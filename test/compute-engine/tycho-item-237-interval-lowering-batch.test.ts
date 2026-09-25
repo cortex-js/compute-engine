@@ -193,7 +193,7 @@ describe('Tycho item 237 — interval-js lowering batch', () => {
       to: 'interval-js',
     });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/not.*numeric|Fail closed/);
+    expect(r.error).toMatch(/not.*numeric|Could not compile/);
   });
 
   test('Apply arity mismatches fail closed', () => {

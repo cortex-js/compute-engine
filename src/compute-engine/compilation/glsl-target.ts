@@ -50,7 +50,8 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   Inversesqrt: 'inversesqrt',
   Mod: ([a, b], compile) => {
-    if (a === null || b === null) throw new Error('Mod: missing argument');
+    if (a === null || b === null)
+      throw new Error('Could not compile `Mod`: missing argument');
     // A divisor of exactly one is the fractional part. GLSL ES 3.00 §8.3
     // defines `mod(x, y)` as `x - y * floor(x / y)` and `fract(x)` as
     // `x - floor(x)`, so the two agree for every dividend, negative ones

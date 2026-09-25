@@ -303,13 +303,14 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       const expr = engine.parse('\\int_0^1 x^2 \\, dx');
       const reason = new Error('aborted by the user');
       const original = engine._withBudget.bind(engine);
-      const spy = jest
-        .spyOn(engine, '_withBudget')
-        .mockImplementation(((options: unknown, fn: () => unknown) => {
-          if ((options as { label?: string }).label === 'compile:antiderivative')
-            throw new CancellationError({ cause: reason });
-          return original(options as never, fn as never);
-        }) as never);
+      const spy = jest.spyOn(engine, '_withBudget').mockImplementation(((
+        options: unknown,
+        fn: () => unknown
+      ) => {
+        if ((options as { label?: string }).label === 'compile:antiderivative')
+          throw new CancellationError({ cause: reason });
+        return original(options as never, fn as never);
+      }) as never);
       let thrown: unknown;
       try {
         compile(expr);
@@ -913,7 +914,7 @@ describe('COMPILE Integrate — indefinite with no closed form fails closed', ()
   test('∫ e^{x³} sin(x) dx declines instead of fabricating 0', () => {
     const r = compile(ce.parse('\\int e^{x^3}\\sin(x) dx'));
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Fail closed \(D6\)/);
+    expect(r.error).toMatch(/Could not compile/);
     expect(r.error).toMatch(/indefinite integral/);
     expect(String((r as any).code ?? '')).not.toContain('_.Nothing');
   });

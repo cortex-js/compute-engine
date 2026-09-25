@@ -138,7 +138,7 @@ describe('half 1 — the D-240 indexed-access class (fixed by the ruling)', () =
     ce.declare('f', { signature: '(unknown) -> unknown' });
     const r = compile(ce.parse('f(t)[1]', { strict: false }))!;
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/not an indexed collection.*Fail closed \(D6\)/s);
+    expect(r.error).toMatch(/not an indexed collection/s);
   });
 });
 

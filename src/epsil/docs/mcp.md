@@ -92,7 +92,7 @@ port or making it public.
    **Tunnel** under **Connection**, and select the tunnel you created.
 
 5. Start a new conversation, add Epsil from the tools menu, and try one of
-   the prompts below. ChatGPT should discover the five Epsil tools and use
+   the prompts below. ChatGPT should discover the six Epsil tools and use
    `evaluate` for a computation.
 
 See OpenAI's
@@ -147,6 +147,7 @@ and monitoring.
 | `doc`       | Look up a library function by name, or search the library by keywords |
 | `parse`     | Convert Epsil source, or LaTeX with `format: "latex"`, to MathJSON |
 | `serialize` | Convert MathJSON to Epsil source, or to LaTeX with `format: "latex"`; `fancySymbols: true` for the Unicode notations |
+| `compile`   | Show the code a compilation target (JavaScript, GLSL, WGSL, Python, interval JavaScript) generates for a program or a LaTeX expression, or why the target declines it |
 
 The server also publishes the [language card for AI agents](/epsil/for-agents/)
 as a resource (`epsil://docs/for-agents`), and its setup instructions tell
@@ -177,6 +178,37 @@ the fragment where it occurred. In the other direction, `serialize` with
 
 For anything with several steps or definitions, an Epsil program is still
 the better fit.
+
+## Compiling
+
+`compile` shows what the Compute Engine generates for an expression on a
+compilation target, without running it. It is useful to an assistant that
+writes code which compiles expressions, or that investigates why a
+compilation fails:
+
+```json
+{
+  "source": "\\arg(z)+1",
+  "format": "latex",
+  "to": "glsl",
+  "declarations": { "z": "complex" }
+}
+```
+
+The result has `ok`, the generated `code` (`atan(z.y, z.x) + 1.0`), and
+`freeSymbolTypes`: for each free symbol, its type, the type the target reads
+it as (here `vec2`, the uniform to declare), and whether it was declared or
+inferred. When the target declines, `ok` is `false`, there is no `code`, and
+`error` and `diagnostic` give the reason. `to` is `javascript` (the default),
+`glsl`, `wgsl`, `python` or `interval-js`, and `mode` selects the arithmetic
+discipline: `auto` (the default), `strict` or `complex`.
+
+Each call uses a new engine. A symbol that is not declared has the type
+inferred from its uses, so declare the types the compilation depends on with
+`declarations`, a map from symbol name to type. A declaration of a name the
+library defines, such as `Pi`, replaces that definition, and the result has a
+`warnings` entry that says so. A compilation has the same deadline as an
+evaluation (`timeLimit`).
 
 ## Trying It Out
 

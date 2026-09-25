@@ -763,7 +763,7 @@ describe('a color channel must be a scalar on the compiled routes', () => {
         ]),
         NO_FOLD as any
       )
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Could not compile/);
   });
 });
 

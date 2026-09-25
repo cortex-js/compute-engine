@@ -115,6 +115,6 @@ describe('RuntimeError — the boxed application', () => {
     const r = compile(ce.box(['g', 'y']), { constantFold: false });
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/RuntimeError/);
-    expect(r?.error).toMatch(/Fail closed/);
+    expect(r?.error).toMatch(/Could not compile/);
   });
 });

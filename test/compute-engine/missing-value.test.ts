@@ -963,7 +963,7 @@ describe('P3 — compile discharge (§3.F)', () => {
       fallback: true,
     });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/isAbsent|absence|Fail closed/i);
+    expect(r.error).toMatch(/isAbsent|absence|Could not compile/i);
   });
 });
 

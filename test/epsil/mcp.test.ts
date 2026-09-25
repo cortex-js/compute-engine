@@ -130,7 +130,7 @@ describe('MCP server protocol', () => {
     expect(response.result.protocolVersion).toBe('2025-11-25');
   });
 
-  test('lists the five tools', async () => {
+  test('lists the six tools', async () => {
     const [response] = await runServer([request(1, 'tools/list')]);
     expect(response.result.tools.map((x: any) => x.name)).toEqual([
       'evaluate',
@@ -138,6 +138,7 @@ describe('MCP server protocol', () => {
       'doc',
       'parse',
       'serialize',
+      'compile',
     ]);
     for (const tool of response.result.tools) {
       expect(typeof tool.description).toBe('string');
@@ -471,6 +472,149 @@ describe('MCP server tools', () => {
   });
 });
 
+describe('MCP server compile tool', () => {
+  test('compiles a LaTeX expression to JavaScript by default', async () => {
+    const [response] = await runServer([
+      callTool(1, 'compile', { source: '\\sin(x)+1', format: 'latex' }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(true);
+    expect(result.target).toBe('javascript');
+    expect(result.code).toContain('Math.sin(_.x)');
+    expect(result.freeSymbolTypes.x).toMatchObject({
+      lowered: 'number',
+      provenance: 'inferred',
+    });
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test('compiles an Epsil program to Python', async () => {
+    const [response] = await runServer([
+      callTool(1, 'compile', { source: 'x^2 + 1', to: 'python' }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(true);
+    expect(result.code).toBe('x ** 2 + 1');
+  });
+
+  // A declaration changes what the target reads the symbol as: a complex
+  // symbol is a `vec2` uniform on GLSL.
+  test('applies declarations before the source is parsed', async () => {
+    const [response] = await runServer([
+      callTool(1, 'compile', {
+        source: '\\arg(z)+1',
+        format: 'latex',
+        to: 'glsl',
+        declarations: { z: 'complex' },
+      }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(true);
+    expect(result.code).toBe('atan(z.y, z.x) + 1.0');
+    expect(result.freeSymbolTypes.z).toEqual({
+      type: 'complex',
+      lowered: 'vec2',
+      provenance: 'declared',
+    });
+  });
+
+  // A decline is a result with the reason, as on a host's own compile route,
+  // not an interpreter fallback: there is no `code`.
+  test('reports a decline with its reason', async () => {
+    const [response] = await runServer([
+      callTool(1, 'compile', {
+        source: '\\operatorname{SinIntegral}(x)',
+        format: 'latex',
+        to: 'glsl',
+      }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(false);
+    expect(result.code).toBeUndefined();
+    expect(result.error).toMatch(/SinIntegral/);
+    expect(result.diagnostic.kind).toBe('capability');
+    expect(result.unsupported).toEqual(['SinIntegral']);
+  });
+
+  // `freeSymbolTypes` lists the inputs the code reads, including those read
+  // by the initial value of a local binding.
+  test('reports the free symbols of a program with a local binding', async () => {
+    const [response] = await runServer([
+      callTool(1, 'compile', { source: 'let y = x + 1\ny * 2' }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(true);
+    expect(Object.keys(result.freeSymbolTypes)).toEqual(['x']);
+  });
+
+  test('warns when a declaration replaces a library definition', async () => {
+    const [plain, constant] = await runServer([
+      callTool(1, 'compile', { source: 'x + 1', declarations: { x: 'real' } }),
+      callTool(2, 'compile', {
+        source: '\\pi+x',
+        format: 'latex',
+        declarations: { Pi: 'real' },
+      }),
+    ]);
+    expect(payload(plain).warnings).toBeUndefined();
+    expect(payload(constant).warnings).toEqual([
+      '"Pi" is defined by the library; the declaration replaces that definition.',
+    ]);
+  });
+
+  // A compile runs under a deadline, like `evaluate`: an antiderivative
+  // search can take long, and one call must not block the server.
+  test('reports a compile that exceeds its deadline', async () => {
+    const [response] = await runServer([
+      callTool(1, 'compile', {
+        source: '\\int_0^x \\frac{\\sin(t)^{7}\\cos(t)^{5}}{1+t^{4}}\\,dt',
+        format: 'latex',
+        timeLimit: 1,
+      }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostic.code).toBe('timeout');
+  });
+
+  test('does not compile a source with parse errors', async () => {
+    const [latex, epsil] = await runServer([
+      callTool(1, 'compile', { source: 'x+', format: 'latex' }),
+      callTool(2, 'compile', { source: 'x +' }),
+    ]);
+    for (const response of [latex, epsil]) {
+      const result = payload(response);
+      expect(result.ok).toBe(false);
+      expect(result.code).toBeUndefined();
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('rejects invalid arguments as tool errors', async () => {
+    const responses = await runServer([
+      callTool(1, 'compile', { source: 'x', to: 'c' }),
+      callTool(2, 'compile', { source: 'x', mode: 'fast' }),
+      callTool(3, 'compile', { source: 'x', declarations: ['x'] }),
+      callTool(4, 'compile', { source: 'x', declarations: { x: 1 } }),
+      callTool(5, 'compile', {
+        source: 'x',
+        declarations: { x: 'nonsense<' },
+      }),
+      callTool(6, 'compile', { source: 'x', timeLimit: -1 }),
+    ]);
+    const messages = responses.map((response) => {
+      expect(response.result.isError).toBe(true);
+      return response.result.content[0].text;
+    });
+    expect(messages[0]).toMatch(/"to"/);
+    expect(messages[1]).toMatch(/"mode"/);
+    expect(messages[2]).toMatch(/"declarations"/);
+    expect(messages[3]).toMatch(/type of "x"/);
+    expect(messages[4]).toMatch(/Cannot declare "x"/);
+    expect(messages[5]).toMatch(/timeLimit|time limit/i);
+  });
+});
+
 describe('MCP server resources', () => {
   test('lists and reads the language and API cards', async () => {
     const loadCard = async (card: string) => `# ${card} card fixture`;
@@ -554,7 +698,7 @@ describe('MCP Streamable HTTP transport', () => {
       expect(listed.status).toBe(200);
       expect(
         ((await listed.json()) as any).result.tools.map((x: any) => x.name)
-      ).toEqual(['evaluate', 'check', 'doc', 'parse', 'serialize']);
+      ).toEqual(['evaluate', 'check', 'doc', 'parse', 'serialize', 'compile']);
 
       const evaluated = await postMcp(
         endpoint,

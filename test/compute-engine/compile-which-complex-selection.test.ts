@@ -93,7 +93,13 @@ describe('a complex-TYPED arm whose runtime cells are real', () => {
       'Map',
       [
         'Function',
-        ['Which', ['Less', '_e', 10], ['Sqrt', ['Subtract', '_e', 3]], 'True', 0],
+        [
+          'Which',
+          ['Less', '_e', 10],
+          ['Sqrt', ['Subtract', '_e', 3]],
+          'True',
+          0,
+        ],
         '_e',
       ],
       L,
@@ -163,7 +169,7 @@ describe('an arm that is genuinely complex at run time', () => {
   });
 
   test('a complex LITERAL arm over a boolean-list condition', () => {
-    // This exact shape was pinned as a `Fail closed (D6)` decline until the
+    // This exact shape was pinned as a `Fail closed` decline until the
     // arm-complexness refusal was lifted.
     const expr = ce.box([
       'Which',
@@ -264,11 +270,7 @@ describe('a complex-valued CONDITION and arithmetic over a complex arm', () => {
       ['Which', listCondition, ['Sqrt', ['Negate', L]], 'True', 0],
       1,
     ] as any);
-    expect(parity(expr)).toEqual([
-      { re: 1, im: 2 },
-      { re: 1, im: 3 },
-      1,
-    ]);
+    expect(parity(expr)).toEqual([{ re: 1, im: 2 }, { re: 1, im: 3 }, 1]);
   });
 
   test('a SCALAR complex `Which` keeps its ternary lowering', () => {

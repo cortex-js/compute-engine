@@ -27,8 +27,32 @@
   time limits, and a table of common traps. Every example is executed by the
   test suite. The Epsil MCP server serves it as a resource
   (`epsil://docs/compute-engine-api`), and its instructions point to it.
+- **The Epsil MCP server compiles.** A new `compile` tool shows the code a
+  compilation target generates for an Epsil program or a LaTeX expression,
+  without running it: `to` is `javascript` (the default), `glsl`, `wgsl`,
+  `python` or `interval-js`, and `mode` is `auto`, `strict` or `complex`.
+  `declarations` gives the types of free symbols (`{"z": "complex"}`). The
+  result has the generated `code` and, for each free symbol, its type and the
+  type the target reads it as (`freeSymbolTypes`). When the target declines,
+  the result has no code, and `error` and `diagnostic` give the reason.
 
 ### Resolved Issues
+
+- `freeSymbols` and `freeSymbolTypes` of a compiled block with a local
+  declaration are complete and exact. The symbols read by the initial value of
+  `let y = x + 1` were missing (the code read `x`, but `freeSymbols` was
+  empty), and the type of a declaration without a value (`Declare(w, number)`)
+  was listed as a free symbol (`number`).
+- The message of a compilation that declines now starts with what could not
+  be compiled, then gives the reason, and no longer ends with the unexplained
+  `Fail closed (D6).`:
+  `SinIntegral: cannot compile — the operator is known to the engine but target 'glsl' has no lowering for it. Fail closed (D6).`
+  is now
+  ``Could not compile `SinIntegral`: the operator is known to the engine but target 'glsl' has no lowering for it.``
+  A message that said `Fail closed — the interpreter evaluates it.` now says
+  `The interpreter evaluates it instead.` Code that matched the text of these
+  messages must match the new text; the `diagnostic.code` of a result is
+  unchanged.
 
 - The documentation of `isEqual()` said that an identity in the free variables,
   such as `(x+1)^2` vs `x^2+2x+1`, is `true`. `isEqual()` attempts no identity

@@ -206,7 +206,7 @@ describe('PYTHON TARGET', () => {
       expect(code).toBe('def g(x):\n    t = x * x\n    return t + 1\n');
     });
 
-    it('fails closed (D6) when a Block is used as a sub-expression', () => {
+    it('fails closed when a Block is used as a sub-expression', () => {
       const block = ce.box([
         'Block',
         ['Assign', 't', ['Multiply', 'x', 'x']],
@@ -233,7 +233,7 @@ describe('PYTHON TARGET', () => {
       expect(() => python.compileLambda(block, ['x'])).toThrow(/lambda/);
     });
 
-    it('fails closed (D6) on arithmetic over a possibly-collection-typed operand', () => {
+    it('fails closed on arithmetic over a possibly-collection-typed operand', () => {
       // Python's `*`/`+` repeat/concatenate a plain list instead of
       // broadcasting element-wise, and the compiled artifact can't constrain
       // the caller's binding — so arithmetic over a `broadcastable<T>` (or a
@@ -241,13 +241,13 @@ describe('PYTHON TARGET', () => {
       const ce2 = new ComputeEngine();
       ce2.declare('b', 'broadcastable<number>');
       expect(() => python.compile(ce2.box(['Multiply', 2, 'b']))).toThrow(
-        /Fail closed/
+        /Could not compile/
       );
 
       const ce3 = new ComputeEngine();
       ce3.declare('h', '(number) -> unknown');
       expect(() => python.compile(ce3.box(['Add', ['h', 'x'], 1]))).toThrow(
-        /Fail closed/
+        /Could not compile/
       );
 
       // Two collection operands fail closed: the interpreter answers
@@ -258,7 +258,7 @@ describe('PYTHON TARGET', () => {
       ce4.declare('v', 'list<number>');
       ce4.declare('w', 'list<number>');
       expect(() => python.compile(ce4.box(['Add', 'v', 'w']))).toThrow(
-        /Fail closed/
+        /Could not compile/
       );
 
       // A collection whose elements are not scalars fails closed as well: one
@@ -269,10 +269,10 @@ describe('PYTHON TARGET', () => {
       ce5.declare('m', 'matrix<2x2>');
       ce5.declare('p', 'list<tuple<number, number>>');
       expect(() => python.compile(ce5.box(['Add', 'm', 1]))).toThrow(
-        /Fail closed/
+        /Could not compile/
       );
       expect(() => python.compile(ce5.box(['Multiply', 'p', 2]))).toThrow(
-        /Fail closed/
+        /Could not compile/
       );
     });
 
@@ -1010,18 +1010,18 @@ describe('PYTHON TARGET', () => {
     // and returns a *list* of booleans (`Equal([1,2],5)` → `["False","False"]`)
     // — a different result kind than the scalar the collection branch above
     // implements. Still fails closed rather than guessing.
-    it('a single (broadcasting) collection operand fails closed (D6)', () => {
+    it('a single (broadcasting) collection operand fails closed', () => {
       expect(() =>
         python.compile(ce.box(['Equal', ['List', 1, 2, 3], 2] as any))
-      ).toThrow(/Equal.*broadcasts element-wise.*Fail closed/s);
+      ).toThrow(/Equal.*broadcasts element-wise/s);
       expect(() =>
         python.compile(ce.box(['NotEqual', 2, ['List', 1, 2, 3]] as any))
-      ).toThrow(/NotEqual.*Fail closed/s);
+      ).toThrow(/NotEqual/s);
       const scoped = new ComputeEngine();
       scoped.declare('eqList', 'list<real>');
       expect(() =>
         python.compile(scoped.box(['Equal', 'eqList', 2] as any))
-      ).toThrow(/Fail closed/);
+      ).toThrow(/Could not compile/);
     });
   });
 
@@ -1090,7 +1090,7 @@ describe('PYTHON TARGET', () => {
       );
     });
 
-    it('every OTHER order above rank 2 fails closed (D6)', () => {
+    it('every OTHER order above rank 2 fails closed', () => {
       // Above rank 2 the interpreter defines only the Frobenius norm; the
       // remaining orders are operator norms, which it leaves symbolic. NumPy
       // raises `ValueError: Improper number of dimensions to norm` for any
@@ -1098,13 +1098,13 @@ describe('PYTHON TARGET', () => {
       // `success: true` for code that cannot run.
       expect(() =>
         python.compile(ce.box(['Norm', T3, { str: 'Infinity' }] as any), noFold)
-      ).toThrow(/above rank 2.*Fail closed/s);
+      ).toThrow(/above rank 2/s);
       expect(() =>
         python.compile(ce.box(['Norm', T3, 1] as any), noFold)
-      ).toThrow(/above rank 2.*Fail closed/s);
+      ).toThrow(/above rank 2/s);
       expect(() =>
         python.compile(ce.box(['Norm', T3, 3] as any), noFold)
-      ).toThrow(/above rank 2.*Fail closed/s);
+      ).toThrow(/above rank 2/s);
     });
 
     it('a string Frobenius order over a matrix still compiles', () => {
@@ -1127,14 +1127,14 @@ describe('PYTHON TARGET', () => {
       ).toBe('np.linalg.norm([[3, 4], [5, 12]], np.inf)');
     });
 
-    it('any other literal matrix order fails closed (D6)', () => {
+    it('any other literal matrix order fails closed', () => {
       // The interpreter's matrix branch defines only 1, 2/Frobenius and
       // +Infinity; `np.linalg.norm(M, 3)` raises a ValueError at run time.
       expect(() => python.compile(ce.box(['Norm', M, 3] as any))).toThrow(
-        /matrix norms only for orders.*Fail closed/s
+        /matrix norms only for orders/s
       );
       expect(() => python.compile(ce.box(['Norm', M, -1] as any))).toThrow(
-        /Fail closed/
+        /Could not compile/
       );
       // A vector operand is unaffected: numeric orders are faithful on 1-D.
       expect(
@@ -1176,7 +1176,7 @@ describe('PYTHON TARGET', () => {
   });
 
   // CO-P1-3: a complex argument into a real-only helper returned garbage.
-  describe('CO-P1-3 complex into a real-only helper fails closed (D6)', () => {
+  describe('CO-P1-3 complex into a real-only helper fails closed', () => {
     it('GammaLn of a complex value throws with the offending head, in strict mode', () => {
       // Under the default mode `auto` a MAYBE-complex operand takes the D2/D6
       // runtime rule instead of declining (compile-mode step 4, 2026-08-16);
@@ -1189,7 +1189,7 @@ describe('PYTHON TARGET', () => {
       expect(() =>
         python.compile(scoped.box(['GammaLn', 'z']), { mode: 'strict' })
       ).toThrow(
-        /GammaLn: scipy\.special\.loggamma takes another branch than the interpreter off the real axis/
+        /Could not compile `GammaLn`: scipy\.special\.loggamma takes another branch than the interpreter off the real axis/
       );
       expect(
         python.compile(scoped.box(['Erf', 'z']), { mode: 'strict' }).code
@@ -1200,9 +1200,9 @@ describe('PYTHON TARGET', () => {
     // than the interpreter off the real axis, so a complex value of `GammaLn`
     // fails closed and never becomes a silent `nan`.
     const GAMMALN_REASON =
-      'GammaLn: scipy.special.loggamma takes another branch than the ' +
-      'interpreter off the real axis; the compiled value would differ. ' +
-      'Fail closed (D6)';
+      'Could not compile `GammaLn`: scipy.special.loggamma takes another ' +
+      'branch than the interpreter off the real axis; the compiled value ' +
+      'would differ';
 
     it('GammaLn of a real value is ln|Γ|, `scipy.special.gammaln`', () => {
       // The interpreter's GammaLn(−2.5) is −0.0562 = ln|Γ(−2.5)|;
@@ -1244,12 +1244,18 @@ describe('PYTHON TARGET', () => {
       scoped.declare('L', 'list<complex>');
       const raise = `(_ for _ in ()).throw(ValueError('${GAMMALN_REASON}'))`;
       expect(
-        python.compile(scoped.box(['GammaLn', 'z'])).code.split('\n').pop()
+        python
+          .compile(scoped.box(['GammaLn', 'z']))
+          .code.split('\n')
+          .pop()
       ).toBe(
         `(lambda _tv1: scipy.special.gammaln(_ce_creal(_tv1)) if _ce_cisreal(_tv1) else ${raise})(z)`
       );
       expect(
-        python.compile(scoped.box(['GammaLn', 'L'])).code.split('\n').pop()
+        python
+          .compile(scoped.box(['GammaLn', 'L']))
+          .code.split('\n')
+          .pop()
       ).toBe(
         `(lambda _tv1: scipy.special.gammaln(_ce_creal_elems(_tv1)) if np.all(np.isreal(_tv1)) else ${raise})(L)`
       );
@@ -1387,7 +1393,7 @@ describe('PYTHON TARGET', () => {
       ).evaluate();
       const sum = '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))';
       expect(() => new PythonTarget().compile(e.parse(sum))).toThrow(
-        /collection-valued body.*Fail closed/s
+        /collection-valued body/s
       );
     });
   });
@@ -1480,7 +1486,7 @@ describe('PYTHON TARGET', () => {
       expect(code).not.toMatch(/return for/);
     });
 
-    it('expression-position Loop fails closed (D6)', () => {
+    it('expression-position Loop fails closed', () => {
       const loop = ce.box([
         'List',
         ['Loop', ['Assign', 'acc', 'i'], ['Element', 'i', ['Range', 1, 5]]],
@@ -1723,7 +1729,7 @@ describe('PYTHON TARGET', () => {
         'r',
       ] as any);
       expect(() => python.compileFunction(expr, 'g', ['x'])).toThrow(
-        /If: wrong number of arguments/
+        /Could not compile `If`: wrong number of arguments/
       );
     });
 
@@ -1739,7 +1745,7 @@ describe('PYTHON TARGET', () => {
         ['If', ['Greater', 'x', 0], ['Assign', 'r', 1], ['Assign', 'r', 2]],
       ] as any);
       expect(() => python.compileFunction(expr, 'h', ['x'])).toThrow(
-        /selection whose branches are statements.*Fail closed/s
+        /selection whose branches are statements/s
       );
     });
   });
@@ -1748,7 +1754,7 @@ describe('PYTHON TARGET', () => {
   // per-condition guard, and a non-empty Python list is TRUTHY — so a
   // collection-valued condition used to compile to a conditional expression
   // that silently picked the value branch for every element
-  // (`(1) if ([True, False]) else (0)`). They now fail closed (D6), matching
+  // (`(1) if ([True, False]) else (0)`). They now fail closed, matching
   // the `If` route, which always asserted.
   describe('Collection-valued conditions fail closed', () => {
     it('declines Which with a literal boolean-list condition', () => {

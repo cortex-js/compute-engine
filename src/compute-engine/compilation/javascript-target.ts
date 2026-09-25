@@ -309,7 +309,7 @@ function unwrittenPointMayBroadcast(expr: Expression): boolean {
 }
 
 /**
- * Fail closed (D6) on an unwritten point one of whose coordinates is a
+ * Fail closed on an unwritten point one of whose coordinates is a
  * collection of non-scalars (`'refused'` in `unwrittenPointCoordinateKinds`).
  */
 function assertPointCoordinatesBroadcastable(
@@ -320,9 +320,9 @@ function assertPointCoordinatesBroadcastable(
   if (kinds !== undefined) {
     if (!kinds.includes('refused')) return;
     throw new Error(
-      `${head}: cannot compile a point whose coordinate is a collection of ` +
+      `Could not compile \`${head}\`: a point whose coordinate is a collection of ` +
         `non-scalars (a list of points): the run-time broadcast would ` +
-        `descend into each element. Fail closed (D6).`
+        `descend into each element.`
     );
   }
   // A union of tuples of DIFFERENT widths has no fixed component list to
@@ -341,10 +341,10 @@ function assertPointCoordinatesBroadcastable(
   );
   if (readable) return;
   throw new Error(
-    `${head}: cannot compile a point typed as a union of tuples of ` +
+    `Could not compile \`${head}\`: a point typed as a union of tuples of ` +
       `different widths with a collection coordinate: no fixed component ` +
       `list reads it, and the whole-value norm would flatten the ` +
-      `coordinate. Fail closed (D6).`
+      `coordinate.`
   );
 }
 
@@ -834,7 +834,7 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
 };
 
 /**
- * Fail closed (D6) when EQUALITY (or the `IndexOf` element test) has a provably
+ * Fail closed when EQUALITY (or the `IndexOf` element test) has a provably
  * string-valued operand — fully closed on any string evidence.
  *
  * Both lowerings are NUMERIC: equality is a raw `===` on the host values,
@@ -862,10 +862,9 @@ function assertNoStringOperand(
 ): void {
   if (args.some(isProvablyStringComparisonParticipant))
     throw new Error(
-      `${kind}: cannot compile — string-valued operands are not supported by ` +
+      `Could not compile \`${kind}\`: string-valued operands are not supported by ` +
         `this target (the lowering is numeric: a host \`===\` that skips the ` +
-        `interpreter's text conditioning). ` +
-        `Fail closed (D6) — the interpreter evaluates it.`
+        `interpreter's text conditioning). The interpreter evaluates it instead.`
     );
 }
 
@@ -1042,13 +1041,13 @@ function assertComparableAggregate(
     const aggregate = unfaithfulComparisonAggregate(a);
     if (aggregate === null) continue;
     throw new Error(
-      `${kind}: cannot compile — a ${aggregate} participant. The interpreter ` +
+      `Could not compile \`${kind}\`: a ${aggregate} participant. The interpreter ` +
         `compares it as ONE value, whereas the compiled kernels look inside ` +
         `its JavaScript representation: the numeric leaf answers \`false\` ` +
         `for two EQUAL dictionaries or records (two distinct objects are ` +
         `never \`===\`), and a tuple's JS array is mapped over element-wise ` +
         `(\`Equal(Tuple(1, 2), 1)\` → \`[true, false]\`) where a point binds ` +
-        `atomically. Fail closed (D6) — the interpreter evaluates it.`
+        `atomically. The interpreter evaluates it instead.`
     );
   }
 }
@@ -1095,13 +1094,12 @@ function assertNoMixedStringOrdering(
 ): void {
   if (isMixedStringOrdering(args))
     throw new Error(
-      `${kind}: cannot compile — an ordering that mixes a string operand with ` +
+      `Could not compile \`${kind}\`: an ordering that mixes a string operand with ` +
         `an operand that is not provably a string. The interpreter leaves such ` +
         `a comparison symbolic (\`Less("a", 1)\` stays inert), whereas the ` +
         `emitted JavaScript \`<\` coerces and answers a plausible-looking ` +
         `\`false\`. An ordering whose operands are ALL provably strings does ` +
-        `compile — the interpreter compares strings with the same \`<\`. ` +
-        `Fail closed (D6) — the interpreter evaluates it.`
+        `compile — the interpreter compares strings with the same \`<\`. The interpreter evaluates it instead.`
     );
 }
 
@@ -1231,7 +1229,9 @@ function compileJSEquality(
   target: CompileTarget<Expression>
 ): string {
   if (args.length < 2)
-    throw new Error(`${kind}: expected at least two arguments`);
+    throw new Error(
+      `Could not compile \`${kind}\`: expected at least two arguments`
+    );
   // Check before both lowerings: the `_SYS.eq`/`_SYS.neq` runtime dispatch
   // compares scalars tolerantly too, so a string operand is as wrong there as
   // on the scalar tolerance path.
@@ -1334,10 +1334,9 @@ function compileJSEquality(
       return `_SYS.${helper}((${compile(args[0])}), (${compile(args[1])}))`;
     }
     throw new Error(
-      `${kind}: cannot compile — chained (n-ary) comparison over an operand ` +
+      `Could not compile \`${kind}\`: chained (n-ary) comparison over an operand ` +
         `that may be a collection at run time (collection-valued or ` +
-        `possibly-collection-typed). Materialize the collection first. ` +
-        `Fail closed (D6).`
+        `possibly-collection-typed). Materialize the collection first.`
     );
   }
   // Each operand is compiled exactly once, here: the direct emission is what
@@ -1477,7 +1476,7 @@ function compileJSCollectionBoolean(
   // opened no region compiles exactly as before.
   //
   // A MIXED / possibly-mixed string ordering is diverted here from the infix
-  // path in `BaseCompiler` expressly to fail closed (D6); an ALL-string ordering
+  // path in `BaseCompiler` expressly to fail closed; an ALL-string ordering
   // never reaches here (it keeps the raw infix lowering, which the interpreter
   // agrees with). Reachable independently when a string operand sits alongside a
   // collection one — `Less("a", [1, 2])` — which the interpreter answers with a
@@ -1515,11 +1514,10 @@ function compileJSCollectionBoolean(
         )}) ${op} 0)`;
       }
       throw new Error(
-        `${kind}: cannot compile — an ordering that mixes a character ` +
+        `Could not compile \`${kind}\`: an ordering that mixes a character ` +
           `operand with an operand that is not provably a character (or a ` +
           `chained character ordering). A BINARY all-character ordering does ` +
-          `compile, through the code-point comparator the interpreter uses. ` +
-          `Fail closed (D6) — the interpreter evaluates it.`
+          `compile, through the code-point comparator the interpreter uses. The interpreter evaluates it instead.`
       );
     }
     assertNoMixedStringOrdering(kind, args);
@@ -1569,7 +1567,9 @@ function compileJSCollectionBoolean(
   if (!args.some(collectionish)) {
     if (kind === 'Not') {
       if (args.length !== 1)
-        throw new Error(`Not: expected exactly one argument`);
+        throw new Error(
+          `Could not compile \`Not\`: expected exactly one argument`
+        );
       return `!(${compile(args[0], 0)})`;
     }
     if (kind === 'And' || kind === 'Or') {
@@ -1601,13 +1601,13 @@ function compileJSCollectionBoolean(
     return `_SYS.bcast((${params.join(', ')}) => ${body}, ${operands})`;
   }
   throw new Error(
-    `${kind}: cannot compile a comparison or logical connective over an ` +
+    `Could not compile \`${kind}\`: a comparison or logical connective over an ` +
       `operand that may be a collection at run time — the JavaScript ` +
       `operators do not broadcast element-wise (an array stringifies in a ` +
       `comparison and is truthy in a connective), and this operand has no ` +
       `element-wise runtime dispatch (a tuple binds atomically; a set, ` +
       `dictionary or string has no positional lowering), so the result would ` +
-      `silently disagree with interpretation. Fail closed (D6). Materialize ` +
+      `silently disagree with interpretation. Materialize ` +
       `the collection with evaluate() and compile a scalar element function ` +
       `instead.`
   );
@@ -1737,14 +1737,17 @@ function compileScalarBooleanBody(
   params: ReadonlyArray<string>
 ): string {
   if (kind === 'Not') {
-    if (params.length !== 1) throw new Error(`Not: expected one argument`);
+    if (params.length !== 1)
+      throw new Error(`Could not compile \`Not\`: expected one argument`);
     return `!(${params[0]})`;
   }
   if (kind === 'And' || kind === 'Or')
     return `(${params.join(kind === 'And' ? ' && ' : ' || ')})`;
   const op = JS_ORDERING_OPERATORS[kind as keyof typeof JS_ORDERING_OPERATORS];
   if (op === undefined || params.length < 2)
-    throw new Error(`${kind}: expected at least two arguments`);
+    throw new Error(
+      `Could not compile \`${kind}\`: expected at least two arguments`
+    );
   const pairs: string[] = [];
   for (let i = 0; i < params.length - 1; i++)
     pairs.push(`(${params[i]} ${op} ${params[i + 1]})`);
@@ -1815,7 +1818,7 @@ export function couldBeIndexedCollectionOperand(e: Expression): boolean {
  * and the interpreter's `At` answers a keyed lookup there, while `_SYS.at`
  * dispatches on the runtime shape and answers `NaN` for every non-array base.
  * A keyed access would therefore compile to a silent `NaN` behind
- * `success: true`, so it fails closed (D6) instead. A base that is PROVABLY an
+ * `success: true`, so it fails closed instead. A base that is PROVABLY an
  * indexed collection is not subject to this test: no dictionary reaches it, and
  * its index gate stays the interpreter-matching runtime one.
  */
@@ -2445,7 +2448,7 @@ function isProvablyNonScalarType(t: Type): boolean {
  *   cannot know to, and silently-wrong points are worse than `NaN`.
  * - A **statically infinite** source and a component that is neither a source
  *   nor a scalar slot (tuple/set/map, or a union with a collection member)
- *   throw: they have no per-point value. Fail closed (D6).
+ *   throw: they have no per-point value. Fail closed.
  * - `target.iterationBudget`, when set, joins the `Math.min` (floored — the
  *   option validator admits fractional values and `new Array(2.5)` throws), so
  *   the zip length is capped. It bounds the zip only: materializing the
@@ -2487,8 +2490,8 @@ function compileJSPointList(
     if (!constructedScalarSlot && isPointListSource(a)) {
       if (a.isCollection && a.isFiniteCollection === false)
         throw new Error(
-          `PointList: source component ${i + 1} is an infinite collection — ` +
-            `an infinite point list has no compiled value. Fail closed (D6).`
+          `Could not compile \`PointList\`: source component ${i + 1} is an infinite collection — ` +
+            `an infinite point list has no compiled value.`
         );
       const name = BaseCompiler.tempVar(target);
       bindings.push(`const ${name} = ${compile(a)};`);
@@ -2507,10 +2510,9 @@ function compileJSPointList(
     }
     if (!constructedScalarSlot && isProvablyNonScalarType(jsType(a)))
       throw new Error(
-        `PointList: cannot compile — component ${i + 1} (type ` +
+        `Could not compile \`PointList\`: component ${i + 1} (type ` +
           `\`${a.type.toString()}\`) is neither a scalar slot nor a list ` +
-          `source; its per-point value cannot be determined at compile time. ` +
-          `Fail closed (D6).`
+          `source; its per-point value cannot be determined at compile time.`
       );
     const name = BaseCompiler.tempVar(target);
     const t = jsType(a);
@@ -2614,13 +2616,12 @@ function compileJSCharacters(
 ): string {
   const arg = args[0];
   if (arg === null || arg === undefined)
-    throw new Error(`${kind}: missing argument`);
+    throw new Error(`Could not compile \`${kind}\`: missing argument`);
   if (args.length !== 1 || !isProvablyStringOperand(arg))
     throw new Error(
-      `${kind}: cannot compile — the operand must be provably a string. The ` +
+      `Could not compile \`${kind}\`: the operand must be provably a string. The ` +
         `interpreter leaves a non-string operand unevaluated (or reports an ` +
-        `\`incompatible-type\` error). ` +
-        `Fail closed (D6) — the interpreter evaluates it.`
+        `\`incompatible-type\` error). The interpreter evaluates it instead.`
     );
   return `_SYS.chars(${compile(arg)})`;
 }
@@ -2907,8 +2908,8 @@ function compileColorOperand(
   for (const op of ops)
     if (BaseCompiler.isNonScalarShape(op))
       throw new Error(
-        'A color channel must be a scalar — a tuple/list component is not a ' +
-          'color channel. Fail closed (D6).'
+        'Could not compile the color: a color channel must be a scalar — a tuple/list component is not a ' +
+          'color channel.'
       );
   return `_SYS.rgb(${ops.map((op) => compile(op)).join(', ')})`;
 }
@@ -3046,11 +3047,11 @@ function tryCompileColorBroadcast(
   if (!color.type.matches(NESTED_COLOR_BROADCAST_TYPE)) {
     if (isFunction(color, 'List')) refuseColorList();
     throw new Error(
-      `${head}: cannot compile a color conversion over an operand that may ` +
+      `Could not compile \`${head}\`: a color conversion over an operand that may ` +
         'be a collection at run time and whose type does not prove a color ' +
         'at every element position, at every depth — a list of plain numbers ' +
         'there is a list of errors in the interpreter, and the compiled map ' +
-        'would throw at the first element instead. Fail closed (D6).'
+        'would throw at the first element instead.'
     );
   }
   const temp = BaseCompiler.tempVar(target);
@@ -3060,8 +3061,8 @@ function tryCompileColorBroadcast(
 /** Decline a `List` written where a color is expected. */
 function refuseColorList(): never {
   throw new Error(
-    'A list is not a color — a color operand must be a color, a color ' +
-      'string or a tuple of 3 or 4 components. Fail closed (D6).'
+    'Could not compile the color: a list is not a color — a color operand must be a color, a color ' +
+      'string or a tuple of 3 or 4 components.'
   );
 }
 
@@ -3083,19 +3084,19 @@ function refuseColorList(): never {
  */
 function refuseColorComponents(head: string): never {
   throw new Error(
-    `${head}: this operator takes a COLOR, and a tuple is color COMPONENTS, ` +
+    `Could not compile \`${head}\`: this operator takes a COLOR, and a tuple is color COMPONENTS, ` +
       'not a color. Build a color from the components first — ' +
       '`AsRgb((r, g, b))` reads them as 0-1 sRGB, and ' +
       '`ColorFromColorspace(components, space)` reads them in any named ' +
-      'space. Fail closed (D6).'
+      'space.'
   );
 }
 
 /** Decline a literal tuple that is too narrow or too wide to be a color. */
 function refuseColorTupleWidth(n: number): never {
   throw new Error(
-    `A tuple of ${n} components is not a color — a color tuple has 3 ` +
-      'components, or 4 with the fourth read as alpha. Fail closed (D6).'
+    `Could not compile the color: a tuple of ${n} components is not a color — a color tuple has 3 ` +
+      'components, or 4 with the fourth read as alpha.'
   );
 }
 
@@ -3261,7 +3262,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.acosh(${compile(args[0])})`;
   },
   Arccot: ([x], compile, target) => {
-    if (x === null) throw new Error('Arccot: no argument');
+    if (x === null) throw new Error('Could not compile `Arccot`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.cacot', compile(x));
     // `Math.atan(1/x)` returns the wrong branch for x < 0 (range (-π/2, 0)
@@ -3270,7 +3271,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(Math.PI / 2 - Math.atan(${compile(x)}))`;
   },
   Arcoth: ([x], compile, target) => {
-    if (x === null) throw new Error('Arcoth: no argument');
+    if (x === null) throw new Error('Could not compile `Arcoth`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.cacoth', compile(x));
     if (resultIsComplexValued('Arcoth', [x]))
@@ -3282,7 +3283,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.atanh(1 / (${compile(x)}))`;
   },
   Arccsc: ([x], compile, target) => {
-    if (x === null) throw new Error('Arccsc: no argument');
+    if (x === null) throw new Error('Could not compile `Arccsc`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.cacsc', compile(x));
     if (resultIsComplexValued('Arccsc', [x]))
@@ -3290,13 +3291,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.asin(1 / (${compile(x)}))`;
   },
   Arcsch: ([x], compile, target) => {
-    if (x === null) throw new Error('Arcsch: no argument');
+    if (x === null) throw new Error('Could not compile `Arcsch`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.cacsch', compile(x));
     return `Math.asinh(1 / (${compile(x)}))`;
   },
   Arcsec: ([x], compile, target) => {
-    if (x === null) throw new Error('Arcsec: no argument');
+    if (x === null) throw new Error('Could not compile `Arcsec`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.casec', compile(x));
     if (resultIsComplexValued('Arcsec', [x]))
@@ -3304,7 +3305,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.acos(1 / (${compile(x)}))`;
   },
   Arsech: ([x], compile, target) => {
-    if (x === null) throw new Error('Arsech: no argument');
+    if (x === null) throw new Error('Could not compile `Arsech`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.casech', compile(x));
     if (resultIsComplexValued('Arsech', [x]))
@@ -3365,13 +3366,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.cosh(${compile(args[0])})`;
   },
   Cot: ([x], compile, target) => {
-    if (x === null) throw new Error('Cot: no argument');
+    if (x === null) throw new Error('Could not compile `Cot`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.ccot', compile(x));
     return `_SYS.cot(${compile(x)})`;
   },
   Coth: ([x], compile, target) => {
-    if (x === null) throw new Error('Coth: no argument');
+    if (x === null) throw new Error('Could not compile `Coth`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.ccoth', compile(x));
     return BaseCompiler.inlineExpression(
@@ -3381,13 +3382,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
   Csc: ([x], compile, target) => {
-    if (x === null) throw new Error('Csc: no argument');
+    if (x === null) throw new Error('Could not compile `Csc`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.ccsc', compile(x));
     return `_SYS.csc(${compile(x)})`;
   },
   Csch: ([x], compile, target) => {
-    if (x === null) throw new Error('Csch: no argument');
+    if (x === null) throw new Error('Could not compile `Csch`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.ccsch', compile(x));
     return `1 / Math.sinh(${compile(x)})`;
@@ -3412,7 +3413,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.floor(${compile(args[0])})`;
   },
   Fract: ([x], compile, target) => {
-    if (x === null) throw new Error('Fract: no argument');
+    if (x === null) throw new Error('Could not compile `Fract`: no argument');
     return BaseCompiler.inlineExpression(
       target,
       '${x} - Math.floor(${x})',
@@ -3452,7 +3453,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // governs.
   Limit: (args, compile, target) => {
     const [f, x, dir] = args;
-    if (f == null || x == null) throw new Error('Limit: missing argument');
+    if (f == null || x == null)
+      throw new Error('Could not compile `Limit`: missing argument');
     if (symbolicLimitAttemptAllowed(f, x, dir, target)) {
       const engine = f.engine;
       // Isolation scope, as `closedFormIntegral` uses for the analogous
@@ -3531,11 +3533,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Tuple: (args, compile, target) =>
     `[${args.map((x) => spreadIfSequence(x, compile, target)).join(', ')}]`,
   // Element count of a compiled collection. Only an indexed collection lowers
-  // to a JS array; a dictionary or string operand fails closed (D6).
+  // to a JS array; a dictionary or string operand fails closed.
   Length: (args, compile, target) => {
     const arg = args[0];
     if (arg === null || arg === undefined)
-      throw new Error('Length: no argument');
+      throw new Error('Could not compile `Length`: no argument');
     // A STRING's length is its GRAPHEME-CLUSTER count, which is what the
     // interpreter's `BoxedString.count` reports. Never `.length` on the JS
     // string: that counts UTF-16 code units, so a ZWJ family emoji would
@@ -3545,8 +3547,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.chars(${compile(arg)}).length`;
     if (!isIndexedCollectionOperand(arg))
       throw new Error(
-        `Length: cannot compile — operand is not an indexed collection ` +
-          `(list/vector/range). Fail closed (D6).`
+        `Could not compile \`Length\`: operand is not an indexed collection ` +
+          `(list/vector/range).`
       );
     // A union with a text arm (`string | list<number>`) is a subtype of
     // `indexed_collection` — a string is one — and so passes the test above,
@@ -3555,9 +3557,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // (D6); see `couldBeStringOperand`.
     if (couldBeStringOperand(arg))
       throw new Error(
-        `Length: cannot compile — operand may be text at run time (its type ` +
+        `Could not compile \`Length\`: operand may be text at run time (its type ` +
           `has a string arm), and \`.length\` counts UTF-16 code units, not ` +
-          `characters. Fail closed (D6) — the interpreter evaluates it.`
+          `characters. The interpreter evaluates it instead.`
       );
     // A positional gather (a range, a literal list of indices, or a `Join`
     // of those) is POSITION-PRESERVING — an out-of-band index contributes an
@@ -3586,7 +3588,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // of hits; a non-integer entry in a collection index makes the interpreter
   // decline, projected as a scalar NaN for the whole result. Only the
   // single-index form over an indexed collection compiles; nested/multi-index
-  // access and non-collection operands fail closed (D6).
+  // access and non-collection operands fail closed.
   At: (args, compile, target) => {
     const coll = args[0];
     const index = args[1];
@@ -3596,11 +3598,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       index === null ||
       index === undefined
     )
-      throw new Error('At: missing argument');
+      throw new Error('Could not compile `At`: missing argument');
     if (args.length !== 2)
       throw new Error(
-        `At: only the single-index form compiles; multi-index (nested) ` +
-          `access is not supported. Fail closed (D6).`
+        `Could not compile \`At\`: only the single-index form compiles; multi-index (nested) ` +
+          `access is not supported.`
       );
     // A STRING base is indexed by GRAPHEME CLUSTER, so it is segmented first
     // and `_SYS.at` then applies the ordinary 1-based / negative-from-the-end
@@ -3614,8 +3616,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const provablyIndexed = stringBase || isIndexedCollectionOperand(coll);
     if (!provablyIndexed && !couldBeIndexedCollectionOperand(coll))
       throw new Error(
-        `At: cannot compile — first operand is not an indexed collection ` +
-          `(list/vector/range). Fail closed (D6).`
+        `Could not compile \`At\`: first operand is not an indexed collection ` +
+          `(list/vector/range).`
       );
     // A base admitted only by the "could be" path may be a dictionary at run
     // time, and keyed access has no compiled equivalent (`_SYS.at` answers NaN
@@ -3623,10 +3625,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // Require a provably numeric index there rather than emit a silent NaN.
     if (!provablyIndexed && !isNumericIndexOperand(index))
       throw new Error(
-        `At: cannot compile — the first operand is not provably an indexed ` +
+        `Could not compile \`At\`: the first operand is not provably an indexed ` +
           `collection (type \`${coll.type.toString()}\`) and the index is not ` +
           `provably numeric, so a keyed (dictionary) access cannot be ruled ` +
-          `out. Fail closed (D6).`
+          `out.`
       );
     // A COMPLEX index needs no compile-time gate: the interpreter validates an
     // index through its `.re` (so `p[1+2i]` selects `p[1]`, the imaginary part
@@ -3732,7 +3734,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // explicit initial value: without one the interpreter folds from `Nothing`
   // (whose effect depends on the combiner and has no numeric equivalent),
   // while a native seedless reduce starts from the first element — those
-  // diverge for non-commutative combiners. Anything else fails closed (D6).
+  // diverge for non-commutative combiners. Anything else fails closed.
   // `Fold(f, init, coll)` canonicalizes to `Reduce(coll, f, init)`, so this
   // handler covers it too.
   Reduce: (args, compile, target) => {
@@ -3740,15 +3742,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const op = args[1];
     const init = args[2];
     if (coll === null || coll === undefined || op === null || op === undefined)
-      throw new Error('Reduce: missing argument');
+      throw new Error('Could not compile `Reduce`: missing argument');
     // A STRING source folds over its CHARACTERS — see `elementsArg`. The gate
     // runs here, ahead of the combiner checks, so the order in which the two
     // diagnostics are reported is unchanged; the operand itself is compiled
     // below, where it was.
     if (!isProvablyStringOperand(coll) && !isIndexedCollectionOperand(coll))
       throw new Error(
-        `Reduce: cannot compile — first operand is not an indexed collection ` +
-          `(list/vector/range). Fail closed (D6).`
+        `Could not compile \`Reduce\`: first operand is not an indexed collection ` +
+          `(list/vector/range).`
       );
     // Product's canonical collection form is Reduce(Map(...), Multiply, 1).
     if (
@@ -3781,10 +3783,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`docs/STRING_ROADMAP.md`, decision D13.)
     if (combiner !== undefined && isProvablyStringOperand(coll))
       throw new Error(
-        `Reduce: cannot compile — an ${(op as Expression & { symbol?: string }).symbol ?? 'arithmetic'} ` +
+        `Could not compile \`Reduce\`: an ${(op as Expression & { symbol?: string }).symbol ?? 'arithmetic'} ` +
           `fold over a string folds over its CHARACTERS, which the ` +
           `interpreter rejects with an \`incompatible-type\` error rather ` +
-          `than combining. Fail closed (D6) — the interpreter evaluates it.`
+          `than combining. The interpreter evaluates it instead.`
       );
     if (
       combiner === undefined &&
@@ -3792,8 +3794,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     ) {
       if (init === undefined || init === null)
         throw new Error(
-          `Reduce: a custom combiner compiles only with an explicit ` +
-            `initial value. Fail closed (D6).`
+          `Could not compile \`Reduce\`: a custom combiner compiles only with an explicit ` +
+            `initial value.`
         );
       // The combiner is `(accumulator, element)`. The accumulator's type is
       // the fold's own result, which `combinerPlan` decides: an accumulator
@@ -3820,9 +3822,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     if (combiner === undefined)
       throw new Error(
-        `Reduce: the combiner does not compile to a function — only ` +
+        `Could not compile \`Reduce\`: the combiner has no compiled function form — only ` +
           `Add/Multiply/Min/Max folds, function literals, and user-defined ` +
-          `functions compile on the JavaScript target. Fail closed (D6).`
+          `functions compile on the JavaScript target.`
       );
     const collCode = elementsArg('Reduce', coll, compile);
     // With an initial value, seed the reduce; without one, the native reduce
@@ -3837,7 +3839,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // --- List-shaped collection operators ---------------------------------
   // Each lowers to a native array operation. Only an indexed collection
-  // (list/vector/range) lowers to a JS array; other operands fail closed (D6),
+  // (list/vector/range) lowers to a JS array; other operands fail closed,
   // matching `Length`/`At`/`Reduce`.
   //
   // `Last` is the last element (`At(coll, -1)`); an empty collection yields NaN
@@ -3853,7 +3855,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       `(${elementsArg('Rest', args[0], compile)}).slice(1)`
     ),
   Take: (args, compile) => {
-    if (args[1] == null) throw new Error('Take: missing count');
+    if (args[1] == null)
+      throw new Error('Could not compile `Take`: missing count');
     // A statically infinite operand (`Take(Map(f, 1..∞), n)`) compiles as a
     // lazy stream, materialized here — the one place (with `TakeWhile`) an
     // infinite pipeline becomes finite. The count may be a runtime value;
@@ -3865,8 +3868,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (isLazyStream(args[0])) {
       if (isNonFiniteBound(args[1]))
         throw new Error(
-          `Take: a non-finite count (\`${args[1].toString()}\`) cannot bound ` +
-            `an infinite collection. Fail closed (D6).`
+          `Could not compile \`Take\`: a non-finite count (\`${args[1].toString()}\`) cannot bound ` +
+            `an infinite collection.`
         );
       return `_SYS.takeIter(${emitLazyStream(args[0]!, compile)}, ${compile(args[1])})`;
     }
@@ -3878,7 +3881,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Drop: (args, compile) => {
     const coll = elementsArg('Drop', args[0], compile);
-    if (args[1] == null) throw new Error('Drop: missing count');
+    if (args[1] == null)
+      throw new Error('Could not compile `Drop`: missing count');
     return joinIfString(
       args[0],
       `(${coll}).slice(${clampedSliceCount(args[1], compile)})`
@@ -3895,8 +3899,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = elementsArg('Sort', args[0], compile);
     if (args.length > 1)
       throw new Error(
-        `Sort: a custom comparator does not compile; only the default ` +
-          `ascending numeric sort is supported. Fail closed (D6).`
+        `Could not compile \`Sort\`: a custom comparator is not supported; only the default ascending numeric sort is.`
       );
     // A STRING source sorts its CHARACTERS, which are ordered by code-point
     // sequence, not numerically: the numeric comparator below would answer NaN
@@ -3986,18 +3989,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   StringJoin: (args, compile) => {
     if (args.length < 1 || args.length > 2)
       throw new Error(
-        `StringJoin: cannot compile — the operator takes a collection and an ` +
+        `Could not compile \`StringJoin\`: the operator takes a collection and an ` +
           `optional separator (\`StringJoin(xs, sep)\`); the variadic ` +
-          `concatenation form was removed in Phase 2 (use \`Join(a, b, …)\`). ` +
-          `Fail closed (D6) — the interpreter evaluates it.`
+          `concatenation form was removed in Phase 2 (use \`Join(a, b, …)\`). The interpreter evaluates it instead.`
       );
     let separator = '""';
     if (args.length === 2) {
       if (!isProvablyStringOperand(args[1]))
         throw new Error(
-          `StringJoin: cannot compile — the separator must be provably a ` +
+          `Could not compile \`StringJoin\`: the separator must be provably a ` +
             `string; the interpreter leaves the expression unevaluated on any ` +
-            `other operand. Fail closed (D6) — the interpreter evaluates it.`
+            `other operand. The interpreter evaluates it instead.`
         );
       separator = `_SYS.ct(${compile(args[1])})`;
     }
@@ -4022,12 +4024,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           !isSubtype(elt, 'character'))
       )
         throw new Error(
-          `StringJoin: cannot compile — the subject must be a string or an ` +
+          `Could not compile \`StringJoin\`: the subject must be a string or an ` +
             `indexed collection whose elements are provably strings or ` +
             `characters (\`list<string>\`, \`list<character>\`); a ` +
             `non-collection or non-text operand leaves the interpreter's ` +
-            `\`StringJoin\` unevaluated or reports a type error. ` +
-            `Fail closed (D6) — the interpreter evaluates it.`
+            `\`StringJoin\` unevaluated or reports a type error. The interpreter evaluates it instead.`
         );
       // Through `collArg`, not `compile`, so the two refusals it owns still
       // apply: an operand whose type merely ADMITS text (`string |
@@ -4045,7 +4046,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `String(c)` is that string — the round-trip law
   // `CharacterFrom(String(c)) == c`.
   //
-  // Everything else fails closed (D6), and two shapes deserve naming: a NUMBER
+  // Everything else fails closed, and two shapes deserve naming: a NUMBER
   // operand, whose interpreter rendering follows the engine's number-formatting
   // options rather than JS `toString` (`String(0.1 + 0.2)` is not
   // `"0.30000000000000004"`); and the single-COLLECTION join carve-out
@@ -4061,10 +4062,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       )
     )
       throw new Error(
-        `String: cannot compile — every operand must be provably a string or ` +
+        `Could not compile \`String\`: every operand must be provably a string or ` +
           `a character. Rendering any other value reproduces the engine's ` +
           `number- and expression-formatting options, which this target does ` +
-          `not carry. Fail closed (D6) — the interpreter evaluates it.`
+          `not carry. The interpreter evaluates it instead.`
       );
     if (args.length === 1) return `(${compile(args[0])})`;
     // `.normalize()` because the interpreter stores every string in NFC
@@ -4103,8 +4104,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   RangeOf: (args, compile) => {
     if (args.length < 2 || args.length > 3)
       throw new Error(
-        `RangeOf: cannot compile — expected \`RangeOf(xs, needle, from?)\`. ` +
-          `Fail closed (D6).`
+        `Could not compile \`RangeOf\`: expected \`RangeOf(xs, needle, from?)\`.`
       );
     requirePrimitiveElements('RangeOf', args[0]);
     requirePrimitiveElements('RangeOf', args[1]);
@@ -4117,10 +4117,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `_SYS.domne` guard below.
     if (args[1].isEmptyCollection === true)
       throw new Error(
-        `RangeOf: cannot compile — the needle is provably empty, and an ` +
+        `Could not compile \`RangeOf\`: the needle is provably empty, and an ` +
           `empty needle is an error value in the interpreter (an empty span ` +
           `has no \`Range\` representation), which a compiled artifact ` +
-          `cannot return. Fail closed (D6) — the interpreter evaluates it.`
+          `cannot return. The interpreter evaluates it instead.`
       );
     // `elementsArg` yields an ARRAY for both kinds of needle — the grapheme
     // clusters of a string, or the materialized elements of a list — so one
@@ -4177,8 +4177,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ContainsSequence: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `ContainsSequence: cannot compile — expected ` +
-          `\`ContainsSequence(xs, needle)\`. Fail closed (D6).`
+        `Could not compile \`ContainsSequence\`: expected ` +
+          `\`ContainsSequence(xs, needle)\`.`
       );
     requirePrimitiveElements('ContainsSequence', args[0]);
     requirePrimitiveElements('ContainsSequence', args[1]);
@@ -4191,8 +4191,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   StartsWith: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `StartsWith: cannot compile — expected \`StartsWith(xs, prefix)\`. ` +
-          `Fail closed (D6).`
+        `Could not compile \`StartsWith\`: expected \`StartsWith(xs, prefix)\`.`
       );
     requirePrimitiveElements('StartsWith', args[0]);
     requirePrimitiveElements('StartsWith', args[1]);
@@ -4208,8 +4207,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   EndsWith: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `EndsWith: cannot compile — expected \`EndsWith(xs, suffix)\`. ` +
-          `Fail closed (D6).`
+        `Could not compile \`EndsWith\`: expected \`EndsWith(xs, suffix)\`.`
       );
     requirePrimitiveElements('EndsWith', args[0]);
     requirePrimitiveElements('EndsWith', args[1]);
@@ -4260,16 +4258,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // string surface at all.
   RegExp: () => {
     throw new Error(
-      `RegExp: cannot compile — a compiled pattern is not a value on this ` +
-        `target; use it directly in \`IsMatch\` or \`StringReplace\`. ` +
-        `Fail closed (D6).`
+      `Could not compile \`RegExp\`: a compiled pattern is not a value on this ` +
+        `target; use it directly in \`IsMatch\` or \`StringReplace\`.`
     );
   },
   IsMatch: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `IsMatch: cannot compile — expected \`IsMatch(subject, pattern)\`. ` +
-          `Fail closed (D6).`
+        `Could not compile \`IsMatch\`: expected \`IsMatch(subject, pattern)\`.`
       );
     const subject = stringArg('IsMatch', args[0], compile, 'the subject');
     const { source, flags } = literalPatternArg('IsMatch', args[1]);
@@ -4278,8 +4274,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   StringReplace: (args, compile) => {
     if (args.length < 3 || args.length > 4)
       throw new Error(
-        `StringReplace: cannot compile — expected ` +
-          `\`StringReplace(s, target, replacement, count?)\`. Fail closed (D6).`
+        `Could not compile \`StringReplace\`: expected ` +
+          `\`StringReplace(s, target, replacement, count?)\`.`
       );
     const subject = stringArg('StringReplace', args[0], compile, 'the subject');
     // A PATTERN target takes the regex kernel. Only a string replacement is
@@ -4343,8 +4339,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   StringRepeat: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `StringRepeat: cannot compile — expected \`StringRepeat(s, n)\`. ` +
-          `Fail closed (D6).`
+        `Could not compile \`StringRepeat\`: expected \`StringRepeat(s, n)\`.`
       );
     const subject = stringArg('StringRepeat', args[0], compile, 'the subject');
     const n = guardedIntegerArg(
@@ -4370,8 +4365,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ToUpperCase: (args, compile) => {
     if (args.length !== 1)
       throw new Error(
-        `ToUpperCase: cannot compile — expected \`ToUpperCase(s)\`. ` +
-          `Fail closed (D6).`
+        `Could not compile \`ToUpperCase\`: expected \`ToUpperCase(s)\`.`
       );
     const s = stringArg('ToUpperCase', args[0], compile, 'the operand');
     return `(_SYS.ct(${s}).toUpperCase().normalize())`;
@@ -4379,8 +4373,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ToLowerCase: (args, compile) => {
     if (args.length !== 1)
       throw new Error(
-        `ToLowerCase: cannot compile — expected \`ToLowerCase(s)\`. ` +
-          `Fail closed (D6).`
+        `Could not compile \`ToLowerCase\`: expected \`ToLowerCase(s)\`.`
       );
     const s = stringArg('ToLowerCase', args[0], compile, 'the operand');
     return `(_SYS.ct(${s}).toLowerCase().normalize())`;
@@ -4388,7 +4381,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   CaseFold: (args, compile) => {
     if (args.length !== 1)
       throw new Error(
-        `CaseFold: cannot compile — expected \`CaseFold(s)\`. Fail closed (D6).`
+        `Could not compile \`CaseFold\`: expected \`CaseFold(s)\`.`
       );
     return `_SYS.cfold(${stringArg('CaseFold', args[0], compile, 'the operand')})`;
   },
@@ -4400,8 +4393,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   StringCompare: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `StringCompare: cannot compile — expected \`StringCompare(a, b)\`. ` +
-          `Fail closed (D6).`
+        `Could not compile \`StringCompare\`: expected \`StringCompare(a, b)\`.`
       );
     const a = stringArg('StringCompare', args[0], compile, 'the first operand');
     const b = stringArg(
@@ -4431,7 +4423,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // distinct nearby numbers.
   IndexOf: (args, compile) => {
     const coll = elementsArg('IndexOf', args[0], compile);
-    if (args[1] == null) throw new Error('IndexOf: missing value');
+    if (args[1] == null)
+      throw new Error('Could not compile `IndexOf`: missing value');
     // Text is admitted on both sides. `_SYS.eqt` provides content equality
     // with no numeric tolerance, matching the interpreter's own `isSame` for a
     // string or character. The
@@ -4477,10 +4470,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         args[1].type.matches('collection<any>')
       )
         throw new Error(
-          `IndexOf: cannot compile — the needle is a collection, which the ` +
+          `Could not compile \`IndexOf\`: the needle is a collection, which the ` +
             `compiled element test compares by reference identity, never ` +
-            `finding it where the interpreter compares element-wise. Fail ` +
-            `closed (D6) — the interpreter evaluates it.`
+            `finding it where the interpreter compares element-wise. The interpreter evaluates it instead.`
         );
     }
     // No element-type gate: the only shapes the removed one closed were the
@@ -4511,7 +4503,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // interpreter passes exactly `(x)`). A mapping operand that does not
   // compile to a lambda fails closed.
   Map: (args, compile, target) => {
-    if (args[1] == null) throw new Error('Map: missing source collection');
+    if (args[1] == null)
+      throw new Error('Could not compile `Map`: missing source collection');
     // The multi-collection (zipWith) form: `Map(f, xs, ys)` is
     // `[f(x1, y1), f(x2, y2), …]`, as long as the SHORTEST source — the
     // interpreter's `count` is the minimum over the sources, and `Zip`
@@ -4537,7 +4530,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Filter: (args, compile, target) => {
     const coll = elementsArg('Filter', args[0], compile);
-    if (args[1] == null) throw new Error('Filter: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `Filter`: missing predicate');
     return joinIfString(
       args[0],
       `((_f) => (${coll}).filter((_x) => _f(_x)))(${fnArg('Filter', args[1], args[0], compile, [], target)})`
@@ -4546,27 +4540,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Number of elements satisfying the predicate.
   CountIf: (args, compile, target) => {
     const coll = elementsArg('CountIf', args[0], compile);
-    if (args[1] == null) throw new Error('CountIf: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `CountIf`: missing predicate');
     return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('CountIf', args[1], args[0], compile, [], target)})`;
   },
   // First element satisfying the predicate; none → NaN (the interpreter's
   // `Nothing` projected onto a real target, matching `Last`).
   Find: (args, compile, target) => {
     const coll = elementsArg('Find', args[0], compile);
-    if (args[1] == null) throw new Error('Find: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `Find`: missing predicate');
     return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? NaN))(${fnArg('Find', args[1], args[0], compile, [], target)})`;
   },
   // 1-based index of the first element satisfying the predicate, or 0 if
   // none — `findIndex` is 0-based and returns -1, so `+ 1` maps both.
   IndexWhere: (args, compile, target) => {
     const coll = elementsArg('IndexWhere', args[0], compile);
-    if (args[1] == null) throw new Error('IndexWhere: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `IndexWhere`: missing predicate');
     return `((_f) => (${coll}).findIndex((_x) => _f(_x)) + 1)(${fnArg('IndexWhere', args[1], args[0], compile, [], target)})`;
   },
   // List of the 1-based indexes of the elements satisfying the predicate.
   Position: (args, compile, target) => {
     const coll = elementsArg('Position', args[0], compile);
-    if (args[1] == null) throw new Error('Position: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `Position`: missing predicate');
     return `((_f) => (${coll}).flatMap((_x, _i) => _f(_x) ? [_i + 1] : []))(${fnArg('Position', args[1], args[0], compile, [], target)})`;
   },
   // Apply the function to 1-based indexes: 1-D `Tabulate(f, n)` → list;
@@ -4583,17 +4581,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // the `Range`/`Table` step-0 precedent.
   Tabulate: (args, compile, target) => {
     if (args[0] == null || args[1] == null)
-      throw new Error('Tabulate: missing argument');
+      throw new Error('Could not compile `Tabulate`: missing argument');
     if (args.length > 3)
       throw new Error(
-        `Tabulate: only the 1-D and 2-D forms compile. Fail closed (D6).`
+        `Could not compile \`Tabulate\`: only the 1-D and 2-D forms compile.`
       );
     for (let i = 1; i < args.length; i++) {
       const dim = tryGetConstant(args[i]!);
       if (dim !== undefined && Math.round(dim) <= 0)
         throw new Error(
-          `Tabulate: a statically non-positive dimension (${dim}) is inert ` +
-            `in the interpreter. Fail closed (D6).`
+          `Could not compile \`Tabulate\`: a statically non-positive dimension (${dim}) is inert ` +
+            `in the interpreter.`
         );
     }
     // The emitted lowering passes 1-based integer indexes, so an annotated
@@ -4615,11 +4613,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Fill: (args, compile, target) => {
     const dims = args[1];
     if (args[0] == null || dims == null)
-      throw new Error('Fill: missing argument');
+      throw new Error('Could not compile `Fill`: missing argument');
     if (!isFunction(dims) || dims.ops.length !== 2)
       throw new Error(
-        `Fill: only the (function, (rows, cols)) form compiles. ` +
-          `Fail closed (D6).`
+        `Could not compile \`Fill\`: only the (function, (rows, cols)) form compiles.`
       );
     BaseCompiler.assertCallbackAnnotations('Fill', args[0], [
       'integer',
@@ -4642,7 +4639,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // A *statically* non-finite count (a `±∞` literal, or an operand typed
   // `infinity` or `nan`) never produces a list in the interpreter — the
   // declared `integer` parameter means a FINITE integer, so such a count is
-  // rejected at the signature — so it fails closed (D6) rather than
+  // rejected at the signature — so it fails closed rather than
   // compiling to `[]` behind `success: true`. A count that the signature
   // cannot decide statically and that is non-finite only at run time
   // still projects to [] — the Chunk/RotateLeft precedent, and the
@@ -4650,24 +4647,25 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // compiled form yields [] rather than attempting an unbounded allocation.
   // The 1-argument form is an INFINITE lazy sequence with no compiled
   // representation, and a statically non-integer count is a type error in the
-  // interpreter — both fail closed (D6).
+  // interpreter — both fail closed.
   Repeat: (args, compile) => {
-    if (args[0] == null) throw new Error('Repeat: missing value');
+    if (args[0] == null)
+      throw new Error('Could not compile `Repeat`: missing value');
     if (args.length !== 2)
       throw new Error(
-        `Repeat: only the (value, count) form compiles — the 1-argument ` +
-          `form is an infinite sequence. Fail closed (D6).`
+        `Could not compile \`Repeat\`: only the (value, count) form compiles — the 1-argument ` +
+          `form is an infinite sequence.`
       );
     if (isNonFiniteBound(args[1]!))
       throw new Error(
-        `Repeat: a statically non-finite count (${args[1]!.toString()}) is ` +
-          `inert in the interpreter. Fail closed (D6).`
+        `Could not compile \`Repeat\`: a statically non-finite count (${args[1]!.toString()}) is ` +
+          `inert in the interpreter.`
       );
     const nConst = tryGetConstant(args[1]!);
     if (nConst !== undefined && !Number.isInteger(nConst))
       throw new Error(
-        `Repeat: a non-integer count (${nConst}) is a type error in the ` +
-          `interpreter. Fail closed (D6).`
+        `Could not compile \`Repeat\`: a non-integer count (${nConst}) is a type error in the ` +
+          `interpreter.`
       );
     return `((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(${compile(args[0])}, ${compile(args[1]!)})`;
   },
@@ -4718,7 +4716,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 2 && args[1] != null) {
       if (!args[1].type.matches('range'))
         throw new Error(
-          'Slice: the two-argument form takes an ascending index span (`range`)'
+          'Could not compile `Slice`: the two-argument form takes an ascending index span (`range`)'
         );
       return joinIfString(
         args[0],
@@ -4726,7 +4724,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     }
     if (args[1] == null || args[2] == null)
-      throw new Error('Slice: missing index');
+      throw new Error('Could not compile `Slice`: missing index');
     return joinIfString(
       args[0],
       `((_l, _s, _e) => { _s = Math.round(_s); if (!Number.isFinite(_s)) _s = 1; _e = Math.round(_e); if (!Number.isFinite(_e)) _e = _l.length; if (_s < 1) _s = _l.length + 1 + _s; if (_s < 1) _s = 1; if (_s > _l.length) return []; if (_e < 1) _e = _l.length + 1 + _e; if (_e < 1) _e = 1; if (_e > _l.length) _e = _l.length; return _l.slice(_s - 1, _e); })(${coll}, ${compile(args[1])}, ${compile(args[2])})`
@@ -4746,9 +4744,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Count: (args, compile) => {
     if (args.length !== 1)
       throw new Error(
-        `Count: only the single-argument cardinality form compiles; the ` +
+        `Could not compile \`Count\`: only the single-argument cardinality form compiles; the ` +
           `value and predicate forms (\`Count(xs, v)\`, \`Count(xs, p)\`) are ` +
-          `not supported. Fail closed (D6).`
+          `not supported.`
       );
     return `(${elementsArg('Count', args[0], compile)}).length`;
   },
@@ -4757,7 +4755,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Contains: (args, compile) => {
     if (args[0]) requirePrimitiveElements('Contains', args[0]);
     const coll = elementsArg('Contains', args[0], compile);
-    if (args[1] == null) throw new Error('Contains: missing value');
+    if (args[1] == null)
+      throw new Error('Could not compile `Contains`: missing value');
     // A TEXT membership test cannot be the raw SameValueZero of `includes`:
     // the interpreter compares strings by their CONDITIONED content (NFC, then
     // the lone-surrogate replacement), so a decomposed `"e" + U+0301` needle
@@ -4820,7 +4819,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // a non-finite runtime count, like the interpreter — and is floored (not
   // rounded) and clamped to ≥ 0; a count of 1 yields [start].
   Linspace: (args, compile) => {
-    if (args[0] == null) throw new Error('Linspace: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Linspace`: missing argument');
     const start = args[1] == null ? '1' : compile(args[0]);
     const end = args[1] == null ? compile(args[0]) : compile(args[1]);
     const count = args[2] == null ? '50' : compile(args[2]);
@@ -4833,20 +4833,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // at runtime projects to [].
   Chunk: (args, compile) => {
     const coll = collArg('Chunk', args[0], compile);
-    if (args[1] == null) throw new Error('Chunk: missing count');
+    if (args[1] == null)
+      throw new Error('Could not compile `Chunk`: missing count');
     const kConst = tryGetConstant(args[1]);
     if (kConst !== undefined && !(Math.round(kConst) > 0))
       throw new Error(
-        `Chunk: a statically non-positive chunk count (${kConst}) is inert ` +
-          `in the interpreter. Fail closed (D6).`
+        `Could not compile \`Chunk\`: a statically non-positive chunk count (${kConst}) is inert ` +
+          `in the interpreter.`
       );
     // A literal count past the cap stays symbolic in the interpreter, so it
     // fails closed here; a run-time count past it answers NaN, the compiled
     // spelling for "no value".
     if (kConst !== undefined && Math.round(kConst) > MAX_CHUNK_COUNT)
       throw new Error(
-        `Chunk: a chunk count past ${MAX_CHUNK_COUNT} stays symbolic in the ` +
-          `interpreter. Fail closed (D6).`
+        `Could not compile \`Chunk\`: a chunk count past ${MAX_CHUNK_COUNT} stays symbolic in the ` +
+          `interpreter.`
       );
     return `((_l, _k) => { _k = Math.round(_k); if (!(Number.isFinite(_k) && _k > 0)) return []; if (_k > ${MAX_CHUNK_COUNT}) return NaN; const _sz = Math.ceil(_l.length / _k); return Array.from({ length: _k }, (_, _i) => _l.slice(_i * _sz, (_i + 1) * _sz)); })(${coll}, ${compile(args[1])})`;
   },
@@ -4857,21 +4858,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Partition: (args, compile, target) => {
     const coll = collArg('Partition', args[0], compile);
     const arg = args[1];
-    if (arg == null) throw new Error('Partition: missing operand');
+    if (arg == null)
+      throw new Error('Could not compile `Partition`: missing operand');
     if (arg.type.matches('number')) {
       const nConst = tryGetConstant(arg);
       if (nConst !== undefined && !(Math.round(nConst) > 0))
         throw new Error(
-          `Partition: a statically non-positive chunk size (${nConst}) is ` +
-            `inert in the interpreter. Fail closed (D6).`
+          `Could not compile \`Partition\`: a statically non-positive chunk size (${nConst}) is ` +
+            `inert in the interpreter.`
         );
       const step = args[2];
       if (step !== undefined) {
         const stepConst = tryGetConstant(step);
         if (stepConst !== undefined && !(Math.round(stepConst) > 0))
           throw new Error(
-            `Partition: a statically non-positive step (${stepConst}) is ` +
-              `inert in the interpreter. Fail closed (D6).`
+            `Could not compile \`Partition\`: a statically non-positive step (${stepConst}) is ` +
+              `inert in the interpreter.`
           );
         return `((_l, _n, _s) => { _n = Math.round(_n); _s = Math.round(_s); if (!(Number.isFinite(_n) && _n > 0 && Number.isFinite(_s) && _s > 0)) return []; const _r = []; for (let _i = 0; _i + _n <= _l.length; _i += _s) _r.push(_l.slice(_i, _i + _n)); return _r; })(${coll}, ${compile(arg)}, ${compile(step)})`;
       }
@@ -4884,8 +4886,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     )
       return `((_f, _l) => { const _t = [], _u = []; for (const _x of _l) (_f(_x) ? _t : _u).push(_x); return [_t, _u]; })(${fnArg('Partition', arg, args[0], compile, [], target)}, ${coll})`;
     throw new Error(
-      `Partition: the second operand must be an integer or a function ` +
-        `literal. Fail closed (D6).`
+      `Could not compile \`Partition\`: the second operand must be an integer or a function ` +
+        `literal.`
     );
   },
   // 1-based indexes that sort the collection ascending; ties keep their
@@ -4895,8 +4897,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = collArg('Ordering', args[0], compile);
     if (args.length > 1)
       throw new Error(
-        `Ordering: a custom ordering function does not compile; only the ` +
-          `default ascending numeric order is supported. Fail closed (D6).`
+        `Could not compile \`Ordering\`: a custom ordering function is not supported; only the default ascending numeric order is.`
       );
     assertNumericSortElements('Ordering', args[0]!);
     return `((_l, _c) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _c(_l[_a - 1], _l[_b - 1])))(${coll}, ${NAN_LAST_COMPARATOR})`;
@@ -4919,7 +4920,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = elementsArg('RandomShuffle', args[0], compile);
     if (args.length > 1)
       throw new Error(
-        `RandomShuffle: expected exactly one argument. Fail closed (D6).`
+        `Could not compile \`RandomShuffle\`: expected exactly one argument.`
       );
     return joinIfString(args[0], `_SYS.shuffle(${coll})`);
   },
@@ -4932,7 +4933,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = elementsArg('Any', args[0], compile);
     if (args[1] == null)
       throw new Error(
-        `Any: only the predicate form compiles. Fail closed (D6).`
+        `Could not compile \`Any\`: only the predicate form compiles.`
       );
     return `((_f) => (${coll}).some((_x) => _f(_x)))(${fnArg('Any', args[1], args[0], compile, [], target)})`;
   },
@@ -4940,13 +4941,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = elementsArg('All', args[0], compile);
     if (args[1] == null)
       throw new Error(
-        `All: only the predicate form compiles. Fail closed (D6).`
+        `Could not compile \`All\`: only the predicate form compiles.`
       );
     return `((_f) => (${coll}).every((_x) => _f(_x)))(${fnArg('All', args[1], args[0], compile, [], target)})`;
   },
   // Longest prefix satisfying the predicate / the rest after that prefix.
   TakeWhile: (args, compile, target) => {
-    if (args[1] == null) throw new Error('TakeWhile: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `TakeWhile`: missing predicate');
     // A statically infinite operand compiles as a lazy stream, scanned until
     // the predicate first fails (see `takeWhileIter` for the
     // never-false-predicate caveat). The predicate is compiled without the
@@ -4965,7 +4967,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   DropWhile: (args, compile, target) => {
     const coll = elementsArg('DropWhile', args[0], compile);
-    if (args[1] == null) throw new Error('DropWhile: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `DropWhile`: missing predicate');
     return joinIfString(
       args[0],
       `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? [] : _l.slice(_i); })(${fnArg('DropWhile', args[1], args[0], compile, [], target)}, ${coll})`
@@ -4976,7 +4979,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // kept as-is.
   FlatMap: (args, compile, target) => {
     const coll = collArg('FlatMap', args[0], compile);
-    if (args[1] == null) throw new Error('FlatMap: missing mapping function');
+    if (args[1] == null)
+      throw new Error('Could not compile `FlatMap`: missing mapping function');
     return `((_f) => (${coll}).flatMap((_x) => _f(_x)))(${fnArg('FlatMap', args[1], args[0], compile, [], target)})`;
   },
   // Running fold: the accumulator AFTER each element; the initial value is
@@ -4987,11 +4991,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = args[0];
     const op = args[1];
     const init = args[2];
-    if (coll == null || op == null) throw new Error('Scan: missing argument');
+    if (coll == null || op == null)
+      throw new Error('Could not compile `Scan`: missing argument');
     if (!isIndexedCollectionOperand(coll))
       throw new Error(
-        `Scan: cannot compile — first operand is not an indexed collection ` +
-          `(list/vector/range). Fail closed (D6).`
+        `Could not compile \`Scan\`: first operand is not an indexed collection ` +
+          `(list/vector/range).`
       );
     const builtin = builtinCombiner(
       op,
@@ -5021,9 +5026,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         : undefined);
     if (combiner === undefined)
       throw new Error(
-        `Scan: the combiner does not compile to a function — only ` +
+        `Could not compile \`Scan\`: the combiner has no compiled function form — only ` +
           `Add/Multiply/Min/Max folds, function literals, and user-defined ` +
-          `functions compile on the JavaScript target. Fail closed (D6).`
+          `functions compile on the JavaScript target.`
       );
     const collCode = compile(coll);
     if (init !== undefined && init !== null) {
@@ -5040,7 +5045,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // guard rethrows on a non-boolean at runtime (the interpreter stays
   // symbolic for an undetermined predicate — no numeric equivalent).
   Boole: (args, compile) => {
-    if (args[0] == null) throw new Error('Boole: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Boole`: missing argument');
     const c = compile(args[0]);
     if (BaseCompiler.isBooleanValued(args[0])) return `((${c}) ? 1 : 0)`;
     return `(_SYS.cond(${c}) ? 1 : 0)`;
@@ -5059,7 +5065,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // no test of its own.
   KroneckerDelta: (args, compile) => {
     if (args.length === 0 || args[0] == null)
-      throw new Error('KroneckerDelta: missing argument');
+      throw new Error('Could not compile `KroneckerDelta`: missing argument');
     if (args.length === 1) return `(${compile(args[0])} === 0 ? 1 : 0)`;
     // A complex operand is a `{ re, im }` object, which `===` compares by
     // reference; compare it component-wise, as `compileJSEquality` does.
@@ -5075,20 +5081,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `Element(x, Integers)`) is not an indexed collection and fails closed.
   Element: (args, compile) => {
     if (args[0] == null || args[1] == null)
-      throw new Error('Element: missing argument');
+      throw new Error('Could not compile `Element`: missing argument');
     requirePrimitiveElements('Element', args[1]);
     const coll = collArg('Element', args[1], compile);
     return `(${coll}).includes(${compile(args[0])})`;
   },
   Identity: (args, compile, target) => {
-    if (args[0] == null) throw new Error('Identity: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Identity`: missing argument');
     return identityPassthrough(args[0], compile, target);
   },
   // Apply a function literal to arguments. (`Apply` with a *symbol* head
   // canonicalizes to a direct call, so only the function-literal form
   // reaches this handler.)
   Apply: (args, compile, target) => {
-    if (args[0] == null) throw new Error('Apply: missing function');
+    if (args[0] == null)
+      throw new Error('Could not compile `Apply`: missing function');
     // `Apply(Derivative(f, n), x)` — the parse of `f''(x)` — would otherwise
     // compile its callee through `compileDerivative`, which differentiates
     // `f`'s body n times at compile time. That closed form multiplies out,
@@ -5122,7 +5130,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // vector, matrix·matrix → matrix. Dimension mismatches yield NaN.
   Dot: (args, compile, target) => {
     if (args[0] == null || args[1] == null)
-      throw new Error('Dot: missing argument');
+      throw new Error('Could not compile `Dot`: missing argument');
     const broadcast = BaseCompiler.compileBroadcastInnerProduct(args, target);
     if (broadcast !== undefined) return broadcast;
     // A LIST OF POINTS against a point, or against another list of points:
@@ -5138,14 +5146,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // point lists, and for nothing else. A point list against a plain
       // vector or a matrix has no arm in the interpreter — it types `value`
       // and stays symbolic — so emitting a list here would make the compiled
-      // route answer something the type does not describe. Fail closed (D6).
+      // route answer something the type does not describe. Fail closed.
       if (
         !args.every((a) => isPointListOperandType(a) || isPointOperandType(a))
       )
         throw new Error(
-          'Dot: a list of points is defined against a point or another list ' +
+          'Could not compile `Dot`: a list of points is defined against a point or another list ' +
             'of points only; the other operand is neither, and the ' +
-            'interpreter leaves this product unevaluated. Fail closed (D6).'
+            'interpreter leaves this product unevaluated.'
         );
       // The product is computed coordinate by coordinate, so every
       // coordinate on both sides must be a value the emitted `*` and `+`
@@ -5160,18 +5168,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         const cs = pointOperandCoordinateTypes(arg);
         if (cs === undefined)
           throw new Error(
-            'Dot: a list of points is multiplied coordinate by coordinate, ' +
+            'Could not compile `Dot`: a list of points is multiplied coordinate by coordinate, ' +
               'and this operand does not name its coordinate types, so they ' +
-              'cannot be proved numbers. Fail closed (D6).'
+              'cannot be proved numbers.'
           );
         coordinates.push(...cs);
       }
       if (!coordinates.every(isNumberCoordinateType))
         throw new Error(
-          'Dot: a list of points is multiplied coordinate by coordinate, and ' +
+          'Could not compile `Dot`: a list of points is multiplied coordinate by coordinate, and ' +
             'a coordinate here is not a number (a string, a nested ' +
             'collection, or a type too open to tell); the interpreter leaves ' +
-            'such a product unevaluated. Fail closed (D6).'
+            'such a product unevaluated.'
         );
       // The lane of the coordinates selects the helper, and the parent reads
       // the value with the same answer (`BaseCompiler.linearAlgebraLane`):
@@ -5209,8 +5217,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         (!isFunction(arg, 'List') && pointHasBroadcastComponent(arg))
       )
         throw new Error(
-          'Dot: cannot compile a point operand with a collection ' +
-            'component. Fail closed (D6).'
+          'Could not compile `Dot`: a point operand with a collection ' +
+            'component.'
         );
     // Two points or vectors of one static width are written out as the sum of
     // their component products; every other shape takes the run-time
@@ -5223,12 +5231,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   MatrixMultiply: (args, compile) => {
     if (args[0] == null || args[1] == null)
-      throw new Error('MatrixMultiply: missing argument');
+      throw new Error('Could not compile `MatrixMultiply`: missing argument');
     return `${linearAlgebraHelper('MatrixMultiply', 'matmul', 'complexMatmul', args)}(${collArg('MatrixMultiply', args[0], compile, 1)}, ${collArg('MatrixMultiply', args[1], compile, 2)})`;
   },
   Cross: (args, compile) => {
     if (args[0] == null || args[1] == null)
-      throw new Error('Cross: missing argument');
+      throw new Error('Could not compile `Cross`: missing argument');
     return `${linearAlgebraHelper('Cross', 'cross', 'complexCross', args)}(${collArg('Cross', args[0], compile, 1)}, ${collArg('Cross', args[1], compile, 2)})`;
   },
   // Norm accepts a scalar (absolute value) or a collection: 2-norm /
@@ -5237,7 +5245,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // norm fails closed). The order 2 of a matrix is the spectral norm, which
   // `_SYS.norm` computes at run time, so the order can be a run-time value.
   Norm: (args, compile, target) => {
-    if (args[0] == null) throw new Error('Norm: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Norm`: missing argument');
     // A point with a broadcasting (non-tuple collection) component is one
     // point per element in the interpreter — `([1, 2], 3)` is `(1, 3)` and
     // `(2, 3)` — so its norm is one number per element, and the application
@@ -5251,7 +5260,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // interpreter's `incompatible-dimensions` error. Only a component that
     // provably holds NUMBERS is a source: a component that is a list of
     // points would make `_SYS.bcast` descend into each point, so that shape
-    // fails closed (D6) and the interpreter answers.
+    // fails closed and the interpreter answers.
     assertPointCoordinatesBroadcastable('Norm', args[0]);
     if (unwrittenPointMayBroadcast(args[0])) {
       if (
@@ -5260,8 +5269,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         args[1].string !== 'Frobenius'
       )
         throw new Error(
-          `Norm: the "${args[1].string}" norm does not compile. ` +
-            `Fail closed (D6).`
+          `Could not compile \`Norm\`: the "${args[1].string}" norm has no compiled form.`
         );
       return broadcastPointNorm(
         compile(args[0]),
@@ -5277,14 +5285,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         args[1].string !== 'Frobenius'
       )
         throw new Error(
-          `Norm: the "${args[1].string}" norm does not compile. ` +
-            `Fail closed (D6).`
+          `Could not compile \`Norm\`: the "${args[1].string}" norm has no compiled form.`
         );
       const point = args[0];
       if (!isFunction(point, 'Tuple'))
         throw new Error(
-          'Norm: cannot compile a point with a broadcasting component. ' +
-            'Fail closed (D6).'
+          'Could not compile `Norm`: a point with a broadcasting component.'
         );
       const bound: string[] = [];
       const values: string[] = [];
@@ -5310,8 +5316,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         if (!broadcasts) return bind(compile(c));
         if (!c.type.matches('indexed_collection<number>'))
           throw new Error(
-            'Norm: cannot compile a point whose component is a collection ' +
-              'of non-scalars. Fail closed (D6).'
+            'Could not compile `Norm`: a point whose component is a collection ' +
+              'of non-scalars.'
           );
         const p = BaseCompiler.tempVar(target);
         params.push(p);
@@ -5338,8 +5344,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         if (isString(args[1])) {
           if (args[1].string !== 'Frobenius')
             throw new Error(
-              `Norm: the "${args[1].string}" norm does not compile. ` +
-                `Fail closed (D6).`
+              `Could not compile \`Norm\`: the "${args[1].string}" norm has no compiled form.`
             );
         } else ord = `, ${compile(args[1])}`;
       }
@@ -5350,8 +5355,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         if (args[1].string === 'Frobenius')
           return `_SYS.norm(${compile(args[0])})`;
         throw new Error(
-          `Norm: the "${args[1].string}" norm does not compile. ` +
-            `Fail closed (D6).`
+          `Could not compile \`Norm\`: the "${args[1].string}" norm has no compiled form.`
         );
       }
       return `_SYS.norm(${compile(args[0])}, ${compile(args[1])})`;
@@ -5362,7 +5366,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Transpose: (args, compile) => {
     if (args.length > 1)
       throw new Error(
-        `Transpose: explicit axes do not compile. Fail closed (D6).`
+        `Could not compile \`Transpose\`: explicit axes do not compile.`
       );
     return `_SYS.transpose(${collArg('Transpose', args[0], compile)})`;
   },
@@ -5374,14 +5378,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     `${linearAlgebraHelper('Inverse', 'inv', 'complexInv', args)}(${collArg('Inverse', args[0], compile)})`,
   Trace: (args, compile) => {
     if (args.length > 1)
-      throw new Error(`Trace: explicit axes do not compile. Fail closed (D6).`);
+      throw new Error(
+        `Could not compile \`Trace\`: explicit axes do not compile.`
+      );
     return `${linearAlgebraHelper('Trace', 'trace', 'complexTrace', args)}(${collArg('Trace', args[0], compile)})`;
   },
   // Transpose + element-wise complex conjugate. Explicit axes do not compile.
   ConjugateTranspose: (args, compile) => {
     if (args.length > 1)
       throw new Error(
-        `ConjugateTranspose: explicit axes do not compile. Fail closed (D6).`
+        `Could not compile \`ConjugateTranspose\`: explicit axes do not compile.`
       );
     return `_SYS.conjTranspose(${collArg('ConjugateTranspose', args[0], compile)})`;
   },
@@ -5390,7 +5396,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Diagonal: (args, compile) => {
     if (args.length > 1)
       throw new Error(
-        `Diagonal: the offset/banded form does not compile. Fail closed (D6).`
+        `Could not compile \`Diagonal\`: the offset/banded form has no compiled form.`
       );
     return `_SYS.diagonal(${collArg('Diagonal', args[0], compile)})`;
   },
@@ -5399,7 +5405,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // time (see the guard below).
   MatrixPower: (args, compile) => {
     if (args[0] == null || args[1] == null)
-      throw new Error('MatrixPower: missing argument');
+      throw new Error('Could not compile `MatrixPower`: missing argument');
     // `_SYS.matpow` computes integer powers only, but the interpreter also
     // answers a HALF-integer power of an exact 2×2 positive-semidefinite
     // matrix through the principal matrix square root
@@ -5409,7 +5415,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     //
     // So the lowering is emitted only when the exponent is STATICALLY
     // PROVEN an integer: a literal integer, or an operand whose type is
-    // `integer`. Anything else fails closed (D6) and the engine falls back
+    // `integer`. Anything else fails closed and the engine falls back
     // to interpretation. Proving it on the literal alone is not enough — a
     // `real`-typed symbol holding 0.5 at run time reaches `_SYS.matpow` and
     // returns NaN for a case the interpreter answers.
@@ -5418,9 +5424,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       args[1].type.matches('integer');
     if (!exponentIsInteger)
       throw new Error(
-        'MatrixPower: an exponent that is not statically an integer may be ' +
+        'Could not compile `MatrixPower`: an exponent that is not statically an integer may be ' +
           'the principal matrix square root in the interpreter, which ' +
-          '`_SYS.matpow` does not compute. Fail closed (D6).'
+          '`_SYS.matpow` does not compute.'
       );
     // A literal exponent past the cap stays symbolic in the interpreter, so
     // it fails closed here; a run-time exponent past it answers NaN in
@@ -5428,8 +5434,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const pConst = tryGetConstant(args[1]);
     if (pConst !== undefined && Math.abs(pConst) > MAX_MATRIX_POWER_EXPONENT)
       throw new Error(
-        `MatrixPower: an exponent past ${MAX_MATRIX_POWER_EXPONENT} stays ` +
-          'symbolic in the interpreter. Fail closed (D6).'
+        `Could not compile \`MatrixPower\`: an exponent past ${MAX_MATRIX_POWER_EXPONENT} stays ` +
+          'symbolic in the interpreter.'
       );
     return `${linearAlgebraHelper('MatrixPower', 'matpow', 'complexMatpow', [args[0]])}(${collArg('MatrixPower', args[0], compile)}, ${compile(
       args[1]
@@ -5440,18 +5446,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // The interpreter computes no reduced row echelon form of a matrix with a
   // complex entry (it leaves `RowReduce` unevaluated), so there is no value
   // for the compiled code to match: an operand whose entries are complex, or
-  // are complex under `mode: 'complex'`, fails closed (D6). An operand whose
+  // are complex under `mode: 'complex'`, fails closed. An operand whose
   // type does not say whether its entries are real (`matrix<number>`, an
   // undeclared matrix) is read as real in `strict` and `auto` mode, as the
   // other linear-algebra heads read it (`linearAlgebraOperandLane`).
   RowReduce: (args, compile) => {
-    if (args[0] === undefined) throw new Error('RowReduce: missing argument');
+    if (args[0] === undefined)
+      throw new Error('Could not compile `RowReduce`: missing argument');
     const lane = BaseCompiler.linearAlgebraLane([args[0]]);
     if (lane === 'complex')
       throw new Error(
-        'RowReduce: the interpreter computes no reduced row echelon form of ' +
+        'Could not compile `RowReduce`: the interpreter computes no reduced row echelon form of ' +
           'a matrix with a complex entry, so the compiled code has no value ' +
-          'to match. Fail closed (D6).'
+          'to match.'
       );
     return `_SYS.rref(${collArg('RowReduce', args[0], compile)})`;
   },
@@ -5459,11 +5466,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // matrix 2, …), NOT the linear-algebra (row) rank. It is the nesting depth of
   // the compiled value, so it lowers for any operand (a scalar gives 0).
   Rank: (args, compile) => {
-    if (args[0] == null) throw new Error('Rank: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Rank`: missing argument');
     return `(_SYS.shape(${compile(args[0])}).length)`;
   },
   Shape: (args, compile) => {
-    if (args[0] == null) throw new Error('Shape: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Shape`: missing argument');
     return `_SYS.shape(${compile(args[0])})`;
   },
   // Flatten to a flat list (native `.flat`), or by an explicit number of
@@ -5478,10 +5487,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Reshape: (args, compile) => {
     const coll = collArg('Reshape', args[0], compile);
     const dims = args[1];
-    if (dims == null) throw new Error('Reshape: missing shape');
+    if (dims == null)
+      throw new Error('Could not compile `Reshape`: missing shape');
     if (!isFunction(dims) || dims.ops.length === 0 || dims.ops.length > 2)
       throw new Error(
-        `Reshape: only a 1-D or 2-D target shape compiles. Fail closed (D6).`
+        `Could not compile \`Reshape\`: only a 1-D or 2-D target shape compiles.`
       );
     return `_SYS.reshape(${coll}, [${dims.ops.map((d) => compile(d)).join(', ')}])`;
   },
@@ -5646,21 +5656,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Covariance: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        'Covariance: expected two collection arguments to compile'
+        'Could not compile `Covariance`: expected two collection arguments to compile'
       );
     return `_SYS.covariance(${compile(args[0])}, ${compile(args[1])})`;
   },
   PopulationCovariance: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        'PopulationCovariance: expected two collection arguments to compile'
+        'Could not compile `PopulationCovariance`: expected two collection arguments to compile'
       );
     return `_SYS.populationCovariance(${compile(args[0])}, ${compile(args[1])})`;
   },
   Correlation: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        'Correlation: expected two collection arguments to compile'
+        'Could not compile `Correlation`: expected two collection arguments to compile'
       );
     return `_SYS.correlation(${compile(args[0])}, ${compile(args[1])})`;
   },
@@ -5668,7 +5678,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Power: (args, compile, target) => {
     const base = args[0];
     const exp = args[1];
-    if (base === null) throw new Error('Power: no argument');
+    if (base === null)
+      throw new Error('Could not compile `Power`: no argument');
     if (
       BaseCompiler.isComplexValued(base) ||
       BaseCompiler.isComplexValued(exp)
@@ -5851,8 +5862,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // the interpreter (the `Repeat` 1-argument precedent).
     if (args.some((a) => a != null && isNonFiniteBound(a)))
       throw new Error(
-        `Range: a non-finite bound (\`${args.find((a) => a != null && isNonFiniteBound(a))!.toString()}\`) does not materialize — an infinite ` +
-          `range compiles only under \`Take\`/\`TakeWhile\`. Fail closed (D6).`
+        `Could not compile \`Range\`: a non-finite bound (\`${args.find((a) => a != null && isNonFiniteBound(a))!.toString()}\`) does not materialize — an infinite ` +
+          `range compiles only under \`Take\`/\`TakeWhile\`.`
       );
     // `Range(n)` is 1..n inclusive (matching the interpreter and the Python
     // target) — not 0..n-1. Canonicalization normally rewrites the
@@ -5868,7 +5879,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const t = compilationType(a);
       if (!couldMatch(t, 'number'))
         throw new Error(
-          `Range: the bound \`${a.toString()}\` is a \`${typeToString(t)}\`, not a number, so the range never materializes. Fail closed (D6).`
+          `Could not compile \`Range\`: the bound \`${a.toString()}\` is a \`${typeToString(t)}\`, not a number, so the range never materializes.`
         );
     }
     if (args.length === 1)
@@ -5877,7 +5888,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     let start = compile(args[0]);
     let stop = compile(args[1]);
     const step = args[2] ? compile(args[2]) : '1';
-    if (start === null) throw new Error('Range: no start');
+    if (start === null) throw new Error('Could not compile `Range`: no start');
     if (stop === null) {
       stop = start;
       start = '1';
@@ -5936,7 +5947,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_e, i) => ${start} + i * ${step})`;
   },
   Root: ([arg, exp], compile, target) => {
-    if (arg === null) throw new Error('Root: no argument');
+    if (arg === null) throw new Error('Could not compile `Root`: no argument');
     if (exp === null) return `Math.sqrt(${compile(arg)})`;
     const aConst = tryGetConstant(arg);
     const nConst = tryGetConstant(exp);
@@ -6027,7 +6038,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 0) return '_SYS.drawNextRandomNumber()';
     if (args.length !== 1)
       throw new Error(
-        `Random: expected at most one domain operand. Fail closed (D6).`
+        `Could not compile \`Random\`: expected at most one domain operand.`
       );
     const domain = args[0];
 
@@ -6065,7 +6076,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   RandomChoice: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `RandomChoice: expected exactly two arguments. Fail closed (D6).`
+        `Could not compile \`RandomChoice\`: expected exactly two arguments.`
       );
     if (args[0] !== undefined && isProvablyStringOperand(args[0]))
       return joinIfString(
@@ -6091,7 +6102,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   RandomSample: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `RandomSample: expected exactly two arguments. Fail closed (D6).`
+        `Could not compile \`RandomSample\`: expected exactly two arguments.`
       );
     if (args[0] !== undefined && isProvablyStringOperand(args[0]))
       return joinIfString(
@@ -6127,7 +6138,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Square: (args, compile, target) => {
     const arg = args[0];
-    if (arg === null) throw new Error('Square: no argument');
+    if (arg === null)
+      throw new Error('Could not compile `Square`: no argument');
     const c = tryGetConstant(arg);
     if (c !== undefined) return String(c * c);
     if (isSymbol(arg) && !target.varsKeys?.has(arg.symbol)) {
@@ -6138,14 +6150,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Sec: (args, compile, target) => {
     const arg = args[0];
-    if (arg === null) throw new Error('Sec: no argument');
+    if (arg === null) throw new Error('Could not compile `Sec`: no argument');
     if (BaseCompiler.isComplexValued(arg))
       return complexUnary(target, '_SYS.csec', compile(arg));
     return `_SYS.sec(${compile(arg)})`;
   },
   Sech: (args, compile, target) => {
     const arg = args[0];
-    if (arg === null) throw new Error('Sech: no argument');
+    if (arg === null) throw new Error('Could not compile `Sech`: no argument');
     if (BaseCompiler.isComplexValued(arg))
       return complexUnary(target, '_SYS.csech', compile(arg));
     return `1 / Math.cosh(${compile(arg)})`;
@@ -6237,7 +6249,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   PointList: (args, compile, target) =>
     compileJSPointList(args, compile, target),
   Mod: ([a, b], compile, target) => {
-    if (a === null || b === null) throw new Error('Mod: missing argument');
+    if (a === null || b === null)
+      throw new Error('Could not compile `Mod`: missing argument');
     // For non-negative integers, plain `%` is correct Euclidean modulo, and it
     // splices each operand once. Every other pair needs the floored-modulo
     // template, which splices the DIVISOR three times.
@@ -6318,7 +6331,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Remainder: ([a, b], compile, target) => {
     if (a === null || b === null)
-      throw new Error('Remainder: missing argument');
+      throw new Error('Could not compile `Remainder`: missing argument');
     // An IMPURE operand must be evaluated exactly once: both operands are
     // spliced twice by the template, so a spliced draw re-draws at run time
     // (`Remainder(Random(), 2)` consumed two draws). Bind to temps; pure
@@ -6338,7 +6351,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // No Subtract function handler — Subtract canonicalizes to Add+Negate.
   // The operator entry in JAVASCRIPT_OPERATORS handles any edge cases.
   Divide: ([a, b], compile, target) => {
-    if (a === null || b === null) throw new Error('Divide: missing argument');
+    if (a === null || b === null)
+      throw new Error('Could not compile `Divide`: missing argument');
     const ac = BaseCompiler.isComplexValued(a);
     const bc = BaseCompiler.isComplexValued(b);
     if (!ac && !bc) {
@@ -6391,7 +6405,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
   Negate: ([x], compile, target) => {
-    if (x === null) throw new Error('Negate: no argument');
+    if (x === null) throw new Error('Could not compile `Negate`: no argument');
     if (!BaseCompiler.isComplexValued(x)) {
       const c = tryGetConstant(x);
       if (c !== undefined) return String(-c);
@@ -6569,7 +6583,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Additional logarithmic functions
   Exp2: ([x], compile) => {
-    if (x === null) throw new Error('Exp2: no argument');
+    if (x === null) throw new Error('Could not compile `Exp2`: no argument');
     return `Math.pow(2, ${compile(x)})`;
   },
   Log2: 'Math.log2',
@@ -6621,8 +6635,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (typeof t === 'string' || t.kind !== 'tuple') return code;
       if (pointHasBroadcastComponent(a))
         throw new Error(
-          'Hypot: cannot compile a point with a broadcasting component. ' +
-            'Fail closed (D6).'
+          'Could not compile `Hypot`: a point with a broadcasting component.'
         );
       return `_SYS.norm(${code})`;
     };
@@ -6634,11 +6647,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Degrees → radians. Only reached in radian mode: in the other angular
   // units `rewriteAngularUnit` replaces the `Degrees` node before codegen.
   Degrees: ([x], compile) => {
-    if (x === null) throw new Error('Degrees: no argument');
+    if (x === null) throw new Error('Could not compile `Degrees`: no argument');
     return `(${compile(x)} * Math.PI / 180)`;
   },
   Haversine: ([x], compile, target) => {
-    if (x === null) throw new Error('Haversine: no argument');
+    if (x === null)
+      throw new Error('Could not compile `Haversine`: no argument');
     return BaseCompiler.inlineExpression(
       target,
       '(1 - Math.cos(${x})) / 2',
@@ -6646,7 +6660,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
   InverseHaversine: ([x], compile, target) => {
-    if (x === null) throw new Error('InverseHaversine: no argument');
+    if (x === null)
+      throw new Error('Could not compile `InverseHaversine`: no argument');
     // Same complex discipline as the Arcsin family: hav⁻¹ = 2·arcsin(√z) is
     // complex outside [0, 1], and the node's TYPE (which the enclosing
     // expression's codegen reads) claims complex for an unconstrained real.
@@ -6739,12 +6754,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Combinatorics
   Mandelbrot: ([c, maxIter], compile) => {
     if (c === null || maxIter === null)
-      throw new Error('Mandelbrot: missing arguments');
+      throw new Error('Could not compile `Mandelbrot`: missing arguments');
     return `_SYS.mandelbrot(${compile(c)}, ${compile(maxIter)})`;
   },
   Julia: ([z, c, maxIter], compile) => {
     if (z === null || c === null || maxIter === null)
-      throw new Error('Julia: missing arguments');
+      throw new Error('Could not compile `Julia`: missing arguments');
     return `_SYS.julia(${compile(z)}, ${compile(c)}, ${compile(maxIter)})`;
   },
 
@@ -6808,18 +6823,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Color functions
   Color: ([color], compile) => {
-    if (color === null) throw new Error('Color: no argument');
+    if (color === null)
+      throw new Error('Could not compile `Color`: no argument');
     return `_SYS.color(${compile(color)})`;
   },
   ColorToString: (args, compile) => {
-    if (args.length === 0) throw new Error('ColorToString: no argument');
+    if (args.length === 0)
+      throw new Error('Could not compile `ColorToString`: no argument');
     const c = compileColorOperand('ColorToString', args[0], compile);
     if (args.length >= 2)
       return `_SYS.colorToString(${c}, ${compile(args[1])})`;
     return `_SYS.colorToString(${c})`;
   },
   GamutMap: (args, compile) => {
-    if (args.length === 0) throw new Error('GamutMap: no argument');
+    if (args.length === 0)
+      throw new Error('Could not compile `GamutMap`: no argument');
     const c = compileColorOperand('GamutMap', args[0], compile);
     const gamut = args[1];
     if (gamut === undefined || gamut === null) return `_SYS.gamutMap(${c})`;
@@ -6828,13 +6846,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // gamut computed at run time is checked by `_SYS.gamutMap`, which throws.
     if (isString(gamut) && readColorGamut(gamut.string) === undefined)
       throw new Error(
-        `GamutMap: unknown gamut "${gamut.string}" — the gamut is "srgb" ` +
+        `Could not compile \`GamutMap\`: unknown gamut "${gamut.string}" — the gamut is "srgb" ` +
           `or "display-p3"`
       );
     return `_SYS.gamutMap(${c}, ${compile(gamut)})`;
   },
   ColorMix: (args, compile) => {
-    if (args.length < 2) throw new Error('ColorMix: need two colors');
+    if (args.length < 2)
+      throw new Error('Could not compile `ColorMix`: need two colors');
     const c1 = compileColorOperand('ColorMix', args[0], compile);
     const c2 = compileColorOperand('ColorMix', args[1], compile);
     if (args.length >= 3)
@@ -6843,7 +6862,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   ColorContrast: ([bg, fg], compile) => {
     if (bg === null || fg === null)
-      throw new Error('ColorContrast: need two colors');
+      throw new Error('Could not compile `ColorContrast`: need two colors');
     return `_SYS.colorContrast(${compileColorOperand(
       'ColorContrast',
       bg,
@@ -6851,7 +6870,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     )}, ${compileColorOperand('ColorContrast', fg, compile)})`;
   },
   ContrastingColor: (args, compile) => {
-    if (args.length === 0) throw new Error('ContrastingColor: no argument');
+    if (args.length === 0)
+      throw new Error('Could not compile `ContrastingColor`: no argument');
     const bg = compileColorOperand('ContrastingColor', args[0], compile);
     if (args.length >= 3)
       return `_SYS.contrastingColor(${bg}, ${compileColorOperand(
@@ -6863,7 +6883,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   ColorToColorspace: ([color, space], compile) => {
     if (color === null || space === null)
-      throw new Error('ColorToColorspace: need color and space');
+      throw new Error(
+        'Could not compile `ColorToColorspace`: need color and space'
+      );
     return `_SYS.colorToColorspace(${compileColorEntryOperand(
       'ColorToColorspace',
       color,
@@ -6872,14 +6894,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   ColorFromColorspace: ([components, space], compile) => {
     if (components === null || space === null)
-      throw new Error('ColorFromColorspace: need components and space');
+      throw new Error(
+        'Could not compile `ColorFromColorspace`: need components and space'
+      );
     return `_SYS.colorFromColorspace(${compileColorComponents(
       components,
       compile
     )}, ${compile(space)})`;
   },
   Colormap: (args, compile) => {
-    if (args.length === 0) throw new Error('Colormap: no argument');
+    if (args.length === 0)
+      throw new Error('Could not compile `Colormap`: no argument');
     if (args.length >= 2) {
       // A literal sample count past the cap stays symbolic in the
       // interpreter, so it fails closed here; a run-time count past it
@@ -6887,8 +6912,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const nConst = tryGetConstant(args[1]);
       if (nConst !== undefined && nConst > MAX_COLORMAP_SAMPLES)
         throw new Error(
-          `Colormap: a sample count past ${MAX_COLORMAP_SAMPLES} stays ` +
-            'symbolic in the interpreter. Fail closed (D6).'
+          `Could not compile \`Colormap\`: a sample count past ${MAX_COLORMAP_SAMPLES} stays ` +
+            'symbolic in the interpreter.'
         );
       return `_SYS.colormap(${compile(args[0])}, ${compile(args[1])})`;
     }
@@ -6902,23 +6927,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // (The GPU target keeps the same canonical space in a bare `vec3`.)
   // -----------------------------------------------------------------------
   Rgb: (args, compile) => {
-    if (args.length < 3) throw new Error('Rgb: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Rgb`: need 3 components');
     return `_SYS.rgb(${args.map(compile).join(', ')})`;
   },
   Hsv: (args, compile) => {
-    if (args.length < 3) throw new Error('Hsv: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Hsv`: need 3 components');
     return `_SYS.hsv(${args.map(compile).join(', ')})`;
   },
   Hsl: (args, compile) => {
-    if (args.length < 3) throw new Error('Hsl: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Hsl`: need 3 components');
     return `_SYS.hsl(${args.map(compile).join(', ')})`;
   },
   Oklab: (args, compile) => {
-    if (args.length < 3) throw new Error('Oklab: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Oklab`: need 3 components');
     return `_SYS.oklab(${args.map(compile).join(', ')})`;
   },
   Oklch: (args, compile) => {
-    if (args.length < 3) throw new Error('Oklch: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Oklch`: need 3 components');
     return `_SYS.oklch(${args.map(compile).join(', ')})`;
   },
 
@@ -6935,7 +6965,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // for these five heads and leave the shape to them — see
   // `CompileTarget.collectionAwareHeads`.
   AsRgb: ([c], compile, target) => {
-    if (c === null) throw new Error('AsRgb: no argument');
+    if (c === null) throw new Error('Could not compile `AsRgb`: no argument');
     const list = tryCompileColorBroadcast(
       'AsRgb',
       c,
@@ -6948,7 +6978,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
   AsHsv: ([c], compile, target) => {
-    if (c === null) throw new Error('AsHsv: no argument');
+    if (c === null) throw new Error('Could not compile `AsHsv`: no argument');
     const list = tryCompileColorBroadcast(
       'AsHsv',
       c,
@@ -6961,7 +6991,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
   AsHsl: ([c], compile, target) => {
-    if (c === null) throw new Error('AsHsl: no argument');
+    if (c === null) throw new Error('Could not compile `AsHsl`: no argument');
     const list = tryCompileColorBroadcast(
       'AsHsl',
       c,
@@ -6974,7 +7004,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
   AsOklab: ([c], compile, target) => {
-    if (c === null) throw new Error('AsOklab: no argument');
+    if (c === null) throw new Error('Could not compile `AsOklab`: no argument');
     const list = tryCompileColorBroadcast(
       'AsOklab',
       c,
@@ -6987,7 +7017,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
   AsOklch: ([c], compile, target) => {
-    if (c === null) throw new Error('AsOklch: no argument');
+    if (c === null) throw new Error('Could not compile `AsOklch`: no argument');
     // The element of a color list goes through `_SYS.asOklch` rather than
     // through the identity below: an element may be a color STRING, and the
     // identity would hand that string back where the interpreter answers an
@@ -7028,7 +7058,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Perceptual color difference (ΔE_OK).
   ColorDelta: ([a, b], compile) => {
     if (a === null || b === null)
-      throw new Error('ColorDelta: need two colors');
+      throw new Error('Could not compile `ColorDelta`: need two colors');
     return `_SYS.colorDelta(${compileColorOperand(
       'ColorDelta',
       a,
@@ -7040,7 +7070,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // The GPU target maps `Distance` to the GLSL/WGSL `distance()` builtin
   // (vec-only); this JS handler works on plain arrays of any length.
   Distance: ([a, b], compile) => {
-    if (a === null || b === null) throw new Error('Distance: need two points');
+    if (a === null || b === null)
+      throw new Error('Could not compile `Distance`: need two points');
     // The distance is a real number for real and complex coordinates alike,
     // so the lane decides only whether the coordinates may be `{re, im}`
     // objects: `_SYS.distanceAny` reads either representation, and a wide
@@ -7062,7 +7093,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   WithRandomSeed: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `WithRandomSeed: expected exactly two arguments. Fail closed (D6).`
+        `Could not compile \`WithRandomSeed\`: expected exactly two arguments.`
       );
     return `_SYS.withRandomSeed(${compile(args[0])}, () => ${compile(args[1])})`;
   },
@@ -8246,7 +8277,7 @@ const colorHelpers = {
   // broadcast (Tycho items 130/138).
   distance(a: unknown, b: unknown): number | number[] {
     if (!Array.isArray(a) || !Array.isArray(b))
-      throw new Error('Distance: expected two arrays');
+      throw new Error('Could not compile `Distance`: expected two arrays');
     // An EMPTY array reads as an empty list of points (a 0-dimensional point
     // has no distance), matching the interpreter's `Distance([], p) → []`.
     const aList = a.length === 0 || Array.isArray(a[0]);
@@ -8254,7 +8285,7 @@ const colorHelpers = {
     if (!aList && !bList) return colorHelpers.pointDistance(a, b);
     if (aList && bList) {
       if (a.length !== b.length)
-        throw new Error('Distance: dimension mismatch');
+        throw new Error('Could not compile `Distance`: dimension mismatch');
       return a.map((p, i) => colorHelpers.pointDistance(p, b[i]));
     }
     if (aList) return a.map((p) => colorHelpers.pointDistance(p, b));
@@ -8265,13 +8296,17 @@ const colorHelpers = {
   // each a flat numeric array.
   pointDistance(a: unknown, b: unknown): number {
     if (!Array.isArray(a) || !Array.isArray(b))
-      throw new Error('Distance: expected points (flat numeric arrays)');
+      throw new Error(
+        'Could not compile `Distance`: expected points (flat numeric arrays)'
+      );
     if (a.length !== b.length || a.length === 0)
-      throw new Error('Distance: dimension mismatch');
+      throw new Error('Could not compile `Distance`: dimension mismatch');
     let sumSq = 0;
     for (let i = 0; i < a.length; i++) {
       if (typeof a[i] !== 'number' || typeof b[i] !== 'number')
-        throw new Error('Distance: expected points (flat numeric arrays)');
+        throw new Error(
+          'Could not compile `Distance`: expected points (flat numeric arrays)'
+        );
       const d = a[i] - b[i];
       // An infinite coordinate difference makes the distance `+∞` whatever
       // the other differences are, a NaN one included. Every Euclidean norm
@@ -8296,13 +8331,13 @@ const colorHelpers = {
   // and complex coordinates alike, so it has no complex counterpart.
   distanceAny(a: unknown, b: unknown): number | number[] {
     if (!Array.isArray(a) || !Array.isArray(b))
-      throw new Error('Distance: expected two arrays');
+      throw new Error('Could not compile `Distance`: expected two arrays');
     const aList = a.length === 0 || Array.isArray(a[0]);
     const bList = b.length === 0 || Array.isArray(b[0]);
     if (!aList && !bList) return colorHelpers.pointDistanceAny(a, b);
     if (aList && bList) {
       if (a.length !== b.length)
-        throw new Error('Distance: dimension mismatch');
+        throw new Error('Could not compile `Distance`: dimension mismatch');
       return a.map((p, i) => colorHelpers.pointDistanceAny(p, b[i]));
     }
     if (aList) return a.map((p) => colorHelpers.pointDistanceAny(p, b));
@@ -8316,16 +8351,20 @@ const colorHelpers = {
   // same.
   pointDistanceAny(a: unknown, b: unknown): number {
     if (!Array.isArray(a) || !Array.isArray(b))
-      throw new Error('Distance: expected points (flat numeric arrays)');
+      throw new Error(
+        'Could not compile `Distance`: expected points (flat numeric arrays)'
+      );
     if (a.length !== b.length || a.length === 0)
-      throw new Error('Distance: dimension mismatch');
+      throw new Error('Could not compile `Distance`: dimension mismatch');
     let sumSq = 0;
     for (let i = 0; i < a.length; i++) {
       if (
         (typeof a[i] !== 'number' && !isComplexObject(a[i])) ||
         (typeof b[i] !== 'number' && !isComplexObject(b[i]))
       )
-        throw new Error('Distance: expected points (flat numeric arrays)');
+        throw new Error(
+          'Could not compile `Distance`: expected points (flat numeric arrays)'
+        );
       const p = complexEntry(a[i]);
       const q = complexEntry(b[i]);
       const dr = p.re - q.re;
@@ -10279,7 +10318,9 @@ const SYS_HELPERS = {
   // constructing one per call dominates the cost in a scanner loop.
   chars: (s: unknown): string[] => {
     if (typeof s !== 'string')
-      throw new Error('Characters: expected a string operand');
+      throw new Error(
+        'Could not compile `Characters`: expected a string operand'
+      );
     graphemeSegmenter ??= new Intl.Segmenter('en', { granularity: 'grapheme' });
     // `conditionText`, not a bare `.normalize()`: the interpreter conditions a
     // string at INGRESS — NFC normalization AND the lone-surrogate → U+FFFD
@@ -10357,7 +10398,7 @@ const SYS_HELPERS = {
   // otherwise coerce `42` to `\"42\"` and answer.
   reis: (s: unknown, src: string, flags: string) => {
     if (typeof s !== 'string')
-      throw new Error('IsMatch: expected a string subject');
+      throw new Error('Could not compile `IsMatch`: expected a string subject');
     return new RegExp(src, flags).test(conditionText(s));
   },
   // Conditioned on both the subject and the replacement, for the reason given
@@ -10371,7 +10412,9 @@ const SYS_HELPERS = {
     limit: number
   ) => {
     if (typeof sRaw !== 'string' || typeof replacementRaw !== 'string')
-      throw new Error('StringReplace: expected string operands');
+      throw new Error(
+        'Could not compile `StringReplace`: expected string operands'
+      );
     const s = conditionText(sRaw);
     const replacement = conditionText(replacementRaw);
     const re = new RegExp(src, flags.includes('g') ? flags : flags + 'g');
@@ -10948,7 +10991,7 @@ const SYS_HELPERS = {
       : Array.isArray(v);
     if (!nested) return v;
     throw new Error(
-      `At: the element read is a list at run time, but its static element ` +
+      `Could not compile \`At\`: the element read is a list at run time, but its static element ` +
         `type is \`${elementType}\`, so the compiled code treats it as a ` +
         `number. Declare the collection with its nested element type ` +
         `(for example \`list<list<number>>\` or \`matrix\`), or evaluate ` +
@@ -11413,7 +11456,9 @@ function makeRandomHelpers(ce: ComputeEngine): RandomSysHelpers {
   const count = (op: string, k: unknown): number => {
     const v = typeof k === 'number' ? Math.round(k) : NaN;
     if (!Number.isSafeInteger(v) || v < 0 || v > cap)
-      throw new Error(`${op}: expected a count in 0..${cap}, got ${k}`);
+      throw new Error(
+        `Could not compile \`${op}\`: expected a count in 0..${cap}, got ${k}`
+      );
     return v;
   };
 
@@ -11432,7 +11477,7 @@ function makeRandomHelpers(ce: ComputeEngine): RandomSysHelpers {
         typeof seed !== 'string'
       )
         throw new Error(
-          `WithRandomSeed: expected a finite real number or a string seed, got ${String(seed)}`
+          `Could not compile \`WithRandomSeed\`: expected a finite real number or a string seed, got ${String(seed)}`
         );
       return withRandomSeedFrame(ce, seed as number | string, body);
     },
@@ -11440,11 +11485,11 @@ function makeRandomHelpers(ce: ComputeEngine): RandomSysHelpers {
     domainInterval: (op, lo, hi) => {
       if (!Number.isFinite(lo) || !Number.isFinite(hi))
         throw new Error(
-          `${op}: expected a bounded Interval, got (${lo}, ${hi})`
+          `Could not compile \`${op}\`: expected a bounded Interval, got (${lo}, ${hi})`
         );
       if (!(hi > lo))
         throw new Error(
-          `${op}: expected a non-empty Interval, got (${lo}, ${hi})`
+          `Could not compile \`${op}\`: expected a non-empty Interval, got (${lo}, ${hi})`
         );
       return { continuous: true, lo, hi };
     },
@@ -11462,16 +11507,20 @@ function makeRandomHelpers(ce: ComputeEngine): RandomSysHelpers {
             : Math.max(0, Math.floor((b - a) / step) + 1);
       if (!Number.isFinite(n) || n <= 0)
         throw new Error(
-          `${op}: expected a finite, non-empty Range, got Range(${a}, ${b}, ${step})`
+          `Could not compile \`${op}\`: expected a finite, non-empty Range, got Range(${a}, ${b}, ${step})`
         );
       return { continuous: false, n, at: (i) => a + step * i };
     },
 
     domainList: (op, xs) => {
       if (!Array.isArray(xs))
-        throw new Error(`${op}: expected a finite indexed collection`);
+        throw new Error(
+          `Could not compile \`${op}\`: expected a finite indexed collection`
+        );
       if (xs.length === 0)
-        throw new Error(`${op}: expected a non-empty collection`);
+        throw new Error(
+          `Could not compile \`${op}\`: expected a non-empty collection`
+        );
       return { continuous: false, n: xs.length, at: (i) => xs[i] };
     },
 
@@ -11497,13 +11546,13 @@ function makeRandomHelpers(ce: ComputeEngine): RandomSysHelpers {
     randomSample: (d, k) => {
       if (d.continuous)
         throw new Error(
-          `RandomSample: an Interval is not an indexed collection`
+          `Could not compile \`RandomSample\`: an Interval is not an indexed collection`
         );
       const n = count('RandomSample', k);
       // Unlike `RandomChoice`, `k` may not exceed the domain size.
       if (n > d.n)
         throw new Error(
-          `RandomSample: expected a count in 0..${d.n}, got ${n}`
+          `Could not compile \`RandomSample\`: expected a count in 0..${d.n}, got ${n}`
         );
       const swapped = new Map<number, number>();
       const at = (i: number): number => swapped.get(i) ?? i;
@@ -11526,7 +11575,7 @@ function makeRandomHelpers(ce: ComputeEngine): RandomSysHelpers {
     shuffle: (xs: unknown[]): unknown[] => {
       if (xs.length > cap)
         throw new Error(
-          `RandomShuffle: expected a collection of at most ${cap} elements`
+          `Could not compile \`RandomShuffle\`: expected a collection of at most ${cap} elements`
         );
       const l = xs.slice();
       for (let i = l.length - 1; i > 0; i--) {
@@ -13009,12 +13058,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         // the `_.Nothing` vars-object lookup reads `undefined` at run time and
         // silently degrades: an indefinite integral's missing bounds made
         // quadrature "converge" to 0, an unbounded `Sum` bound makes the trip
-        // count NaN so the loop returns its identity. Fail closed (D6) instead.
+        // count NaN so the loop returns its identity. Fail closed instead.
         // (A caller that genuinely pins a variable named `Nothing` in `vars` is
         // served by the lookup above, which runs first.)
         if (id === 'Nothing')
           throw new Error(
-            'Nothing: the erasure marker is not a value and cannot be compiled as a variable reference. Fail closed (D6).'
+            'Could not compile `Nothing`: the erasure marker is not a value, so it cannot be read as a variable.'
           );
         const result = JAVASCRIPT_CONSTANTS[id];
         if (result !== undefined) return result;
@@ -13373,7 +13422,7 @@ function compileToTarget(
     const dangling = target.varsObjectRefs;
     if (dangling && dangling.size > 0)
       throw new Error(
-        `Cannot compile a function literal whose body has unbound free ${
+        `Could not compile a function literal whose body has unbound free ${
           dangling.size === 1 ? 'symbol' : 'symbols'
         } ${[...dangling].map((s) => `"${s}"`).join(', ')}: a compiled lambda takes only its declared parameters, so there is no value to bind them to. Assign a value, or pass one via \`vars\`.`
       );
@@ -13536,11 +13585,9 @@ function extractLimits(limitsExpr: Expression): {
   // Decline here instead, with the clause named.
   if (limitsExpr.operator !== 'Limits')
     throw new Error(
-      `${limitsExpr.operator === 'Element' ? 'Element' : limitsExpr.operator}` +
-        ` indexing set: a Sum/Product over a COLLECTION is not lowered to ` +
+      `Could not compile the \`${limitsExpr.operator}\` indexing set: a Sum/Product over a COLLECTION is not lowered to ` +
         `JavaScript — this emitter builds a counted loop from a \`Limits\` ` +
-        `clause and has no bounds to read. Fail closed (D6) — the ` +
-        `interpreter evaluates it.`
+        `clause and has no bounds to read. The interpreter evaluates it instead.`
     );
   const fn = limitsExpr as Expression & {
     op1: Expression;
@@ -13577,7 +13624,7 @@ export function isNonFiniteBound(expr: Expression): boolean {
 }
 
 /**
- * Fail closed (D6) on a Sum/Product bound that is statically non-finite, so
+ * Fail closed on a Sum/Product bound that is statically non-finite, so
  * `compile()` reports failure and the caller falls back to the interpreter
  * (which evaluates a convergent series symbolically/numerically) instead of
  * running a loop that cannot terminate.
@@ -13597,9 +13644,8 @@ function assertFiniteBound(
   if (target.iterationBudget !== undefined) return;
   if (!isNonFiniteBound(expr)) return;
   throw new Error(
-    `${kind}: the ${which} bound \`${expr.toString()}\` is not a finite ` +
-      `number — an infinite or NaN bound has no terminating loop. ` +
-      `Fail closed (D6).`
+    `Could not compile \`${kind}\`: the ${which} bound \`${expr.toString()}\` is not a finite ` +
+      `number — an infinite or NaN bound has no terminating loop.`
   );
 }
 
@@ -13649,7 +13695,7 @@ function compileSumProduct(
   _compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  if (!args[0]) throw new Error(`${kind}: no body`);
+  if (!args[0]) throw new Error(`Could not compile \`${kind}\`: no body`);
   if (!args[1]) {
     // Collection form: `Sum(collection)` / `Product(collection)` with no
     // indexing set — this is what `.total` (→ `Sum`) and a bare list product
@@ -13661,13 +13707,13 @@ function compileSumProduct(
     // a 2-element list or `-1`, Tycho item 249) may be a scalar OR an array at
     // run time, so it reduces under an `Array.isArray` guard (a runtime scalar
     // returns itself, matching the interpreter's `Sum(scalar) = scalar`).
-    // A dictionary/string/statically-scalar operand fails closed (D6), matching
+    // A dictionary/string/statically-scalar operand fails closed, matching
     // `Length`/`At`/`Reduce`.
     if (isIndexedCollectionOperand(args[0]))
       return emitCollectionReduce(kind, args[0], target, false);
     if (isPossiblyCollectionTypedJS(args[0]))
       return emitCollectionReduce(kind, args[0], target, true);
-    throw new Error(`${kind}: no indexing set`);
+    throw new Error(`Could not compile \`${kind}\`: no indexing set`);
   }
   return emitSumProduct(kind, args[0], args.slice(1), target);
 }
@@ -13798,12 +13844,16 @@ function emitLazyStream(
   compile: (expr: Expression) => string
 ): string {
   if (!isFunction(expr))
-    throw new Error('emitLazyStream: not a lazily-compilable collection');
+    throw new Error(
+      'Could not compile the collection: it is not lazily compilable'
+    );
   const op = expr.operator;
   if (op === 'Range') {
     const step = infiniteRangeStep(expr);
     if (step === undefined)
-      throw new Error('Range: not a lazily-compilable infinite range');
+      throw new Error(
+        'Could not compile `Range`: not a lazily-compilable infinite range'
+      );
     return `_SYS.rangeIter(${compile(expr.ops[0])}, ${step})`;
   }
   // `Map` is callback-FIRST (`Map(f, xs)`); every other stream operator
@@ -13819,7 +13869,9 @@ function emitLazyStream(
     return `_SYS.dropIter(${emitLazyStream(source, compile)}, ${compile(expr.ops[1])})`;
   if (op === 'Rest')
     return `_SYS.dropIter(${emitLazyStream(source, compile)}, 1)`;
-  throw new Error(`${op}: not a lazily-compilable infinite collection`);
+  throw new Error(
+    `Could not compile \`${op}\`: not a lazily-compilable infinite collection`
+  );
 }
 
 /**
@@ -13850,7 +13902,7 @@ function linearAlgebraHelper(
 }
 
 /**
- * Compile a collection operand, failing closed (D6) if it is not an indexed
+ * Compile a collection operand, failing closed if it is not an indexed
  * collection (list/vector/range) — shared by the list-shaped collection
  * operators. `position` labels the operand in the error (e.g. for `Join`).
  */
@@ -13862,8 +13914,8 @@ function collArg(
 ): string {
   if (!arg || !isIndexedCollectionOperand(arg))
     throw new Error(
-      `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
-        `is not an indexed collection (list/vector/range). Fail closed (D6).`
+      `Could not compile \`${kind}\`: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
+        `is not an indexed collection (list/vector/range).`
     );
   // A union with a text arm (`string | list<number>`) passes the test above —
   // a string IS an indexed collection in the type lattice — but may be a JS
@@ -13873,10 +13925,10 @@ function collArg(
   // array lowering unsegmented. Refused here (D6). See `couldBeStringOperand`.
   if (couldBeStringOperand(arg))
     throw new Error(
-      `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
+      `Could not compile \`${kind}\`: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
         `may be text at run time (its type has a string arm), which the ` +
         `compiled list lowering would walk as UTF-16 code units rather than ` +
-        `characters. Fail closed (D6) — the interpreter evaluates it.`
+        `characters. The interpreter evaluates it instead.`
     );
   // An infinite pipeline cannot materialize to an array; only `Take`/
   // `TakeWhile` bound one (they lower it via `emitLazyStream` before ever
@@ -13885,9 +13937,9 @@ function collArg(
   // `Array.from({length: Infinity})` and throwing a RangeError at run time.
   if (isLazyStream(arg))
     throw new Error(
-      `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
+      `Could not compile \`${kind}\`: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
         `is an infinite collection — bound it with \`Take\` or \`TakeWhile\` ` +
-        `to compile. Fail closed (D6).`
+        `to compile.`
     );
   return compile(arg);
 }
@@ -13940,7 +13992,7 @@ const NAN_LAST_COMPARATOR =
   '(_a, _b) => _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0)';
 
 /**
- * Fail closed (D6) when the elements of a `Sort`/`Ordering` source are not
+ * Fail closed when the elements of a `Sort`/`Ordering` source are not
  * provably numbers.
  *
  * The compiled comparator orders numbers only. The interpreter leaves a sort
@@ -13966,16 +14018,16 @@ function assertNumericSortElements(kind: string, arg: Expression): void {
         arg.ops.some((x) => BaseCompiler.isComplexValued(x))))
   )
     throw new Error(
-      `${kind}: an element is a complex value, which has no order; the ` +
-        `interpreter leaves the sort unevaluated. Fail closed (D6).`
+      `Could not compile \`${kind}\`: an element is a complex value, which has no order; the ` +
+        `interpreter leaves the sort unevaluated.`
     );
   if (elt !== undefined && (elt === 'never' || isSubtype(elt, 'number')))
     return;
   throw new Error(
-    `${kind}: the elements (type \`${elt === undefined ? 'unknown' : typeToString(elt)}\`) ` +
+    `Could not compile \`${kind}\`: the elements (type \`${elt === undefined ? 'unknown' : typeToString(elt)}\`) ` +
       `are not provably numbers; the compiled sort orders numbers only, ` +
       `and the interpreter leaves a sort of booleans, tuples or symbols ` +
-      `unevaluated. Fail closed (D6).`
+      `unevaluated.`
   );
 }
 
@@ -14003,7 +14055,7 @@ function joinIfString(source: Expression | undefined, code: string): string {
 }
 
 /**
- * Compile a STRING operand of a string-specific operator, failing closed (D6)
+ * Compile a STRING operand of a string-specific operator, failing closed
  * when it is not provably a `string`.
  *
  * `character` is deliberately NOT admitted even though it lowers to a
@@ -14050,14 +14102,13 @@ function literalPatternArg(
   const re = arg !== undefined && isFunction(arg, 'RegExp') ? arg : undefined;
   if (re === undefined || !isString(re.op1))
     throw new Error(
-      `${operator}: cannot compile — the pattern must be a literal ` +
-        `\`RegExp("...")\`. Fail closed (D6).`
+      `Could not compile \`${operator}\`: the pattern must be a literal ` +
+        `\`RegExp("...")\`.`
     );
   const flagText = re.nops >= 2 && isString(re.op2) ? re.op2.string : '';
   if (re.nops >= 2 && !isString(re.op2))
     throw new Error(
-      `${operator}: cannot compile — the flags must be a literal string. ` +
-        `Fail closed (D6).`
+      `Could not compile \`${operator}\`: the flags must be a literal string.`
     );
   const withUnicode =
     flagText.includes('u') || flagText.includes('v')
@@ -14077,9 +14128,8 @@ function stringArg(
 ): string {
   if (arg === undefined || !isProvablyStringOperand(arg))
     throw new Error(
-      `${kind}: cannot compile — ${position} is not provably a string ` +
-        `(type \`${arg === undefined ? 'missing' : arg.type.toString()}\`). ` +
-        `Fail closed (D6) — the interpreter evaluates it.`
+      `Could not compile \`${kind}\`: ${position} is not provably a string ` +
+        `(type \`${arg === undefined ? 'missing' : arg.type.toString()}\`). The interpreter evaluates it instead.`
     );
   return compile(arg);
 }
@@ -14153,9 +14203,9 @@ function guardedIntegerArg(
   if (n !== undefined && n >= min && n <= max) return `${n}`;
   if (isNumber(arg))
     throw new Error(
-      `${kind}: cannot compile — ${rule}, and this operand is the literal ` +
+      `Could not compile \`${kind}\`: ${rule}, and this operand is the literal ` +
         `\`${arg.toString()}\`, which the interpreter answers with an error ` +
-        `value. Fail closed (D6).`
+        `value.`
     );
   // A computed operand can still be PROVABLY below the bound — `Negate(k)` for
   // a `k` known positive — and a known-bad call should not compile. Only the
@@ -14166,9 +14216,9 @@ function guardedIntegerArg(
     min >= 1 ? arg.isPositive === false : arg.isNonNegative === false;
   if (provablyBelow)
     throw new Error(
-      `${kind}: cannot compile — ${rule}, and this operand is provably ` +
+      `Could not compile \`${kind}\`: ${rule}, and this operand is provably ` +
         `outside that domain, which the interpreter answers with an error ` +
-        `value. Fail closed (D6).`
+        `value.`
     );
   return `_SYS.domi(${compile(arg)}, ${min}, ${max}, ${JSON.stringify(
     `${kind}: ${rule}`
@@ -14198,9 +14248,8 @@ function guardedNonEmptyStringArg(
   if (literal !== undefined && literal !== '') return js;
   if (literal === '')
     throw new Error(
-      `${kind}: cannot compile — ${rule}, and this operand is the empty ` +
-        `string literal, which the interpreter answers with an error value. ` +
-        `Fail closed (D6).`
+      `Could not compile \`${kind}\`: ${rule}, and this operand is the empty ` +
+        `string literal, which the interpreter answers with an error value.`
     );
   // Not spelled as a literal, but still provably empty — a symbol assigned
   // `""`, say. Same rule as `RangeOf`'s needle: a known-bad call should not
@@ -14208,9 +14257,8 @@ function guardedNonEmptyStringArg(
   // the guard below.
   if (arg.isEmptyCollection === true)
     throw new Error(
-      `${kind}: cannot compile — ${rule}, and this operand is provably ` +
-        `empty, which the interpreter answers with an error value. ` +
-        `Fail closed (D6).`
+      `Could not compile \`${kind}\`: ${rule}, and this operand is provably ` +
+        `empty, which the interpreter answers with an error value.`
     );
   return `_SYS.doms(${js}, ${JSON.stringify(`${kind}: ${rule}`)})`;
 }
@@ -14235,8 +14283,7 @@ function compileJSTrim(
 ): string {
   if (args.length < 1 || args.length > 2)
     throw new Error(
-      `${kind}: cannot compile — expected \`${kind}(s, chars?)\`. ` +
-        `Fail closed (D6).`
+      `Could not compile \`${kind}\`: expected \`${kind}(s, chars?)\`.`
     );
   const subject = stringArg(kind, args[0], compile, 'the subject');
   let chars = 'undefined';
@@ -14253,10 +14300,10 @@ function compileJSTrim(
           !isSubtype(elt, 'character'))
       )
         throw new Error(
-          `${kind}: cannot compile — \`chars\` must be a string or an indexed ` +
+          `Could not compile \`${kind}\`: \`chars\` must be a string or an indexed ` +
             `collection whose elements are provably strings or characters; ` +
             `the interpreter leaves the expression unevaluated on anything ` +
-            `else. Fail closed (D6) — the interpreter evaluates it.`
+            `else. The interpreter evaluates it instead.`
         );
       // Through `collArg`, not `compile`: it refuses an operand whose type
       // merely ADMITS text (it would arrive as a JS string, not an array) and
@@ -14286,8 +14333,7 @@ function compileJSPad(
 ): string {
   if (args.length < 2 || args.length > 3)
     throw new Error(
-      `${kind}: cannot compile — expected \`${kind}(s, n, pad?)\`. ` +
-        `Fail closed (D6).`
+      `Could not compile \`${kind}\`: expected \`${kind}(s, n, pad?)\`.`
     );
   const subject = stringArg(kind, args[0], compile, 'the subject');
   const width = guardedIntegerArg(
@@ -14458,7 +14504,7 @@ function firstCallBoundLambda(
 
 /**
  * Compile an ELEMENT-consuming callback operand (a predicate, a mapping
- * function), failing closed (D6) when a parameter annotation the emitted
+ * function), failing closed when a parameter annotation the emitted
  * lowering cannot enforce is not provably satisfied by `source`'s element type
  * — see `BaseCompiler.assertCallbackAnnotations`. `extraArgTypes` prefixes the
  * element position for a combiner-shaped callback (`Reduce`/`Scan`, whose
@@ -14532,10 +14578,9 @@ function zipFnArg(
     sources.length !== 2
   )
     throw new Error(
-      `${kind}: the operator symbol '${callback.symbol}' used as the ` +
+      `Could not compile \`${kind}\`: the operator symbol '${callback.symbol}' used as the ` +
         `mapping compiles to a two-argument function, and ${sources.length} ` +
-        `collections supply ${sources.length} arguments per call. Fail ` +
-        `closed (D6) — the interpreter evaluates it.`
+        `collections supply ${sources.length} arguments per call. The interpreter evaluates it instead.`
     );
   BaseCompiler.assertCallbackAnnotations(
     kind,
@@ -14563,17 +14608,19 @@ function zipFnArg(
 function assertDrawableInterval(op: string, lo: number, hi: number): void {
   if (!Number.isFinite(lo) || !Number.isFinite(hi))
     throw new Error(
-      `${op}: an unbounded Interval has no uniform draw. Fail closed (D6).`
+      `Could not compile \`${op}\`: an unbounded Interval has no uniform draw.`
     );
   if (!(hi > lo))
-    throw new Error(`${op}: an empty Interval has no draw. Fail closed (D6).`);
+    throw new Error(
+      `Could not compile \`${op}\`: an empty Interval has no draw.`
+    );
 }
 
 /** As `assertDrawableInterval`, for a `Range`'s normalized element count. */
 function assertDrawableRange(op: string, n: number): void {
   if (!Number.isFinite(n) || n <= 0)
     throw new Error(
-      `${op}: expected a finite, non-empty Range. Fail closed (D6).`
+      `Could not compile \`${op}\`: expected a finite, non-empty Range.`
     );
 }
 
@@ -14630,16 +14677,18 @@ function randomDomain(
   continuousOk: boolean
 ): string {
   if (domain === undefined)
-    throw new Error(`${op}: expected a domain operand. Fail closed (D6).`);
+    throw new Error(`Could not compile \`${op}\`: expected a domain operand.`);
   const name = JSON.stringify(op);
 
   if (isFunction(domain, 'Interval')) {
     if (!continuousOk)
       throw new Error(
-        `${op}: an Interval is not an indexed collection. Fail closed (D6).`
+        `Could not compile \`${op}\`: an Interval is not an indexed collection.`
       );
     if (domain.nops !== 2)
-      throw new Error(`${op}: expected Interval(lo, hi). Fail closed (D6).`);
+      throw new Error(
+        `Could not compile \`${op}\`: expected Interval(lo, hi).`
+      );
     const lo = compile(intervalEndpoint(domain.op1));
     const hi = compile(intervalEndpoint(domain.op2));
     return `_SYS.domainInterval(${name}, ${lo}, ${hi})`;
@@ -14648,7 +14697,7 @@ function randomDomain(
   if (isFunction(domain, 'Range')) {
     const ops = domain.ops;
     if (ops.length === 0 || ops.length > 3)
-      throw new Error(`${op}: expected Range(…). Fail closed (D6).`);
+      throw new Error(`Could not compile \`${op}\`: expected Range(…).`);
     if (ops.length === 1)
       return `_SYS.domainRange(${name}, 1, ${compile(ops[0])}, 1)`;
     const bounds = `${compile(ops[0])}, ${compile(ops[1])}`;
@@ -14696,13 +14745,13 @@ function builtinCombiner(
     case 'Min':
       if (complexLane)
         throw new Error(
-          `Min: a fold over complex values has no ordering. Fail closed (D6).`
+          `Could not compile \`Min\`: a fold over complex values has no ordering.`
         );
       return '(_a, _b) => Math.min(_a, _b)';
     case 'Max':
       if (complexLane)
         throw new Error(
-          `Max: a fold over complex values has no ordering. Fail closed (D6).`
+          `Could not compile \`Max\`: a fold over complex values has no ordering.`
         );
       return '(_a, _b) => Math.max(_a, _b)';
   }
@@ -14795,7 +14844,7 @@ function customCombinerWithLanes(
 }
 
 /**
- * Fail closed (D6) unless the collection's elements compile to JS primitives
+ * Fail closed unless the collection's elements compile to JS primitives
  * with value equality. `includes`/`Set` use SameValueZero, which is reference
  * identity for compound elements (nested lists compile to arrays, tuples and
  * complex numbers to objects), diverging from the interpreter's structural
@@ -14823,9 +14872,9 @@ export function requirePrimitiveElements(kind: string, arg: Expression): void {
       isSubtype(elt, 'character'));
   if (primitive && !BaseCompiler.isComplexValued(arg)) return;
   throw new Error(
-    `${kind}: cannot compile — the interpreter compares elements ` +
+    `Could not compile \`${kind}\`: the interpreter compares elements ` +
       `structurally, but only real/boolean/string elements compare by ` +
-      `value on the JavaScript target. Fail closed (D6).`
+      `value on the JavaScript target.`
   );
 }
 
@@ -14928,7 +14977,7 @@ function compileExtremum(
  *     interpreter for a singleton (`LCM([2.5]) = 2.5`, not `lcm(1, 2.5)`); the
  *     empty case falls back to the identity (`GCD([]) = 0`, `LCM([]) = 1`).
  *   - an operand that is a collection but NOT an indexed collection
- *     (dictionary / string / set) has no array lowering, so fail closed (D6)
+ *     (dictionary / string / set) has no array lowering, so fail closed
  *     rather than emit code that silently NaNs (finding A3).
  */
 /**
@@ -15013,8 +15062,8 @@ function compileGcdLcm(
     if (isIndexedCollectionOperand(a)) return `...(${compile(a)})`;
     if (a.isCollection || a.type.matches('collection<any>'))
       throw new Error(
-        `${kind}: cannot compile — operand is a collection but not an indexed ` +
-          `collection (list/vector/range). Fail closed (D6).`
+        `Could not compile \`${kind}\`: operand is a collection but not an indexed ` +
+          `collection (list/vector/range).`
       );
     return compile(a);
   });
@@ -16202,13 +16251,13 @@ function compileIntegrate(
   // quadrature emitter below would compile the `Nothing` bounds like any other
   // free symbol, to a `vars`-object lookup (`_.Nothing`), and at run time
   // `adaptiveQuadrature(f, undefined, undefined)` reports "converged" and
-  // yields `0` for every input — a silent wrong value. Fail closed (D6) so the
+  // yields `0` for every input — a silent wrong value. Fail closed so the
   // caller falls back to the interpreter, which keeps the integral symbolic.
   const isUnbounded = (e: Expression | undefined) =>
     e === undefined || isSymbol(e, 'Nothing');
   if (limits.some((l) => isUnbounded(l.lowerExpr) || isUnbounded(l.upperExpr)))
     throw new Error(
-      'Integrate: an indefinite integral with no closed-form antiderivative is a function, not a number — it has no value to compute at a point, and quadrature needs bounds. Fail closed (D6). Provide bounds for a definite integral, or evaluate symbolically instead.'
+      'Could not compile `Integrate`: an indefinite integral with no closed-form antiderivative is a function, not a number — it has no value to compute at a point, and quadrature needs bounds. Provide bounds for a definite integral, or evaluate symbolically instead.'
     );
 
   // The integrand as a body in the limits' index variables: a `Function`

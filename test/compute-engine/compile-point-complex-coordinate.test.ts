@@ -11,7 +11,7 @@
  * answered `NaN` where the interpreter answers 1.024.
  *
  * The call is inlined when the substitution admits it, which reads each
- * coordinate at its own lane; otherwise it fails closed (D6).
+ * coordinate at its own lane; otherwise it fails closed.
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
 
@@ -100,7 +100,7 @@ describe('a point argument with a complex-shaped coordinate', () => {
       12
     );
     expect(() => compile(call, { fallback: false })).toThrow(
-      /Cannot compile a call of `\w+`: argument \d is a point with a complex-valued coordinate/
+      /Could not compile a call of `\w+`: argument \d is a point with a complex-valued coordinate/
     );
   });
 

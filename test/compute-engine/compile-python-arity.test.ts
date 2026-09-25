@@ -85,8 +85,8 @@ describe('PYTHON ARITY — Gamma(s, z) is the upper incomplete gamma', () => {
   });
 
   it('a statically non-positive `s` fails closed (scipy gammaincc needs s > 0)', () => {
-    expect(() => src(['Gamma', -1, 2])).toThrow(/Fail closed/);
-    expect(() => src(['Gamma', 0, 2])).toThrow(/Fail closed/);
+    expect(() => src(['Gamma', -1, 2])).toThrow(/Could not compile/);
+    expect(() => src(['Gamma', 0, 2])).toThrow(/Could not compile/);
   });
 });
 
@@ -173,7 +173,7 @@ describe('PYTHON ARITY — Norm / Covariance operand guards', () => {
     );
     expect(() =>
       src(['Norm', ['List', 3, 4], { str: 'bogus' }])
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Could not compile/);
   });
 
   // `Norm(m, 2)` is the SPECTRAL norm (the largest singular value) in the
@@ -372,8 +372,8 @@ describe('PYTHON ARITY — a run-time Norm order the interpreter does not comput
   const M = ['List', ['List', 3, 4], ['List', 5, 12]];
 
   it('a non-positive literal order fails closed', () => {
-    expect(() => src(['Norm', V, 0])).toThrow(/positive order.*Fail closed/s);
-    expect(() => src(['Norm', V, -1])).toThrow(/Fail closed/);
+    expect(() => src(['Norm', V, 0])).toThrow(/positive order/s);
+    expect(() => src(['Norm', V, -1])).toThrow(/Could not compile/);
     // A `-∞` order is already an invalid expression, which does not compile.
     expect(() => src(['Norm', V, 'NegativeInfinity'])).toThrow();
   });
@@ -534,10 +534,8 @@ describe('PYTHON ARITY — a Norm order over an operand of unknown rank', () => 
   });
 
   it('a non-positive literal order still fails closed', () => {
-    expect(() => src(['Norm', 'normOpaqueX', 0])).toThrow(
-      /positive order.*Fail closed/s
-    );
-    expect(() => src(['Norm', 'normOpaqueX', -1])).toThrow(/Fail closed/);
+    expect(() => src(['Norm', 'normOpaqueX', 0])).toThrow(/positive order/s);
+    expect(() => src(['Norm', 'normOpaqueX', -1])).toThrow(/Could not compile/);
   });
 
   it('a scalar operand is its absolute value', () => {
@@ -594,7 +592,7 @@ describe('PYTHON ARITY — a Norm order over an operand of unknown rank', () => 
     // The outer dimension-less list adds one axis to a list element type
     // that carries `dimensions`.
     expect(() => src(['Norm', 'normListVecX', 3])).toThrow(
-      /matrix norms only for orders.*Fail closed/s
+      /matrix norms only for orders/s
     );
     expect(src(['Norm', 'normListMatX', 2])).toBe('np.linalg.norm(normListMatX)');
   });

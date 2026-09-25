@@ -316,14 +316,14 @@ describe('compile fail-closed (plan §3.3)', () => {
   test.each(THROWING_TARGETS)('%s rejects a type value', (name) => {
     const target = (ce as any)._getCompilationTarget(name);
     const value = ce.box(['TypeFrom', { str: 'integer' }]).evaluate();
-    expect(() => target.compile(value)).toThrow(/cannot compile/i);
+    expect(() => target.compile(value)).toThrow(/could not compile/i);
   });
 
   test.each(THROWING_TARGETS)('%s rejects a non-constant Subtype', (name) => {
     const eng = new ComputeEngine();
     const target = (eng as any)._getCompilationTarget(name);
     expect(() => target.compile(nonConstantSubtype(eng))).toThrow(
-      /cannot compile/i
+      /could not compile/i
     );
   });
 
@@ -332,12 +332,12 @@ describe('compile fail-closed (plan §3.3)', () => {
     const value = ce.box(['TypeFrom', { str: 'integer' }]).evaluate();
     const r1 = target.compile(value);
     expect(r1.success).toBe(false);
-    expect(String(r1.error)).toMatch(/cannot compile/i);
+    expect(String(r1.error)).toMatch(/could not compile/i);
     const eng = new ComputeEngine();
     const t2 = (eng as any)._getCompilationTarget('interval-js');
     const r2 = t2.compile(nonConstantSubtype(eng));
     expect(r2.success).toBe(false);
-    expect(String(r2.error)).toMatch(/cannot compile/i);
+    expect(String(r2.error)).toMatch(/could not compile/i);
   });
 
   test('constant folding may legally fold a CONSTANT Subtype call', () => {
@@ -564,7 +564,7 @@ describe('compile fail-closed: the phase-2 operators', () => {
     for (const name of ['glsl', 'wgsl', 'python'])
       expect(() =>
         (eng as any)._getCompilationTarget(name).compile(mt)
-      ).toThrow(/cannot compile/i);
+      ).toThrow(/could not compile/i);
     const js = (eng as any)._getCompilationTarget('javascript').compile(mt);
     expect(js.success).toBe(true);
     expect(js.code).toContain('Number.isInteger(');
@@ -573,7 +573,7 @@ describe('compile fail-closed: the phase-2 operators', () => {
     const untestable = eng.box(['MatchesType', 'gx', { str: 'list<integer>' }]);
     expect(() =>
       (eng as any)._getCompilationTarget('javascript').compile(untestable)
-    ).toThrow(/cannot compile/i);
+    ).toThrow(/could not compile/i);
     // ...and the same for `Conforms`: a SYMBOL subject is not a ground
     // operand (the gate exempts only calls whose operands are all literal
     // type text or settled type values), so the call must fail closed too.
@@ -582,7 +582,7 @@ describe('compile fail-closed: the phase-2 operators', () => {
     for (const name of ['javascript', 'glsl', 'wgsl', 'python'])
       expect(() =>
         (eng as any)._getCompilationTarget(name).compile(cf)
-      ).toThrow(/cannot compile/i);
+      ).toThrow(/could not compile/i);
     const rc = (eng as any)._getCompilationTarget('interval-js').compile(cf);
     expect(rc.success).toBe(false);
   });
@@ -658,14 +658,14 @@ describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
     // value has no compiled representation on any target.
     const target = (ce as any)._getCompilationTarget('javascript');
     expect(() => target.compile(ce.box(['Type', 3]))).toThrow(
-      /cannot compile/i
+      /could not compile/i
     );
     // `StringFrom` itself has no JS lowering (pre-existing — nothing to do
     // with type values), so the through-the-value spelling also fails
     // closed, with the ordinary no-entry rejection rather than the gate's.
     expect(() =>
       target.compile(ce.box(['StringFrom', ['Type', 3]]))
-    ).toThrow(/cannot compile/i);
+    ).toThrow(/could not compile/i);
   });
 });
 

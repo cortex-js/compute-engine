@@ -182,7 +182,7 @@ describe('broadcastable<T> — JavaScript compile target', () => {
         ce.declare('bc', 'broadcastable<complex>');
         return ce.box(['Add', ['Multiply', 2, 'bc'], 1]);
       })
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Could not compile/);
   });
 
   test('Equal over a broadcastable operand lowers to _SYS.eq (Tycho item 41)', () => {

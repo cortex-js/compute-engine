@@ -468,3 +468,36 @@ describe('the reference analysis probes a caller compile handler without compili
     expect(g.unsupported).toEqual(['D']);
   });
 });
+
+// A `Declare` defines a local: only its initial value is read by the code.
+// The value can be positional or in the trailing attributes dictionary (the
+// form `let y = x + 1` parses to), and the type operand is not a symbol.
+describe('COMPILE reference analysis of a declaration', () => {
+  it('lists the free symbols of an initial value in the attributes dictionary', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Block',
+      [
+        'Declare',
+        'y',
+        ['Dictionary', ['KeyValuePair', { str: 'value' }, ['Add', 'x', 1]]],
+      ],
+      ['Multiply', 'y', 2],
+    ]);
+    const r = compile(expr, { to: 'javascript' });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_.x');
+    expect(r.freeSymbols).toEqual(['x']);
+  });
+
+  it('does not list the declared type as a free symbol', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'w', 'number'],
+      ['Assign', 'w', ['Add', 'u', 1]],
+      ['Multiply', 'w', 2],
+    ]);
+    expect(compile(expr, { to: 'glsl' }).freeSymbols).toEqual(['u']);
+  });
+});

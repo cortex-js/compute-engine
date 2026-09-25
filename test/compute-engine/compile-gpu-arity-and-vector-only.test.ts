@@ -13,7 +13,7 @@
  *
  *     `Round(x, n)` now lowers correctly for a compile-time integer precision
  *     (`Round(x·10ⁿ)/10ⁿ`, which is what the interpreter, the JavaScript
- *     target and the interval target all compute) and fails closed (D6) for a
+ *     target and the interval target all compute) and fails closed for a
  *     runtime one. `Gamma(s, z)` is a different function from `Γ(z)`, with no
  *     shader builtin and no preamble helper, so it fails closed.
  *
@@ -124,19 +124,19 @@ describe('GPU ARITY — `Round(x, n)` rounds to `n` decimal places', () => {
     expect(g(['Round', ['Multiply', 2, 'k'], -2], cen)).toContain('* 0.01');
   });
 
-  it('a RUNTIME precision fails closed (D6)', () => {
+  it('a RUNTIME precision fails closed', () => {
     // A shader `pow(10.0, n)` is `exp2(n·log2(10.0))`, not exactly a power of
     // ten, so it moves the tie boundary of the rounding it is scaling for.
     for (const emit of [g, w])
       expect(() => emit(['Round', 'x', 'n'], cen)).toThrow(
-        /^Round: rounding to `n` decimal places compiles on the \w+ target only for a compile-time INTEGER precision .* Fail closed \(D6\)\.$/s
+        /^Could not compile `Round`: rounding to `n` decimal places compiles on the \w+ target only for a compile-time INTEGER precision .*$/s
       );
   });
 
-  it('a factor outside the shader float range fails closed (D6)', () => {
+  it('a factor outside the shader float range fails closed', () => {
     for (const emit of [g, w]) {
       expect(() => emit(['Round', 3.14, 40])).toThrow(
-        /^Round: the rounding factor 10\^40 is outside the shader float range\. Fail closed \(D6\)\.$/
+        /^Could not compile `Round`: the rounding factor 10\^40 is outside the shader float range\.$/
       );
       expect(() => emit(['Round', 3.14, -40])).toThrow(
         /rounding factor 10\^-40 is outside/
@@ -158,13 +158,13 @@ describe('GPU ARITY — `Round(x, n)` rounds to `n` decimal places', () => {
 });
 
 describe('GPU ARITY — `Gamma(s, z)` is the upper INCOMPLETE gamma', () => {
-  it('the two-operand form fails closed (D6)', () => {
+  it('the two-operand form fails closed', () => {
     // Γ(5, 2) = 22.736…, Γ(5) = 24 — a different function, not a variant.
     expect(ce.box(['Gamma', 5, 2]).N().re).toBeCloseTo(22.73632758375093, 9);
     expect(ce.box(['Gamma', 5]).N().re).toBe(24);
     for (const emit of [g, w])
       expect(() => emit(['Gamma', 5, 2])).toThrow(
-        /^Gamma: the two-operand form is the upper incomplete gamma .* Fail closed \(D6\)\.$/s
+        /^Could not compile `Gamma`: the two-operand form is the upper incomplete gamma .*$/s
       );
   });
 
@@ -187,7 +187,7 @@ describe('GPU SHAPE GATE — WGSL builtins with no ALL-SCALAR overload', () => {
     // e2: vecN<T>, e3: T)` — no all-scalar form at all.
     expect(g(['Refract', 1, 2, 0.5])).toBe('refract(1.0, 2.0, 0.5)');
     expect(() => w(['Refract', 1, 2, 0.5])).toThrow(
-      /^Refract: the shader builtin `refract` is declared over the `vecN` genType in arguments 1 and 2 in this language — it has no scalar overload there — but argument 1 lowers to a scalar.* Fail closed \(D6\)\.$/s
+      /^Could not compile `Refract`: the shader builtin `refract` is declared over the `vecN` genType in arguments 1 and 2 in this language — it has no scalar overload there — but argument 1 lowers to a scalar.*$/s
     );
   });
 

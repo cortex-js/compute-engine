@@ -72,7 +72,7 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
     // e2: vecN<T>, e3: T)`. An all-vector call has no overload at all.
     for (const emit of [g, w])
       expect(() => emit(['Refract', V3, W3, U3])).toThrow(
-        /^Refract: the shader builtin `refract` requires a SCALAR in argument 3 .* Fail closed \(D6\)\.$/s
+        /^Could not compile `Refract`: the shader builtin `refract` requires a SCALAR in argument 3 .*$/s
       );
   });
 
@@ -143,7 +143,7 @@ describe('GPU SHAPE GATE — the variadic fold over declared vectors (finding 2)
     // `vecN` constructor in its source, so only the CE operand shapes can
     // decide: the fold carries them in.
     expect(() => g(['ElementMax', 2, 'v', 'w'], cev)).toThrow(
-      /^ElementMax: the shader builtin `max` takes a scalar only in argument 2, but the emitted call `max\(2\.0, v\)` has a scalar in argument 1.* Fail closed \(D6\)\.$/s
+      /^Could not compile `ElementMax`: the shader builtin `max` takes a scalar only in argument 2, but the emitted call `max\(2\.0, v\)` has a scalar in argument 1.*$/s
     );
     expect(() => g(['ElementMin', 2, 'v', 'w'], cev)).toThrow(
       /the emitted call `min\(2\.0, v\)` has a scalar in argument 1/
@@ -207,7 +207,7 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // gate used to step aside for it.
     for (const emit of [g, w])
       expect(() => emit(['Mod', 'P', 'Q'], cev)).toThrow(
-        /^Mod: its operands lower to shader vectors of different widths \(vec3, vec2\).* Fail closed \(D6\)\.$/s
+        /^Could not compile `Mod`: its operands lower to shader vectors of different widths \(vec3, vec2\).*$/s
       );
   });
 
@@ -218,7 +218,7 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // whose own shape gate declines with the builtin's diagnostic.)
     for (const emit of [g, w]) {
       expect(() => emit(['Cot', M2])).toThrow(
-        /^Cot: the compound shader lowering .* have no `matN` reading.* Fail closed \(D6\)\.$/s
+        /^Could not compile `Cot`: the compound shader lowering .* have no `matN` reading.*$/s
       );
       expect(() => emit(['Log', ['List', 1, 2, 3, 4, 5], 3])).toThrow(
         /the compound shader lowering .* have no array reading/
@@ -297,7 +297,10 @@ describe('GPU SHAPE GATE — the Max/Min reduction is DECLARED, not inferred', (
     ['Min of a Range', ['Min', ['Range', 1, 5]]],
     ['Max of a list and a scalar', ['Max', V3, 5]],
     ['Max of a list and a smaller scalar', ['Max', V3, 0]],
-    ['Max of a 5-element list (an ARRAY shape)', ['Max', ['List', 1, 2, 3, 4, 5]]],
+    [
+      'Max of a 5-element list (an ARRAY shape)',
+      ['Max', ['List', 1, 2, 3, 4, 5]],
+    ],
     ['Min of two lists', ['Min', ['List', 8, 2, 5], ['List', 9, 1]]],
     ['Max of negatives', ['Max', ['List', -7, -2], -9]],
     ['Max of a 4-element list', ['Max', V4]],
@@ -337,7 +340,9 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     expect(g(['Dot', V3, W3])).toBe(
       'dot(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
-    expect(g(['Add', V3, W3])).toBe('vec3(1.0, 2.0, 3.0) + vec3(4.0, 5.0, 6.0)');
+    expect(g(['Add', V3, W3])).toBe(
+      'vec3(1.0, 2.0, 3.0) + vec3(4.0, 5.0, 6.0)'
+    );
     expect(g(['Multiply', V3, 2])).toBe('2.0 * vec3(1.0, 2.0, 3.0)');
     expect(g(['Sin', V4])).toBe('sin(vec4(1.0, 2.0, 3.0, 4.0))');
     expect(g(['Negate', V4])).toBe('(-(vec4(1.0, 2.0, 3.0, 4.0)))');
@@ -425,7 +430,7 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
       const e = withL(type);
       for (const emit of [g, w])
         expect(() => emit(['Sin', 'L'], e)).toThrow(
-          /^Sin: the shader builtin `sin` .* the operand shapes \(array\) have no lowering\. Fail closed \(D6\)\.$/s
+          /^Could not compile `Sin`: the shader builtin `sin` .* the operand shapes \(array\) have no lowering\.$/s
         );
     }
   });

@@ -245,7 +245,7 @@ describe('IdenticallyEqual — compilation fails closed', () => {
     e.declare('x', 'number');
     const js = new JavaScriptTarget();
     expect(() => js.compile(e.box(['IdenticallyEqual', 'x', 1]))).toThrow(
-      /IdenticallyEqual.*no lowering.*Fail closed/s
+      /IdenticallyEqual.*no lowering/s
     );
   });
 });

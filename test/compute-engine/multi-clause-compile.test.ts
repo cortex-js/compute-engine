@@ -358,7 +358,9 @@ describe('MULTI-CLAUSE COMPILE — whole-function decline (spec §8)', () => {
     clause('f', ['Function', 1, p('a', '0')]);
     clause('f', ['Function', 2, p('x', 'integer')]);
     const glsl = new GLSLTarget();
-    expect(() => glsl.compile(ce.box(['f', 'u']))).toThrow(/fail closed/i);
+    expect(() => glsl.compile(ce.box(['f', 'u']))).toThrow(
+      /could not compile/i
+    );
   });
 
   // Compiled JavaScript has no distinct value for complex infinity: it lowers

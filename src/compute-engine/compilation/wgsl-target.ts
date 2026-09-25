@@ -57,7 +57,8 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
   Inversesqrt: 'inverseSqrt',
 
   Mod: ([a, b], compile, target) => {
-    if (a === null || b === null) throw new Error('Mod: missing argument');
+    if (a === null || b === null)
+      throw new Error('Could not compile `Mod`: missing argument');
     // A divisor of exactly one is the fractional part: WGSL defines `fract(x)`
     // as `x - floor(x)`, which is the floored convention the interpreter's
     // `Mod` uses, so the two agree for a negative dividend as well
@@ -92,9 +93,9 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
         gpuOperandShape(b) !== 'scalar'
       )
         throw new Error(
-          'Mod: an impure (Random) operand cannot be bound to a ' +
+          'Could not compile `Mod`: an impure (Random) operand cannot be bound to a ' +
             'temporary at this position — a repeated draw would shift every ' +
-            'later value in the shader. Fail closed (D6).'
+            'later value in the shader.'
         );
       const ta = BaseCompiler.tempVar(target);
       const tb = BaseCompiler.tempVar(target);
@@ -112,7 +113,8 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Override Hypot to use vec2f instead of vec2
   Hypot: ([x, y], compile) => {
-    if (x === null || y === null) throw new Error('Hypot: need two arguments');
+    if (x === null || y === null)
+      throw new Error('Could not compile `Hypot`: need two arguments');
     return `length(vec2f(${compile(x)}, ${compile(y)}))`;
   },
 

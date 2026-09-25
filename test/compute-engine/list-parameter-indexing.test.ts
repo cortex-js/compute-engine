@@ -24,7 +24,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  *
  * (c) **Compile.** The JS `At` handler gated on "provably an indexed
  *     collection", which an indexed parameter (typed `indexed_collection |
- *     dictionary`) never satisfies, so every such function failed closed (D6) at
+ *     dictionary`) never satisfies, so every such function failed closed at
  *     the call site AND by reference. Fixed by `couldBeIndexedCollectionOperand`
  *     (`compilation/javascript-target.ts`) — the runtime-projection rule:
  *     `_SYS.at` already dispatches on the runtime shape.
@@ -64,9 +64,13 @@ describe('(a) parse: a declared parameter type reaches the body', () => {
   test('B. declared `(list<real>) -> real` head: subscripts index the parameter', () => {
     const ce = new ComputeEngine();
     ce.declare('h', '(list<real>) -> real');
-    expect(ce.parse('h(v) \\coloneq v_1 + v_2', { canonical: false }).json).toEqual(
-      ['Assign', 'h', ['Function', ['Add', ['At', 'v', 1], ['At', 'v', 2]], 'v']]
-    );
+    expect(
+      ce.parse('h(v) \\coloneq v_1 + v_2', { canonical: false }).json
+    ).toEqual([
+      'Assign',
+      'h',
+      ['Function', ['Add', ['At', 'v', 1], ['At', 'v', 2]], 'v'],
+    ]);
   });
 
   test('B. and the definition then works, interpreted and compiled', () => {
@@ -76,7 +80,12 @@ describe('(a) parse: a declared parameter type reaches the body', () => {
 
     expect(ce.parse('h([3, 4])').evaluate().toString()).toBe('7');
     // Route parity: the box route sees the same definition.
-    expect(ce.box(['h', ['List', 3, 4]]).evaluate().toString()).toBe('7');
+    expect(
+      ce
+        .box(['h', ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('7');
 
     const r = jsCompile(ce, ce.parse('h([3, 4])'));
     expect(r.success).toBe(true);
@@ -86,17 +95,21 @@ describe('(a) parse: a declared parameter type reaches the body', () => {
   test('a declared `vector<3>` parameter indexes too', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(vector<3>) -> real');
-    expect(ce.parse('f(p) \\coloneq p_1 + p_3', { canonical: false }).json).toEqual(
-      ['Assign', 'f', ['Function', ['Add', ['At', 'p', 1], ['At', 'p', 3]], 'p']]
-    );
+    expect(
+      ce.parse('f(p) \\coloneq p_1 + p_3', { canonical: false }).json
+    ).toEqual([
+      'Assign',
+      'f',
+      ['Function', ['Add', ['At', 'p', 1], ['At', 'p', 3]], 'p'],
+    ]);
   });
 
   test('a declared SCALAR parameter does NOT index — `x_1` stays a symbol', () => {
     const ce = new ComputeEngine();
     ce.declare('q', '(real) -> real');
-    expect(ce.parse('q(x) \\coloneq x_1 + 1', { canonical: false }).json).toEqual(
-      ['Assign', 'q', ['Function', ['Add', 'x_1', 1], 'x']]
-    );
+    expect(
+      ce.parse('q(x) \\coloneq x_1 + 1', { canonical: false }).json
+    ).toEqual(['Assign', 'q', ['Function', ['Add', 'x_1', 1], 'x']]);
   });
 
   test('A. UNDECLARED head: the subscript spelling still captures a symbol', () => {
@@ -105,9 +118,9 @@ describe('(a) parse: a declared parameter type reaches the body', () => {
     // parameter to one would break every scalar `f(x) := x_0 + 1`. The bracket
     // spelling below is the answer for undeclared heads.
     const ce = new ComputeEngine();
-    expect(ce.parse('h(v) \\coloneq v_1 + v_2', { canonical: false }).json).toEqual(
-      ['Assign', 'h', ['Function', ['Add', 'v_1', 'v_2'], 'v']]
-    );
+    expect(
+      ce.parse('h(v) \\coloneq v_1 + v_2', { canonical: false }).json
+    ).toEqual(['Assign', 'h', ['Function', ['Add', 'v_1', 'v_2'], 'v']]);
   });
 
   test('the BRACKET spelling reaches `At` with or without a declaration', () => {
@@ -130,11 +143,7 @@ describe('(a) parse: a declared parameter type reaches the body', () => {
 });
 
 describe('(b) inference: an At-indexing body infers a non-scalar parameter', () => {
-  const AT_BODY = [
-    'Function',
-    ['Add', ['At', 'v', 1], ['At', 'v', 2]],
-    'v',
-  ];
+  const AT_BODY = ['Function', ['Add', ['At', 'v', 1], ['At', 'v', 2]], 'v'];
 
   test('D. no declaration: a list argument APPLIES, it does not broadcast', () => {
     const ce = new ComputeEngine();
@@ -148,7 +157,12 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
       '(indexed_collection<number>) -> number'
     );
     // Before the fix this was `[h(3),h(4)]`.
-    expect(ce.box(['h', ['List', 3, 4]]).evaluate().toString()).toBe('7');
+    expect(
+      ce
+        .box(['h', ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('7');
   });
 
   test('C. with a declaration: interpreter unchanged (already correct)', () => {
@@ -156,7 +170,12 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
     ce.declare('h', '(list<real>) -> real');
     ce.box(['Assign', 'h', AT_BODY]).evaluate();
     expect(ce.box('h').type.toString()).toBe('(list<real>) -> real');
-    expect(ce.box(['h', ['List', 3, 4]]).evaluate().toString()).toBe('7');
+    expect(
+      ce
+        .box(['h', ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('7');
   });
 
   test('two list parameters and a list result — no declaration', () => {
@@ -164,7 +183,10 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
     ce.box(['Assign', 'mul', COMPLEX_MUL]).evaluate();
     // (1+2i)(3+4i) = -5 + 10i
     expect(
-      ce.box(['mul', ['List', 1, 2], ['List', 3, 4]]).evaluate().toString()
+      ce
+        .box(['mul', ['List', 1, 2], ['List', 3, 4]])
+        .evaluate()
+        .toString()
     ).toBe('[-5,10]');
   });
 
@@ -176,7 +198,10 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
       '(list<real>, list<real>) -> list<real>'
     );
     expect(
-      ce.box(['mul', ['List', 1, 2], ['List', 3, 4]]).evaluate().toString()
+      ce
+        .box(['mul', ['List', 1, 2], ['List', 3, 4]])
+        .evaluate()
+        .toString()
     ).toBe('[-5,10]');
   });
 
@@ -204,11 +229,7 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
 });
 
 describe('(c) compile: `At` over an indexed parameter', () => {
-  const AT_BODY = [
-    'Function',
-    ['Add', ['At', 'v', 1], ['At', 'v', 2]],
-    'v',
-  ];
+  const AT_BODY = ['Function', ['Add', ['At', 'v', 1], ['At', 'v', 2]], 'v'];
 
   test('C. declared list parameter — call site and by reference', () => {
     const ce = new ComputeEngine();
@@ -310,8 +331,8 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
     // test would never be reached.
     expect(() =>
       jsCompile(ce, ce.box(['k', REC]), { constantFold: false })
-    ).toThrow(/not provably numeric.*Fail closed \(D6\)/);
-    expect(() => jsCompile(ce, ce.box('k'))).toThrow(/Fail closed \(D6\)/);
+    ).toThrow(/not provably numeric/);
+    expect(() => jsCompile(ce, ce.box('k'))).toThrow(/Could not compile/);
   });
 
   test('JS: with fallback:true the decline is reported, and run() is honest', () => {
@@ -328,9 +349,7 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
   test('Python: the same shape declines identically', () => {
     const ce = new ComputeEngine();
     const py = ce._getCompilationTarget('python')!;
-    expect(() => py.compile(ce.box(KEYED))).toThrow(
-      /not provably numeric.*Fail closed \(D6\)/
-    );
+    expect(() => py.compile(ce.box(KEYED))).toThrow(/not provably numeric/);
   });
 
   test('a NUMERIC index over the same could-be base compiles on both targets', () => {
@@ -348,7 +367,7 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
     expect(py.success).toBe(true);
     // The Python emission mirrors `_SYS.at`'s runtime shape dispatch: a base
     // that is not a sequence projects to nan rather than raising.
-    expect(py.code).toContain("isinstance(_l, (list, tuple, np.ndarray))");
+    expect(py.code).toContain('isinstance(_l, (list, tuple, np.ndarray))');
   });
 
   test('a PROVABLY indexed base is unaffected by the index gate', () => {
@@ -380,9 +399,16 @@ describe('(d) inference: a point-accessor body infers a non-scalar parameter', (
   test('PointX(a): a list argument APPLIES, it does not broadcast', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'g', ['Function', ['PointX', 'a'], 'a']]).evaluate();
-    expect(ce.box('g').type.toString()).toBe('(collection<any> | tuple) -> unknown');
+    expect(ce.box('g').type.toString()).toBe(
+      '(collection<any> | tuple) -> unknown'
+    );
     // Before the fix: `[g(3), g(4)]`, and `[null,null]` once compiled.
-    expect(ce.box(['g', ['List', 3, 4]]).evaluate().toString()).toBe('3');
+    expect(
+      ce
+        .box(['g', ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('3');
     const r = jsCompile(ce, ce.box(['g', ['List', 3, 4]]));
     expect(r.success).toBe(true);
     expect(r.run!()).toBe(3);
@@ -395,7 +421,12 @@ describe('(d) inference: a point-accessor body infers a non-scalar parameter', (
       'h',
       ['Function', ['Add', ['PointX', 'a'], ['PointY', 'a']], 'a'],
     ]).evaluate();
-    expect(ce.box(['h', ['List', 3, 4]]).evaluate().toString()).toBe('7');
+    expect(
+      ce
+        .box(['h', ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('7');
   });
 
   test('the filed witness: a Distance-consuming body (already fixed by 130/138)', () => {
@@ -415,7 +446,10 @@ describe('(d) inference: a point-accessor body infers a non-scalar parameter', (
       ],
     ]).evaluate();
     expect(
-      ce.box(['p', ['List', 0, 0], ['List', 3, 4]]).N().toString()
+      ce
+        .box(['p', ['List', 0, 0], ['List', 3, 4]])
+        .N()
+        .toString()
     ).toBe('[0.024,0.032]');
   });
 });
@@ -438,19 +472,13 @@ describe('(e) point-accessor RESULT typing follows the runtime dispatch', () => 
   });
 
   test('a list of points still types a LIST (broadcast)', () => {
-    const e = ce.box([
-      'PointX',
-      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-    ]);
+    const e = ce.box(['PointX', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]]);
     expect(e.type.toString()).toBe('vector<2>');
     expect(e.evaluate().toString()).toBe('[1,3]');
   });
 
   test('the list-of-rows spelling still broadcasts (item 138)', () => {
-    const e = ce.box([
-      'PointX',
-      ['List', ['List', 10, 11], ['List', 20, 21]],
-    ]);
+    const e = ce.box(['PointX', ['List', ['List', 10, 11], ['List', 20, 21]]]);
     expect(e.evaluate().toString()).toBe('[10,20]');
   });
 
@@ -527,7 +555,10 @@ describe('(f) a declared NON-SCALAR parameter reaches the compiled body', () => 
     // because the body was compiled against a scalar parameter.
     for (const [body, want] of [
       [['Length', 'a'], 2],
-      [['Map', ['Function', ['Power', 'w', 2], 'w'], 'a'], [9, 16]],
+      [
+        ['Map', ['Function', ['Power', 'w', 2], 'w'], 'a'],
+        [9, 16],
+      ],
     ] as [any, any][]) {
       const sig = Array.isArray(want)
         ? '(list<real>) -> list<real>'
@@ -590,9 +621,12 @@ describe('non-regressions', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'g', ['Function', ['Multiply', 2, 'x'], 'x']]).evaluate();
     expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
-    expect(ce.box(['g', ['List', 1, 2, 3]]).evaluate().toString()).toBe(
-      '[2,4,6]'
-    );
+    expect(
+      ce
+        .box(['g', ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[2,4,6]');
   });
 
   test('an INDEX parameter is not mistaken for a collection parameter', () => {
@@ -602,7 +636,11 @@ describe('non-regressions', () => {
     // type that excludes every scalar is.
     const ce = new ComputeEngine();
     ce.assign('L', ce.box(['List', 10, 20, 30]));
-    ce.box(['Assign', 'f', ['Function', ['Add', ['At', 'L', 't'], 1], 't']]).evaluate();
+    ce.box([
+      'Assign',
+      'f',
+      ['Function', ['Add', ['At', 'L', 't'], 1], 't'],
+    ]).evaluate();
     // The body's indexed read types `integer | nan` (the out-of-band access
     // marker of a numeric element type), and adding `1` keeps both arms.
     expect(ce.box('f').type.toString()).toBe('(unknown) -> integer | nan');

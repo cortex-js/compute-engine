@@ -369,7 +369,7 @@ describe('sampler-backed At — the static-index and gather tiers read texels', 
       const m = message(() =>
         glsl.compile(ce.box(expr), { ...NO_FOLD, ...SAMPLER })
       );
-      expect(m).toMatch(/`S` is sampler2D-backed/);
+      expect(m).toMatch(/`S`: the symbol is sampler2D-backed/);
       expect(m).toMatch(/read only through a positional access/);
     }
   });
@@ -385,7 +385,7 @@ describe('sampler-backed At — the static-index and gather tiers read texels', 
         vars: { S: 'u_board' },
       })
     );
-    expect(m).toMatch(/`S` is sampler2D-backed/);
+    expect(m).toMatch(/`S`: the symbol is sampler2D-backed/);
   });
 
   test('`compileToSource()` refuses the option: it has no preamble channel', () => {
@@ -518,7 +518,7 @@ describe('WGSL sampler-backed At — the per-binding texel read', () => {
     const ce = boardEngine();
     expect(
       message(() => wgsl.compile(ce.box('S'), { ...NO_FOLD, ...SAMPLER }))
-    ).toMatch(/`S` is sampler2D-backed/);
+    ).toMatch(/`S`: the symbol is sampler2D-backed/);
   });
 });
 

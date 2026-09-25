@@ -958,11 +958,11 @@ describe('PYTHON — arithmetic over a collection that stays declined', () => {
     ce.declare('v1', 'list<number>');
     ce.declare('v2', 'list<number>');
     expect(() => python.compile(ce.box(['Add', 'v1', 'v2']))).toThrow(
-      /Fail closed/
+      /Could not compile/
     );
     expect(() =>
       python.compile(ce.box(['Add', ['List', 1, 2], ['List', 3, 4, 5]]))
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Could not compile/);
     ce.popScope();
   });
 
@@ -974,10 +974,10 @@ describe('PYTHON — arithmetic over a collection that stays declined', () => {
     ce.declare('mx', 'matrix<2x2>');
     ce.declare('pts', 'list<tuple<number, number>>');
     expect(() => python.compile(ce.box(['Add', 'mx', 1]))).toThrow(
-      /Fail closed/
+      /Could not compile/
     );
     expect(() => python.compile(ce.box(['Multiply', 'pts', 2]))).toThrow(
-      /Fail closed/
+      /Could not compile/
     );
     ce.popScope();
   });
@@ -989,10 +989,10 @@ describe('PYTHON — arithmetic over a collection that stays declined', () => {
     ce.declare('bc', 'broadcastable<number>');
     ce.declare('hh', '(number) -> unknown');
     expect(() => python.compile(ce.box(['Multiply', 2, 'bc']))).toThrow(
-      /Fail closed/
+      /Could not compile/
     );
     expect(() => python.compile(ce.box(['Add', ['hh', 1], 1]))).toThrow(
-      /Fail closed/
+      /Could not compile/
     );
     ce.popScope();
   });
@@ -1012,7 +1012,7 @@ describe('PYTHON — arithmetic over a collection that stays declined', () => {
     ce.pushScope();
     ce.declare('vn', 'list<number>');
     expect(() => python.compile(ce.box(['Power', 'vn', -2]))).toThrow(
-      /Fail closed/
+      /Could not compile/
     );
     // A non-negative integer exponent is uniform on both containers.
     expect(python.compile(ce.box(['Power', 'vn', 2])).code).toBe(

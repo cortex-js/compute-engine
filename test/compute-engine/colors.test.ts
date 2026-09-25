@@ -184,7 +184,11 @@ describe('ColorFromColorspace', () => {
   });
 
   test('from hsl', () => {
-    const expr = ce.expr(['ColorFromColorspace', ['Tuple', 0, 1, 0.5], "'hsl'"]);
+    const expr = ce.expr([
+      'ColorFromColorspace',
+      ['Tuple', 0, 1, 0.5],
+      "'hsl'",
+    ]);
     const result = expr.evaluate();
     expect(result.operator).toBe('Hsl');
     expect(result.ops!.map((op) => op.re)).toEqual([0, 1, 0.5]);
@@ -315,7 +319,9 @@ describe('ColorMix', () => {
   });
 
   test('ratio=0 returns first color', () => {
-    const result = ce.expr(['ColorMix', "'#ff0000'", "'#0000ff'", 0]).evaluate();
+    const result = ce
+      .expr(['ColorMix', "'#ff0000'", "'#0000ff'", 0])
+      .evaluate();
     const rgb = mixedToRgb(result);
     expect(rgb.r).toBeCloseTo(1, 1);
     expect(rgb.g).toBeCloseTo(0, 1);
@@ -323,7 +329,9 @@ describe('ColorMix', () => {
   });
 
   test('ratio=1 returns second color', () => {
-    const result = ce.expr(['ColorMix', "'#ff0000'", "'#0000ff'", 1]).evaluate();
+    const result = ce
+      .expr(['ColorMix', "'#ff0000'", "'#0000ff'", 1])
+      .evaluate();
     const rgb = mixedToRgb(result);
     // Should be blue (OKLCh roundtrip has slight gamut clipping)
     expect(rgb.b).toBeGreaterThan(0.85);
@@ -455,12 +463,16 @@ describe('ColorToString formats', () => {
   });
 
   test('oklch format', () => {
-    const result = ce.expr(['ColorToString', "'#ff0000'", "'oklch'"]).evaluate();
+    const result = ce
+      .expr(['ColorToString', "'#ff0000'", "'oklch'"])
+      .evaluate();
     expect(result.string).toMatch(/^oklch\(/);
   });
 
   test('rgb format with alpha', () => {
-    const result = ce.expr(['ColorToString', "'#ff000080'", "'rgb'"]).evaluate();
+    const result = ce
+      .expr(['ColorToString', "'#ff000080'", "'rgb'"])
+      .evaluate();
     expect(result.string).toMatch(/^rgb\(255 0 0 \//);
   });
 });
@@ -861,7 +873,11 @@ describe('GPU color compilation', () => {
   test('compile ColorToColorspace to GLSL', () => {
     // Canonical color value is OKLCh; converting to oklab routes through
     // _gpu_oklch_to_oklab (no sRGB pinch).
-    const expr = ce.expr(['ColorToColorspace', ['Tuple', 0.7, 0.1, 30], "'oklab'"]);
+    const expr = ce.expr([
+      'ColorToColorspace',
+      ['Tuple', 0.7, 0.1, 30],
+      "'oklab'",
+    ]);
     // `constantFold: false`: the color is a literal tuple, so the whole
     // conversion is a constant subtree the compiler would otherwise evaluate
     // at compile time and emit as a bare vec3 — this test pins the conversion
@@ -872,7 +888,11 @@ describe('GPU color compilation', () => {
   });
 
   test('compile ColorToColorspace to GLSL routes oklch as identity', () => {
-    const expr = ce.expr(['ColorToColorspace', ['Tuple', 0.7, 0.1, 30], "'oklch'"]);
+    const expr = ce.expr([
+      'ColorToColorspace',
+      ['Tuple', 0.7, 0.1, 30],
+      "'oklch'",
+    ]);
     // `constantFold: false`: a folded literal vec3 would satisfy the two
     // negative assertions below vacuously, so keep the structural lowering.
     const compiled = compile(expr, { to: 'glsl', constantFold: false });
@@ -924,20 +944,16 @@ describe('GPU color compilation', () => {
     expect(compiled.success).toBe(true);
     expect(compiled.code).toBe('vec3f(0.6, 0.2, 0.1)');
 
-    const consumed = compile(
-      ce.expr(['AsOklch', expr.json]),
-      { to: 'wgsl', constantFold: false }
-    );
+    const consumed = compile(ce.expr(['AsOklch', expr.json]), {
+      to: 'wgsl',
+      constantFold: false,
+    });
     expect(consumed.success).toBe(true);
     expect(consumed.code).toContain('_gpu_oklab_to_oklch');
   });
 
   test('compile ColorFromColorspace to GLSL routes rgb to OKLCh at its consumer', () => {
-    const expr = ce.expr([
-      'ColorFromColorspace',
-      ['Tuple', 1, 0, 0],
-      "'rgb'",
-    ]);
+    const expr = ce.expr(['ColorFromColorspace', ['Tuple', 1, 0, 0], "'rgb'"]);
     // `constantFold: false`: constant operands would otherwise fold to a
     // literal vec3, hiding the lowering this test pins.
     const compiled = compile(expr, { to: 'glsl', constantFold: false });
@@ -1090,9 +1106,11 @@ describe('GPU compile: typed color heads', () => {
       const compiled = compile(ce.expr(json as any), { to });
       expect(compiled.success).toBe(false);
       expect(compiled.error).toMatch(
-        new RegExp(`${head}: an alpha \\(4th\\) operand is not representable`)
+        new RegExp(
+          `Could not compile \`${head}\`: an alpha \\(4th\\) operand is not representable`
+        )
       );
-      expect(compiled.error).toMatch(/Fail closed \(D6\)\./);
+      expect(compiled.error).toMatch(/Could not compile/);
     }
   });
 
@@ -1111,9 +1129,9 @@ describe('GPU compile: typed color heads', () => {
       );
       expect(compiled.success).toBe(false);
       expect(compiled.error).toMatch(
-        /ColorFromColorspace: an alpha \(4th\) operand is not representable/
+        /Could not compile `ColorFromColorspace`: an alpha \(4th\) operand is not representable/
       );
-      expect(compiled.error).toMatch(/Fail closed \(D6\)\./);
+      expect(compiled.error).toMatch(/Could not compile/);
     }
   });
 
@@ -1122,7 +1140,7 @@ describe('GPU compile: typed color heads', () => {
       const compiled = compile(ce.expr(['Color', "'#ff000080'"]), { to });
       expect(compiled.success).toBe(false);
       expect(compiled.error).toMatch(/carries an alpha channel/);
-      expect(compiled.error).toMatch(/Fail closed \(D6\)\./);
+      expect(compiled.error).toMatch(/Could not compile/);
     }
   });
 
@@ -1140,9 +1158,9 @@ describe('GPU compile: typed color heads', () => {
     expect(compile(ce.expr(['Rgb', 0.1, 0.2, 0.3]), { to: 'wgsl' }).code).toBe(
       '_gpu_srgb_to_oklch(vec3f(0.1, 0.2, 0.3))'
     );
-    expect(compile(ce.expr(['Oklch', 0.1, 0.2, 0.3]), { to: 'glsl' }).code).toBe(
-      'vec3(0.1, 0.2, 0.3)'
-    );
+    expect(
+      compile(ce.expr(['Oklch', 0.1, 0.2, 0.3]), { to: 'glsl' }).code
+    ).toBe('vec3(0.1, 0.2, 0.3)');
   });
 
   test('Typed heads compose with ColorMix', () => {
@@ -1546,7 +1564,12 @@ describe('Wide-gamut preservation', () => {
   test('ColorDelta direct-path matches cross-space identity for wide-gamut', () => {
     // A color slightly outside sRGB, defined two ways. Delta should be small.
     const a = ['Oklch', 0.6, 0.32, 30];
-    const b = ['Oklab', 0.6, 0.32 * Math.cos((30 * Math.PI) / 180), 0.32 * Math.sin((30 * Math.PI) / 180)];
+    const b = [
+      'Oklab',
+      0.6,
+      0.32 * Math.cos((30 * Math.PI) / 180),
+      0.32 * Math.sin((30 * Math.PI) / 180),
+    ];
     const delta = ce.expr(['ColorDelta', a, b]).evaluate();
     expect(delta.re).toBeCloseTo(0, 6);
   });
@@ -1580,9 +1603,7 @@ describe('Regression: AsOklab/AsOklch preserve wide-gamut chroma', () => {
 
   test('AsOklch(Oklab) keeps wide-gamut a/b without sRGB pinch', () => {
     // a=0.30, b=0.10 → C ≈ 0.316, well outside displayable red.
-    const result = ce
-      .expr(['AsOklch', ['Oklab', 0.7, 0.3, 0.1]])
-      .evaluate();
+    const result = ce.expr(['AsOklch', ['Oklab', 0.7, 0.3, 0.1]]).evaluate();
     expect(result.operator).toBe('Oklch');
     expect(result.ops![0].re).toBeCloseTo(0.7, 6);
     expect(result.ops![1].re).toBeCloseTo(Math.hypot(0.3, 0.1), 6);
@@ -1590,19 +1611,21 @@ describe('Regression: AsOklab/AsOklch preserve wide-gamut chroma', () => {
 
   test('AsOklab(Oklch) keeps wide-gamut chroma without sRGB pinch', () => {
     // C=0.4, hue 30° → outside displayable red.
-    const result = ce
-      .expr(['AsOklab', ['Oklch', 0.7, 0.4, 30]])
-      .evaluate();
+    const result = ce.expr(['AsOklab', ['Oklch', 0.7, 0.4, 30]]).evaluate();
     expect(result.operator).toBe('Oklab');
     expect(result.ops![0].re).toBeCloseTo(0.7, 6);
-    expect(result.ops![1].re).toBeCloseTo(0.4 * Math.cos((30 * Math.PI) / 180), 6);
-    expect(result.ops![2].re).toBeCloseTo(0.4 * Math.sin((30 * Math.PI) / 180), 6);
+    expect(result.ops![1].re).toBeCloseTo(
+      0.4 * Math.cos((30 * Math.PI) / 180),
+      6
+    );
+    expect(result.ops![2].re).toBeCloseTo(
+      0.4 * Math.sin((30 * Math.PI) / 180),
+      6
+    );
   });
 
   test('AsOklch(Oklab) round-trips wide-gamut alpha', () => {
-    const result = ce
-      .expr(['AsOklch', ['Oklab', 0.7, 0.3, 0, 0.5]])
-      .evaluate();
+    const result = ce.expr(['AsOklch', ['Oklab', 0.7, 0.3, 0, 0.5]]).evaluate();
     expect(result.operator).toBe('Oklch');
     expect(result.ops!.length).toBe(4);
     expect(result.ops![3].re).toBeCloseTo(0.5, 6);
@@ -1693,12 +1716,7 @@ describe('Regression: achromatic hue handling in ColorMix', () => {
     // Hue is meaningless for both; result should be achromatic with
     // C blended to 0 and the first endpoint's H carried (deterministic).
     const result = ce
-      .expr([
-        'ColorMix',
-        ['Oklch', 0.2, 0, 100],
-        ['Oklch', 0.8, 0, 200],
-        0.5,
-      ])
+      .expr(['ColorMix', ['Oklch', 0.2, 0, 100], ['Oklch', 0.8, 0, 200], 0.5])
       .evaluate();
     expect(result.operator).toBe('Oklch');
     expect(result.ops![1].re).toBeCloseTo(0, 6); // C stays 0

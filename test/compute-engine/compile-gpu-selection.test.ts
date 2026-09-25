@@ -5,7 +5,7 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 // Element-wise `Which`/`If` selection on the GPU shader targets
 // (docs/BROADCAST-MODEL.md, R1–R4): a statically
 // shaped (vec2–vec4) condition lowers to boolean-vector masks combined with
-// GLSL `mix` / WGSL `select`; anything with no static shape fails closed (D6).
+// GLSL `mix` / WGSL `select`; anything with no static shape fails closed.
 //
 // A fresh engine: these declarations must not leak into (or inherit from) the
 // shared test engine.
@@ -199,22 +199,18 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       expect(g(['Which', ['Less', 'x', 3], 1, 'True', 0])).toBe(
         '((x < 3.0) ? (1.0) : ((0.0)))'
       );
-      expect(g(['If', ['Less', 'x', 3], 1, 0])).toBe(
-        'float(x < 3.0)'
-      );
+      expect(g(['If', ['Less', 'x', 3], 1, 0])).toBe('float(x < 3.0)');
     });
 
     it('WGSL scalar Which / If', () => {
       expect(w(['Which', ['Less', 'x', 3], 1, 'True', 0])).toBe(
         'select((0.0), 1.0, x < 3.0)'
       );
-      expect(w(['If', ['Less', 'x', 3], 1, 0])).toBe(
-        'f32(x < 3.0)'
-      );
+      expect(w(['If', ['Less', 'x', 3], 1, 0])).toBe('f32(x < 3.0)');
     });
   });
 
-  describe('fail closed (D6)', () => {
+  describe('fail closed', () => {
     // Regression: these used to emit invalid shader source behind
     // `success: true` — `((u_L == 3.0) ? …)`, `((vec2(True, False)) ? …)`.
     it('a list with absent NUMERIC cells compiles; a whole list that may be absent does not', () => {
@@ -372,22 +368,14 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       // shader form; before the emission-site guard this spliced the literal
       // string `undefined` into the source.
       expect(() =>
-        g([
-          'Which',
-          ['Precedes', 'x', 'y'],
-          1,
-          ['Less', 'N2', 3],
-          2,
-          'True',
-          0,
-        ])
+        g(['Which', ['Precedes', 'x', 'y'], 1, ['Less', 'N2', 3], 2, 'True', 0])
       ).toThrow(/no componentwise shader form/);
     });
 
     it('lowers provably-boolean scalar cells in a literal list condition', () => {
-      expect(g(['Which', ['List', ['Less', 'x', 0], 'True'], 1, 'True', 0])).toBe(
-        'mix(vec2(0.0), vec2(1.0), bvec2(x < 0.0, true))'
-      );
+      expect(
+        g(['Which', ['List', ['Less', 'x', 0], 'True'], 1, 'True', 0])
+      ).toBe('mix(vec2(0.0), vec2(1.0), bvec2(x < 0.0, true))');
     });
   });
 });

@@ -387,10 +387,10 @@ describe('GPU: a complex argument to a parameter not declared complex', () => {
   it('`(real) -> real` fails closed (GLSL and WGSL)', () => {
     const ce = engineWith(['f', '(real) -> real', 'z \\mapsto z^2']);
     expect(() => glsl(ce, '|f(x+iy)|')).toThrow(
-      'f: argument 1 `x + i * y` lowers to "vec2" but parameter "z" is declared "float"'
+      'Could not compile `f`: argument 1 `x + i * y` lowers to "vec2" but parameter "z" is declared "float"'
     );
     expect(() => wgsl(ce, '|f(x+iy)|')).toThrow(
-      'f: argument 1 `x + i * y` lowers to "vec2f" but parameter "z" is declared "f32"'
+      'Could not compile `f`: argument 1 `x + i * y` lowers to "vec2f" but parameter "z" is declared "f32"'
     );
     // A real argument compiles.
     expect(glsl(ce, 'f(x)').success).toBe(true);
@@ -459,10 +459,10 @@ describe('GPU: a function declared `(complex) -> complex`', () => {
     );
     for (const run of [glsl, wgsl]) {
       expect(() => run(ce, '|g(x+iy)|')).toThrow(
-        /Floor: the target's lowering for this head is real-only/
+        /Could not compile `Floor`: the target's lowering for this head is real-only/
       );
       expect(() => run(ce, '|h(x+iy)|')).toThrow(
-        /Gamma: the target's lowering for this head is real-only/
+        /Could not compile `Gamma`: the target's lowering for this head is real-only/
       );
     }
   });
@@ -523,10 +523,10 @@ describe('GPU: the declared result type and the value of the body', () => {
     // no conversion from a `vec2` to a `float` that keeps the value.
     const ce = engineWith(['s', '(complex) -> real', 'z \\mapsto z^2']);
     expect(() => glsl(ce, 's(x+iy)')).toThrow(
-      /Typed: the value `\(x \+ i \* y\)\^2` is complex, but its ascribed type `real` says it is real\..*\(unknown\) -> complex/s
+      /Could not compile `Typed`: the value `\(x \+ i \* y\)\^2` is complex, but its ascribed type `real` says it is real\..*\(unknown\) -> complex/s
     );
     expect(() => wgsl(ce, 's(x+iy)')).toThrow(
-      /Typed: the value `\(x \+ i \* y\)\^2` is complex, but its ascribed type `real` says it is real\..*\(unknown\) -> complex/s
+      /Could not compile `Typed`: the value `\(x \+ i \* y\)\^2` is complex, but its ascribed type `real` says it is real\..*\(unknown\) -> complex/s
     );
   });
 
@@ -544,7 +544,7 @@ describe('GPU: the declared result type and the value of the body', () => {
       const ce = engineWith(['s', '(real) -> complex', `t \\mapsto ${body}`]);
       for (const run of [glsl, wgsl])
         expect(() => run(ce, 's(x)')).toThrow(
-          /Typed: the ascribed type `complex` says the value is complex, but the value .* is not a number/
+          /Could not compile `Typed`: the ascribed type `complex` says the value is complex, but the value .* is not a number/
         );
     }
   });
@@ -689,7 +689,9 @@ describe('GPU: real-only lowerings reject a complex argument', () => {
     for (const c of cases) {
       it(`${c[0]} with a complex argument fails closed; a real one compiles`, () => {
         for (const run of [glsl, wgsl]) {
-          expect(() => run(ce, c)).toThrow(`${c[0]}: ${message}`);
+          expect(() => run(ce, c)).toThrow(
+            `Could not compile \`${c[0]}\`: ${message}`
+          );
           const real = c.map((a: any) => (a === Z ? 'x' : a));
           expect(run(ce, real).success).toBe(true);
         }
@@ -757,7 +759,7 @@ describe('GPU: Root of a complex radicand', () => {
   it('a complex degree fails closed', () => {
     for (const run of [glsl, wgsl])
       expect(() => run(ce, ['Root', 'x', Z])).toThrow(
-        'Root: a complex degree has no shader lowering'
+        'Could not compile `Root`: a complex degree has no shader lowering'
       );
   });
 });
@@ -783,10 +785,10 @@ describe('GPU: the iteration count of a fractal is an integer', () => {
   it('a complex count fails closed; a complex point compiles', () => {
     for (const run of [glsl, wgsl]) {
       expect(() => run(ce, ['Mandelbrot', 'u', Z])).toThrow(
-        'Mandelbrot: the integer operand `x + i * y` is complex'
+        'Could not compile `Mandelbrot`: the integer operand `x + i * y` is complex'
       );
       expect(() => run(ce, ['Julia', Z, 'c', Z])).toThrow(
-        'Julia: the integer operand `x + i * y` is complex'
+        'Could not compile `Julia`: the integer operand `x + i * y` is complex'
       );
       expect(run(ce, ['Mandelbrot', Z, 'u']).success).toBe(true);
       expect(run(ce, ['Julia', Z, Z, 'u']).success).toBe(true);

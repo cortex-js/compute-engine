@@ -138,7 +138,7 @@ describe('an impure branch condition is lowered three-valued', () => {
         to: 'python',
         fallback: false,
       } as any)
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Could not compile/);
   });
 
   test('a GPU target keeps its own selection', () => {

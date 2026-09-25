@@ -309,7 +309,9 @@ describe('LINEAR ALGEBRA OVER A COMPLEX ENTRY', () => {
       expect(expr.subs({ x: 2 }).N().operator).toBe('RowReduce');
       expect(() =>
         compile(expr, { to: 'javascript', mode, fallback: false } as any)
-      ).toThrow(/RowReduce: .*no reduced row echelon form.*Fail closed/s);
+      ).toThrow(
+        /Could not compile `RowReduce`: .*no reduced row echelon form/s
+      );
     });
 
   // `Distance(p, q)` is the norm of the difference, `√(Σ|pᵢ − qᵢ|²)`. The
@@ -543,7 +545,7 @@ describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
         to: 'javascript',
         fallback: false,
       } as any)
-    ).toThrow(/RowReduce: .*no reduced row echelon form.*Fail closed/s);
+    ).toThrow(/Could not compile `RowReduce`: .*no reduced row echelon form/s);
   });
 
   // Under `mode: 'complex'` a wide operand is complex, and a wide result is

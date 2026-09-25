@@ -54,14 +54,14 @@ describe('GPU POINT WITH A COMPLEX COMPONENT FAILS CLOSED', () => {
     for (const latex of COMPLEX_COMPONENT_LATEX)
       it(`${to}, parse route: ${latex}`, () => {
         expect(() => run(to, (ce) => ce.parse(latex))).toThrow(
-          /element \d+ \(`.*`\) is itself vector-valued .*Fail closed/s
+          /element \d+ \(`.*`\) is itself vector-valued /s
         );
       });
 
     for (const json of COMPLEX_COMPONENT_MATHJSON)
       it(`${to}, box route: ${JSON.stringify(json)}`, () => {
         expect(() => run(to, (ce) => ce.box(json as any))).toThrow(
-          /element 2 \(`.*`\) is itself vector-valued .*Fail closed/s
+          /element 2 \(`.*`\) is itself vector-valued /s
         );
       });
   }
@@ -69,10 +69,14 @@ describe('GPU POINT WITH A COMPLEX COMPONENT FAILS CLOSED', () => {
   it('names the complex component in the diagnostic', () => {
     expect(() =>
       run('glsl', (ce) => ce.parse('\\operatorname{PointList}(t, h(t))'))
-    ).toThrow('vec2: element 2 (`h(t)`) is itself vector-valued');
+    ).toThrow(
+      'Could not compile `vec2`: element 2 (`h(t)`) is itself vector-valued'
+    );
     expect(() =>
       run('wgsl', (ce) => ce.parse('\\operatorname{PointList}(t, h(t))'))
-    ).toThrow('vec2f: element 2 (`h(t)`) is itself vector-valued');
+    ).toThrow(
+      'Could not compile `vec2f`: element 2 (`h(t)`) is itself vector-valued'
+    );
   });
 });
 

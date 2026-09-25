@@ -320,12 +320,12 @@ describe('PointList compile — the all-scalar opaque-slot guard', () => {
 
   it('the shader and Python targets keep the plain point — they have no run-time list value to guard against', () => {
     const ce = opaqueEngine();
-    expect(
-      new GLSLTarget().compile(ce.box(['PointList', 'u', 'v'])).code
-    ).toBe('vec2(u, v)');
-    expect(
-      new WGSLTarget().compile(ce.box(['PointList', 'u', 'v'])).code
-    ).toBe('vec2f(u, v)');
+    expect(new GLSLTarget().compile(ce.box(['PointList', 'u', 'v'])).code).toBe(
+      'vec2(u, v)'
+    );
+    expect(new WGSLTarget().compile(ce.box(['PointList', 'u', 'v'])).code).toBe(
+      'vec2f(u, v)'
+    );
     expect(
       new PythonTarget().compile(ce.box(['PointList', 'u', 'v'])).code
     ).toBe('(u, v)');
@@ -362,7 +362,7 @@ describe('PointList compile — non-scalar component', () => {
   it('javascript: a `number | list<number>` union component fails closed', () => {
     const js = new JavaScriptTarget();
     expect(() => js.compile(ce.box(['PointList', 'x', 'U']))).toThrow(
-      /PointList: cannot compile — component 2 \(type `[^`]+`\) is neither a scalar slot nor a list source; its per-point value cannot be determined at compile time\. Fail closed \(D6\)\./
+      /Could not compile `PointList`: component 2 \(type `[^`]+`\) is neither a scalar slot nor a list source; its per-point value cannot be determined at compile time\./
     );
     const r = js.compile(ce.box(['PointList', 'x', 'U']), { fallback: true });
     expect(r.success).toBe(false);
@@ -588,9 +588,9 @@ describe('GPU point swizzle — the FLAT point spelling (Tycho item 116)', () =>
 
   it('a list too wide for a vecN is not a point, and still declines', () => {
     // `[1,2,3,4,5]` lowers to a GLSL array, which has no swizzle.
-    expect(() =>
-      glsl(eng().box(['PointX', ['List', 1, 2, 3, 4, 5]]))
-    ).toThrow(/no GPU lowering/);
+    expect(() => glsl(eng().box(['PointX', ['List', 1, 2, 3, 4, 5]]))).toThrow(
+      /no GPU lowering/
+    );
   });
 
   it('a genuine list of points still declines, both spellings', () => {

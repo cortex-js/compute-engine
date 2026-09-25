@@ -21,7 +21,7 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  *
  * A compiled target has no Error VALUE to produce, so exact parity is out of
  * reach. The invariant is the weaker one — NO SILENTLY WRONG VALUES — and the
- * resolution is to fail closed (D6): the shape declines, `compile()` reports
+ * resolution is to fail closed: the shape declines, `compile()` reports
  * `success: false`, and the interpreter (which does enforce) evaluates it.
  * An annotation the argument type PROVABLY satisfies is enforcement-free, so it
  * still compiles, byte-identically — the same admission rule `lowerLevel` uses
@@ -80,7 +80,7 @@ describe('Compiled callbacks with an unenforceable parameter annotation', () => 
         expect(() => js(violating())).toThrow(
           /callback parameter 'n' is annotated 'integer'/
         );
-        expect(() => js(violating())).toThrow(/Fail closed \(D6\)/);
+        expect(() => js(violating())).toThrow(/Could not compile/);
       });
 
       it('fails closed on the Python target', () => {
@@ -203,7 +203,7 @@ describe('the retraction repro', () => {
   };
 
   it('declines on the JavaScript target once the source retracts', () => {
-    expect(() => js(retracted())).toThrow(/Fail closed \(D6\)/);
+    expect(() => js(retracted())).toThrow(/Could not compile/);
   });
 
   it('declines on the Python target once the source retracts', () => {
@@ -224,18 +224,14 @@ describe('a symbol-valued annotated callback', () => {
     const ce = new ComputeEngine();
     ce.assign(
       'p',
-      ce.box([
-        'Function',
-        ['Greater', 'n', 0],
-        ['Typed', 'n', "'integer'"],
-      ])
+      ce.box(['Function', ['Greater', 'n', 0], ['Typed', 'n', "'integer'"]])
     );
     ce.declare('ds', `list<${elementType}>`);
     return ce.box(['Filter', 'ds', 'p']);
   };
 
   it('fails closed when the element type does not satisfy the annotation', () => {
-    expect(() => js(withNamed('number'))).toThrow(/Fail closed \(D6\)/);
+    expect(() => js(withNamed('number'))).toThrow(/Could not compile/);
     expect(() => python.compile(withNamed('number'))).toThrow(/integer/);
   });
 
@@ -296,7 +292,10 @@ describe('combiner and index callbacks', () => {
     const params = (type: string) =>
       op === 'Tabulate'
         ? [['Typed', 'i', type]]
-        : [['Typed', 'i', type], ['Typed', 'j', type]];
+        : [
+            ['Typed', 'i', type],
+            ['Typed', 'j', type],
+          ];
     it(`${op} admits an integer-annotated index parameter`, () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
@@ -318,7 +317,7 @@ describe('combiner and index callbacks', () => {
         ['Function', ['Multiply', 2, 'i'], ...params("'integer<1..2>'")],
         ...(dims as any),
       ] as any);
-      expect(() => js(expr)).toThrow(/Fail closed \(D6\)/);
+      expect(() => js(expr)).toThrow(/Could not compile/);
     });
   }
 });
@@ -377,9 +376,7 @@ describe('a HAND-annotated union callback over a satisfying source', () => {
     const ce = new ComputeEngine();
     // `list<integer | string>` — the annotation is provably satisfied.
     const src = ['List', 1, { str: 'a' }, 2];
-    expect(ce.box(src as any).type.toString()).toBe(
-      'list<integer | string>'
-    );
+    expect(ce.box(src as any).type.toString()).toBe('list<integer | string>');
 
     const expr = ce.box(['Filter', src, UNION_CB] as any);
     // The annotation survives onto the callback (hand-written unions are not

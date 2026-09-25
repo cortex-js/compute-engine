@@ -191,7 +191,11 @@ describe('GPU USER FUNCTIONS — a REAL argument to a COMPLEX parameter is lifte
   const cases: [string, string, string][] = [
     ['a real symbol', 'f(x)', '_fn_f(V(x, 0.0))'],
     ['a real expression', 'f(\\sin(x))', '_fn_f(V(sin(x), 0.0))'],
-    ['a real sum beside the call', 'f(x) + 1', '_fn_f(V(x, 0.0)) + V(1.0, 0.0)'],
+    [
+      'a real sum beside the call',
+      'f(x) + 1',
+      '_fn_f(V(x, 0.0)) + V(1.0, 0.0)',
+    ],
   ];
   for (const [lang, target, v] of [
     ['GLSL', glsl, 'vec2'],
@@ -431,7 +435,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     );
     for (const target of [glsl, wgsl]) {
       expect(() => target.compile(ce.expr(['R', 'u']))).toThrow(
-        /^R: a recursive \(or mutually recursive\) user-defined function/
+        /^Could not compile `R`: a recursive \(or mutually recursive\) user-defined function/
       );
       // Never a call to a name no declaration provides.
       expect(() => target.compile(ce.expr(['R', 'u']))).toThrow(
@@ -452,7 +456,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     ce.declare('m', '(list<real>) -> real');
     ce.assign('m', ce.parse('M \\mapsto 1'));
     expect(() => glsl.compile(ce.expr(['m', 'A']))).toThrow(
-      /^m: parameter "M" has no static GLSL type/
+      /^Could not compile `m`: parameter "M" has no static GLSL type/
     );
   });
 
@@ -460,7 +464,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     const ce = new ComputeEngine();
     ce.assign('w', ce.parse('t \\mapsto (t, t, t, t, t)'));
     expect(() => glsl.compile(ce.parse('w(u)'))).toThrow(
-      /^w: the return value has no static GLSL type/
+      /^Could not compile `w`: the return value has no static GLSL type/
     );
   });
 
@@ -712,14 +716,14 @@ describe('GPU USER FUNCTIONS — a vecN needs REAL components', () => {
     // `vec2` is two floats: declaring one by LENGTH alone emitted
     // `vec2(true, false)` at the call site.
     expect(() => glsl.compile(ce.parse('f(p)'))).toThrow(
-      /f: parameter "b" has no static GLSL type/
+      /Could not compile `f`: parameter "b" has no static GLSL type/
     );
   });
 
   it('WGSL: the same', () => {
     const ce = engineWithImpureBody('(tuple<boolean,boolean>) -> real');
     expect(() => wgsl.compile(ce.parse('f(p)'))).toThrow(
-      /f: parameter "b" has no static WGSL type/
+      /Could not compile `f`: parameter "b" has no static WGSL type/
     );
   });
 
@@ -743,7 +747,7 @@ describe('GPU USER FUNCTIONS — a vecN needs REAL components', () => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.expr(['Function', ['Tuple', 'True', 'False'], 'b']));
     expect(() => glsl.compile(ce.parse('f(p)'))).toThrow(
-      /f: the return value has no static GLSL type/
+      /Could not compile `f`: the return value has no static GLSL type/
     );
   });
 
@@ -840,7 +844,7 @@ describe('GPU MATCH — the SUBJECT is unconditional', () => {
         ] as any),
         NO_FOLD
       )
-    ).toThrow(/Match: a conditionally-evaluated branch/);
+    ).toThrow(/Could not compile `Match`: a conditionally-evaluated branch/);
   });
 });
 
@@ -906,9 +910,9 @@ describe('GPU USER FUNCTIONS — the caller-declared parameter types are authori
     expect(() =>
       glsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [['v', 'vec2']])
     ).toThrow(
-      'h: argument 1 `v` lowers to "vec2" but parameter "w" is declared ' +
+      'Could not compile `h`: argument 1 `v` lowers to "vec2" but parameter "w" is declared ' +
         '"float" — GLSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h". Fail closed (D6).'
+        'matching signature for "h".'
     );
   });
 
@@ -917,9 +921,9 @@ describe('GPU USER FUNCTIONS — the caller-declared parameter types are authori
     expect(() =>
       wgsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [['v', 'vec2']])
     ).toThrow(
-      'h: argument 1 `v` lowers to "vec2f" but parameter "w" is declared ' +
+      'Could not compile `h`: argument 1 `v` lowers to "vec2f" but parameter "w" is declared ' +
         '"f32" — WGSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h". Fail closed (D6).'
+        'matching signature for "h".'
     );
   });
 
@@ -988,9 +992,9 @@ describe('GPU USER FUNCTIONS — a caller-declared `bool` is a BOOLEAN, not a fl
     expect(() =>
       glsl.compileFunction(ce.parse('h(b)'), 'wrap', 'float', [['b', 'bool']])
     ).toThrow(
-      'h: argument 1 `b` lowers to "bool" but parameter "w" is declared ' +
+      'Could not compile `h`: argument 1 `b` lowers to "bool" but parameter "w" is declared ' +
         '"float" — GLSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h". Fail closed (D6).'
+        'matching signature for "h".'
     );
   });
 
@@ -999,9 +1003,9 @@ describe('GPU USER FUNCTIONS — a caller-declared `bool` is a BOOLEAN, not a fl
     expect(() =>
       wgsl.compileFunction(ce.parse('h(b)'), 'wrap', 'float', [['b', 'bool']])
     ).toThrow(
-      'h: argument 1 `b` lowers to "bool" but parameter "w" is declared ' +
+      'Could not compile `h`: argument 1 `b` lowers to "bool" but parameter "w" is declared ' +
         '"f32" — WGSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h". Fail closed (D6).'
+        'matching signature for "h".'
     );
   });
 
@@ -1055,9 +1059,9 @@ describe('GPU USER FUNCTIONS — a shader input/uniform is framed like a paramet
         body: [{ variable: 'fragColor.r', expression: ce.parse('h(v)') }],
       })
     ).toThrow(
-      'h: argument 1 `v` lowers to "vec2" but parameter "w" is declared ' +
+      'Could not compile `h`: argument 1 `v` lowers to "vec2" but parameter "w" is declared ' +
         '"float" — GLSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h". Fail closed (D6).'
+        'matching signature for "h".'
     );
   });
 
@@ -1083,9 +1087,9 @@ describe('GPU USER FUNCTIONS — a shader input/uniform is framed like a paramet
         body: [{ variable: 'output.color.r', expression: ce.parse('h(v)') }],
       })
     ).toThrow(
-      'h: argument 1 `v` lowers to "vec2f" but parameter "w" is declared ' +
+      'Could not compile `h`: argument 1 `v` lowers to "vec2f" but parameter "w" is declared ' +
         '"f32" — WGSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h". Fail closed (D6).'
+        'matching signature for "h".'
     );
   });
 
@@ -1212,9 +1216,9 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
     expect(() =>
       glsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [['v', 'bvec2']])
     ).toThrow(
-      'h: argument 1 `v` lowers to "bvec2" but parameter "w" is declared ' +
+      'Could not compile `h`: argument 1 `v` lowers to "bvec2" but parameter "w" is declared ' +
         '"float" — GLSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h". Fail closed (D6).'
+        'matching signature for "h".'
     );
   });
 
@@ -1234,9 +1238,9 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
         ['v', 'vec2<i32>'],
       ])
     ).toThrow(
-      'h: argument 1 `v` lowers to "vec2<i32>" but parameter "w" is declared ' +
+      'Could not compile `h`: argument 1 `v` lowers to "vec2<i32>" but parameter "w" is declared ' +
         '"vec2f" — WGSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h". Fail closed (D6).'
+        'matching signature for "h".'
     );
   });
 
@@ -1281,10 +1285,10 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
     expect(() =>
       glsl.compileFunction(ce.parse('h(m)'), 'wrap', 'float', [['m', 'mat4']])
     ).toThrow(
-      'h: argument 1 `m` is declared "mat4" by the caller — a type with no ' +
+      'Could not compile `h`: argument 1 `m` is declared "mat4" by the caller — a type with no ' +
         'static GLSL value shape here (only scalars, booleans and 2–4 ' +
         'component vectors have one), so it cannot be matched against ' +
-        'parameter "w" (declared "float"). Fail closed (D6).'
+        'parameter "w" (declared "float").'
     );
   });
 
@@ -1434,10 +1438,10 @@ describe('GPU USER FUNCTIONS — a WGSL shader input is a struct FIELD', () => {
         body: [{ variable: 'output.color.r', expression: ce.parse('1') }],
       })
     ).toThrow(
-      'Shader declaration "v" is declared more than once (as an input and as ' +
-        'a uniform): two storage classes cannot share one name, and a body ' +
-        'referencing it names neither unambiguously. Rename one of them. ' +
-        'Fail closed (D6).'
+      'Could not compile: the shader declaration `v` is declared more than ' +
+        'once (as an input and as a uniform): two storage classes cannot ' +
+        'share one name, and a body referencing it names neither ' +
+        'unambiguously. Rename one of them.'
     );
   });
 
@@ -1451,6 +1455,6 @@ describe('GPU USER FUNCTIONS — a WGSL shader input is a struct FIELD', () => {
         outputs: [{ name: 'fragColor', type: 'vec4' }],
         body: [{ variable: 'fragColor.r', expression: ce.parse('1') }],
       })
-    ).toThrow(/"v" is declared more than once/);
+    ).toThrow(/`v` is declared more than once/);
   });
 });

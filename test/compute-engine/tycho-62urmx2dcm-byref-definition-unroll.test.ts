@@ -558,7 +558,7 @@ describe('BY-REFERENCE DEFINITION UNROLL — shadowing', () => {
         to: 'javascript',
         fallback: false,
       } as any)
-    ).toThrow(/^Vsh: cannot compile/);
+    ).toThrow(/^Could not compile `Vsh`: /);
 
     const fallback: any = compile(ce.box(['qsh', 'u', 'u']), {
       to: 'javascript',

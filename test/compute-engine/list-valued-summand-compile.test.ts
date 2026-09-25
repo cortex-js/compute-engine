@@ -352,7 +352,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
       constantFold: false,
     } as any);
     expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(/collection-valued body does not compile/);
+    expect((r as any).error).toMatch(/collection-valued body has no compiled form/);
   });
 
   test.each(NON_JS)('%s declines the `A(t)` wrapper form', (to) => {
@@ -370,7 +370,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
     // gate. That decline is pre-existing and independent of this fix.
     if (to !== 'python')
       expect((r as any).error).toMatch(
-        /collection-valued body does not compile/
+        /collection-valued body has no compiled form/
       );
   });
 
@@ -551,7 +551,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
       // not regress is the untangling: the decline is never the
       // contradicted-declaration message, which blames the author for a lie
       // they did not write.
-      expect((r as any).error).toMatch(/collection-valued body does not compile/);
+      expect((r as any).error).toMatch(/collection-valued body has no compiled form/);
       expect((r as any).error).not.toMatch(CONTRADICTED);
     }
   );
@@ -613,7 +613,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
         { to, fallback: true, constantFold: false } as any
       );
       expect(r?.success ?? false).toBe(false);
-      expect((r as any).error).toMatch(/collection-valued body does not compile/);
+      expect((r as any).error).toMatch(/collection-valued body has no compiled form/);
       expect((r as any).error).not.toMatch(CONTRADICTED);
     }
   );

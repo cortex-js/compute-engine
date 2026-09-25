@@ -239,7 +239,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
       ],
       to
     );
-    expect(r.declined).toMatch(/Fail closed/);
+    expect(r.declined).toMatch(/Could not compile/);
   });
 
   test('a list of points of one arity is an array of vectors', () => {

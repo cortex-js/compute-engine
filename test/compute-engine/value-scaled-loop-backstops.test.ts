@@ -190,7 +190,7 @@ describe('the compiled lane is bounded by the same caps', () => {
     ]) {
       expect(() =>
         compile(ce.box(json as any), { fallback: false, constantFold: false })
-      ).toThrow(/Fail closed/);
+      ).toThrow(/Could not compile/);
     }
   });
 

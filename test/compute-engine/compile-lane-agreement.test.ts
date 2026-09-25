@@ -49,7 +49,7 @@ describe('A `Typed` ascription and the lane of its value', () => {
       expect(() =>
         compile(expr, { to: 'javascript', mode, fallback: false } as any)
       ).toThrow(
-        /Typed: the value `w\^2` is complex, but its ascribed type `real` says it is real\..*\(unknown\) -> complex/s
+        /Could not compile `Typed`: the value `w\^2` is complex, but its ascribed type `real` says it is real\..*\(unknown\) -> complex/s
       );
     });
 
@@ -110,7 +110,7 @@ describe('Real-only lowerings over a statically non-real operand', () => {
             mode,
             fallback: false,
           } as any)
-        ).toThrow(/cannot compile over the non-real operand/);
+        ).toThrow(/is certainly not a real number/);
       });
 
   // A `complex`-typed symbol MAY hold a real value, so it keeps the run-time
@@ -142,7 +142,9 @@ describe('Real-only lowerings over a statically non-real operand', () => {
           to,
           fallback: false,
         } as any)
-      ).toThrow(/Erf: the target's lowering for this head is real-only/);
+      ).toThrow(
+        /Could not compile `Erf`: the target's lowering for this head is real-only/
+      );
   });
 
   // `GammaLn` is not listed: `scipy.special.loggamma` takes a different

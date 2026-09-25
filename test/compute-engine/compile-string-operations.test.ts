@@ -221,7 +221,7 @@ describe('D8 lock: an operator with NO lowering entry declines on every target',
         constantFold: false,
       } as never);
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/NumberFrom: cannot compile/);
+      expect(r.error).toMatch(/Could not compile `NumberFrom`: /);
       expect(r.error).toMatch(/no lowering for it/);
     }
   );
@@ -1142,7 +1142,7 @@ describe('D8: every Phase-2 operator fails closed on the Python target', () => {
     // for it") or an operator-specific fail-closed gate the Python target
     // already carries — `Join` has one, naming the grapheme-segmentation
     // capability Python's stdlib lacks. Both are the D6 refusal.
-    expect(r.error).toMatch(/target 'python'|Fail closed \(D6\)/);
+    expect(r.error).toMatch(/target 'python'|Could not compile/);
   });
 
   test('Python keeps its SCALAR string support', () => {

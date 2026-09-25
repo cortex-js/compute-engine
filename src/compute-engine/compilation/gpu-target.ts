@@ -42,7 +42,7 @@ import type {
   CompilationResult,
   StorageKind,
 } from './types.js';
-import { compileDiagnosticOf } from './diagnostics.js';
+import { compileDiagnosticOf, compileSubject } from './diagnostics.js';
 import { colorSpaceIsUnsettled, colorSpaceOf } from './color-space-fact.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
@@ -260,7 +260,7 @@ const GLSL_RESERVED: ReadonlySet<string> = new Set([
 
 /**
  * WGSL reserved words + keywords. As with GLSL, a user variable matching one of
- * these cannot be emitted bare; the target fails closed (D6).
+ * these cannot be emitted bare; the target fails closed.
  */
 const WGSL_RESERVED: ReadonlySet<string> = new Set([
   // keywords
@@ -387,7 +387,7 @@ function gpuReservedWords(language?: string): ReadonlySet<string> {
 }
 
 /**
- * Fail closed (D6) if `id` is a reserved word in the target shader language.
+ * Fail closed if `id` is a reserved word in the target shader language.
  * A user variable / loop index carrying a reserved name would emit source that
  * fails to compile on the GPU — surface a clear diagnostic instead. Returns the
  * identifier unchanged when it is safe.
@@ -401,7 +401,7 @@ function gpuCheckIdentifier(id: string, language?: string): string {
 }
 
 /**
- * Fail closed (D6) when the compiled shader body `body` places a `return`
+ * Fail closed when the compiled shader body `body` places a `return`
  * anywhere but at the start of a statement.
  *
  * `Return` is emitted by the base compiler as the bare statement `return <v>`,
@@ -444,20 +444,20 @@ function gpuAssertReturnPlacement(
     for (const m of line.matchAll(/\breturn\b/g)) {
       if (!singleLine && m.index === start) continue;
       throw new Error(
-        `${subject}: an early \`Return\` here has no ` +
+        `Could not compile ${compileSubject(subject)}: an early \`Return\` here has no ` +
           `${language.toUpperCase()} lowering — the emitted source would place ` +
           `a \`return\` where the language requires an expression ` +
           `(\`${line.trim()}\`). A shader function returns once, at the end of ` +
           `its body, so a \`Return\` inside a conditional — or one that IS the ` +
           `body's final value — cannot be emitted. Rewrite it as a conditional ` +
-          `VALUE, or evaluate instead. Fail closed (D6).`
+          `VALUE, or evaluate instead.`
       );
     }
   }
 }
 
 /**
- * Fail closed (D6) when `code`, produced by an **expression-only** route, is
+ * Fail closed when `code`, produced by an **expression-only** route, is
  * not a single expression of the target language.
  *
  * `compileToSource()` answers with a bare expression string, and each
@@ -496,19 +496,19 @@ function gpuAssertExpressionOnly(
   const lang = language.toUpperCase();
   const excerpt = (multiStatement ? code.split('\n')[0] : code).trim();
   throw new Error(
-    `${subject}: this route emits a single ${lang} EXPRESSION, but the body ` +
+    `Could not compile ${compileSubject(subject)}: this route emits a single ${lang} EXPRESSION, but the body ` +
       `lowers to ${
         multiStatement ? 'a statement sequence' : 'a bare `return` statement'
       } (\`${excerpt}${multiStatement ? '…' : ''}\`). ${lang} has no ` +
       `expression-level block or immediately-invoked function to wrap ` +
       `statements in, so there is no valid emission for this position. ` +
       `Compile a statement body with compile() instead — that route emits a ` +
-      `function body. Fail closed (D6).`
+      `function body.`
   );
 }
 
 /**
- * Fail closed (D6) on an expression-only GPU route whose body is STRUCTURALLY a
+ * Fail closed on an expression-only GPU route whose body is STRUCTURALLY a
  * statement — an assignment (WGSL only) or a declaration (both languages).
  *
  * `gpuAssertExpressionOnly` scans the emitted source for the two signals a
@@ -546,21 +546,21 @@ export function gpuAssertExpressionBody(
   if (head === 'Assign') {
     if (language !== 'wgsl') return;
     throw new Error(
-      `${subject}: this route emits a single WGSL EXPRESSION, but the body is ` +
+      `Could not compile ${compileSubject(subject)}: this route emits a single WGSL EXPRESSION, but the body is ` +
         `an assignment. WGSL assignment is a STATEMENT (unlike GLSL, where it ` +
         `is an operator), so the emitted \`… = <target> = <value>\` is not ` +
         `valid source. Compile a statement body with compile() instead — that ` +
-        `route emits a function body. Fail closed (D6).`
+        `route emits a function body.`
     );
   }
   throw new Error(
-    `${subject}: this route emits a single ${lang} EXPRESSION, but the body ` +
+    `Could not compile ${compileSubject(subject)}: this route emits a single ${lang} EXPRESSION, but the body ` +
       `is a declaration. A declaration is a STATEMENT in ${lang}, so the ` +
       `emitted \`${language === 'wgsl' ? 'var s: f32' : 'float s'}\`-shaped ` +
       `source is not valid in an expression position — and it carries no ` +
       `initializer, so the declared value would be silently DROPPED. Compile ` +
       `a statement body with compile() instead — that route emits a function ` +
-      `body. Fail closed (D6).`
+      `body.`
   );
 }
 
@@ -691,25 +691,24 @@ function gpuColorOperand(
 ): string {
   if (isFunction(color, 'List'))
     throw new Error(
-      `${head}: a list is not a color — a color operand must be a color, a ` +
-        `color string or a tuple of 3 or 4 components. Fail closed (D6).`
+      `Could not compile \`${head}\`: a list is not a color — a color operand must be a color, a ` +
+        `color string or a tuple of 3 or 4 components.`
     );
   if (!isFunction(color) || color.operator !== 'Tuple') {
     if (isProvablyTupleParticipant(color))
       throw new Error(
-        `${head}: this operator takes a COLOR, and a tuple is color ` +
+        `Could not compile \`${head}\`: this operator takes a COLOR, and a tuple is color ` +
           `COMPONENTS, not a color. Build a color from the components ` +
           `first — \`AsRgb((r, g, b))\` reads them as 0-1 sRGB, and ` +
           `\`ColorFromColorspace(components, space)\` reads them in any ` +
-          `named space. Fail closed (D6).`
+          `named space.`
       );
     if (colorSpaceIsUnsettled(color))
       throw new Error(
-        `${head}: cannot settle the color space of the operand at compile ` +
+        `Could not compile \`${head}\`: cannot settle the color space of the operand at compile ` +
           `time — it holds a converted color at one of the positions its ` +
           `value comes from, and a shader color is a bare vector with no ` +
-          `run-time tag, so the channels cannot be converted back to OKLCh. ` +
-          `Fail closed (D6).`
+          `run-time tag, so the channels cannot be converted back to OKLCh.`
       );
     // A free symbol read here is a colour: the emitted code reads it as a
     // `vec3`, whatever its engine type says (see `gpuColorSymbolReads`).
@@ -720,9 +719,8 @@ function gpuColorOperand(
   const ops = color.ops;
   if (ops.length < 3 || ops.length > 4)
     throw new Error(
-      `${head}: a tuple of ${ops.length} components is not a color — a color ` +
-        `tuple has 3 components, or 4 with the fourth read as alpha. Fail ` +
-        `closed (D6).`
+      `Could not compile \`${head}\`: a tuple of ${ops.length} components is not a color — a color ` +
+        `tuple has 3 components, or 4 with the fourth read as alpha.`
     );
   assertNoGPUAlpha(head, ops);
   // The `vec3` constructor below is built here rather than by the `Tuple`
@@ -779,9 +777,8 @@ function gpuColorEntryOperand(
     if (width === 4) refuseGPUAlpha(head);
     if (width !== undefined && width !== 3)
       throw new Error(
-        `${head}: a tuple of ${width} components is not a color — color ` +
-          `components are 3 channels, or 4 with the fourth read as alpha. ` +
-          `Fail closed (D6).`
+        `Could not compile \`${head}\`: a tuple of ${width} components is not a color — color ` +
+          `components are 3 channels, or 4 with the fourth read as alpha.`
       );
     return `_gpu_srgb_to_oklch(${compile(color)})`;
   }
@@ -816,7 +813,7 @@ function gpuToOklch(
 }
 
 /**
- * Fail closed (D6) on a color constructor given a 4th (alpha) operand.
+ * Fail closed on a color constructor given a 4th (alpha) operand.
  *
  * The whole `_gpu_*` color chain — `srgb_to_oklch`, `oklch_to_srgb`,
  * `hsl_to_rgb`, `hsv_to_rgb`, `oklab_to_oklch`, … — is `vec3` end to end, and
@@ -835,10 +832,10 @@ function assertNoGPUAlpha(head: string, args: ReadonlyArray<Expression>): void {
  *  (`gpuColorEntryOperand`). */
 function refuseGPUAlpha(head: string): never {
   throw new Error(
-    `${head}: an alpha (4th) operand is not representable on the GPU target — ` +
+    `Could not compile \`${head}\`: an alpha (4th) operand is not representable on the GPU target — ` +
       `color values are \`vec3\` (OKLCh) end to end, with no alpha channel. ` +
       `Drop the alpha operand and pass it separately (e.g. as a uniform) at ` +
-      `the framebuffer boundary. Fail closed (D6).`
+      `the framebuffer boundary.`
   );
 }
 
@@ -924,9 +921,9 @@ function gpuOperandOnce(
     (!complex && gpuOperandShape(x) !== 'scalar')
   )
     throw new Error(
-      `${head}: an impure (Random) operand cannot be bound to a temporary ` +
+      `Could not compile \`${head}\`: an impure (Random) operand cannot be bound to a temporary ` +
         'at this position — a repeated draw would shift every later value ' +
-        'in the shader. Fail closed (D6).'
+        'in the shader.'
     );
   const t = BaseCompiler.tempVar(target);
   const type = complex
@@ -1190,7 +1187,7 @@ export function gpuUniformVectorWidth(
  * `vec2(t, vec2(0.0, t))`: three components into a two-component constructor,
  * which a driver rejects with "constructor: too many arguments". Neither is
  * there a correct flattening — a tuple whose element is complex is not a GPU
- * vector — so fail closed (D6) with a diagnostic naming the shape instead of
+ * vector — so fail closed with a diagnostic naming the shape instead of
  * emitting shader source that cannot compile.
  *
  * The check is on AGGREGATE-ness, not on having a `vecN` lowering: a 1- or
@@ -1210,8 +1207,8 @@ export function assertGPUScalarComponents(
 ): void {
   if (args.length === 0)
     throw new Error(
-      `${ctor}: an empty tuple/list has no GPU lowering — neither GLSL nor ` +
-        `WGSL has a zero-length array type. Fail closed.`
+      `Could not compile \`${ctor}\`: an empty tuple/list has no GPU lowering — neither GLSL nor ` +
+        `WGSL has a zero-length array type.`
     );
   for (const [i, arg] of args.entries()) {
     if (!BaseCompiler.isNonScalarShape(arg)) continue;
@@ -1222,9 +1219,9 @@ export function assertGPUScalarComponents(
         : `${n} component${n === 1 ? '' : 's'} — a complex value or a ` +
           `nested tuple/list`;
     throw new Error(
-      `${ctor}: element ${i + 1} (\`${arg.toString()}\`) is itself ` +
+      `Could not compile \`${ctor}\`: element ${i + 1} (\`${arg.toString()}\`) is itself ` +
         `vector-valued (${shape}) and has no GPU ` +
-        `lowering; a ${ctor} constructor takes scalar components. Fail closed.`
+        `lowering; a ${ctor} constructor takes scalar components.`
     );
   }
 }
@@ -1580,7 +1577,7 @@ function gpuArmSharesWork(e: Expression): boolean {
  * That is not merely a cost: `_gpu_rnd_draw(seed, inout uint n)` advances a
  * RUNTIME counter, so a loop stranded ahead of a ternary it never feeds shifts
  * the value of every later draw in the shader — a silent disagreement with the
- * interpreter, which evaluates only the taken branch. Fail closed (D6); the
+ * interpreter, which evaluates only the taken branch. Fail closed; the
  * caller falls back to interpretation, exactly as it did before hoisting
  * existed.
  *
@@ -1615,12 +1612,12 @@ function compileGPUConditionalArm(
     // reusing the target must not inherit orphaned code.
     sink.stmts.length = before;
     throw new Error(
-      `${head}: a conditionally-evaluated branch contains a multi-statement ` +
+      `Could not compile \`${head}\`: a conditionally-evaluated branch contains a multi-statement ` +
         `construct (a loop-form Sum/Product, or an impure operand bound to a ` +
         `hoisted temporary). Hoisting it out of the branch would run it ` +
         `unconditionally — a shader conditional is an expression, not a ` +
         `statement — which changes the result whenever the branch draws ` +
-        `from the random stream. Fail closed (D6).`
+        `from the random stream.`
     );
   }
   return code;
@@ -1706,9 +1703,9 @@ function gpuIsTupleShaped(expr: Expression): boolean {
   return typeof t !== 'string' && t.kind === 'tuple';
 }
 
-/** Fail closed (D6) on a shape the element-wise selection cannot render. */
+/** Fail closed on a shape the element-wise selection cannot render. */
 /**
- * Fail closed (D6) when a value arm of a selection is a WRITTEN list or
+ * Fail closed when a value arm of a selection is a WRITTEN list or
  * tuple that lowers to a shader ARRAY — a list of points (`vec2[2](…)`) or
  * a list of five or more scalars: GLSL's ternary and WGSL's `select` take
  * scalars and vectors, and neither language selects between arrays. Only
@@ -1724,15 +1721,15 @@ function gpuAssertSelectableArms(
     if (!isFunction(value, 'List') && !isFunction(value, 'Tuple')) continue;
     if (gpuOperandShape(value) !== 'array') continue;
     throw new Error(
-      `${head}: the value \`${value.toString()}\` lowers to a shader ARRAY, ` +
+      `Could not compile \`${head}\`: the value \`${value.toString()}\` lowers to a shader ARRAY, ` +
         `and a selection (a GLSL ternary, a WGSL \`select\`) chooses between ` +
-        `scalars or vectors only. Fail closed (D6).`
+        `scalars or vectors only.`
     );
   }
 }
 
 function gpuSelectionDecline(reason: string): never {
-  throw new Error(`Which: ${reason} Fail closed (D6).`);
+  throw new Error(`Could not compile \`Which\`: ${reason}`);
 }
 
 /**
@@ -1772,9 +1769,9 @@ function gpuSelectionArm(
   const scalar = gpuOperandShape(value) === 'scalar';
   if (!scalar || !couldMatch(value.type.type, 'number'))
     throw new Error(
-      `${head}: the value \`${value.toString()}\` is not a ` +
+      `Could not compile \`${head}\`: the value \`${value.toString()}\` is not a ` +
         `${scalar ? 'number' : 'scalar'}, and another value of the ` +
-        `selection is complex. Fail closed (D6).`
+        `selection is complex.`
     );
   return `${gpuVec2(target)}(${code}, 0.0)`;
 }
@@ -2021,7 +2018,8 @@ function gpuSelectionMask(
   if (h === 'And' || h === 'Or' || h === 'Not') {
     const masks = ops.map((op) => gpuSelectionMask(op, n, compile, target));
     if (h === 'Not') {
-      if (masks.length !== 1) throw new Error('Not: expected one argument');
+      if (masks.length !== 1)
+        throw new Error('Could not compile `Not`: expected one argument');
       return target.language === 'wgsl'
         ? `(!(${masks[0]}))`
         : `not(${masks[0]})`;
@@ -2175,7 +2173,7 @@ function compileGPUSelection(
  * activation gate as the element-wise selection lowering
  * (`gpuComponentCount`). Anything else (an unknown-length list, a matrix, a
  * 5+-element list, or a fixed-length list whose elements are not shader
- * floats) has no shader vector value at all, so it fails closed (D6) rather
+ * floats) has no shader vector value at all, so it fails closed rather
  * than emitting source a driver would reject.
  *
  * The EMITTED lowering is then checked for componentwise safety: most scalar
@@ -2192,7 +2190,7 @@ function compileGPUBroadcastUnary(
   }
 ): string {
   const decline = (reason: string): never => {
-    throw new Error(`${head}: ${reason} Fail closed (D6).`);
+    throw new Error(`Could not compile \`${head}\`: ${reason}`);
   };
   // A complex value is ALSO lowered as a `vec2` (of re, im), so it must be
   // recognized BEFORE the width or it masquerades as a 2-cell collection —
@@ -3062,7 +3060,7 @@ function gpuCheckOperandShapes(
   // follows it: the positional check below reads a rule the preceding
   // `decline` has already ruled out as absent.
   const decline: (reason: string) => never = (reason) => {
-    throw new Error(`${head}: ${reason} Fail closed (D6).`);
+    throw new Error(`Could not compile \`${head}\`: ${reason}`);
   };
 
   // A slot with no SCALAR overload at all — the mirror of
@@ -3420,7 +3418,9 @@ function foldNaryBuiltin(
   rules: GPUShapeRules | undefined
 ): string {
   if (args.length === 0)
-    throw new Error(`${name}: needs at least one argument`);
+    throw new Error(
+      `Could not compile \`${name}\`: needs at least one argument`
+    );
   if (args.length === 1) return compile(args[0]);
   const shapes = args.map(gpuOperandShape);
   const slots = rules?.scalarGenTypeSlots.get(name);
@@ -3440,11 +3440,10 @@ function foldNaryBuiltin(
       );
       if (bad >= 0)
         throw new Error(
-          `${head}: the shader builtin \`${name}\` takes a scalar only ` +
+          `Could not compile \`${head}\`: the shader builtin \`${name}\` takes a scalar only ` +
             `${gpuSlotNames(slots!)}, but the emitted call \`${acc}\` has a ` +
             `scalar in argument ${bad + 1}, where the overload requires the ` +
-            `\`vecN\` genType; the scalar is not promoted to a vector. ` +
-            `Fail closed (D6).`
+            `\`vecN\` genType; the scalar is not promoted to a vector.`
         );
     }
     // The accumulator is a vector as soon as any operand folded into it is.
@@ -3520,7 +3519,9 @@ function compileGPUExtremum(
   target: CompileTarget<Expression>
 ): string {
   if (args.length === 0)
-    throw new Error(`${head}: needs at least one argument`);
+    throw new Error(
+      `Could not compile \`${head}\`: needs at least one argument`
+    );
   const shapes = args.map(gpuOperandShape);
   // An EMPTY collection contributes nothing to the fold. Recognized BEFORE the
   // operand is compiled: `[]` lowers to `float[0]()` / `array<f32, 0>()`, which
@@ -3565,11 +3566,11 @@ function compileGPUExtremum(
     const comps = gpuScalarComponents(args[i], codes[i], target);
     if (comps === undefined)
       throw new Error(
-        `${head}: the operand \`${args[i].toString()}\` lowers to a shader ` +
+        `Could not compile \`${head}\`: the operand \`${args[i].toString()}\` lowers to a shader ` +
           `${gpuShapeName(shapes[i])} with no compile-time component list, so ` +
           `there is nothing for the reduction to fold over — a shader has no ` +
           `dynamic iteration here, and the \`${name}\` builtin is ` +
-          `componentwise, not a reduction. Fail closed (D6).`
+          `componentwise, not a reduction.`
       );
     parts.push(...comps);
   }
@@ -3710,7 +3711,7 @@ function compilePointListProjection(
  * Compile a point-coordinate accessor (`PointX`/`PointY`/`PointZ`) as a GPU
  * swizzle. A single point is a `vec2`/`vec3`/`vec4`, so `.x`/`.y`/`.z` is
  * valid. A *list* of points is not a GPU value — a swizzle on it is invalid
- * shader source, so a list-of-points operand fails closed (D6) rather than
+ * shader source, so a list-of-points operand fails closed rather than
  * silently emitting garbage; the one exception is a symbolic `PointList`
  * application, whose coordinate IS a `vecN` (`compilePointListProjection`). A
  * tuple type also matches `indexed_collection`, so the single-point case is
@@ -3752,9 +3753,8 @@ function compilePointSwizzle(
     const projected = compilePointListProjection(arg, idx, compile, target);
     if (typeof projected === 'string') return projected;
     throw new Error(
-      `Point${comp.toUpperCase()}: a list of points has no GPU lowering ` +
-        `(a point must be a single vec2/vec3/vec4): ${projected.decline}. ` +
-        `Fail closed.`
+      `Could not compile \`Point${comp.toUpperCase()}\`: a list of points has no GPU lowering ` +
+        `(a point must be a single vec2/vec3/vec4): ${projected.decline}.`
     );
   }
   // A stated point arity makes an out-of-range coordinate a static error:
@@ -3763,9 +3763,8 @@ function compilePointSwizzle(
   // `tuple` states no arity and keeps the emission.
   if (pointArity !== undefined && pointArity <= idx)
     throw new Error(
-      `Point${comp.toUpperCase()}: the point has arity ${pointArity} ` +
-        `— no ${['first', 'second', 'third'][idx]} coordinate. ` +
-        `Fail closed (D6).`
+      `Could not compile \`Point${comp.toUpperCase()}\`: the point has arity ${pointArity} ` +
+        `— no ${['first', 'second', 'third'][idx]} coordinate.`
     );
   return gpuSwizzle(compile(arg), comp);
 }
@@ -4375,7 +4374,7 @@ function gpuAtEntryKind(e: Expression): GPUAtEntry {
 
 /**
  * `At` on a shader target. Returns the emitted source or throws the
- * fail-closed (D6) decline, which names the shape that has no lowering.
+ * fail-closed decline, which names the shape that has no lowering.
  */
 function compileGPUAt(
   args: ReadonlyArray<Expression>,
@@ -4385,7 +4384,7 @@ function compileGPUAt(
   // Annotated (rather than inferred) so a `decline(…)` call narrows what
   // follows it — the `gpuCheckOperandShapes` convention.
   const decline: (reason: string) => never = (reason) => {
-    throw new Error(`At: ${reason}. Fail closed (D6).`);
+    throw new Error(`Could not compile \`At\`: ${reason}.`);
   };
 
   if (args.length < 2) decline('it has no index operand');
@@ -4787,7 +4786,7 @@ function gpuStorageOperandSource(
 }
 
 /**
- * Fail closed (D6) when the free symbol `id` is one the caller's `storage`
+ * Fail closed when the free symbol `id` is one the caller's `storage`
  * hint places in shader storage and it is being referenced anywhere but as
  * the operand of a positional read. A texture has no shader value of its own:
  * as an operand of arithmetic, a reduction, a user-function argument, an
@@ -4803,12 +4802,12 @@ function gpuRefuseStorageReference(
   const kind = storage.get(id);
   if (kind === undefined || gpuOpenStorageOperand === id) return;
   throw new Error(
-    `The symbol \`${id}\` is ${kind}-backed (compile option ` +
+    `Could not compile \`${id}\`: the symbol is ${kind}-backed (compile option ` +
       `\`storage: { ${id}: '${kind}' }\`), and a texture has no shader value ` +
       `of its own on the ${language} target: it can be read only through a ` +
       `positional access (\`At(${id}, i)\`). Here it is referenced as a whole ` +
       `— as an operand, in a reduction, or as a bare value — which has no ` +
-      `lowering. Fail closed (D6).`
+      `lowering.`
   );
 }
 
@@ -5040,9 +5039,8 @@ function compileIntArg(
   // iteration count of `_fractal_mandelbrot`).
   if (BaseCompiler.isComplexValued(expr))
     throw new Error(
-      `${head}: the integer operand \`${expr.toString()}\` is complex, and a shader ` +
-        `has no conversion from a complex value to an integer. Fail closed ` +
-        `(D6).`
+      `Could not compile \`${head}\`: the integer operand \`${expr.toString()}\` is complex, and a shader ` +
+        `has no conversion from a complex value to an integer.`
     );
   const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
   return `${intCast}(${compile(expr)})`;
@@ -5052,7 +5050,7 @@ function compileIntArg(
 const GPU_UNROLL_LIMIT = 100;
 
 /**
- * Fail closed (D6) on a Sum/Product bound that is statically non-finite (a
+ * Fail closed on a Sum/Product bound that is statically non-finite (a
  * `±∞`/`NaN` literal, or an expression typed `infinity` or `nan`), so
  * `compile()` reports failure and the caller falls back to the interpreter.
  * `for (int i = 1; i <= _gpu_inf(); i++)` has no terminating condition (and is
@@ -5070,9 +5068,8 @@ function assertFiniteGPUBound(
     expr.type.matches('nan');
   if (!nonFinite) return;
   throw new Error(
-    `${kind}: the ${which} bound \`${expr.toString()}\` is not a finite ` +
-      `number — an infinite or NaN bound has no terminating loop. ` +
-      `Fail closed (D6).`
+    `Could not compile \`${kind}\`: the ${which} bound \`${expr.toString()}\` is not a finite ` +
+      `number — an infinite or NaN bound has no terminating loop.`
   );
 }
 
@@ -5160,23 +5157,21 @@ const GPU_BINOMIAL_UNROLL_LIMIT = 8;
  */
 const gpuBinomial: CompiledFunction<Expression> = ([n, k], compile, target) => {
   if (n === null || n === undefined || k === null || k === undefined)
-    throw new Error('Binomial: need two arguments');
+    throw new Error('Could not compile `Binomial`: need two arguments');
   const kConst = tryGetConstant(k);
   if (kConst === undefined || !Number.isInteger(kConst) || kConst < 0)
     throw new Error(
-      `Binomial: only a literal non-negative integer second operand ` +
-        `compiles — anything else is inert in the interpreter. ` +
-        `Fail closed (D6).`
+      `Could not compile \`Binomial\`: only a literal non-negative integer second operand ` +
+        `compiles — anything else is inert in the interpreter.`
     );
   if (kConst > GPU_BINOMIAL_UNROLL_LIMIT)
     throw new Error(
-      `Binomial: a second operand above ${GPU_BINOMIAL_UNROLL_LIMIT} would ` +
-        `unroll to ${kConst} factors. Fail closed (D6).`
+      `Could not compile \`Binomial\`: a second operand above ${GPU_BINOMIAL_UNROLL_LIMIT} would ` +
+        `unroll to ${kConst} factors.`
     );
   if (BaseCompiler.isComplexValued(n))
     throw new Error(
-      `Binomial: a complex first operand has no GPU lowering. ` +
-        `Fail closed (D6).`
+      `Could not compile \`Binomial\`: a complex first operand has no GPU lowering.`
     );
   // A statically non-finite first operand declines. The interpreter answers
   // every infinite point from its own limit table — `C(±∞, 0) = 1`,
@@ -5195,8 +5190,8 @@ const gpuBinomial: CompiledFunction<Expression> = ([n, k], compile, target) => {
     n.type.matches('nan')
   )
     throw new Error(
-      `Binomial: a statically non-finite first operand evaluates to NaN in ` +
-        `the interpreter, not a falling factorial. Fail closed (D6).`
+      `Could not compile \`Binomial\`: a statically non-finite first operand evaluates to NaN in ` +
+        `the interpreter, not a falling factorial.`
     );
   if (kConst === 0) {
     // `Binomial(x, 0)` is 1 — but the interpreter still EVALUATES the first
@@ -5206,9 +5201,8 @@ const gpuBinomial: CompiledFunction<Expression> = ([n, k], compile, target) => {
     // here, so an impure operand declines instead.
     if (n.isPure === false)
       throw new Error(
-        `Binomial: a second operand of 0 discards the first, but an impure ` +
-          `(Random) first operand is still drawn by the interpreter. ` +
-          `Fail closed (D6).`
+        `Could not compile \`Binomial\`: a second operand of 0 discards the first, but an impure ` +
+          `(Random) first operand is still drawn by the interpreter.`
       );
     return formatFloat(1, target.language);
   }
@@ -5248,7 +5242,7 @@ function gpuSquaredBase(expr: Expression): Expression | undefined {
  * statically known scalar components (`gpuScalarComponents`).
  *
  * A shader has no dynamic iteration, so everything without a compile-time
- * component list fails closed (D6): an unknown-length list, a matrix, and a
+ * component list fails closed: an unknown-length list, a matrix, and a
  * fixed-length list whose elements are not shader floats. So does a
  * statically SCALAR operand — the interpreter answers `Sum(x) = x` for one,
  * but a value that is not a collection at all reaching a reduction is a shape
@@ -5336,19 +5330,19 @@ function compileGPUCollectionReduce(
       (call !== undefined && GPU_AGGREGATE_CONSTRUCTOR.test(call.callee)));
   if (!isAggregate)
     throw new Error(
-      `${kind}: the operand \`${operand.toString()}\` is not a collection ` +
+      `Could not compile \`${kind}\`: the operand \`${operand.toString()}\` is not a collection ` +
         `(type \`${operand.type.toString()}\`), so there is nothing to ` +
         `reduce over — this is the collection form of ${kind}, which takes ` +
-        `no indexing set. Fail closed (D6).`
+        `no indexing set.`
     );
 
   const comps = gpuScalarComponents(operand, code, target);
   if (comps === undefined)
     throw new Error(
-      `${kind}: the operand \`${operand.toString()}\` lowers to a shader ` +
+      `Could not compile \`${kind}\`: the operand \`${operand.toString()}\` lowers to a shader ` +
         `${gpuShapeName(shape)} with no compile-time component list, so ` +
         `there is nothing for the reduction to fold over — a shader has no ` +
-        `dynamic iteration here. Fail closed (D6).`
+        `dynamic iteration here.`
     );
   // Each component is parenthesized, and so is the fold as a whole. A
   // component is a constructor ARGUMENT compiled at its own precedence, so its
@@ -5508,7 +5502,7 @@ function compileGPUSumProduct(
   _compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  if (!args[0]) throw new Error(`${kind}: no body`);
+  if (!args[0]) throw new Error(`Could not compile \`${kind}\`: no body`);
   // No indexing set: the operand IS the collection to reduce
   // (`Sum([3, 4, 5])`), not a body indexed by one.
   if (!args[1])
@@ -5522,20 +5516,22 @@ function compileGPUSumProduct(
 
   if (BaseCompiler.isComplexValued(args[0]))
     throw new Error(
-      `${kind}: complex-valued body not supported in GPU targets`
+      `Could not compile \`${kind}\`: complex-valued body not supported in GPU targets`
     );
 
   // Multi-index Sum/Product (more than one indexing set) would drop the
-  // trailing clauses. Fail closed (D6) rather than emit code with a dangling
+  // trailing clauses. Fail closed rather than emit code with a dangling
   // index.
   if (args.length > 2)
     throw new Error(
-      `${kind}: multi-index (${args.length - 1} indexing sets) is not supported in GPU targets`
+      `Could not compile \`${kind}\`: multi-index (${args.length - 1} indexing sets) is not supported in GPU targets`
     );
 
   const limitsExpr = args[1];
   if (!isFunction(limitsExpr, 'Limits'))
-    throw new Error(`${kind}: expected Limits indexing set`);
+    throw new Error(
+      `Could not compile \`${kind}\`: expected Limits indexing set`
+    );
 
   const limitsOps = limitsExpr.ops;
   const index = isSymbol(limitsOps[0]) ? limitsOps[0].symbol : '_';
@@ -5738,7 +5734,7 @@ function compileGPUSumProduct(
   // takes only a float, and `int(floor(float(K)))` is a needless round trip
   // — so such a bound is used bare (a `uint`/`u32` is converted with
   // `int(K)`/`i32(K)`, no flooring needed). A declared bound with any other
-  // type (`bool`, a vector) is no loop bound at all and fails closed (D6).
+  // type (`bool`, a vector) is no loop bound at all and fails closed.
   const boundCode = (bound: Expression, which: 'lower' | 'upper'): string => {
     const declared = gpuDeclaredTypeOf(bound);
     const value = declared?.value;
@@ -5756,9 +5752,9 @@ function compileGPUSumProduct(
     if (value !== undefined && value.width === 1 && value.element === 'u')
       return isWGSL ? `i32(${declared.ref})` : `int(${declared.ref})`;
     throw new Error(
-      `${kind}: the ${which} bound \`${bound.toString()}\` is declared ` +
+      `Could not compile \`${kind}\`: the ${which} bound \`${bound.toString()}\` is declared ` +
         `"${declared.spelling}" by the caller, which is not ` +
-        `a scalar number — a loop bound must be one. Fail closed (D6).`
+        `a scalar number — a loop bound must be one.`
     );
   };
   const lowerStr =
@@ -5998,7 +5994,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_gpu_cdiv(${v2}(${compile(args[0])}, 0.0), ${compile(args[1])})`;
   },
   Negate: ([x], compile, target) => {
-    if (x === null) throw new Error('Negate: no argument');
+    if (x === null) throw new Error('Could not compile `Negate`: no argument');
     const c = tryGetConstant(x);
     if (c !== undefined) return formatFloat(-c, target.language);
     if (isNumber(x) && x.im !== 0) {
@@ -6087,7 +6083,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Point-coordinate accessors. On the GPU a point is a `vec2`/`vec3`/`vec4`,
   // so a single point maps to the same swizzle as First/Second/Third. A list of
   // points is not a GPU value: emitting a swizzle on it produces invalid shader
-  // source, so a list-of-points operand fails closed (D6) rather than compiling
+  // source, so a list-of-points operand fails closed rather than compiling
   // to garbage behind `success: true`.
   PointX: (args, compile, target) =>
     compilePointSwizzle(args[0], 'x', compile, target),
@@ -6148,7 +6144,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // branch / NaN) — the JS target aligns via a runtime throw, which is not
   // expressible here.
   If: (args, compile, target) => {
-    if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    if (args.length !== 3)
+      throw new Error('Could not compile `If`: wrong number of arguments');
     gpuAssertSelectableArms('If', [args[1], args[2]]);
     // With one complex arm, a real arm is lifted to `vec2(v, 0.0)`.
     const complex = gpuSelectionIsComplex([args[1], args[2]]);
@@ -6192,7 +6189,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   When: (args, compile, target) => {
     if (args.length !== 2)
-      throw new Error('When: expected exactly 2 arguments (expr, cond)');
+      throw new Error(
+        'Could not compile `When`: expected exactly 2 arguments (expr, cond)'
+      );
     // `When` is deliberately NOT a selection form (elementwise-Which design
     // §5): its condition must be a scalar boolean. A provably collection-valued
     // condition would otherwise emit garbage (`(vec2(True, False)) ? …`).
@@ -6224,7 +6223,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
-      throw new Error('Which: expected condition/value pairs');
+      throw new Error(
+        'Could not compile `Which`: expected condition/value pairs'
+      );
     gpuAssertSelectableArms(
       'Which',
       args.filter((_, i) => i % 2 === 1)
@@ -6316,7 +6317,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // `==` comparisons, the subject inlined into each comparison (safe for a PURE
   // subject; an impure one is bound to a hoisted temporary instead — see
   // `BaseCompiler.compileMatchTernary`). Tier-2 destructuring, refutable
-  // tier-3, and string constants (no string type) fail closed (D6).
+  // tier-3, and string constants (no string type) fail closed.
   // `compileMatchTernary` compiles the pieces itself, so the no-hoist guard is
   // handed to it (`arm`) and applied PER PIECE — each case body, each case
   // guard, and each condition past the first — the way the `If`/`Which`
@@ -6333,7 +6334,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Power: (args, compile, target) => {
     const base = args[0];
     const exp = args[1];
-    if (base === null) throw new Error('Power: no argument');
+    if (base === null)
+      throw new Error('Could not compile `Power`: no argument');
     if (
       BaseCompiler.isComplexValued(base) ||
       BaseCompiler.isComplexValued(exp)
@@ -6551,24 +6553,24 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // a RUNTIME `n` is spec-defined as `exp2(n·log2(10.0))`, which is not
     // exactly a power of ten — it moves the very tie boundary the rounding it
     // scales for depends on — and neither language has an integer `pow` to
-    // fall back on. A non-constant precision therefore fails closed (D6), as
+    // fall back on. A non-constant precision therefore fails closed, as
     // it already does on the interval target.
     const n = tryGetConstant(args[1]);
     if (n === undefined || !Number.isInteger(n))
       throw new Error(
-        `Round: rounding to \`n\` decimal places compiles on the ` +
+        `Could not compile \`Round\`: rounding to \`n\` decimal places compiles on the ` +
           `${target.language ?? 'GPU'} target only for a compile-time ` +
           `INTEGER precision — the factor 10ⁿ has to be folded, because a ` +
           `shader \`pow(10.0, n)\` is \`exp2(n·log2(10.0))\` and is not ` +
-          `exactly a power of ten. Fail closed (D6).`
+          `exactly a power of ten.`
       );
     // 10ⁿ and its reciprocal must both be representable as a shader float
     // (f32 normals stop at ~3.4e38 / ~1.2e-38); past that the emitted literal
     // is an infinity and the whole expression collapses to 0 or NaN.
     if (Math.abs(n) > 37)
       throw new Error(
-        `Round: the rounding factor 10^${n} is outside the shader float ` +
-          `range. Fail closed (D6).`
+        `Could not compile \`Round\`: the rounding factor 10^${n} is outside the shader float ` +
+          `range.`
       );
     // An integer-valued operand is unchanged by rounding to a NON-NEGATIVE
     // number of decimal places (it is not, for a negative `n`, which rounds
@@ -6690,7 +6692,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   Remainder: ([a, b], compile, target) => {
     if (a === null || b === null)
-      throw new Error('Remainder: missing argument');
+      throw new Error('Could not compile `Remainder`: missing argument');
     // An IMPURE operand (the Random family) must be evaluated exactly once:
     // both operands are spliced twice, and `_gpu_rnd_draw` advances a runtime
     // counter, so a repeated draw returns a different value AND shifts every
@@ -6704,9 +6706,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         gpuOperandShape(b) !== 'scalar'
       )
         throw new Error(
-          'Remainder: an impure (Random) operand cannot be bound to a ' +
+          'Could not compile `Remainder`: an impure (Random) operand cannot be bound to a ' +
             'temporary at this position — a repeated draw would shift every ' +
-            'later value in the shader. Fail closed (D6).'
+            'later value in the shader.'
         );
       const ta = BaseCompiler.tempVar(target);
       const tb = BaseCompiler.tempVar(target);
@@ -6728,7 +6730,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Reciprocal trigonometric functions (no GPU built-ins)
   Cot: ([x], compile, target) => {
-    if (x === null) throw new Error('Cot: no argument');
+    if (x === null) throw new Error('Could not compile `Cot`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
       // The operand is spliced TWICE below, so an IMPURE one must first be
       // bound to a hoisted temporary — compiling it once is not enough, since
@@ -6737,9 +6739,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (x.isPure === false) {
         if (!BaseCompiler.canHoist(target))
           throw new Error(
-            'Cot: an impure (Random) complex operand cannot be bound to a ' +
+            'Could not compile `Cot`: an impure (Random) complex operand cannot be bound to a ' +
               'temporary at this position — a repeated draw would shift ' +
-              'every later value in the shader. Fail closed (D6).'
+              'every later value in the shader.'
           );
         const t = BaseCompiler.tempVar(target);
         const decl =
@@ -6760,9 +6762,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x.isPure === false) {
       if (!BaseCompiler.canHoist(target) || gpuOperandShape(x) !== 'scalar')
         throw new Error(
-          'Cot: an impure (Random) operand cannot be bound to a temporary ' +
+          'Could not compile `Cot`: an impure (Random) operand cannot be bound to a temporary ' +
             'at this position — a repeated draw would shift every later ' +
-            'value in the shader. Fail closed (D6).'
+            'value in the shader.'
         );
       const t = BaseCompiler.tempVar(target);
       const decl = target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
@@ -6773,7 +6775,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(cos(${arg}) / sin(${arg}))`;
   },
   Csc: ([x], compile, target) => {
-    if (x === null) throw new Error('Csc: no argument');
+    if (x === null) throw new Error('Could not compile `Csc`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csin(${compile(x)}))`;
@@ -6781,7 +6783,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(1.0 / sin(${compile(x)}))`;
   },
   Sec: ([x], compile, target) => {
-    if (x === null) throw new Error('Sec: no argument');
+    if (x === null) throw new Error('Could not compile `Sec`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccos(${compile(x)}))`;
@@ -6791,13 +6793,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Inverse trigonometric (reciprocal)
   Arccot: ([x], compile) => {
-    if (x === null) throw new Error('Arccot: no argument');
+    if (x === null) throw new Error('Could not compile `Arccot`: no argument');
     // `atan(1/x)` returns the wrong branch for x < 0. `π/2 - atan(x)` is
     // branch-free and matches the interpreter's (0, π) range for all real x.
     return `(1.5707963267948966 - atan(${compile(x)}))`;
   },
   Arccsc: ([x], compile, target) => {
-    if (x === null) throw new Error('Arccsc: no argument');
+    if (x === null) throw new Error('Could not compile `Arccsc`: no argument');
     if (
       BaseCompiler.isComplexValued(x) ||
       gpuResultIsComplexValued('Arccsc', [x])
@@ -6806,7 +6808,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `asin(1.0 / (${compile(x)}))`;
   },
   Arcsec: ([x], compile, target) => {
-    if (x === null) throw new Error('Arcsec: no argument');
+    if (x === null) throw new Error('Could not compile `Arcsec`: no argument');
     if (
       BaseCompiler.isComplexValued(x) ||
       gpuResultIsComplexValued('Arcsec', [x])
@@ -6834,7 +6836,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Reciprocal hyperbolic functions
   Coth: ([x], compile, target) => {
-    if (x === null) throw new Error('Coth: no argument');
+    if (x === null) throw new Error('Could not compile `Coth`: no argument');
     // Both branches splice the operand twice — an impure one is bound to a
     // hoisted temporary (see `gpuOperandOnce` and the `Cot` handler).
     if (BaseCompiler.isComplexValued(x)) {
@@ -6845,7 +6847,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(cosh(${arg}) / sinh(${arg}))`;
   },
   Csch: ([x], compile, target) => {
-    if (x === null) throw new Error('Csch: no argument');
+    if (x === null) throw new Error('Could not compile `Csch`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csinh(${compile(x)}))`;
@@ -6853,7 +6855,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(1.0 / sinh(${compile(x)}))`;
   },
   Sech: ([x], compile, target) => {
-    if (x === null) throw new Error('Sech: no argument');
+    if (x === null) throw new Error('Could not compile `Sech`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccosh(${compile(x)}))`;
@@ -6884,7 +6886,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Inverse hyperbolic (reciprocal)
   Arcoth: ([x], compile, target) => {
-    if (x === null) throw new Error('Arcoth: no argument');
+    if (x === null) throw new Error('Could not compile `Arcoth`: no argument');
     if (
       BaseCompiler.isComplexValued(x) ||
       gpuResultIsComplexValued('Arcoth', [x])
@@ -6893,11 +6895,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `atanh(1.0 / (${compile(x)}))`;
   },
   Arcsch: ([x], compile) => {
-    if (x === null) throw new Error('Arcsch: no argument');
+    if (x === null) throw new Error('Could not compile `Arcsch`: no argument');
     return `asinh(1.0 / (${compile(x)}))`;
   },
   Arsech: ([x], compile, target) => {
-    if (x === null) throw new Error('Arsech: no argument');
+    if (x === null) throw new Error('Could not compile `Arsech`: no argument');
     if (
       BaseCompiler.isComplexValued(x) ||
       gpuResultIsComplexValued('Arsech', [x])
@@ -6908,51 +6910,57 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Trigonometric (additional)
   Arctan2: (args, compile, target) => {
-    if (args.length < 2) throw new Error('Arctan2: need two arguments');
+    if (args.length < 2)
+      throw new Error('Could not compile `Arctan2`: need two arguments');
     return `${gpuAtan2(target)}(${compile(args[0])}, ${compile(args[1])})`;
   },
   Hypot: ([x, y], compile) => {
-    if (x === null || y === null) throw new Error('Hypot: need two arguments');
+    if (x === null || y === null)
+      throw new Error('Could not compile `Hypot`: need two arguments');
     return `length(vec2(${compile(x)}, ${compile(y)}))`;
   },
   Haversine: ([x], compile) => {
-    if (x === null) throw new Error('Haversine: no argument');
+    if (x === null)
+      throw new Error('Could not compile `Haversine`: no argument');
     return `((1.0 - cos(${compile(x)})) * 0.5)`;
   },
   InverseHaversine: ([x], compile) => {
-    if (x === null) throw new Error('InverseHaversine: no argument');
+    if (x === null)
+      throw new Error('Could not compile `InverseHaversine`: no argument');
     return `(2.0 * asin(sqrt(${compile(x)})))`;
   },
 
   // Special functions
   Gamma: (args, compile, target) => {
     const x = args[0];
-    if (!x) throw new Error('Gamma: no argument');
+    if (!x) throw new Error('Could not compile `Gamma`: no argument');
     // The TWO-operand form is the upper incomplete gamma
     // `Γ(s, z) = ∫_z^∞ tˢ⁻¹e⁻ᵗ dt` (the signature is `(number, number?)`) — a
     // different function from `Γ(z)`, not a variant of it: `Γ(5, 2)` is
     // 22.736…, `Γ(5)` is 24. `_gpu_gamma` is the COMPLETE Γ, so consuming
     // only the first operand reported success on a shader computing the wrong
     // value. There is no shader builtin for the incomplete form and no
-    // preamble helper for it, so it fails closed (D6).
+    // preamble helper for it, so it fails closed.
     if (args.length > 1)
       throw new Error(
-        `Gamma: the two-operand form is the upper incomplete gamma Γ(s, z), ` +
+        `Could not compile \`Gamma\`: the two-operand form is the upper incomplete gamma Γ(s, z), ` +
           `which has no ${target.language ?? 'GPU'} lowering ` +
-          `(\`_gpu_gamma\` is the COMPLETE Γ). Fail closed (D6).`
+          `(\`_gpu_gamma\` is the COMPLETE Γ).`
       );
     return `_gpu_gamma(${compile(x)})`;
   },
   GammaLn: ([x], compile) => {
-    if (x === null) throw new Error('GammaLn: no argument');
+    if (x === null) throw new Error('Could not compile `GammaLn`: no argument');
     return `_gpu_gammaln(${compile(x)})`;
   },
   Factorial: ([x], compile) => {
-    if (x === null) throw new Error('Factorial: no argument');
+    if (x === null)
+      throw new Error('Could not compile `Factorial`: no argument');
     return `_gpu_gamma(${compile(x)} + 1.0)`;
   },
   Beta: ([a, b], compile, target) => {
-    if (a === null || b === null) throw new Error('Beta: need two arguments');
+    if (a === null || b === null)
+      throw new Error('Could not compile `Beta`: need two arguments');
     // Each operand is spliced twice — an impure one is bound to a hoisted
     // temporary (see `gpuOperandOnce`).
     const ca = gpuOperandOnce('Beta', a, compile, target);
@@ -6960,7 +6968,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(_gpu_gamma(${ca}) * _gpu_gamma(${cb}) / _gpu_gamma(${ca} + ${cb}))`;
   },
   Erf: ([x], compile) => {
-    if (x === null) throw new Error('Erf: no argument');
+    if (x === null) throw new Error('Could not compile `Erf`: no argument');
     return `_gpu_erf(${compile(x)})`;
   },
   Binomial: gpuBinomial,
@@ -6968,32 +6976,35 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // share `evaluateBinomial` in the interpreter, so they must agree here too).
   Choose: gpuBinomial,
   Erfc: ([x], compile) => {
-    if (x === null) throw new Error('Erfc: no argument');
+    if (x === null) throw new Error('Could not compile `Erfc`: no argument');
     return `(1.0 - _gpu_erf(${compile(x)}))`;
   },
   ErfInv: ([x], compile) => {
-    if (x === null) throw new Error('ErfInv: no argument');
+    if (x === null) throw new Error('Could not compile `ErfInv`: no argument');
     return `_gpu_erfinv(${compile(x)})`;
   },
   Heaviside: ([x], compile) => {
-    if (x === null) throw new Error('Heaviside: no argument');
+    if (x === null)
+      throw new Error('Could not compile `Heaviside`: no argument');
     return `_gpu_heaviside(${compile(x)})`;
   },
   Sinc: ([x], compile) => {
-    if (x === null) throw new Error('Sinc: no argument');
+    if (x === null) throw new Error('Could not compile `Sinc`: no argument');
     return `_gpu_sinc(${compile(x)})`;
   },
   FresnelC: ([x], compile) => {
-    if (x === null) throw new Error('FresnelC: no argument');
+    if (x === null)
+      throw new Error('Could not compile `FresnelC`: no argument');
     return `_gpu_fresnelC(${compile(x)})`;
   },
   FresnelS: ([x], compile) => {
-    if (x === null) throw new Error('FresnelS: no argument');
+    if (x === null)
+      throw new Error('Could not compile `FresnelS`: no argument');
     return `_gpu_fresnelS(${compile(x)})`;
   },
   BesselJ: ([n, x], compile, target) => {
     if (n === null || x === null)
-      throw new Error('BesselJ: need two arguments');
+      throw new Error('Could not compile `BesselJ`: need two arguments');
     const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
     return `_gpu_besselJ(${intCast}(${compile(n)}), ${compile(x)})`;
   },
@@ -7001,7 +7012,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Additional math functions
   Lb: 'log2',
   Log: (args, compile, target) => {
-    if (args.length === 0) throw new Error('Log: no argument');
+    if (args.length === 0)
+      throw new Error('Could not compile `Log`: no argument');
     // Complex either because an operand is, or because the RESULT is complex
     // from a PROVABLY negative argument (`a := -2` makes `Log(a)`
     // `complex`). Either way the enclosing emission is the `vec2`
@@ -7030,15 +7042,15 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(log(${compile(args[0])}) / log(${compile(args[1])}))`;
   },
   Log10: ([x], compile) => {
-    if (x === null) throw new Error('Log10: no argument');
+    if (x === null) throw new Error('Could not compile `Log10`: no argument');
     return `(log(${compile(x)}) * 0.4342944819032518)`;
   },
   Lg: ([x], compile) => {
-    if (x === null) throw new Error('Lg: no argument');
+    if (x === null) throw new Error('Could not compile `Lg`: no argument');
     return `(log(${compile(x)}) * 0.4342944819032518)`;
   },
   Square: ([x], compile) => {
-    if (x === null) throw new Error('Square: no argument');
+    if (x === null) throw new Error('Could not compile `Square`: no argument');
     if (isSymbol(x) || isNumber(x)) {
       const arg = compile(x);
       if (/^[A-Za-z_]\w*$|^-?[0-9]+(?:\.[0-9]*)?$/.test(arg))
@@ -7056,7 +7068,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return gpuFixedPower(compile(x), 2, width);
   },
   Root: ([x, n], compile, target) => {
-    if (x === null) throw new Error('Root: no argument');
+    if (x === null) throw new Error('Could not compile `Root`: no argument');
     // A COMPLEX radicand is a `vec2`, which the real lowerings below would
     // read componentwise. It takes the principal root through `_gpu_cpow`,
     // with the one exception the interpreter and the JavaScript `_SYS.croot`
@@ -7071,7 +7083,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     ) {
       if (n != null && BaseCompiler.isComplexValued(n))
         throw new Error(
-          'Root: a complex degree has no shader lowering. Fail closed (D6).'
+          'Could not compile `Root`: a complex degree has no shader lowering.'
         );
       const v2 = gpuVec2(target);
       const z = gpuOperandOnce('Root', x, compile, target, true);
@@ -7158,7 +7170,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // string; an unknown gamut answers `expected-value` in the interpreter, and
   // fails closed here.
   GamutMap: (args, compile, target) => {
-    if (args.length === 0) throw new Error('GamutMap: no argument');
+    if (args.length === 0)
+      throw new Error('Could not compile `GamutMap`: no argument');
     const c = gpuColorOperand('GamutMap', args[0], compile, target);
     const gamut = args.length >= 2 && args[1] !== null ? args[1] : undefined;
     let name = 'srgb';
@@ -7166,19 +7179,20 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const literal = readStringLiteral(gamut);
       if (literal === null)
         throw new Error(
-          'GamutMap: the gamut must be a string literal on a shader target'
+          'Could not compile `GamutMap`: the gamut must be a string literal on a shader target'
         );
       name = literal;
     }
     if (name === 'srgb') return `_gpu_gamut_map_oklch(${c})`;
     if (name === 'display-p3') return `_gpu_gamut_map_oklch_p3(${c})`;
     throw new Error(
-      `GamutMap: unknown gamut "${name}" — the gamut is "srgb" or ` +
-        `"display-p3". Fail closed (D6).`
+      `Could not compile \`GamutMap\`: unknown gamut "${name}" — the gamut is "srgb" or ` +
+        `"display-p3".`
     );
   },
   ColorMix: (args, compile, target) => {
-    if (args.length < 2) throw new Error('ColorMix: need two colors');
+    if (args.length < 2)
+      throw new Error('Could not compile `ColorMix`: need two colors');
     const c1 = gpuColorOperand('ColorMix', args[0], compile, target);
     const c2 = gpuColorOperand('ColorMix', args[1], compile, target);
     const ratio = args.length >= 3 ? compile(args[2]) : '0.5';
@@ -7186,7 +7200,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   ColorContrast: ([bg, fg], compile, target) => {
     if (bg === null || fg === null)
-      throw new Error('ColorContrast: need two colors');
+      throw new Error('Could not compile `ColorContrast`: need two colors');
     return `_gpu_apca(${gpuColorOperand(
       'ColorContrast',
       bg,
@@ -7195,7 +7209,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     )}, ${gpuColorOperand('ColorContrast', fg, compile, target)})`;
   },
   ContrastingColor: (args, compile, target) => {
-    if (args.length === 0) throw new Error('ContrastingColor: no argument');
+    if (args.length === 0)
+      throw new Error('Could not compile `ContrastingColor`: no argument');
     // WGSL has no ternary operator: the selection must be spelled `select`.
     // GLSL keeps the EXACT `?:` text it has always emitted (pinned).
     // `select` evaluates BOTH arms eagerly, unlike `?:` — sound here because
@@ -7214,9 +7229,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // a non-scalar operand).
     if (args.slice(0, 3).some((a) => a.isPure === false))
       throw new Error(
-        `ContrastingColor: an impure (Random) operand cannot be bound to a ` +
+        `Could not compile \`ContrastingColor\`: an impure (Random) operand cannot be bound to a ` +
           `temporary at this position — a repeated draw would shift every ` +
-          `later value in the shader. Fail closed (D6).`
+          `later value in the shader.`
       );
     // Every color operand is spliced twice, and `select` evaluates both arms,
     // so an operand written inline runs its `_gpu_srgb_to_oklch` conversion up
@@ -7278,13 +7293,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   ColorToColorspace: ([color, space], compile, target) => {
     if (color === null || space === null)
-      throw new Error('ColorToColorspace: need color and space');
+      throw new Error(
+        'Could not compile `ColorToColorspace`: need color and space'
+      );
     // The input color is canonical OKLCh; route to the requested space.
     // The space arg must be a string literal so we can pick the helper
     // at compile time (no runtime branching in shader code).
     const spaceName = readStringLiteral(space);
     if (spaceName === null)
-      throw new Error('ColorToColorspace: space must be a string literal');
+      throw new Error(
+        'Could not compile `ColorToColorspace`: space must be a string literal'
+      );
     const c = gpuColorEntryOperand('ColorToColorspace', color, compile, target);
     switch (spaceName) {
       case 'oklch':
@@ -7300,20 +7319,24 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         return `_gpu_rgb_to_hsv(_gpu_oklch_to_srgb(${c}))`;
       default:
         throw new Error(
-          `ColorToColorspace: unsupported space "${spaceName}" on GPU target`
+          `Could not compile \`ColorToColorspace\`: unsupported space "${spaceName}" on GPU target`
         );
     }
   },
   ColorFromColorspace: ([components, space], compile, target) => {
     if (components === null || space === null)
-      throw new Error('ColorFromColorspace: need components and space');
+      throw new Error(
+        'Could not compile `ColorFromColorspace`: need components and space'
+      );
     // Components are in the named space, and the color this builds keeps them
     // there. The space operand must be a string literal so that the space is
     // a compile-time fact (`colorSpaceOf`): a shader color is a bare vector
     // with no run-time tag, and shader code carries no runtime branching.
     const spaceName = readStringLiteral(space);
     if (spaceName === null)
-      throw new Error('ColorFromColorspace: space must be a string literal');
+      throw new Error(
+        'Could not compile `ColorFromColorspace`: space must be a string literal'
+      );
     // A 4-component tuple carries alpha. Same fail-closed policy as the typed
     // color heads: the `_gpu_*` chain is `vec3` end to end, so a `vec4` here
     // would either not type-check or silently drop the alpha downstream.
@@ -7327,8 +7350,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // what the engine calls an error.
     if (isFunction(components) && components.operator === 'List')
       throw new Error(
-        `ColorFromColorspace: a list is not a color component vector — the ` +
-          `operand must be a tuple or a color. Fail closed (D6).`
+        `Could not compile \`ColorFromColorspace\`: a list is not a color component vector — the ` +
+          `operand must be a tuple or a color.`
       );
     if (typedHead) assertNoGPUAlpha('ColorFromColorspace', typedHead.ops);
     else if (isFunction(components) && components.operator === 'Tuple')
@@ -7360,7 +7383,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // fails closed at the operator rather than at its consumer.
     if (!GPU_COLOR_SPACES.has(spaceName))
       throw new Error(
-        `ColorFromColorspace: unsupported space "${spaceName}" on GPU target`
+        `Could not compile \`ColorFromColorspace\`: unsupported space "${spaceName}" on GPU target`
       );
     return c;
   },
@@ -7375,10 +7398,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Color: ([s], _compile, target) => {
     // Compile-time CSS-color-string parsing. Runtime parsing is impractical
     // in shader code, so the string must be a literal at compile time.
-    if (s === null) throw new Error('Color: no argument');
+    if (s === null) throw new Error('Could not compile `Color`: no argument');
     const str = readStringLiteral(s);
     if (str === null)
-      throw new Error('Color: argument must be a string literal on GPU target');
+      throw new Error(
+        'Could not compile `Color`: argument must be a string literal on GPU target'
+      );
     // The predicate is the interpreter's own (`parseColorString`,
     // `library/colors.ts`), so a string is a color on every route or on none
     // of them. Reading the parser's zero sentinel as "not a color" here made
@@ -7387,17 +7412,19 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // `#00000000` and `rgba(0, 0, 0, 0)`.
     const packed = parseColorString(str);
     if (packed === null)
-      throw new Error(`Color: invalid color string "${str}"`);
+      throw new Error(
+        `Could not compile \`Color\`: invalid color string "${str}"`
+      );
     // The packing is 0xrrggbbaa. Only the RGB is lowered below, so a literal
     // carrying a non-opaque alpha would silently become opaque. Decline
     // instead, matching `assertNoGPUAlpha`.
     if ((packed & 0xff) !== 0xff)
       throw new Error(
-        `Color: the color string "${str}" carries an alpha channel, which is ` +
+        `Could not compile \`Color\`: the color string "${str}" carries an alpha channel, which is ` +
           `not representable on the GPU target — color values are \`vec3\` ` +
           `(OKLCh) end to end, with no alpha channel. Use a fully opaque ` +
           `color and pass the alpha separately (e.g. as a uniform) at the ` +
-          `framebuffer boundary. Fail closed (D6).`
+          `framebuffer boundary.`
       );
     const r = (packed >>> 24) & 0xff;
     const g = (packed >>> 16) & 0xff;
@@ -7407,7 +7434,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   Rgb: (args, compile, target) => {
-    if (args.length < 3) throw new Error('Rgb: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Rgb`: need 3 components');
     assertNoGPUAlpha('Rgb', args);
     const v3 = gpuVec3(target);
     // Channels are 0-1 sRGB — no scaling needed.
@@ -7415,28 +7443,32 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   Hsv: (args, compile, target) => {
-    if (args.length < 3) throw new Error('Hsv: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Hsv`: need 3 components');
     assertNoGPUAlpha('Hsv', args);
     const v3 = gpuVec3(target);
     return `_gpu_srgb_to_oklch(_gpu_hsv_to_rgb(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})))`;
   },
 
   Hsl: (args, compile, target) => {
-    if (args.length < 3) throw new Error('Hsl: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Hsl`: need 3 components');
     assertNoGPUAlpha('Hsl', args);
     const v3 = gpuVec3(target);
     return `_gpu_srgb_to_oklch(_gpu_hsl_to_rgb(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})))`;
   },
 
   Oklab: (args, compile, target) => {
-    if (args.length < 3) throw new Error('Oklab: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Oklab`: need 3 components');
     assertNoGPUAlpha('Oklab', args);
     const v3 = gpuVec3(target);
     return `_gpu_oklab_to_oklch(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])}))`;
   },
 
   Oklch: (args, compile, target) => {
-    if (args.length < 3) throw new Error('Oklch: need 3 components');
+    if (args.length < 3)
+      throw new Error('Could not compile `Oklch`: need 3 components');
     assertNoGPUAlpha('Oklch', args);
     // Already in canonical form — no conversion needed.
     const v3 = gpuVec3(target);
@@ -7449,7 +7481,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // ---------------------------------------------------------------------------
 
   AsOklch: ([c], compile, target) => {
-    if (c === null) throw new Error('AsOklch: no argument');
+    if (c === null) throw new Error('Could not compile `AsOklch`: no argument');
     // Identity for a color value — it is already in the canonical form. A
     // tuple at this position is sRGB components and still has to be
     // converted.
@@ -7461,7 +7493,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   AsOklab: ([c], compile, target) => {
-    if (c === null) throw new Error('AsOklab: no argument');
+    if (c === null) throw new Error('Could not compile `AsOklab`: no argument');
     return `_gpu_oklch_to_oklab(${gpuColorEntryOperand(
       'AsOklab',
       c,
@@ -7471,7 +7503,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   AsRgb: ([c], compile, target) => {
-    if (c === null) throw new Error('AsRgb: no argument');
+    if (c === null) throw new Error('Could not compile `AsRgb`: no argument');
     return gpuRgbBoundary(
       c,
       gpuColorEntryOperand('AsRgb', c, compile, target),
@@ -7480,7 +7512,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   AsHsv: ([c], compile, target) => {
-    if (c === null) throw new Error('AsHsv: no argument');
+    if (c === null) throw new Error('Could not compile `AsHsv`: no argument');
     return `_gpu_rgb_to_hsv(_gpu_oklch_to_srgb(${gpuColorEntryOperand(
       'AsHsv',
       c,
@@ -7490,7 +7522,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   AsHsl: ([c], compile, target) => {
-    if (c === null) throw new Error('AsHsl: no argument');
+    if (c === null) throw new Error('Could not compile `AsHsl`: no argument');
     return `_gpu_rgb_to_hsl(_gpu_oklch_to_srgb(${gpuColorEntryOperand(
       'AsHsl',
       c,
@@ -7502,13 +7534,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Fractal functions
   Mandelbrot: ([c, maxIter], compile, target) => {
     if (c === null || maxIter === null)
-      throw new Error('Mandelbrot: missing arguments');
+      throw new Error('Could not compile `Mandelbrot`: missing arguments');
     const iterCode = compileIntArg('Mandelbrot', maxIter, compile, target);
     return `_fractal_mandelbrot(${gpuComplexOperand(c, compile, target)}, ${iterCode})`;
   },
   Julia: ([z, c, maxIter], compile, target) => {
     if (z === null || c === null || maxIter === null)
-      throw new Error('Julia: missing arguments');
+      throw new Error('Could not compile `Julia`: missing arguments');
     const iterCode = compileIntArg('Julia', maxIter, compile, target);
     return `_fractal_julia(${gpuComplexOperand(z, compile, target)}, ${gpuComplexOperand(c, compile, target)}, ${iterCode})`;
   },
@@ -7522,28 +7554,27 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // `length()` only accepts scalars and vec2/3/4: a fixed-arity point or list
   // literal outside that range compiles to an ARRAY constructor
   // (`float[5](...)`), which `length()` rejects — so emit `abs` for arity 1
-  // and fail closed (D6) for arity ≥ 5 or a norm-type argument rather than
+  // and fail closed for arity ≥ 5 or a norm-type argument rather than
   // reporting success on invalid shader source.
   Norm: (args, compile, target) => {
     if (args.length > 1)
       throw new Error(
-        `Norm: only the default L2 norm compiles on the ` +
-          `${target.language ?? 'GPU'} target. Fail closed (D6).`
+        `Could not compile \`Norm\`: only the default L2 norm compiles on the ` +
+          `${target.language ?? 'GPU'} target.`
       );
     const arg = args[0];
     if (isFunction(arg, 'Tuple') || isFunction(arg, 'List')) {
       // A broadcasting component means one norm per zipped element — not a
-      // scalar. Fail closed (D6).
+      // scalar. Fail closed.
       if (pointHasBroadcastComponent(arg))
         throw new Error(
-          'Norm: cannot compile a point with a broadcasting component. ' +
-            'Fail closed (D6).'
+          'Could not compile `Norm`: a point with a broadcasting component.'
         );
       const n = arg.nops;
       if (n === 0 || n > 4)
         throw new Error(
-          `Norm: the ${target.language ?? 'GPU'} 'length()' builtin only ` +
-            `accepts 2-4 component vectors (got ${n}). Fail closed (D6).`
+          `Could not compile \`Norm\`: the ${target.language ?? 'GPU'} 'length()' builtin only ` +
+            `accepts 2-4 component vectors (got ${n}).`
         );
       // A complex entry lowers to a `vec2` of (re, im), and an array of
       // them is not a `length()` operand. The 2-norm is the length of the
@@ -7556,8 +7587,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           // would put a `vec2` inside the vector of moduli.
           if (gpuOperandShape(x) !== 'scalar')
             throw new Error(
-              `Norm: the entry \`${x.toString()}\` is not a scalar, so it ` +
-                `has no modulus beside a complex entry. Fail closed (D6).`
+              `Could not compile \`Norm\`: the entry \`${x.toString()}\` is not a scalar, so it ` +
+                `has no modulus beside a complex entry.`
             );
           return compile(x);
         });
@@ -7572,10 +7603,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Length: (_args, _compile, target) => {
     throw new Error(
-      `Length (collection element count) is not supported on the ` +
+      `Could not compile \`Length\`: the collection element count is not supported on the ` +
         `${target.language ?? 'GPU'} target: the '${target.language ?? 'GPU'}' ` +
-        `'length()' builtin is the Euclidean norm (CE 'Norm'), not a count. ` +
-        `Fail closed (D6).`
+        `'length()' builtin is the Euclidean norm (CE 'Norm'), not a count.`
     );
   },
   Normalize: 'normalize',
@@ -7604,7 +7634,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Range: (args, _compile, target) => {
     if (args.length < 2 || args.length > 3) {
       throw new Error(
-        'Range: GPU compile expects 2 or 3 arguments (lo, hi, step?)'
+        'Could not compile `Range`: GPU compile expects 2 or 3 arguments (lo, hi, step?)'
       );
     }
     const lo = args[0].re;
@@ -7616,20 +7646,21 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       !Number.isFinite(step)
     ) {
       throw new Error(
-        'Range: GPU compile requires constant numeric bounds' +
+        'Could not compile `Range`: GPU compile requires constant numeric bounds' +
           ' (non-constant ranges must be materialized at JS host then uploaded as a uniform)'
       );
     }
-    if (step === 0) throw new Error('Range: step cannot be zero');
+    if (step === 0)
+      throw new Error('Could not compile `Range`: step cannot be zero');
     const count = Math.max(0, Math.floor((hi - lo) / step) + 1);
     if (count === 0) {
       throw new Error(
-        'Range: empty range (lo > hi for positive step, or lo < hi for negative step)'
+        'Could not compile `Range`: empty range (lo > hi for positive step, or lo < hi for negative step)'
       );
     }
     if (count > GPU_MAX_INLINE_ELEMENTS) {
       throw new Error(
-        `Range: GPU compile inlines ranges up to ${GPU_MAX_INLINE_ELEMENTS} elements (got ${count})`
+        `Could not compile \`Range\`: GPU compile inlines ranges up to ${GPU_MAX_INLINE_ELEMENTS} elements (got ${count})`
       );
     }
     const values: number[] = [];
@@ -7643,19 +7674,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Loop — GPU for-loop (no IIFE, no let)
   Loop: (args, _compile, target) => {
-    if (!args[0]) throw new Error('Loop: no body');
-    if (!args[1]) throw new Error('Loop: no indexing set');
+    if (!args[0]) throw new Error('Could not compile `Loop`: no body');
+    if (!args[1]) throw new Error('Could not compile `Loop`: no indexing set');
 
     const indexing = args[1];
     if (!isFunction(indexing, 'Element'))
-      throw new Error('Loop: expected Element(index, Range(lo, hi))');
+      throw new Error(
+        'Could not compile `Loop`: expected Element(index, Range(lo, hi))'
+      );
 
     const indexExpr = indexing.ops[0];
     const rangeExpr = indexing.ops[1];
 
-    if (!isSymbol(indexExpr)) throw new Error('Loop: index must be a symbol');
+    if (!isSymbol(indexExpr))
+      throw new Error('Could not compile `Loop`: index must be a symbol');
     if (!isFunction(rangeExpr, 'Range'))
-      throw new Error('Loop: expected Range(lo, hi)');
+      throw new Error('Could not compile `Loop`: expected Range(lo, hi)');
 
     const index = indexExpr.symbol;
     // The loop index is declared and referenced bare — reject a reserved name.
@@ -7664,7 +7698,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const upper = Math.floor(rangeExpr.ops[1].re);
 
     if (!Number.isFinite(lower) || !Number.isFinite(upper))
-      throw new Error('Loop: bounds must be finite numbers');
+      throw new Error(
+        'Could not compile `Loop`: bounds must be finite numbers'
+      );
 
     const isWGSL = target.language === 'wgsl';
     const intType = isWGSL ? 'i32' : 'int';
@@ -7707,12 +7743,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    * Only two-argument form is supported in GPU targets.
    */
   GCD: (args, compile) => {
-    if (args.length < 2) throw new Error('GCD: need at least two arguments');
+    if (args.length < 2)
+      throw new Error('Could not compile `GCD`: need at least two arguments');
     if (args.length > 2)
-      throw new Error('GCD: GPU target supports only two-argument GCD');
+      throw new Error(
+        'Could not compile `GCD`: GPU target supports only two-argument GCD'
+      );
     const a = args[0];
     const b = args[1];
-    if (a === null || b === null) throw new Error('GCD: missing argument');
+    if (a === null || b === null)
+      throw new Error('Could not compile `GCD`: missing argument');
     return `_gpu_gcd(${compile(a)}, ${compile(b)})`;
   },
 
@@ -7737,11 +7777,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       elems = args;
     } else {
       throw new Error(
-        'Variance: GPU target requires a List argument or at least 2 scalar arguments'
+        'Could not compile `Variance`: GPU target requires a List argument or at least 2 scalar arguments'
       );
     }
     const n = elems.length;
-    if (n < 2) throw new Error('Variance: need at least 2 elements');
+    if (n < 2)
+      throw new Error('Could not compile `Variance`: need at least 2 elements');
     // Every element is spliced 2 + 2·N times (once per mean term, plus twice
     // per squared deviation), so an IMPURE (Random-family) element was drawn
     // once per splice — `Variance(Random(), Random())` consumed TWELVE draws
@@ -7785,14 +7826,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       elems = args;
     } else {
       throw new Error(
-        'Median: GPU target requires a List argument or at least 1 scalar argument'
+        'Could not compile `Median`: GPU target requires a List argument or at least 1 scalar argument'
       );
     }
     const n = elems.length;
-    if (n === 0) throw new Error('Median: empty list');
+    if (n === 0) throw new Error('Could not compile `Median`: empty list');
     if (n > 8) {
       throw new Error(
-        `Median: GPU target supports up to 8 elements via inline sorting network (got ${n}). ` +
+        `Could not compile \`Median\`: GPU target supports up to 8 elements via inline sorting network (got ${n}). ` +
           'For larger lists, compute on the CPU and pass the result as a uniform.'
       );
     }
@@ -7867,7 +7908,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (args.length === 1)
         return gpuRandomDomainDraw(args[0], compile, target);
       throw new Error(
-        'Random: expects at most one operand, the DOMAIN to draw from ' +
+        'Could not compile `Random`: expects at most one operand, the DOMAIN to draw from ' +
           '(`Random()`, `Random(Interval(a, b))`, `Random(Range(…))`). The ' +
           'seed argument was removed by the Random family redesign — seed ' +
           'with `WithRandomSeed(seed, body)`.'
@@ -7892,7 +7933,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   WithRandomSeed: (args, compile, target) => {
     if (args.length !== 2)
       throw new Error(
-        'WithRandomSeed(seed, body): expects exactly two operands'
+        'Could not compile `WithRandomSeed(seed, body)`: expects exactly two operands'
       );
     const state = gpuRandomState(target);
     // The seed is folded ONCE per frame, before the body is compiled.
@@ -7908,7 +7949,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // The multi-draw members of the family need general collection indexing (or
   // a mutable permutation buffer), which a shader expression has no way to
-  // express. Fail closed (D6) with the reason rather than let them fall
+  // express. Fail closed with the reason rather than let them fall
   // through to a bare `Unknown operator`.
   RandomChoice: (_args, _compile, target) => {
     throw new Error(gpuNoIndexingMessage('RandomChoice(domain, k)', target));
@@ -8148,19 +8189,19 @@ function gpuRandomDraw(target: CompileTarget<Expression>): string {
   // the HOST, whose mutable counter a parallel shader invocation cannot share.
   if (state.hostFrame)
     throw new Error(
-      'Random(): an unframed draw cannot be compiled to a shader while a host ' +
+      'Could not compile `Random()`: an unframed draw has no shader form while a host ' +
         '`WithRandomSeed` frame is active — a shader invocation cannot share ' +
         "the host's mutable draw counter, and fragments run in parallel. GPU " +
         'frames must be LEXICAL: move the `WithRandomSeed(seed, …)` inside the ' +
-        'compiled expression. Fail closed (D6).'
+        'compiled expression.'
     );
 
   if (language === 'wgsl')
     throw new Error(
-      'Random(): an unframed draw cannot be compiled to WGSL — a shader has no ' +
+      'Could not compile `Random()`: an unframed draw has no WGSL form — a shader has no ' +
         'live random stream, and WGSL has no `gl_FragCoord` built-in to derive ' +
         'spatial noise from. Wrap the draw in `WithRandomSeed(seed, …)`, whose ' +
-        'seed may be an invocation-varying expression. Fail closed (D6).'
+        'seed may be an invocation-varying expression.'
     );
 
   // `gl_FragCoord` exists only in a fragment shader. A vertex (or other) stage
@@ -8169,11 +8210,10 @@ function gpuRandomDraw(target: CompileTarget<Expression>): string {
   // fragment-shader assumption of the `compile()` entry points.
   if (state.stage !== undefined && state.stage !== 'fragment')
     throw new Error(
-      `Random(): an unframed draw compiles to \`gl_FragCoord\`-derived spatial ` +
+      `Could not compile \`Random()\`: an unframed draw compiles to \`gl_FragCoord\`-derived spatial ` +
         `noise, which exists only in a fragment shader (this is a ` +
         `\`${state.stage}\` shader). Wrap the draw in ` +
-        `\`WithRandomSeed(seed, …)\` to get a stage-independent stream. ` +
-        `Fail closed (D6).`
+        `\`WithRandomSeed(seed, …)\` to get a stage-independent stream.`
     );
 
   state.spatialCounter ??= allocGPURandomCounter(state);
@@ -8252,7 +8292,7 @@ function gpuNoIndexingMessage(
     `${form} is not supported on the ${lang} target: a shader expression has ` +
     `no general collection indexing. Only \`Random()\`, ` +
     `\`Random(Interval(a, b))\` and \`Random(Range(…))\` compile — the ` +
-    `closed-form domains. Fail closed (D6).`
+    `closed-form domains.`
   );
 }
 
@@ -8283,17 +8323,17 @@ function gpuRandomDomainDraw(
     // a shader expression has no statement to evaluate them into once. Pure
     // arithmetic on uniforms is only an ALU cost, but an endpoint that
     // consumes draws would consume a different NUMBER of them than the host.
-    // Fail closed (D6).
+    // Fail closed.
     for (const [role, endpoint] of [
       ['lower', loExpr],
       ['upper', hiExpr],
     ] as const)
       if (!endpoint.canonical.isPure)
         throw new Error(
-          `Random(Interval(a, b)): the ${role} endpoint is not pure — a ` +
+          `Could not compile \`Random(Interval(a, b))\`: the ${role} endpoint is not pure — a ` +
             `shader expression has no statement to evaluate it into once, so ` +
             `the endpoint is spliced (and would run) more than once per ` +
-            `draw. Hoist the draw out of the endpoint. Fail closed (D6).`
+            `draw. Hoist the draw out of the endpoint.`
         );
 
     const lo = tryGetConstant(loExpr);
@@ -8322,9 +8362,9 @@ function gpuRandomDomainDraw(
     const n = domain.count;
     if (n === undefined || !Number.isFinite(n))
       throw new Error(
-        'Random(Range(…)): the GPU target requires a Range with constant, ' +
+        'Could not compile `Random(Range(…))`: the GPU target requires a Range with constant, ' +
           'finite bounds — a symbolic or unbounded range has no known element ' +
-          'count to draw from. Fail closed (D6).'
+          'count to draw from.'
       );
     if (n === 0)
       throw new Error('Random(Range(…)): the range is empty (no elements).');
@@ -8403,10 +8443,10 @@ function gpuFoldSeedSource(
   }
   if (seedExpr.type.matches('string'))
     throw new Error(
-      'WithRandomSeed(seed, …): a string seed that is not a compile-time ' +
+      'Could not compile `WithRandomSeed(seed, …)`: a string seed that is not a compile-time ' +
         'literal cannot be folded in a shader — GLSL and WGSL have no ' +
         'strings. Use a literal string, a numeric seed, or fold the seed on ' +
-        'the host. Fail closed (D6).'
+        'the host.'
     );
 
   // `WithRandomSeed` is `lazy`, so the held seed arrives UNBOUND on the box
@@ -8419,10 +8459,10 @@ function gpuFoldSeedSource(
   // (D6) rather than silently consume extra draws.
   if (!seed.isPure)
     throw new Error(
-      'WithRandomSeed(seed, …): the seed expression is not pure — the folded ' +
+      'Could not compile `WithRandomSeed(seed, …)`: the seed expression is not pure — the folded ' +
         'seed is spliced at EVERY draw site of the frame, so it would be ' +
         'evaluated once per draw. Use a compile-time constant or a single ' +
-        'shader-supplied symbol. Fail closed (D6).'
+        'shader-supplied symbol.'
     );
 
   // A compile-time constant — a literal, a declared constant such as `Pi`, or
@@ -8440,18 +8480,17 @@ function gpuFoldSeedSource(
   const symbol = isSymbol(seed) ? seed.symbol : undefined;
   if (symbol === undefined)
     throw new Error(
-      'WithRandomSeed(seed, …): a COMPUTED seed expression cannot be ' +
-        'compiled to a shader — the folded seed is spliced at every draw ' +
+      'Could not compile `WithRandomSeed(seed, …)`: a COMPUTED seed expression has no shader form — the folded seed is spliced at every draw ' +
         'site of the frame, so it would be recomputed per draw. Use a ' +
         'compile-time constant seed (host-identical stream) or a single ' +
-        'shader-supplied symbol (its own stream). Fail closed (D6).'
+        'shader-supplied symbol (its own stream).'
     );
 
   const mapped = target.var(symbol);
   if (mapped !== undefined) {
     if (gpuRandomState(target).varNames?.has(symbol))
       throw new Error(
-        `WithRandomSeed(${symbol}, …): a seed supplied through \`vars\` ` +
+        `Could not compile \`WithRandomSeed(${symbol}, …)\`: a seed supplied through \`vars\` ` +
           `(\`${symbol}\` → \`${mapped}\`) is the HOST-UNIFORM row of the ` +
           `seed ABI, which is not implemented: the host folds an f64 seed ` +
           `with \`foldSeed\` into TWO words, while a shader can only ` +
@@ -8459,12 +8498,12 @@ function gpuFoldSeedSource(
           `shader would silently draw a DIFFERENT stream than the host. Use ` +
           `either a compile-time literal seed — the host-identical stream — ` +
           `or an explicitly invocation-varying seed symbol that is NOT in ` +
-          `\`vars\`, which owns its own stream. Fail closed (D6).`
+          `\`vars\`, which owns its own stream.`
       );
     throw new Error(
-      `WithRandomSeed(${symbol}, …): the seed resolves to the shader ` +
+      `Could not compile \`WithRandomSeed(${symbol}, …)\`: the seed resolves to the shader ` +
         `constant \`${mapped}\`, which the seed ABI cannot fold. Use a ` +
-        `compile-time numeric or string seed. Fail closed (D6).`
+        `compile-time numeric or string seed.`
     );
   }
 
@@ -11211,7 +11250,7 @@ function gpuComponentCountOfShaderType(shader: string): number {
  * Static component count of a declared aggregate type, if it has one — and
  * only when every component fits a `vecN` slot (`gpuIsVectorComponentType`),
  * so a heterogeneous or non-numeric aggregate answers `undefined` and its
- * caller fails closed (D6).
+ * caller fails closed.
  */
 function gpuDeclaredComponentCount(t: Type): number | undefined {
   // A `type alias` / nominal `type` reference answers layout questions as its
@@ -11607,7 +11646,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // A shader has no expression-level loop or IIFE, so the multi-statement
       // block forms (loop-form Sum/Product, Loop, Block) are only valid at
       // statement position. Flag it so the base compiler hoists them where a
-      // statement sink is available and fails closed (D6) elsewhere, rather
+      // statement sink is available and fails closed elsewhere, rather
       // than splice a bare block into a sub-expression. Gated to the pure GPU
       // languages by language id.
       bareStatementBlocks:
@@ -11655,7 +11694,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       },
       // A free symbol emitted as a bare identifier must not be a reserved word
       // of the shader language, or the generated shader fails to compile. Fail
-      // closed (D6) with a clear diagnostic naming the offending identifier.
+      // closed with a clear diagnostic naming the offending identifier.
       mangleId: (id) => gpuCheckIdentifier(id, this.languageId),
       // A `Which`/`If` with a statically-shaped (vec2–vec4) collection
       // condition selects ELEMENT-WISE: lower it to boolean-vector masks
@@ -11666,14 +11705,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // A `broadcastable` unary head over a statically shaped (vec2–vec4)
       // collection needs NO fan-out: the shader builtins and operators are
       // already componentwise on a vector, so the scalar form applies directly
-      // to the vector operand. Fails closed (D6) on anything with no static
+      // to the vector operand. Fails closed on anything with no static
       // vector shape.
       broadcastUnary: (head, operand, lowering) =>
         compileGPUBroadcastUnary(head, operand, lowering),
       // The same defect class on every emission that does NOT go through the
       // fan-out hook (the generic function-codegen and string-helper paths):
       // a collection, matrix or array operand reaching a lowering the shader
-      // type system cannot give it to. Fails closed (D6) instead of emitting
+      // type system cannot give it to. Fails closed instead of emitting
       // source no driver accepts.
       checkOperandShapes: (h, opArgs, emitted) =>
         gpuCheckOperandShapes(
@@ -11702,7 +11741,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         return undefined;
       },
       // Text has no shader representation, so a string literal in any
-      // position fails closed (D6) rather than emitting one.
+      // position fails closed rather than emitting one.
       //
       // GLSL and WGSL have no string type, no character type and no text
       // storage class: there is nothing a quoted literal could be. Declining
@@ -11710,11 +11749,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // through it.
       string: (str) => {
         throw new Error(
-          `A string literal (${JSON.stringify(str)}) is not supported on the ` +
+          `Could not compile the string literal ${JSON.stringify(str)}: it is not supported on the ` +
             `${this.languageId} target: the shader languages have no text ` +
             `type — no string, no character, no grapheme-cluster indexing — ` +
-            `so there is no value a quoted literal could lower to. ` +
-            `Fail closed (D6).`
+            `so there is no value a quoted literal could lower to.`
         );
       },
       // Bound to the language so a NON-FINITE literal (`NaN`, `±∞`,
@@ -11754,11 +11792,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // emits a `for (…) { … }` statement — has no value to return.
         // Return-prefixing it would produce `return for (…) { … }` (invalid
         // GLSL/WGSL), and a shader block must evaluate to a typed value, so
-        // there is no `return None` analog either. Fail closed (D6). A Loop in
+        // there is no `return None` analog either. Fail closed. A Loop in
         // a non-final position is fine (it stays a bare statement).
         if (/^\s*(for|while)\b/.test(stmts[last]))
           throw new Error(
-            `${this.languageId.toUpperCase()}: a Loop (or other statement-form ` +
+            `Could not compile \`${this.languageId.toUpperCase()}\`: a Loop (or other statement-form ` +
               `construct) cannot be the final statement of a block — a shader ` +
               `block must evaluate to a typed value.`
           );
@@ -11838,11 +11876,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       target.mangleId = (id) => {
         if (textSymbols.has(id))
           throw new Error(
-            `The symbol \`${id}\` is text-typed, which is not supported on ` +
+            `Could not compile \`${id}\`: the symbol is text-typed, which is not supported on ` +
               `the ${this.languageId} target: the shader languages have no ` +
               `text type — no string, no character, no grapheme-cluster ` +
               `indexing — so it would be emitted as a bare identifier and ` +
-              `declared as a numeric uniform. Fail closed (D6).`
+              `declared as a numeric uniform.`
           );
         return inner ? inner(id) : id;
       };
@@ -12008,11 +12046,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             );
             if (shader === undefined)
               throw new Error(
-                `${id}: parameter "${p}" has no static ${language.toUpperCase()} ` +
+                `Could not compile \`${id}\`: parameter "${p}" has no static ${language.toUpperCase()} ` +
                   `type — only scalars, booleans, colors, complex values and 2–4 ` +
                   `component vectors have one, and a shader function ` +
                   `signature must be fully typed. Declare a narrower ` +
-                  `signature for "${id}". Fail closed (D6).`
+                  `signature for "${id}".`
               );
             // Record the parameter's inferred shape so the body analysis
             // agrees with the declaration just synthesized (and so a
@@ -12056,10 +12094,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 const shader = gpuTypeOfValue(x.expr, isWGSL);
                 if (shader === undefined)
                   throw new Error(
-                    `${id}: the hoisted value \`${x.expr.toString()}\` has ` +
+                    `Could not compile \`${id}\`: the hoisted value \`${x.expr.toString()}\` has ` +
                       `no static ${language.toUpperCase()} type, so no ` +
-                      `variant of "${id}" takes it as a parameter. Fail ` +
-                      `closed (D6).`
+                      `variant of "${id}" takes it as a parameter.`
                   );
                 return {
                   shader,
@@ -12097,10 +12134,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               const ret = gpuTypeOfValue(body, isWGSL);
               if (ret === undefined)
                 throw new Error(
-                  `${id}: the return value has no static ` +
+                  `Could not compile \`${id}\`: the return value has no static ` +
                     `${language.toUpperCase()} type — only scalars, booleans, ` +
-                    `colors, complex values and 2–4 component vectors have one. Fail ` +
-                    `closed (D6).`
+                    `colors, complex values and 2–4 component vectors have one.`
                 );
               // Every `Return` in the body must yield the shape the
               // signature just synthesized: a shader function has ONE return
@@ -12121,7 +12157,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                       : gpuTypeOfValue(value, isWGSL);
                   if (t === ret) return;
                   throw new Error(
-                    `${id}: a \`Return\` in this body yields ` +
+                    `Could not compile \`${id}\`: a \`Return\` in this body yields ` +
                       (t === undefined
                         ? `a value with no static ${language.toUpperCase()} type`
                         : `a "${t}" value`) +
@@ -12130,7 +12166,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                       `${language.toUpperCase()} has no implicit conversion ` +
                       `between them, and a shader function has a single ` +
                       `return type. Make every \`Return\` — and the body's ` +
-                      `final value — the same shape. Fail closed (D6).`
+                      `final value — the same shape.`
                   );
                 },
               });
@@ -12187,10 +12223,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           const args = held === undefined ? ordinary : [...ordinary, ...held];
           if (args.length !== sig.params.length)
             throw new Error(
-              `${id}: called with ${args.length} argument(s) but declared ` +
+              `Could not compile \`${id}\`: called with ${args.length} argument(s) but declared ` +
                 `with ${sig.params.length} — a ${language.toUpperCase()} call ` +
                 `must match its declaration exactly (there are no optional or ` +
-                `variadic parameters). Fail closed (D6).`
+                `variadic parameters).`
             );
           const code = args.map((arg, i) => {
             const t = gpuTypeOfValue(arg, isWGSL);
@@ -12204,12 +12240,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               t === undefined ? gpuDeclaredTypeOf(arg) : undefined;
             if (badDecl !== undefined)
               throw new Error(
-                `${id}: argument ${i + 1} \`${arg.toString()}\` is declared ` +
+                `Could not compile \`${id}\`: argument ${i + 1} \`${arg.toString()}\` is declared ` +
                   `"${badDecl.spelling}" by the caller — a type with no ` +
                   `static ${language.toUpperCase()} value shape here (only ` +
                   `scalars, booleans and 2–4 component vectors have one), so ` +
                   `it cannot be matched against parameter "${sig.names[i]}" ` +
-                  `(declared "${sig.params[i]}"). Fail closed (D6).`
+                  `(declared "${sig.params[i]}").`
               );
             // A collection argument beyond the static vec2–vec4 shapes: the
             // JS target answers this with the `_SYS.bcastFn` runtime
@@ -12217,10 +12253,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             // applying it silently would compute a different value.
             if (t === undefined)
               throw new Error(
-                `${id}: argument ${i + 1} is a collection with no static ` +
+                `Could not compile \`${id}\`: argument ${i + 1} is a collection with no static ` +
                   `${language.toUpperCase()} shape (only 2–4 component ` +
                   `vectors have one), and a shader has no runtime broadcast ` +
-                  `dispatch to apply "${id}" element-wise. Fail closed (D6).`
+                  `dispatch to apply "${id}" element-wise.`
               );
             // A real argument to a complex parameter. A real number is a
             // complex number, so the call is valid, but the parameter is a
@@ -12244,11 +12280,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 // often between a `compileFunction` parameter the CALLER
                 // declared and a callee signature it never saw, and the
                 // position alone does not point at either.
-                `${id}: argument ${i + 1} \`${arg.toString()}\` lowers to "${t}" but parameter ` +
+                `Could not compile \`${id}\`: argument ${i + 1} \`${arg.toString()}\` lowers to "${t}" but parameter ` +
                   `"${sig.names[i]}" is declared "${sig.params[i]}" — ` +
                   `${language.toUpperCase()} has no implicit conversion ` +
-                  `between them. Declare a matching signature for "${id}". ` +
-                  `Fail closed (D6).`
+                  `between them. Declare a matching signature for "${id}".`
               );
             return sig.colors[i]
               ? gpuColorOperand(
@@ -12264,10 +12299,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
 
         value: ({ id }) => {
           throw new Error(
-            `${id}: a user-defined function cannot be used as a VALUE on ` +
+            `Could not compile \`${id}\`: a user-defined function cannot be used as a VALUE on ` +
               `target '${language}' — the shader languages have no function ` +
               `values (no higher-order operands, no function pointers). Call ` +
-              `it instead. Fail closed (D6).`
+              `it instead.`
           );
         },
       },
@@ -12771,7 +12806,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         'compileToSource() does not support the `storage` option: a ' +
           'sampler-backed read needs a helper declaration, and this route ' +
           'returns a bare expression with no preamble channel. Use ' +
-          '`compile()`, whose result carries the preamble. Fail closed (D6).'
+          '`compile()`, whose result carries the preamble.'
       );
     const code = BaseCompiler.compile(
       expr,
@@ -12828,10 +12863,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     for (const d of declarations) {
       if (seen.has(d.name))
         throw new Error(
-          `Shader declaration "${d.name}" is declared more than once (as an ` +
+          `Could not compile: the shader declaration \`${d.name}\` is declared more than once (as an ` +
             `input and as a uniform): two storage classes cannot share one ` +
             `name, and a body referencing it names neither unambiguously. ` +
-            `Rename one of them. Fail closed (D6).`
+            `Rename one of them.`
         );
       seen.add(d.name);
     }

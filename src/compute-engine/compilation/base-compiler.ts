@@ -1488,7 +1488,7 @@ export function isProvablyNumericListOperand(e: Expression): boolean {
 /**
  * A `Tuple` or `List` literal with a broadcasting component — a shape whose
  * norm does NOT reduce to one scalar, so `Norm`/`Abs` compile handlers use
- * this to fail closed (D6) and let the interpreter broadcast. Exported for
+ * this to fail closed and let the interpreter broadcast. Exported for
  * the compile targets, which must not import `collection-utils` directly
  * (module-init ordering — see `isIndexedCollectionOperand` in
  * javascript-target.ts); this module already imports it safely.
@@ -1813,7 +1813,7 @@ export class BaseCompiler {
    * arithmetic operators qualify: a unary operator (Negate/Not) would emit
    * wrong-arity or invalid source (e.g. `(a, b) => a ! b`), and a relational or
    * logical operator folds to a boolean that silently diverges from the
-   * interpreter. Any operator symbol NOT in this set fails closed (D6) so the
+   * interpreter. Any operator symbol NOT in this set fails closed so the
    * engine falls back to the interpreter rather than emitting garbage behind
    * `success: true`. Keyed by symbol (not operator glyph) so it is
    * target-agnostic.
@@ -1837,7 +1837,7 @@ export class BaseCompiler {
   }
 
   /**
-   * The fail-closed (D6) refusal for a BUILT-IN operator name used in value
+   * The fail-closed refusal for a BUILT-IN operator name used in value
    * position that has no first-class form: it neither eta-expands
    * (`ensureBuiltinCallbackEmitted` declined — a variadic or zero-required
    * signature, or a wrapper body that does not canonicalize) nor lowers to a
@@ -1847,16 +1847,15 @@ export class BaseCompiler {
    */
   private static builtinCallbackRefusal(s: string): string {
     return (
-      `${s}: cannot compile as a first-class function — the built-in ` +
+      `Could not compile \`${s}\` as a first-class function: the built-in ` +
       `operator has no fixed arity to eta-expand at (a variadic or ` +
       `zero-required signature), and only the binary arithmetic operators ` +
-      `(Add/Subtract/Multiply/Divide) lower to a combiner lambda. ` +
-      `Fail closed (D6).`
+      `(Add/Subtract/Multiply/Divide) lower to a combiner lambda.`
     );
   }
 
   /**
-   * The fail-closed (D6) refusal for a USER-DEFINED function name used in
+   * The fail-closed refusal for a USER-DEFINED function name used in
    * value position — the callback of `Map`/`Filter`/`CountIf`/`Find`, a
    * `Reduce`/`Scan` combiner, a `Tabulate` generator, an argument to a
    * higher-order user function — whose definition the target declined to
@@ -1880,12 +1879,12 @@ export class BaseCompiler {
     reason: string | undefined
   ): string {
     return (
-      `${s}: cannot compile — this user function is referenced as a value ` +
+      `Could not compile \`${s}\`: this user function is referenced as a value ` +
       `but its definition cannot be emitted on target ` +
       `'${target.language ?? 'unknown'}'` +
       (reason === undefined ? '' : ` (${reason})`) +
       `. A caller using the default \`fallback: true\` falls back to ` +
-      `interpreted evaluation. Fail closed (D6).`
+      `interpreted evaluation.`
     );
   }
 
@@ -1947,8 +1946,8 @@ export class BaseCompiler {
   } {
     if (target.absence === undefined)
       throw new Error(
-        `${opName}: target '${target.language ?? 'unknown'}' has no absence ` +
-          `capability. Fail closed (§3.F).`
+        `Could not compile \`${opName}\`: target '${target.language ?? 'unknown'}' has no absence ` +
+          `capability.`
       );
     if (!BaseCompiler.absentDomainIsObject(t)) return target.absence.numeric;
     // A target whose absence spellings cover its whole value model
@@ -1967,9 +1966,9 @@ export class BaseCompiler {
       return target.absence.numeric;
     if (target.absence.object === undefined)
       throw new Error(
-        `${opName}: an object-domain absent position has no representation on ` +
+        `Could not compile \`${opName}\`: an object-domain absent position has no representation on ` +
           `target '${target.language ?? 'unknown'}'. Discharge with 'Coalesce' ` +
-          `first. Fail closed (§3.F).`
+          `first.`
       );
     return target.absence.object;
   }
@@ -1987,11 +1986,11 @@ export class BaseCompiler {
     ) {
       const head = expr !== undefined && isFunction(expr) ? expr.operator : '?';
       throw new Error(
-        `${head}: a multi-statement construct (loop-form Sum/Product, Loop, or Block) ` +
+        `Could not compile \`${head}\`: a multi-statement construct (loop-form Sum/Product, Loop, or Block) ` +
           `cannot be used as a sub-expression in "${target.language ?? 'this'}" ` +
           `here — this position has no statement sink to hoist its statements ` +
           `into (a conditional arm, or an expression-only route), so it is ` +
-          `only valid as a top-level function body. Fail closed (D6).`
+          `only valid as a top-level function body.`
       );
     }
     return code;
@@ -2182,7 +2181,7 @@ export class BaseCompiler {
     if (override !== undefined) return override;
     if (!expr.isValid) {
       throw new Error(
-        `Cannot compile invalid expression: "${expr.toString()}"`
+        `Could not compile invalid expression: "${expr.toString()}"`
       );
     }
     // First-class type values do not compile — a reified type expression has
@@ -2216,9 +2215,9 @@ export class BaseCompiler {
     // faithful test still fails closed here.
     if (expr.type.toString() === 'type')
       throw new Error(
-        `Cannot compile a type value (type 'type') to target ` +
+        `Could not compile a type value (type 'type') to target ` +
           `'${target.language ?? 'unknown'}': a reified type expression has ` +
-          `no compiled representation. Fail closed (D6).`
+          `no compiled representation.`
       );
     if (
       isFunction(expr, 'Subtype') ||
@@ -2238,10 +2237,9 @@ export class BaseCompiler {
         )
       )
         throw new Error(
-          `${expr.operator}: cannot compile — a non-constant type ` +
+          `Could not compile \`${expr.operator}\`: a non-constant type ` +
             `comparison needs the engine's type registry, which compiled ` +
-            `code does not carry (target '${target.language ?? 'unknown'}'). ` +
-            `Fail closed (D6).`
+            `code does not carry (target '${target.language ?? 'unknown'}').`
         );
     }
     // Install the naming context EAGERLY, on the outermost call, for a target
@@ -2322,10 +2320,10 @@ export class BaseCompiler {
           !inValueModel
         )
           throw new Error(
-            `Cannot compile an object-domain absent ('missing') position ` +
+            `Could not compile an object-domain absent ('missing') position ` +
               `(type '${expr.type.toString()}') to target ` +
               `'${target.language ?? 'unknown'}': it has no object null ` +
-              `representation. Discharge with 'Coalesce' first (fail closed, §3.F).`
+              `representation. Discharge with 'Coalesce' first.`
           );
       }
     }
@@ -2344,10 +2342,9 @@ export class BaseCompiler {
       const tagged = taggedSumInType(expr.engine, expr.type.type);
       if (tagged !== undefined)
         throw new Error(
-          `Cannot compile an expression whose result type '${expr.type.toString()}' ` +
+          `Could not compile an expression whose result type '${expr.type.toString()}' ` +
             `is the tagged sum variant '${tagged}': its compiled representation ` +
-            `is internal to the compiled unit and does not cross the boundary. ` +
-            `Fail closed (D6).`
+            `is internal to the compiled unit and does not cross the boundary.`
         );
     }
     // Keep the compile-bound-variables context in sync for the contextless
@@ -3180,9 +3177,9 @@ export class BaseCompiler {
         code: 'non-real-operand',
         kind: 'capability',
         message:
-          `${h}: cannot compile over the non-real operand \`${nonReal.toString()}\` — ` +
-          `the value is certainly not a real number, and this target's ` +
-          `lowering of the head is real-only. Fail closed (D6).`,
+          `Could not compile \`${h}\`: the operand \`${nonReal.toString()}\` is ` +
+          `certainly not a real number, and this target's ` +
+          `lowering of the head is real-only.`,
       });
     if (
       !target.bindExpr ||
@@ -3348,9 +3345,9 @@ export class BaseCompiler {
         code: 'non-real-operand',
         kind: 'capability',
         message:
-          `${h}: cannot compile over the non-real operand \`${nonReal.toString()}\` — ` +
-          `the value is certainly not a real number, and this target's ` +
-          `lowering of the head is real-only. Fail closed (D6).`,
+          `Could not compile \`${h}\`: the operand \`${nonReal.toString()}\` is ` +
+          `certainly not a real number, and this target's ` +
+          `lowering of the head is real-only.`,
       });
     const bind = target.bindExpr;
     const isReal = target.complexIsReal;
@@ -3470,11 +3467,11 @@ export class BaseCompiler {
       throw new CompileDeclineError({
         code: 'unsupported-mode',
         kind: 'capability',
-        message: `mode '${requested}' is not offered by the '${
+        message: `Could not compile: the mode '${requested}' is not offered by the '${
           target.language ?? 'custom'
         }' compilation target (offered: ${supported
           .map((m) => `'${m}'`)
-          .join(', ')}). Fail closed (D6).`,
+          .join(', ')}).`,
       });
     return requested;
   }
@@ -3879,12 +3876,12 @@ export class BaseCompiler {
     if (lanes.byName.has(name)) return lanes.byName.get(name);
     if (BaseCompiler.wideNumericType(finitePartOfType(expr.type.type)))
       throw new Error(
-        `Cannot compile a call of \`${h}\`: its type is ` +
+        `Could not compile a call of \`${h}\`: its type is ` +
           `\`${expr.type.toString()}\`, which does not say whether the call ` +
           `returns a real or a complex value, and the definition of \`${h}\` ` +
           `on target '${target.language}' does not say either. Declare the ` +
           `signature of \`${h}\`, for example \`${h}: (real) -> complex\` or ` +
-          `\`${h}: (real) -> real\`. Fail closed (D6).`
+          `\`${h}: (real) -> real\`.`
       );
     return undefined;
   }
@@ -4222,12 +4219,11 @@ export class BaseCompiler {
       !BaseCompiler.complexDiscipline
     )
       throw new Error(
-        `Cannot compile \`${id}\`: a recursive call of \`${id}\` in its body ` +
+        `Could not compile \`${id}\`: a recursive call of \`${id}\` in its body ` +
           `has a type that does not say whether it returns a real or a ` +
           `complex value, and neither reading gives a body with the same ` +
           `lane. Declare the signature of \`${id}\`, for example ` +
-          `\`${id}: (real) -> complex\` or \`${id}: (real) -> real\`. Fail ` +
-          `closed (D6).`
+          `\`${id}: (real) -> complex\` or \`${id}: (real) -> real\`.`
       );
     lanes.byName.set(name, lane);
   }
@@ -4709,7 +4705,9 @@ export class BaseCompiler {
     if (h === 'Negate') return `_SYS.smul(-1, ${params[0]})`;
     if (h === 'Subtract')
       return `_SYS.sadd(${params[0]}, _SYS.smul(-1, ${params[1]}))`;
-    throw new Error(`${h}: no dispatching broadcast lowering`);
+    throw new Error(
+      `Could not compile \`${h}\`: no dispatching broadcast lowering`
+    );
   }
 
   /**
@@ -5231,11 +5229,10 @@ export class BaseCompiler {
     if (BaseCompiler.isGatherIndex(index)) return;
     if (!BaseCompiler.hasMixedElementComplexness(args[0])) return;
     throw new Error(
-      `At: cannot compile an indexed read with a run-time index into a ` +
+      `Could not compile \`At\`: an indexed read with a run-time index into a ` +
         `collection that mixes complex-valued and real-valued elements — the ` +
         `element is a complex object for some indices and a plain number for ` +
-        `others, so no single lowering is correct. Fail closed (D6) — the ` +
-        `interpreter evaluates it. Use a literal index, or make every element ` +
+        `others, so no single lowering is correct. The interpreter evaluates it instead. Use a literal index, or make every element ` +
         `complex-valued.`
     );
   }
@@ -5929,7 +5926,7 @@ export class BaseCompiler {
     // 50015001, the 10001-term prefix), and baking that as a compile-time
     // constant would put a mathematically wrong number behind
     // `success: true` where the structural lowering deliberately fails
-    // closed (D6). Convergent infinite series decline too — telling the two
+    // closed. Convergent infinite series decline too — telling the two
     // apart is exactly what the fold cannot do — and keep their pre-fold
     // behavior (fail closed, interpreter fallback at run time). A BOUNDED
     // infinite pipeline (`Sum(Take(Map(_ ↦ _^2, 1..∞), 10))`) has its `∞`
@@ -6121,7 +6118,7 @@ export class BaseCompiler {
    * so has no other backstop.
    *
    * Anything whose count cannot be resolved statically returns `Infinity` —
-   * fail closed (D6), the same answer the depth bound gives, and the same
+   * fail closed, the same answer the depth bound gives, and the same
    * shape every other gate in this folder uses. `Infinity` propagates through
    * the arithmetic below without special-casing.
    */
@@ -6618,7 +6615,7 @@ export class BaseCompiler {
    * list. A literal tuple splices directly; a symbolic argument whose STATIC
    * type is a tuple of known arity n rewrites to n positional `At` accesses
    * (`f(At(p,1), …, At(p,n))`). An argument whose arity is not statically
-   * known fails closed (D6): the compiled code could not re-validate the
+   * known fails closed: the compiled code could not re-validate the
    * arity the interpreter enforces at splice time (a JS/Python dynamic
    * spread would silently mis-bind on a mismatch instead of erroring).
    */
@@ -6656,9 +6653,9 @@ export class BaseCompiler {
         continue;
       }
       throw new Error(
-        `Spread: cannot compile — the argument's tuple arity is not ` +
+        `Could not compile \`Spread\`: the argument's tuple arity is not ` +
           `statically known (type '${arg.type.toString()}'). Annotate it ` +
-          `with a tuple type, or evaluate first. Fail closed (D6).`
+          `with a tuple type, or evaluate first.`
       );
     }
     return ce.function(expr.operator, ops);
@@ -6737,7 +6734,7 @@ export class BaseCompiler {
       // while `Equal([1, NaN], [1, NaN])` is false). On a target with no
       // object axis (the shader targets, the interval target) the numeric
       // marker is the only spelling there is, and it is used. A target with no
-      // absence capability at all fails closed (D6).
+      // absence capability at all fails closed.
       //
       // The guard reads `boundVars`/`varsKeys` only — it runs BEFORE
       // `target.var()` is consulted, so that resolving the name does not
@@ -6757,9 +6754,9 @@ export class BaseCompiler {
         if (target.absence?.numeric !== undefined)
           return target.absence.numeric.make();
         throw new Error(
-          `${s}: target '${target.language ?? 'unknown'}' has no absence ` +
+          `Could not compile \`${s}\`: target '${target.language ?? 'unknown'}' has no absence ` +
             `representation (no 'absence' capability), so the absence marker ` +
-            `cannot be spelled. Fail closed (D6).`
+            `cannot be spelled.`
         );
       }
       // Resolving a free symbol RECORDS it as a vars-object reference (see
@@ -6809,7 +6806,7 @@ export class BaseCompiler {
       // targets emitted the undefined identifier `Nothing` (a driver-side
       // compile error behind `success: true`), the Python target the
       // undefined name `Nothing`, and the interval target a `_.Nothing`
-      // vars-object read that is `undefined` at run time. Fail closed (D6)
+      // vars-object read that is `undefined` at run time. Fail closed
       // for every target here, on the one route they share. The JavaScript
       // target's own `var` hook refuses it first with the same message, so
       // this guard is what the other targets rely on. A BOUND name or a
@@ -6817,7 +6814,7 @@ export class BaseCompiler {
       // served above.
       if (s === 'Nothing' && !isBoundOrMapped)
         throw new Error(
-          'Nothing: the erasure marker is not a value and cannot be compiled as a variable reference. Fail closed (D6).'
+          'Could not compile `Nothing`: the erasure marker is not a value, so it cannot be read as a variable.'
         );
       if (registry && !isBoundOrMapped && !registry.misses?.has(s)) {
         // The VALUE position, so a declared-complex parameter needs the
@@ -6831,7 +6828,7 @@ export class BaseCompiler {
           decline
         );
         // A target whose language has no function VALUES (the shader targets)
-        // decides what this reference means — in practice, fails closed (D6).
+        // decides what this reference means — in practice, fails closed.
         if (userFn !== undefined && !hadVarsRef)
           target.varsObjectRefs?.delete(s);
         if (userFn !== undefined && registry.lowering)
@@ -6875,7 +6872,7 @@ export class BaseCompiler {
         );
         // As for user functions: a target whose language has no function
         // VALUES (the shader targets) decides what this reference means — in
-        // practice, fails closed (D6).
+        // practice, fails closed.
         if (etaFn !== undefined && !hadVarsRef)
           target.varsObjectRefs?.delete(s);
         if (etaFn !== undefined && registry.lowering)
@@ -6885,7 +6882,7 @@ export class BaseCompiler {
         // zero-required like `Random`, or a wrapper body that does not
         // canonicalize) must not fall through to `_.Random`: that artifact
         // compiles "successfully" and throws `_f is not a function` at run
-        // time. Fail closed (D6) — with the default `fallback: true` route
+        // time. Fail closed — with the default `fallback: true` route
         // this becomes an interpreter fallback. Scoped to a system-provenance
         // operator name that is not one the engine itself reads as a variable
         // (`isRefusableBuiltinCallback`): a plain free symbol, a value
@@ -6935,7 +6932,7 @@ export class BaseCompiler {
         return folded;
       }
       // Genuinely free symbol: emit its bare identifier. Give the target a
-      // chance to mangle it or fail closed (D6) — e.g. a GLSL/WGSL reserved
+      // chance to mangle it or fail closed — e.g. a GLSL/WGSL reserved
       // keyword used as a variable name would emit invalid shader source.
       return BaseCompiler.liftWideReference(
         expr,
@@ -7009,17 +7006,16 @@ export class BaseCompiler {
     if (isCharacter(expr)) {
       if (target.character === undefined)
         throw new Error(
-          `Cannot compile a character to target '${target.language ?? '?'}': ` +
+          `Could not compile a character to target '${target.language ?? '?'}': ` +
             `it has no character representation (a character is one UAX #29 ` +
-            `grapheme cluster, which this target cannot segment or order). ` +
-            `Fail closed (D6) — the interpreter evaluates it.`
+            `grapheme cluster, which this target cannot segment or order). The interpreter evaluates it instead.`
         );
       return target.character(expr.string);
     }
 
     // It must be a function expression...
     if (!isFunction(expr))
-      throw new Error(`Cannot compile expression: "${expr.toString()}"`);
+      throw new Error(`Could not compile expression: "${expr.toString()}"`);
     // The node itself is passed along: the CSE region inventory is keyed by
     // the `(node, operandIndex)` EDGE (a tree may be a DAG, so a bare operand
     // object is ambiguous), and `compileExpr` receives only the operand list.
@@ -7380,7 +7376,7 @@ export class BaseCompiler {
           // through to the later gate, which would repeat the same analysis
           // before reaching the same decline.
           throw new Error(
-            `${h}: the target's lowering for this head is real-only and cannot represent a complex-valued argument. Fail closed (D6).`
+            `Could not compile \`${h}\`: the target's lowering for this head is real-only and cannot represent a complex-valued argument.`
           );
         }
       }
@@ -7422,7 +7418,7 @@ export class BaseCompiler {
     //     CALL. The widened net stays: those heads are not in
     //     `SCALAR_ARITHMETIC_HEADS`, and a complex-element operand still has to
     //     fail closed rather than call `Math.atan2` on a `{re, im}` object.)
-    // Fail closed (D6) with the offending head so the engine-level `compile()`
+    // Fail closed with the offending head so the engine-level `compile()`
     // reports `success: false` and falls back to the interpreter (which
     // broadcasts correctly).
     //
@@ -7511,8 +7507,8 @@ export class BaseCompiler {
         if (lowersToScalarInfix)
           throw new Error(
             BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h)
-              ? `${h}: cannot compile scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
-              : `${h}: cannot compile a broadcastable head over a possibly list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
+              ? `Could not compile \`${h}\`: scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Materialize the list with evaluate() and compile a scalar element function instead.`
+              : `Could not compile \`${h}\`: a broadcastable head over a possibly list-valued operand — the JavaScript compile target has no list-arithmetic support. Materialize the list with evaluate() and compile a scalar element function instead.`
           );
       }
     }
@@ -7531,7 +7527,7 @@ export class BaseCompiler {
     // What IS soundly expressible is a fan-out over the ONE collection operand
     // (`tryCompilePythonElementwise`): the target spells the element-wise map
     // as a list comprehension, which is element-wise for a plain Python list,
-    // a tuple and an ndarray alike. When that route declines, fail closed (D6)
+    // a tuple and an ndarray alike. When that route declines, fail closed
     // and let the engine fall back to the interpreter, which broadcasts
     // correctly. Only infix-lowering arithmetic heads are affected;
     // element-wise math functions (`Sin` → `np.sin`) broadcast natively over a
@@ -7554,7 +7550,7 @@ export class BaseCompiler {
       // already fans out through the target's `broadcastUnary` hook. The
       // predicate mirrors that dispatch site one for one, so the guard only
       // stands aside when the dispatch will actually fire; if the hook then
-      // declines, that path fails closed (D6) on its own.
+      // declines, that path fails closed on its own.
       const isUnaryBroadcastOverCollection =
         target.broadcastUnary !== undefined &&
         args.length === 1 &&
@@ -7589,7 +7585,7 @@ export class BaseCompiler {
         );
         if (elementwise !== undefined) return elementwise;
         throw new Error(
-          `${h}: cannot compile arithmetic over a possibly-collection-typed operand on the Python target — Python's arithmetic operators repeat/concatenate a list instead of broadcasting element-wise, diverging from the interpreter. Fail closed (D6). Materialize the operand with evaluate() and compile a scalar element function instead.`
+          `Could not compile \`${h}\`: arithmetic over a possibly-collection-typed operand on the Python target — Python's arithmetic operators repeat/concatenate a list instead of broadcasting element-wise, diverging from the interpreter. Materialize the operand with evaluate() and compile a scalar element function instead.`
         );
       }
     }
@@ -7602,7 +7598,7 @@ export class BaseCompiler {
     // aggregate equality where the interpreter broadcasts a `List`
     // element-wise). The element-wise `Which`/`If` selection path builds its
     // boolean-vector masks directly (`compileGPUSelection`) and never routes a
-    // condition through here; everything else fails closed (D6). One shape is
+    // condition through here; everything else fails closed. One shape is
     // deliberately admitted: GLSL `Equal`/`NotEqual` over TUPLE-shaped
     // operands — a tuple (point) is atomic in the interpreter too, and GLSL
     // `==` on two vecNs is scalar aggregate equality, so that lowering is
@@ -7628,11 +7624,11 @@ export class BaseCompiler {
       );
       if (offending !== undefined)
         throw new Error(
-          `${h}: cannot compile a comparison or logical connective over the ` +
+          `Could not compile \`${h}\`: a comparison or logical connective over the ` +
             `non-scalar operand \`${offending.toString()}\` on the ` +
             `${target.language} target — the shader infix operators are ` +
             `scalar-only (element-wise conditions compile only inside a ` +
-            `\`Which\`/\`If\` selection). Fail closed (D6).`
+            `\`Which\`/\`If\` selection).`
         );
     }
 
@@ -7641,7 +7637,7 @@ export class BaseCompiler {
     // `Less(i·x, 0)` symbolic (no truth value), while both the infix path
     // below and the function codegen it falls through to emit a raw `<` over
     // the `{re, im}` object — a silent `false` behind `success: true`. Fail
-    // closed (D6) instead. `Equal`/`NotEqual` are NOT affected: they have
+    // closed instead. `Equal`/`NotEqual` are NOT affected: they have
     // their own complex-aware codegen (`_SYS.eq`/`_SYS.neq`). An operand of
     // merely UNKNOWN sign over a real kernel (`Sqrt(x)`) is not complex-valued
     // by `isComplexValued`'s carve-out, so `Less(Sqrt(x), 2)` still compiles.
@@ -7678,10 +7674,10 @@ export class BaseCompiler {
       );
       if (complexOperand !== undefined)
         throw new Error(
-          `${h}: cannot compile an ordering comparison over the ` +
+          `Could not compile \`${h}\`: an ordering comparison over the ` +
             `complex-valued operand \`${complexOperand.toString()}\` — the ` +
             `complex numbers are not ordered, and the interpreter leaves the ` +
-            `comparison symbolic. Fail closed (D6).`
+            `comparison symbolic.`
         );
     }
 
@@ -7760,7 +7756,7 @@ export class BaseCompiler {
           // mixed pair does not agree: the interpreter leaves `Less("a", 1)`
           // symbolic whereas `"a" < 1` is a plausible-looking `false`. Decline
           // the infix path there so the head falls through to the JS ordering
-          // codegen, which fails closed (D6) and lets the engine fall back to
+          // codegen, which fails closed and lets the engine fall back to
           // the interpreter. An operand of unknown type alongside a string is
           // POSSIBLY mixed and declines too.
           //
@@ -7808,7 +7804,7 @@ export class BaseCompiler {
           // and an aggregate emits `p < q` / `d1 < d2`, which Python answers
           // lexicographically (or raises) where the interpreter leaves the
           // comparison inert. Declining here lets the head fall through to
-          // `compilePythonRelation`, which fails closed (D6) with the
+          // `compilePythonRelation`, which fails closed with the
           // diagnostic. An ALL-string ordering keeps the fast path: `"a" < "b"`
           // is the interpreter's own string comparison (probe-verified,
           // chains included).
@@ -7940,11 +7936,11 @@ export class BaseCompiler {
                 if (!target.bindExpr && impureMiddle && isImpure) {
                   if (!BaseCompiler.canHoist(target) || i >= 2)
                     throw new Error(
-                      `${h}: an impure (Random) operand cannot be bound to a ` +
+                      `Could not compile \`${h}\`: an impure (Random) operand cannot be bound to a ` +
                         'temporary at this position — a repeated draw would ' +
                         'shift every later value in the shader, and a hoisted ' +
                         'draw at index ≥ 2 would fire even when an earlier ' +
-                        'comparison already decided the chain. Fail closed (D6).'
+                        'comparison already decided the chain.'
                     );
                   const name = BaseCompiler.tempVar(target);
                   const decl =
@@ -8234,7 +8230,7 @@ export class BaseCompiler {
             // their own overload table, and a typed-symbol or `Matrix` operand
             // — for which `.isCollection` is false — reaches this path with
             // shapes the operator may have no overload for (`vec3 + vec2`,
-            // `2.0 + mat2x2f(…)` on WGSL). Throws to fail closed (D6).
+            // `2.0 + mat2x2f(…)` on WGSL). Throws to fail closed.
             // No hook (JavaScript, Python, interval-js): unchanged.
             target.checkOperandShapes?.(h, args, resultStr, target);
             return resultPrec < prec ? `(${resultStr})` : resultStr;
@@ -8535,13 +8531,12 @@ export class BaseCompiler {
       // A destructuring declare (`let (x, y) = …`) is desugared at the block
       // level, into per-leaf declares; one reaching here is in value position
       // (or outside a block entirely) and would compile as `let _ = …`, its
-      // pattern names silently reading as NaN — fail closed (D6).
+      // pattern names silently reading as NaN — fail closed.
       if (isFunction(args[0], 'Tuple'))
         throw new Error(
-          `Cannot compile a destructuring declaration in value position. ` +
+          `Could not compile a destructuring declaration in value position. ` +
             `It is desugared to per-leaf declares only in STATEMENT ` +
-            `position (a block's non-final statement, or a loop body). ` +
-            `Fail closed (D6).`
+            `position (a block's non-final statement, or a loop body).`
         );
       const name = isSymbol(args[0]) ? args[0].symbol : '_';
       // Targets with a `declare` hook handle any initial value at the block
@@ -8565,13 +8560,12 @@ export class BaseCompiler {
       // A destructuring assignment (`(x, y) := …`) is desugared at the block
       // level, into temporaries + writes; a bare one reaching here has no
       // statement list to expand into and would compile as `_ = …`, leaving
-      // every target at its old value — fail closed (D6).
+      // every target at its old value — fail closed.
       if (isFunction(args[0], 'Tuple'))
         throw new Error(
-          `Cannot compile a destructuring assignment in value position. ` +
+          `Could not compile a destructuring assignment in value position. ` +
             `It is desugared to temporaries + writes only in STATEMENT ` +
-            `position (a block's non-final statement, or a loop body). ` +
-            `Fail closed (D6).`
+            `position (a block's non-final statement, or a loop body).`
         );
       // A protocol property assignment — `p.name = v` where some protocol
       // declares `name` a property. The engine keeps the canonical form as
@@ -8583,7 +8577,7 @@ export class BaseCompiler {
       // store into a mutable object, and only an object can carry a settable
       // property at all (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Which
       // types can conform"), so every legal receiver here is an object — and
-      // objects have no compiled representation yet. Fail closed (D6) rather
+      // objects have no compiled representation yet. Fail closed rather
       // than emit the no-op; the ROADMAP.md entry for the mutability gate
       // schedules the compiled store with the object work.
       const storeTarget = args[0];
@@ -8605,21 +8599,21 @@ export class BaseCompiler {
           : undefined;
       if (storedProperty !== undefined)
         throw new Error(
-          `${storedProperty}: this protocol property assignment has no ` +
+          `Could not compile \`${storedProperty}\`: this protocol property assignment has no ` +
             `lowering on target '${target.language ?? 'javascript'}' ` +
             `(a property store writes a mutable object, and objects have no ` +
-            `compiled representation). Fail closed (D6).`
+            `compiled representation).`
         );
       // Any other non-symbol target (a `Subscript` sequence definition, a
       // `Field` naming no protocol property, …) has no lowering: emitting
       // `_ = v` would silently leave the target at its old value (and, in
       // sloppy mode, write a stray global `_`) behind `success: true` —
-      // fail closed (D6).
+      // fail closed.
       if (!isSymbol(args[0]))
         throw new Error(
-          `Assign: cannot compile — the assignment target ` +
+          `Could not compile \`Assign\`: the assignment target ` +
             `'${args[0].operator}' is not a variable, and this target ` +
-            `shape has no lowering. Fail closed (D6).`
+            `shape has no lowering.`
         );
       // The write must use the SAME spelling a READ of this name compiles to,
       // or the two halves of the variable disagree (`assignLValue`).
@@ -8661,7 +8655,7 @@ export class BaseCompiler {
     }
 
     if (h === 'If' && args.length !== 2 && args.length !== 3)
-      throw new Error('If: wrong number of arguments');
+      throw new Error('Could not compile `If`: wrong number of arguments');
     // The else-less `If(c, t)` is the one-clause `Which(c, t)`: when the
     // condition is false no branch is selected, and the value is the
     // codomain's absence marker (`NaN` for a number), exactly what a `Which`
@@ -8688,7 +8682,7 @@ export class BaseCompiler {
         ? 'Which'
         : h;
     if (h === 'If' && args.length === 2 && selectionHead === 'If')
-      throw new Error('If: wrong number of arguments');
+      throw new Error('Could not compile `If`: wrong number of arguments');
 
     if (selectionHead === 'If') {
       // A condition that may be an indexed collection at run time selects
@@ -8783,7 +8777,7 @@ export class BaseCompiler {
     if (selectionHead === 'Which') {
       if (args.length < 2 || args.length % 2 !== 0)
         throw new Error(
-          'Which: expected even number of arguments (condition/value pairs)'
+          'Could not compile `Which`: expected even number of arguments (condition/value pairs)'
         );
       // A condition that may be an indexed collection at run time selects
       // ELEMENT-WISE (`np.select`, R1–R4 of
@@ -8915,7 +8909,9 @@ export class BaseCompiler {
 
     if (h === 'When') {
       if (args.length !== 2)
-        throw new Error('When: expected exactly 2 arguments (expr, cond)');
+        throw new Error(
+          'Could not compile `When`: expected exactly 2 arguments (expr, cond)'
+        );
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
@@ -8983,11 +8979,11 @@ export class BaseCompiler {
           (valueType.matches('number') || valueType.matches('boolean'));
         if (!point && !list && !scalar)
           throw new Error(
-            `When: cannot compile a restriction by a list of conditions over ` +
+            `Could not compile \`When\`: a restriction by a list of conditions over ` +
               `a value that may be a list or a point at run time (type ` +
               `'${valueType.toString()}'): a list is aligned with the ` +
               `conditions and a point is repeated, and a flat array cannot ` +
-              `tell the two apart. Fail closed (D6).`
+              `tell the two apart.`
           );
         const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
         const conds = BaseCompiler.compile(args[1], target);
@@ -9051,7 +9047,9 @@ export class BaseCompiler {
     // closed with a diagnostic (propagation stays native; discharge does not).
     if (h === 'IsMissing') {
       if (args.length !== 1)
-        throw new Error('IsMissing: expected exactly one argument');
+        throw new Error(
+          'Could not compile `IsMissing`: expected exactly one argument'
+        );
       const axis = BaseCompiler.absenceAxisForType(
         args[0].type.type,
         target,
@@ -9059,16 +9057,18 @@ export class BaseCompiler {
       );
       if (axis.isAbsent === undefined)
         throw new Error(
-          `IsMissing: target '${target.language ?? 'unknown'}' cannot test ` +
+          `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' cannot test ` +
             `absence (no 'isAbsent' capability — e.g. GPU fast-math cannot ` +
-            `guarantee 'isnan' survives). Fail closed (§3.F).`
+            `guarantee 'isnan' survives).`
         );
       return axis.isAbsent(BaseCompiler.compileValueOperand(args[0], target));
     }
 
     if (h === 'Coalesce') {
       if (args.length === 0)
-        throw new Error('Coalesce: expected at least one argument');
+        throw new Error(
+          'Could not compile `Coalesce`: expected at least one argument'
+        );
       // The result's domain (its widened type — `T₁° | … | Tₙ₋₁° | Tₙ`, §3.D)
       // picks the axis: numeric → NaN-coalesce, object → null-coalesce.
       // Unfold each operand's declared type reference before the strip — the
@@ -9087,8 +9087,8 @@ export class BaseCompiler {
       );
       if (axis.coalesce === undefined)
         throw new Error(
-          `Coalesce: target '${target.language ?? 'unknown'}' cannot ` +
-            `discharge absence (no 'coalesce' capability). Fail closed (§3.F).`
+          `Could not compile \`Coalesce\`: target '${target.language ?? 'unknown'}' cannot ` +
+            `discharge absence (no 'coalesce' capability).`
         );
       // Compiled coalescing evaluates the defaults lazily, left to right: the
       // operands after the first are their own regions (§5.1(b)).
@@ -9148,16 +9148,16 @@ export class BaseCompiler {
     ) {
       if (target.absence.object === undefined)
         throw new Error(
-          `${h}: an absent (Kleene) boolean has no object representation on ` +
+          `Could not compile \`${h}\`: an absent (Kleene) boolean has no object representation on ` +
             `target '${target.language ?? 'unknown'}'. Discharge the operands ` +
-            `with 'Coalesce' first. Fail closed (§3.F).`
+            `with 'Coalesce' first.`
         );
       const guardOf = (a: Expression): TargetSource => {
         const axis = BaseCompiler.absenceAxisForType(a.type.type, target, h);
         if (axis.isAbsent === undefined)
           throw new Error(
-            `${h}: target '${target.language ?? 'unknown'}' cannot test ` +
-              `absence (no 'isAbsent' capability). Fail closed (§3.F).`
+            `Could not compile \`${h}\`: target '${target.language ?? 'unknown'}' cannot test ` +
+              `absence (no 'isAbsent' capability).`
           );
         return axis.isAbsent(BaseCompiler.compileValueOperand(a, target));
       };
@@ -9187,8 +9187,8 @@ export class BaseCompiler {
         const eqFn = target.functions?.(h);
         if (typeof eqFn !== 'function')
           throw new Error(
-            `${h}: target '${target.language ?? 'unknown'}' has no equality ` +
-              `codegen for the guarded (Kleene) form. Fail closed (§3.F).`
+            `Could not compile \`${h}\`: target '${target.language ?? 'unknown'}' has no equality ` +
+              `codegen for the guarded (Kleene) form.`
           );
         inner = eqFn(
           args,
@@ -9262,13 +9262,12 @@ export class BaseCompiler {
         BaseCompiler.mayHoldComplexElement(value)
       )
         throw new Error(
-          `Typed: the value \`${value.toString()}\` has a complex entry, ` +
+          `Could not compile \`Typed\`: the value \`${value.toString()}\` has a complex entry, ` +
             `but its ascribed type \`${typed.type.toString()}\` says every ` +
             `entry is real. The compiled code would read the complex entry ` +
             `as a real number. When the ascription comes from a declared ` +
             `signature, declare a result type that admits a complex entry, ` +
-            `for example \`matrix<complex>\` instead of \`matrix<real>\`. ` +
-            `Fail closed (D6).`
+            `for example \`matrix<complex>\` instead of \`matrix<real>\`.`
         );
       const ascribedComplex = BaseCompiler.isComplexValued(typed);
       const valueComplex = BaseCompiler.isComplexValued(value);
@@ -9280,13 +9279,12 @@ export class BaseCompiler {
           : typed.type.toString();
       if (!ascribedComplex)
         throw new Error(
-          `Typed: the value \`${value.toString()}\` is complex, but its ` +
+          `Could not compile \`Typed\`: the value \`${value.toString()}\` is complex, but its ` +
             `ascribed type \`${ascribed}\` says it is real. The compiled ` +
             `code would read the complex value as a real number. When the ` +
             `ascription comes from a declared signature, declare a result ` +
             `type that admits a complex value, for example ` +
-            `\`(unknown) -> complex\` instead of \`(unknown) -> real\`. ` +
-            `Fail closed (D6).`
+            `\`(unknown) -> complex\` instead of \`(unknown) -> real\`.`
         );
       if (
         BaseCompiler.isNonScalarShape(value) ||
@@ -9294,9 +9292,9 @@ export class BaseCompiler {
         value.type.matches('boolean')
       )
         throw new Error(
-          `Typed: the ascribed type \`${ascribed}\` says the value is ` +
+          `Could not compile \`Typed\`: the ascribed type \`${ascribed}\` says the value is ` +
             `complex, but the value \`${value.toString()}\` is not a ` +
-            `number. Fail closed (D6).`
+            `number.`
         );
       if (target.language === 'javascript')
         return BaseCompiler.isProvablyRealValued(value, target)
@@ -9334,9 +9332,9 @@ export class BaseCompiler {
         );
         if (code !== undefined) return code;
         throw new Error(
-          `${record.name}.${member}: this protocol call has no lowering on ` +
+          `Could not compile \`${record.name}.${member}\`: this protocol call has no lowering on ` +
             `target '${target.language ?? 'javascript'}' (dynamic dispatch ` +
-            `could not be proven compilable). Fail closed (D6).`
+            `could not be proven compilable).`
         );
       }
     }
@@ -9351,11 +9349,10 @@ export class BaseCompiler {
       // objects have no compiled representation yet.
       if (h === 'ProtocolProperty' && args.length === 4)
         throw new Error(
-          `${isString(args[1]) ? args[1].string : 'property'}: this protocol ` +
+          `Could not compile \`${isString(args[1]) ? args[1].string : 'property'}\`: this protocol ` +
             `property assignment has no lowering on target ` +
             `'${target.language ?? 'javascript'}' (a property store writes a ` +
-            `mutable object, and objects have no compiled representation). ` +
-            `Fail closed (D6).`
+            `mutable object, and objects have no compiled representation).`
         );
 
       // A protocol call — a bare dispatcher head (`compare(x, y)`), the
@@ -9450,7 +9447,7 @@ export class BaseCompiler {
           );
           if (guarded !== undefined) return guarded;
           throw new Error(
-            `${h}: the target's lowering for this head is real-only and cannot represent a complex-valued argument. Fail closed (D6).`
+            `Could not compile \`${h}\`: the target's lowering for this head is real-only and cannot represent a complex-valued argument.`
           );
         }
       }
@@ -9461,7 +9458,7 @@ export class BaseCompiler {
       // compiler — Python fans out with a comprehension, the shader languages
       // are already componentwise on a `vecN` and do not fan out at all — so
       // it is delegated to the target's `broadcastUnary` hook. A target
-      // without one fails closed (D6); the base compiler used to emit a
+      // without one fails closed; the base compiler used to emit a
       // JavaScript `.map((v) => …)` arrow here for EVERY target, which is not
       // valid GLSL, WGSL or Python.
       //
@@ -9499,11 +9496,11 @@ export class BaseCompiler {
         );
         if (broadcast !== undefined) return broadcast;
         throw new Error(
-          `${h}: cannot compile an element-wise broadcast over the collection ` +
+          `Could not compile \`${h}\`: an element-wise broadcast over the collection ` +
             `\`${args[0].toString()}\` on the ${
               target.language ?? 'javascript'
-            } target — it has no \`broadcastUnary\` lowering for this shape. ` +
-            `Fail closed (D6). Materialize the collection with evaluate() and ` +
+            } target has no \`broadcastUnary\` lowering for this shape. ` +
+            `Materialize the collection with evaluate() and ` +
             `compile a scalar element function instead.`
         );
       }
@@ -9514,7 +9511,7 @@ export class BaseCompiler {
       const code = fn(args, BaseCompiler.operandCompiler(node, target), target);
       // A target with a static type system gets to reject the emission for the
       // operand shapes it was given (`CompileTarget.checkOperandShapes`); it
-      // throws to fail closed (D6). No hook: unchanged.
+      // throws to fail closed. No hook: unchanged.
       target.checkOperandShapes?.(h, args, code, target);
       // A head that ALSO has an infix spelling gets the same precedence
       // treatment its infix emission would have received. A function handler
@@ -9534,7 +9531,7 @@ export class BaseCompiler {
     // the target declares the helper real-only (`isRealOnlyLowering`: by
     // default every helper name, e.g. JS `_SYS.erf`), it takes a real
     // scalar, and handing it a complex value silently returns garbage
-    // (compiled `Erf(z)` for complex z → −1, not NaN). Fail closed (D6) with
+    // (compiled `Erf(z)` for complex z → −1, not NaN). Fail closed with
     // the offending head. A helper the target declares complex-capable
     // (Python `scipy.special.erf`) receives the complex value as it is.
     if (
@@ -9557,7 +9554,7 @@ export class BaseCompiler {
       );
       if (guarded !== undefined) return guarded;
       throw new Error(
-        `${h}: real-only target helper "${fn}" cannot represent a complex-valued argument. Fail closed (D6).`
+        `Could not compile \`${h}\`: real-only target helper "${fn}" cannot represent a complex-valued argument.`
       );
     }
 
@@ -9598,10 +9595,10 @@ export class BaseCompiler {
     if (declinedByCustomHandler) {
       const types = args.map((a) => `\`${a.type.toString()}\``).join(', ');
       return (
-        `${h}: cannot compile — the operator's compile handler has no lowering ` +
+        `Could not compile \`${h}\`: the operator's compile handler has no lowering ` +
         `for target '${lang}' with these operand types (${types || 'none'}). ` +
         `The head is known to the engine and lowers for other targets/operand ` +
-        `shapes; this is not an unknown operator. Fail closed (D6).`
+        `shapes; this is not an unknown operator.`
       );
     }
     // "Known" = the engine has an OPERATOR definition. A head that was merely
@@ -9615,8 +9612,8 @@ export class BaseCompiler {
     }
     if (known)
       return (
-        `${h}: cannot compile — the operator is known to the engine but ` +
-        `target '${lang}' has no lowering for it. Fail closed (D6).`
+        `Could not compile \`${h}\`: the operator is known to the engine but ` +
+        `target '${lang}' has no lowering for it.`
       );
     return `Unknown operator \`${h}\``;
   }
@@ -9655,7 +9652,7 @@ export class BaseCompiler {
   /**
    * Scalar arithmetic operator heads whose codegen would emit
    * element-wise-impossible scalar JS if handed a list-valued operand. Guarded
-   * in `compileExpr`: such a form fails closed (D6) unless `tryCompileBroadcast`
+   * in `compileExpr`: such a form fails closed unless `tryCompileBroadcast`
    * already lowered it element-wise (e.g. `Negate([1,2,3])` → `_SYS.bcast`).
    */
   private static readonly SCALAR_ARITHMETIC_HEADS: ReadonlySet<string> =
@@ -10249,7 +10246,7 @@ export class BaseCompiler {
       !components.every((c) => realComponents(c.type))
     )
       throw new Error(
-        'Dot: broadcasting complex point coordinates is not supported by this target.'
+        'Could not compile `Dot`: broadcasting complex point coordinates is not supported by this target.'
       );
     const values = args.map(() => BaseCompiler.tempVar(target));
     // A retained helper can have broad coordinate types while its body
@@ -10665,11 +10662,10 @@ export class BaseCompiler {
           const aggregate = unfaithfulComparisonAggregate(a);
           if (aggregate !== null)
             throw new Error(
-              `${h}: cannot compile — an element-wise ordering over a ` +
+              `Could not compile \`${h}\`: an element-wise ordering over a ` +
                 `${aggregate} participant. It has no positional JavaScript ` +
                 `lowering the broadcast closure could compare, so the result ` +
-                `would silently disagree with interpretation. ` +
-                `Fail closed (D6) — the interpreter evaluates it.`
+                `would silently disagree with interpretation. The interpreter evaluates it instead.`
             );
         }
       }
@@ -10698,15 +10694,14 @@ export class BaseCompiler {
         !args.every(isFlatAllStringComparisonParticipant)
       )
         throw new Error(
-          `${h}: cannot compile — an element-wise ordering that mixes string ` +
+          `Could not compile \`${h}\`: an element-wise ordering that mixes string ` +
             `evidence with a participant that is not provably a string. The ` +
             `interpreter leaves such a comparison symbolic (\`Less("a", [1, 2])\` ` +
             `broadcasts to two INERT comparisons), whereas the emitted ` +
             `JavaScript \`<\` coerces and answers a plausible-looking ` +
             `\`false\` for each element. An ordering whose participants are ALL ` +
             `provably strings does compile — the interpreter compares strings ` +
-            `with the same \`<\`. Fail closed (D6) — the interpreter ` +
-            `evaluates it.`
+            `with the same \`<\`. The interpreter evaluates it instead.`
         );
     }
 
@@ -11125,7 +11120,7 @@ export class BaseCompiler {
           // decided that way and fails closed, naming the declaration.
           if (!runtimePointShapeIsUnambiguous(tuples[0]))
             throw new Error(
-              `Add: cannot compile — the operand of type ` +
+              `Could not compile \`Add\`: the operand of type ` +
                 `\`${typeToString(tuples[0].type.type)}\` may be a point ` +
                 `or a list of points at run time, and its declaration also ` +
                 `admits a value whose run-time shape is the same as a ` +
@@ -11133,7 +11128,7 @@ export class BaseCompiler {
                 `of numbers), so the sum with a list of points cannot be ` +
                 `decided by the value's shape. Declare the operand as a ` +
                 `point, or as a list of points (\`list<tuple<…>> | ` +
-                `tuple<…>\`). Fail closed (D6).`
+                `tuple<…>\`).`
             );
           runtimePointOperand = tuples[0];
           atomicTupleOverPoints = 'runtime-list';
@@ -11816,7 +11811,7 @@ export class BaseCompiler {
    * Ask the TARGET to apply a `broadcastable` head's scalar element lowering
    * across a single finite indexed collection operand — see
    * `CompileTarget.broadcastUnary`. Returns `undefined` when the target has no
-   * such hook, or its hook declines; the caller then fails closed (D6).
+   * such hook, or its hook declines; the caller then fails closed.
    *
    * `element(code)` splices already-compiled target source in as the element
    * operand: it binds a fresh placeholder name and shadows `target.var` so the
@@ -11860,7 +11855,7 @@ export class BaseCompiler {
    * exactly ONE collection operand — `Negate(L)`, `1 + L`, `2 * L`, `L ** 2`,
    * `2 / L` for an `L` typed `list<number>`, and the same shapes over a `List`
    * literal whose elements are not all constants (`[x, y] + 1`). Returns
-   * `undefined` to decline, and the caller then fails closed (D6).
+   * `undefined` to decline, and the caller then fails closed.
    *
    * The map is spelled by the target through its `broadcastUnary` hook (Python
    * emits a list comprehension, `[1 + _tv1 for _tv1 in L]`), which iterates a
@@ -12075,7 +12070,7 @@ export class BaseCompiler {
    * literal `Tuple` — the state-threading idiom `(n, j) := parseDigits(cs, j)`
    * — into ONE temporary holding the whole tuple plus a positional read per
    * leaf. Returns `null` when the shape is not admitted; the caller then fails
-   * closed (D6) and the interpreter evaluates the statement.
+   * closed and the interpreter evaluates the statement.
    *
    *     let (v, j) = step(k)
    *       ⟶  let _tv1; _tv1 = step(k); let v = _tv1[1]; let j = _tv1[2]
@@ -12160,7 +12155,7 @@ export class BaseCompiler {
   }
 
   /**
-   * Fail closed (D6) when a destructuring-assignment TARGET carries an
+   * Fail closed when a destructuring-assignment TARGET carries an
    * enforcement the compiled per-leaf write cannot reproduce.
    *
    * The interpreter's destructuring `Assign` is ATOMIC: every leaf is validated
@@ -12211,13 +12206,12 @@ export class BaseCompiler {
       BaseCompiler._enforcedTargets.some((f) => f.has(name))
     )
       throw new Error(
-        `Cannot compile a destructuring assignment: the target '${name}' is ` +
+        `Could not compile a destructuring assignment: the target '${name}' is ` +
           `declared as a constant or with a declared type (a block-local ` +
           `declaration, or an annotated parameter), and ` +
           `the compiled per-leaf write can enforce neither. The interpreter ` +
           `validates every leaf before writing any, and rejects the whole ` +
-          `assignment when one does not fit. ` +
-          `Fail closed (D6) — the interpreter evaluates it.`
+          `assignment when one does not fit. The interpreter evaluates it instead.`
       );
     // A target declared in an ENCLOSING, already-installed scope (a typed
     // function parameter, an `ce.declare`d symbol). The pattern leaves are
@@ -12229,18 +12223,17 @@ export class BaseCompiler {
     const value = def.value;
     if (value.isConstant)
       throw new Error(
-        `Cannot compile a destructuring assignment: cannot assign to the ` +
+        `Could not compile a destructuring assignment: cannot assign to the ` +
           `constant '${name}'. The interpreter rejects the whole ` +
-          `assignment; the compiled per-leaf writes have no such check. ` +
-          `Fail closed (D6) — the interpreter evaluates it.`
+          `assignment; the compiled per-leaf writes have no such check. The interpreter evaluates it instead.`
       );
     if (!value.inferredType && !value.type.isUnknown)
       throw new Error(
-        `Cannot compile a destructuring assignment: the compiled write cannot ` +
+        `Could not compile a destructuring assignment: the compiled write cannot ` +
           `enforce the declared type of '${name}' ` +
           `('${value.type.toString()}'). The interpreter validates every leaf ` +
           `before writing any, and rejects the whole assignment when one does ` +
-          `not fit. Fail closed (D6) — the interpreter evaluates it.`
+          `not fit. The interpreter evaluates it instead.`
       );
   }
 
@@ -12346,7 +12339,7 @@ export class BaseCompiler {
     for (const p of params)
       if (isDestructuringParameter(p))
         throw new Error(
-          `Cannot compile a function literal with a destructuring parameter ` +
+          `Could not compile a function literal with a destructuring parameter ` +
             `"${p.toString()}": no compile target lowers the tuple match. ` +
             `Take the tuple as one named parameter and read its components ` +
             `in the body.`
@@ -12368,7 +12361,7 @@ export class BaseCompiler {
     for (const p of params)
       if (isRestParameter(p))
         throw new Error(
-          `Cannot compile a function literal with a rest parameter ` +
+          `Could not compile a function literal with a rest parameter ` +
             `"${p.toString()}": no compile target collects the trailing ` +
             `arguments. Take the trailing arguments as one tuple parameter ` +
             `and read its components in the body.`
@@ -12586,7 +12579,7 @@ export class BaseCompiler {
     new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Square']);
 
   /**
-   * Fail closed (D6) when a LOCKSTEP walk over several sources — the zip
+   * Fail closed when a LOCKSTEP walk over several sources — the zip
    * form of `Map`, and `Zip` itself — would run a source's effects more often
    * than the interpreter does.
    *
@@ -12609,18 +12602,18 @@ export class BaseCompiler {
     sources.forEach((source, i) => {
       if (source === undefined || source.isPure) return;
       throw new Error(
-        `${kind}: operand ${i + firstPosition} has observable effects, and ` +
+        `Could not compile \`${kind}\`: operand ${i + firstPosition} has observable effects, and ` +
           `a walk over several collections stops at the shortest one, so ` +
           `the compiled code — which materializes every collection in ` +
           `full — would run those effects more often than the interpreter ` +
-          `does. Fail closed (D6) — the interpreter evaluates it.`
+          `does. The interpreter evaluates it instead.`
       );
     });
   }
 
   /**
    * The element type each source of the zip form of `Map` feeds its
-   * callback at that position, or a fail-closed (D6) throw.
+   * callback at that position, or a fail-closed throw.
    *
    * A callback over several sources is compiled with BARE parameters: the
    * zip form stamps none of them (its contextual callback slot is unary), so
@@ -12650,13 +12643,12 @@ export class BaseCompiler {
       )
         return elt;
       throw new Error(
-        `${kind}: operand ${i + firstPosition} ` +
+        `Could not compile \`${kind}\`: operand ${i + firstPosition} ` +
           (elt === undefined
             ? `has no provable element type`
             : `has elements of type '${typeToString(elt)}'`) +
           `, and the mapping over several collections is compiled with ` +
-          `untyped parameters that the emitted code treats as real numbers. ` +
-          `Fail closed (D6) — the interpreter evaluates it.`
+          `untyped parameters that the emitted code treats as real numbers. The interpreter evaluates it instead.`
       );
     });
   }
@@ -12673,7 +12665,7 @@ export class BaseCompiler {
   }
 
   /**
-   * Fail closed (D6) when a compiled CALLBACK carries a parameter annotation
+   * Fail closed when a compiled CALLBACK carries a parameter annotation
    * whose enforcement the emitted code would silently drop.
    *
    * Under the annotation-as-contract ruling
@@ -12726,7 +12718,7 @@ export class BaseCompiler {
       // compiled lowering has no enforcement at all.
       if (actual !== undefined && isSubtype(actual, declared)) continue;
       throw new Error(
-        `${kind}: the callback parameter ` +
+        `Could not compile \`${kind}\`: the callback parameter ` +
           `'${functionLiteralParameterName(params[i]) || `#${i + 1}`}' is ` +
           `annotated '${typeToString(declared)}'` +
           (actual === undefined
@@ -12734,8 +12726,7 @@ export class BaseCompiler {
             : `, which the argument type '${typeToString(actual)}' does not ` +
               `provably satisfy`) +
           `. The compiled callback cannot enforce the annotation, and the ` +
-          `interpreter reports a per-element error when it does not hold. ` +
-          `Fail closed (D6) — the interpreter evaluates it.`
+          `interpreter reports a per-element error when it does not hold. The interpreter evaluates it instead.`
       );
     }
   }
@@ -12774,7 +12765,7 @@ export class BaseCompiler {
    * `step(k)`, a tuple-typed symbol) lowers through ONE temporary holding the
    * whole tuple, plus a positional read per leaf — see `destructureViaTemp`,
    * which owns the gating. Everything else (an untyped or unknown-arity
-   * value, a shape mismatch) fails closed (D6) so the engine falls back to the
+   * value, a shape mismatch) fails closed so the engine falls back to the
    * interpreter. (Without any of this, the pattern compiled as a single
    * `let _ = …` and every pattern name silently read as NaN.)
    */
@@ -12800,19 +12791,18 @@ export class BaseCompiler {
       BaseCompiler.declaredTypeSource(declaredType) !== 'unknown'
     )
       throw new Error(
-        `Cannot compile a destructuring declaration that states a type ` +
+        `Could not compile a destructuring declaration that states a type ` +
           `('${declaredType.toString()}'): the per-leaf lowering cannot ` +
           `enforce it, and the interpreter rejects the whole pattern when a ` +
-          `leaf value does not fit. ` +
-          `Fail closed (D6) — the interpreter evaluates it.`
+          `leaf value does not fit. The interpreter evaluates it instead.`
       );
     const ce = arg.engine;
     const out: Expression[] = [];
     const walk = (pattern: Expression, v: Expression | undefined): void => {
       if (!isFunction(pattern, 'Tuple'))
         throw new Error(
-          `Cannot compile a destructuring declaration: the pattern is not a ` +
-            `tuple. Fail closed (D6).`
+          `Could not compile a destructuring declaration: the pattern is not a ` +
+            `tuple.`
         );
       if (v === undefined || !isFunction(v, 'Tuple')) {
         // A tuple-VALUED (but not literal) value: one temporary + positional
@@ -12828,18 +12818,17 @@ export class BaseCompiler {
           return;
         }
         throw new Error(
-          `Cannot compile a destructuring declaration whose value is not a ` +
+          `Could not compile a destructuring declaration whose value is not a ` +
             `literal tuple, nor an expression of statically-known tuple ` +
             `arity` +
             (v === undefined ? '' : ` (got '${v.type.toString()}')`) +
-            `. Fail closed (D6) — the interpreter evaluates it.`
+            `. The interpreter evaluates it instead.`
         );
       }
       if (pattern.nops !== v.nops)
         throw new Error(
-          `Cannot compile a destructuring declaration: the pattern has ` +
-            `${pattern.nops} positions but the value tuple has ${v.nops}. ` +
-            `Fail closed (D6).`
+          `Could not compile a destructuring declaration: the pattern has ` +
+            `${pattern.nops} positions but the value tuple has ${v.nops}.`
         );
       for (let i = 0; i < pattern.nops; i++) {
         const p = pattern.ops[i];
@@ -12850,8 +12839,8 @@ export class BaseCompiler {
         }
         if (!isSymbol(p))
           throw new Error(
-            `Cannot compile a destructuring declaration: a pattern position ` +
-              `is not a symbol. Fail closed (D6).`
+            `Could not compile a destructuring declaration: a pattern position ` +
+              `is not a symbol.`
           );
         if (p.symbol === '_') {
           out.push(el);
@@ -12885,7 +12874,7 @@ export class BaseCompiler {
    * effect) but no write. As with the declare form, a LITERAL tuple value
    * lowers element-wise, a tuple-VALUED one through a single whole-tuple
    * temporary (`destructureViaTemp`), and anything else — an unknown arity, a
-   * shape mismatch — fails closed (D6) so the interpreter takes over.
+   * shape mismatch — fails closed so the interpreter takes over.
    *
    * The rewrite is for EFFECT only: it ends on a write, whose value is one
    * leaf's, not the tuple's. Callers must therefore only apply it in statement
@@ -12906,8 +12895,8 @@ export class BaseCompiler {
     const walk = (pattern: Expression, v: Expression | undefined): void => {
       if (!isFunction(pattern, 'Tuple'))
         throw new Error(
-          `Cannot compile a destructuring assignment: the pattern is not a ` +
-            `tuple. Fail closed (D6).`
+          `Could not compile a destructuring assignment: the pattern is not a ` +
+            `tuple.`
         );
       if (v === undefined || !isFunction(v, 'Tuple')) {
         // A tuple-VALUED (but not literal) value: one temporary + positional
@@ -12927,18 +12916,17 @@ export class BaseCompiler {
           return;
         }
         throw new Error(
-          `Cannot compile a destructuring assignment whose value is not a ` +
+          `Could not compile a destructuring assignment whose value is not a ` +
             `literal tuple, nor an expression of statically-known tuple ` +
             `arity` +
             (v === undefined ? '' : ` (got '${v.type.toString()}')`) +
-            `. Fail closed (D6) — the interpreter evaluates it.`
+            `. The interpreter evaluates it instead.`
         );
       }
       if (pattern.nops !== v.nops)
         throw new Error(
-          `Cannot compile a destructuring assignment: the pattern has ` +
-            `${pattern.nops} positions but the value tuple has ${v.nops}. ` +
-            `Fail closed (D6).`
+          `Could not compile a destructuring assignment: the pattern has ` +
+            `${pattern.nops} positions but the value tuple has ${v.nops}.`
         );
       for (let i = 0; i < pattern.nops; i++) {
         const p = pattern.ops[i];
@@ -12949,8 +12937,8 @@ export class BaseCompiler {
         }
         if (!isSymbol(p))
           throw new Error(
-            `Cannot compile a destructuring assignment: a pattern position ` +
-              `is not a symbol. Fail closed (D6).`
+            `Could not compile a destructuring assignment: a pattern position ` +
+              `is not a symbol.`
           );
         // A target the compiled write cannot hold to its declaration (a
         // constant, a declared non-inferred type) fails closed. The throw
@@ -13207,7 +13195,7 @@ export class BaseCompiler {
    *
    * A resolution that is not an assignable REFERENCE — a baked constant
    * (`Pi` → `Math.PI`), a folded assigned value, a non-string `vars` mapping —
-   * has nowhere to write: fail closed (D6) rather than emit a write the reads
+   * has nowhere to write: fail closed rather than emit a write the reads
    * cannot see.
    */
   private static assignLValue(
@@ -13225,9 +13213,9 @@ export class BaseCompiler {
       // both the read and the write.
       if (engine._getSymbolValue(name) !== undefined)
         throw new Error(
-          `Assign: cannot compile — "${name}" has an assigned value, which ` +
+          `Could not compile \`Assign\`: "${name}" has an assigned value, which ` +
             `every read of it bakes into the generated source, so this write ` +
-            `would be invisible to them. Fail closed (D6).`
+            `would be invisible to them.`
         );
       return target.mangleId ? target.mangleId(name) : name;
     }
@@ -13242,11 +13230,10 @@ export class BaseCompiler {
     )
       return resolved;
     throw new Error(
-      `Assign: cannot compile — target '${target.language ?? 'javascript'}' ` +
+      `Could not compile \`Assign\`: target '${target.language ?? 'javascript'}' ` +
         `compiles reads of "${name}" as \`${resolved}\`, which is not an ` +
         `assignable reference (a constant, a folded value, or a baked ` +
-        `\`vars\` mapping), so the write would be invisible to every read. ` +
-        `Fail closed (D6).`
+        `\`vars\` mapping), so the write would be invisible to every read.`
     );
   }
 
@@ -13300,7 +13287,7 @@ export class BaseCompiler {
     // When the block's VALUE is used, the last statement is left alone: the
     // block's value is that statement's, and the rewrite ends on a write
     // (yielding one leaf, not the tuple). It falls through to `compileExpr`
-    // and fails closed (D6) rather than silently returning the wrong thing.
+    // and fails closed rather than silently returning the wrong thing.
     // In a statement list (`valueUsed: false`) there is no such position, so
     // every statement — including the last — lowers.
     if (
@@ -13429,7 +13416,7 @@ export class BaseCompiler {
       // A written list of points lowers on a shader target as an ARRAY of
       // vectors, for which no local declaration is synthesized here (the
       // element count would declare a `vecN` over a `vecK[N]` initializer).
-      // Fail closed (D6) rather than emit a declaration that contradicts
+      // Fail closed rather than emit a declaration that contradicts
       // its own initializer.
       if (
         isGPUTarget &&
@@ -13438,10 +13425,10 @@ export class BaseCompiler {
         value.ops.every((op) => BaseCompiler.isNonScalarShape(op))
       )
         throw new Error(
-          `${name}: a local holding a list of points has no static shader ` +
+          `Could not compile \`${name}\`: a local holding a list of points has no static shader ` +
             `declaration — the value lowers as an array of vectors, and a ` +
             `local is declared as a vector or an array of scalars. Read the ` +
-            `points where they are written instead. Fail closed (D6).`
+            `points where they are written instead.`
         );
       const count =
         isGPUTarget &&
@@ -13459,19 +13446,18 @@ export class BaseCompiler {
       }
       if (count === 0)
         throw new Error(
-          `Block local "${name}": an empty tuple/list has no GPU lowering — ` +
+          `Could not compile the block local \`${name}\`: an empty tuple/list has no GPU lowering — ` +
             `neither GLSL nor WGSL has a zero-length array type, so there is ` +
-            `no declaration its assignment could match. Fail closed.`
+            `no declaration its assignment could match.`
         );
       // Provably non-scalar, but with no single component count (a `Matrix`,
       // a multi-axis or unsized list): no declaration can be synthesized for
       // it, and the `float` default would disagree with its `matN` assignment.
       if (count === undefined && BaseCompiler.isNonScalarShape(value))
         throw new Error(
-          `Block local "${name}": a matrix/tensor-valued local has no GPU ` +
+          `Could not compile the block local \`${name}\`: a matrix/tensor-valued local has no GPU ` +
             `declaration (its shape has no single component count), so a ` +
-            `scalar declaration would disagree with its own assignment. ` +
-            `Fail closed.`
+            `scalar declaration would disagree with its own assignment.`
         );
       const n = count ?? BaseCompiler.LOCAL_SCALAR;
       if (prev === BaseCompiler.LOCAL_UNSET) {
@@ -13480,10 +13466,10 @@ export class BaseCompiler {
       }
       if (n !== prev)
         throw new Error(
-          `Block local "${name}" is bound to values of disagreeing shapes ` +
+          `Could not compile the block local \`${name}\`: it is bound to values of disagreeing shapes ` +
             `(${shapeName(prev)}, then ${shapeName(n)}); a shader local has ` +
             `one declared type and neither GLSL nor WGSL can convert between ` +
-            `these. Fail closed.`
+            `these.`
         );
     };
     for (const local of locals) {
@@ -13623,7 +13609,7 @@ export class BaseCompiler {
                 //
                 // The LAST statement of a value-carrying block is NOT a statement
                 // position — its value is the block's — so an else-less `If`
-                // there keeps failing closed (D6).
+                // there keeps failing closed.
                 //
                 // PLAIN JavaScript ONLY. Every other target stays fail-closed, and
                 // each for its own verified reason — the admission is deliberately
@@ -13729,8 +13715,8 @@ export class BaseCompiler {
       if (result.length === 0) {
         if (valueUsed)
           throw new Error(
-            'Block: an empty block evaluates to `Nothing`, the erasure ' +
-              'marker, which has no compiled representation. Fail closed (D6).'
+            'Could not compile `Block`: an empty block evaluates to `Nothing`, the erasure ' +
+              'marker, which has no compiled representation.'
           );
         return '';
       }
@@ -13832,7 +13818,7 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     node?: Expression
   ): TargetSource {
-    if (!args[0]) throw new Error('Loop: no body');
+    if (!args[0]) throw new Error('Could not compile `Loop`: no body');
 
     const body = args[0];
     const elements = args.slice(1);
@@ -13847,7 +13833,7 @@ export class BaseCompiler {
     if (elements.length === 0) {
       if (lang === 'glsl' || lang === 'wgsl')
         throw new Error(
-          `${lang.toUpperCase()}: an unbounded Loop(body) is not supported.`
+          `Could not compile \`${lang.toUpperCase()}\`: an unbounded Loop(body) is not supported.`
         );
       const bodyStmts = inBody(target, () =>
         BaseCompiler.compileLoopBody(body, target)
@@ -13867,9 +13853,10 @@ export class BaseCompiler {
       const indexExpr = indexing.ops[0];
       const rangeExpr = indexing.ops[1];
 
-      if (!isSymbol(indexExpr)) throw new Error('Loop: index must be a symbol');
+      if (!isSymbol(indexExpr))
+        throw new Error('Could not compile `Loop`: index must be a symbol');
       if (!isFunction(rangeExpr, 'Range'))
-        throw new Error('Loop: expected Range(lo, hi)');
+        throw new Error('Could not compile `Loop`: expected Range(lo, hi)');
 
       const index = indexExpr.symbol;
 
@@ -13881,7 +13868,9 @@ export class BaseCompiler {
       const upper = Math.floor(rangeExpr.ops[1].re);
 
       if (!Number.isFinite(lower) || !Number.isFinite(upper))
-        throw new Error('Loop: bounds must be finite numbers');
+        throw new Error(
+          'Could not compile `Loop`: bounds must be finite numbers'
+        );
 
       // Check if the target wraps numeric values (e.g. interval-js).
       // If so, references to the loop index in the body must be wrapped.
@@ -13912,7 +13901,7 @@ export class BaseCompiler {
     // ── General for-each (for effect) ─────────────────────────────────────
     if (lang === 'glsl' || lang === 'wgsl')
       throw new Error(
-        `${lang.toUpperCase()}: a multi-Element or non-Range Loop is not supported.`
+        `Could not compile \`${lang.toUpperCase()}\`: a multi-Element or non-Range Loop is not supported.`
       );
 
     BaseCompiler.assertBreakLeavesWholeLoop(elements, body);
@@ -13950,8 +13939,9 @@ export class BaseCompiler {
      * under a blind instance. */
     node?: Expression
   ): TargetSource {
-    if (!args[0]) throw new Error('Comprehension: no body');
-    if (!args[1]) throw new Error('Comprehension: no indexing set');
+    if (!args[0]) throw new Error('Could not compile `Comprehension`: no body');
+    if (!args[1])
+      throw new Error('Could not compile `Comprehension`: no indexing set');
 
     const body = args[0];
     const elements = args.slice(1);
@@ -13960,7 +13950,7 @@ export class BaseCompiler {
     const lang = target.language ?? '';
     if (lang === 'glsl' || lang === 'wgsl')
       throw new Error(
-        `${lang.toUpperCase()}: Comprehension is not supported (no dynamic arrays). ` +
+        `Could not compile \`${lang.toUpperCase()}\`: Comprehension is not supported (no dynamic arrays). ` +
           'TODO(E3-GLSL): unroll or use a fixed-size array.'
       );
 
@@ -14066,7 +14056,7 @@ export class BaseCompiler {
       const elem = elements[i];
       if (!isFunction(elem, 'Element'))
         throw new Error(
-          `Loop: argument ${i + 1} must be an Element clause, got ${(elem as Expression & { operator?: string }).operator ?? '?'}`
+          `Could not compile \`Loop\`: argument ${i + 1} must be an Element clause, got ${(elem as Expression & { operator?: string }).operator ?? '?'}`
         );
       const clause = elem as ElementBinder['clause'];
       const pattern = clause.ops[0];
@@ -14094,14 +14084,13 @@ export class BaseCompiler {
         // header that does not parse.
         if (new Set(spelled.names).size !== spelled.names.length)
           throw new Error(
-            `Loop: the destructuring binder \`${pattern.toString()}\` binds a ` +
-              `name more than once. Fail closed (D6) — the interpreter ` +
-              `evaluates it.`
+            `Could not compile \`Loop\`: the destructuring binder \`${pattern.toString()}\` binds a ` +
+              `name more than once. The interpreter evaluates it instead.`
           );
         binder = { clause, ...spelled };
       } else
         throw new Error(
-          `Loop: Element index (argument ${i + 1}) must be a symbol or a tuple pattern`
+          `Could not compile \`Loop\`: Element index (argument ${i + 1}) must be a symbol or a tuple pattern`
         );
 
       for (const [leaf, componentType] of binder.leaves) {
@@ -14114,10 +14103,9 @@ export class BaseCompiler {
             )
           )
             throw new Error(
-              `Loop: the binder \`${name}\` occurs in the collection it (or an ` +
+              `Could not compile \`Loop\`: the binder \`${name}\` occurs in the collection it (or an ` +
                 `enclosing clause) iterates, which the emitted loop would read ` +
-                `before binding it. Fail closed (D6) — the interpreter ` +
-                `evaluates it.`
+                `before binding it. The interpreter evaluates it instead.`
             );
         const binderType = compilationType(leaf);
         if (
@@ -14127,10 +14115,9 @@ export class BaseCompiler {
             (isNonRealNumber(binderType) && !isNonRealNumber(componentType)))
         )
           throw new Error(
-            `Loop: the binder \`${name}\` is typed \`${typeToString(binderType)}\` ` +
+            `Could not compile \`Loop\`: the binder \`${name}\` is typed \`${typeToString(binderType)}\` ` +
               `but iterates elements of type \`${typeToString(componentType)}\`; the ` +
-              `body's lowering assumes a shape the loop never binds. ` +
-              `Fail closed (D6) — the interpreter evaluates it.`
+              `body's lowering assumes a shape the loop never binds. The interpreter evaluates it instead.`
           );
       }
       binders.push(binder);
@@ -14157,12 +14144,11 @@ export class BaseCompiler {
   ): Omit<ElementBinder, 'clause'> {
     const decline = (why: string): never => {
       throw new Error(
-        `Loop: the destructuring binder \`${pattern.toString()}\` of Element ` +
+        `Could not compile \`Loop\`: the destructuring binder \`${pattern.toString()}\` of Element ` +
           `clause ${clauseIndex + 1} ${why}. A tuple pattern compiles only ` +
           `when the source's elements are provably tuples of the pattern's ` +
           `arity: the interpreter refuses any other element with an error ` +
-          `value, which compiled code cannot reproduce. Fail closed (D6) — ` +
-          `the interpreter evaluates it.`
+          `value, which compiled code cannot reproduce. The interpreter evaluates it instead.`
       );
     };
     const t = eltType === undefined ? undefined : resolveTypeAlias(eltType);
@@ -14249,9 +14235,8 @@ export class BaseCompiler {
     // guess.
     if (needsWrap && binders.some((b) => b.jsPattern !== b.names[0]))
       throw new Error(
-        `Loop: a destructuring binder is not supported on target ` +
-          `'${target.language ?? '?'}'. Fail closed (D6) — the interpreter ` +
-          `evaluates it.`
+        `Could not compile \`Loop\`: a destructuring binder is not supported on target ` +
+          `'${target.language ?? '?'}'. The interpreter evaluates it instead.`
       );
     // Always shadow the loop variables in the body's target: a loop variable
     // is bound to the bare emitted identifier (wrapped only for wrapping
@@ -14373,11 +14358,10 @@ export class BaseCompiler {
         // (`docs/STRING_ROADMAP.md`, D13.)
         if (target.language !== 'javascript')
           throw new Error(
-            `Cannot iterate a string on target '${target.language ?? '?'}': ` +
+            `Could not compile the iteration over a string on target '${target.language ?? '?'}': ` +
               `its elements are UAX #29 grapheme clusters and this target has ` +
               `no grapheme segmentation, so the emitted loop would run over ` +
-              `code points instead. Fail closed (D6) — the interpreter ` +
-              `evaluates it.`
+              `code points instead. The interpreter evaluates it.`
           );
         collection = `_SYS.chars(${BaseCompiler.compile(collExpr, bodyTarget)})`;
       } else collection = BaseCompiler.compile(collExpr, bodyTarget);
@@ -15092,15 +15076,16 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     node?: Expression
   ): string {
-    if (!args[0]) throw new Error('Sum/Product: no body');
+    if (!args[0])
+      throw new Error('Could not compile `Sum` or `Product`: no body');
 
     // Multi-index Sum/Product (more than one indexing-set clause) is not
-    // representable in this generic single-index loop. Fail closed (D6) rather
+    // representable in this generic single-index loop. Fail closed rather
     // than silently drop the trailing clauses and emit code with a dangling
     // index variable.
     if (args.length > 2)
       throw new Error(
-        `${h}: multi-index (${args.length - 1} indexing sets) is not supported by this target`
+        `Could not compile \`${h}\`: multi-index (${args.length - 1} indexing sets) is not supported by this target`
       );
 
     const {
@@ -16906,36 +16891,34 @@ export class BaseCompiler {
       body.type.matches('indexed_collection<any>')
     )
       throw new Error(
-        `${kind}: a collection-valued body does not compile — distribute the ` +
+        `Could not compile \`${kind}\`: a collection-valued body has no compiled form — distribute the ` +
           `element access through the ${kind} (At(${kind}(…), k) → ` +
-          `${kind}(At(…, k))) or evaluate instead. Fail closed (D6).`
+          `${kind}(At(…, k))) or evaluate instead.`
       );
     if (BaseCompiler.isProvablyNonNumericBigOpBody(body))
       throw new Error(
-        `${kind}: a body of type '${body.type.toString()}' does not compile — ` +
-          `the accumulation is numeric (a bare '+'/'*'), which for a ` +
+        `Could not compile \`${kind}\`: a body of type '${body.type.toString()}' has no compiled form — the accumulation is numeric (a bare '+'/'*'), which for a ` +
           `non-numeric body silently produces a string or an object rather ` +
-          `than a number. Fail closed (D6) — evaluate it instead.`
+          `than a number. Evaluate it instead.`
       );
     if (BaseCompiler.isCollectionValuedBigOpBodyByLookThrough(body))
       throw new Error(
-        `${kind}: a collection-valued body does not compile — '${
+        `Could not compile \`${kind}\`: a collection-valued body has no compiled form — '${
           isFunction(body) ? body.operator : body.toString()
         }' is declared with an open result type ` +
           `('${body.type.toString()}') but its body constructs a collection. ` +
           `Distribute the element access through the ${kind} ` +
-          `(At(${kind}(…), k) → ${kind}(At(…, k))) or evaluate instead. ` +
-          `Fail closed (D6).`
+          `(At(${kind}(…), k) → ${kind}(At(…, k))) or evaluate instead.`
       );
     if (BaseCompiler.isContradictedScalarDeclaration(body))
       throw new Error(
-        `${kind}: the declaration of '${
+        `Could not compile \`${kind}\`: the declaration of '${
           isFunction(body) ? body.operator : body.toString()
         }' says it returns a scalar ` +
           `('${body.type.toString()}'), but its body constructs a collection. ` +
           `The declaration is contradicted by the body, so the numeric ` +
           `accumulation would produce a wrong value. Fix the declaration ` +
-          `(e.g. '-> list<number>') or evaluate instead. Fail closed (D6).`
+          `(e.g. '-> list<number>') or evaluate instead.`
       );
   }
 
@@ -17258,10 +17241,10 @@ export class BaseCompiler {
     const unreadable = params.find((_p, i) => names[i] === '');
     if (unreadable !== undefined)
       throw new Error(
-        `Integrate: cannot compile an integrand whose parameter ` +
+        `Could not compile \`Integrate\`: an integrand whose parameter ` +
           `"${unreadable.toString()}" has no readable name — the body's ` +
           `references to what it binds would compile as references to the ` +
-          `enclosing scope. Fail closed (D6). Use a named parameter, or an ` +
+          `enclosing scope. Use a named parameter, or an ` +
           `integrand expressed directly in the limits' index variables.`
       );
     const oneToOne =
@@ -17270,11 +17253,11 @@ export class BaseCompiler {
       limitIndices.every((v) => names.includes(v));
     if (!oneToOne)
       throw new Error(
-        `Integrate: cannot compile — the integrand's parameters ` +
+        `Could not compile \`Integrate\`: the integrand's parameters ` +
           `(${names.join(', ') || 'none'}) do not match the integration ` +
           `variables (${limitIndices.join(', ') || 'none'}) one to one. The ` +
           `interpreter declines such an integral, and pairing them by ` +
-          `position would bind a parameter to the wrong range. Fail closed (D6).`
+          `position would bind a parameter to the wrong range.`
       );
     return { lambdaVars, bodyExpr: integrand.ops[0] };
   }
@@ -17542,14 +17525,13 @@ export class BaseCompiler {
     );
     if (offending === undefined) return;
     throw new Error(
-      `${h}: the declaration of '${
+      `Could not compile \`${h}\`: the declaration of '${
         isFunction(offending) ? offending.operator : offending.toString()
       }' says it returns a scalar ` +
         `('${offending.type.toString()}'), but its body constructs a ` +
         `collection. The declaration is contradicted by the body, so this ` +
         `scalar position would consume a run-time collection as a number. ` +
-        `Fix the declaration (e.g. '-> list<number>') or evaluate instead. ` +
-        `Fail closed (D6).`
+        `Fix the declaration (e.g. '-> list<number>') or evaluate instead.`
     );
   }
 
@@ -17785,7 +17767,7 @@ export class BaseCompiler {
    * A branch condition (`If`/`Which`/`When`) must be a scalar boolean. A
    * collection-valued condition can never be one — the interpreter throws
    * ("Condition must evaluate to True or False") rather than silently taking a
-   * branch — so fail closed (D6) at compile time. Uses the declared type (not
+   * branch — so fail closed at compile time. Uses the declared type (not
    * `.isCollection`, which is false for a `list<number>`).
    *
    * A CONTRADICTED scalar declaration is the same hazard with the declared type
@@ -17852,19 +17834,18 @@ export class BaseCompiler {
   static assertScalarCondition(cond: Expression): void {
     if (cond.type.matches('collection<any>'))
       throw new Error(
-        'Cannot compile: a branch condition is a collection-valued expression, ' +
-          'which is never a scalar boolean. Materialize the collection first. ' +
-          'Fail closed (D6).'
+        'Could not compile: a branch condition is a collection-valued expression, ' +
+          'which is never a scalar boolean. Materialize the collection first.'
       );
     if (BaseCompiler.isContradictedScalarDeclaration(cond))
       throw new Error(
-        `Cannot compile: the declaration of '${
+        `Could not compile: the declaration of '${
           isFunction(cond) ? cond.operator : cond.toString()
         }' says it returns a scalar ('${cond.type.toString()}'), but its body ` +
           `constructs a collection. The declaration is contradicted by the ` +
           `body, so this branch condition would select on the truthiness of a ` +
           `run-time collection. Fix the declaration (e.g. '-> list<number>') ` +
-          `or evaluate instead. Fail closed (D6).`
+          `or evaluate instead.`
       );
   }
 
@@ -18796,7 +18777,7 @@ export class BaseCompiler {
   //
   // Compilation reuses the classification ladder from `match-dispatch.ts`
   // (`getMatchPlan`): tier 0/1 (constant / literal / pin-of-constant) dispatch,
-  // tier 2 fixed-shape `List`/`Tuple` destructuring, and fail-closed (D6) for
+  // tier 2 fixed-shape `List`/`Tuple` destructuring, and fail-closed for
   // tier 3 and anything a target cannot express. The subject is evaluated once
   // (an IIFE parameter on JS; inlined where the target has no binding form).
   //
@@ -18858,21 +18839,21 @@ export class BaseCompiler {
     if (isString(expr)) {
       if (!allowStrings)
         throw new Error(
-          `Match: a string constant is not compilable to "${target.language ?? 'this'}" (no string type). Fail closed (D6).`
+          `Could not compile \`Match\`: a string constant is not compilable to "${target.language ?? 'this'}" (no string type).`
         );
       return BaseCompiler.compile(expr, target);
     }
     if (cmp.kind === 'pin') {
       // A pin folds only when its value is fixed at compile time: a literal, or
       // a symbol declared `isConstant` (`== Pi` → `Math.PI`). A pin of a runtime
-      // variable (`== limit`) has no compile-time value → fail closed (D6).
+      // variable (`== limit`) has no compile-time value → fail closed.
       const ok =
         isNumber(expr) ||
         isString(expr) ||
         (isSymbol(expr) && engine.box(expr.symbol).isConstant);
       if (!ok)
         throw new Error(
-          `Match: pin '== ${expr.toString()}' references a runtime value; not compilable. Fail closed (D6).`
+          `Could not compile \`Match\`: pin '== ${expr.toString()}' references a runtime value; not compilable.`
         );
     }
     return BaseCompiler.compile(expr, target);
@@ -18924,7 +18905,9 @@ export class BaseCompiler {
       cc.captureNames
     );
     if (bodyClosure === undefined || !isFunction(bodyClosure))
-      throw new Error('Match: case body is not compilable. Fail closed (D6).');
+      throw new Error(
+        'Could not compile `Match`: case body is not compilable.'
+      );
     return BaseCompiler.compile(
       bodyClosure.op1,
       BaseCompiler.matchCaptureTarget(accessors, target, sequenceNames)
@@ -18948,7 +18931,9 @@ export class BaseCompiler {
       cc.captureNames
     );
     if (guardClosure === undefined || !isFunction(guardClosure))
-      throw new Error('Match: case guard is not compilable. Fail closed (D6).');
+      throw new Error(
+        'Could not compile `Match`: case guard is not compilable.'
+      );
     return BaseCompiler.compile(
       guardClosure.op1,
       BaseCompiler.matchCaptureTarget(accessors, target, sequenceNames)
@@ -18998,7 +18983,7 @@ export class BaseCompiler {
     const plan = getMatchPlan(engine, args);
     if (plan.errorAlt !== undefined)
       throw new Error(
-        `Match: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable. Fail closed (D6).`
+        `Could not compile \`Match\`: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable.`
       );
 
     // The emission below is an arrow function, so a `break`/`continue` (or a
@@ -19014,8 +18999,8 @@ export class BaseCompiler {
       const control = BaseCompiler.escapingControl(body);
       if (control !== undefined)
         throw new Error(
-          `Match: a case body contains \`${control}\`, which cannot leave the ` +
-            `compiled match (an arrow function). Fail closed (D6).`
+          `Could not compile \`Match\`: a case body contains \`${control}\`, which cannot leave the ` +
+            `compiled match (an arrow function).`
         );
     }
 
@@ -19074,10 +19059,9 @@ export class BaseCompiler {
   ): void {
     if (elements.length > 1 && BaseCompiler.escapingControl(body) === 'Break')
       throw new Error(
-        'Loop: a `break` inside a loop over several Element clauses stops ' +
+        'Could not compile `Loop`: a `break` inside a loop over several Element clauses stops ' +
           'the whole loop in the interpreter, but would leave only the ' +
-          'innermost emitted loop. Fail closed (D6) — the interpreter ' +
-          'evaluates it.'
+          'innermost emitted loop. The interpreter evaluates it instead.'
       );
   }
 
@@ -19205,12 +19189,12 @@ export class BaseCompiler {
     if (ctor !== undefined) return ctor;
 
     // Tier 3, refutable: no compiled reference implementation of the generic
-    // matcher — fail closed (D6), naming the offending pattern so the caller can
+    // matcher — fail closed, naming the offending pattern so the caller can
     // rewrite it with destructuring or guards.
     const p = cc.rawPatterns?.[0];
     throw new Error(
-      `Match: pattern '${p?.toString() ?? '?'}' is not compilable; ` +
-        `rewrite with destructuring or guards. Fail closed (D6).`
+      `Could not compile \`Match\`: pattern '${p?.toString() ?? '?'}' is not compilable; ` +
+        `rewrite with destructuring or guards.`
     );
   }
 
@@ -19318,7 +19302,9 @@ export class BaseCompiler {
       cc.captureNames
     );
     if (bodyClosure === undefined || !isFunction(bodyClosure))
-      throw new Error('Match: case body is not compilable. Fail closed (D6).');
+      throw new Error(
+        'Could not compile `Match`: case body is not compilable.'
+      );
     return BaseCompiler.compileLoopBody(
       bodyClosure.op1,
       BaseCompiler.matchCaptureTarget(accessors, target, sequenceNames)
@@ -19595,12 +19581,12 @@ export class BaseCompiler {
   ): void {
     // Dictionary shapes are a tier-2 fixed shape for the interpreter, but the
     // compiler does not implement dict destructuring (native dict values have no
-    // compiled array representation). Fail closed (D6), naming the keys.
+    // compiled array representation). Fail closed, naming the keys.
     if (node.kind === 'dict') {
       const keys = node.entries.map((e) => `'${e.key}'`).join(', ');
       throw new Error(
-        `Match: dictionary pattern {${keys}} is not compilable; ` +
-          `rewrite with destructuring or guards. Fail closed (D6).`
+        `Could not compile \`Match\`: dictionary pattern {${keys}} is not compilable; ` +
+          `rewrite with destructuring or guards.`
       );
     }
     conds.push(`Array.isArray(${base})`);
@@ -19732,7 +19718,7 @@ export class BaseCompiler {
    * `ternary` primitive — the path GPU targets use (they have no statement-level
    * IIFE or `switch`). Only tier 0/1 constant dispatch and a trailing
    * irrefutable case compile; tier 2 destructuring and refutable tier 3 fail
-   * closed (D6). The subject is compiled once and inlined into each comparison
+   * closed. The subject is compiled once and inlined into each comparison
    * — once per leaf comparison, twice for a range pattern. That is safe for a
    * PURE subject only: `_gpu_rnd_draw` advances a runtime counter, so an
    * impure (Random-family) subject would be re-drawn per comparison. Such a
@@ -19762,7 +19748,7 @@ export class BaseCompiler {
     const plan = getMatchPlan(engine, args);
     if (plan.errorAlt !== undefined)
       throw new Error(
-        `Match: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable. Fail closed (D6).`
+        `Could not compile \`Match\`: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable.`
       );
 
     // The subject is UNCONDITIONAL — compiled once, before any case — so it is
@@ -19773,10 +19759,10 @@ export class BaseCompiler {
     if (args[0].isPure === false) {
       if (!BaseCompiler.canHoist(target))
         throw new Error(
-          'Match: an impure (Random) subject cannot be bound to a temporary ' +
+          'Could not compile `Match`: an impure (Random) subject cannot be bound to a temporary ' +
             'at this position — the subject is spliced into every case ' +
             'comparison, and a repeated draw would shift every later value ' +
-            'in the shader. Fail closed (D6).'
+            'in the shader.'
         );
       const t = BaseCompiler.tempVar(target);
       const decl = target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
@@ -19825,12 +19811,12 @@ export class BaseCompiler {
       }
       if (cc.tier === 2)
         throw new Error(
-          `Match: list/tuple destructuring is not compilable to "${target.language ?? 'this'}". Fail closed (D6).`
+          `Could not compile \`Match\`: list/tuple destructuring is not compilable to "${target.language ?? 'this'}".`
         );
       const p = cc.rawPatterns?.[0];
       throw new Error(
-        `Match: pattern '${p?.toString() ?? '?'}' is not compilable; ` +
-          `rewrite with destructuring or guards. Fail closed (D6).`
+        `Could not compile \`Match\`: pattern '${p?.toString() ?? '?'}' is not compilable; ` +
+          `rewrite with destructuring or guards.`
       );
     };
 
@@ -19915,19 +19901,19 @@ export class BaseCompiler {
    */
   private static foldCaptureRefusal(id: string, name: string): string {
     return (
-      `${id}: the value assigned to this symbol mentions \`${name}\`, which ` +
+      `Could not compile \`${id}\`: the value assigned to this symbol mentions \`${name}\`, which ` +
       `a parameter or index binds where the value would be emitted, and ` +
       `this target cannot place the value outside that binder. The value ` +
       `would read the binder instead of the \`${name}\` it was written ` +
-      `against. Fail closed (D6).`
+      `against.`
     );
   }
 
   /** The fail-closed message for a value that refers to its own symbol. */
   private static selfReferenceRefusal(id: string): string {
     return (
-      `${id}: the value assigned to this symbol refers to itself, so it ` +
-      `cannot be compiled. Fail closed (D6).`
+      `Could not compile \`${id}\`: the value assigned to this symbol refers to itself, so it ` +
+      `cannot be compiled.`
     );
   }
 
@@ -20014,7 +20000,7 @@ export class BaseCompiler {
    * A value whose compile re-enters its own binding (`a := a + 1`) would emit
    * `const _val_a = _val_a + 1`, a temporal-dead-zone throw at run time.
    * Neither the interpreter nor the inline fold can evaluate such a value, so
-   * this fails closed (D6) at compile time.
+   * this fails closed at compile time.
    */
   private static ensureFoldedValueEmitted(
     id: string,
@@ -20263,13 +20249,13 @@ export class BaseCompiler {
       : `Generated source is text on this target, so a sub-value shared by ` +
         `several references is written out once per reference path`;
     throw new Error(
-      `${id}: cannot compile — the value assigned to this symbol expands to ` +
+      `Could not compile \`${id}\`: the value assigned to this symbol expands to ` +
         `${size} nodes of generated source (an estimated ${emitted}) ` +
         `once baked in, above the fold-size limit of ` +
         `${BaseCompiler.MAX_FOLD_EXPANDED_NODES} nodes, ${why}; folding ` +
         `this value is refused rather than emitting a program that size. A ` +
         `caller using the default \`fallback: true\` falls back to ` +
-        `interpreted evaluation. Fail closed (D6).`
+        `interpreted evaluation.`
     );
   }
 
@@ -20471,7 +20457,7 @@ export class BaseCompiler {
   }
 
   /**
-   * Fail closed (D6) when `callback` is a single-uppercase-letter symbol that
+   * Fail closed when `callback` is a single-uppercase-letter symbol that
    * names a built-in OPERATOR the engine cannot eta-expand (`D`).
    *
    * `isRefusableBuiltinCallback` deliberately exempts single-uppercase names,
@@ -20502,10 +20488,10 @@ export class BaseCompiler {
     // function value (and declines on its own if the body has no lowering).
     if (builtinCallbackArity(engine, s) !== undefined) return;
     throw new Error(
-      `${kind}: the built-in operator '${s}' has no fixed arity, so it ` +
+      `Could not compile \`${kind}\`: the built-in operator '${s}' has no fixed arity, so it ` +
         `cannot be used as a callback value — the artifact would read '${s}' ` +
         `from the vars object and throw at run time. Declare '${s}' as a ` +
-        `variable if it names caller-supplied data. Fail closed (D6).`
+        `variable if it names caller-supplied data.`
     );
   }
 
@@ -20631,7 +20617,7 @@ export class BaseCompiler {
      * compiles as the ordinary call. */
     node?: Expression
   ): TargetSource | undefined {
-    // Fail closed (D6) BEFORE emission: whether the callee can be emitted at
+    // Fail closed BEFORE emission: whether the callee can be emitted at
     // all is irrelevant to whether an emitted call would be sound, and the
     // caller's generic "no lowering" message hides the real reason.
     BaseCompiler.checkDeclaredBroadcast(
@@ -20719,11 +20705,11 @@ export class BaseCompiler {
         );
         if (inlined !== undefined) return inlined;
         throw new Error(
-          `Cannot compile a call of \`${h}\`: argument ${at + 1} is a point ` +
+          `Could not compile a call of \`${h}\`: argument ${at + 1} is a point ` +
             `with a complex-valued coordinate, and the emitted definition ` +
             `reads a point parameter's coordinates as real numbers, so it ` +
             `would compute a different value than the interpreter does. The ` +
-            `call could not be inlined instead. Fail closed (D6).`
+            `call could not be inlined instead.`
         );
       }
     }
@@ -20756,14 +20742,13 @@ export class BaseCompiler {
       );
       if (inlined !== undefined) return inlined;
       throw new Error(
-        `Cannot compile a call of \`${h}\`: argument ${pointAt + 1} is a ` +
+        `Could not compile a call of \`${h}\`: argument ${pointAt + 1} is a ` +
           `point, and the parameter that receives it has no declared or ` +
           `inferred type. The emitted definition treats that parameter as a ` +
           `scalar and would compute a different value than the interpreter ` +
           `does over a point, and the call could not be inlined instead. ` +
           `Declare the parameter's type (for example ` +
-          `\`tuple<real, real>\`), or read it as a point in the body. ` +
-          `Fail closed (D6).`
+          `\`tuple<real, real>\`), or read it as a point in the body.`
       );
     }
 
@@ -20961,11 +20946,11 @@ export class BaseCompiler {
     const arity = literal.ops.length - 1;
     if (args.length !== arity)
       throw new Error(
-        `${h}: cannot compile — the block-local function is declared with ` +
+        `Could not compile \`${h}\`: the block-local function is declared with ` +
           `${arity} parameter${arity === 1 ? '' : 's'} but called with ` +
           `${args.length}. JavaScript would bind the missing parameters to ` +
           `\`undefined\` and compute NaN, where the interpreter reports an ` +
-          `error. Fail closed (D6).`
+          `error.`
       );
 
     // A call of a CLOSED local with constant arguments is itself constant, so
@@ -21036,21 +21021,21 @@ export class BaseCompiler {
     if (generic) {
       if (target.language !== 'javascript')
         throw new Error(
-          `${h}: cannot compile — the block-local function has a GENERIC ` +
+          `Could not compile \`${h}\`: the block-local function has a GENERIC ` +
             `signature, and reading its type variables at their declared ` +
             `bounds is a JavaScript-only convention: the argument coercion ` +
             `and the runtime broadcast an emitted call would rely on are ` +
-            `both spelled in JavaScript (rule G3). Fail closed (D6). ` +
+            `both spelled in JavaScript (rule G3). ` +
             `Evaluate this expression with evaluate() instead, or annotate ` +
             `the parameters with ground types.`
         );
       signature = BaseCompiler.groundSignature(declared);
       if (signature === undefined)
         throw new Error(
-          `${h}: cannot compile — the block-local function has a GENERIC ` +
+          `Could not compile \`${h}\`: the block-local function has a GENERIC ` +
             `signature whose type variables have no ground declared bound, ` +
             `so there is no type to compile the parameters against (rule ` +
-            `G3). Fail closed (D6). Evaluate this expression with evaluate() ` +
+            `G3). Evaluate this expression with evaluate() ` +
             `instead, bound the type variables (\`where T: number\`), or ` +
             `annotate the parameters with ground types.`
         );
@@ -21210,10 +21195,10 @@ export class BaseCompiler {
         );
         if (offending !== undefined)
           throw new Error(
-            `${name}: cannot compile — the call maps over a list argument, ` +
+            `Could not compile \`${name}\`: the call maps over a list argument, ` +
               `and the argument \`${offending.toString()}\` (type ` +
               `\`${offending.type.toString()}\`) is not provably a number to ` +
-              `reuse at every position. Fail closed (D6).`
+              `reuse at every position.`
           );
         const params = args.map(() => BaseCompiler.tempVar(target));
         return (
@@ -21227,11 +21212,11 @@ export class BaseCompiler {
       );
       if (collection !== undefined && !isTuple(collection))
         throw new Error(
-          `${name}: cannot compile — the argument ` +
+          `Could not compile \`${name}\`: the argument ` +
             `\`${collection.toString()}\` is a collection (type ` +
             `\`${collection.type.toString()}\`) handed to a scalar parameter. ` +
             `The interpreter maps the call over it, and this target maps only ` +
-            `over a provable list of numbers. Fail closed (D6).`
+            `over a provable list of numbers.`
         );
     }
     // Deliver a `{ re, im }` to a declared-complex parameter, in whichever of
@@ -21649,7 +21634,7 @@ export class BaseCompiler {
   }
 
   /**
-   * Fail closed (D6) rather than emit code for an application the DECLARED
+   * Fail closed rather than emit code for an application the DECLARED
    * `broadcastable<T>` contract would evaluate element-wise.
    *
    * A declared `broadcastable<T>` parameter is an ELEMENTWISE contract that
@@ -21905,7 +21890,7 @@ export class BaseCompiler {
           hasBroadcastableParam() && !args.every(provablyScalarArg);
     if (!risky) return;
     throw new Error(
-      `${h}: cannot compile an application of a function with a declared \`broadcastable<T>\` parameter over a possibly-collection argument — the declaration maps ONE rank down and the compile targets map to the leaves. Fail closed (D6). Evaluate this expression with evaluate() instead, or declare the parameter as its element type.`
+      `Could not compile \`${h}\`: an application of a function with a declared \`broadcastable<T>\` parameter over a possibly-collection argument — the declaration maps ONE rank down and the compile targets map to the leaves. Evaluate this expression with evaluate() instead, or declare the parameter as its element type.`
     );
   }
 
@@ -24104,15 +24089,15 @@ export class BaseCompiler {
       //
       // Where the target language forbids recursion outright — GLSL and WGSL
       // both do — there is no such call to emit: the name is not declared yet
-      // and no shader compiler would accept it. Fail closed (D6) naming the
+      // and no shader compiler would accept it. Fail closed naming the
       // function instead.
       if (registry.compiling.has(name)) {
         if (registry.lowering?.noRecursion)
           throw new Error(
-            `${h}: a recursive (or mutually recursive) user-defined function ` +
+            `Could not compile \`${h}\`: a recursive (or mutually recursive) user-defined function ` +
               `has no lowering on target '${target.language ?? 'unknown'}' — ` +
               `the shader languages forbid recursion. Rewrite ${h} as a ` +
-              `bounded loop (Sum/Product/Loop) before compiling. Fail closed (D6).`
+              `bounded loop (Sum/Product/Loop) before compiling.`
           );
         return name;
       }
@@ -24199,7 +24184,7 @@ export class BaseCompiler {
           );
           if (unread >= 0)
             throw new Error(
-              `${h}: the invariant prefix ` +
+              `Could not compile \`${h}\`: the invariant prefix ` +
                 `\`${prefixed.prefixes[unread].expr.toString()}\` has no ` +
                 `occurrence in the emitted body, so no variant is emitted`
             );
@@ -24289,12 +24274,12 @@ export class BaseCompiler {
               BaseCompiler.isContradictedScalarFunctionBody(bodyExpr)
             )
               throw new Error(
-                `${h}: the declaration of '${h}' says it returns a scalar ` +
+                `Could not compile \`${h}\`: the declaration of '${h}' says it returns a scalar ` +
                   `('${bodyExpr.type.toString()}'), but its body constructs a ` +
                   `collection. The declaration is contradicted by the body, so ` +
                   `the emitted definition would declare a scalar return type ` +
                   `over a collection return value. Fix the declaration (e.g. ` +
-                  `'-> list<number>') or evaluate instead. Fail closed (D6).`
+                  `'-> list<number>') or evaluate instead.`
               );
             (registry.literals ??= new Map()).set(name, literal);
             registry.defs.set(name, def);
@@ -26361,7 +26346,7 @@ export class BaseCompiler {
       // `p.(P.name) = v` lowers to. Neither is lowerable: a store writes a
       // mutable object, and objects have no compiled representation yet. Both
       // are reported UNSUPPORTED here, in step with the value path, which fails
-      // closed (D6) on the same two shapes.
+      // closed on the same two shapes.
       //
       // The `Assign` arm claims EVERY `Field` target, not only names some
       // protocol declares as a property: an ordinary layout store has no
@@ -26587,6 +26572,18 @@ export class BaseCompiler {
         }
         visit(ops[0], indices.length ? union(bound, indices) : bound);
         for (const le of limitExprs) visit(le, bound);
+        return;
+      }
+      if (h === 'Declare') {
+        // Only the initial value is an expression the code reads. The name
+        // (or destructuring pattern) is a local the code defines, and the
+        // type is a type, not a symbol: visiting them as operands reported
+        // the type `number` of `Declare(w, "number")` as a free input. The
+        // value can also sit in the trailing attributes dictionary
+        // (`let y = x + 1` is `Declare(y, {value: x + 1})`), which the
+        // generic operand walk does not open, so `x` was missed.
+        const value = BaseCompiler.declareValueOperand(ops);
+        if (value !== undefined) visit(value, bound);
         return;
       }
       if (h === 'Block') {
@@ -27562,7 +27559,7 @@ export class BaseCompiler {
     if (instance.bindings.length > 0)
       throw new Error(
         'Internal: a statement-list CSE region bound a temporary, which has ' +
-          'no wrapper to emit it. Fail closed (D6).'
+          'no wrapper to emit it.'
       );
     return result;
   }

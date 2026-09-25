@@ -475,7 +475,9 @@ describe('EPSIL WHILE LET — compilation', () => {
       'let x = 1\nfor i in [1, 2] { let y = match x { 1 => do { break }; _ => 0 } }\nx'
     );
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Match: a case body contains `Break`/);
+    expect(r.error).toMatch(
+      /Could not compile `Match`: a case body contains `Break`/
+    );
     expect(r.value).toBe(1);
   });
 
@@ -499,7 +501,9 @@ describe('EPSIL WHILE LET — compilation', () => {
     ]);
     const r = compile(returning);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Match: a case body contains `Return`/);
+    expect(r.error).toMatch(
+      /Could not compile `Match`: a case body contains `Return`/
+    );
   });
 
   test('an irrefutable case before the end is the fallback; later cases are dead', () => {
@@ -538,6 +542,6 @@ describe('EPSIL WHILE LET — compilation', () => {
     expect(diags).toEqual([]);
     expect(() =>
       new PythonTarget().compileFunction(ce.box(ast!), 'g', [])
-    ).toThrow(/Match: pattern matching is not supported/);
+    ).toThrow(/Could not compile `Match`: pattern matching is not supported/);
   });
 });

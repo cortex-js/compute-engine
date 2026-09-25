@@ -157,7 +157,7 @@ describe('A USER FUNCTION THAT RETURNS A MATRIX', () => {
       expect(() =>
         js(ce.parse('\\operatorname{Determinant}(f(x)) + 1'), mode)
       ).toThrow(
-        /Typed: the value .* has a complex entry, but its ascribed type `matrix<real>` says every entry is real.*Fail closed/s
+        /Could not compile `Typed`: the value .* has a complex entry, but its ascribed type `matrix<real>` says every entry is real/s
       );
     });
 

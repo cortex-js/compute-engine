@@ -777,7 +777,7 @@ describe('GLSL COMPILATION', () => {
       // Negative / non-integer / non-literal k: inert in the interpreter.
       for (const k of [-1, 2.5, 'n'] as any[])
         expect(() => glsl.compile(ce.expr(['Binomial', 'x', k]))).toThrow(
-          /Fail closed/
+          /Could not compile/
         );
       // k above the unroll cap (8).
       expect(() => glsl.compile(ce.expr(['Binomial', 'x', 9]))).toThrow(

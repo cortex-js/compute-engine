@@ -45,7 +45,7 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
 
     it('javascript names the offending component and its type', () => {
       expect(() => new JavaScriptTarget().compile(unionComponent())).toThrow(
-        /PointList: cannot compile — component 2 \(type `[^`]*list<number>[^`]*`\) is neither a scalar slot nor a list source/
+        /Could not compile `PointList`: component 2 \(type `[^`]*list<number>[^`]*`\) is neither a scalar slot nor a list source/
       );
     });
 
@@ -63,7 +63,7 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
         msg = (e as Error).message;
       }
       expect(msg).not.toMatch(/Unknown operator/);
-      expect(msg).toMatch(/Fail closed \(D6\)/);
+      expect(msg).toMatch(/Could not compile/);
     });
 
     it('an all-scalar PointList still compiles (the decline is shape-only)', () => {
@@ -89,7 +89,7 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
       );
       expect(r.success).toBe(false);
       expect(r.error).toMatch(
-        /PointList: cannot compile — the operator's compile handler has no lowering/
+        /Could not compile `PointList`: the operator's compile handler has no lowering/
       );
       expect(r.error).not.toMatch(/Unknown operator/);
     });
@@ -100,14 +100,14 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
       expect(() =>
         new GLSLTarget().compile(ce.box(['GammaRegularized', 3, 'x']))
       ).toThrow(
-        /GammaRegularized: cannot compile — the operator is known to the engine but target 'glsl' has no lowering/
+        /Could not compile `GammaRegularized`: the operator is known to the engine but target 'glsl' has no lowering/
       );
     });
 
     it('glsl: Integrate names the target gap', () => {
       expect(() =>
         new GLSLTarget().compile(ce.parse('\\int_{0}^{1} x^2 \\, dx'))
-      ).toThrow(/Integrate: cannot compile .* has no lowering/);
+      ).toThrow(/Could not compile `Integrate`: .* has no lowering/);
     });
 
     it('interval-js: List reports the target gap in `error`', () => {
@@ -119,7 +119,7 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
       );
       expect(r.success).toBe(false);
       expect(r.error).toMatch(
-        /List: cannot compile — the operator is known to the engine/
+        /Could not compile `List`: the operator is known to the engine/
       );
     });
   });
@@ -155,19 +155,19 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
 
     it('javascript names the unsupported arity', () => {
       expect(() => new JavaScriptTarget().compile(byValue())).toThrow(
-        /Count: only the single-argument cardinality form compiles.*Fail closed \(D6\)/s
+        /Could not compile `Count`: only the single-argument cardinality form compiles/s
       );
       expect(() => new JavaScriptTarget().compile(byPredicate())).toThrow(
-        /Count: only the single-argument cardinality form compiles/
+        /Could not compile `Count`: only the single-argument cardinality form compiles/
       );
     });
 
     it('python names the unsupported arity', () => {
       expect(() => new PythonTarget().compile(byValue())).toThrow(
-        /Count: only the single-argument cardinality form compiles.*Fail closed \(D6\)/s
+        /Could not compile `Count`: only the single-argument cardinality form compiles/s
       );
       expect(() => new PythonTarget().compile(byPredicate())).toThrow(
-        /Count: only the single-argument cardinality form compiles/
+        /Could not compile `Count`: only the single-argument cardinality form compiles/
       );
     });
 

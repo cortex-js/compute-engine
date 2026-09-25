@@ -370,7 +370,7 @@ describe('the admission is plain-JavaScript only', () => {
     // hook (`block` receives already-compiled statements), a separate change.
     const r = compile(elselessBlock(ce), { to: 'python' });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/If: wrong number of arguments/);
+    expect(r.error).toMatch(/Could not compile `If`: wrong number of arguments/);
   });
 
   test('a Python LOOP body with an else-less If was already fine', () => {
@@ -403,7 +403,7 @@ describe('the admission is plain-JavaScript only', () => {
     // which is worse than declining.
     const r = compile(elselessBlock(ce), { to: 'interval-js' });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/If: wrong number of arguments/);
+    expect(r.error).toMatch(/Could not compile `If`: wrong number of arguments/);
   });
 
   test('…and the interval else-FUL lowering, which is correct, is untouched', () => {

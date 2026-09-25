@@ -69,7 +69,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       expect(code).not.toContain('{ re');
     });
 
-    it('a collection-valued Sum body fails closed (D6)', () => {
+    it('a collection-valued Sum body fails closed', () => {
       // `Σ h(i)·(1/1.4^i)·a(…)` where `a` returns a vector — the interpreter's
       // elementwise zip-broadcast Sum. Scalar accumulation over arrays would
       // silently produce a wrong value, so it must throw (mirrors JS/base gate).
@@ -81,9 +81,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       const expr = e.parse(
         '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
       );
-      expect(() => glsl.compile(expr)).toThrow(
-        /collection-valued body.*Fail closed/s
-      );
+      expect(() => glsl.compile(expr)).toThrow(/collection-valued body/s);
     });
   });
 
@@ -174,7 +172,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
 
   // CO-P1-2: a loop-form Sum (non-constant / large bounds) is a bare statement
   // block, valid only as a top-level function body — never spliced into a
-  // sub-expression (which produced invalid `return _acc; + 1.0`). Fail closed.
+  // sub-expression (which produced invalid `return _acc; + 1.0`).
   // Tycho item 110: a loop-form Sum/Product emits STATEMENTS (a shader has no
   // expression-level loop), which used to make it un-composable — `1 + \sum…`
   // failed closed. It now HOISTS: the loop is emitted ahead of the value and
@@ -392,7 +390,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
 
   // CO-P2-23b: a user variable named after a GLSL reserved word (`in`,
   // `sample`, `filter`, `texture`, …) would emit a shader that fails to
-  // compile. Fail closed (D6) with a diagnostic naming the identifier.
+  // compile. Fail closed with a diagnostic naming the identifier.
   describe('reserved-word variables fail closed', () => {
     for (const kw of ['in', 'sample', 'filter', 'texture', 'sampler2D']) {
       it(`rejects "${kw}" as a variable`, () => {
@@ -456,7 +454,7 @@ describe('GLSL Length/Norm name collision (Tycho round)', () => {
   it('CE Length fails closed (was: emitted length() = norm, or invalid source)', () => {
     const expr = ce.box(['Length', ['List', 1, 2, 3]]);
     expect(() => glsl.compile(expr, NO_FOLD)).toThrow(
-      /Norm|not supported|Fail closed/
+      /Norm|not supported|Could not compile/
     );
   });
 
@@ -604,7 +602,7 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
 describe('GLSL vecN constructor arity (no vector-valued components)', () => {
   it('a tuple with a complex component fails closed', () => {
     const expr = ce.box(['Tuple', 't', ['Multiply', 'ImaginaryUnit', 't']]);
-    expect(() => glsl.compile(expr)).toThrow(/Fail closed/);
+    expect(() => glsl.compile(expr)).toThrow(/Could not compile/);
   });
 
   it('a nested tuple of points of one arity is an array of vectors', () => {
@@ -619,7 +617,7 @@ describe('GLSL vecN constructor arity (no vector-valued components)', () => {
   it('a tuple mixing a point and a scalar still fails closed', () => {
     const expr = ce.box(['Tuple', ['Tuple', 1, 2], 't']);
     expect(() => glsl.compile(expr, { constantFold: false })).toThrow(
-      /Fail closed/
+      /Could not compile/
     );
   });
 
@@ -633,12 +631,12 @@ describe('GLSL vecN constructor arity (no vector-valued components)', () => {
   // emitted `vec2(float[1](1.0), 2.0)`.
   it('a 1-element list component fails closed', () => {
     const expr = ce.box(['Tuple', ['List', 1], 2]);
-    expect(() => glsl.compile(expr)).toThrow(/Fail closed/);
+    expect(() => glsl.compile(expr)).toThrow(/Could not compile/);
   });
 
   it('a 5-element list component fails closed', () => {
     const expr = ce.box(['Tuple', ['List', 1, 2, 3, 4, 5], 2]);
-    expect(() => glsl.compile(expr)).toThrow(/Fail closed/);
+    expect(() => glsl.compile(expr)).toThrow(/Could not compile/);
   });
 });
 
@@ -736,7 +734,7 @@ describe('GLSL zero-width aggregates fail closed', () => {
   });
 
   it('an empty List fails closed', () => {
-    expect(() => glsl.compile(ce.box(['List']))).toThrow(/Fail closed/);
+    expect(() => glsl.compile(ce.box(['List']))).toThrow(/Could not compile/);
   });
 
   it('a block local bound to an empty tuple fails closed', () => {
@@ -747,7 +745,7 @@ describe('GLSL zero-width aggregates fail closed', () => {
       'p',
     ]);
     expect(() => glsl.compile(expr)).toThrow(
-      /Block local "p": an empty tuple\/list/
+      /the block local `p`: an empty tuple\/list/
     );
   });
 });
@@ -817,7 +815,9 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
   it('still fails closed on a provably complex operand', () => {
     expect(() =>
       glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)
-    ).toThrow(/Mod: the target's lowering for this head is real-only/);
+    ).toThrow(
+      /Could not compile `Mod`: the target's lowering for this head is real-only/
+    );
     // `Mod` declares the finite real carrier (Contract B), so a non-real
     // LITERAL operand is already an `incompatible-type` error at boxing and
     // compile refuses the invalid expression — fail-closed at an earlier
@@ -830,7 +830,9 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     // replaced with operand recursion.
     expect(() =>
       glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
-    ).toThrow(/Mod: the target's lowering for this head is real-only/);
+    ).toThrow(
+      /Could not compile `Mod`: the target's lowering for this head is real-only/
+    );
   });
 });
 
@@ -878,14 +880,18 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
     // `Conjugate` is complex → complex (it emits a `vec2`), so it is
     // deliberately NOT a real-by-definition head.
     expect(() => glsl.compile(e.box(['Mod', ['Conjugate', 'z'], 1]))).toThrow(
-      /Mod: the target's lowering for this head is real-only/
+      /Could not compile `Mod`: the target's lowering for this head is real-only/
     );
     // The item-144 pins are unchanged.
     expect(() =>
       glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)
-    ).toThrow(/Mod: the target's lowering for this head is real-only/);
+    ).toThrow(
+      /Could not compile `Mod`: the target's lowering for this head is real-only/
+    );
     expect(() =>
       glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
-    ).toThrow(/Mod: the target's lowering for this head is real-only/);
+    ).toThrow(
+      /Could not compile `Mod`: the target's lowering for this head is real-only/
+    );
   });
 });

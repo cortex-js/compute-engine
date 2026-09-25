@@ -341,8 +341,10 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
         ['Typed', 'n', { str: 'integer' }],
       ],
     ]);
-    expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
-    expect(() => new PythonTarget().compile(expr)).toThrow(/Fail closed/);
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /Could not compile/
+    );
+    expect(() => new PythonTarget().compile(expr)).toThrow(/Could not compile/);
   });
 });
 

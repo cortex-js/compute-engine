@@ -49,9 +49,12 @@ type integer is Describable {
     expect(result.code).not.toContain('typeof');
     expect(result.run?.()).toBe('an integer');
     // Interpreter agreement.
-    expect(ce.box(['describe', 42] as any).evaluate().toString()).toBe(
-      '"an integer"'
-    );
+    expect(
+      ce
+        .box(['describe', 42] as any)
+        .evaluate()
+        .toString()
+    ).toBe('"an integer"');
   });
 
   test('strict-supertype domination: an integer receiver takes the integer impl over the real one', () => {
@@ -65,7 +68,12 @@ type real is Describable {
     const result = compile(ce.box(['describe', 7] as any));
     expect(result.success).toBe(true);
     expect(result.run?.()).toBe('int');
-    expect(ce.box(['describe', 7] as any).evaluate().toString()).toBe('"int"');
+    expect(
+      ce
+        .box(['describe', 7] as any)
+        .evaluate()
+        .toString()
+    ).toBe('"int"');
   });
 
   test('equivalent targets in two protocols decline (ambiguity has no compiled analog)', () => {
@@ -112,7 +120,7 @@ type list<T> is Comparable where T is Comparable {
 }`);
     // A list receiver could only dispatch through the conditional edge —
     // whose runtime type-parameter binding the compiled tier cannot
-    // replicate (v1). Fail closed.
+    // replicate (v1).
     const viaList = compile(
       ce.box(['compare', ['List', { str: 'a' }], ['List', { str: 'b' }]] as any)
     );
@@ -138,9 +146,12 @@ type list<T> is Comparable where T is Comparable {
     // compiled code. (The interpreter dispatches it fine.)
     const result = compile(ce.box(['hash', { str: 'q' }] as any));
     expect(result.success).toBe(false);
-    expect(ce.box(['hash', { str: 'q' }] as any).evaluate().toString()).toBe(
-      '"H"'
-    );
+    expect(
+      ce
+        .box(['hash', { str: 'q' }] as any)
+        .evaluate()
+        .toString()
+    ).toBe('"H"');
   });
 });
 
@@ -179,10 +190,18 @@ type integer is Describable {
     // specific target.
     expect(result.run?.({ x: 3 })).toBe('int');
     expect(result.run?.({ x: 3.5 })).toBe('real');
-    expect(ce.box(['describe', 3] as any).evaluate().toString()).toBe('"int"');
-    expect(ce.box(['describe', 3.5] as any).evaluate().toString()).toBe(
-      '"real"'
-    );
+    expect(
+      ce
+        .box(['describe', 3] as any)
+        .evaluate()
+        .toString()
+    ).toBe('"int"');
+    expect(
+      ce
+        .box(['describe', 3.5] as any)
+        .evaluate()
+        .toString()
+    ).toBe('"real"');
   });
 
   test('tagged sum variants dispatch on the reified tag', () => {
@@ -275,7 +294,9 @@ type string is Comparable {
 
   test('bare, ProtocolMember and Apply(Field(…)) routes all compile and agree', () => {
     const ce = engineFor(SOURCE);
-    const bare = compile(ce.box(['compare', { str: 'a' }, { str: 'b' }] as any));
+    const bare = compile(
+      ce.box(['compare', { str: 'a' }, { str: 'b' }] as any)
+    );
     const qualified = compile(
       ce.box([
         'ProtocolMember',
@@ -337,7 +358,8 @@ type node is Nested {
     // AGREE between constructor and guard. Build values via the interpreter
     // convention: probe through the interpreter for agreement instead.
     expect(
-      ce.box(['depth', ['node', ['node', ['leaf']]]] as any)
+      ce
+        .box(['depth', ['node', ['node', ['leaf']]]] as any)
         .evaluate()
         .toString()
     ).toBe('2');
@@ -383,7 +405,11 @@ function readName(p: Person) -> string { p.name }`);
     expect(result.run?.()(['alice', 30])).toBe('alice');
     expect(
       ce
-        .box(['Field', ['Person', { str: 'alice' }, 30], { str: 'name' }] as any)
+        .box([
+          'Field',
+          ['Person', { str: 'alice' }, 30],
+          { str: 'name' },
+        ] as any)
         .evaluate()
         .toString()
     ).toBe('"alice"');
@@ -400,9 +426,7 @@ function rename(p: Cell, v: string) -> Cell {
 }`);
     expect(compile(ce.box('rename')).success).toBe(false);
     expect(
-      String(
-        executeEpsil(ce, 'rename(Cell(n: "alice", age: 30), "bob")').value
-      )
+      String(executeEpsil(ce, 'rename(Cell(n: "alice", age: 30), "bob")').value)
     ).toBe('Cell(n: "bob", age: 30)');
   });
 
@@ -415,7 +439,10 @@ function relabel(v: string) -> Cell {
 }`);
     expect(compile(ce.box('relabel')).success).toBe(false);
     expect(
-      ce.box(['relabel', { str: 'bob' }] as any).evaluate().toString()
+      ce
+        .box(['relabel', { str: 'bob' }] as any)
+        .evaluate()
+        .toString()
     ).toBe('Cell(n: "bob", age: 1)');
   });
 
@@ -464,7 +491,7 @@ function bump(p: P) -> integer {
 }`);
     const result = compile(ce.box('bump'));
     expect(result.success).toBe(false);
-    expect(String(result.error)).toContain('Fail closed (D6)');
+    expect(String(result.error)).toContain('Could not compile');
     expect(String(result.error)).toContain(
       'objects have no compiled representation'
     );
@@ -491,7 +518,7 @@ function bumpQualified(p: P) -> integer {
 }`);
     const result = compile(ce.box('bumpQualified'));
     expect(result.success).toBe(false);
-    expect(String(result.error)).toContain('Fail closed (D6)');
+    expect(String(result.error)).toContain('Could not compile');
     expect(String(result.error)).toContain(
       'objects have no compiled representation'
     );
@@ -559,7 +586,12 @@ function tally() -> integer {
     // Statically resolved: no runtime guard chain over the conformers.
     expect(result.code ?? '').not.toContain('typeof');
     expect(result.run?.()()).toBe(60);
-    expect(ce.box(['tally'] as any).evaluate().toString()).toBe('60');
+    expect(
+      ce
+        .box(['tally'] as any)
+        .evaluate()
+        .toString()
+    ).toBe('60');
   });
 
   test('an ordinary record field does not go through the protocol tier', () => {

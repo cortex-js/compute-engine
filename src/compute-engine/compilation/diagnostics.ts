@@ -52,7 +52,7 @@ export class LaneMismatchError extends CompileDeclineError {
   }) {
     const message =
       payload.message ??
-      `Lane mismatch at ${payload.boundary}: the complex-shaped value \`${payload.value}\` reaches ${payload.binding}, which this compilation shaped real. Declare it complex, or compile with \`mode: 'complex'\`. Fail closed (D6).`;
+      `Lane mismatch at ${payload.boundary}: the complex-shaped value \`${payload.value}\` reaches ${payload.binding}, which this compilation shaped real. Declare it complex, or compile with \`mode: 'complex'\`.`;
     super({
       code: 'lane-mismatch',
       kind: 'correctness',
@@ -107,4 +107,24 @@ export function compileDiagnosticOf(
           ? e
           : 'Compilation failed'),
   };
+}
+
+/**
+ * The object of "Could not compile …" in a decline message raised by a check
+ * of a compiled body (the GPU and Python targets check that a body emits as a
+ * single expression, or places its `return` correctly). Such a check
+ * receives a `subject` that is one of four things: a user function name
+ * (`f`), which is quoted; an API entry point (`compileToSource()`), which is
+ * what the compilation ran "with"; an entry point followed by the part it
+ * compiles; or a phrase ("this function body"), which reads as it is.
+ */
+export function compileSubject(subject: string): string {
+  if (/^[A-Za-z_][\w]*$/.test(subject)) return `\`${subject}\``;
+  if (subject.endsWith('()')) return `with \`${subject}\``;
+  // An entry point followed by the part it compiles:
+  // `compileShader() body statement "fragColor"` reads as
+  // `the body statement "fragColor" of \`compileShader()\``.
+  const part = /^(\w+\(\)) (.+)$/.exec(subject);
+  if (part !== null) return `the ${part[2]} of \`${part[1]}\``;
+  return subject;
 }

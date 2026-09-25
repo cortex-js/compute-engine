@@ -14,7 +14,7 @@
  *   length(vec2(float[1](3.0), 4.0))          array constructor in a vector one
  *   sin(mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))) no matrix overload
  *
- * They now fail closed (D6) through `CompileTarget.checkOperandShapes`, which
+ * They now fail closed through `CompileTarget.checkOperandShapes`, which
  * derives its verdict from the operand shapes and from the emitted source —
  * never from a list of head names.
  *
@@ -100,7 +100,7 @@ describe('GPU OPERAND SHAPE GATE — invalid shader source fails closed', () => 
 
   it('every decline names the head and ends with the D6 marker', () => {
     for (const emit of [g, w])
-      expect(() => emit(['Sin', M2])).toThrow(/^Sin: .*Fail closed \(D6\)\.$/s);
+      expect(() => emit(['Sin', M2])).toThrow(/^Could not compile `Sin`: .*$/s);
   });
 
   it('reports `success: false` (no source) through the fallback route', () => {
@@ -243,7 +243,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
   it('GLSL `mod(genType, float)` takes its scalar LAST', () => {
     expect(g(['Mod', V3, 1])).toBe('mod(vec3(1.0, 2.0, 3.0), 1.0)');
     expect(() => g(['Mod', 1, V3])).toThrow(
-      /^Mod: the shader builtin `mod` takes a scalar only in argument 2, but here the scalar stands in argument 1/
+      /^Could not compile `Mod`: the shader builtin `mod` takes a scalar only in argument 2, but here the scalar stands in argument 1/
     );
     // WGSL is unaffected: it lowers `Mod` to `%`, whose scalar/vector mixed
     // forms ARE defined, so there is no builtin overload to violate.
@@ -255,7 +255,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
   it('GLSL `step(float, genType)` takes its scalar FIRST', () => {
     expect(g(['Step', 1, V3])).toBe('step(1.0, vec3(1.0, 2.0, 3.0))');
     expect(() => g(['Step', V3, 1])).toThrow(
-      /^Step: the shader builtin `step` takes a scalar only in argument 1, but here the scalar stands in argument 2/
+      /^Could not compile `Step`: the shader builtin `step` takes a scalar only in argument 1, but here the scalar stands in argument 2/
     );
     // WGSL has no scalar-tailed `step` at all.
     expect(() => w(['Step', 1, V3])).toThrow(/MATCHING genType/);
@@ -287,14 +287,14 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     );
     for (const emit of [g, w])
       expect(() => emit(['Refract', 0.5, V3, W3])).toThrow(
-        /^Refract: the shader builtin `refract` takes a scalar only in argument 3, but here the scalar stands in argument 1/
+        /^Could not compile `Refract`: the shader builtin `refract` takes a scalar only in argument 3, but here the scalar stands in argument 1/
       );
   });
 
   it('GLSL `clamp(genType, float, float)` takes its scalars in the BOUNDS', () => {
     expect(g(['Clamp', V3, 0, 1])).toBe('clamp(vec3(1.0, 2.0, 3.0), 0.0, 1.0)');
     expect(() => g(['Clamp', 0, V3, 1])).toThrow(
-      /^Clamp: the shader builtin `clamp` takes a scalar only in arguments 2 and 3, but here the scalar stands in argument 1/
+      /^Could not compile `Clamp`: the shader builtin `clamp` takes a scalar only in arguments 2 and 3, but here the scalar stands in argument 1/
     );
     expect(() => w(['Clamp', V3, 0, 1])).toThrow(/MATCHING genType/);
   });
@@ -339,9 +339,9 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
   });
 
   it('every positional decline names the head and ends with the D6 marker', () => {
-    expect(() => g(['Mod', 1, V3])).toThrow(/^Mod: .*Fail closed \(D6\)\.$/s);
+    expect(() => g(['Mod', 1, V3])).toThrow(/^Could not compile `Mod`: .*$/s);
     expect(() => w(['Mix', 0.5, V3, W3])).toThrow(
-      /^Mix: .*Fail closed \(D6\)\.$/s
+      /^Could not compile `Mix`: .*$/s
     );
   });
 
@@ -422,7 +422,7 @@ describe('GPU OPERAND SHAPE GATE — the infix operator route', () => {
   it('typed vectors of DIFFERENT widths decline', () => {
     for (const emit of [gi, wi])
       expect(() => emit(['Add', 'P', 'Q'])).toThrow(
-        /^Add: .*different widths \(vec3, vec2\).*Fail closed \(D6\)\.$/s
+        /^Could not compile `Add`: .*different widths \(vec3, vec2\).*$/s
       );
   });
 

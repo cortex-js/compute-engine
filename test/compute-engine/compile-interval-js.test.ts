@@ -771,7 +771,7 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
     expect(result.value.hi).toBe(24);
   });
 
-  test('a collection-valued Sum body fails closed (D6)', () => {
+  test('a collection-valued Sum body fails closed', () => {
     // `Σ h(i)·(1/1.4^i)·a(…)` where `a` returns a vector — the interpreter's
     // elementwise zip-broadcast Sum. Interval scalar accumulation over arrays
     // would silently produce a wrong value, so compilation must fail closed
@@ -786,7 +786,7 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
     );
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(false);
-    expect(fn.error).toMatch(/collection-valued body.*Fail closed/s);
+    expect(fn.error).toMatch(/collection-valued body/s);
   });
 });
 
@@ -1688,7 +1688,9 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
     expect(fn.success).toBe(true);
     expect(fn.code).not.toContain('_IA.at(');
     expect(emitted(fn)).not.toContain('[_k');
-    const v = fn.run!({ x: { lo: 2, hi: 2 } }) as { value: { lo: number; hi: number } };
+    const v = fn.run!({ x: { lo: 2, hi: 2 } }) as {
+      value: { lo: number; hi: number };
+    };
     const exact = 2 * (h[0] + h[1] + h[2] + h[3]);
     expect(v.value.lo).toBeCloseTo(exact, 12);
     expect(v.value.hi).toBeCloseTo(exact, 12);
@@ -1703,7 +1705,9 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
     expect(fn.code).toMatch(/_IA\.at\(_k\d+, _IA\.point\(i\)\)/);
     expect(fn.code).not.toContain('[_k');
     expect(fn.preamble).toMatch(/const _k\d+ = \[_k\d+(?:, _k\d+){119}\];/);
-    const v = fn.run!({ x: { lo: 2, hi: 2 } }) as { value: { lo: number; hi: number } };
+    const v = fn.run!({ x: { lo: 2, hi: 2 } }) as {
+      value: { lo: number; hi: number };
+    };
     const exact = 2 * h.reduce((a, b) => a + b, 0);
     expect(v.value.lo).toBeLessThanOrEqual(exact);
     expect(v.value.hi).toBeGreaterThanOrEqual(exact);
@@ -1727,8 +1731,14 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
     const a = fn.run!({}) as unknown[][];
     const b = fn.run!({}) as unknown[][];
     expect(a).toEqual([
-      [{ lo: 1, hi: 1 }, { lo: 2, hi: 2 }],
-      [{ lo: 3, hi: 3 }, { lo: 4, hi: 4 }],
+      [
+        { lo: 1, hi: 1 },
+        { lo: 2, hi: 2 },
+      ],
+      [
+        { lo: 3, hi: 3 },
+        { lo: 4, hi: 4 },
+      ],
     ]);
     expect(a).not.toBe(b);
     expect(a[0]).not.toBe(b[0]);
@@ -1754,7 +1764,10 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
     });
     expect(fn.success).toBe(true);
     expect(fn.code).toBe('_IA.at([_k99, _k1, _k2], _.k)');
-    expect(fn.run!({ k: 3 })).toEqual({ kind: 'interval', value: { lo: 3, hi: 3 } });
+    expect(fn.run!({ k: 3 })).toEqual({
+      kind: 'interval',
+      value: { lo: 3, hi: 3 },
+    });
   });
 
   test('a static selection keeps the list when a discarded element is caller code', () => {
@@ -1786,4 +1799,3 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
     expect(a[0]).not.toBe(b[0]);
   });
 });
-

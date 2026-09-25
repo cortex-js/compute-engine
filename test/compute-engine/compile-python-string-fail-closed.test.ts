@@ -1,5 +1,5 @@
 /**
- * String / aggregate COMPARISONS fail closed (D6) on the **Python** compile
+ * String / aggregate COMPARISONS fail closed on the **Python** compile
  * target — the mirror of `compile-string-fail-closed.test.ts` (JavaScript).
  *
  * The shapes that were silently WRONG before the gates, both verified by
@@ -219,7 +219,7 @@ describe('Python: EQUALITY fails closed on string evidence', () => {
           ['Tuple', 1, { str: 'a' }],
         ])
       )
-    ).toThrow(/Equal.*a tuple participant.*Fail closed \(D6\)/s);
+    ).toThrow(/Equal.*a tuple participant/s);
   });
 
   test('Equal over a MIXED string/number collection declines', () => {
@@ -248,9 +248,7 @@ describe('Python: EQUALITY fails closed on string evidence', () => {
 describe('Python: EQUALITY fails closed on an unfaithful aggregate', () => {
   test('Equal(Tuple, List) declines — it answered True against False', () => {
     const expr = ce.box(['Equal', ['Tuple', 1, 2], ['List', 1, 2]]);
-    expect(() => code(expr)).toThrow(
-      /Equal.*a tuple participant.*Fail closed \(D6\)/s
-    );
+    expect(() => code(expr)).toThrow(/Equal.*a tuple participant/s);
     expect(expr.evaluate().toString()).toBe('"False"');
   });
 
@@ -281,9 +279,7 @@ describe('Python: EQUALITY fails closed on an unfaithful aggregate', () => {
     // `True == 1`: this compiled and executed to `True` where the interpreter
     // answers `False`. The carve-out now requires provably NUMERIC components.
     const expr = ce.box(['Equal', ['Tuple', 'True'], ['Tuple', 1]]);
-    expect(() => code(expr)).toThrow(
-      /Equal.*a tuple participant.*Fail closed \(D6\)/s
-    );
+    expect(() => code(expr)).toThrow(/Equal.*a tuple participant/s);
     expect(expr.evaluate().toString()).toBe('"False"');
   });
 
@@ -319,9 +315,7 @@ describe('Python: ORDERINGS decline only the MIXED string case', () => {
       ['List', { str: 'a' }, 10],
       ['List', { str: 'b' }, 9],
     ]);
-    expect(() => code(expr)).toThrow(
-      /Less.*mixes a string operand.*Fail closed \(D6\)/s
-    );
+    expect(() => code(expr)).toThrow(/Less.*mixes a string operand/s);
     // The interpreter's answer, which the fallback produces: `10 < 9` is False.
     expect(expr.evaluate().toString()).toBe('["True","False"]');
   });
@@ -387,9 +381,7 @@ describe('Python: ORDERINGS decline only the MIXED string case', () => {
       ['List', ['Tuple', 1, 2]],
       ['List', ['Tuple', 3, 4]],
     ]);
-    expect(() => code(expr)).toThrow(
-      /Less.*ELEMENTS are tuples.*Fail closed \(D6\)/s
-    );
+    expect(() => code(expr)).toThrow(/Less.*ELEMENTS are tuples/s);
     expect(expr.evaluate().toString()).toBe('[(1, 2) < (3, 4)]');
     // …and the same shape carried by point-list TYPED symbols.
     ce.declare('pl1', 'list<tuple<number, number>>');

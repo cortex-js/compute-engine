@@ -172,7 +172,7 @@ describe('element-wise Sum/Product: unchanged behavior elsewhere', () => {
         // shader vector literal, bypassing the decline under test.
         { constantFold: false }
       )
-    ).toThrow(/collection-valued body does not compile/);
+    ).toThrow(/collection-valued body has no compiled form/);
   });
 
   test('the interval-js target keeps the fail-closed decline', () => {
@@ -181,6 +181,6 @@ describe('element-wise Sum/Product: unchanged behavior elsewhere', () => {
       { to: 'interval-js' } as any
     )!;
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/collection-valued body does not compile/);
+    expect(r.error).toMatch(/collection-valued body has no compiled form/);
   });
 });

@@ -479,20 +479,20 @@ describe('GammaRegularized / BetaRegularized compile', () => {
   test('GammaRegularized fails closed (no kernel) in GLSL and WGSL', () => {
     const expr = ce.box(['GammaRegularized', 3, 'x']);
     expect(() => new GLSLTarget().compile(expr)).toThrow(
-      /GammaRegularized: cannot compile .* target 'glsl' has no lowering/
+      /Could not compile `GammaRegularized`: .* target 'glsl' has no lowering/
     );
     expect(() => new WGSLTarget().compile(expr)).toThrow(
-      /GammaRegularized: cannot compile .* target 'wgsl' has no lowering/
+      /Could not compile `GammaRegularized`: .* target 'wgsl' has no lowering/
     );
   });
 
   test('BetaRegularized fails closed (no kernel) in GLSL and WGSL', () => {
     const expr = ce.box(['BetaRegularized', 'x', 2, 3]);
     expect(() => new GLSLTarget().compile(expr)).toThrow(
-      /BetaRegularized: cannot compile .* target 'glsl' has no lowering/
+      /Could not compile `BetaRegularized`: .* target 'glsl' has no lowering/
     );
     expect(() => new WGSLTarget().compile(expr)).toThrow(
-      /BetaRegularized: cannot compile .* target 'wgsl' has no lowering/
+      /Could not compile `BetaRegularized`: .* target 'wgsl' has no lowering/
     );
   });
 });

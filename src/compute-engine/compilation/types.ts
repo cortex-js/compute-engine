@@ -634,7 +634,7 @@ export interface CompileTarget<Expr = unknown> {
    * `.map((v) => …)` arrow into GLSL, WGSL and Python alike, behind
    * `success: true`.)
    *
-   * Return `undefined` to decline; the base compiler then fails closed (D6)
+   * Return `undefined` to decline; the base compiler then fails closed
    * naming the head and the target. A target may also throw to fail closed
    * with its own diagnostic (the GPU targets do, for a shape with no vector
    * lowering). The JavaScript target deliberately leaves this undefined: its
@@ -657,7 +657,7 @@ export interface CompileTarget<Expr = unknown> {
   /**
    * Inspect an emitted lowering — the head's own function codegen, or the
    * `name(args…)` call of a string-mapped helper — BEFORE it is spliced into
-   * the output, and THROW to fail closed (D6) when the operand shapes are ones
+   * the output, and THROW to fail closed when the operand shapes are ones
    * that lowering cannot accept.
    *
    * The complement of `broadcastUnary`: that hook owns the single-collection
@@ -741,7 +741,7 @@ export interface CompileTarget<Expr = unknown> {
 
   /**
    * Map a free (declarable) identifier to the source token emitted for it, or
-   * **throw to fail closed (D6)** when the identifier cannot be represented in
+   * **throw to fail closed** when the identifier cannot be represented in
    * the target — e.g. a GLSL/WGSL reserved keyword (`in`, `sample`, `filter`,
    * `texture`, …) used as a user variable name, which would emit a shader that
    * fails to compile. Applied by the base compiler only to the bare-symbol
@@ -752,7 +752,7 @@ export interface CompileTarget<Expr = unknown> {
 
   /**
    * Called with the VALUE operand of every `Return` the base compiler emits
-   * against this target. **Throw to fail closed (D6).**
+   * against this target. **Throw to fail closed.**
    *
    * A target that bakes a STATIC return type into the signature it is emitting
    * (`userFunctions.lowering.staticReturnType` — the shader targets) needs the
@@ -1720,7 +1720,7 @@ export interface CompileTarget<Expr = unknown> {
       /**
        * A user function referenced in VALUE position (a higher-order operand
        * such as `Map(f, xs)`). The shader languages have no function values,
-       * so their implementation fails closed (D6).
+       * so their implementation fails closed.
        */
       value: (ctx: {
         id: MathJsonSymbol;
@@ -1730,7 +1730,7 @@ export interface CompileTarget<Expr = unknown> {
 
       /**
        * The target language forbids recursion (GLSL and WGSL both do): a
-       * re-entrant reference fails closed (D6) instead of emitting a call to a
+       * re-entrant reference fails closed instead of emitting a call to a
        * name that is not yet declared. The JS stack-exhaustion contract
        * deliberately does NOT carry over.
        */
@@ -1744,7 +1744,7 @@ export interface CompileTarget<Expr = unknown> {
        * Such a lowering cannot survive a function whose declared scalar result
        * type is contradicted by a collection-constructing body: the declaration
        * would say `float`/`f32` while the `return` statement emits a `vecN`.
-       * `emitFunctionLiteralDefinition` fails closed (D6) on that pair, after
+       * `emitFunctionLiteralDefinition` fails closed on that pair, after
        * `define` has had its own (more specific) chance to decline — see
        * `isContradictedScalarFunctionBody`.
        *

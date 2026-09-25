@@ -751,7 +751,7 @@ function compileIntervalPointComponent(
   target: CompileTarget<Expression>
 ): string {
   if (arg === null || arg === undefined)
-    throw new Error(`${name}: no argument`);
+    throw new Error(`Could not compile \`${name}\`: no argument`);
   const literal = literalPointOps(arg, target);
   if (literal !== undefined) {
     const coordinate = literal[k];
@@ -764,9 +764,9 @@ function compileIntervalPointComponent(
   for (const coord of pointCoordinateTypes(t, k)) {
     if (!couldMatch(coord, 'number'))
       throw new Error(
-        `${name}: cannot compile — the coordinate is not a number (the ` +
+        `Could not compile \`${name}\`: the coordinate is not a number (the ` +
           `operand's type is \`${arg.type.toString()}\`), and the interval ` +
-          `target's value is a numeric interval. Fail closed (D6).`
+          `target's value is a numeric interval.`
       );
   }
   // A literal point that `literalPointOps` does not fold — a `PointList`
@@ -810,7 +810,9 @@ function compileIntervalChain(
   target?: CompileTarget<Expression>
 ): string {
   if (args.length < 2)
-    throw new Error(`${op}: expected at least two arguments`);
+    throw new Error(
+      `Could not compile \`${op}\`: expected at least two arguments`
+    );
   // A MIDDLE operand appears in two comparisons (`a < m < b` → `and(a<m,
   // m<b)`). Emitting it twice evaluates it twice, diverging from the
   // interpreter — which evaluates each operand once — and doubling the work of
@@ -857,7 +859,9 @@ function compileIntervalFold(
   compile: OperandCompiler<Expression>
 ): string {
   if (args.length === 0)
-    throw new Error(`${op}: expected at least one argument`);
+    throw new Error(
+      `Could not compile \`${op}\`: expected at least one argument`
+    );
   let result = compile(args[0], 0);
   // `And`/`Or` operands after the first are the inventory's short-circuit lazy
   // positions: pass the index so the harvested region is pushed. (`_IA.and` is
@@ -886,7 +890,7 @@ function compileIntervalFold(
  * `freeSymbols`.
  */
 /**
- * Fail closed (D6) when the free symbol `id` is complex-valued. The interval
+ * Fail closed when the free symbol `id` is complex-valued. The interval
  * domain is real: an input reads as one real interval `{lo, hi}`, and no
  * lowering of this target has complex arithmetic. A symbol declared
  * `complex` that compiled as a real interval gave a wrong value behind
@@ -902,9 +906,9 @@ function assertIntervalRealSymbol(ce: ComputeEngine, id: string): void {
   const symbol = ce.symbol(id);
   if (!BaseCompiler.isComplexValued(symbol)) return;
   throw new Error(
-    `interval-js: the symbol \`${id}\` has the complex type ` +
+    `Could not compile \`${id}\`: the symbol has the complex type ` +
       `\`${symbol.type.toString()}\`. The interval target computes with ` +
-      `real intervals only and has no complex arithmetic. Fail closed (D6).`
+      `real intervals only and has no complex arithmetic.`
   );
 }
 
@@ -952,7 +956,7 @@ const COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Fail closed (D6) when a scalar interval kernel is handed a provably
+ * Fail closed when a scalar interval kernel is handed a provably
  * collection-valued operand.
  *
  * Every kernel in this target reads `.lo`/`.hi` off its operands: a
@@ -974,11 +978,11 @@ function assertScalarIntervalOperands(
   for (const arg of args) {
     if (arg.isCollection || arg.type.matches('collection<any>'))
       throw new Error(
-        `${head}: cannot compile — the operand \`${arg.toString()}\` is a ` +
+        `Could not compile \`${head}\`: the operand \`${arg.toString()}\` is a ` +
           `collection (type \`${arg.type.toString()}\`), and the interval ` +
           `target's kernels take one interval per operand; the interval domain ` +
           `has no element-wise convention. Evaluate the expression instead, or ` +
-          `compile a scalar per-element function. Fail closed (D6).`
+          `compile a scalar per-element function.`
       );
   }
   // An operand that is POSSIBLY a list of numbers — a `list<number> | number`
@@ -1006,10 +1010,9 @@ function assertScalarIntervalOperands(
       isPossiblyNumericListOperand(arg)
     )
       throw new Error(
-        `${head}: cannot compile — the operand \`${arg.toString()}\` may be ` +
+        `Could not compile \`${head}\`: the operand \`${arg.toString()}\` may be ` +
           `a collection at run time (type \`${arg.type.toString()}\`), and ` +
-          `the interval target's kernels take one interval per operand. ` +
-          `Fail closed (D6).`
+          `the interval target's kernels take one interval per operand.`
       );
   }
 }
@@ -1886,19 +1889,18 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Norm: (args, compile) => {
     if (args.length > 1)
       throw new Error(
-        'Norm: only the default L2 norm compiles on the interval target'
+        'Could not compile `Norm`: only the default L2 norm compiles on the interval target'
       );
     const arg = args[0];
     if (!isFunction(arg, 'Tuple'))
       throw new Error(
-        'Norm: the interval target requires a fixed-arity point operand'
+        'Could not compile `Norm`: the interval target requires a fixed-arity point operand'
       );
     // A broadcasting component means one norm per zipped element — not
-    // representable as a scalar interval. Fail closed (D6).
+    // representable as a scalar interval. Fail closed.
     if (pointHasBroadcastComponent(arg))
       throw new Error(
-        'Norm: cannot compile a point with a broadcasting component. ' +
-          'Fail closed (D6).'
+        'Could not compile `Norm`: a point with a broadcasting component.'
       );
     return compileIntervalPointNorm(arg.ops, compile);
   },
@@ -1915,7 +1917,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Length: (args, compile, target) => {
     const arg = args[0];
     if (arg === null || arg === undefined)
-      throw new Error('Length: no argument');
+      throw new Error('Could not compile `Length`: no argument');
     // A string's length is its GRAPHEME-CLUSTER count, and this target has no
     // text model at all — its domain is numeric, one interval per quantity —
     // so there is nothing to count clusters with here. The union case
@@ -1923,9 +1925,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // string at run time.
     if (isProvablyStringOperand(arg) || couldBeStringOperand(arg))
       throw new Error(
-        `Length: cannot compile — the operand may be text at run time, and ` +
+        `Could not compile \`Length\`: the operand may be text at run time, and ` +
           `the interval target's domain is numeric (one interval per ` +
-          `quantity) with no text model. Fail closed (D6).`
+          `quantity) with no text model.`
       );
     // A value that is POSSIBLY a list of numbers (`isPossiblyNumericListOperand`:
     // a `list<number> | number` union, a `broadcastable<number>` helper
@@ -1933,8 +1935,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // scalar at run time, the interpreter's "no value" for a non-collection.
     if (!isIndexedCollectionOperand(arg) && !isPossiblyNumericListOperand(arg))
       throw new Error(
-        `Length: cannot compile — operand is not an indexed collection ` +
-          `(list/vector/range). Fail closed (D6).`
+        `Could not compile \`Length\`: operand is not an indexed collection ` +
+          `(list/vector/range).`
       );
     // A literal collection's length is a compile-time constant.
     const ops = literalCollectionOps(arg, target);
@@ -1957,19 +1959,19 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       index === null ||
       index === undefined
     )
-      throw new Error('At: missing argument');
+      throw new Error('Could not compile `At`: missing argument');
     if (args.length !== 2)
       throw new Error(
-        `At: only the single-index form compiles; multi-index (nested) ` +
-          `access is not supported. Fail closed (D6).`
+        `Could not compile \`At\`: only the single-index form compiles; multi-index (nested) ` +
+          `access is not supported.`
       );
     // A string base is indexed by grapheme cluster, and this target has no
     // text model — see the `Length` handler above.
     if (isProvablyStringOperand(coll) || couldBeStringOperand(coll))
       throw new Error(
-        `At: cannot compile — the base may be text at run time, and the ` +
+        `Could not compile \`At\`: the base may be text at run time, and the ` +
           `interval target's domain is numeric (one interval per quantity) ` +
-          `with no text model. Fail closed (D6).`
+          `with no text model.`
       );
     const provablyIndexed = isIndexedCollectionOperand(coll);
     // A base that is POSSIBLY a list of numbers (a `list<number> | number`
@@ -1982,8 +1984,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       !isPossiblyNumericListOperand(coll)
     )
       throw new Error(
-        `At: cannot compile — first operand is not an indexed collection ` +
-          `(list/vector/range). Fail closed (D6).`
+        `Could not compile \`At\`: first operand is not an indexed collection ` +
+          `(list/vector/range).`
       );
     // A base admitted only by the "could be" path may be a DICTIONARY at run
     // time, and a keyed lookup has no interval lowering: `_IA.at` answers the
@@ -1992,10 +1994,10 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // emit a silent absence behind `success: true`.
     if (!provablyIndexed && !isNumericIndexOperand(index))
       throw new Error(
-        `At: cannot compile — the first operand is not provably an indexed ` +
+        `Could not compile \`At\`: the first operand is not provably an indexed ` +
           `collection (type \`${coll.type.toString()}\`) and the index is not ` +
           `provably numeric, so a keyed (dictionary) access cannot be ruled ` +
-          `out. Fail closed (D6).`
+          `out.`
       );
     // A TUPLE base with a component that is not a number (a `tuple<number,
     // string>` pair) matches the indexed-collection shape, but the selected
@@ -2008,9 +2010,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       baseType.elements.some((el) => !isSubtype(el.type, 'number'))
     )
       throw new Error(
-        `At: cannot compile — the tuple base has a component that is not a ` +
+        `Could not compile \`At\`: the tuple base has a component that is not a ` +
           `number (its type is \`${coll.type.toString()}\`), and the interval ` +
-          `target's value is a numeric interval. Fail closed (D6).`
+          `target's value is a numeric interval.`
       );
     // A COLLECTION index is a gather or a boolean mask, whose result is itself
     // a collection — one element per index entry. This target has no lowering
@@ -2022,9 +2024,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       index.type.matches('collection<any>')
     )
       throw new Error(
-        `At: cannot compile — a collection-valued index (a gather or a ` +
+        `Could not compile \`At\`: a collection-valued index (a gather or a ` +
           `boolean mask) selects several elements, and the interval target has ` +
-          `no lowering that builds that selection at run time. Fail closed (D6).`
+          `no lowering that builds that selection at run time.`
       );
     // A literal collection indexed by a literal integer folds to the selected
     // element (or to the absence marker when the index selects nothing),
@@ -2153,7 +2155,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Power: (args, compile) => {
     const base = args[0];
     const exp = args[1];
-    if (base === null) throw new Error('Power: no argument');
+    if (base === null)
+      throw new Error('Could not compile `Power`: no argument');
     // Check if this is e^x (base is ExponentialE)
     if (isSymbol(base, 'ExponentialE')) {
       return `_IA.exp(${compile(exp)})`;
@@ -2185,7 +2188,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Root: (args, compile) => {
     const [arg, exp] = args;
-    if (arg === null) throw new Error('Root: no argument');
+    if (arg === null) throw new Error('Could not compile `Root`: no argument');
     if (exp === null) return `_IA.sqrt(${compile(arg)})`;
     if (exp?.re === 2) return `_IA.sqrt(${compile(arg)})`;
     if (isNumber(exp) && exp.im === 0) {
@@ -2208,7 +2211,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // a non-constant precision throws to fail closed to scalar JS.
     const n = args[1];
     if (!isNumber(n) || n.im !== 0 || !Number.isInteger(n.re))
-      throw new Error('Round: interval target requires a constant precision');
+      throw new Error(
+        'Could not compile `Round`: interval target requires a constant precision'
+      );
     // The scale is always spelled as the EXACT integer power `10^|n|`, so the
     // constant is a true point: for `n < 0` the operand is divided by `10^-n`
     // before rounding and multiplied back afterwards (`Round(x, -2)` rounds to
@@ -2296,10 +2301,10 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const parts = tryGetIntervalComplexParts(args[0], compile, target);
     if (parts === undefined)
       throw new Error(
-        'Argument: the interval target compiles the phase of a complex value ' +
+        'Could not compile `Argument`: the interval target compiles the phase of a complex value ' +
           'only when the value is built in the expression (the form ' +
           '`a + i·b` with real `a` and `b`), since the interval domain is ' +
-          'real and has no complex value of its own. Fail closed (D6).'
+          'real and has no complex value of its own.'
       );
     return `_IA.atan2(${parts.im}, ${parts.re})`;
   },
@@ -2334,7 +2339,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Conditionals
   If: (args, compile, target) => {
-    if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    if (args.length !== 3)
+      throw new Error('Could not compile `If`: wrong number of arguments');
     // For interval arithmetic, we need to handle indeterminate conditions.
     // Both arms are conditionally evaluated, so their operand indices are
     // passed to the compile callback (`OperandCompiler`), which opens the
@@ -2352,7 +2358,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // which is always truthy, so a ternary guard would never mask.
   When: (args, compile, target) => {
     if (args.length !== 2)
-      throw new Error('When: expected 2 arguments (value, condition)');
+      throw new Error(
+        'Could not compile `When`: expected 2 arguments (value, condition)'
+      );
     // `When` is not a selection form: its condition must be a scalar boolean.
     BaseCompiler.assertScalarCondition(args[1]);
     // A restricted RELATION (`y ≤ K(x) {K(x) > 0}` as one row) is a verdict:
@@ -2378,7 +2386,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error(
-        'Which: expected even number of arguments (condition/value pairs)'
+        'Could not compile `Which`: expected even number of arguments (condition/value pairs)'
       );
     // Build nested conditionals for each condition/value pair. Every value
     // arm, and every condition after the first, is conditionally evaluated —
@@ -2410,7 +2418,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // (D6) rather than invent it.
   Match: () => {
     throw new Error(
-      'Match: pattern matching is not supported by the interval-js compile target in v1. Fail closed (D6).'
+      'Could not compile `Match`: pattern matching is not supported by the interval-js compile target in v1.'
     );
   },
   // Comparisons. Chained (N-ary) relations conjoin ALL pairwise comparisons
@@ -2437,29 +2445,29 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // arrow over intervals through the shared `Function` lowering.
   // (Tycho item 237.)
   Apply: (args, compile) => {
-    if (args[0] == null) throw new Error('Apply: missing function');
+    if (args[0] == null)
+      throw new Error('Could not compile `Apply`: missing function');
     // Only an exact-arity application of a FUNCTION LITERAL compiles. The
     // interpreter THROWS on an over-applied call and CURRIES an
     // under-applied one (`function-utils.ts`, `makeLambda`); a plain
     // JavaScript call would instead silently truncate the extras or bind
     // the missing parameters to `undefined`. A non-literal callee (a
     // valueless function symbol) has no parameter list to check against.
-    // Fail closed (D6) on all of those.
+    // Fail closed on all of those.
     const fn = isFunction(args[0], 'Derivative')
       ? BaseCompiler.intervalDerivativeLiteral(args)
       : args[0];
     if (!isFunction(fn, 'Function'))
       throw new Error(
-        `Apply: only a function-literal callee compiles on the interval ` +
-          `target. Fail closed (D6).`
+        `Could not compile \`Apply\`: only a function-literal callee compiles on the interval ` +
+          `target.`
       );
     const paramCount = fn.ops.length - 1;
     if (args.length - 1 !== paramCount)
       throw new Error(
-        `Apply: the function takes ${paramCount} parameter(s) but ` +
+        `Could not compile \`Apply\`: the function takes ${paramCount} parameter(s) but ` +
           `${args.length - 1} argument(s) are supplied — the interpreter ` +
-          `curries or throws there, which this target cannot express. ` +
-          `Fail closed (D6).`
+          `curries or throws there, which this target cannot express.`
       );
     return `(${compile(fn)})(${args
       .slice(1)
@@ -2475,14 +2483,13 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // lane actually plots, and the band would no longer enclose them. Only
   // the nullary form is claimed: `Random(source)` draws from an interval, a
   // range, or a collection, whose support this handler does not compute —
-  // fail closed (D6) rather than emit a wrong enclosure.
+  // fail closed rather than emit a wrong enclosure.
   // (Tycho item 237.)
   Random: (args) => {
     if (args.length !== 0)
       throw new Error(
-        `Random: only the nullary form compiles on the interval target — ` +
-          `the support of \`Random(source)\` is not derived here. ` +
-          `Fail closed (D6).`
+        `Could not compile \`Random\`: only the nullary form compiles on the interval target — ` +
+          `the support of \`Random(source)\` is not derived here.`
       );
     return '({ lo: 0, hi: 1 })';
   },
@@ -2494,22 +2501,22 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   WithRandomSeed: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
-        `WithRandomSeed: expected exactly two arguments. Fail closed (D6).`
+        `Could not compile \`WithRandomSeed\`: expected exactly two arguments.`
       );
     // Only a LITERAL seed is accepted — a finite real or a string, the
     // values the interpreter's own validation admits. A compound seed
     // expression would have to be evaluated once per frame entry (the
     // interpreter's contract), and this target has no emission for that
     // evaluation — silently discarding it would also discard the
-    // out-of-range error an invalid seed raises. Fail closed (D6) instead.
+    // out-of-range error an invalid seed raises. Fail closed instead.
     const seed = args[0];
     const literalSeed =
       (isNumber(seed) && seed.im === 0 && Number.isFinite(seed.re)) ||
       isString(seed);
     if (!literalSeed)
       throw new Error(
-        `WithRandomSeed: only a literal finite real or string seed compiles ` +
-          `on the interval target. Fail closed (D6).`
+        `Could not compile \`WithRandomSeed\`: only a literal finite real or string seed compiles ` +
+          `on the interval target.`
       );
     return compile(args[1]);
   },
@@ -2557,7 +2564,7 @@ function extractIntervalLimits(limitsExpr: Expression): {
 }
 
 /**
- * Fail closed (D6) on a Sum/Product bound that is statically non-finite (a
+ * Fail closed on a Sum/Product bound that is statically non-finite (a
  * `±∞`/`NaN` literal, or an expression typed `infinity` or `nan`), so
  * `compile()` reports failure and the caller falls back to the interpreter.
  * `for (i = 1; i <= Infinity; i++)` never terminates and `-Infinity + 1` never
@@ -2575,9 +2582,8 @@ function assertFiniteIntervalBound(
     expr.type.matches('nan');
   if (!nonFinite) return;
   throw new Error(
-    `${kind}: the ${which} bound \`${expr.toString()}\` is not a finite ` +
-      `number — an infinite or NaN bound has no terminating loop. ` +
-      `Fail closed (D6).`
+    `Could not compile \`${kind}\`: the ${which} bound \`${expr.toString()}\` is not a finite ` +
+      `number — an infinite or NaN bound has no terminating loop.`
   );
 }
 
@@ -2727,7 +2733,7 @@ function intervalCollectionElements(
  * statically an indexed collection but not decomposable (a vars-supplied
  * list) folds at run time, `_IA.point`-lifting raw numeric elements; a
  * runtime scalar returns itself (the interpreter's `Sum(scalar) = scalar`).
- * Anything else fails closed (D6).
+ * Anything else fails closed.
  */
 /**
  * Is `e` the single operand of a `Max`/`Min` that the interpreter REDUCES
@@ -2844,7 +2850,7 @@ function compileIntervalCollectionReduce(
     // off whatever they are handed and answer NaN bounds behind
     // `success: true` — the same silent-wrong class the scalar-kernel gate
     // (`assertScalarIntervalOperands`) closes. The interpreter errors on
-    // such an element; fail closed (D6) to match.
+    // such an element; fail closed to match.
     for (const el of elements) {
       const t = el.type;
       if (
@@ -2853,8 +2859,8 @@ function compileIntervalCollectionReduce(
         t.matches('collection<any>')
       )
         throw new Error(
-          `${kind}: cannot compile the collection form — an element is not ` +
-            `numeric (type \`${t.toString()}\`). Fail closed (D6).`
+          `Could not compile \`${kind}\`: the collection form — an element is not ` +
+            `numeric (type \`${t.toString()}\`).`
         );
     }
     if (elements.length === 0) return empty;
@@ -2886,9 +2892,8 @@ function compileIntervalCollectionReduce(
   const resolved = assignedLiteral(operand, target) ?? operand;
   if (isFunction(resolved, 'Range'))
     throw new Error(
-      `${kind}: cannot compile the collection form — the Range operand has ` +
-        `symbolic bounds or too many elements to expand statically. ` +
-        `Fail closed (D6).`
+      `Could not compile \`${kind}\`: the collection form — the Range operand has ` +
+        `symbolic bounds or too many elements to expand statically.`
     );
   const elementType = collectionElementType(operand.type.type);
   const elementsProvablyNumeric =
@@ -2906,10 +2911,10 @@ function compileIntervalCollectionReduce(
     // budget) has no lowering of its own on this target, and the generic
     // "Range has no lowering" message would blame the wrong node.
     throw new Error(
-      `${kind}: cannot compile the collection form — the operand is not a ` +
+      `Could not compile \`${kind}\`: the collection form — the operand is not a ` +
         `statically decomposable collection, and its type ` +
         `(\`${operand.type.toString()}\`) does not prove an indexed ` +
-        `collection of numbers. Fail closed (D6).`
+        `collection of numbers.`
     );
   }
   const code =
@@ -3055,12 +3060,13 @@ function compileIntervalSumProduct(
   _compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  if (!args[0]) throw new Error(`${kind}: no body`);
+  if (!args[0]) throw new Error(`Could not compile \`${kind}\`: no body`);
   // No indexing set: the collection (reduce) form — the operand IS the
   // collection (`Sum([3, 4, 5])`). See `compileIntervalCollectionReduce`.
   if (!args[1] && args.length === 1)
     return compileIntervalCollectionReduce(kind, args[0], target);
-  if (!args[1]) throw new Error(`${kind}: no indexing set`);
+  if (!args[1])
+    throw new Error(`Could not compile \`${kind}\`: no indexing set`);
 
   // Reject a collection-valued body for the indexed form (see
   // `BaseCompiler.assertScalarBigOpBody`): interval scalar accumulation over
@@ -3072,7 +3078,7 @@ function compileIntervalSumProduct(
   // (D6) rather than emit code with a dangling index.
   if (args.length > 2)
     throw new Error(
-      `${kind}: multi-index (${args.length - 1} indexing sets) is not supported in the interval target`
+      `Could not compile \`${kind}\`: multi-index (${args.length - 1} indexing sets) is not supported in the interval target`
     );
 
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } =
@@ -3299,7 +3305,7 @@ function compileIntervalIntegrate(
   // would hand `_IA.integrate` a `vars`-object lookup (`_.Nothing`) —
   // `undefined`, which the runtime reads as a non-finite endpoint and answers
   // `entire`, or with no clause at all would emit the bare integrand as if it
-  // were the integral's value. Fail closed (D6) so the caller falls back to
+  // were the integral's value. Fail closed so the caller falls back to
   // the interpreter, which keeps the integral symbolic.
   const isUnbounded = (e: Expression | undefined) =>
     e === undefined || isSymbol(e, 'Nothing');
@@ -3353,7 +3359,7 @@ function compileIntervalIntegrate(
   if (indefinite) {
     if (closedCode !== undefined) return closedCode;
     throw new Error(
-      'Integrate: an indefinite integral with no closed-form antiderivative is a function, not a number — it has no value to compute at a point, and quadrature needs bounds. Fail closed (D6). Provide bounds for a definite integral, or evaluate symbolically instead.'
+      'Could not compile `Integrate`: an indefinite integral with no closed-form antiderivative is a function, not a number — it has no value to compute at a point, and quadrature needs bounds. Provide bounds for a definite integral, or evaluate symbolically instead.'
     );
   }
 
@@ -3392,12 +3398,12 @@ function compileIntervalIntegrate(
     );
     if (n < 4)
       throw new Error(
-        `Integrate: cannot compile an honest interval enclosure — this ` +
+        `Could not compile \`Integrate\`: an honest interval enclosure — this ` +
           `integral's subtree reaches ${paths} integral runs nested ` +
           `${depth} levels deep, and the evaluation budget ` +
           `(${INTERVAL_QUADRATURE_BUDGET} integrand evaluations) admits ` +
           `fewer than 4 subdivisions per level at that size, which is as ` +
-          `uninformative as no bound at all. Fail closed (D6). Evaluate ` +
+          `uninformative as no bound at all. Evaluate ` +
           `numerically on the scalar target, or reduce the nesting.`
       );
   }
@@ -4521,10 +4527,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
           const c = args[i];
           if (c.isCollection || c.type.matches('collection<any>'))
             throw new Error(
-              'Which: a collection-valued condition has no interval-js lowering — ' +
+              'Could not compile `Which`: a collection-valued condition has no interval-js lowering — ' +
                 'the interval domain is scalar (one interval per quantity), so there ' +
                 'is no elementwise selection convention. Evaluate the expression ' +
-                'instead, or compile a scalar per-element function. Fail closed (D6).'
+                'instead, or compile a scalar per-element function.'
             );
         }
         return null;
@@ -4671,7 +4677,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     if (!result.success && options.fallback === true) {
       const error =
         result.error ??
-        `Cannot compile \`${expr.operator}\` to the interval-js target`;
+        `Could not compile \`${expr.operator}\` to the interval-js target`;
       return this.buildIntervalFallback(
         expr,
         error,

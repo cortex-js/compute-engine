@@ -491,7 +491,9 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
       ['Map', 'Random', ['List', ['List', 1, 2], ['List', 3, 4]]],
     ];
     const expr = engine.box(['Add', mapped, mapped] as any);
-    expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /Could not compile/
+    );
 
     const harvest = harvestCse(expr, { admitPureUserFunctions: true });
     expect(harvest.candidates).toHaveLength(0);
@@ -516,7 +518,9 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     const mapped = ['Sum', ['Map', 'Or', ['List', 'True', 'False', 'True']]];
     const expr = engine.box(['Add', mapped, mapped] as any);
     expect(expr.isValid).toBe(true);
-    expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /Could not compile/
+    );
 
     const harvest = harvestCse(expr, { admitPureUserFunctions: true });
     expect(harvest.candidates).toHaveLength(0);
@@ -527,7 +531,9 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     // callback at boxing, and the compiler's callback gate does.
     const bad = mappedTwice(new ComputeEngine(), 'Less');
     expect(bad.isValid).toBe(true);
-    expect(() => compile(bad, { fallback: false })).toThrow(/Fail closed/);
+    expect(() => compile(bad, { fallback: false })).toThrow(
+      /Could not compile/
+    );
     // …and the harvest of that INVALID tree is empty too: an `Error` node is
     // a diagnostic, not a computation, so no subtree containing one becomes a
     // candidate the emission gate would only refuse.
@@ -765,7 +771,7 @@ describe('COMPILE CSE — `Match` is inert', () => {
     );
     expect(result.success).toBe(false);
     expect(result.error).toMatch(
-      /Match: pattern matching is not supported by the interval-js compile target/
+      /Could not compile `Match`: pattern matching is not supported by the interval-js compile target/
     );
     expect(result.code).not.toMatch(/_cse/);
   });
@@ -776,7 +782,7 @@ describe('COMPILE CSE — `Match` is inert', () => {
         ce.box(['Match', probe3('u'), ['MatchCase', '_a', 'a']])
       )
     ).toThrow(
-      /Match: pattern matching is not supported by the Python compile target/
+      /Could not compile `Match`: pattern matching is not supported by the Python compile target/
     );
   });
 });
@@ -1701,7 +1707,7 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
     // merge), so the merge behavior this test used to pin no longer has a
     // subject; the decline supersedes it.
     expect(() => compile(engine.parse(source), { fallback: false })).toThrow(
-      /^f: cannot compile/
+      /^Could not compile `f`: /
     );
 
     // With the fallback allowed the result reports the decline rather than
@@ -1765,7 +1771,7 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
     const source = '(h,v)\\mapsto q_2(h,v)';
 
     expect(() => compile(engine.parse(source), { fallback: false })).toThrow(
-      /^g_2: cannot compile/
+      /^Could not compile `g_2`: /
     );
 
     const fallbackResult = compile(engine.parse(source));
@@ -2015,7 +2021,7 @@ describe('COMPILE CSE — non-scalar aliasing', () => {
     // live.
     const result = compile(aliased(), { to: 'interval-js', fallback: false });
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Sort: cannot compile/);
+    expect(result.error).toMatch(/Could not compile `Sort`: /);
   });
 });
 

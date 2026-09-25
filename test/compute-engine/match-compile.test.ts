@@ -11,7 +11,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
  * `Match` head. Tier 0/1 (constant / literal / pin-of-constant) compile to
  * chained ternaries (or an integer `switch` on JS), tier 2 (fixed-shape
  * `List`/`Tuple`) to arrow-IIFE destructuring on JS; tier 3 and anything a
- * target cannot express fail closed (D6).
+ * target cannot express fail closed.
  *
  * COMPILED-vs-INTERPRETED FLOAT SEAM (accepted, §4 Phase-2 note): number leaves
  * are compared in compiled code with the target's native `===`/`==`, NOT the
@@ -142,7 +142,12 @@ describe('COMPILE Match — JavaScript tier 2 destructuring', () => {
       'Match',
       'xs',
       // [a, b] with a > b → a - b
-      ['MatchCase', ['List', '_a', '_b'], ['Greater', 'a', 'b'], ['Subtract', 'a', 'b']],
+      [
+        'MatchCase',
+        ['List', '_a', '_b'],
+        ['Greater', 'a', 'b'],
+        ['Subtract', 'a', 'b'],
+      ],
       // [first, ...rest] → first
       ['MatchCase', ['List', '_first', '___rest'], 'first'],
       ['MatchCase', '_', -1],
@@ -169,7 +174,7 @@ describe('COMPILE Match — JavaScript tier 2 destructuring', () => {
   });
 });
 
-describe('COMPILE Match — fail closed (D6)', () => {
+describe('COMPILE Match — fail closed', () => {
   it('fails closed on an operator (tier-3) pattern, naming it', () => {
     const expr: MathJsonExpression = [
       'Match',
@@ -201,7 +206,7 @@ describe('COMPILE Match — fail closed (D6)', () => {
 
   it('fails closed on a dictionary pattern, naming the keys', () => {
     // Dictionary patterns are a tier-2 fixed shape for the interpreter, but the
-    // compiler does not implement dict destructuring — fail closed (D6).
+    // compiler does not implement dict destructuring — fail closed.
     const expr: MathJsonExpression = [
       'Match',
       'x',
@@ -258,9 +263,9 @@ describe('COMPILE Match — GPU targets', () => {
       ['MatchCase', { str: 'a' }, 1],
       ['MatchCase', '_', 0],
     ];
-    expect(() => compile(ce.box(expr), { to: 'glsl', fallback: false })).toThrow(
-      /string constant/
-    );
+    expect(() =>
+      compile(ce.box(expr), { to: 'glsl', fallback: false })
+    ).toThrow(/string constant/);
   });
 
   it('fails closed on tier-2 list destructuring', () => {
@@ -270,9 +275,9 @@ describe('COMPILE Match — GPU targets', () => {
       ['MatchCase', ['List', '_a', '_b'], 'a'],
       ['MatchCase', '_', 0],
     ];
-    expect(() => compile(ce.box(expr), { to: 'glsl', fallback: false })).toThrow(
-      /destructuring/
-    );
+    expect(() =>
+      compile(ce.box(expr), { to: 'glsl', fallback: false })
+    ).toThrow(/destructuring/);
   });
 });
 
@@ -414,9 +419,12 @@ describe('COMPILE Match — rest captures and guarded bindings', () => {
     expect(r.run!({ xs: [1, 2, 3] })).toEqual([2, 3]);
     expect(r.run!({ xs: [1, 2] })).toEqual([2]);
     expect(r.run!({ xs: [1] })).toEqual([]);
-    expect(ce.box(tail).subs({ xs: ['List', 1, 2, 3] }).evaluate().json).toEqual(
-      ['List', 2, 3]
-    );
+    expect(
+      ce
+        .box(tail)
+        .subs({ xs: ['List', 1, 2, 3] })
+        .evaluate().json
+    ).toEqual(['List', 2, 3]);
 
     const middle: MathJsonExpression = [
       'Match',
@@ -444,7 +452,10 @@ describe('COMPILE Match — rest captures and guarded bindings', () => {
 });
 
 describe('COMPILE Match — rest captures in guards, nested shapes, and shadowing', () => {
-  const tail = (body: MathJsonExpression, guard?: MathJsonExpression): MathJsonExpression => [
+  const tail = (
+    body: MathJsonExpression,
+    guard?: MathJsonExpression
+  ): MathJsonExpression => [
     'Match',
     'xs',
     guard === undefined
@@ -454,7 +465,10 @@ describe('COMPILE Match — rest captures in guards, nested shapes, and shadowin
   ];
 
   it('a guard sees the rest as a sequence too', () => {
-    const r = compile(ce.box(tail(1, ['Equal', ['Length', ['List', 't']], 2])), { fallback: false });
+    const r = compile(
+      ce.box(tail(1, ['Equal', ['Length', ['List', 't']], 2])),
+      { fallback: false }
+    );
     expect(r.success).toBe(true);
     expect(r.run!({ xs: [1, 2, 3] })).toBe(1);
     expect(r.run!({ xs: [1, 2] })).toBe(0);
@@ -615,7 +629,10 @@ describe('COMPILE Match — typed bindings (`MatchesType` with a literal type)',
     // is consumed by the test inside the unit: the subject compiles as an
     // operand, not as a root result.
     const engine = new ComputeEngine();
-    executeEpsil(engine, 'type shape = circle(r: number) | square(side: number)');
+    executeEpsil(
+      engine,
+      'type shape = circle(r: number) | square(side: number)'
+    );
     const r = compile(
       engine.box(['MatchesType', ['circle', 2], { str: 'shape' }]),
       { fallback: false, constantFold: false }
@@ -635,19 +652,33 @@ describe('COMPILE Match — typed bindings (`MatchesType` with a literal type)',
       engine,
       'type json = jbool(boolean) | jnum(number)\ntype tree<T> = leaf | node(value: T, children: list<tree<T>>)'
     );
-    for (const type of ['json', 'jnum', 'tree<integer>', 'node<integer>', 'leaf'])
+    for (const type of [
+      'json',
+      'jnum',
+      'tree<integer>',
+      'node<integer>',
+      'leaf',
+    ])
       expect(() =>
         compile(
-          engine.box(['Match', 'x', typed('v', type, 1), ['MatchCase', '_', 0]]),
+          engine.box([
+            'Match',
+            'x',
+            typed('v', type, 1),
+            ['MatchCase', '_', 0],
+          ]),
           { fallback: false }
         )
-      ).toThrow(/MatchesType: cannot compile/);
+      ).toThrow(/Could not compile `MatchesType`: /);
   });
 
   it('a negated test is parenthesized', () => {
-    const r = compile(ce.box(['Not', ['MatchesType', 'x', { str: 'string' }]]), {
-      fallback: false,
-    });
+    const r = compile(
+      ce.box(['Not', ['MatchesType', 'x', { str: 'string' }]]),
+      {
+        fallback: false,
+      }
+    );
     expect(r.success).toBe(true);
     expect(r.run!({ x: 'a' })).toBe(false);
     expect(r.run!({ x: 3 })).toBe(true);
@@ -674,7 +705,7 @@ describe('COMPILE Match — typed bindings (`MatchesType` with a literal type)',
           ce.box(['Match', 'x', typed('v', type, 1), ['MatchCase', '_', 0]]),
           { fallback: false }
         )
-      ).toThrow(/MatchesType: cannot compile/);
+      ).toThrow(/Could not compile `MatchesType`: /);
     }
   });
 

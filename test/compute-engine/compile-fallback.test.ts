@@ -33,7 +33,10 @@ describe('Compilation fallback — lambda calling convention', () => {
   });
 
   test('1-arg lambda binds its argument', () => {
-    const r = compile(ce.expr(['Function', ['Multiply', 'x', 'x'], 'x']), FORCE);
+    const r = compile(
+      ce.expr(['Function', ['Multiply', 'x', 'x'], 'x']),
+      FORCE
+    );
     expect(r.calling).toBe('lambda');
     expect(r.run!(4)).toBe(16);
   });
@@ -100,7 +103,7 @@ describe('Compilation fallback — lambda calling convention', () => {
 // all-complex list has one (each element parameter is declared accordingly and
 // the head's own scalar codegen picks the matching lowering), while a list
 // whose elements DISAGREE, or one whose elements the analysis cannot see at
-// all, has none and fails closed (D6) — `success: false`, and the interpreter
+// all, has none and fails closed — `success: false`, and the interpreter
 // (which broadcasts correctly) answers instead of the compiled code returning
 // garbage.
 describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-closed)', () => {
@@ -133,10 +136,7 @@ describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-clos
     const r = compile(ce2.box(['Multiply', 2, 'Z']));
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.smul');
-    expect(r.run!({ Z: [{ re: 1, im: 1 }, 2] })).toEqual([
-      { re: 2, im: 2 },
-      4,
-    ]);
+    expect(r.run!({ Z: [{ re: 1, im: 1 }, 2] })).toEqual([{ re: 2, im: 2 }, 4]);
   });
 
   test('a mixed-element list lowers through the dispatching closure', () => {
@@ -190,7 +190,11 @@ describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-clos
     const allComplexLeaves = [
       'List',
       ['List', 'ImaginaryUnit', ['Multiply', 2, 'ImaginaryUnit']],
-      ['List', ['Multiply', 3, 'ImaginaryUnit'], ['Multiply', 4, 'ImaginaryUnit']],
+      [
+        'List',
+        ['Multiply', 3, 'ImaginaryUnit'],
+        ['Multiply', 4, 'ImaginaryUnit'],
+      ],
     ];
     const r = compile(ce.box(['Multiply', 2, allComplexLeaves] as any), {
       constantFold: false,

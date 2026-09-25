@@ -121,7 +121,7 @@ describe('GPU: a selection with one complex value lifts its real values', () => 
     const ce = engine();
     for (const to of ['wgsl', 'glsl'])
       expect(() => run(ce, to, ['If', T_POS, 'z', 'True'])).toThrow(
-        /If: the value `.*True.*` is not a number.*Fail closed/
+        /Could not compile `If`: the value `.*True.*` is not a number/
       );
     // A value of unknown type is read as a float, and lifted.
     expect(run(ce, 'wgsl', ['If', T_POS, 'z', 'w']).code).toBe(
@@ -132,7 +132,7 @@ describe('GPU: a selection with one complex value lifts its real values', () => 
   test('a real value that is not a scalar beside a complex one fails closed', () => {
     const ce = engine();
     expect(() => run(ce, 'glsl', ['If', T_POS, 'z', ['Tuple', 1, 2]])).toThrow(
-      /If: the value `\(1, 2\)` is not a scalar.*Fail closed/
+      /Could not compile `If`: the value `\(1, 2\)` is not a scalar/
     );
   });
 });
@@ -206,7 +206,7 @@ describe('GPU: the real-only shader lowerings', () => {
   test('Mean has no shader lowering', () => {
     const ce = engine();
     expect(() => run(ce, 'glsl', ['Mean', ['List', 't', 1]])).toThrow(
-      /Mean: cannot compile .* no lowering/
+      /Could not compile `Mean`: .* no lowering/
     );
   });
 });
@@ -218,19 +218,17 @@ describe('interval-js: a complex symbol fails closed', () => {
     const ce = engine();
     const r = run(ce, 'interval-js', ['Subtract', 1, ['Add', 't', 'z']]);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(
-      /the symbol `z` has the complex type `complex`.*Fail closed/
-    );
+    expect(r.error).toMatch(/`z`: the symbol has the complex type `complex`/);
     const abs = run(ce, 'interval-js', ['Abs', 'z']);
     expect(abs.success).toBe(false);
-    expect(abs.error).toMatch(/the symbol `z`/);
+    expect(abs.error).toMatch(/`z`: the symbol/);
   });
 
   test('Re of a complex symbol fails closed', () => {
     const ce = engine();
     const r = run(ce, 'interval-js', ['Re', 'z']);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Fail closed/);
+    expect(r.error).toMatch(/Could not compile/);
   });
 
   test('a real symbol, and an undeclared one, still compile', () => {

@@ -322,9 +322,7 @@ describe('WGSL COMPILATION', () => {
           { name: 'position', type: 'vec4', builtin: 'position' },
           { name: 'color', type: 'vec3', location: 0 },
         ],
-        uniforms: [
-          { name: 'uTime', type: 'float', group: 0, binding: 0 },
-        ],
+        uniforms: [{ name: 'uTime', type: 'float', group: 0, binding: 0 }],
         body: [
           {
             variable: 'output.color',
@@ -338,9 +336,7 @@ describe('WGSL COMPILATION', () => {
       expect(shader).toContain('struct VertexOutput');
       expect(shader).toContain('@builtin(position) position: vec4f');
       expect(shader).toContain('@location(0) color: vec3f');
-      expect(shader).toContain(
-        '@group(0) @binding(0) var<uniform> uTime: f32'
-      );
+      expect(shader).toContain('@group(0) @binding(0) var<uniform> uTime: f32');
       expect(shader).toContain('@vertex');
       expect(shader).toContain('fn main(input: VertexInput) -> VertexOutput');
       expect(shader).toContain('output.color = vec3f(1.0, 0.0, 0.0)');
@@ -517,12 +513,10 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should emit for-loop for large Sum range inside compileFunction', () => {
-      const expr = ce.expr([
-        'Sum',
-        ['Sin', 'i'],
-        ['Limits', 'i', 1, 1000],
-      ]);
-      const fn = wgsl.compileFunction(expr, 'sumSin', 'float', [], { constantFold: false });
+      const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 1000]]);
+      const fn = wgsl.compileFunction(expr, 'sumSin', 'float', [], {
+        constantFold: false,
+      });
       expect(fn).toContain('fn sumSin() -> f32');
       expect(fn).toContain('for (var i: i32 = 1; i <= 1000; i++)');
       expect(fn).toContain('+= sin(f32(i))');
@@ -541,7 +535,7 @@ describe('WGSL COMPILATION', () => {
       expect(code).not.toContain('{ re');
     });
 
-    it('a collection-valued Sum body fails closed (D6)', () => {
+    it('a collection-valued Sum body fails closed', () => {
       // `Σ h(i)·(1/1.4^i)·a(…)` where `a` returns a vector — the interpreter's
       // elementwise zip-broadcast Sum. Scalar accumulation over arrays would
       // silently produce a wrong value, so it must throw (mirrors JS/base gate).
@@ -550,10 +544,10 @@ describe('WGSL COMPILATION', () => {
       e.parse(
         'h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)'
       ).evaluate();
-      const expr = e.parse('\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))');
-      expect(() => wgsl.compile(expr)).toThrow(
-        /collection-valued body.*Fail closed/s
+      const expr = e.parse(
+        '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
       );
+      expect(() => wgsl.compile(expr)).toThrow(/collection-valued body/s);
     });
   });
 
@@ -627,7 +621,7 @@ describe('WGSL COMPILATION', () => {
       expect(wgsl.compile(ce.expr(['Binomial', 'x', 1])).code).toBe('x');
       expect(wgsl.compile(ce.expr(['Binomial', 'x', 0])).code).toBe('1.0');
       expect(() => wgsl.compile(ce.expr(['Binomial', 'x', -1]))).toThrow(
-        /Fail closed/
+        /Could not compile/
       );
     });
   });
@@ -717,14 +711,16 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('still compiles a loop-form Sum as a top-level function body', () => {
-      const fn = wgsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', [], { constantFold: false });
+      const fn = wgsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', [], {
+        constantFold: false,
+      });
       expect(fn).toContain('for (var i: i32 = 1; i <= 1000; i++)');
       expect(fn).toContain('sin(f32(i))');
     });
   });
 
   // CO-P2-23a / 23b: negative-index Sum unroll must not emit `--`, and a user
-  // variable named after a WGSL reserved word fails closed (D6).
+  // variable named after a WGSL reserved word fails closed.
   describe('CO-P2-23 emission fixes', () => {
     it('negative-index Sum unroll spaces the negation (no `--`)', () => {
       const code = wgsl.compile(
@@ -754,7 +750,9 @@ describe('WGSL COMPILATION', () => {
           ['Element', 'a', ['Range', 1, 5]],
         ],
       ]);
-      expect(() => wgsl.compile(expr).code).toThrow(/final statement of a block/);
+      expect(() => wgsl.compile(expr).code).toThrow(
+        /final statement of a block/
+      );
     });
 
     it('accepts a Loop followed by a value-producing statement', () => {
@@ -817,7 +815,7 @@ describe('WGSL vector locals and vecNf constructor arity', () => {
 
   it('a tuple with a complex component fails closed', () => {
     const expr = ce.box(['Tuple', 't', ['Multiply', 'ImaginaryUnit', 't']]);
-    expect(() => wgsl.compile(expr)).toThrow(/Fail closed/);
+    expect(() => wgsl.compile(expr)).toThrow(/Could not compile/);
   });
 
   // Defect A: a width with no `vecNf` still lowers to `array<f32, N>(…)`, so
@@ -838,14 +836,14 @@ describe('WGSL vector locals and vecNf constructor arity', () => {
   // Defect B: aggregate elements outside widths 2–4 bypassed the guard.
   it('a 1-element list component fails closed', () => {
     expect(() => wgsl.compile(ce.box(['Tuple', ['List', 1], 2]))).toThrow(
-      /Fail closed/
+      /Could not compile/
     );
   });
 
   it('a 5-element list component fails closed', () => {
     expect(() =>
       wgsl.compile(ce.box(['Tuple', ['List', 1, 2, 3, 4, 5], 2]))
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Could not compile/);
   });
 
   // Defect C: the width must propagate through a local reference.
@@ -951,7 +949,7 @@ describe('WGSL zero-width aggregates fail closed', () => {
       'p',
     ]);
     expect(() => wgsl.compile(expr)).toThrow(
-      /Block local "p": an empty tuple\/list/
+      /the block local `p`: an empty tuple\/list/
     );
   });
 });
@@ -983,8 +981,9 @@ describe('WGSL Mod with an impure operand draws once', () => {
 // every other conditional emission in this target.
 describe('WGSL ContrastingColor uses select, never a ternary', () => {
   it('compiles the 1-argument (black/white) form to select(...)', () => {
-    const code = wgsl.compile(ce.box(['ContrastingColor', ['Tuple', 1, 1, 1]]))
-      .code;
+    const code = wgsl.compile(
+      ce.box(['ContrastingColor', ['Tuple', 1, 1, 1]])
+    ).code;
     // The choice is the one the interpreter makes: the candidate with the
     // larger absolute APCA contrast against the background wins, and the
     // candidate is the FIRST argument of the contrast. An earlier emission

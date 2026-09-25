@@ -120,7 +120,7 @@ describe('interval-js: the argument (phase) of a complex value', () => {
     const r = compileInterval(ce.parse('\\arg(\\sin(z))'));
     expect(r.success).toBe(false);
     expect(r.error).toContain('Argument');
-    expect(r.error).toContain('D6');
+    expect(r.error).toContain('Could not compile');
   });
 });
 

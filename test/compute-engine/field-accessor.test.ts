@@ -202,7 +202,7 @@ describe('Field compile lowering (D16/§4.6)', () => {
     // compile-time constant folding would emit `10` and the `At` decline this
     // test pins would never be reached.
     expect(() => js.compile(d, { constantFold: false })).toThrow(
-      /At: cannot compile/
+      /Could not compile `At`: /
     );
   });
 

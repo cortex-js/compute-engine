@@ -146,7 +146,7 @@ describe('compile mode — option surface (step 1)', () => {
   it('a generic fail-closed decline carries a capability diagnostic beside error', () => {
     const e = new ComputeEngine();
     e.declare('z', 'complex');
-    // `Erf` has a real-only helper: a complex-typed operand fails closed (D6).
+    // `Erf` has a real-only helper: a complex-typed operand fails closed.
     // Pinned in `strict`: under the default `auto` a MAYBE-complex operand
     // takes the D2/D6 runtime rule and compiles (compile-mode step 4,
     // 2026-08-16); the compile-time decline is the strict-lane behavior.

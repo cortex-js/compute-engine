@@ -266,7 +266,7 @@ describe('COMPILE interval-js Integrate — indefinite fails closed', () => {
       to: 'interval-js',
     });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Fail closed \(D6\)/);
+    expect(r.error).toMatch(/Could not compile/);
     expect(r.error).toMatch(/indefinite integral/);
     expect(String(r.code ?? '')).not.toContain('_.Nothing');
   });
@@ -539,9 +539,12 @@ describe('INTERVAL INTEGRATE — dynamic nesting: compile-time sizing and the ru
     // from the previous run.
     compileInterval(declareByReferenceChain(), { s: '_.s' }).run({ s: 0 });
 
-    const r = compileInterval('\\int_0^1\\int_0^1 s\\cdot e^{-x y^2}\\,dy\\,dx', {
-      s: '_.s',
-    });
+    const r = compileInterval(
+      '\\int_0^1\\int_0^1 s\\cdot e^{-x y^2}\\,dy\\,dx',
+      {
+        s: '_.s',
+      }
+    );
     expect(r.code.match(/_IA\.integrate\(/g)?.length).toBe(2);
     const out = r.run({ s: 1 });
     expect(kindOf(out)).toBe('interval');
@@ -572,13 +575,16 @@ describe('INTERVAL INTEGRATE — dynamic nesting: compile-time sizing and the ru
       )
     ).toThrow('integrand failure');
 
-    const r = compileInterval('\\int_0^1\\int_0^1 s\\cdot e^{-x y^2}\\,dy\\,dx', {
-      s: '_.s',
-    });
+    const r = compileInterval(
+      '\\int_0^1\\int_0^1 s\\cdot e^{-x y^2}\\,dy\\,dx',
+      {
+        s: '_.s',
+      }
+    );
     const out = r.run({ s: 1 });
     expect(kindOf(out)).toBe('interval');
-    expect(contains(out, reference('\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx'))).toBe(
-      true
-    );
+    expect(
+      contains(out, reference('\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx'))
+    ).toBe(true);
   }, 30000);
 });

@@ -21,55 +21,41 @@ describe('COMPILE COMPLEX - isComplexValued', () => {
 
   it('Add with one complex operand is complex', () => {
     expect(
-      BaseCompiler.isComplexValued(
-        ce.expr(['Add', ['Complex', 1, 2], 3])
-      )
+      BaseCompiler.isComplexValued(ce.expr(['Add', ['Complex', 1, 2], 3]))
     ).toBe(true);
   });
 
   it('Add with all real operands is real', () => {
-    expect(
-      BaseCompiler.isComplexValued(ce.expr(['Add', 1, 2, 3]))
-    ).toBe(false);
+    expect(BaseCompiler.isComplexValued(ce.expr(['Add', 1, 2, 3]))).toBe(false);
   });
 
   it('Abs of complex is real', () => {
     expect(
-      BaseCompiler.isComplexValued(
-        ce.expr(['Abs', ['Complex', 3, 4]])
-      )
+      BaseCompiler.isComplexValued(ce.expr(['Abs', ['Complex', 3, 4]]))
     ).toBe(false);
   });
 
   it('Argument of complex is real', () => {
     expect(
-      BaseCompiler.isComplexValued(
-        ce.expr(['Argument', ['Complex', 3, 4]])
-      )
+      BaseCompiler.isComplexValued(ce.expr(['Argument', ['Complex', 3, 4]]))
     ).toBe(false);
   });
 
   it('Real of complex is real', () => {
     expect(
-      BaseCompiler.isComplexValued(
-        ce.expr(['Real', ['Complex', 3, 4]])
-      )
+      BaseCompiler.isComplexValued(ce.expr(['Real', ['Complex', 3, 4]]))
     ).toBe(false);
   });
 
   it('Imaginary of complex is real', () => {
     expect(
-      BaseCompiler.isComplexValued(
-        ce.expr(['Imaginary', ['Complex', 3, 4]])
-      )
+      BaseCompiler.isComplexValued(ce.expr(['Imaginary', ['Complex', 3, 4]]))
     ).toBe(false);
   });
 
   it('Sin of complex is complex', () => {
     expect(
-      BaseCompiler.isComplexValued(
-        ce.expr(['Sin', ['Complex', 1, 2]])
-      )
+      BaseCompiler.isComplexValued(ce.expr(['Sin', ['Complex', 1, 2]]))
     ).toBe(true);
   });
 
@@ -118,7 +104,7 @@ describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
   // `NaN` at run time (`Ln(-2)` → `Math.log(-2)`, `Arcsin(2)` →
   // `Math.asin(2)`), and while the SAME expression compiled fine when the
   // operand was a variable (`√x` at `x = -2` → `NaN`, `√a` with `a ⩴ -2` →
-  // `Math.sqrt((-2))`). Fail-closed (D6) exists to prevent silently WRONG
+  // `Math.sqrt((-2))`). Fail-closed exists to prevent silently WRONG
   // output, not to prevent a non-real one: `NaN` is the correct,
   // self-describing answer for "no real value", and refusing only the
   // provable-constant case bought no safety, because the runtime-variable
@@ -335,11 +321,7 @@ describe('COMPILE COMPLEX - Sum/Product loops', () => {
 
   it('should multiply complex values in a loop', () => {
     // Product(Complex(1, 1), k, 1, 2) = (1+i)*(1+i) = 2i
-    const expr = ce.expr([
-      'Product',
-      ['Complex', 1, 1],
-      ['Tuple', 'k', 1, 2],
-    ]);
+    const expr = ce.expr(['Product', ['Complex', 1, 1], ['Tuple', 'k', 1, 2]]);
     const result = compile(expr, { fallback: false });
     const val = result.run!() as { re: number; im: number };
     expect(val.re).toBeCloseTo(0);
@@ -422,7 +404,10 @@ describe('COMPILE COMPLEX - integration', () => {
 
   it('Abs of complex sum', () => {
     // |3+4i| = 5
-    const expr = ce.expr(['Abs', ['Add', ['Complex', 3, 0], ['Complex', 0, 4]]]);
+    const expr = ce.expr([
+      'Abs',
+      ['Add', ['Complex', 3, 0], ['Complex', 0, 4]],
+    ]);
     const result = compile(expr, { fallback: false });
     expect(result.run!()).toBeCloseTo(5);
   });
@@ -435,11 +420,7 @@ describe('COMPILE COMPLEX - integration', () => {
   });
 
   it('should handle Euler formula: e^(i*pi) + 1 = 0', () => {
-    const expr = ce.expr([
-      'Add',
-      ['Exp', ['Complex', 0, Math.PI]],
-      1,
-    ]);
+    const expr = ce.expr(['Add', ['Exp', ['Complex', 0, Math.PI]], 1]);
     // `constantFold: false`: the test checks the `{re, im}` result of the
     // emitted complex arithmetic; folding this variable-free expression at
     // compile time would emit a real literal instead.
@@ -736,11 +717,7 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
           [
             'M',
             10,
-            [
-              'Subtract',
-              ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']],
-              2,
-            ],
+            ['Subtract', ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']], 2],
           ],
         ],
         4,
@@ -1134,11 +1111,14 @@ describe('an unused complex operand leaves the result real', () => {
   test.each([
     ['(t, i t)', [0.5, { re: 0, im: 0.5 }]],
     ['(t, 2+3i)', [0.5, { re: 2, im: 3 }]],
-  ])('%s: the complex component IS the result and stays complex', (src, expected) => {
-    const r = jsTarget().compile(ce.parse(src as string, { strict: false }));
-    expect(r.success).toBe(true);
-    expect(r.run({ t: 0.5 })).toEqual(expected);
-  });
+  ])(
+    '%s: the complex component IS the result and stays complex',
+    (src, expected) => {
+      const r = jsTarget().compile(ce.parse(src as string, { strict: false }));
+      expect(r.success).toBe(true);
+      expect(r.run({ t: 0.5 })).toEqual(expected);
+    }
+  );
 });
 
 // A complex value passed as an ARGUMENT to a scalar-bodied user function.
@@ -1328,9 +1308,18 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
     // ↦ b(_x)`, whose call site grants the lane.
     const e = fresh();
     e.declare('L', 'list<complex>');
-    const L = [{ re: 1, im: 2 }, { re: 0, im: 1 }];
-    const expected = [{ re: 2, im: 4 }, { re: 0, im: 2 }];
-    for (const src of ['\\mathrm{Map}(b, L)', '\\mathrm{Map}(x \\mapsto 2x, L)']) {
+    const L = [
+      { re: 1, im: 2 },
+      { re: 0, im: 1 },
+    ];
+    const expected = [
+      { re: 2, im: 4 },
+      { re: 0, im: 2 },
+    ];
+    for (const src of [
+      '\\mathrm{Map}(b, L)',
+      '\\mathrm{Map}(x \\mapsto 2x, L)',
+    ]) {
       const r = compile(e.parse(src), { fallback: false });
       expect(r.run!({ L })).toEqual(expected);
     }
@@ -1345,7 +1334,7 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
     expect(real.run!({ R: [1, 2] })).toEqual([2, 4]);
   });
 
-  it('an emitted definition does not see the caller Block\'s local shapes (isolated frame)', () => {
+  it("an emitted definition does not see the caller Block's local shapes (isolated frame)", () => {
     // `u(x) := x + k` reads the GLOBAL `k`; the calling block declares its
     // own complex local `k`. Before the emitted body compiled under an
     // isolated frame, the block's `k → complex` entry leaked into `u`'s body,
@@ -1426,7 +1415,10 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     expect(r.run!({})).toBe(1);
     // …and the interpreter agrees, in its own (collapsed) spelling.
     expect(
-      engine.box(['Q', ['Complex', 1, -1]]).evaluate().toString()
+      engine
+        .box(['Q', ['Complex', 1, -1]])
+        .evaluate()
+        .toString()
     ).toBe('1');
   });
 
@@ -1520,11 +1512,7 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     // idempotent, so a complex element passes through rather than nesting.
     const engine = makeEngine();
     const r = compile(
-      engine.box([
-        'Map',
-        'Q',
-        ['List', ['Complex', 1, 1], ['Complex', 2, 0]],
-      ]),
+      engine.box(['Map', 'Q', ['List', ['Complex', 1, 1], ['Complex', 2, 0]]]),
       { constantFold: false }
     );
     expect(r.run!({})).toEqual([
@@ -1578,11 +1566,7 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     ]);
     engine.assign(
       'Q2',
-      engine.box([
-        'Function',
-        ['Apply', inner.json, ['Complex', 1, 2], 5],
-        'w',
-      ])
+      engine.box(['Function', ['Apply', inner.json, ['Complex', 1, 2], 5], 'w'])
     );
     const call = engine.box(['Q2', ['Complex', 3, 4]]);
     const r2 = compile(call, { constantFold: false, fallback: false });
@@ -1609,11 +1593,7 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
       'R2',
       engine.box([
         'Function',
-        [
-          'Map',
-          ['Function', ['Multiply', 2, 'z'], 'z'],
-          ['List', 1, 2, 3],
-        ],
+        ['Map', ['Function', ['Multiply', 2, 'z'], 'z'], ['List', 1, 2, 3]],
         'z',
       ])
     );
@@ -1721,22 +1701,39 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
   );
 
   describe.each([
-    ['LaTeX `:=` (operator definition)', (e: any) => {
-      e.parse('h(a, x) := a + 2x').evaluate();
-      e.parse('n(a, x) := a + |x|').evaluate();
-    }],
-    ['ce.assign of a lambda (value definition)', (e: any) => {
-      e.assign('h', e.parse('(a, x) \\mapsto a + 2x'));
-      e.assign('n', e.parse('(a, x) \\mapsto a + |x|'));
-    }],
+    [
+      'LaTeX `:=` (operator definition)',
+      (e: any) => {
+        e.parse('h(a, x) := a + 2x').evaluate();
+        e.parse('n(a, x) := a + |x|').evaluate();
+      },
+    ],
+    [
+      'ce.assign of a lambda (value definition)',
+      (e: any) => {
+        e.assign('h', e.parse('(a, x) \\mapsto a + 2x'));
+        e.assign('n', e.parse('(a, x) \\mapsto a + |x|'));
+      },
+    ],
   ])('a BARE user-function combiner bound via %s', (_label, define) => {
     test('Reduce/Scan with the widening combiner `h` compute complex', () => {
       const engine = makeEngine();
       define(engine);
-      expect(compile(engine.box(['Reduce', 'L', 'h', 0]), opts).run!({})).toEqual(cx(2, 6));
-      expect(compile(engine.box(['Scan', 'L', 'h', 0]), opts).run!({})).toEqual([cx(2, 4), cx(2, 6)]);
-      expect(compile(engine.box(['Reduce', 'L', 'h', ['Complex', 1, 1]]), opts).run!({})).toEqual(cx(3, 7));
-      expect(compile(engine.box(['Scan', 'L', 'h']), opts).run!({})).toEqual([cx(1, 2), cx(1, 4)]);
+      expect(
+        compile(engine.box(['Reduce', 'L', 'h', 0]), opts).run!({})
+      ).toEqual(cx(2, 6));
+      expect(compile(engine.box(['Scan', 'L', 'h', 0]), opts).run!({})).toEqual(
+        [cx(2, 4), cx(2, 6)]
+      );
+      expect(
+        compile(engine.box(['Reduce', 'L', 'h', ['Complex', 1, 1]]), opts).run!(
+          {}
+        )
+      ).toEqual(cx(3, 7));
+      expect(compile(engine.box(['Scan', 'L', 'h']), opts).run!({})).toEqual([
+        cx(1, 2),
+        cx(1, 4),
+      ]);
     });
     test('the real-accumulator combiner `n` takes the element lane and stays real', () => {
       const engine = makeEngine();
@@ -1761,9 +1758,16 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
     test('the fold types from the combiner and its PARENT agrees on the lane', () => {
       const engine = makeEngine();
       define(engine);
-      expect(engine.box(['Reduce', 'L', 'h', 0]).type.toString()).toBe('number');
-      expect(compile(engine.box(['Add', ['Reduce', 'L', 'h', 0], 1]), opts).run!({})).toEqual(cx(3, 6));
-      expect(compile(engine.box(['Add', ['At', ['Scan', 'L', 'h', 0], 2], 1]), opts).run!({})).toEqual(cx(3, 6));
+      expect(engine.box(['Reduce', 'L', 'h', 0]).type.toString()).toBe(
+        'number'
+      );
+      expect(
+        compile(engine.box(['Add', ['Reduce', 'L', 'h', 0], 1]), opts).run!({})
+      ).toEqual(cx(3, 6));
+      expect(
+        compile(engine.box(['Add', ['At', ['Scan', 'L', 'h', 0], 2], 1]), opts)
+          .run!({})
+      ).toEqual(cx(3, 6));
     });
   });
 
@@ -1791,7 +1795,12 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
       engine.box([
         'Scan',
         ['List', 1, 2],
-        ['Function', ['Add', 'a', ['Multiply', ['Complex', 0, 1], 'x']], 'a', 'x'],
+        [
+          'Function',
+          ['Add', 'a', ['Multiply', ['Complex', 0, 1], 'x']],
+          'a',
+          'x',
+        ],
       ]),
       opts
     );
@@ -1801,7 +1810,12 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
   test('an unnamed (`_`) element parameter does not abandon the accumulator plan', () => {
     const engine = makeEngine();
     const r = compile(
-      engine.box(['Reduce', 'L', ['Function', ['Add', 'a', ['Complex', 0, 1]], 'a', '_'], 0]),
+      engine.box([
+        'Reduce',
+        'L',
+        ['Function', ['Add', 'a', ['Complex', 0, 1]], 'a', '_'],
+        0,
+      ]),
       opts
     );
     expect(r.run!({})).toEqual(cx(0, 2));
@@ -1815,24 +1829,49 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
       ['Typed', 'a', { str: 'complex' }],
       'x',
     ];
-    expect(compile(engine.box(['Reduce', 'L', typed, 0]), opts).run!({})).toEqual(cx(2, 6));
-    expect(compile(engine.box(['Reduce', 'L', typed, ['Complex', 1, 1]]), opts).run!({})).toEqual(cx(3, 7));
+    expect(
+      compile(engine.box(['Reduce', 'L', typed, 0]), opts).run!({})
+    ).toEqual(cx(2, 6));
+    expect(
+      compile(engine.box(['Reduce', 'L', typed, ['Complex', 1, 1]]), opts).run!(
+        {}
+      )
+    ).toEqual(cx(3, 7));
   });
 
   test('builtin combiners fold in the complex lane over complex data, and the fold types from the source', () => {
     const engine = makeEngine();
     engine.declare('R', 'list<real>');
-    expect(compile(engine.box(['Scan', 'L', 'Add', 0]), opts).run!({})).toEqual([cx(1, 2), cx(1, 3)]);
-    expect(compile(engine.box(['Reduce', 'L', 'Multiply', 1]), opts).run!({})).toEqual(cx(-2, 1));
+    expect(compile(engine.box(['Scan', 'L', 'Add', 0]), opts).run!({})).toEqual(
+      [cx(1, 2), cx(1, 3)]
+    );
+    expect(
+      compile(engine.box(['Reduce', 'L', 'Multiply', 1]), opts).run!({})
+    ).toEqual(cx(-2, 1));
     // A complex SEED over a real source widens the builtin fold too.
-    expect(compile(engine.box(['Reduce', 'R', 'Add', ['Complex', 0, 1]]), opts).run!({ R: [1, 2] })).toEqual(cx(3, 1));
+    expect(
+      compile(engine.box(['Reduce', 'R', 'Add', ['Complex', 0, 1]]), opts).run!(
+        { R: [1, 2] }
+      )
+    ).toEqual(cx(3, 1));
     // Typed from the source (was `unknown`, which declined the parent as
     // "possibly a collection"): the parent now compiles and agrees.
-    expect(engine.box(['Reduce', 'L', 'Add', 0]).type.toString()).toBe('complex');
-    expect(engine.box(['Reduce', ['List', 1, 2], 'Add', 0]).type.toString()).toBe('integer');
-    expect(compile(engine.box(['Add', ['Reduce', 'L', 'Add', 0], 1]), opts).run!({})).toEqual(cx(2, 3));
+    expect(engine.box(['Reduce', 'L', 'Add', 0]).type.toString()).toBe(
+      'complex'
+    );
+    expect(
+      engine.box(['Reduce', ['List', 1, 2], 'Add', 0]).type.toString()
+    ).toBe('integer');
+    expect(
+      compile(engine.box(['Add', ['Reduce', 'L', 'Add', 0], 1]), opts).run!({})
+    ).toEqual(cx(2, 3));
     // No ordering on complex values: Min/Max fold over complex fails closed.
-    expect(compile(engine.box(['Reduce', 'L', 'Max', 0]), { ...opts, fallback: true }).success).toBe(false);
+    expect(
+      compile(engine.box(['Reduce', 'L', 'Max', 0]), {
+        ...opts,
+        fallback: true,
+      }).success
+    ).toBe(false);
     // Real data keeps the native fold.
     const real = compile(engine.box(['Reduce', 'R', 'Add', 0]), opts);
     expect(real.code).toContain('_a + _b');
@@ -1847,7 +1886,15 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
     const engine = makeEngine();
     engine.declare('M', 'list<complex>');
     const r = compile(
-      engine.box(['Ln', ['Reduce', 'M', ['Function', ['Add', 'a', ['Multiply', 2, 'x']], 'a', 'x'], 0]]),
+      engine.box([
+        'Ln',
+        [
+          'Reduce',
+          'M',
+          ['Function', ['Add', 'a', ['Multiply', 2, 'x']], 'a', 'x'],
+          0,
+        ],
+      ]),
       { ...opts, to: 'python' }
     );
     expect(r.success).toBe(true);
@@ -1958,11 +2005,7 @@ describe('COMPILE COMPLEX - folded value of a complex-declared symbol', () => {
     ce.expr([
       'Max',
       0,
-      [
-        'Subtract',
-        ['Sqrt', ['Add', ['Power', 'x', 2], ['Power', sym, 2]]],
-        1,
-      ],
+      ['Subtract', ['Sqrt', ['Add', ['Power', 'x', 2], ['Power', sym, 2]]], 1],
     ]);
   const expected = Math.sqrt(89) - 1;
 
@@ -2056,7 +2099,12 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
     expect(r.success).toBe(true);
     expect(r.promoted).toBe(false);
     const v = r.run!({ x: -8 }) as number[];
-    expect(v.map((e) => typeof e)).toEqual(['number', 'number', 'number', 'number']);
+    expect(v.map((e) => typeof e)).toEqual([
+      'number',
+      'number',
+      'number',
+      'number',
+    ]);
     expect(v[0]).toBeCloseTo(7, 10);
     expect(v[3]).toBeCloseTo(Math.sqrt(64 + 9) - 1, 10);
     ce.forget('Lbc');
@@ -2108,10 +2156,7 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
     });
     expect(r.success).toBe(true);
     expect(r.promoted).toBe(true);
-    const v = r.run!({ x: 0 }) as [
-      { re: number; im: number },
-      number,
-    ];
+    const v = r.run!({ x: 0 }) as [{ re: number; im: number }, number];
     expect(v[0].re).toBeCloseTo(Math.cos(0.3 * Math.PI), 10);
     expect(v[0].im).toBeCloseTo(Math.sin(0.3 * Math.PI), 10);
     expect(v[1]).toBeCloseTo(Math.pow(2, 0.3), 10);
@@ -2121,7 +2166,7 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
   it('a genuinely promoting broadcast radical still never emits corrupt code', () => {
     // Bare `√L` (unknown-sign elements from the analysis's viewpoint)
     // legitimately promotes; the composed consumer cannot attribute an
-    // element shape and must fail closed (D6) rather than emit real
+    // element shape and must fail closed rather than emit real
     // arithmetic over `{re, im}` elements.
     setupL();
     const expr = ce.expr(['Multiply', ['Sqrt', 'Lbc'], 2]);
@@ -2203,7 +2248,12 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
       ['Colormap', ['Colormap', { str: 'viridis' }, ['Multiply', 0.25, sqrtX]]],
       [
         'ColorMix',
-        ['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1], ['Multiply', 0.25, sqrtX]],
+        [
+          'ColorMix',
+          ['Rgb', 1, 0, 0],
+          ['Rgb', 0, 0, 1],
+          ['Multiply', 0.25, sqrtX],
+        ],
       ],
       [
         'ColorFromColorspace',
@@ -2241,10 +2291,10 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
     // undefined and destructuring it threw "undefined is not iterable" —
     // strict mode hit it with plain `√(-1)` arithmetic, no promotion
     // involved. NaN-in/NaN-out, like compiled real arithmetic.
-    const cm = compile(
-      ce.expr(['Colormap', { str: 'viridis' }, 'nanpos']),
-      { mode: 'strict', fallback: false }
-    );
+    const cm = compile(ce.expr(['Colormap', { str: 'viridis' }, 'nanpos']), {
+      mode: 'strict',
+      fallback: false,
+    });
     expect(cm.success).toBe(true);
     expect(cm.run!({ nanpos: NaN })).toEqual({
       space: 'oklch',
@@ -2297,7 +2347,11 @@ describe('COMPILE COMPLEX - a tuple element that folds to a real number broadcas
   it('a nested tuple element folds too', () => {
     const r = compile(
       ce.box(
-        ['Multiply', 2, ['List', ['Tuple', sqrt5m, 0], ['Tuple', 1, 1]]] as never,
+        [
+          'Multiply',
+          2,
+          ['List', ['Tuple', sqrt5m, 0], ['Tuple', 1, 1]],
+        ] as never,
         { canonical: false }
       ).canonical,
       { fallback: false }
@@ -2314,7 +2368,11 @@ describe('COMPILE COMPLEX - a tuple element that folds to a real number broadcas
     // dispatching scalar helper (`_SYS.sadd`), so the broadcast lowers
     // through it instead of failing closed (Tycho item 246).
     const r = compile(
-      ce.box(['Add', ['Tuple', ['Complex', 1, 1], 0], ['Tuple', 1, 0]] as never),
+      ce.box([
+        'Add',
+        ['Tuple', ['Complex', 1, 1], 0],
+        ['Tuple', 1, 0],
+      ] as never),
       { fallback: false }
     );
     expect(r.code).toContain('_SYS.sadd');
@@ -2361,9 +2419,11 @@ describe('COMPILE COMPLEX - a tuple element that folds to a real number broadcas
     // complex shape verdict; the product lowers through `_SYS.smul`
     // (Tycho item 246) and answers what the interpreter answers.
     const r = compile(
-      ce.box(
-        ['Multiply', 't', ['Tuple', ['Sqrt', ['Subtract', 't', 9]], 0]] as never
-      ),
+      ce.box([
+        'Multiply',
+        't',
+        ['Tuple', ['Sqrt', ['Subtract', 't', 9]], 0],
+      ] as never),
       { fallback: false }
     );
     expect(r.code).toContain('_SYS.smul');

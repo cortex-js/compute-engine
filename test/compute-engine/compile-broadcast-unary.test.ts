@@ -10,7 +10,7 @@
  *     target-mediated (`CompileTarget.broadcastUnary`): the shader targets do
  *     not fan out at all (their builtins are componentwise on a `vecN`),
  *     Python emits a list comprehension, and a target with no such lowering
- *     fails closed (D6).
+ *     fails closed.
  *
  *  B. A *string*-mapped broadcastable head (`Sign` → `Math.sign`, `Arctan2` →
  *     `Math.atan2`, `Hypot` → `Math.hypot`) used to fail closed on the
@@ -229,10 +229,10 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       // artifact would compute for one binding and throw for another, and the
       // interpreter answers `[1, 1/4, 1/16]` for both. Fail closed instead.
       expect(() => p(['Power', 'L', -2])).toThrow(
-        /cannot compile arithmetic over a possibly-collection-typed operand/
+        /arithmetic over a possibly-collection-typed operand/
       );
       expect(() => p(['Power', ['List', 1, 2, 4], -2])).toThrow(
-        /cannot compile arithmetic over a possibly-collection-typed operand/
+        /arithmetic over a possibly-collection-typed operand/
       );
       // The two exponents both containers agree on stay admitted: a
       // non-negative integer, and a provably non-integer one (`v ** 0.5` is a
@@ -255,24 +255,24 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       // Python form reproduces that — NumPy recycles a length-1 axis and a
       // `zip` comprehension truncates to the shorter operand.
       expect(() => p(['Add', ['List', 1, 2, 3], ['List', 4, 5, 6]])).toThrow(
-        /cannot compile arithmetic over a possibly-collection-typed operand/
+        /arithmetic over a possibly-collection-typed operand/
       );
       // A collection of NON-scalars: one level of fan-out would hand a whole
       // row to a scalar operator.
       expect(() => p(['Add', 'M', 1])).toThrow(
-        /cannot compile arithmetic over a possibly-collection-typed operand/
+        /arithmetic over a possibly-collection-typed operand/
       );
       // An operand that is only POSSIBLY a collection: it may still bind to a
       // list at run time, which is the repeat/concatenate divergence itself.
       expect(() => p(['Multiply', 2, 'B'])).toThrow(
-        /cannot compile arithmetic over a possibly-collection-typed operand/
+        /arithmetic over a possibly-collection-typed operand/
       );
       // A SET-typed operand: unordered, so a comprehension has no defined
       // order — and the interpreter answers `incompatible-type` anyway. It
       // used to ESCAPE the guard entirely (a set matches neither `list<any>`
       // nor `indexed_collection<any>`) and emitted `SN + 1`.
       expect(() => p(['Add', 'SN', 1])).toThrow(
-        /cannot compile arithmetic over a possibly-collection-typed operand/
+        /arithmetic over a possibly-collection-typed operand/
       );
     });
 
@@ -286,7 +286,7 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
           constantFold: false,
           fallback: false,
         })
-      ).toThrow(/cannot compile scalar arithmetic over a list-valued operand/);
+      ).toThrow(/scalar arithmetic over a list-valued operand/);
     });
   });
 
@@ -322,7 +322,9 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       // closed until the closure could read such a cell.
       const r = compile(ce.box(['Sin', 'Z']));
       expect(r.success).toBe(true);
-      expect(r.code).toBe('_SYS.bcast((_tv1) => _SYS.csin(_SYS.cplx(_tv1)), _.Z)');
+      expect(r.code).toBe(
+        '_SYS.bcast((_tv1) => _SYS.csin(_SYS.cplx(_tv1)), _.Z)'
+      );
       const out = r.run!({ Z: [{ re: 1, im: 2 }, 3] }) as unknown as [
         { re: number; im: number },
         number,

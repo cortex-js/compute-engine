@@ -4519,12 +4519,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (language === 'javascript') return undefined;
         if (POINT_LIST_COMPILE_LANGUAGES.has(language))
           throw new Error(
-            `PointList: cannot compile — component ${undecided + 1} (type ` +
+            `Could not compile \`PointList\`: component ${undecided + 1} (type ` +
               `\`${args[undecided].type.toString()}\`) is a scalar or a list ` +
               `depending on its run-time value, and a point value on target ` +
               `'${language}' has scalar components only. Evaluate it in the ` +
               `interpreter, or give the operand a type that settles its ` +
-              `shape. Fail closed (D6).`
+              `shape.`
           );
         return undefined;
       }
@@ -4542,12 +4542,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // custom target can still map `PointList` itself.
         if (POINT_LIST_COMPILE_LANGUAGES.has(language))
           throw new Error(
-            `PointList: cannot compile — component ${nonScalar + 1} is ` +
+            `Could not compile \`PointList\`: component ${nonScalar + 1} is ` +
               `collection-valued (type \`${args[nonScalar].type.toString()}\`), ` +
               `and a point value on target '${language}' has scalar components ` +
               `only. A list of points is not an expression-level value here: ` +
               `project the components (\`PointX\`/\`PointY\`) or evaluate it in ` +
-              `the interpreter. Fail closed (D6).`
+              `the interpreter.`
           );
         return undefined;
       }

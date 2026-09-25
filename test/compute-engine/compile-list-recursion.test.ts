@@ -338,7 +338,7 @@ describe('list-building recursion compiles to a loop', () => {
     declareCountUp(ce, 6);
     for (const target of [new GLSLTarget(), new WGSLTarget()])
       expect(() => target.compile(ce.box(['F', 0]))).toThrow(
-        /Fail closed \(D6\)/
+        /Could not compile/
       );
   });
 });

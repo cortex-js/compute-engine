@@ -213,11 +213,11 @@ describe('Interval target — element-wise broadcast over a provable numeric lis
     ]);
     // A point is consumed whole, never mapped over.
     ce.declare('p', 'tuple<number, number>');
-    declines(ce, '\\sin(p)', /Sin: cannot compile/);
+    declines(ce, '\\sin(p)', /Could not compile `Sin`: /);
   });
 
   test('the relations keep the gate: a list of verdicts is not a result', () => {
-    declines(engine(), 'V < 1', /Less: cannot compile/);
+    declines(engine(), 'V < 1', /Could not compile `Less`: /);
   });
 });
 
@@ -1366,8 +1366,8 @@ describe('Interval target — point arithmetic', () => {
     const ce = pointEngine();
     // The elementary functions: the 2026-09-15 decision "a point is consumed
     // whole, never mapped over" stands for them.
-    declines(ce, ['Sin', 'P'], /Sin: cannot compile/);
-    declines(ce, ['Power', 'P', 2], /Power: cannot compile/);
+    declines(ce, ['Sin', 'P'], /Could not compile `Sin`: /);
+    declines(ce, ['Power', 'P', 2], /Could not compile `Power`: /);
     // `Abs` of a point is its norm, not a coordinate-wise absolute value.
     declines(ce, ['Abs', 'P']);
     // A point whose coordinate is proved not to be a number is no operand.

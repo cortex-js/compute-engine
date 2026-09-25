@@ -224,9 +224,7 @@ describe('COMPILE: folded symbol values are bound once', () => {
     ce.assign('a', ce.parse('n + 1'));
     const expr = ce.parse('(n) \\mapsto \\sum_{n=1}^{3} a');
     expect(ce.box(['Apply', expr, 5]).evaluate().toString()).toBe('3n + 3');
-    expect(() => compile(expr, { fallback: false })).toThrow(
-      /mentions `n`.*Fail closed \(D6\)/s
-    );
+    expect(() => compile(expr, { fallback: false })).toThrow(/mentions `n`/s);
     // The public route degrades to the interpreter, whose answer here is the
     // symbolic `3n + 3` — no number, so `NaN`. It is NOT the 18 the captured
     // local used to produce.
@@ -263,7 +261,7 @@ describe('COMPILE: folded symbol values are bound once', () => {
     expect(ce.parse('g(2)').evaluate().toString()).toBe('3t + 3');
     for (const to of ['glsl', 'wgsl'] as const) {
       expect(() => compile(ce.parse('g(2)'), { to, fallback: false })).toThrow(
-        /mentions `t`.*Fail closed \(D6\)/s
+        /mentions `t`/s
       );
       // The public route answers through the interpreter: `3t + 3` at
       // `t = 1` is 6, where the captured shader code answered 7.

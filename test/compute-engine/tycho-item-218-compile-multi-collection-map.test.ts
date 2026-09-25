@@ -8,7 +8,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
  * Tycho item 218 — the `javascript` target declined the multi-collection
  * (zipWith) form of `Map` whenever the sources stayed symbolic:
  * `Map((_1,_2) ↦ _1+_2, 1..N, 2..N)` with `N` a free input answered
- * "Map: multi-collection form is not compiled", while the same shape with
+ * "Could not compile `Map`: multi-collection form is not compiled", while the same shape with
  * literal bounds const-folded and a single-collection `Map` compiled either
  * way. The interpreter evaluated the declined shape correctly.
  *
@@ -266,7 +266,9 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
       const r = js(ce, ['Map', F2, ['Range', 1, 'N'], 'S']);
       expect(r.success).toBe(false);
       // The mapping is operand 1, so the second source is operand 3.
-      expect(r.diagnostic?.message).toMatch(/Map: operand 3/);
+      expect(r.diagnostic?.message).toMatch(
+        /Could not compile `Map`: operand 3/
+      );
       const py = compile(ce.box(['Map', F2, ['Range', 1, 'N'], 'S']), {
         to: 'python',
       });
@@ -287,7 +289,7 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
     });
     expect(r.success).toBe(false);
     expect(r.diagnostic?.message).toMatch(
-      /Map: operand 3 has observable effects/
+      /Could not compile `Map`: operand 3 has observable effects/
     );
     // `Zip` materializes every source the same way, so it refuses the same
     // source; a pure `Zip` still compiles.
@@ -297,7 +299,7 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
     });
     expect(zip.success).toBe(false);
     expect(zip.diagnostic?.message).toMatch(
-      /Zip: operand 2 has observable effects/
+      /Could not compile `Zip`: operand 2 has observable effects/
     );
     const pure = compile<'javascript', number[][]>(
       ce.box(['Zip', ['Range', 1, 'N'], ['Range', 2, 'N']]),

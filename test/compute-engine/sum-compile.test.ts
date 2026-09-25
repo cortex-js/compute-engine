@@ -359,7 +359,7 @@ describe('§B2 — field access on a variant value', () => {
     for (const to of ['python', 'glsl', 'wgsl'] as const)
       expect(() =>
         compile(e, { to, fallback: false, constantFold: false })
-      ).toThrow(/cannot compile/);
+      ).toThrow(/Could not compile/);
   });
 });
 
@@ -509,7 +509,7 @@ describe('fail closed — out-of-scope targets and non-sugar nominals', () => {
     ] as MathJsonExpression);
     expect(compile(e, { fallback: false }).run!({ u: 2 })).toBe(1);
     expect(() => compile(e, { to: 'glsl', fallback: false })).toThrow(
-      /cannot compile/
+      /Could not compile/
     );
   });
 });

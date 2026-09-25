@@ -344,8 +344,8 @@ describe('G3 lift — the bound reading agrees with the ground declaration', () 
       'xs',
       1,
     ]);
-    expect(concrete).toThrow(/At: cannot compile/);
-    expect(generic).toThrow(/At: cannot compile/);
+    expect(concrete).toThrow(/Could not compile `At`: /);
+    expect(generic).toThrow(/Could not compile `At`: /);
   });
 
   test('the VALUE position gets the same definition — there is no call site to read', () => {
@@ -372,8 +372,8 @@ describe('G3 lift — the bound reading agrees with the ground declaration', () 
       'Length',
       'xs',
     ]);
-    expect(concrete).toThrow(/Length: cannot compile/);
-    expect(generic).toThrow(/Length: cannot compile/);
+    expect(concrete).toThrow(/Could not compile `Length`: /);
+    expect(generic).toThrow(/Could not compile `Length`: /);
   });
 
   test('a SCALAR bound stamps nothing — the emission is what it was', () => {

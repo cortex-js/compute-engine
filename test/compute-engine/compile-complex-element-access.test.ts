@@ -169,7 +169,7 @@ describe('indexed read of a call to a collection-valued user function', () => {
   });
 });
 
-describe('run-time index into a MIXED collection fails closed (D6)', () => {
+describe('run-time index into a MIXED collection fails closed', () => {
   // Element 1 is complex and element 2 is not, so the read is a `{re, im}`
   // object for one index and a plain number for the other, decided at run time.
   // No lowering is correct for both. Before this, `[i·t, 1][k] + 1` at `k = 2`
@@ -182,14 +182,14 @@ describe('run-time index into a MIXED collection fails closed (D6)', () => {
     const r = compile(ce.box(['Add', ['At', MIXED, 'k'], 1] as any))!;
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/mixes complex-valued and real-valued elements/);
-    expect(r.error).toMatch(/Fail closed \(D6\)/);
+    expect(r.error).toMatch(/Could not compile/);
   });
 
   test('a user-function body declines the same way', () => {
     const ce = withFn('m', MIXED);
     const r = compile(ce.box(['Add', ['At', ['m', 't'], 'k'], 1] as any))!;
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Fail closed \(D6\)/);
+    expect(r.error).toMatch(/Could not compile/);
   });
 
   test('a LITERAL index into that same list still compiles', () => {

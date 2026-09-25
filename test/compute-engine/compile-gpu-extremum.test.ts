@@ -12,7 +12,7 @@
  *
  * Valid shader source, wrong value — the worst failure mode. The reduction now
  * destructures each collection operand into its scalar components and folds
- * pairwise; an operand with no compile-time component list fails closed (D6).
+ * pairwise; an operand with no compile-time component list fails closed.
  *
  * There is no GPU here, so correctness is checked by EVALUATING the emitted
  * source (the emissions in this file live in the `max`/`min`/literal/swizzle
@@ -194,10 +194,8 @@ describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
 describe('GPU Max/Min over a declared vector operand', () => {
   const cev = new ComputeEngine();
   cev.declare('v', 'vector<3>');
-  const gv = (expr: any): string =>
-    glsl.compile(cev.box(expr), NO_FOLD).code!;
-  const wv = (expr: any): string =>
-    wgsl.compile(cev.box(expr), NO_FOLD).code!;
+  const gv = (expr: any): string => glsl.compile(cev.box(expr), NO_FOLD).code!;
+  const wv = (expr: any): string => wgsl.compile(cev.box(expr), NO_FOLD).code!;
 
   it('reduces a bare vector symbol over its swizzles', () => {
     expect(gv(['Max', 'v'])).toBe('(max(max(v.x, v.y), v.z))');
@@ -231,13 +229,13 @@ describe('GPU Max/Min over a declared vector operand', () => {
   });
 });
 
-describe('GPU Max/Min — operands with no component list fail closed (D6)', () => {
+describe('GPU Max/Min — operands with no component list fail closed', () => {
   const M2 = ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]];
 
   it('a matrix operand declines rather than returning an aggregate', () => {
     expect(() => g(['Max', M2])).toThrow(/no compile-time component list/);
     expect(() => w(['Max', M2])).toThrow(/no compile-time component list/);
-    expect(() => g(['Max', M2])).toThrow(/D6/);
+    expect(() => g(['Max', M2])).toThrow(/Could not compile/);
   });
 
   it('a runtime-length collection declines', () => {

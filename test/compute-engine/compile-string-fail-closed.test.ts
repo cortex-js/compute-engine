@@ -91,7 +91,7 @@ function failsClosed(expr: BoxedExpression, expected: string): void {
   expect(expr.evaluate().toString()).toBe(expected);
 }
 
-describe('string comparisons fail closed (D6)', () => {
+describe('string comparisons fail closed', () => {
   // NOTE: the three EQUALITY declines that used to live here (two string
   // literals under `Equal`/`NotEqual`, and a string-annotated parameter) are
   // now faithful compiles — see the `tier 2: scalar string equality` describe.
@@ -591,9 +591,7 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
       const expr = ce.box(['Less', 1, ['List', 1, 2]]);
       const r = compile(expr, { fallback: false });
       expect(r.success).toBe(true);
-      expect(r.code).toMatchInlineSnapshot(
-        `"[((1) < (1)), ((1) < (2))]"`
-      );
+      expect(r.code).toMatchInlineSnapshot(`"[((1) < (1)), ((1) < (2))]"`);
       expect(r.run!()).toEqual(interpretedBooleans(expr));
     });
 
@@ -658,7 +656,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
         // The honest reason, naming the kind — NOT "string-valued operands".
         expect(r.error).toMatch(new RegExp(`${kind} participant`));
         expect(r.error).not.toMatch(/string-valued operands/);
-        expect(r.error).toMatch(/Fail closed \(D6\)/);
+        expect(r.error).toMatch(/Could not compile/);
         // The interpreter's answer: the comparison stays inert.
         expect(expr.evaluate().operator).toBe(head);
       }
@@ -729,7 +727,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
         const expr = ce.box(json as any);
         const r = compile(expr);
         expect(r.success).toBe(false);
-        expect(r.error).toMatch(/Fail closed \(D6\)/);
+        expect(r.error).toMatch(/Could not compile/);
         expect(expr.evaluate().operator).toBe('Less');
       }
     });
@@ -1731,7 +1729,7 @@ describe('tier 2: StringJoin', () => {
   ] as const)('%s fails closed', (_label, json, ownGate) => {
     const r = compile(ce.box(json as any));
     expect(r.success).toBe(false);
-    if (ownGate) expect(r.error).toMatch(/StringJoin: cannot compile/);
+    if (ownGate) expect(r.error).toMatch(/Could not compile `StringJoin`: /);
   });
 
   test('the removed variadic form is a signature ERROR in the interpreter (the fallback answer)', () => {

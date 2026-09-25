@@ -66,9 +66,7 @@ describe('Declare with a Tuple pattern', () => {
 
   test('a non-tuple value is an error value', () => {
     const ce = new ComputeEngine();
-    const r = ce
-      .box(['Declare', ['Tuple', 'x', 'y'], attrs(5)])
-      .evaluate();
+    const r = ce.box(['Declare', ['Tuple', 'x', 'y'], attrs(5)]).evaluate();
     expect(r.isValid).toBe(false);
     expect(r.toString()).toContain('incompatible-type');
   });
@@ -120,7 +118,12 @@ describe('Declare with a Tuple pattern: the positional value operand', () => {
   test('the declaration evaluates to the tuple value', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .box(['Declare', ['Tuple', 'x', 'y'], { str: 'unknown' }, ['Tuple', 3, 4]])
+      .box([
+        'Declare',
+        ['Tuple', 'x', 'y'],
+        { str: 'unknown' },
+        ['Tuple', 3, 4],
+      ])
       .evaluate();
     expect(r.toString()).toBe('(3, 4)');
     expect(ce.parse('10x + y').evaluate().isSame(34)).toBe(true);
@@ -129,7 +132,12 @@ describe('Declare with a Tuple pattern: the positional value operand', () => {
   test('a positional symbol value resolves to its tuple before splicing', () => {
     const ce = new ComputeEngine();
     ce.assign('p', ce.box(['Tuple', 3, 4]));
-    ce.box(['Declare', ['Tuple', 'x', 'y'], { str: 'unknown' }, 'p']).evaluate();
+    ce.box([
+      'Declare',
+      ['Tuple', 'x', 'y'],
+      { str: 'unknown' },
+      'p',
+    ]).evaluate();
     expect(ce.parse('10x + y').evaluate().isSame(34)).toBe(true);
   });
 
@@ -332,9 +340,7 @@ describe('Declare with a Tuple pattern: the positional value operand', () => {
   test('the Epsil surface route (dictionary form) still binds', () => {
     // `let (a, b) = (1, 2)` emits the trailing-attributes shape; the surface
     // language must be unaffected by the positional-form fix.
-    const {
-      executeEpsil,
-    } = require('../../src/epsil/execute-epsil');
+    const { executeEpsil } = require('../../src/epsil/execute-epsil');
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let (a, b) = (1, 2)');
     expect(ce.parse('10a + b').evaluate().isSame(12)).toBe(true);
@@ -368,11 +374,14 @@ describe('Assign with a Tuple pattern', () => {
     ce.assign('a', 1);
     ce.assign('b', 2);
     ce.assign('c', 3);
-    ce.box(['Assign', ['Tuple', 'a', 'b', 'c'], ['Tuple', 'c', 'a', 'b']])
-      .evaluate();
-    expect(
-      ce.box(['Tuple', 'a', 'b', 'c']).evaluate().toString()
-    ).toBe('(3, 1, 2)');
+    ce.box([
+      'Assign',
+      ['Tuple', 'a', 'b', 'c'],
+      ['Tuple', 'c', 'a', 'b'],
+    ]).evaluate();
+    expect(ce.box(['Tuple', 'a', 'b', 'c']).evaluate().toString()).toBe(
+      '(3, 1, 2)'
+    );
   });
 
   test('the pattern is held RAW through canonicalization', () => {
@@ -534,9 +543,7 @@ describe('Assign with a Tuple pattern', () => {
   });
 
   test('the Epsil route: a rejected leaf leaves the first target alone', () => {
-    const {
-      executeEpsil,
-    } = require('../../src/epsil/execute-epsil');
+    const { executeEpsil } = require('../../src/epsil/execute-epsil');
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
@@ -578,7 +585,7 @@ describe('Assign with a Tuple pattern', () => {
 // Compilation: a destructuring declare with a LITERAL tuple value desugars to
 // per-leaf declares (each element bound once, in order — observationally
 // identical to the interpreter). A non-literal value or a shape mismatch
-// fails closed (D6) so the engine falls back to the interpreter. Regression:
+// fails closed so the engine falls back to the interpreter. Regression:
 // the pattern used to compile as a single `let _ = …`, silently yielding NaN
 // behind `success: true`.
 //

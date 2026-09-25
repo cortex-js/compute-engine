@@ -766,7 +766,7 @@ describe('ERROR-MODEL §6 — compiled lane must agree with the interpreter (fai
     // as a throw, a NaN, or an ordinary value (ERROR-MODEL §6).
     const result = compiled(ce.box(['Sin', { str: 'banana' }]));
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Cannot compile invalid expression');
+    expect(result.error).toContain('Could not compile invalid expression');
   });
 
   test('IsPrime declines on the JavaScript target — a missing lowering fails closed', () => {

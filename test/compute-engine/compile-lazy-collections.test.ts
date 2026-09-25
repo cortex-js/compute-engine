@@ -231,7 +231,7 @@ describe('COMPILE lazy infinite collections', () => {
     expect(drop?.run?.({ m_0: 2 })).toEqual([3, 4, 5]);
   });
 
-  describe('fail closed (D6) when the pipeline is never bounded', () => {
+  describe('fail closed when the pipeline is never bounded', () => {
     it('a statically non-finite take count does not compile', () => {
       const r = compile(ce.parse(String.raw`\mathrm{Take}(1..\infty, \infty)`));
       expect(r?.success).toBe(false);
@@ -350,7 +350,9 @@ describe('Tycho item 187 — computed Range bounds keep every element', () => {
 
   test('the witness: an arithmetic-shifted range over a computed bound', () => {
     // Was [[0,0]] — one element instead of three.
-    expect(run(['Subtract', ['Range', 1, ['Divide', ['Length', 'L'], 3]], 1])).toEqual([
+    expect(
+      run(['Subtract', ['Range', 1, ['Divide', ['Length', 'L'], 3]], 1])
+    ).toEqual([
       [0, 0],
       [1, 1],
       [2, 2],
@@ -400,7 +402,11 @@ describe('Tycho item 187 — computed Range bounds keep every element', () => {
       .box([
         'Comprehension',
         ['Tuple', 'i', 'i'],
-        ['Element', 'i', ['Subtract', ['Range', 1, ['Divide', ['Length', L], 3]], 1]],
+        [
+          'Element',
+          'i',
+          ['Subtract', ['Range', 1, ['Divide', ['Length', L], 3]], 1],
+        ],
       ] as never)
       .evaluate();
     expect(interpreted.toString()).toBe('[(0, 0),(1, 1),(2, 2)]');

@@ -126,7 +126,7 @@ describe('COMPILE Loop — destructuring binder (JavaScript)', () => {
     // expression.
     expect(() =>
       js(epsil('let s = 0\nfor (i, j) in [(1, 2, 3)] { s = s + i }\ns'))
-    ).toThrow(/Cannot compile invalid expression/);
+    ).toThrow(/Could not compile invalid expression/);
     // Unknown element type.
     expect(() =>
       js(epsil('let s = 0\nfor (i, j) in xs { s = s + i }\ns'))
@@ -291,8 +291,8 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
     // Refused at canonicalization (a duplicate name in a destructuring
     // pattern is an error there), so both targets see an invalid expression.
     const program = loopOver(['Tuple', 'a', 'a'], ['List', ['Tuple', 1, 2]]);
-    expect(() => js(program)).toThrow(/Cannot compile invalid expression/);
-    expect(() => py(program)).toThrow(/Cannot compile invalid expression/);
+    expect(() => js(program)).toThrow(/Could not compile invalid expression/);
+    expect(() => py(program)).toThrow(/Could not compile invalid expression/);
   });
 
   it('a one-position Python pattern keeps its trailing comma', () => {

@@ -490,7 +490,7 @@ describe('DECLARED broadcastable<T> — assignment enforcement', () => {
 // D/ The compile route fails closed rather than emitting scalar code.
 //
 
-describe('DECLARED broadcastable<T> — compile fails closed (D6)', () => {
+describe('DECLARED broadcastable<T> — compile fails closed', () => {
   test('a possibly-collection argument declines to compile', () => {
     const ce = new ComputeEngine();
     assignTyped(ce, 'bump', ['Add', 'x', 1], 'broadcastable<number>');

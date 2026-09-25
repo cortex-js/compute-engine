@@ -379,7 +379,7 @@ describe('COMPILE a block-local function — other targets are unchanged', () =>
   it('Python still fails closed on a `function` definition', () => {
     expect(() =>
       both('function h(k) { k + 1 }\nh(3)', { to: 'python' })
-    ).toThrow(/DefineFunction: cannot compile/);
+    ).toThrow(/Could not compile `DefineFunction`: /);
   });
 
   it('Python still fails closed on a call of a lambda-bound local', () => {

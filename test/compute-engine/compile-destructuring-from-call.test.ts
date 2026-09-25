@@ -17,7 +17,7 @@
  *
  * The path is gated: JavaScript only, a FLAT pattern, and a statically-known
  * tuple arity matching the pattern. Everything else keeps the existing
- * fail-closed (D6) refusal so the interpreter evaluates the statement — the
+ * fail-closed refusal so the interpreter evaluates the statement — the
  * literal-tuple lowering (see `declare-destructure.test.ts`) is untouched.
  */
 
@@ -153,10 +153,7 @@ describe('destructuring assign from a tuple-VALUED call', () => {
   });
 
   test('a `_` position in the assign form still runs the call once', () => {
-    const expr = withDefsBlock(
-      STEP,
-      'do { let j = 1; (_, j) := step(3); j }'
-    );
+    const expr = withDefsBlock(STEP, 'do { let j = 1; (_, j) := step(3); j }');
     const code = agrees(expr, 6);
     expect(code.match(/_fn_step\(/g)?.length ?? 0).toBe(1);
     expect(code.match(/_SYS\.at\(/g)?.length ?? 0).toBe(1);
@@ -215,7 +212,10 @@ describe('destructuring from a tuple-TYPED symbol', () => {
     // initializer does not narrow it at box time), so the arity is not
     // statically known and the statement keeps the existing D6 refusal. The
     // interpreter evaluates it correctly.
-    const expr = withDefsBlock('', 'do { let p = (3, 4); let (x, y) = p; 10*x + y }');
+    const expr = withDefsBlock(
+      '',
+      'do { let p = (3, 4); let (x, y) = p; 10*x + y }'
+    );
     const r = compile(expr);
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/statically-known tuple arity/);
@@ -354,8 +354,12 @@ describe('non-JavaScript targets keep the fail-closed refusal', () => {
     const body = r.preamble ?? '';
     expect(body.indexOf('_tv1 = j + 1.0;')).toBeGreaterThan(-1);
     expect(body.indexOf('_tv2 = 2.0 * j;')).toBeGreaterThan(-1);
-    expect(body.indexOf('v = _tv1;')).toBeGreaterThan(body.indexOf('_tv2 = 2.0 * j;'));
-    expect(body.indexOf('j = _tv2;')).toBeGreaterThan(body.indexOf('v = _tv1;'));
+    expect(body.indexOf('v = _tv1;')).toBeGreaterThan(
+      body.indexOf('_tv2 = 2.0 * j;')
+    );
+    expect(body.indexOf('j = _tv2;')).toBeGreaterThan(
+      body.indexOf('v = _tv1;')
+    );
     expect(compile(expr).run!({})).toBe(508);
   });
 });
@@ -407,7 +411,7 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
     const r = compile(expr);
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/declared type|declared type of/);
-    expect(r?.error).toMatch(/Fail closed \(D6\)/);
+    expect(r?.error).toMatch(/Could not compile/);
     // The refusal is the statement's value, and an error value short-circuits
     // the block (it used to be discarded, and the block continued to 102).
     const result = expr.evaluate();
@@ -533,7 +537,7 @@ describe('a destructuring declare that states a type fails closed', () => {
     const r = compile(expr);
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/states a type/);
-    expect(r?.error).toMatch(/Fail closed \(D6\)/);
+    expect(r?.error).toMatch(/Could not compile/);
     // The interpreter binds NEITHER name, so the sum stays symbolic.
     expect(expr.evaluate().isSame(34.5)).toBe(false);
   });
@@ -624,7 +628,7 @@ describe('an annotated PARAMETER as a destructuring-assign target', () => {
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/destructuring assignment/);
     expect(r?.error).toMatch(/declared type|declared as a constant/);
-    expect(r?.error).toMatch(/Fail closed \(D6\)/);
+    expect(r?.error).toMatch(/Could not compile/);
     // The interpreter refuses the assignment atomically: neither parameter
     // moves. Compiled, it ran to 704.5. The refusal's error value
     // short-circuits the body (it used to be discarded, and the call

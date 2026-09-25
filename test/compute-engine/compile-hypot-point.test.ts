@@ -341,6 +341,6 @@ describe('a compiled Hypot consumes a point leg whole', () => {
     ]);
     expect(() =>
       compile(allComplex, { fallback: false, constantFold: false })
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Could not compile/);
   });
 });

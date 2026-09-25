@@ -39,7 +39,7 @@ function p(name: string, type: string): MathJsonExpression {
   return ['Typed', name, { str: type }];
 }
 
-describe('UNEMITTABLE USER FUNCTION IN VALUE POSITION — fail closed (D6)', () => {
+describe('UNEMITTABLE USER FUNCTION IN VALUE POSITION — fail closed', () => {
   it('refuses the ROADMAP reproducer, naming the function and the reason', () => {
     clause('w', ['Function', 2, p('d', 'meters')]);
     clause('w', [
@@ -52,13 +52,13 @@ describe('UNEMITTABLE USER FUNCTION IN VALUE POSITION — fail closed (D6)', () 
 
     // The low-level contract: `fallback: false` surfaces the refusal.
     expect(() => compile(expr, { fallback: false })).toThrow(
-      /^w: cannot compile[\s\S]*referenced as a value[\s\S]*Fail closed \(D6\)/
+      /^Could not compile `w`: [\s\S]*referenced as a value/
     );
 
     // The permissive entry reports the decline and carries the diagnostic.
     const r = compile(expr);
     expect(r?.success).toBe(false);
-    expect(r?.diagnostic?.message).toMatch(/^w: cannot compile/);
+    expect(r?.diagnostic?.message).toMatch(/^Could not compile `w`: /);
     // The reason the emission declined is threaded through, so the author is
     // told WHICH property of the definition the target could not express.
     expect(r?.diagnostic?.message).toContain("typed 'meters'");
@@ -82,7 +82,7 @@ describe('UNEMITTABLE USER FUNCTION IN VALUE POSITION — fail closed (D6)', () 
 
     const r = compile(ce.box(['Map', 'g', 'ys']));
     expect(r?.success).toBe(false);
-    expect(r?.diagnostic?.message).toMatch(/^g: cannot compile/);
+    expect(r?.diagnostic?.message).toMatch(/^Could not compile `g`: /);
     expect(r?.run?.({ ys: [1, 2, 3] })).toEqual([2, 4, 6]);
   });
 

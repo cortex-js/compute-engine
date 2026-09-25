@@ -145,8 +145,8 @@ describe('COMPILE DERIVATIVE — no closed form declines cleanly', () => {
     engine.declare('f', 'function');
     const result = compile(engine.box(['D', ['f', 'x'], 'x']));
     expect(result.success).toBe(false);
-    expect(result.error).toContain('D: cannot compile');
-    expect(result.error).toContain('Fail closed (D6)');
+    expect(result.error).toContain('Could not compile `D`: ');
+    expect(result.error).toContain('Could not compile');
   });
 
   test('ND at a RUNTIME point compiles to the numeric stencil', () => {
@@ -175,7 +175,7 @@ describe('COMPILE DERIVATIVE — no closed form declines cleanly', () => {
     expect(() => new GLSLTarget().compile(expr)).toThrow();
     const result = compile(expr, { to: 'glsl' });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('D: cannot compile');
+    expect(result.error).toContain('Could not compile `D`: ');
   });
 
   test('a closed form the target cannot lower declines, without throwing', () => {
@@ -193,8 +193,8 @@ describe('COMPILE DERIVATIVE — no closed form declines cleanly', () => {
       result = compile(expr, { to: 'glsl' });
     }).not.toThrow();
     expect(result!.success).toBe(false);
-    expect(result!.error).toContain('D: cannot compile');
-    expect(result!.error).toContain('Fail closed (D6)');
+    expect(result!.error).toContain('Could not compile `D`: ');
+    expect(result!.error).toContain('Could not compile');
     expect(result!.error).not.toContain('Digamma');
   });
 });
@@ -210,8 +210,8 @@ describe('COMPILE DERIVATIVE — an impure body is not evaluated at compile time
     const second = compile(expr);
     expect(first.success).toBe(false);
     expect(second.success).toBe(false);
-    expect(first.error).toContain('ND: cannot compile');
-    expect(first.error).toContain('Fail closed (D6)');
+    expect(first.error).toContain('Could not compile `ND`: ');
+    expect(first.error).toContain('Could not compile');
   });
 
   test('a pure ND is still evaluated and compiled', () => {
@@ -244,7 +244,7 @@ describe('COMPILE DERIVATIVE — the no-closed-form guard is head-aware', () => 
     expect(value.getSubexpressions('Derivative').length).toBeGreaterThan(0);
     const result = compile(engine.box(['D', ['f', 'x'], 'x']));
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Fail closed (D6)');
+    expect(result.error).toContain('Could not compile');
   });
 });
 
@@ -290,9 +290,12 @@ describe('COMPILE DERIVATIVE — compiling does not mutate the engine', () => {
     // so an expression that EVALUATES must also compile.
     const engine = new ComputeEngine();
     engine.assign('D', 3);
-    expect(engine.box(['D', ['Power', 'x', 2], 'x']).evaluate().toString()).toBe(
-      '2x'
-    );
+    expect(
+      engine
+        .box(['D', ['Power', 'x', 2], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('2x');
     const result = compile(engine.box(['D', ['Power', 'x', 2], 'x']));
     expect(result.success).toBe(true);
     expect(result.code).toBe('2 * _.x');

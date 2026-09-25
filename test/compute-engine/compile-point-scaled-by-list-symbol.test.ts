@@ -29,7 +29,11 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
     ce.assign('R', ce.box(['Multiply', 2, ['Range', 1, 3]]));
     expect(ce.box('R').type.toString()).toBe('indexed_collection<number>');
 
-    const expr = ce.box(['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]]);
+    const expr = ce.box([
+      'Multiply',
+      'R',
+      ['Tuple', ['Cos', 't'], ['Sin', 't']],
+    ]);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     // The point is kept whole (the inner `_SYS.bcast`); the outer one descends
@@ -77,7 +81,11 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
     ce.declare('R', 'indexed_collection<number>');
     // A `Range` value types `range` — a list of integers, never a point.
     ce.assign('R', ce.box(['Range', 1, 3]));
-    const expr = ce.box(['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]]);
+    const expr = ce.box([
+      'Multiply',
+      'R',
+      ['Tuple', ['Cos', 't'], ['Sin', 't']],
+    ]);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     expect(r.run!({ t: 0 })).toEqual([
@@ -91,7 +99,11 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
     const ce = new ComputeEngine();
     ce.declare('t', 'real');
     ce.declare('R', 'list<number>');
-    const expr = ce.box(['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]]);
+    const expr = ce.box([
+      'Multiply',
+      'R',
+      ['Tuple', ['Cos', 't'], ['Sin', 't']],
+    ]);
     expect(compile(expr, { fallback: false }).success).toBe(true);
   });
 
@@ -101,8 +113,12 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
     const ce = new ComputeEngine();
     ce.declare('t', 'real');
     ce.declare('R', 'indexed_collection<number>'); // declared, no value
-    const expr = ce.box(['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]]);
-    // Unprovable shape (a tuple inhabits the type): fail closed (D6).
+    const expr = ce.box([
+      'Multiply',
+      'R',
+      ['Tuple', ['Cos', 't'], ['Sin', 't']],
+    ]);
+    // Unprovable shape (a tuple inhabits the type): fail closed.
     expect(() => compile(expr, { fallback: false })).toThrow(
       /list-arithmetic|list-valued/
     );
@@ -115,7 +131,11 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
     // A tuple inhabits `indexed_collection<number>`, so this binding is a
     // point, not a list of scalars — the value the whole check guards against.
     ce.assign('R', ce.box(['Tuple', 1, 2]));
-    const expr = ce.box(['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]]);
+    const expr = ce.box([
+      'Multiply',
+      'R',
+      ['Tuple', ['Cos', 't'], ['Sin', 't']],
+    ]);
     expect(() => compile(expr, { fallback: false })).toThrow();
   });
 
@@ -128,7 +148,13 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
     // only contract is the declared `indexed_collection<number>` — which admits
     // a point. The binding is not what runs, so it must not be trusted.
     ce.assign('R', ce.box(['Multiply', 2, ['Range', 1, 3]]));
-    const expr = ce.box(['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]]);
-    expect(() => compile(expr, { fallback: false, vars: { R: '_.R' } })).toThrow();
+    const expr = ce.box([
+      'Multiply',
+      'R',
+      ['Tuple', ['Cos', 't'], ['Sin', 't']],
+    ]);
+    expect(() =>
+      compile(expr, { fallback: false, vars: { R: '_.R' } })
+    ).toThrow();
   });
 });

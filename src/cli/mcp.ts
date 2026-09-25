@@ -15,6 +15,9 @@ import {
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
 import { explainErrorCode } from '../epsil/error-explanations.js';
+import { isTimeoutCancellation } from '../common/interruptible.js';
+import { compile } from '../compute-engine/compilation/compile-expression.js';
+import type { CompileMode } from '../compute-engine/compilation/types.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
 import { checkSource, effectSummaryToJson, parseSource } from './check.js';
@@ -27,8 +30,9 @@ import type { EpsilSession, EvaluationResult, McpOptions } from './types.js';
 /**
  * `epsil mcp` — a Model Context Protocol server over stdio or Streamable
  * HTTP, exposing the same operations as the CLI as tools (`evaluate`,
- * `check`, `doc`, `parse`, `serialize`) and the agent-facing language card
- * as a resource. It is implemented directly rather than through the MCP SDK
+ * `check`, `doc`, `parse`, `serialize`), a `compile` tool that shows the code
+ * a compilation target generates for an expression, and the agent-facing
+ * cards as resources. It is implemented directly rather than through the MCP SDK
  * to keep the package dependency-free.
  *
  * `evaluate` and `parse` also accept a LaTeX expression (`format: "latex"`),
@@ -56,7 +60,18 @@ const STREAMABLE_HTTP_PROTOCOL_VERSIONS = new Set(
   PROTOCOL_VERSIONS.filter((x) => x !== '2024-11-05')
 );
 
-const INSTRUCTIONS = `Tools for Epsil, the programming language of the Compute Engine (https://cortexjs.io). Before writing Epsil source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions. To compute a single formula you already have in LaTeX, pass it to "evaluate" with "format": "latex" instead of translating it; write Epsil for anything with several steps or definitions. Every "evaluate" result includes a "latex" form of the value, ready to display. To write JavaScript or TypeScript code that uses the Compute Engine library (@cortex-js/compute-engine), read the API card resource (${API_CARD_URI}) first.`;
+const INSTRUCTIONS = `Tools for Epsil, the programming language of the Compute Engine (https://cortexjs.io). Before writing Epsil source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions. To compute a single formula you already have in LaTeX, pass it to "evaluate" with "format": "latex" instead of translating it; write Epsil for anything with several steps or definitions. Every "evaluate" result includes a "latex" form of the value, ready to display. Use "compile" to see the code a target (JavaScript, GLSL, WGSL, Python, interval JavaScript) generates for an expression, or why the target declines it. To write JavaScript or TypeScript code that uses the Compute Engine library (@cortex-js/compute-engine), read the API card resource (${API_CARD_URI}) first.`;
+
+/** The targets the `compile` tool offers: the engine's built-in targets. */
+const COMPILE_TARGETS = [
+  'javascript',
+  'glsl',
+  'wgsl',
+  'python',
+  'interval-js',
+] as const;
+
+const COMPILE_MODES = ['auto', 'strict', 'complex'] as const;
 
 const TOOLS = [
   {
@@ -166,6 +181,46 @@ const TOOLS = [
         },
       },
       required: ['mathjson'],
+    },
+    annotations: readOnlyAnnotations(),
+  },
+  {
+    name: 'compile',
+    description:
+      'Compile an Epsil program, or a LaTeX expression with "format": "latex", to the source code of a target, without running it. Returns `ok`, the generated `code`, the free symbols the code reads with their engine type and the type the target reads them as (`freeSymbolTypes`), and the arithmetic `mode` the code was compiled under. When the target declines the expression, `ok` is false and `error` and `diagnostic` say why (the decline is reported, never replaced by an interpreter fallback). Declare the type of a free symbol with "declarations" (e.g. {"z": "complex"}): an undeclared symbol has the type inferred from its uses.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description:
+            'Epsil source code, or a LaTeX expression with "format": "latex"',
+        },
+        format: sourceFormatSchema(),
+        to: {
+          type: 'string',
+          enum: [...COMPILE_TARGETS],
+          description: 'The compilation target (default: "javascript")',
+        },
+        mode: {
+          type: 'string',
+          enum: [...COMPILE_MODES],
+          description:
+            'The arithmetic discipline: "strict" (real kernel, a lane mismatch declines), "complex", or "auto" (strict, escalating to complex when needed). Omit it to use the default of the target: "auto" on "javascript" and "python", "strict" on "glsl", "wgsl" and "interval-js", which offer only "strict" (another mode declines with the code "unsupported-mode")',
+        },
+        timeLimit: {
+          type: 'number',
+          description:
+            'Compilation deadline in milliseconds; 0 disables it (default: 10000)',
+        },
+        declarations: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description:
+            'Types of free symbols, declared before the source is parsed: a map from symbol name to type, e.g. {"z": "complex", "f": "(real) -> real", "L": "list<real>"}',
+        },
+      },
+      required: ['source'],
     },
     annotations: readOnlyAnnotations(),
   },
@@ -564,6 +619,8 @@ class McpServer {
           return McpServer.doc(args);
         case 'parse':
           return McpServer.parse(args);
+        case 'compile':
+          return this.compile(args);
         default:
           return McpServer.serialize(args);
       }
@@ -678,6 +735,120 @@ class McpServer {
     });
   }
 
+  /**
+   * Compile the source on a fresh engine and report what the target
+   * generates. Nothing is run. The engine's default `fallback` is kept, so a
+   * decline is a result with `success: false` and a reason, which is what a
+   * host sees on its own compile route; the tool reports `code` only for a
+   * successful compile, because the code of a declined compile is an
+   * interpreter call, not target code.
+   */
+  private compile(args: Record<string, unknown>): unknown {
+    const source = requireString(args, 'source');
+    const format = optionalFormat(args);
+    const to = optionalEnum(args, 'to', COMPILE_TARGETS) ?? 'javascript';
+    const mode: CompileMode | undefined = optionalEnum(
+      args,
+      'mode',
+      COMPILE_MODES
+    );
+    const declarations = optionalDeclarations(args);
+    const timeLimit =
+      args.timeLimit === undefined
+        ? this.timeLimit
+        : requireTimeLimit(args.timeLimit);
+
+    const ce = new ComputeEngine();
+    // A declaration of a name the library already defines (`Pi`, `e`, `Sin`)
+    // replaces the library definition for this call. That is allowed, since
+    // a host can do the same, but the result says so: a caller that declares
+    // every symbol it sees would otherwise get a compile that reads `Pi` as
+    // an input, with nothing to show why.
+    const warnings: string[] = [];
+    for (const [name, type] of Object.entries(declarations)) {
+      if (ce.lookupDefinition(name) !== undefined)
+        warnings.push(
+          `"${name}" is defined by the library; the declaration replaces that definition.`
+        );
+      try {
+        ce.declare(name, type);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Cannot declare "${name}" as "${type}": ${reason}`);
+      }
+    }
+    const extra = warnings.length > 0 ? { warnings } : {};
+
+    // Parsing and compiling run under the deadline, like `evaluate`: a large
+    // expression can make a target work for a long time (an antiderivative
+    // search, an unrolled comprehension), and one call must not block the
+    // server for the other clients of an HTTP transport.
+    const run = (): unknown => {
+      // Parse first: a source with parse errors has no meaningful compilation.
+      let expr: BoxedExpression;
+      let diagnostics: unknown[];
+      if (format === 'latex') {
+        expr = ce.parse(source);
+        diagnostics = latexDiagnostics(expr.errors);
+      } else {
+        const parsed = parseSource(source, undefined, ce);
+        diagnostics = parsed.diagnostics.map((x) =>
+          diagnosticToJson(x, source)
+        );
+        if (
+          parsed.ast === null ||
+          parsed.diagnostics.some((x) => x.severity === 'error')
+        )
+          return { ok: false, target: to, diagnostics, ...extra };
+        expr = ce.box(parsed.ast);
+      }
+      if (diagnostics.length > 0)
+        return { ok: false, target: to, diagnostics, ...extra };
+
+      const result = compile(expr, { to, ...(mode ? { mode } : {}) });
+      return {
+        ok: result.success,
+        target: to,
+        ...(result.success ? { code: result.code } : {}),
+        ...(result.mode === undefined ? {} : { mode: result.mode }),
+        ...(result.freeSymbolTypes === undefined
+          ? {}
+          : { freeSymbolTypes: result.freeSymbolTypes }),
+        ...(result.success
+          ? {}
+          : { error: result.error ?? 'Compilation failed' }),
+        ...(result.diagnostic === undefined
+          ? {}
+          : { diagnostic: result.diagnostic }),
+        ...(result.unsupported && result.unsupported.length > 0
+          ? { unsupported: result.unsupported }
+          : {}),
+        diagnostics,
+        ...extra,
+      };
+    };
+
+    try {
+      return toolResult(
+        timeLimit > 0
+          ? ce.withTimeLimit({ ms: timeLimit, label: 'epsil:compile' }, run)
+          : run()
+      );
+    } catch (error) {
+      if (!isTimeoutCancellation(error)) throw error;
+      const message =
+        error instanceof Error ? error.message : 'Timeout exceeded';
+      return toolResult({
+        ok: false,
+        target: to,
+        error: message,
+        diagnostic: { code: 'timeout', message },
+        diagnostics: [],
+        ...extra,
+      });
+    }
+  }
+
   private static serialize(args: Record<string, unknown>): unknown {
     if (args.mathjson === undefined)
       throw new Error('Expected a "mathjson" argument.');
@@ -767,6 +938,37 @@ function optionalFormat(args: Record<string, unknown>): 'epsil' | 'latex' {
  * declares the type, and a silent `false` would hide the caller's mistake).
  * Every optional boolean of the tool set goes through here, so the tools
  * answer a wrong type the same way. */
+/** An optional string argument that must be one of `values`. */
+function optionalEnum<T extends string>(
+  args: Record<string, unknown>,
+  key: string,
+  values: readonly T[]
+): T | undefined {
+  const value = args[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !values.includes(value as T))
+    throw new Error(
+      `Expected "${key}" to be one of ${values.map((x) => `"${x}"`).join(', ')}.`
+    );
+  return value as T;
+}
+
+/** The optional `declarations` argument of `compile`: symbol name → type. */
+function optionalDeclarations(
+  args: Record<string, unknown>
+): Record<string, string> {
+  const value = args.declarations;
+  if (value === undefined) return {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    throw new Error(
+      'Expected "declarations" to be an object that maps symbol names to types.'
+    );
+  for (const [name, type] of Object.entries(value))
+    if (typeof type !== 'string')
+      throw new Error(`Expected the type of "${name}" to be a string.`);
+  return value as Record<string, string>;
+}
+
 function optionalBoolean(args: Record<string, unknown>, key: string): boolean {
   const value = args[key];
   if (value === undefined) return false;

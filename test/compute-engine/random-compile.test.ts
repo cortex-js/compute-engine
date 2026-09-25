@@ -197,7 +197,7 @@ describe('compiled Random — degenerate domains throw', () => {
       ['Range', 5, 1, 1],
     ])
       expect(() => js.compile(ce.box(['Random', domain]))).toThrow(
-        /Fail closed/
+        /Could not compile/
       );
   });
 });
@@ -762,7 +762,7 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     expect(gpuDraws(['Conjugate', z])).toBe(1);
   });
 
-  test('GLSL: an impure ContrastingColor operand fails closed (D6)', () => {
+  test('GLSL: an impure ContrastingColor operand fails closed', () => {
     // The three operands are `vec3`-shaped and each spliced twice — there is
     // no temporary to bind a color to, so this declines rather than re-draw.
     expect(() =>
@@ -940,7 +940,7 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   test('GLSL: an impure operand at index ≥ 2 that must be hoisted DECLINES', () => {
     // A shader can only bind by hoisting a statement, which runs
     // unconditionally — it would draw even when `5 < 1` already decided the
-    // chain, diverging from the interpreter. Fail closed (D6).
+    // chain, diverging from the interpreter.
     expect(() => gpuCode(['Less', 5, 1, ['Random'], 0.9])).toThrow(/index ≥ 2/);
     // The index-1 hoist is still fine: the interpreter always evaluates the
     // first two operands.

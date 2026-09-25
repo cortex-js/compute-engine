@@ -431,7 +431,7 @@ function strictTypesChecked<T extends string, R>(
       )
       .join(', ') +
     `. Every free symbol must have a declaration (\`ce.declare\`) when the ` +
-    `\`strictTypes\` option is set. Fail closed (D6).`;
+    `\`strictTypes\` option is set.`;
   const e = new Error(error);
   if (options.fallback === false) throw e;
   console.warn(

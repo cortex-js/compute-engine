@@ -303,7 +303,7 @@ describe('A MUTUALLY RECURSIVE PAIR WHOSE BODY HAS NO LOWERING FAILS CLOSED', ()
       const ce = pair();
       expect(() =>
         compile(ce.parse(latex), { to: 'javascript', fallback: false })
-      ).toThrow(/cannot compile|Cannot compile/);
+      ).toThrow(/Could not compile/);
       const r = compile(ce.parse(latex), { to: 'javascript' }) as any;
       expect(r.success).toBe(false);
       expect(r.run({})).toBe(ce.parse(latex).evaluate().re);

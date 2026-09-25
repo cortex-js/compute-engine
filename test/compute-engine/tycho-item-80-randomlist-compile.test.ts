@@ -192,6 +192,6 @@ describe('compiled RandomChoice — the RandomList migration', () => {
     const js = new JavaScriptTarget();
     expect(() =>
       js.compile(ce.box(['RandomChoice', ['Set', 1, 2, 3], 2]))
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Could not compile/);
   });
 });

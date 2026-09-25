@@ -17,7 +17,11 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types.js';
-import { CompileDeclineError, compileDiagnosticOf } from './diagnostics.js';
+import {
+  CompileDeclineError,
+  compileDiagnosticOf,
+  compileSubject,
+} from './diagnostics.js';
 import type { ConditionDialect } from './base-compiler.js';
 import {
   BaseCompiler,
@@ -130,7 +134,7 @@ function pyClampedCount(
 }
 
 /**
- * Fail closed (D6) when any participant is — or is a collection of — a
+ * Fail closed when any participant is — or is a collection of — a
  * CHARACTER.
  *
  * A character is one UAX #29 grapheme cluster. Python's stdlib cannot segment
@@ -163,16 +167,15 @@ function assertPyNoCharacterOperand(
   };
   if (args.some(isCharacterish))
     throw new Error(
-      `${kind}: cannot compile — a character participant. A character is one ` +
+      `Could not compile \`${kind}\`: a character participant. A character is one ` +
         `UAX #29 grapheme cluster, and this target has no stdlib grapheme ` +
         `segmentation or code-point-sequence ordering to reproduce the ` +
-        `interpreter's character semantics. Fail closed (D6) — the ` +
-        `interpreter evaluates it.`
+        `interpreter's character semantics. The interpreter evaluates it instead.`
     );
 }
 
 /**
- * Fail closed (D6) when a COMPARISON participant is an aggregate whose
+ * Fail closed when a COMPARISON participant is an aggregate whose
  * whole-value comparison none of this target's kernels reproduces — a
  * `dictionary`, a `record`, or a `tuple` at participant level
  * (`unfaithfulComparisonAggregate`). Mirrors `assertComparableAggregate` on the
@@ -202,13 +205,12 @@ function assertPyComparableAggregate(
     const aggregate = unfaithfulComparisonAggregate(a);
     if (aggregate === null) continue;
     throw new Error(
-      `${kind}: cannot compile — a ${aggregate} participant. The interpreter ` +
+      `Could not compile \`${kind}\`: a ${aggregate} participant. The interpreter ` +
         `compares it as ONE value, whereas the emitted Python looks inside it: ` +
         `a dictionary or record has no positional lowering, and a tuple is ` +
         `mapped over element-wise by ` +
         `\`np.less\` (\`Equal(Tuple(1, 2), List(1, 2))\` answered \`True\`) ` +
-        `where a point binds atomically. Fail closed (D6) — the interpreter ` +
-        `evaluates it.`
+        `where a point binds atomically. The interpreter evaluates it instead.`
     );
   }
 }
@@ -260,7 +262,7 @@ function hasNestedTupleEvidence(x: Expression): boolean {
 }
 
 /**
- * Fail closed (D6) when an ORDERING participant is a point list (nested tuple
+ * Fail closed when an ORDERING participant is a point list (nested tuple
  * evidence) — see `hasNestedTupleEvidence`. EQUALITY does not take this gate.
  */
 function assertPyNoNestedTupleOrdering(
@@ -269,12 +271,11 @@ function assertPyNoNestedTupleOrdering(
 ): void {
   if (args.some(hasNestedTupleEvidence))
     throw new Error(
-      `${kind}: cannot compile — a participant whose ELEMENTS are tuples (a ` +
+      `Could not compile \`${kind}\`: a participant whose ELEMENTS are tuples (a ` +
         `point list). \`np.less([(1, 2)], [(3, 4)])\` looks inside each point ` +
         `and answers \`[[True, True]]\`, whereas the interpreter broadcasts to ` +
         `an inert point comparison (\`[(1, 2) < (3, 4)]\`). Only the EQUALITY ` +
-        `family admits point lists (whole-value \`_ce_eqcoll\`). ` +
-        `Fail closed (D6) — the interpreter evaluates it.`
+        `family admits point lists (whole-value \`_ce_eqcoll\`). The interpreter evaluates it instead.`
     );
 }
 
@@ -298,10 +299,9 @@ function assertPyNoStringOperand(
 ): void {
   if (args.some(isProvablyStringComparisonParticipant))
     throw new Error(
-      `${kind}: cannot compile — string-valued operands are not supported by ` +
+      `Could not compile \`${kind}\`: string-valued operands are not supported by ` +
         `this target (the lowering is numeric: a raw \`==\` that skips the ` +
-        `interpreter's text conditioning). ` +
-        `Fail closed (D6) — the interpreter evaluates it.`
+        `interpreter's text conditioning). The interpreter evaluates it instead.`
     );
 }
 
@@ -370,14 +370,13 @@ function assertPyNoMixedStringOrdering(
 ): void {
   if (isMixedStringOrderingParticipants(args))
     throw new Error(
-      `${kind}: cannot compile — an ordering that mixes a string operand with ` +
+      `Could not compile \`${kind}\`: an ordering that mixes a string operand with ` +
         `an operand that is not provably a string. The interpreter leaves such ` +
         `a comparison symbolic (\`Less("a", 1)\` stays inert), whereas NumPy ` +
         `coerces the number to a string and answers a plausible-looking ` +
         `boolean (\`np.less(["a", 10], ["b", 9])\` → \`[True, True]\`). An ` +
         `ordering whose operands are ALL provably strings does compile — the ` +
-        `interpreter compares strings the same way. ` +
-        `Fail closed (D6) — the interpreter evaluates it.`
+        `interpreter compares strings the same way. The interpreter evaluates it instead.`
     );
 }
 
@@ -464,7 +463,9 @@ function compilePythonEquality(
   compile: (e: Expression) => string
 ): string {
   if (args.length < 2)
-    throw new Error(`${kind}: expected at least two arguments`);
+    throw new Error(
+      `Could not compile \`${kind}\`: expected at least two arguments`
+    );
   const collCount = args.filter(isPyCollectionOperand).length;
   // Ahead of every lowering below (the scalar `abs` form, `_ce_eqcoll`, and
   // both chain forms) — see `assertPyComparableAggregate` /
@@ -520,9 +521,9 @@ function compilePythonEquality(
   }
   if (collCount === 1)
     throw new Error(
-      `${kind}: a single collection operand broadcasts element-wise in the ` +
+      `Could not compile \`${kind}\`: a single collection operand broadcasts element-wise in the ` +
         `interpreter (a list of booleans, not a boolean); that shape is not ` +
-        `yet implemented on the Python target. Fail closed (D6).`
+        `yet implemented on the Python target.`
     );
   if (collCount >= 2) {
     // Whole-collection equality per adjacent pair, folded with the scalar
@@ -629,8 +630,9 @@ function compilePythonSumProduct(
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
 ): string {
-  if (!args[0]) throw new Error(`${kind}: no body`);
-  if (!args[1]) throw new Error(`${kind}: no indexing set`);
+  if (!args[0]) throw new Error(`Could not compile \`${kind}\`: no body`);
+  if (!args[1])
+    throw new Error(`Could not compile \`${kind}\`: no indexing set`);
 
   // Reject a collection-valued body for the indexed form (see
   // `BaseCompiler.assertScalarBigOpBody`): `sum(generator)`/`math.prod(...)`
@@ -647,11 +649,13 @@ function compilePythonSumProduct(
   let idxTarget = target;
   for (const clause of clauses) {
     if (!isFunction(clause, 'Limits'))
-      throw new Error(`${kind}: expected a Limits indexing set`);
+      throw new Error(
+        `Could not compile \`${kind}\`: expected a Limits indexing set`
+      );
     const ops = clause.ops;
     const indexExpr = ops[0];
     if (!isSymbol(indexExpr))
-      throw new Error(`${kind}: index must be a symbol`);
+      throw new Error(`Could not compile \`${kind}\`: index must be a symbol`);
     const index = indexExpr.symbol;
 
     const lowerExpr = ops[1];
@@ -665,7 +669,9 @@ function compilePythonSumProduct(
       upperExpr.isInfinity ||
       lowerExpr.isInfinity
     )
-      throw new Error(`${kind}: an unbounded range is not supported`);
+      throw new Error(
+        `Could not compile \`${kind}\`: an unbounded range is not supported`
+      );
 
     const lowerCode = compilePythonBound(lowerExpr, idxTarget);
     const upperCode = compilePythonUpperBound(upperExpr, idxTarget);
@@ -856,10 +862,9 @@ function pythonElementSource(
   // rule `pyCollArg` applies to every other collection operand.
   if (coll.type.matches('string'))
     throw new Error(
-      'Loop: cannot iterate a string on this target — its elements are ' +
+      'Could not compile `Loop`: cannot iterate a string on this target — its elements are ' +
         'UAX #29 grapheme clusters and Python has no stdlib grapheme ' +
-        'segmentation, so the emitted loop would walk code points instead. ' +
-        'Fail closed (D6) — the interpreter evaluates it.'
+        'segmentation, so the emitted loop would walk code points instead. The interpreter evaluates it.'
     );
   assertPyNoCharacterOperand('Loop', [coll]);
   return BaseCompiler.compile(coll, target);
@@ -916,7 +921,7 @@ function compilePythonLoop(
    * region (design §5.1(c)). */
   node?: Expression
 ): string {
-  if (!args[0]) throw new Error('Loop: no body');
+  if (!args[0]) throw new Error('Could not compile `Loop`: no body');
   const body = args[0];
   const elements = args.slice(1);
 
@@ -962,13 +967,14 @@ function compilePythonComprehension(
   target: CompileTarget<Expression>,
   node?: Expression
 ): string {
-  if (!args[0]) throw new Error('Comprehension: no body');
-  if (!args[1]) throw new Error('Comprehension: no indexing set');
+  if (!args[0]) throw new Error('Could not compile `Comprehension`: no body');
+  if (!args[1])
+    throw new Error('Could not compile `Comprehension`: no indexing set');
   let body = args[0];
   if (isFunction(body, 'Block')) {
     if (body.nops !== 1)
       throw new Error(
-        'Comprehension: a multi-statement body has no Python list-comprehension form. Fail closed (D6).'
+        'Could not compile `Comprehension`: a multi-statement body has no Python list-comprehension form.'
       );
     body = body.ops[0];
   }
@@ -978,7 +984,7 @@ function compilePythonComprehension(
   // share; a declaration is caught by the expression-body assertion).
   if (pythonArmIsStatement(body))
     throw new Error(
-      'Comprehension: the body is a statement, which has no place in a Python list comprehension. Fail closed (D6).'
+      'Could not compile `Comprehension`: the body is a statement, which has no place in a Python list comprehension.'
     );
   pythonAssertExpressionBody('Comprehension', body);
   const { headers, bodyTarget } = pythonElementHeaders(args.slice(1), target);
@@ -1125,7 +1131,7 @@ function pyListTypeRank(type: Type): number | undefined {
 }
 
 /**
- * Fail closed (D6) when a `Norm` whose order is NOT the entry-wise Frobenius
+ * Fail closed when a `Norm` whose order is NOT the entry-wise Frobenius
  * one is taken over an operand of statically known rank 3 or more.
  *
  * Above rank 2 the interpreter (`library/linear-algebra.ts`) computes only the
@@ -1143,10 +1149,9 @@ function pyListTypeRank(type: Type): number | undefined {
 function assertPythonNormRankAtMost2(rank: number | undefined): void {
   if (rank === undefined || rank <= 2) return;
   throw new Error(
-    `Norm: above rank 2 the interpreter computes only the Frobenius norm ` +
+    `Could not compile \`Norm\`: above rank 2 the interpreter computes only the Frobenius norm ` +
       `(the order 2, which is also the default), and \`np.linalg.norm\` ` +
-      `raises for any explicit order on an input with more than two axes. ` +
-      `Fail closed (D6).`
+      `raises for any explicit order on an input with more than two axes.`
   );
 }
 
@@ -1577,7 +1582,7 @@ function withPythonHelpers(code: string): string {
 }
 
 /**
- * Fail closed (D6) when `code`, produced by the **expression-only**
+ * Fail closed when `code`, produced by the **expression-only**
  * `compileToSource()` route, is not a single Python expression.
  *
  * `compileToSource()` answers with a bare expression string, and every consumer
@@ -1620,19 +1625,19 @@ function pythonAssertExpressionOnly(subject: string, code: string): void {
     return;
   const excerpt = (multiStatement ? code.split('\n')[0] : code).trim();
   throw new Error(
-    `${subject}: this route emits a single Python EXPRESSION, but the body ` +
+    `Could not compile ${compileSubject(subject)}: this route emits a single Python EXPRESSION, but the body ` +
       `lowers to ${
         multiStatement ? 'a statement sequence' : 'a bare `return` statement'
       } (\`${excerpt}${multiStatement ? '…' : ''}\`). Python has no ` +
       `expression-level block, and \`return\`/\`for\`/\`while\` are ` +
       `statements, so there is no valid emission for this position. Compile a ` +
       `statement body with compileFunction() instead — that route emits a ` +
-      `\`def\`. Fail closed (D6).`
+      `\`def\`.`
   );
 }
 
 /**
- * Fail closed (D6) on a Python **expression-only** route (`compileToSource()`,
+ * Fail closed on a Python **expression-only** route (`compileToSource()`,
  * `compileLambda()`) whose body is STRUCTURALLY a statement.
  *
  * The companion to `pythonAssertExpressionOnly`, which scans the EMITTED source
@@ -1658,7 +1663,7 @@ function pythonAssertExpressionBody(subject: string, expr: Expression): void {
   const head = statementBodyHead(expr);
   if (head === undefined) return;
   throw new Error(
-    `${subject}: this route emits a single Python EXPRESSION, but the body ` +
+    `Could not compile ${compileSubject(subject)}: this route emits a single Python EXPRESSION, but the body ` +
       (head === 'Assign'
         ? 'is an assignment. Python assignment is a STATEMENT (this target ' +
           'does not emit the walrus operator), so the emitted `s = x` is not ' +
@@ -1667,13 +1672,12 @@ function pythonAssertExpressionBody(subject: string, expr: Expression): void {
           'target emits the EMPTY string for it — the declared name and its ' +
           'initializer would be silently DROPPED.') +
       ` Give the block a VALUE statement (\`Block(s ≔ x; s)\`) and compile it ` +
-      `with compileFunction() instead — that route emits a \`def\`. Fail ` +
-      `closed (D6).`
+      `with compileFunction() instead — that route emits a \`def\`.`
   );
 }
 
 /**
- * Fail closed (D6) when `compileFunction()`'s body is STRUCTURALLY a statement.
+ * Fail closed when `compileFunction()`'s body is STRUCTURALLY a statement.
  *
  * `compileFunction()` is the statement-capable route the rest of this class
  * points at, but neither of its two branches can carry a body whose VALUE
@@ -1711,24 +1715,24 @@ function pythonAssertReturnableBody(subject: string, expr: Expression): void {
     (pythonArmIsStatement(value.ops[1]) || pythonArmIsStatement(value.ops[2]))
   )
     throw new Error(
-      `${subject}: the body's value statement is a selection whose branches ` +
+      `Could not compile ${compileSubject(subject)}: the body's value statement is a selection whose branches ` +
         `are statements, which Python writes as an \`if:\`/\`else:\` block — ` +
         `and a block cannot be returned, so this route would emit ` +
         `\`return if …:\`. Give the block a VALUE statement ` +
         `(\`Block(If(c, r ≔ 1, r ≔ 2); r)\`), which compiles to the \`if\` ` +
-        `block followed by \`return r\`. Fail closed (D6).`
+        `block followed by \`return r\`.`
     );
   const head = statementBodyHead(expr);
   if (head === undefined) return;
   throw new Error(
-    `${subject}: the body's value statement is ` +
+    `Could not compile ${compileSubject(subject)}: the body's value statement is ` +
       (head === 'Assign'
         ? 'an assignment'
         : 'a declaration (which this target emits as nothing at all)') +
       `, and a Python statement cannot be returned — this route would emit ` +
       `\`return ${head === 'Assign' ? 's = x' : ''}\`, which does not parse. ` +
       `Give the block a VALUE statement (\`Block(s ≔ x; s)\`), which compiles ` +
-      `to \`def f(x):\\n    s = x\\n    return s\`. Fail closed (D6).`
+      `to \`def f(x):\\n    s = x\\n    return s\`.`
   );
 }
 
@@ -1779,13 +1783,13 @@ function compilePythonTranspose(
   compile: (e: Expression) => string,
   wrap?: string
 ): string {
-  if (args[0] == null) throw new Error('Transpose: missing argument');
+  if (args[0] == null)
+    throw new Error('Could not compile `Transpose`: missing argument');
   const x = wrap ? `${wrap}(${compile(args[0])})` : compile(args[0]);
   if (args.length < 3) return `np.transpose(${x})`;
   if (args.length > 3 || args[1] == null || args[2] == null)
     throw new Error(
-      `Transpose: only the (value) and (value, axis1, axis2) forms compile. ` +
-        `Fail closed (D6).`
+      `Could not compile \`Transpose\`: only the (value) and (value, axis1, axis2) forms compile.`
     );
   return `np.swapaxes(${x}, int(${compile(args[1])}) - 1, int(${compile(
     args[2]
@@ -1809,7 +1813,7 @@ function compilePythonSample(
   kwargs = ''
 ): string {
   if (args.length === 0 || args[0] == null)
-    throw new Error(`${fn}: no argument`);
+    throw new Error(`Could not compile \`${fn}\`: no argument`);
   if (args.length === 1) return `${fn}(${compile(args[0])}${kwargs})`;
   const parts = args.map((a) =>
     isPyCollectionOperand(a) ? `*${compile(a)}` : compile(a)
@@ -1842,7 +1846,10 @@ function compilePythonRelation(
   compile: (e: Expression) => string,
   kind: string
 ): string {
-  if (args.length < 2) throw new Error(`${fn}: expected at least two operands`);
+  if (args.length < 2)
+    throw new Error(
+      `Could not compile \`${fn}\`: expected at least two operands`
+    );
   // The comparison gates. All are reached HERE for every ordering the infix
   // route declines as well: the base compiler diverts a mixed-string,
   // aggregate, or collection-TYPED ordering off the infix `<` so the head falls
@@ -1877,7 +1884,7 @@ function compilePythonLogical(
   compile: (e: Expression) => string
 ): string {
   if (args.length === 0 || args[0] == null)
-    throw new Error(`${fn}: no operand`);
+    throw new Error(`Could not compile \`${fn}\`: no operand`);
   let result = compile(args[0]);
   for (let i = 1; i < args.length; i++)
     result = `${fn}(${result}, ${compile(args[i])})`;
@@ -1891,7 +1898,7 @@ function compilePythonLogical(
  * Most functions are available in the numpy module with np. prefix.
  */
 /**
- * Compile a collection operand, failing closed (D6) if it is not an indexed
+ * Compile a collection operand, failing closed if it is not an indexed
  * collection (list/vector/range) — the Python analog of the JavaScript
  * target's `collArg`. (Local copy of `isIndexedCollectionOperand` to avoid
  * a cross-target import of a 2-line predicate.)
@@ -1912,10 +1919,10 @@ function pyCollArg(
   // (`docs/STRING_ROADMAP.md`, decision D13.)
   if (arg && arg.type.matches('string'))
     throw new Error(
-      `${kind}: cannot compile a string collection to this target — a ` +
+      `Could not compile \`${kind}\`: a string collection — a ` +
         `string's elements are UAX #29 grapheme clusters and Python has no ` +
         `stdlib grapheme segmentation, so the emitted code would walk code ` +
-        `points instead. Fail closed (D6) — the interpreter evaluates it.`
+        `points instead. The interpreter evaluates it.`
     );
   // A collection of CHARACTERS is closed for the same capability reason: an
   // element is one grapheme cluster this target cannot order or re-segment.
@@ -1928,8 +1935,8 @@ function pyCollArg(
     )
   )
     throw new Error(
-      `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
-        `is not an indexed collection (list/vector/range). Fail closed (D6).`
+      `Could not compile \`${kind}\`: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
+        `is not an indexed collection (list/vector/range).`
     );
   return compile(arg);
 }
@@ -1964,7 +1971,7 @@ function pyIsNumericIndexOperand(e: Expression): boolean {
  * literal compiles through the target's lambda handler; a bare binary
  * arithmetic operator symbol lowers to a Python lambda. Anything else —
  * notably a user-defined function symbol, which the shared user-function
- * registry would emit as *JavaScript* source — fails closed (D6): without
+ * registry would emit as *JavaScript* source — fails closed: without
  * this guard the base compiler emits a JS arrow function inside otherwise
  * valid Python.
  */
@@ -1988,9 +1995,9 @@ function pyFnArg(
     if (glyph !== undefined) return `(lambda _a, _b: _a ${glyph} _b)`;
   }
   throw new Error(
-    `${kind}: the function operand does not compile on the Python target ` +
+    `Could not compile \`${kind}\`: the function operand has no Python form ` +
       `(only function literals and binary arithmetic operator symbols ` +
-      `lower to a Python lambda). Fail closed (D6).`
+      `lower to a Python lambda).`
   );
 }
 
@@ -2263,7 +2270,7 @@ function compilePythonIfStatement(
 ): string {
   const cond = args[0];
   if (cond === undefined || args[1] === undefined)
-    throw new Error('If: wrong number of arguments');
+    throw new Error('Could not compile `If`: wrong number of arguments');
 
   /** One branch, compiled as statements inside its own CSE region. */
   const branch = (i: number): string =>
@@ -2524,18 +2531,18 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // `pythonPole`; a complex argument does not, as in the interpreter, whose
   // complex kernels keep a large finite value.
   Cot: ([x], compile) => {
-    if (x === null) throw new Error('Cot: no argument');
+    if (x === null) throw new Error('Could not compile `Cot`: no argument');
     if (BaseCompiler.isComplexValued(x))
       return `(np.cos(${compile(x)}) / np.sin(${compile(x)}))`;
     return pythonPole(compile(x), '1 / np.tan(_x)');
   },
   Csc: ([x], compile) => {
-    if (x === null) throw new Error('Csc: no argument');
+    if (x === null) throw new Error('Could not compile `Csc`: no argument');
     if (BaseCompiler.isComplexValued(x)) return `(1 / np.sin(${compile(x)}))`;
     return pythonPole(compile(x), '1 / np.sin(_x)');
   },
   Sec: ([x], compile) => {
-    if (x === null) throw new Error('Sec: no argument');
+    if (x === null) throw new Error('Could not compile `Sec`: no argument');
     if (BaseCompiler.isComplexValued(x)) return `(1 / np.cos(${compile(x)}))`;
     return pythonPole(compile(x), '1 / np.cos(_x)');
   },
@@ -2543,62 +2550,62 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Degrees → radians. Only reached in radian mode: in the other angular
   // units `rewriteAngularUnit` replaces the `Degrees` node before codegen.
   Degrees: ([x], compile) => {
-    if (x === null) throw new Error('Degrees: no argument');
+    if (x === null) throw new Error('Could not compile `Degrees`: no argument');
     return `(${compile(x)} * np.pi / 180)`;
   },
 
   // Inverse trigonometric (reciprocal)
   Arccot: ([x], compile) => {
-    if (x === null) throw new Error('Arccot: no argument');
+    if (x === null) throw new Error('Could not compile `Arccot`: no argument');
     // `np.arctan(1/x)` returns the wrong branch for x < 0. `π/2 - arctan(x)` is
     // branch-free and matches the interpreter's (0, π) range for all real x.
     return `(np.pi / 2 - np.arctan(${compile(x)}))`;
   },
   Arccsc: ([x], compile) => {
-    if (x === null) throw new Error('Arccsc: no argument');
+    if (x === null) throw new Error('Could not compile `Arccsc`: no argument');
     return `np.arcsin(1 / (${compile(x)}))`;
   },
   Arcsec: ([x], compile) => {
-    if (x === null) throw new Error('Arcsec: no argument');
+    if (x === null) throw new Error('Could not compile `Arcsec`: no argument');
     return `np.arccos(1 / (${compile(x)}))`;
   },
 
   // Reciprocal hyperbolic functions
   Coth: ([x], compile) => {
-    if (x === null) throw new Error('Coth: no argument');
+    if (x === null) throw new Error('Could not compile `Coth`: no argument');
     return `(np.cosh(${compile(x)}) / np.sinh(${compile(x)}))`;
   },
   Csch: ([x], compile) => {
-    if (x === null) throw new Error('Csch: no argument');
+    if (x === null) throw new Error('Could not compile `Csch`: no argument');
     return `(1 / np.sinh(${compile(x)}))`;
   },
   Sech: ([x], compile) => {
-    if (x === null) throw new Error('Sech: no argument');
+    if (x === null) throw new Error('Could not compile `Sech`: no argument');
     return `(1 / np.cosh(${compile(x)}))`;
   },
 
   // Inverse hyperbolic (reciprocal)
   Arcoth: ([x], compile) => {
-    if (x === null) throw new Error('Arcoth: no argument');
+    if (x === null) throw new Error('Could not compile `Arcoth`: no argument');
     return `np.arctanh(1 / (${compile(x)}))`;
   },
   Arcsch: ([x], compile) => {
-    if (x === null) throw new Error('Arcsch: no argument');
+    if (x === null) throw new Error('Could not compile `Arcsch`: no argument');
     return `np.arcsinh(1 / (${compile(x)}))`;
   },
   Arsech: ([x], compile) => {
-    if (x === null) throw new Error('Arsech: no argument');
+    if (x === null) throw new Error('Could not compile `Arsech`: no argument');
     return `np.arccosh(1 / (${compile(x)}))`;
   },
 
   // Elementary
   Lb: 'np.log2',
   Square: ([x], compile) => {
-    if (x === null) throw new Error('Square: no argument');
+    if (x === null) throw new Error('Could not compile `Square`: no argument');
     return `np.square(${compile(x)})`;
   },
   Fract: ([x], compile) => {
-    if (x === null) throw new Error('Fract: no argument');
+    if (x === null) throw new Error('Could not compile `Fract`: no argument');
     return `np.modf(${compile(x)})[0]`;
   },
 
@@ -2756,7 +2763,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // half-away as `sign(x)·floor(|x| + 0.5)`.
   Round: (args, compile) => {
     const x = args[0];
-    if (x == null) throw new Error('Round: no argument');
+    if (x == null) throw new Error('Could not compile `Round`: no argument');
     const halfAway = (c: string): string =>
       `(np.sign(${c}) * np.floor(np.abs(${c}) + 0.5))`;
     if (args.length < 2) return halfAway(compile(x));
@@ -2842,7 +2849,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Mod: 'np.mod',
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
-      throw new Error('Remainder: missing argument');
+      throw new Error('Could not compile `Remainder`: missing argument');
     // `compile()` emits sub-expressions without outer parentheses, and
     // `*`/`/` bind tighter than `+` — wrap before splicing.
     const ca = `(${compile(a)})`;
@@ -2884,19 +2891,23 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // SyntaxError reported as a successful compilation.
   Covariance: ([x, y], compile) => {
     if (x == null || y == null)
-      throw new Error('Covariance: expected two collection arguments');
+      throw new Error(
+        'Could not compile `Covariance`: expected two collection arguments'
+      );
     return `np.cov(${compile(x)}, ${compile(y)})[0][1]`;
   },
   PopulationCovariance: ([x, y], compile) => {
     if (x == null || y == null)
       throw new Error(
-        'PopulationCovariance: expected two collection arguments'
+        'Could not compile `PopulationCovariance`: expected two collection arguments'
       );
     return `np.cov(${compile(x)}, ${compile(y)}, ddof=0)[0][1]`;
   },
   Correlation: ([x, y], compile) => {
     if (x == null || y == null)
-      throw new Error('Correlation: expected two collection arguments');
+      throw new Error(
+        'Could not compile `Correlation`: expected two collection arguments'
+      );
     return `np.corrcoef(${compile(x)}, ${compile(y)})[0][1]`;
   },
 
@@ -2909,15 +2920,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // as the `Norm` handler below does for the same shape.
   Dot: (args, compile) => {
     if (args[0] == null || args[1] == null)
-      throw new Error('Dot: missing argument');
+      throw new Error('Could not compile `Dot`: missing argument');
     // A TUPLE is a point even when its coordinates are points — the
     // interpreter flattens `((1, 2), (3, 4))` into one four-component vector
     // — so only a non-tuple collection of points is a list here.
     if (args.some((a) => !isTuple(a) && isPointListValue(a)))
       throw new Error(
-        'Dot: a list of points has no single numpy spelling — `np.dot` ' +
+        'Could not compile `Dot`: a list of points has no single numpy spelling — `np.dot` ' +
           'contracts it as a matrix, but the interpreter answers one inner ' +
-          'product per point. Fail closed (D6).'
+          'product per point.'
       );
     return `np.dot(${compile(args[0])}, ${compile(args[1])})`;
   },
@@ -2925,18 +2936,19 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // A STRING norm type (`Norm(v, "Infinity")`, `Norm(m, "Frobenius")`) is
   // spelled differently by numpy — `np.linalg.norm(v, "Infinity")` is a
   // ValueError. Map the two spellings the interpreter recognizes; anything else
-  // fails closed (D6). (The `Infinity` SYMBOL already folds to `np.inf`.)
+  // fails closed. (The `Infinity` SYMBOL already folds to `np.inf`.)
   Norm: (args, compile) => {
-    if (args[0] == null) throw new Error('Norm: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Norm`: missing argument');
     // A LIST of points is one norm PER POINT in the interpreter (a point binds
     // atomically — Tycho item 138), which `np.linalg.norm` does not spell
     // without an explicit `axis`. Fail closed rather than emit the flattened
     // scalar behind `success: true`.
     if (isPointListValue(args[0]))
       throw new Error(
-        'Norm: a list of points has no numpy spelling — `np.linalg.norm` ' +
+        'Could not compile `Norm`: a list of points has no numpy spelling — `np.linalg.norm` ' +
           'flattens it into one scalar, but the interpreter answers one norm ' +
-          'per point. Fail closed (D6).'
+          'per point.'
       );
     if (args.length < 2) return `np.linalg.norm(${compile(args[0])})`;
     const p = args[1];
@@ -2948,8 +2960,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       }[p.string];
       if (ord === undefined)
         throw new Error(
-          `Norm: the norm type "${p.string}" has no numpy spelling. ` +
-            `Fail closed (D6).`
+          `Could not compile \`Norm\`: the norm type "${p.string}" has no numpy spelling.`
         );
       // The Frobenius norm is the entry-wise `√(Σ|xᵢ|²)` at EVERY rank — the
       // definition sums over every cell and does not mention the rank — which
@@ -3050,12 +3061,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // A literal numeric order that is not positive (`0`, `-1`, `-∞`) has no
     // value in the interpreter at any rank: the `requires` precondition of
     // `Norm` refuses it. But numpy answers a value for it (`ord=0` on a
-    // vector counts the nonzero entries), so fail closed (D6).
+    // vector counts the nonzero entries), so fail closed.
     if (isNumber(p) && !(p.re > 0))
       throw new Error(
-        `Norm: the interpreter defines norms only for a positive order, ` +
-          `but \`np.linalg.norm\` answers a value for this order. Fail ` +
-          `closed (D6).`
+        `Could not compile \`Norm\`: the interpreter defines norms only for a positive order, ` +
+          `but \`np.linalg.norm\` answers a value for this order.`
       );
     // A literal numeric order on a statically rank-2 operand: the
     // interpreter's matrix branch (`library/linear-algebra.ts`) defines only
@@ -3064,7 +3074,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // semantics (probed 2026-07-31: both agree). Any OTHER literal
     // order stays SYMBOLIC in the interpreter, while numpy either raises
     // (`ord=3` on a matrix is a ValueError) or computes a norm the
-    // interpreter does not define (`-inf`), so fail closed (D6).
+    // interpreter does not define (`-inf`), so fail closed.
     if (
       rank === 2 &&
       isNumber(p) &&
@@ -3073,9 +3083,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       !(p.isInfinity && p.isPositive === true)
     )
       throw new Error(
-        `Norm: the interpreter defines matrix norms only for orders 1, ` +
+        `Could not compile \`Norm\`: the interpreter defines matrix norms only for orders 1, ` +
           `2 and +Infinity — \`np.linalg.norm\` would raise or ` +
-          `diverge for this order. Fail closed (D6).`
+          `diverge for this order.`
       );
     // A literal positive order (not 2, which is decided above) on an operand
     // whose rank is not statically known. The interpreter answers the
@@ -3145,7 +3155,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // `NaN`, both of which are Python SyntaxErrors. Emit Python conditional
   // expressions (`a if cond else b`) and `float('nan')`.
   If: (args, compile, target) => {
-    if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    if (args.length !== 3)
+      throw new Error('Could not compile `If`: wrong number of arguments');
     // An arm with no Python EXPRESSION form — an assignment, a loop, a
     // multi-statement block — makes the whole selection a statement: emit the
     // `if:`/`else:` block instead of a conditional expression. In an
@@ -3181,7 +3192,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // answer a two-armed selection gives when it takes neither arm.
   When: (args, compile, target) => {
     if (args.length !== 2)
-      throw new Error('When: expected exactly 2 arguments (expr, cond)');
+      throw new Error(
+        'Could not compile `When`: expected exactly 2 arguments (expr, cond)'
+      );
     // A provably collection-valued condition must fail closed: a non-empty
     // Python list is TRUTHY, so the conditional expression below would
     // silently take the value branch for every element instead of selecting.
@@ -3195,7 +3208,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
-      throw new Error('Which: expected condition/value pairs');
+      throw new Error(
+        'Could not compile `Which`: expected condition/value pairs'
+      );
     // This handler bypasses the base compiler's per-condition
     // `guardCondition` assert, and Python truthiness would turn a collection
     // condition into a silent whole-expression pick.
@@ -3232,10 +3247,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Epsil `Match`: structural pattern matching. Not supported by the Python
   // target in v1 (a chained conditional lowering is a possible future bonus, not
-  // required — design §5). Fail closed (D6).
+  // required — design §5). Fail closed.
   Match: () => {
     throw new Error(
-      'Match: pattern matching is not supported by the Python compile target in v1. Fail closed (D6).'
+      'Could not compile `Match`: pattern matching is not supported by the Python compile target in v1.'
     );
   },
 
@@ -3260,19 +3275,19 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Γ(5, 2) → 22.736327583750935).
   Gamma: (args, compile) => {
     const s = args[0];
-    if (s == null) throw new Error('Gamma: no argument');
+    if (s == null) throw new Error('Could not compile `Gamma`: no argument');
     if (args.length < 2) return `scipy.special.gamma(${compile(s)})`;
     // scipy's incomplete-gamma family is defined for `s >= 0` only, and the
     // Γ(s) factor is a pole at the non-positive integers — the product is
     // `nan` there, where the interpreter still has a finite value
     // (Γ(-1, 2) = 0.01876…). A statically non-positive `s` therefore fails
-    // closed (D6) rather than compiling to a guaranteed `nan`.
+    // closed rather than compiling to a guaranteed `nan`.
     const sConst = tryGetConstant(s);
     if (sConst !== undefined && sConst <= 0)
       throw new Error(
-        `Gamma: the upper incomplete gamma Γ(s, z) lowers through the ` +
+        `Could not compile \`Gamma\`: the upper incomplete gamma Γ(s, z) lowers through the ` +
           `REGULARIZED \`scipy.special.gammaincc\`, which is defined for ` +
-          `s > 0 only (s = ${sConst}). Fail closed (D6).`
+          `s > 0 only (s = ${sConst}).`
       );
     const cs = compile(s);
     return `(scipy.special.gammaincc(${cs}, ${compile(
@@ -3299,11 +3314,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   //    In strict mode the operand declines at compile time instead, as a
   //    maybe-complex operand of every real-only head does there.
   GammaLn: ([x], compile, target) => {
-    if (x === null) throw new Error('GammaLn: no argument');
+    if (x === null) throw new Error('Could not compile `GammaLn`: no argument');
     const reason =
-      'GammaLn: scipy.special.loggamma takes another branch than the ' +
-      'interpreter off the real axis; the compiled value would differ. ' +
-      'Fail closed (D6)';
+      'Could not compile `GammaLn`: scipy.special.loggamma takes another ' +
+      'branch than the interpreter off the real axis; the compiled value ' +
+      'would differ';
     const decline = () =>
       new CompileDeclineError({
         code: 'non-real-operand',
@@ -3334,7 +3349,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // (Tycho item 99). `scipy.special.gamma` agrees with `factorial` on the
   // non-negative integers (both go through Γ for `exact=False`).
   Factorial: ([x], compile) => {
-    if (x === null) throw new Error('Factorial: no argument');
+    if (x === null)
+      throw new Error('Could not compile `Factorial`: no argument');
     return `scipy.special.gamma((${compile(x)}) + 1)`;
   },
   // Regularized upper incomplete gamma Q(a, z); scipy's argument order matches
@@ -3344,7 +3360,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // takes a DIFFERENT argument order than ours (x, a, b) — reorder here.
   BetaRegularized: ([x, a, b], compile) => {
     if (x === null || a === null || b === null)
-      throw new Error('BetaRegularized: missing argument');
+      throw new Error('Could not compile `BetaRegularized`: missing argument');
     return `scipy.special.betainc(${compile(a)}, ${compile(b)}, ${compile(x)})`;
   },
 
@@ -3384,7 +3400,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // documented divergence from the JS target).
     if (args.some((a) => a != null && isNonFiniteBound(a)))
       throw new Error(
-        `Range: a non-finite bound does not materialize. Fail closed (D6).`
+        `Could not compile \`Range\`: a non-finite bound does not materialize.`
       );
     const start = args.length === 1 ? '1' : compile(args[0]);
     const stop = args.length === 1 ? compile(args[0]) : compile(args[1]);
@@ -3399,7 +3415,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // A lambda body must be a single expression, so a statement-shaped body
   // (`Block`) fails closed.
   Function: (args, compile, target) => {
-    if (args[0] == null) throw new Error('Function: missing body');
+    if (args[0] == null)
+      throw new Error('Could not compile `Function`: missing body');
     // Function-literal bodies canonicalize wrapped in a `Block`; a
     // single-expression Block unwraps into the lambda body. A genuine
     // multi-statement body fails closed — a Python lambda is
@@ -3408,8 +3425,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     while (isFunction(body, 'Block') && body.nops === 1) body = body.ops[0];
     if (isFunction(body, 'Block'))
       throw new Error(
-        `Function: a multi-statement (Block) body cannot compile to a ` +
-          `Python lambda. Fail closed (D6).`
+        `Could not compile \`Function\`: a multi-statement (Block) body has no Python lambda form.`
       );
     BaseCompiler.assertNoDestructuringParams(args.slice(1));
     BaseCompiler.assertNoRestParams(args.slice(1));
@@ -3425,7 +3441,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // --- List-shaped collection operators -------------------------------------
-  // Same fail-closed (D6) discipline and interpreter-verified semantics as
+  // Same fail-closed discipline and interpreter-verified semantics as
   // the JavaScript target: 1-based indexes, `Nothing` → nan, counts clamped.
   Length: (args, compile) => `len(${pyCollArg('Length', args[0], compile)})`,
   // Only the 1-arg cardinality form. `Count(xs, v)` counts the elements equal
@@ -3437,9 +3453,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Count: (args, compile) => {
     if (args.length !== 1)
       throw new Error(
-        `Count: only the single-argument cardinality form compiles; the ` +
+        `Could not compile \`Count\`: only the single-argument cardinality form compiles; the ` +
           `value and predicate forms (\`Count(xs, v)\`, \`Count(xs, p)\`) are ` +
-          `not supported. Fail closed (D6).`
+          `not supported.`
       );
     return `len(${pyCollArg('Count', args[0], compile)})`;
   },
@@ -3450,7 +3466,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const index = args[1];
     if (base == null || index == null || args.length !== 2)
       throw new Error(
-        `At: only the single-index form compiles. Fail closed (D6).`
+        `Could not compile \`At\`: only the single-index form compiles.`
       );
     // Admission mirrors the JavaScript target: provably an indexed collection,
     // or a union that merely ADMITS one (the `dictionary | indexed_collection`
@@ -3464,15 +3480,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (!provablyIndexed) {
       if (!pyCouldBeIndexedCollectionOperand(base))
         throw new Error(
-          `At: operand is not an indexed collection (list/vector/range). ` +
-            `Fail closed (D6).`
+          `Could not compile \`At\`: operand is not an indexed collection (list/vector/range).`
         );
       if (!pyIsNumericIndexOperand(index))
         throw new Error(
-          `At: the first operand is not provably an indexed collection (type ` +
+          `Could not compile \`At\`: the first operand is not provably an indexed collection (type ` +
             `\`${base.type.toString()}\`) and the index is not provably ` +
-            `numeric, so a keyed (dictionary) access cannot be ruled out. ` +
-            `Fail closed (D6).`
+            `numeric, so a keyed (dictionary) access cannot be ruled out.`
         );
     }
     // 1-based; negative counts from the end; 0/out-of-range → nan. A base that
@@ -3492,20 +3506,21 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Most: (args, compile) => `${pyCollArg('Most', args[0], compile)}[:-1]`,
   Take: (args, compile) => {
     const coll = pyCollArg('Take', args[0], compile);
-    if (args[1] == null) throw new Error('Take: missing count');
+    if (args[1] == null)
+      throw new Error('Could not compile `Take`: missing count');
     return `${coll}[:${pyClampedCount(args[1], compile)}]`;
   },
   Drop: (args, compile) => {
     const coll = pyCollArg('Drop', args[0], compile);
-    if (args[1] == null) throw new Error('Drop: missing count');
+    if (args[1] == null)
+      throw new Error('Could not compile `Drop`: missing count');
     return `${coll}[${pyClampedCount(args[1], compile)}:]`;
   },
   Reverse: (args, compile) => `${pyCollArg('Reverse', args[0], compile)}[::-1]`,
   Sort: (args, compile) => {
     if (args.length > 1)
       throw new Error(
-        `Sort: a custom comparator does not compile; only the default ` +
-          `ascending numeric sort is supported. Fail closed (D6).`
+        `Could not compile \`Sort\`: a custom comparator is not supported; only the default ascending numeric sort is.`
       );
     return `sorted(${pyCollArg('Sort', args[0], compile)})`;
   },
@@ -3514,8 +3529,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Ordering: (args, compile) => {
     if (args.length > 1)
       throw new Error(
-        `Ordering: a custom ordering function does not compile. ` +
-          `Fail closed (D6).`
+        `Could not compile \`Ordering\`: a custom ordering function is not supported.`
       );
     return `(lambda _l: [_i + 1 for _i in sorted(range(len(_l)), key=lambda _j: _l[_j])])(${pyCollArg('Ordering', args[0], compile)})`;
   },
@@ -3561,13 +3575,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // `compile-python-string-fail-closed.test.ts`.
   IndexOf: (args, compile) => {
     const coll = pyCollArg('IndexOf', args[0], compile);
-    if (args[1] == null) throw new Error('IndexOf: missing value');
+    if (args[1] == null)
+      throw new Error('Could not compile `IndexOf`: missing value');
     return `_ce_indexof(${coll}, ${compile(args[1])})`;
   },
   Contains: (args, compile) => {
     if (args[0]) requirePrimitiveElements('Contains', args[0]);
     const coll = pyCollArg('Contains', args[0], compile);
-    if (args[1] == null) throw new Error('Contains: missing value');
+    if (args[1] == null)
+      throw new Error('Could not compile `Contains`: missing value');
     return `(${compile(args[1])} in ${coll})`;
   },
   // First-occurrence order (`dict.fromkeys` preserves insertion order).
@@ -3584,7 +3600,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Both endpoints included (native np.linspace); count truncated and
   // clamped ≥ 0; defaults mirror the interpreter (start 1, count 50).
   Linspace: (args, compile) => {
-    if (args[0] == null) throw new Error('Linspace: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Linspace`: missing argument');
     const start = args[1] == null ? '1' : compile(args[0]);
     const end = args[1] == null ? compile(args[0]) : compile(args[1]);
     const count = args[2] == null ? '50' : compile(args[2]);
@@ -3592,7 +3609,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // --- Higher-order collection operators ------------------------------------
   Map: (args, compile) => {
-    if (args[1] == null) throw new Error('Map: missing source collection');
+    if (args[1] == null)
+      throw new Error('Could not compile `Map`: missing source collection');
     // The multi-collection (zipWith) form: one element from each source per
     // call, as long as the shortest source — which is what Python's `zip`
     // does. Parameter `i` is checked against source `i`'s element type, as
@@ -3614,11 +3632,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         sources.length !== 2
       )
         throw new Error(
-          `Map: the operator symbol '${args[0].symbol}' used as the ` +
+          `Could not compile \`Map\`: the operator symbol '${args[0].symbol}' used as the ` +
             `mapping compiles to a two-argument function, and ` +
             `${sources.length} collections supply ${sources.length} ` +
-            `arguments per call. Fail closed (D6) — the interpreter ` +
-            `evaluates it.`
+            `arguments per call. The interpreter evaluates it instead.`
         );
       const fn = pyFnArg(
         'Map',
@@ -3636,7 +3653,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Filter: (args, compile) => {
     const coll = pyCollArg('Filter', args[0], compile);
-    if (args[1] == null) throw new Error('Filter: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `Filter`: missing predicate');
     const fn = pyFnArg('Filter', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -3644,7 +3662,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   CountIf: (args, compile) => {
     const coll = pyCollArg('CountIf', args[0], compile);
-    if (args[1] == null) throw new Error('CountIf: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `CountIf`: missing predicate');
     const fn = pyFnArg('CountIf', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -3652,7 +3671,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Find: (args, compile) => {
     const coll = pyCollArg('Find', args[0], compile);
-    if (args[1] == null) throw new Error('Find: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `Find`: missing predicate');
     const fn = pyFnArg('Find', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -3660,7 +3680,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   IndexWhere: (args, compile) => {
     const coll = pyCollArg('IndexWhere', args[0], compile);
-    if (args[1] == null) throw new Error('IndexWhere: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `IndexWhere`: missing predicate');
     const fn = pyFnArg('IndexWhere', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -3668,7 +3689,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Position: (args, compile) => {
     const coll = pyCollArg('Position', args[0], compile);
-    if (args[1] == null) throw new Error('Position: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `Position`: missing predicate');
     const fn = pyFnArg('Position', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -3678,7 +3700,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('Any', args[0], compile);
     if (args[1] == null)
       throw new Error(
-        `Any: only the predicate form compiles. Fail closed (D6).`
+        `Could not compile \`Any\`: only the predicate form compiles.`
       );
     const fn = pyFnArg('Any', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
@@ -3689,7 +3711,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('All', args[0], compile);
     if (args[1] == null)
       throw new Error(
-        `All: only the predicate form compiles. Fail closed (D6).`
+        `Could not compile \`All\`: only the predicate form compiles.`
       );
     const fn = pyFnArg('All', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
@@ -3698,7 +3720,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   TakeWhile: (args, compile) => {
     const coll = pyCollArg('TakeWhile', args[0], compile);
-    if (args[1] == null) throw new Error('TakeWhile: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `TakeWhile`: missing predicate');
     const fn = pyFnArg('TakeWhile', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -3706,7 +3729,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   DropWhile: (args, compile) => {
     const coll = pyCollArg('DropWhile', args[0], compile);
-    if (args[1] == null) throw new Error('DropWhile: missing predicate');
+    if (args[1] == null)
+      throw new Error('Could not compile `DropWhile`: missing predicate');
     const fn = pyFnArg('DropWhile', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -3715,7 +3739,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // A collection-valued mapping is spliced; a scalar result is kept as-is.
   FlatMap: (args, compile) => {
     const coll = pyCollArg('FlatMap', args[0], compile);
-    if (args[1] == null) throw new Error('FlatMap: missing mapping function');
+    if (args[1] == null)
+      throw new Error('Could not compile `FlatMap`: missing mapping function');
     const fn = pyFnArg('FlatMap', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -3729,7 +3754,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('Reduce', args[0], compile);
     const op = args[1];
     const init = args[2];
-    if (op == null) throw new Error('Reduce: missing combiner');
+    if (op == null)
+      throw new Error('Could not compile `Reduce`: missing combiner');
     const builtin = isSymbol(op)
       ? {
           Add: 'sum(_l)',
@@ -3753,8 +3779,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if ((isFunction(op, 'Function') && op.nops - 1 === 2) || isSymbol(op)) {
       if (init === undefined || init === null)
         throw new Error(
-          `Reduce: a custom combiner compiles only with an explicit ` +
-            `initial value. Fail closed (D6).`
+          `Could not compile \`Reduce\`: a custom combiner compiles only with an explicit ` +
+            `initial value.`
         );
       // The combiner is `(accumulator, element)`: only the element's type is
       // provable, so an annotated accumulator declines.
@@ -3765,8 +3791,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       return `__import__('functools').reduce(${fn}, ${coll}, ${compile(init)})`;
     }
     throw new Error(
-      `Reduce: the combiner does not compile to a function on the Python ` +
-        `target. Fail closed (D6).`
+      `Could not compile \`Reduce\`: the combiner has no compiled function form on the Python ` +
+        `target.`
     );
   },
   // Running fold: `itertools.accumulate`. With an initial value the
@@ -3776,7 +3802,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('Scan', args[0], compile);
     const op = args[1];
     const init = args[2];
-    if (op == null) throw new Error('Scan: missing combiner');
+    if (op == null)
+      throw new Error('Could not compile `Scan`: missing combiner');
     const builtin = isSymbol(op)
       ? {
           Add: '(lambda _a, _b: _a + _b)',
@@ -3795,8 +3822,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         : undefined);
     if (fn === undefined)
       throw new Error(
-        `Scan: the combiner does not compile to a function on the Python ` +
-          `target. Fail closed (D6).`
+        `Could not compile \`Scan\`: the combiner has no compiled function form on the Python ` +
+          `target.`
       );
     if (init !== undefined && init !== null)
       return `list(__import__('itertools').accumulate(${coll}, ${fn}, initial=${compile(init)}))[1:]`;
@@ -3806,17 +3833,17 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // dimension is inert in the interpreter and fails closed.
   Tabulate: (args, compile) => {
     if (args[0] == null || args[1] == null)
-      throw new Error('Tabulate: missing argument');
+      throw new Error('Could not compile `Tabulate`: missing argument');
     if (args.length > 3)
       throw new Error(
-        `Tabulate: only the 1-D and 2-D forms compile. Fail closed (D6).`
+        `Could not compile \`Tabulate\`: only the 1-D and 2-D forms compile.`
       );
     for (let i = 1; i < args.length; i++) {
       const dim = tryGetConstant(args[i]!);
       if (dim !== undefined && Math.round(dim) <= 0)
         throw new Error(
-          `Tabulate: a statically non-positive dimension (${dim}) is inert ` +
-            `in the interpreter. Fail closed (D6).`
+          `Could not compile \`Tabulate\`: a statically non-positive dimension (${dim}) is inert ` +
+            `in the interpreter.`
         );
     }
     const f = pyFnArg('Tabulate', args[0], compile, ['integer', 'integer']);
@@ -3829,11 +3856,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Fill: (args, compile) => {
     const dims = args[1];
     if (args[0] == null || dims == null)
-      throw new Error('Fill: missing argument');
+      throw new Error('Could not compile `Fill`: missing argument');
     if (!isFunction(dims) || dims.ops.length !== 2)
       throw new Error(
-        `Fill: only the (function, (rows, cols)) form compiles. ` +
-          `Fail closed (D6).`
+        `Could not compile \`Fill\`: only the (function, (rows, cols)) form compiles.`
       );
     const f = pyFnArg('Fill', args[0], compile, ['integer', 'integer']);
     const rows = pyClampedCount(dims.ops[0], compile);
@@ -3842,10 +3868,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // --- Core scalar operators -------------------------------------------------
   Boole: (args, compile) => {
-    if (args[0] == null) throw new Error('Boole: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Boole`: missing argument');
     if (!BaseCompiler.isBooleanValued(args[0]))
       throw new Error(
-        `Boole: the argument is not provably boolean. Fail closed (D6).`
+        `Could not compile \`Boole\`: the argument is not provably boolean.`
       );
     return `(1 if ${compile(args[0])} else 0)`;
   },
@@ -3861,22 +3888,24 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // fails the comparison against itself and so needs no test of its own.
   KroneckerDelta: (args, compile) => {
     if (args.length === 0 || args[0] == null)
-      throw new Error('KroneckerDelta: missing argument');
+      throw new Error('Could not compile `KroneckerDelta`: missing argument');
     if (args.length === 1) return `(1 if ${compile(args[0])} == 0 else 0)`;
     return `(lambda *_v: 1 if _v[0] is not None and all(_x == _v[0] for _x in _v) else 0)(${args.map((a) => compile(a)).join(', ')})`;
   },
   Element: (args, compile) => {
     if (args[0] == null || args[1] == null)
-      throw new Error('Element: missing argument');
+      throw new Error('Could not compile `Element`: missing argument');
     requirePrimitiveElements('Element', args[1]);
     return `(${compile(args[0])} in ${pyCollArg('Element', args[1], compile)})`;
   },
   Identity: (args, compile, target) => {
-    if (args[0] == null) throw new Error('Identity: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Identity`: missing argument');
     return pyIdentityPassthrough(args[0], compile(args[0]), target);
   },
   Apply: (args, compile) => {
-    if (args[0] == null) throw new Error('Apply: missing function');
+    if (args[0] == null)
+      throw new Error('Could not compile `Apply`: missing function');
     return `(${compile(args[0])})(${args
       .slice(1)
       .map((a) => compile(a))
@@ -3886,31 +3915,34 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Flatten: (args, compile) => {
     if (args[1] != null)
       throw new Error(
-        `Flatten: an explicit depth does not compile on the Python target. ` +
-          `Fail closed (D6).`
+        `Could not compile \`Flatten\`: an explicit depth is not supported on the Python target.`
       );
     // Recursive self-passing lambda: flattens ragged (non-rectangular)
     // nested lists, which np.asarray(...).ravel() rejects.
     return `(lambda _l: (lambda _f: _f(_f, _l))(lambda _f, _x: [_y for _e in _x for _y in (_f(_f, _e) if isinstance(_e, list) else [_e])]))(${pyCollArg('Flatten', args[0], compile)})`;
   },
   Shape: (args, compile) => {
-    if (args[0] == null) throw new Error('Shape: missing argument');
+    if (args[0] == null)
+      throw new Error('Could not compile `Shape`: missing argument');
     return `list(np.shape(${compile(args[0])}))`;
   },
   // Cyclic padding (np.resize repeats the source), like the interpreter.
   Reshape: (args, compile) => {
     const coll = pyCollArg('Reshape', args[0], compile);
     const dims = args[1];
-    if (dims == null) throw new Error('Reshape: missing shape');
+    if (dims == null)
+      throw new Error('Could not compile `Reshape`: missing shape');
     if (!isFunction(dims) || dims.ops.length === 0 || dims.ops.length > 2)
       throw new Error(
-        `Reshape: only a 1-D or 2-D target shape compiles. Fail closed (D6).`
+        `Could not compile \`Reshape\`: only a 1-D or 2-D target shape compiles.`
       );
     return `np.resize(np.asarray(${coll}), (${dims.ops.map((d) => compile(d)).join(', ')},)).tolist()`;
   },
   Trace: (args, compile) => {
     if (args.length > 1)
-      throw new Error(`Trace: explicit axes do not compile. Fail closed (D6).`);
+      throw new Error(
+        `Could not compile \`Trace\`: explicit axes do not compile.`
+      );
     // `float()` of a complex trace drops its imaginary part, so a complex
     // lane (`BaseCompiler.linearAlgebraLane`, the answer a parent reads for
     // the value of the node) converts with `complex()`.
@@ -4141,7 +4173,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
         writtenSymbol: 'numeric',
       },
       // A Python Block is a bare statement sequence (like GLSL/WGSL), never a
-      // JS IIFE. Fail closed (D6) if such a block is spliced as a sub-operand.
+      // JS IIFE. Fail closed if such a block is spliced as a sub-operand.
       bareStatementBlocks: true,
       // Python has no declaration keyword; a `Declare`'s value rides on the
       // separate `name = value` assignment compileBlock emits. Ignore the GPU
@@ -4164,11 +4196,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
         // (`pythonAssertReturnableBody`); this catches a nested block.
         else if (/^if\b/.test(stmts[last]))
           throw new Error(
-            `Block: the block's value statement is a selection whose branches ` +
+            `Could not compile \`Block\`: the block's value statement is a selection whose branches ` +
               `are statements, which Python writes as an \`if:\`/\`else:\` ` +
               `block — a block cannot be returned, and its value is not ` +
               `\`None\`. Give the block a VALUE statement after the ` +
-              `selection. Fail closed (D6).`
+              `selection.`
           );
         else stmts[last] = `return ${stmts[last]}`;
         return stmts.join('\n');
@@ -4540,7 +4572,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // guard, so check explicitly.
     if (body.includes('\n'))
       throw new Error(
-        'compileLambda: a multi-statement construct (loop-form Sum/Product, ' +
+        'Could not compile `compileLambda`: a multi-statement construct (loop-form Sum/Product, ' +
           'Loop, or Block) cannot be a Python lambda body — use ' +
           'compileFunction instead.'
       );
@@ -4568,7 +4600,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     ] as const)
       if (body.includes(helper))
         throw new Error(
-          `compileLambda: ${what} needs the module-level ` +
+          `Could not compile \`compileLambda\`: ${what} needs the module-level ` +
             `${helper.slice(0, -1)} helper, which cannot ride along a bare ` +
             `lambda — use compileFunction instead.`
         );

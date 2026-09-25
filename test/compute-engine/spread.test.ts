@@ -49,7 +49,12 @@ describe('Spread: evaluation splices a tuple value', () => {
     const ce = new ComputeEngine();
     ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
     ce.assign('p', ce.box(['Tuple', 3, 4]));
-    expect(ce.box(['a', ['Spread', 'p']]).evaluate().isSame(11)).toBe(true);
+    expect(
+      ce
+        .box(['a', ['Spread', 'p']])
+        .evaluate()
+        .isSame(11)
+    ).toBe(true);
     expect(
       ce
         .function('a', [ce.box(['Spread', 'p'])])
@@ -62,25 +67,47 @@ describe('Spread: evaluation splices a tuple value', () => {
     const ce = new ComputeEngine();
     ce.assign('t', ce.box(['Tuple', 1, 2, 3]));
     ce.assign('u', ce.box(['Tuple', 8, 2]));
-    expect(ce.box(['Add', ['Spread', 't']]).evaluate().isSame(6)).toBe(true);
     expect(
-      ce.box(['Add', 10, ['Spread', 't']]).evaluate().isSame(16)
+      ce
+        .box(['Add', ['Spread', 't']])
+        .evaluate()
+        .isSame(6)
     ).toBe(true);
     expect(
-      ce.box(['Multiply', ['Spread', 't']]).evaluate().isSame(6)
+      ce
+        .box(['Add', 10, ['Spread', 't']])
+        .evaluate()
+        .isSame(16)
     ).toBe(true);
-    expect(ce.box(['Divide', ['Spread', 'u']]).evaluate().isSame(4)).toBe(
-      true
-    );
-    expect(ce.box(['Power', ['Spread', 'u']]).evaluate().isSame(64)).toBe(
-      true
-    );
+    expect(
+      ce
+        .box(['Multiply', ['Spread', 't']])
+        .evaluate()
+        .isSame(6)
+    ).toBe(true);
+    expect(
+      ce
+        .box(['Divide', ['Spread', 'u']])
+        .evaluate()
+        .isSame(4)
+    ).toBe(true);
+    expect(
+      ce
+        .box(['Power', ['Spread', 'u']])
+        .evaluate()
+        .isSame(64)
+    ).toBe(true);
   });
 
   test('variadic built-ins accept a spread', () => {
     const ce = new ComputeEngine();
     ce.assign('t', ce.box(['Tuple', 3, 41, 7]));
-    expect(ce.box(['Max', ['Spread', 't']]).evaluate().isSame(41)).toBe(true);
+    expect(
+      ce
+        .box(['Max', ['Spread', 't']])
+        .evaluate()
+        .isSame(41)
+    ).toBe(true);
     expect(
       ce
         .box(['GCD', ['Spread', ['Tuple', 48, 36]]])
@@ -134,11 +161,13 @@ describe('Spread: non-tuple arguments', () => {
 //
 // Compilation: a Spread operand is spliced STATICALLY — a literal tuple
 // directly, a tuple-typed argument via positional `At` accesses. Unknown
-// arity fails closed (D6): a dynamic JS/Python spread would silently
+// arity fails closed: a dynamic JS/Python spread would silently
 // mis-bind on an arity mismatch instead of erroring like the interpreter.
 //
 describe('Spread: compilation', () => {
-  const { compile } = require('../../src/compute-engine/compilation/compile-expression');
+  const {
+    compile,
+  } = require('../../src/compute-engine/compilation/compile-expression');
 
   test('a tuple-typed argument compiles to positional accesses', () => {
     const ce = new ComputeEngine();

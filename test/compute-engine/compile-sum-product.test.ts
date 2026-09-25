@@ -53,14 +53,11 @@ describe('COMPILE Sum', () => {
   });
 
   test('Fourier-like: sum_{k=0}^{2} sin((2k+1)x)/(2k+1) at x=1', () => {
-    const expr = ce.parse(
-      '\\sum_{k=0}^{2} \\frac{\\sin((2k+1)x)}{2k+1}'
-    );
+    const expr = ce.parse('\\sum_{k=0}^{2} \\frac{\\sin((2k+1)x)}{2k+1}');
     const result = compile(expr);
     expect(result.success).toBe(true);
     // sin(1)/1 + sin(3)/3 + sin(5)/5
-    const expected =
-      Math.sin(1) / 1 + Math.sin(3) / 3 + Math.sin(5) / 5;
+    const expected = Math.sin(1) / 1 + Math.sin(3) / 3 + Math.sin(5) / 5;
     expect(result.run!({ x: 1 })).toBeCloseTo(expected, 10);
   });
 });
@@ -133,9 +130,7 @@ describe('COMPILE Sum - symbolic bounds', () => {
   });
 
   test('JS: Taylor sin(x) = sum_{k=0}^{n} (-1)^k x^(2k+1)/(2k+1)!', () => {
-    const expr = ce.parse(
-      '\\sum_{k=0}^{n} \\frac{(-1)^k x^{2k+1}}{(2k+1)!}'
-    );
+    const expr = ce.parse('\\sum_{k=0}^{n} \\frac{(-1)^k x^{2k+1}}{(2k+1)!}');
     const result = compile(expr);
     expect(result.success).toBe(true);
     const val = result.run!({ x: 0.5, n: 10 });
@@ -160,9 +155,7 @@ describe('COMPILE Sum - symbolic bounds', () => {
   });
 
   test('interval-js: Taylor sin(x) with symbolic n', () => {
-    const expr = ce.parse(
-      '\\sum_{k=0}^{n} \\frac{(-1)^k x^{2k+1}}{(2k+1)!}'
-    );
+    const expr = ce.parse('\\sum_{k=0}^{n} \\frac{(-1)^k x^{2k+1}}{(2k+1)!}');
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
     const val = unwrapInterval(result.run!({ x: 0.5, n: 10 }));
@@ -255,7 +248,7 @@ describe('COMPILE Sum - a bound naming a library constant (Tycho item 176)', () 
     expect(strip('i')).toContain('for');
   });
 
-  test("a bound naming a constant still folds when it is NOT shadowed", () => {
+  test('a bound naming a constant still folds when it is NOT shadowed', () => {
     // The guard must not blind the fold to a genuine constant bound: `e` here
     // is the engine's Euler number, not a parameter, so `Σ_{m=1..e} m` is the
     // 2-term sum 1 + 2.
@@ -469,7 +462,7 @@ describe('COMPILE Sum/Product/Max/Min - collection form', () => {
     expect(r.run!()).toBe(15);
   });
 
-  test('non-collection operand still fails closed (D6)', () => {
+  test('non-collection operand still fails closed', () => {
     engine.declare('s', engine.type('number'));
     // Sum of a bare scalar has neither an indexing set nor a collection
     // operand: it still fails closed (throws with fallback disabled).

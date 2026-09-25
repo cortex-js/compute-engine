@@ -190,7 +190,7 @@ describe('SORT AND ORDERING PUT NaN LAST ON EVERY ROUTE', () => {
           ce.box([op, 'xs', ['Function', ['Negate', 'x'], 'x']]),
           { constantFold: false }
         )
-      ).toThrow(/Fail closed/);
+      ).toThrow(/Could not compile/);
   });
 });
 
@@ -226,6 +226,6 @@ describe('SORT OF BOOLEANS, TUPLES OR SYMBOLS: INTERPRETER UNEVALUATED, JAVASCRI
         const js = new JavaScriptTarget();
         expect(() =>
           js.compile(eng.box([op, operand]), { constantFold: false })
-        ).toThrow(/not provably numbers.*Fail closed/);
+        ).toThrow(/not provably numbers/);
       });
 });

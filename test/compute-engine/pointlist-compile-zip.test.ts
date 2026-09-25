@@ -218,7 +218,7 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
   it('a union component declines with the revised per-component message', () => {
     const ce = zipEngine();
     expect(() => js.compile(ce.box(['PointList', 'k', 'U']))).toThrow(
-      /PointList: cannot compile — component 2 \(type `[^`]+`\) is neither a scalar slot nor a list source; its per-point value cannot be determined at compile time\. Fail closed \(D6\)\./
+      /Could not compile `PointList`: component 2 \(type `[^`]+`\) is neither a scalar slot nor a list source; its per-point value cannot be determined at compile time\./
     );
   });
 
@@ -277,7 +277,7 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
     const ce = zipEngine();
     const expr = ce.box(['PointList', -6, ['Range', 1, { num: '+Infinity' }]]);
     expect(() => js.compile(expr)).toThrow(
-      /PointList: source component 2 is an infinite collection — an infinite point list has no compiled value\. Fail closed \(D6\)\./
+      /Could not compile `PointList`: source component 2 is an infinite collection — an infinite point list has no compiled value\./
     );
     const r = js.compile(expr, { fallback: true });
     expect(r.success).toBe(false);
@@ -701,7 +701,7 @@ describe('PointList — GPU construction and the other targets are unchanged', (
     expect(() =>
       new GLSLTarget().compile(ce.box(['PointList', -6, 'v']))
     ).toThrow(
-      /PointList: cannot compile — component 2 is collection-valued .* target 'glsl'/
+      /Could not compile `PointList`: component 2 is collection-valued .* target 'glsl'/
     );
   });
 
@@ -710,7 +710,7 @@ describe('PointList — GPU construction and the other targets are unchanged', (
     expect(() =>
       new PythonTarget().compile(ce.box(['PointList', -6, 'n']))
     ).toThrow(
-      /PointList: cannot compile — component 2 is collection-valued .* target 'python'/
+      /Could not compile `PointList`: component 2 is collection-valued .* target 'python'/
     );
   });
 
@@ -728,7 +728,7 @@ describe('PointList — GPU construction and the other targets are unchanged', (
     );
     expect(wide.success).toBe(false);
     expect(wide.error).toMatch(
-      /PointList: cannot compile — the operator's compile handler has no lowering/
+      /Could not compile `PointList`: the operator's compile handler has no lowering/
     );
   });
 });

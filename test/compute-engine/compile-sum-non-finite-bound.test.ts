@@ -30,28 +30,53 @@ afterAll(() => warn.mockRestore());
 
 const INFINITE_SUM = () => ce.parse('\\sum_{i=1}^{\\infty} 2^{-i}');
 
-describe('Sum/Product with a non-finite bound fails closed (D6)', () => {
+describe('Sum/Product with a non-finite bound fails closed', () => {
   it('declines an infinite upper bound instead of emitting an endless loop', () => {
     const result = compile(INFINITE_SUM(), { constantFold: false });
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Sum: the upper bound/);
-    expect(result.error).toMatch(/Fail closed \(D6\)\./);
+    expect(result.error).toMatch(/Could not compile `Sum`: the upper bound/);
+    expect(result.error).toMatch(/Could not compile/);
   });
 
   it.each([
-    ['Sum', 'PositiveInfinity', 'upper', ['Sum', 'i', ['Limits', 'i', 1, 'PositiveInfinity']]],
-    ['Sum', 'NegativeInfinity', 'lower', ['Sum', 'i', ['Limits', 'i', 'NegativeInfinity', 10]]],
-    ['Product', 'PositiveInfinity', 'upper', ['Product', 'i', ['Limits', 'i', 1, 'PositiveInfinity']]],
-    ['Product', 'NegativeInfinity', 'lower', ['Product', 'i', ['Limits', 'i', 'NegativeInfinity', 5]]],
-  ] as const)('%s with a %s %s bound throws on the direct target', (kind, _bound, which, json) => {
-    expect(() =>
-      new JavaScriptTarget().compile(ce.box(json as any), {
-        constantFold: false,
-      })
-    ).toThrow(
-      new RegExp(`${kind}: the ${which} bound .* is not a finite number`)
-    );
-  });
+    [
+      'Sum',
+      'PositiveInfinity',
+      'upper',
+      ['Sum', 'i', ['Limits', 'i', 1, 'PositiveInfinity']],
+    ],
+    [
+      'Sum',
+      'NegativeInfinity',
+      'lower',
+      ['Sum', 'i', ['Limits', 'i', 'NegativeInfinity', 10]],
+    ],
+    [
+      'Product',
+      'PositiveInfinity',
+      'upper',
+      ['Product', 'i', ['Limits', 'i', 1, 'PositiveInfinity']],
+    ],
+    [
+      'Product',
+      'NegativeInfinity',
+      'lower',
+      ['Product', 'i', ['Limits', 'i', 'NegativeInfinity', 5]],
+    ],
+  ] as const)(
+    '%s with a %s %s bound throws on the direct target',
+    (kind, _bound, which, json) => {
+      expect(() =>
+        new JavaScriptTarget().compile(ce.box(json as any), {
+          constantFold: false,
+        })
+      ).toThrow(
+        new RegExp(
+          `Could not compile \`${kind}\`: the ${which} bound .* is not a finite number`
+        )
+      );
+    }
+  );
 
   // A bound WRITTEN as `NaN` is rejected one step earlier, at boxing: the
   // bound slot types `number` and `NaN` is an absence marker, so the operand
@@ -63,13 +88,16 @@ describe('Sum/Product with a non-finite bound fails closed (D6)', () => {
     ['Sum', ['Sum', 'i', ['Limits', 'i', 1, 'NaN']]],
     ['Sum', ['Sum', 'i', ['Limits', 'i', 'NaN', 5]]],
     ['Product', ['Product', 'i', ['Limits', 'i', 1, 'NaN']]],
-  ] as const)('%s with a NaN bound is invalid at boxing and throws on the direct target', (_kind, json) => {
-    const expr = ce.box(json as any);
-    expect(expr.isValid).toBe(false);
-    expect(() =>
-      new JavaScriptTarget().compile(expr, { constantFold: false })
-    ).toThrow(/Cannot compile invalid expression/);
-  });
+  ] as const)(
+    '%s with a NaN bound is invalid at boxing and throws on the direct target',
+    (_kind, json) => {
+      const expr = ce.box(json as any);
+      expect(expr.isValid).toBe(false);
+      expect(() =>
+        new JavaScriptTarget().compile(expr, { constantFold: false })
+      ).toThrow(/Could not compile invalid expression/);
+    }
+  );
 
   it('declines rather than trying to UNROLL an infinite range', () => {
     // The unroll path runs `for (k = lower; k <= upper; k++)` at COMPILE time:
@@ -84,7 +112,7 @@ describe('Sum/Product with a non-finite bound fails closed (D6)', () => {
       constantFold: false,
     });
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Fail closed \(D6\)\./);
+    expect(result.error).toMatch(/Could not compile/);
   });
 
   it('declines when only a TRAILING indexing set is infinite', () => {
@@ -98,7 +126,7 @@ describe('Sum/Product with a non-finite bound fails closed (D6)', () => {
       { constantFold: false }
     );
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Fail closed \(D6\)\./);
+    expect(result.error).toMatch(/Could not compile/);
   });
 
   it('the interpreter still evaluates the series', () => {
@@ -126,7 +154,7 @@ describe('Sum/Product with a non-finite bound fails closed (D6)', () => {
     });
     expect(direct.success).toBe(false);
     expect(direct.error).toMatch(
-      /Sum: the upper bound .* is not a finite number/
+      /Could not compile `Sum`: the upper bound .* is not a finite number/
     );
     expect(
       compile(INFINITE_SUM(), { to: 'interval-js', constantFold: false })
@@ -160,9 +188,11 @@ describe('the GPU targets decline a non-finite bound too', () => {
       });
       expect(result.success).toBe(false);
       expect(result.error).toMatch(
-        new RegExp(`${kind}: the ${which} bound .* is not a finite number`)
+        new RegExp(
+          `Could not compile \`${kind}\`: the ${which} bound .* is not a finite number`
+        )
       );
-      expect(result.error).toMatch(/Fail closed \(D6\)\./);
+      expect(result.error).toMatch(/Could not compile/);
     }
   });
 
@@ -172,13 +202,19 @@ describe('the GPU targets decline a non-finite bound too', () => {
     ['Sum', ['Sum', 'i', ['Limits', 'i', 1, 'NaN']]],
     ['Sum', ['Sum', 'i', ['Limits', 'i', 'NaN', 5]]],
     ['Product', ['Product', 'i', ['Limits', 'i', 1, 'NaN']]],
-  ] as const)('%s with a NaN bound declines as an invalid expression', (_kind, json) => {
-    for (const to of ['glsl', 'wgsl'] as const) {
-      const result = compile(ce.box(json as any), { to, constantFold: false });
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/Cannot compile invalid expression/);
+  ] as const)(
+    '%s with a NaN bound declines as an invalid expression',
+    (_kind, json) => {
+      for (const to of ['glsl', 'wgsl'] as const) {
+        const result = compile(ce.box(json as any), {
+          to,
+          constantFold: false,
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/Could not compile invalid expression/);
+      }
     }
-  });
+  );
 
   it.each(['glsl', 'wgsl'] as const)(
     'the parsed infinite series declines on %s',
@@ -190,8 +226,14 @@ describe('the GPU targets decline a non-finite bound too', () => {
   );
 
   it.each([
-    ['glsl', '((1.0) + (2.0) + (3.0) + (4.0) + (5.0) + (6.0) + (7.0) + (8.0) + (9.0) + (10.0))'],
-    ['wgsl', '((1.0) + (2.0) + (3.0) + (4.0) + (5.0) + (6.0) + (7.0) + (8.0) + (9.0) + (10.0))'],
+    [
+      'glsl',
+      '((1.0) + (2.0) + (3.0) + (4.0) + (5.0) + (6.0) + (7.0) + (8.0) + (9.0) + (10.0))',
+    ],
+    [
+      'wgsl',
+      '((1.0) + (2.0) + (3.0) + (4.0) + (5.0) + (6.0) + (7.0) + (8.0) + (9.0) + (10.0))',
+    ],
   ] as const)('a finite sum still compiles unchanged on %s', (to, code) => {
     const result = compile(ce.parse('\\sum_{i=1}^{10} i'), {
       to,
@@ -288,7 +330,9 @@ describe('a SYMBOLIC bound is guarded at run time, not at compile time', () => {
   });
 
   it('the interval target guards a symbolic bound with `entire`', () => {
-    const result = compile(ce.parse('\\sum_{i=1}^{n} i'), { to: 'interval-js' });
+    const result = compile(ce.parse('\\sum_{i=1}^{n} i'), {
+      to: 'interval-js',
+    });
     expect(result.success).toBe(true);
     expect(result.run!({ n: Infinity })).toEqual({ kind: 'entire' });
   });

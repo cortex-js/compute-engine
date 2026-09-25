@@ -331,7 +331,7 @@ describe('the shapes a color conversion still refuses', () => {
         ...NO_FOLD,
         fallback: false,
       } as any)
-    ).toThrow(/A list is not a color/);
+    ).toThrow(/a list is not a color/);
   });
 
   test('a collection whose elements are not colors fails closed', () => {

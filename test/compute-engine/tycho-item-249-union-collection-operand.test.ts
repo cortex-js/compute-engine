@@ -219,7 +219,7 @@ describe('Tycho item 249 — what the union admission refuses', () => {
     ce.declare('zc', 'complex | vector<complex^2>');
     expect(() =>
       compile(ce.box(['Multiply', 2, 'zc']), { to: 'javascript', fallback: false })
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Could not compile/);
   });
 });
 
