@@ -2361,3 +2361,45 @@ describe('POLYLOGARITHM Liₙ(z)', () => {
     );
   });
 });
+
+describe('THE ERROR FUNCTIONS APPLY TO EACH ELEMENT OF A LIST', () => {
+  // `Erf`, `Erfc`, `Erfi` and `ErfInv` apply to each element of a list, as
+  // `Gamma`, `Zeta` and the other special functions of one argument do.
+  // Before, `Erf([0.5, 0.25])` was an `incompatible-type` error.
+  const cases: [string, (x: number) => number][] = [
+    ['Erf', (x) => new ComputeEngine().box(['Erf', x]).N().re],
+    ['Erfc', (x) => new ComputeEngine().box(['Erfc', x]).N().re],
+    ['Erfi', (x) => new ComputeEngine().box(['Erfi', x]).N().re],
+    ['ErfInv', (x) => erfInv(x)],
+  ];
+  test.each(cases)('%s of a list is the list of its values', (h, f) => {
+    const e = new ComputeEngine();
+    const r = e.box([h, ['List', 0.5, 0.25]]).evaluate();
+    expect(r.operator).toBe('List');
+    const values = r.ops!.map((x) => x.re);
+    expect(values[0]).toBeCloseTo(f(0.5), 12);
+    expect(values[1]).toBeCloseTo(f(0.25), 12);
+  });
+
+  test.each(cases)('%s of a list compiles to JavaScript', (h, f) => {
+    const e = new ComputeEngine();
+    e.declare('L', 'list<real>');
+    const r = compile(e.box([h, 'L']), {
+      to: 'javascript',
+      fallback: false,
+    } as any);
+    expect(r.success).toBe(true);
+    const out = (r.run as (v: object) => number[])({ L: [0.5, 0.25] });
+    expect(out[0]).toBeCloseTo(f(0.5), 12);
+    expect(out[1]).toBeCloseTo(f(0.25), 12);
+  });
+
+  test('an exact element stays exact', () => {
+    expect(
+      new ComputeEngine()
+        .box(['Erf', ['List', ['Rational', 1, 2]]])
+        .evaluate()
+        .toString()
+    ).toBe('[Erf(1/2)]');
+  });
+});

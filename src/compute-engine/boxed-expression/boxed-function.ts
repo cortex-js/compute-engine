@@ -6186,20 +6186,18 @@ function tupleBroadcastCells(
   if (!broadcastsOverTuples(expr.operator, def)) return undefined;
   if (skipBroadcastForVectorOps(def, false, tail)) return undefined;
   if (!tail.some(isTupleBroadcastParticipant)) return undefined;
-  // `Power`, and its canonical forms `Sqrt` (`x^(1/2)`) and `Root`
-  // (`x^(1/n)`), are arithmetic: over a tuple with a LIST coordinate (a data
-  // tuple such as `Tuple(A, B)` with `A`, `B` lists, not a point) they are an
-  // error, as `Add`, `Multiply`, `Divide` and `Negate` are (see
-  // `listCoordinateTupleOperandError`). Without this, the component-wise
-  // broadcast gave a tuple of lists that no consumer can use.
-  if (
-    expr.operator === 'Power' ||
-    expr.operator === 'Sqrt' ||
-    expr.operator === 'Root'
-  ) {
-    const listTuple = listCoordinateTupleOperandError(expr.engine, tail);
-    if (listTuple !== undefined) return listTuple;
-  }
+  // A function applied to each coordinate of a tuple with a LIST coordinate
+  // (a data tuple such as `Tuple(A, B)` with `A`, `B` lists, not a point) is
+  // an error, as the arithmetic operators are (see
+  // `listCoordinateTupleOperandError`). This covers `Power` and its canonical
+  // forms `Sqrt` (`x^(1/2)`) and `Root` (`x^(1/n)`), and every other operator
+  // that applies to each coordinate: `Sin`, `Ln`, `Floor`, `Arctan2`, … (user
+  // decision 2026-09-25). Without this, `Sin(Tuple([1, 2], 3))` gave the
+  // tuple of lists `([sin(1), sin(2)], sin(3))`, which is neither a point nor
+  // a list of points, so no consumer can use it. A list of points is written
+  // `PointList(A, B)`, or `(A, B)` in LaTeX.
+  const listTuple = listCoordinateTupleOperandError(expr.engine, tail);
+  if (listTuple !== undefined) return listTuple;
 
   const ce = expr.engine;
   let length: number | undefined;

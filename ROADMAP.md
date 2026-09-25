@@ -499,16 +499,6 @@ holding a list, but gives an `incompatible-type` error when the same list is
 written as a literal. The two routes should report the misuse the same way (the
 error, since the operand types are known once `P`'s value is read).
 
-### Threaded functions over a code-built tuple with a list coordinate (OPEN, decision — 2026-09-25)
-
-`Sin(Tuple(A, B))`, and the other functions that apply to each coordinate of a
-tuple (other than `Power`, `Sqrt` and `Root`), still evaluate to a tuple of
-lists when `A` and `B` are lists, for example `(sin([1,2,3]), sin([10,20,30]))`.
-The 2026-09-25 decision makes only arithmetic over such a tuple an
-`incompatible-type` error. Decide whether the functions that apply to each
-coordinate should also be an error, stay a tuple of lists, or read the tuple as
-a list of points.
-
 ### Residues of the tuple-of-lists change (OPEN, small — 2026-09-25)
 
 (1) The static type of arithmetic over a code-built tuple with a list coordinate

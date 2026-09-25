@@ -426,6 +426,69 @@ describe('Arithmetic over a MathJSON Tuple with a list coordinate fails closed',
   });
 });
 
+describe('A function applied to each coordinate of a MathJSON Tuple with a list coordinate fails closed', () => {
+  // User decision 2026-09-25: a function that applies to each coordinate of a
+  // tuple (`Sin((1, 2))` is `(sin(1), sin(2))`) is an error over a tuple
+  // with a LIST coordinate, as arithmetic is. Such a tuple is data, not a
+  // point: `Sin(Tuple([1, 2], 3))` used to give the tuple of lists
+  // `([sin(1), sin(2)], sin(3))`, which no consumer can use.
+  const errorCode = (e: any): string | undefined =>
+    e.operator === 'Error' ? e.op1.op1?.string : undefined;
+
+  const cases: [string, any][] = [
+    ['Sin', ['Sin', ['Tuple', 'A', 'B']]],
+    ['Ln', ['Ln', ['Tuple', 'A', 'B']]],
+    ['Floor', ['Floor', ['Tuple', 'A', 'B']]],
+    ['Arctan2', ['Arctan2', ['Tuple', 'A', 'B'], 1]],
+    ['Mod', ['Mod', ['Tuple', 'A', 'B'], 2]],
+    ['Sin of a scalar and a list', ['Sin', ['Tuple', 'A', 3]]],
+  ];
+
+  test.each(cases)('%s is an incompatible-type error', (_, json) => {
+    const e = ce.box(json);
+    // The canonical form is kept: the check happens at evaluation.
+    expect(e.operator).not.toBe('Error');
+    for (const r of [e.evaluate(), e.N()]) {
+      expect(r.operator).toBe('Error');
+      expect(errorCode(r)).toBe('incompatible-type');
+    }
+  });
+
+  test.each(cases)('%s declines to compile to JavaScript', (_, json) => {
+    expect(() =>
+      compile(declaredEngine().box(json), {
+        to: 'javascript',
+        fallback: false,
+      } as any)
+    ).toThrow(/tuple with a list coordinate/);
+  });
+
+  test('a function of a tuple of scalars still applies to each coordinate', () => {
+    expect(
+      ce
+        .box(['Floor', ['Tuple', 1.5, 2.5]])
+        .evaluate()
+        .toString()
+    ).toBe('(1, 2)');
+    const r = compile(declaredEngine().box(['Floor', ['Tuple', 1.5, 2.5]]), {
+      to: 'javascript',
+      fallback: false,
+    } as any);
+    expect(r.success).toBe(true);
+    expect((r.run as () => unknown)()).toEqual([1, 2]);
+  });
+
+  test('the LaTeX sin((A, B)) is the sine of each point', () => {
+    expect(value('\\sin((A, B))')).toEqual(value('(\\sin(A), \\sin(B))'));
+  });
+
+  test('Abs, which reads the norm of a point, is unchanged', () => {
+    expect(ce.box(['Abs', ['Tuple', 'A', 'B']]).evaluate().operator).toBe(
+      'List'
+    );
+  });
+});
+
 describe('A point parameter called with a list of points maps over the points', () => {
   // User decision 2026-09-25: a user function whose parameter is declared as
   // a point (a tuple type) and that is called with a list of points answers

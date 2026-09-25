@@ -40,6 +40,7 @@ import {
 } from '../boxed-expression/utils.js';
 import {
   broadcastableParamSlots,
+  broadcastsOverTuples,
   declaresBroadcastableParam,
   paramsAreScalar,
   type BroadcastSlotPlan,
@@ -1848,9 +1849,10 @@ export class BaseCompiler {
   /**
    * The arithmetic heads that fail closed over a `Tuple` with a list
    * coordinate (see the check in `compileExpr`). They are the heads whose
-   * evaluate handlers, or whose component-wise tuple broadcast
-   * (`tupleBroadcastCells`: `Power`, `Sqrt`, `Root`), report
-   * `listCoordinateTupleOperandError`.
+   * evaluate handlers report `listCoordinateTupleOperandError`. The other
+   * heads that fail closed are those that apply to each coordinate of a tuple
+   * (`broadcastsOverTuples`: `Sin`, `Ln`, `Floor`, …), whose component-wise
+   * tuple broadcast (`tupleBroadcastCells`) reports the same error.
    */
   private static readonly TUPLE_ARITHMETIC_HEADS: ReadonlySet<string> = new Set(
     ['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power', 'Sqrt', 'Root']
@@ -7356,7 +7358,8 @@ export class BaseCompiler {
       }
     }
 
-    // Arithmetic over a `Tuple` with a LIST coordinate (`Tuple(A, B)` with
+    // Arithmetic, or a function applied to each coordinate (`Sin`, `Ln`,
+    // `Floor`, …), over a `Tuple` with a LIST coordinate (`Tuple(A, B)` with
     // `A`, `B` declared lists, built as MathJSON) fails closed. Such a tuple
     // is data, not a point, and the interpreter answers an
     // `incompatible-type` error for it (`listCoordinateTupleOperandError`).
@@ -7365,8 +7368,9 @@ export class BaseCompiler {
     // a point nor a list of points. A list of points is `PointList(A, B)`,
     // which is what the LaTeX `(A, B)` canonicalizes to.
     if (
-      BaseCompiler.TUPLE_ARITHMETIC_HEADS.has(h) &&
-      args.some((x) => isTupleWithListCoordinate(x))
+      args.some((x) => isTupleWithListCoordinate(x)) &&
+      (BaseCompiler.TUPLE_ARITHMETIC_HEADS.has(h) ||
+        BaseCompiler.appliesToEachTupleCoordinate(engine, h))
     )
       throw new Error(
         `Could not compile \`${h}\`: an operand is a tuple with a list coordinate, ` +
@@ -10184,6 +10188,20 @@ export class BaseCompiler {
    * refuse a tuple of any width other than 3 or 4, which is the width the
    * interpreter answers `incompatible-type` for.
    */
+  /**
+   * Whether the operator `h` applies to each coordinate of a tuple operand
+   * (`Sin((1, 2))` is `(sin(1), sin(2))`), read from its definition with the
+   * predicate the interpreter's component-wise tuple broadcast uses
+   * (`broadcastsOverTuples`), so the two routes decide the same way.
+   */
+  private static appliesToEachTupleCoordinate(
+    engine: ComputeEngine,
+    h: string
+  ): boolean {
+    const def = lookupApplicable(h, engine.context.lexicalScope);
+    return isOperatorDef(def) && broadcastsOverTuples(h, def.operator);
+  }
+
   private static isBroadcastExemptTupleOperand(
     engine: ComputeEngine,
     h: string,

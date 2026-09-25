@@ -364,6 +364,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Erf: {
       description: 'Gauss error function',
       complexity: 7500,
+      // The error functions apply to each element of a list, as the other
+      // special functions of one argument (`Gamma`, `Zeta`, …) do.
+      broadcastable: true,
       // The carrier is every point where erf has a value: the finite
       // complex numbers (erf is entire) and the signed infinities
       // (`Erf(±∞) = ±1` — which is also why the RESULT is plain
@@ -415,6 +418,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Erfc: {
       description: 'Complementary error function: 1 - Erf(x)',
       complexity: 7500,
+      broadcastable: true,
       // The same carrier as `Erf` (erfc = 1 − erf): the finite complex
       // numbers plus the signed infinities, where the values are genuine
       // (`Erfc(+∞) = 0`, `Erfc(−∞) = 2`) — and finite, which is why the
@@ -463,6 +467,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     ErfInv: {
       description: 'Inverse of the error function',
       complexity: 7500,
+      broadcastable: true,
       // The engine has a REAL kernel only. On the real segment (−1, 1) the
       // value is a finite real, ±1 are the ±∞ poles, and everywhere else on
       // the carrier the application has a value the engine cannot compute
@@ -542,6 +547,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Erfi: {
       description: 'Imaginary error function: -i·Erf(i·x)',
       complexity: 7500,
+      broadcastable: true,
       // The carrier is every point where erfi has a value: the finite
       // complex numbers (erfi is entire) and the signed infinities
       // (`Erfi(±∞) = ±∞`). `~oo` is off-carrier — an `incompatible-type`

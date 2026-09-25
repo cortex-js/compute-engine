@@ -21,9 +21,12 @@
     `·`, `/`, negation, powers, `Sqrt`, `Root`) over such a tuple with a list
     coordinate is an `incompatible-type` error, and the compiled targets decline
     it; it used to combine the lists coordinate by coordinate into a tuple of
-    lists that is neither a point nor a list of points. Write `PointList(A, B)`
+    lists that is neither a point nor a list of points. The same is true of the
+    functions that apply to each coordinate of a tuple (`Sin`, `Ln`, `Floor`,
+    `Arctan2`, `Mod`, …): `Sin(Tuple([1, 2], 3))` is an `incompatible-type`
+    error, where it gave `([sin(1), sin(2)], sin(3))`. Write `PointList(A, B)`
     for a list of points. Reading such a tuple (`PointX`, `Norm`, `Dot`,
-    `Length`) is unchanged.
+    `Length`, `Abs`) is unchanged.
   - A user function whose parameter is declared as a point (`tuple<real, real>`,
     `tuple<number, number>`, `tuple<broadcastable<number>, …>`) or has no
     declared type maps over a list of points: `k((x, y))` with `x = [1, 2]` and
@@ -194,6 +197,11 @@
 
 ### Resolved Issues
 
+- `Erf`, `Erfc`, `Erfi` and `ErfInv` now apply to each element of a list, as
+  `Gamma`, `Zeta` and the other special functions of one argument do:
+  `Erf([0.5, 0.25])` is `[0.5205…, 0.2763…]` on the interpreter and in the
+  compiled `javascript` code (and in `interval-js` and `python` for `Erf` and
+  `Erfc`). It was an `incompatible-type` error.
 - `Distance` and `Norm` now read a restricted point or a restricted list of
   points whose condition is not decided. With `t` free,
   `Distance((3,4)\{0<t\}, (0,0))` was an `incompatible-type` error; it is now
@@ -401,14 +409,6 @@
   proof, and such a comparison is `undefined`: the documentation now says so,
   and points to `isIdenticallyEqual()`.
 
-## 0.134.0 _2026-09-24_
-
-### Behavior Changes
-
-- **Ordering functions order exactly.** `Max`, `Min`, `Supremum`, `Infimum`,
-  `Clamp`, `ElementMax`, `ElementMin`, `Sort`, `MaxBy`, `MinBy`, `ArgMax` and
-  `ArgMin` order two different numbers exactly: `Max(1e-12, 2e-12)` is `2e-12`.
-  Before, two numbers closer than the engine tolerance (1e-10) were a tie that
 - The LaTeX of a `Tuple` that has a list of numbers as a coordinate parses back
   as the same `Tuple`. Such a tuple is now spelled `\operatorname{Tuple}(…)`:
   `Tuple([1, 2], [3, 4])` serializes as
@@ -422,6 +422,14 @@
   `\bigl\lbrack\bigr\rbrack`, with no space between the delimiters (it was
   `\lbrace \rbrace`). Both spellings parse to the same value.
 
+## 0.134.0 _2026-09-24_
+
+### Behavior Changes
+
+- **Ordering functions order exactly.** `Max`, `Min`, `Supremum`, `Infimum`,
+  `Clamp`, `ElementMax`, `ElementMin`, `Sort`, `MaxBy`, `MinBy`, `ArgMax` and
+  `ArgMin` order two different numbers exactly: `Max(1e-12, 2e-12)` is `2e-12`.
+  Before, two numbers closer than the engine tolerance (1e-10) were a tie that
   kept the first operand. The relational operators (`Less`, `Greater`, …) and
   equality keep the tolerance, so `1e-12 < 2e-12` is still `False`: a relation
   stays consistent with `Equal`. `Real`, `Imaginary` and `Argument` of an exact
