@@ -168,6 +168,147 @@ describe('STEP 2: A HIGHER PRECISION DECIDES CLOSE CONSTANTS', () => {
   });
 });
 
+// Step 2 raises the precision without the `precision` setter of the engine,
+// which resets the engine (every cached value is discarded and the cache
+// axes advance). Before, each pair that reached step 2 reset the engine
+// twice.
+describe('STEP 2 DOES NOT RESET THE ENGINE', () => {
+  test('no advance of the cache axis', () => {
+    const e = new ComputeEngine();
+    const max = e.box(['Max', SQRT2_PLUS, ['Sqrt', 2]]);
+    const before = e._anyVersion;
+    const result = max.evaluate();
+    // The maximum is decided by step 2
+    expect(result.isSame(e.box(SQRT2_PLUS).evaluate())).toBe(true);
+    expect(e._anyVersion - before).toBe(0);
+  });
+
+  test('the value of π is read at the raised precision', () => {
+    // π − 314159265358979323846264338327/10²⁹ = 9.5·10⁻³⁰: not decided at
+    // 21 digits, and decided at 50 digits. The engine keeps π with the
+    // digits of the working precision (and a few more), which are fewer
+    // than 30: read from the engine, π would be smaller than the fraction.
+    const r: MathJsonExpression = [
+      'Divide',
+      { num: '314159265358979323846264338327' },
+      ['Power', 10, 29],
+    ];
+    expect(valueAt(60, ['Subtract', 'Pi', r]).startsWith('9.502884')).toBe(
+      true
+    );
+    const e = new ComputeEngine();
+    const fraction = e.box(r).evaluate();
+    expect(exactOrder(e.box('Pi'), fraction)).toBe(1);
+    expect(exactOrder(fraction, e.box('Pi'))).toBe(-1);
+    expect(e.box(['Max', 'Pi', r]).evaluate().toString()).toBe('pi');
+    expect(e.box(['Max', r, 'Pi']).evaluate().toString()).toBe('pi');
+  });
+
+  test('the precision of the engine is raised, not only of the big decimals', () => {
+    // sin(314159265358979323846264338327950289/10³⁵) = −5.8·10⁻³⁶. The
+    // evaluation of `sin` rounds a value smaller than its rounding error at
+    // the precision of the ENGINE to 0: with only the precision of the big
+    // decimals raised, the order is not decided.
+    const sin: MathJsonExpression = [
+      'Sin',
+      [
+        'Divide',
+        { num: '314159265358979323846264338327950289' },
+        ['Power', 10, 35],
+      ],
+    ];
+    expect(valueAt(60, sin).startsWith('-5.8028306')).toBe(true);
+    const e = new ComputeEngine();
+    const a = e.box(sin).evaluate();
+    const b = e.box(['Negate', ['Power', 10, -40]]).evaluate();
+    expect(exactOrder(a, b)).toBe(-1);
+    expect(exactOrder(b, a)).toBe(1);
+  });
+
+  test('the precision and the tolerance are restored after a throw', () => {
+    const e = new ComputeEngine();
+    e.tolerance = 1e-8;
+    const precision = e.precision;
+    const bigDecimalPrecision = BigDecimal.precision;
+    // A constant whose value is computed by a host function, which throws
+    // at a precision higher than 30 digits: step 2 computes the values of
+    // the constants again at 50 digits.
+    e.declare('Boom', {
+      isConstant: true,
+      holdUntil: 'N',
+      type: 'real',
+      value: (engine) => {
+        if (engine.precision > 30) throw new Error('boom');
+        return engine.number(engine.bignum(2));
+      },
+    });
+    const a = e.box(['Sqrt', ['Add', 'Boom', ['Power', 10, -30]]]).evaluate();
+    const b = e.box(['Sqrt', 2]).evaluate();
+    expect(() => exactOrder(a, b)).toThrow('boom');
+    expect(e.precision).toBe(precision);
+    expect(e.tolerance).toBe(1e-8);
+    expect(BigDecimal.precision).toBe(bigDecimalPrecision);
+    // The value of the constant is still the one at the working precision.
+    expect(e.box('Boom').N().toString()).toBe('2');
+    // Step 2 is done again after the throw.
+    expect(
+      exactOrder(e.box(SQRT2_PLUS).evaluate(), e.box(['Sqrt', 2]).evaluate())
+    ).toBe(1);
+  });
+
+  test('a value of a constant read at the raised precision is not stored', () => {
+    // The engine stores the value of a constant when it is built, and again
+    // on the first read after a reset (here, a change of the angular unit).
+    // A first read inside `_withTransientPrecision` must not store the value
+    // at the raised precision: it would then be read at the working
+    // precision.
+    const expected = new ComputeEngine().box('Pi').N().json;
+    const e = new ComputeEngine();
+    e.angularUnit = 'deg';
+    e.angularUnit = 'rad';
+    const raised = e._withTransientPrecision(50, () => e.box('Pi').N().json);
+    expect(raised).not.toEqual(expected);
+    expect(e.box('Pi').N().json).toEqual(expected);
+  });
+
+  test('a symbol whose value is a symbol whose value is π', () => {
+    // The chain is kept: the value of `x` is the symbol `y`, and the value
+    // of `y` is `Pi`. The value of `x` is read at the raised precision.
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('y', 'real');
+    e.assign('y', e.symbol('Pi'));
+    e.assign('x', e.symbol('y'));
+    expect(e.symbol('x').value?.json).toBe('y');
+    const r: MathJsonExpression = [
+      'Divide',
+      { num: '314159265358979323846264338327' },
+      ['Power', 10, 29],
+    ];
+    const fraction = e.box(r).evaluate();
+    expect(exactOrder(e.symbol('x'), fraction)).toBe(1);
+    expect(exactOrder(fraction, e.symbol('x'))).toBe(-1);
+  });
+
+  test('also during a computation that holds a scratch scope', () => {
+    // A computation registers the scopes it will pop in
+    // `_scratchDeclarationScopes`. Step 2 was skipped while the list was
+    // not empty when it reset the engine, because the reset clears the
+    // list. Without a reset, the list does not change.
+    const e = new ComputeEngine();
+    const scope = {};
+    e._scratchDeclarationScopes.push(scope);
+    try {
+      expect(
+        exactOrder(e.box(SQRT2_PLUS).evaluate(), e.box(['Sqrt', 2]).evaluate())
+      ).toBe(1);
+      expect(e._scratchDeclarationScopes).toEqual([scope]);
+    } finally {
+      e._scratchDeclarationScopes.pop();
+    }
+  });
+});
+
 describe('STEP 3: A TIE WITHIN THE TOLERANCE, NEVER AN ORDER', () => {
   test('cos(10⁻³⁰) − 1 and 0', () => {
     expect(valueAt(90, COS_30)).toBe('-5e-61');
@@ -202,5 +343,19 @@ describe('STEP 3: A TIE WITHIN THE TOLERANCE, NEVER AN ORDER', () => {
         { tieWithinTolerance: true }
       )
     ).toBeUndefined();
+  });
+});
+
+describe('A SYMBOL VALUE READ INSIDE THE TRANSIENT WINDOW IS NOT STORED', () => {
+  // The memo of a symbol's value is keyed on the world version, which the
+  // transient precision window does not advance: a value computed at the
+  // raised precision must not be served at the working precision afterwards.
+  test('x := 2π read inside the window keeps its working-precision value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', ce.parse('2\\pi'));
+    (ce as any)._withTransientPrecision(50, () => ce.box('x').N());
+    const clean = new ComputeEngine();
+    clean.assign('x', clean.parse('2\\pi'));
+    expect(ce.box('x').N().json).toEqual(clean.box('x').N().json);
   });
 });

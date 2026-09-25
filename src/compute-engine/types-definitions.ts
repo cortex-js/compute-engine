@@ -1705,6 +1705,16 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    *  @internal */
   readonly storedValue: Expression | undefined;
 
+  /** For a constant, its value computed again from its definition at the
+   *  current precision, and not stored: the value of `Pi` at a precision
+   *  that `_withTransientPrecision` set, while `storedValue` keeps the
+   *  value at the precision of the engine. `undefined` for a symbol that
+   *  is not a constant, and for a constant without a value. Optional so
+   *  that the structural mirror of this interface in `types-expression.ts`
+   *  does not need it.
+   *  @internal */
+  _valueAtCurrentPrecision?(): Expression | undefined;
+
   /**
    * True if the current value refers to the symbol itself (a degenerate
    * self-referential binding, e.g. `a := a + 1` over an unbound `a`). Such a

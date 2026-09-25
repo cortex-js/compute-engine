@@ -1617,6 +1617,20 @@ export class ComputeEngine implements IComputeEngine {
     this._reset();
   }
 
+  /** Run `fn` at the precision `digits` (of the engine and of the big
+   * decimals) without a reset of the engine: see
+   * `EngineNumericConfiguration.withTransientPrecision`.
+   * @internal */
+  _withTransientPrecision<T>(digits: number, fn: () => T): T {
+    return this._numericConfiguration.withTransientPrecision(digits, fn);
+  }
+
+  /** True while `_withTransientPrecision` runs a function.
+   * @internal */
+  get _atTransientPrecision(): boolean {
+    return this._numericConfiguration.isTransientPrecision;
+  }
+
   /**
    * The unit used for unitless angles in trigonometric functions.
    *

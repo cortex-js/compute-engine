@@ -490,9 +490,31 @@ export class _BoxedValueDefinition
    * at all (it lives in the context's assumed-value overlay, which the scope
    * that assumed it discards on its pop). */
   get storedValue(): Expression | undefined {
+    // While `_withTransientPrecision` runs a function, the precision is not
+    // the working precision of the engine. The value of a constant (`Pi`)
+    // is then computed again at the current precision and not stored: the
+    // stored value keeps the working precision, and a value stored here
+    // would be read later at the working precision.
+    if (
+      this._isConstant &&
+      this._defValue !== undefined &&
+      this._engine._atTransientPrecision
+    )
+      return dynamicValue(this._engine, this._defValue);
     if (this._value === null)
       this._value = dynamicValue(this._engine, this._defValue);
     return this._value;
+  }
+
+  /** For a constant, its value computed again from `_defValue` at the
+   * current precision. The result is not stored: the stored value keeps the
+   * working precision of the engine. The assumed-value overlay of the
+   * `value` getter is ignored on purpose: a constant has no assumed value.
+   * Read it only inside `_withTransientPrecision` (the exact ordering in
+   * `compare.ts`). */
+  _valueAtCurrentPrecision(): Expression | undefined {
+    if (!this._isConstant) return undefined;
+    return dynamicValue(this._engine, this._defValue);
   }
 
   /**

@@ -1138,13 +1138,14 @@ export function cmp(
  *    argument of a complex number) does not set it: a tie with zero would
  *    make a negative value non-negative.
  *
- * Steps 1 and 2 are not run again inside themselves (`resolvingTie`): the
- * simplification of step 1 and the evaluations of step 2 can evaluate an
- * operator that calls `exactOrder` (`Abs`, `Max`), and a nested run would
- * simplify inside a simplification, which can recurse without end. No
- * simplification rule calls `exactOrder` directly; it is reached from the
- * evaluate handlers of the operators above, which a simplification can
- * call, and the guard bounds that case to one nested simplification.
+ * Steps 1 and 2 are not run again inside themselves, for the same engine
+ * (`resolvingTie`): the simplification of step 1 and the evaluations of
+ * step 2 can evaluate an operator that calls `exactOrder` (`Abs`, `Max`),
+ * and a nested run would simplify inside a simplification, which can
+ * recurse without end. No simplification rule calls `exactOrder` directly;
+ * it is reached from the evaluate handlers of the operators above, which a
+ * simplification can call, and the guard bounds that case to one nested
+ * simplification.
  */
 export function exactOrder(
   a: Expression,
@@ -1153,8 +1154,9 @@ export function exactOrder(
 ): -1 | 0 | 1 | undefined {
   const order = orderAtWorkingPrecision(a, b);
   if (order !== undefined) return order;
-  if (resolvingTie || !isRealConstantPair(a, b)) return undefined;
-  resolvingTie = true;
+  const ce = a.engine;
+  if (resolvingTie.has(ce) || !isRealConstantPair(a, b)) return undefined;
+  resolvingTie.add(ce);
   try {
     if (isProvedEqual(a, b)) return 0;
     const raised = orderAtRaisedPrecision(a, b);
@@ -1163,13 +1165,15 @@ export function exactOrder(
       return 0;
     return undefined;
   } finally {
-    resolvingTie = false;
+    resolvingTie.delete(ce);
   }
 }
 
-/** True while `exactOrder` runs its steps for an undecided order (a
- *  symbolic proof, a higher precision). See `exactOrder`. */
-let resolvingTie = false;
+/** The engines for which `exactOrder` is running its steps for an
+ *  undecided order (a symbolic proof, a higher precision). See
+ *  `exactOrder`. One set for all the engines, so that a comparison in one
+ *  engine does not skip the steps of a comparison in another engine. */
+const resolvingTie = new WeakSet<Expression['engine']>();
 
 /**
  * The precision of the second attempt of `exactOrder` (step 2): twice the
@@ -1232,18 +1236,32 @@ function isProvedEqual(a: Expression, b: Expression): boolean {
 }
 
 /**
- * The order of `a` and `b` (`orderAtWorkingPrecision`) with the precision
- * of the engine raised to `raisedPrecision`, or `undefined` when it is not
- * decided or when the precision cannot be raised.
+ * The order of the real constants `a` and `b` with the precision raised to
+ * `raisedPrecision`, or `undefined` when it is not decided or when the
+ * precision cannot be raised.
  *
- * The precision is changed with the `precision` setter of the engine, which
- * recomputes the values that depend on it (the value of `π`, the stored
- * values of expressions). Setting only the precision of the big decimals
- * would keep those values at the working precision, and the error bounds
- * at the raised precision would then be wrong. Afterwards, the precision of
- * the engine, the precision of the big decimals (global to the module, and
- * another engine can have set it to another value) and the tolerance (the
- * `precision` setter resets it) are restored.
+ * The comparison at the raised precision is the part of `orderByValue`
+ * (with no tolerance) that depends on the precision: the approximation of
+ * each operand, then the approximation of their difference. The other
+ * steps of `orderAtWorkingPrecision` do not depend on the precision, and
+ * they did not decide the order.
+ *
+ * The precision is raised with `_withTransientPrecision`, which sets the
+ * precision of the engine and of the big decimals and restores both on
+ * every exit, also when a host function throws. The precision of the
+ * engine must be raised too, not only the precision of the big decimals:
+ * the evaluation of `sin`, `cos` and `tan` rounds a value smaller than its
+ * rounding error at the precision of the engine to 0 (`chopBignumDust`),
+ * and at the working precision that error is larger than the error bound at
+ * the raised precision. It does not use the `precision` setter of the
+ * engine: the setter resets the engine (every cached value is discarded and
+ * the cache axes advance), and here it would do so twice for each
+ * comparison. Without a reset, the cached values keep the working
+ * precision, so the approximations do not read them: the value of a
+ * constant (`π`, `e`, `γ`) is computed again from its definition at the
+ * raised precision (`constantApproximation`), and the approximations are
+ * kept apart from the ones at the working precision (see
+ * `approximations`). The tolerance of the engine does not change.
  *
  * Not done at machine precision: a number literal made by an engine at
  * machine precision keeps a machine factory (`ExactNumericValue.factory`),
@@ -1253,9 +1271,10 @@ function isProvedEqual(a: Expression, b: Expression): boolean {
  * of a new `√(2 + 10⁻³⁰)` against a `√2` made at machine precision was
  * `−1`.
  *
- * Not done while a computation holds scratch declaration scopes
- * (`_scratchDeclarationScopes`): a change of precision resets the engine,
- * and the reset clears that list.
+ * This step is also done while a computation holds scratch declaration
+ * scopes (`_scratchDeclarationScopes`). It was skipped there when it used
+ * the `precision` setter, because the reset clears that list; without a
+ * reset, the list does not change.
  */
 function orderAtRaisedPrecision(
   a: Expression,
@@ -1263,20 +1282,56 @@ function orderAtRaisedPrecision(
 ): -1 | 0 | 1 | undefined {
   const ce = a.engine;
   const precision = ce.precision;
-  const bigDecimalPrecision = BigDecimal.precision;
   if (precision <= MACHINE_PRECISION) return undefined;
-  const raised = raisedPrecision(Math.min(precision, bigDecimalPrecision));
+  const raised = raisedPrecision(Math.min(precision, BigDecimal.precision));
   if (raised <= precision) return undefined;
-  if (ce._scratchDeclarationScopes.length > 0) return undefined;
-  const tolerance = ce.tolerance;
-  ce.precision = raised;
-  try {
-    return orderAtWorkingPrecision(a, b);
-  } finally {
-    ce.precision = precision;
-    BigDecimal.precision = bigDecimalPrecision;
-    ce.tolerance = tolerance;
-  }
+  const atRaisedPrecision = <T>(fn: () => T): T =>
+    ce._withTransientPrecision(raised, () => {
+      atTransientPrecision.add(ce);
+      try {
+        return fn();
+      } finally {
+        atTransientPrecision.delete(ce);
+      }
+    });
+  // The approximation of each operand.
+  let order = atRaisedPrecision(() => orderOfApproximations(a, b));
+  // The approximation of the difference `a − b`, which can be decided when
+  // the operands are not: the terms that `a` and `b` have in common cancel
+  // in the difference. Two complex values have no order, even when their
+  // difference is real: their values are read at the working precision,
+  // where the values of the constants are the ones that the engine keeps.
+  if (order === undefined && isRealValue(a) && isRealValue(b))
+    order = atRaisedPrecision(() => {
+      const diff = a.sub(b);
+      if (diff.unknowns.length > 0) return undefined;
+      // A difference that `a.sub(b)` rounded to a float is not used (see
+      // `orderByValue`).
+      if (
+        containsInexactLiteral(diff) &&
+        !containsInexactLiteral(a) &&
+        !containsInexactLiteral(b)
+      )
+        return undefined;
+      return signOfApproximation(diff);
+    });
+  if (order === '<') return -1;
+  if (order === '>') return 1;
+  return undefined;
+}
+
+/**
+ * The engines that compute at a precision set by `_withTransientPrecision`
+ * (see `orderAtRaisedPrecision`). For them, `approximate` computes the
+ * value of a constant from its definition, not from the value that the
+ * engine keeps at its working precision.
+ */
+const atTransientPrecision = new WeakSet<Expression['engine']>();
+
+/** True when the value of `x` is a finite real number. */
+function isRealValue(x: Expression): boolean {
+  const v = x.N();
+  return isNumber(v) && v.im === 0 && v.isFinite === true;
 }
 
 /**
@@ -1630,10 +1685,16 @@ function realParts(
  * is a constant. Only those approximations are kept: the value of a symbol
  * that is not a constant can change. Boxed expressions are not modified,
  * so the expression is a valid key, and the map does not keep it alive.
+ *
+ * Each expression keeps the approximations of its last two keys: the
+ * working precision and the raised precision of `exactOrder`, which
+ * alternate when `Sort` orders values that are closer than the rounding
+ * error of the working precision (see `orderAtRaisedPrecision`). With one
+ * approximation for each expression, each one would replace the other.
  */
 const approximations = new WeakMap<
   Expression,
-  { key: string; approximation: Approximation | undefined }
+  { key: string; approximation: Approximation | undefined }[]
 >();
 
 /**
@@ -1690,11 +1751,18 @@ function approximateNode(
   const ce = x.engine;
   const key = `${ce.precision}:${BigDecimal.precision}:${ce.angularUnit}`;
   const known = approximations.get(x);
-  if (known !== undefined && known.key === key)
-    return { approximation: known.approximation, pure: true };
+  const entry = known?.find((k) => k.key === key);
+  if (entry !== undefined)
+    return { approximation: entry.approximation, pure: true };
   const result = computeApproximation(x, unit);
-  if (result.pure)
-    approximations.set(x, { key, approximation: result.approximation });
+  if (result.pure) {
+    const kept = { key, approximation: result.approximation };
+    // The newest entry is last: the oldest one is dropped.
+    approximations.set(
+      x,
+      known === undefined ? [kept] : [known[known.length - 1], kept]
+    );
+  }
   return result;
 }
 
@@ -1723,9 +1791,21 @@ function computeApproximation(
   }
 
   if (isSymbol(x)) {
-    if (x.isConstant) return { approximation: leaf(x, false), pure: true };
+    const transient = atTransientPrecision.has(ce);
+    if (x.isConstant)
+      return {
+        approximation: transient
+          ? constantApproximation(x, unit, leaf)
+          : leaf(x, false),
+        pure: true,
+      };
     const value = x.value;
     if (value !== undefined && isFunction(value))
+      return { approximation: approximate(value, unit), pure: false };
+    // A value that is a constant symbol is approximated like the constant:
+    // the value of a constant that is an expression (the golden ratio)
+    // gets the error bound of its expression, not the bound of a leaf.
+    if (transient && value !== undefined && isSymbol(value) && value.isConstant)
       return { approximation: approximate(value, unit), pure: false };
     return { approximation: leaf(x, false), pure: false };
   }
@@ -1774,6 +1854,32 @@ function computeApproximation(
     },
     pure,
   };
+}
+
+/**
+ * The approximation of the constant symbol `x` at a precision set by
+ * `_withTransientPrecision`. The value that the engine keeps for `x` has the
+ * working precision, so its error can be larger than the bound at the
+ * current precision: the value is computed again from the definition of
+ * `x` (the value of `π` is `BigDecimal.PI` at the current precision). A
+ * value that is a number literal is a leaf (`leaf`); a value that is an
+ * expression (the golden ratio, `(1 + √5)/2`) is approximated.
+ */
+function constantApproximation(
+  x: Expression,
+  unit: number,
+  leaf: (y: Expression, exact: boolean) => Approximation | undefined
+): Approximation | undefined {
+  if (!isSymbol(x)) return undefined;
+  // The type of `valueDefinition` is a structural mirror that does not
+  // declare `_valueAtCurrentPrecision`; the definition object has it.
+  const def = x.valueDefinition as BoxedValueDefinition | undefined;
+  const value = def?._valueAtCurrentPrecision?.();
+  if (value === undefined) return undefined;
+  if (isNumber(value)) return leaf(value, false);
+  // A constant whose value is itself has no approximation.
+  if (isSymbol(value) && value.symbol === x.symbol) return undefined;
+  return approximate(value, unit);
 }
 
 /**

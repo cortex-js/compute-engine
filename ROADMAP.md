@@ -487,17 +487,18 @@ special functions, or a machine-value fast path for two values that are far
 apart relative to the double's precision when the function is computed
 accurately.
 
-### JavaScript entry check: an O(n) walk per call per collection input (OPEN, decision — 2026-09-24)
+### JavaScript entry check: an O(n) walk per call per collection input (OPEN, decision — 2026-09-24, re-measured 2026-09-24)
 
 The run-time entry check that makes a `{re, im}` entry under a real-lane
-collection input throw walks every entry on every call: a 10,000-element `Dot`
-went from 6 to 21 µs (a 100×100 determinant is unchanged, the walk is 1.4 µs
-against 320 µs). A `WeakSet` of arrays already checked would remove the cost on
-repeated calls but would miss a complex value a host writes into an array it
-reuses. Options: (a) keep the walk (sound; the cost matters for O(n) kernels
-only); (b) the `WeakSet` cache with the documented hazard; (c) the cache only
-for arrays the host froze (`Object.isFrozen`). `entryChecks: false` turns the
-check off today.
+collection input throw walks every entry on every call. Re-measured with
+alternated runs (median of 12): a 100×100 determinant 431 µs with the check, 435
+µs without; a 10×10 determinant 0.71 / 0.65 µs; a 10,000-element `Dot` 9.3 / 6.6
+µs; a 3-element `Dot` 0.04 / 0.03 µs. (An earlier reading of 6 → 21 µs for the
+`Dot` was a warm-up artefact.) The cost is visible only on a long O(n) kernel,
+about 3 µs per 10,000 entries. Options: (a) keep the walk (sound); (b) a
+`WeakSet` of arrays already checked (misses a complex value a host writes into
+an array it reuses); (c) the cache only for frozen arrays. Recommendation: (a).
+`entryChecks: false` turns the check off.
 
 ### The imaginary part of an inexact number is a machine double (OPEN, scheduled — 2026-09-24)
 
@@ -523,19 +524,18 @@ Separately, `√i` stays a `Sqrt` head because
 `imaginary-unit-spelling.test.ts:210` requires it, while `√(i/4)` is the exact
 `(√2/4)(1 + i)`; decide whether that pin should change.
 
-### The raised-precision step of the exact ordering resets the engine twice per comparison (OPEN, decision — found 2026-09-24 by the review)
+### The equality proof of the exact ordering dominates the cost of sorting near-equal constants (OPEN, performance — measured 2026-09-24)
 
-`orderAtRaisedPrecision` (`compare.ts`) sets `ce.precision` up and back, and
-each write runs the engine reset (`config` state event, `purgeValues()`,
-`onConfigurationChange` on every constant). Every host-visible cache is
-discarded twice per undecided pair. Measured: `Sort` of `ln(2 + k·10⁻⁴⁰)` for n
-= 100 takes 241 ms, n = 1000 takes 2.36 s (16,792 cache-axis advances); `Max` of
-the same 1000 values 322 ms; 1000 plain rationals sort in 4–6 ms. The values are
-right. Options: (a) accept; (b) evaluate the two operands at the raised
-precision through a narrower mechanism than the public `precision` setter (a
-scoped `BigDecimal` precision with the constants recomputed on demand), which
-keeps the caches. Also `resolvingTie` (`compare.ts`) is a module global shared
-by every engine in the process.
+When the working precision cannot order two constants, `exactOrder`
+(`compare.ts`) first tries to prove them equal (`simplify()` of `a − b`), then
+compares at a raised precision. For values that are close but different, the
+common case, the proof always fails and the raised comparison decides, so the
+proof is pure cost: `Sort` of 200 near-equal logarithms spends 65% of its time
+(282 of 437 ms) in the proof. Running the raised-precision comparison first and
+the proof only when it stays undecided gives the same answers (a sound order and
+a sound equality proof cannot disagree) and removes that cost; equal constants
+then pay both steps. Also: `.N()`-based `resolvingTie` is per engine since
+2026-09-24, and the raised step no longer resets the engine.
 
 ### `interval-js` gives a finite enclosure inside the machine pole zone (OPEN, small — found 2026-09-24)
 
@@ -1195,23 +1195,23 @@ here.
   (`src/compute-engine/function-utils.ts:2761`) rather than returning an error
   value. Wanted: an unknown protocol name should say so.
 
-### Fungrim identity `e2288d` does not apply in `simplify()` for a symbolic argument (OPEN — found 2026-09-24)
+### `simplify()` does not apply 38 Fungrim identities because it simplifies the operands first (OPEN, decision — found 2026-09-24)
 
-The identity `(1+i)/√(2y) · θ₃(0, 1 + i/y) = θ₂(0, 1 + i·y)` for real `y > 0`
-(Fungrim entry `e2288d`) does not rewrite under `simplify()` after
-`loadIdentities(ce, { topics: ['jacobi_theta'] })`, `ce.declare('y', 'real')`
-and `ce.assume(y > 0)`. The result stays
-`((√2/2 + √2/2·i) · θ₃(0, i/y + 1)) / √y`. This is true with the rule as
-committed before 2026-09-24 and with the rule regenerated on 2026-09-24. The
-regeneration was necessary because canonical form now writes `(1+i)/√(2y)` as
-`(√2/2 + √2/2·i)/√y`, so the committed pattern could not match any input
-(`scripts/fungrim/recompile-drift.ts` reported the change). The compiler
-self-test in `scripts/fungrim/compile-rules.ts` still reports the regenerated
-rule as firing, because it calls `replace()` on the rule set directly. So the
-cause is between `replace()` and the `simplify()` channels: the dispatch
-bucket of the loader (`src/compute-engine/fungrim/loader.ts`) or the cost
-check of `simplify()`. With `y = 2` the input folds to a number before any
-rule runs, so only a symbolic argument shows the problem.
+Measured over the left side of each bundled identity (wildcards replaced by
+declared symbols; guards turned into declarations and assumptions): 871
+identities fire with `replace()`, and `simplify()` does not apply 38 of them. It
+ends with a result that is more expensive than the identity's result.
+
+The cause: `simplify()` simplifies the operands of a node before it tries the
+rules on the node. This changes how an argument is written, so the canonical
+pattern of the identity no longer matches. Examples: `LambertW(-(1/2)·π)` (entry
+`e1dd64`), `Hypergeometric0F1(3/2, -(1/4)·z²)` (entry `e2878f`),
+`(sin z / z)·√(2z/π)` (entry `121b21`, the radical is split by `expand`).
+
+A possible fix: when the operand simplification changed a node, also try the
+rules on the node as it was before, and keep the cheaper result. This adds a
+rule pass for each node whose operands changed, for every `simplify()` call, so
+it needs a measurement of its cost and a decision.
 
 ### Fungrim Stage-2 residues: `Fibonacci` growth class, the corpus manifest fork id, `CartesianPower` (OPEN, low — Stage-2 triage of 2026-08-29)
 

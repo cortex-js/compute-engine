@@ -14,6 +14,8 @@ export class EngineNumericConfiguration {
   private _tolerance: number;
   private _bignumTolerance: BigDecimal;
   private _negBignumTolerance: BigDecimal;
+  /** The number of `withTransientPrecision` calls in progress. */
+  private _transientPrecisionDepth = 0;
 
   constructor(options?: {
     precision?: number | 'machine';
@@ -55,6 +57,43 @@ export class EngineNumericConfiguration {
     // Keep historical behavior: changing precision resets tolerance.
     this.setTolerance('auto');
     return true;
+  }
+
+  /**
+   * Run `fn` with the precision of the engine and the precision of the big
+   * decimals set to `digits`, then restore both, also when `fn` throws.
+   *
+   * Unlike `setPrecision`, this does not reset the tolerance, and the
+   * caller does not reset the engine: no cached value is discarded and no
+   * cache axis advances. So a value cached before the call (the value of a
+   * constant such as `Pi`) is still at the previous precision inside `fn`:
+   * the caller must not read cached numeric values that depend on the
+   * precision, and must not cache a value it computes inside `fn` where a
+   * reader at another precision can find it.
+   *
+   * While `fn` runs, `isTransientPrecision` is true. The definition of a
+   * constant reads it: it then computes the value of the constant again at
+   * the current precision and does not store it (`storedValue` in
+   * `boxed-value-definition.ts`).
+   */
+  withTransientPrecision<T>(digits: number, fn: () => T): T {
+    const precision = this._precision;
+    const bigDecimalPrecision = BigDecimal.precision;
+    this._precision = digits;
+    BigDecimal.precision = digits;
+    this._transientPrecisionDepth += 1;
+    try {
+      return fn();
+    } finally {
+      this._transientPrecisionDepth -= 1;
+      this._precision = precision;
+      BigDecimal.precision = bigDecimalPrecision;
+    }
+  }
+
+  /** True while a `withTransientPrecision` call is in progress. */
+  get isTransientPrecision(): boolean {
+    return this._transientPrecisionDepth > 0;
   }
 
   get angularUnit(): AngularUnit {

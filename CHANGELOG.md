@@ -2,12 +2,16 @@
 
 ### Improvements
 
-- **The Epsil MCP server speaks LaTeX.** The `evaluate` and `parse` tools
-  accept `format: "latex"` to take a single LaTeX expression instead of an
-  Epsil program (`\int_0^1 x^2\,dx`, `\sum_{k=1}^{10} \frac{1}{k^2}`), and
-  `serialize` accepts `format: "latex"` to write LaTeX instead of Epsil. LaTeX
-  parse errors are reported as diagnostics. Every `evaluate` result now also
-  includes a `latex` form of the value, ready to display.
+- When `Max`, `Min`, `Clamp` or `Sort` compare two constants that are closer
+  than the working precision can separate, the comparison at a higher precision
+  no longer resets the engine, so it no longer discards every cached value twice
+  per comparison: `Sort` of 200 such values is about 1.5× faster.
+- **The Epsil MCP server speaks LaTeX.** The `evaluate` and `parse` tools accept
+  `format: "latex"` to take a single LaTeX expression instead of an Epsil
+  program (`\int_0^1 x^2\,dx`, `\sum_{k=1}^{10} \frac{1}{k^2}`), and `serialize`
+  accepts `format: "latex"` to write LaTeX instead of Epsil. LaTeX parse errors
+  are reported as diagnostics. Every `evaluate` result now also includes a
+  `latex` form of the value, ready to display.
 - **The `epsil` command speaks LaTeX.** `--from latex` evaluates a single LaTeX
   expression (from `--eval`, a file, standard input or the REPL) instead of an
   Epsil program, and `--latex` writes the result as LaTeX:
@@ -16,9 +20,9 @@
   stopped (``unexpected operator at `+` ``) instead of its Epsil spelling.
 - **A Compute Engine card for AI agents.** A condensed guide for agents writing
   JavaScript or TypeScript with the library: creating expressions, exact and
-  numeric evaluation, symbolic operations, comparison, assumptions,
-  compilation, time limits, and a table of common traps. Every example is
-  executed by the test suite. The Epsil MCP server serves it as a resource
+  numeric evaluation, symbolic operations, comparison, assumptions, compilation,
+  time limits, and a table of common traps. Every example is executed by the
+  test suite. The Epsil MCP server serves it as a resource
   (`epsil://docs/compute-engine-api`), and its instructions point to it.
 
 ### Resolved Issues

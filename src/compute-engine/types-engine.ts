@@ -1066,6 +1066,21 @@ export interface IComputeEngine {
    * `axisMaskOf`'s `declare` case. @internal */
   readonly _scratchDeclarationScopes: object[];
 
+  /** Run `fn` with the precision of the engine and of the big decimals set
+   * to `digits`, and restore both afterwards, also when `fn` throws. There
+   * is no reset: the tolerance, the cached values (the value of `Pi`) and
+   * the cache axes do not change, so a value cached before the call keeps
+   * its previous precision. Used by the exact ordering to compare two
+   * constants at a higher precision (`exactOrder` in `compare.ts`).
+   * @internal */
+  _withTransientPrecision<T>(digits: number, fn: () => T): T;
+
+  /** True while `_withTransientPrecision` runs a function. The value of a
+   * constant is then computed again at the current precision on each read,
+   * and not stored.
+   * @internal */
+  readonly _atTransientPrecision: boolean;
+
   /** The state-event choke point
    * (`docs/EFFECTS-MODEL.md` §3): write
    * sites report what happened; the lifecycle's dispatch table

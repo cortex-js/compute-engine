@@ -1539,6 +1539,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     compute: () => Expression
   ): Expression {
     if (!isFunction(value) || value.isPure !== true) return compute();
+    // Inside a transient precision window (`_withTransientPrecision`, the
+    // raised-precision step of the exact ordering), a computed value carries
+    // the raised precision, and the memo below is keyed on the world version,
+    // which the window does not advance: storing it would serve a
+    // raised-precision value at the working precision after the window.
+    if (this.engine._atTransientPrecision) return compute();
     // A written-out list or tuple is its own value: evaluating it is one
     // pass over its elements, so remembering it buys nothing — and the walks
     // below would READ its elements, which a store-backed numeric list
