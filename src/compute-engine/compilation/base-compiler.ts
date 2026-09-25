@@ -207,6 +207,7 @@ import {
   exactDoubleValue,
   exactValueDoubleRoundings,
 } from '../numeric-value/exact-integer-value.js';
+import { rangeCount, RANGE_COUNT_JS_SOURCE } from '../numerics/range-count.js';
 
 /**
  * A `_tv`/`_cse`-prefixed identifier token, as it appears inside a
@@ -6487,10 +6488,9 @@ export class BaseCompiler {
       const s = step ?? (hi >= lo ? 1 : -1);
       if (s === 0 || !Number.isFinite(s)) return undefined;
       // A step pointing away from the stop yields an empty range, not a
-      // negative count.
-      if ((hi - lo) / s < 0) return 0;
-      const n = Math.floor((hi - lo) / s) + 1;
-      return Number.isFinite(n) ? Math.max(0, n) : undefined;
+      // negative count (`rangeCount` returns 0 for it).
+      const n = rangeCount(lo, hi, s);
+      return Number.isFinite(n) ? n : undefined;
     }
     // A bounding consumer caps its source: `Take(xs, n)` walks at most `n`.
     if (expr.operator === 'Take' && ops.length >= 2) {
@@ -14749,7 +14749,7 @@ export class BaseCompiler {
 
     /** The element count of the range, using the runtime rule. */
     const countOf = (lo: number, hi: number, step: number): number =>
-      step === 0 ? 0 : Math.max(0, Math.floor((hi - lo) / step) + 1);
+      rangeCount(lo, hi, step);
 
     /** The loop for a range whose start, step and count are all known at
      * compile time: no bound temporaries, no length test, no prologue. */
@@ -14827,35 +14827,19 @@ export class BaseCompiler {
     const count = BaseCompiler.tempVar(target);
     const index = BaseCompiler.tempVar(target);
     const stepCode = stepLiteralCode ?? `(${hi} >= ${lo} ? 1 : -1)`;
-    // A zero step yields the empty range, and the count expression says so.
-    // That test earns its place only when the step could BE zero at run time:
-    // an OMITTED step is ±1 by construction, and an explicit one that
-    // compiled to a non-zero literal is not zero either.
-    const stepCouldBeZero =
-      stepExpr !== undefined && (stepValue === undefined || stepValue === 0);
-    // An OMITTED step is the auto-directed ±1, so `(hi - lo) / step` is
-    // `|hi - lo|`: never negative, which makes the `Math.max(0, …)` clamp
-    // dead. The clamp is dropped for no other range: an explicit step pointing
-    // away from the stop needs it (`Range(10, 1, 1)` is empty, and its raw
-    // count is −8).
-    //
-    // The `Math.floor` stays in every case. An INTEGER-typed bound is not an
-    // integer bound at run time: a declared type constrains what the ENGINE
-    // may assign, not what a caller may put in the kernel's `vars` object, so
-    // `a...b` with `a = 1` and `b = 2.5` gives the raw count 2.5, and without
-    // the floor the loop below runs a third time and yields the index 3, past
-    // the stop, where the interpreter answers two elements.
-    const noClamp =
-      stepExpr === undefined &&
-      BaseCompiler.isIntegerValued(loExpr) &&
-      BaseCompiler.isIntegerValued(hiExpr);
-    const countCode = noClamp
-      ? `Math.floor((${hi} - ${lo}) / ${step}) + 1`
-      : `Math.max(0, Math.floor((${hi} - ${lo}) / ${step}) + 1)`;
+    // The count is the interpreter's own function, `rangeCount`, reached as
+    // the runtime helper `_SYS.rangeCount` (this method emits for the
+    // JavaScript target only). It returns 0 for a zero step and for a step
+    // that points away from the stop (`Range(10, 1, 1)` is empty), floors a
+    // fractional count (an INTEGER-typed bound can still arrive as 2.5 from
+    // the caller's `vars` object), and counts an end point that lies on the
+    // step grid in exact arithmetic but one rounding error short of it in
+    // floating point.
+    const countCode = `_SYS.rangeCount(${lo}, ${hi}, ${step})`;
     return (
       `{ const ${lo} = ${loCode}; const ${hi} = ${hiCode}; ` +
       `const ${step} = ${stepCode}; ` +
-      `const ${count} = ${stepCouldBeZero ? `${step} === 0 ? 0 : ${countCode}` : countCode}; ` +
+      `const ${count} = ${countCode}; ` +
       // Array.from treats NaN as a zero length and rejects lengths that
       // exceed the maximum Array length. Preserve both behaviors.
       //
@@ -14876,7 +14860,7 @@ export class BaseCompiler {
    * Compile a `Range(lo, hi)` or `Range(lo, hi, step)` expression into a JS
    * iterable expression. Mirrors the runtime semantics in
    * `library/collections.ts` Range:
-   *     count    = step === 0 ? 0 : max(0, floor((hi - lo) / step) + 1)
+   *     count    = rangeCount(lo, hi, step)   (numerics/range-count.ts)
    *     element  = lo + step * k          (0-indexed)
    * Default step is 1 when omitted. Bounds and step may be fractional.
    *
@@ -14903,7 +14887,7 @@ export class BaseCompiler {
       // Mirrors the runtime range() helper in library/collections.ts.
       const step = stepExpr === undefined ? (hi >= lo ? 1 : -1) : stepExpr.re;
       if (step === 0) return '[]';
-      const len = Math.max(0, Math.floor((hi - lo) / step) + 1);
+      const len = rangeCount(lo, hi, step);
       if (step === 1) {
         if (lo === 0) return `Array.from({length:${len}},(_,k)=>k)`;
         return `Array.from({length:${len}},(_,k)=>${lo}+k)`;
@@ -14911,15 +14895,22 @@ export class BaseCompiler {
       return `Array.from({length:${len}},(_,k)=>${lo}+(${step})*k)`;
     }
 
-    // General path: compute bounds (and step) at runtime.
+    // General path: compute bounds (and step) at runtime. The count is
+    // `rangeCount`: the runtime helper `_SYS.rangeCount` on the JavaScript
+    // target, and an inline copy of it on a target whose emitted code runs
+    // without `_SYS` (`interval-javascript`).
+    const countFn =
+      target.language === 'javascript'
+        ? '_SYS.rangeCount'
+        : RANGE_COUNT_JS_SOURCE;
     const lo = BaseCompiler.compile(loExpr, target);
     const hi = BaseCompiler.compile(hiExpr, target);
     if (stepExpr === undefined) {
       // Auto-direction step at runtime: +1 if _hi >= _lo, else -1.
-      return `((_lo,_hi)=>{const _st=_hi>=_lo?1:-1;return Array.from({length:Math.max(0,Math.floor((_hi-_lo)/_st)+1)},(_,k)=>_lo+_st*k);})(${lo},${hi})`;
+      return `((_lo,_hi)=>{const _st=_hi>=_lo?1:-1;return Array.from({length:${countFn}(_lo,_hi,_st)},(_,k)=>_lo+_st*k);})(${lo},${hi})`;
     }
     const step = BaseCompiler.compile(stepExpr, target);
-    return `((_lo,_hi,_st)=>_st===0?[]:Array.from({length:Math.max(0,Math.floor((_hi-_lo)/_st)+1)},(_,k)=>_lo+_st*k))(${lo},${hi},${step})`;
+    return `((_lo,_hi,_st)=>_st===0?[]:Array.from({length:${countFn}(_lo,_hi,_st)},(_,k)=>_lo+_st*k))(${lo},${hi},${step})`;
   }
 
   /**

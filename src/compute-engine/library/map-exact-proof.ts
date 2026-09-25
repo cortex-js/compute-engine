@@ -14,6 +14,7 @@ import {
   sourceElementTypeKey,
 } from './map-broadcast-shape.js';
 import type { LoweredLevel, Slot } from './map-broadcast-shape.js';
+import { rangeCount } from '../numerics/range-count.js';
 
 /**
  * The static proof behind the **exact-mode** auto-compilation tier for lazy
@@ -257,14 +258,7 @@ function rangeBounds(x: Expression): SourceBounds | undefined {
 
   const span = hi - lo;
   if (!Number.isSafeInteger(span)) return undefined;
-  const count =
-    step > 0
-      ? span >= 0
-        ? Math.floor(span / step) + 1
-        : 0
-      : span <= 0
-        ? Math.floor(-span / -step) + 1
-        : 0;
+  const count = rangeCount(lo, hi, step);
   if (count === 0) return { interval: { lo: 0, hi: 0 }, count: 0 };
   const last = lo + (count - 1) * step;
   if (!Number.isSafeInteger(last)) return undefined;

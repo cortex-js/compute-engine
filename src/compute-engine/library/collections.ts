@@ -111,6 +111,7 @@ import { broadcastAdmitsCollectionElement } from '../boxed-expression/callback-b
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
+import { rangeCount } from '../numerics/range-count.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
@@ -5159,13 +5160,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Symbolic bounds (e.g. Range(1, n)): the count is indeterminate —
         // `range()` would coerce the bound to 1 and report a count of 1.
         if (hasSymbolicRangeBounds(expr)) return undefined;
+        // `rangeCount` returns 0 for a zero step or a sign-mismatched step
+        // (e.g. Range(5, 1, 1)), Infinity for a non-finite bound, and
+        // counts an end point that is on the step grid in exact arithmetic
+        // but one rounding error short of it in floating point.
         const [lower, upper, step] = range(expr);
-        if (step === 0) return 0;
-        if (!isFinite(lower) || !isFinite(upper)) return Infinity;
-        // Math.max guards a sign-mismatched step (e.g. Range(5, 1, 1)) from
-        // returning a positive count. The +1 must be inside the max so an
-        // empty range returns 0, not 1.
-        return Math.max(0, Math.floor((upper - lower) / step) + 1);
+        return rangeCount(lower, upper, step);
       },
 
       contains: (expr, target) => {
@@ -5185,12 +5185,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (hasSymbolicRangeBounds(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return false;
+        const tol = expr.engine.tolerance;
         // Directional bounds check: t must lie between lower and upper in
-        // the direction implied by step's sign.
+        // the direction implied by step's sign. The upper side allows a
+        // slack of `tol` steps: the last element `lower + step·(count − 1)`
+        // can be one rounding error past `upper` when `upper` is on the step
+        // grid in exact arithmetic (`rangeCount` counts that element), and
+        // the range must still contain its own last element. The grid check
+        // below limits the index to the element count.
+        const slack = Number.isFinite(step) ? tol * Math.abs(step) : 0;
         if (step > 0) {
-          if (t < lower || t > upper) return false;
+          if (t < lower || t > upper + slack) return false;
         } else {
-          if (t > lower || t < upper) return false;
+          if (t > lower || t < upper - slack) return false;
         }
         // An infinite lower bound leaves the step grid with no anchor to
         // count from (see `hasInfiniteRangeOrigin`), so `k` below is infinite
@@ -5203,9 +5210,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Step-grid check: t must be reachable as `lower + k*step` for some
         // non-negative integer k, within engine tolerance.
         const k = (t - lower) / step;
-        const tol = expr.engine.tolerance;
         const kRounded = Math.round(k);
-        return kRounded >= 0 && Math.abs(k - kRounded) < tol;
+        return (
+          kRounded >= 0 &&
+          kRounded < rangeCount(lower, upper, step) &&
+          Math.abs(k - kRounded) < tol
+        );
       },
 
       iterator: (expr) => {
@@ -5221,11 +5231,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (hasInfiniteRangeOrigin(expr)) return undefined;
         const [lower, upper, step] = range(expr);
 
-        // Number of elements in the range. Math.max guards against a
-        // sign-mismatched step (e.g. Range(0, 1, -1)) producing a negative
-        // count and looping forever.
-        const maxCount =
-          step === 0 ? 0 : Math.max(0, Math.floor((upper - lower) / step) + 1);
+        // Number of elements in the range. `rangeCount` returns 0 for a
+        // sign-mismatched step (e.g. Range(0, 1, -1)), so the count is never
+        // negative and the loop always ends.
+        const maxCount = rangeCount(lower, upper, step);
 
         let index = 1;
 
@@ -5261,7 +5270,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (hasInfiniteRangeOrigin(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return undefined;
-        const maxCount = Math.max(0, Math.floor((upper - lower) / step) + 1);
+        const maxCount = rangeCount(lower, upper, step);
         if (index < 1 || index > maxCount) return undefined;
         return expr.engine.number(lower + step * (index - 1));
       },
@@ -5298,8 +5307,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // range stops at the last grid point at or before `upper`, so
           // `Range(1, 5, 3)` and `Range(1, 4, 3)` both enumerate {1, 4} and
           // comparing `upper` would call the first no subset of the second.
-          const aCount = Math.floor((aLast - al) / as) + 1;
-          const bCount = Math.floor((bLast - bl) / bs) + 1;
+          const aCount = rangeCount(al, aLast, as);
+          const bCount = rangeCount(bl, bLast, bs);
           // An empty range is a subset of every range, strictly so unless the
           // other is empty too.
           if (aCount <= 0) return strict ? bCount > 0 : true;
@@ -5344,9 +5353,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // the direction alone reported `Range(-5, 10)` as `positive`, which a
         // subset test against `PositiveIntegers` then believed.
         const last = rangeLast(r);
-        // `rangeLast` special-cases an infinite UPPER bound but not an
-        // infinite LOWER one, where `upper - ((upper - lower) % step)`
-        // evaluates to NaN (`Range(-oo, -1)`). Decline explicitly: NaN makes
+        // `rangeLast` returns ±Infinity for an infinite UPPER bound, but NaN
+        // for an infinite LOWER one (`Range(-oo, -1)`), which has no grid
+        // origin to count from. Decline explicitly: NaN makes
         // every comparison below false, so the sign would come out `undefined`
         // by accident rather than by decision. An infinite UPPER bound is
         // fine and stays supported — `Range(1, oo)` is `positive`.
@@ -5379,6 +5388,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
     },
   } as OperatorDefinition,
+
+  // `Open(x)` and `Closed(x)` mark an endpoint of an `Interval` as excluded or
+  // included. They are inert: nothing evaluates them, and `Interval`'s
+  // canonical handler unwraps them before it type-checks the endpoint value.
+  //
+  // They are DEFINED, rather than left as unknown heads, because an
+  // application of a head with no definition infers the opaque effect set
+  // `any` (`docs/EFFECTS-MODEL.md`, "Inference"). That opacity leaked into
+  // every expression built over such an interval: `RandomChoice(Interval(0,
+  // Open(1)), n)` under a `WithRandomSeed` frame discharged to "not random,
+  // still impure", so a symbol assigned a seeded draw from `[0, 1)` was never
+  // memoized and redrew its whole list on every element read (Tycho consumer
+  // item 317: 170,000 reads of `A[m]` took 214 s where a literal list took
+  // 0.5 s). With a definition the marker is pure, the seeded draw discharges
+  // to the empty effect set, and the stored value is memoized like any other
+  // pure value. The signature admits an infinite endpoint (`Open(-oo)` is the
+  // open end of a ray).
+  Open: {
+    description:
+      'Open(x): the endpoint x of an Interval, marked as excluded. A marker with no value of its own.',
+    signature: '(number) -> number',
+  },
+  Closed: {
+    description:
+      'Closed(x): the endpoint x of an Interval, marked as included. A marker with no value of its own; Interval normalizes it away.',
+    signature: '(number) -> number',
+  },
 
   Interval: {
     description:
@@ -12731,7 +12767,7 @@ export function literalCollectionEmptiness(
       return undefined;
     if (step === 0) return true;
     if (!Number.isFinite(lower) || !Number.isFinite(upper)) return false;
-    return Math.max(0, Math.floor((upper - lower) / step) + 1) === 0;
+    return rangeCount(lower, upper, step) === 0;
   }
   return undefined;
 }
@@ -12760,15 +12796,32 @@ export function range(
  * - could be less that lower if step is negative
  * - could be less than upper if step is positive, for
  * example `rangeLast([1, 6, 2])` = 5
+ *
+ * The last value is `lower + step · (count − 1)`, with the element count
+ * from `rangeCount()`. The count absorbs a floating-point rounding error in
+ * `(upper − lower) / step`, so an `upper` that is on the step grid in exact
+ * arithmetic is the last value (`rangeLast([0, 0.3, 0.1])` is 0.3, not 0.2).
+ *
+ * - An infinite `upper` gives `Infinity` (or `-Infinity` for a negative
+ *   step).
+ * - An infinite `lower` or a zero step gives NaN: there is no grid to count
+ *   from.
+ * - An empty range (a step whose sign does not agree with the direction from
+ *   `lower` to `upper`) gives `lower − step`, a value outside the range.
+ *   Callers check for an empty range first.
  */
 export function rangeLast(
   r: [lower: number, upper: number, step: number]
 ): number {
   const [lower, upper, step] = r;
   if (!Number.isFinite(upper)) return step > 0 ? Infinity : -Infinity;
+  if (!Number.isFinite(lower) || step === 0) return NaN;
 
-  if (step > 0) return upper - ((upper - lower) % step);
-  return upper + ((lower - upper) % step);
+  const count = rangeCount(lower, upper, step);
+  // A single element is `lower`, also for an infinite step, where
+  // `step · 0` would be NaN (`Range(1, 5, -oo)` is [1]).
+  if (count === 1) return lower;
+  return lower + step * (count - 1);
 }
 
 /**

@@ -3,6 +3,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
+import { rangeCount } from '../numerics/range-count.js';
 import {
   extractVariables,
   evaluateWithAssignment,
@@ -156,7 +157,7 @@ export function extractFiniteDomainWithReason(
     const step = domain.ops.length >= 3 ? asSmallInteger(domain.op3) : 1;
 
     if (start !== null && end !== null && step !== null && step !== 0) {
-      const count = Math.floor((end - start) / step) + 1;
+      const count = rangeCount(start, end, step);
       if (count > 0 && count <= 1000) {
         const values: Expression[] = [];
         for (let i = start; step > 0 ? i <= end : i >= end; i += step) {

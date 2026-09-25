@@ -174,7 +174,8 @@ describe('J6b: the counted-range prologue', () => {
     ce.declare('N', 'number');
     ce.declare('s', 'number');
     const range = ['Range', 1, ['Multiply', 'N', 'N'], 's'];
-    expect(code(comprehension(ce, range))).toContain('=== 0 ? 0 :');
+    // The zero-step test is inside `_SYS.rangeCount`.
+    expect(code(comprehension(ce, range))).toContain('_SYS.rangeCount(');
     // A zero step is the empty range, as in the interpreter.
     expect(kernel(comprehension(ce, range))({ N: 3, s: 0, x: 1 })).toEqual([]);
     expect(kernel(comprehension(ce, range))({ N: 2, s: 1, x: 1 })).toEqual([
@@ -186,7 +187,8 @@ describe('J6b: the counted-range prologue', () => {
     const ce = new ComputeEngine();
     ce.declare('N', 'number');
     const range = ['Range', 1, 'N', 0];
-    expect(code(comprehension(ce, range))).toContain('=== 0 ? 0 :');
+    // The zero-step test is inside `_SYS.rangeCount`.
+    expect(code(comprehension(ce, range))).toContain('_SYS.rangeCount(');
     expect(kernel(comprehension(ce, range))({ N: 5, x: 1 })).toEqual([]);
   });
 

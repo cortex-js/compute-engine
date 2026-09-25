@@ -337,7 +337,7 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
       'if float(_a).is_integer() and float(_b).is_integer() else'
     );
     expect(src).toContain(
-      '[_a + (1 if _b >= _a else -1) * _i for _i in range(int(abs(_b - _a)) + 1)]'
+      '(lambda _s: [_a + _s * _i for _i in range((lambda _q: max(0, int((_q + (0 if float(_a).is_integer() and float(_b).is_integer() and float(_s).is_integer() else min(1e-12 * (1 + abs(_q)), 0.001))) // 1) + 1))((_b - _a) / _s))])(1 if _b >= _a else -1)'
     );
   });
 
@@ -347,7 +347,8 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
     // direction header read it as `range(5, 0, -1)`.
     const src = py(epsil('let s = 0\nfor k in Range(5.5, 1) { s = s + k }\ns'));
     expect(src).not.toContain('range(5,');
-    expect(src).toContain('float(_a + (1 if _b >= _a else -1) * _i)');
+    expect(src).toContain('float(_a + _s * _i)');
+    expect(src).toContain('(1 if _b >= _a else -1)');
     expect(src).toContain('(5.5, 1)');
   });
 

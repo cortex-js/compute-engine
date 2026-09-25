@@ -27,6 +27,45 @@
   parse back to the same type. A union of scalars keeps its spelling
   (`list<nan | real^3>`). The evaluated values of restricted lists are
   unchanged.
+- **A `Range` whose end point lies on the step grid in exact arithmetic keeps
+  its last element.** The element count of `Range(lower, upper, step)` is
+  `floor((upper − lower) / step) + 1`, and the quotient is computed in floating
+  point: with `d = 500`, `(2 − 2/d)π ÷ (2π/d)` is exactly 499 but evaluates to
+  498.99999999999994, so `[0,\frac{2}{d}\pi...(2-\frac{2}{d})\pi]` had 499
+  elements and stopped one step short of its end point; `Range(0, 0.3, 0.1)` had
+  3 elements (0.3/0.1 = 2.9999999999999996) and `Range(0, 2π, 2π/3)` had 3 where
+  4 end at 2π. The count now allows a tolerance of 10⁻¹² of the quotient (none
+  when the three operands are integers, and never more than a thousandth of a
+  step), so such an end point is counted: those ranges have 500, 4 and 4
+  elements. The tolerance is far below one step, so a range that genuinely stops
+  short of a grid point is unchanged: `Range(0, 2.5, 1)` still has 3 elements
+  (Desmos rounds the quotient to the nearest integer and gives 4; the engine
+  deliberately does not). The same rule is used by the interpreter, the compiled
+  `javascript`, `interval-js`, `glsl`, `wgsl` and `python` code, `Random` over a
+  `Range` domain, and the compile-time trip counts, so every route agrees. What
+  changes for input that did not name this case: a unit-step range whose span is
+  one rounding error short of an integer gains its last element
+  (`Range(1.3, 2.3)` is `[1.3, 2.3]`; it was `[1.3]`), and `Range.contains`
+  accepts the range's own last element when it is one rounding error above
+  `upper`.
+
+### Improvements
+
+- **A seeded list draw compiles on the `interval-js` target.**
+  `WithRandomSeed(seed, RandomChoice(domain, k))`, with a literal seed and a
+  domain that is an `Interval` with finite literal endpoints, a `Range` with
+  literal bounds, or a literal list of numbers, now compiles to the list of
+  point intervals of its values: the draw is seeded, so the i-th element is the
+  i-th draw of the frame, computed by the same kernel and the same element
+  formulas as the interpreter, and the values are identical to `evaluate()` and
+  to the compiled `javascript` code. `k` may be a literal or a run-time argument
+  (a point interval). Before, the target refused: "the operator is known to the
+  engine but target 'interval-javascript' has no lowering for it", so a field
+  that read a seeded draw had no interval leg. An unseeded draw, a symbolic
+  seed, a symbolic domain, and a frame whose body is not exactly the draw
+  (`WithRandomSeed(s, RandomChoice(…) + 1)`) still fail to compile, with a
+  message that names the supported form. `Random()` inside a frame is unchanged:
+  it still lowers to its support `[0, 1]`.
 
 ### Bug Fixes
 
@@ -36,6 +75,26 @@
   `99999999999999991611392`; the default precision printed `1e+300` and
   `1e+23`. The machine value now prints as JavaScript prints the double, so
   the two precisions agree.
+- Compiled to JavaScript, a three-operand `Range` whose step points away from
+  its end (`Range(5, 1, 1)`) threw a `RangeError` at run time, and a zero step
+  gave an infinite length; both now give `[]`, as the interpreter does. The
+  automatic compilation of `Map` over a two-operand descending range
+  (`Range(10, 1)`) priced the range with step +1, so its trip count was never
+  checked against the cap; it now uses step −1.
+- **A seeded draw from an open interval is memoized.** `Open(x)` and
+  `Closed(x)`, the endpoint markers of an `Interval`, are now defined operators
+  (pure markers with no evaluation). They were unknown heads, and an application
+  of an unknown head has the opaque effect set `any`, so `Interval(0, Open(1))`
+  and everything built over it was judged impure: a seeded draw from it,
+  `WithRandomSeed(s, RandomChoice(Interval(0, Open(1)), n))`, was "not random,
+  still impure", and a symbol assigned that draw was never memoized. Every read
+  of one element redrew the whole list: with
+  `A = 2·WithRandomSeed(312463, RandomChoice(Interval(0, Open(1)), 100)) − 1`, a
+  random walk that reads `A[m]` about 170,000 times took 214 s, where the same
+  walk over a literal list took 0.5 s. Both now take about 1 s. A seeded draw
+  from `[0, 1)` is pure, as `WithRandomSeed(1, Random())` already was, and
+  `ce.box(['Open', 1]).isPure` is `true`.
+
 - **The pole `ComplexInfinity` has one MathJSON spelling at every precision.**
   At machine precision (`ce.precision = 'machine'`), a complex number with an
   infinite imaginary part serialized as `["Complex", 1, "PositiveInfinity"]`,

@@ -24,6 +24,7 @@
  */
 
 import type { Interval, IntervalResult } from './types.js';
+import { rangeCount } from '../numerics/range-count.js';
 import {
   getValue,
   ok,
@@ -32,6 +33,7 @@ import {
   unwrapOrPropagate,
   liftJump,
 } from './util.js';
+import { frameDraw, MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 
 /**
  * The band-less interval result a NON-ARRAY collection operand may be — the
@@ -493,6 +495,72 @@ export function map(f: (element: unknown) => unknown, coll: unknown): unknown {
 }
 
 /**
+ * The domain of a seeded `RandomChoice` draw (`seededChoice`), as the
+ * compiler states it from the literal domain operand:
+ *
+ * - `{ lo, hi }`: an `Interval`, whose element for the uniform `u` is
+ *   `lo + u·(hi − lo)`;
+ * - `{ first, step, n }`: a `Range`, normalized as the interpreter normalizes
+ *   it, whose element is `first + step·⌊u·n⌋`;
+ * - an array of numbers: a literal `List`, whose element is `xs[⌊u·n⌋]`.
+ */
+export type SeededChoiceDomain =
+  | { readonly lo: number; readonly hi: number }
+  | { readonly first: number; readonly step: number; readonly n: number }
+  | ReadonlyArray<number>;
+
+/**
+ * `WithRandomSeed(seed, RandomChoice(domain, k))` at run time: the list of
+ * the `k` values of the draw, each as a point interval.
+ *
+ * The frame of a `WithRandomSeed` starts at draw 0, and `RandomChoice` makes
+ * exactly `k` draws in output order, so element `i` is the value of draw `i`
+ * of the frame: `frameDraw(seedLo, seedHi, i)`. The seed is folded to
+ * `(seedLo, seedHi)` at compile time by `foldSeed`, the fold the interpreter
+ * applies when it enters the frame. The element formulas are the
+ * interpreter's (`selectRandomElement` in `library/core.ts`) and the
+ * JavaScript target's (`makeRandomHelpers` in
+ * `compilation/javascript-target.ts`), so the values are bit-identical to
+ * both.
+ *
+ * `k` is a number or an interval. It must be a POINT interval — a count in
+ * a wide interval gives a list of varying length, which no array holds — and
+ * it is rounded half toward +∞ (`Math.round`) and must then be in
+ * `0..MAX_RANDOM_ELEMENT_COUNT`, as `randomCount` requires in the
+ * interpreter. Any other `k` throws an `Error` that names `RandomChoice`.
+ */
+export function seededChoice(
+  seedLo: number,
+  seedHi: number,
+  domain: SeededChoiceDomain,
+  k: unknown
+): Interval[] {
+  const kValue = pointBound(k);
+  const n = kValue === undefined ? NaN : Math.round(kValue);
+  if (!Number.isSafeInteger(n) || n < 0 || n > MAX_RANDOM_ELEMENT_COUNT)
+    throw new RangeError(
+      `RandomChoice: expected a count in 0..${MAX_RANDOM_ELEMENT_COUNT}, got ${
+        kValue === undefined ? JSON.stringify(k) : kValue
+      }`
+    );
+  const element: (u: number) => number = isNumberArray(domain)
+    ? (u) => domain[Math.floor(u * domain.length)]
+    : 'n' in domain
+      ? (u) => domain.first + domain.step * Math.floor(u * domain.n)
+      : (u) => domain.lo + u * (domain.hi - domain.lo);
+  const out: Interval[] = new Array(n);
+  for (let i = 0; i < n; i++)
+    out[i] = point(element(frameDraw(seedLo, seedHi, i)));
+  return out;
+}
+
+function isNumberArray(
+  domain: SeededChoiceDomain
+): domain is ReadonlyArray<number> {
+  return Array.isArray(domain);
+}
+
+/**
  * The scalar a run-time BOUND of a range stands for, or `undefined` when the
  * bound is not one number: a bound is an interval (bare, or wrapped in an
  * interval result), and only a POINT interval names one element count. A
@@ -516,8 +584,9 @@ function pointBound(bound: unknown): number | undefined {
  * interpreter's contract, mirrored from `literalRange` (`library/
  * collections.ts`): `Range(hi)` counts from 1 in steps of 1; a two-operand
  * range infers step ±1 from the order of its bounds; the elements are
- * `lo + i·step` for `i` below the count `max(0, floor((hi − lo) / step) + 1)`
- * (a zero step is the empty range).
+ * `lo + i·step` for `i` below the count `rangeCount(lo, hi, step)`, which is
+ * `max(0, floor((hi − lo) / step) + 1)` with a small tolerance for the
+ * floating-point rounding of the quotient (a zero step is the empty range).
  *
  * Every bound must be a POINT interval at run time (`pointBound`): a wide
  * bound gives a range of varying length, which no array can hold, and the
@@ -547,7 +616,7 @@ export function range(
     }
   }
   if (step === 0) return [];
-  const count = Math.max(0, Math.floor((hi - lo) / step) + 1);
+  const count = rangeCount(lo, hi, step);
   if (!Number.isFinite(count) || count > MAX_RUNTIME_COLLECTION_LENGTH)
     return { kind: 'entire' };
   const out: Interval[] = new Array(count);

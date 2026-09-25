@@ -498,6 +498,7 @@ import {
   variance,
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { rangeCount } from '../numerics/range-count.js';
 import {
   adaptiveQuadrature,
   initialPanelsForDimensions,
@@ -6010,7 +6011,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const fStart = Number(start);
       if (!isNaN(fStop) && !isNaN(fStart)) {
         const dir = fStop >= fStart ? 1 : -1;
-        const len = Math.floor(Math.abs(fStop - fStart)) + 1;
+        const len = rangeCount(fStart, fStop, dir);
         if (len < 50) {
           return `[${Array.from({ length: len }, (_, i) => fStart + dir * i).join(', ')}]`;
         }
@@ -6023,7 +6024,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // bound compiles to a member access like `_.a`. A `_` callback param
       // would shadow the argument object, so `_.a` in the body would read
       // from the (undefined) array element. Use `_e` for the unused element.
-      return `((_a, _b) => Array.from({length: Math.floor(Math.abs(_b - _a)) + 1}, (_e, _i) => _b >= _a ? _a + _i : _a - _i))(${start}, ${stop})`;
+      return `((_a, _b) => Array.from({length: _SYS.rangeCount(_a, _b, _b >= _a ? 1 : -1)}, (_e, _i) => _b >= _a ? _a + _i : _a - _i))(${start}, ${stop})`;
     }
     // An IMPURE operand (the Random family) must be evaluated exactly once:
     // `start` and `step` are each spliced twice, and the SECOND splice is
@@ -6033,9 +6034,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // one more per element). Bind the three bounds to IIFE parameters (the
     // shape the symbolic 2-argument branch above uses); pure operands keep the
     // direct emission byte-identical.
+    //
+    // The length is `_SYS.rangeCount`, the interpreter's own count
+    // (`numerics/range-count.ts`): 0 for a zero step or a step that points
+    // away from the stop, and an end point on the step grid in exact
+    // arithmetic is counted even when the float quotient falls one rounding
+    // error short of it (`Range(0, 0.3, 0.1)` has 4 elements).
     if (args.slice(0, 3).some((a) => a?.isPure === false))
-      return `((_a, _b, _s) => Array.from({length: Math.floor((_b - _a) / _s) + 1}, (_e, _i) => _a + _i * _s))(${start}, ${stop}, ${step})`;
-    return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_e, i) => ${start} + i * ${step})`;
+      return `((_a, _b, _s) => Array.from({length: _SYS.rangeCount(_a, _b, _s)}, (_e, _i) => _a + _i * _s))(${start}, ${stop}, ${step})`;
+    return `Array.from({length: _SYS.rangeCount(${start}, ${stop}, ${step})}, (_e, i) => ${start} + i * ${step})`;
   },
   Root: ([arg, exp], compile, target) => {
     if (arg === null) throw new Error('Could not compile `Root`: no argument');
@@ -10159,6 +10166,10 @@ function enterIntegral(): boolean {
  */
 const SYS_HELPERS = {
   ...JET_HELPERS,
+  // The element count of an arithmetic `Range`, shared with the interpreter
+  // (`numerics/range-count.ts`), so the compiled length agrees with the
+  // interpreter's `count`.
+  rangeCount,
   bcast,
   bcastFn,
   bcastColor,
@@ -11622,12 +11633,7 @@ function makeRandomHelpers(ce: ComputeEngine): RandomSysHelpers {
       // (`library/collections.ts`): a two-operand range descends when
       // `b < a`, and a zero or sign-mismatched step is empty.
       const step = s === undefined ? (b >= a ? 1 : -1) : s;
-      const n =
-        step === 0
-          ? 0
-          : !Number.isFinite(a) || !Number.isFinite(b)
-            ? Infinity
-            : Math.max(0, Math.floor((b - a) / step) + 1);
+      const n = rangeCount(a, b, step);
       if (!Number.isFinite(n) || n <= 0)
         throw new Error(
           `Could not compile \`${op}\`: expected a finite, non-empty Range, got Range(${a}, ${b}, ${step})`
@@ -14775,7 +14781,7 @@ function literalRangeParams(
       ? [1, bounds[0]!, 1]
       : [bounds[0]!, bounds[1]!, ops.length > 2 ? bounds[2]! : undefined];
   const s = step ?? (upper >= first ? 1 : -1);
-  const n = s === 0 ? 0 : Math.max(0, Math.floor((upper - first) / s) + 1);
+  const n = rangeCount(first, upper, s);
   return { first, step: s, n };
 }
 

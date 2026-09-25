@@ -99,6 +99,10 @@ import { resolveStorageHints } from './storage-hints.js';
 import { IntervalArithmetic } from '../interval/index.js';
 import type { Interval } from '../interval/types.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
+import { rangeCount } from '../numerics/range-count.js';
+import { interval } from '../numerics/interval.js';
+import { foldSeed, MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
+import { randomCount } from '../library/random-utils.js';
 import {
   INTERVAL_QUADRATURE_BUDGET,
   INTERVAL_QUADRATURE_SUBDIVISIONS,
@@ -243,8 +247,9 @@ function literalCollectionOps(
  * The interpreter's contract, mirrored from `literalRange` and the Range
  * collection handlers (`library/collections.ts`): `Range(hi)` counts from 1;
  * a two-operand range infers step ±1 from the bounds' order; real bounds and
- * steps are legal; the element count is `max(0, floor((hi - lo) / step) + 1)`
- * (a zero step is empty). Iteration is COUNT-driven with `lo + i·step`
+ * steps are legal; the element count is `rangeCount(lo, hi, step)`, that is
+ * `max(0, floor((hi - lo) / step) + 1)` with a small tolerance for the
+ * floating-point rounding of the quotient (a zero step is empty). Iteration is COUNT-driven with `lo + i·step`
  * elements — an endpoint-driven `k += step` loop can fail to make progress
  * past 2^53 and hang the compilation.
  */
@@ -264,7 +269,7 @@ function literalRangeElements(
   else if (nums.length === 3) [lo, hi, step] = [nums[0]!, nums[1]!, nums[2]!];
   else return undefined;
   if (step === 0) return [];
-  const count = Math.max(0, Math.floor((hi - lo) / step) + 1);
+  const count = rangeCount(lo, hi, step);
   if (!Number.isFinite(count) || count > budget) return undefined;
   const elements: Expression[] = [];
   for (let i = 0; i < count; i++) elements.push(ce.number(lo + i * step));
@@ -346,7 +351,10 @@ const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
  * - `Map(f, collection)` with `f` a one-parameter function literal, as
  *   `_IA.map` over the spelled (or ordinarily compiled) source;
  * - a `PointList` with a list component, as the list of points
- *   `_IA.pointList` builds at run time (`compileIntervalPointListZip`).
+ *   `_IA.pointList` builds at run time (`compileIntervalPointListZip`);
+ * - a seeded list draw `WithRandomSeed(seed, RandomChoice(domain, k))`, as
+ *   the list of point intervals of its fixed value that `_IA.seededChoice`
+ *   computes (`seededRandomChoicePlan`).
  *
  * A `List` with an element that is not provably a number — a boolean, a
  * string — is NOT spelled (it answers `undefined`), so a helper such as
@@ -414,6 +422,24 @@ function compileIntervalCollectionValue(
     target.unrollSkipHeads?.has('Which') !== true
   )
     return compileIntervalSelectionValue(literal, target);
+  // A seeded list draw has a fixed value, the list of point intervals
+  // `_IA.seededChoice` computes (see `seededRandomChoicePlan`). A draw this
+  // target does not compile answers `undefined`, and the ordinary lowering
+  // then reports why. A `WithRandomSeed` or a `RandomChoice` the caller
+  // overrode keeps its ordinary dispatch.
+  if (
+    literal.operator === 'WithRandomSeed' &&
+    literal.ops.length === 2 &&
+    target.unrollSkipHeads?.has('WithRandomSeed') !== true &&
+    target.unrollSkipHeads?.has('RandomChoice') !== true
+  ) {
+    const plan = seededRandomChoicePlan(literal.ops[0], literal.ops[1]);
+    if (plan === undefined || typeof plan === 'string') return undefined;
+    const k = isNumber(plan.k)
+      ? String(plan.k.re)
+      : BaseCompiler.compileValueOperand(plan.k, target);
+    return `_IA.seededChoice(${plan.seedLo}, ${plan.seedHi}, ${plan.domain}, ${k})`;
+  }
   const head = literal.operator;
   if (!COLLECTION_VALUE_HEADS.has(head)) return undefined;
   if (target.unrollSkipHeads?.has(head) === true) return undefined;
@@ -527,6 +553,124 @@ function compileIntervalPointListZip(
         : undefined) ?? BaseCompiler.compileValueOperand(op, target)
   );
   return `_IA.pointList('${kinds.join('')}', ${components.join(', ')})`;
+}
+
+/**
+ * The parts of a SEEDED list draw `WithRandomSeed(seed, RandomChoice(domain,
+ * k))` that `_IA.seededChoice` takes, or a string that says why this target
+ * does not compile the draw. `seed` and `body` are the operands of the
+ * `WithRandomSeed`. Answers `undefined` when `body` is not exactly a
+ * `RandomChoice` application.
+ *
+ * Such a draw has a FIXED value: the frame starts at draw 0 at each entry,
+ * and `RandomChoice` makes exactly `k` draws in output order, so element `i`
+ * is the value of draw `i` of the frame. Each element is then a point
+ * interval, and no run-time frame counter is necessary. A `Random()` draw is
+ * different: it is enclosed by its support (see the `Random` handler), and
+ * a body that is not a bare `RandomChoice` keeps that treatment.
+ *
+ * What is required, and why:
+ *
+ * - the seed is a finite real or a string LITERAL, which is folded here, at
+ *   compile time, by `foldSeed` — the fold the interpreter applies to the
+ *   evaluated seed when it enters the frame;
+ * - the domain is an `Interval` whose endpoints (with the `Open`/`Closed`
+ *   markers removed) are finite real literals with `lo < hi`, a `Range` whose
+ *   bounds are finite real literals and whose element count is finite and
+ *   not zero, or a literal non-empty `List` of finite real literals. A
+ *   domain the interpreter refuses (an empty or unbounded interval, an empty
+ *   range) is refused here too, so that `fallback` gives the interpreter's
+ *   error. The `Range` count is the interpreter's own (`Expression.count`),
+ *   and its first element and step are normalized as `range()` in
+ *   `library/collections.ts` does it;
+ * - `k` is a number. A number literal is validated here as `randomCount`
+ *   (`library/random-utils.ts`) validates it; any other `k` is compiled and
+ *   validated at run time by `_IA.seededChoice`.
+ */
+function seededRandomChoicePlan(
+  seed: Expression,
+  body: Expression
+):
+  | { seedLo: number; seedHi: number; domain: string; k: Expression }
+  | string
+  | undefined {
+  if (!isFunction(body, 'RandomChoice')) return undefined;
+  if (body.ops.length !== 2) return 'expected exactly two arguments.';
+  let folded: [number, number];
+  if (isString(seed)) folded = foldSeed(seed.string);
+  else if (isNumber(seed) && seed.im === 0 && Number.isFinite(seed.re))
+    folded = foldSeed(seed.re);
+  else
+    return (
+      'only a literal finite real or string seed compiles on the interval ' +
+      'target.'
+    );
+  const [domainOp, k] = body.ops;
+  const domain = seededChoiceDomain(domainOp);
+  if (domain === undefined)
+    return (
+      'on the interval target, the domain of a seeded draw must be an ' +
+      '`Interval` or a `Range` with finite literal bounds, or a literal ' +
+      '`List` of finite real numbers.'
+    );
+  if (!k.type.matches('number'))
+    return 'the count of a seeded draw must be a number.';
+  if (isNumber(k)) {
+    const count = randomCount(k.engine, k);
+    if (typeof count !== 'number')
+      return (
+        `the count of a seeded draw must be in ` +
+        `0..${MAX_RANDOM_ELEMENT_COUNT}, got ${k.toString()}.`
+      );
+  }
+  return { seedLo: folded[0], seedHi: folded[1], domain, k };
+}
+
+/**
+ * The JavaScript spelling of the `SeededChoiceDomain` (`interval/
+ * collections.ts`) of a `RandomChoice` domain operand, or `undefined` for a
+ * domain `seededRandomChoicePlan` does not accept.
+ */
+function seededChoiceDomain(domain: Expression): string | undefined {
+  const real = (x: Expression): number | undefined =>
+    isNumber(x) && x.im === 0 && Number.isFinite(x.re) ? x.re : undefined;
+  // `String(x)` spells every finite double exactly, except that it loses the
+  // sign of `-0`.
+  const num = (x: number): string => (Object.is(x, -0) ? '-0' : String(x));
+  if (isFunction(domain, 'Interval')) {
+    const endpoint = (x: Expression): Expression =>
+      isFunction(x, 'Open') || isFunction(x, 'Closed') ? x.op1 : x;
+    if (domain.ops.length !== 2) return undefined;
+    if (!domain.ops.every((x) => real(endpoint(x)) !== undefined))
+      return undefined;
+    // The same reading of the endpoints as the interpreter's
+    // `analyzeRandomDomain`, which calls `interval()`.
+    const int = interval(domain);
+    if (int === undefined) return undefined;
+    if (!Number.isFinite(int.start) || !Number.isFinite(int.end))
+      return undefined;
+    if (!(int.start < int.end)) return undefined;
+    return `{ lo: ${num(int.start)}, hi: ${num(int.end)} }`;
+  }
+  if (isFunction(domain, 'Range')) {
+    const ops = domain.ops.map(real);
+    if (ops.length < 1 || ops.length > 3) return undefined;
+    if (ops.some((x) => x === undefined)) return undefined;
+    const n = domain.count;
+    if (n === undefined || !Number.isFinite(n) || n <= 0) return undefined;
+    const [first, step] =
+      ops.length === 1
+        ? [1, 1]
+        : [ops[0]!, ops[2] ?? (ops[1]! >= ops[0]! ? 1 : -1)];
+    return `{ first: ${num(first)}, step: ${num(step)}, n: ${n} }`;
+  }
+  if (isFunction(domain, 'List')) {
+    if (domain.ops.length === 0) return undefined;
+    const xs = domain.ops.map(real);
+    if (xs.some((x) => x === undefined)) return undefined;
+    return `[${xs.map((x) => num(x!)).join(', ')}]`;
+  }
+  return undefined;
 }
 
 /**
@@ -2529,7 +2673,31 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`WithRandomSeed\`: only a literal finite real or string seed compiles ` +
           `on the interval target.`
       );
+    // A seeded `RandomChoice` body is a list, spelled by
+    // `compileIntervalCollectionValue` in the positions that consume a list
+    // whole. This handler is reached for it only when that spelling declined
+    // (say why) or in a position that takes one interval, where a list has
+    // no reading.
+    const plan = seededRandomChoicePlan(args[0], args[1]);
+    if (typeof plan === 'string')
+      throw new Error(`Could not compile \`RandomChoice\`: ${plan}`);
+    if (plan !== undefined)
+      throw new Error(
+        `Could not compile \`WithRandomSeed\`: a seeded \`RandomChoice\` is a list, which the ` +
+          `interval target compiles only where a list is used whole (a reducer, an accessor, ` +
+          `an element-wise operation, the result).`
+      );
     return compile(args[1]);
+  },
+  // `RandomChoice` compiles on this target only as the whole body of a
+  // `WithRandomSeed` with a literal seed, where its value is fixed (see
+  // `seededRandomChoicePlan`). That form is handled before this handler is
+  // reached.
+  RandomChoice: () => {
+    throw new Error(
+      `Could not compile \`RandomChoice\`: the interval target compiles a draw only when it ` +
+        `is the whole body of a \`WithRandomSeed\` with a literal seed.`
+    );
   },
 };
 
@@ -4962,11 +5130,16 @@ function compileToIntervalTarget(
     // A `Which` root is a collection root when one of its arms is spelled
     // as a collection (`compileIntervalSelectionValue`); a scalar selection
     // compiles through the `Which` handler as before.
+    // A `WithRandomSeed` root is one when its body is a seeded list draw
+    // (`seededRandomChoicePlan`); any other body compiles through the
+    // `WithRandomSeed` handler as before.
     const rootLiteral = assignedLiteral(expr, target) ?? expr;
     const collectionRoot =
       point === undefined &&
       (COLLECTION_VALUE_HEADS.has(rootLiteral.operator) ||
-        rootLiteral.operator === 'Which');
+        rootLiteral.operator === 'Which' ||
+        (isFunction(rootLiteral, 'WithRandomSeed') &&
+          isFunction(rootLiteral.ops[1], 'RandomChoice')));
     js =
       point !== undefined
         ? BaseCompiler.compileCseRoot(

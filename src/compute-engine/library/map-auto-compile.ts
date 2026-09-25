@@ -18,6 +18,7 @@ import { implicitCompile } from '../implicit-compile.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
 import { exactTierShape, MIN_EXACT_COMPILE_COUNT } from './map-exact-proof.js';
+import { rangeCount } from '../numerics/range-count.js';
 import type { Interval } from './map-exact-proof.js';
 
 /**
@@ -292,9 +293,15 @@ function bodyEligible(
       const [lo, hi, step] =
         src.nops === 1
           ? [1, src.op1.re, 1]
-          : [src.op1.re, src.op2.re, src.nops > 2 ? src.op3.re : 1];
+          : [
+              src.op1.re,
+              src.op2.re,
+              // A two-operand range steps by -1 when it descends
+              // (`Range(10, 1)` has 10 elements), as the interpreter does.
+              src.nops > 2 ? src.op3.re : src.op2.re >= src.op1.re ? 1 : -1,
+            ];
       if (step === 0) return false;
-      if ((hi - lo) / step + 1 > MAX_COMPILED_TRIP_COUNT) return false;
+      if (rangeCount(lo, hi, step) > MAX_COMPILED_TRIP_COUNT) return false;
     } else if (!isFunction(src, 'List') && !isFunction(src, 'Tuple'))
       return false;
     return bodyEligible(ce, e.op1, bound, seenFns);

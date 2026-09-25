@@ -63,6 +63,10 @@ import type { Type, TypeReference } from '../../common/type/types.js';
 import { declarationOf } from '../../common/type/reference.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import {
+  RANGE_COUNT_TOLERANCE,
+  RANGE_COUNT_TOLERANCE_CAP,
+} from '../numerics/range-count.js';
+import {
   isNonFiniteBound,
   requirePrimitiveElements,
 } from './javascript-target.js';
@@ -115,6 +119,30 @@ const PYTHON_CONSTANTS: Record<string, string> = {
   CatalanConstant: '0.915965594177219015054603514932384110774',
   EulerGamma: '0.5772156649015328606065120900824024310421',
 };
+
+/**
+ * Python source for the element count of the arithmetic range `a, a + s, …`
+ * up to `b`, the same value as `rangeCount()` (`numerics/range-count.ts`,
+ * which the interpreter uses). `a`, `b` and `s` must be plain Python names
+ * (lambda parameters): each one is read more than once. `s` must not be 0;
+ * the caller tests for a zero step first.
+ *
+ * The quotient `(b − a) / s` is a float, and an end point that lies on the
+ * step grid in exact arithmetic can fall one rounding error short of it
+ * (`0.3 / 0.1` is `2.9999999999999996`). A tolerance of `1e-12 · (1 + |q|)`
+ * absorbs that rounding, so the end point is counted. When `a`, `b` and `s`
+ * are all integral the quotient has no rounding error to absorb, and the
+ * tolerance is 0.
+ *
+ * The floor is Python's floor division `// 1`, not `np.floor`, so the
+ * emitted code needs no import (the `Loop` lowering relies on that).
+ */
+function pyRangeCount(a: string, b: string, s: string): string {
+  return (
+    `(lambda _q: max(0, int((_q + (0 if float(${a}).is_integer() and float(${b}).is_integer() and float(${s}).is_integer() else min(${RANGE_COUNT_TOLERANCE} * (1 + abs(_q)), ${RANGE_COUNT_TOLERANCE_CAP}))) // 1) + 1))` +
+    `((${b} - ${a}) / ${s})`
+  );
+}
 
 /**
  * A `Take`/`Drop` slice bound or a `Tabulate`/`Fill` dimension: non-negative
@@ -852,11 +880,11 @@ function pythonElementSource(
       // `Range(5.0, 1)` is 5, 4, 3, 2, 1. A fractional value walks the range
       // from the start bound in unit steps, in the direction of the stop
       // bound, as the interpreter does (`Range(2.5, 1)` is 2.5, 1.5;
-      // `Range(1, 2.5)` is 1, 2); `int(abs(_b - _a))` is the floor of a
-      // non-negative float, so no `math` import is needed.
+      // `Range(1, 2.5)` is 1, 2). The count is `pyRangeCount`, which needs
+      // no `math` or NumPy import.
       const l = compilePythonBound(lo, target);
       const h = compilePythonBound(hi, target);
-      return `(lambda _a, _b: (range(int(_a), int(_b) + 1) if _b >= _a else range(int(_a), int(_b) - 1, -1)) if float(_a).is_integer() and float(_b).is_integer() else [_a + (1 if _b >= _a else -1) * _i for _i in range(int(abs(_b - _a)) + 1)])(${l}, ${h})`;
+      return `(lambda _a, _b: (range(int(_a), int(_b) + 1) if _b >= _a else range(int(_a), int(_b) - 1, -1)) if float(_a).is_integer() and float(_b).is_integer() else (lambda _s: [_a + _s * _i for _i in range(${pyRangeCount('_a', '_b', '_s')})])(1 if _b >= _a else -1))(${l}, ${h})`;
     }
   }
   // A STRING iterates its grapheme clusters in the interpreter, and a
@@ -3433,8 +3461,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`Range(5, 1)` → [5,4,3,2,1]). (Previously emitted a bare `np.arange`,
     // which excludes the stop, is 0-based in the one-argument form, and
     // never descends — silently diverging from the interpreter.) The count
-    // is `⌊(stop − start)/step⌋ + 1`, computed explicitly so a fractional
-    // step never overshoots the endpoint; a zero step yields [].
+    // is the interpreter's `rangeCount` (`pyRangeCount`): `⌊(stop −
+    // start)/step⌋ + 1` with a small tolerance for the float rounding of the
+    // quotient, computed explicitly so a fractional step never overshoots
+    // the endpoint; a zero step yields [].
     if (args.length === 0) return '[]';
     // A non-finite bound never materializes: `int(np.floor(inf))` raises an
     // OverflowError at run time. Fail closed at compile time instead (the JS
@@ -3448,8 +3478,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const start = args.length === 1 ? '1' : compile(args[0]);
     const stop = args.length === 1 ? compile(args[0]) : compile(args[1]);
     if (args.length <= 2)
-      return `(lambda _a, _b: [float(_a + (1 if _b >= _a else -1) * _i) for _i in range(int(np.floor(abs(_b - _a))) + 1)])(${start}, ${stop})`;
-    return `(lambda _a, _b, _s: [] if _s == 0 else [float(_a + _s * _i) for _i in range(max(0, int(np.floor((_b - _a) / _s)) + 1))])(${start}, ${stop}, ${compile(args[2])})`;
+      return `(lambda _a, _b: (lambda _s: [float(_a + _s * _i) for _i in range(${pyRangeCount('_a', '_b', '_s')})])(1 if _b >= _a else -1))(${start}, ${stop})`;
+    return `(lambda _a, _b, _s: [] if _s == 0 else [float(_a + _s * _i) for _i in range(${pyRangeCount('_a', '_b', '_s')})])(${start}, ${stop}, ${compile(args[2])})`;
   },
 
   // --- Function literals ---------------------------------------------------

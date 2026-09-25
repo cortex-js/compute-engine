@@ -220,12 +220,14 @@ describe('the counted-range prologue of an integer range', () => {
    *  emitted rather than folded away. */
   const TEX = '[k x \\operatorname{for} k=a...b]';
 
-  test('integer bounds need no clamp; the floor stays because a run-time bound may be fractional', () => {
+  test('the count is the interpreter\'s `rangeCount`, which floors a fractional run-time bound', () => {
+    // The clamp, the floor and the zero-step test are inside the runtime
+    // helper `_SYS.rangeCount` (`numerics/range-count.ts`), shared with the
+    // interpreter's `Range` count.
     const ce = engine();
     ce.declare('x', 'number');
     const src = code(ce, TEX);
-    expect(src).not.toContain('Math.max(0');
-    expect(src).toContain('Math.floor');
+    expect(src).toContain('_SYS.rangeCount(');
     expect(src).toContain('? 1 : -1');
   });
 
@@ -251,8 +253,7 @@ describe('the counted-range prologue of an integer range', () => {
     ce.declare('b', 'real');
     ce.declare('x', 'number');
     const src = code(ce, TEX);
-    expect(src).toContain('Math.floor');
-    expect(src).toContain('Math.max(0');
+    expect(src).toContain('_SYS.rangeCount(');
   });
 
   test('the comprehension equals the interpreter, both directions', () => {

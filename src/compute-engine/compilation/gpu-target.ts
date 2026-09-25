@@ -72,6 +72,7 @@ import {
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
 import { foldSeed } from '../numerics/random.js';
+import { rangeCount } from '../numerics/range-count.js';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -7652,7 +7653,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     if (step === 0)
       throw new Error('Could not compile `Range`: step cannot be zero');
-    const count = Math.max(0, Math.floor((hi - lo) / step) + 1);
+    const count = rangeCount(lo, hi, step);
     if (count === 0) {
       throw new Error(
         'Could not compile `Range`: empty range (lo > hi for positive step, or lo < hi for negative step)'

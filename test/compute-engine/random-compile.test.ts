@@ -725,10 +725,10 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
 
   test('JS: Range keeps the pure emission (byte-identical pins)', () => {
     expect(jsCode(['Range', 'a', 'b', 'c'])).toBe(
-      'Array.from({length: Math.floor((_.b - _.a) / _.c) + 1}, (_e, i) => _.a + i * _.c)'
+      'Array.from({length: _SYS.rangeCount(_.a, _.b, _.c)}, (_e, i) => _.a + i * _.c)'
     );
     expect(jsCode(['Range', 1, 10, 2])).toBe(
-      'Array.from({length: Math.floor((10 - 1) / 2) + 1}, (_e, i) => 1 + i * 2)'
+      'Array.from({length: _SYS.rangeCount(1, 10, 2)}, (_e, i) => 1 + i * 2)'
     );
   });
 

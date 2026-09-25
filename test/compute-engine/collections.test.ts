@@ -281,9 +281,12 @@ describe('EXACT NUMERICALLY-KNOWN BOUNDS (item 117)', () => {
         ['Divide', ['Multiply', 2, 'Pi'], 3],
       ])
       .evaluate();
-    expect(v.count).toEqual(3);
+    // 2π ÷ (2π/3) is exactly 3 steps, so the range ends at 2π: 4 elements.
+    // The float quotient falls one rounding error short of 3; the count
+    // absorbs that (`rangeCount`, `numerics/range-count.ts`).
+    expect(v.count).toEqual(4);
     expect([...v.each()].map((e) => e.re)).toEqual([
-      0, 2.0943951023931957, 4.188790204786391,
+      0, 2.0943951023931957, 4.188790204786391, 6.283185307179587,
     ]);
   });
 

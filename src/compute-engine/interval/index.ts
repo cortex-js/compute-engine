@@ -138,6 +138,7 @@ import {
   pointList as _pointList,
   map as _map,
   range as _range,
+  seededChoice as _seededChoice,
 } from './collections.js';
 
 // Types
@@ -274,7 +275,8 @@ export {
 } from './integrate.js';
 
 // Collection access (`At`, `Length`, point coordinates) and the run-time
-// collection values (element-wise broadcast, `Map`, `Range`)
+// collection values (element-wise broadcast, `Map`, `Range`, a seeded
+// `RandomChoice` draw)
 export {
   at,
   length,
@@ -286,7 +288,9 @@ export {
   pointList,
   map,
   range,
+  seededChoice,
 } from './collections.js';
+export type { SeededChoiceDomain } from './collections.js';
 
 /**
  * The complete interval arithmetic library object.
@@ -370,6 +374,7 @@ export const IntervalArithmetic = {
   pointList: _pointList,
   map: _map,
   range: _range,
+  seededChoice: _seededChoice,
 
   // Trigonometric
   sin: _sin,

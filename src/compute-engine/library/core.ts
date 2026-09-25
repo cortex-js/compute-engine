@@ -53,6 +53,7 @@ import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
 
 import { fromDigits } from '../numerics/strings.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
+import { rangeCount } from '../numerics/range-count.js';
 import { randomCount } from './random-utils.js';
 import { isRingConstant } from './ring-constructions.js';
 import { RING_CONSTANTS } from '../latex-syntax/utils.js';
@@ -6556,8 +6557,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (step === 0) return undefined;
           if (!Number.isFinite(first) || !Number.isFinite(upper))
             return undefined;
-          if (Math.max(0, Math.floor((upper - first) / step) + 1) === 0)
-            return undefined;
+          if (rangeCount(first, upper, step) === 0) return undefined;
           const last = rangeLast([first, upper, step]);
           if (first >= 0 && last >= 0) return 'non-negative';
           if (first <= 0 && last <= 0) return 'non-positive';
