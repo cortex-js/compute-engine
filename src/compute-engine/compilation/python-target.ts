@@ -2930,9 +2930,32 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           'contracts it as a matrix, but the interpreter answers one inner ' +
           'product per point.'
       );
+    // A RESTRICTED operand (`P {c}`, `L {c}`) lowers to `(…) if c else
+    // None`, and `np.dot` raises a `TypeError` for `None`, where the
+    // interpreter answers the absence marker (`NaN` for the product of two
+    // points, `Missing` for a list of points). Fail closed.
+    if (args.some((a) => isFunction(a, 'When')))
+      throw new Error(
+        'Could not compile `Dot`: a restricted operand is absent when its ' +
+          'condition is false, and `np.dot` has no answer for an absent ' +
+          'operand where the interpreter answers the absence marker.'
+      );
     return `np.dot(${compile(args[0])}, ${compile(args[1])})`;
   },
-  Cross: 'np.cross',
+  Cross: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('Could not compile `Cross`: missing argument');
+    // A RESTRICTED operand (`P {c}`) lowers to `(…) if c else None`, and
+    // `np.cross` raises for `None`, where the interpreter answers the
+    // absence marker. Fail closed, as `Dot` does.
+    if (args.some((a) => isFunction(a, 'When')))
+      throw new Error(
+        'Could not compile `Cross`: a restricted operand is absent when its ' +
+          'condition is false, and `np.cross` has no answer for an absent ' +
+          'operand where the interpreter answers the absence marker.'
+      );
+    return `np.cross(${compile(args[0])}, ${compile(args[1])})`;
+  },
   // A STRING norm type (`Norm(v, "Infinity")`, `Norm(m, "Frobenius")`) is
   // spelled differently by numpy — `np.linalg.norm(v, "Infinity")` is a
   // ValueError. Map the two spellings the interpreter recognizes; anything else

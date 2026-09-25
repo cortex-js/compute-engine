@@ -19,6 +19,10 @@ import {
 } from './type-guards.js';
 import {
   isTuple,
+  isTupleCarrier,
+  isPointListCarrier,
+  pointListCarrierArity,
+  tupleCarrierArity,
   couldBeNumericTuple,
   numericTupleArity,
   hasAccessibleComponents,
@@ -909,13 +913,21 @@ function pointProductError(
   // `tupleArity` rather than `numericTupleArity`: `isTuple` also accepts a
   // SYMBOL whose bound value is a tuple, and reading only the symbol's own
   // type would call that arity unknown and wrongly leave `Cross` in.
-  const arities = ops.filter((x) => isTuple(x)).map(tupleArity);
+  // A list of points (`isPointListCarrier`) counts with the component count
+  // of its points: the product applies to each point.
+  const arities = ops
+    .filter((x) => isTupleCarrier(x) || isPointListCarrier(x))
+    .map((x) => (isTupleCarrier(x) ? tupleArity(x) : pointListCarrierArity(x)));
   const known = arities.filter((n): n is number => n !== undefined);
   // `Dot` rejects a pair whose component counts differ, so two points of
   // KNOWN and different arity have no alternative to offer at all.
   const mismatched = known.length > 1 && known.some((n) => n !== known[0]);
+  // `Cross` does not accept a list of points (`Dot` does, point by point),
+  // so a product with a list of points never suggests it.
   const crossApplies =
-    !mismatched && arities.every((n) => n === undefined || n === 3);
+    !mismatched &&
+    !ops.some((x) => !isTupleCarrier(x) && isPointListCarrier(x)) &&
+    arities.every((n) => n === undefined || n === 3);
   if (mismatched)
     return ce.error([
       'no-product-between-points',
@@ -943,7 +955,11 @@ function pointProductError(
  * two predicates consulted different places.
  */
 function tupleArity(expr: Expression): number | undefined {
-  return numericTupleArity(expr) ?? numericTupleArity(expr.value ?? expr);
+  return (
+    numericTupleArity(expr) ??
+    numericTupleArity(expr.value ?? expr) ??
+    tupleCarrierArity(expr)
+  );
 }
 
 //
@@ -1027,7 +1043,16 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     // remedy: name the situation instead of reporting that something wanted a
     // number and got a tuple. There is no alternative operator to suggest here
     // — a point has no reciprocal — so the message says only what is undefined.
-    if (isTuple(op2)) return ce.error(['no-division-by-point']);
+    // A divisor typed `missing | tuple<…>` (a restricted point, `When((0,1),
+    // c)`) is rejected the same way (`isTupleCarrier`): when present it is a
+    // point, so `t / P` has no meaning whatever the condition, and Desmos
+    // rejects it the same way.
+    // A divisor that is a list of points (`isPointListCarrier`) is rejected
+    // too: the division applies to each point, so every element is a
+    // division by a point. Desmos rejects `t/L` and `2/[(1,2),(3,4)]` for a
+    // list of points `L` ("Cannot divide a number by a list of points").
+    if (isTupleCarrier(op2) || isPointListCarrier(op2))
+      return ce.error(['no-division-by-point']);
     // The numerator is admitted with COULD-semantics, the same
     // `couldBeNumericTuple` the `Divide` TYPE handler uses to decide that a
     // quotient keeps its tuple shape, so the value route and the type route
@@ -1563,8 +1588,17 @@ export function canonicalMultiply(
   // narrower `isNumericTuple` deferred the identical rejection to evaluation,
   // making validity depend on refinement order (Tycho item 158). Use `Dot`
   // for the explicit inner product. `scalar · tuple` is allowed and scales
-  // component-wise at evaluation.
-  if (ops.filter((x) => isTuple(x)).length >= 2)
+  // component-wise at evaluation. An operand typed `missing | tuple<…>` (a
+  // restricted point, `When((0,1), c)`, or a `Which` with point branches and
+  // no default) counts as a tuple here (`isTupleCarrier`): when present it is
+  // a point, so the product has no meaning whatever the condition, and
+  // Desmos rejects it the same way. A list of points
+  // (`isPointListCarrier`) counts as a point too: the product applies to each
+  // point, so `[(1,2),(3,4)]·(1,1)` is a list of products of two points, and
+  // Desmos rejects it ("Cannot multiply a list of points by a point"). A list
+  // of NUMBERS times a point (`[1,2,3]·(0,1)`) has one point operand and stays
+  // valid: it is a list of scaled points.
+  if (ops.filter((x) => isTupleCarrier(x) || isPointListCarrier(x)).length >= 2)
     return pointProductError(ce, ops);
 
   //

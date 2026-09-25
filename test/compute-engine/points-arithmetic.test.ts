@@ -2732,16 +2732,18 @@ describe('a list times a point types as a list of points', () => {
   });
 
   test('a list of points is not a scaling tensor', () => {
-    // Point times point has no product; the value is that error at every
-    // element, and the arm must not claim a list of points for it.
+    // Point times point has no product, so a list of points times a point
+    // is that error at every element. It is rejected when the expression is
+    // created, as Desmos rejects it ("Cannot multiply a list of points by a
+    // point"), and no type claims a list of points for it.
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Multiply',
       ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
       ['Tuple', 5, 6],
     ]);
-    const value = expr.evaluate();
-    expect(value.operator).toBe('List');
-    expect(value.ops!.every((x) => x.operator === 'Error')).toBe(true);
+    expect(expr.isValid).toBe(false);
+    expect(expr.operator).toBe('Error');
+    expect(JSON.stringify(expr.json)).toContain('no-product-between-points');
   });
 });

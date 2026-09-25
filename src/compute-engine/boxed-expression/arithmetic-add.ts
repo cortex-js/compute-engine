@@ -27,6 +27,8 @@ import {
 import {
   isBroadcastCollectionType,
   isNumericTupleCarrier,
+  isPointListCarrier,
+  isProvablyNumberList,
   isTuple,
   numericTupleArity,
   hasAccessibleComponents,
@@ -153,6 +155,33 @@ export function canonicalAdd(
     ops.some((x) => isProvablyScalarNumber(x))
   )
     return ce.error(['incompatible-type', 'tuple', 'number']);
+
+  // The same mistake, element by element: a point plus a list of numbers
+  // broadcasts the point over the list, and every element is a
+  // `tuple + number` sum. Rejected here, whether the point, the list or both
+  // are restricted by a condition, because Desmos rejects the whole sum
+  // ("Cannot add a point and a list of numbers") whatever the value of the
+  // condition. Before this, `(0,1) + [10,20,30]` was valid and evaluated to
+  // a list of three errors, and with a restricted point to a list of `NaN`
+  // when the point was absent.
+  if (
+    ops.some((x) => isNumericTupleCarrier(x)) &&
+    ops.some((x) => isProvablyNumberList(x))
+  )
+    return ce.error(['incompatible-type', 'tuple', 'list<number>']);
+
+  // The same two mistakes with a LIST of points: the sum applies to each
+  // point, so `[(0,1),(4,5)] + 1` is a list of `tuple + number` sums, and
+  // `[(1,2),(3,4)] + [1,2]` pairs each point with a number. Desmos rejects
+  // both ("Cannot add a list of points and a number", "... and a list of
+  // numbers"), also when the list is restricted by a condition. A list of
+  // points plus a point, or plus another list of points, stays valid.
+  if (ops.some((x) => isPointListCarrier(x))) {
+    if (ops.some((x) => isProvablyScalarNumber(x)))
+      return ce.error(['incompatible-type', 'list<tuple>', 'number']);
+    if (ops.some((x) => isProvablyNumberList(x)))
+      return ce.error(['incompatible-type', 'list<tuple>', 'list<number>']);
+  }
 
   // Remove literal 0
   ops = ops.filter((x) => !isNumber(x) || !x.isSame(0));

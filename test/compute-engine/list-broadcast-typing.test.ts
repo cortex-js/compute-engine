@@ -234,7 +234,12 @@ describe('`isValid` is DEEP through a tensor (Tycho item 67)', () => {
   // whose every element was an `Error` still reported `isValid: true` — and
   // consumers use `isValid` as an admission gate before compiling/plotting.
   test('a broadcast that errors per element is invalid', () => {
-    const v = ce.box(['Add', ['Tuple', 1, 2], ['List', 3, 4]]).evaluate();
+    // A list that holds a point and a number, plus a number: the first
+    // element is a point plus a number. (A point or a list of points plus a
+    // number, or plus a list of numbers, is rejected when the expression is
+    // created, so it does not reach the tensor. A list that holds a number
+    // is not provably a list of points, so this sum is created.)
+    const v = ce.box(['Add', ['List', ['Tuple', 1, 2], 3], 1]).evaluate();
     expect(v.op1.isValid).toBe(false);
     expect(v.isValid).toBe(false);
   });

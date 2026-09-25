@@ -453,21 +453,6 @@ outside the range it accepts. Make the rule skip integers above that range.
 
 ### Residues of the fixes for Tycho asks 306–315 (OPEN — found 2026-09-24)
 
-Found while fixing 312 (decision needed): `Add(P{c}, 1)`, a restricted point
-plus a number, is an `incompatible-type` error at canonicalization, because
-the check reads through the `missing` part of the type
-(`isNumericTupleCarrier`). The product of two restricted points and a division
-by a restricted point are not errors at canonicalization: the interpreter
-answers Missing or NaN when the point is absent and the error only when it is
-present. The compiled targets now decline all of these shapes. Question: should
-`Multiply`/`Divide` also give the error at canonicalization, as `Add` does?
-That changes the interpreter's answer when the point is absent.
-The same decision covers a point added to a number INSIDE a list:
-`Add(P{c}, [10,20,30]{[1,2,3] > 2})` is typed
-`list<list<number> | tuple<number, number>>`, which is wrong in every case, and
-gives `[Missing, Missing, Error(incompatible-type)]` at `t = 1` and
-`[NaN, NaN, NaN]` at `t = -1`.
-
 Found while fixing 312 (not fixed, small): `Multiply(Undefined, [1,2,3])` is
 typed `vector<integer^3>` while its value is `[NaN, NaN, NaN]`;
 `Norm([[1,2],[3,Missing]])` stays unevaluated instead of giving `NaN`;
@@ -479,12 +464,31 @@ keeps `NaN` in an absent cell although its type says `missing | tuple<…>`
 (`markAbsentPointCells`, `boxed-expression/validate.ts`, corrects a rank-1
 `List` only).
 
-Found while fixing 313 (decision needed): `a\ [1,2]` (backslash-space) and
-`a~[1,2]` read as the index `At(a, 1, 2)`, like `a [1,2]`, while `a\,[1,2]` is
-the product `a·[1,2]`. The tokenizer turns `\ `, `~` and `\space` into the
-same `<space>` token as plain whitespace, so the parser cannot tell them apart.
-Making `\ ` a product needs its own token and changes to about 30 places that
-match `<space>` (text mode, keywords, units, `skipSpace`).
+Found while making restricted points canonical errors (decision needed,
+2026-09-25): `Distance` and `Norm` do not read a restricted point while its
+condition is undecided. `Distance((3,4){0<t}, (0,0))` with `t` free is an
+`incompatible-type` error but 5 at `t = 2`; `Distance([(3,4), Missing], (0,0))`
+is an error at every `t`; `Norm([(3,4),(6,8)]{0<t})` with `t` free is an error;
+`Norm((3,4){0<t})` stays unevaluated. `PointX`, `At`, `Dot` and `Cross` now
+each move the restriction onto their result with their own code
+(`restrictedComponent` in `library/collections.ts`,
+`restrictedOperandProduct` in `library/linear-algebra.ts`). The engine already
+does this generically for broadcastable operators (`threadConditional`,
+`boxed-expression/boxed-function.ts`). Question: add an operator-definition
+flag that lets any operator use `threadConditional` (a change to the public
+definition surface), or extend the per-operator code to `Distance` and `Norm`?
+Types in the same area that do not match the value: `At([[1,2],[3,4]]{0<t}, 2,
+1)` is typed `missing | vector<integer^2>` but its value is 3; `At((1,2){0<t},
+2)` is typed `unknown`; `First((1,2){0<t})` is typed `integer` but can be
+`Missing`; `PointX(Missing)` is typed `missing` but its value is `NaN`.
+
+Not fixed, accepted rule: on `javascript`, a list held by a free point
+coordinate becomes `NaN` (`_SYS.pointSlot`), so `[1,2]·PointList(t,t)` run with
+`t = [1,2]` gives `[[NaN,NaN],[NaN,NaN]]` where the interpreter answers
+`[(1,1),(4,4)]`. Refusing the compile whenever a coordinate type is `unknown`
+would also refuse ordinary plot expressions. On `interval-js`,
+`2·PointList(t,1)` with `t = [1,2]` gives the point `([2,4], 2)`; plot
+variables on that target are numbers.
 
 Found while fixing 313 (not fixed; each gives a visible error, not a wrong
 value): `x4[1,2]` (the left side is already the product `x·4`), `2^3[1,2]` and

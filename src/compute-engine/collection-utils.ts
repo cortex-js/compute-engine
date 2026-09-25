@@ -1836,6 +1836,40 @@ export function isProvablyScalarNumber(expr: Expression): boolean {
 }
 
 /**
+ * Is `expr` PROVABLY a non-empty list of scalar numbers — proof enough to
+ * REJECT a sum of it with a point at canonicalization?
+ *
+ * A sum of a point and a list broadcasts the point over the elements, so
+ * `(0, 1) + [10, 20, 30]` is `[(0,1) + 10, (0,1) + 20, (0,1) + 30]`, and
+ * each element is the `tuple + number` mistake `canonicalAdd` rejects. Desmos
+ * rejects the whole sum ("Cannot add a point and a list of numbers"), also
+ * when the list or the point is restricted.
+ *
+ * Recognized: a `List` literal whose every element is a provable scalar
+ * (`isProvablyScalarNumber`), the same list restricted by a condition
+ * (`When([10, 20, 30], c)`: an absent element is `Missing`, and a present one
+ * is a number), and a symbol whose DECLARED (not inferred) type, without its
+ * absence arm, is a list of numbers. Anything else — an unknown-typed operand,
+ * a list of points, a list whose element type was only inferred — is not
+ * proof.
+ */
+export function isProvablyNumberList(expr: Expression): boolean {
+  if (isFunction(expr, 'List'))
+    return expr.nops > 0 && expr.ops.every((op) => isProvablyScalarNumber(op));
+  if (isFunction(expr, 'When') && expr.nops === 2)
+    return isProvablyNumberList(expr.op1);
+  if (isSymbol(expr)) {
+    const def = expr.valueDefinition;
+    if (def === undefined || def.inferredType) return false;
+    const t = stripMissingFromType(resolveTypeAlias(expr.type.type));
+    if (typeof t === 'string' || t.kind !== 'list') return false;
+    const el = resolveTypeAlias(t.elements);
+    return el !== 'never' && isSubtype(el, 'number');
+  }
+  return false;
+}
+
+/**
  * Is `x` an operand that makes an application ELEMENT-WISE, read from its
  * TYPE rather than its value — so the answer is known before the operand is
  * evaluated, and a `list<boolean>`-typed call, a symbol bound to a list, and a
@@ -2011,6 +2045,135 @@ export function isTuple(expr: Expression): boolean {
     if (v !== undefined && !isSymbol(v)) return isTupleShapedType(v.type.type);
   }
   return false;
+}
+
+/**
+ * `isTuple`, read through an absence arm and across a union of tuple
+ * spellings: true when every value the operand can take, other than the
+ * absent one, is a tuple. A restricted point `When((0, 1), c)` and a
+ * `Which` with point branches and no default are typed
+ * `missing | tuple<…>`: when present they are points, and when absent they
+ * are `Missing`. So a product of two of them, or a division by one, is the
+ * same mistake it is for a bare point, and the `Multiply` and `Divide`
+ * canonical forms reject it with the same error. This matches Desmos, which
+ * rejects `P Q`, `t/P` and `P/Q` for a restricted `P = (0,1)\{0<t\}` whatever
+ * the value of the condition.
+ *
+ * `isTuple` itself keeps its exact reading for the callers that scale or add
+ * tuples component-wise, which need a value that is a tuple, not one that may
+ * be absent.
+ */
+export function isTupleCarrier(expr: Expression): boolean {
+  if (isTuple(expr)) return true;
+  // The early exits of `isTuple`, for the reasons given there.
+  if (isNumber(expr)) return false;
+  if (
+    isScalarLiftApplication(expr) &&
+    operandTypeCannotBeTuple(expr, SCALAR_LIFT_DESCENT)
+  )
+    return false;
+  if (tupleCarrierType(expr.type.type)) return true;
+  if (isSymbol(expr)) {
+    const v = expr.value;
+    if (v !== undefined && !isSymbol(v)) return tupleCarrierType(v.type.type);
+  }
+  return false;
+}
+
+/**
+ * The component count of an operand typed `missing | tuple<…>` (a restricted
+ * point), read from the tuple arm, or `undefined` when the type without its
+ * absence arm is not a single parameterized tuple.
+ */
+export function tupleCarrierArity(expr: Expression): number | undefined {
+  const s = resolveTypeAlias(
+    stripMissingFromType(resolveTypeAlias(expr.type.type))
+  );
+  if (typeof s === 'string' || s.kind !== 'tuple') return undefined;
+  return s.elements.length;
+}
+
+/** Is every non-absent arm of `t` a tuple? A type that is `missing` alone
+ *  has no non-absent arm and does not qualify. */
+function tupleCarrierType(t: Type): boolean {
+  // The alias is unfolded BEFORE the absence arm is stripped, as in
+  // `isNumericTupleCarrier`: `stripMissingFromType` leaves a reference node
+  // as it is.
+  const s = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(t)));
+  if (s === 'never') return false;
+  if (typeof s === 'object' && s.kind === 'union')
+    return s.types.length > 0 && s.types.every((arm) => isTupleShapedType(arm));
+  return isTupleShapedType(s);
+}
+
+/**
+ * Is `expr` PROVABLY a list of points — proof enough to REJECT, at
+ * canonicalization, the arithmetic shapes that have no meaning for a list of
+ * points?
+ *
+ * Arithmetic with a list of points applies to each point, so a product of a
+ * list of points and a point (`[(1,2),(3,4)]·(1,1)`) is a list of
+ * point-by-point products, and a division by a list of points
+ * (`2/[(1,2),(3,4)]`) is a list of divisions by a point. Each element is then
+ * the same mistake as for a single point. Desmos rejects the whole
+ * expression ("Cannot multiply a list of points by a point", "Cannot divide a
+ * number by a list of points", "Cannot add a list of points and a number")
+ * whatever the value of a condition on the list, so `Multiply`, `Divide` and
+ * `Add` reject it with the error of the single-point case.
+ *
+ * Recognized from the TYPE, without its absence arm: a list whose every
+ * element, other than an absent one, is a tuple. This includes a list
+ * literal of points (`list<tuple<…>>`), a restricted list of points
+ * (`When([(0,1),(4,5)], c)`, typed `missing | list<tuple<…>>`, or
+ * `list<missing | tuple<…>>` when the condition is a list), and a symbol
+ * declared or assigned such a list (through its value, as `isTupleCarrier`
+ * does). A list literal whose elements are all `isTupleCarrier` also
+ * qualifies, whatever its inferred type. A type that only MAY be a list of
+ * points (`unknown`, `list<any>`, `list<number | tuple<…>>`) is not proof.
+ *
+ * A tuple whose components are lists (`(-6, n)` with `n` a list) is a
+ * `tuple`, not a list, and does not qualify here.
+ */
+export function isPointListCarrier(expr: Expression): boolean {
+  if (isNumber(expr)) return false;
+  if (isFunction(expr, 'List'))
+    if (expr.nops > 0 && expr.ops.every((op) => isTupleCarrier(op)))
+      return true;
+  if (pointListElementType(expr.type.type) !== undefined) return true;
+  if (isSymbol(expr)) {
+    const v = expr.value;
+    if (v !== undefined && !isSymbol(v))
+      return pointListElementType(v.type.type) !== undefined;
+  }
+  return false;
+}
+
+/**
+ * The component count of the points of a list of points
+ * (`isPointListCarrier`), or `undefined` when it is not statically known.
+ */
+export function pointListCarrierArity(expr: Expression): number | undefined {
+  let el = pointListElementType(expr.type.type);
+  if (el === undefined && isSymbol(expr)) {
+    const v = expr.value;
+    if (v !== undefined && !isSymbol(v)) el = pointListElementType(v.type.type);
+  }
+  if (el === undefined && isFunction(expr, 'List') && expr.nops > 0)
+    el = expr.ops[0].type.type;
+  if (el === undefined) return undefined;
+  const s = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(el)));
+  if (typeof s === 'string' || s.kind !== 'tuple') return undefined;
+  return s.elements.length;
+}
+
+/**
+ * When `t`, without its absence arm, is a list whose every non-absent
+ * element is a tuple, the element type. Otherwise `undefined`.
+ */
+function pointListElementType(t: Type): Type | undefined {
+  const s = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(t)));
+  if (typeof s === 'string' || s.kind !== 'list') return undefined;
+  return tupleCarrierType(s.elements) ? s.elements : undefined;
 }
 
 /**

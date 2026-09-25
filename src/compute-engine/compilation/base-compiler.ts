@@ -7790,6 +7790,36 @@ export class BaseCompiler {
               `component-wise value where the interpreter answers an error.`
           );
       }
+      // A point beside a LIST: a shader lowers both to a `vecN`, so a point
+      // and a list of the same length combine component-wise. The
+      // interpreter does not: `[1, 2]·(x, 1)` is the list of points
+      // `[(x, 1), (2x, 2)]`, which has no shader value, and `(3, 1) / [1, 2]`
+      // stays unevaluated. Both compiled to a plausible `vec2`. The point is
+      // read by the COULD-form here (`couldBeNumericTuple`), so a point whose
+      // component types are only possibly numeric (`PointList(t, 1)` with
+      // `t` free) is a point too. `Add` is not listed: a point beside a
+      // list is refused above, as a point beside a non-point.
+      if (h === 'Multiply' || h === 'Divide') {
+        const isAnyPoint = (a: Expression): boolean =>
+          isPoint(a) || couldBeNumericTuple(a);
+        if (
+          args.some(isAnyPoint) &&
+          args.some(
+            (a) =>
+              !isAnyPoint(a) &&
+              !isTupleShapedType(compilationType(a)) &&
+              a.type.matches('list<any>')
+          )
+        )
+          throw new Error(
+            `Could not compile \`${h}\`: ` +
+              (h === 'Multiply'
+                ? 'a point times a list is a list of points in the interpreter'
+                : 'a point divided by a list has no value in the interpreter') +
+              `, and the ${target.language} vector operators would combine ` +
+              `the point and the list component-wise.`
+          );
+      }
     }
 
     // An ORDERING comparison over a complex-valued operand has no lowering:
@@ -11011,22 +11041,51 @@ export class BaseCompiler {
       return null;
     if (gatedPoints.length > 0 && h !== 'Add' && h !== 'Subtract') {
       if (gatedPoints.length > 1) return null;
-      if (
-        args.some(
-          (a) => a !== gatedPoints[0] && BaseCompiler.isArrayOperand(a, target)
+      const otherArrays = args.filter(
+        (a) => a !== gatedPoints[0] && BaseCompiler.isArrayOperand(a, target)
+      );
+      // One exception: a LIST OF NUMBERS times a gated point
+      // (`[1,2,3]·P{c}`) is a list of scaled points in the interpreter, as it
+      // is for a point without a condition. It takes the same nested
+      // emission as the `Multiply` point-family shape below (`atomicTuple`):
+      // the outer broadcast walks the list and the gated point is kept
+      // whole. The other array operands must provably hold numbers
+      // (`isScalarElementSource`), or the outer broadcast would descend into
+      // a point. When the point is absent, the inner broadcast applies the
+      // closure to the absent value as to a scalar, and every element is
+      // `NaN` where the interpreter answers `Missing` (the absent value on a
+      // compiled numeric lane, see the comment of `isGatedIndexedCollection`).
+      if (otherArrays.length > 0) {
+        if (
+          h !== 'Multiply' ||
+          !otherArrays.every(
+            (a) =>
+              !couldBeNumericTuple(a) &&
+              BaseCompiler.isScalarElementSource(a, target)
+          )
         )
-      )
-        return null;
+          return null;
+        atomicTuple = gatedPoints[0];
+      }
       if (h === 'Divide' && args[0] !== gatedPoints[0]) return null;
     }
 
     if (h === 'Multiply') {
+      // A POINT operand is read by the COULD-form (`couldBeNumericTuple`):
+      // a tuple whose component types are only possibly numeric is a point
+      // too. `PointList(t, 1)` with `t` free types `tuple<unknown, integer>`,
+      // and `(-6, [4, 5, 6])` types `tuple<integer, vector<integer^3>>`.
+      // The strict `isNumericTuple` rejects both, so the point was not kept
+      // atomic and the flat `_SYS.bcast` zipped its components against the
+      // list: `[1, 2, 3]·PointList(t, 1)` ran to `NaN` where the
+      // interpreter answers `[(t, 1), (2t, 2), (3t, 3)]`.
+      const isPointOperand = (a: Expression): boolean => couldBeNumericTuple(a);
       const isArrayish = (a: Expression): boolean =>
         // A string matches `indexed_collection` but is not array-shaped — see
         // `compilesToArray` above.
         !isProvablyStringOperand(a) &&
         (isTensorValue(a) ||
-          isNumericTuple(a) ||
+          isPointOperand(a) ||
           a.type.matches('list<any>') ||
           a.type.matches('indexed_collection<any>') ||
           isBoundPossiblyCollectionTyped(a, target));
@@ -11043,7 +11102,7 @@ export class BaseCompiler {
         // `success: true` (Tycho item 245). The single-tuple case is refined
         // below; two or more point-shaped operands decline here.
         if (
-          collection.filter((a) => isNumericTuple(a) || isPointListShaped(a))
+          collection.filter((a) => isPointOperand(a) || isPointListShaped(a))
             .length > 1
         )
           return null;
@@ -11063,7 +11122,7 @@ export class BaseCompiler {
         // point) or a list of numbers (a list of points), both what the
         // interpreter answers. Two or more tuples stay declined: `tuple·tuple`
         // is an interpreter error (no implicit dot/cross).
-        const tuples = collection.filter((a) => isNumericTuple(a));
+        const tuples = collection.filter((a) => isPointOperand(a));
         if (tuples.length > 1) return null;
         if (tuples.length === 1) {
           if (
@@ -11244,10 +11303,18 @@ export class BaseCompiler {
     // n-ary `Add` (`P − (4, 0) − 2(H(i+.2), H(i+.4))` is a three-operand
     // sum) — so that the closure applied per element is the point sum in
     // both cases (Tycho item 253).
+    // The point is read by the COULD-form (`couldBeNumericTuple`): a point
+    // whose component types are only possibly numeric (`PointList(t, 1)`
+    // with `t` free, typed `tuple<unknown, integer>`) is a point too. Read
+    // by the strict `isNumericTuple`, `W + PointList(t, 1)` escaped this lift
+    // and was zipped flat: `W = [(1, 1), (2, 2)]` ran to `[[3, 3], [3, 3]]`
+    // where the interpreter answers `[(3, 2), (4, 3)]` at `t = 2`.
     if (h === 'Add' && atomicTuple === undefined) {
-      const provable = args.filter((a) => isNumericTuple(a));
+      const provable = args.filter(
+        (a) => !isRuntimePointShaped(a) && couldBeNumericTuple(a)
+      );
       const runtime = args.filter(
-        (a) => !isNumericTuple(a) && isRuntimePointShaped(a)
+        (a) => !provable.includes(a) && isRuntimePointShaped(a)
       );
       if (
         provable.length >= 1 &&

@@ -197,8 +197,15 @@ describe('the whole-point absence arm stands aside', () => {
     // The sum is a broadcast over the list; the absent point lands in each
     // cell through the collection kernel, not as one `Missing` for the whole.
     const ce = new ComputeEngine();
+    // The list holds points: a point plus a list of NUMBERS is rejected when
+    // the expression is created (`incompatible-type`).
     const sum = ce
-      .box(['Add', 'Missing', ['Tuple', 1, 2], ['List', 1, 2]])
+      .box([
+        'Add',
+        'Missing',
+        ['Tuple', 1, 2],
+        ['List', ['Tuple', 1, 1], ['Tuple', 2, 2]],
+      ])
       .evaluate();
     expect(sum.symbol).not.toBe('Missing');
     expect(sum.isCollection).toBe(true);

@@ -1196,6 +1196,17 @@ function tryIntervalBroadcast(
             ? count === 1 && points[0]
             : id === 'Negate';
     if (!shapeOk) return undefined;
+    // ONE point divided by a list: the interpreter leaves `(2, 1) / [1, 2]`
+    // unevaluated. It does not scale the point by every element as it does
+    // for `(2, 1)·[1, 2]`, so the point broadcast would answer a list of
+    // points where the interpreter has no value. A list of points divided by
+    // a list is a zip in the interpreter and stays admitted.
+    if (
+      id === 'Divide' &&
+      isIntervalPointOperand(args[0], target) &&
+      lists.some((x) => x)
+    )
+      return undefined;
   }
   const engine = args[0].engine;
   if (!intervalBroadcastHead(id, engine)) return undefined;

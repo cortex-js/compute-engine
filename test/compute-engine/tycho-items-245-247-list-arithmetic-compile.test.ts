@@ -63,9 +63,16 @@ describe('Tycho item 245 — point arithmetic the interpreter rejects fails clos
       's',
     ]],
   ])('%s', (_label, json) => {
-    const r = compile(ce.box(json as never), { to: 'javascript' });
+    // These shapes are now errors when the expression is created (arithmetic
+    // with a list of points applies to each point, and each element is a
+    // product of two points, a division by a point, or a point plus a
+    // number, as Desmos reports statically). The compiler refuses the
+    // invalid expression.
+    const expr = ce.box(json as never);
+    expect(expr.isValid).toBe(false);
+    const r = compile(expr, { to: 'javascript' });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/list-valued operand/);
+    expect(r.error).toMatch(/invalid expression/);
   });
 
   test('the point-list shapes the interpreter answers keep compiling', () => {

@@ -135,6 +135,7 @@ import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { machineListFrom } from '../boxed-expression/machine-broadcast.js';
 import {
+  isAbsentSymbol,
   isAbsentValue,
   isDictionary,
   isFunction,
@@ -2302,9 +2303,10 @@ function isPossiblyCollectionTypedD(d: OperandDescriptor): boolean {
 }
 
 /** Descriptor twin of {@link isPointLike}, for an operand that stands for one
- * ELEMENT of a collection. */
+ * ELEMENT of a collection. The absence arm of its type is not read: a
+ * restricted point, typed `missing | tuple<…>`, is a point. */
 function isPointLikeD(d: OperandDescriptor): boolean {
-  const t = d.type;
+  const t = stripMissingFromType(resolveTypeAlias(d.type));
   if (isPointElementType(t) || d.structureOf?.()?.kind === 'tuple') return true;
   if (d.facts.finiteCollection === true && d.facts.indexed === true) {
     const elt = collectionElementType(t);
@@ -2348,8 +2350,13 @@ function collectionBroadcastsPointsD(
 ): boolean | undefined {
   if (xs.facts.finiteCollection !== true) return undefined;
   const s = xs.structureOf?.();
-  if (s?.kind === 'list-literal' && s.elements.length > 0)
-    return isPointLikeD(s.elements[0]);
+  if (s?.kind === 'list-literal' && s.elements.length > 0) {
+    // The first element that is not absent decides, as it does for the
+    // value (`firstPresentElement`), and a restricted point, typed
+    // `missing | tuple<…>`, is read as its point.
+    const first = s.elements.find((e) => e.type !== 'missing') ?? s.elements[0];
+    return isPointLikeD(first);
+  }
   if (hasPointElementTypeD(xs)) return true;
   const elt = xs.facts.elementType ?? collectionElementType(xs.type);
   if (elt !== undefined && isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE)) {
@@ -3445,6 +3452,57 @@ function chainAbsorbMarker(
   return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
 }
 
+/**
+ * The component `read(body)` of a restriction `When(body, c)`, restricted by
+ * the same condition, or `null` when `xs` is not a restriction.
+ *
+ * `undefined` from `read` (the component stays symbolic) is returned as it
+ * is, and so is an error: an error of the body is the error of the
+ * application whatever the condition, as it is once the condition is true.
+ * The restricted component is evaluated so that a decided condition, or a
+ * component that is itself a list, takes the usual form of a restriction.
+ */
+function restrictedComponent(
+  xs: Expression,
+  ce: ComputeEngine,
+  read: (body: Expression) => Expression | undefined
+): Expression | undefined | null {
+  if (!isFunction(xs, 'When') || xs.nops !== 2) return null;
+  const component = read(xs.op1);
+  if (component === undefined || isFunction(component, 'Error'))
+    return component;
+  return ce.function('When', [component, xs.op2]).evaluate();
+}
+
+/** `e` without its restrictions: the body of `When(body, c)`, repeatedly. */
+function unrestricted(e: Expression): Expression {
+  while (isFunction(e, 'When') && e.nops === 2) e = e.op1;
+  return e;
+}
+
+/**
+ * The first element of the collection `xs` that is not absent, or
+ * `undefined` when there is none. Only a written-out `List` is read past
+ * its first element: its elements are in memory, while the elements of a
+ * lazy collection are computed one by one.
+ *
+ * The coordinate accessors decide from this element whether they broadcast
+ * over `xs`. An absent element (`Missing`, such as the point of an
+ * element-wise restriction whose condition is false) is not a point and not a
+ * scalar, so it cannot decide: `PointX([Missing, (1, 2)])` is the list of
+ * x-coordinates `[Missing, 1]`, as `PointX([(1, 2), Missing])` is
+ * `[1, Missing]`.
+ */
+function firstPresentElement(xs: Expression): Expression | undefined {
+  const all = isFunction(xs, 'List');
+  let first: Expression | undefined;
+  for (const e of xs.each()) {
+    if (first === undefined) first = e;
+    if (!all || !isAbsentSymbol(e)) return e;
+  }
+  return first;
+}
+
 // Access the element of `xs` at 1-based `position` (`-1` = last), used by the
 // `First`/`Second`/`Third`/`Last` evaluate handlers. A literal indexed
 // collection returns the element (an out-of-range position yields the
@@ -3468,6 +3526,16 @@ function componentAt(
   // `IsMissing`/`Coalesce`. The same two names are tested by
   // `isAbsentScalarSymbol` (`boxed-expression/validate.ts`).
   if (isSymbol(xs, 'Missing') || isSymbol(xs, 'Undefined')) return ce.Missing;
+  // A RESTRICTED operand whose condition is not decided yet — the point
+  // `(1, 2) {0 < t}` with `t` free — stays a `When` after evaluation. It is
+  // not a collection, and it was refused with an `incompatible-type` error.
+  // The restriction moves to the element: `First((1, 2) {0 < t})` is
+  // `1 {0 < t}`, which is `1` when the condition holds and `Missing` when it
+  // does not, the values the application has once the condition is decided.
+  const restricted = restrictedComponent(xs, ce, (body) =>
+    componentAt(body, position, ce)
+  );
+  if (restricted !== null) return restricted;
   if (xs.isCollection) {
     // Runtime re-validation of the `indexed_collection` parameter (the static
     // gate is overlap-deferred, so an `unknown`-typed operand can arrive
@@ -3606,6 +3674,8 @@ function staticPointArity(t: Type): number | undefined {
 // The point arity of a CONCRETE (evaluated) operand — the runtime counterpart
 // of `staticPointArity`, for the operands whose type was not decisive.
 function concretePointArity(e: Expression): number | undefined {
+  // A restricted point has the arity of its body.
+  e = unrestricted(e);
   const t = e.type.type;
   if (typeof t !== 'string' && t.kind === 'tuple')
     return t.elements?.length ?? (isFunction(e) ? e.nops : undefined);
@@ -3623,6 +3693,7 @@ function concretePointArity(e: Expression): number | undefined {
 // is not a concrete point or list of points (a list of scalars element-indexes
 // like First/Second/Third, and proves nothing about a point arity).
 function runtimePointArity(xs: Expression): number | undefined {
+  xs = unrestricted(xs);
   const t = xs.type.type;
   if (
     (typeof t !== 'string' && t.kind === 'tuple') ||
@@ -3630,7 +3701,8 @@ function runtimePointArity(xs: Expression): number | undefined {
   )
     return concretePointArity(xs);
   if (xs.isFiniteCollection === true) {
-    for (const e of xs.each()) return concretePointArity(e);
+    const first = firstPresentElement(xs);
+    if (first !== undefined) return concretePointArity(first);
   }
   return undefined;
 }
@@ -3743,6 +3815,13 @@ function pointComponentOf(
   position: number,
   ce: ComputeEngine
 ): Expression {
+  // A restricted point (`(1, 2) {0 < t}`, the element of a restricted list
+  // of points whose condition is not decided yet) gives its coordinate,
+  // restricted: `1 {0 < t}`.
+  const restricted = restrictedComponent(e, ce, (body) =>
+    pointComponentOf(body, position, ce)
+  );
+  if (restricted) return restricted;
   const component = e.at(position);
   if (component !== undefined) return component;
   if (e.isCollection) return absenceMarker(ce, e);
@@ -3793,6 +3872,17 @@ function pointComponentAt(
   numericApproximation = false,
   raw?: Expression
 ): Expression | undefined {
+  // A restricted point whose condition is not decided yet, such as
+  // `(1, 2) {0 < t}` with `t` free, stays a `When` after evaluation. Its
+  // coordinate is the coordinate of the point, restricted: `1 {0 < t}`.
+  // (A restricted LIST of points does not reach this: it evaluates to the
+  // list of its restricted points, which the broadcast below reads.)
+  const restricted = restrictedComponent(xs, ce, (body) =>
+    ce
+      .function(POINT_ACCESSOR_BY_POSITION[position - 1], [body])
+      .evaluate({ numericApproximation })
+  );
+  if (restricted !== null) return restricted;
   // A single point (tuple): the coordinate.
   const t = xs.type.type;
   if (typeof t !== 'string' && t.kind === 'tuple')
@@ -3814,13 +3904,11 @@ function pointComponentAt(
     // was misread as empty (→ a silently-wrong `[]`). `each()` yields the first
     // element for indexed and non-indexed collections alike, and taking just
     // one element keeps the peek O(1) (no materialization of a large domain).
-    let first: Expression | undefined;
-    for (const e of xs.each()) {
-      first = e;
-      break;
-    }
+    // An absent element does not decide the reading, and a restricted point
+    // is read as its point (see `firstPresentElement`).
+    const first = firstPresentElement(xs);
     if (first !== undefined) {
-      if (isPointLike(first)) {
+      if (isPointLike(unrestricted(first))) {
         // Hybrid laziness (Tycho item 52): past the eager threshold — or for
         // an indexed collection of unknown size — return the lazy projection
         // `Map(p ↦ At(p, position), xs)` instead of materializing every
@@ -8624,6 +8712,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // remaining indices into the final position's domain.
         if (isAbsentValue(expr))
           return chainAbsorbMarker(ce, expr.type.type, ops, index);
+
+        // A RESTRICTED value whose condition is not decided yet — the point
+        // `(1, 2) {0 < t}` with `t` free — stays a `When` after evaluation.
+        // The `When` operator has no elements of its own, so the dispatch
+        // below read every position of it as absent: `At((1, 2) {0 < t}, 2)`
+        // was `Missing`. The access is made in the body and the restriction
+        // moves to the result: `2 {0 < t}`. An error in the body is an error
+        // whatever the condition; an access that stays symbolic leaves `At`
+        // unevaluated.
+        const rest = ops.slice(index);
+        const restricted = restrictedComponent(expr, ce, (body) => {
+          const inner = ce.function('At', [body, ...rest]).evaluate();
+          return isFunction(inner, 'At') ? undefined : inner;
+        });
+        if (restricted !== null) return restricted;
 
         const opAtIndex = ops[index];
 

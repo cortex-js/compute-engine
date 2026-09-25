@@ -20,7 +20,10 @@ import {
   packStructural,
 } from '../boxed-expression/tensor-view.js';
 import { totalDegree } from '../boxed-expression/polynomial-degree.js';
-import { checkArity } from '../boxed-expression/validate.js';
+import {
+  absentScalarMarker,
+  checkArity,
+} from '../boxed-expression/validate.js';
 import {
   canEnumerateFiniteSource,
   hasAccessibleComponents,
@@ -1491,6 +1494,207 @@ function pointListDotProduct(
 }
 
 /**
+ * The inner product when an operand is a RESTRICTED point, or a list that
+ * holds restricted or absent points, or `undefined` when neither is the case.
+ *
+ * A restricted point whose condition is not decided yet stays a `When` after
+ * evaluation: `(1, 2) {0 < t}` with `t` free. A restricted LIST of points
+ * evaluates to the list of its restricted points: `[(1, 2), (3, 4)] {0 < t}`
+ * is `[(1, 2) {0 < t}, (3, 4) {0 < t}]`. Neither is a point or a list of
+ * points the other routes of this operator can read, and `MatrixMultiply`
+ * answered an `incompatible-type` error for them.
+ *
+ * - A restricted point moves its restriction to the product:
+ *   `Dot(P {c}, Q)` is `Dot(P, Q) {c}`, so `Dot((1, 2) {0 < t}, (1, 1))` is
+ *   `3 {0 < t}`.
+ * - A list that holds restricted points is taken point by point, one product
+ *   per point, as a list of points is (see `pointListDotProduct`). An ABSENT
+ *   point in that list (`Missing` or `Undefined`, such as the point of an
+ *   element-wise restriction whose condition is false) answers `NaN` at its
+ *   position: the product of two points is a number, and `NaN` is the absence
+ *   marker of a numeric cell (`docs/ERROR-MODEL.md`, the section on `Missing`
+ *   in a numeric slot).
+ *
+ * Only a list whose every element is a point, a restricted point or an absent
+ * value is taken point by point. A restricted VECTOR, such as `[1, 2] {c}`,
+ * also evaluates to a list of `When` cells, but those cells are numbers, not
+ * points, and their inner product is not a list.
+ */
+function restrictedPointDotProduct(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (ops.length !== 2) return undefined;
+  const isRestriction = (x: Expression): boolean =>
+    isFunction(x, 'When') && x.nops === 2;
+
+  const k = ops.findIndex(isRestriction);
+  if (k >= 0) {
+    const w = ops[k] as Expression & { op1: Expression; op2: Expression };
+    const inner = ops.map((op, i) => (i === k ? w.op1 : op));
+    // The product is evaluated BEFORE it is restricted: a restriction whose
+    // condition is not decided keeps its body as it is given, so
+    // `When(Dot((1, 2), (1, 1)), 0 < t)` would stay unreduced. Evaluating
+    // the restriction afterwards moves it into the cells when the product is
+    // a list, as for any restricted list. When the other operand carries the
+    // SAME condition, the product already does too, and it is not restricted
+    // a second time (`5 {0 < t} {0 < t}`).
+    const product = ce
+      .function('Dot', inner)
+      .evaluate({ numericApproximation });
+    const sameRestriction = (x: Expression): boolean =>
+      isRestriction(x) && isFunction(x) && x.op2.isSame(w.op2);
+    if (
+      sameRestriction(product) ||
+      (isFunction(product, 'List') &&
+        product.nops > 0 &&
+        product.ops.every(sameRestriction))
+    )
+      return product;
+    return ce
+      .function('When', [product, w.op2])
+      .evaluate({ numericApproximation });
+  }
+
+  const cells = ops.map((op): ReadonlyArray<Expression> | undefined => {
+    if (!isFunction(op, 'List') || op.nops > MAX_POINT_LIST_DOT)
+      return undefined;
+    if (!op.ops.some((x) => isRestriction(x) || isAbsentSymbol(x)))
+      return undefined;
+    const isPointCell = (x: Expression): boolean =>
+      isAbsentSymbol(x) ||
+      isTuple(x) ||
+      (isRestriction(x) && isFunction(x) && isTuple(x.op1));
+    return op.ops.every(isPointCell) ? op.ops : undefined;
+  });
+  if (cells[0] === undefined && cells[1] === undefined) return undefined;
+
+  // The side that is not such a list must be one point, or a list of points
+  // (paired element by element). Anything else is left to the other routes.
+  const sides: Array<ReadonlyArray<Expression> | undefined> = [];
+  for (let i = 0; i < 2; i++) {
+    if (cells[i] !== undefined) sides.push(cells[i]);
+    else if (isTuple(ops[i])) sides.push(undefined);
+    else if (isPointListValue(ops[i])) {
+      const points = pointListPoints(ops[i]);
+      if (points === undefined) return undefined;
+      sides.push(points);
+    } else return undefined;
+  }
+  const counts = sides.map((s) => s?.length);
+  if (
+    counts[0] !== undefined &&
+    counts[1] !== undefined &&
+    counts[0] !== counts[1]
+  )
+    return ce.error('incompatible-dimensions', `${counts[0]} vs ${counts[1]}`);
+  const n = counts[0] ?? counts[1]!;
+
+  const results: Expression[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = sides[0]?.[i] ?? ops[0];
+    const b = sides[1]?.[i] ?? ops[1];
+    if (isAbsentSymbol(a) || isAbsentSymbol(b)) {
+      results.push(ce.NaN);
+      continue;
+    }
+    const product = ce
+      .function('Dot', [a, b])
+      .evaluate({ numericApproximation });
+    // An error of one product (two points of different widths) is the error
+    // of the whole application, as it is for a list of points whose
+    // condition is decided (`pointListDotProduct`), not one error per point.
+    if (isFunction(product, 'Error')) return product;
+    results.push(product);
+  }
+  return ce.function('List', results);
+}
+
+/**
+ * The product `operator(a, b)` when an operand is RESTRICTED and its
+ * condition is not decided yet, or `null` when no operand is.
+ *
+ * A restricted point `(1, 2, 3) {0 < t}` with `t` free stays a `When` after
+ * evaluation, and a restricted vector `[1, 2, 3] {0 < t}` evaluates to the
+ * list of its restricted components `[1 {0 < t}, 2 {0 < t}, 3 {0 < t}]`.
+ * Neither is a point or a vector the product can read. The restriction
+ * moves to the product: `Cross((1, 2, 3) {0 < t}, (1, 1, 1))` is
+ * `(-1, 2, -1) {0 < t}`, which is the product when the condition holds and
+ * `Missing` when it does not. This is what `Dot` does for a restricted
+ * point (`restrictedPointDotProduct`).
+ *
+ * The product is evaluated before it is restricted, because a restriction
+ * whose condition is not decided keeps its body as it is given. An error
+ * of the product (two operands of the wrong widths) is returned as it is:
+ * it is an error whatever the condition. When the product stays symbolic,
+ * the application stays as written (`undefined`).
+ *
+ * A list whose cells are restricted is read through the operand as it is
+ * written (`expression`), which must be a restriction with one condition;
+ * otherwise the application stays as written.
+ */
+function restrictedOperandProduct(
+  ce: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  expression: Expression | undefined,
+  numericApproximation: boolean | undefined
+): Expression | undefined | null {
+  if (ops.length !== 2) return null;
+  const isRestriction = (x: Expression): boolean =>
+    isFunction(x, 'When') && x.nops === 2;
+  let k = ops.findIndex(isRestriction);
+  let inner: Expression[] | undefined;
+  let condition: Expression | undefined;
+  if (k >= 0) {
+    const w = ops[k] as Expression & { op1: Expression; op2: Expression };
+    inner = ops.map((op, i) => (i === k ? w.op1 : op));
+    condition = w.op2;
+  } else {
+    if (
+      !ops.some(
+        (op) => isFunction(op, 'List') && op.ops.some((x) => isRestriction(x))
+      )
+    )
+      return null;
+    if (!isFunction(expression) || expression.nops !== 2) return undefined;
+    k = expression.ops.findIndex(
+      (x) => isRestriction(x) && isFunction(x) && !isFunction(x.op2, 'List')
+    );
+    if (k < 0) return undefined;
+    const w = expression.ops[k] as Expression & {
+      op1: Expression;
+      op2: Expression;
+    };
+    inner = ops.map((op, i) =>
+      i === k ? w.op1.evaluate({ numericApproximation }) : op
+    );
+    condition = w.op2;
+  }
+  const product = ce
+    .function(operator, inner)
+    .evaluate({ numericApproximation });
+  if (isFunction(product, operator)) return undefined;
+  if (isFunction(product, 'Error')) return product;
+  // When the other operand carries the SAME condition, the product already
+  // does too, and it is not restricted a second time.
+  const sameRestriction = (x: Expression): boolean =>
+    isRestriction(x) && isFunction(x) && x.op2.isSame(condition!);
+  if (
+    sameRestriction(product) ||
+    (isFunction(product) &&
+      product.nops > 0 &&
+      (product.operator === 'List' || product.operator === 'Tuple') &&
+      product.ops.every(sameRestriction))
+  )
+    return product;
+  return ce
+    .function('When', [product, condition])
+    .evaluate({ numericApproximation });
+}
+
+/**
  * The type of the sum of the component-wise products, from the product types
  * alone.
  *
@@ -2545,6 +2749,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // non-numeric component.
       signature:
         '(matrix|vector|tuple|list<tuple>, matrix|vector|tuple|list<tuple>) -> value',
+      // An ABSENT operand is admitted, as it is for `Norm`: the value of a
+      // restricted point `P {c}`, or of a restricted list of points, is
+      // absent when the condition is false, and the product then answers the
+      // absence marker of its codomain (see the evaluate handler). The
+      // signature is not all-numeric, so the derived policy would be
+      // `pass-through`, which refused `Dot(Missing, (1, 1))` at boxing with
+      // an `incompatible-type` error. With `propagate`, the `missing` arm of
+      // an operand is stripped before the type handler reads it, and the
+      // type of the application gains a `missing` arm when its result is not
+      // a number: `Dot([(1, 2), (3, 4)] {0 < t}, (1, 1))` is typed
+      // `list<integer> | missing`, and `Dot((1, 2) {0 < t}, (1, 1))`, whose
+      // absent value is `NaN`, is typed `number`.
+      missingBehavior: 'propagate',
       // The result is a collection only for matrix-ish and point-list
       // operands, and the static type stays the wide `value` for a matrix
       // product — which the facet's type fallthrough misread as a definite
@@ -2649,7 +2866,63 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // `Dot` is Mathematica's `.`: it reduces to the inner product for two
       // vectors and to the matrix product otherwise — exactly what
       // `MatrixMultiply` already computes.
-      evaluate: (ops, { engine: ce, numericApproximation }) => {
+      evaluate: (ops, { engine: ce, numericApproximation, expression }) => {
+        // An ABSENT operand — the `Missing` or `Undefined` symbol, such as
+        // the value of a restricted point or a restricted list of points
+        // whose condition is false — answers the absence marker of the
+        // codomain, read off the application's type (`absentScalarMarker`):
+        // `NaN` for the product of two points, a number, and `Missing` for a
+        // list of points, whose product is a list. The generic absence gate
+        // of `missingBehavior: 'propagate'` does not fire here, because the
+        // other operand is a point or a list, and that gate stands aside
+        // when an operand is a collection.
+        if (ops.some((op) => isAbsentSymbol(op)))
+          return absentScalarMarker(ce, expression);
+        // A restricted point, or a list of restricted points, whose
+        // condition is not decided yet (`restrictedPointDotProduct`).
+        const restricted = restrictedPointDotProduct(
+          ce,
+          ops,
+          numericApproximation
+        );
+        if (restricted !== undefined) return restricted;
+        // Any other list that holds a restricted cell — a restricted VECTOR
+        // such as `[1, 2] {0 < t}`, which evaluates to `[1 {0 < t},
+        // 2 {0 < t}]` — is undecided until its condition is. `MatrixMultiply`
+        // below would answer an `incompatible-type` error for it, because
+        // its cells are not numbers. When the operand as written is a
+        // restriction with one condition, the restriction moves to the
+        // product, as for a restricted point: `Dot([1, 2] {0 < t}, [1, 1])`
+        // is `3 {0 < t}`. Otherwise the application stays as written.
+        if (
+          ops.some(
+            (op) =>
+              isFunction(op, 'List') &&
+              op.ops.some((x) => isFunction(x, 'When'))
+          )
+        ) {
+          if (!isFunction(expression) || expression.nops !== 2)
+            return undefined;
+          const k = expression.ops.findIndex(
+            (x) =>
+              isFunction(x, 'When') &&
+              x.nops === 2 &&
+              !isFunction(x.op2, 'List')
+          );
+          if (k < 0) return expression;
+          const w = expression.ops[k] as Expression & {
+            op1: Expression;
+            op2: Expression;
+          };
+          const inner = ops.map((op, i) => (i === k ? w.op1.evaluate() : op));
+          return ce
+            .function('When', [
+              ce.function('Dot', inner).evaluate({ numericApproximation }),
+              w.op2,
+            ])
+            .evaluate({ numericApproximation });
+        }
+
         // A point list written as a tuple of coordinate lists — `(1, L)` with
         // `L` a list — has no tensor form `MatrixMultiply` accepts, so the
         // inner product is written out instead and left to the broadcast in
@@ -2875,6 +3148,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // the result was a list). Two lists, or a list beside a point, give a
       // list, as before.
       signature: '(vector|tuple, vector|tuple) -> vector | tuple',
+      // An ABSENT operand is admitted, as it is for `Dot`: the value of a
+      // restricted point `P {c}` is absent when the condition is false, and
+      // the product is then absent too (see the evaluate handler). The
+      // derived policy of this signature is `pass-through`, which refused
+      // `Cross(Missing, (1, 1, 1))` with an `incompatible-type` error. With
+      // `propagate`, the `missing` arm of an operand is stripped before the
+      // type handler reads it, and the type of the application gains a
+      // `missing` arm: `Cross((1, 2, 3) {0 < t}, (1, 1, 1))` is typed
+      // `missing | tuple<number, number, number>`.
+      missingBehavior: 'propagate',
       // The type describes the SUCCESS (`docs/ERROR-MODEL.md`): a cross
       // product of two points succeeds only as a numeric 3-point, so two
       // point-shaped operands — the bare `tuple`, a parameterized tuple, a
@@ -2897,7 +3180,33 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // Provable declines only (both operands must be tensor values); success
       // also requires two 3-vectors — see `canEnumerateTensorOperands`.
       canEnumerate: canEnumerateTensorOperands,
-      evaluate: ([a, b], { engine: ce }) => {
+      evaluate: (ops, { engine: ce, numericApproximation, expression }) => {
+        // An ABSENT operand — the `Missing` or `Undefined` symbol, such as
+        // the value of a restricted point whose condition is false — makes
+        // the product absent. Beside a point, the product is an absent
+        // point, `Missing`, as `(1, 2, 3) · Missing` is. Beside a LIST, the
+        // absence is one absent cell per component, `NaN`, as
+        // `[1, 2, 3] + Missing` is `[NaN, NaN, NaN]`: that is also what the
+        // type of the application says, a `vector` with no `missing` arm
+        // (`absorbOperandAbsence`, `boxed-expression/broadcast-lift-type.ts`).
+        // The generic absence gate of `missingBehavior: 'propagate'` does not
+        // fire here, because the other operand is a collection.
+        if (ops.some((op) => isAbsentSymbol(op))) {
+          if (ops.some((op) => op.isCollection === true && !isTuple(op)))
+            return ce.function('List', [ce.NaN, ce.NaN, ce.NaN]);
+          return absentScalarMarker(ce, expression);
+        }
+        // A restricted operand whose condition is not decided yet
+        // (`restrictedOperandProduct`).
+        const restricted = restrictedOperandProduct(
+          ce,
+          'Cross',
+          ops,
+          expression,
+          numericApproximation
+        );
+        if (restricted !== null) return restricted;
+        const [a, b] = ops;
         // Two points answer a point; any list operand answers a list.
         const head = isTuple(a) && isTuple(b) ? 'Tuple' : 'List';
         // Lower each fixed numeric tuple operand to its component vector,

@@ -145,25 +145,26 @@ describe('a broadcast over a default-less Which with point arms', () => {
   });
 });
 
-describe('shapes that are an error when the point is present', () => {
+describe('shapes that are an error for a restricted point', () => {
   // `t / P` and `P · Q` are errors for an unrestricted point
   // (`no-division-by-point`, `no-product-between-points`). Over restricted
-  // points they are errors when the points are present and the absence
-  // marker otherwise. An error is an evaluation effect, not a member of a
-  // type (`docs/ERROR-MODEL.md`), so the type describes only the other
-  // value: the absence absorbed into a numeric slot, `NaN`, typed `number`.
+  // points they are the same errors when the expression is created, whatever
+  // the value of the condition, because when present the operand is a point.
+  // Desmos rejects them the same way (user decision 2026-09-25). Before, they
+  // were valid, typed `number`, and evaluated to the error when the point was
+  // present and to `NaN` when it was absent.
   test('a number divided by a restricted point', () => {
     const r = probe(String.raw`\frac{t}{${PC}}`);
-    expect(r.type).toBe('number');
+    expect(r.type).toBe('error');
     expect(r.present).toContain('no-division-by-point');
-    expect(r.absent).toBe('NaN');
+    expect(r.absent).toContain('no-division-by-point');
   });
 
   test('the product of two restricted points', () => {
     const r = probe(String.raw`${PC}\cdot${QC}`);
-    expect(r.type).toBe('number');
+    expect(r.type).toBe('error');
     expect(r.present).toContain('no-product-between-points');
-    expect(r.absent).toBe('NaN');
+    expect(r.absent).toContain('no-product-between-points');
   });
 });
 

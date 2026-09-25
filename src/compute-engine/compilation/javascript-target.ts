@@ -55,6 +55,7 @@ import {
   resolveTypeAlias,
   resolveTypeForCompilation,
   stripMissingFromType,
+  typeContainsMissing,
   unfoldAliasOnDescent,
   type AliasDescent,
 } from '../../common/type/utils.js';
@@ -2018,6 +2019,17 @@ function pointConstructorComponent(
 }
 
 /**
+ * The element read of an operand that may be absent: `?.` when its type has
+ * a `missing` arm, so that a restricted operand whose condition is false,
+ * which is `undefined` at run time, answers `undefined` (the run-time
+ * spelling of `Missing`, the value the interpreter answers) instead of
+ * throwing a `TypeError`. Empty otherwise.
+ */
+function absentRead(arg: Expression): string {
+  return typeContainsMissing(arg.type.type) ? '?.' : '';
+}
+
+/**
  * Compile a point-coordinate accessor (`.x`/`.y`/`.z` → PointX/PointY/PointZ),
  * `idx` is the 0-based coordinate. On a single point (a tuple, compiled to a JS
  * array) it indexes the coordinate; on a list of points it broadcasts, mapping
@@ -2079,7 +2091,10 @@ function compilePointComponent(
       eltType !== undefined && typeof eltType !== 'string'
         ? tupleElementType(eltType, idx)
         : undefined;
-    return `(${compiled()}).map((_pt) => _pt[${idx}]${pointComponentAbsence(coord)})`;
+    // A point of the list may be absent (the `undefined` of a restricted
+    // point whose condition is false, `[(1, 2), P {c}]`): its coordinate is
+    // absent too, not a `TypeError` thrown by reading `undefined[idx]`.
+    return `(${compiled()}).map((_pt) => _pt${absentRead(arg)}[${idx}]${pointComponentAbsence(coord)})`;
   }
   // The static type settles NEITHER reading: an `unknown`-typed operand, or a
   // type that admits a list of points beside a single point — the parameter
@@ -3406,7 +3421,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   First: (args, compile) =>
     isProvablyStringOperand(args[0])
       ? `_SYS.chars(${compile(args[0])})[0]`
-      : `${compile(args[0])}[0]`,
+      : `${compile(args[0])}${absentRead(args[0])}[0]`,
   Floor: (args, compile, target) => {
     if (BaseCompiler.isIntegerValued(args[0]))
       return identityPassthrough(args[0], compile, target);
@@ -6166,7 +6181,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Second: (args, compile) =>
     isProvablyStringOperand(args[0])
       ? `_SYS.chars(${compile(args[0])})[1]`
-      : `${compile(args[0])}[1]`,
+      : `${compile(args[0])}${absentRead(args[0])}[1]`,
   Heaviside: '_SYS.heaviside',
   // A complex operand takes the complex sign `z/|z|` (`_SYS.csign`), the
   // interpreter's reading off the real line; a real one keeps `Math.sign`.
@@ -6236,7 +6251,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Third: (args, compile) =>
     isProvablyStringOperand(args[0])
       ? `_SYS.chars(${compile(args[0])})[2]`
-      : `${compile(args[0])}[2]`,
+      : `${compile(args[0])}${absentRead(args[0])}[2]`,
   PointX: (args, compile, target) =>
     compilePointComponent(args[0], 0, compile, target),
   PointY: (args, compile, target) =>
