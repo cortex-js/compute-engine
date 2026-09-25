@@ -451,6 +451,14 @@ reached from the rule at `symbolic/simplify-rules.ts:1104`. The assert is
 stripped in production, but the rule is handing `primeFactors` an integer
 outside the range it accepts. Make the rule skip integers above that range.
 
+### `Map` with its arguments reversed: a symbol source stays unevaluated, a literal source is an error (OPEN, small — found 2026-09-24)
+
+`Map(P, fn)` with the arguments in the wrong order (the function first is
+correct) stays as the unevaluated `Map(P, (u) => ||u||)` when `P` is a symbol
+holding a list, but gives an `incompatible-type` error when the same list is
+written as a literal. The two routes should report the misuse the same way (the
+error, since the operand types are known once `P`'s value is read).
+
 ### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24, measured on CE main)
 
 A host now declares plot variables and list seams as
@@ -854,6 +862,37 @@ on the call: for example a per-activation stamp in the key of the value and
 facet caches of a node that reads a parameter, or an axis that only activation
 declarations advance.
 
+Measured 2026-09-24 at MACHINE precision (the precision of a Tycho plot
+document; an upper bound, with the unsound `scratch` change applied in a
+worktree, same answers except the known recursion case): removing every
+activation advance saves nothing measurable on realistic interpreted workloads —
+a `g`, `h`, `k` chain at 1,000 points 119 → 124 ms, a list broadcast 14 → 15 ms,
+the noise functions of Tycho document `hyvhlz4chj` on a 20×20 grid (18,820
+calls, 24,020 advances) 465 → 442 ms (5%) — because the recomputations the
+advances cause are cheap. It saves 30% on a list recursion (77 → 52 ms) and
+about 78% on `Apply(Derivative(f, 3), x).N()` at 100 points (255 → 56 ms), where
+the closed form is re-differentiated and simplified at each point. Decision
+taken on this measurement: no general per-call cache design now; instead (a) key
+the derivative closed form on the definition of `f` rather than on the `any`
+axis, and (b) reduce per-call costs. The machine precision profile of the Tycho
+case (40×40 grid, top self time): development- only `console.assert` calls 8.0%,
+`viewOfExpression` (from the broadcast check `skipBroadcastForVectorOps` in
+`evaluate`) 7.4%, a V8 built-in 5.7%, garbage collection 5.1%, then `isSubtype`,
+`lookup` and `declareParameterActivation` at 1–2% each; no big-decimal
+arithmetic (an earlier profile at the default 21 digits showed it, because the
+benchmark used a bare engine).
+
+Done 2026-09-24: item (a), and the broadcast check of item (b). The finished
+closed form of `Derivative(f, n)` (`symbolic/derivative.ts`) records the
+definitions and `_writeVersion` of the symbols its simplification reads, and
+stays valid across the per-call `any` advances while the semantic version, those
+definitions and the assumptions-hidden bit are unchanged (100 points 326 → 77
+ms, 1,000 points 1,936 → 158 ms). `skipBroadcastForVectorOps` returns before it
+builds operand views when the operator declares no broadcast exemption (the
+Tycho case 1,465 → 1,264 ms at 40×40). Still open: the cost of each parameter
+declaration (`declareParameterActivation`), and the general per-call cache
+design (not worth it, measured above).
+
 ### Rubi 1.2.2.4 #214 reaches the 30 s guard in the rule matcher (OPEN, performance — found 2026-09-24)
 
 After the polynomial GCD fix, one problem of a 200-problem chapter-1 sample
@@ -1195,23 +1234,47 @@ here.
   (`src/compute-engine/function-utils.ts:2761`) rather than returning an error
   value. Wanted: an unknown protocol name should say so.
 
-### `simplify()` does not apply 38 Fungrim identities because it simplifies the operands first (OPEN, decision — found 2026-09-24)
+### A `sgn` handler infers symbol types, which the type-handler purity check reports (OPEN — found 2026-09-24)
 
-Measured over the left side of each bundled identity (wildcards replaced by
-declared symbols; guards turned into declarations and assumptions): 871
-identities fire with `replace()`, and `simplify()` does not apply 38 of them. It
-ends with a result that is more expensive than the identity's result.
+The full test suite logs
+`ComputeEngine: error canonicalizing Subtract: The type handler of "Power" modified engine state while deriving a type (moved: callable)`,
+from the test "anchor fits neither family: 1 + 2 + 4 + … + n² stays inert" in
+`test/compute-engine/interpret.test.ts`. The test passes. The check that reports
+it runs only when `NODE_ENV` is `test` or `CE_TYPE_PURITY_GUARD` is set
+(`guardedTypeHandlerCall()` in
+`src/compute-engine/boxed-expression/operand-descriptor.ts`), so it reproduces
+outside Jest with `CE_TYPE_PURITY_GUARD=1` and
+`ce.function('Interpret', [ce.parse('1 + 2 + 4 + \\dots + n^2')]).evaluate()`.
 
-The cause: `simplify()` simplifies the operands of a node before it tries the
-rules on the node. This changes how an argument is written, so the canonical
-pattern of the identity no longer matches. Examples: `LambertW(-(1/2)·π)` (entry
-`e1dd64`), `Hypergeometric0F1(3/2, -(1/4)·z²)` (entry `e2878f`),
-`(sin z / z)·√(2z/π)` (entry `121b21`, the radical is split by `expand`).
+The chain, measured with a hook on `noteStateEvent()`:
 
-A possible fix: when the operand simplification changed a node, also try the
-rules on the node as it was before, and keep the cheaper result. This adds a
-rule pass for each node whose operands changed, for every `simplify()` call, so
-it needs a measurement of its cost and a decision.
+1. `tryGeometric()` in `src/compute-engine/symbolic/interpret.ts` builds
+   `Subtract(term(U), anchor)`, where the upper bound `U` holds a `Log`.
+2. The type handler of `Power` (`library/arithmetic.ts`) reads the sign of an
+   operand (`operandSgnOnTypes()` → the `.sgn` of the operand descriptor). For
+   an application, that runs the operator's `sgn` handler.
+3. The `sgn` handler of `Log` calls `lnSign()`, which compares the argument with
+   1 through `cmp()` → `orderByValue()` in `boxed-expression/compare.ts`, which
+   computes `a.sub(b)`.
+4. `a.sub(b)` boxes a new expression; validating it narrows the type of the
+   valueless symbol `n` (a value-type inference), and the `inference` event
+   advances the `callable` counter inside the type handler's window.
+
+The comment on the `.sgn` getter of the operand descriptor states that it is "a
+pure read for every operand kind"; the `sgn` handler of `Log` breaks that. The
+engine otherwise expects inferences during a type or sign computation:
+`noteStateEvent()` defers the advance of the `any` counter for them until the
+engine is idle, but it advances the `callable` counter at once
+(`callableAxisSelects()` returns true for every `inference` event).
+
+Possible fixes, not decided: (a) defer the `callable` advance of a value-type
+inference like the `any` advance, or make it depend on whether the inferred type
+is callable (a value-type narrowing to `number` does not change what is
+callable); (b) make `lnSign()`, or `orderByValue()` when it is reached from a
+sign computation, compare without boxing new expressions (validation has a
+`noInference` option, but only as an argument of one internal call). (a) is
+smaller but changes cache invalidation, which needs a review of what the
+`callable` counter protects.
 
 ### Fungrim Stage-2 residues: `Fibonacci` growth class, the corpus manifest fork id, `CartesianPower` (OPEN, low — Stage-2 triage of 2026-08-29)
 

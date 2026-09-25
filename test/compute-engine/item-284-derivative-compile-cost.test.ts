@@ -487,9 +487,10 @@ describe('applied derivative: the memoised closed form', () => {
     // The write goes through the symbol's `type` setter. That setter first
     // retracts the assumptions about `b`, which advances every axis, so the
     // whole cache entry is dropped. A write to `valueDefinition.type`
-    // reports no state event and advances no axis, so no cache sees it. No
-    // public write was found that advances the `any` axis alone and also
-    // changes this derivative.
+    // reports a `type-write` state event, and the cached closed form of the
+    // derivative records the `_writeVersion` of each definition it reads, so
+    // that write drops it too (pinned in
+    // `derivative-closed-form-cache.test.ts`).
     const ce = new ComputeEngine();
     ce.declare('b', 'real');
     ce.parse('f(x):=x^3\\sin(b\\pi)').evaluate();

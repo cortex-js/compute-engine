@@ -15,6 +15,7 @@ import {
   isDestructuringParameter,
 } from '../boxed-expression/function-literal.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
+import { valueDefinitionInContext } from '../boxed-expression/binders.js';
 import {
   angularChainFactor,
   DIRECT_TRIG_OPERATORS,
@@ -425,20 +426,128 @@ function isUserFunction(sym: Expression): boolean {
  *   free symbol of the body turns `6x·sin(πb)` into `0`, and the entry filled
  *   before that write must not answer after it. Only the simplify is redone:
  *   the raw iterates are what the differentiation cost buys.
+ *
+ *   The `any` axis also advances on every call of a user function: the call
+ *   declares the function's parameters in a new activation scope. So a
+ *   generation match alone misses at every point of
+ *   `Apply(Derivative(f, 3), x).N()` evaluated at many points, and each point
+ *   did the closing `simplify()` again. A finished result therefore also
+ *   records the definitions of the symbols the simplify read (`deps`, see
+ *   {@link FinishedDerivative}). When the generation moved but the semantic
+ *   version did not (that is checked by the entry), the fact-suppression bit
+ *   is the same, and every recorded definition is still the one its symbol
+ *   is bound to with the same `_writeVersion`, the result is still valid: a
+ *   type write, an inference that narrows a symbol and a value write each
+ *   bump the `_writeVersion` of the definition they change, and a
+ *   redeclaration replaces the definition. The result is then stamped with
+ *   the current generation.
+ *
+ *   There is one exception to "a value write bumps the `_writeVersion`": inside
+ *   a call of a user function, a parameter of that function reads its value
+ *   from the call frame's parameter ACTIVATION, a separate definition that
+ *   each call declares and writes directly, with no `_writeVersion` bump. So
+ *   a result is recorded without `deps` (valid only at its exact generation)
+ *   when one of its symbols reads its value from a definition other than the
+ *   one it is bound to, which is the case for such a parameter.
  */
 type DerivativeChainCache = {
   semanticVersion: number;
   iterates: Map<string, (Expression | undefined)[]>;
-  results: Map<
-    string,
-    Map<number, { generation: number; value: Expression | undefined }>
-  >;
+  results: Map<string, Map<number, FinishedDerivative>>;
   /** The `generation` of the finished result that {@link derivative} last
    * returned from this entry, from the cache or newly recorded. It is
    * `undefined` until `derivative()` returns such a result.
    * `memoizedDerivativeResult` reads it. */
   lastFinishedGeneration?: number;
+  /** The `deps` of that same finished result. */
+  lastFinishedDeps?: SymbolDependency[];
 };
+
+/**
+ * One finished derivative (see {@link DerivativeChainCache}).
+ *
+ * `deps` holds, for each symbol node of the expression the closing
+ * `simplify()` read, the definition the node is bound to and the
+ * `_writeVersion` of that definition when the result was recorded. It is
+ * `undefined` when the expression holds a node whose state cannot be
+ * validated this way (an unbound symbol, whose meaning can change when the
+ * name is declared later, or a node that is not a number, string, symbol or
+ * function expression). Then only an exact generation match validates the
+ * result.
+ */
+type FinishedDerivative = {
+  generation: number;
+  value: Expression | undefined;
+  deps?: SymbolDependency[];
+};
+
+/** A symbol node, the definition it is bound to (the inner value or operator
+ * definition, which a redeclaration replaces) and the `_writeVersion` of that
+ * definition (0 for an operator definition, which has none: a redefinition
+ * of a function advances the semantic version instead). */
+type SymbolDependency = [node: Expression, def: object, version: number];
+
+/** The definition `node` is bound to now, or `undefined` when it is unbound. */
+function boundDefinition(node: Expression): object | undefined {
+  return node.valueDefinition ?? node.operatorDefinition;
+}
+
+/**
+ * The symbol dependencies of `expr` (see {@link FinishedDerivative}), or
+ * `undefined` when one of its nodes cannot be validated by its definition.
+ */
+function symbolDependencies(
+  ...exprs: (Expression | undefined)[]
+): SymbolDependency[] | undefined {
+  const deps: SymbolDependency[] = [];
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): boolean => {
+    if (isNumber(e) || isString(e)) return true;
+    if (isSymbol(e)) {
+      if (seen.has(e)) return true;
+      seen.add(e);
+      const def = boundDefinition(e);
+      if (def === undefined) return false;
+      if (!readsOwnDefinition(e, e.symbol)) return false;
+      deps.push([e, def, e.valueDefinition?._writeVersion ?? 0]);
+      return true;
+    }
+    if (isFunction(e)) return e.ops.every(visit);
+    return false;
+  };
+  for (const expr of exprs)
+    if (expr !== undefined && !visit(expr)) return undefined;
+  return deps;
+}
+
+/**
+ * Does the symbol node `node` read its value from the definition it is bound
+ * to (`node.valueDefinition`) in the current context? It does not inside a
+ * call of a user function when the node is a parameter of that function: the
+ * read goes to the call frame's parameter ACTIVATION, a separate definition
+ * that each call declares anew and writes without bumping any
+ * `_writeVersion` (see `valueDefinitionInContext` and `markActivation` in
+ * `boxed-expression/binders.ts`). It also does not when the scope chain
+ * holds another binding of the name that intercepts the read.
+ */
+function readsOwnDefinition(node: Expression, name: string): boolean {
+  const own = node.valueDefinition;
+  const read = valueDefinitionInContext(node.engine, name, own);
+  return read === undefined || read === own;
+}
+
+/** Is every definition recorded in `deps` still the one its symbol is bound
+ * to, unchanged since it was recorded? */
+function symbolDependenciesValid(deps: SymbolDependency[]): boolean {
+  for (const [node, def, version] of deps) {
+    if (boundDefinition(node) !== def) return false;
+    if ((node.valueDefinition?._writeVersion ?? 0) !== version) return false;
+    // A result recorded where the node read its own definition is not served
+    // where it reads another one, such as a parameter activation.
+    if (isSymbol(node) && !readsOwnDefinition(node, node.symbol)) return false;
+  }
+  return true;
+}
 
 /**
  * Cached derivative chains, keyed by the FUNCTION LITERAL the derivative is
@@ -473,19 +582,33 @@ function derivativeChainKey(fn: Expression): Expression | undefined {
 /**
  * The finished result of order `order` for `subKey` in `cache`, or
  * `undefined` when there is none. A finished result is returned only when it
- * was simplified under the engine state in force now (see the comment of
- * `DerivativeChainCache`). The `value` of the returned record can be
- * `undefined`: that is a cached decline.
+ * is valid in the engine state in force now: it was recorded at the current
+ * generation, or its symbol dependencies are unchanged (see the comment of
+ * `DerivativeChainCache`), in which case it is stamped with the current
+ * generation. The `value` of the returned record can be `undefined`: that is
+ * a cached decline.
  */
 function finishedDerivative(
   ce: Expression['engine'],
   cache: DerivativeChainCache | undefined,
   subKey: string,
   order: number
-): { generation: number; value: Expression | undefined } | undefined {
+): FinishedDerivative | undefined {
   const finished = cache?.results.get(subKey)?.get(order);
   if (finished === undefined) return undefined;
-  if (finished.generation !== ce._cacheGeneration()) return undefined;
+  // The dependencies are checked even when the generation matches: a write
+  // to a definition that reports no state event still bumps its
+  // `_writeVersion`.
+  if (finished.deps !== undefined && !symbolDependenciesValid(finished.deps))
+    return undefined;
+  const generation = ce._cacheGeneration();
+  if (finished.generation === generation) return finished;
+  // The low bit of the generation is the fact-suppression bit: a result
+  // simplified with the assumptions hidden is never served with them in
+  // force, or the reverse.
+  if (finished.deps === undefined) return undefined;
+  if ((finished.generation & 1) !== (generation & 1)) return undefined;
+  finished.generation = generation;
   return finished;
 }
 
@@ -533,6 +656,7 @@ export function memoizedDerivativeResult(
   if (finished !== undefined) return finished.value;
   const before = ce._cacheGeneration();
   cache.lastFinishedGeneration = undefined;
+  cache.lastFinishedDeps = undefined;
   const value = compute();
   const after = ce._cacheGeneration();
   // See the comment of this function for the rule. `derivativeChains` holds
@@ -548,7 +672,15 @@ export function memoizedDerivativeResult(
     byOrder = new Map();
     cache.results.set(subKey, byOrder);
   }
-  byOrder.set(order, { generation: after, value });
+  // The lift reads the closed form only, so the dependencies of the closed
+  // form are the dependencies of the lifted result. Without a closed form
+  // (not `accounted`), there are none to validate by, and only an exact
+  // generation match serves the entry.
+  byOrder.set(order, {
+    generation: after,
+    value,
+    deps: accounted ? cache.lastFinishedDeps : undefined,
+  });
   return value;
 }
 
@@ -612,6 +744,7 @@ export function derivative(
       const early = finishedDerivative(ce, earlyCache, 'apply:_', order);
       if (early !== undefined) {
         earlyCache.lastFinishedGeneration = early.generation;
+        earlyCache.lastFinishedDeps = early.deps;
         return early.value;
       }
     }
@@ -646,6 +779,7 @@ export function derivative(
   const finished = finishedDerivative(ce, cache, subKey, originalOrder);
   if (finished !== undefined) {
     cache!.lastFinishedGeneration = finished.generation;
+    cache!.lastFinishedDeps = finished.deps;
     return finished.value;
   }
 
@@ -672,6 +806,7 @@ export function derivative(
   // step. The coefficients are already exact integers, so this only collapses
   // structure, it does not change values. Only needed for order >= 2 (a single
   // derivative cannot blow up), which also leaves the common case untouched.
+  const raw = result;
   if (result && originalOrder >= 2) result = result.simplify();
   if (cache !== undefined) {
     let byOrder = cache.results.get(subKey);
@@ -683,8 +818,12 @@ export function derivative(
     // describes, and the simplify itself can advance the axis (it pushes and
     // pops scopes).
     const generation = ce._cacheGeneration();
-    byOrder.set(originalOrder, { generation, value: result });
+    // The symbols the simplify read are those of the raw iterate; the ones of
+    // the result are included in case the simplify introduced one.
+    const deps = symbolDependencies(raw, result);
+    byOrder.set(originalOrder, { generation, value: result, deps });
     cache.lastFinishedGeneration = generation;
+    cache.lastFinishedDeps = deps;
   }
   return result;
 }

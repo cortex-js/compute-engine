@@ -2,6 +2,17 @@
 
 ### Improvements
 
+- At machine precision, `Apply(Derivative(f, n), x).N()` evaluated at many
+  points computes and simplifies the closed form of the derivative once, not at
+  each point (100 points: 326 ms → 77 ms; 1,000 points: 1.94 s → 0.16 s). The
+  cached closed form stays valid until the definitions it reads change, instead
+  of being discarded after every call of a user function.
+- The check that decides whether an application broadcasts over collection
+  operands no longer builds a view of each operand when the operator declares no
+  broadcast exemption (every user function and most operators). Interpreted
+  evaluation of a scalar document, such as a noise function of a Tycho document
+  on a 40×40 grid at machine precision, is about 14% faster, with the same
+  results.
 - **`simplify()` applies the loaded Fungrim identities it used to miss.** Of the
   bundled identities that fire on their own left side with `replace()`,
   `simplify()` applied 736 of 871. With the changes below, more identities are

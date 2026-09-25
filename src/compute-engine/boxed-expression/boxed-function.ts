@@ -6274,6 +6274,12 @@ function skipBroadcastForVectorOps(
   hasTensors: boolean,
   ops: ReadonlyArray<Expression>
 ): boolean {
+  // An operator that declares no exemption never stands down, whatever its
+  // operands are (`skipBroadcastForVectorOpsOnViews` answers false before it
+  // reads a view). This check runs on every evaluation of every application,
+  // so do not build the operand views in that case.
+  const exemptions = def?.broadcastExemptions;
+  if (exemptions === undefined || exemptions.length === 0) return false;
   return skipBroadcastForVectorOpsOnViews(
     def,
     hasTensors,
@@ -6285,43 +6291,52 @@ function skipBroadcastForVectorOps(
  * The broadcast lift's view of an operand EXPRESSION: each fact is read
  * lazily through the value-level predicate this route always used, so a
  * predicate runs only when the arm that needs it does.
+ *
+ * The facts are getters on the class prototype, not on an object literal: an
+ * object literal with getters creates one closure per getter and a slow
+ * (dictionary-mode) object for each operand, and views are built on every
+ * evaluation of an application whose operator declares broadcast exemptions
+ * (`Add`, `Multiply`, ...).
  */
+class ExpressionOperandView implements BroadcastOperandView {
+  constructor(private readonly x: Expression) {}
+  // Lazy too: the value path asks `skipBroadcastForVectorOps` before it
+  // needs any type, and an operator without exemptions answers without
+  // reading one — a type read is a derivation, possibly recursive.
+  get type(): Type {
+    return this.x.type.type;
+  }
+  get isSymbol(): boolean {
+    return isSymbol(this.x);
+  }
+  get isApplication(): boolean {
+    return isFunction(this.x);
+  }
+  get isCollection(): boolean {
+    return this.x.isCollection;
+  }
+  get finiteBroadcastParticipant(): boolean {
+    return isFiniteBroadcastParticipant(this.x);
+  }
+  get tuple(): boolean {
+    return isTuple(this.x);
+  }
+  get textAtom(): boolean {
+    return isTextAtom(this.x);
+  }
+  get tensorShape(): boolean {
+    return candidateShape(this.x) !== null;
+  }
+  get matrixFact(): boolean {
+    return this.x.type.facts.matrix;
+  }
+  get typeIsUnknown(): boolean {
+    return this.x.type.isUnknown;
+  }
+}
+
 export function viewOfExpression(x: Expression): BroadcastOperandView {
-  return {
-    // Lazy too: the value path asks `skipBroadcastForVectorOps` before it
-    // needs any type, and an operator without exemptions answers without
-    // reading one — a type read is a derivation, possibly recursive.
-    get type() {
-      return x.type.type;
-    },
-    get isSymbol() {
-      return isSymbol(x);
-    },
-    get isApplication() {
-      return isFunction(x);
-    },
-    get isCollection() {
-      return x.isCollection;
-    },
-    get finiteBroadcastParticipant() {
-      return isFiniteBroadcastParticipant(x);
-    },
-    get tuple() {
-      return isTuple(x);
-    },
-    get textAtom() {
-      return isTextAtom(x);
-    },
-    get tensorShape() {
-      return candidateShape(x) !== null;
-    },
-    get matrixFact() {
-      return x.type.facts.matrix;
-    },
-    get typeIsUnknown() {
-      return x.type.isUnknown;
-    },
-  };
+  return new ExpressionOperandView(x);
 }
 
 /**
