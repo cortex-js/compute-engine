@@ -4947,6 +4947,7 @@ type OperatorDefinitionFlags = {
   scoped: boolean | BindingSiteSelector;
   broadcastable: boolean;
   broadcastExemptions: ReadonlyArray<BroadcastExemption>;
+  threadsConditionals: boolean | number[];
   inspectsErrors: boolean;
   selectsOperands: boolean;
   namedArgumentsRequired: boolean;
@@ -5324,6 +5325,26 @@ stripsMissingAt(i): boolean
 True if a `missing` arm is stripped from parameter position `i` before
 validation (§3.A). Only `propagate`/`handle` operators strip; `missingStrip`
 selects the positions.
+
+####### i
+
+`number`
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.threadsConditionalsAt() {#threadsconditionalsat}
+
+```ts
+threadsConditionalsAt(i): boolean
+```
+
+True if the `threadsConditionals` flag of
+[OperatorDefinitionFlags](#operatordefinitionflags) selects operand position `i`: a
+conditional value (`When`, `Which`) there moves out of the application at
+evaluation. A broadcastable operator threads every position whatever this
+answers.
 
 ####### i
 
@@ -7543,7 +7564,9 @@ type ResolvedSerializeLatexOptions = Omit<SerializeLatexOptions,
   | "logicStyle"
   | "powerStyle"
   | "numericSetStyle"
-  | "indexStyle"> & {
+  | "indexStyle"
+  | "readsAsPointList"> & {
+  readsAsPointList: ((operands) => boolean | undefined) | undefined;
   applyFunctionStyle: (expr, level) => DelimiterScale;
   groupStyle: (expr, level) => DelimiterScale;
   rootStyle: (expr, level) => RootStyle;
