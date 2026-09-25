@@ -28,6 +28,7 @@ import {
   resolveTypeAlias,
   stripMissingFromType,
   signatureSlotType,
+  staticCollectionDims,
 } from '../../common/type/utils.js';
 import {
   diagnoseNoMatch,
@@ -1897,7 +1898,24 @@ function strippedMatchesParam(
   if (!stripMissing?.(idx)) return false;
   if (!op.type.facts.containsMissing) return false;
   const stripped = stripMissingFromType(op.type.type);
-  return stripped === 'never' || isSubtype(stripped, param);
+  if (stripped === 'never' || isSubtype(stripped, param)) return true;
+  // A rank-free list of scalars whose length the VALUE knows is the vector
+  // of that length. A list holding a restricted cell, `[1{c}, 2{c}]`, and a
+  // restricted list, `[1,2]{c}`, are both typed `list<integer | missing>`
+  // with no length (a list type with a length is the tensor guard, whose
+  // kernels admit union-free cells only), which strips to the rank-free
+  // `list<integer>`, and that does not match `vector`, although the operand
+  // is a 2-vector: its count is known (the literal's operands, or the
+  // restricted list's collection handlers). Without this,
+  // `Dot([1,2]{[0<t, t<0]}, [1,1])` was an `incompatible-type` error.
+  const dims = staticCollectionDims(stripped);
+  if (dims === null || dims.length !== 1 || dims[0] >= 0) return false;
+  if (op.isFiniteCollection !== true) return false;
+  const count = op.count;
+  if (count === undefined || !Number.isFinite(count)) return false;
+  const r = resolveTypeAlias(stripped);
+  if (typeof r === 'string' || r.kind !== 'list') return false;
+  return isSubtype({ ...r, dimensions: [count] }, param);
 }
 
 /**

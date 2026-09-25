@@ -343,7 +343,9 @@ function isCellCollectionType(t: Type): boolean {
  * - A GATED collection operand (`gatedCollectionPresentType`: a restricted
  *   point or list). `Sin(When((0, 1), c))` is
  *   `missing | tuple<number, number>` and answers `Missing` when `c` is
- *   false; `Sin(When([1, 2, 3], c))` is `missing | vector<3>`.
+ *   false; `Sin(When([1, 2, 3], c))` is `missing | list<number>` (the
+ *   operand is `missing | list<integer | missing>`, absent as a whole or
+ *   cell by cell, and both absences are absorbed).
  * - A point result. `2{c} · (0, 1)` is `missing | tuple<…>`, because an
  *   absent factor beside a point makes the whole point absent
  *   (`docs/ERROR-MODEL.md`, the section on `Missing` in a numeric slot).
@@ -353,9 +355,11 @@ function isCellCollectionType(t: Type): boolean {
  *   `Missing` the application answers `Missing`, because its type is not
  *   provably numeric.
  *
- * The exception for an operand beside a list: the absence broadcasts over
- * the list's cells (`[1, 2, 3] + 2{c}` is `[NaN, NaN, NaN]` when `c` is
- * false).
+ * The exception for an operand beside a list, for a BROADCASTABLE operator
+ * (`broadcastable`): the absence broadcasts over the list's cells
+ * (`[1, 2, 3] + 2{c}` is `[NaN, NaN, NaN]` when `c` is false). An operator
+ * that threads its conditional operands whole, such as `Dot`, answers
+ * `Missing` for an absent operand beside a list and keeps the `missing` arm.
  *
  * Every other absence takes the numeric absorption (`absorbNumericAbsence`):
  * every `missing` arm is removed and every numeric cell widens to `number`,
@@ -382,7 +386,8 @@ function isCellCollectionType(t: Type): boolean {
 export function absorbOperandAbsence(
   t: Type,
   operandTypes: ReadonlyArray<Type>,
-  absentCellsStayMissing = false
+  absentCellsStayMissing = false,
+  broadcastable = true
 ): Type {
   let cells = false;
   let wholeCells = false;
@@ -391,18 +396,37 @@ export function absorbOperandAbsence(
   for (let i = 0; i < operandTypes.length; i++) {
     const ot = operandTypes[i];
     if (!typeContainsMissing(ot)) continue;
-    if (!hasTopLevelMissing(ot) || typeContainsMissing(stripTopMissing(ot))) {
+    const wholeAbsence = hasTopLevelMissing(ot);
+    const present = wholeAbsence ? stripTopMissing(ot) : ot;
+    // Absent CELLS (`list<T | missing>`). A restricted list carries both
+    // kinds of absence: its type is `missing | list<T | missing>`
+    // (`restrictedValueType`, `library/control-structures.ts`), because it
+    // is absent as a whole when its condition is false and a list of
+    // restricted cells while the condition is undecided. Both readings must
+    // count. Reading the cells only lost the whole-absence arm:
+    // `Sin([1, 2]{c})` was typed `list<number>` while it answers `Missing`
+    // when `c` is false.
+    if (typeContainsMissing(present)) {
       cells = true;
-      if (missingOutsideTuples(ot)) wholeCells = true;
-      continue;
+      if (missingOutsideTuples(present)) wholeCells = true;
     }
+    if (!wholeAbsence) continue;
     notNumeric ??= !isSubtype(stripMissingFromType(t), 'number');
-    const besideCollection = operandTypes.some(
-      (other, j) =>
-        j !== i &&
-        isCellCollectionType(other) &&
-        gatedCollectionPresentType(other) === undefined
-    );
+    // Only a BROADCASTABLE operator spreads an absent operand over the cells
+    // of a list beside it (`[1, 2, 3] + 2{c}` is `[NaN, NaN, NaN]`). An
+    // operator that threads its conditional operands whole (`Dot`, a
+    // `threadsConditionals` operator) computes on the present value and
+    // answers `Missing` for an absent one, whatever stands beside it:
+    // `Dot([P, Q]{c}, [R, S])` is `Missing` when `c` is false, so its type
+    // keeps the `missing` arm.
+    const besideCollection =
+      broadcastable &&
+      operandTypes.some(
+        (other, j) =>
+          j !== i &&
+          isCellCollectionType(other) &&
+          gatedCollectionPresentType(other) === undefined
+      );
     if (!besideCollection && notNumeric) whole = true;
     else {
       cells = true;

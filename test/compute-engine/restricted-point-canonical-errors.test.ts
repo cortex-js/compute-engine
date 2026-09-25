@@ -381,8 +381,14 @@ describe('Dot of a restricted point or a restricted list of points', () => {
 
   test('the type carries the absent case of a list result only', () => {
     const ce = new ComputeEngine();
+    // The cells are `number`, not `integer`: a restricted list of points is
+    // `missing | list<missing | tuple<…>>`, and a point cell that is absent
+    // contributes `NaN` to the product (`Dot([P{c}, Q], (1, 1))` is
+    // `[NaN, 7]` when `c` is false). It was `list<integer> | missing`, read
+    // off the bare `list<tuple<integer, integer>^2>` the restriction used to
+    // be typed with.
     expect(ce.box(['Dot', RL, ['Tuple', 1, 1]] as never).type.toString()).toBe(
-      'list<integer> | missing'
+      'list<number> | missing'
     );
     expect(ce.box(['Dot', RP, ['Tuple', 1, 1]] as never).type.toString()).toBe(
       'number'

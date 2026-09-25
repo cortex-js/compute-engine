@@ -114,7 +114,13 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
   });
 
   test('the types', () => {
-    expect(type(['PointX', RL])).toBe('missing | vector<2>');
+    // A restricted list of points is `missing | list<missing | tuple<…>>`:
+    // absent as a whole when the condition is false, a list of restricted
+    // points while it is undecided. Its coordinates follow: absent as a
+    // whole, or a list of coordinates that may each be absent. It was
+    // `missing | vector<2>`, which did not admit the undecided value
+    // `[1{0 < t}, 3{0 < t}]`.
+    expect(type(['PointX', RL])).toBe('list<missing | number> | missing');
     expect(type(['PointX', RP])).toBe('number');
     expect(type(['PointY', ['List', RP, ['Tuple', 3, 4]]])).toBe(
       'list<missing | number>'

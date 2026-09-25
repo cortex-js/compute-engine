@@ -1288,7 +1288,26 @@ document's history):
   condition except the literal `True` symbol (the same shape a default-less
   `Which` and the else-less `If` carry, Option A of the same day), and
   `list<T | missing>` for a list-of-booleans condition — so a list holding a
-  masked cell no longer types as a full `vector<integer^3>`. Consumers fixed
+  masked cell no longer types as a full `vector<integer^3>`. Amended
+  2026-09-25 for a LIST value under a scalar condition: `When([1,2,3], c)`
+  is typed `missing | list<integer | missing>`, not
+  `missing | vector<integer^3>`, because its evaluated value while `c` is
+  undecided is the list of restricted cells `[1{c}, 2{c}, 3{c}]`, a
+  rank-free `list<integer | missing>`, which the old type did not admit
+  (`restrictedValueType`, `library/control-structures.ts`). The length is
+  not kept on either side: a list type with a length is the tensor guard
+  (`isTensor`), whose kernels admit union-free cells only. Where the length
+  matters — the `vector` parameter of `Dot` and `Cross` — the argument
+  validation reads it from the value (`strippedMatchesParam`,
+  `boxed-expression/validate.ts`), so a vector restricted element by element,
+  `Dot([1,2]{[0<t, t<0]}, [1,1])`, is accepted and stays symbolic until its
+  conditions are decided, and `Dot([1, Missing], [1,1])` is `NaN`. A
+  restricted list of points is `missing | list<missing | tuple<…>>`, and a
+  restricted matrix a list of restricted rows. An operand that can be absent
+  as a whole AND cell by cell counts as both in `absorbOperandAbsence`
+  (`broadcast-lift-type.ts`), so `Sin([1,2,3]{c})` is
+  `missing | list<number>`: `Missing` when `c` is false, a NaN cell where an
+  absent cell meets the arithmetic. Consumers fixed
   with it: the invisible-operator gates read an operand's type with the
   absence marker stripped (`typeIgnoringAbsence`,
   `boxed-expression/invisible-operator.ts`), so `2x{x>0}`, `t P{0 ≤ t ≤ 1}`

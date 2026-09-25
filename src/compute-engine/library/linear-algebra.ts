@@ -1330,6 +1330,25 @@ function pointListInnerProductPairs(
  * `PointX` of it is the coordinate `(1, 2)`. Reading the same operand as two
  * points here would make `Dot` disagree with both.
  */
+/**
+ * A rank-free list of numbers, `list<integer>`: the type of a restricted
+ * vector (`[1,2,3]{c}`, typed `missing | list<integer | missing>`) or of a
+ * list holding a restricted cell (`[1{c}, 2]`) once the validation has
+ * stripped the absence from it. Neither carries a length — a list type with
+ * a length is the tensor guard (`isTensor`), whose kernels admit union-free
+ * cells only — so neither matches `vector`, while both are vectors: their
+ * cells are numbers, so the rank is one, and the inner product with another
+ * vector is a number (`NaN` for an absent cell, or an `incompatible-dimensions`
+ * error). Without this, `Dot([1,2,3]{0<t}, [1,1,1])` was typed
+ * `missing | value` once the restricted list became rank-free.
+ */
+function isRankFreeNumericListOperand(d: OperandDescriptor): boolean {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t === 'string' || t.kind !== 'list' || t.dimensions !== undefined)
+    return false;
+  return isSubtype(stripMissingFromType(t.elements), 'number');
+}
+
 function isPointListNotPointOperand(
   d: OperandDescriptor,
   engine: PureEngineView
@@ -1352,7 +1371,12 @@ function pointListElementDescriptor(
 ): OperandDescriptor | undefined {
   const elt = d.facts.elementType ?? collectionElementType(resolveType(d.type));
   if (elt === undefined) return undefined;
-  return describeType(elt);
+  // A cell that may be absent (`missing | tuple<…>`, the cell of a restricted
+  // list of points or of a list holding a restricted point) contributes its
+  // PRESENT point to the element product: an absent cell answers the
+  // absence marker of the cell's product, which the lift's numeric
+  // absorption types (`absorbOperandAbsence`, `broadcast-lift-type.ts`).
+  return describeType(stripMissingFromType(elt));
 }
 
 /**
@@ -1612,6 +1636,12 @@ function isPointCell(x: Expression): boolean {
  * (the inner product of two vectors, the cross product) has no value for it
  * until the conditions are decided, and stays unevaluated.
  */
+/** Whether `op` is a literal list one of whose cells is the absent datum
+ * (`Missing` or `Undefined`), such as `[1, Missing]`. */
+function hasAbsentCell(op: Expression): boolean {
+  return isFunction(op, 'List') && op.ops.some((x) => isAbsentSymbol(x));
+}
+
 function hasRestrictedCell(ops: ReadonlyArray<Expression>): boolean {
   return ops.some(
     (op) => isFunction(op, 'List') && op.ops.some((x) => isFunction(x, 'When'))
@@ -2754,7 +2784,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           [a, b].every(
             (x) =>
               isNumericTupleOperand(x) ||
-              (isSubtype(x.type, 'vector') && !isSubtype(x.type, 'matrix'))
+              (isSubtype(x.type, 'vector') && !isSubtype(x.type, 'matrix')) ||
+              isRankFreeNumericListOperand(x)
           )
         )
           return BoxedType.forResult(
@@ -2816,6 +2847,25 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // answer an `incompatible-type` error for it, because its cells are
         // not numbers.
         if (hasRestrictedCell(ops)) return undefined;
+        // A vector with an ABSENT cell (`[1, Missing]`, the value of a
+        // restricted cell whose condition is false): the absent component
+        // contributes `NaN`, so the product is `NaN`, as `Norm((1, Missing))`
+        // and `Sum([1, Missing])` answer. Such a list used to be refused at
+        // boxing, because its rank-free type `list<integer | missing>` did not
+        // match `vector`; the validation now reads its length from the value
+        // (`strippedMatchesParam`, `boxed-expression/validate.ts`) and admits
+        // it, and `MatrixMultiply` below would answer an `incompatible-type`
+        // error for a cell that is not a number. Unequal lengths are still
+        // `incompatible-dimensions`, as they are for present vectors.
+        if (ops.some(hasAbsentCell)) {
+          const counts = ops.map((op) => op.count);
+          if (counts[0] !== counts[1])
+            return ce.error(
+              'incompatible-dimensions',
+              `${counts[0]} vs ${counts[1]}`
+            );
+          return ce.NaN;
+        }
 
         // A point list written as a tuple of coordinate lists — `(1, L)` with
         // `L` a list — has no tensor form `MatrixMultiply` accepts, so the
@@ -3100,6 +3150,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // A list whose cells have different conditions is undecided until
         // they are (`hasRestrictedCell`).
         if (hasRestrictedCell(ops)) return undefined;
+        // A vector with an absent CELL (`[1, Missing, 3]`) answers as an absent
+        // operand does above: one absent cell per component, `NaN`. Such a
+        // list used to be refused at boxing (rank-free `list<integer | missing>`
+        // did not match `vector`); the validation now reads its length from
+        // the value (`strippedMatchesParam`, `boxed-expression/validate.ts`).
+        // A length other than 3 is still `incompatible-dimensions`, as it is
+        // for present vectors.
+        if (ops.some(hasAbsentCell)) {
+          const counts = ops.map((op) => op.count);
+          if (counts.some((n) => n !== 3))
+            return ce.error(
+              'incompatible-dimensions',
+              `${counts[0]} vs ${counts[1]}`
+            );
+          return ce.function('List', [ce.NaN, ce.NaN, ce.NaN]);
+        }
         const [a, b] = ops;
         // Two points answer a point; any list operand answers a list.
         const head = isTuple(a) && isTuple(b) ? 'Tuple' : 'List';

@@ -2199,7 +2199,14 @@ export function isPointListValue(expr: Expression): boolean {
   // of two differently typed points infers) all read as a point element —
   // the same test the point accessors use (`isPointElementType`), so `Abs`
   // over a point list and `PointX` over it agree on what a point list is.
-  if (isPointElementType(elt)) return true;
+  // A point cell that may be absent, `missing | tuple<…>`, is a point cell:
+  // a restricted list of points is typed `missing | list<missing | tuple<…>>`
+  // (`restrictedValueType`, `library/control-structures.ts`), and a symbol
+  // declared `list<missing | tuple<…>>` with no value is a point list too.
+  // Without this `Dot(R, (1, 1))` for such a symbol was an `incompatible-type`
+  // error at evaluation, where a valueless point list stays symbolic.
+  if (elt !== undefined && isPointElementType(stripMissingFromType(elt)))
+    return true;
   // A literal collection is often mis-typed (a list of 2-tuples types as a
   // matrix), so fall back to the runtime evidence of its first element.
   if (expr.isFiniteCollection === true && expr.isIndexedCollection === true) {

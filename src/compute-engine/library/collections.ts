@@ -2337,7 +2337,12 @@ function isPointLikeD(d: OperandDescriptor): boolean {
 /** Descriptor twin of {@link hasPointElementType}. */
 function hasPointElementTypeD(d: OperandDescriptor): boolean {
   const elt = d.facts.elementType ?? collectionElementType(d.type);
-  return isPointElementType(elt);
+  // A restricted point cell, typed `missing | tuple<…>`, is a point cell: a
+  // restricted list of points reports its elements that way
+  // (`restrictedValueType`, `library/control-structures.ts`), as the
+  // list-literal branch of `collectionBroadcastsPointsD` already reads a
+  // restricted point as its point.
+  return elt !== undefined && isPointElementType(stripMissingFromType(elt));
 }
 
 /**
@@ -8626,9 +8631,29 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // only to the FINAL position's domain (chained value-level absorption,
       // §3.C): `At(m, 9, 0)` on `list<list<number>>` reports `number` — the
       // list-domain miss at step 1 absorbs into the numeric final domain.
+      //
+      // A step through a union with `missing` peels the collection arms and
+      // keeps the `missing` arm: an access into an absent row is absent.
+      // `[[1,2]\{0<t\}, [3,4]]` is `list<missing | vector<integer^2>>`, and
+      // `At(…, 1, 2)` peels `missing | vector<integer^2>` to
+      // `missing | integer`. `collectionElementType` has no answer for a
+      // union, so the step read `any` and the result was `unknown`.
+      const peel = (t: Type): Type | undefined => {
+        if (typeof t !== 'string' && t.kind === 'union') {
+          const arms = t.types.map((arm) =>
+            arm === 'missing' ? arm : collectionElementType(arm)
+          );
+          if (
+            t.types.some((arm) => arm !== 'missing') &&
+            arms.every((arm) => arm !== undefined)
+          )
+            return reduceType({ kind: 'union', types: arms as Type[] });
+        }
+        return collectionElementType(t);
+      };
       let current: Type = sourceType;
       for (let i = 1; i < ops.length; i++) {
-        const peeled = collectionElementType(current) ?? 'any';
+        const peeled = peel(current) ?? 'any';
         const last = i === ops.length - 1;
         if (isGatherIndex(ops[i])) {
           // A gather yields a dimensionless list; the final gather's elements

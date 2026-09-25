@@ -152,7 +152,8 @@ export function deriveApplicationType(
       ? absorbOperandAbsence(
           t,
           operands.map((d) => d.type),
-          ABSENT_CELLS_STAY_MISSING.has(operator)
+          ABSENT_CELLS_STAY_MISSING.has(operator),
+          def.broadcastable
         )
       : threadedAbsence
         ? withThreadedAbsence(t)

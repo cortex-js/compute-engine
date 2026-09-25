@@ -464,18 +464,29 @@ keeps `NaN` in an absent cell although its type says `missing | tuple<…>`
 (`markAbsentPointCells`, `boxed-expression/validate.ts`, corrects a rank-1
 `List` only).
 
-Found while adding the `threadsConditionals` flag (not fixed, 2026-09-25): (1)
-`PointX(Missing)` compiles to `_gpu_nan().x` on GLSL and to a `.x` read of an
-`f32` on WGSL, which WGSL rejects. (2) `Dot` and `Cross` of a vector restricted
-element by element, `Dot([1,2]\{[0<t, t<0]\}, [1,1])`, are an
-`incompatible-type` error at boxing (the operand is typed
-`list<integer | missing>`); a list of points restricted the same way works. (3)
-`At([[1,2]\{0<t\}, [3,4]], 1, 2)` is `2\{0<t\}` but is typed `unknown`. (4) With
-its condition undecided, a restricted list `When([1,2], c)` is typed
-`missing | vector<integer^2>`, but its value, the list of restricted cells
-`[1\{c\}, 2\{c\}]`, is typed `list<integer | missing>`, which that type does not
-admit. The applications over it inherit the mismatch at `t` free: `PointX`,
-`Dot`, `Distance` and `Norm` of `[(1,2),(3,4)]\{0<t\}`.
+Found while fixing the type of a restricted list (not fixed, 2026-09-25; needs a
+decision): a numeric cell held by an undecided restriction inside a broadcast is
+typed as a number while its value, once the condition fails, is `Missing`.
+`\sin([1,2]\{0<t\})` is typed `missing | list<number>` and evaluates, with `t`
+free, to `[\sin 1\{0<t\}, \sin 2\{0<t\}]`, whose type is `list<missing | real>`;
+that value is not admitted by the type, because the broadcast lift types an
+absent numeric cell as `number` (the `NaN` it contributes to arithmetic,
+`absorbNumericAbsence`) while a held `When` cell is typed `missing | real` (the
+2026-09-09 rule that a false restriction masks to `Missing`). The two rules also
+give different VALUES for the same input on two routes: evaluated fresh with
+`t = -1`, `\sin([1,2]\{0<t\})` is `Missing` (the whole list is absent);
+evaluated first with `t` free and then again with `t = -1`, the held result
+becomes `[Missing, Missing]`; and `\sin([1, 2\{0<t\}])` with `t = -1` is
+`[\sin 1, NaN]`. The same applies to `Dot`, `Norm` and `Distance` over a
+restricted list of points, and to `[1,2]\{0<t\}` itself (fresh: `Missing`;
+two-step: `[Missing, Missing]`). To decide: whether a restriction that is
+distributed into the cells while undecided should, once decided false, answer
+the whole-list `Missing` (then the distributed cells must remember that they
+came from one restriction, or the distribution should stop now that a held
+`When` over a list presents as a collection through `whenCollectionHandlers`),
+or the per-cell `[Missing, Missing]` (then fresh evaluation and the compiled
+code, which answer `Missing` and `undefined`, change). The type follows the
+decision.
 
 Not fixed, accepted rule: on `javascript`, a list held by a free point
 coordinate becomes `NaN` (`_SYS.pointSlot`), so `[1,2]·PointList(t,t)` run with

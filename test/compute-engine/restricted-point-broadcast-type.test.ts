@@ -103,8 +103,12 @@ describe('a broadcast over a restricted list keeps the list and the absence', ()
     ['Power', `(${LC})^2`, '[1,4,9]'],
   ])('%s', (_label, latex, present) => {
     const r = probe(latex);
-    // It was `number | vector<3>`: the absence arm became a scalar.
-    expect(r.type).toBe('missing | vector<3>');
+    // It was `number | vector<3>`: the absence arm became a scalar. Then
+    // `missing | vector<3>`; the list is now rank-free, because the
+    // restricted list `[1,2,3]{0<t}` is `missing | list<integer | missing>`
+    // (its undecided value is a list of restricted cells, which a type with
+    // a length does not admit), and a broadcast over it keeps that shape.
+    expect(r.type).toBe('list<number> | missing');
     expect(r.present).toBe(present);
     expect(r.absent).toBe('"Missing"');
   });

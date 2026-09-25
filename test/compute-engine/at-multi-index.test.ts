@@ -114,3 +114,37 @@ describe('At: box and parse routes agree', () => {
       boxEval(['At', LIST, 1, 2])
     ));
 });
+
+// A step of a chained `At` through a row that may be absent: the list
+// `[[1,2]\{0<t\}, [3,4]]` is `list<missing | vector<integer^2>>`. The type
+// of `At(…, 1, 2)` peels the collection arm of each row and keeps the
+// `missing` arm, and adds the `nan` marker of a numeric access, like the
+// same access into a matrix with no restricted row (`integer | nan`). The
+// step read `any` for the union before, and the type was `unknown`.
+describe('At: two indices through a row that may be absent', () => {
+  const engine = new ComputeEngine();
+  engine.declare('t', 'real');
+  const rows = engine.parse('[[1,2]\\{0<t\\}, [3,4]]');
+
+  test('the list type', () =>
+    // A restricted row is `missing | list<integer | missing>` (rank-free:
+    // its undecided value is a list of restricted cells), and the present
+    // row `[3,4]` is admitted by that list type, so the union collapses.
+    expect(rows.type.toString()).toBe(
+      'list<list<integer | missing> | missing>'
+    ));
+
+  test('At(…, 1, 2) is typed with the missing arm carried', () => {
+    const at = engine.box(['At', rows, 1, 2]);
+    expect(at.type.toString()).toBe('integer | missing | nan');
+    const value = at.evaluate();
+    expect(value.toString()).toBe('2 {0 < t}');
+    expect(value.type.matches(at.type)).toBe(true);
+  });
+
+  test('At(…, 2, 1) has the same type', () => {
+    const at = engine.box(['At', rows, 2, 1]);
+    expect(at.type.toString()).toBe('integer | missing | nan');
+    expect(at.evaluate().toString()).toBe('3');
+  });
+});

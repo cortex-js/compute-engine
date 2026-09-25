@@ -6989,7 +6989,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
           ? absorbOperandAbsence(
               t,
               expr.ops.map((x) => x.type.type),
-              ABSENT_CELLS_STAY_MISSING.has(expr.operator)
+              ABSENT_CELLS_STAY_MISSING.has(expr.operator),
+              def.broadcastable
             )
           : threadedAbsence
             ? withThreadedAbsence(t)

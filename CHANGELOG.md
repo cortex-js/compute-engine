@@ -1,5 +1,33 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **A restricted list is typed as a list of cells that may be absent.**
+  `[1,2,3]\{c\}` (`When([1,2,3], c)`) is typed
+  `missing | list<integer | missing>`; it was `missing | vector<integer^3>`,
+  which did not admit its own evaluated value while `c` is undecided, the list
+  of restricted cells `[1\{c\}, 2\{c\}, 3\{c\}]`. A restricted list of points is
+  `missing | list<missing | tuple<…>>` (it was `missing | list<tuple<…>^2>`),
+  and a restricted matrix is a list of restricted rows. The accessors and
+  broadcasts over a restricted list follow: `PointX([(1,2),(3,4)]\{0<t\})` is
+  `missing | list<missing | number>` (it was `missing | vector<2>`);
+  `\sin([1,2,3]\{0<t\})`, and `Dot`, `Norm` and `Distance` over a restricted
+  list of points, are `missing | list<number>` (`Dot` lost the `missing` arm
+  before, although it answers `Missing` when the condition is false); a
+  single-index `At` of a restricted matrix is a restricted row,
+  `missing | list<integer | missing>`; and `Dot([1,2,3]\{0<t\}, [1,1,1])` is a
+  `number`. `Dot` and `Cross` of a vector restricted element by element,
+  `Dot([1,2]\{[0<t, t<0]\}, [1,1])`, now evaluate (they stay symbolic until the
+  conditions are decided) instead of being an `incompatible-type` error, and
+  `Dot([1, Missing], [1,1])` is `NaN`, as `Norm((1, Missing))` is, instead of an
+  error. A symbol declared `list<missing | tuple<number, number>>` with no value
+  stays symbolic under `Dot` instead of an `incompatible-type` error. A union
+  element type that holds a list, under a length, is spelled with parentheses,
+  `list<(list<integer | missing^2> | missing)^2>`: the bare spelling did not
+  parse back to the same type. A union of scalars keeps its spelling
+  (`list<nan | real^3>`). The evaluated values of restricted lists are
+  unchanged.
+
 ### Bug Fixes
 
 - **The pole `ComplexInfinity` has one MathJSON spelling at every precision.**

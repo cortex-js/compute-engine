@@ -247,9 +247,14 @@ export function typeToString(type: Type, precedence = 0): string {
           // back to the same `[-1, -1]` shape (`staticCollectionDims`), and a
           // bounded dimension keeps its `^n`.
           let nested = typeToString(type.elements);
-          for (let i = dims.length - 1; i >= 0; i--)
+          for (let i = dims.length - 1; i >= 0; i--) {
+            const inner =
+              i === dims.length - 1
+                ? underLength(type.elements, nested)
+                : nested;
             nested =
-              dims[i] < 0 ? `list<${nested}>` : `list<${nested}^${dims[i]}>`;
+              dims[i] < 0 ? `list<${nested}>` : `list<${inner}^${dims[i]}>`;
+          }
           result = nested;
         } else {
           // Serialize generic list types
@@ -258,7 +263,10 @@ export function typeToString(type: Type, precedence = 0): string {
               ? `^${dims[0].toString()}`
               : `^(${dims.join('x')})`
             : '';
-          result = `list<${typeToString(type.elements)}${dimensions}>`;
+          const elements = typeToString(type.elements);
+          result = `list<${
+            dimensions === '' ? elements : underLength(type.elements, elements)
+          }${dimensions}>`;
         }
       }
       break;
@@ -458,4 +466,33 @@ function getPrecedence(kind: string): number {
     default:
       return 0;
   }
+}
+
+/**
+ * The spelling of a list's element type when a length follows it. A union
+ * one of whose arms is itself a list (or another collection) is
+ * parenthesized, `list<(list<integer | missing^2> | missing)^2>`: without the
+ * parentheses the spelling did not parse back to the same type. A union of
+ * scalars keeps its bare spelling, `list<nan | real^3>`, which parses back
+ * (the parser binds the length to the list), and which consumers match on.
+ */
+function underLength(elements: Type, spelling: string): string {
+  const r = elements;
+  if (
+    typeof r === 'string' ||
+    (r.kind !== 'union' && r.kind !== 'intersection')
+  )
+    return spelling;
+  const collectionArm = r.types.some(
+    (arm) =>
+      typeof arm !== 'string' &&
+      (arm.kind === 'list' ||
+        arm.kind === 'set' ||
+        arm.kind === 'collection' ||
+        arm.kind === 'indexed_collection' ||
+        arm.kind === 'tuple' ||
+        arm.kind === 'dictionary' ||
+        arm.kind === 'record')
+  );
+  return collectionArm ? `(${spelling})` : spelling;
 }

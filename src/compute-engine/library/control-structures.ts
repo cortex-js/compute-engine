@@ -35,7 +35,10 @@ import {
   isCollectionShaped,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
-import { isValidType } from '../../common/type/primitive.js';
+import {
+  INDEXED_COLLECTION_SHAPE_TYPE,
+  isValidType,
+} from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
@@ -408,8 +411,13 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             context.engine._typeResolver
           );
         }
+        // A scalar condition that is not yet decided is distributed into the
+        // cells of a list-like value by `evaluate` (`When([1,2], c)` is
+        // `[1{c}, 2{c}]`), so the type of the result is the one
+        // `restrictedValueType` derives: for a scalar `T | missing`, for a
+        // list-like value `missing | list<…>` whose cells may be absent.
         return BoxedType.forResult(
-          reduceType({ kind: 'union', types: [expr.type, 'missing'] }),
+          restrictedValueType(expr.type),
           context.engine._typeResolver
         );
       },
@@ -806,6 +814,93 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 ];
 
 /**
+ * The type of `When(e, c)` for a value `e` of type `t` and a scalar condition
+ * `c` that is not the literal `True` symbol.
+ *
+ * A scalar value answers `t | missing`: the value when the condition holds,
+ * `Missing` when it fails, and a held `When` (of that same type) while the
+ * condition is undecided.
+ *
+ * A LIST-LIKE value is different because `evaluate` distributes an undecided
+ * scalar condition into the cells (the branch marked "Indeterminate scalar
+ * condition over a collection value"): `When([1,2], c)` evaluates to
+ * `[1{c}, 2{c}]`, a list whose cells may each be absent, typed
+ * `list<integer | missing>`. The values this expression can take are therefore
+ * the list itself (condition `True`), `Missing` (condition `False`) and that
+ * list of restricted cells (condition undecided), and the type must admit all
+ * three: `missing | list<C>`, where `C` is the restricted type of one element
+ * along the FIRST axis, since the distribution walks the first axis only. The
+ * recursion is what makes a matrix work: `When([[1,2],[3,4]], c)` evaluates to
+ * `[[1,2]{c}, [3,4]{c}]`, a list of restricted rows, and each row is itself a
+ * restricted list, `missing | list<integer | missing>`.
+ *
+ * The length is not kept: `When([1,2,3], c)` is
+ * `missing | list<integer | missing>`, rank-free, because its evaluated value
+ * `[1{c}, 2{c}, 3{c}]` is a rank-free `list<integer | missing>` — a literal
+ * list of cells typed `T | missing` claims no shape (`shapedListTypeD`,
+ * `library/collections.ts`), since a dimensioned list type is the tensor
+ * guard (`isTensor`), whose kernels admit union-free cells only. A type with
+ * a length would not admit the value. Before this helper the type was
+ * `missing | list<T^n>`, which a list of restricted cells does not match, so
+ * a restricted list's value contradicted its own type and every accessor
+ * over it (`PointX`, `Dot`, `Norm`, `Distance`) inherited the contradiction
+ * (ROADMAP, residues of the Tycho 306–315 round, item 4).
+ *
+ * The exclusions mirror the distribution rule in `evaluate` and in
+ * `whenCollectionHandlers`: a tuple (a point) and a string are one value each
+ * and stay whole, and a set is not indexed and is never distributed. A
+ * `broadcastable<T>` value is either one `T` or a list of them, so it answers
+ * the union of both readings.
+ *
+ * `depth` bounds the descent: a self-referential type alias
+ * (`type alias nest = list<nest>`) would otherwise recurse without end, and
+ * past the bound the element is typed `T | missing` as a scalar is.
+ */
+function restrictedValueType(t: Type, depth = 0): Type {
+  if (depth < MAX_RESTRICTED_TYPE_DEPTH) {
+    if (
+      isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
+      !isTupleShapedType(t) &&
+      !isSubtype(t, 'string')
+    ) {
+      const cell = collectionElementType(t) ?? 'unknown';
+      // The result is RANK-FREE, `list<T | missing>` with no length, even
+      // when the value's type has one: a literal list of cells typed
+      // `T | missing` claims no shape (`shapedListTypeD`,
+      // `library/collections.ts`), because a dimensioned list type is the
+      // tensor guard (`isTensor`, `boxed-expression/type-guards.ts`), whose
+      // kernels admit union-free cells only. A type with a length would not
+      // admit the value. The length is read from the value where it matters:
+      // the argument validation of a `vector` parameter
+      // (`strippedMatchesParam`, `boxed-expression/validate.ts`).
+      return reduceType({
+        kind: 'union',
+        types: [
+          'missing',
+          { kind: 'list', elements: restrictedValueType(cell, depth + 1) },
+        ],
+      });
+    }
+    if (typeof t !== 'string' && t.kind === 'broadcastable') {
+      const cell = t.elements;
+      return reduceType({
+        kind: 'union',
+        types: [
+          'missing',
+          cell,
+          { kind: 'list', elements: restrictedValueType(cell, depth + 1) },
+        ],
+      });
+    }
+  }
+  return reduceType({ kind: 'union', types: [t, 'missing'] });
+}
+
+/** The deepest nesting `restrictedValueType` descends into. Real tensors are
+ * rank 2 or 3; the bound only stops a self-referential alias. */
+const MAX_RESTRICTED_TYPE_DEPTH = 8;
+
+/**
  * Lazy indexed-collection handlers for a held `When(value, cond)` (Tycho
  * item 66).
  *
@@ -906,7 +1001,14 @@ function whenCollectionHandlers(): CollectionHandlers {
     elttype: (expr) => {
       const v = value(expr);
       if (!v) return undefined;
-      return collectionElementType(v.type.type) ?? 'unknown';
+      // Each element is a restricted cell, `When(elem, cond)` (see `parts`),
+      // so its type is the RESTRICTED type of the wrapped collection's
+      // element, not that element's bare type: a row of a restricted matrix
+      // is `missing | list<integer | missing>` (rank-free, as every restricted
+      // list is), and that is what `At(M{c}, 2)` answers.
+      return restrictedValueType(
+        collectionElementType(v.type.type) ?? 'unknown'
+      );
     },
 
     iterator: (expr) => {
