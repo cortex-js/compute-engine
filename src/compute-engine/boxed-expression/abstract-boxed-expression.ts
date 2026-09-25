@@ -57,6 +57,7 @@ import { functionLiteralParameterNames } from './function-literal.js';
 import { symbolAtSite, scopeForRebuild } from './binding-sites.js';
 import { extractIntervalBounds } from './inequality-bounds.js';
 import { labelFor } from './explain-labels.js';
+import { latexSerializeOptions } from './latex-serialize-options.js';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -392,9 +393,7 @@ export abstract class _BoxedExpression implements Expression {
     }
     const syntax = this.engine._requireLatexSyntax();
     const json = this.toMathJson({ prettify: true, fractionalDigits: 'auto' });
-    const latexOpts = this.engine.latexOptions;
-    if (Object.keys(latexOpts).length === 0) return syntax.serialize(json);
-    return syntax.serialize(json, { ...latexOpts });
+    return syntax.serialize(json, latexSerializeOptions(this.engine));
   }
 
   /**
@@ -463,14 +462,7 @@ export abstract class _BoxedExpression implements Expression {
     );
 
     const syntax = this.engine._requireLatexSyntax();
-    const latexOpts = this.engine.latexOptions;
-    const haveEngineOpts = Object.keys(latexOpts).length > 0;
-    const haveCallOpts = options && Object.keys(options).length > 0;
-
-    if (!haveEngineOpts && !haveCallOpts) return syntax.serialize(json);
-    if (!haveEngineOpts) return syntax.serialize(json, options);
-    if (!haveCallOpts) return syntax.serialize(json, { ...latexOpts });
-    return syntax.serialize(json, { ...latexOpts, ...options });
+    return syntax.serialize(json, latexSerializeOptions(this.engine, options));
   }
 
   /** Called by `JSON.stringify()` when serializing to json.

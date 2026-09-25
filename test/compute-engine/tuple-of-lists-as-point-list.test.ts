@@ -92,6 +92,40 @@ describe('A tuple with a list coordinate is a list of points — interpreter', (
     ).toBe('([1,2], [2,1])');
   });
 
+  test('a Tuple of list literals serializes to LaTeX that parses back as a Tuple', () => {
+    // The parenthesized spelling `([1], [2])` parses as a list of points, so
+    // the serializer spells such a tuple `\operatorname{Tuple}(…)`. A bare
+    // comma list of lists (no parentheses) parses as a `Tuple`.
+    const e = ce.parse('[1, 2], [3, 4]');
+    expect(e.json).toEqual(['Tuple', ['List', 1, 2], ['List', 3, 4]]);
+    expect(e.latex).toBe(
+      '\\operatorname{Tuple}(\\bigl\\lbrack1, 2\\bigr\\rbrack,\\bigl\\lbrack3, 4\\bigr\\rbrack)'
+    );
+    expect(ce.parse(e.latex).isSame(e)).toBe(true);
+    for (const json of [
+      ['Tuple', ['List', 1]],
+      ['Tuple', ['Range', 1, 3], 2],
+      ['Pair', ['List', 1], ['List', 2]],
+    ]) {
+      const t = ce.box(json);
+      expect(ce.parse(t.latex).isSame(t)).toBe(true);
+    }
+    // The decision reads the operand TYPES, as the parser does: `A` and `B`
+    // hold lists of numbers, so `(A,B)` would parse as `PointList(A, B)`.
+    const ab = ce.box(['Tuple', 'A', 'B']);
+    expect(ab.latex).toBe('\\operatorname{Tuple}(A,B)');
+    expect(ce.parse(ab.latex).isSame(ab)).toBe(true);
+    // Any list-of-numbers coordinate selects the longer spelling, even when
+    // the other coordinates would keep a `Tuple`: the parser types them in
+    // the scope of the tuple, which can differ from the current scope.
+    const aSet = ce.box(['Tuple', 'A', ['Set', 1]]);
+    expect(aSet.latex).toBe('\\operatorname{Tuple}(A,\\lbrace1\\rbrace)');
+    expect(ce.parse(aSet.latex).isSame(aSet)).toBe(true);
+    // A tuple with no list coordinate keeps the parenthesized spelling.
+    expect(ce.box(['Tuple', 1, 2]).latex).toBe('(1,2)');
+    expect(ce.box(['Tuple', 'x']).latex).toBe('(x,)');
+  });
+
   test('Length((A, B)) is the number of points', () => {
     expect(
       ce.parse('\\operatorname{Length}((A, B))').evaluate().toString()

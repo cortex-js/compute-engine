@@ -409,6 +409,19 @@
   `Clamp`, `ElementMax`, `ElementMin`, `Sort`, `MaxBy`, `MinBy`, `ArgMax` and
   `ArgMin` order two different numbers exactly: `Max(1e-12, 2e-12)` is `2e-12`.
   Before, two numbers closer than the engine tolerance (1e-10) were a tie that
+- The LaTeX of a `Tuple` that has a list of numbers as a coordinate parses back
+  as the same `Tuple`. Such a tuple is now spelled `\operatorname{Tuple}(…)`:
+  `Tuple([1, 2], [3, 4])` serializes as
+  `\operatorname{Tuple}(\bigl\lbrack1, 2\bigr\rbrack,\bigl\lbrack3, 4\bigr\rbrack)`,
+  and `Tuple(A, B)`, with `A` and `B` declared `list<real>`, as
+  `\operatorname{Tuple}(A,B)`. The parenthesized spelling `(A,B)` parses as the
+  list of points `PointList(A, B)`, a different value. The longer spelling is
+  used when a coordinate has the type of a list of numbers in the current scope.
+  Other tuples keep the parenthesized spelling.
+- An empty set serializes as `\lbrace\rbrace` and an empty list as
+  `\bigl\lbrack\bigr\rbrack`, with no space between the delimiters (it was
+  `\lbrace \rbrace`). Both spellings parse to the same value.
+
   kept the first operand. The relational operators (`Less`, `Greater`, …) and
   equality keep the tolerance, so `1e-12 < 2e-12` is still `False`: a relation
   stays consistent with `Equal`. `Real`, `Imaginary` and `Argument` of an exact

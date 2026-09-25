@@ -1558,6 +1558,48 @@ function parseColon(
   return ['Colon', lhs, rhs];
 }
 
+/**
+ * Operators whose MathJSON form is a literal list. The `Tuple` serializer
+ * uses them when it has no type information (see `serializeTuple()`).
+ */
+const LIST_LITERAL_OPERATORS = new Set(['List', 'Range', 'Linspace']);
+
+/**
+ * Serialize a `Tuple` (and its shorthands `Pair`, `Triple`, `Single`).
+ *
+ * The usual spelling is a parenthesized list, `(a, b)`. A one-element tuple
+ * needs a trailing comma: `(x)` would re-parse as the plain expression `x`,
+ * losing the tuple, while `(x,)` re-parses as `Tuple(x)`.
+ *
+ * A parenthesized list with a list of numbers as an operand parses as a LIST
+ * OF POINTS (`PointList`), not as a `Tuple`: `([1, 2], [3, 4])`, or `(A, B)`
+ * when `A` and `B` hold lists of numbers (see the `Delimiter` canonical
+ * handler in `library/core.ts`). Such a tuple is spelled
+ * `\operatorname{Tuple}(…)`, which parses back as a `Tuple`.
+ *
+ * The parser decides from the operand TYPES. The compute engine supplies the
+ * `readsAsPointList` option, which reads the types (see
+ * `latexSerializeOptions()`). Without it (the
+ * `LatexSyntax` class used alone, with no types), a tuple with a list literal
+ * operand gets the `\operatorname{Tuple}` spelling.
+ */
+function serializeTuple(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): string {
+  const body = serializeOps(',')(serializer, expr);
+  const ops = operands(expr);
+  const readsAsPointList =
+    serializer.options.readsAsPointList?.(ops) ??
+    ops.some((x) => LIST_LITERAL_OPERATORS.has(operator(x)));
+  if (readsAsPointList) return joinLatex(['\\operatorname{Tuple}(', body, ')']);
+  // Do not pass an empty segment to `joinLatex`: it reads the empty string as
+  // text that starts with a letter, and puts a space after a body that ends in
+  // a command (`(A,\sin )`).
+  if (nops(expr) === 1) return joinLatex(['(', body, ',)']);
+  return joinLatex(['(', body, ')']);
+}
+
 export const DEFINITIONS_CORE: LatexDictionary = [
   //
   // Constants
@@ -2207,42 +2249,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
 
-  {
-    name: 'Tuple',
-    // A one-element tuple needs a trailing comma: `(x)` would re-parse as
-    // the plain expression `x`, losing the tuple, while `(x,)` re-parses as
-    // `Tuple(x)`.
-    serialize: (serializer, expr) =>
-      joinLatex([
-        '(',
-        serializeOps(',')(serializer, expr),
-        nops(expr) === 1 ? ',' : '',
-        ')',
-      ]),
-  },
-  {
-    name: 'Pair',
-    serialize: (serializer, expr) =>
-      joinLatex(['(', serializeOps(',')(serializer, expr), ')']),
-  },
-  {
-    name: 'Triple',
-    serialize: (serializer, expr) =>
-      joinLatex(['(', serializeOps(',')(serializer, expr), ')']),
-  },
-  {
-    name: 'Single',
-    // `Single` is the MathJSON shorthand for a one-element `Tuple`: it needs
-    // a trailing comma, since `(x)` would re-parse as the plain expression
-    // `x`, losing the tuple.
-    serialize: (serializer, expr) =>
-      joinLatex([
-        '(',
-        serializeOps(',')(serializer, expr),
-        nops(expr) === 1 ? ',' : '',
-        ')',
-      ]),
-  },
+  { name: 'Tuple', serialize: serializeTuple },
+  { name: 'Pair', serialize: serializeTuple },
+  { name: 'Triple', serialize: serializeTuple },
+  // `Single` is the MathJSON shorthand for a one-element `Tuple`.
+  { name: 'Single', serialize: serializeTuple },
 
   {
     name: 'Domain',

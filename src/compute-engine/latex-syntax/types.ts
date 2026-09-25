@@ -1670,6 +1670,25 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    * ```
    */
   angleNormalization?: 'none' | '0...360' | '-180...180';
+
+  /**
+   * Whether a `Tuple` with these operands must be spelled
+   * `\operatorname{Tuple}(…)`, because the parenthesized list `(a, b, …)`
+   * could parse back as a list of points (`PointList`). The parser decides
+   * this from the TYPES of the operands, so the compute engine supplies this
+   * function when it serializes an expression. `\operatorname{Tuple}(…)`
+   * always parses back as a `Tuple`. A result of `undefined` means "unknown":
+   * the serializer then uses its test on the MathJSON alone.
+   *
+   * When it is not supplied, the serializer has no types, and it uses the
+   * spelling `\operatorname{Tuple}(…)` when an operand is a list literal
+   * (`List`, `Range`, `Linspace`).
+   *
+   * @internal
+   */
+  readsAsPointList?: (
+    operands: ReadonlyArray<MathJsonExpression>
+  ) => boolean | undefined;
 };
 
 /** The serialization options as seen by the serializer: the style options
@@ -1688,7 +1707,11 @@ export type ResolvedSerializeLatexOptions = Omit<
   | 'powerStyle'
   | 'numericSetStyle'
   | 'indexStyle'
+  | 'readsAsPointList'
 > & {
+  readsAsPointList:
+    | ((operands: ReadonlyArray<MathJsonExpression>) => boolean | undefined)
+    | undefined;
   applyFunctionStyle: (
     expr: MathJsonExpression,
     level: number

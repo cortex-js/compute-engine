@@ -473,7 +473,10 @@ export function joinLatex(segments: Iterable<string>): string {
   let sep = '';
   let result = '';
   for (const segment of segments) {
-    if (segment === undefined || segment === null) continue;
+    // An empty segment adds nothing. Without this test, `segment[0]` is
+    // `undefined`, the letter test below matches the string "undefined", and
+    // a space is put after a previous segment that ends in a command.
+    if (segment === undefined || segment === null || segment === '') continue;
     if (typeof segment === 'string') {
       // If the segment begins with a char that *could* be in a command
       // name... insert a separator (if one was needed for the previous segment)

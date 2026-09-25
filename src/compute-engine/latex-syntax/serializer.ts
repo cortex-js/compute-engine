@@ -178,6 +178,7 @@ export class Serializer {
     this.options = {
       dmsFormat: false,
       angleNormalization: 'none',
+      readsAsPointList: undefined,
       ...normalizeStyleOptions(options),
     } as Required<ResolvedSerializeLatexOptions>;
   }

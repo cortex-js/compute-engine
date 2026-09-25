@@ -29,7 +29,7 @@ describe('MATCHFIX', () => {
 describe('MATCHFIX serialize', () => {
   test('[List]', () =>
     expect(latex(['List'])).toMatchInlineSnapshot(
-      `\\bigl\\lbrack \\bigr\\rbrack`
+      `\\bigl\\lbrack\\bigr\\rbrack`
     ));
 
   test('[List, "a"]', () =>

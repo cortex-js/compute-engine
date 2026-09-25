@@ -48,6 +48,7 @@ import {
   containsContinuationOperand,
 } from './type-guards.js';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';
+import { latexSerializeOptions } from './latex-serialize-options.js';
 
 // Lazy reference to break circular dependency:
 // arithmetic-mul-div → ... → abstract-boxed-expression → serialize
@@ -79,10 +80,7 @@ function _serializeLatexMetadata(
   ce: ComputeEngine,
   expr: MathJsonExpression
 ): string {
-  const syntax = ce.latexSyntax!;
-  const opts = ce.latexOptions;
-  if (Object.keys(opts).length === 0) return syntax.serialize(expr);
-  return syntax.serialize(expr, { ...opts });
+  return ce.latexSyntax!.serialize(expr, latexSerializeOptions(ce));
 }
 
 /** Attempt to transform an expression a+b as a subtraction b-a. Return null

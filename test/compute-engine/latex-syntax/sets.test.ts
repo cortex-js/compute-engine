@@ -6,7 +6,7 @@ function parse(s) {
 
 describe('SERIALIZING SETS', () => {
   test('Set', () => {
-    expect(latex(['Set'])).toMatchInlineSnapshot(`\\lbrace \\rbrace`);
+    expect(latex(['Set'])).toMatchInlineSnapshot(`\\lbrace\\rbrace`);
     expect(latex(['Set', 2, 5, 7])).toMatchInlineSnapshot(
       `\\lbrace2, 5, 7\\rbrace`
     );

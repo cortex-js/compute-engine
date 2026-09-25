@@ -287,7 +287,7 @@ describe('INDEX WITH \\lbrack', () => {
 describe('LIST SERIALIZATION', () => {
   test('Empty list', () =>
     expect(latex(['List'])).toMatchInlineSnapshot(
-      `\\bigl\\lbrack \\bigr\\rbrack`
+      `\\bigl\\lbrack\\bigr\\rbrack`
     ));
 });
 
