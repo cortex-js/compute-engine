@@ -99,6 +99,12 @@ describe('a point argument with a complex-shaped coordinate', () => {
       1.0240647445443964,
       12
     );
+    // The body of `l` squares `V.x`, typed `list<number> | missing | number`
+    // (the power of an absent coordinate is `Missing`, so the type keeps the
+    // arm). With that arm, the sum in the emitted `P_0` declines as
+    // arithmetic over a possibly list-valued operand. That decline compiles
+    // its user-function operands first, so the more specific decline of the
+    // inner call is the one reported.
     expect(() => compile(call, { fallback: false })).toThrow(
       /Could not compile a call of `\w+`: argument \d is a point with a complex-valued coordinate/
     );

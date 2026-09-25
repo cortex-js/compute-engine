@@ -12,6 +12,7 @@ import {
   isNumber,
   isFunction,
   isSymbol,
+  isAbsentSymbol,
   numericValue,
   isContinuationOperand,
   containsContinuationOperand,
@@ -2366,7 +2367,14 @@ function mulTensors(
       // the tensor path and change their result typing. Tuples are excluded —
       // they scale component-wise by design (`mulTuples`).
       if (isBroadcastableCollection(x)) return undefined;
-      scalars.push(x);
+      // An absent scalar factor (`Missing` or `Undefined`) is read as `NaN`:
+      // every cell of a packed tensor is a number, and the absence marker of
+      // a numeric cell is `NaN` (`docs/ERROR-MODEL.md`, the codomain rule).
+      // Kept as the symbol, the cell products disagreed: `Missing · 2` is
+      // `NaN` through the `Multiply` absence gate, but `Missing · 1` folds
+      // the identity factor away and answered the bare `Missing`, so
+      // `Missing · [1, 2, 3]` was `[Missing, NaN, NaN]`.
+      scalars.push(isAbsentSymbol(x) ? ce.NaN : x);
     }
   }
 

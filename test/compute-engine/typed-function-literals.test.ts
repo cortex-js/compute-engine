@@ -117,8 +117,9 @@ describe('Annotated function literal — typing (§6.1, §6.2)', () => {
     // The widening exists because an UNKNOWN parameter may bind `∞`, making
     // a finite-numeric body claim unsound. Since the finite-by-default flip
     // the bare name `integer` excludes the infinities, so this parameter
-    // cannot bind one and `x/2` keeps its finite claim.
-    expect(f.type.toString()).toBe('(x: integer) -> real');
+    // cannot bind one and `x/2` keeps its finite claim. `x/2` is the product
+    // `x · 1/2` of two rationals, so the claim is `rational`.
+    expect(f.type.toString()).toBe('(x: integer) -> rational');
   });
 
   test('a param that does NOT prove finiteness still widens', () => {

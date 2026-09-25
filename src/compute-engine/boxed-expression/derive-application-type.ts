@@ -8,7 +8,6 @@ import type {
 import type { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
-  absorbNumericAbsence,
   functionResult,
   stripMissingFromType,
   typeContainsMissing,
@@ -19,7 +18,11 @@ import {
   instantiatedResultTypeOverActuals,
   type SolveActual,
 } from './generic-instantiation.js';
-import { broadcastLiftType, viewOfDescriptor } from './broadcast-lift-type.js';
+import {
+  absorbOperandAbsence,
+  broadcastLiftType,
+  viewOfDescriptor,
+} from './broadcast-lift-type.js';
 
 /**
  * The three readings of an operator definition the broadcast lift needs,
@@ -70,7 +73,10 @@ export function installBroadcastLiftHooks(hooks: BroadcastLiftHooks): void {
  * result absorbs the absence — every `missing` arm stripped, every numeric
  * cell widened to admit the `NaN` an absent numeric operand contributes.
  * Without that, `Map(k ↦ k + 1, xs)` over `integer | missing` elements
- * would advertise elements no evaluation produces.
+ * would advertise elements no evaluation produces. The one exception is a
+ * whole-value absence that reaches a result that is not numeric (a
+ * restricted point under `Sin`): the result keeps a `missing` arm, because
+ * the value is then `Missing` (`absorbOperandAbsence`).
  *
  * It deliberately stops there. The other boxing-time steps that need the
  * expression — argument validation and its error types, the Contract B
@@ -122,7 +128,12 @@ export function deriveApplicationType(
   const absorbMissing =
     propagate && operands.some((d) => typeContainsMissing(d.type));
   const absorb = (t: Type): Type =>
-    absorbMissing ? absorbNumericAbsence(t) : t;
+    absorbMissing
+      ? absorbOperandAbsence(
+          t,
+          operands.map((d) => d.type)
+        )
+      : t;
 
   if (typeof def.type === 'function') {
     const handlerOperands = propagate

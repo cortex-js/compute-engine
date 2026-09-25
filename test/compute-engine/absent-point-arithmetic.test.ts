@@ -9,8 +9,8 @@ import { ComputeEngine } from '../../src/compute-engine';
  * subtype of `number`, and the position-preserving `Missing` otherwise. The
  * APPLICATION's type is what decides, not the operator's declared result:
  * `Negate` is declared `-> number`, yet `Negate(P[0])` for a list of points
- * `P` is typed `tuple<number, number, number>` through the tuple broadcast
- * exemption.
+ * `P` is typed `missing | tuple<number, number, number>` through the tuple
+ * broadcast exemption.
  *
  * In 0.128.0 the gate answered `NaN` unconditionally. An out-of-range point
  * access then scaled to the scalar `NaN`, and adding a point to that `NaN`
@@ -47,8 +47,11 @@ describe('an absent point access', () => {
   test('scaled, it stays an absent point', () => {
     const ce = engineWithPointList();
     const expr = ce.parse('2\\cdot P[0]');
-    // The application is typed a point, so the codomain marker is `Missing`.
-    expect(expr.type.toString()).toBe('tuple<number, number, number>');
+    // The application is typed a point that can be absent, so the codomain
+    // marker is `Missing`, and the type keeps the operand's `missing` arm.
+    expect(expr.type.toString()).toBe(
+      'missing | tuple<number, number, number>'
+    );
     expect(expr.evaluate().symbol).toBe('Missing');
   });
 
@@ -63,8 +66,10 @@ describe('an absent point access', () => {
     const ce = engineWithPointList();
     const expr = ce.box(['Negate', ['At', 'P', 0]]);
     // `Negate` is declared `-> number`; the tuple broadcast exemption is what
-    // makes the APPLICATION a point.
-    expect(expr.type.toString()).toBe('tuple<number, number, number>');
+    // makes the APPLICATION a point (one that can be absent).
+    expect(expr.type.toString()).toBe(
+      'missing | tuple<number, number, number>'
+    );
     expect(expr.evaluate().symbol).toBe('Missing');
   });
 

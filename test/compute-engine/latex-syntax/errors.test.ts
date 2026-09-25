@@ -663,10 +663,12 @@ describe('Postfix-decline recovery in parseSyntaxError', () => {
   });
 
   test('a named postfix with no competing reading is NOT rebuilt as [name, missing]', () => {
-    // `2[1,2]`: the `At` postfix declines and there is no prefix/infix reading
-    // for `[`, so the recovery is the plain error — NOT `["At", missing]`.
+    // `2[1,2)`: the `At` postfix declines (a number cannot be indexed), the
+    // bracket does not open a list (so it is not a factor of a product), and
+    // there is no prefix/infix reading for `[`, so the recovery is the plain
+    // error — NOT `["At", missing]`.
     // (See the note at the fall-through in `parse.ts`.)
-    expect(raw('2[1,2]')).toEqual(
+    expect(raw('2[1,2)')).toEqual(
       '["Sequence",2,["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
     );
     // `!` never reaches that path: it keeps its richer operator recovery.

@@ -77,37 +77,25 @@ describe('DELIMITERS', () => {
         ],
       ]
     `);
+    // `f` is declared as a function: a function cannot be indexed, so the
+    // bracketed list is its argument.
     expect(ce.parse('f[3]').json).toMatchInlineSnapshot(`
       [
-        At,
+        f,
         [
-          Error,
-          [
-            ErrorCode,
-            'incompatible-type',
-            'dictionary | indexed_collection',
-            'function',
-          ],
-          f,
+          List,
+          3,
         ],
-        3,
       ]
     `);
     expect(ce.parse('f[3, 4]').json).toMatchInlineSnapshot(`
       [
-        At,
+        f,
         [
-          Error,
-          [
-            ErrorCode,
-            'incompatible-type',
-            'dictionary | indexed_collection',
-            'function',
-          ],
-          f,
+          List,
+          3,
+          4,
         ],
-        3,
-        4,
       ]
     `);
     expect(ce.parse('v[3]').json).toMatchInlineSnapshot(`
@@ -210,21 +198,26 @@ describe('DELIMITERS', () => {
   });
 
   // Guard-rails: the parenthesized-group relaxation must NOT change how a
-  // bracket binds to a non-`)`-closed LHS. A scalar or bare compound followed
-  // by `[` remains an unexpected-operator error (never flips to indexing or
-  // multiplication), and a declared function application is untouched.
+  // bracket binds to a non-`)`-closed LHS. A number literal is never indexed:
+  // a bracketed list after it is a factor of a product (Tycho ask 313), and
+  // any other bracket after it is an unexpected-operator error. A bare
+  // compound never becomes the indexed target, and a declared function
+  // application is untouched.
   test('Bracket after non-group LHS is unchanged (no scalar[list] flip)', () => {
     const raw = (s: string) =>
       JSON.stringify(ce.parse(s, { canonical: false }).json);
 
-    // Scalar LHS: still an unexpected `[`, not At and not Multiply.
-    expect(raw('2[1,2]')).toEqual(
+    // Number LHS before a list: a product, not At.
+    expect(raw('2[1,2]')).toEqual('["InvisibleOperator",2,["List",1,2]]');
+    // Number LHS before a bracket that is not a list (a half-open interval):
+    // still an unexpected `[`.
+    expect(raw('2[1,2)')).toEqual(
       '["Sequence",2,["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
     );
     // Bare (unparenthesized) compound: `[` binds to the last operand `1`,
-    // which is a number → rejected → leftover unexpected `[`.
+    // which is a number, so the list is a factor of that operand only.
     expect(raw('x+1[2]')).toEqual(
-      '["Sequence",["Add","x",1],["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
+      '["Add","x",["InvisibleOperator",1,["List",2]]]'
     );
     // Symbol LHS multi-index path is preserved.
     expect(raw('x[1,2]')).toEqual('["At","x",1,2]');

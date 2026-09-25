@@ -39,6 +39,7 @@ import {
   typeHandlerContext,
 } from './derive-application-type.js';
 import {
+  absorbOperandAbsence,
   broadcastLiftType,
   skipBroadcastForVectorOpsOnViews,
   type BroadcastOperandView,
@@ -123,7 +124,6 @@ import {
 import { numericStoreTiers } from './literal-tier.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import {
-  absorbNumericAbsence,
   broadcastResultType,
   broadcastShapedResultType,
   functionResult,
@@ -210,6 +210,7 @@ import {
   absentScalarMarker,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
+  markAbsentPointCells,
   runtimeConformanceError,
 } from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
@@ -5066,7 +5067,9 @@ export class BoxedFunction
           this.operator,
           tail,
           def.lazy === true,
-          options
+          options,
+          this,
+          def.resolvedMissingBehavior === 'propagate'
         );
         if (threaded) return threaded;
       }
@@ -6394,7 +6397,9 @@ function threadConditional(
   op: string,
   rawTail: ReadonlyArray<Expression>,
   lazy: boolean,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  application: Expression,
+  propagate: boolean
 ): Expression | undefined {
   const tail = lazy ? rawTail.map((x) => x.evaluate(options)) : rawTail;
 
@@ -6473,7 +6478,35 @@ function threadConditional(
   // (and re-running any effectful selected branch). For a non-`lazy` operator
   // `tail === rawTail` was already evaluated by the caller, so there is nothing
   // to reuse — fall through.
-  if (lazy) return ce._fn(op, tail).evaluate(options);
+  if (lazy) {
+    // A conditional operand that evaluated to `Missing` (a restriction whose
+    // condition is false) leaves an absent scalar in the tail. The folded
+    // application below no longer holds the conditional's value type, so its
+    // own absence gate would read a numeric type and answer `NaN`: `3·P{c}`,
+    // with `P` a point, answered `NaN` when `c` is false. The marker is read
+    // off the type of THIS application instead, as the absence gate of a
+    // strict operator reads it: `Missing` when that type, less its `missing`
+    // arm, is not numeric (`missing | tuple<integer, integer>` for `3·P{c}`),
+    // and `NaN` otherwise.
+    if (
+      propagate &&
+      hasAbsentScalarOperand(tail) &&
+      tail.every((x) => x.isValid) &&
+      !isSubtype(stripMissingFromType(application.type.type), 'number')
+    )
+      return absentScalarMarker(ce, application);
+    // The same loss of type happens beside a list: a restricted point that
+    // evaluated to `Missing` is, in the folded application, a bare absent
+    // scalar, so each cell it meets answers `NaN` (`P{c} · [10, 20, 30]` was
+    // `[NaN, NaN, NaN]` when `c` is false). The cell type of THIS
+    // application, `missing | tuple<…>`, says each cell is a point, and an
+    // absent point is `Missing`.
+    return markAbsentPointCells(
+      ce,
+      application,
+      ce._fn(op, tail).evaluate(options)
+    );
+  }
 
   return undefined;
 }
@@ -6747,7 +6780,12 @@ function type(expr: BoxedFunction): Type | BoxedType {
     };
     const maybeAbsorb = (t: Type): Type | BoxedType => {
       const result = applyContractB(
-        absorbMissing ? absorbNumericAbsence(t) : t
+        absorbMissing
+          ? absorbOperandAbsence(
+              t,
+              expr.ops.map((x) => x.type.type)
+            )
+          : t
       );
       return result === boxedHandlerResult?.type ? boxedHandlerResult : result;
     };

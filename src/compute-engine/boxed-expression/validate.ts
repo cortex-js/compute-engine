@@ -851,6 +851,49 @@ export function absentScalarMarker(
   return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
 }
 
+/**
+ * `result`, a list computed by an element-wise application, with each `NaN`
+ * cell replaced by `Missing` when the application's type says the cell is an
+ * absent POINT: its cell type is `missing | tuple<…>` (every present arm a
+ * tuple). Otherwise `result` itself.
+ *
+ * The kernel computes each cell from the cell's own operands. An absent
+ * operand cell there is the `Missing` symbol, and the cell application
+ * (`2 · Missing`) is numeric, so it answers `NaN`. But the absent cell stood
+ * for a point — `2 · [P{c}, (2, 3)]` with the restricted point `P{c}` absent
+ * — and an absent point is `Missing` (`docs/ERROR-MODEL.md`, the section on
+ * `Missing` in a numeric slot). Only the application's type still knows that
+ * (`absorbOperandAbsence`, `broadcast-lift-type.ts`), so the marker is
+ * corrected here, from that type. A `NaN` cell cannot be a present point, so
+ * the correction never replaces a value. `absentCellMarker()` in
+ * `library/collections.ts` makes the same correction for a `Map` cell.
+ */
+export function markAbsentPointCells(
+  ce: ComputeEngine,
+  expression: Expression | undefined,
+  result: Expression
+): Expression {
+  if (expression === undefined || !isFunction(result, 'List')) return result;
+  if (!result.ops.some((x) => isNumber(x) && x.isNaN)) return result;
+  const cell = collectionElementType(expression.type.type);
+  if (cell === undefined) return result;
+  const r = resolveTypeAlias(cell);
+  if (typeof r === 'string' || r.kind !== 'union') return result;
+  let absent = false;
+  let point = false;
+  for (const arm of r.types) {
+    const a = resolveTypeAlias(arm);
+    if (a === 'missing') absent = true;
+    else if (typeof a !== 'string' && a.kind === 'tuple') point = true;
+    else return result;
+  }
+  if (!absent || !point) return result;
+  return ce._fn(
+    'List',
+    result.ops.map((x) => (isNumber(x) && x.isNaN ? ce.Missing : x))
+  );
+}
+
 // ————————————————————————————————————————————————————————————————————————
 // Generic runtime conformance (R1/R8 — §4.4 of
 // `docs/plans/2026-08-22-type-handlers-on-types.md`)

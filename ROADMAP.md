@@ -451,6 +451,47 @@ reached from the rule at `symbolic/simplify-rules.ts:1104`. The assert is
 stripped in production, but the rule is handing `primeFactors` an integer
 outside the range it accepts. Make the rule skip integers above that range.
 
+### Residues of the fixes for Tycho asks 306–315 (OPEN — found 2026-09-24)
+
+Found while fixing 312 (decision needed): `Add(P{c}, 1)`, a restricted point
+plus a number, is an `incompatible-type` error at canonicalization, because
+the check reads through the `missing` part of the type
+(`isNumericTupleCarrier`). The product of two restricted points and a division
+by a restricted point are not errors at canonicalization: the interpreter
+answers Missing or NaN when the point is absent and the error only when it is
+present. The compiled targets now decline all of these shapes. Question: should
+`Multiply`/`Divide` also give the error at canonicalization, as `Add` does?
+That changes the interpreter's answer when the point is absent.
+The same decision covers a point added to a number INSIDE a list:
+`Add(P{c}, [10,20,30]{[1,2,3] > 2})` is typed
+`list<list<number> | tuple<number, number>>`, which is wrong in every case, and
+gives `[Missing, Missing, Error(incompatible-type)]` at `t = 1` and
+`[NaN, NaN, NaN]` at `t = -1`.
+
+Found while fixing 312 (not fixed, small): `Multiply(Undefined, [1,2,3])` is
+typed `vector<integer^3>` while its value is `[NaN, NaN, NaN]`;
+`Norm([[1,2],[3,Missing]])` stays unevaluated instead of giving `NaN`;
+`Trace(Missing)` is still an `incompatible-type` error while `Norm(Missing)` is
+now `NaN` (both were set by precedent, not by a user decision); the scalar
+`Multiply(Missing, 1)` and `Add(Missing, 0)` fold to `Missing` at
+canonicalization while `2·Missing` is `NaN`; and a MATRIX of restricted points
+keeps `NaN` in an absent cell although its type says `missing | tuple<…>`
+(`markAbsentPointCells`, `boxed-expression/validate.ts`, corrects a rank-1
+`List` only).
+
+Found while fixing 313 (decision needed): `a\ [1,2]` (backslash-space) and
+`a~[1,2]` read as the index `At(a, 1, 2)`, like `a [1,2]`, while `a\,[1,2]` is
+the product `a·[1,2]`. The tokenizer turns `\ `, `~` and `\space` into the
+same `<space>` token as plain whitespace, so the parser cannot tell them apart.
+Making `\ ` a product needs its own token and changes to about 30 places that
+match `<space>` (text mode, keywords, units, `skipSpace`).
+
+Found while fixing 313 (not fixed; each gives a visible error, not a wrong
+value): `x4[1,2]` (the left side is already the product `x·4`), `2^3[1,2]` and
+`\sin 4[1,2]` (read as an index, `At(…)`, then a type error), and `4[x=0]` (an
+Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
+`Tuple(4, Interval(…))`, which is probably not what an author means.
+
 ### `Map` with its arguments reversed: a symbol source stays unevaluated, a literal source is an error (OPEN, small — found 2026-09-24)
 
 `Map(P, fn)` with the arguments in the wrong order (the function first is

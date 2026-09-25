@@ -78,7 +78,16 @@ describe('Norm — Contract B declaration', () => {
     expectIncompatible(ce.box(['Norm', { str: 'a' }] as any));
     expectIncompatible(ce.box(['Norm', 'True'] as any));
     expectIncompatible(ce.box(['Norm', ['List', 1, { str: 'a' }]] as any));
-    expectIncompatible(ce.box(['Norm', 'Missing'] as any));
+  });
+
+  test('an absent operand is NaN, as it is for Abs', () => {
+    // `Missing` is not a wrong kind but a value that is not there: the
+    // operand of `Norm(P{c})` when the restriction's condition is false.
+    // The numeric codomain's absence marker is `NaN`.
+    const ce = new ComputeEngine();
+    const e = ce.box(['Norm', 'Missing'] as any);
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toBe('NaN');
   });
 
   test('an undeclared operand symbol is inferred from the flipped carrier', () => {

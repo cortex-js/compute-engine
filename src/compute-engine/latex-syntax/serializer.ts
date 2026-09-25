@@ -17,6 +17,7 @@ import {
   ResolvedSerializeLatexOptions,
   DelimiterScale,
   ADDITION_PRECEDENCE,
+  MULTIPLICATION_PRECEDENCE,
 } from './types.js';
 
 import { normalizeStyleOptions } from './style-options.js';
@@ -210,6 +211,19 @@ export class Serializer {
       return this.serialize(expr);
     }
     const name = operator(expr);
+    // A juxtaposition of two or more operands (`2x`) has no dictionary
+    // precedence, but it is a product: wrap it as a `Multiply` would be
+    // wrapped. Otherwise a tighter-binding parent takes only its last factor
+    // on re-parse (`Factorial(InvisibleOperator(2, x))` → `2x!` reads as
+    // `2·x!`).
+    if (name === 'InvisibleOperator') {
+      if (nops(expr) >= 2 && MULTIPLICATION_PRECEDENCE < prec)
+        return this.wrapString(
+          this.serialize(expr),
+          this.options.applyFunctionStyle(expr, this.level)
+        );
+      return this.serialize(expr);
+    }
     if (name && name !== 'Delimiter' && name !== 'Subscript') {
       const def = this.dictionary.ids.get(name);
       // `..` parses its END operand at minPrec 270 (below Add, 275) even
@@ -257,6 +271,13 @@ export class Serializer {
     // If the default Delimiter (i.e. using parens), don't wrap
     const h = operator(expr);
     if (h === 'Delimiter' && nops(expr) === 1) return exprStr;
+    // A juxtaposition of two or more operands is a product: in a tight
+    // context it must be wrapped like a `Multiply` (`(2x)^2`, not `2x^2`).
+    if (h === 'InvisibleOperator' && nops(expr) >= 2)
+      return this.wrapString(
+        exprStr,
+        this.options.groupStyle(expr, this.level + 1)
+      );
     // `Mod` serializes as open infix (`a\bmod b`): in a tight context
     // (power base, solidus fraction) the adjacent notation binds tighter
     // than `\bmod` and would absorb its trailing operand on re-parse

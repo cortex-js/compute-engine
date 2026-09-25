@@ -22,10 +22,19 @@ ce.declare('s', 'string');
 
 describe('membership predicates are three-valued on function expressions', () => {
   test('a claimed `real` leaves integrality undecided', () => {
+    const twice = ce.box(['Multiply', 2, 'r']);
+    expect(twice.type.toString()).toBe('real');
+    expect(twice.isInteger).toBeUndefined();
+    expect(twice.isRational).toBeUndefined();
+    expect(twice.isNumber).toBe(true);
+  });
+
+  test('a claimed `rational` leaves integrality undecided', () => {
+    // `k/2` is the product `k · 1/2` of two rationals.
     const half = ce.box(['Divide', 'k', 2]);
-    expect(half.type.toString()).toBe('real');
+    expect(half.type.toString()).toBe('rational');
     expect(half.isInteger).toBeUndefined();
-    expect(half.isRational).toBeUndefined();
+    expect(half.isRational).toBe(true);
     expect(half.isNumber).toBe(true);
   });
 

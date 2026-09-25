@@ -1292,6 +1292,73 @@ function isRuntimePointShaped(a: Expression): boolean {
 }
 
 /**
+ * Is `a` a GATED indexed collection: a value whose static type is
+ * `missing | C`, where every arm of `C` is an indexed collection that is not
+ * a string (a point, a list, or a union of those)?
+ *
+ * A restriction gives this type: `When(PointList(0, 1), c)` is typed
+ * `missing | tuple<integer, integer>`, and it lowers to the ternary
+ * `c ? [0, 1] : undefined`. At run time the value is therefore a JS array or
+ * the absent value, never a number. The plain type tests
+ * (`matches('indexed_collection<any>')`) reject the type because of the
+ * `missing` arm, and `unionAdmitsIndexedCollection` does not see it either,
+ * because a tuple arm is atomic there. Without this test, `t·P` with a
+ * restricted point `P` compiled to the scalar `_.t * [0, 1]`, which runs to
+ * `NaN` where the interpreter answers the point `(0, t)`. The absent value
+ * needs no special lowering: `_SYS.bcast` applies its closure to it as a
+ * scalar and the arithmetic answers `NaN`. The interpreter answers `Missing`
+ * (the absent point) for the product of a number and an absent point; a
+ * compiled numeric lane may answer `NaN` for an absent value instead
+ * (user decision of 2026-09-09, recorded in `ERROR-MODEL.md`).
+ *
+ * A NOMINAL value is atomic whatever its representation, as for
+ * `unionAdmitsIndexedCollection` above.
+ */
+function isGatedIndexedCollection(a: Expression): boolean {
+  return gatedCollectionArms(a) !== undefined;
+}
+
+/**
+ * Is `a` a GATED POINT: a gated indexed collection
+ * (`isGatedIndexedCollection`) whose every present arm is a tuple, such as
+ * `When((0, 1), c)`? At run time it is a point or the absent value. The
+ * broadcast lowering must then apply the point rules of the interpreter: a
+ * point does not add to a number, two points have no product, and a number
+ * cannot be divided by a point.
+ */
+function isGatedPoint(a: Expression): boolean {
+  const arms = gatedCollectionArms(a);
+  return arms !== undefined && arms.every((b) => isTupleShapedType(b));
+}
+
+/**
+ * The present arms of a gated indexed collection (see
+ * `isGatedIndexedCollection`), alias-resolved, or `undefined` when `a` is
+ * not one.
+ */
+function gatedCollectionArms(a: Expression): Type[] | undefined {
+  const raw = a.type.type;
+  if (BaseCompiler.isNominalAtomicType(raw)) return undefined;
+  const r = resolveTypeForCompilation(raw);
+  if (typeof r === 'string' || r.kind !== 'union') return undefined;
+  let absent = false;
+  const arms: Type[] = [];
+  for (const branch of r.types) {
+    if (BaseCompiler.isNominalAtomicType(branch)) return undefined;
+    const b = resolveTypeForCompilation(branch);
+    if (b === 'missing') absent = true;
+    else if (b === 'never') continue;
+    else if (
+      !isSubtype(b, 'string') &&
+      isSubtype(b, INDEXED_COLLECTION_SHAPE_TYPE)
+    )
+      arms.push(b);
+    else return undefined;
+  }
+  return absent && arms.length > 0 ? arms : undefined;
+}
+
+/**
  * For an operand `isRuntimePointShaped` admitted, can its run-time value be
  * told apart as a point or a list of points by its SHAPE alone? Every tuple
  * arm of the union must be a point of plain NUMBERS (a coordinate that is
@@ -3285,7 +3352,9 @@ export class BaseCompiler {
 
   /**
    * Whether operand `a` lowers to a positional array at run time — a
-   * concrete collection, a list- or indexed-collection-typed binding, or a
+   * concrete collection, a list- or indexed-collection-typed binding, a
+   * gated collection such as a restricted point (`isGatedIndexedCollection`:
+   * an array or the absent value at run time), or a
    * binding that may be a collection (`isBoundPossiblyCollectionTyped`). A
    * string is an indexed collection in the type lattice but lowers to a
    * scalar string, so it is excluded. The shared operand test of the
@@ -3307,6 +3376,7 @@ export class BaseCompiler {
       (a.isCollection ||
         a.type.matches('list<any>') ||
         a.type.matches('indexed_collection<any>') ||
+        isGatedIndexedCollection(a) ||
         isBoundPossiblyCollectionTyped(a, target))
     );
   }
@@ -7275,10 +7345,17 @@ export class BaseCompiler {
     // value takes, `Abs` of it is a norm (with the coordinate broadcast the
     // `Norm` lowering performs for a list coordinate), never the
     // component-wise `abs` the broadcast lowering emitted for it.
+    //
+    // A GATED point (`isGatedPoint`: a restricted point such as
+    // `When((t, 1), c)`) is a point too when it is present. Without this,
+    // the Python target emitted `np.abs(…)` over it, the component-wise
+    // `abs`.
     if (
       h === 'Abs' &&
       args.length === 1 &&
-      (isTuple(args[0]) || BaseCompiler.isUnionOfPoints(args[0]))
+      (isTuple(args[0]) ||
+        BaseCompiler.isUnionOfPoints(args[0]) ||
+        isGatedPoint(args[0]))
     ) {
       return BaseCompiler.compileExpr(engine, 'Norm', args, prec, target);
     }
@@ -7487,6 +7564,13 @@ export class BaseCompiler {
               // garbage at run time) where the interpreter answers an
               // `incompatible-type` error.
               a.type.matches('collection<any>') ||
+              // A GATED collection (a restricted point or list, typed
+              // `missing | C`) is an array at run time too, and the
+              // `missing` arm hides it from the test above. Without this, a
+              // shape `tryCompileBroadcast` declined for it — the product of
+              // two restricted points — emitted `[…] * […]`, which runs to
+              // NaN behind `success: true`.
+              isGatedIndexedCollection(a) ||
               // Read WITH the target, as `tryCompileBroadcast` reads it:
               // this guard is reached after that lowering declined, and an
               // operand it proved a constructed scalar (a call of a user
@@ -7504,12 +7588,50 @@ export class BaseCompiler {
         // concatenation or NaN. Any other broadcastable head emits its own
         // scalar codegen instead, so naming arithmetic there sent the reader
         // looking for a `+` that is not in the expression.
-        if (lowersToScalarInfix)
+        if (lowersToScalarInfix) {
+          // A call of a user function among the operands is compiled first,
+          // so a decline of the call itself is reported instead of this
+          // generic one: it names the cause (a point argument with a
+          // complex-valued coordinate, which an emitted definition cannot
+          // read) where this one only names the enclosing head. The probe
+          // leaves no trace: the definitions it emitted are removed, since
+          // the head declines below whatever the calls do. When several calls
+          // decline, the error of a call that can itself be a list is
+          // preferred, because that operand is the one this guard refused; a
+          // call that fails for an unrelated reason is reported only when no
+          // such call fails.
+          const registry = target.userFunctions;
+          const before =
+            registry !== undefined ? new Set(registry.defs.keys()) : undefined;
+          let specific: unknown = undefined;
+          let fallback: unknown = undefined;
+          for (const a of args) {
+            if (
+              !isFunction(a) ||
+              BaseCompiler.userFunctionLiteral(engine, a.operator) === undefined
+            )
+              continue;
+            try {
+              BaseCompiler.compile(a, target, 0);
+            } catch (e) {
+              if (e instanceof Error && e.name === 'CancellationError') throw e;
+              if (isBoundPossiblyCollectionTyped(a, target)) {
+                specific = e;
+                break;
+              }
+              fallback ??= e;
+            }
+          }
+          if (registry !== undefined && before !== undefined)
+            BaseCompiler.removeDefinitionsAddedSince(registry, before);
+          if (specific !== undefined) throw specific;
+          if (fallback !== undefined) throw fallback;
           throw new Error(
             BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h)
               ? `Could not compile \`${h}\`: scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Materialize the list with evaluate() and compile a scalar element function instead.`
               : `Could not compile \`${h}\`: a broadcastable head over a possibly list-valued operand — the JavaScript compile target has no list-arithmetic support. Materialize the list with evaluate() and compile a scalar element function instead.`
           );
+        }
       }
     }
 
@@ -7574,6 +7696,10 @@ export class BaseCompiler {
             // so a set never fans out (unordered — a comprehension has no
             // defined order); it declines here instead.
             a.type.matches('collection<any>') ||
+            // A GATED collection (a restricted point or list, typed
+            // `missing | C`): `t * ((t, 1) if c else None)` repeats a
+            // tuple or raises in Python, for the same reason.
+            isGatedIndexedCollection(a) ||
             isBoundPossiblyCollectionTyped(a)
         )
       ) {
@@ -7630,6 +7756,40 @@ export class BaseCompiler {
             `scalar-only (element-wise conditions compile only inside a ` +
             `\`Which\`/\`If\` selection).`
         );
+    }
+
+    // GPU shader targets: the point rules of the interpreter. A point lowers
+    // to a `vecN`, and the shader operators are component-wise over vectors
+    // and broadcast a scalar over a vector, so every shape below compiled to
+    // a plausible vector where the interpreter answers an error:
+    //  - `Multiply` of two points: `no-product-between-points`;
+    //  - `Divide` by a point: `no-division-by-point`;
+    //  - `Add` of a point and a term that is not a point: `incompatible-type`.
+    // Canonicalization already turns most of these into an `Error` for a
+    // plain point, but not for a GATED point (`isGatedPoint`: a restricted
+    // point such as `When((t, 1), c)`, whose `missing` arm hides the tuple
+    // type), and not for `t + P` with an undeclared `t`. Fail closed instead.
+    if (target.language === 'glsl' || target.language === 'wgsl') {
+      const isPoint = (a: Expression): boolean =>
+        isNumericTuple(a) || isGatedPoint(a);
+      if (args.some(isPoint)) {
+        let reason: string | undefined;
+        if (h === 'Multiply' && args.filter(isPoint).length > 1)
+          reason = 'two points have no product';
+        else if (h === 'Divide' && args.slice(1).some(isPoint))
+          reason = 'a point has no reciprocal';
+        else if (
+          (h === 'Add' || h === 'Subtract') &&
+          args.some((a) => !isPoint(a) && !couldBeNumericTuple(a))
+        )
+          reason = 'a point does not add to a number';
+        if (reason !== undefined)
+          throw new Error(
+            `Could not compile \`${h}\`: ${reason}, and the ` +
+              `${target.language} vector operators would compute a ` +
+              `component-wise value where the interpreter answers an error.`
+          );
+      }
     }
 
     // An ORDERING comparison over a complex-valued operand has no lowering:
@@ -7739,6 +7899,10 @@ export class BaseCompiler {
           // clusters) but lowers to a JS string, which the infix `<`/`===`
           // compares exactly as the interpreter does — the coercion hazard
           // this divert guards against does not arise.
+          // A GATED collection (a restricted point or list, typed
+          // `missing | C`) is an array at run time too: without it,
+          // `Less(When((t, 1), c), 3)` emitted `[…] < 3`, a plain `false`
+          // where the interpreter leaves the comparison of a point inert.
           const relationalOverCollection =
             target.language === 'javascript' &&
             (isRelationalOperator(h) ||
@@ -7747,6 +7911,7 @@ export class BaseCompiler {
               (x) =>
                 !isProvablyStringOperand(x) &&
                 (x.type.matches('collection<any>') ||
+                  isGatedIndexedCollection(x) ||
                   isBoundPossiblyCollectionTyped(x))
             );
           // An ORDERING that MIXES a string operand with one that is not
@@ -10813,6 +10978,48 @@ export class BaseCompiler {
       false;
     // The operand whose shape the `'runtime'` lift tests when emitting.
     let runtimePointOperand: Expression | undefined;
+
+    // A GATED POINT (`isGatedPoint`: a restricted point such as
+    // `When((0, 1), c)`, a point or the absent value at run time) broadcasts
+    // as a point does, but the point plans in this method test for a point
+    // by its tuple type, which the `missing` arm hides. So only the shapes
+    // the interpreter computes component-wise are admitted here: the gated
+    // point is the one array operand and every other operand is a number,
+    // with the gated point as the dividend of a `Divide`. Everything else
+    // declines, and the fail-closed guard of the caller refuses the form:
+    // two points have no product (`no-product-between-points`), a number
+    // cannot be divided by a point (`no-division-by-point`), and a point
+    // beside a list is a list of points in the interpreter, which a flat
+    // broadcast would zip instead. A SUM keeps the point plans below: they
+    // read a gated point beside another point as a point-or-list decided at
+    // run time (`isRuntimePointShaped`), which is correct for it. But every
+    // other term of the sum must then be a point or a list of points: a
+    // point does not add to a number (`incompatible-type`), and `t + P` for
+    // an undeclared `t` is not rejected at canonicalization.
+    const gatedPoints = args.filter((a) => isGatedPoint(a));
+    if (
+      gatedPoints.length > 0 &&
+      (h === 'Add' || h === 'Subtract') &&
+      !args.every(
+        (a) =>
+          couldBeNumericTuple(a) ||
+          isGatedPoint(a) ||
+          isRuntimePointShaped(a) ||
+          isPointListShaped(a)
+      )
+    )
+      return null;
+    if (gatedPoints.length > 0 && h !== 'Add' && h !== 'Subtract') {
+      if (gatedPoints.length > 1) return null;
+      if (
+        args.some(
+          (a) => a !== gatedPoints[0] && BaseCompiler.isArrayOperand(a, target)
+        )
+      )
+        return null;
+      if (h === 'Divide' && args[0] !== gatedPoints[0]) return null;
+    }
+
     if (h === 'Multiply') {
       const isArrayish = (a: Expression): boolean =>
         // A string matches `indexed_collection` but is not array-shaped — see

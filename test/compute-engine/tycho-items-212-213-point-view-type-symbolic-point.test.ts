@@ -14,7 +14,9 @@ import { expectTypeBetween } from '../utils';
  * `unknown`. The pulled VALUES were correct tuples; `PointY` over the view
  * folded to a scalar absence marker from the type alone. `Map` now derives a
  * bare-parameter mapping's element type from the sources' element types
- * (`bareMappingElementType`).
+ * (`bareMappingElementType`). Since Tycho ask 315 these views are typed
+ * `list<…>`, not `indexed_collection<…>`: a `Map` over an indexed source is a
+ * list, so the value of a broadcast matches its static `list<…>` type.
  *
  * Item 213 — the VALUE of a coordinate accessor over SYMBOLIC points. With
  * `P` declared `tuple<number, number>` and unbound, `PointY([P])` evaluated
@@ -40,7 +42,7 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     // `(k/n)·(1, 0)` has rational components: the literal's integer
     // components are scaled by a `number`, so the tuple type must say so.
     expect(a.type.toString()).toBe(
-      'indexed_collection<tuple<number, number>>'
+      'list<tuple<number, number>>'
     );
   });
 
@@ -54,7 +56,7 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     const v = ce.box(expr).evaluate();
     expect(v.operator).toBe('Map');
     expect(v.type.toString()).toBe(
-      'indexed_collection<tuple<number, number>>'
+      'list<tuple<number, number>>'
     );
   });
 
@@ -79,7 +81,7 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     const v = ce.box(['PointY', ['Subtract', A, B]]).evaluate();
     expect(v.operator).toBe('Map');
     expect(v.isCollection).toBe(true);
-    expect(v.type.toString()).toBe('indexed_collection<number>');
+    expect(v.type.toString()).toBe('list<number>');
   });
 
   test('a bare-parameter user zip derives its element type the same way', () => {
@@ -113,7 +115,7 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
       ])
       .evaluate();
     expect(v.type.toString()).toBe(
-      'indexed_collection<tuple<number, number>>'
+      'list<tuple<number, number>>'
     );
   });
 
@@ -165,7 +167,7 @@ describe('the `.N()` route keeps a point view a view of points (found under item
       const v = ce.box(expr).N();
       expect(v.operator).toBe('Map');
       expect(v.type.toString()).toBe(
-        'indexed_collection<tuple<number, number>>'
+        'list<tuple<number, number>>'
       );
     }
   });
@@ -255,7 +257,7 @@ describe('Tycho item 213: coordinate accessors over a list of SYMBOLIC points st
       .box(['Map', ['Function', ['Multiply', '_1', '_2'], '_1', '_2'], ['Range', 1, 'n'], 'u'])
       .evaluate();
     // Not `number`: the unknown-element source may be supplying tuples.
-    expect(v.type.toString()).toBe('indexed_collection<number>');
+    expect(v.type.toString()).toBe('list<number>');
   });
 
   test('the symbolic coordinate list substitutes to the numeric one', () => {

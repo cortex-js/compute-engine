@@ -286,7 +286,7 @@ describe('a union with a collection alternative is possibly-a-collection', () =>
     const ce = new ComputeEngine();
     ce.declare('s', 'integer | rational');
     const st = ce.box(['Multiply', 2, 's']).type;
-    expect(st.toString()).toBe('real');
+    expect(st.toString()).toBe('rational');
     expect(st.matches('number')).toBe(true);
     // A tuple branch is atomic under broadcast and does not count as the
     // collection alternative.

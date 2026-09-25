@@ -28,16 +28,22 @@
  * supplies them from its type, facts and structure
  * ({@link viewOfDescriptor}).
  */
-import type { Type } from '../../common/type/types.js';
-import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import type { TupleType, Type } from '../../common/type/types.js';
 import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
+import {
+  absorbNumericAbsence,
   broadcastElementType,
   broadcastShapedResultType,
   isNumericScalarType,
   resolveTypeAlias,
   staticCollectionDims,
+  stripMissingFromType,
+  typeContainsMissing,
 } from '../../common/type/utils.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, widen } from '../../common/type/subtype.js';
 import type {
   BoxedOperatorDefinition,
   BroadcastExemption,
@@ -166,6 +172,280 @@ function matchesCollectionShape(t: Type): boolean {
 }
 
 /**
+ * The present part of a GATED collection type, or `undefined` when `t` is not
+ * one. A gated collection type is `missing | C`, where every arm of `C` is an
+ * indexed collection that is not a string: a point, a list, or a union of
+ * those. A restriction or a default-less `Which` gives this type:
+ * `When(PointList(0, 1), 0 < t)` is typed `missing | tuple<integer, integer>`,
+ * and its value is the point or `Missing`.
+ *
+ * The broadcast lift reads the present part: without it, the `missing` arm
+ * hides the point or the list from every shape test, and `Sin` of a
+ * restricted point typed as the scalar `number`. A nominal value is atomic
+ * whatever its representation, so a union with a nominal arm is not a gated
+ * collection. (The compile-side twin, over an expression, is
+ * `gatedCollectionArms()` in `compilation/base-compiler.ts`.)
+ */
+export function gatedCollectionPresentType(t: Type): Type | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return undefined;
+  let absent = false;
+  const arms: Type[] = [];
+  for (const branch of r.types) {
+    if (
+      typeof branch !== 'string' &&
+      branch.kind === 'reference' &&
+      branch.alias !== true
+    )
+      return undefined;
+    const b = resolveTypeAlias(branch);
+    if (b === 'missing') absent = true;
+    else if (b === 'never') continue;
+    else if (
+      !isSubtype(b, 'string') &&
+      isSubtype(b, INDEXED_COLLECTION_SHAPE_TYPE)
+    )
+      arms.push(b);
+    else return undefined;
+  }
+  if (!absent || arms.length === 0) return undefined;
+  return arms.length === 1 ? arms[0] : widen(...arms);
+}
+
+/** `v` with a gated collection type (`gatedCollectionPresentType`) replaced
+ * by its present part. Every other fact is read from `v`. */
+function presentView(v: BroadcastOperandView): BroadcastOperandView {
+  const present = gatedCollectionPresentType(v.type);
+  if (present === undefined) return v;
+  return {
+    type: present,
+    get isSymbol() {
+      return v.isSymbol;
+    },
+    get isApplication() {
+      return v.isApplication;
+    },
+    get isCollection() {
+      return v.isCollection;
+    },
+    get finiteBroadcastParticipant() {
+      return v.finiteBroadcastParticipant;
+    },
+    get tuple() {
+      return v.tuple;
+    },
+    get textAtom() {
+      return v.textAtom;
+    },
+    get tensorShape() {
+      return v.tensorShape;
+    },
+    get matrixFact() {
+      return v.matrixFact;
+    },
+    typeIsUnknown: false,
+  };
+}
+
+/** Whether `t` has a top-level `missing` arm: the whole value can be absent. */
+function hasTopLevelMissing(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (r === 'missing') return true;
+  return (
+    typeof r !== 'string' &&
+    r.kind === 'union' &&
+    r.types.some((m) => resolveTypeAlias(m) === 'missing')
+  );
+}
+
+/** Whether `t` is a collection that is not a tuple and not a string: an
+ * operand beside which an absent scalar broadcasts cell by cell. */
+function isCellCollectionType(t: Type): boolean {
+  return (
+    isSubtype(t, COLLECTION_SHAPE_TYPE) &&
+    !isSubtype(t, 'string') &&
+    !isTupleShapedType(t)
+  );
+}
+
+/**
+ * The result type of a `propagate` application, adjusted for its operands
+ * that can be absent (their type has a `missing` arm, at any depth). `t` is
+ * the result the type handler, the signature or the broadcast lift computed
+ * for the present operands.
+ *
+ * At run time, an operand that evaluates to `Missing` beside operands that
+ * are not collections makes the whole application answer the codomain
+ * marker of its own type (`absentScalarMarker()` in `validate.ts`): `NaN`
+ * when the type, less its `missing` arm, is numeric, and `Missing`
+ * otherwise. So when a whole-value absence reaches a result that is not
+ * numeric, the type must keep a `missing` arm, or the marker is computed
+ * from a type that says the value is always present. This function adds
+ * the arm when an operand can be absent as a whole (a top-level `missing`
+ * arm), no other operand is a collection that is not a tuple, and the
+ * result, less its `missing` arm, is not a subtype of `number`. Examples:
+ *
+ * - A GATED collection operand (`gatedCollectionPresentType`: a restricted
+ *   point or list). `Sin(When((0, 1), c))` is
+ *   `missing | tuple<number, number>` and answers `Missing` when `c` is
+ *   false; `Sin(When([1, 2, 3], c))` is `missing | vector<3>`.
+ * - A point result. `2{c} · (0, 1)` is `missing | tuple<…>`, because an
+ *   absent factor beside a point makes the whole point absent
+ *   (`docs/ERROR-MODEL.md`, the section on `Missing` in a numeric slot).
+ * - A result that is a number OR a collection. With `PointX(V)` typed
+ *   `list<number> | missing | number | tuple<number, number>`,
+ *   `PointX(V)^2` is `list<number> | missing | number`: when `PointX(V)` is
+ *   `Missing` the application answers `Missing`, because its type is not
+ *   provably numeric.
+ *
+ * The exception for an operand beside a list: the absence broadcasts over
+ * the list's cells (`[1, 2, 3] + 2{c}` is `[NaN, NaN, NaN]` when `c` is
+ * false).
+ *
+ * Every other absence takes the numeric absorption (`absorbNumericAbsence`):
+ * every `missing` arm is removed and every numeric cell widens to `number`,
+ * because an absent numeric cell contributes `NaN`. That is the case for a
+ * `missing` cell inside a collection operand (`list<integer | missing>`), for
+ * an absent operand beside a list, and for a numeric result
+ * (`Sin(2{c})` is `number`).
+ *
+ * One exception to the numeric absorption: a result cell that is a POINT.
+ * When an absence can replace a whole cell of an operand (a `missing` cell
+ * in a list, or an absent operand beside a list) and the result is a
+ * collection of points, an absent cell makes its point absent, so the cell
+ * answers `Missing` and its type keeps a `missing` arm
+ * (`withAbsentPointCells`): `Sin([P{c}, (2, 3)])` and `2 · [P{c}, (2, 3)]`
+ * are `list<missing | tuple<…>>`. An absence inside a point's coordinate
+ * (`tuple<integer | missing, integer>`) does not make the point absent.
+ */
+export function absorbOperandAbsence(
+  t: Type,
+  operandTypes: ReadonlyArray<Type>
+): Type {
+  let cells = false;
+  let wholeCells = false;
+  let whole = false;
+  let notNumeric: boolean | undefined;
+  for (let i = 0; i < operandTypes.length; i++) {
+    const ot = operandTypes[i];
+    if (!typeContainsMissing(ot)) continue;
+    if (!hasTopLevelMissing(ot) || typeContainsMissing(stripTopMissing(ot))) {
+      cells = true;
+      if (missingOutsideTuples(ot)) wholeCells = true;
+      continue;
+    }
+    notNumeric ??= !isSubtype(stripMissingFromType(t), 'number');
+    const besideCollection = operandTypes.some(
+      (other, j) =>
+        j !== i &&
+        isCellCollectionType(other) &&
+        gatedCollectionPresentType(other) === undefined
+    );
+    if (!besideCollection && notNumeric) whole = true;
+    else {
+      cells = true;
+      wholeCells = true;
+    }
+  }
+  let result = cells ? absorbNumericAbsence(t) : t;
+  if (wholeCells) result = withAbsentPointCells(result);
+  if (!whole) return result;
+  if (isSubtype(stripMissingFromType(result), 'number'))
+    return absorbNumericAbsence(result);
+  return widen('missing', result);
+}
+
+/** Whether `t` has a `missing` arm that can stand for a whole value or a
+ * whole collection cell. A `missing` arm inside a tuple component is an
+ * absent coordinate, not an absent cell, and does not count. */
+function missingOutsideTuples(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (r === 'missing') return true;
+  if (typeof r === 'string') return false;
+  switch (r.kind) {
+    case 'union':
+    case 'intersection':
+      return r.types.some(missingOutsideTuples);
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return missingOutsideTuples(r.elements);
+    default:
+      return false;
+  }
+}
+
+/**
+ * `t` with a `missing` arm added to every collection cell whose type is a
+ * point: a cell whose every arm, less `missing`, is a tuple. An absent operand
+ * cell makes such a result cell absent, and an absent point is `Missing`
+ * (`docs/ERROR-MODEL.md`, the section on `Missing` in a numeric slot).
+ * `list<tuple<number, number>>` becomes
+ * `list<missing | tuple<number, number>>`. A numeric cell, a whole tuple
+ * that is not in a collection, and a cell with a non-tuple arm are kept as
+ * they are.
+ */
+function withAbsentPointCells(t: Type): Type {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string') return t;
+  switch (r.kind) {
+    case 'union': {
+      const arms = r.types.map(withAbsentPointCells);
+      if (arms.every((x, i) => x === r.types[i])) return t;
+      return widen(...arms);
+    }
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable': {
+      const cell = r.elements;
+      const e = resolveTypeAlias(cell);
+      if (
+        typeof e !== 'string' &&
+        (e.kind === 'list' ||
+          e.kind === 'collection' ||
+          e.kind === 'indexed_collection' ||
+          e.kind === 'broadcastable')
+      ) {
+        const inner = withAbsentPointCells(cell);
+        return inner === cell ? t : { ...r, elements: inner };
+      }
+      return isPointCellType(cell) ? { ...r, elements: widen('missing', cell) } : t;
+    }
+    default:
+      return t;
+  }
+}
+
+/** Whether every arm of `t`, less its `missing` arm, is a tuple. */
+function isPointCellType(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string') return false;
+  if (r.kind === 'tuple') return true;
+  if (r.kind !== 'union') return false;
+  let tuple = false;
+  for (const arm of r.types) {
+    const a = resolveTypeAlias(arm);
+    if (a === 'missing') continue;
+    if (typeof a === 'string' || a.kind !== 'tuple') return false;
+    tuple = true;
+  }
+  return tuple;
+}
+
+/** `t` without its top-level `missing` arm (cells are kept as they are). */
+function stripTopMissing(t: Type): Type {
+  const r = resolveTypeAlias(t);
+  if (r === 'missing') return 'never';
+  if (typeof r === 'string' || r.kind !== 'union') return r;
+  const arms = r.types.filter((m) => resolveTypeAlias(m) !== 'missing');
+  if (arms.length === 0) return 'never';
+  return arms.length === 1 ? arms[0] : widen(...arms);
+}
+
+/**
  * Whether an operator's declared broadcast exemptions stand this application
  * down from the element-wise lift: a `'tensors'` operator over a tensor, a
  * `'tuples'` operator over a tuple, a `'whole-collection-compare'` operator
@@ -267,7 +547,18 @@ function pointLeafArity(
   if (t.kind === 'union') {
     let result: { arity: number | undefined; rank: number } | null = null;
     for (const arm of t.types) {
-      const a = pointLeafArity(arm, rank);
+      // A `missing` arm is an absent cell (a restricted point inside a
+      // list, `[P{c}, (2, 3)]`): it has no leaf of its own, and the cell
+      // keeps the arity of the present arms. `absorbOperandAbsence` puts the
+      // `missing` arm back on the result cell.
+      const r = resolveTypeAlias(arm);
+      if (r === 'missing') continue;
+      // A tuple arm of a list CELL (`rank > 0`) is a point leaf, as a
+      // tuple element is below.
+      const a =
+        rank > 0 && typeof r !== 'string' && r.kind === 'tuple'
+          ? tupleLeafArity(r, rank)
+          : pointLeafArity(arm, rank);
       if (a === null) return null;
       if (result === null) result = a;
       else if (result.arity !== a.arity || result.rank !== a.rank) return null;
@@ -288,16 +579,23 @@ function pointLeafArity(
     elt.kind === 'union'
   )
     return pointLeafArity(elt, rank + dims);
-  if (elt.kind === 'tuple') {
-    if (elt.elements.length === 0) return null;
-    if (elt.elements.some((c) => typeCouldBeCollection(c.type))) return null;
-    return { arity: elt.elements.length, rank: rank + dims };
-  }
+  if (elt.kind === 'tuple') return tupleLeafArity(elt, rank + dims);
   // A numeric leaf that is an object type (a ranged number, `integer<2..3>`)
   // is a scalar sibling, as a primitive numeric leaf is above.
   return isSubtype(elt, 'number')
     ? { arity: undefined, rank: rank + dims }
     : null;
+}
+
+/** The point leaf of a tuple cell at nesting rank `rank`, or `null` when the
+ * tuple is empty or has a component that could be a collection. */
+function tupleLeafArity(
+  t: TupleType,
+  rank: number
+): { arity: number; rank: number } | null {
+  if (t.elements.length === 0) return null;
+  if (t.elements.some((c) => typeCouldBeCollection(c.type))) return null;
+  return { arity: t.elements.length, rank };
 }
 
 /** The common tuple arity of the point lists among the broadcasting operand
@@ -378,7 +676,11 @@ export interface BroadcastLiftInput {
  * `broadcastable<T>` slots) and is not a lambda.
  */
 export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
-  const { def, views, sigResult, hasTensors } = input;
+  const { def, sigResult, hasTensors } = input;
+  // A gated collection operand (a restricted point or list) lifts as its
+  // present part. The caller adds the `missing` arm back
+  // (`absorbOperandAbsence`).
+  const views = input.views.map(presentView);
   const mappable = (i: number) =>
     input.mappable === undefined || input.mappable(i);
 

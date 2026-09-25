@@ -23,6 +23,7 @@ import {
   ARROW_PRECEDENCE,
   ASSIGNMENT_PRECEDENCE,
   DIVISION_PRECEDENCE,
+  MULTIPLICATION_PRECEDENCE,
   POSTFIX_PRECEDENCE,
   LatexDictionary,
   LatexDictionaryEntry,
@@ -734,6 +735,21 @@ function rendersAsSolidus(
 }
 
 /**
+ * Library constants that every engine declares with a numeric type. A
+ * juxtaposition of one of these with a parenthesized group re-parses as a
+ * product in any engine, so the serializer needs no explicit multiplication
+ * between them.
+ */
+export const ALWAYS_DECLARED_CONSTANTS = new Set([
+  'Pi',
+  'ExponentialE',
+  'ImaginaryUnit',
+  'GoldenRatio',
+  'EulerGamma',
+  'CatalanConstant',
+]);
+
+/**
  * Serializer for a non-canonical `InvisibleOperator`: join the operands by
  * juxtaposition. A solidus-rendered fraction absorbs the FOLLOWING factor on
  * re-parse (`1/2(sq)` → `1/(2(sq))`, a different value), so a
@@ -752,6 +768,23 @@ function rendersAsSolidus(
  * `Multiply` serializer is the one that must survive the call reading of
  * `x(a+b)`, and it forces the separator for every symbol
  * (`serializeMultiply`).
+ *
+ * An operand that is NOT a `Delimiter` is fenced by the rule the `Multiply`
+ * serializer uses for its factors, because juxtaposition re-parses tighter
+ * than `+`, `-` and `\bmod`:
+ *  - an operand with a precedence below multiplication (`Add`, a `Negate` or
+ *    a negative number after the first operand) is wrapped, so `x+1` next to
+ *    `x+2` does not re-parse as a sum and `y` next to `-x` does not re-parse
+ *    as `y-x`. A leading `Negate` or negative number is not wrapped: `-xy`
+ *    re-parses as the negation of the product, the same value;
+ *  - a two-operand `Mod` is always wrapped, so an adjacent factor is not
+ *    absorbed into it (`R\bmod2\sin(a)` re-parses as `Mod(R, 2\sin(a))`).
+ * The parentheses of such a fence were not written by the user, so a bare
+ * symbol before them gets an explicit multiplication separator, as in the
+ * `Multiply` serializer: `x\times(R\bmod2)`, not `x(R\bmod2)`, which
+ * re-parses as a call of `x`. A library constant (`\pi`) keeps the
+ * juxtaposition. Two digits that would touch (`3` then `2^2`, or `2^2` then
+ * `3`) also get an explicit separator, or they re-parse as one number.
  */
 function serializeInvisibleOperator(
   serializer: Serializer,
@@ -763,7 +796,16 @@ function serializeInvisibleOperator(
   if (xs.length === 1) return serializer.serialize(xs[0]);
 
   const parts = xs.map((op, i) => {
-    const s = serializer.serialize(op);
+    const h = operator(op);
+    let s: string;
+    if (h === 'Mod' && nops(op) === 2)
+      s = serializer.wrap(op, DIVISION_PRECEDENCE + 1);
+    else if (h === 'Negate')
+      // `Negate` has a tight prefix precedence, but its leading `-` re-parses
+      // as a subtraction after another operand.
+      s = i === 0 ? serializer.serialize(op) : serializer.wrap(op);
+    else if (i === 0 && isNumberExpression(op)) s = serializer.serialize(op);
+    else s = serializer.wrap(op, MULTIPLICATION_PRECEDENCE);
     if (i < xs.length - 1 && rendersAsSolidus(serializer, op))
       return serializer.wrapString(
         s,
@@ -775,10 +817,14 @@ function serializeInvisibleOperator(
   let result = parts[0];
   for (let i = 1; i < parts.length; i++) {
     const prevSym = symbol(xs[i - 1]);
+    const opensWithParen = OPENING_PARENTHESIS.test(parts[i]);
     if (
-      prevSym !== null &&
-      /^[A-Z]$/.test(prevSym) &&
-      OPENING_PARENTHESIS.test(parts[i])
+      (prevSym !== null &&
+        opensWithParen &&
+        (/^[A-Z]$/.test(prevSym) ||
+          (operator(xs[i]) !== 'Delimiter' &&
+            !ALWAYS_DECLARED_CONSTANTS.has(prevSym)))) ||
+      (/\d$/.test(result) && /^\d/.test(parts[i]))
     )
       result = latexTemplate(serializer.options.multiply, result, parts[i]);
     else result = joinLatex([result, parts[i]]);
@@ -6050,6 +6096,26 @@ function isFunctionApplication(lhs: MathJsonExpression): boolean {
   return !NON_APPLICATION_HEADS.has(head);
 }
 
+/** True when the raw LHS is a number literal (`4`, `4.5`), a fraction of
+ * two number literals (`\frac12`), or the negation of one of these (`-4`:
+ * the prefix `-` binds tighter than juxtaposition, so `-4` reaches the
+ * parser as `Negate(4)`). A number cannot be indexed, so a bracket after
+ * such an LHS is not an index: `parseAt` declines it, and the parser reads a
+ * bracketed list after it as a factor of a product (`4[1,2]` →
+ * `InvisibleOperator(4, List(1, 2))`). */
+export function isNumberLiteralFactor(lhs: MathJsonExpression): boolean {
+  if (isNumberExpression(lhs)) return true;
+  const head = operator(lhs);
+  if (head === 'Negate' && nops(lhs) === 1)
+    return isNumberLiteralFactor(operand(lhs, 1) ?? 'Nothing');
+  return (
+    (head === 'Divide' || head === 'Rational') &&
+    nops(lhs) === 2 &&
+    isNumberExpression(operand(lhs, 1)) &&
+    isNumberExpression(operand(lhs, 2))
+  );
+}
+
 function parseAt(
   ...close: string[]
 ): (parser: Parser, lhs: MathJsonExpression) => MathJsonExpression | null {
@@ -6071,6 +6137,26 @@ function parseAt(
     // to a `Tuple`/inner expression by canonicalization.
     // An already-built `At` is also indexable: postfix index chains nest,
     // `X[a][b]` → `At(At(X, a), b)`, to any depth.
+    // A fraction of number literals (`\frac12`) has a function-application
+    // shape, but it is a number and cannot be indexed: decline it, so that a
+    // bracketed list after it is read as a factor (`\frac12[1,2]`).
+    if (isNumberLiteralFactor(lhs)) return null;
+    // A symbol whose type is a function (`Sin`, `Gamma`, a user symbol
+    // declared as a function) is not a collection and cannot be indexed.
+    // Decline it, so that the bracket is read as the argument of the function:
+    // `\sin[a,b]` → `Sin(List(a, b))`, the same reading as
+    // `\sin\lbrack a,b\rbrack`.
+    // `D` and `N` are library functions (derivative, numeric evaluation), but
+    // the parser reads them as variables (see `isFunctionOperator()` in
+    // `parse.ts`), so `D[1]` stays an index.
+    const lhsSymbol = symbol(lhs);
+    if (
+      lhsSymbol !== null &&
+      lhsSymbol !== 'D' &&
+      lhsSymbol !== 'N' &&
+      parser.resolveSymbol(lhsSymbol)?.type.matches('function') === true
+    )
+      return null;
     if (
       !symbol(lhs) &&
       operator(lhs) !== 'List' &&
@@ -6085,7 +6171,7 @@ function parseAt(
     if (close.length === 0) {
       rhs = parser.parseGroup() ?? parser.parseExpression({ minPrec: 0 });
       if (rhs === null) return null;
-    } else if (close.length > 1) {
+    } else if (close.length > 1 || close[0] === '\\rbrack') {
       // `\left...\right` fenced form (e.g. `A\left[1\right]`, which Desmos
       // always emits). Bound the index expression by the closing fence.
       // Without this, `parseExpression()` over-consumes: unlike a bare `]`
@@ -6093,6 +6179,8 @@ function parseAt(
       // error and the invisible-operator path keeps swallowing the closing
       // tokens, so the delimiter match then fails and the whole index group
       // is silently dropped.
+      // A bare `\rbrack` does not terminate the expression either, so the
+      // `\lbrack…\rbrack` form (`u\lbrack 1\rbrack`) is bounded the same way.
       parser.addBoundary(close);
       rhs = parser.parseExpression({ minPrec: 0 });
       if (rhs === null || !parser.matchBoundary()) {

@@ -13,6 +13,7 @@ import {
   absentScalarMarker,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
+  markAbsentPointCells,
   nonNumericOperandError,
 } from '../boxed-expression/validate.js';
 import {
@@ -1873,7 +1874,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return (
             foldQuantityOperands(engine!, r) ??
             foldMeasurementOperands(engine!, r) ??
-            r
+            markAbsentPointCells(engine!, expression, r)
           );
         }
         const result = add(...evaluated);
@@ -1904,7 +1905,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           evaluated.some((x) => !isExactNumber(x))
         )
           return result.N();
-        return result;
+        return markAbsentPointCells(engine!, expression, result);
       },
     },
 
@@ -4207,13 +4208,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             refineMul('integer'),
             engine._typeResolver
           );
-        if (ops.every((x) => isExtendedRealOperand(x)))
-          return BoxedType.forResult(refineMul('real'), engine._typeResolver);
+        // The `rational` test must come before the `real` one: every rational
+        // operand is also real, so in the other order a product of rationals
+        // was typed `real`, and a broadcast element typed by this handler
+        // (the lazy `Map` of `2k` over a list of rationals) disagreed with
+        // the `rational` cells of the eager list.
         if (ops.every((x) => factsOf(x.type).rational))
           return BoxedType.forResult(
             refineMul('rational'),
             engine._typeResolver
           );
+        if (ops.every((x) => isExtendedRealOperand(x)))
+          return BoxedType.forResult(refineMul('real'), engine._typeResolver);
 
         // Real × pure-imaginary products: at least one factor is typed
         // `imaginary` and every other factor is provably real. Since
@@ -4373,7 +4379,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return (
             foldQuantityOperands(engine!, r) ??
             foldMeasurementOperands(engine!, r) ??
-            r
+            markAbsentPointCells(engine!, expression, r)
           );
         }
         // `mulFactored`, not `mul`: `evaluate()` promises the most EXACT form,
@@ -4397,7 +4403,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           evaluated.some((x) => !isExactNumber(x))
         )
           return result.N();
-        return result;
+        return markAbsentPointCells(engine!, expression, result);
       },
     },
 

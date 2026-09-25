@@ -67,7 +67,10 @@ import {
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { TypeString } from '../types.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
-import { normalizeContinuationRanges } from './dictionary/definitions-core.js';
+import {
+  isNumberLiteralFactor,
+  normalizeContinuationRanges,
+} from './dictionary/definitions-core.js';
 import { ApplicationPolicy } from './application-policy.js';
 import { continuationRanges } from './range-provenance.js';
 
@@ -3444,11 +3447,18 @@ export class _Parser implements Parser {
     if (lhs === null || this.atEnd) return null;
 
     const start = this.index;
-    // Skip visual space (e.g. `\ `, `\,`) before peeking postfix triggers, so
-    // a `\{…\}` When-restriction can attach even when separated from its base
-    // by space. Restricted to brace triggers: for other postfix operators —
-    // notably `\left[…\right]` indexing — a preceding space means implicit
-    // multiplication by a list literal (Desmos semantics), not a postfix.
+    // Space before a postfix trigger:
+    //  - A `\{…\}` When-restriction attaches after any space, plain or visual
+    //    (`\,`, `\quad`), so visual space is skipped before a brace trigger.
+    //  - An index bracket (`[`, `\lbrack`, `\left[`, `\left\lbrack`) attaches
+    //    after PLAIN whitespace only, because LaTeX ignores that whitespace:
+    //    `a [1,2]` reads as `a[1,2]`. The tokenizer also turns `\ `, `~` and
+    //    `\space` into plain whitespace, so `a\ [1,2]` is an index too.
+    //  - A visual-space command before a bracket (`a\,[1,2]`) means
+    //    multiplication by a list literal (Desmos semantics), not an index:
+    //    no postfix is tried here, and `parseNumberTimesList()` reads the
+    //    list as a factor.
+    //  - Any other postfix trigger attaches only when no space is before it.
     // The `this.index = start` no-match restore rolls back the skipped space.
     this.skipVisualSpace();
     if (this.index !== start) {
@@ -3456,7 +3466,11 @@ export class _Parser implements Parser {
       const isBraceTrigger =
         tok === '\\{' ||
         (tok === '\\left' && this._tokens[this.index + 1] === '\\{');
-      if (!isBraceTrigger) this.index = start;
+      if (!isBraceTrigger) {
+        this.index = start;
+        this.skipSpace();
+        if (!this.atIndexBracket()) this.index = start;
+      }
     }
     const afterSpace = this.index;
     for (const [def, n] of this.peekDefinitions('postfix')) {
@@ -3518,7 +3532,7 @@ export class _Parser implements Parser {
         //
         // A NAMED postfix entry is deliberately NOT recovered here as
         // `[def.name, missing]` (which is what `0e8c11b9` removed): the only
-        // named entry that reaches this point is `At`, and `2[1,2]` /
+        // named entry that reaches this point is `At`, and `2[1,2)` /
         // `\foo[0]{1}{2}` are pinned to the `unexpected-operator` reading by
         // `delimiters.test.ts` and `serialize.test.ts` — pins added AFTER
         // `0e8c11b9`, so the plain error is the intended recovery. (`!` alone
@@ -3763,7 +3777,9 @@ export class _Parser implements Parser {
       let postfix: MathJsonExpression | null = null;
       let index = this.index;
       do {
-        postfix = this.parsePostfixOperator(result, until);
+        postfix =
+          this.parsePostfixOperator(result, until) ??
+          this.parseFunctionListArgument(result);
         if (postfix !== null && result !== null)
           this._applicationPolicy?.suffix(result, postfix);
         result = postfix ?? result;
@@ -3855,6 +3871,134 @@ export class _Parser implements Parser {
   }
 
   /**
+   * A number literal directly before a bracketed list is a product:
+   * `4[1,2]` and `4\left[1,2\right]` parse as
+   * `InvisibleOperator(4, List(1, 2))`, like `4(1,2)`.
+   *
+   * The generic juxtaposition branch of `parseExpression()` does not apply
+   * here: it only runs when no operator definition matches the next token,
+   * and `[` (also `\lbrack`, `\left[`) is the trigger of the postfix index
+   * operator. That operator declines a number on its left, because a number
+   * cannot be indexed, so without this method the bracket is left over and
+   * reported as an `unexpected-operator` error.
+   *
+   * A visual-space command (`\,`, `\;`, `\quad`, `\hspace{…}`, the set
+   * that `skipVisualSpace()` skips) before a bracketed list also makes a
+   * product, whatever the left operand is: `a\,[1,2]` parses as
+   * `InvisibleOperator(a, List(1, 2))`. Without the visual space, the
+   * bracket after a symbol is an index (`a[1,2]` → `At(a, 1, 2)`, see
+   * `parsePostfixOperator()`).
+   *
+   * The bracket must open a list. When it opens something else (for example
+   * the half-open interval `[1,2)`), the parser position is restored and
+   * `null` is returned, so that input is handled as before.
+   */
+  private parseNumberTimesList(
+    lhs: MathJsonExpression,
+    until: Readonly<Terminator>
+  ): MathJsonExpression | null {
+    const start = this.index;
+    // The caller already skipped plain whitespace, so the position moves
+    // only when a visual-space command is ahead.
+    this.skipVisualSpace();
+    const afterVisualSpace = this.index !== start;
+    if (
+      (!afterVisualSpace && !isNumberLiteralFactor(lhs)) ||
+      !this.atIndexBracket()
+    ) {
+      this.index = start;
+      return null;
+    }
+    const bracketStart = this.index;
+
+    // Read the bracketed group alone first, to check that it is a list.
+    const group = this.parseEnclosure();
+    this.index = bracketStart;
+    if (operator(group) !== 'List') {
+      this.index = start;
+      return null;
+    }
+
+    // Then read the whole right operand, so that suffixes of the list
+    // (`4[1,2]^2`, `4[1,2,3][2]`) bind to the list and not to the product.
+    const rhs = this.parseExpression({
+      ...until,
+      minPrec: INVISIBLE_OP_PRECEDENCE + 1,
+    });
+    if (rhs === null) {
+      this.index = start;
+      return null;
+    }
+    // Join the list to an existing product (`2a\,[1,2]`), as the generic
+    // juxtaposition branch of `parseExpression()` does. A function call
+    // reading (`f(x)`) is not a product and is kept as one operand.
+    if (
+      operator(lhs) === 'InvisibleOperator' &&
+      !this._applicationPolicy?.has(lhs)
+    )
+      return ['InvisibleOperator', ...operands(lhs), rhs];
+    return ['InvisibleOperator', lhs, rhs];
+  }
+
+  /**
+   * A symbol whose type is a function, directly before a bracketed list, is
+   * applied to that list: `\Gamma[a,b]` parses as `Gamma(List(a, b))`.
+   *
+   * A function cannot be indexed, so the postfix index operator (`parseAt()`)
+   * declines such a symbol, and the bracket is the argument of the function.
+   * Most function heads read their arguments in their own parser (`\sin`,
+   * `\ln`, `\operatorname{…}`, a user function `f`). This method handles the
+   * heads that `parsePrimary()` reads as a plain symbol, for example `\Gamma`
+   * (a symbol trigger, also the Greek letter). `D` and `N` are excluded, as
+   * in `isFunctionOperator()`: they are read as variables, so `D[1]` stays
+   * an index. Without this
+   * method, the bracket is left over and reported as an
+   * `unexpected-operator` error. It runs in the postfix loop of
+   * `parsePrimary()`, before superscripts, so `\Gamma[a]^2` reads as
+   * `Power(Gamma(List(a)), 2)`.
+   *
+   * Plain whitespace before the bracket is skipped, as for an index
+   * (`\Gamma [a]`). A visual-space command (`\Gamma\,[a]`) is not skipped:
+   * that input stays a product, read by `parseNumberTimesList()`.
+   *
+   * The result is a function application, not an `InvisibleOperator`:
+   * canonicalization reads `InvisibleOperator(Gamma, List(a))` as a product.
+   *
+   * The bracket must open a list. When it opens something else (for example
+   * the half-open interval `[1,2)`), the parser position is restored and
+   * `null` is returned.
+   */
+  private parseFunctionListArgument(
+    lhs: MathJsonExpression | null
+  ): MathJsonExpression | null {
+    const head = symbol(lhs);
+    if (head === null) return null;
+    const start = this.index;
+    this.skipSpace();
+    if (!this.atIndexBracket() || !this.isFunctionOperator(head)) {
+      this.index = start;
+      return null;
+    }
+    const group = this.parseEnclosure();
+    if (operator(group) !== 'List') {
+      this.index = start;
+      return null;
+    }
+    return [head, group!];
+  }
+
+  /** True when the next tokens open an index bracket: `[`, `\lbrack`,
+   * `\left[` or `\left\lbrack`. These are the triggers of the postfix `At`
+   * operator. */
+  private atIndexBracket(): boolean {
+    const tok = this.peek;
+    if (tok === '[' || tok === '\\lbrack') return true;
+    if (tok !== '\\left') return false;
+    const next = this._tokens[this.index + 1];
+    return next === '[' || next === '\\lbrack';
+  }
+
+  /**
    *  Parse an expression:
    *
    * <expression> ::=
@@ -3917,6 +4061,8 @@ export class _Parser implements Parser {
         this._operandDiagnosticCheckpoint = operandDiagCheckpoint;
         this._operandStartIndex = start;
         let result = this.parseInfixOperator(lhs, until);
+        if (result === null && until.minPrec <= INVISIBLE_OP_PRECEDENCE)
+          result = this.parseNumberTimesList(lhs, until);
         if (result === null && until.minPrec <= INVISIBLE_OP_PRECEDENCE) {
           // If any operator, no sequence to apply
           const opDefs = this.peekDefinitions('operator');

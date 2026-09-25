@@ -29,7 +29,10 @@ import {
   EXPONENTIATION_PRECEDENCE,
 } from '../types.js';
 import { latexTemplate } from '../serializer-style.js';
-import { PIPE_TOPIC_MARKER } from './definitions-core.js';
+import {
+  ALWAYS_DECLARED_CONSTANTS,
+  PIPE_TOPIC_MARKER,
+} from './definitions-core.js';
 import {
   parseQuotientRingFraction,
   serializeListDomain,
@@ -37,20 +40,6 @@ import {
 import { endsWithSuperscript, joinLatex, supsub } from '../tokenizer.js';
 import { OPENING_PARENTHESIS } from '../delimiter-tables.js';
 
-/**
- * Library constants that every engine declares with a numeric type. A
- * juxtaposition of one of these with a parenthesized group re-parses as a
- * product in any engine, so the serializer needs no explicit multiplication
- * between them.
- */
-const ALWAYS_DECLARED_CONSTANTS = new Set([
-  'Pi',
-  'ExponentialE',
-  'ImaginaryUnit',
-  'GoldenRatio',
-  'EulerGamma',
-  'CatalanConstant',
-]);
 import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
 

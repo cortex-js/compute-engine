@@ -1,5 +1,35 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- `At` no longer accepts an index that is a head with no value, such as a colon:
+  `[1,2,3][1:2]` parses to `At(List(1,2,3), Colon(1,2))`, and the colon is now
+  an `incompatible-type` error, so the expression is invalid. Before, it was
+  valid, never evaluated, and was typed as one element (`integer | nan`), so a
+  function that used it got the result type `number`. The engine does not read
+  a colon as a slice: use the range notation, `[1,2,3][1...2]` is `[1,2]`. The
+  same applies to the other library heads with no value (`Triangle`, `Segment`,
+  `Perpendicular`, …) used as an index. This happens only when `ce.strict` is
+  true.
+- A `Map` over a range, over an indexed collection, or over several indexed
+  collections is now typed `list<T>`, not `indexed_collection<T>`, with the
+  dimensions of its sources when they are all lists of the same shape.
+  `Map(f, Range(1, 3))` is `list<…>`. A gate that tested the result for
+  `indexed_collection` still matches; a test that expected the exact spelling
+  `indexed_collection<…>` sees `list<…>`.
+- A product of rational numbers is typed `rational`, not `real`: `2x` with `x`
+  declared `rational` is `rational`, and so is `k/2` for an integer `k`.
+- On the `glsl` and `wgsl` targets, a number added to a point
+  (`t + \operatorname{PointList}(t, 1)`) no longer compiles to component-wise
+  vector code; it declines, as the interpreter answers `incompatible-type`.
+- `Sin`, `Power` and a scalar factor applied to a restricted point whose
+  condition is false answer `Missing`, not `NaN` (`\sin((0,1)\{t<0\})` at
+  `t = 1`). Code that tested such a result with `isNaN` must test for
+  `Missing`.
+- `Norm` accepts an absent operand and gives `NaN`, as `Abs` does: `Norm(Missing)`,
+  `Norm(P{c})` with a false condition, and `Norm([1, Missing])` were
+  `incompatible-type` errors.
+
 ### Improvements
 
 - At machine precision, `Apply(Derivative(f, n), x).N()` evaluated at many
@@ -76,6 +106,87 @@
   result has no code, and `error` and `diagnostic` give the reason.
 
 ### Resolved Issues
+
+- The LaTeX of a juxtaposition that was not canonicalized (`InvisibleOperator`,
+  from a raw or structural parse, or `ce.box(…, {form: 'raw'})`) now parses back
+  to the same expression. Its operands get parentheses by the same rule as a
+  product: `(x+1)(x+2)`, not `x+1x+2`; `(R\bmod 2)\sin(a)`, not
+  `R\bmod 2\sin(a)`, which read back as `Mod(R, 2 sin a)`; `y\times(-x)`, not
+  `y-x`, which read back as a subtraction. A juxtaposition inside an operator
+  that binds more tightly also gets parentheses: `(2x)^2` and `(2x)!`, not
+  `2x^2` and `2x!`. When added parentheses follow a symbol, a `\times`
+  separates them, so `x\times(R\bmod 2)` is not read as a call of `x`; two
+  digits that would touch are separated the same way (`2\times3`, not `23`).
+- A number directly before a bracketed list parses as a product: `4[1,2]`,
+  `4\left[1,2\right]`, `-4[1,2]`, `\frac12[1,2]` and `t-4\left[1,2\right]`
+  failed with an `unexpected-operator` error; `4[1,2]` now evaluates to
+  `[4, 8]`. A bracket after a symbol, a list, a call or a parenthesized group is
+  still an index (`a[1,2]` is `At(a, 1, 2)`), and a bracket that opens an
+  interval, as in `4[1,2)`, is still an error.
+- A plain space before an index bracket is ignored, as LaTeX ignores it:
+  `a [1,2]`, `a \left[1,2\right]` and `[1,2,3] [2]` parse like `a[1,2]`
+  (`At(a, 1, 2)`); they were an `unexpected-operator` error. `\sin x [1,2]` now
+  parses like `\sin x[1,2]`. A visual-space command (`\,`, `\;`, `\quad`,
+  `\hspace{…}`) before a bracketed list makes a product: `a\,[1,2]` evaluates
+  to `[a, 2a]`. Before, the list indexed the spacing command, which gave an
+  invalid `Tuple`.
+- A bracketed list directly after a function name is the argument of the
+  function, not an index: `\sin[a,b]`, `\sin\left[a,b\right]`, `\Gamma[a]`
+  and `f[1,2]` (with `f` declared as a function) parse as `Sin(List(a, b))`,
+  `Gamma(List(a))` and `f(List(1, 2))`, and broadcast. Before, they parsed as
+  `At(Sin, a, b)`, an `incompatible-type` error. `D` and `N` are still read as
+  variables, so `D[1]` is still an index. `u\lbrack 1\rbrack` is now the index
+  `At(u, 1)`, like `u[1]`; it was an `unexpected-operator` error.
+- Compiled arithmetic over a restricted point, such as
+  `t\operatorname{PointList}(0,1)\left\{0<1\right\}`, gives the point's
+  components on the `javascript` target; before, the product was compiled as a
+  scalar `*` on an array and ran to `null`. The shapes the interpreter refuses
+  for a point — the product of two points, a division by a point, a point added
+  to a number, an ordering of a point — now fail to compile on the
+  `javascript`, `glsl`, `wgsl` and `python` targets, where they compiled to a
+  wrong value. On `python`, the magnitude of a restricted point is its norm, not
+  the component-wise absolute value.
+- An arithmetic or trigonometric function of a restricted point, a restricted
+  list, or a `Which` with point cases and no default keeps the shape and the
+  absent case in its type: `\sin((0,1)\{0<t\})` is typed
+  `missing | tuple<number, number>` (it was `number`), and
+  `\sin([1,2,3]\{0<t\})` is typed `missing | vector<3>` (it was
+  `number | vector<3>`). When the condition is false, `Sin`, `Power` and a
+  scalar factor now answer `Missing`, the absent point, where they answered
+  `NaN`; this is what the restriction itself answers. Compiled code still
+  answers `NaN` for an absent value.
+- A numeric function of a list restricted by a list of conditions is computed
+  cell by cell: `\sin([10,20,30]\{[1,2,3]>2\})` is `[NaN, NaN, sin(30)]`; it
+  was a 3×3 matrix. Compiled `javascript` code gives the same values.
+- An absent scalar combined with a numeric list gives `NaN` in every cell, for
+  every arithmetic operator: `Missing · [1, 2, 3]` was `[Missing, NaN, NaN]`.
+- `Map` over a list that holds a restricted point gives `Missing` for the absent
+  point, as its type says; it gave `NaN`.
+- A list whose cells are points keeps the absence of a point cell:
+  `Sin([P{c}, (2, 3)])`, `2·[P{c}, (2, 3)]` and
+  `P{c} + [(1,2),(3,4)]\{[1,2] > 1\}` are typed `list<missing | tuple<…>>`, and
+  an absent point cell answers `Missing` for `evaluate()` and `N()`. Before, the
+  type had no absent case, and the absent cell was `NaN`, or `NaN` and
+  `Missing` in the same list. A cell whose present value is a number still
+  answers `NaN`.
+- When the `javascript` target declines arithmetic over an operand that can be
+  a list, and a user-function call in that operand cannot be compiled, the
+  message names the call's reason (for example "argument 2 is a point with a
+  complex-valued coordinate") instead of the generic "scalar arithmetic over a
+  list-valued operand".
+- The type of a numeric function of a value that can be absent, a number or a
+  list keeps the `missing` part: `PointX(V)^2` is
+  `list<number> | missing | number`, because the application can give
+  `Missing`.
+- An element-wise operation over more than 100 elements gives a value whose
+  type matches the type of the expression. Such a result is a lazy `Map`, which
+  was typed `indexed_collection<T>` while the expression was typed `list<T>`:
+  with `k = [1...101]`, assigning the value of
+  `PointList(0, k) + PointList(cos k, sin k)` to a symbol declared with the
+  expression's type threw a `TypeCompatibilityError`. The result stays lazy.
+- Assigning an invalid function (a lambda whose body holds an error) to a
+  symbol declared with a signature no longer says that the initializer "is not
+  a function".
 
 - The polynomial GCD behind `simplify` no longer runs over inexact coefficients:
   `PolynomialGCD` and the cancelling of common factors give the trivial GCD `1`

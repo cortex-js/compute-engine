@@ -88,6 +88,10 @@ export function unboundSignatureHint(
   // different problem with its own, better messages.
   const actual = value.type.type;
   if (actual === 'function') return undefined;
+  // An invalid value (for example a lambda whose body holds an `Error`) has
+  // the type `error`. It may well be a function, so the "not a function" hint
+  // would be wrong; the error inside the value is the problem to report.
+  if (actual === 'error') return undefined;
   if (typeof actual !== 'string' && actual.kind === 'signature')
     return undefined;
 

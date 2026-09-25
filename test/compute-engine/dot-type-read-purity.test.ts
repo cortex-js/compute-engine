@@ -204,17 +204,17 @@ describe('the inner-product type table', () => {
   });
 
   test('a rational component', () => {
-    // `real`, where the constructed form reported `rational`:
-    // canonicalization folded `1/2 · 3` to the rational literal `3/2` and the
-    // sum inherited its tier, while `Multiply`'s ladder reaches its real arm
-    // first and never claims a rational product. Strictly wider, so every slot
-    // that accepted the old answer accepts this one (user-ruled 2026-08-22).
+    // `rational`, as the constructed form reported: `Multiply`'s type
+    // handler tests its `rational` arm before its `real` arm, so a product of
+    // rationals is `rational`. (Before Tycho ask 315 the `real` arm came first
+    // and this answer was the wider `real`, which the 2026-08-22 decision
+    // accepted as strictly wider.)
     const dot = new ComputeEngine().box([
       'Dot',
       ['List', ['Rational', 1, 2], 2],
       ['List', 3, 4],
     ]);
-    expect(dot.type.toString()).toBe('real');
+    expect(dot.type.toString()).toBe('rational');
   });
 
   test('components declared `number`', () => {

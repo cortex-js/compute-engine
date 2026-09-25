@@ -818,6 +818,16 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
  *
  * A `When` guarding a SCALAR is not a collection: `isCollection` reports
  * `false` and every other handler reports scalar, exactly as before.
+ *
+ * A MASK condition — a collection of booleans, such as `[1,2,3] > 2` — is
+ * zipped with the value cell by cell, exactly as the `evaluate` handler zips
+ * it: cell `i` is `When(L_i, c_i)`, and the length is the shorter of the two.
+ * (Before, each element was re-wrapped with the WHOLE mask, so a broadcast
+ * that walked these handlers, such as `Sin(L{m})` or `2·L{m}`, turned every
+ * element into a list and answered a matrix.) A mask with no known length (a
+ * symbol with no value), or a condition whose shape is not settled (a
+ * comparison typed `broadcastable<boolean>`), cannot be zipped here, so the
+ * `When` does not present as a collection until evaluation resolves it.
  */
 function whenCollectionHandlers(): CollectionHandlers {
   // The wrapped collection value, or `undefined` when `When` guards a scalar.
@@ -825,12 +835,17 @@ function whenCollectionHandlers(): CollectionHandlers {
   // in particular a `Tuple` (a point) is NOT list-like here, so a restricted
   // point presents as a scalar `When` wrapping the point rather than as a
   // 2-element collection.
-  // Returns the wrapped collection together with a `restrict` closure that
-  // re-applies the condition to one of its elements.
+  // Returns the wrapped collection, the number of restricted cells, and a
+  // `restrict` closure that applies the condition to the element at 1-based
+  // index `i` (the whole condition, or its cell `i` for a mask).
   const parts = (
     expr: Expression
   ):
-    | { value: Expression; restrict: (elem: Expression) => Expression }
+    | {
+        value: Expression;
+        count: number | undefined;
+        restrict: (elem: Expression, i: number) => Expression | undefined;
+      }
     | undefined => {
     if (!isFunction(expr, 'When')) return undefined;
     const v = expr.op1;
@@ -841,9 +856,30 @@ function whenCollectionHandlers(): CollectionHandlers {
     // excludes the same two kinds.
     if (!v.isCollection || isTuple(v) || isString(v)) return undefined;
     const cond = expr.op2;
+    const ce = expr.engine;
+    if (possiblyElementwiseCondition([cond.type.type])) return undefined;
+    if (!cond.type.matches('collection<any>'))
+      return {
+        value: v,
+        count: v.count,
+        restrict: (elem) => ce._fn('When', [elem, cond]),
+      };
+    // A mask: zip it with the value, to the shorter length. The mask cells
+    // are read once per call of `parts`, not once per element.
+    const vn = v.count;
+    const cn = cond.count;
+    if (vn === undefined || cn === undefined) return undefined;
+    const n = Math.min(vn, cn);
+    let mask: Expression[] | undefined;
     return {
       value: v,
-      restrict: (elem) => expr.engine._fn('When', [elem, cond]),
+      count: n,
+      restrict: (elem, i) => {
+        if (i < 1 || i > n) return undefined;
+        mask ??= Array.from(cond.each()) as Expression[];
+        const ci = mask[i - 1];
+        return ci === undefined ? undefined : ce._fn('When', [elem, ci]);
+      },
     };
   };
   const value = (expr: Expression): Expression | undefined =>
@@ -854,9 +890,14 @@ function whenCollectionHandlers(): CollectionHandlers {
 
     isLazy: (expr) => value(expr) !== undefined,
 
-    count: (expr) => value(expr)?.count,
+    count: (expr) => parts(expr)?.count,
 
-    isEmpty: (expr) => value(expr)?.isEmptyCollection,
+    isEmpty: (expr) => {
+      const p = parts(expr);
+      if (p === undefined) return undefined;
+      if (p.count !== undefined) return p.count === 0;
+      return p.value.isEmptyCollection;
+    },
 
     isFinite: (expr) => value(expr)?.isFiniteCollection,
 
@@ -872,11 +913,14 @@ function whenCollectionHandlers(): CollectionHandlers {
       const p = parts(expr);
       if (!p) return undefined;
       const iter = p.value.each();
+      let i = 0;
       return {
         next: () => {
           const result = iter.next();
-          if (result.done) return { value: undefined, done: true as const };
-          return { value: p.restrict(result.value), done: false as const };
+          const cell = result.done ? undefined : p.restrict(result.value, ++i);
+          if (cell === undefined)
+            return { value: undefined, done: true as const };
+          return { value: cell, done: false as const };
         },
       };
     },
@@ -887,12 +931,18 @@ function whenCollectionHandlers(): CollectionHandlers {
       if (typeof index !== 'number') return undefined;
       const p = parts(expr);
       const elem = p?.value.at(index);
-      return elem ? p!.restrict(elem) : undefined;
+      return elem ? p!.restrict(elem, index) : undefined;
     },
 
     indexWhere: (expr, predicate) => {
       const p = parts(expr);
-      return p?.value.indexWhere((elem) => predicate(p.restrict(elem)));
+      if (p === undefined) return undefined;
+      // The value's own walk does not pass the index, so count the cells here.
+      let i = 0;
+      return p.value.indexWhere((elem) => {
+        const cell = p.restrict(elem, ++i);
+        return cell !== undefined && predicate(cell);
+      });
     },
   };
 }

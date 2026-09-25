@@ -1831,14 +1831,15 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
     // Since the 2026-08-09 widening of the callback element-type inference to
     // scalar element types, `k` is annotated `integer` (Range's element type),
     // so the body types `complex` rather than the looser `number` — strictly
-    // more precise, and still not real.
+    // more precise, and still not real. A `Map` over a range is a `list`
+    // (Tycho ask 315).
     const m: Expression = [
       'Map',
       ['Function', ['Add', 'k', 'ImaginaryUnit'], 'k'],
       ['Range', 1, 3],
     ];
     expect(engine.box(m).type.toString()).toMatchInlineSnapshot(
-      `indexed_collection<complex>`
+      `list<complex>`
     );
   });
 

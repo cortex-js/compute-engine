@@ -44,6 +44,7 @@ import {
 import { describeType } from '../boxed-expression/operand-descriptor.js';
 import { operandLiteralValue } from './type-handlers.js';
 import {
+  isAbsentSymbol,
   isCharacter,
   isExpression,
   isFunction,
@@ -3355,6 +3356,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // while a NaN operand is an ordinary numeric argument the handler
       // answers for.
       nanBehavior: ['handle', 'reject'],
+      // An ABSENT operand — the `Missing` or `Undefined` symbol, such as the
+      // value of a restricted point `P{c}` whose condition is false — has no
+      // norm, and the answer is the absence marker of the numeric codomain,
+      // `NaN`, as it is for `Abs`. Declared explicitly because the signature
+      // is not all-numeric (a tensor, a tuple), so the derived policy would
+      // be `pass-through`, which refused `Norm(Missing)` at boxing with an
+      // `incompatible-type` error. Only the operand slot strips `missing`:
+      // an absent ORDER is still refused.
+      missingBehavior: 'propagate',
+      missingStrip: [0],
       requires: ([, p]) => {
         // Decided for an IN-CARRIER literal only. An off-carrier order (a
         // complex number, `-oo`, `~oo`) is refused by the carrier itself,
@@ -3501,11 +3512,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // collection of characters, and has no norm).
           const isCollectionComponent = (el: Expression): boolean =>
             !isString(el) && !isCharacter(el) && el.isCollection;
+          // An ABSENT component — the `Missing` or `Undefined` symbol — is
+          // not a wrong kind: it is a numeric cell with no value, and the
+          // norm is `NaN`, as `Sum`, `Max` and `Mean` answer for a list that
+          // holds one. The wrong-kind error still wins when the vector holds
+          // both.
+          let hasAbsent = false;
           for (const el of elements) {
             if (isCollectionComponent(el)) continue;
+            if (isAbsentSymbol(el)) {
+              hasAbsent = true;
+              continue;
+            }
             if (admissionOf(el, 'number') === 'refute')
               return ce.typeError('number', el.type, el);
           }
+          if (hasAbsent) return ce.NaN;
 
           // A broadcasting component that is EMPTY zips zero points, so the
           // norm is the empty list — one norm per point, of no points — the

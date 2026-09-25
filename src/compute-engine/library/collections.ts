@@ -131,7 +131,7 @@ import type {
 } from '../global-types.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils.js';
-import { isValueDef } from '../boxed-expression/utils.js';
+import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { machineListFrom } from '../boxed-expression/machine-broadcast.js';
 import {
@@ -531,6 +531,38 @@ function hasIndexableMember(expr: Expression): boolean {
       isSubtype(m, INDEXED_COLLECTION_SHAPE_TYPE) ||
       isSubtype(m, DICTIONARY_SHAPE_TYPE)
   );
+}
+
+// The index type of `AT_SIGNATURE`, reported as the expected type when an
+// `At` index is refused by `isInertOpaqueHead`.
+const AT_INDEX_TYPE = parseType(
+  'number | string | boolean | indexed_collection<any>'
+);
+
+// True when `expr` is an application of a library OPAQUE HEAD: an operator
+// with no `evaluate` handler whose declared result type is `expression`
+// (`Colon`, `Triangle`, `Segment`, `Perpendicular`, …). Such an application
+// never evaluates to anything but itself, so it is never a number, a string,
+// a boolean or a collection, and it can never be a valid `At` index.
+//
+// Validation cannot refuse it by type alone: `expression` is a supertype of
+// `number`, so the operand only OVERLAPS the index type and is admitted
+// provisionally. Without this test `[1,2,3][1:2]` (a `Colon` index) stayed
+// inert and was typed as a scalar element (`integer | nan`), and a function
+// whose body held it refined its result type to `number`.
+//
+// The definition must be the system-scope binding of the operator: a user
+// definition of the same name (a scope that shadows it, or a function that is
+// declared now and given a body later) can evaluate, so it is not refused.
+function isInertOpaqueHead(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  const def = expr.operatorDefinition;
+  if (def === undefined || def.evaluate !== undefined) return false;
+  const systemDef = expr.engine.contextStack[0]?.lexicalScope.bindings.get(
+    expr.operator
+  );
+  if (!isOperatorDef(systemDef) || systemDef.operator !== def) return false;
+  return expr.type.type === 'expression';
 }
 
 // Canonical-time "peek" through eager collection wrappers that don't change
@@ -1410,6 +1442,72 @@ function mapResultType(
   // dictionary/record and anything else: fall back to a plain collection of the
   // lambda results.
   return { kind: 'collection', elements: elementType as Type };
+}
+
+/**
+ * The result type of `Map` itself. It is `mapResultType`, except that a Map
+ * over an index span (`range`) or over an `indexed_collection` is a `list` of
+ * the lambda results, not an `indexed_collection`.
+ *
+ * The reason is the element-wise broadcast. A broadcast over a collection
+ * operand is statically typed `list<E>` (`broadcastShapedResultType`), and
+ * over a hundred elements or fewer its value is a `List`. Over more elements
+ * (or over a source of unknown or infinite length) the value is the lazy
+ * `Map` that `lazyBroadcastMap` builds instead. That `Map` is the same list,
+ * only not yet computed, so it must have a type that matches the static type
+ * of the broadcast. When it was typed `indexed_collection<E>`, the value of
+ * `k + 1` for `k := Range(1, 101)` did not match `list<integer>`, the type of
+ * the expression, and assigning it to a symbol declared with that type failed.
+ * A `Map` is an ordered transform of its source, so it has the `list` kind for
+ * the same reason a Map over a `tuple` or a `string` does.
+ *
+ * `Scan` and the point accessors share `mapResultType` and keep its answer.
+ */
+function mapOperatorResultType(
+  source: Readonly<Type>,
+  elementType: Readonly<Type>
+): Type {
+  if (
+    source === 'range' ||
+    source === 'indexed_collection' ||
+    (typeof source !== 'string' && source.kind === 'indexed_collection')
+  )
+    return { kind: 'list', elements: elementType as Type };
+  return mapResultType(source, elementType);
+}
+
+/**
+ * The result type of the variadic (zipWith) form `Map(f, xs, ys, …)`. When
+ * every source is an indexed collection, the result is a `list` of the lambda
+ * results, for the reason given in `mapOperatorResultType`: a broadcast over
+ * two or more collection operands is typed `list<E>`, and its lazy form is
+ * this `Map`. When every source is a `list` with the same dimensions, the
+ * result keeps these dimensions (the zip stops at the shortest source, and
+ * all sources have the same length). Otherwise the result is an
+ * `indexed_collection` of the lambda results.
+ */
+function zipMapResultType(
+  sources: ReadonlyArray<Readonly<Type>>,
+  elementType: Readonly<Type>
+): Type {
+  if (!sources.every((t) => isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)))
+    return { kind: 'indexed_collection', elements: elementType as Type };
+  const result: ListType = { kind: 'list', elements: elementType as Type };
+  const dims = sources.map((t) =>
+    typeof t !== 'string' && t.kind === 'list' ? t.dimensions : undefined
+  );
+  const first = dims[0];
+  if (
+    first !== undefined &&
+    dims.every(
+      (d) =>
+        d !== undefined &&
+        d.length === first.length &&
+        d.every((n, i) => n === first[i])
+    )
+  )
+    result.dimensions = [...first];
+  return result;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -5870,8 +5968,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The mapped collection keeps the source's shape/indexed-ness, but its
     // elements are the lambda's RESULT type — not the source element type.
     // (If the input collection is indexed, the output collection is indexed.)
-    // For the multi-collection (zipWith) form the result is always an indexed
-    // collection (like `Zip`) of the lambda's result type.
+    // For the multi-collection (zipWith) form the result is a list of the
+    // lambda's result type when every source is indexed, and an indexed
+    // collection of it otherwise (`zipMapResultType`).
     type: (ops, { engine, derive }) => {
       // Source type for shape propagation. When the source's STATIC type is
       // indeterminate (a declared-`unknown` symbol holding a collection
@@ -5907,14 +6006,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // An index span must NOT be echoed: `range` promises a contiguous
           // ascending run of positive integers, and nothing constrains an
           // unknown-typed lambda's output to that shape, so `Map(f, 1..5)`
-          // would claim a type its value need not have. Widen to the honest
-          // supertype — the same reasoning as `mapResultType`'s `range` case,
+          // would claim a type its value need not have. An `indexed_collection`
+          // source must not be echoed either, because its element type is the
+          // SOURCE's, not the lambda's. Both give a bare `list`, the same
+          // answer `mapOperatorResultType` gives on the known-element path,
           // which this fallback path bypasses.
-          if (s === 'range')
-            return BoxedType.forResult(
-              'indexed_collection',
-              engine._typeResolver
-            );
+          if (
+            s === 'range' ||
+            (typeof s !== 'string' && s.kind === 'indexed_collection')
+          )
+            return BoxedType.forResult('list', engine._typeResolver);
           // A string source must not be echoed either, and for a stronger
           // reason: `Map` is permanently list-out over a string (a mapped
           // string is a `list`, even when the callback returns characters — so
@@ -5922,8 +6023,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // The element type is the unknown one this branch is handling.
           if (s === 'string')
             return BoxedType.forResult('list', engine._typeResolver);
-          if (s === 'indexed_collection' && ops[1].type !== s)
-            return BoxedType.forResult(s, engine._typeResolver);
+          if (s === 'indexed_collection')
+            return BoxedType.forResult('list', engine._typeResolver);
           // A TUPLE source must not be echoed either. `Map` over a tuple yields
           // an ordered LIST (ruled 2026-09-14, the same rule `mapResultType`
           // applies on the known-element path), so echoing the tuple type here
@@ -5950,7 +6051,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return BoxedType.forResult(ops[1].type, engine._typeResolver);
         }
         return BoxedType.forResult(
-          mapResultType(sourceType(0), resultType),
+          mapOperatorResultType(sourceType(0), resultType),
           engine._typeResolver
         );
       }
@@ -5958,8 +6059,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         bareMappingElementTypeD(ops[0], ops.slice(1), engine, derive) ??
         functionResult(ops[0].type);
       return BoxedType.forResult(
-        mapResultType(
-          'indexed_collection',
+        zipMapResultType(
+          ops.slice(1).map((_, i) => sourceType(i)),
           !resultType || resultType === 'unknown' || resultType === 'any'
             ? 'unknown'
             : resultType
@@ -6149,7 +6250,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // would answer type questions differently for the same element, and
         // an at()-only workload would keep paying the per-cell literal-type
         // cost the drain no longer pays.
-        return computeBroadcastCell(expr.engine, () => mapAtCell(expr, index));
+        const v = computeBroadcastCell(expr.engine, () =>
+          mapAtCell(expr, index)
+        );
+        if (v === undefined) return undefined;
+        return absentCellMarker(expr)?.(v) ?? v;
       },
     },
   },
@@ -8440,10 +8545,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         () => true
       );
 
-      // `null` → every operand matched; nothing to relax.
-      if (!adjusted) return ce._fn('At', ops);
+      // An index that is an opaque head (`[1,2,3][1:2]` has the index
+      // `Colon(1, 2)`) is never a valid index; see `isInertOpaqueHead`.
+      // Validation only admits it provisionally, so refuse it here. Like the
+      // other operand type checks, this is skipped when the engine is not
+      // strict.
+      const refusesIndex =
+        ce.strict && ops.some((op, i) => i > 0 && isInertOpaqueHead(op));
 
-      const patched = [...adjusted];
+      // `null` → every operand matched; nothing to relax.
+      if (!adjusted && !refusesIndex) return ce._fn('At', ops);
+
+      const patched = [...(adjusted ?? ops)];
+      if (refusesIndex) {
+        for (let i = 1; i < ops.length; i++) {
+          if (patched[i].isValid && isInertOpaqueHead(ops[i]))
+            patched[i] = ce.typeError(AT_INDEX_TYPE, ops[i].type, ops[i]);
+        }
+      }
       const value = ops[0];
       // Restore the value operand when it failed only because its type is
       // retractable — the base may still resolve to a collection at runtime:
@@ -13365,9 +13484,70 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
 function mapIterator(expr: Expression): Iterator<Expression> {
   const inner = mapIteratorImpl(expr);
   const ce = expr.engine;
+  const marker = absentCellMarker(expr);
+  if (marker === undefined)
+    return {
+      next: () => computeBroadcastCell(ce, () => inner.next()),
+    };
   return {
-    next: () => computeBroadcastCell(ce, () => inner.next()),
+    next: () => {
+      const r = computeBroadcastCell(ce, () => inner.next());
+      return r.done ? r : { value: marker(r.value), done: false };
+    },
   };
+}
+
+/**
+ * The absence marker of a `Map` cell, chosen by the CELL's type, or
+ * `undefined` when there is nothing to correct.
+ *
+ * The mapping function runs with its parameter typed from the literal
+ * (usually `unknown`), not from the element: the contextual stamp never
+ * writes a union element type such as `missing | tuple<number, number>`. So
+ * the body `Sin(x)` applied to an absent element — `Missing`, the value of a
+ * restricted point `P{c}` whose condition is false — types `number` and
+ * answers `NaN`, while the `Map` itself is typed from the element and says
+ * the cell is `missing | tuple<number, number>`. `NaN` is neither.
+ * `docs/ERROR-MODEL.md` chooses the absence marker from the codomain: `NaN`
+ * in a numeric one, `Missing` otherwise. When the cell type has a `missing`
+ * arm and its present part is provably not a number, a `NaN` cell is that
+ * absence, and this answers `Missing` for it — the value
+ * `Map(x ↦ sin x, [P{c}])` then agrees with `[sin(P{c})]`.
+ */
+function absentCellMarker(
+  expr: Expression
+): ((v: Expression) => Expression) | undefined {
+  // The `at` handler calls this on every indexed read, so the answer is
+  // cached per expression. The cache entry records the type object it was
+  // computed from: a type that changes later (for example after inference
+  // settles) is a different object, and the answer is computed again.
+  const type = expr.type;
+  const cached = ABSENT_CELL_MARKERS.get(expr);
+  if (cached !== undefined && cached.type === type) return cached.marker;
+  const marker = computeAbsentCellMarker(expr, type);
+  ABSENT_CELL_MARKERS.set(expr, { type, marker });
+  return marker;
+}
+
+const ABSENT_CELL_MARKERS = new WeakMap<
+  Expression,
+  {
+    type: Expression['type'];
+    marker: ((v: Expression) => Expression) | undefined;
+  }
+>();
+
+function computeAbsentCellMarker(
+  expr: Expression,
+  type: Expression['type']
+): ((v: Expression) => Expression) | undefined {
+  const cell = collectionElementType(type.type);
+  if (cell === undefined || !typeContainsMissing(cell)) return undefined;
+  const present = stripMissingFromType(cell);
+  if (present === 'never' || !provablyDisjoint(present, 'number'))
+    return undefined;
+  const missing = expr.engine.Missing;
+  return (v) => (isNumber(v) && v.isNaN ? missing : v);
 }
 
 function mapIteratorImpl(expr: Expression): Iterator<Expression> {

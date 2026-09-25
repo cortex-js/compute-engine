@@ -1160,9 +1160,24 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
   if (typeof t === 'string') return isSubtype(t, 'number') ? 'number' : t;
   switch (t.kind) {
     case 'union': {
-      const arms = t.types
+      // A `missing` arm beside present arms that are all tuples is an
+      // absent POINT, not an absent number. A point is atomic, so its
+      // absence is not absorbed into a `NaN` coordinate: the cell answers
+      // `Missing` (`docs/ERROR-MODEL.md`, the section on `Missing` in a
+      // numeric slot), and the arm stays. `list<missing | tuple<…>>` stays
+      // as it is; `list<missing | integer>` becomes `list<number>`.
+      const present = t.types.filter((x) => resolveTypeAlias(x) !== 'missing');
+      const keepMissing =
+        present.length > 0 &&
+        present.length < t.types.length &&
+        present.every((x) => {
+          const r = resolveTypeAlias(x);
+          return typeof r !== 'string' && r.kind === 'tuple';
+        });
+      const arms = (keepMissing ? present : t.types)
         .map((x) => absorbNumericAbsence(x))
         .filter((x) => x !== 'never');
+      if (keepMissing) arms.push('missing');
       if (arms.length === 0) return 'never';
       if (arms.length === 1) return arms[0];
       return widen(...arms);
