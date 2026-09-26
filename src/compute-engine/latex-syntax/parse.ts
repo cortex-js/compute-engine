@@ -456,6 +456,22 @@ const BAR_DELIMITER_COMMANDS = new Set<string>([
 ]);
 
 /**
+ * True for the value of a bracketed group that is a collection: a list
+ * (`[1,2]`), a comprehension (`[u+1 \operatorname{for} u = L]`) or a range
+ * (`[1...5]`). `parseBrackets()` returns a comprehension or a range as is, not
+ * wrapped in a `List`. A bracket that opens something else, such as the
+ * half-open interval `[1,2)`, is not a collection.
+ */
+function isBracketCollection(
+  expr: MathJsonExpression | null | undefined
+): boolean {
+  const h = operator(expr);
+  return (
+    h === 'List' || h === 'Comprehension' || h === 'Range' || h === 'Linspace'
+  );
+}
+
+/**
  * True when every token of a close boundary is a vertical bar (either the
  * bare `|` or one of the commands above).
  *
@@ -2669,9 +2685,29 @@ export class _Parser implements Parser {
 
     // If fn is a function symbol, it may be followed by an argument list
 
-    const args = this.parseArguments(argMode, until);
+    const parenthesizedBracket =
+      argMode === 'enclosure' && this.atParenthesizedIndexBracket();
+    let args = this.parseArguments(argMode, until);
 
     if (args === null) return fn;
+
+    // A single bracketed-list argument inside the call parentheses,
+    // `A([1])` or `A\left(\left[1\right]\right)`, keeps the parentheses as a
+    // `Delimiter` around the list. Without it, the non-canonical forms of
+    // `A([1])` and of `A[1]` (a bracketed list after a function name is its
+    // argument) are the same `["A", ["List", 1]]`, and a host that reads
+    // `A([1])` differently from `A[1]` (Desmos reads the first as a product
+    // and the second as an index) cannot tell them apart. The canonical form
+    // removes the `Delimiter`, so both spellings are still `A(List(1))`. The
+    // serializer writes a list as `\bigl\lbrack…\bigr\rbrack`, which is not an
+    // index bracket, so `A(\bigl\lbrack1\bigr\rbrack)` gets no `Delimiter`:
+    // the serialized form of `A[1]` reads back as `A[1]` did.
+    if (
+      parenthesizedBracket &&
+      args.length === 1 &&
+      isBracketCollection(args[0])
+    )
+      args = [['Delimiter', args[0]]];
 
     // Predicates are wrapped in ["Predicate", name, ...args] to distinguish
     // them from function applications. This is done only inside quantifier
@@ -3889,7 +3925,8 @@ export class _Parser implements Parser {
    * bracket after a symbol is an index (`a[1,2]` → `At(a, 1, 2)`, see
    * `parsePostfixOperator()`).
    *
-   * The bracket must open a list. When it opens something else (for example
+   * The bracket must open a collection (a list, a comprehension or a range,
+   * see `isBracketCollection()`). When it opens something else (for example
    * the half-open interval `[1,2)`), the parser position is restored and
    * `null` is returned, so that input is handled as before.
    */
@@ -3911,10 +3948,10 @@ export class _Parser implements Parser {
     }
     const bracketStart = this.index;
 
-    // Read the bracketed group alone first, to check that it is a list.
+    // Read the bracketed group alone first, to check that it is a collection.
     const group = this.parseEnclosure();
     this.index = bracketStart;
-    if (operator(group) !== 'List') {
+    if (!isBracketCollection(group)) {
       this.index = start;
       return null;
     }
@@ -3964,7 +4001,8 @@ export class _Parser implements Parser {
    * The result is a function application, not an `InvisibleOperator`:
    * canonicalization reads `InvisibleOperator(Gamma, List(a))` as a product.
    *
-   * The bracket must open a list. When it opens something else (for example
+   * The bracket must open a collection (a list, a comprehension or a range,
+   * see `isBracketCollection()`). When it opens something else (for example
    * the half-open interval `[1,2)`), the parser position is restored and
    * `null` is returned.
    */
@@ -3980,11 +4018,29 @@ export class _Parser implements Parser {
       return null;
     }
     const group = this.parseEnclosure();
-    if (operator(group) !== 'List') {
+    if (!isBracketCollection(group)) {
       this.index = start;
       return null;
     }
     return [head, group!];
+  }
+
+  /** True when the next tokens are an opening parenthesis (`(`, `\lparen`,
+   * optionally sized: `\left(`, `\bigl(`, …) directly followed by an index
+   * bracket (see `atIndexBracket()`), as in `A([1])` or
+   * `A\left(\left[1\right]\right)`. The parser position does not move. */
+  private atParenthesizedIndexBracket(): boolean {
+    const start = this.index;
+    this.skipSpace();
+    if (OPEN_DELIMITER_PREFIX[this.peek]) this.index++;
+    let result = false;
+    if (DELIMITER_SHORTHAND['('].includes(this.peek)) {
+      this.index++;
+      this.skipSpace();
+      result = this.atIndexBracket();
+    }
+    this.index = start;
+    return result;
   }
 
   /** True when the next tokens open an index bracket: `[`, `\lbrack`,

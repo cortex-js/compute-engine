@@ -111,6 +111,92 @@ describe('NUMBER BEFORE A BRACKETED LIST', () => {
   });
 });
 
+describe('NUMBER BEFORE A COMPREHENSION OR RANGE BRACKET', () => {
+  // Tycho item 319: a bracket that opens a comprehension or a range is a
+  // collection, as a bracketed list is, so a number before it makes a product.
+  const comprehension = [
+    'Comprehension',
+    ['Add', 'u', 1],
+    ['Element', 'u', ['List', 1, 2, 3]],
+  ];
+  test.each([
+    [
+      '0.01\\left[u+1 \\operatorname{for} u = [1,2,3]\\right]',
+      ['Multiply', 0.01, comprehension],
+    ],
+    [
+      '0.01[u+1 \\operatorname{for} u = [1,2,3]]',
+      ['Multiply', 0.01, comprehension],
+    ],
+    [
+      '-4\\left[u+1 \\operatorname{for} u = [1,2,3]\\right]',
+      ['Multiply', -4, comprehension],
+    ],
+    ['4[1...3]', ['Multiply', 4, ['Range', 1, 3]]],
+    ['4\\left[1...3\\right]', ['Multiply', 4, ['Range', 1, 3]]],
+  ])('%s', (input, expected) => {
+    const expr = parse(input);
+    expect(expr.isValid).toBe(true);
+    expect(expr.json).toEqual(expected);
+  });
+
+  test('The raw form is a juxtaposition', () => {
+    expect(
+      ce.parse('4[u+1 \\operatorname{for} u = [1,2,3]]', { form: 'raw' }).json
+    ).toEqual(['InvisibleOperator', 4, comprehension]);
+  });
+
+  test('The product evaluates element-wise', () => {
+    expect(
+      parse('2[u+1 \\operatorname{for} u = [1,2]]').evaluate().toString()
+    ).toBe('[4,6]');
+    expect(parse('2[1...3]').evaluate().toString()).toBe('[2,4,6]');
+  });
+
+  test('A symbol before a comprehension bracket is still indexed', () => {
+    // As `x[1,2,3]` is `At(x, 1, 2, 3)`, the bracket after a symbol is an
+    // index whose argument is the comprehension.
+    expect(
+      ce.parse('x\\left[u+1 \\operatorname{for} u = [1,2,3]\\right]', {
+        form: 'raw',
+      }).json
+    ).toEqual(['At', 'x', comprehension]);
+  });
+
+  test('A visual space before a comprehension bracket makes a product', () => {
+    expect(
+      ce.parse('p\\,[u+1 \\operatorname{for} u = [1,2,3]]', { form: 'raw' })
+        .json
+    ).toEqual(['InvisibleOperator', 'p', comprehension]);
+  });
+
+  test('A product with a comprehension factor serializes to text that parses back', () => {
+    const ce2 = new (ce.constructor as any)();
+    for (const json of [
+      ['Multiply', 0.01, comprehension],
+      ['Multiply', 0.01, ['Comprehension', ['Tan', 'u'], comprehension[2]]],
+      ['Multiply', 'x', comprehension],
+      ['Multiply', 2, 'x', comprehension],
+    ]) {
+      const boxed = ce2.box(json, { form: 'structural' });
+      const latex = boxed.toLatex();
+      expect(ce2.parse(latex).json).toEqual(ce2.box(json).json);
+    }
+    // A number before the bracket is juxtaposed; a symbol needs a separator,
+    // or the bracket would read as an index of the symbol.
+    expect(
+      ce2
+        .box(['Multiply', 0.01, comprehension], { form: 'structural' })
+        .toLatex()
+    ).toMatch(/^0\.01\\left\[/);
+    expect(
+      ce2
+        .box(['Multiply', 'x', comprehension], { form: 'structural' })
+        .toLatex()
+    ).toMatch(/^x\\times\\left\[/);
+  });
+});
+
 describe('SPACE BEFORE A BRACKET', () => {
   // LaTeX ignores plain whitespace, so a bracket after plain whitespace is
   // an index, as without the whitespace. The tokenizer reads `\ ` and `~` as
@@ -253,6 +339,76 @@ describe('BRACKET AFTER A FUNCTION NAME', () => {
       1,
       2,
     ]);
+  });
+
+  test('A comprehension or a range bracket is an argument too', () => {
+    expect(
+      ce.parse('\\Gamma[u \\operatorname{for} u = [1,2]]', { form: 'raw' }).json
+    ).toEqual([
+      'Gamma',
+      ['Comprehension', 'u', ['Element', 'u', ['List', 1, 2]]],
+    ]);
+    expect(ce.parse('\\Gamma[1...3]', { form: 'raw' }).json).toEqual([
+      'Gamma',
+      ['Range', 1, 3],
+    ]);
+  });
+
+  describe('A parenthesized list argument keeps its parentheses', () => {
+    // Tycho item 320: `A([1])` and `A[1]` have the same canonical form, but
+    // the raw and structural forms of `A([1])` keep the parentheses as a
+    // `Delimiter` around the list, so a host can tell the two spellings apart.
+    const engine = () => {
+      const ce2 = new (ce.constructor as any)();
+      ce2.declare('A', 'function');
+      return ce2;
+    };
+    test.each([
+      ['A\\left[1\\right]', ['A', ['List', 1]]],
+      ['A[1,2]', ['A', ['List', 1, 2]]],
+      ['A\\left(\\left[1\\right]\\right)', ['A', ['Delimiter', ['List', 1]]]],
+      ['A([1])', ['A', ['Delimiter', ['List', 1]]]],
+      ['A(\\left[1,2\\right])', ['A', ['Delimiter', ['List', 1, 2]]]],
+      ['A(\\lbrack 1\\rbrack)', ['A', ['Delimiter', ['List', 1]]]],
+      ['A([1...3])', ['A', ['Delimiter', ['Range', 1, 3]]]],
+      // The serializer's list spelling is not an index bracket
+      ['A(\\bigl\\lbrack1\\bigr\\rbrack)', ['A', ['List', 1]]],
+      // Unchanged: a scalar argument, and several arguments
+      ['A\\left(1\\right)', ['A', 1]],
+      ['A\\left(\\left(1\\right)\\right)', ['A', ['Delimiter', 1]]],
+      ['A([1],2)', ['A', ['List', 1], 2]],
+      ['A([1]+1)', ['A', ['Add', ['List', 1], 1]]],
+    ])('%s', (input, expected) => {
+      const ce2 = engine();
+      for (const form of ['raw', 'structural'] as const)
+        expect(ce2.parse(input, { form }).json).toEqual(expected);
+    });
+
+    test('The canonical form of both spellings is the application', () => {
+      const ce2 = engine();
+      for (const input of [
+        'A[1]',
+        'A([1])',
+        'A\\left(\\left[1\\right]\\right)',
+      ])
+        expect(ce2.parse(input).json).toEqual(['A', ['List', 1]]);
+    });
+
+    test('Both spellings round-trip through LaTeX', () => {
+      const ce2 = engine();
+      for (const input of [
+        'A[1]',
+        'A\\left[1\\right]',
+        'A([1])',
+        'A\\left(\\left[1\\right]\\right)',
+        'A(\\left[1,2\\right])',
+      ]) {
+        for (const form of ['raw', 'structural', 'canonical'] as const) {
+          const expr = ce2.parse(input, { form });
+          expect(ce2.parse(expr.toLatex(), { form }).json).toEqual(expr.json);
+        }
+      }
+    });
   });
 
   test('D and N are read as variables and are indexed', () => {

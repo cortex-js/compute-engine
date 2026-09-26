@@ -152,6 +152,20 @@ export function foldMeasurementOperands(
   expr: Expression
 ): Expression | undefined {
   const operator = expr.operator;
+  // A broadcast over a list returns a `List` of cells, and a cell can be an
+  // unfolded product such as `0.69 · Measurement(0.06, 1e-19)`: the tensor
+  // kernel multiplies each cell with `mulN`, which has no Measurement rule.
+  // Such a cell's `.re` is `NaN`. Fold every cell (nested lists included).
+  if (operator === 'List' && isFunction(expr)) {
+    let changed = false;
+    const cells = expr.ops.map((cell) => {
+      const folded = foldMeasurementOperands(ce, cell);
+      if (folded === undefined) return cell;
+      changed = true;
+      return folded;
+    });
+    return changed ? ce.function('List', cells) : undefined;
+  }
   if (operator !== 'Add' && operator !== 'Multiply') return undefined;
   if (!isFunction(expr)) return undefined;
   const ops = expr.ops;

@@ -3945,7 +3945,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Could not compile \`Take\`: a non-finite count (\`${args[1].toString()}\`) cannot bound ` +
             `an infinite collection.`
         );
-      return `_SYS.takeIter(${emitLazyStream(args[0]!, compile)}, ${compile(args[1])})`;
+      return `_SYS.takeIter(${emitLazyStream(args[0]!, compile)}, ${compileRealOperand(args[1], compile)})`;
     }
     const coll = elementsArg('Take', args[0], compile);
     return joinIfString(
@@ -4741,7 +4741,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`Repeat\`: a non-integer count (${nConst}) is a type error in the ` +
           `interpreter.`
       );
-    return `((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(${compile(args[0])}, ${compile(args[1]!)})`;
+    return `((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(${compile(args[0])}, ${compileRealOperand(args[1]!, compile)})`;
   },
   // Add one or more elements at the end. `Append` is variadic
   // (`docs/COLLECTIONS-MODEL.md`, Change 2):
@@ -4801,7 +4801,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `Slice`: missing index');
     return joinIfString(
       args[0],
-      `((_l, _s, _e) => { _s = Math.round(_s); if (!Number.isFinite(_s)) _s = 1; _e = Math.round(_e); if (!Number.isFinite(_e)) _e = _l.length; if (_s < 1) _s = _l.length + 1 + _s; if (_s < 1) _s = 1; if (_s > _l.length) return []; if (_e < 1) _e = _l.length + 1 + _e; if (_e < 1) _e = 1; if (_e > _l.length) _e = _l.length; return _l.slice(_s - 1, _e); })(${coll}, ${compile(args[1])}, ${compile(args[2])})`
+      `((_l, _s, _e) => { _s = Math.round(_s); if (!Number.isFinite(_s)) _s = 1; _e = Math.round(_e); if (!Number.isFinite(_e)) _e = _l.length; if (_s < 1) _s = _l.length + 1 + _s; if (_s < 1) _s = 1; if (_s > _l.length) return []; if (_e < 1) _e = _l.length + 1 + _e; if (_e < 1) _e = 1; if (_e > _l.length) _e = _l.length; return _l.slice(_s - 1, _e); })(${coll}, ${compileRealOperand(args[1], compile)}, ${compileRealOperand(args[2], compile)})`
     );
   },
   IsEmpty: (args, compile) =>
@@ -5974,12 +5974,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Could not compile \`Range\`: the bound \`${a.toString()}\` is a \`${typeToString(t)}\`, not a number, so the range never materializes.`
         );
     }
+    // A bound or step on the complex lane is read through its real part
+    // (`compileRealOperand`), as the interpreter reads it: `Range(1, 5, 2+i)`
+    // is `[1, 3, 5]`.
+    const operand = (a: Expression): string => compileRealOperand(a, compile);
     if (args.length === 1)
-      return `Array.from({length: ${compile(args[0])}}, (_e, i) => i + 1)`;
+      return `Array.from({length: ${operand(args[0])}}, (_e, i) => i + 1)`;
 
-    let start = compile(args[0]);
-    let stop = compile(args[1]);
-    const step = args[2] ? compile(args[2]) : '1';
+    let start = operand(args[0]);
+    let stop = operand(args[1]);
+    const step = args[2] ? operand(args[2]) : '1';
     if (start === null) throw new Error('Could not compile `Range`: no start');
     if (stop === null) {
       stop = start;
@@ -6040,9 +6044,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // away from the stop, and an end point on the step grid in exact
     // arithmetic is counted even when the float quotient falls one rounding
     // error short of it (`Range(0, 0.3, 0.1)` has 4 elements).
+    //
+    // The element expression splices `start` and `step` into `start + i *
+    // step`, so an operand whose source is not a single token is wrapped in
+    // parentheses: a step `d - 498` compiles to `_.d + -498`, and spliced bare
+    // it read `0 + i * _.d + -498` — every element shifted by −498 (Tycho item
+    // 324). The count takes the operands as function arguments and needs no
+    // parentheses.
     if (args.slice(0, 3).some((a) => a?.isPure === false))
       return `((_a, _b, _s) => Array.from({length: _SYS.rangeCount(_a, _b, _s)}, (_e, _i) => _a + _i * _s))(${start}, ${stop}, ${step})`;
-    return `Array.from({length: _SYS.rangeCount(${start}, ${stop}, ${step})}, (_e, i) => ${start} + i * ${step})`;
+    return `Array.from({length: _SYS.rangeCount(${start}, ${stop}, ${step})}, (_e, i) => ${spliceOperand(start)} + i * ${spliceOperand(step)})`;
   },
   Root: ([arg, exp], compile, target) => {
     if (arg === null) throw new Error('Could not compile `Root`: no argument');
@@ -6180,10 +6191,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return joinIfString(
         args[0],
         `_SYS.randomChoice(_SYS.domainList("RandomChoice", ` +
-          `_SYS.chars(${compile(args[0])})), ${compile(args[1])})`
+          `_SYS.chars(${compile(args[0])})), ${compileRealOperand(args[1], compile)})`
       );
     const domain = randomDomain('RandomChoice', args[0], compile, true);
-    return `_SYS.randomChoice(${domain}, ${compile(args[1])})`;
+    return `_SYS.randomChoice(${domain}, ${compileRealOperand(args[1], compile)})`;
   },
   // `k` elements WITHOUT replacement, by the same sparse Fisher-Yates as the
   // interpreter (`library/statistics.ts`): `k` draws, one per step, in the
@@ -6206,10 +6217,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return joinIfString(
         args[0],
         `_SYS.randomSample(_SYS.domainList("RandomSample", ` +
-          `_SYS.chars(${compile(args[0])})), ${compile(args[1])})`
+          `_SYS.chars(${compile(args[0])})), ${compileRealOperand(args[1], compile)})`
       );
     const domain = randomDomain('RandomSample', args[0], compile, false);
-    return `_SYS.randomSample(${domain}, ${compile(args[1])})`;
+    return `_SYS.randomSample(${domain}, ${compileRealOperand(args[1], compile)})`;
   },
   Round: (args, compile, target) => {
     // The interpreter rounds half away from zero (Round(-2.5) = -3); JS
@@ -8525,16 +8536,34 @@ const colorHelpers = {
 type BcastValue = number | { re: number; im: number } | BcastValue[];
 
 /**
- * Element-wise broadcast of a scalar function `f` over its arguments (the
- * runtime side of the compile target's list broadcasting — see
- * `tryCompileBroadcast` and `bcast`/`bcastFn` below). Any array argument makes
- * the result an array; a length MISMATCH among the array arguments projects to
- * NaN (the real-target rendering of the interpreter's
- * `incompatible-dimensions` — no truncation to the shortest), a scalar
- * argument is reused for every element, and nested arrays recurse. When no
- * argument is an array, `f` is applied directly. `f` therefore only ever sees
- * scalar (or complex) operands.
+ * `code` ready to splice as an operand of a binary arithmetic operator: a
+ * single token (a number literal, possibly negative, or a name such as `_.d`)
+ * as it is, anything else in parentheses, so that the operator precedence of
+ * the surrounding expression cannot split it.
  */
+function spliceOperand(code: string): string {
+  return /^-?[\w.$]+$/.test(code) ? code : `(${code})`;
+}
+
+/**
+ * Compile an operand the lowering uses as a REAL number — a bound, a step, a
+ * count or a position. When the compiler emits the operand on the complex
+ * lane (a `{ re, im }` object, as for `\sqrt{K}` with `K` not provably
+ * non-negative), the code reads its real part through `_SYS.realPart`: the
+ * interpreter reads a complex bound, count or position the same way, with
+ * the imaginary part ignored (`Take([10,20,30,40], 2+i)` is `[10, 20]`).
+ * Without it the object reached `Math.round`, `rangeCount` or the element
+ * arithmetic, which read it as NaN, and `Take(L, \sqrt{K})` at `K = 4` was
+ * `[]`. A real operand compiles as it is.
+ */
+function compileRealOperand(
+  a: Expression,
+  compile: (expr: Expression) => string
+): string {
+  const code = compile(a);
+  return BaseCompiler.isComplexValued(a) ? `_SYS.realPart(${code})` : code;
+}
+
 /**
  * The numeric value an `At` index entry contributes, mirroring the
  * interpreter's use of the boxed index's `.re`: a plain number passes through,
@@ -8628,6 +8657,17 @@ function oneDatumOk<T>(
   };
 }
 
+/**
+ * Element-wise broadcast of a scalar function `f` over its arguments (the
+ * runtime side of the compile target's list broadcasting — see
+ * `tryCompileBroadcast` and `bcast`/`bcastFn` below). Any array argument makes
+ * the result an array; a length MISMATCH among the array arguments projects to
+ * NaN (the real-target rendering of the interpreter's
+ * `incompatible-dimensions` — no truncation to the shortest), a scalar
+ * argument is reused for every element, and nested arrays recurse. When no
+ * argument is an array, `f` is applied directly. `f` therefore only ever sees
+ * scalar (or complex) operands.
+ */
 function bcast(
   f: (...xs: BcastValue[]) => BcastValue,
   ...args: unknown[]
@@ -10263,6 +10303,10 @@ const SYS_HELPERS = {
   // dust (`toRI`).
   cisreal: (x: unknown): boolean =>
     typeof x === 'number' || (x as { im: number }).im === 0,
+  // The real part of a value that may be a plain number or a `{re, im}`
+  // object, the imaginary part ignored — the interpreter's reading of a
+  // complex bound, count or index. Anything else is NaN.
+  realPart: (x: unknown): number => indexValue(x),
   // Shape-agnostic SCALAR add / multiply: two numbers combine as numbers; a
   // `{re, im}` in either position combines as complex (the other operand
   // lifted). The fold combiner of a collection `Sum`/`Product` whose elements
@@ -11147,10 +11191,16 @@ const SYS_HELPERS = {
   // own source language has no from-the-end indexing: there a computed
   // negative index means "undefined", and `_SYS.at` would hand back a real
   // element from the far end instead. `_SYS.at` stays the lowering the
-  // compiler itself emits, and the two differ in four ways: this one takes no
-  // negative index, reads no boolean mask, marks each out-of-band position of
-  // a LIST index rather than refusing the whole read, and ignores the `.re` of
-  // a complex index instead of indexing through it.
+  // compiler itself emits, and the two differ in three ways: this one takes no
+  // negative index, reads no boolean mask, and marks each out-of-band position
+  // of a LIST index rather than refusing the whole read.
+  //
+  // A COMPLEX index — the `{ re, im }` object the compiler emits for an
+  // operand that is not provably real, such as `\sqrt{K}` — is read through
+  // its `.re`, as `_SYS.at` and the interpreter read it (`indexValue`), so
+  // `[10,20,30][\sqrt{K}]` at `K = 4` reads 20 through either helper. Before,
+  // the integer test ran on the object itself and every such read was out of
+  // band.
   //
   // The absence marker is decided at RUN time, from the first cell: `NaN` for
   // a numeric collection (and for an empty one, where every read is out of
@@ -11169,10 +11219,12 @@ const SYS_HELPERS = {
     if (!Array.isArray(arr)) return NaN;
     const hole =
       arr.length === 0 || typeof arr[0] === 'number' ? NaN : undefined;
-    const pick = (k: unknown): unknown =>
-      Number.isInteger(k) && (k as number) >= 1 && (k as number) <= arr.length
-        ? arr[(k as number) - 1]
+    const pick = (k: unknown): unknown => {
+      const kv = indexValue(k);
+      return Number.isInteger(kv) && kv >= 1 && kv <= arr.length
+        ? arr[kv - 1]
         : hole;
+    };
     return Array.isArray(i) ? i.map((k) => pick(k)) : pick(i);
   },
   // Definite integral via deterministic adaptive Gauss–Kronrod (GK15) — near
@@ -13870,7 +13922,7 @@ function sliceCount(
 ): string {
   const n = tryGetConstant(count);
   if (n !== undefined && Number.isInteger(n)) return compile(count);
-  return `Math.round(${compile(count)})`;
+  return `Math.round(${compileRealOperand(count, compile)})`;
 }
 
 /**
@@ -14003,7 +14055,7 @@ function emitLazyStream(
   if (op === 'Filter')
     return `_SYS.filterIter(${emitLazyStream(source, compile)}, ${fnArg('Filter', expr.ops[1], source, compile)})`;
   if (op === 'Drop')
-    return `_SYS.dropIter(${emitLazyStream(source, compile)}, ${compile(expr.ops[1])})`;
+    return `_SYS.dropIter(${emitLazyStream(source, compile)}, ${compileRealOperand(expr.ops[1], compile)})`;
   if (op === 'Rest')
     return `_SYS.dropIter(${emitLazyStream(source, compile)}, 1)`;
   throw new Error(

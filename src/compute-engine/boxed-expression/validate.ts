@@ -3526,13 +3526,46 @@ function matrixInferencePlan(
     return matrixInferencePlan(expr.op1, eligible);
 
   if (expr.operator === 'Add' || expr.operator === 'Subtract') {
+    // A sum is a matrix when at least one term is a matrix: `Add`
+    // broadcasts a scalar term over the cells of a matrix term, and the
+    // `Add` type handler types `matrix + scalar` as `matrix`. So a constant
+    // numeric term (no free variables, such as the `0.5` of `P + 0.5`) is a
+    // scalar that the sum accepts, the same way a literal factor is accepted
+    // by the `Multiply` branch below. Before this, such a term made the whole
+    // plan fail, so `Histogram(P + 0.5, …)` kept the `number` type that
+    // bottom-up inference gave `P`, while `Histogram(2P, …)` was repaired.
+    // A term with a free variable and no plan still makes the plan fail:
+    // `sin(P)` because its symbol cannot be both a matrix and a scalar
+    // operand, and a symbol that an earlier boxing already inferred `number`
+    // (`Det(A + B)` after `A + 1`) because that earlier numeric use of `A`
+    // is kept as the stronger evidence.
     const result = new Set<string>();
     for (const term of expr.ops) {
       const plan = matrixInferencePlan(term, eligible);
-      if (!plan) return null;
+      if (!plan) {
+        if (
+          term.freeVariables.length === 0 &&
+          isScalarTermOutsidePlan(term, eligible)
+        )
+          continue;
+        return null;
+      }
       for (const name of plan) result.add(name);
     }
-    return result;
+    return result.size > 0 ? result : null;
+  }
+
+  // A quotient with a scalar denominator is a matrix when its numerator is:
+  // `Divide` broadcasts over the cells of the numerator. The canonical form
+  // of `(P - 0.5)/√(…)` keeps the `Divide`, so without this branch the plan
+  // of such a quotient failed. A denominator that contains an eligible
+  // symbol is not accepted: a matrix denominator is not a cell-wise
+  // quotient. A denominator with other free variables (`√(v² + 1)` with a
+  // declared real `v`) is accepted, as the `Multiply` branch accepts a
+  // scalar factor that is not eligible.
+  if (expr.operator === 'Divide' && expr.nops === 2) {
+    if (!isScalarTermOutsidePlan(expr.op2, eligible)) return null;
+    return matrixInferencePlan(expr.op1, eligible);
   }
 
   if (expr.operator === 'Multiply') {
@@ -3549,6 +3582,21 @@ function matrixInferencePlan(
     return matrixInferencePlan(expr.op1, eligible);
 
   return null;
+}
+
+/**
+ * True when `term` is a number-typed operand that contains none of the
+ * `eligible` symbols. The matrix inference plan accepts such a term as a
+ * scalar beside a matrix term of a sum, or as the denominator of a
+ * quotient, because the result of either operation is then still a matrix.
+ */
+function isScalarTermOutsidePlan(
+  term: Expression,
+  eligible: ReadonlySet<string>
+): boolean {
+  if (!term.type.matches('number')) return false;
+  for (const name of term.freeVariables) if (eligible.has(name)) return false;
+  return true;
 }
 
 /** Recursively examine the symbols and operators and for any

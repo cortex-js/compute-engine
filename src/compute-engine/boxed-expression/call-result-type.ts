@@ -7,13 +7,17 @@ import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
-import { resolveTypeAlias } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  resolveTypeAlias,
+} from '../../common/type/utils.js';
 import { describe, describeType } from './operand-descriptor.js';
 import {
   functionLiteralParameterName,
   isRestParameter,
   isDestructuringParameter,
 } from './function-literal.js';
+import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import { isFunction, isSymbol } from './type-guards.js';
 
 const cache = new WeakMap<
@@ -48,6 +52,40 @@ function mayBroadcast(type: Type): boolean {
   return factsOf(t).collection !== false;
 }
 
+/**
+ * Does a call of `head` hand each argument to the body WHOLE, a collection
+ * argument included? It does when the signature that decides the binding has
+ * a parameter that is not a scalar (a collection, a point): the interpreter
+ * then maps over no argument (`applyFunctionLiteral`). The deciding signature
+ * is the declared one when there is one, the literal's own type otherwise
+ * (a bare `function` declaration, whose literal infers `l: collection` from
+ * a use such as `Length(l)`). A generic signature is not read here: its
+ * instantiation types the call.
+ */
+function bindsArgumentsWhole(
+  engine: IComputeEngine,
+  head: string,
+  literal: Expression
+): boolean {
+  const binding = engine.lookupDefinition(head);
+  if (!binding) return false;
+  let sig: Type | undefined;
+  if ('operator' in binding) sig = binding.operator.signature?.type;
+  else {
+    const declared = binding.value.type?.type;
+    sig =
+      typeof declared === 'object' && declared.kind === 'signature'
+        ? declared
+        : literal.type.type;
+  }
+  return (
+    typeof sig === 'object' &&
+    sig.kind === 'signature' &&
+    sig.typeParams === undefined &&
+    !signatureParamsAreScalar(sig)
+  );
+}
+
 /** Derive a call's result from its body without changing the callable contract.
  * Parameters and straight-line locals carry descriptors, never runtime values.
  * Unsupported control flow and recursive calls keep the declared result. */
@@ -68,7 +106,12 @@ export function callResultType(
   )
     return undefined;
   const literal = userFunctionLiteral(engine, head);
-  if (!literal || args.some((x) => mayBroadcast(x.type))) return undefined;
+  if (
+    !literal ||
+    (args.some((x) => mayBroadcast(x.type)) &&
+      !bindsArgumentsWhole(engine, head, literal))
+  )
+    return undefined;
   const params = literal.ops.slice(1);
   if (
     params.length !== args.length ||
@@ -180,6 +223,43 @@ export function callResultType(
           memo.clear();
         }
       }
+      // A comprehension over `Element(i, source)` clauses: each index is
+      // typed as an element of its source (a later clause sees the earlier
+      // indexes), and the body is typed under those indexes. The
+      // `Comprehension` type handler reads the body's type and nothing else.
+      if (expr.operator === 'Comprehension' && expr.nops >= 2) {
+        const saved = env;
+        env = new Map(env);
+        memo.clear();
+        try {
+          for (const clause of expr.ops.slice(1)) {
+            if (
+              !isFunction(clause, 'Element') ||
+              clause.nops !== 2 ||
+              !isSymbol(clause.op1)
+            )
+              return undefined;
+            const source = walk(clause.op2);
+            const element =
+              source === undefined
+                ? undefined
+                : collectionElementType(source.type);
+            if (element === undefined) return undefined;
+            env.set(clause.op1.symbol, describeType(element));
+            memo.clear();
+          }
+          const body = walk(expr.op1);
+          if (!body) return undefined;
+          const t = derive(expr.operator, [
+            body,
+            ...expr.ops.slice(1).map((x) => describe(x)),
+          ]);
+          return t === undefined ? undefined : describeType(t);
+        } finally {
+          env = saved;
+          memo.clear();
+        }
+      }
       if (expr.operator === 'Typed') return walk(expr.op1);
       if (
         expr.operatorDefinition?.scoped ||
@@ -199,12 +279,14 @@ export function callResultType(
       if (children.some((x) => x === undefined)) return undefined;
       const operands = children as OperandDescriptor[];
       // The descriptor fallback does not model a lambda's elementwise lift.
-      // Do not let its whole-argument result refine the enclosing call.
-      if (
-        operands.some((x) => mayBroadcast(x.type)) &&
-        userFunctionLiteral(engine, expr.operator)
-      )
-        return undefined;
+      // Do not let its whole-argument result refine the enclosing call. A
+      // function that binds its arguments whole has no such lift, and its
+      // call is typed from its own body (`callResultType`, through `derive`).
+      if (operands.some((x) => mayBroadcast(x.type))) {
+        const callee = userFunctionLiteral(engine, expr.operator);
+        if (callee && !bindsArgumentsWhole(engine, expr.operator, callee))
+          return undefined;
+      }
       const t = derive(expr.operator, operands);
       const result = t === undefined ? undefined : describeType(t);
       memo.set(expr, result);

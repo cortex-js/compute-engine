@@ -1,5 +1,6 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { factsOf } from '../../common/type/facts.js';
+import { reduceType } from '../../common/type/reduce.js';
 import {
   describeType,
   typeFact,
@@ -758,6 +759,20 @@ function scaleTupleComponents(
         : e
     ),
   };
+}
+
+/**
+ * The type `t` without its `nan` arm, when `t` is a union of `nan` with
+ * numeric types (`nan | real`); `undefined` for any other type.
+ */
+function withoutNanArm(t0: Type): Type | undefined {
+  const t = resolveTypeAlias(t0);
+  if (typeof t !== 'object' || t.kind !== 'union' || !t.types.includes('nan'))
+    return undefined;
+  const rest = t.types.filter((x) => x !== 'nan');
+  if (rest.length === 0 || !rest.every((x) => isSubtype(x, 'number')))
+    return undefined;
+  return rest.length === 1 ? rest[0] : { kind: 'union', types: rest };
 }
 
 /**
@@ -3898,11 +3913,36 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       lazy: true,
       signature: '(number*) -> number',
-      type: (ops, { engine }) => {
+      type: (ops, { engine, derive }) => {
         if (ops.length === 0)
           return BoxedType.forResult('integer', engine._typeResolver); // = 1
         if (ops.length === 1)
           return BoxedType.forResult(ops[0].type, engine._typeResolver);
+        // A factor that is NaN or a number (`nan | real`, the type of an
+        // element read `l[i]` whose index may fall outside the list): the
+        // product is NaN when that factor is NaN, and otherwise the product
+        // of the numbers. So it is typed from the factors without their
+        // `nan` arm, and the `nan` arm is added back, as `Add` keeps it
+        // (`addTypeOnTypes` joins `nan | real` terms to `nan | real`).
+        // Without this, every tier test below failed on the `nan` arm and
+        // `(1/4)·l[i]` over a `list<real>` typed `number`, which admits a
+        // complex value.
+        const present = ops.map((x) => withoutNanArm(x.type));
+        if (present.some((t) => t !== undefined)) {
+          const t = derive(
+            'Multiply',
+            ops.map((x, i) =>
+              present[i] === undefined ? x : describeType(present[i]!)
+            )
+          );
+          // Built as a union, not through `widen`, which joins `real` and
+          // `nan` to their common supertype `number`.
+          if (t !== undefined && isSubtype(t, 'number'))
+            return BoxedType.forResult(
+              reduceType({ kind: 'union', types: [t, 'nan'] }),
+              engine._typeResolver
+            );
+        }
         // A dimensionless list/indexed-collection factor together with a
         // numeric-tuple (point) factor broadcasts the collection while scaling
         // the point component-wise: the value path (`mul()`) checks the

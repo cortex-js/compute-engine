@@ -8,8 +8,10 @@
  *   self-contained lambda per index site (211 sites, about 42 KB of the
  *   emitted JavaScript). `_SYS.atNoWrap` is that lambda as one runtime
  *   helper, so the site becomes a call. The first block below pins the two
- *   spellings to the SAME value on every index shape: the lambda is kept
- *   verbatim as the reference implementation.
+ *   spellings to the SAME value on every index shape but one: the lambda is
+ *   kept verbatim as the reference implementation. The exception is a
+ *   complex `{ re, im }` index, which the helper reads through its real part
+ *   as `_SYS.at` does (Tycho item 322) and the lambda does not.
  * - a counted range emits a five-statement prologue that computes its step,
  *   its element count and an array-length test at run time, even when the
  *   bounds are known.
@@ -88,7 +90,7 @@ describe('J6a: _SYS.atNoWrap reproduces the per-site index lambda', () => {
   test('a non-integer index reads nothing', () => {
     expect(same([10, 20, 30], 1.5)).toBeNaN();
     expect(same([10, 20, 30], NaN)).toBeNaN();
-    expect(same([10, 20, 30], { re: 1, im: 2 })).toBeNaN();
+    expect(same([10, 20, 30], { re: 1.5, im: 0 })).toBeNaN();
   });
 
   test('a base that is not an array reads nothing', () => {
@@ -130,6 +132,179 @@ describe('J6a: _SYS.atNoWrap reproduces the per-site index lambda', () => {
         1
       )
     ).toEqual([1, 2]);
+  });
+});
+
+//
+// Tycho item 322 — `_SYS.atNoWrap` reads a complex index through its real
+// part, as `_SYS.at` does
+//
+
+describe('Tycho 322: _SYS.atNoWrap coerces a complex-lane index', () => {
+  const ce = new ComputeEngine();
+  const helper = new ComputeEngineFunction(
+    ce as any,
+    '_SYS.atNoWrap(_.b, _.i)'
+  );
+  const at = new ComputeEngineFunction(ce as any, '_SYS.at(_.b, _.i)');
+  const read = (fn: any, b: unknown, i: unknown): unknown => fn({ b, i });
+
+  test('a `{ re, im }` index reads its real part, as `_SYS.at` does', () => {
+    for (const i of [
+      { re: 2, im: 0 },
+      { re: 1, im: 2 },
+      { re: 3, im: -1 },
+    ]) {
+      expect(read(helper, [10, 20, 30], i)).toEqual(read(at, [10, 20, 30], i));
+    }
+    expect(read(helper, [10, 20, 30], { re: 2, im: 0 })).toBe(20);
+  });
+
+  test('the no-wrap rules still apply to the real part', () => {
+    expect(read(helper, [10, 20, 30], { re: -1, im: 0 })).toBeNaN();
+    expect(read(helper, [10, 20, 30], { re: 0, im: 0 })).toBeNaN();
+    expect(read(helper, [10, 20, 30], { re: 4, im: 0 })).toBeNaN();
+    expect(read(helper, [10, 20, 30], { re: 1.5, im: 0 })).toBeNaN();
+    expect(read(helper, [10, 20, 30], { re: 'x', im: 0 })).toBeNaN();
+  });
+
+  test('a list index coerces each entry', () => {
+    expect(
+      read(helper, [10, 20, 30], [{ re: 2, im: 0 }, 1, { re: 7, im: 0 }])
+    ).toEqual([20, 10, NaN]);
+  });
+
+  test('a host `At` lowering to `_SYS.atNoWrap` reads `[10,20,30][√K]`', () => {
+    // The `\sqrt{K}` index compiles on the complex lane (`K` is not provably
+    // non-negative), so the helper receives a `{ re, im }` object.
+    const engine = new ComputeEngine();
+    const atDef: any = (engine as any).lookupDefinition('At')?.operator;
+    atDef.compile = (args: any[], c: (e: any) => string, context: any) =>
+      context.language === 'javascript'
+        ? `_SYS.atNoWrap(${c(args[0])},${c(args[1])})`
+        : undefined;
+    const expr = engine.parse(
+      '\\left[10,20,30\\right]\\left[\\sqrt{K}\\right]'
+    );
+    const src = code(expr);
+    expect(src).toContain('_SYS.atNoWrap(');
+    expect(kernel(expr)({ K: 4 })).toBe(20);
+    expect(kernel(expr)({ K: 9 })).toBe(30);
+    expect(kernel(expr)({ K: 16 })).toBeNaN();
+  });
+});
+
+//
+// Tycho item 324 — `Range` operands spliced into the element expression
+//
+
+describe('Tycho 324: a compiled Range with a compound step', () => {
+  /** The compiled elements at `d = 500` against the interpreted ones. */
+  function compare(json: any): { compiled: number[]; interpreted: number[] } {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'real');
+    const expr = ce.box(json);
+    const compiled = kernel(expr)({ d: 500 }) as number[];
+    const interpreted = [
+      ...(expr.subs({ d: 500 } as any).evaluate() as any).each(),
+    ].map((x: any) => x.re);
+    return { compiled, interpreted };
+  }
+
+  test.each([
+    ['literal end, literal step', ['Range', 1, 4, 0.5]],
+    [
+      'symbolic end, literal step',
+      ['Range', 1, ['Subtract', 4, ['Divide', 3, 'd']], 0.5],
+    ],
+    ['literal end, symbolic step', ['Range', 1, 4, ['Divide', 3, 'd']]],
+    [
+      'symbolic end, symbolic step',
+      ['Range', 1, ['Subtract', 4, ['Divide', 3, 'd']], ['Divide', 3, 'd']],
+    ],
+    ['symbolic end, no step', ['Range', 1, ['Divide', 'd', 100]]],
+    ['symbolic start', ['Range', ['Divide', 'd', 100], 10]],
+    ['Rational step', ['Range', 1, 4, ['Rational', 1, 2]]],
+    ['Divide-literal step', ['Range', 1, 4, ['Divide', 3, 500]]],
+    ['Negate step', ['Range', 4, 1, ['Negate', 0.5]]],
+    ['Multiply step', ['Range', 1, 2000, ['Multiply', 2, 'd']]],
+    ['Pi step', ['Range', 0, 10, 'Pi']],
+    ['Sqrt step', ['Range', 0, 10, ['Sqrt', 2]]],
+    ['step d/1000', ['Range', 0, 1, ['Divide', 'd', 1000]]],
+    ['step a bare symbol', ['Range', 0, 2000, 'd']],
+    // The element expression is `start + i * step`: a step that compiles to a
+    // sum (`_.d + -498`) must be parenthesized there, or every element after
+    // the first is shifted by the step's constant term.
+    ['Subtract step', ['Range', 0, 10, ['Subtract', 'd', 498]]],
+    [
+      'Subtract start and step',
+      ['Range', ['Subtract', 'd', 500], 10, ['Subtract', 'd', 498]],
+    ],
+    ['conditional step', ['Range', 0, 10, ['If', ['Greater', 'd', 0], 2, 3]]],
+  ])('%s: the compiled list is the interpreted one', (_label, json) => {
+    const { compiled, interpreted } = compare(json);
+    expect(compiled).toHaveLength(interpreted.length);
+    expect(compiled).toEqual(interpreted);
+  });
+
+  test('a compound step is parenthesized in the element expression', () => {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'real');
+    const src = code(ce.box(['Range', 0, 10, ['Subtract', 'd', 498]] as any));
+    expect(src).toContain('i * (_.d + -498)');
+  });
+
+  test('a Range inside a seeded shuffle keeps the interpreted count', () => {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'real');
+    const expr = ce.box([
+      'WithRandomSeed',
+      7,
+      ['RandomShuffle', ['Range', 1, 4, ['Divide', 3, 'd']]],
+    ] as any);
+    expect(kernel(expr)({ d: 500 })).toHaveLength(501);
+  });
+});
+
+//
+// A bound, step, count or position compiled on the complex lane is read
+// through its real part, as the interpreter reads it (found with Tycho item
+// 322: `\sqrt{K}` compiles to a `{ re, im }` object)
+//
+
+describe('a complex-lane count or bound reads its real part', () => {
+  const ce = new ComputeEngine();
+  ce.declare('L', 'list<real>');
+  const L = [10, 20, 30, 40];
+
+  test.each([
+    ['\\operatorname{Take}(L, \\sqrt{K})', [10, 20]],
+    ['\\operatorname{Drop}(L, \\sqrt{K})', [30, 40]],
+    ['\\operatorname{Slice}(L, 1, \\sqrt{K})', [10, 20]],
+    ['\\operatorname{Repeat}(1, \\sqrt{K})', [1, 1]],
+    ['\\operatorname{Range}(1, \\sqrt{K})', [1, 2]],
+    ['\\operatorname{Range}(1, 5, \\sqrt{K})', [1, 3, 5]],
+    [
+      '\\operatorname{Take}(\\operatorname{Range}(1, \\infty), \\sqrt{K})',
+      [1, 2],
+    ],
+    ['[i \\text{ for } i = [1...\\sqrt{K}]]', [1, 2]],
+  ])('%s', (latex, expected) => {
+    const expr = ce.parse(latex);
+    expect(code(expr)).toContain('_SYS.realPart(');
+    expect(kernel(expr)({ K: 4, L })).toEqual(expected);
+    // The interpreter agrees.
+    const interpreted = expr
+      .subs({ K: 4, L: ce.box(['List', ...L] as any) } as any)
+      .evaluate();
+    expect([...(interpreted as any).each()].map((x: any) => x.re)).toEqual(
+      expected
+    );
+  });
+
+  test('RandomChoice draws a complex-lane count of elements', () => {
+    const expr = ce.parse('\\operatorname{RandomChoice}(L, \\sqrt{K})');
+    expect(kernel(expr)({ K: 4, L })).toHaveLength(2);
   });
 });
 

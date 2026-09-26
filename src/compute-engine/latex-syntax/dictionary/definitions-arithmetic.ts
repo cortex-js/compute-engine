@@ -43,6 +43,10 @@ import { OPENING_PARENTHESIS } from '../delimiter-tables.js';
 import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
 
+/** A serialized term that opens with an index bracket, the triggers of the
+ * postfix `At` operator: `[`, `\lbrack`, `\left[` or `\left\lbrack`. */
+const INDEX_BRACKET = /^(\\left\s*)?(\[|\\lbrack(?![a-zA-Z]))/;
+
 /**
  * True when the expression is EXACTLY the number literal 2, the order the norm
  * notation writes without a subscript.
@@ -995,6 +999,17 @@ function serializeMultiply(
         !ALWAYS_DECLARED_CONSTANTS.has(prevSymbol) &&
         OPENING_PARENTHESIS.test(term)
       ) {
+        result = latexTemplate(serializer.options.multiply, result, term);
+      }
+      // A factor that serializes as an index bracket (`\left[…\right]`, the
+      // spelling of a `Comprehension`) re-parses as an INDEX of the factor
+      // before it when juxtaposed: `x\left[u+1 \operatorname{for} u=L\right]`
+      // reads as `At(x, Comprehension(…))`. Only a number before the bracket
+      // makes a product (a number cannot be indexed), so after any other
+      // factor use an explicit multiplication separator. A list serializes
+      // as `\bigl\lbrack…\bigr\rbrack`, which is not an index bracket, and
+      // does not need this.
+      else if (!prevWasNumber && INDEX_BRACKET.test(term)) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
       // Not first term, use invisible multiply

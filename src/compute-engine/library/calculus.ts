@@ -2154,7 +2154,35 @@ volumes
       // `docs/SCOPING-MODEL.md`). The integrand's
       // own variable stays owned by its `Function` literal.
       scoped: indexingSetSites(1),
-      signature: '(function, limits+) -> number',
+      signature: '(function, limits+) -> number | list<number>',
+      // An integral where a lower or upper bound is a LIST
+      // (`∫_{-∞}^{G} f(Z) dZ` with `G = [-1, 0, 1]`) is one integral per
+      // element, and its value is the list of those integrals. This applies
+      // to a single limit and to several limits alike: with several limits,
+      // each element of the list gives one complete multiple integral, and
+      // when more than one bound is a list, the lists are paired element by
+      // element. Both evaluate paths return a `List` for these shapes (the
+      // numeric path in `evaluate` below, the symbolic path through
+      // `EvaluateAt`). Type it as a list so the type agrees with the value.
+      // The lengths of the lists are not known here: when two list bounds
+      // have different lengths, evaluation declines and the integral stays
+      // unevaluated, although its type is still `list<number>`.
+      type: (ops, { engine }) => {
+        const hasListBound = ops.slice(1).some((op) => {
+          const limit = op.structureOf?.();
+          return (
+            limit?.kind === 'application' &&
+            limit.head === 'Limits' &&
+            limit.children
+              .slice(1)
+              .some((bound) => isSubtype(bound.type, 'list<any>'))
+          );
+        });
+        return BoxedType.forResult(
+          hasListBound ? 'list<number>' : 'number',
+          engine._typeResolver
+        );
+      },
       canonical: (ops, { engine: ce }) => {
         if (!ops[0]) return null;
 
@@ -2226,14 +2254,57 @@ volumes
           // an integration variable's name is not mistaken for it.
           if (transitiveUnknowns(f, boundVars).length > 0) return undefined;
 
+          // A LIST bound (`∫_{-∞}^{G} f(Z) dZ` with `G = [-1, 0, 1]`): one
+          // integral per element. This covers a single limit and several
+          // limits: with several limits, element `i` gives the complete
+          // multiple integral in which each list bound is replaced by its
+          // element `i`. When more than one bound is a list, the lists are
+          // paired element by element, and they must have the same length;
+          // if they do not, stay unevaluated. Without this the bound's `.re`
+          // read `NaN` and the integral stayed inert under `.N()`, while the
+          // symbolic path (through `EvaluateAt`) already answered a list. The
+          // `type` handler above reports `list<number>` for the same shapes.
+          const limitValues: Expression[][] = [];
+          let count: number | undefined;
+          for (const l of ops.slice(1)) {
+            if (!isFunction(l, 'Limits')) {
+              limitValues.push([]);
+              continue;
+            }
+            const bounds = [l.op2.N(), l.op3.N()];
+            for (const b of bounds) {
+              if (!isFunction(b, 'List')) continue;
+              if (count !== undefined && count !== b.nops) return undefined;
+              count = b.nops;
+            }
+            limitValues.push(bounds);
+          }
+          if (count !== undefined) {
+            const results: Expression[] = [];
+            for (let i = 0; i < count; i++) {
+              const limits = ops.slice(1).map((l, k) => {
+                if (!isFunction(l, 'Limits')) return l;
+                const [lo, hi] = limitValues[k].map((b) =>
+                  isFunction(b, 'List') ? b.ops[i] : b
+                );
+                return ce.function('Limits', [l.op1, lo, hi]);
+              });
+              results.push(ce.function('Integrate', [f, ...limits]).N());
+            }
+            return ce.function('List', results);
+          }
+
           // Multiple limits (`Integrate(f, Limits(x,…), Limits(y,…))`):
           // iterated quadrature over every limit. The single-limit path below
           // reads only `ops[1]` and would silently drop the other dimensions.
           if (ops.length > 2) return nIntegrateMultiple(ce, f, ops.slice(1));
 
           const firstLimit = ops[1];
-          if (!isFunction(firstLimit)) return undefined;
-          const [lower, upper] = [firstLimit.op2.N().re, firstLimit.op3.N().re];
+          if (!isFunction(firstLimit) || limitValues[0].length !== 2)
+            return undefined;
+
+          const [lowerValue, upperValue] = limitValues[0];
+          const [lower, upper] = [lowerValue.re, upperValue.re];
           if (isNaN(lower) || isNaN(upper)) return undefined;
 
           // Get the integration variable from the limits

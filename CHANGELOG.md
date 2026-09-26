@@ -128,6 +128,29 @@
 
 ### Improvements
 
+- **A call of a whole-list function is typed and compiled from its argument
+  (Tycho item 323).** When a user function binds a list argument whole (it has
+  a collection parameter, declared or inferred from its body) and its
+  parameter is broader than the argument (a bare `function` declaration, whose
+  parameter types come from the body, or a declared `list`, `collection` or
+  `unknown` parameter), the call is now typed from the body with the parameter
+  typed as the argument, and the JavaScript target compiles it through a
+  helper specialized to the argument's list type. With `u(l)` (an up-sampling
+  comprehension over `l[…]` and `Length(l)`), `s(l)` and `d(l, a)` declared as
+  bare `function` and `L: list<real>`, `d(s(u(L)), 1)` was typed
+  `list<unknown>` and failed to compile ("Could not compile `Length`: operand
+  is not an indexed collection"); declared `(list) -> unknown` it failed with
+  "scalar arithmetic over a list-valued operand". It is now typed
+  `list<nan | real>`, and the twelve-call chain `d(s(u(…)), 4)` compiles in
+  milliseconds to the same 4 096 values as the `(list<real>) -> unknown`
+  declaration. The typing is a pure walk of the body (a list comprehension's
+  index is typed as an element of its source), memoized per argument type, so
+  the cost does not grow with the nesting depth. A parameter declared with an
+  element type (`list<number>`) keeps its single definition, and a function
+  whose parameters are all scalar still maps over a list argument. A sum that
+  failed closed because a declared result union could not be decided by shape
+  (`W(p, x, y, z) + PointList(…)` with `W` returning "a point or a list of
+  points") now compiles when the body proves a list of points.
 - **A seeded list draw compiles on the `interval-js` target.**
   `WithRandomSeed(seed, RandomChoice(domain, k))`, with a literal seed and a
   domain that is an `Interval` with finite literal endpoints, a `Range` with
@@ -146,6 +169,106 @@
 
 ### Bug Fixes
 
+- **A bare `function` over a list compiled to wrong values.** `s(L)`, with `s`
+  declared `function` and assigned `l ↦ [(l[i] + …)/4 for i = …]`, compiled with
+  `success: true` and returned `{ re: NaN, im: NaN }` objects in place of the
+  numbers the interpreter gives (`[7/2, 9/2, …]`): its parameter, inferred as
+  `indexed_collection<number>`, was compiled as possibly complex. Deeper in a
+  nested chain the same helper produced strings such as
+  `"[object Object]1.58"`. The call now compiles through the specialization
+  above, in the real lane.
+- **`Multiply` keeps a `nan` arm.** A factor typed `nan | real` (the type of an
+  element read `l[i]` that may fall outside the list) made the product
+  `number`, which admits a complex value, while `Add`, `Negate` and `Subtract`
+  kept `nan | real`. `2·x`, `r·x` and `x/4` with `x: nan | real` and `r: real`
+  are now typed `nan | real`.
+- **The normal CDF written as an integral evaluates over a list** (Tycho item
+  325). With `s = 0.577`, `G = [-1, 0, 1]` and
+  `E(x) = \frac{1}{\sqrt{2\pi}s}\int_{-\infty}^{x}\exp(-\frac{1}{2}\frac{Z^2}{s^2})\,\mathrm{d}Z`,
+  `E(G).evaluate()` was a list of symbolic integrals (each element's `.re` was
+  `NaN`) and it is `[0.0415…, 0.5, 0.9585…]`, the values the compiled
+  JavaScript route gives. `E(0).evaluate()` is `0.5`; it was symbolic too. The
+  Gaussian antiderivative `∫ e^{a·Z² + b·Z + c} dZ` did not recognize an
+  exponent divided by a factor free of `Z` (`Z²/s²`, or `Z²/0.577²`, which
+  stays a quotient because the denominator is a float), so every element also
+  repeated the full antiderivative search. The polynomial coefficients of such
+  a quotient are now read (`PolynomialDegree(x²/a, x)` is `2`). Also:
+  `\int_{-\infty}^{G}…\,\mathrm{d}Z` with a list bound `G` is typed
+  `list<number>` (it was typed `number`) and its `.N()` is the list of the
+  integrals (it stayed unevaluated), and `.N()` of a number times a list of
+  `Measurement` values folds every element (`0.5·[2 ± 0.1, 3 ± 0.1]` was a
+  list of unevaluated products, and is `[1 ± 0.05, 1.5 ± 0.05]`).
+  A list bound on a multiple integral is handled the same way, one complete
+  integral per element, with several list bounds paired element by element;
+  lists of different lengths leave the integral unevaluated.
+- **A number times a list comprehension serializes to text that parses back**
+  (Tycho item 319). `Multiply(0.01, Comprehension(u+1, Element(u, [1,2,3])))`
+  serializes as `0.01\left[u+1 \operatorname{for} u = …\right]`, and parsing
+  that text gave `Sequence(0.01, Error('unexpected-operator'))`. A number
+  directly before a bracket that opens a comprehension or a range now makes a
+  product, as it does before a bracketed list:
+  `0.01\left[u+1 \operatorname{for} u = [1,2,3]\right]` is
+  `Multiply(0.01, Comprehension(…))` and `4[1...3]` is
+  `Multiply(4, Range(1, 3))` (both were an `unexpected-operator` error). The
+  same holds after a visual space (`p\,[u \operatorname{for} u = L]` is a
+  product; it gave an invalid `Tuple`) and after a function name
+  (`\Gamma[1...3]` is `Gamma(Range(1, 3))`). A bracket after a symbol is still
+  an index, as for a list: `x\left[u+1 \operatorname{for} u = L\right]` is
+  `At(x, Comprehension(…))`. So a product of a symbol and a comprehension now
+  serializes with a sign, `x\times\left[u+1 \operatorname{for} u = …\right]`; it
+  serialized as `x\left[…\right]`, which read back as an index.
+- **A compiled `Range` with a compound step or start has the right elements.**
+  Compiled to JavaScript, `Range(0, 10, d - 498)` at `d = 500` gave
+  `[-498, 2, 502, 1002, 1502, 2002]`, where the interpreter gives
+  `[0, 2, 4, 6, 8, 10]`: the step's source was spliced without parentheses into
+  the element expression, `0 + i * _.d + -498`. The start and the step are now
+  parenthesized there when their source is more than one token
+  (`0 + i * (_.d + -498)`). A step `3/d` now gives each element exactly as the
+  interpreter computes it (`1 + i * (3 / _.d)`; it was `1 + i * 3 / _.d`, which
+  rounds differently). The element COUNT of `Range(1, 4, 3/d)` and of
+  `Range(1, 2000, 2d)`, which Tycho reported as 1 and 499 751 elements where the
+  interpreter gives 501 and 2 on 0.135.0, is already correct in this release:
+  the count is the `rangeCount` call, which takes the step as an argument.
+  (Tycho item 324.)
+- **`_SYS.atNoWrap` reads a complex index through its real part, as `_SYS.at`
+  does.** The compiler emits an operand that is not provably real, such as
+  `\sqrt{K}`, as a `{ re, im }` object. A host `At` lowering that calls
+  `_SYS.atNoWrap` read `[10,20,30][\sqrt{K}]` at `K = 4` as `NaN`, where the
+  stock lowering (`_SYS.at`) and the interpreter read `20`. The helper now reads
+  the real part of such an index, also for each entry of an index list; the
+  imaginary part is ignored, as `_SYS.at` and the interpreter ignore it. The
+  no-wrap rules are unchanged: a real part that is zero, negative, fractional or
+  past the end still reads the absence marker. (Tycho item 322.)
+- **A count, bound or position compiled as a complex value is read through its
+  real part.** In compiled JavaScript, the same `{ re, im }` object reached the
+  count of `Take`, `Drop`, `Repeat`, `RandomChoice` and `RandomSample`, the
+  positions of `Slice`, and the bounds and step of `Range` (also when a
+  comprehension iterates the range, and in `Take` or `Drop` of an infinite
+  range), where it was read as `NaN`. At `K = 4`, `Take(L, \sqrt{K})` was `[]`,
+  `Drop(L, \sqrt{K})` was all of `L`, `Range(1, \sqrt{K})` and
+  `[i \text{ for } i = [1...\sqrt{K}]]` were `[]`, and
+  `RandomChoice(L, \sqrt{K})` threw. They now read the real part, as the
+  interpreter does (`Take([10,20,30,40], 2+i)` is `[10, 20]`), through the new
+  runtime helper `_SYS.realPart`, which is emitted only for an operand on the
+  complex lane.
+- **A sum of an `unknown` symbol and a constant is accepted where a
+  collection is expected** (Tycho item 321). With `P` declared `unknown`,
+  `Histogram(P + 0.5, 1/100)` was an `incompatible-type` error
+  (`'collection'` expected, `'number'` found) and `P` ended typed `number`,
+  while `Histogram(2P, 1/100)` was valid and typed `P` as `matrix`. Bottom-up
+  inference first types every `unknown` operand of arithmetic `number`; when
+  the enclosing parameter accepts a matrix, a repair then retypes those
+  symbols `matrix` and boxes the argument again, but only for the shapes it
+  has a plan for. That plan accepted a constant factor of a product but made a
+  sum with a constant term fail, and it had no case for a quotient. It now
+  accepts a constant term of a sum (`matrix + scalar` is a matrix) and a
+  quotient whose denominator does not contain a repaired symbol, so
+  `Histogram(P + 0.5, 1/100)` and
+  `Histogram(0.5 + ((1-v)P_0 + vP_1 - 0.5)/\sqrt{(1-v)^2 + v^2}, 1/100)` are
+  valid and type `P` as `matrix`, as `Histogram(2P, 1/100)` does. The same
+  repair serves the matrix operators: `Determinant(A + 1)` with `A` unknown is
+  now valid, with `A: matrix`. Outside such a parameter nothing changes:
+  `x + 1` still types `x` as `number`.
 - **At machine precision, a rational is the correctly rounded double, and a
   rational times a constant is the double of `x * p / q`.** `Divide(Pi, 6).N()` with
   `precision: 'machine'` was `0.5235987755982998`, nine units in the last

@@ -486,6 +486,38 @@ element type (wrong for a non-identity callback) or an `unknown` element type
 (which loses the fusion). Test file for the values:
 `tycho-325-integrate-list-limit-broadcast.test.ts`.
 
+### A lazy comprehension is rejected at a `list<real>` parameter that the compiled route accepts (OPEN, decision — found 2026-09-25 while fixing Tycho item 323)
+
+With `u` declared `(list<real>) -> unknown` and assigned an up-sampling
+comprehension over `l`, and `s` declared the same way, `s(u(L))` with
+`L: list<real>` evaluates to `Error(incompatible-type, "list<real>",
+"indexed_collection<integer | nan>")`: `u(L)` is a lazy `Comprehension` whose
+element type carries the `nan` arm of an element read `l[i]`, and the
+`list<real>` parameter of `s` rejects it. The compiled JavaScript code for the
+same expression returns values, so the two routes disagree. Option A keeps the
+rejection (the `nan` arm is in the type, so it is correct) and the mismatch.
+Option B accepts a comprehension at a `list<…>` parameter when its element type
+without `nan` fits, which makes the interpreter agree with the compiled code and
+weakens the `list<real>` contract. Until decided, Tycho's `(list<real>)`
+declarations error in the interpreter and work compiled. Test file with the
+compiled reference values: `tycho-323-call-site-specialization.test.ts`.
+
+### A list-valued integrand is not distributed over the integral (OPEN, decision — found 2026-09-25 by the review of the Tycho item 325 fix)
+
+`Integrate` with a list BOUND evaluates per element since 2026-09-25, on one
+limit or several. A list-valued INTEGRAND does not: the LaTeX
+`\int_0^1\int_0^{G} xy\,dx\,dy` with `G = [1,2,3]` parses to an outer
+single-limit `Integrate` whose integrand is an inner `Integrate` with the list
+bound, so the outer integral is typed `number` and stays unevaluated under both
+`evaluate()` and `.N()`. The symbolic route shows the same gap from the other
+side: `Integrate(xy, Limits(x, 0, [1,2]), Limits(y, 0, [1,2,3]))` evaluates
+the `y` limit over its list and leaves `\int_0^{[1,2]} [x/2, 2x, 9x/2]\,dx`,
+an outer integral over a list-valued integrand, while `.N()` refuses the
+mismatched lengths and stays whole. The decision is whether a list-valued
+integrand distributes (one integral per element, matching the bound rule) or
+stays unevaluated with a documented message on both routes. Test file for the
+bound rule: `tycho-325-integrate-list-limit-broadcast.test.ts`.
+
 ### An out-of-range component read answers `Missing` when the tuple holds an absent cell, `NaN` otherwise (OPEN, small — found 2026-09-25)
 
 `Third((1, 2))` is `NaN` (typed `nan`: index 3 of a 2-tuple is out of range),

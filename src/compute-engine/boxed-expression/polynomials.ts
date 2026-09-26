@@ -137,6 +137,15 @@ export function polynomialDegree(expr: Expression, variable: string): number {
     return totalDeg;
   }
 
+  // A quotient by a factor free of the variable is a polynomial with scaled
+  // coefficients: `x²/a` has degree 2 in `x`, as `a⁻¹·x²` already has. A
+  // symbolic or machine-float denominator stays a `Divide` in canonical form
+  // (an exact number denominator folds into a `Rational` coefficient).
+  if (op === 'Divide') {
+    if (expr.op2.has(variable)) return -1;
+    return polynomialDegree(expr.op1, variable);
+  }
+
   if (op === 'Power') {
     const baseDeg = polynomialDegree(expr.op1, variable);
     if (baseDeg < 0) return -1;
@@ -219,6 +228,20 @@ export function getPolynomialCoefficients(
         if (!innerCoeffs[i].isSame(0)) {
           addCoefficient(innerCoeffs[i].neg(), i);
         }
+      }
+      return true;
+    }
+
+    if (isFunction(term, 'Divide')) {
+      // `p(x)/d` with `d` free of the variable: the coefficients of `p`,
+      // each divided by `d` (see the matching case in `polynomialDegree`).
+      if (term.op2.has(variable)) return false;
+      const numCoeffs = getPolynomialCoefficients(term.op1, variable);
+      if (!numCoeffs) return false;
+      for (let i = 0; i < numCoeffs.length; i++) {
+        if (numCoeffs[i].isSame(0)) continue;
+        if (!addCoefficient(ce.function('Divide', [numCoeffs[i], term.op2]), i))
+          return false;
       }
       return true;
     }

@@ -164,21 +164,27 @@ describe('A list argument at an untyped parameter is specialized', () => {
     );
   });
 
-  test('the sum with a point list fails closed on the declared result', () => {
-    // The specialized call keeps the definition's declared result — a point
-    // OR a list of points OR an indexed collection of NUMBERS and points.
-    // A flat array of numbers has the shape of a point, so the sum cannot
-    // be decided by the value's shape at run time: it fails closed, naming
-    // the declaration to tighten (`list<tuple<…>> | tuple<…>` is decided by
-    // shape, see below). The interpreter answers the four point sums.
+  test('the sum with a point list is typed from the body and compiles', () => {
+    // The definition's declared result is a point OR a list of points OR an
+    // indexed collection of NUMBERS and points. A flat array of numbers has
+    // the shape of a point, so that union alone cannot decide the sum by the
+    // value's shape at run time, and the compile failed closed. The call
+    // binds its list arguments whole (`p` is declared a point or a list of
+    // points), so its type is derived from the body with each parameter
+    // typed as its argument (`callResultType`, Tycho item 323): a list of
+    // four points. The sum is then decided, and the compiled points are the
+    // interpreter's.
     const ce = engineWithW();
     const expr = ce.parse(
       String.raw`W(C(u, v), \bigl\lbrack0.8, 0.2, 0.8, 0.2\bigr\rbrack, \bigl\lbrack0.2, 0.8, 0.2, 0.8\bigr\rbrack, 0.6)+\operatorname{PointList}(\bigl\lbrack0, 0.3, 0, -0.3\bigr\rbrack, \bigl\lbrack0.3, 0, -0.3, 0\bigr\rbrack, 0.6)`
     );
-    expect(() => compile(expr, { fallback: false })).toThrow(
-      /admits a value whose run-time shape is the same as a point's/
+    const got = compile(expr, { fallback: false }).run!(VARS) as number[][];
+    const want = interpreted(ce, expr);
+    expect(want.length).toBe(4);
+    expect(got.length).toBe(4);
+    got.forEach((p, i) =>
+      p.forEach((c, j) => expect(c).toBeCloseTo(want[i][j], 12))
     );
-    expect(interpreted(ce, expr).length).toBe(4);
   });
 
   test('a list alone, with no point beside it, keeps the generic definition', () => {

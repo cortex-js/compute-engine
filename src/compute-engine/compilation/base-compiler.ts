@@ -14796,12 +14796,12 @@ export class BaseCompiler {
       if (loop !== undefined) return loop;
     }
 
-    const loCode = BaseCompiler.compile(loExpr, target);
-    const hiCode = BaseCompiler.compile(hiExpr, target);
+    const loCode = BaseCompiler.compileRangeOperand(loExpr, target);
+    const hiCode = BaseCompiler.compileRangeOperand(hiExpr, target);
     const stepLiteralCode =
       stepExpr === undefined
         ? undefined
-        : BaseCompiler.compile(stepExpr, target);
+        : BaseCompiler.compileRangeOperand(stepExpr, target);
 
     // A bound whose EXPRESSION is not a literal can still COMPILE to one: a
     // symbol with an assigned value, or arithmetic the constant fold reduced
@@ -14860,6 +14860,27 @@ export class BaseCompiler {
   }
 
   /**
+   * Compile a bound or step of a `Range` the comprehension path iterates.
+   * On the JavaScript target an operand the compiler emits on the complex
+   * lane (a `{ re, im }` object, as for `\sqrt{K}` with `K` not provably
+   * non-negative) is read through its real part (`_SYS.realPart`), as the
+   * interpreter reads a complex bound: without it the object reached
+   * `rangeCount` as NaN and `[i for i = [1...\sqrt{K}]]` at `K = 4` was
+   * `[]`, where the interpreter gives `[1, 2]`. Every other operand, and
+   * every other target, compiles as it is.
+   */
+  private static compileRangeOperand(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): string {
+    const code = BaseCompiler.compile(expr, target);
+    return target.language === 'javascript' &&
+      BaseCompiler.isComplexValued(expr)
+      ? `_SYS.realPart(${code})`
+      : code;
+  }
+
+  /**
    * Compile a `Range(lo, hi)` or `Range(lo, hi, step)` expression into a JS
    * iterable expression. Mirrors the runtime semantics in
    * `library/collections.ts` Range:
@@ -14906,13 +14927,13 @@ export class BaseCompiler {
       target.language === 'javascript'
         ? '_SYS.rangeCount'
         : RANGE_COUNT_JS_SOURCE;
-    const lo = BaseCompiler.compile(loExpr, target);
-    const hi = BaseCompiler.compile(hiExpr, target);
+    const lo = BaseCompiler.compileRangeOperand(loExpr, target);
+    const hi = BaseCompiler.compileRangeOperand(hiExpr, target);
     if (stepExpr === undefined) {
       // Auto-direction step at runtime: +1 if _hi >= _lo, else -1.
       return `((_lo,_hi)=>{const _st=_hi>=_lo?1:-1;return Array.from({length:${countFn}(_lo,_hi,_st)},(_,k)=>_lo+_st*k);})(${lo},${hi})`;
     }
-    const step = BaseCompiler.compile(stepExpr, target);
+    const step = BaseCompiler.compileRangeOperand(stepExpr, target);
     return `((_lo,_hi,_st)=>_st===0?[]:Array.from({length:${countFn}(_lo,_hi,_st)},(_,k)=>_lo+_st*k))(${lo},${hi},${step})`;
   }
 
@@ -23554,6 +23575,41 @@ export class BaseCompiler {
     return false;
   }
 
+  /**
+   * Does the declaration of user function `h` leave the element type of
+   * parameter `i` open? It does when `h` has no declared signature (a bare
+   * `function` declaration, or a function assigned without a declaration,
+   * whose parameter types are inferred from the body), or when the declared
+   * parameter is `unknown` or a collection whose element type is not stated
+   * (`collection`, `list`, `indexed_collection<unknown>`).
+   *
+   * A parameter declared with an element type (`list<number>`,
+   * `collection<number>`) is the host's contract: the definition is compiled
+   * once against it, whatever list type a call site passes, so that a ground
+   * declaration and a generic one bounded by the same type compile alike.
+   */
+  private static paramElementTypeIsOpen(
+    engine: ComputeEngine,
+    h: string,
+    i: number
+  ): boolean {
+    const def = engine.lookupDefinition(h);
+    if (def !== undefined && isOperatorDef(def) && def.operator.inferredSignature)
+      return true;
+    const declared = BaseCompiler.userFunctionParamType(engine, h, i);
+    if (
+      declared === undefined ||
+      declared === 'unknown' ||
+      declared === 'any' ||
+      declared === 'value'
+    )
+      return true;
+    const resolved = resolveTypeForCompilation(declared);
+    if (!isSubtype(resolved, 'collection<any>')) return false;
+    const element = collectionElementType(resolved);
+    return element === undefined || element === 'unknown' || element === 'any';
+  }
+
   /** Compile one shared helper for each proven argument representation.
    * The private literal carries narrower parameters; the engine definition
    * remains available for list calls and function-value uses. */
@@ -23728,6 +23784,51 @@ export class BaseCompiler {
           t = 'complex';
           complexArgument = true;
         } else t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
+      } else if (
+        target.language === 'javascript' &&
+        bindsListsWhole &&
+        BaseCompiler.isRealListArg(a) &&
+        BaseCompiler.paramElementTypeIsOpen(engine, h, i)
+      ) {
+        // A LIST of real numbers that the interpreter binds WHOLE (the
+        // definition declares or infers a collection parameter, so no
+        // parameter list is all scalar). This branch applies only when the
+        // element type of the parameter is open (`paramElementTypeIsOpen`):
+        // the function has an inferred signature, or the parameter is
+        // declared `unknown`, `any`, `value`, or a collection with no stated
+        // element type (`collection`, `list`). A parameter DECLARED with an
+        // element type is the host's contract, and the call keeps the
+        // generic definition. So a parameter typed
+        // `indexed_collection<number>` (elements possibly complex) comes
+        // here only when the signature is inferred from the body, not when
+        // it is declared. The generic definition compiles its body against a
+        // broad type: an element read `l[i]` of unknown type declines as
+        // "scalar arithmetic over a list-valued operand", a `Length(l)` of a
+        // `collection` declines as "not an indexed collection", and a
+        // `number` element takes the complex lane. The helper specialized to
+        // the argument's own list type compiles the body with real elements,
+        // as a declared `(list<real>) -> …` signature does. The key is the
+        // argument's type, so each distinct list type has one helper, and a
+        // nested chain `d(s(u(L)))` compiles one helper per function (the
+        // type of each inner call follows its argument, `callResultType`).
+        // An argument typed `indexed_collection<E>` (a comprehension, a
+        // `Map`) is typed `list<E>` here: the compiled value is an array
+        // either way, and a parameter declared `list` then admits it, as the
+        // interpreter binds it. The compiled argument is always a
+        // materialized, finite JavaScript array, never a lazy iterator: only
+        // `Take` and `TakeWhile` lower an infinite pipeline as a lazy stream
+        // (`emitLazyStream` in `javascript-target.ts`), and both return an
+        // array. An infinite collection anywhere else, including as a call
+        // argument, makes the compile fail (the `Range` handler and
+        // `collArg` throw), so the call falls back to the interpreter.
+        // Witness: Tycho item 323, three helpers declared as bare `function`
+        // or as `(list) -> unknown`.
+        const own = a.type.type;
+        const element = collectionElementType(own);
+        t =
+          isSubtype(own, 'list<any>') || element === undefined
+            ? own
+            : { kind: 'list', elements: element };
       } else if (
         target.language === 'javascript' &&
         (declared === 'unknown' ||
