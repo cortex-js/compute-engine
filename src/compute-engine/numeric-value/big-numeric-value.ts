@@ -393,8 +393,33 @@ export class BigNumericValue extends NumericValue {
     )
       return this.clone({ re: Infinity, im: Infinity });
 
-    if (this.im === 0 && other.im === 0)
+    if (this.im === 0 && other.im === 0) {
+      // A product with an exact rational is `(x · p) / q`, computed with 5
+      // guard digits: `x · (p / q)` rounded the quotient to the working
+      // precision and then multiplied, and `sin(π/6)` at 21 digits was
+      // `0.500…001` where the kernel answers `0.5` for a 26-digit angle.
+      // The guard digits are kept in the result, as a big-decimal product
+      // keeps them (`mul` does not round to the working precision, `div`
+      // does): an angle such as `π/2 − 10⁻¹²` must carry them for
+      // `cos(π/2 − 10⁻¹²)` to be `10⁻¹²` to more than 9 digits.
+      if (
+        other instanceof ExactNumericValue &&
+        other.radical === 1 &&
+        other.rational[1] != 1
+      ) {
+        const [p, q] = other.rational;
+        const saved = BigDecimal.precision;
+        BigDecimal.precision = saved + 5;
+        try {
+          return this.clone(
+            this.decimal.mul(new BigDecimal(p)).div(new BigDecimal(q))
+          );
+        } finally {
+          BigDecimal.precision = saved;
+        }
+      }
       return this.clone(this.decimal.mul(other.bignumRe ?? other.re));
+    }
 
     return this.clone({
       re: this.decimal.mul(other.bignumRe ?? other.re).sub(this.im * other.im),

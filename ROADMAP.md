@@ -615,36 +615,6 @@ whether the interval target should answer `singular` inside that zone. (The sign
 of an overflowing `Csc`/`Cot` of a tiny angle, `+oo` for `Csc(5e-324)`, landed
 2026-09-25 on the interpreter and the JavaScript and Python targets.)
 
-### At machine precision, a rational multiple of π is computed from a 15-digit π (OPEN, wrong values — found 2026-09-25 by the review of the large-angle fix)
-
-With `precision: 'machine'`, `Divide(Pi, 6).N()` is `0.5235987755982998` where
-`Math.PI / 6` is `0.5235987755982988`, and `\frac{7\pi}{6}` is
-`3.6651914291881025` (true `3.665191429188092`), so `\sin(7\pi/6).N()` is
-`-0.500000000000009` where `Math.sin` gives `-0.4999999999999997`: about ten
-units in the last place. `Multiply(7, Pi)` is exact (`21.991148575128552`), so
-the loss is on the division route, which appears to go through a big decimal at
-the 15-digit working precision that machine mode gives big decimals
-(`applyAngle` says so), then rounds to a double. Also, `\cot(5\pi/2).N()` at
-machine precision is `3.13e-20` where `\cos(5\pi/2)` is chopped to `0`. The
-exact-angle route of 2026-09-25 (`exactLargeAngle`) reduces only `|c| ≥ 2`
-multiples of π, so these small angles keep the inaccurate route; either extend
-it to every rational multiple of π at machine precision (measure the snapshot
-radius: every machine-precision trig value of a special angle can move in its
-last digits), or find the 15-digit conversion and give it a double's 17.
-
-### Degree mode: an angle that contains π is rounded before the reduction, and the unit conversion loses the last digit (OPEN, wrong values — found 2026-09-25 while fixing the large-integer argument)
-
-With `angularUnit = 'deg'`, `\sin(10^{30}\pi).N()` is `0`; the true value is
-`sin(10³⁰·π²/180) = 0.35016022992…`. The angle in radians has a `π²` factor, so
-it is not a rational multiple of π and the exact large-angle route
-(`exactAngleParts`, `boxed-expression/trigonometry.ts`) cannot read it; the
-angle is then rounded to the working precision before the reduction, as every
-large angle was before 2026-09-25. A fix evaluates the angle at a raised
-precision (enough guard digits to hold the integer part of the product).
-Separately, `\sin(30)` in degree mode is `0.500000000000000000001` at 21 digits:
-the last digit is lost in the unit conversion (`applyAngle` / `canonicalAngle`),
-not in the reduction. Pre-existing, both.
-
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 
 `Eigenvalues([[1, i, 0], [i, 2, 0], [0, 0, 3]])`, `Eigenvectors` of it,

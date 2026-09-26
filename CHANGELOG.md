@@ -130,6 +130,33 @@
 
 ### Bug Fixes
 
+- **At machine precision, a rational is the correctly rounded double, and a
+  rational times a constant is the double of `x * p / q`.** `Divide(Pi, 6).N()` with
+  `precision: 'machine'` was `0.5235987755982998`, nine units in the last
+  place from `Math.PI / 6`, `(1/6).N()` printed `0.166666666666667`, and
+  `\sin(7\pi/6).N()` was about ten units from `Math.sin` of the same angle:
+  an exact rational was converted through a 15-digit big decimal, fewer than
+  the 17 digits a double carries, and then multiplied. The conversion now
+  keeps 25 digits in machine mode, and a product of an exact rational and a
+  float is computed as `(x·p)/q` on every route, the eager list arithmetic
+  included, so `\frac{7\pi}{6}` is `Math.PI * 7 / 6` exactly. Every
+  machine-precision value that involved a non-integer rational moves by a
+  few units in the last place (26 snapshots).
+- **At 21 digits, `\sin(\pi/6)`, `\cos(\pi/3)` and `\sin(30)` in degree
+  mode are exactly `0.5`.** They were `0.500…001`: the rational multiple of
+  π was rounded to the working precision and then multiplied by π, two
+  roundings, and in `canonicalAngle` the multiple was reduced modulo 2 as a
+  float. The product keeps 5 guard digits and the reduction is exact.
+  `\cos(30\degree)` at 21 digits is now `0.866025403784438646764`, the
+  correctly rounded value (it ended in `…763`).
+- **In degree mode, a large angle with a π factor is reduced from its exact
+  value.** `\sin(10^{30}\pi).N()` with `angularUnit = 'deg'` was `0`; it is
+  `0.350160229920896711994`, the sine of `10³⁰·π²/180` radians. The angle is
+  computed with enough digits to hold every digit of its integer part, and the
+  kernel reduces it from those digits, as a radian angle already was. Also,
+  `\cot(5\pi/2)` and `\tan(\pi)` at machine precision answer `0`, as
+  `\cos(5\pi/2)` does: the rounding dust of the big-decimal kernel at a
+  zero of `tan` and `cot` is chopped as it is for `sin` and `cos`.
 - **An imaginary literal with an integer coefficient is exact on every route.**
   `4i` typed as LaTeX, `-2i`, `4\imaginaryI` and the one-argument
   `["Complex", 4]` were built as inexact floating-point values, while `i4`,

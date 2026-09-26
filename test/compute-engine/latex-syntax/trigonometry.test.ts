@@ -97,8 +97,8 @@ describe('TRIGONOMETRIC DEGREES', () => {
       simplify  = sqrt(3)/2
       eval-auto = sqrt(3)/2
       eval-mach = sqrt(3)/2
-      N-auto    = 0.866025403784438646763
-      N-mach    = 0.8660254037844382
+      N-auto    = 0.866025403784438646764
+      N-mach    = 0.8660254037844387
     `));
 
   test('\\cos(30\\degree)', () =>
@@ -108,8 +108,8 @@ describe('TRIGONOMETRIC DEGREES', () => {
       simplify  = sqrt(3)/2
       eval-auto = sqrt(3)/2
       eval-mach = sqrt(3)/2
-      N-auto    = 0.866025403784438646763
-      N-mach    = 0.8660254037844382
+      N-auto    = 0.866025403784438646764
+      N-mach    = 0.8660254037844387
     `));
 
   test('\\cos(30^\\circ)', () =>
@@ -119,8 +119,8 @@ describe('TRIGONOMETRIC DEGREES', () => {
       simplify  = sqrt(3)/2
       eval-auto = sqrt(3)/2
       eval-mach = sqrt(3)/2
-      N-auto    = 0.866025403784438646763
-      N-mach    = 0.8660254037844382
+      N-auto    = 0.866025403784438646764
+      N-mach    = 0.8660254037844387
     `));
 
   test('\\cos(\\ang{30})', () =>
@@ -130,7 +130,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
       simplify  = sqrt(3)/2
       eval-auto = sqrt(3)/2
       eval-mach = sqrt(3)/2
-      N-auto    = 0.866025403784438646763
-      N-mach    = 0.8660254037844382
+      N-auto    = 0.866025403784438646764
+      N-mach    = 0.8660254037844387
     `));
 });

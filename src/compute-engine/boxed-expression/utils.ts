@@ -21,6 +21,7 @@ import {
 import { foldSeed } from '../numerics/random.js';
 import { containsSignatureArm } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
@@ -716,7 +717,18 @@ export function canonicalAngle(
 
   if (k.isZero) return ce.number(t);
 
-  const k2 = ce._numericValue(k.bignumRe ? k.bignumRe.mod(2) : k.re % 2);
+  // The multiple of π is reduced modulo 2 EXACTLY when it is an exact
+  // rational, with the sign of `k` kept as `%` keeps it: converting it to a
+  // float first rounded it before its product with π, a second rounding
+  // that left `sin(30)` in degree mode (the angle `(1/6)·π`) at 21 digits
+  // as `0.500…001` where `sin(π/6)` is `0.5`. A radical multiple (`√2·π`)
+  // has no exact reduction and takes the float route below.
+  let k2: NumericValue;
+  if (k instanceof ExactNumericValue && k.im === 0 && k.radical === 1) {
+    const half = k.div(2);
+    const whole = half.re < 0 ? half.ceil() : half.floor();
+    k2 = k.sub(whole.mul(2));
+  } else k2 = ce._numericValue(k.bignumRe ? k.bignumRe.mod(2) : k.re % 2);
   const piMulK2N = ce.Pi.mul(k2).N();
   return ce.number(t.add(numericValue(piMulK2N) ?? 0));
 }

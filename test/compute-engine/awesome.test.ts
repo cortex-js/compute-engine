@@ -335,7 +335,7 @@ describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
       eval-auto = floor(3540326840/2710032743^(3^n))
       eval-mach = floor(3540326840/2710032743^(3^n))
       N-auto    = floor(1.30637788386308069046^(3^n))
-      N-mach    = floor(1.30637788386308^(3^n))
+      N-mach    = floor(1.3063778838630806^(3^n))
     `)));
 
 // A meaningless, but amusing, coincidence
@@ -391,7 +391,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       eval-auto = sqrt(pi) * (n / e)^n * root(6)(8n^3 + 4n^2 + n + 1/30)
       eval-mach = sqrt(pi) * (n / e)^n * root(6)(8n^3 + 4n^2 + n + 1/30)
       N-auto    = 1.7724538509055160273 * (0.367879441171442321596 * n)^n * root(6)(8n^3 + 4n^2 + n + 0.0333333333333333333333)
-      N-mach    = 1.7724538509055159 * (0.36787944117144233 * n)^n * root(6)(8n^3 + 4n^2 + n + 0.0333333333333333)
+      N-mach    = 1.7724538509055159 * (0.36787944117144233 * n)^n * root(6)(8n^3 + 4n^2 + n + 0.03333333333333333)
     `)));
 
 /*

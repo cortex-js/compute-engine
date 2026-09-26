@@ -125,7 +125,7 @@ describe('CANONICAL FORMS', () => {
       eval-auto = -101 / 10^(2/3)
       eval-mach = -101 / 10^(2/3)
       N-auto    = -21.7597903693220255898
-      N-mach    = -21.759790369322012
+      N-mach    = -21.759790369322026
     `);
   });
 
@@ -136,7 +136,7 @@ describe('CANONICAL FORMS', () => {
       eval-auto = 1/3 * x
       eval-mach = 1/3 * x
       N-auto    = 0.333333333333333333333 * x
-      N-mach    = 0.333333333333333 * x
+      N-mach    = 0.3333333333333333 * x
     `);
   });
 

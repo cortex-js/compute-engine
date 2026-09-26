@@ -379,6 +379,12 @@ function integerPartDigits([p, q]: BigRational): number {
  *   all the digits of their argument and reduce it with as many digits of π
  *   as its magnitude requires.
  *
+ * In degree, gradian and turn modes an angle with a π factor has a `π²` term
+ * in radians, which no integer arithmetic reduces. That term is computed with
+ * enough digits to hold every digit of its integer part, and the kernel
+ * reduces it from those digits; the multiple of π that the rational part
+ * contributes is reduced exactly as above.
+ *
  * To keep ordinary angles on the usual route, this applies only when the
  * multiple of π is `2` or more in magnitude, or when the rational part has an
  * integer part of 3 digits or more (an integer only when it has more digits
@@ -391,16 +397,62 @@ function exactLargeAngle(raw: Expression): BigDecimal | undefined {
   if (!parts) return undefined;
   let [c, t] = parts;
 
-  // Convert the angle to radians. In an angular unit other than radians, `π`
-  // is not a rational multiple of the unit, so only a rational angle is read.
+  // Convert the angle to radians. In an angular unit other than radians the
+  // angle `c·π + t` is `(c·π + t)·u` radians, with `u` the unit in radians
+  // over π: 1/180 (deg), 1/200 (grad) or 2 (turn) times π.
   const unit = ce.angularUnit;
   if (unit !== 'rad') {
-    if (c[0] !== 0n) return undefined;
-    if (unit === 'deg') c = [t[0], t[1] * 180n];
-    else if (unit === 'grad') c = [t[0], t[1] * 200n];
-    else if (unit === 'turn') c = [t[0] * 2n, t[1]];
-    else return undefined;
-    t = [0n, 1n];
+    const u: [bigint, bigint] | undefined =
+      unit === 'deg'
+        ? [1n, 180n]
+        : unit === 'grad'
+          ? [1n, 200n]
+          : unit === 'turn'
+            ? [2n, 1n]
+            : undefined;
+    if (u === undefined) return undefined;
+    if (c[0] === 0n) {
+      // A rational angle is a rational multiple of π in radians, reduced
+      // exactly below like a radian angle.
+      c = [t[0] * u[0], t[1] * u[1]];
+      t = [0n, 1n];
+    } else {
+      // An angle with a π factor has a `π²` term in radians, `c·u·π²`, which
+      // is not a rational multiple of π and cannot be reduced by integer
+      // arithmetic. It is computed with enough digits to hold every digit of
+      // its integer part on top of the working precision, and the kernel
+      // reduces it from those digits. Rounding it to the working precision
+      // first gave `sin(10³⁰·π)` in degrees as `0` where the value is
+      // `0.3501…`. The rational part contributes the multiple of π `t·u`,
+      // reduced exactly modulo 2π as a radian multiple is. As for a radian
+      // angle, only a large angle takes this route: a multiple of π of 2 or
+      // more from either term.
+      const cp = c[0] * u[0];
+      const cq = c[1] * u[1];
+      const tp = t[0] * u[0];
+      const tq = t[1] * u[1];
+      const large =
+        (cp < 0n ? -cp : cp) >= 2n * cq || (tp < 0n ? -tp : tp) >= 2n * tq;
+      if (!large) return undefined;
+      // (tp/tq)·π modulo 2π is ((tp mod 2tq)/tq)·π exactly
+      const tReduced = tp % (2n * tq);
+      const digits = integerPartDigits([cp, cq]) + 2;
+      const saved = BigDecimal.precision;
+      BigDecimal.precision = saved + digits + 5;
+      try {
+        const pi = BigDecimal.PI;
+        const piSquaredTerm = pi
+          .mul(pi)
+          .mul(new BigDecimal(cp))
+          .div(new BigDecimal(cq));
+        if (tReduced === 0n) return piSquaredTerm;
+        return piSquaredTerm.add(
+          pi.mul(new BigDecimal(tReduced)).div(new BigDecimal(tq))
+        );
+      } finally {
+        BigDecimal.precision = saved;
+      }
+    }
   }
 
   const [cp, cq] = c;
@@ -615,6 +667,22 @@ function bigPoleDust(
   if (value.abs().mul(dustScale(ce, x)).gte(BigDecimal.ONE))
     return ce.ComplexInfinity;
   return value;
+}
+
+/**
+ * `bigPoleDust` and `chopBignumDust` together, for `tan` and `cot`, which
+ * have zeros as well as poles: a value that is only rounding at a zero is
+ * `0`, as the `sin` and `cos` kernels answer at theirs. Without the chop,
+ * `cot(5π/2)` at machine precision, computed on the exact-angle route from
+ * `π/2` at 20 digits, answered `3.1e-20` where `cos(5π/2)` answers `0`.
+ */
+function bigZeroAndPoleDust(
+  ce: ComputeEngine,
+  value: BigDecimal,
+  x: BigDecimal
+): BigDecimal | 0 | Expression {
+  const r = bigPoleDust(ce, value, x);
+  return r instanceof BigDecimal ? chopBignumDust(ce, r, x) : r;
 }
 
 /**
@@ -885,7 +953,7 @@ export function evalTrig(
       return applyAngle(
         op,
         (x) => poleDust(ce, 1 / Math.tan(x), x),
-        (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.tan()), x),
+        (x) => bigZeroAndPoleDust(ce, BigDecimal.ONE.div(x.tan()), x),
         (x) => x.tan().inverse(),
         raw
       );
@@ -957,7 +1025,7 @@ export function evalTrig(
       return applyAngle(
         op,
         (x) => poleDust(ce, Math.tan(x), x),
-        (x) => bigPoleDust(ce, x.tan(), x),
+        (x) => bigZeroAndPoleDust(ce, x.tan(), x),
         (x) => x.tan(),
         raw
       );

@@ -18,13 +18,12 @@ import { checkDeadline } from '../../common/interruptible.js';
 export const DEADLINE_STRIDE = 0xffff;
 
 /**
- * The double of an exact rational literal that is not an integer (`1/3`,
- * `-5/7`), computed as the interpreter computes it when it meets a float: the
- * quotient of the numerator and the denominator as doubles. `undefined` for
- * any other operand, and for a numerator or a denominator past the safe
- * integers, whose conversion to a double would already round.
+ * The numerator and the denominator, as doubles, of an exact rational literal
+ * that is not an integer (`1/3`, `-5/7`). `undefined` for any other operand,
+ * and for a numerator or a denominator past the safe integers, whose
+ * conversion to a double would already round.
  */
-function rationalScalarOf(op: Expression): number | undefined {
+function rationalScalarOf(op: Expression): [number, number] | undefined {
   if (!isNumber(op)) return undefined;
   const nv = op.numericValue;
   if (typeof nv === 'number') return undefined;
@@ -42,7 +41,7 @@ function rationalScalarOf(op: Expression): number | undefined {
   if (!Number.isSafeInteger(nn) || !Number.isSafeInteger(dd) || dd === 0)
     return undefined;
   if (Number.isInteger(nn / dd)) return undefined;
-  return nn / dd;
+  return [nn, dd];
 }
 
 /**
@@ -119,12 +118,17 @@ export function machineBroadcast(
   let length: number | undefined = undefined;
   const columns: (readonly number[] | number)[] = [];
   // An exact rational scalar (`L / 3` is `Multiply(1/3, L)`) is admitted in a
-  // sum or a product of TWO operands. With a float, the interpreter turns the
-  // rational into its double and makes one operation: `x·(p/q)` and
-  // `x + (p/q)` (measured on 16,000 cells each at machine precision). With an
-  // integer it answers an exact rational (`(1/3)·2` is `2/3`), which a double
-  // does not hold, so a cell with an integer declines (see the loop below).
+  // sum or a product of TWO operands. With a float, the interpreter makes one
+  // operation: `x + (p/q)` with the rational turned into its double, and
+  // `(x·p)/q` for a product, the numerator first, the double JavaScript's
+  // `x * p / q` gives (measured on 16,000 cells each at machine precision;
+  // a cell whose `x·p` overflows is not finite and declines). With
+  // an integer it answers an exact rational (`(1/3)·2` is `2/3`), which a
+  // double does not hold, so a cell with an integer declines (see the loop
+  // below).
   let rationalScalar = false;
+  let rationalProduct: [number, number] | undefined = undefined;
+  let listColumn = 0;
   for (const op of ops) {
     if (
       ops.length === 2 &&
@@ -134,7 +138,9 @@ export function machineBroadcast(
       const q = rationalScalarOf(op);
       if (q !== undefined) {
         rationalScalar = true;
-        columns.push(q);
+        if (operator === 'Multiply') rationalProduct = q;
+        listColumn = 1 - columns.length;
+        columns.push(q[0] / q[1]);
         continue;
       }
     }
@@ -177,7 +183,9 @@ export function machineBroadcast(
     const r =
       kernel.arity === 1
         ? kernel.apply(cell[0], 0)
-        : foldExactFirst(kernel, cell);
+        : rationalProduct !== undefined
+          ? (cell[listColumn] * rationalProduct[0]) / rationalProduct[1]
+          : foldExactFirst(kernel, cell);
     // A `NaN` or an infinite result, and an integer result past the safe
     // range (an exact big integer in the interpreter when every operand is
     // an integer, where the double boxes as a float), are decided by the

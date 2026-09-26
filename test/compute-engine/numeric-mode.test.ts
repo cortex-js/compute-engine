@@ -25,7 +25,7 @@ describe('NUMERIC MODE', () => {
       eval-auto = 1/7
       eval-mach = 1/7
       N-auto    = 0.142857142857142857143
-      N-mach    = 0.142857142857143
+      N-mach    = 0.14285714285714285
     `));
 
   test(`\\frac{1.5}{7.8}`, () =>
@@ -35,7 +35,7 @@ describe('NUMERIC MODE', () => {
       eval-auto = 1/7
       eval-mach = 1/7
       N-auto    = 0.142857142857142857143
-      N-mach    = 0.142857142857143
+      N-mach    = 0.14285714285714285
     `));
 
   test(`\\frac{\\pi}{4}`, () =>
@@ -55,7 +55,7 @@ describe('NUMERIC MODE', () => {
       eval-auto = 1/7
       eval-mach = 1/7
       N-auto    = 0.142857142857142857143
-      N-mach    = 0.142857142857143
+      N-mach    = 0.14285714285714285
     `));
 
   // The exact result is finite but astronomically large (~4.6·10^20 digits),
@@ -127,7 +127,7 @@ describe('NUMERIC MODE bignum 7', () => {
     expect(N('\\sqrt{-1}')).toMatchInlineSnapshot(`["Complex", 0, 1]`));
 
   test(`\\frac{1}{7}`, () =>
-    expect(N('\\frac{1}{7}')).toMatchInlineSnapshot(`0.142857142857143`));
+    expect(N('\\frac{1}{7}')).toMatchInlineSnapshot(`0.14285714285714285`));
 
   test(`\\frac{\\pi}{4}`, () =>
     expect(N('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`0.7853981633974483`));

@@ -1,4 +1,5 @@
 import { BigDecimal } from '../../big-decimal/index.js';
+import { MACHINE_PRECISION } from '../numerics/numeric.js';
 
 import { Rational, SmallInteger } from '../numerics/types.js';
 import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric.js';
@@ -331,8 +332,29 @@ export class ExactNumericValue extends NumericValue {
 
   private _bignumComponent(r: Rational, radical: number): BigDecimal {
     if (radical === 1) {
-      if (isMachineRational(r)) return new BigDecimal(r[0]).div(r[1]);
-      return new BigDecimal(r[0]).div(new BigDecimal(r[1]));
+      // A machine-precision engine sets the global `BigDecimal.precision` to
+      // `MACHINE_PRECISION` (15), fewer than the 17 significant digits a
+      // double carries, so a quotient rounded at that precision and then
+      // converted with `.toNumber()` (the machine lane's `N()`, and every
+      // `factory(bignumRe)` below) is a wrong double: `1/6` came out as
+      // `0.166666666666667`, and `(1/6)·π` nine units in the last place from
+      // `Math.PI / 6`. In machine mode the quotient is computed at 25 digits,
+      // the floor the radical branch uses. At any other precision the working
+      // precision is kept: a big-decimal engine prints exactly its digits,
+      // and an engine below machine precision (`precision: 3`) numericizes
+      // to that coarse precision by design (`6000001/2000000` is `3`).
+      const quotient = () =>
+        isMachineRational(r)
+          ? new BigDecimal(r[0]).div(r[1])
+          : new BigDecimal(r[0]).div(new BigDecimal(r[1]));
+      const saved = BigDecimal.precision;
+      if (saved !== MACHINE_PRECISION) return quotient();
+      BigDecimal.precision = 25;
+      try {
+        return quotient();
+      } finally {
+        BigDecimal.precision = saved;
+      }
     }
     // rational × √radical: compute the two rounded factors with guard
     // digits, then round the (exact, ~2P-digit) product back to the working

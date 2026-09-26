@@ -345,8 +345,21 @@ export class MachineNumericValue extends NumericValue {
     )
       return this.clone({ re: Infinity, im: Infinity });
 
-    if (this.im === 0 && other.im === 0)
+    if (this.im === 0 && other.im === 0) {
+      // A product with an exact rational is `(x · p) / q`, the order in which
+      // JavaScript evaluates `x * p / q` and the double the kernels are
+      // measured against: `x · (p / q)` gave `(7/6)·π` one unit in the last
+      // place from `Math.PI * 7 / 6`, and `sin(7π/6)` four units from
+      // `Math.sin` of the same angle. When `x · p` overflows a double the
+      // quotient form is kept, so `(2/3)·1.5e308` stays finite.
+      const r = exactMachineRational(other);
+      if (r !== null) {
+        const n = this.decimal * r[0];
+        if (Number.isFinite(n) || !Number.isFinite(this.decimal))
+          return this.clone(n / r[1]);
+      }
       return this.clone(this.decimal * other.re);
+    }
 
     return this.clone({
       re: this.decimal * other.re - this.im * other.im,
@@ -703,4 +716,17 @@ export class MachineNumericValue extends NumericValue {
 // convention"): scale of machine roundoff, not `ce.tolerance`.
 function chop(n: number): number {
   return Math.abs(n) <= ROUNDOFF_TOLERANCE ? 0 : n;
+}
+
+/**
+ * The `[p, q]` of an exact real rational with machine-integer parts and no
+ * radical, or `null`: the operand shape whose product with a float is best
+ * computed as `(x · p) / q`.
+ */
+function exactMachineRational(v: NumericValue): [number, number] | null {
+  if (!(v instanceof ExactNumericValue) || v.im !== 0 || v.radical !== 1)
+    return null;
+  const [p, q] = v.rational;
+  if (typeof p !== 'number' || typeof q !== 'number') return null;
+  return [p, q];
 }

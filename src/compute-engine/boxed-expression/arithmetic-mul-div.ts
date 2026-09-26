@@ -2101,6 +2101,24 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   return new Product(ce, xs).asRationalExpression();
 }
 
+/**
+ * Whether `x` is a number literal holding an exact integer or rational. A
+ * radical is not included: its product with a big-decimal factor would keep
+ * the unrounded digits of both factors (`√2·π` came out with 50 digits), so
+ * it is numericized first, as before.
+ */
+function isExactRealLiteral(x: Expression): boolean {
+  if (!isNumber(x)) return false;
+  const nv = x.numericValue;
+  if (typeof nv === 'number') return Number.isInteger(nv);
+  return (
+    nv.isExact &&
+    nv.im === 0 &&
+    nv instanceof ExactNumericValue &&
+    nv.radical === 1
+  );
+}
+
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   return mulNEvaluated(xs);
 }
@@ -2181,6 +2199,22 @@ export function mulNEvaluated(
       tupleInert = true;
     }
   }
+  // An exact integer or rational literal is remembered here and, when every
+  // factor is a number literal, folded into the product's coefficient as is
+  // in the scalar assembly at the end: its product with a float factor is
+  // then `(x · p) / q` in the float lane, the numerator first (one rounding
+  // in the big-decimal lane, and in the machine lane the double JavaScript's
+  // `x * p / q` gives). Numericizing it first rounded the quotient and then
+  // the product, and `sin(π/6)` at 21 digits was `0.500…001` where the
+  // kernel answers `0.5` for the correctly rounded angle. Every other
+  // product floats each literal as before: the collection, tensor and tuple
+  // dispatches below see floats (`PointX` of an exact point list under
+  // `.N()` floats), and a product with a symbolic factor keeps no exact
+  // coefficient that `expandProducts` could rebuild into a `Divide`
+  // (`(1/3)·(1/x)` under `.N()` is `0.333…/x`, not `1/(3x)`).
+  const exactFactors = xs.map((x, i) =>
+    !numeric?.[i] && isExactRealLiteral(x) ? x : undefined
+  );
   xs = xs.map((x, i) => (numeric?.[i] ? x : x.N()));
   // Post-evaluation re-dispatch (Tycho item 52): an operand may only have
   // BECOME a collection through the numeric evaluation above (`Mod(L,11)`
@@ -2239,13 +2273,23 @@ export function mulNEvaluated(
   if (xs.some(hasDistributableSum))
     return new Product(ce, xs).asRationalExpression();
 
-  const exp = expandProducts(ce, xs);
+  // The scalar assembly, with the exact integer and rational literals when
+  // every factor is a number literal (see the numericizing map above). A
+  // product that folds to an exact literal (`(1/3)·(2/3)`) is floated, since
+  // this is the numeric route.
+  let factors: ReadonlyArray<Expression> = xs.every((x) => isNumber(x))
+    ? xs.map((x, i) => exactFactors[i] ?? x)
+    : xs;
+  const exp = expandProducts(ce, factors);
   if (exp) {
-    if (exp.operator !== 'Multiply') return exp;
-    if (isFunction(exp)) xs = exp.ops;
+    if (exp.operator !== 'Multiply')
+      return isExactRealLiteral(exp) ? exp.N() : exp;
+    if (isFunction(exp)) factors = exp.ops;
   }
 
-  return new Product(ce, xs).asExpression({ numericApproximation: true });
+  return new Product(ce, factors).asExpression({
+    numericApproximation: true,
+  });
 }
 
 /**
