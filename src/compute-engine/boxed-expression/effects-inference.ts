@@ -458,14 +458,38 @@ function restrictionValueType(
 ): Type | undefined {
   if (valueExpr === undefined) return undefined;
   const t = value.type;
-  if (typeof t !== 'object' || t.kind !== 'union') return undefined;
-  if (!t.types.includes('missing')) return undefined;
   // Stacked restrictions canonicalize into one `When`, but a value that was
   // not canonicalized can still nest, so walk to the innermost held operand.
   let held: Expression = valueExpr;
   while (isFunction(held, 'When') && held.ops.length === 2) held = held.op1;
-  if (held === valueExpr || !isNumber(held)) return undefined;
+  if (held === valueExpr) return undefined;
+  // A NUMERIC restriction is typed with a `nan` arm and no `missing` arm,
+  // because it masks to `NaN` (user decision 2026-09-25): the type it
+  // PRESENTS is the value it holds, `integer` for `5 {a > 0}`, which is what
+  // an assumption (`v > 3`) or a declared range (`integer<3<..>`) is asked
+  // about. This extends the 2026-09-22 rule (absence is a state every type
+  // can take, so a `missing` arm is not held against the declared type) to
+  // the `NaN` a masked number answers: a declared `integer<3<..>` symbol
+  // holding `5 {a > 0}` evaluates to `NaN` once `a` fails, exactly as it
+  // evaluated to `Missing` before. A list
+  // MASK over numbers (`[10,20,30] {[1,2,3] > 2}`, `5 {[a > 0, b > 0]}`) is
+  // typed `list<number>` for the same reason and presents the held list, or
+  // a list of the held number's tier.
+  if (isNumber(held) && isSubtype(t, 'number')) return held.type.type;
+  if (
+    typeof t === 'object' &&
+    t.kind === 'list' &&
+    isSubtype(t.elements, 'number')
+  ) {
+    if (isNumber(held)) return { kind: 'list', elements: held.type.type };
+    if (isFunction(held, 'List') && isSubtype(held.type.type, 'list<number>'))
+      return held.type.type;
+    return undefined;
+  }
+  if (!isNumber(held)) return undefined;
   const literal = held.type.type;
+  if (typeof t !== 'object' || t.kind !== 'union') return undefined;
+  if (!t.types.includes('missing')) return undefined;
   if (!isSubtype(literal, stripMissingFromType(t))) return undefined;
   return reduceType({ kind: 'union', types: [literal, 'missing'] });
 }
@@ -487,7 +511,7 @@ export function presentedValueType(
 ): BoxedType {
   const refined = restrictionValueType(value.type, value);
   const t = refined ?? value.type.type;
-  if (!typeContainsMissing(t)) return value.type;
+  if (!typeContainsMissing(t)) return refined ? ce.type(refined) : value.type;
   return ce.type(stripMissingFromType(t));
 }
 

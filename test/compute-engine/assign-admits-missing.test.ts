@@ -34,9 +34,11 @@ describe('the type a restriction carries', () => {
     );
   });
 
-  test('a gated scalar has a `missing` arm', () => {
+  test('a gated scalar has a `nan` arm', () => {
+    // A masked number is `NaN` (user decision 2026-09-25); the arm was
+    // `missing`.
     const ce = new ComputeEngine();
-    expect(gatedScalar(ce).type.toString()).toBe('integer | missing');
+    expect(gatedScalar(ce).type.toString()).toBe('integer | nan');
   });
 });
 
@@ -88,7 +90,8 @@ describe('the bound gate still decides at evaluation', () => {
     ce.assign('a', 1);
     expect(ce.box('n').evaluate().toString()).toBe('3');
     ce.assign('a', -1);
-    expect(ce.box('n').evaluate().symbol).toBe('Missing');
+    // A masked number is `NaN` (user decision 2026-09-25).
+    expect(ce.box('n').evaluate().isNaN).toBe(true);
   });
 });
 
@@ -152,10 +155,10 @@ describe('the other declared-type admission routes', () => {
 });
 
 describe('an inferred type still carries the `missing` arm', () => {
-  test('an undeclared symbol keeps `integer | missing`', () => {
+  test('an undeclared symbol keeps `integer | nan`', () => {
     const ce = new ComputeEngine();
     ce.assign('q', ce.parse('3\\left\\{a>0\\right\\}'));
-    expect(ce.box('q').type.toString()).toBe('integer | missing');
+    expect(ce.box('q').type.toString()).toBe('integer | nan');
   });
 });
 

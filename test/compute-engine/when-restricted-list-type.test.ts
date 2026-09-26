@@ -167,7 +167,7 @@ describe('the applications over a restricted list follow', () => {
   test('an absent operand beside a list still lands in each cell of a broadcast', () => {
     const ce = engine();
     const e = ce.box(['Add', ['List', 1, 2, 3], ['When', 2, ['Less', 0, 't']]]);
-    expect(e.type.toString()).toBe('vector<3>');
+    expect(e.type.toString()).toBe('list<integer | nan^3>');
     ce.assign('t', -1);
     expect(e.evaluate().toString()).toBe('[NaN,NaN,NaN]');
   });
@@ -187,7 +187,8 @@ describe('the applications over a restricted list follow', () => {
     const cell = probe(ce, ['At', M, 2, 1]);
     expect(cell.type).toBe('integer | missing | nan');
     expect(cell.value).toBe('3 {0 < t}');
-    expect(cell.twoStep).toBe('"Missing"');
+    // A masked NUMBER is `NaN` (user decision 2026-09-25).
+    expect(cell.twoStep).toBe('NaN');
   });
 });
 

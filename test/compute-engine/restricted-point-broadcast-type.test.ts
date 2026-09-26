@@ -89,11 +89,14 @@ describe('a broadcast over a restricted point keeps the point and the absence', 
     expect(ce.parse(`-${P}`).type.toString()).toBe('tuple<integer, integer>');
   });
 
-  test('a restricted scalar factor beside a point makes the point absent', () => {
+  test('a restricted scalar factor beside a point lands in each coordinate', () => {
+    // A masked number is `NaN` (user decision 2026-09-25), and a scalar
+    // restriction beside a point lands in each coordinate, so the absent
+    // product is `(NaN, NaN)`; it was `Missing`, the whole point.
     const r = probe(String.raw`2\left\{0<t\right\}\cdot${P}`);
-    expect(r.type).toBe('missing | tuple<integer, integer>');
+    expect(r.type).toBe('tuple<integer | nan, integer | nan>');
     expect(r.present).toBe('(0, 2)');
-    expect(r.absent).toBe('"Missing"');
+    expect(r.absent).toBe('(NaN, NaN)');
   });
 });
 
@@ -111,7 +114,9 @@ describe('a broadcast over a restricted list keeps the list and the absence', ()
 
   test('a restricted scalar beside a list still lands in each cell', () => {
     const r = probe(String.raw`[1,2,3]+2\left\{0<t\right\}`);
-    expect(r.type).toBe('vector<3>');
+    // The cells are `integer | nan`: a masked number is `NaN` (user
+    // decision 2026-09-25).
+    expect(r.type).toBe('list<integer | nan^3>');
     expect(r.absent).toBe('[NaN,NaN,NaN]');
   });
 
@@ -215,7 +220,7 @@ describe('a list that holds a restricted point or masked points', () => {
     [
       'a restricted point times masked numbers',
       ['Multiply', PJ, NUMS],
-      '["Missing","Missing",(0, 30)]',
+      '[(NaN, NaN),(NaN, NaN),(0, 30)]',
       '["Missing","Missing","Missing"]',
     ],
     [

@@ -196,18 +196,24 @@ describe('A2 — Multi-restriction GLSL verification', () => {
     expect(v1.re).toEqual(9);
     ce.assign('x', -1);
     const v2 = expr.evaluate();
-    expect(v2.symbol).toEqual('Missing');
+    // A masked number is `NaN` (user decision 2026-09-25).
+    expect(v2.isNaN).toBe(true);
     ce.assign('x', 10);
     const v3 = expr.evaluate();
-    expect(v3.symbol).toEqual('Missing');
+    // A masked number is `NaN` (user decision 2026-09-25).
+    expect(v3.isNaN).toBe(true);
   });
 });
 
 describe('A2 — When(e, False) masking rule', () => {
-  test('When(e, False) evaluates to Missing', () => {
+  test('When(e, False) evaluates to NaN for a number', () => {
+    // The mask is the absence marker of the value's type (user decision
+    // 2026-09-25): `NaN` for a number, `Missing` for a point.
     const ce = new ComputeEngine();
-    const expr = ce.expr(['When', 42, 'False']);
-    expect(expr.evaluate().symbol).toEqual('Missing');
+    expect(ce.expr(['When', 42, 'False']).evaluate().isNaN).toBe(true);
+    expect(
+      ce.expr(['When', ['Tuple', 1, 2], 'False']).evaluate().symbol
+    ).toEqual('Missing');
   });
 
   test('When(e, True) evaluates to e', () => {

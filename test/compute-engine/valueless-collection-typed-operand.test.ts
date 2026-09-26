@@ -488,7 +488,8 @@ describe('a collection-TYPED but valueless operand', () => {
           .evaluate()
           .toString()
       );
-      expect(ce.box(stored.json).evaluate().toString()).toBe('[1,"Missing"]');
+      // A masked numeric cell is `NaN` (user decision 2026-09-25).
+      expect(ce.box(stored.json).evaluate().toString()).toBe('[1,NaN]');
     });
 
     // `PointList` zips its components into points, lifting a scalar component

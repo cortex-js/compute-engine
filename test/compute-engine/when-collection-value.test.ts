@@ -166,7 +166,8 @@ describe('When: collection-valued restriction', () => {
         ce.parse(s, { strict: false }).evaluate().toString();
 
       expect(ev('\\mathrm{When}(7, 1>0)')).toEqual('7');
-      expect(ev('\\mathrm{When}(7, 1<0)')).toEqual('"Missing"');
+      // A masked number is `NaN` (user decision 2026-09-25).
+      expect(ev('\\mathrm{When}(7, 1<0)')).toEqual('NaN');
       expect(ev('\\mathrm{When}([1,2,3], 1>0)')).toEqual('[1,2,3]');
       expect(ev('\\mathrm{When}([1,2,3], 1<0)')).toEqual('"Missing"');
     });

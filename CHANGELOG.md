@@ -2,6 +2,24 @@
 
 ### Behavior Changes
 
+- **A restriction over a number masks to `NaN`.** `x\{c\}` with `c` false
+  evaluates to `NaN` when `x` is a number; it was `Missing`. A point, a list, a
+  string or a value that is not provably numeric still masks to `Missing`. The
+  type of a numeric restriction is its tier with a `nan` arm, `integer | nan`
+  for `1\{c\}` (it was `integer | missing`), and a masked numeric cell of a list
+  mask is `NaN` (`[10,20,30]\{[1,2,3] > 2\}` is `[NaN, NaN, 30]`, typed
+  `list<number>`; it was `[Missing, Missing, 30]`). This removes the
+  disagreement between the two evaluation routes: `2x\{c\}`, `\sin(x\{c\})`,
+  `Length([1,2]\{c\})` and `Sum([1,2]\{c\})` now answer `NaN` once `c` fails
+  whether they are evaluated in one step or re-evaluated from a held result, as
+  the compiled code always did. With it, a scalar restriction beside a list or a
+  point lands in each cell of the result: `[1,2,3] + 2\{c\}` is
+  `[3\{c\}, 4\{c\}, 5\{c\}]` (`[NaN, NaN, NaN]` once `c` fails) and
+  `2\{c\}·(1,2)` is `(2\{c\}, 4\{c\})` (`(NaN, NaN)`; it was `Missing`, the
+  whole point). A restricted list or point (`[1,2]\{c\} + 1`, `P\{c\} + (1,1)`)
+  still restricts the whole result. A `Which` with no selected clause and the
+  else-less `If` are unchanged (`Missing`). A gated value still binds to a
+  declared range or an assumption (`e := 5\{a>0\}` with `e: integer<3<..>`).
 - **A bracketed list in the parentheses of a function call keeps the parentheses
   in the raw and structural forms** (Tycho item 320). With `A` declared as a
   function, `A([1])` and `A\left(\left[1\right]\right)` parse to
@@ -129,28 +147,28 @@
 ### Improvements
 
 - **A call of a whole-list function is typed and compiled from its argument
-  (Tycho item 323).** When a user function binds a list argument whole (it has
-  a collection parameter, declared or inferred from its body) and its
-  parameter is broader than the argument (a bare `function` declaration, whose
-  parameter types come from the body, or a declared `list`, `collection` or
-  `unknown` parameter), the call is now typed from the body with the parameter
-  typed as the argument, and the JavaScript target compiles it through a
-  helper specialized to the argument's list type. With `u(l)` (an up-sampling
+  (Tycho item 323).** When a user function binds a list argument whole (it has a
+  collection parameter, declared or inferred from its body) and its parameter is
+  broader than the argument (a bare `function` declaration, whose parameter
+  types come from the body, or a declared `list`, `collection` or `unknown`
+  parameter), the call is now typed from the body with the parameter typed as
+  the argument, and the JavaScript target compiles it through a helper
+  specialized to the argument's list type. With `u(l)` (an up-sampling
   comprehension over `l[…]` and `Length(l)`), `s(l)` and `d(l, a)` declared as
-  bare `function` and `L: list<real>`, `d(s(u(L)), 1)` was typed
-  `list<unknown>` and failed to compile ("Could not compile `Length`: operand
-  is not an indexed collection"); declared `(list) -> unknown` it failed with
-  "scalar arithmetic over a list-valued operand". It is now typed
-  `list<nan | real>`, and the twelve-call chain `d(s(u(…)), 4)` compiles in
-  milliseconds to the same 4 096 values as the `(list<real>) -> unknown`
-  declaration. The typing is a pure walk of the body (a list comprehension's
-  index is typed as an element of its source), memoized per argument type, so
-  the cost does not grow with the nesting depth. A parameter declared with an
-  element type (`list<number>`) keeps its single definition, and a function
-  whose parameters are all scalar still maps over a list argument. A sum that
-  failed closed because a declared result union could not be decided by shape
-  (`W(p, x, y, z) + PointList(…)` with `W` returning "a point or a list of
-  points") now compiles when the body proves a list of points.
+  bare `function` and `L: list<real>`, `d(s(u(L)), 1)` was typed `list<unknown>`
+  and failed to compile ("Could not compile `Length`: operand is not an indexed
+  collection"); declared `(list) -> unknown` it failed with "scalar arithmetic
+  over a list-valued operand". It is now typed `list<nan | real>`, and the
+  twelve-call chain `d(s(u(…)), 4)` compiles in milliseconds to the same 4 096
+  values as the `(list<real>) -> unknown` declaration. The typing is a pure walk
+  of the body (a list comprehension's index is typed as an element of its
+  source), memoized per argument type, so the cost does not grow with the
+  nesting depth. A parameter declared with an element type (`list<number>`)
+  keeps its single definition, and a function whose parameters are all scalar
+  still maps over a list argument. A sum that failed closed because a declared
+  result union could not be decided by shape (`W(p, x, y, z) + PointList(…)`
+  with `W` returning "a point or a list of points") now compiles when the body
+  proves a list of points.
 - **A seeded list draw compiles on the `interval-js` target.**
   `WithRandomSeed(seed, RandomChoice(domain, k))`, with a literal seed and a
   domain that is an `Interval` with finite literal endpoints, a `Range` with
@@ -185,33 +203,32 @@
   `success: true` and returned `{ re: NaN, im: NaN }` objects in place of the
   numbers the interpreter gives (`[7/2, 9/2, …]`): its parameter, inferred as
   `indexed_collection<number>`, was compiled as possibly complex. Deeper in a
-  nested chain the same helper produced strings such as
-  `"[object Object]1.58"`. The call now compiles through the specialization
-  above, in the real lane.
+  nested chain the same helper produced strings such as `"[object Object]1.58"`.
+  The call now compiles through the specialization above, in the real lane.
 - **`Multiply` keeps a `nan` arm.** A factor typed `nan | real` (the type of an
-  element read `l[i]` that may fall outside the list) made the product
-  `number`, which admits a complex value, while `Add`, `Negate` and `Subtract`
-  kept `nan | real`. `2·x`, `r·x` and `x/4` with `x: nan | real` and `r: real`
-  are now typed `nan | real`.
+  element read `l[i]` that may fall outside the list) made the product `number`,
+  which admits a complex value, while `Add`, `Negate` and `Subtract` kept
+  `nan | real`. `2·x`, `r·x` and `x/4` with `x: nan | real` and `r: real` are
+  now typed `nan | real`.
 - **The normal CDF written as an integral evaluates over a list** (Tycho item
   325). With `s = 0.577`, `G = [-1, 0, 1]` and
   `E(x) = \frac{1}{\sqrt{2\pi}s}\int_{-\infty}^{x}\exp(-\frac{1}{2}\frac{Z^2}{s^2})\,\mathrm{d}Z`,
   `E(G).evaluate()` was a list of symbolic integrals (each element's `.re` was
-  `NaN`) and it is `[0.0415…, 0.5, 0.9585…]`, the values the compiled
-  JavaScript route gives. `E(0).evaluate()` is `0.5`; it was symbolic too. The
-  Gaussian antiderivative `∫ e^{a·Z² + b·Z + c} dZ` did not recognize an
-  exponent divided by a factor free of `Z` (`Z²/s²`, or `Z²/0.577²`, which
-  stays a quotient because the denominator is a float), so every element also
-  repeated the full antiderivative search. The polynomial coefficients of such
-  a quotient are now read (`PolynomialDegree(x²/a, x)` is `2`). Also:
+  `NaN`) and it is `[0.0415…, 0.5, 0.9585…]`, the values the compiled JavaScript
+  route gives. `E(0).evaluate()` is `0.5`; it was symbolic too. The Gaussian
+  antiderivative `∫ e^{a·Z² + b·Z + c} dZ` did not recognize an exponent divided
+  by a factor free of `Z` (`Z²/s²`, or `Z²/0.577²`, which stays a quotient
+  because the denominator is a float), so every element also repeated the full
+  antiderivative search. The polynomial coefficients of such a quotient are now
+  read (`PolynomialDegree(x²/a, x)` is `2`). Also:
   `\int_{-\infty}^{G}…\,\mathrm{d}Z` with a list bound `G` is typed
   `list<number>` (it was typed `number`) and its `.N()` is the list of the
   integrals (it stayed unevaluated), and `.N()` of a number times a list of
-  `Measurement` values folds every element (`0.5·[2 ± 0.1, 3 ± 0.1]` was a
-  list of unevaluated products, and is `[1 ± 0.05, 1.5 ± 0.05]`).
-  A list bound on a multiple integral is handled the same way, one complete
-  integral per element, with several list bounds paired element by element;
-  lists of different lengths leave the integral unevaluated.
+  `Measurement` values folds every element (`0.5·[2 ± 0.1, 3 ± 0.1]` was a list
+  of unevaluated products, and is `[1 ± 0.05, 1.5 ± 0.05]`). A list bound on a
+  multiple integral is handled the same way, one complete integral per element,
+  with several list bounds paired element by element; lists of different lengths
+  leave the integral unevaluated.
 - **A number times a list comprehension serializes to text that parses back**
   (Tycho item 319). `Multiply(0.01, Comprehension(u+1, Element(u, [1,2,3])))`
   serializes as `0.01\left[u+1 \operatorname{for} u = …\right]`, and parsing
@@ -262,51 +279,50 @@
   interpreter does (`Take([10,20,30,40], 2+i)` is `[10, 20]`), through the new
   runtime helper `_SYS.realPart`, which is emitted only for an operand on the
   complex lane.
-- **A sum of an `unknown` symbol and a constant is accepted where a
-  collection is expected** (Tycho item 321). With `P` declared `unknown`,
-  `Histogram(P + 0.5, 1/100)` was an `incompatible-type` error
-  (`'collection'` expected, `'number'` found) and `P` ended typed `number`,
-  while `Histogram(2P, 1/100)` was valid and typed `P` as `matrix`. Bottom-up
-  inference first types every `unknown` operand of arithmetic `number`; when
-  the enclosing parameter accepts a matrix, a repair then retypes those
-  symbols `matrix` and boxes the argument again, but only for the shapes it
-  has a plan for. That plan accepted a constant factor of a product but made a
-  sum with a constant term fail, and it had no case for a quotient. It now
-  accepts a constant term of a sum (`matrix + scalar` is a matrix) and a
-  quotient whose denominator does not contain a repaired symbol, so
-  `Histogram(P + 0.5, 1/100)` and
-  `Histogram(0.5 + ((1-v)P_0 + vP_1 - 0.5)/\sqrt{(1-v)^2 + v^2}, 1/100)` are
+- **A sum of an `unknown` symbol and a constant is accepted where a collection
+  is expected** (Tycho item 321). With `P` declared `unknown`,
+  `Histogram(P + 0.5, 1/100)` was an `incompatible-type` error (`'collection'`
+  expected, `'number'` found) and `P` ended typed `number`, while
+  `Histogram(2P, 1/100)` was valid and typed `P` as `matrix`. Bottom-up
+  inference first types every `unknown` operand of arithmetic `number`; when the
+  enclosing parameter accepts a matrix, a repair then retypes those symbols
+  `matrix` and boxes the argument again, but only for the shapes it has a plan
+  for. That plan accepted a constant factor of a product but made a sum with a
+  constant term fail, and it had no case for a quotient. It now accepts a
+  constant term of a sum (`matrix + scalar` is a matrix) and a quotient whose
+  denominator does not contain a repaired symbol, so `Histogram(P + 0.5, 1/100)`
+  and `Histogram(0.5 + ((1-v)P_0 + vP_1 - 0.5)/\sqrt{(1-v)^2 + v^2}, 1/100)` are
   valid and type `P` as `matrix`, as `Histogram(2P, 1/100)` does. The same
   repair serves the matrix operators: `Determinant(A + 1)` with `A` unknown is
-  now valid, with `A: matrix`. Outside such a parameter nothing changes:
-  `x + 1` still types `x` as `number`.
+  now valid, with `A: matrix`. Outside such a parameter nothing changes: `x + 1`
+  still types `x` as `number`.
 - **At machine precision, a rational is the correctly rounded double, and a
-  rational times a constant is the double of `x * p / q`.** `Divide(Pi, 6).N()` with
-  `precision: 'machine'` was `0.5235987755982998`, nine units in the last
+  rational times a constant is the double of `x * p / q`.** `Divide(Pi, 6).N()`
+  with `precision: 'machine'` was `0.5235987755982998`, nine units in the last
   place from `Math.PI / 6`, `(1/6).N()` printed `0.166666666666667`, and
-  `\sin(7\pi/6).N()` was about ten units from `Math.sin` of the same angle:
-  an exact rational was converted through a 15-digit big decimal, fewer than
-  the 17 digits a double carries, and then multiplied. The conversion now
-  keeps 25 digits in machine mode, and a product of an exact rational and a
-  float is computed as `(x·p)/q` on every route, the eager list arithmetic
-  included, so `\frac{7\pi}{6}` is `Math.PI * 7 / 6` exactly. Every
-  machine-precision value that involved a non-integer rational moves by a
-  few units in the last place (26 snapshots).
-- **At 21 digits, `\sin(\pi/6)`, `\cos(\pi/3)` and `\sin(30)` in degree
-  mode are exactly `0.5`.** They were `0.500…001`: the rational multiple of
-  π was rounded to the working precision and then multiplied by π, two
-  roundings, and in `canonicalAngle` the multiple was reduced modulo 2 as a
-  float. The product keeps 5 guard digits and the reduction is exact.
-  `\cos(30\degree)` at 21 digits is now `0.866025403784438646764`, the
-  correctly rounded value (it ended in `…763`).
+  `\sin(7\pi/6).N()` was about ten units from `Math.sin` of the same angle: an
+  exact rational was converted through a 15-digit big decimal, fewer than the 17
+  digits a double carries, and then multiplied. The conversion now keeps 25
+  digits in machine mode, and a product of an exact rational and a float is
+  computed as `(x·p)/q` on every route, the eager list arithmetic included, so
+  `\frac{7\pi}{6}` is `Math.PI * 7 / 6` exactly. Every machine-precision value
+  that involved a non-integer rational moves by a few units in the last place
+  (26 snapshots).
+- **At 21 digits, `\sin(\pi/6)`, `\cos(\pi/3)` and `\sin(30)` in degree mode are
+  exactly `0.5`.** They were `0.500…001`: the rational multiple of π was rounded
+  to the working precision and then multiplied by π, two roundings, and in
+  `canonicalAngle` the multiple was reduced modulo 2 as a float. The product
+  keeps 5 guard digits and the reduction is exact. `\cos(30\degree)` at 21
+  digits is now `0.866025403784438646764`, the correctly rounded value (it ended
+  in `…763`).
 - **In degree mode, a large angle with a π factor is reduced from its exact
   value.** `\sin(10^{30}\pi).N()` with `angularUnit = 'deg'` was `0`; it is
   `0.350160229920896711994`, the sine of `10³⁰·π²/180` radians. The angle is
   computed with enough digits to hold every digit of its integer part, and the
   kernel reduces it from those digits, as a radian angle already was. Also,
   `\cot(5\pi/2)` and `\tan(\pi)` at machine precision answer `0`, as
-  `\cos(5\pi/2)` does: the rounding dust of the big-decimal kernel at a
-  zero of `tan` and `cot` is chopped as it is for `sin` and `cos`.
+  `\cos(5\pi/2)` does: the rounding dust of the big-decimal kernel at a zero of
+  `tan` and `cot` is chopped as it is for `sin` and `cos`.
 - **An imaginary literal with an integer coefficient is exact on every route.**
   `4i` typed as LaTeX, `-2i`, `4\imaginaryI` and the one-argument
   `["Complex", 4]` were built as inexact floating-point values, while `i4`,

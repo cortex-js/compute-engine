@@ -115,15 +115,19 @@ describe('gated value assignment', () => {
     // The refinement lives at the assignment site, not in the `When` type
     // handler: a handler result is widened back to ordinary types, so the
     // handler cannot keep the literal `5` in the type it stores.
-    test('a scalar restriction types the tier joined with missing', () => {
+    // A NUMERIC restriction masks to `NaN` (user decision 2026-09-25), so
+    // its type is its tier with a `nan` arm and no `missing` arm; the value
+    // it presents to an assumption or a declared range is the literal it
+    // holds.
+    test('a scalar restriction types its tier with a nan arm', () => {
       const ce = new ComputeEngine();
-      expect(ce.parse('5\\{a>0\\}').type.toString()).toBe('integer | missing');
+      expect(ce.parse('5\\{a>0\\}').type.toString()).toBe('integer | nan');
     });
 
-    test('a list-broadcast restriction types a list of cells', () => {
+    test('a list-broadcast restriction types a list of numeric cells', () => {
       const ce = new ComputeEngine();
       expect(ce.parse('[10,20,30]\\{[1,2,3]>2\\}').type.toString()).toBe(
-        'list<integer | missing>'
+        'list<number>'
       );
     });
   });
@@ -133,9 +137,8 @@ describe('gated value assignment', () => {
       const ce = new ComputeEngine();
       ce.declare('L', 'list<integer>');
       ce.assign('L', ce.parse('[10,20,30]\\{[1,2,3]>2\\}'));
-      expect(ce.box('L').evaluate().toString()).toBe(
-        '["Missing","Missing",30]'
-      );
+      // Masked numeric cells are `NaN` (user decision 2026-09-25).
+      expect(ce.box('L').evaluate().toString()).toBe('[NaN,NaN,30]');
     });
 
     test('a scalar masked by a list of conditions binds to a declared list', () => {

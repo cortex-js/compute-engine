@@ -30,7 +30,9 @@ const interp = (json: unknown): string =>
 
 describe('a restriction with a list of conditions', () => {
   test('a scalar value is repeated at every position, masked per condition', () => {
-    expect(interp(['When', 'u', COND])).toBe('[5,"Missing","Missing"]');
+    // A masked numeric cell is `NaN` (user decision 2026-09-25), as the
+    // compiled code always answered.
+    expect(interp(['When', 'u', COND])).toBe('[5,NaN,NaN]');
     expect(run(['When', 'u', COND])).toEqual([5, NaN, NaN]);
   });
 
@@ -57,7 +59,7 @@ describe('a restriction with a list of conditions', () => {
       ['List', 10, 20, 30],
       ['Greater', ['List', 1, 2, 3], 2],
     ];
-    expect(interp(json)).toBe('["Missing","Missing",30]');
+    expect(interp(json)).toBe('[NaN,NaN,30]');
     expect(run(json)).toEqual([NaN, NaN, 30]);
   });
 
@@ -67,21 +69,21 @@ describe('a restriction with a list of conditions', () => {
       ['List', 10, 20],
       ['Less', ['List', 'v', ['Multiply', 2, 'v'], ['Multiply', 3, 'v']], 2],
     ];
-    expect(interp(shorter)).toBe('[10,"Missing"]');
+    expect(interp(shorter)).toBe('[10,NaN]');
     expect(run(shorter)).toEqual([10, NaN]);
     const longer = [
       'When',
       ['List', 10, 20, 30, 40],
       ['Less', ['List', 'v', ['Multiply', 2, 'v']], 2],
     ];
-    expect(interp(longer)).toBe('[10,"Missing"]');
+    expect(interp(longer)).toBe('[10,NaN]');
     expect(run(longer)).toEqual([10, NaN]);
     const allFalse = [
       'When',
       ['List', 10, 20],
       ['Greater', ['List', 'v', ['Multiply', 2, 'v']], 5],
     ];
-    expect(interp(allFalse)).toBe('["Missing","Missing"]');
+    expect(interp(allFalse)).toBe('[NaN,NaN]');
     expect(run(allFalse)).toEqual([NaN, NaN]);
   });
 
@@ -91,7 +93,7 @@ describe('a restriction with a list of conditions', () => {
       ['Add', 'u', ['Multiply', ['Complex', 0, 1], 'v']],
       ['Less', ['Multiply', 'v', ['List', 1, 2]], 2],
     ];
-    expect(interp(json)).toBe('[(5 + i),"Missing"]');
+    expect(interp(json)).toBe('[(5 + i),NaN]');
     const out = run(json) as { re: number; im: number }[];
     expect(out[0]).toEqual({ re: 5, im: 1 });
     expect(out[1].re).toBeNaN();

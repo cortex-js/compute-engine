@@ -2714,16 +2714,24 @@ describe('ERROR-MODEL §3 — a lazy operator propagates only what it DEMANDS', 
     expect(symbolName(ce2.box(['Which', 'False', 1]).evaluate())).toBe(
       'Missing'
     );
-    expect(symbolName(ce2.box(['When', 5, 'False']).evaluate())).toBe(
-      'Missing'
-    );
+    // `When` differs since 2026-09-25: a restriction masks to the marker of
+    // its VALUE'S type, `NaN` for a number and `Missing` otherwise.
+    expect(ce2.box(['When', 5, 'False']).evaluate().isNaN).toBe(true);
+    expect(
+      symbolName(ce2.box(['When', ['Tuple', 1, 2], 'False']).evaluate())
+    ).toBe('Missing');
   });
 
   test('the When restriction carries the missing arm in its type, like a default-less Which', () => {
     const ce2 = new ComputeEngine();
+    // A numeric restriction is typed with a `nan` arm and no `missing` arm
+    // (user decision 2026-09-25); a point keeps the arm.
     expect(ce2.box(['When', 5, ['Less', 1, 0]]).type.toString()).toBe(
-      'integer | missing'
+      'integer | nan'
     );
+    expect(
+      ce2.box(['When', ['Tuple', 1, 2], ['Less', 1, 0]]).type.toString()
+    ).toBe('missing | tuple<integer, integer>');
     expect(ce2.box(['Which', ['Less', 1, 0], 5]).type.toString()).toBe(
       'integer | missing'
     );
@@ -2732,7 +2740,9 @@ describe('ERROR-MODEL §3 — a lazy operator propagates only what it DEMANDS', 
     // A masked cell in a list is typed like an absent one.
     expect(
       ce2.box(['List', 1, ['When', 2, ['Less', 1, 0]], 3]).type.toString()
-    ).toBe('list<integer | missing>');
+      // The masked cell is `NaN` (user decision 2026-09-25): the list has
+      // three numeric cells, one of them `integer | nan`, and no absent one.
+    ).toBe('list<integer | nan^3>');
     // A restriction over an UNDECLARED symbol types `missing | unknown`, and
     // juxtaposition still reads it as a product, as it reads a bare `unknown`.
     // Before the alignment `2x{x>0}` was a product only because `When` hid

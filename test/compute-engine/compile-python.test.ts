@@ -1770,8 +1770,13 @@ describe('PYTHON TARGET', () => {
     });
 
     it('declines When with a collection-valued condition', () => {
+      // `constantFold: false`, as for `Which` above: since a masked number
+      // is `NaN` (user decision 2026-09-25) the whole `When` is a literal
+      // list, `[1, NaN]`, which constant folding emits as `[1, np.nan]`.
       expect(() =>
-        python.compile(ce.box(['When', 1, ['List', 'True', 'False']]))
+        python.compile(ce.box(['When', 1, ['List', 'True', 'False']]), {
+          constantFold: false,
+        })
       ).toThrow(/branch condition is a collection-valued expression/);
     });
 

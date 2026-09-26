@@ -26,8 +26,10 @@ describe('a broadcast over a list restricted by a list of conditions', () => {
   // answered a 3×3 matrix.
   test('the masked list itself', () => {
     const e = ce.parse(MASKED);
-    expect(e.evaluate().toString()).toBe('["Missing","Missing",30]');
-    expect(e.type.toString()).toBe('list<integer | missing>');
+    // Masked numeric cells are `NaN` (user decision 2026-09-25); they were
+    // `Missing`, and the list was typed `list<integer | missing>`.
+    expect(e.evaluate().toString()).toBe('[NaN,NaN,30]');
+    expect(e.type.toString()).toBe('list<number>');
   });
 
   test.each([
@@ -280,7 +282,7 @@ describe('Map over a list that holds a restricted point', () => {
 
   test('a numeric cell is still NaN', () => {
     const m = c.box(['Map', sinFn, ['List', ['When', 2, 'c'], 3]] as never);
-    expect(m.type.toString()).toBe('list<number>');
+    expect(m.type.toString()).toBe('vector<2>');
     expect(m.evaluate().toString()).toBe('[NaN,sin(3)]');
   });
 });

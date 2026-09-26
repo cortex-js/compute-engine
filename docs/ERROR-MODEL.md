@@ -1334,7 +1334,41 @@ document's history):
   `2{c}` or `3{c}`, which masks to `Missing` (the `When` rule) while the same
   expression evaluated fresh with `c` false gives the marker `NaN`; the same
   holds for every numeric operator threaded over a scalar restriction
-  (`2·x{c}` is `2x{c}`, `2·Missing` is `NaN`). Consumers fixed
+  (`2·x{c}` is `2x{c}`, `2·Missing` is `NaN`).
+- **RULED 2026-09-25 (later the same day): a restriction masks to the
+  absence marker of its VALUE'S type.** `x{c}` with `c` false is `NaN` when
+  `x` is a number, and `Missing` when it is a point, a list, a string or a
+  value not provably numeric (`maskedValue`, `library/control-structures.ts`);
+  a masked numeric cell of a list mask is `NaN` too (`[10,20,30]{[1,2,3] > 2}`
+  is `[NaN, NaN, 30]`). This amends the 2026-09-09 rule above, which masked
+  every value to `Missing`: that was the one place the engine spelled an
+  absent number as `Missing`, so `2·x{c}`, threaded to `2x{c}`, answered
+  `Missing` on the held route and `NaN` when evaluated fresh (`2·Missing`),
+  and `Length([1,2]{c})` answered `2{c}` → `Missing` against a fresh `NaN`.
+  One rule for absence, then: every operator answers the marker of its
+  codomain for an absent operand (§2 rule 4), and a restriction answers the
+  marker of its value. The type of a numeric restriction is its tier with a
+  `nan` arm and no `missing` arm, `integer | nan` for `1{c}` (it was
+  `integer | missing`); a list mask over numbers is `list<number>`. The
+  compiled code, which always emitted `NaN` for a masked number, is
+  unchanged. With it, a SCALAR restriction beside a collection or a point
+  operand of a broadcastable operator lands in each cell of the result
+  (`threadConditional`, `restrictCells`): `[1,2,3] + 2{c}` is
+  `[3{c}, 4{c}, 5{c}]` and `2{c}·(1,2)` is `(2{c}, 4{c})`, `NaN` cells once
+  `c` fails, as the fresh route answers; restricting the whole result made it
+  `Missing` on the held route. A restricted collection or point operand
+  (`[1,2]{c} + 1`, `P{c} + (1,1)`) still restricts the whole result, and
+  when both kinds meet under different conditions (`[1,2]{a>0} + 2{b>0}`)
+  the guards stay apart, `[3{b>0}, 4{b>0}]{a>0}`: the list is still one
+  restriction, `Missing` once `a` fails. The
+  read-back of a gated value at assignment (`restrictionValueType`,
+  `effects-inference.ts`) reads the held literal through the `nan`-armed
+  type and through a list mask. Not changed: a `Which` with no selected
+  clause and the else-less `If` still answer `Missing` for a number (the
+  no-selection ruling of 2026-08-27). Known consequence, not ruled: an
+  element read of an absent ROW, `At([[1,2]{c}, [3,4]], 1, 2)`, is `Missing`
+  when evaluated fresh (§3.C: an access into an absent collection is absent)
+  but `2{c}` on the held route, which masks to `NaN`. Consumers fixed
   with it: the invisible-operator gates read an operand's type with the
   absence marker stripped (`typeIgnoringAbsence`,
   `boxed-expression/invisible-operator.ts`), so `2x{x>0}`, `t P{0 ≤ t ≤ 1}`

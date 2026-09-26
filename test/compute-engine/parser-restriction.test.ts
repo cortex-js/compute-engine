@@ -54,9 +54,10 @@ describe('Parser: restriction braces', () => {
       expect(result.json).toBe(5);
     });
 
-    test('When(5, False) evaluates to Missing', () => {
+    test('When(5, False) evaluates to NaN', () => {
+      // A masked number is `NaN` (user decision 2026-09-25); it was `Missing`.
       const result = ce.expr(['When', 5, 'False']).evaluate();
-      expect(result.json).toBe('Missing');
+      expect(result.isNaN).toBe(true);
     });
 
     test('When(5, x > 0) holds when x has no value', () => {

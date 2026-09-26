@@ -291,15 +291,17 @@ describe('UNDEFINED in a numeric slot', () => {
   });
 
   describe('the When restriction', () => {
-    // The masking answer of `When` is `Missing`, not `Undefined`: the 2026-09-09
-    // ruling aligned it with a default-less `Which` and the else-less `If`.
-    it('When(1, False) answers Missing', () => {
-      expect(ce.box(['When', 1, 'False']).evaluate().symbol).toBe('Missing');
+    // The masking answer of `When` is the absence marker of the value's own
+    // type, never `Undefined`: `NaN` for a number (user decision 2026-09-25;
+    // the 2026-09-09 ruling had aligned every value with the `Missing` of a
+    // default-less `Which`, which a point or a list still answers).
+    it('When(1, False) answers NaN', () => {
+      expect(ce.box(['When', 1, 'False']).evaluate().isNaN).toBe(true);
     });
 
-    it('its result type carries the `missing` arm', () => {
+    it('its result type is its tier with a nan arm, no `missing` arm', () => {
       expect(ce.box(['When', 1, 'False']).type.toString()).toBe(
-        'integer | missing'
+        'integer | nan'
       );
       expect(ce.box(['When', 1, 'True']).type.toString()).toBe('integer');
     });

@@ -472,12 +472,12 @@ absent operand as `NaN`, as the tuple routes do since 2026-09-25.
 ### `Map` with a bare symbol callback copies the source element type (OPEN, decision — found 2026-09-25 while fixing Tycho item 325)
 
 `Map(\sin, [-1, 2])` is typed `vector<integer^2>`, and `Map(W, G)` with
-`W = x \mapsto \sin x` and `G = [-1, 0, 1]` is typed `vector<integer^3>`,
-while the values are reals. A bare symbol as the callback is deliberately left
+`W = x \mapsto \sin x` and `G = [-1, 0, 1]` is typed `vector<integer^3>`, while
+the values are reals. A bare symbol as the callback is deliberately left
 unresolved on the parse route, so its type reads `unknown`, and the `Map` type
-handler then copies the source type, element type included. Typing the result
-as the same kind and dimensions with `unknown` elements (`list<unknown^3>`)
-was tried and reverted: it breaks four pins that expect the copied type
+handler then copies the source type, element type included. Typing the result as
+the same kind and dimensions with `unknown` elements (`list<unknown^3>`) was
+tried and reverted: it breaks four pins that expect the copied type
 (`pipe-type-read-purity.test.ts`, the placeholder inside a nested `Map` stage;
 `map-over-tuple-result.test.ts`, "a list source is unchanged"; two in
 `compile-map-reduction-fusion.test.ts`, which then emitted `.map(` instead of
@@ -490,17 +490,18 @@ element type (wrong for a non-identity callback) or an `unknown` element type
 
 With `u` declared `(list<real>) -> unknown` and assigned an up-sampling
 comprehension over `l`, and `s` declared the same way, `s(u(L))` with
-`L: list<real>` evaluates to `Error(incompatible-type, "list<real>",
-"indexed_collection<integer | nan>")`: `u(L)` is a lazy `Comprehension` whose
-element type carries the `nan` arm of an element read `l[i]`, and the
-`list<real>` parameter of `s` rejects it. The compiled JavaScript code for the
-same expression returns values, so the two routes disagree. Option A keeps the
-rejection (the `nan` arm is in the type, so it is correct) and the mismatch.
-Option B accepts a comprehension at a `list<…>` parameter when its element type
-without `nan` fits, which makes the interpreter agree with the compiled code and
-weakens the `list<real>` contract. Until decided, Tycho's `(list<real>)`
-declarations error in the interpreter and work compiled. Test file with the
-compiled reference values: `tycho-323-call-site-specialization.test.ts`.
+`L: list<real>` evaluates to
+`Error(incompatible-type, "list<real>", "indexed_collection<integer | nan>")`:
+`u(L)` is a lazy `Comprehension` whose element type carries the `nan` arm of an
+element read `l[i]`, and the `list<real>` parameter of `s` rejects it. The
+compiled JavaScript code for the same expression returns values, so the two
+routes disagree. Option A keeps the rejection (the `nan` arm is in the type, so
+it is correct) and the mismatch. Option B accepts a comprehension at a `list<…>`
+parameter when its element type without `nan` fits, which makes the interpreter
+agree with the compiled code and weakens the `list<real>` contract. Until
+decided, Tycho's `(list<real>)` declarations error in the interpreter and work
+compiled. Test file with the compiled reference values:
+`tycho-323-call-site-specialization.test.ts`.
 
 ### A list-valued integrand is not distributed over the integral (OPEN, decision — found 2026-09-25 by the review of the Tycho item 325 fix)
 
@@ -510,13 +511,13 @@ limit or several. A list-valued INTEGRAND does not: the LaTeX
 single-limit `Integrate` whose integrand is an inner `Integrate` with the list
 bound, so the outer integral is typed `number` and stays unevaluated under both
 `evaluate()` and `.N()`. The symbolic route shows the same gap from the other
-side: `Integrate(xy, Limits(x, 0, [1,2]), Limits(y, 0, [1,2,3]))` evaluates
-the `y` limit over its list and leaves `\int_0^{[1,2]} [x/2, 2x, 9x/2]\,dx`,
-an outer integral over a list-valued integrand, while `.N()` refuses the
-mismatched lengths and stays whole. The decision is whether a list-valued
-integrand distributes (one integral per element, matching the bound rule) or
-stays unevaluated with a documented message on both routes. Test file for the
-bound rule: `tycho-325-integrate-list-limit-broadcast.test.ts`.
+side: `Integrate(xy, Limits(x, 0, [1,2]), Limits(y, 0, [1,2,3]))` evaluates the
+`y` limit over its list and leaves `\int_0^{[1,2]} [x/2, 2x, 9x/2]\,dx`, an
+outer integral over a list-valued integrand, while `.N()` refuses the mismatched
+lengths and stays whole. The decision is whether a list-valued integrand
+distributes (one integral per element, matching the bound rule) or stays
+unevaluated with a documented message on both routes. Test file for the bound
+rule: `tycho-325-integrate-list-limit-broadcast.test.ts`.
 
 ### An out-of-range component read answers `Missing` when the tuple holds an absent cell, `NaN` otherwise (OPEN, small — found 2026-09-25)
 
@@ -541,20 +542,17 @@ of the same list answer `NaN`. Related, recorded as a decision in
 typed `real<0..> | signed_infinity` with no `nan` arm although `Abs(NaN)` is
 `NaN`.
 
-### A numeric result of a restricted list masks to `Missing` on the held route and to `NaN` on the fresh route (OPEN, needs a decision — found 2026-09-25)
+### An absent list carries no shape: `Missing + 2\{b>0\}` is a scalar (OPEN, small — found 2026-09-25)
 
-`Length([1,2]\{0<t\})` evaluates, with `t` free, to `2\{0<t\}` (the operator
-threads the restriction whole), and `Sum([1,2]\{0<t\})` to `3\{0<t\}`; once
-`t = -1`, that held value masks to `Missing` (the `When` rule of 2026-09-09),
-while the same expression evaluated fresh answers `NaN`, the marker of a number
-(`Length(Missing)`, `Sum(Missing)`). The two rulings collide on every numeric
-operator threaded over a scalar restriction (`2·x\{c\}` is `2x\{c\}`, `Missing`
-when `c` fails; `2·Missing` is `NaN`), so the disagreement is scalar-wide, not
-specific to lists. To decide: whether a restriction over a NUMBER should mask to
-`NaN` (then `x\{c\}` alone answers `NaN`, which plot consumers already read from
-compiled code) or the fresh route should answer `Missing` for a numeric operator
-over an absent operand (which reverses the 2026-07-24 absence ruling,
-`Sin(Missing)` is `NaN`).
+`[1,2]\{a>0\} + 2\{b>0\}` with both conditions undecided is
+`[3\{b>0\}, 4\{b>0\}]\{a>0\}`, and once `a = -1` that held value is `Missing`.
+Evaluated fresh with `a = -1`, the list restriction is already `Missing` when
+the sum is formed, and `Missing + 2\{b>0\}` threads to `NaN\{b>0\}`: the absent
+operand is a bare `Missing`, which carries no shape, so the sum reads it as an
+absent scalar and answers the numeric marker still gated by `b`. The two routes
+agree once `b` is decided too (`[NaN, NaN]` for `b = -1` with `a` free on both).
+A fix needs the absent value of a list to remember that it was a list (a typed
+absence), which `Missing` does not.
 
 ### Residues of the tuple-of-lists change (OPEN, small — 2026-09-25)
 

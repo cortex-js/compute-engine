@@ -28,7 +28,8 @@ describe('When: list-condition broadcast', () => {
       .parse('x\\left\\{x\\le\\left[1,2,3\\right]\\right\\}')
       .evaluate();
     // 2 <= [1,2,3] → [False, True, True]
-    expect(r.json).toEqual(['List', 'Missing', 2, 2]);
+    // A masked numeric cell is `NaN` (user decision 2026-09-25).
+    expect(r.toString()).toBe('[NaN,2,2]');
   });
 
   test('indeterminate (symbolic) elements → held When per element', () => {
@@ -50,7 +51,7 @@ describe('When: list-condition broadcast', () => {
       .parse('\\left[10,20,30\\right]\\left\\{\\left[1,2,3\\right]>2\\right\\}')
       .evaluate();
     // [1,2,3] > 2 → [False, False, True]
-    expect(r.json).toEqual(['List', 'Missing', 'Missing', 30]);
+    expect(r.toString()).toBe('[NaN,NaN,30]');
   });
 
   test('different lengths truncate to the shorter (At mask alignment)', () => {
@@ -71,7 +72,7 @@ describe('When: list-condition broadcast', () => {
     // Canonical folds to When(x, And(0 < x, x <= [1,2])).
     expect(expr.op2.operator).toEqual('And');
     // 3 > 0 ∧ 3 <= [1,2] → [False, False]
-    expect(expr.evaluate().json).toEqual(['List', 'Missing', 'Missing']);
+    expect(expr.evaluate().toString()).toBe('[NaN,NaN]');
   });
 
   describe('type handler', () => {
@@ -99,12 +100,10 @@ describe('When: list-condition broadcast', () => {
       expect(ce.parse('x\\left\\{x>3\\right\\}').evaluate().re).toEqual(5);
     });
 
-    test('False condition → Missing', () => {
+    test('False condition → NaN for a number', () => {
       const ce = new ComputeEngine();
       ce.assign('x', 1);
-      expect(ce.parse('x\\left\\{x>3\\right\\}').evaluate().symbol).toEqual(
-        'Missing'
-      );
+      expect(ce.parse('x\\left\\{x>3\\right\\}').evaluate().isNaN).toBe(true);
     });
 
     test('indeterminate condition → held When', () => {

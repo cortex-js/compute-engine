@@ -45,11 +45,14 @@ describe('CONDITIONAL VALUES — When threading (T1–T5)', () => {
     expect(r.isSame(6)).toBe(true);
   });
 
-  it('T4: a decidable-False guard masks to Missing', () => {
-    // When(5, 3<0) → Missing (masking rule; aligned with the no-selection ruling 2026-09-09)
-    expect(ce.box(['When', 5, ['Less', 3, 0]]).evaluate().symbol).toBe(
-      'Missing'
-    );
+  it('T4: a decidable-False guard masks a number to NaN', () => {
+    // When(5, 3<0) → NaN: a masked value is the absence marker of its own
+    // type, `NaN` for a number (user decision 2026-09-25; it was `Missing`
+    // under the 2026-09-09 alignment with the no-selection ruling).
+    expect(ce.box(['When', 5, ['Less', 3, 0]]).evaluate().isNaN).toBe(true);
+    expect(
+      ce.box(['When', ['Tuple', 1, 2], ['Less', 3, 0]]).evaluate().symbol
+    ).toBe('Missing');
   });
 
   it('numericizes a When with a True guard, passing options through', () => {
@@ -178,10 +181,8 @@ describe('CONDITIONAL VALUES — Undefined conditions (decision 9)', () => {
     expect(r.symbol).toBe('Missing');
   });
 
-  it('When with an Undefined condition masks to Missing', () => {
-    expect(ce.box(['When', 5, 'Undefined']).evaluate().symbol).toBe(
-      'Missing'
-    );
+  it('When with an Undefined condition masks (NaN for a number)', () => {
+    expect(ce.box(['When', 5, 'Undefined']).evaluate().isNaN).toBe(true);
   });
 
   it('a provably non-boolean Which condition is an error operand', () => {
@@ -397,9 +398,11 @@ describe('Convergence guards (Phase 3a)', () => {
     expect(r.subs({ a: 2 }).evaluate().toString()).toBe('1/2');
   });
 
-  it('substituting a = −1 (outside the guard) gives Missing', () => {
+  it('substituting a = −1 (outside the guard) gives NaN', () => {
+    // The guarded value is a number, so the mask is `NaN` (user decision
+    // 2026-09-25); it was `Missing`.
     const r = ce.parse('\\int_0^\\infty e^{-a x} dx').evaluate();
-    expect(r.subs({ a: -1 }).evaluate().symbol).toBe('Missing');
+    expect(r.subs({ a: -1 }).evaluate().isNaN).toBe(true);
   });
 
   it('an assumption a > 0 discharges the guard to a bare 1/a', () => {
@@ -554,7 +557,8 @@ describe('Phase 3b', () => {
       .box(['Solve', ce.parse('\\sqrt{x+3} = a'), 'x'])
       .evaluate().op1;
     expect(root?.subs({ a: 2 }).evaluate().toString()).toBe('1');
-    expect(root?.subs({ a: -2 }).evaluate().symbol).toBe('Missing');
+    // A masked number is `NaN` (user decision 2026-09-25).
+    expect(root?.subs({ a: -2 }).evaluate().isNaN).toBe(true);
   });
 
   it('numeric RHS unchanged: √(x+3) = 2 → [1]', () => {

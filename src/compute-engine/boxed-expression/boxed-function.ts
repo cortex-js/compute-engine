@@ -6574,6 +6574,27 @@ function sameRestriction(
 }
 
 /**
+ * `value` with `guard` applied to each of its cells, through nested lists
+ * and the coordinates of a point: a `List` or a `Tuple` answers the same
+ * container over its restricted cells, and any other value the restricted
+ * value itself (`When(value, guard)`, evaluated). Used by `threadConditional`
+ * when a scalar restriction lands in the cells of a broadcast result.
+ */
+function restrictCells(
+  ce: ComputeEngine,
+  value: Expression,
+  guard: Expression,
+  options: Partial<EvaluateOptions> | undefined
+): Expression {
+  if (isFunction(value, 'List') || isFunction(value, 'Tuple'))
+    return ce._fn(
+      value.operator,
+      value.ops.map((cell) => restrictCells(ce, cell, guard, options))
+    );
+  return ce._fn('When', [value, guard]).evaluate(options);
+}
+
+/**
  * Threading pre-pass for conditional values (`When`/`Which`), modeled on the
  * broadcast lift (step 4b). Given the already-evaluated `tail` of operator
  * `op`, lift a conditional operand outward:
@@ -6652,6 +6673,57 @@ function threadConditional(
       (isFunction(inner, 'Error') || sameRestriction(inner, distinct))
     )
       return inner;
+    // A SCALAR restriction beside a collection or a point operand of a
+    // broadcastable operator lands in each cell of the result:
+    // `[1,2,3] + 2{c}` is `[3{c}, 4{c}, 5{c}]` and `2{c}·(1,2)` is
+    // `(2{c}, 4{c})`, each cell `NaN` once `c` fails — exactly what the same
+    // expression answers when `2{c}` is evaluated first (a masked number is
+    // `NaN`, user decision 2026-09-25) and what the compiled code emits.
+    // Restricting the whole result instead, `[3,4,5]{c}`, made it absent as
+    // a whole (`Missing`) on this route while the fresh route answered
+    // `[NaN, NaN, NaN]`. A restricted COLLECTION or POINT operand
+    // (`[1,2]{c} + 1`, `P{c} + (1,1)`) still restricts the whole result: it
+    // is one restriction over that value. When both kinds meet
+    // (`[1,2]{a>0} + 2{b>0}`) the guards are kept APART, the scalar one in
+    // the cells and the collection one around the whole result,
+    // `[3{b>0}, 4{b>0}]{a>0}`: folded into one cell-wise conjunction the
+    // result forgot that the list was one restriction, and answered
+    // `[NaN, NaN]` once `a` failed where the fresh route answers `Missing`
+    // for the absent list (that route then reads `Missing + 2{b>0}` as the
+    // scalar `NaN{b>0}`, an absent value carrying no shape: recorded in
+    // `ROADMAP.md`).
+    if (
+      threadsAt === undefined &&
+      stripped.some((x) => x.isCollection || isTuple(x))
+    ) {
+      const cellGuards: Expression[] = [];
+      const wholeGuards: Expression[] = [];
+      for (const x of tail) {
+        if (!isFunction(x, 'When')) continue;
+        const scalar =
+          !x.op1.isCollection &&
+          !isTuple(x.op1) &&
+          !x.op1.type.matches('collection<any>');
+        (scalar ? cellGuards : wholeGuards).push(x.op2);
+      }
+      // A scalar guard that also restricts a collection operand
+      // (`2{c}·P{c}`) is implied by the whole restriction: `(2, 4){c}`, not
+      // `(2{c}, 4{c}){c}`.
+      const cellOnly = cellGuards.filter(
+        (g) => !wholeGuards.some((w) => w.isSame(g))
+      );
+      if (cellOnly.length > 0) {
+        const cellGuard =
+          cellOnly.length === 1 ? cellOnly[0] : ce._fn('And', cellOnly);
+        const cells = restrictCells(ce, inner, cellGuard, options);
+        if (wholeGuards.length === 0) return cells;
+        const wholeGuard =
+          wholeGuards.length === 1
+            ? wholeGuards[0]
+            : ce._fn('And', wholeGuards);
+        return ce._fn('When', [cells, wholeGuard]).evaluate(options);
+      }
+    }
     return ce._fn('When', [inner, guard]).evaluate(options);
   }
 

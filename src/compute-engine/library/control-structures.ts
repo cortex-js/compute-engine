@@ -21,6 +21,7 @@ import {
   resolveTypeAlias,
   resolveTypeForCompilation,
   widen,
+  stripMissingFromType,
 } from '../../common/type/utils.js';
 import {
   broadcastLengthMismatch,
@@ -344,7 +345,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       description:
         'Conditional/restriction value. `When(e, cond)` evaluates to:\n' +
         '  - `e` when `cond` evaluates to `True`\n' +
-        '  - `Missing` when `cond` evaluates to `False` (the "masking rule": the position-preserving absent datum, the same answer a selection with no selected branch gives; consumers like 2D plotters skip masked points)\n' +
+        '  - the absence marker of the type of `e` when `cond` evaluates to `False` (the "masking rule"): `NaN` for a number, `Missing` — the position-preserving absent datum, the answer a selection with no selected branch gives — for a point, a list, a string or a value not provably numeric; consumers like 2D plotters skip masked points\n' +
         '  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\n' +
         'Stacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\n' +
         'Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.',
@@ -396,17 +397,34 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           const cell = isSubtype(expr.type, 'list<any>')
             ? (collectionElementType(expr.type) ?? 'unknown')
             : expr.type;
+          // A masked NUMERIC cell is `NaN` (`maskedValue`), so the cells are
+          // numbers, `list<number>`: the materialized list the mask answers
+          // (`[NaN, NaN, 30]`) is typed by the `List` handler, which joins a
+          // `NaN` cell and an integer cell to `number`. Any other cell keeps
+          // its `missing` arm.
           return BoxedType.forResult(
             {
               kind: 'list',
-              elements: reduceType({
-                kind: 'union',
-                types: [cell, 'missing'],
-              }),
+              elements: isNumericValueType(cell)
+                ? 'number'
+                : reduceType({ kind: 'union', types: [cell, 'missing'] }),
             },
             context.engine._typeResolver
           );
         }
+        // A NUMERIC value masks to `NaN` (`maskedValue`), so its type is its
+        // own tier with the `nan` arm, `integer | nan` for `When(1, c)`, and
+        // no `missing` arm (user decision 2026-09-25; it was
+        // `integer | missing`). The tier is kept — rather than absorbed to
+        // `number` — so that the value stays admitted where the tier matters:
+        // an element read of a restricted row is typed
+        // `integer | missing | nan` by `At`, and a declared range or an
+        // assumption reads the held literal back through it.
+        if (isNumericValueType(expr.type))
+          return BoxedType.forResult(
+            withNanArm(expr.type),
+            context.engine._typeResolver
+          );
         // A list-like value keeps its own type under the `missing` arm,
         // `missing | vector<integer^2>` for `When([1,2], c)`: while the
         // condition is undecided the value is the held `When` itself (never a
@@ -504,7 +522,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               // The per-element expression: the zipped element, or the scalar.
               const elem = zip ? elems[i] : ev;
               if (cis === 'True') result.push(elem);
-              else if (cis === 'False') result.push(ce.Missing);
+              else if (cis === 'False') result.push(maskedValue(ce, elem));
               // Indeterminate (symbolic boolean): hold `When` on the element.
               else result.push(ce._fn('When', [zip ? elems[i] : expr, ci]));
             }
@@ -514,17 +532,20 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 
         const cs = sym(c);
         if (cs === 'True') return expr.evaluate(options);
-        // A false guard masks the value: the answer is `Missing`, the
-        // position-preserving absent datum — the same answer a `Which` with
-        // no selected clause and the else-less `If` give (no-selection
-        // ruling of 2026-08-27; `When` aligned 2026-09-09). Before the
-        // alignment `When` answered the `Undefined` symbol, which has no
-        // standing in `docs/ERROR-MODEL.md` and no consumer: plot consumers
-        // read the mask from compiled code, where it is `NaN`.
-        if (cs === 'False') return ce.Missing;
+        // A false guard masks the value to the absence marker of the VALUE'S
+        // type (`maskedValue`, user decision 2026-09-25): `NaN` for a number,
+        // `Missing` — the position-preserving absent datum — for a point, a
+        // list or a value not provably numeric. Before, every value masked to
+        // `Missing` (ruling of 2026-09-09), the one place the engine spelled
+        // an absent number as `Missing`; a numeric operator over it answered
+        // `NaN` (`2·Missing` is `NaN`), so `2·x{c}`, threaded to `2x{c}`,
+        // answered `Missing` on the held route and `NaN` when evaluated
+        // fresh. The compiled code has always emitted `NaN` for a masked
+        // number.
+        if (cs === 'False') return maskedValue(ce, expr);
         // A guard that evaluates to `Undefined` masks (decision 9): no value,
         // treated as not-True rather than held.
-        if (cs === 'Undefined') return ce.Missing;
+        if (cs === 'Undefined') return maskedValue(ce, expr);
 
         // Indeterminate scalar condition over a collection value: the
         // restriction stays ONE held `When` over the evaluated collection,
@@ -804,6 +825,40 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+/**
+ * Whether a value of type `t` masks to `NaN`: its type, less any `missing`
+ * arm, is a number. A value that is not provably numeric (`unknown`, a point,
+ * a list, a string) masks to `Missing`, exactly as `absentScalarMarker`
+ * (`boxed-expression/validate.ts`) reads the codomain of an application.
+ */
+function isNumericValueType(t: Type): boolean {
+  const present = stripMissingFromType(t);
+  return present !== 'never' && isSubtype(present, 'number');
+}
+
+/** `t` less any `missing` arm, joined with `nan`: the type of a masked
+ * numeric value. */
+function withNanArm(t: Type): Type {
+  return reduceType({
+    kind: 'union',
+    types: [stripMissingFromType(t), 'nan'],
+  });
+}
+
+/**
+ * The value a false restriction answers for `expr`: the absence marker of
+ * the value's own type, `NaN` for a number and `Missing` otherwise (user
+ * decision 2026-09-25). One rule for absence, then: every operator answers
+ * the marker of its codomain for an absent operand (`docs/ERROR-MODEL.md`,
+ * §2 rule 4), and a restriction answers the marker of its value. Before,
+ * `When` masked every value to `Missing`, so a masked NUMBER read as
+ * `Missing` on the route that held the restriction and as `NaN` on the route
+ * that evaluated it fresh (`2·x{c}` versus `2·Missing`).
+ */
+function maskedValue(ce: ComputeEngine, expr: Expression): Expression {
+  return isNumericValueType(expr.type.type) ? ce.NaN : ce.Missing;
+}
 
 /**
  * Lazy indexed-collection handlers for a held `When(value, cond)` (Tycho
