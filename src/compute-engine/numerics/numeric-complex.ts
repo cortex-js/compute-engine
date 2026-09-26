@@ -1,7 +1,6 @@
 import { Complex } from 'complex-esm';
 import './complex-esm-augment.js'; // adds the 1-arg `Complex.equals` overload
 import { bernoulliRational } from './bernoulli.js';
-import { zeta } from './special-functions.js';
 
 // Lanczos approximation coefficients (g = 7, n = 9), accurate to ~15 digits
 // for the principal branch. See Numerical Recipes / mathjs gamma().
@@ -358,6 +357,192 @@ export function coshIntegralComplex(z: Complex): Complex {
 // in the large-|z| asymptotic region of the incomplete-gamma kernel.
 //
 
+//
+// ---------------- Hurwitz / Riemann / generalized zeta (complex) --------
+//
+// Ported from enumeratio's hurwitz-zeta.ts (WTFPL; ported here under MIT).
+// Euler-Maclaurin (DLMF 25.11.9) directly at Re(s) >= 0 or a far past its
+// edge. Elsewhere a naive EM cancels heavily, so a is shifted to within 3/4
+// of 1 and ζ(s, 1+h) expanded as Σ C(-s,k) hᵏ ζ(s+k), each ζ(s+k) reflected
+// to Re >= 0 — nothing cancels.
+
+/** cₖ = B₂ₖ/(2k)!, k = 1..EM_PAIRS — the Euler-Maclaurin tail coefficients. */
+const EM_PAIRS = 12;
+const EM_COEFF: number[] = (() => {
+  const c: number[] = [0];
+  let factorial = 1;
+  for (let k = 1; k <= EM_PAIRS; k++) {
+    factorial *= (2 * k - 1) * (2 * k);
+    const [num, den] = bernoulliRational(2 * k);
+    c[k] = Number(num) / Number(den) / factorial;
+  }
+  return c;
+})();
+
+/** Where the EM tail's direct terms have pushed a+N far enough right. */
+function emEdge(s: Complex): number {
+  return Math.max(12, Math.ceil(Math.abs(s.re) + Math.abs(s.im)) + 6);
+}
+
+/**
+ * Raw Euler-Maclaurin for ζ(s,a): direct terms up to a base point, then the
+ * tail's integral, half-term, and Bernoulli correction series. Drops the
+ * (a+k) = 0 term (Wolfram's `HurwitzZeta` convention) rather than diverging
+ * there — callers decide whether that term was actually a pole.
+ */
+function hurwitzEMComplex(s: Complex, a: Complex): Complex {
+  const n = Math.max(8, Math.ceil(emEdge(s) - a.re));
+  const negS = s.neg();
+  let sum = C_ZERO;
+  for (let k = 0; k < n; k++) {
+    const b = new Complex(a.re + k, a.im);
+    if (b.re === 0 && b.im === 0) continue;
+    sum = sum.add(b.pow(negS));
+  }
+  const z = new Complex(a.re + n, a.im);
+  const zNegS = z.pow(negS);
+  sum = sum.add(z.pow(C_ONE.sub(s)).div(s.sub(1))).add(zNegS.mul(0.5));
+
+  // Σ_{k≥1} cₖ·(s)_{2k-1}·z^{-(s+2k-1)}, rolling the Pochhammer and z-power.
+  let zPow = zNegS.div(z);
+  const zInv2 = z.pow(-2);
+  let poch = s;
+  for (let k = 1; k <= EM_PAIRS; k++) {
+    sum = sum.add(poch.mul(zPow).mul(EM_COEFF[k]));
+    const m = 2 * k;
+    poch = poch.mul(s.add(m - 1)).mul(s.add(m));
+    zPow = zPow.mul(zInv2);
+  }
+  return sum;
+}
+
+/** ζ(s): reflection left of Re(s) = 0, EM across the strip, the bare series far right. */
+function riemannZetaComplex(s: Complex): Complex {
+  // Trivial zero, exact: the reflection formula's sin(πs/2) factor is only
+  // zero up to rounding, which callers relying on an exact 0 (e.g. the
+  // polylog Crandall expansion's break condition) cannot use.
+  if (s.im === 0 && s.re < 0 && Number.isInteger(s.re) && s.re % 2 === 0)
+    return C_ZERO;
+  if (s.re < 0) return reflectedZetaComplex(s);
+  if (s.re < 16) return hurwitzEMComplex(s, C_ONE);
+  const n = Math.ceil(10 ** (17 / s.re));
+  let z = C_ONE;
+  for (let k = 2; k <= n; k++) z = z.add(new Complex(k, 0).pow(s.neg()));
+  return z;
+}
+
+/**
+ * ζ(s) = 2ˢ π^(s-1) sin(πs/2) Γ(1-s) ζ(1-s), Re(s) < 0. Every factor but
+ * ζ(1-s) is taken as a log and summed, so a huge Γ and sin never meet
+ * outside exp.
+ */
+function reflectedZetaComplex(s: Complex): Complex {
+  const r = new Complex(1 - s.re, -s.im);
+  const log = s
+    .mul(Math.LN2)
+    .add(new Complex(s.re - 1, s.im).mul(Math.log(Math.PI)))
+    .add(gammaln(r))
+    .add(logSinComplex(s.mul(Math.PI / 2)));
+  return log.exp().mul(hurwitzEMComplex(r, C_ONE));
+}
+
+/** ln sin(w), up to 2πi; stays finite for any |Im w| via e^(2iw) (|·| <= 1 above the axis). */
+function logSinComplex(w: Complex): Complex {
+  if (w.im < 0) {
+    const c = logSinComplex(new Complex(w.re, -w.im));
+    return new Complex(c.re, -c.im);
+  }
+  const u = new Complex(-2 * w.im, 2 * w.re).exp();
+  const l = new Complex(1 - u.re, -u.im).log();
+  return new Complex(w.im + l.re - Math.LN2, -w.re + l.im + Math.PI / 2);
+}
+
+/** ζ(s, 1+h) = Σₖ C(-s,k) hᵏ ζ(s+k), |h| < 1 — see `hurwitzZetaComplex`. */
+function zetaNearOneComplex(s: Complex, h: Complex): Complex {
+  let sum = riemannZetaComplex(s);
+  let c = C_ONE;
+  let hk = C_ONE;
+  let largest = sum.abs();
+  let small = 0;
+  const cap = Math.ceil(Math.abs(s.re)) + 200;
+  for (let k = 1; k < cap; k++) {
+    hk = hk.mul(h);
+    if (hk.re === 0 && hk.im === 0) break;
+    const f = new Complex(-s.re - k + 1, -s.im);
+    if (f.re === 0 && f.im === 0) {
+      // s = 1-k, an integer: C(-s,k) -> 0 as ζ(s+k) -> ∞, product -> -C(-s,k-1)/k.
+      // Every later term is 0 too (a Bernoulli polynomial) — the series ends here.
+      return sum.add(c.mul(hk).mul(-1 / k));
+    }
+    c = c.mul(f).mul(1 / k);
+    const t = c.mul(hk).mul(riemannZetaComplex(new Complex(s.re + k, s.im)));
+    sum = sum.add(t);
+    const size = t.abs();
+    largest = Math.max(largest, size);
+    // Two small terms in a row: ζ at a negative even integer vanishes every other term.
+    if (size <= 1e-17 * largest) {
+      if (++small === 2) break;
+    } else small = 0;
+  }
+  return sum;
+}
+
+/** Past this many times `emEdge`, EM's own tail already costs no cancellation. */
+const EM_BEYOND = 4;
+/** How far from 1 (once shifted by an integer) a may sit for the Taylor series. */
+const TAYLOR_RADIUS = 0.75;
+
+/** Riemann zeta ζ(s) for complex s — `hurwitzZetaComplex(s, 1)`, direct (no shift needed at a = 1). */
+export function zetaComplex(s: Complex): Complex {
+  if (s.isNaN()) return C_NAN;
+  if (s.re === 1 && s.im === 0) return C_NAN; // pole; caller special-cases it
+  return riemannZetaComplex(s);
+}
+
+/**
+ * Hurwitz zeta ζ(s,a) for complex s, a, matching Wolfram's `HurwitzZeta`
+ * (drops the (a+k) = 0 term rather than diverging there). Callers decide
+ * pole vs. finite for a non-positive integer a themselves — see
+ * `library/arithmetic.ts`.
+ */
+export function hurwitzZetaComplex(s: Complex, a: Complex): Complex {
+  if (s.isNaN() || a.isNaN()) return C_NAN;
+  if (s.re === 1 && s.im === 0) return C_NAN; // pole; caller special-cases s = 1
+  if (s.re >= 0 || a.re >= EM_BEYOND * emEdge(s)) return hurwitzEMComplex(s, a);
+  const m = Math.floor(a.re - 0.5); // a - m has real part in [1/2, 3/2)
+  const h = new Complex(a.re - m - 1, a.im);
+  if (!(h.abs() <= TAYLOR_RADIUS)) return hurwitzEMComplex(s, a);
+  // ζ(s,a) = ζ(s,a+1) + a^(-s): walk a to 1+h, carrying the passed-over terms.
+  let z = zetaNearOneComplex(s, h);
+  for (let j = 0; j < Math.abs(m); j++) {
+    const br = m > 0 ? h.re + 1 + j : a.re + j;
+    if (br === 0 && a.im === 0) continue;
+    const t = new Complex(br, a.im).pow(s.neg());
+    z = m > 0 ? z.sub(t) : z.add(t);
+  }
+  return z;
+}
+
+/**
+ * Zeta(s,a) in Wolfram's generalized-zeta convention: identical to
+ * HurwitzZeta for Re(a) > 0; for Re(a) <= 0 the finitely many terms off the
+ * positive axis use ((k+a)²)^(-s/2) (real |k+a|^(-s) when k+a is real and
+ * negative) instead, and the (k+a) = 0 slot is dropped without a pole — so
+ * Zeta(s, a) is finite at a = 0, -1, -2, ..., unlike HurwitzZeta.
+ */
+export function zetaGeneralizedComplex(s: Complex, a: Complex): Complex {
+  if (s.isNaN() || a.isNaN()) return C_NAN;
+  const negHalfS = s.mul(-0.5);
+  let acc = C_ZERO;
+  let cur = new Complex(a.re, a.im);
+  while (cur.re < 0) {
+    acc = acc.add(cur.mul(cur).pow(negHalfS));
+    cur = new Complex(cur.re + 1, cur.im);
+  }
+  if (cur.re === 0 && cur.im === 0) cur = C_ONE; // drop (k+a) = 0 — no pole here
+  return acc.add(hurwitzZetaComplex(s, cur));
+}
+
 const SQRT_PI = Math.sqrt(Math.PI);
 
 /** Gauss error function erf(z) for complex z. */
@@ -444,7 +629,8 @@ function polylogLnExpComplex(n: number, z: Complex): Complex {
   const L = z.log();
   // z = 1: L = 0. The singular term vanishes (L^{n−1} = 0 for n ≥ 2) and
   // only the k = 0 term survives → Liₙ(1) = ζ(n). Guard the ln(−L) = −∞.
-  if (L.re === 0 && L.im === 0) return new Complex(zeta(n), 0);
+  if (L.re === 0 && L.im === 0)
+    return new Complex(riemannZetaComplex(new Complex(n, 0)).re, 0);
 
   // Harmonic number H_{n−1} = Σ_{j=1}^{n−1} 1/j.
   let H = 0;
@@ -456,7 +642,7 @@ function polylogLnExpComplex(n: number, z: Complex): Complex {
   for (let k = 0; k < 200; k++) {
     let term: Complex;
     if (k === n - 1) term = coef.mul(new Complex(H, 0).sub(lnNegL));
-    else term = coef.mul(zeta(n - k));
+    else term = coef.mul(riemannZetaComplex(new Complex(n - k, 0)).re);
     sum = sum.add(term);
     // ζ vanishes at the negative even integers, so every other term is exactly
     // 0; break only on a small *non-zero* term (the non-zero terms decay

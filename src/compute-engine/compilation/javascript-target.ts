@@ -451,6 +451,7 @@ import {
   trigamma,
   polygamma,
   zeta,
+  hurwitzZeta,
   lambertW,
   besselJ,
   besselY,
@@ -6852,7 +6853,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Trigamma: '_SYS.trigamma',
   PolyGamma: (args, compile) =>
     `_SYS.polygamma(${compile(args[0])}, ${compile(args[1])})`,
-  Zeta: '_SYS.zeta',
+  // The two-argument form is the Hurwitz zeta ζ(s,a) (Wolfram's `Zeta[s,a]`);
+  // `_SYS.zeta` is the one-argument Riemann ζ only.
+  Zeta: (args, compile) =>
+    args.length === 2
+      ? `_SYS.hurwitzZeta(${compile(args[0])}, ${compile(args[1])})`
+      : `_SYS.zeta(${compile(args[0])})`,
+  HurwitzZeta: (args, compile) =>
+    `_SYS.hurwitzZeta(${compile(args[0])}, ${compile(args[1])})`,
   LambertW: '_SYS.lambertW',
 
   // Bessel functions
@@ -11434,6 +11442,7 @@ const SYS_HELPERS = {
   trigamma,
   polygamma,
   zeta,
+  hurwitzZeta,
   lambertW,
   besselJ,
   besselY,

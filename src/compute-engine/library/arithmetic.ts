@@ -1,3 +1,4 @@
+import { Complex } from 'complex-esm';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { factsOf } from '../../common/type/facts.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -61,6 +62,9 @@ import {
   gamma as gammaComplex,
   gammaln as lngammaComplex,
   incompleteGammaUpperComplex,
+  zetaComplex,
+  hurwitzZetaComplex,
+  zetaGeneralizedComplex,
 } from '../numerics/numeric-complex.js';
 import {
   factorial2 as bigFactorial2,
@@ -71,6 +75,7 @@ import { factorial as bigFactorial } from '../numerics/numeric-bigint.js';
 import {
   zetaEvenCoefficient,
   zetaNegativeInteger,
+  hurwitzZetaNegativeInteger,
 } from '../numerics/bernoulli.js';
 import {
   gamma,
@@ -1725,6 +1730,126 @@ function threadOperandsThatBecameConditional(
   return engine._fn(op, [...evaluated]).evaluate({ numericApproximation });
 }
 
+/** Box a machine complex result, dropping a near-zero imaginary part to real. */
+function boxComplexResult(
+  engine: ComputeEngine,
+  z: { re: number; im: number }
+): Expression {
+  // Drop a part only when it is rounding noise next to the other: an
+  // absolute chop would zero a genuinely tiny result, e.g. ζ(18, 5) ≈ 2e-13.
+  const noise = 1e-14 * Math.hypot(z.re, z.im);
+  const re = Math.abs(z.re) <= noise ? 0 : z.re;
+  const im = Math.abs(z.im) <= noise ? 0 : z.im;
+  return im === 0 ? engine.number(re) : engine.number(engine.complex(re, im));
+}
+
+/**
+ * Evaluate HurwitzZeta(s,a) = Σ (k+a)^-s, a pole at every non-positive
+ * integer a when Re(s) > 0 (ported from enumeratio's `evaluateHurwitz`).
+ * Shared by `HurwitzZeta` and by `Zeta`'s two-argument form for Re(a) > 0
+ * or symbolic a (see `evaluateGeneralizedZeta`).
+ */
+function evaluateHurwitzZeta(
+  engine: ComputeEngine,
+  s: Expression,
+  a: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  // ζ(-n,a) = -B_{n+1}(a)/(n+1): exact for a rational a, checked before any
+  // numeric path so N() reaches it too.
+  const sInt = asSmallInteger(s);
+  if (sInt !== null && sInt <= 0 && -sInt <= 100) {
+    const ra = asRational(a);
+    if (ra !== undefined) {
+      const exact = engine.number(
+        hurwitzZetaNegativeInteger(-sInt, [BigInt(ra[0]), BigInt(ra[1])])
+      );
+      return numericApproximation ? exact.N() : exact;
+    }
+  }
+
+  if (sInt === 1) return engine.ComplexInfinity; // pole, every a
+
+  const finite = (x: Expression) =>
+    isNumber(x) && Number.isFinite(x.re) && Number.isFinite(x.im);
+  const aNonposInt =
+    isNumber(a) && a.im === 0 && Number.isInteger(a.re) && a.re <= 0;
+
+  // a a non-positive integer: the (k+a) = 0 term diverges when Re(s) > 0,
+  // and is indeterminate on Re(s) = 0 for a non-real s.
+  if (aNonposInt && finite(s) && s.re > 0) return engine.ComplexInfinity;
+  if (
+    numericApproximation &&
+    aNonposInt &&
+    finite(s) &&
+    s.re === 0 &&
+    s.im !== 0
+  )
+    return engine.NaN;
+
+  // ζ(s,m), positive integer m: ζ(s) − Σ_{k=1}^{m-1} k^{-s}. Skipped for a
+  // concretely complex s, which falls through to the kernel below instead.
+  const complexS = finite(s) && s.im !== 0;
+  if (
+    !complexS &&
+    isNumber(a) &&
+    a.im === 0 &&
+    Number.isInteger(a.re) &&
+    a.re >= 1
+  ) {
+    const m = a.re;
+    if (m === 1)
+      return engine.function('Zeta', [s]).evaluate({ numericApproximation });
+    let tail = engine.number(1).pow(engine.function('Negate', [s]));
+    for (let k = 2; k < m; k++)
+      tail = tail.add(engine.number(k).pow(engine.function('Negate', [s])));
+    return engine
+      .function('Subtract', [engine.function('Zeta', [s]), tail])
+      .evaluate({ numericApproximation });
+  }
+
+  if (!shouldNumericize(numericApproximation, s, a) || !finite(s) || !finite(a))
+    return undefined; // stay symbolic
+
+  return boxComplexResult(
+    engine,
+    hurwitzZetaComplex(new Complex(s.re, s.im), new Complex(a.re, a.im))
+  );
+}
+
+/**
+ * Evaluate Zeta(s,a), Wolfram's generalized zeta: identical to HurwitzZeta
+ * for Re(a) > 0 or symbolic a; at a = 0, -1, -2, … it uses a different,
+ * always-finite convention instead (`zetaGeneralizedComplex`), so
+ * `Zeta(s, 0) = ζ(s)` where `HurwitzZeta(s, 0)` is a pole.
+ */
+function evaluateGeneralizedZeta(
+  engine: ComputeEngine,
+  s: Expression,
+  a: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!isNumber(a) || a.re > 0)
+    return evaluateHurwitzZeta(engine, s, a, numericApproximation);
+
+  if (a.im === 0 && a.re === 0)
+    return engine.function('Zeta', [s]).evaluate({ numericApproximation });
+
+  if (
+    !shouldNumericize(numericApproximation, s, a) ||
+    !isNumber(s) ||
+    !Number.isFinite(s.re) ||
+    !Number.isFinite(s.im) ||
+    !Number.isFinite(a.im)
+  )
+    return undefined; // stay symbolic
+
+  return boxComplexResult(
+    engine,
+    zetaGeneralizedComplex(new Complex(s.re, s.im), new Complex(a.re, a.im))
+  );
+}
+
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   {
     //
@@ -3085,10 +3210,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    // Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s
+    // Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s, and its two-argument
+    // (Hurwitz) form ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s} — Wolfram's `Zeta[s,a]`;
+    // `HurwitzZeta` below is the same function under its own name.
     // Converges for Re(s) > 1, analytically continued elsewhere
     Zeta: {
-      description: 'Riemann zeta function',
+      description:
+        'Riemann zeta function; with two arguments, the Hurwitz zeta function ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s}.',
       wikidata: 'Q187235',
       complexity: 8500,
       broadcastable: true,
@@ -3098,12 +3226,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // carrier: `ζ(+∞) = 1` (ζ(100) = 1 to 30 digits), and `NaN` at `−∞`
       // (the trivial zeros at the even negative integers alternate with
       // values like ζ(−10⁶ − ½) = −10^4767531: no limit), at `~oo` and at
-      // an anonymous infinity. A
-      // non-real finite argument stays symbolic — no complex kernel, a
-      // capability gap. `NaN` propagates (explicit: the carrier is not a
-      // subtype of `complex`). No `canonical` handler, so a proven
-      // off-carrier operand is rejected at boxing.
-      signature: '(complex | infinity) -> number',
+      // an anonymous infinity. `NaN` propagates (explicit: the carrier is
+      // not a subtype of `complex`). No `canonical` handler, so a proven
+      // off-carrier operand is rejected at boxing. The two-argument form
+      // keeps the generic `specialFunctionType` claim below rather than the
+      // single-argument pole refinement.
+      signature: '(complex | infinity, (complex | infinity)?) -> number',
       nanBehavior: 'propagate',
       // ζ(1) is the pole; its value `~oo` is neither finite nor a member of
       // the signed pair `+oo | -oo`, so only `number` admits it. The
@@ -3113,7 +3241,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // provably-NaN operand declines (`specialFunctionType` records what
       // that buys: the derived claim stays `number` for a `number`-result
       // head).
-      type: ([x], context) => {
+      type: (ops, context) => {
+        if (ops.length === 2)
+          return BoxedType.forResult(
+            specialFunctionType(ops),
+            context.engine._typeResolver
+          );
+        const x = ops[0];
         if (x !== undefined && factsOf(x.type).nan) return undefined;
         return BoxedType.forResult(
           x !== undefined && operandLiteralValueOnTypes(x) === 1
@@ -3122,7 +3256,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: ([x], { numericApproximation, engine }) => {
+      evaluate: (ops, { numericApproximation, engine }) => {
+        // Hurwitz zeta ζ(s,a) — Wolfram's `Zeta[s,a]`, the same function
+        // `HurwitzZeta` below declares under its own name.
+        if (ops.length === 2)
+          return evaluateGeneralizedZeta(
+            engine,
+            ops[0],
+            ops[1],
+            numericApproximation
+          );
+
+        const x = ops[0];
         // The pole and the infinite points are exact, so they are answered
         // on both routes, before the kernel is consulted.
         if (isNumber(x)) {
@@ -3132,7 +3277,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (x.im === 0 && x.isSame(1)) return engine.ComplexInfinity;
         }
         if (shouldNumericize(numericApproximation, x))
-          return apply(x, zeta, (x) => bigZeta(engine, x));
+          return apply(x, zeta, (x) => bigZeta(engine, x), zetaComplex);
 
         // Exact values at integer literals (via exact Bernoulli rationals):
         // - ζ(2k) = (−1)^{k+1}·B₂ₖ·(2π)^{2k}/(2·(2k)!) → rational · π^{2k}
@@ -3157,6 +3302,40 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             .number(zetaEvenCoefficient(n / 2))
             .mul(engine.Pi.pow(n));
         return undefined;
+      },
+    },
+
+    // Hurwitz zeta function ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s}, under Wolfram's
+    // own name for it. An alias for the two-argument form of `Zeta` above —
+    // both declarations share the same evaluation and closed forms; keeping
+    // them as separate library entries (rather than a `Zeta` alias) matches
+    // how the fungrim simplification rules already reference `HurwitzZeta`
+    // as its own head.
+    HurwitzZeta: {
+      description: 'Hurwitz zeta function ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s}',
+      wikidata: 'Q1638777',
+      complexity: 8500,
+      broadcastable: true,
+      // The optional third operand is an nth-derivative order (fungrim's
+      // `HurwitzZeta(s, a, n)`, the ∂ⁿ/∂aⁿ ζ(s,a) identity rules) — no
+      // evaluate handler here implements it, so a 3-operand call stays
+      // symbolic, but the signature still admits it: those rules box
+      // against this same head and must not fail to box.
+      signature: '(complex | infinity, complex | infinity, integer?) -> number',
+      nanBehavior: 'propagate',
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
+      evaluate: (ops, { numericApproximation, engine }) => {
+        if (ops.length !== 2) return undefined;
+        return evaluateHurwitzZeta(
+          engine,
+          ops[0],
+          ops[1],
+          numericApproximation
+        );
       },
     },
 

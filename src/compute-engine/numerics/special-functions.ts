@@ -1,7 +1,9 @@
+import { Complex } from 'complex-esm';
 import type { IComputeEngine as ComputeEngine } from '../global-types.js';
 import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { hurwitzZetaComplex } from './numeric-complex.js';
 
 const gammaG = 7;
 const lanczos_7_c = [
@@ -1536,7 +1538,7 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum, branch = 0): BigNum {
 const EULER_MASCHERONI = 0.5772156649015329;
 
 // Bernoulli numbers B_{2k} for k=1..10 (used in asymptotic expansions)
-const BERNOULLI_2K = [
+export const BERNOULLI_2K = [
   1 / 6, // B_2
   -1 / 30, // B_4
   1 / 42, // B_6
@@ -1773,6 +1775,17 @@ export function zeta(s: number): number {
   }
   // 1 − 2^{1−s} = −expm1((1−s)·ln 2), computed without cancellation near s = 1
   return sum / dn / -Math.expm1((1 - s) * Math.LN2);
+}
+
+/**
+ * Real Hurwitz zeta ζ(s,a), for the compiled (JS) real-scalar path —
+ * `hurwitzZetaComplex`'s real part at im = 0. Re(s) ≪ 0 with a ≠ 1 needs
+ * the same Taylor-shift the complex kernel uses to avoid cancellation
+ * (see there), so this delegates rather than repeating a simpler,
+ * cancellation-prone version.
+ */
+export function hurwitzZeta(s: number, a: number): number {
+  return hurwitzZetaComplex(new Complex(s, 0), new Complex(a, 0)).re;
 }
 
 const ZETA_BORWEIN_N = 28;

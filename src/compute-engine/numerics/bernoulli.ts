@@ -80,6 +80,42 @@ export function bernoulliRational(n: number): [bigint, bigint] {
 }
 
 /**
+ * Bernoulli polynomial Bₙ(x) = Σ_{k=0}^n C(n,k)·Bₖ·x^{n−k}, for a rational
+ * point x = xNum/xDen. Used for the exact closed form
+ * ζ(−n,a) = −Bₙ₊₁(a)/(n+1) at a rational base point a (`library/arithmetic.ts`).
+ */
+export function bernoulliPolynomialRational(
+  n: number,
+  x: [bigint, bigint]
+): [bigint, bigint] {
+  if (!Number.isInteger(n) || n < 0)
+    throw new RangeError(`bernoulliPolynomialRational: invalid degree ${n}`);
+  const [xNum, xDen] = x;
+  let sumNum = 0n;
+  let sumDen = 1n;
+  let powNum = 1n; // xNum^{n-k}, grows as k counts down from n to 0
+  let powDen = 1n;
+  let binom = 1n; // C(n, k), starts at k = n → C(n, n) = 1
+  for (let k = n; k >= 0; k--) {
+    const [bNum, bDen] = bernoulliRational(k);
+    if (bNum !== 0n) {
+      const termNum = binom * bNum * powNum;
+      const termDen = bDen * powDen;
+      sumNum = sumNum * termDen + termNum * sumDen;
+      sumDen = sumDen * termDen;
+      [sumNum, sumDen] = reduce(sumNum, sumDen);
+    }
+    if (k > 0) {
+      // C(n, k-1) = C(n, k) · k / (n-k+1)
+      binom = (binom * BigInt(k)) / BigInt(n - k + 1);
+      powNum *= xNum;
+      powDen *= xDen;
+    }
+  }
+  return reduce(sumNum, sumDen);
+}
+
+/**
  * The exact rational c such that ζ(2k) = c·π^{2k}, for integer k ≥ 1.
  *
  * From ζ(2k) = (−1)^{k+1}·B₂ₖ·(2π)^{2k} / (2·(2k)!) and the sign alternation
@@ -106,5 +142,20 @@ export function zetaNegativeInteger(n: number): [bigint, bigint] {
   if (!Number.isInteger(n) || n < 1)
     throw new RangeError(`zetaNegativeInteger: invalid index ${n}`);
   const [num, den] = bernoulliRational(n + 1);
+  return reduce(-num, den * BigInt(n + 1));
+}
+
+/**
+ * ζ(−n,a) for integer n ≥ 1 and rational base point a, as an exact reduced
+ * rational: ζ(−n,a) = −Bₙ₊₁(a)/(n+1), the Bernoulli polynomial (DLMF
+ * 25.11.14). Generalizes `zetaNegativeInteger` (a = 1) to a rational a.
+ */
+export function hurwitzZetaNegativeInteger(
+  n: number,
+  a: [bigint, bigint]
+): [bigint, bigint] {
+  if (!Number.isInteger(n) || n < 1)
+    throw new RangeError(`hurwitzZetaNegativeInteger: invalid index ${n}`);
+  const [num, den] = bernoulliPolynomialRational(n + 1, a);
   return reduce(-num, den * BigInt(n + 1));
 }

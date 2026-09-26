@@ -1,3 +1,15 @@
+## Unreleased
+
+### New Features
+
+- **`Zeta` evaluates at complex `s` and takes a second operand, and
+  `HurwitzZeta` is new** (#340). `Zeta(0.5 + 14i).N()` evaluates, and
+  `Zeta(s, a)` is Wolfram's `Zeta[s, a]`: the same as `HurwitzZeta(s, a)` for
+  `Re(a) > 0`; for `a ≤ 0` it follows Wolfram's own convention, where
+  `HurwitzZeta` can be complex at real arguments. `ζ(−n, a)` at a rational `a`
+  is exact (a Bernoulli polynomial). Numeric values are machine precision.
+  Both heads compile to JavaScript and WGSL.
+
 ## 0.136.2 _2026-09-25_
 
 ### Issues Resolved
