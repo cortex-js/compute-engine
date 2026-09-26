@@ -586,19 +586,6 @@ symbolic), while `√(i/4)` evaluates to the exact `(√2/4)(1 + i)` and, since
 2026-09-25, `√(4i)` to `√2(1 + i)`. Decide whether that pin should change: `√i`
 is `(√2/2)(1 + i)`, an exact Gaussian radical the engine can hold.
 
-### The distribution test of `RandomSample` under a pinned seed fails under load (OPEN, test determinism — found 2026-09-25)
-
-`random.test.ts`, "the sparse Fisher-Yates of `RandomSample` is uniform":
-`WithRandomSeed(42, Map(First(RandomSample(Range(1,5), 1)), Range(1, 10000)))`
-gave one count 151 away from 2000 (the band is 150) in one full-suite run of two
-on the 18-core box, and passes when the file or the test runs alone. The test's
-comment says the pinned seed fixes the sequence, so the band is a correctness
-band; a sequence that differs under load means the draws do not come from one
-fixed stream on every route (a candidate: `Map` choosing the compiled route or
-the interpreter by a time budget, with the two routes consuming the seeded
-stream differently). Not caused by the exact-imaginary change of 2026-09-25 (the
-test involves no complex number).
-
 ### `interval-js` gives a finite enclosure inside the machine pole zone (OPEN, small — found 2026-09-24)
 
 The machine pole rule (2026-09-24) declares `Tan(x)` the pole `~oo` when

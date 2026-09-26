@@ -69,9 +69,7 @@ describe('Random — no operand', () => {
 
   it('types real', () => {
     expect(ce.box(['Random']).type.toString()).toBe('real');
-    expect(ce.parse('\\operatorname{Random}()').type.toString()).toBe(
-      'real'
-    );
+    expect(ce.parse('\\operatorname{Random}()').type.toString()).toBe('real');
   });
 
   it('is sgn non-negative', () => {
@@ -112,7 +110,9 @@ describe('Random — Range domains', () => {
   it('a Range domain types as its element type, which is already FINITE', () => {
     expect(ce.box(['Random', ['Range', 1, 6]]).type.toString()).toBe('integer');
     // Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — `real`, not `integer`.
-    expect(ce.box(['Random', ['Range', 0.5, 2.5]]).type.toString()).toBe('real');
+    expect(ce.box(['Random', ['Range', 0.5, 2.5]]).type.toString()).toBe(
+      'real'
+    );
   });
 
   it('Range(0.5, 2.5) draws a NON-integer', () => {
@@ -338,7 +338,9 @@ describe('RandomChoice / RandomSample — the §4 k table', () => {
     // (L10), so neither an `Interval` nor a `Range` element can be ±∞.
     expect(ce.box(['Random', ['Interval', 0, 1]]).type.toString()).toBe('real');
     expect(
-      ce.box(['RandomChoice', ['Interval', 0, 1], 3]).type.matches('list<real^3>')
+      ce
+        .box(['RandomChoice', ['Interval', 0, 1], 3])
+        .type.matches('list<real^3>')
     ).toBe(true);
 
     expect(ce.box(['Random', ['Range', 1, 6]]).type.toString()).toBe('integer');
@@ -350,7 +352,9 @@ describe('RandomChoice / RandomSample — the §4 k table', () => {
 
     // An unshaped (symbolic-`k`) result carries the same element type.
     expect(
-      ce.box(['RandomChoice', ['Interval', 0, 1], 'm']).type.matches('list<real>')
+      ce
+        .box(['RandomChoice', ['Interval', 0, 1], 'm'])
+        .type.matches('list<real>')
     ).toBe(true);
 
     // A non-closed-form domain keeps its collection element type unchanged.
@@ -536,19 +540,42 @@ describe('Distribution — objective thresholds under a pinned seed', () => {
   it('the sparse Fisher-Yates of RandomSample is uniform', () => {
     // An off-by-one in the partial Fisher-Yates yields output that looks
     // random but is biased, so the rewrite gets its own distribution test.
-    const counts = tally(
-      values([
-        'WithRandomSeed',
-        42,
+    //
+    // The `Map` is materialized INSIDE the frame (`ListFrom`): a lazy view
+    // draws when its elements are produced, from whatever frame is active
+    // then (`docs/RANDOMNESS-MODEL.md` §6). Without the `ListFrom`, the frame
+    // has ended by the time `values()` iterates the view, every draw is live,
+    // and the band below is a flake margin: this test failed a full-suite run
+    // on 2026-09-25 with a count 151 away from 2,000.
+    const sample = [
+      'WithRandomSeed',
+      42,
+      [
+        'ListFrom',
         [
           'Map',
           ['Function', ['First', ['RandomSample', ['Range', 1, 5], 1]], 'i'],
           ['Range', 1, 10_000],
         ],
-      ])
-    );
+      ],
+    ];
+    const counts = tally(values(sample));
     expect(counts.reduce((a, b) => a + b)).toBe(10_000);
     for (const c of counts) expect(Math.abs(c - 2000)).toBeLessThanOrEqual(150);
+    // The sequence is pinned by the seed: a second evaluation replays it.
+    expect(tally(values(sample))).toEqual(counts);
+    // A sample of one element is the first step of the Fisher-Yates, one draw
+    // over the whole index space, so under the same seed it is the same draw
+    // as `RandomChoice` makes.
+    expect(counts).toEqual(
+      tally(
+        values([
+          'WithRandomSeed',
+          42,
+          ['RandomChoice', ['Range', 1, 5], 10_000],
+        ])
+      )
+    );
   });
 });
 
