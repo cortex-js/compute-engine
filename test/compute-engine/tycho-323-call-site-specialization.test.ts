@@ -164,3 +164,38 @@ describe('MULTIPLY OVER A NAN | REAL FACTOR', () => {
     expect(ce.box(json as never).type.toString()).toBe(expected);
   });
 });
+
+/**
+ * A call with a scalar argument whose type is a union of scalars (`nan |
+ * real`, the type Tycho declares for every slider value) is typed from the
+ * body like a call with a `real` argument. Before, any union-typed argument
+ * made the call keep its declared result (`list<unknown>` for the chain
+ * below), because a union was treated as a value that may be a collection.
+ * The product of a `nan | real` parameter and a list keeps the `nan` arm in
+ * its cells.
+ */
+describe('SCALAR ARGUMENT WITH A NAN ARM', () => {
+  test.each([
+    // The helpers read elements with `l[i]`, typed `nan | real`, so the
+    // chain has a `nan` arm whatever `a` is.
+    ['real', 'list<nan | real>'],
+    ['nan | real', 'list<nan | real>'],
+    ['real | signed_infinity | nan', 'list<infinity | nan | real>'],
+  ])('d(s(u(L)), a) with a: %s types %s', (declared, expected) => {
+    const ce = engine('function');
+    ce.declare('a', declared as never);
+    expect(ce.parse('d(s(u(L)), a)').type.toString()).toBe(expected);
+    // A literal argument is unchanged.
+    expect(ce.parse('d(s(u(L)), 2)').type.toString()).toBe('list<nan | real>');
+  });
+
+  test('a body without a random draw', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<real>');
+    ce.declare('a', 'nan | real');
+    ce.declare('g', 'function');
+    ce.assign('g', ce.parse('(l, b) \\mapsto l + b\\operatorname{Length}(l)'));
+    expect(ce.parse('g(L, a)').type.toString()).toBe('list<nan | real>');
+    expect(ce.parse('a L').type.toString()).toBe('list<nan | real>');
+  });
+});

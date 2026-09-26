@@ -3956,6 +3956,43 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               reduceType({ kind: 'union', types: [t, 'nan'] }),
               engine._typeResolver
             );
+          // A product with a list factor is a list: when the NaN factor is
+          // NaN, every cell is NaN, so the `nan` arm is added to the cell
+          // type. Without this, the product of a `nan | real` factor and a
+          // `list<real>` typed `list<real>` when the factor was a function
+          // parameter (whose descriptor carries a type and no declaration),
+          // while the same product of a declared symbol typed
+          // `list<nan | real>`. A factor that may also be infinite
+          // (`real | signed_infinity | nan`) makes a cell infinite, so the
+          // `infinity` arm is added as well: the finite tiers above do not
+          // model a factor that is neither provably finite nor provably
+          // infinite, and the cell type must not claim finiteness.
+          const list = t === undefined ? undefined : resolveTypeAlias(t);
+          if (
+            typeof list === 'object' &&
+            list.kind === 'list' &&
+            isSubtype(list.elements, 'number')
+          ) {
+            // Every scalar factor is tested, not only the ones with a `nan`
+            // arm: a `real | signed_infinity` factor beside a `nan | real`
+            // one makes a cell infinite too.
+            const mayBeInfinite = ops.some((x, i) => {
+              const p = present[i] ?? x.type;
+              return isSubtype(p, 'number') && !isSubtype(p, 'complex');
+            });
+            return BoxedType.forResult(
+              {
+                ...list,
+                elements: reduceType({
+                  kind: 'union',
+                  types: mayBeInfinite
+                    ? [list.elements, 'infinity', 'nan']
+                    : [list.elements, 'nan'],
+                }),
+              },
+              engine._typeResolver
+            );
+          }
         }
         // A dimensionless list/indexed-collection factor together with a
         // numeric-tuple (point) factor broadcasts the collection while scaling

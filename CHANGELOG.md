@@ -1,3 +1,25 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **A call with a `nan | real` argument is typed from the function body.** A
+  user function that binds its arguments whole (such as a function declared
+  `function` whose body reads `Length(l)`) is typed at each call from its body,
+  with each parameter typed as its argument. An argument whose type was a union
+  (`nan | real`, `real | signed_infinity | nan`) stopped that analysis, and the
+  call kept the function's declared result: `d(L, a)` with
+  `d := (l, b) ↦ l + b·Length(l)`, `L: list<real>` and `a: nan | real` typed
+  `collection | number` (`list<unknown>` when the body draws a random list),
+  while the same call with `a: real` typed `list<real>`. A union of scalars
+  cannot be a collection, so it is now read like any other scalar argument, and
+  the call types `list<nan | real>`. A union that may hold a collection still
+  keeps the declared result.
+- **The product of a `nan | real` factor and a list keeps the `nan` arm in its
+  cells.** When the type of `b·L` was derived from operand types only (as for
+  a function parameter `b`), it was `list<real>`; it is now `list<nan | real>`,
+  as for a declared symbol. A factor that may also be infinite adds an
+  `infinity` arm (`list<infinity | nan | real>`).
+
 ## 0.136.1 _2026-09-25_
 
 ### Behavior Changes

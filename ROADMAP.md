@@ -584,6 +584,29 @@ value; a host that reads the type of a result to choose a shader type or a lane
 sees `number` where `real | signed_infinity | nan` is true. Probe: Tycho's
 `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
 
+### `Multiply` claims a finite product for a factor that may be infinite (OPEN, decision — found 2026-09-25 while fixing the Tycho item 323 residue)
+
+The `Multiply` type handler has a branch for a factor that is provably
+infinite (`signed_infinity`, `Ln(0)`), and after it treats every factor as
+finite. A factor typed `real | signed_infinity` is neither, so it reaches the
+finite tiers: `a·r` with `a: real | signed_infinity` and `r: real` types
+`real`, and with `a: real | signed_infinity | nan` it types `nan | real`. The
+value can be `±∞` (`a = ∞`, `r = 2`) or NaN (`a = ∞`, `r = 0`), so the claim is
+wrong, not only imprecise. `signed_infinity · integer` types `number`, which
+follows the non-finite typing convention in `ARCHITECTURE.md` (rule 2: a
+product that may be NaN claims `number`). The same product with a list factor
+types `list<infinity | nan | real>`, because the handler adds the factor's
+arms to the cells. Fixing the scalar case by the convention changes the type
+of every product of a Tycho slider value (declared
+`real | signed_infinity | nan`) from `nan | real` to `number`, and Tycho picks a
+value layout from that type. The decision is between applying rule 2 as
+written (`number`) and a narrower sound type for extended-real factors
+(`real | signed_infinity | nan`, which admits no complex value). Tycho needs
+the extended-real type (Tycho session `tycho-4a`, 2026-09-25): its resolver
+treats `number` as possibly complex, so `number` would move every product of a
+slider value to the complex lane or leave it with no value layout, and the
+Tycho item 323 chain would decline again.
+
 ### Ordering of constants with special functions: what stays open after the 2026-09-25 bounds (OPEN, low)
 
 `approximate()` (`compare.ts`) propagates an error bound through `Gamma`, `Erf`,

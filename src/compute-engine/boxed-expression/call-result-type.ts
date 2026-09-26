@@ -127,13 +127,20 @@ export function callResultType(
     if (!name) return undefined;
     const t = args[i].type;
     // Unknown arguments may be collections at runtime. Do not infer a scalar
-    // result by treating an unknown parameter as a numeric operand.
+    // result by treating an unknown parameter as a numeric operand. A union
+    // whose every member is a scalar (`real | nan`, the type of a value that
+    // may be undefined) cannot be a collection, so it is typed like any other
+    // scalar argument.
     if (
       t === 'unknown' ||
       t === 'any' ||
       t === 'value' ||
       (typeof t === 'object' &&
-        (t.kind === 'broadcastable' || t.kind === 'union'))
+        (t.kind === 'broadcastable' ||
+          (t.kind === 'union' &&
+            !isSubtype(t, 'number') &&
+            !isSubtype(t, 'boolean') &&
+            !isSubtype(t, 'string'))))
     )
       return undefined;
     env.set(name, describeType(t));
