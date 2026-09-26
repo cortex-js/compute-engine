@@ -169,14 +169,16 @@ describe('Cross of a restricted point', () => {
       ['Cross', ['When', ['List', 1, 2, 3], c], ['List', 1, 1, 1]],
       '[-1,2,-1] {0 < t}',
       '[-1,2,-1]',
-      '[NaN,NaN,NaN]',
+      // The whole product is absent (user decision 2026-09-25: a collection
+      // operator over an absent collection); it was `[NaN, NaN, NaN]`.
+      '"Missing"',
     ],
     [
       'a vector and a restricted vector',
       ['Cross', ['List', 1, 1, 1], ['When', ['List', 1, 2, 3], c]],
       '[1,-2,1] {0 < t}',
       '[1,-2,1]',
-      '[NaN,NaN,NaN]',
+      '"Missing"',
     ],
   ])('%s', (_l, json, free, present, absent) => {
     expect(value(json)).toBe(free);
@@ -199,7 +201,7 @@ describe('Cross of a restricted point', () => {
         .box(['Cross', ['List', 1, 1, 1], 'Missing'] as never)
         .evaluate()
         .toString()
-    ).toBe('[NaN,NaN,NaN]');
+    ).toBe('"Missing"');
   });
 
   test('the type of a restricted point product carries the absent case', () => {

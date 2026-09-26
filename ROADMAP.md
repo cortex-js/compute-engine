@@ -469,6 +469,23 @@ folds an absent operand through them, rather than through the operator's
 evaluate handler, keeps the symbol in its result. Make the methods read an
 absent operand as `NaN`, as the tuple routes do since 2026-09-25.
 
+### `Map` with a bare symbol callback copies the source element type (OPEN, decision — found 2026-09-25 while fixing Tycho item 325)
+
+`Map(\sin, [-1, 2])` is typed `vector<integer^2>`, and `Map(W, G)` with
+`W = x \mapsto \sin x` and `G = [-1, 0, 1]` is typed `vector<integer^3>`,
+while the values are reals. A bare symbol as the callback is deliberately left
+unresolved on the parse route, so its type reads `unknown`, and the `Map` type
+handler then copies the source type, element type included. Typing the result
+as the same kind and dimensions with `unknown` elements (`list<unknown^3>`)
+was tried and reverted: it breaks four pins that expect the copied type
+(`pipe-type-read-purity.test.ts`, the placeholder inside a nested `Map` stage;
+`map-over-tuple-result.test.ts`, "a list source is unchanged"; two in
+`compile-map-reduction-fusion.test.ts`, which then emitted `.map(` instead of
+the fused form). The decision is which the pins should lock in: the copied
+element type (wrong for a non-identity callback) or an `unknown` element type
+(which loses the fusion). Test file for the values:
+`tycho-325-integrate-list-limit-broadcast.test.ts`.
+
 ### An out-of-range component read answers `Missing` when the tuple holds an absent cell, `NaN` otherwise (OPEN, small — found 2026-09-25)
 
 `Third((1, 2))` is `NaN` (typed `nan`: index 3 of a 2-tuple is out of range),

@@ -9,6 +9,7 @@ import {
   typeIsProvablyNonNumericCollection,
 } from '../collection-utils.js';
 
+import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { functionLiteralParameterType } from './function-literal.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
@@ -29,6 +30,7 @@ import {
   stripMissingFromType,
   signatureSlotType,
   staticCollectionDims,
+  functionResult,
 } from '../../common/type/utils.js';
 import {
   diagnoseNoMatch,
@@ -880,8 +882,12 @@ export function isAbsentScalarSymbol(x: Expression): boolean {
  * Missing`, then `sin(w)` and `2w` are typed `never`): the value is absent in
  * every case, and the operator's own domain is numeric, so the numeric marker
  * of the 2026-07-24 absence ruling (`Sin(Missing)` is `NaN`) is the answer.
- * `never` is a subtype of `number`, so no separate arm is needed for it; this
- * sentence records that the fall-through is intended.
+ * `never` is a subtype of `number`, so the numeric reading would fall
+ * through on its own; the explicit `never` arm below exists for the OTHER
+ * operators (since 2026-09-25 collection operators propagate absence too):
+ * `Sort(Missing)` is typed `missing`, which strips to `never` as well, and
+ * its marker is `Missing`. The arm reads the operator's declared result to
+ * tell the two apart.
  */
 export function absentScalarMarker(
   ce: ComputeEngine,
@@ -889,6 +895,21 @@ export function absentScalarMarker(
 ): Expression {
   if (expression === undefined) return ce.NaN;
   const t = stripMissingFromType(expression.type.type);
+  // An application typed `missing` alone (`Sort(Missing)`), or `never` (a
+  // numeric operator over a symbol assigned `Missing`, which types `never`),
+  // strips to `never`, a subtype of everything, so the type says nothing
+  // about the codomain: it is read off the operator's declared result
+  // instead, `NaN` for a numeric one and `Missing` otherwise.
+  if (t === 'never') {
+    const sig = expression.operatorDefinition?.signature.type;
+    const declared =
+      sig === undefined
+        ? undefined
+        : functionResult(readTypeVariablesAsBounds(sig));
+    return declared !== undefined && isSubtype(declared, 'number')
+      ? ce.NaN
+      : ce.Missing;
+  }
   return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
 }
 

@@ -1308,7 +1308,33 @@ document's history):
   `boxed-expression/validate.ts`), so `Dot([1,2]{[0<t, t<0]}, [1,1])` is
   accepted and `Dot([1, Missing], [1,1])` is `NaN`. An operand that can be
   absent as a whole AND cell by cell counts as both in `absorbOperandAbsence`
-  (`broadcast-lift-type.ts`). Consumers fixed
+  (`broadcast-lift-type.ts`).
+- **RULED 2026-09-25: a collection operator propagates absence.** An
+  operator with no declared `missingBehavior` propagates an absent operand
+  when every parameter of its signature is a number, a collection or a
+  function and at least one is a number or a collection
+  (`signatureParamsPropagateAbsence`, `boxed-operator-definition.ts`); before,
+  only an all-numeric signature did. So `Reverse(Missing)`, `Sort(Missing)`,
+  `Take(Missing, 1)`, `Zip(L, Missing)`, `Map(f, Missing)` and
+  `Filter(Missing, p)` answer `Missing`, the marker of a collection codomain,
+  where they were `incompatible-type` errors or stayed raw; `Length(Missing)`
+  and `Reduce(Missing, f, 0)` answer `NaN`, the marker of a number (`Length`
+  and `Reduce` declare the policy, their signatures having an `any` or
+  `value` parameter). The absence gate stands aside beside a collection
+  operand for a BROADCASTABLE operator only (`Add(Missing, matrix)` lands in
+  each cell); a collection operator computes on the whole operand, so an
+  absent one makes the whole answer absent. The collection-operand check of
+  the canonical handlers (`checkCollectionOperand`, `library/collections.ts`)
+  admits an absent symbol for the same reason. A restricted collection,
+  `[1,2]{c}`, is threaded whole by these operators (`threadsConditionals`):
+  `Reverse([1,2]{c})` is the held `Reverse([1,2]){c}`, a collection of the
+  present elements, `Missing` once `c` fails; read cell by cell it used to
+  materialize as a `Set`. Known consequence, not ruled: a numeric result
+  computed from a restricted list, `Length([1,2]{c})` or `Sum([1,2]{c})`, is
+  `2{c}` or `3{c}`, which masks to `Missing` (the `When` rule) while the same
+  expression evaluated fresh with `c` false gives the marker `NaN`; the same
+  holds for every numeric operator threaded over a scalar restriction
+  (`2·x{c}` is `2x{c}`, `2·Missing` is `NaN`). Consumers fixed
   with it: the invisible-operator gates read an operand's type with the
   absence marker stripped (`typeIgnoringAbsence`,
   `boxed-expression/invisible-operator.ts`), so `2x{x>0}`, `t P{0 ≤ t ≤ 1}`
@@ -1469,7 +1495,12 @@ document's history):
   gap goes back into a labeled block naming the eventual behavior, and the
   pin is what measures the change. One negative finding worth keeping: the
   three routes AGREED on every probe in the canonical kit — no route
-  divergence exists there today.
+  divergence exists there today. Amended 2026-09-25: an ABSENT
+  operand is no longer a refused non-collection — `Length(Missing)`,
+  `Count(Missing)` and `Length(First([]))` answer `NaN`, the marker of
+  their numeric result, as every collection operator answers the marker of
+  its codomain for an absent operand (the ruling of 2026-09-25 below). A
+  number or a boolean is still refused with the identical diagnostic.
 
 ## Related documents
 

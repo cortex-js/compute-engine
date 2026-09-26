@@ -2838,10 +2838,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // whose condition is false — answers the absence marker of the
         // codomain, read off the application's type (`absentScalarMarker`):
         // `NaN` for the product of two points, a number, and `Missing` for a
-        // list of points, whose product is a list. The generic absence gate
-        // of `missingBehavior: 'propagate'` does not fire here, because the
-        // other operand is a point or a list, and that gate stands aside
-        // when an operand is a collection.
+        // list of points, whose product is a list. The evaluation driver's
+        // absence gate answers that same marker BEFORE this handler runs
+        // (since 2026-09-25 it stands aside beside a collection operand for
+        // a broadcastable operator only, and `Dot` is not one); this arm is
+        // kept for a route that reaches the handler directly.
         if (ops.some((op) => isAbsentSymbol(op)))
           return absentScalarMarker(ce, expression);
         // A list of points that holds restricted or absent points
@@ -3190,13 +3191,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // `[1, 2, 3] + Missing` is `[NaN, NaN, NaN]`: that is also what the
         // type of the application says, a `vector` with no `missing` arm
         // (`absorbOperandAbsence`, `boxed-expression/broadcast-lift-type.ts`).
-        // The generic absence gate of `missingBehavior: 'propagate'` does not
-        // fire here, because the other operand is a collection.
-        if (ops.some((op) => isAbsentSymbol(op))) {
-          if (ops.some((op) => op.isCollection === true && !isTuple(op)))
-            return ce.function('List', [ce.NaN, ce.NaN, ce.NaN]);
+        // An absent operand makes the product absent, `Missing`: the
+        // evaluation driver's absence gate answers the marker of the codomain
+        // before this handler runs (user decision 2026-09-25, every
+        // collection operator); this arm is the same answer for a route that
+        // reaches the handler directly. (Before, the driver stood aside beside
+        // a list operand and this handler answered `[NaN, NaN, NaN]`.)
+        if (ops.some((op) => isAbsentSymbol(op)))
           return absentScalarMarker(ce, expression);
-        }
         // A restricted point or vector whose condition is not decided moved
         // its condition out before this handler ran (`threadsConditionals`).
         // A list whose cells have different conditions is undecided until

@@ -2,6 +2,22 @@
 
 ### Behavior Changes
 
+- **A bracketed list in the parentheses of a function call keeps the parentheses
+  in the raw and structural forms** (Tycho item 320). With `A` declared as a
+  function, `A([1])` and `A\left(\left[1\right]\right)` parse to
+  `["A", ["Delimiter", ["List", 1]]]` in the raw and structural forms; they
+  parsed to `["A", ["List", 1]]`, the same as `A[1]` (a bracketed list after a
+  function name is its argument), so a host could not tell the two spellings
+  apart. `A[1]` is unchanged, and so is the canonical form: both spellings are
+  `["A", ["List", 1]]`. The marker is added only when the call has one argument
+  and the list opens with an index bracket (`[`, `\lbrack`, `\left[`):
+  `A([1], 2)`, `A(1)` and the serializer's own spelling
+  `A(\bigl\lbrack1\bigr\rbrack)` parse as before. The raw form of `A([1])`
+  serializes as `A((\bigl\lbrack1\bigr\rbrack))`, which parses back to the same
+  raw form. A head that holds its argument unevaluated keeps the parentheses in
+  the canonical form too: `\operatorname{Hold}([1,2])` is
+  `["Hold", ["Delimiter", ["List", 1, 2]]]`, as `\operatorname{Hold}((1))` is
+  `["Hold", ["Delimiter", 1]]`.
 - **A collection operator over an absent collection answers the absence marker
   of its result.** `Reverse(Missing)`, `Sort(Missing)`, `Take(Missing, 1)`,
   `Unique(Missing)`, `Zip(L, Missing)`, `Map(f, Missing)` and

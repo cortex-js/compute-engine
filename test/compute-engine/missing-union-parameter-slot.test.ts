@@ -128,16 +128,17 @@ describe('the single-arm siblings agree, before and after', () => {
     }
   );
 
-  test('`Chunk` answers `incompatible-type` for an absent size', () => {
+  test('`Chunk` answers `Missing` for an absent size', () => {
+    // A collection operator propagates an absent operand, its size
+    // included, to the marker of its result (user decision 2026-09-25); it
+    // was an `incompatible-type` error.
     const ce = engineWithPiecewise();
     expect(
       ce
         .box(['Chunk', ['List', 1, 2, 3, 4], ['k', 3]])
         .evaluate()
         .toString()
-    ).toBe(
-      'Error(ErrorCode("incompatible-type", "integer", "missing"), "Missing")'
-    );
+    ).toBe('"Missing"');
   });
 });
 

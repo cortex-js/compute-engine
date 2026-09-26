@@ -5,6 +5,11 @@ import type {
   OperandDescriptor,
   TypeHandlerContext,
 } from '../global-types.js';
+import { reduceType } from '../../common/type/reduce.js';
+import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import { isTupleShapedType } from '../collection-utils.js';
 import type { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
@@ -199,7 +204,16 @@ export function deriveApplicationType(
       def.type!(handlerOperands, typeHandlerContext(engine))
     );
     const answered = BoxedType.forResult(raw, engine._typeResolver)?.type;
-    if (answered !== undefined) return absorb(lift(answered));
+    if (answered !== undefined)
+      return absorb(
+        lift(
+          withCodomainForAbsentAnswer(
+            answered,
+            def,
+            operands.map((d) => d.type)
+          )
+        )
+      );
   }
 
   const sig = def.signature.type;
@@ -281,4 +295,45 @@ export function actualOfDescriptor(d: OperandDescriptor): SolveActual {
       );
     },
   };
+}
+
+/**
+ * A type handler that read an ABSENT operand (`Filter(Missing, p)`; the
+ * descriptor of a bare `Missing` keeps its own type) often answers `missing`
+ * alone, which strips to `never`, a subtype of everything: the absorption
+ * then read it as numeric and typed `Filter(Missing, p)` as `number`, so its
+ * marker was `NaN` instead of `Missing`. When the signature's declared result
+ * is a COLLECTION or a point, that is the codomain of such an answer
+ * (`missing | collection` for `Filter`), and the absorption reads it
+ * correctly. A numeric codomain keeps the absorption's reading (`Negate` of an
+ * absent operand is a `number`, its marker `NaN`), and a boolean one keeps the
+ * handler's own answer (a comparison with `Missing` is `missing`, Kleene).
+ */
+export function withCodomainForAbsentAnswer(
+  answered: Type,
+  def: { signature: { type: Type } },
+  operandTypes: ReadonlyArray<Type>
+): Type {
+  if (stripMissingFromType(answered) !== 'never') return answered;
+  // Only when an operand IS absent (typed `missing`, or `never` as a symbol
+  // assigned `Missing` is): a handler may answer `never` for a reason of its
+  // own — a contradiction it wants surfaced — and that answer is left alone.
+  if (
+    !operandTypes.some(
+      (t) => t === 'never' || stripMissingFromType(t) === 'never'
+    )
+  )
+    return answered;
+  // A polymorphic signature (`-> collection where T`) reads its result
+  // through the bounds of its type variables.
+  const declared = functionResult(
+    readTypeVariablesAsBounds(def.signature.type)
+  );
+  if (declared === undefined) return answered;
+  if (
+    !isSubtype(declared, COLLECTION_SHAPE_TYPE) &&
+    !isTupleShapedType(declared)
+  )
+    return answered;
+  return reduceType({ kind: 'union', types: ['missing', declared] });
 }

@@ -170,16 +170,50 @@ function normalizeSignatureField(
  * (§3.A): an undeclared, non-inferred, all-numeric signature resolves to
  * `propagate`.
  */
-function signatureAllParamsNumeric(signature: Type): boolean {
-  if (typeof signature === 'string') return false;
-  if (signature.kind !== 'signature') return false;
-  const params: Type[] = [
-    ...(signature.args?.map((x) => x.type) ?? []),
-    ...(signature.optArgs?.map((x) => x.type) ?? []),
-    ...(signature.variadicArg ? [signature.variadicArg.type] : []),
-  ];
-  if (params.length === 0) return false;
-  return params.every((t) => isSubtype(t, 'number'));
+/**
+ * Whether an operator with this signature and no declared `missingBehavior`
+ * PROPAGATES an absent operand (answers the marker of its codomain, `NaN` for
+ * a number and `Missing` otherwise, `absentScalarMarker`): every parameter
+ * is a number, a collection, or a function, and at least one is a number or
+ * a collection. Numeric operators have always propagated (§3.A of
+ * `docs/ERROR-MODEL.md`). Collection operators join them (user decision
+ * 2026-09-25): `Reverse(Missing)`, `Map(f, Missing)` and `Filter(Missing, p)`
+ * answer `Missing`, where they used to be `incompatible-type` errors, and
+ * `Length(Missing)` answers `NaN` (declared on `Length` itself, whose
+ * parameter is `any`). A function-typed parameter (the mapping of `Map`) is
+ * neutral: it neither admits nor blocks the policy. An `any`-typed parameter
+ * blocks it, because such an operator may mean to read the absent datum.
+ */
+function signatureParamsPropagateAbsence(signature: Type): boolean {
+  // ONE arm of an intersection signature qualifying is enough (`Reverse`
+  // has a string arm and a list arm; the absent operand belongs to neither,
+  // and the marker is read off the application's type), and a type variable
+  // is read as its bound (`T where T: list` is a list). A STRING parameter
+  // is not a collection here: a string is a collection of characters in the
+  // type lattice, but a string operator (`Characters`, `(string) -> string`)
+  // keeps the pass-through default and refuses an absent operand, as before.
+  const arms = signatureArms(readTypeVariablesAsBounds(signature));
+  if (arms === undefined || arms.length === 0) return false;
+  const isFunctionLike = (t: Type): boolean =>
+    typeof t !== 'string' &&
+    (t.kind === 'signature' ||
+      (t.kind === 'union' && t.types.every((x) => isFunctionLike(x))));
+  const isNumeric = (t: Type) => isSubtype(t, 'number');
+  const isCollection = (t: Type) =>
+    isSubtype(t, COLLECTION_SHAPE_TYPE) && !isSubtype(t, 'string');
+  return arms.some((arm) => {
+    const params: Type[] = [
+      ...(arm.args?.map((x) => x.type) ?? []),
+      ...(arm.optArgs?.map((x) => x.type) ?? []),
+      ...(arm.variadicArg ? [arm.variadicArg.type] : []),
+    ];
+    if (params.length === 0) return false;
+    return (
+      params.every(
+        (t) => isNumeric(t) || isCollection(t) || isFunctionLike(t)
+      ) && params.some((t) => isNumeric(t) || isCollection(t))
+    );
+  });
 }
 
 /**
@@ -845,9 +879,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       memo.inferred === inferred
     )
       return memo.behavior;
-    // undeclared ∧ ¬inferredSignature ∧ allParamsNumeric(sig) → propagate
+    // undeclared ∧ ¬inferredSignature ∧ every parameter numeric, collection or
+    // function, one of them numeric or collection → propagate
     const behavior =
-      !inferred && signatureAllParamsNumeric(signature)
+      !inferred && signatureParamsPropagateAbsence(signature)
         ? 'propagate'
         : 'pass-through';
     this._resolvedMissingBehaviorMemo = { signature, inferred, behavior };

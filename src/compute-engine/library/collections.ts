@@ -12,6 +12,7 @@ import {
   spellCheckMessage,
   validateArguments,
   widenUnannotatedLiteralParams,
+  isAbsentScalarSymbol,
 } from '../boxed-expression/validate.js';
 import { toInteger, toIntegerOperand } from '../boxed-expression/numerics.js';
 import { computeBroadcastCell } from '../boxed-expression/broadcast-cell-widening.js';
@@ -746,6 +747,14 @@ function checkCollectionOperand(
   if (arg === undefined || arg === null) return engine.error('missing');
   const x = arg.canonical;
   if (!x.isValid) return x;
+  // An ABSENT operand (`Missing`, `Undefined`) is admitted: every collection
+  // operator propagates absence (`signatureParamsPropagateAbsence`,
+  // `boxed-operator-definition.ts`, user decision 2026-09-25), so the
+  // evaluation driver answers the marker of the codomain for it (`Missing`
+  // for a collection result). Refused here, `Map(f, Missing)` stayed a raw
+  // node that no gate could reach, and `Filter(Missing, p)` was an
+  // `incompatible-type` error.
+  if (isAbsentScalarSymbol(x)) return x;
   const t = x.type.type;
   if (t === 'unknown' || t === 'any' || t === 'value') {
     // Value-aware refinement: an indeterminate-TYPED operand with a concrete
@@ -4385,10 +4394,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Length: {
     description:
-      'Number of elements in a collection. Returns +oo for an unbounded Range, an `incompatible-type` error for an operand that is decidably not a collection, and stays unevaluated for an infinite collection whose length is not decided.',
+      'Number of elements in a collection. Returns +oo for an unbounded Range, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for an infinite collection whose length is not decided.',
     keywords: ['size'],
     complexity: 4000,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(any) -> integer | infinity',
+    // An absent collection has no length: `Length(Missing)` answers the
+    // marker of the codomain, `NaN`, as every collection operator does for
+    // an absent operand (user decision 2026-09-25;
+    // `signatureParamsPropagateAbsence`, `boxed-operator-definition.ts`).
+    // Declared here because the parameter is `any`, which the default policy
+    // does not read as a collection.
+    missingBehavior: 'propagate',
     // Only an unbounded `Range` can produce the infinite length the signature
     // admits; every other collection either has a finite length or leaves
     // `Length` unevaluated. Report the exact `integer` for those, so a length
@@ -4461,10 +4484,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce._fn('Length', adjusted ?? stripped);
     },
     evaluate: ([xs], { engine }) => {
-      // `Length(5)`, `Length(True)` and `Length(Missing)` are decided
-      // non-collections and answer an `incompatible-type` error; an operand
-      // that is merely not decided yet keeps the inert form (see
-      // `nonCollectionSizeOperandError`).
+      // `Length(5)` and `Length(True)` are decided non-collections and answer
+      // an `incompatible-type` error; an operand that is merely not decided
+      // yet keeps the inert form (see `nonCollectionSizeOperandError`). An
+      // ABSENT operand never reaches this handler: `missingBehavior:
+      // 'propagate'` above makes the evaluation driver's absence gate answer
+      // `NaN` for `Length(Missing)` first (user decision 2026-09-25).
       if (!xs.isCollection) return nonCollectionSizeOperandError(engine, xs);
       // `count` is asked FIRST and `isEmptyCollection` only as its fallback.
       // Both facets walk a lazy collection — `Filter.count` to the end,
@@ -4991,6 +5016,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Keys: {
     description: 'Return a list of the keys of a dictionary.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(dictionary<any>) -> list<string>',
     // Complete precondition: the evaluate guard (`isDictionary`) is the
     // handler's only decline — see `canEnumerate` (types-definitions.ts).
@@ -5013,6 +5045,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Values: {
     description: 'Return a list of the values of a dictionary.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(dictionary<any>) -> list',
     type: ([dict], context) => {
       const t = dict.type;
@@ -5849,6 +5888,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return True if the collection contains the given element (structural identity, like `===`), False otherwise.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
+    // An absent collection, or an absent element, answers `Missing`, the
+    // marker of a boolean (Kleene), as `IsEmpty(Missing)` does (user decision
+    // 2026-09-25: a collection operator over an absent collection). Declared
+    // because the element parameter is `any`, which the default policy does
+    // not read as a collection.
+    missingBehavior: 'propagate',
     signature: '(collection<any>, element: any) -> boolean',
     // Peek through membership-preserving wrappers (incl. `Unique`) so an eager
     // Sort/RandomShuffle isn't materialized just to test membership (see
@@ -5858,12 +5910,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // drop) that this custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
       const stripped = withFirst(peekMembershipPreserving(ops[0]), ops);
+      // An absent operand is admitted, as the generic boxing route admits it
+      // (strip-before-validate): the operator propagates absence and the
+      // evaluation driver answers `Missing` (user decision 2026-09-25).
+      // Without the policy this handler's own validation refused
+      // `Contains(Missing, …)`.
       const adjusted = validateArguments(
         ce,
         stripped,
         CONTAINS_SIGNATURE,
         false,
-        false
+        false,
+        undefined,
+        () => true
       );
       return ce._fn('Contains', adjusted ?? stripped);
     },
@@ -5884,6 +5943,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     keywords: ['cardinality', 'tally', 'occurrences'],
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
+    // An absent collection has no count: `Count(Missing)` answers `NaN`, as
+    // `Length(Missing)` does (user decision 2026-09-25). Declared because the
+    // optional predicate parameter is `any`, which the default policy does
+    // not read as a collection.
+    missingBehavior: 'propagate',
     signature: '(collection<any>, any?) -> integer | infinity',
     // Only the 1-arg cardinality form can answer an infinity: it reports
     // `xs.count` as it stands, and an unbounded source counts infinitely many
@@ -5992,12 +6063,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       const stripped =
         ops.length === 1 ? withFirst(peekCountPreserving(ops[0]), ops) : ops;
+      // The absent operand is admitted at a stripped position, as the
+      // generic boxing route admits it (strip-before-validate): `Count` now
+      // propagates absence and answers `NaN` for `Count(Missing)` (user
+      // decision 2026-09-25). Without the policy this handler's own
+      // validation refused it with an `incompatible-type` error.
       const adjusted = validateArguments(
         ce,
         stripped,
         COUNT_SIGNATURE,
         false,
-        false
+        false,
+        undefined,
+        () => true
       );
       return ce._fn('Count', adjusted ?? stripped);
     },
@@ -6072,6 +6150,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   IsEmpty: {
     description: ['Return True if the collection is empty, False otherwise.'],
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<any>) -> boolean',
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to test emptiness (see `peekCountPreserving`).
@@ -6080,12 +6165,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // drop) that this custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
       const stripped = withFirst(peekCountPreserving(ops[0]), ops);
+      // An absent operand is admitted, as the generic boxing route admits it
+      // (strip-before-validate): the operator propagates absence and the
+      // evaluation driver answers `Missing` (user decision 2026-09-25).
+      // Without the policy this handler's own validation refused
+      // `IsEmpty(Missing, …)`.
       const adjusted = validateArguments(
         ce,
         stripped,
         ISEMPTY_SIGNATURE,
         false,
-        false
+        false,
+        undefined,
+        () => true
       );
       return ce._fn('IsEmpty', adjusted ?? stripped);
     },
@@ -6112,6 +6204,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // type; see `CountIf`. The predicate stays optional — `Any(xs)` tests the
     // elements themselves — and the contextual stamp simply never runs when the
     // operand is absent.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     canonical: (ops, { engine }) => {
@@ -6140,6 +6239,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     // The signature links the predicate parameter to the collection element
     // type, with the same optional predicate as `Any`.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     canonical: (ops, { engine }) => {
@@ -6169,6 +6275,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'shortest input. The mapping function is always the FIRST argument.',
     ],
     complexity: 8200,
+    // A restricted source, `[1,2]{c}`, is ONE held `When` over the list and
+    // is threaded whole (user decision 2026-09-25): the result is computed on
+    // the present list and re-wrapped, absent as a whole once `c` fails. Read
+    // cell by cell through the held form's collection handlers it was not an
+    // indexed collection, and the result materialized as a `Set`.
+    threadsConditionals: true,
     lazy: true,
     // The mapping function comes first, followed by a variadic list of source
     // collections. The type language consumes required→optional→variadic, so a
@@ -6488,6 +6600,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Equivalent to `[x for x in xs if p(x)]`.',
     ],
     complexity: 8200,
+    // A restricted source, `[1,2]{c}`, is ONE held `When` over the list and
+    // is threaded whole (user decision 2026-09-25): the result is computed on
+    // the present list and re-wrapped, absent as a whole once `c` fails. Read
+    // cell by cell through the held form's collection handlers it was not an
+    // indexed collection, and the result materialized as a `Set`.
+    threadsConditionals: true,
     lazy: true,
     // Design D phase 0b: the element-of link lives in the SIGNATURE (see
     // `CountIf`). The RESULT stays with the `type:` handler below — the type
@@ -6797,6 +6915,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     //
     // The RESULT stays with the `type:` handler below: it is the reducer's own
     // result type, which the accumulator channel does not carry.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
+    // An absent collection folds to the marker of the codomain (`NaN` for a
+    // numeric fold), as every collection operator answers for an absent
+    // operand (user decision 2026-09-25). Declared here because the optional
+    // `initial` parameter is a `value`, which the default policy
+    // (`signatureParamsPropagateAbsence`) does not read as a collection.
+    missingBehavior: 'propagate',
     signature:
       '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T',
     canonical: (ops, { engine }) => {
@@ -6999,6 +7130,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // collection at operand 2. The accumulator stays bare (see `Reduce`). The
     // stamp survives this operator's rewrite into a `Reduce`: it runs before
     // the canonical handler, on the raw literal the handler then reuses.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
+    // An absent collection folds to the marker of the codomain (`NaN` for a
+    // numeric fold), as every collection operator answers for an absent
+    // operand (user decision 2026-09-25). Declared here because the optional
+    // `initial` parameter is a `value`, which the default policy
+    // (`signatureParamsPropagateAbsence`) does not read as a collection.
+    missingBehavior: 'propagate',
     signature:
       '(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T',
     canonical: (ops, { engine }) => {
@@ -7130,6 +7274,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input.',
     complexity: 8200,
     lazy: true,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<any>) -> indexed_collection',
     type: (ops, context) => {
       const elt = collectionElementType(ops[0].type) ?? 'number';
@@ -7469,6 +7620,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `(T) -> collection<U> | U`: `S` describes the STAMP, never the operator's
     // tolerance, and the scalar-result singleton lift is the `type:` handler's
     // calculation below (§7 rule 2).
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<T>, mapping: (T) any -> U) -> list where T, U',
     type: (ops, { engine }) => {
       const resultType = callbackResultTypeD(ops[1], engine);
@@ -7626,6 +7784,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (`wrapScalarJoinOperand`), so `Join(L, 5)` and `Join(1, 2, 3)` are
     // accepted without widening the arm to `value` — which would have
     // inferred an undeclared operand as `value` instead of a collection.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((T+) -> T where T: string) & ((collection<any>*) -> collection)',
     // Same-head flatten: `Join(Join(…inner), …outer)` → `Join(…inner, …outer)`
@@ -7925,6 +8090,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Append: {
     description: ['Add one or more elements to the end of a collection.'],
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<any>, value+) -> collection',
     // Same-head flatten: `Append(Append(c, …vs), …ws)` → `Append(c, …vs, …ws)`,
     // so an accumulator loop (`xs = Append(xs, v)`) builds a node of bounded
@@ -9061,6 +9233,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // most-specific-wins on every untyped operand and claim `string` for a
     // call that usually returns a list. A bounded variable with no call-site
     // binding does not.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)',
     // No `evaluate` handler: materialization goes through the generic lazy-
@@ -9172,6 +9351,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)',
     collection: {
@@ -9469,6 +9655,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)',
     collection: {
@@ -9542,6 +9735,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)',
     collection: {
@@ -9651,6 +9851,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // type admits `Nothing`; a span that statically excludes it (a literal
     // `2..3`, a `range`-declared symbol) is left to the resolver, so the
     // precise result — and with it string preservation — is untouched.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: SLICE_SIGNATURE_TEXT,
     // Restore the honesty the resolver drops (see above): a possibly-absent
     // span makes the result possibly-`Nothing`. Returning `undefined` leaves
@@ -9788,6 +9995,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not —
     // which is exactly how the `T: list` arm beside it already behaves.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)',
     collection: {
@@ -9863,6 +10077,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `list<function>` that the ground `(indexed_collection, …)` accepted.
     // `evaluate` splices whatever it is given, so the looser reading is also
     // the honest one.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
@@ -10082,6 +10303,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The repeated variable widens the element type to include the replacement
     // value's type (the §4.3 join of the two lower bounds). UNBOUNDED — see
     // `Insert`: a bound would also constrain the SOURCE collection's elements.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
@@ -10366,6 +10594,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the 1-based index of the first occurrence of value in collection, or 0 if not found.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
+    // An absent collection, or an absent element, answers `Missing`, the
+    // marker of a boolean (Kleene), as `IsEmpty(Missing)` does (user decision
+    // 2026-09-25: a collection operator over an absent collection). Declared
+    // because the element parameter is `any`, which the default policy does
+    // not read as a collection.
+    missingBehavior: 'propagate',
     signature: '(collection<any>, any) -> integer',
     evaluate: ([xs, value], { engine: ce }) => {
       const index = xs.indexWhere((x) => x.isSame(value)) ?? undefined;
@@ -10571,6 +10812,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `CountIf`). The declared result stays the widest `any`: the NOT-FOUND
     // answer is `Nothing`, so the precise `elementType | nothing` is the `type:`
     // handler's below, not something `T` alone could say (§7 rule 1).
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<T>, predicate: (T) any -> boolean) -> any where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1, PER_ELEMENT_SUPPLY),
@@ -10695,6 +10943,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Ordering: {
     description: 'Return the indexes that would sort the collection.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<integer> where T',
     canonical: (ops, { engine }) =>
@@ -10744,6 +10999,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((T, order: (((character) any -> unknown) | ((character, character) any -> number | boolean))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<T> where T)',
     canonical: (ops, { engine }) =>
@@ -10781,6 +11043,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that maximizes the given key function.',
     complexity: 8200,
     lazy: true,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<T>, key: (T) any -> unknown) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -10813,6 +11082,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that minimizes the given key function.',
     complexity: 8200,
     lazy: true,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<T>, key: (T) any -> unknown) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -10961,6 +11237,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T)',
     // Provable declines only, answered from the SOURCE's facets alone — an
@@ -11208,6 +11491,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return a tuple with the unique elements of the collection and their respective counts.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<T>) -> tuple<list<T>, list<integer>> where T',
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
@@ -11233,6 +11523,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((collection<T>) -> list<T> where T)',
     // Provable declines only (finite, walkable source required); success is
@@ -11264,6 +11561,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<any>) -> collection',
     // Preserve the source's element type / indexed-ness (mirrors TakeWhile).
     type: (ops, context) =>
@@ -11411,6 +11715,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `integer` arm cannot take, so the arrow arm is the resolved one. A
     // size operand (a number, or a symbol holding one) is not a literal, so
     // the SIZE arm is untouched.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '(collection<T>, integer | ((T) any -> boolean), integer?) -> list<list<T>> where T',
     // The string rule, and it covers BOTH forms: a chunk, a window and a
@@ -11600,6 +11911,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // win most-specific-wins on every untyped operand and claim `list<string>`
     // for a call that usually returns a list of lists. A bounded variable with
     // no call-site binding does not.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)',
     // Provable declines only (a finite, walkable source and a positive
@@ -11836,6 +12154,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Partition the collection into a dictionary of lists based on the key returned by the function.',
     ],
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature:
       '(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T',
     canonical: (ops, { engine }) =>
@@ -11900,6 +12225,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(indexed_collection<any>+) -> list',
     // Each element is a tuple of one element from every source, so the
     // result is `list<tuple<e₁, …, eₙ>>` when every source's element type is
@@ -12150,6 +12482,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Produce an infinite sequence by cycling through the elements of a finite collection.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(list<any>) -> list',
     collection: {
       isEnumerable: enumerableFromSource,
@@ -12432,6 +12771,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Create a dictionary from the elements of a collection of (key, value) pairs.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Read cell by cell through the held form's collection handlers it
+    // was not an indexed collection, and a list result materialized as a
+    // `Set` of restricted cells.
+    threadsConditionals: true,
     signature: '(collection<any>) -> dictionary',
     // Provable declines only (the source must be a finite, walkable
     // collection); success also depends on every element being a

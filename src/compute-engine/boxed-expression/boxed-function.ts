@@ -37,6 +37,7 @@ import {
   deriveApplicationType,
   installBroadcastLiftHooks,
   typeHandlerContext,
+  withCodomainForAbsentAnswer,
 } from './derive-application-type.js';
 import {
   ABSENT_CELLS_STAY_MISSING,
@@ -4899,9 +4900,17 @@ export class BoxedFunction
         // live in `hasAbsentScalarOperand` (`validate.ts`), which the async
         // twin (step 3a) and the lazy `Add`/`Multiply` handlers share, so
         // the three routes decide the same question the same way.
+        // The gate stands aside beside a collection operand for a
+        // BROADCASTABLE operator only, where the absence lands in each cell
+        // (`Add(Missing, matrix)`). A collection operator that is not
+        // broadcastable (`Zip(L, Missing)`, `Dot(P, Missing)`) computes on
+        // the whole operand, so an absent one makes the whole answer absent:
+        // the marker of the codomain (user decision 2026-09-25).
         if (
           (behavior === 'propagate' || behavior === 'reject') &&
-          hasAbsentScalarOperand(tail)
+          (def.broadcastable
+            ? hasAbsentScalarOperand(tail)
+            : tail.some((x) => isAbsentScalarSymbol(x)))
         ) {
           if (behavior === 'reject')
             return this.engine.error([
@@ -5766,9 +5775,17 @@ export class BoxedFunction
       //
       if (def instanceof _BoxedOperatorDefinition) {
         const behavior = def.resolvedMissingBehavior;
+        // The gate stands aside beside a collection operand for a
+        // BROADCASTABLE operator only, where the absence lands in each cell
+        // (`Add(Missing, matrix)`). A collection operator that is not
+        // broadcastable (`Zip(L, Missing)`, `Dot(P, Missing)`) computes on
+        // the whole operand, so an absent one makes the whole answer absent:
+        // the marker of the codomain (user decision 2026-09-25).
         if (
           (behavior === 'propagate' || behavior === 'reject') &&
-          hasAbsentScalarOperand(tail)
+          (def.broadcastable
+            ? hasAbsentScalarOperand(tail)
+            : tail.some((x) => isAbsentScalarSymbol(x)))
         ) {
           if (behavior === 'reject')
             return this.engine.error([
@@ -7146,8 +7163,15 @@ function type(expr: BoxedFunction): Type | BoxedType {
         );
       if (calculatedType) {
         typeHandlerAnswered = true;
+        // An answer that strips to `never` (a handler that read an absent
+        // operand) takes the signature's declared result as its codomain
+        // (`withCodomainForAbsentAnswer`).
         boxedHandlerResult = BoxedType.forResult(
-          calculatedType,
+          withCodomainForAbsentAnswer(
+            BoxedType.forResult(calculatedType, expr.engine._typeResolver).type,
+            def,
+            expr.ops.map((x) => x.type.type)
+          ),
           expr.engine._typeResolver
         );
         sigResult = boxedHandlerResult.type;

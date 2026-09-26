@@ -2866,8 +2866,10 @@ describe('ERROR-MODEL §5 — the absence marker of a numeric slot types `nan`',
 
 describe('ERROR-MODEL §1 — the size operators refuse a decided non-collection', () => {
   // `Length` and `Count` answer the SAME `incompatible-type` diagnostic for an
-  // operand that refutes the collection contract — a number, a boolean, or the
-  // `Missing` absence marker (absence is decided, ERROR-MODEL §1). The two
+  // operand that refutes the collection contract — a number or a boolean. (An
+  // ABSENT operand, `Missing`, is no longer refused: since 2026-09-25 a
+  // collection operator answers the marker of its result for it, `NaN` for
+  // these two — see the last test of this block.) The two
   // mint it at different seams and that is deliberate: `Count` declares a
   // `collection<any>` parameter, so `validateArguments` wraps a statically
   // decided operand at BOXING, while `Length` declares the tolerant `(any)`
@@ -2880,15 +2882,6 @@ describe('ERROR-MODEL §1 — the size operators refuse a decided non-collection
   const operands: { name: string; json: any; latex: string }[] = [
     { name: '5', json: 5, latex: '5' },
     { name: 'True', json: 'True', latex: '\\operatorname{True}' },
-    { name: 'Missing', json: 'Missing', latex: '\\operatorname{Missing}' },
-    // `First([])` is decided only at EVALUATION: it boxes as an ordinary
-    // application and evaluates to `Missing`, so the refusal cannot come from
-    // the boxing-time argument check on either operator.
-    {
-      name: 'First([])',
-      json: ['First', ['List']],
-      latex: '\\operatorname{First}(\\bigl\\lbrack\\bigr\\rbrack)',
-    },
   ];
 
   for (const head of ['Length', 'Count']) {
@@ -2927,6 +2920,21 @@ describe('ERROR-MODEL §1 — the size operators refuse a decided non-collection
     }
   });
 
+  test('an ABSENT operand has no size: NaN, the marker of a number', () => {
+    // User decision 2026-09-25: a collection operator over an absent
+    // collection answers the marker of its result. `First([])` is absent
+    // only at evaluation. Before, both operators answered the
+    // `incompatible-type` error of a decided non-collection.
+    const ce = new ComputeEngine();
+    for (const json of ['Missing', ['First', ['List']]]) {
+      for (const head of ['Length', 'Count']) {
+        const r = ce.box([head, json] as never);
+        expect(r.isValid).toBe(true);
+        expect(r.evaluate().toString()).toBe('NaN');
+      }
+    }
+  });
+
   test("Count's 2-arg forms refuse the same sources", () => {
     const ce = new ComputeEngine();
     // The value form and the predicate form both read the SOURCE operand, so
@@ -2935,9 +2943,14 @@ describe('ERROR-MODEL §1 — the size operators refuse a decided non-collection
       expect(errorCode(ce.box(['Count', 5, second]).evaluate())).toBe(
         'incompatible-type'
       );
+      // An absent source answers `NaN` on both forms too (user decision
+      // 2026-09-25); it was refused with the same error.
       expect(
-        errorCode(ce.box(['Count', ['First', ['List']], second]).evaluate())
-      ).toBe('incompatible-type');
+        ce
+          .box(['Count', ['First', ['List']], second])
+          .evaluate()
+          .toString()
+      ).toBe('NaN');
     }
   });
 
