@@ -341,6 +341,94 @@ describe('loadIdentities (full artifact)', () => {
     ).toBe(true);
   });
 
+  // Errata round-trip: the upstream corpus published these three entries
+  // wrong (Fungrim's own pygrim/formulas/chebyshev.py) — U_n(cos x)·sin x =
+  // sin(n·x) instead of U_{n−1}, T_n² + (x²−1)·U_{n−1}² = 1 instead of a
+  // difference, and U_{2n}(x) = T_n(2x²−1) + U_{n−1}(2x²−1) instead of U_n.
+  // Each rewrote to a wrong value under `simplify()` (or, for the 42eb01
+  // difference-of-squares entry, was latent — its `Add` form never matched
+  // in practice). The corpus now carries the corrected forms; these cases
+  // pin the fix: the corrected shape fires with the right result, and the
+  // ORIGINAL (buggy) shape from the issue no longer fires at all.
+  describe('chebyshev errata (upstream corpus was wrong)', () => {
+    it('U_{n-1}(cos x)·sin x → sin(n·x) under simplify()  [fungrim:4c7aeb]', () => {
+      const ce2 = new ComputeEngine();
+      loadIdentities(ce2, { topics: ['chebyshev'] });
+      ce2.declare('n', 'integer');
+      ce2.declare('x', 'complex');
+      const result = ce2
+        .expr([
+          'Multiply',
+          ['Sin', 'x'],
+          ['ChebyshevU', ['Subtract', 'n', 1], ['Cos', 'x']],
+        ])
+        .simplify();
+      expect(result.isSame(ce2.expr(['Sin', ['Multiply', 'n', 'x']]))).toBe(
+        true
+      );
+    });
+
+    it('the issue-reported shape (bare U_n, not U_{n-1}) does not fire', () => {
+      // Before the fix this matched ChebyshevU(_n, cos x) directly and
+      // rewrote to the wrong value sin(n·x) (should be sin((n+1)·x)).
+      const ce2 = new ComputeEngine();
+      loadIdentities(ce2, { topics: ['chebyshev'] });
+      ce2.declare('n', 'integer');
+      ce2.declare('x', 'complex');
+      const expr = ce2.expr([
+        'Multiply',
+        ['Sin', 'x'],
+        ['ChebyshevU', 'n', ['Cos', 'x']],
+      ]);
+      expect(expr.simplify().isSame(expr)).toBe(true);
+    });
+
+    it('U_n(2x²−1) + U_{n-1}(2x²−1) → U_{2n}(x) under simplify()  [fungrim:5f09f4]', () => {
+      const ce2 = new ComputeEngine();
+      loadIdentities(ce2, { topics: ['chebyshev'] });
+      ce2.declare('n', 'integer');
+      ce2.declare('x', 'complex');
+      const result = ce2
+        .expr([
+          'Add',
+          ['ChebyshevU', 'n', ['Subtract', ['Multiply', 2, ['Power', 'x', 2]], 1]],
+          [
+            'ChebyshevU',
+            ['Subtract', 'n', 1],
+            ['Subtract', ['Multiply', 2, ['Power', 'x', 2]], 1],
+          ],
+        ])
+        .simplify();
+      expect(
+        result.isSame(ce2.expr(['ChebyshevU', ['Multiply', 2, 'n'], 'x']))
+      ).toBe(true);
+    });
+
+    it('the issue-reported shape (T_n, not U_n) does not fire', () => {
+      // Before the fix this matched with ChebyshevT in the second summand
+      // and rewrote to the wrong value ChebyshevU(2n, x).
+      const ce2 = new ComputeEngine();
+      loadIdentities(ce2, { topics: ['chebyshev'] });
+      ce2.declare('n', 'integer');
+      ce2.declare('x', 'real');
+      const expr = ce2.expr([
+        'Add',
+        ['ChebyshevU', ['Subtract', 'n', 1], ['Subtract', ['Multiply', 2, ['Power', 'x', 2]], 1]],
+        ['ChebyshevT', 'n', ['Subtract', ['Multiply', 2, ['Power', 'x', 2]], 1]],
+      ]);
+      expect(expr.simplify().isSame(expr)).toBe(true);
+    });
+
+    it('numeric check at n=1: U_0(cos x)·sin x = sin x', () => {
+      const ce2 = new ComputeEngine();
+      loadIdentities(ce2, { topics: ['chebyshev'] });
+      const lhs = ce2
+        .expr(['Multiply', ['Sin', 2.5], ['ChebyshevU', 0, ['Cos', 2.5]]])
+        .simplify();
+      expect(lhs.N().isEqual(ce2.expr(['Sin', 2.5]).N())).toBe(true);
+    });
+  });
+
   it('Arctan(1 + √2) → 3π/8  [fungrim:c6c92a]', () => {
     expect(
       ce.expr(['Arctan', ['Add', 1, ['Sqrt', 2]]]).simplify().isSame(

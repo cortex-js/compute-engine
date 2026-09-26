@@ -1,3 +1,14 @@
+## Unreleased
+
+### Issues Resolved
+
+- **Three false Fungrim Chebyshev identities are corrected** (#343): `42eb01`
+  (`T_n(x)² − (x²−1)·U_{n−1}(x)² = 1`), `4c7aeb`
+  (`U_{n−1}(cos x)·sin x = sin(n·x)`) and `5f09f4`
+  (`U_{2n}(x) = U_n(2x²−1) + U_{n−1}(2x²−1)`) were wrong in Fungrim's source,
+  and `4c7aeb` and `5f09f4` rewrote wrongly in `simplify()` with
+  `loadIdentities`.
+
 ## 0.136.2 _2026-09-25_
 
 ### Issues Resolved
