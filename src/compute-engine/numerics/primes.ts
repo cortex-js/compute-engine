@@ -1,4 +1,4 @@
-import { bigint } from './bigint.js';
+import { bigint, bigintMaximalPerfectPower } from './bigint.js';
 import {
   CancellationError,
   checkDeadline,
@@ -323,23 +323,37 @@ function pollardRho(n: bigint, deadline?: number | DeadlineFrame): bigint {
 
 /**
  * Complete the factorization of an odd `n ≥ 1` into `result`, using
- * Miller–Rabin to recognize prime cofactors and Pollard rho to split
- * composite ones. Callers strip the small factors first (rho is only
- * economical past the trial-division range).
+ * Miller–Rabin to recognize prime cofactors, an exact root to recognize a
+ * perfect power, and Pollard rho to split the rest. Callers strip the small
+ * factors first. `multiplicity` scales every exponent found for `n`.
+ *
+ * Rho's cost is set by the smallest prime factor, which for `p^k` is `p`
+ * itself, so a perfect power is reduced to its base first.
  */
 function factorWithRho(
   n: bigint,
   result: Map<bigint, number>,
-  deadline?: number | DeadlineFrame
+  deadline?: number | DeadlineFrame,
+  multiplicity = 1
 ): void {
   while (n !== 1n) {
     if (isPrimeBigint(n)) {
-      result.set(n, (result.get(n) ?? 0) + 1);
+      result.set(n, (result.get(n) ?? 0) + multiplicity);
+      return;
+    }
+    const power = bigintMaximalPerfectPower(n);
+    if (power) {
+      factorWithRho(
+        power.base,
+        result,
+        deadline,
+        multiplicity * power.exponent
+      );
       return;
     }
     const d = pollardRho(n, deadline);
     // The factor rho returns may itself be composite.
-    factorWithRho(d, result, deadline);
+    factorWithRho(d, result, deadline, multiplicity);
     n /= d;
   }
 }

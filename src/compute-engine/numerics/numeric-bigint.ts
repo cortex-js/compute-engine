@@ -31,15 +31,17 @@ export function extGcd(a: bigint, b: bigint): [bigint, bigint, bigint] {
 }
 
 /**
- * The modular multiplicative inverse of `a` modulo `m` (`m > 0`): the integer
- * `x` in `[0, m)` with `a·x ≡ 1 (mod m)`, or `null` when `a` and `m` are not
- * coprime (i.e. `gcd(a mod m, m) ≠ 1`).
+ * The modular multiplicative inverse of `a` modulo `m` (`m ≠ 0`): the integer
+ * `x` with `a·x ≡ 1 (mod m)`, or `null` when `a` and `m` are not coprime
+ * (i.e. `gcd(a mod m, m) ≠ 1`). `x` takes the sign of `m`, as `Mod` does:
+ * `modularInverse(3n, -7n)` is `-2n`.
  */
 export function modularInverse(a: bigint, m: bigint): bigint | null {
-  if (m <= 0n) return null;
-  if (m === 1n) return 0n;
-  const base = ((a % m) + m) % m;
-  const [g, s] = extGcd(base, m);
+  if (m === 0n) return null;
+  if (m === 1n || m === -1n) return 0n;
+  const absM = m < 0n ? -m : m;
+  const base = ((a % absM) + absM) % absM;
+  const [g, s] = extGcd(base, absM);
   if (g !== 1n && g !== -1n) return null;
   return ((s % m) + m) % m;
 }
