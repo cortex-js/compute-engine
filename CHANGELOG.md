@@ -1,3 +1,17 @@
+## Unreleased
+
+### Issues Resolved
+
+- **Number theory on large integers** (#339). With `p` a large prime:
+  `FactorInteger(p^2)` factors at once instead of exhausting Pollard rho (a
+  perfect power is reduced to its base first), which also fixes `Totient`,
+  `DivisorSigma` and the other heads built on the factorization.
+  `Divisors(p^2)` builds its list from the factorization once the
+  trial-division scan is out of budget, rather than staying unevaluated.
+  `MultiplicativeOrder(2, p)` strips the prime factors of `λ(n)` instead of
+  scanning its divisors. `ModularInverse(3, -7)` is `-2`: the result takes
+  the sign of the modulus, as `Mod` does.
+
 ## 0.136.2 _2026-09-25_
 
 ### Issues Resolved
