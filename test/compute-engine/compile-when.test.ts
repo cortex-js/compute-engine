@@ -168,7 +168,8 @@ describe('When condition containing Max/Min compiles (Tycho item 56)', () => {
     const ce2 = new ComputeEngine();
     ce2.assign('L', ce2.box(['List', 1, 7, 3]).evaluate());
     const m = ce2.box(['Max', 'L']);
-    expect(m.type.toString()).toBe('number');
+    // An empty list has no maximum (NaN), hence the `nan` arm.
+    expect(m.type.toString()).toBe('integer | nan');
     expect(m.evaluate().re).toBe(7);
   });
 });

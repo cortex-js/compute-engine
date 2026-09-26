@@ -4,6 +4,7 @@ import {
   provablyEquals,
   provablyGreater,
   provablyLess,
+  extendedReductionType,
 } from './type-handlers.js';
 import {
   type DataConstraint,
@@ -624,6 +625,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // so it would refuse the very input the rule is about.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
+      // Data on the extended real line has a mean on it too, or NaN: typed
+      // there instead of `number` (`extendedReductionType`).
+      type: (ops, context) =>
+        BoxedType.forResult(
+          extendedReductionType('Mean', ops) ?? 'number',
+          context.engine._typeResolver
+        ),
       description: 'Arithmetic mean (average) of a collection of numbers.',
       keywords: ['average'],
       evaluate: (ops, { engine, numericApproximation }) => {

@@ -98,6 +98,7 @@ import {
   typeContainsMissing,
   widen,
   widenAll,
+  widenElementTypes,
 } from '../../common/type/utils.js';
 import {
   arityProvablyIncapable,
@@ -2827,7 +2828,7 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   const { dims, cells } = analysis;
   if (cells.length === 0) return null;
 
-  const widened = widenAll(cells);
+  const widened = widenElementTypes(cells);
 
   if (
     typeof widened !== 'string' &&
@@ -4151,7 +4152,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         shapedListTypeD(ops) ??
           internType({
             kind: 'list',
-            elements: widenAll(ops.map((op) => storedComponentTypeD(op))),
+            elements: widenElementTypes(
+              ops.map((op) => storedComponentTypeD(op))
+            ),
           }),
         context.engine._typeResolver
       ),

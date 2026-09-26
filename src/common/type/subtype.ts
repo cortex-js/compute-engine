@@ -2430,6 +2430,44 @@ export function widenAll(types: ReadonlyArray<Readonly<Type>>): Readonly<Type> {
 }
 
 /**
+ * The element type of a literal collection: `widenAll` of the element types,
+ * except when every element type is on the extended real line, with or
+ * without NaN, and one of them is infinite or NaN (`[1, ∞]`, `[1.5, NaN]`).
+ * Then the join is the union of the widened finite tier, each signed
+ * infinity present, and `nan` when present (`list<real | signed_infinity>`,
+ * not `list<number>`). `widen` joins `integer` and `+oo`, or `real` and
+ * `nan`, to their common supertype `number`, which a host reads as possibly
+ * complex (user decision 2026-09-25).
+ */
+export function widenElementTypes(
+  types: ReadonlyArray<Readonly<Type>>
+): Readonly<Type> {
+  const plusInf: Type = { kind: 'value', value: Infinity };
+  const minusInf: Type = { kind: 'value', value: -Infinity };
+  const members = types.flatMap((t) =>
+    typeof t === 'object' && t.kind === 'union' ? t.types : [t as Type]
+  );
+  let hasPlus = false;
+  let hasMinus = false;
+  let hasNaN = false;
+  const finite: Type[] = [];
+  for (const m of members) {
+    if (m === 'nan') hasNaN = true;
+    else if (isSubtype(m, plusInf)) hasPlus = true;
+    else if (isSubtype(m, minusInf)) hasMinus = true;
+    else if (isSubtype(m, 'real')) finite.push(m);
+    else return widenAll(types);
+  }
+  if (!hasPlus && !hasMinus && !hasNaN) return widenAll(types);
+  const result: Type[] = [];
+  if (finite.length > 0) result.push(widenAll(finite) as Type);
+  if (hasPlus) result.push(plusInf);
+  if (hasMinus) result.push(minusInf);
+  if (hasNaN) result.push('nan');
+  return result.length === 1 ? result[0] : { kind: 'union', types: result };
+}
+
+/**
  * The candidate common supertypes probed by `superType`, ordered from most
  * specific to most general.
  *

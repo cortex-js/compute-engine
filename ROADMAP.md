@@ -562,28 +562,41 @@ an untyped parameter beside another collection argument still declines to
 compile to JavaScript (the interpreter pairs the lists). (5) Block-local
 functions and variadic parameters do not map over a list of points.
 
-### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24, measured on CE main)
+### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24; narrowed 2026-09-26)
 
-A host now declares plot variables and list seams as
-`real | signed_infinity | nan` instead of `number` (Tycho, 2026-09-24). Two
-places widen that union back: (1) a function declared
-`(real | signed_infinity | nan) -> unknown` whose body is closed on the extended
-reals (`t²`, `sin t`) refines its result to `number`, and `Sum(L)`, `Max(L)`
-over `list<real | signed_infinity | nan>` type `number` (`Add` and `Multiply`
-keep the signed pair since 2026-09-25; `Power` and the elementary functions
-still widen: `a²` and `sin(a)` with `a: real | signed_infinity | nan` type
-`number`; an operand that is a union of a scalar and a list,
-`u: real | signed_infinity | list<real>`, makes `y·u` and `y + u` type
-`list<number> | number`, which is sound but not on the extended real line);
-(2) a literal list
-with an infinite or NaN member types `vector<2>` (element type `number`):
-`[1, ∞]` and `[1.5, NaN]` do not match `list<(real | signed_infinity | nan)^2>`,
-although the join of the members' types is `real | signed_infinity` (the
-ASSIGNMENT of `[1, ∞]` to a symbol declared with the union does succeed on main;
-Tycho measured a failure on 0.133.0). Each is a lost precision, not a wrong
-value; a host that reads the type of a result to choose a shader type or a lane
-sees `number` where `real | signed_infinity | nan` is true. Probe: Tycho's
-`scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
+A host declares plot variables and list seams as
+`real | signed_infinity | nan` instead of `number` (Tycho, 2026-09-24), and
+reads `number` as possibly complex. Arithmetic, powers, the elementary
+functions with a real result, `Max`/`Min`, `Sum`/`Product`/`Mean` and literal
+lists keep that union since 2026-09-26 (user decision 2026-09-25). What still
+widens to `number`, measured on CE main with `a: real | signed_infinity | nan`:
+
+1. **User functions.** A function declared
+   `(real | signed_infinity | nan) -> unknown` and assigned `t ↦ t + 1`
+   refines its declared result to `number`: the refinement reads the result
+   type of the literal, whose parameter is typed `unknown`, not the declared
+   parameter type. And a call is never typed from the body when the declared
+   result is a number type (`callResultType` returns early for it), so `g(a)`
+   is `number`. Relaxing that early return for `number` alone typed every
+   call from its body, and 17 tests failed: calls took literal value types
+   (`g(3)` → `integer<6..6>`), and a complex-mode compiled call lost its
+   `_SYS.cplx` wrapper. A fix needs a design for which calls are typed from
+   the body.
+2. **`Tan`, `Sec`, `Arsinh`** of `y: real | signed_infinity` type `number`:
+   `elementaryFunctionType` declines for an operand described by its type
+   only (`Tan`, `Sec`), and it types `Arsinh(±∞)` as `number` although the
+   value is `±∞`.
+3. **A result that may be complex** (`Arccos(y)`, `Arcsin(y)`, `y^r`) keeps
+   `number`, although `complex | nan` would be more precise: the GPU
+   compilers refuse a body typed `complex` and compile one typed `number`
+   (as a real). The compilers read `number` as real, and a host such as
+   Tycho reads it as possibly complex.
+4. **A union of a scalar and a list** (`u: real | signed_infinity | list<real>`)
+   makes `y·u` and `y + u` type `list<number> | number`.
+5. **`Sum` and `Product` with limits** (`Sum(k², k, 1, 10)`) type `number`;
+   only the one-operand form `Sum(L)` is typed from the elements.
+
+Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
 
 ### Ordering of constants with special functions: what stays open after the 2026-09-25 bounds (OPEN, low)
 

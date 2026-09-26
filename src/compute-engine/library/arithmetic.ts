@@ -56,6 +56,7 @@ import {
   isExactNumber,
 } from '../boxed-expression/apply.js';
 import { flatten } from '../boxed-expression/flatten.js';
+import { rangeCount } from '../numerics/range-count.js';
 
 import {
   gamma as gammaComplex,
@@ -236,6 +237,7 @@ import {
   operandNonFiniteNumber as operandNonFiniteNumberOnTypes,
   absFunctionType as absFunctionTypeOnTypes,
   broadcastOperandType,
+  finiteExtendedPart,
 } from './type-handlers.js';
 import {
   infinitePoint,
@@ -865,6 +867,158 @@ function mapProductCells(
       : reduceType({ kind: 'union', types: types as Type[] });
   }
   return undefined;
+}
+
+/**
+ * Add the `nan` arm to the type of `base^exp` when the power may be the
+ * indeterminate form `0^0`, which evaluates to NaN: the base may be 0 and
+ * the exponent may be 0. `x^n` with `x: real` and `n: integer<0..>` was
+ * typed `real`, although `x = 0, n = 0` gives NaN. The claim is unchanged
+ * when an operand is not an extended real, when the type already admits
+ * NaN, or when it is `number`.
+ */
+function withZeroToZeroNaN(
+  ops: ReadonlyArray<OperandDescriptor>,
+  context: {
+    engine: { _typeResolver: Parameters<typeof BoxedType.forResult>[1] };
+  },
+  claim: BoxedType | undefined
+): BoxedType | undefined {
+  if (claim === undefined || ops.length !== 2) return claim;
+  const [base, exp] = ops;
+  if (!isExtendedRealOperand(base) || !isExtendedRealOperand(exp)) return claim;
+  const mayBeZero = (d: OperandDescriptor): boolean => {
+    if (provablyNonZeroSign(d)) return false;
+    const range = intervalOfType(d.type);
+    return range === undefined || (range.lo <= 0 && range.hi >= 0);
+  };
+  if (!mayBeZero(base) || !mayBeZero(exp)) return claim;
+  const t = claim.type;
+  if (t === 'number' || !isSubtype(t, 'number') || isSubtype('nan', t))
+    return claim;
+  return BoxedType.forResult(
+    reduceType({ kind: 'union', types: [t, 'nan'] }),
+    context.engine._typeResolver
+  );
+}
+
+/**
+ * Can `base^exp` be the pole `0^−k = ~oo`? True when the base may be 0 (its
+ * sign does not prove it non-zero and its interval, when known, contains 0)
+ * and the exponent may be negative.
+ */
+function powerMayBePole(
+  base: OperandDescriptor,
+  expSgn: ReturnType<typeof operandSgnOnTypes>
+): boolean {
+  if (nonNegativeSign(expSgn) === true) return false;
+  if (provablyNonZeroSign(base)) return false;
+  const range = intervalOfType(base.type);
+  return range === undefined || (range.lo <= 0 && range.hi >= 0);
+}
+
+/**
+ * The type of `base^exp` when both are on the extended real line and at
+ * least one of them is not provably finite (`y: real | signed_infinity`,
+ * `Ln(0)`). A power of extended reals whose base is non-negative, or whose
+ * exponent is an integer, is an extended real, zero, or NaN, never a complex
+ * value, so it is typed without `number` (user decision 2026-09-25: a host
+ * reads `number` as possibly complex). The finite part of the type is the
+ * type of the same power with each operand restricted to its finite values,
+ * typed by this handler. Then:
+ * - `+oo` is added (`∞²`, `2^∞`);
+ * - `-oo` is added unless the base is non-negative or the exponent is even
+ *   (`(−∞)³ = −∞`);
+ * - `0` is added when the exponent may be infinite (`2^−∞ = 0`), or when the
+ *   base may be infinite and the exponent may be negative (`∞^−1 = 0`);
+ * - `infinity` is added when the base may be 0 and the exponent may be
+ *   negative: `0^−1` and `0^−∞` are the complex infinity `~oo`;
+ * - `nan` is added when the exponent may be infinite and the base may be 1
+ *   (`1^∞`), or when the base may be infinite and the exponent may be zero
+ *   (`∞^0`).
+ * `undefined` (the caller's own claim applies) when an operand is not an
+ * extended real, when both are finite, or when the power may be complex: a
+ * possibly negative base with an exponent that may be infinite, or with a
+ * non-integer exponent when the base may be infinite (`(−∞)^½ = ~oo`).
+ */
+function extendedPowerType(
+  base: OperandDescriptor,
+  exp: OperandDescriptor,
+  baseSgn: ReturnType<typeof operandSgnOnTypes>,
+  expSgn: ReturnType<typeof operandSgnOnTypes>,
+  context: { derive: (h: string, a: OperandDescriptor[]) => Type | undefined }
+): Type | undefined {
+  // An operand with a `nan` arm (`real | signed_infinity | nan`): the power
+  // is NaN when that operand is NaN, and otherwise the power of the present
+  // values, so it is typed without the arm, which is added back.
+  const baseNaN = withoutNanArm(base.type);
+  const expNaN = withoutNanArm(exp.type);
+  if (baseNaN !== undefined || expNaN !== undefined) {
+    const b = baseNaN === undefined ? base : describeType(baseNaN);
+    const e = expNaN === undefined ? exp : describeType(expNaN);
+    if (!isExtendedRealOperand(b) || !isExtendedRealOperand(e))
+      return undefined;
+    const t = extendedPowerType(
+      b,
+      e,
+      operandSgnOnTypes(b),
+      operandSgnOnTypes(e),
+      context
+    );
+    // Both present operands finite (`n²` with `n: nan | real`): the power of
+    // the present values, as the rest of this handler types it.
+    const present = t ?? context.derive('Power', [b, e]);
+    return present === undefined ||
+      present === 'number' ||
+      !isSubtype(present, 'number')
+      ? undefined
+      : reduceType({ kind: 'union', types: [present, 'nan'] });
+  }
+  if (!isExtendedRealOperand(base) || !isExtendedRealOperand(exp))
+    return undefined;
+  const baseInf = !isSubtype(base.type, 'real');
+  const expInf = !isSubtype(exp.type, 'real');
+  if (!baseInf && !expInf) return undefined;
+  const nonNegativeBase = nonNegativeSign(baseSgn) === true;
+  const finiteBase = finiteExtendedPart(base.type);
+  const finiteExp = finiteExtendedPart(exp.type);
+  const integerExp = finiteExp !== undefined && factsOf(finiteExp).integer;
+  if (expInf && !nonNegativeBase) return undefined;
+  if (baseInf && !integerExp && !nonNegativeBase) return undefined;
+  const types: Type[] = [{ kind: 'value', value: Infinity }];
+  let finite: Type | undefined;
+  if (finiteBase !== undefined && finiteExp !== undefined) {
+    finite = context.derive('Power', [
+      baseInf ? describeType(finiteBase) : base,
+      expInf ? describeType(finiteExp) : exp,
+    ]);
+    if (finite === undefined || !isSubtype(finite, 'number')) return undefined;
+  }
+  if (!nonNegativeBase && operandParityIsEven(exp) !== true)
+    types.push({ kind: 'value', value: -Infinity });
+  // The zero arm. A value type `0` would be widened to `integer` by the
+  // result boxing, which drops the sign of a non-negative finite part, so
+  // `e^y` would lose `real<0..>`: a non-negative finite part is widened to
+  // `real<0..>` instead.
+  const zero: Type = { kind: 'value', value: 0 };
+  if (
+    (expInf || (baseInf && positiveSign(expSgn) !== true)) &&
+    (finite === undefined || !isSubtype(zero, finite))
+  ) {
+    if (finite !== undefined && isSubtype(finite, nonNegativeRangeType('real')))
+      finite = nonNegativeRangeType('real');
+    else types.push(zero);
+  }
+  if (finite !== undefined) types.push(finite);
+  // `0^−1` and `0^−∞` are the complex infinity `~oo`, which only `infinity`
+  // admits: a base that may be 0 with an exponent that may be negative.
+  if (powerMayBePole(base, expSgn)) types.push('infinity');
+  // `1^∞` is NaN: the base may be 1 unless its interval excludes 1.
+  const bIv = baseInf ? undefined : intervalOfType(base.type);
+  const baseMayBeOne = bIv === undefined || (bIv.lo <= 1 && bIv.hi >= 1);
+  if ((expInf && baseMayBeOne) || (baseInf && !provablyNonZeroSign(exp)))
+    types.push('nan');
+  return reduceType({ kind: 'union', types });
 }
 
 /** Is this operand's sign a proof that it is not zero? */
@@ -4960,215 +5114,271 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // type handler below.
       signature: '(complex | infinity, complex | signed_infinity) -> number',
       nanBehavior: 'propagate',
-      type: ([base, exp], context) => {
-        // A proven-NaN operand: decline, so the framework's proven-NaN arm
-        // answers the sharp `nan` from the propagate policy (the
-        // `Sqrt`/`Erf` precedent).
-        if (provablyNaNOperand(base) || provablyNaNOperand(exp))
-          return undefined;
-        // A non-finite base or exponent can produce ±∞ *or* NaN — `0^∞`,
-        // `∞^0`, `1^∞`, `i^∞`, `∞^i` are all indeterminate. Only a
-        // *non-negative real* base raised to a *positive finite real* exponent
-        // is guaranteed non-finite (`(+∞)^2 = +∞`); everything else widens to
-        // the top type (the old `+oo | -oo` ignored the NaN forms).
-        // `=== true` (not truthiness): an operand whose finiteness the
-        // descriptor cannot decide must not be treated as non-finite.
-        // Sign reads combine the value channel with the TYPE channel
-        // (`operandSgn`): a literal's sign travels in its handler-visible
-        // type, and `assume(x > 0)` travels in the symbol's refined type.
-        const baseSgn = operandSgnOnTypes(base);
-        const expSgn = operandSgnOnTypes(exp);
-        if (
-          operandNonFiniteNumberOnTypes(base) ||
-          operandNonFiniteNumberOnTypes(exp)
-        ) {
-          if (
-            nonNegativeSign(baseSgn) === true &&
-            exp.facts.finite === true &&
-            positiveSign(expSgn) === true &&
-            operandNonFiniteNumberOnTypes(base)
-          )
-            return BoxedType.forResult(
-              '+oo | -oo',
-              context.engine._typeResolver
+      type: (ops, context) =>
+        withZeroToZeroNaN(
+          ops,
+          context,
+          ((): BoxedType | undefined => {
+            const [base, exp] = ops;
+            // A proven-NaN operand: decline, so the framework's proven-NaN arm
+            // answers the sharp `nan` from the propagate policy (the
+            // `Sqrt`/`Erf` precedent).
+            if (provablyNaNOperand(base) || provablyNaNOperand(exp))
+              return undefined;
+            // A non-finite base or exponent can produce ±∞ *or* NaN — `0^∞`,
+            // `∞^0`, `1^∞`, `i^∞`, `∞^i` are all indeterminate. Only a
+            // *non-negative real* base raised to a *positive finite real* exponent
+            // is guaranteed non-finite (`(+∞)^2 = +∞`); everything else widens to
+            // the top type (the old `+oo | -oo` ignored the NaN forms).
+            // `=== true` (not truthiness): an operand whose finiteness the
+            // descriptor cannot decide must not be treated as non-finite.
+            // Sign reads combine the value channel with the TYPE channel
+            // (`operandSgn`): a literal's sign travels in its handler-visible
+            // type, and `assume(x > 0)` travels in the symbol's refined type.
+            const baseSgn = operandSgnOnTypes(base);
+            const expSgn = operandSgnOnTypes(exp);
+            const extended = extendedPowerType(
+              base,
+              exp,
+              baseSgn,
+              expSgn,
+              context
             );
-          return BoxedType.forResult('number', context.engine._typeResolver);
-        }
-        // `0` raised to a non-positive power is a pole: `0^0` is indeterminate
-        // and `0^-k = ±∞` (P0-11: `0^(−0.5) = +∞`).
-        if (
-          operandLiteralValueOnTypes(base) === 0 &&
-          positiveSign(expSgn) !== true
-        )
-          return BoxedType.forResult('number', context.engine._typeResolver);
-        // Interval refinement for a LITERAL positive integer exponent (the
-        // ruled first-round scope of the interval-arithmetic plan,
-        // `docs/plans/2026-08-27-interval-arithmetic-result-types.md`;
-        // exponent ≤ 0 is deferred with `Divide` — the pole story): the
-        // base's interval raised per the `powInterval` case table. `even`
-        // clamps the lower bound at 0 — sound independently of the
-        // interval (an even power is never negative), so a dropped lower
-        // bound cannot lose the sign fact the arms below claim.
-        const powN = (() => {
-          const nv = operandLiteralValueOnTypes(exp);
-          // SAFE integers only: every double at or beyond 2⁵³ is even, so
-          // the parity-based sign logic in `powInterval` would lie about
-          // an exact odd exponent that large. (The literal channel never
-          // carries such values today — the exactness gate in
-          // `boxed-number.ts` refuses the whole span — but the guard
-          // keeps the invariant local.)
-          // Any NONZERO safe integer: a negative exponent is the reciprocal
-          // of the positive power (`powIntervalSigned`); `n = 0` stays out
-          // — `0^0` is the pole guard's business above.
-          return nv !== undefined && Number.isSafeInteger(nv) && nv !== 0
-            ? nv
-            : undefined;
-        })();
-        // A NEGATIVE literal exponent over a base that may be ZERO is a
-        // pole: `0^-2 = ~oo` (the projective infinity, type `infinity`), so
-        // the finite `rational`/`real` fallbacks the arms below reach for
-        // are unsound there — the same obligation the `Divide` handler
-        // meets with `POSSIBLY_ZERO_QUOTIENT_TYPE` (dual-review catch). The
-        // base admits zero when its interval does not exclude it AND its
-        // sign does not prove it non-zero.
-        const negativePoleTier = (): Type | undefined => {
-          if (powN === undefined || powN > 0) return undefined;
-          const bIv = intervalOfType(base.type);
-          if (bIv !== undefined && intervalExcludesZero(bIv)) return undefined;
-          if (provablyNonZeroSign(base)) return undefined;
-          return POSSIBLY_ZERO_QUOTIENT_TYPE;
-        };
-        const refinePow = (
-          tier: Type,
-          opts?: { clampNonNegative?: boolean; requirePositive?: boolean }
-        ): Type | undefined => {
-          if (powN === undefined) return undefined;
-          const bIv = intervalOfType(base.type);
-          if (bIv === undefined) return undefined;
-          const p = powIntervalSigned(bIv, powN);
-          if (p === undefined) return undefined;
-          const iv = finalizeInterval(p);
-          if (opts?.clampNonNegative) iv.lo = Math.max(iv.lo, 0);
-          if (opts?.requirePositive && !(iv.lo > 0)) return undefined;
-          const r = attachInterval(tier, iv);
-          return typeof r === 'string' ? undefined : r;
-        };
-        // `integer ^ (non-negative integer)` stays an integer; a possibly
-        // *negative* integer exponent yields a (non-integer) rational
-        // (P0-11: `2^-2 = 1/4`). An EVEN exponent adds the sign: x² ≥ 0
-        // (and x⁻² ≥ 0) for any real x (ROADMAP "Ranged types should carry
-        // sign…", work item 4 — the even-power head).
-        const baseIsInteger = factsOf(base.type).integer;
-        const expIsInteger = factsOf(exp.type).integer;
-        if (baseIsInteger && expIsInteger) {
-          if (nonNegativeSign(expSgn) === true) {
-            const even = operandParityIsEven(exp) === true;
-            return BoxedType.forResult(
-              refinePow('integer', { clampNonNegative: even }) ??
-                (even ? nonNegativeRangeType('integer') : 'integer'),
-              context.engine._typeResolver
-            );
-          }
-          {
-            // A possibly-negative integer exponent: the quotient tier is
-            // `rational`, refined by the reciprocal interval when the
-            // literal exponent is known (`x: integer<2<..<3>`, `x^-2`) —
-            // unless the base may be zero, a pole.
-            const even = operandParityIsEven(exp) === true;
-            return BoxedType.forResult(
-              negativePoleTier() ??
-                refinePow('rational', { clampNonNegative: even }) ??
-                (even ? nonNegativeRangeType('rational') : 'rational'),
-              context.engine._typeResolver
-            );
-          }
-        }
-        if (factsOf(base.type).rational && expIsInteger) {
-          const even = operandParityIsEven(exp) === true;
-          return BoxedType.forResult(
-            negativePoleTier() ??
-              refinePow('rational', { clampNonNegative: even }) ??
-              (even ? nonNegativeRangeType('rational') : 'rational'),
-            context.engine._typeResolver
-          );
-        }
-        // A real result needs a non-negative base or an integer exponent;
-        // otherwise the result may be complex (e.g. (−2)^0.5).
-        if (isExtendedRealOperand(base) && isExtendedRealOperand(exp)) {
-          // A provably positive base keeps a positive result — `b^x =
-          // e^(x·ln b) > 0` for a real exponent (`Exp` canonicalizes to
-          // `Power(e, x)`, so this arm is item 4's `Exp` head); a
-          // non-negative base or an even exponent keeps a non-negative one.
-          // Same generic-point convention as the plain `real` claims
-          // these refine: an operand of unknown finiteness is treated as a
-          // finite point.
-          if (positiveSign(baseSgn) === true)
-            // The refinement must keep the positivity this arm proves, so
-            // it only replaces the `& !0` claim when its own lower bound
-            // is strictly positive.
-            return BoxedType.forResult(
-              refinePow('real', { requirePositive: true }) ??
-                positiveRangeType('real'),
-              context.engine._typeResolver
-            );
-          if (nonNegativeSign(baseSgn) === true)
-            return BoxedType.forResult(
-              negativePoleTier() ??
-                refinePow('real', { clampNonNegative: true }) ??
-                nonNegativeRangeType('real'),
-              context.engine._typeResolver
-            );
-          if (operandParityIsEven(exp) === true)
-            return BoxedType.forResult(
-              negativePoleTier() ??
-                refinePow('real', { clampNonNegative: true }) ??
-                nonNegativeRangeType('real'),
-              context.engine._typeResolver
-            );
-          if (expIsInteger)
-            return BoxedType.forResult(
-              negativePoleTier() ?? refinePow('real') ?? 'real',
-              context.engine._typeResolver
-            );
-          // A *provably negative* base with an exponent that provably lands on
-          // the complex branch (`(−2)^0.3`) is a finite complex value — the
-          // `number` default below is true but too coarse for the
-          // compiler, which then guesses real and emits NaN. `=== true`, and
-          // an exponent whose branch cannot be proven keeps the wider default.
-          // (Nested under the `isExtendedReal` guard so a complex-typed base
-          // never pays for the extra sign query.)
-          if (
-            negativeSign(baseSgn) === true &&
-            negativeBaseIsComplexBranch(exp)
-          )
-            return BoxedType.forResult('complex', context.engine._typeResolver);
-        }
-        // A pure-imaginary base (non-zero by type: `imaginary ∩ real =
-        // nothing` in the lattice, and 0 is real) raised to an integer power:
-        // (bi)^n = bⁿ·iⁿ, so an even n is real, an odd n is pure imaginary
-        // (non-zero since b ≠ 0), and an unknown-parity integer is one of the
-        // two — both ⊂ `complex`.
-        if (factsOf(base.type).imaginary && expIsInteger) {
-          if (operandParityIsEven(exp) === true)
-            return BoxedType.forResult('real', context.engine._typeResolver);
-          if (operandParityIsOdd(exp) === true)
-            return BoxedType.forResult(
-              'imaginary',
-              context.engine._typeResolver
-            );
-          return BoxedType.forResult('complex', context.engine._typeResolver);
-        }
-        // A positive real base raised to a finite complex power is
-        // e^(exp·ln base): finite and non-zero, hence a finite complex
-        // number (e.g. `e^i`, on the unit circle).
-        if (
-          isExtendedRealOperand(base) &&
-          positiveSign(baseSgn) === true &&
-          factsOf(exp.type).complex
-        )
-          return BoxedType.forResult('complex', context.engine._typeResolver);
-        return BoxedType.forResult('number', context.engine._typeResolver);
-      },
+            if (extended !== undefined)
+              return BoxedType.forResult(
+                extended,
+                context.engine._typeResolver
+              );
+            if (
+              operandNonFiniteNumberOnTypes(base) ||
+              operandNonFiniteNumberOnTypes(exp)
+            ) {
+              if (
+                nonNegativeSign(baseSgn) === true &&
+                exp.facts.finite === true &&
+                positiveSign(expSgn) === true &&
+                operandNonFiniteNumberOnTypes(base)
+              )
+                return BoxedType.forResult(
+                  '+oo | -oo',
+                  context.engine._typeResolver
+                );
+              return BoxedType.forResult(
+                'number',
+                context.engine._typeResolver
+              );
+            }
+            // `0` raised to a non-positive power is a pole: `0^0` is indeterminate
+            // and `0^-k = ±∞` (P0-11: `0^(−0.5) = +∞`).
+            if (
+              operandLiteralValueOnTypes(base) === 0 &&
+              positiveSign(expSgn) !== true
+            )
+              return BoxedType.forResult(
+                'number',
+                context.engine._typeResolver
+              );
+            // Interval refinement for a LITERAL positive integer exponent (the
+            // ruled first-round scope of the interval-arithmetic plan,
+            // `docs/plans/2026-08-27-interval-arithmetic-result-types.md`;
+            // exponent ≤ 0 is deferred with `Divide` — the pole story): the
+            // base's interval raised per the `powInterval` case table. `even`
+            // clamps the lower bound at 0 — sound independently of the
+            // interval (an even power is never negative), so a dropped lower
+            // bound cannot lose the sign fact the arms below claim.
+            const powN = (() => {
+              const nv = operandLiteralValueOnTypes(exp);
+              // SAFE integers only: every double at or beyond 2⁵³ is even, so
+              // the parity-based sign logic in `powInterval` would lie about
+              // an exact odd exponent that large. (The literal channel never
+              // carries such values today — the exactness gate in
+              // `boxed-number.ts` refuses the whole span — but the guard
+              // keeps the invariant local.)
+              // Any NONZERO safe integer: a negative exponent is the reciprocal
+              // of the positive power (`powIntervalSigned`); `n = 0` stays out
+              // — `0^0` is the pole guard's business above.
+              return nv !== undefined && Number.isSafeInteger(nv) && nv !== 0
+                ? nv
+                : undefined;
+            })();
+            // A NEGATIVE literal exponent over a base that may be ZERO is a
+            // pole: `0^-2 = ~oo` (the projective infinity, type `infinity`), so
+            // the finite `rational`/`real` fallbacks the arms below reach for
+            // are unsound there — the same obligation the `Divide` handler
+            // meets with `POSSIBLY_ZERO_QUOTIENT_TYPE` (dual-review catch). The
+            // base admits zero when its interval does not exclude it AND its
+            // sign does not prove it non-zero.
+            const negativePoleTier = (): Type | undefined => {
+              if (powN === undefined || powN > 0) return undefined;
+              const bIv = intervalOfType(base.type);
+              if (bIv !== undefined && intervalExcludesZero(bIv))
+                return undefined;
+              if (provablyNonZeroSign(base)) return undefined;
+              return POSSIBLY_ZERO_QUOTIENT_TYPE;
+            };
+            const refinePow = (
+              tier: Type,
+              opts?: { clampNonNegative?: boolean; requirePositive?: boolean }
+            ): Type | undefined => {
+              if (powN === undefined) return undefined;
+              const bIv = intervalOfType(base.type);
+              if (bIv === undefined) return undefined;
+              const p = powIntervalSigned(bIv, powN);
+              if (p === undefined) return undefined;
+              const iv = finalizeInterval(p);
+              if (opts?.clampNonNegative) iv.lo = Math.max(iv.lo, 0);
+              if (opts?.requirePositive && !(iv.lo > 0)) return undefined;
+              const r = attachInterval(tier, iv);
+              return typeof r === 'string' ? undefined : r;
+            };
+            // `integer ^ (non-negative integer)` stays an integer; a possibly
+            // *negative* integer exponent yields a (non-integer) rational
+            // (P0-11: `2^-2 = 1/4`). An EVEN exponent adds the sign: x² ≥ 0
+            // (and x⁻² ≥ 0) for any real x (ROADMAP "Ranged types should carry
+            // sign…", work item 4 — the even-power head).
+            // A base that may be 0 with an exponent that may be negative: `0^−k`
+            // is the complex infinity `~oo` (`0^−1`, `k^j` at `k = 0, j = −1`),
+            // so the finite tiers below are unsound there. The claim is the one
+            // `Divide` makes for a divisor that may be zero. A literal exponent
+            // is read by `negativePoleTier` in the same way. Only a power that
+            // is real otherwise (a non-negative base, or an integer exponent):
+            // `x^r` with a possibly negative base may be complex, and the
+            // branches below keep the wider claim for it.
+            if (
+              isExtendedRealOperand(base) &&
+              isExtendedRealOperand(exp) &&
+              (nonNegativeSign(baseSgn) === true ||
+                factsOf(exp.type).integer) &&
+              powerMayBePole(base, expSgn)
+            )
+              return BoxedType.forResult(
+                negativePoleTier() ?? POSSIBLY_ZERO_QUOTIENT_TYPE,
+                context.engine._typeResolver
+              );
+            const baseIsInteger = factsOf(base.type).integer;
+            const expIsInteger = factsOf(exp.type).integer;
+            if (baseIsInteger && expIsInteger) {
+              if (nonNegativeSign(expSgn) === true) {
+                const even = operandParityIsEven(exp) === true;
+                return BoxedType.forResult(
+                  refinePow('integer', { clampNonNegative: even }) ??
+                    (even ? nonNegativeRangeType('integer') : 'integer'),
+                  context.engine._typeResolver
+                );
+              }
+              {
+                // A possibly-negative integer exponent: the quotient tier is
+                // `rational`, refined by the reciprocal interval when the
+                // literal exponent is known (`x: integer<2<..<3>`, `x^-2`) —
+                // unless the base may be zero, a pole.
+                const even = operandParityIsEven(exp) === true;
+                return BoxedType.forResult(
+                  negativePoleTier() ??
+                    refinePow('rational', { clampNonNegative: even }) ??
+                    (even ? nonNegativeRangeType('rational') : 'rational'),
+                  context.engine._typeResolver
+                );
+              }
+            }
+            if (factsOf(base.type).rational && expIsInteger) {
+              const even = operandParityIsEven(exp) === true;
+              return BoxedType.forResult(
+                negativePoleTier() ??
+                  refinePow('rational', { clampNonNegative: even }) ??
+                  (even ? nonNegativeRangeType('rational') : 'rational'),
+                context.engine._typeResolver
+              );
+            }
+            // A real result needs a non-negative base or an integer exponent;
+            // otherwise the result may be complex (e.g. (−2)^0.5).
+            if (isExtendedRealOperand(base) && isExtendedRealOperand(exp)) {
+              // A provably positive base keeps a positive result — `b^x =
+              // e^(x·ln b) > 0` for a real exponent (`Exp` canonicalizes to
+              // `Power(e, x)`, so this arm is item 4's `Exp` head); a
+              // non-negative base or an even exponent keeps a non-negative one.
+              // Same generic-point convention as the plain `real` claims
+              // these refine: an operand of unknown finiteness is treated as a
+              // finite point.
+              if (positiveSign(baseSgn) === true)
+                // The refinement must keep the positivity this arm proves, so
+                // it only replaces the `& !0` claim when its own lower bound
+                // is strictly positive.
+                return BoxedType.forResult(
+                  refinePow('real', { requirePositive: true }) ??
+                    positiveRangeType('real'),
+                  context.engine._typeResolver
+                );
+              if (nonNegativeSign(baseSgn) === true)
+                return BoxedType.forResult(
+                  negativePoleTier() ??
+                    refinePow('real', { clampNonNegative: true }) ??
+                    nonNegativeRangeType('real'),
+                  context.engine._typeResolver
+                );
+              if (operandParityIsEven(exp) === true)
+                return BoxedType.forResult(
+                  negativePoleTier() ??
+                    refinePow('real', { clampNonNegative: true }) ??
+                    nonNegativeRangeType('real'),
+                  context.engine._typeResolver
+                );
+              if (expIsInteger)
+                return BoxedType.forResult(
+                  negativePoleTier() ?? refinePow('real') ?? 'real',
+                  context.engine._typeResolver
+                );
+              // A *provably negative* base with an exponent that provably lands on
+              // the complex branch (`(−2)^0.3`) is a finite complex value — the
+              // `number` default below is true but too coarse for the
+              // compiler, which then guesses real and emits NaN. `=== true`, and
+              // an exponent whose branch cannot be proven keeps the wider default.
+              // (Nested under the `isExtendedReal` guard so a complex-typed base
+              // never pays for the extra sign query.)
+              if (
+                negativeSign(baseSgn) === true &&
+                negativeBaseIsComplexBranch(exp)
+              )
+                return BoxedType.forResult(
+                  'complex',
+                  context.engine._typeResolver
+                );
+            }
+            // A pure-imaginary base (non-zero by type: `imaginary ∩ real =
+            // nothing` in the lattice, and 0 is real) raised to an integer power:
+            // (bi)^n = bⁿ·iⁿ, so an even n is real, an odd n is pure imaginary
+            // (non-zero since b ≠ 0), and an unknown-parity integer is one of the
+            // two — both ⊂ `complex`.
+            if (factsOf(base.type).imaginary && expIsInteger) {
+              if (operandParityIsEven(exp) === true)
+                return BoxedType.forResult(
+                  'real',
+                  context.engine._typeResolver
+                );
+              if (operandParityIsOdd(exp) === true)
+                return BoxedType.forResult(
+                  'imaginary',
+                  context.engine._typeResolver
+                );
+              return BoxedType.forResult(
+                'complex',
+                context.engine._typeResolver
+              );
+            }
+            // A positive real base raised to a finite complex power is
+            // e^(exp·ln base): finite and non-zero, hence a finite complex
+            // number (e.g. `e^i`, on the unit circle).
+            if (
+              isExtendedRealOperand(base) &&
+              positiveSign(baseSgn) === true &&
+              factsOf(exp.type).complex
+            )
+              return BoxedType.forResult(
+                'complex',
+                context.engine._typeResolver
+              );
+            return BoxedType.forResult('number', context.engine._typeResolver);
+          })()
+        ),
       canonical: (args, { engine }) => {
         // @fastpath: See also shortcut in makeNumericFunction()
         args = checkNumericArgs(engine, args, 2);
@@ -7010,7 +7220,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(any, tuple*) -> number',
       type: (ops, context) =>
         BoxedType.forResult(
-          bigOpResultTypeOnTypes(ops),
+          bigOpResultTypeOnTypes(ops, 'Product'),
           context.engine._typeResolver
         ),
 
@@ -7217,7 +7427,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(any, tuple*) -> number',
       type: (ops, context) =>
         BoxedType.forResult(
-          bigOpResultTypeOnTypes(ops),
+          bigOpResultTypeOnTypes(ops, 'Sum'),
           context.engine._typeResolver
         ),
 
@@ -8213,13 +8423,18 @@ function processMinMaxItem(
   if (item.operator === 'Range') {
     // Symbolic bounds (e.g. Range(1, n)): the extremum is indeterminate
     if (hasSymbolicRangeBounds(item)) return [undefined, [item]];
-    if (upper) {
-      const r = range(item);
-      const last = rangeLast(r);
-      return [ce.number(Math.max(r[0], last)), []];
-    } else {
-      return [ce.number(range(item)[0]), []];
-    }
+    // The run may descend (`Range(1, -oo)` is 1, 0, -1, …), so the
+    // extremum is the larger or smaller of the first and last elements, as
+    // for `Max`. Reading the first element for `Min` answered 1 for that
+    // range, whose minimum is -oo.
+    const r = range(item);
+    // An empty range (`Range(1, 5, -1)`) contributes no value, as an empty
+    // list does: `Min(1, Range(1, 5, -1))` is 1, and a call whose every
+    // operand is empty is NaN (`evaluateMinMax`). `rangeLast` would answer
+    // `lower - step` for it, a value that is not an element.
+    if (rangeCount(r[0], r[1], r[2]) === 0) return [undefined, []];
+    const last = rangeLast(r);
+    return [ce.number(upper ? Math.max(r[0], last) : Math.min(r[0], last)), []];
   }
 
   if (isFunction(item, 'Linspace')) {

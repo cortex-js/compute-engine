@@ -131,12 +131,13 @@ describe('TYPE INFERENCE FOR SPECIAL FUNCTIONS', () => {
 });
 
 describe('TYPE INFERENCE FOR STATISTICS FUNCTIONS', () => {
-  it('Mean returns number', () => {
-    // A data-consuming aggregate types as the numeric base `number` (never
-    // `real`): an absent datum or empty input evaluates to `NaN`, so a
-    // `real` claim would be unsound (§3.C of the missing-value design).
+  it('Mean of integers is a rational or NaN', () => {
+    // A data-consuming aggregate: an absent datum or empty input evaluates
+    // to `NaN`, so the claim carries a `nan` arm (§3.C of the missing-value
+    // design). Data on the extended real line has its mean there, so the
+    // claim is not `number` (user decision 2026-09-25).
     const expr = ce.expr(['Mean', ['List', 1, 2, 3]]);
-    expect(expr.type.toString()).toBe('number');
+    expect(expr.type.toString()).toBe('nan | rational');
   });
 
   it('Erf returns real', () => {

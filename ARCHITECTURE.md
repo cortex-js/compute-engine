@@ -312,7 +312,13 @@ Every operator `type` handler follows these rules:
    (`real | signed_infinity`, with or without `nan`) cannot be complex, so it
    claims `real | signed_infinity`, with a `nan` arm when one factor may be
    infinite and a different factor may be zero (`0 · ∞`), or when two terms
-   may be infinite (`∞ − ∞`). `x · ∞` with `x: real` is
+   may be infinite (`∞ − ∞`). The same holds for a power with a
+   non-negative base or an integer exponent (`extendedPowerType()`), an
+   elementary function whose values are real (`extendedElementaryFunctionType()`
+   in `library/type-handlers.ts`; a function with no value at `±∞`, such as
+   `Sin`, takes a `nan` arm for it), `Max`/`Min`, the reductions
+   `Sum`/`Product`/`Mean` (`extendedReductionType()`), and the element type of
+   a literal list (`widenElementTypes()`). `x · ∞` with `x: real` is
    `nan | signed_infinity`, and `2y` with `y: real | signed_infinity` is
    `real | signed_infinity`. A host reads `number` and `infinity` as possibly
    complex, so the wider claims cost it the real value layout. The rules live

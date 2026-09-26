@@ -282,7 +282,7 @@ describe('Map over a list that holds a restricted point', () => {
 
   test('a numeric cell is still NaN', () => {
     const m = c.box(['Map', sinFn, ['List', ['When', 2, 'c'], 3]] as never);
-    expect(m.type.toString()).toBe('vector<2>');
+    expect(m.type.toString()).toBe('list<nan | real^2>');
     expect(m.evaluate().toString()).toBe('[NaN,sin(3)]');
   });
 });
@@ -311,7 +311,7 @@ describe('a numeric function of a value that can be a list or absent', () => {
     const c = new ComputeEngine();
     c.declare('b', 'boolean');
     const e = c.box(['Sin', ['When', 2, 'b']]);
-    expect(e.type.toString()).toBe('number');
+    expect(e.type.toString()).toBe('nan | real');
     c.assign('b', false);
     expect(e.evaluate().toString()).toBe('NaN');
   });

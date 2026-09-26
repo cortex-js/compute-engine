@@ -79,7 +79,7 @@ describe('a false restriction answers the marker of the value type', () => {
 describe('the two evaluation routes agree', () => {
   test.each([
     ['2·x{c}', ['Multiply', 2, ['When', 'x', C]], 'nan | real', 'NaN'],
-    ['sin(x{c})', ['Sin', ['When', 'x', C]], 'number', 'NaN'],
+    ['sin(x{c})', ['Sin', ['When', 'x', C]], 'nan | real', 'NaN'],
     [
       'Length([1,2]{c})',
       ['Length', ['When', ['List', 1, 2], C]],

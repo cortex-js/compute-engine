@@ -1,4 +1,5 @@
 import {
+  EXTENDED_REAL_TYPE,
   SIGNED_INFINITY_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
   NUMERIC_TYPES_SET,
@@ -15,9 +16,12 @@ import {
 import { parseType } from '../../common/type/parse.js';
 import {
   collectionElementType,
+  resolveTypeAlias,
   stripNumericRanges,
   widen,
 } from '../../common/type/utils.js';
+import { reduceType } from '../../common/type/reduce.js';
+import { describeType } from '../boxed-expression/operand-descriptor.js';
 import {
   negativeSign,
   nonNegativeSign,
@@ -1041,6 +1045,91 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
 }
 
 /**
+ * The finite part of an extended-real type: the type without its `+oo` and
+ * `-oo` members (`real | signed_infinity` → `real`), the type itself when it
+ * is below `real`, and `undefined` when it has no finite member (`+oo`).
+ */
+export function finiteExtendedPart(t0: Type, depth = 0): Type | undefined {
+  const t = resolveTypeAlias(t0);
+  if (isSubtype(t, 'real')) return t;
+  if (typeof t !== 'object' || t.kind !== 'union' || depth > 8)
+    return undefined;
+  // A member can itself be an alias of a union (`E | -oo` with
+  // `E = real | +oo`): its finite part is kept, not the whole member
+  // dropped. The depth bound stops an alias cycle.
+  const finite = t.types
+    .map((x) => finiteExtendedPart(x, depth + 1))
+    .filter((x): x is Type => x !== undefined);
+  if (finite.length === 0) return undefined;
+  return finite.length === 1
+    ? finite[0]
+    : reduceType({ kind: 'union', types: finite });
+}
+
+/** `+∞` and `−∞` as value types, the members of `signed_infinity`. */
+const PLUS_INFINITY_TYPE: Type = Object.freeze({
+  kind: 'value',
+  value: Infinity,
+}) as Type;
+const MINUS_INFINITY_TYPE: Type = Object.freeze({
+  kind: 'value',
+  value: -Infinity,
+}) as Type;
+/** The extended real line with NaN: `real | +oo | -oo | nan`. */
+const EXTENDED_REAL_OR_NAN_TYPE: Type = Object.freeze({
+  kind: 'union',
+  types: ['real', 'nan', PLUS_INFINITY_TYPE, MINUS_INFINITY_TYPE],
+}) as Type;
+
+/**
+ * The type of a one-argument elementary function (`Tanh`, `Sin`, `Arsinh`)
+ * of an operand on the extended real line that may be infinite or NaN
+ * (`real | signed_infinity | nan`), or `undefined` when the operand is not
+ * such a type. The result is typed without `number` where the values allow
+ * it (user decision 2026-09-25: a host reads `number` as possibly complex).
+ * It is the union of:
+ * - the type of the function at the operand's finite values;
+ * - at `±∞`, the type of the function at a `signed_infinity` operand when
+ *   the head's carrier admits the signed infinities (`Tanh(±∞) = ±1`), and
+ *   `nan` when it does not: `Sin(∞)` is an `incompatible-type` error in the
+ *   interpreter and NaN on a compiled route (`Math.sin(Infinity)`);
+ * - `nan` when the operand has a `nan` arm.
+ * `undefined` as well when one of those parts is not on the extended real
+ * line (`number`, `complex`), so the caller's own claim applies.
+ */
+export function extendedElementaryFunctionType(
+  operator: string,
+  carrierAdmitsSignedInfinity: boolean,
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  if (ops.length !== 1) return undefined;
+  const t = resolveTypeAlias(ops[0].type);
+  const present = stripNaN(t);
+  const hasNaN = present !== t;
+  if (!isSubtype(present, EXTENDED_REAL_TYPE)) return undefined;
+  const mayBeInfinite = !isSubtype(present, 'real');
+  if (!mayBeInfinite && !hasNaN) return undefined;
+  const parts: Type[] = [];
+  const finite = finiteExtendedPart(present);
+  if (finite !== undefined)
+    parts.push(elementaryFunctionType(operator, [describeType(finite)]));
+  if (mayBeInfinite)
+    parts.push(
+      carrierAdmitsSignedInfinity
+        ? elementaryFunctionType(operator, [describeType(SIGNED_INFINITY_TYPE)])
+        : 'nan'
+    );
+  if (hasNaN) parts.push('nan');
+  // Only a result on the extended real line is claimed. A complex part
+  // (`Arccos` of a real beyond ±1) keeps the caller's claim: the GPU
+  // compilers refuse a body typed `complex` but compile one typed `number`,
+  // so trading `number` for `complex | nan` would stop code that compiles.
+  if (parts.some((p) => !isSubtype(p, EXTENDED_REAL_OR_NAN_TYPE)))
+    return undefined;
+  return reduceType({ kind: 'union', types: parts });
+}
+
+/**
  * `Max`/`Min`/`Supremum`/`Infimum`. These are data-consuming aggregates
  * (an absent datum or empty input evaluates to NaN), so the base claim is
  * `number`. When every operand is a *scalar* number, though, no
@@ -1058,10 +1147,66 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
  */
 export function extremumType(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length === 0) return 'number';
-  if (!ops.every((d) => factsOf(d.type).belowNumber)) return 'number';
-  for (const t of ['integer', 'rational', 'real'] as const)
-    if (ops.every((d) => factsOf(d.type)[t])) return t;
-  return 'number';
+  if (ops.every((d) => factsOf(d.type).belowNumber))
+    for (const t of ['integer', 'rational', 'real'] as const)
+      if (ops.every((d) => factsOf(d.type)[t])) return t;
+  return extendedExtremumType(ops) ?? 'number';
+}
+
+/**
+ * `Max`/`Min` over operands whose values (the elements, for a `list`
+ * operand) are all on the extended real line, with or
+ * without NaN, or `undefined` for any other operand. The result is one of
+ * those values, or NaN, so it is typed on the extended real line (user
+ * decision 2026-09-25: a host reads `number` as possibly complex): the
+ * tightest numeric tier of the finite values, each signed infinity a value
+ * may take, and `nan` when a value may be NaN or a collection operand may be
+ * empty (an empty input evaluates to NaN).
+ */
+function extendedExtremumType(
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  const plusInf = PLUS_INFINITY_TYPE;
+  const minusInf = MINUS_INFINITY_TYPE;
+  let hasNaN = false;
+  const values: Type[] = [];
+  for (const d of ops) {
+    const t = resolveTypeAlias(d.type);
+    let v: Type = t;
+    // Only a `list` has a finite length. An `indexed_collection` may be
+    // infinite (`Range(1, ∞)`), and its maximum is then `+∞` although
+    // every element is finite.
+    if (typeof t === 'object' && t.kind === 'list') {
+      v = t.elements;
+      hasNaN = true;
+    }
+    if (!isSubtype(v, EXTENDED_REAL_OR_NAN_TYPE)) return undefined;
+    values.push(v);
+  }
+  const types: Type[] = [];
+  const finite = values
+    .map((v) => finiteExtendedPart(stripNaN(v)))
+    .filter((v): v is Type => v !== undefined);
+  if (finite.length > 0) {
+    const tier = (['integer', 'rational', 'real'] as const).find((t) =>
+      finite.every((v) => factsOf(v)[t])
+    );
+    types.push(tier ?? 'real');
+  }
+  if (values.some((v) => isSubtype(plusInf, v))) types.push(plusInf);
+  if (values.some((v) => isSubtype(minusInf, v))) types.push(minusInf);
+  if (hasNaN || values.some((v) => isSubtype('nan', v))) types.push('nan');
+  return types.length === 0 ? undefined : reduceType({ kind: 'union', types });
+}
+
+/** The type without its `nan` member, when it is a union with one. */
+function stripNaN(t: Type): Type {
+  if (typeof t !== 'object' || t.kind !== 'union' || !t.types.includes('nan'))
+    return t;
+  return reduceType({
+    kind: 'union',
+    types: t.types.filter((x) => x !== 'nan'),
+  });
 }
 
 /**
@@ -1122,6 +1267,79 @@ export function measurementType(ops: ReadonlyArray<OperandDescriptor>): Type {
 }
 
 /**
+ * The type of `Sum`, `Product` or `Mean` reducing values that are all on the
+ * extended real line, with or without NaN: the elements of each rank-1
+ * `list` operand, and each scalar operand. `undefined` for any
+ * other operand, so the caller's own claim applies. The result is typed on
+ * the extended real line (user decision 2026-09-25: a host reads `number` as
+ * possibly complex):
+ * - the finite part is the tightest tier of the finite values (`integer`,
+ *   `rational`, `real`), and at least `rational` for a mean; the empty sum is
+ *   0 and the empty product is 1, both in that tier;
+ * - a sum or a mean takes each signed infinity a value may take; a product
+ *   takes both when a value may be infinite, since a negative factor flips
+ *   the sign;
+ * - `nan` is added when a value may be NaN, when a sum or a mean may meet
+ *   both `+∞` and `−∞`, when a product may meet `0` and an infinity, and for
+ *   a mean over a collection, which may be empty (`Mean([])` is NaN).
+ */
+export function extendedReductionType(
+  operator: 'Sum' | 'Product' | 'Mean',
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  const plusInf = PLUS_INFINITY_TYPE;
+  const minusInf = MINUS_INFINITY_TYPE;
+  let mayBeEmpty = false;
+  const values: Type[] = [];
+  for (const d of ops) {
+    const t = resolveTypeAlias(d.type);
+    let v: Type = t;
+    if (typeof t === 'object' && t.kind === 'list') {
+      // A matrix (`list<real^2x2>`) sums column by column, to a list, not
+      // to a scalar.
+      if ((t.dimensions?.length ?? 1) > 1) return undefined;
+      v = t.elements;
+      mayBeEmpty = true;
+    }
+    // Only a `list` has a finite length: an `indexed_collection` may be
+    // infinite (`Range(1, ∞)`), and its sum is then not a finite value.
+    if (!isSubtype(v, EXTENDED_REAL_OR_NAN_TYPE)) return undefined;
+    values.push(v);
+  }
+  if (values.length === 0) return undefined;
+  const finite = values
+    .map((v) => finiteExtendedPart(stripNaN(v)))
+    .filter((v): v is Type => v !== undefined);
+  const tiers =
+    operator === 'Mean'
+      ? (['rational', 'real'] as const)
+      : (['integer', 'rational', 'real'] as const);
+  const tier = tiers.find((t) => finite.every((v) => factsOf(v)[t])) ?? 'real';
+  const mayBePlus = values.some((v) => isSubtype(plusInf, v));
+  const mayBeMinus = values.some((v) => isSubtype(minusInf, v));
+  const mayBeInfinite = mayBePlus || mayBeMinus;
+  const types: Type[] = [];
+  // A value set that is only infinite still has a finite result when the
+  // input may be empty (the empty sum 0, the empty product 1).
+  if (finite.length > 0 || (mayBeEmpty && operator !== 'Mean'))
+    types.push(tier);
+  if (operator === 'Product' ? mayBeInfinite : mayBePlus) types.push(plusInf);
+  if (operator === 'Product' ? mayBeInfinite : mayBeMinus) types.push(minusInf);
+  const mayBeZero = finite.some((v) => {
+    const range = intervalOfType(v);
+    return range === undefined || (range.lo <= 0 && range.hi >= 0);
+  });
+  if (
+    values.some((v) => isSubtype('nan', v)) ||
+    (operator !== 'Product' && mayBePlus && mayBeMinus) ||
+    (operator === 'Product' && mayBeInfinite && mayBeZero) ||
+    (operator === 'Mean' && mayBeEmpty)
+  )
+    types.push('nan');
+  return reduceType({ kind: 'union', types });
+}
+
+/**
  * Result type of a big-op (`Sum`/`Product`) in its `(body, limits…)` form.
  * Elementwise accumulation over a collection-valued body yields the same
  * indexed-collection type: summing (or multiplying) a `vector<2>`-, `list<T>`-
@@ -1135,7 +1353,14 @@ export function measurementType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * operand whose TYPE does not prove a collection — a claim the types alone
  * do not support.
  */
-export function bigOpResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
+export function bigOpResultType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  operator?: 'Sum' | 'Product'
+): Type {
+  if (ops.length === 1 && operator !== undefined) {
+    const reduced = extendedReductionType(operator, ops);
+    if (reduced !== undefined) return reduced;
+  }
   const body = ops[0];
   if (
     ops.length > 1 &&

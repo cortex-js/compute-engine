@@ -378,9 +378,10 @@ describe('TYPE AUDIT: Max/Min extremum join', () => {
     expect(typeOf(['Min', 1, 2.5])).toBe('real');
   });
 
-  it('keeps number when a collection or unknown-number operand is present (§3.C)', () => {
-    // A collection may be empty or contain Missing → NaN absorption applies.
-    expect(typeOf(['Max', ['List', 1, 2]])).toBe('number');
+  it('keeps number when an unknown-number operand is present (§3.C)', () => {
+    // A collection may be empty → NaN absorption applies, so its elements'
+    // tier gains a `nan` arm (user decision 2026-09-25: not `number`).
+    expect(typeOf(['Max', ['List', 1, 2]])).toBe('integer | nan');
     // A `number`-typed symbol may be NaN.
     expect(typeOf(['Max', 'u', 1])).toBe('number');
   });

@@ -122,7 +122,7 @@ describe('a broadcast over a restricted list keeps the list and the absence', ()
 
   test('a restricted scalar with a scalar result absorbs to NaN', () => {
     const r = probe(String.raw`\sin(2\left\{0<t\right\})`);
-    expect(r.type).toBe('number');
+    expect(r.type).toBe('nan | real');
     expect(r.absent).toBe('NaN');
   });
 });

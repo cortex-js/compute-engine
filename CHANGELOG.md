@@ -2,6 +2,42 @@
 
 ### Behavior Changes
 
+- **Powers, elementary functions, extrema, reductions and literal lists of
+  extended reals are typed on the extended real line**. With
+  `y: real | signed_infinity`, `a: real | signed_infinity | nan`,
+  `L: list<real>`, `K: list<integer>` and
+  `C: list<real | signed_infinity | nan>`:
+  - Two claims were wrong: `y²` typed `real<0..>` and `e^y` and `2^y` typed
+    `real<0<..>`, although `∞² = +∞`, `e^∞ = +∞` and `e^−∞ = 0`. They are now
+    `real<0..> | signed_infinity`. `y³` is `real | signed_infinity`, `a²` is
+    `nan | real<0..> | signed_infinity`, and `n²` with `n: nan | real` is
+    `nan | real<0..>` (all were `number`). A power that may be complex (`y^r`, a
+    possibly negative base with a non-integer exponent) stays `number`.
+  - `tanh(y)` is `real`, `sinh(a)` is `nan | real | signed_infinity`, and
+    `arctan(a)` is `nan | real` (all were `number`). `sin(y)` and `cos(y)` are
+    `nan | real` (they were `number`): `Sin(±∞)` has no value, an error in the
+    interpreter and NaN on a compiled route. A function whose value may be
+    complex (`arccos(y)`) stays `number`.
+  - `max(y, r)` is `real | signed_infinity`, `Max(C)` is
+    `nan | real | signed_infinity`, and `Max(K)` is `integer | nan` (the `nan`
+    arm is for an empty list). All were `number`.
+  - `Sum(C)` is `nan | real | signed_infinity`, `Sum(L)` is `real`, `Product(K)`
+    is `integer`, `Mean(L)` is `nan | real` and `Mean(K)` is `nan | rational`.
+    All were `number`. The forms with limits (`Sum(k², k, 1, 10)`) are
+    unchanged.
+  - A literal list with an infinite or NaN element keeps it in the element type:
+    `[1, ∞]` is `list<integer | signed_infinity^2>` and `[1.5, NaN]` is
+    `list<nan | real^2>` (both were `vector<2>`, a list of `number`). What a
+    host loses: code that compared these types with `number` (or `vector<n>`)
+    now sees the precise union.
+- **A power that may be `0^−k` or `0^0` says so in its type.** `0^−1` and `0^−∞`
+  evaluate to the complex infinity `~oo`, and `0^0` to NaN, but the finite tiers
+  claimed a finite value: `x^k` with `x: real`, `k: integer` was `real` and is
+  now `infinity | nan | real` (the type `Divide` gives a quotient whose divisor
+  may be zero); `k^j` for integers was `rational`; `x^n` with `n: integer<0..>`
+  was `real` and is now `nan | real`. A base or an exponent that is provably
+  non-zero keeps the old claim (`2^n` is `integer`, `x²` is `real<0..>`).
+
 - **A product or sum of extended reals that may be infinite is typed on the
   extended real line**. A factor typed `real | signed_infinity` is neither
   finite nor provably infinite, and the `Multiply` type handler treated it as
@@ -30,8 +66,13 @@
   for such a product now sees the signed-infinity arm, and the rounding of one
   follows (`Round(4Q)`, `Floor(4Q)`, `Ceil(4Q)` with `Q` inferred
   `real | signed_infinity` are `integer | signed_infinity`, not `integer`).
-  `Power` and the elementary functions are unchanged (`a²` and `sin(a)` still
-  type `number`).
+
+### Issues Resolved
+
+- **`Min` over a descending range** answered its first element:
+  `Min(Range(1, −∞))` was `1` and is `−∞`, and `Min(Range(5, 1))` was `5` and is
+  `1`. **An empty range** has no extremum: `Max(Range(1, 5, −1))` was `2` (not
+  an element) and is `NaN`, as for an empty list.
 
 ## 0.136.2 _2026-09-25_
 

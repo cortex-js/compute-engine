@@ -147,6 +147,7 @@ import {
   typeContainsMissing,
   typeHasNanFreeNumericCell,
   widen,
+  widenElementTypes,
   widenCellsWithMarker,
   widenNumericCellsWithNan,
   widenWithNan,
@@ -392,7 +393,7 @@ function sameComputedEffects(a: ComputedEffects, b: ComputedEffects): boolean {
 function numericStoreType(store: readonly number[]): Type {
   return internType({
     kind: 'list',
-    elements: widen(...numericStoreTiers(store)),
+    elements: widenElementTypes(numericStoreTiers(store)),
     dimensions: [store.length],
   });
 }

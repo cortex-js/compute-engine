@@ -52,6 +52,7 @@ import {
   broadcastOperandType,
   numericTypeHandler as numericTypeHandlerOnTypes,
   elementaryFunctionType as elementaryFunctionTypeOnTypes,
+  extendedElementaryFunctionType,
   boundedInverseTrigType as boundedInverseTrigTypeOnTypes,
   operandSgn as operandSgnOnTypes,
   iv,
@@ -566,7 +567,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
-          elementaryFunctionTypeOnTypes('Arctan', ops),
+          extendedElementaryFunctionType('Arctan', true, ops) ??
+            elementaryFunctionTypeOnTypes('Arctan', ops),
           context.engine._typeResolver
         ),
       // arctan is odd and strictly increasing with arctan(0) = 0, so it
@@ -1754,7 +1756,8 @@ function trigFunction(
     ...common,
     type: (ops, context) =>
       BoxedType.forResult(
-        elementaryFunctionTypeOnTypes(operator, ops),
+        extendedElementaryFunctionType(operator, carrier !== 'complex', ops) ??
+          elementaryFunctionTypeOnTypes(operator, ops),
         context.engine._typeResolver
       ),
   };

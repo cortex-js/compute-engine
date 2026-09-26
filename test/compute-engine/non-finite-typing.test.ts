@@ -993,3 +993,106 @@ describe('POSSIBLY INFINITE EXTENDED-REAL OPERANDS', () => {
     expect(ce.box(json as never).type.toString()).toBe(expected);
   });
 });
+
+/**
+ * Powers, elementary functions, extrema, reductions and literal lists over
+ * values on the extended real line are typed there too (user decision
+ * 2026-09-25). Before, `y²` and `e^y` claimed finite types (`real<0..>`,
+ * `real<0<..>`) the values contradict at `y = ∞`, and the others were
+ * `number`.
+ */
+describe('EXTENDED-REAL POWERS, FUNCTIONS AND REDUCTIONS', () => {
+  const ce = new ComputeEngine();
+  ce.declare('y', 'real | signed_infinity');
+  ce.declare('a', 'real | signed_infinity | nan');
+  ce.declare('n', 'nan | real');
+  ce.declare('r', 'real');
+  ce.declare('C', 'list<real | signed_infinity | nan>');
+  ce.declare('L', 'list<real>');
+  ce.declare('K', 'list<integer>');
+  test.each([
+    [['Power', 'y', 2], 'real<0..> | signed_infinity'],
+    [['Power', 'y', 3], 'real | signed_infinity'],
+    [['Power', 'a', 2], 'nan | real<0..> | signed_infinity'],
+    [['Power', 'n', 2], 'nan | real<0..>'],
+    [['Exp', 'y'], 'real<0..> | signed_infinity'],
+    [['Power', 2, 'y'], 'real<0..> | signed_infinity'],
+    // A possibly negative base with a non-integer exponent may be complex.
+    [['Power', 'y', 'r'], 'number'],
+    [['Tanh', 'y'], 'real'],
+    [['Sinh', 'a'], 'nan | real | signed_infinity'],
+    // `Sin(±∞)` has no value (an error in the interpreter, NaN compiled).
+    [['Sin', 'y'], 'nan | real'],
+    [['Arctan', 'a'], 'nan | real'],
+    [['Max', 'y', 'r'], 'real | signed_infinity'],
+    [['Max', 'C'], 'nan | real | signed_infinity'],
+    [['Max', 'K'], 'integer | nan'],
+    [['Sum', 'C'], 'nan | real | signed_infinity'],
+    [['Sum', 'L'], 'real'],
+    [['Product', 'K'], 'integer'],
+    [['Mean', 'L'], 'nan | real'],
+  ])('%j types %s', (json, expected) => {
+    expect(ce.box(json as never).type.toString()).toBe(expected);
+  });
+
+  test.each([
+    ['[1, \\infty]', 'list<integer | signed_infinity^2>'],
+    ['[1.5, \\operatorname{NaN}]', 'list<nan | real^2>'],
+    ['[1, 2]', 'vector<integer^2>'],
+  ])('%s types %s', (latex, expected) => {
+    expect(ce.parse(latex).type.toString()).toBe(expected);
+  });
+});
+
+/**
+ * Cases found by the review of the extended-real narrowing (2026-09-26).
+ */
+describe('EXTENDED-REAL NARROWING: POLES, INFINITE RANGES, MATRICES', () => {
+  const ce = new ComputeEngine();
+  ce.declare('y', 'real | signed_infinity');
+  ce.declare('h', 'real');
+  ce.assume(ce.parse('h >= 0'));
+  ce.declare('x', 'real');
+  ce.declare('k', 'integer');
+  ce.declare('n', 'integer');
+  ce.assume(ce.parse('n >= 0'));
+  ce.declare('M', 'list<real^(2x2)>');
+  test.each([
+    // `0^−1` and `0^−∞` are the complex infinity `~oo`.
+    [['Power', 'h', 'y'], 'infinity | nan | real'],
+    [['Power', 'x', 'k'], 'infinity | nan | real'],
+    [['Power', 'k', 'k'], 'infinity | nan | real'],
+    // A non-negative exponent has no pole.
+    [['Power', 'x', 2], 'real<0..>'],
+    // `0^0` is NaN: a base and an exponent that may both be 0.
+    [['Power', 'x', 'n'], 'nan | real'],
+    [['Power', 2, 'n'], 'integer'],
+    // `Range(1, ∞)` is infinite: its maximum and sum are not finite.
+    [['Max', ['Range', 1, 'PositiveInfinity']], 'number'],
+    [['Sum', ['Range', 1, 'PositiveInfinity']], 'number'],
+    // A matrix sums column by column, to a list.
+    [['Sum', 'M'], 'number'],
+    [['Max', 'M'], 'nan | real'],
+  ])('%j types %s', (json, expected) => {
+    expect(ce.box(json as never).type.toString()).toBe(expected);
+  });
+
+  test.each([
+    // A descending range: the minimum is the last element.
+    [['Min', ['Range', 1, 'NegativeInfinity']], '-oo'],
+    [['Min', ['Range', 5, 1]], '1'],
+    [['Max', ['Range', 5, 1]], '5'],
+    // An empty range has no extremum.
+    [['Min', ['Range', 1, 5, -1]], 'NaN'],
+    [['Max', ['Range', 1, 5, -1]], 'NaN'],
+  ])('%j evaluates to %s', (json, expected) => {
+    expect(ce.box(json as never).evaluate().toString()).toBe(expected);
+  });
+
+  test('0^−1 is the complex infinity', () => {
+    const c = new ComputeEngine();
+    c.declare('h', 'real');
+    c.assign('h', 0);
+    expect(c.box(['Power', 'h', -1]).evaluate().toString()).toBe('~oo');
+  });
+});
