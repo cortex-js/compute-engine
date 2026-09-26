@@ -3551,52 +3551,91 @@ export function isPointListArgumentType(arg: Type, param: Type): boolean {
 }
 
 /**
- * True when `x` is a conditional value (`When`, `Which`), or a `List`,
+ * True when `x` is a conditional value (`When`, `Which`, `If`), or a `List`,
  * `Tuple` or `Set` that holds one at any depth.
  *
  * The search operators (`Contains`, `IndexOf`, `Count`, `Element`,
  * `NotElement`) use it on the value they search for. If that value holds a
  * conditional value whose condition is not decided, the search stays
  * unevaluated, and gives the correct answer once the condition is decided
- * (user decision 2026-09-26).
+ * (user decision 2026-09-26). An `If` stays in an evaluated value only when
+ * its condition is not decided, as a `When` and a `Which` do. Before `If` was
+ * included, `IndexOf([1, 2], If(0 < t, 1, 3))` with `t` not known compared
+ * the `If` node with the elements and gave `0`, and stayed `0` when `t`
+ * became positive.
  */
 export function holdsConditionalValue(x: Expression): boolean {
   if (!isFunction(x)) return false;
   const h = x.operator;
-  if (h === 'When' || h === 'Which') return true;
+  if (h === 'When' || h === 'Which' || h === 'If') return true;
   if (h !== 'List' && h !== 'Tuple' && h !== 'Set') return false;
   return x.ops.some((op) => holdsConditionalValue(op));
 }
 
 /**
- * True when the evaluated operand `value` is `NaN` only because it is a
- * restricted number whose condition is false: `written`, the operand before
- * evaluation, is a restriction `When(v, c)` whose condition evaluates to
- * `False`, or a piecewise value `Which(c1, v1, c2, v2, …)` whose conditions
- * all evaluate to `False`.
+ * True when `value`, the evaluated value that `Contains`, `IndexOf`, `Count`,
+ * `Element` or `NotElement` searches for, is absent: the `Missing` or
+ * `Undefined` symbol, or a `NaN` number. A search never finds an absent value,
+ * whatever the collection holds (user decision 2026-09-26).
  *
- * A restricted number masks to `NaN`, not to `Missing` (`2{c}` is `NaN` when
- * `c` is false). The evaluated value then cannot be told apart from a `NaN`
- * that is present. The search operators use this test to read such a value
- * as absent, which a search does not find (user decision 2026-09-26), while
- * a `NaN` that is present is still found (`IndexOf([1, NaN], NaN)` is `2`).
+ * In a numeric domain, `NaN` is the absence marker: `Missing` becomes `NaN`
+ * when a numeric operation absorbs it, and a restricted number whose
+ * condition is false is `NaN` (`2{c}` is `NaN` when `c` is false). Also, an
+ * IEEE `NaN` is not equal to any value, itself included. So a `NaN` value is
+ * not found either: `IndexOf([1, NaN], NaN)` is `0`. The test reads only the
+ * value, not how the operand was written, so the answer is the same for a
+ * value that comes from a restriction, a piecewise value, an element read or
+ * an arithmetic operation, and on every evaluation route.
  */
-export function isMaskedAbsentNumber(
-  value: Expression,
-  written: Expression | undefined
+export function isAbsentSearchedValue(value: Expression): boolean {
+  if (isAbsentSymbol(value)) return true;
+  return isNumber(value) && value.isNaN === true;
+}
+
+/**
+ * True when a "not a member" answer about `value` and the collection `xs` is
+ * not settled yet, because an unknown could still make them match: `x ∈
+ * [1, 2]` is true when `x` becomes 1. A structural match is always settled,
+ * and an absent element (`Missing`, `Undefined`) never matches.
+ *
+ * - A literal `List`, `Set` or `Tuple`: an element that is not the same
+ *   expression as `value`, where either side has unknowns, keeps the answer
+ *   open.
+ * - A set named by a symbol (`EmptySet`, `Integers`), a `Range` and an
+ *   `Interval` answer membership mathematically, so their "not a member" is
+ *   settled.
+ * - Any other collection (a lazy view such as `Take`, `Reverse`, `Filter`)
+ *   compares structurally, so the answer stays open while `value` or the
+ *   collection expression has unknowns (`1 ∈ Reverse([x, 2])`). Its elements
+ *   are not read: walking a lazy collection again would run its callbacks
+ *   again.
+ *
+ * This is for mathematical membership (`Element`). The search operators
+ * `Contains`, `IndexOf` and `Count` compare structurally, like `===`, so an
+ * unknown there is simply a different expression.
+ */
+export function searchMayStillMatch(
+  xs: Expression,
+  value: Expression
 ): boolean {
-  if (!isNumber(value) || value.isNaN !== true) return false;
-  if (!isFunction(written)) return false;
-  if (written.operator === 'When')
-    return (
-      written.nops === 2 && isSymbol(written.ops[1].evaluate(), 'False')
+  if (
+    isFunction(xs, 'List') ||
+    isFunction(xs, 'Set') ||
+    isFunction(xs, 'Tuple')
+  )
+    return xs.ops.some(
+      (x) =>
+        !isAbsentElement(x) &&
+        !x.isSame(value) &&
+        (x.unknowns.length > 0 || value.unknowns.length > 0)
     );
-  if (written.operator === 'Which')
-    return (
-      written.nops % 2 === 0 &&
-      written.ops.every(
-        (c, i) => i % 2 === 1 || isSymbol(c.evaluate(), 'False')
-      )
-    );
-  return false;
+  if (isSymbol(xs) || isFunction(xs, 'Range') || isFunction(xs, 'Interval'))
+    return false;
+  // The unknowns of the collection expression are read from its structure;
+  // the view is not walked.
+  return value.unknowns.length > 0 || xs.unknowns.length > 0;
+}
+
+function isAbsentElement(x: Expression): boolean {
+  return isSymbol(x, 'Missing') || isSymbol(x, 'Undefined');
 }

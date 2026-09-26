@@ -9,6 +9,7 @@ import { numberToString } from '../numerics/strings.js';
 import { bigint } from '../numerics/bigint.js';
 import { ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
+import { isComplexDust } from './roundoff.js';
 
 export class BigNumericValue extends NumericValue {
   declare __brand: 'BigNumericValue';
@@ -526,10 +527,14 @@ export class BigNumericValue extends NumericValue {
         const realExp = lnMod.mul(re).sub(arg.mul(im));
         const imagExp = arg.mul(re).add(lnMod.mul(im));
         const mag = realExp.exp();
+        // `mul` is exact (2P digits); round back to working precision.
+        const reValue = mag._mulToPrecision(imagExp.cos(), BigDecimal.precision);
+        const imValue = mag.mul(imagExp.sin());
+        // A part is dust only when it is small compared with the modulus of
+        // the result, `mag` (see `isComplexDust()`).
         return this.clone({
-          // `mul` is exact (2P digits); round back to working precision.
-          re: mag._mulToPrecision(imagExp.cos(), BigDecimal.precision),
-          im: chop(mag.mul(imagExp.sin()).toNumber()),
+          re: isComplexDust(reValue, mag) ? BigDecimal.ZERO : reValue,
+          im: isComplexDust(imValue, mag) ? 0 : imValue.toNumber(),
         });
       }
     }
@@ -572,9 +577,17 @@ export class BigNumericValue extends NumericValue {
     const argument = BigDecimal.atan2(b, a);
     const newModulus = modulus.pow(exponent);
     const newArgument = argument.mul(exponent);
+    const reValue = newModulus._mulToPrecision(
+      newArgument.cos(),
+      BigDecimal.precision
+    );
+    const imValue = newModulus.mul(newArgument.sin());
+    // A part is dust only when it is small compared with the modulus of the
+    // result, `newModulus`: `(10^{-6}i)^3` is `-10^{-18}i`, not 0 (see
+    // `isComplexDust()`).
     return this.clone({
-      re: newModulus._mulToPrecision(newArgument.cos(), BigDecimal.precision),
-      im: chop(newModulus.mul(newArgument.sin()).toNumber()),
+      re: isComplexDust(reValue, newModulus) ? BigDecimal.ZERO : reValue,
+      im: isComplexDust(imValue, newModulus) ? 0 : imValue.toNumber(),
     });
   }
 
@@ -627,10 +640,17 @@ export class BigNumericValue extends NumericValue {
     const newModulus = modulus.ln().div(exp).exp();
     const newArgument = argument.div(exp);
 
-    // Return the principal root
+    // Return the principal root. A part is dust only when it is small
+    // compared with the modulus of the result, `newModulus` (see
+    // `isComplexDust()`).
+    const reValue = newModulus._mulToPrecision(
+      newArgument.cos(),
+      BigDecimal.precision
+    );
+    const imValue = newModulus.mul(newArgument.sin());
     return this.clone({
-      re: newModulus._mulToPrecision(newArgument.cos(), BigDecimal.precision),
-      im: chop(newModulus.mul(newArgument.sin()).toNumber()),
+      re: isComplexDust(reValue, newModulus) ? BigDecimal.ZERO : reValue,
+      im: isComplexDust(imValue, newModulus) ? 0 : imValue.toNumber(),
     });
   }
 
@@ -638,24 +658,33 @@ export class BigNumericValue extends NumericValue {
     if (this.isZero || this.isOne) return this;
 
     if (this.im !== 0) {
-      // Complex square root:
-      // sqrt(a + bi) = sqrt((a + sqrt(a^2 + b^2)) / 2) + i * sign(b) * sqrt((sqrt(a^2 + b^2) - a) / 2)
+      // Complex square root, with m = |a + bi|:
+      //   sqrt(a + bi) = sqrt((m + a)/2) + i·sign(b)·sqrt((m − a)/2)
+      // When |b| is small compared with |a|, one of `m + a` and `m − a` is
+      // the difference of two almost equal values, and it loses most of its
+      // digits (for `1 + 10^{-10}i`, `m − a` is 5·10^{-21}, below the
+      // precision of `m`). Thus compute only the part with no cancellation
+      // from its formula, and get the other part from the identity
+      // re·im = b/2. The result has no roundoff dust, and it is not chopped.
       const a = this.decimal;
       const b = this.im;
       // Exact decimal b²: a double `b * b` rounds and contaminates the
       // full-precision modulus. (NU-P1-3)
+      // An infinite imaginary part: both parts of the root are infinite.
+      if (Math.abs(b) === Infinity) return this.clone({ re: Infinity, im: b });
       const modulus = a.mul(a).add(new BigDecimal(b).mul(b)).sqrt();
-
-      // Both a + |z| and |z| − a are mathematically ≥ 0, but either can
-      // round epsilon-negative when |b| ≪ |a| — clamp to avoid a NaN from
-      // sqrt(−ε)
-      const reSq = a.add(modulus).div(2);
-      const imSq = modulus.sub(a).div(2);
-      const realPart = reSq.isNegative() ? BigDecimal.ZERO : reSq.sqrt();
-      const imaginaryPart = chop(
-        Math.sign(b) * (imSq.isNegative() ? 0 : imSq.sqrt().toNumber())
-      );
-      return this.clone({ re: realPart, im: imaginaryPart });
+      if (!a.isNegative()) {
+        const realPart = a.add(modulus).div(2).sqrt();
+        return this.clone({
+          re: realPart,
+          im: new BigDecimal(b).div(realPart.mul(2)).toNumber(),
+        });
+      }
+      const imMagnitude = modulus.sub(a).div(2).sqrt();
+      return this.clone({
+        re: new BigDecimal(Math.abs(b)).div(imMagnitude.mul(2)),
+        im: Math.sign(b) * imMagnitude.toNumber(),
+      });
     }
 
     if (this.decimal.isPositive()) return this.clone(this.decimal.sqrt());
@@ -745,14 +774,20 @@ export class BigNumericValue extends NumericValue {
       // contaminate the full-precision magnitude past digit ~16. An exact
       // zero (b near an odd multiple of π/2) still snaps via chop so that
       // e^{iπ/2} stays exactly i. (NU-P1-3)
+      //
+      // The imaginary part is dust only when it is small compared with the
+      // modulus of the result, e^a: that is, when |sin(b)| is dust. A test of
+      // the product e^a·sin(b) against a fixed value is not correct: it
+      // changes the imaginary part of e^{-40 + i} (3.6e-18) to 0.
       const e = this.decimal.exp();
       const cosIm =
         chop(Math.cos(this.im)) === 0
           ? BigDecimal.ZERO
           : new BigDecimal(this.im).cos();
+      const sinIm = chop(Math.sin(this.im));
       return this.clone({
         re: e._mulToPrecision(cosIm, BigDecimal.precision),
-        im: chop(e.mul(Math.sin(this.im)).toNumber()),
+        im: sinIm === 0 ? 0 : e.mul(sinIm).toNumber(),
       });
     }
     return this.clone(this.decimal.exp());

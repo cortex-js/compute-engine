@@ -411,9 +411,11 @@ const CASES: Case[] = [
     inputs: [{}],
   },
   // A search for an absent value finds nothing (user decision 2026-09-26).
-  // `Missing` and a restricted number whose condition is false both compile
-  // to `nan`, which the element test finds in a list that holds `nan`, so the
-  // absence is decided from the structure of the searched value.
+  // `Missing` in a numeric position and a restricted number whose condition
+  // is false both compile to `nan`, which is the absence marker of a number.
+  // The compiled search reads the run-time value of the searched operand: a
+  // `None` or a `nan` is not found, whatever the list holds, so the structure
+  // of the searched operand does not matter.
   {
     name: 'index_of_absent',
     expr: ['IndexOf', ['List', 1, 'Missing'], 'Missing'],
@@ -450,6 +452,44 @@ const CASES: Case[] = [
     params: ['x'],
     inputs: [{ x: -1 }, { x: 2 }],
   },
+  {
+    // The absent branch of an `If` compiles to `nan`. Before, the search
+    // tested only for `None`, and found the `nan` of the list (3 for 0).
+    name: 'index_of_if_absent_branch',
+    expr: [
+      'IndexOf',
+      ['List', 1, 'NaN', 2],
+      ['If', ['Less', 0, 'x'], 2, 'Missing'],
+    ],
+    params: ['x'],
+    inputs: [{ x: -1 }, { x: 2 }],
+  },
+  {
+    name: 'index_of_nan',
+    expr: ['IndexOf', ['List', 1, 'NaN'], 'NaN'],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'contains_restricted_sum',
+    expr: [
+      'Contains',
+      ['List', 6, 'NaN'],
+      ['Add', ['When', 5, ['Less', 0, 'x']], 1],
+    ],
+    params: ['x'],
+    inputs: [{ x: -1 }, { x: 2 }],
+  },
+  {
+    name: 'index_of_nested_selection',
+    expr: [
+      'IndexOf',
+      ['List', 'NaN', 2],
+      ['Which', 'True', ['When', 2, ['Less', 0, 'x']]],
+    ],
+    params: ['x'],
+    inputs: [{ x: -1 }, { x: 2 }],
+  },
 ];
 
 const describeMaybe = venvHasNumpy() ? describe : describe.skip;
@@ -458,7 +498,8 @@ describeMaybe('PYTHON EXECUTION PARITY (venv)', () => {
   const python = new PythonTarget();
 
   it('emitted Python is valid and matches the interpreter .N()', () => {
-    let src = 'import numpy as np\nimport cmath\nimport json\n\n';
+    // `math` is imported for the `math.nan` of an absent number (`Missing`).
+    let src = 'import numpy as np\nimport cmath\nimport json\nimport math\n\n';
     const expected: Array<boolean | number> = [];
 
     for (const c of CASES) {
@@ -1258,7 +1299,7 @@ describeMaybe(
  * The absence marker of an element read, run in the venv. An out-of-range
  * position, and a restricted collection whose condition is false (`None` at
  * run time), answer the marker of the element domain, as the interpreter
- * does (user decision 2026-09-25, `docs/ERROR-MODEL.md` §2): NaN for a
+ * does (user decision 2026-09-26, `docs/ERROR-MODEL.md` §2): NaN for a
  * number, `Missing` (`None`) for a row, a point or a string. Each case is
  * run with the condition false (`t = -1`) and true (`t = 1`), and compared
  * with the interpreter's value.

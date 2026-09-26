@@ -1391,18 +1391,32 @@ document's history):
   the conformance suite and in `conditional-values.test.ts`,
   `when-list-broadcast.test.ts`, `a2-restrictions.test.ts`.
 - **RULED 2026-09-26: searching for an absent value means not found.** When
-  the value that `Contains`, `IndexOf`, `Count` or `Element` searches for is
-  absent, the answer is the "not found" answer of the operator: `False` for
-  `Contains` and `Element`, `0` for `IndexOf` and `Count`, and `True` for
-  `NotElement`. This is true for the `Missing` and `Undefined` symbols, and
-  for a restricted value whose condition is false. It is true also when the
-  collection holds an absent element: `IndexOf([1, Missing], Missing)` is
-  `0`. A `NaN` that is present is still found: `IndexOf([1, NaN], NaN)` is
-  `2`. Because a restricted number whose condition is false is `NaN` (the
-  rule above), the operator examines the operand as written to tell that
-  `NaN` from a present one: `IndexOf([1, NaN], 2{c})` is `0` when `c` is
-  false. A searched value that holds a restriction or a piecewise value whose
-  condition is not decided is not moved out of the application: the
+  the value that `Contains`, `IndexOf`, `Count`, `Element` or `NotElement`
+  searches for is absent, the answer is the "not found" answer of the
+  operator: `False` for `Contains` and `Element`, `0` for `IndexOf` and
+  `Count`, and `True` for `NotElement`. The searched value is absent when its
+  VALUE is `Missing`, `Undefined` or `NaN`: in a numeric domain `NaN` is the
+  absence marker (`Missing` absorbed into a number, §2), and an IEEE `NaN`
+  is equal to nothing, itself included. So a search never finds an absent
+  value, whatever the collection holds: `IndexOf([1, Missing], Missing)`,
+  `IndexOf([1, NaN], NaN)` and `Count([NaN, NaN], NaN)` are `0`,
+  `Contains([NaN], NaN)` and `Element(Missing, [1, Missing])` are `False`.
+  An absent or `NaN` element of the collection does not change the answer,
+  except that it cannot match. The test reads only the evaluated value
+  (`isAbsentSearchedValue`, `collection-utils.ts`), never the operand as
+  written, so a restricted number whose condition is false (`2{c}` is
+  `NaN`), a piecewise value with no selected clause, an `If` with an absent
+  branch, an element read of a restricted list (`First([5, 6]{c})`) and an
+  arithmetic result (`5{c} + 1`) all give the same answer, on every route:
+  held, fresh, `.N()`, compiled JavaScript and compiled Python. Amended the
+  same day: the first version of this rule found a `NaN` that was written as
+  `NaN` (`IndexOf([1, NaN], NaN)` was `2`) and decided the absence of a
+  `NaN` from the operand as written, which gave different answers for a
+  nested selection (interpreter against compiled code), for a value derived
+  from a restriction (fresh against held), evaluated a random condition a
+  second time, and missed the `nan` of an absent `If` branch in Python. A
+  searched value that holds a restriction, a piecewise value or an `If`
+  whose condition is not decided is not moved out of the application: the
   application stays unevaluated and gives the correct answer once the
   condition is decided either way. `Contains([1, 2], 2{c})` stays
   `Contains([1, 2], 2{c})` while `c` is not known, and then gives `True` or
@@ -1412,18 +1426,19 @@ document's history):
   `Element(2{c}, [1, 2])` was `False` while `c` was not known, and stayed
   `False` after `c` became true. The collection operand is not changed: an
   absent collection makes the answer absent (`Contains(Missing, 2)` is
-  `Missing`, `IndexOf(Missing, 2)` and `Count(Missing, 2)` are `NaN`), and a
-  restricted collection is threaded. The searched position does not strip
-  `missing` (`missingStrip: [0]`), and the absence gate and the type
-  absorption now read `missingStrip` (`boxed-expression/boxed-function.ts`,
+  `Missing`, `IndexOf(Missing, 2)` and `Count(Missing, 2)` are `NaN`;
+  `Element(2, Missing)` stays unevaluated), and a restricted collection is
+  threaded. The searched position does not strip `missing`
+  (`missingStrip: [0]`), and the absence gate and the type absorption now
+  read `missingStrip` (`boxed-expression/boxed-function.ts`,
   `derive-application-type.ts`), so the handler receives the absent value.
   An absent element of the collection does not make the answer absent
   either, and does not widen its type: `IndexOf([1, Missing], 2)` is typed
   `integer` (`ABSENT_CELLS_PASS_THROUGH`, `broadcast-lift-type.ts`). The
-  compiled JavaScript and Python code decide the absence from the structure
-  of the searched value (`compileSearchedValue`, `pySearchedValue`), because
-  their absent values (`undefined`, `NaN`, `None`) are found by the element
-  test in a list that holds such a value.
+  compiled code tests the run-time value of the searched operand before the
+  element test (`compileSearchedValue`, `pySearchedValue`): in JavaScript
+  `v == null || v !== v`, in Python `v is None` or a float `v != v`, gives
+  the "not found" answer.
 - **RULED 2026-09-26: Insert, ReplaceAt and Append on an absent collection
   answer Missing.** `Insert(Missing, 1, 2)`, `ReplaceAt(Missing, 1, 2)` and
   `Append(Missing, 1)` answer `Missing` on every route, typed with a

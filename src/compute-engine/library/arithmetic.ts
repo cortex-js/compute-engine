@@ -27,6 +27,7 @@ import { hasAsyncOnlyApplication } from '../boxed-expression/async-only-descenda
 import {
   bignumPreferred,
   numericFromExactValue,
+  numericFromExactValueAsync,
 } from '../boxed-expression/utils.js';
 import {
   DEADLINE_STRIDE,
@@ -7420,6 +7421,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // below and report a wrong value, so the decline is carried out of
         // the closure by this flag instead.
         let captureUnsafe = false;
+        const nonFinite = new NonFiniteTerm();
         // No fold of a whole list exists for a product, so the options that
         // `Sum` passes (the fold, and with it the numeric-route evaluation of
         // a body with no indexing set) are not passed here: the body is
@@ -7434,6 +7436,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 captureUnsafe = true;
                 return null;
               }
+              if (numeric)
+                noteNonFiniteTerm(nonFinite, options.expression, xe, () =>
+                  evaluateBigOpTerm(x, bindings, false)
+                );
               return productAccumulate(acc, xe, numeric);
             },
             ce.One
@@ -7455,9 +7461,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A factor above the largest double is ±∞ at machine precision, and
         // `∞ · 0` is NaN. The float of the exact product is used then.
         if (!numeric) return product;
-        return (
-          numericFromExactValue(ce, options.expression, product) ?? product
-        );
+        return numericOfFold(ce, options.expression, product, nonFinite);
       },
 
       evaluateAsync: async (ops, options) => {
@@ -7513,6 +7517,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Capture-unsafe decline flag — see the Product sync handler.
         let captureUnsafe = false;
+        // The first factor that is not finite: see the sync handler. The
+        // factors of an asynchronous-only application are not recorded. A
+        // recorded factor whose exact value is infinite decides the result
+        // whatever the other factors are, so the exact evaluation is skipped
+        // only when such a factor exists and the result is not NaN.
+        const nonFinite = new NonFiniteTerm();
         const accumulate = (
           acc: Expression,
           xe: Expression | undefined
@@ -7522,6 +7532,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return null;
           }
           return productAccumulate(acc, xe, numeric);
+        };
+        const numericTerm = (
+          x: Expression,
+          bindings: Parameters<typeof evaluateBigOpTerm>[1]
+        ): Expression | undefined => {
+          const xe = evaluateBigOpTerm(x, bindings, numeric);
+          if (numeric)
+            noteNonFiniteTerm(nonFinite, options.expression, xe, () =>
+              evaluateBigOpTerm(x, bindings, false)
+            );
+          return xe;
         };
         const result = await runAsync(
           // The terms are evaluated synchronously, and `runAsync`
@@ -7542,7 +7563,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       options.signal,
                       options.effects
                     ).then((xe) => accumulate(acc, xe))
-                  : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
+                  : accumulate(acc, numericTerm(x, bindings)),
               ce.One
             )
           ),
@@ -7557,7 +7578,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(ce, bounds);
-        return result?.evaluate({ numericApproximation: numeric }) ?? ce.NaN;
+        const product = result?.evaluate({ numericApproximation: numeric });
+        if (product === undefined) return ce.NaN;
+        // The same recovery as the sync handler, with an asynchronous exact
+        // evaluation.
+        if (!numeric) return product;
+        return numericOfFoldAsync(
+          ce,
+          options.expression,
+          product,
+          nonFinite,
+          { signal: options.signal, _effects: options.effects }
+        );
       },
     },
 
@@ -7617,14 +7649,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // the element callback of a lazy `Map`/`Filter` once more than there
           // are elements.
           let walked = 0;
+          const nonFinite = new NonFiniteTerm();
           const result = run(
             reduceCollection(source, new SumTerms(), (acc, x) => {
               walked += 1;
-              return addSumTerm(
-                acc,
-                x.evaluate({ numericApproximation }),
-                numericApproximation
-              );
+              const term = x.evaluate({ numericApproximation });
+              if (numericApproximation)
+                noteNonFiniteTerm(nonFinite, expression, term, () =>
+                  x.evaluate()
+                );
+              return addSumTerm(acc, term, numericApproximation);
             }),
             engine._timeRemaining,
             engine._deadlineFrame
@@ -7633,7 +7667,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (result === undefined) return engine.NaN;
           const sum = finishSum(engine, result, numericApproximation);
           if (!numericApproximation) return sum;
-          return numericFromExactValue(engine, expression, sum) ?? sum;
+          return numericOfFold(engine, expression, sum, nonFinite);
         }
 
         // Big-op form: Sum(body, [i, a, b], …).
@@ -7682,6 +7716,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Capture-unsafe decline flag — see the Product sync handler.
         let captureUnsafe = false;
+        const nonFinite = new NonFiniteTerm();
         const result = run(
           reduceBigOp(
             first,
@@ -7692,6 +7727,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 captureUnsafe = true;
                 return null;
               }
+              if (numeric)
+                noteNonFiniteTerm(nonFinite, expression, term, () =>
+                  evaluateBigOpTerm(x, bindings, false)
+                );
               return addSumTerm(acc, term, numeric);
             },
             new SumTerms(),
@@ -7720,7 +7759,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Evaluate to combine numeric terms (e.g., 3x + 1 + 2 + 3 → 3x + 6).
         const sum = finishSum(engine, result, numeric);
         if (!numeric) return sum;
-        return numericFromExactValue(engine, expression, sum) ?? sum;
+        return numericOfFold(engine, expression, sum, nonFinite);
       },
 
       evaluateAsync: async (
@@ -7742,6 +7781,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (first.isFiniteCollection !== true) return undefined;
           // Decline read off the fold's own walk — see the sync handler.
           let walked = 0;
+          const nonFinite = new NonFiniteTerm();
           const result = await runAsync(
             // The elements are evaluated synchronously, and `runAsync`
             // suspends this handler between time slices: every step must run
@@ -7751,11 +7791,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               effects,
               reduceCollection(first, new SumTerms(), (acc, x) => {
                 walked += 1;
-                return addSumTerm(
-                  acc,
-                  x.evaluate({ numericApproximation }),
-                  numericApproximation
-                );
+                const term = x.evaluate({ numericApproximation });
+                if (numericApproximation)
+                  noteNonFiniteTerm(nonFinite, expression, term, () =>
+                    x.evaluate()
+                  );
+                return addSumTerm(acc, term, numericApproximation);
               })
             ),
             engine._timeRemaining,
@@ -7765,11 +7806,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
           if (result === undefined) return engine.NaN;
           const sum = finishSum(engine, result, numericApproximation);
-          // The same rescue as the synchronous handler. It evaluates the
-          // expression again synchronously, so a collection with an
-          // asynchronous-only application does not get it.
-          if (!numericApproximation || asyncOnly) return sum;
-          return numericFromExactValue(engine, expression, sum) ?? sum;
+          // The same recovery as the synchronous handler, with an
+          // asynchronous exact evaluation.
+          if (!numericApproximation) return sum;
+          return numericOfFoldAsync(engine, expression, sum, nonFinite, {
+            signal,
+            _effects: effects,
+          });
         }
 
         const numeric = numericApproximation;
@@ -7817,6 +7860,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Capture-unsafe decline flag — see the Product sync handler.
         let captureUnsafe = false;
+        // The first term that is not finite: see the `Product` handler.
+        const nonFinite = new NonFiniteTerm();
         const accumulate = (
           acc: SumTerms,
           term: Expression | undefined
@@ -7826,6 +7871,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return null;
           }
           return addSumTerm(acc, term, numeric);
+        };
+        const numericTerm = (
+          x: Expression,
+          bindings: Parameters<typeof evaluateBigOpTerm>[1]
+        ): Expression | undefined => {
+          const term = evaluateBigOpTerm(x, bindings, numeric);
+          if (numeric)
+            noteNonFiniteTerm(nonFinite, expression, term, () =>
+              evaluateBigOpTerm(x, bindings, false)
+            );
+          return term;
         };
         const result = await runAsync(
           // The terms are evaluated synchronously, and `runAsync`
@@ -7846,7 +7902,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       signal,
                       effects
                     ).then((term) => accumulate(acc, term))
-                  : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
+                  : accumulate(acc, numericTerm(x, bindings)),
               new SumTerms(),
               {
                 // The same fold as the synchronous handler, so that both
@@ -7871,7 +7927,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(engine, rest);
         if (result === undefined || result === null) return engine.NaN;
-        return finishSum(engine, result, numeric);
+        const sum = finishSum(engine, result, numeric);
+        // The same recovery as the synchronous handler, with an asynchronous
+        // exact evaluation.
+        if (!numeric) return sum;
+        return numericOfFoldAsync(engine, expression, sum, nonFinite, {
+          signal,
+          _effects: effects,
+        });
       },
     },
 
@@ -8179,6 +8242,91 @@ function sumOf(term: Expression): SumTerms {
   const acc = new SumTerms();
   acc.literal = term;
   return acc;
+}
+
+/**
+ * The first term of a numeric `Sum` or `Product` fold whose numeric value
+ * is not finite, and the reason for it.
+ *
+ * When the numeric value of a fold is NaN or infinite, the fold is
+ * evaluated again exactly (`numericFromExactValue`), because at machine
+ * precision the double of a finite exact term can be ±∞ (`10^{400}`). That
+ * second evaluation is not necessary when a term has an exact value that is
+ * not finite (`ln 0` is exactly -∞): then a numeric value of ±∞ is also the
+ * float of the exact value. Each term has the same sign in the two
+ * evaluations, and with a term that is exactly infinite, a finite sum or
+ * product of the other terms cannot change the result. The terms of opposite
+ * infinities, and the product of an infinity and a zero (also a zero from a
+ * double that is too small), give NaN, and the exact evaluation is done
+ * then. Without this record, `Σ_{k=0}^{20000} ln k` evaluated the 20001
+ * logarithms again exactly, for the same -∞.
+ *
+ * - `'exact'`: the exact value of the first such term is not finite.
+ * - `'overflow'`: the exact value of that term is finite (or is not known),
+ *   and the exact evaluation of the fold is necessary.
+ *
+ * Only the first term that is not finite is evaluated exactly, so a fold
+ * pays one test on each term, and at most one exact term evaluation.
+ */
+class NonFiniteTerm {
+  kind: 'exact' | 'overflow' | undefined = undefined;
+}
+
+/**
+ * Records in `seen` the first term of a numeric fold that is not finite.
+ * `exact` gives the exact value of that term. It is called only when
+ * `expression` (the whole fold) is pure: the exact value of an impure term
+ * (a random number) is a new value, and the exact evaluation of an impure
+ * fold is not done.
+ */
+function noteNonFiniteTerm(
+  seen: NonFiniteTerm,
+  expression: Expression | undefined,
+  term: Expression | null | undefined,
+  exact: () => Expression | undefined
+): void {
+  if (seen.kind !== undefined || !term || !isNumber(term)) return;
+  if (term.isFinite !== false) return;
+  if (expression?.isPure !== true) {
+    seen.kind = 'overflow';
+    return;
+  }
+  const v = exact();
+  seen.kind =
+    v !== undefined && isNumber(v) && v.isFinite === false
+      ? 'exact'
+      : 'overflow';
+}
+
+/**
+ * The numeric value of a `Sum` or `Product` fold: `value`, or the float of
+ * the exact value of `expression` when `value` is NaN or infinite and a term
+ * can have overflowed (see `NonFiniteTerm`). A finite `value` costs one test.
+ */
+function numericOfFold(
+  ce: ComputeEngine,
+  expression: Expression | undefined,
+  value: Expression,
+  seen: NonFiniteTerm
+): Expression {
+  if (seen.kind === 'exact' && value.isNaN !== true) return value;
+  return numericFromExactValue(ce, expression, value) ?? value;
+}
+
+/** The asynchronous form of `numericOfFold()`: see
+ * `numericFromExactValueAsync()`. */
+async function numericOfFoldAsync(
+  ce: ComputeEngine,
+  expression: Expression | undefined,
+  value: Expression,
+  seen: NonFiniteTerm,
+  options: Parameters<Expression['evaluateAsync']>[0]
+): Promise<Expression> {
+  if (seen.kind === 'exact' && value.isNaN !== true) return value;
+  return (
+    (await numericFromExactValueAsync(ce, expression, value, options)) ??
+    value
+  );
 }
 
 /** Generator-based reducer over a finite collection. Yields between

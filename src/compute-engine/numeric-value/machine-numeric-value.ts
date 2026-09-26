@@ -9,8 +9,8 @@ import { ExactNumericValue, withDoubleDigits } from './exact-numeric-value.js';
 import {
   isOutsideNormalDoubleRange,
   machineNthRoot,
-  ROUNDOFF_TOLERANCE,
 } from '../numerics/numeric.js';
+import { chopComplexDust } from './roundoff.js';
 
 export class MachineNumericValue extends NumericValue {
   declare __brand: 'MachineNumericValue';
@@ -472,10 +472,11 @@ export class MachineNumericValue extends NumericValue {
         const realExp = re * lnMod - im * arg;
         const imagExp = re * arg + im * lnMod;
         const mag = Math.exp(realExp);
-        return this.clone({
-          re: chop(mag * Math.cos(imagExp)),
-          im: chop(mag * Math.sin(imagExp)),
-        });
+        // A part is dust only when it is small compared with the modulus of
+        // the result (see `chopComplexDust()`).
+        return this.clone(
+          chopComplexDust(mag * Math.cos(imagExp), mag * Math.sin(imagExp))
+        );
       }
     }
 
@@ -518,10 +519,14 @@ export class MachineNumericValue extends NumericValue {
     // De Moivre: zⁿ = |z|ⁿ · (cos(n·arg) + i·sin(n·arg)). The new argument is
     // n·arg, not argⁿ.
     const newArgument = argument * exponent;
-    return this.clone({
-      re: newModulus * Math.cos(newArgument),
-      im: newModulus * Math.sin(newArgument),
-    });
+    // A part is dust only when it is small compared with the modulus of the
+    // result (see `chopComplexDust()`): `i^2` is `-1`, not `-1 + 1.2e-16i`.
+    return this.clone(
+      chopComplexDust(
+        newModulus * Math.cos(newArgument),
+        newModulus * Math.sin(newArgument)
+      )
+    );
   }
 
   root(exponent: number): NumericValue {
@@ -538,7 +543,10 @@ export class MachineNumericValue extends NumericValue {
 
     if (exponent === 1) return this;
     if (exponent === 2) return this.sqrt();
-    if (exponent === 3) return this.clone(Math.cbrt(this.decimal));
+    // `Math.cbrt` reads only the real part: a complex radicand takes the
+    // complex root below.
+    if (exponent === 3 && this.im === 0)
+      return this.clone(Math.cbrt(this.decimal));
 
     if (this.im === 0) {
       if (this.decimal < 0) {
@@ -557,10 +565,14 @@ export class MachineNumericValue extends NumericValue {
     const newModulus = Math.pow(modulus, 1 / exponent);
     const newArgument = argument / exponent;
 
-    return this.clone({
-      re: newModulus * Math.cos(newArgument),
-      im: newModulus * Math.sin(newArgument),
-    });
+    // A part is dust only when it is small compared with the modulus of the
+    // result (see `chopComplexDust()`).
+    return this.clone(
+      chopComplexDust(
+        newModulus * Math.cos(newArgument),
+        newModulus * Math.sin(newArgument)
+      )
+    );
   }
 
   sqrt(): NumericValue {
@@ -568,15 +580,47 @@ export class MachineNumericValue extends NumericValue {
     if (this.isZero || this.isOne) return this;
 
     if (this.im !== 0) {
-      // Complex square root:
-      // sqrt(a + bi) = sqrt((a + sqrt(a^2 + b^2)) / 2) + i * sign(b) * sqrt((sqrt(a^2 + b^2) - a) / 2)
-      const a = this.decimal;
-      const b = this.im;
-      const modulus = Math.sqrt(a * a + b * b);
-
-      const realPart = Math.sqrt((a + modulus) / 2);
-      const imaginaryPart = Math.sign(b) * Math.sqrt((modulus - a) / 2);
-      return this.clone({ re: realPart, im: imaginaryPart });
+      // Complex square root, with m = |a + bi|:
+      //   sqrt(a + bi) = sqrt((m + a)/2) + i·sign(b)·sqrt((m − a)/2)
+      // When |b| is small compared with |a|, one of `m + a` and `m − a` is
+      // the difference of two almost equal values, and it loses most of its
+      // digits (for `1 + 10^{-10}i`, m is exactly 1 as a double and `m − a`
+      // is 0). Thus compute only the part with no cancellation from its
+      // formula, and get the other part from the identity re·im = b/2.
+      let a = this.decimal;
+      let b = this.im;
+      // An infinite imaginary part: both parts of the root are infinite.
+      if (Math.abs(b) === Infinity) return this.clone({ re: Infinity, im: b });
+      // The sum `m + |a|` can overflow to +∞ (a = b = 10^{308}), and the
+      // sum of two subnormal doubles, divided by 2, can underflow to 0
+      // (a = 0, b = 5·10^{-324}). Thus scale a very large or a very small
+      // operand by a power of 4 first: sqrt(4^k·z) = 2^k·sqrt(z). The
+      // multiplications by powers of 2 do not change the digits.
+      const largest = Math.max(Math.abs(a), Math.abs(b));
+      let scale = 1;
+      if (largest > 2 ** 1020) {
+        a /= 4;
+        b /= 4;
+        scale = 2;
+      } else if (largest < 2 ** -1000) {
+        a *= 2 ** 104;
+        b *= 2 ** 104;
+        scale = 2 ** -52;
+      }
+      // `Math.hypot` does not overflow or underflow on a·a or b·b.
+      const modulus = Math.hypot(a, b);
+      if (a >= 0) {
+        const realPart = Math.sqrt((a + modulus) / 2);
+        return this.clone({
+          re: scale * realPart,
+          im: scale * (b / (2 * realPart)),
+        });
+      }
+      const imMagnitude = Math.sqrt((modulus - a) / 2);
+      return this.clone({
+        re: scale * (Math.abs(b) / (2 * imMagnitude)),
+        im: scale * Math.sign(b) * imMagnitude,
+      });
     }
 
     if (this.decimal > 0) return this.clone(Math.sqrt(this.decimal));
@@ -659,11 +703,12 @@ export class MachineNumericValue extends NumericValue {
     if (this.im !== 0) {
       // Complex exponential:
       // exp(a + bi) = exp(a) * (cos(b) + i * sin(b))
+      // A part is dust only when it is small compared with the modulus of
+      // the result, e^a (see `chopComplexDust()`): e^{iπ} is -1.
       const e = Math.exp(this.decimal);
-      return this.clone({
-        re: e * Math.cos(this.im),
-        im: e * Math.sin(this.im),
-      });
+      return this.clone(
+        chopComplexDust(e * Math.cos(this.im), e * Math.sin(this.im))
+      );
     }
     return this.clone(Math.exp(this.decimal));
   }
@@ -735,12 +780,6 @@ export class MachineNumericValue extends NumericValue {
     if (other instanceof ExactNumericValue) return other.lte(this.decimal);
     return this.decimal >= other.re;
   }
-}
-
-// Kernel roundoff dust (see ARCHITECTURE.md § "Chopping and the `im === 0`
-// convention"): scale of machine roundoff, not `ce.tolerance`.
-function chop(n: number): number {
-  return Math.abs(n) <= ROUNDOFF_TOLERANCE ? 0 : n;
 }
 
 /**

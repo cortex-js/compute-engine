@@ -1849,7 +1849,7 @@ describe('PYTHON TARGET — operands that can be absent and compound operands', 
 // An element read that selects no element (an out-of-range position) or that
 // reads a collection absent as a whole (a restriction whose condition is
 // false, `None` at run time) answers the absence marker of the element
-// domain, as the interpreter does (user decision 2026-09-25,
+// domain, as the interpreter does (user decision 2026-09-26,
 // `docs/ERROR-MODEL.md` §2): `float('nan')` for a number, `None` for a row,
 // a point or a string. Before, the compiled `At` and `First`/`Second`/
 // `Third`/`Last` answered `float('nan')` for every element domain, and
@@ -1883,5 +1883,19 @@ describe('PYTHON TARGET — the absence marker of an element read', () => {
   ])('%s uses None', (_label, json) => {
     const c = code(json);
     expect(c).toContain('None if _l is None');
+  });
+});
+
+describe('PYTHON TARGET — the absent-needle test of a search', () => {
+  // A searched value that may be absent is tested at run time. The float
+  // test must accept `np.floating`: `np.float32` and `np.float16` are not
+  // subclasses of `float`, and a `nan` of those types is absent too.
+  test('the guard accepts NumPy floats', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('x', 'real');
+    const code = new PythonTarget().compile(
+      ce2.box(['IndexOf', ['List', 1, 'NaN'], ['When', 'x', ['Less', 0, 'x']]])
+    ).code;
+    expect(code).toContain('isinstance(_n, (float, np.floating)) and _n != _n');
   });
 });

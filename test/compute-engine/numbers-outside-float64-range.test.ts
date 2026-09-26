@@ -424,10 +424,17 @@ describe('MACHINE FUNCTIONS AND SUMS OF EXACT VALUES OUTSIDE THE FLOAT64 RANGE',
   test('an engine below machine precision keeps its coarse precision', () => {
     // The quotient is computed at the 3 digits of the engine, not at the 25
     // digits that the machine precision uses to get a correct double.
-    const p3 = new ComputeEngine({ precision: 3 });
-    const q = p3.parse('\\frac{1}{7\\cdot 10^{400}}').evaluate().numericValue;
-    if (typeof q !== 'object') throw new Error('expected an exact value');
-    expect(q.div(p3._numericValue(1e-300)).re).toBe(1.43e-101);
+    // Constructing an engine writes the module-global `BigDecimal.precision`,
+    // so it is restored: the later blocks use the shared engine.
+    const saved = BigDecimal.precision;
+    try {
+      const p3 = new ComputeEngine({ precision: 3 });
+      const q = p3.parse('\\frac{1}{7\\cdot 10^{400}}').evaluate().numericValue;
+      if (typeof q !== 'object') throw new Error('expected an exact value');
+      expect(q.div(p3._numericValue(1e-300)).re).toBe(1.43e-101);
+    } finally {
+      BigDecimal.precision = saved;
+    }
   });
 });
 
@@ -485,10 +492,15 @@ describe('MACHINE NUMERIC VALUE OF A RESULT ABOVE THE LARGEST DOUBLE', () => {
     expect(m.parse('\\frac{10^{400}}{y}\\cdot 10^{-300}').N().toString()).toBe(
       '1e+100 / y'
     );
-    // The exact value is 10i/y. The factor `i` is kept.
+    // The exact value is 10i/y. The factor `i` is multiplied into the
+    // number coefficient, as at the default precision.
     expect(
       m.parse('\\frac{10^{400}}{y}\\cdot 10^{-399}\\cdot i').N().toString()
-    ).toBe('(10i) / y');
+    ).toBe('10i / y');
+    // The exact value is (10 + 10i)/y.
+    expect(
+      m.parse('\\frac{10^{400}}{y}\\cdot 10^{-399} (1+i)').N().toString()
+    ).toBe('(10 + 10i) / y');
   });
 
   test('a sum over a list of big integers', () => {
@@ -541,10 +553,260 @@ describe('MACHINE NUMERIC VALUE OF A PRODUCT OVER A LIST', () => {
   test.each([
     [['Product', ['List', ['Power', 10, 400], 0]], '0'],
     [['Product', ['List', { num: '1e400' }, 0]], '0'],
-    [['Reduce', ['List', ['Power', 10, 400], ['Power', 10, -400]], 'Multiply'], '1'],
+    [
+      ['Reduce', ['List', ['Power', 10, 400], ['Power', 10, -400]], 'Multiply'],
+      '1',
+    ],
     [['Product', ['List', ['Power', 10, 400], 2]], '+oo'],
     [['Product', ['List', 1.5, 2]], '3'],
   ])('%j .N() is %s', (expr, expected) => {
-    expect(m.box(expr as never).N().toString()).toBe(expected);
+    expect(
+      m
+        .box(expr as never)
+        .N()
+        .toString()
+    ).toBe(expected);
+  });
+});
+
+describe('MACHINE NUMERIC VALUE OF A SUM OR A PRODUCT WITH A TERM OUTSIDE THE FLOAT64 RANGE', () => {
+  // At machine precision the double of a term such as `10^{400}` is ±∞, and
+  // the numeric fold can be NaN (`∞ - ∞`, `∞ · 0`) where the exact value is
+  // finite. The float of the exact value is used then, on the synchronous
+  // and on the asynchronous evaluation.
+  let m: ComputeEngine;
+  let saved: number;
+  beforeAll(() => {
+    saved = BigDecimal.precision;
+    m = new ComputeEngine({ precision: 'machine' });
+  });
+  afterAll(() => {
+    BigDecimal.precision = saved;
+  });
+
+  test.each([
+    // -10^{400} + 0 + 10^{400}
+    ['\\sum_{k=-1}^{1} 10^{400} k', '0'],
+    ['\\sum_{k=1}^{3} 10^{400}k', '+oo'],
+    // 10^{-400} · 10^{400}
+    ['\\prod_{k=1}^{2} 10^{800k-1200}', '1'],
+    // 10^{-400} · 1 · 10^{400}
+    ['\\prod_{k=1}^{3} 10^{400(k-2)}', '1'],
+    ['\\prod_{k=1}^{3} 10^{200}k', '+oo'],
+    // ln 0 is exactly -∞.
+    ['\\sum_{k=0}^{3} \\ln k', '-oo'],
+    ['\\sum_{k=0}^{2} (\\ln k - 10^{400}k)', '-oo'],
+  ])('%s', async (tex, expected) => {
+    expect(m.parse(tex).N().toString()).toBe(expected);
+    expect(
+      (
+        await m.parse(tex).evaluateAsync({ numericApproximation: true })
+      ).toString()
+    ).toBe(expected);
+  });
+
+  test('a sum over a list of big integers, asynchronous', async () => {
+    const sum = m.box([
+      'Sum',
+      ['List', { num: '1e400' }, { num: '-1e400' }, 1],
+    ]);
+    expect(
+      (await sum.evaluateAsync({ numericApproximation: true })).toString()
+    ).toBe('1');
+  });
+});
+
+// A complex power, root, square root or exponential removes the roundoff dust
+// of its kernel. The test for dust must be relative to the modulus of the
+// result: a part that is small is not dust when the whole result is small.
+// A test against the fixed value 1e-14 changed `(10^{-10}i)^2 = -10^{-20}` to
+// 0. The expected values are hand calculations, for example
+// (10^{-6}i)^3 = 10^{-18}·i^3 = -10^{-18}i.
+describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
+  // `BigDecimal.precision` is global, and constructing an engine sets it
+  // (an earlier block leaves it at 3 digits). Thus each group of tests
+  // makes its engine before it runs, and the precision is restored after
+  // this block.
+  let savedPrecision: number;
+  beforeAll(() => {
+    savedPrecision = BigDecimal.precision;
+  });
+  afterAll(() => {
+    BigDecimal.precision = savedPrecision;
+  });
+  const engines: [string, () => ComputeEngine][] = [
+    ['default precision', () => new ComputeEngine()],
+    ['machine precision', () => new ComputeEngine({ precision: 'machine' })],
+  ];
+
+  // Compare the parts of `actual` with `re` and `im`, with a relative error
+  // of 1e-12 of the modulus. A part that must be 0 must be exactly 0.
+  function expectComplex(
+    actual: { re: number; im: number },
+    re: number,
+    im: number
+  ) {
+    const scale = 1e-12 * Math.hypot(re, im);
+    if (re === 0) expect(actual.re).toBe(0);
+    else expect(Math.abs(actual.re - re)).toBeLessThanOrEqual(scale);
+    if (im === 0) expect(actual.im).toBe(0);
+    else expect(Math.abs(actual.im - im)).toBeLessThanOrEqual(scale);
+  }
+
+  describe.each(engines)('%s', (_, engine) => {
+    let e: ComputeEngine;
+    beforeAll(() => {
+      e = engine();
+    });
+    test.each([
+      ['(10^{-10}i)^2', -1e-20, 0],
+      ['(10^{-6}i)^3', 0, -1e-18],
+      ['(10^{-8}+10^{-8}i)^2', 0, 2e-16],
+      // (10^{-10}i)^{2.5} = 10^{-25}·e^{i·5π/4}
+      ['(10^{-10}i)^{2.5}', -Math.SQRT1_2 * 1e-25, -Math.SQRT1_2 * 1e-25],
+      // √(10^{-30}i) = 10^{-15}·e^{iπ/4}
+      ['\\sqrt{10^{-30}i}', Math.SQRT1_2 * 1e-15, Math.SQRT1_2 * 1e-15],
+    ])('%s under .N()', (latex, re, im) => {
+      const v = e.parse(latex).N();
+      expectComplex(v, re, im);
+    });
+
+    test('dust is removed when it is small compared with the modulus', () => {
+      expect(e.parse('i^2').N().toString()).toBe('-1');
+      expect(e.parse('\\sqrt{-4}').N().toString()).toBe('2i');
+      expect(e.parse('(2i)^2').N().toString()).toBe('-4');
+      expectComplex(e._numericValue({ re: 0, im: 1.5 }).pow(3), 0, -3.375);
+      expectComplex(e._numericValue({ re: 0, im: Math.PI }).exp(), -1, 0);
+    });
+
+    test('the numeric-value kernels keep a small result', () => {
+      const nv = (re: number, im: number) => e._numericValue({ re, im });
+      expectComplex(nv(0, 1e-10).pow(2), -1e-20, 0);
+      expectComplex(nv(0, 1e-6).pow(3), 0, -1e-18);
+      // (10^{-10}i)^{2+0.5i} = e^{(2+0.5i)(ln 10^{-10} + iπ/2)}
+      const lnMod = Math.log(1e-10);
+      const mag = Math.exp(2 * lnMod - 0.5 * (Math.PI / 2));
+      const arg = 2 * (Math.PI / 2) + 0.5 * lnMod;
+      expectComplex(
+        nv(0, 1e-10).pow({ re: 2, im: 0.5 }),
+        mag * Math.cos(arg),
+        mag * Math.sin(arg)
+      );
+      // ∛(10^{-30}i) = 10^{-10}·e^{iπ/6}
+      expectComplex(
+        nv(0, 1e-30).root(3),
+        1e-10 * Math.cos(Math.PI / 6),
+        1e-10 * Math.sin(Math.PI / 6)
+      );
+      // ∛(8i) = 2·e^{iπ/6}. The machine kernel read only the real part.
+      expectComplex(
+        nv(0, 8).root(3),
+        2 * Math.cos(Math.PI / 6),
+        2 * Math.sin(Math.PI / 6)
+      );
+      expectComplex(
+        nv(0, 1e-30).sqrt(),
+        Math.SQRT1_2 * 1e-15,
+        Math.SQRT1_2 * 1e-15
+      );
+      // e^{-40+i} = e^{-40}·(cos 1 + i·sin 1)
+      expectComplex(
+        nv(-40, 1).exp(),
+        Math.exp(-40) * Math.cos(1),
+        Math.exp(-40) * Math.sin(1)
+      );
+    });
+
+    test('a complex square root with a small imaginary part', () => {
+      // √(1 + εi) = 1 + (ε/2)i to first order; the second-order term is
+      // below the double precision for ε = 10^{-10}.
+      const nv = (re: number, im: number) => e._numericValue({ re, im });
+      expectComplex(nv(1, 1e-10).sqrt(), 1, 5e-11);
+      expectComplex(nv(-1, 1e-10).sqrt(), 5e-11, 1);
+      expectComplex(nv(-1, -1e-10).sqrt(), 5e-11, -1);
+      expectComplex(nv(3, -4).sqrt(), 2, -1);
+      expectComplex(nv(-3, 4).sqrt(), 1, 2);
+    });
+
+    test('a complex power that the complex kernel cannot compute', () => {
+      // The complex kernel gives NaN + NaN·i for these powers, because an
+      // intermediate value overflows or underflows. The power is computed
+      // again in polar form: z^w = |z|^w·e^{i·w·arg(z)} for a real w.
+      // |10^{300}(1+i)|^{0.3} = 10^{90}·2^{0.15}, arg = π/4.
+      const v = e.box(['Power', ['Complex', 1e300, 1e300], 0.3]).N();
+      const m1 = 1e90 * 2 ** 0.15;
+      expectComplex(
+        v,
+        m1 * Math.cos((0.3 * Math.PI) / 4),
+        m1 * Math.sin((0.3 * Math.PI) / 4)
+      );
+      // |10^{-200}(1+i)|^{-0.5} = 10^{100}·2^{-0.25}, arg = π/4.
+      const w = e.box(['Power', ['Complex', 1e-200, 1e-200], -0.5]).N();
+      const m2 = 1e100 * 2 ** -0.25;
+      expectComplex(
+        w,
+        m2 * Math.cos(-Math.PI / 8),
+        m2 * Math.sin(-Math.PI / 8)
+      );
+      // A result that overflows is complex infinity, not NaN.
+      expect(
+        e
+          .box(['Power', ['Complex', 1e300, 1e300], 1.5])
+          .N()
+          .toString()
+      ).toBe('~oo');
+    });
+  });
+
+  test('a machine complex square root of a very small or a very large value', () => {
+    // The sum `m + |a|` of the square root formula can overflow, and its half
+    // can underflow to 0. The expected values: √(2^{-1074}i) =
+    // 2^{-537}·(1+i)/√2 = 2^{-537.5}·(1+i), and √(10^{308}(1+i)) =
+    // 10^{154}·√(1+i), with √(1+i) = √((√2+1)/2) + i·√((√2−1)/2).
+    const m = new ComputeEngine({ precision: 'machine' });
+    const nv = (re: number, im: number) => m._numericValue({ re, im });
+    const tiny = 2 ** -538 * Math.SQRT2;
+    expectComplex(nv(0, Number.MIN_VALUE).sqrt(), tiny, tiny);
+    expectComplex(nv(0, -Number.MIN_VALUE).sqrt(), tiny, -tiny);
+    const re = 1e154 * Math.sqrt((Math.SQRT2 + 1) / 2);
+    const im = 1e154 * Math.sqrt((Math.SQRT2 - 1) / 2);
+    expectComplex(nv(1e308, 1e308).sqrt(), re, im);
+    // √(10^{308}(−1+i)) = i·√(10^{308}(1−i)): the parts are exchanged.
+    expectComplex(nv(-1e308, 1e308).sqrt(), im, re);
+    // √(10^{-310}(1−i)) = 10^{-155}·√(1−i)
+    expectComplex(
+      nv(1e-310, -1e-310).sqrt(),
+      1e-155 * Math.sqrt((Math.SQRT2 + 1) / 2),
+      -1e-155 * Math.sqrt((Math.SQRT2 - 1) / 2)
+    );
+  });
+
+  test('a big-decimal complex power outside the float64 range', () => {
+    // (10^{-200}i)^2 = -10^{-400}: the dust test compares big decimals.
+    const d = new ComputeEngine();
+    const v = d._numericValue({ re: 0, im: 1e-200 }).pow(2);
+    expect(v.bignumRe?.toString()).toBe('-1e-400');
+    expect(v.im).toBe(0);
+  });
+});
+
+describe('COMPLEX POWER WITH A MODULUS ABOVE THE LARGEST DOUBLE', () => {
+  // The polar form computes ln|z| without forming |z|, which can be above the
+  // largest double for finite parts. A retry whose magnitude overflows or
+  // underflows gives the complex infinity or 0, not a symbolic power.
+  test('finite parts with an overflowing modulus', () => {
+    const ce = new ComputeEngine();
+    const z = ce.box(['Power', ['Complex', 1.5e308, 1.5e308], 0.3]).N();
+    expect(z.re).toBeCloseTo(3.0606480553398345e92, -78);
+    expect(z.im).toBeCloseTo(7.347965871069578e91, -77);
+  });
+  test('an infinite part gives the complex infinity', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Power', ['Complex', 'PositiveInfinity', 1], ['Complex', 1, 1]])
+        .N()
+        .toString()
+    ).toBe('~oo');
   });
 });

@@ -755,8 +755,11 @@ for two different tolerances:
    mathematically-real result with a dust-sized imaginary part (e.g.
    `Complex(0.5, 0).asin()` → `im: 5.55e-17`, from the complex log/sqrt
    formulation). Whether that is noise is a property of the _arithmetic_ — the
-   scale is machine roundoff (the `numeric-value/` classes use a fixed
-   `1e-14`) — and does not depend on any user setting.
+   scale is machine roundoff — and does not depend on any user setting. The
+   test is RELATIVE: a component is dust only when it is at most `1e-14`
+   times the modulus of the result (`chopComplexDust` and `isComplexDust`,
+   `numeric-value/roundoff.ts`). An absolute cut erased small results:
+   `(10^{-10} i)^2` gave 0 instead of `-10^{-20}` until 2026-09-26.
 2. **Comparison tolerance** — should two values be considered equal _for the
    user_? That is `ce.tolerance` (default `1e-10`, user-configurable), used by
    `Equal`, the relational operators, `.is()`, and the `Chop` operator.

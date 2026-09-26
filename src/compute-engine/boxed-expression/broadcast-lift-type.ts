@@ -380,7 +380,7 @@ export function threadedPresentType(t: Type): Type | undefined {
  * The arm is the absence marker of the result's domain: `nan` when `t`,
  * less its `missing` arm, is a subtype of `number`, and `missing`
  * otherwise. An element read of an absent collection answers that marker
- * (user decision of 2026-09-25, `docs/ERROR-MODEL.md` §2): `First` of a
+ * (user decision of 2026-09-26, `docs/ERROR-MODEL.md` §2): `First` of a
  * restricted pair of integers whose condition is false is `NaN`, typed
  * `integer | nan`, and `First` of a restricted list of points is `Missing`,
  * typed `missing | tuple<…>`. The evaluate handler reads the same marker

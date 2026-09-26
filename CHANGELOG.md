@@ -172,7 +172,20 @@
   `Element` agrees. A restricted value whose condition is undecided,
   `Contains([1,2], 2{c})`, stays held and gives the right answer once `c` is
   decided (it was held as `Missing` or `NaN` whatever `c` became). Compiled
-  JavaScript and Python give the same answers.
+  JavaScript and Python give the same answers. `NaN` is the absence marker of
+  a number, so a `NaN` value is not found either: `IndexOf([1, NaN], NaN)`
+  was `2` and is `0`, and `Contains([NaN], NaN)` is `False`. The answer
+  depends on the value of the searched expression, not on how it is written,
+  so a derived value such as `First([5,6]{c})` with `c` false is not found
+  either.
+- **`Element` waits when an unknown could still make a value a member.**
+  `Element(x, [1, 2])` with `x` free was `False` and stays unevaluated until
+  `x` has a value, as it already did for a `Set`; the same holds for a tuple
+  and for a lazy collection with unknowns (`1 ∈ Reverse([x, 2])`).
+  `Element` over an absent collection is `Missing`, and over a restricted
+  collection it is threaded as `Contains` is. The search operators
+  `Contains`, `IndexOf` and `Count` compare structurally, like `===`, and are
+  unchanged.
 - **An operator over a whole absent collection gives `Missing`.** `Insert`,
   `ReplaceAt`, `Append`, `Union`, `Intersection` and `SetMinus` over
   `Missing` were `incompatible-type` errors; `Join(Missing, [1])` was
@@ -191,6 +204,19 @@
 
 ### Issues Resolved
 
+- **A complex power, root, square root or exponential keeps a small
+  result.** A part of a complex result was set to 0 when it was below a
+  fixed `1e-14`, so `(10^{-10}i)^2` was `0` (it is `-10^{-20}`) and
+  `(10^{-6}i)^3` was `0`. A part is now noise only when it is small compared
+  with the modulus of the result. At machine precision, `∛(8i)` was `0` and
+  is `√3 + i`; `\sqrt{1+10^{-10}i}` was `1` and keeps its imaginary part; the
+  complex square root no longer overflows or underflows near the ends of the
+  double range; `(10^{300}+10^{300}i)^{0.3}` was `NaN` and is computed.
+- **`Map`/`Filter`/`Sum`/`Length` over a `Join` or `Append` with an absent
+  source agree with its value.** `Sum(Join([3], Take(Missing, 1)))` was `3`
+  and is `NaN`; `Join(Missing, [3])` is no longer enumerated as `[3]`; a
+  `Join` over an undecided `If` operand was `Set(3)` and stays unevaluated
+  until the condition is decided.
 - **Fixes from a second review of the commits of 2026-09-23 to 2026-09-26.**
   - Linear algebra: `Norm` of a matrix with tiny or huge entries no longer
     underflows to `0` or overflows through the rank-one shortcut; an exact

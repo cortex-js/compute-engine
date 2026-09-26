@@ -293,7 +293,7 @@ describe('a search for an absent value finds nothing', () => {
 
 describe('Join and the set operators over an absent collection', () => {
   // A collection operator over an absent collection answers `Missing` (user
-  // decision 2026-09-25). Before, `Join(Missing, [1])` was `[Missing, 1]`
+  // decision 2026-09-26). Before, `Join(Missing, [1])` was `[Missing, 1]`
   // (the absent operand was wrapped as one element), and `Union`,
   // `Intersection` and `SetMinus` refused an absent set with an
   // `incompatible-type` error, also when it was a restricted set whose
@@ -359,6 +359,87 @@ describe('Join and the set operators over an absent collection', () => {
     // A removed value that is absent is still refused.
     expect(ce.box(['SetMinus', S, 'Missing']).isValid).toBe(false);
   });
+
+  // `Join` and `Append` with an operand that can be absent are not collection
+  // views: their collection handlers do not enumerate the present operands.
+  // Before, `Join(Missing, [3])` evaluated to `Missing` but enumerated `3`,
+  // so `Sum` of it stayed unevaluated while `Sum(Missing)` is `NaN`, and the
+  // unevaluated `Join([1, 2]{c}, [3])` printed as a `Set` of restricted cells.
+  test.each([
+    [['Join', 'Missing', ['List', 3]]],
+    [['Join', ['List', 3], 'Undefined']],
+    [['Append', 'Missing', 3]],
+    [['Join', ['When', ['List', 1, 2], c], ['List', 3]]],
+    [['Append', ['When', ['List', 1, 2], c], 3]],
+  ])('%j is not a collection view', (json) => {
+    const e = engine().box(json as never);
+    expect(e.isCollection).toBe(false);
+    expect([...e.each()]).toEqual([]);
+    expect(e.count).toBeUndefined();
+    expect(e.isFiniteCollection).toBeUndefined();
+  });
+
+  test('the unevaluated join of a restricted list prints as written', () => {
+    const e = engine().box([
+      'Join',
+      ['When', ['List', 1, 2], c],
+      ['List', 3],
+    ] as never);
+    expect(e.toString()).toBe('Join([1,2] {0 < t}, [3])');
+  });
+
+  test.each([
+    [['Sum', ['Join', 'Missing', ['List', 3]]], 'NaN'],
+    [['Sum', ['Append', 'Missing', 3]], 'NaN'],
+    [['Max', ['Join', 'Missing', ['List', 3]]], 'NaN'],
+    [['Max', ['Append', 'Missing', 3]], 'NaN'],
+    [['Length', ['Join', 'Missing', ['List', 3]]], 'NaN'],
+    [['Reverse', ['Append', 'Missing', 3]], '"Missing"'],
+  ])('a consumer of %j agrees with the evaluation', (json, expected) => {
+    expect(
+      engine()
+        .box(json as never)
+        .evaluate()
+        .toString()
+    ).toBe(expected);
+  });
+
+  test.each([
+    [['Sum', ['Join', ['When', ['List', 1, 2], c], ['List', 3]]], '6', 'NaN'],
+    [['Sum', ['Append', ['When', ['List', 1, 2], c], 3]], '6', 'NaN'],
+    [
+      ['Length', ['Join', ['When', ['List', 1, 2], c], ['List', 3]]],
+      '3',
+      'NaN',
+    ],
+  ])('a consumer of %j over a restricted list', (json, present, absent) => {
+    for (const [t, expected] of [
+      [2, present],
+      [-1, absent],
+    ] as const) {
+      const ce = engine();
+      ce.assign('t', t);
+      expect(
+        ce
+          .box(json as never)
+          .evaluate()
+          .toString()
+      ).toBe(expected);
+    }
+  });
+
+  test.each(['javascript', 'python'])(
+    'a join with an absent operand does not compile to %s',
+    (to) => {
+      // The interpreter answers `Missing` for the whole join. The compiled
+      // code was `[undefined, 3]` (JavaScript) and `[math.nan, 3]` (Python).
+      const r = compile(
+        engine().box(['Join', 'Missing', ['List', 3]] as never),
+        { to } as never
+      );
+      expect(r.success).toBe(false);
+    }
+  );
 });
 
 describe('A set relation over an absent set', () => {
@@ -391,5 +472,146 @@ describe('A set relation over an absent set', () => {
     const e = ce.box([op, ['Set', 2], ['Set', 2, 3]] as never);
     expect(e.type.toString()).toBe('boolean');
     expect(['"True"', '"False"']).toContain(e.evaluate().toString());
+  });
+});
+
+describe('Membership that an unknown could still change', () => {
+  // `Element` is mathematical membership: an element with unknowns may
+  // become equal to the value later, so "not a member" is not settled and
+  // the call stays held, as it already did for a `Set`. The search operators
+  // `Contains`, `IndexOf` and `Count` compare structurally and are not
+  // affected.
+  test('the answer waits for the unknown', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Element', 'x', ['List', 1, 2]]).evaluate().operator).toBe(
+      'Element'
+    );
+    expect(ce.box(['Element', 1, ['List', 'a', 2]]).evaluate().operator).toBe(
+      'Element'
+    );
+    ce.assign('x', 1);
+    expect(
+      ce.box(['Element', 'x', ['List', 1, 2]]).evaluate().toString()
+    ).toBe('"True"');
+  });
+  test('a settled answer is unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Element', 2, ['List', 'a', 2]]).evaluate().toString()).toBe('"True"');
+    expect(ce.box(['Element', 3, ['List', 1, 2]]).evaluate().toString()).toBe('"False"');
+    expect(ce.box(['Element', 2, ['List', 1, 'Missing']]).evaluate().toString()).toBe('"False"');
+    // Structural search is unchanged.
+    expect(ce.box(['Contains', ['List', 1, 2], 'x']).evaluate().toString()).toBe('"False"');
+  });
+});
+
+describe('Element over an absent or restricted collection', () => {
+  // `Element` threads a restricted collection whole, as `Contains` does,
+  // and an absent collection makes the answer `Missing`. An absent value is
+  // not a member.
+  test('an absent collection gives Missing', () => {
+    const ce = engine();
+    for (const op of ['Element', 'NotElement']) {
+      const e = ce.box([op, 2, 'Missing'] as never);
+      expect(e.type.toString()).toBe('boolean | missing');
+      expect(e.evaluate().toString()).toBe('"Missing"');
+    }
+  });
+  test('a restricted collection is threaded, and held and fresh agree', () => {
+    const ce = engine();
+    const W = ['When', ['List', 1, 2], ['Less', 0, 't']];
+    const held = ce.box(['Element', 2, W] as never).evaluate();
+    expect(held.toString()).toBe('"True" {0 < t}');
+    ce.assign('t', -1);
+    expect(held.evaluate().toString()).toBe('"Missing"');
+    expect(ce.box(['Element', 2, W] as never).evaluate().toString()).toBe(
+      '"Missing"'
+    );
+  });
+  test('a settled exclusion from a set that is not a literal list stays', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Element', 'x', 'EmptySet']).evaluate().toString()).toBe(
+      '"False"'
+    );
+  });
+});
+
+describe('Join and Append over a nested or piecewise absent source', () => {
+  test('a nested Join over an absent operand is not a collection view', () => {
+    const ce = engine();
+    const e = ce.box(['Append', ['Join', 'Missing', ['List', 1]], 3]);
+    expect([...e.each()].length).toBe(0);
+    expect(e.evaluate().toString()).toBe('"Missing"');
+  });
+  test('an undecided If operand keeps the Join held', () => {
+    const ce = engine();
+    const expr = [
+      'Join',
+      ['If', ['Greater', 't', 0], ['List', 1, 2], 'Missing'],
+      ['List', 3],
+    ];
+    // Before, the view skipped the `If` operand and the value was `Set(3)`.
+    expect(ce.box(expr as never).evaluate().operator).toBe('Join');
+    ce.assign('t', 1);
+    expect(ce.box(expr as never).evaluate().toString()).toBe('[1,2,3]');
+    ce.assign('t', -1);
+    expect(ce.box(expr as never).evaluate().toString()).toBe('"Missing"');
+  });
+});
+
+describe('Membership scope and Append sources', () => {
+  test('a tuple or a lazy view keeps an unknown value open', () => {
+    // Their `contains` compares structurally, so "not a member" is not
+    // settled while the value has unknowns.
+    const ce = new ComputeEngine();
+    for (const coll of [
+      ['Tuple', 1, 2],
+      ['Take', ['List', 1, 2, 3], 2],
+      ['Reverse', ['List', 1, 2]],
+    ])
+      expect(ce.box(['Element', 'x', coll] as never).evaluate().operator).toBe(
+        'Element'
+      );
+    expect(ce.box(['Element', 3, ['Tuple', 1, 2]]).evaluate().toString()).toBe(
+      '"False"'
+    );
+    expect(ce.box(['Element', 11, ['Range', 1, 10]]).evaluate().toString()).toBe(
+      '"False"'
+    );
+  });
+  test('a piecewise appended element does not make the source absent', () => {
+    const ce = engine();
+    const e = ce.box([
+      'Join',
+      ['Append', ['Range', 1, 3], ['If', ['Greater', 't', 0], 4, 5]],
+      ['List', 6],
+    ] as never);
+    expect([...e.each()].length).toBe(5);
+  });
+});
+
+describe('Absent sources under other collection operators', () => {
+  // `Take`, `Sort`, `Reverse` and the other operators that take their source
+  // first pass an absent source through, so a `Join` over one of them is not
+  // a collection view. Before, `Sum(Join([3], Take(Missing, 1)))` was 3.
+  test('the consumers see the absence', () => {
+    const ce = engine();
+    for (const inner of [
+      ['Take', 'Missing', 1],
+      ['Sort', 'Missing'],
+      ['Reverse', 'Missing'],
+    ]) {
+      expect(
+        ce.box(['Sum', ['Join', ['List', 3], inner]] as never).evaluate().toString()
+      ).toBe('NaN');
+      expect(
+        ce.box(['Length', ['Join', ['List', 3], inner]] as never).evaluate().toString()
+      ).toBe('NaN');
+    }
+  });
+  test('a lazy view with unknowns keeps membership open', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Element', 1, ['Reverse', ['List', 'x', 2]]]).evaluate().operator
+    ).toBe('Element');
   });
 });

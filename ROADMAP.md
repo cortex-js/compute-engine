@@ -241,7 +241,45 @@ Defects:
    wrapper used by every complex quotient. The same overflow makes
    `Inverse([[1+i, 1e308+1e308i],[0,1]]).N()` give `-oo` for the entry that
    is `-1e308`.
-3. **Arithmetic over an error-typed term types differently by operator.**
+3. **A complex number whose imaginary part is outside the double range is
+   wrong (silent wrong results).** Measured 2026-09-26 at the default
+   precision: `i\cdot10^{-800}` evaluates to `0`; `(1+i)10^{-800}`
+   evaluates to `1/1e+800` (the imaginary part is lost);
+   `(2+3i)\cdot10^{-400}` evaluates to `1/5e+399`; `(1+i)10^{800}` `.N()`
+   is `~oo` instead of `1e+800 + 1e+800i`. The cause: `ExactNumericValue`
+   stores the imaginary part exactly but caches its double in `im`, and about
+   650 read sites test `im !== 0` to decide that a value is complex, so an
+   imaginary part whose double underflows reads as real. `BigNumericValue`
+   has a big-decimal real part but a machine-number imaginary part, so no
+   float value at the default precision can hold `10^{-800}i` either. A fix
+   on 2026-09-26 kept `im = ±Number.MIN_VALUE` as a nonzero marker; review
+   found the marker leaking into the function kernels
+   (`Ln(i\cdot10^{-800}).N()` gave `-744.44 + 1.5708i`), into `isSame` and
+   into compiled code, so it was removed. The fix is a redesign: a
+   big-decimal imaginary part in `BigNumericValue`, and an explicit
+   "is complex" flag in `ExactNumericValue` instead of the `im !== 0` test.
+   Related: at the default precision, the reciprocal of `1e-200+1e-200i`
+   gives re = `1e200` (should be `5e199`) and im = `-Infinity`, because
+   `d·d` underflows in double arithmetic; `(1e-200+1e-200i)^{-1}` is `~oo`
+   at both precisions; `(10^{-200}(1+i))^2` `.N()` is `NaN`;
+   `\sqrt{i\cdot10^{-600}}` `.N()` is `0`; `e^{i\,10^{-800}}` `.N()`
+   drops the imaginary part.
+4. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is
+   absent stays unevaluated.** `Map(f, Join(Missing, [3]))` should be
+   `Missing`, as `Map(f, Missing)` is. The source correctly declines to
+   enumerate, but a lazy operator does not evaluate its collection operand,
+   and conditional threading reads only direct `When`/`Which` operands. An
+   `evaluate` handler on `Map`/`Filter` was tried and broke ordinary lazy
+   evaluation (45 suites). The fix belongs in the evaluation step
+   (`boxed-function.ts`): evaluate a lazy operator's `Join`/`Append`
+   operand when it may be absent, then thread the result.
+5. **A lazy `Join` over an eager collection operator is not known to be
+   finite.** `Sum(Join([3], Sort([2,1])))` stays unevaluated (the answer is
+   6), while `Sum(Join([3], [2,1]))` is 6 and `Sum(Sort([2,1]))` is 3.
+   Unevaluated, `Sort([2,1])` reports `isCollection` false and
+   `isFiniteCollection` undefined, so `Join` cannot report a finite count
+   and `Sum` declines. Measured at `7713654e` and later.
+6. **Arithmetic over an error-typed term types differently by operator.**
    With `E = Sin(Tuple(A, B))` and `A, B: list<real>`, `Add(1, E)` is
    `error | integer`, `Multiply(2, E)` and `Divide(E, 2)` are `number`, and
    `Negate(E)` is `error`.

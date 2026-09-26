@@ -1606,3 +1606,27 @@ export function numericFromExactValue(
   if (!isNumber(exact) || exact.isNaN === true) return undefined;
   return exact.N();
 }
+
+/**
+ * The asynchronous form of `numericFromExactValue()`, for the
+ * `evaluateAsync` handlers. The exact value is computed with
+ * `evaluateAsync()` and `options` (the abort signal and the effect handlers
+ * of the evaluation), so that an application that has only an asynchronous
+ * handler is evaluated, and the evaluation can be cancelled.
+ */
+export async function numericFromExactValueAsync(
+  ce: ComputeEngine,
+  expression: Expression | undefined,
+  value: Expression,
+  options: Parameters<Expression['evaluateAsync']>[0]
+): Promise<Expression | undefined> {
+  if (!isNumber(value) || value.isFinite === true) return undefined;
+  if (expression === undefined || expression.isPure !== true) return undefined;
+  if (bignumPreferred(ce)) return undefined;
+  const exact = await expression.evaluateAsync({
+    signal: options?.signal,
+    _effects: options?._effects,
+  });
+  if (!isNumber(exact) || exact.isNaN === true) return undefined;
+  return exact.N();
+}

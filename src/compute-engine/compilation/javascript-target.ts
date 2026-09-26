@@ -4097,6 +4097,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // not lower to a JS array.
   Join: (args, compile) => {
     if (args.length === 0) return '[]';
+    // An absent operand (`Missing`, `Undefined`) is an absent collection, and
+    // the interpreter answers `Missing` for the whole join (user decision
+    // 2026-09-26). The scalar arm below compiled it as one `undefined`
+    // element (`[undefined, 3]`), so the call fails closed.
+    const absent = args.findIndex(
+      (a) => isSymbol(a, 'Missing') || isSymbol(a, 'Undefined')
+    );
+    if (absent >= 0)
+      throw new Error(
+        `Could not compile \`Join\`: operand ${absent + 1} is absent, and the ` +
+          `interpreter answers \`Missing\` for the whole join. The interpreter ` +
+          `evaluates it instead.`
+      );
     if (args.every(isProvablyStringOperand))
       return `([${args
         .map((a) => `_SYS.ct(${compile(a)})`)
@@ -4582,9 +4595,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // has no numeric tolerance (`IndexOf([0], 5e-11)` and
   // `IndexOf([0.30000000000000004], 0.3)` both answer 0, probe-verified),
   // the same exact comparison `compileJSEquality` emits for `Equal`. It is not
-  // `Array.indexOf` either, because of NaN (below). `findIndex` is 0-based and
-  // returns -1 when absent, so `+ 1` maps both. The value is hoisted into an
-  // IIFE parameter so it is evaluated once.
+  // `Array.indexOf` either, because text is compared with `_SYS.eqt`
+  // (below). `findIndex` is 0-based and returns -1 when absent, so `+ 1` maps
+  // both. The value is hoisted into an IIFE parameter so it is evaluated
+  // once.
   //
   // ACCEPTED RESIDUAL (exactness loss, unclosable): a needle COMPUTED at
   // runtime to a near-miss f64 (`0.1 + 0.2` → `0.30000000000000004`) is not
@@ -4613,7 +4627,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return compileSearchedValue(
         args[1],
         compile,
-        (v) => `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${v})`,
+        (v) =>
+          `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${v})`,
         '0'
       );
     }
@@ -4659,18 +4674,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     //
     // `_SYS.eqt` is the whole element test: strict `===` for every non-text
     // pair, and conditioned (NFC, well-formed) content equality for a text
-    // pair, which is what the interpreter compares. Plus one departure: NaN.
-    // `NaN === NaN` is false, so a NaN needle would never be found, where the
-    // interpreter's structural `.isSame()` answers 1 — hence the both-NaN
-    // short-circuit. BOOLEAN-ness needs no guard: `true === 1` is false
-    // natively (it was an earlier tolerance leaf, `Math.abs(true - 1) <= tol`, that found
+    // pair, which is what the interpreter compares. A `NaN` or absent needle
+    // never reaches the test: `compileSearchedValue` answers 0 for it, as the
+    // interpreter does (a search never finds an absent value, and `NaN` is the
+    // absence marker of a number). BOOLEAN-ness needs no guard: `true === 1`
+    // is false natively (it was an earlier tolerance leaf, `Math.abs(true - 1) <= tol`, that found
     // a boolean needle in a numeric haystack, and a numeric needle in a
     // boolean one, where the interpreter answers 0).
     return compileSearchedValue(
       args[1],
       compile,
       (v) =>
-        `((_v) => (${coll}).findIndex((_x) => (_x !== _x && _v !== _v) || _SYS.eqt(_x, _v)) + 1)(${v})`,
+        `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${v})`,
       '0'
     );
   },
@@ -4942,15 +4957,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // bound to a compiled parameter must be found in a haystack of precomposed
     // literals — which `includes` misses, since the two are different
     // code-unit sequences. `_SYS.eqt` is the same element test `IndexOf` uses,
-    // and it falls back to strict `===` for every non-text pair. The
-    // both-NaN disjunct keeps `includes`'s SameValueZero verdict on NaN, which
-    // `===` alone would lose.
+    // and it falls back to strict `===` for every non-text pair. A `NaN` or
+    // absent needle never reaches the test (`compileSearchedValue`).
     if (hasPossiblyTextElements(args[0]) || isProvablyTextOperand(args[1]))
       return compileSearchedValue(
         args[1],
         compile,
-        (v) =>
-          `((_v) => (${coll}).some((_x) => (_x !== _x && _v !== _v) || _SYS.eqt(_x, _v)))(${v})`,
+        (v) => `((_v) => (${coll}).some((_x) => _SYS.eqt(_x, _v)))(${v})`,
         'false'
       );
     return compileSearchedValue(
@@ -11441,7 +11454,7 @@ const SYS_HELPERS = {
   // element domain: `NaN` when `numeric` is true, and `undefined` otherwise.
   // The interpreter does the same: `First` of a restricted pair of numbers
   // whose condition is false is `NaN`, and `First(Missing)` is `Missing`
-  // (user decision of 2026-09-25). A cell inside the array is
+  // (user decision of 2026-09-26). A cell inside the array is
   // returned as it is, an absent cell included. A position past the end reads
   // the marker of the element domain: `NaN` when `numeric` is true (the
   // element type is numeric), and otherwise the domain the cells show, as
@@ -14398,26 +14411,31 @@ function collArg(
  * (`docs/STRING_ROADMAP.md`, decision D13.)
  */
 /**
- * Compile the search of `Contains`, `IndexOf` or `Element` for the searched value
- * `needle`, so that an absent searched value is not found (user decision
- * 2026-09-26): the answer is then `notFound` (`false` or `0`), as in the
- * interpreter. `search(v)` emits the search for the compiled value `v`.
+ * True when the searched value `needle` can be absent at run time: its type
+ * has a `missing` arm, or it can be a number, which can be `NaN`. A needle
+ * that is provably a string, a boolean, a tuple or a list cannot be absent,
+ * so its search needs no run-time test.
+ */
+function canBeAbsentAtRunTime(needle: Expression): boolean {
+  const t = resolveTypeForCompilation(needle.type.type);
+  return typeContainsMissing(t) || couldMatch(t, 'number');
+}
+
+/**
+ * Compile the search of `Contains`, `IndexOf` or `Element` for the searched
+ * value `needle`, so that an absent searched value is not found (user
+ * decision 2026-09-26): the answer is then `notFound` (`false` or `0`), as in
+ * the interpreter. `search(v)` emits the search for the compiled value `v`.
  *
- * The compiled value of an absent needle cannot be told apart from a present
- * one by the element test alone. The `Missing` symbol compiles to
- * `undefined`, which `IndexOf` finds in a list that holds an absent element,
- * and a restriction `v{c}` whose condition is false compiles to `NaN`, which
- * the element test finds in a list that holds `NaN`. So the absence is decided
- * here, from the structure of the needle:
- *
- * - A `Missing` or `Undefined` symbol is not found.
- * - A restriction `When(v, c)` with a scalar condition searches for `v` when
- *   `c` holds, and is not found otherwise. A piecewise value
- *   `Which(c1, v1, c2, v2, …)` searches for the value of the first condition
- *   that holds, and is not found when no condition holds.
- * - Any other needle whose type admits `missing` is not found when its
- *   run-time value is `undefined` or `null`, the absence markers of the
- *   compiled code.
+ * The searched value is absent when its run-time value is `undefined` or
+ * `null` (the absence markers of the compiled code) or `NaN` (the absence
+ * marker of a number: a restriction `v{c}` whose condition is false compiles
+ * to `NaN`). The test is on the run-time value, not on the structure of the
+ * needle, so a restriction, a piecewise value, an element read and an
+ * arithmetic result all give the same answer as the interpreter
+ * (`isAbsentSearchedValue`, `collection-utils.ts`). Because the test is done
+ * first, the element test never sees a `NaN` or an absent needle, and an
+ * absent or `NaN` element of the collection is never matched.
  */
 function compileSearchedValue(
   needle: Expression,
@@ -14427,29 +14445,9 @@ function compileSearchedValue(
 ): string {
   if (isSymbol(needle, 'Missing') || isSymbol(needle, 'Undefined'))
     return notFound;
-  const self = (x: Expression) =>
-    compileSearchedValue(x, compile, search, notFound);
-  const scalarCondition = (c: Expression) =>
-    !c.type.matches('collection<any>');
-  if (
-    isFunction(needle, 'When') &&
-    needle.nops === 2 &&
-    scalarCondition(needle.ops[1])
-  )
-    return `((${compile(needle.ops[1])}) ? ${self(needle.ops[0])} : ${notFound})`;
-  if (
-    isFunction(needle, 'Which') &&
-    needle.nops % 2 === 0 &&
-    needle.ops.every((x, i) => i % 2 === 1 || scalarCondition(x))
-  ) {
-    let code = notFound;
-    for (let i = needle.nops - 2; i >= 0; i -= 2)
-      code = `((${compile(needle.ops[i])}) ? ${self(needle.ops[i + 1])} : ${code})`;
-    return code;
-  }
   const v = compile(needle);
-  if (!typeContainsMissing(needle.type.type)) return search(v);
-  return `((_n) => (_n == null ? ${notFound} : ${search('_n')}))(${v})`;
+  if (!canBeAbsentAtRunTime(needle)) return search(v);
+  return `((_n) => (_n == null || _n !== _n ? ${notFound} : ${search('_n')}))(${v})`;
 }
 
 function elementsArg(

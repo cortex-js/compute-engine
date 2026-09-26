@@ -1135,12 +1135,13 @@ describe('IndexOf element test is exact and boolean-aware (executed parity)', ()
       expr: ['IndexOf', ['List', { num: '1.5' }, 3], { num: '1.5' }],
       expected: 1,
     },
-    // NaN: `NaN === NaN` is false, but the interpreter's structural
-    // `.isSame()` finds a NaN needle — hence the both-NaN short-circuit.
+    // NaN is the absence marker of a number, and a search never finds an
+    // absent value (user decision 2026-09-26): a NaN needle gives the
+    // not-found index 0 on every route, even when the list holds a NaN.
     {
       name: 'NaN needle, NaN in haystack',
       expr: ['IndexOf', ['List', 'NaN', 3], 'NaN'],
-      expected: 1,
+      expected: 0,
     },
     {
       name: 'NaN needle, no NaN in haystack',

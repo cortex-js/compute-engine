@@ -28,11 +28,11 @@ import {
   enumerableFromAllSources,
   enumerableFromSource,
   holdsConditionalValue,
+  isAbsentSearchedValue,
   isBroadcastableCollection,
   isDeclaredScalarNumber,
   isEnumerableSource,
   isFiniteBroadcastParticipant,
-  isMaskedAbsentNumber,
   isUnresolvedCollectionOperand,
   isTextAtom,
   isRecordShapedType,
@@ -738,12 +738,14 @@ const APPEND_SIGNATURE = parseType('(collection<any>, value+) -> collection');
  * SEARCHED_VALUE_POLICY: how `Contains`, `IndexOf` and `Count` treat the value
  * they search for (user decision 2026-09-26).
  *
- * A search for an absent value finds nothing. When the searched value is the
- * `Missing` or `Undefined` symbol, the answer is the "not found" answer of the
- * operator: `False` for `Contains`, `0` for `IndexOf` and `0` for `Count`.
- * This is true also when the collection holds an absent element:
- * `IndexOf([1, Missing], Missing)` is `0`. A `NaN` value is not absent: it is
- * a number, and `IndexOf([NaN], NaN)` is `1`.
+ * A search for an absent value finds nothing. When the evaluated searched
+ * value is `Missing`, `Undefined` or `NaN`, the answer is the "not found"
+ * answer of the operator: `False` for `Contains`, `0` for `IndexOf` and `0`
+ * for `Count`. In a numeric domain `NaN` is the absence marker, so a `NaN`
+ * value is not found either (`isAbsentSearchedValue`). This is true whatever
+ * the collection holds: `IndexOf([1, Missing], Missing)` and
+ * `IndexOf([1, NaN], NaN)` are both `0`. An absent element of the collection
+ * does not change the answer, except that it cannot match.
  *
  * A restricted value, `2{c}` (`When(2, c)`), whose condition `c` is not
  * decided, stays in the application: these operators do not thread
@@ -751,18 +753,9 @@ const APPEND_SIGNATURE = parseType('(collection<any>, value+) -> collection');
  * threaded value gives `When(Contains([1, 2], 2), c)`, which becomes `Missing`
  * when `c` becomes false, but the correct answer is then `False`. So the
  * application stays unevaluated until `c` is decided. When `c` is true, the
- * value is `2` and the search runs. When `c` is false, the value is absent and
- * the answer is "not found". The same is true for a `List`, `Tuple` or `Set`
- * that holds such a value.
- *
- * A restricted NUMBER whose condition is false evaluates to `NaN`, not to
- * `Missing` (`2{c}` is `NaN` when `c` is false). The evaluated value then
- * cannot be told apart from a `NaN` that is present, which a search finds
- * (`IndexOf([1, NaN], NaN)` is `2`). So when the evaluated value is `NaN`,
- * the searched operand of `application` (the application before its operands
- * are evaluated) is examined: if it is a restriction whose condition is
- * false, or a piecewise value (`Which`) whose conditions are all false, the
- * value is absent (`isMaskedAbsentNumber`).
+ * value is `2` and the search runs. When `c` is false, the value is absent
+ * (`NaN` for a number) and the answer is "not found". The same is true for a
+ * `List`, `Tuple` or `Set` that holds such a value.
  *
  * The collection operand is different: an absent collection makes the answer
  * absent (`Contains(Missing, 2)` is `Missing`), and a restricted collection is
@@ -773,14 +766,11 @@ const APPEND_SIGNATURE = parseType('(collection<any>, value+) -> collection');
  * otherwise.
  */
 function searchedValueStatus(
-  value: Expression | undefined,
-  application: Expression | undefined
+  value: Expression | undefined
 ): 'absent' | 'undecided' | undefined {
   if (value === undefined) return undefined;
-  if (isAbsentSymbol(value)) return 'absent';
+  if (isAbsentSearchedValue(value)) return 'absent';
   if (holdsConditionalValue(value)) return 'undecided';
-  const written = isFunction(application) ? application.ops[1] : undefined;
-  if (isMaskedAbsentNumber(value, written)) return 'absent';
   return undefined;
 }
 
@@ -3705,7 +3695,7 @@ function firstPresentElement(xs: Expression): Expression | undefined {
  * The absence marker of an element read whose collection operand is absent
  * as a whole, such as `First` of a restricted list whose condition is false.
  * The marker is that of the codomain, read from the type of the application
- * `expression` (user decision of 2026-09-25, `docs/ERROR-MODEL.md` §2): `NaN`
+ * `expression` (user decision of 2026-09-26, `docs/ERROR-MODEL.md` §2): `NaN`
  * when that type, less its `missing` arm, is numeric, and `Missing`
  * otherwise. So `First((1, 2) {0 < t})` is `NaN` once `t` is negative, as it
  * is when the restriction was lifted out before `t` got a value, and `First`
@@ -6262,8 +6252,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       return ce._fn('Contains', adjusted ?? stripped);
     },
-    evaluate: ([xs, value], { engine: ce, expression }) => {
-      const searched = searchedValueStatus(value, expression);
+    evaluate: ([xs, value], { engine: ce }) => {
+      const searched = searchedValueStatus(value);
       if (searched === 'undecided') return undefined;
       if (searched === 'absent') return ce.False;
       // Three-valued: an indeterminate membership (e.g. a bounded walk that
@@ -6423,7 +6413,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       return ce._fn('Count', adjusted ?? stripped);
     },
-    evaluate: ([xs, what], { engine, expression }) => {
+    evaluate: ([xs, what], { engine }) => {
       // A decided non-collection source is refused the same way `Length` is,
       // in both the 1-arg and the 2-arg form. The declared `collection<any>`
       // parameter makes `validateArguments` wrap a STATICALLY decided operand
@@ -6463,7 +6453,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // number leaves compare by exact value, so `0.5` counts as `1/2`).
       // Only a finite collection has a knowable count; anything else stays
       // symbolic, mirroring the 1-arg form.
-      const searched = searchedValueStatus(what, expression);
+      const searched = searchedValueStatus(what);
       if (searched === 'undecided') return undefined;
       if (searched === 'absent') return engine.Zero;
       if (xs.isFiniteCollection !== true) return undefined;
@@ -8058,6 +8048,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops, context) =>
       BoxedType.forResult(joinResultTypeD(ops), context.engine._typeResolver),
     collection: {
+      // A `Join` with an operand that can be absent is not a collection view
+      // (`mayBeAbsentCollectionOperand`): it is not enumerated, and it has no
+      // count and no finiteness. It evaluates to `Missing` (or to a threaded
+      // result for a restricted operand), and consumers read that value.
+      isCollection: (expr) =>
+        !isFunction(expr) || !expr.ops.some(mayBeAbsentCollectionOperand),
       isEnumerable: enumerableFromAllSources,
       isLazy: (_expr) => true,
       // Without this, `materialize()` never reaches its key-value branch (it
@@ -8374,6 +8370,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops, context) =>
       BoxedType.forResult(appendResultTypeD(ops), context.engine._typeResolver),
     collection: {
+      // An `Append` whose source can be absent is not a collection view
+      // (`mayBeAbsentCollectionOperand`). See `Join`.
+      isCollection: (expr) =>
+        !isFunction(expr) ||
+        expr.nops === 0 ||
+        !mayBeAbsentCollectionOperand(expr.op1),
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       // Without this, `materialize()` never reaches its key-value branch (it
@@ -10881,8 +10883,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     missingStrip: [0],
     signature: '(collection<any>, any) -> integer',
-    evaluate: ([xs, value], { engine: ce, expression }) => {
-      const searched = searchedValueStatus(value, expression);
+    evaluate: ([xs, value], { engine: ce }) => {
+      const searched = searchedValueStatus(value);
       if (searched === 'undecided') return undefined;
       if (searched === 'absent') return ce.Zero;
       const index = xs.indexWhere((x) => x.isSame(value)) ?? undefined;
@@ -14189,6 +14191,67 @@ function isAtomicJoinOperand(op: Expression): boolean {
 }
 
 /**
+ * The collection operators whose FIRST operand is the source collection and
+ * whose result is absent when that source is absent. `Append` is one: its
+ * other operands are elements, and an element that may be absent does not
+ * make the collection absent.
+ */
+const SOURCE_FIRST_COLLECTION_OPERATORS = new Set([
+  'Append',
+  'Take',
+  'Drop',
+  'Reverse',
+  'Sort',
+  'Rest',
+  'Most',
+  'Unique',
+  'Slice',
+  'RotateLeft',
+  'RotateRight',
+  'RandomShuffle',
+  'Filter',
+]);
+
+/**
+ * True when `op`, a collection operand of `Join` or of `Append`, can be
+ * absent: the `Missing` or `Undefined` symbol; a restriction (`When`) or a
+ * piecewise value (`Which`, `If`) that is held because its condition is not
+ * decided when the expression is built; or a nested `Join`, or a collection
+ * operator whose source is one of these (`Take(Missing, 1)`).
+ *
+ * `Join` and `Append` propagate an absent collection: `Join(Missing, [3])` and
+ * `Append(Missing, 3)` evaluate to `Missing` (user decision 2026-09-26), and
+ * a restricted operand is threaded (`Join([1, 2]{c}, [3])` is
+ * `[1, 2, 3]{c}`). So such an expression is not a collection view: its
+ * collection handlers must not enumerate the present operands. Before, they
+ * did. `Join(Missing, [3])` enumerated `3`, so `Sum(Join(Missing, [3]))` stayed
+ * unevaluated while `Sum(Missing)` is `NaN`, and the unevaluated
+ * `Join([1, 2]{c}, [3])` printed as `Set(1{c}, 2{c}, 3)`, a set of restricted
+ * cells.
+ */
+function mayBeAbsentCollectionOperand(op: Expression): boolean {
+  if (
+    isAbsentSymbol(op) ||
+    isFunction(op, 'When') ||
+    isFunction(op, 'Which') ||
+    isFunction(op, 'If')
+  )
+    return true;
+  // A nested `Join` over such an operand may be absent too, and so may an
+  // `Append` whose SOURCE (its first operand) is: the appended values are
+  // elements, and an element that may be absent does not make the collection
+  // absent. The test reads the structure only: it never evaluates an operand.
+  if (isFunction(op, 'Join'))
+    return op.ops.some((x) => mayBeAbsentCollectionOperand(x));
+  // A collection operator that takes its source first passes an absent
+  // source through (`Take(Missing, 1)` is `Missing`), so its source is read
+  // too.
+  if (isFunction(op) && SOURCE_FIRST_COLLECTION_OPERATORS.has(op.operator))
+    return op.op1 !== undefined && mayBeAbsentCollectionOperand(op.op1);
+  return false;
+}
+
+/**
  * A `Join` operand that is provably a SCALAR — one value, not a collection —
  * wrapped as the one-element list it contributes, so `Join([1, 2], 3)` is
  * `[1, 2, 3]` and `Join(1, 2, 3)` is `[1, 2, 3]`: the Desmos reading of
@@ -14203,10 +14266,13 @@ function isAtomicJoinOperand(op: Expression): boolean {
 function wrapScalarJoinOperand(ce: ComputeEngine, op: Expression): Expression {
   // An absent operand (`Missing`, `Undefined`) is an absent collection, not
   // one element: `Join(Missing, [1])` is `Missing`, as a collection operator
-  // over an absent collection is (user decision 2026-09-25). Before, it was
+  // over an absent collection is (user decision 2026-09-26). Before, it was
   // wrapped, and the result was `[Missing, 1]`, while a restricted list whose
   // condition failed (`Join([1]{c}, [2])`) gave `Missing`.
   if (isAbsentSymbol(op)) return op;
+  // The same holds for an operand that may be an absent collection
+  // (`Sort(Missing)` has the type `missing`, which reads as a scalar).
+  if (mayBeAbsentCollectionOperand(op)) return op;
   return isProvablyScalarJoinOperand(op) ? ce.function('List', [op]) : op;
 }
 

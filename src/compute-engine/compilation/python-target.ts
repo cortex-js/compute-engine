@@ -1043,25 +1043,34 @@ function compilePythonComprehension(
 // `toString` as an ordinary free symbol.
 
 /**
+ * True when the searched value `needle` can be absent at run time: its type
+ * has a `missing` arm, or it can be a number, which can be `NaN`. A needle
+ * that is provably a string, a boolean, a tuple or a list cannot be absent,
+ * so its search needs no run-time test.
+ */
+function canBeAbsentAtRunTime(needle: Expression): boolean {
+  const t = resolveTypeForCompilation(needle.type.type);
+  return typeContainsMissing(t) || couldMatch(t, 'number');
+}
+
+/**
  * Compile the search of `Contains`, `IndexOf` or `Element` for the searched
  * value `needle`, so that an absent searched value is not found (user
  * decision 2026-09-26): the answer is then `notFound` (`False` or `0`), as in
  * the interpreter. `search(v)` emits the search for the compiled value `v`.
  *
- * The compiled value of an absent needle cannot be told apart from a present
- * one by the element test alone. The `Missing` symbol and a restriction
- * `v{c}` whose condition is false both compile to `nan` for a number, which
- * the element test finds in a list that holds `nan`. So the absence is
- * decided here, from the structure of the needle:
- *
- * - A `Missing` or `Undefined` symbol is not found.
- * - A restriction `When(v, c)` with a scalar condition searches for `v` when
- *   `c` holds, and is not found otherwise. A piecewise value
- *   `Which(c1, v1, c2, v2, …)` searches for the value of the first condition
- *   that holds, and is not found when no condition holds.
- * - Any other needle whose type admits `missing` is not found when its
- *   run-time value is `None`, the absence marker of a value that is not a
- *   number.
+ * The searched value is absent when its run-time value is `None` (the absence
+ * marker of a value that is not a number) or a float `nan` (the absence
+ * marker of a number: `Missing` in a numeric position and a restriction
+ * `v{c}` whose condition is false both compile to `nan`). The test is on the
+ * run-time value, not on the structure of the needle, so a restriction, a
+ * piecewise value, an `If` with a `Missing` branch, an element read and an
+ * arithmetic result all give the same answer as the interpreter
+ * (`isAbsentSearchedValue`, `collection-utils.ts`). The float test accepts
+ * `np.floating` as well: `np.float32` and `np.float16` are not subclasses of
+ * `float`, and `_ce_same` treats them as floats too. The `nan` test is
+ * `_n != _n`, which is true only for `nan`, so the emitted code needs no
+ * `import math`.
  */
 function pySearchedValue(
   needle: Expression,
@@ -1071,29 +1080,9 @@ function pySearchedValue(
 ): string {
   if (isSymbol(needle, 'Missing') || isSymbol(needle, 'Undefined'))
     return notFound;
-  const self = (x: Expression) =>
-    pySearchedValue(x, compile, search, notFound);
-  const scalarCondition = (c: Expression) =>
-    !c.type.matches('collection<any>');
-  if (
-    isFunction(needle, 'When') &&
-    needle.nops === 2 &&
-    scalarCondition(needle.ops[1])
-  )
-    return `(${self(needle.ops[0])} if (${compile(needle.ops[1])}) else ${notFound})`;
-  if (
-    isFunction(needle, 'Which') &&
-    needle.nops % 2 === 0 &&
-    needle.ops.every((x, i) => i % 2 === 1 || scalarCondition(x))
-  ) {
-    let code = notFound;
-    for (let i = needle.nops - 2; i >= 0; i -= 2)
-      code = `(${self(needle.ops[i + 1])} if (${compile(needle.ops[i])}) else ${code})`;
-    return code;
-  }
   const v = compile(needle);
-  if (!typeContainsMissing(needle.type.type)) return search(v);
-  return `(lambda _n: ${notFound} if _n is None else ${search('_n')})(${v})`;
+  if (!canBeAbsentAtRunTime(needle)) return search(v);
+  return `(lambda _n: ${notFound} if _n is None or (isinstance(_n, (float, np.floating)) and _n != _n) else ${search('_n')})(${v})`;
 }
 const PYTHON_OPERATORS: CompiledOperators = {
   __proto__: null as never,
@@ -1614,8 +1603,10 @@ const PYTHON_EQCOLL_HELPER = `def _ce_eqcoll(_a, _b):
  *  - strings, and a missing needle → 0, are unchanged.
  *
  * The one other departure from Python equality is NaN: `nan == nan` is False,
- * so a NaN needle was never found, where the interpreter's structural
- * `.isSame()` answers 1. The both-NaN case is guarded to float scalars so an
+ * where the interpreter's structural `.isSame()` compares two `NaN` as the
+ * same. A `NaN` needle never reaches this helper (`pySearchedValue` answers 0
+ * for it, because a search never finds an absent value), but a `NaN`
+ * component of a tuple needle does, and is found. The both-NaN case is guarded to float scalars so an
  * ndarray element cannot reach it (`_a != _a` on an array is an array, and
  * `and` would raise an ambiguous-truth-value error); `np.float64` subclasses
  * `float`, and `np.floating` covers the narrower numpy float scalars.
@@ -2095,7 +2086,7 @@ function pyCollArg(
  * collection `coll` that selects no element: an out-of-range position, or a
  * collection that is absent as a whole (`None` at run time, the value of a
  * restriction whose condition is false). The interpreter answers the marker
- * of the element domain (user decision of 2026-09-25, `docs/ERROR-MODEL.md`
+ * of the element domain (user decision of 2026-09-26, `docs/ERROR-MODEL.md`
  * §2, and `absenceMarker()` in `library/collections.ts`):
  *
  * - `float('nan')` when the element type, less its `missing` arm, is a
@@ -2164,7 +2155,8 @@ function pyNthElement(
     }
   } else code = pyCollArg(kind, arg, compile);
   const marker = pyAbsenceMarker(arg!);
-  const read = k < 0 ? `_l[${k}] if len(_l) >= ${-k}` : `_l[${k}] if len(_l) > ${k}`;
+  const read =
+    k < 0 ? `_l[${k}] if len(_l) >= ${-k}` : `_l[${k}] if len(_l) > ${k}`;
   return `(lambda _l: ${marker} if _l is None else (${read} else ${marker}))(${code})`;
 }
 
@@ -3828,6 +3820,19 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Join: (args, compile) => {
     if (args.length === 0) return '[]';
+    // An absent operand (`Missing`, `Undefined`) is an absent collection, and
+    // the interpreter answers `Missing` for the whole join (user decision
+    // 2026-09-26). The scalar arm below compiled it as one `nan` element
+    // (`[math.nan, 3]`), so the call fails closed.
+    const absent = args.findIndex(
+      (a) => isSymbol(a, 'Missing') || isSymbol(a, 'Undefined')
+    );
+    if (absent >= 0)
+      throw new Error(
+        `Could not compile \`Join\`: operand ${absent + 1} is absent, and the ` +
+          `interpreter answers \`Missing\` for the whole join. The interpreter ` +
+          `evaluates it instead.`
+      );
     // A tuple (through an alias or an all-tuple union:
     // `isProvablyTupleParticipant`), or a scalar whose type proves it is not
     // a collection, is one ELEMENT, as the interpreter's `isAtomicJoinOperand`

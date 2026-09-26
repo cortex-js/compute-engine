@@ -2264,10 +2264,11 @@ function isExactRealValue(x: Expression): boolean {
  * of the factors. The result is the numeric product as one literal, followed
  * by the factors that are not numbers.
  *
- * A complex number factor with a finite value is kept as a factor, after the
- * numeric product. Returns `undefined` when no factor has an exact value that
- * is not zero (the 0 or ±∞ is then the true value of the factor), or when
- * another number factor is not real.
+ * A complex number factor with a finite value is multiplied into the numeric
+ * product after the fold of the real factors, so that the result has one
+ * number factor, as at the default precision. Returns `undefined` when no
+ * factor has an exact value that is not zero (the 0 or ±∞ is then the true
+ * value of the factor), or when another number factor is not real.
  */
 function foldOutOfDoubleRange(
   ce: ComputeEngine,
@@ -2277,6 +2278,7 @@ function foldOutOfDoubleRange(
   numeric?: ReadonlyArray<boolean>
 ): Expression[] | undefined {
   const rest: Expression[] = [];
+  const complexFactors: Expression[] = [];
   let rescued = false;
   let product = BigDecimal.ONE;
   for (let i = 0; i < xs.length; i++) {
@@ -2302,8 +2304,10 @@ function foldOutOfDoubleRange(
       if (isExactRealValue(v)) ex = v;
     }
     const y = ex ?? x;
-    // A complex factor with a finite value (`i`) is kept as a factor, as a
-    // symbol is: `(10^{400}/y) · 10^{-399} · i` is then `10i/y`.
+    // A complex factor with a finite value (`1 + i`) is not folded with the
+    // big decimals, which are real. It is multiplied into the result of the
+    // fold below: `(10^{400}/y) · 10^{-399} · (1 + i)` is then
+    // `(10 + 10i)/y`.
     if (
       isNumber(y) &&
       y.im !== 0 &&
@@ -2311,7 +2315,7 @@ function foldOutOfDoubleRange(
       Number.isFinite(y.re) &&
       Number.isFinite(y.im)
     ) {
-      rest.push(y);
+      complexFactors.push(y);
       continue;
     }
     if (!isNumber(y) || y.im !== 0) return undefined;
@@ -2324,7 +2328,9 @@ function foldOutOfDoubleRange(
     );
   }
   if (!rescued) return undefined;
-  return [ce.number(ce._numericValue(product)).N(), ...rest];
+  let coefficient = ce.number(ce._numericValue(product)).N();
+  for (const z of complexFactors) coefficient = coefficient.mul(z);
+  return [coefficient, ...rest];
 }
 
 /**

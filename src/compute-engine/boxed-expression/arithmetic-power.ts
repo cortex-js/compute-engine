@@ -1,7 +1,7 @@
 import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { BigDecimal } from '../../big-decimal/index.js';
-import type { Expression } from '../global-types.js';
+import type { Expression, NumberLiteralInterface } from '../global-types.js';
 import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric.js';
 import { bigintMaximalPerfectPower } from '../numerics/bigint.js';
 import {
@@ -17,6 +17,7 @@ import { halfTurnAngle, radiansToAngle } from './trigonometry.js';
 import { apply, apply2 } from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import { chopComplexDust } from '../numeric-value/roundoff.js';
 
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
  * type must answer no: `never` is a subtype of `matrix` (of everything),
@@ -1083,6 +1084,69 @@ function hasInexactLiteral(x: Expression): boolean {
 }
 
 /**
+ * The numeric value of `x^exp` for a complex base or a complex exponent,
+ * computed with the complex kernel.
+ *
+ * The roundoff dust of the kernel is removed with a test that is relative to
+ * the modulus of the result (`chopComplexDust()`), so that a small result is
+ * kept: `(10^{-10}i)^2` is `-10^{-20}`, and `(10^{-6}i)^3` is `-10^{-18}i`.
+ */
+function complexPowN(
+  x: Expression & NumberLiteralInterface,
+  exp: number | (Expression & NumberLiteralInterface)
+): Expression | undefined {
+  const ce = x.engine;
+  const [expRe, expIm] = typeof exp === 'number' ? [exp, 0] : [exp.re, exp.im];
+  // A NaN operand propagates.
+  if ([x.re, x.im, expRe, expIm].some((v) => Number.isNaN(v))) return ce.NaN;
+  // A zero base: 0^w is 0 when the real part of w is positive. Otherwise it
+  // has no value (a pole or an undefined point), so the result is NaN, and
+  // the polar form below must not run (ln 0 is -∞).
+  if (x.re === 0 && x.im === 0) return expRe > 0 ? ce.Zero : ce.NaN;
+  let z: { re: number; im: number } = ce
+    .complex(x.re, x.im)
+    .pow(ce.complex(expRe, expIm));
+  // The complex kernel can give a NaN part for finite operands when an
+  // intermediate value overflows or underflows: `(10^{-200} + 10^{-200}i)^{-0.5}`
+  // and `(10^{300} + 10^{300}i)^{0.3}` give `NaN + NaN·i`. Then compute the
+  // power again in polar form, z^w = e^{w·ln z} with
+  // ln z = ln|z| + i·arg(z). ln|z| is computed as
+  // ln(m) + ½·ln(1 + (n/m)²), where m and n are the larger and the smaller
+  // of |re| and |im|, so that |z| itself is never formed: it can be above the
+  // largest double for finite parts (`1.5e308 + 1.5e308i`).
+  if (Number.isNaN(z.re) || Number.isNaN(z.im)) {
+    const m = Math.max(Math.abs(x.re), Math.abs(x.im));
+    const n = Math.min(Math.abs(x.re), Math.abs(x.im));
+    const lnModulus = Math.log(m) + 0.5 * Math.log1p((n / m) ** 2);
+    const argument = Math.atan2(x.im, x.re);
+    const magnitude = Math.exp(expRe * lnModulus - expIm * argument);
+    const angle = expIm * lnModulus + expRe * argument;
+    z = {
+      re: magnitude * Math.cos(angle),
+      im: magnitude * Math.sin(angle),
+    };
+  }
+  // When the polar form also gives a NaN part, the angle is not known (an
+  // infinite ln|z| times a nonzero imaginary exponent, or an angle that
+  // overflows). The magnitude can still decide the answer: 0 when it
+  // underflows, the complex infinity when it overflows. Otherwise the result
+  // is undefined, and the caller uses the exact or symbolic power.
+  if (Number.isNaN(z.re) || Number.isNaN(z.im)) {
+    const m = Math.max(Math.abs(x.re), Math.abs(x.im));
+    const n = Math.min(Math.abs(x.re), Math.abs(x.im));
+    const lnModulus =
+      m === Infinity ? Infinity : Math.log(m) + 0.5 * Math.log1p((n / m) ** 2);
+    const lnMagnitude = expRe * lnModulus - expIm * Math.atan2(x.im, x.re);
+    if (lnMagnitude === -Infinity || Math.exp(lnMagnitude) === 0)
+      return ce.Zero;
+    if (lnMagnitude === Infinity || Math.exp(lnMagnitude) === Infinity)
+      return ce.ComplexInfinity;
+    return undefined;
+  }
+  return ce.number(ce._numericValue(chopComplexDust(z.re, z.im)));
+}
+
+/**
  * The power function.
  *
  * It follows the same conventions as SymPy, which do not always
@@ -1274,6 +1338,21 @@ export function pow(
           return absPow.mul(ce.number(ce._numericValue({ re, im })));
         }
       }
+
+      // A complex base or a complex exponent: use `complexPowN()`, not
+      // `apply2()`. It gives a zero base its value (0 or NaN), and it
+      // computes the power again in polar form when the complex kernel gives
+      // a NaN part for finite operands. When it cannot give a value (it
+      // returns undefined), the result is the exact or symbolic power.
+      if (typeof exp === 'number') {
+        if (x.im !== 0)
+          return (
+            complexPowN(x, exp) ?? pow(x, exp, { numericApproximation: false })
+          );
+      } else if (isNumber(exp) && (x.im !== 0 || exp.im !== 0))
+        return (
+          complexPowN(x, exp) ?? pow(x, exp, { numericApproximation: false })
+        );
 
       if (typeof exp === 'number') {
         return (

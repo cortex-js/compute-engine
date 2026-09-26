@@ -4,13 +4,10 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression, IComputeEngine } from '../global-types.js';
 
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
-import {
-  chop,
-  ROUNDOFF_TOLERANCE,
-  SMALL_INTEGER,
-} from '../numerics/numeric.js';
+import { SMALL_INTEGER } from '../numerics/numeric.js';
 import { bignumPreferred } from './utils.js';
 import { isNumber } from './type-guards.js';
+import { chopComplexDust } from '../numeric-value/roundoff.js';
 
 /**
  * Box a kernel result that is a plain JS double.
@@ -207,15 +204,12 @@ export function applyN(
   if (result === undefined) return undefined;
   if (result instanceof Complex) {
     if (Number.isNaN(result.re) || Number.isNaN(result.im)) return undefined;
-    // Chop kernel roundoff dust at the machine-roundoff scale, NOT
-    // `ce.tolerance` — whether a component is noise from the complex kernel is
+    // Remove kernel roundoff dust at the machine-roundoff scale, NOT
+    // `ce.tolerance`: whether a component is noise from the complex kernel is
     // a property of the arithmetic, not of the user's comparison tolerance.
-    return ce.number(
-      ce._numericValue({
-        re: chop(result.re, ROUNDOFF_TOLERANCE),
-        im: chop(result.im, ROUNDOFF_TOLERANCE),
-      })
-    );
+    // The test is RELATIVE to the modulus of the result, so a small result
+    // (`(10^{-10} i)^2 = -10^{-20}`) keeps both parts.
+    return ce.number(ce._numericValue(chopComplexDust(result.re, result.im)));
   }
   if (typeof result === 'number') {
     if (Number.isNaN(result)) return undefined;
@@ -289,18 +283,13 @@ export function apply2(
 
   if (result === undefined) return undefined;
   if (result instanceof Complex)
-    // Roundoff scale, not `ce.tolerance` — see the single-argument `apply`.
-    return ce.number(
-      ce._numericValue({
-        re: chop(result.re, ROUNDOFF_TOLERANCE),
-        im: chop(result.im, ROUNDOFF_TOLERANCE),
-      })
-    );
+    // Relative roundoff scale, not `ce.tolerance`: see the first branch.
+    return ce.number(ce._numericValue(chopComplexDust(result.re, result.im)));
   // Do not chop a real result: a legitimately-small value (e.g. 10^-100 from
   // `Power(10, -100)`) is not roundoff noise, and chopping it to 0 is both
   // wrong and inconsistent with the single-argument `apply` above. (The
-  // complex branch still chops each component, where a tiny re/im part is
-  // typically trig roundoff.)
+  // complex branch removes a component only when it is tiny compared with
+  // the modulus, which is typically trig roundoff.)
   if (typeof result === 'number') return boxMachineNumber(ce, result);
   return ce.number(result);
 }
