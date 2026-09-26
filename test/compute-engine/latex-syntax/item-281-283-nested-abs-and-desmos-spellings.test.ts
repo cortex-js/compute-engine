@@ -379,8 +379,16 @@ describe('A square of a base that ends with a superscript', () => {
   });
 
   test('a base with no superscript adds no brace', () => {
-    expect(ce.parse('(n!)^2').latex).toBe('n!^2');
     expect(ce.parse('x_1^2').latex).toBe('x_1^2');
+  });
+
+  // `!` binds tighter than `^`, so `n!^2` is unambiguous to parse, but it
+  // is parenthesized anyway: read at a glance, it looks like `n` factorial
+  // of `2`, not `n!` squared. Real parens, not a brace: a `Factorial` base
+  // is not a stacked-superscript case, so `endsWithSuperscript` above does
+  // not apply to it.
+  test('a factorial base is parenthesized', () => {
+    expect(ce.parse('(n!)^2').latex).toBe('(n!)^2');
   });
 
   test('the braced form parses back to the same expression', () => {

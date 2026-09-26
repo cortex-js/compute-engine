@@ -492,9 +492,47 @@ export function joinLatex(segments: Iterable<string>): string {
 }
 
 export function supsub(c: '_' | '^', body: string, x: string): string {
-  if (body.includes(c)) body = `{${body}}`;
+  if (body.includes(c) && !isFullyParenthesized(body)) body = `{${body}}`;
   if (/^[0-9]$/.test(x)) return `${body}${c}${x}`;
   return `${body}${c}{${x}}`;
+}
+
+/**
+ * Is `s` a single `(...)` or `\left(...\right)` group spanning the whole
+ * string? `wrapShort` already parenthesizes a base this way when its
+ * contents (e.g. a nested power) would otherwise be ambiguous; `supsub`
+ * must not add its own `{}` bracing on top, or `(x^2)^3` becomes the
+ * needlessly doubled `{(x^2)}^3`.
+ */
+function isFullyParenthesized(s: string): boolean {
+  const scaled = s.startsWith('\\left(');
+  if (!scaled && !s.startsWith('(')) return false;
+  const closeToken = scaled ? '\\right)' : ')';
+  if (!s.endsWith(closeToken)) return false;
+
+  let depth = 0;
+  for (let i = 0; i < s.length; ) {
+    if (s.startsWith('\\left(', i)) {
+      depth++;
+      i += 6;
+    } else if (s.startsWith('\\right)', i)) {
+      depth--;
+      // The group that opened the string closed before the end: the
+      // outermost pair does not span the whole string.
+      if (depth === 0 && i + 7 !== s.length) return false;
+      i += 7;
+    } else if (s[i] === '(') {
+      depth++;
+      i++;
+    } else if (s[i] === ')') {
+      depth--;
+      if (depth === 0 && i + 1 !== s.length) return false;
+      i++;
+    } else {
+      i++;
+    }
+  }
+  return depth === 0;
 }
 
 /** Is the character at `i` escaped, as the brace of `\{` is? It is when an

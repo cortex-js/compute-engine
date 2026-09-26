@@ -1,3 +1,15 @@
+## Unreleased
+
+### Issues Resolved
+
+- **A `Power` base loses its brackets in `.latex`.** The serializer decided
+  whether to parenthesize a `Power`'s base from a fixed list of heads, so a
+  base outside that list serialized unwrapped even where it changes the
+  math: `["Power", ["Complex", 1, 1], 2]` wrote `1+\imaginaryI^2` (reads as
+  `1 + i²`) instead of `(1+\imaginaryI)^2`. The base is now bracketed by
+  precedence and kind: a `Complex` sum or scaled unit, a `Rational`/`Divide`
+  (looser than `^`), a postfix `Factorial`, and a nested `Power` (#345).
+
 ## 0.136.2 _2026-09-25_
 
 ### Issues Resolved

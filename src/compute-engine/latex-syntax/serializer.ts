@@ -3,6 +3,7 @@ import {
   nops,
   stringValue,
   operator,
+  operand,
   symbol,
   isNumberObject,
   isSymbolObject,
@@ -18,6 +19,7 @@ import {
   DelimiterScale,
   ADDITION_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
+  EXPONENTIATION_PRECEDENCE,
 } from './types.js';
 
 import { normalizeStyleOptions } from './style-options.js';
@@ -279,27 +281,88 @@ export class Serializer {
         exprStr,
         this.options.groupStyle(expr, this.level + 1)
       );
+    // A `Complex` node (raw, before it folds into a symbol or a real
+    // literal — e.g. under `{ canonical: false }`) serializes to a sum
+    // (`1+i`) or a scaled unit (`2i`), both of which read looser than `^`
+    // and must be wrapped. The bare unit `i`/`-i` (`re` is 0, `|im|` is 1)
+    // is a single token, same as any other symbol, and needs no wrapping.
+    if (h === 'Complex') {
+      const isBareUnit =
+        machineValue(operand(expr, 1)) === 0 &&
+        Math.abs(machineValue(operand(expr, 2)) ?? 0) === 1;
+      return isBareUnit
+        ? exprStr
+        : this.wrapString(
+            exprStr,
+            this.options.groupStyle(expr, this.level + 1)
+          );
+    }
+
     // `Mod` serializes as open infix (`a\bmod b`): in a tight context
     // (power base, solidus fraction) the adjacent notation binds tighter
     // than `\bmod` and would absorb its trailing operand on re-parse
     // (`Mod(A,2)^x` → `A\bmod2^x` = `Mod(A, 2^x)`), so it must be wrapped.
     // `Range` has the same hazard on its END operand (parsed at minPrec
     // 270): `Range(1,n)^2` → `1..n^2` re-parses as `Range(1, n²)`.
-    if (
-      h !== 'Add' &&
-      h !== 'Negate' &&
-      h !== 'Subtract' &&
-      h !== 'Measurement' &&
-      h !== 'Multiply' &&
-      h !== 'Mod' &&
-      h !== 'Range'
-    )
-      return exprStr;
+    const isRoundTripHazard =
+      h === 'Add' ||
+      h === 'Negate' ||
+      h === 'Subtract' ||
+      h === 'Measurement' ||
+      h === 'Multiply' ||
+      h === 'Mod' ||
+      h === 'Range';
+
+    // Anything the dictionary declares as an `expression` with a
+    // precedence looser than `^` (e.g. `Rational`/`Divide`, at fraction
+    // precedence) reads the same way: `\frac{2}{3}^2` looks like the
+    // fraction raised to the denominator's power squared, not the whole
+    // fraction squared.
+    const def = h ? this.dictionary.ids.get(h) : undefined;
+    const isLooseExpression =
+      def?.kind === 'expression' &&
+      def.precedence !== undefined &&
+      def.precedence < EXPONENTIATION_PRECEDENCE;
+
+    if (!isRoundTripHazard && !isLooseExpression) return exprStr;
 
     // Wrap the expression with delimiters
     return this.wrapString(
       exprStr,
       this.options.groupStyle(expr, this.level + 1)
+    );
+  }
+
+  /**
+   * Like `wrapShort`, but for a base that sits directly under a `^` (a
+   * `Power`/`Square`/`Root` exponent or degree). Two more shapes read as
+   * ambiguous there, though neither is a parsing hazard in `wrapShort`'s
+   * other context, a solidus fraction's numerator or denominator (`a/n!`,
+   * `a/x^{23}` are unambiguous, so those stay bare):
+   *
+   * - `Power`/`Square` (a `Power` with exponent 2 is rewritten to `Square`
+   *   for serialization, see `boxed-expression/serialize.ts`): stacking
+   *   superscripts, `x^{2^3}`, is read as `x^(2^3)`, a different
+   *   expression than `(x^2)^3`.
+   * - `Factorial`/`Factorial2`: `!` binds tighter than `^`
+   *   (`POSTFIX_PRECEDENCE` > `EXPONENTIATION_PRECEDENCE`), so `n!^2` is
+   *   unambiguous to parse, but reads as `n` factorial, squared, only
+   *   with effort.
+   */
+  wrapPowerBase(base: MathJsonExpression | null | undefined): string {
+    const wrapped = this.wrapShort(base);
+    if (base === null || base === undefined) return wrapped;
+    const h = operator(base);
+    if (
+      h !== 'Power' &&
+      h !== 'Square' &&
+      h !== 'Factorial' &&
+      h !== 'Factorial2'
+    )
+      return wrapped;
+    return this.wrapString(
+      wrapped,
+      this.options.groupStyle(base, this.level + 1)
     );
   }
 
