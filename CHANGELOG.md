@@ -1,3 +1,12 @@
+## Unreleased
+
+### Issues Resolved
+
+- **`EllipticE(m)` is accurate at complex `m`** (#346). It now uses Carlson's
+  R_F/R_D (DLMF 19.25.1), as `EllipticE(φ, m)` already did at `φ = π/2`,
+  instead of an AGM sum that lost digits off the real axis. `EllipticE(φ, m)`
+  outside `[−π/2, π/2]`, which reduces to `EllipticE(m)`, is fixed with it.
+
 ## 0.136.2 _2026-09-25_
 
 ### Issues Resolved
