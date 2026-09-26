@@ -1492,6 +1492,35 @@ function inverseHyperbolicPole(
 }
 
 /**
+ * The exact value of the hyperbolic functions at 0, which
+ * `constructibleValues` (circular special angles only) does not cover.
+ * `Coth(0)` and `Csch(0)` are two-sided poles, as `Cot(0)` and `Csc(0)` are.
+ * `Arcosh(0)` and `Arcoth(0)` are `iπ/2` and, like `Arccos(2)`, stay symbolic.
+ */
+function hyperbolicZeroValue(
+  operator: string,
+  x: Expression,
+  ce: IComputeEngine
+): Expression | undefined {
+  if (!isNumber(x) || x.im !== 0 || !x.isSame(0)) return undefined;
+  switch (operator) {
+    case 'Sinh':
+    case 'Tanh':
+    case 'Arsinh':
+    case 'Artanh':
+      return ce.Zero;
+    case 'Cosh':
+    case 'Sech':
+      return ce.One;
+    case 'Coth':
+    case 'Csch':
+      return ce.ComplexInfinity;
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Can `DMS`'s degrees/minutes/seconds operands be folded into a single
  * degree count by reading `.re`?
  *
@@ -1720,6 +1749,12 @@ function trigFunction(
         const r = measurementTrig(engine, operator, evalX);
         if (r !== undefined) return numericApproximation ? r.N() : r;
       }
+      // Exact values, ahead of the numeric branch so `.N()` agrees with
+      // `evaluate()` (the float kernel gives `Arcsch(0)` a signed infinity).
+      const exact =
+        inverseHyperbolicPole(operator, x, engine) ??
+        hyperbolicZeroValue(operator, x, engine);
+      if (exact) return numericApproximation ? exact.N() : exact;
       // The operand before its numeric evaluation lets the kernel read an
       // exact large angle without rounding it first (`12345678901234567890123`
       // or `10³⁰·π`). It is the operand of `x` only when the node has one
@@ -1732,10 +1767,6 @@ function trigFunction(
             ? expression.op1
             : undefined
         );
-      // Literal poles of the inverse hyperbolic functions are exact non-finite
-      // values, so fold them in `evaluate()` too (not just `.N()`).
-      const pole = inverseHyperbolicPole(operator, x, engine);
-      if (pole) return pole;
       const a = constructibleValues(operator, x);
       if (a) return a;
       // No constructible value: numericize ONLY an inexact (float) numeric

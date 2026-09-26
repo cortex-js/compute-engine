@@ -1,3 +1,13 @@
+## Unreleased
+
+### Issues Resolved
+
+- **The hyperbolic functions fold at 0 under `evaluate()`,** as the circular
+  ones do (#341): `Sinh(0)`, `Tanh(0)`, `Arsinh(0)` and `Artanh(0)` are `0`,
+  `Cosh(0)` and `Sech(0)` are `1`, and `Coth(0)` and `Csch(0)` are
+  `ComplexInfinity`, as `Cot(0)` and `Csc(0)` are. `Arcsch(0).N()` is now
+  `ComplexInfinity`, as `Arcsch(0).evaluate()` was, not `PositiveInfinity`.
+
 ## 0.136.2 _2026-09-25_
 
 ### Issues Resolved

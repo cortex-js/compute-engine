@@ -325,6 +325,46 @@ describe('Degrees is a faithful conversion (REVIEW.md B20)', () => {
   });
 });
 
+// Regression: the hyperbolic functions stayed symbolic at 0 under
+// `evaluate()` (only `.N()` folded them), unlike their circular counterparts
+// (Sin(0), Cos(0), Tan(0), … already fold via `constructibleValues`, which
+// only knows the circular special angles). `Coth(0)` and `Csch(0)` match
+// `Cot(0)` and `Csc(0)`: `ComplexInfinity`, not a signed infinity.
+describe('Hyperbolic functions at 0', () => {
+  const cases: [string, string][] = [
+    ['Sinh', '0'],
+    ['Cosh', '1'],
+    ['Tanh', '0'],
+    ['Sech', '1'],
+    ['Coth', '~oo'],
+    ['Csch', '~oo'],
+    ['Arsinh', '0'],
+    ['Artanh', '0'],
+  ];
+  for (const [op, expected] of cases) {
+    test(`${op}(0) = ${expected} (exact, evaluate)`, () =>
+      expect(engine.expr([op, 0]).evaluate().toString()).toBe(expected));
+    test(`${op}(0) = ${expected} (N, consistent with evaluate)`, () =>
+      expect(engine.expr([op, 0]).N().toString()).toBe(expected));
+  }
+
+  // Arcosh(0) and Arcoth(0) are legitimately iπ/2, but stay symbolic under
+  // `evaluate()`, matching how Arccos leaves another exact-but-complex value
+  // (e.g. Arccos(2)) unevaluated there.
+  test('Arcosh(0) stays symbolic under evaluate, folds under N', () => {
+    expect(engine.expr(['Arcosh', 0]).evaluate().operator).toBe('Arcosh');
+    const v = engine.expr(['Arcosh', 0]).N();
+    expect(v.re).toBeCloseTo(0, 12);
+    expect(v.im).toBeCloseTo(Math.PI / 2, 12);
+  });
+  test('Arcoth(0) stays symbolic under evaluate, folds under N', () => {
+    expect(engine.expr(['Arcoth', 0]).evaluate().operator).toBe('Arcoth');
+    const v = engine.expr(['Arcoth', 0]).N();
+    expect(v.re).toBeCloseTo(0, 12);
+    expect(v.im).toBeCloseTo(Math.PI / 2, 12);
+  });
+});
+
 // R28b: inverse trig/hyperbolic functions evaluate to their complex principal
 // value when the argument is off the real domain (previously `Arcsin(2).N()`
 // was NaN and `Artanh(2).N()` stayed symbolic), and for complex arguments.
