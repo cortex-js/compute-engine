@@ -277,6 +277,59 @@ export const ABSENT_CELLS_STAY_MISSING: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The collection operators that never compute a value from a cell: they
+ * reorder, select or index the cells of their collection operand (`Sort`,
+ * `Reverse`, `Take`, `Filter`, …), answer positions (`Ordering`), or count
+ * equal cells (`Tally`). An absent cell of
+ * the operand (`[3, Missing, 1]`, typed `list<integer | missing>`) is then
+ * an ordinary cell: it goes into the result as it is, or it only takes a
+ * position in the order. `Sort([3, Missing, 1])` is `[1, 3, Missing]`.
+ *
+ * For these operators, an operand whose `missing` arm is only in its cells
+ * is typed as it is (see `passesAbsentCellsThrough`). Its type binds the type
+ * variables of the signature with the `missing` arm, so `Sort` of that list
+ * is typed `list<integer | missing>`, and the numeric absorption of
+ * `absorbOperandAbsence` is not applied, so `Ordering` of that list stays
+ * `list<integer>`. Before, the operand gave no binding and the numeric
+ * absorption applied: `Sort` was typed `list<unknown>`, `Reverse` `list` and
+ * `Ordering` `list<number>`.
+ *
+ * An operand that can be absent AS A WHOLE (`Sort(Missing)`, a restricted
+ * list) is not changed: the absence gate answers `Missing` for it.
+ */
+const ABSENT_CELLS_PASS_THROUGH: ReadonlySet<string> = new Set([
+  'Sort',
+  'Ordering',
+  'Reverse',
+  'Take',
+  'Drop',
+  'Rest',
+  'Most',
+  'Unique',
+  'RotateLeft',
+  'RotateRight',
+  'Filter',
+  'Slice',
+  'Tally',
+]);
+
+/**
+ * True when `operator` is one of the operators of
+ * `ABSENT_CELLS_PASS_THROUGH` and an operand of type `t` is absent only in
+ * its cells: `t` has a `missing` arm, but not at the top level. Such an
+ * operand is typed as it is: its `missing` arm is not stripped before the
+ * type variables are bound, and it does not start the absorption of
+ * `absorbOperandAbsence`.
+ */
+export function passesAbsentCellsThrough(operator: string, t: Type): boolean {
+  return (
+    ABSENT_CELLS_PASS_THROUGH.has(operator) &&
+    typeContainsMissing(t) &&
+    !hasTopLevelMissing(t)
+  );
+}
+
+/**
  * The type of a THREADED operand without its top-level `missing` arm, or
  * `undefined` when it has none (or has nothing else).
  *

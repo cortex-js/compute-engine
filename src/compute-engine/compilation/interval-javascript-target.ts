@@ -54,6 +54,7 @@ import {
   BaseCompiler,
   compilationType,
   exactRationalDivisor,
+  isGatedNumericListOperand,
   isProvablyNumericListOperand,
   isProvablyStringOperand,
   pointHasBroadcastComponent,
@@ -422,6 +423,23 @@ function compileIntervalCollectionValue(
     target.unrollSkipHeads?.has('Which') !== true
   )
     return compileIntervalSelectionValue(literal, target);
+  // A `When` in a consuming position is a RESTRICTED collection value
+  // (`[1, 2]\{0 < t\}`, `(1, 2)\{0 < t\}`, or a restricted list inside a
+  // `PointList`): its value operand is spelled the way the position spells
+  // it, and `_IA.restrict` masks it as the `When` handler does for a
+  // list-typed input — the `empty` result where the condition fails, the
+  // elements clipped where it is undecided. A value operand this function
+  // does not spell answers `undefined`, and the handler then compiles the
+  // `When` the ordinary way (a list-typed input, a scalar). A restricted
+  // relation is the handler's too. A `When` the caller overrode keeps its
+  // ordinary dispatch.
+  if (
+    literal.operator === 'When' &&
+    literal.ops.length === 2 &&
+    target.unrollSkipHeads?.has('When') !== true &&
+    !literal.ops[0].type.matches('boolean')
+  )
+    return compileIntervalRestrictedValue(literal, target);
   // A seeded list draw has a fixed value, the list of point intervals
   // `_IA.seededChoice` computes (see `seededRandomChoicePlan`). A draw this
   // target does not compile answers `undefined`, and the ordinary lowering
@@ -465,8 +483,14 @@ function compileIntervalCollectionValue(
     // list as an element, so only the point spellings are held to scalar
     // coordinates. A `PointList` with a list component is built as that
     // list of points at run time (`compileIntervalPointListZip`); a `Tuple`
-    // with one is not spelled.
-    if (head !== 'List' && pointHasBroadcastComponent(literal))
+    // with one is not spelled. A RESTRICTED list component
+    // (`isGatedNumericListOperand`, `(A\{0 < t\}, 3)`) is a source too,
+    // although its `missing` arm hides it from `pointHasBroadcastComponent`.
+    if (
+      head !== 'List' &&
+      (pointHasBroadcastComponent(literal) ||
+        literal.ops.some((op) => isGatedNumericListOperand(op)))
+    )
       return head === 'PointList'
         ? compileIntervalPointListZip(literal.ops, target)
         : undefined;
@@ -539,7 +563,7 @@ function compileIntervalPointListZip(
 ): string | undefined {
   const kinds: string[] = [];
   for (const op of ops) {
-    if (isProvablyNumericListOperand(op)) {
+    if (isProvablyNumericListOperand(op) || isGatedNumericListOperand(op)) {
       if (op.isCollection && op.isFiniteCollection === false) return undefined;
       kinds.push('l');
     } else if (op.type.matches('number') && !op.isCollection) kinds.push('s');
@@ -735,6 +759,34 @@ function compileIntervalSelectionValue(
     );
   };
   return build(0);
+}
+
+/**
+ * A `When(value, condition)` at a consuming position (see
+ * `compileIntervalCollectionValue`): `_IA.restrict` over the collection
+ * spelling of `value`, the same run-time call the `When` handler emits.
+ * Answers `undefined` when `value` has no collection spelling, and the
+ * handler then compiles the node. The condition is held scalar
+ * (`assertScalarCondition`) and is evaluated eagerly; the value is the
+ * conditionally-evaluated operand 0, compiled in its own common-subexpression
+ * region, as in the handler.
+ */
+function compileIntervalRestrictedValue(
+  when: Expression,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (!isFunction(when)) return undefined;
+  const [value, cond] = when.ops;
+  if (compileIntervalCollectionValue(value, target) === undefined)
+    return undefined;
+  BaseCompiler.assertScalarCondition(cond);
+  const spelled = BaseCompiler.withCseOperand(
+    when,
+    0,
+    target,
+    () => compileIntervalCollectionValue(value, target)!
+  );
+  return `_IA.restrict(${BaseCompiler.compileValueOperand(cond, target)}, () => ${spelled})`;
 }
 
 /**
@@ -1320,7 +1372,9 @@ function tryIntervalBroadcast(
   const lists = args.map(
     (a, i) =>
       !points[i] &&
-      (isProvablyNumericListOperand(a) || isPossiblyNumericListOperand(a))
+      (isProvablyNumericListOperand(a) ||
+        isPossiblyNumericListOperand(a) ||
+        isGatedNumericListOperand(a))
   );
   const hasPoint = points.some((x) => x);
   if (!hasPoint && !lists.some((x) => x)) return undefined;
@@ -1485,7 +1539,22 @@ function isIntervalPointValuedOperand(
     const element = collectionElementType(t);
     return element !== undefined && pointValued(element);
   };
-  return pointValued(compilationType(e));
+  // The absence arm of a RESTRICTED point or list of points
+  // (`PointList(When(A, 0 < t), B)`, typed `list<tuple<real, real>> |
+  // missing`) is set aside: at run time that operand is its present value
+  // or the `empty` result of the failed restriction, which `_IA.bcastPoint`
+  // passes through as the value of the whole operation.
+  // Only a TOP-LEVEL `missing` arm is set aside; an absent coordinate or an
+  // absent element keeps its own type.
+  const t = compilationType(e);
+  if (typeof t !== 'string' && t.kind === 'union') {
+    const present = t.types.filter((arm) => arm !== 'missing');
+    if (present.length < t.types.length)
+      return (
+        present.length > 0 && pointValued({ kind: 'union', types: present })
+      );
+  }
+  return pointValued(t);
 }
 
 /**
@@ -5133,11 +5202,15 @@ function compileToIntervalTarget(
     // A `WithRandomSeed` root is one when its body is a seeded list draw
     // (`seededRandomChoicePlan`); any other body compiles through the
     // `WithRandomSeed` handler as before.
+    // A `When` root is one when its value is spelled as a collection
+    // (`compileIntervalRestrictedValue`: `[1, 2]\{0 < t\}`); any other value
+    // compiles through the `When` handler as before.
     const rootLiteral = assignedLiteral(expr, target) ?? expr;
     const collectionRoot =
       point === undefined &&
       (COLLECTION_VALUE_HEADS.has(rootLiteral.operator) ||
         rootLiteral.operator === 'Which' ||
+        rootLiteral.operator === 'When' ||
         (isFunction(rootLiteral, 'WithRandomSeed') &&
           isFunction(rootLiteral.ops[1], 'RandomChoice')));
     js =

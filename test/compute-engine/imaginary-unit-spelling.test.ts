@@ -190,8 +190,9 @@ describe('imaginary unit: the interned value is exact', () => {
       0,
       2,
     ]);
-    expect(ce.box(['Multiply', ['Rational', 1, 2], 'ImaginaryUnit']).json)
-      .toEqual(['Complex', 0, ['Rational', 1, 2]]);
+    expect(
+      ce.box(['Multiply', ['Rational', 1, 2], 'ImaginaryUnit']).json
+    ).toEqual(['Complex', 0, ['Rational', 1, 2]]);
     expect(ce.box(['Multiply', ['Sqrt', 2], 'ImaginaryUnit']).json).toEqual([
       'Complex',
       0,
@@ -242,6 +243,85 @@ describe('imaginary unit: the interned value is exact', () => {
       expect(float.re).toBeCloseTo(Math.SQRT1_2, 10);
       expect(float.im).toBeCloseTo(im, 10);
     }
+    // The principal fourth root of a negative value is √(√(−a)), so it is
+    // exact whenever that square root of a Gaussian value is: ∜(−1) is the
+    // same value as √i. `(−1)^{1/4}` canonicalizes to the same `Root`.
+    const halfSqrt2 = ['Divide', ['Sqrt', 2], 2];
+    for (const [src, json, re, im] of [
+      [
+        '\\sqrt[4]{-1}',
+        ['Complex', halfSqrt2, halfSqrt2],
+        Math.SQRT1_2,
+        Math.SQRT1_2,
+      ],
+      [
+        '(-1)^{1/4}',
+        ['Complex', halfSqrt2, halfSqrt2],
+        Math.SQRT1_2,
+        Math.SQRT1_2,
+      ],
+      ['\\sqrt[4]{-4}', ['Complex', 1, 1], 1, 1],
+      [
+        '\\sqrt[4]{-16}',
+        ['Complex', ['Sqrt', 2], ['Sqrt', 2]],
+        Math.SQRT2,
+        Math.SQRT2,
+      ],
+      [
+        '\\sqrt[4]{-9}',
+        ['Complex', ['Divide', ['Sqrt', 6], 2], ['Divide', ['Sqrt', 6], 2]],
+        Math.sqrt(6) / 2,
+        Math.sqrt(6) / 2,
+      ],
+      [
+        '\\sqrt[4]{-\\frac14}',
+        ['Complex', ['Rational', 1, 2], ['Rational', 1, 2]],
+        0.5,
+        0.5,
+      ],
+      [
+        '(-4)^{-1/4}',
+        ['Complex', ['Rational', 1, 2], ['Rational', -1, 2]],
+        0.5,
+        -0.5,
+      ],
+    ] as const) {
+      expect(ce.parse(src).evaluate().json).toEqual(json);
+      const exact = ce.parse(src).evaluate().N();
+      const float = ce.parse(src).N();
+      expect(exact.re).toBeCloseTo(re, 10);
+      expect(exact.im).toBeCloseTo(im, 10);
+      expect(float.re).toBeCloseTo(re, 10);
+      expect(float.im).toBeCloseTo(im, 10);
+    }
+    // No exact value: ∜(−2) = 2^{1/4}(√2/2)(1 + i) needs a fourth root, and
+    // the sixth and eighth roots of −1 have components with different
+    // radicals. They stay a `Root`.
+    for (const src of ['\\sqrt[4]{-2}', '\\sqrt[6]{-1}', '\\sqrt[8]{-1}'])
+      expect(ce.parse(src).evaluate().operator).toBe('Root');
+    // An odd root of a negative value keeps the real-root convention.
+    expect(ce.parse('\\sqrt[3]{-8}').evaluate().json).toEqual(-2);
+    // The `root()` method and `simplify()` gave the root of the absolute
+    // value, ∜(−16) = 2, which is not a fourth root of −16.
+    expect(ce.number(-16).root(4).json).toEqual([
+      'Complex',
+      ['Sqrt', 2],
+      ['Sqrt', 2],
+    ]);
+    expect(ce.parse('\\sqrt[4]{-16}').simplify().json).toEqual([
+      'Complex',
+      ['Sqrt', 2],
+      ['Sqrt', 2],
+    ]);
+    expect(ce.parse('\\sqrt[4]{-1}').simplify().isSame(1)).toBe(false);
+    expect(ce.parse('-x').root(4).operator).toBe('Root');
+    // A negative odd index is odd too: in JavaScript `-3 % 2` is `-1`, and
+    // the method skipped the real-root rewrite. (−8)^(−1/3) = −1/2.
+    expect(ce.number(-8).root(-3).json).toEqual(['Rational', -1, 2]);
+    // Both float lanes give the imaginary square root of a negative real
+    // (the big-decimal lane gave NaN).
+    expect(ce._numericValue(ce.bignum('-4')).root(2).im).toBe(2);
+    expect(ce._numericValue(-4).root(2).im).toBe(2);
     // A transcendental of an exact argument stays symbolic under evaluate()
     // and numericizes only under N().
     expect(ce.parse('\\ln(i)').evaluate().operator).toBe('Ln');

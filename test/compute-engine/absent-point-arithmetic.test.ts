@@ -419,3 +419,227 @@ describe('a point of absent coordinates only, and a product against a matrix', (
     );
   });
 });
+
+describe('an out-of-range read does not depend on how another cell is spelled', () => {
+  // User decision of 2026-09-25. `Third((1, 2))` and `Third((1, Undefined))`
+  // were `NaN`, but `Third((1, Missing))` was `Missing`: the `missing` type of
+  // the absent cell made the element domain look non-numeric. An absent cell
+  // says nothing about the domain of the other cells.
+  const ce = new ComputeEngine();
+  test.each([
+    [['Third', ['Tuple', 1, 2]]],
+    [['Third', ['Tuple', 1, 'Missing']]],
+    [['Third', ['Tuple', 1, 'Undefined']]],
+    [['Third', ['List', 1, 'Missing']]],
+    [['At', ['Tuple', 1, 'Missing'], 5]],
+    [['At', ['List', 1, 'Missing'], 5]],
+  ])('%j is NaN', (json) => {
+    const e = ce.box(json as any);
+    expect(e.evaluate().toString()).toBe('NaN');
+    expect(e.evaluate().type.matches(e.type)).toBe(true);
+  });
+
+  test('the parse route', () => {
+    expect(
+      ce
+        .parse('\\operatorname{Third}((1, \\operatorname{Missing}))')
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
+  });
+
+  test('the type of a literal out-of-range read is the numeric marker', () => {
+    expect(ce.box(['Third', ['Tuple', 1, 'Missing']]).type.toString()).toBe(
+      'nan'
+    );
+  });
+
+  test('a non-numeric collection, or one of absent cells only, is Missing', () => {
+    expect(
+      ce
+        .box(['Third', ['Tuple', "'a'", 'Missing']])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+    expect(
+      ce
+        .box(['Third', ['Tuple', 'Missing', 'Missing']])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+  });
+
+  test('an in-range absent cell is read as it is', () => {
+    expect(
+      ce
+        .box(['Second', ['Tuple', 1, 'Missing']])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+  });
+});
+
+describe('a difference with an absent operand beside a point', () => {
+  // `(1, 2) - Missing` is canonically `Add(Negate(Missing), (1, 2))`. The
+  // evaluation of `-Missing` alone is the number `NaN`, and that `NaN` then
+  // met the point: the difference was `Error(incompatible-type, tuple,
+  // number)` while the sum `(1, 2) + Missing` was `Missing`.
+  const ce = new ComputeEngine();
+  test.each([
+    [['Subtract', ['Tuple', 1, 2], 'Missing']],
+    [['Subtract', ['Tuple', 1, 2], 'Undefined']],
+    [['Subtract', 'Missing', ['Tuple', 1, 2]]],
+    [['Subtract', ['Tuple', 1, 'x'], 'Missing']],
+    [['Add', ['Tuple', 1, 2], ['Multiply', 2, 'Missing']]],
+  ])('%j is Missing, typed missing | tuple', (json) => {
+    const e = ce.box(json as any);
+    expect(e.evaluate().toString()).toBe('"Missing"');
+    expect(e.N().toString()).toBe('"Missing"');
+    expect(e.type.toString()).toMatch(/^missing \| tuple</);
+  });
+
+  test('the parse route', () => {
+    expect(
+      ce.parse('(1,2)-\\operatorname{Missing}').evaluate().toString()
+    ).toBe('"Missing"');
+    expect(
+      ce.parse('\\operatorname{Missing}-(1,2)').evaluate().toString()
+    ).toBe('"Missing"');
+  });
+
+  test('the asynchronous evaluation', async () => {
+    const r = await ce
+      .box(['Subtract', ['Tuple', 1, 2], 'Missing'])
+      .evaluateAsync();
+    expect(r.toString()).toBe('"Missing"');
+  });
+
+  test('the `.sub()` method', () => {
+    expect(ce.box(['Tuple', 1, 2]).sub(ce.box('Missing')).toString()).toBe(
+      '"Missing"'
+    );
+  });
+
+  test('a difference of numbers, or of a list, is still NaN', () => {
+    expect(ce.box(['Subtract', 3, 'Missing']).evaluate().toString()).toBe(
+      'NaN'
+    );
+    expect(
+      ce
+        .box(['Subtract', ['List', 1, 2], 'Missing'])
+        .evaluate()
+        .toString()
+    ).toBe('[NaN,NaN]');
+  });
+
+  test('a point divided by a negated or scaled absence is Missing', () => {
+    // `Divide` evaluates its operands first, and `-Missing` alone is the
+    // number `NaN`: the quotient was scaled into the components and gave
+    // `(NaN, NaN)`, where `(1, 2) / Missing` is `Missing`.
+    for (const den of [
+      ['Negate', 'Missing'],
+      ['Multiply', 2, 'Missing'],
+    ]) {
+      const e = ce.box(['Divide', ['Tuple', 1, 2], den] as any);
+      expect(e.evaluate().toString()).toBe('"Missing"');
+      expect(e.N().toString()).toBe('"Missing"');
+    }
+    expect(
+      ce.parse('\\frac{(1,2)}{-\\operatorname{Missing}}').evaluate().toString()
+    ).toBe('"Missing"');
+    // The `.mul()` method agrees with `.add()` and `.div()`.
+    const pt = ce.box(['Tuple', 1, 2]);
+    for (const f of [
+      ['Negate', 'Missing'],
+      ['Multiply', 2, 'Missing'],
+    ])
+      expect(pt.mul(ce.box(f as any)).toString()).toBe('"Missing"');
+    // A present divisor still scales the components.
+    expect(
+      ce
+        .box(['Divide', ['Tuple', 1, 2], 2])
+        .evaluate()
+        .toString()
+    ).toBe('(1/2, 1)');
+  });
+});
+
+describe('a compiled out-of-range read agrees with the interpreter', () => {
+  // `First`/`Second`/`Third` compiled to the bare JavaScript read, which is
+  // `undefined` past the end, where the interpreter answers `NaN` for a
+  // numeric collection. `Third((1, 2))` only agreed because it folds to a
+  // constant: a variable cell keeps the read in the compiled code.
+  const ce = new ComputeEngine();
+  const run = (json: any, vars: Record<string, unknown> = {}): unknown => {
+    const r = compile(ce.box(json), { fallback: false });
+    expect(r.success).toBe(true);
+    return (r.run as (v: Record<string, unknown>) => unknown)(vars);
+  };
+  test.each([
+    [['Third', ['Tuple', 1, 'x']]],
+    [['Third', ['List', 1, 'x']]],
+    [['Second', ['Tuple', 'x']]],
+    [['Third', ['Tuple', 1, 'Missing']]],
+    [['Third', ['Tuple', 'x', 'Missing']]],
+  ])('%j is NaN on both routes', (json) => {
+    expect(
+      ce
+        .box(json as any)
+        .subs({ x: 2 })
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
+    expect(run(json, { x: 2 })).toBeNaN();
+  });
+
+  test('an in-range absent cell is still read as absent', () => {
+    // `undefined` is the run-time spelling of `Missing`.
+    expect(
+      ce
+        .box(['First', ['Tuple', 'Missing', 'x']])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+    expect(run(['First', ['Tuple', 'Missing', 'x']], { x: 2 })).toBeUndefined();
+  });
+
+  test('a collection of points reads as absent', () => {
+    const json = ['Third', ['List', ['Tuple', 1, 2], ['Tuple', 3, 'x']]];
+    expect(
+      ce
+        .box(json as any)
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+    expect(run(json, { x: 4 })).toBeUndefined();
+  });
+
+  test('the parse route', () => {
+    const r = compile(ce.parse('\\operatorname{Third}((1, x))'), {
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect((r.run as (v: object) => unknown)({ x: 2 })).toBeNaN();
+  });
+});
+
+describe('an absent term that may be a list is not a scalar absence', () => {
+  // `Missing·L`, with `L` a list, broadcasts: the absence lands in each cell.
+  // It is not read as a scalar absent term, whatever literal the method is
+  // called on.
+  const ce = new ComputeEngine();
+  ce.declare('L', 'list<number>');
+  const mL = () => ce.box(['Multiply', 'Missing', 'L']);
+  test('the product keeps the list', () => {
+    expect(ce.box(1).mul(mL()).type.toString()).toBe('list<number>');
+    expect(ce.box(2).mul(mL()).type.toString()).toBe('list<number>');
+    expect(ce.Zero.add(mL()).type.toString()).toBe('list<number>');
+    expect(
+      ce.box(['Add', ['Multiply', 'Missing', 'L'], 1]).type.toString()
+    ).toBe('list<number>');
+  });
+  test('a scalar negated absence is still NaN', () => {
+    expect(ce.Zero.add(ce.box(['Negate', 'Missing'])).toString()).toBe('NaN');
+    expect(ce.One.mul(ce.box(['Negate', 'Missing'])).toString()).toBe('NaN');
+  });
+});

@@ -208,17 +208,14 @@ describe('tuple broadcast — a list operand still supplies the cells', () => {
 });
 
 describe('tuple broadcast — the declared type stays in step with the value', () => {
-  test('a tuple with a COLLECTION component types as the wide `tuple`', () => {
-    // The components would have different shapes here (a list from the list
-    // component, a scalar from the scalar one), so no `tuple<...>` of
-    // identical component types describes it: the declared type is the wide
-    // bare `tuple`, not the scalar type the `Sin` handler computes for its
-    // operand. The VALUE is an `incompatible-type` error (user decision
-    // 2026-09-25): a tuple with a list coordinate is data, not a point, and
-    // a function applied to each coordinate of it gave a tuple of lists
-    // (`([sin(1),sin(2)], sin(3))`) that no consumer can use.
+  test('a tuple with a LIST component types as `error`', () => {
+    // The VALUE is an `incompatible-type` error (user decision 2026-09-25):
+    // a tuple with a list coordinate is data, not a point, and a function
+    // applied to each coordinate of it gave a tuple of lists
+    // (`([sin(1),sin(2)], sin(3))`) that no consumer can use. The declared
+    // type says so: `error`, not the wide bare `tuple` it was.
     const e = ce.box(['Sin', ['Tuple', ['List', 1, 2], 3]]);
-    expect(e.type.toString()).toBe('tuple');
+    expect(e.type.toString()).toBe('error');
     const v = e.evaluate();
     expect(v.operator).toBe('Error');
     expect(v.op1.op1?.string).toBe('incompatible-type');

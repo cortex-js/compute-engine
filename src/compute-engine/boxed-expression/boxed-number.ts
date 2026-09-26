@@ -34,7 +34,7 @@ import { digest128, hashCode } from './utils.js';
 import { match } from './match.js';
 import { same } from './compare.js';
 import { add } from './arithmetic-add.js';
-import { pow } from './arithmetic-power.js';
+import { pow, root } from './arithmetic-power.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   positiveSign,
@@ -73,7 +73,12 @@ import type {
   ExpressionInput,
   NumberLiteralInterface,
 } from '../global-types.js';
-import { isNumber, isSymbol } from './type-guards.js';
+import {
+  isAbsentArithmeticOperand,
+  isAbsentSymbol,
+  isNumber,
+  isSymbol,
+} from './type-guards.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import {
   hasInfiniteComponent,
@@ -487,6 +492,16 @@ export class BoxedNumber
 
   add(rhs: number | Expression): Expression {
     const ce = this.engine;
+    // `0 + x` is `x`, but `0 + Missing` is `NaN`, not the absent symbol:
+    // arithmetic with an absent operand is `NaN` (user decision of
+    // 2026-09-25). A negation or product of an absent value (`-Missing`,
+    // `Missing·L`) goes to `add()`, which reads it as `NaN` too, except when
+    // the term may be a collection: then the sum stays inert, so that the
+    // absence can later land in each cell.
+    if (this.isSame(0) && typeof rhs !== 'number') {
+      if (isAbsentSymbol(rhs)) return ce.NaN;
+      if (isAbsentArithmeticOperand(rhs)) return add(this, rhs.canonical);
+    }
     if (this.isSame(0)) return ce.expr(rhs);
     if (typeof rhs === 'number') {
       // @fastpath
@@ -509,6 +524,18 @@ export class BoxedNumber
   }
 
   mul(rhs: NumericValue | number | Expression): Expression {
+    // `1 · x` is `x` and `-1 · x` is `-x`, but a product with an absent
+    // operand is `NaN` (see `add()`). A negation or product of an absent
+    // value goes to `mul()`, which reads it as `NaN` too, except when a
+    // factor may be a collection (the product then stays inert).
+    if (
+      (this.isSame(1) || this.isSame(-1)) &&
+      typeof rhs !== 'number' &&
+      !(rhs instanceof NumericValue)
+    ) {
+      if (isAbsentSymbol(rhs)) return this.engine.NaN;
+      if (isAbsentArithmeticOperand(rhs)) return mul(this, rhs);
+    }
     if (this.isSame(1)) return this.engine.expr(rhs);
     if (this.isSame(-1)) return this.engine.expr(rhs).neg();
 
@@ -580,9 +607,17 @@ export class BoxedNumber
       if (exp === 1) return this;
       if (exp === -1) return this.inv();
       if (exp === 2) return this.sqrt();
+      // An odd root of a negative value is real: −(|x|^(1/n)). An even root
+      // of a negative value is NOT |x|^(1/n) (∜(−16) is √2 + √2·i, not 2):
+      // `root()` returns its exact principal value or keeps the `Root`.
       if (this.isNegative) {
-        if (exp % 2 === 1) return this.neg().root(exp).neg();
-        if (exp % 2 === 0) return this.neg().root(exp);
+        // `Math.abs`: in JavaScript `-3 % 2` is `-1`, so a negative odd index
+        // would fail a bare `exp % 2 === 1` test.
+        if (Math.abs(exp) % 2 === 1) return this.neg().root(exp).neg();
+        if (exp % 2 === 0)
+          return root(this, this.engine.number(exp), {
+            numericApproximation: false,
+          });
       }
     } else {
       exp = exp.canonical;
@@ -592,7 +627,7 @@ export class BoxedNumber
       if (exp.isSame(2)) return this.sqrt();
       if (this.isNegative) {
         if (exp.isOdd) return this.neg().root(exp).neg();
-        if (exp.isEven) return this.neg().root(exp);
+        if (exp.isEven) return root(this, exp, { numericApproximation: false });
       }
     }
 

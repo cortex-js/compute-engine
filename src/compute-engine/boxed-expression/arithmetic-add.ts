@@ -23,6 +23,7 @@ import {
   isFunction,
   isSymbol,
   isAbsentSymbol,
+  isAbsentArithmeticOperand,
   isContinuationOperand,
 } from './type-guards.js';
 import {
@@ -38,9 +39,11 @@ import {
   isBroadcastableCollection,
   isUnknownLengthBroadcast,
   hasUnresolvedCollectionOperand,
+  isUnresolvedCollectionOperand,
   broadcastLengthMismatch,
   lazyBroadcastMap,
   broadcastOverIndexedCollections,
+  isAbsentScalarTerm,
 } from '../collection-utils.js';
 
 import type { NumericValue } from '../numeric-value/types.js';
@@ -178,11 +181,21 @@ export function canonicalAdd(
       return ce.error(['incompatible-type', 'list<tuple>', 'list<number>']);
   }
 
+  // A sum of several terms that folds down to a lone absent term
+  // (`Add(Missing, 0)`, `Add(Missing, 1, -1)`) is `NaN`, not the bare
+  // symbol: arithmetic with an absent operand is `NaN` (user decision of
+  // 2026-09-25), and removing the `+ 0` must not turn the sum into the
+  // absent value itself. `Add(Missing, x)` is not folded here: it stays a
+  // sum, and its evaluation answers `NaN`.
+  const severalTerms = ops.length > 1;
+  const lone = (x: Expression): Expression =>
+    severalTerms && isAbsentSymbol(x) ? ce.NaN : x;
+
   // Remove literal 0
   ops = ops.filter((x) => !isNumber(x) || !x.isSame(0));
 
   if (ops.length === 0) return ce.Zero;
-  if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
+  if (ops.length === 1 && !ops[0].isIndexedCollection) return lone(ops[0]);
 
   //
   // Fold exact numeric operands (integers, rationals, radicals, exact
@@ -228,7 +241,7 @@ export function canonicalAdd(
       }
       ops = rest;
       if (ops.length === 0) return ce.Zero;
-      if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
+      if (ops.length === 1 && !ops[0].isIndexedCollection) return lone(ops[0]);
     }
     // else: 0 or 1 exact numerics — ops is unchanged, no folding needed
   }
@@ -327,7 +340,7 @@ export function canonicalAdd(
     }
   }
 
-  if (xs.length === 1) return xs[0];
+  if (xs.length === 1) return lone(xs[0]);
 
   // Commutative: sort
   return ce._fn('Add', sortAddTerms(xs));
@@ -554,6 +567,19 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   // `(-6, n)` with `n` a list) add component-wise (never broadcast).
   if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, false);
 
+  // An absent term (`Missing`, `Undefined`, or a product or negation of one)
+  // makes the sum `NaN`, as the `Add` operator answers at evaluation:
+  // arithmetic with an absent operand is `NaN` (user decision of
+  // 2026-09-25). Before, only `Undefined` was read this way (in `Terms`),
+  // and `ce.box('Missing').add(ce.box(1))` was `"Missing" + 1`. A term that
+  // is collection-typed but has no value yet (`L: list<number>`) keeps the
+  // sum inert: once it resolves, the absence is broadcast over its cells.
+  if (
+    xs.some((x) => isAbsentArithmeticOperand(x)) &&
+    !xs.some((x) => !isAbsentSymbol(x) && isUnresolvedCollectionOperand(x))
+  )
+    return xs[0].engine.NaN;
+
   return new Terms(xs[0].engine, xs).asExpression();
 }
 
@@ -734,6 +760,15 @@ function addTuples(
   // `isProvablyScalarNumber`), falling through to the symbolic `Add` below.
   if (ops.some((x) => isProvablyScalarNumber(x)))
     return ce.error(['incompatible-type', 'tuple', 'number']);
+
+  // An absent addend (`Missing` or `Undefined`) beside a point makes the
+  // whole point absent: a tuple is atomic, so there is no cell for the
+  // absence to land in (`docs/ERROR-MODEL.md` §3). The `Add` operator already
+  // answers `Missing` at evaluation; the `.add()` method stayed an inert
+  // `"Missing" + (1, 2)`. A negated or scaled absence is an absent addend
+  // too (`isAbsentArithmeticOperand`): `(1, 2).sub(Missing)` adds
+  // `Negate(Missing)`, and it stayed an inert `(1, 2) - "Missing"`.
+  if (ops.some((x) => isAbsentScalarTerm(x))) return ce.Missing;
 
   // Enforce equal arity when statically known.
   const arities = ops.map((x) => numericTupleArity(x));

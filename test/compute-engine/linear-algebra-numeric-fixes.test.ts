@@ -406,13 +406,12 @@ describe('SPECTRAL NORM OF A 2 × 2 MATRIX WITH A SYMBOLIC ENTRY', () => {
   });
 });
 
-// The double kernels have an absolute error of about ε·σ_max, and an entry
-// much smaller than the largest one underflows to 0 once the matrix is
-// scaled and its Gram matrix is formed. The small singular values of such a
-// matrix came back as 0. The numeric routes of `SingularValues` and `SVD`
-// now decline a matrix whose nonzero entry magnitudes span more than
-// 10^150; the spectral norm, which needs only the largest singular value,
-// still answers.
+// An entry much smaller than the largest one underflows to 0 once the
+// matrix is scaled so that its largest entry is about 1. The small singular
+// values of such a matrix came back as 0. The numeric routes of
+// `SingularValues` and `SVD` now decline a matrix whose nonzero entry
+// magnitudes span more than 10^290; the spectral norm, which needs only the
+// largest singular value, still answers.
 describe('SINGULAR VALUES OF A MATRIX WITH A WIDE RANGE OF ENTRIES', () => {
   const wide = [
     'List',
@@ -466,7 +465,7 @@ describe('SINGULAR VALUES OF A MATRIX WITH A WIDE RANGE OF ENTRIES', () => {
       .evaluate();
     expect(svd.operator).toBe('Tuple');
     const [U, S, V] = svd.ops!;
-    expect(S.toString()).toBe('[[1e+200,0],[0,2e+200]]');
+    expect(S.toString()).toBe('[[2e+200,0],[0,1e+200]]');
     // U and V are orthogonal: each column has norm 1, and the columns are
     // orthogonal.
     for (const Q of [U, V]) {
@@ -514,5 +513,215 @@ describe('SINGULAR VALUES OF A MATRIX WITH A WIDE RANGE OF ENTRIES', () => {
     r.ops!.forEach((x, k) => expect(x.re).toBeCloseTo(expected[k], 12));
     expect(r.ops![1].re).toBeCloseTo(2.288245611270737, 14);
     expect(r.ops![2].re).toBeCloseTo(0.8740320488976421, 14);
+  });
+});
+
+// The double kernel of `SingularValues` and `SVD` formed the Gram matrix
+// `AᵀA` (or `AAᵀ`), which squares the condition number, so a singular value
+// below about ε·σ_max (ε ≈ 2.2e-16) came back as 0, also when the entries
+// are well within the float64 range and determine it accurately. The kernel
+// is now a one-sided Jacobi SVD with a QR preconditioner, which has a small
+// relative error for such values. The expected values come from the exact
+// closed form of the 2 × 2 Gram matrix (the same matrix with exact entries,
+// under `N()`), or from the construction of the matrix.
+describe('SMALL SINGULAR VALUES OF A MATRIX WITH GRADED ENTRIES', () => {
+  const half = ['Rational', 1, 2];
+
+  /** The singular values of an expression, as machine numbers. */
+  const values = (expr: Expression) => {
+    expect(expr.operator).toBe('List');
+    return expr.ops!.map((x) => x.re);
+  };
+
+  /** The rows of a matrix expression, as machine numbers. */
+  const rows = (expr: Expression) =>
+    expr.ops!.map((row) => row.ops!.map((x) => x.re));
+
+  const multiply = (a: number[][], b: number[][]) =>
+    a.map((row) =>
+      b[0].map((_, j) => row.reduce((s, x, k) => s + x * b[k][j], 0))
+    );
+
+  const transpose = (a: number[][]) => a[0].map((_, j) => a.map((r) => r[j]));
+
+  /** `max |QᵀQ − I|` */
+  const orthogonalityError = (q: number[][]) => {
+    const g = multiply(transpose(q), q);
+    return Math.max(
+      ...g.flatMap((row, i) =>
+        row.map((x, j) => Math.abs(x - (i === j ? 1 : 0)))
+      )
+    );
+  };
+
+  // Two rotations, so that the graded matrices below are dense.
+  const rotation = (() => {
+    const [c1, s1] = [Math.cos(0.3), Math.sin(0.3)];
+    const [c2, s2] = [Math.cos(1.1), Math.sin(1.1)];
+    return multiply(
+      [
+        [c1, -s1, 0],
+        [s1, c1, 0],
+        [0, 0, 1],
+      ],
+      [
+        [1, 0, 0],
+        [0, c2, -s2],
+        [0, s2, c2],
+      ]
+    );
+  })();
+  const D = [
+    [1e20, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1e-5],
+  ];
+  const toList = (a: number[][]) => ['List', ...a.map((r) => ['List', ...r])];
+
+  test('SingularValues of [[1e20, 0.5], [0.5, 2.5]]', () => {
+    // Was [1e+20, 0]. The small value is |det| / σ_max ≈ 2.5 − 2.5e-21.
+    const [s1, s2] = values(
+      ce
+        .box([
+          'SingularValues',
+          ['List', ['List', 1e20, 0.5], ['List', 0.5, 2.5]],
+        ])
+        .evaluate()
+    );
+    const [e1, e2] = values(
+      ce
+        .box([
+          'SingularValues',
+          ['List', ['List', P(20), half], ['List', half, ['Rational', 5, 2]]],
+        ])
+        .N()
+    );
+    expect(Math.abs(s1 / e1 - 1)).toBeLessThan(1e-15);
+    expect(Math.abs(s2 / e2 - 1)).toBeLessThan(1e-15);
+    expect(s2).toBeCloseTo(2.5, 14);
+  });
+
+  test('SingularValues of a 2 × 3 matrix with a large entry', () => {
+    // Was [1e+20, 0].
+    const [s1, s2] = values(
+      ce
+        .box([
+          'SingularValues',
+          ['List', ['List', 1e20, 0.5, 0], ['List', 0.5, 2.5, 1]],
+        ])
+        .evaluate()
+    );
+    const [e1, e2] = values(
+      ce
+        .box([
+          'SingularValues',
+          [
+            'List',
+            ['List', P(20), half, 0],
+            ['List', half, ['Rational', 5, 2], 1],
+          ],
+        ])
+        .N()
+    );
+    expect(Math.abs(s1 / e1 - 1)).toBeLessThan(1e-15);
+    expect(Math.abs(s2 / e2 - 1)).toBeLessThan(1e-14);
+  });
+
+  test('SingularValues of a complex matrix with a large entry', () => {
+    // A complex matrix goes to the complex kernel. Was [1e+20, 0].
+    const [s1, s2] = values(
+      ce
+        .box([
+          'SingularValues',
+          ['List', ['List', 1e20, ['Complex', 0, 0.5]], ['List', 0.5, 2.5]],
+        ])
+        .evaluate()
+    );
+    const [e1, e2] = values(
+      ce
+        .box([
+          'SingularValues',
+          [
+            'List',
+            ['List', P(20), ['Multiply', half, 'ImaginaryUnit']],
+            ['List', half, ['Rational', 5, 2]],
+          ],
+        ])
+        .N()
+    );
+    expect(Math.abs(s1 / e1 - 1)).toBeLessThan(1e-15);
+    expect(Math.abs(s2 / e2 - 1)).toBeLessThan(1e-14);
+  });
+
+  for (const [name, A] of [
+    ['Q · diag(1e20, 1, 1e-5)', multiply(rotation, D)],
+    ['diag(1e20, 1, 1e-5) · Q', multiply(D, rotation)],
+  ] as const) {
+    test(`SingularValues of ${name}, Q a rotation`, () => {
+      // Was [1e+20, 0, 0].
+      const s = values(ce.box(['SingularValues', toList(A)]).evaluate());
+      [1e20, 1, 1e-5].forEach((e, k) =>
+        expect(Math.abs(s[k] / e - 1)).toBeLessThan(1e-12)
+      );
+    });
+  }
+
+  test('SVD of [[1e20, 0.5], [0.5, 2.5]]', () => {
+    // Was S = [[1e+20, 0], [0, 0]].
+    const A = [
+      [1e20, 0.5],
+      [0.5, 2.5],
+    ];
+    const svd = ce.box(['SVD', toList(A)]).evaluate();
+    expect(svd.operator).toBe('Tuple');
+    const [U, S, V] = svd.ops!.map(rows);
+    expect(S[0][0]).toBe(1e20);
+    expect(S[1][1]).toBeCloseTo(2.5, 14);
+    expect(orthogonalityError(U)).toBeLessThan(1e-15);
+    expect(orthogonalityError(V)).toBeLessThan(1e-15);
+    // U Σ Vᵀ = A, entry by entry, to a relative error of the entry.
+    const B = multiply(multiply(U, S), transpose(V));
+    A.forEach((row, i) =>
+      row.forEach((x, j) =>
+        expect(Math.abs(B[i][j] - x)).toBeLessThan(1e-15 * Math.abs(x))
+      )
+    );
+  });
+
+  test('SVD of a graded 3 × 3 matrix', () => {
+    const A = multiply(D, rotation);
+    const svd = ce.box(['SVD', toList(A)]).evaluate();
+    expect(svd.operator).toBe('Tuple');
+    const [U, S, V] = svd.ops!.map(rows);
+    [1e20, 1, 1e-5].forEach((e, k) =>
+      expect(Math.abs(S[k][k] / e - 1)).toBeLessThan(1e-12)
+    );
+    expect(orthogonalityError(U)).toBeLessThan(1e-14);
+    expect(orthogonalityError(V)).toBeLessThan(1e-14);
+    // Each row of U Σ Vᵀ matches the row of A to a relative error of the
+    // row: the rows have magnitudes 1e20, 1 and 1e-5.
+    const B = multiply(multiply(U, S), transpose(V));
+    A.forEach((row, i) => {
+      const scale = Math.max(...row.map(Math.abs));
+      row.forEach((x, j) =>
+        expect(Math.abs(B[i][j] - x)).toBeLessThan(1e-14 * scale)
+      );
+    });
+  });
+
+  test('SingularValues with an entry range of 10^285 answers', () => {
+    // Was declined (unevaluated) for a range above 10^150, because the Gram
+    // matrix squared the range. det = 1e115 − 6e-160 ≈ 1e115 and
+    // σ₁ ≈ 1e200, so σ₂ = det / σ₁ ≈ 1e-85.
+    const s = values(
+      ce
+        .box([
+          'SingularValues',
+          ['List', ['List', 1e200, 3e-80], ['List', 2e-80, 1e-85]],
+        ])
+        .evaluate()
+    );
+    expect(Math.abs(s[0] / 1e200 - 1)).toBeLessThan(1e-15);
+    expect(Math.abs(s[1] / 1e-85 - 1)).toBeLessThan(1e-14);
   });
 });

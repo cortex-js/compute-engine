@@ -423,3 +423,105 @@ describe('Dot of a restricted operand', () => {
     expect(declines(json, 'python')).toBe(true);
   });
 });
+
+/**
+ * A restricted list, point or list of points on the INTERVAL target. The
+ * `When` handler already masked a list-typed input (`A\{0<t\}`) with
+ * `_IA.restrict`; a restricted LITERAL (`[1, 2]\{0<t\}`, `(1, 2)\{0<t\}`)
+ * declined because the target spells a literal list only at a consuming
+ * position, and the restricted list inside a `PointList` or under arithmetic
+ * declined because its `missing` arm hid the list from the type tests. The
+ * value is the one `A\{0<t\}` has: the array where the condition holds, the
+ * `empty` result where it fails (the interpreter answers `Missing`), and the
+ * elements clipped to `partial` where it is undecided.
+ */
+describe('A restricted collection on the interval target', () => {
+  const ce2 = new ComputeEngine();
+  ce2.declare('A', 'list<real>');
+  ce2.declare('B', 'list<real>');
+  ce2.declare('t', 'real');
+  const A = [1, 2, 3];
+  const B = [4, 5, 6];
+
+  /** The midpoint of every interval in `v`, nested as `v` is (every value
+   * here is a point or a two-ulp enclosure), or `'empty'` for the `empty`
+   * result. */
+  function bounds(v: unknown): unknown {
+    if (Array.isArray(v)) return v.map(bounds);
+    const x = v as { kind?: string; value?: { lo: number; hi: number } };
+    if (x.kind === 'empty') return 'empty';
+    const iv = x.value ?? (v as { lo: number; hi: number });
+    return (iv.lo + iv.hi) / 2;
+  }
+
+  /** The interpreter's value at `t`, nested the same way, with the absent
+   * value `Missing` read as `'empty'`. */
+  function interpreted(latex: string, t: number): unknown {
+    const v = ce2
+      .parse(latex)
+      .subs({ t, A: ce2.box(['List', ...A]), B: ce2.box(['List', ...B]) })
+      .N();
+    const toJS = (e: typeof v): unknown =>
+      e.symbol === 'Missing'
+        ? 'empty'
+        : e.operator === 'List' || e.operator === 'Tuple'
+          ? e.ops!.map(toJS)
+          : e.re;
+    return toJS(v);
+  }
+
+  function intervalRun(latex: string, t: unknown): unknown {
+    const r = compile(ce2.parse(latex), { to: 'interval-js' } as never);
+    expect(r.success).toBe(true);
+    return r.run!({ t, A, B } as never);
+  }
+
+  const close = (x: unknown): unknown =>
+    Array.isArray(x)
+      ? x.map(close)
+      : typeof x === 'number'
+        ? expect.closeTo(x, 12)
+        : x;
+
+  test.each([
+    ['a restricted list literal', '[1,2]\\{0<t\\}'],
+    ['a restricted point literal', '(1,2)\\{0<t\\}'],
+    ['a restricted list input', 'A\\{0<t\\}'],
+    ['a point list over a restricted list', '(A\\{0<t\\}, B)'],
+    ['a point list over a restricted list and a slot', '(A\\{0<t\\}, 3)'],
+    ['a restricted point list plus a point', '(A\\{0<t\\}, B)+(1,1)'],
+    ['a restricted list plus a number', 'A\\{0<t\\}+1'],
+    ['a function of a restricted list', '\\sin(A\\{0<t\\})'],
+    ['a scalar times a restricted point', 't\\cdot(1,2)\\{0<t\\}'],
+    ['a restricted point plus a point', '(1,2)\\{0<t\\}+(t,1)'],
+  ])('%s matches the interpreter', (_l, latex) => {
+    for (const t of [2, -1]) {
+      const expected = interpreted(latex, t);
+      expect(bounds(intervalRun(latex, t))).toEqual(close(expected));
+    }
+  });
+
+  test('an undecided condition clips each element to a partial value', () => {
+    // A coordinate of the unrestricted source `B` is a bare interval.
+    const v = intervalRun('(A\\{0<t\\}, B)', { lo: -1, hi: 1 }) as Array<
+      Array<{ kind?: string; value?: { lo: number }; lo?: number }>
+    >;
+    expect(v.map((p) => p.map((c) => c.kind ?? 'interval'))).toEqual([
+      ['partial', 'interval'],
+      ['partial', 'interval'],
+      ['partial', 'interval'],
+    ]);
+    expect(v.map((p) => p.map((c) => c.value?.lo ?? c.lo))).toEqual([
+      [1, 4],
+      [2, 5],
+      [3, 6],
+    ]);
+  });
+
+  test('a restricted list of booleans still declines', () => {
+    const r = compile(ce2.parse('[t<1, t<2]\\{0<t\\}'), {
+      to: 'interval-js',
+    } as never);
+    expect(r.success).toBe(false);
+  });
+});

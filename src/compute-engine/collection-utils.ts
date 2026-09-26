@@ -34,6 +34,8 @@ import {
 } from './global-types.js';
 import type { MathJsonExpression } from '../math-json/types.js';
 import {
+  isAbsentArithmeticOperand,
+  isAbsentSymbol,
   isFunction,
   isNumber,
   isString,
@@ -2014,6 +2016,21 @@ export function typeMayCarryQuotientShape(t: Type): boolean {
 }
 
 /**
+ * True when `x` is a SCALAR absent term of a sum or product: an absence symbol
+ * (`Missing`, `Undefined`), or a negation, product, quotient or power of one
+ * (`-Missing`, `2·Missing`) whose type cannot be a collection. Beside a point,
+ * such a term makes the whole point absent (`Missing`). A term that may be a
+ * collection (`Missing·L`, with `L` a list) is not a scalar absence: it
+ * broadcasts, and the absence lands in each cell.
+ */
+export function isAbsentScalarTerm(x: Expression): boolean {
+  if (isAbsentSymbol(x)) return true;
+  return (
+    isAbsentArithmeticOperand(x) && !typeMayCarryQuotientShape(x.type.type)
+  );
+}
+
+/**
  * True when `expr` is a `tuple` — a point/vector in ℝⁿ *or* a Desmos-style
  * point-list (a tuple with a finite-collection component, e.g. `(-6, n)` with
  * `n` a list). Broader than `isNumericTuple`, which requires every element to
@@ -3399,6 +3416,59 @@ export function isPointListReading(ops: ReadonlyArray<Expression>): boolean {
  */
 export function isTupleWithListCoordinate(x: Expression): boolean {
   return isFunction(x, 'Tuple') && x.ops.some(isPointListCoordinateSource);
+}
+
+/**
+ * The type-level twin of {@link isTupleWithListCoordinate}: whether `type`,
+ * with its `missing` arm removed, is a tuple type with at least one LIST
+ * coordinate ({@link isListCoordinateType}), such as
+ * `tuple<list<real>, list<real>>`.
+ *
+ * A value of such a type evaluates to a `Tuple` with a list coordinate, so
+ * arithmetic over it, and every function that applies to each coordinate of
+ * a tuple, always evaluates to an `incompatible-type` error. The static type
+ * of such an application is `error` for the same reason. A union with another
+ * arm (`tuple<list<real>, real> | real`) is not recognized: it may hold a
+ * value that is not such a tuple.
+ */
+export function isListCoordinateTupleType(type: Type): boolean {
+  const stripped = stripMissingFromType(type);
+  const t = resolveTypeReference(stripped) ?? stripped;
+  if (typeof t === 'string' || t.kind !== 'tuple') return false;
+  return t.elements.some((el) => isListCoordinateType(el.type));
+}
+
+/** The arithmetic operators whose evaluate handlers report an error for a
+ * `Tuple` operand with a list coordinate (`listCoordinateTupleOperandError`
+ * in `boxed-expression/validate.ts`). */
+const LIST_COORDINATE_TUPLE_ARITHMETIC = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Power',
+  'Sqrt',
+  'Root',
+]);
+
+/**
+ * Whether an application of `operator` to operands of the types
+ * `operandTypes` always evaluates to an `incompatible-type` error because an
+ * operand is a tuple with a list coordinate ({@link isListCoordinateTupleType}).
+ * This is true for the arithmetic operators, and for an operator that applies
+ * to each coordinate of a tuple (`overTuples`, the `broadcastsOverTuples`
+ * predicate of `boxed-function.ts`: `Sin`, `Ln`, `Floor`, …). The type of such
+ * an application is `error`.
+ */
+export function appliesToListCoordinateTuple(
+  operator: string,
+  overTuples: boolean,
+  operandTypes: ReadonlyArray<Type>
+): boolean {
+  if (!overTuples && !LIST_COORDINATE_TUPLE_ARITHMETIC.has(operator))
+    return false;
+  return operandTypes.some(isListCoordinateTupleType);
 }
 
 /**

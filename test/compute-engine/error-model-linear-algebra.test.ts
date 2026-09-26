@@ -233,7 +233,30 @@ describe('Trace — Contract B declaration', () => {
     const ce = new ComputeEngine();
     expectIncompatible(ce.box(['Trace', { str: 'a' }] as any));
     expectIncompatible(ce.box(['Trace', 'True'] as any));
-    expectIncompatible(ce.box(['Trace', 'Missing'] as any));
+  });
+
+  test('an absent operand is NaN, as for Norm', () => {
+    // User decision of 2026-09-25. It was an `incompatible-type` error at
+    // boxing.
+    const ce = new ComputeEngine();
+    for (const x of ['Missing', 'Undefined']) {
+      const e = ce.box(['Trace', x] as any);
+      expect(e.isValid).toBe(true);
+      expect(e.type.toString()).toBe('number');
+      expect(e.evaluate().toString()).toBe('NaN');
+      expect(e.N().toString()).toBe('NaN');
+    }
+    expect(
+      ce
+        .parse('\\operatorname{Trace}(\\operatorname{Missing})')
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
+    // An absent AXIS is still refused.
+    expect(
+      ce.box(['Trace', ['List', ['List', 1, 2], ['List', 3, 4]], 'Missing', 2])
+        .isValid
+    ).toBe(false);
   });
 
   test('NaN and infinite CELLS are summed by IEEE along the diagonal', () => {

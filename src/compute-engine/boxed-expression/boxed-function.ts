@@ -42,6 +42,7 @@ import {
 import {
   ABSENT_CELLS_STAY_MISSING,
   absorbOperandAbsence,
+  passesAbsentCellsThrough,
   threadedPresentType,
   withThreadedAbsence,
   broadcastLiftType,
@@ -75,6 +76,8 @@ import {
   lazyMapNumericApproximation,
   zip,
   zipParticipates,
+  appliesToListCoordinateTuple,
+  isAbsentScalarTerm,
 } from '../collection-utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
@@ -2174,12 +2177,12 @@ export class BoxedFunction
       return num.root(exp).div(denom.root(exp));
     }
 
-    // (-x)^n = (-1)^n x^n
+    // An odd root of a negation is the negation of the root:
+    // ∛(−x) = −∛x. An even root is not reduced: ∜(−x) is not ∜x (for
+    // x = 16 the first is √2 + √2·i and the second is 2).
     if (this.operator === 'Negate') {
-      if (e !== undefined) {
-        if (e % 2 === 0) return this.op1.root(exp);
+      if (e !== undefined && Number.isInteger(e) && e % 2 !== 0)
         return this.op1.root(exp).neg();
-      }
     }
 
     // root(sqrt(a), c) -> root(a, 2*c)
@@ -6937,6 +6940,22 @@ function type(expr: BoxedFunction): Type | BoxedType {
   // Is there a definition associated with the operator of the function?
   const def = expr.operatorDefinition;
   if (def) {
+    // Arithmetic over a tuple with a list coordinate (`Tuple(A, B) + (1, 1)`
+    // with `A`, `B` lists), or a function applied to each coordinate of such
+    // a tuple (`Sin(Tuple(A, B))`), always evaluates to an `incompatible-type`
+    // error: the tuple is data, not a point (`listCoordinateTupleOperandError`
+    // in `validate.ts`). The static type says so. The numeric-argument check
+    // of an enclosing arithmetic expression lets an `error`-typed operand
+    // through unchanged (`checkNumericArgs`), so the one real error surfaces
+    // at evaluation.
+    if (
+      appliesToListCoordinateTuple(
+        expr.operator,
+        broadcastsOverTuples(expr.operator, def),
+        expr.ops.map((x) => x.type.type)
+      )
+    )
+      return 'error';
     const sig =
       def.signature instanceof BoxedType
         ? def.signature.type
@@ -6991,7 +7010,12 @@ function type(expr: BoxedFunction): Type | BoxedType {
           declaredSlots === undefined || def.broadcastable === true
             ? def.broadcastable
             : (i: number) => declaredSlots.at(i).mappable,
-        stripMissing: (i) => def.stripsMissingAt(i),
+        // An operand absent only in its cells, at an operator that moves
+        // cells without computing from them, binds the type variables with
+        // its `missing` arm (`passesAbsentCellsThrough`).
+        stripMissing: (i) =>
+          def.stripsMissingAt(i) &&
+          !passesAbsentCellsThrough(expr.operator, expr.ops[i].type.type),
         lazy: def.lazy,
       });
       return instantiated ?? functionResult(resolved) ?? 'unknown';
@@ -7010,13 +7034,35 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // type is `unknown`, which a join drops, so without this the result
     // claimed the type of the present operands (`integer`,
     // `vector<integer^3>`). For the absorption it is typed `missing`.
-    const absenceTypes = expr.ops.map((x) =>
-      isAbsentScalarSymbol(x) ? 'missing' : x.type.type
+    //
+    // An operand absent only in its cells, at an operator that reorders or
+    // selects cells without computing from them (`Sort`, `Reverse`), is a
+    // present collection whose absent cells stay in the result as they are:
+    // it takes no part in the absorption (`passesAbsentCellsThrough`).
+    //
+    // A negated or scaled absence in a sum (`(1, 2) - Missing`, which is
+    // `Add(Negate(Missing), (1, 2))`) is an absent addend too, as the `Add`
+    // evaluate handler reads it: the difference beside a point is `Missing`.
+    // The term itself is typed `number` (`-Missing` alone is `NaN`), so
+    // without this the sum was typed `number | tuple<…>`.
+    const absentTerm = (x: Expression): boolean =>
+      isAbsentScalarSymbol(x) ||
+      (expr.operator === 'Add' && isFunction(x) && isAbsentScalarTerm(x));
+    const passedThrough = expr.ops.map((x) =>
+      passesAbsentCellsThrough(expr.operator, x.type.type)
+    );
+    const absenceTypes = expr.ops.map((x, i) =>
+      absentTerm(x)
+        ? 'missing'
+        : passedThrough[i]
+          ? stripMissingFromType(x.type.type)
+          : x.type.type
     );
     const absorbMissing =
       def.resolvedMissingBehavior === 'propagate' &&
       expr.ops.some(
-        (x) => x.type.facts.containsMissing || isAbsentScalarSymbol(x)
+        (x, i) =>
+          (x.type.facts.containsMissing && !passedThrough[i]) || absentTerm(x)
       );
 
     // Conditional-value threading (`threadsConditionals`) for an operator
@@ -7142,11 +7188,16 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // handler consults `options.operandTypes[i]` before `ops[i].type` (no proxy
     // expressions, no interaction with the `_type` cache).
     if (typeof def.type === 'function') {
+      // An operand that passes its absent cells through
+      // (`passesAbsentCellsThrough`) is given to the handler as it is.
       const stripsAny =
         (def.resolvedMissingBehavior === 'propagate' ||
           def.resolvedMissingBehavior === 'handle') &&
         expr.ops.some(
-          (x, i) => def.stripsMissingAt(i) && x.type.facts.containsMissing
+          (x, i) =>
+            def.stripsMissingAt(i) &&
+            x.type.facts.containsMissing &&
+            !passedThrough[i]
         );
       // A `missing` component of a tuple operand is an absent coordinate of
       // a point. An operator that READS coordinates (`PointY`,
@@ -7160,7 +7211,9 @@ function type(expr: BoxedFunction): Type | BoxedType {
         : 'nan';
       const operandTypes = stripsAny
         ? expr.ops.map((x, i) =>
-            def.stripsMissingAt(i) && x.type.facts.containsMissing
+            def.stripsMissingAt(i) &&
+            x.type.facts.containsMissing &&
+            !passedThrough[i]
               ? stripMissingFromType(x.type.type, tupleComponents)
               : undefined
           )
@@ -7188,7 +7241,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
         // stands for in a numeric slot, so the handler types it exactly as
         // it types `Missing` (its declared type, `unknown`, made
         // `Negate(Undefined)` an `unknown` result).
-        if (isAbsentScalarSymbol(expr.ops[i])) return 'missing';
+        if (absentTerm(expr.ops[i])) return 'missing';
         const stripped = operandTypes?.[i];
         // A BARE `missing` operand strips to `never`, and a `never`-typed
         // descriptor proves numeric claims vacuously (`never` is the

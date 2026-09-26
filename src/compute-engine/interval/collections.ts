@@ -410,6 +410,16 @@ export function bcastPoint(
   kinds: string,
   ...args: unknown[]
 ): unknown {
+  // A point or list-of-points argument that is not an array is a RESTRICTED
+  // one whose condition failed (`PointList(When(A, 0 < t), B) + (1, 1)`):
+  // the band-less `empty` result of `restrict`, passed through as the value
+  // of the whole operation, as the interpreter answers the absent value
+  // there, and as `pointList` passes it through.
+  for (let i = 0; i < args.length; i++) {
+    if (kinds[i] === 's' || Array.isArray(args[i])) continue;
+    const propagated = propagatedNonCollection(args[i]);
+    if (propagated !== undefined) return propagated;
+  }
   const isList = args.map((a, i) => {
     if (!Array.isArray(a) || kinds[i] === 'p') return false;
     if (kinds[i] === 'q') return a.length === 0 || Array.isArray(a[0]);

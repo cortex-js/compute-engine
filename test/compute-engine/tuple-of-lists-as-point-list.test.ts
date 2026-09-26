@@ -1008,3 +1008,172 @@ describe('A list of points at a parameter that also admits a matrix', () => {
     expect((r.run as any)()).toBe(10);
   });
 });
+
+describe('Arithmetic over a MathJSON Tuple with a list coordinate is typed error', () => {
+  // The value of such an application is always an `incompatible-type` error
+  // (user decision 2026-09-25), so its static type is `error`. An enclosing
+  // arithmetic expression lets the error-typed operand through unchanged: the
+  // one real error surfaces at evaluation, not a sum of
+  // `Error(incompatible-type, "number", "error")` wrappers.
+  const errorCode = (e: any): string | undefined =>
+    e.operator === 'Error' ? e.op1.op1?.string : undefined;
+
+  /** `D` holds the data tuple `([1, 2], [3, 4])`; `A`, `B` are lists. */
+  function dataEngine(): ComputeEngine {
+    const ce = valuedEngine();
+    ce.declare('D', 'tuple<list<real>, list<real>>');
+    ce.assign(
+      'D',
+      ce.function('Tuple', [ce.box(['List', 1, 2]), ce.box(['List', 3, 4])])
+    );
+    return ce;
+  }
+
+  test.each([
+    [
+      'Tuple(1, 1) + Tuple(A, B)',
+      ['Add', ['Tuple', 1, 1], ['Tuple', 'A', 'B']],
+    ],
+    ['2 · Tuple(A, B)', ['Multiply', 2, ['Tuple', 'A', 'B']]],
+    ['Tuple(A, B) / 2', ['Divide', ['Tuple', 'A', 'B'], 2]],
+    ['−Tuple(A, B)', ['Negate', ['Tuple', 'A', 'B']]],
+    ['Tuple(A, B)^2', ['Power', ['Tuple', 'A', 'B'], 2]],
+    ['Sqrt(Tuple(A, B))', ['Sqrt', ['Tuple', 'A', 'B']]],
+    ['Sin(Tuple(A, B))', ['Sin', ['Tuple', 'A', 'B']]],
+    ['t · D', ['Multiply', 't', 'D']],
+  ])('%s is typed error', (_, json) => {
+    const e = dataEngine().box(json as any);
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe('error');
+    expect(errorCode(e.evaluate())).toBe('incompatible-type');
+  });
+
+  test('a tuple of scalars and a list of points keep their types', () => {
+    const ce = dataEngine();
+    expect(
+      ce.box(['Add', ['Tuple', 1, 1], ['Tuple', 2, 3]]).type.toString()
+    ).toBe('tuple<integer, integer>');
+    expect(ce.parse('(A, B) + (1, 1)').type.toString()).toBe(
+      'list<tuple<real, real>>'
+    );
+  });
+
+  // `(1 − t)D − tD` on the box route and on the parse route.
+  const routes: [string, (ce: ComputeEngine) => any][] = [
+    [
+      'box',
+      (ce) =>
+        ce.box([
+          'Subtract',
+          ['Multiply', ['Subtract', 1, 't'], 'D'],
+          ['Multiply', 't', 'D'],
+        ]),
+    ],
+    ['parse', (ce) => ce.parse('(1-t)D - tD')],
+  ];
+
+  test.each(routes)(
+    '(1 − t)D − tD (%s route) is one incompatible-type error',
+    (_, make) => {
+      const e = make(dataEngine());
+      // The canonical form holds no error wrapper: every term is kept.
+      expect(e.isValid).toBe(true);
+      expect(JSON.stringify(e.json)).not.toMatch(/Error/);
+      expect(e.type.toString()).toBe('error');
+      for (const r of [e.evaluate(), e.N()]) {
+        expect(errorCode(r)).toBe('incompatible-type');
+        // The error names the data tuple, not an operand typed `error`.
+        expect(r.op1.op2.string).toBe('tuple<number, number>');
+        expect(r.op2.toString()).toBe('([1,2], [3,4])');
+      }
+    }
+  );
+});
+
+describe('A restricted list of points plus a point compiles to JavaScript', () => {
+  // `(A\{0<t\}, B)` is `PointList(When(A, 0 < t), B)`, typed
+  // `list<tuple<real, real>> | missing`. The interpreter adds the point to
+  // every point of the list, or answers `Missing` when `t` fails the
+  // condition. The compiled code gives the same points; for an absent list it
+  // answers `NaN`, the value a compiled numeric lane gives an absent operand
+  // (as `A\{0<t\} + 1` does).
+  function restrictedEngine(valued: boolean): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('A', 'list<real>');
+    ce.declare('B', 'list<real>');
+    ce.declare('t', 'real');
+    if (valued) {
+      ce.assign('A', ce.box(['List', 1, 2]));
+      ce.assign('B', ce.box(['List', 3, 3]));
+    }
+    return ce;
+  }
+  const values = { A: [1, 2], B: [3, 3] };
+  const shifted = [
+    [2, 4],
+    [3, 4],
+  ];
+
+  const cases: [string, (ce: ComputeEngine) => any, number[][]][] = [
+    [
+      '(A\\{0<t\\}, B) + (1, 1), parse route',
+      (ce) => ce.parse('(A\\{0<t\\}, B) + (1, 1)'),
+      shifted,
+    ],
+    [
+      '(A\\{0<t\\}, B) + (1, 1), box route',
+      (ce) =>
+        ce.box([
+          'Add',
+          [
+            'Delimiter',
+            ['Sequence', ['When', 'A', ['Less', 0, 't']], 'B'],
+            "'(,)'",
+          ],
+          ['Tuple', 1, 1],
+        ]),
+      shifted,
+    ],
+    [
+      'PointList(When(A, 0 < t), B) + (1, 1), box route',
+      (ce) =>
+        ce.box([
+          'Add',
+          ['PointList', ['When', 'A', ['Less', 0, 't']], 'B'],
+          ['Tuple', 1, 1],
+        ]),
+      shifted,
+    ],
+    [
+      '(A\\{0<t\\}, B) - (1, 1)',
+      (ce) => ce.parse('(A\\{0<t\\}, B) - (1, 1)'),
+      [
+        [0, 2],
+        [1, 2],
+      ],
+    ],
+    [
+      '(A, B)\\{0<t\\} + (1, 1)',
+      (ce) => ce.parse('(A, B)\\{0<t\\} + (1, 1)'),
+      shifted,
+    ],
+  ];
+
+  test.each(cases)('%s', (_, make, expected) => {
+    const ce = restrictedEngine(true);
+    const e = make(ce);
+    expect(e.type.toString()).toBe('list<tuple<real, real>> | missing');
+    ce.assign('t', 1);
+    close(plain(e.evaluate()), expected);
+    ce.assign('t', -1);
+    expect(e.evaluate().symbol).toBe('Missing');
+
+    const r = compile(make(restrictedEngine(false)), {
+      to: 'javascript',
+      fallback: false,
+    } as any);
+    expect(r.success).toBe(true);
+    close((r.run as any)({ ...values, t: 1 }), expected);
+    expect((r.run as any)({ ...values, t: -1 })).toBeNaN();
+  });
+});

@@ -74,6 +74,29 @@ export function isAbsentSymbol(expr: Expression | null | undefined): boolean {
 }
 
 /**
+ * True when `expr` is an absence symbol (`Missing` or `Undefined`), or an
+ * arithmetic node that the arithmetic methods build around one: a `Negate`,
+ * `Multiply`, `Divide` or `Power` with such an operand, at any depth
+ * (`-Missing`, `2·Missing`, `1/Missing`, `Missing^2`).
+ *
+ * Arithmetic with an absent operand is `NaN` (user decision of 2026-09-25).
+ * The `.add()`/`.mul()`/`.div()` methods read such an operand as `NaN` through
+ * this test, as the `Add`/`Multiply`/`Divide` operators do at evaluation.
+ * Before, the methods kept the symbol: `ce.box('Missing').mul(ce.box(2))`
+ * was `2·"Missing"` while `Multiply(2, Missing)` evaluated to `NaN`.
+ */
+export function isAbsentArithmeticOperand(
+  expr: Expression | null | undefined
+): boolean {
+  if (isAbsentSymbol(expr)) return true;
+  if (!isFunction(expr)) return false;
+  const h = expr.operator;
+  if (h !== 'Negate' && h !== 'Multiply' && h !== 'Divide' && h !== 'Power')
+    return false;
+  return expr.ops.some((x) => isAbsentArithmeticOperand(x));
+}
+
+/**
  * True when a value is an absence MARKER — an absence symbol (`Missing` or
  * `Undefined`) or a `NaN` number — regardless of provenance (I6). This is the
  * value-level test the missing-value runtime gate and chained-`At` absorption

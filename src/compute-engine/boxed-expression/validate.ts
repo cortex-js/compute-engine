@@ -514,6 +514,15 @@ export function checkNumericArgs(
     } else if (!op.isValid) {
       isValid = false;
       xs.push(op);
+    } else if (op.type.type === 'error') {
+      // A valid operand whose type is `error` always evaluates to an error of
+      // its own, such as `Tuple(A, B) + (1, 1)` with `A`, `B` lists (see
+      // `appliesToListCoordinateTuple`). It passes through unchanged, so that
+      // evaluation reports that one error. Wrapping it in an
+      // `incompatible-type` error ("expected `number`, got `error`") would
+      // hide the real error, and would make every enclosing sum or product a
+      // sum or product of such wrappers.
+      xs.push(op);
     } else if (op.isNumber) {
       // The argument is a number literal or a function whose result is a number
       xs.push(op);

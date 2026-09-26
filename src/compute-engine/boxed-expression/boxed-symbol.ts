@@ -82,7 +82,12 @@ import {
 import { matchesSymbol } from '../../math-json/utils.js';
 import { getSignFromAssumptions } from '../assume.js';
 import { getFactIndex, hasAssumptions } from './constraint-subject.js';
-import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import {
+  isAbsentSymbol,
+  isFunction,
+  isNumber,
+  isSymbol,
+} from './type-guards.js';
 import {
   memoDepsStillValid,
   snapshotMemoDeps,
@@ -419,11 +424,25 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   add(rhs: number | Expression): Expression {
+    // An absent symbol (`Missing`, `Undefined`) plus a number is `NaN`:
+    // arithmetic with an absent operand is `NaN` (user decision of
+    // 2026-09-25). The `+ 0` fastpath below would return the symbol itself.
+    // An expression operand goes to `add()`, which reads the absent term.
+    if (typeof rhs === 'number' && isAbsentSymbol(this)) return this.engine.NaN;
     if (rhs === 0) return this;
     return add(this, this.engine.expr(rhs));
   }
 
   mul(rhs: NumericValue | number | Expression): Expression {
+    // An absent symbol times a number is `NaN`, for the reason given in
+    // `add()`: the `· 1`, `· 0` and `· -1` fastpaths below would return the
+    // symbol, `0` or `-Missing`. An expression operand goes to `mul()`,
+    // which reads the absent factor (and answers `Missing` beside a point).
+    if (
+      (typeof rhs === 'number' || rhs instanceof NumericValue) &&
+      isAbsentSymbol(this)
+    )
+      return this.engine.NaN;
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
 

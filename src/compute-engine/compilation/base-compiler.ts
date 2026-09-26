@@ -1364,6 +1364,26 @@ function gatedCollectionArms(a: Expression): Type[] | undefined {
 }
 
 /**
+ * The compilation type of `a` without its absence: for a GATED indexed
+ * collection with one present arm (`isGatedIndexedCollection`, such as the
+ * restricted list of points `PointList(When(A, 0 < t), B)`, typed
+ * `list<tuple<real, real>> | missing`), that arm; otherwise the compilation
+ * type of `a`. At run time such an operand is an array of the present type,
+ * or the absent value `undefined`. The point-list plans of
+ * `tryCompileBroadcast` read an operand's element type to prove that it is
+ * a list of points, and the `missing` arm hid it: `(A\{0<t\}, B) + (1, 1)`
+ * declined to compile where the interpreter answers the shifted points.
+ * Those plans emit `NaN` for a source that is not an array at run time, the
+ * value a compiled numeric lane gives an absent operand (`A\{0<t\} + 1`
+ * runs to `NaN` when `t` is negative; see `isGatedIndexedCollection`).
+ */
+function presentCompilationType(a: Expression): Type {
+  const arms = gatedCollectionArms(a);
+  if (arms !== undefined && arms.length === 1) return arms[0];
+  return compilationType(a);
+}
+
+/**
  * For an operand `isRuntimePointShaped` admitted, can its run-time value be
  * told apart as a point or a list of points by its SHAPE alone? Every tuple
  * arm of the union must be a point of plain NUMBERS (a coordinate that is
@@ -1555,6 +1575,29 @@ export function isProvablyNumericListOperand(e: Expression): boolean {
   const element = collectionElementType(t);
   if (element === undefined) return false;
   return isSubtype(element, 'number');
+}
+
+/**
+ * Is `e` a RESTRICTED list of numbers: a gated indexed collection
+ * (`isGatedIndexedCollection`, typed `C | missing`) whose every present arm
+ * is a flat list of numbers, never a point? `When(A, 0 < t)` with
+ * `A: list<real>` is one, typed `list<real> | missing`. At run time it is
+ * that list or the absent value. `isProvablyNumericListOperand` refuses it,
+ * because the `missing` arm is not a list.
+ *
+ * Exported for the interval target, whose run-time `PointList` zip
+ * (`_IA.pointList`) passes an absent source through as the value of the
+ * whole list of points.
+ */
+export function isGatedNumericListOperand(e: Expression): boolean {
+  if (isProvablyStringOperand(e)) return false;
+  const arms = gatedCollectionArms(e);
+  if (arms === undefined) return false;
+  return arms.every((b) => {
+    if (isTupleShapedType(b)) return false;
+    const element = collectionElementType(b);
+    return element !== undefined && isSubtype(element, 'number');
+  });
 }
 
 /**
@@ -11005,8 +11048,11 @@ export class BaseCompiler {
     // A possibly-collection operand is not a point list: its shape is
     // unprovable.
     const isPointListShaped = (a: Expression): boolean => {
-      if (isBoundPossiblyCollectionTyped(a)) return false;
-      const t = compilationType(a);
+      // A gated collection (a restricted list, typed `C | missing`) has the
+      // shape of its present arm: it is not a possibly-collection operand.
+      if (!isGatedIndexedCollection(a) && isBoundPossiblyCollectionTyped(a))
+        return false;
+      const t = presentCompilationType(a);
       if (
         typeof t !== 'string' &&
         t.kind === 'list' &&
@@ -11419,8 +11465,9 @@ export class BaseCompiler {
         // `_SYS.sadd` (Tycho item 246: a Desmos polygon column carries
         // `√-1` as its "undefined vertex" separator).
         const isProvablyPointList = (a: Expression): boolean => {
-          if (isBoundPossiblyCollectionTyped(a)) return false;
-          const elt = collectionElementType(compilationType(a));
+          if (!isGatedIndexedCollection(a) && isBoundPossiblyCollectionTyped(a))
+            return false;
+          const elt = collectionElementType(presentCompilationType(a));
           if (elt === undefined || typeof elt === 'string') return false;
           if (elt.kind !== 'tuple') return false;
           if (!elt.elements.every((c) => isSubtype(c.type, 'number')))

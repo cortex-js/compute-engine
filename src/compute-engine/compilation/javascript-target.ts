@@ -2020,6 +2020,57 @@ function pointConstructorComponent(
 }
 
 /**
+ * The element at 0-based position `idx` of `arg`, for the compiled
+ * `First`/`Second`/`Third`.
+ *
+ * An out-of-range position answers what the interpreter answers
+ * (`absenceMarker()` in `library/collections.ts`): `NaN` when the elements,
+ * less their `missing` arm, are numbers, and `Missing` otherwise, whose
+ * run-time spelling is `undefined`. So `Third((1, Missing))` is `NaN` on both
+ * routes. Before, every out-of-range read was the bare JavaScript read, which
+ * is `undefined`, also for a list of numbers.
+ *
+ * - A STRING source is segmented first: `"s"[0]` selects a UTF-16 code
+ *   unit, where the interpreter yields the whole grapheme cluster
+ *   (`docs/STRING_ROADMAP.md`, decision D13).
+ * - Elements that are not numbers (strings, points, lists): the bare read,
+ *   whose `undefined` out of range is the spelling of `Missing`.
+ * - Elements that are numbers, in a collection that has no absent cell and
+ *   cannot be absent as a whole: `(xs[k] ?? NaN)`.
+ * - Otherwise `_SYS.nth`, which reads the length instead: `?? NaN` would
+ *   also replace an absent cell INSIDE the collection (`First((Missing, 1))`
+ *   is `Missing`, `undefined` at run time), and a collection that is absent
+ *   as a whole (a restricted operand whose condition is false) must read
+ *   `undefined`, not `NaN`. When the element type does not decide the domain
+ *   (`unknown`), `_SYS.nth` looks at the cells, as the interpreter does.
+ */
+function compileNthElement(
+  arg: Expression,
+  idx: number,
+  compile: (e: Expression) => string
+): string {
+  if (isProvablyStringOperand(arg))
+    return `_SYS.chars(${compile(arg)})[${idx}]`;
+  const read = absentRead(arg);
+  const collT = stripMissingFromType(jsType(arg));
+  const eltT = collectionElementType(collT);
+  const present =
+    eltT === undefined
+      ? undefined
+      : stripMissingFromType(resolveTypeForCompilation(eltT));
+  const decided =
+    present !== undefined &&
+    present !== 'unknown' &&
+    present !== 'any' &&
+    present !== 'never';
+  if (decided && !isSubtype(present, 'number'))
+    return `${compile(arg)}${read}[${idx}]`;
+  if (decided && read === '' && !typeContainsMissing(eltT!))
+    return `(${compile(arg)}[${idx}] ?? NaN)`;
+  return `_SYS.nth(${compile(arg)}, ${idx}${decided ? ', true' : ''})`;
+}
+
+/**
  * The element read of an operand that may be absent: `?.` when its type has
  * a `missing` arm, so that a restricted operand whose condition is false,
  * which is `undefined` at run time, answers `undefined` (the run-time
@@ -3477,10 +3528,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // sequence only the base letter, where the interpreter yields the whole
   // grapheme cluster (`docs/STRING_ROADMAP.md`,
   // decision D13).
-  First: (args, compile) =>
-    isProvablyStringOperand(args[0])
-      ? `_SYS.chars(${compile(args[0])})[0]`
-      : `${compile(args[0])}${absentRead(args[0])}[0]`,
+  First: (args, compile) => compileNthElement(args[0], 0, compile),
   Floor: (args, compile, target) => {
     if (BaseCompiler.isIntegerValued(args[0]))
       return identityPassthrough(args[0], compile, target);
@@ -3981,6 +4029,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // interpreter's own character order (`compare.ts`, decision D8).
     if (isProvablyStringOperand(args[0]))
       return joinIfString(args[0], `(${coll}).slice().sort(_SYS.cmpc)`);
+    // An absent cell (`undefined` at run time) needs no comparator case:
+    // `Array.prototype.sort` puts every `undefined` element after the others
+    // without calling the comparator, which is where the interpreter puts an
+    // absent cell (after `NaN`).
     assertNumericSortElements('Sort', args[0]!);
     return `(${coll}).slice().sort(${NAN_LAST_COMPARATOR})`;
   },
@@ -4973,8 +5025,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`Ordering\`: a custom ordering function is not supported; only the default ascending numeric order is.`
       );
-    assertNumericSortElements('Ordering', args[0]!);
-    return `((_l, _c) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _c(_l[_a - 1], _l[_b - 1])))(${coll}, ${NAN_LAST_COMPARATOR})`;
+    // The comparator sees the CELLS here (it sorts indexes), so a cell that
+    // may be absent needs its own case: `ABSENT_LAST_COMPARATOR`.
+    const comparator = assertNumericSortElements('Ordering', args[0]!)
+      ? ABSENT_LAST_COMPARATOR
+      : NAN_LAST_COMPARATOR;
+    return `((_l, _c) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _c(_l[_a - 1], _l[_b - 1])))(${coll}, ${comparator})`;
   },
   // Unbiased Fisher–Yates shuffle on a copy (`_SYS.shuffle`), consuming its
   // `n − 1` draws through the frame-aware `_SYS.drawNextRandomNumber()` in the
@@ -6272,10 +6328,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `1 / Math.cosh(${compile(arg)})`;
   },
   /** A string source is segmented first — see `First`. */
-  Second: (args, compile) =>
-    isProvablyStringOperand(args[0])
-      ? `_SYS.chars(${compile(args[0])})[1]`
-      : `${compile(args[0])}${absentRead(args[0])}[1]`,
+  Second: (args, compile) => compileNthElement(args[0], 1, compile),
   Heaviside: '_SYS.heaviside',
   // A complex operand takes the complex sign `z/|z|` (`_SYS.csign`), the
   // interpreter's reading off the real line; a real one keeps `Math.sign`.
@@ -6342,10 +6395,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.tanh(${compile(args[0])})`;
   },
   /** A string source is segmented first — see `First`. */
-  Third: (args, compile) =>
-    isProvablyStringOperand(args[0])
-      ? `_SYS.chars(${compile(args[0])})[2]`
-      : `${compile(args[0])}${absentRead(args[0])}[2]`,
+  Third: (args, compile) => compileNthElement(args[0], 2, compile),
   PointX: (args, compile, target) =>
     compilePointComponent(args[0], 0, compile, target),
   PointY: (args, compile, target) =>
@@ -11227,6 +11277,39 @@ const SYS_HELPERS = {
     };
     return Array.isArray(i) ? i.map((k) => pick(k)) : pick(i);
   },
+  // The element at 0-based position `k` of `arr`, for the compiled
+  // `First`/`Second`/`Third` (`compileNthElement`). An absent collection
+  // (`undefined`, the run-time spelling of `Missing`) reads `undefined`, as
+  // the interpreter's `First(Missing)` is `Missing`. A cell inside the array is
+  // returned as it is, an absent cell included. A position past the end reads
+  // the marker of the element domain: `NaN` when `numeric` is true (the
+  // element type is numeric), and otherwise the domain the cells show, as
+  // the interpreter's `absenceMarker()` decides it for an element type that
+  // does not: `NaN` when the first cells that are present are numbers, and
+  // `undefined` when one is not or no cell is present. A value that is not
+  // an array is read as it was before this helper.
+  nth: (arr: unknown, k: number, numeric?: boolean): unknown => {
+    if (arr === undefined || arr === null) return undefined;
+    if (!Array.isArray(arr)) return (arr as Record<number, unknown>)[k];
+    if (k < arr.length) return arr[k];
+    if (numeric === true) return NaN;
+    let sawNumber = false;
+    // The interpreter looks at the first 10 cells only (its
+    // `MAX_ABSENCE_MARKER_PROBE`), absent ones included.
+    for (let j = 0; j < arr.length && j < 10; j++) {
+      const c: unknown = arr[j];
+      if (c === undefined) continue;
+      const isNum =
+        typeof c === 'number' ||
+        (typeof c === 'object' &&
+          c !== null &&
+          typeof (c as { re?: unknown }).re === 'number' &&
+          typeof (c as { im?: unknown }).im === 'number');
+      if (!isNum) return undefined;
+      sawNumber = true;
+    }
+    return sawNumber ? NaN : undefined;
+  },
   // Definite integral via deterministic adaptive Gauss–Kronrod (GK15) — near
   // machine precision on smooth integrands, µs-scale. On non-convergence
   // (pathological integrand), fall back to the Monte-Carlo estimator — but only
@@ -14181,6 +14264,18 @@ const NAN_LAST_COMPARATOR =
   '(_a, _b) => _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0)';
 
 /**
+ * `NAN_LAST_COMPARATOR` with an absent cell (`undefined`, the run-time
+ * spelling of `Missing`) after every other cell, `NaN` included, and two
+ * absent cells tied (the sort is stable, so they keep their order). This is
+ * the interpreter's order (user decision of 2026-09-25). Used by the compiled
+ * `Ordering` when the element type has a `missing` arm; the compiled `Sort`
+ * does not need it, because `Array.prototype.sort` already puts every
+ * `undefined` element last.
+ */
+const ABSENT_LAST_COMPARATOR =
+  '(_a, _b) => _a === undefined ? (_b === undefined ? 0 : 1) : _b === undefined ? -1 : _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0)';
+
+/**
  * Fail closed when the elements of a `Sort`/`Ordering` source are not
  * provably numbers.
  *
@@ -14190,9 +14285,18 @@ const NAN_LAST_COMPARATOR =
  * every pair of arrays as a tie. So an element type that admits any value that
  * is not a number (`boolean`, `tuple<…>`, `list<…>`, `any`, `unknown`)
  * does not compile, and the two routes never give different answers.
+ *
+ * An absent cell (`Missing` or `Undefined`, typed `missing`) is allowed: the
+ * interpreter sorts it after every other cell (user decision of 2026-09-25),
+ * and at run time it is `undefined`, which the compiled sort puts last too.
+ * So the test is on the element type less its `missing` arm. Returns `true`
+ * when the element type has a `missing` arm, that is, when a cell can be
+ * absent.
  */
-function assertNumericSortElements(kind: string, arg: Expression): void {
-  const elt = collectionElementType(arg.type.type);
+function assertNumericSortElements(kind: string, arg: Expression): boolean {
+  const declared = collectionElementType(arg.type.type);
+  const absent = declared !== undefined && typeContainsMissing(declared);
+  const elt = absent ? stripMissingFromType(declared) : declared;
   // A complex value has no order: the interpreter leaves such a sort
   // unevaluated, and the comparator would read a `{re, im}` pair as a tie.
   // A complex value that arrives at run time under a `number` element type
@@ -14211,9 +14315,9 @@ function assertNumericSortElements(kind: string, arg: Expression): void {
         `interpreter leaves the sort unevaluated.`
     );
   if (elt !== undefined && (elt === 'never' || isSubtype(elt, 'number')))
-    return;
+    return absent;
   throw new Error(
-    `Could not compile \`${kind}\`: the elements (type \`${elt === undefined ? 'unknown' : typeToString(elt)}\`) ` +
+    `Could not compile \`${kind}\`: the elements (type \`${declared === undefined ? 'unknown' : typeToString(declared)}\`) ` +
       `are not provably numbers; the compiled sort orders numbers only, ` +
       `and the interpreter leaves a sort of booleans, tuples or symbols ` +
       `unevaluated.`

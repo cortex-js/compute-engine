@@ -590,13 +590,20 @@ describe('ROOT', () => {
 
   // NU-P1-8: an even root of a negative exact number has no real value, but a
   // complex principal value exists (like Sqrt(-4) = 2i). evaluate() used to
-  // assert a NaN literal; it must stay symbolic instead (never NaN).
+  // assert a NaN literal; it must stay symbolic instead (never NaN), unless
+  // the principal root is exact: ∜(−4) = 1 + i.
   test(`Even root of a negative number stays symbolic (not NaN) under evaluate`, () => {
-    const r = ce.expr(['Root', -4, 4]).evaluate();
+    const r = ce.expr(['Root', -2, 4]).evaluate();
     expect(r.isNaN).not.toBe(true);
     expect(r.operator).toBe('Root');
-    const p = ce.expr(['Power', -4, ['Rational', 1, 4]]).evaluate();
+    expect(ce.expr(['Root', -4, 4]).evaluate().json).toEqual(['Complex', 1, 1]);
+    const p = ce.expr(['Power', -2, ['Rational', 1, 4]]).evaluate();
     expect(p.isNaN).not.toBe(true);
+    expect(ce.expr(['Power', -4, ['Rational', 1, 4]]).evaluate().json).toEqual([
+      'Complex',
+      1,
+      1,
+    ]);
     // N() produces the principal complex root (~1 + i).
     const n = ce.expr(['Root', -4, 4]).N();
     expect(n.re).toBeCloseTo(1, 12);

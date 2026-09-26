@@ -13,6 +13,7 @@ import {
   isFunction,
   isSymbol,
   isAbsentSymbol,
+  isAbsentArithmeticOperand,
   numericValue,
   isContinuationOperand,
   containsContinuationOperand,
@@ -37,6 +38,7 @@ import {
   broadcastOverIndexedCollections,
   typeMayCarryQuotientShape,
   isTupleWithListCoordinate,
+  isAbsentScalarTerm,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -1088,16 +1090,43 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       // A tuple with a LIST coordinate is data, not a point: it is not
       // scaled here, so the `Divide` stays and its evaluate handler reports
       // the error (see `isTupleWithListCoordinate`).
+      //
+      // An absent divisor is not scaled into the components either: a point
+      // divided by an absent value is the absent point `Missing`, which
+      // `div()` answers when the `Divide` is evaluated. A negation or product
+      // of an absent value (`−Missing`, `2·Missing`) is read as the bare
+      // `Missing` here, because `Divide` evaluates its operands first and
+      // `−Missing` alone evaluates to the number `NaN`, which would hide the
+      // absence. Scaled, `(1, 2) / −Missing` was `(NaN, NaN)`.
+      if (isAbsentScalarTerm(op2) && !isAbsentSymbol(op2))
+        return canonicalDivide(op1, ce.Missing);
       if (
         hasAccessibleComponents(op1) &&
         isFunction(op1) &&
         isSubtype(op2.type.type, 'number') &&
-        !isTupleWithListCoordinate(op1)
+        !isTupleWithListCoordinate(op1) &&
+        !isAbsentScalarTerm(op2)
       )
         return ce.tuple(...op1.ops.map((c) => canonicalDivide(c, op2)));
       return ce._fn('Divide', [op1, op2]);
     }
   }
+
+  // An absent operand (`Missing` or `Undefined`) folds to `NaN` here, as a
+  // `NaN` operand does above and for the same reasons: arithmetic with an
+  // absent operand is `NaN` (user decision of 2026-09-25), and the folds
+  // below would otherwise erase the absence — `Missing / 1` was `Missing`
+  // and `Missing / Missing` was `1` (the `a/a` fold). A point numerator was
+  // handled above: a tuple divided by an absent value is not a number. An
+  // operand that is or may be a collection (`[1, 2, 3] / Missing`) keeps
+  // the `Divide`, so evaluation broadcasts the absence over the cells
+  // (`[NaN, NaN, NaN]`) instead of collapsing the shape to one scalar.
+  if (
+    (isAbsentSymbol(op1) || isAbsentSymbol(op2)) &&
+    !typeMayCarryQuotientShape(op1.type.type) &&
+    !typeMayCarryQuotientShape(op2.type.type)
+  )
+    return ce.NaN;
 
   // A fully-determined expression (no free variables) that is not already a
   // literal. Such expressions may evaluate to 0 or ∞ (e.g. 1-1, tan(π/2))
@@ -1405,6 +1434,24 @@ export function div(num: Expression, denom: number | Expression): Expression {
       return ce.tuple(...num.ops.map((c) => c.div(d).evaluate()));
   }
 
+  // An absent operand (`Missing`, `Undefined`, or a product or negation of
+  // one): arithmetic with an absent operand is `NaN` (user decision of
+  // 2026-09-25), as the `Divide` operator answers at evaluation. Before,
+  // `ce.box('Missing').div(ce.box(2))` was `½·"Missing"`. A point divided by
+  // an absent value is an absent point, `Missing`, as for a product: a tuple
+  // is atomic, so there is no cell for the absence to land in. An operand
+  // that is or may be a collection keeps the quotient, for the reason given
+  // in `canonicalDivide`.
+  if (
+    (isAbsentArithmeticOperand(num) ||
+      (typeof denom !== 'number' && isAbsentArithmeticOperand(denom))) &&
+    (typeof denom === 'number' ||
+      isTuple(num) ||
+      (!typeMayCarryQuotientShape(num.type.type) &&
+        !typeMayCarryQuotientShape(denom.type.type)))
+  )
+    return isTuple(num) ? ce.Missing : ce.NaN;
+
   if (typeof denom === 'number') {
     if (isNaN(denom)) return ce.NaN;
     if (isLiteral(num, 0)) {
@@ -1631,6 +1678,15 @@ export function canonicalMultiply(
     for (const op of ops) unnegateInto(op);
   }
 
+  // A product of several factors that folds down to a lone absent factor
+  // (`Multiply(Missing, 1)`) is `NaN`, not the bare symbol: arithmetic with
+  // an absent operand is `NaN` (user decision of 2026-09-25), and removing
+  // the `· 1` must not turn the product into the absent value itself.
+  // `Multiply(Missing, 2)` is not folded here: it stays a product, and its
+  // evaluation answers `NaN`.
+  const severalFactors = xs.length > 1;
+  const hasAbsentFactor = xs.some((x) => isAbsentSymbol(x));
+
   //
   // Filter out ones
   //
@@ -1692,8 +1748,10 @@ export function canonicalMultiply(
         product = candidate;
       }
       if (product.isZero) {
-        // 0 * ±∞ = NaN, 0 * NaN = NaN
-        if (nonNumeric.some((x) => x.isInfinity || x.isNaN)) return ce.NaN;
+        // 0 * ±∞ = NaN, 0 * NaN = NaN, and 0 times an absent factor is NaN
+        // (arithmetic with an absent operand is `NaN`)
+        if (hasAbsentFactor || nonNumeric.some((x) => x.isInfinity || x.isNaN))
+          return ce.NaN;
         return ce.Zero;
       }
       // The fold can produce a NEGATIVE real coefficient even though the sign
@@ -1851,6 +1909,7 @@ export function canonicalMultiply(
     // symbol stays admitted.
     if (heldNonNumericScalar(ys[0]))
       return ce.typeError('number', ys[0].type, ys[0]);
+    if (severalFactors && isAbsentSymbol(ys[0])) return ce.NaN;
     return ys[0];
   }
 
@@ -2082,6 +2141,20 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   // list-of-points reading.
   if (xs.some((x) => isTuple(x)) && !hasUnresolvedTupleCofactor(xs))
     return mulTuples(ce, xs, false, expand);
+
+  // An absent factor (`Missing`, `Undefined`, or a product or negation of
+  // one) makes the product `NaN`, as the `Multiply` operator answers at
+  // evaluation: arithmetic with an absent operand is `NaN` (user decision of
+  // 2026-09-25). Before, `ce.box('Missing').mul(ce.box(2))` was
+  // `2·"Missing"`. A tuple co-factor was handled above: an absent factor
+  // beside a point makes the whole point absent (`mulTuples`). A factor that
+  // is collection-typed but has no value yet (`L: list<number>`) keeps the
+  // product inert: once it resolves, the absence is broadcast over its cells.
+  if (
+    xs.some((x) => isAbsentArithmeticOperand(x)) &&
+    !xs.some((x) => !isAbsentSymbol(x) && isUnresolvedCollectionOperand(x))
+  )
+    return ce.NaN;
 
   // `expandProducts` does two things: it distributes over sums, and — as a
   // side effect of walking the operands pairwise — it folds the product two at
@@ -2343,6 +2416,15 @@ function mulTuples(
   const scalars = xs.filter((x) => !isTuple(x));
 
   if (tuples.length >= 2) return pointProductError(ce, xs);
+
+  // An absent factor (`Missing` or `Undefined`) beside a point makes the
+  // whole point absent: a tuple is atomic, so there is no cell for the
+  // absence to land in (`docs/ERROR-MODEL.md` §3). The `Multiply` operator
+  // already answers `Missing` at evaluation; the `.mul()` method answered the
+  // half-absent point `("Missing", NaN)` for `Missing · (1, 2)`. A negated
+  // or scaled absence (`-Missing`, `2·Missing`) is an absent factor too, as
+  // in `addTuples`: scaled into the components it gave `(NaN, NaN)`.
+  if (scalars.some((x) => isAbsentScalarTerm(x))) return ce.Missing;
 
   const tuple = tuples[0];
 

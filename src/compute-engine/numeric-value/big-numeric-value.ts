@@ -585,7 +585,14 @@ export class BigNumericValue extends NumericValue {
 
     if (this.isZero) return this;
     if (this.isOne) return this;
-    if (this.isNegativeOne) return this;
+    // An odd root of −1 is −1 (real-root convention). An even root of −1 is
+    // not −1: it is handled below like any even root of a negative real.
+    if (this.isNegativeOne && Math.abs(exp) % 2 === 1) return this;
+
+    // The square root of a negative real is imaginary (`sqrt()` handles it),
+    // as in `MachineNumericValue.root`. Only the higher even roots of a
+    // negative real are NaN in the float lanes.
+    if (exp === 2) return this.sqrt();
 
     if (this.im === 0) {
       if (this.decimal.isNegative()) {
@@ -596,7 +603,6 @@ export class BigNumericValue extends NumericValue {
         if (exp === 3) return this.clone(this.decimal.cbrt());
         return this.clone(this.decimal.neg().ln().div(exp).exp().neg());
       }
-      if (exp === 2) return this.clone(this.decimal.sqrt());
       if (exp === 3) return this.clone(this.decimal.cbrt());
       // x^(1/n) via `nthRoot`, which computes it at full working precision and
       // snaps a perfect power to its exact integer root. (The earlier

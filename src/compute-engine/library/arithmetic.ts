@@ -318,6 +318,7 @@ import {
   isContinuationOperand,
   isAbsentValue,
   isAbsentSymbol,
+  isAbsentArithmeticOperand,
 } from '../boxed-expression/type-guards.js';
 import { cmp, exactOrder } from '../boxed-expression/compare.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
@@ -1878,8 +1879,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // a LIST (any non-tuple collection) is also an operand: that sum is
           // a broadcast over the list, and the absent point lands in each
           // cell through the collection kernel instead.
+          //
+          // A negated or scaled absence is an absent addend too:
+          // `(1, 2) - Missing` is canonically `Add(Negate(Missing), (1, 2))`,
+          // and the evaluation above made `-Missing` the number `NaN`
+          // (a numeric codomain). The operand as it was written still says
+          // that the term is absent (`isAbsentArithmeticOperand`), so the
+          // difference is `Missing`, as the sum `(1, 2) + Missing` is.
+          // Before, the `NaN` term met the point and the difference was
+          // an `incompatible-type` error.
           if (
-            evaluated.some(isAbsentScalarSymbol) &&
+            evaluated.some(
+              (x, i) =>
+                isAbsentScalarSymbol(x) ||
+                (x.isNaN === true && isAbsentArithmeticOperand(ops[i]))
+            ) &&
             evaluated.some((x) => isTuple(x)) &&
             !evaluated.some((x) => isNonTupleCollectionOperand(x))
           )

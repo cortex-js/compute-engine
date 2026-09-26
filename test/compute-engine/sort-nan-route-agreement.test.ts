@@ -102,12 +102,18 @@ const LISTS = (() => {
 
 describe('SORT AND ORDERING PUT NaN LAST ON EVERY ROUTE', () => {
   test('the examples of the decision', () => {
-    expect(ce.box(['Sort', ['List', 3, 'NaN', 1]]).evaluate().toString()).toBe(
-      '[1,3,NaN]'
-    );
+    expect(
+      ce
+        .box(['Sort', ['List', 3, 'NaN', 1]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,3,NaN]');
     // 1-based indices of 1, 3 and NaN.
     expect(
-      ce.box(['Ordering', ['List', 3, 'NaN', 1]]).evaluate().toString()
+      ce
+        .box(['Ordering', ['List', 3, 'NaN', 1]])
+        .evaluate()
+        .toString()
     ).toBe('[3,1,2]');
     expect(compiled('Sort', [3, NaN, 1])).toEqual([1, 3, NaN]);
     expect(compiled('Ordering', [3, NaN, 1])).toEqual([3, 1, 2]);
@@ -124,9 +130,9 @@ describe('SORT AND ORDERING PUT NaN LAST ON EVERY ROUTE', () => {
     ]);
     expect(compiled('Sort', xs)).toEqual([-Infinity, 2, Infinity, NaN, NaN]);
     // Two NaN keep their order in the input: index 1 before index 5.
-    expect(
-      interpret(['Ordering', ['List', ...xs.map(toMathJson)]])
-    ).toEqual([4, 3, 2, 1, 5]);
+    expect(interpret(['Ordering', ['List', ...xs.map(toMathJson)]])).toEqual([
+      4, 3, 2, 1, 5,
+    ]);
     expect(compiled('Ordering', xs)).toEqual([4, 3, 2, 1, 5]);
   });
 
@@ -186,10 +192,9 @@ describe('SORT AND ORDERING PUT NaN LAST ON EVERY ROUTE', () => {
     const js = new JavaScriptTarget();
     for (const op of ['Sort', 'Ordering'])
       expect(() =>
-        js.compile(
-          ce.box([op, 'xs', ['Function', ['Negate', 'x'], 'x']]),
-          { constantFold: false }
-        )
+        js.compile(ce.box([op, 'xs', ['Function', ['Negate', 'x'], 'x']]), {
+          constantFold: false,
+        })
       ).toThrow(/Could not compile/);
   });
 });
@@ -228,4 +233,137 @@ describe('SORT OF BOOLEANS, TUPLES OR SYMBOLS: INTERPRETER UNEVALUATED, JAVASCRI
           js.compile(eng.box([op, operand]), { constantFold: false })
         ).toThrow(/not provably numbers/);
       });
+});
+
+describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
+  // User decision of 2026-09-25. `Sort([1, Missing])` stayed unevaluated,
+  // because `Missing` compares neither equal to nor less than a number. An
+  // absent cell (`Missing` or `Undefined`) now sorts after every other
+  // element, `NaN` included, in an ascending sort, a descending comparator and
+  // a sort by key. Two absent cells keep their order in the input.
+  const eng = new ComputeEngine();
+  const value = (json: any) => eng.box(json).evaluate().toString();
+  const DESC = ['Function', ['Subtract', 'b', 'a'], 'a', 'b'];
+  const DESC_BOOL = ['Function', ['Greater', 'a', 'b'], 'a', 'b'];
+  const NEG_KEY = ['Function', ['Negate', 'x'], 'x'];
+
+  test.each(['Missing', 'Undefined'])('%s', (absent) => {
+    const xs = ['List', 3, absent, 1];
+    expect(value(['Sort', xs])).toBe(`[1,3,"${absent}"]`);
+    expect(value(['Ordering', xs])).toBe('[3,1,2]');
+    expect(value(['Sort', xs, DESC])).toBe(`[3,1,"${absent}"]`);
+    expect(value(['Sort', xs, DESC_BOOL])).toBe(`[3,1,"${absent}"]`);
+    expect(value(['Sort', xs, NEG_KEY])).toBe(`[3,1,"${absent}"]`);
+    expect(value(['Ordering', xs, DESC])).toBe('[1,3,2]');
+  });
+
+  test('after NaN, and two absent cells keep their order', () => {
+    expect(value(['Sort', ['List', 'Undefined', 3, 'NaN', 'Missing', 1]])).toBe(
+      '[1,3,NaN,"Undefined","Missing"]'
+    );
+  });
+
+  test('a list of strings', () => {
+    expect(value(['Sort', ['List', "'b'", 'Missing', "'a'"]])).toBe(
+      '["a","b","Missing"]'
+    );
+  });
+
+  test('the parse route', () => {
+    expect(
+      eng
+        .parse('\\operatorname{Sort}([3, \\operatorname{Missing}, 1])')
+        .evaluate()
+        .toString()
+    ).toBe('[1,3,"Missing"]');
+  });
+
+  // The absent cell is kept in the type too. Before, the `missing` arm of
+  // the elements stopped the element type from binding, and the numeric
+  // absorption of an absent operand applied: `Sort` was typed
+  // `list<unknown>`, `Reverse` `list` and `Ordering` `list<number>`.
+  test.each([
+    ['Sort', 'list<integer | missing>'],
+    ['Ordering', 'list<integer>'],
+    ['Reverse', 'list<integer | missing>'],
+    ['Rest', 'list<integer | missing>'],
+    ['Unique', 'list<integer | missing>'],
+  ])('%s of a list with an absent cell is typed %s', (op, type) => {
+    for (const absent of ['Missing', 'Undefined']) {
+      const e = eng.box([op, ['List', 3, absent, 1]]);
+      expect(e.type.toString()).toBe(type);
+      expect(e.evaluate().type.matches(e.type)).toBe(true);
+    }
+    const parsed = eng.parse(
+      `\\operatorname{${op}}([3, \\operatorname{Missing}, 1])`
+    );
+    expect(parsed.type.toString()).toBe(type);
+  });
+
+  test('a declared list with absent cells keeps its element type', () => {
+    const e2 = new ComputeEngine();
+    e2.declare('ms', 'list<real | missing>');
+    expect(e2.box(['Sort', 'ms']).type.toString()).toBe('list<missing | real>');
+    expect(e2.box(['Take', 'ms', 2]).type.toString()).toBe(
+      'list<missing | real>'
+    );
+  });
+
+  test('a list absent as a whole is still Missing', () => {
+    expect(value(['Sort', 'Missing'])).toBe('"Missing"');
+  });
+
+  // The compiled sort orders a list with an absent cell as the interpreter
+  // does. The run-time spelling of an absent cell is `undefined` (a written
+  // `Missing` lowers to the object null of the target, `docs/ERROR-MODEL.md`
+  // §3), and `Array.prototype.sort` puts every `undefined` element last.
+  // Before, the element type `integer | missing` was not provably numeric,
+  // so the sort did not compile, and the interpreter fallback answered
+  // `[1, 3, NaN]`.
+  test('compiled to JavaScript', () => {
+    const runOf = (json: any, vars: object = {}): unknown => {
+      const r = compile(eng.box(json), { fallback: false })!;
+      expect(r.success).toBe(true);
+      return (r.run as (v: object) => unknown)(vars);
+    };
+    expect(runOf(['Sort', ['List', 3, 'Missing', 1]])).toEqual([
+      1,
+      3,
+      undefined,
+    ]);
+    expect(runOf(['Sort', ['List', 3, 'Missing', 'x']], { x: 1 })).toEqual([
+      1,
+      3,
+      undefined,
+    ]);
+    expect(
+      runOf(['Sort', ['List', 'x', 'Undefined', 3, 'NaN', 'Missing', 1]], {
+        x: 2,
+      })
+    ).toEqual([1, 2, 3, NaN, undefined, undefined]);
+    expect(runOf(['Ordering', ['List', 3, 'Missing', 'x']], { x: 1 })).toEqual([
+      3, 1, 2,
+    ]);
+    expect(
+      runOf(['Ordering', ['List', 'Missing', 'x', 'NaN', 'Undefined', 1]], {
+        x: 2,
+      })
+    ).toEqual([5, 2, 3, 1, 4]);
+    expect(
+      value(['Ordering', ['List', 'Missing', 2, 'NaN', 'Undefined', 1]])
+    ).toBe('[5,2,3,1,4]');
+  });
+
+  test('compiled from the parse route', () => {
+    const r = compile(
+      eng.parse('\\operatorname{Sort}([3, \\operatorname{Missing}, x])'),
+      { fallback: false }
+    )!;
+    expect(r.success).toBe(true);
+    expect((r.run as (v: object) => unknown)({ x: 1 })).toEqual([
+      1,
+      3,
+      undefined,
+    ]);
+  });
 });

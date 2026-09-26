@@ -425,25 +425,21 @@ the rule: `ce.parse('1.0')` is the exact `One` (the shared `isOne`/ `isZero`
 constants in `createNumberExpression`) while `ce.parse('2.0')` is a float, and
 `ce.number(ce.bignum('1500'))` is exact (`canonicalNumber` turns a big decimal
 at most `10^6` into an exact number) while `ce.parse('1500.0')` is a float.
-Decide whether no big decimal is ever exact (then `Sqrt(4).N()` at bignum
-precision becomes inexact; blast radius unmeasured) or accept the difference.
+Cause (found 2026-09-25): both are shortcuts that test the value and ignore
+exactness. `createNumberExpression` (`engine-expression-entrypoints.ts`)
+returns the shared exact constants `Zero`/`One`/`NegativeOne` for any numeric
+value that `isZero`/`isOne`/`isNegativeOne`, so the inexact big decimal `1.0`
+becomes the exact `1` (there is no such shortcut for `2`); the `BigDecimal`
+branch of `canonicalNumber` (`boxed-number.ts`) turns an integer-valued big
+decimal of at most `SMALL_INTEGER` into a plain JavaScript integer, which is
+exact. The proposed fix is to also test `isExact` in both shortcuts. Decide
+whether no big decimal is ever exact (then `Sqrt(4).N()` at bignum precision
+becomes inexact; blast radius unmeasured) or accept the difference.
 (2) A float past the safe integers becomes exact after a LaTeX round trip:
 `ce.box(1e16)` serializes to `10\,000\,000\,000\,000\,000`, which parses back as
 an exact integer; a fix needs a LaTeX mark for an inexact integer-valued number.
-(3) The `SingularValues` double kernel returns `0` for a singular value below
-about `ε·σ_max` even when the entries are within the double range:
-`SingularValues([[1e20, 0.5], [0.5, 2.5]]).evaluate()` gives `[1e+20, 0]` (the
-1×1/2×2 closed form under `.N()` on exact decimal entries is fixed; the general
-kernel is not). Pre-existing, wrong value.
 
 ### Residues of the fixes for Tycho asks 306–315 (OPEN — found 2026-09-24)
-
-Found while fixing 312 (not fixed, small; the `Multiply(Undefined, [1,2,3])`
-type, the matrix `Norm` with an absent cell, and the matrix of restricted points
-landed 2026-09-25): `Trace(Missing)` is still an `incompatible-type` error while
-`Norm(Missing)` is `NaN` (both were set by precedent, not by a user decision);
-and the scalar `Multiply(Missing, 1)` and `Add(Missing, 0)` fold to `Missing` at
-canonicalization while `2·Missing` is `NaN`.
 
 Not fixed, accepted rule: on `javascript`, a list held by a free point
 coordinate becomes `NaN` (`_SYS.pointSlot`), so `[1,2]·PointList(t,t)` run with
@@ -458,16 +454,6 @@ value): `x4[1,2]` (the left side is already the product `x·4`), `2^3[1,2]` and
 `\sin 4[1,2]` (read as an index, `At(…)`, then a type error), and `4[x=0]` (an
 Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
 `Tuple(4, Interval(…))`, which is probably not what an author means.
-
-### The `.add()` and `.mul()` methods keep an absent operand as a symbol (OPEN, small — found 2026-09-25)
-
-`ce.box('Missing').add(ce.box(1))` gives `"Missing" + 1` and `.mul()` gives
-`2·Missing` (for `Undefined` too), while the operators `Add(Missing, 1)` and
-`Multiply(2, Missing)` evaluate to `NaN`. The methods are the internal
-arithmetic route (`arithmetic-add.ts`, `arithmetic-mul-div.ts`); a caller that
-folds an absent operand through them, rather than through the operator's
-evaluate handler, keeps the symbol in its result. Make the methods read an
-absent operand as `NaN`, as the tuple routes do since 2026-09-25.
 
 ### `Map` with a bare symbol callback copies the source element type (OPEN, decision — found 2026-09-25 while fixing Tycho item 325)
 
@@ -519,28 +505,27 @@ distributes (one integral per element, matching the bound rule) or stays
 unevaluated with a documented message on both routes. Test file for the bound
 rule: `tycho-325-integrate-list-limit-broadcast.test.ts`.
 
-### An out-of-range component read answers `Missing` when the tuple holds an absent cell, `NaN` otherwise (OPEN, small — found 2026-09-25)
+### Residues of the absent-value round (OPEN, small — found 2026-09-25)
 
-`Third((1, 2))` is `NaN` (typed `nan`: index 3 of a 2-tuple is out of range),
-`Third((1, Undefined))` is `NaN`, but `Third((1, Missing))` is `Missing`: the
-marker of an out-of-range read (`componentAt`, `library/collections.ts`) depends
-on which symbol spells the absence of an UNRELATED cell. The static type
-`missing | nan` admits both; the value should not depend on the spelling.
-Related, unconfirmed: compiled `PointY([(1, Missing), (2, 3)])` gives `[NaN, 3]`
-where the interpreter gives `[Missing, 3]`; `?? NaN` is the compiled spelling of
-an absent number, so this is probably intended, but the 0.135.0 notes say an
-absent point cell compiles to `undefined`; confirm which.
+The round of that date made arithmetic with an absent operand `NaN`, an
+out-of-range read `NaN`, `Trace(Missing)` `NaN`, and put an absent cell last in
+`Sort`. What it left: (1) The interpreter fallback of a compiled function
+(`interpretedRunValue`, `compilation/base-compiler.ts`) turns `Missing` into
+`NaN`, while compiled code spells an absent cell `undefined` (`docs/ERROR-MODEL.md`
+§3): compiled `(1, x) - Missing` falls back and gives `NaN`. Changing it reaches
+every fallback case; a decision. (2) The descriptor typing route
+(`derive-application-type.ts`) cannot see that an operand is a negated absence,
+so a type derived through it (a `Map` body) for `Add(Negate(Missing), (1, 2))`
+is still `number | tuple<…>`; the expression route types it
+`missing | tuple<…>`. (3) The `.neg()` and `.inv()` methods keep an absent
+operand (`-"Missing"`, `1/"Missing"`; both evaluate to `NaN`). Not a defect,
+recorded rule: compiled arithmetic with an absent POINT gives `NaN` where the
+interpreter gives `Missing` (`compile-restricted-point.test.ts`, as for
+`A\{0<t\} + 1`).
 
-### `Sort` of a list with an absent cell stays unevaluated (OPEN, decision — found 2026-09-25)
-
-`Sort([1, Missing])` and `Sort([1, Undefined])` stay as the unevaluated
-`Sort(…)` (the two twins agree since the `Undefined` cell is typed `missing`,
-2026-09-25). Where an absent cell goes in the order (first, last, or the list is
-`NaN`-like and the sort declines with an error) is a decision; `Max`/`Min`/`Sum`
-of the same list answer `NaN`. Related, recorded as a decision in
-`absFunctionType` (`library/type-handlers.ts`): `Abs(x)` with `x: number` is
-typed `real<0..> | signed_infinity` with no `nan` arm although `Abs(NaN)` is
-`NaN`.
+Related, recorded as a decision in `absFunctionType`
+(`library/type-handlers.ts`): `Abs(x)` with `x: number` is typed
+`real<0..> | signed_infinity` with no `nan` arm although `Abs(NaN)` is `NaN`.
 
 ### An absent list carries no shape: `Missing + 2\{b>0\}` is a scalar (OPEN, small — found 2026-09-25)
 
@@ -551,28 +536,30 @@ the sum is formed, and `Missing + 2\{b>0\}` threads to `NaN\{b>0\}`: the absent
 operand is a bare `Missing`, which carries no shape, so the sum reads it as an
 absent scalar and answers the numeric marker still gated by `b`. The two routes
 agree once `b` is decided too (`[NaN, NaN]` for `b = -1` with `a` free on both).
+The same question for points (found 2026-09-25): at `t = −1`,
+`(A\{0<t\}, B) + (A, B)` is `[Missing, Missing]` (typed
+`list<missing | tuple<number, number>>`) while `(A\{0<t\}, B) + (1, 1)` is the
+whole `Missing`; compiled to JavaScript, the first gives `[[NaN,NaN],[NaN,NaN]]`.
 A fix needs the absent value of a list to remember that it was a list (a typed
 absence), which `Missing` does not.
 
 ### Residues of the tuple-of-lists change (OPEN, small — 2026-09-25)
 
-(1) The static type of arithmetic over a code-built tuple with a list coordinate
-(`Add(Tuple(1,1), Tuple(A,B))`) is still `tuple<list<real>, list<real>>` though
-it always evaluates to an error. Typing it `error` makes the canonicalization of
-an enclosing arithmetic expression wrap the operand in
-`Error(incompatible-type, "number", "error")`, so `(1−t)P − tP` with a data
-tuple `P` gives a sum of errors after `.N()`; `checkNumericArgs` must first stop
-wrapping error-typed operands. (2) Compiled `(A\{0<t\}, B) + (1, 1)` declines
-("scalar arithmetic over a list-valued operand") where the interpreter answers;
-a reachable decline. (3) `Length(Missing)` is
-`Error(incompatible-type, collection, missing)` while its type says `integer`.
-(4) For a parameter with no declared type, the compiled route does not handle a
+(1) On `javascript`, restricted point arithmetic with an UNTYPED `t` declines:
+`PointList(t,1)\{1<t\} + PointList(2,t)` is typed `missing | tuple<unknown,
+unknown>` and fails the absent-value check ("object-domain absent ('missing')
+position … has no object null representation", `isNumericOrVerdictShaped`
+does not accept an `unknown` coordinate); with `t: real` it compiles. A
+reachable decline (found 2026-09-25). (2) An operator that
+encloses an `error`-typed operand does not always report `error` itself:
+`Sin(Add(Tuple(1,1), Tuple(A,B)))` is typed `number` although it evaluates to
+the error (the direct application is typed `error` since 2026-09-25). (3) For a parameter with no declared type, the compiled route does not handle a
 restricted list of points (`untypedPointListElement` does not remove `missing`).
 On the interpreter, an untyped `k := P ↦ 2P` applied to `[Missing, (3,4)]`
 answers `[NaN, (6, 8)]` typed `list<number>` (found 2026-09-25): the absent cell
-is not `Missing` and the type does not describe the value. (5) A point list at
+is not `Missing` and the type does not describe the value. (4) A point list at
 an untyped parameter beside another collection argument still declines to
-compile to JavaScript (the interpreter pairs the lists). (6) Block-local
+compile to JavaScript (the interpreter pairs the lists). (5) Block-local
 functions and variadic parameters do not map over a list of points.
 
 ### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24, measured on CE main)
@@ -641,17 +628,6 @@ radical of a complex literal but not its real radical. Also found 2026-09-25:
 part at machine precision; the digits are correct, the precision mix is the same
 defect on the `Multiply` route.
 
-### `∜(−1)` stays a `Root` head while `√i`, its equal, is an exact Gaussian radical (OPEN, small — found 2026-09-25)
-
-Since 2026-09-25 (user ruling) `√i` evaluates to `(√2/2)(1 + i)` and `√(−i)` to
-`(√2/2)(1 − i)`, like every other exact Gaussian square root. `\sqrt[4]{-1}`,
-the same value, goes through the `Root` route, which has no exact case for a
-root of a negative number with an even index above 2, and stays `root(4)(-1)`
-(its `.N()` is correct). Also consistent but limited: a Gaussian value raised to
-a rational power other than `1/2` never reduces (`i^{3/2}`, `(3 + 4i)^{3/2}` =
-`2 + 11i` stays symbolic); an exact `p/2` power of a Gaussian integer would be a
-feature, not a defect.
-
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 
 `Eigenvalues([[1, i, 0], [i, 2, 0], [0, 0, 3]])`, `Eigenvectors` of it,
@@ -659,8 +635,10 @@ feature, not a defect.
 `QRDecomposition` and `SVD` of a complex matrix stay unevaluated under
 `evaluate()` AND under `.N()` (before `168de97d` they answered wrong real
 values). `SingularValues(...).N()` of a complex matrix of any size is computed
-since 2026-09-24 (`singularValues(re, im)` in `numerics/linear-algebra.ts`, the
-Jacobi run on the Hermitian embedding `[[P, −Q], [Q, P]]`). The same embedding
+since 2026-09-24. Since 2026-09-25 its kernel, `singularValueDecomposition(re,
+im)` in `numerics/linear-algebra.ts` (QR with column pivoting, then a one-sided
+Jacobi pass), also returns the complex `U` and `V`; the complex `SVD` only
+needs `computeSVD` (`library/linear-algebra.ts`) to accept complex entries. The same embedding
 gives the eigenvalues of a HERMITIAN matrix (run Jacobi on the embedding itself,
 take each eigenvalue once; an eigenvector `[x; y]` gives `x + iy`); a general
 complex matrix needs a complex QR iteration.

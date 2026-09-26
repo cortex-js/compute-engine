@@ -1,3 +1,165 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **The arithmetic methods read an absent operand as `NaN`.** Arithmetic with an
+  absent operand (`Missing` or `Undefined`) is `NaN` (user decision 2026-09-25),
+  and the `.add()`, `.sub()`, `.mul()` and `.div()` methods now answer what the
+  `Add`, `Multiply` and `Divide` operators already answered at evaluation.
+  `ce.box('Missing').add(ce.box(1))` is `NaN` (it was `"Missing" + 1`),
+  `ce.box('Missing').mul(ce.box(2))` and `ce.box('Undefined').mul(ce.box(2))`
+  are `NaN` (they were `2·"Missing"` and `2·"Undefined"`),
+  `ce.box('Missing').mul(0)` is `NaN` (it was `0`) and
+  `ce.box('Missing').div(ce.box(2))` is `NaN` (it was `½·"Missing"`). Beside a
+  point the whole point is absent, as with the operators:
+  `ce.box('Missing').mul(ce.box(['Tuple', 1, 2]))` is `Missing` (it was
+  `("Missing", NaN)`) and `.add()` of the same is `Missing` (it stayed
+  `"Missing" + (1, 2)`). A list operand still takes the absence in each cell
+  (`[NaN, NaN]`), and a list symbol with no value keeps the sum inert. The
+  `.neg()` and `.inv()` methods are unchanged (`-"Missing"`, `1/"Missing"`), and
+  so is the evaluated value of both, `NaN`.
+- **Canonicalization no longer folds an absent operand out of arithmetic.**
+  Removing an identity element or cancelling left the bare absent value:
+  `Multiply(Missing, 1)`, `Add(Missing, 0)`, `Add(Missing, 1, -1)`,
+  `Subtract(Missing, 0)`, `Divide(Missing, 1)` and `Negate(Negate(Missing))`
+  canonicalized to `Missing` (and the same with `Undefined`),
+  `Divide(Missing, Missing)` to `1`, and `Multiply(0, 2, Missing)` to `0`, where
+  `Multiply(Missing, 2)` evaluates to `NaN`. They are now `NaN`. A `Divide` with
+  an absent operand and a scalar other operand is `NaN` at canonicalization, as
+  a `Divide` with a `NaN` operand already was (`Divide(Missing, 2)` was
+  `½·"Missing"`). `Multiply(2, Missing)`, `Add(Missing, x)` and
+  `Negate(Missing)` keep their form and still evaluate to `NaN`.
+  `Divide((1, 2), Missing)` now evaluates to `Missing` (it stayed unevaluated).
+- **An out-of-range read of a numeric collection with an absent cell is `NaN`.**
+  `Third((1, Missing))` and `At([1, Missing], 5)` are `NaN`, typed `nan` for the
+  literal read (they were `Missing`, typed `missing | nan`), as `Third((1, 2))`
+  and `Third((1, Undefined))` already were. An absent cell says nothing about
+  the domain of the other cells. A collection of absent cells only, or with
+  non-numeric cells, still answers `Missing` (`Third(("a", Missing))`).
+- **`Trace` of an absent operand is `NaN`.** `Trace(Missing)` and
+  `Trace(Undefined)` evaluate to `NaN`, typed `number`, as `Norm(Missing)` does;
+  they were `incompatible-type` errors at boxing. An absent axis is still an
+  error.
+- **`Sort` and `Ordering` put an absent cell last.** `Sort([3, Missing, 1])` is
+  `[1, 3, Missing]` and `Ordering([3, Missing, 1])` is `[3, 1, 2]`; both stayed
+  unevaluated, and so did the `Undefined` spelling. An absent cell sorts after
+  every other element, `NaN` included, in an ascending sort, a descending
+  comparator and a sort by key (an absent key puts its element last). Two absent
+  cells keep their order in the input.
+- **Arithmetic over a MathJSON `Tuple` with a list coordinate is typed
+  `error`.** Its value has been an `incompatible-type` error since 0.135.0 (a
+  code-built tuple such as `Tuple(A, B)` with `A`, `B` lists is data, not a
+  point), but its static type still described a tuple of lists:
+  `Add(Tuple(1, 1), Tuple(A, B))` was typed `tuple<list<real>, list<real>>`, and
+  `Sin(Tuple([1, 2], 3))` the bare `tuple`. Both are now typed `error`, as are
+  `Multiply`, `Divide`, `Negate`, `Power`, `Sqrt`, `Root` and every function
+  that applies to each coordinate of a tuple over such an operand. A host that
+  reads the type of `t·D`, with `D` declared `tuple<list<real>, list<real>>`,
+  now sees `error` where it saw a tuple.
+- An arithmetic operand whose type is `error` is kept as it is when an enclosing
+  sum, product, power or negation is canonicalized. Before, it was wrapped in
+  `Error(incompatible-type, "number", "error")`, so the expression became
+  invalid and hid the real error. `(1 − t)D − tD`, with `D` the data tuple
+  above, stays valid and evaluates (with `evaluate()` and `N()`) to one
+  `incompatible-type` error that names the tuple `([1,2], [3,4])`.
+- **`SVD` returns the singular values in descending order.** The diagonal of `Σ`
+  followed the order of the old iteration: the `Σ` of
+  `SVD([[1e200, 0], [0, 2e200]])` was `[[1e200, 0], [0, 2e200]]`, and is now
+  `[[2e200, 0], [0, 1e200]]`. The sign (for a complex matrix, the phase) of each
+  pair of singular vectors is also fixed: the entry of largest magnitude of each
+  column of `V` is real and positive, so the SVD of a diagonal matrix with
+  positive entries has identity factors.
+- **`SingularValues` and `SVD` answer for a matrix whose entry magnitudes span
+  up to `10^290`**, not only `10^150`. The numeric kernel no longer forms the
+  Gram matrix, which squared that range:
+  `SingularValues([[1e200, 3e-80], [2e-80, 1e-85]])` was unevaluated, and is now
+  `[1e200, 1e-85]`.
+- **The fourth root of a negative number evaluates to its exact principal value
+  when it has one.** `∜(−1)` and `(−1)^{1/4}` evaluate to `(√2/2)(1 + i)`, the
+  same value as `√i`; `∜(−4)` is `1 + i`, `∜(−16)` is `√2 + √2·i` and
+  `(−4)^{−1/4}` is `(1 − i)/2`. They stayed a symbolic `Root`. `∜(−2)` (whose
+  value needs `2^{1/4}`), the sixth and eighth roots of `−1` still stay a
+  `Root`, and an odd root of a negative number keeps its real value
+  (`∛(−8) = −2`).
+
+### Resolved Issues
+
+- **A restricted list, point or list of points now compiles on the `interval-js`
+  target**, as it does on `javascript`. Before, a restricted literal
+  (`[1,2]\{0<t\}`, `(1,2)\{0<t\}`), a list of points built from a restricted
+  list (`(A\{0<t\}, B)` with `A`, `B` lists of numbers), and arithmetic over a
+  restricted value (`(A\{0<t\}, B) + (1,1)`, `A\{0<t\} + 1`,
+  `t\cdot(1,2)\{0<t\}`) failed to compile with "no lowering for `List`",
+  "`Tuple`" or "`PointList`". The value is the one a restricted list input
+  (`A\{0<t\}`) already had on that target: the list where the condition holds,
+  the `empty` result where it fails (the interpreter answers `Missing`), and
+  each element marked `partial` where the condition is undecided over the
+  interval. An arithmetic operation over a restricted point or list of points
+  whose condition fails answers `empty` as a whole.
+- Compiled to JavaScript, the sum of a restricted list of points and a point,
+  `(A\{0<t\}, B) + (1, 1)` (parsed to
+  `Add(PointList(When(A, 0 < t), B), Tuple(1, 1))`), and
+  `(A, B)\{0<t\} + (1, 1)`, now give the shifted points, as the interpreter
+  does. They declined with "scalar arithmetic over a list-valued operand". When
+  the condition fails, the compiled code answers `NaN` where the interpreter
+  answers `Missing`, as for `A\{0<t\} + 1`.
+- **The small singular values of a matrix with graded entries were 0.** The
+  machine-precision kernel of `SingularValues` and `SVD` found the eigenvalues
+  of `AᵀA`, which has an absolute error of about `ε·σ_max` (`ε ≈ 2.2e-16`), so a
+  smaller singular value came back as 0 even when the entries were well within
+  the float64 range: `SingularValues([[1e20, 0.5], [0.5, 2.5]])` was
+  `[1e20, 0]`, and is now `[1e20, 2.5]`; the `Σ` of the `SVD` of that matrix had
+  a 0 where it now has `2.5`. The complex kernel had the same fault
+  (`SingularValues([[1e20, 0.5i], [0.5, 2.5]])` was `[1e20, 2.5495…]`, and is
+  now `[1e20, 2.5]`). The kernel is now a one-sided Jacobi SVD after a QR
+  factorization with column pivoting, which computes each singular value with a
+  small relative error when the matrix is a well-conditioned matrix with scaled
+  rows or columns: the singular values of `Q·diag(1e20, 1, 1e-5)` and of
+  `diag(1e20, 1, 1e-5)·Q`, for a rotation `Q`, are `1e20`, `1` and `1e-5`, not
+  `1e20`, `0` and `0`.
+- **An even root of a negative number no longer drops the sign.**
+  `\sqrt[4]{-16}` simplified to `2` and `\sqrt[4]{-1}` to `1`, and the `root()`
+  method gave the same values (`ce.number(-16).root(4)`); none of them is a
+  fourth root of the radicand. They now give the principal root (`√2 + √2·i`) or
+  keep the `Root`, and `(-x).root(4)` stays `∜(−x)` instead of becoming `∜x`.
+- **The `root()` method of a number with a negative odd index keeps the real
+  root.** `ce.number(-8).root(-3)` is `−1/2`; the check for an odd index failed
+  for a negative index. The big-decimal numeric value gives the imaginary square
+  root of a negative real (`2i` for `−4`), as the machine numeric value does,
+  instead of `NaN`.
+- **A point minus an absent value is `Missing`, as the sum is.**
+  `(1, 2) - Missing` was `Error(incompatible-type, tuple, number)`, while
+  `(1, 2) + Missing` was `Missing`: the difference is `(1, 2) + (-Missing)`,
+  and `-Missing` alone is the number `NaN`, which then met the point. A negated
+  or scaled absence beside a point now makes the whole point absent, as an
+  absent addend does. The same holds for `Undefined`, for `2·Missing + (1, 2)`,
+  for `.N()` and for the `.sub()` method, and the difference is typed
+  `missing | tuple<…>` instead of `number | tuple<…>`. `3 - Missing` and
+  `[1, 2] - Missing` are still `NaN` and `[NaN, NaN]`. A point divided by a
+  negated or scaled absence is `Missing` too: `(1, 2) / (-Missing)` was
+  `(NaN, NaN)`.
+- **A compiled out-of-range `First`, `Second` or `Third` is `NaN` for a numeric
+  collection, as in the interpreter.** Compiled to JavaScript, `Third((1, x))`
+  was `undefined` (the bare JavaScript read past the end of the array), where
+  the interpreter gives `NaN`. `Third((1, 2))` only agreed because it folds to a
+  constant. A collection of strings or points still reads `undefined` there,
+  the run-time spelling of `Missing`, and an absent cell inside the collection
+  is still read as absent (`First((Missing, x))` is `undefined`).
+- **`Sort` and `Ordering` of a list with an absent cell compile to JavaScript.**
+  The element type `integer | missing` was not provably numeric, so the sort
+  declined, and the interpreter fallback gave `[1, 3, NaN]` for
+  `Sort([3, Missing, 1])`. The compiled sort now puts the absent cell last, as
+  the interpreter does, with the run-time spelling of an absent cell:
+  `[1, 3, undefined]`. The compiled `Ordering` puts it after `NaN` too.
+- **The collection operators that reorder or select cells keep the type of an
+  absent cell.** `Sort([3, Missing, 1])` was typed `list<unknown>`,
+  `Reverse([3, Missing, 1])` `list` and `Ordering([3, Missing, 1])`
+  `list<number>`. They are now typed `list<integer | missing>`,
+  `list<integer | missing>` and `list<integer>`. The same applies to `Take`,
+  `Drop`, `Rest`, `Most`, `Unique`, `RotateLeft`, `RotateRight`, `Slice` and
+  `Tally`, and to `Filter`, which was typed `list<number>` for a list whose
+  absent cell it keeps.
+
 ## 0.136.0 _2026-09-25_
 
 ### Behavior Changes
@@ -185,7 +347,7 @@
   message that names the supported form. `Random()` inside a frame is unchanged:
   it still lowers to its support `[0, 1]`.
 
-### Bug Fixes
+### Resolved Issues
 
 - **The `interval-js` target answers `singular` where the interpreter answers
   the pole.** A point interval at a double within its rounding error of a pole
@@ -23383,7 +23545,7 @@ Read more about the Identities Library in the
 [dedicated guide](https://mathlive.io/compute-engine/guides/identities/).
 
 This release also includes a large collection of performance improvements and
-bug fixes across the library.
+Resolved Issues across the library.
 
 This release includes some breaking changes.
 

@@ -1403,18 +1403,19 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
       expect(s.toString()).toBe('[3,1,2]');
     });
 
-    test('a Missing key for ONE element leaves both operators unevaluated', () => {
-      // `Missing` compares neither equal to nor less than the number 5, so
-      // the first key cannot be placed.
+    test('a Missing key for ONE element puts that element last', () => {
+      // An absent key sorts last, as an absent element does (user decision
+      // of 2026-09-25). Before, `Missing` compared neither equal to nor less
+      // than the number 5, and both operators stayed unevaluated.
       const key: Expression = [
         'Function',
         ['At', ['List', 'Missing', 5, 6], 'x'],
         'x',
       ];
       const e = engine.box(['Ordering', ['List', 1, 2, 3], key]).evaluate();
-      expect(e.operator).toEqual('Ordering');
+      expect(e.toString()).toBe('[2,3,1]');
       const s = engine.box(['Sort', ['List', 1, 2, 3], key]).evaluate();
-      expect(s.operator).toEqual('Sort');
+      expect(s.toString()).toBe('[2,3,1]');
     });
 
     test('a NaN key for ONE element puts that element last', () => {

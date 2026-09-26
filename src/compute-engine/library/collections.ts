@@ -3361,11 +3361,17 @@ export function objectFieldStore(
  * bare `number`).
  */
 function markerType(t: Type): Type {
-  if (typeof t !== 'string' && t.kind === 'union')
+  if (typeof t !== 'string' && t.kind === 'union') {
+    // A `missing` arm (an absent cell) says nothing about the domain of the
+    // other cells, so it does not contribute a `missing` marker of its own
+    // when another arm remains: `marker(integer | missing)` is `nan`. The
+    // value-level twin, `absenceMarker()`, drops the arm the same way.
+    const present = t.types.filter((x) => x !== 'missing');
     return reduceType({
       kind: 'union',
-      types: t.types.map((x) => markerType(x)),
+      types: (present.length > 0 ? present : t.types).map((x) => markerType(x)),
     });
+  }
   if (t === 'never') return 'missing';
   if (t === 'unknown' || t === 'any') return parseType('nan | missing') as Type;
   if (isSubtype(t, 'number')) return 'nan';
@@ -3485,6 +3491,14 @@ function absenceMarker(ce: ComputeEngine, xs?: Expression): Expression {
       xs.operatorDefinition?.collection?.elttype?.(xs) ??
       collectionElementType(xt);
 
+  // An absent cell (`Missing`, typed `missing`) says nothing about the domain
+  // of the other cells, so its arm is dropped before the domain is read.
+  // Without this, the answer depended on how an unrelated cell was spelled:
+  // `Third((1, Missing))` was `Missing` while `Third((1, Undefined))` and
+  // `Third((1, 2))` were `NaN` (user decision of 2026-09-25: an out-of-range
+  // read of a numeric collection is `NaN`).
+  if (t !== undefined) t = stripMissingFromType(t);
+
   if (t !== undefined && t !== 'unknown' && t !== 'any' && t !== 'never')
     return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
 
@@ -3501,6 +3515,8 @@ function absenceMarker(ce: ComputeEngine, xs?: Expression): Expression {
     let n = 0;
     for (const el of xs.each()) {
       if (++n > MAX_ABSENCE_MARKER_PROBE) break;
+      // An absent cell is skipped, for the reason given above.
+      if (isAbsentSymbol(el)) continue;
       if (!isNumber(el)) return ce.Missing;
       sawNumber = true;
     }
@@ -14774,8 +14790,20 @@ export function sortedIndices(
  * is not on the extended real line (a symbol, a boolean, a tuple, a complex
  * number): such an operand has no place relative to the other elements
  * either, and the caller decides the pair (the default order leaves the sort
- * undetermined). */
+ * undetermined).
+ *
+ * An ABSENT element — the `Missing` or `Undefined` symbol — sorts last too,
+ * after every other element, `NaN` included, and whatever that other element
+ * is: an absent cell holds no value to compare, so the only order that does
+ * not depend on a guess is "at the end". Two absent elements tie, so the
+ * stable sort keeps their order in the input. `Sort([3, Missing, NaN, 1])` is
+ * `[1, 3, NaN, Missing]`, for an ascending sort, a descending comparator and
+ * a sort by key alike. (User decision of 2026-09-25: an absent cell sorts
+ * last.) */
 function nanLastOrder(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
+  const aAbsent = isAbsentSymbol(a);
+  const bAbsent = isAbsentSymbol(b);
+  if (aAbsent || bAbsent) return aAbsent && bAbsent ? 0 : aAbsent ? 1 : -1;
   const aNaN = a.isNaN === true;
   const bNaN = b.isNaN === true;
   if (aNaN && bNaN) return 0;

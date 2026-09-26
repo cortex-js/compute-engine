@@ -1077,6 +1077,24 @@ export class ExactNumericValue extends NumericValue {
     if (this.sign < 0 && Number.isInteger(exponent) && exponent % 2 === 1)
       return this.neg().root(exponent).neg();
 
+    // Even root of a negative value: the value is the principal root, which
+    // is not real. The index 2 is the exact square root (√(−4) = 2i). For
+    // the index 4, ∜(−a) = √(√(−a)) with principal square
+    // roots: the argument goes from π to π/2 to π/4, the argument of the
+    // principal fourth root. The result is exact when both square roots stay
+    // in the representable set: ∜(−1) = (√2/2)(1 + i), ∜(−4) = 1 + i,
+    // ∜(−9) = (√6/2)(1 + i). Otherwise (another even index, or ∜(−2), whose
+    // value 2^(1/4)·(√2/2)(1 + i) has no exact form here) the float lane
+    // answers, and it answers NaN for an even root of a negative real.
+    if (this.sign < 0 && Number.isInteger(exponent) && exponent % 2 === 0) {
+      if (exponent === 2) return this.sqrt();
+      if (exponent === 4) {
+        const r = this.sqrt().sqrt();
+        if (r instanceof ExactNumericValue) return r;
+      }
+      return this.factory(this.bignumRe).root(exponent);
+    }
+
     if (this.radical === 1) {
       if (this.sign > 0 && Number.isInteger(exponent)) {
         // Exact n-th root of a rational: snap when both the numerator and

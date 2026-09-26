@@ -61,7 +61,12 @@ import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
 import { MAX_MATRIX_POWER_EXPONENT } from '../numerics/value-scaled-caps.js';
-import { singularValues, spectralNorm } from '../numerics/linear-algebra.js';
+import {
+  completeOrthonormalColumns,
+  singularValueDecomposition,
+  singularValues,
+  spectralNorm,
+} from '../numerics/linear-algebra.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { float64HoldsNumber } from '../boxed-expression/constraint-subject.js';
 import { exactOrder } from '../boxed-expression/compare.js';
@@ -198,14 +203,11 @@ function decimalExponent(x: BigDecimal): number {
  * decimal: `‖[[10^400, 1], [0, 1]]‖₂` is `10^400`, not NaN.
  *
  * A part much smaller than the largest one can become 0 after the division.
- * The double kernels (`spectralNorm()`, `singularValues()`) have an absolute
- * error of about `ε·σ_max`, where `ε ≈ 2.2e-16` and `σ_max` is the largest
- * singular value, so a singular value below that is not resolved, and a
- * lost part changes the matrix by less than that error. This is harmless for
- * the spectral norm, which is `σ_max`. It is not harmless for the smaller
- * singular values: they can come back as 0. `wideRange` is true when the
- * ratio of the largest to the smallest nonzero entry magnitude is more than
- * `10^MAX_SINGULAR_VALUE_RANGE_EXPONENT`. A caller that needs the small
+ * This is harmless for the spectral norm, which is `σ_max`, the largest
+ * singular value. It is not harmless for the smaller singular values: they
+ * can depend on the lost part, and come back as 0. `wideRange` is true when
+ * the ratio of the largest to the smallest nonzero entry magnitude is more
+ * than `10^MAX_SINGULAR_VALUE_RANGE_EXPONENT`. A caller that needs the small
  * singular values (`SingularValues`) declines such a matrix.
  */
 function scaledMachineMatrix(
@@ -272,16 +274,17 @@ function scaledMachineMatrix(
 /**
  * The largest decimal exponent of the ratio of the largest to the smallest
  * nonzero entry magnitude of a matrix whose singular values are computed in
- * machine precision. The Gram matrix squares that ratio: with the matrix
- * scaled so that its largest entry is about 1, an entry of `10^-150` gives
- * Gram terms of about `10^-300`, which a float64 still holds as a normal
- * number. A smaller entry underflows to 0 in the Gram matrix (or already in
- * the scaled matrix), and the singular values that depend on it come back as
- * 0: the singular values of `[[1e200, 0], [0, 1e-200]]` were `[1e200, 0]`.
- * `SingularValues` and `SVD` decline a matrix with a wider range, and the
- * application stays unevaluated.
+ * machine precision. The kernel (`singularValueDecomposition()`) scales the
+ * matrix so that its largest entry is about 1, and does not form the Gram
+ * matrix, so an entry of `10^-290` stays a normal float64 number (the
+ * smallest one is about `2.2e-308`), with a margin for the products of the
+ * rotations. A smaller entry becomes subnormal or 0 in the scaled matrix,
+ * and the singular values that depend on it lose their precision or come
+ * back as 0: the singular values of `[[1e200, 0], [0, 1e-200]]` were
+ * `[1e200, 0]`. `SingularValues` and `SVD` decline a matrix with a wider
+ * range, and the application stays unevaluated.
  */
-const MAX_SINGULAR_VALUE_RANGE_EXPONENT = 150;
+const MAX_SINGULAR_VALUE_RANGE_EXPONENT = 290;
 
 /**
  * The machine number `x` times `10^exponent`, as a number literal: a big
@@ -2356,6 +2359,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // `Trace([[1, NaN], [3, 4]])` is 5 (the NaN is off the diagonal) while
       // `Trace([[NaN, 1], [3, 4]])` is NaN.
       nanBehavior: ['handle', 'reject', 'reject'],
+      // An ABSENT operand — the `Missing` or `Undefined` symbol — has no
+      // trace, and the answer is the absence marker of the numeric codomain,
+      // `NaN`, as it is for `Norm`. Declared explicitly because the
+      // signature is not all-numeric (a tensor), so the derived policy would
+      // be `pass-through`, which refused `Trace(Missing)` at boxing with an
+      // `incompatible-type` error. Only the operand slot strips `missing`:
+      // an absent axis is still refused.
+      missingBehavior: 'propagate',
+      missingStrip: [0],
       // The trace of a rank-2 matrix (or a scalar 1×1) is a scalar `number`.
       // Tracing a pair of axes of a higher-rank tensor reduces two axes and
       // stays a collection, and there is nothing cheap to claim about its
@@ -2366,6 +2378,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       type: ([m], context) => {
         if (m === undefined) return undefined;
         const t = m.type;
+        // An operand that is only absent (`Missing`, or `Undefined`, which
+        // the propagating policy types `missing`) answers `NaN` (see
+        // `missingBehavior` above), a number. Without this arm the result
+        // type kept the declared `number | tensor`, and the absence gate,
+        // which reads the result type to pick its marker, answered `Missing`
+        // instead of `NaN`.
+        if (t === 'missing')
+          return BoxedType.forResult('number', context.engine._typeResolver);
         if (typeof t !== 'string' && t.kind === 'list') {
           // A matrix carries 2 dimensions (e.g. `matrix` = `[-1, -1]`); a
           // vector (rank-1 list) has no `dimensions` and has no trace.
@@ -4525,10 +4545,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // big decimal), and the exact closed form above does not apply. A
         // float is a decimal, so a 1×1 or 2×2 Gram matrix of those decimal
         // values still has the closed form, computed exactly and then
-        // approximated at the working precision. The double kernel below
-        // has an absolute error of about ε·σ_max and returns 0 for a smaller
-        // singular value: `SingularValues([[10^20, 1], [1, 2]]).N()` was
-        // `[1e20, 0]`.
+        // approximated at the working precision. The kernel below computes
+        // in machine precision only.
         if (numericApproximation) {
           const decimal = decimalRationalMatrix(M, m, n);
           if (decimal !== undefined) {
@@ -4799,8 +4817,11 @@ function computeCholesky(
 }
 
 /**
- * Compute Singular Value Decomposition: A = UΣV^T
- * Uses iterative algorithm based on QR iteration
+ * Compute the singular value decomposition `A = U Σ Vᵀ` of a real matrix in
+ * machine precision, with `singularValueDecomposition()`
+ * (`numerics/linear-algebra.ts`): U is `m × m`, Σ is `m × n`, V is `n × n`,
+ * and the singular values (the `min(m, n)` diagonal entries of Σ) are in
+ * descending order.
  */
 function computeSVD(
   M: Expression,
@@ -4815,174 +4836,49 @@ function computeSVD(
   // arithmetic only, so the conversion fails for an entry that is complex or
   // not numeric, and the application then stays unevaluated. Reading only the
   // real part of a complex entry would give a wrong result.
-  const unscaled = tensorToNumericMatrix(M, m, n);
-  if (!unscaled) return undefined;
+  const A = tensorToNumericMatrix(M, m, n);
+  if (!A) return undefined;
 
-  // Divide the matrix by a power of two near its largest magnitude, and
-  // multiply the singular values by it at the end. A^T·A squares the
-  // entries, so without the scale an entry above about 1e154 overflows to
-  // infinity and an entry below about 1e-154 underflows to zero: the SVD of
-  // `[[10^200, 0], [0, 10^200]]` was NaN. A power of two divides every
-  // entry exactly. U and V do not depend on the scale.
   let largest = 0;
   let smallest = Infinity;
-  for (const row of unscaled)
+  for (const row of A)
     for (const x of row) {
       largest = Math.max(largest, Math.abs(x));
       if (x !== 0) smallest = Math.min(smallest, Math.abs(x));
     }
   // A matrix whose entry magnitudes span more than
-  // `10^MAX_SINGULAR_VALUE_RANGE_EXPONENT` loses its small entries in the
-  // Gram matrix, and its small singular values would come back as 0 (and U
-  // and V would not be orthogonal): decline it.
+  // `10^MAX_SINGULAR_VALUE_RANGE_EXPONENT` is declined (see that constant).
   if (
     largest > 0 &&
     Math.log10(largest) - Math.log10(smallest) >
       MAX_SINGULAR_VALUE_RANGE_EXPONENT
   )
     return undefined;
-  const scale = largest === 0 ? 1 : 2 ** Math.floor(Math.log2(largest));
-  const A = unscaled.map((row) => row.map((x) => x / scale));
 
-  // Compute A^T * A for right singular vectors
-  const AtA: number[][] = Array(n)
-    .fill(null)
-    .map(() => Array(n).fill(0));
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      for (let k = 0; k < m; k++) {
-        AtA[i][j] += A[k][i] * A[k][j];
-      }
-    }
-  }
+  const svd = singularValueDecomposition(
+    A,
+    A.map((row) => row.map(() => 0))
+  );
+  if (!svd) return undefined;
+  const singularValues = svd.sigma;
 
-  // Compute A * A^T for left singular vectors
-  const AAt: number[][] = Array(m)
-    .fill(null)
-    .map(() => Array(m).fill(0));
-  for (let i = 0; i < m; i++) {
-    for (let j = 0; j < m; j++) {
-      for (let k = 0; k < n; k++) {
-        AAt[i][j] += A[i][k] * A[j][k];
-      }
-    }
-  }
-
-  // Use QR iteration to find eigenvalues/eigenvectors of A^T*A
-  const maxIter = 100;
-  const tol = 1e-10;
-
-  // Initialize V as identity
-  let V: number[][] = Array(n)
-    .fill(null)
-    .map((_, i) =>
-      Array(n)
-        .fill(0)
-        .map((_, j) => (i === j ? 1 : 0))
-    );
-  let B = AtA.map((row) => [...row]);
-
-  for (let iter = 0; iter < maxIter; iter++) {
-    // QR decomposition of B
-    const { Q, R } = qrDecomposition(B, n);
-
-    // B = R * Q
-    const newB: number[][] = Array(n)
-      .fill(null)
-      .map(() => Array(n).fill(0));
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < n; j++) {
-        for (let k = 0; k < n; k++) {
-          newB[i][j] += R[i][k] * Q[k][j];
-        }
-      }
-    }
-
-    // V = V * Q
-    const newV: number[][] = Array(n)
-      .fill(null)
-      .map(() => Array(n).fill(0));
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < n; j++) {
-        for (let k = 0; k < n; k++) {
-          newV[i][j] += V[i][k] * Q[k][j];
-        }
-      }
-    }
-
-    // Check convergence
-    let maxOffDiag = 0;
-    for (let i = 1; i < n; i++) {
-      for (let j = 0; j < i; j++) {
-        maxOffDiag = Math.max(maxOffDiag, Math.abs(newB[i][j]));
-      }
-    }
-
-    B = newB;
-    V = newV;
-
-    if (maxOffDiag < tol) break;
-  }
-
-  // Singular values are sqrt of diagonal of B (eigenvalues of A^T*A)
-  const singularValues: number[] = [];
-  for (let i = 0; i < n; i++) {
-    singularValues.push(Math.sqrt(Math.max(0, B[i][i])));
-  }
-
-  // Compute U = A * V * Σ^(-1)
-  const U: number[][] = Array(m)
-    .fill(null)
-    .map(() => Array(m).fill(0));
-
-  for (let j = 0; j < Math.min(m, n); j++) {
-    if (singularValues[j] > tol) {
-      // Compute j-th column of U
-      for (let i = 0; i < m; i++) {
-        let sum = 0;
-        for (let k = 0; k < n; k++) {
-          sum += A[i][k] * V[k][j];
-        }
-        U[i][j] = sum / singularValues[j];
-      }
-    }
-  }
-
-  // Complete U to orthogonal basis if m > n
-  if (m > n) {
-    // Use Gram-Schmidt to add orthogonal columns
-    for (let j = n; j < m; j++) {
-      // Start with a unit vector
-      const col: number[] = Array(m).fill(0);
-      col[j] = 1;
-
-      // Orthogonalize against existing columns
-      for (let k = 0; k < j; k++) {
-        let dotProd = 0;
-        for (let i = 0; i < m; i++) {
-          dotProd += col[i] * U[i][k];
-        }
-        for (let i = 0; i < m; i++) {
-          col[i] -= dotProd * U[i][k];
-        }
-      }
-
-      // Normalize
-      let norm = 0;
-      for (let i = 0; i < m; i++) {
-        norm += col[i] * col[i];
-      }
-      norm = Math.sqrt(norm);
-      if (norm > tol) {
-        for (let i = 0; i < m; i++) {
-          U[i][j] = col[i] / norm;
-        }
-      }
-    }
-  }
-
-  // The singular values of the matrix itself, not of the scaled one.
-  for (let i = 0; i < singularValues.length; i++) singularValues[i] *= scale;
+  // The kernel gives `min(m, n)` orthonormal columns for U and for V.
+  // Complete the one with fewer columns than rows to a square orthogonal
+  // matrix. The input is real, so the imaginary parts are 0.
+  const square = (re: number[][], im: number[][], size: number) => {
+    const qRe = re.map((row) => [
+      ...row,
+      ...new Array(size - row.length).fill(0),
+    ]);
+    const qIm = im.map((row) => [
+      ...row,
+      ...new Array(size - row.length).fill(0),
+    ]);
+    completeOrthonormalColumns(qRe, qIm);
+    return qRe;
+  };
+  const U = square(svd.uRe, svd.uIm, m);
+  const V = square(svd.vRe, svd.vIm, n);
 
   // Build Σ matrix (m x n diagonal matrix)
   const S: number[][] = Array(m)
@@ -4992,10 +4888,10 @@ function computeSVD(
     S[i][i] = singularValues[i];
   }
 
-  // Build result matrices
+  // Build result matrices. `+ 0` turns a -0 into 0.
   const UExpr = ce.expr([
     'List',
-    ...U.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
+    ...U.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x + 0))])),
   ]);
   const SExpr = ce.expr([
     'List',
@@ -5005,7 +4901,7 @@ function computeSVD(
   ]);
   const VExpr = ce.expr([
     'List',
-    ...V.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
+    ...V.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x + 0))])),
   ]);
 
   return { U: UExpr, S: SExpr, V: VExpr, singularValues };
@@ -5017,10 +4913,10 @@ function computeSVD(
  * in machine precision, sorted in descending order, or `undefined`.
  *
  * They are computed by `singularValues()` (`numerics/linear-algebra.ts`),
- * which finds the eigenvalues of the Gram matrix `Aᴴ A` (or `A Aᴴ`) with
- * the Jacobi method, for a complex matrix of any size. The entries are
- * first divided by a power of ten when a float64 cannot hold one of them
- * (`scaledMachineMatrix`), and the singular values are then big decimals.
+ * with the one-sided Jacobi method, for a complex matrix of any size. The
+ * entries are first divided by a power of ten when a float64 cannot hold
+ * one of them (`scaledMachineMatrix`), and the singular values are then big
+ * decimals.
  *
  * A matrix of exact entries has no numeric answer under `evaluate()`: the
  * application stays unevaluated, and `.N()` answers. A symbolic entry, or a
@@ -5749,70 +5645,6 @@ function hessenbergEigenvalues(
   const result: (number | [number, number])[] = [];
   for (let i = 0; i < n; i++) result.push(wi[i] === 0 ? wr[i] : [wr[i], wi[i]]);
   return result;
-}
-
-/**
- * QR decomposition using Gram-Schmidt process
- */
-function qrDecomposition(
-  A: number[][],
-  n: number
-): { Q: number[][]; R: number[][] } {
-  const Q: number[][] = Array(n)
-    .fill(null)
-    .map(() => Array(n).fill(0));
-  const R: number[][] = Array(n)
-    .fill(null)
-    .map(() => Array(n).fill(0));
-
-  // Copy columns of A
-  const columns: number[][] = [];
-  for (let j = 0; j < n; j++) {
-    columns[j] = [];
-    for (let i = 0; i < n; i++) {
-      columns[j][i] = A[i][j];
-    }
-  }
-
-  // Gram-Schmidt orthogonalization
-  const U: number[][] = [];
-  for (let j = 0; j < n; j++) {
-    U[j] = [...columns[j]];
-
-    // Subtract projections onto previous vectors
-    for (let k = 0; k < j; k++) {
-      const dotUU = dot(U[k], U[k]);
-      if (Math.abs(dotUU) > 1e-10) {
-        const proj = dot(columns[j], U[k]) / dotUU;
-        R[k][j] = proj * Math.sqrt(dotUU);
-        for (let i = 0; i < n; i++) {
-          U[j][i] -= proj * U[k][i];
-        }
-      }
-    }
-
-    // Normalize
-    const norm = Math.sqrt(dot(U[j], U[j]));
-    R[j][j] = norm;
-    if (norm > 1e-10) {
-      for (let i = 0; i < n; i++) {
-        Q[i][j] = U[j][i] / norm;
-      }
-    }
-  }
-
-  return { Q, R };
-}
-
-/**
- * Dot product of two vectors
- */
-function dot(a: number[], b: number[]): number {
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) {
-    sum += a[i] * b[i];
-  }
-  return sum;
 }
 
 /**

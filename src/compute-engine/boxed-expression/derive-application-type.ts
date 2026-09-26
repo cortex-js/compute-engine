@@ -10,6 +10,7 @@ import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
+  appliesToListCoordinateTuple,
   isTupleShapedType,
   typeCouldBeUnkeyedCollection,
 } from '../collection-utils.js';
@@ -29,6 +30,7 @@ import {
   ABSENT_CELLS_STAY_MISSING,
   absorbOperandAbsence,
   broadcastLiftType,
+  passesAbsentCellsThrough,
   threadedPresentType,
   viewOfDescriptor,
   withThreadedAbsence,
@@ -134,6 +136,19 @@ export function deriveApplicationType(
   }
   const def = binding.operator;
 
+  // Arithmetic over a tuple with a list coordinate always evaluates to an
+  // error, and is typed `error`, as at the call site (`type()` in
+  // `boxed-function.ts`, `appliesToListCoordinateTuple`).
+  if (
+    broadcastLiftHooks !== undefined &&
+    appliesToListCoordinateTuple(
+      operator,
+      broadcastLiftHooks.broadcastsOverTuples(operator, def),
+      operands.map((d) => d.type)
+    )
+  )
+    return 'error';
+
   const propagate = def.resolvedMissingBehavior === 'propagate';
   // An operand that is the library `Undefined` symbol stands for an absent
   // value in a numeric slot, as `Missing` does (`isAbsentScalarSymbol`,
@@ -147,8 +162,15 @@ export function deriveApplicationType(
         ? { type: 'missing', facts: d.facts, structureOf: d.structureOf }
         : d;
     });
+  // An operand absent only in its cells, at an operator that reorders or
+  // selects cells without computing from them, takes no part in the
+  // absorption, as at the call site (`passesAbsentCellsThrough`).
+  const passedThrough = operands.map((d) =>
+    passesAbsentCellsThrough(operator, d.type)
+  );
   const absorbMissing =
-    propagate && operands.some((d) => typeContainsMissing(d.type));
+    propagate &&
+    operands.some((d, i) => typeContainsMissing(d.type) && !passedThrough[i]);
   // An operator that threads conditional values without propagating absence
   // (`threadsConditionals`): a threaded operand that can be absent as a
   // whole is typed from its present value, and the result of a `handle`
@@ -170,7 +192,9 @@ export function deriveApplicationType(
     absorbMissing
       ? absorbOperandAbsence(
           t,
-          operands.map((d) => d.type),
+          operands.map((d, i) =>
+            passedThrough[i] ? stripMissingFromType(d.type) : d.type
+          ),
           ABSENT_CELLS_STAY_MISSING.has(operator),
           def.broadcastable
         )
@@ -181,7 +205,12 @@ export function deriveApplicationType(
   if (typeof def.type === 'function') {
     const handlerOperands = propagate
       ? operands.map((d, i) => {
-          if (!def.stripsMissingAt(i) || !typeContainsMissing(d.type)) return d;
+          if (
+            !def.stripsMissingAt(i) ||
+            !typeContainsMissing(d.type) ||
+            passedThrough[i]
+          )
+            return d;
           // An absent coordinate of a point (a `missing` tuple component) is
           // kept for an operator that reads coordinates, and is `nan` for one
           // that computes with them, as at the call site.
@@ -232,7 +261,7 @@ export function deriveApplicationType(
     lift(
       instantiatedResultTypeOverActuals(sig, actuals, {
         threadable: def.broadcastable,
-        stripMissing: (i) => def.stripsMissingAt(i),
+        stripMissing: (i) => def.stripsMissingAt(i) && !passedThrough[i],
         lazy: def.lazy,
         resolver: engine._typeResolver,
       }) ??

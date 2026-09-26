@@ -1723,8 +1723,17 @@ export function root(
     // principal value always exists (like Sqrt(-4) = 2i). Never assert a NaN
     // literal here — stay symbolic so N() can produce the complex root.
     // (`Root(-8,3)` = −2 is odd and still reduces below.) (NU-P1-8)
+    // The index 4 is the exception: the principal fourth root of a negative
+    // value is exact when it is a Gaussian value of the representable set
+    // (`Root(-1, 4)` = (√2/2)(1 + i), `Root(-4, 4)` = 1 + i), which
+    // `ExactNumericValue.root` decides. A result that is not exact is
+    // rejected below, so the `Root` stays symbolic.
     const evenRootOfNegative =
-      a.isNegative === true && e !== undefined && e > 0 && e % 2 === 0;
+      a.isNegative === true &&
+      e !== undefined &&
+      e > 0 &&
+      e % 2 === 0 &&
+      e !== 4;
 
     // @todo the result should always be exact if e is an integer
     if (e !== undefined && !evenRootOfNegative) {

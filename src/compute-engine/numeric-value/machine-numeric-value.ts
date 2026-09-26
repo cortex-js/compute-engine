@@ -509,7 +509,10 @@ export class MachineNumericValue extends NumericValue {
     if (this.isNaN) return this;
     if (this.isZero) return this;
     if (this.isOne) return this;
-    if (this.isNegativeOne) return this;
+    // An odd root of −1 is −1 (real-root convention). An even root of −1 is
+    // not −1: the square root is `i`, and the other even roots are handled
+    // below like any negative real.
+    if (this.isNegativeOne && Math.abs(exponent) % 2 === 1) return this;
 
     if (exponent === 1) return this;
     if (exponent === 2) return this.sqrt();

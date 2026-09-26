@@ -338,12 +338,13 @@ describe('Tycho item 246 (c) — point + (list, list) types as the broadcast tup
   ce.declare('G', 'tuple<number, number>');
   ce.declare('L2', 'list<number>');
 
-  test('G + Tuple(L, L2) is tuple<list<number>, list<number>>, not a union', () => {
-    // The static type is unchanged. The value is an error, and the compiled
-    // code declines: a MathJSON `Tuple` with list coordinates is data, not a
-    // point, and arithmetic over it fails closed (user decision 2026-09-25).
+  test('G + Tuple(L, L2) is typed error, not a union', () => {
+    // A MathJSON `Tuple` with list coordinates is data, not a point, and
+    // arithmetic over it fails closed (user decision 2026-09-25): the value
+    // is an error, the static type is `error`, and the compiled code
+    // declines.
     const e = ce.box(['Add', 'G', ['Tuple', 'L', 'L2']] as never);
-    expect(e.type.toString()).toBe('tuple<list<number>, list<number>>');
+    expect(e.type.toString()).toBe('error');
     const r = compile(e, { to: 'javascript' });
     expect(r.success).toBe(false);
   });
@@ -365,13 +366,15 @@ describe('Tycho item 246 (c) — point + (list, list) types as the broadcast tup
     ]);
   });
 
-  test('G + (−L2, L) and a mixed scalar/list tuple type component-wise', () => {
+  test('G + (−L2, L) and a mixed scalar/list tuple are typed error', () => {
+    // Each MathJSON `Tuple` has a list coordinate, so the sum always
+    // evaluates to an `incompatible-type` error.
     expect(
       ce.box(['Add', 'G', ['Tuple', ['Negate', 'L2'], 'L']] as never).type.toString()
-    ).toBe('tuple<list<number>, list<number>>');
+    ).toBe('error');
     expect(
       ce.box(['Add', 'G', ['Tuple', 's', 'L']] as never).type.toString()
-    ).toBe('tuple<number, list<number>>');
+    ).toBe('error');
   });
 
   test('the interpreter agrees: an error for the Tuple, the points for (L, L2)', () => {
