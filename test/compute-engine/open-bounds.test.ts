@@ -215,9 +215,11 @@ describe('OPEN BOUNDS — algebra', () => {
       )
     ).toBe('integer');
     const ce = new ComputeEngine();
+    // A sum of extended reals keeps the signed pair (the `Add` type handler
+    // narrows the join's `infinity`; user decision 2026-09-25).
     ce.declare('C', 'list<real | signed_infinity | nan>');
     expect(ce.parse('C + 1').type.toString()).toBe(
-      'list<infinity | nan | real>'
+      'list<nan | real | signed_infinity>'
     );
   });
 

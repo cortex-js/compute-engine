@@ -198,15 +198,17 @@ describe('Tycho item 89 — rounding a symbolic number stays integer-valued', ()
   it('Round of a literal, a bare symbol and an arithmetic term all agree', () => {
     expect(typeOf('\\mathrm{Round}(4.7)')).toBe('integer');
     // `Q` is inferred `real | signed_infinity` from the carrier, so the
-    // claim is the mixed-finiteness union; the finite product `4Q` then
-    // sharpens back to `integer` — more information, sharper type.
+    // claim is the mixed-finiteness union. `4Q` may be infinite too (it is
+    // `real | signed_infinity`; it was typed `real`, a finiteness claim the
+    // value contradicts at `Q = ∞`), so its rounding claims the same union:
+    // an operand with more information never gets a weaker type.
     expect(typeOf('\\mathrm{Round}(Q)')).toBe('integer | signed_infinity');
-    expect(typeOf('\\mathrm{Round}(4Q)')).toBe('integer');
+    expect(typeOf('\\mathrm{Round}(4Q)')).toBe('integer | signed_infinity');
   });
 
   it('Floor/Ceil follow', () => {
-    expect(typeOf('\\lfloor 4Q \\rfloor')).toBe('integer');
-    expect(typeOf('\\lceil 4Q \\rceil')).toBe('integer');
+    expect(typeOf('\\lfloor 4Q \\rfloor')).toBe('integer | signed_infinity');
+    expect(typeOf('\\lceil 4Q \\rceil')).toBe('integer | signed_infinity');
   });
 
   it('a PROVABLY non-real argument is a boxing error now', () => {

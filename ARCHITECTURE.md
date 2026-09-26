@@ -304,9 +304,20 @@ Every operator `type` handler follows these rules:
    branch spelled out.** A pole-capable operator whose argument may land on a
    pole claims `complex | +oo | -oo` (the unknown-sign `Ln`, the
    bounded inverse functions at their poles); a result that may be `~oo` or
-   NaN — `x · ∞` with a possibly-zero `x`, `∞/∞`, `k/0` — claims `number`,
-   the only type that admits every numeric value. A claim of bare `complex`
-   is a finiteness promise and must not cover a path that reaches a pole.
+   NaN — `x · ∞` with a possibly-zero complex `x`, `∞/∞`, `k/0` — claims
+   `number`, the only type that admits every numeric value. A claim of bare
+   `complex` is a finiteness promise and must not cover a path that reaches a
+   pole. **Exception for extended-real operands** (user decision 2026-09-25):
+   a product or sum whose operands are all on the extended real line
+   (`real | signed_infinity`, with or without `nan`) cannot be complex, so it
+   claims `real | signed_infinity`, with a `nan` arm when one factor may be
+   infinite and a different factor may be zero (`0 · ∞`), or when two terms
+   may be infinite (`∞ − ∞`). `x · ∞` with `x: real` is
+   `nan | signed_infinity`, and `2y` with `y: real | signed_infinity` is
+   `real | signed_infinity`. A host reads `number` and `infinity` as possibly
+   complex, so the wider claims cost it the real value layout. The rules live
+   in the `Multiply` and `Add` type handlers (`library/arithmetic.ts`,
+   `signedInfinitySum()` for `Add`).
 3. **Unknown finiteness no longer exists for the bare tiers.** An operand
    declared `real` (or `integer`, `rational`, `complex`) is finite by its
    type; `Sin(x)` with `x: real` claims `real` because the input provably is

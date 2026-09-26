@@ -180,7 +180,7 @@ describe('SCALAR ARGUMENT WITH A NAN ARM', () => {
     // chain has a `nan` arm whatever `a` is.
     ['real', 'list<nan | real>'],
     ['nan | real', 'list<nan | real>'],
-    ['real | signed_infinity | nan', 'list<infinity | nan | real>'],
+    ['real | signed_infinity | nan', 'list<nan | real | signed_infinity>'],
   ])('d(s(u(L)), a) with a: %s types %s', (declared, expected) => {
     const ce = engine('function');
     ce.declare('a', declared as never);

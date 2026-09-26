@@ -565,16 +565,17 @@ functions and variadic parameters do not map over a list of points.
 ### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24, measured on CE main)
 
 A host now declares plot variables and list seams as
-`real | signed_infinity | nan` instead of `number` (Tycho, 2026-09-24). Three
+`real | signed_infinity | nan` instead of `number` (Tycho, 2026-09-24). Two
 places widen that union back: (1) a function declared
 `(real | signed_infinity | nan) -> unknown` whose body is closed on the extended
-reals (`t + 1`, `t²`, `sin t`) refines its result to `number`, and `Sum(L)`,
-`Max(L)` over `list<real | signed_infinity | nan>` type `number`; (2) arithmetic
-widens `signed_infinity` to `infinity`, which admits the complex infinity:
-`C + 1` over such a list typed `list<infinity | infinity | nan | real>` (the
-duplicate `infinity`, a union built from the two signed infinities that
-`stripNumericRanges` widened without removing duplicates, is fixed since
-2026-09-25; the union prints `list<infinity | nan | real>`); (3) a literal list
+reals (`t²`, `sin t`) refines its result to `number`, and `Sum(L)`, `Max(L)`
+over `list<real | signed_infinity | nan>` type `number` (`Add` and `Multiply`
+keep the signed pair since 2026-09-25; `Power` and the elementary functions
+still widen: `a²` and `sin(a)` with `a: real | signed_infinity | nan` type
+`number`; an operand that is a union of a scalar and a list,
+`u: real | signed_infinity | list<real>`, makes `y·u` and `y + u` type
+`list<number> | number`, which is sound but not on the extended real line);
+(2) a literal list
 with an infinite or NaN member types `vector<2>` (element type `number`):
 `[1, ∞]` and `[1.5, NaN]` do not match `list<(real | signed_infinity | nan)^2>`,
 although the join of the members' types is `real | signed_infinity` (the
@@ -583,29 +584,6 @@ Tycho measured a failure on 0.133.0). Each is a lost precision, not a wrong
 value; a host that reads the type of a result to choose a shader type or a lane
 sees `number` where `real | signed_infinity | nan` is true. Probe: Tycho's
 `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
-
-### `Multiply` claims a finite product for a factor that may be infinite (OPEN, decision — found 2026-09-25 while fixing the Tycho item 323 residue)
-
-The `Multiply` type handler has a branch for a factor that is provably
-infinite (`signed_infinity`, `Ln(0)`), and after it treats every factor as
-finite. A factor typed `real | signed_infinity` is neither, so it reaches the
-finite tiers: `a·r` with `a: real | signed_infinity` and `r: real` types
-`real`, and with `a: real | signed_infinity | nan` it types `nan | real`. The
-value can be `±∞` (`a = ∞`, `r = 2`) or NaN (`a = ∞`, `r = 0`), so the claim is
-wrong, not only imprecise. `signed_infinity · integer` types `number`, which
-follows the non-finite typing convention in `ARCHITECTURE.md` (rule 2: a
-product that may be NaN claims `number`). The same product with a list factor
-types `list<infinity | nan | real>`, because the handler adds the factor's
-arms to the cells. Fixing the scalar case by the convention changes the type
-of every product of a Tycho slider value (declared
-`real | signed_infinity | nan`) from `nan | real` to `number`, and Tycho picks a
-value layout from that type. The decision is between applying rule 2 as
-written (`number`) and a narrower sound type for extended-real factors
-(`real | signed_infinity | nan`, which admits no complex value). Tycho needs
-the extended-real type (Tycho session `tycho-4a`, 2026-09-25): its resolver
-treats `number` as possibly complex, so `number` would move every product of a
-slider value to the complex lane or leave it with no value layout, and the
-Tycho item 323 chain would decline again.
 
 ### Ordering of constants with special functions: what stays open after the 2026-09-25 bounds (OPEN, low)
 

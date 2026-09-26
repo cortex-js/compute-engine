@@ -1,3 +1,38 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **A product or sum of extended reals that may be infinite is typed on the
+  extended real line**. A factor typed `real | signed_infinity` is neither
+  finite nor provably infinite, and the `Multiply` type handler treated it as
+  finite: `2y` and `r·y`, with `y: real | signed_infinity` and `r: real`, typed
+  `real`, and `r·a`, with `a: real | signed_infinity | nan`, typed `nan | real`,
+  although the value is `±∞` at `y = ∞` (and NaN at `r = 0`). They now type
+  `real | signed_infinity` (`2y`) and `nan | real | signed_infinity` (`r·y`,
+  `r·a`). The `nan` arm is added when one factor may be infinite and a different
+  factor may be zero. A provably infinite factor times a possibly-zero real
+  factor (`x · ∞`, `x: real`) now types `nan | signed_infinity`; it was
+  `number`. A complex factor still gives `number`. A list factor types each cell
+  as the scalar product: `y·L` with `L: list<real>` is
+  `list<nan | real | signed_infinity>` (it was `list<infinity | real>`, which
+  admits the complex infinity and has no arm for `∞ · 0`); the same holds for an
+  indexed collection, a matrix, a tuple
+  (`tuple<nan | real | signed_infinity, …>`), and a product of two lists
+  (`y·L·K` was `list<real>`). `0·Ln(0)` is `nan` (it was `number`). A sum of
+  extended reals keeps the signed pair instead of widening it to `infinity`:
+  `y + 1` is `real | signed_infinity`, `y + y` is
+  `nan | real | signed_infinity`, `∞ + y` is `nan | signed_infinity` (it was
+  `signed_infinity`, although it is NaN at `y = −∞`), `Ln(0) + Ln(0)` is
+  `nan | signed_infinity` (it was `number`), and `C + 1` with
+  `C: list<real | signed_infinity | nan>` is
+  `list<nan | real | signed_infinity>` (it was `list<infinity | nan | real>`).
+  What a host loses: code that expected the finite types `real` or `nan | real`
+  for such a product now sees the signed-infinity arm, and the rounding of one
+  follows (`Round(4Q)`, `Floor(4Q)`, `Ceil(4Q)` with `Q` inferred
+  `real | signed_infinity` are `integer | signed_infinity`, not `integer`).
+  `Power` and the elementary functions are unchanged (`a²` and `sin(a)` still
+  type `number`).
+
 ## 0.136.2 _2026-09-25_
 
 ### Issues Resolved
@@ -15,19 +50,19 @@
   the call types `list<nan | real>`. A union that may hold a collection still
   keeps the declared result.
 - **The product of a `nan | real` factor and a list keeps the `nan` arm in its
-  cells.** When the type of `b·L` was derived from operand types only (as for
-  a function parameter `b`), it was `list<real>`; it is now `list<nan | real>`,
-  as for a declared symbol. A factor that may also be infinite adds an
-  `infinity` arm (`list<infinity | nan | real>`).
+  cells.** When the type of `b·L` was derived from operand types only (as for a
+  function parameter `b`), it was `list<real>`; it is now `list<nan | real>`, as
+  for a declared symbol. A factor that may also be infinite adds an `infinity`
+  arm (`list<infinity | nan | real>`).
 
 ## 0.136.1 _2026-09-25_
 
 ### Behavior Changes
 
 - **The arithmetic methods read an absent operand as `NaN`.** Arithmetic with an
-  absent operand (`Missing` or `Undefined`) is `NaN` (user decision 2026-09-25),
-  and the `.add()`, `.sub()`, `.mul()` and `.div()` methods now answer what the
-  `Add`, `Multiply` and `Divide` operators already answered at evaluation.
+  absent operand (`Missing` or `Undefined`) is `NaN`, and the `.add()`,
+  `.sub()`, `.mul()` and `.div()` methods now answer what the `Add`, `Multiply`
+  and `Divide` operators already answered at evaluation.
   `ce.box('Missing').add(ce.box(1))` is `NaN` (it was `"Missing" + 1`),
   `ce.box('Missing').mul(ce.box(2))` and `ce.box('Undefined').mul(ce.box(2))`
   are `NaN` (they were `2·"Missing"` and `2·"Undefined"`),
@@ -151,11 +186,11 @@
   instead of `NaN`.
 - **A point minus an absent value is `Missing`, as the sum is.**
   `(1, 2) - Missing` was `Error(incompatible-type, tuple, number)`, while
-  `(1, 2) + Missing` was `Missing`: the difference is `(1, 2) + (-Missing)`,
-  and `-Missing` alone is the number `NaN`, which then met the point. A negated
-  or scaled absence beside a point now makes the whole point absent, as an
-  absent addend does. The same holds for `Undefined`, for `2·Missing + (1, 2)`,
-  for `.N()` and for the `.sub()` method, and the difference is typed
+  `(1, 2) + Missing` was `Missing`: the difference is `(1, 2) + (-Missing)`, and
+  `-Missing` alone is the number `NaN`, which then met the point. A negated or
+  scaled absence beside a point now makes the whole point absent, as an absent
+  addend does. The same holds for `Undefined`, for `2·Missing + (1, 2)`, for
+  `.N()` and for the `.sub()` method, and the difference is typed
   `missing | tuple<…>` instead of `number | tuple<…>`. `3 - Missing` and
   `[1, 2] - Missing` are still `NaN` and `[NaN, NaN]`. A point divided by a
   negated or scaled absence is `Missing` too: `(1, 2) / (-Missing)` was
@@ -164,9 +199,9 @@
   collection, as in the interpreter.** Compiled to JavaScript, `Third((1, x))`
   was `undefined` (the bare JavaScript read past the end of the array), where
   the interpreter gives `NaN`. `Third((1, 2))` only agreed because it folds to a
-  constant. A collection of strings or points still reads `undefined` there,
-  the run-time spelling of `Missing`, and an absent cell inside the collection
-  is still read as absent (`First((Missing, x))` is `undefined`).
+  constant. A collection of strings or points still reads `undefined` there, the
+  run-time spelling of `Missing`, and an absent cell inside the collection is
+  still read as absent (`First((Missing, x))` is `undefined`).
 - **`Sort` and `Ordering` of a list with an absent cell compile to JavaScript.**
   The element type `integer | missing` was not provably numeric, so the sort
   declined, and the interpreter fallback gave `[1, 3, NaN]` for
@@ -234,11 +269,10 @@
   is `Map(f, [1,2])\{c\}`; read cell by cell, the result was a `Set` of
   restricted cells. `[2, 1\{c\}]` and other lists with a restricted cell are
   unchanged.
-- **An `Undefined` cell of a list literal is typed as absent** (user decision
-  2026-09-25). `[1, Undefined]` is typed `list<integer | missing>`, as
-  `[1, Missing]` is; it was typed `vector<2>`, so the tensor code accepted the
-  list and left the symbol in the value: `(2·[1, Undefined]).N()` was
-  `[2, 2·"Undefined"]` and is `[2, NaN]`;
+- **An `Undefined` cell of a list literal is typed as absent**. `[1, Undefined]`
+  is typed `list<integer | missing>`, as `[1, Missing]` is; it was typed
+  `vector<2>`, so the tensor code accepted the list and left the symbol in the
+  value: `(2·[1, Undefined]).N()` was `[2, 2·"Undefined"]` and is `[2, NaN]`;
   `Determinant([[1, Undefined], [1, 2]])` was `2 − "Undefined"` and is the
   `incompatible-type` error that the `Missing` twin gives; `Sum`, `Max`, `Norm`
   and `Mean` of the list are `NaN`. The same applies to a tuple and a set:
@@ -248,10 +282,10 @@
   answers `NaN` in that coordinate for both spellings: `(1, Missing) + (1, 1)`
   is `(2, NaN)` (it was `(2, "Missing" + 1)`), `(3, 4) − (1, Missing)` is
   `(2, NaN)` (it stayed unevaluated), and `2·(1, Missing)` is `(2, NaN)`.
-- **`√i` evaluates to the exact `(√2/2)(1 + i)`** (user decision 2026-09-25),
-  and `√(−i)` to `(√2/2)(1 − i)`, as `√(4i)` and `√(i/4)` already did. It stayed
-  a symbolic `Sqrt` because one test pinned it so. `∜(−1)`, the same value,
-  still stays a `Root`.
+- **`√i` evaluates to the exact `(√2/2)(1 + i)`**, and `√(−i)` to
+  `(√2/2)(1 − i)`, as `√(4i)` and `√(i/4)` already did. It stayed a symbolic
+  `Sqrt` because one test pinned it so. `∜(−1)`, the same value, still stays a
+  `Root`.
 - **A restriction over a list stays one restriction while its condition is
   undecided.** `[1,2,3]\{c\}` (`When([1,2,3], c)`) evaluates to the held
   `[1,2,3]\{c\}`, whose MathJSON is `["When",["List",1,2,3],"c"]`; it used to be

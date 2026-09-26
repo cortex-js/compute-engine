@@ -132,7 +132,11 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Multiply', 'ImaginaryUnit', ['Ln', 0]])).toBe('number');
       expect(typeOf(['Multiply', 2, 'ComplexInfinity'])).toBe('number');
       // A possibly-zero FINITE factor still blocks the claim (0 · −∞ = NaN).
-      expect(typeOf(['Multiply', 'x_r', ['Ln', 0]])).toBe('number');
+      // Every factor is real, so the product is ±∞ or NaN, never a complex
+      // value (user decision 2026-09-25).
+      expect(typeOf(['Multiply', 'x_r', ['Ln', 0]])).toBe(
+        'nan | signed_infinity'
+      );
       // Divide: an unknown-finiteness denominator admits ∞/∞ = NaN.
       expect(typeOf(['Divide', ['Ln', 0], 'x_r'])).toBe('number');
       // Divide: a provably finite denominator with no proven sign may be 0.
@@ -231,9 +235,15 @@ describe('NON-FINITE TYPING CONVENTION', () => {
 
   describe('possible (or provable) ~oo / NaN → number', () => {
     test('x · ∞ with possibly-zero x (0·∞ = NaN)', () => {
-      expect(typeOf(['Multiply', 'x_r', 'PositiveInfinity'])).toBe('number');
-      // Provably finite but possibly zero: still speculative.
-      expect(typeOf(['Multiply', 'z_f', 'PositiveInfinity'])).toBe('number');
+      // A real `x`: ±∞ or NaN, never a complex value, so not `number`
+      // (user decision 2026-09-25).
+      expect(typeOf(['Multiply', 'x_r', 'PositiveInfinity'])).toBe(
+        'nan | signed_infinity'
+      );
+      // Provably finite but possibly zero: NaN at zero, ±∞ otherwise.
+      expect(typeOf(['Multiply', 'z_f', 'PositiveInfinity'])).toBe(
+        'nan | signed_infinity'
+      );
     });
 
     test('ElementMax/ElementMin/Clamp with a non-finite operand claim the extended real line', () => {
@@ -920,5 +930,66 @@ describe('NON-FINITE TYPING CONVENTION', () => {
         '[[-2,1],[3/2,-1/2]]'
       );
     });
+  });
+});
+
+/**
+ * A factor or term that MAY be infinite (`real | signed_infinity`) is neither
+ * finite nor provably infinite. A product or sum of extended reals is an
+ * extended real or NaN, never a complex value, so it is typed on the extended
+ * real line, not `number` (user decision 2026-09-25: a host reads `number` and
+ * `infinity` as possibly complex). The `nan` arm appears when one factor may
+ * be infinite and a different factor may be zero (`0 · ∞`), or when two terms
+ * may be infinite (`∞ − ∞`).
+ */
+describe('POSSIBLY INFINITE EXTENDED-REAL OPERANDS', () => {
+  const ce = new ComputeEngine();
+  ce.declare('y', 'real | signed_infinity');
+  ce.declare('a', 'real | signed_infinity | nan');
+  ce.declare('r', 'real');
+  ce.declare('p', 'real');
+  ce.assume(ce.parse('p > 0'));
+  ce.declare('z', 'complex');
+  ce.declare('L', 'list<real>');
+  ce.declare('K', 'list<real>');
+  ce.declare('I', 'indexed_collection<real>');
+  ce.declare('T', 'tuple<real, real>');
+  ce.declare('n', 'nan | real');
+  test.each([
+    // Was `real`: a finiteness claim the value contradicts at `y = ∞`.
+    [['Multiply', 2, 'y'], 'real | signed_infinity'],
+    [['Multiply', 'p', 'y'], 'real | signed_infinity'],
+    [['Multiply', 'r', 'y'], 'nan | real | signed_infinity'],
+    // Was `nan | real`.
+    [['Multiply', 'r', 'a'], 'nan | real | signed_infinity'],
+    // A complex factor: `∞ · i` is the complex infinity.
+    [['Multiply', 'z', 'y'], 'number'],
+    // Was `list<infinity | real>`, with no `nan` arm for `∞ · 0`.
+    [['Multiply', 'y', 'L'], 'list<nan | real | signed_infinity>'],
+    [['Add', 'y', 1], 'real | signed_infinity'],
+    [['Add', 'y', 'y'], 'nan | real | signed_infinity'],
+    [['Add', 'a', 1], 'nan | real | signed_infinity'],
+    [['Add', 'L', 'y'], 'list<real | signed_infinity>'],
+    [['Add', 'y', 'z'], 'number'],
+    // Two collections, an indexed collection, a matrix literal and a tuple
+    // take the same cell type as a list.
+    [['Multiply', 'y', 'L', 'K'], 'list<nan | real | signed_infinity>'],
+    [['Multiply', 'y', 'I'], 'list<nan | real | signed_infinity>'],
+    [
+      ['Multiply', 'y', ['List', ['List', 0, 1], ['List', 2, 3]]],
+      'list<nan | real | signed_infinity^(2x2)>',
+    ],
+    [
+      ['Multiply', 'y', 'T'],
+      'tuple<nan | real | signed_infinity, nan | real | signed_infinity>',
+    ],
+    [['Multiply', 0, ['Ln', 0]], 'nan'],
+    // `∞ + y` is NaN at `y = −∞`, and never finite.
+    [['Add', 'PositiveInfinity', 'y'], 'nan | signed_infinity'],
+    [['Add', ['Ln', 0], ['Ln', 0]], 'nan | signed_infinity'],
+    [['Add', 'y', 'n'], 'nan | real | signed_infinity'],
+    [['Add', 'PositiveInfinity', 1], 'signed_infinity'],
+  ])('%j types %s', (json, expected) => {
+    expect(ce.box(json as never).type.toString()).toBe(expected);
   });
 });

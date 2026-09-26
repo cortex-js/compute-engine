@@ -832,6 +832,41 @@ function isExtendedRealOperand(d: OperandDescriptor): boolean {
   return factsOf(d.type).extendedReal;
 }
 
+/**
+ * Replace each numeric cell of a product type by `cellOf(cell)`: the
+ * elements of a `list` or `indexed_collection` (recursively, for a nested
+ * list), the components of a `tuple`, and each member of a union of such
+ * types. `undefined` when a cell is not numeric or `cellOf` declines.
+ */
+function mapProductCells(
+  t0: Type,
+  cellOf: (cell: Type) => Type | undefined
+): Type | undefined {
+  const t = resolveTypeAlias(t0);
+  if (isSubtype(t, 'number')) return cellOf(t);
+  if (typeof t !== 'object') return undefined;
+  if (t.kind === 'list' || t.kind === 'indexed_collection') {
+    const elements = mapProductCells(t.elements, cellOf);
+    return elements === undefined ? undefined : { ...t, elements };
+  }
+  if (t.kind === 'tuple') {
+    const elements = t.elements.map((e) => {
+      const type = mapProductCells(e.type, cellOf);
+      return type === undefined ? undefined : { ...e, type };
+    });
+    return elements.some((e) => e === undefined)
+      ? undefined
+      : { ...t, elements: elements as typeof t.elements };
+  }
+  if (t.kind === 'union') {
+    const types = t.types.map((x) => mapProductCells(x, cellOf));
+    return types.some((x) => x === undefined)
+      ? undefined
+      : reduceType({ kind: 'union', types: types as Type[] });
+  }
+  return undefined;
+}
+
 /** Is this operand's sign a proof that it is not zero? */
 function provablyNonZeroSign(d: OperandDescriptor): boolean {
   const s = operandSgnOnTypes(d);
@@ -1207,6 +1242,92 @@ function withoutFunctionArm(x: OperandDescriptor): OperandDescriptor {
   // would copy no facts: they are getters on a class instance), keeping the
   // source's structural view.
   return { ...describeType(type, x.facts.closed), structureOf: x.structureOf };
+}
+
+/**
+ * The scalar a term contributes to each cell of a sum: the term's type for a
+ * scalar, the element type of a `list` or `indexed_collection` term,
+ * `undefined` for any other shape.
+ */
+function sumCellType(t0: Type): Type | undefined {
+  const t = resolveTypeAlias(t0);
+  if (
+    typeof t === 'object' &&
+    (t.kind === 'list' || t.kind === 'indexed_collection')
+  )
+    return t.elements;
+  return isSubtype(t, 'number') ? t : undefined;
+}
+
+/**
+ * The type of a sum whose terms (whose cells, for a list term) are all on the
+ * extended real line, with or without a `nan` arm, when at least one of them
+ * may be infinite. Such a sum is an extended real or NaN, never a complex
+ * value, so it is typed `real | +oo | -oo` (user decision 2026-09-25: a host
+ * reads `number` and `infinity` as possibly complex). The join that types a
+ * sum widens the signed infinities to `infinity`, and two infinite terms to
+ * `number`, because it does not look at the other terms. The rules:
+ * - no finite arm when a term is provably `±∞` (`∞ + y` is never finite);
+ * - a `nan` arm when a term has one, or when two terms may be infinite
+ *   (`+∞ + −∞` is NaN; `∞ + y` is NaN at `y = −∞`).
+ * The shape of `result` (a list, an indexed collection, or a union of those
+ * for a sum of two collections) is kept, and its cell type is replaced.
+ * `result` is returned unchanged when a term is not an extended real, or when
+ * no term may be infinite.
+ */
+function signedInfinitySum(
+  ops: ReadonlyArray<OperandDescriptor>,
+  result: Type
+): Type {
+  const cells = ops.map((x) => sumCellType(x.type));
+  const infinities: Type[] = [
+    { kind: 'value', value: Infinity },
+    { kind: 'value', value: -Infinity },
+  ];
+  const extended: Type = {
+    kind: 'union',
+    types: ['real', 'nan', ...infinities],
+  };
+  if (cells.some((c) => c === undefined || !isSubtype(c, extended)))
+    return result;
+  const finite: Type = { kind: 'union', types: ['real', 'nan'] };
+  const infinite = cells.filter((c) => !isSubtype(c!, finite)).length;
+  if (infinite === 0) return result;
+  const provablyInfinite = cells.some((c) =>
+    isSubtype(c!, { kind: 'union', types: ['nan', ...infinities] })
+  );
+  const hasNaN =
+    infinite >= 2 ||
+    cells.some(
+      (c) => !isSubtype(c!, { kind: 'union', types: ['real', ...infinities] })
+    );
+  const cell = reduceType({
+    kind: 'union',
+    types: [
+      ...(provablyInfinite ? [] : ['real' as Type]),
+      ...infinities,
+      ...(hasNaN ? ['nan' as Type] : []),
+    ],
+  });
+  const reshape = (t: Type): Type => {
+    if (typeof t === 'object') {
+      if (t.kind === 'list' || t.kind === 'indexed_collection')
+        return { ...t, elements: cell };
+      // A sum of two collections can be typed as the union of their
+      // collection types (`indexed_collection<…> | list<…>`).
+      if (
+        t.kind === 'union' &&
+        t.types.every(
+          (x) =>
+            typeof x === 'object' &&
+            (x.kind === 'list' || x.kind === 'indexed_collection')
+        )
+      )
+        return reduceType({ kind: 'union', types: t.types.map(reshape) });
+    }
+    return cell;
+  };
+  return reshape(resolveTypeAlias(result));
 }
 
 function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
@@ -1809,7 +1930,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
-          addTypeOnTypes(ops.map(withoutFunctionArm)),
+          signedInfinitySum(ops, addTypeOnTypes(ops.map(withoutFunctionArm))),
           context.engine._typeResolver
         ),
 
@@ -3963,36 +4084,58 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // parameter (whose descriptor carries a type and no declaration),
           // while the same product of a declared symbol typed
           // `list<nan | real>`. A factor that may also be infinite
-          // (`real | signed_infinity | nan`) makes a cell infinite, so the
-          // `infinity` arm is added as well: the finite tiers above do not
-          // model a factor that is neither provably finite nor provably
-          // infinite, and the cell type must not claim finiteness.
+          // (`real | signed_infinity | nan`) is typed by the single-collection
+          // branch below, which types each cell as a scalar product, so its
+          // `±∞` arm is already in the cell type.
           const list = t === undefined ? undefined : resolveTypeAlias(t);
           if (
             typeof list === 'object' &&
             list.kind === 'list' &&
             isSubtype(list.elements, 'number')
-          ) {
-            // Every scalar factor is tested, not only the ones with a `nan`
-            // arm: a `real | signed_infinity` factor beside a `nan | real`
-            // one makes a cell infinite too.
-            const mayBeInfinite = ops.some((x, i) => {
-              const p = present[i] ?? x.type;
-              return isSubtype(p, 'number') && !isSubtype(p, 'complex');
-            });
+          )
             return BoxedType.forResult(
               {
                 ...list,
                 elements: reduceType({
                   kind: 'union',
-                  types: mayBeInfinite
-                    ? [list.elements, 'infinity', 'nan']
-                    : [list.elements, 'nan'],
+                  types: [list.elements, 'nan'],
                 }),
               },
               engine._typeResolver
             );
-          }
+        }
+        // A scalar factor on the extended real line that may be infinite
+        // (`real | signed_infinity`, or a provably infinite `Ln(0)`) beside
+        // collection factors: the shape of the product is the shape of the
+        // same product with that factor finite, and each cell is the scalar
+        // product of such a cell and the infinite factors, typed by this
+        // handler. So a cell is `±∞`, or NaN (`∞ · 0`), as a scalar product
+        // is (user decision 2026-09-25). The collection branches below join
+        // the scalar into the cells, which widened `signed_infinity` to
+        // `infinity` (a host reads it as possibly complex) with no `nan` arm,
+        // or dropped the scalar when there are two collections.
+        const infiniteScalars = ops.filter(
+          (x) =>
+            isSubtype(x.type, 'number') &&
+            isExtendedRealOperand(x) &&
+            !isSubtype(x.type, 'real')
+        );
+        if (
+          infiniteScalars.length > 0 &&
+          ops.some((x) => !isSubtype(x.type, 'number'))
+        ) {
+          const shape = derive(
+            'Multiply',
+            ops.map((x) =>
+              infiniteScalars.includes(x) ? describeType('real') : x
+            )
+          );
+          const cellOf = (c: Type): Type | undefined =>
+            derive('Multiply', [describeType(c), ...infiniteScalars]);
+          const product =
+            shape === undefined ? undefined : mapProductCells(shape, cellOf);
+          if (product !== undefined)
+            return BoxedType.forResult(product, engine._typeResolver);
         }
         // A dimensionless list/indexed-collection factor together with a
         // numeric-tuple (point) factor broadcasts the collection while scaling
@@ -4302,9 +4445,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // it `2·Ln(0)` fell through to the "every operand is finite" tail and
         // claimed `integer` (unsound; the value is −∞).
         if (ops.some((x) => operandNonFiniteNumberOnTypes(x))) {
-          // 0 · ±∞ = NaN (indeterminate).
+          // 0 · ±∞ = NaN (indeterminate). With every factor real, NaN is the
+          // only value (user decision 2026-09-25: not `number`, which a host
+          // reads as possibly complex).
           if (ops.some((x) => operandLiteralValueOnTypes(x) === 0))
-            return BoxedType.forResult('number', engine._typeResolver);
+            return BoxedType.forResult(
+              ops.every((x) => isExtendedRealOperand(x)) ? 'nan' : 'number',
+              engine._typeResolver
+            );
           // real · ±∞ = ±∞ (a non-finite real); a non-real factor (i, complex)
           // with ∞ gives ~oo or NaN, and a *possibly-zero* finite factor gives
           // NaN (0 · ∞). So every factor must be provably REAL, and every
@@ -4329,7 +4477,37 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             })
           )
             return BoxedType.forResult('+oo | -oo', engine._typeResolver);
+          // Extended-real factors with a factor that may be zero: the
+          // product is ±∞, or NaN when that factor is zero (0 · ∞). No
+          // complex value is possible, so the type is not `number`
+          // (user decision 2026-09-25: a host reads `number` as possibly
+          // complex).
+          if (ops.every((x) => isExtendedRealOperand(x)))
+            return BoxedType.forResult('+oo | -oo | nan', engine._typeResolver);
           return BoxedType.forResult('number', engine._typeResolver);
+        }
+        // A factor that MAY be infinite (`real | signed_infinity`, typed
+        // neither finite nor provably infinite) makes the product possibly
+        // infinite, and NaN when another factor may be zero (0 · ∞). The
+        // finite tiers below must not claim it. With every factor on the
+        // extended real line, the product is too, since no complex value can
+        // arise (user decision 2026-09-25); otherwise it is `number`. The
+        // `nan` arm is added when one factor may be infinite and a DIFFERENT
+        // factor may be zero: `2y` and `y·p` with `p > 0` are never NaN.
+        const mayBeInfinite = (x: OperandDescriptor) =>
+          isSubtype(x.type, 'number') && !isSubtype(x.type, 'complex');
+        if (ops.some(mayBeInfinite)) {
+          if (!ops.every((x) => isExtendedRealOperand(x)))
+            return BoxedType.forResult('number', engine._typeResolver);
+          const mayBeNaN = ops.some(
+            (x, i) =>
+              mayBeInfinite(x) &&
+              ops.some((y, j) => j !== i && !provablyNonZeroSign(y))
+          );
+          return BoxedType.forResult(
+            mayBeNaN ? 'real | +oo | -oo | nan' : 'real | +oo | -oo',
+            engine._typeResolver
+          );
         }
         // From here every operand is finite (no `isFinite === false`).
         // The all-real tiers get an interval refinement (interval
