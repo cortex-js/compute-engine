@@ -550,29 +550,17 @@ export function ellipticKComplex(m: Complex): Complex {
 }
 
 /**
- * Complex E(m) via the AGM cₙ-sum (analytic continuation of A&S 17.6.4):
- * E = K·(1 − Σₙ 2^{n−1}cₙ²), c₀² = m, cₙ = (aₙ₋₁ − bₙ₋₁)/2.
+ * Complex E(m) via Carlson's symmetric integrals (DLMF 19.25.1):
+ * E(m) = R_F(0, 1−m, 1) − (m/3)·R_D(0, 1−m, 1), as `ellipticEIncompleteComplex`
+ * at φ = π/2. The AGM cₙ-sum (A&S 17.6.4) lost digits off the real axis.
  */
 export function ellipticEComplex(m: Complex): Complex {
   if (m.isNaN()) return C_NAN;
   if (m.equals(C_ONE)) return C_ONE;
-  let a: Complex = C_ONE;
-  let b: Complex = C_ONE.sub(m).sqrt();
-  let sum: Complex = m.mul(0.5); // 2^{−1}·c₀²
-  let pow2 = 0.5;
-  for (let i = 0; i < 100; i++) {
-    const c = a.sub(b).mul(0.5);
-    const an = a.add(b).mul(0.5);
-    let bn = a.mul(b).sqrt();
-    if (an.sub(bn).abs() > an.add(bn).abs()) bn = bn.neg();
-    a = an;
-    b = bn;
-    pow2 *= 2;
-    sum = sum.add(c.mul(c).mul(pow2));
-    if (a.sub(b).abs() <= 1e-17 * a.abs()) break;
-  }
-  const K = new Complex(Math.PI / 2, 0).div(a);
-  return K.mul(C_ONE.sub(sum));
+  const y = C_ONE.sub(m);
+  return carlsonRFComplex(C_ZERO, y, C_ONE).sub(
+    m.div(3).mul(carlsonRDComplex(C_ZERO, y, C_ONE))
+  );
 }
 
 //

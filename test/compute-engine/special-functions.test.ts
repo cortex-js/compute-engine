@@ -1750,6 +1750,80 @@ describe('ELLIPTIC INTEGRALS (parameter convention m = k²)', () => {
   });
 });
 
+// Regression for cortex-js/compute-engine#346 part 1: complete E(m) at
+// complex m went through an AGM cₙ-sum whose branch choice corrupts the
+// intermediate terms off the real axis (see the comment on
+// `ellipticEComplex`), while `EllipticE(π/2, m)` (built on Carlson R_F/R_D)
+// stayed correct. Reference values from mpmath 1.3 (`ellipe`), dps=30.
+describe('COMPLEX-ARGUMENT EllipticE, EllipticK', () => {
+  const expectComplex = (expr: any, re: number, im: number, tol = 1e-11) => {
+    const v = expr.N();
+    const scale = Math.hypot(re, im) * tol + tol;
+    expect(Math.abs(v.re - re)).toBeLessThan(scale);
+    expect(Math.abs(v.im - im)).toBeLessThan(scale);
+  };
+  const z = (re: number, im: number): any => ['Complex', re, im];
+
+  test('E(0.57+0.23i) matches mpmath (the issue #346 repro)', () =>
+    expectComplex(
+      ce.expr(['EllipticE', z(0.57, 0.23)]),
+      1.3248077726970516,
+      -0.1197294454595117
+    ));
+
+  test('E(0.57+0.23i) matches E(π/2, 0.57+0.23i)', () => {
+    const complete = ce.expr(['EllipticE', z(0.57, 0.23)]).N();
+    const incomplete = ce
+      .expr(['EllipticE', ['Divide', 'Pi', 2], z(0.57, 0.23)])
+      .N();
+    expect(Math.abs(complete.re - incomplete.re)).toBeLessThan(1e-11);
+    expect(Math.abs(complete.im - incomplete.im)).toBeLessThan(1e-11);
+  });
+
+  test('E(2+i) matches mpmath (|m| > 1)', () =>
+    expectComplex(
+      ce.expr(['EllipticE', z(2, 1)]),
+      0.991052601328069,
+      -0.81879421395609
+    ));
+
+  test('E(−1+0.5i) matches mpmath (Re m < 0)', () =>
+    expectComplex(
+      ce.expr(['EllipticE', z(-1, 0.5)]),
+      1.9175827859942576,
+      -0.148960405566028
+    ));
+
+  test('E(0.3−0.4i) matches mpmath', () =>
+    expectComplex(
+      ce.expr(['EllipticE', z(0.3, -0.4)]),
+      1.4625128107172381,
+      0.1751606054169262
+    ));
+
+  // The quasi-periodic reduction (DLMF 19.2.10) for φ outside [−π/2, π/2]
+  // adds 2k·E(m), so it inherits the complete-E fix directly.
+  test('E(2, 0.57+0.23i): incomplete E at φ outside [−π/2, π/2]', () =>
+    expectComplex(
+      ce.expr(['EllipticE', 2, z(0.57, 0.23)]),
+      1.6245313286877133,
+      -0.1863687686016351
+    ));
+
+  test('K(0.57+0.23i) matches mpmath (shares the AGM kernel with E, unaffected)', () =>
+    expectComplex(
+      ce.expr(['EllipticK', z(0.57, 0.23)]),
+      1.8599100402588483,
+      0.2088229435403994
+    ));
+
+  test('real-argument path unchanged: E(0.5), E(−1), K(0.5)', () => {
+    expectApprox(ce.expr(['EllipticE', 0.5]), 1.3506438810476755, 1e-13);
+    expectApprox(ce.expr(['EllipticE', -1]), 1.910098894513856, 1e-13);
+    expectApprox(ce.expr(['EllipticK', 0.5]), 1.8540746773013719, 1e-13);
+  });
+});
+
 //
 // ---------------- Incomplete elliptic integrals (Carlson kernels) ----------------
 // Reference values from mpmath 1.4 (ellipf/ellipe/ellippi, which share the
