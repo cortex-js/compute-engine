@@ -8,6 +8,7 @@ import type { Interval, IntervalResult } from './types.js';
 import {
   ok,
   containsExtremum,
+  extremumWithin,
   containsZero,
   unwrapOrPropagate,
   liftJump,
@@ -26,7 +27,12 @@ import {
   fresnelS as scalarFresnelS,
   fresnelC as scalarFresnelC,
 } from '../numerics/special-functions.js';
-import { nextDown, nextUp } from '../numerics/numeric.js';
+import {
+  isMachineTrigPole,
+  nextDown,
+  nextUp,
+  TRIG_POLE_ARGUMENT_CAP,
+} from '../numerics/numeric.js';
 
 const TWO_PI = 2 * Math.PI;
 const PI = Math.PI;
@@ -98,6 +104,52 @@ function cosRaw(x: Interval | IntervalResult): IntervalResult {
 }
 
 /**
+ * Whether the pole search (`extremumWithin`) can decide for `x`. Above
+ * `TRIG_POLE_ARGUMENT_CAP` (2⁴⁰) the doubles are spaced more widely than the
+ * tolerance of the search, and `extremum + n·period` rounds to the argument
+ * itself, so every huge point answered `singular` (`tan(10²²)`) where the
+ * interpreter's rule, capped at the same magnitude, answers the finite
+ * value. A point there is decided by `machinePole` from its value; a wider
+ * interval keeps the search, which is conservative.
+ */
+function poleSearchApplies(x: Interval): boolean {
+  return x.lo !== x.hi || Math.abs(x.lo) < TRIG_POLE_ARGUMENT_CAP;
+}
+
+/**
+ * The pole of `tan`, `cot`, `sec` or `csc` when an endpoint of the argument
+ * `x` is within its own rounding error of one, the rule the interpreter and
+ * compiled JavaScript apply (`isMachineTrigPole`, `numerics/numeric.ts`):
+ * `lo` and `hi` are the values at `x.lo` and `x.hi`, and the pole is at
+ * `extremum + n·period`. `undefined` when neither endpoint is a pole. The
+ * location is the pole nearest the endpoint that is a pole, clamped into the
+ * interval: consumers subdivide along it, and the pole itself may lie just
+ * outside the interval, within the endpoint's rounding error.
+ *
+ * The pole search of the kernels finds a pole that lies inside the interval,
+ * which for a point interval is only the double nearest the pole. A point
+ * at `π/2 + 10⁻¹⁵` answered a finite enclosure near `−9.5·10¹⁴` where the
+ * interpreter answers `~oo`, and a plot drew a wild segment there. The
+ * enclosure of a real point `x` is finite, but a double argument stands for
+ * a rounded real, and the three routes must answer the same pole at the same
+ * argument.
+ */
+function machinePole(
+  x: Interval,
+  lo: number,
+  hi: number,
+  extremum: number,
+  period: number
+): IntervalResult | undefined {
+  const atLo = isMachineTrigPole(lo, x.lo);
+  if (!atLo && !isMachineTrigPole(hi, x.hi)) return undefined;
+  const endpoint = atLo ? x.lo : x.hi;
+  const n = Math.round((endpoint - extremum) / period);
+  const pole = extremum + n * period;
+  return { kind: 'singular', at: Math.min(Math.max(pole, x.lo), x.hi) };
+}
+
+/**
  * Tangent of an interval.
  *
  * Has singularities at pi/2 + n*pi. Within a single branch,
@@ -112,13 +164,12 @@ function tanRaw(x: Interval | IntervalResult): IntervalResult {
     return { kind: 'singular' };
   }
 
-  // Case 2: Check if interval contains a pole at pi/2 + n*pi
-  if (containsExtremum(xVal, HALF_PI, PI)) {
-    // Find the pole location for refinement hints
-    const n = Math.ceil((xVal.lo - HALF_PI) / PI);
-    const poleAt = HALF_PI + n * PI;
-    return { kind: 'singular', at: poleAt };
-  }
+  // Case 2: Check if interval contains a pole at pi/2 + n*pi (the location
+  // is a refinement hint)
+  const poleAt = poleSearchApplies(xVal)
+    ? extremumWithin(xVal, HALF_PI, PI)
+    : undefined;
+  if (poleAt !== undefined) return { kind: 'singular', at: poleAt };
 
   // Case 3: Safe interval - tan is monotonic on this branch
   const tanLo = Math.tan(xVal.lo);
@@ -130,7 +181,9 @@ function tanRaw(x: Interval | IntervalResult): IntervalResult {
     return { kind: 'singular' };
   }
 
-  return ok({ lo: tanLo, hi: tanHi });
+  return (
+    machinePole(xVal, tanLo, tanHi, HALF_PI, PI) ?? ok({ lo: tanLo, hi: tanHi })
+  );
 }
 
 /**
@@ -147,18 +200,20 @@ function cotRaw(x: Interval | IntervalResult): IntervalResult {
     return { kind: 'singular' };
   }
 
-  if (containsExtremum(xVal, 0, PI)) {
-    const n = Math.ceil(xVal.lo / PI);
-    const poleAt = n * PI;
-    return { kind: 'singular', at: poleAt };
-  }
+  const poleAt = poleSearchApplies(xVal)
+    ? extremumWithin(xVal, 0, PI)
+    : undefined;
+  if (poleAt !== undefined) return { kind: 'singular', at: poleAt };
 
   // Safe interval - cot is monotonically decreasing within a branch
   const cotLo = 1 / Math.tan(xVal.lo);
   const cotHi = 1 / Math.tan(xVal.hi);
 
   // Note: cot is decreasing, so bounds are swapped
-  return ok({ lo: Math.min(cotLo, cotHi), hi: Math.max(cotLo, cotHi) });
+  return (
+    machinePole(xVal, cotLo, cotHi, 0, PI) ??
+    ok({ lo: Math.min(cotLo, cotHi), hi: Math.max(cotLo, cotHi) })
+  );
 }
 
 /**
@@ -175,14 +230,15 @@ function secRaw(x: Interval | IntervalResult): IntervalResult {
     return { kind: 'singular' };
   }
 
-  if (containsExtremum(xVal, HALF_PI, PI)) {
-    const n = Math.ceil((xVal.lo - HALF_PI) / PI);
-    const poleAt = HALF_PI + n * PI;
-    return { kind: 'singular', at: poleAt };
-  }
+  const poleAt = poleSearchApplies(xVal)
+    ? extremumWithin(xVal, HALF_PI, PI)
+    : undefined;
+  if (poleAt !== undefined) return { kind: 'singular', at: poleAt };
 
   const secLo = 1 / Math.cos(xVal.lo);
   const secHi = 1 / Math.cos(xVal.hi);
+  const pole = machinePole(xVal, secLo, secHi, HALF_PI, PI);
+  if (pole !== undefined) return pole;
 
   let lo = Math.min(secLo, secHi);
   let hi = Math.max(secLo, secHi);
@@ -213,14 +269,15 @@ function cscRaw(x: Interval | IntervalResult): IntervalResult {
     return { kind: 'singular' };
   }
 
-  if (containsExtremum(xVal, 0, PI)) {
-    const n = Math.ceil(xVal.lo / PI);
-    const poleAt = n * PI;
-    return { kind: 'singular', at: poleAt };
-  }
+  const poleAt = poleSearchApplies(xVal)
+    ? extremumWithin(xVal, 0, PI)
+    : undefined;
+  if (poleAt !== undefined) return { kind: 'singular', at: poleAt };
 
   const cscLo = 1 / Math.sin(xVal.lo);
   const cscHi = 1 / Math.sin(xVal.hi);
+  const pole = machinePole(xVal, cscLo, cscHi, 0, PI);
+  if (pole !== undefined) return pole;
 
   let lo = Math.min(cscLo, cscHi);
   let hi = Math.max(cscLo, cscHi);

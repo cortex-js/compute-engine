@@ -169,6 +169,17 @@
 
 ### Bug Fixes
 
+- **The `interval-js` target answers `singular` where the interpreter answers
+  the pole.** A point interval at a double within its rounding error of a pole
+  of `Tan`, `Cot`, `Sec` or `Csc` (`π/2 + 10⁻¹⁵`, `π + 1 ulp`) gave a finite
+  enclosure near `10¹⁵` where the interpreter and compiled JavaScript answer
+  `~oo` and `Infinity`; the target now applies the same rule, and a plot no
+  longer draws a wild segment there. Two faults of the pole search are fixed
+  with it: a pole within the tolerance just below the lower bound was never
+  found, and above `2⁴⁰` every point was `singular` (`tan(10²²)`) because the
+  doubles there are spaced more widely than the tolerance; a point is now
+  decided by its value, as the interpreter's capped rule does. A reported pole
+  location (`at`) is the pole the search found.
 - **A bare `function` over a list compiled to wrong values.** `s(L)`, with `s`
   declared `function` and assigned `l ↦ [(l[i] + …)/4 for i = …]`, compiled with
   `success: true` and returned `{ re: NaN, im: NaN }` objects in place of the

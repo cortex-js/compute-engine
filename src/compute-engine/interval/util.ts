@@ -42,13 +42,29 @@ export function containsExtremum(
   extremum: number,
   period: number
 ): boolean {
-  // Find the smallest candidate >= x.lo
-  const n = Math.ceil((x.lo - extremum) / period);
-  const candidate = extremum + n * period;
-  // Epsilon tolerance for floating-point edge cases
+  return extremumWithin(x, extremum, period) !== undefined;
+}
+
+/**
+ * The first point `extremum + n·period` inside the interval `x`, or
+ * `undefined`. The bounds are inclusive with a tolerance of `1e-15`, and the
+ * search starts below the lower bound by that tolerance: a candidate just
+ * below `x.lo` counts as inside, and a search that started at `x.lo` skipped
+ * it, so `cot` of the point `π + 1 ulp` found no pole at `π` while the point
+ * `π − 1 ulp` did. The kernels that report where a pole lies (`tan`, `cot`,
+ * `sec`, `csc`) take the location from here, so that the pole they report is
+ * the one that was found.
+ */
+export function extremumWithin(
+  x: Interval,
+  extremum: number,
+  period: number
+): number | undefined {
   const EPS = 1e-15;
-  // Inclusive check: candidate in [x.lo, x.hi]
-  return candidate >= x.lo - EPS && candidate <= x.hi + EPS;
+  const n = Math.ceil((x.lo - EPS - extremum) / period);
+  const candidate = extremum + n * period;
+  if (candidate >= x.lo - EPS && candidate <= x.hi + EPS) return candidate;
+  return undefined;
 }
 
 /**

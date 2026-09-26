@@ -101,6 +101,77 @@ describe('compiled JavaScript answers the pole where the interpreter does', () =
   });
 });
 
+describe('compiled interval-js answers `singular` where the interpreter answers the pole', () => {
+  // A point interval at a double within its rounding error of a pole is
+  // `singular`, by the same rule (`isMachineTrigPole`) the interpreter and
+  // compiled JavaScript apply; elsewhere the enclosure holds the double.
+  // Before, only the double nearest the pole was found (`π/2 + 10⁻¹⁵` gave a
+  // finite enclosure near `−9.5·10¹⁴`), and a pole just below the lower
+  // bound was never found (`cot` at `π + 1 ulp`).
+  const ce = machineEngine();
+  type Result = {
+    kind: string;
+    value?: { lo: number; hi: number };
+    at?: number;
+  };
+
+  test.each(HEADS)('%s', (head) => {
+    const f = compile(ce.box([head, 'x']), { to: 'interval-js' });
+    expect(f.success).toBe(true);
+    for (const x of ANGLES) {
+      const expected = ce.box([head, x]).N();
+      const actual = f.run!({ x: { lo: x, hi: x } }) as Result;
+      // A signed overflow (`csc(5e-324)` is `+oo`) has no finite
+      // enclosure: the interval answer is `singular` too.
+      if (isPole(expected) || !Number.isFinite(expected.re))
+        expect([head, x, actual.kind]).toEqual([head, x, 'singular']);
+      else {
+        expect([head, x, actual.kind]).toEqual([head, x, 'interval']);
+        expect(actual.value!.lo).toBeLessThanOrEqual(expected.re);
+        expect(actual.value!.hi).toBeGreaterThanOrEqual(expected.re);
+      }
+    }
+  });
+
+  test('the pole is located, and a wide interval keeps its verdict', () => {
+    const at = (head: string, lo: number, hi = lo) =>
+      compile(ce.box([head, 'x']), { to: 'interval-js' }).run!({
+        x: { lo, hi },
+      }) as Result;
+    const piPlusUlp = 3.1415926535897936;
+    expect(at('Cot', piPlusUlp)).toEqual({ kind: 'singular', at: Math.PI });
+    expect(at('Tan', Math.PI / 2 + 1e-15)).toEqual({
+      kind: 'singular',
+      at: Math.PI / 2,
+    });
+    // A pole within the tolerance below the lower bound counts as inside.
+    expect(at('Cot', piPlusUlp, Math.PI + 1).kind).toBe('singular');
+    // Away from every pole, an ordinary enclosure.
+    expect(at('Tan', 0.1, 1.4).kind).toBe('interval');
+    expect(at('Cot', 0.1, 3).kind).toBe('interval');
+    // The pole at 0 is exact: `cot` of a tiny angle is its large value.
+    expect(at('Cot', 1e-13).kind).toBe('interval');
+    // Above 2⁴⁰ the pole search cannot resolve a multiple of π at a point,
+    // which is decided by its value, as the interpreter does. A wider
+    // interval keeps the search: near 2⁴⁵ the doubles are 2⁻⁷ apart, so a
+    // pole computed as `π/2 + n·π` is still a double near the true pole, and
+    // an interval of width below π around it is found `singular` at it.
+    expect(at('Tan', 1e22).kind).toBe('interval');
+    const n = Math.round((2 ** 45 - Math.PI / 2) / Math.PI);
+    const pole = Math.PI / 2 + n * Math.PI;
+    expect(at('Tan', pole - 1, pole + 1)).toEqual({
+      kind: 'singular',
+      at: pole,
+    });
+    // A pole at the upper endpoint of a wide interval is reported there, not
+    // at the pole nearest the lower endpoint.
+    const wide = at('Tan', -1.4, Math.PI / 2 - 1e-14);
+    expect(wide.kind).toBe('singular');
+    expect(wide.at).toBeGreaterThan(1.5);
+    expect(wide.at).toBeLessThanOrEqual(Math.PI / 2 - 1e-14);
+  });
+});
+
 describe('a lazy Map over a list with a pole', () => {
   // Above a hundred elements `Tan(L).N()` is a lazy `Map` whose function is
   // compiled. A real double cannot tell `+oo` from `~oo`, so an infinite
