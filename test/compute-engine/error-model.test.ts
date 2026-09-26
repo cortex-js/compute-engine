@@ -864,7 +864,10 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
         label,
         true,
       ]);
-      expect([label, isNaNValue(ce2, ce2.box(json).N())]).toEqual([label, true]);
+      expect([label, isNaNValue(ce2, ce2.box(json).N())]).toEqual([
+        label,
+        true,
+      ]);
     }
   });
 
@@ -955,9 +958,9 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     for (const op of ['Floor', 'Ceil', 'Round', 'Truncate']) {
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).N())).toBe(true);
-      expect(
-        ce2.box([op, 'PositiveInfinity']).evaluate().isInfinity
-      ).toBe(true);
+      expect(ce2.box([op, 'PositiveInfinity']).evaluate().isInfinity).toBe(
+        true
+      );
       expect(ce2.box([op, ['Complex', 1, 2]]).isValid).toBe(false);
       expect(ce2.box([op, 'ComplexInfinity']).isValid).toBe(false);
     }
@@ -1018,16 +1021,21 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       expect(isTypeError(ce2.box([op, 'NegativeInfinity']).N())).toBe(true);
     }
     // The genuine extended values are unchanged.
-    expect(ce2.box(['Sqrt', 'PositiveInfinity']).evaluate().isSame(ce2.PositiveInfinity)).toBe(true);
+    expect(
+      ce2
+        .box(['Sqrt', 'PositiveInfinity'])
+        .evaluate()
+        .isSame(ce2.PositiveInfinity)
+    ).toBe(true);
     expect(ce2.box(['Erf', 'PositiveInfinity']).evaluate().isSame(1)).toBe(
       true
     );
     expect(ce2.box(['Erf', 'NegativeInfinity']).evaluate().isSame(-1)).toBe(
       true
     );
-    expect(
-      ce2.box(['Ln', 0]).evaluate().isSame(ce2.NegativeInfinity)
-    ).toBe(true);
+    expect(ce2.box(['Ln', 0]).evaluate().isSame(ce2.NegativeInfinity)).toBe(
+      true
+    );
     // The sharp NaN types where the handler declines for a proven NaN.
     expect(ce2.box(['Sqrt', 'NaN']).type.toString()).toBe('nan');
     expect(ce2.box(['Erf', 'NaN']).type.toString()).toBe('nan');
@@ -1099,7 +1107,15 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const acosh = ce2.box(['Arcosh', NEG]).N();
     expect(acosh.re).toBe(Infinity);
     expect(acosh.im).toBeCloseTo(Math.PI, 12);
-    for (const op of ['Sinh', 'Tanh', 'Arsinh', 'Arcosh', 'Artanh', 'Arsech', 'Arccot']) {
+    for (const op of [
+      'Sinh',
+      'Tanh',
+      'Arsinh',
+      'Arcosh',
+      'Artanh',
+      'Arsech',
+      'Arccot',
+    ]) {
       expect(isTypeError(ce2.box([op, COO]).evaluate())).toBe(true);
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
     }
@@ -1233,9 +1249,9 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(
       isNaNValue(ce2, ce2.box(['Power', 'ImaginaryUnit', POS]).evaluate())
     ).toBe(true);
-    expect(
-      isNaNValue(ce2, ce2.box(['Power', 'ImaginaryUnit', POS]).N())
-    ).toBe(true);
+    expect(isNaNValue(ce2, ce2.box(['Power', 'ImaginaryUnit', POS]).N())).toBe(
+      true
+    );
     // The unit-circle boundary is decided EXACTLY for an exact base —
     // the machine doubles cannot: `(5+12i)/13` has modulus exactly 1
     // (re² + im² computes 1.0000000000000002 in doubles), while
@@ -1243,16 +1259,18 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(
       isNaNValue(
         ce2,
-        ce2
-          .box(['Power', ['Divide', ['Complex', 5, 12], 13], POS])
-          .evaluate()
+        ce2.box(['Power', ['Divide', ['Complex', 5, 12], 13], POS]).evaluate()
       )
     ).toBe(true);
     expect(
       ce2
         .box([
           'Power',
-          ['Add', 1, ['Multiply', ['Divide', 1, ['Power', 10, 10]], 'ImaginaryUnit']],
+          [
+            'Add',
+            1,
+            ['Multiply', ['Divide', 1, ['Power', 10, 10]], 'ImaginaryUnit'],
+          ],
           POS,
         ])
         .evaluate()
@@ -1266,9 +1284,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(
       isNaNValue(
         ce2,
-        ce2
-          .box(['Power', ['Complex', Math.sqrt(3) / 2, 0.5], POS])
-          .evaluate()
+        ce2.box(['Power', ['Complex', Math.sqrt(3) / 2, 0.5], POS]).evaluate()
       )
     ).toBe(true);
     expect(
@@ -1328,8 +1344,12 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // 2026-09-01; between the Power flip and that ruling their simplify
     // twins declined).
     expect(ce2.box(['Power', 2, COO]).simplify().operator).toBe('Power');
-    expect(ce2.box(['Sqrt', COO]).simplify().isSame(ce2.ComplexInfinity)).toBe(true);
-    expect(ce2.box(['Ln', COO]).simplify().isSame(ce2.ComplexInfinity)).toBe(true);
+    expect(ce2.box(['Sqrt', COO]).simplify().isSame(ce2.ComplexInfinity)).toBe(
+      true
+    );
+    expect(ce2.box(['Ln', COO]).simplify().isSame(ce2.ComplexInfinity)).toBe(
+      true
+    );
   });
 
   test('the elementary remainder: Abs, Log, Arctan, Arctan2, Root declare their domains', () => {
@@ -1364,7 +1384,9 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Sqrt', COO], isCoo);
     both(['Ln', COO], isCoo);
     both(['Ln', POS], is(ce2.PositiveInfinity));
-    expect(ce2.box(['Ln', COO]).simplify().isSame(ce2.ComplexInfinity)).toBe(true);
+    expect(ce2.box(['Ln', COO]).simplify().isSame(ce2.ComplexInfinity)).toBe(
+      true
+    );
 
     // Log(x, b) = Ln(x)/Ln(b): the quotient rule at every exceptional
     // point, identical on all three routes (they disagreed at most of
@@ -1423,7 +1445,9 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     angle(['Arctan2', NEG, NEG], ce2.Pi.mul(-3).div(4), (-3 * Math.PI) / 4);
     angle(['Arctan2', -1, NEG], ce2.Pi.neg(), -Math.PI);
     angle(['Arctan2', 0, NEG], ce2.Pi, Math.PI);
-    expect(ce2.box(['Arctan2', POS, NEG]).simplify().isSame(ce2.Pi.mul(3).div(4))).toBe(true);
+    expect(
+      ce2.box(['Arctan2', POS, NEG]).simplify().isSame(ce2.Pi.mul(3).div(4))
+    ).toBe(true);
     expect(ce2.box(['Arctan2', 1, COO]).isValid).toBe(false);
     expect(ce2.box(['Arctan2', COO, 1]).isValid).toBe(false);
     both(['Arctan2', 'NaN', POS], isNaNv);
@@ -1467,7 +1491,12 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       Math.PI / (1000 * Math.LN10),
       12
     );
-    expect(ce2.box(['Sqrt', huge]).evaluate().isSame(ce2.box(['Power', 10, 500]).evaluate())).toBe(true);
+    expect(
+      ce2
+        .box(['Sqrt', huge])
+        .evaluate()
+        .isSame(ce2.box(['Power', 10, 500]).evaluate())
+    ).toBe(true);
     // The exact `i` folds; an exact value a hair off `i` — which projects
     // to the machine double `im === 1` — is a finite point.
     expect(
@@ -1647,9 +1676,13 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // answered 0) and `Chi(−∞)` follows Ln(−∞) (it answered +∞); NaN at
     // ~oo and at an anonymous infinity (Shi/Chi answered ~oo there).
     // (The exact values numericize under N(), per the exactness contract.)
-    expect(ce2.box(['SinIntegral', POS]).evaluate().isSame(ce2.Pi.div(2))).toBe(true);
+    expect(ce2.box(['SinIntegral', POS]).evaluate().isSame(ce2.Pi.div(2))).toBe(
+      true
+    );
     expect(ce2.box(['SinIntegral', POS]).N().re).toBeCloseTo(Math.PI / 2, 12);
-    expect(ce2.box(['CosIntegral', NEG]).evaluate().isSame(ce2.I.mul(ce2.Pi))).toBe(true);
+    expect(
+      ce2.box(['CosIntegral', NEG]).evaluate().isSame(ce2.I.mul(ce2.Pi))
+    ).toBe(true);
     const ciInf = ce2.box(['CosIntegral', NEG]).N();
     expect(ciInf.re).toBe(0);
     expect(ciInf.im).toBeCloseTo(Math.PI, 12);
@@ -1662,7 +1695,12 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const chiNeg = ce2.box(['CoshIntegral', NEG]).N();
     expect(chiNeg.re).toBe(Infinity);
     expect(chiNeg.im).toBeCloseTo(Math.PI, 12);
-    for (const h of ['SinIntegral', 'CosIntegral', 'SinhIntegral', 'CoshIntegral']) {
+    for (const h of [
+      'SinIntegral',
+      'CosIntegral',
+      'SinhIntegral',
+      'CoshIntegral',
+    ]) {
       both([h, COO], isNaNv);
       both([h, ANON], isNaNv);
     }
@@ -1670,7 +1708,9 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // Ci/Chi; a proven non-negative one keeps the extended real line.
     ce2.declare('sgnUnknown', 'real');
     ce2.declare('nonNeg', 'real<0..>');
-    expect(ce2.box(['CosIntegral', 'sgnUnknown']).type.toString()).toBe('number');
+    expect(ce2.box(['CosIntegral', 'sgnUnknown']).type.toString()).toBe(
+      'number'
+    );
     expect(ce2.box(['CosIntegral', 'nonNeg']).type.toString()).toBe(
       'real | signed_infinity'
     );
@@ -1737,7 +1777,9 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // (the Bessel order slot above; a string anywhere), and NaN
     // propagates through the dispatch gate on every head.
     expect(ce2.box(['Zeta', { str: 'x' }]).isValid).toBe(false);
-    expect(ce2.box(['Factorial', { str: 'x' }]).evaluate().operator).toBe('Error');
+    expect(ce2.box(['Factorial', { str: 'x' }]).evaluate().operator).toBe(
+      'Error'
+    );
     both(['Beta', 'NaN', 2], isNaNv);
     both(['AGM', 1, 'NaN'], isNaNv);
     both(['PolyLog', 'NaN', ['Rational', 1, 2]], isNaNv); // used to stay inert
@@ -2025,7 +2067,8 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // read as its absolute value, a NaN one ignored).
     both(['Rationalize', 'NaN'], isNaNv);
     expect(typeOf(['Rationalize', 'NaN'])).toBe('nan');
-    for (const x of [POS, NEG, COO, ANON, NONREAL]) boxError(['Rationalize', x]);
+    for (const x of [POS, NEG, COO, ANON, NONREAL])
+      boxError(['Rationalize', x]);
     boxError(['Rationalize', 1.75, -0.01]);
     boxError(['Rationalize', 1.75, 'NaN']);
     boxError(['Rationalize', 1.75, POS]);
@@ -2337,10 +2380,9 @@ describe('SIGNATURE-GUIDELINES §3.3 — a membership predicate answers False fo
       // composite number is a POSITIVE integer greater than 1 that is not
       // prime, so no negative integer is composite either.
       for (const n of [-1, -4, -7])
-        expect([n, symbolName(ce2.box(['IsComposite', n]).evaluate())]).toEqual([
-          n,
-          'False',
-        ]);
+        expect([n, symbolName(ce2.box(['IsComposite', n]).evaluate())]).toEqual(
+          [n, 'False']
+        );
     });
   });
 
@@ -2455,11 +2497,17 @@ describe('ERROR-MODEL §1 — an UNDECIDABLE condition is inert, never a host th
 
   test('a decidable condition is still decided — inertness is not a new default', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['If', ['Equal', 2, 2], 1, 2]).evaluate().isSame(1)).toBe(
-      true
-    );
     expect(
-      ce.box(['Which', ['Less', 3, 0], 1, 'True', 2]).evaluate().isSame(2)
+      ce
+        .box(['If', ['Equal', 2, 2], 1, 2])
+        .evaluate()
+        .isSame(1)
+    ).toBe(true);
+    expect(
+      ce
+        .box(['Which', ['Less', 3, 0], 1, 'True', 2])
+        .evaluate()
+        .isSame(2)
     ).toBe(true);
     // An ABSENT condition is a different channel: `Missing` is a decided data
     // state that can never resolve, so it is a catchable Error, not inertness.
@@ -3346,7 +3394,9 @@ describe('Euclidean norms: an infinite leg dominates a NaN leg', () => {
     // are: the infinite-entry scan applies inside the orders it does, as it
     // does in the interpreter, so an entry cannot make an unsupported order
     // answer.
-    expect(run(['Norm', ['List', ['List', 1, 2], ['List', 3, 4]], 3])).toBeNaN();
+    expect(
+      run(['Norm', ['List', ['List', 1, 2], ['List', 3, 4]], 3])
+    ).toBeNaN();
     expect(
       run(['Norm', ['List', ['List', INF, 2], ['List', 3, 4]], 3])
     ).toBeNaN();
@@ -3516,14 +3566,23 @@ describe('the arithmetic core declares its domains', () => {
     // scales component-wise, a list broadcasts, and a `Quantity` keeps its
     // unit (it types `value`, which only the canonical handler's own
     // admission lets through).
-    expect(ce.box(['Divide', ['Tuple', 1, 2], 2]).evaluate().toString()).toBe(
-      '(1/2, 1)'
-    );
-    expect(ce.box(['Divide', ['List', 1, 2], 2]).evaluate().toString()).toBe(
-      '[1/2,1]'
-    );
     expect(
-      ce.box(['Divide', ['List', 1, 'NaN'], 2]).evaluate().toString()
+      ce
+        .box(['Divide', ['Tuple', 1, 2], 2])
+        .evaluate()
+        .toString()
+    ).toBe('(1/2, 1)');
+    expect(
+      ce
+        .box(['Divide', ['List', 1, 2], 2])
+        .evaluate()
+        .toString()
+    ).toBe('[1/2,1]');
+    expect(
+      ce
+        .box(['Divide', ['List', 1, 'NaN'], 2])
+        .evaluate()
+        .toString()
     ).toBe('[1/2,NaN]');
     expect(
       ce
@@ -3586,9 +3645,12 @@ describe('the arithmetic core declares its domains', () => {
 
     // The type handler's echo — component-wise for a tuple, element-wise
     // for a collection, ranges reflected about zero — is unchanged.
-    expect(ce.box(['Negate', ['Tuple', 1, 2]]).evaluate().toString()).toBe(
-      '(-1, -2)'
-    );
+    expect(
+      ce
+        .box(['Negate', ['Tuple', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('(-1, -2)');
     expect(ce.box(['Negate', ['List', 1, 2]]).type.toString()).toBe(
       'vector<integer^2>'
     );
@@ -3627,7 +3689,11 @@ describe('the arithmetic core declares its domains', () => {
     const OO = 'PositiveInfinity';
     const NOO = 'NegativeInfinity';
     const COO = 'ComplexInfinity';
-    const both = (json: any, tex: string, check: (v: Expression) => boolean) => {
+    const both = (
+      json: any,
+      tex: string,
+      check: (v: Expression) => boolean
+    ) => {
       for (const e of [ce.box(json), ce.parse(tex)]) {
         expect(check(e.evaluate())).toBe(true);
         expect(check(e.N())).toBe(true);
@@ -3643,12 +3709,14 @@ describe('the arithmetic core declares its domains', () => {
       '\\operatorname{Clamp}(0.5,-\\infty,\\infty)',
       is(0.5)
     );
-    both(
-      ['ElementMax', OO, 1],
-      '\\operatorname{ElementMax}(\\infty,1)',
-      (v) => v.isSame(ce.PositiveInfinity)
+    both(['ElementMax', OO, 1], '\\operatorname{ElementMax}(\\infty,1)', (v) =>
+      v.isSame(ce.PositiveInfinity)
     );
-    both(['ElementMax', NOO, 1], '\\operatorname{ElementMax}(-\\infty,1)', is(1));
+    both(
+      ['ElementMax', NOO, 1],
+      '\\operatorname{ElementMax}(-\\infty,1)',
+      is(1)
+    );
     both(['ElementMin', OO, 1], '\\operatorname{ElementMin}(\\infty,1)', is(1));
     // The order is total on the whole carrier, `lo > hi` included, which
     // is why `partiality` is `total`: `Clamp(5, 1, 0)` is `min(max(5, 1), 0)`.
@@ -3658,7 +3726,10 @@ describe('the arithmetic core declares its domains', () => {
     // NaN-free result lets the sharp `nan` claim show (the old wide
     // `number` handler answer hid it).
     for (const [json, tex] of [
-      [['Clamp', 'NaN', 0, 1], '\\operatorname{Clamp}(\\operatorname{NaN},0,1)'],
+      [
+        ['Clamp', 'NaN', 0, 1],
+        '\\operatorname{Clamp}(\\operatorname{NaN},0,1)',
+      ],
       [
         ['ElementMax', 'NaN', 1],
         '\\operatorname{ElementMax}(\\operatorname{NaN},1)',
@@ -3681,10 +3752,7 @@ describe('the arithmetic core declares its domains', () => {
     for (const [json, tex] of [
       [['Clamp', COO, 0, 1], '\\operatorname{Clamp}(\\tilde\\infty,0,1)'],
       [['Clamp', 'ImaginaryUnit', 0, 1], '\\operatorname{Clamp}(i,0,1)'],
-      [
-        ['ElementMax', COO, 1],
-        '\\operatorname{ElementMax}(\\tilde\\infty,1)',
-      ],
+      [['ElementMax', COO, 1], '\\operatorname{ElementMax}(\\tilde\\infty,1)'],
       [['ElementMax', 'ImaginaryUnit', 1], '\\operatorname{ElementMax}(i,1)'],
       [['ElementMin', 'ImaginaryUnit', 1], '\\operatorname{ElementMin}(i,1)'],
     ] as [any, string][]) {
@@ -3697,7 +3765,9 @@ describe('the arithmetic core declares its domains', () => {
     // a symbol assigned `i` after the application was built.
     ce.assign('hB11', ce.box('ImaginaryUnit'));
     expect(
-      errorCode(ce.function('ElementMax', [ce.box('hB11'), ce.box(1)]).evaluate())
+      errorCode(
+        ce.function('ElementMax', [ce.box('hB11'), ce.box(1)]).evaluate()
+      )
     ).toBe('incompatible-type');
 
     // The slim type handler claims the operands' common tier — these heads
@@ -3715,10 +3785,16 @@ describe('the arithmetic core declares its domains', () => {
       'vector<integer^2>'
     );
     expect(
-      ce.box(['Clamp', ['List', -1, 0.5, 2], 0, 1]).evaluate().toString()
+      ce
+        .box(['Clamp', ['List', -1, 0.5, 2], 0, 1])
+        .evaluate()
+        .toString()
     ).toBe('[0,0.5,1]');
     expect(
-      ce.box(['ElementMax', ['List', 1, 'NaN'], 3]).evaluate().toString()
+      ce
+        .box(['ElementMax', ['List', 1, 'NaN'], 3])
+        .evaluate()
+        .toString()
     ).toBe('[3,NaN]');
 
     // A fresh symbol IS inferred from the declared carrier here, unlike
