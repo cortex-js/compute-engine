@@ -5,6 +5,10 @@ import type {
   Type,
   TypeString,
 } from '../../common/type/types.js';
+import {
+  resultUnderDeclaredParameters,
+  withSignatureResult,
+} from './declared-parameter-result.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   hasDeclaredEffectLabel,
@@ -706,6 +710,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         stored: BoxedType;
         skeleton: Type;
         lambdaType: BoxedType;
+        generation: number;
         type: BoxedType;
       }
     | undefined = undefined;
@@ -736,12 +741,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     } finally {
       this._derivingSignature = false;
     }
+    // The memo also keys on the engine's cache generation, because the
+    // result under the declared parameter types (below) reads the current
+    // types of the symbols the body refers to.
+    const generation = this.engine._cacheGeneration();
     const memo = this._signatureMemo;
     if (
       memo !== undefined &&
       memo.stored === stored &&
       memo.skeleton === skeleton &&
-      memo.lambdaType === lambdaType
+      memo.lambdaType === lambdaType &&
+      memo.generation === generation
     )
       return memo.type;
     const t = stored.type;
@@ -766,12 +776,25 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         );
       // When the lambda gives no evidence for a slot, the slot reads
       // `unknown` again: the answer is `base`, never an older refinement.
+      // The lambda reads its scalar parameters as `unknown`; its result
+      // under the DECLARED parameter types is the accurate one to report
+      // (`resultUnderDeclaredParameters`).
+      const typedResult = resultUnderDeclaredParameters(
+        this.engine,
+        literal,
+        skeleton
+      );
       type = new BoxedType(
-        refineDeclaredPlaceholders(base, lambdaType.type),
+        refineDeclaredPlaceholders(
+          base,
+          typedResult === undefined
+            ? lambdaType.type
+            : withSignatureResult(lambdaType.type, typedResult)
+        ),
         this.engine._typeResolver
       );
     }
-    this._signatureMemo = { stored, skeleton, lambdaType, type };
+    this._signatureMemo = { stored, skeleton, lambdaType, generation, type };
     return type;
   }
 

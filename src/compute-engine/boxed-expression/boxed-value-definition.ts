@@ -7,6 +7,10 @@ import type {
   IComputeEngine as ComputeEngine,
   TypeProvenanceEntry,
 } from '../global-types.js';
+import {
+  resultUnderDeclaredParameters,
+  withSignatureResult,
+} from './declared-parameter-result.js';
 
 import type { Type, TypeString } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
@@ -200,7 +204,12 @@ export class _BoxedValueDefinition
    * not state, so a checkpoint does not capture it: a restore that changes
    * either key makes the memo miss. */
   private _signatureMemo:
-    | { skeleton: Type; valueType: BoxedType; type: BoxedType }
+    | {
+        skeleton: Type;
+        valueType: BoxedType;
+        generation: number;
+        type: BoxedType;
+      }
     | undefined = undefined;
 
   /** True while `_deriveSignature` reads the stored value's type. A
@@ -818,19 +827,37 @@ export class _BoxedValueDefinition
     } finally {
       this._derivingSignature = false;
     }
+    // The memo also keys on the engine's cache generation, because the
+    // result under the declared parameter types (below) reads the current
+    // types of the symbols the body refers to.
+    const generation = this._engine._cacheGeneration();
     const memo = this._signatureMemo;
     if (
       memo !== undefined &&
       memo.skeleton === skeleton &&
-      memo.valueType === valueType
+      memo.valueType === valueType &&
+      memo.generation === generation
     )
       return memo.type;
-    const refined = refineDeclaredPlaceholders(skeleton, valueType.type);
+    // The stored literal reads its scalar parameters as `unknown`; its
+    // result under the DECLARED parameter types is the accurate one to
+    // report (`resultUnderDeclaredParameters`).
+    const typedResult = resultUnderDeclaredParameters(
+      this._engine,
+      v,
+      skeleton
+    );
+    const refined = refineDeclaredPlaceholders(
+      skeleton,
+      typedResult === undefined
+        ? valueType.type
+        : withSignatureResult(valueType.type, typedResult)
+    );
     const type =
       refined === recorded.type
         ? recorded
         : new BoxedType(refined, this._engine._typeResolver);
-    this._signatureMemo = { skeleton, valueType, type };
+    this._signatureMemo = { skeleton, valueType, generation, type };
     return type;
   }
 

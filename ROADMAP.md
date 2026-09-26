@@ -571,32 +571,68 @@ functions with a real result, `Max`/`Min`, `Sum`/`Product`/`Mean` and literal
 lists keep that union since 2026-09-26 (user decision 2026-09-25). What still
 widens to `number`, measured on CE main with `a: real | signed_infinity | nan`:
 
-1. **User functions.** A function declared
-   `(real | signed_infinity | nan) -> unknown` and assigned `t ↦ t + 1`
-   refines its declared result to `number`: the refinement reads the result
-   type of the literal, whose parameter is typed `unknown`, not the declared
-   parameter type. And a call is never typed from the body when the declared
-   result is a number type (`callResultType` returns early for it), so `g(a)`
-   is `number`. Relaxing that early return for `number` alone typed every
-   call from its body, and 17 tests failed: calls took literal value types
-   (`g(3)` → `integer<6..6>`), and a complex-mode compiled call lost its
-   `_SYS.cplx` wrapper. A fix needs a design for which calls are typed from
-   the body.
-2. **`Tan`, `Sec`, `Arsinh`** of `y: real | signed_infinity` type `number`:
-   `elementaryFunctionType` declines for an operand described by its type
-   only (`Tan`, `Sec`), and it types `Arsinh(±∞)` as `number` although the
-   value is `±∞`.
-3. **A result that may be complex** (`Arccos(y)`, `Arcsin(y)`, `y^r`) keeps
-   `number`, although `complex | nan` would be more precise: the GPU
-   compilers refuse a body typed `complex` and compile one typed `number`
-   (as a real). The compilers read `number` as real, and a host such as
-   Tycho reads it as possibly complex.
-4. **A union of a scalar and a list** (`u: real | signed_infinity | list<real>`)
+1. **User-function calls.** A function declared with a result `unknown`
+   reports the result of its body under the declared parameter types
+   (2026-09-26), and a declared result is used as given. What stays open is
+   a call of a function declared bare `function` with a union argument: the
+   call is typed from the body only when the declared result is not a number
+   type (`callResultType` returns early for one). Relaxing that early return
+   typed every call from its body, and 17 tests failed (calls took literal
+   value types, `g(3)` → `integer<6..6>`, and a complex-mode compiled call
+   lost its `_SYS.cplx` wrapper). Under the decision of 2026-09-26 (the host
+   that constructs a function gives its type), the host's declaration is the
+   intended fix, so this is low priority.
+2. **A result that may be complex** (`Arccos(y)`, `Arcsin(y)`, `y^r`) keeps
+   `number`, although `complex | nan` is the accurate type. Typing it so was
+   measured on 2026-09-26: a GPU compile of a `Sum` whose body contains
+   `√(1 − ((i − 0.5)/40)²)` then refused the body as complex, because the
+   index of `Sum(…, Limits(i, 1, 40))` is typed `integer` without its range
+   (`indexingSetSites(1, 'integer')` in `binding-sites.ts`), so the square
+   root is `complex`. Giving the index the range `integer<1..40>` makes that
+   body `real`, but exposed the JavaScript-target defect below, so both were
+   left out.
+3. **A union of a scalar and a list** (`u: real | signed_infinity | list<real>`)
    makes `y·u` and `y + u` type `list<number> | number`.
-5. **`Sum` and `Product` with limits** (`Sum(k², k, 1, 10)`) type `number`;
+4. **`Sum` and `Product` with limits** (`Sum(k², k, 1, 10)`) type `number`;
    only the one-operand form `Sum(L)` is typed from the elements.
 
 Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
+
+### JavaScript target: an unrolled `Sum` mixes a complex object with real arithmetic (OPEN — found 2026-09-26)
+
+With the index of a `Sum` over literal limits typed by its range
+(`integer<1..40>`, an experiment of 2026-09-26 that was not kept), the kernel
+of `test/compute-engine/compile-invariant-prefix.test.ts` (the transit kernel
+`B`) compiled to code that returns `{re: NaN, im: NaN}`. The unrolled terms
+lower `√(1 − (0.0125)²)` as a complex value and then add a real to it:
+`-(k * (_SYS.cneg({ re: 0.9999218719480037, im: 0 })) + 1)`, where `+ 1` on
+an object is NaN. The same terms lower in the real lane when the index is
+plain `integer`. The lane choice for one sub-expression disagrees with the
+arithmetic around it. Repro: in that test file, pin the range in
+`indexingSetSite` (`binding-sites.ts`) for a `Limits` clause with integer
+literal bounds, and run the first test of "Invariant prefix reuse across the
+calls of a repetition site".
+
+### A scalar-declared function called with a tuple is typed as a scalar (OPEN — found 2026-09-26 by the review of the narrow-return-types round)
+
+A function declared `(real) -> real` (or `(real) -> unknown`, which now
+reports `-> real`) accepts a `Tuple` argument: the stored literal has no
+parameter types, so it maps over the tuple, and `h((1, 2))` with
+`h := x ↦ 2x` evaluates to `(2, 4)`, but the call is typed `real`. A list
+argument is already typed as the mapped list (`vector<real^2>`). Either the
+call rejects a tuple for a scalar parameter, or its type is the mapped tuple.
+Probe: `ce.declare('h', '(real) -> unknown'); ce.assign('h', x ↦ 2x);
+ce.box(['h', ['Tuple', 1, 2]])`.
+
+### A symbol that holds a pole value is typed off the pole (OPEN — found 2026-09-26 by the review of the narrow-return-types round)
+
+`poleReciprocalType` (`library/type-handlers.ts`) applies a generic-point
+convention to a non-constant operand: the pole set of `Tan` has measure zero,
+so `Tan(z)` with `z: real` claims `real`. A symbol that holds a pole value is
+outside that convention: with `z := π/2`, `Tan(z)` is typed `real` (`nan | real`
+for `z: real | signed_infinity`) and evaluates to `~oo`. The same holds for a
+constant symbol with a value, whose `closed` fact is `false`. Treating a
+symbol with a value as closed would close the constant case.
 
 ### Ordering of constants with special functions: what stays open after the 2026-09-25 bounds (OPEN, low)
 

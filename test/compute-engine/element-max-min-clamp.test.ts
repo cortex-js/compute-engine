@@ -70,17 +70,19 @@ describe('ElementMax / ElementMin — type', () => {
   test('scalar⊗scalar is a scalar type', () => {
     // The slim handler of the Contract B flip claims the operands' common
     // tier, and an extremum returns one of its operands, so two integer
-    // literals give `integer` (it used to answer the looser `real`).
-    expect(ce.box(['ElementMax', 2, 5]).type.toString()).toBe('integer');
+    // literals give an integer, here in the range the operands bound
+    // (it used to answer the looser `real`, then `integer`).
+    expect(ce.box(['ElementMax', 2, 5]).type.toString()).toBe('integer<5..5>');
   });
-  test('a non-finite operand keeps the declared extended-real claim', () => {
+  test('a non-finite operand is a value of the extended real line', () => {
     // `±∞` are ordinary values of the declared carrier
-    // (`real | signed_infinity`), so the handler declines the finite-tier
-    // claim and the declared result shows, lifted per cell by the
-    // broadcast. It used to widen to the shape-only `vector<2>`.
+    // (`real | signed_infinity`), lifted per cell by the broadcast. The
+    // maximum of a cell and `+∞` is `+∞`, so every cell is infinite. It
+    // used to widen to the shape-only `vector<2>`, then to
+    // `list<real | signed_infinity^2>`.
     expect(
       ce.box(['ElementMax', ['List', 1, 2], 'PositiveInfinity']).type.toString()
-    ).toBe('list<real | signed_infinity^2>');
+    ).toBe('list<signed_infinity^2>');
   });
   test('a non-real operand is off-carrier — an error at boxing', () => {
     // An extremum is defined by the ORDER of the real line, so `i` and

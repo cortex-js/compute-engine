@@ -47,6 +47,10 @@ import { verifyVariance } from '../common/type/variance.js';
 import type { VarianceResult } from '../common/type/variance.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import {
+  resultUnderDeclaredParameters,
+  withSignatureResult,
+} from './boxed-expression/declared-parameter-result.js';
+import {
   assertSingleArmPolytype,
   EffectContractError,
   inferFunctionLiteralEffects,
@@ -2021,9 +2025,18 @@ export function declareFn(
       // only shows after reconciliation): declared `unknown` slots adopt the
       // literal's inferred slots, and the refined type is what the definition
       // installs under.
+      // The body's result under the declared parameter types, as on the
+      // assign routes (`resultUnderDeclaredParameters`).
+      const typedResult = resultUnderDeclaredParameters(
+        ce,
+        def.value as Expression,
+        declaredType0
+      );
+      const withTypedResult = (t: Type): Type =>
+        typedResult === undefined ? t : withSignatureResult(t, typedResult);
       let declaredType = refineDeclaredPlaceholders(
         declaredType0,
-        (def.value as Expression).type.type
+        withTypedResult((def.value as Expression).type.type)
       );
       if (hasFunctionSignature(declaredType)) {
         // G11 (§2.4) — see the assign path. Checked FIRST, ahead of the
@@ -2060,7 +2073,7 @@ export function declareFn(
         // Second refinement pass — adopt the post-ascription result.
         declaredType = refineDeclaredPlaceholders(
           declaredType,
-          reconciled.type.type
+          withTypedResult(reconciled.type.type)
         );
         valueDef = { ...valueDef, value: reconciled };
       }
@@ -2299,7 +2312,25 @@ export function assignFn(
       const skeleton = def.value._signatureSkeleton;
       const declaredType0 =
         skeleton !== undefined ? ce.type(skeleton) : def.value.type;
-      let declaredType = refineDeclaredType(ce, declaredType0, literal.type);
+      // The result the body has with the DECLARED parameter types, when the
+      // declared result is a placeholder: the stored literal reads its
+      // scalar parameters as `unknown` (see `ascribeDeclaredParameterTypes`),
+      // so its own result is wider than the declaration allows. Both
+      // refinement passes read it, or the first would fix the wider result.
+      const typedResult = resultUnderDeclaredParameters(
+        ce,
+        literal,
+        declaredType0.type
+      );
+      const withTypedResult = (t: BoxedType): BoxedType =>
+        typedResult === undefined
+          ? t
+          : ce.type(withSignatureResult(t.type, typedResult));
+      let declaredType = refineDeclaredType(
+        ce,
+        declaredType0,
+        withTypedResult(literal.type)
+      );
 
       // A generic declaration DOES take a function-literal body (the
       // generic-literals milestone, §2.4): the literal installs under the
@@ -2332,9 +2363,10 @@ export function assignFn(
         ascribeDeclaredParameterTypes(ce, literal, declaredType.type),
         declaredType.type
       );
+      const reconciledType = withTypedResult(reconciled.type);
       // Second refinement pass (see the comment above): adopt the
       // post-ascription result for any slot still `unknown`.
-      declaredType = refineDeclaredType(ce, declaredType, reconciled.type);
+      declaredType = refineDeclaredType(ce, declaredType, reconciledType);
       // The effects axis is judged by its own provenance: a bare specifier is
       // the INFERRED track (the body's effects are simply re-stamped on every
       // assignment), a stated one is a contract.
@@ -2350,7 +2382,7 @@ export function assignFn(
       if (
         !matchesDeclaredTypeAxes(
           ce,
-          reconciled.type,
+          reconciledType,
           declaredType,
           effectsDeclared,
           reconciled,
@@ -2480,7 +2512,22 @@ export function assignFn(
           opSkeleton !== undefined
             ? ce.type(opSkeleton)
             : def.operator.signature;
-        let declaredType = refineDeclaredType(ce, declaredType0, literal.type);
+        // The body's result under the declared parameter types, as on the
+        // value-slot route above.
+        const typedResult = resultUnderDeclaredParameters(
+          ce,
+          literal,
+          declaredType0.type
+        );
+        const withTypedResult = (t: BoxedType): BoxedType =>
+          typedResult === undefined
+            ? t
+            : ce.type(withSignatureResult(t.type, typedResult));
+        let declaredType = refineDeclaredType(
+          ce,
+          declaredType0,
+          withTypedResult(literal.type)
+        );
 
         // G11 — see the value-slot route above. The literal then installs as a
         // VALUE carrying the DECLARED polytype (the same representation this
@@ -2506,7 +2553,8 @@ export function assignFn(
           declaredType.type
         );
         // Second refinement pass — adopt the post-ascription result.
-        declaredType = refineDeclaredType(ce, declaredType, reconciled.type);
+        const reconciledType = withTypedResult(reconciled.type);
+        declaredType = refineDeclaredType(ce, declaredType, reconciledType);
         // The effects axis is judged by its own provenance. The operator
         // definition carries the bit (`effectsDeclared`), and it has to travel
         // with the value definition this route installs: the declared type
@@ -2523,7 +2571,7 @@ export function assignFn(
         if (
           !matchesDeclaredTypeAxes(
             ce,
-            reconciled.type,
+            reconciledType,
             declaredType,
             effectsDeclared,
             reconciled,

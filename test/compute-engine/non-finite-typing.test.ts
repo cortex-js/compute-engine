@@ -255,10 +255,18 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       // and DECLINES otherwise, and the declared result is what shows
       // here. (`Max`/`Min`, which reduce collections, keep the wide
       // carrier and the `number` claim.)
-      const EXT = 'real | signed_infinity';
-      expect(typeOf(['ElementMax', 'PositiveInfinity', 5])).toBe(EXT);
-      expect(typeOf(['ElementMin', 'NegativeInfinity', 5])).toBe(EXT);
-      expect(typeOf(['Clamp', 'x_r', 0, 'PositiveInfinity'])).toBe(EXT);
+      // The result lies in the range the operands bound (2026-09-26):
+      // `max(+∞, 5)` is `+∞` (the boxing prints `+oo` as the signed pair),
+      // and `Clamp(x, 0, +∞)` is `max(x, 0)`, finite for a real `x`.
+      expect(typeOf(['ElementMax', 'PositiveInfinity', 5])).toBe(
+        'signed_infinity'
+      );
+      expect(typeOf(['ElementMin', 'NegativeInfinity', 5])).toBe(
+        'signed_infinity'
+      );
+      expect(typeOf(['Clamp', 'x_r', 0, 'PositiveInfinity'])).toBe(
+        'real<0..>'
+      );
     });
 
     test('poles that evaluate to ~oo claim number, not complex/finite', () => {
@@ -1094,5 +1102,83 @@ describe('EXTENDED-REAL NARROWING: POLES, INFINITE RANGES, MATRICES', () => {
     c.declare('h', 'real');
     c.assign('h', 0);
     expect(c.box(['Power', 'h', -1]).evaluate().toString()).toBe('~oo');
+  });
+});
+
+/**
+ * Accurate return types (user decision 2026-09-26: the host gives the types
+ * of what it constructs, CE gives narrow types for the values it returns).
+ */
+describe('NARROW RETURN TYPES', () => {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real | signed_infinity');
+  ce.declare('a', 'real | signed_infinity | nan');
+  ce.declare('k', 'integer');
+  test.each([
+    // A clamp lies between its bounds, whatever its operand is.
+    [['Clamp', 'x', -1, 1], 'real<-1..1>'],
+    [['Clamp', 'a', -1, 1], 'nan | real<-1..1>'],
+    [['Clamp', 'k', 0, 10], 'integer<0..10>'],
+    [['ElementMax', 'x', 0], 'real<0..>'],
+    [['ElementMin', 'k', 2], 'integer<..2>'],
+    // `Clamp(y, 0, x)` is at most `x`, which is finite.
+    [['Clamp', 'y', 0, 'x'], 'real'],
+    // So `Arccos` of a clamp is real.
+    [['Arccos', ['Clamp', 'x', -1, 1]], 'real'],
+    [['Arccos', ['Clamp', 'a', -1, 1]], 'nan | real'],
+    // `Tan(±∞)` has no value; a variable is not a constant on a pole.
+    [['Tan', 'y'], 'nan | real'],
+    [['Sec', 'a'], 'nan | real'],
+    [['Arsinh', 'y'], 'real | signed_infinity'],
+  ])('%j types %s', (json, expected) => {
+    expect(ce.box(json as never).type.toString()).toBe(expected);
+  });
+
+  test('a declared `unknown` result is the body result under the declared parameter types', () => {
+    const c = new ComputeEngine();
+    c.declare('a', 'real | signed_infinity | nan');
+    c.declare('g', '(real | signed_infinity | nan) -> unknown');
+    c.assign('g', c.parse('t \\mapsto t + 1'));
+    expect(c.lookupDefinition('g')!.value!.type.toString()).toBe(
+      '(nan | real | signed_infinity) -> nan | real | signed_infinity'
+    );
+    expect(c.box(['g', 'a']).type.toString()).toBe(
+      'nan | real | signed_infinity'
+    );
+    // A reassignment refines again.
+    c.assign('g', c.parse('t \\mapsto t^2'));
+    expect(c.lookupDefinition('g')!.value!.type.toString()).toBe(
+      '(nan | real | signed_infinity) -> nan | real<0..> | signed_infinity'
+    );
+    // The stored literal is unchanged: a scalar-declared body still
+    // broadcasts over a tuple argument.
+    c.declare('q', '(real) -> unknown');
+    c.assign('q', c.parse('x \\mapsto 2x'));
+    expect(c.box(['q', ['Tuple', 1, 2]]).evaluate().toString()).toBe('(2, 4)');
+  });
+
+  test('every declaration route reports the same result', () => {
+    const c = new ComputeEngine();
+    const sig = '(real | signed_infinity | nan) -> unknown';
+    c.declare('f', sig);
+    c.assign('f', c.parse('t \\mapsto t + 1'));
+    c.declare('g', { type: sig, value: c.parse('t \\mapsto t + 1') } as never);
+    c.declare('h', { signature: sig } as never);
+    c.assign('h', c.parse('t \\mapsto t + 1'));
+    const expected =
+      '(nan | real | signed_infinity) -> nan | real | signed_infinity';
+    expect(c.box('f').type.toString()).toBe(expected);
+    expect(c.box('g').type.toString()).toBe(expected);
+    expect(c.box('h').type.toString()).toBe(expected);
+  });
+
+  test('the result follows a symbol the body reads', () => {
+    const c = new ComputeEngine();
+    c.declare('h', '(real) -> unknown');
+    c.assign('h', c.parse('x \\mapsto 1 + a x'));
+    c.assign('a', c.box(['List', 1, 2]));
+    expect(c.box('h').type.toString()).toBe('(real) -> vector<real^2>');
+    expect(c.box(['h', 2]).evaluate().toString()).toBe('[3,5]');
   });
 });

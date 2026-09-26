@@ -562,8 +562,11 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     ce.parse('f(x) \\coloneq 2x').evaluate();
     // The declared PARAMETER is authoritative and preserved; the `unknown`
     // RESULT is a placeholder the body's inference refines (2026-08-15
-    // placeholder-signature ruling).
-    expect(ce.box('f').type.toString()).toBe('(tuple<number, number>) -> number');
+    // placeholder-signature ruling), with the body typed under the declared
+    // parameter types (2026-09-26): `2x` of a point is a point.
+    expect(ce.box('f').type.toString()).toBe(
+      '(tuple<number, number>) -> tuple<number, number>'
+    );
     // A scalar call still type-errors (tuple required)…
     expect(ce.box(['f', 3]).json).toEqual([
       'f',
@@ -671,9 +674,10 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     ce.declare('f', { signature: '(tuple<number, number>) -> unknown' });
     ce.parse('f(x) \\coloneq 2x').evaluate();
     // Declared PARAMETER preserved (authoritative); the placeholder result
-    // refines to the body's inference (2026-08-15 ruling).
+    // refines to the body's inference (2026-08-15 ruling), under the
+    // declared parameter types (2026-09-26): `2x` of a point is a point.
     expect(ce.box('f').type.toString()).toBe(
-      '(tuple<number, number>) -> number'
+      '(tuple<number, number>) -> tuple<number, number>'
     );
     // Scalar call still type-errors (tuple required)…
     expect(ce.box(['f', 3]).json).toEqual([
@@ -697,9 +701,10 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     const ce = new ComputeEngine();
     ce.declare('f', { signature: '(tuple<number, number>) -> unknown' });
     ce.assign('f', ce.box(['Function', ['Multiply', 2, 'x'], 'x']));
-    // Parameter preserved; placeholder result refined (2026-08-15 ruling).
+    // Parameter preserved; placeholder result refined (2026-08-15 ruling)
+    // under the declared parameter types (2026-09-26).
     expect(ce.box('f').type.toString()).toBe(
-      '(tuple<number, number>) -> number'
+      '(tuple<number, number>) -> tuple<number, number>'
     );
     expect(ce.box(['f', 3]).json).toEqual([
       'f',

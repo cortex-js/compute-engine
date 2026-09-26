@@ -6115,6 +6115,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return gpuIdentityPassthrough(args[0], compile, target);
     return `ceil(${compile(args[0])})`;
   },
+  // The native `clamp` keeps the operand-shape rules the shape gate knows
+  // (`clamp(genType, float, float)`). CE defines `Clamp(x, lo, hi)` as
+  // `min(max(x, lo), hi)`, which is `hi` when `lo > hi`, and its type handler
+  // claims that range (`extremumRangeType`). WGSL defines `clamp` as that
+  // same `min(max())`; GLSL leaves the result undefined when `lo > hi`
+  // (common drivers compute `min(max())`), so for such bounds a GLSL result
+  // may disagree with the claimed type.
   Clamp: 'clamp',
   Cos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))

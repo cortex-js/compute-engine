@@ -3784,15 +3784,16 @@ describe('the arithmetic core declares its domains', () => {
     // SELECT one of their operands, they never compute — and declines
     // wherever finiteness or realness is not proven, so the declared
     // `real | signed_infinity` shows instead of the old blanket `number`.
-    expect(ce.box(['ElementMin', 2, 5]).type.toString()).toBe('integer');
-    expect(ce.box(['Clamp', 5, 1, 0]).type.toString()).toBe('integer');
+    // The result also lies in the range the operands bound (2026-09-26).
+    expect(ce.box(['ElementMin', 2, 5]).type.toString()).toBe('integer<2..2>');
+    expect(ce.box(['Clamp', 5, 1, 0]).type.toString()).toBe('integer<0..0>');
     expect(ce.box(['ElementMax', OO, 1]).type.toString()).toBe(
-      'real | signed_infinity'
+      'signed_infinity'
     );
     // Under the broadcast lift the handler reads the CELL type, so a list
     // of integers keeps a sharp per-cell claim.
     expect(ce.box(['Clamp', ['List', 1, 2], 0, 1]).type.toString()).toBe(
-      'vector<integer^2>'
+      'list<integer<0..1>^2>'
     );
     expect(
       ce
@@ -3809,9 +3810,10 @@ describe('the arithmetic core declares its domains', () => {
 
     // A fresh symbol IS inferred from the declared carrier here, unlike
     // `Divide`: these heads have no `canonical` handler, so the signature
-    // validation — which is what infers — actually runs.
+    // validation — which is what infers — actually runs. The clamp itself
+    // lies between its bounds whatever the operand is (2026-09-26).
     expect(ce.box(['Clamp', 'cB11', 0, 1]).type.toString()).toBe(
-      'real | signed_infinity'
+      'real<0..1>'
     );
     expect(ce.box('cB11').type.toString()).toBe('real | signed_infinity');
   });

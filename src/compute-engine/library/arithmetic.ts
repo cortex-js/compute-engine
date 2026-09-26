@@ -229,6 +229,7 @@ import {
   gammaPoleType as gammaPoleTypeOnTypes,
   extremumType as extremumTypeOnTypes,
   elementExtremumType as elementExtremumTypeOnTypes,
+  extremumRangeType as extremumRangeTypeOnTypes,
   roundingFunctionType as roundingFunctionTypeOnTypes,
   measurementType as measurementTypeOnTypes,
   bigOpResultType as bigOpResultTypeOnTypes,
@@ -6969,7 +6970,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       partiality: 'total',
       type: (ops, context) =>
         BoxedType.forResult(
-          elementExtremumTypeOnTypes(ops),
+          extremumRangeTypeOnTypes('max', ops) ??
+            elementExtremumTypeOnTypes(ops),
           context.engine._typeResolver
         ),
       evaluate: (ops, { numericApproximation }) =>
@@ -6988,7 +6990,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       partiality: 'total',
       type: (ops, context) =>
         BoxedType.forResult(
-          elementExtremumTypeOnTypes(ops),
+          extremumRangeTypeOnTypes('min', ops) ??
+            elementExtremumTypeOnTypes(ops),
           context.engine._typeResolver
         ),
       evaluate: (ops, { numericApproximation }) =>
@@ -7007,7 +7010,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       partiality: 'total',
       type: (ops, context) =>
         BoxedType.forResult(
-          elementExtremumTypeOnTypes(ops),
+          extremumRangeTypeOnTypes('clamp', ops) ??
+            elementExtremumTypeOnTypes(ops),
           context.engine._typeResolver
         ),
       evaluate: ([x, lo, hi], { numericApproximation }) => {

@@ -272,6 +272,24 @@ Larger cancellations (`x²/(5x²) → 1/5`) and the wider policy that governs wh
 declared-`complex` one) are **simplify-level**, documented in
 [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).
 
+### Who provides a type (user decision 2026-09-26)
+
+Whoever constructs a function or a symbol is responsible for giving it an
+accurate type. A host such as Tycho declares its symbols and the parameters
+of its functions with narrow types (`real | signed_infinity | nan`, not
+`number`), and a declared result type is a promise the host makes: the
+interpreter does not check a function's value against it (decision
+2026-09-24). CE constructs the **return values** of its operators and of the
+bodies it types, so CE owes an accurate, narrow result type for them: an
+operator's type handler claims the tightest type its operand types prove
+(`Clamp(x, -1, 1)` is `real<-1..1>`, `tanh(y)` is `real`), and a function
+literal assigned under a declared signature whose result is `unknown`
+reports the result its body has with the DECLARED parameter types
+(`resultUnderDeclaredParameters()` in `engine-declarations.ts`). Where no type
+information exists, a reasonable assumption is acceptable: a compiler that
+meets a `number` operand assumes a real value. A result type that is too wide
+is a defect of the return type, not a reason to change that assumption.
+
 ### Non-finite typing convention for type handlers
 
 The numeric lattice is finite-by-default (ratified 2026-08-27; the decision

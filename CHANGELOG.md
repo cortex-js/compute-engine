@@ -67,6 +67,30 @@
   follows (`Round(4Q)`, `Floor(4Q)`, `Ceil(4Q)` with `Q` inferred
   `real | signed_infinity` are `integer | signed_infinity`, not `integer`).
 
+- **`Clamp`, `ElementMax` and `ElementMin` are typed by the range their
+  operands bound.** `Clamp(x, −1, 1)` is `real<−1..1>` (it was `real`), with
+  `nan` when `x` may be NaN, and whatever `x` is: `Clamp(+∞, −1, 1)` is 1, so
+  `Clamp(a, −1, 1)` with `a: real | signed_infinity | nan` is
+  `nan | real<−1..1>` (it was `nan | real | signed_infinity`).
+  `ElementMax(x, 0)` is `real<0..>`, `ElementMax(2, 5)` is `integer<5..5>`
+  (it was `integer`), and `ElementMax(+∞, 5)` is `signed_infinity` (it was
+  `real | signed_infinity`). As a consequence `Arccos(Clamp(x, −1, 1))` is
+  `real` (it was `complex`).
+- **`Tan`, `Sec` and `Arsinh` of an extended real.** With
+  `y: real | signed_infinity`, `tan(y)` and `sec(y)` are `nan | real` (they
+  were `number`; `Tan(±∞)` has no value) and `arsinh(y)` is
+  `real | signed_infinity` (it was `number`).
+- **A function declared with an `unknown` result reports the result of its
+  body under the declared parameter types.** `(real | signed_infinity | nan)
+  -> unknown` assigned `t ↦ t + 1` now reports
+  `-> nan | real | signed_infinity`, and a call `g(a)` has that type; it was
+  `-> number`, because the result was read from the literal with its
+  parameter typed `unknown`. In the same way `(tuple<number, number>) ->
+  unknown` assigned `x ↦ 2x` reports `-> tuple<number, number>` (it was
+  `-> number`, although `f((3, 4))` is `(6, 8)`). Both the string and the
+  object form of the declaration, and both `ce.assign` and `:=`, behave the
+  same. The stored literal is unchanged.
+
 ### Issues Resolved
 
 - **`Min` over a descending range** answered its first element:

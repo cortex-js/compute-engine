@@ -10,6 +10,7 @@ import { isSubtype } from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
 import {
   absRange,
+  attachInterval,
   intervalOfType,
   type Interval,
 } from '../numerics/interval-arithmetic.js';
@@ -1111,8 +1112,17 @@ export function extendedElementaryFunctionType(
   if (!mayBeInfinite && !hasNaN) return undefined;
   const parts: Type[] = [];
   const finite = finiteExtendedPart(present);
+  // The finite part keeps the operand's closedness, so `poleReciprocalType`
+  // applies its generic-point convention to a non-constant operand, as it
+  // does for one typed `real`: the pole set of `Tan` has measure zero, so
+  // `Tan(y)` claims `real` on the finite values. (A symbol that holds a pole
+  // value, `y := π/2`, is outside that convention; see ROADMAP.)
   if (finite !== undefined)
-    parts.push(elementaryFunctionType(operator, [describeType(finite)]));
+    parts.push(
+      elementaryFunctionType(operator, [
+        describeType(finite, ops[0].facts.closed),
+      ])
+    );
   if (mayBeInfinite)
     parts.push(
       carrierAdmitsSignedInfinity
@@ -1120,10 +1130,10 @@ export function extendedElementaryFunctionType(
         : 'nan'
     );
   if (hasNaN) parts.push('nan');
-  // Only a result on the extended real line is claimed. A complex part
-  // (`Arccos` of a real beyond ±1) keeps the caller's claim: the GPU
-  // compilers refuse a body typed `complex` but compile one typed `number`,
-  // so trading `number` for `complex | nan` would stop code that compiles.
+  // Only a result on the extended real line is claimed. A part that may be
+  // complex (`Arccos` of a real beyond ±1) keeps the caller's claim: typing
+  // it `complex | nan` stops compiles that work today (see the ROADMAP entry
+  // on complex-capable results).
   if (parts.some((p) => !isSubtype(p, EXTENDED_REAL_OR_NAN_TYPE)))
     return undefined;
   return reduceType({ kind: 'union', types: parts });
@@ -1207,6 +1217,116 @@ function stripNaN(t: Type): Type {
     kind: 'union',
     types: t.types.filter((x) => x !== 'nan'),
   });
+}
+
+/** `t` with an `infinity` member replaced by the signed pair `+oo | -oo`. */
+function onCarrierInfinities(t: Type): Type {
+  if (t === 'infinity')
+    return {
+      kind: 'union',
+      types: [PLUS_INFINITY_TYPE, MINUS_INFINITY_TYPE],
+    };
+  if (typeof t !== 'object' || t.kind !== 'union') return t;
+  if (!t.types.includes('infinity')) return t;
+  return reduceType({
+    kind: 'union',
+    types: [
+      ...t.types.filter((x) => x !== 'infinity'),
+      PLUS_INFINITY_TYPE,
+      MINUS_INFINITY_TYPE,
+    ],
+  });
+}
+
+/**
+ * The range of `ElementMax`, `ElementMin` or `Clamp` from the ranges of its
+ * operands (their broadcast elements), when every operand is on the extended
+ * real line, with or without NaN; `undefined` otherwise. Each of these heads
+ * returns one of its operands, so the result lies within bounds read off the
+ * operands' intervals:
+ * - `ElementMax`: from the largest lower bound to the largest upper bound;
+ * - `ElementMin`: from the smallest lower bound to the smallest upper bound;
+ * - `Clamp(x, lo, hi) = min(max(x, lo), hi)`: from
+ *   `min(max(xL, loL), hiL)` to `min(hiH, max(xH, loH))`, so
+ *   `Clamp(x, -1, 1)` is `real<-1..1>` whatever `x` is (`Clamp(+∞, -1, 1)`
+ *   is 1).
+ * The bounds are closed (a sound cover of an open one). A signed infinity
+ * is a possible value only on an unbounded side where an operand admits it,
+ * and `nan` is added when an operand may be NaN (the heads propagate it).
+ * Return types are narrow on purpose: a host reads a result type to choose
+ * a value layout, and `Arccos(Clamp(x, -1, 1))` is real only when the clamp
+ * says `real<-1..1>`.
+ */
+export function extremumRangeType(
+  kind: 'max' | 'min' | 'clamp',
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  if (ops.length === 0 || (kind === 'clamp' && ops.length !== 3))
+    return undefined;
+  let hasNaN = false;
+  const bounds: { lo: number; hi: number }[] = [];
+  const presents: Type[] = [];
+  for (const d of ops) {
+    const t0 = broadcastOperandType(d);
+    if (isSubtype(t0, 'never')) return undefined;
+    // An `infinity` member (the type of a quotient whose divisor may be 0)
+    // also admits `~oo`, which is off these heads' carrier: an error, not a
+    // value (a compiled route lowers it to `+∞`, a signed infinity). The
+    // values the head can return come from the signed pair.
+    const t = onCarrierInfinities(t0);
+    const p = stripNaN(t);
+    if (p !== t) hasNaN = true;
+    if (!isSubtype(p, EXTENDED_REAL_TYPE)) return undefined;
+    const range = intervalOfType(p);
+    bounds.push({ lo: range?.lo ?? -Infinity, hi: range?.hi ?? Infinity });
+    presents.push(p);
+  }
+  let lo: number;
+  let hi: number;
+  if (kind === 'clamp') {
+    const [x, l, h] = bounds;
+    lo = Math.min(Math.max(x.lo, l.lo), h.lo);
+    hi = Math.min(h.hi, Math.max(x.hi, l.hi));
+  } else {
+    const pick = kind === 'max' ? Math.max : Math.min;
+    lo = pick(...bounds.map((b) => b.lo));
+    hi = pick(...bounds.map((b) => b.hi));
+  }
+  if (Number.isNaN(lo) || Number.isNaN(hi) || lo > hi) return undefined;
+  const finite = presents
+    .map((p) => finiteExtendedPart(p))
+    .filter((p): p is Type => p !== undefined);
+  const tier =
+    (['integer', 'rational'] as const).find((t) =>
+      finite.every((p) => factsOf(p)[t])
+    ) ?? 'real';
+  // Which signed infinities the result can take. `max` is `+∞` when any
+  // operand is and `−∞` only when every operand is; `min` is the mirror;
+  // `clamp` is `+∞` only through `hi` (the result is at most `hi`) and `−∞`
+  // through `hi`, or through both `x` and `lo`.
+  const plus = presents.map((p) => isSubtype(PLUS_INFINITY_TYPE, p));
+  const minus = presents.map((p) => isSubtype(MINUS_INFINITY_TYPE, p));
+  let mayBePlus: boolean;
+  let mayBeMinus: boolean;
+  if (kind === 'clamp') {
+    mayBePlus = plus[2] && (plus[0] || plus[1]);
+    mayBeMinus = minus[2] || (minus[0] && minus[1]);
+  } else if (kind === 'max') {
+    mayBePlus = plus.some(Boolean);
+    mayBeMinus = minus.every(Boolean);
+  } else {
+    mayBePlus = plus.every(Boolean);
+    mayBeMinus = minus.some(Boolean);
+  }
+  const types: Type[] = [];
+  // A finite part exists when an operand has finite values and the bounds
+  // are not the same infinity.
+  if (finite.length > 0 && !(lo === hi && !Number.isFinite(lo)))
+    types.push(attachInterval(tier, { lo, hi }));
+  if (mayBePlus) types.push(PLUS_INFINITY_TYPE);
+  if (mayBeMinus) types.push(MINUS_INFINITY_TYPE);
+  if (hasNaN) types.push('nan');
+  return reduceType({ kind: 'union', types });
 }
 
 /**
@@ -1412,8 +1532,8 @@ export function elementaryFunctionType(
     case 'Csch':
       return poleReciprocalType(operator, ops);
 
-    // Pole-free hyperbolics at a provably real ±∞: `sinh`/`cosh` send it to
-    // a PROVABLE ±∞/+∞ (`+oo | -oo`), while `tanh(±∞) = ±1` and
+    // Pole-free hyperbolics at a provably real ±∞: `sinh`/`cosh`/`arsinh`
+    // send it to a PROVABLE ±∞/+∞ (`+oo | -oo`), while `tanh(±∞) = ±1` and
     // `sech(±∞) = 0` are finite reals. (The circular Sin/Cos give NaN at ±∞
     // and correctly keep `number` via `numericTypeHandler`.) The realness
     // test is the TYPE's, and it is EXTENDED realness: the bare name `real`
@@ -1425,6 +1545,7 @@ export function elementaryFunctionType(
     // is not a member of.
     case 'Sinh':
     case 'Cosh':
+    case 'Arsinh':
       if (
         ops[0] !== undefined &&
         ops[0].facts.finite === false &&
