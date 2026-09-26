@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, compile } from '../../src/compute-engine';
 
 /**
  * An absent POINT stays absent through arithmetic.
@@ -229,5 +229,193 @@ describe('the whole-point absence arm stands aside', () => {
       .evaluate();
     expect(product.symbol).not.toBe('Missing');
     expect(JSON.stringify(product.json)).toContain('Error');
+  });
+});
+
+/**
+ * A point with an ABSENT COORDINATE, such as `(1, Missing)` (the value of a
+ * restricted coordinate whose condition is false), follows the `Norm`
+ * precedent: `Norm((1, Missing))` is `NaN`, typed `number`. The operators
+ * that compute a number from the point (`Distance`, `Dot`) answer `NaN`; the
+ * operators that read a coordinate (`PointX`/`PointY`/`PointZ`,
+ * `First`/`Second`/`Third`/`Last`) answer the coordinate as it is, and their
+ * static type is read off the type of that coordinate.
+ */
+describe('a point with an absent coordinate', () => {
+  const ce = new ComputeEngine();
+  ce.assign('pAbsent', ce.box(['Tuple', 1, 'Missing']));
+
+  const value = (json: any, n = false): string => {
+    const e = ce.box(json);
+    return (n ? e.N() : e.evaluate()).toString();
+  };
+  const type = (json: any): string => ce.box(json).type.toString();
+
+  test.each([
+    [['Distance', ['Tuple', 1, 'Missing'], ['Tuple', 0, 0]]],
+    [['Distance', ['Tuple', 1, 'Undefined'], ['Tuple', 0, 0]]],
+    [['Distance', ['Tuple', 0, 0], ['Tuple', 'Missing', 1]]],
+    [['Distance', ['Tuple', 'PositiveInfinity', 'Missing'], ['Tuple', 0, 0]]],
+    [['Distance', ['List', 1, 'Missing'], ['Tuple', 0, 0]]],
+    [['Distance', 'pAbsent', ['Tuple', 0, 0]]],
+    [['Dot', ['Tuple', 1, 'Missing'], ['Tuple', 1, 1]]],
+    [['Dot', ['Tuple', 1, 'Undefined'], ['Tuple', 1, 1]]],
+    [['Dot', ['Tuple', 1, 1], ['Tuple', 'Missing', 1]]],
+    [['Dot', ['Tuple', 1, 'Missing'], ['List', 1, 1]]],
+    [['Dot', 'pAbsent', ['Tuple', 1, 1]]],
+  ])('%j is NaN, typed number', (json) => {
+    // `Distance` answered an `expected-value` error; `Dot` stayed
+    // unevaluated.
+    expect(value(json)).toBe('NaN');
+    expect(value(json, true)).toBe('NaN');
+    expect(type(json)).toBe('number');
+  });
+
+  test('a point of the wrong width is still a dimension error', () => {
+    expect(value(['Dot', ['Tuple', 1, 'Missing'], ['Tuple', 1, 1, 1]])).toBe(
+      'Error("incompatible-dimensions", "2 vs 3")'
+    );
+  });
+
+  test.each([
+    [
+      [
+        'Distance',
+        ['List', ['Tuple', 1, 'Missing'], ['Tuple', 3, 4]],
+        ['Tuple', 0, 0],
+      ],
+      '[NaN,5]',
+    ],
+    [
+      [
+        'Distance',
+        ['Tuple', 0, 0],
+        ['List', ['Tuple', 3, 4], ['Tuple', 'Undefined', 1]],
+      ],
+      '[5,NaN]',
+    ],
+    [
+      [
+        'Dot',
+        ['List', ['Tuple', 1, 'Missing'], ['Tuple', 2, 3]],
+        ['Tuple', 1, 1],
+      ],
+      '[NaN,5]',
+    ],
+    [
+      [
+        'Dot',
+        ['Tuple', 1, 'Missing'],
+        ['List', ['Tuple', 2, 3], ['Tuple', 4, 5]],
+      ],
+      '[NaN,NaN]',
+    ],
+    // The scalar route and the list route agree with `Norm`.
+    [['Norm', ['List', ['Tuple', 1, 'Missing'], ['Tuple', 3, 4]]], '[NaN,5]'],
+  ])('inside a list of points, %j is NaN for that point', (json, expected) => {
+    expect(value(json)).toBe(expected);
+    expect(value(json, true)).toBe(expected);
+  });
+
+  test('a symbol holding the point is typed as the point is', () => {
+    // A tuple component that is only absent was stripped to the bottom type
+    // `never` before the type handler read it: `Dot(pAbsent, (1, 1))` was
+    // typed `infinity` and `Norm(pAbsent)` `list<number>`.
+    expect(type(['Norm', 'pAbsent'])).toBe('number');
+    expect(value(['Norm', 'pAbsent'])).toBe('NaN');
+  });
+
+  test.each([
+    [['PointX', ['Tuple', 1, 'Missing']], 'integer | nan', '1'],
+    [['PointY', ['Tuple', 1, 'Missing']], 'missing', '"Missing"'],
+    [['PointY', ['Tuple', 1, 'Undefined']], 'missing', '"Undefined"'],
+    [['PointX', 'pAbsent'], 'integer | nan', '1'],
+    [['PointY', 'pAbsent'], 'missing', '"Missing"'],
+    [['First', ['Tuple', 1, 'Missing']], 'integer', '1'],
+    [['Second', ['Tuple', 1, 'Missing']], 'missing', '"Missing"'],
+    [['Last', ['Tuple', 1, 'Missing']], 'missing', '"Missing"'],
+    [['Third', ['Tuple', 1, 2, 'Missing']], 'missing', '"Missing"'],
+    [['PointZ', ['Tuple', 1, 2, 'Missing']], 'missing', '"Missing"'],
+    [['PointY', ['List', 1, 'Missing']], 'missing | number', '"Missing"'],
+    [
+      ['PointY', ['List', ['Tuple', 1, 'Missing'], ['Tuple', 2, 3]]],
+      'list<missing | number>',
+      '["Missing",3]',
+    ],
+    [
+      ['PointX', ['List', ['Tuple', 1, 'Missing'], ['Tuple', 2, 3]]],
+      'list<number>',
+      '[1,2]',
+    ],
+  ])(
+    'the accessor %j reads the type of its coordinate',
+    (json, expectedType, expectedValue) => {
+      // The coordinate accessors were typed `number` (and `First`/`Second`/
+      // `Last` `never`) while their value was `Missing`.
+      expect(type(json)).toBe(expectedType);
+      expect(value(json)).toBe(expectedValue);
+    }
+  );
+
+  test.each([
+    [['Distance', ['Tuple', 1, 'Missing'], ['Tuple', 0, 0]], 'NaN'],
+    [
+      [
+        'Distance',
+        ['List', ['Tuple', 1, 'Missing'], ['Tuple', 3, 4]],
+        ['Tuple', 0, 0],
+      ],
+      'NaN,5',
+    ],
+    [['Dot', ['Tuple', 1, 'Missing'], ['Tuple', 1, 1]], 'NaN'],
+  ])('compiled to JavaScript, %j agrees', (json, expected) => {
+    // The compiled `Distance` threw "expected points (flat numeric arrays)"
+    // at run time on the `undefined` coordinate.
+    const compiled = compile(ce.box(json));
+    expect(compiled.success).toBe(true);
+    expect(String((compiled.run as () => unknown)())).toBe(expected);
+  });
+});
+
+describe('a point of absent coordinates only, and a product against a matrix', () => {
+  const ce = new ComputeEngine();
+  const val = (json: any) => ce.box(json).evaluate().toString();
+
+  test('the flat list of absent values is a point: its distance is NaN', () => {
+    // Found by review 2026-09-25: `[Missing, Missing]` was routed to the
+    // list-of-points broadcast and answered `incompatible-type`, while the
+    // tuple spelling `(Missing, Missing)` answered `NaN`.
+    for (const json of [
+      ['Distance', ['List', 'Missing', 'Missing'], ['List', 0, 0]],
+      ['Distance', ['List', 'Missing', 'Missing'], ['Tuple', 0, 0]],
+      ['Distance', ['List', 'Undefined'], ['List', 0]],
+      ['Distance', ['Tuple', 'Missing', 'Missing'], ['Tuple', 0, 0]],
+    ]) {
+      const e = ce.box(json);
+      expect([json, e.evaluate().toString()]).toEqual([json, 'NaN']);
+      expect([json, e.N().toString()]).toEqual([json, 'NaN']);
+      // The static type admits the value: an all-absent list could as well
+      // be a list of absent points, so it is the undecided union.
+      expect(e.evaluate().type.matches(e.type)).toBe(true);
+    }
+    expect(
+      val(['Distance', ['List', 'Missing', 'Missing'], ['List', 0, 0, 0]])
+    ).toBe('Error("incompatible-dimensions")');
+  });
+
+  test('a point with an absent coordinate against a matrix is a vector of NaN', () => {
+    const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+    expect(val(['Dot', ['Tuple', 1, 'Missing'], M])).toBe('[NaN,NaN]');
+    expect(val(['Dot', M, ['Tuple', 1, 'Missing']])).toBe('[NaN,NaN]');
+    expect(
+      ce
+        .box(['Dot', ['Tuple', 1, 'Missing'], M])
+        .N()
+        .toString()
+    ).toBe('[NaN,NaN]');
+    // A width mismatch is still the dimension error.
+    expect(val(['Dot', ['Tuple', 1, 'Missing', 2], M])).toMatch(
+      /incompatible-dimensions/
+    );
   });
 });

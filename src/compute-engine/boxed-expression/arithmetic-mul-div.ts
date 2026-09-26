@@ -2326,6 +2326,10 @@ function mulTuples(
   // `0.5 · π`); the `.N()` route has already floated it. See `mulTensors`.
   const components = tuple.ops.map((c) => {
     const cv = numericApproximation ? c.N() : c.evaluate();
+    // An absent component (`Missing` or `Undefined`) is `NaN` in this numeric
+    // slot. `mulN()` keeps the symbol, so without this `(2·(1, Missing)).N()`
+    // was `(2, 2·Missing)` while the exact route gave `(2, NaN)`.
+    if (isAbsentSymbol(cv)) return ce.NaN;
     const product = multiply(scalar, cv);
     return numericApproximation ? product : product.evaluate();
   });

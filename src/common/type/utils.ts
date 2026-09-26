@@ -1230,21 +1230,27 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
  * Every kind {@link typeContainsMissing} recurses into is rebuilt here, so the
  * two stay symmetric: a `record{x: integer | missing}` or a
  * `dictionary<number | missing>` that arms the strip is also stripped by it.
+ *
+ * `tupleComponents` selects what happens to a `missing` arm inside a tuple
+ * component (an absent coordinate); see the `tuple` case below. The default,
+ * `'strip'`, treats it like any other cell.
  */
-export function stripMissingFromType(t: Readonly<Type>): Type {
+export function stripMissingFromType(
+  t: Readonly<Type>,
+  tupleComponents: 'strip' | 'keep' | 'nan' = 'strip'
+): Type {
   if (t === 'missing') return 'never';
   if (typeof t === 'string') return t;
+  const strip = (x: Readonly<Type>) => stripMissingFromType(x, tupleComponents);
   switch (t.kind) {
     case 'union': {
-      const arms = t.types
-        .map((x) => stripMissingFromType(x))
-        .filter((x) => x !== 'never');
+      const arms = t.types.map((x) => strip(x)).filter((x) => x !== 'never');
       if (arms.length === 0) return 'never';
       if (arms.length === 1) return arms[0];
       return { kind: 'union', types: arms };
     }
     case 'intersection': {
-      const arms = t.types.map((x) => stripMissingFromType(x));
+      const arms = t.types.map((x) => strip(x));
       return { kind: 'intersection', types: arms };
     }
     case 'list':
@@ -1252,17 +1258,38 @@ export function stripMissingFromType(t: Readonly<Type>): Type {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-      return { ...t, elements: stripMissingFromType(t.elements) };
+      return { ...t, elements: strip(t.elements) };
     case 'tuple':
+      // A `missing` component of a tuple is an absent COORDINATE of a point.
+      // `tupleComponents` says what becomes of it:
+      // - `'strip'` removes the arm, as for every other cell, so a bare
+      //   `missing` component becomes `never`;
+      // - `'keep'` leaves the tuple as it is, for an operator that READS a
+      //   coordinate (`PointY((1, Missing))` is `Missing`);
+      // - `'nan'` removes the arm, but a component that was nothing BUT
+      //   absent becomes `nan`, the value an absent coordinate contributes
+      //   to a numeric computation (`Norm((1, Missing))` is `NaN`). With
+      //   `'strip'`, such a component is `never`, the bottom type, and a
+      //   tuple with a `never` component has no value at all, so a type
+      //   handler that reads it proves every claim vacuously.
+      if (tupleComponents === 'keep') return t;
       return {
         ...t,
-        elements: t.elements.map((e) => ({
-          ...e,
-          type: stripMissingFromType(e.type),
-        })),
+        elements: t.elements.map((e) => {
+          const type = strip(e.type);
+          return {
+            ...e,
+            type:
+              tupleComponents === 'nan' &&
+              type === 'never' &&
+              e.type !== 'never'
+                ? 'nan'
+                : type,
+          };
+        }),
       };
     case 'dictionary':
-      return { ...t, values: stripMissingFromType(t.values) };
+      return { ...t, values: strip(t.values) };
     case 'record':
     case 'object': {
       // `elements` is a prototype-free map from field name to field type, and
@@ -1271,7 +1298,7 @@ export function stripMissingFromType(t: Readonly<Type>): Type {
       // inherit a bogus type for the second.
       const elements: Record<string, Type> = Object.create(null);
       for (const key of Object.keys(t.elements))
-        elements[key] = stripMissingFromType(t.elements[key]);
+        elements[key] = strip(t.elements[key]);
       return { ...t, elements };
     }
     default:

@@ -104,6 +104,166 @@ describe('UNDEFINED in a numeric slot', () => {
         expect(boxed.evaluate().type.matches(boxed.type)).toBe(true);
       }
     });
+
+    // An `Undefined` CELL of a list literal is typed `missing`, as a `Missing`
+    // cell is (user ruling of 2026-09-25). Before, the generic-symbol fold
+    // typed it `number`: `[1, Undefined]` was a `vector<2>`, the tensor code
+    // accepted it, and the symbol stayed in the value — `(2·[1, Undefined]).N()`
+    // was `[2, 2·Undefined]` and `Determinant([[1, Undefined], [1, 2]])` was
+    // `2 − Undefined`.
+    const withCell = (m: string, xs: any[]): any =>
+      xs.map((x) => (x === '@' ? m : Array.isArray(x) ? withCell(m, x) : x));
+    const twins = (xs: any): [any, any] =>
+      ['Missing', 'Undefined'].map((m) => withCell(m, xs)) as [any, any];
+
+    it('a list literal with an Undefined cell types as the Missing one does', () => {
+      for (const xs of [
+        ['List', 1, '@'],
+        ['List', '@', 1.5, 2],
+        ['List', ['List', 1, '@'], ['List', 1, 2]],
+        ['List', '@', ['List', 1, 2]],
+      ]) {
+        const [withMissing, withUndefined] = twins(xs).map((x) =>
+          ce.box(x).type.toString()
+        );
+        expect(withUndefined).toEqual(withMissing);
+      }
+      expect(ce.box(['List', 1, 'Undefined']).type.toString()).toBe(
+        'list<integer | missing>'
+      );
+      expect(
+        ce
+          .box(['List', ['List', 1, 'Undefined'], ['List', 1, 2]])
+          .type.toString()
+      ).toBe('list<integer | missing>');
+      expect(ce.parse('[1, \\operatorname{Undefined}]').type.toString()).toBe(
+        'list<integer | missing>'
+      );
+    });
+
+    it('a list literal with an Undefined cell evaluates as the Missing one does', () => {
+      const cases: any[] = [
+        ['Multiply', 2, ['List', 1, '@']],
+        ['Multiply', ['List', 1, '@'], ['List', 1, 2]],
+        ['Add', ['List', 1, '@'], ['List', 1, 2]],
+        ['Determinant', ['List', ['List', 1, '@'], ['List', 1, 2]]],
+        ['Length', ['List', 1, '@']],
+        ['Sum', ['List', 1, '@']],
+        ['Max', ['List', 1, '@']],
+        ['Norm', ['List', 1, '@']],
+        ['Reverse', ['List', 1, '@']],
+      ];
+      for (const xs of cases) {
+        const [withMissing, withUndefined] = twins(xs).map((x) => ce.box(x));
+        for (const run of [(e: any) => e.evaluate(), (e: any) => e.N()]) {
+          const [m, u] = [run(withMissing), run(withUndefined)];
+          expect(u.toString()).toEqual(
+            m.toString().replace(/Missing/g, 'Undefined')
+          );
+          expect(u.type.toString()).toEqual(m.type.toString());
+        }
+      }
+      expect(
+        ce
+          .box(['Multiply', 2, ['List', 1, 'Undefined']])
+          .N()
+          .toString()
+      ).toBe('[2,NaN]');
+      expect(
+        ce
+          .box(['Multiply', ['List', 1, 'Undefined'], ['List', 1, 2]])
+          .N()
+          .toString()
+      ).toBe('[1,NaN]');
+    });
+
+    it('the static type of a list with an Undefined cell admits its value', () => {
+      for (const expr of [
+        ['List', 1, 'Undefined'],
+        ['List', ['List', 1, 'Undefined'], ['List', 1, 2]],
+        ['Multiply', 2, ['List', 1, 'Undefined']],
+        ['Multiply', ['List', 1, 'Undefined'], ['List', 1, 2]],
+      ]) {
+        const boxed = ce.box(expr as any);
+        expect(boxed.evaluate().type.matches(boxed.type)).toBe(true);
+        expect(boxed.N().type.matches(boxed.type)).toBe(true);
+      }
+    });
+
+    // The same rule for the other composite literals: an `Undefined` element
+    // of a `Tuple`, a `Set` or a `Sequence` is typed `missing`, as a
+    // `Missing` element is. Before, a tuple kept its declared type,
+    // `unknown` (`tuple<integer, unknown>`), and a set join dropped it
+    // (`set<integer>`).
+    it('a Tuple, Set or Sequence with an Undefined element types as the Missing one does', () => {
+      for (const xs of [
+        ['Tuple', 1, '@'],
+        ['Tuple', '@', 1.5],
+        ['Set', 1, '@'],
+        ['Sequence', 1, '@'],
+        ['PointList', 1, '@'],
+        ['PointList', ['List', 1, 2], '@'],
+        ['List', ['Tuple', 1, '@'], ['Tuple', 1, 2]],
+      ]) {
+        const [withMissing, withUndefined] = twins(xs).map((x) =>
+          ce.box(x).type.toString()
+        );
+        expect(withUndefined).toEqual(withMissing);
+      }
+      expect(ce.box(['Tuple', 1, 'Undefined']).type.toString()).toBe(
+        'tuple<integer, missing>'
+      );
+      expect(ce.box(['Set', 1, 'Undefined']).type.toString()).toBe(
+        'set<integer | missing>'
+      );
+      expect(ce.parse('(1, \\operatorname{Undefined})').type.toString()).toBe(
+        'tuple<integer, missing>'
+      );
+    });
+
+    // A point with an absent component: the component is `NaN` in the
+    // arithmetic, for both absence names. Before, `(3, 4) - (1, Missing)`
+    // stayed inert, `(1, Missing) + (1, 1)` was `(2, Missing + 1)` and
+    // `(2·(1, Missing)).N()` was `(2, 2·Missing)`.
+    it('a Tuple or Set with an Undefined element evaluates as the Missing one does', () => {
+      const cases: any[] = [
+        ['Length', ['Tuple', 1, '@']],
+        ['Length', ['Set', 1, '@']],
+        ['Sum', ['Tuple', 1, '@']],
+        ['Max', ['Set', 1, '@']],
+        ['First', ['Tuple', 1, '@']],
+        ['Element', 1, ['Set', 1, '@']],
+        ['Add', ['Tuple', 1, '@'], ['Tuple', 1, 1]],
+        ['Subtract', ['Tuple', 3, 4], ['Tuple', 1, '@']],
+        ['Negate', ['Tuple', 1, '@']],
+        ['Multiply', 2, ['Tuple', 1, '@']],
+        ['Norm', ['Tuple', 1, '@']],
+      ];
+      for (const xs of cases) {
+        const [withMissing, withUndefined] = twins(xs).map((x) => ce.box(x));
+        for (const run of [(e: any) => e.evaluate(), (e: any) => e.N()]) {
+          const [m, u] = [run(withMissing), run(withUndefined)];
+          expect(u.toString()).toEqual(
+            m.toString().replace(/Missing/g, 'Undefined')
+          );
+          expect(u.type.toString()).toEqual(m.type.toString());
+        }
+      }
+      for (const m of ['Missing', 'Undefined']) {
+        const t = ['Tuple', 1, m];
+        for (const [expr, expected] of [
+          [['Add', t, ['Tuple', 1, 1]], '(2, NaN)'],
+          [['Subtract', ['Tuple', 3, 4], t], '(2, NaN)'],
+          [['Negate', t], '(-1, NaN)'],
+          [['Multiply', 2, t], '(2, NaN)'],
+        ] as const) {
+          const boxed = ce.box(expr as any);
+          expect(boxed.evaluate().toString()).toBe(expected);
+          expect(boxed.N().toString()).toBe(expected);
+          expect(boxed.evaluate().type.matches(boxed.type)).toBe(true);
+        }
+      }
+    });
   });
 
   describe('compiled JavaScript lane', () => {

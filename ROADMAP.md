@@ -445,22 +445,6 @@ landed 2026-09-25): `Trace(Missing)` is still an `incompatible-type` error while
 and the scalar `Multiply(Missing, 1)` and `Add(Missing, 0)` fold to `Missing` at
 canonicalization while `2·Missing` is `NaN`.
 
-Found while making a restricted list one held restriction (not fixed,
-2026-09-25; needs a decision on what a collection operator answers for an ABSENT
-collection): with `L := [1,2]`, `Length(L\{0<t\})` at `t = -1` is an
-`incompatible-type` error (`Length(Missing)`), and so are `Reverse`, `Filter`
-and `Map` over it, while `Sum` answers `NaN` and `Max` answers `NaN`;
-`Map(f, L\{c\})` with `c` undecided materializes as a `Set` of restricted cells,
-`Set(2\{c\}, 4\{c\})`, because the held restriction is not an indexed collection
-for `Map`'s result kind (it must not be one for the broadcast machinery, which
-would map it cell by cell), and `Filter(L\{c\}, p)` fails with "predicate must
-return True or False". These are the same questions as `Trace(Missing)` versus
-`Norm(Missing)` above; the answers were set by precedent, not by a decision.
-Proposed: a collection operator over an absent collection answers `Missing` (the
-position-preserving absent datum, as `When` does), a numeric reduction (`Sum`,
-`Max`) answers `NaN`, and `Map`/`Filter` over a held restriction thread it whole
-(`Map(f, L\{c\})` is `Map(f, L)\{c\}`).
-
 Not fixed, accepted rule: on `javascript`, a list held by a free point
 coordinate becomes `NaN` (`_SYS.pointSlot`), so `[1,2]·PointList(t,t)` run with
 `t = [1,2]` gives `[[NaN,NaN],[NaN,NaN]]` where the interpreter answers
@@ -475,21 +459,53 @@ value): `x4[1,2]` (the left side is already the product `x·4`), `2^3[1,2]` and
 Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
 `Tuple(4, Interval(…))`, which is probably not what an author means.
 
-### A list literal with an `Undefined` cell is typed as a numeric tensor, and the symbol leaks into results (OPEN, decision — found 2026-09-25)
+### The `.add()` and `.mul()` methods keep an absent operand as a symbol (OPEN, small — found 2026-09-25)
 
-`[1, Undefined]` is typed `vector<2>` while `[1, Missing]` is
-`list<integer | missing>`, so the tensor code accepts the list and leaves the
-symbol in the value: `(2·[1, Undefined]).N()` is `[2, 2·"Undefined"]`,
-`([1, Undefined]·[1, 2]).N()` is `[1, 2·"Undefined"]`, and
-`Determinant([[1, Undefined], [1, 2]])` is `2 − "Undefined"`. Wrong values. The
-fix is to type an `Undefined` cell of a `List` as `missing` in the `List` type
-handler, as an `Undefined` OPERAND of a propagating operator is read since
-2026-09-25 (`boxed-function.ts`, `derive-application-type.ts`); that is a typing
-decision with wide reach (every list-literal type), so it needs a ruling and a
-snapshot-radius measurement first. Related, recorded as a decision in
+`ce.box('Missing').add(ce.box(1))` gives `"Missing" + 1` and `.mul()` gives
+`2·Missing` (for `Undefined` too), while the operators `Add(Missing, 1)` and
+`Multiply(2, Missing)` evaluate to `NaN`. The methods are the internal
+arithmetic route (`arithmetic-add.ts`, `arithmetic-mul-div.ts`); a caller that
+folds an absent operand through them, rather than through the operator's
+evaluate handler, keeps the symbol in its result. Make the methods read an
+absent operand as `NaN`, as the tuple routes do since 2026-09-25.
+
+### An out-of-range component read answers `Missing` when the tuple holds an absent cell, `NaN` otherwise (OPEN, small — found 2026-09-25)
+
+`Third((1, 2))` is `NaN` (typed `nan`: index 3 of a 2-tuple is out of range),
+`Third((1, Undefined))` is `NaN`, but `Third((1, Missing))` is `Missing`: the
+marker of an out-of-range read (`componentAt`, `library/collections.ts`) depends
+on which symbol spells the absence of an UNRELATED cell. The static type
+`missing | nan` admits both; the value should not depend on the spelling.
+Related, unconfirmed: compiled `PointY([(1, Missing), (2, 3)])` gives `[NaN, 3]`
+where the interpreter gives `[Missing, 3]`; `?? NaN` is the compiled spelling of
+an absent number, so this is probably intended, but the 0.135.0 notes say an
+absent point cell compiles to `undefined`; confirm which.
+
+### `Sort` of a list with an absent cell stays unevaluated (OPEN, decision — found 2026-09-25)
+
+`Sort([1, Missing])` and `Sort([1, Undefined])` stay as the unevaluated
+`Sort(…)` (the two twins agree since the `Undefined` cell is typed `missing`,
+2026-09-25). Where an absent cell goes in the order (first, last, or the list is
+`NaN`-like and the sort declines with an error) is a decision; `Max`/`Min`/`Sum`
+of the same list answer `NaN`. Related, recorded as a decision in
 `absFunctionType` (`library/type-handlers.ts`): `Abs(x)` with `x: number` is
 typed `real<0..> | signed_infinity` with no `nan` arm although `Abs(NaN)` is
-`NaN`, which is why `Abs([1, Undefined])` has a type without NaN.
+`NaN`.
+
+### A numeric result of a restricted list masks to `Missing` on the held route and to `NaN` on the fresh route (OPEN, needs a decision — found 2026-09-25)
+
+`Length([1,2]\{0<t\})` evaluates, with `t` free, to `2\{0<t\}` (the operator
+threads the restriction whole), and `Sum([1,2]\{0<t\})` to `3\{0<t\}`; once
+`t = -1`, that held value masks to `Missing` (the `When` rule of 2026-09-09),
+while the same expression evaluated fresh answers `NaN`, the marker of a number
+(`Length(Missing)`, `Sum(Missing)`). The two rulings collide on every numeric
+operator threaded over a scalar restriction (`2·x\{c\}` is `2x\{c\}`, `Missing`
+when `c` fails; `2·Missing` is `NaN`), so the disagreement is scalar-wide, not
+specific to lists. To decide: whether a restriction over a NUMBER should mask to
+`NaN` (then `x\{c\}` alone answers `NaN`, which plot consumers already read from
+compiled code) or the fresh route should answer `Missing` for a numeric operator
+over an absent operand (which reverses the 2026-07-24 absence ruling,
+`Sin(Missing)` is `NaN`).
 
 ### Residues of the tuple-of-lists change (OPEN, small — 2026-09-25)
 
@@ -578,13 +594,16 @@ radical of a complex literal but not its real radical. Also found 2026-09-25:
 part at machine precision; the digits are correct, the precision mix is the same
 defect on the `Multiply` route.
 
-### `√i` stays a `Sqrt` head while `√(i/4)` evaluates to an exact literal (OPEN, decision — found 2026-09-24)
+### `∜(−1)` stays a `Root` head while `√i`, its equal, is an exact Gaussian radical (OPEN, small — found 2026-09-25)
 
-`√i` stays a `Sqrt` head because `imaginary-unit-spelling.test.ts:210` requires
-it (the exactness contract: a transcendental of an exact argument stays
-symbolic), while `√(i/4)` evaluates to the exact `(√2/4)(1 + i)` and, since
-2026-09-25, `√(4i)` to `√2(1 + i)`. Decide whether that pin should change: `√i`
-is `(√2/2)(1 + i)`, an exact Gaussian radical the engine can hold.
+Since 2026-09-25 (user ruling) `√i` evaluates to `(√2/2)(1 + i)` and `√(−i)` to
+`(√2/2)(1 − i)`, like every other exact Gaussian square root. `\sqrt[4]{-1}`,
+the same value, goes through the `Root` route, which has no exact case for a
+root of a negative number with an even index above 2, and stays `root(4)(-1)`
+(its `.N()` is correct). Also consistent but limited: a Gaussian value raised to
+a rational power other than `1/2` never reduces (`i^{3/2}`, `(3 + 4i)^{3/2}` =
+`2 + 11i` stays symbolic); an exact `p/2` power of a Gaussian integer would be a
+feature, not a defect.
 
 ### `interval-js` gives a finite enclosure inside the machine pole zone (OPEN, small — found 2026-09-24)
 

@@ -205,10 +205,45 @@ describe('imaginary unit: the interned value is exact', () => {
   });
 
   test('the exactness contract still holds for i', () => {
+    // `√i` has an exact value in the representable set, `(√2/2)(1 + i)`, so
+    // evaluate() reduces it the same way it reduces `√(i/4)` and `√(4i)`
+    // (user decision, 2026-09-25: this replaced a pin that kept `√i` as a
+    // symbolic `Sqrt`).
+    expect(ce.parse('\\sqrt{i}').evaluate().json).toEqual([
+      'Complex',
+      ['Divide', ['Sqrt', 2], 2],
+      ['Divide', ['Sqrt', 2], 2],
+    ]);
+    expect(ce.box(['Sqrt', 'ImaginaryUnit']).evaluate().json).toEqual([
+      'Complex',
+      ['Divide', ['Sqrt', 2], 2],
+      ['Divide', ['Sqrt', 2], 2],
+    ]);
+    expect(ce.parse('i^{1/2}').evaluate().json).toEqual([
+      'Complex',
+      ['Divide', ['Sqrt', 2], 2],
+      ['Divide', ['Sqrt', 2], 2],
+    ]);
+    // √(−i) = (√2/2)(1 − i), the principal root (real part positive)
+    expect(ce.parse('\\sqrt{-i}').evaluate().json).toEqual([
+      'Complex',
+      ['Divide', ['Sqrt', 2], 2],
+      ['Negate', ['Divide', ['Sqrt', 2], 2]],
+    ]);
+    for (const [src, im] of [
+      ['\\sqrt{i}', Math.SQRT1_2],
+      ['\\sqrt{-i}', -Math.SQRT1_2],
+      ['i^{1/2}', Math.SQRT1_2],
+    ] as const) {
+      const exact = ce.parse(src).evaluate().N();
+      const float = ce.parse(src).N();
+      expect(exact.re).toBeCloseTo(Math.SQRT1_2, 10);
+      expect(exact.im).toBeCloseTo(im, 10);
+      expect(float.re).toBeCloseTo(Math.SQRT1_2, 10);
+      expect(float.im).toBeCloseTo(im, 10);
+    }
     // A transcendental of an exact argument stays symbolic under evaluate()
     // and numericizes only under N().
-    expect(ce.parse('\\sqrt{i}').evaluate().operator).toBe('Sqrt');
-    expect(ce.parse('\\sqrt{i}').N().im).toBeCloseTo(Math.SQRT1_2, 10);
     expect(ce.parse('\\ln(i)').evaluate().operator).toBe('Ln');
     expect(ce.parse('\\ln(i)').N().im).toBeCloseTo(Math.PI / 2, 10);
     // An inexact operand still numericizes

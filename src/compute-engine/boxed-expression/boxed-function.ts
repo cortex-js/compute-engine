@@ -7059,10 +7059,20 @@ function type(expr: BoxedFunction): Type | BoxedType {
         expr.ops.some(
           (x, i) => def.stripsMissingAt(i) && x.type.facts.containsMissing
         );
+      // A `missing` component of a tuple operand is an absent coordinate of
+      // a point. An operator that READS coordinates (`PointY`,
+      // `ABSENT_CELLS_STAY_MISSING`) answers it as it is, so its handler sees
+      // the tuple unchanged: `PointY((1, Missing))` is typed `missing`. Any
+      // other operator computes with it, and an absent coordinate contributes
+      // `NaN`, so a component that is only absent is typed `nan` rather than
+      // the bottom `never`, which would make the whole tuple uninhabited.
+      const tupleComponents = ABSENT_CELLS_STAY_MISSING.has(expr.operator)
+        ? 'keep'
+        : 'nan';
       const operandTypes = stripsAny
         ? expr.ops.map((x, i) =>
             def.stripsMissingAt(i) && x.type.facts.containsMissing
-              ? stripMissingFromType(x.type.type)
+              ? stripMissingFromType(x.type.type, tupleComponents)
               : undefined
           )
         : undefined;

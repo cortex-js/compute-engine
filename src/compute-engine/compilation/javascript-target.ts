@@ -8428,6 +8428,10 @@ const colorHelpers = {
       );
     if (a.length !== b.length || a.length === 0)
       throw new Error('Could not compile `Distance`: dimension mismatch');
+    // An absent coordinate (`undefined`, the run-time spelling of `Missing`)
+    // makes the distance `NaN`, even beside an infinite difference, as in the
+    // interpreter (`Distance((1, Missing), (0, 0))` is `NaN`).
+    if (a.some((x) => x == null) || b.some((x) => x == null)) return NaN;
     let sumSq = 0;
     for (let i = 0; i < a.length; i++) {
       if (typeof a[i] !== 'number' || typeof b[i] !== 'number')
@@ -8486,6 +8490,10 @@ const colorHelpers = {
       );
     if (a.length !== b.length || a.length === 0)
       throw new Error('Could not compile `Distance`: dimension mismatch');
+    // An absent coordinate (`undefined`, the run-time spelling of `Missing`)
+    // makes the distance `NaN`, even beside an infinite difference, as in the
+    // interpreter (`Distance((1, Missing), (0, 0))` is `NaN`).
+    if (a.some((x) => x == null) || b.some((x) => x == null)) return NaN;
     let sumSq = 0;
     for (let i = 0; i < a.length; i++) {
       if (

@@ -878,6 +878,12 @@ function couldBeNumericElement(el: Type, seen?: AliasDescent): boolean {
   return (
     el === 'any' ||
     el === 'unknown' ||
+    // An absent component (`Missing`, or `Undefined`, which a tuple literal
+    // also types `missing`) reads as `NaN` in a numeric slot, so it does not
+    // stop the tuple from being a point: `-(1, Missing)` negates to
+    // `(-1, NaN)` and `(3, 4) - (1, Missing)` is `(2, NaN)`. Without this
+    // both stayed inert.
+    el === 'missing' ||
     isSubtype(el, 'number') ||
     isSubtype('number', el) ||
     typeCouldBeNumericCollection(el, seen) ||

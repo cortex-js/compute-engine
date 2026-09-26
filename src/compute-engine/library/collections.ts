@@ -153,6 +153,7 @@ import { isRingConstant } from './ring-constructions.js';
 import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import {
   adjoinType as adjoinTypeD,
+  isUndefinedSymbolD,
   operandLiteralValue as descriptorLiteralValue,
   storedComponentTypeD,
 } from './type-handlers.js';
@@ -2132,12 +2133,19 @@ function elementRequirementOfAt(
 function presentArmOf(d: OperandDescriptor): OperandDescriptor {
   const t = d.type;
   if (!typeContainsMissing(t)) return d;
-  const stripped = stripMissingFromType(t);
-  // A BARE `missing` operand strips to `never`, the bottom type, which proves
-  // every claim vacuously. There is no present arm to type, so the operand
+  // Only the TOP-LEVEL `missing` arm (the operand as a whole is absent) is
+  // removed. A `missing` arm inside the operand is a cell the accessor may
+  // read and answer as it is: `Second((1, Missing))` is `Missing`, so it is
+  // typed `missing`. Removing it too turned the tuple component into the
+  // bottom type `never`, and `Second((1, Missing))` was typed `never`.
+  // A BARE `missing` operand has no present arm to type, so the operand
   // keeps its own type and the absence machinery downstream owns the case.
-  if (stripped === 'never') return d;
-  return { type: stripped, facts: d.facts, structureOf: d.structureOf };
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return d;
+  const arms = r.types.filter((x) => resolveTypeAlias(x) !== 'missing');
+  if (arms.length === 0 || arms.length === r.types.length) return d;
+  const present = arms.length === 1 ? arms[0] : widen(...arms);
+  return { type: present, facts: d.facts, structureOf: d.structureOf };
 }
 
 /**
@@ -2624,6 +2632,31 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   // point, not a collection of them.
   if (emptyCollectionBroadcastsD(xs) && isProvablyEmptyCollectionD(xs))
     return { kind: 'list', elements: 'never' };
+  // The coordinate of each point of a list of points. A point with an absent
+  // coordinate (`tuple<integer, missing>`) answers `Missing` there
+  // (`PointY([(1, Missing), (2, 3)])` is `[Missing, 3]`), so the coordinate
+  // type keeps a `missing` arm when the component at this position of a
+  // point element type holds one. An absent
+  // POINT of the list (a `missing` cell) was removed from the operand type
+  // before this handler ran; its `missing` arm is restored by the absence
+  // machinery (`absorbOperandAbsence`), so a `missing` arm here can only come
+  // from a coordinate.
+  const elementOfList = collectionElementType(t);
+  const pointArms =
+    elementOfList !== undefined ? pointElementArms(elementOfList) : [];
+  const coordinateOfList =
+    pointArms.length > 0
+      ? tupleComponentType(
+          pointArms.length === 1
+            ? pointArms[0]
+            : { kind: 'union', types: pointArms },
+          position
+        )
+      : undefined;
+  const coordinate: Type =
+    coordinateOfList !== undefined && typeContainsMissing(coordinateOfList)
+      ? parseType('number | missing')
+      : 'number';
   if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) {
     if (collectionBroadcastsPointsD(xs) === false)
       return componentResultTypeD(xs, position);
@@ -2637,10 +2670,10 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
         elements: 'number',
         dimensions: [t.dimensions![0]],
       };
-    return mapResultType(t, 'number');
+    return mapResultType(t, coordinate);
   }
   if (collectionBroadcastsPointsD(xs) === true)
-    return { kind: 'list', elements: 'number' };
+    return { kind: 'list', elements: coordinate };
   return componentResultTypeD(xs, position);
 }
 
@@ -2651,6 +2684,9 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
  * - A number literal is a cell of its TIER (`integer`, `real`, …), read off
  *   its structure. The list's type is a stored contract, so the literal's
  *   own value or enclosure type is never part of it, and never built here.
+ * - The `Undefined` symbol is a cell of type `missing`, as a `Missing` cell
+ *   is (`isUndefinedSymbolD()`). Without this, the fold for inference-pending
+ *   symbols below typed it `number`.
  * - An inference-pending bare SYMBOL (a symbol typed `unknown`) is a cell of
  *   type `number` — the generic-symbol fold; an application typed
  *   `unknown`/`any` blocks, since it could return a collection.
@@ -2661,6 +2697,7 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
 function classifyCellD(op: OperandDescriptor): Type | null {
   const s = op.structureOf?.();
   if (s?.kind === 'number') return s.tier;
+  if (isUndefinedSymbolD(op)) return 'missing';
   const t = op.type;
 
   if (t === 'unknown' || t === 'any') {

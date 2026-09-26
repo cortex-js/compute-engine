@@ -2,6 +2,38 @@
 
 ### Behavior Changes
 
+- **A collection operator over an absent collection answers the absence marker
+  of its result.** `Reverse(Missing)`, `Sort(Missing)`, `Take(Missing, 1)`,
+  `Unique(Missing)`, `Zip(L, Missing)`, `Map(f, Missing)` and
+  `Filter(Missing, p)` evaluate to `Missing`; they were `incompatible-type`
+  errors (`Map` stayed unevaluated). `Length(Missing)` and
+  `Reduce(Missing, f, 0)` evaluate to `NaN`, the marker of a number. This is the
+  default absence policy extended from numeric signatures to signatures whose
+  parameters are collections and functions; an operator that declares its own
+  `missingBehavior` is unchanged. A restricted collection is threaded whole by
+  these operators: `Reverse([1,2]\{c\})` is `Reverse([1,2])\{c\}` (a collection
+  of the present elements, `Missing` once `c` fails), and `Map(f, [1,2]\{c\})`
+  is `Map(f, [1,2])\{c\}`; read cell by cell, the result was a `Set` of
+  restricted cells. `[2, 1\{c\}]` and other lists with a restricted cell are
+  unchanged.
+- **An `Undefined` cell of a list literal is typed as absent** (user decision
+  2026-09-25). `[1, Undefined]` is typed `list<integer | missing>`, as
+  `[1, Missing]` is; it was typed `vector<2>`, so the tensor code accepted the
+  list and left the symbol in the value: `(2·[1, Undefined]).N()` was
+  `[2, 2·"Undefined"]` and is `[2, NaN]`;
+  `Determinant([[1, Undefined], [1, 2]])` was `2 − "Undefined"` and is the
+  `incompatible-type` error that the `Missing` twin gives; `Sum`, `Max`, `Norm`
+  and `Mean` of the list are `NaN`. The same applies to a tuple and a set:
+  `(1, Undefined)` is `tuple<integer, missing>` (it was
+  `tuple<integer, unknown>`) and `Set(1, Undefined)` is
+  `set<integer | missing>`. Arithmetic on a point with an absent coordinate now
+  answers `NaN` in that coordinate for both spellings: `(1, Missing) + (1, 1)`
+  is `(2, NaN)` (it was `(2, "Missing" + 1)`), `(3, 4) − (1, Missing)` is
+  `(2, NaN)` (it stayed unevaluated), and `2·(1, Missing)` is `(2, NaN)`.
+- **`√i` evaluates to the exact `(√2/2)(1 + i)`** (user decision 2026-09-25),
+  and `√(−i)` to `(√2/2)(1 − i)`, as `√(4i)` and `√(i/4)` already did. It stayed
+  a symbolic `Sqrt` because one test pinned it so. `∜(−1)`, the same value,
+  still stays a `Root`.
 - **A restriction over a list stays one restriction while its condition is
   undecided.** `[1,2,3]\{c\}` (`When([1,2,3], c)`) evaluates to the held
   `[1,2,3]\{c\}`, whose MathJSON is `["When",["List",1,2,3],"c"]`; it used to be
@@ -105,14 +137,13 @@
   `1.414… + 1.414…i` where `\sqrt{i4}` is `\sqrt2(1 + i)`, and `(4i)^2` was
   computed from the inexact value. All spellings now give the exact Gaussian
   integer: `\sqrt{4i}` is `\sqrt2(1 + i)` and `(4i)^2` canonicalizes to `-16`.
-  The one-argument `Complex` also keeps a rational, a radical or an integer
-  past the safe range exact (`["Complex", ["Rational", 1, 2]]` is `i/2`,
-  `12345678901234567890i` keeps every digit), and the `Number` canonical form
-  of `["Complex", 0, 4]` is the same exact literal as boxing gives. A
-  coefficient with a fractional part (`1.5i`) stays inexact, and `.N()` still
-  gives a float. A float added to an integer imaginary literal is still one
-  inexact literal (`1.5 + 2i` is `["Complex", 1.5, 2]`, `3i + 1.5i` is
-  `4.5i`).
+  The one-argument `Complex` also keeps a rational, a radical or an integer past
+  the safe range exact (`["Complex", ["Rational", 1, 2]]` is `i/2`,
+  `12345678901234567890i` keeps every digit), and the `Number` canonical form of
+  `["Complex", 0, 4]` is the same exact literal as boxing gives. A coefficient
+  with a fractional part (`1.5i`) stays inexact, and `.N()` still gives a float.
+  A float added to an integer imaginary literal is still one inexact literal
+  (`1.5 + 2i` is `["Complex", 1.5, 2]`, `3i + 1.5i` is `4.5i`).
 - **A large double prints in exponent form at machine precision.** With
   `precision: 'machine'`, `ce.box(1e300).toString()` printed the 301-digit exact
   binary value of the double, and `1e23` printed as `99999999999999991611392`;
@@ -249,6 +280,19 @@
   applies the same correction, at rank 1 and inside matrices, also when a symbol
   holds the list. A numeric list keeps `NaN` (`Sin([Missing, 1])` is
   `[NaN, sin 1]`, typed `list<number>`).
+
+- **`Distance` and `Dot` of a point with an absent coordinate are `NaN`.**
+  `Distance((1, Missing), (0, 0))` was `Error("expected-value")` and
+  `Dot((1, Missing), (1, 1))` stayed unevaluated; both are now `NaN`, as
+  `Norm((1, Missing))` is, for `Undefined` too, for a symbol that holds the
+  point, for the flat spelling `[1, Missing]`, and inside a list of points
+  (`Distance([(1, Missing), (3, 4)], (0, 0))` is `[NaN, 5]`; the whole list was
+  an error). Compiled JavaScript answers the same `NaN` where it threw "expected
+  points". The coordinate accessors are typed from the coordinate they read:
+  `PointY((1, Missing))` is typed `missing` (it was `number`),
+  `Second((1, Missing))` is `missing` (it was `never`), and
+  `PointY([(1, Missing), (2, 3)])` is `list<missing | number>`; `Dot(p, (1, 1))`
+  with `p := (1, Missing)` is typed `number` (it was `infinity`).
 
 ## 0.135.0 _2026-09-25_
 

@@ -1098,18 +1098,11 @@ export class ExactNumericValue extends NumericValue {
     // representable set: float lane (`BoxedNumber.sqrt` keeps an exact
     // argument symbolic in that case).
     //
-    // `±i` itself is kept out: `√i` is `(√2/2)·(1+i)`, but
-    // `test/compute-engine/imaginary-unit-spelling.test.ts` requires
-    // `evaluate()` of `√i` to stay a symbolic `Sqrt`.
+    // `±i` itself reduces too: `√i = (√2/2)·(1+i)` and
+    // `√(−i) = (√2/2)·(1−i)`, the same shape as `√(i/4)` and `√(4i)`
+    // (user decision, 2026-09-25).
     if (this.im !== 0) {
-      if (
-        this.radical === 1 &&
-        this.imRadical === 1 &&
-        !(
-          isZero(this.rational) &&
-          (isOne(this.imRational) || isNegativeOne(this.imRational))
-        )
-      ) {
+      if (this.radical === 1 && this.imRadical === 1) {
         const a = this.rational;
         const b = this.imRational;
         const modulus = this.clone({

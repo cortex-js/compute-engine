@@ -1515,6 +1515,13 @@ function pointListDotProduct(
         'incompatible-dimensions',
         `${as.length} vs ${bs.length}`
       );
+    // An absent coordinate (`Missing`, `Undefined`) makes this point's
+    // product `NaN`, as it makes the product of two points `NaN` (see the
+    // `Dot` evaluate handler).
+    if ([...as, ...bs].some((c) => isAbsentSymbol(c))) {
+      results.push(ce.NaN);
+      continue;
+    }
     if (![...as, ...bs].every((c) => isNumber(c))) return undefined;
     results.push(
       ce
@@ -2896,6 +2903,40 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (ops.some((op) => !isTuple(op) && isPointListValue(op)))
           return undefined;
 
+        // A POINT with an ABSENT coordinate (`(1, Missing)`, the value of a
+        // restricted coordinate whose condition is false) against a point or
+        // a vector of the same width: the absent component contributes `NaN`,
+        // so the product is `NaN`, as `Norm((1, Missing))` and the vector
+        // `[1, Missing]` above answer. The lowering below requires a numeric
+        // tuple, so without this the product stayed unevaluated. The other
+        // operand must be a point or a flat list: against a matrix the
+        // product is a vector, not a number, and the lowering below
+        // substitutes `NaN` for the absent component.
+        if (
+          ops.some((op) =>
+            isTuple(op)
+              ? pointComponents(op)?.some((c) => isAbsentSymbol(c)) === true
+              : false
+          )
+        ) {
+          const widths = ops.map((op) =>
+            isTuple(op)
+              ? pointComponents(op)?.length
+              : isFunction(op, 'List') &&
+                  op.ops.every((x) => x.isCollection !== true)
+                ? op.nops
+                : undefined
+          );
+          if (widths[0] !== undefined && widths[1] !== undefined) {
+            if (widths[0] !== widths[1])
+              return ce.error(
+                'incompatible-dimensions',
+                `${widths[0]} vs ${widths[1]}`
+              );
+            return ce.NaN;
+          }
+        }
+
         // Lower each fixed numeric tuple operand to its component vector;
         // `MatrixMultiply` does not accept tuples (and supplies the
         // `incompatible-dimensions` check on unequal lengths). A tuple
@@ -2905,12 +2946,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const lowered: Expression[] = [];
         for (const op of ops) {
           if (isTuple(op)) {
-            if (
-              !isFunction(op) ||
-              !hasAccessibleComponents(op) ||
-              !isNumericTuple(op)
-            )
+            if (!isFunction(op) || !hasAccessibleComponents(op))
               return undefined;
+            // An absent component is `NaN` in the product (a point against
+            // a matrix gives a vector with `NaN` where that component
+            // reaches); the present components must be numbers.
+            if (op.ops.some((c) => isAbsentSymbol(c))) {
+              if (!op.ops.every((c) => isAbsentSymbol(c) || isNumber(c)))
+                return undefined;
+              lowered.push(
+                ce.function(
+                  'List',
+                  op.ops.map((c) => (isAbsentSymbol(c) ? ce.NaN : c))
+                )
+              );
+              continue;
+            }
+            if (!isNumericTuple(op)) return undefined;
             lowered.push(ce.function('List', op.ops));
           } else lowered.push(op);
         }

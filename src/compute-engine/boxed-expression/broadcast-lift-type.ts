@@ -381,7 +381,10 @@ function isCellCollectionType(t: Type): boolean {
  * numeric ones included, for an operator that READS each cell rather than
  * computing a number from it (`ABSENT_CELLS_STAY_MISSING`): the coordinate
  * of an absent point of a list is `Missing`, as the masked cell is, so
- * `PointY([P{c}, (3, 4)])` is `list<number | missing>`.
+ * `PointY([P{c}, (3, 4)])` is `list<number | missing>`. For such an
+ * operator, an absent coordinate of a point (`tuple<integer, missing>`) is
+ * not absorbed at all: the coordinate is read as it is, so
+ * `PointY((1, Missing))` is typed `missing`.
  */
 export function absorbOperandAbsence(
   t: Type,
@@ -391,6 +394,7 @@ export function absorbOperandAbsence(
 ): Type {
   let cells = false;
   let wholeCells = false;
+  let absentCell = false;
   let whole = false;
   let notNumeric: boolean | undefined;
   for (let i = 0; i < operandTypes.length; i++) {
@@ -407,9 +411,17 @@ export function absorbOperandAbsence(
     // whole. (A restricted list, `[1, 2]{c}`, is typed
     // `missing | vector<integer^2>`, whole absence only: it stays one held
     // `When` while its condition is undecided.)
+    //
+    // An absent COORDINATE (a `missing` component of a tuple) is not
+    // absorbed for an operator that reads coordinates
+    // (`absentCellsStayMissing`): its handler saw the component as it is and
+    // typed the coordinate it answers, `Missing` included.
     if (typeContainsMissing(present)) {
-      cells = true;
-      if (missingOutsideTuples(present)) wholeCells = true;
+      if (missingOutsideTuples(present)) {
+        cells = true;
+        wholeCells = true;
+        absentCell = true;
+      } else if (!absentCellsStayMissing) cells = true;
     }
     if (!wholeAbsence) continue;
     notNumeric ??= !isSubtype(stripMissingFromType(t), 'number');
@@ -436,6 +448,18 @@ export function absorbOperandAbsence(
   }
   let result = cells ? absorbNumericAbsence(t) : t;
   if (wholeCells) result = withAbsentPointCells(result, absentCellsStayMissing);
+  // An operator that reads cells and answers ONE of them (`PointY([1,
+  // Missing])` reads the flat point `[1, Missing]` and answers its second
+  // cell) answers `Missing` when that cell is absent, so a result that is not
+  // provably a collection keeps a `missing` arm too. This is for an absent
+  // CELL of an operand only: an operand absent as a whole (`PointX(Missing)`)
+  // is answered `NaN` by the absence gate.
+  if (
+    absentCell &&
+    absentCellsStayMissing &&
+    !isSubtype(result, COLLECTION_SHAPE_TYPE)
+  )
+    result = widen('missing', result);
   if (!whole) return result;
   if (isSubtype(stripMissingFromType(result), 'number'))
     return absorbNumericAbsence(result);

@@ -22,6 +22,7 @@ import {
   isNumber,
   isFunction,
   isSymbol,
+  isAbsentSymbol,
   isContinuationOperand,
 } from './type-guards.js';
 import {
@@ -759,6 +760,13 @@ function addTuples(
       const c = isFunction(x) ? x.ops[i] : x;
       return numericApproximation ? c.N() : c.evaluate();
     });
+    // An absent component (`Missing` or `Undefined`) is `NaN` in this numeric
+    // slot. `add()` folds `Undefined` to `NaN` but not `Missing`, so without
+    // this `(1, Missing) + (1, 1)` was `(2, Missing + 1)`.
+    if (parts.some((p) => isAbsentSymbol(p))) {
+      components.push(ce.NaN);
+      continue;
+    }
     components.push(numericApproximation ? addN(...parts) : add(...parts));
   }
   return ce.tuple(...components);

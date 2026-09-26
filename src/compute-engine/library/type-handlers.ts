@@ -1311,5 +1311,25 @@ export function quotientRingType(ops: ReadonlyArray<OperandDescriptor>): Type {
  */
 export function storedComponentTypeD(d: OperandDescriptor): Type {
   const s = d.structureOf?.();
+  if (isUndefinedSymbolD(d)) return 'missing';
   return s?.kind === 'number' ? s.tier : d.type;
+}
+
+/**
+ * True when the operand `d` is the library `Undefined` symbol.
+ *
+ * As a component of a composite a handler builds from its operands (a list,
+ * set or tuple literal, a sequence), `Undefined` is an absent value, as
+ * `Missing` is: the runtime absence test reads both names the same
+ * (`isAbsentScalarSymbol`, `validate.ts`). So `storedComponentTypeD()` types
+ * it `missing`, the type of a `Missing` component. Its declared type is
+ * `unknown`, and before this a join dropped it (`Set(1, Undefined)` was
+ * `set<integer>`), a tuple kept it (`Tuple(1, Undefined)` was
+ * `tuple<integer, unknown>`), and the generic-symbol fold of a list literal
+ * typed it `number` (`[1, Undefined]` was a `vector<2>`, and
+ * `2·[1, Undefined]` gave `[2, 2·Undefined]`).
+ */
+export function isUndefinedSymbolD(d: OperandDescriptor): boolean {
+  const s = d.structureOf?.();
+  return s?.kind === 'symbol' && s.name === 'Undefined';
 }

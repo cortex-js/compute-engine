@@ -175,7 +175,13 @@ export function deriveApplicationType(
     const handlerOperands = propagate
       ? operands.map((d, i) => {
           if (!def.stripsMissingAt(i) || !typeContainsMissing(d.type)) return d;
-          const stripped = stripMissingFromType(d.type);
+          // An absent coordinate of a point (a `missing` tuple component) is
+          // kept for an operator that reads coordinates, and is `nan` for one
+          // that computes with them, as at the call site.
+          const stripped = stripMissingFromType(
+            d.type,
+            ABSENT_CELLS_STAY_MISSING.has(operator) ? 'keep' : 'nan'
+          );
           // A bare `missing` strips to `never`; the descriptor keeps its own
           // type there, as at the call site.
           if (stripped === 'never') return d;

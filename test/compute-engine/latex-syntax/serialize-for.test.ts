@@ -496,16 +496,19 @@ describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
     const ce = new ComputeEngine();
     ce.assign('d', ce.box(['List', 1, 2, 3]));
     ce.declare('m', 'number'); // no value: the body can't fully evaluate
+    // The function comes first (`Map(f, collection)`); with the collection
+    // first the call is an `incompatible-type` error since 2026-09-25, on
+    // the symbol route as on the literal route.
     const e = ce.box([
       'Map',
-      'd',
       ['Function', ['Which', ['Equal', 'k', 'm'], 1e9, 'True', 'k'], 'k'],
+      'd',
     ]);
     const lx = e.latex;
 
     // Faithful operator form, not a materialized preview of raw lambda bodies.
     expect(lx).toMatchInlineSnapshot(
-      `\\mathrm{Map}(d, k\\mapsto\\begin{cases}1\\,000\\,000\\,000&k=m\\\\k&\\top\\end{cases})`
+      `\\mathrm{Map}(k\\mapsto\\begin{cases}1\\,000\\,000\\,000&k=m\\\\k&\\top\\end{cases}, d)`
     );
 
     // Round-trips to the same expression.
@@ -524,13 +527,14 @@ describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
     ce.assign('m', ce.box(2)); // every referenced symbol has a value
     const e = ce.box([
       'Map',
-      'd',
       ['Function', ['Which', ['Equal', 'k', 'm'], 1e9, 'True', 'k'], 'k'],
+      'd',
     ]);
     const lx = e.latex;
 
     // Still the operator form (no evaluated-result list baked in).
-    expect(lx).toContain('\\mathrm{Map}(d,');
+    expect(lx).toContain('\\mathrm{Map}(k\\mapsto');
+    expect(lx).toContain(', d)');
     expect(ce.parse(lx).json).toEqual(e.json);
   });
 

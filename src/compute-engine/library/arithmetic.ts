@@ -6587,8 +6587,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // An `At` access types `missing | tuple<…>` (the out-of-range arm);
       // strip-before-validate (§3.B) admits it, or `Distance(S[n], p)` errors
       // at canonicalization (Tycho item 164's sibling). The runtime marker is
-      // handled in `evaluate` below: the §3.E gate cannot substitute the NaN
-      // because a tuple operand IS a collection, which the gate defers to.
+      // answered by the §3.E gate of the evaluation driver for a bare absent
+      // operand (since 2026-09-25 the gate stands aside beside a collection
+      // operand for a broadcastable operator only, and `Distance` is not
+      // one), and by `evaluate` below for the routes that reach it directly.
       missingBehavior: 'propagate',
       // A restricted point `P {c}`, or a restricted list of points, whose
       // condition is not decided moves out of the application:
@@ -7567,9 +7569,13 @@ function pointOperand(x: Expression): readonly Expression[] | undefined {
   const count = x.count;
   if (count === undefined || count === 0 || count > MAX_DISTANCE_BROADCAST)
     return undefined;
+  // An absent element (`Missing` or `Undefined`) is an absent coordinate, as
+  // it is in a `Tuple`: `[1, Missing]` is a point whose distance to any other
+  // point is `NaN`, and so is `[Missing, Missing]` (a list of absent POINTS
+  // holds tuples, not bare symbols, so it cannot be mistaken for this).
   const coords: Expression[] = [];
   for (const el of x.each()) {
-    if (!isCoordinate(el)) return undefined;
+    if (!isAbsentSymbol(el) && !isCoordinate(el)) return undefined;
     coords.push(el);
   }
   return coords;
@@ -7651,6 +7657,15 @@ function isPointListType(t: Type): boolean | undefined {
       ? undefined
       : false;
   }
+  // A list of absent values only (`[Missing, Missing]`, typed `list<missing>`)
+  // is read by `pointOperand` as ONE point with absent coordinates (its
+  // distance is `NaN`), but it could as well be a list of absent points, so
+  // the static answer is undecided, as for an unknown element type.
+  // The handler receives the operand type with `missing` stripped, so that
+  // list reaches here as `list<never>`; `never` is a subtype of every type
+  // and would count as a point.
+  const e = resolveTypeAlias(elt);
+  if (e === 'missing' || e === 'never') return undefined;
   // A tuple, a nested list, or a union of those: an element that is itself an
   // indexed collection is a point.
   return isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE);
@@ -7673,6 +7688,14 @@ function pointDistance(
   // reasons: the infinite-leg test below reads a number literal, and `∞ − ∞`
   // is NaN, a cancellation only the difference shows and never the two
   // coordinates on their own.
+  // An ABSENT coordinate (`Missing` or `Undefined`, such as the value of a
+  // restricted coordinate whose condition is false) makes the distance `NaN`,
+  // as it makes `Norm((1, Missing))` `NaN`: the numeric slot's absence marker
+  // absorbs, even beside an infinite leg (`Norm((+oo, Missing))` is `NaN`
+  // too). It used to reach the coordinate test below and answer an
+  // `expected-value` error.
+  if (a.some((c) => isAbsentSymbol(c)) || b.some((c) => isAbsentSymbol(c)))
+    return ce.NaN;
   const legs: Expression[] = [];
   for (let i = 0; i < a.length; i++) {
     const ai = a[i];
