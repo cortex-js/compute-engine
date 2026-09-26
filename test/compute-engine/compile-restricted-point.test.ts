@@ -424,6 +424,42 @@ describe('Dot of a restricted operand', () => {
   });
 });
 
+describe('Distance of a restricted point', () => {
+  // The distances from a restricted point to a list of points form a LIST,
+  // so an absent point answers `Missing` (`undefined` at run time), as for a
+  // restricted list of points. The distance between two points answers NaN.
+  // A matrix, whose rows are the points, is a list of points too.
+  const L = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
+  const M = ['List', ['List', 3, 4], ['List', 6, 8]];
+  test.each([
+    ['point, list', ['Distance', gated(['Tuple', 0, 0]), L]],
+    ['list, point', ['Distance', L, gated(['Tuple', 0, 0])]],
+    ['point, matrix', ['Distance', gated(['Tuple', 0, 0]), M]],
+    ['matrix, point', ['Distance', M, gated(['Tuple', 0, 0])]],
+  ])('%s: an absent point answers Missing', (_l, json) => {
+    expect(
+      ce
+        .box(json as never)
+        .subs({ t: 0 })
+        .evaluate().json
+    ).toBe('Missing');
+    expect(run(json, 0)).toBeUndefined();
+    expect(run(json, 2)).toEqual([5, 10]);
+  });
+
+  test('point, point: an absent point answers NaN', () => {
+    const json = ['Distance', gated(['Tuple', 0, 0]), ['Tuple', 3, 4]];
+    expect(
+      ce
+        .box(json as never)
+        .subs({ t: 0 })
+        .evaluate().json
+    ).toBe('NaN');
+    expect(run(json, 0)).toBeNaN();
+    expect(run(json, 2)).toBe(5);
+  });
+});
+
 /**
  * A restricted list, point or list of points on the INTERVAL target. The
  * `When` handler already masked a list-typed input (`A\{0<t\}`) with

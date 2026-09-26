@@ -8660,7 +8660,7 @@ float _gpu_gamma(float z) {
   // survives, the missing direction does not). The lower bound keeps
   // -Infinity out of the guard: it satisfies z == floor(z) but is not a
   // pole, and Gamma(-Infinity) is NaN in the interpreter's numeric lane.
-  if (z <= 0.0 && z == floor(z) && z > -3.0e38) return _gpu_inf();
+  if (z <= 0.0 && z == floor(z) && z >= -3.4028234663852886e38) return _gpu_inf();
   float w = z;
   if (z < 0.5) w = 1.0 - z;
   w -= 1.0;
@@ -8705,7 +8705,7 @@ fn _gpu_gamma(z: f32) -> f32 {
   // bound keeps -Infinity out of the guard (it is not a pole). (No
   // backticks in this comment: it lives inside a TypeScript template
   // literal, which one would terminate.)
-  if (z <= 0.0 && z == floor(z) && z > -3.0e38) { return bitcast<f32>(0x7f800000u); }
+  if (z <= 0.0 && z == floor(z) && z >= -3.4028234663852886e38) { return bitcast<f32>(0x7f800000u); }
   var w = z;
   if (z < 0.5) { w = 1.0 - z; }
   w = w - 1.0;
@@ -9718,7 +9718,9 @@ fn _gpu_median_8(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32)
  *   extended color.
  * - `_gpu_gamut_map_oklch` is the CSS Color 4 gamut mapping of the
  *   interpreter (`gamutMapOklch`, `numerics/color-conversion.ts`), step for
- *   step: a lightness of 1 or more is white and 0 or less is black; a
+ *   step: a triple with a `NaN` or an infinite channel is the `NaN` triple
+ *   (this test comes first, so that an infinite lightness is not read as
+ *   white); a lightness of 1 or more is white and 0 or less is black; a
  *   negative chroma is the positive chroma at the hue plus 180; a color
  *   inside the gamut (each channel within 1e-6 of `[0, 1]`) is its own
  *   channels, clamped; otherwise the chroma is searched in `[0, C]` at
@@ -9881,6 +9883,8 @@ vec3 _gpu_gamut_map_oklch_in(vec3 lch, bool p3) {
   float C = lch.y;
   float H = lch.z;
   if (L != L || C != C || H != H) return vec3(L + C + H);
+  if (!(abs(L) <= 3.4028234663852886e38 && abs(C) <= 3.4028234663852886e38 && abs(H) <= 3.4028234663852886e38))
+    return vec3(intBitsToFloat(0x7FC00000));
   if (L >= 1.0) return vec3(1.0);
   if (L <= 0.0) return vec3(0.0);
   if (C < 0.0) {
@@ -9927,7 +9931,7 @@ vec3 _gpu_gamut_map_srgb(vec3 rgb) {
   if (rgb.x != rgb.x || rgb.y != rgb.y || rgb.z != rgb.z)
     return vec3(rgb.x + rgb.y + rgb.z);
   if (_gpu_in_srgb_gamut(rgb)) return clamp(rgb, 0.0, 1.0);
-  if (!(abs(rgb.x) <= 3.0e38 && abs(rgb.y) <= 3.0e38 && abs(rgb.z) <= 3.0e38))
+  if (!(abs(rgb.x) <= 3.4028234663852886e38 && abs(rgb.y) <= 3.4028234663852886e38 && abs(rgb.z) <= 3.4028234663852886e38))
     return clamp(rgb, 0.0, 1.0);
   return _gpu_gamut_map_oklch(_gpu_srgb_to_oklch(rgb));
 }
@@ -10177,6 +10181,9 @@ fn _gpu_gamut_map_oklch_in(lch: vec3f, p3: bool) -> vec3f {
   var C = lch.y;
   var H = lch.z;
   if (L != L || C != C || H != H) { return vec3f(L + C + H); }
+  if (!(abs(L) <= 3.4028234663852886e38 && abs(C) <= 3.4028234663852886e38 && abs(H) <= 3.4028234663852886e38)) {
+    return vec3f(bitcast<f32>(0x7fc00000u));
+  }
   if (L >= 1.0) { return vec3f(1.0); }
   if (L <= 0.0) { return vec3f(0.0); }
   if (C < 0.0) {
@@ -10224,7 +10231,7 @@ fn _gpu_gamut_map_srgb(rgb: vec3f) -> vec3f {
     return vec3f(rgb.x + rgb.y + rgb.z);
   }
   if (_gpu_in_srgb_gamut(rgb)) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
-  if (!(abs(rgb.x) <= 3.0e38 && abs(rgb.y) <= 3.0e38 && abs(rgb.z) <= 3.0e38)) {
+  if (!(abs(rgb.x) <= 3.4028234663852886e38 && abs(rgb.y) <= 3.4028234663852886e38 && abs(rgb.z) <= 3.4028234663852886e38)) {
     return clamp(rgb, vec3f(0.0), vec3f(1.0));
   }
   return _gpu_gamut_map_oklch(_gpu_srgb_to_oklch(rgb));
@@ -10388,8 +10395,9 @@ fn _gpu_apca(lch_bg: vec3f, lch_fg: vec3f) -> f32 {
  * the arithmetic of the conversion (`inf - inf`), and the conversions test
  * for a `NaN` channel before each sign step and return `NaN` channels, so a
  * `NaN` channel stays `NaN` (best effort, as the colour preamble comment
- * says). The test is against `3.0e38`, near
- * the largest finite 32-bit float, because WGSL has no `isinf`.
+ * says). The test is against `3.4028234663852886e38`, the largest finite 32-bit
+ * float, because WGSL has no `isinf`: every finite channel passes it, and
+ * only an infinite one (or `NaN`) fails.
  *
  * It stands apart from the colour preamble above only because it is a later
  * addition to the same library; it calls two of that library's functions,
@@ -10398,7 +10406,7 @@ fn _gpu_apca(lch_bg: vec3f, lch_fg: vec3f) -> f32 {
  */
 const GPU_SRGB_ROUNDTRIP_GLSL = `
 vec3 _gpu_srgb_roundtrip(vec3 rgb) {
-  if (abs(rgb.x) <= 3.0e38 && abs(rgb.y) <= 3.0e38 && abs(rgb.z) <= 3.0e38) return rgb;
+  if (abs(rgb.x) <= 3.4028234663852886e38 && abs(rgb.y) <= 3.4028234663852886e38 && abs(rgb.z) <= 3.4028234663852886e38) return rgb;
   return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
 }
 `;
@@ -10406,7 +10414,7 @@ vec3 _gpu_srgb_roundtrip(vec3 rgb) {
 /** The sRGB round trip (WGSL syntax). See `GPU_SRGB_ROUNDTRIP_GLSL`. */
 const GPU_SRGB_ROUNDTRIP_WGSL = `
 fn _gpu_srgb_roundtrip(rgb: vec3f) -> vec3f {
-  if (abs(rgb.x) <= 3.0e38 && abs(rgb.y) <= 3.0e38 && abs(rgb.z) <= 3.0e38) { return rgb; }
+  if (abs(rgb.x) <= 3.4028234663852886e38 && abs(rgb.y) <= 3.4028234663852886e38 && abs(rgb.z) <= 3.4028234663852886e38) { return rgb; }
   return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
 }
 `;

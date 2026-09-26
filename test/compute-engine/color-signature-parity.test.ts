@@ -827,6 +827,18 @@ describe('a shader reads an infinite HSV or HSL channel as its bound', () => {
     }
   });
 
+  test('a finite channel above 3e38 is kept by the round trip', () => {
+    // The largest finite 32-bit float is about 3.4028e38. A channel between
+    // 3e38 and that value is finite, so the sRGB round trip returns it
+    // unchanged, as the interpreter does. On a 32-bit shader, the 2.4-power
+    // transfer function of the conversions overflows for such a channel.
+    const shader = evalGLSL(['AsRgb', ['Rgb', 3.1e38, 0, 0]]);
+    expect(interp(['AsRgb', ['Rgb', 3.1e38, 0, 0]]).ops![0].re).toBe(3.1e38);
+    expect(shader.x).toBe(3.1e38);
+    expect(shader.y).toBe(0);
+    expect(shader.z).toBe(0);
+  });
+
   test('an infinite hue is NaN', () => {
     const shader = evalGLSL(['AsRgb', ['Hsv', 'PositiveInfinity', 1, 1]]);
     expect(Number.isNaN(shader.x)).toBe(true);
@@ -1152,6 +1164,23 @@ describe('a shader maps a color into the gamut as the interpreter does', () => {
     expect([shader.x, shader.y, shader.z].every(Number.isNaN)).toBe(true);
   });
 
+  test('an infinite channel is NaN, not white or black', () => {
+    // The interpreter refuses a color with an infinite channel. The test for
+    // it comes before the lightness tests, so an infinite lightness is not
+    // read as white, and an infinite chroma or hue is not hidden by a
+    // lightness of 1 or more (white) or of 0 or less (black).
+    for (const color of [
+      ['Oklch', 'PositiveInfinity', 0.2, 30],
+      ['Oklch', 'NegativeInfinity', 0.2, 30],
+      ['Oklch', 1.5, 'PositiveInfinity', 30],
+      ['Oklch', -0.5, 0.2, 'PositiveInfinity'],
+    ]) {
+      expect(interp(['GamutMap', color]).operator).toBe('Error');
+      const shader = evalGLSL(['GamutMap', color]);
+      expect([shader.x, shader.y, shader.z].every(Number.isNaN)).toBe(true);
+    }
+  });
+
   test('an unknown gamut fails closed', () => {
     expect(() =>
       glsl.compile(
@@ -1172,6 +1201,12 @@ describe('a shader maps a color into the gamut as the interpreter does', () => {
     );
     expect(r.preamble).toContain(
       'return all(rgb >= vec3f(-1e-6)) && all(rgb <= vec3f(1.000001));'
+    );
+    // A triple with an infinite channel is the NaN triple, before the
+    // lightness tests (WGSL has no `isinf`, so the test compares with the
+    // largest finite 32-bit float).
+    expect(r.preamble).toContain(
+      'if (!(abs(L) <= 3.4028234663852886e38 && abs(C) <= 3.4028234663852886e38 && abs(H) <= 3.4028234663852886e38)) {\n    return vec3f(bitcast<f32>(0x7fc00000u));'
     );
   });
 });

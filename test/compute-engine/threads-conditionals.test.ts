@@ -141,13 +141,17 @@ describe('The types of element access of a restricted operand', () => {
     [['At', W(['Tuple', 1, 2]), 2]],
     [['First', W(['Tuple', 1, 2])]],
     [['Last', W(['Tuple', 1, 2])]],
-  ])('%j admits Missing and an integer', (json) => {
+  ])('%j admits NaN and an integer', (json) => {
     const t = type(json);
-    // Before: `missing | vector<integer^2>`, `unknown` and `integer`.
-    expect(t).toContain('missing');
+    // Before: `missing | vector<integer^2>`, `unknown` and `integer`. An
+    // element read of an absent collection answers the marker of its
+    // codomain, `NaN` for a number, not `Missing` (user decision
+    // 2026-09-25, `docs/ERROR-MODEL.md` §2).
+    expect(t).toContain('nan');
+    expect(t).not.toContain('missing');
     expect(t).toContain('integer');
     expect(t).not.toContain('vector');
-    expect(value(json, -1)).toBe('"Missing"');
+    expect(value(json, -1)).toBe('NaN');
   });
 
   test('the coordinate of an absent point is typed as a number', () => {
@@ -351,5 +355,131 @@ describe('Distance of two lists of points with a restricted cell on one side', (
     expect(e.evaluate().toString()).toBe('[5 {0 < t},10]');
     ce.assign('t', -1);
     expect(e.evaluate().toString()).toBe('[NaN,10]');
+  });
+});
+
+describe('The stored value of Insert and ReplaceAt is not threaded', () => {
+  // The value is one element of the result. Its restriction stays in that
+  // element, so the other elements are kept once the condition fails, as
+  // when the restricted value is evaluated first.
+  test.each([
+    [
+      ['Insert', ['List', 1], 1, W(2)],
+      '[2 {0 < t},1]',
+      '[2,1]',
+      '[NaN,1]',
+    ],
+    [
+      ['ReplaceAt', ['List', 1, 5], 1, W(2)],
+      '[2 {0 < t},5]',
+      '[2,5]',
+      '[NaN,5]',
+    ],
+  ])('%j', (json, free, present, absent) => {
+    expect(value(json)).toBe(free);
+    expect(value(json, 2)).toBe(present);
+    expect(value(json, -1)).toBe(absent);
+    // The value held with `t` free answers the same once `t` is assigned.
+    const ce = new ComputeEngine();
+    const held = ce.box(json as never).evaluate();
+    ce.assign('t', -1);
+    expect(held.evaluate().toString()).toBe(absent);
+  });
+});
+
+describe('A search for a restricted value', () => {
+  // A search for an absent value finds nothing (user decision 2026-09-26).
+  // The searched value is not threaded: with `t` free the application stays
+  // unevaluated, and it gives the "not found" answer once the condition
+  // fails, on every route. Before, the held value was `When(Contains(…), c)`,
+  // which became `Missing` (or `NaN` for `IndexOf` and `Count`) when `c`
+  // failed, while a fresh evaluation gave `False` (or `0`).
+  const L = ['List', 1, 2, 2];
+  // A list that holds `NaN`: a restricted number whose condition fails is
+  // `NaN`, and that `NaN` must not be found.
+  const LN = ['List', 1, 'NaN'];
+  test.each([
+    [['Contains', L, W(2)], 'Contains([1,2,2], 2 {0 < t})', '"True"', '"False"'],
+    [['IndexOf', L, W(2)], 'IndexOf([1,2,2], 2 {0 < t})', '2', '0'],
+    [['Count', L, W(2)], 'Count([1,2,2], 2 {0 < t})', '2', '0'],
+    [['Contains', LN, W(1)], 'Contains([1,NaN], 1 {0 < t})', '"True"', '"False"'],
+    [['Contains', LN, W(2)], 'Contains([1,NaN], 2 {0 < t})', '"False"', '"False"'],
+    [['IndexOf', LN, W(2)], 'IndexOf([1,NaN], 2 {0 < t})', '0', '0'],
+    [['Count', LN, W(2)], 'Count([1,NaN], 2 {0 < t})', '0', '0'],
+    [
+      ['IndexOf', LN, ['Which', c, 1]],
+      'IndexOf([1,NaN], Which(0 < t, 1))',
+      '1',
+      '0',
+    ],
+    // `Element` and `NotElement` follow the same rule. Before, an undecided
+    // restricted value was compared as a `When` node: `Element(2{c}, L)` was
+    // `False` at once, and stayed `False` after `c` became true.
+    [['Element', W(2), L], 'Element(2 {0 < t}, [1,2,2])', '"True"', '"False"'],
+    [
+      ['NotElement', W(2), L],
+      'NotElement(2 {0 < t}, [1,2,2])',
+      '"False"',
+      '"True"',
+    ],
+    [['Element', W(2), LN], 'Element(2 {0 < t}, [1,NaN])', '"False"', '"False"'],
+    [
+      ['NotElement', W(2), LN],
+      'NotElement(2 {0 < t}, [1,NaN])',
+      '"True"',
+      '"True"',
+    ],
+  ])('%j', (json, free, present, absent) => {
+    expect(value(json)).toBe(free);
+    expect(value(json, 2)).toBe(present);
+    expect(value(json, -1)).toBe(absent);
+    // The value held with `t` free answers the same once `t` is assigned.
+    for (const [t, expected] of [
+      [2, present],
+      [-1, absent],
+    ] as const) {
+      const ce = new ComputeEngine();
+      const held = ce.box(json as never).evaluate();
+      ce.assign('t', t);
+      expect(held.evaluate().toString()).toBe(expected);
+    }
+  });
+
+  test('a NaN that is present is found', () => {
+    expect(value(['IndexOf', LN, W('NaN')], 2)).toBe('2');
+    expect(value(['IndexOf', LN, W('NaN')], -1)).toBe('0');
+    expect(value(['IndexOf', LN, 'NaN'])).toBe('2');
+  });
+
+  test('the type has no missing arm', () => {
+    expect(type(['Contains', L, W(2)])).toBe('boolean');
+    expect(type(['IndexOf', L, W(2)])).toBe('integer');
+    expect(type(['Count', L, W(2)])).toBe('integer');
+  });
+
+  test('a restricted collection is still threaded', () => {
+    expect(value(['Contains', W(L), 2])).toBe('"True" {0 < t}');
+    expect(value(['Contains', W(L), 2], -1)).toBe('"Missing"');
+    expect(value(['IndexOf', W(L), 2], -1)).toBe('NaN');
+  });
+
+  test('compiled to JavaScript', () => {
+    const ce = new ComputeEngine();
+    const run = (json: unknown, t: number): unknown => {
+      const r = compile(ce.box(json as never), { to: 'javascript' } as never);
+      expect(r.success).toBe(true);
+      return r.run!({ t } as never);
+    };
+    expect(run(['Contains', LN, W(1)], 2)).toBe(true);
+    expect(run(['Contains', LN, W(1)], -1)).toBe(false);
+    // The failed restriction compiles to `NaN`, which the element test finds
+    // in a list that holds `NaN` unless the absence is decided first.
+    expect(run(['IndexOf', LN, W(2)], -1)).toBe(0);
+    expect(run(['Contains', LN, W(2)], -1)).toBe(false);
+    expect(run(['IndexOf', LN, ['Which', c, 1]], 2)).toBe(1);
+    expect(run(['IndexOf', LN, ['Which', c, 1]], -1)).toBe(0);
+    expect(run(['IndexOf', LN, 'NaN'], -1)).toBe(2);
+    expect(run(['Element', W(2), LN], -1)).toBe(false);
+    expect(run(['Element', W(1), LN], 2)).toBe(true);
   });
 });

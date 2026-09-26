@@ -161,11 +161,12 @@ let y = 5
 // ➔ (True, False)
 ```
 
-**A truth table**, as a `map` over the four boolean pairs:
+**A truth table**, over the four boolean pairs. The tuple pattern `(p, q)`
+takes each pair apart, so the stage is applied to each pair:
 
 ```epsil
 [(True, True), (True, False), (False, True), (False, False)] 
-  |> p => p[1] && p[2]
+  |> ((p, q)) => p && q
 // ➔ [True, False, False, False]
 ```
 
@@ -723,13 +724,15 @@ If the slot can be inferred based on the type of the previous argument, it can b
 // ➔ 25
 ```
 
-And a lambda is automatically converted to a map:
+And a lambda stage is a call, `xs |> f` is `f(xs)`: a lambda whose body uses
+its parameter as a number is applied to each element of a list, as calling it
+on the list does:
 
 ```epsil
 1..100 |> x => x^2
 
-// Shorthand for:
-1..100 |> map(x => x^2, _)
+// The same as:
+(x => x^2)(1..100)
 ```
 
 
@@ -772,13 +775,14 @@ solve([x^2 + y^2 == 25, x + y == 7], [x, y])
 ```
 
 **Errors are values.** A type-incompatible element does not abort the
-computation — it surfaces as `NaN` while the valid inputs still compute. Here
-`sqrt` is mapped over a list containing a string:
+computation — it surfaces as an error value in its own cell while the valid
+inputs still compute. Here `sqrt` is applied to each element of a list
+containing a string:
 
 ```epsil
 let inputs = [16, -4, "banana", 81]
 inputs |> x => sqrt(x)
-// ➔ [4, 2i, NaN, 9]
+// ➔ [4, 2i, Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"), 9]
 ```
 
 ## Linear Algebra

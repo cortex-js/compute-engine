@@ -163,6 +163,21 @@ describe('MULTIPLY OVER A NAN | REAL FACTOR', () => {
   ])('%j types %s', (json, expected) => {
     expect(ce.box(json as never).type.toString()).toBe(expected);
   });
+
+  test('beside a list of integers, the cells take the real tier', () => {
+    // The `nan | real` factor was read as an undeclared scalar once its
+    // `nan` arm was removed, so the cells kept the `integer` tier of the
+    // list: `list<integer | nan>`, while `x = 0.5`, `L = [1]` gives `[0.5]`.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'nan | real');
+    ce.declare('L', 'list<integer>');
+    for (const json of [
+      ['Multiply', 'x', 'L'],
+      ['Multiply', 'L', 'x'],
+      ['Multiply', 2, 'x', 'L'],
+    ])
+      expect(ce.box(json as never).type.toString()).toBe('list<nan | real>');
+  });
 });
 
 /**

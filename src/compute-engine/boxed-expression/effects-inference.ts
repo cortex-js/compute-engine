@@ -1398,7 +1398,9 @@ class Walker {
     }
 
     // ── Applications ─────────────────────────────────────────────────────
-    if (head === 'Apply') {
+    // `ApplyWhole` is `Apply` with its arguments bound whole (engine-internal,
+    // `library/core.ts`): the same effects flow.
+    if (head === 'Apply' || head === 'ApplyWhole') {
       const callee = expr.ops[0];
       if (callee !== undefined) {
         // An immediately-applied literal: its latent effects DO flow into the

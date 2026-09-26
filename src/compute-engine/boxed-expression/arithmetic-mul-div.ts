@@ -1,4 +1,5 @@
 import { isSubtype } from '../../common/type/subtype.js';
+import { BigDecimal } from '../../big-decimal/index.js';
 
 import type {
   Expression,
@@ -55,7 +56,10 @@ import {
   reducedRational,
   isZero,
 } from '../numerics/rationals.js';
-import { SMALL_INTEGER } from '../numerics/numeric.js';
+import {
+  isOutsideNormalDoubleRange,
+  SMALL_INTEGER,
+} from '../numerics/numeric.js';
 import { bigint } from '../numerics/bigint.js';
 
 import { sortProductOperands } from './order.js';
@@ -679,6 +683,12 @@ export class Product {
       // is deliberately permissive at boxing time (`checkNumericArgs`
       // admits could-be-a-number operands), so this is where the mistake
       // surfaces. Absence markers are exempt: they propagate, not error.
+      // A term that is already an error (the evaluated value of `Sin((A, B))`
+      // with `A`, `B` lists) is the result as it is. Wrapping it in a second
+      // `incompatible-type` error ("expected `number`, got `error`") hides
+      // the real error.
+      const error = this.terms.find((t) => t.term.operator === 'Error');
+      if (error !== undefined) return error.term;
       const nonNumeric = this.terms.find((t) =>
         t.term.type.isDisjointFrom('broadcastable<number> | missing | nothing')
       );
@@ -1423,7 +1433,13 @@ export function div(num: Expression, denom: number | Expression): Expression {
     couldBeNumericTuple(num)
   ) {
     const d = typeof denom === 'number' ? ce.number(denom) : denom;
-    if (!d.isNaN && isSubtype(d.type.type, 'number'))
+    // An absent divisor (`Negate(Missing)` is typed as a number) is not a
+    // scale: the absence rule below answers `Missing` for the point.
+    if (
+      !d.isNaN &&
+      !isAbsentArithmeticOperand(d) &&
+      isSubtype(d.type.type, 'number')
+    )
       // Evaluate each component quotient, mirroring `mulTuples`: a component
       // that is itself a collection (`[1,2]` in a zipped point list) divides
       // to an inert `Multiply(1/d, [1,2])`, because `div()` builds a
@@ -1441,14 +1457,15 @@ export function div(num: Expression, denom: number | Expression): Expression {
   // an absent value is an absent point, `Missing`, as for a product: a tuple
   // is atomic, so there is no cell for the absence to land in. An operand
   // that is or may be a collection keeps the quotient, for the reason given
-  // in `canonicalDivide`.
+  // in `canonicalDivide`. This applies to a JavaScript number divisor too:
+  // `Multiply(Missing, L).div(2)`, with `L` a list, keeps the list shape.
   if (
     (isAbsentArithmeticOperand(num) ||
       (typeof denom !== 'number' && isAbsentArithmeticOperand(denom))) &&
-    (typeof denom === 'number' ||
-      isTuple(num) ||
+    (isTuple(num) ||
       (!typeMayCarryQuotientShape(num.type.type) &&
-        !typeMayCarryQuotientShape(denom.type.type)))
+        (typeof denom === 'number' ||
+          !typeMayCarryQuotientShape(denom.type.type))))
   )
     return isTuple(num) ? ce.Missing : ce.NaN;
 
@@ -1752,7 +1769,11 @@ export function canonicalMultiply(
         // (arithmetic with an absent operand is `NaN`)
         if (hasAbsentFactor || nonNumeric.some((x) => x.isInfinity || x.isNaN))
           return ce.NaN;
-        return ce.Zero;
+        // A factor typed `error` always evaluates to an error (such as
+        // `Sin((A, B))` with `A`, `B` lists). The zero must not erase it:
+        // keep the product as `0` times the other factors, so that
+        // evaluation reports that error.
+        if (!nonNumeric.some((x) => x.type.type === 'error')) return ce.Zero;
       }
       // The fold can produce a NEGATIVE real coefficient even though the sign
       // pass above normalized every literal positive — only a product with
@@ -2192,6 +2213,146 @@ function isExactRealLiteral(x: Expression): boolean {
   );
 }
 
+/**
+ * Whether `x` is a real number literal whose value is 0, ±∞, NaN or a
+ * subnormal double (see `isOutsideNormalDoubleRange()`). After a numeric
+ * evaluation, this is what an exact factor such as `1/10^400`, `10^400` or
+ * `10^{-320}` becomes at machine precision, because a double cannot hold it
+ * exactly enough. The usual literal costs one comparison.
+ */
+export function isOutOfDoubleRangeLiteral(x: Expression): boolean {
+  if (!isNumber(x)) return false;
+  const nv = x.numericValue;
+  if (typeof nv === 'number') return isOutsideNormalDoubleRange(nv);
+  if (nv.im !== 0 || !isOutsideNormalDoubleRange(nv.re)) return false;
+  if (nv.isZero || nv.isNaN || nv.isPositiveInfinity || nv.isNegativeInfinity)
+    return true;
+  // A value with a big-decimal part (an exact value, or a big decimal) holds
+  // a tiny or a huge magnitude without loss: only a double can be out of the
+  // range.
+  return nv.bignumRe === undefined;
+}
+
+/**
+ * Whether `x` is a number literal with an exact real value: an integer, a
+ * rational, or a rational multiple of a square root (`√2/10^400`). This is
+ * the test for the factors that `foldOutOfDoubleRange()` can use. It is wider
+ * than `isExactRealLiteral()`, which excludes the radicals of an ordinary
+ * product.
+ */
+function isExactRealValue(x: Expression): boolean {
+  if (!isNumber(x)) return false;
+  const nv = x.numericValue;
+  if (typeof nv === 'number') return Number.isInteger(nv);
+  return nv instanceof ExactNumericValue && nv.im === 0;
+}
+
+/**
+ * The numeric product of the number factors of `xs`, computed from the exact
+ * values where the float of a factor is out of the normal double range (see
+ * `isOutOfDoubleRangeLiteral`) while its exact value is not zero.
+ *
+ * `xs` are the factors after the numeric evaluation, `originals` the factors
+ * before it, `exactFactors[i]` the exact literal of `originals[i]` if it is
+ * one. A factor that is not a literal, and was not already evaluated
+ * (`numeric[i]`), gets its exact value from `evaluate()`: `10^{-400}` is the
+ * exact rational `1/10^400`.
+ *
+ * The product is computed with big decimals: a big-decimal product is exact,
+ * so the only rounding is the conversion of the result to the working lane.
+ * `1e300 · 1/10^400` is then `1e-100`, not `1e300 · 0`, whatever the order
+ * of the factors. The result is the numeric product as one literal, followed
+ * by the factors that are not numbers.
+ *
+ * A complex number factor with a finite value is kept as a factor, after the
+ * numeric product. Returns `undefined` when no factor has an exact value that
+ * is not zero (the 0 or ±∞ is then the true value of the factor), or when
+ * another number factor is not real.
+ */
+function foldOutOfDoubleRange(
+  ce: ComputeEngine,
+  originals: ReadonlyArray<Expression>,
+  xs: ReadonlyArray<Expression>,
+  exactFactors: ReadonlyArray<Expression | undefined>,
+  numeric?: ReadonlyArray<boolean>
+): Expression[] | undefined {
+  const rest: Expression[] = [];
+  let rescued = false;
+  let product = BigDecimal.ONE;
+  for (let i = 0; i < xs.length; i++) {
+    const x = xs[i];
+    if (!isNumber(x)) {
+      // A factor such as `10^{400}/x` keeps its exact coefficient after the
+      // numeric evaluation, because its double would be ∞. The coefficient
+      // is taken out and folded with the other number factors:
+      // `(10^{400}/x)·10^{-399}` is then `10/x`, not `0·(10^{400}/x)`.
+      const split = exactCoefficientOutOfRange(ce, x);
+      if (split === undefined) rest.push(x);
+      else {
+        product = product.mul(split[0]);
+        rest.push(split[1]);
+        rescued = true;
+      }
+      continue;
+    }
+    const outOfRange = isOutOfDoubleRangeLiteral(x);
+    let ex = exactFactors[i];
+    if (ex === undefined && outOfRange && !numeric?.[i]) {
+      const v = isNumber(originals[i]) ? originals[i] : originals[i].evaluate();
+      if (isExactRealValue(v)) ex = v;
+    }
+    const y = ex ?? x;
+    // A complex factor with a finite value (`i`) is kept as a factor, as a
+    // symbol is: `(10^{400}/y) · 10^{-399} · i` is then `10i/y`.
+    if (
+      isNumber(y) &&
+      y.im !== 0 &&
+      !outOfRange &&
+      Number.isFinite(y.re) &&
+      Number.isFinite(y.im)
+    ) {
+      rest.push(y);
+      continue;
+    }
+    if (!isNumber(y) || y.im !== 0) return undefined;
+    const nv = y.numericValue!;
+    if (ex !== undefined && outOfRange && !ex.isSame(0)) rescued = true;
+    // `bignumRe` of an exact rational has at least 25 digits (see
+    // `ExactNumericValue`); a double converts to a big decimal exactly.
+    product = product.mul(
+      typeof nv === 'number' ? new BigDecimal(nv) : (nv.bignumRe ?? nv.re)
+    );
+  }
+  if (!rescued) return undefined;
+  return [ce.number(ce._numericValue(product)).N(), ...rest];
+}
+
+/**
+ * If `x` is `Divide(c, d)` or `Multiply(c, …)` where `c` is an exact real
+ * number literal whose double is outside the normal double range, the
+ * big-decimal value of `c` and the factor without `c` (`1/d`, or the product
+ * of the other operands). Otherwise, `undefined`.
+ */
+function exactCoefficientOutOfRange(
+  ce: ComputeEngine,
+  x: Expression
+): [BigDecimal, Expression] | undefined {
+  if (!isFunction(x)) return undefined;
+  const op = x.operator;
+  if (op !== 'Divide' && op !== 'Multiply') return undefined;
+  const c = x.ops[0];
+  if (!isNumber(c) || !(c.numericValue instanceof ExactNumericValue))
+    return undefined;
+  const nv = c.numericValue;
+  if (nv.im !== 0 || nv.isZero || !isOutsideNormalDoubleRange(nv.re))
+    return undefined;
+  const rest =
+    op === 'Divide'
+      ? ce.function('Divide', [ce.One, x.ops[1]])
+      : ce.function('Multiply', x.ops.slice(1));
+  return [nv.bignumRe, rest];
+}
+
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   return mulNEvaluated(xs);
 }
@@ -2285,10 +2446,37 @@ export function mulNEvaluated(
   // `.N()` floats), and a product with a symbolic factor keeps no exact
   // coefficient that `expandProducts` could rebuild into a `Divide`
   // (`(1/3)·(1/x)` under `.N()` is `0.333…/x`, not `1/(3x)`).
-  const exactFactors = xs.map((x, i) =>
+  let exactFactors = xs.map((x, i) =>
     !numeric?.[i] && isExactRealLiteral(x) ? x : undefined
   );
+  const originals = xs;
   xs = xs.map((x, i) => (numeric?.[i] ? x : x.N()));
+  // A factor whose float underflows to 0, overflows to ±∞ or is subnormal
+  // while its exact value is not (see `foldOutOfDoubleRange`) is folded with
+  // the other number factors from its exact value. A factor with an exact
+  // coefficient outside the double range (`10^{400}/y`, see
+  // `exactCoefficientOutOfRange`) is folded in the same way. The test is one
+  // scan of the factors, so the usual product pays nothing more.
+  if (
+    xs.some(
+      (x) =>
+        isOutOfDoubleRangeLiteral(x) ||
+        (isFunction(x) && exactCoefficientOutOfRange(ce, x) !== undefined)
+    )
+  ) {
+    const folded = foldOutOfDoubleRange(
+      ce,
+      originals,
+      xs,
+      exactFactors,
+      numeric
+    );
+    if (folded) {
+      if (folded.length === 1) return folded[0];
+      xs = folded;
+      exactFactors = xs.map(() => undefined);
+    }
+  }
   // Post-evaluation re-dispatch (Tycho item 52): an operand may only have
   // BECOME a collection through the numeric evaluation above (`Mod(L,11)`
   // over a list `L` → a lazy `Map`) — the raw-operand dispatches missed it
@@ -2349,14 +2537,21 @@ export function mulNEvaluated(
   // The scalar assembly, with the exact integer and rational literals when
   // every factor is a number literal (see the numericizing map above). A
   // product that folds to an exact literal (`(1/3)·(2/3)`) is floated, since
-  // this is the numeric route.
+  // this is the numeric route. In the machine lane, an exact complex literal
+  // is floated too: an exact factor lifts a float Gaussian integer such as
+  // `i` back to an exact value, and `(10^{400} + 1)·i` then folded to an
+  // exact complex literal whose imaginary part is above the largest double.
+  // `.N()` promises a float, so the result is the complex float (here the
+  // complex infinity). The big-decimal lane is not changed by this test.
   let factors: ReadonlyArray<Expression> = xs.every((x) => isNumber(x))
     ? xs.map((x, i) => exactFactors[i] ?? x)
     : xs;
   const exp = expandProducts(ce, factors);
   if (exp) {
     if (exp.operator !== 'Multiply')
-      return isExactRealLiteral(exp) ? exp.N() : exp;
+      return isExactRealLiteral(exp) || (isNumber(exp) && !bignumPreferred(ce))
+        ? exp.N()
+        : exp;
     if (isFunction(exp)) factors = exp.ops;
   }
 

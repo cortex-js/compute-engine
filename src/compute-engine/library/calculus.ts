@@ -381,11 +381,19 @@ function measurementFromParts(
  * integration variable, or that otherwise fails to numericize, declines
  * (returns `undefined`, keeping the integral symbolic) rather than
  * integrating wrongly.
+ *
+ * `evaluatedBounds`, when given, holds for each limit the values of its lower
+ * and upper bounds that the caller already computed with `.N()`. A bound that
+ * does not reference an integration variable uses that value, and is not
+ * evaluated again. This is necessary when a bound has side effects: a bound
+ * `Random()` must use the same draw that the caller saw, and must not
+ * consume a second one.
  */
 function nIntegrateMultiple(
   ce: ComputeEngine,
   f: Expression,
-  limits: ReadonlyArray<Expression>
+  limits: ReadonlyArray<Expression>,
+  evaluatedBounds?: ReadonlyArray<ReadonlyArray<Expression>>
 ): Expression | undefined {
   const vars: string[] = [];
   for (const l of limits) {
@@ -400,7 +408,11 @@ function nIntegrateMultiple(
   // `Function` of the outer variables — the literal's parameter binding also
   // shields a same-named global assignment, as for the integrand itself.
   type BoundFn = (outer: ReadonlyArray<number>) => number;
-  const mkBound = (b: Expression, d: number): BoundFn | undefined => {
+  const mkBound = (
+    b: Expression,
+    d: number,
+    value: Expression | undefined
+  ): BoundFn | undefined => {
     const syms = b.symbols;
     if (syms.some((s) => vars.indexOf(s) >= d)) return undefined;
     if (syms.some((s) => vars.includes(s))) {
@@ -413,7 +425,7 @@ function nIntegrateMultiple(
       const app = applicable(fn);
       return (outer) => app(outer.map((x) => ce.number(x)))?.re ?? NaN;
     }
-    const c = b.N().re;
+    const c = (value ?? b.N()).re;
     if (isNaN(c)) return undefined;
     return () => c;
   };
@@ -422,8 +434,9 @@ function nIntegrateMultiple(
   for (let d = 0; d < limits.length; d++) {
     const l = limits[d];
     if (!isFunction(l)) return undefined;
-    const lower = mkBound(l.op2, d);
-    const upper = mkBound(l.op3, d);
+    const values = evaluatedBounds?.[d];
+    const lower = mkBound(l.op2, d, values?.[0]);
+    const upper = mkBound(l.op3, d, values?.[1]);
     if (!lower || !upper) return undefined;
     boundFns.push([lower, upper]);
   }
@@ -2297,7 +2310,10 @@ volumes
           // Multiple limits (`Integrate(f, Limits(x,…), Limits(y,…))`):
           // iterated quadrature over every limit. The single-limit path below
           // reads only `ops[1]` and would silently drop the other dimensions.
-          if (ops.length > 2) return nIntegrateMultiple(ce, f, ops.slice(1));
+          // The bound values computed above are passed on, so that a bound
+          // is not evaluated a second time.
+          if (ops.length > 2)
+            return nIntegrateMultiple(ce, f, ops.slice(1), limitValues);
 
           const firstLimit = ops[1];
           if (!isFunction(firstLimit) || limitValues[0].length !== 2)

@@ -64,6 +64,7 @@ import {
   finitePartOfType,
   isNonRealNumber,
   isPointElementType,
+  nonNegativeRangeType,
   resolveTypeAlias,
   resolveTypeForCompilation,
   stripMissingFromType,
@@ -208,6 +209,9 @@ import {
   exactValueDoubleRoundings,
 } from '../numeric-value/exact-integer-value.js';
 import { rangeCount, RANGE_COUNT_JS_SOURCE } from '../numerics/range-count.js';
+
+/** `real<0..>`: every real number that is not negative. */
+const NON_NEGATIVE_REAL_TYPE = nonNegativeRangeType('real');
 
 /**
  * A `_tv`/`_cse`-prefixed identifier token, as it appears inside a
@@ -1719,6 +1723,21 @@ type UserFunctionLanes = {
    * and the body then returned a complex value (`RecursiveLaneRetry`).
    */
   assumedComplex: Set<string>;
+  /**
+   * The definitions with a collection body whose recursive call was read,
+   * while the definition was compiling, with the lane of its entries taken
+   * from its type (`userCallElementLane`). A type such as `matrix<number>`
+   * gives the wide lane, and a linear-algebra head over the call then takes
+   * its real helper.
+   */
+  assumedRealElements: Set<string>;
+  /**
+   * The definitions with a collection body that are compiled a second time
+   * with the entries of their recursive calls read as complex, because the
+   * first compilation read them from the type and the body then returned
+   * complex entries (`RecursiveLaneRetry`).
+   */
+  assumedComplexElements: Set<string>;
   /**
    * Emitted definition name → the lane of the ENTRIES of the collection
    * that the definition returns (`linearAlgebraOperandLane` of its body),
@@ -3655,13 +3674,24 @@ export class BaseCompiler {
    * kernel before this predicate is consulted. A value TYPED non-real is not
    * real-assumed and answers `false` (unless the engine proves it).
    *
-   * Recognized: a non-negative literal; the engine's own proof; `Abs`,
+   * Recognized: a non-negative literal; the engine's own proof; a type
+   * that is a non-negative real range (`real<0..>` or narrower); `Abs`,
    * `Exp`, `Square`, an even integer `Power` of a real-assumed operand; a
    * sum, product or quotient of recognized operands; a `Sqrt` of one.
    */
   static assumedRealNonNegative(expr: Expression): boolean {
     if (expr.isNonNegative === true) return true;
     if (isNumber(expr)) return expr.im === 0 && expr.re >= 0;
+    // A type that is a non-negative real range is a proof too. The engine's
+    // `isNonNegative` does not read ranged types, so without this a radicand
+    // typed `real<0.02..1>` (`1 − ((k − 0.5)/40)²` over an index typed
+    // `integer<1..40>`) had an unknown sign here: the `Sqrt` promoted to the
+    // complex lane while its type, and so the parent's lane verdict, stayed
+    // `real`. The parent then emitted real arithmetic around a `{re, im}`
+    // object, which evaluates to NaN.
+    const exprType = expr.type?.type;
+    if (exprType !== undefined && isSubtype(exprType, NON_NEGATIVE_REAL_TYPE))
+      return true;
     // An unrolled `Sum`/`Product` term binds its index to a literal integer,
     // so a subtree whose sign is unknown while the index is free can still be
     // a closed constant in the term being emitted. Consult the term's index
@@ -4158,6 +4188,8 @@ export class BaseCompiler {
         onAsk: new Set(),
         assumedReal: new Set(),
         assumedComplex: new Set(),
+        assumedRealElements: new Set(),
+        assumedComplexElements: new Set(),
         elementByName: new Map(),
       };
       BaseCompiler._userFunctionLanes.set(registry, lanes);
@@ -4190,6 +4222,15 @@ export class BaseCompiler {
    * (`assumedComplex`), and its body is complex too, so the lanes agree. At
    * most two compilations run for one definition.
    *
+   * The same holds for the ENTRIES of a collection body. With
+   * `f: (integer) -> matrix<number>` and
+   * `f := n ↦ ([[i, 0], [0, 1]] if n = 0, f(n − 1)² otherwise)`, the type
+   * `matrix<number>` of the recursive call does not say whether its entries
+   * are complex, so the first compilation squares it with the real matrix
+   * helper, which answers NaN entries for a complex entry. The body returns
+   * complex entries, so the second compilation reads the entries of the
+   * recursive calls as complex (`assumedComplexElements`).
+   *
    * Before the second compilation, the definitions that the first one
    * emitted are removed. They were compiled with the wrong lane of this
    * definition (a mutually recursive `g` called by `f`), and are emitted
@@ -4203,6 +4244,7 @@ export class BaseCompiler {
     const lanes = BaseCompiler.userFunctionLanes(registry);
     const before = new Set(registry.defs.keys());
     const complexShapedBefore = new Set(registry.complexShaped ?? []);
+    let elements = false;
     try {
       return emitBody();
     } catch (e) {
@@ -4212,12 +4254,18 @@ export class BaseCompiler {
         (e as Error & { definition?: string }).definition !== name
       )
         throw e;
+      elements = (e as Error & { elements?: boolean }).elements === true;
     }
     BaseCompiler.removeDefinitionsAddedSince(registry, before);
     if (registry.complexShaped !== undefined)
       registry.complexShaped = complexShapedBefore;
-    lanes.assumedReal.delete(name);
-    lanes.assumedComplex.add(name);
+    if (elements) {
+      lanes.assumedRealElements.delete(name);
+      lanes.assumedComplexElements.add(name);
+    } else {
+      lanes.assumedReal.delete(name);
+      lanes.assumedComplex.add(name);
+    }
     BaseCompiler._invalidateComplexMemo();
     return emitBody();
   }
@@ -4292,14 +4340,32 @@ export class BaseCompiler {
     // linear-algebra head over a call of the definition. The declared
     // result type of the function cannot give it: `(real) -> matrix<number>`
     // says nothing about the entries of `[[t, i], [2, 3]]`.
+    //
+    // A recursive call read while the definition was compiling had no
+    // record, and the lane of its entries was taken from its type
+    // (`userCallElementLane`). When the body returns complex entries, that
+    // reading may be wrong: the definition is compiled again with the
+    // entries of the recursive calls read as complex
+    // (`emitWithRecursiveLaneRetry`).
     if (body.type.matches('collection<any>')) {
       const lanes = BaseCompiler.userFunctionLanes(registry);
-      lanes.elementByName.set(
-        name,
-        BaseCompiler.withBoundVarsOf(target, () =>
-          BaseCompiler.linearAlgebraOperandLane(body)
-        )
+      const elementLane = BaseCompiler.withBoundVarsOf(target, () =>
+        BaseCompiler.linearAlgebraOperandLane(body)
       );
+      if (
+        elementLane === 'complex' &&
+        lanes.assumedRealElements.has(name) &&
+        !lanes.assumedComplexElements.has(name)
+      ) {
+        const retry = new Error(
+          `${id}: recompile with complex entries of the recursive calls`
+        );
+        retry.name = 'RecursiveLaneRetry';
+        (retry as Error & { definition?: string }).definition = name;
+        (retry as Error & { elements?: boolean }).elements = true;
+        throw retry;
+      }
+      lanes.elementByName.set(name, elementLane);
     }
   }
 
@@ -5234,7 +5300,16 @@ export class BaseCompiler {
           ? BaseCompiler.linearAlgebraOperandLane(route.inlined)
           : undefined;
       name = route.name;
-      if (registry.compiling.has(name)) return undefined;
+      // A recursive call, reached while its own definition is compiling, has
+      // no record yet. The lane of its entries is read from its type, and
+      // the definition records that assumption: when the body then returns
+      // complex entries, the definition is compiled again with the entries
+      // of the recursive calls read as complex (`recordUserFunctionLane`).
+      if (registry.compiling.has(name)) {
+        if (lanes.assumedComplexElements.has(name)) return 'complex';
+        lanes.assumedRealElements.add(name);
+        return undefined;
+      }
       lanes.byNode.set(a, name);
     }
     return lanes.elementByName.get(name);
@@ -26751,14 +26826,35 @@ export class BaseCompiler {
    * (`freeSymbols` covered by its inputs, `unsupported` empty) declaratively,
    * instead of executing or GPU-compiling the code to discover a dangling
    * reference or an unlowerable operator.
+   *
+   * When `occurrences` is given, the walk records in it, for each free
+   * symbol, its first FREE occurrence in `expr` itself: an occurrence that no
+   * enclosing binder (a parameter, an index, a local) shadows, and that is
+   * not inside a folded symbol value or a user-function body. A bound
+   * occurrence of the same name (the index `q` of `Sum(q, Limits(q, 1, n))`
+   * beside a free `q`) is a different variable, with its own type.
    */
   static analyzeReferences(
     expr: Expression,
     target: CompileTarget<Expression>,
-    varsKeys?: ReadonlySet<string>
+    varsKeys?: ReadonlySet<string>,
+    occurrences?: Map<string, Expression>
   ): { freeSymbols: string[]; unsupported: string[] } {
     const engine = expr.engine;
     const free = new Set<string>();
+    // Greater than zero while the walk is inside a folded symbol value or a
+    // function-literal body: an occurrence there is not an occurrence in
+    // `expr`, so it is not recorded in `occurrences`.
+    let indirectDepth = 0;
+    const addFree = (e: Expression & { symbol: string }): void => {
+      free.add(e.symbol);
+      if (
+        occurrences !== undefined &&
+        indirectDepth === 0 &&
+        !occurrences.has(e.symbol)
+      )
+        occurrences.set(e.symbol, e);
+    };
     const unsupported = new Set<string>();
     // Guard against a symbol whose value (transitively) references itself.
     const foldedSeen = new Set<string>();
@@ -26838,16 +26934,28 @@ export class BaseCompiler {
       return `${oversizedValueDepth > 0 ? 'o' : ''}${frameId}|${key}`;
     };
     /** True when `e` was already walked under the current frame; records the
-     * visit otherwise. */
+     * visit otherwise.
+     *
+     * When `occurrences` is recorded, a DIRECT visit (not inside a folded
+     * symbol value or a function-literal body) adds to it and an indirect
+     * visit does not. So a node that was visited only indirectly must be
+     * visited again when the walk meets it directly: with `a := q + 1`, the
+     * walk of `[a, q + 1]` meets the shared node `q + 1` first in the value
+     * of `a`, and the occurrence of `q` is recorded only at the second,
+     * direct, visit. A direct visit adds all that an indirect visit adds, so
+     * an indirect visit after a direct visit is skipped. */
     const alreadyVisited = (e: Expression, bound: ReadonlySet<string>) => {
       const key = frameKey(bound);
+      const directKey = `${key}|d`;
+      const direct = occurrences !== undefined && indirectDepth === 0;
       let frames = visitedFrames.get(e);
       if (frames === undefined) {
         frames = new Set();
         visitedFrames.set(e, frames);
       }
-      if (frames.has(key)) return true;
-      frames.add(key);
+      if (frames.has(directKey)) return true;
+      if (!direct && frames.has(key)) return true;
+      frames.add(direct ? directKey : key);
       return false;
     };
 
@@ -26864,10 +26972,12 @@ export class BaseCompiler {
       const params = functionLiteralBoundNames(literal.ops.slice(1));
       const saved = declaredTypes;
       declaredTypes = BaseCompiler.literalDeclaredParamTypes(literal);
+      indirectDepth++;
       try {
         visit(literal.ops[0], params.length ? union(bound, params) : bound);
       } finally {
         declaredTypes = saved;
+        indirectDepth--;
       }
     };
 
@@ -26926,7 +27036,7 @@ export class BaseCompiler {
         // name stays an external input, consistent with the value-position
         // codegen in `compile`.
         if (varsKeys?.has(s)) {
-          free.add(s);
+          addFree(e);
           return;
         }
         // A bare symbol naming a user-defined function, used in value position
@@ -26978,10 +27088,12 @@ export class BaseCompiler {
               BaseCompiler.expandedFoldSize(engine, value, target) >
                 BaseCompiler.MAX_FOLD_EXPANDED_NODES;
             if (oversized) oversizedValueDepth++;
+            indirectDepth++;
             try {
               visit(value, inner);
             } finally {
               if (oversized) oversizedValueDepth--;
+              indirectDepth--;
             }
           }
           return;
@@ -27009,7 +27121,7 @@ export class BaseCompiler {
         // genuine variable and was claimed above.
         if (isAbsentSymbol(e)) return;
         // No mapping, no value, not a constant: a genuinely free symbol.
-        free.add(s);
+        addFree(e);
         return;
       }
 
@@ -27435,7 +27547,13 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     varsKeys?: ReadonlySet<string>
   ): R {
-    const refs = BaseCompiler.analyzeReferences(expr, target, varsKeys);
+    const occurrences = new Map<string, Expression>();
+    const refs = BaseCompiler.analyzeReferences(
+      expr,
+      target,
+      varsKeys,
+      occurrences
+    );
     return Object.assign(
       result,
       refs,
@@ -27443,7 +27561,8 @@ export class BaseCompiler {
         freeSymbolTypes: BaseCompiler.freeSymbolTypes(
           expr,
           target,
-          refs.freeSymbols
+          refs.freeSymbols,
+          occurrences
         ),
       },
       BaseCompiler.modeReport()
@@ -27455,10 +27574,14 @@ export class BaseCompiler {
    * `CompilationResult.freeSymbolTypes`): its engine type, the type the code
    * compiled for `target` reads it as, and whether it was declared.
    *
-   * The types are read from an occurrence of the symbol in `expr`, which is
-   * bound in the scope the expression was compiled in. A symbol reachable
-   * only through a folded value or a user-function body has no occurrence
-   * in `expr`; it is then read from its definition.
+   * The types are read from a FREE occurrence of the symbol in `expr`,
+   * which is bound in the scope the expression was compiled in.
+   * `occurrences` holds them, as recorded by `analyzeReferences`, which
+   * skips an occurrence that a binder shadows: in
+   * `[Sum(q, Limits(q, 1, n)), Real(q)]` the index `q` is an integer local
+   * of the sum, while the free `q` can be complex. A symbol reachable only
+   * through a folded value or a user-function body has no occurrence in
+   * `expr`; it is then read from its definition.
    *
    * The provenance is read from the definition the occurrence is bound to,
    * not from a lookup in the current scope: an expression parsed in a scope
@@ -27472,24 +27595,13 @@ export class BaseCompiler {
   static freeSymbolTypes(
     expr: Expression,
     target: CompileTarget<Expression>,
-    names: ReadonlyArray<string>
+    names: ReadonlyArray<string>,
+    occurrences: ReadonlyMap<string, Expression>
   ): Record<string, FreeSymbolType> {
     const ce = expr.engine;
-    const wanted = new Set(names);
-    const found = new Map<string, Expression>();
-    const walk = (e: Expression): void => {
-      if (found.size === wanted.size) return;
-      if (isSymbol(e)) {
-        if (wanted.has(e.symbol) && !found.has(e.symbol))
-          found.set(e.symbol, e);
-        return;
-      }
-      if (isFunction(e)) for (const op of e.ops) walk(op);
-    };
-    walk(expr);
     const result: Record<string, FreeSymbolType> = {};
     for (const name of names) {
-      const occurrence = found.get(name);
+      const occurrence = occurrences.get(name);
       const symbol = occurrence ?? ce.symbol(name);
       let valueDef: { inferredType: boolean } | undefined;
       if (occurrence !== undefined && isSymbol(occurrence))
@@ -27813,9 +27925,15 @@ export class BaseCompiler {
       freeSymbols: [],
       unsupported: [],
     };
+    const occurrences = new Map<string, Expression>();
     try {
       if (compileTarget)
-        refs = BaseCompiler.analyzeReferences(expr, compileTarget, varsKeys);
+        refs = BaseCompiler.analyzeReferences(
+          expr,
+          compileTarget,
+          varsKeys,
+          occurrences
+        );
     } catch (e) {
       // The analysis runs the compile handlers of custom operators, which
       // can evaluate: a caller's cancellation propagates. Any other error
@@ -27834,7 +27952,8 @@ export class BaseCompiler {
           freeSymbolTypes: BaseCompiler.freeSymbolTypes(
             expr,
             compileTarget,
-            refs.freeSymbols
+            refs.freeSymbols,
+            occurrences
           ),
         };
       } catch (e) {

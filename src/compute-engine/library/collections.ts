@@ -13,6 +13,7 @@ import {
   validateArguments,
   widenUnannotatedLiteralParams,
   isAbsentScalarSymbol,
+  absentScalarMarker,
 } from '../boxed-expression/validate.js';
 import { toInteger, toIntegerOperand } from '../boxed-expression/numerics.js';
 import { computeBroadcastCell } from '../boxed-expression/broadcast-cell-widening.js';
@@ -26,10 +27,12 @@ import {
   elementCountOfFiniteSource,
   enumerableFromAllSources,
   enumerableFromSource,
+  holdsConditionalValue,
   isBroadcastableCollection,
   isDeclaredScalarNumber,
   isEnumerableSource,
   isFiniteBroadcastParticipant,
+  isMaskedAbsentNumber,
   isUnresolvedCollectionOperand,
   isTextAtom,
   isRecordShapedType,
@@ -119,6 +122,7 @@ import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { sumVariantInfo } from '../sum-representation.js';
 import type {
+  EvaluateHandlerOptions,
   EvaluateOptions,
   Expression,
   FunctionInterface,
@@ -134,7 +138,11 @@ import type {
 } from '../global-types.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils.js';
-import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
+import {
+  isOperatorDef,
+  isValueDef,
+  numericFromExactValue,
+} from '../boxed-expression/utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { machineListFrom } from '../boxed-expression/machine-broadcast.js';
 import {
@@ -726,6 +734,56 @@ const SLICE_SIGNATURE_TEXT =
 const SLICE_SIGNATURE = parseType(SLICE_SIGNATURE_TEXT);
 const APPEND_SIGNATURE = parseType('(collection<any>, value+) -> collection');
 
+/**
+ * SEARCHED_VALUE_POLICY: how `Contains`, `IndexOf` and `Count` treat the value
+ * they search for (user decision 2026-09-26).
+ *
+ * A search for an absent value finds nothing. When the searched value is the
+ * `Missing` or `Undefined` symbol, the answer is the "not found" answer of the
+ * operator: `False` for `Contains`, `0` for `IndexOf` and `0` for `Count`.
+ * This is true also when the collection holds an absent element:
+ * `IndexOf([1, Missing], Missing)` is `0`. A `NaN` value is not absent: it is
+ * a number, and `IndexOf([NaN], NaN)` is `1`.
+ *
+ * A restricted value, `2{c}` (`When(2, c)`), whose condition `c` is not
+ * decided, stays in the application: these operators do not thread
+ * conditional values at this position (`threadsConditionals: [0]`). A
+ * threaded value gives `When(Contains([1, 2], 2), c)`, which becomes `Missing`
+ * when `c` becomes false, but the correct answer is then `False`. So the
+ * application stays unevaluated until `c` is decided. When `c` is true, the
+ * value is `2` and the search runs. When `c` is false, the value is absent and
+ * the answer is "not found". The same is true for a `List`, `Tuple` or `Set`
+ * that holds such a value.
+ *
+ * A restricted NUMBER whose condition is false evaluates to `NaN`, not to
+ * `Missing` (`2{c}` is `NaN` when `c` is false). The evaluated value then
+ * cannot be told apart from a `NaN` that is present, which a search finds
+ * (`IndexOf([1, NaN], NaN)` is `2`). So when the evaluated value is `NaN`,
+ * the searched operand of `application` (the application before its operands
+ * are evaluated) is examined: if it is a restriction whose condition is
+ * false, or a piecewise value (`Which`) whose conditions are all false, the
+ * value is absent (`isMaskedAbsentNumber`).
+ *
+ * The collection operand is different: an absent collection makes the answer
+ * absent (`Contains(Missing, 2)` is `Missing`), and a restricted collection is
+ * moved out of the application.
+ *
+ * Returns `'absent'` for an absent value, `'undecided'` for a value that
+ * holds a conditional value whose condition is not decided, and `undefined`
+ * otherwise.
+ */
+function searchedValueStatus(
+  value: Expression | undefined,
+  application: Expression | undefined
+): 'absent' | 'undecided' | undefined {
+  if (value === undefined) return undefined;
+  if (isAbsentSymbol(value)) return 'absent';
+  if (holdsConditionalValue(value)) return 'undecided';
+  const written = isFunction(application) ? application.ops[1] : undefined;
+  if (isMaskedAbsentNumber(value, written)) return 'absent';
+  return undefined;
+}
+
 // Validate the collection operand of a LAZY collection operator's canonical
 // handler — like `checkType(engine, op, type)` but fail-open: an operand whose
 // type is not PROVABLY incompatible (`unknown`/`any`/`value`, or a
@@ -1015,8 +1073,23 @@ function callbackCompatibilityError(
   //
   // Either way the DECLARED result rides along (a still-free result
   // variable is skipped by the relation).
-  const elementOf = (src: Expression): Type =>
-    collectionElementType(src.type.type) ?? ('any' as Type);
+  // A callback OPERATOR that takes an absent operand itself (`Multiply`
+  // gives `NaN` for `Missing`, `Max` skips it) is judged against the element
+  // type without its `missing` arm. Without this, a collection whose only
+  // elements are absent (`[Missing]`, element type `missing`) was an
+  // `incompatible-type` error for `Reduce([Missing], Multiply, 1)`, the
+  // canonical form of `Product([Missing])`, while `[1, Missing]` was
+  // accepted and folded to `NaN`.
+  const fnDef = isSymbol(fn) ? ce.lookupDefinition(fn.symbol) : undefined;
+  const fnTakesAbsence =
+    fnDef !== undefined &&
+    'operator' in fnDef &&
+    (fnDef.operator.resolvedMissingBehavior === 'propagate' ||
+      fnDef.operator.resolvedMissingBehavior === 'handle');
+  const elementOf = (src: Expression): Type => {
+    const t = collectionElementType(src.type.type) ?? ('any' as Type);
+    return fnTakesAbsence ? stripMissingFromType(t) : t;
+  };
   let supplyArrow: FunctionSignature;
   // Which supply positions carry a SOURCE ELEMENT, as opposed to a parameter
   // the operator supplies from somewhere else (a reducer's accumulator). Only
@@ -1446,7 +1519,12 @@ function mapResultType(
   }
   if (source.kind === 'list') {
     const t: ListType = { kind: 'list', elements: elementType as Type };
-    if (source.dimensions) t.dimensions = source.dimensions;
+    // `Map` applies the lambda to each OUTER element of the source. For a
+    // matrix, that element is a row. Thus the result keeps only the outer
+    // length of the source. The lambda result type (`elementType`) gives
+    // the shape of each element. `Map((r) => 0, [[1,2],[3,4]])` is `[0, 0]`,
+    // a list of 2 integers, not a 2x2 matrix.
+    if (source.dimensions?.length) t.dimensions = [source.dimensions[0]];
     return t;
   }
   if (source.kind === 'indexed_collection')
@@ -1507,9 +1585,9 @@ function mapOperatorResultType(
  * every source is an indexed collection, the result is a `list` of the lambda
  * results, for the reason given in `mapOperatorResultType`: a broadcast over
  * two or more collection operands is typed `list<E>`, and its lazy form is
- * this `Map`. When every source is a `list` with the same dimensions, the
- * result keeps these dimensions (the zip stops at the shortest source, and
- * all sources have the same length). Otherwise the result is an
+ * this `Map`. When every source is a `list` with the same outer length, the
+ * result has this length as its only dimension (the zip stops at the
+ * shortest source, and all sources have the same length). Otherwise the result is an
  * `indexed_collection` of the lambda results.
  */
 function zipMapResultType(
@@ -1519,20 +1597,18 @@ function zipMapResultType(
   if (!sources.every((t) => isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)))
     return { kind: 'indexed_collection', elements: elementType as Type };
   const result: ListType = { kind: 'list', elements: elementType as Type };
-  const dims = sources.map((t) =>
-    typeof t !== 'string' && t.kind === 'list' ? t.dimensions : undefined
+  // The lambda receives one OUTER element of each source (a row, for a
+  // matrix). Thus only the outer length of the sources is a dimension of the
+  // result. The lambda result type (`elementType`) gives the shape of each
+  // element.
+  const lengths = sources.map((t) =>
+    typeof t !== 'string' && t.kind === 'list' && t.dimensions?.length
+      ? t.dimensions[0]
+      : undefined
   );
-  const first = dims[0];
-  if (
-    first !== undefined &&
-    dims.every(
-      (d) =>
-        d !== undefined &&
-        d.length === first.length &&
-        d.every((n, i) => n === first[i])
-    )
-  )
-    result.dimensions = [...first];
+  const first = lengths[0];
+  if (first !== undefined && lengths.every((n) => n === first))
+    result.dimensions = [first];
   return result;
 }
 
@@ -2291,15 +2367,34 @@ function foldResultTypeD(
   engine: PureEngineView
 ): Type | undefined {
   if (op === undefined) return undefined;
+  // The collection operand is given with the `missing` arm of its cells
+  // (`passesAbsentCellsThrough`, `broadcast-lift-type.ts`), because this
+  // handler must see it: a fold with no initial value returns its only
+  // element unchanged, so `Reduce([Missing], Max)` is `Missing`.
+  const rawElt = coll ? collectionElementType(coll.type) : undefined;
+  const elt = rawElt === undefined ? undefined : stripMissingFromType(rawElt);
+  const cellAbsent = rawElt !== undefined && typeContainsMissing(rawElt);
+  // A fold that computes with an absent cell gives `NaN`, so a numeric
+  // result widens to `number`, as for any operator that propagates absence.
+  const absorb = (t: Type | undefined): Type | undefined =>
+    t !== undefined && cellAbsent && isSubtype(t, 'number') ? 'number' : t;
+  // With no initial value, the result can be the first element itself,
+  // unchanged: the result type admits the element type too. When the
+  // element type is already a subtype of the result type, this adds
+  // nothing.
+  const withFirst = (t: Type | undefined): Type | undefined => {
+    if (t === undefined || init !== undefined || rawElt === undefined) return t;
+    if (isSubtype(rawElt, t)) return t;
+    return reduceType({ kind: 'union', types: [t, rawElt] });
+  };
   const s = op.structureOf?.();
   if (s?.kind === 'symbol' && BUILTIN_FOLD_HEADS.has(s.name)) {
-    const elt = coll ? collectionElementType(coll.type) : undefined;
     if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
-    if (init === undefined) return elt;
+    if (init === undefined) return withFirst(absorb(elt));
     const seed = init.type;
-    return isSubtype(seed, 'number') ? widen(elt, seed) : undefined;
+    return isSubtype(seed, 'number') ? absorb(widen(elt, seed)) : undefined;
   }
-  return callbackResultTypeD(op, engine);
+  return withFirst(absorb(callbackResultTypeD(op, engine)));
 }
 
 /**
@@ -3606,29 +3701,53 @@ function firstPresentElement(xs: Expression): Expression | undefined {
   return first;
 }
 
+/**
+ * The absence marker of an element read whose collection operand is absent
+ * as a whole, such as `First` of a restricted list whose condition is false.
+ * The marker is that of the codomain, read from the type of the application
+ * `expression` (user decision of 2026-09-25, `docs/ERROR-MODEL.md` §2): `NaN`
+ * when that type, less its `missing` arm, is numeric, and `Missing`
+ * otherwise. So `First((1, 2) {0 < t})` is `NaN` once `t` is negative, as it
+ * is when the restriction was lifted out before `t` got a value, and `First`
+ * of a restricted list of points is `Missing`. A bare absent operand
+ * (`First(Missing)`) has an application type that is not numeric, and its
+ * marker is `Missing`. With no application to read, the marker is `Missing`.
+ */
+function absentOperandMarker(
+  ce: ComputeEngine,
+  expression: Expression | undefined
+): Expression {
+  if (expression === undefined) return ce.Missing;
+  return absentScalarMarker(ce, expression);
+}
+
 // Access the element of `xs` at 1-based `position` (`-1` = last), used by the
 // `First`/`Second`/`Third`/`Last` evaluate handlers. A literal indexed
 // collection returns the element (an out-of-range position yields the
 // position-preserving absence marker, NOT `Nothing`, which would erase it);
 // a symbolic operand whose type is (or could be) an indexed collection stays
 // symbolic (return `undefined`); an operand provably not an indexed
-// collection is a type error.
+// collection is a type error. `expression` is the application being
+// evaluated; its type gives the marker for an absent operand.
 function componentAt(
   xs: Expression,
   position: number,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  expression?: Expression
 ): Expression | undefined {
   // An absent base propagates position-preservingly, mirroring `At` over a
-  // `Missing` base (`missingBehavior: 'handle'` on First/Second/Third/Last —
-  // the element domain is unknown, so the marker stays `Missing`, not `NaN`).
-  // Both symbols that name an absent datum take this route (user ruling of
-  // 2026-09-22): `Undefined` is declared `unknown`, so without this test it
-  // fell through to the type error below and reported that an absent operand
-  // is not an indexed collection. The answer is the `Missing` marker for both,
-  // never the operand itself — the marker is what a consumer discharges with
-  // `IsMissing`/`Coalesce`. The same two names are tested by
+  // `Missing` base (`missingBehavior: 'handle'` on First/Second/Third/Last).
+  // The marker is that of the application's codomain
+  // (`absentOperandMarker`): `NaN` for a numeric element, `Missing`
+  // otherwise. Both symbols that name an absent datum take this route (user
+  // ruling of 2026-09-22): `Undefined` is declared `unknown`, so without
+  // this test it fell through to the type error below and reported that an
+  // absent operand is not an indexed collection. The answer is a marker,
+  // never the operand itself — the marker is what a consumer discharges
+  // with `IsMissing`/`Coalesce`. The same two names are tested by
   // `isAbsentScalarSymbol` (`boxed-expression/validate.ts`).
-  if (isSymbol(xs, 'Missing') || isSymbol(xs, 'Undefined')) return ce.Missing;
+  if (isSymbol(xs, 'Missing') || isSymbol(xs, 'Undefined'))
+    return absentOperandMarker(ce, expression);
   if (xs.isCollection) {
     // Runtime re-validation of the `indexed_collection` parameter (the static
     // gate is overlap-deferred, so an `unknown`-typed operand can arrive
@@ -4133,6 +4252,162 @@ function pointComponentAt(
 // TakeDiagonal(matrix) -> [matrix[1, 1], matrix[2, 2], ...]
 
 // Diagonal(list) -> [[list[1, 1], 0, 0], [0, list[2, 2], 0], ...]
+
+/**
+ * The evaluation of `Reduce(collection, fn, initial)`, before the machine
+ * overflow check in the `Reduce` definition.
+ */
+const reduceEvaluate = (
+  [collection, fn, initial]: ReadonlyArray<Expression>,
+  { engine: ce, numericApproximation }: EvaluateHandlerOptions
+): Expression | undefined => {
+  if (!collection.isFiniteCollection) return undefined;
+  // A collection may report a finite count yet decline enumeration
+  // (e.g. Linspace(a, 1, 3) with a symbolic endpoint: size 3, but the
+  // elements have no numeric value, so its iterator returns undefined
+  // and each() yields nothing). Folding that would silently produce the
+  // initial value (Sum → 0): stay inert instead.
+  //
+  // Each of the three folds below reads that verdict off its OWN walk
+  // (`enumerationDeclinedAfterWalk`) rather than probing for it here:
+  // probing starts a second enumeration, which re-runs the element
+  // callback of a lazy `Map`/`Filter` once more than there are elements.
+  const hasInitial = initial !== undefined;
+  const seed = initial ?? ce.Nothing;
+
+  // The compiled fast path folds with JS numbers, so it always yields a
+  // float. Under exact evaluation that violates the Evaluate-vs-N
+  // exactness contract (e.g. `a + 1/k` over a Range would collapse the
+  // exact rational sum to a float). Only take it under numeric
+  // approximation, or when the inputs are already inexact (a float result
+  // is then correct anyway). Otherwise fall through to the interpreted
+  // path, which is contract-correct.
+  const inputsInexact =
+    numericApproximation || (isNumber(seed) && !seed.isExact);
+
+  if (
+    inputsInexact &&
+    // A SEEDLESS fold has no initial value to type-check: its seed is the
+    // first element, covered by the collection check. (Testing `nothing`
+    // against `real` used to make this whole branch unreachable without an
+    // initial value.)
+    (!hasInitial || seed.type.matches('real')) &&
+    collection.type.matches(ce.type('collection<real>'))
+  ) {
+    // If we're dealing with real numbers, we can compile.
+    const compiled = implicitCompile(ce, fn);
+    // Only take the compiled fast path if the function actually compiled
+    // to a lambda; otherwise fall through to the interpreted path below
+    // (previously this returned `undefined`, leaving Reduce unevaluated).
+    if (compiled && compiled.calling === 'lambda' && compiled.run) {
+      // The interpreted reducer, needed by the fast path too (below).
+      const fInterp = applicable(fn);
+      const stepInterp = (acc: Expression, x: Expression): Expression =>
+        fInterp([acc, x]) ?? absenceMarker(ce, collection);
+      return run(
+        (function* () {
+          // With an explicit initial value, fold it in from the start; do
+          // not overwrite it with the first element (that is only the seed
+          // when no initial value was supplied).
+          //
+          // The accumulator is a JS number while the fast path holds, and
+          // becomes a boxed expression the moment the compiled reducer
+          // returns anything else. The gate above checks the SEED and the
+          // ELEMENTS are real, but not the reducer's RESULT: `(z, k) ↦ z²
+          // + c` with a complex `c` (declared or a literal) compiles to a
+          // lambda that returns a `{re, im}` object, and the body was
+          // compiled with `z` analyzed real — feeding that object back in
+          // computes `z * z` on an object (`re: null`), and boxing the
+          // result at the end raised `unexpected-mathjson` from `.N()`
+          // while `.evaluate()` was correct (reported by Tycho against
+          // 0.112.0/0.113.0). The FIRST non-number result is trustworthy
+          // (every input to that call was a number), so that step is
+          // redone through the interpreted reducer from the previous,
+          // still-numeric accumulator, and the fold stays interpreted
+          // from there. The static result type cannot decide this
+          // upstream: such a body types the wide `number`.
+          let accumulator: number | Expression = hasInitial ? seed.re : NaN;
+          let first = true;
+          let empty = true;
+          for (const item of collection.each()) {
+            empty = false;
+            if (first && !hasInitial) accumulator = item.re;
+            else if (typeof accumulator === 'number') {
+              const next: unknown = compiled.run!(accumulator, item.re);
+              accumulator =
+                typeof next === 'number'
+                  ? next
+                  : stepInterp(ce.number(accumulator), item);
+            } else accumulator = stepInterp(accumulator, item);
+            first = false;
+            yield;
+          }
+          if (enumerationDeclinedAfterWalk(collection, empty ? 0 : 1))
+            return undefined;
+          // A seedless fold of an empty collection has nothing to seed
+          // from — `Nothing`, as the interpreted path answers.
+          if (empty && !hasInitial) return ce.Nothing;
+          return typeof accumulator === 'number'
+            ? ce.expr(accumulator)
+            : accumulator;
+        })(),
+        ce._timeRemaining,
+        ce._deadlineFrame
+      );
+    }
+  }
+  // We don't have a compiled function, so we need to use the
+  // interpreted version.
+  const f = applicable(fn);
+  // A reducer that produced no value is a computation failure: fold in
+  // the marker rather than the erasure symbol.
+  const step = (acc: Expression, x: Expression): Expression =>
+    f([acc, x]) ?? absenceMarker(ce, collection);
+
+  if (!hasInitial) {
+    // SEEDLESS: seed with the FIRST element and fold from the second —
+    // the convention of `Scan` and of the compiled fast path above (ruled
+    // 2026-08-09). The previous encoding folded from the `Nothing`
+    // sentinel, which only looked right for a reducer that splices it
+    // away (`Add`): `Reduce([1, 2, 3], (a, b) => a - b)` answered -6
+    // (`((nothing - 1) - 2) - 3`) where `Scan`'s last element is -4, and a
+    // reducer that does not splice leaked `Nothing` into the result
+    // (`Reduce([2, 3, 2], Power)` → `Nothing^12`). It also made the
+    // `Nothing` sentinel the accumulator's first VALUE, which apply-time
+    // validation rejects for an annotated reducer.
+    return run(
+      (function* (): Generator<Expression | undefined, Expression | undefined> {
+        let acc: Expression | undefined = undefined;
+        for (const x of collection.each()) {
+          acc = acc === undefined ? x : step(acc, x);
+          yield acc;
+        }
+        if (enumerationDeclinedAfterWalk(collection, acc === undefined ? 0 : 1))
+          return undefined;
+        // Nothing to seed from: an empty seedless fold has no value.
+        return acc ?? ce.Nothing;
+      })(),
+      ce._timeRemaining,
+      ce._deadlineFrame
+    );
+  }
+
+  let walked = 0;
+  const folded = run(
+    reduceCollection<Expression>(
+      collection,
+      (acc, x) => {
+        walked += 1;
+        return step(acc, x);
+      },
+      seed
+    ) as Generator<Expression | undefined, Expression | undefined>,
+    ce._timeRemaining,
+    ce._deadlineFrame
+  );
+  if (enumerationDeclinedAfterWalk(collection, walked)) return undefined;
+  return folded;
+};
 
 export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   //
@@ -5293,19 +5568,49 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (hasSymbolicRangeBounds(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return false;
+        // An infinite step with a finite lower bound: the only finite
+        // element is `lower`, and `rangeCount` counts it (`Range(0, 1, +oo)`
+        // is [0], and `Range(1, 5, -oo)` is [1], as in `rangeLast()`). The
+        // span and grid tests below cannot decide this case: the grid index
+        // `(t − lower) / step` is 0 for every finite target, and the last
+        // element `lower + step·0` is NaN.
+        if (!Number.isFinite(step) && Number.isFinite(lower))
+          return t === lower && rangeCount(lower, upper, step) > 0;
         const tol = expr.engine.tolerance;
         // Directional bounds check: t must lie between lower and upper in
-        // the direction implied by step's sign. The upper side allows a
-        // slack of `tol` steps: the last element `lower + step·(count − 1)`
-        // can be one rounding error past `upper` when `upper` is on the step
-        // grid in exact arithmetic (`rangeCount` counts that element), and
-        // the range must still contain its own last element. The grid check
-        // below limits the index to the element count.
+        // the direction implied by step's sign. Both sides allow a slack of
+        // `tol` steps. On the far side, the last element
+        // `lower + step·(count − 1)` can be one rounding error past `upper`
+        // when `upper` is on the step grid in exact arithmetic (`rangeCount`
+        // counts that element), and the range must still contain its own
+        // last element. On the near side, the grid check below accepts a
+        // target within `tol` steps of an element, and the first element is
+        // not an exception: `Range(0.1 + 0.2, 0.3, 0.1)` is
+        // [0.30000000000000004] (`rangeCount` counts 1 element), and 0.3 is a
+        // member, as 0.3 is a member of `Range(0, 0.3, 0.1)`, whose last
+        // element is also 0.30000000000000004. The grid check below limits
+        // the index to the element count.
+        //
+        // `rangeCount` absorbs rounding with its own tolerance, which grows
+        // with the quotient `(upper − lower) / step` and can be larger than
+        // `tol` steps: `Range(0, 999.9999999999, 0.1)` counts 10001
+        // elements, and its last element, 1000, is past `upper` by 10⁻¹⁰.
+        // When both bounds are finite, the far limit is therefore the
+        // last counted element if it is past `upper`.
         const slack = Number.isFinite(step) ? tol * Math.abs(step) : 0;
+        const near = step > 0 ? lower - slack : lower + slack;
+        let far = step > 0 ? upper + slack : upper - slack;
+        if (Number.isFinite(lower) && Number.isFinite(upper)) {
+          const count = rangeCount(lower, upper, step);
+          if (count > 0) {
+            const last = lower + step * (count - 1);
+            far = step > 0 ? Math.max(far, last) : Math.min(far, last);
+          }
+        }
         if (step > 0) {
-          if (t < lower || t > upper + slack) return false;
+          if (t < near || t > far) return false;
         } else {
-          if (t > lower || t < upper - slack) return false;
+          if (t > near || t < far) return false;
         }
         // An infinite lower bound leaves the step grid with no anchor to
         // count from (see `hasInfiniteRangeOrigin`), so `k` below is infinite
@@ -5350,8 +5655,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           next: () => {
             if (index === maxCount + 1) return { value: undefined, done: true };
             index += 1;
+            // The first element is `lower` itself: for an infinite step,
+            // `step · 0` is NaN (`Range(0, 1, +oo)` is [0]).
             return {
-              value: expr.engine.number(lower + step * (index - 1 - 1)),
+              value: expr.engine.number(
+                index === 2 ? lower : lower + step * (index - 1 - 1)
+              ),
               done: false,
             };
           },
@@ -5380,7 +5689,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (step === 0) return undefined;
         const maxCount = rangeCount(lower, upper, step);
         if (index < 1 || index > maxCount) return undefined;
-        return expr.engine.number(lower + step * (index - 1));
+        // The first element is `lower` itself: for an infinite step,
+        // `step · 0` is NaN (`Range(0, 1, +oo)` is [0]).
+        return expr.engine.number(
+          index === 1 ? lower : lower + step * (index - 1)
+        );
       },
 
       indexWhere: undefined,
@@ -5913,13 +6226,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. Read cell by cell through the held form's collection handlers it
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
-    threadsConditionals: true,
-    // An absent collection, or an absent element, answers `Missing`, the
-    // marker of a boolean (Kleene), as `IsEmpty(Missing)` does (user decision
-    // 2026-09-25: a collection operator over an absent collection). Declared
-    // because the element parameter is `any`, which the default policy does
-    // not read as a collection.
+    // The searched value (position 1) is NOT threaded. See
+    // `SEARCHED_VALUE_POLICY`.
+    threadsConditionals: [0],
+    // An absent collection answers `Missing`, the marker of a boolean
+    // (Kleene), as `IsEmpty(Missing)` does (user decision 2026-09-25: a
+    // collection operator over an absent collection). Declared because the
+    // element parameter is `any`, which the default policy does not read as a
+    // collection. Only the collection strips `missing`: an absent searched
+    // value is not found, so the answer is `False` (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
+    missingStrip: [0],
     signature: '(collection<any>, element: any) -> boolean',
     // Peek through membership-preserving wrappers (incl. `Unique`) so an eager
     // Sort/RandomShuffle isn't materialized just to test membership (see
@@ -5941,11 +6258,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         false,
         false,
         undefined,
-        () => true
+        (i) => i === 0
       );
       return ce._fn('Contains', adjusted ?? stripped);
     },
-    evaluate: ([xs, value], { engine: ce }) => {
+    evaluate: ([xs, value], { engine: ce, expression }) => {
+      const searched = searchedValueStatus(value, expression);
+      if (searched === 'undecided') return undefined;
+      if (searched === 'absent') return ce.False;
       // Three-valued: an indeterminate membership (e.g. a bounded walk that
       // hits its iteration limit) stays inert rather than collapsing to False.
       const found = xs.contains(value);
@@ -5968,12 +6288,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. Read cell by cell through the held form's collection handlers it
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
-    threadsConditionals: true,
+    // The counted value or predicate (position 1) is NOT threaded. See
+    // `SEARCHED_VALUE_POLICY`.
+    threadsConditionals: [0],
     // An absent collection has no count: `Count(Missing)` answers `NaN`, as
     // `Length(Missing)` does (user decision 2026-09-25). Declared because the
     // optional predicate parameter is `any`, which the default policy does
-    // not read as a collection.
+    // not read as a collection. Only the collection strips `missing`: an
+    // absent counted value is not found, so the count is `0`
+    // (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
+    missingStrip: [0],
     signature: '(collection<any>, any?) -> integer | infinity',
     // Only the 1-arg cardinality form can answer an infinity: it reports
     // `xs.count` as it stands, and an unbounded source counts infinitely many
@@ -6094,11 +6419,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         false,
         false,
         undefined,
-        () => true
+        (i) => i === 0
       );
       return ce._fn('Count', adjusted ?? stripped);
     },
-    evaluate: ([xs, what], { engine }) => {
+    evaluate: ([xs, what], { engine, expression }) => {
       // A decided non-collection source is refused the same way `Length` is,
       // in both the 1-arg and the 2-arg form. The declared `collection<any>`
       // parameter makes `validateArguments` wrap a STATICALLY decided operand
@@ -6138,6 +6463,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // number leaves compare by exact value, so `0.5` counts as `1/2`).
       // Only a finite collection has a knowable count; anything else stays
       // symbolic, mirroring the 1-arg form.
+      const searched = searchedValueStatus(what, expression);
+      if (searched === 'undecided') return undefined;
+      if (searched === 'absent') return engine.Zero;
       if (xs.isFiniteCollection !== true) return undefined;
       // ...and only an enumerable one: `Take(xs, 2)` over a valueless `xs` is
       // finite yet has nothing to walk (see `isEnumerableSource`).
@@ -6973,164 +7301,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         engine._typeResolver
       ),
 
-    evaluate: (
-      [collection, fn, initial],
-      { engine: ce, numericApproximation }
-    ) => {
-      if (!collection.isFiniteCollection) return undefined;
-      // A collection may report a finite count yet decline enumeration
-      // (e.g. Linspace(a, 1, 3) with a symbolic endpoint: size 3, but the
-      // elements have no numeric value, so its iterator returns undefined
-      // and each() yields nothing). Folding that would silently produce the
-      // initial value (Sum → 0): stay inert instead.
-      //
-      // Each of the three folds below reads that verdict off its OWN walk
-      // (`enumerationDeclinedAfterWalk`) rather than probing for it here:
-      // probing starts a second enumeration, which re-runs the element
-      // callback of a lazy `Map`/`Filter` once more than there are elements.
-      const hasInitial = initial !== undefined;
-      const seed = initial ?? ce.Nothing;
-
-      // The compiled fast path folds with JS numbers, so it always yields a
-      // float. Under exact evaluation that violates the Evaluate-vs-N
-      // exactness contract (e.g. `a + 1/k` over a Range would collapse the
-      // exact rational sum to a float). Only take it under numeric
-      // approximation, or when the inputs are already inexact (a float result
-      // is then correct anyway). Otherwise fall through to the interpreted
-      // path, which is contract-correct.
-      const inputsInexact =
-        numericApproximation || (isNumber(seed) && !seed.isExact);
-
-      if (
-        inputsInexact &&
-        // A SEEDLESS fold has no initial value to type-check: its seed is the
-        // first element, covered by the collection check. (Testing `nothing`
-        // against `real` used to make this whole branch unreachable without an
-        // initial value.)
-        (!hasInitial || seed.type.matches('real')) &&
-        collection.type.matches(ce.type('collection<real>'))
-      ) {
-        // If we're dealing with real numbers, we can compile.
-        const compiled = implicitCompile(ce, fn);
-        // Only take the compiled fast path if the function actually compiled
-        // to a lambda; otherwise fall through to the interpreted path below
-        // (previously this returned `undefined`, leaving Reduce unevaluated).
-        if (compiled && compiled.calling === 'lambda' && compiled.run) {
-          // The interpreted reducer, needed by the fast path too (below).
-          const fInterp = applicable(fn);
-          const stepInterp = (acc: Expression, x: Expression): Expression =>
-            fInterp([acc, x]) ?? absenceMarker(ce, collection);
-          return run(
-            (function* () {
-              // With an explicit initial value, fold it in from the start; do
-              // not overwrite it with the first element (that is only the seed
-              // when no initial value was supplied).
-              //
-              // The accumulator is a JS number while the fast path holds, and
-              // becomes a boxed expression the moment the compiled reducer
-              // returns anything else. The gate above checks the SEED and the
-              // ELEMENTS are real, but not the reducer's RESULT: `(z, k) ↦ z²
-              // + c` with a complex `c` (declared or a literal) compiles to a
-              // lambda that returns a `{re, im}` object, and the body was
-              // compiled with `z` analyzed real — feeding that object back in
-              // computes `z * z` on an object (`re: null`), and boxing the
-              // result at the end raised `unexpected-mathjson` from `.N()`
-              // while `.evaluate()` was correct (reported by Tycho against
-              // 0.112.0/0.113.0). The FIRST non-number result is trustworthy
-              // (every input to that call was a number), so that step is
-              // redone through the interpreted reducer from the previous,
-              // still-numeric accumulator, and the fold stays interpreted
-              // from there. The static result type cannot decide this
-              // upstream: such a body types the wide `number`.
-              let accumulator: number | Expression = hasInitial ? seed.re : NaN;
-              let first = true;
-              let empty = true;
-              for (const item of collection.each()) {
-                empty = false;
-                if (first && !hasInitial) accumulator = item.re;
-                else if (typeof accumulator === 'number') {
-                  const next: unknown = compiled.run!(accumulator, item.re);
-                  accumulator =
-                    typeof next === 'number'
-                      ? next
-                      : stepInterp(ce.number(accumulator), item);
-                } else accumulator = stepInterp(accumulator, item);
-                first = false;
-                yield;
-              }
-              if (enumerationDeclinedAfterWalk(collection, empty ? 0 : 1))
-                return undefined;
-              // A seedless fold of an empty collection has nothing to seed
-              // from — `Nothing`, as the interpreted path answers.
-              if (empty && !hasInitial) return ce.Nothing;
-              return typeof accumulator === 'number'
-                ? ce.expr(accumulator)
-                : accumulator;
-            })(),
-            ce._timeRemaining,
-            ce._deadlineFrame
-          );
-        }
-      }
-      // We don't have a compiled function, so we need to use the
-      // interpreted version.
-      const f = applicable(fn);
-      // A reducer that produced no value is a computation failure: fold in
-      // the marker rather than the erasure symbol.
-      const step = (acc: Expression, x: Expression): Expression =>
-        f([acc, x]) ?? absenceMarker(ce, collection);
-
-      if (!hasInitial) {
-        // SEEDLESS: seed with the FIRST element and fold from the second —
-        // the convention of `Scan` and of the compiled fast path above (ruled
-        // 2026-08-09). The previous encoding folded from the `Nothing`
-        // sentinel, which only looked right for a reducer that splices it
-        // away (`Add`): `Reduce([1, 2, 3], (a, b) => a - b)` answered -6
-        // (`((nothing - 1) - 2) - 3`) where `Scan`'s last element is -4, and a
-        // reducer that does not splice leaked `Nothing` into the result
-        // (`Reduce([2, 3, 2], Power)` → `Nothing^12`). It also made the
-        // `Nothing` sentinel the accumulator's first VALUE, which apply-time
-        // validation rejects for an annotated reducer.
-        return run(
-          (function* (): Generator<
-            Expression | undefined,
-            Expression | undefined
-          > {
-            let acc: Expression | undefined = undefined;
-            for (const x of collection.each()) {
-              acc = acc === undefined ? x : step(acc, x);
-              yield acc;
-            }
-            if (
-              enumerationDeclinedAfterWalk(
-                collection,
-                acc === undefined ? 0 : 1
-              )
-            )
-              return undefined;
-            // Nothing to seed from: an empty seedless fold has no value.
-            return acc ?? ce.Nothing;
-          })(),
-          ce._timeRemaining,
-          ce._deadlineFrame
-        );
-      }
-
-      let walked = 0;
-      const folded = run(
-        reduceCollection<Expression>(
-          collection,
-          (acc, x) => {
-            walked += 1;
-            return step(acc, x);
-          },
-          seed
-        ) as Generator<Expression | undefined, Expression | undefined>,
-        ce._timeRemaining,
-        ce._deadlineFrame
+    evaluate: (ops, options) => {
+      const folded = reduceEvaluate(ops, options);
+      // At machine precision, a fold of doubles can overflow where the exact
+      // fold does not: `Product([10^400, 0])` gives `∞ · 0 = NaN`, but the
+      // exact product is 0. When the numeric fold is NaN or infinite, the
+      // float of the exact fold is the result.
+      if (!options.numericApproximation || folded === undefined) return folded;
+      return (
+        numericFromExactValue(options.engine, options.expression, folded) ??
+        folded
       );
-      if (enumerationDeclinedAfterWalk(collection, walked)) return undefined;
-      return folded;
     },
   },
 
@@ -7827,8 +8008,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // list BEFORE validation, so the signature admits it and the type and
       // collection handlers see only collections and tuples.
       ops = ops.map((op) => wrapScalarJoinOperand(ce, op));
+      // An absent operand is admitted (strip-before-validate), as the generic
+      // boxing route admits it: `Join` propagates absence, and the evaluation
+      // answers `Missing` (`wrapScalarJoinOperand`).
       const args =
-        validateArguments(ce, ops, JOIN_SIGNATURE, false, false) ?? ops;
+        validateArguments(
+          ce,
+          ops,
+          JOIN_SIGNATURE,
+          false,
+          false,
+          undefined,
+          () => true
+        ) ?? ops;
       if (args.some((x) => !x.isValid)) return ce._fn('Join', args);
 
       const source = args[0];
@@ -8116,6 +8308,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
+    // An absent collection answers `Missing` (user decision 2026-09-26), as
+    // the other collection operators do for an absent collection. Declared
+    // because the appended values are `value`, which the default policy does
+    // not read as a collection. Only the collection strips `missing`: an
+    // absent appended value is still refused.
+    missingBehavior: 'propagate',
+    missingStrip: [0],
     signature: '(collection<any>, value+) -> collection',
     // Same-head flatten: `Append(Append(c, …vs), …ws)` → `Append(c, …vs, …ws)`,
     // so an accumulator loop (`xs = Append(xs, v)`) builds a node of bounded
@@ -8136,8 +8335,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Run the framework's default flatten step (Sequence-splice + Nothing-
       // drop) that this custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
+      // The absent collection is admitted, as the generic boxing route
+      // admits it (strip-before-validate): `Append(Missing, 1)` answers
+      // `Missing` at evaluation. Without this, the validation here refused it
+      // with an `incompatible-type` error.
       const args =
-        validateArguments(ce, ops, APPEND_SIGNATURE, false, false) ?? ops;
+        validateArguments(
+          ce,
+          ops,
+          APPEND_SIGNATURE,
+          false,
+          false,
+          undefined,
+          (i) => i === 0
+        ) ?? ops;
       if (args.length < 2 || args.some((x) => !x.isValid))
         return ce._fn('Append', args);
 
@@ -9038,7 +9249,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce._fn('At', patched);
     },
 
-    evaluate: (ops, { engine: ce }) => {
+    evaluate: (ops, { engine: ce, expression }) => {
       // Edge conventions, on the record (revised 2026-07-22 — BREAKING):
       // out-of-band access is POSITION-PRESERVING and yields the absence
       // MARKER (`NaN` for a numeric collection, `Missing` otherwise — see
@@ -9062,6 +9273,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Value-level absorption: an absent current value (an absent base, or
         // an absent intermediate produced by a prior step) short-circuits the
         // remaining indices into the final position's domain.
+        // An absent BASE (a restricted collection whose condition is false)
+        // has no type of its own left to peel: its value is the `Missing`
+        // (or `Undefined`) symbol. The marker is then that of the application's codomain
+        // (`absentOperandMarker`): `NaN` for a numeric element, as when the
+        // restriction was lifted out before its condition was decided, and
+        // `Missing` for a row or a point.
+        if (index === 1 && isAbsentSymbol(expr))
+          return absentOperandMarker(ce, expression);
         if (isAbsentValue(expr))
           return chainAbsorbMarker(ce, expr.type.type, ops, index);
 
@@ -9469,10 +9688,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // First/Second/Third/Last admit an absent base (§3.B strip-before-validate):
   // an `At` access types `missing | T` (the out-of-range arm), and without the
   // strip every indexed-then-accessed chain (`First(L[n])`) errored at
-  // canonicalization (Tycho item 164's sibling). Declared `handle`: the
-  // element domain is unknown, so `componentAt` propagates a `Missing` base
-  // as `Missing` — the position-preserving marker, mirroring `At` — rather
-  // than the numeric `NaN` a `propagate` gate would substitute.
+  // canonicalization (Tycho item 164's sibling). Declared `handle`: a
+  // `propagate` gate would substitute `NaN` for every absent base, and the
+  // element may not be a number. `componentAt` answers the marker of the
+  // application's codomain instead: `NaN` for a numeric element, `Missing`
+  // for a point, a row, a string or an element of unknown type.
   First: {
     description: 'The first element of a collection.',
     complexity: 8200,
@@ -9488,7 +9708,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
-    evaluate: ([xs], { engine: ce }) => componentAt(xs, 1, ce),
+    evaluate: ([xs], { engine: ce, expression }) =>
+      componentAt(xs, 1, ce, expression),
   },
 
   Second: {
@@ -9503,7 +9724,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
-    evaluate: ([xs], { engine: ce }) => componentAt(xs, 2, ce),
+    evaluate: ([xs], { engine: ce, expression }) =>
+      componentAt(xs, 2, ce, expression),
   },
 
   Third: {
@@ -9518,7 +9740,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
-    evaluate: ([xs], { engine: ce }) => componentAt(xs, 3, ce),
+    evaluate: ([xs], { engine: ce, expression }) =>
+      componentAt(xs, 3, ce, expression),
   },
 
   // Point-coordinate accessors (`.x`/`.y`/`.z`). On a single point they return
@@ -9647,7 +9870,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
-    evaluate: ([xs], { engine: ce }) => componentAt(xs, -1, ce),
+    evaluate: ([xs], { engine: ce, expression }) =>
+      componentAt(xs, -1, ce, expression),
   },
 
   Rest: {
@@ -10102,7 +10326,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. Read cell by cell through the held form's collection handlers it
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
-    threadsConditionals: true,
+    // The stored value (position 2) is NOT threaded: it is one element of
+    // the result, so its restriction stays in that element.
+    // `Insert([1], 1, 2{c})` is `[2{c}, 1]`, which is `[NaN, 1]` once `c`
+    // fails, as when `2{c}` is evaluated first. Threaded, the whole result
+    // was absent (`Missing`) and the other elements were lost.
+    threadsConditionals: [0, 1],
+    // An absent collection answers `Missing` (user decision 2026-09-26), as
+    // the other collection operators do for an absent collection. Declared
+    // because the stored value is `T`, which the default policy does not
+    // read as a collection. Only the collection strips `missing`: an absent
+    // index is refused, and an absent stored value is kept as one element of
+    // the result.
+    missingBehavior: 'propagate',
+    missingStrip: [0],
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
@@ -10328,7 +10565,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. Read cell by cell through the held form's collection handlers it
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
-    threadsConditionals: true,
+    // The stored value (position 2) is NOT threaded: it is one element of
+    // the result, so its restriction stays in that element.
+    // `ReplaceAt([1], 1, 2{c})` is `[2{c}]`, which is `[NaN]` once `c`
+    // fails, as when `2{c}` is evaluated first. Threaded, the whole result
+    // was absent (`Missing`) and the other elements were lost.
+    threadsConditionals: [0, 1],
+    // An absent collection answers `Missing` (user decision 2026-09-26), as
+    // the other collection operators do for an absent collection. Declared
+    // because the stored value is `T`, which the default policy does not
+    // read as a collection. Only the collection strips `missing`: an absent
+    // index is refused, and an absent stored value is kept as one element of
+    // the result.
+    missingBehavior: 'propagate',
+    missingStrip: [0],
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
@@ -10619,15 +10869,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // fails. Read cell by cell through the held form's collection handlers it
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
-    threadsConditionals: true,
-    // An absent collection, or an absent element, answers `Missing`, the
-    // marker of a boolean (Kleene), as `IsEmpty(Missing)` does (user decision
-    // 2026-09-25: a collection operator over an absent collection). Declared
-    // because the element parameter is `any`, which the default policy does
-    // not read as a collection.
+    // The searched value (position 1) is NOT threaded. See
+    // `SEARCHED_VALUE_POLICY`.
+    threadsConditionals: [0],
+    // An absent collection has no index: `IndexOf(Missing, 2)` answers
+    // `NaN`, the marker of a number (user decision 2026-09-25: a collection
+    // operator over an absent collection). Declared because the element
+    // parameter is `any`, which the default policy does not read as a
+    // collection. Only the collection strips `missing`: an absent searched
+    // value is not found, so the answer is `0` (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
+    missingStrip: [0],
     signature: '(collection<any>, any) -> integer',
-    evaluate: ([xs, value], { engine: ce }) => {
+    evaluate: ([xs, value], { engine: ce, expression }) => {
+      const searched = searchedValueStatus(value, expression);
+      if (searched === 'undecided') return undefined;
+      if (searched === 'absent') return ce.Zero;
       const index = xs.indexWhere((x) => x.isSame(value)) ?? undefined;
       return ce.number(index ?? 0);
     },
@@ -13944,6 +14201,12 @@ function isAtomicJoinOperand(op: Expression): boolean {
  * collection route and its `collection<any>` inference.
  */
 function wrapScalarJoinOperand(ce: ComputeEngine, op: Expression): Expression {
+  // An absent operand (`Missing`, `Undefined`) is an absent collection, not
+  // one element: `Join(Missing, [1])` is `Missing`, as a collection operator
+  // over an absent collection is (user decision 2026-09-25). Before, it was
+  // wrapped, and the result was `[Missing, 1]`, while a restricted list whose
+  // condition failed (`Join([1]{c}, [2])`) gave `Missing`.
+  if (isAbsentSymbol(op)) return op;
   return isProvablyScalarJoinOperand(op) ? ce.function('List', [op]) : op;
 }
 
@@ -14726,8 +14989,18 @@ export function sortedIndices(
   // existing changes meaning.
   if (f && fn && functionArity(fn.type.type) === 1) {
     const keys = new Map<number, Expression>();
+    // An ABSENT element (`Missing`, `Undefined`) sorts last whatever its key
+    // (see `nanLastOrder`): it holds no value, so its key is not computed.
+    // Compared by key, `Sort([Missing, 2, 1], x ↦ 0)` tied every element
+    // and kept `Missing` first.
+    const absent = new Set<number>();
     for (const i of indices) {
-      const key = f([expr.at(i)!]);
+      const x = expr.at(i)!;
+      if (isAbsentSymbol(x)) {
+        absent.add(i);
+        continue;
+      }
+      const key = f([x]);
       if (key === undefined) return undefined;
       keys.set(i, key);
     }
@@ -14735,6 +15008,9 @@ export function sortedIndices(
     // original relative order (first-listed stays first).
     let undetermined = false;
     indices.sort((i, j) => {
+      const aAbsent = absent.has(i);
+      const bAbsent = absent.has(j);
+      if (aAbsent || bAbsent) return aAbsent && bAbsent ? 0 : aAbsent ? 1 : -1;
       // A NaN key sorts last (see `nanLastOrder`). This is done here and not
       // in `compareKeys`, which `MaxBy`/`MinBy`/`ArgMax`/`ArgMin` share: an
       // extremum over a NaN key stays undetermined.

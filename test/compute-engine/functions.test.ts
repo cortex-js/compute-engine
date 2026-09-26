@@ -571,9 +571,9 @@ describe('Pipe — stage sugar (box route)', () => {
     // The element tier is derived from the source's: a bare-parameter
     // mapping over integers squares integers, so the cells say
     // `integer<0..>` (the even-power range, since the
-    // ranged-results round) — on the evaluated view too.
+    // ranged-results round).
     expect(pipe.type.toString()).toBe('list<integer<0..>^3>');
-    expect(pipe.type.toString()).toBe(pipe.evaluate().type.toString());
+    expect(pipe.evaluate().toString()).toBe('[1,4,9]');
 
     // Element type, not just shape: a list of boolean pairs mapped through a
     // conjunction of its components types as a list of booleans.
@@ -591,39 +591,24 @@ describe('Pipe — stage sugar (box route)', () => {
         'p',
       ],
     ]);
-    expect(table.type.toString()).toBe('list<boolean^3>');
-    // The static answer is the one the equivalent explicit `Map` reports —
-    // the equivalence the implicit-map typing is defined by.
-    expect(table.type.toString()).toBe(
-      ce
-        .box([
-          'Map',
-          ['Function', ['And', ['At', 'p', 1], ['At', 'p', 2]], 'p'],
-          [
-            'List',
-            ['Tuple', 'True', 'True'],
-            ['Tuple', 'True', 'False'],
-            ['Tuple', 'False', 'False'],
-          ],
-        ])
-        .type.toString()
-    );
-    // Evaluating the pipe yields a LAZY `Map` node. The `Map` is built from
-    // the raw stage and canonicalized as a whole, so its parameter is
-    // stamped with the topic's element type exactly as the static answer
-    // binds it, and the two types agree (ruled 2026-09-03: one source of
-    // truth for the parameter type).
-    expect(table.evaluate().type.toString()).toBe(table.type.toString());
-    // The shorthand spellings agree the same way: the shorthand literal is
-    // given its `_` parameter explicitly before the `Map` is built.
-    for (const stage of [
-      ['Function', ['And', ['At', '_', 1], ['At', '_', 2]]],
-      ['Function', ['And', ['At', '_1', 1], ['At', '_1', 2]]],
-    ]) {
-      const shorthand = ce.box(['Pipe', table.op1, stage] as any);
-      expect(shorthand.type.toString()).toBe('list<boolean^3>');
-      expect(shorthand.evaluate().type.toString()).toBe('list<boolean^3>');
-    }
+    // `xs |> f` is `f(xs)` (user decision 2026-09-26): `p[1]` makes `p` a
+    // collection parameter, so the literal binds the list whole, as the same
+    // literal called directly or under a name does.
+    const call = ce.box([
+      'Apply',
+      ['Function', ['And', ['At', 'p', 1], ['At', 'p', 2]], 'p'],
+      table.op1.json,
+    ] as any);
+    expect(table.type.toString()).toBe(call.type.toString());
+    expect(table.evaluate().toString()).toBe(call.evaluate().toString());
+    // The spelling that maps each pair destructures it: a tuple-pattern
+    // parameter maps over a list of points.
+    const pairs = ce.box([
+      'Pipe',
+      table.op1.json,
+      ['Function', ['And', 'a', 'b'], ['Tuple', 'a', 'b']],
+    ] as any);
+    expect(pairs.evaluate().toString()).toBe('["True","False","False"]');
 
     // A chain types through: the inner pipe is the outer one's collection
     // topic, so the outer gate needs the inner pipe's own mapped type.
@@ -638,7 +623,9 @@ describe('Pipe — stage sugar (box route)', () => {
     // type, so the inner `<0..>` range survives the `+1` as `<1..>` — the
     // same answer the equivalent explicit `Map` of a `Map` reports.
     expect(chained.type.toString()).toBe('list<integer<1..>^3>');
-    expect(chained.type.toString()).toBe(chained.evaluate().type.toString());
+    // The evaluated value is a plain list, whose own type widens its cells
+    // to `integer`.
+    expect(chained.evaluate().toString()).toBe('[2,5,10]');
   });
 
   test('a stage that does NOT map keeps the applied (scalar) typing', () => {

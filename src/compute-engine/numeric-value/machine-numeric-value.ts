@@ -5,8 +5,12 @@ import type { MathJsonExpression } from '../../math-json/types.js';
 import { numberToString } from '../numerics/strings.js';
 import { numberToExpression } from '../numerics/expression.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
-import { ExactNumericValue } from './exact-numeric-value.js';
-import { machineNthRoot, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
+import { ExactNumericValue, withDoubleDigits } from './exact-numeric-value.js';
+import {
+  isOutsideNormalDoubleRange,
+  machineNthRoot,
+  ROUNDOFF_TOLERANCE,
+} from '../numerics/numeric.js';
 
 export class MachineNumericValue extends NumericValue {
   declare __brand: 'MachineNumericValue';
@@ -358,7 +362,15 @@ export class MachineNumericValue extends NumericValue {
         if (Number.isFinite(n) || !Number.isFinite(this.decimal))
           return this.clone(n / r[1]);
       }
-      return this.clone(this.decimal * other.re);
+      const x = other.re;
+      // An exact value whose double projection underflows to 0, overflows
+      // to ±∞ or is subnormal (`1/10^400`, `10^400/3`, `10^{-320}`) can still
+      // give a product in the double range (`1e300 · 1/10^400` is `1e-100`).
+      // In that case the product is computed from the big-decimal value of
+      // the exact factor.
+      if (outOfDoubleRange(other, x) && Number.isFinite(this.decimal))
+        return this.clone(other.bignumRe!.mul(this.decimal));
+      return this.clone(this.decimal * x);
     }
 
     return this.clone({
@@ -383,8 +395,18 @@ export class MachineNumericValue extends NumericValue {
     if (other.isNegativeOne) return this.neg();
     if (other.isZero) return this.clone(this.isZero ? NaN : Infinity);
 
-    if (this.im === 0 && other.im === 0)
-      return this.clone(this.decimal / other.re);
+    if (this.im === 0 && other.im === 0) {
+      const x = other.re;
+      // See `mul`: an exact divisor whose double projection is 0, ±∞ or
+      // subnormal can still give a quotient in the double range.
+      if (outOfDoubleRange(other, x) && Number.isFinite(this.decimal))
+        return this.clone(
+          withDoubleDigits(() =>
+            new BigDecimal(this.decimal).div(other.bignumRe!)
+          )
+        );
+      return this.clone(this.decimal / x);
+    }
 
     const [a, b] = [this.decimal, this.im];
     const [c, d] = [other.re, other.im];
@@ -719,6 +741,23 @@ export class MachineNumericValue extends NumericValue {
 // convention"): scale of machine roundoff, not `ce.tolerance`.
 function chop(n: number): number {
   return Math.abs(n) <= ROUNDOFF_TOLERANCE ? 0 : n;
+}
+
+/**
+ * Whether `v` is an exact, non-zero real value whose double projection `re`
+ * is outside the normal double range (see `isOutsideNormalDoubleRange()`):
+ * 0 (underflow), ±∞ (overflow), NaN (`∞/∞`) or subnormal. The value itself
+ * is finite and not zero, so an operation with it must use its big-decimal
+ * value, not `re`.
+ */
+function outOfDoubleRange(v: NumericValue, re: number): boolean {
+  return (
+    isOutsideNormalDoubleRange(re) &&
+    v instanceof ExactNumericValue &&
+    v.im === 0 &&
+    !v.isZero &&
+    !v.isNaN
+  );
 }
 
 /**

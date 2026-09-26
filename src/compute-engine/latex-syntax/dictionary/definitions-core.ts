@@ -1827,6 +1827,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
 
+  // `ApplyWhole` (engine-internal: `Apply` with its arguments bound whole,
+  // `library/core.ts`) reads as the application it performs.
+  {
+    name: 'ApplyWhole',
+    kind: 'function',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      serializer.serialize(['Apply', ...operands(expr)] as MathJsonExpression),
+  },
+
   {
     name: 'Apply',
     kind: 'function',

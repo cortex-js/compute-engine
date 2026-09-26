@@ -773,6 +773,22 @@ export class BoxedNumber
             ? ce.number(p)
             : ce.number(ce._numericValue({ rational: [p, q] }));
         }
+      } else if (this.isInteger && Number.isInteger(b) && b > 1) {
+        // The argument is an integer beyond the safe range (for example
+        // 10^20 or 2^100). The reduction above cannot factor it, so find the
+        // smallest integer root c of the base (b = c^q) and count how many
+        // times c divides the argument, in bigint arithmetic.
+        const v = this._value;
+        const r =
+          v instanceof ExactNumericValue && v.radical === 1 && v.im === 0
+            ? bigIntegerLogRational(v.rational, b)
+            : null;
+        if (r !== null) {
+          const [p, q] = r;
+          return q === 1
+            ? ce.number(p)
+            : ce.number(ce._numericValue({ rational: [p, q] }));
+        }
       }
     }
 
@@ -1309,6 +1325,52 @@ export class BoxedNumber
   ): boolean {
     if (this.isSame(other)) return true;
 
+    // An exact value (a rational, a radical, an exact complex, a large
+    // integer) is compared with a number, a bigint or another exact value
+    // through their EXACT difference. The doubles of the two operands can be
+    // the same when the values are not: `2^53` and the bigint `2^53 + 1`
+    // both round to the double `2^53`, but their difference is 1.
+    if (this._value instanceof ExactNumericValue) {
+      let otherValue: NumericValue | undefined = undefined;
+      if (typeof other === 'number' || typeof other === 'bigint') {
+        if (typeof other === 'number' && !Number.isFinite(other)) return false;
+        // An integer is converted to an exact integer, also when it is not a
+        // safe integer: as a float value, the subtraction rounds the exact
+        // operand (at machine precision, `2^53 + 1 - 2^53` is then 0).
+        otherValue = this.engine._numericValue(
+          typeof other === 'number' && Number.isInteger(other)
+            ? BigInt(other)
+            : other
+        );
+      } else if (
+        other instanceof _BoxedExpression &&
+        isNumber(other) &&
+        other.numericValue instanceof ExactNumericValue
+      )
+        otherValue = other.numericValue;
+      if (otherValue !== undefined) {
+        const tol = tolerance ?? this.engine.tolerance;
+        const d = this._value.sub(otherValue);
+        const re = d.re;
+        const im = d.im;
+        if (Number.isFinite(re) && Number.isFinite(im))
+          return Math.abs(re) <= tol && Math.abs(im) <= tol;
+        // The double of an exact rational divides the double of its
+        // numerator by the double of its denominator. When both are above
+        // the largest double, this is `∞/∞ = NaN`, also for a small value
+        // (`1/3 - (10^400 + 1)/(3·10^400 + 10^390)` is about `1.1e-11`).
+        // The big-decimal values do not have this limit.
+        const bigRe = d.bignumRe;
+        const bigIm = d.bignumIm;
+        return (
+          (Number.isFinite(re)
+            ? Math.abs(re) <= tol
+            : !!bigRe?.abs().lte(tol)) &&
+          (Number.isFinite(im) ? Math.abs(im) <= tol : !!bigIm?.abs().lte(tol))
+        );
+      }
+    }
+
     // Primitive with explicit tolerance: direct numeric comparison
     if (tolerance !== undefined) {
       if (typeof other === 'number') {
@@ -1325,25 +1387,12 @@ export class BoxedNumber
       }
     }
 
-    // An exact value (a rational, a radical, an exact complex) compared with
-    // a double: `isSame` compares the two EXACTLY (a double is a dyadic
-    // rational), so `1/3` is not the same as the double `1/3`. `.is()` is
-    // the tolerant check, so it compares the values within the engine
-    // tolerance, as it does for `.is(ce.number(v))`. A machine number
-    // compared with a primitive keeps the strict answer of `isSame`
-    // (`ce.number(1e-17).is(0)` is false).
-    if (
-      (typeof other === 'number' || typeof other === 'bigint') &&
-      this._value instanceof ExactNumericValue
-    ) {
-      const v = Number(other);
-      if (!Number.isFinite(v)) return false;
-      const tol = this.engine.tolerance;
-      return Math.abs(this.re - v) <= tol && Math.abs(this.im) <= tol;
-    }
-
-    // For other primitive arguments without explicit tolerance, isSame is
-    // definitive
+    // A machine number compared with a primitive, without an explicit
+    // tolerance, keeps the strict answer of `isSame`
+    // (`ce.number(1e-17).is(0)` is false). An exact value compared with a
+    // primitive was compared within the tolerance above: `isSame` compares
+    // the two EXACTLY (a double is a dyadic rational), so `1/3` is not the
+    // same as the double `1/3`, but `.is()` is the tolerant check.
     if (!(other instanceof _BoxedExpression)) return false;
 
     // BoxedExpression: evaluate other side and compare numerically
@@ -1508,6 +1557,41 @@ function integerLogRational(a: number, b: number): [number, number] | null {
   if (den === 0) return null;
   const g = gcd(num, den);
   return [num / g, den / g];
+}
+
+/**
+ * Exact `log_b(a)` for an integer argument `a` beyond the safe range and a
+ * safe integer base `b > 1`. Let c be the smallest integer with b = c^q (the
+ * q-th root of b, where q is the gcd of the exponents of the prime factors of
+ * b). When a = c^p, the result is p/q in lowest terms. Otherwise the result
+ * is `null` and the logarithm stays symbolic.
+ *
+ * `a` is the exact rational of the argument. Its big-decimal value is not
+ * used, because that value is rounded to the engine precision.
+ */
+function bigIntegerLogRational(
+  a: Rational,
+  b: number
+): [number, number] | null {
+  if (BigInt(a[1]) !== 1n) return null;
+  let n = BigInt(a[0]);
+  if (n <= 1n) return null;
+  const fb = primeFactors(b);
+  let q = 0;
+  for (const e of Object.values(fb)) q = q === 0 ? e : gcd(q, e);
+  if (q === 0) return null;
+  let c = 1n;
+  for (const [prime, e] of Object.entries(fb))
+    c *= BigInt(prime) ** BigInt(e / q);
+  if (c <= 1n) return null;
+  let p = 0;
+  while (n % c === 0n) {
+    n /= c;
+    p += 1;
+  }
+  if (n !== 1n) return null;
+  const g = gcd(p, q);
+  return [p / g, q / g];
 }
 
 export function canonicalNumber(

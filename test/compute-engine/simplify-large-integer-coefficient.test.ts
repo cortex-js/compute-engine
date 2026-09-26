@@ -38,6 +38,19 @@ describe('SIMPLIFY WITH A COEFFICIENT OUTSIDE THE SAFE-INTEGER RANGE', () => {
     expect(failed).toEqual([]);
   });
 
+  test('a rational coefficient whose double is an integer is not factored', () => {
+    // The double of `(2·10³⁰ + 1)/10³⁰` is 2, but the coefficient is not
+    // the integer 2: it must not be merged into `2^(x + 1)`.
+    const c = ce.number(
+      ce._numericValue({ rational: [2n * 10n ** 30n + 1n, 10n ** 30n] })
+    );
+    const e = ce.function('Multiply', [c, ce.parse('2^x')]);
+    expect(e.simplify().toString()).toBe(
+      '2000000000000000000000000000001/1e+30 * 2^x'
+    );
+    expect(failed).toEqual([]);
+  });
+
   test('a small coefficient is still combined with the powers', () => {
     expect(ce.parse('12\\cdot 2^x 3^y').simplify().toString()).toBe(
       '2^(x + 2) * 3^(y + 1)'

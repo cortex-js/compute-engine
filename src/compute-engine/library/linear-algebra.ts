@@ -508,7 +508,24 @@ function spectralMatrixNorm(
   // is at most a rounding error of its products, so the matrix is then
   // within a rounding error of rank 1, and the Frobenius norm differs from
   // its spectral norm by much less than one rounding error.
-  if (entries.length <= MAX_EXACT_SPECTRAL_SIDE ** 2) {
+  //
+  // The test is not made when an entry is a machine number whose square a
+  // float64 cannot hold: its magnitude is below `2^-511` or above `2^511`.
+  // Its products then underflow to 0 or overflow to infinity, so a minor
+  // can read 0 when the matrix does not have rank 1, and the Frobenius sum
+  // can read 0 or `+∞`. With machine numbers, the 3 × 3 matrix
+  // `[[s, s, 0], [0, s, s], [s, 0, s]]` with `s = 1e-200` has the norm
+  // `2e-200`, not 0. The scaled Jacobi iteration below answers for it. A
+  // big decimal entry does not have this problem.
+  const machineSquareOutOfRange = numericValues.some((v, k) => {
+    if (v.bignumRe !== undefined) return false;
+    const magnitude = Math.max(Math.abs(values[k].re), Math.abs(values[k].im));
+    return magnitude !== 0 && (magnitude < 2 ** -511 || magnitude > 2 ** 511);
+  });
+  if (
+    entries.length <= MAX_EXACT_SPECTRAL_SIDE ** 2 &&
+    (allExact || !machineSquareOutOfRange)
+  ) {
     const frobenius = rankOneSpectralNorm(ce, entries, m, n, isZero);
     if (frobenius !== undefined)
       return numericApproximation ? frobenius.N() : frobenius;
@@ -630,7 +647,20 @@ function maxAbsoluteLineSum(
     // NaN in a later entry still makes the norm NaN.
     if (!isNumber(v)) undecided = true;
     magnitudes.push(magnitude);
-    values.push(v.re);
+    // On the exact route, the `.re` projection of an exact rational divides
+    // the machine values of its numerator and its denominator, and each of
+    // them can overflow on its own: `10^300 / (10^309 + 1)` projects to 0,
+    // not to about `1e-9`. A projection that is 0 or below the smallest
+    // normal float64 for a nonzero magnitude is not within the rounding
+    // bound below, so it is recorded as NaN: the line is then always kept
+    // and added exactly.
+    if (
+      exact &&
+      Math.abs(v.re) < 2 ** -1022 &&
+      !(isNumber(magnitude) && magnitude.isSame(0))
+    )
+      values.push(NaN);
+    else values.push(v.re);
     if (!exact) {
       const big = v.bignumRe ?? new BigDecimal(v.re);
       if (!float64HoldsBigDecimal(big)) machineHoldsAll = false;
@@ -2885,6 +2915,35 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // it, and `MatrixMultiply` below would answer an `incompatible-type`
         // error for a cell that is not a number. Unequal lengths are still
         // `incompatible-dimensions`, as they are for present vectors.
+        //
+        // Against a matrix, the product is a vector, not a number: the
+        // absent cell is replaced by `NaN` and the matrix product is
+        // computed, so `[1, Missing] · [[1, 2], [3, 4]]` is `[NaN, NaN]`, as
+        // for the point `(1, Missing)` below. The matrix product also
+        // checks the contraction dimension, which is not the number of
+        // rows of a rectangular matrix.
+        const isFlat = (op: Expression) =>
+          isTuple(op) ||
+          (isFunction(op, 'List') &&
+            op.ops.every((x) => x.isCollection !== true));
+        if (
+          ops.some(hasAbsentCell) &&
+          ops.every((op) => !hasAbsentCell(op) || isFlat(op)) &&
+          ops.some((op) => !isFlat(op))
+        )
+          return ce
+            .function(
+              'Dot',
+              ops.map((op) =>
+                isFunction(op, 'List') && hasAbsentCell(op)
+                  ? ce.function(
+                      'List',
+                      op.ops.map((x) => (isAbsentSymbol(x) ? ce.NaN : x))
+                    )
+                  : op
+              )
+            )
+            .evaluate({ numericApproximation });
         if (ops.some(hasAbsentCell)) {
           const counts = ops.map((op) => op.count);
           if (counts[0] !== counts[1])
@@ -4059,6 +4118,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return undefined;
           const elements: Expression[] = [];
           for (const el of x.each()) elements.push(el);
+          // A collection that declines to enumerate its elements
+          // (`Linspace(a, 1, 3)` for an unassigned `a`) yields fewer
+          // elements than its count. The norm is then undecided, not the
+          // norm of the elements read so far: an empty vector has the
+          // norm 0.
+          if (elements.length !== x.count) return undefined;
           // Text is a collection of characters but a scalar CELL here, so a
           // list that holds it is still a vector, and `vectorNorm` reports
           // the wrong kind: `‖[3, "a", Missing]‖` is an `incompatible-type`
@@ -4338,10 +4403,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         const eigenvalues = eigenvaluesExpr.ops;
 
-        // For each eigenvalue, compute the corresponding eigenvector
+        // For each eigenvalue, compute the corresponding eigenvector. A
+        // repeated eigenvalue can have more than one independent
+        // eigenvector: the eigenspace of 2 in `[[2, 0], [0, 2]]` is the
+        // whole plane. The k-th occurrence of an eigenvalue takes the k-th
+        // vector of a basis of the null space of M − λI, so the result is
+        // `[[1, 0], [0, 1]]`, not `[[1, 0], [1, 0]]`. When the null space
+        // has fewer vectors than the multiplicity (a defective matrix such
+        // as `[[2, 1], [0, 2]]`), the extra occurrences repeat the first
+        // vector.
         const eigenvectors: Expression[] = [];
-        for (const lambda of eigenvalues) {
-          const eigenvector = computeEigenvector(M, lambda, n, ce);
+        for (let k = 0; k < eigenvalues.length; k++) {
+          const lambda = eigenvalues[k];
+          let index = 0;
+          for (let j = 0; j < k; j++)
+            if (sameEigenvalue(eigenvalues[j], lambda)) index += 1;
+          const eigenvector = computeEigenvector(M, lambda, n, ce, index);
           if (eigenvector) {
             eigenvectors.push(eigenvector);
           } else {
@@ -4551,7 +4628,20 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const decimal = decimalRationalMatrix(M, m, n);
           if (decimal !== undefined) {
             const closed = rationalSingularValues(decimal, m, n, ce);
-            if (closed !== undefined) return closed.N();
+            // At machine precision, the approximation of the closed form
+            // can overflow in its intermediate values, which are about the
+            // fourth power of the entries: the singular values of
+            // `[[1e200, 1], [0, 1e200]]` read `[+∞, 0]`. A value that is not
+            // finite for a matrix of finite entries is not used, and the
+            // scaled kernel below answers instead.
+            if (closed !== undefined) {
+              const approximation = closed.N();
+              if (
+                !isFunction(approximation, 'List') ||
+                approximation.ops.every((x) => x.isFinite === true)
+              )
+                return approximation;
+            }
           }
         }
 
@@ -5283,14 +5373,18 @@ function checkDiagonalOrTriangular(M: Expression, n: number): boolean {
   for (let i = 0; i < n && (isUpperTriangular || isLowerTriangular); i++) {
     for (let j = 0; j < n; j++) {
       const val = mTensor.at(i + 1, j + 1);
-      // Both parts must be zero: an entry `i` has a zero real part.
+      // Both parts must be zero: an entry `i` has a zero real part. An
+      // expression cell must be exactly zero: its machine parts are 0 for
+      // an exact `10^-400`, which is not zero.
       const isZero =
         val === undefined ||
         val === 0 ||
-        (typeof val === 'object' &&
-          're' in val &&
-          val.re === 0 &&
-          (!('im' in val) || val.im === 0));
+        (isExpression(val)
+          ? val.isSame(0)
+          : typeof val === 'object' &&
+            're' in val &&
+            val.re === 0 &&
+            (!('im' in val) || val.im === 0));
 
       if (i > j && !isZero) isUpperTriangular = false;
       if (i < j && !isZero) isLowerTriangular = false;
@@ -5660,7 +5754,8 @@ function exactEigenvector(
   M: Expression,
   lambda: Expression,
   n: number,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  index: number = 0
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
 
@@ -5685,25 +5780,42 @@ function exactEigenvector(
   const basis = exactRationalNullSpaceBasis(AminusLambdaI);
   if (basis.length === 0) return undefined;
 
-  const v = basis[0];
+  const v = basis[index] ?? basis[0];
   return ce.expr(['List', ...v.map(([num, den]) => ce.number([num, den]))]);
 }
 
 /**
- * Compute eigenvector for a given eigenvalue
+ * True when two eigenvalues from the same `Eigenvalues` result are the same
+ * value, so that they are occurrences of one repeated eigenvalue. Exact and
+ * symbolic values must be the same expression. Inexact values can differ by
+ * rounding, so they are the same when their difference is at most `1e-10`
+ * relative to their magnitude.
+ */
+function sameEigenvalue(x: Expression, y: Expression): boolean {
+  if (x.isSame(y)) return true;
+  if (!isNumber(x) || !isNumber(y) || (x.isExact && y.isExact)) return false;
+  const scale = Math.max(1, Math.hypot(x.re, x.im), Math.hypot(y.re, y.im));
+  return Math.hypot(x.re - y.re, x.im - y.im) <= 1e-10 * scale;
+}
+
+/**
+ * Compute an eigenvector for a given eigenvalue: the vector `index` of a
+ * basis of the null space of M − λI, or its first vector when the basis has
+ * fewer vectors.
  */
 function computeEigenvector(
   M: Expression,
   lambda: Expression,
   n: number,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  index: number = 0
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
 
   // Exact path: when M and λ are both exact rationals, A − λI is exact, so the
   // eigenvector (a null-space vector of A − λI) can be computed with exact
   // fraction arithmetic. Irrational/complex λ falls through to the float path.
-  const exact = exactEigenvector(M, lambda, n, ce);
+  const exact = exactEigenvector(M, lambda, n, ce, index);
   if (exact) return exact;
 
   // The float path below does real arithmetic only. It requires a real λ and
@@ -5715,7 +5827,7 @@ function computeEigenvector(
   const lambdaNum = lambda.re;
   const A = tensorToNumericMatrix(M, n, n);
   if (A === undefined || isNaN(lambdaNum) || lambda.im !== 0) {
-    if (n === 2) return computeEigenvector2x2Symbolic(M, lambda, ce);
+    if (n === 2) return computeEigenvector2x2Symbolic(M, lambda, ce, index);
     return undefined;
   }
 
@@ -5725,7 +5837,7 @@ function computeEigenvector(
   );
 
   // Solve (A - λI)v = 0 using Gaussian elimination to find null space
-  const eigenvector = solveNullSpace(AminusLambdaI, n);
+  const eigenvector = solveNullSpace(AminusLambdaI, n, index);
   if (!eigenvector) return undefined;
 
   return ce.expr(['List', ...eigenvector.map((x) => ce.number(x))]);
@@ -5737,7 +5849,8 @@ function computeEigenvector(
 function computeEigenvector2x2Symbolic(
   M: Expression,
   lambda: Expression,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  index: number = 0
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
 
@@ -5760,10 +5873,15 @@ function computeEigenvector2x2Symbolic(
   };
   const bMag = magnitude(b);
   const c2 = magnitude(c);
+  // An entry is zero only when it is exactly zero. A small entry is not
+  // zero: the eigenvectors of `[[0, i/10^12], [-i/10^12, 0]]` are those of
+  // `[[0, i], [-i, 0]]`, and `[1, 0]` is not one of them.
+  const bNonzero = !isNaN(bMag) && !b.evaluate().isSame(0);
+  const cNonzero = !isNaN(c2) && !c.evaluate().isSame(0);
 
   // A symbolic `b` or `c` is taken as nonzero: the vector is then correct
   // except for the values of the symbol that make it zero.
-  if (bMag > 1e-10 || (isNaN(bMag) && !(c2 > 1e-10))) {
+  if (bNonzero || (isNaN(bMag) && !cNonzero)) {
     // v = [b, λ - a]. When λ = a, this vector is zero for a symbolic b that
     // is zero, and [1, 0] is an eigenvector for every value of b.
     const v2 = lambda.sub(a).evaluate();
@@ -5772,30 +5890,45 @@ function computeEigenvector2x2Symbolic(
     return ce.expr(['List', b, v2]);
   }
 
-  if (c2 > 1e-10 || isNaN(c2)) {
+  if (cNonzero || isNaN(c2)) {
     // v = [λ - d, c]
     const d = getElement(M, 2, 2, ce);
     const v1 = lambda.sub(d).evaluate();
     return ce.expr(['List', v1, c]);
   }
 
-  // Diagonal matrix case: λ is a or d. Compare the complex difference.
-  const aDiff = magnitude(ce.function('Subtract', [a, lambda]));
-  if (aDiff < 1e-10) return ce.expr(['List', ce.One, ce.Zero]);
-  const dDiff = magnitude(
-    ce.function('Subtract', [getElement(M, 2, 2, ce), lambda])
-  );
-  if (dDiff < 1e-10) return ce.expr(['List', ce.Zero, ce.One]);
+  // Diagonal matrix case: λ is a or d. An exact difference of 0 decides.
+  // Otherwise, compare the complex difference, which is not exactly 0 for
+  // an inexact λ. When λ is both a and d, every vector is an eigenvector:
+  // the first occurrence of λ (`index` 0) takes [1, 0], and the next one
+  // takes [0, 1].
+  // The comparison of the magnitude is made only when neither difference
+  // is exactly 0: for `[[10^-12, 0], [0, 0]]` and λ = 0, the difference
+  // `10^-12` is small but not 0, and λ is d only.
+  const d = getElement(M, 2, 2, ce);
+  let isA = ce.function('Subtract', [a, lambda]).evaluate().isSame(0);
+  let isD = ce.function('Subtract', [d, lambda]).evaluate().isSame(0);
+  if (!isA && !isD) {
+    isA = magnitude(ce.function('Subtract', [a, lambda])) < 1e-10;
+    isD = magnitude(ce.function('Subtract', [d, lambda])) < 1e-10;
+  }
+  if (isA && (index === 0 || !isD)) return ce.expr(['List', ce.One, ce.Zero]);
+  if (isD) return ce.expr(['List', ce.Zero, ce.One]);
 
   return undefined;
 }
 
 /**
  * Find a non-trivial solution to Ax = 0 (null space vector).
- * Delegates to computeNullSpaceBasis and returns the first basis vector,
+ * Delegates to computeNullSpaceBasis and returns the basis vector `index`
+ * (the first one when the basis has fewer vectors),
  * normalized to unit length.
  */
-function solveNullSpace(A: number[][], n: number): number[] | undefined {
+function solveNullSpace(
+  A: number[][],
+  n: number,
+  index: number = 0
+): number[] | undefined {
   const basis = computeNullSpaceBasis(A);
   if (basis.length === 0) {
     // Matrix has full rank, no null space (shouldn't happen for eigenvalue).
@@ -5805,7 +5938,7 @@ function solveNullSpace(A: number[][], n: number): number[] | undefined {
     return result;
   }
 
-  const result = basis[0];
+  const result = basis[index] ?? basis[0];
 
   // Normalize to unit length
   let norm = 0;

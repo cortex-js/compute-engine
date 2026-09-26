@@ -1597,6 +1597,10 @@ function orderByValue(
   // An exact difference has an exact sign (`(x + 1) − (x + 2)` is `−1`).
   if (tolerance === 0 && isNumber(diff0) && diff0.isExact && diff0.im === 0) {
     if (diff0.isSame(0)) return '=';
+    // A complex value that is not real has no order, also when the
+    // imaginary parts cancel in the difference: `z < z + 1` is undecided
+    // for a complex `z`.
+    if (isNonRealComplex(a) || isNonRealComplex(b)) return undefined;
     if (diff0.isNegative === true) return '<';
     if (diff0.isPositive === true) return '>';
     return undefined;

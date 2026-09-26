@@ -162,9 +162,13 @@ piped value goes.
 
 A stage may also be a **lambda**, written inline without parentheses — after
 `|>` the arrow binds tighter than the pipe, and the lambda's body ends at the
-next `|>`. When the piped value is a collection, a one-parameter lambda stage
-is applied **to each element** (an implicit `map`); `_^2` is shorthand for
-such a lambda. The following three pipelines are equivalent:
+next `|>`. A pipe is a call written the other way round: `xs |> f` is
+`f(xs)`, for a lambda as for a named function. So when the piped value is a
+list (or a range), a one-parameter lambda whose body uses its parameter as a
+**scalar** (`x^2`, `x + 1`) is applied **to each element**, at every depth of
+a nested list, as calling it on the list does; `_^2` is shorthand for such a
+lambda. A set, a tuple (a point) or a string is passed whole. The following
+three pipelines are equivalent:
 
 ```epsil-live
 1..oo |> take(_, 10) |> map(_^2, _) |> sum
@@ -178,10 +182,11 @@ such a lambda. The following three pipelines are equivalent:
 
 Note the two readings of `_`: in a **call** stage it is the piped value
 (`take(_, 10)`); in an **operator-written** stage (`_^2`, `_ + 1`) it is the
-element of the implicit lambda. A **named** function stage always receives
-the whole value — `xs |> sum` sums the collection, it does not map — as does
-a lambda whose annotated parameter accepts it
-(`xs |> (l: list<number>) => length(l)`).
+parameter of the lambda. A lambda that uses its parameter as a
+**collection** receives the whole value, as the same call would:
+`xs |> l => length(l)` and `xs |> (l: list<number>) => length(l)` are the
+length of `xs`. A named function stage is called the same way: `xs |> sum`
+sums the collection.
 
 A pipe hands its stage exactly **one** value, so a stage that declares more
 than one parameter is a `pipe-stage-arity` error rather than a partial

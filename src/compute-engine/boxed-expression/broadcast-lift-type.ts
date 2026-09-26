@@ -44,6 +44,7 @@ import {
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import { isSubtype, widen } from '../../common/type/subtype.js';
+import { reduceType } from '../../common/type/reduce.js';
 import type {
   BoxedOperatorDefinition,
   BroadcastExemption,
@@ -279,8 +280,11 @@ export const ABSENT_CELLS_STAY_MISSING: ReadonlySet<string> = new Set([
 /**
  * The collection operators that never compute a value from a cell: they
  * reorder, select or index the cells of their collection operand (`Sort`,
- * `Reverse`, `Take`, `Filter`, …), answer positions (`Ordering`), or count
- * equal cells (`Tally`). An absent cell of
+ * `Reverse`, `Take`, `Filter`, …), put a new cell in among them (`Insert`,
+ * `ReplaceAt`, `Append`), answer positions (`Ordering`, `IndexOf`), count
+ * cells (`Tally`, `Count`), or test that a cell is there (`Contains`). An
+ * absent cell does not make their answer absent: `IndexOf([1, Missing], 2)`
+ * is `0`, typed `integer`, not `number`. An absent cell of
  * the operand (`[3, Missing, 1]`, typed `list<integer | missing>`) is then
  * an ordinary cell: it goes into the result as it is, or it only takes a
  * position in the order. `Sort([3, Missing, 1])` is `[1, 3, Missing]`.
@@ -311,19 +315,37 @@ const ABSENT_CELLS_PASS_THROUGH: ReadonlySet<string> = new Set([
   'Filter',
   'Slice',
   'Tally',
+  'Insert',
+  'ReplaceAt',
+  'Append',
+  'Contains',
+  'IndexOf',
+  'Count',
 ]);
 
 /**
+ * The collection operators whose `type` handler reads the absent cells of
+ * the collection operand itself. `Reduce` computes from its cells, but with
+ * no initial value it returns its only element unchanged
+ * (`Reduce([Missing], Max)` is `Missing`), so its handler must see the
+ * `missing` arm of the cells to put it in the result type. The handler also
+ * does the numeric widening that the absorption of `absorbOperandAbsence`
+ * does for the other operands.
+ */
+const ABSENT_CELLS_READ_BY_HANDLER: ReadonlySet<string> = new Set(['Reduce']);
+
+/**
  * True when `operator` is one of the operators of
- * `ABSENT_CELLS_PASS_THROUGH` and an operand of type `t` is absent only in
- * its cells: `t` has a `missing` arm, but not at the top level. Such an
- * operand is typed as it is: its `missing` arm is not stripped before the
- * type variables are bound, and it does not start the absorption of
- * `absorbOperandAbsence`.
+ * `ABSENT_CELLS_PASS_THROUGH` or `ABSENT_CELLS_READ_BY_HANDLER`, and an
+ * operand of type `t` is absent only in its cells: `t` has a `missing` arm,
+ * but not at the top level. Such an operand is typed as it is: its `missing`
+ * arm is not stripped before the type variables are bound, and it does not
+ * start the absorption of `absorbOperandAbsence`.
  */
 export function passesAbsentCellsThrough(operator: string, t: Type): boolean {
   return (
-    ABSENT_CELLS_PASS_THROUGH.has(operator) &&
+    (ABSENT_CELLS_PASS_THROUGH.has(operator) ||
+      ABSENT_CELLS_READ_BY_HANDLER.has(operator)) &&
     typeContainsMissing(t) &&
     !hasTopLevelMissing(t)
   );
@@ -339,9 +361,10 @@ export function passesAbsentCellsThrough(operator: string, t: Type): boolean {
  * `When(f(v), c)`. Its type handler must then see the operand as the value
  * it is applied to, without the absent case (a restriction is typed
  * `missing | T`), and the absent case goes to the result. A `handle`
- * operator answers `Missing` when the operand is, so its result type gains
- * a `missing` arm (`withThreadedAbsence`). A `propagate` operator strips the
- * arm with its own machinery (`absorbOperandAbsence`).
+ * operator answers the absence marker of its result when the operand is
+ * absent, so its result type gains the arm of that marker
+ * (`withThreadedAbsence`). A `propagate` operator strips the arm with its
+ * own machinery (`absorbOperandAbsence`).
  */
 export function threadedPresentType(t: Type): Type | undefined {
   if (!hasTopLevelMissing(t)) return undefined;
@@ -350,9 +373,18 @@ export function threadedPresentType(t: Type): Type | undefined {
 }
 
 /**
- * `t` with the `missing` arm of an application whose threaded operand can be
+ * `t` with the absence arm of an application whose threaded operand can be
  * absent (`threadedPresentType`). The empty type and the error type are
  * kept as they are: they say the application has no value at all.
+ *
+ * The arm is the absence marker of the result's domain: `nan` when `t`,
+ * less its `missing` arm, is a subtype of `number`, and `missing`
+ * otherwise. An element read of an absent collection answers that marker
+ * (user decision of 2026-09-25, `docs/ERROR-MODEL.md` §2): `First` of a
+ * restricted pair of integers whose condition is false is `NaN`, typed
+ * `integer | nan`, and `First` of a restricted list of points is `Missing`,
+ * typed `missing | tuple<…>`. The evaluate handler reads the same marker
+ * from this type (`absentScalarMarker()`, `validate.ts`).
  */
 export function withThreadedAbsence(t: Type): Type {
   if (t === 'never' || t === 'error') return t;
@@ -363,6 +395,12 @@ export function withThreadedAbsence(t: Type): Type {
   // inferred `m`'s elements as `real` instead of `number`. The result stays
   // `unknown`, which admits the absent case.
   if (t === 'unknown' || t === 'any') return t;
+  // The arms are joined with `reduceType`, not with `widen`: widening climbs
+  // the numeric ladder and answers a bare `number` for `integer ⊔ nan`,
+  // which loses the element tier.
+  const present = stripMissingFromType(t);
+  if (present !== 'never' && isSubtype(present, 'number'))
+    return reduceType({ kind: 'union', types: [t, 'nan'] });
   return widen('missing', t);
 }
 

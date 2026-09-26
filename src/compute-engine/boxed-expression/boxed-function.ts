@@ -1,4 +1,5 @@
 import { callResultType } from './call-result-type.js';
+import { isPolymorphicType } from '../../common/type/instantiate.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import type {
   SimplifyOptions,
@@ -75,6 +76,7 @@ import {
   lazyBroadcastMapIfNeeded,
   lazyMapNumericApproximation,
   zip,
+  zipBroadcast,
   zipParticipates,
   appliesToListCoordinateTuple,
   isAbsentScalarTerm,
@@ -134,6 +136,7 @@ import { numericStoreTiers } from './literal-tier.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import {
   broadcastResultType,
+  nestedBroadcastResultType,
   broadcastShapedResultType,
   functionResult,
   staticMembership,
@@ -4577,7 +4580,7 @@ export class BoxedFunction
         );
         if (lazy) return lazy;
 
-        const items = zip(bops);
+        const items = zipBroadcast(bops, isBroadcastableCollection);
         if (items) {
           const results: Expression[] = [];
           // A THROWN element failure aborts the whole broadcast, so it cannot
@@ -4914,7 +4917,18 @@ export class BoxedFunction
           (behavior === 'propagate' || behavior === 'reject') &&
           (def.broadcastable
             ? hasAbsentScalarOperand(tail)
-            : tail.some((x) => isAbsentScalarSymbol(x)))
+            : tail.some(
+                (x, i) =>
+                  // A `propagate` operator answers the marker only for an
+                  // absent operand at a position that strips `missing`
+                  // (`missingStrip`). At any other position the handler
+                  // receives the absent operand and gives its own answer:
+                  // `Contains([1, 2], Missing)` is `False`, because a search
+                  // for an absent value finds nothing (user decision
+                  // 2026-09-26).
+                  (behavior === 'reject' || def.stripsMissingAt(i)) &&
+                  isAbsentScalarSymbol(x)
+              ))
         ) {
           if (behavior === 'reject')
             return this.engine.error([
@@ -5008,7 +5022,12 @@ export class BoxedFunction
         );
         if (lazy) return lazy;
 
-        const items = zip(tail);
+        // For a user function a tuple (a point) is lifted whole into every
+        // cell, not zipped; a builtin operator zips it (a tuple zipped
+        // against a list supplies cells, pinned by its tests).
+        const items = lambdaBroadcast
+          ? zipBroadcast(tail, isBroadcastableCollection)
+          : zip(tail);
         if (items) {
           const results: Expression[] = [];
           // Element-wise context, for the LAMBDA broadcast only (see step 2b):
@@ -5497,7 +5516,7 @@ export class BoxedFunction
         );
         if (lazy) return lazy;
 
-        const items = zip(bops);
+        const items = zipBroadcast(bops, isBroadcastableCollection);
         if (items) {
           const results: Promise<Expression>[] = [];
           while (true) {
@@ -5789,7 +5808,18 @@ export class BoxedFunction
           (behavior === 'propagate' || behavior === 'reject') &&
           (def.broadcastable
             ? hasAbsentScalarOperand(tail)
-            : tail.some((x) => isAbsentScalarSymbol(x)))
+            : tail.some(
+                (x, i) =>
+                  // A `propagate` operator answers the marker only for an
+                  // absent operand at a position that strips `missing`
+                  // (`missingStrip`). At any other position the handler
+                  // receives the absent operand and gives its own answer:
+                  // `Contains([1, 2], Missing)` is `False`, because a search
+                  // for an absent value finds nothing (user decision
+                  // 2026-09-26).
+                  (behavior === 'reject' || def.stripsMissingAt(i)) &&
+                  isAbsentScalarSymbol(x)
+              ))
         ) {
           if (behavior === 'reject')
             return this.engine.error([
@@ -5867,7 +5897,12 @@ export class BoxedFunction
         );
         if (lazy) return lazy;
 
-        const items = zip(tail);
+        // For a user function a tuple (a point) is lifted whole into every
+        // cell, not zipped; a builtin operator zips it (a tuple zipped
+        // against a list supplies cells, pinned by its tests).
+        const items = lambdaBroadcast
+          ? zipBroadcast(tail, isBroadcastableCollection)
+          : zip(tail);
         if (items) {
           const results: Promise<Expression>[] = [];
           while (true) {
@@ -6852,16 +6887,27 @@ function lambdaBroadcastType(
   ops: ReadonlyArray<Expression>,
   perElementResult: Type,
   slots: ReturnType<typeof broadcastableParamSlots>,
-  inferredResult: boolean
+  inferredResult: boolean,
+  generic = false
 ): Type | undefined {
   // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
-  // never mapped), then the body's own arithmetic broadcasts it element-wise
-  // (`g := x ↦ 2x`; `g((1,2))` evaluates `2·(1,2) = (2,4)`). An INFERRED
-  // scalar signature result therefore disagrees with the value, and the
-  // body's shape is not statically knowable — return `any`. A DECLARED
-  // signature is authoritative (the user promised the result type) and is
-  // left untouched.
-  if (inferredResult && ops.some((x) => isNumericTuple(x))) return 'any';
+  // never mapped), then the body's own arithmetic decides the shape:
+  // `g := x ↦ 2x` gives `g((1,2)) = 2·(1,2) = (2,4)`, a tuple, while
+  // `x ↦ Abs(x)` gives the norm, a scalar. The signature result describes a
+  // scalar argument, whether it was inferred or declared (a declared
+  // `(real) -> real` called with a tuple evaluates to a tuple), so it does
+  // not bound the value, and the body's shape is not statically knowable —
+  // return `any`. (Typing the body with the parameter typed as the tuple was
+  // tried on 2026-09-26: the descriptor-based derivation gave wrong narrow
+  // types, for a nested user call inside a list or for `P·Norm(P)`.)
+  // A DECLARED result that is not a number type is kept: a generic
+  // `(x: T) -> T where T` instantiates `T` to the tuple, and a declared
+  // tuple result describes the tuple argument.
+  if (
+    ops.some((x) => isNumericTuple(x)) &&
+    (inferredResult || isSubtype(perElementResult, 'number'))
+  )
+    return 'any';
 
   const mappable = (i: number) => slots === undefined || slots.at(i).mappable;
   const mapped = ops.filter(
@@ -6911,7 +6957,19 @@ function lambdaBroadcastType(
         perElementResult.types.some((m) =>
           isSubtype(m, COLLECTION_SHAPE_TYPE)
         ));
-    if (collectionValued) return broadcastResultType(perElementResult);
+    // One list level per rank the broadcast descends: a nested list is
+    // mapped at its leaves (`nestedBroadcastResultType`). Two exceptions
+    // take one level: a GENERIC signature, whose type solver bound its type
+    // parameter to the element one rank down, so `perElementResult` already
+    // reflects the argument's rank; and a declared `broadcastable<T>` slot
+    // plan (`slots`), which maps exactly one rank.
+    if (collectionValued)
+      return generic || slots !== undefined
+        ? broadcastResultType(perElementResult)
+        : nestedBroadcastResultType(
+            mapped.map((x) => x.type.type),
+            perElementResult
+          );
     // Shape-aware (§D6.1): the map preserves the source's structure.
     return broadcastShapedResultType(
       mapped.map((x) => x.type.type),
@@ -7052,18 +7110,28 @@ function type(expr: BoxedFunction): Type | BoxedType {
     const passedThrough = expr.ops.map((x) =>
       passesAbsentCellsThrough(expr.operator, x.type.type)
     );
+    // A position that does not strip `missing` (`missingStrip`) takes no
+    // part in the absorption: the handler answers for an absent operand
+    // there (the searched value of `Contains` is not found).
     const absenceTypes = expr.ops.map((x, i) =>
-      absentTerm(x)
-        ? 'missing'
-        : passedThrough[i]
-          ? stripMissingFromType(x.type.type)
-          : x.type.type
+      !def.stripsMissingAt(i)
+        ? stripMissingFromType(x.type.type)
+        : absentTerm(x)
+          ? 'missing'
+          : passedThrough[i]
+            ? stripMissingFromType(x.type.type)
+            : x.type.type
     );
     const absorbMissing =
       def.resolvedMissingBehavior === 'propagate' &&
       expr.ops.some(
         (x, i) =>
-          (x.type.facts.containsMissing && !passedThrough[i]) || absentTerm(x)
+          // Only a position that strips `missing` (`missingStrip`) makes the
+          // result absent. At another position the handler answers for the
+          // absent operand itself, as the runtime absence gate says.
+          def.stripsMissingAt(i) &&
+          ((x.type.facts.containsMissing && !passedThrough[i]) ||
+            absentTerm(x))
       );
 
     // Conditional-value threading (`threadsConditionals`) for an operator
@@ -7407,14 +7475,16 @@ function type(expr: BoxedFunction): Type | BoxedType {
       // so the D10 lift is admitted unconditionally, exactly as
       // `paramsAreScalar(sig)` does on the value route. A ground signature
       // yields `undefined` and keeps `sigResult` untouched.
-      const lambdaResult =
-        instantiatedResultType(resolvedOf(), expr.ops, { threadable: true }) ??
-        sigResult;
+      const instantiated = instantiatedResultType(resolvedOf(), expr.ops, {
+        threadable: true,
+      });
+      const lambdaResult = instantiated ?? sigResult;
       const lifted = lambdaBroadcastType(
         expr.ops,
         lambdaResult,
         declaredSlots,
-        def.inferredSignature
+        def.inferredSignature,
+        instantiated !== undefined
       );
       // Through `applyContractB` directly, NOT `maybeAbsorb`: the
       // missing-value absorption never applied on this return, and the
@@ -7502,7 +7572,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
         expr.ops,
         sigResult,
         valueSlots,
-        expr.valueDefinition.inferredType
+        expr.valueDefinition.inferredType,
+        isPolymorphicType(sig)
       );
       if (lifted !== undefined) return lifted;
     }
@@ -7592,6 +7663,11 @@ function applyFunctionLiteral(
     return expr._withParseScope(() => expr.engine.function(expr.operator, ops));
   }
   if (broadcastsElementwise) {
+    // Collections of different lengths are an error, not a truncation (the
+    // broadcast rulings of 2026-07-24, as at step 2b): the zip below stops
+    // at the shortest source, so `f([1, 2], [1, 2, 3])` gave `[2, 4]`.
+    const mismatch = broadcastLengthMismatch(expr.engine, ops);
+    if (mismatch) return mismatch;
     // Hybrid laziness, as at the operator-def lambda broadcast (step 2b):
     // past the eager threshold — or for a provably-finite collection of
     // unknown size — return the lazy `Map` form instead of materializing.
@@ -7606,7 +7682,8 @@ function applyFunctionLiteral(
     );
     if (lazy) return lazy;
 
-    const items = zip(ops);
+    // A tuple (a point) is lifted whole into every cell, not zipped.
+    const items = zipBroadcast(ops, isBroadcastableCollection);
     if (items) {
       const results: Expression[] = [];
       // Element-wise context, exactly as at the operator-def lambda broadcast
@@ -8137,7 +8214,11 @@ function pointListAbsence(
         whole = true;
       return;
     }
-    if (!isFunction(x, 'List') || !mapsAsPointList(plan, i, x, true)) return;
+    if (
+      !isFunction(x, 'List') ||
+      !mapsAsEvaluatedPointList(plan, i, x, canonicalOps)
+    )
+      return;
     x.ops.forEach((cell, j) => {
       if (isAbsentScalarSymbol(cell)) cells.add(j);
     });
@@ -8161,6 +8242,36 @@ function markAbsentPointListCells(
 }
 
 /**
+ * Whether the EVALUATED operand `x` at slot `i` is a list of points the map
+ * applies to. This is `mapsAsPointList`, with one more case: a non-empty
+ * `List` whose cells are ALL absent (`Missing` or `Undefined`), when the
+ * canonical operand `canonicalOps[i]` is typed as a list of points. The
+ * evaluated type of such a list (`list<missing>`) does not say that its
+ * elements are points, but the canonical operand does:
+ * `k([(3, 4)\{0 < t\}])` with `t < 0` evaluates its argument to
+ * `[Missing]`, and the call answers `[Missing]`, as it does when only some
+ * of the points are absent.
+ */
+function mapsAsEvaluatedPointList(
+  plan: BroadcastSlotPlan,
+  i: number,
+  x: Expression,
+  canonicalOps: ReadonlyArray<Expression> | undefined
+): boolean {
+  if (mapsAsPointList(plan, i, x, true)) return true;
+  const slot = plan.at(i);
+  if (!slot.mappable || slot.elements === undefined) return false;
+  if (!isFunction(x, 'List') || x.nops === 0) return false;
+  if (!x.ops.every((cell) => isAbsentScalarSymbol(cell))) return false;
+  const c = canonicalOps?.[i];
+  return (
+    c !== undefined &&
+    !isTuple(c) &&
+    isPointListArgumentType(c.type.type, slot.elements)
+  );
+}
+
+/**
  * Run the point-list map for one application (see `pointListParamSlots`), or
  * return `undefined` when no operand at a point slot is a list of points. The
  * operands `ops` must already be evaluated; `canonicalOps` are the operands
@@ -8178,7 +8289,8 @@ function pointListBroadcast(
 ): Expression | undefined {
   const absence = pointListAbsence(plan, ops, canonicalOps);
   if (absence.whole) return ce.Missing;
-  if (!ops.some((x, i) => mapsAsPointList(plan, i, x, true))) return undefined;
+  if (!ops.some((x, i) => mapsAsEvaluatedPointList(plan, i, x, canonicalOps)))
+    return undefined;
   return markAbsentPointListCells(
     ce,
     declaredBroadcast(
@@ -8187,7 +8299,7 @@ function pointListBroadcast(
       literal,
       plan,
       ops,
-      (x, i) => mapsAsPointList(plan, i, x, true),
+      (x, i) => mapsAsEvaluatedPointList(plan, i, x, canonicalOps),
       options
     ),
     absence.cells
@@ -8206,7 +8318,8 @@ async function pointListBroadcastAsync(
 ): Promise<Expression | undefined> {
   const absence = pointListAbsence(plan, ops, canonicalOps);
   if (absence.whole) return ce.Missing;
-  if (!ops.some((x, i) => mapsAsPointList(plan, i, x, true))) return undefined;
+  if (!ops.some((x, i) => mapsAsEvaluatedPointList(plan, i, x, canonicalOps)))
+    return undefined;
   return markAbsentPointListCells(
     ce,
     await declaredBroadcastAsync(
@@ -8215,7 +8328,7 @@ async function pointListBroadcastAsync(
       literal,
       plan,
       ops,
-      (x, i) => mapsAsPointList(plan, i, x, true),
+      (x, i) => mapsAsEvaluatedPointList(plan, i, x, canonicalOps),
       options
     ),
     absence.cells
@@ -8504,7 +8617,9 @@ function declaredBroadcastElement(
     // no type to re-read.
     return ce.typeError(t, el.type, el);
   }
-  return ce._fn('Apply', [literal, ...row]);
+  // The element binds whole: a collection element is not mapped again
+  // (`ApplyWhole`; `Apply` maps a scalar-parameter literal over it).
+  return ce._fn('ApplyWhole', [literal, ...row]);
 }
 
 /** The function literal a declared-`broadcastable<T>` map applies per element,

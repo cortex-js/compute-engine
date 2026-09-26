@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { canonicalAngle } from '../../src/compute-engine/boxed-expression/utils';
 
 /**
  * Numeric evaluation of rational multiples of π, and of a rational times a
@@ -64,6 +65,20 @@ describe('at machine precision a rational is the correctly rounded double', () =
     );
   });
 
+  test('a tiny rational angle whose denominator overflows is not read as 0', () => {
+    // `(10³⁰⁰ + 1)/10⁴⁰⁰` is about `10⁻¹⁰⁰`, a normal double, although its
+    // denominator overflows a double: `csc` and `cot` of it are finite.
+    const q = m.number(
+      m._numericValue({ rational: [10n ** 300n + 1n, 10n ** 400n] })
+    );
+    expect(m.box(['Csc', q]).N().re).toBe(1e100);
+    expect(m.box(['Cot', q]).N().re).toBe(1e100);
+    // An angle whose double is 0 is the signed infinity.
+    const tiny = m.number(m._numericValue({ rational: [1n, 10n ** 400n] }));
+    expect(m.box(['Csc', tiny]).N().toString()).toBe('+oo');
+    expect(m.box(['Cot', tiny.neg()]).N().toString()).toBe('-oo');
+  });
+
   test('cot at a zero on the exact-angle route is 0, as cos is', () => {
     // `5π/2` is reduced exactly to `π/2` and the big-decimal kernel runs at
     // 20 digits; its rounding dust is chopped for `cot` as it is for `cos`.
@@ -88,6 +103,16 @@ describe('at 21 digits a rational multiple of π is rounded once', () => {
       { num: '0.333333333333333333333' },
       'x',
     ]);
+  });
+
+  test('a tiny negative multiple of π is not reduced to 2π', () => {
+    // `−π/10³¹⁰`: the double of `−1/(2·10³¹⁰)` is `−0`, which is not
+    // negative, so the reduction modulo 2 took the floor and gave
+    // `(2 − 10⁻³¹⁰)π`, which rounds to `2π`.
+    const k = ce.number(ce._numericValue({ rational: [-1n, 10n ** 310n] }));
+    const theta = ce.function('Multiply', [k, ce.Pi]);
+    expect(canonicalAngle(theta)!.re).toBeLessThan(0);
+    expect(canonicalAngle(theta)!.re).toBeGreaterThan(-1e-309);
   });
 
   test('an angle near a special angle keeps its guard digits', () => {

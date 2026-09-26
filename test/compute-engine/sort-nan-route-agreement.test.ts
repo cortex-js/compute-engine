@@ -257,6 +257,18 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
     expect(value(['Ordering', xs, DESC])).toBe('[1,3,2]');
   });
 
+  test.each(['Missing', 'Undefined'])(
+    '%s is last by a key that ties every element',
+    (absent) => {
+      // The absent cell is ordered by itself, not by its key: with a
+      // constant key the sort kept it first.
+      const xs = ['List', absent, 2, 1];
+      const ZERO_KEY = ['Function', 0, 'x'];
+      expect(value(['Sort', xs, ZERO_KEY])).toBe(`[2,1,"${absent}"]`);
+      expect(value(['Ordering', xs, ZERO_KEY])).toBe('[2,3,1]');
+    }
+  );
+
   test('after NaN, and two absent cells keep their order', () => {
     expect(value(['Sort', ['List', 'Undefined', 3, 'NaN', 'Missing', 1]])).toBe(
       '[1,3,NaN,"Undefined","Missing"]'

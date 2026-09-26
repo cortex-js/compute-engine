@@ -406,7 +406,9 @@ class ExpressionOperandFacts implements OperandFacts {
   get closed(): Tri {
     if (!(this._computed & CLOSED_COMPUTED)) {
       this._computed |= CLOSED_COMPUTED;
-      this._closed = this.#op.isConstant;
+      const constant = this.#op.isConstant;
+      this._closed =
+        constant === true ? true : (symbolHoldsConstant(this.#op) ?? constant);
     }
     return this._closed;
   }
@@ -612,6 +614,27 @@ class TypeOperandFacts implements OperandFacts {
   get shape(): readonly number[] | undefined {
     return factsOf(this.type).shape;
   }
+}
+
+/**
+ * Whether a SYMBOL that holds a value stands for a constant expression, or
+ * `undefined` for any other operand. A symbol reports `isConstant` false
+ * even when it holds `π/2`, and a type handler that reads `closed` false
+ * applies the generic-point convention to it: `Tan(z)` with `z := π/2`
+ * claimed `real` and evaluated to `~oo`. So a held value that is a constant
+ * expression makes the symbol closed. A held number literal does not: the
+ * only pole a number literal can sit on is 0 (a pole of `Cot`, `Csc`,
+ * `Coth`, `Csch`; every other pole is an irrational multiple of π), and
+ * `poleReciprocalType` rules 0 out with its own sign check. So `Tan(w)` with
+ * `w := 3` keeps its `real` claim, and `Cot(w)` with `w := 0` is `number`. A symbol that is itself a constant (`Pi`) is closed already and
+ * is not read here: its numeric value is a machine approximation of a pole.
+ */
+function symbolHoldsConstant(op: Expression): Tri {
+  if (!isSymbol(op)) return undefined;
+  const value = op.value;
+  if (value === undefined) return undefined;
+  if (isNumber(value)) return false;
+  return value.isConstant;
 }
 
 export function describeType(t: Type, closed?: Tri): OperandDescriptor {

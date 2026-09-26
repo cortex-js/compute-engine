@@ -192,6 +192,42 @@ describe('A RECURSIVE CALL HAS THE LANE OF THE BODY OF ITS DEFINITION', () => {
   }
 });
 
+describe('A RECURSIVE CALL HAS THE ENTRY LANE OF THE BODY OF ITS DEFINITION', () => {
+  // With `f: (integer) -> matrix<number>`, the type of a recursive call does
+  // not say whether its entries are complex, and strict and auto read it as
+  // real: `MatrixPower(f(n − 1), 2)` took the real matrix helper, which
+  // answers NaN entries for the complex base case. The body returns complex
+  // entries, so the definition is now compiled a second time with the
+  // entries of the recursive calls read as complex.
+  const BODY = [
+    'Function',
+    [
+      'If',
+      ['Equal', 'n', 0],
+      ['List', ['List', 'ImaginaryUnit', 0], ['List', 0, 1]],
+      ['MatrixPower', ['f', ['Subtract', 'n', 1]], 2],
+    ],
+    'n',
+  ];
+
+  for (const mode of MODES) {
+    it(`complex base case, (integer) -> matrix<number>, ${mode}`, () => {
+      const ce = new ComputeEngine();
+      ce.declare('f', '(integer) -> matrix<number>');
+      ce.assign('f', ce.box(BODY as any));
+      ce.declare('k', 'integer');
+      expect(ce.box(['f', 1]).evaluate().toString()).toBe('[[-1,0],[0,1]]');
+      const result = js(ce.box(['f', 'k']), mode);
+      const m = result.run({ k: 1 });
+      expectValue(m[0][0], [-1, 0]);
+      expectValue(m[0][1], [0, 0]);
+      expectValue(m[1][0], [0, 0]);
+      expectValue(m[1][1], [1, 0]);
+      expectValue(result.run({ k: 0 })[0][0], [0, 1]);
+    });
+  }
+});
+
 // A wide operand (`matrix<number>`, `vector<number>`) is read as real in
 // `strict` and `auto` mode (user decision of 2026-09-24, option B). Before,
 // the compilation failed closed and its diagnostic named the symbol to

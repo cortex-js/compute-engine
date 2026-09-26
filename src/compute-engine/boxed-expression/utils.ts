@@ -726,7 +726,9 @@ export function canonicalAngle(
   let k2: NumericValue;
   if (k instanceof ExactNumericValue && k.im === 0 && k.radical === 1) {
     const half = k.div(2);
-    const whole = half.re < 0 ? half.ceil() : half.floor();
+    // The sign is read from the exact value: the double of a rational whose
+    // denominator overflows (`−1/10³¹⁰`) is `−0`, which is not negative.
+    const whole = k.sgn() === -1 ? half.ceil() : half.floor();
     k2 = k.sub(whole.mul(2));
   } else k2 = ce._numericValue(k.bignumRe ? k.bignumRe.mod(2) : k.re % 2);
   const piMulK2N = ce.Pi.mul(k2).N();
@@ -1576,4 +1578,31 @@ export function placeholderDef(
   return {
     value: new _BoxedValueDefinition(ce, name, { type: 'function' }),
   };
+}
+
+/**
+ * The float of the exact value of `expression`, when `value` (the numeric
+ * value of `expression`) is a NaN or an infinite number literal at machine
+ * precision. Otherwise, `undefined`.
+ *
+ * At machine precision, the numeric evaluation of each term of a sum gives a
+ * double, and the double of an integer above the largest double is ±∞. The
+ * sum of the doubles of `[10^{400}, -10^{400}, 1]` is then `∞ - ∞ + 1 = NaN`,
+ * while the exact sum is 1. The exact value is computed with `evaluate()`,
+ * and its float is the result: 1 here, and +∞ for an exact sum above the
+ * largest double. Only a pure `expression` is evaluated again. An engine
+ * whose numeric values are big decimals does not have this limit. A finite
+ * `value` costs one test.
+ */
+export function numericFromExactValue(
+  ce: ComputeEngine,
+  expression: Expression | undefined,
+  value: Expression
+): Expression | undefined {
+  if (!isNumber(value) || value.isFinite === true) return undefined;
+  if (expression === undefined || expression.isPure !== true) return undefined;
+  if (bignumPreferred(ce)) return undefined;
+  const exact = expression.evaluate();
+  if (!isNumber(exact) || exact.isNaN === true) return undefined;
+  return exact.N();
 }

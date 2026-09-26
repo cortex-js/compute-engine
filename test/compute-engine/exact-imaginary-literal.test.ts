@@ -121,6 +121,29 @@ describe('an exact imaginary literal beside a float still pairs into one literal
     const twoI = sum.ops!.find((op) => op.re === 0)!;
     expect(exact(twoI)).toBe(true);
   });
+  test('a big decimal real partner keeps its digits', () => {
+    // At 50 digits the real part has more digits than a double: the pairing
+    // keeps them, as the two-argument `Complex` form does.
+    const e = new ComputeEngine({ precision: 50 });
+    const re = { num: '1.2345678901234567890123456789' };
+    expect(e.box(['Add', re, ['Complex', 0, 2]]).json).toEqual(
+      e.box(['Complex', re, 2]).json
+    );
+    expect(e.box(['Add', re, ['Complex', 0, 2]]).json).toEqual([
+      'Complex',
+      re,
+      2,
+    ]);
+    expect(e.box(['Add', re, ['Complex', 0, 2.5]]).json).toEqual([
+      'Complex',
+      re,
+      2.5,
+    ]);
+    // An exact integer past the safe integers keeps its digits too.
+    expect(
+      ce.box(['Add', { num: '1152921504606846977' }, ['Complex', 0, 2.5]]).json
+    ).toEqual(['Complex', { num: '1152921504606846977' }, 2.5]);
+  });
   test('with no inexact partner the exact literal is kept', () => {
     expect(ce.parse('2i + 3').json).toEqual(['Complex', 3, 2]);
     expect(exact(ce.parse('2i + 3'))).toBe(true);

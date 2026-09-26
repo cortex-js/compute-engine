@@ -108,16 +108,15 @@ describe('the derived type is unchanged', () => {
     // equivalent explicit `Map` reports for the same shape — that equivalence
     // is what the implicit-map typing is defined by — so this row moves
     // whenever the inner head's own answer moves.
-    expect(pipe.type.toString()).toBe('vector<integer^3>');
-    expect(pipe.type.toString()).toBe(
-      ce
-        .box([
-          'Map',
-          ['Function', ['Map', ['Function', ['Power', 'k', 2], 'k'], '_1'], '_1'],
-          ['List', 1, 2, 3],
-        ])
-        .type.toString()
-    );
+    // `xs |> f` is `f(xs)` (user decision 2026-09-26): the pipe reports
+    // what the same literal called on the list reports.
+    const call = ce.box([
+      'Apply',
+      ['Function', ['Map', ['Function', ['Power', 'k', 2], 'k'], '_1'], '_1'],
+      ['List', 1, 2, 3],
+    ]);
+    expect(pipe.type.toString()).toBe('list<collection<number>>');
+    expect(pipe.evaluate().toString()).toBe(call.evaluate().toString());
   });
 });
 

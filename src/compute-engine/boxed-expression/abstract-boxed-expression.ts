@@ -392,8 +392,12 @@ export abstract class _BoxedExpression implements Expression {
       }
     }
     const syntax = this.engine._requireLatexSyntax();
-    const json = this.toMathJson({ prettify: true, fractionalDigits: 'auto' });
-    return syntax.serialize(json, latexSerializeOptions(this.engine));
+    const jsonOptions = { prettify: true, fractionalDigits: 'auto' } as const;
+    const json = this.toMathJson(jsonOptions);
+    return syntax.serialize(
+      json,
+      latexSerializeOptions(this.engine, undefined, this, jsonOptions)
+    );
   }
 
   /**
@@ -455,14 +459,17 @@ export abstract class _BoxedExpression implements Expression {
     // lays out the already-rounded digits (it must not re-crop). When the
     // caller supplies `digits`, thread it through; otherwise default to
     // `'auto'` (round to engine precision), matching prior behavior.
-    const json = this.toMathJson(
+    const jsonOptions: Partial<JsonSerializationOptions> =
       options?.digits !== undefined
         ? { prettify: options?.prettify ?? true, digits: options.digits }
-        : { prettify: options?.prettify ?? true, fractionalDigits: 'auto' }
-    );
+        : { prettify: options?.prettify ?? true, fractionalDigits: 'auto' };
+    const json = this.toMathJson(jsonOptions);
 
     const syntax = this.engine._requireLatexSyntax();
-    return syntax.serialize(json, latexSerializeOptions(this.engine, options));
+    return syntax.serialize(
+      json,
+      latexSerializeOptions(this.engine, options, this, jsonOptions)
+    );
   }
 
   /** Called by `JSON.stringify()` when serializing to json.

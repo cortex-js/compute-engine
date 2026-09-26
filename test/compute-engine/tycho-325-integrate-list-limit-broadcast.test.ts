@@ -215,6 +215,22 @@ describe('Tycho 325: a multiple integral with a list bound', () => {
     expect(expr.N().operator).toBe('Integrate');
   });
 
+  test('a scalar bound is evaluated once', () => {
+    // The scan for a list bound evaluates each bound. The multiple integral
+    // must use those values, and not evaluate the bound again: a second
+    // evaluation of `Random()` consumes a second draw.
+    const ce = new ComputeEngine();
+    const draw = ce.box(['WithRandomSeed', 7, ['Random']]).N().re;
+    const integral = ce
+      .box([
+        'WithRandomSeed',
+        7,
+        ['Integrate', 1, ['Limits', 'x', 0, ['Random']], ['Limits', 'y', 0, 1]],
+      ])
+      .N().re;
+    expect(Math.abs(integral - draw)).toBeLessThan(1e-9);
+  });
+
   test('scalar bounds still type as a number', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([

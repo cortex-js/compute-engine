@@ -630,7 +630,14 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
         // exactness through the tensor (`Norm([[1, 1+2i], [0, 1]], 1)` would
         // answer `3.236…` instead of `1 + √5`). An exact complex value
         // uses the `expression` dtype; an inexact one uses `complex128`.
-        return expr.isExact ? 'expression' : 'complex128';
+        // An inexact value whose real part is outside the float64 range
+        // (`1e400 + i` or `1e-400 + i` as a big decimal) would be lost in a
+        // `complex128` cell, so it uses the `expression` dtype too, as for
+        // the real tiers. The imaginary part of a big decimal value is a
+        // machine number, so a float64 holds it.
+        return expr.isExact || !float64HoldsNumber(expr)
+          ? 'expression'
+          : 'complex128';
 
       default:
         return 'expression';

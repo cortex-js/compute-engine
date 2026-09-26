@@ -159,7 +159,11 @@ export function singularValueDecomposition(
       if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
       largest = Math.max(largest, x, y);
     }
-  const scale = largest === 0 ? 1 : 2 ** Math.floor(Math.log2(largest));
+  // `Math.log2` rounds up to 1024 near `Number.MAX_VALUE`, and `2^1024` is
+  // `Infinity`, so the exponent is at most 1023, the largest one of a finite
+  // float64.
+  const scale =
+    largest === 0 ? 1 : 2 ** Math.min(1023, Math.floor(Math.log2(largest)));
   for (let i = 0; i < m; i++)
     for (let j = 0; j < n; j++) {
       bRe[i][j] /= scale;

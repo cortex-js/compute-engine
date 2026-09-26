@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
 
 // An exact number literal holds one radical times a Gaussian rational,
 // `√r·(a + b·i)` with `r` a square-free positive integer and `a`, `b` exact
@@ -331,6 +332,43 @@ describe('.is() OF AN EXACT VALUE AND A DOUBLE', () => {
     expect(ce.number([1, 3]).is(ce.number(1 / 3))).toBe(true);
     expect(ce.box(2).is(2.0000001)).toBe(false);
     expect(ce.number([1, 3]).is(0.3334)).toBe(false);
+  });
+  test('a large integer is compared through its exact difference', () => {
+    // `2^53` and `2^53 + 1` have the same double, but they differ by 1,
+    // which is larger than the tolerance.
+    const big = ce.number(9007199254740992n);
+    const next = ce.number(9007199254740993n);
+    expect(big.is(9007199254740993n)).toBe(false);
+    expect(big.is(9007199254740993n, 0.5)).toBe(false);
+    expect(big.is(next)).toBe(false);
+    expect(next.is(9007199254740992)).toBe(false);
+    expect(big.is(9007199254740993n, 1)).toBe(true);
+    expect(next.is(9007199254740993n)).toBe(true);
+  });
+  test('a large integer is compared exactly at machine precision', () => {
+    // At machine precision, the integer `2^53` (not a safe integer) was
+    // converted to a double value, and the subtraction rounded the exact
+    // operand to that double: the difference was 0.
+    const savedPrecision = BigDecimal.precision;
+    try {
+      const m = new ComputeEngine({ precision: 'machine' });
+      expect(m.number(9007199254740993n).is(9007199254740992)).toBe(false);
+      expect(m.number(9007199254740993n).is(9007199254740993n)).toBe(true);
+      expect(m.number(9007199254740992n).is(9007199254740992)).toBe(true);
+    } finally {
+      BigDecimal.precision = savedPrecision;
+    }
+  });
+  test('the difference of two rationals with huge parts is compared', () => {
+    // The double of each part of the difference is +∞, so its double is
+    // `∞/∞ = NaN`. The difference is about 1.1e-11, within the tolerance.
+    const b = 10n ** 400n;
+    const x = ce.number([b + 1n, 3n * b + 10n ** 390n]);
+    expect(ce.number([1, 3]).is(x)).toBe(true);
+    expect(x.is(ce.number([1, 3]))).toBe(true);
+    // A difference of about 3e-10 is larger than the tolerance.
+    const y = ce.number([b + 1n, 3n * b + 10n ** 392n]);
+    expect(ce.number([1, 3]).is(y)).toBe(false);
   });
   test('isSame stays exact', () => {
     expect(ce.number([1, 3]).isSame(1 / 3)).toBe(false);

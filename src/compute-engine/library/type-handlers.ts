@@ -1095,8 +1095,8 @@ const EXTENDED_REAL_OR_NAN_TYPE: Type = Object.freeze({
  *   `nan` when it does not: `Sin(∞)` is an `incompatible-type` error in the
  *   interpreter and NaN on a compiled route (`Math.sin(Infinity)`);
  * - `nan` when the operand has a `nan` arm.
- * `undefined` as well when one of those parts is not on the extended real
- * line (`number`, `complex`), so the caller's own claim applies.
+ * `undefined` as well when one of those parts is `number` or not numeric,
+ * so the caller's own claim applies.
  */
 export function extendedElementaryFunctionType(
   operator: string,
@@ -1115,8 +1115,10 @@ export function extendedElementaryFunctionType(
   // The finite part keeps the operand's closedness, so `poleReciprocalType`
   // applies its generic-point convention to a non-constant operand, as it
   // does for one typed `real`: the pole set of `Tan` has measure zero, so
-  // `Tan(y)` claims `real` on the finite values. (A symbol that holds a pole
-  // value, `y := π/2`, is outside that convention; see ROADMAP.)
+  // `Tan(y)` claims `real` on the finite values. A symbol that holds a
+  // constant expression (`y := π/2`) is closed (its `closed` fact reads the
+  // held value, `symbolHoldsConstant` in `operand-descriptor.ts`), so
+  // `poleReciprocalType` keeps `number` for it.
   if (finite !== undefined)
     parts.push(
       elementaryFunctionType(operator, [
@@ -1130,12 +1132,19 @@ export function extendedElementaryFunctionType(
         : 'nan'
     );
   if (hasNaN) parts.push('nan');
-  // Only a result on the extended real line is claimed. A part that may be
-  // complex (`Arccos` of a real beyond ±1) keeps the caller's claim: typing
-  // it `complex | nan` stops compiles that work today (see the ROADMAP entry
-  // on complex-capable results).
-  if (parts.some((p) => !isSubtype(p, EXTENDED_REAL_OR_NAN_TYPE)))
-    return undefined;
+  // A part that may be complex (`Arccos` of a real beyond ±1) is claimed as
+  // such: `complex | nan` is the accurate return type, and a compiler that
+  // cannot lower a complex value must refuse it rather than rely on the
+  // wider `number` (user decision 2026-09-26). A part typed `number`, or not
+  // numeric, keeps the caller's claim.
+  const complexOrExtended: Type = {
+    kind: 'union',
+    types: [
+      'complex',
+      ...(EXTENDED_REAL_OR_NAN_TYPE as { types: Type[] }).types,
+    ],
+  };
+  if (parts.some((p) => !isSubtype(p, complexOrExtended))) return undefined;
   return reduceType({ kind: 'union', types: parts });
 }
 
@@ -1273,7 +1282,15 @@ export function extremumRangeType(
     // also admits `~oo`, which is off these heads' carrier: an error, not a
     // value (a compiled route lowers it to `+∞`, a signed infinity). The
     // values the head can return come from the signed pair.
-    const t = onCarrierInfinities(t0);
+    // A numeric operand that may be off the extended real line (`number`,
+    // the type of an untyped parameter, or `complex`) holds values off the
+    // carrier, and those are an `incompatible-type` error in the
+    // interpreter (NaN on a compiled route), not a value: the values the
+    // head can return come from its extended-real part, and NaN.
+    const t =
+      isSubtype(t0, 'number') && !isSubtype(t0, EXTENDED_REAL_OR_NAN_TYPE)
+        ? EXTENDED_REAL_OR_NAN_TYPE
+        : onCarrierInfinities(t0);
     const p = stripNaN(t);
     if (p !== t) hasNaN = true;
     if (!isSubtype(p, EXTENDED_REAL_TYPE)) return undefined;

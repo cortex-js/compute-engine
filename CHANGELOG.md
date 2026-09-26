@@ -91,8 +91,159 @@
   object form of the declaration, and both `ce.assign` and `:=`, behave the
   same. The stored literal is unchanged.
 
+- **A result that may be complex is typed `complex | nan`.** With
+  `y: real | signed_infinity`, `arccos(y)` and `arcsin(y)` were `number` and
+  are `complex | nan` (the value is complex beyond ±1, and there is none at
+  ±∞). A compiler that cannot lower a complex value now refuses such a body
+  instead of compiling it as real.
+- **`Clamp` keeps its bounds for a wide operand.** `Clamp(u, −1, 1)` with
+  `u: number` is `nan | real<−1..1>` (it was `real | signed_infinity`, with
+  `nan`): a value outside the extended real line is an error, not a value.
+- **The index of a `Sum` or `Product` over integer-literal limits is typed
+  by its range.** In `Sum(body, Limits(i, 1, 40))`, `i` is `integer<1..40>`
+  (it was `integer`), so `√(1 − ((i − 0.5)/40)²)` is `real` (it was
+  `complex`). An index that the body assigns keeps `integer`.
+- **A call with a tuple argument at a scalar parameter is typed `any`.**
+  `h((1, 2))` with `h: (real) -> real` and `h := x ↦ 2x` was typed `real`
+  and evaluates to `(2, 4)`; it is now `any`, as the same call already was
+  when the result was inferred. The body decides the shape (`x ↦ |x|` gives
+  a scalar), so the declared scalar result does not describe it.
+- **A symbol that holds a pole value is typed on the pole.** `Tan(z)` with
+  `z := π/2` was typed `real` and evaluates to `~oo`; it is now `number`.
+  A symbol that holds a number literal keeps the narrow claim (`Tan(w)` with
+  `w := 3` is `real`).
+
+- **A function literal applied to a collection maps over it, like a named
+  user function** (user decision 2026-09-26, Tycho item 327). `Apply` used
+  to bind each argument whole, so `Apply(i ↦ Sum(Cos(n), Limits(n, 1, i)),
+  [1, 2, 3])` was typed `number` and evaluated to an `incompatible-type`
+  error, while `X([1, 2, 3])` with `X := i ↦ …` and the compiled code of the
+  literal both mapped. Now a function literal whose parameters are scalar by
+  its signature maps over a collection argument, zips several, and is typed
+  as the mapped collection. What changes: `Apply(x ↦ (x, x), [1, 2])` is
+  `[(1, 1), (2, 2)]` (it was `([1,2], [1,2])`), the value the named call and
+  the compiled code already gave. A literal whose parameter is a collection
+  (`x ↦ Length(x)`) or generic (`(x: T) -> T where T`) still binds whole, and
+  a tuple or a string argument is not mapped.
+- **A named user function broadcast keeps a tuple whole and rejects
+  collections of different lengths.** `f([1, 2, 3], (10, 20))` for a
+  scalar-parameter `f := (x, y) ↦ (x, y)` zipped the point as if it were a
+  list and gave two cells, `[(1, 10), (2, 20)]`; each of the three cells now
+  holds the whole point. `f([1, 2], [1, 2, 3])` gave `[2, 4]` for
+  `f := (x, y) ↦ x + y`, a silent truncation; it is now the
+  `incompatible-dimensions` error that the broadcast rules of 2026-07-24
+  prescribe and the other broadcast routes already gave (user decision
+  2026-09-26: every user-function route reports it; a consumer that wants
+  Desmos truncation lowers the call to `Zip`). Builtin operators
+  are unchanged. The type of a broadcast whose per-element result is a
+  collection has one list level per rank it descends: `f := x ↦ (x, x)` over
+  `[[1, 2], [3, 4]]` is `list<list<tuple<…>>>` (it was
+  `list<tuple<…>>`, which the value `[[(1,1),(2,2)],[(3,3),(4,4)]]` is not a
+  member of).
+- **A pipe stage behaves exactly as a call** (user decision 2026-09-26):
+  `xs |> f` is `f(xs)` for a function-literal stage too. The stage used to
+  lower to a one-level `Map(f, xs)`. What changes: a nested list is mapped at
+  every depth (`[[1,2],[3,4]] |> x ↦ (x, x)` is
+  `[[(1,1),(2,2)],[(3,3),(4,4)]]`; it was `[([1,2],[1,2]),([3,4],[3,4])]`); a
+  stage whose parameter is a collection by its body binds the whole value
+  (`[[1],[2,3]] |> l ↦ Length(l)` is `2`; it was `[1,2]`, and
+  `xs |> p ↦ p[1] ∧ p[2]` over a list of pairs binds the list; write
+  `xs |> ((a, b)) ↦ a ∧ b` to map the pairs); and a set is bound whole, as a
+  call binds it.
+- **A parenthesized pipe stage maps like an unparenthesized one.**
+  `[1,2,3] |> (x \mapsto (x,x))` gave `([1,2,3], [1,2,3])`; it is now
+  `[(1, 1),(2, 2),(3, 3)]`, as `[1,2,3] |> x \mapsto (x,x)` already was.
+
+- **At machine precision, `.N()` of an integer too large for a double is
+  `±oo`**, however it is written. `\frac{10^{400}}{10^{-400}}` (which
+  canonicalizes to the integer literal `10^800`) was `1e+800`, an exact
+  integer, and is `+oo`, as `10^{800}` already was. `.N()` gives a machine
+  float at machine precision. `evaluate()` and the default precision are
+  unchanged: there `10^{800}` is still exact or `1e+800`.
+- **A number read from an absent collection is `NaN` on every route.** With
+  `t := -1`, `First((1,2){0<t})` gave `NaN` when it was held but `Missing`
+  when evaluated fresh, with `.N()`, or in compiled JavaScript. It is `NaN`
+  everywhere and is typed `integer | nan` (it was `integer | missing`). The
+  same applies to `Second`, `Third`, `Last` and `At`, and to compiled Python.
+  A row, a point or a string read from an absent collection is still
+  `Missing`: `At([[1,2],[3,4]]{0<t}, 2)` is `Missing`.
+- **Searching for an absent value finds nothing.** `Contains(L, Missing)` was
+  `Missing` and is `False`; `IndexOf` and `Count` were `NaN` and are `0`;
+  `Element` agrees. A restricted value whose condition is undecided,
+  `Contains([1,2], 2{c})`, stays held and gives the right answer once `c` is
+  decided (it was held as `Missing` or `NaN` whatever `c` became). Compiled
+  JavaScript and Python give the same answers.
+- **An operator over a whole absent collection gives `Missing`.** `Insert`,
+  `ReplaceAt`, `Append`, `Union`, `Intersection` and `SetMinus` over
+  `Missing` were `incompatible-type` errors; `Join(Missing, [1])` was
+  `[Missing, 1]`; the set relations (`Subset(Missing, {2,3})` and the others)
+  were `False` or `True`. All give `Missing` now.
+- **A `Reduce` with no start value can return its first element**, so its
+  type now admits the element type: `Reduce([Missing], Max)` is typed
+  `missing | number` (it was `number`, although the value is `Missing`).
+- **`Map` over a matrix is typed as a list of results**, one per row:
+  `Map(a ↦ 0, [[1,2],[3,4]])` is `vector<integer^2>` (it was typed as a 2×2
+  matrix).
+- **`Range` membership accepts a value within the counting tolerance of
+  either end.** `Element(1000, Range(0, 999.9999999999, 0.1))` was `False`
+  although `1000` is the last element; it is `True`. A value just before the
+  first element is also a member now: `Element(-1e-17, Range(0, 1, 0.1))`.
+
 ### Issues Resolved
 
+- **Fixes from a second review of the commits of 2026-09-23 to 2026-09-26.**
+  - Linear algebra: `Norm` of a matrix with tiny or huge entries no longer
+    underflows to `0` or overflows through the rank-one shortcut; an exact
+    1-norm no longer drops a column whose entries overflow a double;
+    `Eigenvalues` no longer treats an exact entry like `10^{-400}` as zero;
+    `Eigenvectors` returns a basis of the eigenspace for a repeated
+    eigenvalue (`[[2,0],[0,2]]` gave `[[1,0],[1,0]]`, now
+    `[[1,0],[0,1]]`) and no longer uses absolute thresholds on exact
+    entries; `Dot` of a vector with an absent cell and a matrix keeps the
+    matrix-product shape; `Norm(Linspace(a, 1, 3))` with a symbolic `a` stays
+    symbolic instead of `0`; `SingularValues` scales at the edge of the
+    double range; a big-decimal complex entry beyond the double range keeps
+    its value in a tensor; `Mean`, `Median` and `Variance` accept exact data
+    beyond the double range.
+  - Machine precision: `.N()` of a product, quotient, sum, square root, root
+    or logarithm whose exact operand is beyond the double range gives the
+    correct value (`\frac{10^{300}+1}{10^{400}}` was `0` and is `1e-100`;
+    `\ln(10^{400})` was `+oo`; `10^{400}-10^{400}+1` was `NaN`); `csc` and
+    `cot` of such an angle are finite; an exact angle `-π/10^{310}` keeps its
+    sign; an exact integer beyond `2^53` no longer compares equal to its
+    neighbor with `.is()`.
+  - Exact values: `Log` of an integer power beyond `2^53` reduces exactly
+    (`\log_2(2^{100})` is `100`); a complex `z` is not ordered by `z < z+1`
+    at zero tolerance; a big-decimal real part keeps its digits beside an
+    exact imaginary literal; `((2·10^{30}+1)/10^{30})·2^x` no longer
+    simplifies to `2^{x+1}`.
+  - Absent values: `Sum([Missing])`, `Product([Missing])` and
+    `Reduce([Missing], Multiply, 1)` are `NaN`; a factor typed `error` stops
+    the zero fold in `Multiply`; `Sort` by a key puts absent cells last;
+    `Insert` and `ReplaceAt` keep the restriction on the stored element
+    instead of the whole collection; mapping over a point list whose points
+    all became absent returns a list of `Missing`; `.div()` keeps the list
+    shape of an absent product and handles an absent divisor before scaling
+    a tuple.
+  - Compilation: a recursive function returning complex matrices compiles
+    with complex entries; free-symbol types ignore bound occurrences and
+    shared subexpressions; Python `Degrees` parenthesizes its operand, Python
+    `Dot` and `Cross` refuse an operand that can be absent, and Python `Norm`
+    handles NaN and infinite entries; JavaScript complex division is scaled
+    so it does not overflow or underflow; JavaScript `Distance` beside a list
+    of points returns `Missing` for an absent point; GLSL/WGSL color helpers
+    reject infinite channels and keep finite channels up to the largest
+    32-bit float, and `Gamma` treats every finite negative integer as a pole;
+    interval-js no longer treats a tiny nonzero angle as the pole at `0`.
+  - Other: a multiple integral evaluates a scalar bound once (a
+    `Random()` bound used the second draw); `Range(0, 1, +∞)` is `[0]` (it
+    was `[NaN]`); a `Tuple` parsed in an explicit scope keeps the
+    `\operatorname{Tuple}` spelling when serialized outside that scope.
+- **JavaScript target: an unrolled `Sum` no longer mixes a complex object
+  with real arithmetic.** A square root whose type proved it real was still
+  promoted to the complex lane (the non-negativity test did not read ranged
+  types), and the real arithmetic around it gave NaN
+  (`_SYS.cneg({re: 0.9999…, im: 0}) + 1`). It is now lowered real.
 - **`Min` over a descending range** answered its first element:
   `Min(Range(1, −∞))` was `1` and is `−∞`, and `Min(Range(5, 1))` was `5` and is
   `1`. **An empty range** has no extremum: `Max(Range(1, 5, −1))` was `2` (not

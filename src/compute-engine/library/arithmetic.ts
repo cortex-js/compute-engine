@@ -24,7 +24,10 @@ import {
   heldNonNumericScalar,
 } from '../boxed-expression/value-membership.js';
 import { hasAsyncOnlyApplication } from '../boxed-expression/async-only-descendants.js';
-import { bignumPreferred } from '../boxed-expression/utils.js';
+import {
+  bignumPreferred,
+  numericFromExactValue,
+} from '../boxed-expression/utils.js';
 import {
   DEADLINE_STRIDE,
   holdsDoubles,
@@ -121,6 +124,7 @@ import {
 import {
   mulFactored,
   mulNEvaluated,
+  isOutOfDoubleRangeLiteral,
   canonicalDivide,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
@@ -312,6 +316,8 @@ import type {
   SymbolDefinitions,
   Sign,
 } from '../global-types.js';
+import type { NumericValue } from '../numeric-value/types.js';
+import { withDoubleDigits } from '../numeric-value/exact-numeric-value.js';
 import {
   isNumber,
   isFunction,
@@ -2218,8 +2224,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const raw = ops.map(
             (op) => op.isPure === true && (isNumber(op) || isSymbol(op))
           );
+          const terms = ops.map((op, i) => (raw[i] ? op : evaluated[i]));
+          // A pure operand whose float is 0, ±∞ or NaN can have an exact
+          // value that is not (`10^{400}` is an integer above the largest
+          // double). It is passed as its exact value, so that the exact terms
+          // are added before the sum becomes a float: `10^{400} - 10^{400} +
+          // 1` is then 1, not `∞ - ∞ + 1 = NaN`.
+          for (let i = 0; i < ops.length; i++) {
+            if (raw[i]) continue;
+            const exact = exactValueOutOfDoubleRange(engine!, ops[i], terms[i]);
+            if (exact !== undefined) {
+              terms[i] = exact;
+              raw[i] = true;
+            }
+          }
           const r = addNEvaluated(
-            ops.map((op, i) => (raw[i] ? op : evaluated[i])),
+            terms,
             raw.map((x) => !x)
           );
           // An operand may only have BECOME a Quantity or Measurement through
@@ -2639,7 +2659,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
         return result;
       },
-      evaluate: ([num, den], { numericApproximation, engine }) => {
+      evaluate: ([num, den], { numericApproximation, engine, expression }) => {
         // Non-lazy operator: operands arrive already evaluated by the
         // driver (`_computeValue` step 4) — do not re-evaluate them.
         const nonNumeric = nonNumericOperandError(engine!, [num, den]);
@@ -2670,6 +2690,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         ) {
           const r = measurementDivide(engine!, evalNum, evalDen);
           return numericApproximation ? r?.N() : r;
+        }
+        // An operand whose float is 0 or ±∞ can have an exact value that is
+        // not: `10^{400} + 1` is an integer above the largest double. The
+        // quotient is then computed from the exact values, and it can be in
+        // the double range: `10^{300} / (10^{400} + 1)` is about `1e-100`,
+        // not `1e300 / ∞ = 0`. Only a pure operand is evaluated again.
+        if (
+          numericApproximation &&
+          (isOutOfDoubleRangeLiteral(num) || isOutOfDoubleRangeLiteral(den))
+        ) {
+          const originals =
+            expression && isFunction(expression) ? expression.ops : undefined;
+          const q = divideFromExactValues(engine!, originals, [num, den]);
+          if (q !== undefined) return q;
         }
         const res = num.div(den);
         if (numericApproximation && res.operator !== 'Divide') return res.N();
@@ -3798,7 +3832,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       sgn: ([x]) => lnSign(x),
-      evaluate: ([z], { numericApproximation, engine }) => {
+      evaluate: ([z], { numericApproximation, engine, expression }) => {
         // Ln(a, b) = Log(a, b), so no need to check second argument
         // Non-lazy: `z` is already evaluated by the driver.
         const nonNumeric = nonNumericOperandError(engine, [z]);
@@ -3809,6 +3843,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation ? r?.N() : r;
         }
         if (!numericApproximation) return z.ln();
+
+        // An exact argument outside the double range (`10^{400}`) has a
+        // logarithm in the double range.
+        {
+          const big = bigRealOf(
+            exactValueOutOfDoubleRange(engine, operandOf(expression, 0), z)
+          );
+          if (big !== undefined) {
+            const ln = engine.number(withDoubleDigits(() => big.abs().ln()));
+            if (!big.isNegative()) return ln;
+            return engine.number(engine.complex(ln.re, Math.PI));
+          }
+        }
 
         // The exceptional points answer the same exact values on the
         // numeric route (`Ln(+∞) = +∞`, `Ln(~oo) = ~oo`), and `Ln(−∞)` its
@@ -3878,7 +3925,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //   if (!x) return ce._fn('Log', [ce.error('missing'), base]);
       //   return x.ln(base ?? 10);
       // },
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: (ops, { numericApproximation, engine, expression }) => {
         // Non-lazy: operands are already evaluated by the driver.
         // Covers the whole log family: Lb/Lg/Log2/Log10 canonicalize to Log.
         const nonNumeric = nonNumericOperandError(engine, ops);
@@ -3891,6 +3938,38 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         if (!numericApproximation) return ops[0]?.ln(ops[1] ?? 10) ?? undefined;
         const ce = engine;
+        // An exact argument or base outside the double range (`10^{400}`)
+        // has a logarithm in the double range. The quotient of the two
+        // natural logarithms is computed with big decimals.
+        {
+          const zBig = bigRealOf(
+            exactValueOutOfDoubleRange(ce, operandOf(expression, 0), ops[0])
+          );
+          const bBig =
+            ops[1] === undefined
+              ? undefined
+              : bigRealOf(
+                  exactValueOutOfDoubleRange(
+                    ce,
+                    operandOf(expression, 1),
+                    ops[1]
+                  )
+                );
+          if (zBig !== undefined || bBig !== undefined) {
+            const z = zBig ?? bigRealOf(ops[0]);
+            const b =
+              bBig ??
+              (ops[1] === undefined ? new BigDecimal(10) : bigRealOf(ops[1]));
+            if (
+              z !== undefined &&
+              b !== undefined &&
+              z.isPositive() &&
+              b.isPositive() &&
+              !b.eq(1)
+            )
+              return ce.number(withDoubleDigits(() => z.ln().div(b.ln())));
+          }
+        }
         // The exceptional points answer their exact quotient values on the
         // numeric route too (the machine kernels below would give the
         // wrong sign at `Log(0, 1/2)` and NaN at `Log(8, −∞)`), and
@@ -4219,10 +4298,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // complex value.
         const present = ops.map((x) => withoutNanArm(x.type));
         if (present.some((t) => t !== undefined)) {
+          // The narrowed descriptor keeps the structural view of the factor.
+          // Without it, a declared `nan | real` factor read as an undeclared
+          // scalar, which the single-collection branch leaves out of the
+          // cell type: `a·L`, `a: real | nan`, `L: list<integer>`, was typed
+          // `list<integer | nan>`, and `a = 0.5` gives a cell that is not an
+          // integer.
           const t = derive(
             'Multiply',
             ops.map((x, i) =>
-              present[i] === undefined ? x : describeType(present[i]!)
+              present[i] === undefined
+                ? x
+                : {
+                    ...describeType(present[i]!, x.facts.closed),
+                    structureOf: x.structureOf,
+                  }
             )
           );
           // Built as a union, not through `widen`, which joins `real` and
@@ -4860,8 +4950,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const raw = ops.map(
             (op) => op.isPure === true && (isNumber(op) || isSymbol(op))
           );
+          const factors = ops.map((op, i) => (raw[i] ? op : evaluated[i]));
+          // A pure operand whose float is 0 or ±∞ can have an exact value
+          // that is not (`10^{-400}` is `1/10^400`, `1 + 10^{400}` is an
+          // integer). It is passed as its exact value, so that `mulNEvaluated`
+          // can fold it with the other factors before it becomes a float:
+          // `10^{-400}·10^{300}` is then `1e-100`, not `0·1e300`.
+          for (let i = 0; i < ops.length; i++) {
+            if (raw[i]) continue;
+            const exact = exactValueOutOfDoubleRange(
+              engine!,
+              ops[i],
+              factors[i]
+            );
+            if (exact !== undefined) {
+              factors[i] = exact;
+              raw[i] = true;
+            }
+          }
+          rescueExactCoefficients(engine!, ops, factors, raw);
           const r = mulNEvaluated(
-            ops.map((op, i) => (raw[i] ? op : evaluated[i])),
+            factors,
             raw.map((x) => !x)
           );
           // See the matching comment in `Add` (Tycho item 101).
@@ -5760,7 +5869,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         //note: args. are canonicalized prior.
         return canonicalRoot(base, exp);
       },
-      evaluate: ([x, n], { numericApproximation, engine }) => {
+      evaluate: ([x, n], { numericApproximation, engine, expression }) => {
         // Non-lazy: operands are already evaluated by the driver.
         const nonNumeric = nonNumericOperandError(engine, [x, n]);
         if (nonNumeric !== undefined) return nonNumeric;
@@ -5782,6 +5891,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (isMeasurement(evalX)) {
           const r = measurementRoot(engine, evalX, n);
           return numericApproximation ? r?.N() : r;
+        }
+        // An exact radicand outside the double range (`10^{-900}`) can have
+        // a root in the double range (`Root(10^{-900}, 3)` is `1e-300`). The
+        // root is computed with big decimals, as `exp(ln(x) / n)`. A negative
+        // radicand has a real root only for an odd integer index.
+        if (numericApproximation && isNumber(n) && n.im === 0) {
+          const big = bigRealOf(
+            exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
+          );
+          const k = n.re;
+          if (
+            big !== undefined &&
+            Number.isFinite(k) &&
+            k !== 0 &&
+            (!big.isNegative() || (Number.isInteger(k) && k % 2 !== 0))
+          ) {
+            const r = withDoubleDigits(() => big.abs().ln().div(k).exp());
+            return engine.number(big.isNegative() ? r.neg() : r);
+          }
         }
         // D2: an inexact (float) radicand or index numericizes even under
         // plain evaluate() — `Root(5.1, 3)` → 1.721…; `isExactNumber`
@@ -6155,7 +6283,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.sgn === 'not-zero') return 'not-zero';
         return undefined;
       },
-      evaluate: ([x], { numericApproximation, engine }) => {
+      evaluate: ([x], { numericApproximation, engine, expression }) => {
         // Non-lazy: `x` is already evaluated by the driver.
         const nonNumeric = nonNumericOperandError(engine, [x]);
         if (nonNumeric !== undefined) return nonNumeric;
@@ -6178,6 +6306,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
 
         if (!numericApproximation) return sqrtOfSquareFactors(x) ?? x.sqrt();
+
+        // An exact radicand outside the double range (`10^{-401}`) can have
+        // a square root in the double range (`3.16e-201`).
+        {
+          const big = bigRealOf(
+            exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
+          );
+          if (big !== undefined) {
+            const r = withDoubleDigits(() => big.abs().sqrt());
+            if (!big.isNegative()) return engine.number(r);
+            return engine.number(engine.complex(0, r.toNumber()));
+          }
+        }
 
         // An infinite radicand — a named infinity, or an "anonymous" one
         // with an infinite component (`∞ + i`) — has an exact value on the
@@ -7309,7 +7450,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(ce, bounds);
         // Evaluate the accumulated result to combine numeric factors
-        return result?.evaluate({ numericApproximation: numeric }) ?? ce.NaN;
+        const product = result?.evaluate({ numericApproximation: numeric });
+        if (product === undefined) return ce.NaN;
+        // A factor above the largest double is ±∞ at machine precision, and
+        // `∞ · 0` is NaN. The float of the exact product is used then.
+        if (!numeric) return product;
+        return (
+          numericFromExactValue(ce, options.expression, product) ?? product
+        );
       },
 
       evaluateAsync: async (ops, options) => {
@@ -7446,7 +7594,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return canonicalBigop('Sum', body, bounds, scope);
       },
 
-      evaluate: ([first, ...rest], { engine, numericApproximation }) => {
+      evaluate: (
+        [first, ...rest],
+        { engine, numericApproximation, expression }
+      ) => {
         // Arity-1 collection-reducer form: Sum(L).
         if (rest.length === 0 && first?.isCollection) {
           // Non-finite collections stay symbolic — infinite iteration would
@@ -7480,7 +7631,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           );
           if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
           if (result === undefined) return engine.NaN;
-          return finishSum(engine, result, numericApproximation);
+          const sum = finishSum(engine, result, numericApproximation);
+          if (!numericApproximation) return sum;
+          return numericFromExactValue(engine, expression, sum) ?? sum;
         }
 
         // Big-op form: Sum(body, [i, a, b], …).
@@ -7565,19 +7718,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return bigOpBoundsError(engine, rest);
         if (result === undefined || result === null) return engine.NaN;
         // Evaluate to combine numeric terms (e.g., 3x + 1 + 2 + 3 → 3x + 6).
-        return finishSum(engine, result, numeric);
+        const sum = finishSum(engine, result, numeric);
+        if (!numeric) return sum;
+        return numericFromExactValue(engine, expression, sum) ?? sum;
       },
 
       evaluateAsync: async (
         [first, ...rest],
-        { engine, signal, numericApproximation, effects }
+        { engine, signal, numericApproximation, effects, expression }
       ) => {
         // Arity-1 collection-reducer form: Sum(L). A literal collection
         // whose elements hold an asynchronous-only application is evaluated
         // first, which awaits them (`List` evaluates its elements); the
         // synchronous per-element evaluation below cannot.
         if (rest.length === 0 && first?.isCollection) {
-          if (hasAsyncOnlyApplication(first))
+          const asyncOnly = hasAsyncOnlyApplication(first);
+          if (asyncOnly)
             first = await first.evaluateAsync({
               numericApproximation,
               signal,
@@ -7608,7 +7764,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           );
           if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
           if (result === undefined) return engine.NaN;
-          return finishSum(engine, result, numericApproximation);
+          const sum = finishSum(engine, result, numericApproximation);
+          // The same rescue as the synchronous handler. It evaluates the
+          // expression again synchronously, so a collection with an
+          // asynchronous-only application does not get it.
+          if (!numericApproximation || asyncOnly) return sum;
+          return numericFromExactValue(engine, expression, sum) ?? sum;
         }
 
         const numeric = numericApproximation;
@@ -7958,6 +8119,11 @@ function addSumTerm(
     acc.error = term.engine.typeError('number', term.type);
     return acc;
   }
+  // An absent term (`Missing`, `Undefined`) is `NaN` in a sum, as in any
+  // arithmetic. Kept as a term, a sum of that one term answered the term
+  // itself: `Sum([Missing])` was `Missing`, where `Sum([0, Missing])` is
+  // `NaN`.
+  if (isAbsentScalarSymbol(term)) term = term.engine.NaN;
   if (isNumber(term)) {
     const literal = acc.literal;
     if (literal === undefined) {
@@ -8942,4 +9108,144 @@ function evaluateGcdLcm(
   if (rest.length === 0) return result === null ? ce.One : ce.number(result);
   if (result === null) return ce._fn(mode, rest);
   return ce._fn(mode, [ce.number(result), ...rest]);
+}
+
+/**
+ * The numeric value of `num / den`, where `num` and `den` are the operands
+ * after a numeric evaluation, and one of them is a real float literal whose
+ * value is 0 or ±∞. `originals` are the operands before the evaluation.
+ *
+ * Each such operand is replaced by the exact value of its original when the
+ * original is pure and evaluates to an exact, non-zero, real number. The
+ * quotient is then computed with the numeric values, which use the
+ * big-decimal value of an exact operand whose double is out of range.
+ *
+ * Returns `undefined` when no operand has such an exact value, or when an
+ * operand is not a real number literal. The caller then divides as usual.
+ */
+function divideFromExactValues(
+  ce: ComputeEngine,
+  originals: ReadonlyArray<Expression> | undefined,
+  operands: [Expression, Expression]
+): Expression | undefined {
+  if (originals?.length !== 2) return undefined;
+  let rescued = false;
+  const values: NumericValue[] = [];
+  for (let i = 0; i < 2; i++) {
+    let x = operands[i];
+    const exact = exactValueOutOfDoubleRange(ce, originals[i], x);
+    if (exact !== undefined) {
+      x = exact;
+      rescued = true;
+    }
+    if (!isNumber(x) || x.im !== 0) return undefined;
+    const nv = x.numericValue;
+    values.push(typeof nv === 'number' ? ce._numericValue(nv) : nv);
+  }
+  if (!rescued) return undefined;
+  return ce.number(values[0].div(values[1])).N();
+}
+
+/**
+ * The exact value of `original`, when `value` (the numeric value of
+ * `original`) is a real literal outside the normal double range (0, ±∞, NaN
+ * or subnormal, see `isOutOfDoubleRangeLiteral()`), while the exact value is
+ * a finite number that is not zero. Otherwise, `undefined`.
+ *
+ * At machine precision, a numeric evaluation gives a double, and the double
+ * of `10^{-401}` is 0 and the double of `10^{401}` is +∞. An operation with
+ * this operand must then use its exact value: `\sqrt{10^{-401}}` is about
+ * `3.16e-201`, not 0. Only a pure `original` is evaluated again. An engine
+ * whose numeric values are big decimals does not have this limit.
+ *
+ * The usual operand costs one comparison.
+ */
+function exactValueOutOfDoubleRange(
+  ce: ComputeEngine,
+  original: Expression | undefined,
+  value: Expression
+): Expression | undefined {
+  if (!isOutOfDoubleRangeLiteral(value)) return undefined;
+  if (original === undefined || original.isPure !== true) return undefined;
+  if (bignumPreferred(ce)) return undefined;
+  const exact = isNumber(original) ? original : original.evaluate();
+  if (
+    !isNumber(exact) ||
+    !exact.isExact ||
+    exact.isFinite !== true ||
+    exact.isSame(0)
+  )
+    return undefined;
+  return exact;
+}
+
+/**
+ * Replace a factor of a numeric product by its exact value when the
+ * coefficient of its numeric value is 0, ±∞ or subnormal. `ops` are the
+ * factors before the evaluation, `factors` the factors that go to
+ * `mulNEvaluated()`, and `raw[i]` is true when `factors[i]` is not evaluated
+ * yet.
+ *
+ * At machine precision, the numeric value of `10^{400}/y` is `∞ · (1/y)`,
+ * because the float of its exact coefficient `10^{400}` is ∞. In the product
+ * `(10^{400}/y) · 10^{-399}`, the exact coefficient must be folded with the
+ * other number factors before it becomes a float: the result is then `10/y`,
+ * not `∞ · 0 · (1/y) = NaN`. The replaced factor stays marked as evaluated,
+ * so it goes to `mulNEvaluated()` with its exact coefficient, and
+ * `mulNEvaluated()` folds this coefficient with the number factors and
+ * floats the product: `(10^{400}/y) · 2` is `∞ · (1/y)`. Only a pure factor
+ * is evaluated again. An engine whose numeric values are big decimals does
+ * not have this limit.
+ *
+ * The usual product costs one scan of the factors.
+ */
+function rescueExactCoefficients(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  factors: Expression[],
+  raw: ReadonlyArray<boolean>
+): void {
+  const hasOutOfRangeCoefficient = (x: Expression): boolean =>
+    isFunction(x) &&
+    (x.operator === 'Multiply' || x.operator === 'Divide') &&
+    isOutOfDoubleRangeLiteral(x.ops[0]);
+  if (!factors.some((x, i) => !raw[i] && hasOutOfRangeCoefficient(x))) return;
+  if (bignumPreferred(ce)) return;
+  for (let i = 0; i < factors.length; i++) {
+    if (raw[i] || !hasOutOfRangeCoefficient(factors[i])) continue;
+    if (ops[i].isPure !== true) continue;
+    const exact = ops[i].evaluate();
+    if (
+      isFunction(exact) &&
+      (exact.operator === 'Multiply' || exact.operator === 'Divide') &&
+      isNumber(exact.ops[0]) &&
+      exact.ops[0].isExact
+    )
+      factors[i] = exact;
+  }
+}
+
+/** The operand `i` of `expression` before its evaluation, if any. */
+function operandOf(
+  expression: Expression | undefined,
+  i: number
+): Expression | undefined {
+  return expression !== undefined && isFunction(expression)
+    ? expression.ops[i]
+    : undefined;
+}
+
+/**
+ * The big-decimal value of `x`, when `x` is a real finite number literal.
+ * The big-decimal value of an exact value keeps a magnitude that its double
+ * cannot hold (`10^{400}`). Otherwise, `undefined`.
+ */
+function bigRealOf(x: Expression | undefined): BigDecimal | undefined {
+  if (x === undefined || !isNumber(x)) return undefined;
+  const nv = x.numericValue;
+  if (typeof nv === 'number')
+    return Number.isFinite(nv) ? new BigDecimal(nv) : undefined;
+  if (nv.im !== 0) return undefined;
+  const big = nv.bignumRe ?? new BigDecimal(nv.re);
+  return big.isFinite() ? big : undefined;
 }

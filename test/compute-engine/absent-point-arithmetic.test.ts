@@ -165,6 +165,100 @@ describe('all-numeric absences still absorb into `NaN`', () => {
     expect(ce.box(['Add', 'Missing', 1]).evaluate().toString()).toBe('NaN');
   });
 
+  test('the sum of a list that holds only one absent element', () => {
+    // A sum of one term answered that term itself: `Sum([Missing])` was
+    // `Missing`, where `Sum([0, Missing])` is `NaN`.
+    const ce = new ComputeEngine();
+    for (const xs of [
+      ['List', 'Missing'],
+      ['List', 'Undefined'],
+      ['List', 0, 'Missing'],
+      ['List', 'Missing', 'Missing'],
+    ]) {
+      const e = ce.box(['Sum', xs] as any);
+      expect(e.evaluate().toString()).toBe('NaN');
+      expect(e.N().toString()).toBe('NaN');
+    }
+  });
+
+  test('the product of a list that holds only absent elements', () => {
+    // `Product(L)` is `Reduce(L, Multiply, 1)`. For a list whose element
+    // type is `missing`, the reducer `Multiply` was an `incompatible-type`
+    // error, while `Product([1, Missing])` was `NaN`.
+    const ce = new ComputeEngine();
+    for (const json of [
+      ['Product', ['List', 'Missing']],
+      ['Product', ['List', 'Undefined']],
+      ['Product', ['List', 'Missing', 'Missing']],
+      ['Product', ['List', 1, 'Missing']],
+      ['Reduce', ['List', 'Missing'], 'Multiply', 1],
+      ['Reduce', ['List', 'Missing'], 'Add', 0],
+    ]) {
+      const e = ce.box(json as any);
+      expect(e.isValid).toBe(true);
+      expect(e.evaluate().toString()).toBe('NaN');
+      expect(e.N().toString()).toBe('NaN');
+    }
+  });
+
+  test('a fold with no initial value admits its first element', () => {
+    // With no initial value, a fold of one element returns that element
+    // unchanged: `Reduce([Missing], Max)` is `Missing`. It was typed
+    // `number`, which does not admit that value.
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<integer>');
+    ce.declare('S', 'list<string>');
+    const type = (json: any) => ce.box(json).type.toString();
+    for (const json of [
+      ['Reduce', ['List', 'Missing'], 'Max'],
+      ['Reduce', ['List', 'Undefined'], 'Max'],
+      ['Reduce', ['List', 'Missing'], 'Multiply'],
+      [
+        'Reduce',
+        ['List', 'Missing'],
+        ['Function', ['Multiply', 'a', 'x'], 'a', 'x'],
+      ],
+    ]) {
+      expect(type(json)).toBe('missing | number');
+      expect(ce.box(json as any).evaluate().symbol).toMatch(
+        /Missing|Undefined/
+      );
+    }
+    const missing = ce.box(['Reduce', ['List', 'Missing'], 'Max']);
+    expect(missing.evaluate().type.matches(missing.type)).toBe(true);
+    // An element that computes with an absent cell gives `NaN`.
+    expect(
+      ce
+        .box(['Reduce', ['List', 'Missing', 1], 'Max'])
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
+    // With an initial value, the element is not returned unchanged.
+    expect(type(['Reduce', ['List', 'Undefined'], 'Max', 0])).toBe('number');
+    // An element type that the result type already admits adds nothing.
+    expect(type(['Reduce', 'L', 'Max'])).toBe('integer');
+    // A callback whose result type does not admit the element type: the
+    // only element of a one-element list is returned as it is.
+    expect(type(['Reduce', 'S', ['Function', ['Length', 'a'], 'a', 'x']])).toBe(
+      'integer | string'
+    );
+  });
+
+  test('a fold over a list with no absent cell keeps its result type', () => {
+    // The rows of a matrix have a structured type that has no `missing`
+    // arm. The result type of the callback, `integer`, was widened to
+    // `number` as if a cell could be absent.
+    const ce = new ComputeEngine();
+    ce.declare('g', '(integer, any) -> integer');
+    const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+    expect(ce.box(['Reduce', M, 'g', 0]).type.toString()).toBe('integer');
+    expect(ce.box(['Scan', M, 'g', 0]).type.toString()).not.toMatch(/number/);
+    // A list with an absent cell still widens to `number`.
+    expect(
+      ce.box(['Reduce', ['List', 'Missing', 2], 'g', 0]).type.toString()
+    ).toBe('number');
+  });
+
   test('a numeric piecewise with no default arm', () => {
     // `g(t) = 0.5` when `t < 1`, absent otherwise: `g(3)` is `Missing` and the
     // sum is typed `number`, so the numeric marker is the answer.
@@ -418,6 +512,29 @@ describe('a point of absent coordinates only, and a product against a matrix', (
       /incompatible-dimensions/
     );
   });
+
+  test('a vector with an absent cell against a matrix is a vector of NaN', () => {
+    // The product of a vector and a matrix is a vector, not a number.
+    const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+    expect(val(['Dot', ['List', 1, 'Missing'], M])).toBe('[NaN,NaN]');
+    expect(val(['Dot', M, ['List', 1, 'Missing']])).toBe('[NaN,NaN]');
+    expect(
+      ce
+        .box(['Dot', ['List', 1, 'Missing'], M])
+        .N()
+        .toString()
+    ).toBe('[NaN,NaN]');
+    // A rectangular matrix: the contraction dimension is the number of rows
+    // of the right operand, not its number of columns.
+    const R = ['List', ['List', 1, 2, 5], ['List', 3, 4, 6]];
+    expect(val(['Dot', ['List', 1, 'Missing'], R])).toBe('[NaN,NaN,NaN]');
+    expect(val(['Dot', R, ['List', 1, 'Missing', 3]])).toBe('[NaN,NaN]');
+    expect(val(['Dot', R, ['List', 1, 'Missing']])).toMatch(
+      /incompatible-dimensions/
+    );
+    // Two vectors still give a number.
+    expect(val(['Dot', ['List', 1, 'Missing'], ['List', 1, 2]])).toBe('NaN');
+  });
 });
 
 describe('an out-of-range read does not depend on how another cell is spelled', () => {
@@ -554,6 +671,13 @@ describe('a difference with an absent operand beside a point', () => {
       ['Multiply', 2, 'Missing'],
     ])
       expect(pt.mul(ce.box(f as any)).toString()).toBe('"Missing"');
+    // The `.div()` method too: `Negate(Missing)` is typed as a number, and
+    // the point was scaled by it into `(NaN, NaN)`.
+    for (const f of [
+      ['Negate', 'Missing'],
+      ['Multiply', 2, 'Missing'],
+    ])
+      expect(pt.div(ce.box(f as any)).toString()).toBe('"Missing"');
     // A present divisor still scales the components.
     expect(
       ce
@@ -637,6 +761,17 @@ describe('an absent term that may be a list is not a scalar absence', () => {
     expect(
       ce.box(['Add', ['Multiply', 'Missing', 'L'], 1]).type.toString()
     ).toBe('list<number>');
+  });
+  test('the quotient by a JavaScript number keeps the list', () => {
+    // `.div(2)` collapsed the quotient to the scalar `NaN`, while
+    // `.div(ce.box(2))` kept it. With `L = [1, 2]` the value is `[NaN, NaN]`.
+    expect(mL().div(2).type.toString()).toBe('list<number>');
+    expect(
+      mL()
+        .div(2)
+        .isSame(mL().div(ce.box(2)))
+    ).toBe(true);
+    expect(ce.box('Missing').div(2).toString()).toBe('NaN');
   });
   test('a scalar negated absence is still NaN', () => {
     expect(ce.Zero.add(ce.box(['Negate', 'Missing'])).toString()).toBe('NaN');

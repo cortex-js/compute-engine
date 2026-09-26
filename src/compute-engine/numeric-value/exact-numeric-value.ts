@@ -4,6 +4,7 @@ import { Rational, SmallInteger } from '../numerics/types.js';
 import {
   canonicalInteger,
   gcd,
+  isOutsideNormalDoubleRange,
   MACHINE_PRECISION,
   SMALL_INTEGER,
 } from '../numerics/numeric.js';
@@ -594,7 +595,19 @@ export class ExactNumericValue extends NumericValue {
   N(): NumericValue {
     if (this.isZero || this.isOne || this.isNegativeOne) return this;
     if (this.im === 0) {
-      if (this.rational[1] == 1 && this.radical === 1) return this;
+      if (this.rational[1] == 1 && this.radical === 1) {
+        // An integer stays exact, except in the machine lane (a factory
+        // value with no big-decimal part) when its double is ±∞: `.N()`
+        // promises a float, so an integer above the largest double
+        // (`10^{800}`) gives the float +∞, as `10^{800}` written as a power
+        // does. An integer that has a finite double stays exact. In the
+        // big-decimal lane, the value is kept.
+        if (!Number.isFinite(Number(this.rational[0]))) {
+          const approx = this.factory(this.bignumRe);
+          if (approx.bignumRe === undefined) return approx;
+        }
+        return this;
+      }
       return this.factory(this.bignumRe);
     }
     // Every complex value goes to the float lane, a Gaussian integer
@@ -773,7 +786,21 @@ export class ExactNumericValue extends NumericValue {
           imRadical: this.imRadical,
         });
       }
-      if (this.im === 0) return this.factory(this.bignumRe).mul(other);
+      if (this.im === 0) {
+        const approx = this.factory(this.bignumRe);
+        // In the machine lane (a factory value with no big-decimal part),
+        // a value whose double underflows to 0, overflows to ±∞ or is
+        // subnormal loses its value or its digits before the product.
+        // Multiply the big-decimal values first: `1e300 · 1/10^400` is then
+        // `1e-100`, not 0. A big-decimal product is exact.
+        if (
+          approx.bignumRe === undefined &&
+          isOutsideNormalDoubleRange(approx.re) &&
+          Number.isFinite(other)
+        )
+          return this.factory(this.bignumRe.mul(other));
+        return approx.mul(other);
+      }
       return this._toFloat().mul(other);
     }
     if (other instanceof BigDecimal) return this.factory(other).mul(this);
@@ -888,7 +915,27 @@ export class ExactNumericValue extends NumericValue {
       // Lift a Gaussian integer from the inexact lane (e.g. `x/i`) so the
       // quotient stays exact
       const lifted = other.im !== 0 ? this._liftComplex(other) : null;
-      if (lifted === null) return this._toFloat().div(other);
+      if (lifted === null) {
+        const approx = this._toFloat();
+        // In the machine lane (a factory value with no big-decimal part),
+        // a real value whose double underflows to 0, overflows to ±∞ or is
+        // subnormal loses its value or its digits before the quotient.
+        // Divide the big-decimal values first: `(1/10^400) / 1e-300` is then
+        // `1e-100`, not `0 / 1e-300`.
+        if (
+          this.im === 0 &&
+          other.im === 0 &&
+          approx.bignumRe === undefined &&
+          isOutsideNormalDoubleRange(approx.re) &&
+          Number.isFinite(other.re)
+        ) {
+          const divisor = other.re;
+          return this.factory(
+            withDoubleDigits(() => this.bignumRe.div(divisor))
+          );
+        }
+        return approx.div(other);
+      }
       exactOther = lifted;
     }
 
@@ -2113,4 +2160,24 @@ function integerNthRoot(v: number | bigint, n: number): number | bigint | null {
     if (BigInt(candidate) ** bn === bv) return candidate;
   }
   return null;
+}
+
+/**
+ * Evaluate `f` with 25 significant digits when the global
+ * `BigDecimal.precision` is the machine precision. A machine-precision engine
+ * sets it to 15 digits, which is fewer than the 17 digits a double needs, so
+ * a quotient rounded at that precision and then converted to a double can
+ * give a wrong double. At any other precision the working precision is kept:
+ * an engine below the machine precision (`precision: 3`) computes to that
+ * coarse precision by design, as `_bignumComponent()` does.
+ */
+export function withDoubleDigits(f: () => BigDecimal): BigDecimal {
+  const saved = BigDecimal.precision;
+  if (saved !== MACHINE_PRECISION) return f();
+  BigDecimal.precision = 25;
+  try {
+    return f();
+  } finally {
+    BigDecimal.precision = saved;
+  }
 }

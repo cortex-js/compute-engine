@@ -1,6 +1,10 @@
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+import {
+  isNumber,
+  isSymbol,
+} from '../../src/compute-engine/boxed-expression/type-guards';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -405,6 +409,46 @@ const CASES: Case[] = [
     expr: ['NotEqual', ['List', 1, 2], ['List', 1, 2], ['List', 3, 4]],
     params: [],
     inputs: [{}],
+  },
+  // A search for an absent value finds nothing (user decision 2026-09-26).
+  // `Missing` and a restricted number whose condition is false both compile
+  // to `nan`, which the element test finds in a list that holds `nan`, so the
+  // absence is decided from the structure of the searched value.
+  {
+    name: 'index_of_absent',
+    expr: ['IndexOf', ['List', 1, 'Missing'], 'Missing'],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'contains_absent',
+    expr: ['Contains', ['List', 1, 2], 'Missing'],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'index_of_restricted',
+    expr: ['IndexOf', ['List', 1, 'NaN', 2], ['When', 2, ['Less', 0, 'x']]],
+    params: ['x'],
+    inputs: [{ x: -1 }, { x: 2 }],
+  },
+  {
+    name: 'contains_restricted',
+    expr: ['Contains', ['List', 1, 'NaN'], ['When', 2, ['Less', 0, 'x']]],
+    params: ['x'],
+    inputs: [{ x: -1 }, { x: 2 }],
+  },
+  {
+    name: 'element_restricted',
+    expr: ['Element', ['When', 1, ['Less', 0, 'x']], ['List', 1, 'NaN']],
+    params: ['x'],
+    inputs: [{ x: -1 }, { x: 2 }],
+  },
+  {
+    name: 'index_of_piecewise',
+    expr: ['IndexOf', ['List', 1, 'NaN'], ['Which', ['Less', 0, 'x'], 1]],
+    params: ['x'],
+    inputs: [{ x: -1 }, { x: 2 }],
   },
 ];
 
@@ -1112,5 +1156,171 @@ describeMaybe('PYTHON EXECUTION PARITY — statement If and rank-3 Norm (venv)',
     const interpreted = scoped.box(['Norm', T3, { str: 'Frobenius' }] as any).N().re!;
     expect(interpreted).toBeCloseTo(Math.sqrt(204), 10);
     expect(JSON.parse(out) as number).toBeCloseTo(interpreted, 10);
+  });
+});
+
+/**
+ * `Norm` over entries that are NaN or infinite, and `Degrees` of a compound
+ * operand.
+ *
+ * - The interpreter answers `+∞` for a norm with an infinite entry (a NaN
+ *   entry included) and NaN for a norm with a NaN entry. numpy answers `nan`
+ *   for `[inf, nan]`, and its spectral norm (`ord=2` on a matrix) raises
+ *   `LinAlgError` for a matrix with a NaN or infinite entry.
+ * - `Degrees(x + 1)` must multiply the whole sum by π/180. Without
+ *   parentheses, Python reads `x + 1 * np.pi / 180`.
+ */
+describeMaybe(
+  'PYTHON EXECUTION PARITY — non-finite Norm and Degrees (venv)',
+  () => {
+    const python = new PythonTarget();
+
+    function run(source: string): string {
+      const file = path.join(os.tmpdir(), `ce-py-norm-${process.pid}.py`);
+      fs.writeFileSync(file, source);
+      try {
+        return execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+      } finally {
+        fs.unlinkSync(file);
+      }
+    }
+
+    it('a norm with a NaN or an infinite entry matches the interpreter', () => {
+      const scoped = new ComputeEngine();
+      const matrices = [
+        [
+          ['List', 'NaN', 1],
+          ['List', 2, 3],
+        ],
+        [
+          ['List', 'PositiveInfinity', 'NaN'],
+          ['List', 2, 3],
+        ],
+        [
+          ['List', 'PositiveInfinity', 1],
+          ['List', 2, 3],
+        ],
+        [
+          ['List', 'NaN', 0],
+          ['List', 'PositiveInfinity', 0],
+        ],
+      ];
+      const cases: unknown[] = [];
+      for (const m of matrices)
+        for (const p of [1, 2, 'PositiveInfinity', undefined])
+          cases.push(
+            p === undefined
+              ? ['Norm', ['List', ...m]]
+              : ['Norm', ['List', ...m], p]
+          );
+      for (const p of [1, 2, 3, undefined])
+        cases.push(
+          p === undefined
+            ? ['Norm', ['List', 'PositiveInfinity', 'NaN']]
+            : ['Norm', ['List', 'PositiveInfinity', 'NaN'], p]
+        );
+      const lines = ['import numpy as np', 'import json', 'out = []'];
+      const expected: (number | null)[] = [];
+      for (const c of cases) {
+        const expr = scoped.box(c as any);
+        const code = python.compile(expr, { constantFold: false }).code;
+        lines.push(`out.append(float(${code}))`);
+        const v = expr.N().re;
+        expected.push(Number.isNaN(v) ? null : v);
+      }
+      lines.push(
+        "print(json.dumps([None if v != v else ('inf' if v == float('inf') else v) for v in out]))"
+      );
+      const got = JSON.parse(run(lines.join('\n'))) as (
+        | number
+        | string
+        | null
+      )[];
+      expect(got).toEqual(expected.map((v) => (v === Infinity ? 'inf' : v)));
+      // The interpreter answers +∞ whenever an entry is infinite.
+      expect(expected.filter((v) => v === Infinity).length).toBe(16);
+    });
+
+    it('Degrees of a sum multiplies the whole sum', () => {
+      const scoped = new ComputeEngine();
+      const expr = scoped.box(['Sin', ['Degrees', ['Add', 'x', 1]]] as any);
+      const fn = python.compileFunction(expr, 'fn_deg', ['x']);
+      const out = run(
+        `import numpy as np\n\n${fn}\nprint(float(fn_deg(179)))\n`
+      );
+      // sin(180°) is 0.
+      expect(Math.abs(Number(out))).toBeLessThan(1e-12);
+    });
+  }
+);
+
+/**
+ * The absence marker of an element read, run in the venv. An out-of-range
+ * position, and a restricted collection whose condition is false (`None` at
+ * run time), answer the marker of the element domain, as the interpreter
+ * does (user decision 2026-09-25, `docs/ERROR-MODEL.md` §2): NaN for a
+ * number, `Missing` (`None`) for a row, a point or a string. Each case is
+ * run with the condition false (`t = -1`) and true (`t = 1`), and compared
+ * with the interpreter's value.
+ */
+describeMaybe('PYTHON EXECUTION PARITY — absence marker of element reads (venv)', () => {
+  const python = new PythonTarget();
+  const scoped = new ComputeEngine();
+  scoped.declare('t', 'real');
+  const W = (x: unknown) => ['When', x, ['Less', 0, 't']];
+  const M = W(['List', ['List', 1, 2], ['List', 3, 4]]);
+  const CASES: Array<[string, unknown]> = [
+    ['first_pair', ['First', W(['Tuple', 1, 2])]],
+    ['second_pair', ['Second', W(['Tuple', 1, 2])]],
+    ['third_pair', ['Third', W(['Tuple', 1, 2])]],
+    ['last_list', ['Last', W(['List', 1, 2])]],
+    ['at_list', ['At', W(['List', 1, 2]), 1]],
+    ['at_row', ['At', M, 2]],
+    ['first_points', ['First', W(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]])]],
+    ['at_points_out_of_range', ['At', ['List', ['Tuple', 1, 2]], 5]],
+    ['third_points', ['Third', ['List', ['Tuple', 1, 2]]]],
+    ['at_out_of_range', ['At', ['List', 1, 2], 5]],
+    ['first_empty', ['First', ['List']]],
+  ];
+
+  /** The interpreter's value in the form the Python serializer prints. */
+  function interpreted(json: unknown, t: number): unknown {
+    const v = scoped
+      .box(json as never)
+      .subs({ t: scoped.number(t) })
+      .evaluate();
+    if (isSymbol(v, 'Missing')) return 'None';
+    if (isNumber(v)) return v.isNaN ? 'nan' : v.re;
+    return v.ops!.map((x) => x.re);
+  }
+
+  it('matches the interpreter', () => {
+    let src = 'import numpy as np\nimport json\nimport math\n\n';
+    for (const [name, json] of CASES)
+      src += `${python.compileFunction(scoped.box(json as never), `fn_${name}`, ['t'])}\n`;
+    src +=
+      '\ndef _ser(z):\n' +
+      "    if z is None: return 'None'\n" +
+      '    if isinstance(z, (list, tuple, np.ndarray)): return [_ser(v) for v in list(z)]\n' +
+      "    return 'nan' if math.isnan(float(z)) else float(z)\n\n" +
+      'results = {}\n';
+    for (const [name] of CASES)
+      src += `results[${JSON.stringify(name)}] = [_ser(fn_${name}(-1)), _ser(fn_${name}(1))]\n`;
+    src += 'print(json.dumps(results))\n';
+
+    const file = path.join(os.tmpdir(), `ce-py-absence-${process.pid}.py`);
+    fs.writeFileSync(file, src);
+    let out = '';
+    try {
+      out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    const actual = JSON.parse(out) as Record<string, unknown[]>;
+    for (const [name, json] of CASES)
+      expect([name, actual[name]]).toEqual([
+        name,
+        [interpreted(json, -1), interpreted(json, 1)],
+      ]);
   });
 });

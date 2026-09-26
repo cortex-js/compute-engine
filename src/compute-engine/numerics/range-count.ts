@@ -46,7 +46,13 @@ export const RANGE_COUNT_TOLERANCE_CAP = 1e-3;
  *   numerically).
  * - A non-finite `lower` or `upper` gives `Infinity`.
  * - A step whose sign does not agree with the direction from `lower` to
- *   `upper` gives 0 (the range is empty).
+ *   `upper` gives 0 (the range is empty), except when `upper` is within the
+ *   tolerance of `lower`. Then the count is 1: the tolerance applies to the
+ *   first element as it applies to every other element. For example,
+ *   `Range(0.1 + 0.2, 0.3, 0.1)` has a quotient of about −5.6·10⁻¹⁶,
+ *   because `0.1 + 0.2` is `0.30000000000000004`, and it has 1 element, as
+ *   the last element of `Range(0, 0.3, 0.1)` is counted although it is
+ *   `0.30000000000000004`.
  *
  * The JavaScript compile target calls this function at run time as the
  * helper `_SYS.rangeCount` (`compilation/javascript-target.ts`). Code emitted

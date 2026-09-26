@@ -126,6 +126,39 @@ describe('A tuple with a list coordinate is a list of points — interpreter', (
     expect(ce.box(['Tuple', 'x']).latex).toBe('(x,)');
   });
 
+  test('a Tuple parsed in an explicit scope keeps the long spelling outside it', () => {
+    // `A` is declared `list<real>` only in `scope`. The serializer reads the
+    // type of `A` from the parsed expression, not from the current scope,
+    // where `A` is not declared. With the short spelling `(A,0)`, a parse
+    // with the same scope would give `PointList(A, 0)`.
+    const e = new ComputeEngine();
+    const scope = e.createScope();
+    e.pushScope(scope);
+    e.declare('A', 'list<real>');
+    e.popScope();
+    const t = e.parse('\\operatorname{Tuple}(A,0)', { scope });
+    expect(t.operator).toBe('Tuple');
+    expect(t.latex).toBe('\\operatorname{Tuple}(A,0)');
+    expect(t.toLatex()).toBe('\\operatorname{Tuple}(A,0)');
+    expect(e.parse(t.latex, { scope }).operator).toBe('Tuple');
+  });
+
+  test('a compound Tuple operand parsed in an explicit scope keeps the long spelling', () => {
+    // `A - 1` is `["Add", "A", -1]` in the expression, but the serializer
+    // receives the prettified form `["Subtract", "A", 1]`. The operand must
+    // still be found with the binding it has in the parsed expression.
+    const e = new ComputeEngine();
+    const scope = e.createScope();
+    e.pushScope(scope);
+    e.declare('A', 'list<real>');
+    e.popScope();
+    const t = e.parse('\\operatorname{Tuple}(A-1,0)', { scope });
+    expect(t.operator).toBe('Tuple');
+    expect(t.latex).toBe('\\operatorname{Tuple}(A-1,0)');
+    expect(t.toLatex()).toBe('\\operatorname{Tuple}(A-1,0)');
+    expect(e.parse(t.latex, { scope }).operator).toBe('Tuple');
+  });
+
   test('Length((A, B)) is the number of points', () => {
     expect(
       ce.parse('\\operatorname{Length}((A, B))').evaluate().toString()
@@ -923,6 +956,32 @@ describe('Absences in a list of points', () => {
     expect(js[1]).toBeCloseTo(Math.hypot(2, 8), 12);
   });
 
+  test('a list whose points are ALL absent still maps', () => {
+    // The evaluated argument `[Missing]` is typed `list<missing>`, which does
+    // not say its elements are points. The canonical argument does, so the
+    // call still maps and answers `[Missing]`, not an `incompatible-type`
+    // error for the whole list.
+    const latex = 'k\\left(\\left[\\left(3,4\\right)\\{0<t\\}\\right]\\right)';
+    const ce = absenceEngine(true);
+    const call = ce.parse(latex);
+    expect(call.type.toString()).toBe('list<missing | real>');
+    ce.assign('t', -1);
+    const v = call.evaluate();
+    expect(v.json).toEqual(['List', 'Missing']);
+    expect(v.type.matches(call.type)).toBe(true);
+    expect(call.N().json).toEqual(['List', 'Missing']);
+    expect(runJS(latex, { t: -1 })).toEqual([undefined]);
+  });
+
+  test('a list whose points are ALL absent still maps (async)', async () => {
+    const ce = absenceEngine(true);
+    const call = ce.parse(
+      'k\\left(\\left[\\left(3,4\\right)\\{0<t\\}\\right]\\right)'
+    );
+    ce.assign('t', -1);
+    expect((await call.evaluateAsync()).json).toEqual(['List', 'Missing']);
+  });
+
   test('a PointList with an absent source is absent', () => {
     for (const latex of [
       '\\operatorname{PointList}(A\\{0<t\\}, B)',
@@ -1046,6 +1105,26 @@ describe('Arithmetic over a MathJSON Tuple with a list coordinate is typed error
     expect(e.isValid).toBe(true);
     expect(e.type.toString()).toBe('error');
     expect(errorCode(e.evaluate())).toBe('incompatible-type');
+  });
+
+  test('a zero factor does not erase an error-typed factor', () => {
+    // `0 · 2 · Sin(Tuple(A, B))` folded to `0` at canonicalization, and the
+    // error of `Sin(Tuple(A, B))` was lost. `0 · Sin(Tuple(A, B))` gave the
+    // error wrapped in a second one ("expected `number`, got `error`").
+    for (const json of [
+      ['Multiply', 0, 2, ['Sin', ['Tuple', 'A', 'B']]],
+      ['Multiply', 0, ['Sin', ['Tuple', 'A', 'B']]],
+      ['Multiply', 0, 'x', ['Sin', ['Tuple', 'A', 'B']]],
+    ]) {
+      const e = dataEngine().box(json as any);
+      expect(e.isSame(0)).toBe(false);
+      const v = e.evaluate();
+      expect(errorCode(v)).toBe('incompatible-type');
+      // The error is the one of `Sin(Tuple(A, B))`, not a wrapper.
+      expect(v.op1.op2.string).toBe('tuple<number, number>');
+    }
+    // Without an error-typed factor, the zero still folds.
+    expect(dataEngine().box(['Multiply', 0, 2, 'x']).isSame(0)).toBe(true);
   });
 
   test('a tuple of scalars and a list of points keep their types', () => {

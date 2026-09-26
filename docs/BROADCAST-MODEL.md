@@ -15,7 +15,10 @@ wrote**, not by the operand shapes:
 1. **An operator LIFTED over collections requires length agreement.** When an
    operator is implicitly broadcast over collection operands — `Add`,
    `Multiply`, `Divide`/`Power`/`Mod`, the ordering relations, the logical
-   connectives, `ElementMax`/`ElementMin`/`Clamp` — a length mismatch is
+   connectives, `ElementMax`/`ElementMin`/`Clamp`, and a user function with
+   scalar parameters called over lists (on every route: `DefineFunction`,
+   `:=`, a function declared `function` and assigned, and a function literal
+   applied with `Apply`; user decision 2026-09-26) — a length mismatch is
    `incompatible-dimensions`, never a silent zip-to-shortest. The user asked
    for `a + b`, not for a pairing; truncation would return a plausible answer
    that silently discards data.

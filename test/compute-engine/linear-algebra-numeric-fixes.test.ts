@@ -725,3 +725,274 @@ describe('SMALL SINGULAR VALUES OF A MATRIX WITH GRADED ENTRIES', () => {
     expect(Math.abs(s[1] / 1e-85 - 1)).toBeLessThan(1e-14);
   });
 });
+
+describe('MATRIX FUNCTIONS NEAR THE LIMITS OF MACHINE NUMBERS', () => {
+  // Constructing an engine, and setting its precision, set the global
+  // big-decimal precision, which the shared engine `ce` also reads. The tests
+  // that make a machine engine restore it.
+  test('the spectral norm of machine entries whose products underflow', () => {
+    const savedPrecision = BigDecimal.precision;
+    try {
+      spectralNormAtMachinePrecision();
+    } finally {
+      BigDecimal.precision = savedPrecision;
+    }
+  });
+
+  function spectralNormAtMachinePrecision() {
+    // The products of the entries are below the smallest float64. The
+    // matrix does not have rank 1: its norm is 2s, not 0.
+    const me = new ComputeEngine();
+    me.precision = 'machine';
+    const s = 1e-200;
+    const norm = (rows: number[][]) =>
+      me
+        .box(['Norm', ['List', ...rows.map((r) => ['List', ...r])], 2])
+        .evaluate().re;
+    expect(
+      norm([
+        [s, s, 0],
+        [0, s, s],
+        [s, 0, s],
+      ]) / 2e-200
+    ).toBeCloseTo(1, 14);
+    // A matrix with rank 1: its squared entries underflow or overflow.
+    expect(
+      norm([
+        [s, 0],
+        [s, 0],
+      ]) /
+        (Math.SQRT2 * s)
+    ).toBeCloseTo(1, 14);
+    expect(
+      norm([
+        [1e200, 0],
+        [1e200, 0],
+      ]) /
+        (Math.SQRT2 * 1e200)
+    ).toBeCloseTo(1, 14);
+  }
+
+  test('the 1-norm keeps a line whose machine value underflows', () => {
+    // r = 10^300 / (10^309 + 1) ≈ 10^-9. The machine values of its
+    // numerator and denominator overflow, so its machine value is 0.
+    const r = ['Divide', P(300), ['Add', P(309), 1]];
+    const norm = ce
+      .box([
+        'Norm',
+        ['List', ['List', r, 0], ['List', 0, ['Divide', 1, P(10)]]],
+        1,
+      ])
+      .evaluate();
+    expect(norm.isSame(ce.box(r).evaluate())).toBe(true);
+  });
+
+  test('the SVD kernel scales an entry near Number.MAX_VALUE', () => {
+    const M = Number.MAX_VALUE;
+    expect(singularValues([[M]], [[0]])).toEqual([M]);
+    const s = singularValues(
+      [
+        [M, 1],
+        [0, M / 2],
+      ],
+      [
+        [0, 0],
+        [0, 0],
+      ]
+    );
+    expect(s[0] / M).toBeCloseTo(1, 14);
+    expect(s[1] / (M / 2)).toBeCloseTo(1, 14);
+  });
+
+  test('SingularValues at machine precision does not overflow in the closed form', () => {
+    // The singular values of [[a, 1], [0, a]] are a ± 1/2 + O(1/a).
+    const savedPrecision = BigDecimal.precision;
+    try {
+      const me = new ComputeEngine();
+      me.precision = 'machine';
+      const sv = me
+        .box([
+          'SingularValues',
+          ['List', ['List', 1e200, 1], ['List', 0, 1e200]],
+        ])
+        .N();
+      expect(sv.ops!.map((x) => x.re / 1e200)).toEqual([
+        expect.closeTo(1, 14),
+        expect.closeTo(1, 14),
+      ]);
+    } finally {
+      BigDecimal.precision = savedPrecision;
+    }
+  });
+
+  test('Eigenvalues of a triangular-looking matrix with a tiny exact entry', () => {
+    // [[0, 10^-400], [1, 0]] is not triangular: its eigenvalues are
+    // ±10^-200.
+    const ev = ce
+      .box(['Eigenvalues', ['List', ['List', 0, P(-400)], ['List', 1, 0]]])
+      .evaluate();
+    expect(ev.ops!.map((x) => x.toString()).sort()).toEqual(
+      ['-1/1e+200', '1/1e+200'].sort()
+    );
+  });
+
+  test('Eigenvectors of a complex matrix with small exact entries', () => {
+    // A scaled matrix has the eigenvectors of the unscaled one.
+    const e = ['Divide', 'ImaginaryUnit', P(12)];
+    const m = ['List', ['List', 0, e], ['List', ['Negate', e], 0]];
+    const values = ce.box(['Eigenvalues', m]).evaluate();
+    const vectors = ce.box(['Eigenvectors', m]).evaluate();
+    expect(vectors.nops).toBe(2);
+    vectors.ops!.forEach((v, k) => {
+      // v is not zero, and M·v − λ·v is zero.
+      expect(v.ops!.some((x) => !x.isSame(0))).toBe(true);
+      const residual = ce
+        .box([
+          'Subtract',
+          ['MatrixMultiply', m, v.json],
+          ['Multiply', values.ops![k].json, v.json],
+        ])
+        .evaluate();
+      expect(residual.ops!.every((x) => x.isSame(0))).toBe(true);
+    });
+  });
+
+  test('a complex big decimal outside the float64 range packs exactly', () => {
+    for (const re of ['1e400', '1e-400']) {
+      const z = ce.number(ce._numericValue({ re: new BigDecimal(re), im: 1 }));
+      const t = ce
+        .function('Transpose', [
+          ce.function('List', [ce.function('List', [z])]),
+        ])
+        .evaluate();
+      expect(t.ops![0].ops![0].isSame(z)).toBe(true);
+    }
+  });
+
+  test('Norm of a lazy collection that declines to enumerate', () => {
+    // `Linspace(a, 1, 3)` has 3 elements, but no values while `a` has none.
+    expect(
+      ce
+        .box(['Norm', ['Linspace', 'a', 1, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('||Linspace(a, 1, 3)||');
+  });
+});
+
+describe('EIGENVECTORS OF A REPEATED EIGENVALUE', () => {
+  const mat = (rows: any[][]) => ['List', ...rows.map((r) => ['List', ...r])];
+  const vectors = (rows: any[][]) =>
+    ce
+      .box(['Eigenvectors', mat(rows)])
+      .evaluate()
+      .toString();
+
+  test('a basis of the eigenspace on the exact, float and symbolic routes', () => {
+    expect(
+      vectors([
+        [2, 0],
+        [0, 2],
+      ])
+    ).toBe('[[1,0],[0,1]]');
+    expect(
+      vectors([
+        [2.5, 0],
+        [0, 2.5],
+      ])
+    ).toBe('[[1,0],[0,1]]');
+    expect(
+      vectors([
+        ['ImaginaryUnit', 0],
+        [0, 'ImaginaryUnit'],
+      ])
+    ).toBe('[[1,0],[0,1]]');
+    expect(
+      vectors([
+        ['x', 0],
+        [0, 'x'],
+      ])
+    ).toBe('[[1,0],[0,1]]');
+    expect(
+      vectors([
+        [2, 0, 0],
+        [0, 2, 0],
+        [0, 0, 2],
+      ])
+    ).toBe('[[1,0,0],[0,1,0],[0,0,1]]');
+    // The eigenvalue 2 has the eigenspace x + y + z = 0.
+    expect(
+      vectors([
+        [3, 1, 1],
+        [1, 3, 1],
+        [1, 1, 3],
+      ])
+    ).toBe('[[1,1,1],[-1,1,0],[-1,0,1]]');
+    const v = ce
+      .box([
+        'Eigenvectors',
+        mat([
+          [3.5, 1, 1],
+          [1, 3.5, 1],
+          [1, 1, 3.5],
+        ]),
+      ])
+      .evaluate();
+    expect(v.ops![2].ops!.map((x) => x.re)).toEqual([
+      expect.closeTo(-Math.SQRT1_2, 14),
+      0,
+      expect.closeTo(Math.SQRT1_2, 14),
+    ]);
+  });
+
+  test('a defective matrix repeats its one eigenvector', () => {
+    expect(
+      vectors([
+        [2, 1],
+        [0, 2],
+      ])
+    ).toBe('[[1,0],[1,0]]');
+    expect(
+      vectors([
+        [2.5, 1],
+        [0, 2.5],
+      ])
+    ).toBe('[[1,0],[1,0]]');
+    expect(
+      vectors([
+        ['ImaginaryUnit', 1],
+        [0, 'ImaginaryUnit'],
+      ])
+    ).toBe('[[1,0],[1,0]]');
+    // Geometric multiplicity 2 for an eigenvalue of multiplicity 3.
+    expect(
+      vectors([
+        [2, 1, 0],
+        [0, 2, 0],
+        [0, 0, 2],
+      ])
+    ).toBe('[[1,0,0],[0,0,1],[1,0,0]]');
+  });
+
+  test('distinct eigenvalues of a diagonal matrix keep their vectors', () => {
+    // 10^-12 is not 0, so λ = 0 is the second diagonal entry only.
+    expect(
+      vectors([
+        [['Power', 10, -12], 0],
+        [0, 0],
+      ])
+    ).toBe('[[1,0],[0,1]]');
+    expect(
+      vectors([
+        [0, 0],
+        [0, ['Power', 10, -12]],
+      ])
+    ).toBe('[[1,0],[0,1]]');
+    expect(
+      vectors([
+        ['x', 0],
+        [0, 'y'],
+      ])
+    ).toBe('[[1,0],[0,1]]');
+  });
+});

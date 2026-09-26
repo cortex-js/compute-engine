@@ -1,3 +1,4 @@
+import type { BigDecimal } from '../../big-decimal/index.js';
 import { getImaginaryFactor } from './utils.js';
 
 import { flatten } from './flatten.js';
@@ -294,7 +295,7 @@ export function canonicalAdd(
 
     if (hasIm) {
       // We have imaginary terms: find the first real float/integer to pair with
-      let realVal: number | undefined;
+      let realVal: number | BigDecimal | undefined;
       let realFound = false;
 
       for (const op of ops) {
@@ -315,6 +316,18 @@ export function canonicalAdd(
               (isSubtype(nv.type, 'real') && !nv.isExact) ||
               isSubtype(nv.type, 'integer')
             ) {
+              // A big decimal real part (at a precision above the machine
+              // precision), or an exact integer that is not a safe integer,
+              // is kept as a big decimal: its double would round it.
+              if (
+                typeof nv !== 'number' &&
+                nv.bignumRe !== undefined &&
+                !(nv.isExact && Number.isSafeInteger(nv.re))
+              ) {
+                realVal = nv.bignumRe;
+                realFound = true;
+                continue;
+              }
               const re = typeof nv === 'number' ? nv : nv.re;
               if (typeof re === 'number') {
                 realVal = re;

@@ -245,6 +245,38 @@ describe('strictTypes', () => {
     expect(r.run({ q: 2 })).toBe(3);
   });
 
+  it('a popped-scope symbol in a node shared with a folded value is declared', () => {
+    // `[a, q + 1]` with `a := q + 1` holds ONE node `q + 1` twice: in the
+    // value of `a` and as the second element. The walk meets it first in the
+    // value of `a`, where an occurrence is not recorded. The second, direct,
+    // visit must not be skipped, or the occurrence of `q` is missing and its
+    // type is read from the current scope, where `q` is not declared.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('q', 'real');
+    const e = ce.parse('q + 1');
+    ce.popScope();
+    ce.declare('a', 'unknown');
+    ce.assign('a', e);
+    for (const list of [
+      ce.function('List', [ce.symbol('a'), e]),
+      ce.function('List', [e, ce.symbol('a')]),
+    ]) {
+      const r = compile(list, {
+        to: 'javascript',
+        fallback: false,
+        strictTypes: true,
+      } as any) as any;
+      expect(r.success).toBe(true);
+      expect(r.freeSymbolTypes.q).toEqual({
+        type: 'real',
+        lowered: 'number',
+        provenance: 'declared',
+      });
+      expect(r.run({ q: 2 })).toEqual([3, 3]);
+    }
+  });
+
   it('a matrix type is spelled as in the entry diagnostic', () => {
     const ce = new ComputeEngine();
     ce.declare('N', 'matrix');
@@ -282,4 +314,35 @@ describe('Tycho item 308: a complex argument of a user function on GLSL', () => 
       expect(run(ce, 'glsl', latex).success).toBe(true);
       expect(run(ce, 'wgsl', latex).success).toBe(true);
     });
+});
+
+describe('a bound occurrence of a free name', () => {
+  // The index `q` of the sum is a local of the sum, an integer. The free `q`
+  // outside the sum is a different variable, and the report describes it.
+  const SUM_AND_FREE = [
+    'List',
+    ['Sum', 'q', ['Limits', 'q', 1, 'n']],
+    ['Real', 'q'],
+  ];
+
+  it('the report reads the free occurrence, not the index', () => {
+    const ce = new ComputeEngine();
+    ce.declare('q', 'complex');
+    ce.declare('n', 'integer');
+    const r = run(ce, 'glsl', SUM_AND_FREE);
+    expect(r.success).toBe(true);
+    expect(r.freeSymbolTypes.q).toEqual({
+      type: 'complex',
+      lowered: 'vec2',
+      provenance: 'declared',
+    });
+  });
+
+  it('strictTypes: the index does not declare the free name', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    expect(() =>
+      run(ce, 'javascript', SUM_AND_FREE, { strictTypes: true })
+    ).toThrow(/declare `q`/);
+  });
 });

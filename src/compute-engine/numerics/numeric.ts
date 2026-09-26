@@ -35,6 +35,24 @@ export const DEFAULT_TOLERANCE = 1e-10;
 // § "Chopping and the `im === 0` convention".
 export const ROUNDOFF_TOLERANCE = 1e-14;
 
+/**
+ * Whether the double `x` is outside the normal double range: 0, ±∞, NaN, or
+ * a subnormal value (below `2.2250738585072014e-308` in magnitude, where a
+ * double keeps fewer than 17 significant digits).
+ *
+ * The double of an exact value that is not zero is like this when the value
+ * is too small or too large for a double (`1/10^400`, `10^400`), or when its
+ * double is computed as `∞/∞` (a rational with a numerator and a denominator
+ * above the largest double). An operation with such a value must then use
+ * its exact value or its big-decimal value. The test is one comparison, so
+ * it can guard a frequent operation.
+ */
+export function isOutsideNormalDoubleRange(x: number): boolean {
+  return !(
+    Math.abs(x) >= 2.2250738585072014e-308 && Math.abs(x) <= Number.MAX_VALUE
+  );
+}
+
 // When applying simplifications, only considers integers whose absolute value
 // is less than SMALL_INTEGER. This avoid loss of precision by preventing
 // simplification for `1e199 + 1`.

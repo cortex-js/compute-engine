@@ -1103,8 +1103,10 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (!isNumber(term)) continue;
 
       // --- Integer coefficients (positive and negative) ---
+      // The coefficient itself must be an integer: the double of an exact
+      // rational such as `(2·10³⁰ + 1)/10³⁰` is the integer 2.
       const n = term.re;
-      if (canFactor(n) && Math.abs(n) > 1) {
+      if (term.isInteger === true && canFactor(n) && Math.abs(n) > 1) {
         const absN = Math.abs(n);
         const factors = primeFactors(absN);
         const primes = Object.keys(factors).filter((k) => k !== '1');

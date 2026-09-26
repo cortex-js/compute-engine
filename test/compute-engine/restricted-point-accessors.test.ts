@@ -122,17 +122,19 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
   });
 });
 
+// A number read of an absent point is `NaN`, the marker of its codomain
+// (user decision 2026-09-25, `docs/ERROR-MODEL.md` §2).
 describe('Element access of a restricted point', () => {
   test.each([
-    ['First', ['First', RP], '1 {0 < t}', '1', '"Missing"'],
-    ['Last', ['Last', RP], '2 {0 < t}', '2', '"Missing"'],
-    ['At', ['At', RP, 2], '2 {0 < t}', '2', '"Missing"'],
+    ['First', ['First', RP], '1 {0 < t}', '1', 'NaN'],
+    ['Last', ['Last', RP], '2 {0 < t}', '2', 'NaN'],
+    ['At', ['At', RP, 2], '2 {0 < t}', '2', 'NaN'],
     [
       'At with two indices',
       ['At', ['When', ['List', ['List', 1, 2], ['List', 3, 4]], c], 2, 1],
       '3 {0 < t}',
       '3',
-      '"Missing"',
+      'NaN',
     ],
   ])('%s', (_l, json, free, present, absent) => {
     expect(value(json)).toBe(free);
@@ -259,7 +261,8 @@ describe('Compiled accessors of a restricted point', () => {
 
   test('First of a restricted point', () => {
     expect(run(['First', RP], 2)).toBe(1);
-    expect(run(['First', RP], -1)).toBeUndefined();
+    // A number read of an absent point is `NaN`, as in the interpreter.
+    expect(run(['First', RP], -1)).toBeNaN();
   });
 
   test('PointX of a restricted list and of a restricted point', () => {

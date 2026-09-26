@@ -6,7 +6,7 @@ import type {
   Scope,
 } from '../global-types.js';
 
-import { isFunction, isSymbol } from './type-guards.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import {
   functionLiteralParameterName,
   functionLiteralParameterNames,
@@ -101,6 +101,68 @@ const INDEXING_SET_OPERATORS = new Set([
 ]);
 
 /**
+ * The type of the index of a `Limits` clause whose bounds are integer
+ * literals: the ranged type `integer<lo..hi>` (or `integer<lo..>` when the
+ * upper bound is `+∞`). A ranged index lets the body type more precisely:
+ * `√(1 − ((k − 0.5)/40)²)` over `Limits(k, 1, 40)` is `real`, not `complex`.
+ * Any other clause, or a `type` other than `integer`, keeps `type` unchanged.
+ *
+ * `ops` are all the operands of the binder. When one of them ASSIGNS the
+ * index (`Sum(Block(Assign(k, k + 1), k), Limits(k, 1, 2))`), the index can
+ * hold a value outside the range, and the ranged type would reject that
+ * write. The index then keeps `type`.
+ */
+function rangeIndexType(
+  op: Expression,
+  type: TypeString | undefined,
+  ops: ReadonlyArray<Expression>
+): TypeString | undefined {
+  if (type !== 'integer' || !isFunction(op, 'Limits')) return type;
+  const index = op.ops[0];
+  if (!isSymbol(index)) return type;
+  if (ops.some((x) => assignsSymbol(x, index.symbol))) return type;
+  // Two clauses that bind the same name (`Sum(k, Limits(k, 1, 3),
+  // Limits(k, 5, 7))`) assign the values of both ranges to one symbol, so
+  // neither range is its type.
+  const bindsIndex = (x: Expression): boolean =>
+    isFunction(x) &&
+    INDEXING_SET_OPERATORS.has(x.operator) &&
+    isSymbol(x.ops[0]) &&
+    x.ops[0].symbol === index.symbol;
+  if (ops.filter(bindsIndex).length > 1) return type;
+  // Only number LITERALS: a symbol bound (`Limits(k, 1, n)` with `n := 10`)
+  // can be reassigned after this binding, which would leave the index type
+  // wrong.
+  const [, loOp, hiOp] = op.ops;
+  if (!isNumber(loOp) || !isNumber(hiOp)) return type;
+  // Safe integers only: the machine value of a larger literal is rounded,
+  // and the range would then miss index values.
+  const lo = loOp.re;
+  const hi = hiOp.re;
+  if (!Number.isSafeInteger(lo) || lo > hi) return type;
+  if (hi === Infinity) return `integer<${lo}..>` as TypeString;
+  if (!Number.isSafeInteger(hi)) return type;
+  return `integer<${lo}..${hi}>` as TypeString;
+}
+
+/** Does `expr` contain an `Assign` whose target is the symbol `name`, or a
+ * tuple pattern with `name` as a leaf (`Assign(Tuple(k, _), …)`)? */
+function assignsSymbol(expr: Expression, name: string): boolean {
+  if (!isFunction(expr)) return false;
+  if (expr.operator === 'Assign' && patternNames(expr.ops[0], name))
+    return true;
+  return expr.ops.some((x) => assignsSymbol(x, name));
+}
+
+/** Is `name` the symbol `target`, or a leaf of the tuple pattern `target`? */
+function patternNames(target: Expression | undefined, name: string): boolean {
+  if (isSymbol(target)) return target.symbol === name;
+  if (isFunction(target, 'Tuple'))
+    return target.ops.some((x) => patternNames(x, name));
+  return false;
+}
+
+/**
  * The index of a single indexing-set operand at `[i]`, if it has one.
  *
  * Marked `clauseLocal`: an indexing set is a *clause*, and the contract
@@ -111,7 +173,8 @@ const INDEXING_SET_OPERATORS = new Set([
 function indexingSetSite(
   op: Expression | undefined,
   i: number,
-  type: TypeString | undefined
+  type: TypeString | undefined,
+  ops: ReadonlyArray<Expression>
 ): BindingSite[] {
   // A DESTRUCTURING loop variable — `for (p, q) in pairs { … }`, lowered to
   // `Element(Tuple(p, q), pairs)` — binds one name per pattern leaf, so the
@@ -154,7 +217,7 @@ function indexingSetSite(
   }
   const site =
     isFunction(op) && INDEXING_SET_OPERATORS.has(op.operator)
-      ? siteFor(op.ops[0], [i, 0], type)
+      ? siteFor(op.ops[0], [i, 0], rangeIndexType(op, type, ops))
       : // A bare symbol (`Sum(body, n, 1, 10)`) or `Hold(n)`.
         siteFor(op, [i], type);
   return site === undefined ? [] : [{ ...site, clauseLocal: true }];
@@ -177,7 +240,7 @@ export function indexingSetSites(
   return (ops) => {
     const sites: BindingSite[] = [];
     for (let i = first; i < ops.length; i++)
-      sites.push(...indexingSetSite(ops[i], i, type));
+      sites.push(...indexingSetSite(ops[i], i, type, ops));
     return sites.length === 0 ? NO_SITES : sites;
   };
 }
@@ -192,7 +255,7 @@ export function limitsIndexSites(
   type?: TypeString
 ): BindingSiteSelector {
   return (ops) => {
-    const sites = indexingSetSite(ops[index], index, type);
+    const sites = indexingSetSite(ops[index], index, type, ops);
     return sites.length === 0 ? NO_SITES : sites;
   };
 }

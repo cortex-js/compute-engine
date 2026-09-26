@@ -63,6 +63,18 @@ describe('ORDER OF COMPLEX VALUES', () => {
     expect(e.box('z').isLessEqual(e.box('z'))).toBe(true);
   });
 
+  test('a complex symbol is not ordered with a zero tolerance', () => {
+    // With no tolerance, the exact difference `z − (z + 1) = −1` has a
+    // sign, but the operands are complex and have no order.
+    const e = new ComputeEngine({ tolerance: 0 });
+    e.declare('z', 'complex');
+    expect(e.box('z').isLess(e.parse('z+1'))).toBeUndefined();
+    expect(e.box('z').isGreater(e.parse('z-1'))).toBeUndefined();
+    expect(e.box('z').isLessEqual(e.box('z'))).toBe(true);
+    e.declare('w', 'real');
+    expect(e.box('w').isLess(e.parse('w+1'))).toBe(true);
+  });
+
   test('equality of complex values is unchanged', () => {
     expect(ce.parse('\\pi+i').isEqual(ce.parse('\\pi+i'))).toBe(true);
     expect(ce.parse('\\pi+i').isEqual(ce.parse('\\pi+2i'))).toBe(false);

@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 import { isSubtype } from '../../src/common/type/subtype';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // A restriction over a list value, `When(L, c)`, stays ONE held `When` while
 // its condition is undecided, and presents as a collection of restricted
@@ -185,10 +186,14 @@ describe('the applications over a restricted list follow', () => {
     expect(row.admitted).toBe(true);
     expect(row.twoStep).toBe('"Missing"');
     const cell = probe(ce, ['At', M, 2, 1]);
-    expect(cell.type).toBe('integer | missing | nan');
+    // An element read of an absent collection answers the marker of its
+    // codomain, `NaN` for a number, so the type has a `nan` arm and no
+    // `missing` arm (user decision 2026-09-25).
+    expect(cell.type).toBe('integer | nan');
     expect(cell.value).toBe('3 {0 < t}');
     // A masked NUMBER is `NaN` (user decision 2026-09-25).
     expect(cell.twoStep).toBe('NaN');
+    expect(cell.fresh).toBe('NaN');
   });
 });
 
@@ -371,5 +376,88 @@ describe('a union element type under a length', () => {
     );
     expect(isSubtype(parseType(typeToString(t))!, t)).toBe(true);
     expect(isSubtype(t, parseType(typeToString(t))!)).toBe(true);
+  });
+});
+
+// An element read of a restricted collection whose condition is false
+// answers the absence marker of the element's domain (user decision
+// 2026-09-25, `docs/ERROR-MODEL.md` §2, rules 4 and 5): `NaN` when the
+// element is a number, `Missing` when it is a row, a point or a string.
+// Every route agrees: the held form (evaluated while `t` is free, then again
+// once `t` is negative), a fresh evaluation, `.N()` and the compiled
+// JavaScript. The type of the application has a `nan` arm for a number and a
+// `missing` arm otherwise. Before, a fresh evaluation of a number read
+// answered `Missing`, while the held form answered `NaN`.
+describe('an element read of a restricted collection whose condition is false', () => {
+  const W = (x: unknown) => ['When', x, ['Less', 0, 't']];
+  const M = W(['List', ['List', 1, 2], ['List', 3, 4]]);
+
+  function routes(json: unknown) {
+    const ce = engine();
+    const e = ce.box(json as never);
+    const held = e.evaluate();
+    const code = compile(e, { to: 'javascript' });
+    ce.assign('t', -1);
+    const js = code.success ? code.run!({ t: -1 } as never) : 'no-compile';
+    return {
+      type: e.type.toString(),
+      held: held.evaluate().toString(),
+      fresh: e.evaluate().toString(),
+      n: e.N().toString(),
+      js,
+    };
+  }
+
+  test.each([
+    ['First of a pair', ['First', W(['Tuple', 1, 2])]],
+    ['Second of a pair', ['Second', W(['Tuple', 1, 2])]],
+    ['Last of a list', ['Last', W(['List', 1, 2])]],
+    ['At of a list', ['At', W(['List', 1, 2]), 1]],
+    ['At of a matrix, two indices', ['At', M, 2, 1]],
+  ])('%s is NaN', (_label, json) => {
+    const r = routes(json);
+    expect(r.type).toBe('integer | nan');
+    expect(r.held).toBe('NaN');
+    expect(r.fresh).toBe('NaN');
+    expect(r.n).toBe('NaN');
+    // `Last` and the two-index `At` do not compile for this operand; the
+    // compiled routes that exist answer `NaN`.
+    if (r.js !== 'no-compile') expect(r.js).toBeNaN();
+  });
+
+  test.each([
+    ['a row of a matrix', ['At', M, 2], 'missing | vector<integer^2>'],
+    [
+      'a point of a list of points',
+      ['First', W(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]])],
+      'missing | tuple<integer, integer>',
+    ],
+    [
+      'a point of a list of points, by At',
+      ['At', W(['List', ['Tuple', 1, 2]]), 1],
+      'missing | tuple<integer, integer>',
+    ],
+    ['a string', ['First', W(['List', { str: 'a' }])], 'missing | string'],
+  ])('%s is Missing', (_label, json, type) => {
+    const r = routes(json);
+    expect(r.type).toBe(type);
+    expect(r.held).toBe('"Missing"');
+    expect(r.fresh).toBe('"Missing"');
+    expect(r.n).toBe('"Missing"');
+    // `undefined` is the run-time spelling of `Missing`.
+    expect(r.js).toBeUndefined();
+  });
+
+  test('an absent operand of unknown type is Missing', () => {
+    const r = routes(['First', 'Missing']);
+    expect(r.fresh).toBe('"Missing"');
+    expect(r.n).toBe('"Missing"');
+    expect(r.js).toBeUndefined();
+  });
+
+  test('an out-of-range read of a list of numbers is NaN', () => {
+    const r = routes(['At', ['List', 1, 2], 5]);
+    expect(r.fresh).toBe('NaN');
+    expect(r.js).toBeNaN();
   });
 });

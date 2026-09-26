@@ -98,6 +98,15 @@ describe('per-function preamble inclusion', () => {
     expect(declaredIn(r.preamble)).toEqual(['_gpu_inf', '_gpu_gamma']);
   });
 
+  it('the Gamma pole test covers every finite negative integer', () => {
+    // A finite f32 integer below -3.0e38 is a pole too. The bound must be
+    // the most negative finite f32, so that only -Infinity is excluded.
+    for (const r of [glsl(['Gamma', 'x']), wgsl(['Gamma', 'x'])]) {
+      expect(r.preamble).toContain('z >= -3.4028234663852886e38');
+      expect(r.preamble).not.toContain('3.0e38');
+    }
+  });
+
   it('a subset naming every function reproduces the library exactly', () => {
     for (const library of [
       GPU_COLOR_PREAMBLE_GLSL,

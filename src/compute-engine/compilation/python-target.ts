@@ -1041,6 +1041,60 @@ function compilePythonComprehension(
 // target defined it. That made `Add(toString, 1)` refuse to compile as a
 // bogus "built-in operator with no fixed arity" instead of compiling
 // `toString` as an ordinary free symbol.
+
+/**
+ * Compile the search of `Contains`, `IndexOf` or `Element` for the searched
+ * value `needle`, so that an absent searched value is not found (user
+ * decision 2026-09-26): the answer is then `notFound` (`False` or `0`), as in
+ * the interpreter. `search(v)` emits the search for the compiled value `v`.
+ *
+ * The compiled value of an absent needle cannot be told apart from a present
+ * one by the element test alone. The `Missing` symbol and a restriction
+ * `v{c}` whose condition is false both compile to `nan` for a number, which
+ * the element test finds in a list that holds `nan`. So the absence is
+ * decided here, from the structure of the needle:
+ *
+ * - A `Missing` or `Undefined` symbol is not found.
+ * - A restriction `When(v, c)` with a scalar condition searches for `v` when
+ *   `c` holds, and is not found otherwise. A piecewise value
+ *   `Which(c1, v1, c2, v2, …)` searches for the value of the first condition
+ *   that holds, and is not found when no condition holds.
+ * - Any other needle whose type admits `missing` is not found when its
+ *   run-time value is `None`, the absence marker of a value that is not a
+ *   number.
+ */
+function pySearchedValue(
+  needle: Expression,
+  compile: (expr: Expression) => string,
+  search: (v: string) => string,
+  notFound: string
+): string {
+  if (isSymbol(needle, 'Missing') || isSymbol(needle, 'Undefined'))
+    return notFound;
+  const self = (x: Expression) =>
+    pySearchedValue(x, compile, search, notFound);
+  const scalarCondition = (c: Expression) =>
+    !c.type.matches('collection<any>');
+  if (
+    isFunction(needle, 'When') &&
+    needle.nops === 2 &&
+    scalarCondition(needle.ops[1])
+  )
+    return `(${self(needle.ops[0])} if (${compile(needle.ops[1])}) else ${notFound})`;
+  if (
+    isFunction(needle, 'Which') &&
+    needle.nops % 2 === 0 &&
+    needle.ops.every((x, i) => i % 2 === 1 || scalarCondition(x))
+  ) {
+    let code = notFound;
+    for (let i = needle.nops - 2; i >= 0; i -= 2)
+      code = `(${self(needle.ops[i + 1])} if (${compile(needle.ops[i])}) else ${code})`;
+    return code;
+  }
+  const v = compile(needle);
+  if (!typeContainsMissing(needle.type.type)) return search(v);
+  return `(lambda _n: ${notFound} if _n is None else ${search('_n')})(${v})`;
+}
 const PYTHON_OPERATORS: CompiledOperators = {
   __proto__: null as never,
   Add: ['+', 11],
@@ -1187,6 +1241,56 @@ function assertPythonNormRankAtMost2(rank: number | undefined): void {
 }
 
 /**
+ * True when every entry of `expr`, through every level of nesting, is typed
+ * as a finite number (`finite_number`: `integer`, `real`, `complex`, and
+ * their subtypes). Such an operand cannot hold a NaN or an infinite entry, so
+ * its norm needs no guard (`pyNorm`). A declared type is a promise the host
+ * makes, and the compiled code relies on it.
+ */
+function pyFiniteEntries(expr: Expression): boolean {
+  let t: Type | undefined = expr.type.type;
+  for (let depth = 0; t !== undefined && depth < 16; depth++) {
+    if (isSubtype(t, 'finite_number')) return true;
+    t = collectionElementType(t);
+  }
+  return false;
+}
+
+/**
+ * The Python source of `np.linalg.norm(x, ord)` (no `ord` argument when `ord`
+ * is `undefined`) with the interpreter's rule for non-finite entries. An
+ * infinite entry (a complex entry with an infinite part included) makes every
+ * norm `+∞`, a NaN entry included: `|±∞|` dominates every sum and every
+ * maximum. Otherwise a NaN entry makes the norm NaN. numpy does not follow
+ * this rule: `np.linalg.norm([inf, nan])` is `nan`, and the spectral norm
+ * (`ord=2` on a matrix) raises `LinAlgError` for a matrix with a NaN or
+ * infinite entry, because its SVD does not converge. The JavaScript target
+ * applies the same rule in its `norm` helper.
+ *
+ * The test applies only to an array of floating-point or complex entries
+ * (numpy dtype kinds `f` and `c`): other arrays cannot hold a NaN or an
+ * infinity, and `np.isinf` raises for an array of objects. The source is one
+ * expression and needs no module-level helper, so `compileLambda` accepts it.
+ * Call it only after the order is accepted: the guard answers `+∞` for any
+ * order.
+ *
+ * When `finite` is true (the operand's entries are typed as finite numbers,
+ * see `pyFiniteEntries`), no entry can be NaN or infinite and the source is
+ * the plain `np.linalg.norm` call.
+ */
+function pyNorm(x: string, ord: string | undefined, finite: boolean): string {
+  if (finite)
+    return `np.linalg.norm(${x}${ord === undefined ? '' : `, ${ord}`})`;
+  const call = `np.linalg.norm(_a${ord === undefined ? '' : `, ${ord}`})`;
+  const float = `_a.dtype.kind in 'fc'`;
+  return (
+    `(lambda _a: float('inf') if ${float} and np.isinf(_a).any() else ` +
+    `(float('nan') if ${float} and np.isnan(_a).any() else ${call}))` +
+    `(np.asarray(${x}))`
+  );
+}
+
+/**
  * The Python source of `Norm(x, p)` for a LITERAL positive order `p` over an
  * operand whose rank is not statically known: a lambda that tests the rank
  * with `np.ndim` when it runs, and answers the value the interpreter
@@ -1216,13 +1320,14 @@ function assertPythonNormRankAtMost2(rank: number | undefined): void {
 function pythonNormRankTest(
   x: string,
   p: string,
-  orders: 'vector' | 'matrix' | 'two'
+  orders: 'vector' | 'matrix' | 'two',
+  finite: boolean
 ): string {
   const nan = "float('nan')";
   const body =
     orders === 'vector'
-      ? `np.linalg.norm(_x, ${p}) if np.ndim(_x) == 1 else ${nan}`
-      : `np.linalg.norm(_x, ${p}) if np.ndim(_x) <= 2 else ${orders === 'two' ? 'np.linalg.norm(_x)' : nan}`;
+      ? `${pyNorm('_x', p, finite)} if np.ndim(_x) == 1 else ${nan}`
+      : `${pyNorm('_x', p, finite)} if np.ndim(_x) <= 2 else ${orders === 'two' ? pyNorm('_x', undefined, finite) : nan}`;
   return `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${body})(${x})`;
 }
 
@@ -1246,7 +1351,12 @@ function pythonNormRankTest(
  * `pType` is the type of the order; see `pythonNormRuntimeOrder` for the
  * string orders.
  */
-function pythonNormRuntimeRankTest(x: string, p: string, pType: Type): string {
+function pythonNormRuntimeRankTest(
+  x: string,
+  p: string,
+  pType: Type,
+  finite: boolean
+): string {
   const nan = "float('nan')";
   return pythonNormRuntimeOrder(
     x,
@@ -1254,9 +1364,9 @@ function pythonNormRuntimeRankTest(x: string, p: string, pType: Type): string {
     pType,
     (fro) =>
       `(np.abs(_x) if _p > 0 else ${nan}) if np.ndim(_x) == 0 else ` +
-      `(np.linalg.norm(_x, _p) if _p > 0 else ${nan}) if np.ndim(_x) == 1 else ` +
-      `(${pythonMatrixRuntimeNorm(fro)}) if np.ndim(_x) == 2 else ` +
-      `(np.linalg.norm(_x) if _p == 2 else ${nan})`
+      `(${pyNorm('_x', '_p', finite)} if _p > 0 else ${nan}) if np.ndim(_x) == 1 else ` +
+      `(${pythonMatrixRuntimeNorm(fro, finite)}) if np.ndim(_x) == 2 else ` +
+      `(${pyNorm('_x', undefined, finite)} if _p == 2 else ${nan})`
   );
 }
 
@@ -1268,12 +1378,15 @@ function pythonNormRuntimeRankTest(x: string, p: string, pType: Type): string {
  * can be a string: on a matrix that order is the Frobenius norm, which is not
  * the spectral norm of the order 2, so it is spelled `'fro'`.
  */
-function pythonMatrixRuntimeNorm(fro: string | undefined): string {
+function pythonMatrixRuntimeNorm(
+  fro: string | undefined,
+  finite: boolean
+): string {
   const nan = "float('nan')";
-  const numeric = `np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else ${nan}`;
+  const numeric = `${pyNorm('_x', '_p', finite)} if _p == 1 or _p == 2 or _p == np.inf else ${nan}`;
   return fro === undefined
     ? numeric
-    : `np.linalg.norm(_x, 'fro') if ${fro} else ${numeric}`;
+    : `${pyNorm('_x', "'fro'", finite)} if ${fro} else ${numeric}`;
 }
 
 /**
@@ -1978,6 +2091,84 @@ function pyCollArg(
 }
 
 /**
+ * The Python expression of the absence marker for an element read of the
+ * collection `coll` that selects no element: an out-of-range position, or a
+ * collection that is absent as a whole (`None` at run time, the value of a
+ * restriction whose condition is false). The interpreter answers the marker
+ * of the element domain (user decision of 2026-09-25, `docs/ERROR-MODEL.md`
+ * §2, and `absenceMarker()` in `library/collections.ts`):
+ *
+ * - `float('nan')` when the element type, less its `missing` arm, is a
+ *   number;
+ * - `None` (the Python spelling of `Missing`) when it is a settled type that
+ *   is not a number: a row, a point, a string;
+ * - when the element type is not known (`unknown`, `any`), a test at run
+ *   time, as the interpreter looks at the cells: `float('nan')` when the
+ *   first 10 cells that are not `None` are all numbers and there is at least
+ *   one, `None` otherwise (and for an absent collection). The emitted test
+ *   reads the sequence through the name `_l`, which every caller binds.
+ *
+ * The element type is read from the collection type with its `missing` arm
+ * removed: a restricted collection is typed `missing | list<…>`, and its
+ * element domain is that of the list.
+ */
+function pyAbsenceMarker(coll: Expression): string {
+  const collT = stripMissingFromType(resolveTypeForCompilation(coll.type.type));
+  const eltT = collectionElementType(collT);
+  const present =
+    eltT === undefined
+      ? undefined
+      : stripMissingFromType(resolveTypeForCompilation(eltT));
+  if (
+    present !== undefined &&
+    present !== 'unknown' &&
+    present !== 'any' &&
+    present !== 'never'
+  )
+    return isSubtype(present, 'number') ? "float('nan')" : 'None';
+  return "((lambda _c: float('nan') if len(_c) > 0 and all(isinstance(_x, (int, float, complex, np.number)) and not isinstance(_x, (bool, np.bool_)) for _x in _c) else None)([_x for _x in list(_l)[:10] if _x is not None]) if isinstance(_l, (list, tuple, np.ndarray)) else None)";
+}
+
+/**
+ * The element at 0-based position `k` of `arg` (`-1` is the last), for the
+ * compiled `First`/`Second`/`Third`/`Last`. A position past the end, and an
+ * operand that is absent as a whole, answer the absence marker of the
+ * element domain (`pyAbsenceMarker`).
+ *
+ * An operand that can be absent as a whole (a restriction, typed
+ * `missing | list<…>`) is admitted when its present type is an indexed
+ * collection, as in the interpreter; it is `None` at run time when absent.
+ * Any other operand goes through `pyCollArg`, which refuses a string and an
+ * operand that is not an indexed collection.
+ */
+function pyNthElement(
+  kind: string,
+  arg: Expression | undefined,
+  k: number,
+  compile: (expr: Expression) => string
+): string {
+  let code: string;
+  if (arg !== undefined && typeContainsMissing(arg.type.type)) {
+    const present = stripMissingFromType(
+      resolveTypeForCompilation(arg.type.type)
+    );
+    if (
+      present === 'never' ||
+      isSubtype(present, 'string') ||
+      !isSubtype(present, INDEXED_COLLECTION_SHAPE_TYPE)
+    )
+      code = pyCollArg(kind, arg, compile);
+    else {
+      assertPyNoCharacterOperand(kind, [arg]);
+      code = compile(arg);
+    }
+  } else code = pyCollArg(kind, arg, compile);
+  const marker = pyAbsenceMarker(arg!);
+  const read = k < 0 ? `_l[${k}] if len(_l) >= ${-k}` : `_l[${k}] if len(_l) > ${k}`;
+  return `(lambda _l: ${marker} if _l is None else (${read} else ${marker}))(${code})`;
+}
+
+/**
  * The Python analogs of the JavaScript target's `couldBeIndexedCollectionOperand`
  * / `isNumericIndexOperand` (kept local, like `pyCollArg`, to avoid a
  * cross-target import): a base whose static type merely ADMITS an indexed
@@ -2102,6 +2293,17 @@ const PYTHON_CONDITION_DIALECT: ConditionDialect = {
   bind: (params, body, args) =>
     `(lambda ${params.join(', ')}: ${body})(${args.join(', ')})`,
 };
+
+/**
+ * True when `expr` can lower to the Python absence value `None`: a
+ * restriction (`When`), or any operand whose type holds a `missing` arm at
+ * any depth (a `Which` with no default clause, a symbol declared with a
+ * `missing` arm, a point with an absent coordinate). numpy functions such as
+ * `np.dot` raise for `None`, where the interpreter answers an absence marker.
+ */
+function pythonMayBeAbsent(expr: Expression): boolean {
+  return isFunction(expr, 'When') || typeContainsMissing(expr.type.type);
+}
 
 /**
  * The Python literal for an absent selection value over arms of the given
@@ -2587,7 +2789,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // units `rewriteAngularUnit` replaces the `Degrees` node before codegen.
   Degrees: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Degrees`: no argument');
-    return `(${compile(x)} * np.pi / 180)`;
+    return `(${pyOperand(compile(x))} * np.pi / 180)`;
   },
 
   // Inverse trigonometric (reciprocal)
@@ -2969,8 +3171,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // A RESTRICTED operand (`P {c}`, `L {c}`) lowers to `(…) if c else
     // None`, and `np.dot` raises a `TypeError` for `None`, where the
     // interpreter answers the absence marker (`NaN` for the product of two
-    // points, `Missing` for a list of points). Fail closed.
-    if (args.some((a) => isFunction(a, 'When')))
+    // points, `Missing` for a list of points). Fail closed. Any other operand
+    // whose type admits absence (a `Which` with no default clause, a symbol
+    // with a `missing` arm, a point with an absent coordinate) can also
+    // lower to `None`, so the same test applies to its type.
+    if (args.some((a) => pythonMayBeAbsent(a)))
       throw new Error(
         'Could not compile `Dot`: a restricted operand is absent when its ' +
           'condition is false, and `np.dot` has no answer for an absent ' +
@@ -2983,8 +3188,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `Cross`: missing argument');
     // A RESTRICTED operand (`P {c}`) lowers to `(…) if c else None`, and
     // `np.cross` raises for `None`, where the interpreter answers the
-    // absence marker. Fail closed, as `Dot` does.
-    if (args.some((a) => isFunction(a, 'When')))
+    // absence marker. Fail closed, as `Dot` does, also for any other operand
+    // whose type admits absence.
+    if (args.some((a) => pythonMayBeAbsent(a)))
       throw new Error(
         'Could not compile `Cross`: a restricted operand is absent when its ' +
           'condition is false, and `np.cross` has no answer for an absent ' +
@@ -3026,7 +3232,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
             'into one scalar, but the interpreter answers one norm per point.'
         );
     }
-    if (args.length < 2) return `np.linalg.norm(${compile(args[0])})`;
+    const finite = pyFiniteEntries(args[0]);
+    if (args.length < 2) return pyNorm(compile(args[0]), undefined, finite);
     const p = args[1];
     const rank = pyStaticRank(args[0]);
     if (isString(p)) {
@@ -3056,7 +3263,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       // scalar (whose norm is then its absolute value, as in the
       // interpreter).
       if (p.string === 'Frobenius' && rank !== 2)
-        return `np.linalg.norm(${compile(args[0])})`;
+        return pyNorm(compile(args[0]), undefined, finite);
       // The `"Infinity"` norm type is the order +Infinity. Over an operand
       // whose rank is not statically known, the emitted code tests the rank
       // when it runs (`pythonNormRankTest`). A scalar answers its absolute
@@ -3064,9 +3271,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       if (rank === undefined)
         return args[0].type.matches('number')
           ? `np.abs(${compile(args[0])})`
-          : pythonNormRankTest(compile(args[0]), ord, 'matrix');
+          : pythonNormRankTest(compile(args[0]), ord, 'matrix', finite);
       assertPythonNormRankAtMost2(rank);
-      return `np.linalg.norm(${compile(args[0])}, ${ord})`;
+      return pyNorm(compile(args[0]), ord, finite);
     }
     // The order 2 is the Euclidean norm on a vector and the SPECTRAL norm
     // (the largest singular value) on a matrix, in the interpreter
@@ -3083,10 +3290,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const scalar = rank === undefined && args[0].type.matches('number');
     if (p.isSame(2)) {
       if (rank !== undefined && rank >= 3)
-        return `np.linalg.norm(${compile(args[0])})`;
+        return pyNorm(compile(args[0]), undefined, finite);
       if (scalar) return `np.abs(${compile(args[0])})`;
       if (rank === undefined)
-        return pythonNormRankTest(compile(args[0]), compile(p), 'two');
+        return pythonNormRankTest(compile(args[0]), compile(p), 'two', finite);
     } else if (!isNumber(p) && !p.isInfinity) {
       // The order is only known at RUN time. A scalar answers its absolute
       // value for a positive order and has no value for any other one, as
@@ -3105,7 +3312,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           () => `np.abs(_x) if _p > 0 else float('nan')`
         );
       if (rank === undefined)
-        return pythonNormRuntimeRankTest(compile(args[0]), compile(p), pType);
+        return pythonNormRuntimeRankTest(
+          compile(args[0]),
+          compile(p),
+          pType,
+          finite
+        );
       // Above rank 2 the interpreter computes only the order 2, as the
       // entry-wise Frobenius norm, which is `np.linalg.norm(t)` with no `ord`
       // argument (numpy raises for an explicit order on more than two axes).
@@ -3114,7 +3326,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           compile(args[0]),
           compile(p),
           pType,
-          () => `np.linalg.norm(_x) if _p == 2 else float('nan')`
+          () =>
+            `${pyNorm('_x', undefined, finite)} if _p == 2 else float('nan')`
         );
       // The interpreter (`library/linear-algebra.ts`) computes a vector norm
       // only for an order `p > 0` (the p-norms, and L∞ for `+∞`), and a
@@ -3130,8 +3343,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         pType,
         (fro) =>
           rank === 1
-            ? `np.linalg.norm(_x, _p) if _p > 0 else float('nan')`
-            : pythonMatrixRuntimeNorm(fro)
+            ? `${pyNorm('_x', '_p', finite)} if _p > 0 else float('nan')`
+            : pythonMatrixRuntimeNorm(fro, finite)
       );
     }
     // A literal numeric order that is not positive (`0`, `-1`, `-∞`) has no
@@ -3176,11 +3389,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       return pythonNormRankTest(
         compile(args[0]),
         compile(p),
-        matrixOrder ? 'matrix' : 'vector'
+        matrixOrder ? 'matrix' : 'vector',
+        finite
       );
     }
     assertPythonNormRankAtMost2(rank);
-    return `np.linalg.norm(${compile(args[0])}, ${compile(p)})`;
+    return pyNorm(compile(args[0]), compile(p), finite);
   },
   Determinant: 'np.linalg.det',
   Inverse: 'np.linalg.inv',
@@ -3567,19 +3781,20 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
             `numeric, so a keyed (dictionary) access cannot be ruled out.`
         );
     }
-    // 1-based; negative counts from the end; 0/out-of-range → nan. A base that
-    // is not a sequence at run time (the dictionary arm of an admitted union)
-    // projects to nan, mirroring the JavaScript `_SYS.at` runtime dispatch.
-    return `(lambda _l, _i: float('nan') if not isinstance(_l, (list, tuple, np.ndarray)) else (_l[int(_i) - 1] if 1 <= _i <= len(_l) else (_l[int(_i)] if -len(_l) <= _i <= -1 else float('nan'))))(${compile(base)}, ${compile(index)})`;
+    // 1-based; negative counts from the end. An index that selects no
+    // element (0, out of range) and an absent base (`None`, a restricted
+    // collection whose condition is false) answer the absence marker of the
+    // element domain (`pyAbsenceMarker`): `float('nan')` for numbers, `None`
+    // otherwise. Any other base that is not a sequence at run time (the
+    // dictionary arm of an admitted union) projects to nan, mirroring the
+    // JavaScript `_SYS.at` runtime dispatch.
+    const marker = pyAbsenceMarker(base);
+    return `(lambda _l, _i: (${marker} if _l is None else float('nan')) if not isinstance(_l, (list, tuple, np.ndarray)) else (_l[int(_i) - 1] if 1 <= _i <= len(_l) else (_l[int(_i)] if -len(_l) <= _i <= -1 else ${marker})))(${compile(base)}, ${compile(index)})`;
   },
-  First: (args, compile) =>
-    `(lambda _l: _l[0] if len(_l) > 0 else float('nan'))(${pyCollArg('First', args[0], compile)})`,
-  Second: (args, compile) =>
-    `(lambda _l: _l[1] if len(_l) > 1 else float('nan'))(${pyCollArg('Second', args[0], compile)})`,
-  Third: (args, compile) =>
-    `(lambda _l: _l[2] if len(_l) > 2 else float('nan'))(${pyCollArg('Third', args[0], compile)})`,
-  Last: (args, compile) =>
-    `(lambda _l: _l[-1] if len(_l) > 0 else float('nan'))(${pyCollArg('Last', args[0], compile)})`,
+  First: (args, compile) => pyNthElement('First', args[0], 0, compile),
+  Second: (args, compile) => pyNthElement('Second', args[0], 1, compile),
+  Third: (args, compile) => pyNthElement('Third', args[0], 2, compile),
+  Last: (args, compile) => pyNthElement('Last', args[0], -1, compile),
   Rest: (args, compile) => `${pyCollArg('Rest', args[0], compile)}[1:]`,
   Most: (args, compile) => `${pyCollArg('Most', args[0], compile)}[:-1]`,
   Take: (args, compile) => {
@@ -3655,14 +3870,24 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('IndexOf', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `IndexOf`: missing value');
-    return `_ce_indexof(${coll}, ${compile(args[1])})`;
+    return pySearchedValue(
+      args[1],
+      compile,
+      (v) => `_ce_indexof(${coll}, ${v})`,
+      '0'
+    );
   },
   Contains: (args, compile) => {
     if (args[0]) requirePrimitiveElements('Contains', args[0]);
     const coll = pyCollArg('Contains', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Contains`: missing value');
-    return `(${compile(args[1])} in ${coll})`;
+    return pySearchedValue(
+      args[1],
+      compile,
+      (v) => `(${v} in ${coll})`,
+      'False'
+    );
   },
   // First-occurrence order (`dict.fromkeys` preserves insertion order).
   Unique: (args, compile) => {
@@ -3974,7 +4199,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Element`: missing argument');
     requirePrimitiveElements('Element', args[1]);
-    return `(${compile(args[0])} in ${pyCollArg('Element', args[1], compile)})`;
+    const coll = pyCollArg('Element', args[1], compile);
+    // An absent value is not an element (see `pySearchedValue`).
+    return pySearchedValue(
+      args[0],
+      compile,
+      (v) => `(${v} in ${coll})`,
+      'False'
+    );
   },
   Identity: (args, compile, target) => {
     if (args[0] == null)
@@ -4031,6 +4263,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return `${convert}(np.trace(np.asarray(${pyCollArg('Trace', args[0], compile)})))`;
   },
 };
+
+// `ApplyWhole` (engine-internal, `library/core.ts`) applies a function to
+// arguments bound whole, which is what the `Apply` lowering emits: the call
+// `(fn)(args)` binds each argument as given. The lazy `Map` of a declared
+// `broadcastable<T>` map builds its per-element call with it.
+PYTHON_FUNCTIONS.ApplyWhole = PYTHON_FUNCTIONS.Apply;
 
 /**
  * Python/NumPy language target implementation

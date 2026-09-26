@@ -170,7 +170,14 @@ export function deriveApplicationType(
   );
   const absorbMissing =
     propagate &&
-    operands.some((d, i) => typeContainsMissing(d.type) && !passedThrough[i]);
+    operands.some(
+      (d, i) =>
+        // Only a position that strips `missing` (`missingStrip`) makes the
+        // result absent, as at the call site.
+        def.stripsMissingAt(i) &&
+        typeContainsMissing(d.type) &&
+        !passedThrough[i]
+    );
   // An operator that threads conditional values without propagating absence
   // (`threadsConditionals`): a threaded operand that can be absent as a
   // whole is typed from its present value, and the result of a `handle`
@@ -192,8 +199,12 @@ export function deriveApplicationType(
     absorbMissing
       ? absorbOperandAbsence(
           t,
+          // A position that does not strip `missing` (`missingStrip`) takes
+          // no part in the absorption, as at the call site.
           operands.map((d, i) =>
-            passedThrough[i] ? stripMissingFromType(d.type) : d.type
+            passedThrough[i] || !def.stripsMissingAt(i)
+              ? stripMissingFromType(d.type)
+              : d.type
           ),
           ABSENT_CELLS_STAY_MISSING.has(operator),
           def.broadcastable

@@ -486,6 +486,27 @@ describe('P0-16f — Log with a symbolic (exact) base stays symbolic', () => {
   });
 });
 
+describe('Log of an integer power beyond the safe integers is exact', () => {
+  // An argument above 2^53 cannot use the double factorization. The exact
+  // reduction must still find log_b(c^p) = p/q when b = c^q.
+  test.each([
+    [['Log', ['Power', 10, 20], 10], '20'],
+    [['Log', ['Power', 10, 400], 10], '400'],
+    [['Log', ['Power', 2, 100], 2], '100'],
+    [['Log', ['Power', 2, 101], 4], '101/2'],
+    [['Log', ['Power', 2, 100], 8], '100/3'],
+  ])('%j → %s', (expr, expected) => {
+    expect(evalStr(expr)).toEqual(expected);
+  });
+  test('a big integer that is not a power of the base stays symbolic', () => {
+    expect(num(['Log', ['Add', ['Power', 10, 20], 1], 10]).operator).toEqual(
+      'Log'
+    );
+    expect(num(['Log', ['Power', 2, 100], 6]).operator).toEqual('Log');
+    expect(num(['Log', ['Power', 3, 50], 2]).operator).toEqual('Log');
+  });
+});
+
 describe('P0-16g — Real/Imaginary/Conjugate keep exact real parts', () => {
   test('Real(1/2) → 1/2', () => {
     expect(evalStr(['Real', ['Rational', 1, 2]])).toEqual('1/2');

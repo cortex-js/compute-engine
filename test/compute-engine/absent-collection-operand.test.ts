@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // A collection operator over an ABSENT collection answers the marker of its
 // codomain, `Missing` for a collection result and `NaN` for a number (user
@@ -143,5 +144,252 @@ describe('a collection operator over a restricted collection', () => {
       '2 {0 < t}',
       '4 {0 < t}',
     ]);
+  });
+});
+
+describe('Insert, ReplaceAt and Append over an absent collection', () => {
+  // They answer `Missing` on every route (user decision 2026-09-26). Before,
+  // a boxed `Insert(Missing, 1, 2)` was an `incompatible-type` error, and
+  // only a restricted collection whose condition failed gave `Missing`.
+  const RL = ['When', ['List', 1, 2], ['Less', 0, 't']];
+  test.each([
+    ['Insert', ['Insert', 'Missing', 1, 2], 'list<integer> | missing'],
+    ['ReplaceAt', ['ReplaceAt', 'Missing', 1, 2], 'list<integer> | missing'],
+    ['Append', ['Append', 'Missing', 1], 'list | missing'],
+    ['Append (Undefined)', ['Append', 'Undefined', 1], 'list | missing'],
+  ])('%s answers Missing', (_op, json, type) => {
+    const e = engine().box(json as never);
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe(type);
+    expect(e.evaluate().toString()).toBe('"Missing"');
+    expect(e.N().toString()).toBe('"Missing"');
+  });
+
+  test('the parse route', () => {
+    const ce = engine();
+    for (const src of [
+      '\\operatorname{Insert}(\\operatorname{Missing}, 1, 2)',
+      '\\operatorname{ReplaceAt}(\\operatorname{Missing}, 1, 2)',
+      '\\operatorname{Append}(\\operatorname{Missing}, 1)',
+    ])
+      expect(ce.parse(src).evaluate().toString()).toBe('"Missing"');
+  });
+
+  test.each([
+    ['Insert', ['Insert', RL, 1, 5], '[5,1,2] {0 < t}'],
+    ['ReplaceAt', ['ReplaceAt', RL, 1, 5], '[5,2] {0 < t}'],
+    ['Append', ['Append', RL, 5], '[1,2,5] {0 < t}'],
+  ])('%s over a restricted collection', (_op, json, free) => {
+    const ce = engine();
+    const e = ce.box(json as never);
+    expect(e.type.toString()).toBe('list<integer> | missing');
+    const held = e.evaluate();
+    expect(held.toString()).toBe(free);
+    ce.assign('t', -1);
+    expect(held.evaluate().toString()).toBe('"Missing"');
+    expect(e.evaluate().toString()).toBe('"Missing"');
+    expect(e.N().toString()).toBe('"Missing"');
+  });
+
+  test('an absent index or value is not an absent collection', () => {
+    const ce = engine();
+    // The stored value is kept as one element of the result.
+    expect(
+      ce
+        .box(['Insert', ['List', 1, 2], 1, 'Missing'])
+        .evaluate()
+        .toString()
+    ).toBe('["Missing",1,2]');
+    // An absent index and an absent appended value are still refused.
+    expect(ce.box(['Insert', ['List', 1], 'Missing', 2]).isValid).toBe(false);
+    expect(ce.box(['Append', ['List', 1], 'Missing']).isValid).toBe(false);
+  });
+});
+
+describe('a search for an absent value finds nothing', () => {
+  // `Contains`, `IndexOf` and `Count` give their "not found" answer for an
+  // absent searched value (user decision 2026-09-26). Before, the answer was
+  // `Missing` for `Contains` and `NaN` for `IndexOf` and `Count`.
+  test.each([
+    [['Contains', ['List', 1, 2], 'Missing'], '"False"', 'boolean'],
+    [['Contains', ['List', 1, 2], 'Undefined'], '"False"', 'boolean'],
+    // A collection that holds an absent element: the absent value is not
+    // found in it either.
+    [['Contains', ['List', 1, 'Missing'], 'Missing'], '"False"', 'boolean'],
+    [['IndexOf', ['List', 1, 2], 'Missing'], '0', 'integer'],
+    [['IndexOf', ['List', 1, 'Missing'], 'Missing'], '0', 'integer'],
+    [['Count', ['List', 1, 2], 'Missing'], '0', 'integer'],
+    [['Count', ['List', 'Missing', 'Missing'], 'Missing'], '0', 'integer'],
+  ])('%j', (json, expected, type) => {
+    const e = engine().box(json as never);
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe(type);
+    expect(e.evaluate().toString()).toBe(expected);
+  });
+
+  test.each([
+    // An absent element of the collection does not make the answer absent,
+    // so it does not widen the type. Before, these were typed `number`
+    // (`IndexOf`, `Count`) and `list<number>` (`Insert`, `ReplaceAt`).
+    [['Contains', ['List', 1, 'Missing'], 2], 'boolean', '"False"'],
+    [['IndexOf', ['List', 1, 'Missing'], 2], 'integer', '0'],
+    [['Count', ['List', 1, 'Missing']], 'integer', '2'],
+    [['Count', ['List', 1, 'Missing'], 2], 'integer', '0'],
+    [
+      ['Insert', ['List', 1, 'Missing'], 1, 2],
+      'list<integer | missing>',
+      '[2,1,"Missing"]',
+    ],
+    [
+      ['ReplaceAt', ['List', 1, 'Missing'], 1, 2],
+      'list<integer | missing>',
+      '[2,"Missing"]',
+    ],
+    [
+      ['Append', ['List', 1, 'Missing'], 2],
+      'list<integer | missing>',
+      '[1,"Missing",2]',
+    ],
+  ])('an absent element: %j', (json, type, expected) => {
+    const e = engine().box(json as never);
+    expect(e.type.toString()).toBe(type);
+    expect(e.evaluate().toString()).toBe(expected);
+  });
+
+  test('the parse route', () => {
+    expect(
+      engine()
+        .parse('\\operatorname{Contains}([1, 2], \\operatorname{Missing})')
+        .evaluate()
+        .toString()
+    ).toBe('"False"');
+  });
+
+  test('an absent collection still makes the answer absent', () => {
+    const ce = engine();
+    expect(ce.box(['Contains', 'Missing', 2]).evaluate().toString()).toBe(
+      '"Missing"'
+    );
+    expect(ce.box(['IndexOf', 'Missing', 2]).evaluate().toString()).toBe(
+      'NaN'
+    );
+    expect(ce.box(['Count', 'Missing', 2]).evaluate().toString()).toBe('NaN');
+  });
+
+  test('compiled to JavaScript', () => {
+    const ce = engine();
+    const run = (json: unknown): unknown => {
+      const r = compile(ce.box(json as never), { to: 'javascript' } as never);
+      expect(r.success).toBe(true);
+      return r.run!({} as never);
+    };
+    // `Missing` compiles to `undefined`, which the element test found in a
+    // list that holds an absent element: the answer was 2.
+    expect(run(['IndexOf', ['List', 1, 'Missing'], 'Missing'])).toBe(0);
+    expect(run(['IndexOf', ['List', 1, 2], 'Missing'])).toBe(0);
+    expect(run(['Contains', ['List', 1, 2], 'Missing'])).toBe(false);
+  });
+});
+
+describe('Join and the set operators over an absent collection', () => {
+  // A collection operator over an absent collection answers `Missing` (user
+  // decision 2026-09-25). Before, `Join(Missing, [1])` was `[Missing, 1]`
+  // (the absent operand was wrapped as one element), and `Union`,
+  // `Intersection` and `SetMinus` refused an absent set with an
+  // `incompatible-type` error, also when it was a restricted set whose
+  // condition failed.
+  const S = ['Set', 1, 2];
+  const T = ['Set', 2, 3];
+  const c = ['Less', 0, 't'];
+  test.each([
+    [['Join', 'Missing', ['List', 1]]],
+    [['Join', ['List', 1], 'Missing']],
+    [['Join', ['List', 1], 'Undefined']],
+    [['Union', 'Missing', T]],
+    [['Union', S, 'Missing']],
+    [['Intersection', 'Missing', T]],
+    [['SetMinus', 'Missing', 1]],
+  ])('%j answers Missing', (json) => {
+    const ce = engine();
+    const e = ce.box(json as never);
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toMatch(/missing/);
+    expect(e.evaluate().toString()).toBe('"Missing"');
+    expect(e.N().toString()).toBe('"Missing"');
+  });
+
+  test('the parse route', () => {
+    expect(
+      engine()
+        .parse('\\operatorname{Join}(\\operatorname{Missing}, [1])')
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+  });
+
+  test.each([
+    [['Join', ['When', ['List', 1], c], ['List', 2]], '[1,2] {0 < t}'],
+    [['Union', ['When', S, c], T], 'Set(1, 2, 3) {0 < t}'],
+    [['Intersection', ['When', S, c], T], 'Set(2) {0 < t}'],
+    [['SetMinus', ['When', S, c], 1], 'Set(2) {0 < t}'],
+  ])('%j over a restricted collection', (json, free) => {
+    const ce = engine();
+    const e = ce.box(json as never);
+    const held = e.evaluate();
+    expect(held.toString()).toBe(free);
+    ce.assign('t', -1);
+    expect(held.evaluate().toString()).toBe('"Missing"');
+    expect(e.evaluate().toString()).toBe('"Missing"');
+  });
+
+  test('an absent element or value is not an absent collection', () => {
+    const ce = engine();
+    expect(
+      ce
+        .box(['Join', ['List', 1, 'Missing'], ['List', 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,"Missing",2]');
+    expect(
+      ce
+        .box(['Union', ['Set', 1, 'Missing'], T])
+        .evaluate()
+        .toString()
+    ).toBe('Set(1, "Missing", 2, 3)');
+    // A removed value that is absent is still refused.
+    expect(ce.box(['SetMinus', S, 'Missing']).isValid).toBe(false);
+  });
+});
+
+describe('A set relation over an absent set', () => {
+  // A set relation computes on the whole collection, so an absent set makes
+  // the answer absent: the marker of a boolean codomain is `Missing`. Before,
+  // `Subset(Missing, {2,3})` was `False` and `NotSubset(Missing, {2,3})` was
+  // `True`, while `Contains(Missing, 2)` was already `Missing`.
+  const relations = [
+    'Subset',
+    'SubsetEqual',
+    'Superset',
+    'SupersetEqual',
+    'NotSubset',
+    'NotSuperset',
+    'NotSupersetEqual',
+  ];
+  test.each(relations)('%s over an absent set is Missing', (op) => {
+    const ce = engine();
+    for (const args of [
+      ['Missing', ['Set', 2, 3]],
+      [['Set', 2], 'Undefined'],
+    ]) {
+      const e = ce.box([op, ...args] as never);
+      expect(e.type.toString()).toBe('boolean | missing');
+      expect(e.evaluate().toString()).toBe('"Missing"');
+    }
+  });
+  test.each(relations)('%s over present sets is unchanged', (op) => {
+    const ce = engine();
+    const e = ce.box([op, ['Set', 2], ['Set', 2, 3]] as never);
+    expect(e.type.toString()).toBe('boolean');
+    expect(['"True"', '"False"']).toContain(e.evaluate().toString());
   });
 });

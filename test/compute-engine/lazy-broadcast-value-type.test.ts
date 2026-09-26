@@ -132,6 +132,29 @@ describe('the type of Map', () => {
     expect(m.type.toString()).toBe('list<rational>');
   });
 
+  // The lambda receives one row of each matrix source, so only the outer
+  // length is a dimension of the result. The lambda result type gives the
+  // shape of each element.
+  test('a Map over a matrix keeps only the outer length', () => {
+    const M = ['List', ['List', 1, 2], ['List', 3, 4]] as const;
+    const zipScalar = ce.box(['Map', ['Function', 0, 'a', 'b'], M, M] as any);
+    expect(zipScalar.type.toString()).toBe(
+      zipScalar.evaluate().type.toString()
+    );
+    expect(zipScalar.type.matches('matrix')).toBe(false);
+    const oneScalar = ce.box(['Map', ['Function', 0, 'a'], M] as any);
+    expect(oneScalar.evaluate().toString()).toBe('[0,0]');
+    expect(oneScalar.type.toString()).toBe('vector<integer^2>');
+    const zipRows = ce.box([
+      'Map',
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+      M,
+      M,
+    ] as any);
+    expect(zipRows.evaluate().toString()).toBe('[[2,4],[6,8]]');
+    expect(zipRows.type.toString()).toBe('list<vector<integer^2>^2>');
+  });
+
   test('a zip Map with a set source is an indexed collection', () => {
     const m = ce.box([
       'Map',

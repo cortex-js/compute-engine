@@ -1390,6 +1390,60 @@ document's history):
   would turn its arithmetic consumers into a host `TypeError`. Pinned in
   the conformance suite and in `conditional-values.test.ts`,
   `when-list-broadcast.test.ts`, `a2-restrictions.test.ts`.
+- **RULED 2026-09-26: searching for an absent value means not found.** When
+  the value that `Contains`, `IndexOf`, `Count` or `Element` searches for is
+  absent, the answer is the "not found" answer of the operator: `False` for
+  `Contains` and `Element`, `0` for `IndexOf` and `Count`, and `True` for
+  `NotElement`. This is true for the `Missing` and `Undefined` symbols, and
+  for a restricted value whose condition is false. It is true also when the
+  collection holds an absent element: `IndexOf([1, Missing], Missing)` is
+  `0`. A `NaN` that is present is still found: `IndexOf([1, NaN], NaN)` is
+  `2`. Because a restricted number whose condition is false is `NaN` (the
+  rule above), the operator examines the operand as written to tell that
+  `NaN` from a present one: `IndexOf([1, NaN], 2{c})` is `0` when `c` is
+  false. A searched value that holds a restriction or a piecewise value whose
+  condition is not decided is not moved out of the application: the
+  application stays unevaluated and gives the correct answer once the
+  condition is decided either way. `Contains([1, 2], 2{c})` stays
+  `Contains([1, 2], 2{c})` while `c` is not known, and then gives `True` or
+  `False`. Before, the searched value was threaded, the held result was
+  `True{c}`, and it became `Missing` (or `NaN` for `IndexOf` and `Count`)
+  when `c` failed, while a fresh evaluation gave `False` (or `0`); and
+  `Element(2{c}, [1, 2])` was `False` while `c` was not known, and stayed
+  `False` after `c` became true. The collection operand is not changed: an
+  absent collection makes the answer absent (`Contains(Missing, 2)` is
+  `Missing`, `IndexOf(Missing, 2)` and `Count(Missing, 2)` are `NaN`), and a
+  restricted collection is threaded. The searched position does not strip
+  `missing` (`missingStrip: [0]`), and the absence gate and the type
+  absorption now read `missingStrip` (`boxed-expression/boxed-function.ts`,
+  `derive-application-type.ts`), so the handler receives the absent value.
+  An absent element of the collection does not make the answer absent
+  either, and does not widen its type: `IndexOf([1, Missing], 2)` is typed
+  `integer` (`ABSENT_CELLS_PASS_THROUGH`, `broadcast-lift-type.ts`). The
+  compiled JavaScript and Python code decide the absence from the structure
+  of the searched value (`compileSearchedValue`, `pySearchedValue`), because
+  their absent values (`undefined`, `NaN`, `None`) are found by the element
+  test in a list that holds such a value.
+- **RULED 2026-09-26: Insert, ReplaceAt and Append on an absent collection
+  answer Missing.** `Insert(Missing, 1, 2)`, `ReplaceAt(Missing, 1, 2)` and
+  `Append(Missing, 1)` answer `Missing` on every route, typed with a
+  `missing` arm (`list<integer> | missing`). Before, a boxed absent
+  collection was an `incompatible-type` error, while a restricted collection
+  whose condition failed gave `Missing`. The operators declare
+  `missingBehavior: 'propagate'` with `missingStrip: [0]`, because their
+  value parameters are not collections and the default policy does not
+  apply. Only the collection position strips `missing`: an absent index and
+  an absent appended value are still refused, and an absent value stored by
+  `Insert` or `ReplaceAt` is kept as one element of the result
+  (`Insert([1], 1, Missing)` is `[Missing, 1]`). By the rule of 2026-09-25
+  (a collection operator propagates absence), `Join(Missing, [1])` is
+  `Missing` too (it was `[Missing, 1]`: the absent operand was wrapped as one
+  element), and `Union`, `Intersection` and `SetMinus` over an absent set,
+  or over a restricted set whose condition is false, answer `Missing` (they
+  were `incompatible-type` errors). A restricted set whose condition is not
+  decided is threaded by these three operators:
+  `Union({1, 2}{c}, {2, 3})` is `{1, 2, 3}{c}`. An absent element inside a
+  set is not changed: `Union({1, Missing}, {2})` keeps it as an element.
 - **Container vs. cell validity (§3) — DEFERRED by ruling 2026-09-02.**
   Should a collection whose cells include errors eventually be a *valid*
   container of partially-invalid cells, with a type that says so

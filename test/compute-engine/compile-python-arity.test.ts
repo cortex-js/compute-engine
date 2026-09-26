@@ -1,6 +1,22 @@
 import { engine as ce } from '../utils';
 import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+
+/**
+ * The Python source that the target emits for `np.linalg.norm(x, ord)` over
+ * an operand whose entries can be NaN or infinite. An infinite entry makes
+ * the norm `+∞`, a NaN entry included; otherwise a NaN entry makes it NaN.
+ * The interpreter follows this rule, and numpy does not (the spectral norm
+ * of a matrix with a NaN entry raises `LinAlgError`).
+ */
+function gn(x: string, ord?: string): string {
+  const call = `np.linalg.norm(_a${ord === undefined ? '' : `, ${ord}`})`;
+  return (
+    `(lambda _a: float('inf') if _a.dtype.kind in 'fc' and np.isinf(_a).any() else ` +
+    `(float('nan') if _a.dtype.kind in 'fc' and np.isnan(_a).any() else ${call}))` +
+    `(np.asarray(${x}))`
+  );
+}
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -196,14 +212,14 @@ describe('PYTHON ARITY — Norm / Covariance operand guards', () => {
     // So the emitted code tests the rank when it runs.
     ce.declare('normList1', 'list<number>');
     expect(src(['Norm', 'normList1', 2])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 2) if np.ndim(_x) <= 2 else np.linalg.norm(_x))(normList1)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', '2')} if np.ndim(_x) <= 2 else ${gn('_x')})(normList1)`
     );
   });
 
   it('order 2 on an operand of unknown rank tests the rank when it runs', () => {
     ce.declare('normOpaque1', 'unknown');
     expect(src(['Norm', 'normOpaque1', 2])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 2) if np.ndim(_x) <= 2 else np.linalg.norm(_x))(normOpaque1)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', '2')} if np.ndim(_x) <= 2 else ${gn('_x')})(normOpaque1)`
     );
   });
 
@@ -492,21 +508,21 @@ describe('PYTHON ARITY — a Norm order over an operand of unknown rank', () => 
 
   it('emits a run-time rank test instead of a bare `np.linalg.norm`', () => {
     expect(src(['Norm', 'normOpaqueX', 3])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 3) if np.ndim(_x) == 1 else float('nan'))(normOpaqueX)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', '3')} if np.ndim(_x) == 1 else float('nan'))(normOpaqueX)`
     );
     expect(src(['Norm', 'normOpaqueX', 1])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 1) if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', '1')} if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)`
     );
     expect(src(['Norm', 'normOpaqueX', 'PositiveInfinity'])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, np.inf) if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', 'np.inf')} if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)`
     );
     expect(src(['Norm', 'normOpaqueX', { str: 'Infinity' }])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, np.inf) if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', 'np.inf')} if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)`
     );
     // The order 2 is the Euclidean norm of a vector, the spectral norm of a
     // matrix, and the Frobenius norm (numpy's default order) above rank 2.
     expect(src(['Norm', 'normOpaqueX', 2])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 2) if np.ndim(_x) <= 2 else np.linalg.norm(_x))(normOpaqueX)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', '2')} if np.ndim(_x) <= 2 else ${gn('_x')})(normOpaqueX)`
     );
   });
 
@@ -515,21 +531,21 @@ describe('PYTHON ARITY — a Norm order over an operand of unknown rank', () => 
     // normalized first (`"Infinity"` → `np.inf`, `"Frobenius"` → 2, any other
     // string → NaN), and the matrix branch spells `"Frobenius"` as `'fro'`.
     expect(src(['Norm', 'normOpaqueX', 'normRunP'])).toBe(
-      "(lambda _x, _q: (lambda _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (np.linalg.norm(_x, _p) if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (np.linalg.norm(_x, 'fro') if (isinstance(_q, str) and _q == 'Frobenius') else np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (np.linalg.norm(_x) if _p == 2 else float('nan')))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normOpaqueX, normRunP)"
+      `(lambda _x, _q: (lambda _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (${gn('_x', '_p')} if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (${gn('_x', "'fro'")} if (isinstance(_q, str) and _q == 'Frobenius') else ${gn('_x', '_p')} if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (${gn('_x')} if _p == 2 else float('nan')))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normOpaqueX, normRunP)`
     );
     // An order whose type admits no string is compared as it is.
     ce.declare('normRealP', 'real');
     expect(src(['Norm', 'normOpaqueX', 'normRealP'])).toBe(
-      "(lambda _x, _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (np.linalg.norm(_x, _p) if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (np.linalg.norm(_x) if _p == 2 else float('nan')))(normOpaqueX, normRealP)"
+      `(lambda _x, _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (${gn('_x', '_p')} if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (${gn('_x', '_p')} if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (${gn('_x')} if _p == 2 else float('nan')))(normOpaqueX, normRealP)`
     );
   });
 
   it('the default order and the Frobenius norm type need no rank test', () => {
     // With no `ord` argument `np.linalg.norm` flattens its input at every
     // rank, which is the entry-wise Frobenius norm of the interpreter.
-    expect(src(['Norm', 'normOpaqueX'])).toBe('np.linalg.norm(normOpaqueX)');
+    expect(src(['Norm', 'normOpaqueX'])).toBe(gn('normOpaqueX'));
     expect(src(['Norm', 'normOpaqueX', { str: 'Frobenius' }])).toBe(
-      'np.linalg.norm(normOpaqueX)'
+      gn('normOpaqueX')
     );
   });
 
@@ -575,16 +591,16 @@ describe('PYTHON ARITY — a Norm order over an operand of unknown rank', () => 
     // `np.linalg.norm(T, 3)`, which raises for a matrix, and
     // `np.linalg.norm(T, 2)`, which raises above rank 2.
     expect(src(['Norm', 'normTensorX', 1])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 1) if np.ndim(_x) <= 2 else float('nan'))(normTensorX)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', '1')} if np.ndim(_x) <= 2 else float('nan'))(normTensorX)`
     );
     expect(src(['Norm', 'normTensorX', 2])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 2) if np.ndim(_x) <= 2 else np.linalg.norm(_x))(normTensorX)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', '2')} if np.ndim(_x) <= 2 else ${gn('_x')})(normTensorX)`
     );
     expect(src(['Norm', 'normTensorX', 3])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 3) if np.ndim(_x) == 1 else float('nan'))(normTensorX)"
+      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', '3')} if np.ndim(_x) == 1 else float('nan'))(normTensorX)`
     );
     expect(src(['Norm', 'normTensorX', 'normRunP'])).toBe(
-      "(lambda _x, _q: (lambda _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (np.linalg.norm(_x, _p) if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (np.linalg.norm(_x, 'fro') if (isinstance(_q, str) and _q == 'Frobenius') else np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (np.linalg.norm(_x) if _p == 2 else float('nan')))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normTensorX, normRunP)"
+      `(lambda _x, _q: (lambda _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (${gn('_x', '_p')} if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (${gn('_x', "'fro'")} if (isinstance(_q, str) and _q == 'Frobenius') else ${gn('_x', '_p')} if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (${gn('_x')} if _p == 2 else float('nan')))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normTensorX, normRunP)`
     );
   });
 

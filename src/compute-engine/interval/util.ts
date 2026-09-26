@@ -62,7 +62,14 @@ export function extremumWithin(
 ): number | undefined {
   const EPS = 1e-15;
   const n = Math.ceil((x.lo - EPS - extremum) / period);
-  const candidate = extremum + n * period;
+  let candidate = extremum + n * period;
+  // The point 0 is exact and has no rounding error, so the tolerance does
+  // not apply to it: it is inside only when `x` contains 0. Otherwise the
+  // interval `[10⁻¹⁶, 10⁻¹⁶]` would contain the pole of `cot` at 0, while
+  // `cot(10⁻¹⁶)` is the finite value `10¹⁶`. The search then continues with
+  // the next point above 0.
+  if (candidate === 0 && !(x.lo <= 0 && 0 <= x.hi))
+    candidate = extremum + (n + 1) * period;
   if (candidate >= x.lo - EPS && candidate <= x.hi + EPS) return candidate;
   return undefined;
 }

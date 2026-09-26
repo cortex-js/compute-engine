@@ -777,7 +777,13 @@ function underflowingAngleSign(
   if (!parts) return undefined;
   const [[cp], [tp, tq]] = parts;
   if (cp !== 0n || tp === 0n) return undefined;
-  if (Number(tp) / Number(tq) !== 0) return undefined;
+  // The double of `tp/tq` is 0 when `|tp/tq| ≤ 2⁻¹⁰⁷⁵` (half of the
+  // smallest subnormal, which rounds to 0 with ties to even). The test is
+  // exact, on the integers: the doubles of `tp` and `tq` can overflow to
+  // infinity, and `(10³⁰⁰ + 1)/10⁴⁰⁰` would then read as 0.
+  const absP = tp < 0n ? -tp : tp;
+  const absQ = tq < 0n ? -tq : tq;
+  if (absP << 1075n > absQ) return undefined;
   return tp < 0n !== tq < 0n ? -1 : 1;
 }
 

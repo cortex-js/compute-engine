@@ -484,14 +484,17 @@ describe('functions of one machine number on doubles', () => {
     for (const x of FLOATS) exps += Math.exp(x * 0.01);
     expect(ce.box(['Sum', ['Exp', ['Divide', 'L', 100]]]).N().re).toBe(exps);
     // The numeric route is used only when it gives a finite list of machine
-    // numbers. `10^308 · K` overflows the doubles to infinities, and the exact
-    // route answers the exact big integer; `1/X` with a zero in `X` has the
-    // pole `~oo` in the exact route. (`10^308` is written as a string of
-    // digits: the JavaScript number `1e308` is past the safe integers, so it
-    // boxes as a float and the sum is a float.)
-    const huge = ce.box(['Sum', ['Multiply', { num: '1e308' }, 'K']]).N();
+    // numbers. `10^308 · K` overflows the doubles to infinities, and the sum
+    // of the infinities is NaN. The result is then the float of the exact
+    // sum: `.N()` gives a machine float, and a value above the largest double
+    // is ±∞. `1/X` with a zero in `X` has the pole `~oo` in the exact route.
+    // (`10^308` is written as a string of digits: the JavaScript number
+    // `1e308` is past the safe integers, so it boxes as a float and the sum
+    // is a float.)
+    const hugeSum = ce.box(['Sum', ['Multiply', { num: '1e308' }, 'K']]);
+    const huge = hugeSum.N();
     expect(huge.isNaN).toBe(false);
-    expect(huge.isInteger).toBe(true);
+    expect(huge.json).toEqual(hugeSum.evaluate().N().json);
     ce.declare('X0', { value: ce.box(['List', ...FLOATS, 0]) });
     expect(ce.box(['Sum', ['Divide', 1, 'X0']]).N().json).toEqual(
       ce

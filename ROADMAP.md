@@ -214,6 +214,38 @@ that no ruling covers yet.
   value is `Missing` (the type handlers read a `missing`-typed operand, not the
   symbol).
 
+### What the second review of the 2026-09-23 to 2026-09-26 commits left open (OPEN — found 2026-09-26)
+
+A Codex review of the commits made while it was unavailable found 41 defects;
+the fixes and four user decisions of the same day landed. These items remain.
+
+Decision for the user:
+
+1. **A predicate that meets an absent element.** The predicate answers
+   `Missing` for the element, and each operator reacts differently:
+   `Count([1, Missing], x ↦ x > 0)` throws an uncaught JavaScript error
+   ("Filter predicate must return True or False"), `Filter` returns that
+   message as its value, and `Any` answers `True`. Options: treat a `Missing`
+   predicate answer as "not satisfied" (the element is not kept or counted,
+   as a database `WHERE` clause does), or combine it by Kleene logic (`All`
+   and `Any` may answer `Missing`). With no decision, the throw stays.
+
+Defects:
+
+2. **The interpreter's complex division overflows.** `1/(10^{308}+10^{308}i)`
+   and `Inverse([[1e308+1e308i]])` give `0` in the interpreter; the correct
+   value is about `5e-309 - 5e-309i`. The compiled JavaScript uses a scaled
+   division and gives the correct value. The interpreter divides through
+   `complex-esm` (`Complex.div`), whose Smith algorithm forms `d·(d/c) + c`
+   without scaling, at about 200 call sites. The fix is a scaled division
+   wrapper used by every complex quotient. The same overflow makes
+   `Inverse([[1+i, 1e308+1e308i],[0,1]]).N()` give `-oo` for the entry that
+   is `-1e308`.
+3. **Arithmetic over an error-typed term types differently by operator.**
+   With `E = Sin(Tuple(A, B))` and `A, B: list<real>`, `Add(1, E)` is
+   `error | integer`, `Multiply(2, E)` and `Divide(E, 2)` are `number`, and
+   `Negate(E)` is `error`.
+
 ### A function-typed factor is a product under juxtaposition and a type error under an explicit operator (OPEN, ruling — found 2026-09-22 while fixing the MathNet round-trip check)
 
 In one engine, after `ce.parse('f(x)')` has declared `f` a function, `fy` parses
@@ -582,57 +614,52 @@ widens to `number`, measured on CE main with `a: real | signed_infinity | nan`:
    lost its `_SYS.cplx` wrapper). Under the decision of 2026-09-26 (the host
    that constructs a function gives its type), the host's declaration is the
    intended fix, so this is low priority.
-2. **A result that may be complex** (`Arccos(y)`, `Arcsin(y)`, `y^r`) keeps
-   `number`, although `complex | nan` is the accurate type. Typing it so was
-   measured on 2026-09-26: a GPU compile of a `Sum` whose body contains
-   `√(1 − ((i − 0.5)/40)²)` then refused the body as complex, because the
-   index of `Sum(…, Limits(i, 1, 40))` is typed `integer` without its range
-   (`indexingSetSites(1, 'integer')` in `binding-sites.ts`), so the square
-   root is `complex`. Giving the index the range `integer<1..40>` makes that
-   body `real`, but exposed the JavaScript-target defect below, so both were
-   left out.
-3. **A union of a scalar and a list** (`u: real | signed_infinity | list<real>`)
+2. **A union of a scalar and a list** (`u: real | signed_infinity | list<real>`)
    makes `y·u` and `y + u` type `list<number> | number`.
-4. **`Sum` and `Product` with limits** (`Sum(k², k, 1, 10)`) type `number`;
+3. **`Sum` and `Product` with limits** (`Sum(k², k, 1, 10)`) type `number`;
    only the one-operand form `Sum(L)` is typed from the elements.
 
 Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
 
-### JavaScript target: an unrolled `Sum` mixes a complex object with real arithmetic (OPEN — found 2026-09-26)
+### Residue of the lane and return-type round of 2026-09-26 (OPEN, small)
 
-With the index of a `Sum` over literal limits typed by its range
-(`integer<1..40>`, an experiment of 2026-09-26 that was not kept), the kernel
-of `test/compute-engine/compile-invariant-prefix.test.ts` (the transit kernel
-`B`) compiled to code that returns `{re: NaN, im: NaN}`. The unrolled terms
-lower `√(1 − (0.0125)²)` as a complex value and then add a real to it:
-`-(k * (_SYS.cneg({ re: 0.9999218719480037, im: 0 })) + 1)`, where `+ 1` on
-an object is NaN. The same terms lower in the real lane when the index is
-plain `integer`. The lane choice for one sub-expression disagrees with the
-arithmetic around it. Repro: in that test file, pin the range in
-`indexingSetSite` (`binding-sites.ts`) for a `Limits` clause with integer
-literal bounds, and run the first test of "Invariant prefix reuse across the
-calls of a repetition site".
-
-### A scalar-declared function called with a tuple is typed as a scalar (OPEN — found 2026-09-26 by the review of the narrow-return-types round)
-
-A function declared `(real) -> real` (or `(real) -> unknown`, which now
-reports `-> real`) accepts a `Tuple` argument: the stored literal has no
-parameter types, so it maps over the tuple, and `h((1, 2))` with
-`h := x ↦ 2x` evaluates to `(2, 4)`, but the call is typed `real`. A list
-argument is already typed as the mapped list (`vector<real^2>`). Either the
-call rejects a tuple for a scalar parameter, or its type is the mapped tuple.
-Probe: `ce.declare('h', '(real) -> unknown'); ce.assign('h', x ↦ 2x);
-ce.box(['h', ['Tuple', 1, 2]])`.
-
-### A symbol that holds a pole value is typed off the pole (OPEN — found 2026-09-26 by the review of the narrow-return-types round)
-
-`poleReciprocalType` (`library/type-handlers.ts`) applies a generic-point
-convention to a non-constant operand: the pole set of `Tan` has measure zero,
-so `Tan(z)` with `z: real` claims `real`. A symbol that holds a pole value is
-outside that convention: with `z := π/2`, `Tan(z)` is typed `real` (`nan | real`
-for `z: real | signed_infinity`) and evaluates to `~oo`. The same holds for a
-constant symbol with a value, whose `closed` fact is `false`. Treating a
-symbol with a value as closed would close the constant case.
+1. **A lane mismatch is still possible in general.** A head in
+   `COMPLEX_PROPAGATING_HEADS` (`Negate`, for example) whose type is `real`
+   answers "not complex" from its type in `BaseCompiler.isComplexValued`,
+   while its emitter chooses the complex lowering from its operands. The
+   known case (a square root promoted to the complex lane although its type
+   proved it real) is fixed in `assumedRealNonNegative`; any other operand
+   that is complex-shaped under a real-typed parent would give NaN the same
+   way (`_SYS.cneg({…}) + 1`). A fix makes the emitter follow the parent's
+   lane.
+2. **`isNonNegative` does not read ranged types.** An expression typed
+   `real<0.9985..0.9999>` answers `isNonNegative === undefined`. The compiler
+   no longer depends on it for radicands, but other sign-dependent folds may.
+3. **A ranged `Sum` index and index writes.** An index keeps plain `integer`
+   when an operand of the binder `Assign`s it. No other operator is known to
+   write a symbol from inside a body, but the library was not audited for
+   one.
+4. **A tuple argument at a scalar parameter is typed `any`.** The call
+   `h((1, 2))` with `h := x ↦ 2x` (declared `(real) -> real` or not)
+   evaluates to `(2, 4)` and is typed `any`, since the body decides the
+   shape (`x ↦ |x|` gives a scalar). Typing the body with the parameter
+   typed as the tuple was tried on 2026-09-26 and removed: the
+   descriptor-based derivation (`callResultType`) gave wrong narrow types
+   for a nested user call inside a list (`P ↦ [q(P), q(P)]`), for
+   `P ↦ P·Norm(P)`, and for `P ↦ P/(P[1] − 1)`. A precise type needs a
+   tuple-aware derivation. The same holds for `Apply(x ↦ 2x, (1, 2))`.
+5. **A known-infinite source is typed as mapped but bound whole.** A named
+   scalar-parameter function, and a function literal applied with `Apply`,
+   bind a known-infinite collection whole (`X(Range(1, +∞))` with
+   `X := x ↦ (x, x)` is `(Range(1, +oo), Range(1, +oo))`), but the call is
+   typed as the mapped list (`list<tuple<…>>`): the type handler cannot tell
+   an infinite source from its type. Either the broadcast maps an infinite
+   source lazily, or the type handlers read finiteness from the operand.
+6. **`Abs` and `Real` drop a `nan` arm.** `Abs(Arccos(q))` with
+   `q: real | nan` is typed `real<0..> | signed_infinity`, although the value
+   is NaN at `q = NaN` (`absFunctionType` in `library/type-handlers.ts`
+   says closing that is a separate decision), and `Real(Arccos(q))` is
+   `number`.
 
 ### Ordering of constants with special functions: what stays open after the 2026-09-25 bounds (OPEN, low)
 

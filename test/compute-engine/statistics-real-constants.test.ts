@@ -178,4 +178,18 @@ describe('Statistics over real constants', () => {
     expect(exact(['Mean', L('Pi', 'PositiveInfinity')])).toBe('+oo');
     expect(exact(['Median', L('Pi', 'NaN')])).toBe('NaN');
   });
+
+  test('a constant outside the float64 range is data', () => {
+    // π·10^400 is finite, although its machine value overflows.
+    const big = ['Multiply', 'Pi', ['Power', 10, 400]];
+    expect(exact(['Mean', L(big, 0)])).toBe('5e+399 * pi');
+    expect(exact(['Median', L(big, 0)])).toBe('5e+399 * pi');
+    expect(exact(['Variance', L(big, 0)])).toBe('5e+799 * pi^2');
+    expect(
+      ce
+        .box(['Mean', L(big, 0)])
+        .N()
+        .toString()
+    ).toMatch(/^1\.5707963267948966\d*e\+400$/);
+  });
 });

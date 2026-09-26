@@ -11,8 +11,9 @@ import { ComputeEngine } from '../../src/compute-engine';
 //
 // - `PointX`/`PointY`/`PointZ` declare `propagate` — a coordinate is a
 //   numeric slot, so an absent point's coordinate is the numeric marker `NaN`;
-// - `First`/`Second`/`Third`/`Last` declare `handle` — the element domain is
-//   unknown, so they mirror `At` and propagate `Missing` itself;
+// - `First`/`Second`/`Third`/`Last` declare `handle` — an absent point
+//   answers the marker of the element's domain, `NaN` for a number and
+//   `Missing` otherwise (user decision 2026-09-25);
 // - `Distance` declares `propagate` with an explicit NaN absorption in its
 //   evaluate handler (the §3.E gate defers to collection operands, and a
 //   tuple is one).
@@ -69,10 +70,8 @@ describe('Tycho item 164: accessors over At results (missing | T)', () => {
       expect(ce.parse('S\\left[5\\right].x').evaluate().isNaN).toBe(true);
     });
 
-    test('out-of-range element access propagates Missing, mirroring At', () => {
-      expect(
-        ce.box(['First', ['At', 'S', 5]]).evaluate().symbol
-      ).toBe('Missing');
+    test('a number read of an out-of-range point is NaN', () => {
+      expect(ce.box(['First', ['At', 'S', 5]]).evaluate().isNaN).toBe(true);
     });
 
     test('Distance of an absent point is NaN; of a present one, the value', () => {

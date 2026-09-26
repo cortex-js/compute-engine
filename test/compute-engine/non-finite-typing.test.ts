@@ -1182,3 +1182,72 @@ describe('NARROW RETURN TYPES', () => {
     expect(c.box(['h', 2]).evaluate().toString()).toBe('[3,5]');
   });
 });
+
+/**
+ * Accurate return types, second round (2026-09-26): a result that may be
+ * complex is typed so, a tuple argument at a scalar parameter types the
+ * call from the body, and a symbol that holds a pole value is not typed off
+ * the pole.
+ */
+describe('NARROW RETURN TYPES — COMPLEX RESULTS, TUPLE CALLS, POLE SYMBOLS', () => {
+  test.each([
+    [['Arccos', 'y'], 'complex | nan'],
+    [['Arcsin', 'y'], 'complex | nan'],
+    // A clamp keeps its bounds for any numeric operand: a value off the
+    // carrier is an error, not a value.
+    [['Clamp', 'u', -1, 1], 'nan | real<-1..1>'],
+    [['Arccos', ['Clamp', 'u', -1, 1]], 'nan | real'],
+  ])('%j types %s', (json, expected) => {
+    const ce = new ComputeEngine();
+    ce.declare('y', 'real | signed_infinity');
+    ce.declare('u', 'number');
+    expect(ce.box(json as never).type.toString()).toBe(expected);
+  });
+
+  test('a tuple argument at a scalar parameter is not typed by the scalar result', () => {
+    // The body decides the shape (`2x` gives a tuple, `|x|` a scalar), and
+    // the declared result describes a scalar argument, so the call is `any`.
+    const ce = new ComputeEngine();
+    ce.declare('h', '(real) -> real');
+    ce.assign('h', ce.parse('x \\mapsto 2x'));
+    ce.declare('T', 'tuple<real, real>');
+    const call = ce.box(['h', ['Tuple', 1, 2]]);
+    expect(call.type.toString()).toBe('any');
+    expect(call.evaluate().toString()).toBe('(2, 4)');
+    expect(ce.box(['h', 'T']).type.toString()).toBe('any');
+  });
+
+  test('a Sum index is typed by its range only when nothing else writes it', () => {
+    const ce = new ComputeEngine();
+    // Two clauses with one index name, and a destructuring write.
+    expect(
+      ce
+        .box(['Sum', 'k', ['Limits', 'k', 1, 3], ['Limits', 'k', 5, 7]])
+        .evaluate()
+        .toString()
+    ).toBe('54');
+    expect(
+      ce
+        .box([
+          'Sum',
+          ['Block', ['Assign', ['Tuple', 'j', '_'], ['Tuple', 3, 0]], 'j'],
+          ['Limits', 'j', 1, 2],
+        ] as never)
+        .evaluate()
+        .toString()
+    ).toBe('6');
+  });
+
+  test('a symbol that holds a pole value is typed on the pole', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', 'real');
+    ce.assign('z', ce.parse('\\frac{\\pi}{2}'));
+    ce.declare('w', 'real');
+    ce.assign('w', 3);
+    expect(ce.box(['Tan', 'z']).type.toString()).toBe('number');
+    expect(ce.box(['Tan', 'z']).evaluate().toString()).toBe('~oo');
+    // A number literal is on no pole of `Tan`.
+    expect(ce.box(['Tan', 'w']).type.toString()).toBe('real');
+    expect(ce.box(['Tan', 'Pi']).type.toString()).toBe('number');
+  });
+});

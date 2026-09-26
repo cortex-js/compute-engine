@@ -1023,13 +1023,13 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     expect(run('[1,2,3] |> (x => x^2)').value.toString()).toBe('[1,4,9]');
     expect(run('[1,2,3] |> _^2').value.toString()).toBe('[1,4,9]');
     expect(run('[1,2,3] |> _ + 1').value.toString()).toBe('[2,3,4]');
-    // The stage maps EACH ELEMENT, so a collection-consuming body is applied
-    // per element: it reads each element's own length…
+    // `xs |> f` is `f(xs)` (user decision 2026-09-26): a literal whose
+    // parameter is a collection by its body (`Length(l)`) binds the topic
+    // whole, as the same literal called directly or under a name does…
     expect(
       run('[[1],[2,3],[4,5,6]] |> (l => Length(l))').value.toString()
-    ).toBe('[1,2,3]');
-    // …the whole-collection spellings are the named function or an authored
-    // annotation the topic satisfies.
+    ).toBe('3');
+    // …and so do the named function and an authored collection annotation.
     expect(run('[1,2,3] |> Length').value.re).toBe(3);
     expect(
       run('[1,2,3] |> ((l: list<number>) => Length(l))').value.re

@@ -2770,6 +2770,12 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 };
 
+// `ApplyWhole` (engine-internal, `library/core.ts`) applies a function to
+// arguments bound whole, which is what the `Apply` lowering emits: the call
+// `(fn)(args)` binds each argument as given. The lazy `Map` of a declared
+// `broadcastable<T>` map builds its per-element call with it.
+INTERVAL_JAVASCRIPT_FUNCTIONS.ApplyWhole = INTERVAL_JAVASCRIPT_FUNCTIONS.Apply;
+
 /**
  * Maximum number of terms to unroll in an interval Sum/Product.
  */

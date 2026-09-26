@@ -127,6 +127,45 @@ function isPointListOperandType(expr: Expression): boolean {
   return r === 'tuple' || (typeof r !== 'string' && r.kind === 'tuple');
 }
 
+/**
+ * Does this `Distance` operand's TYPE say it is a LIST of points, once its
+ * `missing` arms are removed? This is the test that the interpreter's
+ * `Distance` type handler applies (`isPointListType` in
+ * `library/arithmetic.ts`), so the compiled absence marker agrees with the
+ * interpreter's result type: `undefined` (the run-time spelling of
+ * `Missing`) for a list of distances, `NaN` for one distance.
+ *
+ * A list of points is a list whose elements are tuples, a list whose
+ * elements are numeric lists (each row is one point), or a numeric matrix,
+ * whose element type is the scalar and whose dimensions give the rows. A
+ * tuple is always ONE point, even when its coordinates are collections. A
+ * list whose element type is unknown gives `false`: the interpreter does not
+ * type it as a list either.
+ */
+function isDistancePointListOperand(expr: Expression): boolean {
+  const t = resolveTypeForCompilation(stripMissingFromType(jsType(expr)));
+  if (typeof t !== 'string' && t.kind === 'tuple') return false;
+  if (t === 'tuple') return false;
+  if (
+    typeof t !== 'string' &&
+    t.kind === 'list' &&
+    (t.dimensions?.length ?? 0) >= 2
+  )
+    return true;
+  const elt = collectionElementType(t);
+  if (elt === undefined) return false;
+  const e = resolveTypeAlias(elt);
+  if (
+    e === 'unknown' ||
+    e === 'any' ||
+    e === 'missing' ||
+    e === 'never' ||
+    e === 'nothing'
+  )
+    return false;
+  return isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE);
+}
+
 /** Does this operand's TYPE say it is a POINT — a tuple, of any width? */
 function isPointOperandType(expr: Expression): boolean {
   const t = jsType(expr);
@@ -2039,9 +2078,10 @@ function pointConstructorComponent(
  *   cannot be absent as a whole: `(xs[k] ?? NaN)`.
  * - Otherwise `_SYS.nth`, which reads the length instead: `?? NaN` would
  *   also replace an absent cell INSIDE the collection (`First((Missing, 1))`
- *   is `Missing`, `undefined` at run time), and a collection that is absent
- *   as a whole (a restricted operand whose condition is false) must read
- *   `undefined`, not `NaN`. When the element type does not decide the domain
+ *   is `Missing`, `undefined` at run time). A collection that is absent as a
+ *   whole (a restricted operand whose condition is false) reads `NaN` when
+ *   the element type is numeric and `undefined` otherwise, as the
+ *   interpreter answers. When the element type does not decide the domain
  *   (`unknown`), `_SYS.nth` looks at the cells, as the interpreter does.
  */
 function compileNthElement(
@@ -3806,7 +3846,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // The extracted element type can itself be a reference (`list<maybe_n>`
     // with `maybe_n = number | missing`) — unfold it before the missing-strip,
     // or the strip is a no-op and the axis test misclassifies the domain.
-    const eltT = collectionElementType(jsType(coll));
+    // A base that can be absent as a whole (a restricted collection, typed
+    // `missing | list<…>`) is read through its present arm: the element
+    // domain is that arm's, and `_SYS.at` answers `NaN` for the absent base,
+    // which the object-domain mapping below turns into `undefined`. So a row
+    // read of a restricted matrix whose condition is false is `undefined`
+    // (the interpreter's `Missing`), and a number read is `NaN`.
+    const eltT = collectionElementType(stripMissingFromType(jsType(coll)));
     const scalarIndex =
       !isIndexedCollectionOperand(index) &&
       !index.type.matches('collection<any>');
@@ -4564,9 +4610,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // pair falls back to `===` unchanged.
     if (isProvablyStringOperand(args[0])) {
       assertComparableAggregate('IndexOf', [args[1]]);
-      return `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${compile(
-        args[1]
-      )})`;
+      return compileSearchedValue(
+        args[1],
+        compile,
+        (v) => `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${v})`,
+        '0'
+      );
     }
     // An AGGREGATE needle is invisible to the element test — `===` on two
     // distinct arrays is reference identity, so
@@ -4617,9 +4666,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // natively (it was an earlier tolerance leaf, `Math.abs(true - 1) <= tol`, that found
     // a boolean needle in a numeric haystack, and a numeric needle in a
     // boolean one, where the interpreter answers 0).
-    return `((_v) => (${coll}).findIndex((_x) => (_x !== _x && _v !== _v) || _SYS.eqt(_x, _v)) + 1)(${compile(
-      args[1]
-    )})`;
+    return compileSearchedValue(
+      args[1],
+      compile,
+      (v) =>
+        `((_v) => (${coll}).findIndex((_x) => (_x !== _x && _v !== _v) || _SYS.eqt(_x, _v)) + 1)(${v})`,
+      '0'
+    );
   },
   // Higher-order: the mapping/predicate operand is compiled as a lambda
   // (`Function` literal → `(x) => …`), hoisted into an IIFE parameter so it
@@ -4893,10 +4946,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // both-NaN disjunct keeps `includes`'s SameValueZero verdict on NaN, which
     // `===` alone would lose.
     if (hasPossiblyTextElements(args[0]) || isProvablyTextOperand(args[1]))
-      return `((_v) => (${coll}).some((_x) => (_x !== _x && _v !== _v) || _SYS.eqt(_x, _v)))(${compile(
-        args[1]
-      )})`;
-    return `(${coll}).includes(${compile(args[1])})`;
+      return compileSearchedValue(
+        args[1],
+        compile,
+        (v) =>
+          `((_v) => (${coll}).some((_x) => (_x !== _x && _v !== _v) || _SYS.eqt(_x, _v)))(${v})`,
+        'false'
+      );
+    return compileSearchedValue(
+      args[1],
+      compile,
+      (v) => `(${coll}).includes(${v})`,
+      'false'
+    );
   },
   // Unique elements in first-occurrence order (`Set` preserves insertion
   // order and uses SameValueZero — value equality only for primitive
@@ -5214,7 +5276,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `Element`: missing argument');
     requirePrimitiveElements('Element', args[1]);
     const coll = collArg('Element', args[1], compile);
-    return `(${coll}).includes(${compile(args[0])})`;
+    // An absent value is not an element (see `compileSearchedValue`).
+    return compileSearchedValue(
+      args[0],
+      compile,
+      (v) => `(${coll}).includes(${v})`,
+      'false'
+    );
   },
   Identity: (args, compile, target) => {
     if (args[0] == null)
@@ -6538,15 +6606,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // whose absolute value is `+∞`. A divisor with an infinite part — `~oo`
     // itself, which the first case produces — makes both parts `∞ / ∞`, where
     // the interpreter answers `0`. And the squares of a very small or very
-    // large FINITE divisor underflow to zero or overflow to `∞`, where the
-    // quotient is an ordinary number. The quotient is read from
-    // `_SYS.cdivedge` in those cases.
+    // large FINITE divisor underflow (to zero, or to a subnormal number that
+    // has lost precision) or overflow to `∞`, where the quotient is an
+    // ordinary number. And the numerator parts of a very large dividend
+    // overflow to `∞` (or become `NaN`) where the quotient is an ordinary
+    // number: `(1e308 + 1e308·i) / (1 + i)` is `1e308`. The quotient is read
+    // from `_SYS.cdivedge` in those cases, which scales the operands first.
+    // `x - x !== 0` is true exactly when `x` is `±∞` or `NaN`.
+    // 2.2250738585072014e-308 is the smallest normal double.
     if (ac && bc) {
       const d = BaseCompiler.tempVar(target);
+      const nr = BaseCompiler.tempVar(target);
+      const ni = BaseCompiler.tempVar(target);
       return boundJSResult(
         target,
-        `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im;`,
-        `(${d} === 0 || ${d} === Infinity ? _SYS.cdivedge(${ta}.re, ${ta}.im, ${tb}.re, ${tb}.im) : { re: (${ta}.re * ${tb}.re + ${ta}.im * ${tb}.im) / ${d}, im: (${ta}.im * ${tb}.re - ${ta}.re * ${tb}.im) / ${d} })`
+        `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im; ` +
+          `const ${nr} = ${ta}.re * ${tb}.re + ${ta}.im * ${tb}.im; ` +
+          `const ${ni} = ${ta}.im * ${tb}.re - ${ta}.re * ${tb}.im;`,
+        `(${d} < 2.2250738585072014e-308 || ${d} === Infinity || ${nr} - ${nr} !== 0 || ${ni} - ${ni} !== 0 ? _SYS.cdivedge(${ta}.re, ${ta}.im, ${tb}.re, ${tb}.im) : { re: ${nr} / ${d}, im: ${ni} / ${d} })`
       );
     }
     if (ac && !bc) {
@@ -6557,10 +6634,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     }
     const d = BaseCompiler.tempVar(target);
+    const nr = BaseCompiler.tempVar(target);
+    const ni = BaseCompiler.tempVar(target);
     return boundJSResult(
       target,
-      `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im;`,
-      `(${d} === 0 || ${d} === Infinity ? _SYS.cdivedge(${ta}, 0, ${tb}.re, ${tb}.im) : { re: ${ta} * ${tb}.re / ${d}, im: -${ta} * ${tb}.im / ${d} })`
+      `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im; ` +
+        `const ${nr} = ${ta} * ${tb}.re; const ${ni} = -${ta} * ${tb}.im;`,
+      `(${d} < 2.2250738585072014e-308 || ${d} === Infinity || ${nr} - ${nr} !== 0 || ${ni} - ${ni} !== 0 ? _SYS.cdivedge(${ta}, 0, ${tb}.re, ${tb}.im) : { re: ${nr} / ${d}, im: ${ni} / ${d} })`
     );
   },
   Negate: ([x], compile, target) => {
@@ -7243,9 +7323,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // points, `undefined` at run time when its condition is false) answers
     // the absence marker of the codomain, as the interpreter does: `NaN` for
     // the distance between two points, and `undefined`, the run-time
-    // spelling of `Missing`, for the distances of a list of points.
+    // spelling of `Missing`, for the distances of a list of points. The
+    // result is a list when EITHER operand is a list of points, including a
+    // list that cannot be absent beside a restricted point, and a matrix or
+    // a list of numeric lists, whose rows are the points
+    // (`isDistancePointListOperand`).
     if (typeContainsMissing(a.type.type) || typeContainsMissing(b.type.type)) {
-      const list = [a, b].some((x) => isAbsentablePointListOperand(x));
+      const list = [a, b].some(isDistancePointListOperand);
       return (
         `((_a, _b) => (_a == null || _b == null) ? ${list ? 'undefined' : 'NaN'} : ` +
         `${helper}(_a, _b))(${compile(a)}, ${compile(b)})`
@@ -7269,6 +7353,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_SYS.withRandomSeed(${compile(args[0])}, () => ${compile(args[1])})`;
   },
 };
+
+// `ApplyWhole` (engine-internal, `library/core.ts`) applies a function to
+// arguments bound whole, which is what the `Apply` lowering emits: the call
+// `(fn)(args)` binds each argument as given. The lazy `Map` of a declared
+// `broadcastable<T>` map builds its per-element call with it.
+JAVASCRIPT_FUNCTIONS.ApplyWhole = JAVASCRIPT_FUNCTIONS.Apply;
 
 /**
  * Convert a Complex instance produced by a TRANSCENDENTAL kernel (`csqrt`,
@@ -9221,19 +9311,92 @@ const cxMul = (a: ComplexResult, b: ComplexResult): ComplexResult => ({
   re: a.re * b.re - a.im * b.im,
   im: a.re * b.im + a.im * b.re,
 });
-/** `a / b`, scaled by the larger part of the divisor so that no square of a
- * part is formed (the same formula `_SYS.cdivedge` uses). The linear-algebra
- * callers divide only by a pivot, which is not zero; a zero divisor gives
- * NaN parts. */
-function cxDiv(a: ComplexResult, b: ComplexResult): ComplexResult {
-  if (Math.abs(b.re) >= Math.abs(b.im)) {
-    const r = b.im / b.re;
-    const den = b.re + b.im * r;
-    return { re: (a.re + a.im * r) / den, im: (a.im - a.re * r) / den };
+/**
+ * `x · 2^k` for an integer `k` of any size. The factor is applied in steps,
+ * because `2^k` is a double only for `-1074 <= k <= 1023`. Each step is
+ * exact while the result stays in the normal range of a double.
+ */
+function scaleByPowerOfTwo(x: number, k: number): number {
+  while (k > 1023) {
+    x *= 2 ** 1023;
+    k -= 1023;
   }
-  const r = b.re / b.im;
-  const den = b.re * r + b.im;
-  return { re: (a.re * r + a.im) / den, im: (a.im * r - a.re) / den };
+  while (k < -1022) {
+    x *= 2 ** -1022;
+    k += 1022;
+  }
+  return x * 2 ** k;
+}
+
+/**
+ * The binary exponent of the larger magnitude of `x` and `y`, approximately:
+ * `max(|x|, |y|)` divided by `2^k` is near 1. It is `0` when both are zero,
+ * or when one is not finite, so that no scaling occurs.
+ */
+function pairExponent(x: number, y: number): number {
+  const m = Math.max(Math.abs(x), Math.abs(y));
+  if (m === 0 || !Number.isFinite(m)) return 0;
+  return Math.floor(Math.log2(m));
+}
+
+/**
+ * The quotient `(ar + ai·i) / (br + bi·i)` for a divisor that is not zero.
+ *
+ * The dividend is divided by `2^ka` and the divisor by `2^kb`, where `ka`
+ * and `kb` are the binary exponents of their larger parts, so that the parts
+ * of both are near 1 or smaller. Smith's formula then divides the scaled
+ * values: it divides by the larger part of the divisor first, so no square of
+ * a part is formed, and no intermediate value can overflow. The quotient is
+ * multiplied by `2^(ka − kb)` at the end, so it overflows only when the true
+ * quotient is outside the range of a double.
+ *
+ * A multiplication by a power of two is exact in the normal range, so when
+ * Smith's formula on the unscaled operands keeps all its values in the
+ * normal range, the result is the same, bit for bit. A part of the quotient that is
+ * exactly zero stays zero, also when the other part overflows:
+ * `(1e308 + 1e308·i) / (1e-200 + 1e-200·i)` is `Infinity + 0·i`. Examples of
+ * representable quotients whose intermediate values leave the range of a
+ * double without this scaling: `1 / (1e308 + 1e308·i)` is
+ * `5e-309 − 5e-309·i`, and `(1e308 + 1e308·i) / (1 + i)` is `1e308`.
+ *
+ * A dividend with an infinite part is not scaled; the result then has the
+ * infinite and NaN parts that Smith's formula gives.
+ */
+function smithDivide(
+  ar: number,
+  ai: number,
+  br: number,
+  bi: number
+): ComplexResult {
+  const ka = pairExponent(ar, ai);
+  const kb = pairExponent(br, bi);
+  const xr = scaleByPowerOfTwo(ar, -ka);
+  const xi = scaleByPowerOfTwo(ai, -ka);
+  const yr = scaleByPowerOfTwo(br, -kb);
+  const yi = scaleByPowerOfTwo(bi, -kb);
+  let re: number;
+  let im: number;
+  if (Math.abs(yr) >= Math.abs(yi)) {
+    const r = yi / yr;
+    const den = yr + yi * r;
+    re = (xr + xi * r) / den;
+    im = (xi - xr * r) / den;
+  } else {
+    const r = yr / yi;
+    const den = yr * r + yi;
+    re = (xr * r + xi) / den;
+    im = (xi * r - xr) / den;
+  }
+  return {
+    re: scaleByPowerOfTwo(re, ka - kb),
+    im: scaleByPowerOfTwo(im, ka - kb),
+  };
+}
+/** `a / b`, with Smith's formula (`smithDivide`). The linear-algebra callers
+ * divide only by a pivot, which is not zero; a zero divisor gives NaN
+ * parts. */
+function cxDiv(a: ComplexResult, b: ComplexResult): ComplexResult {
+  return smithDivide(a.re, a.im, b.re, b.im);
 }
 /** `|z|`, used to choose a pivot and to test it for zero. */
 const cxAbs = (z: ComplexResult): number => Math.hypot(z.re, z.im);
@@ -10318,16 +10481,18 @@ const SYS_HELPERS = {
     typeof x === 'number'
       ? { re: x, im: 0 }
       : (x as { re: number; im: number }),
-  // The quotient `(ar + ai·i) / (br + bi·i)` where the squared modulus of the
-  // divisor is zero or infinite, which is where the quotient formula fails
-  // (see the `Divide` codegen). For a divisor that is exactly zero the
-  // interpreter answers the unsigned pole `~oo` when the dividend is not
-  // zero, and `NaN` for `0 / 0`. For a divisor with an infinite part it
-  // answers `0` when the dividend is finite, and `NaN` for `∞ / ∞`. Any other
-  // divisor is finite and not zero, and only its squares left the range of a
-  // double: the quotient is computed by scaling with the larger part of the
-  // divisor first, so no square is formed (`1 / (1e-200 + 1e-200·i)` is
-  // `5e199 − 5e199·i`).
+  // The quotient `(ar + ai·i) / (br + bi·i)` where the quotient formula of
+  // the `Divide` codegen fails: the squared modulus of the divisor is zero,
+  // subnormal or infinite, or a part of the numerator is not finite. For a
+  // divisor that is exactly zero the interpreter answers the unsigned pole
+  // `~oo` when the dividend is not zero, and `NaN` for `0 / 0`. For a divisor
+  // with an infinite part it answers `0` when the dividend is finite, and
+  // `NaN` for `∞ / ∞`. Any other divisor is finite and not zero, and the
+  // quotient is computed by `smithDivide`, which scales both operands by
+  // powers of two first, so no intermediate value overflows
+  // (`1 / (1e-200 + 1e-200·i)` is `5e199 − 5e199·i`,
+  // `1 / (1e308 + 1e308·i)` is `5e-309 − 5e-309·i`, and
+  // `(1e308 + 1e308·i) / (1 + i)` is `1e308`).
   cdivedge: (ar: number, ai: number, br: number, bi: number): ComplexResult => {
     if (ar !== ar || ai !== ai || br !== br || bi !== bi)
       return { re: NaN, im: NaN };
@@ -10337,14 +10502,7 @@ const SYS_HELPERS = {
       return Math.abs(ar) === Infinity || Math.abs(ai) === Infinity
         ? { re: NaN, im: NaN }
         : { re: 0, im: 0 };
-    if (Math.abs(br) >= Math.abs(bi)) {
-      const r = bi / br;
-      const den = br + bi * r;
-      return { re: (ar + ai * r) / den, im: (ai - ar * r) / den };
-    }
-    const r = br / bi;
-    const den = br * r + bi;
-    return { re: (ar * r + ai) / den, im: (ai * r - ar) / den };
+    return smithDivide(ar, ai, br, bi);
   },
   // The exact runtime realness test of a value that may be a plain number or
   // a `{re, im}` object: true when the imaginary part is exactly zero. The
@@ -11279,8 +11437,11 @@ const SYS_HELPERS = {
   },
   // The element at 0-based position `k` of `arr`, for the compiled
   // `First`/`Second`/`Third` (`compileNthElement`). An absent collection
-  // (`undefined`, the run-time spelling of `Missing`) reads `undefined`, as
-  // the interpreter's `First(Missing)` is `Missing`. A cell inside the array is
+  // (`undefined`, the run-time spelling of `Missing`) reads the marker of the
+  // element domain: `NaN` when `numeric` is true, and `undefined` otherwise.
+  // The interpreter does the same: `First` of a restricted pair of numbers
+  // whose condition is false is `NaN`, and `First(Missing)` is `Missing`
+  // (user decision of 2026-09-25). A cell inside the array is
   // returned as it is, an absent cell included. A position past the end reads
   // the marker of the element domain: `NaN` when `numeric` is true (the
   // element type is numeric), and otherwise the domain the cells show, as
@@ -11289,7 +11450,8 @@ const SYS_HELPERS = {
   // `undefined` when one is not or no cell is present. A value that is not
   // an array is read as it was before this helper.
   nth: (arr: unknown, k: number, numeric?: boolean): unknown => {
-    if (arr === undefined || arr === null) return undefined;
+    if (arr === undefined || arr === null)
+      return numeric === true ? NaN : undefined;
     if (!Array.isArray(arr)) return (arr as Record<number, unknown>)[k];
     if (k < arr.length) return arr[k];
     if (numeric === true) return NaN;
@@ -14235,6 +14397,61 @@ function collArg(
  * where the interpreter treats a string as a rank-0 leaf.
  * (`docs/STRING_ROADMAP.md`, decision D13.)
  */
+/**
+ * Compile the search of `Contains`, `IndexOf` or `Element` for the searched value
+ * `needle`, so that an absent searched value is not found (user decision
+ * 2026-09-26): the answer is then `notFound` (`false` or `0`), as in the
+ * interpreter. `search(v)` emits the search for the compiled value `v`.
+ *
+ * The compiled value of an absent needle cannot be told apart from a present
+ * one by the element test alone. The `Missing` symbol compiles to
+ * `undefined`, which `IndexOf` finds in a list that holds an absent element,
+ * and a restriction `v{c}` whose condition is false compiles to `NaN`, which
+ * the element test finds in a list that holds `NaN`. So the absence is decided
+ * here, from the structure of the needle:
+ *
+ * - A `Missing` or `Undefined` symbol is not found.
+ * - A restriction `When(v, c)` with a scalar condition searches for `v` when
+ *   `c` holds, and is not found otherwise. A piecewise value
+ *   `Which(c1, v1, c2, v2, …)` searches for the value of the first condition
+ *   that holds, and is not found when no condition holds.
+ * - Any other needle whose type admits `missing` is not found when its
+ *   run-time value is `undefined` or `null`, the absence markers of the
+ *   compiled code.
+ */
+function compileSearchedValue(
+  needle: Expression,
+  compile: (expr: Expression) => string,
+  search: (v: string) => string,
+  notFound: string
+): string {
+  if (isSymbol(needle, 'Missing') || isSymbol(needle, 'Undefined'))
+    return notFound;
+  const self = (x: Expression) =>
+    compileSearchedValue(x, compile, search, notFound);
+  const scalarCondition = (c: Expression) =>
+    !c.type.matches('collection<any>');
+  if (
+    isFunction(needle, 'When') &&
+    needle.nops === 2 &&
+    scalarCondition(needle.ops[1])
+  )
+    return `((${compile(needle.ops[1])}) ? ${self(needle.ops[0])} : ${notFound})`;
+  if (
+    isFunction(needle, 'Which') &&
+    needle.nops % 2 === 0 &&
+    needle.ops.every((x, i) => i % 2 === 1 || scalarCondition(x))
+  ) {
+    let code = notFound;
+    for (let i = needle.nops - 2; i >= 0; i -= 2)
+      code = `((${compile(needle.ops[i])}) ? ${self(needle.ops[i + 1])} : ${code})`;
+    return code;
+  }
+  const v = compile(needle);
+  if (!typeContainsMissing(needle.type.type)) return search(v);
+  return `((_n) => (_n == null ? ${notFound} : ${search('_n')}))(${v})`;
+}
+
 function elementsArg(
   kind: string,
   arg: Expression | undefined,

@@ -1808,9 +1808,10 @@ function isRealConstantDatum(v: Expression): boolean {
   if (v.unknowns.length > 0) return false;
   if (!v.type.matches('real') || v.isFinite === false) return false;
   const n = v.N();
-  return (
-    isNumber(n) && n.isFinite === true && n.im === 0 && Number.isFinite(n.re)
-  );
+  // `n.isFinite` reads the value itself, not its machine projection: the
+  // constant `π·10^400` is finite, although its `.re` overflows to
+  // `+Infinity`. A number literal `10^400` is data too.
+  return isNumber(n) && n.isFinite === true && n.im === 0;
 }
 
 /**

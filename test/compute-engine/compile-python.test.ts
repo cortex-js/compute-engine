@@ -2,6 +2,22 @@ import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
+/**
+ * The Python source that the target emits for `np.linalg.norm(x, ord)` over
+ * an operand whose entries can be NaN or infinite. An infinite entry makes
+ * the norm `+∞`, a NaN entry included; otherwise a NaN entry makes it NaN.
+ * The interpreter follows this rule, and numpy does not (the spectral norm
+ * of a matrix with a NaN entry raises `LinAlgError`).
+ */
+function gn(x: string, ord?: string): string {
+  const call = `np.linalg.norm(_a${ord === undefined ? '' : `, ${ord}`})`;
+  return (
+    `(lambda _a: float('inf') if _a.dtype.kind in 'fc' and np.isinf(_a).any() else ` +
+    `(float('nan') if _a.dtype.kind in 'fc' and np.isnan(_a).any() else ${call}))` +
+    `(np.asarray(${x}))`
+  );
+}
+
 describe('PYTHON TARGET', () => {
   const python = new PythonTarget();
   const pythonWithImports = new PythonTarget({ includeImports: true });
@@ -1056,7 +1072,7 @@ describe('PYTHON TARGET', () => {
         python.compile(
           scoped.box(['Norm', 'anyRank', { str: 'Frobenius' }] as any)
         ).code
-      ).toBe('np.linalg.norm(anyRank)');
+      ).toBe(gn('anyRank'));
     });
 
     // A rank-3 literal: √(1² + 2² + … + 8²) = √204 = 14.2828568570857.
@@ -1170,7 +1186,7 @@ describe('PYTHON TARGET', () => {
         python.compile(scoped.box(['Norm', 'normOpaque2', 'normP2'] as any))
           .code
       ).toBe(
-        "(lambda _x, _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (np.linalg.norm(_x, _p) if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (np.linalg.norm(_x) if _p == 2 else float('nan')))(normOpaque2, normP2)"
+        `(lambda _x, _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (${gn('_x', '_p')} if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (${gn('_x', '_p')} if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (${gn('_x')} if _p == 2 else float('nan')))(normOpaque2, normP2)`
       );
     });
   });
@@ -1792,5 +1808,80 @@ describe('PYTHON TARGET', () => {
         "(((1) if (x < 3) else ((0))) if (x == x) else float('nan'))"
       );
     });
+  });
+});
+
+describe('PYTHON TARGET — operands that can be absent and compound operands', () => {
+  const python = new PythonTarget();
+
+  it('Dot and Cross fail closed for an operand whose type admits absence', () => {
+    // A `Which` with no default clause lowers to `None` when no condition
+    // holds, and `np.dot` / `np.cross` raise for `None`, where the
+    // interpreter answers NaN.
+    const scoped = new ComputeEngine();
+    scoped.declare('t', 'real');
+    const dot = scoped.box([
+      'Dot',
+      ['Which', ['Greater', 't', 0], ['Tuple', 1, 2]],
+      ['Tuple', 3, 4],
+    ]);
+    expect(() => python.compile(dot, { fallback: false })).toThrow(
+      /Could not compile `Dot`/
+    );
+    const cross = scoped.box([
+      'Cross',
+      ['Which', ['Greater', 't', 0], ['Tuple', 1, 2, 3]],
+      ['Tuple', 3, 4, 5],
+    ]);
+    expect(() => python.compile(cross, { fallback: false })).toThrow(
+      /Could not compile `Cross`/
+    );
+  });
+
+  it('Degrees parenthesizes a compound operand', () => {
+    const code = python.compile(
+      ce.box(['Sin', ['Degrees', ['Add', 'x', 1]]])
+    ).code;
+    expect(code).toBe('np.sin(((x + 1) * np.pi / 180))');
+  });
+});
+
+// An element read that selects no element (an out-of-range position) or that
+// reads a collection absent as a whole (a restriction whose condition is
+// false, `None` at run time) answers the absence marker of the element
+// domain, as the interpreter does (user decision 2026-09-25,
+// `docs/ERROR-MODEL.md` §2): `float('nan')` for a number, `None` for a row,
+// a point or a string. Before, the compiled `At` and `First`/`Second`/
+// `Third`/`Last` answered `float('nan')` for every element domain, and
+// `First` of a restricted collection did not compile. The emitted code is
+// run by `compile-python-parity.test.ts`.
+describe('PYTHON TARGET — the absence marker of an element read', () => {
+  const python = new PythonTarget();
+  const scoped = new ComputeEngine();
+  scoped.declare('t', 'real');
+  scoped.declare('v', 'list<real>');
+  const W = (x: unknown) => ['When', x, ['Less', 0, 't']];
+  const code = (json: unknown) =>
+    python.compile(scoped.box(json as never), { fallback: false }).code;
+
+  test.each([
+    ['At of a list of numbers', ['At', W(['List', 1, 2]), 1]],
+    ['First of a restricted pair', ['First', W(['Tuple', 1, 2])]],
+    ['Last of a restricted list', ['Last', W(['List', 1, 2])]],
+    ['Third of a list of numbers', ['Third', 'v']],
+  ])('%s uses NaN', (_label, json) => {
+    const c = code(json);
+    expect(c).toContain("float('nan') if _l is None");
+    expect(c).not.toContain('None if _l is None');
+  });
+
+  test.each([
+    ['At of a restricted matrix (a row)', ['At', W(['List', ['List', 1, 2], ['List', 3, 4]]), 2]],
+    ['First of a restricted list of points', ['First', W(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]])]],
+    ['At of a list of points', ['At', ['List', ['Tuple', 1, 2]], 5]],
+    ['Third of a list of points', ['Third', ['List', ['Tuple', 1, 2]]]],
+  ])('%s uses None', (_label, json) => {
+    const c = code(json);
+    expect(c).toContain('None if _l is None');
   });
 });

@@ -3,7 +3,11 @@ import { immutableNumericType } from './immutable.js';
 import { isEffectSubset, unionEffectSets } from './effects.js';
 import { substituteTypeVariables } from './instantiate.js';
 import { parseType } from './parse.js';
-import { isValidType, NUMERIC_TYPES_SET } from './primitive.js';
+import {
+  INDEXED_COLLECTION_SHAPE_TYPE,
+  isValidType,
+  NUMERIC_TYPES_SET,
+} from './primitive.js';
 import { isComplexInfinityValue } from './types.js';
 import { declarationOf } from './reference.js';
 import { typeToDedupKey, typeToString } from './serialize.js';
@@ -1411,6 +1415,60 @@ function valueLiteralType(value: unknown): Type {
  */
 export function broadcastResultType(elementType: Readonly<Type>): Type {
   const result: ListType = { kind: 'list', elements: elementType as Type };
+  return result;
+}
+
+/**
+ * The type of a broadcast whose per-element result `elementType` is itself a
+ * collection (`x ↦ (x, x)` gives a tuple): one `list` level around it for
+ * each rank the broadcast descends in the deepest operand of
+ * `operandTypes`. A broadcast of a scalar-parameter function descends into
+ * every rank of a nested list (a list of lists is mapped at the leaves), and
+ * stops at a tuple, a string, or a collection with no indexed element type.
+ * So `x ↦ (x, x)` over `list<list<integer>>` is
+ * `list<list<tuple<…>>>`; {@link broadcastResultType} alone gave one level,
+ * a type the value is not a member of.
+ */
+export function nestedBroadcastResultType(
+  operandTypes: ReadonlyArray<Readonly<Type>>,
+  elementType: Readonly<Type>
+): Type {
+  // The bound on the ranks read: a type does not nest deeper in practice,
+  // and it stops a recursive alias from looping.
+  const MAX_RANK = 8;
+  // The ranks a broadcast descends into `t`: none for a tuple, a string or a
+  // non-indexed type; one more than its element for an indexed collection;
+  // the deepest member for a union of collections (`list<integer^2> |
+  // list<integer^3>`, a ragged row). `undefined` for a union that mixes a
+  // scalar and a collection, which each cell descends to a different depth.
+  const ranks = (t0: Type, d: number): number | undefined => {
+    if (d >= MAX_RANK) return 0;
+    const t = resolveTypeAlias(t0);
+    if (typeof t === 'object' && t.kind === 'tuple') return 0;
+    if (isSubtype(t, 'string')) return 0;
+    if (typeof t === 'object' && t.kind === 'union') {
+      const members = t.types.map((m) => ranks(m, d));
+      if (members.some((m) => m === undefined)) return undefined;
+      const depths = members as number[];
+      const deepest = Math.max(...depths);
+      return depths.every((m) => m === deepest) ? deepest : undefined;
+    }
+    if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return 0;
+    const e = collectionElementType(t);
+    if (e === undefined) return 1;
+    const inner = ranks(e, d + 1);
+    return inner === undefined ? undefined : 1 + inner;
+  };
+  let depth = 1;
+  for (const t of operandTypes) {
+    const d = ranks(t as Type, 0);
+    // A ragged element is mapped to a different depth in each cell, which no
+    // single nesting describes: the cell type is then `any`.
+    if (d === undefined) return broadcastResultType('any');
+    depth = Math.max(depth, d);
+  }
+  let result = elementType as Type;
+  for (let k = 0; k < depth; k++) result = broadcastResultType(result);
   return result;
 }
 

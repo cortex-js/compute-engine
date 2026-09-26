@@ -53,6 +53,61 @@ describe('RANGE COUNT: END POINT ON THE STEP GRID', () => {
     expect(e.box(['Element', last, range]).evaluate().symbol).toBe('True');
   });
 
+  test('the range contains its last element past the engine tolerance', () => {
+    // The quotient is 9999.999999999. The count tolerance (10⁻¹² of the
+    // quotient, about 10⁻⁸) counts 10001 elements, and the last one, 1000,
+    // is 10⁻⁹ steps past the upper bound. That is more than the engine
+    // tolerance (10⁻¹⁰ steps), but the range must contain its last element.
+    const range = ce.box(['Range', 0, 999.9999999999, 0.1]);
+    expect(range.count).toBe(10001);
+    const last = ce.box(['At', range, 10001]).evaluate();
+    expect(last.re).toBe(1000);
+    expect(ce.box(['Element', last, range]).evaluate().symbol).toBe('True');
+    expect(ce.box(['Element', 1000, range]).evaluate().symbol).toBe('True');
+    // One step past the last element is not an element.
+    expect(ce.box(['Element', 1000.1, range]).evaluate().symbol).toBe(
+      'False'
+    );
+  });
+
+  test('the first element has the same slack as the last element', () => {
+    // `Range(0.1 + 0.2, 0.3, 0.1)` has 1 element, 0.30000000000000004.
+    // 0.3 is a member, as it is a member of `Range(0, 0.3, 0.1)`, whose last
+    // element is also 0.30000000000000004.
+    const el = (t: number, r: any) =>
+      ce.box(['Element', t, r]).evaluate().symbol;
+    const r = ['Range', 0.1 + 0.2, 0.3, 0.1];
+    expect(ce.box(r).count).toBe(1);
+    expect(el(0.3, r)).toBe('True');
+    expect(el(0.1 + 0.2, r)).toBe('True');
+    expect(el(0.3, ['Range', 0, 0.3, 0.1])).toBe('True');
+    expect(el(0.1 + 0.2, ['Range', 0, 0.3, 0.1])).toBe('True');
+    // A negative step: the near side is above the first element.
+    expect(el(0.1 + 0.2, ['Range', 0.3, 0, -0.1])).toBe('True');
+    // A target one grid step, or a fraction of a step, before the first
+    // element is not a member.
+    expect(el(-0.01, ['Range', 0, 1, 0.1])).toBe('False');
+    expect(el(-0.1, ['Range', 0, 1, 0.1])).toBe('False');
+    expect(el(0.31, ['Range', 0.3, 0, -0.1])).toBe('False');
+  });
+
+  test('a range with an infinite step has one element, its lower bound', () => {
+    // `step · 0` is NaN for an infinite step: the first element was NaN, and
+    // every target between the bounds was a member.
+    const el = (t: number, r: any) =>
+      ce.box(['Element', t, r]).evaluate().symbol;
+    const up = ['Range', 0, 1, 'PositiveInfinity'];
+    const down = ['Range', 1, 5, 'NegativeInfinity'];
+    expect(ce.box(up).evaluate().toString()).toBe('[0]');
+    expect(ce.box(down).evaluate().toString()).toBe('[1]');
+    expect(ce.box(['At', up, 1]).evaluate().toString()).toBe('0');
+    expect(el(0, up)).toBe('True');
+    expect(el(0.5, up)).toBe('False');
+    expect(el(10, up)).toBe('False');
+    expect(el(1, down)).toBe('True');
+    expect(el(3, down)).toBe('False');
+  });
+
   test('Range(0, 0.3, 0.1) has 4 elements', () => {
     expect(count('[0,0.1...0.3]')).toBe(4);
     expect(ce.box(['Range', 0, 0.3, 0.1]).count).toBe(4);

@@ -94,7 +94,15 @@ import {
   widen,
   containsSignatureArm,
   resolveTypeAlias,
+  broadcastResultType,
+  broadcastShapedResultType,
+  nestedBroadcastResultType,
 } from '../../common/type/utils.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
+import { signatureParamsAreScalar } from '../boxed-expression/callback-broadcast-admission.js';
 import {
   parseType,
   parseTypeParameterClause,
@@ -130,6 +138,7 @@ import type {
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
   freeTypeVariables,
+  isPolymorphicType,
   substituteTypeVariables,
 } from '../../common/type/instantiate.js';
 import type { Rule } from '../types-evaluation.js';
@@ -213,6 +222,11 @@ import {
   isEnumerableSource,
   isPointListReading,
   isTupleShapedType,
+  broadcastLengthMismatch,
+  hasUnresolvedCollectionOperand,
+  isBroadcastableCollection,
+  lazyBroadcastMapIfNeeded,
+  zipBroadcast,
 } from '../collection-utils.js';
 import { numericDerivativeOfApply } from './calculus.js';
 import {
@@ -463,78 +477,280 @@ function pipeStageWithImplicitTopic(
 }
 
 /**
- * Implicit `Map`: a pipe stage that is a UNARY function literal maps over a
- * collection topic instead of being applied to the collection as a whole —
- * `xs |> x ↦ x^2` and `xs |> _^2` (the Epsil parser wraps the latter as a
- * `Function` literal) both mean `Map(x ↦ x^2, xs)`. Returns the `Map`
- * expression, or `undefined` when the stage is an ordinary application.
+ * Does every parameter of the function-literal signature `sig` map over a
+ * collection argument? A scalar parameter does (`signatureParamsAreScalar`,
+ * the rule of the named route). So does a TUPLE-typed parameter, the type a
+ * destructuring pattern `((p, q)) ↦ …` infers: a point is atomic, so a list
+ * of points maps point by point, and binding the list whole to a tuple
+ * parameter would be a type error. A generic signature binds whole.
+ */
+function literalParamsMap(sig: Type): boolean {
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
+  if (isPolymorphicType(sig)) return false;
+  const params = [
+    ...(sig.args ?? []),
+    ...(sig.optArgs ?? []),
+    ...(sig.variadicArg ? [sig.variadicArg] : []),
+  ];
+  return params.every(
+    (p) =>
+      isTupleShapedType(p.type) ||
+      signatureParamsAreScalar({
+        kind: 'signature',
+        args: [p],
+        result: sig.result,
+      })
+  );
+}
+
+/**
+ * Does `Apply(fn, …args)` map element by element over its collection
+ * arguments, as a call of a named user function with the same body does?
+ * True when `fn` is a function literal whose parameters are all scalar by
+ * its signature (`signatureParamsAreScalar`, the rule the named route uses
+ * through `paramsAreScalar`) and at least one argument is an indexed
+ * collection not known to be infinite that is not a tuple (a point stays
+ * atomic) nor a string. A known-infinite source (`Range(1, +∞)`, `Cycle`) is
+ * bound whole, as on the named route; a large or unknown-length one maps
+ * lazily (`applyLiteralMapped`).
  *
- * The stage must be a LITERAL lambda: a bare function symbol (`xs |> Sum`) or
- * a symbol whose value is a lambda still applies to the whole collection, so
- * whole-collection consumers keep their natural spelling. Two more escapes:
- * - a STRING topic is enumerable but reads as a scalar in a pipeline
- *   (`"abc" |> (s ↦ …)` binds the string, not each character);
- * - an AUTHORED parameter annotation that the topic itself satisfies is a
- *   contract that the lambda consumes the whole collection
- *   (`xs |> (l: list<number>) ↦ Length(l)` applies; an element-typed or
- *   unannotated parameter maps). The annotation is read from the RAW stage,
- *   the same authored-vs-derived discrimination
- *   `annotateFunctionLiteralParams` documents.
+ * User decision 2026-09-26 (Tycho item 327): a function literal applied to a
+ * list maps like a named user function, on every route. It used to bind each
+ * argument whole, so `Apply(i ↦ Sum(Cos(n), Limits(n, 1, i)), [1, 2, 3])`
+ * was an `incompatible-type` error while `X([1, 2, 3])` with
+ * `X := i ↦ …` mapped, and the compiled code of the literal mapped as well.
+ * A literal whose parameter is a collection by its signature
+ * (`x ↦ Length(x)` infers `x: collection`) still binds the argument whole.
+ */
+function applyLiteralMaps(
+  fn: Expression,
+  args: ReadonlyArray<Expression>
+): boolean {
+  if (!isFunction(fn, 'Function')) return false;
+  // A generic literal (`(x: T) -> T where T`) binds its argument whole, as
+  // on the named route: its type parameter is solved against the whole
+  // argument (`literalParamsMap`).
+  if (!literalParamsMap(fn.type.type)) return false;
+  return args.some(
+    (a) => isBroadcastableCollection(a) && a.isFiniteCollection !== false
+  );
+}
+
+/**
+ * The type of one cell of a mapped application of a one-parameter function
+ * literal `fn` over one collection argument: the literal's body typed with
+ * the parameter bound to the collection's leaf element type (a broadcast of
+ * a scalar-parameter function binds its parameter to the leaves), through
+ * `pipeStageBodyType`. `undefined` when there is no handler context, more
+ * than one argument, a leaf that is not a single element type (a ragged
+ * union), or a body the derivation cannot type.
+ */
+function literalCellType(
+  fn: OperandDescriptor,
+  collections: ReadonlyArray<OperandDescriptor>,
+  args: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext | undefined
+): Type | undefined {
+  if (context === undefined || args.length !== 1 || collections.length !== 1)
+    return undefined;
+  const st = fn.structureOf?.();
+  if (st?.kind !== 'function-literal') return undefined;
+  const param = pipeStageParameter(st);
+  if (param === undefined) return undefined;
+  let leaf: Type | undefined = collections[0].type;
+  for (let k = 0; k < 8; k++) {
+    const r = resolveTypeAlias(leaf);
+    if (typeof r === 'object' && r.kind === 'tuple') break;
+    if (isSubtype(r, 'string')) break;
+    if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) break;
+    leaf = collectionElementType(r);
+    if (leaf === undefined) return undefined;
+  }
+  const r = resolveTypeAlias(leaf);
+  if (typeof r === 'object' && r.kind === 'union') return undefined;
+  return pipeStageBodyType(context, st.body, param.name, leaf);
+}
+
+/**
+ * The static type of `Apply(fn, …args)` when it maps (`applyLiteralMaps`),
+ * read from operand descriptors; `undefined` otherwise. The gate is the
+ * evaluate-time one: a function-literal callee whose parameters are scalar
+ * by its signature, and an argument typed as an indexed collection that is
+ * neither a tuple nor a string.
+ */
+function applyLiteralMapType(
+  fn: OperandDescriptor,
+  args: ReadonlyArray<OperandDescriptor>,
+  context?: TypeHandlerContext
+): Type | undefined {
+  if (fn.structureOf?.()?.kind !== 'function-literal') return undefined;
+  if (!literalParamsMap(fn.type)) return undefined;
+  const mapsOver = (t: Type): boolean =>
+    isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
+    !isSubtype(t, 'string') &&
+    !(typeof t === 'object' && t.kind === 'tuple');
+  // A numeric tuple binds whole (in every cell, beside a collection), and
+  // the body decides the shape (`x·y` with a point `y` gives a point), so
+  // a scalar result does not describe the cell: `any`, as on the named route
+  // (`lambdaBroadcastType`).
+  const perElement0 = functionResult(fn.type) ?? 'unknown';
+  if (
+    args.some((a) => {
+      const t = resolveTypeAlias(a.type);
+      return (
+        typeof t === 'object' &&
+        t.kind === 'tuple' &&
+        t.elements.every((e) => isSubtype(e.type, 'number'))
+      );
+    }) &&
+    (perElement0 === 'unknown' || isSubtype(perElement0, 'number'))
+  )
+    return 'any';
+  const collections = args.filter((a) => mapsOver(a.type));
+  if (collections.length === 0) {
+    // A scalar-or-list argument (`u: number | list<number>`) maps when it
+    // holds a list and binds when it holds a scalar: the call is either
+    // shape, as on the named route (`loneUnionBroadcastResultType` in
+    // `boxed-function.ts`).
+    const union = args.find((a) => {
+      const t = resolveTypeAlias(a.type);
+      return (
+        typeof t === 'object' &&
+        t.kind === 'union' &&
+        t.types.some((m) => mapsOver(m))
+      );
+    });
+    if (union === undefined) return undefined;
+    const cell = functionResult(fn.type) ?? 'unknown';
+    return reduceType({
+      kind: 'union',
+      types: [cell, broadcastResultType(cell)],
+    });
+  }
+  // As the named route types a lambda broadcast (`lambdaBroadcastType` in
+  // `boxed-function.ts`): a collection-valued per-element result nests
+  // (`x ↦ (x, x)` over a list is a list of tuples), a scalar one takes the
+  // source's shape. The per-element result is the literal's body typed with
+  // its parameter bound to the collection's LEAF element type, when there is
+  // one parameter and one collection (`x ↦ x^2` over integers gives
+  // `integer<0..>` cells), and the literal's signature result otherwise.
+  const perElement =
+    literalCellType(fn, collections, args, context) ??
+    functionResult(fn.type) ??
+    'unknown';
+  if (isSubtype(perElement, COLLECTION_SHAPE_TYPE))
+    return nestedBroadcastResultType(
+      collections.map((a) => a.type),
+      perElement
+    );
+  return broadcastShapedResultType(
+    collections.map((a) => a.type),
+    perElement
+  );
+}
+
+/**
+ * The value of `Apply(fn, …args)` when it maps (`applyLiteralMaps`), built as
+ * the named route builds the broadcast of a scalar-parameter user function
+ * (`BoxedFunction` evaluation, step 4b): collections of different lengths
+ * are the `incompatible-dimensions` error; a large source, or one of unknown
+ * length (a `Filter`), gives the lazy `Map` form
+ * (`lazyBroadcastMapIfNeeded`); otherwise the mapped arguments are
+ * zipped and `Apply(fn, …row)` is evaluated per cell, a scalar argument, a
+ * tuple (a point) or a string repeated whole in every cell. The per-cell
+ * `Apply` maps again over a cell that is itself a collection, as the named
+ * route does, so a nested list is mapped at every depth.
+ */
+function applyLiteralMapped(
+  ce: ComputeEngine,
+  fn: Expression,
+  args: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const mapped = (x: Expression) => isBroadcastableCollection(x);
+  const mismatch = broadcastLengthMismatch(ce, args.filter(mapped));
+  if (mismatch) return mismatch;
+  // A collection argument with no value yet (a symbol declared `list<…>`)
+  // holds the application, as the named route does: mapping now would lift
+  // it whole into every cell, and assigning it later could not recover the
+  // element-wise result.
+  if (hasUnresolvedCollectionOperand(args, isBroadcastableCollection))
+    return ce._fn('Apply', [fn, ...args]);
+  const lazy = lazyBroadcastMapIfNeeded(
+    ce,
+    'Apply',
+    [fn, ...args],
+    (x, i) => i > 0 && mapped(x),
+    numericApproximation === true
+  );
+  if (lazy) return lazy;
+  const rows = zipBroadcast(args, mapped);
+  const results: Expression[] = [];
+  while (true) {
+    const { done, value } = rows.next();
+    if (done) break;
+    results.push(
+      ce._fn('Apply', [fn, ...value]).evaluate({ numericApproximation })
+    );
+  }
+  return ce._fn('List', results);
+}
+
+/**
+ * The canonical form of a pipe STAGE that is a unary function literal: a
+ * written literal with one parameter, or the shorthand spelling (a literal
+ * with no parameter list whose body mentions exactly one placeholder, `_` or
+ * `_1`, the first argument, the only one a pipe supplies), either one
+ * possibly parenthesized (`Delimiter`). `undefined` for any other stage.
+ * The literal is canonicalized in a fresh placeholder scope, so a global
+ * named `_` or `_1` cannot capture its parameter.
+ */
+function pipeLiteralStage(
+  ce: ComputeEngine,
+  stage: Expression
+): Expression | undefined {
+  while (isFunction(stage, 'Delimiter') && stage.nops === 1) stage = stage.op1;
+  if (!isFunction(stage, 'Function')) return undefined;
+  if (stage.nops === 1) {
+    const usesUnderscore = stage.has('_');
+    const usesFirst = stage.has('_1');
+    if (usesUnderscore === usesFirst || stage.has('_2')) return undefined;
+    // Give the shorthand literal its parameter explicitly.
+    stage = ce._fn(
+      'Function',
+      [stage.op1, ce.symbol(usesUnderscore ? '_' : '_1', { canonical: false })],
+      { canonical: false }
+    );
+  } else if (stage.nops !== 2) return undefined; // body + one parameter
+  return canonicalWithFreshPlaceholders(stage);
+}
+
+/**
+ * The value of a pipe whose stage is a unary function literal:
+ * `Apply(stage, topic)`, which is `stage(topic)`. A function literal with
+ * scalar (or tuple) parameters maps over a list topic at every rank, and
+ * binds any other topic, or a collection parameter, whole, exactly as the
+ * same literal called directly or under a name (`applyLiteralMaps`, user
+ * decision 2026-09-26: the pipe route is consistent with them). Every such
+ * stage takes this route, whatever the topic's static type, so a topic that
+ * only becomes a list when evaluated (`g() |> x ↦ 0`) maps as `Apply` maps
+ * it. It used to be `Map(stage, topic)`, which mapped one rank, mapped a
+ * literal whose parameter is a collection (`xs |> x ↦ Length(x)`), and
+ * mapped a set. Returns `undefined` when the stage is not such a literal,
+ * or the topic is the written `Nothing` (erased by the caller).
  */
 function pipeImplicitMap(
   ce: ComputeEngine,
   topic: Expression,
-  rawStage: Expression,
   stageForMap: Expression
 ): Expression | undefined {
-  // The decision reads the RAW stage: a written literal with one parameter,
-  // or the shorthand spelling — a literal with no parameter list whose body
-  // mentions exactly one placeholder, `_` or `_1` (the first argument, the
-  // only one a pipe supplies). Nothing is canonicalized to decide.
-  if (!isFunction(stageForMap, 'Function')) return undefined;
-  let stage: Expression = stageForMap;
-  if (stageForMap.nops === 1) {
-    const usesUnderscore = stageForMap.has('_');
-    const usesFirst = stageForMap.has('_1');
-    if (usesUnderscore === usesFirst || stageForMap.has('_2')) return undefined;
-    // Give the shorthand literal its parameter explicitly, so the `Map`
-    // below can stamp it: the contextual typing of a callback slot stamps a
-    // WRITTEN parameter and leaves a parameterless literal to infer its own.
-    stage = ce._fn(
-      'Function',
-      [
-        stageForMap.op1,
-        ce.symbol(usesUnderscore ? '_' : '_1', { canonical: false }),
-      ],
-      { canonical: false }
-    );
-  } else if (stageForMap.nops !== 2) return undefined; // body + one parameter
-  if (isString(topic) || topic.type.matches('string')) return undefined;
-  if (!(topic.isCollection || topic.type.matches('collection<any>')))
-    return undefined;
-  const rawParam = isFunction(rawStage, 'Function')
-    ? rawStage.ops[1]
-    : undefined;
-  if (rawParam !== undefined && isFunction(rawParam, 'Typed')) {
-    const t = rawParam.op2;
-    const ts = isString(t) ? t.string : undefined;
-    if (ts !== undefined && topic.type.matches(ts)) return undefined;
-  }
-  // The `Map` is built from the raw stage and canonicalized as a whole.
-  // Canonicalizing the literal inside the `Map` lets the `Map` stamp the
-  // stage's parameter with the topic's ELEMENT type, exactly as an
-  // explicitly written `Map(p ↦ …, xs)` does; canonicalized alone, the
-  // literal infers its parameter from the body's operators (`p[1]` reads
-  // `p` as "dictionary or indexed collection"), and the lazy `Map` the pipe
-  // evaluates to would then carry a wider cell type than the pipe's own
-  // static type — `list<broadcastable<boolean>^3>` against
-  // `list<boolean^3>` for `xs |> p ↦ p[1] ∧ p[2]`. The canonicalization
-  // runs in a fresh placeholder scope, built the same way as the one the
-  // direct-application branch uses for its stage, so a global named `_` or
-  // `_1` is shadowed for the whole literal here too.
-  return canonicalWithFreshPlaceholders(
-    ce._fn('Map', [stage, topic], { canonical: false })
-  );
+  if (isSymbol(topic, 'Nothing')) return undefined;
+  const stage =
+    isFunction(stageForMap, 'Function') && stageForMap.isCanonical
+      ? stageForMap
+      : pipeLiteralStage(ce, stageForMap);
+  if (!isFunction(stage, 'Function') || stage.nops !== 2) return undefined;
+  return ce.function('Apply', [stage, topic]);
 }
 
 /**
@@ -589,36 +805,25 @@ function pipeStageArityError(stage: Expression): Expression | undefined {
 const PIPE_COLLECTION_SHAPE_TYPE = parseType('collection<any>')!;
 
 /**
- * The static type of a `Pipe` whose stage implicitly MAPS — the collection
- * type of the `Map` the evaluate handler will build, or `undefined` when the
- * stage is an ordinary application (the caller then falls back to the stage's
- * declared result type).
+ * The static type of a `Pipe` whose stage is a unary function literal, or
+ * `undefined` when this derivation does not decide it (the caller then
+ * falls back to the stage's result type).
  *
- * Without this, `xs |> x ↦ f(x)` typed as `f`'s RESULT — a scalar — while it
- * evaluates to a collection, so the whole pipe degraded to `unknown` and
- * downstream inference lost both the shape and the element type that the
- * equivalent `Map(x ↦ f(x), xs)` reports.
+ * A pipe with such a stage is `Apply(stage, topic)` (`pipeImplicitMap`, user
+ * decision 2026-09-26), so when the stage is CANONICAL — the canonical
+ * handler canonicalizes a unary literal stage, and a chained topic — its
+ * signature is known and the type is `Apply`'s own (`applyLiteralMapType`):
+ * a list topic mapped at every rank, and `undefined` when the topic binds
+ * whole (a set, a tuple, a string, a collection parameter).
  *
- * The gate is the evaluate-time `pipeImplicitMap`'s, restated on operand
- * DESCRIPTORS so that deriving a `Pipe`'s type declares, canonicalizes and
- * evaluates nothing: the stage must be a function LITERAL of exactly one
- * parameter, the topic must not be a string, the topic must be
- * collection-shaped, and the stage's parameter must carry no authored
- * annotation the topic itself satisfies (that annotation is a contract that
- * the lambda consumes the whole collection). There is no "does the parameter
- * accept the element type" test.
+ * A RAW stage (a pipe read from a held form that was never canonicalized)
+ * has no signature: the older derivation below types the mapping body over
+ * the topic's element type and wraps it back in the topic's shape, through
+ * `context.derive`, without canonicalizing anything.
  *
- * The result is the mapping body's type over the topic's ELEMENT type,
- * wrapped back in the source's collection shape — the two steps `Map`
- * performs, reached through `context.derive` instead of by building a `Map`
- * expression and reading its type.
- *
- * `Pipe` is `lazy` and its `canonical` handler deliberately leaves the
- * operands unbound, so both descriptors arrive RAW: the topic's own type is
- * `unknown` and its collection facts are undecided. {@link heldOperandType}
- * is what recovers a held operand's type from pure sources, where the
- * expression shape recovered it by canonicalizing the operand inside the type
- * read.
+ * `Pipe` is `lazy` and its `canonical` handler leaves the TOPIC unbound, so
+ * the topic's own type is `unknown` and its collection facts are undecided.
+ * {@link heldOperandType} recovers a held operand's type from pure sources.
  */
 function pipeImplicitMapType(
   context: TypeHandlerContext,
@@ -631,6 +836,20 @@ function pipeImplicitMapType(
 
   const param = pipeStageParameter(st);
   if (param === undefined) return undefined;
+  // A canonical stage (the canonical handler canonicalizes a unary literal
+  // stage, and a chained topic) carries its signature: the pipe is
+  // `Apply(stage, topic)` and is typed by `Apply`'s own rule, which maps a
+  // list topic at every rank, binds a set, a tuple, a string or a
+  // collection parameter whole, and keeps both shapes of a scalar-or-list
+  // topic (`applyLiteralMapType`). `undefined` there means the topic binds
+  // whole: the pipe then takes the stage's result type.
+  const sig = stage.type;
+  if (typeof sig === 'object' && sig.kind === 'signature')
+    return applyLiteralMapType(
+      stage,
+      [describeType(heldOperandType(context, topic))],
+      context
+    );
 
   const topicType = heldOperandType(context, topic);
   if (isSubtype(topicType, 'string')) return undefined;
@@ -853,6 +1072,13 @@ function pipeStageBodyType(
     return { kind: 'list', elements: widen(...cells) };
   }
   if (body.kind !== 'application') return undefined;
+  // A canonical literal wraps its body in a one-statement `Block` (the pipe
+  // canonicalizes a literal stage): the body is that statement.
+  if (body.head === 'Block' && body.children.length === 1) {
+    const inner = body.children[0].structureOf?.();
+    if (inner !== undefined)
+      return pipeStageBodyType(context, inner, param, elementType);
+  }
   return context.derive(
     body.head,
     body.children.map((c) => bindStageParameter(context, c, param, elementType))
@@ -951,9 +1177,15 @@ function heldOperandType(
         })),
       };
     case 'list-literal': {
-      const elements = widen(
+      let elements: Type = widen(
         ...s.elements.map((e) => heldComponentType(context, e))
       );
+      // A shape of rank r > 1 (`[[1, 2], [3, 4]]` is 2×2) puts the LEAF type
+      // in `elements`: the components are rows, so descend r − 1 ranks. The
+      // row type in a 2×2 shape counted the inner rank twice
+      // (`list<vector<integer^2>^(2x2)>`).
+      for (let k = 1; k < s.shape.length; k++)
+        elements = collectionElementType(elements) ?? 'unknown';
       return s.shape.length > 0
         ? { kind: 'list', elements, dimensions: [...s.shape] }
         : { kind: 'list', elements };
@@ -3573,22 +3805,30 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // application-head spelling `[⟨literal⟩, 5]` canonicalizes to `Apply`, so
       // it is covered by the same line.
       // Same solver as the value-definition arm, but NOT its `threadable`
-      // gate: `apply()` binds each argument WHOLE — `Apply(x => (x, x),
-      // [1, 2])` evaluates to `([1,2], [1,2])`, not to a list of pairs (a
-      // broadcasting BODY such as `2x` broadcasts on its own, inside the
-      // binding, and does not make this route a map). So no position is
-      // lift-admitted here and the D10 element bind (§4.4) must not fire:
-      // `T` binds the collection itself, and there is no wrap on this route
-      // to put a rank back. A ground callee yields `undefined` and falls
-      // through to today's `functionResult`.
+      // gate: a GENERIC callee binds each argument WHOLE — `T` binds the
+      // collection itself, and there is no wrap on this route to put a rank
+      // back — so no position is lift-admitted here and the D10 element
+      // bind (§4.4) must not fire. A ground function literal with scalar
+      // parameters maps over a collection argument instead, like a named
+      // user function (`applyLiteralMaps`, user decision 2026-09-26):
+      // `Apply(x ↦ (x, x), [1, 2])` is `[(1, 1), (2, 2)]`. A ground callee
+      // that does not map yields `undefined` here and falls through to
+      // `functionResult`.
       //
       // The solve runs over the descriptors' solver view
       // (`actualOfDescriptor`), which answers the same five reads off a
       // descriptor that the expression route answers off an operand
       // expression (`instantiatedResultTypeOverActuals`,
       // `boxed-expression/generic-instantiation.ts`).
-      type: ([fn, ...args], { engine }) => {
+      type: ([fn, ...args], context) => {
+        const { engine } = context;
         const t = fn.type;
+        // A function literal with scalar parameters maps over a collection
+        // argument (`applyLiteralMaps`): the call is typed as the mapped
+        // collection (`applyLiteralMapType`).
+        const mapped = applyLiteralMapType(fn, args, context);
+        if (mapped !== undefined)
+          return BoxedType.forResult(mapped, engine._typeResolver);
         return BoxedType.forResult(
           instantiatedResultTypeOverActuals(t, args.map(actualOfDescriptor), {
             threadable: false,
@@ -3619,7 +3859,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           ...args.slice(1).filter((x) => !isSymbol(x, 'Nothing')),
         ]);
       },
-      evaluate: (ops, { numericApproximation }) => {
+      evaluate: (ops, { numericApproximation, engine }) => {
+        // A function literal with scalar parameters maps over a collection
+        // argument, like a named user function (`applyLiteralMaps`). An
+        // error callee or argument bubbles first, as `apply()` does; an
+        // error inside a collection's cell is not an error argument
+        // (`errorValue` stops at a collection literal) and stays in its cell.
+        if (applyLiteralMaps(ops[0], ops.slice(1))) {
+          const err =
+            errorValue(ops[0]) ??
+            ops
+              .slice(1)
+              .map((a) => errorValue(a))
+              .find((e) => e !== undefined);
+          if (err !== undefined) return err;
+          const mapped = applyLiteralMapped(
+            engine,
+            ops[0],
+            ops.slice(1),
+            numericApproximation
+          );
+          if (mapped !== undefined) return mapped;
+        }
         const result = apply(ops[0], ops.slice(1));
         if (!numericApproximation) return result;
         // N(f(x)) = N of the applied result: without this, e.g.
@@ -3642,6 +3903,31 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return numericDerivativeOfApply(result) ?? result;
         }
         return result.N();
+      },
+    },
+
+    // Engine-internal: apply a function to arguments, each bound WHOLE. The
+    // per-element call of a declared `broadcastable<T>` map uses it (the
+    // eager loop, `declaredBroadcastElement` in `boxed-function.ts`, and the
+    // lazy `Map`, `lazyBroadcastMap` in `collection-utils.ts`): its element is
+    // bound whole by the declaration, whatever its shape, while `Apply` maps
+    // a function literal with scalar parameters over a collection argument
+    // (`applyLiteralMaps`, user decision 2026-09-26). `(broadcastable<value>)
+    // -> unknown` assigned `x ↦ (x, x)` and called with `[[1, 2], [3, 4, 5]]`
+    // is `[([1,2], [1,2]), ([3,4,5], [3,4,5])]` for any size of the source.
+    ApplyWhole: {
+      description:
+        'Apply a function to arguments, each bound whole (engine-internal).',
+      inspectsErrors: true,
+      signature: '(name:any, arguments:any*) -> unknown',
+      type: ([fn], { engine }) =>
+        BoxedType.forResult(
+          (fn && functionResult(fn.type)) ?? 'unknown',
+          engine._typeResolver
+        ),
+      evaluate: (ops, { numericApproximation }) => {
+        const result = apply(ops[0], ops.slice(1));
+        return numericApproximation ? result.N() : result;
       },
     },
 
@@ -3700,6 +3986,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const arityError = pipeStageArityError(ops[1]);
         if (arityError !== undefined)
           return ce._fn('Pipe', [ops[0], arityError]);
+        // A unary function-literal stage (`xs |> x ↦ …`, the shorthand
+        // `xs |> _^2`, or either one parenthesized) is canonicalized here, so
+        // its signature, parameter types inferred from the body included, is
+        // known to the type handler: `xs |> f` is `f(xs)`, and whether a
+        // literal maps over `xs` or binds it whole depends on that signature
+        // (`applyLiteralMaps`, user decision 2026-09-26).
+        const literal = pipeLiteralStage(ce, ops[1]);
+        // A chained topic (`a |> f |> g` is `Pipe(Pipe(a, f), g)`) is
+        // canonicalized too, so its own literal stage carries its signature
+        // when this pipe's type reads the inner pipe's type. The evaluate
+        // handler treats a chained topic as plumbing already.
+        const topic = isFunction(ops[0], 'Pipe') ? ops[0].canonical : ops[0];
+        if (literal !== undefined) return ce._fn('Pipe', [topic, literal]);
+        if (topic !== ops[0]) return ce._fn('Pipe', [topic, ops[1]]);
         return ce._fn('Pipe', ops);
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {
@@ -3735,14 +4035,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const stageForMap =
           pipeStageWithImplicitTopic(ce, rawStage, x) ?? rawStage;
 
-        // Implicit `Map`: a unary LITERAL lambda stage over a collection
-        // topic maps instead of applying — `xs |> x ↦ x^2` and `xs |> _^2`
-        // are `Map(x ↦ x^2, xs)` (see `pipeImplicitMap` for the escapes:
-        // named functions, string topics, whole-collection parameter
-        // annotations). Decided on the raw stage, before the stage is
-        // canonicalized for direct application below, so the stage is
-        // canonicalized exactly once, on whichever branch is taken.
-        const mapped = pipeImplicitMap(ce, x, rawStage, stageForMap);
+        // A unary function-literal stage is a call: `xs |> x ↦ x^2` and
+        // `xs |> _^2` are `Apply(x ↦ x^2, xs)`, which maps over a list or
+        // binds whole as the same call does (`pipeImplicitMap`). The stage
+        // is canonical when this pipe was canonicalized, raw when it is
+        // evaluated from a held form.
+        const mapped = pipeImplicitMap(ce, x, stageForMap);
         if (mapped !== undefined)
           return mapped.evaluate({ numericApproximation });
 

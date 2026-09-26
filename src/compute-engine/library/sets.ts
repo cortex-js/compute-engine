@@ -38,6 +38,8 @@ import {
   declareTypeSaturatedSet,
   enumerableFromAllSources,
   enumerableFromSource,
+  holdsConditionalValue,
+  isMaskedAbsentNumber,
   shapeIncludedIn,
   typeSaturatedShape,
   typeSaturatedSubsetOf,
@@ -852,7 +854,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       }
       return ce._fn('Element', [value.canonical, canonicalCollection]);
     },
-    evaluate: ([value, collection, _condition], { engine: ce }) => {
+    evaluate: ([value, collection, _condition], { engine: ce, expression }) => {
       // Note: condition is only used during Sum/Product iteration,
       // not for standalone Element evaluation
       if (!collection) return undefined;
@@ -881,6 +883,19 @@ export const SETS_LIBRARY: SymbolDefinitions = {
             .evaluate();
       }
 
+      // A restricted number whose condition is false is `NaN`, and it is an
+      // absent value, which is not an element of any collection (user
+      // decision 2026-09-26). Without this test, it was an element of a
+      // collection that holds `NaN`.
+      if (
+        value !== undefined &&
+        isMaskedAbsentNumber(
+          value,
+          isFunction(expression) ? expression.ops[0] : undefined
+        )
+      )
+        return ce.False;
+
       const result = membershipKleene(ce, value, collection);
       if (result === true) return ce.True;
       if (result === false) return ce.False;
@@ -904,8 +919,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       const [value, collection] = args;
       return ce._fn('NotElement', [value.canonical, collection.canonical]);
     },
-    evaluate: ([value, collection], { engine: ce }) => {
+    evaluate: ([value, collection], { engine: ce, expression }) => {
       if (!collection) return undefined;
+      // An absent value is not an element (see `Element`).
+      if (
+        isMaskedAbsentNumber(
+          value,
+          isFunction(expression) ? expression.ops[0] : undefined
+        )
+      )
+        return ce.True;
       const result = membershipKleene(ce, value, collection);
       if (result === true) return ce.False;
       if (result === false) return ce.True;
@@ -925,6 +948,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // canonical handler and no chain form; they keep `(any, any)`.
   Subset: {
     complexity: 11200,
+    // A set relation over an absent set is absent: it computes on the whole
+    // collection, so it answers the marker of a boolean codomain, `Missing`.
+    missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
     description:
       'Test whether the first collection is a strict subset of the second.',
@@ -943,6 +969,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SubsetEqual: {
     complexity: 11200,
+    // A set relation over an absent set is absent: it computes on the whole
+    // collection, so it answers the marker of a boolean codomain, `Missing`.
+    missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
     description:
       'Test whether the first collection is a subset (possibly equal) of the second.',
@@ -961,6 +990,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotSubset: {
     complexity: 11200,
+    // A set relation over an absent set is absent: it computes on the whole
+    // collection, so it answers the marker of a boolean codomain, `Missing`.
+    missingBehavior: 'propagate',
     signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is not a strict subset of the second.',
@@ -974,6 +1006,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   Superset: {
     complexity: 11200,
+    // A set relation over an absent set is absent: it computes on the whole
+    // collection, so it answers the marker of a boolean codomain, `Missing`.
+    missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
     description:
       'Test whether the first collection is a strict superset of the second.',
@@ -992,6 +1027,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SupersetEqual: {
     complexity: 11200,
+    // A set relation over an absent set is absent: it computes on the whole
+    // collection, so it answers the marker of a boolean codomain, `Missing`.
+    missingBehavior: 'propagate',
     signature: '(any, any*) -> boolean',
     description:
       'Test whether the first collection is a superset (possibly equal) of the second.',
@@ -1011,6 +1049,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotSuperset: {
     complexity: 11200,
+    // A set relation over an absent set is absent: it computes on the whole
+    // collection, so it answers the marker of a boolean codomain, `Missing`.
+    missingBehavior: 'propagate',
     signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is not a strict superset of the second.',
@@ -1024,6 +1065,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotSupersetEqual: {
     complexity: 11200,
+    // A set relation over an absent set is absent: it computes on the whole
+    // collection, so it answers the marker of a boolean codomain, `Missing`.
+    missingBehavior: 'propagate',
     signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is not a superset (possibly equal) of the second.',
@@ -1143,6 +1187,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // list operands are coerced to a set (deduped) by `intersection`, so
     // `Intersection([1,2,3], [2,3,4])` works without building sets by hand.
     wikidata: 'Q185837',
+    // An absent collection operand (`Missing`, or a restricted set whose
+    // condition is false) makes the result `Missing`, as a collection
+    // operator over an absent collection does (user decision 2026-09-25).
+    // A restricted operand whose condition is not decided moves out of the
+    // application: `Union([1, 2]{c}, [3])` is `Union([1, 2], [3]){c}`.
+    // Declared because the signature is `any`, which the default policy does
+    // not read as a collection. An absent ELEMENT inside a set is not
+    // changed: `Union({1, Missing}, {2})` keeps it as an element.
+    missingBehavior: 'propagate',
+    threadsConditionals: true,
     signature: '(any+) -> set',
     description: 'Return the intersection of one or more collections as a set.',
     canonical: (args, { engine: ce }) => {
@@ -1157,7 +1211,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           args.map((arg) => arg.canonical),
           'Intersection'
         ),
-        '(collection<any>+) -> set'
+        '(collection<any>+) -> set',
+        () => true
       );
       return ce._fn('Intersection', validatedArgs);
     },
@@ -1178,6 +1233,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   Union: {
     // Works on set, but can also work on lists
     wikidata: 'Q185359',
+    // An absent collection operand (`Missing`, or a restricted set whose
+    // condition is false) makes the result `Missing`, as a collection
+    // operator over an absent collection does (user decision 2026-09-25).
+    // A restricted operand whose condition is not decided moves out of the
+    // application: `Union([1, 2]{c}, [3])` is `Union([1, 2], [3]){c}`.
+    // Declared because the signature is `any`, which the default policy does
+    // not read as a collection. An absent ELEMENT inside a set is not
+    // changed: `Union({1, Missing}, {2})` keeps it as an element.
+    missingBehavior: 'propagate',
+    threadsConditionals: true,
     signature: '(any+) -> set',
     description: 'Return the union of two or more collections as a set.',
     canonical: (args, { engine: ce }) => {
@@ -1188,7 +1253,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           args.map((arg) => arg.canonical),
           'Union'
         ),
-        '(collection<any>+) -> set'
+        '(collection<any>+) -> set',
+        () => true
       );
       // Even if there is only one argument, we still need to call Union
       // to canonicalize the argument, since it may not be a set (it could
@@ -1229,6 +1295,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SetMinus: {
     wikidata: 'Q18192442',
+    // An absent first operand (`Missing`, or a restricted set whose
+    // condition is false) makes the result `Missing`, as a collection
+    // operator over an absent collection does (user decision 2026-09-25).
+    // A restricted first operand whose condition is not decided moves out of
+    // the application. Declared because the removed values are `value`,
+    // which the default policy does not read as a collection. Only the first
+    // operand strips `missing`: an absent removed value is still refused.
+    missingBehavior: 'propagate',
+    missingStrip: [0],
+    threadsConditionals: [0],
     signature: '(set<any>, value*) -> set',
     description:
       'Return the set difference between the first set and subsequent values.',
@@ -1238,7 +1314,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       // operand (e.g. `G`, the gravitational constant, types real).
       return ce._fn(
         'SetMinus',
-        validateSetArguments(ce, args, '(set<any>, value*) -> set')
+        validateSetArguments(
+          ce,
+          args,
+          '(set<any>, value*) -> set',
+          (i) => i === 0
+        )
       );
     },
     evaluate: setMinus,
@@ -1490,9 +1571,21 @@ function isLabelOperand(expr: Expression): boolean {
 function validateSetArguments(
   ce: ComputeEngine,
   args: ReadonlyArray<Expression>,
-  signature: string
+  signature: string,
+  /** The positions where an absent operand (`Missing`) is admitted: the
+   * operator propagates absence there, and the evaluation answers
+   * `Missing`. */
+  stripMissing?: (index: number) => boolean
 ): ReadonlyArray<Expression> {
-  const validated = validateArguments(ce, args, parseType(signature));
+  const validated = validateArguments(
+    ce,
+    args,
+    parseType(signature),
+    false,
+    false,
+    undefined,
+    stripMissing
+  );
   if (!validated) return args;
   return validated.map((v, i) =>
     !v.isValid && isLabelOperand(args[i]) ? args[i] : v
@@ -1629,6 +1722,15 @@ function boundKleene(
  * 5. Stored membership/exclusion facts, matched exactly (`isSame`).
  *
  * Returns `undefined` when membership is indeterminate (design §5.2).
+ *
+ * Before these steps: an element that holds a conditional value (`When`,
+ * `Which`) whose condition is not decided is indeterminate. The
+ * `Element`/`NotElement` call then stays unevaluated and gives the correct
+ * answer once the condition is decided. Before this rule, the `contains`
+ * handler compared the `When` node itself with the elements, so
+ * `Element(2{c}, [1, 2])` was `False`, and stayed `False` after `c` became
+ * true (user decision 2026-09-26: a search for an absent value finds
+ * nothing, and an undecided restricted value is held).
  */
 function membershipKleene(
   ce: ComputeEngine,
@@ -1637,6 +1739,7 @@ function membershipKleene(
   depth = 0
 ): boolean | undefined {
   if (depth > 4) return undefined;
+  if (holdsConditionalValue(x)) return undefined;
 
   // 1. SetMinus query decomposition (signature is `(set, value*)`: trailing
   //    operands exclude their members when they are collections, themselves

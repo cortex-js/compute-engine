@@ -151,6 +151,12 @@ describe('compiled interval-js answers `singular` where the interpreter answers 
     expect(at('Cot', 0.1, 3).kind).toBe('interval');
     // The pole at 0 is exact: `cot` of a tiny angle is its large value.
     expect(at('Cot', 1e-13).kind).toBe('interval');
+    // Below the tolerance of the search too: the pole at 0 is inside only
+    // an interval that contains 0.
+    expect(at('Cot', 1e-16).kind).toBe('interval');
+    expect(at('Csc', -1e-16).kind).toBe('interval');
+    expect(at('Csc', 1e-16, 1e-3).kind).toBe('interval');
+    expect(at('Cot', -1e-16, 1e-16)).toEqual({ kind: 'singular', at: 0 });
     // Above 2⁴⁰ the pole search cannot resolve a multiple of π at a point,
     // which is decided by its value, as the interpreter does. A wider
     // interval keeps the search: near 2⁴⁵ the doubles are 2⁻⁷ apart, so a

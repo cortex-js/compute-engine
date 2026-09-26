@@ -2398,10 +2398,11 @@ export function broadcastOverIndexedCollections(
  *
  * `callee` is the one-rank ARREST hook for a DECLARED `broadcastable<T>`
  * parameter (`docs/plans/2026-08-08-broadcastable-param-semantics.md`, rule 2):
- * the body becomes `Apply(⟨literal⟩, …)` instead of `operator(…)`, and `Apply`
- * binds every argument WHOLE — so a nested-collection element is passed to the
- * function intact instead of re-entering the broadcast gate by name and
- * descending another rank. Without it a lazified declared broadcast would
+ * the body becomes `ApplyWhole(⟨literal⟩, …)` instead of `operator(…)`, and
+ * `ApplyWhole` binds every argument WHOLE — so a nested-collection element is
+ * passed to the function intact instead of re-entering the broadcast gate by
+ * name and descending another rank. (`Apply` would not do: it maps a function
+ * literal with scalar parameters over a collection argument.) Without it a lazified declared broadcast would
  * disagree with the eager one purely because of the source's SIZE.
  *
  * `paramTypes` is the same declaration's rule 3, per element: the mapping
@@ -2464,8 +2465,12 @@ export function lazyBroadcastMap(
     }
   }
 
+  // The per-element call of a `callee` binds its element WHOLE (the one-rank
+  // arrest): `ApplyWhole`, since `Apply` maps a function literal with scalar
+  // parameters over a collection element (`applyLiteralMaps`,
+  // `library/core.ts`).
   let body = callee
-    ? ce._fn('Apply', [callee, ...bodyArgs], { canonical: false })
+    ? ce._fn('ApplyWhole', [callee, ...bodyArgs], { canonical: false })
     : ce._fn(operator, bodyArgs, { canonical: false });
   // When a numeric approximation was requested (`.N()`), wrap each element's
   // body in `N(…)` so it floats on access — otherwise a lazy element would
@@ -2795,6 +2800,33 @@ export function repeat(
  */
 export function zipParticipates(x: Expression): boolean {
   return x.isCollection && !isTextAtom(x);
+}
+
+/**
+ * The rows of a broadcast over `items`: the items for which `participates`
+ * is true are zipped (shortest length wins, as in {@link zip}), and every
+ * other item is repeated WHOLE in each row, a tuple included. {@link zip}
+ * iterates every non-text collection, so a tuple beside a list was zipped
+ * too, and `f([1, 2, 3], (10, 20))` for a scalar-parameter `f` gave two rows
+ * `(1, 10), (2, 20)` instead of three rows each holding the whole point.
+ */
+export function zipBroadcast(
+  items: ReadonlyArray<Expression>,
+  participates: (x: Expression) => boolean
+): Iterator<Expression[]> {
+  const columns = items.filter(participates);
+  const inner = zip(columns);
+  return {
+    next() {
+      const { done, value } = inner.next();
+      if (done) return { done: true, value: undefined };
+      let k = 0;
+      return {
+        done: false,
+        value: items.map((x) => (participates(x) ? value[k++] : x)),
+      };
+    },
+  };
 }
 
 /**
@@ -3516,4 +3548,55 @@ export function isPointListArgumentType(arg: Type, param: Type): boolean {
   const e = stripMissingFromType(element);
   if (e === 'never') return false;
   return isSubtype(e, param);
+}
+
+/**
+ * True when `x` is a conditional value (`When`, `Which`), or a `List`,
+ * `Tuple` or `Set` that holds one at any depth.
+ *
+ * The search operators (`Contains`, `IndexOf`, `Count`, `Element`,
+ * `NotElement`) use it on the value they search for. If that value holds a
+ * conditional value whose condition is not decided, the search stays
+ * unevaluated, and gives the correct answer once the condition is decided
+ * (user decision 2026-09-26).
+ */
+export function holdsConditionalValue(x: Expression): boolean {
+  if (!isFunction(x)) return false;
+  const h = x.operator;
+  if (h === 'When' || h === 'Which') return true;
+  if (h !== 'List' && h !== 'Tuple' && h !== 'Set') return false;
+  return x.ops.some((op) => holdsConditionalValue(op));
+}
+
+/**
+ * True when the evaluated operand `value` is `NaN` only because it is a
+ * restricted number whose condition is false: `written`, the operand before
+ * evaluation, is a restriction `When(v, c)` whose condition evaluates to
+ * `False`, or a piecewise value `Which(c1, v1, c2, v2, …)` whose conditions
+ * all evaluate to `False`.
+ *
+ * A restricted number masks to `NaN`, not to `Missing` (`2{c}` is `NaN` when
+ * `c` is false). The evaluated value then cannot be told apart from a `NaN`
+ * that is present. The search operators use this test to read such a value
+ * as absent, which a search does not find (user decision 2026-09-26), while
+ * a `NaN` that is present is still found (`IndexOf([1, NaN], NaN)` is `2`).
+ */
+export function isMaskedAbsentNumber(
+  value: Expression,
+  written: Expression | undefined
+): boolean {
+  if (!isNumber(value) || value.isNaN !== true) return false;
+  if (!isFunction(written)) return false;
+  if (written.operator === 'When')
+    return (
+      written.nops === 2 && isSymbol(written.ops[1].evaluate(), 'False')
+    );
+  if (written.operator === 'Which')
+    return (
+      written.nops % 2 === 0 &&
+      written.ops.every(
+        (c, i) => i % 2 === 1 || isSymbol(c.evaluate(), 'False')
+      )
+    );
+  return false;
 }
