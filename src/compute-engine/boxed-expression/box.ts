@@ -20,7 +20,6 @@ import type {
 } from '../../math-json/types.js';
 import {
   hasMetaData,
-  machineValue,
   matchesNumber,
   matchesString,
   matchesSymbol,
@@ -31,9 +30,7 @@ import {
 import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
-import { isOne, isZero } from '../numerics/rationals.js';
-import { SMALL_INTEGER } from '../numerics/numeric.js';
-import type { Rational } from '../numerics/types.js';
+import { isOne } from '../numerics/rationals.js';
 import { asBigint } from './numerics.js';
 import { isExactDouble } from '../numerics/numeric-bignum.js';
 

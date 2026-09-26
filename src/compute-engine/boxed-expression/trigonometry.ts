@@ -302,7 +302,8 @@ function exactAngleParts(
     for (const [i, op] of x.ops.entries()) {
       const a = exactAngleParts(op, depth + 1);
       if (!a) return undefined;
-      let [ca, ta] = a;
+      const ca = a[0];
+      let ta = a[1];
       if (x.operator === 'Divide' && i === 1) {
         // Only a rational divisor keeps the angle in the form `c·π + t`.
         if (ca[0] !== 0n || ta[0] === 0n) return undefined;

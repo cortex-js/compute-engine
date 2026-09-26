@@ -654,19 +654,6 @@ a rational power other than `1/2` never reduces (`i^{3/2}`, `(3 + 4i)^{3/2}` =
 `2 + 11i` stays symbolic); an exact `p/2` power of a Gaussian integer would be a
 feature, not a defect.
 
-### Two `interval-js` collection tests fail at HEAD since `e5766b66` (OPEN, regression — found 2026-09-25)
-
-In `test/compute-engine/compile-interval-collections.test.ts`, "a whole-bound
-call takes an array argument (audit 0et6fx01id)" expects the lowering
-`_IA.bcast((_tv1) => _IA.sin(_tv1), _fn_P(_.x, _.y))` and receives
-`_IA.sin(_fn_P(_.x, _.y))`, and "a union that the broadcast does not admit
-fails closed at the kernel" expects a `broadcastable<number>` type in the
-decline and receives `(unknown, unknown) -> number`. Both pass at `76164595`
-and fail at `e5766b66` (Tycho items 319, 321, 323, 325: list arguments,
-comprehensions and arithmetic over unknown symbols), in a clean worktree with
-no other change. The call of a user function that returns a list is no longer
-seen as a collection by the interval lowering, or its declared type changed.
-
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 
 `Eigenvalues([[1, i, 0], [i, 2, 0], [0, 0, 3]])`, `Eigenvectors` of it,

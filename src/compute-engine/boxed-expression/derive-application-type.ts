@@ -9,7 +9,10 @@ import { reduceType } from '../../common/type/reduce.js';
 import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
-import { isTupleShapedType } from '../collection-utils.js';
+import {
+  isTupleShapedType,
+  typeCouldBeUnkeyedCollection,
+} from '../collection-utils.js';
 import type { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
@@ -17,7 +20,6 @@ import {
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
-import { typeCouldBeUnkeyedCollection } from '../collection-utils.js';
 import { guardedTypeHandlerCall } from './operand-descriptor.js';
 import {
   instantiatedResultTypeOverActuals,

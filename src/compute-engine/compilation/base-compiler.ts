@@ -23594,7 +23594,11 @@ export class BaseCompiler {
     i: number
   ): boolean {
     const def = engine.lookupDefinition(h);
-    if (def !== undefined && isOperatorDef(def) && def.operator.inferredSignature)
+    if (
+      def !== undefined &&
+      isOperatorDef(def) &&
+      def.operator.inferredSignature
+    )
       return true;
     const declared = BaseCompiler.userFunctionParamType(engine, h, i);
     if (

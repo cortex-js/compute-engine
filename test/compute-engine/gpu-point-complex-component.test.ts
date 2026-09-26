@@ -356,14 +356,18 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       compiles: ['strict'],
     },
     {
-      // The call types `broadcastable<number>` (from the generic body), and
-      // an addition over such an operand has no complex lowering: it fails
-      // closed. Before, it answered `"1[object Object]2[object Object]…"`.
+      // The call is compiled through a definition of `p` specialized to the
+      // argument's type (Tycho item 323), so its body is not inlined where
+      // the index `k` would capture the body's `k`, and the sum adds the
+      // index to the complex value the helper returns. Before item 323 the
+      // call typed `broadcastable<number>` from the generic body, an addition
+      // over such an operand had no complex lowering, and the case failed
+      // closed (earlier still, it answered `"1[object Object]2…"`).
       name: 'parse route: \\sum_{k=1}^{3} (k + p((x, 1)))',
       build: (ce) => ce.parse('\\sum_{k=1}^{3} (k + p((x, 1)))'),
       vars: { x: 2 },
       expected: { re: 12, im: 3 },
-      compiles: [],
+      compiles: ['strict', 'auto'],
     },
     {
       name: 'parse route: \\sum_{k=1}^{3} q((x, k)), the index in the point',
@@ -395,7 +399,8 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       compiles: ['strict', 'auto'],
     },
     {
-      // Fails closed for the reason stated for `k + p((x, 1))` above.
+      // Compiles for the reason stated for `k + p((x, 1))` above: the
+      // specialized helper keeps the block's `k` apart from the body's.
       name: 'box route: a Block local k beside p((x, 1))',
       build: (ce) =>
         ce.box([
@@ -406,7 +411,7 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
         ]),
       vars: { x: 2 },
       expected: { re: 4, im: 1 },
-      compiles: [],
+      compiles: ['strict', 'auto'],
     },
     {
       // The inlined body is compiled at the call site, where the index `k`

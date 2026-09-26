@@ -1,8 +1,12 @@
 import { BigDecimal } from '../../big-decimal/index.js';
-import { MACHINE_PRECISION } from '../numerics/numeric.js';
 
 import { Rational, SmallInteger } from '../numerics/types.js';
-import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric.js';
+import {
+  canonicalInteger,
+  gcd,
+  MACHINE_PRECISION,
+  SMALL_INTEGER,
+} from '../numerics/numeric.js';
 import { bigintNthRoot } from '../numerics/bigint.js';
 import {
   isOne,

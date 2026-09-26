@@ -236,10 +236,12 @@ describe('Interval target — collection values across a user-function boundary'
     // literal [x, y] is an array argument. sin(P(x, y)) is a scalar.
     const ce = engine();
     const { code, out } = run(ce, '\\sin(P(x, y))', { x: pt(0.3), y: pt(0.7) });
-    // The call returns `broadcastable<number>` (its body reads wide
-    // parameters), so the kernel over it broadcasts: the scalar the call
-    // answers at run time is applied to directly.
-    expect(code).toBe('_IA.bcast((_tv1) => _IA.sin(_tv1), _fn_P(_.x, _.y))');
+    // The call returns `number`: a call of a whole-list function is typed
+    // from its body with the parameters typed as the arguments (Tycho item
+    // 323), so the kernel applies to it directly. Before, the call returned
+    // `broadcastable<number>` from the generic body and the kernel broadcast
+    // over it (`_IA.bcast((_tv1) => _IA.sin(_tv1), _fn_P(_.x, _.y))`).
+    expect(code).toBe('_IA.sin(_fn_P(_.x, _.y))');
     const want = ce.parse('\\sin(P(x, y))').subs({ x: 0.3, y: 0.7 }).N().re;
     expectEncloses(out, want);
   });
@@ -909,12 +911,15 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     // answer one `'maybe'` for an array.
     declines(ce, ['Less', 'U', 3], /may be a collection at run time/);
     declines(ce, ['Less', ['PointY', 'v'], 3], /may be a collection at run time/);
-    // A head that does not broadcast on this target — a relation — keeps its
-    // scalar lowering over a `broadcastable<number>` operand: the implicit
-    // plot of a helper returning that type is a scalar comparison at run time.
+    // A helper whose parameters are lists is typed from its arguments (Tycho
+    // item 323): `P` returns `number`, and the implicit plot of it is a
+    // scalar comparison at run time. (Before item 323 the call returned
+    // `broadcastable<number>` from the generic body, and a relation, a head
+    // that does not broadcast on this target, kept its scalar lowering over
+    // that operand.)
     ce.parse('d(a, b) := a[1] b[1] + a[2] b[2]').evaluate();
     ce.parse('P(x, y) := d([x, y], [x, y])').evaluate();
-    expect(ce.box('P').type.toString()).toContain('broadcastable<number>');
+    expect(ce.box('P').type.toString()).toBe('(unknown, unknown) -> number');
     const plot = compile(ce.parse('P(x, y) < 1'), {
       to: 'interval-js',
       fallback: false,
