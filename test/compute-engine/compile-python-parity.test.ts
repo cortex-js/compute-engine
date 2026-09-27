@@ -410,24 +410,13 @@ const CASES: Case[] = [
     params: [],
     inputs: [{}],
   },
-  // A search for an absent value finds nothing (user decision 2026-09-26).
-  // `Missing` in a numeric position and a restricted number whose condition
-  // is false both compile to `nan`, which is the absence marker of a number.
-  // The compiled search reads the run-time value of the searched operand: a
-  // `None` or a `nan` is not found, whatever the list holds, so the structure
-  // of the searched operand does not matter.
-  {
-    name: 'index_of_absent',
-    expr: ['IndexOf', ['List', 1, 'Missing'], 'Missing'],
-    params: [],
-    inputs: [{}],
-  },
-  {
-    name: 'contains_absent',
-    expr: ['Contains', ['List', 1, 2], 'Missing'],
-    params: [],
-    inputs: [{}],
-  },
+  // A search is structural (user decision 2026-09-26, `SEARCHED_VALUE_POLICY`
+  // in `library/collections.ts`): a restricted number whose condition is
+  // false is `nan`, and it is found where the list holds `nan`, as the
+  // interpreter finds it. The compiled element test is `_ce_same`, whose
+  // float leaf reads `nan` as the same as `nan`. A needle that may be the
+  // OBJECT-domain absence `Missing` does not compile on this target (it would
+  // spell as `nan` too); see `compile-python.test.ts`.
   {
     name: 'index_of_restricted',
     expr: ['IndexOf', ['List', 1, 'NaN', 2], ['When', 2, ['Less', 0, 'x']]],
@@ -443,24 +432,6 @@ const CASES: Case[] = [
   {
     name: 'element_restricted',
     expr: ['Element', ['When', 1, ['Less', 0, 'x']], ['List', 1, 'NaN']],
-    params: ['x'],
-    inputs: [{ x: -1 }, { x: 2 }],
-  },
-  {
-    name: 'index_of_piecewise',
-    expr: ['IndexOf', ['List', 1, 'NaN'], ['Which', ['Less', 0, 'x'], 1]],
-    params: ['x'],
-    inputs: [{ x: -1 }, { x: 2 }],
-  },
-  {
-    // The absent branch of an `If` compiles to `nan`. Before, the search
-    // tested only for `None`, and found the `nan` of the list (3 for 0).
-    name: 'index_of_if_absent_branch',
-    expr: [
-      'IndexOf',
-      ['List', 1, 'NaN', 2],
-      ['If', ['Less', 0, 'x'], 2, 'Missing'],
-    ],
     params: ['x'],
     inputs: [{ x: -1 }, { x: 2 }],
   },

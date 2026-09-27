@@ -167,17 +167,53 @@
   same applies to `Second`, `Third`, `Last` and `At`, and to compiled Python.
   A row, a point or a string read from an absent collection is still
   `Missing`: `At([[1,2],[3,4]]{0<t}, 2)` is `Missing`.
-- **Searching for an absent value finds nothing.** `Contains(L, Missing)` was
-  `Missing` and is `False`; `IndexOf` and `Count` were `NaN` and are `0`;
-  `Element` agrees. A restricted value whose condition is undecided,
+- **A search is structural: an absent value is found where the same marker
+  sits.** `Contains`, `IndexOf`, `Element`, `NotElement` and `Count(xs, v)`
+  compare by structural identity, the test `Unique` and `Set` already use, so
+  `IndexOf([1, NaN], NaN)` is `2`, `Contains([1, Missing], Missing)` is
+  `True`, `Element(NaN, [1, NaN])` is `True` and `Count([NaN, NaN], NaN)` is
+  `2`. A marker cell matches only the same marker: `Contains([1, Missing], 5)`
+  is `False`, `IndexOf([1, NaN], Missing)` is `0`, and `Missing` is not found
+  where `Undefined` sits. The searched value is read as a value, so a
+  restricted number whose condition is false, `2{c}`, is `NaN` and is found
+  where the list holds `NaN`, while a `Which` with no selected branch is
+  `Missing` and is not. A restricted value whose condition is undecided,
   `Contains([1,2], 2{c})`, stays held and gives the right answer once `c` is
-  decided (it was held as `Missing` or `NaN` whatever `c` became). Compiled
-  JavaScript and Python give the same answers. `NaN` is the absence marker of
-  a number, so a `NaN` value is not found either: `IndexOf([1, NaN], NaN)`
-  was `2` and is `0`, and `Contains([NaN], NaN)` is `False`. The answer
-  depends on the value of the searched expression, not on how it is written,
-  so a derived value such as `First([5,6]{c})` with `c` false is not found
-  either.
+  decided (it was held as `Missing` or `NaN` whatever `c` became). Before,
+  `Contains(L, Missing)` was `Missing` and `IndexOf(L, Missing)` was `NaN`,
+  which made a `Which` on a search take no branch. Compiled JavaScript agrees
+  (`includes` and the `IndexOf` element test are SameValueZero) and refuses a
+  searched value that may be a computed absence, which it spells as `NaN`;
+  Python agrees for a `NaN` value and refuses a value that may be `Missing`,
+  which it spells as `nan` too. A literal `NaN` membership is also decided at
+  the type level: `Element(NaN, [1, NaN])` is typed `true` (it was `false`,
+  and compiled to a literal `false`). Membership and comparison stay different
+  questions: `NaN = NaN` is `False` and `Equal([1, Missing], [1, 5])` is
+  `Missing`. The rules for the three markers in every collection operator are
+  in `docs/ERROR-MODEL.md` §3, "Absent values in collection operators".
+- **A predicate that answers `Missing` for an absent element does not select
+  it, and `Any`/`All` combine such answers by Kleene logic.** `Filter([1,
+  Missing, 3], x ↦ x > 0)` is `[1, 3]` and `Count([1, Missing, 3], x ↦ x > 0)`
+  is `2`, the rule of a database `WHERE` clause; `CountIf`, `Position`,
+  `IndexWhere` and `Find` agree, and `Partition` puts the element in the
+  false group. `Any([1, Missing], x ↦ x > 2)` and `All([1, Missing, 3], x ↦
+  x > 0)` are `Missing`, while `Any([1, Missing, 3], x ↦ x > 2)` is `True`
+  and `All([1, Missing, -1], x ↦ x > 0)` is `False`, the table of `Or` and
+  `And`. Before, `Count` threw "Filter predicate must return True or False",
+  `Filter` returned that message as its value, and `Any`/`All` stayed
+  unevaluated. A `NaN` element compares `False` and is unchanged. Compiled
+  `Any`/`All` over a collection whose element type has a `missing` arm are
+  refused on JavaScript and Python, since `some`/`every` cannot answer
+  `Missing`.
+- **`Append([1], Missing)` is `[1, Missing]`.** It was an `incompatible-type`
+  error while `Append([1], Undefined)`, `Append([1], NaN)` and
+  `Insert([1], 1, Missing)` kept the cell. The parameter now admits `missing`.
+- **A product or sum over a ranged type with a `missing` arm is typed
+  `number`.** With `y: integer<1..3> | missing`, `2y` was typed
+  `integer<2..6>` although its value can be `NaN`; it is `number`, as `2z`
+  with `z: integer | missing` already was. The same fix types
+  `Map(x ↦ 2x, [1, Missing, 3])` as `list<number>` (it claimed
+  `list<integer<2..6>>` for a value that holds `NaN`).
 - **`Element` waits when an unknown could still make a value a member.**
   `Element(x, [1, 2])` with `x` free was `False` and stays unevaluated until
   `x` has a value, as it already did for a `Set`; the same holds for a tuple

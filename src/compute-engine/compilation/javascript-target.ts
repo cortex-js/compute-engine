@@ -48,6 +48,7 @@ import {
 } from './constant-folding.js';
 import {
   collectionElementType,
+  functionResult,
   containsBroadcastableType,
   finitePartOfType,
   isNonRealNumber,
@@ -4625,11 +4626,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (isProvablyStringOperand(args[0])) {
       assertComparableAggregate('IndexOf', [args[1]]);
       return compileSearchedValue(
+        'IndexOf',
         args[1],
+        args[0],
         compile,
         (v) =>
-          `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${v})`,
-        '0'
+          `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${v})`
       );
     }
     // An AGGREGATE needle is invisible to the element test — `===` on two
@@ -4672,21 +4674,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // closed here — and needs no closing, since `===` is exact for every
     // element sort (see the boolean note below).
     //
-    // `_SYS.eqt` is the whole element test: strict `===` for every non-text
-    // pair, and conditioned (NFC, well-formed) content equality for a text
-    // pair, which is what the interpreter compares. A `NaN` or absent needle
-    // never reaches the test: `compileSearchedValue` answers 0 for it, as the
-    // interpreter does (a search never finds an absent value, and `NaN` is the
-    // absence marker of a number). BOOLEAN-ness needs no guard: `true === 1`
+    // `_SYS.eqt` is the whole element test: SameValueZero for every non-text
+    // pair (so a `NaN` needle is found where `NaN` sits, and an absent needle,
+    // `undefined`, where an absent cell sits, as the interpreter's structural
+    // search finds them), and conditioned (NFC, well-formed) content equality
+    // for a text pair, which is what the interpreter compares. BOOLEAN-ness
+    // needs no guard: `true === 1`
     // is false natively (it was an earlier tolerance leaf, `Math.abs(true - 1) <= tol`, that found
     // a boolean needle in a numeric haystack, and a numeric needle in a
     // boolean one, where the interpreter answers 0).
     return compileSearchedValue(
+      'IndexOf',
       args[1],
+      args[0],
       compile,
-      (v) =>
-        `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${v})`,
-      '0'
+      (v) => `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${v})`
     );
   },
   // Higher-order: the mapping/predicate operand is compiled as a lambda
@@ -4957,20 +4959,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // bound to a compiled parameter must be found in a haystack of precomposed
     // literals — which `includes` misses, since the two are different
     // code-unit sequences. `_SYS.eqt` is the same element test `IndexOf` uses,
-    // and it falls back to strict `===` for every non-text pair. A `NaN` or
-    // absent needle never reaches the test (`compileSearchedValue`).
+    // and it falls back to SameValueZero for every non-text pair, so a `NaN`
+    // or absent needle is found where the same marker sits, as `includes`
+    // finds it (`compileSearchedValue`).
     if (hasPossiblyTextElements(args[0]) || isProvablyTextOperand(args[1]))
       return compileSearchedValue(
+        'Contains',
         args[1],
+        args[0],
         compile,
-        (v) => `((_v) => (${coll}).some((_x) => _SYS.eqt(_x, _v)))(${v})`,
-        'false'
+        (v) => `((_v) => (${coll}).some((_x) => _SYS.eqt(_x, _v)))(${v})`
       );
     return compileSearchedValue(
+      'Contains',
       args[1],
+      args[0],
       compile,
-      (v) => `(${coll}).includes(${v})`,
-      'false'
+      (v) => `(${coll}).includes(${v})`
     );
   },
   // Unique elements in first-occurrence order (`Set` preserves insertion
@@ -5140,6 +5145,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`Any\`: only the predicate form compiles.`
       );
+    refuseKleeneQuantifier('Any', args[0], args[1]);
     return `((_f) => (${coll}).some((_x) => _f(_x)))(${fnArg('Any', args[1], args[0], compile, [], target)})`;
   },
   All: (args, compile, target) => {
@@ -5148,6 +5154,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`All\`: only the predicate form compiles.`
       );
+    refuseKleeneQuantifier('All', args[0], args[1]);
     return `((_f) => (${coll}).every((_x) => _f(_x)))(${fnArg('All', args[1], args[0], compile, [], target)})`;
   },
   // Longest prefix satisfying the predicate / the rest after that prefix.
@@ -5289,12 +5296,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `Element`: missing argument');
     requirePrimitiveElements('Element', args[1]);
     const coll = collArg('Element', args[1], compile);
-    // An absent value is not an element (see `compileSearchedValue`).
+    // An absent value is an element where the same marker sits (see
+    // `compileSearchedValue`).
     return compileSearchedValue(
+      'Element',
       args[0],
+      args[1],
       compile,
-      (v) => `(${coll}).includes(${v})`,
-      'false'
+      (v) => `(${coll}).includes(${v})`
     );
   },
   Identity: (args, compile, target) => {
@@ -10085,16 +10094,21 @@ function conditionText(x: unknown): string {
 /**
  * The interpreter's element/scalar equality for text: two strings are equal
  * when their CONDITIONED content is identical (see {@link conditionText}), and
- * anything else falls back to strict identity.
+ * anything else falls back to SameValueZero, the test of `includes`: strict
+ * identity, except that `NaN` is the same as `NaN`.
  *
- * The fallback keeps every non-text shape byte-for-byte as it was: a number, a
- * boolean and an array compare exactly as `===` did, and a string paired with a
+ * The fallback keeps every non-text shape as it was: a number, a boolean and
+ * an array compare exactly as `===` does, and a string paired with a
  * non-string is `false` either way (`Equal("1", 1)` is `False` in the
- * interpreter). Only a string/string pair changes, and only when one side is
- * not already NFC.
+ * interpreter). The one addition is the `NaN` pair, which is the interpreter's
+ * own structural verdict (`isSame`): `IndexOf([1, NaN], NaN)` is `2` there,
+ * so the compiled element test of `IndexOf` and the sequence-search family
+ * must find it too (user decision 2026-09-26, `SEARCHED_VALUE_POLICY` in
+ * `library/collections.ts`).
  */
 function eqText(a: unknown, b: unknown): boolean {
-  if (typeof a !== 'string' || typeof b !== 'string') return a === b;
+  if (typeof a !== 'string' || typeof b !== 'string')
+    return a === b || (a !== a && b !== b);
   return conditionText(a) === conditionText(b);
 }
 
@@ -14411,43 +14425,113 @@ function collArg(
  * (`docs/STRING_ROADMAP.md`, decision D13.)
  */
 /**
- * True when the searched value `needle` can be absent at run time: its type
- * has a `missing` arm, or it can be a number, which can be `NaN`. A needle
- * that is provably a string, a boolean, a tuple or a list cannot be absent,
- * so its search needs no run-time test.
+ * Compile the search of `Contains`, `IndexOf` or `Element` for the searched
+ * value `needle`. The search is STRUCTURAL, as in the interpreter: a marker is
+ * found where the same marker sits (user decision 2026-09-26,
+ * `SEARCHED_VALUE_POLICY` in `library/collections.ts`). A `NaN` needle is
+ * found in a list that holds `NaN`, and a written `Missing`, which lowers to
+ * `undefined`, is found where a written `Missing` sits. The element tests the
+ * lowerings emit are SameValueZero: `includes`, and `_SYS.eqt` (see `eqText`),
+ * so no run-time absence test is needed. `search(v)` emits the search for the
+ * compiled value `v`.
+ *
+ * A needle that may be a COMPUTED NUMERIC absence — its type has a `missing`
+ * arm beside a numeric arm, and it is not the written symbol — fails closed.
+ * The interpreter keeps `Missing` apart from `NaN`, so
+ * `IndexOf([1, NaN], Which(c, 1))` is `0` when no branch is selected; this
+ * target spells an unselected numeric `Which` as `NaN`, and the compiled
+ * search would find it at position 2. The written symbol keeps compiling: it
+ * lowers to `undefined`, which is a different value from `NaN` here too. So
+ * does a needle whose present arms are not numeric (`character | missing`, a
+ * character read that may be out of range): its absence lowers to
+ * `undefined`, never to `NaN`, so the element test stays faithful.
+ * (`pySearchedValue` is the Python counterpart, which must also refuse the
+ * written symbol.)
+ *
+ * The written symbol is refused in one case: when the COLLECTION's element
+ * type has a `missing` arm. `Missing` and `Undefined` both lower to
+ * `undefined` here, while the interpreter keeps them apart
+ * (`IndexOf([1, Missing], Undefined)` is `0`, since `Unique([Missing,
+ * Undefined])` keeps both), so a written symbol searched in a list that may
+ * hold either one could be found where the other sits. Against a list whose
+ * elements cannot be absent the written symbol is never found on either
+ * route, and compiles.
  */
-function canBeAbsentAtRunTime(needle: Expression): boolean {
+function compileSearchedValue(
+  operator: string,
+  needle: Expression,
+  collection: Expression | undefined,
+  compile: (expr: Expression) => string,
+  search: (v: string) => string
+): string {
   const t = resolveTypeForCompilation(needle.type.type);
-  return typeContainsMissing(t) || couldMatch(t, 'number');
+  const written = isSymbol(needle, 'Missing') || isSymbol(needle, 'Undefined');
+  if (
+    !written &&
+    typeContainsMissing(t) &&
+    couldMatch(stripMissingFromType(t), 'number')
+  )
+    throw new Error(
+      `Could not compile \`${operator}\`: the searched value may be a computed absence (\`Missing\`), ` +
+        `which this target may spell as \`NaN\` and would then find where a \`NaN\` element sits. ` +
+        `The interpreter evaluates it instead.`
+    );
+  if (written && collectionMayHoldAbsentCell(collection))
+    throw new Error(
+      `Could not compile \`${operator}\`: the searched value is \`${needle.toString()}\` and an element ` +
+        `of the collection may be absent; this target spells \`Missing\` and \`Undefined\` alike, ` +
+        `where the interpreter keeps them apart. The interpreter evaluates it instead.`
+    );
+  return search(compile(needle));
+}
+
+/** True when the element type of `collection` has a `missing` arm, so a cell
+ * may be `Missing` or `Undefined` at run time. */
+export function collectionMayHoldAbsentCell(
+  collection: Expression | undefined
+): boolean {
+  if (collection === undefined) return false;
+  const elt = collectionElementType(
+    resolveTypeForCompilation(collection.type.type)
+  );
+  return elt !== undefined && typeContainsMissing(elt);
 }
 
 /**
- * Compile the search of `Contains`, `IndexOf` or `Element` for the searched
- * value `needle`, so that an absent searched value is not found (user
- * decision 2026-09-26): the answer is then `notFound` (`false` or `0`), as in
- * the interpreter. `search(v)` emits the search for the compiled value `v`.
- *
- * The searched value is absent when its run-time value is `undefined` or
- * `null` (the absence markers of the compiled code) or `NaN` (the absence
- * marker of a number: a restriction `v{c}` whose condition is false compiles
- * to `NaN`). The test is on the run-time value, not on the structure of the
- * needle, so a restriction, a piecewise value, an element read and an
- * arithmetic result all give the same answer as the interpreter
- * (`isAbsentSearchedValue`, `collection-utils.ts`). Because the test is done
- * first, the element test never sees a `NaN` or an absent needle, and an
- * absent or `NaN` element of the collection is never matched.
+ * Fail closed for `Any`/`All` when a predicate answer may be absent: the
+ * collection's elements may be absent (an element type with a `missing` arm,
+ * on which a comparison answers `Missing`), or the predicate's own result type
+ * has a `missing` arm (`x ↦ If(x > 0, Missing, False)` over present
+ * elements). The interpreter combines such answers by Kleene logic, so
+ * `Any([1, Missing], x ↦ x > 2)` is `Missing` (user decision 2026-09-26,
+ * `evaluateQuantifier` in `library/collections.ts`). The compiled predicate
+ * has no third value: an absent element lowers to `undefined`, `undefined > 2`
+ * is `false`, and `some`/`every` would answer a confident `false` where the
+ * interpreter is undecided. A `NaN` element needs no refusal: it compares
+ * `false` in both. `Filter`, `CountIf`, `Position`, `IndexWhere` and `Find`
+ * need none either, since there "not decidedly true" is "not selected" on
+ * both routes (`selectionVerdict`, `library/collections.ts`). Shared by the
+ * JavaScript and Python targets.
  */
-function compileSearchedValue(
-  needle: Expression,
-  compile: (expr: Expression) => string,
-  search: (v: string) => string,
-  notFound: string
-): string {
-  if (isSymbol(needle, 'Missing') || isSymbol(needle, 'Undefined'))
-    return notFound;
-  const v = compile(needle);
-  if (!canBeAbsentAtRunTime(needle)) return search(v);
-  return `((_n) => (_n == null || _n !== _n ? ${notFound} : ${search('_n')}))(${v})`;
+export function refuseKleeneQuantifier(
+  operator: string,
+  collection: Expression | undefined,
+  predicate: Expression | undefined
+): void {
+  if (collectionMayHoldAbsentCell(collection))
+    throw new Error(
+      `Could not compile \`${operator}\`: an element of the collection may be absent (\`Missing\`), ` +
+        `and the interpreter then answers \`Missing\` by Kleene logic, which the compiled ` +
+        `\`some\`/\`every\` cannot. The interpreter evaluates it instead.`
+    );
+  if (predicate === undefined) return;
+  const result = functionResult(resolveTypeForCompilation(predicate.type.type));
+  if (result !== undefined && typeContainsMissing(result))
+    throw new Error(
+      `Could not compile \`${operator}\`: the predicate may answer \`Missing\`, which the interpreter ` +
+        `combines by Kleene logic and the compiled \`some\`/\`every\` cannot. ` +
+        `The interpreter evaluates it instead.`
+    );
 }
 
 function elementsArg(

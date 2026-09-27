@@ -388,24 +388,32 @@ describe('The stored value of Insert and ReplaceAt is not threaded', () => {
 });
 
 describe('A search for a restricted value', () => {
-  // A search for an absent value finds nothing (user decision 2026-09-26).
   // The searched value is not threaded: with `t` free the application stays
-  // unevaluated, and it gives the "not found" answer once the condition
-  // fails, on every route. Before, the held value was `When(Contains(…), c)`,
-  // which became `Missing` (or `NaN` for `IndexOf` and `Count`) when `c`
-  // failed, while a fresh evaluation gave `False` (or `0`).
+  // unevaluated, and once the condition is decided the search runs on the
+  // VALUE the operand then has, on every route (user decision 2026-09-26).
+  // Before, the held value was `When(Contains(…), c)`, which became `Missing`
+  // (or `NaN` for `IndexOf` and `Count`) when `c` failed, while a fresh
+  // evaluation gave `False` (or `0`).
+  //
+  // A restricted number whose condition fails is `NaN`, and the search is
+  // structural (rule C of
+  // `docs/plans/2026-09-26-absent-values-in-collection-operators.md`): that
+  // `NaN` is found where the list holds `NaN`, as `IndexOf([1, NaN], NaN)`
+  // is `2`. This is the numeric-domain conflation of `docs/ERROR-MODEL.md`
+  // §1, in which a number cannot tell "no datum" from "no answer".
   const L = ['List', 1, 2, 2];
-  // A list that holds `NaN`: a restricted number whose condition fails is
-  // `NaN`, and that `NaN` must not be found.
   const LN = ['List', 1, 'NaN'];
   test.each([
     [['Contains', L, W(2)], 'Contains([1,2,2], 2 {0 < t})', '"True"', '"False"'],
     [['IndexOf', L, W(2)], 'IndexOf([1,2,2], 2 {0 < t})', '2', '0'],
     [['Count', L, W(2)], 'Count([1,2,2], 2 {0 < t})', '2', '0'],
-    [['Contains', LN, W(1)], 'Contains([1,NaN], 1 {0 < t})', '"True"', '"False"'],
-    [['Contains', LN, W(2)], 'Contains([1,NaN], 2 {0 < t})', '"False"', '"False"'],
-    [['IndexOf', LN, W(2)], 'IndexOf([1,NaN], 2 {0 < t})', '0', '0'],
-    [['Count', LN, W(2)], 'Count([1,NaN], 2 {0 < t})', '0', '0'],
+    [['Contains', LN, W(1)], 'Contains([1,NaN], 1 {0 < t})', '"True"', '"True"'],
+    [['Contains', LN, W(2)], 'Contains([1,NaN], 2 {0 < t})', '"False"', '"True"'],
+    [['IndexOf', LN, W(2)], 'IndexOf([1,NaN], 2 {0 < t})', '0', '2'],
+    [['Count', LN, W(2)], 'Count([1,NaN], 2 {0 < t})', '0', '1'],
+    // A `Which` with no selected branch is `Missing`, not `NaN`: the two
+    // markers are different expressions, so it is not found where `NaN`
+    // sits.
     [
       ['IndexOf', LN, ['Which', c, 1]],
       'IndexOf([1,NaN], Which(0 < t, 1))',
@@ -422,12 +430,12 @@ describe('A search for a restricted value', () => {
       '"False"',
       '"True"',
     ],
-    [['Element', W(2), LN], 'Element(2 {0 < t}, [1,NaN])', '"False"', '"False"'],
+    [['Element', W(2), LN], 'Element(2 {0 < t}, [1,NaN])', '"False"', '"True"'],
     [
       ['NotElement', W(2), LN],
       'NotElement(2 {0 < t}, [1,NaN])',
       '"True"',
-      '"True"',
+      '"False"',
     ],
   ])('%j', (json, free, present, absent) => {
     expect(value(json)).toBe(free);
@@ -445,48 +453,49 @@ describe('A search for a restricted value', () => {
     }
   });
 
-  test('a NaN value is not found', () => {
-    // In a numeric domain `NaN` is the absence marker, so a search for `NaN`
-    // finds nothing, also in a list that holds `NaN`. Before, a `NaN` that
-    // was written as `NaN` was found (`IndexOf([1, NaN], NaN)` was `2`).
-    expect(value(['IndexOf', LN, W('NaN')], 2)).toBe('0');
-    expect(value(['IndexOf', LN, W('NaN')], -1)).toBe('0');
-    expect(value(['IndexOf', LN, 'NaN'])).toBe('0');
-    expect(value(['Contains', ['List', 'NaN'], 'NaN'])).toBe('"False"');
-    expect(value(['Count', ['List', 'NaN', 'NaN'], 'NaN'])).toBe('0');
-    expect(value(['Element', 'NaN', LN])).toBe('"False"');
-    expect(value(['NotElement', 'NaN', LN])).toBe('"True"');
+  test('a NaN value is found where NaN sits', () => {
+    // The search is structural: `NaN` is the same expression as `NaN`, so a
+    // `NaN` needle is found in a list that holds `NaN`, whether it was
+    // written as `NaN` or is a restricted number whose condition failed.
+    expect(value(['IndexOf', LN, W('NaN')], 2)).toBe('2');
+    expect(value(['IndexOf', LN, W('NaN')], -1)).toBe('2');
+    expect(value(['IndexOf', LN, 'NaN'])).toBe('2');
+    expect(value(['Contains', ['List', 'NaN'], 'NaN'])).toBe('"True"');
+    expect(value(['Count', ['List', 'NaN', 'NaN'], 'NaN'])).toBe('2');
+    expect(value(['Element', 'NaN', LN])).toBe('"True"');
+    expect(value(['NotElement', 'NaN', LN])).toBe('"False"');
   });
 
   // The answer depends only on the VALUE of the searched operand, not on how
-  // it is written. Before, the absence was read from the written operand, so
-  // a value that became `NaN` through another operator was found in a list
-  // that holds `NaN`, and a nested selection was found by the interpreter but
-  // not by the compiled code.
+  // it is written: a value that becomes `NaN` through another operator is
+  // found in a list that holds `NaN`, on the interpreter and in compiled
+  // code alike. A value that becomes `Missing` (the absent branch of an
+  // `If`) is not found where `NaN` sits: the two markers are different
+  // expressions.
   test.each([
     [
       'a nested selection',
       ['IndexOf', ['List', 'NaN', 2], ['Which', 'True', W(2)]],
       '2',
-      '0',
+      '1',
     ],
     [
       'the first element of a restricted list',
       ['Contains', LN, ['First', W(['List', 5, 6])]],
       '"False"',
-      '"False"',
+      '"True"',
     ],
     [
       'an element read of a restricted list',
       ['Contains', LN, ['At', W(['List', 5, 6]), 1]],
       '"False"',
-      '"False"',
+      '"True"',
     ],
     [
       'a sum with a restricted term',
       ['Contains', LN, ['Add', W(5), 1]],
       '"False"',
-      '"False"',
+      '"True"',
     ],
     [
       'a conditional with an absent branch',
@@ -510,12 +519,15 @@ describe('A search for a restricted value', () => {
   });
 
   test('the condition of the searched value is evaluated once', () => {
-    // Before, the condition was evaluated a second time to decide whether a
-    // `NaN` value was absent: with a random condition, the second draw could
-    // disagree with the first, and the search found the `NaN` of the list.
+    // The searched value is evaluated once and then searched for as it is:
+    // with a random condition, the answer is `1` (the failed restriction is
+    // `NaN`, found at position 1) or `0` (the value `2` is not in the list),
+    // never anything else. Before, the condition was evaluated a second time
+    // to decide whether the value was absent, and the two draws could
+    // disagree.
     const ce = new ComputeEngine();
     for (let i = 0; i < 20; i++)
-      expect(
+      expect(['0', '1']).toContain(
         ce
           .box([
             'IndexOf',
@@ -524,16 +536,17 @@ describe('A search for a restricted value', () => {
           ] as never)
           .evaluate()
           .toString()
-      ).toBe('0');
+      );
   });
 
-  test('an absent value is not an element', () => {
+  test('an absent value is an element where the same marker sits', () => {
     for (const x of ['Missing', 'Undefined']) {
-      expect(value(['Element', x, ['List', 1, 2, x]])).toBe('"False"');
-      expect(value(['NotElement', x, ['List', 1, 2, x]])).toBe('"True"');
-      expect(value(['Contains', ['List', 1, 2, x], x])).toBe('"False"');
-      expect(value(['IndexOf', ['List', 1, 2, x], x])).toBe('0');
-      expect(value(['Count', ['List', x, x], x])).toBe('0');
+      expect(value(['Element', x, ['List', 1, 2, x]])).toBe('"True"');
+      expect(value(['NotElement', x, ['List', 1, 2, x]])).toBe('"False"');
+      expect(value(['Contains', ['List', 1, 2, x], x])).toBe('"True"');
+      expect(value(['IndexOf', ['List', 1, 2, x], x])).toBe('3');
+      expect(value(['Count', ['List', x, x], x])).toBe('2');
+      expect(value(['Contains', ['List', 1, 2], x])).toBe('"False"');
     }
     // An absent collection is not changed by the rule.
     expect(value(['Contains', 'Missing', 'Missing'])).toBe('"Missing"');
@@ -568,25 +581,42 @@ describe('A search for a restricted value', () => {
       return r.run!({ t } as never);
     };
     expect(run(['Contains', LN, W(1)], 2)).toBe(true);
-    expect(run(['Contains', LN, W(1)], -1)).toBe(false);
-    // The failed restriction compiles to `NaN`, which the element test finds
-    // in a list that holds `NaN` unless the absence is decided first.
-    expect(run(['IndexOf', LN, W(2)], -1)).toBe(0);
-    expect(run(['Contains', LN, W(2)], -1)).toBe(false);
-    expect(run(['IndexOf', LN, ['Which', c, 1]], 2)).toBe(1);
-    expect(run(['IndexOf', LN, ['Which', c, 1]], -1)).toBe(0);
-    expect(run(['IndexOf', LN, 'NaN'], -1)).toBe(0);
-    expect(run(['Contains', ['List', 'NaN'], 'NaN'], -1)).toBe(false);
-    expect(run(['Element', W(2), LN], -1)).toBe(false);
+    expect(run(['Contains', LN, W(1)], -1)).toBe(true);
+    // The failed restriction compiles to `NaN`, which the SameValueZero
+    // element test finds in a list that holds `NaN`, as the interpreter's
+    // structural search does.
+    expect(run(['IndexOf', LN, W(2)], -1)).toBe(2);
+    expect(run(['Contains', LN, W(2)], -1)).toBe(true);
+    expect(run(['IndexOf', LN, 'NaN'], -1)).toBe(2);
+    expect(run(['Contains', ['List', 'NaN'], 'NaN'], -1)).toBe(true);
+    expect(run(['Element', W(2), LN], -1)).toBe(true);
     expect(run(['Element', W(1), LN], 2)).toBe(true);
-    // The absence is read from the run-time value of the searched operand,
+    // The run-time value of the searched operand is what is searched for,
     // so its structure does not matter.
     const nested = ['IndexOf', ['List', 'NaN', 2], ['Which', 'True', W(2)]];
-    expect(run(nested, -1)).toBe(0);
+    expect(run(nested, -1)).toBe(1);
     expect(run(nested, 2)).toBe(2);
-    expect(run(['Contains', LN, ['Add', W(5), 1]], -1)).toBe(false);
-    expect(run(['Contains', LN, ['First', W(['List', 5, 6])]], -1)).toBe(false);
-    expect(run(['IndexOf', LN, ['If', c, 1, 'Missing']], -1)).toBe(0);
-    expect(run(['IndexOf', LN, ['If', c, 1, 'Missing']], 2)).toBe(1);
+    expect(run(['Contains', LN, ['Add', W(5), 1]], -1)).toBe(true);
+    expect(run(['Contains', LN, ['First', W(['List', 5, 6])]], -1)).toBe(true);
+    // A needle that may be a COMPUTED absence (a `Which` with no selected
+    // branch, an `If` with an absent branch: typed `integer | missing`) is
+    // not compiled. The interpreter keeps `Missing` apart from `NaN`, while
+    // this target spells an unselected numeric `Which` as `NaN` and would
+    // find it where `NaN` sits (`compileSearchedValue`).
+    const refused = (json: unknown): boolean => {
+      try {
+        const r = compile(ce.box(json as never), {
+          to: 'javascript',
+          fallback: false,
+        } as never);
+        return r.success === false;
+      } catch {
+        return true;
+      }
+    };
+    expect(refused(['IndexOf', LN, ['Which', c, 1]])).toBe(true);
+    expect(refused(['IndexOf', LN, ['If', c, 1, 'Missing']])).toBe(true);
+    expect(refused(['Contains', LN, ['Which', c, 1]])).toBe(true);
+    expect(refused(['Element', ['Which', c, 1], LN])).toBe(true);
   });
 });

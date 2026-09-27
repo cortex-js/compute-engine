@@ -1135,13 +1135,14 @@ describe('IndexOf element test is exact and boolean-aware (executed parity)', ()
       expr: ['IndexOf', ['List', { num: '1.5' }, 3], { num: '1.5' }],
       expected: 1,
     },
-    // NaN is the absence marker of a number, and a search never finds an
-    // absent value (user decision 2026-09-26): a NaN needle gives the
-    // not-found index 0 on every route, even when the list holds a NaN.
+    // The search is structural (user decision 2026-09-26, rule C of
+    // `docs/plans/2026-09-26-absent-values-in-collection-operators.md`): a
+    // NaN needle is found where the list holds a NaN, on every route. The
+    // compiled element test is SameValueZero (`_SYS.eqt`), not `===`.
     {
       name: 'NaN needle, NaN in haystack',
       expr: ['IndexOf', ['List', 'NaN', 3], 'NaN'],
-      expected: 0,
+      expected: 1,
     },
     {
       name: 'NaN needle, no NaN in haystack',

@@ -1217,6 +1217,16 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
           type: absorbNumericAbsence(e.type),
         })),
       };
+    // A RANGED or literal numeric type (`integer<1..3>`, `real<0..1>`) is a
+    // number, and an absent operand makes its value `NaN`, which no range
+    // admits: it widens to `number` exactly as the bare numeric primitives
+    // do in the string branch above. Without this arm `2·y` with
+    // `y: integer<1..3> | missing` was typed `integer<2..6>`, while the same
+    // product over `y: integer | missing` was `number`, and a `Map` of `2x`
+    // over `[1, Missing, 3]` claimed `list<integer<2..6>>` for a value that
+    // holds `NaN` (found 2026-09-26).
+    case 'numeric':
+      return 'number';
     default:
       return t;
   }

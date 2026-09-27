@@ -1886,16 +1886,75 @@ describe('PYTHON TARGET — the absence marker of an element read', () => {
   });
 });
 
-describe('PYTHON TARGET — the absent-needle test of a search', () => {
-  // A searched value that may be absent is tested at run time. The float
-  // test must accept `np.floating`: `np.float32` and `np.float16` are not
-  // subclasses of `float`, and a `nan` of those types is absent too.
-  test('the guard accepts NumPy floats', () => {
+describe('PYTHON TARGET — a search whose value may be Missing fails closed', () => {
+  // The search is structural, and this target spells a written `Missing` as
+  // `nan`, so it could not tell an absent needle from a `NaN` element where
+  // the interpreter keeps them apart (`IndexOf([1, NaN], Missing)` is `0`).
+  // A needle that is `Missing`, or whose type has a `missing` arm, is
+  // refused; a `NaN` needle compiles, and `_ce_same` finds it where `nan`
+  // sits (`pySearchedValue`).
+  test('a written Missing or a maybe-missing needle is refused', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('x', 'real');
-    const code = new PythonTarget().compile(
+    const target = new PythonTarget();
+    for (const expr of [
+      ['IndexOf', ['List', 1, 'NaN'], 'Missing'],
+      ['Contains', ['List', 1, 2], 'Undefined'],
+      [
+        'IndexOf',
+        ['List', 1, 'NaN', 2],
+        ['If', ['Less', 0, 'x'], 2, 'Missing'],
+      ],
+      ['IndexOf', ['List', 1, 'NaN'], ['Which', ['Less', 0, 'x'], 1]],
+      ['Element', 'Missing', ['List', 1, 2]],
+    ])
+      expect(() => target.compile(ce2.box(expr as never))).toThrow(
+        /may be the absent value `Missing`/
+      );
+  });
+
+  test('a numeric needle against a list that may hold Missing is refused', () => {
+    // An absent cell is spelled `nan` on this target, so a `NaN`-valued
+    // needle would be found where the interpreter answers 0
+    // (`IndexOf([1, Missing], NaN)`).
+    const ce2 = new ComputeEngine();
+    ce2.declare('x', 'real');
+    const target = new PythonTarget();
+    for (const expr of [
+      ['IndexOf', ['List', 1, 'Missing'], 'NaN'],
+      ['IndexOf', ['List', 1, 'Undefined'], 'x'],
+    ])
+      expect(() => target.compile(ce2.box(expr as never))).toThrow(
+        /an element of the collection may be absent/
+      );
+    // `Contains` and `Element` refuse such a list earlier, since they require
+    // primitive elements and a `missing` arm is not one.
+    for (const expr of [
+      ['Contains', ['List', 1, 'Undefined'], 'x'],
+      ['Element', 'x', ['List', 1, 'Missing']],
+    ])
+      expect(() => target.compile(ce2.box(expr as never))).toThrow();
+    // A text needle cannot be `NaN`, so it compiles against such a list.
+    expect(
+      target.compile(ce2.box(['IndexOf', ['List', "'a'", 'Missing'], "'b'"]))
+        .code
+    ).toContain('_ce_indexof(');
+  });
+
+  test('a NaN needle compiles through the structural element test', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('x', 'real');
+    const target = new PythonTarget();
+    const code = target.compile(
       ce2.box(['IndexOf', ['List', 1, 'NaN'], ['When', 'x', ['Less', 0, 'x']]])
     ).code;
-    expect(code).toContain('isinstance(_n, (float, np.floating)) and _n != _n');
+    expect(code).toContain('_ce_indexof([1, np.nan], ');
+    expect(code).not.toContain('_n != _n');
+    expect(
+      target.compile(ce2.box(['Contains', ['List', 1, 'NaN'], 'x'])).code
+    ).toContain('(_ce_indexof([1, np.nan], x) > 0)');
+    expect(
+      target.compile(ce2.box(['Element', 'x', ['List', 1, 'NaN']])).code
+    ).toContain('(_ce_indexof([1, np.nan], x) > 0)');
   });
 });

@@ -12,7 +12,6 @@ import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
-  isAbsentSymbol,
   isFunction,
   isNumber,
   isSymbol,
@@ -40,7 +39,6 @@ import {
   enumerableFromAllSources,
   enumerableFromSource,
   holdsConditionalValue,
-  isAbsentSearchedValue,
   shapeIncludedIn,
   typeSaturatedShape,
   typeSaturatedSubsetOf,
@@ -307,7 +305,13 @@ function sameLiteralValue(
     );
   const av = descriptorLiteralValue(a);
   const bv = descriptorLiteralValue(b);
-  if (av !== undefined && bv !== undefined) return av === bv;
+  // `NaN` is the same literal as `NaN`: membership is structural (`isSame`),
+  // so `Element(NaN, [1, NaN])` is `True` (user decision 2026-09-26,
+  // `SEARCHED_VALUE_POLICY` in `library/collections.ts`). The value type of
+  // `NaN` carries the double `NaN`, and `===` reads the pair as different,
+  // which proved `false` for a member that is present.
+  if (av !== undefined && bv !== undefined)
+    return av === bv || (av !== av && bv !== bv);
   // The two literals answer through different channels (an exact `1/3`
   // against the float `0.5`), so equality cannot be settled — but
   // DISEQUALITY still can. Equal values have equal nearest doubles, so two
@@ -736,11 +740,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // A restricted collection, `[1]{c}`, is threaded whole, as `Contains`
     // threads its collection: the answer is computed on the present
     // collection and is absent once `c` fails. The value (position 0) is not
-    // threaded: an absent value is not a member (user decision 2026-09-26).
+    // threaded: an undecided restricted value is held, and a decided absent
+    // value is an ordinary element to search for (user decision 2026-09-26).
     threadsConditionals: [1],
     // An absent collection makes the answer absent (`Missing`, the marker of
     // a boolean codomain), as for `Contains`. Only the collection strips
-    // `missing`: an absent value is simply not a member.
+    // `missing`: an absent value is a member where the same marker sits.
     missingBehavior: 'propagate',
     missingStrip: [1],
     type: (ops, context) =>
@@ -895,19 +900,11 @@ export const SETS_LIBRARY: SymbolDefinitions = {
             .evaluate();
       }
 
-      // An absent value (`Missing`, `Undefined` or `NaN`) is not an element
-      // of any collection, also of a collection that holds an absent element
-      // (user decision 2026-09-26, `isAbsentSearchedValue`). A restricted
-      // number whose condition is false is `NaN`, so it is not an element.
-      // An absent collection is not a collection that holds nothing, so the
-      // call is then left as it is, as `Element(2, Missing)` is.
-      if (
-        value !== undefined &&
-        isAbsentSearchedValue(value) &&
-        !isAbsentSymbol(collection)
-      )
-        return ce.False;
-
+      // An absent value (`Missing`, `Undefined` or `NaN`) is an ordinary
+      // element to search for: it is a member where the same marker sits,
+      // `Element(NaN, [1, NaN])` is `True` (user decision 2026-09-26,
+      // `SEARCHED_VALUE_POLICY` in `library/collections.ts`). An absent
+      // COLLECTION makes the answer absent through the missing gate.
       const result = membershipKleene(ce, value, collection);
       if (result === true) return ce.True;
       if (result === false) return ce.False;
@@ -943,9 +940,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     },
     evaluate: ([value, collection], { engine: ce }) => {
       if (!collection) return undefined;
-      // An absent value is not an element (see `Element`).
-      if (isAbsentSearchedValue(value) && !isAbsentSymbol(collection))
-        return ce.True;
+      // An absent value is an ordinary element to search for (see `Element`).
       const result = membershipKleene(ce, value, collection);
       if (result === true) return ce.False;
       if (result === false) return ce.True;
@@ -1746,8 +1741,7 @@ function boundKleene(
  * answer once the condition is decided. Before this rule, the `contains`
  * handler compared the `When` node itself with the elements, so
  * `Element(2{c}, [1, 2])` was `False`, and stayed `False` after `c` became
- * true (user decision 2026-09-26: a search for an absent value finds
- * nothing, and an undecided restricted value is held).
+ * true (user decision 2026-09-26: an undecided restricted value is held).
  */
 function membershipKleene(
   ce: ComputeEngine,

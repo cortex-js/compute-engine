@@ -442,6 +442,85 @@ numeric marker, because the whole-collection rule above must keep an absent
 cell distinct from a `NaN` one, and each target's numeric absence test
 therefore reads the object null as absent too (2026-09-22).
 
+**Absent values in collection operators: five rules** (user decisions of
+2026-09-26; the design record with the precedent for each rule is
+`docs/plans/2026-09-26-absent-values-in-collection-operators.md`; the tests are
+`test/compute-engine/collections-absent.test.ts`). "Absent cell" means an
+element that is `NaN`, `Missing` or `Undefined`; "absent collection" means the
+whole operand is `Missing` or `Undefined`. The rules rest on the two notions of
+"same" the engine already keeps apart: structural identity (`Same`, `isSame`),
+under which a marker is the same as itself, and value equality (`Equal`), under
+which `NaN` equals nothing and `Missing` compared with anything is `Missing`.
+
+- **A. Positional operators keep an absent cell in place.** `Length`, `Count`
+  of a collection, `Join`, `Append`, `Insert`, `Reverse`, `Take`, `Drop`,
+  `Zip`, `Sort`, `Unique`, `Tally`, `Map`, `At`, `First`, `Last`. An absent
+  cell is a position like any other: `Length([1, Missing, 3])` is `3`,
+  `Append([1], Missing)` is `[1, Missing]`, `Sort` puts absent cells last,
+  `Unique` and `Set` keep one absent cell (by structural identity, so
+  `Unique([Missing, Undefined])` keeps both), and `Map` applies the function
+  to the cell, which answers by its own absence rule (`Map(x ↦ 2x, [1,
+  Missing, 3])` is `[2, NaN, 6]`, typed `list<number>`). Only an explicit
+  removal shortens a collection: `Nothing` in a literal, or a `Filter` on
+  `IsMissing`.
+- **B. Aggregates propagate.** `Sum`, `Product`, `Mean`, `Median`, `Max`,
+  `Min`, the variance family, `Quantile`, `Reduce`: one absent cell makes the
+  aggregate the marker of its codomain, `NaN`. The empty collection answers
+  the identity (`Sum([])` is `0`), not a marker. Skipping is opt-in, by
+  removing the cells first.
+- **C. Search is structural: a marker is found where the same marker sits.**
+  `Contains`, `IndexOf`, `Element`, `NotElement`, `Count(xs, value)` compare
+  by structural identity, the notion `Unique`, `Set` and `Tally` use.
+  `IndexOf([1, NaN], NaN)` is `2`, `Contains([1, Missing], Missing)` is
+  `True`, `Element(NaN, [1, NaN])` is `True`. A marker cell matches only the
+  same marker, so the other cells decide every other answer:
+  `Contains([Missing, 5], 5)` is `True`, `Contains([1, Missing], 5)` is
+  `False`, and `IndexOf([1, NaN], Missing)` is `0`. A search never answers a
+  marker, except for an absent collection (rule E). The needle is read as a
+  VALUE, so a needle that evaluates to `NaN` (a restricted number whose
+  condition failed) is found where `NaN` sits, and a needle that evaluates to
+  `Missing` (a `Which` with no selected branch) is not. This is the majority
+  precedent for container membership (JavaScript `includes`, R `match`,
+  Julia `isequal`, Mathematica `Position`, Python `in`); it replaces the
+  unpublished rule of the same day under which a marker was never found.
+  Membership and comparison are different questions: `NaN = NaN` stays
+  `False` and `Equal([1, Missing], [1, 5])` stays `Missing`.
+- **D. Selection keeps only a decided `True`; the quantifiers are Kleene.**
+  The predicate is applied to each cell, and a comparison answers `Missing`
+  for a `Missing`/`Undefined` cell (Kleene) and `False` for a `NaN` cell
+  (IEEE). `Filter`, `Count(xs, p)`, `CountIf`, `Position`, `IndexWhere` and
+  `Find` read a `Missing` answer as "not selected": `Filter([1, Missing, 3],
+  x ↦ x > 0)` is `[1, 3]` and `Count([1, Missing, 3], x ↦ x > 0)` is `2`,
+  the rule of a database `WHERE` clause; `Partition` puts such a cell in the
+  false group. `Any` and `All` combine the answers by the Kleene table of
+  `Or` and `And`: `Any([1, Missing, 3], x ↦ x > 2)` is `True`, `Any([1,
+  Missing], x ↦ x > 2)` is `Missing`, `All([1, Missing, 3], x ↦ x > 0)` is
+  `Missing`, `All([1, Missing, -1], x ↦ x > 0)` is `False`. A symbolic answer
+  (`x > n` with `n` free) still keeps a quantifier inert, because evidence may
+  still arrive. A predicate that answers `True` on the marker selects it
+  (`Filter(xs, IsMissing)`), which is how the markers are located. The
+  implementation is `selectionVerdict` and `evaluateQuantifier` in
+  `src/compute-engine/library/collections.ts`. Before this rule `Count` threw
+  and `Filter` returned its error message as a value on an absent cell.
+- **E. An absent collection makes the whole result absent** (ruled
+  2026-09-26, above): `Length(Missing)` and `IndexOf(Missing, 3)` are `NaN`,
+  `Reverse(Missing)` and `Contains(Missing, 3)` are `Missing`. `NaN` in a
+  collection slot is a number, not an absent collection, so `Length(NaN)` is
+  the same `incompatible-type` error as `Length(5)`, and `Join([1], NaN)`
+  lifts the scalar to `[1, NaN]`.
+
+On the compiled routes, rule C holds through SameValueZero element tests
+(`includes`, and `_SYS.eqt` on JavaScript; `_ce_same` on Python, whose float
+leaf reads `nan` as the same as `nan`). Two refusals keep them faithful: a
+needle that may be a COMPUTED absence (its type has a `missing` arm, and it is
+not the written symbol) is not compiled on JavaScript, because an unselected
+numeric `Which` lowers to `NaN` there and would be found where `NaN` sits; on
+Python the written symbol is refused as well, because it lowers to `nan`. For
+rule D, `Any` and `All` over a collection whose element type has a `missing`
+arm are not compiled on either target, because `some`/`every` cannot answer
+`Missing`; the selecting operators need no refusal, since "not decidedly true"
+is "not selected" on both routes.
+
 Because errors absorb *before* ordinary handlers run, an ordinary
 operator handler never receives an error operand and needs no error
 tests — laziness does not change that, since a lazy handler that demands
@@ -1390,7 +1469,16 @@ document's history):
   would turn its arithmetic consumers into a host `TypeError`. Pinned in
   the conformance suite and in `conditional-values.test.ts`,
   `when-list-broadcast.test.ts`, `a2-restrictions.test.ts`.
-- **RULED 2026-09-26: searching for an absent value means not found.** When
+- **SUPERSEDED the same day — RULED 2026-09-26: searching for an absent
+  value means not found.** This entry is kept as history. It was reversed
+  later on 2026-09-26, before any release carried it, by rule C of §3,
+  "Absent values in collection operators": a search is structural, and a
+  marker IS found where the same marker sits (`IndexOf([1, NaN], NaN)` is
+  `2`, `Contains([NaN], NaN)` is `True`). The function this entry cites,
+  `isAbsentSearchedValue`, was deleted with the reversal. What survives of
+  this entry is the held undecided restriction (`Contains([1, 2], 2{c})`
+  stays unevaluated while `c` is not known) and the absent-collection rule.
+  The original text: When
   the value that `Contains`, `IndexOf`, `Count`, `Element` or `NotElement`
   searches for is absent, the answer is the "not found" answer of the
   operator: `False` for `Contains` and `Element`, `0` for `IndexOf` and

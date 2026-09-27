@@ -3607,30 +3607,11 @@ export function holdsConditionalValue(x: Expression): boolean {
 }
 
 /**
- * True when `value`, the evaluated value that `Contains`, `IndexOf`, `Count`,
- * `Element` or `NotElement` searches for, is absent: the `Missing` or
- * `Undefined` symbol, or a `NaN` number. A search never finds an absent value,
- * whatever the collection holds (user decision 2026-09-26).
- *
- * In a numeric domain, `NaN` is the absence marker: `Missing` becomes `NaN`
- * when a numeric operation absorbs it, and a restricted number whose
- * condition is false is `NaN` (`2{c}` is `NaN` when `c` is false). Also, an
- * IEEE `NaN` is not equal to any value, itself included. So a `NaN` value is
- * not found either: `IndexOf([1, NaN], NaN)` is `0`. The test reads only the
- * value, not how the operand was written, so the answer is the same for a
- * value that comes from a restriction, a piecewise value, an element read or
- * an arithmetic operation, and on every evaluation route.
- */
-export function isAbsentSearchedValue(value: Expression): boolean {
-  if (isAbsentSymbol(value)) return true;
-  return isNumber(value) && value.isNaN === true;
-}
-
-/**
  * True when a "not a member" answer about `value` and the collection `xs` is
  * not settled yet, because an unknown could still make them match: `x ∈
  * [1, 2]` is true when `x` becomes 1. A structural match is always settled,
- * and an absent element (`Missing`, `Undefined`) never matches.
+ * and an absent element (`Missing`, `Undefined`) matches only the same
+ * marker, which is a structural match, so it never keeps the answer open.
  *
  * - A literal `List`, `Set` or `Tuple`: an element that is not the same
  *   expression as `value`, where either side has unknowns, keeps the answer

@@ -200,37 +200,90 @@ describe('Insert, ReplaceAt and Append over an absent collection', () => {
         .evaluate()
         .toString()
     ).toBe('["Missing",1,2]');
-    // An absent index and an absent appended value are still refused.
+    // An absent index is still refused.
     expect(ce.box(['Insert', ['List', 1], 'Missing', 2]).isValid).toBe(false);
-    expect(ce.box(['Append', ['List', 1], 'Missing']).isValid).toBe(false);
+    // An absent appended value is an ordinary cell, kept in place as
+    // `Insert` keeps it (rule A of
+    // `docs/plans/2026-09-26-absent-values-in-collection-operators.md`).
+    // Before, `Append([1], Missing)` was an `incompatible-type` error while
+    // `Append([1], Undefined)` and `Append([1], NaN)` kept the cell.
+    const appended = ce.box(['Append', ['List', 1], 'Missing']);
+    expect(appended.isValid).toBe(true);
+    expect(appended.type.toString()).toBe('list<integer | missing>');
+    expect(appended.evaluate().toString()).toBe('[1,"Missing"]');
+    expect(
+      ce
+        .box(['Append', ['List', 1], 'Missing', 3])
+        .evaluate()
+        .toString()
+    ).toBe('[1,"Missing",3]');
+    expect(
+      ce
+        .parse('\\operatorname{Append}([1], \\operatorname{Missing})')
+        .evaluate()
+        .toString()
+    ).toBe('[1,"Missing"]');
   });
 });
 
-describe('a search for an absent value finds nothing', () => {
-  // `Contains`, `IndexOf` and `Count` give their "not found" answer for an
-  // absent searched value (user decision 2026-09-26). Before, the answer was
-  // `Missing` for `Contains` and `NaN` for `IndexOf` and `Count`.
+describe('a search finds an absent value where the same marker sits', () => {
+  // Search is structural, by `isSame`, the test `Unique` and `Set` use: a
+  // marker needle is found where the same marker sits, and a marker cell
+  // matches only the same marker (user decision 2026-09-26, rule C of
+  // `docs/plans/2026-09-26-absent-values-in-collection-operators.md`,
+  // `SEARCHED_VALUE_POLICY` in `library/collections.ts`). This replaces the
+  // earlier, unpublished rule of the same day under which a marker was never
+  // found (`Contains([1, Missing], Missing)` was `False`, `IndexOf` and
+  // `Count` were `0`).
   test.each([
     [['Contains', ['List', 1, 2], 'Missing'], '"False"', 'boolean'],
     [['Contains', ['List', 1, 2], 'Undefined'], '"False"', 'boolean'],
-    // A collection that holds an absent element: the absent value is not
-    // found in it either.
-    [['Contains', ['List', 1, 'Missing'], 'Missing'], '"False"', 'boolean'],
+    [['Contains', ['List', 1, 'Missing'], 'Missing'], '"True"', 'boolean'],
+    [['Contains', ['List', 1, 'Undefined'], 'Undefined'], '"True"', 'boolean'],
+    [['Contains', ['List', 1, 'NaN'], 'NaN'], '"True"', 'boolean'],
+    // `Missing` and `Undefined` are different symbols, as they are for
+    // `Unique([Missing, Undefined])`, which keeps both.
+    [['Contains', ['List', 1, 'Missing'], 'Undefined'], '"False"', 'boolean'],
+    [['Contains', ['List', 1, 'NaN'], 'Missing'], '"False"', 'boolean'],
     [['IndexOf', ['List', 1, 2], 'Missing'], '0', 'integer'],
-    [['IndexOf', ['List', 1, 'Missing'], 'Missing'], '0', 'integer'],
+    [['IndexOf', ['List', 1, 'Missing'], 'Missing'], '2', 'integer'],
+    [['IndexOf', ['List', 1, 'NaN', 3], 'NaN'], '2', 'integer'],
+    [['IndexOf', ['List', 'Missing', 5], 5], '2', 'integer'],
     [['Count', ['List', 1, 2], 'Missing'], '0', 'integer'],
-    [['Count', ['List', 'Missing', 'Missing'], 'Missing'], '0', 'integer'],
+    [['Count', ['List', 'Missing', 'Missing'], 'Missing'], '2', 'integer'],
+    [['Count', ['List', 'NaN', 1, 'NaN'], 'NaN'], '2', 'integer'],
+    // A literal `NaN` in a literal list is decided at the type level.
+    [['Element', 'NaN', ['List', 1, 'NaN']], '"True"', 'true'],
+    [['Element', 'Missing', ['List', 1, 'Missing']], '"True"', 'boolean'],
+    [['Element', 5, ['List', 1, 'Missing']], '"False"', 'boolean'],
+    [['NotElement', 'NaN', ['List', 1, 'NaN']], '"False"', 'boolean'],
   ])('%j', (json, expected, type) => {
     const e = engine().box(json as never);
     expect(e.isValid).toBe(true);
     expect(e.type.toString()).toBe(type);
     expect(e.evaluate().toString()).toBe(expected);
+    expect(e.N().toString()).toBe(expected);
+  });
+
+  test('a literal NaN membership is decided at the type level too', () => {
+    // The `Element` type handler claims `true`/`false` for a literal needle
+    // in a literal list; it read `NaN` as different from `NaN` and claimed
+    // `false`, which the compiler then emitted as a literal.
+    expect(
+      engine()
+        .box(['Element', 'NaN', ['List', 1, 'NaN']])
+        .type.toString()
+    ).toBe('true');
+    expect(
+      engine()
+        .box(['Element', 'NaN', ['List', 1, 2]])
+        .type.toString()
+    ).toBe('false');
   });
 
   test.each([
     // An absent element of the collection does not make the answer absent,
-    // so it does not widen the type. Before, these were typed `number`
-    // (`IndexOf`, `Count`) and `list<number>` (`Insert`, `ReplaceAt`).
+    // so it does not widen the type.
     [['Contains', ['List', 1, 'Missing'], 2], 'boolean', '"False"'],
     [['IndexOf', ['List', 1, 'Missing'], 2], 'integer', '0'],
     [['Count', ['List', 1, 'Missing']], 'integer', '2'],
@@ -257,12 +310,27 @@ describe('a search for an absent value finds nothing', () => {
   });
 
   test('the parse route', () => {
+    const ce = engine();
     expect(
-      engine()
+      ce
         .parse('\\operatorname{Contains}([1, 2], \\operatorname{Missing})')
         .evaluate()
         .toString()
     ).toBe('"False"');
+    expect(
+      ce
+        .parse(
+          '\\operatorname{Contains}([1, \\operatorname{Missing}], \\operatorname{Missing})'
+        )
+        .evaluate()
+        .toString()
+    ).toBe('"True"');
+    expect(
+      ce
+        .parse('\\operatorname{IndexOf}([1, \\mathrm{NaN}], \\mathrm{NaN})')
+        .evaluate()
+        .toString()
+    ).toBe('2');
   });
 
   test('an absent collection still makes the answer absent', () => {
@@ -270,10 +338,14 @@ describe('a search for an absent value finds nothing', () => {
     expect(ce.box(['Contains', 'Missing', 2]).evaluate().toString()).toBe(
       '"Missing"'
     );
-    expect(ce.box(['IndexOf', 'Missing', 2]).evaluate().toString()).toBe(
-      'NaN'
-    );
+    expect(ce.box(['IndexOf', 'Missing', 2]).evaluate().toString()).toBe('NaN');
     expect(ce.box(['Count', 'Missing', 2]).evaluate().toString()).toBe('NaN');
+    expect(
+      ce
+        .box(['Contains', 'Missing', 'Missing'])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
   });
 
   test('compiled to JavaScript', () => {
@@ -283,11 +355,31 @@ describe('a search for an absent value finds nothing', () => {
       expect(r.success).toBe(true);
       return r.run!({} as never);
     };
-    // `Missing` compiles to `undefined`, which the element test found in a
-    // list that holds an absent element: the answer was 2.
-    expect(run(['IndexOf', ['List', 1, 'Missing'], 'Missing'])).toBe(0);
+    // `NaN` is found by the SameValueZero element test. A written `Missing`
+    // compiles to `undefined`, as `Undefined` does, so a search for either in
+    // a list that may hold an absent cell is not compiled (the interpreter
+    // keeps the two apart); against a list with no absent cell it compiles
+    // and is not found.
+    expect(
+      (() => {
+        try {
+          return compile(
+            ce.box(['IndexOf', ['List', 1, 'Missing'], 'Missing'] as never),
+            { to: 'javascript', fallback: false } as never
+          ).success;
+        } catch {
+          return false;
+        }
+      })()
+    ).toBe(false);
     expect(run(['IndexOf', ['List', 1, 2], 'Missing'])).toBe(0);
     expect(run(['Contains', ['List', 1, 2], 'Missing'])).toBe(false);
+    // (`Contains` over a list with a `missing` element arm is not compiled:
+    // the target requires primitive elements, and falls back.)
+    expect(run(['IndexOf', ['List', 1, 'NaN', 3], 'NaN'])).toBe(2);
+    expect(run(['Contains', ['List', 1, 'NaN'], 'NaN'])).toBe(true);
+    expect(run(['Element', 'NaN', ['List', 1, 'NaN']])).toBe(true);
+    expect(run(['IndexOf', ['List', 1, 'NaN'], 'Missing'])).toBe(0);
   });
 });
 

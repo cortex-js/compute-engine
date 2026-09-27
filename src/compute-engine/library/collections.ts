@@ -28,7 +28,6 @@ import {
   enumerableFromAllSources,
   enumerableFromSource,
   holdsConditionalValue,
-  isAbsentSearchedValue,
   isBroadcastableCollection,
   isDeclaredScalarNumber,
   isEnumerableSource,
@@ -732,44 +731,53 @@ const SLICE_SIGNATURE_TEXT =
 // Parsed once, so the `canonical` handler does not re-parse the signature on
 // every canonicalization.
 const SLICE_SIGNATURE = parseType(SLICE_SIGNATURE_TEXT);
-const APPEND_SIGNATURE = parseType('(collection<any>, value+) -> collection');
+const APPEND_SIGNATURE = parseType(
+  '(collection<any>, (value | missing)+) -> collection'
+);
 
 /**
- * SEARCHED_VALUE_POLICY: how `Contains`, `IndexOf` and `Count` treat the value
- * they search for (user decision 2026-09-26).
+ * SEARCHED_VALUE_POLICY: how `Contains`, `IndexOf`, `Count(xs, v)`, `Element`
+ * and `NotElement` treat the value they search for.
  *
- * A search for an absent value finds nothing. When the evaluated searched
- * value is `Missing`, `Undefined` or `NaN`, the answer is the "not found"
- * answer of the operator: `False` for `Contains`, `0` for `IndexOf` and `0`
- * for `Count`. In a numeric domain `NaN` is the absence marker, so a `NaN`
- * value is not found either (`isAbsentSearchedValue`). This is true whatever
- * the collection holds: `IndexOf([1, Missing], Missing)` and
- * `IndexOf([1, NaN], NaN)` are both `0`. An absent element of the collection
- * does not change the answer, except that it cannot match.
+ * A search asks "is this expression in the container?", so it compares by
+ * STRUCTURAL identity (`isSame`), the notion `Unique`, `Set` and `Tally` use,
+ * never by value equality. A marker is found where the same marker sits:
+ * `IndexOf([1, NaN], NaN)` is `2`, `Contains([1, Missing], Missing)` is `True`
+ * and `Count([NaN, NaN], NaN)` is `2`. A marker cell matches only the same
+ * marker, so the other cells decide every other answer:
+ * `Contains([Missing, 5], 5)` is `True` and `Contains([1, Missing], 5)` is
+ * `False`. `Missing` and `Undefined` are different symbols, so one is not
+ * found where the other sits, as `Unique([Missing, Undefined])` keeps both.
+ * (User decision 2026-09-26, replacing the earlier rule of the same day under
+ * which a marker was never found; the design record is
+ * `docs/plans/2026-09-26-absent-values-in-collection-operators.md`, rule C.)
  *
- * A restricted value, `2{c}` (`When(2, c)`), whose condition `c` is not
- * decided, stays in the application: these operators do not thread
- * conditional values at this position (`threadsConditionals: [0]`). A
- * threaded value gives `When(Contains([1, 2], 2), c)`, which becomes `Missing`
- * when `c` becomes false, but the correct answer is then `False`. So the
- * application stays unevaluated until `c` is decided. When `c` is true, the
- * value is `2` and the search runs. When `c` is false, the value is absent
- * (`NaN` for a number) and the answer is "not found". The same is true for a
- * `List`, `Tuple` or `Set` that holds such a value.
+ * The needle is read as a VALUE: it is evaluated before the search, so a
+ * needle that evaluates to a marker is found where that marker sits, whatever
+ * it was written as. A restricted number whose condition is false is `NaN`
+ * (`2{c}` with `c` false), and it is found in a list that holds `NaN`. This
+ * is the numeric-domain conflation of `docs/ERROR-MODEL.md` §1: a number
+ * cannot tell "no datum" from "no answer".
+ *
+ * A restricted value whose condition is NOT decided, `2{c}` (`When(2, c)`),
+ * stays in the application: these operators do not thread conditional values
+ * at this position (`threadsConditionals: [0]`). A threaded value would give
+ * `When(Contains([1, 2], 2), c)`, which becomes `Missing` when `c` becomes
+ * false, but the answer is then the search for `NaN`. So the application
+ * stays unevaluated until `c` is decided. The same is true for a `List`,
+ * `Tuple` or `Set` that holds such a value.
  *
  * The collection operand is different: an absent collection makes the answer
- * absent (`Contains(Missing, 2)` is `Missing`), and a restricted collection is
- * moved out of the application.
+ * absent (`Contains(Missing, 2)` is `Missing`, `IndexOf(Missing, 2)` is
+ * `NaN`), and a restricted collection is moved out of the application.
  *
- * Returns `'absent'` for an absent value, `'undecided'` for a value that
- * holds a conditional value whose condition is not decided, and `undefined`
- * otherwise.
+ * Returns `'undecided'` for a value that holds a conditional value whose
+ * condition is not decided, and `undefined` otherwise.
  */
 function searchedValueStatus(
   value: Expression | undefined
-): 'absent' | 'undecided' | undefined {
+): 'undecided' | undefined {
   if (value === undefined) return undefined;
-  if (isAbsentSearchedValue(value)) return 'absent';
   if (holdsConditionalValue(value)) return 'undecided';
   return undefined;
 }
@@ -836,6 +844,35 @@ function isPredicateShorthand(op: Expression): boolean {
     op.type.matches('boolean') &&
     op.symbols.some((x) => ANONYMOUS_PARAMETER_RE.test(x))
   );
+}
+
+/**
+ * The verdict a SELECTING predicate consumer (`Filter`, `Count(xs, p)`,
+ * `CountIf`, `Position`, `IndexWhere`, `Find`, `Partition`) reads from an
+ * applied predicate: `'True'` selects the element, `'False'` does not, and
+ * `undefined` is anything else (an element-valued failure, a malformed
+ * predicate, an undecided relation), which the caller reports as before.
+ *
+ * A predicate that answers `Missing` or `Undefined` — the Kleene answer a
+ * comparison gives for an absent element, `Missing > 0` — does NOT select the
+ * element: `Filter([1, Missing, 3], x ↦ x > 0)` is `[1, 3]` and
+ * `Count([1, Missing, 3], x ↦ x > 0)` is `2`. This is the rule of a database
+ * `WHERE` clause, which keeps only the rows whose predicate is decidedly true,
+ * and of Mathematica's `Select`. A `NaN` element already takes this branch by
+ * IEEE (`NaN > 0` is `False`). To select the absent elements, test for them:
+ * `Filter(xs, IsMissing)`. (User decision 2026-09-26, rule D of
+ * `docs/plans/2026-09-26-absent-values-in-collection-operators.md`.) The
+ * quantifiers `Any` and `All` do NOT use this verdict: they combine the
+ * predicate's answers by Kleene logic, as `Or` and `And` do
+ * (`evaluateQuantifier`).
+ */
+function selectionVerdict(
+  applied: Expression | undefined
+): 'True' | 'False' | undefined {
+  const s = sym(applied);
+  if (s === 'True' || s === 'False') return s;
+  if (applied !== undefined && isAbsentSymbol(applied)) return 'False';
+  return undefined;
 }
 
 /**
@@ -6208,7 +6245,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Contains: {
     description:
-      'Return True if the collection contains the given element (structural identity, like `===`), False otherwise.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.',
+      'Return True if the collection contains the given element (structural identity, like `===`), False otherwise. An absent element is found where the same marker sits: `Contains([1, NaN], NaN)` is True.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.',
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
@@ -6224,7 +6261,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // collection operator over an absent collection). Declared because the
     // element parameter is `any`, which the default policy does not read as a
     // collection. Only the collection strips `missing`: an absent searched
-    // value is not found, so the answer is `False` (`SEARCHED_VALUE_POLICY`).
+    // value is an ordinary needle, found where the same marker sits
+    // (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
     missingStrip: [0],
     signature: '(collection<any>, element: any) -> boolean',
@@ -6253,9 +6291,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce._fn('Contains', adjusted ?? stripped);
     },
     evaluate: ([xs, value], { engine: ce }) => {
-      const searched = searchedValueStatus(value);
-      if (searched === 'undecided') return undefined;
-      if (searched === 'absent') return ce.False;
+      if (searchedValueStatus(value) === 'undecided') return undefined;
       // Three-valued: an indeterminate membership (e.g. a bounded walk that
       // hits its iteration limit) stays inert rather than collapsing to False.
       const found = xs.contains(value);
@@ -6285,8 +6321,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Length(Missing)` does (user decision 2026-09-25). Declared because the
     // optional predicate parameter is `any`, which the default policy does
     // not read as a collection. Only the collection strips `missing`: an
-    // absent counted value is not found, so the count is `0`
-    // (`SEARCHED_VALUE_POLICY`).
+    // absent counted value is an ordinary needle, counted where the same
+    // marker sits (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
     missingStrip: [0],
     signature: '(collection<any>, any?) -> integer | infinity',
@@ -6453,9 +6489,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // number leaves compare by exact value, so `0.5` counts as `1/2`).
       // Only a finite collection has a knowable count; anything else stays
       // symbolic, mirroring the 1-arg form.
-      const searched = searchedValueStatus(what);
-      if (searched === 'undecided') return undefined;
-      if (searched === 'absent') return engine.Zero;
+      if (searchedValueStatus(what) === 'undecided') return undefined;
       if (xs.isFiniteCollection !== true) return undefined;
       // ...and only an enumerable one: `Take(xs, 2)` over a valueless `xs` is
       // finite yet has nothing to walk (see `isEnumerableSource`).
@@ -7105,8 +7139,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Mirror the iterator's verdicts on the predicate result, so a query
         // and a walk of the same `Filter` never disagree.
         if (applied === undefined) throw invalidPredicateError(expr.op2);
-        if (sym(applied) === 'True') return true;
-        if (sym(applied) === 'False') return false;
+        // A `Missing` answer is "not selected" (`selectionVerdict`).
+        const verdict = selectionVerdict(applied);
+        if (verdict === 'True') return true;
+        if (verdict === 'False') return false;
         // An element-valued predicate failure (see `predicateErrorValue`)
         // leaves membership UNDECIDED: answering `false` would be an unsound
         // definite answer about an element the predicate could not judge.
@@ -7148,8 +7184,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               if (!pred) {
                 throw invalidPredicateError(expr.op2);
               }
-              if (sym(pred) === 'True') return emit(value);
-              if (sym(pred) !== 'False') {
+              // A `Missing` answer is "not selected" (`selectionVerdict`).
+              const verdict = selectionVerdict(pred);
+              if (verdict === 'True') return emit(value);
+              if (verdict !== 'False') {
                 // The predicate failed on this ELEMENT (e.g. its `Typed`
                 // parameter annotation rejected it): emit that `Error` value
                 // in the element's place, as `Map` does, instead of throwing
@@ -8308,10 +8346,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the other collection operators do for an absent collection. Declared
     // because the appended values are `value`, which the default policy does
     // not read as a collection. Only the collection strips `missing`: an
-    // absent appended value is still refused.
+    // absent appended value is an ordinary cell, kept in place
+    // (`Append([1], Missing)` is `[1, Missing]`), as `Insert` and `ReplaceAt`
+    // keep it and as `Join([1, Missing], [3])` does. The parameter spells the
+    // `missing` arm for that reason; `Undefined` is typed `unknown` and was
+    // already admitted (rule A of
+    // `docs/plans/2026-09-26-absent-values-in-collection-operators.md`).
     missingBehavior: 'propagate',
     missingStrip: [0],
-    signature: '(collection<any>, value+) -> collection',
+    signature: '(collection<any>, (value | missing)+) -> collection',
     // Same-head flatten: `Append(Append(c, …vs), …ws)` → `Append(c, …vs, …ws)`,
     // so an accumulator loop (`xs = Append(xs, v)`) builds a node of bounded
     // DEPTH — every structural walker (serialization, hashing, `isSame`,
@@ -10863,7 +10906,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   IndexOf: {
     description:
-      'Return the 1-based index of the first occurrence of value in collection, or 0 if not found.',
+      'Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2.',
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
@@ -10879,14 +10922,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // operator over an absent collection). Declared because the element
     // parameter is `any`, which the default policy does not read as a
     // collection. Only the collection strips `missing`: an absent searched
-    // value is not found, so the answer is `0` (`SEARCHED_VALUE_POLICY`).
+    // value is an ordinary needle, found where the same marker sits
+    // (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
     missingStrip: [0],
     signature: '(collection<any>, any) -> integer',
     evaluate: ([xs, value], { engine: ce }) => {
-      const searched = searchedValueStatus(value);
-      if (searched === 'undecided') return undefined;
-      if (searched === 'absent') return ce.Zero;
+      if (searchedValueStatus(value) === 'undecided') return undefined;
       const index = xs.indexWhere((x) => x.isSame(value)) ?? undefined;
       return ce.number(index ?? 0);
     },
@@ -11067,7 +11109,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const index =
         xs.indexWhere((x) => {
           const applied = f([x]);
-          const pred = sym(applied);
+          const pred = selectionVerdict(applied);
           if (pred === 'True') return true;
           if (pred === 'False') return false;
           const err = predicateErrorValue(applied);
@@ -11119,7 +11161,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isEnumerableSource(xs)) return undefined;
       for (const item of xs.each()) {
         const applied = f([item]);
-        const pred = sym(applied);
+        const pred = selectionVerdict(applied);
         if (pred === 'False') continue;
         if (pred === 'True') return item;
         // See `predicateErrorValue`: an element-valued predicate failure is
@@ -11161,7 +11203,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       let count = 0;
       for (const item of xs.each()) {
         const applied = f([item]);
-        const pred = sym(applied);
+        const pred = selectionVerdict(applied);
         if (pred === 'False') continue;
         if (pred === 'True') count++;
         else {
@@ -11199,7 +11241,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       let index = 1;
       for (const item of xs.each()) {
         const applied = f([item]);
-        const pred = sym(applied);
+        const pred = selectionVerdict(applied);
         if (pred === 'True') indices.push(ce.number(index));
         else if (pred !== 'False') {
           // See `predicateErrorValue`: an element-valued predicate failure is
@@ -12116,7 +12158,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const falseGroup: Expression[] = [];
       for (const item of xs.each()) {
         const applied = fn([item]);
-        const pred = sym(applied);
+        // A `Missing` answer puts the element in the FALSE group: a partition
+        // keeps every element, and "not decidedly satisfied" is the group a
+        // selection would leave it out of (`selectionVerdict`).
+        const pred = selectionVerdict(applied);
         if (pred === 'True') trueGroup.push(item);
         else if (pred === 'False') falseGroup.push(item);
         else {
@@ -13283,6 +13328,21 @@ function isSymbolicOperand(op: Expression | undefined): boolean {
  * undetermined element) and no short-circuit fired, `undefined` is returned so
  * the expression stays inert — the CAS-correct behavior rather than throwing.
  *
+ * A predicate answer of `Missing` or `Undefined` — what a comparison gives for
+ * an absent element, `Missing > 2` — is combined by KLEENE logic, the table
+ * `Or` and `And` use, since `Any` is a fold of `Or` and `All` a fold of `And`:
+ * a short-circuit still wins (`Any([1, Missing, 3], x ↦ x > 2)` is `True`,
+ * `All([1, Missing, -1], x ↦ x > 0)` is `False`), and otherwise the answer is
+ * `Missing`, the marker of a boolean (`Any([1, Missing], x ↦ x > 2)` and
+ * `All([1, Missing, 3], x ↦ x > 0)`). This is the rule of SQL's `ANY`/`ALL`, of
+ * R's and of Julia's `any`/`all`. A `NaN` element compares `False` by IEEE and
+ * so never makes a quantifier undecided. A SYMBOLIC answer (`x > n` with `n`
+ * free) still keeps the quantifier inert, because evidence may still arrive:
+ * inert outranks `Missing`. The selecting consumers (`Filter`, `Count`) read
+ * the same answer as "not selected" instead (`selectionVerdict`). (User
+ * decision 2026-09-26, rule D of
+ * `docs/plans/2026-09-26-absent-values-in-collection-operators.md`.)
+ *
  * An ELEMENT-valued predicate failure (see `predicateErrorValue`) is neither of
  * those: it is surfaced as the operator's RESULT, the scalar-consumer
  * convention `CountIf`/`Find`/`IndexWhere` follow. Absorbing it into
@@ -13318,6 +13378,7 @@ function evaluateQuantifier(
   const defaultValue = kind === 'Any' ? ce.False : ce.True;
 
   let sawUndetermined = false;
+  let sawAbsent = false;
   return run(
     (function* (): Generator<undefined, Expression | undefined> {
       for (const item of collection.each()) {
@@ -13329,11 +13390,16 @@ function evaluateQuantifier(
           // surfaced as the operator's result, not absorbed as "undetermined".
           const err = predicateErrorValue(result);
           if (err) return err;
-          sawUndetermined = true;
+          // An absent answer is Kleene's third value; anything else is
+          // evidence that has not arrived yet.
+          if (result !== undefined && isAbsentSymbol(result)) sawAbsent = true;
+          else sawUndetermined = true;
         }
         yield;
       }
-      return sawUndetermined ? undefined : defaultValue;
+      if (sawUndetermined) return undefined;
+      if (sawAbsent) return ce.symbol('Missing');
+      return defaultValue;
     })(),
     ce._timeRemaining,
     ce._deadlineFrame

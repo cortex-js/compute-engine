@@ -219,20 +219,9 @@ that no ruling covers yet.
 A Codex review of the commits made while it was unavailable found 41 defects;
 the fixes and four user decisions of the same day landed. These items remain.
 
-Decision for the user:
-
-1. **A predicate that meets an absent element.** The predicate answers
-   `Missing` for the element, and each operator reacts differently:
-   `Count([1, Missing], x ↦ x > 0)` throws an uncaught JavaScript error
-   ("Filter predicate must return True or False"), `Filter` returns that
-   message as its value, and `Any` answers `True`. Options: treat a `Missing`
-   predicate answer as "not satisfied" (the element is not kept or counted,
-   as a database `WHERE` clause does), or combine it by Kleene logic (`All`
-   and `Any` may answer `Missing`). With no decision, the throw stays.
-
 Defects:
 
-2. **The interpreter's complex division overflows.** `1/(10^{308}+10^{308}i)`
+1. **The interpreter's complex division overflows.** `1/(10^{308}+10^{308}i)`
    and `Inverse([[1e308+1e308i]])` give `0` in the interpreter; the correct
    value is about `5e-309 - 5e-309i`. The compiled JavaScript uses a scaled
    division and gives the correct value. The interpreter divides through
@@ -241,7 +230,7 @@ Defects:
    wrapper used by every complex quotient. The same overflow makes
    `Inverse([[1+i, 1e308+1e308i],[0,1]]).N()` give `-oo` for the entry that
    is `-1e308`.
-3. **A complex number whose imaginary part is outside the double range is
+2. **A complex number whose imaginary part is outside the double range is
    wrong (silent wrong results).** Measured 2026-09-26 at the default
    precision: `i\cdot10^{-800}` evaluates to `0`; `(1+i)10^{-800}`
    evaluates to `1/1e+800` (the imaginary part is lost);
@@ -264,7 +253,7 @@ Defects:
    at both precisions; `(10^{-200}(1+i))^2` `.N()` is `NaN`;
    `\sqrt{i\cdot10^{-600}}` `.N()` is `0`; `e^{i\,10^{-800}}` `.N()`
    drops the imaginary part.
-4. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is
+3. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is
    absent stays unevaluated.** `Map(f, Join(Missing, [3]))` should be
    `Missing`, as `Map(f, Missing)` is. The source correctly declines to
    enumerate, but a lazy operator does not evaluate its collection operand,
@@ -273,13 +262,13 @@ Defects:
    evaluation (45 suites). The fix belongs in the evaluation step
    (`boxed-function.ts`): evaluate a lazy operator's `Join`/`Append`
    operand when it may be absent, then thread the result.
-5. **A lazy `Join` over an eager collection operator is not known to be
+4. **A lazy `Join` over an eager collection operator is not known to be
    finite.** `Sum(Join([3], Sort([2,1])))` stays unevaluated (the answer is
    6), while `Sum(Join([3], [2,1]))` is 6 and `Sum(Sort([2,1]))` is 3.
    Unevaluated, `Sort([2,1])` reports `isCollection` false and
    `isFiniteCollection` undefined, so `Join` cannot report a finite count
    and `Sum` declines. Measured at `7713654e` and later.
-6. **Arithmetic over an error-typed term types differently by operator.**
+5. **Arithmetic over an error-typed term types differently by operator.**
    With `E = Sin(Tuple(A, B))` and `A, B: list<real>`, `Add(1, E)` is
    `error | integer`, `Multiply(2, E)` and `Divide(E, 2)` are `number`, and
    `Negate(E)` is `error`.
@@ -651,6 +640,17 @@ decision of 2026-09-26 (the host that constructs a function gives its
 type), the host's declaration is the intended fix, so this is low priority.
 
 Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
+
+### The held value of a `Sum` over an infinite `Element` range loses its type (OPEN, small — 2026-09-26)
+
+`Sum(k², Element(k, Range(1, +∞)))` is typed `integer | nan |
+signed_infinity`, but `evaluate()` returns the same sum, held, and the held
+expression is typed `number`. The claim is still sound (`number` admits every
+value), only wider than the expression it came from. The held form is
+probably rebuilt so that the body no longer sees the index typed from the
+range, and `bigOpOverDomainType` (`library/type-handlers.ts`) then reads a
+body that is not typed on the extended real line. `Limits` forms keep their
+type.
 
 ### A tuple argument at a scalar parameter is typed `any` (OPEN, small — 2026-09-26)
 

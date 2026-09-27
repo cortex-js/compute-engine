@@ -69,6 +69,8 @@ import {
 import {
   isNonFiniteBound,
   requirePrimitiveElements,
+  refuseKleeneQuantifier,
+  collectionMayHoldAbsentCell,
 } from './javascript-target.js';
 
 /**
@@ -1043,46 +1045,60 @@ function compilePythonComprehension(
 // `toString` as an ordinary free symbol.
 
 /**
- * True when the searched value `needle` can be absent at run time: its type
- * has a `missing` arm, or it can be a number, which can be `NaN`. A needle
- * that is provably a string, a boolean, a tuple or a list cannot be absent,
- * so its search needs no run-time test.
- */
-function canBeAbsentAtRunTime(needle: Expression): boolean {
-  const t = resolveTypeForCompilation(needle.type.type);
-  return typeContainsMissing(t) || couldMatch(t, 'number');
-}
-
-/**
  * Compile the search of `Contains`, `IndexOf` or `Element` for the searched
- * value `needle`, so that an absent searched value is not found (user
- * decision 2026-09-26): the answer is then `notFound` (`False` or `0`), as in
- * the interpreter. `search(v)` emits the search for the compiled value `v`.
+ * value `needle`. The search is STRUCTURAL, as in the interpreter: a marker is
+ * found where the same marker sits, `IndexOf([1, NaN], NaN)` is `2` (user
+ * decision 2026-09-26, `SEARCHED_VALUE_POLICY` in `library/collections.ts`).
+ * The element test is `_ce_same` (see `PYTHON_INDEXOF_HELPER`), whose float
+ * leaf reads `nan` as the same as `nan`; Python's own `in` finds a `nan` only
+ * by object identity, so the lowerings never use it. `search(v)` emits the
+ * search for the compiled value `v`.
  *
- * The searched value is absent when its run-time value is `None` (the absence
- * marker of a value that is not a number) or a float `nan` (the absence
- * marker of a number: `Missing` in a numeric position and a restriction
- * `v{c}` whose condition is false both compile to `nan`). The test is on the
- * run-time value, not on the structure of the needle, so a restriction, a
- * piecewise value, an `If` with a `Missing` branch, an element read and an
- * arithmetic result all give the same answer as the interpreter
- * (`isAbsentSearchedValue`, `collection-utils.ts`). The float test accepts
- * `np.floating` as well: `np.float32` and `np.float16` are not subclasses of
- * `float`, and `_ce_same` treats them as floats too. The `nan` test is
- * `_n != _n`, which is true only for `nan`, so the emitted code needs no
- * `import math`.
+ * This target fails closed on a needle that may be the OBJECT-domain absence,
+ * `Missing` or `Undefined`: a written absence symbol lowers to `math.nan` here
+ * (`docs/ERROR-MODEL.md` §3, since numpy raises on `None`), so the compiled
+ * search would find it where a `NaN` cell sits, while the interpreter keeps
+ * the two markers apart (`IndexOf([1, NaN], Missing)` is `0`). The JavaScript
+ * target has an object null, `undefined`, for the written symbol and refuses
+ * only a COMPUTED absence (`compileSearchedValue`).
+ *
+ * The same spelling makes the COLLECTION side ambiguous: a cell that is
+ * `Missing` or `Undefined` is `nan` here too, so a numeric needle that is
+ * `NaN` at run time would be found where an absent cell sits
+ * (`IndexOf([1, Missing], NaN)` is `0` in the interpreter). A needle that may
+ * be a number is therefore refused when the collection's element type has a
+ * `missing` arm.
  */
 function pySearchedValue(
+  operator: string,
   needle: Expression,
+  collection: Expression | undefined,
   compile: (expr: Expression) => string,
-  search: (v: string) => string,
-  notFound: string
+  search: (v: string) => string
 ): string {
-  if (isSymbol(needle, 'Missing') || isSymbol(needle, 'Undefined'))
-    return notFound;
-  const v = compile(needle);
-  if (!canBeAbsentAtRunTime(needle)) return search(v);
-  return `(lambda _n: ${notFound} if _n is None or (isinstance(_n, (float, np.floating)) and _n != _n) else ${search('_n')})(${v})`;
+  // A needle whose present arms are not numeric (`character | missing`) is
+  // never confused with a `nan` element and compiles, as on JavaScript.
+  const t = resolveTypeForCompilation(needle.type.type);
+  if (
+    couldMatch(stripMissingFromType(t), 'number') &&
+    collectionMayHoldAbsentCell(collection)
+  )
+    throw new Error(
+      `Could not compile \`${operator}\`: an element of the collection may be absent, which this ` +
+        `target spells as \`nan\`, and the searched value may be a number, which could be \`NaN\`; ` +
+        `the interpreter keeps the two apart. The interpreter evaluates it instead.`
+    );
+  if (
+    isSymbol(needle, 'Missing') ||
+    isSymbol(needle, 'Undefined') ||
+    (typeContainsMissing(t) && couldMatch(stripMissingFromType(t), 'number'))
+  )
+    throw new Error(
+      `Could not compile \`${operator}\`: the searched value may be the absent value \`Missing\`, ` +
+        `which this target spells as \`nan\` and could not tell from a \`NaN\` element. ` +
+        `The interpreter evaluates it instead.`
+    );
+  return search(compile(needle));
 }
 const PYTHON_OPERATORS: CompiledOperators = {
   __proto__: null as never,
@@ -1600,13 +1616,16 @@ const PYTHON_EQCOLL_HELPER = `def _ce_eqcoll(_a, _b):
  *    an ambiguous-truth-value error). An ndarray row is therefore LIST-like,
  *    and a compiled tuple needle matches it — a deliberate choice, matching how
  *    the engine lowers `Matrix` rows (as nested lists / an ndarray);
- *  - strings, and a missing needle → 0, are unchanged.
+ *  - strings are unchanged. A needle that may be the object-domain absence
+ *    (`Missing`, `Undefined`) does not reach this helper: `pySearchedValue`
+ *    refuses it at compile time, since this target spells it as `nan`.
  *
  * The one other departure from Python equality is NaN: `nan == nan` is False,
  * where the interpreter's structural `.isSame()` compares two `NaN` as the
- * same. A `NaN` needle never reaches this helper (`pySearchedValue` answers 0
- * for it, because a search never finds an absent value), but a `NaN`
- * component of a tuple needle does, and is found. The both-NaN case is guarded to float scalars so an
+ * same. A `NaN` needle reaches this helper and IS found where `nan` sits
+ * (`IndexOf([1, NaN], NaN)` is `2`, the structural search of
+ * `SEARCHED_VALUE_POLICY` in `library/collections.ts`), and so is a `NaN`
+ * component of a tuple needle. The both-NaN case is guarded to float scalars so an
  * ndarray element cannot reach it (`_a != _a` on an array is an array, and
  * `and` would raise an ambiguous-truth-value error); `np.float64` subclasses
  * `float`, and `np.floating` covers the narrower numpy float scalars.
@@ -3863,7 +3882,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // test. This lowering is not numeric: the `_ce_indexof` adapter is Python's
   // own structural equality, so a string needle, a string haystack and a TUPLE
   // needle in a point list are all faithful — probe-verified against the
-  // interpreter (`IndexOf([(1,2),(3,4)], Tuple(3,4))` → 2, a missing value → 0).
+  // interpreter (`IndexOf([(1,2),(3,4)], Tuple(3,4))` → 2, a `NaN` value → its
+  // position).
   // Nothing to GATE here (ruled 2026-08-08: adapter over gate) — but the
   // faithfulness now holds BECAUSE of the adapter: bare `in`/`.index` had one
   // crack, Python's `True == 1`, which found a boolean needle in a numeric
@@ -3876,10 +3896,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args[1] == null)
       throw new Error('Could not compile `IndexOf`: missing value');
     return pySearchedValue(
+      'IndexOf',
       args[1],
+      args[0],
       compile,
-      (v) => `_ce_indexof(${coll}, ${v})`,
-      '0'
+      (v) => `_ce_indexof(${coll}, ${v})`
     );
   },
   Contains: (args, compile) => {
@@ -3887,11 +3908,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('Contains', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Contains`: missing value');
+    // `_ce_indexof`, not `in`: Python's `in` finds a `nan` only by object
+    // identity, and the search is structural (`pySearchedValue`).
     return pySearchedValue(
+      'Contains',
       args[1],
+      args[0],
       compile,
-      (v) => `(${v} in ${coll})`,
-      'False'
+      (v) => `(_ce_indexof(${coll}, ${v}) > 0)`
     );
   },
   // First-occurrence order (`dict.fromkeys` preserves insertion order).
@@ -4010,6 +4034,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`Any\`: only the predicate form compiles.`
       );
+    // An absent element makes the interpreter's answer `Missing` (Kleene),
+    // which `any` cannot express: fail closed (`refuseKleeneQuantifier`).
+    refuseKleeneQuantifier('Any', args[0], args[1]);
     const fn = pyFnArg('Any', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -4021,6 +4048,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`All\`: only the predicate form compiles.`
       );
+    refuseKleeneQuantifier('All', args[0], args[1]);
     const fn = pyFnArg('All', args[1], compile, [
       BaseCompiler.collectionElementTypeOf(args[0]),
     ]);
@@ -4205,12 +4233,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `Element`: missing argument');
     requirePrimitiveElements('Element', args[1]);
     const coll = pyCollArg('Element', args[1], compile);
-    // An absent value is not an element (see `pySearchedValue`).
+    // An absent value is an element where the same marker sits; the test is
+    // `_ce_indexof`, not `in`, for the reason `pySearchedValue` states.
     return pySearchedValue(
+      'Element',
       args[0],
+      args[1],
       compile,
-      (v) => `(${v} in ${coll})`,
-      'False'
+      (v) => `(_ce_indexof(${coll}, ${v}) > 0)`
     );
   },
   Identity: (args, compile, target) => {
