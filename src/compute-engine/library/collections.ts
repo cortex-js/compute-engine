@@ -1461,11 +1461,13 @@ function iterateArgs(
  * stalls `materialize()` and leaves the whole `Map` symbolic: `Map(f, X - 1)`
  * stayed unevaluated while `Map(f, X)` and `Map(f, [0,1,2])` did not.
  *
- * Every other lazy collection operator answers those predicates from its own
- * iterator (`Filter`, `Drop`, `Rest`, …, all of which already handle a
- * computed source); `Map` is the one that delegates them to its source, so the
- * resolution lives here rather than on `BoxedExpression`. Reporting such an
- * operand as a collection engine-wide is NOT a safe generalization — it
+ * The other lazy collection operators answer most of those predicates from
+ * their own iterator (`Filter`, `Drop`, `Rest`, …, all of which already handle
+ * a computed source), and read their source's finiteness through
+ * `eagerViewSource` below; `Map` is the one that delegates all of them to its
+ * source, so the resolution lives here rather than on `BoxedExpression`.
+ * Reporting such an operand as a collection engine-wide is NOT a safe
+ * generalization — it
  * reclassifies broadcast results for `Sum`/`Product` body typing and for the
  * compile targets' collection-valued-body fail-closed gates.
  */
@@ -1487,6 +1489,100 @@ function mapSource(xs: Expression): Expression {
   if (xs.valueDefinition?.isSelfReferential) return xs;
   const evaluated = xs.evaluate();
   return evaluated.isCollection ? evaluated : xs;
+}
+
+/**
+ * The source of a lazy collection view (`Join`, `Append`, `Reverse`, `Drop`,
+ * `Filter`, …), with an EAGER library collection operator resolved to its
+ * evaluated form.
+ *
+ * An eager operator (`Sort`, `Unique`, `Tally`, …) has no collection handlers
+ * until it is evaluated, so its `isFiniteCollection` is `undefined` and its
+ * `count` is known only when it declares an `elementCount`. A view that read
+ * those facets directly did not know that it was finite, and `Sum`, which does
+ * not walk a collection of unknown finiteness, stayed unevaluated:
+ * `Sum(Join([3], Sort([2, 1])))` stayed symbolic while `Sum(Sort([2, 1]))` was
+ * 3.
+ *
+ * The operand is evaluated only when all of these are true:
+ * - its operator is a library operator, not a user function;
+ * - it is pure, so the evaluation consumes no random draw;
+ * - none of its own operands is an unevaluated function application.
+ *
+ * The last two requirements bound the cost. A recursive list builder
+ * (`F(n) = Join([n], F(n + 1))`, or `Join([n], Sort(F(n + 1)))`) would
+ * otherwise evaluate the rest of its recursion once more for each level whose
+ * facet is read, which is exponential in the depth of the recursion.
+ */
+function eagerViewSource(xs: Expression): Expression {
+  if (xs.isCollection || !isFunction(xs)) return xs;
+  const def = xs.operatorDefinition;
+  if (def === undefined || def.isUserFunctionDefinition) return xs;
+  if (!xs.isPure) return xs;
+  if (xs.ops.some((op) => isFunction(op) && !op.isCollection)) return xs;
+  return mapSource(xs);
+}
+
+/**
+ * The finiteness of the source of a lazy collection view.
+ *
+ * The answer is derived without an evaluation whenever possible, because a
+ * finiteness query is a metadata read and must stay cheap: evaluating
+ * `Unique(Range(1, 100000))` to learn that `Reverse` of it is finite took
+ * 46 seconds (`Unique` tallies every element against the distinct ones seen
+ * so far). In order:
+ * - a source with collection handlers answers for itself;
+ * - an eager source whose element count is known without an evaluation (an
+ *   `elementCount` handler, whose answer is a promise about the evaluated
+ *   result) is finite;
+ * - an eager library operator materializes its result from its operands, so
+ *   it is finite when every collection-typed operand is a finite collection
+ *   (`Sort(xs)`, `Unique(Range(1, n))`, `Tally(Join(a, b))`), provided the
+ *   operator is pure and none of its operands is an unevaluated function
+ *   application (the requirements of {@link eagerViewSource});
+ * - otherwise the source is evaluated, see {@link eagerViewSource}.
+ */
+function finitenessOfSource(xs: Expression): boolean | undefined {
+  const finite = xs.isFiniteCollection;
+  if (finite !== undefined || xs.isCollection || !isFunction(xs)) return finite;
+  const count = xs.count;
+  if (count !== undefined && Number.isFinite(count)) return true;
+  if (eagerOperandsAreFinite(xs)) return true;
+  return eagerViewSource(xs).isFiniteCollection;
+}
+
+/**
+ * True when `xs` is a pure library collection operator whose collection-typed
+ * operands are all finite collections and whose other operands are not
+ * unevaluated function applications, so that its evaluated result is a finite
+ * collection without the evaluation being run. The requirements are the ones
+ * {@link eagerViewSource} applies before it evaluates, so the structural
+ * answer never claims more than the evaluation would find.
+ */
+function eagerOperandsAreFinite(xs: Expression): boolean {
+  if (!isFunction(xs)) return false;
+  const def = xs.operatorDefinition;
+  if (def === undefined || def.isUserFunctionDefinition) return false;
+  if (!xs.isPure) return false;
+  if (!xs.type.matches('collection<any>')) return false;
+  let sawCollection = false;
+  for (const op of xs.ops) {
+    if (op.type.matches('collection<any>')) {
+      sawCollection = true;
+      if (finitenessOfSource(op) !== true) return false;
+    } else if (isFunction(op) && !op.isCollection) {
+      return false;
+    }
+  }
+  return sawCollection;
+}
+
+/**
+ * The element count of the source of a lazy collection view. See
+ * {@link eagerViewSource}.
+ */
+function countOfSource(xs: Expression): number | undefined {
+  return xs.count ?? eagerViewSource(xs).count;
 }
 
 // Rebuild the operand list with `first` in place of `op1`, dropping nothing
@@ -7054,7 +7150,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // would throw during canonicalization of a large source.
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        return expr.op1.isFiniteCollection === true ? true : undefined;
+        return finitenessOfSource(expr.op1) === true ? true : undefined;
       },
       // A filter of an empty source is empty (O(1)). Otherwise emptiness
       // depends on the predicate — a finite source may filter down to nothing
@@ -7441,7 +7537,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEmpty: (expr) =>
         isFunction(expr) ? expr.op1.isEmptyCollection : undefined,
       isFinite: (expr) =>
-        isFunction(expr) ? expr.op1.isFiniteCollection : undefined,
+        isFunction(expr) ? finitenessOfSource(expr.op1) : undefined,
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
@@ -7559,7 +7655,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return Math.max(0, c - 1);
       },
       isFinite: (expr) =>
-        isFunction(expr) ? expr.op1.isFiniteCollection : undefined,
+        isFunction(expr) ? finitenessOfSource(expr.op1) : undefined,
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
@@ -7640,7 +7736,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // True if the source is finite (the taken prefix is then finite too);
       // for an infinite/unknown source we cannot know (it MAY be finite).
       isFinite: (expr) =>
-        isFunction(expr) && expr.op1.isFiniteCollection === true
+        isFunction(expr) && finitenessOfSource(expr.op1) === true
           ? true
           : undefined,
       // Empty iff the first source element already fails the predicate. Cheap
@@ -7783,7 +7879,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       // Delegates to the source for finite sources; unknown otherwise.
       isFinite: (expr) =>
-        isFunction(expr) && expr.op1.isFiniteCollection === true
+        isFunction(expr) && finitenessOfSource(expr.op1) === true
           ? true
           : undefined,
       iterator: (expr) => {
@@ -7923,7 +8019,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         // A provably infinite source keeps reporting `false` (the reverse
         // direction is untouched by this handler's tightening).
-        const source = expr.op1.isFiniteCollection;
+        const source = finitenessOfSource(expr.op1);
         if (source !== true) return source;
         const inner = callbackResultType(expr.op2);
         if (inner === undefined) return undefined;
@@ -8120,7 +8216,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             total += 1;
             continue;
           }
-          const count = op.count;
+          const count = countOfSource(op);
           if (count === undefined) return undefined;
           if (!Number.isFinite(count)) {
             // A concatenation containing an infinite operand is infinite
@@ -8180,7 +8276,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return kleeneAnd(
           expr.ops.map((op) => {
             if (isAtomicJoinOperand(op)) return true;
-            const finite = op.isFiniteCollection;
+            const finite = finitenessOfSource(op);
             if (finite !== false || !isSet) return finite;
             return op.type.matches('set<any>') ? false : undefined;
           })
@@ -8432,7 +8528,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       elementMemo: true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        const count = expr.op1.count;
+        const count = countOfSource(expr.op1);
         if (count === undefined) return undefined;
         // A set-kind result counts DISTINCT elements: an appended value the
         // source already holds adds nothing (`Append(Set(1, 2), 2)` is still
@@ -8457,7 +8553,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // finiteness only when it is itself a set (already distinct).
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        const finite = expr.op1.isFiniteCollection;
+        const finite = finitenessOfSource(expr.op1);
         if (finite !== false || !producesSet(expr)) return finite;
         return expr.op1.type.matches('set<any>') ? false : undefined;
       },
@@ -9590,7 +9686,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // finiteness is unknown too: defer to the source.
         const count = takeCount(expr);
         if (count !== undefined && Number.isFinite(count)) return true;
-        return expr.op1.isFiniteCollection;
+        return finitenessOfSource(expr.op1);
       },
       iterator: takeIterator,
       at: (
@@ -9672,7 +9768,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // unknown is what keeps a consumer (`ListFrom`, a broadcast) from
         // reading the empty iterator as an empty collection.
         if (integerParam(expr.op2) === null) return undefined;
-        return expr.op1.isFiniteCollection;
+        return finitenessOfSource(expr.op1);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -9970,7 +10066,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        return expr.op1.isFiniteCollection;
+        return finitenessOfSource(expr.op1);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -10043,7 +10139,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        return expr.op1.isFiniteCollection;
+        return finitenessOfSource(expr.op1);
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -10305,7 +10401,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        return expr.op1.isFiniteCollection;
+        return finitenessOfSource(expr.op1);
       },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
@@ -10760,7 +10856,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isFinite: (expr) => {
         if (!isFunction(expr) || integerParam(expr.op2) === null)
           return undefined;
-        return expr.op1.isFiniteCollection;
+        return finitenessOfSource(expr.op1);
       },
       // NOT gated on the offset: a rotation is a permutation, so membership is
       // offset-INVARIANT. `false` here is the DEFINITIVE "not a member" answer
@@ -11931,7 +12027,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       // Finite source ⇒ deduped result is finite; otherwise unknown.
       isFinite: (expr) =>
-        isFunction(expr) && expr.op1.isFiniteCollection === true
+        isFunction(expr) && finitenessOfSource(expr.op1) === true
           ? true
           : undefined,
       // Empty iff the source is empty (dedup of a non-empty source is
@@ -12390,7 +12486,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       // Finite source ⇒ finite number of runs; otherwise unknown.
       isFinite: (expr) =>
-        isFunction(expr) && expr.op1.isFiniteCollection === true
+        isFunction(expr) && finitenessOfSource(expr.op1) === true
           ? true
           : undefined,
       // Empty iff the source is empty (a non-empty source has ≥ 1 run).
@@ -12588,7 +12684,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // `Zip([1,2,3], <infinite>)` infinite).
         let anyUnknown = false;
         for (const x of expr.ops) {
-          const f = x.isFiniteCollection;
+          const f = finitenessOfSource(x);
           if (f === true) return true;
           if (f === undefined) anyUnknown = true;
         }

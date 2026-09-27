@@ -263,9 +263,9 @@ describe('DERIVATIVE ROUND-TRIP', () => {
     ]);
   });
 
-  test('recognized D(f, x) serialization is unchanged', () => {
+  test('recognized D(f, x) serializes in Leibniz notation', () => {
     expect(ce.box(['D', 'f', 'x'], { canonical: false }).toLatex()).toBe(
-      '\\frac{\\mathrm{d}}{\\mathrm{d}x}f'
+      '\\frac{\\mathrm{d}f}{\\mathrm{d}x}'
     );
   });
 });

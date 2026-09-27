@@ -3520,12 +3520,19 @@ const LIST_COORDINATE_TUPLE_ARITHMETIC = new Set([
 
 /**
  * Whether an application of `operator` to operands of the types
- * `operandTypes` always evaluates to an `incompatible-type` error because an
- * operand is a tuple with a list coordinate ({@link isListCoordinateTupleType}).
- * This is true for the arithmetic operators, and for an operator that applies
- * to each coordinate of a tuple (`overTuples`, the `broadcastsOverTuples`
- * predicate of `boxed-function.ts`: `Sin`, `Ln`, `Floor`, …). The type of such
- * an application is `error`.
+ * `operandTypes` always evaluates to an error, so that its static type is
+ * `error`. This is true for the arithmetic operators, and for an operator
+ * that applies to each coordinate of a tuple (`overTuples`, the
+ * `broadcastsOverTuples` predicate of `boxed-function.ts`: `Sin`, `Ln`,
+ * `Floor`, …), when an operand is:
+ * - a tuple with a list coordinate ({@link isListCoordinateTupleType}): the
+ *   application evaluates to an `incompatible-type` error;
+ * - typed `error`, such as `Sin(Tuple(A, B))` with `A`, `B` lists: the
+ *   operand evaluates to an error, and the numeric-argument check lets that
+ *   operand through unchanged (`checkNumericArgs` in `validate.ts`), so the
+ *   application evaluates to that same error. Without this rule, the type of
+ *   the enclosing application depended on the operator: `1 + E` was
+ *   `error | integer`, `2E` was `number` and `-E` was `error`.
  */
 export function appliesToListCoordinateTuple(
   operator: string,
@@ -3534,7 +3541,9 @@ export function appliesToListCoordinateTuple(
 ): boolean {
   if (!overTuples && !LIST_COORDINATE_TUPLE_ARITHMETIC.has(operator))
     return false;
-  return operandTypes.some(isListCoordinateTupleType);
+  return operandTypes.some(
+    (t) => t === 'error' || isListCoordinateTupleType(t)
+  );
 }
 
 /**

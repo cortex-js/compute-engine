@@ -109,9 +109,10 @@ describe('EXACT PRODUCT OF A RADICAL AND A COMPLEX VALUE', () => {
       '["Complex",["Divide",["Sqrt",2],2],["Negate",["Divide",["Sqrt",2],2]]]'
     ));
 
+  // The printed real part is rounded to the working precision (21 digits).
   test('.N() gives the float', () =>
     expect(ce.parse('\\sqrt{2}(1+\\imaginaryI)').N().toString()).toBe(
-      '(1.414213562373095048801689 + 1.4142135623730951i)'
+      '(1.4142135623730950488 + 1.4142135623730951i)'
     ));
 
   test('an inexact factor makes the product a float', () =>

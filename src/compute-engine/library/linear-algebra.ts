@@ -46,7 +46,7 @@ import {
   TypeHandlerContext,
 } from '../global-types.js';
 import { describeType } from '../boxed-expression/operand-descriptor.js';
-import { operandLiteralValue } from './type-handlers.js';
+import { hasErrorTypedOperand, operandLiteralValue } from './type-handlers.js';
 import {
   isAbsentSymbol,
   isCharacter,
@@ -3800,6 +3800,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // declared union.
       type: ([x], { engine }) => {
         if (x === undefined) return undefined;
+        // An operand typed `error` evaluates to an error, and so does its
+        // norm (`hasErrorTypedOperand`).
+        if (hasErrorTypedOperand([x]))
+          return BoxedType.forResult('error', engine._typeResolver);
         if (isTupleOperand(x, engine))
           return BoxedType.forResult(
             declineWideNormType(pointNormTypeOf(x, engine)),
@@ -4562,7 +4566,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // value); success is not cheaply decidable — see
       // `canEnumerateFiniteSource`.
       canEnumerate: canEnumerateFiniteSource,
-      evaluate: (ops, { engine: ce }): Expression | undefined => {
+      evaluate: (
+        ops,
+        { engine: ce, numericApproximation }
+      ): Expression | undefined => {
         const M = ops[0];
 
         if (!isTensorValue(M)) return undefined;
@@ -4574,7 +4581,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         }
 
         const [m, n] = shape;
-        const result = computeSVD(M, m, n, ce);
+        // `computeSVD` declines a matrix with a complex entry. Such a matrix
+        // is decomposed by `computeComplexSVD`, which reads the entries as
+        // `SingularValues` does for a complex matrix.
+        const result =
+          computeSVD(M, m, n, ce) ??
+          computeComplexSVD(M, m, n, ce, numericApproximation);
         if (!result) return undefined;
 
         const { U, S, V } = result;
@@ -5024,6 +5036,34 @@ function numericSingularValues(
   ce: ComputeEngine,
   numericApproximation: boolean | undefined
 ): Expression | undefined {
+  const scaled = numericMachineMatrix(M, m, n, ce, numericApproximation);
+  if (scaled === undefined) return undefined;
+  const { re, im, exponent } = scaled;
+  return ce.expr([
+    'List',
+    ...singularValues(re, im).map((v) => scaledNumber(ce, v, exponent)),
+  ]);
+}
+
+/**
+ * The numeric values of the entries of an `m × n` matrix as a machine
+ * matrix (`scaledMachineMatrix`), for the singular value kernel, or
+ * `undefined`.
+ *
+ * The result is `undefined` for a symbolic, NaN or infinite entry, for a
+ * matrix of exact entries under `evaluate()` (only `.N()` gives a numeric
+ * answer for it), and for a matrix whose nonzero entry magnitudes span more
+ * than `10^MAX_SINGULAR_VALUE_RANGE_EXPONENT` (its small singular values
+ * would come back as 0). `SingularValues` and `SVD` read a complex matrix
+ * with this function.
+ */
+function numericMachineMatrix(
+  M: Expression,
+  m: number,
+  n: number,
+  ce: ComputeEngine,
+  numericApproximation: boolean | undefined
+): { re: number[][]; im: number[][]; exponent: number } | undefined {
   const packed = packTensor(ce, M);
   if (!packed) return undefined;
   const isFiniteValue = (big: BigDecimal | undefined, x: number) =>
@@ -5045,10 +5085,76 @@ function numericSingularValues(
   // The small singular values of a matrix with a wide range of entry
   // magnitudes would come back as 0 (see `scaledMachineMatrix`).
   if (wideRange) return undefined;
-  return ce.expr([
-    'List',
-    ...singularValues(re, im).map((v) => scaledNumber(ce, v, exponent)),
-  ]);
+  return { re, im, exponent };
+}
+
+/**
+ * The singular value decomposition `A = U Σ Vᴴ` of a matrix with a complex
+ * entry, in machine precision, with `singularValueDecomposition()`
+ * (`numerics/linear-algebra.ts`): U is a unitary `m × m` matrix, Σ is `m × n`
+ * with the singular values in descending order on its diagonal, and V is a
+ * unitary `n × n` matrix. `Vᴴ` is the conjugate transpose of V.
+ *
+ * The entries are read as `SingularValues` reads a complex matrix
+ * (`numericMachineMatrix`): a matrix of exact entries is decomposed only
+ * under `.N()`, and the singular values are multiplied back by the power of
+ * ten that the entries were divided by. The result is `undefined` when no
+ * entry has a nonzero imaginary part: a real matrix is `computeSVD`'s job,
+ * and a real matrix that `computeSVD` declines stays unevaluated.
+ */
+function computeComplexSVD(
+  M: Expression,
+  m: number,
+  n: number,
+  ce: ComputeEngine,
+  numericApproximation: boolean | undefined
+): { U: Expression; S: Expression; V: Expression } | undefined {
+  const scaled = numericMachineMatrix(M, m, n, ce, numericApproximation);
+  if (scaled === undefined) return undefined;
+  const { re, im, exponent } = scaled;
+  if (im.every((row) => row.every((x) => x === 0))) return undefined;
+
+  const svd = singularValueDecomposition(re, im);
+  if (!svd) return undefined;
+
+  // The kernel gives `min(m, n)` orthonormal columns for U and for V.
+  // Complete the one with fewer columns than rows to a square unitary
+  // matrix.
+  const square = (qRe: number[][], qIm: number[][], size: number) => {
+    const pad = (row: number[]) => [
+      ...row,
+      ...new Array(size - row.length).fill(0),
+    ];
+    const sRe = qRe.map(pad);
+    const sIm = qIm.map(pad);
+    completeOrthonormalColumns(sRe, sIm);
+    return { re: sRe, im: sIm };
+  };
+  // `+ 0` turns a -0 into 0.
+  const entry = (x: number, y: number) =>
+    y === 0 ? ce.number(x + 0) : ce.number(ce.complex(x + 0, y));
+  const matrix = (q: { re: number[][]; im: number[][] }) =>
+    ce.expr([
+      'List',
+      ...q.re.map((row, i) =>
+        ce.expr(['List', ...row.map((x, j) => entry(x, q.im[i][j]))])
+      ),
+    ]);
+
+  const S: Expression[][] = [];
+  for (let i = 0; i < m; i++) {
+    S.push([]);
+    for (let j = 0; j < n; j++)
+      S[i].push(
+        i === j ? scaledNumber(ce, svd.sigma[i], exponent) : ce.number(0)
+      );
+  }
+
+  return {
+    U: matrix(square(svd.uRe, svd.uIm, m)),
+    S: ce.expr(['List', ...S.map((row) => ce.expr(['List', ...row]))]),
+    V: matrix(square(svd.vRe, svd.vIm, n)),
+  };
 }
 
 /**

@@ -116,8 +116,9 @@ export class BigNumericValue extends NumericValue {
   /**
    * Return a human-readable string representation.
    *
-   * The real part is rounded to `BigDecimal.precision` significant digits
-   * so that noise digits from precision-bounded operations (division,
+   * The real part is rounded to `BigDecimal.precision` significant digits,
+   * both for a real value and for the real part of a complex value, so that
+   * noise digits from precision-bounded operations (division,
    * transcendentals) are not displayed. The imaginary part uses native
    * `Number.toString()` (always machine precision).
    *
@@ -143,7 +144,7 @@ export class BigNumericValue extends NumericValue {
     else if (this.im > 0) im = `+ ${this.im}i`;
     else im = `- ${-this.im}i`;
 
-    return `(${decimalToString(this.decimal)} ${im})`;
+    return `(${decimalToString(this.decimal.toPrecision(BigDecimal.precision))} ${im})`;
   }
 
   clone(value: number | BigDecimal | NumericValueData) {

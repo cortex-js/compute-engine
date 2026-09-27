@@ -3408,47 +3408,42 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         bodyToSerialize = operand(innerFn, 1) ?? innerFn;
       }
 
-      const plainLatex = serializer.serialize(bodyToSerialize);
       // `wrapShort` delimits the loose-infix heads (`Add`/`Subtract`/
       // `Negate`/`Multiply`/`Mod`/`Range`), a raw `Complex` sum or scaled
       // unit, and any dictionary `expression`, `infix` or `prefix` entry
       // looser than `^` (`Rational`/`Divide`, `Sum`/`Product`, `Union`),
-      // and leaves symbols, numbers,
-      // function applications (`\sin(x)`) and already delimited bodies
-      // untouched — so a difference between the two spellings is exactly
-      // the test "is this differentiand a tight atom?".
+      // and leaves symbols, numbers, function applications (`\sin(x)`) and
+      // already delimited bodies untouched.
       const fnLatex = serializer.wrapShort(bodyToSerialize);
       const varLatex = serializer.serialize(variable);
 
-      // A COMPOUND differentiand folds into the NUMERATOR
-      // (`\frac{\mathrm{d}(x - d_t)}{\mathrm{d}y}`) instead of trailing the
-      // fraction. Trailing it is unsafe at any level of delimiting: the
-      // differentiand is parsed at `ADDITION_PRECEDENCE`, so the parser keeps
-      // consuming past a closing delimiter and swallows whatever follows —
-      // `D(x - d_t, y) + 1` serialized to
-      // `\frac{\mathrm{d}}{\mathrm{d}y}x-d_{t}+1` and re-read as
-      // `D(x - d_t + 1, y)`, and merely parenthesizing the body still re-read
-      // as `D((x - d_t) + 1, y)`. The isolated case round-tripped only because
-      // that greed happened to re-absorb exactly what it emitted; any right
-      // neighbour broke it (Tycho item 166).
+      // The differentiand always goes in the NUMERATOR
+      // (`\frac{\mathrm{d}x^2}{\mathrm{d}x}`,
+      // `\frac{\mathrm{d}(x-d_t)}{\mathrm{d}y}`), never after the fraction
+      // (`\frac{\mathrm{d}}{\mathrm{d}x}x^2`).
       //
-      // The folded spelling is self-delimiting by construction — the numerator
-      // group bounds the differentiand, so nothing can leak into it — and the
-      // parser already accepts it (`\frac{d^n f}{dx^n}`, the `numerFn` route),
-      // at every order. This deliberately does NOT narrow the parser's greed:
-      // documents that rely on the current trailing binding are untouched,
-      // because a tight atom still serializes the way it always did.
-      if (fnLatex !== plainLatex) {
-        if (order === 1)
-          return `\\frac{\\mathrm{d}${fnLatex}}{\\mathrm{d}${varLatex}}`;
-        return `\\frac{\\mathrm{d}^{${order}}${fnLatex}}{\\mathrm{d}${varLatex}^{${order}}}`;
-      }
-
-      // Output Leibniz notation: \frac{d}{dx}f or \frac{d^n}{dx^n}f
-      if (order === 1) {
-        return `\\frac{\\mathrm{d}}{\\mathrm{d}${varLatex}}${fnLatex}`;
-      }
-      return `\\frac{\\mathrm{d}^{${order}}}{\\mathrm{d}${varLatex}^{${order}}}${fnLatex}`;
+      // The parser reads a differentiand that trails the fraction at
+      // `ADDITION_PRECEDENCE`: it keeps consuming terms to the end of the
+      // enclosing sum, past any closing delimiter. So the trailing spelling
+      // re-reads correctly only when nothing follows the derivative.
+      // `D(x, x) + 1` serialized to `\frac{\mathrm{d}}{\mathrm{d}x}x+1` and
+      // re-read as `D(x + 1, x)`; `D(x - d_t, y) + 1` re-read as
+      // `D(x - d_t + 1, y)` even with the body in parentheses. This is true
+      // for a single symbol as much as for a sum.
+      //
+      // The serializer cannot tell whether something follows the derivative:
+      // a handler receives no parent, and `serializer.level` cannot tell a
+      // lone `D` from the first term of a sum because `Add` and `Multiply`
+      // lower the level before they serialize their operands. So the
+      // spelling does not depend on the context.
+      //
+      // The numerator group bounds the differentiand, so the folded spelling
+      // is self-delimiting, and the parser accepts it at every order
+      // (`\frac{\mathrm{d}^n f}{\mathrm{d}x^n}`). The parser still accepts
+      // the trailing spelling as input.
+      if (order === 1)
+        return `\\frac{\\mathrm{d}${fnLatex}}{\\mathrm{d}${varLatex}}`;
+      return `\\frac{\\mathrm{d}^{${order}}${fnLatex}}{\\mathrm{d}${varLatex}^{${order}}}`;
     },
   },
 

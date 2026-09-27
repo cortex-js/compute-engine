@@ -994,6 +994,7 @@ export function roundingFunctionType(
  */
 export function absFunctionType(x: OperandDescriptor | undefined): Type {
   if (!x) return 'number';
+  if (hasErrorTypedOperand([x])) return 'error';
   const t = x.type;
   const f = factsOf(t);
   // An operand the TYPE proves infinite — the signed pair `±∞` and the
@@ -1167,6 +1168,23 @@ export function extendedElementaryFunctionType(
 }
 
 /**
+ * Whether an operand is typed `error`, such as `Sin(Tuple(A, B))` with `A`,
+ * `B` lists. Such an operand always evaluates to an error, and an operator
+ * that evaluates it (`Abs`, `Hypot`, `Norm`, `Max`, `Min`, …) evaluates to
+ * that same error, so the type handler of such an operator answers `error`.
+ * The arithmetic operators and the functions that apply to each coordinate of
+ * a tuple get the same answer from `appliesToListCoordinateTuple` in
+ * `collection-utils.ts`. A collection that holds an operand typed `error`
+ * (`List(E, 1)`, typed `list<error | integer>`) is not typed `error`: it
+ * keeps the error as an element.
+ */
+export function hasErrorTypedOperand(
+  ops: ReadonlyArray<OperandDescriptor | undefined>
+): boolean {
+  return ops.some((d) => d?.type === 'error');
+}
+
+/**
  * `Max`/`Min`/`Supremum`/`Infimum`. These are data-consuming aggregates
  * (an absent datum or empty input evaluates to NaN), so the base claim is
  * `number`. When every operand is a *scalar* number, though, no
@@ -1184,6 +1202,7 @@ export function extendedElementaryFunctionType(
  */
 export function extremumType(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length === 0) return 'number';
+  if (hasErrorTypedOperand(ops)) return 'error';
   if (ops.every((d) => factsOf(d.type).belowNumber))
     for (const t of ['integer', 'rational', 'real'] as const)
       if (ops.every((d) => factsOf(d.type)[t])) return t;

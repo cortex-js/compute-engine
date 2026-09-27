@@ -56,6 +56,7 @@ import {
   extendedElementaryFunctionType,
   boundedInverseTrigType as boundedInverseTrigTypeOnTypes,
   operandSgn as operandSgnOnTypes,
+  hasErrorTypedOperand,
   iv,
   type RealDomain,
 } from './type-handlers.js';
@@ -428,6 +429,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // per element (via its norm below) — report the honest list type, not
       // a decided-but-wrong scalar (the Tycho item-44 class).
       type: ([x, y], context) => {
+        // A leg typed `error` evaluates to an error, and so does the
+        // hypotenuse (`hasErrorTypedOperand`).
+        if (hasErrorTypedOperand([x, y]))
+          return BoxedType.forResult('error', context.engine._typeResolver);
         if (
           (x && isTupleShapedType(x.type) && pointNormBroadcasts(x)) ||
           (y && isTupleShapedType(y.type) && pointNormBroadcasts(y))

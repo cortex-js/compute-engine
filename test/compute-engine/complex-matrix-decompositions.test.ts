@@ -114,7 +114,6 @@ describe('COMPLEX MATRIX — real-only kernels stay unevaluated', () => {
     'LUDecomposition',
     'QRDecomposition',
     'CholeskyDecomposition',
-    'SVD',
   ];
   for (const head of REAL_ONLY) {
     it(`${head} of a complex matrix (box route)`, () => {
@@ -130,6 +129,22 @@ describe('COMPLEX MATRIX — real-only kernels stay unevaluated', () => {
       }
     });
   }
+
+  // `SVD` has a complex kernel: a matrix of exact complex entries stays
+  // unevaluated under `evaluate()`, as for `SingularValues`, and `.N()`
+  // decomposes it (`complex-svd.test.ts` checks the values).
+  it('SVD of an exact complex matrix is decomposed only under N()', () => {
+    for (const M of [A, H, B, C]) {
+      expect(ce.box(['SVD', M]).evaluate().operator).toBe('SVD');
+      expect(ce.box(['SVD', M]).N().operator).toBe('Tuple');
+    }
+    for (const tex of [A_TEX, H_TEX, B_TEX]) {
+      const expr = ce.parse(`\\operatorname{SVD}(${tex})`);
+      expect(expr.operator).toBe('SVD');
+      expect(expr.evaluate().operator).toBe('SVD');
+      expect(expr.N().operator).toBe('Tuple');
+    }
+  });
 
   it('a 3×3 complex matrix keeps Eigenvalues and Eigenvectors unevaluated', () => {
     // The characteristic polynomial is (1 − λ)³ − i, whose roots numpy gives
