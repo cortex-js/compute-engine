@@ -7583,13 +7583,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // The same recovery as the sync handler, with an asynchronous exact
         // evaluation.
         if (!numeric) return product;
-        return numericOfFoldAsync(
-          ce,
-          options.expression,
-          product,
-          nonFinite,
-          { signal: options.signal, _effects: options.effects }
-        );
+        return numericOfFoldAsync(ce, options.expression, product, nonFinite, {
+          signal: options.signal,
+          _effects: options.effects,
+        });
       },
     },
 
@@ -8324,8 +8321,7 @@ async function numericOfFoldAsync(
 ): Promise<Expression> {
   if (seen.kind === 'exact' && value.isNaN !== true) return value;
   return (
-    (await numericFromExactValueAsync(ce, expression, value, options)) ??
-    value
+    (await numericFromExactValueAsync(ce, expression, value, options)) ?? value
   );
 }
 

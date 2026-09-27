@@ -7131,8 +7131,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
           // result absent. At another position the handler answers for the
           // absent operand itself, as the runtime absence gate says.
           def.stripsMissingAt(i) &&
-          ((x.type.facts.containsMissing && !passedThrough[i]) ||
-            absentTerm(x))
+          ((x.type.facts.containsMissing && !passedThrough[i]) || absentTerm(x))
       );
 
     // Conditional-value threading (`threadsConditionals`) for an operator

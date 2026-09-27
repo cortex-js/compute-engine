@@ -336,6 +336,14 @@
   promoted to the complex lane (the non-negativity test did not read ranged
   types), and the real arithmetic around it gave NaN
   (`_SYS.cneg({re: 0.9999…, im: 0}) + 1`). It is now lowered real.
+- **A `Sum`, `Product`, `Loop` or `Comprehension` rebuilt from its canonical
+  operands keeps the type of its `Element` index.** The index takes the
+  element type of the collection it iterates, but a rebuilt binder narrowed
+  the index of the original scope instead of its own, so the body typed the
+  index from its use: the held value of `Sum(k², Element(k, Range(1, ∞)))`
+  was typed `number` where the expression is `integer | nan |
+  signed_infinity`, and a rebuilt `[10i for i in [1, 2, 3]]` was
+  `indexed_collection<number>` instead of `indexed_collection<integer>`.
 - **`.N()` of an infinite series with no limit stays unevaluated.**
   `Σ_{k≥1} (−1)^k` gave `−1`, `Σ_{k≥0} (−1)^k` gave `1`, `Σ cos(πk)` gave `−1`,
   and `Π 2^((−1)^k)` gave `0.5`. The extrapolation sampled the partial sums

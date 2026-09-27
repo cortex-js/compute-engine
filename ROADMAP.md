@@ -641,17 +641,6 @@ type), the host's declaration is the intended fix, so this is low priority.
 
 Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
 
-### The held value of a `Sum` over an infinite `Element` range loses its type (OPEN, small — 2026-09-26)
-
-`Sum(k², Element(k, Range(1, +∞)))` is typed `integer | nan |
-signed_infinity`, but `evaluate()` returns the same sum, held, and the held
-expression is typed `number`. The claim is still sound (`number` admits every
-value), only wider than the expression it came from. The held form is
-probably rebuilt so that the body no longer sees the index typed from the
-range, and `bigOpOverDomainType` (`library/type-handlers.ts`) then reads a
-body that is not typed on the extended real line. `Limits` forms keep their
-type.
-
 ### A tuple argument at a scalar parameter is typed `any` (OPEN, small — 2026-09-26)
 
 The call `h((1, 2))` with `h := x ↦ 2x` (declared `(real) -> real` or not)

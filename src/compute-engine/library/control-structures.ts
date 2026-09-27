@@ -2402,8 +2402,18 @@ function canonicalLoopLike(
       // `library/utils.ts`, says why and how the removal is journaled).
       const bindAuthoritatively = (binding: Expression, type: Type): void =>
         bindIndexAuthoritatively(ce, binding, type);
+      // The binding narrowed is the one this scope holds for the name: a
+      // clause that is already canonical (a loop rebuilt from its canonical
+      // operands) keeps its index bound to the ORIGINAL loop's scope, and
+      // narrowing that symbol left this scope's index `unknown`, so the body
+      // typed `10i` as `number` (`canonicalIndexingSet`, `library/utils.ts`,
+      // does the same for a `Sum`).
       if (isSymbol(idxCanonical)) {
-        bindAuthoritatively(idxCanonical, elt);
+        bindAuthoritatively(
+          ce._bindingSymbol(idxCanonical.symbol, ce.context.lexicalScope) ??
+            idxCanonical,
+          elt
+        );
         return;
       }
       // A destructuring pattern (`for (p, q) in pairs`) binds each leaf to

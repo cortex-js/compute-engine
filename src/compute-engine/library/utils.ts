@@ -2006,13 +2006,24 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     // assumption, and the binding written here is a contract the next
     // statement must not be able to retract. An element type that is unknown
     // leaves the index `unknown`, to be typed by its use in the body.
+    //
+    // The binding narrowed is the one this scope holds for the name. A clause
+    // that is already canonical (a `Sum` rebuilt from its canonical operands,
+    // which `evaluate()` does when the sum stays symbolic) keeps its index
+    // symbol bound to the scope of the ORIGINAL sum, so narrowing that symbol
+    // left the new scope's index `unknown`; the body then typed it `number`
+    // from `k²`, and the held `Sum(k², Element(k, [1, 2, 3]))` was typed
+    // `number` where the original was `integer`.
     if (isSymbol(canonicalIndex) && canonicalIndex.symbol !== 'Nothing')
       ce._withoutFacts(() => {
         const elt = collectionElementType(
           resolveTypeForCompilation(canonicalCollection.type.type)
         );
         if (elt === undefined || elt === 'any' || elt === 'unknown') return;
-        bindIndexAuthoritatively(ce, canonicalIndex, elt);
+        const binding =
+          ce._bindingSymbol(canonicalIndex.symbol, ce.context.lexicalScope) ??
+          canonicalIndex;
+        bindIndexAuthoritatively(ce, binding, elt);
       });
     if (condition) {
       return ce.function('Element', [

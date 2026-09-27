@@ -528,7 +528,10 @@ export class BigNumericValue extends NumericValue {
         const imagExp = arg.mul(re).add(lnMod.mul(im));
         const mag = realExp.exp();
         // `mul` is exact (2P digits); round back to working precision.
-        const reValue = mag._mulToPrecision(imagExp.cos(), BigDecimal.precision);
+        const reValue = mag._mulToPrecision(
+          imagExp.cos(),
+          BigDecimal.precision
+        );
         const imValue = mag.mul(imagExp.sin());
         // A part is dust only when it is small compared with the modulus of
         // the result, `mag` (see `isComplexDust()`).
