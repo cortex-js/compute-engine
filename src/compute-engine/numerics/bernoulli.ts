@@ -177,6 +177,7 @@ export function generalizedZetaNegativeInteger(
 ): [bigint, bigint] | undefined {
   if (!Number.isInteger(n) || n < 0)
     throw new RangeError(`generalizedZetaNegativeInteger: invalid index ${n}`);
+  // eslint-disable-next-line prefer-const
   let [num, den] = reduce(a[0], a[1]);
   const power = BigInt(n);
   let sumNum = 0n;
