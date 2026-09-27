@@ -6260,7 +6260,7 @@ type SymbolResolution = {
 ```
 
 What the ambient environment knows about a declared symbol, as reported by
-the [ParseLatexOptions.resolveSymbol](#parselatexoptions) handler.
+the ParseLatexOptions.resolveSymbol handler.
 
 Declaration is signaled by the *presence* of this record (the handler
 returns `undefined` for an undeclared symbol), so a declared symbol whose
@@ -6588,7 +6588,7 @@ The single symbol oracle: everything the parser knows about `id`.
 
 Merges (in priority order) parser-local bindings — sum indices, `Block`/
 `Function` parameters, tracked in the parser's symbol table — over the
-[ParseLatexOptions.resolveSymbol](#parselatexoptions) handler (which `ce.parse()` wires
+ParseLatexOptions.resolveSymbol handler (which `ce.parse()` wires
 to consult explicit engine declarations before external handlers).
 
 Returns `undefined` if `id` is undeclared. A declared symbol always gets
@@ -9430,7 +9430,7 @@ For an operator that RETURNS a collection but has no `collection`
 handlers (an EAGER producer — `Sort`, `Chunk`, `Ordering`, …): how many
 elements would `evaluate()` produce?
 
-The `count` twin of [canEnumerate](#operatordefinition), and the honest replacement for
+The `count` twin of canEnumerate, and the honest replacement for
 the broadcast count fallback: `count` reads the operands' agreed length
 only for a `broadcastable` operator, where agreement IS the semantics
 (`docs/BROADCAST-MODEL.md`). A reshaping operator's length is its own
@@ -15199,7 +15199,7 @@ Default: `"auto"`
 
 ##### Deprecated
 
-Use [digits](#numberserializationformat) instead.
+Use digits instead.
 
 </MemberCard>
 
