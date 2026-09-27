@@ -1050,6 +1050,18 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * Advanced when an existing definition changes: a retype, a declaration
+   * that shadows a callable, or any other change of a callable except a
+   * declaration. Keys the memo of a declared function's derived result
+   * (`declaredResultMemoKey`); see
+   * `EngineConfigurationLifecycle.definitionVersion`. READ-ONLY.
+   * @internal
+   */
+  get _definitionVersion(): number {
+    return this._configurationLifecycle.definitionVersion;
+  }
+
+  /**
    * The `callable` invalidation axis (design §5, step 3) — events that can
    * change what the effects projection reads: world-class events, callable
    * writes/declares/retypes/swaps, and assumption-dirty pops. Keys
@@ -1057,12 +1069,6 @@ export class ComputeEngine implements IComputeEngine {
    * see `_anyVersion`.
    * @internal
    */
-  /** See `EngineConfigurationLifecycle.typeVersion`.
-   * @internal */
-  get _typeVersion(): number {
-    return this._configurationLifecycle.typeVersion;
-  }
-
   get _callableVersion(): number {
     return this._configurationLifecycle.callableVersion;
   }

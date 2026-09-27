@@ -185,4 +185,50 @@ describe('THE RESULT UNDER DECLARED PARAMETER TYPES IS MEMOIZED', () => {
       'real';
     expect(ce.box('f').type.toString()).toBe('(integer) -> real');
   });
+  test('functions with an `unknown` parameter do not invalidate each other', () => {
+    // An `unknown` parameter may hold a function, so declaring it moves the
+    // engine's `callable` axis. When that axis was part of the memo key,
+    // re-boxing `k` invalidated `w`'s memo and re-boxing `w` invalidated
+    // `k`'s, and every enclosing operator read them again: Tycho's
+    // `plasma-effect` document took more than 5 s to register `s`.
+    const ce = new ComputeEngine();
+    ce.declare('t', T);
+    ce.assign('t', 1);
+    ce.declare('k', `(unknown, ${T}) -> unknown`);
+    ce.assign('k', ce.parse('(x,y) \\mapsto \\cos(y+0.3t)+2.4t'));
+    ce.declare('w', `(${T}, unknown) -> unknown`);
+    ce.assign('w', ce.parse('(x,y) \\mapsto \\sin(x+0.3t)-0.7t'));
+    const engine = ce as unknown as { box: (...args: unknown[]) => unknown };
+    const box = engine.box.bind(ce);
+    let boxed = 0;
+    engine.box = (...args: unknown[]) => {
+      boxed += 1;
+      return box(...args);
+    };
+    try {
+      const e = ce.parse('\\sin(\\cos(k(x,y)+w(x,y)))');
+      expect(e.type.toString()).toBe('nan | real');
+    } finally {
+      engine.box = box;
+    }
+    // Measured: 6 calls of `box` (the parse, and each signature derived
+    // once); 0.137.1 made 11 274.
+    expect(boxed).toBeLessThanOrEqual(20);
+  });
+  test('a declaration that shadows a function moves the definition counter', () => {
+    // A cached result follows this counter; a parameter declaration that
+    // merely MAY hold a function (an `unknown` parameter) does not move it.
+    const ce = new ComputeEngine();
+    const engine = ce as unknown as { _definitionVersion: number };
+    ce.declare('h', 'function');
+    ce.assign('h', ce.parse('t \\mapsto t'));
+    let before = engine._definitionVersion;
+    ce.parse('(x) \\mapsto x').type.toString();
+    expect(engine._definitionVersion).toBe(before);
+    before = engine._definitionVersion;
+    ce.pushScope();
+    ce.declare('h', 'integer');
+    expect(engine._definitionVersion).toBeGreaterThan(before);
+    ce.popScope();
+  });
 });

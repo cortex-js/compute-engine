@@ -100,14 +100,20 @@ export function resultUnderDeclaredParameters(
  * in. So the key moves with:
  * - a value write (`_semanticVersion`);
  * - an assumption, a redefinition or a signature inference (`_worldVersion`);
- * - a change of a function, and every inference event
- *   (`_callableVersion`: `callableAxisSelects` selects it for each one);
- * - a retype of a symbol (`_typeVersion`). A narrowing of a symbol by a use
+ * - a retype of a symbol, a declaration that shadows a function, and any
+ *   other change of a function (`_definitionVersion`). A narrowing of a
+ *   symbol by a use
  *   (`inference-settled`) is not counted: it is frequent, and it can only
  *   leave a cached result wider than it could be, never wrong;
  * - a declaration in the literal's home scope or one of its ancestors
  *   (`scopeChainDeclarationCount`): assigning an undeclared `b` declares it
- *   in the global scope, and `x ↦ b + x` then reads it;
+ *   in the global scope, and `x ↦ b + x` then reads it. A declaration in the
+ *   home scope of a function the body CALLS, outside this chain, is not
+ *   counted unless it shadows a function: a callee defined in another
+ *   scope, whose result changes because a new scalar is declared there,
+ *   can leave this result wider or narrower than a fresh derivation until
+ *   another counter moves (all functions of a Tycho document share one
+ *   scope, so this does not arise there);
  * - whether the assumptions are hidden (the low bit of `_cacheGeneration()`).
  * Each memo records this key AFTER its computation, so the events of the
  * computation itself are part of it.
@@ -124,6 +130,13 @@ export function resultUnderDeclaredParameters(
  * computation is not enough either: the boxing of an outer function (`V`)
  * declares its own parameters between two reads of an inner one (`P`), and
  * one document still took more than 200 s.
+ *
+ * Nor is it the `callable` axis, which a declaration of a parameter that may
+ * hold a function (an `unknown` parameter) also moves. With `k` declared
+ * `(unknown, T) -> unknown` and `w` declared `(T, unknown) -> unknown`,
+ * re-boxing `k` moved the axis and invalidated `w`'s memo, and re-boxing `w`
+ * invalidated `k`'s: typing `sin(cos(k(x,y) + w(x,y)))` took 10 s (Tycho's
+ * `plasma-effect` document hit its 5 s budget and dropped a definition).
  */
 export function declaredResultMemoKey(
   ce: IComputeEngine,
@@ -133,8 +146,8 @@ export function declaredResultMemoKey(
   // parameter types (`resultUnderDeclaredParameters`), so no scope's
   // declarations can change it.
   const home = homeScopeOf(literal);
-  return `${ce._semanticVersion}:${ce._worldVersion}:${ce._callableVersion}:${
-    ce._typeVersion
+  return `${ce._semanticVersion}:${ce._worldVersion}:${
+    ce._definitionVersion
   }:${scopeChainDeclarationCount(home)}:${ce._cacheGeneration() & 1}`;
 }
 

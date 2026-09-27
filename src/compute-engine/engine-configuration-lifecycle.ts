@@ -192,7 +192,7 @@ export class EngineConfigurationLifecycle {
   private _semanticVersion = 0;
   private _worldVersion = 0;
   private _callableVersion = 0;
-  private _typeVersion = 0;
+  private _definitionVersion = 0;
   private _ephemeralWriteDepth = 0;
   private _factSuppressionDepth = 0;
   private _scratchDeclarationScopes: object[] = [];
@@ -216,18 +216,25 @@ export class EngineConfigurationLifecycle {
     return this._callableVersion;
   }
 
-  /** Advanced when an existing symbol is retyped (a `type-write`). That
-   * event advances only the `any` axis, which every declaration also
-   * advances, so a cache that must follow a retype but must not be
-   * invalidated by a declaration (the declarations a computation makes
-   * itself) keys on this counter. See `declaredResultMemoKey`.
+  /** Advanced when an existing definition changes: a symbol retyped (a
+   * `type-write`), a declaration that SHADOWS a callable (a name that held a
+   * function now resolves to the new binding, in whatever scope), or any
+   * other event that can change a callable (`callableAxisSelects`). A retype
+   * of a scalar advances only the `any` axis, which every declaration also
+   * advances; and a declaration of a parameter that may hold a function (an
+   * `unknown` parameter) selects the `callable` axis without shadowing
+   * anything. A cache that must follow those changes but must not be
+   * invalidated by the declarations every function literal makes for its
+   * parameters keys on this counter, and tracks the other declarations it
+   * depends on per scope (`scopeChainDeclarationCount`). See
+   * `declaredResultMemoKey`.
    *
    * An `inference-settled` event (a symbol narrowed by a use) does not
    * advance it: those are frequent during type derivation, and counting
    * them made a Tycho document three times slower to register. A narrowing
    * can only make a cached result wider than it could be, never wrong. */
-  get typeVersion(): number {
-    return this._typeVersion;
+  get definitionVersion(): number {
+    return this._definitionVersion;
   }
 
   get ephemeralWriteDepth(): number {
@@ -276,7 +283,13 @@ export class EngineConfigurationLifecycle {
     if (m.semantic) this._semanticVersion += 1;
     if (m.world) this._worldVersion += 1;
     if (callableAxisSelects(e)) this._callableVersion += 1;
-    if (e.kind === 'type-write') this._typeVersion += 1;
+    if (
+      e.kind === 'type-write' ||
+      (e.kind === 'declare'
+        ? !e.scratch && e.shadowsCallable
+        : callableAxisSelects(e))
+    )
+      this._definitionVersion += 1;
     if (CACHE_STATS) {
       if (m.any) recordBump('generation');
       if (m.semantic) recordBump('mutationGeneration');

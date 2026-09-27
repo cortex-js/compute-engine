@@ -641,6 +641,22 @@ type), the host's declaration is the intended fix, so this is low priority.
 
 Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
 
+### A declared function's derived result misses a declaration in a callee's scope (OPEN, small — 2026-09-26)
+
+The signature of a function declared `(T, …) -> unknown` reports the result
+its body has under the declared parameter types, cached until one of the
+counters in `declaredResultMemoKey`
+(`boxed-expression/declared-parameter-result.ts`) moves. Declarations are
+counted per scope, along the function's own home scope chain only. So if
+`f` (global) calls `g` (defined in a child scope), and a new scalar is
+declared in `g`'s scope, `g`'s result follows but `f`'s cached result does
+not, unless the declaration shadows a function or `f`'s own literal type
+changes. The stale result can be wider or narrower than a fresh derivation.
+Not reachable in Tycho, whose functions all live in one document scope.
+Found by review, not measured on a real input. A general fix records, while
+the result is derived, which callee signatures were read and keys on their
+memo keys too.
+
 ### A tuple argument at a scalar parameter is typed `any` (OPEN, small — 2026-09-26)
 
 The call `h((1, 2))` with `h := x ↦ 2x` (declared `(real) -> real` or not)

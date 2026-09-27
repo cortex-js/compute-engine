@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **Functions with an `unknown` parameter no longer slow each other down.**
+  With `k` declared `(unknown, T) -> unknown` and `w` declared
+  `(T, unknown) -> unknown`, deriving the signature of one invalidated the
+  cached signature of the other, so typing `sin(cos(k(x,y) + w(x,y)))` took
+  10 s and boxed 11 274 expressions; it takes a few milliseconds (0.137.1).
+
 ## 0.137.1 _2026-09-26_
 
 ### Issues Resolved
