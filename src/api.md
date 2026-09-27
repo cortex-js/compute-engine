@@ -7840,6 +7840,27 @@ short (not a function)
 
 <MemberCard>
 
+##### Serializer.wrapPowerBase() {#wrappowerbase}
+
+```ts
+wrapPowerBase(expr): string
+```
+
+Like `wrapShort`, but for a base directly under a `^` (the base of a
+`Power`/`Square`, or of a `Root` written in exponent form: the solidus
+or quotient root style), where a nested power or a
+postfix `Factorial` also needs a fence.
+
+####### expr
+
+  \| [`MathJsonExpression`](#mathjsonexpression)
+  \| `null`
+  \| `undefined`
+
+</MemberCard>
+
+<MemberCard>
+
 ### SerializeHandler {#serializehandler}
 
 ```ts
