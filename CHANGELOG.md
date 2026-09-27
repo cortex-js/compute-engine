@@ -1,3 +1,19 @@
+## Unreleased
+
+### Issues Resolved
+
+- **The hyperbolic functions fold at 0 under `evaluate()`,** as the circular
+  ones do (#341, contributed by
+  [enumeratio](https://github.com/enumeratio)): `Sinh(0)`, `Tanh(0)`,
+  `Arsinh(0)` and `Artanh(0)` are `0`,
+  `Cosh(0)` and `Sech(0)` are `1`, and `Coth(0)` and `Csch(0)` are
+  `ComplexInfinity`, as `Cot(0)` and `Csc(0)` are. `Arcosh(1)` and
+  `Arsech(1)` are `0`. `Coth(0).N()`, `Csch(0).N()` and `Arcsch(0).N()` are
+  now `ComplexInfinity`, as `evaluate()` gives, not `PositiveInfinity`, and
+  so is the compiled complex lane of `Coth` and `Csch` at `0` (it answered
+  `{re: ∞, im: 0}`). `simplify()` folds the same values (`Sinh(0).simplify()`
+  was symbolic).
+
 ## 0.137.3 _2026-09-26_
 
 ### Issues Resolved

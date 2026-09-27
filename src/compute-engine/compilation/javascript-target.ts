@@ -11786,22 +11786,19 @@ const SYS_HELPERS = {
     return SYS_HELPERS.cpow(zz, cxDiv({ re: 1, im: 0 }, nn));
   },
   // The reciprocal kernels have a pole at zero, where the complex library
-  // answers `NaN`. The interpreter answers `~oo` for `cot 0` and `csc 0`, and
-  // `+∞` for `coth 0` and `csch 0`.
+  // answers `NaN`. The interpreter answers the two-sided pole `~oo` for
+  // `cot 0`, `csc 0`, `coth 0` and `csch 0` (`hyperbolicExactValue`,
+  // `boxed-expression/trigonometry.ts`), so the compiled lane does too.
   ccot: (z: ComplexResult) =>
     isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).cot()),
   csec: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sec()),
   ccsc: (z: ComplexResult) =>
     isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).csc()),
   ccoth: (z: ComplexResult) =>
-    isComplexZero(z)
-      ? { re: Infinity, im: 0 }
-      : toRI(new Complex(z.re, z.im).coth()),
+    isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).coth()),
   csech: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sech()),
   ccsch: (z: ComplexResult) =>
-    isComplexZero(z)
-      ? { re: Infinity, im: 0 }
-      : toRI(new Complex(z.re, z.im).csch()),
+    isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).csch()),
   cacot: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acot()),
   // `arcsec 0` and `arccsc 0` are `NaN` in the interpreter, and `arsech 0` is
   // `+∞`. The complex library answers a value with an infinite imaginary

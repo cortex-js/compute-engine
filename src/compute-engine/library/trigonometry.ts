@@ -13,6 +13,7 @@ import {
   constructibleValues,
   evalTrig,
   halfTurnAngle,
+  hyperbolicExactValue,
   processInverseFunction,
   radiansToAngle,
   trigSign,
@@ -1463,37 +1464,6 @@ function angularQuantityToRadians(expr: Expression): Expression | null {
 }
 
 /**
- * Literal pole values of the inverse hyperbolic functions:
- *   `artanh(±1) = ±∞`, `arcoth(±1) = ±∞` (one-sided real poles),
- *   `arsech(0) = +∞` (approached from the domain `(0, 1]`),
- *   `arcsch(0) = ~oo` (odd function, two-sided pole).
- * Returns `undefined` for any other operator or argument. Only applies to a
- * real number literal (`im === 0`).
- */
-function inverseHyperbolicPole(
-  operator: string,
-  x: Expression | undefined,
-  ce: IComputeEngine
-): Expression | undefined {
-  if (!isNumber(x) || x.im !== 0) return undefined;
-  switch (operator) {
-    case 'Artanh':
-    case 'Arcoth':
-      if (x.isSame(1)) return ce.PositiveInfinity;
-      if (x.isSame(-1)) return ce.NegativeInfinity;
-      return undefined;
-    case 'Arsech':
-      if (x.isSame(0)) return ce.PositiveInfinity;
-      return undefined;
-    case 'Arcsch':
-      if (x.isSame(0)) return ce.ComplexInfinity;
-      return undefined;
-    default:
-      return undefined;
-  }
-}
-
-/**
  * Can `DMS`'s degrees/minutes/seconds operands be folded into a single
  * degree count by reading `.re`?
  *
@@ -1722,6 +1692,13 @@ function trigFunction(
         const r = measurementTrig(engine, operator, evalX);
         if (r !== undefined) return numericApproximation ? r.N() : r;
       }
+      // Exact hyperbolic values (`sinh(0) = 0`, `coth(0) = ~oo`,
+      // `artanh(1) = +oo`, ...), ahead of the numeric branch so `.N()` agrees
+      // with `evaluate()` (the float kernel gives `Arcsch(0)` a signed
+      // infinity). The same helper serves the `constructible value` simplify
+      // rule, so `simplify()` agrees too.
+      const exact = hyperbolicExactValue(operator, x);
+      if (exact) return numericApproximation ? exact.N() : exact;
       // The operand before its numeric evaluation lets the kernel read an
       // exact large angle without rounding it first (`12345678901234567890123`
       // or `10³⁰·π`). It is the operand of `x` only when the node has one
@@ -1734,10 +1711,6 @@ function trigFunction(
             ? expression.op1
             : undefined
         );
-      // Literal poles of the inverse hyperbolic functions are exact non-finite
-      // values, so fold them in `evaluate()` too (not just `.N()`).
-      const pole = inverseHyperbolicPole(operator, x, engine);
-      if (pole) return pole;
       const a = constructibleValues(operator, x);
       if (a) return a;
       // No constructible value: numericize ONLY an inexact (float) numeric

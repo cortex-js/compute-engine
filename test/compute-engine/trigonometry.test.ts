@@ -273,6 +273,10 @@ describe('Inverse hyperbolic literal poles', () => {
     test(`${op}(${arg}) = ${expected} (exact, non-finite)`, () => {
       const e = engine.expr([op, arg]);
       expect(e.evaluate().toString()).toBe(expected);
+      // `.N()` and `simplify()` agree with `evaluate()`: the exact pole is
+      // read before the float kernel, which gave `Arcsch(0)` `+oo`.
+      expect(e.N().toString()).toBe(expected);
+      expect(e.simplify().toString()).toBe(expected);
       // Type must not claim real for a pole.
       expect(e.type.matches('real')).toBe(false);
     });
@@ -322,6 +326,73 @@ describe('Degrees is a faithful conversion (REVIEW.md B20)', () => {
     const r = ce.expr(['Degrees', 0.5]).evaluate();
     expect((r as unknown as { isExact?: boolean }).isExact).toBe(false);
     expect(r.re).toBeCloseTo((0.5 * Math.PI) / 180, 12);
+  });
+});
+
+// Regression: the hyperbolic functions stayed symbolic at 0 under
+// `evaluate()` (only `.N()` folded them), unlike their circular counterparts
+// (Sin(0), Cos(0), Tan(0), … already fold via `constructibleValues`, which
+// only knows the circular special angles). `Coth(0)` and `Csch(0)` match
+// `Cot(0)` and `Csc(0)`: `ComplexInfinity`, not a signed infinity.
+describe('Hyperbolic functions at 0', () => {
+  const cases: [string, string][] = [
+    ['Sinh', '0'],
+    ['Cosh', '1'],
+    ['Tanh', '0'],
+    ['Sech', '1'],
+    ['Coth', '~oo'],
+    ['Csch', '~oo'],
+    ['Arsinh', '0'],
+    ['Artanh', '0'],
+  ];
+  for (const [op, expected] of cases) {
+    test(`${op}(0) = ${expected} (exact, evaluate)`, () =>
+      expect(engine.expr([op, 0]).evaluate().toString()).toBe(expected));
+    test(`${op}(0) = ${expected} (N, consistent with evaluate)`, () =>
+      expect(engine.expr([op, 0]).N().toString()).toBe(expected));
+    test(`${op}(0) = ${expected} (simplify, consistent with evaluate)`, () =>
+      expect(engine.expr([op, 0]).simplify().toString()).toBe(expected));
+  }
+
+  // The fold does not depend on the route: a parsed `\sinh(0)` and a
+  // compound argument that evaluates to 0 fold too.
+  test('parse route: \\cosh(0) and \\coth(0)', () => {
+    expect(engine.parse('\\cosh(0)').evaluate().toString()).toBe('1');
+    expect(engine.parse('\\coth(0)').evaluate().toString()).toBe('~oo');
+  });
+  test('compound argument: Sinh(x - x) = 0', () => {
+    const x = engine.symbol('x');
+    expect(
+      engine
+        .function('Sinh', [x.sub(x)])
+        .evaluate()
+        .toString()
+    ).toBe('0');
+  });
+
+  // The real zeros of the two inverse functions whose domain starts at 1.
+  test('Arcosh(1) = 0 and Arsech(1) = 0 under evaluate, N and simplify', () => {
+    for (const op of ['Arcosh', 'Arsech']) {
+      expect(engine.expr([op, 1]).evaluate().toString()).toBe('0');
+      expect(engine.expr([op, 1]).N().toString()).toBe('0');
+      expect(engine.expr([op, 1]).simplify().toString()).toBe('0');
+    }
+  });
+
+  // Arcosh(0) and Arcoth(0) are legitimately iπ/2, but stay symbolic under
+  // `evaluate()`, matching how Arccos leaves another exact-but-complex value
+  // (e.g. Arccos(2)) unevaluated there.
+  test('Arcosh(0) stays symbolic under evaluate, folds under N', () => {
+    expect(engine.expr(['Arcosh', 0]).evaluate().operator).toBe('Arcosh');
+    const v = engine.expr(['Arcosh', 0]).N();
+    expect(v.re).toBeCloseTo(0, 12);
+    expect(v.im).toBeCloseTo(Math.PI / 2, 12);
+  });
+  test('Arcoth(0) stays symbolic under evaluate, folds under N', () => {
+    expect(engine.expr(['Arcoth', 0]).evaluate().operator).toBe('Arcoth');
+    const v = engine.expr(['Arcoth', 0]).N();
+    expect(v.re).toBeCloseTo(0, 12);
+    expect(v.im).toBeCloseTo(Math.PI / 2, 12);
   });
 });
 

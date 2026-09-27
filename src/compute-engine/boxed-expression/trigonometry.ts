@@ -1222,6 +1222,64 @@ export function isConstructible(x: string | Expression): boolean {
   );
 }
 
+/**
+ * Exact values of the hyperbolic functions at a real number literal, which
+ * `constructibleValues` (circular special angles only) does not cover:
+ *
+ * - at 0: `sinh`, `tanh`, `arsinh`, `artanh` are `0`; `cosh` and `sech` are
+ *   `1`; `coth(0)` and `csch(0)` are two-sided poles, `ComplexInfinity`, as
+ *   `cot(0)` and `csc(0)` are;
+ * - at 1: `arcosh(1)` and `arsech(1)` are `0`;
+ * - the literal poles of the inverse functions: `artanh(±1)` and `arcoth(±1)`
+ *   are `±∞` (one-sided real poles), `arsech(0)` is `+∞` (approached from the
+ *   domain `(0, 1]`), `arcsch(0)` is `ComplexInfinity` (odd, two-sided pole).
+ *
+ * `Arcosh(0)` and `Arcoth(0)` are `iπ/2` and, like `Arccos(2)`, stay symbolic.
+ * Returns `undefined` for any other operator or argument.
+ *
+ * Both the `evaluate` handler (`library/trigonometry.ts`) and the
+ * `constructible value` simplify rule (`symbolic/simplify-rules.ts`) call
+ * this, so `evaluate()`, `.N()` and `simplify()` agree.
+ */
+export function hyperbolicExactValue(
+  operator: string,
+  x: Expression | undefined
+): Expression | undefined {
+  if (!isNumber(x) || x.im !== 0) return undefined;
+  const ce = x.engine;
+  switch (operator) {
+    case 'Sinh':
+    case 'Tanh':
+    case 'Arsinh':
+      return x.isSame(0) ? ce.Zero : undefined;
+    case 'Cosh':
+    case 'Sech':
+      return x.isSame(0) ? ce.One : undefined;
+    case 'Coth':
+    case 'Csch':
+      return x.isSame(0) ? ce.ComplexInfinity : undefined;
+    case 'Artanh':
+      if (x.isSame(0)) return ce.Zero;
+      if (x.isSame(1)) return ce.PositiveInfinity;
+      if (x.isSame(-1)) return ce.NegativeInfinity;
+      return undefined;
+    case 'Arcoth':
+      if (x.isSame(1)) return ce.PositiveInfinity;
+      if (x.isSame(-1)) return ce.NegativeInfinity;
+      return undefined;
+    case 'Arcosh':
+      return x.isSame(1) ? ce.Zero : undefined;
+    case 'Arsech':
+      if (x.isSame(0)) return ce.PositiveInfinity;
+      if (x.isSame(1)) return ce.Zero;
+      return undefined;
+    case 'Arcsch':
+      return x.isSame(0) ? ce.ComplexInfinity : undefined;
+    default:
+      return undefined;
+  }
+}
+
 export function constructibleValues(
   operator: string,
   x: Expression | undefined

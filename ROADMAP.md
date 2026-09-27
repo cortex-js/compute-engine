@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-25.
+**Last updated:** 2026-09-26.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -433,6 +433,21 @@ expected effect on the corpus.
   linear in its length. The alternative is to document the returned enclosure as
   read-only and drop the copy. Today no in-repo consumer writes to a returned
   enclosure. The copy stays until ruled otherwise.
+
+### LaTeX: the trailing Leibniz form of a derivative absorbs the term that follows it (OPEN, small — found 2026-09-26 by the review of PR #349)
+
+`Add(D(x, x), 1)` serializes as `\frac{\mathrm{d}}{\mathrm{d}x}x+1`, and
+`ce.parse` reads that back as `D(x + 1, x)`: the parser reads the differentiand
+to the end of the sum. The same happens for every "tight atom" differentiand
+that the `D` serializer (`latex-syntax/dictionary/definitions-core.ts`) puts
+in the trailing position (`x^2`, `x!`, `\sin(x)`); the comment there says the
+trailing form is safe for a tight atom, which holds only when nothing follows
+the derivative. PR #349 moves a fraction, `Sum` or `Product` differentiand to
+the self-delimiting folded-numerator form
+`\frac{\mathrm{d}(\frac{x}{y})}{\mathrm{d}x}`, which fixes those shapes; the
+tight atoms still use the trailing form. Fix: use the folded form whenever the
+`D` is not the last operand of its parent, or always. The blast radius is the
+snapshots of every serialized derivative of a tight atom; measure it first.
 
 ### JavaScript target: adding two point lists of different lengths throws a `TypeError` (OPEN — found 2026-09-23 while fixing Tycho item 307)
 

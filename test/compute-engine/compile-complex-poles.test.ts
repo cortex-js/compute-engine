@@ -132,8 +132,8 @@ describe('The complex kernels at an exact pole', () => {
   test.each([
     ['Cot', '~oo'],
     ['Csc', '~oo'],
-    ['Coth', Infinity],
-    ['Csch', Infinity],
+    ['Coth', '~oo'],
+    ['Csch', '~oo'],
     ['Arsech', Infinity],
   ])('%s(z) at z = 0', (head, want) => {
     expect(spelled(run([head, 'z'], { z: ZERO }))).toBe(want);

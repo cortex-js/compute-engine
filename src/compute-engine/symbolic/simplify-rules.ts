@@ -1,5 +1,6 @@
 import {
   constructibleValues,
+  hyperbolicExactValue,
   isConstructible,
   processInverseFunction,
   arctan2AtInfinity,
@@ -835,11 +836,14 @@ export const SIMPLIFY_RULES: Rule[] = [
   simplifyProduct,
 
   //
-  // Constructible values of trig functions
+  // Constructible values of trig functions, and the exact values of the
+  // hyperbolic functions at a literal (`sinh(0)`, `coth(0)`, `artanh(1)`)
   //
   (x): RuleStep | undefined => {
-    if (!isConstructible(x) || !isFunction(x)) return undefined;
-    const value = constructibleValues(x.operator, x.op1);
+    if (!isFunction(x)) return undefined;
+    const value = isConstructible(x)
+      ? constructibleValues(x.operator, x.op1)
+      : hyperbolicExactValue(x.operator, x.op1);
     if (!value) return undefined;
     return { value, because: 'constructible value' };
   },

@@ -294,7 +294,7 @@ exports[`simplify: trigonometry \\tan(0) 1`] = `0`;
 
 exports[`simplify: trigonometry \\tan(x)\\cos(x) 1`] = `["Multiply", ["Cos", "x"], ["Tan", "x"]]`;
 
-exports[`simplify: trigonometry \\tanh(0) 1`] = `["Tanh", 0]`;
+exports[`simplify: trigonometry \\tanh(0) 1`] = `0`;
 
 exports[`simplify: trigonometry 1 - \\sin^2(x) 1`] = `["Square", ["Cos", "x"]]`;
 
