@@ -8,9 +8,13 @@ import type {
   TypeProvenanceEntry,
 } from '../global-types.js';
 import {
+  calleeHomesDeclarationCount,
+  collectCalleeHomes,
   declaredResultMemoKey,
+  noteCalleeHomes,
   resultUnderDeclaredParameters,
   withSignatureResult,
+  type HomeScope,
 } from './declared-parameter-result.js';
 
 import type { Type, TypeString } from '../../common/type/types.js';
@@ -211,6 +215,11 @@ export class _BoxedValueDefinition
         value: Expression;
         valueType: string;
         versions: string;
+        /** The home scopes of the declared functions the body calls,
+         * transitively (`collectCalleeHomes`), and the declarations counted
+         * along their chains when the result was derived. */
+        calleeHomes: HomeScope[];
+        calleeCount: number;
         type: BoxedType;
       }
     | undefined = undefined;
@@ -844,9 +853,10 @@ export class _BoxedValueDefinition
       memo.skeleton === skeleton &&
       memo.value === v &&
       memo.valueType === valueTypeKey &&
-      memo.versions === declaredResultMemoKey(this._engine, v)
+      memo.versions === declaredResultMemoKey(this._engine, v) &&
+      calleeHomesDeclarationCount(memo.calleeHomes) === memo.calleeCount
     )
-      return memo.type;
+      return this._noted(memo.type, memo.calleeHomes);
     // The stored literal reads its scalar parameters as `unknown`; its
     // result under the DECLARED parameter types is the accurate one to
     // report (`resultUnderDeclaredParameters`).
@@ -854,10 +864,15 @@ export class _BoxedValueDefinition
     // signature: the guard makes that read answer the recorded type, as for
     // the value's type above. Without it, each level boxed the body again,
     // without end.
+    // The home scopes of the declared functions the body calls are recorded
+    // while the result is derived (`collectCalleeHomes`).
     let typedResult: Type | undefined;
+    let calleeHomes: HomeScope[];
     this._derivingSignature = true;
     try {
-      typedResult = resultUnderDeclaredParameters(this._engine, v, skeleton);
+      ({ result: typedResult, homes: calleeHomes } = collectCalleeHomes(() =>
+        resultUnderDeclaredParameters(this._engine, v, skeleton)
+      ));
     } finally {
       this._derivingSignature = false;
     }
@@ -881,8 +896,23 @@ export class _BoxedValueDefinition
         value: v,
         valueType: valueTypeKey,
         versions: declaredResultMemoKey(this._engine, v),
+        calleeHomes,
+        calleeCount: calleeHomesDeclarationCount(calleeHomes),
         type,
       };
+    return this._noted(type, calleeHomes);
+  }
+
+  /** `type`, after recording this function's home scope and the home scopes
+   * its derived result depends on (`calleeHomes`) for a derivation of
+   * another declared function that reads this signature
+   * (`noteCalleeHomes`). */
+  private _noted(
+    type: BoxedType,
+    calleeHomes: readonly HomeScope[]
+  ): BoxedType {
+    const literal = this.storedValue;
+    if (literal !== undefined) noteCalleeHomes(literal, calleeHomes);
     return type;
   }
 

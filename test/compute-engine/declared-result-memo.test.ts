@@ -231,4 +231,44 @@ describe('THE RESULT UNDER DECLARED PARAMETER TYPES IS MEMOIZED', () => {
     expect(engine._definitionVersion).toBeGreaterThan(before);
     ce.popScope();
   });
+  test('the result follows a declaration in the scope of a function it calls', () => {
+    // `g`'s literal is written in a scope `S` that is not on `f`'s scope
+    // chain. Declaring `h` there changes `g`'s result, and `f`'s result,
+    // which reads `g`'s signature, follows (0.137.2 kept `-> number`).
+    const ce = new ComputeEngine();
+    const engine = ce as unknown as {
+      context: { lexicalScope: object };
+      _inScope: (scope: object, f: () => void) => void;
+    };
+    ce.pushScope();
+    const S = engine.context.lexicalScope;
+    const g = ce.parse('x \\mapsto h + x');
+    ce.popScope();
+    ce.declare('g', '(integer) -> unknown');
+    ce.assign('g', g);
+    ce.declare('f', '(integer) -> unknown');
+    ce.assign('f', ce.parse('x \\mapsto g(x)'));
+    expect(ce.box('f').type.toString()).toBe('(integer) -> number');
+    engine._inScope(S, () => ce.declare('h', 'integer'));
+    expect(ce.box('g').type.toString()).toBe('(integer) -> integer');
+    expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
+  });
+
+  // Deriving `p` reads `q`, which reads `p` back: the guard answers that
+  // read with the declared signature, so both finish. (This passed before
+  // the callee scopes were recorded; it pins that recording them does not
+  // break the recursion guard.)
+  test('mutually recursive declared functions have signatures', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', `(${T}) -> unknown`);
+    ce.declare('q', `(${T}) -> unknown`);
+    ce.assign('p', ce.parse('n \\mapsto 1 + q(n-1)'));
+    ce.assign('q', ce.parse('n \\mapsto 2 + p(n-1)'));
+    expect(ce.box('p').type.toString()).toMatch(
+      /^\(nan \| real \| signed_infinity\) -> /
+    );
+    expect(ce.box('q').type.toString()).toMatch(
+      /^\(nan \| real \| signed_infinity\) -> /
+    );
+  });
 });

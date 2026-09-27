@@ -107,13 +107,9 @@ export function resultUnderDeclaredParameters(
  *   leave a cached result wider than it could be, never wrong;
  * - a declaration in the literal's home scope or one of its ancestors
  *   (`scopeChainDeclarationCount`): assigning an undeclared `b` declares it
- *   in the global scope, and `x ↦ b + x` then reads it. A declaration in the
- *   home scope of a function the body CALLS, outside this chain, is not
- *   counted unless it shadows a function: a callee defined in another
- *   scope, whose result changes because a new scalar is declared there,
- *   can leave this result wider or narrower than a fresh derivation until
- *   another counter moves (all functions of a Tycho document share one
- *   scope, so this does not arise there);
+ *   in the global scope, and `x ↦ b + x` then reads it. The memo adds the
+ *   declarations along the home scope chains of the declared functions the
+ *   body calls, transitively (`collectCalleeHomes`);
  * - whether the assumptions are hidden (the low bit of `_cacheGeneration()`).
  * Each memo records this key AFTER its computation, so the events of the
  * computation itself are part of it.
@@ -149,6 +145,73 @@ export function declaredResultMemoKey(
   return `${ce._semanticVersion}:${ce._worldVersion}:${
     ce._definitionVersion
   }:${scopeChainDeclarationCount(home)}:${ce._cacheGeneration() & 1}`;
+}
+
+/**
+ * The home scopes of the declared functions whose signatures were read while
+ * the result of another one was derived under its declared parameter types.
+ *
+ * The derived result of `f` depends on the signatures of the functions its
+ * body calls, and the result of such a callee `g` depends on the
+ * declarations in `g`'s home scope chain, which need not be `f`'s: a scalar
+ * declared later in the scope `g` was defined in changes `g`'s result, while
+ * no counter in `f`'s key moves. Every other change a callee's result
+ * depends on moves an engine-wide counter that `f`'s key already reads. So
+ * `f`'s memo also records the home scopes of the callees it read, and of
+ * THEIR callees (`collectCalleeHomes`), and keys on the declarations counted
+ * along those chains (`calleeHomesDeclarationCount`). The check is a sum of
+ * counts; re-reading each callee's signature instead made a Tycho document
+ * five times slower to register.
+ *
+ * A read of a signature that is itself being derived further up the stack
+ * (a recursive or mutually recursive call) records nothing: the guard in
+ * `_deriveSignature` answers it with the DECLARED signature, which does not
+ * depend on any scope, so there is nothing to record. That stays true only
+ * while the guard's answer is the declared signature.
+ */
+
+/** A scope, as far as the declaration counts need it. */
+export type HomeScope = { parent: unknown };
+const homeFrames: Set<HomeScope>[] = [];
+
+/** Run `f`, and collect the home scopes of the declared functions whose
+ * signatures it reads (`noteCalleeHomes`). */
+export function collectCalleeHomes<T>(f: () => T): {
+  result: T;
+  homes: HomeScope[];
+} {
+  const frame = new Set<HomeScope>();
+  homeFrames.push(frame);
+  try {
+    const result = f();
+    return { result, homes: [...frame] };
+  } finally {
+    homeFrames.pop();
+  }
+}
+
+/** Record that the signature of a declared function was read: its own home
+ * scope (the scope its literal was defined in) and the home scopes its own
+ * derived result depends on. Nothing is recorded outside a collection. */
+export function noteCalleeHomes(
+  literal: Expression,
+  dependencies: readonly HomeScope[]
+): void {
+  const frame = homeFrames[homeFrames.length - 1];
+  if (frame === undefined) return;
+  const home = homeScopeOf(literal);
+  if (home !== undefined) frame.add(home);
+  for (const h of dependencies) frame.add(h);
+}
+
+/** The declarations counted along the scope chains of `homes`. The counts
+ * only increase, so the sum changes whenever one of them does. */
+export function calleeHomesDeclarationCount(
+  homes: readonly HomeScope[]
+): number {
+  let total = 0;
+  for (const h of homes) total += scopeChainDeclarationCount(h);
+  return total;
 }
 
 /** `t` with its result replaced by `result`, when `t` is a signature. */

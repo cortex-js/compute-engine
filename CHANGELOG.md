@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **The derived result of a declared function follows the scope of the
+  functions it calls.** With `f := x ↦ g(x)` and `g` defined in another
+  scope, a variable declared later in `g`'s scope changed `g`'s signature
+  but not `f`'s: `f` kept `(integer) -> number` while `g` became
+  `(integer) -> integer` (0.137.2). A declared function now keeps the scopes
+  of the functions it calls, transitively, with its derived result.
+
 ## 0.137.2 _2026-09-26_
 
 ### Issues Resolved

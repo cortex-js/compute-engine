@@ -6,9 +6,13 @@ import type {
   TypeString,
 } from '../../common/type/types.js';
 import {
+  calleeHomesDeclarationCount,
+  collectCalleeHomes,
   declaredResultMemoKey,
+  noteCalleeHomes,
   resultUnderDeclaredParameters,
   withSignatureResult,
+  type HomeScope,
 } from './declared-parameter-result.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
@@ -713,6 +717,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         literal: Expression;
         lambdaType: string;
         versions: string;
+        /** The home scopes of the declared functions the body calls,
+         * transitively (`collectCalleeHomes`), and the declarations counted
+         * along their chains when the result was derived. */
+        calleeHomes: HomeScope[];
+        calleeCount: number;
         type: BoxedType;
       }
     | undefined = undefined;
@@ -758,11 +767,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       memo.skeleton === skeleton &&
       memo.literal === literal &&
       memo.lambdaType === lambdaTypeKey &&
-      memo.versions === declaredResultMemoKey(this.engine, literal)
+      memo.versions === declaredResultMemoKey(this.engine, literal) &&
+      calleeHomesDeclarationCount(memo.calleeHomes) === memo.calleeCount
     )
-      return memo.type;
+      return this._noted(memo.type, memo.calleeHomes);
     const t = stored.type;
     let type = stored;
+    // The home scopes of the declared functions the body calls, recorded
+    // while the result under the declared parameter types is derived
+    // (`collectCalleeHomes`).
+    let calleeHomes: HomeScope[] = [];
     if (
       typeof t === 'object' &&
       t.kind === 'signature' &&
@@ -792,11 +806,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       let typedResult: Type | undefined;
       this._derivingSignature = true;
       try {
-        typedResult = resultUnderDeclaredParameters(
-          this.engine,
-          literal,
-          skeleton
-        );
+        ({ result: typedResult, homes: calleeHomes } = collectCalleeHomes(() =>
+          resultUnderDeclaredParameters(this.engine, literal, skeleton)
+        ));
       } finally {
         this._derivingSignature = false;
       }
@@ -822,8 +834,23 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         literal,
         lambdaType: lambdaTypeKey,
         versions: declaredResultMemoKey(this.engine, literal),
+        calleeHomes,
+        calleeCount: calleeHomesDeclarationCount(calleeHomes),
         type,
       };
+    return this._noted(type, calleeHomes);
+  }
+
+  /** `type`, after recording this function's home scope and the home scopes
+   * its derived result depends on (`calleeHomes`) for a derivation of
+   * another declared function that reads this signature
+   * (`noteCalleeHomes`). */
+  private _noted(
+    type: BoxedType,
+    calleeHomes: readonly HomeScope[]
+  ): BoxedType {
+    const literal = this._lambdaLiteral;
+    if (literal !== undefined) noteCalleeHomes(literal, calleeHomes);
     return type;
   }
 
