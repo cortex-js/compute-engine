@@ -1801,6 +1801,13 @@ export interface Serializer {
    */
   wrapShort(expr: MathJsonExpression | null | undefined): LatexString;
 
+  /** Like `wrapShort`, but for a base directly under a `^` (the base of a
+   * `Power`/`Square`, or of a `Root` written in exponent form: the solidus
+   * or quotient root style), where a nested power or a
+   * postfix `Factorial` also needs a fence.
+   */
+  wrapPowerBase(expr: MathJsonExpression | null | undefined): LatexString;
+
   /** Styles */
   applyFunctionStyle: (
     expr: MathJsonExpression,

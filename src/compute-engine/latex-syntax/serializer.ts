@@ -3,6 +3,7 @@ import {
   nops,
   stringValue,
   operator,
+  operand,
   symbol,
   isNumberObject,
   isSymbolObject,
@@ -18,6 +19,7 @@ import {
   DelimiterScale,
   ADDITION_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
+  EXPONENTIATION_PRECEDENCE,
 } from './types.js';
 
 import { normalizeStyleOptions } from './style-options.js';
@@ -27,7 +29,12 @@ import type {
   IndexedLatexDictionaryEntry,
 } from './dictionary/definitions.js';
 
-import { countTokens, joinLatex, supsub } from './tokenizer.js';
+import {
+  countTokens,
+  endsWithSuperscript,
+  joinLatex,
+  supsub,
+} from './tokenizer.js';
 import { serializeNumber } from './serialize-number.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
 import {
@@ -279,27 +286,86 @@ export class Serializer {
         exprStr,
         this.options.groupStyle(expr, this.level + 1)
       );
+    // A `Complex` node (raw, before it folds into a symbol or a real
+    // literal — e.g. under `{ canonical: false }`) usually serializes to a
+    // sum (`1+i`) or a scaled unit (`2i`). The precedence rule below wraps
+    // those (the dictionary gives `Complex` a precedence looser than `^`).
+    // Two shapes serialize to a single token and need no wrapping: an
+    // imaginary part of 0 (the node writes as a plain real, `1.5`), and the
+    // bare unit `i`/`-i` (`re` is 0, `|im|` is 1).
+    if (h === 'Complex') {
+      const re = machineValue(operand(expr, 1));
+      const im = machineValue(operand(expr, 2));
+      if (im === 0 || (re === 0 && Math.abs(im ?? 0) === 1)) return exprStr;
+    }
+
     // `Mod` serializes as open infix (`a\bmod b`): in a tight context
     // (power base, solidus fraction) the adjacent notation binds tighter
     // than `\bmod` and would absorb its trailing operand on re-parse
     // (`Mod(A,2)^x` → `A\bmod2^x` = `Mod(A, 2^x)`), so it must be wrapped.
     // `Range` has the same hazard on its END operand (parsed at minPrec
     // 270): `Range(1,n)^2` → `1..n^2` re-parses as `Range(1, n²)`.
-    if (
-      h !== 'Add' &&
-      h !== 'Negate' &&
-      h !== 'Subtract' &&
-      h !== 'Measurement' &&
-      h !== 'Multiply' &&
-      h !== 'Mod' &&
-      h !== 'Range'
-    )
-      return exprStr;
+    const isRoundTripHazard =
+      h === 'Add' ||
+      h === 'Negate' ||
+      h === 'Subtract' ||
+      h === 'Measurement' ||
+      h === 'Multiply' ||
+      h === 'Mod' ||
+      h === 'Range';
+
+    // Anything the dictionary declares as an `expression`, `infix` or
+    // `prefix` entry with a precedence looser than `^` reads the same way.
+    // For example, `\frac{2}{3}^2` (`Rational`/`Divide`, at fraction
+    // precedence) looks like the fraction raised to the denominator's power
+    // squared, not the whole fraction squared, and `A\cup B^2` (`Union`)
+    // re-parses as `Union(A, B^2)`.
+    const def = h ? this.dictionary.ids.get(h) : undefined;
+    const isLooseExpression =
+      (def?.kind === 'expression' ||
+        def?.kind === 'infix' ||
+        def?.kind === 'prefix') &&
+      def.precedence !== undefined &&
+      def.precedence < EXPONENTIATION_PRECEDENCE;
+
+    if (!isRoundTripHazard && !isLooseExpression) return exprStr;
 
     // Wrap the expression with delimiters
     return this.wrapString(
       exprStr,
       this.options.groupStyle(expr, this.level + 1)
+    );
+  }
+
+  /**
+   * Like `wrapShort`, but for a base that sits directly under a `^` (the
+   * base of a `Power`/`Square`, or of a `Root` written in exponent form:
+   * the solidus or quotient root style). Two more shapes read as
+   * ambiguous there, though neither is a parsing hazard in `wrapShort`'s
+   * other context, a solidus fraction's numerator or denominator (`a/n!`,
+   * `a/x^{23}` are unambiguous, so those stay bare):
+   *
+   * - `Power`/`Square` (a `Power` with exponent 2 is rewritten to `Square`
+   *   for serialization, see `boxed-expression/serialize.ts`): stacking
+   *   superscripts, `x^{2^3}`, is read as `x^(2^3)`, a different
+   *   expression than `(x^2)^3`. The fence is added only when the
+   *   serialized base ends with a superscript: `Power(x, 1/2)` writes as
+   *   `\sqrt{x}`, which is a single group and stays bare (`\sqrt{x}^2`).
+   * - `Factorial`/`Factorial2`: `!` binds tighter than `^`
+   *   (`POSTFIX_PRECEDENCE` > `EXPONENTIATION_PRECEDENCE`), so `n!^2` is
+   *   unambiguous to parse, but reads as `n` factorial, squared, only
+   *   with effort.
+   */
+  wrapPowerBase(base: MathJsonExpression | null | undefined): string {
+    const wrapped = this.wrapShort(base);
+    if (base === null || base === undefined) return wrapped;
+    const h = operator(base);
+    const isPower = h === 'Power' || h === 'Square';
+    if (isPower && !endsWithSuperscript(wrapped)) return wrapped;
+    if (!isPower && h !== 'Factorial' && h !== 'Factorial2') return wrapped;
+    return this.wrapString(
+      wrapped,
+      this.options.groupStyle(base, this.level + 1)
     );
   }
 

@@ -492,9 +492,58 @@ export function joinLatex(segments: Iterable<string>): string {
 }
 
 export function supsub(c: '_' | '^', body: string, x: string): string {
-  if (body.includes(c)) body = `{${body}}`;
+  if (body.includes(c) && !isFullyParenthesized(body)) body = `{${body}}`;
   if (/^[0-9]$/.test(x)) return `${body}${c}${x}`;
   return `${body}${c}{${x}}`;
+}
+
+/**
+ * The open/close fence pairs `Serializer.wrapString` emits for the `()`
+ * fence: plain (`normal` style), `\left(`/`\right)` (`scaled` style) and
+ * `\Bigl(`/`\Bigr)` (`big` style).
+ */
+const PAREN_FENCES: [open: string, close: string][] = [
+  ['\\left(', '\\right)'],
+  ['\\Bigl(', '\\Bigr)'],
+  ['(', ')'],
+];
+
+/**
+ * Is `s` a single parenthesized group, in any of the fence styles
+ * `wrapString` emits (`(...)`, `\left(...\right)`, `\Bigl(...\Bigr)`),
+ * spanning the whole string? `wrapShort` already parenthesizes a base this
+ * way when its contents (e.g. a nested power) would otherwise be
+ * ambiguous; `supsub` must not add its own `{}` bracing on top, or
+ * `(x^2)^3` becomes the needlessly doubled `{(x^2)}^3`.
+ */
+function isFullyParenthesized(s: string): boolean {
+  if (
+    !PAREN_FENCES.some(
+      ([open, close]) => s.startsWith(open) && s.endsWith(close)
+    )
+  )
+    return false;
+
+  let depth = 0;
+  for (let i = 0; i < s.length; ) {
+    const open = PAREN_FENCES.find(([o]) => s.startsWith(o, i));
+    if (open) {
+      depth++;
+      i += open[0].length;
+      continue;
+    }
+    const close = PAREN_FENCES.find(([, c]) => s.startsWith(c, i));
+    if (close) {
+      depth--;
+      i += close[1].length;
+      // The group that opened the string closed before the end: the
+      // outermost pair does not span the whole string.
+      if (depth === 0 && i !== s.length) return false;
+      continue;
+    }
+    i++;
+  }
+  return depth === 0;
 }
 
 /** Is the character at `i` escaped, as the brace of `\{` is? It is when an

@@ -2094,7 +2094,7 @@
    "formula": [
     "Equal",
     [
-     "Add",
+     "Subtract",
      [
       "Power",
       [
@@ -2421,7 +2421,11 @@
      "Multiply",
      [
       "ChebyshevU",
-      "n",
+      [
+       "Subtract",
+       "n",
+       1
+      ],
       [
        "Cos",
        "x"
@@ -2987,7 +2991,7 @@
     [
      "Add",
      [
-      "ChebyshevT",
+      "ChebyshevU",
       "n",
       [
        "Subtract",
@@ -3046,7 +3050,6 @@
    "class": "identity",
    "subclass": null,
    "heads": [
-    "ChebyshevT",
     "ChebyshevU"
    ],
    "guardLevel": "complex-domain",

@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-08T16:59:54.268Z",
-  "corpus": "/Users/arno/dev/ce-wt-dirichlet/data/fungrim",
+  "generated": "2026-09-27T14:27:01.567Z",
+  "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
   "stage1": {
     "total": 2551,
     "ok": 2551,
@@ -8,7 +8,7 @@
     "unknownSymbol": 0,
     "timeout": 0,
     "passRate": 1,
-    "elapsedMs": 1601,
+    "elapsedMs": 1078,
     "failureBuckets": [],
     "perTopic": {
       "agm": {

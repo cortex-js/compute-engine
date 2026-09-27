@@ -54,6 +54,44 @@
   `1`) and now routes to `EllipticE(m)`; and the Carlson R_J/R_D kernels
   overflowed above `|m| ≈ 10¹⁵⁴`, so `EllipticE(10³⁰⁰)` stayed unevaluated
   where it is `10¹⁵⁰i`.
+- **A `Power` base loses its brackets in `.latex`.** The serializer decided
+  whether to parenthesize a `Power`'s base from a fixed list of heads, so a base
+  outside that list serialized unwrapped even where it changes the math:
+  `["Power", ["Complex", 1, 1], 2]` wrote `1+\imaginaryI^2` (reads as `1 + i²`)
+  instead of `(1+\imaginaryI)^2`. The base is now bracketed by precedence and
+  kind: a `Complex` sum or scaled unit, a `Rational`/`Divide` (looser than `^`),
+  a postfix `Factorial`, and a nested `Power` (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+- **Other outputs that use the same bracketing rule changed too.** The
+  precedence rule applies wherever the serializer brackets a short operand, so
+  it also fixes these spellings:
+  - A `Sum` or `Product` raised to a power:
+    `["Power", ["Sum", "k", ["Tuple", "k", 1, "n"]], 2]` now writes
+    `(\sum_{k=1}^{n}k)^2`. It wrote `\sum_{k=1}^{n}k^2`, which reads back as the
+    sum of `k^2`. An `infix` or `prefix` operator looser than `^` is bracketed
+    the same way: `(A\cup B)^2`, not `A\cup B^2`.
+  - The solidus fraction style (`fractionStyle: 'inline-solidus'`):
+    `["Divide", "a", ["Divide", "b", "c"]]` now writes `a/(b/c)` instead of
+    `a/b/c`, and `["Divide", ["Complex", 1, 1], "x"]` writes `(1+\imaginaryI)/x`
+    instead of `1+\imaginaryI/x`.
+  - The derivative of a fraction, a `Sum` or a `Product` now uses the form with
+    the function in the numerator, `\frac{\mathrm{d}(\frac{x}{y})}{\mathrm{d}x}`, instead of
+    `\frac{\mathrm{d}}{\mathrm{d}x}\frac{x}{y}`. The old form reads back wrongly
+    inside a larger expression: `["Add", ["D", ["Divide", "x", "y"], "x"], 1]`
+    read back as the derivative of `x/y + 1`.
+  - A factorial raised to a power is now written with parentheses, `(n!)^2`,
+    where it was `n!^2`. This is a spelling change for readability, not a
+    round-trip fix: `n!^2` already read back correctly.
+- **Three false Fungrim Chebyshev identities are corrected** (#343, contributed by
+  [enumeratio](https://github.com/enumeratio)): `42eb01`
+  (`T_n(x)² − (x²−1)·U_{n−1}(x)² = 1`), `4c7aeb`
+  (`U_{n−1}(cos x)·sin x = sin(n·x)`) and `5f09f4`
+  (`U_{2n}(x) = U_n(2x²−1) + U_{n−1}(2x²−1)`) were wrong in Fungrim's source,
+  and each rewrote to a wrong value in `simplify()` with `loadIdentities`
+  (`T_n(x)² + (x²−1)·U_{n−1}(x)²` became `1`, `U_n(cos x)·sin x` became
+  `sin(n·x)`, `T_n(2x²−1) + U_{n−1}(2x²−1)` became `U_{2n}(x)`). The fix is
+  in the `arnog/fungrim` fork (`pygrim/formulas/chebyshev.py`), from which
+  the corpus was regenerated and re-pinned.
 
 ## 0.137.3 _2026-09-26_
 

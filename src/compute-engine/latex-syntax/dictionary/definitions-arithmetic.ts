@@ -355,19 +355,19 @@ function serializeRoot(
 ): string {
   if (base === null || base === undefined) return '\\sqrt{}';
   degree = degree ?? 2;
-  // `supsub` braces a base that itself contains '^': a `Power` base is not
-  // wrapped by `wrapShort`, and bare `x^2^{1/2}` is unparsable LaTeX —
-  // `{x^2}^{1/2}` round-trips (same rule as the generic Power path).
+  // The exponent form of a root is a `Power`-style base: `wrapPowerBase`
+  // fences a nested power or a factorial (same rule as the generic Power
+  // path, see `serializePower` below).
   if (style === 'solidus') {
     return supsub(
       '^',
-      serializer.wrapShort(base),
+      serializer.wrapPowerBase(base),
       '1/' + serializer.serialize(degree)
     );
   } else if (style === 'quotient') {
     return supsub(
       '^',
-      serializer.wrapShort(base),
+      serializer.wrapPowerBase(base),
       '\\frac{1}{' + serializer.serialize(degree) + '}'
     );
   }
@@ -1474,14 +1474,16 @@ function serializePower(
   const wrapNegativeBase = (latex: string): string =>
     latex.startsWith('-') ? serializer.wrapString(latex, 'normal') : latex;
 
-  // A Power base means (a^b)^c. It must serialize as {a^b}^c — NOT a^{b^c},
+  // A Power base means (a^b)^c. It must serialize as (a^b)^c — NOT a^{b^c},
   // which reads as a^(b^c), a different expression (e.g. (x^3)^{2/5} would
-  // become x^{3^{2/5}} and fail to round-trip). `supsub` braces the base
-  // because it contains '^', producing the correct {a^b}^c.
+  // become x^{3^{2/5}} and fail to round-trip). `wrapPowerBase` fences a
+  // base that is itself a power (or a factorial, same ambiguity); `supsub`
+  // only braces a base that still contains a bare '^' after that (e.g. a
+  // transposed matrix, `A^T`), which the fence already ruled out here.
 
   return supsub(
     '^',
-    wrapNegativeBase(serializer.wrapShort(base)),
+    wrapNegativeBase(serializer.wrapPowerBase(base)),
     serializer.serialize(exp)
   );
 }
@@ -2931,7 +2933,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Square',
     precedence: 720,
     serialize: (serializer, expr) => {
-      const base = serializer.wrapShort(operand(expr, 1));
+      const base = serializer.wrapPowerBase(operand(expr, 1));
       const wrapped = base.startsWith('-')
         ? serializer.wrapString(base, 'normal')
         : base;

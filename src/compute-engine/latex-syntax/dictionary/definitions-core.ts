@@ -3377,11 +3377,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       }
 
       const plainLatex = serializer.serialize(bodyToSerialize);
-      // `wrapShort` delimits precisely the loose-infix heads
-      // (`Add`/`Subtract`/`Negate`/`Multiply`/`Mod`/`Range`) and leaves
-      // symbols, numbers, function applications (`\sin(x)`) and already
-      // delimited bodies untouched — so a difference between the two spellings
-      // is exactly the test "is this differentiand a tight atom?".
+      // `wrapShort` delimits the loose-infix heads (`Add`/`Subtract`/
+      // `Negate`/`Multiply`/`Mod`/`Range`), a raw `Complex` sum or scaled
+      // unit, and any dictionary `expression`, `infix` or `prefix` entry
+      // looser than `^` (`Rational`/`Divide`, `Sum`/`Product`, `Union`),
+      // and leaves symbols, numbers,
+      // function applications (`\sin(x)`) and already delimited bodies
+      // untouched — so a difference between the two spellings is exactly
+      // the test "is this differentiand a tight atom?".
       const fnLatex = serializer.wrapShort(bodyToSerialize);
       const varLatex = serializer.serialize(variable);
 

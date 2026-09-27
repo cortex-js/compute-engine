@@ -228,7 +228,8 @@ describe('Style options accept a constant as well as a function', () => {
 describe('solidus/quotient root style over a Power base (Tycho item 113)', () => {
   // The exponent-spelled root styles must delimit a base that is itself a
   // Power: bare `x^2^{1/2}` is unparsable LaTeX (`unexpected-superscript`),
-  // so the base is braced — `{x^2}^{1/2}` — like the generic Power path.
+  // so the base is parenthesized — `(x^2)^{1/2}` — like the generic Power
+  // path.
   const shapes: [string, unknown][] = [
     ['Sqrt(Power)', ['Sqrt', ['Power', 'x', 2]]],
     ['Root(Power, 3)', ['Root', ['Power', 'x', 2], 3]],
@@ -249,12 +250,12 @@ describe('solidus/quotient root style over a Power base (Tycho item 113)', () =>
     }
   }
 
-  test('the solidus witness braces the Power base', () => {
+  test('the solidus witness parenthesizes the Power base', () => {
     const ce = new ComputeEngine();
     ce.latexOptions = { rootStyle: () => 'solidus' };
     expect(
       ce.box(['Sqrt', ['Power', 'x', 2]], { canonical: false }).toLatex()
-    ).toEqual('{x^2}^{1/2}');
+    ).toEqual('(x^2)^{1/2}');
   });
 });
 

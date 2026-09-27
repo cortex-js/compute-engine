@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generated": "2026-08-14",
+  "generated": "2026-09-27",
   "generator": "grim2mathjson 0.1.0",
   "upstream": {
     "name": "fungrim",
@@ -10,10 +10,10 @@
     "parent": {
       "repository": "https://github.com/fredrik-johansson/fungrim",
       "commit": "b7c3ca6e565e1058638cab6ba2bc811090296767",
-      "note": "pygrim/ content = upstream commit + 5 fix commits (Equal-paren in 6c2b31/e54e61; Element(w,CC) x24 in jacobi_theta.py; empty assumption interval in a172c7; missing polygamma order in b16177; factor 2 in 419b45: π = 2·Σ n!/(2n+1)!!) — submitted upstream as PRs #36, #37, #39, #41 (b16177) and #40 (419b45); numerically verified at 30 digits"
+      "note": "pygrim/ content = upstream commit + 6 fix commits (Equal-paren in 6c2b31/e54e61; Element(w,CC) x24 in jacobi_theta.py; empty assumption interval in a172c7; missing polygamma order in b16177; factor 2 in 419b45: π = 2·Σ n!/(2n+1)!!; three Chebyshev identities in chebyshev.py — 42eb01 is a difference T_n² − (x²−1)U_{n−1}² = 1, 4c7aeb is U_{n−1}(cos x)·sin x = sin(nx), 5f09f4 is U_{2n}(x) = U_n(2x²−1) + U_{n−1}(2x²−1); compute-engine issue #343) — submitted upstream as PRs #36, #37, #39, #41 (b16177) and #40 (419b45); numerically verified at 30 digits"
     },
     "pin": {
-      "sha256": "9ac399f742e3c508bf43f6fc08df99b306619fc00e00cc1c205b008781fed424",
+      "sha256": "6d46503fddb5fea523362bdf863c6627dd3ea256e1e1a68b4307e39c7b20db3f",
       "method": "cd fungrim && find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256",
       "fileCount": 70
     },
