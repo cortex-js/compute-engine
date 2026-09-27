@@ -24,6 +24,19 @@
   scanning its divisors. `ModularInverse` accepts a negative modulus (it
   used to stay unevaluated): `ModularInverse(3, -7)` is `-2`, the result
   takes the sign of the modulus, as `Mod` does.
+- **`EllipticE(m)` is correct at complex `m`** (#346, contributed by
+  [enumeratio](https://github.com/enumeratio)). It returned wrong
+  values in some regions off the real axis, from the third significant digit
+  on: `EllipticE(0.57 + 0.23i)` was `1.3175 − 0.1205i` (correct:
+  `1.3248 − 0.1197i`), and `m` just off the real axis in `(0, 1)` or near
+  `m = 1` was wrong too. It now uses Carlson's R_F/R_D (DLMF 19.25.1), as
+  `EllipticE(φ, m)` already did at `φ = π/2`, instead of an AGM sum.
+  `EllipticE(φ, m)` outside `[−π/2, π/2]`, which reduces to `EllipticE(m)`,
+  is fixed with it. Also: `EllipticE(π/2, m)` for `m` within rounding of `1`
+  lost every digit (`EllipticE(π/2, 1 + 10⁻²⁰i)` was `14.6 − 0.79i`, not
+  `1`) and now routes to `EllipticE(m)`; and the Carlson R_J/R_D kernels
+  overflowed above `|m| ≈ 10¹⁵⁴`, so `EllipticE(10³⁰⁰)` stayed unevaluated
+  where it is `10¹⁵⁰i`.
 
 ## 0.137.3 _2026-09-26_
 

@@ -1750,6 +1750,134 @@ describe('ELLIPTIC INTEGRALS (parameter convention m = k²)', () => {
   });
 });
 
+// Regression for cortex-js/compute-engine#346 part 1: complete E(m) at
+// complex m went through an AGM cₙ-sum (A&S 17.6.4 continued to complex m)
+// that returned wrong values in some regions off the real axis, from the
+// third significant digit on (E(0.57+0.23i) came out as 1.3175 − 0.1205i,
+// where the value is 1.3248 − 0.1197i), while `EllipticE(π/2, m)` (built on
+// Carlson R_F/R_D) stayed correct. E(m) is now computed from R_F/R_D too.
+// Reference values from mpmath 1.3 (`ellipe`), dps=30.
+describe('COMPLEX-ARGUMENT EllipticE, EllipticK', () => {
+  const expectComplex = (expr: any, re: number, im: number, tol = 1e-11) => {
+    const v = expr.N();
+    const scale = Math.hypot(re, im) * tol + tol;
+    expect(Math.abs(v.re - re)).toBeLessThan(scale);
+    expect(Math.abs(v.im - im)).toBeLessThan(scale);
+  };
+  const z = (re: number, im: number): any => ['Complex', re, im];
+
+  test('E(0.57+0.23i) matches mpmath (the issue #346 repro)', () =>
+    expectComplex(
+      ce.expr(['EllipticE', z(0.57, 0.23)]),
+      1.3248077726970516,
+      -0.1197294454595117
+    ));
+
+  test('E(0.57+0.23i) matches E(π/2, 0.57+0.23i)', () => {
+    const complete = ce.expr(['EllipticE', z(0.57, 0.23)]).N();
+    const incomplete = ce
+      .expr(['EllipticE', ['Divide', 'Pi', 2], z(0.57, 0.23)])
+      .N();
+    expect(Math.abs(complete.re - incomplete.re)).toBeLessThan(1e-11);
+    expect(Math.abs(complete.im - incomplete.im)).toBeLessThan(1e-11);
+  });
+
+  test('E(2+i) matches mpmath (|m| > 1)', () =>
+    expectComplex(
+      ce.expr(['EllipticE', z(2, 1)]),
+      0.991052601328069,
+      -0.81879421395609
+    ));
+
+  test('E(−1+0.5i) matches mpmath (Re m < 0)', () =>
+    expectComplex(
+      ce.expr(['EllipticE', z(-1, 0.5)]),
+      1.9175827859942576,
+      -0.148960405566028
+    ));
+
+  test('E(0.3−0.4i) matches mpmath', () =>
+    expectComplex(
+      ce.expr(['EllipticE', z(0.3, -0.4)]),
+      1.4625128107172381,
+      0.1751606054169262
+    ));
+
+  // The quasi-periodic reduction (DLMF 19.2.10) for φ outside [−π/2, π/2]
+  // adds 2k·E(m), so it inherits the complete-E fix directly.
+  test('E(2, 0.57+0.23i): incomplete E at φ outside [−π/2, π/2]', () =>
+    expectComplex(
+      ce.expr(['EllipticE', 2, z(0.57, 0.23)]),
+      1.6245313286877133,
+      -0.1863687686016351
+    ));
+
+  test('K(0.57+0.23i) matches mpmath (the AGM route of K is unchanged)', () =>
+    expectComplex(
+      ce.expr(['EllipticK', z(0.57, 0.23)]),
+      1.8599100402588483,
+      0.2088229435403994
+    ));
+
+  test('real-argument path unchanged: E(0.5), E(−1), K(0.5)', () => {
+    expectApprox(ce.expr(['EllipticE', 0.5]), 1.3506438810476755, 1e-13);
+    expectApprox(ce.expr(['EllipticE', -1]), 1.910098894513856, 1e-13);
+    expectApprox(ce.expr(['EllipticK', 0.5]), 1.8540746773013719, 1e-13);
+  });
+
+  // Real m > 1 also goes through the complex kernel. E(2) has equal real and
+  // imaginary parts (exactly, by the reciprocal-modulus transformation), so
+  // this checks the branch (Im > 0) and the accuracy of that route.
+  test('E(2): equal real and imaginary parts, Im > 0', () => {
+    const v = ce.expr(['EllipticE', 2]).N();
+    expect(Math.abs(v.re - 0.5990701173677961)).toBeLessThan(1e-14);
+    expect(Math.abs(v.im - 0.5990701173677961)).toBeLessThan(1e-14);
+  });
+
+  // Large |m|: the Carlson duplication loops overflowed above |m| ≈ 1e154
+  // (a complex `pow(1.5)`, then a product of the order of |A|^{3/2}), which
+  // left `EllipticE(1e300)` unevaluated. R_J now scales its arguments by
+  // homogeneity, so E stays finite over the double range. For real m → +∞,
+  // E(m) ≈ i·√m (DLMF 19.6.1 gives the growth; the real part, π/(4√m), is
+  // below the relative precision of the complex value there).
+  test('E(m) is finite at large |m| and grows like √m', () => {
+    for (const [re, im] of [
+      [1e200, 0],
+      [1e300, 0],
+      [-1e250, 0],
+      [1e200, 1e200],
+      [-1e250, 1e250],
+    ]) {
+      const v = ce.expr(['EllipticE', ['Complex', re, im]]).N();
+      expect(Number.isFinite(v.re)).toBe(true);
+      expect(Number.isFinite(v.im)).toBe(true);
+      const mag = Math.hypot(re, im);
+      const ratio = Math.hypot(v.re, v.im) / Math.sqrt(mag);
+      expect(Math.abs(ratio - 1)).toBeLessThan(0.25);
+    }
+    const v = ce.expr(['EllipticE', 1e300]).N();
+    expect(Math.abs(v.im / 1e150 - 1)).toBeLessThan(1e-12);
+    const w = ce.expr(['EllipticE', -1e250]).N();
+    expect(Math.abs(w.re / 1e125 - 1)).toBeLessThan(1e-12);
+    expect(w.im).toBe(0);
+  });
+
+  // A real φ = ±π/2 is the complete integral. Through the general formula,
+  // cos²(π/2) is 3.7e-33 rather than 0, and for m near 1 the two Carlson
+  // terms grow like a logarithm and their difference lost every digit:
+  // E(π/2 | 1 + 1e-20i) came out as 14.6 − 0.79i. It now routes to E(m).
+  test('E(±π/2 | m) is the complete E(m), also for m near 1', () => {
+    const v = ce.expr(['EllipticE', ['Divide', 'Pi', 2], z(1, 1e-20)]).N();
+    expect(Math.abs(v.re - 1)).toBeLessThan(1e-12);
+    expect(Math.abs(v.im)).toBeLessThan(1e-12);
+    const w = ce
+      .expr(['EllipticE', ['Negate', ['Divide', 'Pi', 2]], z(0.57, 0.23)])
+      .N();
+    expect(Math.abs(w.re + 1.3248077726970516)).toBeLessThan(1e-11);
+    expect(Math.abs(w.im - 0.1197294454595117)).toBeLessThan(1e-11);
+  });
+});
+
 //
 // ---------------- Incomplete elliptic integrals (Carlson kernels) ----------------
 // Reference values from mpmath 1.4 (ellipf/ellipe/ellippi, which share the

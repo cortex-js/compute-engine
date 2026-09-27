@@ -550,29 +550,20 @@ export function ellipticKComplex(m: Complex): Complex {
 }
 
 /**
- * Complex E(m) via the AGM cₙ-sum (analytic continuation of A&S 17.6.4):
- * E = K·(1 − Σₙ 2^{n−1}cₙ²), c₀² = m, cₙ = (aₙ₋₁ − bₙ₋₁)/2.
+ * Complex E(m) via Carlson's symmetric integrals (DLMF 19.25.1):
+ * E(m) = R_F(0, 1−m, 1) − (m/3)·R_D(0, 1−m, 1), as `ellipticEIncompleteComplex`
+ * at φ = π/2. The AGM cₙ-sum it replaces (A&S 17.6.4, continued to complex
+ * m) returned wrong values off the real axis in some regions, from the
+ * third significant digit on: E(0.57 + 0.23i) came out as 1.3175 − 0.1205i
+ * where the value is 1.3248 − 0.1197i.
  */
 export function ellipticEComplex(m: Complex): Complex {
   if (m.isNaN()) return C_NAN;
   if (m.equals(C_ONE)) return C_ONE;
-  let a: Complex = C_ONE;
-  let b: Complex = C_ONE.sub(m).sqrt();
-  let sum: Complex = m.mul(0.5); // 2^{−1}·c₀²
-  let pow2 = 0.5;
-  for (let i = 0; i < 100; i++) {
-    const c = a.sub(b).mul(0.5);
-    const an = a.add(b).mul(0.5);
-    let bn = a.mul(b).sqrt();
-    if (an.sub(bn).abs() > an.add(bn).abs()) bn = bn.neg();
-    a = an;
-    b = bn;
-    pow2 *= 2;
-    sum = sum.add(c.mul(c).mul(pow2));
-    if (a.sub(b).abs() <= 1e-17 * a.abs()) break;
-  }
-  const K = new Complex(Math.PI / 2, 0).div(a);
-  return K.mul(C_ONE.sub(sum));
+  const y = C_ONE.sub(m);
+  return carlsonRFComplex(C_ZERO, y, C_ONE).sub(
+    m.div(3).mul(carlsonRDComplex(C_ZERO, y, C_ONE))
+  );
 }
 
 //
@@ -698,6 +689,18 @@ export function carlsonRJComplex(
   }
   if (!ok) return C_NAN;
 
+  // R_J is homogeneous of degree −3/2: R_J(λx, λy, λz, λp) = λ^{-3/2}·R_J(x,
+  // y, z, p). Above about 1e100 the duplication loop overflows (the dₘ
+  // product is of the order of |A|^{3/2}), so scale the arguments to unit
+  // size first, with a real positive λ so no branch moves. E(m) at
+  // |m| = 1e300 goes through R_D(0, 1 − m, 1) and needs this. The two
+  // divisions at the end (by λ, then by √λ) keep the result in range.
+  const big = Math.max(x.abs(), y.abs(), z.abs(), p.abs());
+  if (big > 1e100) {
+    const r = carlsonRJComplex(x.div(big), y.div(big), z.div(big), p.div(big));
+    return r.div(big).div(Math.sqrt(big));
+  }
+
   const A0 = x.add(y).add(z).add(p.mul(2)).div(5);
   const delta = p.sub(x).mul(p.sub(y)).mul(p.sub(z));
   const Q =
@@ -727,7 +730,12 @@ export function carlsonRJComplex(
     zm = zm.add(lm).div(4);
     pm = pm.add(lm).div(4);
     const dm = sp.add(sx).mul(sp.add(sy)).mul(sp.add(sz));
-    const em = delta.mul(pow4 * pow4 * pow4).div(dm.mul(dm));
+    // When p equals one of x, y, z (the R_D case) δ is exactly 0 and so is
+    // every eₘ; dividing would turn an underflowed dm² (|z| above about
+    // 1e250 with x = 0) into 0/0 = NaN.
+    const em = delta.isZero()
+      ? C_ZERO
+      : delta.mul(pow4 * pow4 * pow4).div(dm.mul(dm));
     if (pow4 * Q < A.abs()) break;
     S = S.add(carlsonRCComplex(C_ONE, C_ONE.add(em)).mul(pow4).div(dm));
     pow4 /= 4;
@@ -755,7 +763,13 @@ export function carlsonRJComplex(
     .sub(E4.mul(3276))
     .add(E5.mul(2772))
     .div(24024);
-  return series.mul(pow4).div(A.pow(1.5)).add(S.mul(6));
+  // Divide by A and then by √A rather than by `A.pow(1.5)`: complex-esm's
+  // `pow` goes through `log`/`exp` and returns NaN once |A| is above about
+  // 1e154, and the product A·√A overflows to an infinite part above about
+  // 1e205, which the complex division turns into NaN. The two divisions
+  // stay finite over the whole double range (E(m) at |m| = 1e300 needs
+  // this; the term only underflows to 0 there, where it is negligible).
+  return series.mul(pow4).div(A).div(A.sqrt()).add(S.mul(6));
 }
 
 /** Carlson R_D(x, y, z) = R_J(x, y, z, z), complex. */
@@ -800,6 +814,13 @@ export function ellipticEIncompleteComplex(phi: Complex, m: Complex): Complex {
       ellipticEIncompleteComplex(phi.sub(k * Math.PI), m)
     );
   }
+  // A real φ = ±π/2 is the complete integral. Computed through the general
+  // formula, cos²(π/2) is 3.7e-33 rather than 0, and for m near 1 the two
+  // Carlson terms both grow like a logarithm and their difference loses
+  // every digit (E(π/2 | 1 + 1e-20i) came out as 14.6 − 0.79i, not 1). The
+  // complete kernel passes an exact 0 and has the m = 1 value.
+  if (phi.im === 0 && Math.abs(Math.abs(phi.re) - Math.PI / 2) < 1e-15)
+    return ellipticEComplex(m).mul(Math.sign(phi.re));
   const s = phi.sin();
   const c = phi.cos();
   const cc = c.mul(c);
