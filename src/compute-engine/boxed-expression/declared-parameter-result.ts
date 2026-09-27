@@ -4,6 +4,20 @@ import type { Expression, IComputeEngine } from '../global-types.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { functionResult, returnTypeText } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { scopeChainDeclarationCount } from '../scope-declaration-count.js';
+
+/**
+ * The scope the function literal `literal` was defined in: the parent of the
+ * local scope of its body, which holds its parameters. `undefined` when the
+ * body has no local scope, as for a literal built in structural form: its
+ * home is then unknown, and no result under the declared parameter types is
+ * computed for it (boxing it in the reader's scope would let that scope
+ * decide what its free names mean).
+ */
+function homeScopeOf(literal: Expression) {
+  if (!isFunction(literal, 'Function')) return undefined;
+  return literal.ops[0].localScope?.parent ?? undefined;
+}
 
 /**
  * The result type of the function literal `literal` with the parameter types
@@ -59,14 +73,69 @@ export function resultUnderDeclaredParameters(
     return ['Typed', p.json, `'${returnTypeText(t)}'`] as MathJsonExpression;
   });
   if (!changed) return undefined;
+  const home = homeScopeOf(literal);
+  if (home === undefined) return undefined;
   let result: Type | undefined;
   try {
-    const typed = ce.box(['Function', literal.ops[0].json, ...stamped]);
+    // The literal is boxed again in the scope it was defined in, so its free
+    // names resolve as they do in the stored literal, whatever scope the
+    // signature is read from: read from inside another function's body, a
+    // parameter of that function with the same name as a free name of this
+    // one would otherwise capture it.
+    const typed = ce._inScope(home, () =>
+      ce.box(['Function', literal.ops[0].json, ...stamped])
+    );
     result = functionResult(typed.type.type);
   } catch {
     return undefined;
   }
   return result === undefined || result === 'unknown' ? undefined : result;
+}
+
+/**
+ * The key of a memo of `resultUnderDeclaredParameters` for the function
+ * literal `literal`: the engine versions and counts that move when the
+ * result can change. The result depends on the types and values of the
+ * symbols the body reads, resolved from the scope the literal was defined
+ * in. So the key moves with:
+ * - a value write (`_semanticVersion`);
+ * - an assumption, a redefinition or a signature inference (`_worldVersion`);
+ * - a change of a function, and every inference event
+ *   (`_callableVersion`: `callableAxisSelects` selects it for each one);
+ * - a retype of a symbol (`_typeVersion`). A narrowing of a symbol by a use
+ *   (`inference-settled`) is not counted: it is frequent, and it can only
+ *   leave a cached result wider than it could be, never wrong;
+ * - a declaration in the literal's home scope or one of its ancestors
+ *   (`scopeChainDeclarationCount`): assigning an undeclared `b` declares it
+ *   in the global scope, and `x ↦ b + x` then reads it;
+ * - whether the assumptions are hidden (the low bit of `_cacheGeneration()`).
+ * Each memo records this key AFTER its computation, so the events of the
+ * computation itself are part of it.
+ *
+ * It is deliberately NOT the cache generation, the `any` axis, which every
+ * declaration moves, in any scope. Computing the result boxes the function
+ * literal, which declares its parameters in a scope of its own, so a
+ * generation read BEFORE the computation never matched the one stored: the
+ * memo never hit, every read re-boxed the body, and the body read the
+ * signatures of the declared functions it calls, each re-boxed in turn. A
+ * Tycho document with nested declared functions (a Voronoï pattern: `P`
+ * calls `S` twice, `S` calls `H`, `V` calls `P` nine times) spent 75 s
+ * registering its definitions, 1 s before. Reading the generation AFTER the
+ * computation is not enough either: the boxing of an outer function (`V`)
+ * declares its own parameters between two reads of an inner one (`P`), and
+ * one document still took more than 200 s.
+ */
+export function declaredResultMemoKey(
+  ce: IComputeEngine,
+  literal: Expression
+): string {
+  // A literal with no home scope has no result under the declared
+  // parameter types (`resultUnderDeclaredParameters`), so no scope's
+  // declarations can change it.
+  const home = homeScopeOf(literal);
+  return `${ce._semanticVersion}:${ce._worldVersion}:${ce._callableVersion}:${
+    ce._typeVersion
+  }:${scopeChainDeclarationCount(home)}:${ce._cacheGeneration() & 1}`;
 }
 
 /** `t` with its result replaced by `result`, when `t` is a signature. */

@@ -993,6 +993,11 @@ export interface IComputeEngine {
    * `_noteStateEvent`) — keys `BoxedFunction._effects`. @internal */
   readonly _callableVersion: number;
 
+  /** Advanced when an existing symbol is retyped (a `type-write` event),
+   * not by a declaration (see `EngineConfigurationLifecycle.typeVersion`).
+   * @internal */
+  readonly _typeVersion: number;
+
   /** When > 0, value writes are ephemeral loop-index writes.
    * @internal */
   _ephemeralWriteDepth: number;

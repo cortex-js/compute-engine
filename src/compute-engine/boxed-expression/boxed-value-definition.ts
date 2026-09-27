@@ -8,12 +8,14 @@ import type {
   TypeProvenanceEntry,
 } from '../global-types.js';
 import {
+  declaredResultMemoKey,
   resultUnderDeclaredParameters,
   withSignatureResult,
 } from './declared-parameter-result.js';
 
 import type { Type, TypeString } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
+import { typeToString } from '../../common/type/serialize.js';
 import {
   collectionElementType,
   containsSignatureArm,
@@ -206,8 +208,9 @@ export class _BoxedValueDefinition
   private _signatureMemo:
     | {
         skeleton: Type;
-        valueType: BoxedType;
-        generation: number;
+        value: Expression;
+        valueType: string;
+        versions: string;
         type: BoxedType;
       }
     | undefined = undefined;
@@ -827,26 +830,37 @@ export class _BoxedValueDefinition
     } finally {
       this._derivingSignature = false;
     }
-    // The memo also keys on the engine's cache generation, because the
-    // result under the declared parameter types (below) reads the current
-    // types of the symbols the body refers to.
-    const generation = this._engine._cacheGeneration();
+    // The memo keys on the value's type by CONTENT: the object is rebuilt
+    // whenever the cache generation moves, which the computation below does
+    // itself. It also keys on the engine versions that move when the result
+    // under the declared parameter types (below) can change, read AFTER the
+    // computation so that its own declarations are included
+    // (`declaredResultMemoKey`). Without both, the memo never hit, and every
+    // read re-boxed the body and the bodies of the functions it calls.
+    const valueTypeKey = typeToString(valueType.type);
     const memo = this._signatureMemo;
     if (
       memo !== undefined &&
       memo.skeleton === skeleton &&
-      memo.valueType === valueType &&
-      memo.generation === generation
+      memo.value === v &&
+      memo.valueType === valueTypeKey &&
+      memo.versions === declaredResultMemoKey(this._engine, v)
     )
       return memo.type;
     // The stored literal reads its scalar parameters as `unknown`; its
     // result under the DECLARED parameter types is the accurate one to
     // report (`resultUnderDeclaredParameters`).
-    const typedResult = resultUnderDeclaredParameters(
-      this._engine,
-      v,
-      skeleton
-    );
+    // Computing it boxes the body again, and a recursive body reads this
+    // signature: the guard makes that read answer the recorded type, as for
+    // the value's type above. Without it, each level boxed the body again,
+    // without end.
+    let typedResult: Type | undefined;
+    this._derivingSignature = true;
+    try {
+      typedResult = resultUnderDeclaredParameters(this._engine, v, skeleton);
+    } finally {
+      this._derivingSignature = false;
+    }
     const refined = refineDeclaredPlaceholders(
       skeleton,
       typedResult === undefined
@@ -857,7 +871,18 @@ export class _BoxedValueDefinition
       refined === recorded.type
         ? recorded
         : new BoxedType(refined, this._engine._typeResolver);
-    this._signatureMemo = { skeleton, valueType, generation, type };
+    // Not stored while an inference rollback frame is open: its undo restores
+    // declarations and types by raw writes that advance no counter of the
+    // key, so a result computed in the discarded trial would still match
+    // after the rollback.
+    if (this._engine._rollbackFrames.length === 0)
+      this._signatureMemo = {
+        skeleton,
+        value: v,
+        valueType: valueTypeKey,
+        versions: declaredResultMemoKey(this._engine, v),
+        type,
+      };
     return type;
   }
 

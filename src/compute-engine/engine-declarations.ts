@@ -1,3 +1,4 @@
+import { noteScopeDeclaration } from './scope-declaration-count.js';
 import type {
   DeclarationOrigin,
   FunctionSignature,
@@ -559,6 +560,7 @@ export function declareSymbolValue(
   if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
   updateDef(ce, name, boxedDef, def);
 
+  noteScopeDeclaration(scope);
   ce._noteStateEvent({
     kind: 'declare',
     callable: defIsCallableShaped(boxedDef),
@@ -615,6 +617,7 @@ export function declareSymbolOperator(
   if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
   updateDef(ce, name, boxedDef, def);
 
+  noteScopeDeclaration(scope);
   ce._noteStateEvent({
     kind: 'declare',
     callable: true,

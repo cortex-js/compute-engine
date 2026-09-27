@@ -6,6 +6,7 @@ import type {
   TypeString,
 } from '../../common/type/types.js';
 import {
+  declaredResultMemoKey,
   resultUnderDeclaredParameters,
   withSignatureResult,
 } from './declared-parameter-result.js';
@@ -709,8 +710,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     | {
         stored: BoxedType;
         skeleton: Type;
-        lambdaType: BoxedType;
-        generation: number;
+        literal: Expression;
+        lambdaType: string;
+        versions: string;
         type: BoxedType;
       }
     | undefined = undefined;
@@ -741,17 +743,22 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     } finally {
       this._derivingSignature = false;
     }
-    // The memo also keys on the engine's cache generation, because the
-    // result under the declared parameter types (below) reads the current
-    // types of the symbols the body refers to.
-    const generation = this.engine._cacheGeneration();
+    // The memo keys on the lambda's type by CONTENT: the object is rebuilt
+    // whenever the cache generation moves, which the computation below does
+    // itself. It also keys on the engine versions that move when the result
+    // under the declared parameter types (below) can change, read AFTER the
+    // computation so that its own declarations are included
+    // (`declaredResultMemoKey`). Without both, the memo never hit, and every
+    // read re-boxed the body and the bodies of the functions it calls.
+    const lambdaTypeKey = typeToString(lambdaType.type);
     const memo = this._signatureMemo;
     if (
       memo !== undefined &&
       memo.stored === stored &&
       memo.skeleton === skeleton &&
-      memo.lambdaType === lambdaType &&
-      memo.generation === generation
+      memo.literal === literal &&
+      memo.lambdaType === lambdaTypeKey &&
+      memo.versions === declaredResultMemoKey(this.engine, literal)
     )
       return memo.type;
     const t = stored.type;
@@ -778,12 +785,21 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // `unknown` again: the answer is `base`, never an older refinement.
       // The lambda reads its scalar parameters as `unknown`; its result
       // under the DECLARED parameter types is the accurate one to report
-      // (`resultUnderDeclaredParameters`).
-      const typedResult = resultUnderDeclaredParameters(
-        this.engine,
-        literal,
-        skeleton
-      );
+      // (`resultUnderDeclaredParameters`). Computing it boxes the body
+      // again, and a recursive body reads this signature: the guard makes
+      // that read answer the stored signature, as for the lambda's type
+      // above. Without it, each level boxed the body again, without end.
+      let typedResult: Type | undefined;
+      this._derivingSignature = true;
+      try {
+        typedResult = resultUnderDeclaredParameters(
+          this.engine,
+          literal,
+          skeleton
+        );
+      } finally {
+        this._derivingSignature = false;
+      }
       type = new BoxedType(
         refineDeclaredPlaceholders(
           base,
@@ -794,7 +810,20 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         this.engine._typeResolver
       );
     }
-    this._signatureMemo = { stored, skeleton, lambdaType, generation, type };
+    // Not stored while an inference rollback frame is open: its undo restores
+    // declarations and types by raw writes that advance no counter of the
+    // key, so a result computed in the discarded trial would still match
+    // after the rollback (the effects memo below refuses to stamp there for
+    // the same reason).
+    if (this.engine._rollbackFrames.length === 0)
+      this._signatureMemo = {
+        stored,
+        skeleton,
+        literal,
+        lambdaType: lambdaTypeKey,
+        versions: declaredResultMemoKey(this.engine, literal),
+        type,
+      };
     return type;
   }
 

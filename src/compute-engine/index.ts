@@ -1057,6 +1057,12 @@ export class ComputeEngine implements IComputeEngine {
    * see `_anyVersion`.
    * @internal
    */
+  /** See `EngineConfigurationLifecycle.typeVersion`.
+   * @internal */
+  get _typeVersion(): number {
+    return this._configurationLifecycle.typeVersion;
+  }
+
   get _callableVersion(): number {
     return this._configurationLifecycle.callableVersion;
   }

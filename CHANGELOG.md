@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **Declaring several functions that call each other no longer takes
+  minutes.** Since 0.137.0 the signature of a function declared
+  `(T, …) -> unknown` reports the result its body has under the declared
+  parameter types. That result was cached on the engine's cache generation,
+  which computing it moves, so it was computed again at every read, together
+  with the signatures of the declared functions the body calls. With three
+  nested functions (`P` calls `S` twice, `S` calls `H`), assigning `P` did not
+  finish in 100 s; it takes 20 ms. The result is now cached until a value, an
+  assumption, a definition, a called function, a symbol's type, or the
+  declarations in the scope the function was defined in change.
+- **A recursive function declared `(T, …) -> unknown` has a signature.** The
+  signature of `f := n ↦ n + f(n − 1)` read its own signature while it was
+  computed and never finished (0.137.0).
+
 ## 0.137.0 _2026-09-26_
 
 ### Behavior Changes

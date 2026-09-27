@@ -192,6 +192,7 @@ export class EngineConfigurationLifecycle {
   private _semanticVersion = 0;
   private _worldVersion = 0;
   private _callableVersion = 0;
+  private _typeVersion = 0;
   private _ephemeralWriteDepth = 0;
   private _factSuppressionDepth = 0;
   private _scratchDeclarationScopes: object[] = [];
@@ -213,6 +214,20 @@ export class EngineConfigurationLifecycle {
 
   get callableVersion(): number {
     return this._callableVersion;
+  }
+
+  /** Advanced when an existing symbol is retyped (a `type-write`). That
+   * event advances only the `any` axis, which every declaration also
+   * advances, so a cache that must follow a retype but must not be
+   * invalidated by a declaration (the declarations a computation makes
+   * itself) keys on this counter. See `declaredResultMemoKey`.
+   *
+   * An `inference-settled` event (a symbol narrowed by a use) does not
+   * advance it: those are frequent during type derivation, and counting
+   * them made a Tycho document three times slower to register. A narrowing
+   * can only make a cached result wider than it could be, never wrong. */
+  get typeVersion(): number {
+    return this._typeVersion;
   }
 
   get ephemeralWriteDepth(): number {
@@ -261,6 +276,7 @@ export class EngineConfigurationLifecycle {
     if (m.semantic) this._semanticVersion += 1;
     if (m.world) this._worldVersion += 1;
     if (callableAxisSelects(e)) this._callableVersion += 1;
+    if (e.kind === 'type-write') this._typeVersion += 1;
     if (CACHE_STATS) {
       if (m.any) recordBump('generation');
       if (m.semantic) recordBump('mutationGeneration');
