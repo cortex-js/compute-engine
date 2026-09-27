@@ -2,6 +2,10 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 import { ComputeEngine } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
 import { packTensor } from '../../src/compute-engine/boxed-expression/tensor-view';
+import { rationalAsFloat } from '../../src/compute-engine/numerics/rationals';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { ExactNumericValue } from '../../src/compute-engine/numeric-value/exact-numeric-value';
+import { isGaussianInteger } from '../../src/compute-engine/numeric-value/gaussian-integer';
 
 // A number whose magnitude is outside the float64 range (`10^400`,
 // `10^-400`) has a machine value of ±Infinity or 0. Two kinds of code used
@@ -809,4 +813,532 @@ describe('COMPLEX POWER WITH A MODULUS ABOVE THE LARGEST DOUBLE', () => {
         .toString()
     ).toBe('~oo');
   });
+});
+
+// The imaginary part of an exact value is stored exactly, as a rational
+// times the square root of an integer, but the question "is this value
+// complex?" was answered from its double projection `im`, which is `0` for
+// an imaginary part below the double range. So `i·10^{-800}` was stored
+// exactly and read as zero. `isComplex` reads the exact part.
+// Specification: docs/plans/2026-09-27-big-decimal-imaginary-part.md, §1
+// (the table of defects), §2.1 and §2.2, "Phase 1" in §6.
+describe('EXACT IMAGINARY PART OUTSIDE THE FLOAT64 RANGE', () => {
+  const ce = new ComputeEngine();
+
+  // §1 table, row 1: `i\cdot10^{-800}` `.evaluate()` was `0`.
+  test('i·10^{-800} evaluates to a non-zero exact imaginary value', () => {
+    const z = ce.parse('i\\cdot10^{-800}').evaluate();
+    expect(z.isSame(0)).toBe(false);
+    expect(z.json).toEqual(['Complex', 0, ['Rational', 1, { num: '1e+800' }]]);
+    const nv = z.numericValue;
+    expect(typeof nv).toBe('object');
+    if (typeof nv === 'object') {
+      expect(nv.isExact).toBe(true);
+      expect(nv.isZero).toBe(false);
+      expect(nv.isComplex).toBe(true);
+      // `im` is the double projection of the imaginary part, which is 0
+      expect(nv.im).toBe(0);
+    }
+    expect(z.im).toBe(0);
+  });
+
+  // §1 table, row 2: `(1+i)10^{-800}` `.evaluate()` lost its imaginary part.
+  test('(1+i)·10^{-800} keeps both parts under evaluate()', () => {
+    const z = ce.parse('(1+i)10^{-800}').evaluate();
+    const part: MathJsonExpression = ['Rational', 1, { num: '1e+800' }];
+    expect(z.json).toEqual(['Complex', part, part]);
+  });
+
+  // §6 "Phase 1" acceptance: the pair test. The value `2·10^{-800}i` is
+  // written as `2i·10^{-800}`: the parser reads `2\cdot10^{-800}` as the
+  // decimal literal `2e-800`, which is inexact, and the product of an inexact
+  // real with `i` still keeps a double imaginary part (Phase 2 and Phase 3 of
+  // the design note).
+  test('10^{-800}i and 2·10^{-800}i are distinct and not zero', () => {
+    const a = ce.parse('10^{-800}i').evaluate();
+    const b = ce.parse('2i\\cdot10^{-800}').evaluate();
+    expect(a.isSame(0)).toBe(false);
+    expect(b.isSame(0)).toBe(false);
+    expect(a.isSame(b)).toBe(false);
+    expect(b.json).toEqual(['Complex', 0, ['Rational', 1, { num: '5e+799' }]]);
+    for (const z of [a, b]) {
+      const nv = z.numericValue;
+      if (typeof nv === 'object') {
+        expect(nv.isZero).toBe(false);
+        expect(nv.isComplex).toBe(true);
+      } else throw new Error('expected a numeric value');
+    }
+  });
+
+  // §1 table, row 3, the exact route only: `(1+i)10^{800}` `.N()` is still
+  // `~oo` until Phase 2, but `evaluate()` keeps both parts exactly.
+  test('(1+i)·10^{800} keeps both parts under evaluate()', () => {
+    const z = ce.parse('(1+i)10^{800}').evaluate();
+    expect(z.json).toEqual(['Complex', { num: '1e+800' }, { num: '1e+800' }]);
+    const nv = z.numericValue;
+    if (typeof nv === 'object') {
+      expect(nv.isExact).toBe(true);
+      expect(nv.isComplex).toBe(true);
+      // The double projection of 10^{800} is +Infinity
+      expect(nv.im).toBe(Infinity);
+    } else throw new Error('expected a numeric value');
+  });
+
+  // §2.2, `_liftComplex`: an inexact complex value with integer parts is
+  // lifted to an exact value when it meets an exact value. A double cannot
+  // hold `10^{-800}i`, so the inexact imaginary part is tested with `0.5i`
+  // (not an integer: no lift) and `2i` (an integer: lift). The real part,
+  // which can be a big decimal, is tested with `10^{-800}`, whose double
+  // projection is the integer `0`: it must not be lifted to an exact zero.
+  test('only a Gaussian integer is lifted to an exact value', () => {
+    const third = ce._numericValue({ rational: [1, 3] });
+    const half = third.mul(ce._numericValue({ re: 0, im: 0.5 }));
+    expect(half.isExact).toBe(false);
+    expect(half.im).toBeCloseTo(1 / 6, 15);
+
+    const two = third.mul(ce._numericValue({ re: 0, im: 2 }));
+    expect(two.isExact).toBe(true);
+    expect(two.toString()).toBe('2/3i');
+
+    const tinyRe = ce._numericValue({ re: new BigDecimal('1e-800'), im: 2 });
+    expect(tinyRe.re).toBe(0);
+    const product = third.mul(tinyRe);
+    expect(product.isExact).toBe(false);
+    expect(product.bignumRe?.isZero()).toBe(false);
+    const sum = third.add(tinyRe);
+    expect(sum.isExact).toBe(false);
+  });
+
+  // §2.2, `eq` of an exact value against an inexact one: the real parts
+  // compare at working precision through `bignumRe`, and the imaginary parts
+  // now follow the same rule through `bignumIm`. They were compared as
+  // doubles, so the exact `10^{-800}i` (double `im` 0) was equal to an
+  // inexact 0.
+  test('10^{-800}i is not the same as an inexact 0, in both directions', () => {
+    const tiny = ce.parse('10^{-800}i').evaluate();
+    const zero = ce.number(ce._numericValue(ce.bignum('0.0')));
+    expect(tiny.isSame(zero)).toBe(false);
+    expect(zero.isSame(tiny)).toBe(false);
+    const a = tiny.numericValue;
+    const b = zero.numericValue;
+    if (typeof a !== 'object' || typeof b !== 'object')
+      throw new Error('expected numeric values');
+    expect(a.eq(b)).toBe(false);
+    expect(b.eq(a)).toBe(false);
+  });
+
+  // The imaginary part mirrors the real part: the exact √2 is not the same
+  // as the double 1.4142135623730951, so the exact √2·i is not the same as
+  // the inexact 1.4142135623730951i. An integer part is the same in both
+  // lanes (2i).
+  test('an exact imaginary part against an inexact one follows the real part', () => {
+    const real = ce.parse('\\sqrt2').evaluate();
+    const realFloat = ce.number(ce._numericValue(1.4142135623730951));
+    expect(real.isSame(realFloat)).toBe(false);
+    expect(realFloat.isSame(real)).toBe(false);
+
+    const imag = ce.parse('\\sqrt2 i').evaluate();
+    const imagFloat = ce.number(
+      ce._numericValue({ re: 0, im: 1.4142135623730951 })
+    );
+    expect(imag.isSame(imagFloat)).toBe(false);
+    expect(imagFloat.isSame(imag)).toBe(false);
+
+    const two = ce.parse('2i').evaluate().numericValue;
+    const twoFloat = ce._numericValue({ re: 0, im: 2 });
+    if (typeof two !== 'object') throw new Error('expected a numeric value');
+    expect(two.eq(twoFloat)).toBe(true);
+    expect(twoFloat.eq(two)).toBe(true);
+  });
+
+  // `eq` against a machine value (a double, no `bignumRe`) compares at the
+  // precision of the double: the projections are compared, so the exact 1/3
+  // and √2 are the same as their nearest doubles, from both sides. A part
+  // whose projection lost its value (10^{400} → Infinity, 10^{-400} → 0,
+  // the imaginary 10^{-800} → 0) is not the same as that double.
+  // (Before this rule, the exact side compared 25 digits against the
+  // 16-digit double, and 1/3 against 0.3333333333333333 was unequal.)
+  test('against a machine value, eq compares the doubles', () => {
+    const machine = new ComputeEngine({ precision: 'machine' });
+    const third = machine.number(1 / 3);
+    const exactThird = machine.box(['Rational', 1, 3]);
+    expect(third.isSame(exactThird)).toBe(true);
+    expect(exactThird.isSame(third)).toBe(true);
+
+    const root = machine.number(Math.SQRT2);
+    const exactRoot = machine.parse('\\sqrt2').evaluate();
+    expect(root.isSame(exactRoot)).toBe(true);
+    expect(exactRoot.isSame(root)).toBe(true);
+
+    // The inexact operand is built from a big decimal: at machine precision
+    // it becomes a machine value (`{re: 0, im: 0}` would give the exact 0).
+    const pairs: [MathJsonExpression, number][] = [
+      [BIG, Infinity],
+      [TINY, 0],
+      [['Multiply', 'ImaginaryUnit', ['Power', 10, -800]], 0],
+    ];
+    for (const [exactJson, double] of pairs) {
+      const exact = machine.box(exactJson).evaluate().numericValue;
+      const inexact = machine._numericValue(new BigDecimal(double));
+      if (typeof exact !== 'object') throw new Error('expected a value');
+      expect(inexact.constructor.name).toBe('MachineNumericValue');
+      expect(exact.eq(inexact)).toBe(false);
+      expect(inexact.eq(exact)).toBe(false);
+    }
+  });
+
+  // `ExactNumericValue.sum` treats an inexact Gaussian integer as exact, and
+  // decides this with `isGaussianInteger()`, the rule `_liftComplex` uses.
+  // A real part too small for a double (`10^{-800}`, projection 0) does not
+  // make the value a Gaussian integer.
+  test('the exact sum treats only a Gaussian integer as exact', () => {
+    const half = ce._numericValue({ rational: [1, 2] });
+    const [gauss] = ExactNumericValue.sum(
+      [half, ce._numericValue({ re: 0, im: 3 })],
+      (x) => ce._numericValue(x)
+    ).filter((x) => !x.isZero);
+    expect(gauss.isExact).toBe(true);
+    expect(gauss.toString()).toBe('(1/2 + 3i)');
+
+    const tinyRe = ce._numericValue({ re: ce.bignum('1e-800'), im: 3 });
+    expect(isGaussianInteger(tinyRe)).toBe(false);
+    expect(isGaussianInteger(ce._numericValue({ re: 0, im: 3 }))).toBe(true);
+    const sums = ExactNumericValue.sum([half, tinyRe], (x) =>
+      ce._numericValue(x)
+    );
+    expect(sums).toHaveLength(1);
+    expect(sums[0].isExact).toBe(false);
+    expect(sums[0].bignumRe?.toString()).not.toBe('0.5');
+  });
+
+  // §1 table, the exact route of row 4 (`(10^{-200}(1+i))^2`). The integer
+  // power of an exact imaginary value is computed exactly
+  // (`exactIntegerPow`, `boxed-expression/arithmetic-power.ts`). Its guard on
+  // the size of the result read the double projection of the imaginary part,
+  // which is `0` for `10^{-200}` and `10^{-800}` and `Infinity` for
+  // `10^{400}`, so these powers stayed symbolic.
+  test.each([
+    ['(10^{-200}i)^2', '-10^{-400}'],
+    ['(10^{400}i)^2', '-10^{800}'],
+    ['(10^{-800}i)^3', '-10^{-2400}i'],
+  ])('%s evaluates to the exact %s', (input, expected) => {
+    const z = ce.parse(input).evaluate();
+    const want = ce.parse(expected).evaluate();
+    expect(z.json).toEqual(want.json);
+    expect(z.isSame(want)).toBe(true);
+    const nv = z.numericValue;
+    if (typeof nv === 'object') expect(nv.isExact).toBe(true);
+  });
+
+  test('the exact expected values of the powers', () => {
+    expect(ce.parse('(10^{-200}i)^2').evaluate().json).toEqual([
+      'Rational',
+      -1,
+      { num: '1e+400' },
+    ]);
+    expect(ce.parse('(10^{400}i)^2').evaluate().json).toEqual({
+      num: '-1e+800',
+    });
+    expect(ce.parse('(10^{-800}i)^3').evaluate().json).toEqual([
+      'Complex',
+      0,
+      ['Rational', -1, { num: '1e+2400' }],
+    ]);
+  });
+
+  // §3, a test of integrality on the projection: the sum of imaginary terms
+  // (`boxed-expression/arithmetic-add.ts`) tested `Number.isSafeInteger(im)`
+  // to find an integer coefficient of `i`, and the projection `0` of
+  // `10^{-800}` passed that test, so the exact term was folded into the
+  // float coefficient as `0`. The canonical sum keeps the exact term. (Under
+  // `evaluate()` the float `2.5i` absorbs it, because the imaginary part of
+  // an inexact value is a double until Phase 2 of the design note.)
+  test('10^{-800}i + 2.5i keeps the exact term in the canonical sum', () => {
+    const sum = ce.parse('10^{-800}i + 2.5i');
+    expect(sum.isSame(ce.parse('2.5i'))).toBe(false);
+    expect(sum.operator).toBe('Add');
+    expect(sum.nops).toBe(2);
+    const tiny = ce.parse('10^{-800}i').evaluate();
+    expect(sum.ops!.some((op) => op.evaluate().isSame(tiny))).toBe(true);
+  });
+
+  // §2.5 and §3, the statistics functions: the carrier of the data read the
+  // double projection of an exact datum, so the imaginary part `10^{400}`,
+  // whose projection is `Infinity`, made the datum the complex infinity.
+  test('Mean([1, 10^{400}i, 3]) is 4/3 + (10^{400}/3)i', () => {
+    const m = ce.parse('\\operatorname{Mean}([1, 10^{400}i, 3])').evaluate();
+    expect(m.json).toEqual([
+      'Complex',
+      ['Rational', 4, 3],
+      ['Rational', { num: '1e+400' }, 3],
+    ]);
+    const nv = m.numericValue;
+    if (typeof nv === 'object') expect(nv.isExact).toBe(true);
+    else throw new Error('expected a numeric value');
+  });
+
+  // §3: the recognizer of the imaginary unit (`boxed-expression/
+  // arithmetic-mul-div.ts`, `utils.ts`) compared the double of the real part
+  // with `0`, so `10^{-800} + i`, whose real part projects to `0`, was
+  // taken for `i` and the product was simplified as `i·i = -1`.
+  // (10^{-800} + i)·i = -1 + 10^{-800}·i.
+  test('(10^{-800} + i)·i is not simplified as i·i', () => {
+    const expected: MathJsonExpression = [
+      'Complex',
+      -1,
+      ['Rational', 1, { num: '1e+800' }],
+    ];
+    const product = ce.parse('(10^{-800}+i)\\cdot i');
+    expect(product.evaluate().json).toEqual(expected);
+    expect(product.simplify().evaluate().json).toEqual(expected);
+    expect(product.isSame(-1)).toBe(false);
+  });
+
+  // §5 and decision D2 of the design note: compiled code computes in
+  // doubles, so a constant whose imaginary part underflows the double range
+  // is folded as `{re, im: 0}`, which is what the compiled double arithmetic
+  // gives for the same value. Paired with the first test of this block,
+  // where the same value stays non-zero under `evaluate()`.
+  test('compiled 10^{-800}i folds to the double 0', () => {
+    const expr = ce.parse('10^{-800}i');
+    expect(expr.evaluate().isSame(0)).toBe(false);
+    const result = compile(expr, { to: 'javascript' });
+    expect(result.success).toBe(true);
+    const value: unknown = result.run!({});
+    if (typeof value === 'number') expect(value).toBe(0);
+    else expect(value).toEqual({ re: 0, im: 0 });
+  });
+
+  // §2.3, the arithmetic of `BigNumericValue` with an exact complex operand.
+  // Once the "is complex?" test reads the exact imaginary part, an exact
+  // `1 + 10^{-400}i` reaches the complex product of the big-decimal class.
+  // That product multiplied the double projections: the real part `10^{400}`
+  // is `Infinity` as a double and `10^{-400}` is `0`, so `Infinity · 0` made
+  // the product `NaN`, in both operand orders. With every part a big decimal,
+  // 10^{400}·(1 + 10^{-400}i) = 10^{400} + i and
+  // 10^{400}/(1 + 10^{-400}i) = 10^{400}(1 − 10^{-400}i)/(1 + 10^{-800}),
+  // whose parts are 10^{400} and −1 at the working precision.
+  test('10^{400} (big decimal) times and over the exact 1 + 10^{-400}i', () => {
+    const big = ce._numericValue(ce.bignum('1e400'));
+    const z = ce._numericValue({
+      rational: [1, 1],
+      imRational: [BigInt(1), BigInt(10) ** BigInt(400)],
+    });
+    expect(z.isComplex).toBe(true);
+    for (const product of [big.mul(z), z.mul(big)]) {
+      expect(product.isNaN).toBe(false);
+      expect(product.bignumRe?.eq(ce.bignum('1e400'))).toBe(true);
+      expect(product.im).toBe(1);
+      expect(product.toString()).toBe('(1e+400 + i)');
+    }
+    const quotient = big.div(z);
+    expect(quotient.isNaN).toBe(false);
+    expect(quotient.bignumRe?.eq(ce.bignum('1e400'))).toBe(true);
+    expect(quotient.im).toBe(-1);
+  });
+
+  // The same class multiplied its double imaginary part by the double of a
+  // big-decimal factor, which is `Infinity` for a finite `10^{400}`, and so
+  // answered `~oo` for (1.5 + 10^{-300}i)·10^{400} = 1.5·10^{400} + 10^{100}i.
+  test('(1.5 + 10^{-300}i) times the big decimal 10^{400} is finite', () => {
+    const w = ce._numericValue({ re: ce.bignum('1.5'), im: 1e-300 });
+    const product = w.mul(ce.bignum('1e400'));
+    expect(product.isComplexInfinity).toBe(false);
+    expect(product.bignumRe?.eq(ce.bignum('1.5e400'))).toBe(true);
+    expect(product.im).toBe(1e100);
+  });
+});
+
+// §2.1: the double projection of an exact rational. It divided
+// `Number(numerator)` by `Number(denominator)`, and a bigint beyond the
+// double range converts to `Infinity`, so `(10^400 + 1)/10^400`, whose
+// nearest double is `1`, projected to `Infinity/Infinity = NaN`.
+describe('DOUBLE PROJECTION OF AN EXACT RATIONAL OUTSIDE THE FLOAT64 RANGE', () => {
+  const ce = new ComputeEngine();
+
+  test('(10^400 + 1)/10^400 projects to 1', () => {
+    const q = ce.box(['Divide', BIG_PLUS_ONE, BIG]).evaluate();
+    expect(q.isSame(1)).toBe(false);
+    expect(q.re).toBe(1);
+  });
+
+  test('the imaginary part projects the same way', () => {
+    const z = ce
+      .box(['Multiply', ['Divide', BIG_PLUS_ONE, BIG], 'ImaginaryUnit'])
+      .evaluate();
+    const nv = z.numericValue;
+    if (typeof nv === 'object') {
+      expect(nv.isExact).toBe(true);
+      expect(nv.im).toBe(1);
+      expect(nv.re).toBe(0);
+    } else throw new Error('expected a numeric value');
+  });
+
+  test('bigint rationals beyond the double range', () => {
+    const big = 10n ** 400n;
+    expect(rationalAsFloat([big + 1n, big])).toBe(1);
+    expect(rationalAsFloat([-7n * big, 2n * big])).toBe(-3.5);
+    expect(rationalAsFloat([1n, big])).toBe(0);
+    expect(rationalAsFloat([big, 3n])).toBe(Infinity);
+    // 10^400/(3·10^100) = 10^300/3, a finite double
+    expect(rationalAsFloat([big, 3n * 10n ** 100n])).toBe(1e300 / 3);
+  });
+
+  // A subnormal result (below 2^-1022) must be rounded once, from the exact
+  // quotient. Rounding the quotient to 53 bits first and then scaling it
+  // rounded twice: (2^54 + 1)/2^1129 is just above half of 2^-1074, the
+  // first rounding made it exactly half, and the second rounded that tie
+  // to 0. Each expected value is the correctly rounded double, checked
+  // against Python's correctly rounded integer division (`n / d` on ints),
+  // and written as a multiple of 2^-1074 (`Number.MIN_VALUE`), which is
+  // exact.
+  test.each([
+    // just above the midpoint between 0 and 2^-1074: rounds up
+    ['(2^54 + 1)/2^1129', 2n ** 54n + 1n, 2n ** 1129n, Number.MIN_VALUE],
+    // exactly the midpoint: ties to even gives 0
+    ['1/2^1075', 1n, 2n ** 1075n, 0],
+    // 1.5·2^-1074: ties to even gives 2·2^-1074
+    ['3/2^1075', 3n, 2n ** 1075n, 2 * Number.MIN_VALUE],
+    // the largest subnormal, (2^52 - 1)·2^-1074
+    [
+      '(2^53 - 2)/2^1075',
+      2n ** 53n - 2n,
+      2n ** 1075n,
+      (2 ** 52 - 1) * Number.MIN_VALUE,
+    ],
+    // (2^52 - 1/2)·2^-1074 is a tie between the largest subnormal (odd)
+    // and the smallest normal 2^-1022 (even): it rounds to 2^-1022
+    ['(2^53 - 1)/2^1075', 2n ** 53n - 1n, 2n ** 1075n, 2 ** -1022],
+    // the smallest normal, exactly
+    ['2^55/2^1077', 2n ** 55n, 2n ** 1077n, 2 ** -1022],
+    // a negative subnormal
+    ['-(2^54 + 1)/2^1129', -(2n ** 54n + 1n), 2n ** 1129n, -Number.MIN_VALUE],
+  ])('%s is rounded once in the subnormal range', (_, n, d, expected) => {
+    expect(Object.is(rationalAsFloat([n, d]), expected)).toBe(true);
+  });
+
+  test('a rational out of the double range projects to 0 or ±Infinity', () => {
+    const tiny = ce.box(['Divide', 1, BIG_PLUS_ONE]).evaluate();
+    expect(tiny.re).toBe(0);
+    const huge = ce.box(['Divide', BIG_PLUS_ONE, 3]).evaluate();
+    expect(huge.re).toBe(Infinity);
+    const negHuge = ce.box(['Divide', ['Negate', BIG_PLUS_ONE], 3]).evaluate();
+    expect(negHuge.re).toBe(-Infinity);
+  });
+
+  // An ordinary rational keeps the double it had: the quotient of the two
+  // converted parts, bit for bit.
+  test.each([
+    [1, 3],
+    [-7, 2],
+    [22, 7],
+    [123456789, 1000],
+  ])('%d/%d projects as Number(n)/Number(d)', (n, d) => {
+    const q = ce.box(['Rational', n, d]).evaluate();
+    expect(Object.is(q.re, n / d)).toBe(true);
+    expect(Object.is(rationalAsFloat([BigInt(n), BigInt(d)]), n / d)).toBe(
+      true
+    );
+  });
+});
+
+// §2.2, `eq` between an inexact value and an exact one. The inexact classes
+// (`BigNumericValue`, `MachineNumericValue`) compared the double `im` of the
+// exact operand, which is `0` for `10^{-800}i`, so an inexact `0` was equal
+// to that value from the inexact side. The inexact classes now let the exact
+// operand compare the pair, so the relation is symmetric. (Whether the pair
+// is equal is decided by `ExactNumericValue.eq`, which compares both parts at
+// the working precision.)
+describe('EQ BETWEEN AN INEXACT VALUE AND AN EXACT IMAGINARY VALUE', () => {
+  const tiny = (e: ComputeEngine) =>
+    e._numericValue({
+      rational: [0, 1],
+      imRational: [BigInt(1), BigInt(10) ** BigInt(800)],
+    });
+
+  test('big-decimal 0 and the exact 10^{-800}i are not eq, from both sides', () => {
+    const e = new ComputeEngine();
+    const zero = e._numericValue(new BigDecimal(0));
+    expect(zero.constructor.name).toBe('BigNumericValue');
+    expect(zero.eq(tiny(e))).toBe(false);
+    expect(tiny(e).eq(zero)).toBe(false);
+  });
+
+  test('machine 0 and the exact 10^{-800}i are not eq, from both sides', () => {
+    const e = new ComputeEngine({ precision: 'machine' });
+    const zero = e._numericValue(new BigDecimal(0));
+    expect(zero.constructor.name).toBe('MachineNumericValue');
+    expect(zero.eq(tiny(e))).toBe(false);
+    expect(tiny(e).eq(zero)).toBe(false);
+  });
+
+  test('inexact 2i and the exact 2i are equal from both sides', () => {
+    for (const e of [
+      new ComputeEngine(),
+      new ComputeEngine({ precision: 'machine' }),
+    ]) {
+      const inexact = e._numericValue({ re: new BigDecimal(0), im: 2 });
+      const exact = e._numericValue({ rational: [0, 1], imRational: [2, 1] });
+      expect(inexact.constructor.name).not.toBe('ExactNumericValue');
+      expect(exact.constructor.name).toBe('ExactNumericValue');
+      expect(inexact.eq(exact)).toBe(true);
+      expect(exact.eq(inexact)).toBe(true);
+    }
+  });
+});
+
+// A big-decimal value whose real part is too small for a double
+// (`10^{-800} + 2i` at precision 1000) projects its real part to the double
+// `0`. The boxed Add and Multiply routes lift a Gaussian-integer literal to
+// an exact value; they must not take this value for the Gaussian integer
+// `2i`, which would drop its real part.
+describe('BIG-DECIMAL REAL PART OUTSIDE THE FLOAT64 RANGE, BOXED ROUTES', () => {
+  const withPrecision1000 = (fn: () => void) => {
+    const saved = ce.precision;
+    try {
+      ce.precision = 1000;
+      fn();
+    } finally {
+      ce.precision = saved;
+    }
+  };
+  const z = () =>
+    ce.number(ce._numericValue({ re: ce.bignum('1e-800'), im: 2 }));
+
+  test('Add(1/2, 10^{-800} + 2i) keeps the real part 10^{-800}', () =>
+    withPrecision1000(() => {
+      const r = ce.function('Add', [ce.parse('\\frac12'), z()]).evaluate();
+      expect(r.im).toBe(2);
+      expect(r.bignumRe!.sub(ce.bignum('0.5')).eq(ce.bignum('1e-800'))).toBe(
+        true
+      );
+    }));
+
+  test('Multiply(√2, 10^{-800} + 2i) keeps the real part √2·10^{-800}', () =>
+    withPrecision1000(() => {
+      const r = ce.function('Multiply', [ce.parse('\\sqrt2'), z()]).evaluate();
+      expect(r.im).toBeCloseTo(2 * Math.SQRT2, 14);
+      const re = r.bignumRe!;
+      expect(re.isZero()).toBe(false);
+      // √2·10^{-800} = 1.41421356237309504880…·10^{-800}
+      expect(re.toString()).toMatch(/^1\.4142135623730950488\d*e-800$/);
+    }));
+
+  // (10^{-800} + 2i)^2 = -4 + 4·10^{-800}·i + 10^{-1600}. The boxed route no
+  // longer lifts the base to the exact `2i`, but the big-decimal power itself
+  // still holds its imaginary part as a double, so `4·10^{-800}` underflows
+  // to `0` and the result is `-4`. That is fixed by the big-decimal imaginary
+  // part (design note `docs/plans/2026-09-27-big-decimal-imaginary-part.md`
+  // §2.3, Phase 2). `test.failing` records the known-wrong result: when
+  // Phase 2 lands this test starts to pass, jest reports it, and the
+  // `.failing` marker must then be removed.
+  test.failing(
+    'Power(10^{-800} + 2i, 2) keeps the imaginary part 4·10^{-800}',
+    () =>
+      withPrecision1000(() => {
+        const r = ce.function('Power', [z(), ce.number(2)]).evaluate();
+        expect(r.isSame(-4)).toBe(false);
+        expect(r.bignumIm?.isZero()).toBe(false);
+      })
+  );
 });

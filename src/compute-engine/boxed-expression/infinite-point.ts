@@ -45,7 +45,7 @@ export function isRealLiteral(x: Expression): boolean {
   if (!isNumber(x)) return false;
   const p = infinitePoint(x);
   if (p === '~oo' || p === 'anonymous') return false;
-  return x.im === 0;
+  return !x.isComplex;
 }
 
 /**

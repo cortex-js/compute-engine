@@ -329,7 +329,7 @@ const OPERATORS: Record<
         const op1 = expr.op1;
         if (isNumber(op1)) {
           const lhs = op1.numericValue;
-          if (typeof lhs !== 'number' && lhs.im !== 0) {
+          if (typeof lhs !== 'number' && lhs.isComplex) {
             joinMul(
               serialize(expr.op2, 12),
               joinAdd(lhs.re.toString(), `${lhs.im}i`)
@@ -993,7 +993,7 @@ export function toAsciiMath(
       if (typeof num === 'number')
         return serializeAsciiNumber(num, expr.isExact, options.digits);
       // Round real values only; leave complex values to their default form.
-      if (num.im === 0)
+      if (!num.isComplex)
         return serializeAsciiNumber(
           num.bignumRe ?? num.re,
           expr.isExact,

@@ -49,7 +49,7 @@ export function complexParts(
     if (isNumber(x)) {
       if (x.isFinite !== true) return undefined;
       const v = x.numericValue;
-      if (typeof v === 'number' || v.im === 0) return [x, ce.Zero];
+      if (typeof v === 'number' || !v.isComplex) return [x, ce.Zero];
       // An exact complex value carries its parts as exact components (a
       // rational multiple of a square root): read them rather than the
       // machine values, so that the parts of `1/3 + (2/5)i` are `1/3` and

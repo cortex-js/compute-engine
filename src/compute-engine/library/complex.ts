@@ -514,7 +514,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // A real value is its own real part: return the operand unchanged so an
         // exact real (`1/2`, `√2`) stays exact instead of being rounded to a
         // float. Only a genuinely complex value extracts a real part.
-        if (typeof op === 'number' || op.im === 0) return ops[0];
+        if (typeof op === 'number' || !op.isComplex) return ops[0];
         // An exact complex value carries its real part as an exact component
         // (a rational multiple of a square root): read that component rather
         // than the numeric projection, so `Re(1/3 + 2i/5)` is `1/3` and not a
@@ -561,7 +561,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (ops[0].isNaN === true) return ce.NaN;
         if (infinitePoint(ops[0]) === '~oo') return ce.NaN;
         const op = ops[0].numericValue;
-        if (typeof op === 'number' || op.im === 0) return ce.Zero;
+        if (typeof op === 'number' || !op.isComplex) return ce.Zero;
         // Exact operand: the imaginary part is an exact component too
         // (`Im(1/3 + 2i/5)` is `2/5`, `Im(√2·i)` is `√2`). `op.im` is the
         // machine projection of that component, so it must not be the source.
@@ -656,7 +656,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // `Arctan2` (0 or π).
         if (infinitePoint(ops[0]) === '~oo') return ce.NaN;
         const op = ops[0].numericValue;
-        if (typeof op === 'number' || op.im === 0) {
+        if (typeof op === 'number' || !op.isComplex) {
           const isNonNegative = typeof op === 'number' ? op >= 0 : op.re >= 0;
           const result = isNonNegative ? ce.Zero : ce.Pi;
           // D2: an inexact (float) argument numericizes even under plain
@@ -789,7 +789,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (m !== undefined) return m;
         if (!isNumber(ops[0])) return conjugateOfConstant(ce, ops[0]);
         const op = ops[0].numericValue;
-        if (typeof op === 'number' || op.im === 0) return ops[0];
+        if (typeof op === 'number' || !op.isComplex) return ops[0];
         // Negating the exact imaginary component keeps an exact operand exact
         // (`Conjugate(1/3 + 2i/5)` is `1/3 - 2i/5`), which is what makes
         // `z · Conjugate(z)` — the natural spelling of `|z|²` — answer with

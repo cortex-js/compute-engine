@@ -104,7 +104,7 @@ const MAX_SPINE_DEPTH = 32;
  */
 function literalInteger(x: Expression | undefined): number | undefined {
   if (x === undefined || !isNumber(x)) return undefined;
-  if (x.im !== 0) return undefined;
+  if (x.isComplex) return undefined;
   if (!x.isExact) return undefined;
   const v = x.re;
   return Number.isSafeInteger(v) ? v : undefined;

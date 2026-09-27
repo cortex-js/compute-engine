@@ -573,7 +573,7 @@ export function radiansToAngle(
   if (
     nv !== undefined &&
     typeof nv !== 'number' &&
-    nv.im === 0 &&
+    !nv.isComplex &&
     nv.bignumRe !== undefined
   ) {
     const big = nv.bignumRe;
@@ -1256,7 +1256,7 @@ export function hyperbolicExactValue(
   operator: string,
   x: Expression | undefined
 ): Expression | undefined {
-  if (!isNumber(x) || x.im !== 0) return undefined;
+  if (!isNumber(x) || x.isComplex) return undefined;
   const ce = x.engine;
   switch (operator) {
     case 'Sinh':
@@ -1500,7 +1500,7 @@ const SPECIAL_ANGLE_DENOMINATORS: readonly bigint[] = [
  * are at least `1/132` apart), and is not read.
  */
 function floatSpecialCoefficient(c: Expression): [bigint, bigint] | undefined {
-  if (!isNumber(c) || c.isExact !== false || c.im !== 0) return undefined;
+  if (!isNumber(c) || c.isExact !== false || c.isComplex) return undefined;
   const big = c.bignumRe ?? new BigDecimal(c.re);
   if (!big.isFinite()) return undefined;
   if (big.isZero()) return [0n, 1n];
@@ -1566,7 +1566,7 @@ function quadrant(theta: Expression): [number | undefined, number | undefined] {
   }
 
   if (!theta.isValid || !isNumber(theta)) return [undefined, undefined];
-  if (theta.im !== 0) return [undefined, undefined];
+  if (theta.isComplex) return [undefined, undefined];
   if (!Number.isFinite(theta.re)) return [undefined, undefined];
 
   const ce = theta.engine;

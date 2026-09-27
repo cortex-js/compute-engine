@@ -2264,7 +2264,7 @@ export class ComputeEngine implements IComputeEngine {
         !exact.isComplexInfinity
       ) {
         return new ExactNumericValue(
-          exact.im === 0
+          !exact.isComplex
             ? { rational: exact.rational, radical: exact.radical }
             : {
                 rational: exact.rational,

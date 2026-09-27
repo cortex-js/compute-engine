@@ -104,6 +104,7 @@ import {
   isContinuationOperand,
   isFoldBarrierProduct,
 } from './type-guards.js';
+import { realExponentValue } from './imaginary-part.js';
 import { scopeForRebuild } from './binding-sites.js';
 import {
   armHasValueParam,
@@ -1556,7 +1557,11 @@ export class BoxedFunction
     }
 
     if (isFunction(expr, 'Root')) {
-      const exp = expr.op2.re;
+      // `realExponentValue` is `undefined` (read as `NaN`) for an exact
+      // non-integer index whose double is an integer.
+      const exp = isNumber(expr.op2)
+        ? (realExponentValue(expr.op2) ?? NaN)
+        : expr.op2.re;
       if (isNaN(exp) || expr.op2.im !== 0) return [ce._numericValue(1), this];
 
       const [coef, rest] = expr.op1.toNumericValue();
@@ -2165,7 +2170,14 @@ export class BoxedFunction
     )
       throw new Error('Not canonical');
 
-    const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
+    const e =
+      typeof exp === 'number'
+        ? exp
+        : isNumber(exp)
+          ? realExponentValue(exp)
+          : exp.im === 0
+            ? exp.re
+            : undefined;
 
     if (e === 0) return this.engine.NaN;
     if (e === 1) return this;

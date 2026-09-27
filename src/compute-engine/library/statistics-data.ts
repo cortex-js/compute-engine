@@ -1,5 +1,6 @@
 import { isNumber } from '../boxed-expression/type-guards.js';
 import { numberLiteralOf } from '../boxed-expression/numerics.js';
+import { isImaginaryPartFinite } from '../boxed-expression/imaginary-part.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -141,7 +142,7 @@ export function isComplexDatum(v: Expression): boolean {
   if (!isNumber(v)) return false;
   const n = v.numericValue;
   if (typeof n === 'number') return false;
-  if (n.im !== 0) return Number.isFinite(n.im);
+  if (n.isComplex) return hasFiniteImaginaryPart(n);
   return n.isExact && n.bignumIm?.isZero() === false;
 }
 
@@ -194,7 +195,23 @@ export function nonFiniteDatum(
  */
 export function hasNonFiniteImaginaryPart(v: Expression): boolean {
   const n = numberLiteralOf(v);
-  return n !== undefined && !Number.isFinite(n.im);
+  return n !== undefined && !hasFiniteImaginaryPart(n);
+}
+
+/**
+ * True if the imaginary part of the number `n` is finite. A real number has
+ * the finite imaginary part `0`.
+ *
+ * The test does not read the double `im`: `im` is only the double nearest to
+ * the imaginary part, so it is `Infinity` for an exact imaginary part too
+ * large for a double (`10^{400}·i`), which is finite.
+ */
+export function hasFiniteImaginaryPart(
+  n: Parameters<typeof isImaginaryPartFinite>[0] & {
+    readonly isComplex: boolean;
+  }
+): boolean {
+  return !n.isComplex || isImaginaryPartFinite(n);
 }
 
 /**
@@ -224,6 +241,6 @@ export function hasNonFiniteImaginaryPart(v: Expression): boolean {
  */
 export function realProjection(v: Expression): number {
   const n = numberLiteralOf(v);
-  if (!n || !Number.isFinite(n.im)) return NaN;
+  if (!n || !hasFiniteImaginaryPart(n)) return NaN;
   return n.re;
 }

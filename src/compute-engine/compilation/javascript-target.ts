@@ -2925,7 +2925,7 @@ function tryGetJSComplexParts(
     const scaleOf = (op: Expression): number | undefined =>
       isSymbol(op, 'ImaginaryUnit')
         ? 1
-        : isNumber(op) && op.re === 0 && op.im !== 0
+        : isNumber(op) && op.re === 0 && op.isComplex
           ? op.im
           : undefined;
     const i = ops.findIndex((op) => scaleOf(op) !== undefined);
@@ -6539,7 +6539,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // allocates a closure per evaluation at every such site (the Tycho
     // corpus has about a thousand of them, nearly all with a call as the
     // dividend), where the helper call is a plain call the engine inlines.
-    if (!fastPath && isNumber(b) && b.re === 1 && b.im === 0) {
+    if (!fastPath && isNumber(b) && b.re === 1 && !b.isComplex) {
       const spliceableDividend =
         isNumber(a) || (isSymbol(a) && !target.varsKeys?.has(a.symbol));
       if (impure || !spliceableDividend) return `_SYS.fract(${compile(a)})`;
@@ -14196,7 +14196,7 @@ function infiniteRangeStep(expr: Expression): number | undefined {
   const ops = expr.ops;
   if (ops.length < 2 || ops.length > 3) return undefined;
   const stop = ops[1];
-  if (!isNumber(stop) || stop.im !== 0) return undefined;
+  if (!isNumber(stop) || stop.isComplex) return undefined;
   if (stop.re !== Infinity && stop.re !== -Infinity) return undefined;
   const dir = stop.re === Infinity ? 1 : -1;
   if (ops[0] === undefined || isNonFiniteBound(ops[0])) return undefined;
@@ -14697,7 +14697,7 @@ function stringArg(
  * a run-time guard instead.
  */
 function literalInteger(x: Expression | undefined): number | undefined {
-  if (x === undefined || !isNumber(x) || x.im !== 0) return undefined;
+  if (x === undefined || !isNumber(x) || x.isComplex) return undefined;
   const n = x.re;
   return Number.isInteger(n) ? n : undefined;
 }
@@ -15177,7 +15177,7 @@ function assertDrawableRange(op: string, n: number): void {
 
 /** A finite real literal operand, or `undefined`. */
 function literalReal(x: Expression | undefined): number | undefined {
-  if (x === undefined || !isNumber(x) || x.im !== 0) return undefined;
+  if (x === undefined || !isNumber(x) || x.isComplex) return undefined;
   return Number.isFinite(x.re) ? x.re : undefined;
 }
 

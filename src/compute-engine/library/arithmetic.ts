@@ -122,6 +122,7 @@ import {
   roundHalfAway,
 } from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
+import type { NumberLiteralInterface } from '../types-expression.js';
 import { isComposite, isPrime } from '../boxed-expression/predicates.js';
 
 import {
@@ -1728,7 +1729,7 @@ function polygammaValueAtExceptionalPoint(
   if (point !== undefined && point !== '+oo') return ce.NaN;
   if (order === null || order < 0) return undefined;
   if (point === '+oo') return order === 0 ? ce.PositiveInfinity : ce.Zero;
-  if (x.im === 0 && x.isInteger === true && x.isNonPositive === true)
+  if (!x.isComplex && x.isInteger === true && x.isNonPositive === true)
     return ce.ComplexInfinity;
   return undefined;
 }
@@ -1776,7 +1777,7 @@ function besselValueAtExceptionalPoint(
     if (kind === 'K') return ce.ComplexInfinity;
     return n % 2 === 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
   }
-  if ((kind === 'Y' || kind === 'K') && x.im === 0 && x.isSame(0)) {
+  if ((kind === 'Y' || kind === 'K') && !x.isComplex && x.isSame(0)) {
     if (n !== 0) return ce.ComplexInfinity;
     return kind === 'Y' ? ce.NegativeInfinity : ce.PositiveInfinity;
   }
@@ -1877,7 +1878,7 @@ function betaValueAtInfinity(
   const positiveInteger = (x: Expression): boolean =>
     isNumber(x) &&
     infinitePoint(x) === undefined &&
-    x.im === 0 &&
+    !x.isComplex &&
     x.isInteger === true &&
     x.isPositive === true;
   if (
@@ -1932,7 +1933,7 @@ function incompleteGammaValueAtInfinity(
   if (pz !== undefined) return isNumber(s) ? ce.NaN : undefined;
   // s is the infinite operand and z is finite.
   if (ps === '~oo' || ps === 'anonymous') return ce.NaN;
-  if (!isNumber(z) || z.im !== 0 || z.isPositive !== true) return undefined;
+  if (!isNumber(z) || z.isComplex || z.isPositive !== true) return undefined;
   if (ps === '+oo') return ce.PositiveInfinity;
   if (z.isGreaterEqual(1) === true) return ce.Zero;
   if (z.isLess(1) === true) return ce.PositiveInfinity;
@@ -2039,7 +2040,9 @@ function boxComplexResult(
 }
 
 /** Both components of a number literal are finite machine numbers. */
-function isFiniteNumberLiteral(x: Expression): boolean {
+function isFiniteNumberLiteral(
+  x: Expression
+): x is Expression & NumberLiteralInterface {
   return isNumber(x) && Number.isFinite(x.re) && Number.isFinite(x.im);
 }
 
@@ -2068,7 +2071,7 @@ function zetaAtInfiniteOperand(
   if (sPoint !== undefined) {
     if (!isFiniteNumberLiteral(a)) return null;
     if (sPoint !== '+oo') return engine.NaN;
-    if (a.im !== 0 || !(a.re > 0)) return null;
+    if (a.isComplex || !(a.re > 0)) return null;
     if (a.re > 1) return engine.Zero;
     if (a.re === 1) return engine.One;
     return engine.PositiveInfinity;
@@ -2115,7 +2118,7 @@ function evaluateHurwitzZeta(
 
   const finite = isFiniteNumberLiteral;
   const aNonposInt =
-    isNumber(a) && a.im === 0 && Number.isInteger(a.re) && a.re <= 0;
+    isNumber(a) && !a.isComplex && Number.isInteger(a.re) && a.re <= 0;
 
   // a a non-positive integer: the (k+a) = 0 term diverges when Re(s) > 0,
   // and is indeterminate on Re(s) = 0 for a non-real s.
@@ -2125,7 +2128,7 @@ function evaluateHurwitzZeta(
     aNonposInt &&
     finite(s) &&
     s.re === 0 &&
-    s.im !== 0
+    s.isComplex
   )
     return engine.NaN;
 
@@ -2150,11 +2153,11 @@ function evaluateHurwitzZeta(
   // ζ(s, m) is small next to ζ(s) (HurwitzZeta(100, 5) ≈ 5^(−100), but both
   // ζ(100) and the sum round to 1), so only the exact route rewrites, and
   // only for m ≤ HURWITZ_PEEL_LIMIT; a numeric request uses the kernel.
-  const complexS = finite(s) && s.im !== 0;
+  const complexS = finite(s) && s.isComplex;
   if (
     !complexS &&
     isNumber(a) &&
-    a.im === 0 &&
+    !a.isComplex &&
     Number.isInteger(a.re) &&
     a.re >= 1
   ) {
@@ -2177,7 +2180,9 @@ function evaluateHurwitzZeta(
   // Real s and real a: a term (k + a)^(−s) with k + a < 0 is complex for a
   // non-integer s, so the value is real when a ≥ 0 or s is an integer.
   const real =
-    s.im === 0 && a.im === 0 && (a.re >= 0 || Number.isInteger(s.re));
+    !s.isComplex && !a.isComplex && (a.re >= 0 || Number.isInteger(s.re));
+  // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
+  // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   return boxComplexResult(
     engine,
     hurwitzZetaComplex(new Complex(s.re, s.im), new Complex(a.re, a.im)),
@@ -2206,7 +2211,7 @@ function evaluateGeneralizedZeta(
   if (!isNumber(a) || a.re > 0)
     return evaluateHurwitzZeta(engine, s, a, numericApproximation);
 
-  if (a.im === 0 && a.re === 0)
+  if (!a.isComplex && a.re === 0)
     return engine.function('Zeta', [s]).evaluate({ numericApproximation });
 
   const atInfinity = zetaAtInfiniteOperand(engine, s, a);
@@ -2237,10 +2242,12 @@ function evaluateGeneralizedZeta(
 
   // Real s and real a: the terms off the positive axis are |k + a|^(−s)
   // and the rest is a Hurwitz ζ at a positive base point, all real.
+  // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
+  // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   return boxComplexResult(
     engine,
     zetaGeneralizedComplex(new Complex(s.re, s.im), new Complex(a.re, a.im)),
-    s.im === 0 && a.im === 0
+    !s.isComplex && !a.isComplex
   );
 }
 
@@ -3112,8 +3119,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const infinite = infiniteGammaFamilyValue(x, ce);
         if (infinite !== undefined) return infinite;
 
-        // Is the argument a complex number?
-        if (x.im !== 0 && x.im !== undefined)
+        // Is the argument a complex number? `isComplex` decides, but the
+        // kernel reads the double `im`: the complex-esm kernels are doubles by
+        // nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
+        if (x.isComplex && x.im !== undefined)
           return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
 
         // The argument is real...
@@ -3162,8 +3171,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const infinite = infiniteGammaFamilyValue(x, ce);
         if (infinite !== undefined) return infinite;
 
-        // Is the argument a complex number?
-        if (x.im !== 0 && x.im !== undefined)
+        // Is the argument a complex number? `isComplex` decides, but the
+        // kernel reads the double `im`: the complex-esm kernels are doubles by
+        // nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
+        if (x.isComplex && x.im !== undefined)
           return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
 
         // The argument is real...
@@ -3386,7 +3397,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Exact fractional part for an exact real argument: x - floor(x),
         // computed exactly (rational arithmetic) so `Fract(1/2) → 1/2`, not
         // `0.5`. Only an inexact (float) argument numericizes.
-        if (!numericApproximation && isNumber(x) && x.isExact && x.im === 0) {
+        if (!numericApproximation && isNumber(x) && x.isExact && !x.isComplex) {
           const fl = ce.function('Floor', [x]).evaluate();
           if (isNumber(fl) && fl.isExact)
             return ce.function('Subtract', [x, fl]).evaluate();
@@ -3475,7 +3486,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         // Gamma has poles at the non-positive integers (0, -1, -2, ...).
         // This is exact, so return it regardless of numericApproximation.
-        if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
+        if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
           return engine.ComplexInfinity;
         // Γ at an infinite argument. Also exact, so it does not wait for
         // `numericApproximation` either.
@@ -3512,7 +3523,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // At the poles of Γ (the non-positive integers) |Γ| → ∞, so
         // ln Γ → +∞ (as in Mathematica's LogGamma and SymPy's loggamma).
         // This is exact, so return it regardless of numericApproximation.
-        if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
+        if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
           return engine.PositiveInfinity;
         // ln Γ(x) → +∞ as x → +∞ (ln Γ(10¹²) ≈ 2.66·10¹³), and it has no
         // limit as x → −∞, nor at the unsigned `~∞` — same reasons as Γ
@@ -3711,7 +3722,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const point = infinitePoint(x);
           if (point === '+oo') return engine.One;
           if (point !== undefined) return engine.NaN;
-          if (x.im === 0 && x.isSame(1)) return engine.ComplexInfinity;
+          if (!x.isComplex && x.isSame(1)) return engine.ComplexInfinity;
         }
         if (shouldNumericize(numericApproximation, x))
           return apply(x, zeta, (x) => bigZeta(engine, x), zetaComplex);
@@ -3831,7 +3842,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // non-positive integer into silent overflow garbage (e.g. B(−1, 2)
         // → −2.97e49); the exact rational form below is correct on both the
         // finite (`B(−2, 2) = 1/2`) and the pole (`B(−1, 2) = ~oo`) branches.
-        if (isNumber(a) && isNumber(b) && a.im === 0 && b.im === 0) {
+        if (isNumber(a) && isNumber(b) && !a.isComplex && !b.isComplex) {
           const ai = a.isInteger ? asSmallInteger(a) : null;
           const bi = b.isInteger ? asSmallInteger(b) : null;
           // B(a, m) = (m−1)! / (a(a+1)…(a+m−1)) — an exact rational function of
@@ -6032,7 +6043,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // exponential) `.N()` walk the `isNumber` test would then reject.
           if (ops[0].unknowns.length > 0) return undefined;
           const f = ops[0].N();
-          if (!isNumber(f) || f.im !== 0) return undefined;
+          if (!isNumber(f) || f.isComplex) return undefined;
           return ce.number(rationalize(f.re));
         }
 
@@ -6079,10 +6090,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // See `Rational`: a symbolic argument cannot numericize.
         if (ops[0].unknowns.length > 0) return undefined;
         const f = ops[0].N();
-        if (!isNumber(f) || f.im !== 0) return undefined;
+        if (!isNumber(f) || f.isComplex) return undefined;
         if (ops.length >= 2) {
           const tol = ops[1].N();
-          if (!isNumber(tol) || tol.im !== 0) return undefined;
+          if (!isNumber(tol) || tol.isComplex) return undefined;
           return ce.number(rationalize(f.re, tol.re));
         }
         return ce.number(rationalize(f.re));
@@ -6220,7 +6231,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // a root in the double range (`Root(10^{-900}, 3)` is `1e-300`). The
         // root is computed with big decimals, as `exp(ln(x) / n)`. A negative
         // radicand has a real root only for an odd integer index.
-        if (numericApproximation && isNumber(n) && n.im === 0) {
+        if (numericApproximation && isNumber(n) && !n.isComplex) {
           const big = bigRealOf(
             exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
           );
@@ -6478,7 +6489,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A complex number literal off the real line: `z/|z|`, exact when
         // the modulus is (`Sign(3 + 4i)` is `3/5 + 4i/5`). A symbolic
         // operand stays symbolic.
-        if (isNumber(x) && x.im !== 0) {
+        if (isNumber(x) && x.isComplex) {
           const unit = engine.function('Divide', [
             x,
             engine.function('Abs', [x]),
@@ -8883,7 +8894,7 @@ function sqrtOfSquareFactors(x: Expression): Expression | undefined {
       (isFunction(abs, 'Abs') && !isFunction(base, 'Abs')) ||
       n === undefined ||
       !isNumber(n) ||
-      n.im !== 0 ||
+      n.isComplex ||
       !Number.isInteger(n.re) ||
       n.re <= 0 ||
       n.re % 2 !== 0
@@ -8928,7 +8939,7 @@ function evaluateAbs(
     // |a+bi| = √(a²+b²), built exactly (`|1+i| → √2`) instead of the machine
     // hypot float. `Abs(3+4i)` already gave 5 because 25 is a perfect square;
     // this extends the exact path to every integer a, b. `.N()` numericizes.
-    if (num.im !== 0) {
+    if (num.isComplex) {
       // An exact complex value `√r·(a+bi)`: its modulus `√(r·(a²+b²))` is
       // exact when the root has an exact form (`|√2·(1000+1000i)|` is 2000,
       // `|√3·(1+2i)|` is `√15`).
@@ -9013,7 +9024,7 @@ function evaluateAbs(
         // real constant expression (`|e + π·i|²` is `e² + π²`, and the
         // result is `√(e² + π²)`).
         const isRealConstant = isNumber(mVal)
-          ? mVal.im === 0
+          ? !mVal.isComplex
           : mVal.isConstant && mVal.type.matches('real');
         if (isRealConstant && mVal.isNonNegative === true) {
           const modSq = zre * zre + zim * zim;
@@ -9169,7 +9180,7 @@ function processMinMaxItem(
   // a value that is not real stays in the unevaluated result.
   if (item.isConstant && item.type.matches('number')) {
     const value = item.N();
-    if (isNumber(value) && value.im === 0 && !value.isNaN) return [item, []];
+    if (isNumber(value) && !value.isComplex && !value.isNaN) return [item, []];
   }
   return [undefined, [item]];
 }
@@ -9313,7 +9324,7 @@ function scalarExtremum(
 ): Expression | undefined {
   const ce = a.engine;
   if (a.isNaN === true || b.isNaN === true) return ce.NaN;
-  if ((isNumber(a) && a.im !== 0) || (isNumber(b) && b.im !== 0))
+  if ((isNumber(a) && a.isComplex) || (isNumber(b) && b.isComplex))
     return undefined;
   // `undefined` when the comparison is not decidable (a free symbol); ties
   // keep `a`, unless `b` is a number literal and `a` is not (see
@@ -9369,7 +9380,7 @@ function foldExtremumValue(
   rest: Expression[],
   upper: boolean
 ): Expression | undefined {
-  if (isNumber(val) && val.im !== 0) {
+  if (isNumber(val) && val.isComplex) {
     rest.push(val);
     return current;
   }
@@ -9532,7 +9543,7 @@ function evaluateGcdLcm(
   if (
     ops.length > 0 &&
     ops.some((x) => isNumber(x) && !x.isExact) &&
-    ops.every((x) => isNumber(x) && Number.isFinite(x.re) && !x.im)
+    ops.every((x) => isNumber(x) && Number.isFinite(x.re) && !x.isComplex)
   ) {
     const rfn = mode === 'LCM' ? realLcm : realGcd;
     let acc = Math.abs(ops[0].re);
@@ -9610,7 +9621,7 @@ function divideFromExactValues(
       x = exact;
       rescued = true;
     }
-    if (!isNumber(x) || x.im !== 0) return undefined;
+    if (!isNumber(x) || x.isComplex) return undefined;
     const nv = x.numericValue;
     values.push(typeof nv === 'number' ? ce._numericValue(nv) : nv);
   }
@@ -9717,7 +9728,7 @@ function bigRealOf(x: Expression | undefined): BigDecimal | undefined {
   const nv = x.numericValue;
   if (typeof nv === 'number')
     return Number.isFinite(nv) ? new BigDecimal(nv) : undefined;
-  if (nv.im !== 0) return undefined;
+  if (nv.isComplex) return undefined;
   const big = nv.bignumRe ?? new BigDecimal(nv.re);
   return big.isFinite() ? big : undefined;
 }

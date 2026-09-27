@@ -318,8 +318,8 @@ function evaluateBinomial(
   if (
     isNumber(nExpr) &&
     isNumber(kExpr) &&
-    nExpr.im === 0 &&
-    kExpr.im === 0 &&
+    !nExpr.isComplex &&
+    !kExpr.isComplex &&
     nExpr.isInteger &&
     kExpr.isInteger
   ) {
@@ -333,8 +333,8 @@ function evaluateBinomial(
 
   // Complex operands: no closed form implemented here; stay symbolic.
   if (
-    (isNumber(nExpr) && nExpr.im !== 0) ||
-    (isNumber(kExpr) && kExpr.im !== 0)
+    (isNumber(nExpr) && nExpr.isComplex) ||
+    (isNumber(kExpr) && kExpr.isComplex)
   )
     return undefined;
 
@@ -369,7 +369,7 @@ function evaluateBinomial(
   if (
     !isNumber(nExpr) &&
     isNumber(kExpr) &&
-    kExpr.im === 0 &&
+    !kExpr.isComplex &&
     kExpr.isInteger
   ) {
     const k = toBigint(kExpr);
@@ -515,7 +515,7 @@ function evaluatePochhammer(
   if (infinite !== undefined) return infinite;
 
   const k =
-    isNumber(kExpr) && kExpr.im === 0 && kExpr.isInteger === true
+    isNumber(kExpr) && !kExpr.isComplex && kExpr.isInteger === true
       ? toBigint(kExpr)
       : null;
   if (k !== null && k >= -SYMBOLIC_EXPANSION_CAP && k <= SYMBOLIC_EXPANSION_CAP)

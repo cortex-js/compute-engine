@@ -29,6 +29,7 @@ import {
   NumericValue,
   NumericValueFactory,
 } from './types.js';
+import { isGaussianInteger } from './gaussian-integer.js';
 import { MathJsonExpression } from '../../math-json/types.js';
 import { numberToExpression } from '../numerics/expression.js';
 import { numberToString } from '../numerics/strings.js';
@@ -230,7 +231,7 @@ export class ExactNumericValue extends NumericValue {
     // union `+oo | -oo` at the type level.
     if (this.isPositiveInfinity || this.isNegativeInfinity) return 'infinity';
     // a/b√c -> real number (c can't be a perfect square)
-    if (this.im !== 0) return isZero(this.rational) ? 'imaginary' : 'complex';
+    if (this.isComplex) return isZero(this.rational) ? 'imaginary' : 'complex';
     if (this.radical !== 1) {
       console.assert(!isZero(this.rational));
       return 'real';
@@ -259,7 +260,7 @@ export class ExactNumericValue extends NumericValue {
     // This is lossless: boxing `['Complex', …]` with exact components
     // reconstructs the same exact value (see the `Complex` handling in
     // `box.ts`), so `ce.expr(x.json).isSame(x)` holds.
-    if (this.im !== 0)
+    if (this.isComplex)
       return [
         'Complex',
         isZero(this.rational)
@@ -281,7 +282,7 @@ export class ExactNumericValue extends NumericValue {
     if (this.isOne) return '1';
     if (this.isNegativeOne) return '-1';
 
-    if (this.im !== 0) {
+    if (this.isComplex) {
       // Complex exact value
       const imPart = componentToString(this.imRational, this.imRadical);
       const imStr =
@@ -394,7 +395,7 @@ export class ExactNumericValue extends NumericValue {
 
   get numerator(): ExactNumericValue {
     // A complex value is its own numerator (mirrors MachineNumericValue)
-    if (this.im !== 0) return this;
+    if (this.isComplex) return this;
     if (this.rational[1] == 1) return this;
     return this.clone({
       rational: isMachineRational(this.rational)
@@ -405,7 +406,7 @@ export class ExactNumericValue extends NumericValue {
   }
 
   get denominator(): ExactNumericValue {
-    if (this.im !== 0) return this.clone(1);
+    if (this.isComplex) return this.clone(1);
     if (isMachineRational(this.rational)) return this.clone(this.rational[1]);
     return this.clone({ rational: [this.rational[1], BigInt(1)] });
   }
@@ -420,9 +421,14 @@ export class ExactNumericValue extends NumericValue {
   /** Lift a Gaussian-integer value from the inexact lane (e.g. the machine
    * complex `i` constant, `3i`) to an exact value, so mixed exact/Gaussian
    * arithmetic stays exact (`√2·i`, `1/2 + i`). Returns `null` when the
-   * components are not exactly-representable integers. */
+   * components are not exactly-representable integers.
+   *
+   * The test is `isGaussianInteger()`: the double projections `re` and `im`
+   * alone are not enough, because a part too small for a double
+   * (`10^{-800}`) projects to the integer `0`, and lifting it would make an
+   * exact zero of a non-zero part. */
   private _liftComplex(other: NumericValue): ExactNumericValue | null {
-    if (Number.isSafeInteger(other.re) && Number.isSafeInteger(other.im))
+    if (isGaussianInteger(other))
       return this.clone({
         rational: [other.re, 1],
         imRational: [other.im, 1],
@@ -455,7 +461,7 @@ export class ExactNumericValue extends NumericValue {
     if (isNaN(this.radical)) {
       w.rational = [NaN, 1];
       w.radical = 1;
-      if (this.im !== 0) this._clearIm();
+      if (this.isComplex) this._clearIm();
       return;
     }
     // a/0 -> NaN
@@ -464,7 +470,7 @@ export class ExactNumericValue extends NumericValue {
     if (d == 0) {
       w.rational = [NaN, 1];
       w.radical = 1;
-      if (this.im !== 0) this._clearIm();
+      if (this.isComplex) this._clearIm();
       return;
     }
 
@@ -496,10 +502,12 @@ export class ExactNumericValue extends NumericValue {
     // Representable-set invariant: a value with BOTH non-zero components
     // carries the same radical on both. (Callers must check before
     // constructing.)
-    // The assert is gated on `im !== 0` so the real-value hot path pays
-    // nothing for it in from-source (assert-live) runs: when `im === 0` the
-    // invariant holds vacuously.
-    if (this.im !== 0)
+    // The assert is gated on `isComplex` so the real-value hot path pays
+    // nothing for it in from-source (assert-live) runs: for a real value the
+    // invariant holds vacuously. The gate reads the exact imaginary part, not
+    // the double `im`, which is `0` for an imaginary part too small for a
+    // double (`10^{-800}`).
+    if (this.isComplex)
       console.assert(
         !Number.isFinite(this.rational[0] as number) ||
           this.radical === this.imRadical
@@ -568,25 +576,34 @@ export class ExactNumericValue extends NumericValue {
     return false;
   }
 
+  /** True if the exact imaginary part `imRational · √imRadical` is not zero.
+   *
+   * It is read from the exact rational, never from the cached double `im`:
+   * `im` is `0` for an imaginary part too small for a double (the exact
+   * `10^{-800}·i`), and that value is complex all the same. */
+  get isComplex(): boolean {
+    return !isZero(this.imRational);
+  }
+
   get isZero(): boolean {
-    return this.im === 0 && isZero(this.rational);
+    return !this.isComplex && isZero(this.rational);
   }
 
   get isOne(): boolean {
     if (this.rational[0] !== this.rational[1]) return false;
     if (this.radical !== 1) return false;
-    return this.im === 0;
+    return !this.isComplex;
   }
 
   get isNegativeOne(): boolean {
     if (this.rational[0] !== -this.rational[1]) return false;
     if (this.radical !== 1) return false;
-    return this.im === 0;
+    return !this.isComplex;
   }
 
   sgn(): -1 | 0 | 1 | undefined {
     // The sign of a complex value is undefined
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (Number.isNaN(this.rational[0])) return undefined;
     if (isZero(this.rational)) return 0;
     return isPositive(this.rational) ? 1 : -1;
@@ -594,7 +611,7 @@ export class ExactNumericValue extends NumericValue {
 
   N(): NumericValue {
     if (this.isZero || this.isOne || this.isNegativeOne) return this;
-    if (this.im === 0) {
+    if (!this.isComplex) {
       if (this.rational[1] == 1 && this.radical === 1) {
         // An integer stays exact, except in the machine lane (a factory
         // value with no big-decimal part) when its double is ±∞: `.N()`
@@ -620,7 +637,7 @@ export class ExactNumericValue extends NumericValue {
   }
 
   neg(): ExactNumericValue {
-    if (this.im === 0) {
+    if (!this.isComplex) {
       if (this.isZero) return this;
       return this.clone({
         rational: neg(this.rational),
@@ -646,7 +663,7 @@ export class ExactNumericValue extends NumericValue {
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
 
-    if (this.im !== 0) {
+    if (this.isComplex) {
       if (isZero(this.rational)) {
         // Pure imaginary: 1/(q√r·i) = −(1/(q·r))·√r·i
         const [a, b] = this.imRational;
@@ -690,7 +707,7 @@ export class ExactNumericValue extends NumericValue {
   add(other: number | NumericValue): NumericValue {
     if (typeof other === 'number') {
       if (other === 0) return this;
-      if (this.im === 0) {
+      if (!this.isComplex) {
         if (Number.isInteger(other) && this.radical === 1)
           return this.clone({
             rational: add(this.rational, [other, 1]),
@@ -715,14 +732,14 @@ export class ExactNumericValue extends NumericValue {
     if (!(other instanceof ExactNumericValue)) {
       // A Gaussian integer from the inexact lane is exactly representable:
       // lift it so the sum stays exact (`1/2 + i` → the exact `1/2 + i`)
-      if (other.im !== 0) {
+      if (other.isComplex) {
         const lifted = this._liftComplex(other);
         if (lifted !== null) return this.add(lifted);
       }
       return other.add(this);
     }
 
-    if (this.im === 0 && other.im === 0) {
+    if (!this.isComplex && !other.isComplex) {
       // Can we keep a rational result?
       // Yes, if both numbers are rational and have the same radical
 
@@ -773,7 +790,7 @@ export class ExactNumericValue extends NumericValue {
     if (other === -1) return this.neg();
     if (typeof other === 'number') {
       if (Number.isInteger(other)) {
-        if (this.im === 0)
+        if (!this.isComplex)
           return this.clone({
             rational: mul(this.rational, [other, 1]),
             radical: this.radical,
@@ -786,7 +803,7 @@ export class ExactNumericValue extends NumericValue {
           imRadical: this.imRadical,
         });
       }
-      if (this.im === 0) {
+      if (!this.isComplex) {
         const approx = this.factory(this.bignumRe);
         // In the machine lane (a factory value with no big-decimal part),
         // a value whose double underflows to 0, overflows to ±∞ or is
@@ -808,7 +825,7 @@ export class ExactNumericValue extends NumericValue {
     // exactly representable: lift it so the product stays exact (`√2·i`,
     // `3·i`). Other complex machine/big values know how to multiply by
     // `this`; an exact complex `other` is handled by the exact section below.
-    if (other.im !== 0 && !(other instanceof ExactNumericValue)) {
+    if (other.isComplex && !(other instanceof ExactNumericValue)) {
       const lifted = this._liftComplex(other);
       if (lifted === null) return other.mul(this);
       other = lifted;
@@ -839,7 +856,7 @@ export class ExactNumericValue extends NumericValue {
 
     if (!(other instanceof ExactNumericValue)) return other.mul(this);
 
-    if (this.im === 0 && other.im === 0) {
+    if (!this.isComplex && !other.isComplex) {
       const radical = BigInt(this.radical) * BigInt(other.radical);
       if (radical > BigInt(SMALL_INTEGER))
         return this.factory(this.bignumRe).mul(other);
@@ -883,7 +900,7 @@ export class ExactNumericValue extends NumericValue {
       if (other === 1) return this;
       if (other === -1) return this.neg();
       if (other === 0) return this.clone(NaN);
-      if (this.im === 0)
+      if (!this.isComplex)
         return this.clone({
           rational: mul(this.rational, [1, other]),
           radical: this.radical,
@@ -907,7 +924,7 @@ export class ExactNumericValue extends NumericValue {
     }
     if (other.isNaN) return other;
     if (other.isZero) {
-      if (this.im !== 0) return this.factory({ im: Infinity }); // complex/unsigned ∞
+      if (this.isComplex) return this.factory({ im: Infinity }); // complex/unsigned ∞
       return this.clone(this.sign * Infinity);
     }
 
@@ -916,7 +933,7 @@ export class ExactNumericValue extends NumericValue {
     else {
       // Lift a Gaussian integer from the inexact lane (e.g. `x/i`) so the
       // quotient stays exact
-      const lifted = other.im !== 0 ? this._liftComplex(other) : null;
+      const lifted = other.isComplex ? this._liftComplex(other) : null;
       if (lifted === null) {
         const approx = this._toFloat();
         // In the machine lane (a factory value with no big-decimal part),
@@ -925,8 +942,8 @@ export class ExactNumericValue extends NumericValue {
         // Divide the big-decimal values first: `(1/10^400) / 1e-300` is then
         // `1e-100`, not `0 / 1e-300`.
         if (
-          this.im === 0 &&
-          other.im === 0 &&
+          !this.isComplex &&
+          !other.isComplex &&
           approx.bignumRe === undefined &&
           isOutsideNormalDoubleRange(approx.re) &&
           Number.isFinite(other.re)
@@ -941,7 +958,7 @@ export class ExactNumericValue extends NumericValue {
       exactOther = lifted;
     }
 
-    if (this.im !== 0 || exactOther.im !== 0) {
+    if (this.isComplex || exactOther.isComplex) {
       // z/w = z · (1/w): the inverse of an exact value in the representable
       // set is itself exactly representable (conjugate/norm for a Gaussian
       // rational; a pure-imaginary radical inverts to one), and `mul` handles
@@ -992,7 +1009,7 @@ export class ExactNumericValue extends NumericValue {
       if (exponent.isNaN) return this.clone(NaN);
       if (exponent.isZero) return this.clone(1);
       if (exponent.isOne) return this;
-      if (exponent.im) {
+      if (exponent.isComplex) {
         exponent = { re: exponent.re, im: exponent.im };
       } else {
         if (exponent instanceof ExactNumericValue) {
@@ -1068,7 +1085,7 @@ export class ExactNumericValue extends NumericValue {
     // `√r·(a + bi)` are closed under multiplication, unless the radical of
     // an intermediate product is too large to store). A non-integer
     // exponent has no exact closed form here: use the float lane.
-    if (this.im !== 0) {
+    if (this.isComplex) {
       if (Number.isInteger(exponent) && exponent <= 1024) {
         let result: NumericValue = this.clone(1);
         // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -1141,7 +1158,7 @@ export class ExactNumericValue extends NumericValue {
     if (exponent === -1) return this.inv();
 
     // Complex base: roots leave the representable set — float lane
-    if (this.im !== 0) return this._toFloat().root(exponent);
+    if (this.isComplex) return this._toFloat().root(exponent);
 
     if (exponent < 0) return this.root(-exponent).inv();
 
@@ -1225,7 +1242,7 @@ export class ExactNumericValue extends NumericValue {
     // `±i` itself reduces too: `√i = (√2/2)·(1+i)` and
     // `√(−i) = (√2/2)·(1−i)`, the same shape as `√(i/4)` and `√(4i)`
     // (user decision, 2026-09-25).
-    if (this.im !== 0) {
+    if (this.isComplex) {
       if (this.radical === 1 && this.imRadical === 1) {
         const a = this.rational;
         const b = this.imRational;
@@ -1234,7 +1251,7 @@ export class ExactNumericValue extends NumericValue {
         }).sqrt();
         if (
           modulus instanceof ExactNumericValue &&
-          modulus.im === 0 &&
+          !modulus.isComplex &&
           modulus.radical === 1
         ) {
           const half: Rational = [1, 2];
@@ -1249,9 +1266,9 @@ export class ExactNumericValue extends NumericValue {
           // carry no radical and is accepted with any radical of `y`.
           if (
             x instanceof ExactNumericValue &&
-            x.im === 0 &&
+            !x.isComplex &&
             y instanceof ExactNumericValue &&
-            y.im === 0 &&
+            !y.isComplex &&
             (x.isZero || x.radical === y.radical)
           )
             return this.clone({
@@ -1337,7 +1354,7 @@ export class ExactNumericValue extends NumericValue {
 
   gcd(other: NumericValue): NumericValue {
     if (!(other instanceof ExactNumericValue)) return other.gcd(this);
-    if (this.isOne || this.im !== 0 || other.im !== 0 || other.isOne)
+    if (this.isOne || this.isComplex || other.isComplex || other.isOne)
       return this.clone(1);
 
     // Calculate the GCD of the rational parts
@@ -1347,7 +1364,7 @@ export class ExactNumericValue extends NumericValue {
   }
 
   abs(): NumericValue {
-    if (this.im !== 0) {
+    if (this.isComplex) {
       // Pure imaginary: |q√r·i| = |q|√r
       if (isZero(this.rational)) {
         const im = this.imRational;
@@ -1382,7 +1399,7 @@ export class ExactNumericValue extends NumericValue {
     if (this.isZero) return this.clone(NaN);
     if (this.isPositiveInfinity) return this.clone(Infinity);
 
-    if (this.im !== 0) return this._toFloat().ln(base);
+    if (this.isComplex) return this._toFloat().ln(base);
 
     if (this.sign < 0) return this.clone(NaN);
     if (this.isOne) return this.clone(0);
@@ -1394,7 +1411,7 @@ export class ExactNumericValue extends NumericValue {
   exp(): NumericValue {
     if (this.isNaN) return this.clone(NaN);
     if (this.isZero) return this.clone(1);
-    if (this.im !== 0) return this._toFloat().exp();
+    if (this.isComplex) return this._toFloat().exp();
     if (this.isNegativeInfinity) return this.clone(0);
     if (this.isPositiveInfinity) return this.clone(Infinity);
     return this.factory(this.bignumRe).exp();
@@ -1433,21 +1450,21 @@ export class ExactNumericValue extends NumericValue {
   // An exact value is an integer iff it has no radical part and a unit
   // denominator.
   floor(): NumericValue {
-    if (this.isNaN || this.im !== 0) return this.clone(NaN);
+    if (this.isNaN || this.isComplex) return this.clone(NaN);
     if (this.radical === 1 && isInteger(this.rational)) return this;
     if (this.radical === 1) return this._integerPart('floor');
     return this.clone(Math.floor(this.re));
   }
 
   ceil(): NumericValue {
-    if (this.isNaN || this.im !== 0) return this.clone(NaN);
+    if (this.isNaN || this.isComplex) return this.clone(NaN);
     if (this.radical === 1 && isInteger(this.rational)) return this;
     if (this.radical === 1) return this._integerPart('ceil');
     return this.clone(Math.ceil(this.re));
   }
 
   round(): NumericValue {
-    if (this.isNaN || this.im !== 0) return this.clone(NaN);
+    if (this.isNaN || this.isComplex) return this.clone(NaN);
     if (this.radical === 1 && isInteger(this.rational)) return this;
     if (this.radical === 1) return this._integerPart('round');
     return this.clone(Math.round(this.re));
@@ -1456,7 +1473,7 @@ export class ExactNumericValue extends NumericValue {
   eq(other: number | NumericValue): boolean {
     if (typeof other === 'number')
       return (
-        this.im === 0 &&
+        !this.isComplex &&
         this.radical === 1 &&
         isInteger(this.rational) &&
         this.rational[0] == other
@@ -1478,9 +1495,31 @@ export class ExactNumericValue extends NumericValue {
     // (`1/3` equalled a 30-digit `0.333…` in one direction only) and broke
     // transitivity — isSame is a dedup/matching key, so it must be an
     // equivalence relation (CM-P1-2 / SYMBOLIC P1-9).
-    // The imaginary parts compare as machine floats (the inexact lanes store
-    // a machine `im`; the cached exact `im` uses the same representation).
-    return this.im === other.im && this.bignumRe.eq(other.bignumRe ?? other.re);
+    // The imaginary parts follow the same rule. They are not compared as
+    // doubles: the exact `10^{-800}·i` has the double `im` `0`, and compared
+    // that way it was equal to an inexact `0`. So first both values must be
+    // complex or both real (`isComplex` reads the exact imaginary part), then
+    // the imaginary parts compare at working precision through `bignumIm`,
+    // as the real parts do.
+    //
+    // The comparison is made at the precision of the inexact operand. A
+    // machine value (no `bignumRe`) is a double, so the pair compares as
+    // doubles: `bignumRe` has 25 digits at machine precision, and the exact
+    // `1/3` against the double `0.3333333333333333` compared unequal at 25
+    // digits. A projection that lost the value (a finite non-zero part whose
+    // double is `0` or `±Infinity`, such as `10^{-400}` or `10^{400}`) is not
+    // the double it projects to, so such a pair is unequal.
+    if (this.isComplex !== other.isComplex) return false;
+    if (other.bignumRe === undefined) {
+      const reInfinite = isInfiniteEncoding(this.rational);
+      if (!sameAsDouble(isZero(this.rational), reInfinite, this.re, other.re))
+        return false;
+      if (!this.isComplex) return true;
+      return sameAsDouble(false, false, this.im, other.im);
+    }
+    if (!this.bignumRe.eq(other.bignumRe)) return false;
+    if (!this.isComplex) return true;
+    return this.bignumIm.eq(other.bignumIm ?? other.im);
   }
 
   /**
@@ -1506,14 +1545,14 @@ export class ExactNumericValue extends NumericValue {
    * exponent range the double projection loses.
    */
   private _order(other: number | NumericValue): -1 | 0 | 1 | undefined {
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     // Whether THIS value is infinite is read from the stored encoding
     // (`[±Infinity, 1]`), never from the projection `this.re`: a finite
     // `10^400` projects to `Infinity` as well, and reading the projection
     // ordered it EQUAL to `+oo`.
     const infinite = isInfiniteEncoding(this.rational);
     if (typeof other !== 'number') {
-      if (other.im !== 0 || other.isNaN) return undefined;
+      if (other.isComplex || other.isNaN) return undefined;
       if (other instanceof ExactNumericValue) return orderExact(this, other);
       // The other lane's infiniteness is read from its own flags, never
       // from its projection: a finite `BigNumericValue` holding `10^400`
@@ -1578,7 +1617,7 @@ export class ExactNumericValue extends NumericValue {
    * `false` for a NaN operand (IEEE 754: every comparison with NaN fails,
    * which is what `this.re < NaN` used to answer). */
   private _unorderedAnswer(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (typeof other === 'number')
       return Number.isNaN(other) ? false : undefined;
     return other.isNaN ? false : undefined;
@@ -1601,9 +1640,11 @@ export class ExactNumericValue extends NumericValue {
     // the inexact path — otherwise an exact real summed with it would floatify
     // (`1/2 + i` → `0.5 + i`). The structured path tracks the imaginary part
     // (`imSum`) and the exact real part separately, preserving both.
+    // The integrality of the parts is read with `isGaussianInteger()`, not
+    // from the doubles: an imaginary part too small for a double has the
+    // projection `0`, which is an integer.
     const isExactForSum = (x: NumericValue): boolean =>
-      x.isExact ||
-      (x.im !== 0 && Number.isInteger(x.re) && Number.isInteger(x.im));
+      x.isExact || (x.isComplex && isGaussianInteger(x));
 
     // If we have some genuinely inexact values, just do a simple sum
     if (values.some((x) => !isExactForSum(x))) {
@@ -1650,7 +1691,7 @@ export class ExactNumericValue extends NumericValue {
           addToBuckets(radicals, rational, value.radical);
         }
         // Imaginary component (exact)
-        if (value.im !== 0) {
+        if (value.isComplex) {
           if (value.imRadical === 1)
             imRationalSum = add(imRationalSum, value.imRational);
           else addToBuckets(imRadicals, value.imRational, value.imRadical);
@@ -1659,10 +1700,10 @@ export class ExactNumericValue extends NumericValue {
         // A non-`ExactNumericValue` value reaching the exact path is a real
         // integer or a Gaussian integer: fold both integer components exactly.
         console.assert(
-          isSubtype(value.type, 'integer') ||
-            (Number.isInteger(value.re) && Number.isInteger(value.im))
+          isSubtype(value.type, 'integer') || isGaussianInteger(value)
         );
-        if (value.im !== 0) imRationalSum = add(imRationalSum, [value.im, 1]);
+        if (value.isComplex)
+          imRationalSum = add(imRationalSum, [value.im, 1]);
         // Use bignumRe to avoid precision loss for large integers. A
         // MachineNumericValue has no bignumRe: its integral `re` converts
         // to BigInt exactly.
@@ -1800,6 +1841,25 @@ function mulComponents(
 function negComponent(x: ExactComponent): ExactComponent {
   if (isZero(x.rat)) return x;
   return { rat: neg(x.rat), rad: x.rad };
+}
+
+/** True if one part of an exact value, whose double projection is
+ * `projection`, is the double `other`. `isZeroPart` and `isInfinitePart`
+ * say whether the exact part is zero or infinite (an infinite exact real
+ * part is stored as `±Infinity` and projects to itself). A non-zero part
+ * whose projection is `0`, and a finite part whose projection is
+ * `±Infinity`, lost its value in the projection and is not equal to any
+ * double. */
+function sameAsDouble(
+  isZeroPart: boolean,
+  isInfinitePart: boolean,
+  projection: number,
+  other: number
+): boolean {
+  if (projection !== other) return false;
+  if (projection === 0) return isZeroPart;
+  if (!Number.isFinite(projection)) return isInfinitePart;
+  return true;
 }
 
 /** Is a (re, im) component pair inside the representable set?
@@ -2032,7 +2092,7 @@ export function orderExactAgainstInexact(
   x: ExactNumericValue,
   y: number | BigDecimal
 ): -1 | 0 | 1 | undefined {
-  if (x.im !== 0 || isInfiniteEncoding(x.rational)) return undefined;
+  if (x.isComplex || isInfiniteEncoding(x.rational)) return undefined;
   const r = exactRationalOfInexact(y);
   if (r === undefined) return undefined;
   const [D, E] = r;

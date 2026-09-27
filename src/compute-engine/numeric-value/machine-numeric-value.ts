@@ -58,7 +58,7 @@ export class MachineNumericValue extends NumericValue {
     // every value of infinite magnitude whatever its direction.
     if (this.isComplexInfinity) return 'infinity';
 
-    if (this.im !== 0) {
+    if (this.isComplex) {
       // A value with a non-finite component is not a *finite* complex number,
       // so it is not below `complex` at all. Two cases reach here, because an
       // infinite IMAGINARY part was already answered above (that IS the `~oo`
@@ -88,7 +88,7 @@ export class MachineNumericValue extends NumericValue {
   // reading (the binary value of the double) is an artifact of the
   // rounding, so it stays a float.
   get isExact(): boolean {
-    return this.im === 0 && Number.isSafeInteger(this.decimal);
+    return !this.isComplex && Number.isSafeInteger(this.decimal);
   }
 
   get asExact(): NumericValue | undefined {
@@ -109,7 +109,7 @@ export class MachineNumericValue extends NumericValue {
     // the MathJSON of the same pole differed between the two precisions.
     if (this.isComplexInfinity) return 'ComplexInfinity';
 
-    if (this.im === 0) return numberToExpression(this.decimal);
+    if (!this.isComplex) return numberToExpression(this.decimal);
     return [
       'Complex',
       numberToExpression(this.decimal),
@@ -121,7 +121,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.isZero) return '0';
     if (this.isOne) return '1';
     if (this.isNegativeOne) return '-1';
-    if (this.im === 0) return numberToString(this.decimal);
+    if (!this.isComplex) return numberToString(this.decimal);
     if (this.decimal === 0) {
       if (this.im === 1) return 'i';
       if (this.im === -1) return '-i';
@@ -164,19 +164,30 @@ export class MachineNumericValue extends NumericValue {
   }
 
   get isPositiveInfinity(): boolean {
-    return !Number.isFinite(this.decimal) && this.decimal > 0 && this.im === 0;
+    return (
+      !Number.isFinite(this.decimal) && this.decimal > 0 && !this.isComplex
+    );
   }
 
   get isNegativeInfinity(): boolean {
-    return !Number.isFinite(this.decimal) && this.decimal < 0 && this.im === 0;
+    return (
+      !Number.isFinite(this.decimal) && this.decimal < 0 && !this.isComplex
+    );
   }
 
   get isComplexInfinity(): boolean {
     return !Number.isFinite(this.im) && !Number.isNaN(this.im);
   }
 
+  /** True if the imaginary part is not zero. Every part of this class is a
+   * double, so the double `im` is the imaginary part itself, not a
+   * projection of it. */
+  get isComplex(): boolean {
+    return this.im !== 0;
+  }
+
   get isZero(): boolean {
-    return this.im === 0 && this.decimal === 0;
+    return !this.isComplex && this.decimal === 0;
   }
 
   isZeroWithTolerance(tolerance: number | BigDecimal): boolean {
@@ -189,11 +200,11 @@ export class MachineNumericValue extends NumericValue {
   }
 
   get isOne(): boolean {
-    return this.im === 0 && this.decimal === 1;
+    return !this.isComplex && this.decimal === 1;
   }
 
   get isNegativeOne(): boolean {
-    return this.im === 0 && this.decimal === -1;
+    return !this.isComplex && this.decimal === -1;
   }
 
   sgn(): -1 | 0 | 1 | undefined {
@@ -202,7 +213,7 @@ export class MachineNumericValue extends NumericValue {
     // Answering `undefined` for ±∞ made `Product` read an infinite
     // coefficient as POSITIVE through its `sgn() ?? 1` fallback, so
     // `-∞ · +∞` accumulated to `+∞` at machine precision only.
-    if (this.im !== 0 || Number.isNaN(this.decimal)) return undefined;
+    if (this.isComplex || Number.isNaN(this.decimal)) return undefined;
 
     return Math.sign(this.decimal) as -1 | 0 | 1;
   }
@@ -221,7 +232,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
-    if (this.im === 0) return this.clone(1 / this.decimal);
+    if (!this.isComplex) return this.clone(1 / this.decimal);
 
     // 1/z = conj(z) / |z|²  (not / |z|). For finite parts,
     // `complexQuotient()` scales the parts when |z|² overflows or underflows
@@ -294,13 +305,13 @@ export class MachineNumericValue extends NumericValue {
       // other overloads have to say it themselves — they never reach that path.
       if (
         !this.isNaN &&
-        this.im !== 0 &&
+        this.isComplex &&
         !Number.isFinite(other) &&
         !Number.isNaN(other)
       )
         return this.clone({ re: Infinity, im: Infinity });
 
-      if (this.im === 0) return this.clone(this.decimal * other);
+      if (!this.isComplex) return this.clone(this.decimal * other);
 
       return this.clone({
         re: this.decimal * other,
@@ -348,13 +359,13 @@ export class MachineNumericValue extends NumericValue {
       (this.isComplexInfinity ||
         other.isComplexInfinity ||
         ((this.isPositiveInfinity || this.isNegativeInfinity) &&
-          other.im !== 0) ||
+          other.isComplex) ||
         ((other.isPositiveInfinity || other.isNegativeInfinity) &&
-          this.im !== 0))
+          this.isComplex))
     )
       return this.clone({ re: Infinity, im: Infinity });
 
-    if (this.im === 0 && other.im === 0) {
+    if (!this.isComplex && !other.isComplex) {
       // A product with an exact rational is `(x · p) / q`, the order in which
       // JavaScript evaluates `x * p / q` and the double the kernels are
       // measured against: `x · (p / q)` gave `(7/6)·π` one unit in the last
@@ -400,7 +411,7 @@ export class MachineNumericValue extends NumericValue {
     if (other.isNegativeOne) return this.neg();
     if (other.isZero) return this.clone(this.isZero ? NaN : Infinity);
 
-    if (this.im === 0 && other.im === 0) {
+    if (!this.isComplex && !other.isComplex) {
       const x = other.re;
       // See `mul`: an exact divisor whose double projection is 0, ±∞ or
       // subnormal can still give a quotient in the double range.
@@ -443,7 +454,7 @@ export class MachineNumericValue extends NumericValue {
       if (exponent.isNaN) return this.clone(NaN);
       if (exponent.isZero) return this.clone(1);
       if (exponent.isOne) return this;
-      if (exponent.im) {
+      if (exponent.isComplex) {
         exponent = { re: exponent.re, im: exponent.im };
       } else exponent = exponent.re;
     }
@@ -521,10 +532,10 @@ export class MachineNumericValue extends NumericValue {
     // Real base: 1/xⁿ. (Complex bases fall through to the De Moivre branch
     // below, which handles negative exponents too — using only `this.decimal`
     // here would drop the imaginary part.)
-    if (exponent < 0 && this.im === 0)
+    if (exponent < 0 && !this.isComplex)
       return this.clone(1 / this.decimal ** -exponent);
 
-    if (this.im === 0) return this.clone(this.decimal ** exponent);
+    if (!this.isComplex) return this.clone(this.decimal ** exponent);
 
     const a = this.decimal;
     const b = this.im;
@@ -560,10 +571,10 @@ export class MachineNumericValue extends NumericValue {
     if (exponent === 2) return this.sqrt();
     // `Math.cbrt` reads only the real part: a complex radicand takes the
     // complex root below.
-    if (exponent === 3 && this.im === 0)
+    if (exponent === 3 && !this.isComplex)
       return this.clone(Math.cbrt(this.decimal));
 
-    if (this.im === 0) {
+    if (!this.isComplex) {
       if (this.decimal < 0) {
         if (exponent % 2 === 0) return this.clone(NaN);
         return this.clone(-machineNthRoot(-this.decimal, exponent));
@@ -594,7 +605,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
     if (this.isZero || this.isOne) return this;
 
-    if (this.im !== 0) {
+    if (this.isComplex) {
       // Complex square root, with m = |a + bi|:
       //   sqrt(a + bi) = sqrt((m + a)/2) + i·sign(b)·sqrt((m − a)/2)
       // When |b| is small compared with |a|, one of `m + a` and `m − a` is
@@ -647,7 +658,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.isZero) return other;
     if (other.isZero) return this;
 
-    if (this.im !== 0 || other.im !== 0) return this._makeExact(NaN);
+    if (this.isComplex || other.isComplex) return this._makeExact(NaN);
     if (!Number.isInteger(this.decimal)) return this._makeExact(1);
     let b = other.re;
     if (!Number.isInteger(b)) return this._makeExact(1);
@@ -663,7 +674,7 @@ export class MachineNumericValue extends NumericValue {
 
   abs(): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
-    if (this.im === 0)
+    if (!this.isComplex)
       return this.decimal > 0 ? this : this.clone(-this.decimal);
 
     // abs(z) = √(z.real² + z.imaginary²)
@@ -676,7 +687,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.isNegativeInfinity) return this._makeExact(NaN);
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
 
-    if (this.im === 0) {
+    if (!this.isComplex) {
       if (this.isOne) return this._makeExact(0);
       // Negative real: principal branch ln(x) = ln|x| + iπ (both parts
       // divided by ln(base) when a base is given). Previously every negative
@@ -715,7 +726,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.isZero) return this._makeExact(1);
     if (this.isNegativeInfinity) return this._makeExact(0);
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
-    if (this.im !== 0) {
+    if (this.isComplex) {
       // Complex exponential:
       // exp(a + bi) = exp(a) * (cos(b) + i * sin(b))
       // A part is dust only when it is small compared with the modulus of
@@ -729,19 +740,19 @@ export class MachineNumericValue extends NumericValue {
   }
 
   floor(): NumericValue {
-    if (this.isNaN || this.im !== 0) return this._makeExact(NaN);
+    if (this.isNaN || this.isComplex) return this._makeExact(NaN);
     if (Number.isInteger(this.decimal)) return this;
     return this._makeExact(Math.floor(this.decimal));
   }
 
   ceil(): NumericValue {
-    if (this.isNaN || this.im !== 0) return this._makeExact(NaN);
+    if (this.isNaN || this.isComplex) return this._makeExact(NaN);
     if (Number.isInteger(this.decimal)) return this;
     return this._makeExact(Math.ceil(this.decimal));
   }
 
   round(): NumericValue {
-    if (this.isNaN || this.im !== 0) return this._makeExact(NaN);
+    if (this.isNaN || this.isComplex) return this._makeExact(NaN);
     if (Number.isInteger(this.decimal)) return this;
     return this._makeExact(Math.round(this.decimal));
   }
@@ -752,7 +763,12 @@ export class MachineNumericValue extends NumericValue {
     // a subtraction-based check made `Infinity.eq(Infinity)` false (and
     // disagreed with BigNumericValue).
     if (typeof other === 'number')
-      return this.im === 0 && this.decimal === other;
+      return !this.isComplex && this.decimal === other;
+    // An exact operand compares the pair itself, reading its imaginary part
+    // from the exact value: its double `im` is `0` for `10^{-800}i`, and
+    // comparing it here would make an inexact `0` equal to that value from
+    // this side only. Delegating keeps `eq` symmetric.
+    if (other instanceof ExactNumericValue) return other.eq(this);
     if (other.isNaN) return false;
     if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
     return this.decimal === other.re && this.im === other.im;
@@ -765,33 +781,33 @@ export class MachineNumericValue extends NumericValue {
   // `a.lt(b)` and `b.gt(a)` in agreement across the two lanes.
   lt(other: number | NumericValue): boolean | undefined {
     // Complex values are unordered: any non-real operand → indeterminate
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal < other;
-    if (other.im !== 0) return undefined;
+    if (other.isComplex) return undefined;
     if (other instanceof ExactNumericValue) return other.gt(this.decimal);
     return this.decimal < other.re;
   }
 
   lte(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal <= other;
-    if (other.im !== 0) return undefined;
+    if (other.isComplex) return undefined;
     if (other instanceof ExactNumericValue) return other.gte(this.decimal);
     return this.decimal <= other.re;
   }
 
   gt(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal > other;
-    if (other.im !== 0) return undefined;
+    if (other.isComplex) return undefined;
     if (other instanceof ExactNumericValue) return other.lt(this.decimal);
     return this.decimal > other.re;
   }
 
   gte(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal >= other;
-    if (other.im !== 0) return undefined;
+    if (other.isComplex) return undefined;
     if (other instanceof ExactNumericValue) return other.lte(this.decimal);
     return this.decimal >= other.re;
   }
@@ -808,7 +824,7 @@ function outOfDoubleRange(v: NumericValue, re: number): boolean {
   return (
     isOutsideNormalDoubleRange(re) &&
     v instanceof ExactNumericValue &&
-    v.im === 0 &&
+    !v.isComplex &&
     !v.isZero &&
     !v.isNaN
   );
@@ -820,7 +836,7 @@ function outOfDoubleRange(v: NumericValue, re: number): boolean {
  * computed as `(x · p) / q`.
  */
 function exactMachineRational(v: NumericValue): [number, number] | null {
-  if (!(v instanceof ExactNumericValue) || v.im !== 0 || v.radical !== 1)
+  if (!(v instanceof ExactNumericValue) || v.isComplex || v.radical !== 1)
     return null;
   const [p, q] = v.rational;
   if (typeof p !== 'number' || typeof q !== 'number') return null;

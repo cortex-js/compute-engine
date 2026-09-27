@@ -2988,6 +2988,13 @@ export interface Expression {
 export interface NumberLiteralInterface {
   readonly numericValue: number | NumericValue;
   readonly isExact: boolean;
+  /** True if the imaginary part of this number is not zero.
+   *
+   * Unlike a test of `im !== 0`, this is `true` for an imaginary part too
+   * small or too large for a double (the exact `10^{-800}·i`), because it is
+   * read from the numeric value itself, not from its double projection
+   * `im`. */
+  readonly isComplex: boolean;
   readonly isNumberLiteral: true;
 }
 

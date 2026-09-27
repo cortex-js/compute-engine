@@ -6581,7 +6581,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         else if (isNumber(seedValue)) {
           // A non-finite or non-real seed is a structured error, never a
           // shared zero-seed stream.
-          if (seedValue.im !== 0 || !Number.isFinite(seedValue.re))
+          if (seedValue.isComplex || !Number.isFinite(seedValue.re))
             return ce.error([
               'out-of-range',
               'a finite real number or a string',

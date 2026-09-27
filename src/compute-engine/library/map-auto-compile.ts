@@ -200,7 +200,9 @@ function markedMapLambda(
 
 /** Is `x` a finite real number literal (a literal loop bound)? */
 function isLiteralBound(x: Expression | undefined): boolean {
-  return x !== undefined && isNumber(x) && x.im === 0 && Number.isFinite(x.re);
+  return (
+    x !== undefined && isNumber(x) && !x.isComplex && Number.isFinite(x.re)
+  );
 }
 
 /**
@@ -749,7 +751,7 @@ export function mapAutoCompileRunner(
         const b = sourceBounds[i];
         if (
           b === undefined ||
-          item.im !== 0 ||
+          item.isComplex ||
           !item.isExact ||
           !Number.isSafeInteger(item.re) ||
           item.re < b.lo ||
@@ -759,7 +761,7 @@ export function mapAutoCompileRunner(
           return undefined;
         }
       }
-      args.push(item.im !== 0 ? { re: item.re, im: item.im } : item.re);
+      args.push(item.isComplex ? { re: item.re, im: item.im } : item.re);
     }
 
     // Draw-counter rollback: a compiled body can draw from the ambient

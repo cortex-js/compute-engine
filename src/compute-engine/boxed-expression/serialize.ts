@@ -47,6 +47,7 @@ import {
   isObject,
   containsContinuationOperand,
 } from './type-guards.js';
+import { isImaginaryPartFinite } from './imaginary-part.js';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';
 import { latexSerializeOptions } from './latex-serialize-options.js';
 
@@ -913,7 +914,7 @@ function serializeJsonNumber(
       // `{ fractional: 2 }` must pad to `1500.00`, matching a bare `1500`).
       // `{ significant: n }` remains a no-op on it, and `'auto'`/`'max'` still
       // emit the bare integer.
-      if (value.im === 0 && value.radical === 1 && isInteger(value.rational))
+      if (!value.isComplex && value.radical === 1 && isInteger(value.rational))
         return serializeJsonNumber(ce, value.rational[0], options);
 
       // Honor the `exclude` option for the heads emitted here. The default
@@ -979,7 +980,7 @@ function serializeJsonNumber(
 
       // Exact complex value: `['Complex', re, im]` with exact components
       // (mirrors `ExactNumericValue.toJSON()`)
-      if (value.im !== 0)
+      if (value.isComplex)
         return [
           'Complex',
           isZero(value.rational)
@@ -992,19 +993,25 @@ function serializeJsonNumber(
     }
 
     // We have a real number (big or machine)
-    if (value.im === 0) {
+    if (!value.isComplex) {
       const re = value.bignumRe ?? value.re;
       return serializeJsonNumber(ce, re, options, metadata);
     }
 
-    // We have a complex number
-    if (!Number.isFinite(value.im))
+    // We have a complex number. Its imaginary part is read without loss
+    // (`bignumIm`) when the value holds one: the double `im` is only the
+    // nearest double, `±Infinity` for a finite imaginary part beyond the
+    // double range.
+    if (!isImaginaryPartFinite(value))
       return serializeJsonSymbol(ce, 'ComplexInfinity', options, metadata);
 
     return serializeJsonFunction(
       ce,
       'Complex',
-      [boxBignumResult(ce, value.bignumRe ?? value.re), ce.number(value.im)],
+      [
+        boxBignumResult(ce, value.bignumRe ?? value.re),
+        ce.number(value.bignumIm ?? value.im),
+      ],
       options,
       {
         ...metadata,

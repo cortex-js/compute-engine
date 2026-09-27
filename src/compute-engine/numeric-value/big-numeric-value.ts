@@ -10,7 +10,6 @@ import { bigint } from '../numerics/bigint.js';
 import { ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
 import { isComplexDust } from './roundoff.js';
-import { complexQuotient } from '../numerics/numeric-complex.js';
 
 export class BigNumericValue extends NumericValue {
   declare __brand: 'BigNumericValue';
@@ -49,7 +48,7 @@ export class BigNumericValue extends NumericValue {
     // not a finite complex number: its type is `infinity`, the tier that names
     // every value of infinite magnitude whatever its direction.
     if (this.isComplexInfinity) return 'infinity';
-    if (this.im !== 0) {
+    if (this.isComplex) {
       // A value with a non-finite component is not a *finite* complex number,
       // so it is not below `complex` at all. Two cases reach here, because an
       // infinite IMAGINARY part was already answered above (that IS the `~oo`
@@ -97,7 +96,7 @@ export class BigNumericValue extends NumericValue {
     if (this.isPositiveInfinity) return 'PositiveInfinity';
     if (this.isNegativeInfinity) return 'NegativeInfinity';
     if (this.isComplexInfinity) return 'ComplexInfinity';
-    if (this.im === 0) {
+    if (!this.isComplex) {
       if (isInMachineRange(this.decimal)) return this.decimal.toNumber();
       return { num: decimalToString(this.decimal) };
     }
@@ -129,7 +128,7 @@ export class BigNumericValue extends NumericValue {
     if (this.isZero) return '0';
     if (this.isOne) return '1';
     if (this.isNegativeOne) return '-1';
-    if (this.im === 0)
+    if (!this.isComplex)
       return decimalToString(this.decimal.toPrecision(BigDecimal.precision));
     if (this.decimal.isZero()) {
       if (this.im === 1) return 'i';
@@ -178,7 +177,7 @@ export class BigNumericValue extends NumericValue {
 
   get isPositiveInfinity(): boolean {
     return (
-      this.im === 0 &&
+      !this.isComplex &&
       !this.decimal.isFinite() &&
       !this.decimal.isNaN() &&
       this.decimal.isPositive()
@@ -187,7 +186,7 @@ export class BigNumericValue extends NumericValue {
 
   get isNegativeInfinity(): boolean {
     return (
-      this.im === 0 &&
+      !this.isComplex &&
       !this.decimal.isFinite() &&
       !this.decimal.isNaN() &&
       this.decimal.isNegative()
@@ -198,8 +197,15 @@ export class BigNumericValue extends NumericValue {
     return !Number.isFinite(this.im) && !Number.isNaN(this.im);
   }
 
+  /** True if the imaginary part is not zero. The imaginary part of this
+   * class is still a double, so this reads `im`; when the imaginary part is
+   * stored as a big decimal, this reads the big decimal instead. */
+  get isComplex(): boolean {
+    return this.im !== 0;
+  }
+
   get isZero(): boolean {
-    return this.im === 0 && this.decimal.isZero();
+    return !this.isComplex && this.decimal.isZero();
   }
 
   isZeroWithTolerance(tolerance: number | BigDecimal): boolean {
@@ -215,15 +221,15 @@ export class BigNumericValue extends NumericValue {
   }
 
   get isOne(): boolean {
-    return this.im === 0 && this.decimal.eq(1);
+    return !this.isComplex && this.decimal.eq(1);
   }
 
   get isNegativeOne(): boolean {
-    return this.im === 0 && this.decimal.eq(-1);
+    return !this.isComplex && this.decimal.eq(-1);
   }
 
   sgn(): -1 | 0 | 1 | undefined {
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (this.decimal.isZero()) return 0;
     if (this.decimal.isPositive()) return 1;
     if (this.decimal.isNegative()) return -1;
@@ -242,21 +248,19 @@ export class BigNumericValue extends NumericValue {
   inv(): BigNumericValue {
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
-    if (this.im === 0) return this.clone(this.decimal.inv());
+    if (!this.isComplex) return this.clone(this.decimal.inv());
 
     // 1/z = conj(z) / |z|²  (not / |z|).
-    // For finite parts, the squares are formed as big decimals, which do not
-    // overflow, and the machine imaginary part comes from
-    // `complexQuotient()`, which scales the parts when |z|² is not a normal
-    // double: `1/(1e308 + 1e308i)` is `5e-309 − 5e-309i`, not `0`, and
-    // `1/(1e-200 + 1e-200i)` is `5e199 − 5e199i`, not `~oo`.
+    // For finite parts, both parts are formed as big decimals, which do not
+    // overflow or underflow, and only the result's imaginary part is
+    // converted to a double: `1/(1e308 + 1e308i)` is `5e-309 − 5e-309i`, not
+    // `0`, and `1/(1e-200 + 1e-200i)` is `5e199 − 5e199i`, not `~oo`.
     if (this.decimal.isFinite() && Number.isFinite(this.im)) {
-      const bigD = this.decimal
-        .mul(this.decimal)
-        .add(new BigDecimal(this.im).mul(this.im));
+      const b = bigImaginaryPart(this);
+      const bigD = this.decimal.mul(this.decimal).add(b.mul(b));
       return this.clone({
         re: this.decimal.div(bigD),
-        im: complexQuotient(1, 0, this.re, this.im).im,
+        im: b.neg().div(bigD).toNumber(),
       });
     }
     const d = this.re * this.re + this.im * this.im;
@@ -280,9 +284,14 @@ export class BigNumericValue extends NumericValue {
     if (this.isZero)
       return this.clone({ re: other.bignumRe ?? other.re, im: other.im });
 
+    // The imaginary parts are added as big decimals: an exact operand's
+    // imaginary part can be too small or too large for a double.
     return this.clone({
       re: this.decimal.add(other.bignumRe ?? other.re),
-      im: this.im + other.im,
+      im:
+        this.isComplex || other.isComplex
+          ? bigImaginaryPart(this).add(bigImaginaryPart(other)).toNumber()
+          : 0,
     });
   }
 
@@ -328,17 +337,17 @@ export class BigNumericValue extends NumericValue {
       // other overloads have to say it themselves — they never reach that path.
       if (
         !this.isNaN &&
-        this.im !== 0 &&
+        this.isComplex &&
         !Number.isFinite(other) &&
         !Number.isNaN(other)
       )
         return this.clone({ re: Infinity, im: Infinity });
 
-      if (this.im === 0) return this.clone(this.decimal.mul(other));
+      if (!this.isComplex) return this.clone(this.decimal.mul(other));
 
       return this.clone({
         re: this.decimal.mul(other),
-        im: this.im * other,
+        im: bigImaginaryPart(this).mul(other).toNumber(),
       });
     }
     if (other instanceof BigDecimal) {
@@ -347,19 +356,16 @@ export class BigNumericValue extends NumericValue {
       // direction left. Without this the component arithmetic computes `0 · ∞`
       // for the real part of `i · ∞` and the whole value collapses to NaN. The
       // other.toNumber() overloads have to say it themselves — they never reach that path.
-      if (
-        !this.isNaN &&
-        this.im !== 0 &&
-        !Number.isFinite(other.toNumber()) &&
-        !Number.isNaN(other.toNumber())
-      )
+      // The test reads the big decimal itself, not `toNumber()`, which is
+      // `Infinity` for a FINITE value beyond the double range (`10^{400}`).
+      if (!this.isNaN && this.isComplex && !other.isFinite() && !other.isNaN())
         return this.clone({ re: Infinity, im: Infinity });
 
-      if (this.im === 0) return this.clone(this.decimal.mul(other));
+      if (!this.isComplex) return this.clone(this.decimal.mul(other));
 
       return this.clone({
         re: this.decimal.mul(other),
-        im: this.im * other.toNumber(),
+        im: bigImaginaryPart(this).mul(other).toNumber(),
       });
     }
 
@@ -404,13 +410,13 @@ export class BigNumericValue extends NumericValue {
       (this.isComplexInfinity ||
         other.isComplexInfinity ||
         ((this.isPositiveInfinity || this.isNegativeInfinity) &&
-          other.im !== 0) ||
+          other.isComplex) ||
         ((other.isPositiveInfinity || other.isNegativeInfinity) &&
-          this.im !== 0))
+          this.isComplex))
     )
       return this.clone({ re: Infinity, im: Infinity });
 
-    if (this.im === 0 && other.im === 0) {
+    if (!this.isComplex && !other.isComplex) {
       // A product with an exact rational is `(x · p) / q`, computed with 5
       // guard digits: `x · (p / q)` rounded the quotient to the working
       // precision and then multiplied, and `sin(π/6)` at 21 digits was
@@ -438,9 +444,16 @@ export class BigNumericValue extends NumericValue {
       return this.clone(this.decimal.mul(other.bignumRe ?? other.re));
     }
 
+    // (a + bi)(c + di) = (ac − bd) + (ad + bc)i, with every part a big
+    // decimal. The double projections are not enough: for
+    // `10^{400} · (1 + 10^{-400}i)` the real part `a` is `Infinity` as a
+    // double and `d` is `0`, so `a·d` is NaN, where the product is `10^{400} + i`.
+    const b = bigImaginaryPart(this);
+    const c = other.bignumRe ?? new BigDecimal(other.re);
+    const d = bigImaginaryPart(other);
     return this.clone({
-      re: this.decimal.mul(other.bignumRe ?? other.re).sub(this.im * other.im),
-      im: this.re * other.im + this.im * other.re,
+      re: this.decimal.mul(c).sub(b.mul(d)),
+      im: this.decimal.mul(d).add(b.mul(c)).toNumber(),
     });
   }
 
@@ -462,35 +475,39 @@ export class BigNumericValue extends NumericValue {
       // numerator, an unsigned) infinity — the previous code always returned
       // +Infinity, dropping the sign (ExactNumericValue is sign-aware).
       if (this.isZero || this.isNaN) return this.clone(NaN);
-      if (this.im !== 0) return this.clone({ im: Infinity });
+      if (this.isComplex) return this.clone({ im: Infinity });
       return this.clone(this.decimal.isNegative() ? -Infinity : Infinity);
     }
 
-    if (this.im === 0 && other.im === 0)
+    if (!this.isComplex && !other.isComplex)
       return this.clone(this.decimal.div(other.bignumRe ?? other.re));
 
     const [a, b] = [this.re, this.im];
     const [c, d] = [other.re, other.im];
     const bigC = other.bignumRe ?? new BigDecimal(other.re);
-    // For finite parts, the products are formed as big decimals, which do not
-    // overflow, and the machine imaginary part comes from
-    // `complexQuotient()`, which scales the parts when an intermediate value
-    // is not a normal double: `(1e308 + 1e308i) / (1 + i)` is `1e308`.
+    const bigD = bigImaginaryPart(other);
+    // For finite parts, (a + bi)/(c + di) = ((ac + bd) + (bc − ad)i)/(c² + d²)
+    // is formed with every part a big decimal, which does not overflow or
+    // underflow: `(1e308 + 1e308i) / (1 + i)` is `1e308`, and
+    // `10^{400} / (1 + 10^{-400}i)` is `10^{400} − i`. The finiteness of the
+    // real parts and of the divisor's imaginary part is read from the big
+    // decimals: their double projections are `±Infinity` for a finite value
+    // beyond the double range.
     if (
       this.decimal.isFinite() &&
       bigC.isFinite() &&
-      Number.isFinite(a) &&
       Number.isFinite(b) &&
-      Number.isFinite(c) &&
-      Number.isFinite(d)
+      bigD.isFinite()
     ) {
       const bigB = new BigDecimal(b);
+      const denominator = bigC.mul(bigC).add(bigD.mul(bigD));
       return this.clone({
-        re: this.decimal
+        re: this.decimal.mul(bigC).add(bigB.mul(bigD)).div(denominator),
+        im: bigB
           .mul(bigC)
-          .add(bigB.mul(d))
-          .div(bigC.mul(bigC).add(new BigDecimal(d).mul(d))),
-        im: complexQuotient(a, b, c, d).im,
+          .sub(this.decimal.mul(bigD))
+          .div(denominator)
+          .toNumber(),
       });
     }
     const denominator = c * c + d * d;
@@ -517,7 +534,7 @@ export class BigNumericValue extends NumericValue {
       if (exponent.isNaN) return this.clone(NaN);
       if (exponent.isZero) return this.clone(1);
       if (exponent.isOne) return this;
-      if (exponent.im) {
+      if (exponent.isComplex) {
         exponent = { re: exponent.re, im: exponent.im };
       } else exponent = exponent.re;
     }
@@ -604,7 +621,7 @@ export class BigNumericValue extends NumericValue {
 
     if (exponent < 0) return this.pow(-exponent).inv();
 
-    if (this.im === 0) {
+    if (!this.isComplex) {
       return this.clone(this.decimal.pow(exponent));
     }
 
@@ -647,7 +664,7 @@ export class BigNumericValue extends NumericValue {
     // negative real are NaN in the float lanes.
     if (exp === 2) return this.sqrt();
 
-    if (this.im === 0) {
+    if (!this.isComplex) {
       if (this.decimal.isNegative()) {
         // Odd root of a negative real: real-root convention, matching
         // MachineNumericValue.root (e.g. (-8)^(1/3) = -2). Even roots of
@@ -697,7 +714,7 @@ export class BigNumericValue extends NumericValue {
   sqrt(): NumericValue {
     if (this.isZero || this.isOne) return this;
 
-    if (this.im !== 0) {
+    if (this.isComplex) {
       // Complex square root, with m = |a + bi|:
       //   sqrt(a + bi) = sqrt((m + a)/2) + i·sign(b)·sqrt((m − a)/2)
       // When |b| is small compared with |a|, one of `m + a` and `m − a` is
@@ -735,7 +752,7 @@ export class BigNumericValue extends NumericValue {
     if (this.isZero) return other;
     if (other.isZero) return this;
 
-    if (this.im !== 0 || other.im !== 0) return this._makeExact(NaN);
+    if (this.isComplex || other.isComplex) return this._makeExact(NaN);
     if (!this.decimal.isInteger()) return this._makeExact(1);
     let b = other.bignumRe
       ? new BigDecimal(other.bignumRe)
@@ -752,7 +769,7 @@ export class BigNumericValue extends NumericValue {
   }
 
   abs(): NumericValue {
-    if (this.im === 0)
+    if (!this.isComplex)
       return this.decimal.isPositive() ? this : this.clone(this.decimal.neg());
 
     return this.clone(
@@ -769,7 +786,7 @@ export class BigNumericValue extends NumericValue {
     if (this.isNegativeInfinity) return this._makeExact(NaN);
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
 
-    if (this.im === 0) {
+    if (!this.isComplex) {
       if (this.isOne) return this._makeExact(0);
       // Negative real: principal branch ln(x) = ln|x| + iπ (both parts
       // divided by ln(base) when a base is given). Previously every negative
@@ -807,7 +824,7 @@ export class BigNumericValue extends NumericValue {
     if (this.isZero) return this._makeExact(1);
     if (this.isNegativeInfinity) return this._makeExact(0);
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
-    if (this.im !== 0) {
+    if (this.isComplex) {
       // Complex exponential:
       // exp(a + bi) = exp(a) * (cos(b) + i * sin(b))
       // cos(b) is computed at working precision — a machine cos would
@@ -834,19 +851,19 @@ export class BigNumericValue extends NumericValue {
   }
 
   floor(): NumericValue {
-    if (this.isNaN || this.im !== 0) return this._makeExact(NaN);
+    if (this.isNaN || this.isComplex) return this._makeExact(NaN);
     if (this.decimal.isInteger()) return this;
     return this._makeExact(bigint(this.decimal.floor())!);
   }
 
   ceil(): NumericValue {
-    if (this.isNaN || this.im !== 0) return this._makeExact(NaN);
+    if (this.isNaN || this.isComplex) return this._makeExact(NaN);
     if (this.decimal.isInteger()) return this;
     return this._makeExact(bigint(this.decimal.ceil())!);
   }
 
   round(): NumericValue {
-    if (this.isNaN || this.im !== 0) return this._makeExact(NaN);
+    if (this.isNaN || this.isComplex) return this._makeExact(NaN);
     if (this.decimal.isInteger()) return this;
     return this._makeExact(bigint(this.decimal.round())!);
   }
@@ -854,7 +871,12 @@ export class BigNumericValue extends NumericValue {
   eq(other: number | NumericValue): boolean {
     if (this.isNaN) return false;
     if (typeof other === 'number')
-      return this.im === 0 && this.decimal.eq(other);
+      return !this.isComplex && this.decimal.eq(other);
+    // An exact operand compares the pair itself, reading its imaginary part
+    // from the exact value: its double `im` is `0` for `10^{-800}i`, and
+    // comparing it here would make an inexact `0` equal to that value from
+    // this side only. Delegating keeps `eq` symmetric.
+    if (other instanceof ExactNumericValue) return other.eq(this);
     if (other.isNaN) return false;
     if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
     return (
@@ -864,30 +886,30 @@ export class BigNumericValue extends NumericValue {
 
   lt(other: number | NumericValue): boolean | undefined {
     // Complex values are unordered: any non-real operand → indeterminate
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal.lt(other);
-    if (other.im !== 0) return undefined;
+    if (other.isComplex) return undefined;
     return this.decimal.lt(other.bignumRe ?? other.re);
   }
 
   lte(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal.lte(other);
-    if (other.im !== 0) return undefined;
+    if (other.isComplex) return undefined;
     return this.decimal.lte(other.bignumRe ?? other.re);
   }
 
   gt(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal.gt(other);
-    if (other.im !== 0) return undefined;
+    if (other.isComplex) return undefined;
     return this.decimal.gt(other.bignumRe ?? other.re);
   }
 
   gte(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) return undefined;
+    if (this.isComplex) return undefined;
     if (typeof other === 'number') return this.decimal.gte(other);
-    if (other.im !== 0) return undefined;
+    if (other.isComplex) return undefined;
     return this.decimal.gte(other.bignumRe ?? other.re);
   }
 }
@@ -919,4 +941,13 @@ function decimalToString(num: BigDecimal): string {
 // machine roundoff, not `ce.tolerance`.
 function chop(n: number): number {
   return Math.abs(n) <= ROUNDOFF_TOLERANCE ? 0 : n;
+}
+
+/** The imaginary part of `v` as a big decimal: `bignumIm` when the value has
+ * one (an `ExactNumericValue`, whose imaginary part can be too small or too
+ * large for a double), otherwise the double `im` converted to a big decimal.
+ * A big-decimal complex product or quotient must read this, not `im`: the
+ * double is `0` or `±Infinity` for such a part. */
+function bigImaginaryPart(v: NumericValue): BigDecimal {
+  return v.bignumIm ?? new BigDecimal(v.im);
 }

@@ -6290,7 +6290,7 @@ function decimalRationalMatrix(
     const row: BigRat[] = [];
     for (let j = 0; j < cols; j++) {
       const boxed = ce.box(packed.at(i + 1, j + 1) as Expression);
-      if (!isNumber(boxed) || boxed.im !== 0) return undefined;
+      if (!isNumber(boxed) || boxed.isComplex) return undefined;
       if (boxed.isExact) {
         const r = asRational(boxed);
         if (r === undefined) return undefined;

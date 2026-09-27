@@ -876,7 +876,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       return { value: ce.NaN, because: 'arctan2' };
 
     // atan2 is a real-plane function: leave non-real operands symbolic.
-    if ((isNumber(y) && y.im !== 0) || (isNumber(x) && x.im !== 0))
+    if ((isNumber(y) && y.isComplex) || (isNumber(x) && x.isComplex))
       return undefined;
 
     // Every angle below is built from `halfTurnAngle` — π rad / 180 deg /

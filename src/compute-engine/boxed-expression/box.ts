@@ -3733,7 +3733,7 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
   // decomposing it into `re + im·i` terms would only re-fold to the same
   // literal (via canonicalAdd), and the machine-complex imaginary emission
   // below would degrade it to an inexact float.
-  if (value.im !== 0 && value instanceof ExactNumericValue)
+  if (value.isComplex && value instanceof ExactNumericValue)
     return ce.number(value);
 
   if (!value.isExact) {
@@ -3792,7 +3792,7 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
 
   let result: Expression;
 
-  if (value.im === 0) {
+  if (!value.isComplex) {
     if (terms.length === 0) return ce.Zero;
     result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
     return result;

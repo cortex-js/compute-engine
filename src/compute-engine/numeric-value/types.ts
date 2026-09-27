@@ -87,11 +87,30 @@ export abstract class NumericValue {
     return undefined;
   }
 
-  /** The imaginary part of this numeric value.
+  /** The imaginary part of this numeric value, as the double nearest to it.
    *
    * Can be negative, zero or positive.
+   *
+   * This is a PROJECTION for computations in doubles. It is `0` when the
+   * true imaginary part is too small for a double (`10^{-800}`) and
+   * `±Infinity` when it is too large (`10^{800}`). So do not use it to decide
+   * whether the value is complex (use `isComplex`), nor whether the
+   * imaginary part is finite or an integer.
    */
   im!: number; // Assigned by every concrete subclass constructor.
+
+  /** True if the imaginary part of this numeric value is not zero.
+   *
+   * This is read from a representation that holds the imaginary part without
+   * loss (the exact rational of an `ExactNumericValue`), so it is true for an
+   * imaginary part whose double projection `im` is `0`, such as the exact
+   * `10^{-800}·i`. Use it, not `im !== 0`, to decide whether a value is
+   * complex.
+   *
+   * A value with a NaN imaginary part is NaN; do not rely on `isComplex` to
+   * detect it.
+   */
+  abstract get isComplex(): boolean;
 
   get bignumIm(): BigDecimal | undefined {
     return undefined;
@@ -153,7 +172,7 @@ export abstract class NumericValue {
   /** Object.valueOf(): returns a primitive value, preferably a JavaScript
    *  number over a string, even if at the expense of precision */
   valueOf(): number | string {
-    if (this.im === 0)
+    if (!this.isComplex)
       return this.bignumRe ? this.bignumRe.toNumber() : this.re;
 
     return this.toString();
@@ -168,7 +187,7 @@ export abstract class NumericValue {
 
   /** Object.toJSON */
   toJSON(): unknown {
-    if (this.im === 0) {
+    if (!this.isComplex) {
       const r = this.re;
       // JSON cannot represent NaN, Infinity, -Infinity
       if (Number.isFinite(r)) return r;

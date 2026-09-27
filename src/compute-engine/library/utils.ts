@@ -683,7 +683,7 @@ function asReadableFraction(z: Expression, ce: ComputeEngine): Expression {
   let coeff: Expression | undefined;
   const rest: Expression[] = [];
   for (const op of z.ops) {
-    if (coeff === undefined && isNumber(op) && op.im === 0) coeff = op;
+    if (coeff === undefined && isNumber(op) && !op.isComplex) coeff = op;
     else rest.push(op);
   }
   if (coeff === undefined || rest.length === 0) return z;
@@ -719,7 +719,7 @@ function pSeriesClosedForm(
   const base = body.op1;
   const exp = body.op2;
   if (!(isSymbol(base) && base.symbol === index)) return undefined;
-  if (!isNumber(exp) || exp.im !== 0) return undefined;
+  if (!isNumber(exp) || exp.isComplex) return undefined;
   const r = exp.re;
   // s = −exp must be a real > 1 for absolute convergence (s = 1 is the
   // harmonic/ζ(1) pole; s ≤ 1 diverges).

@@ -78,7 +78,7 @@ function negatedRealRatio(b: Expression, a?: Expression): number | undefined {
   const val = numericValue(ratio);
   if (val === undefined) return undefined;
   if (typeof val === 'number') return val;
-  if (val.im !== 0) return undefined;
+  if (val.isComplex) return undefined;
   return val.re;
 }
 

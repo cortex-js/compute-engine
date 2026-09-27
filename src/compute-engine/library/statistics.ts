@@ -9,6 +9,7 @@ import {
 import {
   type DataConstraint,
   dataConstraintError,
+  hasFiniteImaginaryPart,
   hasNonFiniteImaginaryPart,
   isComplexDatum,
   nonFiniteDatum,
@@ -400,7 +401,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
+        if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
           if (x.isSame(0)) return ce.Zero;
           if (x.isInfinity) return x.isPositive ? ce.One : ce.NegativeOne;
@@ -448,7 +449,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
+        if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
           if (x.isSame(0)) return ce.One;
           if (x.isInfinity) return x.isPositive ? ce.Zero : ce.number(2);
@@ -531,7 +532,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (infinitePoint(x) !== undefined) return ce.NaN;
         // A non-real argument, or a real one outside [−1, 1], has a value
         // the real kernel cannot compute: stay symbolic, under N() too.
-        if (x.im !== 0) return undefined;
+        if (x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.Zero;
         if (x.isSame(1)) return ce.PositiveInfinity;
@@ -584,7 +585,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
+        if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
           if (x.isSame(0)) return ce.Zero;
           if (x.isInfinity)
@@ -1822,7 +1823,7 @@ function isRealConstantDatum(v: Expression): boolean {
   // `n.isFinite` reads the value itself, not its machine projection: the
   // constant `π·10^400` is finite, although its `.re` overflows to
   // `+Infinity`. A number literal `10^400` is data too.
-  return isNumber(n) && n.isFinite === true && n.im === 0;
+  return isNumber(n) && n.isFinite === true && !n.isComplex;
 }
 
 /**
@@ -1900,7 +1901,7 @@ function exactData(data: ReadonlyArray<Expression>): Expression[] | null {
     // `collectData` admits a datum that is not a number literal only when it
     // is a real constant.
     if (!isNumber(v)) continue;
-    if (v.isExact !== true || v.im !== 0 || v.isFinite !== true) return null;
+    if (v.isExact !== true || v.isComplex || v.isFinite !== true) return null;
   }
   return [...data];
 }
@@ -1996,7 +1997,7 @@ function squaredMagnitude(ce: ComputeEngine, d: Expression): Expression {
       powi(ce, ce.function('Re', [d]).evaluate(), 2),
       powi(ce, ce.function('Im', [d]).evaluate(), 2),
     ]);
-  if (d.im === 0) return multiply(ce, [d, d]);
+  if (!d.isComplex) return multiply(ce, [d, d]);
   if (isNumber(d) && d.isExact)
     return powi(ce, ce.function('Abs', [d]).evaluate(), 2);
   return ce.number(d.re * d.re + d.im * d.im);
@@ -2180,7 +2181,12 @@ function exactMode(
 /** True if every value is an exact, finite, real number literal. */
 function allExact(vals: ReadonlyArray<Expression>): boolean {
   for (const v of vals)
-    if (!isNumber(v) || v.isExact !== true || v.im !== 0 || v.isFinite !== true)
+    if (
+      !isNumber(v) ||
+      v.isExact !== true ||
+      v.isComplex ||
+      v.isFinite !== true
+    )
       return false;
   return true;
 }
@@ -2271,7 +2277,7 @@ const bigVals = (vals: ReadonlyArray<Expression>) =>
  */
 function bigProjection(v: Expression) {
   const n = numberLiteralOf(v);
-  if (!n || !Number.isFinite(n.im)) return v.engine.bignum(NaN);
+  if (!n || !hasFiniteImaginaryPart(n)) return v.engine.bignum(NaN);
   return n.bignumRe ?? v.engine.bignum(n.re);
 }
 
@@ -2363,7 +2369,7 @@ function hasNaNDatum(
   for (const vals of data)
     for (const v of vals) {
       if (isAbsentValue(v)) return true;
-      if (isNumber(v) && (v.isNaN === true || !Number.isFinite(v.im)))
+      if (isNumber(v) && (v.isNaN === true || !hasFiniteImaginaryPart(v)))
         return true;
     }
   return false;

@@ -234,7 +234,7 @@ function integerRange(
 ): IntegerRange | undefined {
   if (depth > 32) return undefined;
   if (isNumber(expr))
-    return expr.im === 0 && Number.isSafeInteger(expr.re)
+    return !expr.isComplex && Number.isSafeInteger(expr.re)
       ? { min: expr.re, max: expr.re }
       : undefined;
   if (isSymbol(expr))
@@ -296,7 +296,7 @@ function numericArray(
   return (
     isFunction(expr, 'List') &&
     builtin(expr, target) &&
-    expr.ops.every((x) => isNumber(x) && x.im === 0)
+    expr.ops.every((x) => isNumber(x) && !x.isComplex)
   );
 }
 
@@ -339,7 +339,7 @@ export function numericArrayCells(
   if (
     !isFunction(coll, 'List') ||
     !builtin(coll, target) ||
-    !coll.ops.every((x) => isNumber(x) && x.im === 0)
+    !coll.ops.every((x) => isNumber(x) && !x.isComplex)
   )
     return undefined;
   return coll.ops;

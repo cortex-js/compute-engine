@@ -623,7 +623,7 @@ function compilePythonBound(
   expr: Expression,
   target: CompileTarget<Expression>
 ): string {
-  if (isNumber(expr) && expr.im === 0 && Number.isFinite(expr.re))
+  if (isNumber(expr) && !expr.isComplex && Number.isFinite(expr.re))
     return String(Math.floor(expr.re));
   return BaseCompiler.compile(expr, target);
 }
@@ -637,7 +637,7 @@ function compilePythonUpperBound(
   expr: Expression,
   target: CompileTarget<Expression>
 ): string {
-  if (isNumber(expr) && expr.im === 0 && Number.isFinite(expr.re))
+  if (isNumber(expr) && !expr.isComplex && Number.isFinite(expr.re))
     return String(Math.floor(expr.re) + 1);
   return `${BaseCompiler.compile(expr, target)} + 1`;
 }
@@ -845,7 +845,10 @@ function pythonElementSource(
     // Safe integers only: a larger magnitude stringifies in exponent form
     // (`1e+21`), which Python reads as a float and `range` refuses.
     const literalInteger = (x: Expression | undefined): number | undefined =>
-      x !== undefined && isNumber(x) && x.im === 0 && Number.isSafeInteger(x.re)
+      x !== undefined &&
+      isNumber(x) &&
+      !x.isComplex &&
+      Number.isSafeInteger(x.re)
         ? x.re
         : undefined;
     const l = literalInteger(lo);

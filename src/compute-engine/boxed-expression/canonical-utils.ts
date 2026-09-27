@@ -38,7 +38,7 @@ export function exactRealComponent(
     if (!Number.isInteger(nv)) return null;
     return { rational: [nv, 1], radical: 1 };
   }
-  if (nv.im !== 0) return null;
+  if (nv.isComplex) return null;
   const exact = nv.asExact;
   if (!(exact instanceof ExactNumericValue)) return null;
   if (exact.isNaN || exact.isPositiveInfinity || exact.isNegativeInfinity)

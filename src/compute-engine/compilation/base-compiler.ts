@@ -736,7 +736,7 @@ function literalHasNoDoubleValue(expr: Expression): boolean {
   const nv = expr.numericValue;
   // A machine float carries no exact value beyond the double it already is.
   if (typeof nv === 'number') return false;
-  if (!nv.isExact || nv.im !== 0) return false;
+  if (!nv.isExact || nv.isComplex) return false;
   // An infinity and a NaN have no enclosure to widen; they are emitted as
   // themselves.
   if (!Number.isFinite(expr.re)) return false;
@@ -2866,7 +2866,7 @@ export class BaseCompiler {
     // "a COMPLEX index is left to its own handling").
     if (isFunction(expr, 'At')) return verdict;
     const v = BaseCompiler.constantFoldValue(expr, target)?.value;
-    if (v !== undefined && isNumber(v) && v.im === 0) return false;
+    if (v !== undefined && isNumber(v) && !v.isComplex) return false;
     // Inside an unrolled `Sum`/`Product` term the index still appears as a
     // free symbol in the expression — the term binds it at the emitted-CODE
     // level — so the fold above declines for every subtree that mentions it.
@@ -2877,7 +2877,7 @@ export class BaseCompiler {
     if (
       underIndices !== undefined &&
       isNumber(underIndices) &&
-      underIndices.im === 0
+      !underIndices.isComplex
     )
       return false;
     return verdict;
@@ -3181,7 +3181,7 @@ export class BaseCompiler {
    * is a promoted radical or a wide binding — those take the D2 runtime rule.
    */
   static isProvablyNonReal(expr: Expression): boolean {
-    if (isNumber(expr)) return expr.im !== 0 && expr.isNumberLiteral === true;
+    if (isNumber(expr)) return expr.isComplex && expr.isNumberLiteral === true;
     if (isSymbol(expr)) {
       if (expr.symbol === 'ImaginaryUnit') return true;
       const t = expr.type;
@@ -3686,7 +3686,7 @@ export class BaseCompiler {
    */
   static assumedRealNonNegative(expr: Expression): boolean {
     if (expr.isNonNegative === true) return true;
-    if (isNumber(expr)) return expr.im === 0 && expr.re >= 0;
+    if (isNumber(expr)) return !expr.isComplex && expr.re >= 0;
     // A type that is a non-negative real range is a proof too. The engine's
     // `isNonNegative` does not read ranged types, so without this a radicand
     // typed `real<0.02..1>` (`1 − ((k − 0.5)/40)²` over an index typed
@@ -3727,7 +3727,7 @@ export class BaseCompiler {
       const e = ops[1];
       return (
         isNumber(e) &&
-        e.im === 0 &&
+        !e.isComplex &&
         Number.isInteger(e.re) &&
         e.re % 2 === 0 &&
         realAssumed(ops[0])
@@ -3782,7 +3782,7 @@ export class BaseCompiler {
     if (
       !isNumber(exponent) ||
       !exponent.isExact ||
-      exponent.im !== 0 ||
+      exponent.isComplex ||
       !Number.isFinite(exponent.re) ||
       Number.isInteger(exponent.re)
     )
@@ -3863,7 +3863,7 @@ export class BaseCompiler {
         return false;
       const [base, exp] = args;
       if (base === undefined || exp === undefined) return false;
-      if (!isNumber(exp) || Number.isInteger(exp.re) || exp.im !== 0)
+      if (!isNumber(exp) || Number.isInteger(exp.re) || exp.isComplex)
         return false;
       if (BaseCompiler.assumedRealNonNegative(base)) return false;
       if (base.isNegative !== true && !isNonRealNumber(base.type.type))
@@ -3885,7 +3885,7 @@ export class BaseCompiler {
       // promoting it would move every `\sqrt[n]{x}` off the real kernel.
       const [radicand, degree] = args;
       if (radicand === undefined || degree === undefined) return false;
-      if (!isNumber(degree) || degree.im !== 0) return false;
+      if (!isNumber(degree) || degree.isComplex) return false;
       if (!Number.isInteger(degree.re) || degree.re === 0) return false;
       if (degree.re % 2 !== 0) return false;
       if (BaseCompiler.assumedRealNonNegative(radicand)) return false;
@@ -5699,7 +5699,7 @@ export class BaseCompiler {
       // (the non-finite typing convention `isComplexValued` follows), so it
       // does not count.
       if (BaseCompiler.isComplexValued(expr)) return undefined;
-      if (elements.some((e) => isNumber(e) && e.im !== 0 && !e.isInfinity))
+      if (elements.some((e) => isNumber(e) && e.isComplex && !e.isInfinity))
         return undefined;
       // A collection with a `NaN` element does not fold either. An `Error`
       // never folds, because only number literals are inlined, but a
@@ -5743,7 +5743,11 @@ export class BaseCompiler {
     // exactly as it did before folding existed. A value with a NONZERO
     // imaginary part is unambiguous and still folds, through the complex
     // literal path below.
-    if (isNumber(value) && value.im === 0 && BaseCompiler.isComplexValued(expr))
+    if (
+      isNumber(value) &&
+      !value.isComplex &&
+      BaseCompiler.isComplexValued(expr)
+    )
       return undefined;
 
     // `~oo` on a node the surrounding code reads as a REAL number folds to
@@ -5761,7 +5765,7 @@ export class BaseCompiler {
     if (
       isNumber(value) &&
       value.isInfinity &&
-      value.im !== 0 &&
+      value.isComplex &&
       !BaseCompiler.isComplexValued(expr)
     )
       // The float projection of `~oo` is `Infinity` (pole-encoding ruling
@@ -6849,7 +6853,7 @@ export class BaseCompiler {
     const value = BaseCompiler.constantFoldValue(expr, target)?.value;
     return value !== undefined &&
       isNumber(value) &&
-      value.im === 0 &&
+      !value.isComplex &&
       !BaseCompiler.isComplexValued(expr)
       ? value.re
       : undefined;
@@ -7201,8 +7205,8 @@ export class BaseCompiler {
       // `docs/COMPILATION-MODEL.md`. (Emitting the `{re: ∞, im: ∞}` object
       // instead handed a real-arithmetic parent an object to add, producing
       // the string `"1[object Object]"` from `1 + ~oo`.)
-      if (expr.isInfinity && expr.im !== 0) return target.number(Infinity);
-      if (expr.im !== 0) {
+      if (expr.isInfinity && expr.isComplex) return target.number(Infinity);
+      if (expr.isComplex) {
         if (!target.complex)
           throw new Error('Complex numbers are not supported by this target');
         return target.complex(expr.re, expr.im);
@@ -7355,7 +7359,7 @@ export class BaseCompiler {
    */
   static complexShapedEmission(node: Expression): boolean {
     if (!BaseCompiler.complexDiscipline) return false;
-    if (isNumber(node)) return node.im !== 0 && !node.isInfinity;
+    if (isNumber(node)) return node.isComplex && !node.isInfinity;
     if (!isFunction(node)) return false;
     const h = node.operator;
     if (h === 'Block') {
@@ -12457,7 +12461,7 @@ export class BaseCompiler {
       const exponent = args[1];
       const uniform =
         isNumber(exponent) &&
-        exponent.im === 0 &&
+        !exponent.isComplex &&
         (!Number.isInteger(exponent.re) || exponent.re >= 0);
       if (!uniform) return undefined;
     }
@@ -14779,12 +14783,14 @@ export class BaseCompiler {
         const [lo, hi, step] = range.ops;
         if (
           isNumber(lo) &&
-          lo.im === 0 &&
+          !lo.isComplex &&
           isNumber(hi) &&
-          hi.im === 0 &&
+          !hi.isComplex &&
           Number.isSafeInteger(hi.re - lo.re) &&
           (step === undefined ||
-            (isNumber(step) && step.im === 0 && Number.isSafeInteger(step.re)))
+            (isNumber(step) &&
+              !step.isComplex &&
+              Number.isSafeInteger(step.re)))
         )
           recordIntegerRange(
             bodyTarget,
@@ -14804,10 +14810,10 @@ export class BaseCompiler {
         // instead of the range.
         if (
           isNumber(lo) &&
-          lo.im === 0 &&
+          !lo.isComplex &&
           Number.isFinite(lo.re) &&
           (step === undefined ||
-            (isNumber(step) && step.im === 0 && Number.isFinite(step.re))) &&
+            (isNumber(step) && !step.isComplex && Number.isFinite(step.re))) &&
           target.cse?.harvestOptions !== undefined &&
           !isCallerMapped(range, target.cse.harvestOptions)
         )
@@ -14876,7 +14882,7 @@ export class BaseCompiler {
         target.language === 'javascript' &&
         isFunction(collExpr, 'Range') &&
         // The iterable lowering uses the real parts of complex constants.
-        !collExpr.ops.some((op) => isNumber(op) && op.im !== 0) &&
+        !collExpr.ops.some((op) => isNumber(op) && op.isComplex) &&
         binders[i].names.length === 1 &&
         !BaseCompiler.mentionsExcludedName(
           collExpr,
@@ -14984,10 +14990,10 @@ export class BaseCompiler {
 
     if (
       isNumber(loExpr) &&
-      loExpr.im === 0 &&
+      !loExpr.isComplex &&
       isNumber(hiExpr) &&
-      hiExpr.im === 0 &&
-      (stepExpr === undefined || (isNumber(stepExpr) && stepExpr.im === 0))
+      !hiExpr.isComplex &&
+      (stepExpr === undefined || (isNumber(stepExpr) && !stepExpr.isComplex))
     ) {
       const stepValue =
         stepExpr === undefined
@@ -16007,7 +16013,7 @@ export class BaseCompiler {
     expr: Expression
   ): boolean {
     const v = BaseCompiler.unrolledIndexValueFold(expr);
-    return v !== undefined && isNumber(v) && v.im === 0 && v.re >= 0;
+    return v !== undefined && isNumber(v) && !v.isComplex && v.re >= 0;
   }
 
   /** Does a symbol of `expr` spell one of `names`? */
@@ -16492,8 +16498,8 @@ export class BaseCompiler {
       // enclosing expression on the complex lane on the strength of a pole,
       // so `1 + (-1)!` emitted a `{re, im}` object where the real lane wants
       // the pole's float projection, `Infinity`.
-      if (expr.isInfinity && expr.im !== 0) return false;
-      return expr.im !== 0;
+      if (expr.isInfinity && expr.isComplex) return false;
+      return expr.isComplex;
     }
 
     if (isSymbol(expr)) {
@@ -17410,12 +17416,12 @@ export class BaseCompiler {
     expr: Expression,
     target?: CompileTarget<Expression>
   ): boolean {
-    if (isNumber(expr)) return expr.im === 0;
+    if (isNumber(expr)) return !expr.isComplex;
     if (BaseCompiler.isComplexValued(expr)) return false;
     if (expr.type.matches('real')) return true;
     if (target !== undefined) {
       const v = BaseCompiler.constantFoldValue(expr, target)?.value;
-      if (v !== undefined && isNumber(v) && v.im === 0) return true;
+      if (v !== undefined && isNumber(v) && !v.isComplex) return true;
     }
     return false;
   }
@@ -19500,14 +19506,14 @@ export class BaseCompiler {
 
   /** True if the expression is provably integer-typed. */
   static isIntegerValued(expr: Expression): boolean {
-    if (isNumber(expr)) return expr.im === 0 && Number.isInteger(expr.re);
+    if (isNumber(expr)) return !expr.isComplex && Number.isInteger(expr.re);
     const t = expr.type;
     return t ? t.matches('integer') : false;
   }
 
   /** True if the expression is provably non-negative (sign ≥ 0). */
   static isNonNegative(expr: Expression): boolean {
-    if (isNumber(expr)) return expr.im === 0 && expr.re >= 0;
+    if (isNumber(expr)) return !expr.isComplex && expr.re >= 0;
     return expr.isNonNegative === true;
   }
 

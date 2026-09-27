@@ -32,6 +32,26 @@
   for an indexing clause, so the spelling could never resolve to the operator;
   the Standard Library page lists `Limits` with no Epsil column.
 
+### Issues Resolved
+
+- **An exact complex number whose imaginary part is too small or too large
+  for a double keeps it.** `i\cdot10^{-800}` evaluated to `0`, `(1+i)10^{-800}`
+  to `1/1e+800` with the imaginary part lost, `(10^{-200}i)^2` and
+  `(10^{400}i)^2` stayed symbolic, `Mean([1, 10^{400}i, 3])` read the exact
+  datum as complex infinity, and an exact `10^{-800} + i` was taken for `i`
+  by the imaginary-unit recognizer: the exact value stored its imaginary part
+  exactly but every "is this complex?" test read the cached machine double,
+  which underflows to `0` or overflows to `Infinity`. Every numeric value now
+  answers `isComplex` from its own representation (`NumericValue.isComplex`,
+  `BoxedNumber.isComplex`, public on the number-literal interface), the
+  finiteness, integrality and "is the real part zero?" tests on exact values
+  read the exact fields, and the exact-to-double projection of a large
+  rational is finite (`(10^{400}+1)/10^{400}` projected to `NaN`; it is `1`).
+  The double `im` stays available as a projection for double kernels. This
+  is Phase 1 of `docs/plans/2026-09-27-big-decimal-imaginary-part.md`; the
+  inexact route (`.N()` of such values, and the imaginary part's printed
+  precision) is unchanged until Phase 2.
+
 ## 0.139.0 _2026-09-27_
 
 ### New Features

@@ -1503,7 +1503,7 @@ function rtAuxBody(u: Expression, n: number): Expression {
       const r = realNum(f.evaluate());
       if (r !== null) return Number.isFinite(r) ? r : null;
       const nv = f.N();
-      if (isNumber(nv) && typeof nv.re === 'number' && nv.im === 0)
+      if (isNumber(nv) && typeof nv.re === 'number' && !nv.isComplex)
         return Number.isFinite(nv.re) ? nv.re : null;
       return null;
     };
@@ -2378,7 +2378,7 @@ function pseudoBinomialPartsX(u: Expression, x: string): PseudoBinParts | null {
 /** Rubi FractionalPowerFactorQ: a factor of u is a complex constant or a
  * fractional power */
 function fracPowerFactorQ(u: Expression): boolean {
-  if (!u.ops) return isNumber(u) && typeof u.im === 'number' && u.im !== 0;
+  if (!u.ops) return isNumber(u) && typeof u.im === 'number' && u.isComplex;
   switch (u.operator) {
     case 'Power': {
       const e = u.ops[1];

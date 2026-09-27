@@ -656,7 +656,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // BOTH paths rather than let evaluate() continue analytically via
         // Arctan (e.g. 0.549i) while .N()/apply2 silently reads the real
         // part (0).
-        if ((isNumber(y) && y.im !== 0) || (isNumber(x) && x.im !== 0))
+        if ((isNumber(y) && y.isComplex) || (isNumber(x) && x.isComplex))
           return undefined;
 
         // Like the other inverse trig functions, the result is an angle in
@@ -1029,7 +1029,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
+        if (!isNumber(x) || x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.One;
         if (x.isInfinity) return ce.Zero;
@@ -1059,7 +1059,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
+        if (!isNumber(x) || x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.Zero;
         if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
@@ -1089,7 +1089,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
+        if (!isNumber(x) || x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.Zero;
         if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
@@ -1154,7 +1154,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation ? v.N() : v;
         }
         if (point !== undefined) return ce.NaN;
-        if (x.im === 0 && x.isSame(0)) return ce.Zero;
+        if (!x.isComplex && x.isSame(0)) return ce.Zero;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the E₁-based kernel.
         return apply(x, (x) => sinIntegral(x), undefined, sinIntegralComplex);
@@ -1218,7 +1218,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation ? v.N() : v;
         }
         if (point !== undefined) return ce.NaN;
-        if (x.im === 0 && x.isSame(0)) return ce.NegativeInfinity;
+        if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // A non-negative real argument uses the machine kernel; a negative
         // real one is the principal value `Ci(−x) = Ci(x) + iπ`, built from
@@ -1276,7 +1276,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.NegativeInfinity;
         if (point !== undefined) return ce.NaN;
-        if (x.im === 0 && x.isSame(0)) return ce.Zero;
+        if (!x.isComplex && x.isSame(0)) return ce.Zero;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the Si-based kernel.
         return apply(x, (x) => sinhIntegral(x), undefined, sinhIntegralComplex);
@@ -1340,7 +1340,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
             ? ce.number(ce.complex(Infinity, Math.PI))
             : undefined;
         if (point !== undefined) return ce.NaN;
-        if (x.im === 0 && x.isSame(0)) return ce.NegativeInfinity;
+        if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // A non-negative real argument uses the machine kernel; a negative
         // real one is the principal value `Chi(−x) = Chi(x) + iπ`, built
@@ -1486,7 +1486,7 @@ function angularQuantityToRadians(expr: Expression): Expression | null {
  * An absent optional component is foldable: the fold defaults it to 0.
  */
 function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
-  return ops.every((op) => op === undefined || (isNumber(op) && op.im === 0));
+  return ops.every((op) => op === undefined || (isNumber(op) && !op.isComplex));
 }
 
 /**

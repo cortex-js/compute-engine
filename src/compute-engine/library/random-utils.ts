@@ -42,7 +42,7 @@ export function randomCount(
     // out-of-range counts and must error loudly rather than linger as
     // symbolic. Everything else — a symbol (`isNumber` is false), an error
     // operand — stays symbolic.
-    if (isNumber(kOp) && kOp.im === 0) return outOfRange(kOp.toString());
+    if (isNumber(kOp) && !kOp.isComplex) return outOfRange(kOp.toString());
     return null;
   }
   if (k < 0 || k > MAX_RANDOM_ELEMENT_COUNT) return outOfRange(k.toString());

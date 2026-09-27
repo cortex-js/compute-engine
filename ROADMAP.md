@@ -237,34 +237,27 @@ Defects:
    argument near `5e199` (`new Complex(5e199, -5e199).atan()` is `NaN`).
    Found 2026-09-27 while scaling the interpreter's complex division; the
    fix is a scaled `atan`/`asin` kernel, or a reduction for large arguments.
-2. **A complex number whose imaginary part is outside the double range is
-   wrong (silent wrong results).** Measured 2026-09-26 at the default
-   precision: `i\cdot10^{-800}` evaluates to `0`; `(1+i)10^{-800}`
-   evaluates to `1/1e+800` (the imaginary part is lost);
-   `(2+3i)\cdot10^{-400}` evaluates to `1/5e+399`; `(1+i)10^{800}` `.N()`
-   is `~oo` instead of `1e+800 + 1e+800i`. The cause: `ExactNumericValue`
-   stores the imaginary part exactly but caches its double in `im`, and about
-   650 read sites test `im !== 0` to decide that a value is complex, so an
-   imaginary part whose double underflows reads as real. `BigNumericValue`
-   has a big-decimal real part but a machine-number imaginary part, so no
-   float value at the default precision can hold `10^{-800}i` either. A fix
-   on 2026-09-26 kept `im = ±Number.MIN_VALUE` as a nonzero marker; review
-   found the marker leaking into the function kernels
-   (`Ln(i\cdot10^{-800}).N()` gave `-744.44 + 1.5708i`), into `isSame` and
-   into compiled code, so it was removed. The fix is a redesign: a
-   big-decimal imaginary part in `BigNumericValue`, and an explicit
-   "is complex" flag in `ExactNumericValue` instead of the `im !== 0` test.
-   Related: at the default precision, the reciprocal of `1e-200+1e-200i`
-   gives re = `1e200` (should be `5e199`) and im = `-Infinity`, because
-   `d·d` underflows in double arithmetic (fixed 2026-09-27 by the scaled
-   division); `(10^{-200}(1+i))^2` `.N()` is `0` at the default precision
-   (the true value `2e-400i` needs a big-decimal imaginary part; at machine
-   precision `0` is the correctly rounded double);
-   `\sqrt{i\cdot10^{-600}}` `.N()` is `0`; `e^{i\,10^{-800}}` `.N()`
-   drops the imaginary part. Also `\frac{1}{10^{308}+10^{308}i}` under
-   `evaluate()` is `1/2e+308` with no imaginary part: the exact inverse is
-   right, but the cached double of the imaginary part `-1/2e308` reads as
-   `0`.
+2. **A complex number whose imaginary part is outside the double range:
+   the inexact route (Phases 2 and 3 of
+   `docs/plans/2026-09-27-big-decimal-imaginary-part.md`).** Phase 1 landed
+   2026-09-27: every numeric value answers `isComplex` from a representation
+   that holds its imaginary part (the exact Gaussian fields, or the double for
+   the two inexact classes), and the "is complex?" tests across the engine
+   read it instead of the double projection `im`, so the EXACT route is
+   right: `i\cdot10^{-800}` and `(1+i)10^{-800}` evaluate to their exact
+   values, `(10^{-200}i)^2` is `-10^{-400}`, `Mean([1, 10^{400}i, 3])` is
+   `4/3 + (10^{400}/3)i`. What remains is the inexact route, where
+   `BigNumericValue` still holds a machine-double imaginary part:
+   `(1+i)10^{800}` `.N()` is `~oo` instead of `1e+800 + 1e+800i`,
+   `(10^{-200}(1+i))^2` `.N()` is `0` (the true value `2e-400i`),
+   `\sqrt{i\cdot10^{-600}}` `.N()` is `0`, `e^{i\,10^{-800}}` `.N()` drops
+   the part, `.N()` prints 21 digits on the real part and 16 on the
+   imaginary; the parser's `c·i` fold still builds a machine complex literal
+   from an inexact coefficient, so `2\cdot10^{-800}i` evaluates to `0`
+   (§2.5 of the note, Phase 3); `ExactNumericValue.eq` against an inexact
+   value and the two inexact classes' `eq` still compare the double
+   projections (Phase 2's symmetry item). The design, the kernels, the dust
+   rule and the acceptance tests are in the note, decided 2026-09-27.
 3. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is
    absent stays unevaluated.** `Map(f, Join(Missing, [3]))` should be
    `Missing`, as `Map(f, Missing)` is. The source correctly declines to
@@ -686,15 +679,19 @@ doubles, so an argument within about `10⁻¹⁵` relative of a pole is refused 
 every precision (`Γ(−3 + 10⁻³⁰)` against `0` stays undecided at 50 digits):
 never a wrong order, a lost answer.
 
-### The imaginary part of an inexact number is a machine double (OPEN, scheduled — 2026-09-24)
+### The imaginary part of an inexact number is a machine double (OPEN, decided — design in `docs/plans/2026-09-27-big-decimal-imaginary-part.md`, Phases 2 and 3)
 
 `BigNumericValue.im` is a `number`, so `.N()` of a complex value has the working
 precision (21 digits by default) on the real part and 16 digits on the imaginary
 part: `.N()` of `√2 + √2 i` is
 `1.414213562373095 + 1.4142135623730951i` (since 2026-09-27 the real part
-prints at the working precision; before, the complex branch of
-`BigNumericValue.toString()` did not round it and printed 25 or 46 digits). A
-big-decimal imaginary part is scheduled (user decision 2026-09-24), not done.
+prints at the working precision). The big-decimal imaginary part is decided
+(2026-09-27, decisions D1 to D6 of the note); Phase 1 (the exact route)
+landed 2026-09-27, Phases 2 and 3 (`imDecimal` in `BigNumericValue` with the
+kernels and the dust rule, the boundary sites, the public
+`ce.number({ re, im })` overload) are next. Also left for Phase 2: `Sin`,
+`Gamma` and the other complex transcendentals keep machine precision at every
+engine precision (decision D4, a separate capability item once Phase 2 lands).
 
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 

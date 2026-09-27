@@ -56,7 +56,7 @@ export function gpuIntegerFact(
 ): IntegerFact | undefined {
   if (depth > 32) return undefined;
   if (isNumber(expr))
-    return expr.im === 0 && exact(expr.re, expr.re)
+    return !expr.isComplex && exact(expr.re, expr.re)
       ? { min: expr.re, max: expr.re, code: String(expr.re) }
       : undefined;
   if (isSymbol(expr)) {

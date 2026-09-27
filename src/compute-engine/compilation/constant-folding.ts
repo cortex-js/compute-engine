@@ -125,7 +125,7 @@ export function formatFloat(n: number, language?: string): string {
  */
 export function tryGetConstant(expr: Expression): number | undefined {
   if (!isNumber(expr)) return undefined;
-  if (expr.im !== 0) return undefined;
+  if (expr.isComplex) return undefined;
   const re = expr.re;
   if (!isFinite(re)) return undefined;
   return re;
@@ -342,7 +342,8 @@ export function tryGetComplexParts(
   }
 
   // Number literal with non-zero imaginary part → Complex literal
-  if (isNumber(expr) && expr.im !== 0) {
+  // Read as doubles: an imaginary part too small for a double folds as im 0.
+  if (isNumber(expr) && expr.isComplex) {
     const re = expr.re;
     const im = expr.im;
     return {
@@ -392,7 +393,7 @@ function imaginaryFactorIndex(ops: ReadonlyArray<Expression>): number {
   return ops.findIndex(
     (op) =>
       isSymbol(op, 'ImaginaryUnit') ||
-      (isNumber(op) && op.re === 0 && op.im !== 0)
+      (isNumber(op) && op.re === 0 && op.isComplex)
   );
 }
 
@@ -411,7 +412,7 @@ function imaginaryFactorIndex(ops: ReadonlyArray<Expression>): number {
  */
 export function isOpaqueComplexOperand(expr: Expression): boolean {
   if (isSymbol(expr, 'ImaginaryUnit')) return false;
-  if (isNumber(expr) && expr.im !== 0) return false;
+  if (isNumber(expr) && expr.isComplex) return false;
   if (isFunction(expr, 'Multiply') && imaginaryFactorIndex(expr.ops) >= 0)
     return false;
   return BaseCompiler.isComplexValued(expr);

@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types.js';
 import type { NumericValue } from '../numeric-value/types.js';
 import { isNumber, isSymbol } from './type-guards.js';
+import { isImaginaryPartFinite } from './imaginary-part.js';
 
 /**
  * Whether a number literal's value has an infinite component although it is
@@ -14,7 +15,7 @@ export function hasInfiniteComponent(nv: NumericValue | number): boolean {
   if (typeof nv === 'number') return !Number.isFinite(nv);
   const reFinite =
     nv.bignumRe !== undefined ? nv.bignumRe.isFinite() : Number.isFinite(nv.re);
-  return !reFinite || !Number.isFinite(nv.im);
+  return !reFinite || !isImaginaryPartFinite(nv);
 }
 
 /**

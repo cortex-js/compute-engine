@@ -3674,7 +3674,7 @@ function isProvablyNonIntegerIndex(index: Expression): boolean {
   // is not an integer, however close to one (`1.0000000001`, `10⁹ + 1/2`).
   // The margin below is for an exact SYMBOLIC constant only.
   if (isNumber(index)) {
-    if (index.im !== 0 || !Number.isFinite(index.re)) return false;
+    if (index.isComplex || !Number.isFinite(index.re)) return false;
     return !index.isInteger;
   }
   const own = index.re;
@@ -3686,7 +3686,7 @@ function isProvablyNonIntegerIndex(index: Expression): boolean {
     // applies, for the same reason: no discarded numeric work).
     if (index.unknowns.length > 0) return false;
     const approx = index.N();
-    if (!isNumber(approx) || approx.im !== 0) return false;
+    if (!isNumber(approx) || approx.isComplex) return false;
     value = approx.re;
   }
   if (!Number.isFinite(value) || Number.isInteger(value)) return false;

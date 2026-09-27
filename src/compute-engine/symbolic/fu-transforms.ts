@@ -2026,7 +2026,7 @@ function extractMultiplier(
 
     if (isNumber(op)) {
       // Get numeric value for ratio checking
-      if (typeof op.re === 'number' && op.im === 0) {
+      if (typeof op.re === 'number' && !op.isComplex) {
         numValue = op.re;
       }
     }
@@ -2279,7 +2279,7 @@ export function TRpythagorean(expr: Expression): Expression | undefined {
 
     if (extracted) {
       trigTerms.push({ ...extracted, index: i });
-    } else if (typeof op.re === 'number' && op.im === 0 && isNumber(op)) {
+    } else if (typeof op.re === 'number' && isNumber(op) && !op.isComplex) {
       constantTerms.push({ value: op.re, index: i });
     } else {
       otherTerms.push({ expr: op, index: i });

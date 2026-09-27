@@ -7,6 +7,10 @@ import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 import { SMALL_INTEGER } from '../numerics/numeric.js';
 import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
+import {
+  isGaussianIntegerValue,
+  isImaginaryPartNaN,
+} from './imaginary-part.js';
 import { chopComplexDust } from '../numeric-value/roundoff.js';
 
 /**
@@ -61,7 +65,7 @@ function boxMachineNumber(ce: IComputeEngine, value: number): Expression {
 export function isExactNumber(x: Expression): boolean {
   if (!isNumber(x)) return true;
   if (x.isExact) return true;
-  return x.im !== 0 && Number.isInteger(x.re) && Number.isInteger(x.im);
+  return x.isComplex && isGaussianIntegerValue(x.numericValue);
 }
 
 /**
@@ -138,10 +142,17 @@ export function apply(
   // the cascade reads the propagated NaN as a domain exit and the application
   // stays inert, which ERROR-MODEL §1 forbids as a terminal answer.
   // `applyN` carries the same guard for the n-ary kernels.
-  if (Number.isNaN(expr.re) || Number.isNaN(expr.im)) return ce.NaN;
+  if (Number.isNaN(expr.re) || isImaginaryPartNaN(expr)) return ce.NaN;
 
   let result: number | Complex | BigDecimal | undefined = undefined;
-  if (expr.im !== 0) result = complexFn?.(ce.complex(expr.re, expr.im));
+  // The test is `isComplex`, not `im !== 0`: an exact value with an
+  // imaginary part too small for a double (`10^{-800}·i`) is complex and must
+  // reach the complex kernel, not the real branch, which reads only `re`. The
+  // complex kernels (`complex-esm`) compute in doubles by nature, so they
+  // receive the double projections `re` and `im`, and for that value they see
+  // an imaginary part of `0`. The same rule applies in `applyN` and `apply2`.
+  // Design note: `docs/plans/2026-09-27-big-decimal-imaginary-part.md` §5.
+  if (expr.isComplex) result = complexFn?.(ce.complex(expr.re, expr.im));
   else {
     const re = expr.re;
     const bigRe = expr.bignumRe;
@@ -187,7 +198,7 @@ export function applyN(
   if (!ops.every((op) => isNumber(op))) return undefined;
   const ce = ops[0].engine;
 
-  if (ops.some((op) => Number.isNaN(op.re) || Number.isNaN(op.im)))
+  if (ops.some((op) => Number.isNaN(op.re) || isImaginaryPartNaN(op)))
     return ce.NaN;
 
   let result: number | Complex | BigDecimal | undefined = undefined;
@@ -200,7 +211,7 @@ export function applyN(
         ? r.isNaN()
         : r.isNaN());
 
-  if (ops.some((op) => op.im !== 0)) {
+  if (ops.some((op) => op.isComplex)) {
     result = complexFn?.(...ops.map((op) => ce.complex(op.re, op.im)));
   } else {
     // Cascade: bignum (if preferred) → machine → complex. A NaN from a
@@ -254,14 +265,14 @@ export function apply2(
   // propagated NaN as a report about the kernel's domain, which it is not.
   if (
     Number.isNaN(expr1.re) ||
-    Number.isNaN(expr1.im) ||
+    isImaginaryPartNaN(expr1) ||
     Number.isNaN(expr2.re) ||
-    Number.isNaN(expr2.im)
+    isImaginaryPartNaN(expr2)
   )
     return ce.NaN;
 
   let result: number | Complex | BigDecimal | undefined = undefined;
-  if (expr1.im !== 0 || expr2.im !== 0) {
+  if (expr1.isComplex || expr2.isComplex) {
     // A non-real operand needs the complex kernel. Without one the
     // application stays symbolic: the real branches below read only `.re`,
     // so falling through would silently DROP the imaginary part and answer

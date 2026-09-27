@@ -30,7 +30,7 @@ export function machineNumberOf(target: Expression): number | undefined {
   if (!isNumber(target)) return undefined;
   const nv = target.numericValue;
   if (typeof nv === 'number') return nv;
-  if (nv.im !== 0) return undefined;
+  if (nv.isComplex) return undefined;
   if (nv.isExact) return exactDoubleValue(nv);
   // A machine float holds its value AS a double (`decimal` is a JavaScript
   // number; a big-number float holds a `BigDecimal` there), so the double is

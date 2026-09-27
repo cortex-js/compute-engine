@@ -285,7 +285,7 @@ function jumpOffsetAt(
   const u = o1(sub);
   if (u === undefined) return 'unknown';
   const at = u.subs({ [x]: a }).evaluate();
-  if (!isNumber(at) || !at.isValid || at.isFinite !== true || at.im !== 0)
+  if (!isNumber(at) || !at.isValid || at.isFinite !== true || at.isComplex)
     return 'unknown';
   const op = sub.operator;
   const arity = oo(sub).length;
@@ -315,7 +315,7 @@ function jumpOffsetAt(
     if (
       !isNumber(mv) ||
       mv.isFinite !== true ||
-      mv.im !== 0 ||
+      mv.isComplex ||
       mv.is(0) === true
     )
       return 'unknown';

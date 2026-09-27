@@ -427,7 +427,7 @@ export function trigExpand(expr: Expression): Expression {
 
 /** True if `expr` contains a number literal with a non-zero imaginary part. */
 function containsImaginary(expr: Expression): boolean {
-  if (isNumber(expr)) return expr.im !== 0;
+  if (isNumber(expr)) return expr.isComplex;
   if (isFunction(expr)) return expr.ops.some(containsImaginary);
   return false;
 }

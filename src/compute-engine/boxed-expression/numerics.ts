@@ -35,7 +35,7 @@ export function asRational(expr: Expression): Rational | undefined {
   const type = num.type;
   if (type !== 'integer' && type !== 'rational') return undefined;
 
-  if (num.im !== 0) return undefined;
+  if (num.isComplex) return undefined;
 
   if (num instanceof ExactNumericValue) {
     if (num.radical !== 1) return undefined;
@@ -83,7 +83,7 @@ export function asBigint(
     // `BigDecimal` (`bignumRe` is the stored decimal there, not a rounded
     // rendering), so an integer of any number of digits is read in full.
     if (!(num instanceof ExactNumericValue)) {
-      if (num.im !== 0) return null;
+      if (num.isComplex) return null;
       const big = num.bignumRe;
       if (big !== undefined) return big.isInteger() ? bigint(big) : null;
       return Number.isInteger(num.re) ? BigInt(num.re) : null;
@@ -117,7 +117,7 @@ export function asBignum(expr: Expression | undefined): BigDecimal | null {
 
   if (typeof num === 'number') return expr.engine.bignum(num);
 
-  if (num.im !== 0) return null;
+  if (num.isComplex) return null;
 
   const re = num.bignumRe ?? num.re;
   if (typeof re === 'number' && isNaN(re)) return null;
@@ -154,7 +154,7 @@ export function asSmallInteger(
     return null;
   }
 
-  if (num.im !== 0) return null;
+  if (num.isComplex) return null;
 
   // The type is read before the double projection: an exact rational such as
   // `(10^30 + 1)/10^30` projects to the double `1`, and reading `re` alone
@@ -333,7 +333,7 @@ export function numericValueOf(
   x: Expression | null | undefined
 ): number | undefined {
   const v = numberLiteralOf(x);
-  if (v === undefined || v.im !== 0) return undefined;
+  if (v === undefined || v.isComplex) return undefined;
   const re = v.re;
   return Number.isFinite(re) ? re : undefined;
 }

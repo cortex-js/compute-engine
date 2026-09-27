@@ -1484,7 +1484,7 @@ function numericApplier(
  * than silently read as its real part.
  */
 function realPart(n: Expression): number {
-  return isNumber(n) && n.im === 0 ? n.re : NaN;
+  return isNumber(n) && !n.isComplex ? n.re : NaN;
 }
 
 /**
