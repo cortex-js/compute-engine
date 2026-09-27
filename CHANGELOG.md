@@ -1,12 +1,37 @@
-## Unreleased
+## [Unreleased]
+
+### New Features
+
+- **Epsil comprehensions.** A trailing `for` clause inside a list or brace
+  literal builds the collection from an iteration; the bracket picks the kind,
+  as it does for a literal: `[x^2 for x in 1..10 if x % 2 == 1]` is a list,
+  `{x % 3 for x in 1..10}` a set, `{s -> length(s) for s in ["ab", "cde"]}` a
+  dictionary. Several clauses are separated by commas and a later collection may
+  use an earlier binding (`[(x, y) for x in 1..3, y in 1..x]`); the binding may
+  be a tuple pattern (`[p + q for (p, q) in pairs]`); each clause takes an
+  optional `if` guard. A list comprehension is the engine's lazy
+  `Comprehension`; the set and dictionary forms are `SetFrom` and
+  `DictionaryFrom` of it. The Epsil serializer writes these shapes back in the
+  bracket form, so a formatted program keeps its spelling. The set literal
+  `{1, 2, 3}` is unchanged.
+- **A guard on a `Comprehension` or `Loop` clause.** `["Element", x, xs, cond]`,
+  the three-operand indexing set `Sum` and `Product` already take, visits only
+  the elements for which `cond` evaluates to `True`, in the interpreter and in
+  the JavaScript and Python comprehension routes (a guarded `Loop` has no Python
+  statement form and stays with the interpreter). In LaTeX a guarded
+  comprehension serializes in the function form,
+  `\operatorname{Comprehension}(…)`, which re-parses to the same expression; the
+  `for` spelling has no place for a guard.
+
+## 0.138.0 _2026-09-27_
 
 ### New Features
 
 - **`Zeta` evaluates at complex `s` and takes a second operand, and
   `HurwitzZeta` is new** (#340, contributed by
-  [enumeratio](https://github.com/enumeratio)). `Zeta(0.5 + 14i).N()` evaluates, and
-  `Zeta(s, a)` is Wolfram's `Zeta[s, a]`: the same as `HurwitzZeta(s, a)` for
-  `Re(a) > 0`; for `a ≤ 0` it follows Wolfram's own convention, where
+  [enumeratio](https://github.com/enumeratio)). `Zeta(0.5 + 14i).N()` evaluates,
+  and `Zeta(s, a)` is Wolfram's `Zeta[s, a]`: the same as `HurwitzZeta(s, a)`
+  for `Re(a) > 0`; for `a ≤ 0` it follows Wolfram's own convention, where
   `HurwitzZeta` can be complex at real arguments. `ζ(−n, a)` at a rational `a`
   is exact (a Bernoulli polynomial), `ζ(s, 1/2) = (2^s − 1)·ζ(s)` at an integer
   `s ≥ 2` (`Zeta(2, 1/2)` is `π²/2`), and the infinite operands have their
@@ -20,40 +45,37 @@
 ### Issues Resolved
 
 - **The hyperbolic functions fold at 0 under `evaluate()`,** as the circular
-  ones do (#341, contributed by
-  [enumeratio](https://github.com/enumeratio)): `Sinh(0)`, `Tanh(0)`,
-  `Arsinh(0)` and `Artanh(0)` are `0`,
-  `Cosh(0)` and `Sech(0)` are `1`, and `Coth(0)` and `Csch(0)` are
-  `ComplexInfinity`, as `Cot(0)` and `Csc(0)` are. `Arcosh(1)` and
-  `Arsech(1)` are `0`. `Coth(0).N()`, `Csch(0).N()` and `Arcsch(0).N()` are
-  now `ComplexInfinity`, as `evaluate()` gives, not `PositiveInfinity`, and
-  so is the compiled complex lane of `Coth` and `Csch` at `0` (it answered
-  `{re: ∞, im: 0}`). `simplify()` folds the same values (`Sinh(0).simplify()`
-  was symbolic).
+  ones do (#341, contributed by [enumeratio](https://github.com/enumeratio)):
+  `Sinh(0)`, `Tanh(0)`, `Arsinh(0)` and `Artanh(0)` are `0`, `Cosh(0)` and
+  `Sech(0)` are `1`, and `Coth(0)` and `Csch(0)` are `ComplexInfinity`, as
+  `Cot(0)` and `Csc(0)` are. `Arcosh(1)` and `Arsech(1)` are `0`. `Coth(0).N()`,
+  `Csch(0).N()` and `Arcsch(0).N()` are now `ComplexInfinity`, as `evaluate()`
+  gives, not `PositiveInfinity`, and so is the compiled complex lane of `Coth`
+  and `Csch` at `0` (it answered `{re: ∞, im: 0}`). `simplify()` folds the same
+  values (`Sinh(0).simplify()` was symbolic).
 - **Number theory on large integers** (#339, contributed by
   [enumeratio](https://github.com/enumeratio)). With `p` a large prime:
   `FactorInteger(p^2)` factors at once instead of exhausting Pollard rho (a
   perfect power is reduced to its base first), which also fixes `Totient`,
-  `DivisorSigma` and the other heads built on the factorization.
-  `Divisors(p^2)` builds its list from the factorization once the
-  trial-division scan is out of budget, rather than staying unevaluated.
-  `MultiplicativeOrder(2, p)` strips the prime factors of `λ(n)` instead of
-  scanning its divisors. `ModularInverse` accepts a negative modulus (it
-  used to stay unevaluated): `ModularInverse(3, -7)` is `-2`, the result
-  takes the sign of the modulus, as `Mod` does.
+  `DivisorSigma` and the other heads built on the factorization. `Divisors(p^2)`
+  builds its list from the factorization once the trial-division scan is out of
+  budget, rather than staying unevaluated. `MultiplicativeOrder(2, p)` strips
+  the prime factors of `λ(n)` instead of scanning its divisors. `ModularInverse`
+  accepts a negative modulus (it used to stay unevaluated):
+  `ModularInverse(3, -7)` is `-2`, the result takes the sign of the modulus, as
+  `Mod` does.
 - **`EllipticE(m)` is correct at complex `m`** (#346, contributed by
-  [enumeratio](https://github.com/enumeratio)). It returned wrong
-  values in some regions off the real axis, from the third significant digit
-  on: `EllipticE(0.57 + 0.23i)` was `1.3175 − 0.1205i` (correct:
+  [enumeratio](https://github.com/enumeratio)). It returned wrong values in some
+  regions off the real axis, from the third significant digit on:
+  `EllipticE(0.57 + 0.23i)` was `1.3175 − 0.1205i` (correct:
   `1.3248 − 0.1197i`), and `m` just off the real axis in `(0, 1)` or near
   `m = 1` was wrong too. It now uses Carlson's R_F/R_D (DLMF 19.25.1), as
   `EllipticE(φ, m)` already did at `φ = π/2`, instead of an AGM sum.
-  `EllipticE(φ, m)` outside `[−π/2, π/2]`, which reduces to `EllipticE(m)`,
-  is fixed with it. Also: `EllipticE(π/2, m)` for `m` within rounding of `1`
-  lost every digit (`EllipticE(π/2, 1 + 10⁻²⁰i)` was `14.6 − 0.79i`, not
-  `1`) and now routes to `EllipticE(m)`; and the Carlson R_J/R_D kernels
-  overflowed above `|m| ≈ 10¹⁵⁴`, so `EllipticE(10³⁰⁰)` stayed unevaluated
-  where it is `10¹⁵⁰i`.
+  `EllipticE(φ, m)` outside `[−π/2, π/2]`, which reduces to `EllipticE(m)`, is
+  fixed with it. Also: `EllipticE(π/2, m)` for `m` within rounding of `1` lost
+  every digit (`EllipticE(π/2, 1 + 10⁻²⁰i)` was `14.6 − 0.79i`, not `1`) and now
+  routes to `EllipticE(m)`; and the Carlson R_J/R_D kernels overflowed above
+  `|m| ≈ 10¹⁵⁴`, so `EllipticE(10³⁰⁰)` stayed unevaluated where it is `10¹⁵⁰i`.
 - **A `Power` base loses its brackets in `.latex`.** The serializer decided
   whether to parenthesize a `Power`'s base from a fixed list of heads, so a base
   outside that list serialized unwrapped even where it changes the math:
@@ -75,67 +97,68 @@
     `a/b/c`, and `["Divide", ["Complex", 1, 1], "x"]` writes `(1+\imaginaryI)/x`
     instead of `1+\imaginaryI/x`.
   - The derivative of a fraction, a `Sum` or a `Product` now uses the form with
-    the function in the numerator, `\frac{\mathrm{d}(\frac{x}{y})}{\mathrm{d}x}`, instead of
+    the function in the numerator,
+    `\frac{\mathrm{d}(\frac{x}{y})}{\mathrm{d}x}`, instead of
     `\frac{\mathrm{d}}{\mathrm{d}x}\frac{x}{y}`. The old form reads back wrongly
     inside a larger expression: `["Add", ["D", ["Divide", "x", "y"], "x"], 1]`
     read back as the derivative of `x/y + 1`.
   - A factorial raised to a power is now written with parentheses, `(n!)^2`,
     where it was `n!^2`. This is a spelling change for readability, not a
     round-trip fix: `n!^2` already read back correctly.
-- **Three false Fungrim Chebyshev identities are corrected** (#343, contributed by
-  [enumeratio](https://github.com/enumeratio)): `42eb01`
+- **Three false Fungrim Chebyshev identities are corrected** (#343, contributed
+  by [enumeratio](https://github.com/enumeratio)): `42eb01`
   (`T_n(x)² − (x²−1)·U_{n−1}(x)² = 1`), `4c7aeb`
   (`U_{n−1}(cos x)·sin x = sin(n·x)`) and `5f09f4`
   (`U_{2n}(x) = U_n(2x²−1) + U_{n−1}(2x²−1)`) were wrong in Fungrim's source,
   and each rewrote to a wrong value in `simplify()` with `loadIdentities`
   (`T_n(x)² + (x²−1)·U_{n−1}(x)²` became `1`, `U_n(cos x)·sin x` became
-  `sin(n·x)`, `T_n(2x²−1) + U_{n−1}(2x²−1)` became `U_{2n}(x)`). The fix is
-  in the `arnog/fungrim` fork (`pygrim/formulas/chebyshev.py`), from which
-  the corpus was regenerated and re-pinned.
+  `sin(n·x)`, `T_n(2x²−1) + U_{n−1}(2x²−1)` became `U_{2n}(x)`). The fix is in
+  the `arnog/fungrim` fork (`pygrim/formulas/chebyshev.py`), from which the
+  corpus was regenerated and re-pinned.
 
 ## 0.137.3 _2026-09-26_
 
 ### Issues Resolved
 
-- **The derived result of a declared function follows the scope of the
-  functions it calls.** With `f := x ↦ g(x)` and `g` defined in another
-  scope, a variable declared later in `g`'s scope changed `g`'s signature
-  but not `f`'s: `f` kept `(integer) -> number` while `g` became
-  `(integer) -> integer` (0.137.2). A declared function now keeps the scopes
-  of the functions it calls, transitively, with its derived result.
+- **The derived result of a declared function follows the scope of the functions
+  it calls.** With `f := x ↦ g(x)` and `g` defined in another scope, a variable
+  declared later in `g`'s scope changed `g`'s signature but not `f`'s: `f` kept
+  `(integer) -> number` while `g` became `(integer) -> integer` (0.137.2). A
+  declared function now keeps the scopes of the functions it calls,
+  transitively, with its derived result.
 
 ## 0.137.2 _2026-09-26_
 
 ### Issues Resolved
 
-- **Functions with an `unknown` parameter no longer slow each other down.**
-  With `k` declared `(unknown, T) -> unknown` and `w` declared
+- **Functions with an `unknown` parameter no longer slow each other down.** With
+  `k` declared `(unknown, T) -> unknown` and `w` declared
   `(T, unknown) -> unknown`, deriving the signature of one invalidated the
-  cached signature of the other, so typing `sin(cos(k(x,y) + w(x,y)))` took
-  10 s and boxed 11 274 expressions; it takes a few milliseconds (0.137.1).
+  cached signature of the other, so typing `sin(cos(k(x,y) + w(x,y)))` took 10 s
+  and boxed 11 274 expressions; it takes a few milliseconds (0.137.1).
 
 ## 0.137.1 _2026-09-26_
 
 ### Issues Resolved
 
-- **Declaring several functions that call each other no longer takes
-  minutes.** Since 0.137.0 the signature of a function declared
-  `(T, …) -> unknown` reports the result its body has under the declared
-  parameter types. That result was cached on the engine's cache generation,
-  which computing it moves, so it was computed again at every read, together
-  with the signatures of the declared functions the body calls. With three
-  nested functions (`P` calls `S` twice, `S` calls `H`), assigning `P` did not
-  finish in 100 s; it takes 20 ms. The result is now cached until a value, an
-  assumption, a definition, a called function, a symbol's type, or the
-  declarations in the scope the function was defined in change.
-- **A function declared `(T, …) -> unknown` no longer stores its derived
-  result as a declared one.** Assigning `x ↦ a` to `f: (integer) -> unknown`
-  with `a: integer` stored the body as `Typed(a, 'integer')`, the result CE had
+- **Declaring several functions that call each other no longer takes minutes.**
+  Since 0.137.0 the signature of a function declared `(T, …) -> unknown` reports
+  the result its body has under the declared parameter types. That result was
+  cached on the engine's cache generation, which computing it moves, so it was
+  computed again at every read, together with the signatures of the declared
+  functions the body calls. With three nested functions (`P` calls `S` twice,
+  `S` calls `H`), assigning `P` did not finish in 100 s; it takes 20 ms. The
+  result is now cached until a value, an assumption, a definition, a called
+  function, a symbol's type, or the declarations in the scope the function was
+  defined in change.
+- **A function declared `(T, …) -> unknown` no longer stores its derived result
+  as a declared one.** Assigning `x ↦ a` to `f: (integer) -> unknown` with
+  `a: integer` stored the body as `Typed(a, 'integer')`, the result CE had
   derived written back as if the host had declared it. The signature then kept
   `-> integer` after `a` was retyped `real`, and in complex mode `f(z) = z²`
-  with a real-declared parameter refused a complex argument
-  (`arg(f(x + iy))`). The stored literal is now the one assigned, and the
-  derived result follows the symbols the body reads (0.137.0).
+  with a real-declared parameter refused a complex argument (`arg(f(x + iy))`).
+  The stored literal is now the one assigned, and the derived result follows the
+  symbols the body reads (0.137.0).
 - **A recursive function declared `(T, …) -> unknown` has a signature.** The
   signature of `f := n ↦ n + f(n − 1)` read its own signature while it was
   computed and never finished (0.137.0).
@@ -209,188 +232,185 @@
   follows (`Round(4Q)`, `Floor(4Q)`, `Ceil(4Q)` with `Q` inferred
   `real | signed_infinity` are `integer | signed_infinity`, not `integer`).
 
-- **`Clamp`, `ElementMax` and `ElementMin` are typed by the range their
-  operands bound.** `Clamp(x, −1, 1)` is `real<−1..1>` (it was `real`), with
-  `nan` when `x` may be NaN, and whatever `x` is: `Clamp(+∞, −1, 1)` is 1, so
+- **`Clamp`, `ElementMax` and `ElementMin` are typed by the range their operands
+  bound.** `Clamp(x, −1, 1)` is `real<−1..1>` (it was `real`), with `nan` when
+  `x` may be NaN, and whatever `x` is: `Clamp(+∞, −1, 1)` is 1, so
   `Clamp(a, −1, 1)` with `a: real | signed_infinity | nan` is
   `nan | real<−1..1>` (it was `nan | real | signed_infinity`).
-  `ElementMax(x, 0)` is `real<0..>`, `ElementMax(2, 5)` is `integer<5..5>`
-  (it was `integer`), and `ElementMax(+∞, 5)` is `signed_infinity` (it was
+  `ElementMax(x, 0)` is `real<0..>`, `ElementMax(2, 5)` is `integer<5..5>` (it
+  was `integer`), and `ElementMax(+∞, 5)` is `signed_infinity` (it was
   `real | signed_infinity`). As a consequence `Arccos(Clamp(x, −1, 1))` is
   `real` (it was `complex`).
 - **`Tan`, `Sec` and `Arsinh` of an extended real.** With
-  `y: real | signed_infinity`, `tan(y)` and `sec(y)` are `nan | real` (they
-  were `number`; `Tan(±∞)` has no value) and `arsinh(y)` is
-  `real | signed_infinity` (it was `number`).
-- **A function declared with an `unknown` result reports the result of its
-  body under the declared parameter types.** `(real | signed_infinity | nan)
-  -> unknown` assigned `t ↦ t + 1` now reports
+  `y: real | signed_infinity`, `tan(y)` and `sec(y)` are `nan | real` (they were
+  `number`; `Tan(±∞)` has no value) and `arsinh(y)` is `real | signed_infinity`
+  (it was `number`).
+- **A function declared with an `unknown` result reports the result of its body
+  under the declared parameter types.**
+  `(real | signed_infinity | nan) -> unknown` assigned `t ↦ t + 1` now reports
   `-> nan | real | signed_infinity`, and a call `g(a)` has that type; it was
-  `-> number`, because the result was read from the literal with its
-  parameter typed `unknown`. In the same way `(tuple<number, number>) ->
-  unknown` assigned `x ↦ 2x` reports `-> tuple<number, number>` (it was
-  `-> number`, although `f((3, 4))` is `(6, 8)`). Both the string and the
-  object form of the declaration, and both `ce.assign` and `:=`, behave the
-  same. The stored literal is unchanged.
+  `-> number`, because the result was read from the literal with its parameter
+  typed `unknown`. In the same way `(tuple<number, number>) -> unknown` assigned
+  `x ↦ 2x` reports `-> tuple<number, number>` (it was `-> number`, although
+  `f((3, 4))` is `(6, 8)`). Both the string and the object form of the
+  declaration, and both `ce.assign` and `:=`, behave the same. The stored
+  literal is unchanged.
 
 - **A result that may be complex is typed `complex | nan`.** With
-  `y: real | signed_infinity`, `arccos(y)` and `arcsin(y)` were `number` and
-  are `complex | nan` (the value is complex beyond ±1, and there is none at
-  ±∞). A compiler that cannot lower a complex value now refuses such a body
-  instead of compiling it as real.
+  `y: real | signed_infinity`, `arccos(y)` and `arcsin(y)` were `number` and are
+  `complex | nan` (the value is complex beyond ±1, and there is none at ±∞). A
+  compiler that cannot lower a complex value now refuses such a body instead of
+  compiling it as real.
 - **`Clamp` keeps its bounds for a wide operand.** `Clamp(u, −1, 1)` with
   `u: number` is `nan | real<−1..1>` (it was `real | signed_infinity`, with
   `nan`): a value outside the extended real line is an error, not a value.
-- **The index of a `Sum` or `Product` over integer-literal limits is typed
-  by its range.** In `Sum(body, Limits(i, 1, 40))`, `i` is `integer<1..40>`
-  (it was `integer`), so `√(1 − ((i − 0.5)/40)²)` is `real` (it was
-  `complex`). An index that the body assigns keeps `integer`.
+- **The index of a `Sum` or `Product` over integer-literal limits is typed by
+  its range.** In `Sum(body, Limits(i, 1, 40))`, `i` is `integer<1..40>` (it was
+  `integer`), so `√(1 − ((i − 0.5)/40)²)` is `real` (it was `complex`). An index
+  that the body assigns keeps `integer`.
 - **A call with a tuple argument at a scalar parameter is typed `any`.**
-  `h((1, 2))` with `h: (real) -> real` and `h := x ↦ 2x` was typed `real`
-  and evaluates to `(2, 4)`; it is now `any`, as the same call already was
-  when the result was inferred. The body decides the shape (`x ↦ |x|` gives
-  a scalar), so the declared scalar result does not describe it.
+  `h((1, 2))` with `h: (real) -> real` and `h := x ↦ 2x` was typed `real` and
+  evaluates to `(2, 4)`; it is now `any`, as the same call already was when the
+  result was inferred. The body decides the shape (`x ↦ |x|` gives a scalar), so
+  the declared scalar result does not describe it.
 - **A symbol that holds a pole value is typed on the pole.** `Tan(z)` with
-  `z := π/2` was typed `real` and evaluates to `~oo`; it is now `number`.
-  A symbol that holds a number literal keeps the narrow claim (`Tan(w)` with
+  `z := π/2` was typed `real` and evaluates to `~oo`; it is now `number`. A
+  symbol that holds a number literal keeps the narrow claim (`Tan(w)` with
   `w := 3` is `real`).
 
-- **A function literal applied to a collection maps over it, like a named
-  user function** (user decision 2026-09-26, Tycho item 327). `Apply` used
-  to bind each argument whole, so `Apply(i ↦ Sum(Cos(n), Limits(n, 1, i)),
-  [1, 2, 3])` was typed `number` and evaluated to an `incompatible-type`
-  error, while `X([1, 2, 3])` with `X := i ↦ …` and the compiled code of the
-  literal both mapped. Now a function literal whose parameters are scalar by
-  its signature maps over a collection argument, zips several, and is typed
-  as the mapped collection. What changes: `Apply(x ↦ (x, x), [1, 2])` is
-  `[(1, 1), (2, 2)]` (it was `([1,2], [1,2])`), the value the named call and
-  the compiled code already gave. A literal whose parameter is a collection
-  (`x ↦ Length(x)`) or generic (`(x: T) -> T where T`) still binds whole, and
-  a tuple or a string argument is not mapped.
-- **A named user function broadcast keeps a tuple whole and rejects
-  collections of different lengths.** `f([1, 2, 3], (10, 20))` for a
-  scalar-parameter `f := (x, y) ↦ (x, y)` zipped the point as if it were a
-  list and gave two cells, `[(1, 10), (2, 20)]`; each of the three cells now
-  holds the whole point. `f([1, 2], [1, 2, 3])` gave `[2, 4]` for
-  `f := (x, y) ↦ x + y`, a silent truncation; it is now the
-  `incompatible-dimensions` error that the broadcast rules of 2026-07-24
-  prescribe and the other broadcast routes already gave (user decision
-  2026-09-26: every user-function route reports it; a consumer that wants
-  Desmos truncation lowers the call to `Zip`). Builtin operators
-  are unchanged. The type of a broadcast whose per-element result is a
+- **A function literal applied to a collection maps over it, like a named user
+  function** (user decision 2026-09-26, Tycho item 327). `Apply` used to bind
+  each argument whole, so `Apply(i ↦ Sum(Cos(n), Limits(n, 1, i)), [1, 2, 3])`
+  was typed `number` and evaluated to an `incompatible-type` error, while
+  `X([1, 2, 3])` with `X := i ↦ …` and the compiled code of the literal both
+  mapped. Now a function literal whose parameters are scalar by its signature
+  maps over a collection argument, zips several, and is typed as the mapped
+  collection. What changes: `Apply(x ↦ (x, x), [1, 2])` is `[(1, 1), (2, 2)]`
+  (it was `([1,2], [1,2])`), the value the named call and the compiled code
+  already gave. A literal whose parameter is a collection (`x ↦ Length(x)`) or
+  generic (`(x: T) -> T where T`) still binds whole, and a tuple or a string
+  argument is not mapped.
+- **A named user function broadcast keeps a tuple whole and rejects collections
+  of different lengths.** `f([1, 2, 3], (10, 20))` for a scalar-parameter
+  `f := (x, y) ↦ (x, y)` zipped the point as if it were a list and gave two
+  cells, `[(1, 10), (2, 20)]`; each of the three cells now holds the whole
+  point. `f([1, 2], [1, 2, 3])` gave `[2, 4]` for `f := (x, y) ↦ x + y`, a
+  silent truncation; it is now the `incompatible-dimensions` error that the
+  broadcast rules of 2026-07-24 prescribe and the other broadcast routes already
+  gave (user decision 2026-09-26: every user-function route reports it; a
+  consumer that wants Desmos truncation lowers the call to `Zip`). Builtin
+  operators are unchanged. The type of a broadcast whose per-element result is a
   collection has one list level per rank it descends: `f := x ↦ (x, x)` over
-  `[[1, 2], [3, 4]]` is `list<list<tuple<…>>>` (it was
-  `list<tuple<…>>`, which the value `[[(1,1),(2,2)],[(3,3),(4,4)]]` is not a
-  member of).
+  `[[1, 2], [3, 4]]` is `list<list<tuple<…>>>` (it was `list<tuple<…>>`, which
+  the value `[[(1,1),(2,2)],[(3,3),(4,4)]]` is not a member of).
 - **A pipe stage behaves exactly as a call** (user decision 2026-09-26):
-  `xs |> f` is `f(xs)` for a function-literal stage too. The stage used to
-  lower to a one-level `Map(f, xs)`. What changes: a nested list is mapped at
-  every depth (`[[1,2],[3,4]] |> x ↦ (x, x)` is
-  `[[(1,1),(2,2)],[(3,3),(4,4)]]`; it was `[([1,2],[1,2]),([3,4],[3,4])]`); a
-  stage whose parameter is a collection by its body binds the whole value
-  (`[[1],[2,3]] |> l ↦ Length(l)` is `2`; it was `[1,2]`, and
-  `xs |> p ↦ p[1] ∧ p[2]` over a list of pairs binds the list; write
-  `xs |> ((a, b)) ↦ a ∧ b` to map the pairs); and a set is bound whole, as a
-  call binds it.
+  `xs |> f` is `f(xs)` for a function-literal stage too. The stage used to lower
+  to a one-level `Map(f, xs)`. What changes: a nested list is mapped at every
+  depth (`[[1,2],[3,4]] |> x ↦ (x, x)` is `[[(1,1),(2,2)],[(3,3),(4,4)]]`; it
+  was `[([1,2],[1,2]),([3,4],[3,4])]`); a stage whose parameter is a collection
+  by its body binds the whole value (`[[1],[2,3]] |> l ↦ Length(l)` is `2`; it
+  was `[1,2]`, and `xs |> p ↦ p[1] ∧ p[2]` over a list of pairs binds the list;
+  write `xs |> ((a, b)) ↦ a ∧ b` to map the pairs); and a set is bound whole, as
+  a call binds it.
 - **A parenthesized pipe stage maps like an unparenthesized one.**
   `[1,2,3] |> (x \mapsto (x,x))` gave `([1,2,3], [1,2,3])`; it is now
   `[(1, 1),(2, 2),(3, 3)]`, as `[1,2,3] |> x \mapsto (x,x)` already was.
 
 - **At machine precision, `.N()` of an integer too large for a double is
   `±oo`**, however it is written. `\frac{10^{400}}{10^{-400}}` (which
-  canonicalizes to the integer literal `10^800`) was `1e+800`, an exact
-  integer, and is `+oo`, as `10^{800}` already was. `.N()` gives a machine
-  float at machine precision. `evaluate()` and the default precision are
-  unchanged: there `10^{800}` is still exact or `1e+800`.
+  canonicalizes to the integer literal `10^800`) was `1e+800`, an exact integer,
+  and is `+oo`, as `10^{800}` already was. `.N()` gives a machine float at
+  machine precision. `evaluate()` and the default precision are unchanged: there
+  `10^{800}` is still exact or `1e+800`.
 - **A number read from an absent collection is `NaN` on every route.** With
-  `t := -1`, `First((1,2){0<t})` gave `NaN` when it was held but `Missing`
-  when evaluated fresh, with `.N()`, or in compiled JavaScript. It is `NaN`
-  everywhere and is typed `integer | nan` (it was `integer | missing`). The
-  same applies to `Second`, `Third`, `Last` and `At`, and to compiled Python.
-  A row, a point or a string read from an absent collection is still
-  `Missing`: `At([[1,2],[3,4]]{0<t}, 2)` is `Missing`.
+  `t := -1`, `First((1,2){0<t})` gave `NaN` when it was held but `Missing` when
+  evaluated fresh, with `.N()`, or in compiled JavaScript. It is `NaN`
+  everywhere and is typed `integer | nan` (it was `integer | missing`). The same
+  applies to `Second`, `Third`, `Last` and `At`, and to compiled Python. A row,
+  a point or a string read from an absent collection is still `Missing`:
+  `At([[1,2],[3,4]]{0<t}, 2)` is `Missing`.
 - **A search is structural: an absent value is found where the same marker
   sits.** `Contains`, `IndexOf`, `Element`, `NotElement` and `Count(xs, v)`
   compare by structural identity, the test `Unique` and `Set` already use, so
-  `IndexOf([1, NaN], NaN)` is `2`, `Contains([1, Missing], Missing)` is
-  `True`, `Element(NaN, [1, NaN])` is `True` and `Count([NaN, NaN], NaN)` is
-  `2`. A marker cell matches only the same marker: `Contains([1, Missing], 5)`
-  is `False`, `IndexOf([1, NaN], Missing)` is `0`, and `Missing` is not found
-  where `Undefined` sits. The searched value is read as a value, so a
-  restricted number whose condition is false, `2{c}`, is `NaN` and is found
-  where the list holds `NaN`, while a `Which` with no selected branch is
-  `Missing` and is not. A restricted value whose condition is undecided,
-  `Contains([1,2], 2{c})`, stays held and gives the right answer once `c` is
-  decided (it was held as `Missing` or `NaN` whatever `c` became). Before,
-  `Contains(L, Missing)` was `Missing` and `IndexOf(L, Missing)` was `NaN`,
-  which made a `Which` on a search take no branch. Compiled JavaScript agrees
-  (`includes` and the `IndexOf` element test are SameValueZero) and refuses a
-  searched value that may be a computed absence, which it spells as `NaN`;
-  Python agrees for a `NaN` value and refuses a value that may be `Missing`,
-  which it spells as `nan` too. A literal `NaN` membership is also decided at
-  the type level: `Element(NaN, [1, NaN])` is typed `true` (it was `false`,
-  and compiled to a literal `false`). Membership and comparison stay different
-  questions: `NaN = NaN` is `False` and `Equal([1, Missing], [1, 5])` is
-  `Missing`. The rules for the three markers in every collection operator are
-  in `docs/ERROR-MODEL.md` §3, "Absent values in collection operators".
-- **A predicate that answers `Missing` for an absent element does not select
-  it, and `Any`/`All` combine such answers by Kleene logic.** `Filter([1,
-  Missing, 3], x ↦ x > 0)` is `[1, 3]` and `Count([1, Missing, 3], x ↦ x > 0)`
-  is `2`, the rule of a database `WHERE` clause; `CountIf`, `Position`,
-  `IndexWhere` and `Find` agree, and `Partition` puts the element in the
-  false group. `Any([1, Missing], x ↦ x > 2)` and `All([1, Missing, 3], x ↦
-  x > 0)` are `Missing`, while `Any([1, Missing, 3], x ↦ x > 2)` is `True`
-  and `All([1, Missing, -1], x ↦ x > 0)` is `False`, the table of `Or` and
-  `And`. Before, `Count` threw "Filter predicate must return True or False",
-  `Filter` returned that message as its value, and `Any`/`All` stayed
-  unevaluated. A `NaN` element compares `False` and is unchanged. Compiled
-  `Any`/`All` over a collection whose element type has a `missing` arm are
-  refused on JavaScript and Python, since `some`/`every` cannot answer
-  `Missing`.
+  `IndexOf([1, NaN], NaN)` is `2`, `Contains([1, Missing], Missing)` is `True`,
+  `Element(NaN, [1, NaN])` is `True` and `Count([NaN, NaN], NaN)` is `2`. A
+  marker cell matches only the same marker: `Contains([1, Missing], 5)` is
+  `False`, `IndexOf([1, NaN], Missing)` is `0`, and `Missing` is not found where
+  `Undefined` sits. The searched value is read as a value, so a restricted
+  number whose condition is false, `2{c}`, is `NaN` and is found where the list
+  holds `NaN`, while a `Which` with no selected branch is `Missing` and is not.
+  A restricted value whose condition is undecided, `Contains([1,2], 2{c})`,
+  stays held and gives the right answer once `c` is decided (it was held as
+  `Missing` or `NaN` whatever `c` became). Before, `Contains(L, Missing)` was
+  `Missing` and `IndexOf(L, Missing)` was `NaN`, which made a `Which` on a
+  search take no branch. Compiled JavaScript agrees (`includes` and the
+  `IndexOf` element test are SameValueZero) and refuses a searched value that
+  may be a computed absence, which it spells as `NaN`; Python agrees for a `NaN`
+  value and refuses a value that may be `Missing`, which it spells as `nan` too.
+  A literal `NaN` membership is also decided at the type level:
+  `Element(NaN, [1, NaN])` is typed `true` (it was `false`, and compiled to a
+  literal `false`). Membership and comparison stay different questions:
+  `NaN = NaN` is `False` and `Equal([1, Missing], [1, 5])` is `Missing`. The
+  rules for the three markers in every collection operator are in
+  `docs/ERROR-MODEL.md` §3, "Absent values in collection operators".
+- **A predicate that answers `Missing` for an absent element does not select it,
+  and `Any`/`All` combine such answers by Kleene logic.**
+  `Filter([1, Missing, 3], x ↦ x > 0)` is `[1, 3]` and
+  `Count([1, Missing, 3], x ↦ x > 0)` is `2`, the rule of a database `WHERE`
+  clause; `CountIf`, `Position`, `IndexWhere` and `Find` agree, and `Partition`
+  puts the element in the false group. `Any([1, Missing], x ↦ x > 2)` and
+  `All([1, Missing, 3], x ↦ x > 0)` are `Missing`, while
+  `Any([1, Missing, 3], x ↦ x > 2)` is `True` and
+  `All([1, Missing, -1], x ↦ x > 0)` is `False`, the table of `Or` and `And`.
+  Before, `Count` threw "Filter predicate must return True or False", `Filter`
+  returned that message as its value, and `Any`/`All` stayed unevaluated. A
+  `NaN` element compares `False` and is unchanged. Compiled `Any`/`All` over a
+  collection whose element type has a `missing` arm are refused on JavaScript
+  and Python, since `some`/`every` cannot answer `Missing`.
 - **`Append([1], Missing)` is `[1, Missing]`.** It was an `incompatible-type`
   error while `Append([1], Undefined)`, `Append([1], NaN)` and
   `Insert([1], 1, Missing)` kept the cell. The parameter now admits `missing`.
 - **A product or sum over a ranged type with a `missing` arm is typed
-  `number`.** With `y: integer<1..3> | missing`, `2y` was typed
-  `integer<2..6>` although its value can be `NaN`; it is `number`, as `2z`
-  with `z: integer | missing` already was. The same fix types
+  `number`.** With `y: integer<1..3> | missing`, `2y` was typed `integer<2..6>`
+  although its value can be `NaN`; it is `number`, as `2z` with
+  `z: integer | missing` already was. The same fix types
   `Map(x ↦ 2x, [1, Missing, 3])` as `list<number>` (it claimed
   `list<integer<2..6>>` for a value that holds `NaN`).
 - **`Element` waits when an unknown could still make a value a member.**
-  `Element(x, [1, 2])` with `x` free was `False` and stays unevaluated until
-  `x` has a value, as it already did for a `Set`; the same holds for a tuple
-  and for a lazy collection with unknowns (`1 ∈ Reverse([x, 2])`).
-  `Element` over an absent collection is `Missing`, and over a restricted
-  collection it is threaded as `Contains` is. The search operators
-  `Contains`, `IndexOf` and `Count` compare structurally, like `===`, and are
-  unchanged.
+  `Element(x, [1, 2])` with `x` free was `False` and stays unevaluated until `x`
+  has a value, as it already did for a `Set`; the same holds for a tuple and for
+  a lazy collection with unknowns (`1 ∈ Reverse([x, 2])`). `Element` over an
+  absent collection is `Missing`, and over a restricted collection it is
+  threaded as `Contains` is. The search operators `Contains`, `IndexOf` and
+  `Count` compare structurally, like `===`, and are unchanged.
 - **An operator over a whole absent collection gives `Missing`.** `Insert`,
-  `ReplaceAt`, `Append`, `Union`, `Intersection` and `SetMinus` over
-  `Missing` were `incompatible-type` errors; `Join(Missing, [1])` was
-  `[Missing, 1]`; the set relations (`Subset(Missing, {2,3})` and the others)
-  were `False` or `True`. All give `Missing` now.
-- **A `Reduce` with no start value can return its first element**, so its
-  type now admits the element type: `Reduce([Missing], Max)` is typed
+  `ReplaceAt`, `Append`, `Union`, `Intersection` and `SetMinus` over `Missing`
+  were `incompatible-type` errors; `Join(Missing, [1])` was `[Missing, 1]`; the
+  set relations (`Subset(Missing, {2,3})` and the others) were `False` or
+  `True`. All give `Missing` now.
+- **A `Reduce` with no start value can return its first element**, so its type
+  now admits the element type: `Reduce([Missing], Max)` is typed
   `missing | number` (it was `number`, although the value is `Missing`).
 - **`Map` over a matrix is typed as a list of results**, one per row:
   `Map(a ↦ 0, [[1,2],[3,4]])` is `vector<integer^2>` (it was typed as a 2×2
   matrix).
-- **`Range` membership accepts a value within the counting tolerance of
-  either end.** `Element(1000, Range(0, 999.9999999999, 0.1))` was `False`
-  although `1000` is the last element; it is `True`. A value just before the
-  first element is also a member now: `Element(-1e-17, Range(0, 1, 0.1))`.
-- **`Sum` and `Product` over an index range are typed from the body** when
-  the body is on the extended real line. `Sum(k², k, 1, 10)` is `integer`,
+- **`Range` membership accepts a value within the counting tolerance of either
+  end.** `Element(1000, Range(0, 999.9999999999, 0.1))` was `False` although
+  `1000` is the last element; it is `True`. A value just before the first
+  element is also a member now: `Element(-1e-17, Range(0, 1, 0.1))`.
+- **`Sum` and `Product` over an index range are typed from the body** when the
+  body is on the extended real line. `Sum(k², k, 1, 10)` is `integer`,
   `Product(1/k, k, 1, 4)` is `rational`, and `Sum(a·k, k, 1, 10)` with
   `a: real | signed_infinity | nan` is `nan | real | signed_infinity`. When the
-  range is not known to be finite (`Sum(1/k, k, 1, ∞)`, or an upper bound `n`
-  of unknown type), the value may also be `±∞` or have no limit, so the type is
+  range is not known to be finite (`Sum(1/k, k, 1, ∞)`, or an upper bound `n` of
+  unknown type), the value may also be `±∞` or have no limit, so the type is
   `nan | real | signed_infinity`, or `integer | nan | signed_infinity` for
   integer terms. All were `number`.
 - **An operation on a scalar-or-list union is typed from the union's cell.**
   With `v: real | list<real>`, `2v`, `r·v` and `sin(v)` are `list<real> | real`
-  (they were `list<number> | number`); with `u: real | signed_infinity |
-  list<real>` and `y: real | signed_infinity | nan`, `y·u` is
+  (they were `list<number> | number`); with
+  `u: real | signed_infinity | list<real>` and
+  `y: real | signed_infinity | nan`, `y·u` is
   `list<nan | real | signed_infinity> | nan | real | signed_infinity`.
 - **`Abs` keeps NaN in its type, and `Real`, `Imaginary` and `Arg` are
   narrower.** `|q|` with `q: real | nan` was `real<0..> | signed_infinity`,
@@ -399,93 +419,91 @@
   `type.matches('real<0..>')` on `|x|` now answers `false` when `x` may be NaN.
   `Re(z)`, `Im(z)` and `Arg(z)` with `z: complex | nan` are `nan | real`, and
   `Re(w)` is `nan | real | signed_infinity` (all were `number`).
-- **A function expression reads its sign from a ranged type** when its
-  operator has no sign rule: with `t: real<0.9985..0.9999>`, `1 − t` and
+- **A function expression reads its sign from a ranged type** when its operator
+  has no sign rule: with `t: real<0.9985..0.9999>`, `1 − t` and
   `Clamp(t, −1, 1)` are positive (`isPositive` was `undefined`). So `|π − 4|`
   simplifies to `4 − π` and `|e − 2|` to `e − 2`.
 - **A function literal, or a function declared `function`, applied to an
   infinite collection maps over it lazily.** `Apply(x ↦ (x, x), Range(1, ∞))`
-  was the tuple `(Range(1, +∞), Range(1, +∞))` under a `list<tuple<…>>` type;
-  it is the infinite list `[(1, 1), (2, 2), …]`, as for a function assigned
-  without a declaration. A finite list beside an infinite one is the
+  was the tuple `(Range(1, +∞), Range(1, +∞))` under a `list<tuple<…>>` type; it
+  is the infinite list `[(1, 1), (2, 2), …]`, as for a function assigned without
+  a declaration. A finite list beside an infinite one is the
   `incompatible-dimensions` error on every route.
 
 ### Issues Resolved
 
-- **A complex power, root, square root or exponential keeps a small
-  result.** A part of a complex result was set to 0 when it was below a
-  fixed `1e-14`, so `(10^{-10}i)^2` was `0` (it is `-10^{-20}`) and
-  `(10^{-6}i)^3` was `0`. A part is now noise only when it is small compared
-  with the modulus of the result. At machine precision, `∛(8i)` was `0` and
-  is `√3 + i`; `\sqrt{1+10^{-10}i}` was `1` and keeps its imaginary part; the
-  complex square root no longer overflows or underflows near the ends of the
-  double range; `(10^{300}+10^{300}i)^{0.3}` was `NaN` and is computed.
+- **A complex power, root, square root or exponential keeps a small result.** A
+  part of a complex result was set to 0 when it was below a fixed `1e-14`, so
+  `(10^{-10}i)^2` was `0` (it is `-10^{-20}`) and `(10^{-6}i)^3` was `0`. A part
+  is now noise only when it is small compared with the modulus of the result. At
+  machine precision, `∛(8i)` was `0` and is `√3 + i`; `\sqrt{1+10^{-10}i}` was
+  `1` and keeps its imaginary part; the complex square root no longer overflows
+  or underflows near the ends of the double range; `(10^{300}+10^{300}i)^{0.3}`
+  was `NaN` and is computed.
 - **`Map`/`Filter`/`Sum`/`Length` over a `Join` or `Append` with an absent
-  source agree with its value.** `Sum(Join([3], Take(Missing, 1)))` was `3`
-  and is `NaN`; `Join(Missing, [3])` is no longer enumerated as `[3]`; a
-  `Join` over an undecided `If` operand was `Set(3)` and stays unevaluated
-  until the condition is decided.
+  source agree with its value.** `Sum(Join([3], Take(Missing, 1)))` was `3` and
+  is `NaN`; `Join(Missing, [3])` is no longer enumerated as `[3]`; a `Join` over
+  an undecided `If` operand was `Set(3)` and stays unevaluated until the
+  condition is decided.
 - **Fixes from a second review of the commits of 2026-09-23 to 2026-09-26.**
   - Linear algebra: `Norm` of a matrix with tiny or huge entries no longer
     underflows to `0` or overflows through the rank-one shortcut; an exact
     1-norm no longer drops a column whose entries overflow a double;
     `Eigenvalues` no longer treats an exact entry like `10^{-400}` as zero;
-    `Eigenvectors` returns a basis of the eigenspace for a repeated
-    eigenvalue (`[[2,0],[0,2]]` gave `[[1,0],[1,0]]`, now
-    `[[1,0],[0,1]]`) and no longer uses absolute thresholds on exact
-    entries; `Dot` of a vector with an absent cell and a matrix keeps the
-    matrix-product shape; `Norm(Linspace(a, 1, 3))` with a symbolic `a` stays
-    symbolic instead of `0`; `SingularValues` scales at the edge of the
-    double range; a big-decimal complex entry beyond the double range keeps
-    its value in a tensor; `Mean`, `Median` and `Variance` accept exact data
-    beyond the double range.
-  - Machine precision: `.N()` of a product, quotient, sum, square root, root
-    or logarithm whose exact operand is beyond the double range gives the
-    correct value (`\frac{10^{300}+1}{10^{400}}` was `0` and is `1e-100`;
-    `\ln(10^{400})` was `+oo`; `10^{400}-10^{400}+1` was `NaN`); `csc` and
-    `cot` of such an angle are finite; an exact angle `-π/10^{310}` keeps its
-    sign; an exact integer beyond `2^53` no longer compares equal to its
-    neighbor with `.is()`.
+    `Eigenvectors` returns a basis of the eigenspace for a repeated eigenvalue
+    (`[[2,0],[0,2]]` gave `[[1,0],[1,0]]`, now `[[1,0],[0,1]]`) and no longer
+    uses absolute thresholds on exact entries; `Dot` of a vector with an absent
+    cell and a matrix keeps the matrix-product shape; `Norm(Linspace(a, 1, 3))`
+    with a symbolic `a` stays symbolic instead of `0`; `SingularValues` scales
+    at the edge of the double range; a big-decimal complex entry beyond the
+    double range keeps its value in a tensor; `Mean`, `Median` and `Variance`
+    accept exact data beyond the double range.
+  - Machine precision: `.N()` of a product, quotient, sum, square root, root or
+    logarithm whose exact operand is beyond the double range gives the correct
+    value (`\frac{10^{300}+1}{10^{400}}` was `0` and is `1e-100`;
+    `\ln(10^{400})` was `+oo`; `10^{400}-10^{400}+1` was `NaN`); `csc` and `cot`
+    of such an angle are finite; an exact angle `-π/10^{310}` keeps its sign; an
+    exact integer beyond `2^53` no longer compares equal to its neighbor with
+    `.is()`.
   - Exact values: `Log` of an integer power beyond `2^53` reduces exactly
-    (`\log_2(2^{100})` is `100`); a complex `z` is not ordered by `z < z+1`
-    at zero tolerance; a big-decimal real part keeps its digits beside an
-    exact imaginary literal; `((2·10^{30}+1)/10^{30})·2^x` no longer
-    simplifies to `2^{x+1}`.
+    (`\log_2(2^{100})` is `100`); a complex `z` is not ordered by `z < z+1` at
+    zero tolerance; a big-decimal real part keeps its digits beside an exact
+    imaginary literal; `((2·10^{30}+1)/10^{30})·2^x` no longer simplifies to
+    `2^{x+1}`.
   - Absent values: `Sum([Missing])`, `Product([Missing])` and
-    `Reduce([Missing], Multiply, 1)` are `NaN`; a factor typed `error` stops
-    the zero fold in `Multiply`; `Sort` by a key puts absent cells last;
-    `Insert` and `ReplaceAt` keep the restriction on the stored element
-    instead of the whole collection; mapping over a point list whose points
-    all became absent returns a list of `Missing`; `.div()` keeps the list
-    shape of an absent product and handles an absent divisor before scaling
-    a tuple.
-  - Compilation: a recursive function returning complex matrices compiles
-    with complex entries; free-symbol types ignore bound occurrences and
-    shared subexpressions; Python `Degrees` parenthesizes its operand, Python
-    `Dot` and `Cross` refuse an operand that can be absent, and Python `Norm`
-    handles NaN and infinite entries; JavaScript complex division is scaled
-    so it does not overflow or underflow; JavaScript `Distance` beside a list
-    of points returns `Missing` for an absent point; GLSL/WGSL color helpers
-    reject infinite channels and keep finite channels up to the largest
-    32-bit float, and `Gamma` treats every finite negative integer as a pole;
-    interval-js no longer treats a tiny nonzero angle as the pole at `0`.
-  - Other: a multiple integral evaluates a scalar bound once (a
-    `Random()` bound used the second draw); `Range(0, 1, +∞)` is `[0]` (it
-    was `[NaN]`); a `Tuple` parsed in an explicit scope keeps the
-    `\operatorname{Tuple}` spelling when serialized outside that scope.
-- **JavaScript target: an unrolled `Sum` no longer mixes a complex object
-  with real arithmetic.** A square root whose type proved it real was still
-  promoted to the complex lane (the non-negativity test did not read ranged
-  types), and the real arithmetic around it gave NaN
+    `Reduce([Missing], Multiply, 1)` are `NaN`; a factor typed `error` stops the
+    zero fold in `Multiply`; `Sort` by a key puts absent cells last; `Insert`
+    and `ReplaceAt` keep the restriction on the stored element instead of the
+    whole collection; mapping over a point list whose points all became absent
+    returns a list of `Missing`; `.div()` keeps the list shape of an absent
+    product and handles an absent divisor before scaling a tuple.
+  - Compilation: a recursive function returning complex matrices compiles with
+    complex entries; free-symbol types ignore bound occurrences and shared
+    subexpressions; Python `Degrees` parenthesizes its operand, Python `Dot` and
+    `Cross` refuse an operand that can be absent, and Python `Norm` handles NaN
+    and infinite entries; JavaScript complex division is scaled so it does not
+    overflow or underflow; JavaScript `Distance` beside a list of points returns
+    `Missing` for an absent point; GLSL/WGSL color helpers reject infinite
+    channels and keep finite channels up to the largest 32-bit float, and
+    `Gamma` treats every finite negative integer as a pole; interval-js no
+    longer treats a tiny nonzero angle as the pole at `0`.
+  - Other: a multiple integral evaluates a scalar bound once (a `Random()` bound
+    used the second draw); `Range(0, 1, +∞)` is `[0]` (it was `[NaN]`); a
+    `Tuple` parsed in an explicit scope keeps the `\operatorname{Tuple}`
+    spelling when serialized outside that scope.
+- **JavaScript target: an unrolled `Sum` no longer mixes a complex object with
+  real arithmetic.** A square root whose type proved it real was still promoted
+  to the complex lane (the non-negativity test did not read ranged types), and
+  the real arithmetic around it gave NaN
   (`_SYS.cneg({re: 0.9999…, im: 0}) + 1`). It is now lowered real.
 - **A `Sum`, `Product`, `Loop` or `Comprehension` rebuilt from its canonical
-  operands keeps the type of its `Element` index.** The index takes the
-  element type of the collection it iterates, but a rebuilt binder narrowed
-  the index of the original scope instead of its own, so the body typed the
-  index from its use: the held value of `Sum(k², Element(k, Range(1, ∞)))`
-  was typed `number` where the expression is `integer | nan |
-  signed_infinity`, and a rebuilt `[10i for i in [1, 2, 3]]` was
-  `indexed_collection<number>` instead of `indexed_collection<integer>`.
+  operands keeps the type of its `Element` index.** The index takes the element
+  type of the collection it iterates, but a rebuilt binder narrowed the index of
+  the original scope instead of its own, so the body typed the index from its
+  use: the held value of `Sum(k², Element(k, Range(1, ∞)))` was typed `number`
+  where the expression is `integer | nan | signed_infinity`, and a rebuilt
+  `[10i for i in [1, 2, 3]]` was `indexed_collection<number>` instead of
+  `indexed_collection<integer>`.
 - **`.N()` of an infinite series with no limit stays unevaluated.**
   `Σ_{k≥1} (−1)^k` gave `−1`, `Σ_{k≥0} (−1)^k` gave `1`, `Σ cos(πk)` gave `−1`,
   and `Π 2^((−1)^k)` gave `0.5`. The extrapolation sampled the partial sums
@@ -494,9 +512,9 @@
 - **JavaScript target: the lane of `Add`, `Multiply`, `Negate`, `Divide`,
   `Subtract` and `Sign` follows their operands** in the analysis the parent
   reads, as it already did in their emitters. A real-typed application over a
-  complex-shaped operand was reported real to its parent while its emitter
-  wrote complex code. No input is known to reach this now; the change removes
-  the possibility.
+  complex-shaped operand was reported real to its parent while its emitter wrote
+  complex code. No input is known to reach this now; the change removes the
+  possibility.
 - **`Min` over a descending range** answered its first element:
   `Min(Range(1, −∞))` was `1` and is `−∞`, and `Min(Range(5, 1))` was `5` and is
   `1`. **An empty range** has no extremum: `Max(Range(1, 5, −1))` was `2` (not
@@ -21562,8 +21580,8 @@ from 95.3% to 97.1%:
   classical first-order classes:
   - **Separable** equations return an implicit solution when no explicit form is
     available: $y' = x/y$ gives $\frac12 y(x)^2 = \frac12 x^2 + c_1$.
-  - **Bernoulli** equations $y' = p(x)\,y + q(x)\,y^n$ reduce via the
-    $v = y^{1-n}$ substitution and return explicit solutions.
+  - **Bernoulli** equations $y' = p(x)\,y + q(x)\,y^n$ reduce via the $v =
+    y^{1-n}$ substitution and return explicit solutions.
   - **Homogeneous** equations of the form $y' = F(y/x)$ solve by the $v = y/x$
     substitution: $y' = 1 + y/x$ gives $y(x)/x = \ln x + c_1$.
   - **Exact** equations $M(x,y) + N(x,y)\,y' = 0$ return the implicit potential:
@@ -21577,11 +21595,11 @@ from 95.3% to 97.1%:
   `DSolve([y'' = -y, y(0) = 0, y'(0) = 1], y, x)` returns $y(x) = \sin x$.
   Derivative conditions are recognized in both the `Apply(Derivative(y, 1), x0)`
   and flat `D(y(x0), x)` forms. Conditions also apply to supported implicit
-  solutions ($y' = x/y$ with $y(0) = 1$ gives
-  $\frac12 y(x)^2 = \frac12 x^2 + \frac12$), and free parameters survive:
-  $y' = kx/y$ with $y(0) = 2$ gives $\frac12 y(x)^2 = \frac12 k x^2 + 2$ with
-  $k$ untouched. If the conditions cannot be applied to the solution class, the
-  equation stays inert rather than silently dropping them.
+  solutions ($y' = x/y$ with $y(0) = 1$ gives $\frac12 y(x)^2 = \frac12 x^2 +
+  \frac12$), and free parameters survive: $y' = kx/y$ with $y(0) = 2$ gives
+  $\frac12 y(x)^2 = \frac12 k x^2 + 2$ with $k$ untouched. If the conditions
+  cannot be applied to the solution class, the equation stays inert rather than
+  silently dropping them.
 
 - **Nonhomogeneous constant-coefficient equations of any order.** The
   undetermined-coefficients method now covers **polynomial, exponential, and
@@ -21609,12 +21627,11 @@ from 95.3% to 97.1%:
   [KingArth0r](https://github.com/KingArth0r)) `RSolve(equation, a, n)` solves
   **linear homogeneous constant-coefficient** recurrences via the characteristic
   polynomial: geometric ($a_{n+1} = 2a_n$ gives $a(n) = c_1\,2^n$),
-  Fibonacci-style, repeated roots with $n^k r^n$ modes
-  ($a_{n+2} + a_n = 2a_{n+1}$ gives $a(n) = c_1 + c_2\,n$), and complex roots
-  ($a_{n+2} = -a_n$ gives $a(n) = c_1\,i^n + c_2\,(-i)^n$). Initial conditions
-  can be given in list form: `RSolve([a(n+1) = 2a(n), a(0) = 3], a, n)` gives
-  $a(n) = 3 \cdot 2^n$. Nonhomogeneous and variable-coefficient recurrences stay
-  inert.
+  Fibonacci-style, repeated roots with $n^k r^n$ modes ($a_{n+2} + a_n =
+  2a_{n+1}$ gives $a(n) = c_1 + c_2\,n$), and complex roots ($a_{n+2} = -a_n$
+  gives $a(n) = c_1\,i^n + c_2\,(-i)^n$). Initial conditions can be given in
+  list form: `RSolve([a(n+1) = 2a(n), a(0) = 3], a, n)` gives $a(n) = 3 \cdot
+  2^n$. Nonhomogeneous and variable-coefficient recurrences stay inert.
 
 ## 0.70.0 _2026-07-08_
 
@@ -22074,31 +22091,28 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   powers of `1/x`.
   - `Series(\sin x, x)` → $x - \tfrac{x^3}{6} + \tfrac{x^5}{120} + O(x^7)$;
     `Series(\ln(\cos x), x)` → $-\tfrac{x^2}{2} - \tfrac{x^4}{12} + O(x^6)$;
-    `Series(\arctan x, x, +\infty)` →
-    $\tfrac{\pi}{2} - \tfrac{1}{x} + \tfrac{1}{3x^3} - \dots$. Coefficients are
-    exact (`Series(\sin x, x, \frac{\pi}{6})` gives $\tfrac12$,
-    $\tfrac{\sqrt 3}{2}$, …), and an undeclared `f` yields the textbook form
-    $f(0) + f'(0)x + \dots$.
+    `Series(\arctan x, x, +\infty)` → $\tfrac{\pi}{2} - \tfrac{1}{x} +
+    \tfrac{1}{3x^3} - \dots$. Coefficients are exact
+    (`Series(\sin x, x, \frac{\pi}{6})` gives $\tfrac12$, $\tfrac{\sqrt 3}{2}$,
+    …), and an undeclared `f` yields the textbook form $f(0) + f'(0)x + \dots$.
   - At a **pole** the result is a Laurent expansion with a finite principal
-    part: `Series(\frac{1}{\sin x}, x)` →
-    $\tfrac{1}{x} + \tfrac{x}{6} + \tfrac{7x^3}{360} + O(x^7)$,
-    `Series(\cot x, x)` →
-    $\tfrac{1}{x} - \tfrac{x}{3} - \tfrac{x^3}{45} + \dots$, and the special
-    functions expand at their poles with exact coefficients —
-    `Series(\Gamma(x), x)` →
-    $\tfrac{1}{x} - \gamma + (\tfrac{\gamma^2}{2} + \tfrac{\pi^2}{12})x + \dots$,
-    `Series(\zeta(x), x, 1)` → $\tfrac{1}{x-1} + \gamma + O(x-1)$. Poles at `±∞`
-    are handled too (`Series(\frac{x^2}{x-1}, x, +\infty)` →
-    $x + 1 + \tfrac1x + \tfrac1{x^2} + \dots$). An essential singularity or
-    branch point (e.g. `Series(e^{1/x}, x)`, `Series(\ln x, x)`) is still left
-    unevaluated rather than expanded incorrectly.
+    part: `Series(\frac{1}{\sin x}, x)` → $\tfrac{1}{x} + \tfrac{x}{6} +
+    \tfrac{7x^3}{360} + O(x^7)$, `Series(\cot x, x)` → $\tfrac{1}{x} -
+    \tfrac{x}{3} - \tfrac{x^3}{45} + \dots$, and the special functions expand at
+    their poles with exact coefficients — `Series(\Gamma(x), x)` →
+    $\tfrac{1}{x} - \gamma + (\tfrac{\gamma^2}{2} + \tfrac{\pi^2}{12})x +
+    \dots$, `Series(\zeta(x), x, 1)` → $\tfrac{1}{x-1} + \gamma + O(x-1)$. Poles
+    at `±∞` are handled too (`Series(\frac{x^2}{x-1}, x, +\infty)` → $x + 1 +
+    \tfrac1x + \tfrac1{x^2} + \dots$). An essential singularity or branch point
+    (e.g. `Series(e^{1/x}, x)`, `Series(\ln x, x)`) is still left unevaluated
+    rather than expanded incorrectly.
   - `BigO(u)` is the inert Landau remainder, serialized `O\left(u\right)` and
     parsed from `\mathcal{O}(u)` and `\operatorname{O}(u)`. It is inert under
     `evaluate`/`simplify`; a numeric approximation (`.N()`) of any expression
     containing it is `NaN`.
   - `Normal(expr)` strips the `BigO` terms, yielding the compilable/plottable
-    truncated polynomial: `Normal(Series(\sin x, x))` →
-    $x - \tfrac{x^3}{6} + \tfrac{x^5}{120}$.
+    truncated polynomial: `Normal(Series(\sin x, x))` → $x - \tfrac{x^3}{6} +
+    \tfrac{x^5}{120}$.
 
 - **`TrigExpand`, `TrigToExp`, and `TrigReduce` rewrite trigonometric and
   hyperbolic expressions.** These are transformation verbs in the spirit of
@@ -22109,24 +22123,22 @@ against an independent `mpmath` reference, never another tool. Reproduce with
     `\sec`/`\csc`/`\cot` as reciprocals of the expanded `\cos`/`\sin`, are also
     handled).
   - `TrigToExp` rewrites trigonometric and hyperbolic functions in terms of the
-    complex exponential, exactly: `TrigToExp(\sin x)` →
-    $-\tfrac{i}{2}e^{ix} + \tfrac{i}{2}e^{-ix}$.
+    complex exponential, exactly: `TrigToExp(\sin x)` → $-\tfrac{i}{2}e^{ix} +
+    \tfrac{i}{2}e^{-ix}$.
   - `TrigReduce` is the inverse of `TrigExpand`, rewriting products and integer
-    powers as functions of multiple angles: `TrigReduce(\sin^2 x)` →
-    $\tfrac{1 - \cos 2x}{2}$ and `TrigReduce(\sin x\cos x)` →
-    $\tfrac{\sin 2x}{2}$.
+    powers as functions of multiple angles: `TrigReduce(\sin^2 x)` → $\tfrac{1 -
+    \cos 2x}{2}$ and `TrigReduce(\sin x\cos x)` → $\tfrac{\sin 2x}{2}$.
 
 - **Probability distributions: `NormalDistribution`, `BinomialDistribution`,
   `PoissonDistribution`, `UniformDistribution`, `ExponentialDistribution`,
   consumed by the generic `PDF`, `CDF`, and `Quantile` operators.** A
   distribution is a first-class value — assign it, pass it around, query it:
   - `PDF(dist, x)`, `CDF(dist, x)` and `Quantile(dist, p)` evaluate to **exact
-    closed forms**: `CDF(NormalDistribution(0, 1), x)` →
-    $\tfrac12\left(1 + \operatorname{erf}\tfrac{x}{\sqrt2}\right)$, an ordinary
-    expression that can be simplified, differentiated, compiled and plotted.
-    Exact arguments give exact results —
-    `PDF(BinomialDistribution(4, \tfrac12), 2)` → $\tfrac38$ — and `.N()`
-    numericizes at machine or arbitrary precision.
+    closed forms**: `CDF(NormalDistribution(0, 1), x)` → $\tfrac12\left(1 +
+    \operatorname{erf}\tfrac{x}{\sqrt2}\right)$, an ordinary expression that can
+    be simplified, differentiated, compiled and plotted. Exact arguments give
+    exact results — `PDF(BinomialDistribution(4, \tfrac12), 2)` → $\tfrac38$ —
+    and `.N()` numericizes at machine or arbitrary precision.
   - For discrete distributions `PDF` is the probability mass function, and
     `Quantile` (the least $k$ with $\operatorname{CDF}(k) \ge p$) is computed by
     exact search: `Quantile(PoissonDistribution(9), 0.95)` → `14`.
@@ -22138,15 +22150,15 @@ against an independent `mpmath` reference, never another tool. Reproduce with
     and scipy conventions.
 
 - **`GammaRegularized` and `BetaRegularized` — the regularized incomplete gamma
-  and beta functions.** `GammaRegularized(a, z)` is
-  $Q(a, z) = \Gamma(a, z)/\Gamma(a)$ and `BetaRegularized(x, a, b)` is
-  $I_x(a, b)$. They follow the exactness contract (special values fold —
-  `GammaRegularized(1, z)` → $e^{-z}$ — and exact arguments stay symbolic),
-  evaluate numerically at machine and arbitrary precision, and compile to
-  JavaScript and Python (`scipy.special.gammaincc`/`betainc`). The discrete
-  distribution CDFs evaluate to closed forms in these functions, e.g.
-  `CDF(PoissonDistribution(\lambda), k)` →
-  $\operatorname{GammaRegularized}(k+1, \lambda)$.
+  and beta functions.** `GammaRegularized(a, z)` is $Q(a, z) = \Gamma(a,
+  z)/\Gamma(a)$ and `BetaRegularized(x, a, b)` is $I_x(a, b)$. They follow the
+  exactness contract (special values fold — `GammaRegularized(1, z)` → $e^{-z}$
+  — and exact arguments stay symbolic), evaluate numerically at machine and
+  arbitrary precision, and compile to JavaScript and Python
+  (`scipy.special.gammaincc`/`betainc`). The discrete distribution CDFs evaluate
+  to closed forms in these functions, e.g.
+  `CDF(PoissonDistribution(\lambda), k)` → $\operatorname{GammaRegularized}(k+1,
+  \lambda)$.
 
 - **`Covariance`, `PopulationCovariance` and `Correlation` measure the
   relationship between two data sets.** Each accepts either two equal-length
@@ -22270,19 +22282,19 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   fresh parameter `t` ranging over ℤ, and Pell equations yield their exact
   closed forms $\bigl(\tfrac{(3+2\sqrt2)^t + (3-2\sqrt2)^t}{2}, \dots\bigr)$,
   and **Pythagorean triples** return the complete classical parametrization:
-  `Solve(x^2+y^2=z^2, x, y, z)` →
-  $\bigl(t(t_1^2-t_2^2),\; 2t\,t_1 t_2,\; t(t_1^2+t_2^2)\bigr)$ and its leg-swap
-  — every integer triple, including all signs, lies in one of the two families.
-  Every concrete solution is exact-confirmed by substitution; half-bounded
-  domains (e.g. $n \ge 1$ alone) are left unevaluated, and forms whose textbook
-  parametrizations are provably incomplete (weighted coefficients, four or more
-  squares) are declined rather than answered partially.
+  `Solve(x^2+y^2=z^2, x, y, z)` → $\bigl(t(t_1^2-t_2^2),\; 2t\,t_1 t_2,\;
+  t(t_1^2+t_2^2)\bigr)$ and its leg-swap — every integer triple, including all
+  signs, lies in one of the two families. Every concrete solution is
+  exact-confirmed by substitution; half-bounded domains (e.g. $n \ge 1$ alone)
+  are left unevaluated, and forms whose textbook parametrizations are provably
+  incomplete (weighted coefficients, four or more squares) are declined rather
+  than answered partially.
 
 - **Periodic equations expand their root families over a bounded domain.**
   `Solve(\sin x = \tfrac12,\; x \in [0, 4\pi])` returns all four exact solutions
   $\tfrac{\pi}{6}, \tfrac{5\pi}{6}, \tfrac{13\pi}{6}, \tfrac{17\pi}{6}$ — not
-  just the principal values. Scaled arguments work too (`\sin 2x = 1` over
-  $[0, 2\pi]$ → $\tfrac{\pi}{4}, \tfrac{5\pi}{4}$). Expansion applies when the
+  just the principal values. Scaled arguments work too (`\sin 2x = 1` over $[0,
+  2\pi]$ → $\tfrac{\pi}{4}, \tfrac{5\pi}{4}$). Expansion applies when the
   unknown appears only inside trigonometric functions of linear arguments; each
   family member is verified by exact substitution, and unreasonably large
   expansions degrade gracefully to the principal roots.
@@ -22378,18 +22390,18 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
   `sin^-1 x` now means $\arcsin x$ (the inverse function), not $1/\sin x$
   (matching strict `\sin^{-1}`); `sin^-2 x` stays $1/\sin^2 x$. `atan2(1, 2)`
   parses as `Arctan2(1, 2)`, and `acot`/`asec`/`acsc` are recognized. A
-  multi-letter run with an embedded Greek constant is segmented (`2pix` →
-  $2\pi x$, `xpi` → $x\pi$) instead of injecting a spurious imaginary unit, and
-  an implicit subscript is accepted on a constant base (`alpha2` → $\alpha_2$).
+  multi-letter run with an embedded Greek constant is segmented (`2pix` → $2\pi
+  x$, `xpi` → $x\pi$) instead of injecting a spurious imaginary unit, and an
+  implicit subscript is accepted on a constant base (`alpha2` → $\alpha_2$).
 
 ### Differential Equations
 
 - **Repeated roots produce correct general solutions.** `DSolve` now clusters
   numeric characteristic roots by multiplicity: $y'''' + 2y'' + y = 0$ gives
   $(c_1 + c_2 x)\cos x + (c_3 + c_4 x)\sin x$ instead of a degenerate basis with
-  spurious $e^{\varepsilon x}$ factors, and repeated real roots keep their
-  $x e^{x}$ modes. A structural self-check returns the equation unevaluated
-  rather than emit a basis with fewer independent solutions than the order.
+  spurious $e^{\varepsilon x}$ factors, and repeated real roots keep their $x
+  e^{x}$ modes. A structural self-check returns the equation unevaluated rather
+  than emit a basis with fewer independent solutions than the order.
 
 - **No more corrupted solutions.** Equations with variable coefficients on
   higher-order derivatives (e.g. $x^2 y'' + x y' = x$) previously returned a
@@ -22400,11 +22412,10 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 
 - **Exponential forcing terms solve.** Variation of parameters was silently
   disabled for exponential bases (an internal Wronskian stayed unsimplified):
-  $y'' - y = e^x$ now returns
-  $c_1 e^x + c_2 e^{-x} + \frac12 x e^x - \frac14 e^x$, and $y'' + y = e^x$
-  returns $c_1 \cos x + c_2 \sin x + \frac12 e^x$, instead of the equation
-  unevaluated. Solutions are returned in collected form (no $e^a \cdot e^b$
-  products or $A\sin^2 u + A\cos^2 u$ pairs).
+  $y'' - y = e^x$ now returns $c_1 e^x + c_2 e^{-x} + \frac12 x e^x - \frac14
+  e^x$, and $y'' + y = e^x$ returns $c_1 \cos x + c_2 \sin x + \frac12 e^x$,
+  instead of the equation unevaluated. Solutions are returned in collected form
+  (no $e^a \cdot e^b$ products or $A\sin^2 u + A\cos^2 u$ pairs).
 
 - **Parsed LaTeX input works end-to-end.** `ce.parse("y''(x)+y(x)=0")` no longer
   canonicalizes the derivative of an undeclared function into an `Error` node: a
@@ -22416,10 +22427,10 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 ### Evaluation
 
 - **`Beta` is exact and pole-aware.** $\mathrm{B}(a, m)$ with a positive integer
-  argument reduces exactly ($\mathrm{B}(2,3) = \frac{1}{12}$,
-  $\mathrm{B}(-2,2) = \frac12$), and arguments at gamma-function poles return
-  $\tilde\infty$ instead of a silently wrong finite value ($\mathrm{B}(-1,2)$
-  previously returned $-2.97\times10^{49}$).
+  argument reduces exactly ($\mathrm{B}(2,3) = \frac{1}{12}$, $\mathrm{B}(-2,2)
+  = \frac12$), and arguments at gamma-function poles return $\tilde\infty$
+  instead of a silently wrong finite value ($\mathrm{B}(-1,2)$ previously
+  returned $-2.97\times10^{49}$).
 
 - **Multiplication by infinity respects sign information.** $x \cdot \infty$
   stays symbolic when the sign of $x$ is unknown, evaluates to $-\infty$ when
@@ -22461,12 +22472,11 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
   projection. It now types as `finite_complex`, prints its full digits, and
   `bignumIm` is exact.
 
-- **Perfect-power radicands reduce.** $(997^3)^{1/6} = \sqrt{997}$,
-  $8^{1/6} = \sqrt2$, $8^{1/4} = 2^{3/4}$: when canonicalization folds a power
-  into an opaque integer, the root now recovers the structure by perfect-power
-  decomposition. In particular the zero-equivalence test
-  $\sqrt{997} - (997^3)^{1/6}$ evaluates to exact $0$ (it previously leaked a
-  float residue).
+- **Perfect-power radicands reduce.** $(997^3)^{1/6} = \sqrt{997}$, $8^{1/6} =
+  \sqrt2$, $8^{1/4} = 2^{3/4}$: when canonicalization folds a power into an
+  opaque integer, the root now recovers the structure by perfect-power
+  decomposition. In particular the zero-equivalence test $\sqrt{997} -
+  (997^3)^{1/6}$ evaluates to exact $0$ (it previously leaked a float residue).
 
 - **Logarithms reduce when the argument and base are powers of a common base.**
   $\log_8 32768 = 5$, $\log_8 2 = \tfrac13$, $\log_4 8 = \tfrac32$ — exactly,
@@ -22478,14 +22488,16 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 
 ### Linear Algebra
 
-- **3×3 `Eigenvalues` returned wrong values — fixed.** The analytic solver used
-  a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-  $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-  $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-  symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-  it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-  returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-  complex eigenvalues are now returned as complex numbers.
+- **3×3 `Eigenvalues`
+
+  returned wrong values — fixed.** The analytic solver used
+      a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+      $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+      $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+      symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+      it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+      returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+      complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 
@@ -22604,11 +22616,11 @@ answer, lose exactness, hang, or silently accept invalid input.
   identities that require real arguments no longer apply to symbols declared as
   complex.
 
-- **Some unsafe rewrites were removed.** `simplify()` no longer rewrites
-  $|\sin x|$ as $\sin|x|$, `Arctan2` preserves the correct quadrant, rule
-  conditions such as $x \ne 0$ require proof rather than assuming unknown
-  symbols satisfy them, and alternating-binomial sum simplifications now check
-  their validity bounds.
+- **Some unsafe rewrites were removed.** `simplify()` no longer rewrites $|\sin
+  x|$ as $\sin|x|$, `Arctan2` preserves the correct quadrant, rule conditions
+  such as $x \ne 0$ require proof rather than assuming unknown symbols satisfy
+  them, and alternating-binomial sum simplifications now check their validity
+  bounds.
 
 - **Differential equation solvers handle higher-order equations.** (contributed
   by [KingArth0r](https://github.com/KingArth0r)) `DSolve` now solves **linear
@@ -26147,8 +26159,8 @@ ce.simplificationRules.push({
 
 - **Monte Carlo improper integrals**: Fixed two bugs in `monteCarloEstimate()`
   that produced incorrect results (typically `NaN` or `Infinity`) for improper
-  integrals. The change-of-variables estimator was inverted
-  ($f(x) / \mathrm{jacobian}$ instead of $f(x) * \mathrm{jacobian}$), and the
+  integrals. The change-of-variables estimator was inverted ($f(x) /
+  \mathrm{jacobian}$ instead of $f(x) * \mathrm{jacobian}$), and the
   finite-interval scale factor $b - a$ was applied to transformed domains where
   it is infinite. Affects `NIntegrate` and compiled `integrate` for any integral
   with infinite bounds.

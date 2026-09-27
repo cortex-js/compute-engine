@@ -434,6 +434,33 @@ expected effect on the corpus.
   read-only and drop the copy. Today no in-repo consumer writes to a returned
   enclosure. The copy stays until ruled otherwise.
 
+### A clause that names a later clause's binder is folded with the enclosing variable unbound (OPEN, small — found 2026-09-27 by the review of the Epsil comprehension round)
+
+In `Comprehension(x, Element(x, Range(1, 3), Less(x, y)), Element(y, Range(1, 2)))`
+the guard's `y` is the ENCLOSING variable `y`: `canonicalLoopLike`
+canonicalizes each clause before the later indices are declared, and the
+interpreter answers `[1, 1]` when `y := 2`. But the node's unknowns subtract
+every clause index over the whole node (the binder scope of
+`indexingSetSites(1)` is not ordered by clause), so `y` is not counted free.
+The JavaScript and Python routes then constant-fold the node before
+`elementClauseBinders` can decline it: the fold evaluates with the enclosing `y`
+unbound, the guard is undecided, and the compiled function is `[]` for every
+`y`. The same shape with
+the name in a COLLECTION (`Element(x, Range(1, y))`) is not folded (a lazy
+`Range` over a symbol does not materialize) and reaches the decline. The
+`compile()` interpreter fallback passes `vars` by name and misses the enclosing
+`y` for the same reason.
+
+The compile-time decline added 2026-09-27 (a guard that names a later binder
+throws "The interpreter evaluates it instead") covers the routes the fold does
+not pre-empt. What remains is a decision: (a) teach the binder machinery that an
+`Element` clause's collection and guard see only the EARLIER indices, so the
+name counts as free — a change to `binding-sites.ts` that `Sum`/`Product` share;
+or (b) reject the shape at canonicalization (a clause may not name a later
+clause's index), which changes the interpreter's answer for a form nobody
+writes deliberately. Reproducer: `test/compute-engine/comprehension-guard.test.ts`,
+"a guard naming a later clause variable reads the enclosing one".
+
 ### LaTeX: the trailing Leibniz form of a derivative absorbs the term that follows it (OPEN, small — found 2026-09-26 by the review of PR #349)
 
 `Add(D(x, x), 1)` serializes as `\frac{\mathrm{d}}{\mathrm{d}x}x+1`, and

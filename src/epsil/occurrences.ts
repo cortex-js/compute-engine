@@ -1,5 +1,6 @@
 import type { MathJsonExpression } from '../math-json/types.js';
 import {
+  nops,
   operand,
   operands,
   operator,
@@ -709,6 +710,38 @@ export function documentBindings(
           return;
         }
         for (const op of operands(node)) walk(op, scope);
+        return;
+      }
+
+      case 'Comprehension': {
+        // `[body for x in xs if cond, y in ys]` → `Comprehension(body,
+        // Element(x, xs, cond?), Element(y, ys))`. Each clause's collection
+        // is read in the scope the EARLIER clauses built (a later collection
+        // may name an earlier binding); the clause then opens a child scope
+        // where its pattern binds and its guard is read. The body is read in
+        // the innermost scope. The clause scopes share the comprehension's
+        // span: the bindings are visible from the clause onward, and nowhere
+        // outside the brackets.
+        const ops = [...operands(node)];
+        let inner = scope;
+        for (let i = 1; i < ops.length; i++) {
+          const clause = ops[i];
+          if (clause === null || operator(clause) !== 'Element') {
+            walk(clause, inner);
+            continue;
+          }
+          walk(operand(clause, 2), inner);
+          inner = childScope(spanOf(node), inner);
+          bindPattern(
+            operand(clause, 1),
+            inner,
+            'loop',
+            spanOf(clause),
+            inner.span[0]
+          );
+          if (nops(clause) >= 3) walk(operand(clause, 3), inner);
+        }
+        walk(ops[0] ?? null, inner);
         return;
       }
 

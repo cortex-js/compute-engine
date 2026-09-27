@@ -134,13 +134,17 @@ specified in [Literals](/epsil/literals/#strings).
 
 _parenthesized_ → **`(`** _expression_ **`)`**
 
-_list_ → **`[`** \[(_expression_)#**`,`**\] **`]`**
+_list_ → **`[`** \[(_expression_)#**`,`**\] **`]`** | **`[`** _expression_ _comprehension-clauses_ **`]`**
 
-_set_ → **`{`** \[(_expression_)#**`,`**\] **`}`**
+_set_ → **`{`** \[(_expression_)#**`,`**\] **`}`** | **`{`** _expression_ _comprehension-clauses_ **`}`**
 
-_dictionary_ → **`{`** \[(_key-value-pair_)#**`,`**\] **`}`** | **`{->}`**
+_dictionary_ → **`{`** \[(_key-value-pair_)#**`,`**\] **`}`** | **`{->}`** | **`{`** _key-value-pair_ _comprehension-clauses_ **`}`**
 
 _key-value-pair_ → _expression_ **`->`** _expression_
+
+_comprehension-clauses_ → **`for`** (_comprehension-clause_)#**`,`**
+
+_comprehension-clause_ → (_symbol_ | _tuple-pattern_) **`in`** _expression_ \[**`if`** _expression_\]
 
 _block_ → **`{`** \[(_statement_)#_statement-separator_\] **`}`**
 
@@ -476,6 +480,57 @@ is its last statement — while a bare `{ … }` stays a set/dictionary. See
 
 ```epsil
 { one -> 1, two -> 2 }
+```
+
+### Comprehensions
+
+A `for` clause after the first (and only) element of a list or brace literal
+makes it a **comprehension**. The bracket picks the collection kind, exactly
+as it does for a literal:
+
+```epsil
+[x^2 for x in 1..10 if x % 2 == 1]        // list: [1, 9, 25, 49, 81]
+{x % 3 for x in 1..10}                     // set: {1, 2, 0}
+{s -> length(s) for s in ["ab", "cde"]}    // dictionary: {"ab" -> 2, "cde" -> 3}
+```
+
+Each clause is `binding in collection`, optionally followed by `if guard`;
+several clauses are separated by commas and nest left to right, so a later
+collection may use an earlier binding:
+
+```epsil
+[(x, y) for x in 1..3, y in 1..x]
+// ➔ [(1, 1), (2, 1), (2, 2), (3, 1), (3, 2), (3, 3)]
+[p + q for (p, q) in [(1, 2), (-3, 4)] if p > 0]
+// ➔ [3]
+```
+
+The binding is a name or a tuple destructuring pattern, with the same grammar
+as the `for` statement. The bound names are visible in the guard, in the later
+clauses and in the body, and nowhere outside the brackets. An element is kept
+only when its guard evaluates to `true`; a guard that cannot be decided
+excludes the element.
+
+A list comprehension is the engine's `Comprehension`, a lazy collection like
+`map`, `filter` and a range: it enumerates when it is indexed, aggregated or
+iterated. A set comprehension deduplicates its values. In a dictionary
+comprehension the key is an **expression** — it is evaluated, and must produce
+a string — unlike the unquoted key of a literal `{one -> 1}`, which is the
+string `"one"`. A repeated key keeps the last value.
+
+The collection and the guard are read above the conditional expression, so a
+conditional, a pipeline, a `??` or a `->` in either position must be
+parenthesized: `[x for x in (xs |> sort)]`. The body is an ordinary expression
+and needs no parentheses: `[x if x > 0 else 0 for x in xs]`.
+
+The lowering is the engine's `Comprehension` with one `Element` clause per
+`in`, and the guard as the clause's third operand:
+
+```epsil
+[x^2 for x in xs if x > 0]
+// ➔ ["Comprehension", ["Power", "x", 2], ["Element", "x", "xs", ["Greater", "x", 0]]]
+{x for x in xs}          // ➔ ["SetFrom", ["Comprehension", "x", ["Element", "x", "xs"]]]
+{k -> v for (k, v) in ps} // ➔ ["DictionaryFrom", ["Comprehension", ["Tuple", "k", "v"], ["Element", ["Tuple", "k", "v"], "ps"]]]
 ```
 
 Trailing commas are allowed in every collection form (lists, sets, tuples,

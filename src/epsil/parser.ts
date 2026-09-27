@@ -22,6 +22,7 @@ import {
   isStringObject,
   mapArgs,
   operand,
+  operands,
   operator,
   stringValue,
   symbol,
@@ -3408,6 +3409,56 @@ export class Parser {
    * destructuring `let` produces. */
   private parseFor(): MathJsonExpression | null {
     const kw = this.advance(); // 'for'
+    const binding = this.parseIterationBinding();
+    if (binding === null) return null;
+    const { node: varNode, start: varStart } = binding;
+
+    const coll = this.parseExpression(0);
+    if (coll === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    if (!this.check('OPEN_BRACE')) {
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    const body = this.inLoopContext(this.loopDepth + 1, () =>
+      this.parseBlock()
+    );
+    const end = this.localEnd(body) ?? this.previousEnd();
+
+    const elementNode = this.wrap(
+      ['Element', varNode, coll] as MathJsonExpression[],
+      varStart,
+      this.localEnd(coll) ?? this.previousEnd()
+    );
+    return this.wrap(
+      ['Loop', body, elementNode] as MathJsonExpression[],
+      kw.start,
+      end
+    );
+  }
+
+  /**
+   * The `binding in` head of an iteration clause: the loop variable of a
+   * `for` statement, or one clause of a comprehension. The binding is a bare
+   * (or verbatim) name, or a tuple destructuring pattern in parentheses, with
+   * the same grammar as `let (p, q) = v`; the `in` that follows is consumed
+   * here as a contextual keyword, so the `Element` infix operator (also
+   * spelled `in`) never enters the collection's expression grammar. The
+   * caller parses the collection.
+   *
+   * Returns the binding node and its start offset, or `null` after a
+   * diagnostic.
+   */
+  private parseIterationBinding(): {
+    node: MathJsonExpression;
+    start: number;
+  } | null {
     const varTok = this.current;
     let varNode: MathJsonExpression;
     if (varTok.type === 'OPEN_PAREN') {
@@ -3441,34 +3492,72 @@ export class Parser {
       return null;
     }
     this.advance(); // 'in'
+    return { node: varNode, start: varTok.start };
+  }
 
-    const coll = this.parseExpression(0);
-    if (coll === null) {
-      this.error(['expression-expected'], this.current.start, this.current.end);
-      return null;
+  /**
+   * The clauses of a comprehension, after the body of a list or brace
+   * literal has been parsed and the current token is the `for` keyword:
+   *
+   *   `for` binding `in` collection [`if` guard] (`,` binding `in` collection [`if` guard])*
+   *
+   * Each clause lowers to an `Element` indexing set, `["Element", binding,
+   * collection]`, or `["Element", binding, collection, guard]` when the clause
+   * has a guard, the same three-operand form `Sum` and `Product` take. The
+   * result is `["Comprehension", body, clause, …]`; the caller wraps it for
+   * a set or a dictionary. Later clauses see the names bound by earlier
+   * ones, so a clause's collection may depend on an earlier binding
+   * (`[(x, y) for x in 1..3, y in 1..x]`).
+   *
+   * The collection and the guard are parsed above the conditional
+   * expression (`a if c else b`), so the `if` that starts a guard is never
+   * read as a conditional tail of the collection. A conditional, a pipeline,
+   * a `??` or a `->` in either position must be parenthesized.
+   *
+   * On a malformed clause a diagnostic is emitted and `null` is returned; the
+   * caller then resynchronizes at the closing bracket.
+   */
+  private parseComprehensionClauses(
+    body: MathJsonExpression
+  ): MathJsonExpression | null {
+    const forTok = this.advance(); // 'for'
+    const clauses: MathJsonExpression[] = [];
+    for (;;) {
+      const binding = this.parseIterationBinding();
+      if (binding === null) return null;
+      const coll = this.parseExpression(CONDITIONAL_PRECEDENCE + 1);
+      if (coll === null) {
+        this.error(
+          ['expression-expected'],
+          this.current.start,
+          this.current.end
+        );
+        return null;
+      }
+      let end = this.localEnd(coll) ?? this.previousEnd();
+      const clause: MathJsonExpression[] = ['Element', binding.node, coll];
+      if (this.check('SYMBOL') && this.current.text === 'if') {
+        this.advance(); // 'if'
+        const guard = this.parseExpression(CONDITIONAL_PRECEDENCE + 1);
+        if (guard === null) {
+          this.error(
+            ['expression-expected'],
+            this.current.start,
+            this.current.end
+          );
+          return null;
+        }
+        this.checkConditionAssign(guard);
+        clause.push(guard);
+        end = this.localEnd(guard) ?? this.previousEnd();
+      }
+      clauses.push(this.wrap(clause, binding.start, end));
+      if (!this.match('COMMA')) break;
     }
-    if (!this.check('OPEN_BRACE')) {
-      this.error(
-        ['opening-bracket-expected', '{'],
-        this.current.start,
-        this.current.end
-      );
-      return null;
-    }
-    const body = this.inLoopContext(this.loopDepth + 1, () =>
-      this.parseBlock()
-    );
-    const end = this.localEnd(body) ?? this.previousEnd();
-
-    const elementNode = this.wrap(
-      ['Element', varNode, coll] as MathJsonExpression[],
-      varTok.start,
-      this.localEnd(coll) ?? this.previousEnd()
-    );
     return this.wrap(
-      ['Loop', body, elementNode] as MathJsonExpression[],
-      kw.start,
-      end
+      ['Comprehension', body, ...clauses] as MathJsonExpression[],
+      this.localStart(body) ?? forTok.start,
+      this.previousEnd()
     );
   }
 
@@ -8321,12 +8410,20 @@ export class Parser {
    * a spread (`["Spread", expr]`), spliced by `List`'s canonicalization:
    * `[...xs, c]` is `Join`/`ListFrom` sugar (`library/collections.ts`). */
   private parseList(): MathJsonExpression {
-    const { values, open, end } = this.parseBracketedList(
+    const { values, open, end, comprehension } = this.parseBracketedList(
       'CLOSE_BRACKET',
       ']',
       false,
-      /* allowSpread */ true
+      /* allowSpread */ true,
+      false,
+      false,
+      /* allowComprehension */ true
     );
+    // `[body for x in xs]` — a list comprehension is the engine's
+    // `Comprehension`, a lazy indexed collection like `map()` and `Range`: it
+    // enumerates when it is indexed, aggregated or iterated.
+    if (comprehension !== undefined)
+      return this.wrap(comprehension, open.start, end);
     return this.wrap(
       ['List', ...values] as MathJsonExpression[],
       open.start,
@@ -8358,14 +8455,58 @@ export class Parser {
       return this.wrap(['Dictionary'], open.start, close.end);
     }
 
-    const { values, open, end, dictMarker } = this.parseBracketedList(
-      'CLOSE_BRACE',
-      '}',
-      false,
-      /* allowSpread */ true,
-      false,
-      /* allowDictionaryMarker */ true
-    );
+    const { values, open, end, dictMarker, comprehension } =
+      this.parseBracketedList(
+        'CLOSE_BRACE',
+        '}',
+        false,
+        /* allowSpread */ true,
+        false,
+        /* allowDictionaryMarker */ true,
+        /* allowComprehension */ true
+      );
+
+    // A brace comprehension. The body decides the kind exactly as the first
+    // element of a literal does: `{k -> v for …}` builds a DICTIONARY from
+    // the `(key, value)` pairs the comprehension produces (the key is an
+    // expression here — it is evaluated, unlike the unquoted literal key of
+    // `{one -> 1}`, which becomes a string); any other body builds a SET from
+    // the values. Both lower to the constructor the spread forms use
+    // (`{...xs}` is `SetFrom`, `{->, ...d}` is `DictionaryFrom`), so the set
+    // deduplicates and the dictionary keeps the last value of a repeated key.
+    if (comprehension !== undefined) {
+      const body = operand(comprehension, 1);
+      if (body !== null && operator(body) === 'KeyValuePair') {
+        const bodyOffsets = nodeOffsets(body);
+        const pair = this.wrap(
+          [
+            'Tuple',
+            operand(body, 1) ?? 'Nothing',
+            operand(body, 2) ?? 'Nothing',
+          ] as MathJsonExpression[],
+          bodyOffsets ? bodyOffsets[0] - this.baseOffset : open.start,
+          bodyOffsets ? bodyOffsets[1] - this.baseOffset : end
+        );
+        const clauses = operands(comprehension).slice(1);
+        return this.wrap(
+          [
+            'DictionaryFrom',
+            this.wrap(
+              ['Comprehension', pair, ...clauses] as MathJsonExpression[],
+              open.start,
+              end
+            ),
+          ] as MathJsonExpression[],
+          open.start,
+          end
+        );
+      }
+      return this.wrap(
+        ['SetFrom', comprehension] as MathJsonExpression[],
+        open.start,
+        end
+      );
+    }
 
     // Disambiguate Set vs Dictionary: ANY element with a top-level `->` (a
     // `KeyValuePair`), or the bare `->` marker, makes it a dictionary
@@ -8481,6 +8622,14 @@ export class Parser {
    * is passed only by `parseCall` — a `name: value` element means a type guard
    * in pattern position and a lambda parameter annotation in a mapsto list, so
    * the production is claimed in call argument lists and nowhere else.
+   *
+   * `allowComprehension` admits a `for` clause after a FIRST plain element
+   * (`[x^2 for x in xs]`, `{k -> v for k in ks}`): the element is the body of
+   * a comprehension, the clauses run to the closer, and the result is
+   * returned as `comprehension` (see `parseComprehensionClauses`) with an
+   * empty `values`. Passed by the list and brace literals only; a `for` after
+   * a second element, a spread, or the dictionary marker follows the ordinary
+   * closing-bracket error path.
    */
   private parseBracketedList(
     closeType: TokenType,
@@ -8488,13 +8637,15 @@ export class Parser {
     allowTypedParams = false,
     allowSpread = false,
     allowNamedArgs = false,
-    allowDictionaryMarker = false
+    allowDictionaryMarker = false,
+    allowComprehension = false
   ): {
     values: MathJsonExpression[];
     open: Token;
     end: number;
     typed: boolean;
     dictMarker: boolean;
+    comprehension?: MathJsonExpression;
   } {
     const open = this.advance(); // the opening bracket
     this.brackets.push(open);
@@ -8502,6 +8653,7 @@ export class Parser {
     const values: MathJsonExpression[] = [];
     let typed = false;
     let dictMarker = false;
+    let comprehension: MathJsonExpression | undefined;
     if (!this.check(closeType)) {
       for (;;) {
         // A bare `->` element — the DICTIONARY MARKER (brace literals
@@ -8603,6 +8755,35 @@ export class Parser {
           this.recoverInBracket();
           break;
         }
+        // `body for binding in collection …` — a comprehension. Only a first
+        // plain element can be a body; the clauses run to the closer.
+        if (
+          allowComprehension &&
+          values.length === 0 &&
+          !dictMarker &&
+          this.check('SYMBOL') &&
+          this.current.text === 'for'
+        ) {
+          comprehension = this.parseComprehensionClauses(expr) ?? undefined;
+          // The clauses run to the closer: anything else after the last
+          // clause (`[x for x in xs |> sort]` — a pipe the clause grammar
+          // does not admit unparenthesized) is diagnosed here, and the rest
+          // of the bracket is skipped so the stray operator does not cascade
+          // into the enclosing expression.
+          if (
+            comprehension !== undefined &&
+            !this.check(closeType) &&
+            this.current.type !== 'EOF'
+          )
+            this.error(
+              ['unexpected-symbol', this.current.text],
+              this.current.start,
+              this.current.end
+            );
+          if (comprehension === undefined || !this.check(closeType))
+            this.recoverInBracket();
+          break;
+        }
         // A `bare-symbol : Type` element is a typed lambda parameter
         // `["Typed", sym, {str: type}]` (only valid in a `( … ) =>` mapsto
         // parameter list; the caller checks the `=>` follows).
@@ -8651,7 +8832,7 @@ export class Parser {
       if (isCloseToken(this.current.type)) this.advance();
     }
 
-    return { values, open, end, typed, dictMarker };
+    return { values, open, end, typed, dictMarker, comprehension };
   }
 
   /** Within a bracketed construct, skip to (but do not consume) the matching

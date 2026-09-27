@@ -236,8 +236,7 @@ const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
  * ordinary masked analysis stands.
  */
 let unrolledBigOpLaneHook:
-  | ((expr: Expression) => boolean | undefined)
-  | undefined;
+  ((expr: Expression) => boolean | undefined) | undefined;
 
 /** See {@link unrolledBigOpLaneHook}. */
 export function installUnrolledBigOpLane(
@@ -4799,14 +4798,12 @@ export class BaseCompiler {
     // constant — see `_withFoldedRealOverride` — so an exact
     // `√(5−√5)`-class element reads as the plain number its emission
     // inlines.)
-    if (
-      !(
-        element.isCollection ||
-        element.type.matches('list<any>') ||
-        element.type.matches('indexed_collection<any>') ||
-        isBoundPossiblyCollectionTyped(element)
-      )
-    )
+    if (!(
+      element.isCollection ||
+      element.type.matches('list<any>') ||
+      element.type.matches('indexed_collection<any>') ||
+      isBoundPossiblyCollectionTyped(element)
+    ))
       return BaseCompiler.isComplexValued(element);
     // A collection whose own elements cannot be identified has no leaf
     // verdict to report, and its whole-collection one describes none of them.
@@ -14309,9 +14306,13 @@ export class BaseCompiler {
     }
 
     // ── Counted loop: single integer-ascending step-1 Range ───────────────
+    // A GUARDED clause (`Element(k, Range(lo, hi), cond)`) takes the general
+    // path below, whose loop emission applies the guard; this counted form
+    // reads the index and the range only.
     if (
       elements.length === 1 &&
       isFunction(elements[0], 'Element') &&
+      elements[0].nops === 2 &&
       BaseCompiler.isLegacyCompatibleRange(elements[0].ops[1])
     ) {
       const indexing = elements[0];
@@ -14587,6 +14588,26 @@ export class BaseCompiler {
       }
       binders.push(binder);
     }
+    // A GUARD that names a binder of a LATER clause reads, in the
+    // interpreter, the ENCLOSING variable of that name (`canonicalLoopLike`
+    // canonicalizes each guard before the later indices are declared). The
+    // node's own free-variable accounting cannot say so — every clause's
+    // index is subtracted from its unknowns — so a route that folds a node
+    // with no unknowns would evaluate it with the enclosing variable
+    // unbound and answer the empty list. Decline the shape instead of
+    // compiling it under a guess; the interpreter evaluates it.
+    for (let i = 0; i < binders.length; i++) {
+      const guard = binders[i].clause.ops[2];
+      if (guard === undefined || isSymbol(guard, 'Nothing')) continue;
+      for (let j = i + 1; j < binders.length; j++)
+        for (const name of binders[j].names)
+          if (BaseCompiler.symbolOccursFree(guard, name))
+            throw new Error(
+              `Could not compile \`Loop\`: the guard of Element clause ${i + 1} names \`${name}\`, ` +
+                `which a later clause binds; in the interpreter that name is the enclosing ` +
+                `variable, and the compiled loop cannot tell the two apart. The interpreter evaluates it instead.`
+            );
+    }
     return binders;
   }
 
@@ -14786,6 +14807,43 @@ export class BaseCompiler {
       // a hole where the pattern skips a position).
       const name = binders[i].jsPattern;
       const collExpr = elem.ops[1];
+      // A GUARDED clause, `Element(x, xs, cond)`: the inner loops and the
+      // body run only for the elements the guard accepts, so the guard
+      // wraps everything nested inside this clause's loop. The interpreter
+      // keeps an element only when the guard evaluates to exactly `True`
+      // (`runNested`), so the emitted test is the DECIDED-TRUE test of the
+      // three-valued condition lowering, not JavaScript truthiness: a
+      // non-boolean guard (`if x`) keeps nothing, a relation over `NaN` and a
+      // `Not` of one are undecided and keep nothing, exactly as they do for a
+      // branch condition (`compileGuardTest`).
+      //
+      // The guard reads the bindings of ITS clause and the clauses before it
+      // — a name bound by a LATER clause is, in the interpreter, the
+      // enclosing variable of that name (`canonicalLoopLike` canonicalizes
+      // each guard before the later indices are declared). The body target
+      // binds every clause's name, so it is not the target for the guard: a
+      // later name would be emitted bare, before its loop declares it.
+      //
+      // A target that wraps its numbers (interval arithmetic) has no plain
+      // boolean to test, so the guard declines there and the interpreter
+      // evaluates the comprehension.
+      const guard = elem.ops[2];
+      if (guard !== undefined && !isSymbol(guard, 'Nothing')) {
+        if (needsWrap)
+          throw new Error(
+            `Could not compile \`Loop\`: a guarded clause is not supported on target ` +
+              `'${target.language ?? '?'}'. The interpreter evaluates it instead.`
+          );
+        const visible = new Set(
+          binders.slice(0, i + 1).flatMap((b) => b.names)
+        );
+        const guardTarget: CompileTarget<Expression> = {
+          ...target,
+          var: (id: string) => (visible.has(id) ? id : target.var(id)),
+          boundVars: BaseCompiler.withBoundNames(target, [...visible]),
+        };
+        inner = `if (${BaseCompiler.compileGuardTest(guard, guardTarget)}) { ${inner} }`;
+      }
       let collection: string;
       if (
         target.language === 'javascript' &&
@@ -18486,6 +18544,29 @@ export class BaseCompiler {
    * `'operands'` tests a relation's operands for NaN, and `'connective'`
    * combines its operands' pairs by the Kleene tables.
    */
+  /**
+   * A guard condition as a target boolean that is true exactly when the
+   * condition is DECIDED TRUE — the test the interpreter applies to a
+   * guarded `Element` clause (`runNested` keeps an element only when the
+   * guard evaluates to the symbol `True`). A condition decided by
+   * construction (a comparison of operands that can never be `NaN`) compiles
+   * to its plain boolean; any other condition compiles to its three-valued
+   * Kleene value (`true`/`false`/undecided) and is tested for `true`, so an
+   * undecided relation, a `Not` of one, and a non-boolean value all answer
+   * false here, as they answer "no branch" in `If`/`Which`.
+   */
+  static compileGuardTest(
+    cond: Expression,
+    target: CompileTarget<Expression>,
+    dialect: ConditionDialect = CONDITION_DIALECT_JS
+  ): TargetSource {
+    const node = BaseCompiler.conditionDecidability(cond, true, target);
+    if (node === null) return BaseCompiler.compile(cond, target);
+    return dialect.isTrue(
+      `(${BaseCompiler.kleeneCondition(node, target, dialect)})`
+    );
+  }
+
   static conditionDecidability(
     cond: Expression,
     canBind = true,
@@ -26222,7 +26303,7 @@ export class BaseCompiler {
       candidates.add(base);
     }
     if (candidates.size === 0) return;
-    for (let changed = true; changed; ) {
+    for (let changed = true; changed;) {
       changed = false;
       for (const name of candidates) {
         if (!defs.has(name)) continue;

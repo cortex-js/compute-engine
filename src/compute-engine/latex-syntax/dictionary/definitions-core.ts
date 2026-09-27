@@ -2924,6 +2924,38 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const body = args[0];
       const elements = args.slice(1);
 
+      // A GUARDED clause, `Element(x, L, cond)`, has no `for` spelling: the
+      // `name = expr` binding grammar carries no guard, and `L\{cond\}` would
+      // re-parse as a restriction of the collection (`When`), a different
+      // expression. Such a comprehension is written in the function form,
+      // which re-parses to the same node. The guarded clause itself is
+      // written in function form too: its infix spelling would chain the
+      // `\in` (`x\in L\in cond`), which re-parses as a nested membership.
+      // A `Block` argument is fenced (`fenceBlockBody`): its bare
+      // `;`-separated statement list binds looser than the argument commas
+      // and would absorb the following arguments on re-parse.
+      const isGuarded = (elem: MathJsonExpression): boolean =>
+        nops(elem) >= 3 && symbol(operand(elem, 3)) !== 'Nothing';
+      if (elements.some(isGuarded))
+        return joinLatex([
+          '\\operatorname{Comprehension}\\left(',
+          [
+            fenceBlockBody(serializer, body),
+            ...elements.map((elem) =>
+              isGuarded(elem)
+                ? joinLatex([
+                    '\\operatorname{Element}\\left(',
+                    operands(elem)
+                      .map((x) => fenceBlockBody(serializer, x))
+                      .join(', '),
+                    '\\right)',
+                  ])
+                : serializer.serialize(elem)
+            ),
+          ].join(', '),
+          '\\right)',
+        ]);
+
       // Emit comprehension form: body \operatorname{for} x = L1, y = L2, ...
       const bindings = elements
         .map((elem) => {

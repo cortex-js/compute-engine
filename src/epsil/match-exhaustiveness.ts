@@ -214,6 +214,30 @@ function walk(
       return;
     }
 
+    case 'Comprehension': {
+      // `[body for x in xs if cond, …]` → `Comprehension(body, Element(x, xs,
+      // cond?), …)`: each clause's collection is read with the earlier
+      // clauses' names bound, its guard and the body with its own name bound
+      // too. The bound names shadow any annotated outer binding of the same
+      // name for the guard and the body, exactly as a `for` loop's does.
+      const [body, ...clauses] = operands(node);
+      const saved = new Map(scope);
+      for (const clause of clauses) {
+        if (operator(clause) !== 'Element') {
+          if (clause !== undefined) walk(ce, clause, scope, into, source);
+          continue;
+        }
+        const [target, collection, guard] = operands(clause);
+        if (collection !== undefined) walk(ce, collection, scope, into, source);
+        if (target !== undefined)
+          for (const name of symbolsIn(target)) scope.delete(name);
+        if (guard !== undefined) walk(ce, guard, scope, into, source);
+      }
+      if (body !== undefined) walk(ce, body, scope, into, source);
+      restore(scope, saved);
+      return;
+    }
+
     case 'Loop': {
       // `for x in xs { … }` → `Loop(body, Element(x, xs))`: the collection is
       // read in the enclosing scope, the body with the element name bound.

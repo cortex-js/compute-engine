@@ -153,6 +153,15 @@ Pipelines read from input to result, rather than inside out. The `_` marks the
 argument position filled by the piped value, which matters when `map` or
 `filter` has another argument as well.
 
+When the result is a collection, a comprehension says the same thing in one
+bracket. The bracket picks the kind: `[…]` builds a list, `{…}` a set, and
+`{k -> v …}` a dictionary.
+
+```epsil
+[n^2 for n in 1..10 if n % 2 == 0]
+// ➔ [4, 16, 36, 64, 100]
+```
+
 For work whose purpose is changing a binding — an accumulator, for example —
 use a loop:
 

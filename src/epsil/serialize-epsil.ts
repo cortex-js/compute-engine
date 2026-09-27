@@ -617,6 +617,56 @@ export function serializeEpsil(
     },
 
     //
+    // Comprehensions
+    //
+    // `["Comprehension", body, ["Element", x, xs], …]` is the list
+    // comprehension `[body for x in xs, …]`; a clause with a guard,
+    // `["Element", x, xs, cond]`, prints `x in xs if cond`. A `SetFrom` or
+    // `DictionaryFrom` whose only operand is a comprehension is the brace
+    // form the parser produced for `{body for …}` and `{k -> v for …}`
+    // (the dictionary body is the `Tuple(k, v)` pair). Any other shape —
+    // a clause that is not an `Element`, a `SetFrom` of several operands —
+    // falls back to the call form, which re-parses faithfully.
+    //
+    Comprehension: (expr: MathJsonExpression): FormattingBlock =>
+      serializeComprehension(expr, '[', ']') ?? serializeGenericFunction(expr),
+
+    SetFrom: (expr: MathJsonExpression): FormattingBlock => {
+      const source = operand(expr, 1);
+      if (
+        source !== null &&
+        nops(expr) === 1 &&
+        operator(source) === 'Comprehension'
+      ) {
+        const block = serializeComprehension(source, '{', '}');
+        if (block !== null) return block;
+      }
+      return serializeGenericFunction(expr);
+    },
+
+    DictionaryFrom: (expr: MathJsonExpression): FormattingBlock => {
+      const source = operand(expr, 1);
+      if (
+        source !== null &&
+        nops(expr) === 1 &&
+        operator(source) === 'Comprehension'
+      ) {
+        const pair = operand(source, 1);
+        if (operator(pair) === 'Tuple' && nops(pair) === 2) {
+          const block = serializeComprehension(source, '{', '}', (body) =>
+            serializeExpression([
+              'KeyValuePair',
+              operand(body, 1) ?? 'Nothing',
+              operand(body, 2) ?? 'Nothing',
+            ])
+          );
+          if (block !== null) return block;
+        }
+      }
+      return serializeGenericFunction(expr);
+    },
+
+    //
     // Tuple
     //
     // `(a, b)` for 2+ elements; the empty and 1-element cases have no
@@ -2534,6 +2584,54 @@ export function serializeEpsil(
   /** `Loop` in one of its three Epsil statement spellings — `for … in … { … }`,
    * `while … { … }` and `while let … = … { … }` — or `null` for a shape that
    * has none of them (the caller then emits the generic call form). */
+  /**
+   * A comprehension in its bracket form: `open body for x in xs if cond, …
+   * close`. `serializeBody` renders the body (the dictionary form prints its
+   * `Tuple(k, v)` body as `k -> v`). Returns `null` when a clause is not an
+   * `Element` with a name or tuple-pattern binding, so the caller can fall
+   * back to the call form.
+   *
+   * The parser reads each clause's collection and guard ABOVE the conditional
+   * expression, so a conditional or anything binding more loosely (`|>`,
+   * `??`, `->`, `=>`) is parenthesized there, as the head of a `for` statement
+   * is. The body is an ordinary first element and needs no fence.
+   */
+  function serializeComprehension(
+    expr: MathJsonExpression,
+    open: string,
+    close: string,
+    serializeBody: (body: MathJsonExpression) => FormattingBlock = (body) =>
+      serializeExpression(body)
+  ): FormattingBlock | null {
+    const args = operands(expr);
+    if (args.length < 2) return null;
+    const [body, ...clauses] = args;
+    const clauseOperand = (x: MathJsonExpression): FormattingBlock =>
+      serializeConditionalOperand(x, CONDITIONAL_PRECEDENCE + 1);
+    const parts: (FormattingBlock | string)[] = [];
+    for (const clause of clauses) {
+      if (operator(clause) !== 'Element') return null;
+      const n = nops(clause);
+      if (n !== 2 && n !== 3) return null;
+      const binding = operand(clause, 1);
+      const collection = operand(clause, 2);
+      if (binding === null || collection === null) return null;
+      let bindingText: string | null;
+      if (operator(binding) === 'Tuple')
+        bindingText = serializeDestructuringPattern(binding);
+      else {
+        const name = symbol(binding);
+        bindingText = name === null ? null : escapeSymbol(name);
+      }
+      if (bindingText === null) return null;
+      if (parts.length > 0) parts.push(', ');
+      parts.push(bindingText, ' in ', clauseOperand(collection));
+      const guard = operand(clause, 3);
+      if (n === 3 && guard !== null) parts.push(' if ', clauseOperand(guard));
+    }
+    return fmt.line(open, serializeBody(body), ' for ', ...parts, close);
+  }
+
   function serializeLoop(expr: MathJsonExpression): FormattingBlock | null {
     // The head expressions sit where the parser resumes at precedence 0 and
     // then requires a `{`, so they are parenthesized on the same rule as an

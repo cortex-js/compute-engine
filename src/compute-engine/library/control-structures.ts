@@ -290,7 +290,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'Value-producing comprehension: evaluate `body` in nested iteration ' +
         'over one or more `Element` clauses and collect the results into an ' +
         'indexed collection (a `List`). Later clauses see earlier bindings; ' +
-        'independent clauses produce a Cartesian product.',
+        'independent clauses produce a Cartesian product. A clause with a ' +
+        'third operand, `Element(x, xs, cond)`, is a guard: only the ' +
+        'elements for which `cond` evaluates to `True` are visited.',
       lazy: true,
       // See `Loop`: each `Element` clause's index is a bound variable of this
       // node.
@@ -2471,9 +2473,24 @@ function canonicalLoopLike(
       };
       bindPattern(idxCanonical, elt);
     });
+    // An optional GUARD, `Element(x, xs, cond)` — the three-operand indexing
+    // set `Sum` and `Product` also take. It is canonicalized here, after the
+    // index is declared, so its occurrences of the index bind to this loop's
+    // scope, as the body's do. At run time an element is visited only when
+    // the guard evaluates to `True` (`runNested`).
+    const guard = it.ops[2];
+    const guardCanonical =
+      guard === undefined || sym(guard) === 'Nothing'
+        ? undefined
+        : guard.canonical;
     if (patternError !== undefined)
       return ce._fn('Element', [patternError, collCanonical]);
-    return ce._fn('Element', [idxCanonical, collCanonical]);
+    return ce._fn(
+      'Element',
+      guardCanonical === undefined
+        ? [idxCanonical, collCanonical]
+        : [idxCanonical, collCanonical, guardCanonical]
+    );
   });
   const canonicalBody: Expression = canonicalStatement(ce, body);
 
@@ -2859,8 +2876,24 @@ function comprehensionCount(expr: Expression): number | undefined {
   if (s === undefined) return undefined;
   if (s.empty) return 0;
   if (s.unknown) return undefined;
-  if (s.infinite) return Infinity;
-  return s.product;
+  // A GUARDED clause (`Element(x, xs, cond)`) keeps only the elements its
+  // guard accepts, so the product of the domain counts is an upper bound,
+  // not the count. Over finite domains the count is the domain-only
+  // traversal, which applies the guard; over an infinite domain nothing
+  // decides how many elements the guard keeps.
+  const guarded = comprehensionHasGuard(clauses);
+  if (s.infinite) return guarded ? undefined : Infinity;
+  return guarded ? comprehensionEnumeratedCount(expr) : s.product;
+}
+
+/** Whether any clause carries a guard, a third `Element` operand. */
+function comprehensionHasGuard(clauses: ReadonlyArray<Expression>): boolean {
+  return clauses.some(
+    (clause) =>
+      isFunction(clause, 'Element') &&
+      clause.nops >= 3 &&
+      sym(clause.ops[2]) !== 'Nothing'
+  );
 }
 
 /**
@@ -2885,7 +2918,10 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
   if (s === undefined) return undefined;
   if (s.empty) return true; // 0 elements ⇒ finite
   if (s.unknown) return undefined;
-  if (s.infinite) return false;
+  // A guard over an infinite domain may keep finitely many elements or
+  // infinitely many; nothing here can tell. Over finite domains it keeps a
+  // subset, which is finite.
+  if (s.infinite) return comprehensionHasGuard(clauses) ? undefined : false;
   return true;
 }
 
@@ -2968,7 +3004,31 @@ function comprehensionCollectionHandlers(): CollectionHandlers {
 
     isEmpty: (expr) => {
       const c = comprehensionCount(expr);
-      return c === undefined ? undefined : c === 0;
+      if (c !== undefined) return c === 0;
+      // A GUARDED comprehension over an infinite (or unknown-count) domain
+      // has no count, but its emptiness is decided by the first element the
+      // guard accepts, as `Filter` decides it: walk until one element is
+      // produced. The walk stops at the iteration limit — a guard that never
+      // accepts leaves emptiness unknown rather than looping — and a domain
+      // that cannot be enumerated is not probed at all (the walk would find
+      // nothing and report a definite `true`). Without this, `Take(c, 3)` over
+      // such a comprehension stayed symbolic: materialization declines a view
+      // whose emptiness is unknown.
+      if (!isFunction(expr)) return undefined;
+      const clauses = expr.ops.slice(1);
+      if (!comprehensionHasGuard(clauses)) return undefined;
+      if (comprehensionIsEnumerable(expr) !== true) return undefined;
+      try {
+        for (const _ of expr.each()) return false;
+        return true;
+      } catch (e) {
+        if (
+          e instanceof CancellationError &&
+          e.cause === 'iteration-limit-exceeded'
+        )
+          return undefined;
+        throw e;
+      }
     },
 
     isFinite: (expr) => comprehensionIsFinite(expr),
@@ -3131,6 +3191,26 @@ function* runNested(
       // Ephemeral index write: bumps `_anyVersion` and the index def's
       // `_writeVersion`, not `_semanticVersion` (see `assignLoopIndex`).
       assignLoopIndex(ce, name, value);
+    }
+    // A guarded clause, `Element(x, xs, cond)`: the element is visited only
+    // when the guard evaluates to `True` with the index bound to it. A
+    // `False` guard skips the element; so does one that stays undecided (a
+    // symbolic comparison) or is not a boolean at all — a comprehension is a
+    // value, and an element it cannot decide to keep is not in it.
+    const guard = elem.ops[2];
+    if (guard !== undefined && sym(guard) !== 'Nothing') {
+      const verdict = guard.evaluate();
+      if (sym(verdict) !== 'True') {
+        // A rejected element is an iteration too: it counts against the
+        // iteration limit, or a guard that never accepts over an infinite
+        // domain (`[x for x in 1..oo if x < 0]`) would never reach the body,
+        // whose evaluation is where the limit is otherwise enforced, and the
+        // walk would never end.
+        state.count += 1;
+        if (state.count > ce.iterationLimit)
+          throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+        continue;
+      }
     }
     yield* runNested(body, elements, index + 1, ce, state, onLeaf);
     if (state.stopped) return;

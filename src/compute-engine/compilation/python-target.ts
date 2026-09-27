@@ -920,7 +920,6 @@ function pythonElementHeaders(
   let scope = target;
   for (const b of binders) {
     const source = pythonElementSource(b.clause.ops[1], scope);
-    headers.push(`for ${b.pyPattern} in ${source}:`);
     const prev = scope;
     const bound = new Set(b.names);
     scope = {
@@ -928,8 +927,31 @@ function pythonElementHeaders(
       var: (id) => (bound.has(id) ? id : prev.var(id)),
       boundVars: BaseCompiler.withBoundNames(prev, b.names),
     };
+    // A GUARDED clause, `Element(x, xs, cond)`, is the `if` of a Python
+    // comprehension clause, `for x in xs if cond`. The guard reads the
+    // clause's own binding, so it compiles under the scope that binds it.
+    // The test is the DECIDED-TRUE test of the three-valued condition
+    // lowering, as the interpreter keeps an element only when the guard
+    // evaluates to exactly `True` (`compileGuardTest`). The statement-form
+    // loop cannot carry this header (`compilePythonLoop` declines a guarded
+    // clause before coming here).
+    const guard = b.clause.ops[2];
+    const guardCode =
+      guard !== undefined && !isSymbol(guard, 'Nothing')
+        ? ` if ${BaseCompiler.compileGuardTest(guard, scope, PYTHON_CONDITION_DIALECT)}`
+        : '';
+    headers.push(`for ${b.pyPattern} in ${source}${guardCode}:`);
   }
   return { headers, bodyTarget: scope };
+}
+
+/** Whether an `Element` clause carries a guard (a third operand): the
+ * `for x in xs if cond` of a comprehension. */
+function hasGuardedClause(elements: ReadonlyArray<Expression>): boolean {
+  return elements.some(
+    (e) =>
+      isFunction(e, 'Element') && e.nops >= 3 && !isSymbol(e.ops[2], 'Nothing')
+  );
 }
 
 /**
@@ -962,6 +984,12 @@ function compilePythonLoop(
   let bodyTarget = target;
   if (elements.length === 0) headers = ['while True:'];
   else {
+    // A `for` statement header has no `if` clause in Python; the guard of a
+    // comprehension clause has no place here.
+    if (hasGuardedClause(elements))
+      throw new Error(
+        'Could not compile `Loop`: a guarded `Element` clause has no Python statement form. The interpreter evaluates it instead.'
+      );
     BaseCompiler.assertBreakLeavesWholeLoop(elements, body);
     ({ headers, bodyTarget } = pythonElementHeaders(elements, target));
   }

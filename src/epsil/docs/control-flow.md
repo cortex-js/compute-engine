@@ -961,6 +961,17 @@ value of `a in b`:
 for x in a in b { x }
 ```
 
+A `for` loop runs for its effects. To build a collection from an iteration,
+write a **comprehension** — the same clause inside a list or brace literal,
+optionally with an `if` guard:
+
+```epsil
+[x^2 for x in 1..10 if x % 2 == 1]
+// ➔ [1, 9, 25, 49, 81]
+```
+
+See [Comprehensions](/epsil/syntax/#comprehensions).
+
 ## Pipelines
 
 `x |> f` means exactly `f(x)`. For a single call that is a wash — `sqrt(2)`
