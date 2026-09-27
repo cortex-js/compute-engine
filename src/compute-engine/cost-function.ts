@@ -59,6 +59,18 @@ function numericCostFunction(n: NumericValue | number): number {
     // A pure-imaginary exact value carries its radical in `imRadical`, so it
     // needs the same treatment as the real one below — otherwise `i√17` prices
     // at 4 while `√17` prices at 7, and D6's fix is only half applied.
+    //
+    // An exact complex literal is ONE radical times a Gaussian rational
+    // (`√2 + √2·i` is `√2·(1 + i)`; `ExactNumericValue.normalize()` asserts
+    // that both non-zero parts carry the same radical), so the radical is
+    // charged once, here, and not again for the real part. Charging it twice
+    // was tried on 2026-09-27 and reverted: `√2 + √2·i` then cost more than
+    // `∜(−16)`, and `simplify()` kept the root instead of rewriting it to the
+    // literal, which the exact `∜(−1)` decision of 2026-09-25 requires
+    // (`imaginary-unit-spelling.test.ts`). Recorded rule, user decision
+    // 2026-09-27. A possible refinement is to price the two parts as the small
+    // rationals they are rather than as their machine doubles, which lowers
+    // the literal's cost and needs a full-suite blast-radius run.
     const imRad = (n as { imRadical?: number }).imRadical;
     const imExtra =
       imRad !== undefined && imRad > 1 ? 3 + numericCostFunction(imRad) : 0;

@@ -459,26 +459,6 @@ whose result is a complex scalar. Also, `\sum_{k=1}^{3} p((x, \sqrt{x-5}))`
 declines in `auto` mode (inlining refuses because the body's `k` would be
 captured by the index); strict mode compiles it.
 
-### Residues of the 2026-09-24 fix round (OPEN, small — found by the review of the fixes)
-
-Found by the review of the fixes of 2026-09-24, not fixed in that round (the
-bigint root extraction, the `e^{1 + 0.5iπ}` dust and the mutually recursive
-diagnostic landed 2026-09-25; a float multiple of π that is a special angle is exact in
-every angular unit since 2026-09-27, user decision — what that left:
-`e^{1+0.25iπ}` stays a float in every unit because the canonical exponent is
-already a float complex literal with no structure left to read, which
-`trig-structural-fixes.test.ts` pins for `e^{1+0.5iπ}`): (1) The dust limit is capped at
-`|x| ≥ 1`, so `sin(10^6π).N()` is `−3.8e-19` while `evaluate()` is `0`, and
-`tan(10^6π + π/2).N()` is `2.6e18` while `evaluate()` is `~oo` (the cap exists
-so that `sin(10^22)` is not chopped; the two routes disagree for multiples of π
-above `10^2`). Note that since 2026-09-25 a LITERAL `10^6π` argument is reduced
-exactly (`\sin(10^{6}\pi).N()` is `0`); the cap still applies to a float
-argument near a multiple of π. (2) A float near a special angle gives the sine
-of the DECIMAL literal on the scalar route (`Sin(3.141592653589793)` is
-`2.38e-16`, 21 digits) and the sine of the DOUBLE inside a machine list
-(`1.22e-16`, `Math.sin`), a factor of 2 at a zero crossing; both are exact
-readings of their literal.
-
 ### Residues of the exactness-by-route rule (OPEN, decisions — 2026-09-27)
 
 Since 2026-09-27 (user decision) exactness is decided by the route: a literal
@@ -715,14 +695,6 @@ part: `.N()` of `√2 + √2 i` is
 prints at the working precision; before, the complex branch of
 `BigNumericValue.toString()` did not round it and printed 25 or 46 digits). A
 big-decimal imaginary part is scheduled (user decision 2026-09-24), not done.
-Related, a decision (found 2026-09-27): `numericCostFunction`
-(`cost-function.ts`) prices the imaginary radical of an exact complex literal
-but not its real radical, so `√2 + √2i` costs 9 where `i√2` costs 8. Pricing
-the real radical the same way (13) was tried and reverted: `simplify()` then
-kept `∜(−16)` instead of rewriting it to `√2 + √2i`, which
-`imaginary-unit-spelling.test.ts` pins (the exact `∜(−1)` decision of
-2026-09-25). Either the real radical stays unpriced, or the cost of a `Root`
-of a negative radicand rises with it.
 
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 

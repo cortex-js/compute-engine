@@ -638,6 +638,15 @@ function chopBignumDust(
 /**
  * The rounding error of the angle `x` (in radians) that `chopBignumDust`
  * and `bigPoleDust` allow: `min(1, |x|)·10^(2−precision)`.
+ *
+ * The scale is capped at `|x| = 1` on purpose, and the cap is a recorded rule
+ * (user decision 2026-09-27): the sine of a float argument is the sine of
+ * that float. `\sin(3141592.653589793)`, the double nearest to `10^6·π`, is
+ * `−3.8e-19` under both `evaluate()` and `.N()`, because that double is not
+ * `10^6·π`; a symbolic multiple of π (`\sin(10^{6}\pi)`) is reduced exactly
+ * before any float is formed, so it is `0`. A chop that grew with `|x|`
+ * would also chop `\sin(10^{22})`, whose value is `−0.85`, so a larger
+ * allowance would need its own cap and would only move the boundary.
  */
 function dustScale(ce: ComputeEngine, x: BigDecimal): BigDecimal {
   const limit = new BigDecimal(`1e${2 - ce.precision}`);
