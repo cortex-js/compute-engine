@@ -1994,7 +1994,19 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     )
       ce.declare(indexExpr.symbol, { type: 'unknown', inferred: true });
     const canonicalCollection = collection.canonical;
-    const canonicalIndex = indexExpr.canonical;
+    // The index is the binding THIS scope holds for the name. A clause that
+    // is already canonical (a `Sum` rebuilt from its canonical operands,
+    // which `evaluate()` does when the sum stays symbolic) keeps its index
+    // symbol bound to the scope of the ORIGINAL sum: narrowing that symbol
+    // below left the new scope's index `unknown`, the body then typed it
+    // `number` from `k²` (the held `Sum(k², Element(k, [1, 2, 3]))` was typed
+    // `number` where the original was `integer`), and the clause and the body
+    // denoted two different bindings of one index.
+    const indexCanonical = indexExpr.canonical;
+    const canonicalIndex = isSymbol(indexCanonical)
+      ? (ce._bindingSymbol(indexCanonical.symbol, ce.context.lexicalScope) ??
+        indexCanonical)
+      : indexCanonical;
     // Narrow the index to the collection's ELEMENT type when it is known,
     // before the body canonicalizes against it: `Sum(chi(n), Element(chi,
     // G))` over `G: set<function>` needs `chi` bound as a function for the
@@ -2006,24 +2018,13 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     // assumption, and the binding written here is a contract the next
     // statement must not be able to retract. An element type that is unknown
     // leaves the index `unknown`, to be typed by its use in the body.
-    //
-    // The binding narrowed is the one this scope holds for the name. A clause
-    // that is already canonical (a `Sum` rebuilt from its canonical operands,
-    // which `evaluate()` does when the sum stays symbolic) keeps its index
-    // symbol bound to the scope of the ORIGINAL sum, so narrowing that symbol
-    // left the new scope's index `unknown`; the body then typed it `number`
-    // from `k²`, and the held `Sum(k², Element(k, [1, 2, 3]))` was typed
-    // `number` where the original was `integer`.
     if (isSymbol(canonicalIndex) && canonicalIndex.symbol !== 'Nothing')
       ce._withoutFacts(() => {
         const elt = collectionElementType(
           resolveTypeForCompilation(canonicalCollection.type.type)
         );
         if (elt === undefined || elt === 'any' || elt === 'unknown') return;
-        const binding =
-          ce._bindingSymbol(canonicalIndex.symbol, ce.context.lexicalScope) ??
-          canonicalIndex;
-        bindIndexAuthoritatively(ce, binding, elt);
+        bindIndexAuthoritatively(ce, canonicalIndex, elt);
       });
     if (condition) {
       return ce.function('Element', [

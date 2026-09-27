@@ -46,15 +46,33 @@ describe('A BINDER REBUILT FROM ITS CANONICAL OPERANDS KEEPS ITS INDEX TYPE', ()
     expect(held.type.toString()).toBe('integer | nan | signed_infinity');
   });
 
-  test('an outer symbol with the same name is not narrowed', () => {
+  test.each(['Sum', 'Comprehension', 'Loop'])(
+    'an outer symbol with the same name is not narrowed: %s',
+    (head) => {
+      const ce = new ComputeEngine();
+      ce.declare('k', 'real');
+      const e = ce.box([
+        head,
+        ['Power', 'k', 2],
+        ['Element', 'k', ['List', 1, 2, 3]],
+      ] as never);
+      ce.function(head, [...e.ops!]);
+      expect(ce.box('k').type.toString()).toBe('real');
+    }
+  );
+
+  test('the clause and the body of a rebuilt binder share one binding', () => {
     const ce = new ComputeEngine();
-    ce.declare('k', 'real');
-    const e = ce.box([
-      'Sum',
-      ['Power', 'k', 2],
-      ['Element', 'k', ['List', 1, 2, 3]],
-    ] as never);
-    ce.function('Sum', [...e.ops!]);
-    expect(ce.box('k').type.toString()).toBe('real');
+    for (const head of ['Sum', 'Comprehension']) {
+      const e = ce.box([
+        head,
+        ['Power', 'k', 2],
+        ['Element', 'k', ['List', 1, 2, 3]],
+      ] as never);
+      const rebuilt = ce.function(head, [...e.ops!]);
+      const clauseIndex = rebuilt.op2.op1;
+      const bodyIndex = rebuilt.op1.op1;
+      expect(clauseIndex.valueDefinition).toBe(bodyIndex.valueDefinition);
+    }
   });
 });

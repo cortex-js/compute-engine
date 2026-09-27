@@ -2383,9 +2383,21 @@ function canonicalLoopLike(
     // A destructuring pattern stays RAW, exactly as the `Declare`/`Assign`
     // destructuring targets do: canonicalizing it would fold a single-letter
     // leaf into the library constant of that name (`i` → `ImaginaryUnit`).
-    const idxCanonical = isFunction(indexExpr, 'Tuple')
+    //
+    // A plain index is the binding THIS scope holds for the name. A clause
+    // that is already canonical (a loop rebuilt from its canonical operands)
+    // keeps its index bound to the ORIGINAL loop's scope: narrowing that
+    // symbol left this scope's index `unknown`, so the body typed `10i` as
+    // `number`, and the clause and the body denoted two different bindings
+    // of one index (`canonicalIndexingSet`, `library/utils.ts`, does the same
+    // for a `Sum`).
+    const canonicalIndex = isFunction(indexExpr, 'Tuple')
       ? indexExpr
       : indexExpr.canonical;
+    const idxCanonical = isSymbol(canonicalIndex)
+      ? (ce._bindingSymbol(canonicalIndex.symbol, ce.context.lexicalScope) ??
+        canonicalIndex)
+      : canonicalIndex;
     // The element type is read fact-blind: the collection's EFFECTIVE type can
     // be narrowed by an assumption, and the index binding this write creates is
     // a contract that must not carry a fact the next statement can retract.
@@ -2402,18 +2414,8 @@ function canonicalLoopLike(
       // `library/utils.ts`, says why and how the removal is journaled).
       const bindAuthoritatively = (binding: Expression, type: Type): void =>
         bindIndexAuthoritatively(ce, binding, type);
-      // The binding narrowed is the one this scope holds for the name: a
-      // clause that is already canonical (a loop rebuilt from its canonical
-      // operands) keeps its index bound to the ORIGINAL loop's scope, and
-      // narrowing that symbol left this scope's index `unknown`, so the body
-      // typed `10i` as `number` (`canonicalIndexingSet`, `library/utils.ts`,
-      // does the same for a `Sum`).
       if (isSymbol(idxCanonical)) {
-        bindAuthoritatively(
-          ce._bindingSymbol(idxCanonical.symbol, ce.context.lexicalScope) ??
-            idxCanonical,
-          elt
-        );
+        bindAuthoritatively(idxCanonical, elt);
         return;
       }
       // A destructuring pattern (`for (p, q) in pairs`) binds each leaf to
