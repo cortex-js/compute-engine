@@ -150,11 +150,20 @@ function withinDivisorScanBudget(m: bigint): boolean {
   );
 }
 
-/** A nonzero integer whose divisor scan is within the step budget — the
- * `Divisors` evaluate guard, for its `canEnumerate` promise. */
-function divisorScanGround(g: Expression): boolean {
+/**
+ * The `Divisors` ground predicate, for its `canEnumerate` promise: `true`
+ * for a nonzero integer whose divisor scan is within the step budget (the
+ * evaluate handler's cheap route), `false` for zero (infinitely many
+ * divisors, never evaluated), and `undefined` past the scan budget — there
+ * the handler builds the list from the factorization, which may or may not
+ * run out of its own budget, so whether evaluation declines cannot be told
+ * cheaply. A `false` promise here would make the collection routes (`at`,
+ * `Filter`, `Take`) skip an operand that `evaluate()` serves.
+ */
+function divisorScanGround(g: Expression): boolean | undefined {
   const k = toBigint(g);
-  return k !== null && k !== 0n && withinDivisorScanBudget(k < 0n ? -k : k);
+  if (k === null || k === 0n) return false;
+  return withinDivisorScanBudget(k < 0n ? -k : k) ? true : undefined;
 }
 
 /**
@@ -381,14 +390,37 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // 0 has infinitely many divisors; leave it unevaluated.
         const m = k < 0n ? -k : k;
         if (m === 0n) return undefined;
-        // The scan is O(√n) steps; past the step budget it would abort, so
-        // an operand that large stays symbolic instead (and `canEnumerate`
-        // declines it through the same predicate).
-        if (!withinDivisorScanBudget(m)) return undefined;
-        return ce.function(
-          'List',
-          divisorsAscending(m, ce._deadlineFrame).map((d) => ce.number(d))
-        );
+        // Within budget, the O(√n) scan is cheapest.
+        if (withinDivisorScanBudget(m))
+          return ce.function(
+            'List',
+            divisorsAscending(m, ce._deadlineFrame).map((d) => ce.number(d))
+          );
+        // Past it, build the divisors from the factorization. A factorization
+        // that runs out of budget leaves the call unevaluated — after the
+        // full Pollard rho budget (about 10⁷ iterations, the same cost as
+        // `FactorInteger` of the operand), where the scan-budget check
+        // alone used to decline at once. So does a divisor count past the
+        // step budget.
+        try {
+          const factors = bigPrimeFactors(m, ce._deadlineFrame);
+          const divisors = divisorsFromFactorization(
+            factors,
+            ce._deadlineFrame
+          );
+          if (divisors === undefined) return undefined;
+          return ce.function(
+            'List',
+            divisors.map((d) => ce.number(d))
+          );
+        } catch (e) {
+          if (
+            e instanceof CancellationError &&
+            e.cause === 'iteration-limit-exceeded'
+          )
+            return undefined;
+          throw e;
+        }
       },
     },
 
@@ -606,15 +638,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     ModularInverse: {
       description:
-        'Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` in [0, m) with `a·x ≡ 1 (mod m)`. Undefined when `a` and `m` are not coprime.',
+        'Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. The sign of `x` follows the sign of `m` (the same floored-division convention as `Mod`). Undefined when `a` and `m` are not coprime.',
       signature: '(integer, integer) -> integer',
-      examples: ['ModularInverse(3, 7)  // 5'],
+      examples: ['ModularInverse(3, 7)  // 5', 'ModularInverse(3, -7)  // -2'],
       evaluate: ([aOp, mOp], { engine: ce }) => {
         const a = toBigint(aOp);
         const m = toBigint(mOp);
-        if (a === null || m === null) return undefined;
-        if (m < 1n) return undefined; // modulus must be positive
-        if (m === 1n) return ce.number(0); // everything ≡ 0 (mod 1)
+        if (a === null || m === null || m === 0n) return undefined; // modulus must be nonzero
+        if (m === 1n || m === -1n) return ce.number(0); // everything ≡ 0 (mod ±1)
         const inv = modularInverse(a, m);
         if (inv === null) return undefined; // inverse does not exist
         return ce.number(inv);
@@ -1181,15 +1212,20 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (n === 1n) return ce.number(1);
         const a = ((a0 % n) + n) % n;
         if (gcd(a, n) !== 1n) return undefined;
-        // The order divides λ(n); the smallest such divisor is the order.
-        for (const d of divisorsAscending(
-          carmichaelLambda(n, ce._deadlineFrame),
-          ce._deadlineFrame
-        )) {
-          checkDeadline(ce._deadlineFrame);
-          if (modPow(a, d, n) === 1n) return ce.number(d);
+        // The order divides λ(n): strip each prime factor of λ(n) while `a`
+        // still raises to 1 without it. λ(n) = 1 (n = 2) has no prime
+        // factor — `bigPrimeFactors(1n)` reports `{1: 1}`, and stripping the
+        // factor 1 never ends — so it is answered first.
+        const lambda = carmichaelLambda(n, ce._deadlineFrame);
+        if (lambda === 1n) return ce.number(1);
+        let order = lambda;
+        for (const [q] of bigPrimeFactors(lambda, ce._deadlineFrame)) {
+          while (order % q === 0n && modPow(a, order / q, n) === 1n) {
+            checkDeadline(ce._deadlineFrame);
+            order /= q;
+          }
         }
-        return undefined;
+        return ce.number(order);
       },
     },
 
@@ -1694,6 +1730,40 @@ function divisorsAscending(
   }
   large.reverse();
   return [...small, ...large];
+}
+
+/**
+ * Sorted divisors of `m ≥ 1` from its prime factorization: cost is the
+ * divisor count, not `√m`. The count, ∏ (eᵢ+1), is known before anything is
+ * built; past `MAX_VALUE_SCALED_ITERATIONS` the result is `undefined` (the
+ * call stays unevaluated) rather than a list of millions of bigints that
+ * the step backstop would reject only once it is built.
+ */
+function divisorsFromFactorization(
+  factors: Map<bigint, number>,
+  deadline: number | DeadlineFrame | undefined
+): bigint[] | undefined {
+  let count = 1;
+  for (const e of factors.values()) {
+    count *= e + 1;
+    if (count > MAX_VALUE_SCALED_ITERATIONS) return undefined;
+  }
+  let divisors = [1n];
+  let steps = 0;
+  for (const [p, e] of factors) {
+    const next: bigint[] = [];
+    let power = 1n;
+    for (let i = 0; i <= e; i++) {
+      for (const d of divisors) {
+        valueScaledStep('Divisors', ++steps, deadline);
+        next.push(d * power);
+      }
+      power *= p;
+    }
+    divisors = next;
+  }
+  divisors.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return divisors;
 }
 
 /**

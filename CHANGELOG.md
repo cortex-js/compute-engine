@@ -13,6 +13,17 @@
   so is the compiled complex lane of `Coth` and `Csch` at `0` (it answered
   `{re: ∞, im: 0}`). `simplify()` folds the same values (`Sinh(0).simplify()`
   was symbolic).
+- **Number theory on large integers** (#339, contributed by
+  [enumeratio](https://github.com/enumeratio)). With `p` a large prime:
+  `FactorInteger(p^2)` factors at once instead of exhausting Pollard rho (a
+  perfect power is reduced to its base first), which also fixes `Totient`,
+  `DivisorSigma` and the other heads built on the factorization.
+  `Divisors(p^2)` builds its list from the factorization once the
+  trial-division scan is out of budget, rather than staying unevaluated.
+  `MultiplicativeOrder(2, p)` strips the prime factors of `λ(n)` instead of
+  scanning its divisors. `ModularInverse` accepts a negative modulus (it
+  used to stay unevaluated): `ModularInverse(3, -7)` is `-2`, the result
+  takes the sign of the modulus, as `Mod` does.
 
 ## 0.137.3 _2026-09-26_
 

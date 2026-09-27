@@ -195,7 +195,7 @@ export function groundEnumerationOperand(
  */
 export function canEnumerateOperand(
   op: Expression | undefined,
-  isAcceptable: (ground: Expression) => boolean
+  isAcceptable: (ground: Expression) => boolean | undefined
 ): boolean | undefined {
   const ground = groundEnumerationOperand(op);
   if (ground === undefined) return undefined;

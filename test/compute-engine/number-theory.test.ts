@@ -137,6 +137,14 @@ describe('FactorInteger', () => {
       expect(product).toEqual(BigInt(n));
     }
   });
+
+  test('a perfect power of a large prime factors via an exact root, not rho (#339)', () => {
+    // p = 10^20+39 is prime; rho alone needs ~√p ≈ 10^10 steps to split p²
+    // or p³ — an exact root finds p directly instead.
+    const p = 100000000000000000039n;
+    expect(factorInteger(p * p)).toEqual('[(100000000000000000039, 2)]');
+    expect(factorInteger(p * p * p)).toEqual('[(100000000000000000039, 3)]');
+  });
 });
 
 const divisors = (n: number | bigint) =>
@@ -164,6 +172,36 @@ describe('Divisors', () => {
 
   test('0 is left unevaluated (infinitely many divisors)', () => {
     expect(divisors(0)).toEqual('Divisors(0)');
+  });
+
+  test('a perfect power past the trial-division scan falls back to its factorization (#339)', () => {
+    // p = 10^20+39 is prime; p² is far past the O(√n) scan's budget, but
+    // its factorization ({p: 2}) is instant once FactorInteger's exact-root
+    // check finds it, so Divisors can build the 3-element list from that.
+    const p = 100000000000000000039n;
+    expect(divisors(p * p)).toEqual(`[1,${p},${p * p}]`);
+  });
+
+  test('the collection routes serve a list that evaluate() serves', () => {
+    // `canEnumerate` must not promise `false` for an operand past the scan
+    // budget: the list is built from the factorization instead.
+    const p = 100000000000000000039n;
+    const expr = ce.box(['Divisors', ce.number(p * p)]);
+    expect(evalStr(['At', expr, 2])).toEqual(`${p}`);
+    expect(evalStr(['Length', expr])).toEqual('3');
+  });
+
+  test('a divisor count past the step budget stays unevaluated at once', () => {
+    // The product of the first 26 primes has 2²⁶ ≈ 6.7·10⁷ divisors, past
+    // the 10⁷ step budget; the count is read from the factorization before
+    // any divisor is built.
+    const primorial =
+      2n * 3n * 5n * 7n * 11n * 13n * 17n * 19n * 23n * 29n * 31n * 37n *
+      41n * 43n * 47n * 53n * 59n * 61n * 67n * 71n * 73n * 79n * 83n * 89n *
+      97n * 101n;
+    expect(
+      ce.box(['Divisors', ce.number(primorial)]).evaluate().operator
+    ).toEqual('Divisors');
   });
 });
 
@@ -278,6 +316,21 @@ describe('Radical', () => {
   });
 });
 
+describe('ModularInverse', () => {
+  test('the inverse in [0, m) for a positive modulus', () => {
+    expect(evalStr(['ModularInverse', 3, 7])).toEqual('5'); // 3·5 ≡ 1 mod 7
+    expect(evalStr(['ModularInverse', 10, 17])).toEqual('12');
+  });
+  test('a negative modulus takes the sign of m, matching Mod (#339)', () => {
+    // 3·5 ≡ 1 (mod 7); reduced into (-7, 0] that is -2, not 5.
+    expect(evalStr(['ModularInverse', 3, -7])).toEqual('-2');
+  });
+  test('undefined when a and m are not coprime, or m is 0', () => {
+    expect(evalStr(['ModularInverse', 4, 8])).toEqual('ModularInverse(4, 8)');
+    expect(evalStr(['ModularInverse', 3, 0])).toEqual('ModularInverse(3, 0)');
+  });
+});
+
 describe('PowerMod', () => {
   test('modular exponentiation', () => {
     expect(evalStr(['PowerMod', 2, 10, 1000])).toEqual('24'); // 1024 mod 1000
@@ -352,6 +405,21 @@ describe('CarmichaelLambda', () => {
     expect(evalStr(['CarmichaelLambda', 8])).toEqual('2'); // 2^(3-2)
     expect(evalStr(['CarmichaelLambda', 15])).toEqual('4'); // lcm(λ3,λ5)=lcm(2,4)
     expect(evalStr(['CarmichaelLambda', 561])).toEqual('80'); // Carmichael number
+  });
+});
+
+describe('Totient', () => {
+  test("Euler's totient", () => {
+    expect(evalStr(['Totient', 1])).toEqual('1');
+    expect(evalStr(['Totient', 9])).toEqual('6'); // 1,2,4,5,7,8
+    expect(evalStr(['Totient', 360])).toEqual('96');
+  });
+  test("a perfect power of a large prime, via FactorInteger's exact-root check (#339)", () => {
+    // φ(p²) = p² - p = p(p-1) for a prime p.
+    const p = 100000000000000000039n;
+    expect(evalStr(['Totient', ce.number(p * p)])).toEqual(
+      '10000000000000000007700000000000000001482'
+    );
   });
 });
 
@@ -653,6 +721,22 @@ describe('MultiplicativeOrder', () => {
       'MultiplicativeOrder'
     );
   });
+  test('modulus 2: λ(2) = 1 has no prime factor to strip', () => {
+    // Regression: stripping the prime factors of λ(n) = 1 looped forever,
+    // because the factorization of 1 reports the factor 1.
+    expect(evalStr(['MultiplicativeOrder', 1, 2])).toEqual('1');
+    expect(evalStr(['MultiplicativeOrder', 3, 2])).toEqual('1');
+    expect(evalStr(['MultiplicativeOrder', 1, 1])).toEqual('1');
+    expect(evalStr(['MultiplicativeOrder', 5, 4])).toEqual('1');
+  });
+  test('a 20-digit prime modulus resolves from the factorization of λ(n), not a divisor scan (#339)', () => {
+    // p = 10^20+39 is prime, so λ(p) = p-1; scanning every divisor of a
+    // 21-digit λ(p) is impractical, but its factorization is small.
+    const p = 100000000000000000039n;
+    expect(evalStr(['MultiplicativeOrder', 2, ce.number(p)])).toEqual(
+      '50000000000000000019'
+    );
+  });
 });
 
 describe('PrimitiveRoot', () => {
@@ -893,10 +977,11 @@ describe('GCD/LCM on non-integer reals (tolerant float Euclid)', () => {
 });
 
 describe('factorization is interruptible (Finding 1)', () => {
-  // (2^61−1)² — a hard 37-digit square semiprime whose only prime factor is
-  // M61 ≈ 2.3·10¹⁸. Pollard rho needs ~√(2^61−1) ≈ 1.5·10⁹ iterations to
+  // M61 (2^61−1) times a distinct 21-digit prime — a hard 39-digit
+  // semiprime with no perfect-power shortcut, so splitting it is squarely
+  // Pollard rho's job. Pollard rho needs ~√(2^61−1) ≈ 1.5·10⁹ iterations to
   // split it, so before the fix this factored past any external kill.
-  const HARD_SEMIPRIME = 5316911983139663487003542222693990401n;
+  const HARD_SEMIPRIME = 230584300921369395189927877359334064089n;
 
   it('honors withTimeLimit — deadline wins, promptly and attributed', () => {
     const engine = new ComputeEngine();
