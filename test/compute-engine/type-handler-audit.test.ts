@@ -493,10 +493,9 @@ describe('TYPE AUDIT: Abs (magnitude)', () => {
     expect(typeOf(['Abs', { num: 'NaN' }])).toBe('number');
     // An operand typed the top `number` may hold `±∞` or `~oo`, so its
     // magnitude may be `+∞`; the claim is the union of the finite and the
-    // infinite outcome. (`number` also admits NaN, which this claim does
-    // NOT cover — a hole the pre-flip `real<0..>` had as well, since NaN
-    // was never a member of `real`.)
-    expect(typeOf(['Abs', 'u'])).toBe('real<0..> | signed_infinity');
+    // infinite outcome. `number` also admits NaN, and |NaN| is NaN, so the
+    // claim keeps a `nan` member (user decision 2026-09-26).
+    expect(typeOf(['Abs', 'u'])).toBe('nan | real<0..> | signed_infinity');
     // The claim admits `+∞`, the value `Abs` of such an operand can reach.
     expect(
       isSubtype(

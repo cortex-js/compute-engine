@@ -1413,8 +1413,42 @@ export function acceleratedInfiniteSum(
 
   // Require genuine convergence (a divergent or non-smooth series stalls with
   // a large error estimate) before trusting the accelerated value.
+  //
+  // The schedule samples the partial sums after 1, 2, 4, 8, … steps only,
+  // so every sample has the same parity. A series whose terms do not tend to
+  // 0 but alternate with period 2 then looks converged: every sample of
+  // `Σ_{k≥1} (−1)^k` is −1, and `.N()` returned −1 for a series that has no
+  // sum. So the partial sums one step later (the other parity) must
+  // extrapolate to the same value. That schedule starts at 2 steps
+  // (`step: 2`), so its samples are at 3, 5, 9, 17, … steps and all share
+  // one parity; starting at 1 would put the first sample (2 steps) at the
+  // other parity and spoil the extrapolation of a convergent alternating
+  // series (`Σ (−1)^k / k`).
   if (!overflow && Number.isFinite(val)) {
-    if (err <= Math.max(1e-10, 1e-9 * Math.abs(val))) return ce.number(val);
+    const tol = Math.max(1e-10, 1e-9 * Math.abs(val));
+    if (err <= tol) {
+      const [shifted, shiftedErr] = extrapolate(
+        (x) => partialSum(x + 1),
+        Infinity,
+        {
+          contract: 0.5,
+          step: 2,
+          power: 1,
+          atol: 1e-14,
+          rtol: 1e-12,
+          maxeval: 64,
+          deadline: ce._deadline,
+        }
+      );
+      if (
+        !overflow &&
+        Number.isFinite(shifted) &&
+        shiftedErr <= tol &&
+        Math.abs(shifted - val) <= 10 * tol
+      )
+        return ce.number(val);
+      return undefined;
+    }
   }
 
   // Second acceptance, for OSCILLATING absolutely-convergent series
@@ -1426,12 +1460,20 @@ export function acceleratedInfiniteSum(
   // p-series) adds ~3e-2 per doubling at this depth, orders of magnitude
   // over the tolerance, and anything slower still fails the window test
   // rather than sneaking through as "settled".
+  // The windows end at the same parity, so the last step must be small as
+  // well: a series whose terms alternate without tending to 0
+  // (`Σ cos(πk)`) has settled windows and no sum.
   const s1 = partialSum(MAX_TERMS / 4);
   const s2 = partialSum(MAX_TERMS / 2);
+  const s0 = partialSum(MAX_TERMS - 1);
   const s3 = partialSum(MAX_TERMS);
   if (!Number.isFinite(s3)) return undefined;
   const tol = 1e-8 * Math.max(1, Math.abs(s3));
-  if (Math.abs(s3 - s2) <= tol && Math.abs(s2 - s1) <= tol)
+  if (
+    Math.abs(s3 - s2) <= tol &&
+    Math.abs(s2 - s1) <= tol &&
+    Math.abs(s3 - s0) <= tol
+  )
     return ce.number(s3);
   return undefined;
 }
@@ -1502,7 +1544,34 @@ export function acceleratedInfiniteProduct(
   });
 
   if (invalid || overflow || !Number.isFinite(logValue)) return undefined;
-  if (!(error <= Math.max(1e-10, 1e-9 * Math.abs(logValue)))) return undefined;
+  const tol = Math.max(1e-10, 1e-9 * Math.abs(logValue));
+  if (!(error <= tol)) return undefined;
+  // The same parity check as `acceleratedInfiniteSum`: the samples after 1,
+  // 2, 4, … steps share one parity, so a product whose factors alternate
+  // without tending to 1 looks converged (`Π 2^((−1)^k)` is 0.5 at every
+  // sample and has no limit). The partial products one step later must
+  // extrapolate to the same value.
+  const [shifted, shiftedError] = extrapolate(
+    (x) => partialLogSum(x + 1),
+    Infinity,
+    {
+      contract: 0.5,
+      step: 2,
+      power: 1,
+      atol: 1e-14,
+      rtol: 1e-12,
+      maxeval: 64,
+      deadline: ce._deadline,
+    }
+  );
+  if (
+    invalid ||
+    overflow ||
+    !Number.isFinite(shifted) ||
+    !(shiftedError <= tol) ||
+    Math.abs(shifted - logValue) > 10 * tol
+  )
+    return undefined;
   const value = Math.exp(logValue);
   return Number.isFinite(value) ? ce.number(value) : undefined;
 }

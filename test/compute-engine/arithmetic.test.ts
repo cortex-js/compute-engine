@@ -1206,8 +1206,9 @@ describe('SUM', () => {
     engine.assign('t', 0.5);
     expect(engine.parse('A(t)[1]').evaluate().re).toBeCloseTo(-0.3883979339);
 
-    // A scalar body still types as `number` (no over-eager collection claim).
-    expect(engine.parse('\\sum_{i=0}^{6}i^2').type.toString()).toBe('number');
+    // A scalar body types as a scalar (no over-eager collection claim): a
+    // sum of integers over a finite range is an integer.
+    expect(engine.parse('\\sum_{i=0}^{6}i^2').type.toString()).toBe('integer');
   });
 
   // Tycho item 32.2: `["Sum", body]` serializes to a bounds-less `\sum` which

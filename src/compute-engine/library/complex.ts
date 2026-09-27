@@ -36,7 +36,11 @@ import {
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { broadcastCellType } from '../../common/type/utils.js';
+import {
+  broadcastCellType,
+  resolveTypeAlias,
+} from '../../common/type/utils.js';
+import { reduceType } from '../../common/type/reduce.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { neg } from '../numerics/rationals.js';
 import { measurementLipschitzUnary } from './measurement-arithmetic.js';
@@ -172,6 +176,41 @@ function infinitePointOfDescriptor(
   return isSubtype(t, 'infinity') ? 'anonymous' : undefined;
 }
 
+/**
+ * The type of `Re`, `Im` or `Arg` of a scalar operand whose type is a union
+ * of numeric members, read member by member; `undefined` when a member is
+ * not numeric. Each numeric member gives:
+ * - a finite complex number (`complex` and below): a finite real;
+ * - a signed infinity `±∞`: `Re` is `±∞`, `Im` is 0, `Arg` is 0 or π;
+ * - any other infinity (`~oo`, `∞ + i`): the real part is `±∞` or NaN, the
+ *   imaginary part and the argument are finite or NaN (`~oo` has neither);
+ * - `nan`: NaN;
+ * - the wide `number`: every case above.
+ *
+ * So `Re(z)` for `z: complex | nan` is `real | nan`, where it used to be the
+ * wide `number` (user decision 2026-09-26: CE gives a narrow type for what
+ * it returns, and a host reads `number` as possibly complex).
+ */
+function partTypeByMember(
+  t: Type,
+  part: 're' | 'im' | 'arg'
+): Type | undefined {
+  const r = resolveTypeAlias(t);
+  const members = typeof r === 'object' && r.kind === 'union' ? r.types : [r];
+  const out: Type[] = [];
+  for (const m of members) {
+    if (isSubtype(m, 'complex')) out.push('real');
+    else if (isSubtype(m, SIGNED_INFINITY_TYPE))
+      out.push(part === 're' ? m : 'real');
+    else if (isSubtype(m, 'nan')) out.push('nan');
+    else if (isSubtype(m, 'infinity') || m === 'number') {
+      out.push(part === 're' ? SIGNED_INFINITY_TYPE : 'real', 'nan');
+      if (m === 'number') out.push('real');
+    } else return undefined;
+  }
+  return reduceType({ kind: 'union', types: out });
+}
+
 // Re follows the operand's finiteness: a finite number has a finite real
 // part, a signed or anonymous infinity has an infinite one, and `~oo` has
 // none. A proven-NaN literal declines, so the framework's proven-NaN arm
@@ -199,8 +238,10 @@ const realPartType: OperatorTypeHandlerOnTypes = ([z], context) => {
   // A real-typed operand is its own real part. The bare name `real` is
   // finite and excludes `~oo` and NaN, so this claim is exact; a
   // `number`-typed operand may be either of those and keeps the top type.
+  if (isSubtype(t, 'real'))
+    return BoxedType.forResult('real', context.engine._typeResolver);
   return BoxedType.forResult(
-    isSubtype(t, 'real') ? 'real' : 'number',
+    partTypeByMember(t, 're') ?? 'number',
     context.engine._typeResolver
   );
 };
@@ -226,8 +267,10 @@ const imaginaryPartType: OperatorTypeHandlerOnTypes = ([z], context) => {
   // A real-typed operand has Im = 0. The bare name `real` is finite and
   // excludes `~oo` and NaN; a `number`-typed operand may be either, and
   // their imaginary part is not a finite real.
+  if (isSubtype(t, 'real'))
+    return BoxedType.forResult('real', context.engine._typeResolver);
   return BoxedType.forResult(
-    isSubtype(t, 'real') ? 'real' : 'number',
+    partTypeByMember(t, 'im') ?? 'number',
     context.engine._typeResolver
   );
 };
@@ -253,8 +296,10 @@ const argumentType: OperatorTypeHandlerOnTypes = ([z], context) => {
   // A real-typed operand has Arg ∈ {0, π}. The bare name `real` is finite
   // and excludes `~oo` and NaN; a `number`-typed operand may be either,
   // where Arg is NaN.
+  if (isSubtype(t, 'real'))
+    return BoxedType.forResult('real', context.engine._typeResolver);
   return BoxedType.forResult(
-    isSubtype(t, 'real') ? 'real' : 'number',
+    partTypeByMember(t, 'arg') ?? 'number',
     context.engine._typeResolver
   );
 };

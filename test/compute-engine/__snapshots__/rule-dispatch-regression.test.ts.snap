@@ -6,7 +6,7 @@ exports[`simplify: absolute value \\left|\\left|x\\right|\\right| 1`] = `["Abs",
 
 exports[`simplify: absolute value \\left|x\\right|\\cdot\\left|y\\right| 1`] = `["Multiply", ["Abs", "x"], ["Abs", "y"]]`;
 
-exports[`simplify: absolute value |\\pi - 4| 1`] = `["Abs", ["Subtract", "Pi", 4]]`;
+exports[`simplify: absolute value |\\pi - 4| 1`] = `["Subtract", 4, "Pi"]`;
 
 exports[`simplify: absolute value |\\sin(x)| 1`] = `["Abs", ["Sin", "x"]]`;
 
@@ -18,7 +18,7 @@ exports[`simplify: absolute value |2x| 1`] = `["Multiply", 2, ["Abs", "x"]]`;
 
 exports[`simplify: absolute value |3| 1`] = `3`;
 
-exports[`simplify: absolute value |e - 2| 1`] = `["Abs", ["Subtract", "ExponentialE", 2]]`;
+exports[`simplify: absolute value |e - 2| 1`] = `["Subtract", "ExponentialE", 2]`;
 
 exports[`simplify: absolute value |x^2| 1`] = `["Square", "x"]`;
 

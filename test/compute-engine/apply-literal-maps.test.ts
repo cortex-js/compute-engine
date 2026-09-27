@@ -32,7 +32,9 @@ describe('A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
   test('a scalar argument is unchanged', () => {
     const ce = new ComputeEngine();
     const call = ce.box(['Apply', ['Function', SUM_BODY, 'i'], 3] as never);
-    expect(call.type.toString()).toBe('number');
+    // The upper bound `i` is not known to be finite, so the sum may also
+    // diverge or have no limit (`bigOpOverDomainType`).
+    expect(call.type.toString()).toBe('nan | real | signed_infinity');
     expect(call.evaluate().toString()).toBe('cos(1) + cos(2) + cos(3)');
   });
 
@@ -192,5 +194,38 @@ describe('A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
     const r = compile(value, { fallback: false } as never)!;
     expect(r.success).toBe(true);
     expect((r.run!({}) as number[]).length).toBe(300);
+  });
+
+  // A known-infinite source maps lazily on both routes, so the value is the
+  // infinite list its `list<tuple<…>>` type describes. `Apply`, and a
+  // function declared `function` then assigned, used to bind it whole:
+  // `(Range(1, +oo), Range(1, +oo))`.
+  test.each([
+    ['an infinite range', ['Range', 1, { num: '+Infinity' }], '(3, 3)'],
+    ['a cycle', ['Cycle', ['List', 1, 2]], '(1, 1)'],
+  ])('a known-infinite source maps lazily: %s', (_, arg, third) => {
+    const ce = new ComputeEngine();
+    const f = ['Function', ['Tuple', 'x', 'x'], 'x'];
+    ce.declare('H', 'function');
+    ce.assign('H', ce.box(f as never));
+    for (const e of [['Apply', f, arg], ['H', arg]]) {
+      const call = ce.box(e as never);
+      const value = call.evaluate();
+      expect(value.isFiniteCollection).toBe(false);
+      expect(value.at(3)?.toString()).toBe(third);
+      expect(call.type.toString()).toMatch(/^list<tuple</);
+    }
+  });
+
+  test('a finite list beside an infinite source is an error on both routes', () => {
+    const ce = new ComputeEngine();
+    const f = ['Function', ['Add', 'x', 'y'], 'x', 'y'];
+    ce.declare('G', 'function');
+    ce.assign('G', ce.box(f as never));
+    const args = [['List', 1, 2, 3], ['Range', 1, { num: '+Infinity' }]];
+    for (const e of [['Apply', f, ...args], ['G', ...args]])
+      expect(ce.box(e as never).evaluate().toString()).toBe(
+        'Error("incompatible-dimensions", "3 vs Infinity")'
+      );
   });
 });

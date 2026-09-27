@@ -54,6 +54,7 @@ import {
   dimensionlessIndexedElement,
   isTupleShapedType,
   loneUnionBroadcastResultType,
+  scalarOrListUnionCellType,
   scalarOrCollectionUnionBranches,
   typeCouldBeCollection,
 } from '../collection-utils.js';
@@ -871,6 +872,12 @@ export interface BroadcastLiftInput {
   readonly broadcastsOverTuples: boolean;
   /** Some operand is a `List` literal with a readable shape. */
   readonly hasTensors: boolean;
+  /** The per-element result of the handler called again with each
+   * scalar-or-list union operand typed as its cell
+   * (`scalarOrListUnionCellType`), or `undefined` when no operand is such a
+   * union or the handler declines. Read only when every broadcast trigger
+   * is such a union. */
+  readonly unionCellResult?: () => Type | undefined;
 }
 
 /**
@@ -984,7 +991,25 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // Every trigger a LONE scalar-or-collection union (a valueless
     // `u: number | list<number>`): the result carries the union through
     // instead of claiming the definite `list<E>` that `u := 5` contradicts.
-    const loneUnionResult = loneUnionBroadcastResultType(types, cellResult);
+    // The handler typed the cell from the whole union, which is not a
+    // number type, so it answered a wide cell (`2u` gave `number` for
+    // `u: real | list<real>`). Typed again from the union's cell, it answers
+    // the narrow one (`real`).
+    const unionCell =
+      input.unionCellResult !== undefined &&
+      types.every((t) => scalarOrListUnionCellType(t) !== undefined)
+        ? input.unionCellResult()
+        : undefined;
+    const loneUnionResult = loneUnionBroadcastResultType(
+      types,
+      unionCell === undefined
+        ? cellResult
+        : // A tuple result is the structured value of one cell, as for
+          // `cellResult` above: it is not unwrapped.
+          hasTupleBranch(unionCell)
+          ? resolveTypeAlias(unionCell)
+          : broadcastElementType(unionCell)
+    );
     if (loneUnionResult !== undefined) return loneUnionResult;
 
     // A handler that owns its collection typing and answered a SHAPED

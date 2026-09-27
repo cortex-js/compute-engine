@@ -47,7 +47,8 @@ describe('an inferred type is revised when its value refutes it', () => {
 
   test('the committed likely type moves once the value dependency refines', () => {
     const ce = chain();
-    expect(ce.box('C_0').type.toString()).toBe('number');
+    // A sum of integers over a finite range is an integer.
+    expect(ce.box('C_0').type.toString()).toBe('integer');
     expect(ce.lookupDefinition('C_0')?.value?.inferredType).toBe(true);
     ce.assign('C', ce.box(['List', 10, 30]));
     const t = ce.box('C_0').type;

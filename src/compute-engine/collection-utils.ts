@@ -1641,6 +1641,40 @@ export function loneUnionBroadcastResultType(
 }
 
 /**
+ * The type of one CELL of a broadcast over a scalar-or-list union operand: the
+ * union of its scalar branches and the element types of its list branches.
+ * With `u: real | signed_infinity | list<real>`, `2u` is either `2·u` for a
+ * scalar `u` or `[2·u₁, 2·u₂, …]` for a list, so every value the operator
+ * sees in one cell is `real | signed_infinity`. A type handler given that
+ * cell type answers a narrow per-element result (`real | signed_infinity`),
+ * where it answers `number` for the whole union, which is not a number type
+ * (`loneUnionBroadcastResultType` then wraps the cell result).
+ *
+ * Only a union whose branches are extended numbers (`number`, `infinity`,
+ * `nan`) or dimensionless lists of them qualifies. `undefined` otherwise,
+ * in particular for a point-or-point-list union, which the arithmetic
+ * handlers type branch by branch (see `broadcastLiftType`).
+ */
+export function scalarOrListUnionCellType(t: Readonly<Type>): Type | undefined {
+  if (scalarOrCollectionUnionBranches(t) === undefined) return undefined;
+  const resolved = resolveTypeAlias(t);
+  if (typeof resolved === 'string' || resolved.kind !== 'union')
+    return undefined;
+  const isExtendedNumber = (x: Type): boolean =>
+    x !== 'never' &&
+    (isSubtype(x, 'number') || isSubtype(x, 'infinity') || isSubtype(x, 'nan'));
+  const cells: Type[] = [];
+  for (const branch of resolved.types) {
+    const b = resolveTypeAlias(branch);
+    const element = dimensionlessIndexedElement(b, undefined, true);
+    const cell = element ?? b;
+    if (!isExtendedNumber(cell)) return undefined;
+    cells.push(cell);
+  }
+  return reduceType({ kind: 'union', types: cells });
+}
+
+/**
  * True when `expr`'s collection-ness is **not statically visible**, so an
  * element-wise numeric operator (`Add`/`Multiply`) over it must produce a
  * `broadcastable<T>` result — the operand might broadcast at runtime (a

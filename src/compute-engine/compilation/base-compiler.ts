@@ -16760,6 +16760,27 @@ export class BaseCompiler {
       !expr.ops.some((a) => BaseCompiler.isComplexValued(a))
     )
       return false;
+    // A head whose emitter picks its real or complex lowering from the
+    // OPERANDS (`COMPLEX_PROPAGATING_HEADS`: every target writes
+    // `args.some(isComplexValued)`, never a test of the node's type) is
+    // complex exactly when an operand is, WHATEVER its type says. Answering
+    // from the type first would disagree with the emitter when the type is
+    // real and an operand is complex-shaped: `Negate` typed `real` over an
+    // operand the compiler put on the complex lane reported "real" to its
+    // parent while its emitter wrote `_SYS.cneg(…)`, so the parent added a
+    // number to a `{re, im}` object (`_SYS.cneg({…}) + 1`) and the result was
+    // NaN. Such an operand is complex-shaped with a real value (an imaginary
+    // part of 0), so the complex lane gives the right number. The same rule
+    // covers a non-real type: `Multiply(1e5, Sqrt(u))` is typed `complex`,
+    // but the `Sqrt` carve-out below keeps `Sqrt(u)` real, so the product is
+    // real (Tycho item 144). And a wide type: `9.81 / k[i]` is typed `number`
+    // (the element read has a `nan` arm) and is emitted as the real
+    // `9.81 / _SYS.at(k, i)`, so `√(9.81 / k[i])` must not hand that number
+    // to `_SYS.csqrt` (Tycho item 252). Heads whose emitter reads the node
+    // TYPE instead (`Power`, `Root`, the inverse trigonometric functions, see
+    // `resultIsComplexValued`) must NOT be in that set.
+    if (BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(expr.operator))
+      return expr.ops.some((a) => BaseCompiler.isComplexValued(a));
     // Check the function's return type from its operator definition.
     //
     // The infinite and NaN branches are dropped first: a head whose value can
@@ -16801,20 +16822,6 @@ export class BaseCompiler {
           (a) => a.isNegative === true || BaseCompiler.isComplexValued(a)
         );
       }
-      // …and the carve-out has to survive the arithmetic ABOVE those heads
-      // (Tycho item 144): `Multiply(1e5, Sqrt(u))` is itself typed
-      // `complex`, so answering from the type here would report
-      // complex for a subtree the Sqrt carve-out just declared real, and the
-      // real-only-helper gate would fail closed on an operand that is real by
-      // construction. These heads only PROPAGATE complexness from their
-      // operands — and every target's emitter for them picks its
-      // real-vs-complex lowering from the OPERANDS with this same predicate
-      // (`args.some(isComplexValued)`), never from the node's type — so
-      // recursing keeps parent and child agreeing on the value SHAPE. Heads
-      // whose emitter reads the node TYPE instead (`Power`, `Root`, the
-      // inverse trigs — see `resultIsComplexValued`) must NOT be listed here.
-      if (BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(expr.operator))
-        return expr.ops.some((a) => BaseCompiler.isComplexValued(a));
       return true;
     }
     // The REAL verdict reads the same finite part the non-real verdict above
@@ -16847,15 +16854,6 @@ export class BaseCompiler {
       );
 
     if (expr.ops.some((arg) => BaseCompiler.isComplexValued(arg))) return true;
-    // A head whose emitter chooses its lowering from the OPERANDS' shapes
-    // (`COMPLEX_PROPAGATING_HEADS`) produces a real value when every operand
-    // is real-shaped, whatever the node's type says: `9.81 / k[i]` types the
-    // wide `number` (the element read carries a `nan` arm) and is emitted
-    // as the real `9.81 / _SYS.at(k, i)`. Under the complex discipline the
-    // wide-type rule below would report it complex, and `√(9.81 / k[i])`
-    // then handed that plain number to `_SYS.csqrt`, which reads `.re`/`.im`
-    // (Tycho item 252, `mode: "complex"`).
-    if (BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(expr.operator)) return false;
     // COMPLEX discipline: a wide-typed result whose operands are all real can
     // still be a complex value at run time (a user function returning its
     // parameter, an element read of a `list<number>`), and the value it

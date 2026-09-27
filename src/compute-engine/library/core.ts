@@ -509,10 +509,13 @@ function literalParamsMap(sig: Type): boolean {
  * True when `fn` is a function literal whose parameters are all scalar by
  * its signature (`signatureParamsAreScalar`, the rule the named route uses
  * through `paramsAreScalar`) and at least one argument is an indexed
- * collection not known to be infinite that is not a tuple (a point stays
- * atomic) nor a string. A known-infinite source (`Range(1, +∞)`, `Cycle`) is
- * bound whole, as on the named route; a large or unknown-length one maps
- * lazily (`applyLiteralMapped`).
+ * collection that is not a tuple (a point stays atomic) nor a string. A
+ * known-infinite source (`Range(1, +∞)`, `Cycle`), a large one, or one of
+ * unknown length maps lazily (`applyLiteralMapped`), as on the named route:
+ * `Apply(x ↦ (x, x), Range(1, +∞))` is the infinite list `[(1, 1), (2, 2),
+ * …]`, the value the type handler (`applyLiteralMapType`) describes. An
+ * infinite source used to be bound whole, which gave the tuple
+ * `(Range(1, +∞), Range(1, +∞))` under a `list<tuple<…>>` type.
  *
  * User decision 2026-09-26 (Tycho item 327): a function literal applied to a
  * list maps like a named user function, on every route. It used to bind each
@@ -531,9 +534,7 @@ function applyLiteralMaps(
   // on the named route: its type parameter is solved against the whole
   // argument (`literalParamsMap`).
   if (!literalParamsMap(fn.type.type)) return false;
-  return args.some(
-    (a) => isBroadcastableCollection(a) && a.isFiniteCollection !== false
-  );
+  return args.some((a) => isBroadcastableCollection(a));
 }
 
 /**

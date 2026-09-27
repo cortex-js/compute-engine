@@ -1008,6 +1008,24 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
   // it — and the descriptor carries that channel for a held value as well
   // as for a literal, hence no literal gate here.
   if (mayBeNaN(x)) return 'number';
+  // An operand whose TYPE admits NaN (`real | nan`, or the wide `number`)
+  // has |NaN| = NaN, so the result keeps a `nan` member: |q| for
+  // `q: real | nan` is `nan | real<0..>`, and |w| for `w: number` is
+  // `nan | real<0..> | signed_infinity`. The magnitude of
+  // the other values is typed from the operand without its `nan` member.
+  // (User decision 2026-09-26. Before it, the claim left NaN out, and was
+  // wrong for that one value.)
+  if (t !== 'nan' && isSubtype('nan', t)) {
+    const present = t === 'number' ? COMPLEX_OR_INFINITY_TYPE : stripNaN(t);
+    if (present !== t) {
+      const magnitude = absFunctionType({
+        type: present,
+        facts: x.facts,
+        structureOf: x.structureOf,
+      });
+      return reduceType({ kind: 'union', types: [magnitude, 'nan'] });
+    }
+  }
   // |x| also preserves the numeric TIER of a real operand: the magnitude of
   // an integer is an integer, of a rational a rational (`|−1/2| = 1/2`). A
   // *complex* finite operand — whose magnitude is real but neither rational
@@ -1217,6 +1235,13 @@ function extendedExtremumType(
   if (hasNaN || values.some((v) => isSubtype('nan', v))) types.push('nan');
   return types.length === 0 ? undefined : reduceType({ kind: 'union', types });
 }
+
+/** The numeric values other than NaN: the finite complex numbers and the
+ * infinities. */
+const COMPLEX_OR_INFINITY_TYPE: Type = Object.freeze({
+  kind: 'union',
+  types: ['complex', 'infinity'],
+}) as Type;
 
 /** The type without its `nan` member, when it is a union with one. */
 function stripNaN(t: Type): Type {
@@ -1477,6 +1502,80 @@ export function extendedReductionType(
 }
 
 /**
+ * The type of `Sum(body, clauses…)` or `Product(body, clauses…)` when the
+ * body is typed on the extended real line, with or without NaN
+ * (`real | signed_infinity | nan`); `undefined` otherwise. The body is typed
+ * with the index in scope, so `Sum(k², Limits(k, 1, 10))` sees `k` as
+ * `integer<1..10>` and `k²` as `integer<1..100>`.
+ *
+ * - When every clause has a finite number of terms (a `Limits` with finite
+ *   real bounds, or an `Element` of a `list` or of a `Range` with finite
+ *   bounds), the result is typed as the
+ *   reduction of a list of such values (`extendedReductionType`): `integer`
+ *   for that sum. The range may be empty (`Limits(k, 5, 1)`), which gives
+ *   the empty sum 0 or the empty product 1, also in that tier.
+ * - Otherwise (an upper bound `+∞`, a bound that is not known to be
+ *   finite, an `Element` of a collection that may be infinite) the value is
+ *   a limit: a real series converges to a real number, diverges to `±∞`,
+ *   or has no limit. So the result is `real | +oo | -oo | nan`, or
+ *   `integer | +oo | -oo | nan` for integer terms, whose partial sums
+ *   converge only when they become constant.
+ *
+ * A host reads `number` as possibly complex, so a body on the extended
+ * real line must not widen to it (user decision 2026-09-25).
+ */
+function bigOpOverDomainType(
+  operator: 'Sum' | 'Product',
+  body: OperandDescriptor,
+  clauses: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  if (!isSubtype(body.type, EXTENDED_REAL_OR_NAN_TYPE)) return undefined;
+  const isFiniteBound = (d: OperandDescriptor | undefined): boolean =>
+    d !== undefined && factsOf(d.type).real === true;
+  const finiteDomain = clauses.every((c) => {
+    const st = c.structureOf?.();
+    if (st?.kind !== 'application') return false;
+    if (st.head === 'Limits')
+      return (
+        st.children.length === 3 &&
+        isFiniteBound(st.children[1]) &&
+        isFiniteBound(st.children[2])
+      );
+    if (st.head === 'Element') {
+      const source = st.children[1];
+      if (source === undefined) return false;
+      // A `list` type alone does not prove a finite length: a `Filter` of
+      // an infinite range and a `Cycle` are typed `list`. A list with fixed
+      // dimensions, or an operand known to be a finite collection, is.
+      if (source.facts.finiteCollection === true) return true;
+      const t = resolveTypeAlias(source.type);
+      if (typeof t === 'object' && t.kind === 'list' && t.dimensions)
+        return true;
+      // A `Range` has a finite number of terms when its bounds are finite.
+      const range = source.structureOf?.();
+      return (
+        range?.kind === 'application' &&
+        range.head === 'Range' &&
+        range.children.length >= 2 &&
+        range.children.every(isFiniteBound)
+      );
+    }
+    return false;
+  });
+  const reduced = extendedReductionType(operator, [
+    { type: { kind: 'list', elements: body.type }, facts: body.facts },
+  ]);
+  if (reduced === undefined || finiteDomain) return reduced;
+  const finite = finiteExtendedPart(stripNaN(body.type));
+  const tier =
+    finite !== undefined && factsOf(finite).integer ? 'integer' : 'real';
+  return reduceType({
+    kind: 'union',
+    types: [tier, PLUS_INFINITY_TYPE, MINUS_INFINITY_TYPE, 'nan'],
+  });
+}
+
+/**
  * Result type of a big-op (`Sum`/`Product`) in its `(body, limits…)` form.
  * Elementwise accumulation over a collection-valued body yields the same
  * indexed-collection type: summing (or multiplying) a `vector<2>`-, `list<T>`-
@@ -1499,6 +1598,10 @@ export function bigOpResultType(
     if (reduced !== undefined) return reduced;
   }
   const body = ops[0];
+  if (ops.length > 1 && operator !== undefined && body !== undefined) {
+    const reduced = bigOpOverDomainType(operator, body, ops.slice(1));
+    if (reduced !== undefined) return reduced;
+  }
   if (
     ops.length > 1 &&
     body !== undefined &&

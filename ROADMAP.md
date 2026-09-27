@@ -632,72 +632,36 @@ an untyped parameter beside another collection argument still declines to
 compile to JavaScript (the interpreter pairs the lists). (5) Block-local
 functions and variadic parameters do not map over a list of points.
 
-### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24; narrowed 2026-09-26)
+### Extended-real declarations lose precision through a call of a function declared `function` (OPEN, low — reported by Tycho 2026-09-24; narrowed 2026-09-26)
 
 A host declares plot variables and list seams as
 `real | signed_infinity | nan` instead of `number` (Tycho, 2026-09-24), and
 reads `number` as possibly complex. Arithmetic, powers, the elementary
-functions with a real result, `Max`/`Min`, `Sum`/`Product`/`Mean` and literal
-lists keep that union since 2026-09-26 (user decision 2026-09-25). What still
-widens to `number`, measured on CE main with `a: real | signed_infinity | nan`:
-
-1. **User-function calls.** A function declared with a result `unknown`
-   reports the result of its body under the declared parameter types
-   (2026-09-26), and a declared result is used as given. What stays open is
-   a call of a function declared bare `function` with a union argument: the
-   call is typed from the body only when the declared result is not a number
-   type (`callResultType` returns early for one). Relaxing that early return
-   typed every call from its body, and 17 tests failed (calls took literal
-   value types, `g(3)` → `integer<6..6>`, and a complex-mode compiled call
-   lost its `_SYS.cplx` wrapper). Under the decision of 2026-09-26 (the host
-   that constructs a function gives its type), the host's declaration is the
-   intended fix, so this is low priority.
-2. **A union of a scalar and a list** (`u: real | signed_infinity | list<real>`)
-   makes `y·u` and `y + u` type `list<number> | number`.
-3. **`Sum` and `Product` with limits** (`Sum(k², k, 1, 10)`) type `number`;
-   only the one-operand form `Sum(L)` is typed from the elements.
+functions, `Max`/`Min`, `Sum`/`Product`/`Mean` (with or without limits),
+literal lists, operations on a scalar-or-list union, and `Abs`/`Real`/
+`Imaginary`/`Arg` keep a narrow type since 2026-09-26. What still widens to
+`number`: a call of a function declared bare `function` with a union
+argument. A function declared with a result `unknown` reports the result of
+its body under the declared parameter types, and a declared result is used
+as given, but `callResultType` returns early when the declared result is a
+number type. Relaxing that early return typed every call from its body, and
+17 tests failed (calls took literal value types, `g(3)` → `integer<6..6>`,
+and a complex-mode compiled call lost its `_SYS.cplx` wrapper). Under the
+decision of 2026-09-26 (the host that constructs a function gives its
+type), the host's declaration is the intended fix, so this is low priority.
 
 Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
 
-### Residue of the lane and return-type round of 2026-09-26 (OPEN, small)
+### A tuple argument at a scalar parameter is typed `any` (OPEN, small — 2026-09-26)
 
-1. **A lane mismatch is still possible in general.** A head in
-   `COMPLEX_PROPAGATING_HEADS` (`Negate`, for example) whose type is `real`
-   answers "not complex" from its type in `BaseCompiler.isComplexValued`,
-   while its emitter chooses the complex lowering from its operands. The
-   known case (a square root promoted to the complex lane although its type
-   proved it real) is fixed in `assumedRealNonNegative`; any other operand
-   that is complex-shaped under a real-typed parent would give NaN the same
-   way (`_SYS.cneg({…}) + 1`). A fix makes the emitter follow the parent's
-   lane.
-2. **`isNonNegative` does not read ranged types.** An expression typed
-   `real<0.9985..0.9999>` answers `isNonNegative === undefined`. The compiler
-   no longer depends on it for radicands, but other sign-dependent folds may.
-3. **A ranged `Sum` index and index writes.** An index keeps plain `integer`
-   when an operand of the binder `Assign`s it. No other operator is known to
-   write a symbol from inside a body, but the library was not audited for
-   one.
-4. **A tuple argument at a scalar parameter is typed `any`.** The call
-   `h((1, 2))` with `h := x ↦ 2x` (declared `(real) -> real` or not)
-   evaluates to `(2, 4)` and is typed `any`, since the body decides the
-   shape (`x ↦ |x|` gives a scalar). Typing the body with the parameter
-   typed as the tuple was tried on 2026-09-26 and removed: the
-   descriptor-based derivation (`callResultType`) gave wrong narrow types
-   for a nested user call inside a list (`P ↦ [q(P), q(P)]`), for
-   `P ↦ P·Norm(P)`, and for `P ↦ P/(P[1] − 1)`. A precise type needs a
-   tuple-aware derivation. The same holds for `Apply(x ↦ 2x, (1, 2))`.
-5. **A known-infinite source is typed as mapped but bound whole.** A named
-   scalar-parameter function, and a function literal applied with `Apply`,
-   bind a known-infinite collection whole (`X(Range(1, +∞))` with
-   `X := x ↦ (x, x)` is `(Range(1, +oo), Range(1, +oo))`), but the call is
-   typed as the mapped list (`list<tuple<…>>`): the type handler cannot tell
-   an infinite source from its type. Either the broadcast maps an infinite
-   source lazily, or the type handlers read finiteness from the operand.
-6. **`Abs` and `Real` drop a `nan` arm.** `Abs(Arccos(q))` with
-   `q: real | nan` is typed `real<0..> | signed_infinity`, although the value
-   is NaN at `q = NaN` (`absFunctionType` in `library/type-handlers.ts`
-   says closing that is a separate decision), and `Real(Arccos(q))` is
-   `number`.
+The call `h((1, 2))` with `h := x ↦ 2x` (declared `(real) -> real` or not)
+evaluates to `(2, 4)` and is typed `any`, since the body decides the shape
+(`x ↦ |x|` gives a scalar). Typing the body with the parameter typed as the
+tuple was tried on 2026-09-26 and removed: the descriptor-based derivation
+(`callResultType`) gave wrong narrow types for a nested user call inside a
+list (`P ↦ [q(P), q(P)]`), for `P ↦ P·Norm(P)`, and for
+`P ↦ P/(P[1] − 1)`. A precise type needs a tuple-aware derivation. The same
+holds for `Apply(x ↦ 2x, (1, 2))`.
 
 ### Ordering of constants with special functions: what stays open after the 2026-09-25 bounds (OPEN, low)
 

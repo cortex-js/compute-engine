@@ -23,7 +23,7 @@
  *    scalar tiers — `2·u` and `sin(u)` typed `number` — because a fixed shape
  *    is left to the tensor handlers, which never see a union. Inside a union
  *    the branch now counts as a broadcast collection and keeps its dimensions
- *    (`number | vector<2>`).
+ *    (`integer | vector<integer^2>` for `2·u`).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -225,10 +225,12 @@ describe('Tycho item 249 — what the union admission refuses', () => {
 
 describe('Tycho item 249 — typing of a union with a dimensioned list branch', () => {
   it.each([
-    [['Multiply', 2, 'v'], 'number | vector<2>'],
-    [['Sin', 'v'], 'number | vector<2>'],
-    [['Power', 'v', 2], 'number | vector<2>'],
-    [['Multiply', 2, w], 'number | vector<2>'],
+    // Each cell is typed from the union's cell type, `integer`
+    // (`scalarOrListUnionCellType`), so the per-element result is narrow.
+    [['Multiply', 2, 'v'], 'integer | vector<integer^2>'],
+    [['Sin', 'v'], 'real | vector<real^2>'],
+    [['Power', 'v', 2], 'integer<0..> | list<integer<0..>^2>'],
+    [['Multiply', 2, w], 'integer | vector<integer^2>'],
     [['Negate', w], 'integer | vector<integer^2>'],
   ])('%j types %s', (body, type) => {
     expect(ce.box(body as any).type.toString()).toBe(type);
@@ -256,7 +258,7 @@ describe('Tycho item 249 — typing of a union with a dimensioned list branch', 
 
   it('a dimensionless union still types per branch', () => {
     expect(ce.box(['Multiply', 2, 'u']).type.toString()).toBe(
-      'list<number> | number'
+      'integer | list<integer>'
     );
   });
 });

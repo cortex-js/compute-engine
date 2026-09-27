@@ -65,6 +65,7 @@ import {
   isKnownFinitenessBroadcast,
   isTextAtom,
   loneUnionBroadcastResultType,
+  scalarOrListUnionCellType,
   isNumericTuple,
   couldBeUnkeyedCollectionOperand,
   isPossiblyCollectionTyped,
@@ -7443,6 +7444,22 @@ function type(expr: BoxedFunction): Type | BoxedType {
         broadcastsOverTuples: broadcastsOverTuples(expr.operator, def),
         // O(rank) candidate check — see the §D4.2 note at the sibling sites.
         hasTensors: expr.ops.some((x) => candidateShape(x) !== null),
+        unionCellResult: () => {
+          if (typeof def.type !== 'function') return undefined;
+          const cells = expr.ops.map((x) =>
+            scalarOrListUnionCellType(x.type.type)
+          );
+          if (cells.every((c) => c === undefined)) return undefined;
+          const descriptors = expr.ops.map((x, i) =>
+            describeOperand(x, cells[i])
+          );
+          const t = guardedTypeHandlerCall(expr.engine, expr.operator, () =>
+            def.type!(descriptors, typeHandlerContext(expr.engine))
+          );
+          return t === undefined
+            ? undefined
+            : BoxedType.forResult(t, expr.engine._typeResolver).type;
+        },
       });
       if (lifted !== undefined) return maybeAbsorb(lifted);
     }
@@ -7636,9 +7653,16 @@ function applyFunctionLiteral(
     typeof declaredType === 'object' && declaredType.kind === 'signature'
       ? declaredType
       : value.type.type;
+  // The arguments are evaluated, so an infinite source (`Range(1, +∞)`,
+  // `Cycle`) or one of unknown length maps too (`isUnknownLengthBroadcast`),
+  // lazily, as at the operator-definition post-evaluation broadcast (step 4b).
+  // It used to be bound whole: `H(Range(1, +∞))` with `H := x ↦ (x, x)`
+  // declared `function` was the tuple `(Range(1, +∞), Range(1, +∞))`, while
+  // the same function assigned undeclared, and the call's type, mapped.
   const broadcastsElementwise =
-    ops.some((x) => isFiniteBroadcastParticipant(x)) &&
-    paramsAreScalar(broadcastGateType);
+    ops.some(
+      (x) => isFiniteBroadcastParticipant(x) || isUnknownLengthBroadcast(x)
+    ) && paramsAreScalar(broadcastGateType);
   // As at the operator-def broadcast steps: a collection-TYPED argument with
   // no collection value yet must not be bound as a per-element scalar
   // (`hasUnresolvedCollectionOperand`). Skipping the broadcast is not enough on

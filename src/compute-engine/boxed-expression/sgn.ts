@@ -1,5 +1,6 @@
 import type { Expression, Sign } from '../global-types.js';
 import { isFunction, isSymbol, isNumber } from './type-guards.js';
+import { signOfType } from '../../common/type/utils.js';
 
 export function sgn(expr: Expression): Sign | undefined {
   const ce = expr.engine;
@@ -16,6 +17,13 @@ export function sgn(expr: Expression): Sign | undefined {
   if (isFunction(expr)) {
     const def = expr.operatorDefinition;
     if (def?.sgn) s = def.sgn(expr.ops, { engine: ce });
+
+    // When the operator's sign handler proves nothing, a RANGED result type
+    // can: `1 - t` with `t: real<0.9985..0.9999>` is typed
+    // `real<0.0001..0.0015>`, so it is positive. The symbol route reads a
+    // ranged declaration the same way (`BoxedSymbol.sgn`). `signOfType`
+    // answers only for a real type that excludes NaN.
+    if (s === undefined) s = signOfType(expr.type.type);
 
     return s;
   }

@@ -12,6 +12,7 @@ import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
   appliesToListCoordinateTuple,
   isTupleShapedType,
+  scalarOrListUnionCellType,
   typeCouldBeUnkeyedCollection,
 } from '../collection-utils.js';
 import type { Type } from '../../common/type/types.js';
@@ -21,7 +22,7 @@ import {
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
-import { guardedTypeHandlerCall } from './operand-descriptor.js';
+import { describeType, guardedTypeHandlerCall } from './operand-descriptor.js';
 import {
   instantiatedResultTypeOverActuals,
   type SolveActual,
@@ -301,6 +302,29 @@ export function deriveApplicationType(
         mappable: mappable === 'no-plan' ? undefined : mappable,
         broadcastsOverTuples: hooks.broadcastsOverTuples(operator, def),
         hasTensors: views.some((v) => v.tensorShape),
+        // The handler typed again with each scalar-or-list union operand
+        // typed as its cell, as on the expression route
+        // (`BoxedFunction.type`).
+        unionCellResult: () => {
+          if (typeof def.type !== 'function') return undefined;
+          const cells = operands.map((d) => scalarOrListUnionCellType(d.type));
+          if (cells.every((c) => c === undefined)) return undefined;
+          // The facts are read from the cell type (`describeType`): the
+          // operand's own facts describe the whole union, and would contradict
+          // the narrower type (a possible collection beside a scalar type).
+          const cellOperands = operands.map((d, i) =>
+            cells[i] === undefined
+              ? d
+              : {
+                  ...describeType(cells[i]!, d.facts.closed),
+                  structureOf: d.structureOf,
+                }
+          );
+          const raw = guardedTypeHandlerCall(engine, operator, () =>
+            def.type!(cellOperands, typeHandlerContext(engine))
+          );
+          return BoxedType.forResult(raw, engine._typeResolver)?.type;
+        },
       }) ?? perElement
     );
   }

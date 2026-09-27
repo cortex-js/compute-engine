@@ -23,8 +23,8 @@
     arm is for an empty list). All were `number`.
   - `Sum(C)` is `nan | real | signed_infinity`, `Sum(L)` is `real`, `Product(K)`
     is `integer`, `Mean(L)` is `nan | real` and `Mean(K)` is `nan | rational`.
-    All were `number`. The forms with limits (`Sum(k², k, 1, 10)`) are
-    unchanged.
+    All were `number`. The forms with limits are typed from the body as well
+    (see below).
   - A literal list with an infinite or NaN element keeps it in the element type:
     `[1, ∞]` is `list<integer | signed_infinity^2>` and `[1.5, NaN]` is
     `list<nan | real^2>` (both were `vector<2>`, a list of `number`). What a
@@ -201,6 +201,36 @@
   either end.** `Element(1000, Range(0, 999.9999999999, 0.1))` was `False`
   although `1000` is the last element; it is `True`. A value just before the
   first element is also a member now: `Element(-1e-17, Range(0, 1, 0.1))`.
+- **`Sum` and `Product` over an index range are typed from the body** when
+  the body is on the extended real line. `Sum(k², k, 1, 10)` is `integer`,
+  `Product(1/k, k, 1, 4)` is `rational`, and `Sum(a·k, k, 1, 10)` with
+  `a: real | signed_infinity | nan` is `nan | real | signed_infinity`. When the
+  range is not known to be finite (`Sum(1/k, k, 1, ∞)`, or an upper bound `n`
+  of unknown type), the value may also be `±∞` or have no limit, so the type is
+  `nan | real | signed_infinity`, or `integer | nan | signed_infinity` for
+  integer terms. All were `number`.
+- **An operation on a scalar-or-list union is typed from the union's cell.**
+  With `v: real | list<real>`, `2v`, `r·v` and `sin(v)` are `list<real> | real`
+  (they were `list<number> | number`); with `u: real | signed_infinity |
+  list<real>` and `y: real | signed_infinity | nan`, `y·u` is
+  `list<nan | real | signed_infinity> | nan | real | signed_infinity`.
+- **`Abs` keeps NaN in its type, and `Real`, `Imaginary` and `Arg` are
+  narrower.** `|q|` with `q: real | nan` was `real<0..> | signed_infinity`,
+  although `|NaN|` is NaN; it is `nan | real<0..>`. `|w|` with `w: number` is
+  `nan | real<0..> | signed_infinity`. A type check such as
+  `type.matches('real<0..>')` on `|x|` now answers `false` when `x` may be NaN.
+  `Re(z)`, `Im(z)` and `Arg(z)` with `z: complex | nan` are `nan | real`, and
+  `Re(w)` is `nan | real | signed_infinity` (all were `number`).
+- **A function expression reads its sign from a ranged type** when its
+  operator has no sign rule: with `t: real<0.9985..0.9999>`, `1 − t` and
+  `Clamp(t, −1, 1)` are positive (`isPositive` was `undefined`). So `|π − 4|`
+  simplifies to `4 − π` and `|e − 2|` to `e − 2`.
+- **A function literal, or a function declared `function`, applied to an
+  infinite collection maps over it lazily.** `Apply(x ↦ (x, x), Range(1, ∞))`
+  was the tuple `(Range(1, +∞), Range(1, +∞))` under a `list<tuple<…>>` type;
+  it is the infinite list `[(1, 1), (2, 2), …]`, as for a function assigned
+  without a declaration. A finite list beside an infinite one is the
+  `incompatible-dimensions` error on every route.
 
 ### Issues Resolved
 
@@ -270,6 +300,17 @@
   promoted to the complex lane (the non-negativity test did not read ranged
   types), and the real arithmetic around it gave NaN
   (`_SYS.cneg({re: 0.9999…, im: 0}) + 1`). It is now lowered real.
+- **`.N()` of an infinite series with no limit stays unevaluated.**
+  `Σ_{k≥1} (−1)^k` gave `−1`, `Σ_{k≥0} (−1)^k` gave `1`, `Σ cos(πk)` gave `−1`,
+  and `Π 2^((−1)^k)` gave `0.5`. The extrapolation sampled the partial sums
+  after 1, 2, 4, 8, … terms only, which all have the same parity; the partial
+  sums of the other parity must now agree.
+- **JavaScript target: the lane of `Add`, `Multiply`, `Negate`, `Divide`,
+  `Subtract` and `Sign` follows their operands** in the analysis the parent
+  reads, as it already did in their emitters. A real-typed application over a
+  complex-shaped operand was reported real to its parent while its emitter
+  wrote complex code. No input is known to reach this now; the change removes
+  the possibility.
 - **`Min` over a descending range** answered its first element:
   `Min(Range(1, −∞))` was `1` and is `−∞`, and `Min(Range(5, 1))` was `5` and is
   `1`. **An empty range** has no extremum: `Max(Range(1, 5, −1))` was `2` (not

@@ -1029,13 +1029,13 @@ describe('a LONE union-typed operand keeps the union in the result type', () => 
     ce.declare('v', 'integer | indexed_collection<integer>');
     ce.declare('r', 'integer | range');
     expect(ce.box(['Multiply', 2, 'v']).type.toString()).toBe(
-      'indexed_collection<number> | number'
+      'indexed_collection<integer> | integer'
     );
     expect(ce.box(['Negate', 'v']).type.toString()).toBe(
       'indexed_collection<integer> | integer'
     );
     expect(ce.box(['Multiply', 2, 'r']).type.toString()).toBe(
-      'indexed_collection<number> | number'
+      'indexed_collection<integer> | integer'
     );
   });
 
