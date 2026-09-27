@@ -11,8 +11,10 @@ import {
   rewriteWithBinders,
   sameBindingDef,
   boundVariableNames,
+  boundVariableNamesInOperand,
   shadowedKey,
 } from './boxed-expression/binders.js';
+import { declaredBinders } from './boxed-expression/binding-sites.js';
 import type {
   BoxedDefinition,
   BoxedValueDefinition,
@@ -2430,12 +2432,24 @@ function containsFreeSymbol(
   if (isDictionary(expr))
     result = expr.values.some((v) => containsFreeSymbol(v, shadowed, memo));
   else {
+    // A bound name shadows the operands it is IN SCOPE in
+    // (`boundVariableNamesInOperand`): an iterator clause's index does not
+    // shadow an earlier clause's collection or guard.
     const binds = boundVariableNames(expr);
-    const inner =
-      binds.length > 0
-        ? new Set(shadowed ? [...shadowed, ...binds] : binds)
-        : shadowed;
-    result = expr.ops.some((op) => containsFreeSymbol(op, inner, memo));
+    // The clause ordering is read once per node, not once per operand.
+    const binders =
+      binds.length > 0 ? declaredBinders(expr, 'post') : undefined;
+    result = expr.ops.some((op, i) => {
+      const here =
+        binders === undefined
+          ? binds
+          : boundVariableNamesInOperand(expr, i, binders);
+      const inner =
+        here.length > 0
+          ? new Set(shadowed ? [...shadowed, ...here] : here)
+          : shadowed;
+      return containsFreeSymbol(op, inner, memo);
+    });
   }
   let byShadowing = memo.get(expr);
   if (byShadowing === undefined) {

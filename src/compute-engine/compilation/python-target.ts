@@ -916,6 +916,25 @@ function pythonElementHeaders(
   target: CompileTarget<Expression>
 ): { headers: string[]; bodyTarget: CompileTarget<Expression> } {
   const binders = BaseCompiler.elementClauseBinders(elements, target);
+  // A Python comprehension is ONE scope: every `for` target is a local of the
+  // whole comprehension, so a guard that names a binder of a LATER clause
+  // would read that local before its `for` assigns it (an unbound local),
+  // where the interpreter reads the ENCLOSING variable of that name. The
+  // JavaScript loops nest block scopes and read the parameter; Python has no
+  // spelling for it here, so the shape declines.
+  binders.forEach((b, i) => {
+    const guard = b.clause.ops[2];
+    if (guard === undefined || isSymbol(guard, 'Nothing')) return;
+    for (let j = i + 1; j < binders.length; j++)
+      for (const name of binders[j].names)
+        if (guard.has(name))
+          throw new Error(
+            `Could not compile \`Comprehension\`: the guard of clause ${i + 1} names \`${name}\`, ` +
+              `which a later clause binds; in a Python comprehension that name is the later ` +
+              `loop's variable, unassigned at that point, where the interpreter reads the enclosing one. ` +
+              `The interpreter evaluates it instead.`
+          );
+  });
   const headers: string[] = [];
   let scope = target;
   for (const b of binders) {

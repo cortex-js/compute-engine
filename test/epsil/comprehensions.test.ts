@@ -301,6 +301,42 @@ describe('EPSIL COMPREHENSIONS — serialization', () => {
     ).toBe('DictionaryFrom([p for p in pairs])');
   });
 
+  test("the engine's set-builder prints as a set comprehension", () => {
+    // `["Set", body, ["Element", v, domain, cond?]]` with `v` in the body is
+    // the engine's set-builder (form A of `parseSetComprehension`); its
+    // literal spelling `{body, v in domain}` reads as a two-element set.
+    expect(
+      serializeEpsil(['Set', ['Power', 'x', 2], ['Element', 'x', 'xs']])
+    ).toBe('{x ^ 2 for x in xs}');
+    expect(
+      serializeEpsil([
+        'Set',
+        ['Multiply', 2, 'k'],
+        ['Element', 'k', 'S', ['Greater', 'k', 2]],
+      ])
+    ).toBe('{2k for k in S if k > 2}');
+    // The reprint re-parses to the same set, as `SetFrom(Comprehension(…))`.
+    expect(validEpsil('{x^2, x in xs}')).toStrictEqual([
+      'Set',
+      ['Power', 'x', 2],
+      ['Element', 'x', 'xs'],
+    ]);
+    expect(serializeEpsil(parseEpsil('{x^2, x in xs}')[0]!)).toBe(
+      '{x ^ 2 for x in xs}'
+    );
+    // A domain that names the index reads the ENCLOSING variable in the
+    // set-builder; a comprehension would capture it, so the literal stays.
+    expect(
+      serializeEpsil(['Set', 'n', ['Element', 'n', ['Range', 1, 'n']]])
+    ).toBe('{n, n in Range(1, n)}');
+    // A two-element set whose membership does not bind a name of the body
+    // stays a literal.
+    expect(serializeEpsil(['Set', 'a', ['Element', 'b', 'c']])).toBe(
+      '{a, b in c}'
+    );
+    expect(serializeEpsil(['Set', 1, 2])).toBe('{1, 2}');
+  });
+
   test('a comprehension whose clause is not an Element keeps the call form', () => {
     expect(serializeEpsil(['Comprehension', 'x', 'xs'])).toBe(
       'Comprehension(x, xs)'

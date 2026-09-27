@@ -35,9 +35,11 @@ import {
 } from './provisional-application.js';
 import {
   boundVariableNames,
+  boundVariableNamesInOperand,
   markShieldDeclaration,
   rewriteWithBinders,
 } from './binders.js';
+import { declaredBinders } from './binding-sites.js';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants
@@ -498,11 +500,26 @@ export function resolveBoundSymbols(
   // body's bound `x` into `5`. Extend the protected set with the locally-bound
   // names before descending. (`localScope` covers `Block`/`Sum`/`Product`/…;
   // a `Function`'s parameters live in its operand slots, not its scope.)
+  // A bound name protects the operands it is IN SCOPE in
+  // (`boundVariableNamesInOperand`): an iterator clause's index does not
+  // protect an earlier clause's collection or guard, where the name denotes
+  // the enclosing binding.
   const bound = boundVariableNames(expr);
-  const childProtect = bound.length ? new Set([...protect, ...bound]) : protect;
+  // The clause ordering is read once per node, not once per operand.
+  const binders = bound.length ? declaredBinders(expr, 'post') : undefined;
+  const protectIn = (i: number): ReadonlySet<string> => {
+    if (!bound.length) return protect;
+    const here =
+      binders === undefined
+        ? bound
+        : boundVariableNamesInOperand(expr, i, binders);
+    return here.length ? new Set([...protect, ...here]) : protect;
+  };
 
   const ops = expr.ops;
-  const resolved = ops.map((op) => resolveBoundSymbols(op, childProtect, seen));
+  const resolved = ops.map((op, i) =>
+    resolveBoundSymbols(op, protectIn(i), seen)
+  );
   if (resolved.every((op, i) => op === ops[i])) return expr;
   return expr.engine.function(expr.operator, resolved);
 }

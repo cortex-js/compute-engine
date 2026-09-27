@@ -262,16 +262,17 @@ Defects:
    evaluation (45 suites). The fix belongs in the evaluation step
    (`boxed-function.ts`): evaluate a lazy operator's `Join`/`Append`
    operand when it may be absent, then thread the result.
-4. **A lazy `Join` over an eager collection operator is not known to be
-   finite.** `Sum(Join([3], Sort([2,1])))` stays unevaluated (the answer is
-   6), while `Sum(Join([3], [2,1]))` is 6 and `Sum(Sort([2,1]))` is 3.
-   Unevaluated, `Sort([2,1])` reports `isCollection` false and
-   `isFiniteCollection` undefined, so `Join` cannot report a finite count
-   and `Sum` declines. Measured at `7713654e` and later.
-5. **Arithmetic over an error-typed term types differently by operator.**
-   With `E = Sin(Tuple(A, B))` and `A, B: list<real>`, `Add(1, E)` is
-   `error | integer`, `Multiply(2, E)` and `Divide(E, 2)` are `number`, and
-   `Negate(E)` is `error`.
+4. **A lazy view over an eager collection operator whose own operand is
+   not yet evaluated is not known to be finite.** Since 2026-09-27 a lazy
+   view (`Join`, `Append`, `Reverse`, `Zip`, `Filter`, `Take`, …) evaluates a
+   PURE library-operator source to answer finiteness and count, so
+   `Sum(Join([3], Sort([2,1])))` is 6. What stays symbolic: a source whose own
+   operand is an unevaluated application (`Join([3], Sort(Sort([2,1])))`),
+   and an impure source with no `elementCount`. The restriction exists
+   because evaluating the source from a facet read re-runs a recursive
+   builder's tail at every read (`recursive-list-builder.test.ts`,
+   "an effectful bound keeps one evaluation per recursive call" went from 3
+   calls to 7) and spends extra random draws.
 
 ### A function-typed factor is a product under juxtaposition and a type error under an explicit operator (OPEN, ruling — found 2026-09-22 while fixing the MathNet round-trip check)
 
@@ -434,60 +435,6 @@ expected effect on the corpus.
   read-only and drop the copy. Today no in-repo consumer writes to a returned
   enclosure. The copy stays until ruled otherwise.
 
-### A clause that names a later clause's binder is folded with the enclosing variable unbound (OPEN, small — found 2026-09-27 by the review of the Epsil comprehension round)
-
-In `Comprehension(x, Element(x, Range(1, 3), Less(x, y)), Element(y, Range(1, 2)))`
-the guard's `y` is the ENCLOSING variable `y`: `canonicalLoopLike`
-canonicalizes each clause before the later indices are declared, and the
-interpreter answers `[1, 1]` when `y := 2`. But the node's unknowns subtract
-every clause index over the whole node (the binder scope of
-`indexingSetSites(1)` is not ordered by clause), so `y` is not counted free.
-The JavaScript and Python routes then constant-fold the node before
-`elementClauseBinders` can decline it: the fold evaluates with the enclosing `y`
-unbound, the guard is undecided, and the compiled function is `[]` for every
-`y`. The same shape with
-the name in a COLLECTION (`Element(x, Range(1, y))`) is not folded (a lazy
-`Range` over a symbol does not materialize) and reaches the decline. The
-`compile()` interpreter fallback passes `vars` by name and misses the enclosing
-`y` for the same reason.
-
-The compile-time decline added 2026-09-27 (a guard that names a later binder
-throws "The interpreter evaluates it instead") covers the routes the fold does
-not pre-empt. What remains is a decision: (a) teach the binder machinery that an
-`Element` clause's collection and guard see only the EARLIER indices, so the
-name counts as free — a change to `binding-sites.ts` that `Sum`/`Product` share;
-or (b) reject the shape at canonicalization (a clause may not name a later
-clause's index), which changes the interpreter's answer for a form nobody
-writes deliberately. Reproducer: `test/compute-engine/comprehension-guard.test.ts`,
-"a guard naming a later clause variable reads the enclosing one".
-
-### LaTeX: the trailing Leibniz form of a derivative absorbs the term that follows it (OPEN, small — found 2026-09-26 by the review of PR #349)
-
-`Add(D(x, x), 1)` serializes as `\frac{\mathrm{d}}{\mathrm{d}x}x+1`, and
-`ce.parse` reads that back as `D(x + 1, x)`: the parser reads the differentiand
-to the end of the sum. The same happens for every "tight atom" differentiand
-that the `D` serializer (`latex-syntax/dictionary/definitions-core.ts`) puts
-in the trailing position (`x^2`, `x!`, `\sin(x)`); the comment there says the
-trailing form is safe for a tight atom, which holds only when nothing follows
-the derivative. PR #349 moves a fraction, `Sum` or `Product` differentiand to
-the self-delimiting folded-numerator form
-`\frac{\mathrm{d}(\frac{x}{y})}{\mathrm{d}x}`, which fixes those shapes; the
-tight atoms still use the trailing form. Fix: use the folded form whenever the
-`D` is not the last operand of its parent, or always. The blast radius is the
-snapshots of every serialized derivative of a tight atom; measure it first.
-
-### JavaScript target: adding two point lists of different lengths throws a `TypeError` (OPEN — found 2026-09-23 while fixing Tycho item 307)
-
-With `L_1 = [1, 2, 3]`, `L_2 = [4, 5]` and `A = [0.1, 0.2, 0.3]`,
-`Min(PointX(Add(PointList(L_1, L_2), Multiply(1/20, PointList(Cos(A), Sin(A))))))`
-compiles on `javascript`, but the compiled function throws
-`TypeError: _SYS.bcast(...).map is not a function`. The first `PointList` has
-two points and the second has three. The interpreter answers
-`Error("incompatible-dimensions", "3 vs 2")` and `interval-js` answers the
-absence marker. The probable cause: `_SYS.bcast` returns `NaN` on a length
-mismatch, and the generated code then calls `.map` on it. The compiled code must
-answer the same absence the interpreter's error projects to, not throw.
-
 ### JavaScript target: calls that now decline instead of compiling (OPEN, compile gap — found 2026-09-23)
 
 With `k := i` and `p: (unknown) -> unknown`, `p(P) := P.x + k`: `p((x, 1)) + 1`,
@@ -618,9 +565,13 @@ every fallback case; a decision. (2) The descriptor typing route
 (`derive-application-type.ts`) cannot see that an operand is a negated absence,
 so a type derived through it (a `Map` body) for `Add(Negate(Missing), (1, 2))`
 is still `number | tuple<…>`; the expression route types it
-`missing | tuple<…>`. (3) The `.neg()` and `.inv()` methods keep an absent
-operand (`-"Missing"`, `1/"Missing"`; both evaluate to `NaN`). Not a defect,
-recorded rule: compiled arithmetic with an absent POINT gives `NaN` where the
+`missing | tuple<…>`. Not a defect (checked 2026-09-27): the `.neg()`,
+`.inv()`, `.pow()` and `.sqrt()` methods keep an absent operand
+(`-"Missing"`, `1/"Missing"`; both evaluate to `NaN`) on purpose, because
+canonicalization builds a difference as `a + (-b)` and the kept
+`Negate(Missing)` is the marker that makes `(1, 2) - Missing` absent rather
+than a type error (`absent-point-arithmetic.test.ts` pins six such cases).
+Not a defect, recorded rule: compiled arithmetic with an absent POINT gives `NaN` where the
 interpreter gives `Missing` (`compile-restricted-point.test.ts`, as for
 `A\{0<t\} + 1`).
 
@@ -646,21 +597,13 @@ absence), which `Missing` does not.
 
 ### Residues of the tuple-of-lists change (OPEN, small — 2026-09-25)
 
-(1) On `javascript`, restricted point arithmetic with an UNTYPED `t` declines:
-`PointList(t,1)\{1<t\} + PointList(2,t)` is typed `missing | tuple<unknown,
-unknown>` and fails the absent-value check ("object-domain absent ('missing')
-position … has no object null representation", `isNumericOrVerdictShaped`
-does not accept an `unknown` coordinate); with `t: real` it compiles. A
-reachable decline (found 2026-09-25). (2) An operator that
-encloses an `error`-typed operand does not always report `error` itself:
-`Sin(Add(Tuple(1,1), Tuple(A,B)))` is typed `number` although it evaluates to
-the error (the direct application is typed `error` since 2026-09-25). (3) For a parameter with no declared type, the compiled route does not handle a
+(1) For a parameter with no declared type, the compiled route does not handle a
 restricted list of points (`untypedPointListElement` does not remove `missing`).
 On the interpreter, an untyped `k := P ↦ 2P` applied to `[Missing, (3,4)]`
 answers `[NaN, (6, 8)]` typed `list<number>` (found 2026-09-25): the absent cell
-is not `Missing` and the type does not describe the value. (4) A point list at
+is not `Missing` and the type does not describe the value. (2) A point list at
 an untyped parameter beside another collection argument still declines to
-compile to JavaScript (the interpreter pairs the lists). (5) Block-local
+compile to JavaScript (the interpreter pairs the lists). (3) Block-local
 functions and variadic parameters do not map over a list of points.
 
 ### Extended-real declarations lose precision through a call of a function declared `function` (OPEN, low — reported by Tycho 2026-09-24; narrowed 2026-09-26)
@@ -727,28 +670,34 @@ an array it reuses); (c) the cache only for frozen arrays. Recommendation: (a).
 `BigNumericValue.im` is a `number`, so `.N()` of a complex value has the working
 precision (21 digits by default) on the real part and 16 digits on the imaginary
 part: `.N()` of `√2 + √2 i` is
-`1.414213562373095048801689 + 1.4142135623730951i`. A big-decimal imaginary part
-is scheduled (user decision 2026-09-24), not done. Also,
-`BigNumericValue.toString()` does not round the real part of a complex value to
-the working precision (the real-only branch does), so that part prints 25
-digits. Related: `numericCostFunction` (`cost-function.ts`) prices the imaginary
-radical of a complex literal but not its real radical. Also found 2026-09-25:
-`.N()` of `Multiply(Complex(√2/2, √2/2), e^2)` prints the real part with about
-46 digits (`5.224851674121679747327997452771991010463873012`) and the imaginary
-part at machine precision; the digits are correct, the precision mix is the same
-defect on the `Multiply` route.
+`1.414213562373095 + 1.4142135623730951i` (since 2026-09-27 the real part
+prints at the working precision; before, the complex branch of
+`BigNumericValue.toString()` did not round it and printed 25 or 46 digits). A
+big-decimal imaginary part is scheduled (user decision 2026-09-24), not done.
+Related, a decision (found 2026-09-27): `numericCostFunction`
+(`cost-function.ts`) prices the imaginary radical of an exact complex literal
+but not its real radical, so `√2 + √2i` costs 9 where `i√2` costs 8. Pricing
+the real radical the same way (13) was tried and reverted: `simplify()` then
+kept `∜(−16)` instead of rewriting it to `√2 + √2i`, which
+`imaginary-unit-spelling.test.ts` pins (the exact `∜(−1)` decision of
+2026-09-25). Either the real radical stays unpriced, or the cost of a `Root`
+of a negative radicand rises with it.
 
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 
 `Eigenvalues([[1, i, 0], [i, 2, 0], [0, 0, 3]])`, `Eigenvectors` of it,
-`CholeskyDecomposition([[2, 1+i], [1-i, 3]])`, and `LUDecomposition`,
-`QRDecomposition` and `SVD` of a complex matrix stay unevaluated under
-`evaluate()` AND under `.N()` (before `168de97d` they answered wrong real
-values). `SingularValues(...).N()` of a complex matrix of any size is computed
-since 2026-09-24. Since 2026-09-25 its kernel, `singularValueDecomposition(re,
-im)` in `numerics/linear-algebra.ts` (QR with column pivoting, then a one-sided
-Jacobi pass), also returns the complex `U` and `V`; the complex `SVD` only
-needs `computeSVD` (`library/linear-algebra.ts`) to accept complex entries. The same embedding
+`CholeskyDecomposition([[2, 1+i], [1-i, 3]])`, and `LUDecomposition` and
+`QRDecomposition` of a complex matrix stay unevaluated under `evaluate()` AND
+under `.N()` (before `168de97d` they answered wrong real values).
+`SingularValues(...).N()` of a complex matrix of any size is computed since
+2026-09-24, and `SVD(...).N()` since 2026-09-27, both through the kernel
+`singularValueDecomposition(re, im)` in `numerics/linear-algebra.ts` (QR with
+column pivoting, then a one-sided Jacobi pass), which returns the complex `U`
+and `V`. Left open by the `SVD` change: a complex matrix of exact entries is
+decomposed only under `.N()`, while a real matrix of exact entries still
+decomposes to floats under `evaluate()` (`linear-algebra.test.ts` pins it);
+aligning real `SVD` with the exactness contract is a behaviour change that
+needs a decision. The same embedding
 gives the eigenvalues of a HERMITIAN matrix (run Jacobi on the embedding itself,
 take each eigenvalue once; an eigenvector `[x; y]` gives `x + iy`); a general
 complex matrix needs a complex QR iteration.

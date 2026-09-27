@@ -10,6 +10,7 @@ import type {
 import { isFunction, isSymbol, isDictionary, isNumber } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
 import { assertLiveBinding } from './binding-tombstone.js';
+import { declaredBinders, type DeclaredBinders } from './binding-sites.js';
 
 /**
  * The names bound BY THIS NODE (not by its descendants).
@@ -46,6 +47,43 @@ export function boundVariableNames(expr: Expression): readonly string[] {
 }
 
 const NO_BINDERS: readonly string[] = [];
+
+/**
+ * The names bound by `expr` that are IN SCOPE in its operand `index`.
+ *
+ * The same list as {@link boundVariableNames} for most binders. A binder whose
+ * sites are iterator CLAUSES (`BindingSite.clauseLocal`: `Sum`, `Product`,
+ * `Comprehension`, `Loop`, …) binds each index from its own clause onward:
+ * in `Comprehension(b, Element(i, [j, j+1]), Element(j, [10, 20]))` the first
+ * clause's collection reads the ENCLOSING `j`, not the second clause's index
+ * — "later clauses see earlier bindings", not the reverse — while the body
+ * (every operand before the first clause) sees every binding. That is the
+ * scope `bindBindingSites` (`box.ts`) canonicalizes against, so a
+ * free-variable walk or a rewrite that treated every bound name as shadowing
+ * the whole node would report such a `j` bound and never substitute it, and a
+ * route that folds a node with no free variables would then evaluate it with
+ * the enclosing `j` unbound (a guarded comprehension compiled to `[]`, found
+ * 2026-09-27).
+ *
+ * `binders` is the node's clause ordering, `declaredBinders(expr, 'post')`
+ * (`binding-sites.ts`). A walk over the operands computes it ONCE per node
+ * and passes it in, so the selector is not re-run for every operand; the
+ * default serves a one-off question. A name the scope binds that the
+ * selectors do not order (a `Block` local) is in scope throughout.
+ */
+export function boundVariableNamesInOperand(
+  expr: Expression,
+  index: number,
+  binders: DeclaredBinders | undefined = declaredBinders(expr, 'post')
+): readonly string[] {
+  const names = boundVariableNames(expr);
+  if (names.length === 0) return names;
+  if (binders === undefined || index < binders.firstClause) return names;
+  const visible = names.filter(
+    (n) => (binders.visibleFrom.get(n) ?? 0) <= index
+  );
+  return visible.length === names.length ? names : visible;
+}
 
 /**
  * The activation-record link, as carried by `_BoxedValueDefinition`.
@@ -458,16 +496,28 @@ export function rewriteWithBinders(
     // can be rewritten, and reading its `ops` would box every element.
     result = expr;
   } else {
-    let inner = shadowed;
-    if (!skipRootBinds) {
-      const binds = boundVariableNames(expr);
-      if (binds.length > 0)
-        inner = new Set(shadowed ? [...shadowed, ...binds] : binds);
-    }
+    // The names this node binds shadow the walk into each operand — the
+    // names IN SCOPE in that operand (`boundVariableNamesInOperand`): an
+    // iterator clause's index shadows its own clause and the later ones, not
+    // an earlier clause's collection or guard, where the same name denotes
+    // the enclosing binding and must be rewritten as such.
+    const binds = skipRootBinds ? NO_BINDERS : boundVariableNames(expr);
+    // The clause ordering is read once per node, not once per operand.
+    const binders =
+      binds.length > 0 ? declaredBinders(expr, 'post') : undefined;
+    const shadowedIn = (i: number): ReadonlySet<string> | undefined => {
+      if (binds.length === 0) return shadowed;
+      const here =
+        binders === undefined
+          ? binds
+          : boundVariableNamesInOperand(expr, i, binders);
+      if (here.length === 0) return shadowed;
+      return new Set(shadowed ? [...shadowed, ...here] : here);
+    };
 
     const ops = expr.ops;
-    const next = ops.map((op) =>
-      rewriteWithBinders(op, visit, inner, false, memo)
+    const next = ops.map((op, i) =>
+      rewriteWithBinders(op, visit, shadowedIn(i), false, memo)
     );
     if (next.every((op, i) => op === ops[i])) result = expr;
     else {

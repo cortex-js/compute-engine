@@ -252,14 +252,10 @@ describe('COMPREHENSION GUARD — decided-true semantics and clause scope', () =
   });
 
   // A guard reads the bindings of its own clause and the clauses BEFORE it;
-  // a name bound by a later clause is the enclosing variable of that name.
-  // The compiled routes decline the shape: the node's unknowns subtract
-  // every clause index, so a name-based route cannot tell the enclosing
-  // variable from the later binder. Both compiled routes constant-fold such
-  // a node before the decline is reached (the fold sees no unknowns), so
-  // only the interpreter is asserted here — recorded in ROADMAP.md, "A
-  // clause that names a later clause's binder is folded with the enclosing
-  // variable unbound".
+  // a name bound by a later clause is the ENCLOSING variable of that name.
+  // The node's free variables say so (`boundVariableNamesInOperand`), so the
+  // compiled routes neither fold the node nor bind the name to the later
+  // loop: the guard reads the parameter.
   test('a guard naming a later clause variable reads the enclosing one', () => {
     const engine = new ComputeEngine();
     engine.declare('y', 'integer');
@@ -269,6 +265,16 @@ describe('COMPREHENSION GUARD — decided-true semantics and clause scope', () =
       ['Element', 'x', ['Range', 1, 3], ['Less', 'x', 'y']],
       ['Element', 'y', ['Range', 1, 2]],
     ]);
+    expect(comp.unknowns).toEqual(['y']);
+    const js = compile(comp, { fallback: false });
+    expect(js.success).toBe(true);
+    expect(js.run!({ y: 2 })).toEqual([1, 1]);
+    expect(js.run!({ y: 3 })).toEqual([1, 1, 2, 2]);
+    // A Python comprehension is one scope, where `y` would be the later
+    // loop's unassigned local: the Python route declines the shape.
+    expect(() =>
+      new PythonTarget().compileFunction(comp, 'fn', ['y'], undefined, {})
+    ).toThrow(/later clause binds/);
     engine.assign('y', 2);
     expect(comp.evaluate().toString()).toBe('[1,1]');
   });

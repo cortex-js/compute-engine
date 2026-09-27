@@ -608,6 +608,19 @@ export function serializeEpsil(
     //
     Set: (expr: MathJsonExpression): FormattingBlock => {
       if (nops(expr) === 0) return fmt.text('{}');
+      // The engine's set-builder, `["Set", body, ["Element", v, domain,
+      // cond?]]` with `v` a symbol the body mentions (the shape the LaTeX
+      // `\{2k \mid k \in S\}` and the big operators produce;
+      // `parseSetComprehension`, `library/collections.ts`), is a
+      // comprehension and prints as one, `{body for v in domain if cond}`.
+      // The literal spelling `{body, v in domain}` re-parses to the same
+      // shape but reads as a two-element set holding a boolean. The reprint
+      // re-parses to `SetFrom(Comprehension(…))`, the same set.
+      const builder = setBuilderShape(expr);
+      if (builder !== null) {
+        const block = serializeComprehension(builder, '{', '}');
+        if (block !== null) return block;
+      }
       return fmt.fencedList(
         '{',
         fmt.separator(','),
@@ -2630,6 +2643,47 @@ export function serializeEpsil(
       if (n === 3 && guard !== null) parts.push(' if ', clauseOperand(guard));
     }
     return fmt.line(open, serializeBody(body), ' for ', ...parts, close);
+  }
+
+  /**
+   * The engine's set-builder read as a `Comprehension` node — `["Set", body,
+   * ["Element", v, domain]]` or `["Set", body, ["Element", v, domain,
+   * cond]]`, `v` a symbol that occurs in `body` — or `null` for a literal
+   * set. Mirrors form A of `parseSetComprehension`
+   * (`library/collections.ts`): the other forms (`Condition` operands) have
+   * no Epsil spelling and keep the literal print.
+   */
+  function setBuilderShape(
+    expr: MathJsonExpression
+  ): MathJsonExpression | null {
+    if (nops(expr) !== 2) return null;
+    const body = operand(expr, 1);
+    const clause = operand(expr, 2);
+    if (body === null || clause === null) return null;
+    if (operator(clause) !== 'Element') return null;
+    const n = nops(clause);
+    if (n !== 2 && n !== 3) return null;
+    const variable = symbol(operand(clause, 1));
+    if (variable === null || variable === 'Nothing') return null;
+    if (!mentionsSymbol(body, variable)) return null;
+    // A domain that names the index itself — `{n, n in 1..n}` with an
+    // enclosing `n` — reads the ENCLOSING `n` in the set-builder (the domain
+    // is evaluated before the body is substituted), but a comprehension's
+    // clause declares its index before its collection is canonicalized, so
+    // the reprint would capture it. Such a set keeps the literal spelling.
+    const domain = operand(clause, 2);
+    if (domain !== null && mentionsSymbol(domain, variable)) return null;
+    return ['Comprehension', body, clause];
+  }
+
+  /** Does `expr` contain the symbol `name`, at any depth? A plain name
+   * search, blind to shadowing by a nested binder — the same test the
+   * engine's set-builder recognition applies (`body.has(v)` in
+   * `parseSetComprehension`), so the print agrees with what the engine
+   * treats as a comprehension. */
+  function mentionsSymbol(expr: MathJsonExpression, name: string): boolean {
+    if (symbol(expr) === name) return true;
+    return operands(expr).some((op) => mentionsSymbol(op, name));
   }
 
   function serializeLoop(expr: MathJsonExpression): FormattingBlock | null {

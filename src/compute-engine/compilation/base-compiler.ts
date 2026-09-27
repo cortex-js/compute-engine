@@ -75,8 +75,14 @@ import {
 } from '../../common/type/utils.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { boundVariableNames } from '../boxed-expression/binders.js';
-import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
+import {
+  boundVariableNames,
+  boundVariableNamesInOperand,
+} from '../boxed-expression/binders.js';
+import {
+  declaredBinders,
+  scopeForRebuild,
+} from '../boxed-expression/binding-sites.js';
 import { parseType } from '../../common/type/parse.js';
 import {
   hasFreeTypeVariables,
@@ -5406,8 +5412,18 @@ export class BaseCompiler {
   private static symbolOccursFree(expr: Expression, name: string): boolean {
     if (isSymbol(expr)) return expr.symbol === name;
     if (!isFunction(expr)) return false;
-    if (boundVariableNames(expr).includes(name)) return false;
-    return expr.ops.some((op) => BaseCompiler.symbolOccursFree(op, name));
+    // A bound name shadows the operands it is IN SCOPE in: an iterator
+    // clause's index does not shadow an earlier clause's collection or guard
+    // (`boundVariableNamesInOperand`).
+    if (!boundVariableNames(expr).includes(name))
+      return expr.ops.some((op) => BaseCompiler.symbolOccursFree(op, name));
+    // The clause ordering is read once per node, not once per operand.
+    const binders = declaredBinders(expr, 'post');
+    return expr.ops.some(
+      (op, i) =>
+        !boundVariableNamesInOperand(expr, i, binders).includes(name) &&
+        BaseCompiler.symbolOccursFree(op, name)
+    );
   }
 
   /**
@@ -14588,26 +14604,6 @@ export class BaseCompiler {
       }
       binders.push(binder);
     }
-    // A GUARD that names a binder of a LATER clause reads, in the
-    // interpreter, the ENCLOSING variable of that name (`canonicalLoopLike`
-    // canonicalizes each guard before the later indices are declared). The
-    // node's own free-variable accounting cannot say so — every clause's
-    // index is subtracted from its unknowns — so a route that folds a node
-    // with no unknowns would evaluate it with the enclosing variable
-    // unbound and answer the empty list. Decline the shape instead of
-    // compiling it under a guess; the interpreter evaluates it.
-    for (let i = 0; i < binders.length; i++) {
-      const guard = binders[i].clause.ops[2];
-      if (guard === undefined || isSymbol(guard, 'Nothing')) continue;
-      for (let j = i + 1; j < binders.length; j++)
-        for (const name of binders[j].names)
-          if (BaseCompiler.symbolOccursFree(guard, name))
-            throw new Error(
-              `Could not compile \`Loop\`: the guard of Element clause ${i + 1} names \`${name}\`, ` +
-                `which a later clause binds; in the interpreter that name is the enclosing ` +
-                `variable, and the compiled loop cannot tell the two apart. The interpreter evaluates it instead.`
-            );
-    }
     return binders;
   }
 
@@ -14820,9 +14816,11 @@ export class BaseCompiler {
       // The guard reads the bindings of ITS clause and the clauses before it
       // — a name bound by a LATER clause is, in the interpreter, the
       // enclosing variable of that name (`canonicalLoopLike` canonicalizes
-      // each guard before the later indices are declared). The body target
-      // binds every clause's name, so it is not the target for the guard: a
-      // later name would be emitted bare, before its loop declares it.
+      // each guard before the later indices are declared, and the node's
+      // free variables count it as free: `boundVariableNamesInOperand`). The
+      // body target binds every clause's name, so it is not the target for
+      // the guard: a later name would be emitted bare, before its loop
+      // declares it; under the guard target it reads the enclosing variable.
       //
       // A target that wraps its numbers (interval arithmetic) has no plain
       // boolean to test, so the guard declines there and the interpreter

@@ -54,7 +54,12 @@ import {
   isFunction,
 } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
-import { symbolAtSite, scopeForRebuild } from './binding-sites.js';
+import {
+  binderBoundAt,
+  declaredBinders,
+  scopeForRebuild,
+  type DeclaredBinders,
+} from './binding-sites.js';
 import { extractIntervalBounds } from './inequality-bounds.js';
 import { labelFor } from './explain-labels.js';
 import { latexSerializeOptions } from './latex-serialize-options.js';
@@ -1496,16 +1501,18 @@ function isReferencedFunctionHead(
  */
 function bindingSiteNames(
   expr: Expression & { ops: ReadonlyArray<Expression> }
-): Set<string> | undefined {
-  const sites = expr.operatorDefinition?.bindingSites?.(expr.ops, 'post');
-  if (sites === undefined || sites.length === 0) return undefined;
-  const names = new Set<string>();
-  for (const site of sites) {
-    if (!site.clauseLocal) continue;
-    const sym = symbolAtSite(expr.ops, site.path);
-    if (sym !== undefined) names.add(sym.symbol);
-  }
-  return names.size === 0 ? undefined : names;
+): DeclaredBinders | undefined {
+  // An UNBOUND node (no operator definition — `canonical: false`) consults
+  // no selector: only the canonical `Limits`/`Element` spellings are
+  // recognized for it, by the structural fallback in the caller (pinned by
+  // `expression-properties.test.ts`, "a node with no definition falls back
+  // to the spelling heuristic"). `declaredBinders` would find the definition
+  // by name and read a `Tuple` spelling the unbound tree does not carry.
+  if (expr.operatorDefinition === undefined) return undefined;
+  const binders = declaredBinders(expr, 'post');
+  return binders === undefined || binders.clauseLocal.size === 0
+    ? undefined
+    : binders;
 }
 
 /**
@@ -1640,8 +1647,15 @@ function collectReferences(
   //   - local variables — Block: inner `Assign`/`Declare` introduce locals.
   //     `Block` is `scoped: true` with no binding sites, so this stays a
   //     structural recognition.
-  const siteVars = bindingSiteNames(expr);
-  const indexVars = siteVars ?? new Set<string>();
+  const sites = bindingSiteNames(expr);
+  const siteVars = sites?.clauseLocal;
+  const indexVars = new Set<string>(siteVars);
+  // Is the index `name` in scope in operand `i`? Always, for a structurally
+  // recognized index; for a clause site, from its own clause onward and in
+  // the body (every operand before the first clause) — the clause ordering
+  // `bindBindingSites` canonicalized against (`binderBoundAt`).
+  const boundIn = (name: string, i: number): boolean =>
+    sites === undefined || binderBoundAt(sites, name, i);
   const localVars = new Set<string>();
   for (const op of expr.ops) {
     if (!isFunction(op)) continue;
@@ -1658,9 +1672,11 @@ function collectReferences(
       localVars.add(op.op1.symbol);
   }
 
-  const innerFree = new Set<string>();
-  const innerRef = new Set<string>();
-  for (const op of expr.ops) {
+  const ops = expr.ops;
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    const innerFree = new Set<string>();
+    const innerRef = new Set<string>();
     // When this expression has index variables (e.g. an `Integrate`), a
     // `Function` operand is the integrand. `Integrate` over-lists *every*
     // referenced symbol as an integrand parameter (not just the integration
@@ -1675,16 +1691,18 @@ function collectReferences(
     )
       getReferences(op.ops[0], innerFree, innerRef, memo);
     else getReferences(op, innerFree, innerRef, memo);
-  }
-
-  if (indexVars.size === 0 && localVars.size === 0) {
-    for (const s of innerFree) freeVars.add(s);
-    for (const s of innerRef) refFns.add(s);
-  } else {
-    for (const s of innerFree)
-      if (!indexVars.has(s) && !localVars.has(s)) freeVars.add(s);
-    for (const s of innerRef)
-      if (!indexVars.has(s) && !localVars.has(s)) refFns.add(s);
+    if (indexVars.size === 0 && localVars.size === 0) {
+      for (const s of innerFree) freeVars.add(s);
+      for (const s of innerRef) refFns.add(s);
+    } else {
+      // Filtered PER OPERAND: an index is bound only where it is in scope.
+      for (const s of innerFree)
+        if (!(indexVars.has(s) && boundIn(s, i)) && !localVars.has(s))
+          freeVars.add(s);
+      for (const s of innerRef)
+        if (!(indexVars.has(s) && boundIn(s, i)) && !localVars.has(s))
+          refFns.add(s);
+    }
   }
 }
 

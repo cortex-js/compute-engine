@@ -48,6 +48,19 @@
   of `√2 + √2i` printed a 25-digit real part
   (`1.414213562373095048801689 + 1.4142135623730951i`).
 
+- **A binder's free variables follow the clause order.** In
+  `Comprehension(x, Element(x, Range(1, 3), x < y), Element(y, Range(1, 2)))`
+  the guard's `y` is the enclosing variable — a clause sees the indices of the
+  clauses before it, not after — and the node now reports `y` free, as `Sum` and
+  `Product` do for the same shape. Before, every index was subtracted from the
+  whole node, so the compiled routes folded such a node with `y` unbound and
+  answered `[]` for every `y`. The Python route declines a guard that names a
+  later clause's index (a Python comprehension is one scope). The Epsil
+  serializer prints the engine's set-builder,
+  `["Set", body, ["Element", v, domain]]`, as the comprehension
+  `{body for v in domain}` instead of the literal `{body, v in domain}`, which
+  read as a two-element set.
+
 ## 0.138.0 _2026-09-27_
 
 ### New Features
@@ -18045,13 +18058,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-      a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-      $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-      $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-      symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-      it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-      returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-      complex eigenvalues are now returned as complex numbers.
+        a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+        $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+        $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+        symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+        it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+        returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+        complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

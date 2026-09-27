@@ -316,6 +316,12 @@ export function lambdaParamSites(op: number): BindingSiteSelector {
 export interface DeclaredBinders {
   readonly visibleFrom: ReadonlyMap<string, number>;
   readonly firstClause: number;
+  /** The names bound by CLAUSE-LOCAL sites — the indexing-set clauses of
+   * `Sum`, `Product`, `Comprehension`, … — as opposed to a plain operand
+   * site (`D`'s variable, `Series`' expansion variable) or a function
+   * literal's parameters. The free-variable walk eliminates only these
+   * (`bindingSiteNames`, `abstract-boxed-expression.ts`). */
+  readonly clauseLocal: ReadonlySet<string>;
 }
 
 /**
@@ -334,11 +340,21 @@ export interface DeclaredBinders {
  * matching `boundVariableNames`; its parameters have no clause ordering, so
  * they are visible throughout. Returns `undefined` for a node that binds
  * nothing, which is the overwhelming majority.
+ *
+ * `phase` selects the sites read: `'pre'` (the default) is the only phase a
+ * RAW tree can answer for — the sites knowable before the canonical handler
+ * reshapes the operands; `'post'` is authoritative on a canonical (or
+ * structural) tree, and is what the free-variable walk and the rewrite walks
+ * ask for a bound tree (`boundVariableNamesInOperand`, `binders.ts`).
  */
-export function declaredBinders(expr: Expression): DeclaredBinders | undefined {
+export function declaredBinders(
+  expr: Expression,
+  phase: 'pre' | 'post' = 'pre'
+): DeclaredBinders | undefined {
   if (!isFunction(expr)) return undefined;
 
   const visibleFrom = new Map<string, number>();
+  const clauseLocal = new Set<string>();
 
   if (expr.operator === 'Function') {
     // The PLURAL helper: a destructuring parameter (`((p, q)) => …`) binds one
@@ -349,26 +365,46 @@ export function declaredBinders(expr: Expression): DeclaredBinders | undefined {
         visibleFrom.set(n, 0);
     return visibleFrom.size === 0
       ? undefined
-      : { visibleFrom, firstClause: Number.POSITIVE_INFINITY };
+      : { visibleFrom, firstClause: Number.POSITIVE_INFINITY, clauseLocal };
   }
 
   const sites = bindingSiteSelectorOf(expr);
   if (sites === undefined) return undefined;
 
   let firstClause = Number.POSITIVE_INFINITY;
-  // 'pre' — the sites knowable before the canonical handler reshapes the
-  // operands, which is the only phase a raw tree can answer for.
-  for (const site of sites(expr.ops, 'pre')) {
+  for (const site of sites(expr.ops, phase)) {
     const sym = symbolAtSite(expr.ops, site.path);
     if (sym === undefined) continue;
     const from = site.clauseLocal ? site.path[0] : 0;
-    if (site.clauseLocal) firstClause = Math.min(firstClause, site.path[0]);
+    if (site.clauseLocal) {
+      firstClause = Math.min(firstClause, site.path[0]);
+      clauseLocal.add(sym.symbol);
+    }
     visibleFrom.set(
       sym.symbol,
       Math.min(visibleFrom.get(sym.symbol) ?? from, from)
     );
   }
-  return visibleFrom.size === 0 ? undefined : { visibleFrom, firstClause };
+  return visibleFrom.size === 0
+    ? undefined
+    : { visibleFrom, firstClause, clauseLocal };
+}
+
+/**
+ * Is `name`, bound by `binders`, in scope in operand `operandIndex`? A name
+ * `binders` does not list is not bound by this node at all (`false`); a
+ * clause-local name is in scope from its own clause onward and in every
+ * operand before the first clause (the body); any other bound name is in
+ * scope throughout.
+ */
+export function binderBoundAt(
+  binders: DeclaredBinders | undefined,
+  name: string,
+  operandIndex: number
+): boolean {
+  const from = binders?.visibleFrom.get(name);
+  if (from === undefined) return false;
+  return operandIndex < binders!.firstClause || from <= operandIndex;
 }
 
 /**
