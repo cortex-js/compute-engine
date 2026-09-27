@@ -64,3 +64,7 @@ echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building errors.md"
 printf $BASENAME$DOT$RESET" Building library.md"
 npx tsx scripts/build-library-docs.ts > /dev/null
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building library.md"
+
+printf $BASENAME$DOT$RESET" Building reference/"
+npx tsx scripts/build-library-reference.ts > /dev/null
+echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building reference/"

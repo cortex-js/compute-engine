@@ -15,36 +15,39 @@ The 679 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
-shows as a hover. The examples are executed when this page is generated,
-and the value each one evaluates to is written after it as `// ➔`; the
-documentation test runs them again, so an example that stops being true
-fails the build.
+shows as a hover. The full description of every definition is on the
+category's reference page, linked from each heading. The examples are
+executed when this page is generated, and the value each one evaluates to
+is written after it as `// ➔`; the documentation test runs them again, so
+an example that stops being true fails the build.
 
 To search the library by concept rather than by name, use
 `epsil doc <keywords>` (see the [CLI](/epsil/cli/)); the
 [guide for agents](/epsil/for-agents/) lists the names most often needed.
 
-- [Core](#core) — 111 definitions
-- [Control structures](#control-structures) — 14 definitions
-- [Logic](#logic) — 27 definitions
-- [Collections](#collections) — 124 definitions
-- [Colors](#colors) — 20 definitions
-- [Regular expressions](#regular-expressions) — 4 definitions
-- [Fractals](#fractals) — 2 definitions
-- [Relations](#relations) — 30 definitions
-- [Arithmetic](#arithmetic) — 97 definitions
-- [Trigonometry](#trigonometry) — 42 definitions
-- [Calculus](#calculus) — 19 definitions
-- [Polynomials](#polynomials) — 17 definitions
-- [Combinatorics](#combinatorics) — 11 definitions
-- [Number theory](#number-theory) — 52 definitions
-- [Special functions](#special-functions) — 14 definitions
-- [Linear algebra](#linear-algebra) — 42 definitions
-- [Statistics](#statistics) — 35 definitions
-- [Units](#units) — 7 definitions
-- [Physics](#physics) — 11 definitions
+- [Core](#core) — 111 definitions · [full reference](/epsil/reference/core/)
+- [Control structures](#control-structures) — 14 definitions · [full reference](/epsil/reference/control-structures/)
+- [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
+- [Collections](#collections) — 124 definitions · [full reference](/epsil/reference/collections/)
+- [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
+- [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
+- [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
+- [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
+- [Arithmetic](#arithmetic) — 97 definitions · [full reference](/epsil/reference/arithmetic/)
+- [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
+- [Calculus](#calculus) — 19 definitions · [full reference](/epsil/reference/calculus/)
+- [Polynomials](#polynomials) — 17 definitions · [full reference](/epsil/reference/polynomials/)
+- [Combinatorics](#combinatorics) — 11 definitions · [full reference](/epsil/reference/combinatorics/)
+- [Number theory](#number-theory) — 52 definitions · [full reference](/epsil/reference/number-theory/)
+- [Special functions](#special-functions) — 14 definitions · [full reference](/epsil/reference/special-functions/)
+- [Linear algebra](#linear-algebra) — 42 definitions · [full reference](/epsil/reference/linear-algebra/)
+- [Statistics](#statistics) — 35 definitions · [full reference](/epsil/reference/statistics/)
+- [Units](#units) — 7 definitions · [full reference](/epsil/reference/units/)
+- [Physics](#physics) — 11 definitions · [full reference](/epsil/reference/physics/)
 
 ## Core
+
+The [Core reference](/epsil/reference/core/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -162,6 +165,8 @@ To search the library by concept rather than by name, use
 
 ## Control structures
 
+The [Control structures reference](/epsil/reference/control-structures/) has the full description of each definition.
+
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | — | `Alternatives` | `(expression+) -> nothing` | Inside a `Match` pattern, `Alternatives(p1, p2, …)` matches if any alternative matches. |
@@ -180,6 +185,8 @@ To search the library by concept rather than by name, use
 | — | `Which` | `(expression+) -> unknown` | Return the value for the first condition that is true. |
 
 ## Logic
+
+The [Logic reference](/epsil/reference/logic/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -212,6 +219,8 @@ To search the library by concept rather than by name, use
 | `xor` | `Xor` | `(boolean+) -> boolean` | Exclusive or: true when an odd number of operands are true |
 
 ## Collections
+
+The [Collections reference](/epsil/reference/collections/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -342,6 +351,8 @@ To search the library by concept rather than by name, use
 
 ## Colors
 
+The [Colors reference](/epsil/reference/colors/) has the full description of each definition.
+
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `asHsl` | `AsHsl` | `(color \| string \| tuple) -> color` | Convert any color to HSL (hue degrees, s/l 0-1) |
@@ -367,6 +378,8 @@ To search the library by concept rather than by name, use
 
 ## Regular expressions
 
+The [Regular expressions reference](/epsil/reference/regexp/) has the full description of each definition.
+
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `isMatch` | `IsMatch` | `(subject: string, pattern: regexp) -> boolean` | Whether a string contains a match for a regular expression. |
@@ -376,12 +389,16 @@ To search the library by concept rather than by name, use
 
 ## Fractals
 
+The [Fractals reference](/epsil/reference/fractals/) has the full description of each definition.
+
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `julia` | `Julia` | `(complex, complex, integer) -> real` | Smooth escape-time value for a Julia set with parameter c. |
 | `mandelbrot` | `Mandelbrot` | `(complex, integer) -> real` | Smooth escape-time value for the Mandelbrot set. |
 
 ## Relations
+
+The [Relations reference](/epsil/reference/relop/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -417,6 +434,8 @@ To search the library by concept rather than by name, use
 | — | `TildeFullEqual` | `(any, any*) -> boolean` | Indicate isomorphism, congruence and homotopic equivalence |
 
 ## Arithmetic
+
+The [Arithmetic reference](/epsil/reference/arithmetic/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -532,6 +551,8 @@ rationalize(sqrt(3), 1/500)
 
 ## Trigonometry
 
+The [Trigonometry reference](/epsil/reference/trigonometry/) has the full description of each definition.
+
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `arccos` | `Arccos` | `(complex) -> number` | Arccosine, the inverse cosine function. |
@@ -579,6 +600,8 @@ rationalize(sqrt(3), 1/500)
 
 ## Calculus
 
+The [Calculus reference](/epsil/reference/calculus/) has the full description of each definition.
+
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `bigO` | `BigO` | `(value) -> number` | Landau big-O remainder term. |
@@ -590,7 +613,7 @@ rationalize(sqrt(3), 1/500)
 | `interpolatingFunction` | `InterpolatingFunction` | `(list<any>, number?) -> number` | Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `NDSolveFunction`). |
 | `jacobianMatrix` | `JacobianMatrix` | `(any, any?) -> value` | JacobianMatrix(fs, vars): the matrix of partial derivatives |
 | `limit` | `Limit` | `(function, point: number, direction: number?) -> number` | Limit of a function |
-| `limits` | `Limits` | `(index: symbol, lower: value, upper: value) -> tuple` | Limits of a function |
+| — | `Limits` | `(index: symbol, lower: value, upper: value) -> tuple` | Limits of a function |
 | `nd` | `ND` | `(function, at: number) -> list<number> \| number \| tuple` | Numerical derivative evaluated at a point. |
 | `ndSolve` | `NDSolve` | `(expression, symbol, limits: symbol \| tuple, number, number?) -> list` | Numerical differential equation solver. |
 | `ndSolveFunction` | `NDSolveFunction` | `(expression, symbol, limits: symbol \| tuple, number) -> function` | Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `InterpolatingFunction`), usable at any point of the integration interval. |
@@ -602,6 +625,8 @@ rationalize(sqrt(3), 1/500)
 | `series` | `Series` | `(expression, variable: symbol?, point: value?, order: number?) -> number` | Taylor series expansion of an expression about a point (or an asymptotic expansion at ±∞), including Laurent, Puiseux (fractional-power), and log-aware expansions at poles and branch points. |
 
 ## Polynomials
+
+The [Polynomials reference](/epsil/reference/polynomials/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -625,6 +650,8 @@ rationalize(sqrt(3), 1/500)
 
 ## Combinatorics
 
+The [Combinatorics reference](/epsil/reference/combinatorics/) has the full description of each definition.
+
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `bellNumber` | `BellNumber` | `(integer) -> integer` | Compute the Bell number B(n), the number of partitions of a set of n elements. |
@@ -640,6 +667,8 @@ rationalize(sqrt(3), 1/500)
 | `subfactorial` | `Subfactorial` | `(integer) -> integer` | Compute the number of derangements (subfactorial) of n items. |
 
 ## Number theory
+
+The [Number theory reference](/epsil/reference/number-theory/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -884,6 +913,8 @@ stirlingS1(5, 2)
 
 ## Special functions
 
+The [Special functions reference](/epsil/reference/special-functions/) has the full description of each definition.
+
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `agm` | `AGM` | `(complex \| infinity, (complex \| infinity)?) -> number` | Arithmetic-geometric mean. |
@@ -902,6 +933,8 @@ stirlingS1(5, 2)
 | `polyLog` | `PolyLog` | `(complex \| infinity, complex \| infinity) -> number` | Polylogarithm Liₛ(z) = Σ_&#123;k≥1&#125; zᵏ/kˢ. |
 
 ## Linear algebra
+
+The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -949,6 +982,8 @@ stirlingS1(5, 2)
 | `zeroMatrix` | `ZeroMatrix` | `(integer, integer?) -> matrix` | Matrix filled with zeros. |
 
 ## Statistics
+
+The [Statistics reference](/epsil/reference/statistics/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -1027,6 +1062,8 @@ slidingWindow("abcd", 2)
 
 ## Units
 
+The [Units reference](/epsil/reference/units/) has the full description of each definition.
+
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `isCompatibleUnit` | `IsCompatibleUnit` | `(value, value) -> value` | Check if two units have the same dimension |
@@ -1038,6 +1075,8 @@ slidingWindow("abcd", 2)
 | `unitSimplify` | `UnitSimplify` | `(value) -> value` | Simplify a quantity unit to a named derived unit if possible |
 
 ## Physics
+
+The [Physics reference](/epsil/reference/physics/) has the full description of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|

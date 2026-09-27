@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { MathJsonExpression } from '../../src/math-json/types';
 
@@ -418,7 +419,11 @@ describe('EPSIL ROUND-TRIP', () => {
     // No corpus expression may re-parse with a diagnostic.
     expect(diagnostics.map((d) => d.message)).toEqual([]);
 
-    expect(normalize(value)).toEqual(normalize(expr));
+    // The serializer writes a library name with its Epsil spelling
+    // (`apply(…)` for `Apply`); the resolution pass reads it back.
+    expect(
+      normalize(resolveLibraryNames(value, src, new ComputeEngine()))
+    ).toEqual(normalize(expr));
   });
 });
 

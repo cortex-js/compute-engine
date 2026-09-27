@@ -22,31 +22,63 @@ free occurrences before a program is boxed, and the spelling table with its
 exclusions is `src/epsil/library-names.ts`. Design, audit, and the decisions
 taken: `docs/plans/2026-09-05-epsil-standard-library-lowercase-aliases.md`.
 
+The serializer prints the lowercase spelling since 2026-09-27
+(`serializeEpsil` in `src/epsil/serialize-epsil.ts`: a name whose spelling
+the expression writes, or that the `isBound` option reports bound, keeps
+the MathJSON name; `libraryNames: 'mathjson'` restores the old output).
+
+The per-category reference pages (`src/epsil/docs/reference/<category>.md`,
+one per library, every definition with both spellings, its signature, its
+full description and its executed examples) are generated since
+2026-09-27 by `scripts/build-library-reference.ts` (run by `npm run doc`);
+`library.md` links each category to its page. A hand-written introduction
+is spliced in from `reference/<category>.intro.md` when that file exists.
+
 Remaining work:
 
-- **Serializer output.** The Epsil serializer still prints the MathJSON
-  names (`Sin(x)`). Printing the lowercase spelling needs the reverse scope
-  check (a program with `let sin = 3` in scope must not get `Sin(x)` printed
-  as `sin(x)`) and touches every Epsil snapshot and documentation example.
-- **Expanded library reference.** One page per library category in Epsil
-  syntax, mirroring `doc/*-reference-*.md`: a generated part per entry (both
-  spellings, the full description, executed examples) and a hand-written
-  introduction per category spliced in by the generator. Section 8.2 of the
-  plan above has the shape; the generator comes first.
+- **Reference introductions.** No `reference/<category>.intro.md` exists
+  yet: each page opens with one generated sentence. The prose sections of
+  the matching website reference page (`doc/*-reference-*.md`, for example
+  "Trigonometric Transformations") are to be ported to Epsil syntax, one
+  category at a time, starting with the categories an author meets first
+  (core, collections, arithmetic, control structures, strings).
+- **Examples.** 637 of the 679 definitions have no `examples` field, so
+  their reference entry is a description alone (per category, measured
+  2026-09-27: core 111 of 111, collections 124 of 124, arithmetic 96 of 97,
+  trigonometry 42 of 42, linear algebra 42 of 42, logic 27, relations 30,
+  statistics 29 of 35, number theory 17 of 52, the rest all of theirs). An
+  example is Epsil source in the definition (`BaseDefinition.examples`),
+  executed at generation and checked by the documentation test.
 
 
 ## Runtime and representation
 
+- **A `{dict}` value that is an array.** The serializer reads an array
+  value of a MathJSON `{dict: …}` object as a nested expression
+  (`{dict: {z: ["Add", 2, "x"]}}` prints `{"z" -> 2 + x}`, pinned by the
+  dictionary serialization tests), while the engine reads it as a list of
+  values (`ce.box` makes it the list `["Add", 2, "x"]` of two strings and
+  a number, and a bare string value the string, not a symbol). An array
+  that is not an expression under the serializer's reading throws:
+  `serializeEpsil({dict: {xs: [1, 2]}})` and `{dict: {flags: [true,
+  false]}}` fail with a `TypeError` (found 2026-09-27 by the review of the
+  serializer spelling round). A decision is needed: follow the engine (an
+  array is a list, a string is a string; the pinned `2 + x` reading
+  changes), or keep the expression reading and print an array with a
+  non-operator head as a list. A boxed dictionary's `.json` is the
+  `["Dictionary", ["KeyValuePair", …]]` form, which prints correctly on
+  every value, so the CLI and the MCP server are not affected.
 - **Comment fidelity.** Parsing discards comments and serialization can emit
   only a single normalized MathJSON `comment` field. A first useful rung is
   leading comments on statements in raw parse/serialize workflows. Trailing,
   orphan, multiple, and through-boxing comments require a broader metadata
   model. The current lossy contract remains public in
   `src/epsil/docs/comments.md`.
-- **Compilation tails.** Epsil has no comprehension syntax (`Map`/`Filter`
-  and the pipe are the idiom), and the engine's `Comprehension`, stepped or
-  descending `Range`, multi-`Element` `Loop`, and destructuring `for (p, q)
-  in pairs` loop binder all compile on the JavaScript target; the Python
+- **Compilation tails.** Epsil comprehensions (`[x^2 for x in 1..10 if x %
+  2 == 1]`, with set and dictionary forms, tuple patterns and guards, since
+  2026-09-27) lower to the engine's `Comprehension`, which, with a stepped
+  or descending `Range`, a multi-`Element` `Loop`, and the destructuring
+  `for (p, q) in pairs` loop binder, compiles on the JavaScript target; the Python
   target lowers the same forms to nested `for` statements, a native `range`
   for integer literal bounds, a tuple pattern, and a list comprehension. A
   destructuring binder compiles only when the source's static element type

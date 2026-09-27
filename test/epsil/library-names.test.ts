@@ -21,6 +21,7 @@ import { OPERATORS } from '../../src/epsil/operators';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { HARD_RESERVED_WORDS } from '../../src/epsil/reserved-words';
 import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
+import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 
 //
 // The lowercase spellings of the standard library (`sin` for `Sin`, `pi`
@@ -213,13 +214,20 @@ describe('the spelling table', () => {
 
   test('a spelling names nothing that the engine binds', () => {
     // The spelling is a property of the language: the engine has no `sin`,
-    // and the hand-written `print`/`input` aliases are gone.
+    // and the hand-written `print`/`input` aliases are gone. A spelling a
+    // fresh engine binds would never resolve to the library name (the
+    // engine binding wins in the resolution pass) and must not be in the
+    // table, or the serializer would write the library name as it:
+    // `ENGINE_BOUND_SPELLINGS` excludes `limits` (the engine's clause type)
+    // for that reason.
     const ce = new ComputeEngine();
     for (const spelling of ['sin', 'print', 'input', 'pi', 'map'])
-      expect([spelling, ce.lookupDefinition(spelling)]).toEqual([
-        spelling,
-        undefined,
-      ]);
+      expect(canonicalLibraryName(spelling)).toBeDefined();
+    const bound = [...epsilLibraryNames().keys()].filter(
+      (spelling) => ce.lookupDefinition(spelling) !== undefined
+    );
+    expect(bound).toEqual([]);
+    expect(epsilNameOf('Limits')).toBeUndefined();
   });
 });
 
@@ -247,6 +255,19 @@ describe('the resolution pass', () => {
 
   test('a constant', () => {
     expect(resolved('pi')).toEqual({ sym: 'Pi' });
+    // A repeated constant is not a variable: the variable heuristic runs
+    // only for an operator that takes a variable operand.
+    expect(resolved('[pi, pi]')).toEqual({
+      fn: ['List', { sym: 'Pi' }, { sym: 'Pi' }],
+    });
+    expect(resolved('max(pi, 2 * pi)')).toEqual({
+      fn: [
+        'Max',
+        { sym: 'Pi' },
+        { fn: ['Multiply', { num: '2' }, { sym: 'Pi' }] },
+      ],
+    });
+    expect(runSymbol('max(pi, pi) == pi')).toBe('True');
     expect(resolved('nothing')).toEqual({ sym: 'Nothing' });
     expect(resolved('missing')).toEqual({ sym: 'Missing' });
     expect(resolved('goldenRatio')).toEqual({ sym: 'GoldenRatio' });
@@ -480,6 +501,186 @@ describe('the resolution pass', () => {
     const expr = ce.box(resolveLibraryNames(parseEpsil(source)[0], source, ce));
     expect(expr.json).toEqual(['Add', ['Sin', 'x'], 'Pi']);
     expect(compile(expr)?.run?.({ x: 0 })).toBeCloseTo(Math.PI, 12);
+  });
+});
+
+describe('the serializer', () => {
+  // The serializer writes the Epsil spelling of a library name, in call
+  // position and in value position, so a printed program is in the style
+  // of the language and the resolution pass reads it back to the same
+  // tree. The MathJSON name is kept where the spelling would read back as
+  // something else: written in the expression (every binding form writes
+  // the name it binds), bound outside it (`isBound`), or when the caller
+  // asks for MathJSON names.
+  test('a library name is written with its spelling', () => {
+    expect(serializeEpsil(['Sin', 'x'])).toBe('sin(x)');
+    expect(serializeEpsil(['Map', 'Sin', 'xs'])).toBe('map(sin, xs)');
+    expect(serializeEpsil('Pi')).toBe('pi');
+    expect(serializeEpsil(['IsPrime', 7])).toBe('isPrime(7)');
+    expect(serializeEpsil(['GCD', 12, 18])).toBe('gcd(12, 18)');
+    expect(serializeEpsil(['Add', ['Sin', 'x'], 1])).toBe('sin(x) + 1');
+  });
+
+  test('a name with no spelling keeps its MathJSON name', () => {
+    // `Range` is the `..` operator, `Limits` is a type the engine binds, and
+    // `Total` merely looks like a library name.
+    expect(serializeEpsil(['Range', 1, 'n'])).toBe('Range(1, n)');
+    expect(serializeEpsil(['Limits', 'k', 1, 2])).toBe('Limits(k, 1, 2)');
+    expect(serializeEpsil(['Total', 'xs'])).toBe('Total(xs)');
+  });
+
+  test('a spelling the expression writes keeps the MathJSON name', () => {
+    // `let sin = 3` binds `sin`: printing `Sin(x)` as `sin(x)` would call
+    // the local. The check is by written name, so the `let` after the call
+    // and a binding in a sibling scope count too — the MathJSON name reads
+    // back the same either way.
+    const declared: MathJsonExpression = [
+      'Block',
+      ['Declare', 'sin', ['Dictionary', ['KeyValuePair', 'value', 3]]],
+      ['Sin', 'x'],
+    ];
+    expect(serializeEpsil(declared)).toBe('let sin = 3\nSin(x)');
+    const parameter: MathJsonExpression = [
+      'Function',
+      ['Add', ['Sin', 'x'], 'Pi'],
+      'pi',
+    ];
+    expect(serializeEpsil(parameter)).toBe('Function(sin(x) + Pi, pi)');
+    const loop: MathJsonExpression = [
+      'Loop',
+      ['Add', 'Pi', 1],
+      ['Element', 'pi', 'xs'],
+    ];
+    expect(serializeEpsil(loop)).toBe('Loop(Pi + 1, pi in xs)');
+    const nested: MathJsonExpression = [
+      'Block',
+      ['Sin', 'x'],
+      [
+        'Block',
+        ['Declare', 'sin', ['Dictionary', ['KeyValuePair', 'value', 3]]],
+        'sin',
+      ],
+    ];
+    expect(serializeEpsil(nested)).toBe('Sin(x)\ndo {let sin = 3; sin}');
+  });
+
+  test('a name a match pattern binds keeps the MathJSON name', () => {
+    // A pattern encodes its binding as `_pi`; the body's `Pi` must not be
+    // printed as the pattern variable.
+    expect(serializeEpsil(['Match', 0, ['MatchCase', '_pi', 'Pi']])).toBe(
+      'match 0 {\n  pi => Pi\n}'
+    );
+    expect(
+      serializeEpsil([
+        'Match',
+        'xs',
+        ['MatchCase', ['List', '_a', '___length'], ['Length', 'length']],
+      ])
+    ).toBe('match xs {\n  [a, ...length] => Length(length)\n}');
+    expect(serializeEpsil(['Match', 0, ['MatchCase', '_a', 'Pi']])).toBe(
+      'match 0 {\n  a => pi\n}'
+    );
+  });
+
+  test('a boolean dictionary value is not a name', () => {
+    // A `{dict}` value can be a raw JS boolean; the written-name walk skips
+    // it (it reached `'sym' in true` before). A boolean nested in an ARRAY
+    // value cannot be printed at all — the serializer reads such an array
+    // as a nested expression, the engine as a list; that conflict is an
+    // open item of `docs/epsil/ROADMAP.md`.
+    expect(
+      serializeEpsil([
+        'Add',
+        'Pi',
+        { dict: { ok: true } },
+      ] as unknown as MathJsonExpression)
+    ).toBe('pi + {"ok" -> True}');
+  });
+
+  test('a repeated constant reads back as the constant', () => {
+    const ce = new ComputeEngine();
+    for (const [expr, expected] of [
+      [['List', 'Pi', 'Pi'], { fn: ['List', { sym: 'Pi' }, { sym: 'Pi' }] }],
+      [
+        ['Max', 'Pi', ['Multiply', 2, 'Pi']],
+        {
+          fn: [
+            'Max',
+            { sym: 'Pi' },
+            { fn: ['Multiply', { num: '2' }, { sym: 'Pi' }] },
+          ],
+        },
+      ],
+    ] as [MathJsonExpression, unknown][]) {
+      const source = serializeEpsil(expr);
+      const [ast] = parseEpsil(source);
+      expect([source, strip(resolveLibraryNames(ast, source, ce))]).toEqual([
+        source,
+        expected,
+      ]);
+    }
+  });
+
+  test('a name bound outside the expression keeps the MathJSON name', () => {
+    const isBound = (name: string) => name === 'sin';
+    expect(serializeEpsil(['Sin', 'x'], { isBound })).toBe('Sin(x)');
+    expect(serializeEpsil(['Cos', 'x'], { isBound })).toBe('cos(x)');
+  });
+
+  test('the caller can ask for MathJSON names', () => {
+    expect(serializeEpsil(['Sin', 'x'], { libraryNames: 'mathjson' })).toBe(
+      'Sin(x)'
+    );
+    expect(serializeEpsil('Pi', { libraryNames: 'mathjson' })).toBe('Pi');
+  });
+
+  test('the CLI keeps the MathJSON name of a name the session binds', () => {
+    // The REPL prints a result with the engine's `lookupDefinition` as
+    // `isBound`, so after `let sin = 3` in an earlier cell a result `Sin(x)`
+    // is not printed as a call of the local.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let sin = 3');
+    const isBound = (name: string) => ce.lookupDefinition(name) !== undefined;
+    expect(serializeEpsil(['Sin', 'x'], { isBound })).toBe('Sin(x)');
+    expect(serializeEpsil(['Cos', 'x'], { isBound })).toBe('cos(x)');
+  });
+
+  test('every spelling reads back to its library name', () => {
+    // The drift guard over the whole table: a library name written with its
+    // spelling, parsed, and resolved is the library name again — in call
+    // position and in value position. A spelling the parser reads as
+    // something else (a keyword, an operator) would surface here.
+    const ce = new ComputeEngine();
+    const failures: string[] = [];
+    for (const [spelling, name] of epsilLibraryNames()) {
+      for (const expr of [[name, 'x'], name] as MathJsonExpression[]) {
+        // A head with a surface form of its own (`Rational(x)` is the number
+        // `x`) is not written as a call, on either spelling.
+        if (
+          !serializeEpsil(expr, { libraryNames: 'mathjson' }).startsWith(name)
+        )
+          continue;
+        const source = serializeEpsil(expr);
+        if (!source.startsWith(spelling)) {
+          failures.push(`${name}: written ${JSON.stringify(source)}`);
+          continue;
+        }
+        const [ast, diagnostics] = parseEpsil(source);
+        if (diagnostics.some((d) => d.severity === 'error')) {
+          failures.push(`${name}: ${source} does not parse`);
+          continue;
+        }
+        const back = strip(resolveLibraryNames(ast, source, ce));
+        const expected = Array.isArray(expr)
+          ? { fn: [name, { sym: 'x' }] }
+          : { sym: name };
+        if (JSON.stringify(back) !== JSON.stringify(expected))
+          failures.push(
+            `${name}: ${source} reads back as ${JSON.stringify(back)}`
+          );
+      }
+    }
+    expect(failures).toEqual([]);
   });
 });
 

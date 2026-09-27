@@ -538,9 +538,9 @@ describe('Rest parameter — named definitions', () => {
   });
 
   test.each([
-    'h(a, ...rest) = Length(rest)',
-    'h(...all) = Length(all)',
-    'function h(a, ...rest) {Length(rest)}',
+    'h(a, ...rest) = length(rest)',
+    'h(...all) = length(all)',
+    'function h(a, ...rest) {length(rest)}',
   ])('Epsil round-trips the named form %p', (source) => {
     const [ast, diagnostics] = parseEpsil(source);
     expect(diagnostics).toEqual([]);

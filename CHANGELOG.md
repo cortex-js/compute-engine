@@ -1,3 +1,37 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **The Epsil serializer writes the lowercase spelling of a library name.**
+  `serializeEpsil(["Sin", "x"])` is `sin(x)`, `"Pi"` is `pi`, and
+  `["Map", "Sin", "xs"]` is `map(sin, xs)`; the `epsil format` command, the
+  `--epsil` output mode of the CLI and the MCP server, and the snippet a
+  diagnostic quotes follow. Before, the serializer wrote the MathJSON names
+  (`Sin(x)`). A library name keeps its MathJSON spelling where the lowercase
+  one would read back as something else: when the expression binds or
+  mentions the spelling (`let sin = 3`, a parameter named `pi`), and when
+  the new `isBound` option reports it bound outside the expression (the CLI
+  passes the session's bindings). The new option `libraryNames: 'mathjson'`
+  restores the previous output. A round trip through `parseEpsil` alone now
+  yields the raw lowercase head (`["sin", "x"]`); `resolveLibraryNames`, which
+  `executeEpsil` and the CLI already run, reads it back to `Sin`.
+- **Epsil library reference pages.** `src/epsil/docs/reference/<category>.md`,
+  one page per library category (19 pages), lists every definition under its
+  Epsil spelling with its MathJSON name, its signature, its full description
+  and its executed examples; the Standard Library page links each category to
+  its reference page. `npm run doc` generates them
+  (`scripts/build-library-reference.ts`); a hand-written introduction in
+  `reference/<category>.intro.md` is spliced in when present.
+- **A repeated constant in a call resolves.** The Epsil resolution pass read a
+  symbol operand that also occurs in another operand of the same call as the
+  call's variable, for every operator: `[pi, pi]`, `max(pi, 2 * pi)` and
+  `(pi, pi)` left `pi` unresolved. The rule now applies only to an operator
+  that takes a variable operand (`limit`, `solve`, and every operator whose
+  signature types a parameter `symbol`: `D`, `series`, `factor`, …).
+- **`Limits` has no Epsil spelling.** `limits` is the type the engine declares
+  for an indexing clause, so the spelling could never resolve to the operator;
+  the Standard Library page lists `Limits` with no Epsil column.
+
 ## 0.139.0 _2026-09-27_
 
 ### New Features

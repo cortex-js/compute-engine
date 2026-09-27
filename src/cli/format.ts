@@ -54,14 +54,22 @@ export function formatValue(
   // meant for LaTeX display: Epsil source spells a square `x ^ 2` (or `x²` in
   // fancy-symbol mode), so that one rewrite is excluded here. The other
   // prettifier rewrites produce ordinary Epsil (`1 / x`, `Exp(x)`) and stay.
-  if (mode === 'epsil')
+  // A library name is written with its Epsil spelling (`sin(x)`), unless the
+  // session binds the spelling (`let sin = 3` in an earlier cell): then the
+  // MathJSON name is kept, so the printed text reads back as the value.
+  if (mode === 'epsil') {
+    const engine = result.value.engine;
     return serializeEpsil(
       result.value.toMathJson({
         fractionalDigits: 'auto',
         exclude: ['Square'],
       }),
-      { fancySymbols: options?.fancySymbols === true }
+      {
+        fancySymbols: options?.fancySymbols === true,
+        isBound: (name) => engine.lookupDefinition(name) !== undefined,
+      }
     );
+  }
   // A `Nothing` result is not echoed in the human-facing mode: a program
   // whose last statement is a `print(…)` (or a declaration, or a loop)
   // produces Nothing, and printing the word after the program's own output

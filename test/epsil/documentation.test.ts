@@ -1,15 +1,22 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 
 const DOCS_DIR = join(__dirname, '../../src/epsil/docs');
-const DOC_FILES = readdirSync(DOCS_DIR)
-  .filter((name) => name.endsWith('.md'))
-  .sort()
-  .map((name) => join(DOCS_DIR, name));
+// The pages: the top-level documents and the generated per-category
+// reference pages under `reference/`. A `reference/<category>.intro.md`
+// is the hand-written introduction the generator splices into that
+// category's page, not a page of its own: its Epsil blocks are tested
+// through the generated page.
+const DOC_FILES = [DOCS_DIR, join(DOCS_DIR, 'reference')].flatMap((dir) =>
+  readdirSync(dir)
+    .filter((name) => name.endsWith('.md') && !name.endsWith('.intro.md'))
+    .sort()
+    .map((name) => join(dir, name))
+);
 
 type EpsilBlock = {
   file: string;
@@ -160,6 +167,7 @@ describe('EPSIL DOCUMENTATION', () => {
         block.language === 'epsil-live' ||
         basename(block.file) === 'examples.md' ||
         basename(block.file) === 'library.md' ||
+        basename(dirname(block.file)) === 'reference' ||
         basename(block.file) === 'style.md' ||
         basename(block.file) === 'for-agents.md' ||
         basename(block.file) === 'from-python.md' ||

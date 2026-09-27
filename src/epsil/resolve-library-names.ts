@@ -2,6 +2,8 @@ import type { MathJsonExpression } from '../math-json/types.js';
 import { operands, operator, symbol } from '../math-json/utils.js';
 
 import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
+import type { BoxedDefinition } from '../compute-engine/global-types.js';
+import { typeToString } from '../common/type/serialize.js';
 
 import { canonicalLibraryName } from './library-names.js';
 import { documentBindings, type BinderSite } from './occurrences.js';
@@ -64,6 +66,45 @@ function occursAsHead(node: MathJsonExpression | null, name: string): boolean {
   return operands(node).some((op) => occursAsHead(op, name));
 }
 
+/**
+ * Operators whose handler reads a plain symbol operand as a VARIABLE while
+ * their signature types that operand loosely, so the signature cannot say
+ * so: `Limit(expr, x, 0)` is typed `(function, point)` (the three-operand
+ * form is canonicalized into it), and `Solve(eq, x)` is `(any, any*)`. The
+ * other variable-taking operators declare the operand `symbol` in their
+ * signature (`D`, `Series`, `Residue`, `Factor`, `PolynomialGCD`, …), which
+ * `takesVariableOperand` reads.
+ */
+const VARIABLE_OPERAND_OPERATORS: ReadonlySet<string> = new Set([
+  'Limit',
+  'Solve',
+]);
+
+/**
+ * Whether a call to `name` can take a variable as a plain operand: the
+ * operator is listed above, or a parameter of its signature is typed with
+ * `symbol` (`D: (expression, symbol*)`). The variable heuristic of
+ * `binderSitesOf` runs only for such operators. Run for every operator, it
+ * read a REPEATED value as a variable — in `[pi, pi]`, `max(pi, pi)` and
+ * `[pi, 2 * pi]` the first `pi` is a whole operand that also occurs in
+ * another operand, so both were left as the unknown `pi` instead of `Pi`.
+ */
+function takesVariableOperand(name: string, def: BoxedDefinition): boolean {
+  if (VARIABLE_OPERAND_OPERATORS.has(name)) return true;
+  if (!('operator' in def)) return false;
+  const signature = def.operator.signature.type;
+  if (typeof signature !== 'object' || signature.kind !== 'signature')
+    return false;
+  const parameters = [
+    ...(signature.args ?? []),
+    ...(signature.optArgs ?? []),
+    ...(signature.variadicArg === undefined ? [] : [signature.variadicArg]),
+  ];
+  return parameters.some((parameter) =>
+    /\bsymbol\b/.test(typeToString(parameter.type))
+  );
+}
+
 /** The operand shapes whose direct symbol elements can name variables: the
  * `{x, 2}` of a higher-order `D`, the `[x, y]` of a `Solve`. */
 const VARIABLE_GROUP_HEADS = new Set([
@@ -88,12 +129,15 @@ const VARIABLE_GROUP_HEADS = new Set([
  *    the whole call.
  * 2. The rule the engine's own `Limit` handler applies, for the operators
  *    that take a variable as a plain operand without declaring a site
- *    (`Limit(expr, x, 0)`, `Solve(eq, x)`, the `{x, 2}` order form of `D`):
- *    a symbol that is a whole operand, or a direct element of a list, set,
- *    or tuple operand, and that also occurs as a value inside ANOTHER
- *    operand of the call, is the call's variable. A name that is used as a
- *    call head anywhere in the call (`map(sin, [sin(1)])`) is a function,
- *    never a variable. Such a variable is visible in the whole call.
+ *    (`Limit(expr, x, 0)`, `Solve(eq, x)`, the `{x, 2}` order form of `D`
+ *    — `takesVariableOperand` says which): a symbol that is a whole
+ *    operand, or a direct element of a list, set, or tuple operand, and
+ *    that also occurs as a value inside ANOTHER operand of the call, is the
+ *    call's variable. A name that is used as a call head anywhere in the
+ *    call (`map(sin, [sin(1)])`) is a function, never a variable. Such a
+ *    variable is visible in the whole call. An operator that takes no
+ *    variable (`Max`, `List`) binds nothing this way: `max(pi, pi)` is two
+ *    constants.
  *
  * The callee is looked up under its written name first (an engine binding
  * wins), then under the library name its spelling stands for — unless it
@@ -150,6 +194,8 @@ export function binderSitesOf(
       }
     }
   }
+
+  if (!takesVariableOperand(name, def)) return sites;
 
   ops.forEach((op, i) => {
     const candidates: string[] = [];

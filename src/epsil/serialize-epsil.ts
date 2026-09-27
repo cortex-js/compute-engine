@@ -43,6 +43,7 @@ import {
   FormattingBlock,
 } from './formatter.js';
 import { HARD_RESERVED_WORDS } from './reserved-words.js';
+import { canonicalLibraryName, epsilNameOf } from './library-names.js';
 import {
   CONDITIONAL_PRECEDENCE,
   OPERATORS as SHARED_OPERATORS,
@@ -115,6 +116,23 @@ const PERMISSIVE_TYPE_RESOLVER: TypeResolver = {
  * `√x`, `Root(x, 3)` -> `∛x`, `Power(x, 2)` -> `x²`. Every fancy spelling is
  * one the parser reads back to the same expression.
  *
+ * @param options.libraryNames - How a standard-library name is written.
+ * `'epsil'` (the default) writes the Epsil spelling (`sin(x)`, `pi`,
+ * `map(sin, xs)`), which is the style of the language and what the
+ * resolution pass (`resolveLibraryNames`) reads back to the MathJSON name.
+ * `'mathjson'` writes the MathJSON name (`Sin(x)`, `Pi`), which `parseEpsil`
+ * alone reads back. A name keeps its MathJSON spelling when its Epsil
+ * spelling is TAKEN: written anywhere in the expression as a symbol or a
+ * call head (every binding form — `let sin = 3`, a parameter `sin`, a loop
+ * pattern, a match pattern — writes the name it binds, so this is a
+ * superset of "bound somewhere in the program"), or reported bound by
+ * `options.isBound`.
+ *
+ * @param options.isBound - Whether a name is bound outside the expression —
+ * by the engine the expression will be read into (a previous notebook
+ * cell's `let sin = 3`, a host `ce.declare`). The CLI passes the engine's
+ * `lookupDefinition`. A name `isBound` reports bound keeps its MathJSON
+ * spelling.
  */
 /** The superscript form of each ASCII digit and of `-`, read off the lexer's
  * table so the serializer writes exactly what the parser reads. */
@@ -128,8 +146,47 @@ export function serializeEpsil(
   expr: MathJsonExpression,
   options?: Partial<FormattingOptions> & {
     fancySymbols?: boolean;
+    libraryNames?: 'epsil' | 'mathjson';
+    isBound?: (name: string) => boolean;
   }
 ): string {
+  // The names written in the expression, collected once on first use: a
+  // library name whose Epsil spelling is among them keeps its MathJSON
+  // spelling (see `libraryName`).
+  let writtenNames: Set<string> | undefined;
+  const isWritten = (name: string): boolean => {
+    if (writtenNames === undefined) {
+      writtenNames = new Set();
+      collectWrittenNames(expr, writtenNames);
+    }
+    return writtenNames.has(name);
+  };
+  const spellings = new Map<string, string>();
+
+  /**
+   * The spelling a standard-library name is written with: its Epsil
+   * spelling (`sin` for `Sin`) under `libraryNames: 'epsil'`, unless the
+   * spelling is written elsewhere in the expression or bound outside it
+   * (`options.isBound`), in which case the spelling would read back as that
+   * binding and the MathJSON name is kept. A name with no spelling, or whose
+   * spelling does not name it back (a user name that merely looks like a
+   * library name), is written as is.
+   */
+  const libraryName = (name: string): string => {
+    if (options?.libraryNames === 'mathjson') return name;
+    const known = spellings.get(name);
+    if (known !== undefined) return known;
+    const spelling = epsilNameOf(name);
+    const written =
+      spelling === undefined ||
+      canonicalLibraryName(spelling) !== name ||
+      isWritten(spelling) ||
+      options?.isBound?.(spelling) === true
+        ? name
+        : spelling;
+    spellings.set(name, written);
+    return written;
+  };
   // To provide automatic formatting of the result, a Formatter is used.
   // The result of the serialization is a series of `FormattingBlock`
   // representing various layout options. They are then combined and arranged
@@ -171,7 +228,7 @@ export function serializeEpsil(
 
     if (!body) {
       const symName = symbol(expr);
-      if (symName !== null) body = fmt.text(escapeSymbol(symName));
+      if (symName !== null) body = fmt.text(escapeSymbol(libraryName(symName)));
     }
     if (
       !body &&
@@ -2158,7 +2215,7 @@ export function serializeEpsil(
     if (h) {
       // It's a function application with a named function
       return fmt.line(
-        escapeSymbol(h),
+        escapeSymbol(libraryName(h)),
         fmt.fencedList(
           '(',
           fmt.separator(','),
@@ -2170,7 +2227,7 @@ export function serializeEpsil(
 
     // A function application with a function expression.
     return fmt.line(
-      'Apply(',
+      libraryName('Apply') + '(',
       serializeExpression(h),
       fmt.separator(','),
       fmt.fencedList(
@@ -3005,6 +3062,74 @@ function escapeString(s: string): string {
 // valid symbol has no Epsil spelling at all; it is emitted with escapes so
 // the output stays lexically balanced (single line, closed backticks), and
 // re-parses with an `invalid-symbol-name` diagnostic.
+/**
+ * Every name written in `expr` — each symbol and each string call head, at
+ * any depth, including inside dictionary values — added to `into`. A binding
+ * form writes the name it binds (`let sin = 3` is `Declare(sin, …)`, a
+ * parameter is a symbol of the `Function` node, a loop or match pattern is
+ * made of symbols), so a library spelling absent from this set is bound
+ * nowhere in the expression. A match pattern encodes the name it binds
+ * with a leading underscore (`_pi` binds `pi`, `___rest` is the rest
+ * capture `...rest`), so the encoded symbol contributes its decoded name
+ * too — without it, `match 0 { pi => Pi }` printed the body as `pi`, the
+ * pattern's own variable.
+ *
+ * The set is over the WHOLE expression, not per scope: one `let sin = 3`
+ * anywhere keeps every `Sin` in the expression at its MathJSON name, in
+ * unrelated scopes too. That is deliberate — the MathJSON name reads back
+ * the same under any binding, so the flat set is always safe, where a
+ * scope-local answer would have to reproduce the resolution pass's scope
+ * walk (`documentBindings`) on a tree that has no source offsets.
+ *
+ * A dictionary value is a `DictionaryValue`, whose nested arrays hold raw
+ * JS booleans (`{flags: [true, false]}`): a boolean, like a number, names
+ * nothing and is skipped before the object shapes are tested.
+ */
+function collectWrittenNames(
+  expr: MathJsonExpression | null,
+  into: Set<string>
+): void {
+  if (expr === null || (typeof expr !== 'object' && typeof expr !== 'string'))
+    return;
+  if (typeof expr === 'string') {
+    if (!matchesString(expr) && !matchesNumber(expr))
+      addWrittenName(expr, into);
+    return;
+  }
+  if (Array.isArray(expr)) {
+    const [head, ...args] = expr;
+    if (typeof head === 'string') into.add(head);
+    else collectWrittenNames(head as MathJsonExpression, into);
+    for (const arg of args)
+      collectWrittenNames(arg as MathJsonExpression, into);
+    return;
+  }
+  if ('sym' in expr) {
+    addWrittenName(expr.sym, into);
+    return;
+  }
+  if ('fn' in expr) {
+    const [head, ...args] = expr.fn;
+    if (typeof head === 'string') addWrittenName(head, into);
+    else collectWrittenNames(head, into);
+    for (const arg of args) collectWrittenNames(arg, into);
+    return;
+  }
+  if ('dict' in expr)
+    for (const value of Object.values(expr.dict))
+      collectWrittenNames(dictionaryValueToExpression(value), into);
+}
+
+/** `name` and, for a pattern-encoded symbol (`_pi`, `___rest`), the name
+ * it binds (`pi`, `rest`). */
+function addWrittenName(name: string, into: Set<string>): void {
+  into.add(name);
+  if (name.startsWith('_')) {
+    const decoded = name.replace(/^_+/, '');
+    if (decoded !== '') into.add(decoded);
+  }
+}
+
 function escapeSymbol(s: string): string {
   // A HARD-reserved word (a literal or a head/word operator the grammar claims)
   // has no plain spelling — emit the verbatim form so it re-parses as a symbol.

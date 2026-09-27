@@ -2039,8 +2039,14 @@ describe('EPSIL OPERATOR ROUND-TRIP', () => {
       ['NotElement', 'a', 'b'],
       ['KeyValuePair', 'a', 'b'],
     ];
+    // This is a round trip through the RAW grammar (no resolution pass), so
+    // the serializer is asked for the MathJSON names; the default Epsil
+    // spellings read back through `resolveLibraryNames`, which
+    // `test/epsil/library-names.test.ts` checks for every spelling.
     for (const row of rows) {
-      expect(validEpsil(serializeEpsil(row as any))).toStrictEqual(row);
+      expect(
+        validEpsil(serializeEpsil(row as any, { libraryNames: 'mathjson' }))
+      ).toStrictEqual(row);
     }
   });
 
@@ -2064,8 +2070,14 @@ describe('EPSIL OPERATOR ROUND-TRIP', () => {
         ['KeyValuePair', { str: 'c' }, ['Add', 2, 1]],
       ],
     ];
+    // This is a round trip through the RAW grammar (no resolution pass), so
+    // the serializer is asked for the MathJSON names; the default Epsil
+    // spellings read back through `resolveLibraryNames`, which
+    // `test/epsil/library-names.test.ts` checks for every spelling.
     for (const row of rows) {
-      expect(validEpsil(serializeEpsil(row as any))).toStrictEqual(row);
+      expect(
+        validEpsil(serializeEpsil(row as any, { libraryNames: 'mathjson' }))
+      ).toStrictEqual(row);
     }
   });
 });

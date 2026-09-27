@@ -123,7 +123,7 @@ describe('Epsil CLI fancy symbols', () => {
   test('--epsil alone writes the ASCII spellings', async () => {
     const { io, stdout } = makeIo();
     expect(await main(['--epsil', '-e', 'Sqrt(3) + x^2'], io)).toBe(0);
-    expect(stdout()).toBe('x ^ 2 + Sqrt(3)\n');
+    expect(stdout()).toBe('x ^ 2 + sqrt(3)\n');
   });
 });
 
@@ -809,7 +809,7 @@ describe('Epsil CLI signature error notes', () => {
     // And the message quotes the CALL that failed, not the definition —
     // which is all a host that shows only the message (an editor hover) has.
     expect(diagnostic.message).toBe(
-      'Static error: unexpected argument in `IndexOf(digits, cs[i], 23)`'
+      'Static error: unexpected argument in `indexOf(digits, cs[i], 23)`'
     );
   });
 
@@ -922,7 +922,7 @@ describe('Epsil CLI evaluation', () => {
     try {
       const result = makeEpsilSession(0).evaluate('let x = 3\nprint(x)');
       expect(formatValue(result, 'value')).toBe('');
-      expect(formatValue(result, 'epsil')).toBe('Nothing');
+      expect(formatValue(result, 'epsil')).toBe('nothing');
       expect(JSON.parse(formatValue(result, 'json'))).toEqual('Nothing');
       expect(log).toHaveBeenCalledWith('3');
     } finally {

@@ -329,7 +329,7 @@ describe('MCP server tools', () => {
         fancySymbols: true,
       }),
     ]);
-    expect(payload(ascii).epsil).toBe('Sqrt(x ^ 2)');
+    expect(payload(ascii).epsil).toBe('sqrt(x ^ 2)');
     expect(payload(fancy).epsil).toBe('√x²');
   });
 
@@ -338,7 +338,7 @@ describe('MCP server tools', () => {
       callTool(1, 'evaluate', { source: 'Sqrt(3) + x^2' }),
       callTool(2, 'evaluate', { source: 'Sqrt(3) + x^2', fancySymbols: true }),
     ]);
-    expect(payload(ascii).epsil).toBe('x ^ 2 + Sqrt(3)');
+    expect(payload(ascii).epsil).toBe('x ^ 2 + sqrt(3)');
     // Fancy-symbol mode spaces infix operators with U+205F.
     expect(payload(fancy).epsil).toBe('x²\u205f+\u205f√3');
   });

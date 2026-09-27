@@ -213,7 +213,7 @@ describe('hold: contextual keyword and lowering', () => {
 
   test('serializes back with the prefix, in both forms and both dictionary encodings', () => {
     for (const src of [
-      'hold f(e) = Head(e)',
+      'hold f(e) = head(e)',
       'hold function g(e, n) random -> integer {e + n}',
       'hold k(e: integer) -> integer = e',
     ]) {
@@ -227,7 +227,7 @@ describe('hold: contextual keyword and lowering', () => {
         ['Function', ['Head', 'e'], 'e'],
         { dict: { hold: 'True' } },
       ])
-    ).toBe('hold f(e) = Head(e)');
+    ).toBe('hold f(e) = head(e)');
     // An attribute the language cannot spell falls back to the call form.
     expect(
       serializeEpsil([
@@ -359,7 +359,7 @@ describe('bind: bound-variable parameters of a hold function', () => {
   });
 
   test('lowers to a `bind` list of names and round-trips', () => {
-    const src = 'hold mySum(body, bind i, n) = Sum(body, (i, 1, n))';
+    const src = 'hold mySum(body, bind i, n) = sum(body, (i, 1, n))';
     const [expr, diags] = parseEpsil(src);
     expect(diags).toHaveLength(0);
     const json = JSON.parse(

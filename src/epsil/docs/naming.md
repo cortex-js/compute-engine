@@ -22,9 +22,14 @@ map(sin, [0, pi / 2])
 // ➔ [0, 1]
 ```
 
-The lowercase spelling is the style of the language. The capitalized
-spelling is what MathJSON uses and what the engine reports: a value prints
-back with the MathJSON names, and a diagnostic names the operator as `Sin`.
+The lowercase spelling is the style of the language, and it is the
+spelling Epsil writes: the serializer (`serializeEpsil`), the `format`
+command, the `--epsil` output mode and the snippet a diagnostic quotes all
+write a library name in lowercase (`sin(x)`, `map(sin, xs)`, `pi`). A
+program that binds the lowercase spelling itself (`let sin = 3`, a
+parameter named `pi`) is written with the capitalized name for that
+library member, so the text reads back as the same program. The
+capitalized spelling is what MathJSON uses, and what an engine error names.
 
 ## How the spelling is formed
 
@@ -113,7 +118,7 @@ form: `` `sin` `` is the symbol `sin`, not the sine function.
 A few mathematical glyphs are **input aliases** for library symbols,
 canonicalized at the lexer — every position (expression, parameter,
 binding, match pattern) treats the glyph exactly like its ASCII spelling,
-and serialization emits the canonical name:
+and serialization writes the library spelling (`pi` for `π`):
 
 | Glyph | Symbol            |
 | :---- | :---------------- |
