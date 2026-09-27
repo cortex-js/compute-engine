@@ -12,6 +12,14 @@
   finish in 100 s; it takes 20 ms. The result is now cached until a value, an
   assumption, a definition, a called function, a symbol's type, or the
   declarations in the scope the function was defined in change.
+- **A function declared `(T, …) -> unknown` no longer stores its derived
+  result as a declared one.** Assigning `x ↦ a` to `f: (integer) -> unknown`
+  with `a: integer` stored the body as `Typed(a, 'integer')`, the result CE had
+  derived written back as if the host had declared it. The signature then kept
+  `-> integer` after `a` was retyped `real`, and in complex mode `f(z) = z²`
+  with a real-declared parameter refused a complex argument
+  (`arg(f(x + iy))`). The stored literal is now the one assigned, and the
+  derived result follows the symbols the body reads (0.137.0).
 - **A recursive function declared `(T, …) -> unknown` has a signature.** The
   signature of `f := n ↦ n + f(n − 1)` read its own signature while it was
   computed and never finished (0.137.0).

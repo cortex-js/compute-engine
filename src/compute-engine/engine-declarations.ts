@@ -2063,6 +2063,13 @@ export function declareFn(
           declaredType,
           ce.type(declaredType).toString()
         );
+        // The return is reconciled against the DECLARED result, not the one
+        // refined from the typed result above: that result is CE's derivation,
+        // not the host's contract, and ascribing it wrote a `Typed` marker into
+        // the stored literal (`x ↦ a` with `a: integer` stored
+        // `Typed(a, 'integer')`), which froze the result: a later retype of `a`
+        // could not change the signature. The declared result is `unknown`
+        // whenever there is a typed result, and `unknown` ascribes nothing.
         const reconciled = reconcileFunctionLiteralReturn(
           ce,
           ascribeDeclaredParameterTypes(
@@ -2070,7 +2077,9 @@ export function declareFn(
             def.value as Expression,
             declaredType
           ),
-          declaredType
+          typedResult === undefined
+            ? declaredType
+            : withSignatureResult(declaredType, 'unknown')
         );
         assertDeclaredEffects(id, reconciled, declaredType, effectsDeclared);
         // Second refinement pass — adopt the post-ascription result.
@@ -2361,10 +2370,19 @@ export function assignFn(
         declaredType.toString()
       );
 
+      // The return is reconciled against the DECLARED result, not the one
+      // refined from the typed result above: that result is CE's derivation,
+      // not the host's contract, and ascribing it wrote a `Typed` marker into
+      // the stored literal (`x ↦ a` with `a: integer` stored
+      // `Typed(a, 'integer')`), which froze the result: a later retype of `a`
+      // could not change the signature. The declared result is `unknown`
+      // whenever there is a typed result, and `unknown` ascribes nothing.
       const reconciled = reconcileFunctionLiteralReturn(
         ce,
         ascribeDeclaredParameterTypes(ce, literal, declaredType.type),
-        declaredType.type
+        typedResult === undefined
+          ? declaredType.type
+          : withSignatureResult(declaredType.type, 'unknown')
       );
       const reconciledType = withTypedResult(reconciled.type);
       // Second refinement pass (see the comment above): adopt the
@@ -2550,10 +2568,13 @@ export function assignFn(
           declaredType.toString()
         );
 
+        // As on the value-slot route: reconciled against the DECLARED result.
         const reconciled = reconcileFunctionLiteralReturn(
           ce,
           ascribeDeclaredParameterTypes(ce, literal, declaredType.type),
-          declaredType.type
+          typedResult === undefined
+            ? declaredType.type
+            : withSignatureResult(declaredType.type, 'unknown')
         );
         // Second refinement pass — adopt the post-ascription result.
         const reconciledType = withTypedResult(reconciled.type);

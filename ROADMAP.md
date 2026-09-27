@@ -641,23 +641,6 @@ type), the host's declaration is the intended fix, so this is low priority.
 
 Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
 
-### The result under declared parameter types misses a retype of a symbol the body reads (OPEN, small — 2026-09-26)
-
-With `a: integer`, `f` declared `(integer) -> unknown` and assigned
-`x ↦ a`, the signature is `(integer) -> integer`. Retyping `a` to `real`
-through its definition (`ce.lookupDefinition('a').value.type = 'real'`, or
-the type setter of a boxed symbol) leaves the signature at
-`(integer) -> integer`, although a fresh function literal with the same
-body reports `real`. The cache of that result follows the retype
-(`_typeVersion` in `declaredResultMemoKey`,
-`boxed-expression/declared-parameter-result.ts`); the stale value comes
-from the recomputation itself. A reviewer traced it to a type annotation
-(`Typed`) that `ce.assign` writes into the stored literal when the body
-applies an arithmetic operator to a free symbol, but `x ↦ a` has no
-operator, so that explanation is not verified. Measured the same on 0.137.0
-(commit 7713654e), before the memo fix. `ce.declare` of an existing name
-throws, so the public route to a retype is the definition or type setter.
-
 ### A tuple argument at a scalar parameter is typed `any` (OPEN, small — 2026-09-26)
 
 The call `h((1, 2))` with `h := x ↦ 2x` (declared `(real) -> real` or not)

@@ -124,4 +124,65 @@ describe('THE RESULT UNDER DECLARED PARAMETER TYPES IS MEMOIZED', () => {
     expect(ce.box('g').type.toString()).toBe('(integer) -> integer');
     expect(ce.box('h').type.toString()).toBe('(complex) -> integer');
   });
+  // `ce.assign` used to reconcile the literal's return against the result it
+  // had just DERIVED under the declared parameter types, as if the host had
+  // declared it, and wrote it into the stored literal as `Typed(a,
+  // 'integer')`. The signature then kept that result after a retype of `a`.
+  test.each([
+    [
+      'its definition',
+      (ce: ComputeEngine) => {
+        (ce.lookupDefinition('a') as { value: { type: unknown } }).value.type =
+          'real';
+      },
+    ],
+    [
+      'a boxed symbol',
+      (ce: ComputeEngine) => {
+        (ce.box('a') as unknown as { type: unknown }).type = 'real';
+      },
+    ],
+  ])(
+    'the result follows a retype of a symbol the body reads, through %s',
+    (_, retype) => {
+      const ce = new ComputeEngine();
+      ce.declare('a', 'integer');
+      ce.declare('f', '(integer) -> unknown');
+      ce.assign('f', ce.parse('x \\mapsto a'));
+      const stored = (
+        ce.lookupDefinition('f') as { value: { value: { json: unknown } } }
+      ).value.value;
+      expect(JSON.stringify(stored.json)).not.toContain('Typed');
+      expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
+      retype(ce);
+      expect(ce.box('f').type.toString()).toBe('(integer) -> real');
+    }
+  );
+  // The same reconciliation runs on the two other routes that install a
+  // literal under a declared signature.
+  test.each([
+    [
+      'a declaration with a value',
+      (ce: ComputeEngine) =>
+        ce.declare('f', {
+          type: '(integer) -> unknown',
+          value: ce.parse('x \\mapsto a'),
+        } as never),
+    ],
+    [
+      'an operator signature, then an assignment',
+      (ce: ComputeEngine) => {
+        ce.declare('f', { signature: '(integer) -> unknown' } as never);
+        ce.assign('f', ce.parse('x \\mapsto a'));
+      },
+    ],
+  ])('the result follows a retype after %s', (_, define) => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'integer');
+    define(ce);
+    expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
+    (ce.lookupDefinition('a') as { value: { type: unknown } }).value.type =
+      'real';
+    expect(ce.box('f').type.toString()).toBe('(integer) -> real');
+  });
 });
