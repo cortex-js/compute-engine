@@ -20,6 +20,26 @@
 
 ### Behavior Changes
 
+- **Exactness is decided by the route a number arrives on.** A literal with a
+  fraction part is a float on every route: `1.0`, `0.0`, `-1.0`, `1.00` and
+  the MathJSON `{num: "1.0"}` were the exact interned constants (`1.0x`
+  evaluated to `x`, `\frac{1.0}{3}` to the exact `1/3`, `\sqrt{1.0}` to the
+  exact `1`, `\sin(1.0)` stayed `\sin(1)`) while `2.0` was a float. They now
+  behave as `2.0` does: `1.0x` is `1.0·x`, `\frac{1.0}{3}` is `0.333…`,
+  `\sin(1.0)` is `0.841…`. On the API, `ce.number(bigDecimal)` with an
+  integer-valued big decimal is exact at any magnitude (`ce.number(1)` was
+  exact and `ce.number(ce.bignum('10000000'))` was a float; both are exact,
+  a `bigint` above the safe integers). A float `±1` produced by a computation
+  is kept as a coefficient (`0.5·2x` evaluates to `1x`, it was `x`), a float
+  `0` or `±1` is no identity in a power, a quotient or a sum either
+  (`x^{1.0}` stays `x^{1.0}`, `1.0^x` stays, `2/1.0` and `2.0^2` are floats,
+  `0.0 + x` stays `x + 0.0`, `0.5x + 0.5x` is `1.0·x`), while a float `0`
+  still absorbs a product (`0.0x` is the float `0`). `GCD`,
+  `LCM` and `Factorial2` of big integers are exact at the default precision
+  (they were floats). An exponent literal with no fraction part (`1e3`) is
+  still exact, as Mathematica's `1*^3` is. See "Exact and Inexact Numbers:
+  the Spelling Decides" in the numerical evaluation guide.
+
 - **Derivatives serialize with the differentiand in the numerator.** `D(x^2, x)`
   now serializes as `\frac{\mathrm{d}x^2}{\mathrm{d}x}` instead of
   `\frac{\mathrm{d}}{\mathrm{d}x}x^2`. The old form did not round-trip when a
@@ -27,6 +47,107 @@
   still accepted as input.
 
 ### Resolved Issues
+
+- **An exact coefficient raised to a rational power stays exact.**
+  `(8x+8)^{2/3}·y` evaluated to `3.99999999999999944548·y·(x+1)^(2/3)` (an
+  exact input gave a float with a wrong last digit) and
+  `\frac13(2x^2+2)^{-2/3}` to `0.2099…/(x²+1)^(2/3)`: a rational exponent
+  `p/q` with `p ≠ 1` went through the big-number route. `p/q` is now the
+  `q`-th root followed by the integer power `p`, exact when the root is
+  (`8^{2/3} = 4`, `(1/8)^{-2/3} = 4`), and a root that is not exact is kept as
+  a symbolic factor (`(2x+2)^{2/3}·y` is `2^{2/3}·(x+1)^{2/3}·y`). On the way,
+  `(-8)^{2/3}` gave `8^{2/3}·i`; it is `4`, the real root, as `Root` gives.
+- **A compiled comparison chain with an absent operand keeps its decided
+  links.** `Less(x, 0, Missing)` with `x = 1` is `False` in the interpreter
+  (the first link decides), but compiled to `undefined`, so an `If` over it
+  took no arm; a chain now combines its pairwise links with Kleene "and". A
+  two-operand relation with an absent operand and an operand with effects
+  still evaluates that operand (`Less(Missing, t + Random())` consumes its
+  draw), and a chain whose shared operand has effects is refused rather than
+  evaluated twice.
+- **A complex quotient whose numerator products underflow is scaled.**
+  `2^{-1000} / (2^{-100} + 2^{-100}i)` gave `0` on the interpreter's numeric
+  values (the products `2^{-1000}·2^{-100}` round to `0`, so the numerator read
+  as an exact zero); it is `2^{-901} − 2^{-901}i`, on both the interpreter and
+  the compiled JavaScript.
+
+- **The interpreter fallback of a compiled function spells an absent value as
+  compiled code does.** When a compiled function falls back to the
+  interpreter, every `Missing` became `NaN`, while compiled JavaScript spells
+  an absent point, list, tuple, colour, boolean or string `undefined` and only
+  an absent number `NaN`. The fallback now spells an absent result, and an
+  absent cell inside a list or tuple, by the type of its position (user
+  decision 2026-09-27); the interval-js fallback spells it `{kind: 'empty'}`
+  as its compiled code does (it gave `{lo: NaN, hi: NaN}`). Also, a compiled
+  comparison with a written `Missing` or `Undefined` operand answered `false`
+  (`NotEqual` `true`) and `If`/`Which` over it took an arm; the six relations
+  now compile to the undecided value (`undefined`, Python `None`), a branch
+  over them takes no arm and answers `NaN`, and `And`/`Or` keep the Kleene
+  rules. A restricted number is still `NaN` with its IEEE comparison.
+
+- **A lazy collection whose element type carries a `nan` arm is accepted at a
+  `list<…>` parameter.** With `u` and `s` declared `(list<real>) -> unknown`
+  and `u` assigned an up-sampling comprehension, `s(u(L))` evaluated to
+  `incompatible-type` (`u(L)` is a lazy comprehension typed
+  `indexed_collection<integer | nan>`, the `nan` arm coming from an element
+  read) while the compiled JavaScript returned values. The argument check now
+  accepts a lazy collection at a list, collection or indexed-collection
+  parameter when its element type without the `nan` arm fits (user decision
+  2026-09-27); the `list<real>` contract is unchanged, an eager list that
+  holds `NaN` and a mismatched element type are still rejected.
+
+- **`Map` with a bare-symbol callback is typed from the callback's
+  signature.** `Map(\sin, [-1, 2])` was typed `vector<integer^2>` (the source
+  type was copied because a bare symbol callback reads as `unknown`); it is
+  `vector<number^2>`, from `Sin`'s signature, and a declared or assigned
+  function's result type is used the same way (user decision 2026-09-27). The
+  source type is still copied when the callback is an undeclared symbol. Also,
+  `.N()` of such a `Map` did not numericize (`[sin(-1), sin(2)]` stayed
+  symbolic while the lambda form gave floats); it does now.
+- **A list-valued integrand distributes over the integral.**
+  `\int_0^1\int_0^{G} xy\,dx\,dy` with `G = [1, 2, 3]` stayed unevaluated
+  (the outer integral had a list-valued integrand); it is `[1/4, 1, 9/4]`, one
+  integral per element, as a list BOUND already evaluates (user decision
+  2026-09-27), under `evaluate()` and `.N()`, on the parse, box and function
+  routes. Two list bounds of equal length pair element by element; different
+  lengths are the `incompatible-dimensions` error under `evaluate()`. Also,
+  `\int_0^1 (x, 2x)\,dx` parsed to a two-statement `Block` integrand and gave
+  `1/2` under `evaluate()` and `1` under `.N()`; it parses to the `Tuple`
+  integrand, as `(x, 2x)` does on its own, and stays whole in both modes.
+
+- **A float multiple of π that is a special angle is exact in every angular
+  unit.** `e^{0.25i\pi}` was the exact `√2/2 + √2/2·i` in degree mode and a
+  float in radian and turn mode, while `\sin(0.5\pi)` in radian mode was already
+  the exact `1`. A float coefficient within one unit in the last place of a
+  fraction `p/q` with `q` in the recognizer's table (1, 2, 3, 4, 5, 6, 8, 10,
+  12) is now read as that fraction on the `e^{iθ}` route and in `Sin`, `Cos`
+  and `Tan` (user decision 2026-09-27): radian `e^{0.25i\pi}` is
+  `√2/2 + √2/2·i`, `\sin(0.3\pi)` is `1/4 + √5/4`. A float that is not a
+  special angle stays a float (`e^{0.35i\pi}`), and `.N()` is unchanged.
+  Found on the way: in degree and gradian mode `e^{0.35i\pi}` came out as the
+  symbolic `cos(63) + i·sin(63)` for a float input; it is now a float.
+
+- **`Xor` and `Equivalent` accept an absent operand.** `Xor(True, Missing)`
+  and `Equivalent(True, Missing)` were `incompatible-type` errors, and
+  `Xor(True, Undefined)` stayed as `¬Undefined`, while `And`, `Or`, `Not`,
+  `Implies`, `Nand` and `Nor` answer `Missing` for an absent operand. The two
+  now do the same (user decision 2026-09-27); a decided result is unchanged
+  (`Xor(True, False)` is `True`, `Xor(True, B)` is `¬B`).
+
+- **Complex division in the interpreter no longer overflows or underflows.**
+  `1/(10^{308}+10^{308}i)` evaluated numerically to `0` and
+  `1/(10^{-200}+10^{-200}i)` to `~oo`; `Inverse([[1+i, 10^{308}+10^{308}i],
+  [0, 1]])` gave `-oo` for the entry that is `-10^{308}`. The interpreter
+  divided with the textbook formula, whose intermediate products overflow or
+  underflow the double range. Every complex quotient the interpreter forms
+  (the numeric-value `div` and `inv`, the complex matrix field behind
+  `Inverse`, `Determinant` and `LUDecomposition`, the reciprocal trigonometric
+  functions, `Rational` with complex operands, polynomial root finding) now
+  uses the scaled division the compiled JavaScript route already had (Smith's
+  algorithm with power-of-two scaling), so the two routes share one
+  algorithm. Ordinary quotients are unchanged bit for bit; a zero, infinite or
+  NaN operand keeps its previous answer. `ComplexRoots(10^{200}+10^{200}i, 2)`
+  gave `NaN` from an overflowing modulus and is now correct.
 
 - **An operator applied to an `error`-typed operand has the type `error`.** With
   `E = Sin(Tuple(A, B))` for `A, B: list<real>`, `Add(1, E)` had the type

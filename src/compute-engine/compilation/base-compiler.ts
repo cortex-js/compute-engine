@@ -5701,6 +5701,17 @@ export class BaseCompiler {
       if (BaseCompiler.isComplexValued(expr)) return undefined;
       if (elements.some((e) => isNumber(e) && e.im !== 0 && !e.isInfinity))
         return undefined;
+      // A collection with a `NaN` element does not fold either. An `Error`
+      // never folds, because only number literals are inlined, but a
+      // collection can hold an error in a disguised form: a lazy `Map`
+      // served through the lowered broadcast spine replaces an element whose
+      // callback returned an `Error` with the collection's absence marker,
+      // which is `NaN` for a numeric collection. Inlining that `NaN` would
+      // compile an interpreter error into a number with `success: true`.
+      // The fold cannot tell such a `NaN` from a computed one, so it
+      // declines, and the structural lowering decides both the value and
+      // whether the expression compiles at all.
+      if (elements.some((e) => isNumber(e) && e.isNaN)) return undefined;
       return BaseCompiler.emitFoldedValue(
         engine.function(isTuple(value) ? 'Tuple' : 'List', elements),
         target,
@@ -8005,6 +8016,29 @@ export class BaseCompiler {
       }
     }
 
+    // A comparison with a WRITTEN absence operand (`Missing`, `Undefined`) is
+    // undecided: the interpreter answers `Missing` for `Less(Missing, t)` and
+    // for `Equal(Undefined, 1)`, whatever the other operand holds (Kleene).
+    // The compiled value is the target's object null, which is also the
+    // undecided value of its three-valued conditions, so an `If`/`Which` over
+    // it takes no arm (`conditionNode` reads such a relation by its value).
+    // Before, the absence symbol lowered to `undefined` and the plain
+    // comparison answered a confident `false` (`true` for `NotEqual`), so an
+    // `If` over it took an arm. A target without an object axis keeps its
+    // plain lowering.
+    if (
+      BaseCompiler.BRANCH_RELATIONS.has(h) &&
+      target.absence?.object !== undefined &&
+      args.some(BaseCompiler.isAbsenceSymbol)
+    )
+      return BaseCompiler.compileAbsentRelation(
+        engine,
+        h,
+        args,
+        target,
+        target.absence.object.nullLiteral
+      );
+
     // An ORDERING comparison over a complex-valued operand has no lowering:
     // the complex numbers are not ordered, so the interpreter leaves
     // `Less(i·x, 0)` symbolic (no truth value), while both the infix path
@@ -9503,12 +9537,7 @@ export class BaseCompiler {
     // string evidence, and the union is neither provably numeric nor a
     // collection), the unguarded lowering emitted `undefined !== "x"` — a bare
     // `true` where the interpreter answers `Missing`.
-    const isObjectDomainMissing = (a: Expression): boolean => {
-      const t = compilationType(a);
-      if (!typeContainsMissing(t)) return false;
-      const stripped = resolveTypeForCompilation(stripMissingFromType(t));
-      return !(stripped === 'never' || isSubtype(stripped, 'number'));
-    };
+    const isObjectDomainMissing = BaseCompiler.isObjectDomainMissingOperand;
     if (
       (h === 'Equal' || h === 'NotEqual') &&
       target.absence !== undefined &&
@@ -18472,6 +18501,133 @@ export class BaseCompiler {
   ]);
 
   /**
+   * The spellings of the three-valued condition pieces for each target that
+   * has its own (`ConditionDialect`), keyed by `CompileTarget.language`. A
+   * target module registers its dialect here when it is loaded (the Python
+   * target does); every other target uses {@link CONDITION_DIALECT_JS}.
+   */
+  static readonly conditionDialects = new Map<string, ConditionDialect>();
+
+  private static conditionDialectOf(
+    target: CompileTarget<Expression>
+  ): ConditionDialect {
+    return (
+      BaseCompiler.conditionDialects.get(target.language ?? '') ??
+      CONDITION_DIALECT_JS
+    );
+  }
+
+  /**
+   * The value of a relation with a WRITTEN absence operand (`Missing`,
+   * `Undefined`), on a target with an object null `nullLiteral`.
+   *
+   * With two operands the relation is undecided whatever the other operand
+   * holds, so its value is the object null. The other operand is still
+   * evaluated when it has effects: the interpreter evaluates it (a `Random`
+   * draw is consumed), so the value is the object null bound after it.
+   *
+   * A CHAIN (`Less(x, 0, Missing)`) is the Kleene conjunction of its pairwise
+   * links: a link with an absent operand is undecided, a link between two
+   * present operands is an ordinary three-valued comparison (undecided for a
+   * NaN operand), and one link that is decidedly false makes the whole chain
+   * false. So with `x = 1`, `Less(x, 0, Missing)` is `false` and
+   * `Less(x, 5, Missing)` is undecided, as in the interpreter. A chain with an
+   * operand that has effects is declined: a middle operand belongs to two
+   * links, and the lowering would evaluate it once per link.
+   */
+  private static compileAbsentRelation(
+    ce: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    nullLiteral: TargetSource
+  ): TargetSource {
+    const dialect = BaseCompiler.conditionDialectOf(target);
+    if (args.length <= 2) {
+      const effects = args.filter(
+        (a) => !BaseCompiler.isAbsenceSymbol(a) && a.isPure !== true
+      );
+      if (effects.length === 0) return nullLiteral;
+      return dialect.bind(
+        effects.map(() => BaseCompiler.tempVar(target)),
+        nullLiteral,
+        effects.map((a) => BaseCompiler.compileValueOperand(a, target))
+      );
+    }
+    if (args.some((a) => a.isPure !== true))
+      throw new Error(
+        `Could not compile \`${h}\`: a chained comparison with an absent ` +
+          `operand and an operand that has effects. The chain is decided link ` +
+          `by link, and an operand shared by two links would be evaluated ` +
+          `twice.`
+      );
+    const links: Expression[] = [];
+    for (let i = 0; i + 1 < args.length; i++)
+      links.push(ce._fn(h, [args[i], args[i + 1]]));
+    const nodes: ConditionNode[] = [];
+    for (const link of links) {
+      const node = BaseCompiler.conditionNode(link, true, target);
+      if (node === null)
+        throw new Error(
+          `Could not compile \`${h}\`: a link of a chained comparison with ` +
+            `an absent operand has no three-valued lowering.`
+        );
+      nodes.push(node);
+    }
+    return BaseCompiler.kleeneCondition(
+      {
+        negate: false,
+        test: {
+          kind: 'connective',
+          expr: ce._fn('And', links),
+          op: 'And',
+          operands: nodes,
+        },
+      },
+      target,
+      dialect
+    );
+  }
+
+  /** True when `a` is a written absence symbol, `Missing` or `Undefined`. */
+  private static isAbsenceSymbol(a: Expression): boolean {
+    return isSymbol(a, 'Missing') || isSymbol(a, 'Undefined');
+  }
+
+  /**
+   * True when the value of `a` may be absent in an OBJECT domain: its type
+   * has a `missing` arm and, without it, is not a number (`string | missing`,
+   * a restricted point). The Kleene `Equal`/`NotEqual` guard answers the
+   * target's object null for such an operand when it is absent.
+   */
+  private static isObjectDomainMissingOperand(a: Expression): boolean {
+    const t = compilationType(a);
+    if (!typeContainsMissing(t)) return false;
+    const stripped = resolveTypeForCompilation(stripMissingFromType(t));
+    return !(stripped === 'never' || isSubtype(stripped, 'number'));
+  }
+
+  /**
+   * True when a numeric comparison operand may hold the object null at run
+   * time: a written absence symbol, or a value whose type has a `missing` arm
+   * of its own (`First([Missing, 1])` is typed `integer | missing | nan` and
+   * lowers to `undefined`). The NaN test does not see that value
+   * (`undefined === undefined` is true) and every comparison with it is
+   * `false`, so the decidedness test must test it separately.
+   */
+  private static operandMayBeAbsent(a: Expression): boolean {
+    if (BaseCompiler.isAbsenceSymbol(a)) return true;
+    const admits = (t: Readonly<Type>): boolean => {
+      const r = resolveTypeForCompilation(t);
+      if (r === 'missing') return true;
+      return (
+        typeof r !== 'string' && r.kind === 'union' && r.types.some(admits)
+      );
+    };
+    return admits(compilationType(a));
+  }
+
+  /**
    * An emitted fragment that is already a NAME or a bare constant — an
    * identifier, a member read off one (`_.x`), or a numeric literal. Repeating
    * such a fragment costs nothing and evaluates nothing, so a decidedness test
@@ -18660,6 +18816,21 @@ export class BaseCompiler {
     // - the SAME impure node in two positions (`Less(d, d)` built from one
     //   boxed `d`): the binding is keyed on the node (`_codeOverrides`), so
     //   one draw would stand for the two evaluations that were written.
+    // A relation whose compiled VALUE is the object null when an operand is
+    // absent — a written absence operand, or the Kleene `Equal`/`NotEqual`
+    // guard over an object-domain operand — is read by that value, which is
+    // the undecided one. The operand test below would see no numeric operand
+    // to test and call the relation decided, so the plain comparison took an
+    // arm (the else arm for `Less(Missing, t)`). A caller that passes no
+    // target (the Python target's selection handlers) has an object null too.
+    if (
+      (target === undefined || target.absence?.object !== undefined) &&
+      (cond.ops.some(BaseCompiler.isAbsenceSymbol) ||
+        ((h === 'Equal' || h === 'NotEqual') &&
+          cond.nops === 2 &&
+          cond.ops.some(BaseCompiler.isObjectDomainMissingOperand)))
+    )
+      return { negate: false, test: { kind: 'value', expr: cond } };
     if (cond.isPure !== true) {
       if (!canBind || cond.nops > 2) return null;
       if (cond.nops === 2 && cond.op1 === cond.op2 && cond.op1.isPure !== true)
@@ -18762,7 +18933,8 @@ export class BaseCompiler {
   private static operandDecidedConjuncts(
     code: TargetSource,
     target: CompileTarget<Expression>,
-    decided: DecidedNumberTest = DECIDED_NUMBER_JS
+    decided: DecidedNumberTest = DECIDED_NUMBER_JS,
+    present?: DecidedNumberTest
   ): TargetSource[] {
     // A fragment the compiler already reduced to a finite numeric literal
     // holds that number at every call, so it can decide every comparison it
@@ -18770,7 +18942,11 @@ export class BaseCompiler {
     // guarded operand.
     if (code.length > 0 && Number.isFinite(Number(code))) return [];
     const atom = BaseCompiler.ATOMIC_FRAGMENT.test(code) ? code : `(${code})`;
-    const conjuncts: TargetSource[] = [decided(atom)];
+    // `present` tests that an operand which may hold the object null does
+    // not (`operandMayBeAbsent`). It comes first: Python's NaN test raises on
+    // `None`, and the conjunction stops at the first false conjunct.
+    const conjuncts: TargetSource[] =
+      present === undefined ? [decided(atom)] : [present(atom), decided(atom)];
     if (BaseCompiler.isVarsObjectRead(code, target))
       conjuncts.push(`${atom} !== undefined`);
     return conjuncts;
@@ -19033,10 +19209,14 @@ export class BaseCompiler {
       const conjuncts: TargetSource[] = [];
       for (const op of test.operands) {
         const code = BaseCompiler.compile(op, target);
+        const present = BaseCompiler.operandMayBeAbsent(op)
+          ? (x: TargetSource) => `${dialect.not}(${dialect.isUndecided(x)})`
+          : undefined;
         const inline = BaseCompiler.operandDecidedConjuncts(
           code,
           target,
-          dialect.decidedNumber
+          dialect.decidedNumber,
+          present
         );
         // No test at all: the operand is a constant the compiler already
         // folded, so it decides every comparison it takes part in.
@@ -19057,7 +19237,8 @@ export class BaseCompiler {
           ...BaseCompiler.operandDecidedConjuncts(
             name,
             target,
-            dialect.decidedNumber
+            dialect.decidedNumber,
+            present
           )
         );
       }
@@ -19185,10 +19366,14 @@ export class BaseCompiler {
       const conjuncts: TargetSource[] = [];
       for (const op of operands) {
         const code = BaseCompiler.compile(op, target);
+        const present = BaseCompiler.operandMayBeAbsent(op)
+          ? (x: TargetSource) => `${dialect.not}(${dialect.isUndecided(x)})`
+          : undefined;
         const inline = BaseCompiler.operandDecidedConjuncts(
           code,
           target,
-          dialect.decidedNumber
+          dialect.decidedNumber,
+          present
         );
         // No test at all: the operand is a constant the compiler already
         // folded, so it decides every comparison it takes part in.
@@ -19209,7 +19394,8 @@ export class BaseCompiler {
           ...BaseCompiler.operandDecidedConjuncts(
             name,
             target,
-            dialect.decidedNumber
+            dialect.decidedNumber,
+            present
           )
         );
       }
@@ -27894,17 +28080,102 @@ export class BaseCompiler {
         alpha,
       };
     };
+    // The value an ABSENT interpreter result (`Missing`, `Undefined`) takes in
+    // the compiled-runner value contract. Compiled code spells an absent value
+    // by the kind of the position that holds it (`docs/ERROR-MODEL.md` §3): the
+    // numeric marker `NaN` in a numeric position, and the target's object null
+    // (`undefined` on JavaScript) in an object-domain position — a point, a
+    // tuple, a list, a colour, a boolean, a string — and wherever the position
+    // admits `missing` itself, since a written absence symbol lowers to the
+    // object null so that an absent cell stays distinct from a `NaN` cell. The
+    // fallback spells it the same way, so a host cannot tell from the value
+    // which route ran. Without this rule every absent result was `NaN`, where
+    // the compiled code answers `undefined` for the same absent point.
+    //
+    // The kind is read from the static type `t` of the position. When that
+    // type says nothing (`unknown`, `any`, or no type), `hint` gives the kind
+    // of the present sibling cells of the same collection; with no hint the
+    // value is `NaN`. A target that declares an absence capability without an
+    // object axis (the shader targets, the interval target) spells every
+    // absent value with its numeric marker, so the fallback gives `NaN` there.
+    const hasObjectNull =
+      compileTarget?.absence === undefined ||
+      compileTarget.absence.object !== undefined;
+    // Whether `t` admits `missing` as one of its own arms (not in a cell).
+    const admitsMissing = (t: Readonly<Type>): boolean => {
+      const r = resolveTypeForCompilation(t);
+      if (r === 'missing') return true;
+      return (
+        typeof r !== 'string' &&
+        r.kind === 'union' &&
+        r.types.some(admitsMissing)
+      );
+    };
+    const absentRunValue = (
+      t: Readonly<Type> | undefined,
+      hint: 'number' | 'object' | undefined
+    ): number | undefined => {
+      if (!hasObjectNull) return NaN;
+      if (t !== undefined) {
+        const r = resolveTypeForCompilation(t);
+        if (r !== 'unknown' && r !== 'any') {
+          if (admitsMissing(r)) return undefined;
+          if (isSubtype(r, 'number')) return NaN;
+          if (provablyDisjoint(r, 'number')) return undefined;
+        }
+      }
+      return hint === 'object' ? undefined : NaN;
+    };
+    // The static type of cell `i` of a collection whose type is `t`: the
+    // positional type of a tuple, the element type of a list, `undefined`
+    // when the type does not say. The collection's own `missing` arm is
+    // removed first: the collection is present, since it has cells. When `t`
+    // is not a collection type at all, the collection is a cell of an outer
+    // list whose type names only the scalar leaves (`[[1, Missing], [t, 2]]`
+    // is typed `list<integer | missing | number>`), and that leaf type applies
+    // to the cells at this depth too.
+    const isCollectionType = (x: Readonly<Type>): boolean =>
+      collectionElementType(x) !== undefined;
+    const cellType = (
+      t: Readonly<Type> | undefined,
+      i: number
+    ): Type | undefined => {
+      if (t === undefined) return undefined;
+      let r = resolveTypeForCompilation(t);
+      if (typeof r !== 'string' && r.kind === 'union') {
+        const arms = r.types
+          .filter((x) => !admitsMissing(x))
+          .map((x) => resolveTypeForCompilation(x));
+        if (!arms.some(isCollectionType)) return r;
+        if (arms.length !== 1) return undefined;
+        r = arms[0];
+      }
+      if (typeof r !== 'string' && r.kind === 'tuple')
+        return r.elements[i]?.type;
+      return collectionElementType(r) ?? r;
+    };
+    const isAbsentValue = (e: Expression): boolean =>
+      isSymbol(e, 'Missing') || isSymbol(e, 'Undefined');
     // Materialize an interpreted result matching the compiled-runner value
     // contract: a scalar yields a `number` (imaginary part exactly zero), a
     // `{re, im}` object (otherwise) or a boolean; a finite indexed collection
-    // becomes a nested JS array of element values. A scalar leaf is
-    // numericized first — `evaluate()` correctly stays symbolic for an exact
-    // argument (`ln(2)` evaluates to `Ln(2)`), and `.re` of a symbolic
+    // becomes a nested JS array of element values; an absent value is spelled
+    // by `absentRunValue` from the static type `t` of its position. A scalar
+    // leaf is numericized first — `evaluate()` correctly stays symbolic for an
+    // exact argument (`ln(2)` evaluates to `Ln(2)`), and `.re` of a symbolic
     // expression is NaN, so without `.N()` every decline whose expression has
     // no non-symbolic evaluation would run to NaN instead of its value.
     const interpretedRunValue = (
-      e: Expression
-    ): number | boolean | ComplexResult | CompiledColor | unknown[] => {
+      e: Expression,
+      t?: Readonly<Type>
+    ):
+      | number
+      | boolean
+      | ComplexResult
+      | CompiledColor
+      | unknown[]
+      | undefined => {
+      if (isAbsentValue(e)) return absentRunValue(t, undefined);
       // A COLOR node keeps its space. The interpreter answers a color as a
       // typed head — `Rgb(r, g, b)`, `Hsv(h, s, v)`, … — and the compiled
       // runtime's color value carries the same three channels plus the space
@@ -27915,12 +28186,35 @@ export class BaseCompiler {
       // `fallback: true`.
       const color = interpretedColorValue(e);
       if (color !== undefined) return color;
-      if (e.isCollection) return [...e.each()].map(interpretedRunValue);
+      if (e.isCollection) {
+        // The present cells are rendered first: when the type of an absent
+        // cell says nothing, their kind is the hint for its spelling (a
+        // list of points holds `undefined`, a list of numbers `NaN`).
+        const cells = [...e.each()];
+        const out = cells.map((c, i) =>
+          isAbsentValue(c) ? undefined : interpretedRunValue(c, cellType(t, i))
+        );
+        const kinds = new Set(
+          out
+            .filter((v, i) => !isAbsentValue(cells[i]))
+            .map((v) =>
+              typeof v === 'number' || isComplexArg(v) ? 'number' : 'object'
+            )
+        );
+        const hint =
+          kinds.size === 1
+            ? (kinds.values().next().value as 'number' | 'object')
+            : undefined;
+        return out.map((v, i) =>
+          isAbsentValue(cells[i]) ? absentRunValue(cellType(t, i), hint) : v
+        );
+      }
       if (isSymbol(e, 'True')) return true;
       if (isSymbol(e, 'False')) return false;
       const n = e.N();
       if (isSymbol(n, 'True')) return true;
       if (isSymbol(n, 'False')) return false;
+      if (isAbsentValue(n)) return absentRunValue(t, undefined);
       const im = n.im;
       // `im` is NaN for a symbolic residue (no numeric value): a number, not
       // an object, is the honest shape for "no value" — `re` is NaN too.
@@ -28048,15 +28342,15 @@ export class BaseCompiler {
       // (`(p: tuple<number, number>) -> …` receives `[0, 0]` as a POINT), as
       // the vars-object convention below does through `declaredTypeOf`.
       const paramTypes = functionLiteralParameters(expr).map((p) => p.type);
-      const lambdaRun = ((...args: unknown[]) =>
-        interpretedRunValue(
-          ce
-            .function('Apply', [
-              expr,
-              ...args.map((a, i) => boxArg(a, paramTypes[i])),
-            ])
-            .evaluate()
-        )) as unknown as CompiledRunner;
+      // The absent result is spelled by the static type of the application,
+      // which is the function's result type for these arguments.
+      const lambdaRun = ((...args: unknown[]) => {
+        const applied = ce.function('Apply', [
+          expr,
+          ...args.map((a, i) => boxArg(a, paramTypes[i])),
+        ]);
+        return interpretedRunValue(applied.evaluate(), applied.type.type);
+      }) as unknown as CompiledRunner;
       return {
         target: targetName,
         success: false,
@@ -28109,7 +28403,7 @@ export class BaseCompiler {
             }
           }
         }
-        return interpretedRunValue(expr.evaluate());
+        return interpretedRunValue(expr.evaluate(), expr.type.type);
       } finally {
         ce.popScope();
       }

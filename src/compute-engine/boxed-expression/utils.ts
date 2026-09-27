@@ -11,7 +11,8 @@ import type {
   Scope,
 } from '../global-types.js';
 
-import { MACHINE_PRECISION } from '../numerics/numeric.js';
+import { MACHINE_PRECISION, SMALL_INTEGER } from '../numerics/numeric.js';
+import { BigDecimal } from '../../big-decimal/index.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { tombstoneBinding } from './binding-tombstone.js';
 import {
@@ -127,6 +128,33 @@ function isIterable(x: unknown): x is Iterable<unknown> {
  */
 export function bignumPreferred(ce: ComputeEngine): boolean {
   return ce.precision > MACHINE_PRECISION;
+}
+
+/**
+ * Box a number that a numeric computation produced.
+ *
+ * `ce.number()` reads a big decimal as a value given by the host, and makes
+ * an integer-valued big decimal exact at any magnitude. The result of a
+ * numeric computation is inexact even when it is integer-valued, so it must
+ * not take that route. This function keeps it a float, except that a small
+ * integer (at most `SMALL_INTEGER` in absolute value) is boxed as an exact
+ * integer, as `boxMachineNumber()` in `apply.ts` does for a machine result.
+ * Any other value (a JavaScript number, for example) goes to `ce.number()`
+ * unchanged.
+ */
+export function boxBignumResult(
+  ce: ComputeEngine,
+  value: BigDecimal | number
+): Expression {
+  // A kernel can return a value of another kind than its declared type (the
+  // trigonometric kernels return the boxed `ComplexInfinity` at a pole):
+  // `ce.number()` handles it as before.
+  if (!(value instanceof BigDecimal)) return ce.number(value);
+  if (value.isInteger()) {
+    const n = value.toNumber();
+    if (Math.abs(n) <= SMALL_INTEGER) return ce.number(n);
+  }
+  return ce.number(ce._numericValue(value));
 }
 
 // export function getMeta(expr: Expression): Partial<Metadata> {

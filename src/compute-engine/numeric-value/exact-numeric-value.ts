@@ -819,8 +819,9 @@ export class ExactNumericValue extends NumericValue {
         return this.clone(NaN);
       return other;
     }
-    if (other.isOne) return this;
-    if (other.isNegativeOne) return this.neg();
+    // Only an exact ±1 is an identity: a float ±1 makes the product a float
+    if (other.isExact && other.isOne) return this;
+    if (other.isExact && other.isNegativeOne) return this.neg();
     if (other.isNaN) return other;
 
     if (this.isZero) {
@@ -897,8 +898,9 @@ export class ExactNumericValue extends NumericValue {
     }
 
     if (this.isNaN) return this;
-    if (other.isOne) return this;
-    if (other.isNegativeOne) return this.neg();
+    // Only an exact ±1 is an identity: a float ±1 makes the quotient a float
+    if (other.isExact && other.isOne) return this;
+    if (other.isExact && other.isNegativeOne) return this.neg();
     if (this.isZero) {
       if (other.isZero) return this.clone(NaN);
       return other.isNaN ? other : this;
@@ -970,6 +972,21 @@ export class ExactNumericValue extends NumericValue {
 
     if (this.isNaN) return this;
     if (typeof exponent === 'number' && isNaN(exponent)) return this.clone(NaN);
+    // `1^r` is the exact `1` for every finite exponent. Without this early
+    // return a rational exponent goes through the big-number route and comes
+    // back as an INEXACT `1`, which then makes every product it is folded
+    // into a float: `(1/3)·(x²+1)^(−2/3)` evaluated to
+    // `0.333…/(x²+1)^(2/3)` because the coefficient of `(x²+1)` is `1` and
+    // `Product.mul` raises it to the term's exponent (found 2026-09-27).
+    if (this.isOne) {
+      const finite =
+        typeof exponent === 'number'
+          ? Number.isFinite(exponent)
+          : exponent instanceof NumericValue
+            ? !exponent.isNaN && Number.isFinite(exponent.re)
+            : Number.isFinite(exponent.re) && Number.isFinite(exponent.im);
+      if (finite) return this;
+    }
 
     if (exponent instanceof NumericValue) {
       if (exponent.isNaN) return this.clone(NaN);
@@ -983,6 +1000,22 @@ export class ExactNumericValue extends NumericValue {
           // the denominator rational[1] (not the numerator).
           if (exponent.radical === 1 && exponent.rational[0] == 1)
             return this.root(Number(exponent.rational[1]));
+          // Exponent p/q with p ≠ 1 ⇒ the q-th root, then the integer power
+          // p (a negative p inverts). The result is exact when the root is
+          // exact: 8^(2/3) = 4, (1/8)^(−2/3) = 4, (−8)^(2/3) = 4 (the real
+          // root of a negative value, as `root()` gives). When the root is
+          // not exact, the float result below is used.
+          if (exponent.radical === 1 && exponent.rational[1] != 1) {
+            const p = Number(exponent.rational[0]);
+            const q = Number(exponent.rational[1]);
+            if (Number.isSafeInteger(p) && Number.isSafeInteger(q)) {
+              const root = this.root(q);
+              if (root.isExact) {
+                const result = root.pow(p);
+                if (result.isExact) return result;
+              }
+            }
+          }
         }
         exponent = exponent.re;
       }

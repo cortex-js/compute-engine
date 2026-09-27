@@ -2352,6 +2352,11 @@ const PYTHON_CONDITION_DIALECT: ConditionDialect = {
     `(lambda ${params.join(', ')}: ${body})(${args.join(', ')})`,
 };
 
+// The value-position lowering of a comparison with an absent operand builds
+// a three-valued condition itself (`BaseCompiler.compileAbsentRelation`), so
+// it needs this target's spellings of the condition pieces.
+BaseCompiler.conditionDialects.set('python', PYTHON_CONDITION_DIALECT);
+
 /**
  * True when `expr` can lower to the Python absence value `None`: a
  * restriction (`When`), or any operand whose type holds a `missing` arm at

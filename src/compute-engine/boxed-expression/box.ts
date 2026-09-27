@@ -101,7 +101,7 @@ import {
 } from '../../common/type/instantiate.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
-import { isValueDef } from './utils.js';
+import { boxBignumResult, isValueDef } from './utils.js';
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
@@ -3715,14 +3715,19 @@ function makeNumericFunction(
 }
 
 function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
-  if (value.isZero) return ce.Zero;
-  if (value.isOne) return ce.One;
-  if (value.isNegativeOne) return ce.NegativeOne;
+  // Only an exact value can be one of the shared exact constants or be
+  // converted to an exact value: a float `1.0` or `2.0` stays a float, as
+  // `ce.number()` keeps it.
+  if (value.isExact) {
+    if (value.isZero) return ce.Zero;
+    if (value.isOne) return ce.One;
+    if (value.isNegativeOne) return ce.NegativeOne;
+  }
   if (value.isNaN) return ce.NaN;
   if (value.isNegativeInfinity) return ce.NegativeInfinity;
   if (value.isPositiveInfinity) return ce.PositiveInfinity;
 
-  value = value.asExact ?? value;
+  if (value.isExact) value = value.asExact ?? value;
 
   // An exact complex value is best represented as a number literal directly:
   // decomposing it into `re + im·i` terms would only re-fold to the same
@@ -3733,13 +3738,15 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
 
   if (!value.isExact) {
     const im = value.im;
-    if (im === 0) return ce.number(value.bignumRe ?? value.re);
+    // A float with an integer value (`2.0`) stays a float: box the value
+    // itself, not its big decimal, which `ce.number()` reads as exact.
+    if (im === 0) return ce.number(value);
     if (value.re === 0) return ce.number(ce.complex(0, im));
     // A complex literal holds its real part as a double, so a big-decimal real
     // part that is not exactly a double is kept in a separate term.
     if (value.bignumRe !== undefined && !isExactDouble(value.bignumRe)) {
       return canonicalAdd(ce, [
-        ce.number(value.bignumRe),
+        boxBignumResult(ce, value.bignumRe),
         ce.number(ce.complex(0, im)),
       ]);
     }

@@ -6792,9 +6792,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             'indexed_collection',
             engine._typeResolver
           );
+        // A bare symbol callback is unbound on the parse route and its own type
+        // reads `unknown`, so its declared signature is read from its definition
+        // (`callbackResultTypeD`). Only a symbol with no function type falls to
+        // the copied source type below (user decision 2026-09-27).
         const resultType =
           bareMappingElementTypeD(ops[0], [ops[1]], engine, derive) ??
-          functionResult(ops[0].type);
+          callbackResultTypeD(ops[0], engine);
         if (!resultType || resultType === 'unknown' || resultType === 'any') {
           // Unknown element type: still preserve value-aware indexed-ness
           // (the `.N()` route wraps the body in `N`, whose lazy result types
@@ -6855,7 +6859,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       const resultType =
         bareMappingElementTypeD(ops[0], ops.slice(1), engine, derive) ??
-        functionResult(ops[0].type);
+        callbackResultTypeD(ops[0], engine);
       return BoxedType.forResult(
         zipMapResultType(
           ops.slice(1).map((_, i) => sourceType(i)),

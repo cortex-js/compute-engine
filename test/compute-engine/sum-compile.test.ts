@@ -552,9 +552,14 @@ describe('generic sums', () => {
   test('FAIL-CLOSED (v1): the roadmap `total` example does not compile', () => {
     // Not a sum-tier limitation: the payload capture `cs` reaches `Map` as an
     // accessor STRING with no static type attached (the same thing tier-2
-    // captures do), so `Map`'s compile-time collection gate declines. The sum
-    // half is fine — `node(v, cs)` lowers — and this pin is here to catch the
-    // day the capture-typing gap closes.
+    // captures do), so the compile route declines. Until 2026-09-27 the
+    // decline came from `Map`'s collection gate ("not an indexed
+    // collection"); since a bare-symbol callback with a signature types the
+    // `Map` from that signature (`total` is `(tree<number>) -> number`), the
+    // `Map` passes its own gate and the decline comes from `Sum`, which finds
+    // no indexing set behind the untyped capture ("no indexing set"). Either
+    // way it fails closed. The sum half is fine — `node(v, cs)` lowers — and
+    // this pin is here to catch the day the capture-typing gap closes.
     const ce = engine(`${TREE}
       function total(t: tree<number>) -> number {
         match t {
@@ -571,6 +576,6 @@ describe('generic sums', () => {
     expect(expr.evaluate().re).toBe(6);
     const r = compile(expr);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/not an indexed collection/);
+    expect(r.error).toMatch(/no indexing set|not an indexed collection/);
   });
 });

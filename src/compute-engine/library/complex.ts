@@ -18,6 +18,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
 import { exactOrder } from '../boxed-expression/compare.js';
+import { boxBignumResult } from '../boxed-expression/utils.js';
 import { complexParts } from './complex-parts.js';
 import {
   infinitePoint,
@@ -522,7 +523,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
           return ce.number(
             ce._numericValue({ rational: op.rational, radical: op.radical })
           );
-        return ce.number(op.bignumRe ?? op.re);
+        return boxBignumResult(ce, op.bignumRe ?? op.re);
       },
     },
     Imaginary: {
@@ -861,7 +862,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         const im = ops[0].im ?? 0;
 
         const arg = Math.atan2(im, re);
-        const mod = Math.sqrt(re * re + im * im);
+        const mod = Math.hypot(re, im);
 
         for (let k = 0; k < n; k++) {
           const theta = (arg + 2 * Math.PI * k) / n;

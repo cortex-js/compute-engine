@@ -372,6 +372,118 @@ function measurementFromParts(
 }
 
 /**
+ * The type of the integral of an integrand of type `t`. An integrand whose
+ * value is a list (`∫ [x, 2x] dx`) gives one integral per element, so the
+ * integral of a list is a list of the same shape, with number elements. Any
+ * other integrand gives a number.
+ */
+function integralTypeOf(t: Readonly<Type> | undefined): Type {
+  if (t === undefined) return 'number';
+  if (typeof t === 'object' && t.kind === 'list')
+    return { ...t, elements: integralTypeOf(t.elements) };
+  if (typeof t === 'string' && t !== 'unknown' && isSubtype(t, 'list<any>'))
+    return { kind: 'list', elements: 'number' };
+  return 'number';
+}
+
+/**
+ * An integral whose integrand is a LIST (`∫_0^1 [x, 2x] dx`, or the outer
+ * integral of `∫_0^1 ∫_0^{G} x·y dx dy` with `G = [1, 2, 3]`, whose integrand
+ * is an integral with a list bound) is one integral per element of the list:
+ * `Integrate([f1, f2], limits)` is `[Integrate(f1, limits), Integrate(f2,
+ * limits)]`. This is the same rule as for a list bound. When a bound is also
+ * a list, the element `i` of the integrand is paired with the element `i` of
+ * the bound, and the lengths must agree.
+ *
+ * Return `undefined` when the integrand is not a list: the caller then
+ * integrates it as usual. Return `null` when the integrand is a list but the
+ * integral cannot be evaluated: under `N()`, a list bound whose length is not
+ * the length of the integrand keeps the integral unevaluated, as a mismatch
+ * of two list bounds does. Under `evaluate()` that mismatch is the
+ * `incompatible-dimensions` error, as a mismatch of the two list bounds of
+ * one limit is.
+ *
+ * A tuple integrand is not a list (a point is not a list), and is not
+ * distributed.
+ */
+function integrateListIntegrand(
+  ce: ComputeEngine,
+  integrand: Expression,
+  limits: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression | null | undefined {
+  // The integrand is a `List` value, or, for a function literal, its body
+  // is typed as a list. Checking the type first means that an integrand that
+  // is not a list is not evaluated here.
+  let value: Expression | undefined;
+  if (isFunction(integrand, 'List')) value = integrand;
+  else if (isFunction(integrand, 'Function')) {
+    const result = functionResult(integrand.type.type);
+    if (
+      result === undefined ||
+      result === 'unknown' ||
+      !isSubtype(result, 'list<any>')
+    )
+      return undefined;
+  } else return undefined;
+
+  // The integration variables are bound by `Integrate`: a same-named global
+  // assignment (`x := 5`) must not substitute into the integrand or into a
+  // bound that refers to an outer integration variable.
+  const names: string[] = [];
+  for (const l of limits)
+    if (isFunction(l)) {
+      const v = sym(l.op1);
+      if (v && v !== 'Nothing') names.push(v);
+    }
+  if (isFunction(integrand, 'Function'))
+    for (const p of integrand.ops.slice(1)) {
+      const n = sym(p);
+      if (n) names.push(n);
+    }
+
+  return withValueShield(ce, names, () => {
+    // The integrand is evaluated exactly, also under `N()`: an inner integral
+    // with a free outer integration variable has no numeric value, but its
+    // exact value can be a list of expressions in that variable.
+    value ??= liftIntegrand(integrand).evaluate();
+    if (!isFunction(value, 'List')) return undefined;
+    const elements = value.ops;
+    const count = elements.length;
+
+    // Evaluate each bound once, and pair a list bound with the integrand.
+    const bounds: (Expression[] | undefined)[] = [];
+    for (const l of limits) {
+      if (!isFunction(l, 'Limits')) {
+        bounds.push(undefined);
+        continue;
+      }
+      const values = [l.op2, l.op3].map((b) =>
+        sym(b) === 'Nothing' ? b : numericApproximation ? b.N() : b.evaluate()
+      );
+      for (const b of values) {
+        if (!isFunction(b, 'List') || b.nops === count) continue;
+        if (numericApproximation) return null;
+        return ce.error('incompatible-dimensions', `${count} vs ${b.nops}`);
+      }
+      bounds.push(values);
+    }
+
+    const results = elements.map((element, i) => {
+      const elementLimits = limits.map((l, k) => {
+        const b = bounds[k];
+        if (!isFunction(l, 'Limits') || b === undefined) return l;
+        const [lo, hi] = b.map((x) => (isFunction(x, 'List') ? x.ops[i] : x));
+        return ce.function('Limits', [l.op1, lo, hi]);
+      });
+      const integral = ce.function('Integrate', [element, ...elementLimits]);
+      return numericApproximation ? integral.N() : integral.evaluate();
+    });
+    return ce.function('List', results);
+  });
+}
+
+/**
  * Iterated numeric quadrature for a multi-limit `Integrate`, e.g.
  * `Integrate(f, Limits(x, 0, 3), Limits(y, 0, 2))`. Limits follow the
  * Mathematica iterator convention (matching the symbolic path): the FIRST
@@ -2178,9 +2290,18 @@ volumes
       // numeric path in `evaluate` below, the symbolic path through
       // `EvaluateAt`). Type it as a list so the type agrees with the value.
       // The lengths of the lists are not known here: when two list bounds
-      // have different lengths, evaluation declines and the integral stays
-      // unevaluated, although its type is still `list<number>`.
+      // have different lengths, `N()` declines and the integral stays
+      // unevaluated, and `evaluate()` gives an `incompatible-dimensions`
+      // error, although the type is still `list<number>`.
+      // An integrand whose value is a list is also one integral per element
+      // (`integrateListIntegrand`), so the integral has the shape of the
+      // integrand's list type, with number elements.
       type: (ops, { engine }) => {
+        // The integrand is a function literal: its result type is the type
+        // of the integrand's value.
+        const listType = integralTypeOf(functionResult(ops[0]?.type));
+        if (listType !== 'number')
+          return BoxedType.forResult(listType, engine._typeResolver);
         const hasListBound = ops.slice(1).some((op) => {
           const limit = op.structureOf?.();
           return (
@@ -2230,8 +2351,22 @@ volumes
           }
         }
 
+        // A parenthesized list of several expressions, `\int_0^1 (x, 2x)\,dx`,
+        // is a tuple, as the same `(x, 2x)` is outside an integral (and as
+        // the summand of `Sum` is). Canonicalize it as such before it becomes
+        // the body of the function literal: `canonicalFunctionLiteral` reads
+        // a `Delimiter` of several expressions as a `Block` of statements,
+        // whose value is the last expression only.
+        let integrand = ops[0];
+        if (
+          isFunction(integrand, 'Delimiter') &&
+          isFunction(integrand.op1, 'Sequence') &&
+          integrand.op1.nops > 1
+        )
+          integrand = integrand.canonical;
+
         const f = canonicalFunctionLiteral(
-          ops[0],
+          integrand,
           vars.length > 0 ? { params: vars } : undefined
         );
         if (!f) return null;
@@ -2240,6 +2375,16 @@ volumes
       },
 
       evaluate: (ops, { engine: ce, numericApproximation }) => {
+        // A list-valued integrand: one integral per element.
+        const perElement = integrateListIntegrand(
+          ce,
+          ops[0],
+          ops.slice(1),
+          numericApproximation ?? false
+        );
+        if (perElement === null) return undefined;
+        if (perElement !== undefined) return perElement;
+
         if (numericApproximation) {
           // If a numeric approximation is requested, equivalent to NIntegrate
           const f = ops[0];
@@ -2506,6 +2651,16 @@ volumes
 
           let isIndefinite = true;
           for (let i = limitsSequence.length - 1; i >= 0; i--) {
+            // An inner integral with a list bound gives a LIST integrand for
+            // the remaining (outer) limits: one integral per element, paired
+            // with the elements of an outer list bound.
+            if (isFunction(expr, 'List')) {
+              const remaining = limitsSequence.slice(0, i + 1);
+              return (
+                integrateListIntegrand(ce, expr, remaining, false) ??
+                ce.function('Integrate', [expr, ...remaining])
+              );
+            }
             if (!isFunction(limitsSequence[i])) continue;
             const limitFn = limitsSequence[i] as Expression &
               import('../global-types.js').FunctionInterface;

@@ -5,7 +5,7 @@ import type { Expression, IComputeEngine } from '../global-types.js';
 
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 import { SMALL_INTEGER } from '../numerics/numeric.js';
-import { bignumPreferred } from './utils.js';
+import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
 import { chopComplexDust } from '../numeric-value/roundoff.js';
 
@@ -103,6 +103,24 @@ function isNaNKernelResult(r: unknown): boolean {
   return false;
 }
 
+/**
+ * Box the big-decimal result of a kernel. When an argument is a float, the
+ * result is a float, even when its value is an integer: `2.0^2` is the float
+ * `4`. Otherwise an integer-valued result is exact (`boxBignumResult`).
+ */
+function boxKernelResult(
+  ce: IComputeEngine,
+  result: BigDecimal | number,
+  args: ReadonlyArray<Expression>
+): Expression {
+  if (
+    result instanceof BigDecimal &&
+    args.some((x) => isNumber(x) && !x.isExact)
+  )
+    return ce.number(ce._numericValue(result));
+  return boxBignumResult(ce, result);
+}
+
 export function apply(
   expr: Expression,
   fn: (x: number) => number | Complex,
@@ -143,7 +161,7 @@ export function apply(
   if (result instanceof Complex)
     return ce.number(ce._numericValue({ re: result.re, im: result.im }));
   if (typeof result === 'number') return boxMachineNumber(ce, result);
-  return ce.number(result);
+  return boxKernelResult(ce, result, [expr]);
 }
 
 /**
@@ -216,7 +234,7 @@ export function applyN(
     return boxMachineNumber(ce, result);
   }
   if (result.isNaN()) return undefined;
-  return ce.number(result);
+  return boxKernelResult(ce, result, ops);
 }
 
 export function apply2(
@@ -291,5 +309,5 @@ export function apply2(
   // complex branch removes a component only when it is tiny compared with
   // the modulus, which is typically trig roundoff.)
   if (typeof result === 'number') return boxMachineNumber(ce, result);
-  return ce.number(result);
+  return boxKernelResult(ce, result, [expr1, expr2]);
 }

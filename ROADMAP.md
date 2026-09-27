@@ -208,11 +208,20 @@ whole-collection equality with an absent cell, no one-argument `Clamp`, the
 shader statement order documented) are in `CHANGELOG.md`. Each left a residue
 that no ruling covers yet.
 
-- **Two absence parity residues.** `Xor` and `Equivalent` reject `Missing` by
-  TYPE (`incompatible-type boolean/missing`) so `Undefined`, typed `unknown`,
-  stays inert there; and a comparison on `Undefined` TYPES `boolean` while its
-  value is `Missing` (the type handlers read a `missing`-typed operand, not the
-  symbol).
+- **Absence parity residues.** A comparison on `Undefined` TYPES `boolean`
+  while its value is `Missing` (the type handlers read a `missing`-typed
+  operand, not the symbol). `Xor` and `Equivalent` accept an absent operand
+  since 2026-09-27 (user decision: they answer `Missing`, as `And`, `Or` and
+  `Not` do). Found with that change, a decision: `Nand(A, Missing)`,
+  `Nor(A, Missing)`, `Implies(A, Missing)` and `Implies(Missing, A)` with an
+  UNKNOWN `A` evaluate to `Missing`, while `And(A, Missing)` stays symbolic
+  (Kleene: `A = False` would decide `Nand` as `True`); and
+  `Implies(Missing, True)` is `Missing` while `Or(Missing, True)` is `True`,
+  which `undefined-absence-seams.test.ts` (lines 154–172) pins and a comment
+  in `evaluateImplies` (`symbolic/logic-utils.ts`) contradicts ("`p ⇒ True` is
+  decided above"). Either the three operators follow `And` (stay symbolic
+  beside an unknown, decide `p ⇒ True` as `True`; the pin changes), or the
+  comment is corrected and the pin stands.
 
 ### What the second review of the 2026-09-23 to 2026-09-26 commits left open (OPEN — found 2026-09-26)
 
@@ -221,15 +230,13 @@ the fixes and four user decisions of the same day landed. These items remain.
 
 Defects:
 
-1. **The interpreter's complex division overflows.** `1/(10^{308}+10^{308}i)`
-   and `Inverse([[1e308+1e308i]])` give `0` in the interpreter; the correct
-   value is about `5e-309 - 5e-309i`. The compiled JavaScript uses a scaled
-   division and gives the correct value. The interpreter divides through
-   `complex-esm` (`Complex.div`), whose Smith algorithm forms `d·(d/c) + c`
-   without scaling, at about 200 call sites. The fix is a scaled division
-   wrapper used by every complex quotient. The same overflow makes
-   `Inverse([[1+i, 1e308+1e308i],[0,1]]).N()` give `-oo` for the entry that
-   is `-1e308`.
+1. **Inverse trigonometric functions of a huge complex argument are `NaN`.**
+   `Arccot(10^{-200}+10^{-200}i).N()` and `Arccsc(10^{-200}+10^{-200}i).N()`
+   are `NaN`: the reciprocal is now right (`5e199 - 5e199i`, since
+   2026-09-27), but `complex-esm`'s `atan` and `asin` return `NaN` for an
+   argument near `5e199` (`new Complex(5e199, -5e199).atan()` is `NaN`).
+   Found 2026-09-27 while scaling the interpreter's complex division; the
+   fix is a scaled `atan`/`asin` kernel, or a reduction for large arguments.
 2. **A complex number whose imaginary part is outside the double range is
    wrong (silent wrong results).** Measured 2026-09-26 at the default
    precision: `i\cdot10^{-800}` evaluates to `0`; `(1+i)10^{-800}`
@@ -249,10 +256,15 @@ Defects:
    "is complex" flag in `ExactNumericValue` instead of the `im !== 0` test.
    Related: at the default precision, the reciprocal of `1e-200+1e-200i`
    gives re = `1e200` (should be `5e199`) and im = `-Infinity`, because
-   `d·d` underflows in double arithmetic; `(1e-200+1e-200i)^{-1}` is `~oo`
-   at both precisions; `(10^{-200}(1+i))^2` `.N()` is `NaN`;
+   `d·d` underflows in double arithmetic (fixed 2026-09-27 by the scaled
+   division); `(10^{-200}(1+i))^2` `.N()` is `0` at the default precision
+   (the true value `2e-400i` needs a big-decimal imaginary part; at machine
+   precision `0` is the correctly rounded double);
    `\sqrt{i\cdot10^{-600}}` `.N()` is `0`; `e^{i\,10^{-800}}` `.N()`
-   drops the imaginary part.
+   drops the imaginary part. Also `\frac{1}{10^{308}+10^{308}i}` under
+   `evaluate()` is `1/2e+308` with no imaginary part: the exact inverse is
+   right, but the cached double of the imaginary part `-1/2e308` reads as
+   `0`.
 3. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is
    absent stays unevaluated.** `Map(f, Join(Missing, [3]))` should be
    `Missing`, as `Map(f, Missing)` is. The source correctly declines to
@@ -451,41 +463,69 @@ captured by the index); strict mode compiles it.
 
 Found by the review of the fixes of 2026-09-24, not fixed in that round (the
 bigint root extraction, the `e^{1 + 0.5iπ}` dust and the mutually recursive
-diagnostic landed 2026-09-25): (1) `e^{0.25iπ}` is the exact `√2/2 + √2/2·i` in
-degree mode and a float in radian and turn mode: `radiansToAngle` gives the big
-decimal `45.000…`, which the degree-mode recognizer accepts as the special angle
-45°, while a float is never special in radians. (2) The dust limit is capped at
+diagnostic landed 2026-09-25; a float multiple of π that is a special angle is exact in
+every angular unit since 2026-09-27, user decision — what that left:
+`e^{1+0.25iπ}` stays a float in every unit because the canonical exponent is
+already a float complex literal with no structure left to read, which
+`trig-structural-fixes.test.ts` pins for `e^{1+0.5iπ}`): (1) The dust limit is capped at
 `|x| ≥ 1`, so `sin(10^6π).N()` is `−3.8e-19` while `evaluate()` is `0`, and
 `tan(10^6π + π/2).N()` is `2.6e18` while `evaluate()` is `~oo` (the cap exists
 so that `sin(10^22)` is not chopped; the two routes disagree for multiples of π
 above `10^2`). Note that since 2026-09-25 a LITERAL `10^6π` argument is reduced
 exactly (`\sin(10^{6}\pi).N()` is `0`); the cap still applies to a float
-argument near a multiple of π. (3) A float near a special angle gives the sine
+argument near a multiple of π. (2) A float near a special angle gives the sine
 of the DECIMAL literal on the scalar route (`Sin(3.141592653589793)` is
 `2.38e-16`, 21 digits) and the sine of the DOUBLE inside a machine list
 (`1.22e-16`, `Math.sin`), a factor of 2 at a zero crossing; both are exact
 readings of their literal.
 
-### Residues of the exact-boxing rule (OPEN, decisions — found 2026-09-24)
+### Residues of the exactness-by-route rule (OPEN, decisions — 2026-09-27)
 
-(1) Small integer-valued big decimals are still exact on two routes that predate
-the rule: `ce.parse('1.0')` is the exact `One` (the shared `isOne`/ `isZero`
-constants in `createNumberExpression`) while `ce.parse('2.0')` is a float, and
-`ce.number(ce.bignum('1500'))` is exact (`canonicalNumber` turns a big decimal
-at most `10^6` into an exact number) while `ce.parse('1500.0')` is a float.
-Cause (found 2026-09-25): both are shortcuts that test the value and ignore
-exactness. `createNumberExpression` (`engine-expression-entrypoints.ts`)
-returns the shared exact constants `Zero`/`One`/`NegativeOne` for any numeric
-value that `isZero`/`isOne`/`isNegativeOne`, so the inexact big decimal `1.0`
-becomes the exact `1` (there is no such shortcut for `2`); the `BigDecimal`
-branch of `canonicalNumber` (`boxed-number.ts`) turns an integer-valued big
-decimal of at most `SMALL_INTEGER` into a plain JavaScript integer, which is
-exact. The proposed fix is to also test `isExact` in both shortcuts. Decide
-whether no big decimal is ever exact (then `Sqrt(4).N()` at bignum precision
-becomes inexact; blast radius unmeasured) or accept the difference.
-(2) A float past the safe integers becomes exact after a LaTeX round trip:
-`ce.box(1e16)` serializes to `10\,000\,000\,000\,000\,000`, which parses back as
-an exact integer; a fix needs a LaTeX mark for an inexact integer-valued number.
+Since 2026-09-27 (user decision) exactness is decided by the route: a literal
+with a fraction part (`1.0`, `2.0`, `{num: "1.0"}`) is a float on every route,
+and `ce.number(bigDecimal)` is exact for an integer-valued big decimal at any
+magnitude (`doc/12-guide-numerical-evaluations.md`, "Exact and Inexact
+Numbers: the Spelling Decides"). What that left:
+
+1. **A float `0` or `1` is still an identity in `Power` and `Add`, and a float
+   coefficient is folded to an exact one in a sum.** `x^{1.0}` is `x`,
+   `1.0^x` is `1`, `0.0 + x` is `x`, `0.0x` evaluates to the exact `0`,
+   `2.0x + x` evaluates to the exact `3x`, and exact `0` divided by a float
+   is exact `0`. `Multiply` no longer drops a float `±1` (`1.0x` stays
+   `1.0·x`); the other operators need the same decision.
+2. **An exponent literal with no fraction part (`1e3`) is exact**, as
+   Mathematica's `1*^3` is; `1.5e3` is a float. It cannot become a float
+   without first changing the MathJSON serialization of a large exact integer,
+   which is `{num: "1e+30"}` today, and `numbers.test.ts` pins
+   `parse('1e100000').isInteger`.
+3. **A float quotient does not survive a LaTeX round trip.** `\frac{1.0}{3}`
+   evaluates to a float whose LaTeX is `0.\overline{3}`, which re-parses as
+   the exact `1/3` (true of any float with repeating digits, and of a float
+   past the safe integers: `ce.box(1e16)` serializes to
+   `10\,000\,000\,000\,000\,000`, an exact integer on re-parse). A fix needs
+   a LaTeX mark for an inexact number.
+4. `\gcd(4.0, 6)` is the exact `2` (`realGcd` returns a JavaScript number,
+   boxed as exact). At machine precision `Factorial2(41)` is a lossy double
+   (exact at the default precision since 2026-09-27).
+5. `.N()` of an exact small integer stays exact (`\sqrt{4}.N()` at precision
+   30 is the exact `2`, `(\sqrt{2})^2.N()` too): `BoxedNumber.N()` returns a
+   small exact integer unchanged, on purpose. Under the exactness contract
+   `.N()` produces a float; changing it has a large effect and is a decision.
+6. **At `precision: 'machine'` the rule does not apply**: `ce.parse('2.0')`
+   reports `isExact` true there, because `MachineNumericValue.isExact` is
+   `Number.isSafeInteger(value)` and a machine engine holds every number as a
+   double. A machine engine needs an exactness flag on its numbers, or the
+   literal route must keep the float marker some other way.
+7. **A float `1.0` prints as `1`**, so `Power(x, 1.0)` prints `x` and its
+   MathJSON `["Power", "x", 1]` boxes again as the exact `1`: the float does
+   not survive a round trip (the same LaTeX mark as item 3 would fix both).
+8. `x^{0.5}` still becomes `\sqrt{x}` (the `b.isSame(0.5)` check has no
+   exactness condition); Mathematica keeps `x^0.5`.
+9. `e^{1152921504606846977.5 i\pi}` (with `i` BEFORE `\pi`) evaluates to `1`
+   at precision 50: the parser folds `c·i` into a machine complex literal and
+   the parity of the half-turn count is lost before `pow()` sees it; the
+   `\pi i` spelling is right since 2026-09-27. `.N()` of that angle is also
+   wrong at precision 50 because it computes the angle as a double.
 
 ### Residues of the fixes for Tycho asks 306–315 (OPEN — found 2026-09-24)
 
@@ -503,65 +543,79 @@ value): `x4[1,2]` (the left side is already the product `x·4`), `2^3[1,2]` and
 Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
 `Tuple(4, Interval(…))`, which is probably not what an author means.
 
-### `Map` with a bare symbol callback copies the source element type (OPEN, decision — found 2026-09-25 while fixing Tycho item 325)
+### Compiled callbacks: an inline lambda ignores its parameter annotation, and a folded `Map` over per-element errors (OPEN — found 2026-09-27)
 
-`Map(\sin, [-1, 2])` is typed `vector<integer^2>`, and `Map(W, G)` with
-`W = x \mapsto \sin x` and `G = [-1, 0, 1]` is typed `vector<integer^3>`, while
-the values are reals. A bare symbol as the callback is deliberately left
-unresolved on the parse route, so its type reads `unknown`, and the `Map` type
-handler then copies the source type, element type included. Typing the result as
-the same kind and dimensions with `unknown` elements (`list<unknown^3>`) was
-tried and reverted: it breaks four pins that expect the copied type
-(`pipe-type-read-purity.test.ts`, the placeholder inside a nested `Map` stage;
-`map-over-tuple-result.test.ts`, "a list source is unchanged"; two in
-`compile-map-reduction-fusion.test.ts`, which then emitted `.map(` instead of
-the fused form). The decision is which the pins should lock in: the copied
-element type (wrong for a non-identity callback) or an `unknown` element type
-(which loses the fusion). Test file for the values:
-`tycho-325-integrate-list-limit-broadcast.test.ts`.
+`Map(k ↦ h(k), [1, 2.5])` with `h` declared `(x: integer) -> …` compiles to
+JavaScript and runs to `[2, 5]`, while the interpreter answers an
+`incompatible-type` error for `2.5`: the compiled callback does not check the
+parameter annotation. The bare-symbol form `Map(h, …)` correctly refuses to
+compile. Related, recorded convention rather than a defect: under `.N()` a
+`Map` whose callback errors per element answers `NaN` cells (the lowered
+broadcast in `library/map-lowering.ts` turns a bad element into the
+collection's absence marker, pinned by `test/epsil/programs.test.ts` "errors
+are values: a bad element becomes NaN" and two more), while `evaluate()`
+keeps the `Error` elements. Since 2026-09-27 the constant fold declines a
+collection with a `NaN` element, because it cannot tell an error's `NaN`
+from a computed one, so `compile(Map(w, [1, 2, 3]))` with an unemittable `w`
+refuses as before instead of compiling `[NaN, NaN, NaN]`.
 
-### A lazy comprehension is rejected at a `list<real>` parameter that the compiled route accepts (OPEN, decision — found 2026-09-25 while fixing Tycho item 323)
+### `Map` with a bare symbol callback: what the 2026-09-27 decision left (OPEN, low)
 
-With `u` declared `(list<real>) -> unknown` and assigned an up-sampling
-comprehension over `l`, and `s` declared the same way, `s(u(L))` with
-`L: list<real>` evaluates to
-`Error(incompatible-type, "list<real>", "indexed_collection<integer | nan>")`:
-`u(L)` is a lazy `Comprehension` whose element type carries the `nan` arm of an
-element read `l[i]`, and the `list<real>` parameter of `s` rejects it. The
-compiled JavaScript code for the same expression returns values, so the two
-routes disagree. Option A keeps the rejection (the `nan` arm is in the type, so
-it is correct) and the mismatch. Option B accepts a comprehension at a `list<…>`
-parameter when its element type without `nan` fits, which makes the interpreter
-agree with the compiled code and weakens the `list<real>` contract. Until
-decided, Tycho's `(list<real>)` declarations error in the interpreter and work
-compiled. Test file with the compiled reference values:
-`tycho-323-call-site-specialization.test.ts`.
+Since 2026-09-27 (user decision) a bare-symbol callback with a known signature
+types the elements of `Map` from that signature's result type, and the source
+type is copied only when the callback is unknown. Two residues: (1) the zip
+form `Map(Add, xs, ys)` is typed `list<value^2>` (it was `list<unknown^2>`)
+because `Add`'s declared result is `value`; no test covers it. (2) Only the
+declared signature is used; running the operator's own type handler on the
+source element type would give narrower types (`Sin` over integers gives
+`real`), and an assigned lambda `x ↦ x + 10` over integers now types
+`number` elements where the copied type said `integer`.
 
-### A list-valued integrand is not distributed over the integral (OPEN, decision — found 2026-09-25 by the review of the Tycho item 325 fix)
+### `Integrate` over a tuple integrand stays whole while `Sum` over a tuple is element-wise (OPEN, decision — found 2026-09-27)
 
-`Integrate` with a list BOUND evaluates per element since 2026-09-25, on one
-limit or several. A list-valued INTEGRAND does not: the LaTeX
-`\int_0^1\int_0^{G} xy\,dx\,dy` with `G = [1,2,3]` parses to an outer
-single-limit `Integrate` whose integrand is an inner `Integrate` with the list
-bound, so the outer integral is typed `number` and stays unevaluated under both
-`evaluate()` and `.N()`. The symbolic route shows the same gap from the other
-side: `Integrate(xy, Limits(x, 0, [1,2]), Limits(y, 0, [1,2,3]))` evaluates the
-`y` limit over its list and leaves `\int_0^{[1,2]} [x/2, 2x, 9x/2]\,dx`, an
-outer integral over a list-valued integrand, while `.N()` refuses the mismatched
-lengths and stays whole. The decision is whether a list-valued integrand
-distributes (one integral per element, matching the bound rule) or stays
-unevaluated with a documented message on both routes. Test file for the bound
-rule: `tycho-325-integrate-list-limit-broadcast.test.ts`.
+A list-valued integrand distributes since 2026-09-27 (user decision: one
+integral per element, matching the list-bound rule). A TUPLE integrand does
+not: `\int_0^1 (x, 2x)\,dx` stays whole and unevaluated under both
+`evaluate()` and `.N()` (it now parses to a `Tuple` integrand; it parsed to a
+two-statement `Block` and gave `1/2` under `evaluate()` and `1` under `.N()`),
+while `\sum_{n=1}^3 (n, 2n)` is `(6, 12)`. Either `Integrate` treats a
+tuple as a vector-valued integrand, one integral per coordinate (`(1/2, 1)`),
+as `Sum` does, or the difference is documented. Also left by the change: a
+length mismatch between a list bound and a list integrand is the
+`incompatible-dimensions` error under `evaluate()` but leaves the integral
+unevaluated under `.N()`, because `tycho-325-integrate-list-limit-broadcast.test.ts`
+pins that `.N()` leaves mismatched list bounds unevaluated; the two modes
+should agree.
 
 ### Residues of the absent-value round (OPEN, small — found 2026-09-25)
 
 The round of that date made arithmetic with an absent operand `NaN`, an
 out-of-range read `NaN`, `Trace(Missing)` `NaN`, and put an absent cell last in
-`Sort`. What it left: (1) The interpreter fallback of a compiled function
-(`interpretedRunValue`, `compilation/base-compiler.ts`) turns `Missing` into
-`NaN`, while compiled code spells an absent cell `undefined` (`docs/ERROR-MODEL.md`
-§3): compiled `(1, x) - Missing` falls back and gives `NaN`. Changing it reaches
-every fallback case; a decision. (2) The descriptor typing route
+`Sort`. What it left: (1) Since 2026-09-27 (user decision) the interpreter
+fallback of a compiled function (`buildInterpreterFallback`,
+`compilation/base-compiler.ts`) spells an absent result or cell by the type of
+its position, `NaN` for a number and `undefined` for a point, list, tuple,
+colour, boolean or string, as compiled JavaScript does, and the interval-js
+fallback spells it `{kind: 'empty'}`. What that left, decisions: (a) the
+COMPILED route spells an absent point three ways for the same static type
+`missing | tuple<…>`: a restricted point, `At(P, 5)` and `Distance` to a list
+give `undefined`; point + absent point gives `[NaN, NaN]`
+(`point-list-length-mismatch-compiled.test.ts`); scalar × absent point gives
+`NaN` (`compile-restricted-point.test.ts`); the fallback follows the type and
+gives `undefined`, so the two arithmetic cases still differ by route. (b) A
+bare `Undefined` (type `unknown`) falls back to `NaN` while compiled code
+gives `undefined`. (c) The Python fallback gives `undefined` for an absent
+object result while a written `Missing` compiles to `math.nan` on that target.
+(d) On interval-js a present number is `{kind: 'interval', value: {lo, hi}}`
+compiled and `{lo, hi}` from the fallback, and a written `Missing` or an
+out-of-range `At` compiles to `{lo: NaN, hi: NaN}` while the fallback gives
+`{kind: 'empty'}`. Also found 2026-09-27, interpreter defects against
+`docs/ERROR-MODEL.md` §3: `Less(First([Missing, 1]), 0)` is `False` but `If`
+over it is an "absent condition" error, and `If(Less(Missing, t), …)` is that
+error where §3 says a branch on an undecided comparison takes no arm; compiled
+code answers `NaN` in both. `python-target.ts` calls `conditionDecidability`
+without a target at two sites (lines near 2409 and 2564); the absent-relation
+rule is handled inside `conditionNode` instead. (2) The descriptor typing route
 (`derive-application-type.ts`) cannot see that an operand is a negated absence,
 so a type derived through it (a `Map` body) for `Add(Negate(Missing), (1, 2))`
 is still `number | tuple<…>`; the expression route types it
@@ -651,19 +705,6 @@ decides it). The intervals for Γ, ζ, arcosh and artanh are computed with
 doubles, so an argument within about `10⁻¹⁵` relative of a pole is refused at
 every precision (`Γ(−3 + 10⁻³⁰)` against `0` stays undecided at 50 digits):
 never a wrong order, a lost answer.
-
-### JavaScript entry check: an O(n) walk per call per collection input (OPEN, decision — 2026-09-24, re-measured 2026-09-24)
-
-The run-time entry check that makes a `{re, im}` entry under a real-lane
-collection input throw walks every entry on every call. Re-measured with
-alternated runs (median of 12): a 100×100 determinant 431 µs with the check, 435
-µs without; a 10×10 determinant 0.71 / 0.65 µs; a 10,000-element `Dot` 9.3 / 6.6
-µs; a 3-element `Dot` 0.04 / 0.03 µs. (An earlier reading of 6 → 21 µs for the
-`Dot` was a warm-up artefact.) The cost is visible only on a long O(n) kernel,
-about 3 µs per 10,000 entries. Options: (a) keep the walk (sound); (b) a
-`WeakSet` of arrays already checked (misses a complex value a host writes into
-an array it reuses); (c) the cache only for frozen arrays. Recommendation: (a).
-`entryChecks: false` turns the check off.
 
 ### The imaginary part of an inexact number is a machine double (OPEN, scheduled — 2026-09-24)
 

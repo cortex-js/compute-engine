@@ -4659,6 +4659,16 @@ function hasIntervalBounds(
  * signal the runtime proxy uses.
  */
 function toIntervalValue(value: unknown): IntervalValue {
+  // An ABSENT value is `empty`, the value the compiled code of this target
+  // gives where there is no value at run time: a restriction whose condition
+  // fails (`_IA.restrict`) and a real function outside its domain both answer
+  // `empty`, for a number, a point and a list alike. The interpreter spells an
+  // absent value as `NaN` in a numeric position and as `Missing` elsewhere, and
+  // the generic fallback gives `NaN` for both on this target, since it has no
+  // object null. Without this the fallback answered `{ lo: NaN, hi: NaN }`, so
+  // a host could tell from the value which route ran.
+  if (value === undefined || (typeof value === 'number' && Number.isNaN(value)))
+    return { kind: 'empty' };
   if (typeof value === 'number') return { lo: value, hi: value };
   if (Array.isArray(value)) return value.map(toIntervalValue);
   return { kind: 'entire' };

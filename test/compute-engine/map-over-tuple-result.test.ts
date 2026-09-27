@@ -31,14 +31,17 @@ describe('Map over a tuple yields an ordered list', () => {
     ]);
     expect(inline.evaluate().type.toString()).toBe('list<integer>');
 
-    // Assigned-symbol lambda: the result element type is NOT derivable at the
-    // type-handler, so the element type widens to the honest `unknown` — but
-    // the shape is still an ordered `list`, never the echoed tuple type.
+    // Assigned-symbol lambda: a bare-symbol callback with a known signature
+    // types the elements from that signature's result type. `ce.assign`
+    // infers `(unknown) -> number` for `x ↦ x + 10`, so the elements are
+    // `number`, and the shape is an ordered `list`, never the tuple type.
+    // The source type is copied only when the callback is unknown (user
+    // decision 2026-09-27).
     const ce2 = new ComputeEngine();
     ce2.assign('g', ce2.parse('x \\mapsto x + 10'));
     expect(
       ce2.parse('\\mathrm{Map}(g, (1, 2, 3))').evaluate().type.toString()
-    ).toBe('list');
+    ).toBe('list<number>');
   });
 
   test('value is an ordered list, whichever route builds it', () => {
@@ -78,10 +81,12 @@ describe('Map over a tuple yields an ordered list', () => {
     const ce = new ComputeEngine();
     ce.assign('p', ce.parse('x \\mapsto x > 0'));
     const r = ce.parse('\\mathrm{Map}(p, (1, 2, 3))').evaluate();
-    // The value is booleans; the type must be a `list`, never the source's
+    // The value is booleans. The callback `p` has the inferred signature
+    // `(unknown) -> boolean`, so the elements are typed from its result
+    // type: `list<boolean>`, never the source's
     // `tuple<integer, integer, integer>`.
     expect(r.toString()).toBe('["True","True","True"]');
-    expect(r.type.toString()).toBe('list');
+    expect(r.type.toString()).toBe('list<boolean>');
   });
 
   test('arithmetic on a tuple mapped through a symbol compiles on the JavaScript target', () => {
@@ -112,19 +117,25 @@ describe('Map over a tuple yields an ordered list', () => {
       ce1.box(['Map', ['Function', ['Add', 'x', 10], 'x'], 't']).type.toString()
     ).toBe('list<number>');
 
-    // Assigned-symbol callback — the echo path (result element type
-    // underivable), which must not echo the bare `tuple` type verbatim.
+    // Assigned-symbol callback: its inferred signature `(unknown) -> number`
+    // gives the element type, and the bare `tuple` source is demoted to a
+    // `list` as well.
     const ce2 = new ComputeEngine();
     ce2.declare('t', 'tuple');
     ce2.assign('g', ce2.parse('x \\mapsto x + 10'));
-    expect(ce2.box(['Map', 'g', 't']).type.toString()).toBe('list');
+    expect(ce2.box(['Map', 'g', 't']).type.toString()).toBe('list<number>');
   });
 
   test('a list source is unchanged — still a vector/list, both lambda forms', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto x + 10'));
+    // A list source keeps its kind and dimensions (`vector` of 3). The
+    // elements are typed from the callback's inferred signature
+    // `(unknown) -> number`, so `vector<3>` (`vector<number^3>`), not the
+    // source's `integer`: the source type is copied only when the callback
+    // is unknown (user decision 2026-09-27).
     expect(
       ce.parse('\\mathrm{Map}(g, \\lbrack 1, 2, 3 \\rbrack)').evaluate().type.toString()
-    ).toBe('vector<integer^3>');
+    ).toBe('vector<3>');
   });
 });

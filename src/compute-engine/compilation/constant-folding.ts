@@ -26,6 +26,7 @@ import {
 } from '../numerics/numeric.js';
 import { gamma } from '../numerics/special-functions.js';
 import { Complex } from 'complex-esm';
+import { complexDivide } from '../numerics/numeric-complex.js';
 
 /**
  * The shader spelling of a NON-FINITE value (`NaN`, `±∞`).
@@ -222,7 +223,7 @@ export function principalComplexPow(
     const root = new Complex(base, 0).sqrt();
     let acc = new Complex(1, 0);
     for (let i = 0; i < Math.abs(twice); i++) acc = acc.mul(root);
-    if (twice < 0) acc = new Complex(1, 0).div(acc);
+    if (twice < 0) acc = complexDivide(new Complex(1, 0), acc);
     if (Number.isFinite(acc.re) && Number.isFinite(acc.im))
       return { re: acc.re, im: acc.im };
   }

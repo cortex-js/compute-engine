@@ -152,6 +152,7 @@ import {
   withRandomSeedFrame,
   withDrawRollback,
   updateDef,
+  boxBignumResult,
 } from '../boxed-expression/utils.js';
 import {
   checkTypeConstructorNamespace,
@@ -8626,7 +8627,7 @@ function roundToSignificantDigits(value: Expression, p: number): Expression {
   // Real: round the bignum to `p` significant digits (preserving large `p`).
   // `ce.bignum(re)` covers the machine-float case where there is no `bignumRe`.
   const bd = value.bignumRe ?? ce.bignum(re);
-  return ce.number(bd.toPrecision(p));
+  return boxBignumResult(ce, bd.toPrecision(p));
 }
 
 /**

@@ -541,6 +541,7 @@ import {
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { rangeCount } from '../numerics/range-count.js';
+import { scaledComplexDivide } from '../numerics/numeric-complex.js';
 import {
   adaptiveQuadrature,
   initialPanelsForDimensions,
@@ -6638,8 +6639,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // overflow to `∞` (or become `NaN`) where the quotient is an ordinary
     // number: `(1e308 + 1e308·i) / (1 + i)` is `1e308`. The quotient is read
     // from `_SYS.cdivedge` in those cases, which scales the operands first.
-    // `x - x !== 0` is true exactly when `x` is `±∞` or `NaN`.
-    // 2.2250738585072014e-308 is the smallest normal double.
+    // `x - x !== 0` is true exactly when `x` is `±∞` or `NaN`. A numerator
+    // part that is subnormal but not zero has lost digits, and a product of
+    // two non-zero parts that underflowed (`_SYS.cprodok` is false) can leave
+    // a numerator part reading as an exact `0`; both take the scaled route
+    // too. This is the test `complexQuotient()` in
+    // `numerics/numeric-complex.ts` makes, and the two must stay the same so
+    // that the interpreter and the compiled code take the same branch for
+    // the same operands. 2.2250738585072014e-308 is the smallest normal
+    // double.
     if (ac && bc) {
       const d = BaseCompiler.tempVar(target);
       const nr = BaseCompiler.tempVar(target);
@@ -6649,7 +6657,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im; ` +
           `const ${nr} = ${ta}.re * ${tb}.re + ${ta}.im * ${tb}.im; ` +
           `const ${ni} = ${ta}.im * ${tb}.re - ${ta}.re * ${tb}.im;`,
-        `(${d} < 2.2250738585072014e-308 || ${d} === Infinity || ${nr} - ${nr} !== 0 || ${ni} - ${ni} !== 0 ? _SYS.cdivedge(${ta}.re, ${ta}.im, ${tb}.re, ${tb}.im) : { re: ${nr} / ${d}, im: ${ni} / ${d} })`
+        `(${d} < 2.2250738585072014e-308 || ${d} === Infinity || ${nr} - ${nr} !== 0 || ${ni} - ${ni} !== 0 || (${nr} !== 0 && Math.abs(${nr}) < 2.2250738585072014e-308) || (${ni} !== 0 && Math.abs(${ni}) < 2.2250738585072014e-308) || !_SYS.cprodok(${ta}.re, ${tb}.re) || !_SYS.cprodok(${ta}.im, ${tb}.im) || !_SYS.cprodok(${ta}.im, ${tb}.re) || !_SYS.cprodok(${ta}.re, ${tb}.im) ? _SYS.cdivedge(${ta}.re, ${ta}.im, ${tb}.re, ${tb}.im) : { re: ${nr} / ${d}, im: ${ni} / ${d} })`
       );
     }
     if (ac && !bc) {
@@ -6666,7 +6674,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       target,
       `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im; ` +
         `const ${nr} = ${ta} * ${tb}.re; const ${ni} = -${ta} * ${tb}.im;`,
-      `(${d} < 2.2250738585072014e-308 || ${d} === Infinity || ${nr} - ${nr} !== 0 || ${ni} - ${ni} !== 0 ? _SYS.cdivedge(${ta}, 0, ${tb}.re, ${tb}.im) : { re: ${nr} / ${d}, im: ${ni} / ${d} })`
+      `(${d} < 2.2250738585072014e-308 || ${d} === Infinity || ${nr} - ${nr} !== 0 || ${ni} - ${ni} !== 0 || (${nr} !== 0 && Math.abs(${nr}) < 2.2250738585072014e-308) || (${ni} !== 0 && Math.abs(${ni}) < 2.2250738585072014e-308) || !_SYS.cprodok(${ta}, ${tb}.re) || !_SYS.cprodok(${ta}, ${tb}.im) ? _SYS.cdivedge(${ta}, 0, ${tb}.re, ${tb}.im) : { re: ${nr} / ${d}, im: ${ni} / ${d} })`
     );
   },
   Negate: ([x], compile, target) => {
@@ -9357,92 +9365,12 @@ const cxMul = (a: ComplexResult, b: ComplexResult): ComplexResult => ({
   re: a.re * b.re - a.im * b.im,
   im: a.re * b.im + a.im * b.re,
 });
-/**
- * `x · 2^k` for an integer `k` of any size. The factor is applied in steps,
- * because `2^k` is a double only for `-1074 <= k <= 1023`. Each step is
- * exact while the result stays in the normal range of a double.
- */
-function scaleByPowerOfTwo(x: number, k: number): number {
-  while (k > 1023) {
-    x *= 2 ** 1023;
-    k -= 1023;
-  }
-  while (k < -1022) {
-    x *= 2 ** -1022;
-    k += 1022;
-  }
-  return x * 2 ** k;
-}
-
-/**
- * The binary exponent of the larger magnitude of `x` and `y`, approximately:
- * `max(|x|, |y|)` divided by `2^k` is near 1. It is `0` when both are zero,
- * or when one is not finite, so that no scaling occurs.
- */
-function pairExponent(x: number, y: number): number {
-  const m = Math.max(Math.abs(x), Math.abs(y));
-  if (m === 0 || !Number.isFinite(m)) return 0;
-  return Math.floor(Math.log2(m));
-}
-
-/**
- * The quotient `(ar + ai·i) / (br + bi·i)` for a divisor that is not zero.
- *
- * The dividend is divided by `2^ka` and the divisor by `2^kb`, where `ka`
- * and `kb` are the binary exponents of their larger parts, so that the parts
- * of both are near 1 or smaller. Smith's formula then divides the scaled
- * values: it divides by the larger part of the divisor first, so no square of
- * a part is formed, and no intermediate value can overflow. The quotient is
- * multiplied by `2^(ka − kb)` at the end, so it overflows only when the true
- * quotient is outside the range of a double.
- *
- * A multiplication by a power of two is exact in the normal range, so when
- * Smith's formula on the unscaled operands keeps all its values in the
- * normal range, the result is the same, bit for bit. A part of the quotient that is
- * exactly zero stays zero, also when the other part overflows:
- * `(1e308 + 1e308·i) / (1e-200 + 1e-200·i)` is `Infinity + 0·i`. Examples of
- * representable quotients whose intermediate values leave the range of a
- * double without this scaling: `1 / (1e308 + 1e308·i)` is
- * `5e-309 − 5e-309·i`, and `(1e308 + 1e308·i) / (1 + i)` is `1e308`.
- *
- * A dividend with an infinite part is not scaled; the result then has the
- * infinite and NaN parts that Smith's formula gives.
- */
-function smithDivide(
-  ar: number,
-  ai: number,
-  br: number,
-  bi: number
-): ComplexResult {
-  const ka = pairExponent(ar, ai);
-  const kb = pairExponent(br, bi);
-  const xr = scaleByPowerOfTwo(ar, -ka);
-  const xi = scaleByPowerOfTwo(ai, -ka);
-  const yr = scaleByPowerOfTwo(br, -kb);
-  const yi = scaleByPowerOfTwo(bi, -kb);
-  let re: number;
-  let im: number;
-  if (Math.abs(yr) >= Math.abs(yi)) {
-    const r = yi / yr;
-    const den = yr + yi * r;
-    re = (xr + xi * r) / den;
-    im = (xi - xr * r) / den;
-  } else {
-    const r = yr / yi;
-    const den = yr * r + yi;
-    re = (xr * r + xi) / den;
-    im = (xi * r - xr) / den;
-  }
-  return {
-    re: scaleByPowerOfTwo(re, ka - kb),
-    im: scaleByPowerOfTwo(im, ka - kb),
-  };
-}
-/** `a / b`, with Smith's formula (`smithDivide`). The linear-algebra callers
- * divide only by a pivot, which is not zero; a zero divisor gives NaN
- * parts. */
+/** `a / b`, with Smith's formula (`scaledComplexDivide`). The linear-algebra
+ * callers divide only by a pivot, which is not zero; a zero divisor takes the
+ * componentwise branch of `scaledComplexDivide` and gives infinite parts for
+ * a non-zero dividend (NaN parts for a zero dividend). */
 function cxDiv(a: ComplexResult, b: ComplexResult): ComplexResult {
-  return smithDivide(a.re, a.im, b.re, b.im);
+  return scaledComplexDivide(a.re, a.im, b.re, b.im);
 }
 /** `|z|`, used to choose a pivot and to test it for zero. */
 const cxAbs = (z: ComplexResult): number => Math.hypot(z.re, z.im);
@@ -10539,11 +10467,19 @@ const SYS_HELPERS = {
   // `~oo` when the dividend is not zero, and `NaN` for `0 / 0`. For a divisor
   // with an infinite part it answers `0` when the dividend is finite, and
   // `NaN` for `∞ / ∞`. Any other divisor is finite and not zero, and the
-  // quotient is computed by `smithDivide`, which scales both operands by
+  // quotient is computed by `scaledComplexDivide`, which scales both operands by
   // powers of two first, so no intermediate value overflows
   // (`1 / (1e-200 + 1e-200·i)` is `5e199 − 5e199·i`,
   // `1 / (1e308 + 1e308·i)` is `5e-309 − 5e-309·i`, and
   // `(1e308 + 1e308·i) / (1 + i)` is `1e308`).
+  // True when `x·y` is an exact zero (a factor is zero) or a normal double:
+  // the emitted complex `Divide` tests its four numerator products with it,
+  // as `complexQuotient()` in `numerics/numeric-complex.ts` does.
+  cprodok: (x: number, y: number): boolean => {
+    if (x === 0 || y === 0) return true;
+    const p = Math.abs(x * y);
+    return p >= 2.2250738585072014e-308 && p < Infinity;
+  },
   cdivedge: (ar: number, ai: number, br: number, bi: number): ComplexResult => {
     if (ar !== ar || ai !== ai || br !== br || bi !== bi)
       return { re: NaN, im: NaN };
@@ -10553,7 +10489,7 @@ const SYS_HELPERS = {
       return Math.abs(ar) === Infinity || Math.abs(ai) === Infinity
         ? { re: NaN, im: NaN }
         : { re: 0, im: 0 };
-    return smithDivide(ar, ai, br, bi);
+    return scaledComplexDivide(ar, ai, br, bi);
   },
   // The exact runtime realness test of a value that may be a plain number or
   // a `{re, im}` object: true when the imaginary part is exactly zero. The

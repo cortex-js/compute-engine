@@ -3,7 +3,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 //
 // Fixes that follow the STRUCTURAL recognition of trigonometric special
 // values: only an exact rational multiple of π (a half-turn) is a special
-// angle, and a float argument is never special. Each value below was checked
+// angle, and a float argument is never special, except a float coefficient
+// of π within one unit in its last place of a special angle (`0.25·π`). Each value below was checked
 // against mpmath at 40 digits.
 //
 
@@ -29,12 +30,18 @@ describe('e^{iθ} for a float multiple of π', () => {
         .evaluate();
       expect(exp.toString()).toBe('i');
 
-      // Not a multiple of a quarter-turn: a float, with no rounding dust
-      // beyond the precision of the result.
+      // A float multiple of π that is a special angle is that exact angle
+      // (user decision, 2026-09-27; this replaces the earlier float value).
       const eighth = ce.parse('e^{0.25i\\pi}').evaluate();
-      expect(eighth.isExact).toBe(false);
-      expect(Math.abs(eighth.re - Math.SQRT1_2)).toBeLessThan(1e-15);
-      expect(Math.abs(eighth.im - Math.SQRT1_2)).toBeLessThan(1e-15);
+      expect(eighth.toString()).toBe('(sqrt(2)/2 + sqrt(2)/2i)');
+      expect(Math.abs(eighth.N().re - Math.SQRT1_2)).toBeLessThan(1e-15);
+      expect(Math.abs(eighth.N().im - Math.SQRT1_2)).toBeLessThan(1e-15);
+      // Not a special angle: a float, with no rounding dust beyond the
+      // precision of the result.
+      const other = ce.parse('e^{0.35i\\pi}').evaluate();
+      expect(other.isExact).toBe(false);
+      expect(Math.abs(other.re - Math.cos(0.35 * Math.PI))).toBeLessThan(1e-15);
+      expect(Math.abs(other.im - Math.sin(0.35 * Math.PI))).toBeLessThan(1e-15);
     });
   }
 

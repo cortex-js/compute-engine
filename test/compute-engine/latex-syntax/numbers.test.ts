@@ -19,8 +19,10 @@ describe('PARSING OF NUMBER', () => {
   test('Basic Parsing', () => {
     expect(parseVal('1')).toEqual(1);
     expect(parseVal('-1')).toEqual(-1);
-    expect(parseVal('1.0')).toEqual(1);
-    expect(parseVal('-1.0')).toEqual(-1);
+    // A literal with a fraction part is a float, even when its value is an
+    // integer: its numeric value is a big decimal, not a JavaScript integer
+    expect(parseVal('1.0')).toEqual('1');
+    expect(parseVal('-1.0')).toEqual('-1');
     expect(parseVal('-12.1234')).toEqual('-12.1234');
     expect(parseVal('-123 456.123 4')).toEqual('-123456.1234');
   });

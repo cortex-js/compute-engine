@@ -11,6 +11,250 @@ const LANCZOS_P = [
   -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
 ];
 
+/**
+ * `x · 2^k` for an integer `k` of any size. The factor is applied in steps,
+ * because `2^k` is a double only for `-1074 <= k <= 1023`. Each step is
+ * exact while the result stays in the normal range of a double.
+ */
+function scaleByPowerOfTwo(x: number, k: number): number {
+  while (k > 1023) {
+    x *= 2 ** 1023;
+    k -= 1023;
+  }
+  while (k < -1022) {
+    x *= 2 ** -1022;
+    k += 1022;
+  }
+  return x * 2 ** k;
+}
+
+/**
+ * The binary exponent of the larger magnitude of `x` and `y`, approximately:
+ * `max(|x|, |y|)` divided by `2^k` is near 1. It is `0` when both are zero,
+ * or when one is not finite, so that no scaling occurs.
+ */
+function pairExponent(x: number, y: number): number {
+  const m = Math.max(Math.abs(x), Math.abs(y));
+  if (m === 0 || !Number.isFinite(m)) return 0;
+  return Math.floor(Math.log2(m));
+}
+
+/**
+ * The quotient `(ar + ai·i) / (br + bi·i)` for a divisor that is not zero,
+ * computed so that no intermediate value overflows or underflows when the
+ * quotient itself is in the range of a double.
+ *
+ * The usual formulas fail at the ends of the double range. The textbook
+ * formula `(a·conj(b)) / |b|²` squares the parts of the divisor, so
+ * `1 / (1e308 + 1e308·i)` gives `0` (the square overflows to `∞`) and
+ * `1 / (1e-200 + 1e-200·i)` gives `∞` (the square underflows to `0`).
+ * Smith's formula divides by the larger part of the divisor first and forms
+ * no square, but it still forms `d·(d/c) + c` and `a + b·(d/c)` without
+ * scaling, which overflow for `(1e308 + 1e308·i) / (1 + i)`.
+ *
+ * The algorithm (Smith's formula with power-of-two scaling, in the manner of
+ * Baudin and Smith, "A Robust Complex Division in Scilab", 2012): the
+ * dividend is divided by `2^ka` and the divisor by `2^kb`, where `ka` and
+ * `kb` are the binary exponents of their larger parts, so that the parts of
+ * both are near 1 or smaller. Smith's formula then divides the scaled values,
+ * and the quotient is multiplied by `2^(ka − kb)` at the end, so it
+ * overflows only when the true quotient is outside the range of a double.
+ *
+ * A multiplication by a power of two is exact in the normal range, so when
+ * Smith's formula on the unscaled operands keeps all its values in the
+ * normal range, the result is the same, bit for bit, as the unscaled Smith
+ * formula (the one `Complex.div()` of `complex-esm` uses). A part of the
+ * quotient that is exactly zero stays zero, also when the other part
+ * overflows.
+ *
+ * A dividend with an infinite part is not scaled; the result then has the
+ * infinite and NaN parts that Smith's formula gives.
+ *
+ * Known limit, shared with the unscaled `Complex.div()`: the two parts of an
+ * operand are scaled by ONE exponent (the larger one), so a part that is more
+ * than about 1000 binades smaller than its partner underflows in the scaling
+ * and its contribution to the quotient is lost. `(2^1000·i) / (2^100 + 2^-1000·i)`
+ * has the representable real part `2^-200` and answers `0` for it, as
+ * `Complex.div()` does; recovering it needs exponent-aware products. The callers handle a
+ * zero, infinite or NaN operand themselves, with their own conventions.
+ *
+ * The compiled JavaScript target uses this function too (`_SYS.cdivedge` and
+ * the complex matrix kernels in `compilation/javascript-target.ts`), so that
+ * the interpreter and the compiled code give the same quotient.
+ */
+export function scaledComplexDivide(
+  ar: number,
+  ai: number,
+  br: number,
+  bi: number
+): { re: number; im: number } {
+  // A divisor with one zero part divides each part of the dividend on its
+  // own: `(ar + ai·i) / br` is `ar/br + (ai/br)·i`, and
+  // `(ar + ai·i) / (bi·i)` is `ai/bi − (ar/bi)·i`. No intermediate value is
+  // formed, so a dividend whose parts differ by more than the double range
+  // keeps both of them: `(2^700 + 2^-700·i) / i` is `2^-700 − 2^700·i`. The
+  // scaling below would divide both parts by `2^700` and lose the small one
+  // to underflow (found by the review of 2026-09-27).
+  if (bi === 0) return { re: ar / br, im: ai / br };
+  if (br === 0) return { re: ai / bi, im: -ar / bi };
+  const ka = pairExponent(ar, ai);
+  const kb = pairExponent(br, bi);
+  const xr = scaleByPowerOfTwo(ar, -ka);
+  const xi = scaleByPowerOfTwo(ai, -ka);
+  const yr = scaleByPowerOfTwo(br, -kb);
+  const yi = scaleByPowerOfTwo(bi, -kb);
+  let re: number;
+  let im: number;
+  if (Math.abs(yr) >= Math.abs(yi)) {
+    const r = yi / yr;
+    const den = yr + yi * r;
+    re = (xr + xi * r) / den;
+    im = (xi - xr * r) / den;
+  } else {
+    const r = yr / yi;
+    const den = yr * r + yi;
+    re = (xr * r + xi) / den;
+    im = (xi * r - xr) / den;
+  }
+  return {
+    re: scaleByPowerOfTwo(re, ka - kb),
+    im: scaleByPowerOfTwo(im, ka - kb),
+  };
+}
+
+/** The smallest positive normal double, `2^-1022`. */
+const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
+
+/**
+ * The quotient `(ar + ai·i) / (br + bi·i)` of FINITE parts, for a divisor
+ * that is not zero, with the textbook formula `(a·conj(b)) / |b|²` when all
+ * its intermediate values are normal doubles, and with
+ * `scaledComplexDivide()` otherwise.
+ *
+ * The textbook formula is kept where it is accurate so that the quotient of
+ * ordinary values does not change, bit for bit, from the formula that the
+ * numeric values used before (it can differ from Smith's formula in the last
+ * bit). The compiled JavaScript `Divide` (`compilation/javascript-target.ts`)
+ * emits the same test, so the interpreter and the compiled code take the same
+ * branch for the same operands: the textbook formula unless `|b|²` is not a
+ * normal double, a numerator part is not finite, or a numerator part is
+ * subnormal (not zero), because a subnormal product has lost digits.
+ */
+export function complexQuotient(
+  ar: number,
+  ai: number,
+  br: number,
+  bi: number
+): { re: number; im: number } {
+  const d = br * br + bi * bi;
+  const nr = ar * br + ai * bi;
+  const ni = ai * br - ar * bi;
+  if (textbookQuotientIsAccurate(ar, ai, br, bi, d, nr, ni))
+    return { re: nr / d, im: ni / d };
+  return scaledComplexDivide(ar, ai, br, bi);
+}
+
+/**
+ * True when the textbook quotient `(nr + ni·i) / d`, with `d = |b|²`,
+ * `nr = Re(a·conj(b))` and `ni = Im(a·conj(b))`, has all its intermediate
+ * values in the normal double range, so that neither the denominator nor a
+ * numerator part has overflowed, underflowed or lost digits to the subnormal
+ * range. When it is true, Smith's unscaled formula is accurate as well (its
+ * intermediate values are bounded by the same operands), so a caller that
+ * must keep its previous Smith result bit for bit can use it in this case.
+ */
+function textbookQuotientIsAccurate(
+  ar: number,
+  ai: number,
+  br: number,
+  bi: number,
+  d: number,
+  nr: number,
+  ni: number
+) {
+  return (
+    d >= MIN_NORMAL_DOUBLE &&
+    d < Infinity &&
+    Number.isFinite(nr) &&
+    Number.isFinite(ni) &&
+    (nr === 0 || Math.abs(nr) >= MIN_NORMAL_DOUBLE) &&
+    (ni === 0 || Math.abs(ni) >= MIN_NORMAL_DOUBLE) &&
+    productIsAccurate(ar, br) &&
+    productIsAccurate(ai, bi) &&
+    productIsAccurate(ai, br) &&
+    productIsAccurate(ar, bi)
+  );
+}
+
+/**
+ * True when the product `x·y` of two finite doubles is either an exact zero
+ * (a factor is zero) or a normal double. A product of two non-zero factors
+ * that underflows to zero or to the subnormal range has lost its digits, and
+ * a numerator part built from such products can read as an exact `0` although
+ * the quotient is representable: `(2^-1000) / (2^-100 + 2^-100·i)` is
+ * `2^-901 − 2^-901·i`, but `2^-1000 · 2^-100` rounds to `0`, so the sum
+ * `nr = ar·br + ai·bi` is `0` and the test on `nr` alone accepted the
+ * textbook formula (found by the review of 2026-09-27).
+ */
+function productIsAccurate(x: number, y: number): boolean {
+  if (x === 0 || y === 0) return true;
+  const p = Math.abs(x * y);
+  return p >= MIN_NORMAL_DOUBLE && p < Infinity;
+}
+
+/**
+ * `a / b` for `complex-esm` values, a drop-in replacement for `a.div(b)`
+ * that does not overflow or underflow when the quotient is in the range of a
+ * double. An ordinary quotient is `a.div(z)` itself, and only an out-of-range
+ * one pays for the scaling (see `scaledComplexDivide()`).
+ *
+ * A zero, infinite or NaN operand, and a real divisor (whose quotient
+ * `a.div()` computes part by part, without an intermediate value), are left
+ * to `a.div(b)`, so their results do not change: `x / 0` is the unsigned
+ * infinity `Complex.INFINITY`, `0 / 0` is `NaN`, `x / ∞` is `0`.
+ */
+export function complexDivide(a: Complex, b: Complex | number): Complex {
+  const z = typeof b === 'number' ? new Complex(b, 0) : b;
+  if (
+    z.im === 0 ||
+    z.isZero() ||
+    a.isZero() ||
+    !Number.isFinite(a.re) ||
+    !Number.isFinite(a.im) ||
+    !Number.isFinite(z.re) ||
+    !Number.isFinite(z.im)
+  )
+    return a.div(z);
+  // The ordinary case keeps `a.div(z)`, Smith's unscaled formula, so that the
+  // call sites that used it before (the complex matrix field, the polynomial
+  // root finder, `Rational`) get the same quotient bit for bit; only an
+  // operand pair whose textbook intermediates leave the normal range takes
+  // the scaled route.
+  const d = z.re * z.re + z.im * z.im;
+  const nr = a.re * z.re + a.im * z.im;
+  const ni = a.im * z.re - a.re * z.im;
+  if (textbookQuotientIsAccurate(a.re, a.im, z.re, z.im, d, nr, ni))
+    return a.div(z);
+  const q = scaledComplexDivide(a.re, a.im, z.re, z.im);
+  return new Complex(q.re, q.im);
+}
+
+/**
+ * `1 / z` for a `complex-esm` value, a drop-in replacement for
+ * `z.inverse()`. `z.inverse()` computes `conj(z) / |z|²`, whose `|z|²`
+ * overflows for `z = 1e308 + 1e308·i` (the result is `0` instead of
+ * `5e-309 − 5e-309·i`) and underflows for `z = 1e-200 + 1e-200·i` (the
+ * result is infinite instead of `5e199 − 5e199·i`). This function uses
+ * `complexQuotient()`. A zero, infinite or NaN value is left to
+ * `z.inverse()`, so its result does not change.
+ */
+export function complexInverse(z: Complex): Complex {
+  if (z.isZero() || !Number.isFinite(z.re) || !Number.isFinite(z.im))
+    return z.inverse();
+  const q = complexQuotient(1, 0, z.re, z.im);
+  return new Complex(q.re, q.im);
+}
+
 const SQRT_2PI = Math.sqrt(2 * Math.PI);
 const HALF_LOG_2PI = 0.5 * Math.log(2 * Math.PI);
 

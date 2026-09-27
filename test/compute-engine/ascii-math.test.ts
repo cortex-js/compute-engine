@@ -79,8 +79,9 @@ describe('NUMBERS', () => {
     ).toMatchInlineSnapshot(`9007199254740997/9007199254741033`);
 
     expect(check('2345/2')).toMatch(`2345/2`);
-    expect(check('469/2.46e+100')).toMatchInlineSnapshot(`469/246e+98`);
-    expect(check('-469/2.46e+100')).toMatchInlineSnapshot(`-469/246e+98`);
+    // `2.46e+100` is a float literal, so the quotient is a float quotient
+    expect(check('469/2.46e+100')).toMatchInlineSnapshot(`469 / 2.46e+100`);
+    expect(check('-469/2.46e+100')).toMatchInlineSnapshot(`-469 / 2.46e+100`);
 
     expect(check('-1.123456789123456789')).toMatchInlineSnapshot(
       `-1.123456789123456789`

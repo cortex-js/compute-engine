@@ -2622,6 +2622,22 @@ export function lazyMapNumericApproximation(
   if (memo !== undefined) return memo;
   if (!isFunction(expr, 'Map')) return undefined;
   const fn = expr.op1;
+  // A bare symbol callback (`Map(Sin, xs)`, `Map(f, xs, ys)`) has no body to
+  // wrap. Build the function literal `(_1, …, _k) ↦ N(f(_1, …, _k))` instead,
+  // with one parameter per source, so that the elements numericize on access
+  // as they do for a function literal callback.
+  if (isSymbol(fn)) {
+    const params = expr.ops.slice(1).map((_, i) => `_${i + 1}`);
+    const wrappedFn = ce.box([
+      'Function',
+      ['N', [fn.symbol, ...params]],
+      ...params,
+    ] as MathJsonExpression);
+    if (!wrappedFn.isValid) return undefined;
+    const rewrapped = ce.function('Map', [wrappedFn, ...expr.ops.slice(1)]);
+    lazyMapNRewraps.set(expr, rewrapped);
+    return rewrapped;
+  }
   if (!isFunction(fn, 'Function') || fn.nops < 1) return undefined;
 
   // Wrap the body INSIDE the canonical `Block` wrapper: `Block` evaluates its

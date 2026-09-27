@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { exactOrder } from '../boxed-expression/compare.js';
+import { boxBignumResult } from '../boxed-expression/utils.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 
 /**
@@ -62,7 +63,7 @@ export function complexParts(
             ce._numericValue({ rational: v.imRational, radical: v.imRadical })
           ),
         ];
-      return [ce.number(v.bignumRe ?? v.re), ce.number(v.im)];
+      return [boxBignumResult(ce, v.bignumRe ?? v.re), ce.number(v.im)];
     }
     if (x.type.matches('real')) return [x, ce.Zero];
     if (!isFunction(x)) return undefined;

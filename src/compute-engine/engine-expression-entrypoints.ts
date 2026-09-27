@@ -371,9 +371,14 @@ export function createNumberExpression(
       if (!Number.isFinite(n))
         return n < 0 ? engine.NegativeInfinity : engine.PositiveInfinity;
     } else if (canonicalValue instanceof NumericValue) {
-      if (canonicalValue.isZero) return engine.Zero;
-      if (canonicalValue.isOne) return engine.One;
-      if (canonicalValue.isNegativeOne) return engine.NegativeOne;
+      // Only an exact value can be one of the shared exact constants. A float
+      // whose value is 0, 1 or -1 (the literal `1.0`, or a numeric result)
+      // stays a float, as the literal `2.0` does.
+      if (canonicalValue.isExact) {
+        if (canonicalValue.isZero) return engine.Zero;
+        if (canonicalValue.isOne) return engine.One;
+        if (canonicalValue.isNegativeOne) return engine.NegativeOne;
+      }
       if (canonicalValue.isNaN) return engine.NaN;
       if (canonicalValue.isNegativeInfinity) return engine.NegativeInfinity;
       if (canonicalValue.isPositiveInfinity) return engine.PositiveInfinity;

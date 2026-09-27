@@ -559,12 +559,15 @@ describe('Derivatives of container-valued bodies', () => {
     ])
       expect(d.evaluate().toString()).not.toContain('Derivative');
 
+    // The argument `0.25` is a float, so `sin(2π·0.25)` is computed from the
+    // float angle `1.5707…` and is the float `1`: the first component is the
+    // float `-2π`.
     expect(
       ce
         .expr(['Apply', ['Derivative', 'g', 1], 0.25])
         .evaluate()
         .toString()
-    ).toEqual('(-2pi, 0, 1)');
+    ).toEqual('(-6.28318530717958647693, 0, 1)');
     expect(
       ce
         .expr(['D', ['g', 't'], 't'])

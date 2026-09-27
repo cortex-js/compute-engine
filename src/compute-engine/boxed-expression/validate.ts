@@ -1972,6 +1972,59 @@ function strippedMatchesParam(
 }
 
 /**
+ * A LAZY collection (a comprehension, a `Map` view, …) at a collection-kind
+ * parameter is admitted when its element type, with the `nan` arm removed,
+ * fits the parameter's element type.
+ *
+ * The `nan` arm of such an element type is a possibility the type system
+ * records, not a value the caller passed: a comprehension whose body reads
+ * `l[i]` is typed `indexed_collection<nan | real>`, because an element read
+ * outside the list is `NaN`. Refusing it at a `list<real>` parameter made
+ * `s(u(L))` an `incompatible-type` error (with `u` and `s` declared
+ * `(list<real>) -> unknown`), while the compiled JavaScript code of the same
+ * expression returned values. The parameter's own contract is not widened:
+ * an EAGER list with a `nan` element (`[1, NaN]`) is still refused, and so
+ * is a lazy collection whose elements are nothing but `nan`.
+ *
+ * A lazy INDEXED collection materializes as a list, so at a `list<…>`
+ * parameter it is compared as the list of its elements.
+ *
+ * User decision of 2026-09-27, option B of the ROADMAP entry "A lazy
+ * comprehension is rejected at a `list<real>` parameter that the compiled
+ * route accepts".
+ */
+function lazyCollectionMatchesWithoutNan(op: Expression, param: Type): boolean {
+  if (!op.isLazyCollection || op.isFiniteCollection === false) return false;
+  const p = resolveTypeAlias(param);
+  if (
+    typeof p === 'string' ||
+    (p.kind !== 'list' &&
+      p.kind !== 'collection' &&
+      p.kind !== 'indexed_collection')
+  )
+    return false;
+  const t = resolveTypeAlias(op.type.type);
+  if (
+    typeof t === 'string' ||
+    (t.kind !== 'list' &&
+      t.kind !== 'collection' &&
+      t.kind !== 'indexed_collection')
+  )
+    return false;
+  const el = t.elements;
+  if (typeof el === 'string' || el.kind !== 'union') return false;
+  const arms = el.types.filter((x) => x !== 'nan');
+  if (arms.length === 0 || arms.length === el.types.length) return false;
+  const elements: Type =
+    arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
+  const stripped: Type =
+    t.kind === 'indexed_collection' && p.kind === 'list'
+      ? { kind: 'list', elements }
+      : { ...t, elements };
+  return isSubtype(stripped, param);
+}
+
+/**
  * Contract B NaN admission (`docs/ERROR-MODEL.md` §4, composition rule
  * step 1): the NaN policy is tested BEFORE ordinary type disjointness, so a
  * proven-`NaN` operand in a `propagate` or `handle` slot is admitted even
@@ -2693,6 +2746,13 @@ export function validateArguments(
         deferredIdx.add(result.length - 1);
         continue;
       }
+      // A lazy collection whose element type fits without its `nan` arm —
+      // see `lazyCollectionMatchesWithoutNan`.
+      if (lazyCollectionMatchesWithoutNan(op, param)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
       // An inferred signature with placeholder `unknown` slots reconciles
       // against the declared parameter (see `admitsPlaceholderSignature`).
       if (admitsPlaceholderSignature(op, param)) {
@@ -2929,6 +2989,13 @@ export function validateArguments(
         i += 1;
         continue;
       }
+      // Lazy collection without its `nan` arm — see the required-param gate.
+      if (lazyCollectionMatchesWithoutNan(op, param)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        i += 1;
+        continue;
+      }
       // Placeholder-signature reconciliation — see the required-param gate.
       if (admitsPlaceholderSignature(op, param)) {
         result.push(op);
@@ -3129,6 +3196,13 @@ export function validateArguments(
         }
         // Overlap-deferred validation (§D6.2) — see the required-param gate.
         if (overlapsForDeferredValidation(op.type.type, varParam)) {
+          result.push(op);
+          deferredIdx.add(result.length - 1);
+          continue;
+        }
+        // Lazy collection without its `nan` arm — see the required-param
+        // gate.
+        if (lazyCollectionMatchesWithoutNan(op, varParam)) {
           result.push(op);
           deferredIdx.add(result.length - 1);
           continue;

@@ -13,7 +13,7 @@ import type { Rational } from '../numerics/types.js';
 
 import { asRational } from './numerics.js';
 import { getImaginaryFactor } from './utils.js';
-import { halfTurnAngle, radiansToAngle } from './trigonometry.js';
+import { halfTurnAngle, halfTurns, radiansToAngle } from './trigonometry.js';
 import { apply, apply2 } from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -131,6 +131,17 @@ function complexBaseAtInfiniteExponent(
   if (m2 < 1) return expPositive ? ce.Zero : ce.ComplexInfinity;
   // Unreachable: every m2 === 1 case was answered by an arm above.
   return undefined;
+}
+
+/**
+ * True if `x` is the EXACT number literal `n`. A float literal with the same
+ * value (`1.0`, `-1.0`) is not an identity of `Power`: a float operand makes
+ * the result a float, so `1.0^x`, `x^{1.0}` and `x^{-1.0}` stay as they are,
+ * and `1.0^2` evaluates to a float `1`. (Mathematica does the same:
+ * `x^1.` stays `x^1.`.)
+ */
+function isExactLiteral(x: Expression, n: number): boolean {
+  return isNumber(x) && x.isExact && x.isSame(n);
 }
 
 function isSqrt(expr: Expression): boolean {
@@ -457,8 +468,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // Handle special base cases that only need sign/infinity info from the
   // exponent, before the numeric-exponent guard below.
   if (isNumber(a) && a.isSame(0) && !b.isSame(0) && !b.isInfinity) {
-    // 0^positive = 0, 0^negative = ComplexInfinity
-    if (b.isPositive === true) return ce.Zero;
+    // 0^positive = 0, 0^negative = ComplexInfinity. A float base `0.0`
+    // gives a float `0`.
+    if (b.isPositive === true) return a.isExact ? ce.Zero : a;
     if (b.isNegative === true) return ce.ComplexInfinity;
   }
 
@@ -469,7 +481,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // intentionally excluded — it has `isFinite === false` / `isNaN === true` and
   // falls through to the NaN handling further down. (Matches SymPy / Mathematica,
   // which both reduce `1^x → 1`.)
-  if (isNumber(a) && a.isSame(1) && b.isFinite !== false && b.isNaN !== true)
+  if (isExactLiteral(a, 1) && b.isFinite !== false && b.isNaN !== true)
     return ce.One;
 
   // Onwards, the focus on operations is where is a *numeric* exponent.
@@ -537,8 +549,14 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
   // Zero as exponent
   if (b.isSame(0)) {
-    // If 'isFinite' is a boolean, then 'a' has a value.
-    if (aIsNum && a.isFinite !== undefined) return a.isFinite ? ce.One : ce.NaN;
+    // If 'isFinite' is a boolean, then 'a' has a value. A float exponent
+    // `0.0` is not folded to the exact `1`: `2^{0.0}` evaluates to a float.
+    if (
+      aIsNum &&
+      a.isFinite !== undefined &&
+      (a.isFinite === false || isExactLiteral(b, 0))
+    )
+      return a.isFinite ? ce.One : ce.NaN;
     return unchanged();
   }
 
@@ -549,7 +567,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // 2026-09-01), and the `Power` evaluate handler owns the
   // incompatible-type error. `1^±∞` keeps the indeterminate-form NaN and
   // `1^NaN` the propagated NaN.
-  if (aIsNum && a.isSame(1)) {
+  if (aIsNum && isExactLiteral(a, 1)) {
     if (b.isFinite) return ce.One;
     if (isComplexInfinityLiteral(b)) return unchanged();
     return ce.NaN;
@@ -557,10 +575,11 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
   // One as exponent
   // (Permit the base to be a FN-expr. here, too...)
-  if (b.isSame(1) && a.type.matches('number' as NumericPrimitiveType)) return a;
+  if (isExactLiteral(b, 1) && a.type.matches('number' as NumericPrimitiveType))
+    return a;
 
   // -1 exponent
-  if (b.isSame(-1)) {
+  if (isExactLiteral(b, -1)) {
     if (aIsNum) {
       // 1/∞ = 0 for EVERY infinite base, `~oo` included: the modulus is
       // infinite in every direction, so the reciprocal's modulus is 0 in
@@ -573,10 +592,10 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       if (isNumber(a) && a.isInfinity === true) return ce.Zero;
 
       // (-1)^-1 = -1
-      if (a.isSame(-1)) return ce.NegativeOne;
+      if (isExactLiteral(a, -1)) return ce.NegativeOne;
 
       // 1^-1 = 1
-      if (a.isSame(1)) return ce.One;
+      if (isExactLiteral(a, 1)) return ce.One;
     }
 
     // Matrix inverse: A^{-1} -> Inverse(A)
@@ -755,7 +774,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // Only when both base and exponent are exact, and exponent is a real
   // integer (a pure-imaginary exponent like `i` has re = 0, which must NOT
   // fold as a^0)
-  if (isNumber(a) && isNumber(b) && b.im === 0) {
+  if (isNumber(a) && isNumber(b) && b.isExact && b.im === 0) {
     const e = b.re;
     if (typeof e === 'number' && Number.isInteger(e) && Math.abs(e) <= 64) {
       const n = a.numericValue;
@@ -1438,25 +1457,46 @@ export function pow(
       const cardinal = eulerQuarterTurn(imagFactor);
       if (cardinal !== undefined)
         return [ce.One, ce.I, ce.NegativeOne, ce.I.neg()][cardinal];
+      // A float multiple of π that is a special angle (`0.25·π`: the float
+      // `0.25` is within one unit in its last place of `1/4`) is read as
+      // that exact angle, whatever the angular unit, and `e^{0.25iπ}` is
+      // `√2/2 + √2/2·i`, as `e^{iπ/4}` is (user decision, 2026-09-27). The
+      // exponent of `e` is in radians, so it is read in radians.
+      let angle = imagFactor;
+      let floatAngle = hasInexactLiteral(angle);
+      if (floatAngle) {
+        const turns = halfTurns(angle, 'rad');
+        if (turns !== undefined) {
+          // Reduce the number of half-turns modulo a full turn (`2·den`) as a
+          // bigint, and keep the rational in bigints: a numerator above
+          // 2^53 converted to a double loses its parity, and the parity
+          // decides the sign of the value.
+          const [num, den] = turns;
+          let reduced = num % (2n * den);
+          if (reduced < 0n) reduced += 2n * den;
+          angle = ce.function('Multiply', [ce.number([reduced, den]), ce.Pi]);
+          floatAngle = false;
+        }
+      }
       // `Cos` and `Sin` read their argument in the engine's angular unit, so
       // in another unit `theta` is converted to it. An exact angle is
       // converted exactly (`θ·halfTurn/π`: `π` is `180` in degrees), and
       // `Cos` and `Sin` find an exact value from its structure
-      // (`halfTurns`). An angle with a float is converted numerically, at
-      // the working precision (`radiansToAngle`): a float is never a
-      // special angle, and a symbolic conversion of it could fold the float
-      // into an exact integer (`0.25·π·180/π` is `45`). In radians the angle
-      // is passed as it is, and `Cos` and `Sin` reduce and round an angle
-      // that is not special at the working precision.
+      // (`halfTurns`). Any other angle with a float is converted
+      // numerically, at the working precision (`radiansToAngle`): a
+      // symbolic conversion of it could fold the float into an exact
+      // integer. In radians the angle is passed as it is, and `Cos` and
+      // `Sin` reduce and round an angle that is not special at the working
+      // precision.
       const theta =
         ce.angularUnit === 'rad'
-          ? imagFactor
-          : hasInexactLiteral(imagFactor)
-            ? imagFactor.unknowns.length === 0
-              ? radiansToAngle(imagFactor.N())
+          ? angle
+          : floatAngle
+            ? angle.unknowns.length === 0
+              ? radiansToAngle(angle.N())
               : undefined
             : ce.function('Divide', [
-                ce.function('Multiply', [imagFactor, halfTurnAngle(ce)]),
+                ce.function('Multiply', [angle, halfTurnAngle(ce)]),
                 ce.Pi,
               ]);
       // Euler's formula e^{iθ} = cos θ + i·sin θ — but only adopt it for a
@@ -1471,8 +1511,17 @@ export function pow(
       if (theta !== undefined && theta.unknowns.length === 0) {
         // IMPORTANT: Use .evaluate() not .simplify() to avoid infinite
         // recursion when pow() is called from simplification rules.
-        const cosVal = ce.function('Cos', [theta]).evaluate();
-        const sinVal = ce.function('Sin', [theta]).evaluate();
+        //
+        // An angle with a float that is not a special angle gives a float,
+        // in every unit. In degrees `radiansToAngle` can give an exact
+        // integer (`0.35·π` is `63`), and `Cos(63)` stays symbolic under
+        // `evaluate()`: `e^{0.35iπ}` was `cos(63) + i·sin(63)`.
+        const cosVal = floatAngle
+          ? ce.function('Cos', [theta]).N()
+          : ce.function('Cos', [theta]).evaluate();
+        const sinVal = floatAngle
+          ? ce.function('Sin', [theta]).N()
+          : ce.function('Sin', [theta]).evaluate();
         // Assemble with the non-folding canonical constructors: the `.add()`/
         // `.mul()` methods fold exact literals (e.g. 1/2, √3/2) to machine
         // floats, which would violate the evaluate-vs-N exactness contract.

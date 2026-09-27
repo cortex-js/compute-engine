@@ -57,6 +57,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
+import { boxBignumResult } from '../boxed-expression/utils.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
@@ -307,8 +308,8 @@ function scaledNumber(
   if (exponent === 0 && Math.abs(x) <= Number.MAX_SAFE_INTEGER)
     return ce.number(x);
   const big = new BigDecimal(String(x));
-  if (exponent === 0) return ce.number(big);
-  return ce.number(big.mul(new BigDecimal(`1e${exponent}`)));
+  if (exponent === 0) return boxBignumResult(ce, big);
+  return boxBignumResult(ce, big.mul(new BigDecimal(`1e${exponent}`)));
 }
 
 /**
@@ -688,7 +689,7 @@ function maxAbsoluteLineSum(
         for (const index of line) sum = sum.add(bigValues[index]);
         if (bestBig === undefined || sum.gt(bestBig)) bestBig = sum;
       }
-      return ce.number(bestBig!);
+      return boxBignumResult(ce, bestBig!);
     }
     let bestSum = -Infinity;
     for (const sum of machineSums) if (sum > bestSum) bestSum = sum;

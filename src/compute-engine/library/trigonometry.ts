@@ -2,7 +2,7 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import { euclideanNormType, pointNormBroadcasts } from './utils.js';
-import { bignumPreferred } from '../boxed-expression/utils.js';
+import { bignumPreferred, boxBignumResult } from '../boxed-expression/utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
   checkArity,
@@ -212,7 +212,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       holdUntil: 'N',
       wikidata: 'Q167',
       value: (engine) =>
-        engine.number(bignumPreferred(engine) ? BigDecimal.PI : Math.PI),
+        boxBignumResult(
+          engine,
+          bignumPreferred(engine) ? BigDecimal.PI : Math.PI
+        ),
     },
   },
   {
@@ -1716,7 +1719,16 @@ function trigFunction(
             ? expression.op1
             : undefined
         );
-      const a = constructibleValues(operator, x);
+      // The evaluated operand of `0.25·π` is the float `0.785…`, which is
+      // not a special angle. The operand before its evaluation keeps the
+      // float coefficient of π, which `constructibleValues` reads as the
+      // special angle `π/4` when it is within one unit in its last place of
+      // `1/4` (user decision, 2026-09-27).
+      const a =
+        constructibleValues(operator, x) ??
+        (isFunction(expression) && expression.nops === 1
+          ? constructibleValues(operator, expression.op1)
+          : undefined);
       if (a) return a;
       // No constructible value: numericize ONLY an inexact (float) numeric
       // argument — `sin(2.5) → 0.598…` — since a float has no exactness to

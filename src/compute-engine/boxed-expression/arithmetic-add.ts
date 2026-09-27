@@ -192,8 +192,9 @@ export function canonicalAdd(
   const lone = (x: Expression): Expression =>
     severalTerms && isAbsentSymbol(x) ? ce.NaN : x;
 
-  // Remove literal 0
-  ops = ops.filter((x) => !isNumber(x) || !x.isSame(0));
+  // Remove an exact literal 0. A float `0.0` is kept: a float operand makes
+  // the sum numeric, so `0.0 + x` stays `0.0 + x`, as it does in Mathematica.
+  ops = ops.filter((x) => !isNumber(x) || !x.isExact || !x.isSame(0));
 
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !ops[0].isIndexedCollection) return lone(ops[0]);
@@ -1003,7 +1004,7 @@ export class Terms {
       else if (coef.isNegativeInfinity) negInfinityCount += 1;
 
       if (rest.isSame(1)) {
-        if (!coef.isZero) numericValues.push(coef);
+        if (!coef.isZero || !coef.isExact) numericValues.push(coef);
       } else this._add(coef, rest);
     }
 
@@ -1029,7 +1030,15 @@ export class Terms {
   }
 
   private _add(coef: NumericValue, term: Expression): void {
-    if (term.isSame(0) || coef.isZero) return;
+    if (term.isSame(0)) return;
+    // A float `0` coefficient (`0.0·x`, or `0.0` itself) is the float `0`:
+    // it is kept as a numeric term, so the sum stays numeric.
+    if (coef.isZero) {
+      if (!coef.isExact && !term.isSame(1)) this._add(coef, this.engine.One);
+      else if (!coef.isExact)
+        this.push({ coef: [], term: this.engine.number(coef) });
+      return;
+    }
     if (term.isSame(1)) {
       // We have a numeric value. Keep it in the terms,
       // so that "1+sqrt(3)" remains exact.
@@ -1113,18 +1122,24 @@ export class Terms {
         } else rest.push(term);
       } else {
         const sum = coef.reduce((acc, x) => acc.add(x)).N();
+        // A sum of coefficients with a float in it is a float coefficient:
+        // `0.5x + 0.5x` is `1.0·x`, and `0.5x - 0.5x` is the float `0`
+        const exactCoef = coef.every((x) => x.isExact);
 
-        if (sum.isZero) continue;
+        if (sum.isZero) {
+          if (!exactCoef) numericValues.push(sum);
+          continue;
+        }
 
         const termN = termsAreNumeric ? term : term.N();
-        if (sum.eq(1)) rest.push(termN);
-        else if (sum.eq(-1)) rest.push(termN.neg());
+        if (sum.eq(1) && exactCoef) rest.push(termN);
+        else if (sum.eq(-1) && exactCoef) rest.push(termN.neg());
         else rest.push(termN.mul(ce.expr(sum)));
       }
     }
 
     const sum = nvSumN(ce, numericValues);
-    if (!sum.isZero) {
+    if (!sum.isZero || numericValues.some((x) => !x.isExact)) {
       if (rest.length === 0) return ce.expr(sum);
       rest.push(ce.expr(sum));
     }
@@ -1156,9 +1171,11 @@ export class Terms {
         }
         const sum = coefs[0];
         if (sum.isNaN) return ce.NaN;
-        if (sum.isZero) return ce.Zero;
-        if (sum.eq(1)) return term;
-        if (sum.eq(-1)) return term.neg();
+        // A float sum of coefficients stays a float coefficient: `0.5x + 0.5x`
+        // is `1.0·x`, and `0.5x - 0.5x` is the float `0`
+        if (sum.isZero) return sum.isExact ? ce.Zero : ce.expr(sum);
+        if (sum.eq(1) && sum.isExact) return term;
+        if (sum.eq(-1) && sum.isExact) return term.neg();
         if (term.isSame(1)) return ce.expr(sum);
 
         return term.mul(ce.expr(sum));

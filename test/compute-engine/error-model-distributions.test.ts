@@ -565,12 +565,15 @@ describe('Contract B — Quantile carrier', () => {
 
   test('the empirical quantile absorbs an absent datum and an empty sample', () => {
     const e = new ComputeEngine();
+    // The probability `0.5` is a float, so the interpolated quantile is a
+    // float too (exactness follows the spelling since 2026-09-27); before,
+    // the float weight was folded away and the answer was the exact `5/2`.
     expect(
       e
         .box(['Quantile', ['List', 1, 2, 3, 4], 0.5])
         .evaluate()
         .toString()
-    ).toBe('5/2');
+    ).toBe('2.5');
     expect(
       e.box(['Quantile', ['List', 1, 'NaN', 3], 0.5]).evaluate().isNaN
     ).toBe(true);

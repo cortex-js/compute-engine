@@ -1481,7 +1481,8 @@ export class BoxedFunction
       let coef = ce._numericValue(1);
       for (const arg of expr.ops) {
         const [c, r] = arg.toNumericValue();
-        if (!c.isOne) coef = coef.mul(c);
+        // A float 1 is multiplied in, so the coefficient becomes a float
+        if (!c.isOne || !c.isExact) coef = coef.mul(c);
         if (!r.isSame(1)) rest.push(r);
       }
       if (rest.length === 0) return [coef, ce.One];

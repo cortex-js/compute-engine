@@ -536,8 +536,12 @@ export class BoxedNumber
       if (isAbsentSymbol(rhs)) return this.engine.NaN;
       if (isAbsentArithmeticOperand(rhs)) return mul(this, rhs);
     }
-    if (this.isSame(1)) return this.engine.expr(rhs);
-    if (this.isSame(-1)) return this.engine.expr(rhs).neg();
+    // Only an exact 1 or -1 is an identity here. A float 1 (the literal
+    // `1.0`) makes the product numeric, as any other float factor does.
+    if (this.isExact) {
+      if (this.isSame(1)) return this.engine.expr(rhs);
+      if (this.isSame(-1)) return this.engine.expr(rhs).neg();
+    }
 
     const ce = this.engine;
 
@@ -564,8 +568,8 @@ export class BoxedNumber
       return ce.number(this._value * rhs);
 
     if (rhs instanceof NumericValue) {
-      if (this.isSame(1)) return ce.number(rhs);
-      if (this.isSame(-1)) return ce.number(rhs.neg());
+      if (this.isExact && this.isSame(1)) return ce.number(rhs);
+      if (this.isExact && this.isSame(-1)) return ce.number(rhs.neg());
       // Same indeterminate-form guard as the JS-number fastpath above:
       // `NumericValue.mul` answers 0 for a zero times a non-finite value.
       if (this.isSame(0) && !rhs.isZero) {
@@ -1626,8 +1630,19 @@ export function canonicalNumber(
 
   if (value instanceof BigDecimal) {
     const n = value.toNumber();
-    // Is it a small integer?
-    if (value.isInteger() && Math.abs(n) <= SMALL_INTEGER) return n;
+    // A big decimal given to `ce.number()` or `ce.box()` is exact when it is
+    // integer-valued, at any magnitude: a small integer becomes a plain
+    // integer, a larger one an exact bigint. A big decimal with a fraction
+    // part is a float. A numeric computation that produces a big decimal must
+    // not come through here, because its result is inexact even when it is
+    // integer-valued: it uses `boxBignumResult()` (`boxed-expression/utils.ts`)
+    // instead. An exponent too large to write out as digits stays a float, as
+    // in `canonicalNumberString()`.
+    if (value.isInteger()) {
+      if (Math.abs(n) <= SMALL_INTEGER) return n;
+      if (value.exponent <= 1_000_000)
+        return canonicalNumber(ce, value.toBigInt());
+    }
     if (value.isNaN()) return NaN;
     if (!value.isFinite()) return n > 0 ? +Infinity : -Infinity;
     return ce._numericValue(value);

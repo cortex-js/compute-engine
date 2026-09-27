@@ -52,6 +52,7 @@ import {
   isOne,
   isInteger as isIntegerRational,
   neg,
+  isNeg,
   rationalGcd,
   reducedRational,
   isZero,
@@ -113,9 +114,17 @@ function exactPowExceedsBudget(base: NumericValue, exp: Rational): boolean {
  * itself. `.isSame()` is strictly syntactic (a symbol never compares equal to
  * a literal), so a bare `.isSame(n)` could no longer mis-fold; the `isNumber`
  * guard is kept because it states the intent and short-circuits cheaply.
+ *
+ * For `n = ±1` the literal must also be exact. A float `1` (the literal `1.0`)
+ * is not removed from a product or a quotient: like any other float factor it
+ * makes the product numeric, so `1.0x` stays a product with a float
+ * coefficient, as `2.0x` does, and `1.0/3` is a float quotient. A float `0`
+ * still absorbs the product, as an exact `0` does.
  */
 function isLiteral(op: Expression, n: number): boolean {
-  return isNumber(op) && op.isSame(n);
+  if (!isNumber(op)) return false;
+  if (n !== 0 && !op.isExact) return false;
+  return op.isSame(n);
 }
 
 //
@@ -241,7 +250,8 @@ export class Product {
       // running terms
       const num = numericValue(term);
       if (num !== undefined) {
-        if (term.isSame(1)) return;
+        // An exact 1 is dropped; a float 1 folds into the coefficient below
+        if (isLiteral(term, 1)) return;
 
         if (term.isSame(0)) {
           // infinity * 0 -> NaN (indeterminate form). The unsigned complex
@@ -260,11 +270,16 @@ export class Product {
             this.coefficient = this.engine._numericValue(NaN);
             return;
           }
-          this.coefficient = this.engine._numericValue(isZero(exp) ? NaN : 0);
+          // A float `0` absorbs the product and keeps it a float: `0.0·x`
+          // is the float `0`
+          this.coefficient =
+            isZero(exp) || !isNumber(term) || term.isExact
+              ? this.engine._numericValue(isZero(exp) ? NaN : 0)
+              : this.engine._numericValue(num);
           return;
         }
 
-        if (term.isSame(-1)) {
+        if (isLiteral(term, -1)) {
           if (isOne(exp)) this.coefficient = this.coefficient.neg();
           else {
             this.coefficient = this.coefficient.mul(
@@ -325,12 +340,17 @@ export class Product {
           // into the coefficient — mirrors the guard in arithmetic-power.ts,
           // and avoids a `Maximum BigInt size exceeded` throw.
           this.terms.push({ term, exponent: exp });
-        } else if (
-          !this.foldIntoCoefficient(
-            this.engine._numericValue(num).pow(this.engine._numericValue(exp))
-          )
-        )
-          this.tally(term, exp);
+        } else {
+          // An exact number raised to a fractional power folds into the
+          // coefficient only when the power is exact (`8^(2/3)` is `4`).
+          // Otherwise it stays a symbolic `Power` term: `2^(2/3)` computed
+          // as a float would make the product of exact operands a float.
+          const base = this.engine._numericValue(num);
+          const power = base.pow(this.engine._numericValue(exp));
+          if (base.isExact && !power.isExact && !isIntegerRational(exp))
+            this.tallyNumericPower(term, exp);
+          else if (!this.foldIntoCoefficient(power)) this.tally(term, exp);
+        }
         return;
       }
 
@@ -386,14 +406,25 @@ export class Product {
             !isIntegerRational(e) &&
             Number(e[1]) % 2 === 0 &&
             coef.sgn() === -1;
+          const power =
+            exp && !isOne(exp)
+              ? coef.pow(this.engine._numericValue(exp))
+              : coef;
           if (
             !evenRootOfNegative &&
-            this.foldIntoCoefficient(
-              exp && !isOne(exp)
-                ? coef.pow(this.engine._numericValue(exp))
-                : coef
-            )
-          )
+            coef.isExact &&
+            !power.isExact &&
+            !isIntegerRational(e)
+          ) {
+            // An exact coefficient under a fractional power whose value is
+            // not exact (`2^(2/3)` in `(2x + 2)^(2/3)`) is kept as a
+            // symbolic `Power` term, not folded as a float:
+            // `(2x + 2)^(2/3)` is `2^(2/3)·(x + 1)^(2/3)`.
+            if (!coef.isOne) {
+              this.tallyNumericPower(this.engine.number(coef), e);
+              term = rest;
+            }
+          } else if (!evenRootOfNegative && this.foldIntoCoefficient(power))
             term = rest;
         }
       }
@@ -549,6 +580,24 @@ export class Product {
     return true;
   }
 
+  /**
+   * Add an exact number raised to a fractional power (`2^(2/3)`, `∛2`) as one
+   * symbolic factor, with the exponent `1` or `-1`. Tallied as the number
+   * with the exponent `p/q`, it is grouped with the other terms that have
+   * the same exponent: `2^(1/3)·x^(1/3)` becomes `∛(2x)`, which the inverse
+   * and root operations split again into `∛2·∛x`, and inverting such a
+   * product did not terminate.
+   */
+  private tallyNumericPower(base: Expression, exponent: Rational): void {
+    const e = reducedRational(exponent);
+    const negative = isNeg(e);
+    const power = this.engine.function('Power', [
+      base,
+      this.engine.number(negative ? neg(e) : e),
+    ]);
+    this.tally(power, negative ? [-1, 1] : [1, 1]);
+  }
+
   /** Add `exponent` to the exponent of `term`, or add `term` as a new term. */
   private tally(term: Expression, exponent: Rational): void {
     for (const x of this.terms) {
@@ -610,8 +659,14 @@ export class Product {
     }
 
     const xs: { exponent: Rational; terms: Expression[] }[] = [];
-    if (!this.coefficient.isOne) {
-      if (mode === 'rational' && this.coefficient.type === 'rational') {
+    // A float coefficient of 1 (from the literal `1.0`) is kept: it makes the
+    // product numeric, as any other float coefficient does.
+    if (!this.coefficient.isOne || !this.coefficient.isExact) {
+      if (
+        mode === 'rational' &&
+        this.coefficient.isExact &&
+        this.coefficient.type === 'rational'
+      ) {
         // Numerator
         const num = this.coefficient.numerator;
         if (!num.isOne) xs.push({ exponent: [1, 1], terms: [ce.number(num)] });
@@ -694,7 +749,8 @@ export class Product {
       );
       if (nonNumeric !== undefined)
         return ce.typeError('number', nonNumeric.term.type, nonNumeric.term);
-      return ce.Zero;
+      // A float `0` coefficient gives a float `0` (`0.0·x`)
+      return coef.isExact ? ce.Zero : ce.number(coef);
     }
 
     if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
@@ -723,8 +779,9 @@ export class Product {
       return ce._fn('Multiply', [infinity, rest]);
     }
 
-    // If the coef is -1, temporarily set it to 1
-    const isNegativeOne = coef.isNegativeOne;
+    // If the coef is -1, temporarily set it to 1 (only an exact -1: a float
+    // -1 is kept as a coefficient, as any other float coefficient is)
+    const isNegativeOne = coef.isNegativeOne && coef.isExact;
     if (isNegativeOne) this.coefficient = ce._numericValue(1);
 
     const groupedTerms = this.groupedByDegrees({
@@ -752,7 +809,7 @@ export class Product {
     // as `(x + 1) · NaN` came back as an inert `NaN * (x + 1)` — which does
     // not even report `isNaN`, since an unevaluated function node cannot.
     if (coef.isNaN) return [ce.NaN, ce.One];
-    if (coef.isZero) return [ce.Zero, ce.One];
+    if (coef.isZero) return [coef.isExact ? ce.Zero : ce.number(coef), ce.One];
     if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
       const infinity = coef.isPositiveInfinity
         ? ce.PositiveInfinity
@@ -776,8 +833,9 @@ export class Product {
       return [ce._fn('Multiply', [infinity, rest]), ce.One];
     }
 
-    // If the coef is -1, temporarily set it to 1
-    const isNegativeOne = coef.isNegativeOne;
+    // If the coef is -1, temporarily set it to 1 (only an exact -1: a float
+    // -1 is kept as a coefficient, as any other float coefficient is)
+    const isNegativeOne = coef.isNegativeOne && coef.isExact;
     if (isNegativeOne) this.coefficient = ce._numericValue(1);
 
     const xs = this.groupedByDegrees({ mode: 'rational' });
@@ -1178,7 +1236,8 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       return ce.function('Divide', [op1, op2], {
         form: 'structural',
       });
-    return ce.Zero;
+    // A float `0` gives a float `0`
+    return isNumber(op1) && !op1.isExact ? op1 : ce.Zero;
   }
 
   // a/∞ = 0, ∞/∞ = NaN (check before a/a = 1 rule)
@@ -1207,8 +1266,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   )
     return op2.isPositive === true ? op1 : op1.neg();
 
-  // a/a = 1 (if a ≠ 0 and a is finite)
-  if (op2.isSame(0) === false && op2.isFinite !== false) {
+  // a/a = 1 (if a ≠ 0 and a is finite). Not for a float literal: `2.0/2.0`
+  // is a float quotient, computed when it is evaluated.
+  if (
+    op2.isSame(0) === false &&
+    op2.isFinite !== false &&
+    !(isNumber(op1) && !op1.isExact) &&
+    !(isNumber(op2) && !op2.isExact)
+  ) {
     if (
       isSymbol(op1) &&
       isSymbol(op2) &&
@@ -1317,7 +1382,13 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
     if (typeof v1 === 'number' && Number.isInteger(v1)) {
       if (v1 === 0) return ce.Zero;
-      if (typeof v2 !== 'number' && isSubtype(v2.type, 'integer')) {
+      // Only an exact divisor folds to a rational: `2/2.0` is a float
+      // quotient, computed when it is evaluated.
+      if (
+        typeof v2 !== 'number' &&
+        v2.isExact &&
+        isSubtype(v2.type, 'integer')
+      ) {
         const b = v2.bignumRe;
         if (b !== undefined) {
           if (b.isInteger()) return ce.number([bigint(v1)!, bigint(b)!]);
@@ -1374,11 +1445,16 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // A unit coefficient (`c = ±1`) is only *removed* here, never minted, so it
   // is safe to drop even for float coefficients (e.g. `0.2/0.2 = 1`). Only the
   // coefficient-*minting* fold below is gated on exactness.
+  // The unit is not removed when exactly one of the two coefficients is a
+  // float: `x/1.0` keeps its float divisor, as `x/2.0` does, because a float
+  // operand makes the quotient numeric.
   const coefExact = c1.isExact && c2.isExact;
+  const unitRemovable = c1.isExact === c2.isExact;
 
-  if (c.isOne) return isLiteral(t2, 1) ? t1 : ce._fn('Divide', [t1, t2]);
+  if (c.isOne && unitRemovable)
+    return isLiteral(t2, 1) ? t1 : ce._fn('Divide', [t1, t2]);
 
-  if (c.isNegativeOne)
+  if (c.isNegativeOne && unitRemovable)
     return isLiteral(t2, 1) ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
 
   // If c is exact, use as a product: `c * (t1/t2)`
@@ -1773,7 +1849,8 @@ export function canonicalMultiply(
         // `Sin((A, B))` with `A`, `B` lists). The zero must not erase it:
         // keep the product as `0` times the other factors, so that
         // evaluation reports that error.
-        if (!nonNumeric.some((x) => x.type.type === 'error')) return ce.Zero;
+        if (!nonNumeric.some((x) => x.type.type === 'error'))
+          return product.isExact ? ce.Zero : ce.number(product);
       }
       // The fold can produce a NEGATIVE real coefficient even though the sign
       // pass above normalized every literal positive — only a product with

@@ -402,6 +402,10 @@ export function evaluateEquivalent(
     (lhs === 'False' && rhs === 'True')
   )
     return ce.False;
+  // Kleene over absence: flipping either operand flips the equivalence, so
+  // no value of the other operand decides it, and an absent operand makes
+  // the equivalence absent.
+  if (isAbsenceName(lhs) || isAbsenceName(rhs)) return ce.Missing;
   return undefined;
 }
 
@@ -431,6 +435,11 @@ export function evaluateXor(
   // N-ary XOR is true when an odd number of operands are true
   // (equivalent to parity check)
   if (args.length === 0) return ce.False;
+
+  // Kleene over absence: flipping any one operand flips the parity, so no
+  // value of the other operands decides it, and an absent operand makes the
+  // exclusive or absent.
+  if (args.some((arg) => isAbsenceName(sym(arg)))) return ce.Missing;
 
   let trueCount = 0;
   const unknowns: Expression[] = [];

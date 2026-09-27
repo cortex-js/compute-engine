@@ -91,6 +91,7 @@ import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isEmptyType, isSubtype } from '../../common/type/subtype.js';
 import {
   bignumPreferred,
+  boxBignumResult,
   withDrawRollback,
 } from '../boxed-expression/utils.js';
 import { numberLiteralOf, toInteger } from '../boxed-expression/numerics.js';
@@ -660,7 +661,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return boxedMean(engine, vals);
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigMean(bigScalarsOf(xs))
             : mean(scalarsOf(xs))
@@ -713,7 +715,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return exactMedianOf(engine, sorted);
           }
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigMedian(bigScalarsOf(xs))
             : median(scalarsOf(xs))
@@ -777,7 +780,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, false);
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigVariance(bigScalarsOf(xs))
             : variance(scalarsOf(xs))
@@ -833,7 +837,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, true);
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigPopulationVariance(bigScalarsOf(xs))
             : populationVariance(scalarsOf(xs))
@@ -904,7 +909,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
               .function('Sqrt', [exactVariance(engine, vals, false)])
               .evaluate();
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigVariance(bigScalarsOf(xs)).sqrt()
             : Math.sqrt(variance(scalarsOf(xs)))
@@ -966,7 +972,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
               .function('Sqrt', [exactVariance(engine, vals, true)])
               .evaluate();
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigPopulationVariance(bigScalarsOf(xs)).sqrt()
             : Math.sqrt(populationVariance(scalarsOf(xs)))
@@ -1010,7 +1017,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return exactKurtosis(engine, vals);
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigKurtosis(bigScalarsOf(xs))
             : kurtosis(scalarsOf(xs))
@@ -1054,7 +1062,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return exactSkewness(engine, vals);
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigSkewness(bigScalarsOf(xs))
             : skewness(scalarsOf(xs))
@@ -1103,7 +1112,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           // stays unevaluated.
           if (vals) return exactMode(engine, vals);
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigMode(bigScalarsOf(xs))
             : mode(scalarsOf(xs))
@@ -1189,7 +1199,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           bignumPreferred(engine)
             ? bigQuartiles(bigScalarsOf(xs))
             : quartiles(scalarsOf(xs))
-        ).map((v) => engine.number(v));
+        ).map((v) => boxBignumResult(engine, v));
         return engine.tuple(lower, mid, upper);
       },
     },
@@ -1248,7 +1258,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return subtract(engine, q3, q1);
           }
         }
-        return engine.number(
+        return boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? bigInterquartileRange(bigScalarsOf(xs))
             : interquartileRange(scalarsOf(xs))
@@ -2424,7 +2435,8 @@ function evaluateCovariance(
     return exactCovariance(ce, xs, ys, population);
 
   if (bignumPreferred(ce))
-    return ce.number(
+    return boxBignumResult(
+      ce,
       population
         ? bigPopulationCovariance(bigVals(xs), bigVals(ys))
         : bigCovariance(bigVals(xs), bigVals(ys))
@@ -2471,7 +2483,7 @@ function evaluateCorrelation(
   const r = bignumPreferred(ce)
     ? bigCorrelation(bigVals(xs), bigVals(ys))
     : correlation(machineVals(xs), machineVals(ys));
-  const num = ce.number(r);
+  const num = boxBignumResult(ce, r);
   if (!num.isNaN) return num;
   // A `NaN` from the kernel is not by itself evidence of a zero variance: the
   // machine kernel also answers `NaN` when the sums of squares overflow, which

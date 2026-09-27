@@ -1,4 +1,5 @@
 import { Complex } from 'complex-esm';
+import { complexDivide } from './numeric-complex.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
 
@@ -41,7 +42,7 @@ export function durandKernerRoots(
       let denom = new Complex(1, 0);
       for (let j = 0; j < n; j++)
         if (j !== i) denom = denom.mul(roots[i].sub(roots[j]));
-      const delta = evalP(roots[i]).div(denom);
+      const delta = complexDivide(evalP(roots[i]), denom);
       next.push(roots[i].sub(delta));
       maxDelta = Math.max(maxDelta, delta.abs() / (1 + roots[i].abs()));
     }

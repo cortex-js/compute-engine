@@ -500,6 +500,11 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
+    // Kleene over absence, as for `And`/`Or`/`Not`: a possibly-absent operand
+    // (`boolean | missing`) validates through the strip-before-validate gate,
+    // and an absent operand makes the equivalence absent, since no value of
+    // the other operand decides it (see `evaluateEquivalent`).
+    missingBehavior: 'handle',
     canonical: (args: ReadonlyArray<Expression>, { engine: ce }) => {
       const lhs = sym(args[0]);
       const rhs = sym(args[1]);
@@ -556,6 +561,11 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     commutative: true,
     complexity: 10200,
     signature: '(boolean+) -> boolean',
+    // Kleene over absence, as for `And`/`Or`/`Not`: a possibly-absent operand
+    // (`boolean | missing`) validates through the strip-before-validate gate,
+    // and an absent operand makes the exclusive or absent, since no value of
+    // the other operands decides it (see `evaluateXor`).
+    missingBehavior: 'handle',
     evaluate: evaluateXor,
   },
   Nand: {

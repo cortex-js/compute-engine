@@ -1,5 +1,6 @@
 import { Complex } from 'complex-esm';
 import '../numerics/complex-esm-augment.js'; // adds the 1-arg `Complex.equals` overload
+import { complexDivide } from '../numerics/numeric-complex.js';
 import {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -482,7 +483,8 @@ export class TensorFieldComplex implements TensorField<Complex> {
   }
 
   div(lhs: Complex, rhs: Complex): Complex {
-    return lhs.div(rhs);
+    // Scaled, so that `(1e308 + 1e308i) / (1 + i)` is `1e308`, not `∞`.
+    return complexDivide(lhs, rhs);
   }
 
   pow(lhs: Complex, rhs: number): Complex {

@@ -10,6 +10,7 @@ import { bigint } from '../numerics/bigint.js';
 import { ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
 import { isComplexDust } from './roundoff.js';
+import { complexQuotient } from '../numerics/numeric-complex.js';
 
 export class BigNumericValue extends NumericValue {
   declare __brand: 'BigNumericValue';
@@ -244,6 +245,20 @@ export class BigNumericValue extends NumericValue {
     if (this.im === 0) return this.clone(this.decimal.inv());
 
     // 1/z = conj(z) / |z|²  (not / |z|).
+    // For finite parts, the squares are formed as big decimals, which do not
+    // overflow, and the machine imaginary part comes from
+    // `complexQuotient()`, which scales the parts when |z|² is not a normal
+    // double: `1/(1e308 + 1e308i)` is `5e-309 − 5e-309i`, not `0`, and
+    // `1/(1e-200 + 1e-200i)` is `5e199 − 5e199i`, not `~oo`.
+    if (this.decimal.isFinite() && Number.isFinite(this.im)) {
+      const bigD = this.decimal
+        .mul(this.decimal)
+        .add(new BigDecimal(this.im).mul(this.im));
+      return this.clone({
+        re: this.decimal.div(bigD),
+        im: complexQuotient(1, 0, this.re, this.im).im,
+      });
+    }
     const d = this.re * this.re + this.im * this.im;
     const bigD = this.decimal.mul(this.decimal).add(this.im * this.im);
     return this.clone({ re: this.decimal.div(bigD), im: -this.im / d });
@@ -456,8 +471,29 @@ export class BigNumericValue extends NumericValue {
 
     const [a, b] = [this.re, this.im];
     const [c, d] = [other.re, other.im];
-    const denominator = c * c + d * d;
     const bigC = other.bignumRe ?? new BigDecimal(other.re);
+    // For finite parts, the products are formed as big decimals, which do not
+    // overflow, and the machine imaginary part comes from
+    // `complexQuotient()`, which scales the parts when an intermediate value
+    // is not a normal double: `(1e308 + 1e308i) / (1 + i)` is `1e308`.
+    if (
+      this.decimal.isFinite() &&
+      bigC.isFinite() &&
+      Number.isFinite(a) &&
+      Number.isFinite(b) &&
+      Number.isFinite(c) &&
+      Number.isFinite(d)
+    ) {
+      const bigB = new BigDecimal(b);
+      return this.clone({
+        re: this.decimal
+          .mul(bigC)
+          .add(bigB.mul(d))
+          .div(bigC.mul(bigC).add(new BigDecimal(d).mul(d))),
+        im: complexQuotient(a, b, c, d).im,
+      });
+    }
+    const denominator = c * c + d * d;
     const bigDenominator = bigC.mul(bigC).add(d * d);
     return this.clone({
       re: this.decimal

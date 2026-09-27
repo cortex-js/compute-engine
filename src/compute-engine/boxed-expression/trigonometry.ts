@@ -6,7 +6,7 @@ import type { LatexString } from '../latex-syntax/types.js';
 
 import { apply } from './apply.js';
 
-import { bignumPreferred, canonicalAngle } from './utils.js';
+import { bignumPreferred, boxBignumResult, canonicalAngle } from './utils.js';
 
 import type {
   AngularUnit,
@@ -23,6 +23,7 @@ import {
   ROUNDOFF_TOLERANCE,
 } from '../numerics/numeric.js';
 import { gcd as bigGcd } from '../numerics/numeric-bigint.js';
+import { complexInverse } from '../numerics/numeric-complex.js';
 import { asRational } from './numerics.js';
 
 type ConstructibleTrigValues = [
@@ -492,7 +493,7 @@ function applyAngle(
       const big = exactLargeAngle(raw);
       if (big !== undefined)
         return apply(
-          ce.number(big),
+          boxBignumResult(ce, big),
           fn as (x: number) => number | Complex,
           bigFn as (x: BigDecimal) => BigDecimal | Complex | number,
           complexFn
@@ -584,7 +585,7 @@ export function radiansToAngle(
           : angularUnit === 'turn'
             ? big.div(BigDecimal.PI.mul(2))
             : undefined;
-    if (converted !== undefined) return ce.number(converted);
+    if (converted !== undefined) return boxBignumResult(ce, converted);
   }
 
   const scale =
@@ -810,14 +811,14 @@ export function evalTrig(
         op,
         (x) => Math.atan2(1, x),
         (x) => BigDecimal.atan2(BigDecimal.ONE, x),
-        (x) => x.inverse().atan()
+        (x) => complexInverse(x).atan()
       );
     case 'Arccsc':
       return inverseAngle(
         op,
         (x) => Math.asin(1 / x),
         (x) => BigDecimal.ONE.div(x).asin(),
-        (x) => x.inverse().asin()
+        (x) => complexInverse(x).asin()
       );
     // Inverse HYPERBOLIC functions return an area (a dimensionless real),
     // NOT an angle: they are unit-independent and must not be scaled by
@@ -859,7 +860,8 @@ export function evalTrig(
             .sqrt()
             .add(BigDecimal.ONE.div(x))
             .ln(),
-        (x) => x.mul(x).inverse().add(1).sqrt().add(x.inverse()).log()
+        (x) =>
+          complexInverse(x.mul(x)).add(1).sqrt().add(complexInverse(x)).log()
       );
 
     case 'Arcsec':
@@ -867,7 +869,7 @@ export function evalTrig(
         op,
         (x) => Math.acos(1 / x),
         (x) => BigDecimal.ONE.div(x).acos(),
-        (x) => x.inverse().acos()
+        (x) => complexInverse(x).acos()
       );
 
     case 'Arcsin':
@@ -961,7 +963,7 @@ export function evalTrig(
         op,
         (x) => poleDust(ce, 1 / Math.tan(x), x),
         (x) => bigZeroAndPoleDust(ce, BigDecimal.ONE.div(x.tan()), x),
-        (x) => x.tan().inverse(),
+        (x) => complexInverse(x.tan()),
         raw
       );
     }
@@ -970,7 +972,7 @@ export function evalTrig(
         op,
         (x) => 1 / Math.tanh(x),
         (x) => BigDecimal.ONE.div(x.tanh()),
-        (x) => x.tanh().inverse()
+        (x) => complexInverse(x.tanh())
       );
     case 'Csc': {
       // Poles at multiples of π, recognized as for `Cot`.
@@ -984,7 +986,7 @@ export function evalTrig(
         op,
         (x) => poleDust(ce, 1 / Math.sin(x), x),
         (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.sin()), x),
-        (x) => x.sin().inverse(),
+        (x) => complexInverse(x.sin()),
         raw
       );
     }
@@ -993,7 +995,7 @@ export function evalTrig(
         op,
         (x) => 1 / Math.sinh(x),
         (x) => BigDecimal.ONE.div(x.sinh()),
-        (x) => x.sinh().inverse()
+        (x) => complexInverse(x.sinh())
       );
     case 'Sec':
       // Poles at π/2 + kπ, recognized as for `Cot`.
@@ -1002,7 +1004,7 @@ export function evalTrig(
         op,
         (x) => poleDust(ce, 1 / Math.cos(x), x),
         (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.cos()), x),
-        (x) => x.cos().inverse(),
+        (x) => complexInverse(x.cos()),
         raw
       );
     case 'Sech':
@@ -1010,7 +1012,7 @@ export function evalTrig(
         op,
         (x) => 1 / Math.cosh(x),
         (x) => BigDecimal.ONE.div(x.cosh()),
-        (x) => x.cosh().inverse()
+        (x) => complexInverse(x.cosh())
       );
     case 'Sin':
       return applyAngle(
@@ -1374,6 +1376,12 @@ export function constructibleValues(
  * `−π/6 + 2π` and (in degrees) `30` are exact multiples, but a float
  * such as `3.14159`, or `π − 10⁻³⁰`, is not.
  *
+ * One float is read as a rational: the coefficient of a product with an
+ * angle, such as `0.25` in `0.25·π`, when it is within one unit in the last
+ * place of a rational whose denominator is one of the special angles'
+ * (`floatSpecialCoefficient`). So `0.25·π` is `1/4` of a half-turn, as
+ * `π/4` is, but `0.35·π` is not known.
+ *
  * A symbol with an assigned value is replaced by that value.
  *
  * `unit` is the angular unit in which `x` is read, the engine's by default:
@@ -1432,7 +1440,7 @@ export function halfTurns(
       let d = 1n;
       let angle: [bigint, bigint] | undefined = undefined;
       for (const factor of y.ops) {
-        const r = exactRational(factor);
+        const r = exactRational(factor) ?? floatSpecialCoefficient(factor);
         if (r !== undefined) {
           [n, d] = reduce(n * r[0], d * r[1]);
           continue;
@@ -1453,6 +1461,56 @@ export function halfTurns(
     return undefined;
   };
   return walk(x);
+}
+
+/**
+ * The denominators of the special angles of `CONSTRUCTIBLE_VALUES`, as
+ * multiples of π: 1, 2, 3, 4, 5, 6, 8, 10 and 12. An angle reduced to the
+ * first quadrant keeps a denominator in this set.
+ */
+const SPECIAL_ANGLE_DENOMINATORS: readonly bigint[] = [
+  ...new Set(CONSTRUCTIBLE_VALUES.map(([[, den]]) => BigInt(den))),
+].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+/**
+ * The rational `p/q`, with `q` a denominator of a special angle
+ * (`SPECIAL_ANGLE_DENOMINATORS`), that the float literal `c` rounds: `c` is
+ * within one unit in its last place of `p/q`. Return `undefined` when `c`
+ * is not a real float, or not near such a rational.
+ *
+ * A float coefficient of π that is a special angle gives an exact value
+ * (user decision, 2026-09-27): `sin(0.25·π)` is `√2/2`, as `sin(π/4)` is.
+ * The float has the rounding of the literal only, so `0.25` is `1/4` and
+ * the double nearest `0.3` is `3/10`.
+ *
+ * The unit in the last place is `2⁻⁵²·|c|` at machine precision and
+ * `10^(1−precision)·|c|` above it, where a float literal is a big decimal:
+ * at 21 digits the double `0.1 + 0.2`, `0.30000000000000004`, is not
+ * `3/10`. A float with a unit in the last
+ * place of `1/264` or more cannot tell two of these rationals apart (they
+ * are at least `1/132` apart), and is not read.
+ */
+function floatSpecialCoefficient(c: Expression): [bigint, bigint] | undefined {
+  if (!isNumber(c) || c.isExact !== false || c.im !== 0) return undefined;
+  const big = c.bignumRe ?? new BigDecimal(c.re);
+  if (!big.isFinite()) return undefined;
+  if (big.isZero()) return [0n, 1n];
+  const epsilon = bignumPreferred(c.engine)
+    ? new BigDecimal(10).pow(1 - c.engine.precision)
+    : new BigDecimal(Number.EPSILON);
+  const ulp = big.abs().mul(epsilon);
+  if (ulp.mul(264).gte(1)) return undefined;
+  for (const q of SPECIAL_ANGLE_DENOMINATORS) {
+    const scaled = big.mul(new BigDecimal(q));
+    const p = scaled.round();
+    const error = scaled.sub(p).abs();
+    if (error.lte(ulp.mul(new BigDecimal(q)))) {
+      const n = p.toBigInt();
+      const g = bigGcd(n, q);
+      return g > 1n ? [n / g, q / g] : [n, q];
+    }
+  }
+  return undefined;
 }
 
 /**

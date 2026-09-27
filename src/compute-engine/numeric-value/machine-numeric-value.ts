@@ -11,6 +11,7 @@ import {
   machineNthRoot,
 } from '../numerics/numeric.js';
 import { chopComplexDust } from './roundoff.js';
+import { complexQuotient } from '../numerics/numeric-complex.js';
 
 export class MachineNumericValue extends NumericValue {
   declare __brand: 'MachineNumericValue';
@@ -222,7 +223,11 @@ export class MachineNumericValue extends NumericValue {
     if (this.isNegativeOne) return this;
     if (this.im === 0) return this.clone(1 / this.decimal);
 
-    // 1/z = conj(z) / |z|²  (not / |z|).
+    // 1/z = conj(z) / |z|²  (not / |z|). For finite parts,
+    // `complexQuotient()` scales the parts when |z|² overflows or underflows
+    // (`1/(1e308 + 1e308i)` is `5e-309 − 5e-309i`, not `0`).
+    if (Number.isFinite(this.decimal) && Number.isFinite(this.im))
+      return this.clone(complexQuotient(1, 0, this.decimal, this.im));
     const d = this.re * this.re + this.im * this.im;
     return this.clone({ re: this.decimal / d, im: -this.im / d });
   }
@@ -410,6 +415,16 @@ export class MachineNumericValue extends NumericValue {
 
     const [a, b] = [this.decimal, this.im];
     const [c, d] = [other.re, other.im];
+    // For finite parts, `complexQuotient()` scales the parts when an
+    // intermediate value of the formula below overflows or underflows
+    // (`(1e308 + 1e308i) / (1 + i)` is `1e308`, not `∞`).
+    if (
+      Number.isFinite(a) &&
+      Number.isFinite(b) &&
+      Number.isFinite(c) &&
+      Number.isFinite(d)
+    )
+      return this.clone(complexQuotient(a, b, c, d));
     const denominator = c * c + d * d;
     return this.clone({
       re: (a * c + b * d) / denominator,

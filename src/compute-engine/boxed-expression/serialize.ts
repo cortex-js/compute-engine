@@ -36,7 +36,7 @@ import type {
   JsonSerializationOptions,
   DisplayDigits,
 } from '../global-types.js';
-import { isDictionary, isOperatorDef } from './utils.js';
+import { boxBignumResult, isDictionary, isOperatorDef } from './utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   isNumber,
@@ -1004,7 +1004,7 @@ function serializeJsonNumber(
     return serializeJsonFunction(
       ce,
       'Complex',
-      [ce.number(value.bignumRe ?? value.re), ce.number(value.im)],
+      [boxBignumResult(ce, value.bignumRe ?? value.re), ce.number(value.im)],
       options,
       {
         ...metadata,

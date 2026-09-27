@@ -27,6 +27,7 @@ import {
 import { hasAsyncOnlyApplication } from '../boxed-expression/async-only-descendants.js';
 import {
   bignumPreferred,
+  boxBignumResult,
   numericFromExactValue,
   numericFromExactValueAsync,
 } from '../boxed-expression/utils.js';
@@ -70,6 +71,7 @@ import {
   zetaComplex,
   hurwitzZetaComplex,
   zetaGeneralizedComplex,
+  complexDivide,
 } from '../numerics/numeric-complex.js';
 import {
   factorial2 as bigFactorial2,
@@ -2942,6 +2944,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         const res = num.div(den);
         if (numericApproximation && res.operator !== 'Divide') return res.N();
+        // A quotient that stays a `Divide` can hold an exact factor that
+        // the division made: `1/∛(2x + 2)` is `1/(∛2·∛(x + 1))`. Under `N()`
+        // its operands are approximated, so `∛2` is a float.
+        if (numericApproximation && isFunction(res, 'Divide'))
+          return engine!.function('Divide', [res.op1.N(), res.op2.N()]);
         return res;
       },
     },
@@ -3279,6 +3286,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           estimatedFactorialDigits(n) / 2 > MAX_EXACT_FACTORIAL_DIGITS
         )
           return numericApproximation ? ce.number(factorial2(n)) : undefined;
+        // The big-decimal product of integers is exact, so the result is an
+        // exact integer at any magnitude (`ce.number()` of an integer-valued
+        // big decimal), not a numeric result.
         if (bignumPreferred(ce))
           return ce.number(
             run(
@@ -4159,7 +4169,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             exactValueOutOfDoubleRange(engine, operandOf(expression, 0), z)
           );
           if (big !== undefined) {
-            const ln = engine.number(withDoubleDigits(() => big.abs().ln()));
+            const ln = boxBignumResult(
+              engine,
+              withDoubleDigits(() => big.abs().ln())
+            );
             if (!big.isNegative()) return ln;
             return engine.number(engine.complex(ln.re, Math.PI));
           }
@@ -4275,7 +4288,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               b.isPositive() &&
               !b.eq(1)
             )
-              return ce.number(withDoubleDigits(() => z.ln().div(b.ln())));
+              return boxBignumResult(
+                ce,
+                withDoubleDigits(() => z.ln().div(b.ln()))
+              );
           }
         }
         // The exceptional points answer their exact quotient values on the
@@ -6026,7 +6042,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ops[1],
             (a, b) => a / b,
             (a, b) => a.div(b),
-            (a, b) => a.div(b)
+            (a, b) => complexDivide(a, b)
           );
         }
         const [n, d] = [asSmallInteger(ops[0]), asSmallInteger(ops[1])];
@@ -6216,7 +6232,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             (!big.isNegative() || (Number.isInteger(k) && k % 2 !== 0))
           ) {
             const r = withDoubleDigits(() => big.abs().ln().div(k).exp());
-            return engine.number(big.isNegative() ? r.neg() : r);
+            return boxBignumResult(engine, big.isNegative() ? r.neg() : r);
           }
         }
         // D2: an inexact (float) radicand or index numericizes even under
@@ -6623,7 +6639,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           );
           if (big !== undefined) {
             const r = withDoubleDigits(() => big.abs().sqrt());
-            if (!big.isNegative()) return engine.number(r);
+            if (!big.isNegative()) return boxBignumResult(engine, r);
             return engine.number(engine.complex(0, r.toNumber()));
           }
         }
@@ -6792,7 +6808,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       holdUntil: 'N',
 
       value: (engine) =>
-        engine.number(
+        boxBignumResult(
+          engine,
           bignumPreferred(engine) ? BigDecimal.ONE.exp() : Math.exp(1)
         ),
     },
@@ -6947,7 +6964,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // hardcoded ~858-digit literal capped γ-dependent results at higher
       // precision (ROADMAP B12). Machine mode uses the double value.
       value: (engine) =>
-        engine.number(
+        boxBignumResult(
+          engine,
           bignumPreferred(engine)
             ? BigDecimal.EULER_GAMMA
             : 0.5772156649015328606
@@ -9539,6 +9557,9 @@ function evaluateGcdLcm(
       }
     }
 
+    // The GCD or LCM of exact integers is an exact integer at any magnitude
+    // (`ce.number()` of an integer-valued big decimal). Float operands took
+    // the `realGcd`/`realLcm` branch above.
     if (rest.length === 0) return result === null ? ce.One : ce.number(result);
     if (result === null) return ce._fn(mode, rest);
     return ce._fn(mode, [ce.number(result), ...rest]);
