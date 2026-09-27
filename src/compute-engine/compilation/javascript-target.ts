@@ -491,6 +491,8 @@ import {
   trigamma,
   polygamma,
   zeta,
+  hurwitzZeta,
+  zetaGeneralized,
   lambertW,
   besselJ,
   besselY,
@@ -3008,6 +3010,8 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'FresnelC',
   'FresnelS',
   'BesselJ',
+  'Zeta',
+  'HurwitzZeta',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of this target. */
@@ -6954,7 +6958,27 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Trigamma: '_SYS.trigamma',
   PolyGamma: (args, compile) =>
     `_SYS.polygamma(${compile(args[0])}, ${compile(args[1])})`,
-  Zeta: '_SYS.zeta',
+  // The two-argument form is Wolfram's generalized `Zeta[s, a]`: the Hurwitz
+  // zeta for a > 0, but real |k + a|^(−s) terms and no pole for a ≤ 0, as the
+  // interpreter's `evaluateGeneralizedZeta` computes it — so it lowers to
+  // `_SYS.zetaGeneralized`, not to `_SYS.hurwitzZeta`. `_SYS.zeta` is the
+  // one-argument Riemann ζ only. Both are real-only lowerings
+  // (`JS_REAL_ONLY_LOWERINGS`).
+  Zeta: (args, compile) => {
+    if (args.length === 1) return `_SYS.zeta(${compile(args[0])})`;
+    if (args.length === 2)
+      return `_SYS.zetaGeneralized(${compile(args[0])}, ${compile(args[1])})`;
+    throw new Error('Could not compile `Zeta`: it takes one or two operands');
+  },
+  // The three-operand form `HurwitzZeta(s, a, n)` is a derivative the
+  // interpreter leaves symbolic, so it declines here.
+  HurwitzZeta: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        'Could not compile `HurwitzZeta`: only the two-operand form `HurwitzZeta(s, a)` compiles'
+      );
+    return `_SYS.hurwitzZeta(${compile(args[0])}, ${compile(args[1])})`;
+  },
   LambertW: '_SYS.lambertW',
 
   // Bessel functions
@@ -11623,6 +11647,8 @@ const SYS_HELPERS = {
   trigamma,
   polygamma,
   zeta,
+  hurwitzZeta,
+  zetaGeneralized,
   lambertW,
   besselJ,
   besselY,

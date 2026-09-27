@@ -80,6 +80,42 @@ export function bernoulliRational(n: number): [bigint, bigint] {
 }
 
 /**
+ * Bernoulli polynomial Bₙ(x) = Σ_{k=0}^n C(n,k)·Bₖ·x^{n−k}, for a rational
+ * point x = xNum/xDen. Used for the exact closed form
+ * ζ(−n,a) = −Bₙ₊₁(a)/(n+1) at a rational base point a (`library/arithmetic.ts`).
+ */
+export function bernoulliPolynomialRational(
+  n: number,
+  x: [bigint, bigint]
+): [bigint, bigint] {
+  if (!Number.isInteger(n) || n < 0)
+    throw new RangeError(`bernoulliPolynomialRational: invalid degree ${n}`);
+  const [xNum, xDen] = x;
+  let sumNum = 0n;
+  let sumDen = 1n;
+  let powNum = 1n; // xNum^{n-k}, grows as k counts down from n to 0
+  let powDen = 1n;
+  let binom = 1n; // C(n, k), starts at k = n → C(n, n) = 1
+  for (let k = n; k >= 0; k--) {
+    const [bNum, bDen] = bernoulliRational(k);
+    if (bNum !== 0n) {
+      const termNum = binom * bNum * powNum;
+      const termDen = bDen * powDen;
+      sumNum = sumNum * termDen + termNum * sumDen;
+      sumDen = sumDen * termDen;
+      [sumNum, sumDen] = reduce(sumNum, sumDen);
+    }
+    if (k > 0) {
+      // C(n, k-1) = C(n, k) · k / (n-k+1)
+      binom = (binom * BigInt(k)) / BigInt(n - k + 1);
+      powNum *= xNum;
+      powDen *= xDen;
+    }
+  }
+  return reduce(sumNum, sumDen);
+}
+
+/**
  * The exact rational c such that ζ(2k) = c·π^{2k}, for integer k ≥ 1.
  *
  * From ζ(2k) = (−1)^{k+1}·B₂ₖ·(2π)^{2k} / (2·(2k)!) and the sign alternation
@@ -107,4 +143,56 @@ export function zetaNegativeInteger(n: number): [bigint, bigint] {
     throw new RangeError(`zetaNegativeInteger: invalid index ${n}`);
   const [num, den] = bernoulliRational(n + 1);
   return reduce(-num, den * BigInt(n + 1));
+}
+
+/**
+ * ζ(−n,a) for integer n ≥ 0 and rational base point a, as an exact reduced
+ * rational: ζ(−n,a) = −Bₙ₊₁(a)/(n+1), the Bernoulli polynomial (DLMF
+ * 25.11.14). Generalizes `zetaNegativeInteger` (a = 1) to a rational a. At
+ * n = 0 it is ζ(0,a) = −B₁(a) = 1/2 − a, which needs the B₁ = −1/2
+ * convention this module uses.
+ */
+export function hurwitzZetaNegativeInteger(
+  n: number,
+  a: [bigint, bigint]
+): [bigint, bigint] {
+  if (!Number.isInteger(n) || n < 0)
+    throw new RangeError(`hurwitzZetaNegativeInteger: invalid index ${n}`);
+  const [num, den] = bernoulliPolynomialRational(n + 1, a);
+  return reduce(-num, den * BigInt(n + 1));
+}
+
+/**
+ * Wolfram's generalized `Zeta[−n, a]` for integer n ≥ 0 and rational a, as an
+ * exact reduced rational: the terms with k + a < 0 are |k + a|ⁿ, the term
+ * with k + a = 0 is dropped, and the rest is the Hurwitz ζ(−n, a₀) of the
+ * first base point a₀ ≥ 0 reached by steps of 1 (a₀ = 1 when that point is
+ * 0). This is the exact form of `zetaGeneralizedComplex`
+ * (`numeric-complex.ts`). Returns `undefined` when a is so negative that
+ * more than 1000 terms precede the positive axis.
+ */
+export function generalizedZetaNegativeInteger(
+  n: number,
+  a: [bigint, bigint]
+): [bigint, bigint] | undefined {
+  if (!Number.isInteger(n) || n < 0)
+    throw new RangeError(`generalizedZetaNegativeInteger: invalid index ${n}`);
+  let [num, den] = reduce(a[0], a[1]);
+  const power = BigInt(n);
+  let sumNum = 0n;
+  let sumDen = 1n;
+  let steps = 0;
+  while (num < 0n) {
+    if (++steps > 1000) return undefined;
+    const termNum = (-num) ** power;
+    const termDen = den ** power;
+    [sumNum, sumDen] = reduce(
+      sumNum * termDen + termNum * sumDen,
+      sumDen * termDen
+    );
+    num += den;
+  }
+  if (num === 0n) num = den; // drop the (k + a) = 0 term: continue at a₀ = 1
+  const [hNum, hDen] = hurwitzZetaNegativeInteger(n, [num, den]);
+  return reduce(sumNum * hDen + hNum * sumDen, sumDen * hDen);
 }

@@ -8,6 +8,10 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { loadIdentities } from '../../src/identities';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
+import { zeta as zetaReal } from '../../src/compute-engine/numerics/special-functions';
 import {
   bernoulliRational,
   zetaEvenCoefficient,
@@ -177,5 +181,446 @@ describe('An exact rational within a double of an integer is not that integer', 
     const n = ce.box(['Zeta', ['Add', 1, ['Power', 10, -30]]]).N().re;
     expect(Math.abs(n - 1e30) / 1e30).toBeLessThan(1e-12);
     expect(ce.box(['Zeta', 1]).evaluate().json).toBe('ComplexInfinity');
+  });
+});
+
+describe('Zeta at complex s', () => {
+  test('ζ(0.5 + 14i) matches the mpmath reference value', () => {
+    // mpmath: zeta(0.5+14j) = 0.0222411 − 0.1032581j
+    const z = ce.expr(['Zeta', ['Complex', 0.5, 14]]).N();
+    expect(z.re).toBeCloseTo(0.0222411, 6);
+    expect(z.im).toBeCloseTo(-0.1032581, 6);
+  });
+
+  test('a negative-real-part complex argument agrees with the real ζ on the real axis', () => {
+    // Re(s) < 0 goes through the functional equation on both the real
+    // (`zeta`) and complex (`zetaComplex`) kernels — two independent
+    // implementations of the same reduction, cross-checked here.
+    const z = ce.expr(['Zeta', ['Complex', -10.5, 0]]).N();
+    expect(z.im).toBeCloseTo(0, 10);
+    expect(z.re).toBeCloseTo(zetaReal(-10.5), 10);
+  });
+
+  test('a complex pole is still ~oo, not a finite complex NaN', () => {
+    expect(
+      ce
+        .expr(['Zeta', ['Complex', 1, 0]])
+        .evaluate()
+        .isSame(ce.ComplexInfinity)
+    ).toBe(true);
+  });
+});
+
+describe('Two-argument Zeta (Hurwitz) and HurwitzZeta', () => {
+  test('ζ(s,1) = ζ(s)', () => {
+    expect(
+      ce
+        .expr(['Zeta', 4, 1])
+        .evaluate()
+        .isSame(ce.expr(['Zeta', 4]).evaluate())
+    ).toBe(true);
+    expect(ce.expr(['Zeta', 4, 1]).N().re).toBeCloseTo(Math.PI ** 4 / 90, 10);
+  });
+
+  test('ζ(2, 1/3) matches a direct summation of the defining series', () => {
+    let sum = 0;
+    for (let k = 0; k < 2_000_000; k++) sum += (1 / 3 + k) ** -2;
+    expect(ce.expr(['Zeta', 2, ['Rational', 1, 3]]).N().re).toBeCloseTo(sum, 5);
+  });
+
+  test('ζ(0.5 + 14i, 1/3) is complex and finite', () => {
+    const z = ce.expr(['Zeta', ['Complex', 0.5, 14], ['Rational', 1, 3]]).N();
+    expect(Number.isFinite(z.re)).toBe(true);
+    expect(Number.isFinite(z.im)).toBe(true);
+  });
+
+  test('ζ(−n, a) = −Bₙ₊₁(a)/(n+1): exact rational at a rational base point', () => {
+    // B_2(1/3) = 1/9 − 1/3 + 1/6 = −1/18, so ζ(−1, 1/3) = −B_2(1/3)/2 = 1/36.
+    expect(
+      ce
+        .expr(['Zeta', -1, ['Rational', 1, 3]])
+        .evaluate()
+        .isSame(ce.number([1, 36]))
+    ).toBe(true);
+    expect(
+      ce
+        .expr(['HurwitzZeta', -1, ['Rational', 1, 3]])
+        .evaluate()
+        .isSame(ce.number([1, 36]))
+    ).toBe(true);
+  });
+
+  test('ζ(1, a) is the pole for every base point a', () => {
+    expect(
+      ce
+        .expr(['Zeta', 1, ['Rational', 1, 3]])
+        .evaluate()
+        .isSame(ce.ComplexInfinity)
+    ).toBe(true);
+    expect(
+      ce.expr(['HurwitzZeta', 1, 2]).evaluate().isSame(ce.ComplexInfinity)
+    ).toBe(true);
+  });
+
+  test('HurwitzZeta(s,a) agrees with the two-argument Zeta(s,a)', () => {
+    expect(ce.expr(['HurwitzZeta', 3, ['Rational', 1, 4]]).N().re).toBeCloseTo(
+      ce.expr(['Zeta', 3, ['Rational', 1, 4]]).N().re,
+      10
+    );
+  });
+});
+
+describe('Zeta / HurwitzZeta JS compile', () => {
+  test('a runtime one-argument Zeta matches the interpreted value', () => {
+    ce.declare('cz_x', 'real');
+    const run = compile(ce.box(['Zeta', 'cz_x']))?.run;
+    expect(run?.({ cz_x: 2 })).toBeCloseTo(Math.PI ** 2 / 6, 10);
+    // Re(s) < 0: the compiled kernel must take the functional-equation
+    // branch, not the direct (cancellation-prone) Euler-Maclaurin series.
+    expect(run?.({ cz_x: -10.5 })).toBeCloseTo(zetaReal(-10.5), 8);
+  });
+
+  test('a runtime two-argument Zeta and HurwitzZeta match the interpreted value', () => {
+    ce.declare('cz_s', 'real');
+    ce.declare('cz_a', 'real');
+    const runZeta = compile(ce.box(['Zeta', 'cz_s', 'cz_a']))?.run;
+    const runHZ = compile(ce.box(['HurwitzZeta', 'cz_s', 'cz_a']))?.run;
+    const expected = ce.expr(['Zeta', 2, ['Rational', 1, 3]]).N().re;
+    expect(runZeta?.({ cz_s: 2, cz_a: 1 / 3 })).toBeCloseTo(expected, 8);
+    expect(runHZ?.({ cz_s: 2, cz_a: 1 / 3 })).toBeCloseTo(expected, 8);
+  });
+});
+
+describe('Two-argument Zeta/HurwitzZeta precision at Re(s) << 0, a != 1', () => {
+  // A naive Euler-Maclaurin at a very negative Re(s) cancels heavily when
+  // a != 1; hurwitzZetaComplex instead shifts a and expands ζ(s,1+h) as a
+  // Taylor series of Riemann zetas (each reflected to Re >= 0), avoiding it.
+  test('HurwitzZeta(-20.5, 0.25) matches mpmath to ~1e-13 relative', () => {
+    const z = ce.expr(['HurwitzZeta', -20.5, 0.25]).N();
+    expect(z.im).toBeCloseTo(0, 8);
+    expect(Math.abs(z.re / 108.21747504680551109 - 1)).toBeLessThan(1e-13);
+  });
+
+  test('HurwitzZeta(-8.5, 0.3) matches mpmath to ~1e-13 relative', () => {
+    const z = ce.expr(['HurwitzZeta', -8.5, 0.3]).N();
+    expect(Math.abs(z.re / 0.005557849602182534 - 1)).toBeLessThan(1e-13);
+  });
+
+  test('HurwitzZeta(-2.5+i, 1/3) matches mpmath to ~1e-11 relative', () => {
+    const z = ce
+      .expr(['HurwitzZeta', ['Complex', -2.5, 1], ['Rational', 1, 3]])
+      .N();
+    expect(Math.abs(z.re / -0.014434340959835304646 - 1)).toBeLessThan(1e-11);
+    expect(Math.abs(z.im / -0.017476965783826936444 - 1)).toBeLessThan(1e-11);
+  });
+});
+
+describe('HurwitzZeta vs Zeta at a <= 0 (Wolfram distinguishes the two)', () => {
+  // Zeta[s,a] drops the (k+a) = 0 term and stays real there; HurwitzZeta[s,a]
+  // (mpmath's zeta(s,a)) is the plain series and is genuinely complex at a
+  // non-positive, non-integer a — arithmetic.ts must route each convention
+  // through its own kernel rather than reusing one for both.
+  test('Zeta(0.5, -2.5) is real, matching the Wolfram Zeta[s,a] convention', () => {
+    const z = ce.expr(['Zeta', 0.5, -2.5]).N();
+    expect(z.im ?? 0).toBeCloseTo(0, 10);
+    expect(Math.abs(z.re / 2.25826703191286657769 - 1)).toBeLessThan(1e-13);
+  });
+
+  test('HurwitzZeta(0.5, -2.5) is complex, matching mpmath', () => {
+    const z = ce.expr(['HurwitzZeta', 0.5, -2.5]).N();
+    expect(Math.abs(z.re / -0.60489864342163037025 - 1)).toBeLessThan(1e-13);
+    expect(Math.abs(z.im / -2.8631656753344969479 - 1)).toBeLessThan(1e-13);
+  });
+});
+
+describe('HurwitzZeta at large s', () => {
+  test('HurwitzZeta(18.199, 4.933) keeps a tiny value (mpmath 2.5226160559690445e-13)', () => {
+    const z = ce.expr(['HurwitzZeta', 18.199, 4.933]).N();
+    expect(Math.abs(z.re / 2.5226160559690445e-13 - 1)).toBeLessThan(1e-12);
+  });
+});
+
+// A sample of @enumeratio/analytic's Zeta.examples.yaml / HurwitzZeta.examples.yaml,
+// each cross-checked against mpmath/Wolfram there.
+describe('Reference examples (enumeratio)', () => {
+  test('Zeta(3, -1/2) = 8 + Zeta(3, 1/2), Wolfram convention for a <= 0', () => {
+    expect(ce.expr(['Zeta', 3, ['Rational', -1, 2]]).N().re).toBeCloseTo(
+      16.4143983221171599978,
+      10
+    );
+  });
+
+  test('Zeta(-1, -2) = 35/12, exactly and numerically', () => {
+    // |−2| + |−1| + (the a = 0 term dropped) + ζ(−1, 1) = 3 − 1/12.
+    expect(
+      ce
+        .expr(['Zeta', -1, -2])
+        .evaluate()
+        .isSame(ce.number([35, 12]))
+    ).toBe(true);
+    expect(ce.expr(['Zeta', -1, -2]).N().re).toBeCloseTo(35 / 12, 10);
+  });
+
+  test('Zeta(-1, 5) = -B_2(5)/2 = -121/12 exactly', () => {
+    expect(
+      ce
+        .expr(['Zeta', -1, 5])
+        .evaluate()
+        .isSame(ce.number([-121, 12]))
+    ).toBe(true);
+  });
+
+  test('Zeta(3, 0) = Zeta(3): the dropped-pole convention holds at any s', () => {
+    expect(
+      ce
+        .expr(['Zeta', 3, 0])
+        .evaluate()
+        .isSame(ce.expr(['Zeta', 3]))
+    ).toBe(true);
+  });
+
+  test('HurwitzZeta(-3, 7/3) = -B_4(7/3)/4 = -7813/3240 exactly', () => {
+    expect(
+      ce
+        .expr(['HurwitzZeta', -3, ['Rational', 7, 3]])
+        .evaluate()
+        .isSame(ce.number([-7813, 3240]))
+    ).toBe(true);
+  });
+
+  test('HurwitzZeta(0.51, 0.87), inside the critical strip', () => {
+    expect(ce.expr(['HurwitzZeta', 0.51, 0.87]).N().re).toBeCloseTo(
+      -1.32015502369495837551,
+      10
+    );
+  });
+
+  test('HurwitzZeta(2.3, Complex(8,1)), complex a', () => {
+    const z = ce.expr(['HurwitzZeta', 2.3, ['Complex', 8, 1]]).N();
+    expect(z.re).toBeCloseTo(0.05447008273213067, 10);
+    expect(z.im).toBeCloseTo(-0.009448515336470249, 10);
+  });
+
+  test('HurwitzZeta([2,3,4], 0.5) threads over a list of orders', () => {
+    const z = ce.expr(['HurwitzZeta', ['List', 2, 3, 4], 0.5]).evaluate();
+    const got = z.ops?.map((op) => op.N().re) ?? [];
+    const expected = [4.934802200544679, 8.41439832211716, 16.234848505667074];
+    expect(got.length).toBe(3);
+    got.forEach((v, i) => expect(v).toBeCloseTo(expected[i], 10));
+  });
+
+  test('HurwitzZeta(7, 5) peels off the first terms: Zeta(7) - sum_{k=1}^{4} k^-7', () => {
+    const z = ce.expr(['HurwitzZeta', 7, 5]).evaluate();
+    expect(z.has('Zeta')).toBe(true);
+    expect(z.N().re).toBeCloseTo(
+      ce.expr(['Zeta', 7]).N().re - 36130315 / 35831808,
+      10
+    );
+  });
+});
+
+describe('Zeta(0, a) = 1/2 − a exactly', () => {
+  test.each([
+    [
+      ['Rational', 1, 3],
+      [1, 6],
+    ],
+    [
+      ['Rational', 7, 3],
+      [-11, 6],
+    ],
+    [1, [-1, 2]],
+  ])('Zeta(0, %j)', (a, expected) => {
+    expect(
+      ce
+        .expr(['Zeta', 0, a])
+        .evaluate()
+        .isSame(ce.number(expected as [number, number]))
+    ).toBe(true);
+    expect(
+      ce
+        .expr(['HurwitzZeta', 0, a])
+        .evaluate()
+        .isSame(ce.number(expected as [number, number]))
+    ).toBe(true);
+  });
+});
+
+describe('Two-operand Zeta at edge operands', () => {
+  test('a non-finite base point does not hang', () => {
+    expect(ce.expr(['Zeta', 2, 'NegativeInfinity']).N().isNumberLiteral).toBe(
+      false
+    );
+    expect(ce.expr(['HurwitzZeta', 2, 'NegativeInfinity']).N().re).toBeNaN();
+  });
+
+  test('s = 1 is the pole at a negative base point too', () => {
+    expect(ce.expr(['Zeta', 1, -2.5]).N().isSame(ce.ComplexInfinity)).toBe(
+      true
+    );
+    expect(
+      ce
+        .expr(['Zeta', 1, ['Rational', -5, 2]])
+        .evaluate()
+        .isSame(ce.ComplexInfinity)
+    ).toBe(true);
+  });
+
+  test('a large positive integer base point uses the kernel under N()', () => {
+    // ζ(100, 5) = 5^(−100) + 6^(−100) + …, where ζ(100) − Σ_{k<5} k^(−100)
+    // cancels to 0 or noise. The direct sum of a few terms is exact to 1 ulp.
+    let expected = 0;
+    for (let k = 5; k < 20; k++) expected += k ** -100;
+    const z = ce.expr(['HurwitzZeta', 100, 5]).N();
+    expect(Math.abs(z.re / expected - 1)).toBeLessThan(1e-12);
+    // ζ(2, 2000) ≈ 1/1999.5, and must not build a 2000-term symbolic sum.
+    const t0 = Date.now();
+    const w = ce.expr(['Zeta', 2, 2000]).N();
+    expect(Date.now() - t0).toBeLessThan(200);
+    expect(w.re).toBeCloseTo(0.0005001250208333, 13);
+    // The exact route stays symbolic past 20 terms.
+    expect(ce.expr(['Zeta', 2, 25]).evaluate().operator).toBe('Zeta');
+  });
+
+  test('real s far below 0 with a real a > 0 is real', () => {
+    const z = ce.expr(['HurwitzZeta', -60.5, 0.3]).N();
+    expect(z.im).toBe(0);
+    expect(z.re).toBeGreaterThan(9e33);
+    const w = ce.expr(['Zeta', -101, ['Rational', 1, 2]]).N();
+    expect(w.im).toBe(0);
+    expect(w.re).toBeGreaterThan(7e78);
+  });
+
+  test('ζ(s, 1/2) = (2^s − 1)·ζ(s)', () => {
+    expect(
+      ce
+        .expr(['Zeta', 2, ['Rational', 1, 2]])
+        .evaluate()
+        .isSame(ce.parse('\\frac{\\pi^2}{2}'))
+    ).toBe(true);
+    const z3 = ce.expr(['Zeta', 3, ['Rational', 1, 2]]).evaluate();
+    expect(z3.N().re).toBeCloseTo(ce.expr(['HurwitzZeta', 3, 0.5]).N().re, 12);
+  });
+
+  test('infinite operands have their limits', () => {
+    expect(ce.expr(['Zeta', 'PositiveInfinity', 2]).N().re).toBe(0);
+    expect(ce.expr(['Zeta', 'PositiveInfinity', 1]).evaluate().re).toBe(1);
+    expect(
+      ce
+        .expr(['Zeta', 'PositiveInfinity', ['Rational', 1, 2]])
+        .evaluate()
+        .isSame(ce.PositiveInfinity)
+    ).toBe(true);
+    expect(ce.expr(['Zeta', 2, 'PositiveInfinity']).evaluate().re).toBe(0);
+    expect(ce.expr(['HurwitzZeta', 2, 'PositiveInfinity']).N().re).toBe(0);
+  });
+});
+
+describe('Zeta / HurwitzZeta result types', () => {
+  test('the poles and the complex branch are typed number', () => {
+    expect(ce.expr(['Zeta', 1, 2]).type.toString()).toBe('number');
+    expect(ce.expr(['HurwitzZeta', 1, 2]).type.toString()).toBe('number');
+    expect(ce.expr(['HurwitzZeta', 2, 0]).type.toString()).toBe('number');
+    expect(ce.expr(['HurwitzZeta', 0.5, -0.5]).type.toString()).toBe('number');
+  });
+
+  test('real operands on the real branch are typed real', () => {
+    expect(ce.expr(['HurwitzZeta', 2, 3]).type.toString()).toBe('real');
+    // Wolfram's generalized Zeta is real at every real a.
+    expect(ce.expr(['Zeta', 0.5, -0.5]).type.toString()).toBe('real');
+  });
+});
+
+describe('Zeta / HurwitzZeta LaTeX round trip', () => {
+  test.each([[['Zeta', 's', 'a']], [['HurwitzZeta', 's', 'a']]])('%j', (e) => {
+    const expr = ce.expr(e);
+    expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+  });
+});
+
+describe('Compiled Zeta / HurwitzZeta match N()', () => {
+  ce.declare('cp_s', 'real');
+  ce.declare('cp_a', 'real');
+  const runZ1 = compile(ce.box(['Zeta', 'cp_s']))?.run;
+  const runZ = compile(ce.box(['Zeta', 'cp_s', 'cp_a']))?.run;
+  const runH = compile(ce.box(['HurwitzZeta', 'cp_s', 'cp_a']))?.run;
+
+  // Compare a compiled value with the interpreter's `.N()`: `~oo` is
+  // `+Infinity` compiled; a complex value is NaN compiled.
+  function expectParity(got: unknown, expr: any) {
+    const n = ce.expr(expr).N();
+    if (n.isSame(ce.ComplexInfinity)) expect(got).toBe(Infinity);
+    else if (n.im !== 0) expect(got).toBeNaN();
+    else
+      expect(Math.abs((got as number) - n.re)).toBeLessThan(
+        1e-10 * Math.max(1, Math.abs(n.re))
+      );
+  }
+
+  test.each([2, 0.5, -3, -10.5, 1])('Zeta(%p)', (s) => {
+    expectParity(runZ1?.({ cp_s: s }), ['Zeta', s]);
+  });
+
+  test.each([
+    [2, 1 / 3],
+    [0.5, -0.5],
+    [3, -0.5],
+    [2, 0],
+    [2, -2],
+    [0, -2],
+    [-2.5, -1.5],
+    [1, 2],
+    [1, -2.5],
+  ])('Zeta(%p, %p)', (s, a) => {
+    expectParity(runZ?.({ cp_s: s, cp_a: a }), ['Zeta', s, a]);
+  });
+
+  test.each([
+    [2, 1 / 3],
+    [2, -0.5],
+    [0.5, -0.5],
+    [0.5, -2.5],
+    [-3, 0.3],
+    [0, 0],
+    [0, -2],
+    [1, 2],
+    [2, 0],
+    [2, -3],
+  ])('HurwitzZeta(%p, %p)', (s, a) => {
+    expectParity(runH?.({ cp_s: s, cp_a: a }), ['HurwitzZeta', s, a]);
+  });
+
+  test('the three-operand HurwitzZeta does not compile', () => {
+    expect(compile(ce.box(['HurwitzZeta', 'cp_s', 'cp_a', 2])).success).toBe(
+      false
+    );
+  });
+});
+
+describe('GPU Zeta / HurwitzZeta preamble', () => {
+  ce.declare('gz_s', 'real');
+  ce.declare('gz_a', 'real');
+  const targets = [
+    ['GLSL', new GLSLTarget(), 'float _gpu_gamma('],
+    ['WGSL', new WGSLTarget(), 'fn _gpu_gamma('],
+  ] as const;
+
+  test.each(targets)(
+    '%s: HurwitzZeta(s, a) and Zeta(s, a) define _gpu_gamma',
+    (_name, target, gammaDecl) => {
+      for (const e of [
+        ['HurwitzZeta', 'gz_s', 'gz_a'],
+        ['Zeta', 'gz_s', 'gz_a'],
+      ]) {
+        const r = target.compile(ce.box(e));
+        expect(r.success).toBe(true);
+        expect(r.preamble ?? '').toContain(gammaDecl);
+      }
+    }
+  );
+
+  test('the two-operand Zeta lowers to the generalized helper', () => {
+    const r = new GLSLTarget().compile(ce.box(['Zeta', 'gz_s', 'gz_a']));
+    expect(r.code).toBe('_gpu_zeta_generalized(gz_s, gz_a)');
   });
 });

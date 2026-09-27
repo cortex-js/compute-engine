@@ -1,7 +1,9 @@
+import { Complex } from 'complex-esm';
 import type { IComputeEngine as ComputeEngine } from '../global-types.js';
 import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { hurwitzZetaComplex } from './numeric-complex.js';
 
 const gammaG = 7;
 const lanczos_7_c = [
@@ -1536,7 +1538,7 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum, branch = 0): BigNum {
 const EULER_MASCHERONI = 0.5772156649015329;
 
 // Bernoulli numbers B_{2k} for k=1..10 (used in asymptotic expansions)
-const BERNOULLI_2K = [
+export const BERNOULLI_2K = [
   1 / 6, // B_2
   -1 / 30, // B_4
   1 / 42, // B_6
@@ -1773,6 +1775,58 @@ export function zeta(s: number): number {
   }
   // 1 − 2^{1−s} = −expm1((1−s)·ln 2), computed without cancellation near s = 1
   return sum / dn / -Math.expm1((1 - s) * Math.LN2);
+}
+
+/**
+ * Real Hurwitz zeta ζ(s,a) = Σ (k+a)^(−s), for the compiled (JS) real-scalar
+ * path. Re(s) ≪ 0 with a ≠ 1 needs the same Taylor-shift the complex kernel
+ * uses to avoid cancellation (see there), so this delegates to
+ * `hurwitzZetaComplex` rather than repeating a simpler, cancellation-prone
+ * version.
+ *
+ * The values match the interpreter's `HurwitzZeta`: `+Infinity` (the float
+ * encoding of the undirected infinity) at the pole s = 1 and at a
+ * non-positive integer a with s > 0, where the (k + a) = 0 term diverges;
+ * ζ(0, a) = 1/2 − a (the (k + a) = 0 term counts as 0⁰ = 1 there, which the
+ * kernel drops). A term (k + a)^(−s) with k + a < 0 is complex for a
+ * non-integer s, so the value is real only when a ≥ 0 or s is an integer;
+ * elsewhere this returns NaN, never the real part alone.
+ */
+export function hurwitzZeta(s: number, a: number): number {
+  if (Number.isNaN(s) || Number.isNaN(a)) return NaN;
+  if (s === 1) return Infinity;
+  if (s === Infinity && Number.isFinite(a) && a > 0)
+    return a > 1 ? 0 : a === 1 ? 1 : Infinity;
+  if (a === Infinity && Number.isFinite(s)) return s > 1 ? 0 : NaN;
+  if (!Number.isFinite(s) || !Number.isFinite(a)) return NaN;
+  if (a <= 0 && Number.isInteger(a) && s > 0) return Infinity;
+  if (s === 0) return 0.5 - a;
+  if (a < 0 && !Number.isInteger(s)) return NaN;
+  return hurwitzZetaComplex(new Complex(s, 0), new Complex(a, 0)).re;
+}
+
+/**
+ * Real generalized zeta `Zeta(s, a)` in Wolfram's convention, for the
+ * compiled (JS) real-scalar path: the same as `hurwitzZeta` for a > 0; for
+ * a ≤ 0 the terms with k + a < 0 are |k + a|^(−s) (always real), the
+ * (k + a) = 0 term is dropped, and the rest is a Hurwitz ζ at a positive
+ * base point. So Zeta(s, 0) = ζ(s), and the only pole is s = 1. This is the
+ * real form of `zetaGeneralizedComplex` (`numeric-complex.ts`), which the
+ * interpreter uses.
+ */
+export function zetaGeneralized(s: number, a: number): number {
+  if (Number.isNaN(s) || Number.isNaN(a)) return NaN;
+  if (s === 1) return Infinity;
+  if (a > 0) return hurwitzZeta(s, a);
+  if (a === 0) return zeta(s);
+  if (!Number.isFinite(s) || !Number.isFinite(a)) return NaN;
+  let sum = 0;
+  let cur = a;
+  while (cur < 0) {
+    sum += Math.pow(-cur, -s);
+    cur += 1;
+  }
+  return sum + hurwitzZeta(s, cur === 0 ? 1 : cur);
 }
 
 const ZETA_BORWEIN_N = 28;

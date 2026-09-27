@@ -3001,6 +3001,8 @@ const GPU_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'InverseHaversine',
   'Gamma',
   'Factorial',
+  'Zeta',
+  'HurwitzZeta',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of the shader targets. The base
@@ -7039,6 +7041,26 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Could not compile `Erf`: no argument');
     return `_gpu_erf(${compile(x)})`;
   },
+  // The two-argument form is Wolfram's generalized `Zeta[s, a]`: the Hurwitz
+  // zeta for a > 0, but real |k + a|^(−s) terms and no pole for a ≤ 0, as the
+  // interpreter's `evaluateGeneralizedZeta` computes it — so it lowers to
+  // `_gpu_zeta_generalized`, not to `_gpu_hurwitz_zeta`. `_gpu_zeta` is the
+  // one-argument Riemann ζ only.
+  Zeta: (args, compile) => {
+    if (args.length === 1) return `_gpu_zeta(${compile(args[0])})`;
+    if (args.length === 2)
+      return `_gpu_zeta_generalized(${compile(args[0])}, ${compile(args[1])})`;
+    throw new Error('Could not compile `Zeta`: it takes one or two operands');
+  },
+  // The three-operand form `HurwitzZeta(s, a, n)` is a derivative the
+  // interpreter leaves symbolic, so it declines here.
+  HurwitzZeta: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        'Could not compile `HurwitzZeta`: only the two-operand form `HurwitzZeta(s, a)` compiles'
+      );
+    return `_gpu_hurwitz_zeta(${compile(args[0])}, ${compile(args[1])})`;
+  },
   Binomial: gpuBinomial,
   // `Choose(n, k)` is the binomial coefficient — same lowering (the two heads
   // share `evaluateBinomial` in the interpreter, so they must agree here too).
@@ -8731,6 +8753,277 @@ fn _gpu_gammaln(z: f32) -> f32 {
     + 1.0 / (12.0 * z)
     - 1.0 / (360.0 * z3)
     + 1.0 / (1260.0 * z3 * z * z);
+}
+`;
+
+/**
+ * GPU Hurwitz/Riemann/generalized zeta, real-valued (f32) — ported from
+ * `hurwitzEMComplex` and `hurwitzZetaComplex` in
+ * `numerics/numeric-complex.ts`, at im = 0 throughout, with the value
+ * conventions of the JavaScript helpers `hurwitzZeta` and `zetaGeneralized`
+ * (`numerics/special-functions.ts`). GLSL syntax.
+ *
+ * - `_gpu_zeta_pow(x, e)` is x^e with a real value: `pow` is undefined for
+ *   x < 0 in GLSL and WGSL, so a negative x with an integer e is |x|^e with
+ *   the sign (−1)^e, and a negative x with a non-integer e (a complex
+ *   value) answers NaN.
+ * - `_gpu_hurwitz_zeta_em` is the raw Euler-Maclaurin sum; `_gpu_zeta` and
+ *   `_gpu_hurwitz_zeta` add the functional-equation / Taylor-shift dispatch
+ *   that avoids its cancellation at s < 0.
+ * - `_gpu_zeta` reflects only for s < 0 and returns NaN below s = −24.5:
+ *   the f32 `_gpu_gamma(1 − s)` overflows to infinity once 1 − s reaches
+ *   about 26 (its Lanczos power term passes the f32 maximum 3.4e38).
+ * - `_gpu_hurwitz_zeta(s, a)` is the pole (+∞) at s = 1 and at a
+ *   non-positive integer a with s > 0, 1/2 − a at s = 0, and NaN at a < 0
+ *   with a non-integer s, where the true value is complex.
+ * - `_gpu_zeta_generalized(s, a)` is Wolfram's `Zeta[s, a]`: the terms with
+ *   k + a < 0 are |k + a|^(−s), the (k + a) = 0 term is dropped, so it is
+ *   real for every real s and a and its only pole is s = 1.
+ *
+ * Both base-point walks cost one term per unit of |a|, so a < −10⁶ answers
+ * NaN instead of looping for that long.
+ */
+export const GPU_ZETA_PREAMBLE_GLSL = `
+float _gpu_zeta_pow(float x, float e) {
+  if (x >= 0.0) return pow(x, e);
+  if (e != floor(e)) return _gpu_nan();
+  float r = pow(-x, e);
+  if (mod(abs(e), 2.0) == 1.0) return -r;
+  return r;
+}
+
+float _gpu_hurwitz_zeta_em(float s, float a) {
+  int n = int(ceil(15.0 - a));
+  if (n < 0) n = 0;
+  float sum = 0.0;
+  float z = a;
+  for (int k = 0; k < n; k++) {
+    sum += _gpu_zeta_pow(z, -s);
+    z += 1.0;
+  }
+  // Tail: closed-form integral + half-term (DLMF 25.11.9).
+  sum += pow(z, 1.0 - s) / (s - 1.0) + 0.5 * pow(z, -s);
+  // Bernoulli correction series, same ten B_2j as BERNOULLI_2K
+  // (special-functions.ts); u carries the term divided by B_2j.
+  float b[10] = float[10](
+    1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0,
+    -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0, 43867.0 / 798.0,
+    -174611.0 / 330.0
+  );
+  float u = (s / 2.0) * pow(z, -(s + 1.0));
+  float prevAbs = 3.0e38;
+  for (int j = 1; j <= 10; j++) {
+    float term = u * b[j - 1];
+    if (abs(term) >= prevAbs) break;
+    sum += term;
+    prevAbs = abs(term);
+    float m = float(2 * j);
+    u = u * (s + m - 1.0) * (s + m) / ((m + 1.0) * (m + 2.0) * z * z);
+  }
+  return sum;
+}
+
+float _gpu_zeta(float s) {
+  const float PI = 3.14159265358979;
+  if (s == 1.0) return _gpu_inf(); // pole
+  if (s == 0.0) return -0.5;
+  if (s < 0.0) {
+    if (s == floor(s) && mod(s, 2.0) == 0.0) return 0.0; // trivial zero
+    if (s < -24.5) return _gpu_nan(); // f32 _gpu_gamma(1 - s) overflows
+    float oneMinusS = 1.0 - s;
+    return pow(2.0, s) * pow(PI, s - 1.0) * sin(PI * s / 2.0) *
+      _gpu_gamma(oneMinusS) * _gpu_hurwitz_zeta_em(oneMinusS, 1.0);
+  }
+  return _gpu_hurwitz_zeta_em(s, 1.0);
+}
+
+// zeta(s, 1+h) = sum C(-s,k) h^k zeta(s+k), |h| < 1 — no cancellation,
+// since each zeta(s+k) reflects to Re >= 0. See zetaNearOneComplex. The
+// stop tolerance is near the f32 epsilon (1.2e-7), and 100 terms reach it
+// for every s >= -24.5 (below that _gpu_zeta is NaN).
+float _gpu_zeta_near_one(float s, float h) {
+  float sum = _gpu_zeta(s);
+  float c = 1.0;
+  float hk = 1.0;
+  float largest = abs(sum);
+  int small = 0;
+  for (int k = 1; k < 100; k++) {
+    hk *= h;
+    if (hk == 0.0) break;
+    float f = -s - float(k) + 1.0;
+    if (f == 0.0) return sum + c * hk * (-1.0 / float(k));
+    c = c * f / float(k);
+    float term = c * hk * _gpu_zeta(s + float(k));
+    sum += term;
+    float size = abs(term);
+    largest = max(largest, size);
+    if (size <= 1e-7 * largest) {
+      if (++small == 2) break;
+    } else small = 0;
+  }
+  return sum;
+}
+
+float _gpu_hurwitz_zeta(float s, float a) {
+  if (s == 1.0) return _gpu_inf(); // pole, every base point a
+  if (s == 0.0) return 0.5 - a;
+  if (a == 1.0) return _gpu_zeta(s);
+  bool aNonposInt = a <= 0.0 && a == floor(a);
+  if (aNonposInt && s > 0.0) return _gpu_inf(); // (a+k) = 0 term diverges
+  if (a < 0.0 && s != floor(s)) return _gpu_nan(); // complex value
+  if (a < -1.0e6) return _gpu_nan();
+  float edge = max(12.0, ceil(abs(s)) + 6.0);
+  if (s >= 0.0 || a >= 4.0 * edge) return _gpu_hurwitz_zeta_em(s, a);
+  // Shift a to 1+h (|h| <= 3/4) and expand in Taylor series — see
+  // hurwitzZetaComplex's doc comment for why EM alone cancels here.
+  float m = floor(a - 0.5);
+  float h = a - m - 1.0;
+  if (abs(h) > 0.75) return _gpu_hurwitz_zeta_em(s, a);
+  float z = _gpu_zeta_near_one(s, h);
+  int steps = int(abs(m));
+  for (int j = 0; j < steps; j++) {
+    float br = m > 0.0 ? h + 1.0 + float(j) : a + float(j);
+    if (br == 0.0) continue;
+    float t = _gpu_zeta_pow(br, -s);
+    z = m > 0.0 ? z - t : z + t;
+  }
+  return z;
+}
+
+float _gpu_zeta_generalized(float s, float a) {
+  if (s == 1.0) return _gpu_inf(); // pole, every base point a
+  if (a > 0.0) return _gpu_hurwitz_zeta(s, a);
+  if (a == 0.0) return _gpu_zeta(s);
+  if (a < -1.0e6) return _gpu_nan();
+  int n = int(ceil(-a));
+  float sum = 0.0;
+  for (int k = 0; k < n; k++) sum += pow(-(a + float(k)), -s);
+  float cur = a + float(n);
+  if (cur == 0.0) cur = 1.0; // drop the (k + a) = 0 term
+  return sum + _gpu_hurwitz_zeta(s, cur);
+}
+`;
+
+/**
+ * GPU Hurwitz/Riemann/generalized zeta functions (WGSL syntax). See
+ * `GPU_ZETA_PREAMBLE_GLSL`; WGSL has no implicit GLSL-style `float`/
+ * braceless-`if` syntax, so a separate variant is required, and the pole
+ * and NaN are spelled inline as bit patterns (see `GPU_GAMMA_PREAMBLE_WGSL`).
+ */
+export const GPU_ZETA_PREAMBLE_WGSL = `
+fn _gpu_zeta_pow(x: f32, e: f32) -> f32 {
+  if (x >= 0.0) { return pow(x, e); }
+  if (e != floor(e)) { return bitcast<f32>(0x7fc00000u); }
+  let r = pow(-x, e);
+  if ((abs(e) % 2.0) == 1.0) { return -r; }
+  return r;
+}
+
+fn _gpu_hurwitz_zeta_em(s: f32, a: f32) -> f32 {
+  var n: i32 = i32(ceil(15.0 - a));
+  if (n < 0) { n = 0; }
+  var sum: f32 = 0.0;
+  var z: f32 = a;
+  for (var k: i32 = 0; k < n; k = k + 1) {
+    sum = sum + _gpu_zeta_pow(z, -s);
+    z = z + 1.0;
+  }
+  sum = sum + pow(z, 1.0 - s) / (s - 1.0) + 0.5 * pow(z, -s);
+  let b = array<f32, 10>(
+    1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0,
+    -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0, 43867.0 / 798.0,
+    -174611.0 / 330.0
+  );
+  var u: f32 = (s / 2.0) * pow(z, -(s + 1.0));
+  var prevAbs: f32 = 3.0e38;
+  for (var j: i32 = 1; j <= 10; j = j + 1) {
+    let term = u * b[j - 1];
+    if (abs(term) >= prevAbs) { break; }
+    sum = sum + term;
+    prevAbs = abs(term);
+    let m = f32(2 * j);
+    u = u * (s + m - 1.0) * (s + m) / ((m + 1.0) * (m + 2.0) * z * z);
+  }
+  return sum;
+}
+
+fn _gpu_zeta(s: f32) -> f32 {
+  let PI = 3.14159265358979;
+  if (s == 1.0) { return bitcast<f32>(0x7f800000u); } // pole
+  if (s == 0.0) { return -0.5; }
+  if (s < 0.0) {
+    if (s == floor(s) && (s % 2.0) == 0.0) { return 0.0; } // trivial zero
+    if (s < -24.5) { return bitcast<f32>(0x7fc00000u); } // f32 gamma overflows
+    let oneMinusS = 1.0 - s;
+    return pow(2.0, s) * pow(PI, s - 1.0) * sin(PI * s / 2.0) *
+      _gpu_gamma(oneMinusS) * _gpu_hurwitz_zeta_em(oneMinusS, 1.0);
+  }
+  return _gpu_hurwitz_zeta_em(s, 1.0);
+}
+
+// zeta(s, 1+h) = sum C(-s,k) h^k zeta(s+k) — see GLSL's _gpu_zeta_near_one.
+fn _gpu_zeta_near_one(s: f32, h: f32) -> f32 {
+  var sum = _gpu_zeta(s);
+  var c = 1.0;
+  var hk = 1.0;
+  var largest = abs(sum);
+  var small = 0;
+  for (var k = 1; k < 100; k = k + 1) {
+    hk = hk * h;
+    if (hk == 0.0) { break; }
+    let f = -s - f32(k) + 1.0;
+    if (f == 0.0) { return sum + c * hk * (-1.0 / f32(k)); }
+    c = c * f / f32(k);
+    let term = c * hk * _gpu_zeta(s + f32(k));
+    sum = sum + term;
+    let size = abs(term);
+    largest = max(largest, size);
+    if (size <= 1e-7 * largest) {
+      small = small + 1;
+      if (small == 2) { break; }
+    } else { small = 0; }
+  }
+  return sum;
+}
+
+fn _gpu_hurwitz_zeta(s: f32, a: f32) -> f32 {
+  if (s == 1.0) { return bitcast<f32>(0x7f800000u); } // pole, every base point a
+  if (s == 0.0) { return 0.5 - a; }
+  if (a == 1.0) { return _gpu_zeta(s); }
+  let aNonposInt = a <= 0.0 && a == floor(a);
+  if (aNonposInt && s > 0.0) { return bitcast<f32>(0x7f800000u); } // (a+k) = 0 diverges
+  if (a < 0.0 && s != floor(s)) { return bitcast<f32>(0x7fc00000u); } // complex value
+  if (a < -1.0e6) { return bitcast<f32>(0x7fc00000u); }
+  let edge = max(12.0, ceil(abs(s)) + 6.0);
+  if (s >= 0.0 || a >= 4.0 * edge) { return _gpu_hurwitz_zeta_em(s, a); }
+  // Shift a to 1+h (|h| <= 3/4) and expand in Taylor series — see
+  // hurwitzZetaComplex's doc comment for why EM alone cancels here.
+  let m = floor(a - 0.5);
+  let h = a - m - 1.0;
+  if (abs(h) > 0.75) { return _gpu_hurwitz_zeta_em(s, a); }
+  var z = _gpu_zeta_near_one(s, h);
+  let steps = i32(abs(m));
+  for (var j = 0; j < steps; j = j + 1) {
+    var br: f32;
+    if (m > 0.0) { br = h + 1.0 + f32(j); } else { br = a + f32(j); }
+    if (br == 0.0) { continue; }
+    let t = _gpu_zeta_pow(br, -s);
+    if (m > 0.0) { z = z - t; } else { z = z + t; }
+  }
+  return z;
+}
+
+fn _gpu_zeta_generalized(s: f32, a: f32) -> f32 {
+  if (s == 1.0) { return bitcast<f32>(0x7f800000u); } // pole, every base point a
+  if (a > 0.0) { return _gpu_hurwitz_zeta(s, a); }
+  if (a == 0.0) { return _gpu_zeta(s); }
+  if (a < -1.0e6) { return bitcast<f32>(0x7fc00000u); }
+  let n = i32(ceil(-a));
+  var sum: f32 = 0.0;
+  for (var k: i32 = 0; k < n; k = k + 1) { sum = sum + pow(-(a + f32(k)), -s); }
+  var cur = a + f32(n);
+  if (cur == 0.0) { cur = 1.0; } // drop the (k + a) = 0 term
+  return sum + _gpu_hurwitz_zeta(s, cur);
 }
 `;
 
@@ -12718,17 +13011,24 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const isWGSL = this.languageId === 'wgsl';
     const atWidths = gpuAtHelperWidths(code);
     const texAtWidths = gpuTexAtHelperWidths(code);
+    // The zeta helpers call `_gpu_nan()` from their bodies too (a complex
+    // value, or an f32 overflow), so they force the GLSL NaN helper as well.
+    const usesZeta = /_gpu_(hurwitz_)?zeta/.test(code);
     if (
       code.includes('_gpu_nan') ||
-      (!isWGSL && (atWidths.length > 0 || texAtWidths.length > 0))
+      (!isWGSL && (atWidths.length > 0 || texAtWidths.length > 0 || usesZeta))
     )
       preamble += GPU_NAN_PREAMBLE_GLSL;
     // `_gpu_gamma` calls `_gpu_inf()` from its BODY at a pole (the float
     // projection of the interpreter's undirected infinity — pole-encoding
     // ruling 2026-08-28), so it forces the GLSL Infinity helper for the same
     // reason `_gpu_at*` forces the NaN helper: these scans read the EMITTED
-    // code and never a helper body.
-    if (code.includes('_gpu_inf') || (!isWGSL && code.includes('_gpu_gamma')))
+    // code and never a helper body. The zeta helpers call `_gpu_inf()` at
+    // their own pole the same way.
+    if (
+      code.includes('_gpu_inf') ||
+      (!isWGSL && (code.includes('_gpu_gamma') || usesZeta))
+    )
       preamble += GPU_INF_PREAMBLE_GLSL;
     // AFTER the NaN branches, and that ORDER is load-bearing: GLSL requires a
     // declaration before its use, and these bodies call `_gpu_nan()`. The
@@ -12759,9 +13059,19 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       code,
       isWGSL ? GPU_ROUND_PREAMBLE_WGSL : GPU_ROUND_PREAMBLE_GLSL
     );
+    // `_gpu_zeta` calls `_gpu_gamma` from its own body for the s < 0
+    // functional-equation branch, and every other zeta entry point
+    // (`_gpu_hurwitz_zeta`, `_gpu_zeta_generalized`) can reach `_gpu_zeta`
+    // — the same "scan reads emitted code, not helper bodies" gap
+    // `_gpu_gamma`'s `_gpu_inf()` call has above, so force Γ's preamble in
+    // whenever any zeta helper is needed.
+    preamble += gpuLibrarySubset(
+      usesZeta ? `${code} _gpu_gamma(` : code,
+      isWGSL ? GPU_GAMMA_PREAMBLE_WGSL : GPU_GAMMA_PREAMBLE_GLSL
+    );
     preamble += gpuLibrarySubset(
       code,
-      isWGSL ? GPU_GAMMA_PREAMBLE_WGSL : GPU_GAMMA_PREAMBLE_GLSL
+      isWGSL ? GPU_ZETA_PREAMBLE_WGSL : GPU_ZETA_PREAMBLE_GLSL
     );
     preamble += gpuLibrarySubset(
       code,

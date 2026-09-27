@@ -1,5 +1,22 @@
 ## Unreleased
 
+### New Features
+
+- **`Zeta` evaluates at complex `s` and takes a second operand, and
+  `HurwitzZeta` is new** (#340, contributed by
+  [enumeratio](https://github.com/enumeratio)). `Zeta(0.5 + 14i).N()` evaluates, and
+  `Zeta(s, a)` is Wolfram's `Zeta[s, a]`: the same as `HurwitzZeta(s, a)` for
+  `Re(a) > 0`; for `a ≤ 0` it follows Wolfram's own convention, where
+  `HurwitzZeta` can be complex at real arguments. `ζ(−n, a)` at a rational `a`
+  is exact (a Bernoulli polynomial), `ζ(s, 1/2) = (2^s − 1)·ζ(s)` at an integer
+  `s ≥ 2` (`Zeta(2, 1/2)` is `π²/2`), and the infinite operands have their
+  limits (`Zeta(+oo, 2) = 0`, `Zeta(2, +oo) = 0`). Arbitrary precision still
+  covers only the real one-operand `Zeta`: the two-operand and complex values
+  are machine precision even when the engine `precision` is higher. Both heads
+  compile to JavaScript, GLSL and WGSL for real operands; the compiled
+  `HurwitzZeta` is `NaN` where its value is complex, and the pole is
+  `+Infinity`, as for the one-operand `Zeta`.
+
 ### Issues Resolved
 
 - **The hyperbolic functions fold at 0 under `evaluate()`,** as the circular
