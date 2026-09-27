@@ -2,7 +2,7 @@
  "$comment": "Known failures of the serialize->parse round-trip property `ce.parse(t.latex).isSame(t)` (structural tier) over docs/mathnet/parser-test-cases.json. Maintained by docs/mathnet/scripts/check-roundtrip.ts (npm run check:roundtrip); regenerate with `npm run check:roundtrip -- --update`. `reason` is `bug` (a serializer/round-trip defect to fix) or `documented-lossy` (a form the serializer is contractually allowed to lose). `class` groups identical-cause entries; see `classes` below. CI fails only on failures NOT listed here.",
  "date": "2026-08-04",
  "engineVersion": "0.101.0+unreleased",
- "lastChecked": "2026-09-22",
+ "lastChecked": "2026-09-27",
  "classes": {
   "fraction-fallback-inverse-power": {
    "reason": "documented-lossy",
@@ -20,7 +20,7 @@
  "exceptions": [
   {
    "latex": "\\left( \\frac{n}{2(a_1 + a_2 + \\cdots + a_n)} - 1 \\right)^n \\le \\left[ \\frac{a_1 + a_2 + \\cdots + a_n}{n} \\right]^n \\left( \\frac{1}{a_1} - 1 \\right) \\left( \\frac{1}{a_2} - 1 \\right) \\cdots \\left( \\frac{1}{a_n} - 1 \\right).",
-   "reserialized": "{((n)(2(a_1+a_2+\\dots+a_{n}))^{-1}-1)}^{n}\\le\\bigl\\lbrack\\frac{a_1+a_2+\\dots+a_{n}}{n}\\bigr\\rbrack^{n}\\times(\\frac{1}{a_1}-1)\\times(\\frac{1}{a_2}-1)\\times\\dots\\times(\\frac{1}{a_{n}}-1)",
+   "reserialized": "((n)(2(a_1+a_2+\\dots+a_{n}))^{-1}-1)^{n}\\le\\bigl\\lbrack\\frac{a_1+a_2+\\dots+a_{n}}{n}\\bigr\\rbrack^{n}\\times(\\frac{1}{a_1}-1)\\times(\\frac{1}{a_2}-1)\\times\\dots\\times(\\frac{1}{a_{n}}-1)",
    "mismatch": "[\"LessEqual\",[\"Power\",[\"Add\",[\"Divide\",\"n\",[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]],-1],\"n\"],[\"Multiply\",[\"Power\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"],\"n\"]],\"n…  ≠  [\"LessEqual\",[\"Power\",[\"Add\",[\"Multiply\",\"n\",[\"Divide\",1,[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]]],-1],\"n\"],[\"Multiply\",[\"Power\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",…",
    "class": "fraction-fallback-inverse-power",
    "reason": "documented-lossy",
