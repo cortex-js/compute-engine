@@ -102,6 +102,16 @@
 
 ### New Features
 
+- **`PolyGamma(m, z)`, `Digamma(z)` and `Trigamma(z)` evaluate at a complex
+  `z`** (#340, contributed by [enumeratio](https://github.com/enumeratio)).
+  `PolyGamma(1, 1+2i).N()` is `0.1249311621409446 − 0.4778255501472298i`:
+  ψ⁽ᵐ⁾(z) = (−1)^(m+1) m! ζ(m+1, z) for m ≥ 1 (DLMF 5.15.2), and an asymptotic
+  series for the digamma. Left of the imaginary axis the reflection formula
+  is used, so the cost does not depend on `Re(z)` (`PolyGamma(8, -10^12+i)`
+  answers at once). The order is limited to 10 000. A value outside the
+  range of a double stays unevaluated, not `~oo` or `0`. The compiled
+  JavaScript `PolyGamma` is now marked real-only, as `Zeta` is: a complex
+  argument there ran the real kernel.
 - **Examples for the arithmetic, trigonometry and linear-algebra libraries**,
   with a hand-written introduction for each reference page: 97, 84 and 40
   examples, each executed when the pages are generated.
