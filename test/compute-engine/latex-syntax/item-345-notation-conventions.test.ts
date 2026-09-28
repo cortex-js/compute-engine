@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../../../src/compute-engine';
+import { ComputeEngine, LatexSyntax } from '../../../src/compute-engine';
 
 /**
  * Remaining items from #345, after the power-base bracketing fix
@@ -17,9 +17,12 @@ import { ComputeEngine } from '../../../src/compute-engine';
  * 2. A fraction's sign was written inside the numerator or denominator
  *    (`\frac{-1}{2}`, `\frac{x}{-4}`), or, for `Negate` of a fraction, with a
  *    redundant parenthesis (`-(\frac{3}{4})`). `serializeFraction` now pulls
- *    the sign in front (`unsign()` on each operand), and `Negate`'s
- *    serializer no longer parenthesizes a `Divide`/`Rational` operand, since
- *    `\frac{}{}` is already self-delimiting.
+ *    the sign in front (`unsign()` on each operand) for a `Rational` or a
+ *    fraction with a number denominator, and `Negate`'s serializer no longer
+ *    parenthesizes a `Divide`/`Rational` operand, since `\frac{}{}` is already
+ *    self-delimiting. A fraction with a symbolic denominator keeps the sign in
+ *    the numerator (`\frac{-1}{x}`): `-\frac{1}{x}` parses to
+ *    `Negate(Divide(1, x))`, a different canonical expression.
  * 4. `\operatorname{rank}(A)` parsed to the free symbol `rank` applied to
  *    `A`, rather than to `MatrixRank`, the library function that already
  *    exists for it — the same gap `\operatorname{lcm}` (→ `LCM`) already
@@ -95,7 +98,17 @@ describe('345 Beta, Zeta and Lb write conventional notation when applied', () =>
   // single-letter symbol (`\mathrm{B}` alone reads as a variable `B`); only
   // the *applied* form is claimed for `Beta`.
   test('\\mathrm{B} without a call is still a plain symbol', () => {
-    expect(ce.parse('\\mathrm{B}').operator).not.toBe('Beta');
+    expect(ce.parse('\\mathrm{B}').json).toEqual('B_upright');
+    expect(ce.parse('\\mathrm{B}x').json).toEqual([
+      'Multiply',
+      'B_upright',
+      'x',
+    ]);
+    expect(ce.parse('\\mathrm{B}(2, 3)').json).toEqual(['Beta', 2, 3]);
+    expect(ce.parse('\\mathrm{B}(x+1)').json).toEqual([
+      'B_upright',
+      ['Add', 'x', 1],
+    ]);
   });
 });
 
@@ -202,6 +215,91 @@ describe('345 \\operatorname{rank} parses to MatrixRank, like \\operatorname{lcm
 
   test('round-trips through .latex', () => {
     const expr = ce.box(['MatrixRank', 'A']);
+    expect(expr.latex).toBe('\\operatorname{rank}(A)');
     expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+  });
+});
+
+describe('345 the fraction sign keeps digits and round-trips structurally', () => {
+  // The sign is removed from the digit string, never through a JavaScript
+  // double, which would round a big integer.
+  test('a big negative numerator keeps its digits', () => {
+    expect(
+      ce.box(['Rational', { num: '-123456789012345678901234567' }, 7], {
+        canonical: false,
+      }).latex
+    ).toBe('-\\frac{123\\,456\\,789\\,012\\,345\\,678\\,901\\,234\\,567}{7}');
+    expect(
+      ce.box(['Divide', { num: '-9007199254740993' }, 3], { canonical: false })
+        .latex
+    ).toBe('-\\frac{9\\,007\\,199\\,254\\,740\\,993}{3}');
+    expect(
+      ce.box(['Add', 'x', { num: '-9007199254740993' }], { canonical: false })
+        .latex
+    ).toBe('x-9\\,007\\,199\\,254\\,740\\,993');
+  });
+
+  // `.latex` parses back to the same canonical expression. The sign moves in
+  // front only for a `Rational` or a number denominator; with a symbolic
+  // denominator it stays in the numerator.
+  const cases: [any, string][] = [
+    [['Divide', -1, 'x'], '\\frac{-1}{x}'],
+    [['Divide', -2, 'x'], '\\frac{-2}{x}'],
+    [['Divide', -0.5, 'x'], '\\frac{-0.5}{x}'],
+    [['Divide', -1, ['Multiply', 2, 'x']], '\\frac{-1}{2x}'],
+    [['Divide', ['Negate', 'x'], ['Multiply', 2, 'y']], '\\frac{-x}{2y}'],
+    [['Rational', -1, 2], '-\\frac{1}{2}'],
+    [['Multiply', ['Rational', -1, 2], 'x'], '-\\frac{x}{2}'],
+    [['Negate', ['Rational', 3, 4]], '-\\frac{3}{4}'],
+    [
+      ['Rational', { num: '-123456789012345678901234567' }, 7],
+      '-\\frac{123\\,456\\,789\\,012\\,345\\,678\\,901\\,234\\,567}{7}',
+    ],
+  ];
+  for (const [json, expected] of cases) {
+    test(`${JSON.stringify(json)} writes ${expected} and round-trips`, () => {
+      const box = ce.box(json, { canonical: false });
+      expect(box.latex).toBe(expected);
+      expect(ce.parse(box.latex).isSame(box.canonical)).toBe(true);
+    });
+  }
+
+  test('a fraction factor gives its sign to the product', () => {
+    const json = ['Multiply', 'y', ['Divide', 'x', -4]];
+    // Without prettify, the factor is kept in place; the sign must not read
+    // as a subtraction (`y-\frac{x}{4}`).
+    const syntax = new LatexSyntax();
+    expect(syntax.serialize(json as any, { prettify: false })).toBe(
+      '-y\\frac{x}{4}'
+    );
+    expect(syntax.serialize(json as any)).toBe('-\\frac{yx}{4}');
+    const box = ce.box(json as any, { canonical: false });
+    expect(ce.parse(box.latex).isSame(box.canonical)).toBe(true);
+  });
+
+  test('a sum numerator is not wrapped in parentheses', () => {
+    const box = ce.box(['Multiply', ['Rational', -1, 2], ['Add', 'a', 'b']], {
+      canonical: false,
+    });
+    expect(box.latex).toBe('-\\frac{a+b}{2}');
+    expect(ce.parse(box.latex).isSame(box.canonical)).toBe(true);
+  });
+
+  test('Negate of a negative fraction keeps its parentheses', () => {
+    expect(
+      ce.box(['Negate', ['Rational', -3, 4]], { canonical: false }).latex
+    ).toBe('-(-\\frac{3}{4})');
+    expect(
+      ce.box(['Negate', ['Divide', -1, 2]], { canonical: false }).latex
+    ).toBe('-(-\\frac{1}{2})');
+    expect(
+      ce.parse('-(-\\frac{3}{4})').isSame(ce.box(['Rational', 3, 4]))
+    ).toBe(true);
+  });
+
+  test('a negative fraction base keeps its brackets', () => {
+    expect(
+      ce.box(['Power', ['Rational', -1, 2], 2], { canonical: false }).latex
+    ).toBe('(-\\frac{1}{2})^2');
   });
 });

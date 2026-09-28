@@ -428,11 +428,14 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   // `\operatorname{rank}(A)` has no dedicated macro (unlike `\det`/`\ker`), so
   // only the `\operatorname{}` spelling is claimed, the same as `lcm` below.
+  // `MatrixRank(A)` also serializes with this spelling.
   {
+    name: 'MatrixRank',
     symbolTrigger: 'rank',
     kind: 'function',
-    parse: 'MatrixRank',
     arguments: 'implicit',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      '\\operatorname{rank}' + serializer.wrapArguments(expr),
   },
 
   // MatrixMultiply serializes as multiplication with \cdot

@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **The negation of a product folds its sign into the numeric factor.**
+  `-(2x)` (MathJSON `["Negate", ["Multiply", 2, "x"]]`) canonicalizes to
+  `Multiply(-2, x)`; it was `Negate(Multiply(2, x))`. `-\frac{x}{2}` is now
+  `Multiply(-1/2, x)`, the same expression as `-\frac{1}{2}x`, so the sign
+  of a fraction written in front of it reads back unchanged (#345).
+
 ### New Features
 
 - **Epsil comprehensions.** A `for` clause inside a list or brace literal builds
@@ -48,26 +56,33 @@
 
 ### Resolved Issues
 
-- **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and a
-  fraction's sign moves in front of it.** `Beta(2, 3)` wrote `\Beta(2, 3)`
-  (capital beta is roman, not a separate glyph — MathLive renders it as an
-  error) and `Zeta(3)` wrote `\Zeta(3)`; both came from the fallback that
-  spells an unrecognized function head as its symbol's notation, which for
-  these two names is the Greek-letter entry. They now write `\mathrm{B}(2,
-  3)` and `\zeta(3)`; the old spellings still parse. `Lb(x)` wrote `\lb(x)`,
+- **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and the
+  sign of a numeric fraction moves in front of it.** `Beta(2, 3)` wrote
+  `\Beta(2, 3)` (capital beta is roman, not a separate glyph — MathLive
+  renders it as an error) and `Zeta(3)` wrote `\Zeta(3)`; both came from the
+  fallback that spells an unrecognized function head as its symbol's
+  notation, which for these two names is the Greek-letter entry. They now
+  write `\mathrm{B}(2, 3)` and `\zeta(3)`; the old spellings still parse, and
+  a bare `\mathrm{B}` is still the upright letter `B`. `Lb(x)` wrote `\lb(x)`,
   not a standard LaTeX command, and now writes `\log_2(x)` (which already
-  parsed to `Lb`). Separately, a fraction's negative sign was written inside
-  the numerator or denominator — `Rational(-1, 2)` as `\frac{-1}{2}`,
-  `Divide(x, -4)` as `\frac{x}{-4}` — or, for `Negate` of a fraction, with a
-  redundant parenthesis (`Negate(Rational(3, 4))` as `-(\frac{3}{4})`); all
-  three now write the sign in front: `-\frac{1}{2}`, `-\frac{x}{4}`,
-  `-\frac{3}{4}`. So these round-trip, `Negate` of a product now folds its
-  sign into the numeric factor: `-\frac{x}{2}` is `Multiply(-1/2, x)`, as
-  `-\frac{1}{2}x` and `-2x` already were, not `Negate(Multiply(1/2, x))`
-  (#345, contributed by [enumeratio](https://github.com/enumeratio)).
-- **`\operatorname{rank}(A)` parses to `MatrixRank`.** It parsed to the free
-  symbol `rank` applied to `A`, the same gap `\operatorname{lcm}` (→ `LCM`)
-  already covered for a different head (#345, contributed by
+  parsed to `Lb`). A negative `Rational`, or a fraction with a number
+  denominator, wrote its sign inside the numerator or the denominator —
+  `Rational(-1, 2)` as `\frac{-1}{2}`, `Divide(x, -4)` as `\frac{x}{-4}` — or,
+  for `Negate` of a fraction, with a redundant parenthesis
+  (`Negate(Rational(3, 4))` as `-(\frac{3}{4})`); all three now write the sign
+  in front: `-\frac{1}{2}`, `-\frac{x}{4}`, `-\frac{3}{4}`. A fraction with a
+  symbolic denominator keeps the sign in the numerator (`\frac{-1}{x}`), since
+  `-\frac{1}{x}` reads back as a different expression (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+- **A negative big number keeps its digits when its sign moves.** The LaTeX
+  serializer removed the sign of a negative literal in a sum through a
+  JavaScript double, so `Add(x, -9007199254740993)` wrote
+  `x-9\,007\,199\,254\,740\,992`. The sign is now removed from the digit
+  string.
+- **`\operatorname{rank}(A)` parses to `MatrixRank`, and `MatrixRank(A)`
+  writes `\operatorname{rank}(A)`.** It parsed to the free symbol `rank`
+  applied to `A`, the same gap `\operatorname{lcm}` (→ `LCM`) already covered
+  for a different head (#345, contributed by
   [enumeratio](https://github.com/enumeratio)).
 - **An exact coefficient raised to a rational power stays exact.**
   `(8x+8)^{2/3}·y` evaluated to `3.99999999999999944548·y·(x+1)^(2/3)` (an

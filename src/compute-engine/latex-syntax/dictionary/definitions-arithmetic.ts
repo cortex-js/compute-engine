@@ -948,6 +948,17 @@ function serializeMultiply(
           ? serializer.wrap(arg, MULTIPLICATION_PRECEDENCE + 1)
           : serializer.wrap(arg, MULTIPLICATION_PRECEDENCE);
 
+    // A factor that serializes with a leading sign (a fraction such as
+    // `Divide(x, -4)`, written `-\frac{x}{4}`) gives its sign to the whole
+    // product. Juxtaposed as is, the sign would read as a subtraction:
+    // `y-\frac{x}{4}`. A factor that was not wrapped and starts with `-`
+    // binds at least as tightly as a product, so the `-` applies to the
+    // whole factor.
+    if (term.startsWith('-')) {
+      term = term.slice(1);
+      isNegative = !isNegative;
+    }
+
     // 2.2. The terms can be separated by an invisible multiply.
     const isContinuation = symbol(arg) === 'ContinuationPlaceholder';
     if (!result) {
@@ -1349,16 +1360,27 @@ function serializeFraction(
   let numer = missingIfEmpty(operand(expr, 1));
   let denom = missingIfEmpty(operand(expr, 2));
 
-  // The sign of a fraction belongs in front of it, not inside the numerator
-  // or the denominator: `-\frac{1}{2}`, not `\frac{-1}{2}` or
-  // `\frac{1}{-2}`. `unsign()` recognizes a negative sign from either
-  // operand's shape (a literal negative number, `Negate`, or a leading
-  // negative `Multiply` coefficient) and returns the un-signed operand.
+  // The sign of a numeric fraction goes in front of it, not inside the
+  // numerator or the denominator: `-\frac{1}{2}`, `-\frac{x}{2}`, not
+  // `\frac{-1}{2}` or `\frac{x}{-2}`. `unsign()` recognizes a negative sign
+  // from either operand's shape (a literal negative number, `Negate`, or a
+  // leading negative `Multiply` coefficient) and returns the un-signed
+  // operand.
+  //
+  // The sign moves only for a `Rational`, or when the denominator is a number
+  // literal. There, `-\frac{x}{2}` parses back to the same canonical
+  // expression, because the canonical `Negate` folds its sign into the
+  // numeric coefficient of the product `x/2`. With a symbolic denominator it
+  // does not: `-\frac{1}{x}` parses to `Negate(Divide(1, x))`, not to
+  // `Divide(-1, x)`, so the sign stays in the numerator, `\frac{-1}{x}`.
+  let sign = '';
   const [unsignedNumer, numerSign] = unsign(numer);
   const [unsignedDenom, denomSign] = unsign(denom);
-  numer = unsignedNumer;
-  denom = unsignedDenom;
-  const sign = numerSign * denomSign < 0 ? '-' : '';
+  if (operator(expr) === 'Rational' || isNumberExpression(unsignedDenom)) {
+    numer = unsignedNumer;
+    denom = unsignedDenom;
+    if (numerSign * denomSign < 0) sign = '-';
+  }
 
   const style = serializer.options.prettify
     ? serializer.fractionStyle(expr, serializer.level)
@@ -2103,10 +2125,19 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'Beta',
   },
   // `\mathrm{B}(2, 3)`: the conventional spelling this now serializes to.
+  // Only a parenthesized list of exactly two arguments (the arity of the Beta
+  // function) makes it `Beta`. Otherwise this returns `null`, so the generic
+  // parser reads the upright letter `B_upright` as before: a bare
+  // `\mathrm{B}` or `\mathrm{B}x` is the symbol, and `\mathrm{B}(x+1)` is
+  // that symbol applied to `x+1`.
   {
     latexTrigger: ['\\mathrm', '<{>', 'B', '<}>'],
     kind: 'function',
-    parse: 'Beta',
+    parse: (parser: Parser) => {
+      const args = parser.parseArguments('enclosure');
+      if (args === null || args.length !== 2) return null;
+      return ['Beta', ...args] as MathJsonExpression;
+    },
   },
   // Lambert W function (product logarithm)
   {
@@ -2791,8 +2822,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) => {
       const rhs = operand(expr, 1);
       if (rhs === null) return '';
-      if (operator(rhs) === 'Divide' || operator(rhs) === 'Rational')
-        return '-' + serializer.serialize(rhs);
+      if (operator(rhs) === 'Divide' || operator(rhs) === 'Rational') {
+        // A fraction that already writes its own sign keeps the
+        // parentheses: `-(-\frac{3}{4})`, not `--\frac{3}{4}`.
+        const fraction = serializer.serialize(rhs);
+        return fraction.startsWith('-')
+          ? '-' + serializer.wrapString(fraction, 'normal')
+          : '-' + fraction;
+      }
       return '-' + serializer.wrap(rhs, EXPONENTIATION_PRECEDENCE + 1);
     },
   },
@@ -3653,8 +3690,13 @@ function unsign(expr: MathJsonExpression): [MathJsonExpression, -1 | 1] {
       const [first, firstSign] = unsign(operand(expr, 1)!);
       if (firstSign < 0) {
         sign *= -1;
-        if (first === 1) newExpr = ['Multiply', ...operands(expr).slice(1)];
-        else newExpr = ['Multiply', first, ...operands(expr).slice(1)];
+        const rest = operands(expr).slice(1);
+        // A single remaining factor is returned bare: a one-operand
+        // `Multiply` would serialize with parentheses around a sum,
+        // `\frac{(a+b)}{2}`.
+        if (first !== 1) newExpr = ['Multiply', first, ...rest];
+        else if (rest.length === 1) newExpr = rest[0];
+        else newExpr = ['Multiply', ...rest];
       }
     } else if (fnName === 'Divide' || fnName === 'Rational') {
       const [numer, numerSign] = unsign(operand(expr, 1)!);
@@ -3663,10 +3705,13 @@ function unsign(expr: MathJsonExpression): [MathJsonExpression, -1 | 1] {
         newExpr = [fnName, numer, operand(expr, 2)!];
       }
     } else {
-      const val = machineValue(expr);
-      if (val !== null && val < 0) {
+      // Remove the sign from the digit string (`{num: "-123…"}` →
+      // `{num: "123…"}`), never through a JavaScript double: a double
+      // would round a big integer or a long decimal.
+      const magnitude = negatedNumber(expr);
+      if (magnitude !== null) {
         sign *= -1;
-        newExpr = -val;
+        newExpr = magnitude;
       }
     }
   } while (newExpr !== expr);
