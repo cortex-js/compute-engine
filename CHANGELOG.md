@@ -116,6 +116,33 @@
 
 ### New Features
 
+- **`LerchPhi` is new** (#340, contributed by
+  [enumeratio](https://github.com/enumeratio)). `LerchPhi(z, s, a)` is the
+  Lerch transcendent `Φ(z,s,a) = Σ zᵏ(k+a)^(−s)`, generalizing `HurwitzZeta`
+  (`LerchPhi(1, s, a)` reduces to it exactly). `LerchPhi(0.5, 2, 1).N()`
+  evaluates by direct summation, `LerchPhi(3, 2, 1).N()` continues past the
+  unit disk through the incomplete gamma function, and `LerchPhi(-1, 1, 1)`
+  is `ln 2` on the disk's rim, where direct summation alone would need an
+  impractical number of terms. A base point `a` at a non-positive integer is
+  the pole `ComplexInfinity` when `Re(s) > 0` and `z` is provably nonzero,
+  as for `HurwitzZeta`. Values are computed at machine precision only, even
+  when `precision` is higher, and are within about 1e−11 relative of the
+  true value (measured against mpmath). Where the kernel cannot vouch for
+  that accuracy, `LerchPhi` stays symbolic under `N()` instead of returning
+  a wrong value: past the unit disk and on its rim wherever the incomplete
+  gamma function it needs is inaccurate (#353), when the terms of a sum
+  cancel too far (for example `LerchPhi(-0.99, -12, 1)`), and when the base
+  point is further left than `a = −10⁶`. A float operand gives a float
+  result (`LerchPhi(1.0, 2, 1)` is `1.6449…`, not `π²/6`). `LerchPhi`
+  compiles to JavaScript, GLSL and WGSL for real operands. The JavaScript
+  lane runs the interpreter's kernel and is `NaN` where the value is complex
+  (real `z > 1`, or `a < 0` with a non-integer `s`) and for real `z < −1`,
+  where the value is real but the kernel declines until #353 is fixed. The
+  GPU lane is `NaN` past the unit disk (except for `s = 0, −1, −2`, where
+  `Φ` is a rational function of `z`), and inside it wherever its f32 sums
+  cannot converge within their term budget (`|z|` closer to 1 than about
+  0.995) or have cancelled too far.
+
 - **`PolyGamma(m, z)`, `Digamma(z)` and `Trigamma(z)` evaluate at a complex
   `z`** (#340, contributed by [enumeratio](https://github.com/enumeratio)).
   `PolyGamma(1, 1+2i).N()` is `0.1249311621409446 − 0.4778255501472298i`:
@@ -342,23 +369,6 @@
   precision) is unchanged until Phase 2.
 
 ### New Features
-
-- **`LerchPhi` is new** (#340, contributed by
-  [enumeratio](https://github.com/enumeratio)). `LerchPhi(z, s, a)` is the
-  Lerch transcendent `Φ(z,s,a) = Σ zᵏ(k+a)^(−s)`, generalizing `HurwitzZeta`
-  (`LerchPhi(1, s, a)` reduces to it exactly). `LerchPhi(0.5, 2, 1).N()`
-  evaluates by direct summation, `LerchPhi(3, 2, 1).N()` continues past the
-  unit disk through the incomplete gamma function, and `LerchPhi(-1, 1, 1)`
-  is `ln 2` on the disk's rim, where direct summation alone would need an
-  impractical number of terms. A base point `a` at a non-positive integer is
-  the pole `ComplexInfinity` when `Re(s) > 0`, as for `HurwitzZeta`. Past the
-  unit disk it stays symbolic under `N()` wherever the incomplete gamma
-  function's argument `−a·log z` has a negative real part and modulus above
-  2.5, where `Gamma`'s own numeric kernel loses digits (#353). Values are
-  computed at machine precision only, even when `precision` is higher. `LerchPhi` compiles to JavaScript,
-  GLSL and WGSL for real operands; the compiled lane is `NaN` past the unit
-  disk, where the continuation needs a complex incomplete gamma function
-  neither target has a kernel for.
 
 - **`ce.number({ re, im })` builds a complex number from two parts, each a
   JavaScript number or a `BigDecimal`.** `ce.number({ re: ce.bignum('1e-800'),

@@ -7063,8 +7063,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_gpu_hurwitz_zeta(${compile(args[0])}, ${compile(args[1])})`;
   },
   // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_lerch_phi` is NaN past
-  // |z| = 1, where the continuation needs a complex incomplete Γ this
-  // target has no kernel for (`_gpu_gamma` is real-only) — see there.
+  // |z| = 1 (except for s = 0, −1, −2, where Φ is rational in z), where the
+  // continuation needs a complex incomplete Γ this target has no kernel
+  // for (`_gpu_gamma` is real-only) — see there.
   LerchPhi: (args, compile) => {
     if (args.length !== 3)
       throw new Error(
@@ -9047,40 +9048,92 @@ fn _gpu_zeta_generalized(s: f32, a: f32) -> f32 {
  * (`lerchContinuedComplex`), which has no GPU kernel — `_gpu_gamma` is
  * real-only — so `_gpu_lerch_phi` answers NaN there instead of the
  * continued value, along with everywhere else the value would be complex
- * (a < 0 with a non-integer s).
+ * (a < 0 with a non-integer s). The exceptions are s = 0, −1, −2, where Φ
+ * is a rational function of z, computed from its closed form for every z:
+ * 1/(1−z), a/(1−z) + z/(1−z)², and a²/(1−z) + 2az/(1−z)² + z(1+z)/(1−z)³.
  *
- * - `_gpu_lerch_series` is the direct sum, for 0 <= z < 1.
+ * - `_gpu_lerch_series` is the direct sum, for real |z| < 1 (and for
+ *   z < 0 with s < 0, where the Euler transform is not valid). The terms
+ *   with a + k <= 0 are summed first, without a convergence test, since
+ *   they need not decrease. After them the sum stops when three
+ *   consecutive terms each shrink and bound the tail below 1e−7 of the
+ *   sum: the bound is |term|·ρ/(1−ρ), where ρ, the larger of the current
+ *   term ratio and |z|, bounds every later ratio. When 4096 terms past the
+ *   prefix do not reach that, it answers NaN rather than a truncated sum:
+ *   the budget covers |z| up to about 0.995 for s near 0 (closer to 1
+ *   when s is larger), and the f32 sum of that many terms is within about
+ *   2e−5 relative. It also answers NaN when the sum is below 1/100 of its
+ *   largest term: the f32 terms have cancelled too far (z < 0 with s < 0).
  * - `_gpu_lerch_euler` is the van Wijngaarden Euler transform (Numerical
- *   Recipes' `eulsum`), for −1 <= z < 0 — direct summation there is only
- *   conditionally convergent and stalls approaching the rim; the
+ *   Recipes' `eulsum`), for −1 <= z < 0 and s > 0 — direct summation there
+ *   is only conditionally convergent and stalls approaching the rim; the
  *   repeated-averaging table reaches f32 precision in a few dozen terms.
- *   `LERCH_EULER_TERMS` bounds the table: GLSL/WGSL arrays need a
- *   compile-time size, and the loop already breaks once its terms stop
- *   shrinking.
+ *   The terms with a + k <= 0 are summed first, as in the series, so the
+ *   transform sees only decreasing terms. It stops when three consecutive
+ *   increments are below 1e−7 of the sum, and answers NaN when the
+ *   `LERCH_EULER_TERMS` budget runs out first (GLSL/WGSL arrays need a
+ *   compile-time size) or when the sum has cancelled as above.
+ *
+ * Checked against mpmath by simulating these helpers in f32 (1400 real
+ * points with −1 <= z < 1): every value that is not NaN is within 1.5e−5
+ * relative of Φ at the f32-rounded operands.
  */
 const LERCH_EULER_TERMS = 64;
 export const GPU_LERCH_PREAMBLE_GLSL = `
 float _gpu_lerch_series(float z, float s, float a) {
-  int n = int(ceil(log(1e-6) / log(abs(z))) + 16.0);
-  n = clamp(n, 8, 4096);
+  int n0 = a < 0.0 ? int(ceil(-a)) : 0;
+  float az = abs(z);
   float sum = 0.0;
   float zk = 1.0;
-  for (int k = 0; k < n; k++) {
+  float prev = 3.0e38;
+  float largest = 0.0;
+  int settled = 0;
+  for (int k = 0; k < n0 + 4096; k++) {
     float b = a + float(k);
-    if (b != 0.0) sum += zk * _gpu_zeta_pow(b, -s);
+    float t = (b != 0.0) ? zk * _gpu_zeta_pow(b, -s) : 0.0;
+    sum += t;
+    largest = max(largest, abs(t));
+    if (b > 0.0) {
+      float size = abs(t);
+      float rho = max(size / prev, az);
+      if (size == 0.0 ||
+          (size < prev && rho < 1.0 &&
+           size * rho / (1.0 - rho) <= 1e-7 * abs(sum))) {
+        settled++;
+        if (settled == 3) {
+          if (largest > 100.0 * abs(sum)) return _gpu_nan();
+          return sum;
+        }
+      } else {
+        settled = 0;
+      }
+      prev = size;
+    }
     zk *= z;
   }
-  return sum;
+  return _gpu_nan();
 }
 
 float _gpu_lerch_euler(float z, float s, float a) {
+  int n0 = a <= 0.0 ? int(floor(-a)) + 1 : 0;
+  float head = 0.0;
+  float zn = 1.0;
+  float largest = 0.0;
+  for (int k = 0; k < n0; k++) {
+    float b = a + float(k);
+    float t = (b != 0.0) ? zn * _gpu_zeta_pow(b, -s) : 0.0;
+    head += t;
+    largest = max(largest, abs(t));
+    zn *= z;
+  }
+  float b0 = a + float(n0);
   float w[${LERCH_EULER_TERMS + 1}];
   int nterm = 0;
   float sum = 0.0;
   float zPow = 1.0;
+  int settled = 0;
   for (int k = 0; k < ${LERCH_EULER_TERMS}; k++) {
-    float b = a + float(k);
-    float cur = (b != 0.0) ? zPow * _gpu_zeta_pow(b, -s) : 0.0;
+    float cur = zPow * pow(b0 + float(k), -s);
     float inc;
     if (k == 0) {
       nterm = 1;
@@ -9094,6 +9147,7 @@ float _gpu_lerch_euler(float z, float s, float a) {
         w[j + 1] = 0.5 * (w[j] + tmp);
         tmp = dum;
       }
+      if (nterm >= ${LERCH_EULER_TERMS}) return _gpu_nan();
       w[nterm + 1] = 0.5 * (w[nterm] + tmp);
       if (abs(w[nterm + 1]) <= abs(w[nterm])) {
         nterm++;
@@ -9104,20 +9158,35 @@ float _gpu_lerch_euler(float z, float s, float a) {
     }
     sum += inc;
     zPow *= z;
-    if (k > 4 && abs(inc) < 1e-6 * (abs(sum) + 1e-6)) break;
+    if (k > 4 && abs(inc) <= 1e-7 * abs(sum)) {
+      settled++;
+      if (settled == 3) {
+        float tail = zn * sum;
+        float out = head + tail;
+        if (max(largest, abs(tail)) > 100.0 * abs(out)) return _gpu_nan();
+        return out;
+      }
+    } else {
+      settled = 0;
+    }
   }
-  return sum;
+  return _gpu_nan();
 }
 
 float _gpu_lerch_phi(float z, float s, float a) {
   if (z == 1.0) return _gpu_hurwitz_zeta(s, a);
   if (z == 0.0) return _gpu_zeta_pow(a, -s); // only the k = 0 term survives
-  if (s == 0.0) return 1.0 / (1.0 - z);
+  float w = 1.0 - z;
+  if (s == 0.0) return 1.0 / w;
+  if (s == -1.0) return a / w + z / (w * w);
+  if (s == -2.0) return a * a / w + 2.0 * a * z / (w * w) + z * (1.0 + z) / (w * w * w);
   bool aNonposInt = a <= 0.0 && a == floor(a);
   if (aNonposInt && s > 0.0) return _gpu_inf(); // (k+a) = 0 diverges, z != 0
-  if (abs(z) >= 1.0) return _gpu_nan(); // needs the continuation; no GPU kernel
+  if (abs(z) > 1.0) return _gpu_nan(); // needs the continuation; no GPU kernel
   if (a < 0.0 && s != floor(s)) return _gpu_nan(); // complex value
-  if (z < 0.0) return _gpu_lerch_euler(z, s, a);
+  if (a < -1.0e6) return _gpu_nan(); // one term per unit of -a
+  if (z < 0.0 && s > 0.0) return _gpu_lerch_euler(z, s, a);
+  if (z == -1.0) return _gpu_nan(); // s < 0: diverges, no valid transform
   return _gpu_lerch_series(z, s, a);
 }
 `;
@@ -9130,27 +9199,63 @@ float _gpu_lerch_phi(float z, float s, float a) {
  */
 export const GPU_LERCH_PREAMBLE_WGSL = `
 fn _gpu_lerch_series(z: f32, s: f32, a: f32) -> f32 {
-  var n = i32(ceil(log(1e-6) / log(abs(z))) + 16.0);
-  n = clamp(n, 8, 4096);
+  var n0: i32 = 0;
+  if (a < 0.0) { n0 = i32(ceil(-a)); }
+  let az = abs(z);
   var sum: f32 = 0.0;
   var zk: f32 = 1.0;
-  for (var k: i32 = 0; k < n; k = k + 1) {
+  var prev: f32 = 3.0e38;
+  var largest: f32 = 0.0;
+  var settled: i32 = 0;
+  for (var k: i32 = 0; k < n0 + 4096; k = k + 1) {
     let b = a + f32(k);
-    if (b != 0.0) { sum = sum + zk * _gpu_zeta_pow(b, -s); }
+    var t: f32 = 0.0;
+    if (b != 0.0) { t = zk * _gpu_zeta_pow(b, -s); }
+    sum = sum + t;
+    largest = max(largest, abs(t));
+    if (b > 0.0) {
+      let size = abs(t);
+      let rho = max(size / prev, az);
+      if (size == 0.0 ||
+          (size < prev && rho < 1.0 &&
+           size * rho / (1.0 - rho) <= 1e-7 * abs(sum))) {
+        settled = settled + 1;
+        if (settled == 3) {
+          if (largest > 100.0 * abs(sum)) { return bitcast<f32>(0x7fc00000u); }
+          return sum;
+        }
+      } else {
+        settled = 0;
+      }
+      prev = size;
+    }
     zk = zk * z;
   }
-  return sum;
+  return bitcast<f32>(0x7fc00000u);
 }
 
 fn _gpu_lerch_euler(z: f32, s: f32, a: f32) -> f32 {
+  var n0: i32 = 0;
+  if (a <= 0.0) { n0 = i32(floor(-a)) + 1; }
+  var head: f32 = 0.0;
+  var zn: f32 = 1.0;
+  var largest: f32 = 0.0;
+  for (var k: i32 = 0; k < n0; k = k + 1) {
+    let b = a + f32(k);
+    var t: f32 = 0.0;
+    if (b != 0.0) { t = zn * _gpu_zeta_pow(b, -s); }
+    head = head + t;
+    largest = max(largest, abs(t));
+    zn = zn * z;
+  }
+  let b0 = a + f32(n0);
   var w: array<f32, ${LERCH_EULER_TERMS + 1}>;
   var nterm: i32 = 0;
   var sum: f32 = 0.0;
   var zPow: f32 = 1.0;
+  var settled: i32 = 0;
   for (var k: i32 = 0; k < ${LERCH_EULER_TERMS}; k = k + 1) {
-    let b = a + f32(k);
-    var cur: f32 = 0.0;
-    if (b != 0.0) { cur = zPow * _gpu_zeta_pow(b, -s); }
+    let cur = zPow * pow(b0 + f32(k), -s);
     var inc: f32;
     if (k == 0) {
       nterm = 1;
@@ -9164,6 +9269,7 @@ fn _gpu_lerch_euler(z: f32, s: f32, a: f32) -> f32 {
         w[j + 1] = 0.5 * (w[j] + tmp);
         tmp = dum;
       }
+      if (nterm >= ${LERCH_EULER_TERMS}) { return bitcast<f32>(0x7fc00000u); }
       w[nterm + 1] = 0.5 * (w[nterm] + tmp);
       if (abs(w[nterm + 1]) <= abs(w[nterm])) {
         nterm = nterm + 1;
@@ -9174,20 +9280,35 @@ fn _gpu_lerch_euler(z: f32, s: f32, a: f32) -> f32 {
     }
     sum = sum + inc;
     zPow = zPow * z;
-    if (k > 4 && abs(inc) < 1e-6 * (abs(sum) + 1e-6)) { break; }
+    if (k > 4 && abs(inc) <= 1e-7 * abs(sum)) {
+      settled = settled + 1;
+      if (settled == 3) {
+        let tail = zn * sum;
+        let out = head + tail;
+        if (max(largest, abs(tail)) > 100.0 * abs(out)) { return bitcast<f32>(0x7fc00000u); }
+        return out;
+      }
+    } else {
+      settled = 0;
+    }
   }
-  return sum;
+  return bitcast<f32>(0x7fc00000u);
 }
 
 fn _gpu_lerch_phi(z: f32, s: f32, a: f32) -> f32 {
   if (z == 1.0) { return _gpu_hurwitz_zeta(s, a); }
   if (z == 0.0) { return _gpu_zeta_pow(a, -s); }
-  if (s == 0.0) { return 1.0 / (1.0 - z); }
+  let w = 1.0 - z;
+  if (s == 0.0) { return 1.0 / w; }
+  if (s == -1.0) { return a / w + z / (w * w); }
+  if (s == -2.0) { return a * a / w + 2.0 * a * z / (w * w) + z * (1.0 + z) / (w * w * w); }
   let aNonposInt = a <= 0.0 && a == floor(a);
   if (aNonposInt && s > 0.0) { return bitcast<f32>(0x7f800000u); }
-  if (abs(z) >= 1.0) { return bitcast<f32>(0x7fc00000u); }
+  if (abs(z) > 1.0) { return bitcast<f32>(0x7fc00000u); }
   if (a < 0.0 && s != floor(s)) { return bitcast<f32>(0x7fc00000u); }
-  if (z < 0.0) { return _gpu_lerch_euler(z, s, a); }
+  if (a < -1.0e6) { return bitcast<f32>(0x7fc00000u); }
+  if (z < 0.0 && s > 0.0) { return _gpu_lerch_euler(z, s, a); }
+  if (z == -1.0) { return bitcast<f32>(0x7fc00000u); }
   return _gpu_lerch_series(z, s, a);
 }
 `;

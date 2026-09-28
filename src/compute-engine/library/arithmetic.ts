@@ -262,6 +262,7 @@ import {
   bigOpResultType as bigOpResultTypeOnTypes,
   operandLiteralValue as operandLiteralValueOnTypes,
   operandSgn as operandSgnOnTypes,
+  provablyLess as provablyLessOnTypes,
   operandNonFiniteNumber as operandNonFiniteNumberOnTypes,
   absFunctionType as absFunctionTypeOnTypes,
   broadcastOperandType,
@@ -2043,13 +2044,15 @@ function boxComplexResult(
   z: { re: number; im: number },
   real = false
 ): Expression {
-  if (real) return engine.number(z.re);
+  // The value comes from a machine kernel, so it is a float even when it is
+  // an integer: `engine.number(52)` would box an exact 52.
+  if (real) return engine.number(engine._inexactNumericValue(z.re));
   // Drop a part only when it is rounding noise next to the other: an
   // absolute chop would zero a genuinely tiny result, e.g. ζ(18, 5) ≈ 2e-13.
   const noise = 1e-14 * Math.hypot(z.re, z.im);
   const re = Math.abs(z.re) <= noise ? 0 : z.re;
   const im = Math.abs(z.im) <= noise ? 0 : z.im;
-  return im === 0 ? engine.number(re) : engine.number(engine.complex(re, im));
+  return engine.number(engine._inexactNumericValue(im === 0 ? re : { re, im }));
 }
 
 /** Both components of a number literal are finite machine numbers. */
@@ -2331,19 +2334,28 @@ function evaluateLerchPhi(
   numericApproximation: boolean | undefined
 ): Expression | undefined {
   const finite = isFiniteNumberLiteral;
+  // A float operand makes every result a float, the shortcuts below
+  // included: LerchPhi(1.0, 2, 1) is the float 1.6449…, not the exact π²/6.
+  const numeric =
+    numericApproximation || [z, s, a].some((x) => isNumber(x) && !x.isExact);
+  const zIsZero = isNumber(z) && z.re === 0 && !z.isComplex;
+  // The pole and the indeterminate case below need z ≠ 0: at z = 0 only the
+  // k = 0 term remains. A symbolic z of unknown sign is not proven nonzero.
+  const zNonZero =
+    (isNumber(z) && !zIsZero) || z.isPositive === true || z.isNegative === true;
 
   // Φ(1,s,a) = ζ(s,a): the same exact closed forms and EM kernel as
   // `HurwitzZeta`.
-  if (isNumber(z) && z.im === 0 && z.re === 1)
+  if (isNumber(z) && !z.isComplex && z.re === 1)
     return engine
       .function('HurwitzZeta', [s, a])
-      .evaluate({ numericApproximation });
+      .evaluate({ numericApproximation: numeric });
 
   // Φ(0,s,a) = a^(−s): only the k = 0 term survives (0⁰ = 1).
-  if (isNumber(z) && z.isSame(0))
+  if (zIsZero)
     return engine
       .function('Power', [a, engine.function('Negate', [s])])
-      .evaluate({ numericApproximation });
+      .evaluate({ numericApproximation: numeric });
 
   // Φ(z,0,a) = 1/(1 − z), independent of a — the geometric series and its
   // continuation.
@@ -2354,25 +2366,25 @@ function evaluateLerchPhi(
         engine.number(1),
         engine.function('Subtract', [engine.number(1), z]),
       ])
-      .evaluate({ numericApproximation });
+      .evaluate({ numericApproximation: numeric });
 
   // a a non-positive integer, Re(s) > 0, z ≠ 0: the (k+a) = 0 term
   // diverges — the same pole `evaluateHurwitzZeta` gives `HurwitzZeta` at a
   // non-positive integer base point, since a nonzero zᵏ never cancels it.
   const aNonposInt =
-    isNumber(a) && a.im === 0 && Number.isInteger(a.re) && a.re <= 0;
-  if (aNonposInt && finite(s) && s.re > 0 && !(isNumber(z) && z.isSame(0)))
+    isNumber(a) && !a.isComplex && Number.isInteger(a.re) && a.re <= 0;
+  if (aNonposInt && finite(s) && s.re > 0 && zNonZero)
     return engine.ComplexInfinity;
   // Re(s) = 0, s ≠ 0, same base point, z ≠ 0: 0^(−s) = 0^(−i·Im(s)) doesn't
   // converge to any value (it winds the unit circle) — the same
   // indeterminate case `evaluateHurwitzZeta` answers `NaN` for under `N()`.
   if (
-    numericApproximation &&
+    numeric &&
     aNonposInt &&
     finite(s) &&
     s.re === 0 &&
-    s.im !== 0 &&
-    !(isNumber(z) && z.isSame(0))
+    s.isComplex &&
+    zNonZero
   )
     return engine.NaN;
 
@@ -2395,9 +2407,9 @@ function evaluateLerchPhi(
   // a ≥ 0 or s is an integer keeps every term real — the same predicate
   // `evaluateHurwitzZeta` uses, restricted to the cut-free side of z.
   const real =
-    z.im === 0 &&
-    s.im === 0 &&
-    a.im === 0 &&
+    !z.isComplex &&
+    !s.isComplex &&
+    !a.isComplex &&
     z.re < 1 &&
     (a.re >= 0 || Number.isInteger(s.re));
   return boxComplexResult(engine, result, real);
@@ -4024,25 +4036,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Lerch transcendent Φ(z,s,a) = Σ_{k=0}^∞ zᵏ(k+a)^{-s}',
       complexity: 8600,
       broadcastable: true,
-      // Every operand is a plain complex number: no infinite-point limit
-      // is implemented here (unlike `Zeta`/`HurwitzZeta` above), so an
-      // infinite operand stays symbolic rather than boxing against the
-      // wrong carrier.
+      // Every operand is a finite complex number: no infinite-point limit
+      // is implemented here (unlike `Zeta`/`HurwitzZeta` above), so the
+      // signature does not admit an infinite operand, and
+      // `LerchPhi(0.5, +oo, 2)` is an `incompatible-type` error.
       signature: '(complex, complex, complex) -> number',
       nanBehavior: 'propagate',
-      // Real only on the branch-cut-free, real-operand side: a ≥ 0 keeps
-      // every term's base (k+a) non-negative, so its (−s) power is real
-      // for a real s; elsewhere (a < 0, z on the [1, ∞) cut, or any
-      // non-real operand) the value can be complex, or the pole `~oo` (a
-      // non-positive integer a with Re(s) > 0), so the claim stays
-      // `number` there — matching `evaluateLerchPhi`'s `real` predicate,
-      // less precisely since the cut and the s-integer case aren't
-      // visible to the type layer.
+      // Real only on the branch-cut-free, real-operand side: a > 0 keeps
+      // every term's base (k+a) positive, so its (−s) power is real for a
+      // real s, and a real z < 1 keeps z off the [1, ∞) branch cut, where
+      // the value is complex (LerchPhi(3, 2, 1) ≈ 0.773 − 1.150i) or the
+      // pole at z = 1 (LerchPhi(1, 1, 1)). z must be proven below 1: a
+      // literal, or a type bounded below 1. Elsewhere (a ≤ 0, z not proven
+      // below 1, or any non-real operand) the value can be complex, or the
+      // pole `~oo` (a non-positive integer a with Re(s) > 0), so the claim
+      // stays `number` there — matching `evaluateLerchPhi`'s `real`
+      // predicate, less precisely since the s-integer case isn't visible
+      // to the type layer.
       type: (ops, context) => {
         const t = specialFunctionType(ops);
-        const a = ops[2];
+        const [z, , a] = ops;
         const realBranch =
-          a !== undefined && operandSgnOnTypes(a) === 'positive';
+          z !== undefined &&
+          provablyLessOnTypes(z, 1) &&
+          a !== undefined &&
+          operandSgnOnTypes(a) === 'positive';
         return BoxedType.forResult(
           t !== undefined && !realBranch ? 'number' : t,
           context.engine._typeResolver

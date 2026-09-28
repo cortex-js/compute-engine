@@ -6989,8 +6989,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.hurwitzZeta(${compile(args[0])}, ${compile(args[1])})`;
   },
-  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.lerchPhi` is NaN wherever
-  // the value is genuinely complex, matching the interpreter's `LerchPhi`.
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.lerchPhi` (`lerchPhiReal`)
+  // runs the interpreter's machine kernel, the continuation past |z| = 1
+  // included, and is NaN wherever the value is genuinely complex (real
+  // z > 1 is on the branch cut, a < 0 with a non-integer s) or the kernel
+  // declines. For real z < −1 the value is real, but the continuation
+  // declines there until the incomplete gamma kernel is accurate for an
+  // argument with a negative real part (cortex-js/compute-engine#353), so
+  // it is NaN there too.
   LerchPhi: (args, compile) => {
     if (args.length !== 3)
       throw new Error(
