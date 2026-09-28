@@ -3,7 +3,11 @@ import type { SmallInteger } from '../numerics/types.js';
 import { NumericValue, NumericValueData } from './types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import { numberToString } from '../numerics/strings.js';
-import { numberToExpression } from '../numerics/expression.js';
+import {
+  floatComplexToExpression,
+  floatToExpression,
+  numberToExpression,
+} from '../numerics/expression.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
 import { ExactNumericValue, withDoubleDigits } from './exact-numeric-value.js';
 import {
@@ -116,12 +120,15 @@ export class MachineNumericValue extends NumericValue {
     // the MathJSON of the same pole differed between the two precisions.
     if (this.isComplexInfinity) return 'ComplexInfinity';
 
-    if (!this.isComplex) return numberToExpression(this.decimal);
-    return [
-      'Complex',
-      numberToExpression(this.decimal),
-      numberToExpression(this.im),
-    ];
+    // A machine value is a float, so an integer-valued value is written with
+    // a fraction part (`{ num: "2.0" }`) to be read back as a float.
+    if (!this.isComplex) return floatToExpression(this.decimal);
+    // `+ 0` turns a negative zero part (the real part of `-1.1i`) into `0`:
+    // the engine has no distinct negative zero
+    return floatComplexToExpression([
+      numberToExpression(this.decimal + 0),
+      numberToExpression(this.im + 0),
+    ]);
   }
 
   toString(): string {

@@ -4,7 +4,12 @@ import { NumericValue, NumericValueData } from './types.js';
 import { ExactNumericValue } from './exact-numeric-value.js';
 import { isInMachineRange } from '../numerics/numeric-bignum.js';
 import { MathJsonExpression } from '../../math-json/types.js';
-import { numberToExpression } from '../numerics/expression.js';
+import {
+  floatComplexToExpression,
+  floatToExpression,
+  numberToExpression,
+} from '../numerics/expression.js';
+import { withFractionPart } from '../numerics/strings.js';
 import { bigint } from '../numerics/bigint.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
 import { complexNoiseRatio, isComplexDust } from './roundoff.js';
@@ -123,17 +128,20 @@ export class BigNumericValue extends NumericValue {
     if (this.isPositiveInfinity) return 'PositiveInfinity';
     if (this.isNegativeInfinity) return 'NegativeInfinity';
     if (this.isComplexInfinity) return 'ComplexInfinity';
-    if (!this.isComplex) {
-      if (isInMachineRange(this.decimal)) return this.decimal.toNumber();
-      return { num: decimalToString(this.decimal) };
-    }
-    // Each part is written as a JSON number only when the double is exactly
-    // that part, otherwise as a `{ num }` string that keeps every digit.
+    // A value is written as a JSON number only when the double is exactly
+    // that value, otherwise as a `{ num }` string that keeps every digit. A
+    // big decimal is a float, so an integer-valued value is written with a
+    // fraction part (`{ num: "2.0" }`, `{ num: "1.0e+800" }`) to be read
+    // back as a float.
+    if (!this.isComplex)
+      return isInMachineRange(this.decimal)
+        ? floatToExpression(this.decimal.toNumber())
+        : { num: withFractionPart(decimalToString(this.decimal)) };
     const part = (x: BigDecimal): MathJsonExpression =>
       isInMachineRange(x)
         ? numberToExpression(x.toNumber())
         : { num: decimalToString(x) };
-    return ['Complex', part(this.decimal), part(this.imDecimal)];
+    return floatComplexToExpression([part(this.decimal), part(this.imDecimal)]);
   }
 
   /**

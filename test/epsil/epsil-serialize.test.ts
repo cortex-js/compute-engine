@@ -11,15 +11,15 @@ describe('EPSIL SERIALIZING', () => {
       `"-1_234_567.89"`
     );
     expect(serializeEpsil(-1234567.89e-123)).toMatchInlineSnapshot(
-      `"-123_456_789e-125"`
+      `"-1.234_567_89e-117"`
     );
     expect(serializeEpsil({ num: '-1234567.890e-123' })).toMatchInlineSnapshot(
-      `"-1_234_567_890e-126"`
+      `"-1_234_567.890e-123"`
     );
     expect(
       serializeEpsil({ num: '-123456789012345678901234567890.890e-123' })
     ).toMatchInlineSnapshot(
-      `"-123_456_789_012_345_678_901_234_567_890_890e-126"`
+      `"-123_456_789_012_345_678_901_234_567_890.890e-123"`
     );
     // Epsil's canonical infinity spelling is unsigned (`Infinity`); the
     // `+Infinity` payload spelling is input-only.

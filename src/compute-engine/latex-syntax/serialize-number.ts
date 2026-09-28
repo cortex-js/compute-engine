@@ -77,8 +77,13 @@ function formatFractionalPart(
   if (maxFractionalDigits < 0)
     maxFractionalDigits = maxFractionalDigits - wholeDigitsCount;
   if (maxFractionalDigits < 0) maxFractionalDigits = 0;
-  const extraDigits = digits.length > maxFractionalDigits;
-  if (extraDigits) digits = digits.substring(0, maxFractionalDigits);
+  // The truncation marker is shown only when a digit that is not zero is
+  // dropped: `2.0` with no fractional digits is written `2`, not `2.\ldots`
+  const extraDigits =
+    digits.length > maxFractionalDigits &&
+    !/^0*$/.test(digits.substring(maxFractionalDigits));
+  if (digits.length > maxFractionalDigits)
+    digits = digits.substring(0, maxFractionalDigits);
 
   // Insert group separators if necessary
   digits = insertFractionalGroupSeparator(digits, options);
@@ -121,22 +126,36 @@ export function serializeNumber(
     else if (num === -Infinity) return options.negativeInfinity;
     else if (Number.isNaN(num)) return options.notANumber;
 
+    // A JSON number is read back as an exact integer only when it is a safe
+    // integer: any other JSON number is a float
+    const isFloat = !Number.isSafeInteger(num);
     let result: string | undefined = undefined;
     if (options.notation === 'engineering') {
       result = serializeScientificNotationNumber(
         num.toExponential(),
         options,
+        isFloat,
         3
       );
     } else if (options.notation === 'scientific') {
-      result = serializeScientificNotationNumber(num.toExponential(), {
-        ...options,
-        avoidExponentsInRange: null, // Scientific notation should always use exponents
-      });
+      result = serializeScientificNotationNumber(
+        num.toExponential(),
+        {
+          ...options,
+          avoidExponentsInRange: null, // Scientific notation should always use exponents
+        },
+        isFloat
+      );
     } else if (options.notation === 'adaptiveScientific') {
-      result = serializeScientificNotationNumber(num.toExponential(), options);
+      result = serializeScientificNotationNumber(
+        num.toExponential(),
+        options,
+        isFloat
+      );
     }
-    return result ?? serializeAutoNotationNumber(num.toString(), options);
+    return (
+      result ?? serializeAutoNotationNumber(num.toString(), options, isFloat)
+    );
   }
 
   num = num.toLowerCase().replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
@@ -183,24 +202,37 @@ export function serializeNumber(
   if (num.length === 0) num = '0';
   else if (num[0] === '.') num = '0' + num;
 
+  // A number spelled with a fraction part (`2.0`, `1.5e+23`) or with a
+  // negative exponent (`1e-7`) is a float. An exact integer (`2`, `1e+30`)
+  // has neither.
+  const isFloat = num.includes('.') || /e-/.test(num);
+
   let result: string | undefined = undefined;
   if (options.notation === 'engineering') {
-    result = serializeScientificNotationNumber(num, options, 3);
+    result = serializeScientificNotationNumber(num, options, isFloat, 3);
   } else if (options.notation === 'scientific') {
-    result = serializeScientificNotationNumber(num, {
-      ...options,
-      avoidExponentsInRange: null, // Scientific notation should always use exponents
-    });
+    result = serializeScientificNotationNumber(
+      num,
+      {
+        ...options,
+        avoidExponentsInRange: null, // Scientific notation should always use exponents
+      },
+      isFloat
+    );
   } else if (options.notation === 'adaptiveScientific') {
-    result = serializeScientificNotationNumber(num, options);
+    result = serializeScientificNotationNumber(num, options, isFloat);
   }
 
   return (
     sign +
     (result ??
-      serializeAutoNotationNumber(num, {
-        ...options,
-      }))
+      serializeAutoNotationNumber(
+        num,
+        {
+          ...options,
+        },
+        isFloat
+      ))
   );
 }
 
@@ -211,11 +243,15 @@ export function serializeNumber(
  * - an optional exponent
  * @param valString
  * @param options
+ * @param isFloat - true if the number is a float (inexact). The result then
+ * keeps a fraction part (`2.0`, `1.0\times10^{800}`), because a LaTeX
+ * number without one is read back as an exact integer.
  * @returns
  */
 function serializeScientificNotationNumber(
   valString: string,
   options: NumberSerializationFormat,
+  isFloat: boolean,
   expMultiple = 1
 ): string | undefined {
   // For '7' returns '7e+0'
@@ -275,12 +311,15 @@ function serializeScientificNotationNumber(
       } else {
         // 1.234  -> 1.234e+0
         // 12.345 -> 1.2345e+1
+        // 1234.0 -> 1.234e+3 (the trailing zeros of an integer-valued
+        // float are not significant digits)
+        let digits = whole.slice(1) + fraction;
+        if (/^0*$/.test(fraction)) digits = digits.replace(/0+$/, '');
         valString =
           sign +
           whole[0] +
           '.' +
-          whole.slice(1) +
-          fraction +
+          (digits || '0') +
           'e+' +
           (whole.length - 1).toString();
       }
@@ -288,7 +327,7 @@ function serializeScientificNotationNumber(
     m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/);
   }
   console.assert(m !== null);
-  if (!m) return serializeAutoNotationNumber(valString, options);
+  if (!m) return serializeAutoNotationNumber(valString, options, isFloat);
 
   let exponent = parseInt(m[2]);
   let mantissa = m[1];
@@ -354,6 +393,10 @@ function serializeScientificNotationNumber(
     wholePart.length,
     options
   );
+  // An integer-valued float keeps one zero after the decimal separator,
+  // unless the caller asked for no fractional digits
+  if (!fractionalPart && isFloat && options.fractionalDigits !== 0)
+    fractionalPart = '0';
   if (fractionalPart)
     fractionalPart = options.decimalSeparator + fractionalPart;
 
@@ -363,9 +406,15 @@ function serializeScientificNotationNumber(
   return wholePart + fractionalPart + options.exponentProduct + expString;
 }
 
+/**
+ * `isFloat` is true if the number is a float (inexact). The result then keeps
+ * a fraction part (`2.0`, `1.0\cdot10^{800}`), because a LaTeX number without
+ * one is read back as an exact integer.
+ */
 function serializeAutoNotationNumber(
   valString: string,
-  options: NumberSerializationFormat
+  options: NumberSerializationFormat,
+  isFloat: boolean
 ): string {
   let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/i);
   // if valString === '-1234567.89e-123'
@@ -393,7 +442,9 @@ function serializeAutoNotationNumber(
   // If we have some fractional digits *and* an exponent, we need to
   // adjust the whole part to include the fractional part.
   // 1.23e4 -> 123e2
-  if (exp !== 0 && fractionalPart) {
+  // A float keeps its mantissa as it is (`1.5\cdot10^{300}`, not
+  // `15.0\cdot10^{299}`): it needs a fraction part anyway.
+  if (exp !== 0 && fractionalPart && !isFloat) {
     wholePart += fractionalPart;
     exp -= fractionalPart.length;
     fractionalPart = '';
@@ -417,17 +468,24 @@ function serializeAutoNotationNumber(
   const exponent = formatExponent(exp.toString(), options);
 
   if (fractionalPart)
-    fractionalPart =
-      options.decimalSeparator +
-      formatFractionalPart(fractionalPart, wholePart.length, options);
+    fractionalPart = formatFractionalPart(
+      fractionalPart,
+      wholePart.length,
+      options
+    );
+  // An integer-valued float keeps one zero after the decimal separator,
+  // unless the caller asked for no fractional digits
+  if (!fractionalPart && isFloat && options.fractionalDigits !== 0)
+    fractionalPart = '0';
+  if (fractionalPart)
+    fractionalPart = options.decimalSeparator + fractionalPart;
 
   wholePart = insertWholeGroupSeparator(wholePart, options);
 
+  // The mantissa is written even when it is `1`: `1\cdot10^{30}` is read
+  // back as a number literal, but `10^{30}` is read back as a power, and the
+  // Epsil `e22` as a symbol.
   if (!exponent) return wholePart + fractionalPart;
-  if (!fractionalPart) {
-    if (wholePart === '1') return exponent;
-    if (wholePart === '-1') return '-' + exponent;
-  }
   return wholePart + fractionalPart + options.exponentProduct + exponent;
 }
 

@@ -84,7 +84,7 @@ describe('Numbers', () => {
     expect(
       ce.expr(['Exp', ['Multiply', 'Pi', ['Sqrt', 163]]]).N().json
     ).toEqual({
-      num: '262537412640768744',
+      num: '262537412640768744.0',
     });
   });
 

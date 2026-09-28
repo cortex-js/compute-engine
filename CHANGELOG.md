@@ -2,6 +2,18 @@
 
 ### Behavior Changes
 
+- **An integer-valued float is written with a fraction part, so it reads
+  back as a float.** A float whose value is an integer serializes as
+  `{num: "2.0"}` in MathJSON and `2.0` in LaTeX (a large one as `1.0e+800`
+  and `1.0\cdot10^{800}`); it was `2`, which reads back as the exact `2`, so
+  `Sin(2.0)` numericized while its round trip `Sin(2)` stayed symbolic (user
+  decision 2026-09-28). An exact integer is still written `2`. A float in
+  LaTeX with a negative exponent now keeps its fraction part too
+  (`123.0\cdot10^{-3}`), which read back as an exact rational before. With `fractionalDigits: 0` (LaTeX)
+  or `digits: {fractional: 0}` (MathJSON) the integer spelling is kept, as
+  requested.
+
+
 - **An Epsil decimal literal keeps its value, and a literal with a fraction
   part is a float.** The Epsil parser summed the fraction digits one float at a
   time, so `0.75` read as `0.7500000000000001`, `0.3` as `0.30000000000000004`

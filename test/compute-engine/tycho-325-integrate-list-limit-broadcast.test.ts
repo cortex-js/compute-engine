@@ -323,7 +323,7 @@ describe('Tycho 325: the pieces of the fix', () => {
       .N();
     expect(r.json).toEqual([
       'List',
-      ['Measurement', 1, 0.05],
+      ['Measurement', { num: '1.0' }, 0.05],
       ['Measurement', 1.5, 0.05],
     ]);
   });

@@ -246,6 +246,24 @@ export function fromDigits(
   return [value, ''];
 }
 
+/**
+ * Return the decimal spelling `s` of a number with a fraction part in its
+ * mantissa: `2` becomes `2.0`, `-2` becomes `-2.0` and `1e+800` becomes
+ * `1.0e+800`. A spelling that already has a fraction part, or that is not a
+ * plain decimal number (`NaN`, a repeating decimal `0.(3)`), is returned
+ * unchanged.
+ *
+ * The exactness of a number literal follows its spelling: a literal with a
+ * fraction part is a float, a literal without one is an exact integer. An
+ * integer-valued float is written with this spelling so that it is read back
+ * as a float.
+ */
+export function withFractionPart(s: string): string {
+  const m = /^([+-]?\d+)([eE][+-]?\d+)?$/.exec(s);
+  if (!m) return s;
+  return `${m[1]}.0${m[2] ?? ''}`;
+}
+
 export function numberToString(
   num: number | bigint,
   fractionalDigits?: number | string

@@ -355,7 +355,8 @@ export class BoxedNumber
     //    literal when re-boxed — `ce.expr(x.json).isSame(x)` holds (RT-P1-1);
     //  - machine floats serialize as JSON numbers, big floats keep every stored
     //    digit, and non-finite values map to `NaN`/`PositiveInfinity`/
-    //    `NegativeInfinity`.
+    //    `NegativeInfinity`. An integer-valued float has a fraction part
+    //    (`{ num: "2.0" }`), so that it is read back as a float.
     // (Historically this path could emit a rounded numeric approximation; the
     // P0-32/P0-33 fidelity fixes made it lossless.)
 

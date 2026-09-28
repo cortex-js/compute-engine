@@ -16,6 +16,7 @@ import {
   getSequence,
 } from '../../../math-json/utils.js';
 import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
+import { isFloatSpelling } from '../../numerics/expression.js';
 import {
   Serializer,
   Parser,
@@ -1482,7 +1483,9 @@ function serializePower(
     );
 
   if (serializer.options.prettify) {
-    const val2 = machineValue(exp) ?? 1;
+    // A float exponent (`x^{-1.0}`, `x^{-0.5}`) is written as it is: the
+    // rewrites below write an exact exponent, which reads back exact
+    const val2 = isFloatSpelling(exp) ? 1 : (machineValue(exp) ?? 1);
     if (val2 === -1) {
       return serializer.serialize(['Divide', '1', base]);
     } else if (val2 < 0) {
@@ -1946,6 +1949,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       const negImMagnitude =
         im === null ? negatedMagnitude(operand(expr, 2)) : null;
 
+      // A float imaginary part `±1.0` with no real part keeps its
+      // coefficient: `1.0\imaginaryI`, not `\imaginaryI`, which is read
+      // back as the exact `i`. With a real part, the real part makes the
+      // value a float.
+      const reIsZero = complexPartShape(operand(expr, 1))?.isZero === true;
+      const imOperand = operand(expr, 2);
+      const unitCoefficient = !(
+        reIsZero &&
+        imOperand !== null &&
+        isFloatSpelling(imOperand)
+      );
+
       const imPart =
         negImMagnitude !== null
           ? joinLatex([
@@ -1957,16 +1972,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
                     '\\imaginaryI',
                   ]),
             ])
-          : im?.isOne
+          : im?.isOne && unitCoefficient
             ? '\\imaginaryI'
-            : im?.isNegativeOne
+            : im?.isNegativeOne && unitCoefficient
               ? '-\\imaginaryI'
               : joinLatex([
                   serializer.serialize(operand(expr, 2)),
                   '\\imaginaryI',
                 ]);
 
-      if (complexPartShape(operand(expr, 1))?.isZero) return imPart;
+      if (reIsZero) return imPart;
 
       if (im?.isNegative || negImMagnitude !== null)
         return joinLatex([rePart, imPart]);
