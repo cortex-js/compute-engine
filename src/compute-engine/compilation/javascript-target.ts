@@ -7006,9 +7006,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.lerchPhi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
   },
-  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.polyLog` is `z·lerchPhi(z,
-  // s, 1)`, so it is NaN everywhere `_SYS.lerchPhi` is, matching the
-  // interpreter's widened `PolyLog`.
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.polyLog` is
+  // `polylogOrderReal` (`numerics/polylog.ts`), which answers every order
+  // the way the interpreter does (the closed forms and the dedicated
+  // integer-order kernel first) and is NaN for a complex value or where
+  // the interpreter's kernel declines.
   PolyLog: (args, compile) => {
     if (args.length !== 2)
       throw new Error(

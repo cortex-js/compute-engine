@@ -1,16 +1,19 @@
 /**
  * `PolyLog(s, z)` widened to a non-integer or complex order s
- * (cortex-js/compute-engine#340). Native `PolyLog` already evaluates an
- * integer order ≥ 2 (unchanged here) and the elementary/ζ exact
- * reductions in `library/special-functions.ts`'s `polylogReduce`
- * (unchanged here); `evaluatePolyLog`'s new branch widens everything
- * else via `numerics/polylog.ts`'s `Liₛ(z) = z·Φ(z,s,1)`, reusing the
- * Lerch transcendent kernel (`numerics/lerch-phi.ts`). Reference values
- * below are cross-checked against mpmath's `polylog` at 30 digits; the
- * comment on each case carries the value mpmath reports.
+ * (cortex-js/compute-engine#340). An integer order ≥ 2 still uses the
+ * dedicated kernel. `polylogReduce` (`library/special-functions.ts`) gives
+ * the exact reductions: the orders 1, 0 and −1, ζ(s) at z = 1 and the
+ * Dirichlet eta identity at z = −1 for every order, and the Eulerian closed
+ * form for an order −2 … −12. The `PolyLog` evaluate handler sends every
+ * other order to `numerics/polylog.ts`: `Liₛ(z) = z·Φ(z,s,1)` through the
+ * Lerch transcendent kernel (`numerics/lerch-phi.ts`), and Jonquière's
+ * inversion formula past |z| = 1 where the Lerch continuation declines.
+ * Reference values below are cross-checked against mpmath's `polylog` at
+ * 30 digits; the comment on each case carries the value mpmath reports.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
@@ -141,6 +144,125 @@ describe('PolyLog past |z| = 1 and on the rim, non-integer order', () => {
   });
 });
 
+describe('PolyLog past |z| = 1 by the inversion formula', () => {
+  test.each([
+    // mpmath: polylog(1.5,-3) = -1.6790897305048281353
+    [1.5, -3, -1.6790897305048281353],
+    // mpmath: polylog(2.5,-1.5) = -1.2315115793252009745
+    [2.5, -1.5, -1.2315115793252009745],
+    // mpmath: polylog(-0.5,-2) = -0.43748088858023395075
+    [-0.5, -2, -0.43748088858023395075],
+    // mpmath: polylog(0.5,-5) = -1.2972654048194184803
+    [0.5, -5, -1.2972654048194184803],
+    // mpmath: polylog(1.5,-1.01) = -0.77118480262567375903
+    [1.5, -1.01, -0.77118480262567375903],
+  ])('Li_%p(%p), on the real axis below −1, is real', (s, z, expected) => {
+    const v = li(s, z).N();
+    expect(v.im).toBe(0);
+    expect(Math.abs(v.re - expected)).toBeLessThan(1e-13 * Math.abs(expected));
+  });
+
+  test('a complex order below −1 matches mpmath', () => {
+    // mpmath: polylog(1.5+0.5j,-3) = -1.695817331186100915 - 0.27884681338230110013j
+    const v = li(['Complex', 1.5, 0.5], -3).N();
+    expect(v.re).toBeCloseTo(-1.695817331186100915, 12);
+    expect(v.im).toBeCloseTo(-0.27884681338230110013, 12);
+  });
+
+  test('a complex z past the disk matches mpmath', () => {
+    // mpmath: polylog(2.5,-2+1j) = -1.6125833346456794631 + 0.63412545532810159467j
+    const v = li(2.5, ['Complex', -2, 1]).N();
+    expect(v.re).toBeCloseTo(-1.6125833346456794631, 12);
+    expect(v.im).toBeCloseTo(0.63412545532810159467, 12);
+  });
+});
+
+describe('PolyLog of a negative integer order: the Eulerian closed form', () => {
+  test('Li₋₂(1/2) is the exact 6', () => {
+    // mpmath: polylog(-2,0.5) = 6.0
+    expect(li(-2, ['Rational', 1, 2]).evaluate().isSame(6)).toBe(true);
+    expect(li(-2, ['Rational', 1, 2]).N().re).toBe(6);
+  });
+
+  test('Li₋₂(−2) is the exact 2/27', () => {
+    // mpmath: polylog(-2,-2) = 0.074074074074074074074
+    expect(
+      li(-2, -2)
+        .evaluate()
+        .isSame(ce.number([2, 27]))
+    ).toBe(true);
+  });
+
+  test('Li₋₃(1/3) is the exact 33/8', () => {
+    // mpmath: polylog(-3,1/3) = 4.125
+    expect(
+      li(-3, ['Rational', 1, 3])
+        .evaluate()
+        .isSame(ce.number([33, 8]))
+    ).toBe(true);
+  });
+
+  test('Li₋₅(0.3) matches mpmath', () => {
+    // mpmath: polylog(-5,0.3) = 39.397104947768354556
+    expect(li(-5, 0.3).N().re).toBeCloseTo(39.397104947768354556, 11);
+  });
+
+  test('Li₋₁₂(1/2) is exact, at the largest order the closed form covers', () => {
+    // mpmath: polylog(-12,0.5) = 56183135190.0
+    expect(li(-12, ['Rational', 1, 2]).evaluate().isSame(56183135190)).toBe(
+      true
+    );
+  });
+
+  test('a symbolic z stays symbolic', () => {
+    expect(li(-2, 'x').evaluate().operator).toBe('PolyLog');
+  });
+});
+
+describe('PolyLog at z = 1 and z = −1 for the elementary orders', () => {
+  // The orders 1, 0 and −1 have closed forms that `polylogReduce` applies
+  // before the ζ point value at z = 1, so these are poles, not ζ(1), ζ(0)
+  // and ζ(−1).
+  test('Li₁(1) is +∞', () => {
+    expect(li(1, 1).evaluate().json).toBe('PositiveInfinity');
+  });
+
+  test('Li₀(1) and Li₋₁(1) are ComplexInfinity', () => {
+    expect(li(0, 1).evaluate().json).toBe('ComplexInfinity');
+    expect(li(-1, 1).evaluate().json).toBe('ComplexInfinity');
+  });
+
+  test('Li_{1/2}(1) stays the exact Zeta(1/2)', () => {
+    const v = li(['Rational', 1, 2], 1).evaluate();
+    expect(v.operator).toBe('Zeta');
+    // mpmath: zeta(0.5) = -1.4603545088095868129
+    expect(v.N().re).toBeCloseTo(-1.4603545088095868129, 14);
+  });
+
+  test('Li₁(−1) is −ln 2', () => {
+    expect(
+      li(1, -1)
+        .evaluate()
+        .isSame(ce.expr(['Negate', ['Ln', 2]]))
+    ).toBe(true);
+  });
+
+  test('a float order near 1 at z = −1 uses the kernel, not the eta identity', () => {
+    // The identity multiplies 2^(1−s) − 1 ≈ 0 by ζ(s) ≈ ∞ and lost about
+    // 12 of the 21 working digits here (−0.6931471810004).
+    // mpmath: polylog(1.000000000001,-1) = -0.69314718056010519253
+    const v = li(1.000000000001, -1).N();
+    expect(Math.abs(v.re - -0.69314718056010519253)).toBeLessThan(1e-15);
+  });
+
+  test('a float order makes a closed-form result a float', () => {
+    // `{ num: '0.0' }` is the float 0 (a JavaScript `0.0` is the integer 0).
+    const v = li({ num: '0.0' }, ['Rational', 1, 2]).evaluate();
+    expect(v.re).toBe(1);
+    expect(isNumber(v) && v.isExact).toBe(false);
+  });
+});
+
 describe('PolyLog declines rather than certify an unreliable widened value', () => {
   test('a large negative order near, but not at, z = −1 (van Wijngaarden Euler transform) declines', () => {
     // z = −1 exactly goes through the exact Dirichlet eta reduction below,
@@ -159,11 +281,31 @@ describe('PolyLog declines rather than certify an unreliable widened value', () 
   });
 
   test('close to the z = 1 branch point declines rather than trust the continuation there', () => {
-    // The Hermite-integral continuation's cancellation widens faster than
-    // its own `lost` guard catches this close to the branch point (see
+    // The Hermite-integral continuation's cancellation grows faster than
+    // its own `lost` guard catches within 1e−3 of the branch point (see
     // `nearBranchPointUnreliable`); z = 1 itself is unaffected (the exact
-    // ζ(s) reduction above).
-    expect(li(4.98972, 1.001).N().numericValue).toBeUndefined();
+    // ζ(s) reduction above). The order 3.5 is far from an integer, so only
+    // that guard applies.
+    expect(li(3.5, 1.0001).N().numericValue).toBeUndefined();
+  });
+
+  test('just outside the branch-point guard the kernel answers', () => {
+    // mpmath: polylog(2.5,0.999) = 1.3389476332802494862
+    expect(li(2.5, 0.999).N().re).toBeCloseTo(1.3389476332802494862, 12);
+  });
+
+  test('a complex order next to a positive integer declines on the rim', () => {
+    // The distance to the integer is measured in the complex plane: the
+    // continuation is 3e−4 off here (mpmath: -0.84520374989768012881 -
+    // 0.48601214735116938011j).
+    expect(
+      li(['Complex', 5, 1e-6], ['Complex', -0.86, -0.51]).N().numericValue
+    ).toBeUndefined();
+  });
+
+  test('a negative order at a positive z answers (every term is positive)', () => {
+    // mpmath: polylog(-3.5,0.5) = 60.53011239698513298
+    expect(li(-3.5, 0.5).N().re).toBeCloseTo(60.53011239698513298, 11);
   });
 
   test('z = 1 itself is unaffected by the near-branch-point decline', () => {
@@ -176,8 +318,17 @@ describe('PolyLog declines rather than certify an unreliable widened value', () 
 
 describe('PolyLog result types', () => {
   test('a non-integer real order and real z < 1 type real', () => {
-    const t = li(2.5, 0.5).type;
-    expect(t.matches('number')).toBe(true);
+    expect(li(2.5, 0.5).type.matches('real')).toBe(true);
+  });
+
+  test('a real order and a real z > 1 is not typed real (the value is complex)', () => {
+    // mpmath: polylog(1.5,2) = 1.5488677485243837586 - 2.9513292532712117788j
+    expect(li(1.5, 2).type.matches('real')).toBe(false);
+    expect(li(1.5, 2).N().im).toBeCloseTo(-2.9513292532712117788, 12);
+  });
+
+  test('a negative integer order is real on the whole real axis', () => {
+    expect(li(-2, 5).type.matches('real')).toBe(true);
   });
 });
 
@@ -186,12 +337,15 @@ describe('PolyLog JS compile', () => {
   ce.declare('pl_z', 'real');
   const run = compile(ce.box(['PolyLog', 'pl_s', 'pl_z']))?.run;
 
-  // z = ±1 go through `polylogReduce`'s exact `Zeta`-based reduction under
-  // `evaluate()`/`N()`, a different (more accurate) route than the
-  // compiled lane's direct kernel call, so parity is not expected there —
-  // excluded here the same way `lerch-phi-values.test.ts` excludes z = 1.
+  // The compiled lane (`polylogOrderReal`) answers the integer orders the
+  // way the interpreter does. At z = −1 the interpreter uses the exact
+  // Dirichlet eta identity and the compiled lane the Euler transform, so
+  // the two agree to the 1e−9 tolerance below rather than bit for bit.
   function expectParity(got: unknown, s: number, z: number) {
     const n = li(s, z).N();
+    // Every row has a numeric interpreter value, so a NaN from both sides
+    // cannot pass as agreement.
+    expect(isNumber(n)).toBe(true);
     if (n.im !== 0) expect(got).toBeNaN();
     else
       expect(Math.abs((got as number) - n.re)).toBeLessThan(
@@ -206,12 +360,29 @@ describe('PolyLog JS compile', () => {
     [-2.5, -0.5],
     [-0.9, -1],
     [2.5, -0.5],
+    // Integer orders: the closed forms and the dedicated kernel.
+    [3, -2],
+    [2, -3],
+    [1, -3],
+    [-6, 0],
+    [2, 0.99],
+    [-3, -5],
+    // Below z = −1, through the inversion formula.
+    [1.5, -3],
+    [0.5, -5],
   ])('PolyLog(%p, %p)', (s, z) => {
     expectParity(run?.({ pl_s: s, pl_z: z }), s, z);
   });
 
-  test('past |z| = 1 the real-only compiled lane is NaN (no GPU/JS incomplete-Γ kernel)', () => {
+  test('the poles at z = 1 of the orders 1, 0 and −1 are Infinity', () => {
+    expect(run?.({ pl_s: 1, pl_z: 1 })).toBe(Infinity);
+    expect(run?.({ pl_s: 0, pl_z: 1 })).toBe(Infinity);
+    expect(run?.({ pl_s: -1, pl_z: 1 })).toBe(Infinity);
+  });
+
+  test('a complex value on the cut z > 1 is NaN in the real-only compiled lane', () => {
     expect(run?.({ pl_s: 2.5, pl_z: 3 })).toBeNaN();
+    expect(run?.({ pl_s: 2, pl_z: 3 })).toBeNaN();
   });
 });
 
