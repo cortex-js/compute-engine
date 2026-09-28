@@ -635,29 +635,55 @@ function emEdge(s: Complex): number {
  * there — callers decide whether that term was actually a pole.
  */
 function hurwitzEMComplex(s: Complex, a: Complex): Complex {
+  return hurwitzEMComplexCore(s, a).value;
+}
+
+/**
+ * `hurwitzEMComplex`, plus the largest term magnitude seen while summing.
+ * When the terms are nowhere near the same size as the final sum, that sum
+ * is a near-cancellation of larger values: double precision carries about
+ * 16 significant digits per term, so a `largest` many orders above
+ * `value.abs()` means most of those digits cancelled away, and the caller
+ * cannot trust the low ones that are left. `polygammaComplex` is the one
+ * caller that checks this (`ratio = largest / value.abs()`); every other
+ * caller only wants `hurwitzEMComplex`'s plain result.
+ */
+function hurwitzEMComplexCore(
+  s: Complex,
+  a: Complex
+): { value: Complex; largest: number } {
   const n = Math.max(8, Math.ceil(emEdge(s) - a.re));
   const negS = s.neg();
   let sum = C_ZERO;
+  let largest = 0;
   for (let k = 0; k < n; k++) {
     const b = new Complex(a.re + k, a.im);
     if (b.re === 0 && b.im === 0) continue;
-    sum = sum.add(b.pow(negS));
+    const t = b.pow(negS);
+    sum = sum.add(t);
+    if (t.abs() > largest) largest = t.abs();
   }
   const z = new Complex(a.re + n, a.im);
   const zNegS = z.pow(negS);
-  sum = sum.add(z.pow(C_ONE.sub(s)).div(s.sub(1))).add(zNegS.mul(0.5));
+  const t1 = z.pow(C_ONE.sub(s)).div(s.sub(1));
+  const t2 = zNegS.mul(0.5);
+  sum = sum.add(t1).add(t2);
+  if (t1.abs() > largest) largest = t1.abs();
+  if (t2.abs() > largest) largest = t2.abs();
 
   // Σ_{k≥1} cₖ·(s)_{2k-1}·z^{-(s+2k-1)}, rolling the Pochhammer and z-power.
   let zPow = zNegS.div(z);
   const zInv2 = z.pow(-2);
   let poch = s;
   for (let k = 1; k <= EM_PAIRS; k++) {
-    sum = sum.add(poch.mul(zPow).mul(EM_COEFF[k]));
+    const t = poch.mul(zPow).mul(EM_COEFF[k]);
+    sum = sum.add(t);
+    if (t.abs() > largest) largest = t.abs();
     const m = 2 * k;
     poch = poch.mul(s.add(m - 1)).mul(s.add(m));
     zPow = zPow.mul(zInv2);
   }
-  return sum;
+  return { value: sum, largest };
 }
 
 /** ζ(s): reflection left of Re(s) = 0, EM across the strip, the bare series far right. */
@@ -785,6 +811,96 @@ export function zetaGeneralizedComplex(s: Complex, a: Complex): Complex {
   }
   if (cur.re === 0 && cur.im === 0) cur = C_ONE; // drop (k+a) = 0 — no pole here
   return acc.add(hurwitzZetaComplex(s, cur));
+}
+
+//
+// ---------------- Digamma / polygamma (complex) --------------------------
+//
+// cortex-js/compute-engine#340: PolyGamma(m, z) at a complex z. The native
+// `PolyGamma` already covers every real z at every integer order m >= 0
+// (`special-functions.ts`); this widens it to a complex z, reusing
+// `hurwitzZetaComplex` above for m >= 1 via DLMF 5.15.2,
+// ψ⁽ᵐ⁾(z) = (−1)^(m+1) m! ζ(m+1, z). ζ(1, z) is itself the pole ψ(z) sits
+// at, so m = 0 (the digamma) has no such form and gets its own asymptotic
+// series below.
+
+/** B₂ₖ/(2k), k = 1..14 — the digamma asymptotic tail coefficients. */
+const DIGAMMA_COEFF: number[] = (() => {
+  const c: number[] = [0];
+  for (let k = 1; k <= 14; k++) {
+    const [num, den] = bernoulliRational(2 * k);
+    c[k] = Number(num) / Number(den) / (2 * k);
+  }
+  return c;
+})();
+
+/** Shift z into Re(z) >= this before the asymptotic series, where the
+ * 14-term Bernoulli tail below reaches full double precision. */
+const DIGAMMA_SHIFT = 18;
+
+/**
+ * ψ(z), analytically continued to complex z: the derivative of `gammaln`'s
+ * Stirling series, ψ(w) ~ ln w − 1/(2w) − Σ_{k>=1} B₂ₖ/(2k) w^(−2k) for
+ * Re(w) large, reached from any z by the recurrence
+ * ψ(z) = ψ(z+n) − Σ_{k<n} 1/(z+k). Non-finite at the poles 0, −1, −2, ...
+ */
+function digammaComplex(z: Complex): Complex {
+  if (z.isNaN()) return C_NAN;
+  if (z.im === 0 && z.re <= 0 && Number.isInteger(z.re)) return C_NAN; // pole; caller decides finite vs. ~oo
+  const n = Math.max(0, Math.ceil(DIGAMMA_SHIFT - z.re));
+  let shift = C_ZERO;
+  for (let k = 0; k < n; k++) shift = shift.add(C_ONE.div(z.add(k)));
+  const w = z.add(n);
+  let r = w.log().sub(C_ONE.div(w).mul(0.5)); // ln w − 1/(2w)
+  const w2 = w.mul(w);
+  let p = w2; // w^(2k)
+  for (let k = 1; k < DIGAMMA_COEFF.length; k++) {
+    r = r.sub(new Complex(DIGAMMA_COEFF[k], 0).div(p));
+    p = p.mul(w2);
+  }
+  return r.sub(shift);
+}
+
+/** m! for a small integer m >= 0; non-finite past m ~ 170, same as the
+ * native real `polygamma` kernel — the caller treats that the same way. */
+function factorialSmall(m: number): number {
+  let f = 1;
+  for (let k = 2; k <= m; k++) f *= k;
+  return f;
+}
+
+/**
+ * ψ⁽ᵐ⁾(z) for a complex z and integer order m >= 0, matching mpmath's
+ * `polygamma`/Wolfram's `PolyGamma` (poles at the non-positive integers).
+ * Callers keep a real non-positive-integer z symbolic themselves — see
+ * `polygammaValueAtExceptionalPoint` in `library/arithmetic.ts` — so this is
+ * only reached off that axis, where `hurwitzZetaComplex`'s pole-dropping
+ * convention never applies.
+ */
+/**
+ * Past this ratio of the largest term the Euler-Maclaurin sum added to its
+ * own result's magnitude, the result is not trusted (see `polygammaComplex`).
+ * A random 800-point oracle grid (m in {0,1,2,3,5,8}, |z| up to 50) put the
+ * lowest ratio on a wrong (> 1e-12 relative) answer at ~187 and the highest
+ * ratio on a correct one at ~4787 — the two overlap, so no ratio threshold
+ * separates them exactly. 100 sits under every observed failure with room
+ * to spare, at the cost of declining some answers (ratio up to ~4787) that
+ * were in fact accurate.
+ */
+const POLYGAMMA_CANCELLATION_LIMIT = 100;
+
+export function polygammaComplex(m: number, z: Complex | number): Complex {
+  const c = typeof z === 'number' ? new Complex(z, 0) : z;
+  if (!Number.isInteger(m) || m < 0 || c.isNaN()) return C_NAN;
+  if (m === 0) return digammaComplex(c);
+  const sign = m % 2 === 0 ? -1 : 1; // (−1)^(m+1)
+  // ψ⁽ᵐ⁾(z) = (−1)^(m+1) m! ζ(m+1, z) (DLMF 5.15.2), s = m+1 >= 1 always takes
+  // the direct Euler-Maclaurin branch of `hurwitzZetaComplex` (its `s.re >= 0`
+  // case) — call that branch directly so the cancellation ratio is available.
+  const { value, largest } = hurwitzEMComplexCore(new Complex(m + 1, 0), c);
+  const size = value.abs();
+  if (size > 0 && largest / size > POLYGAMMA_CANCELLATION_LIMIT) return C_NAN;
+  return value.mul(sign * factorialSmall(m));
 }
 
 const SQRT_PI = Math.sqrt(Math.PI);

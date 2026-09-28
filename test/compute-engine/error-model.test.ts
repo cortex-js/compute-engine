@@ -1580,10 +1580,16 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     }
     // A symbolic order at +∞ depends on the order: stays symbolic.
     both(['PolyGamma', 'm', POS], symbolic('PolyGamma'));
-    // No complex kernel: a non-real argument stays symbolic on N() too
-    // (PolyGamma(2, 1+2i).N() used to answer ψ₂(1), the imaginary part
-    // silently dropped by the two-argument dispatcher).
-    both(['PolyGamma', 2, ['Complex', 1, 2]], symbolic('PolyGamma'));
+    // A complex kernel now exists (#340): stays symbolic under evaluate()
+    // (no exact/symbolic route for a non-real argument), but N() gives the
+    // numeric value — it used to answer ψ₂(1) there, the imaginary part
+    // silently dropped by the two-argument dispatcher.
+    expect(
+      ce2.box(['PolyGamma', 2, ['Complex', 1, 2]]).evaluate().operator
+    ).toBe('PolyGamma');
+    const pg2complex = ce2.box(['PolyGamma', 2, ['Complex', 1, 2]]).N();
+    expect(Math.abs(pg2complex.re - 0.21502435405364953)).toBeLessThan(1e-9);
+    expect(Math.abs(pg2complex.im - 0.124567475958697)).toBeLessThan(1e-9);
 
     // Zeta: the pole is `~oo` on both routes (N() answered +∞), `ζ(+∞) = 1`
     // (was NaN), no limit at −∞ (the trivial zeros alternate with huge
@@ -3812,9 +3818,7 @@ describe('the arithmetic core declares its domains', () => {
     // `Divide`: these heads have no `canonical` handler, so the signature
     // validation — which is what infers — actually runs. The clamp itself
     // lies between its bounds whatever the operand is (2026-09-26).
-    expect(ce.box(['Clamp', 'cB11', 0, 1]).type.toString()).toBe(
-      'real<0..1>'
-    );
+    expect(ce.box(['Clamp', 'cB11', 0, 1]).type.toString()).toBe('real<0..1>');
     expect(ce.box('cB11').type.toString()).toBe('real | signed_infinity');
   });
 });

@@ -17,6 +17,13 @@
 - **`SVD` of a complex matrix.** `SVD([[2, 1+i], [1-i, 3]]).N()` returns a
   complex `U`, a real diagonal `Σ` and a complex `V`. It stayed unevaluated
   before. A complex matrix with exact entries is decomposed only with `.N()`.
+- **`PolyGamma(m, z)` evaluates at a complex `z`** (#340, contributed by
+  [enumeratio](https://github.com/enumeratio)). `PolyGamma(1, 1+2i).N()` is
+  `0.1249311621409446 − 0.4778255501472298i`: ψ⁽ᵐ⁾(z) = (−1)^(m+1) m! ζ(m+1, z)
+  for m ≥ 1 (DLMF 5.15.2), and an asymptotic series for the digamma. Where
+  cancellation leaves no accurate digits (a high order at a large negative
+  `Re(z)`) it stays unevaluated. The compiled JavaScript `PolyGamma` is now
+  marked real-only, as `Zeta` is: a complex argument there ran the real kernel.
 
 ### Behavior Changes
 

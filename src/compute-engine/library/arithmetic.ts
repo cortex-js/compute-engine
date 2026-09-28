@@ -71,6 +71,7 @@ import {
   zetaComplex,
   hurwitzZetaComplex,
   zetaGeneralizedComplex,
+  polygammaComplex,
   complexDivide,
 } from '../numerics/numeric-complex.js';
 import {
@@ -3599,7 +3600,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `Digamma` above. The exceptional points of the argument are
       // `polygammaValueAtExceptionalPoint`'s and need a KNOWN non-negative
       // order (`+∞` for order 0 at `+∞`, else 0; `~oo` at the poles); a
-      // symbolic or negative order leaves them symbolic.
+      // symbolic or negative order leaves them symbolic. Unlike `Digamma`
+      // and `Trigamma`, a non-real finite argument has a kernel
+      // (`polygammaComplex`, cortex-js/compute-engine#340): ψ⁽ᵐ⁾(z) via
+      // `hurwitzZetaComplex` for m >= 1 (DLMF 5.15.2), its own asymptotic
+      // series for m = 0 (ζ(1, z) is the pole ψ itself sits at).
       signature: '(order: integer, complex | infinity) -> number',
       nanBehavior: 'propagate',
       // ψⁿ(x) has poles (value `~oo`) at the non-positive integers. A
@@ -3629,14 +3634,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // negative literal order is a capability gap, so the application
         // stays symbolic instead of reporting the kernel's `NaN`.
         if (order !== null && order < 0) return undefined;
-        return shouldNumericize(numericApproximation, n, x)
-          ? apply2(
-              n,
-              x,
-              (n, x) => polygamma(n, x),
-              (n, x) => bigPolygamma(engine, n, x)
-            )
-          : undefined;
+        if (!shouldNumericize(numericApproximation, n, x)) return undefined;
+        const result = apply2(
+          n,
+          x,
+          (n, x) => polygamma(n, x),
+          (n, x) => bigPolygamma(engine, n, x),
+          (n, x) => polygammaComplex(n.re, x)
+        );
+        // `polygammaComplex` answers NaN where cancellation leaves no
+        // accurate digits: stay symbolic there rather than report `NaN`.
+        if (result?.isNaN === true && x.im !== 0 && !x.isNaN) return undefined;
+        return result;
       },
     },
 

@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-26.
+**Last updated:** 2026-09-28.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -108,6 +108,19 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ---
 
 ## Remaining work
+
+### `PolyGamma`/`Digamma`/`Trigamma` have no GPU shader lowering (OPEN, capability gap — found 2026-09-28 widening `PolyGamma` to a complex `z` for #340)
+
+Neither `gpu-target.ts` shader (GLSL or WGSL) declares a lowering for these
+three heads at all, unlike every other special function in `arithmetic.ts`
+(`Zeta`, `HurwitzZeta`, `Gamma`, `Erf`, …). This already fails closed — a
+`PolyGamma`/`Digamma`/`Trigamma` call in a GPU-compiled expression declines
+to the interpreter rather than emitting anything wrong — so it is not a
+correctness bug, only a missing capability: a plot or shader that calls
+these compiles the rest of the expression and evaluates this part off the
+GPU. Fix: port `numerics/special-functions.ts`'s real `digamma`/`trigamma`/
+`polygamma` (recurrence + asymptotic series, the same shape already used for
+`_gpu_gamma`) to GLSL/WGSL helpers and wire them into `GPU_FUNCTIONS`.
 
 ### Next items to pick up, ranked (2026-09-23)
 
