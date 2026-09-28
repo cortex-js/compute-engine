@@ -79,6 +79,7 @@ import {
   zetaGeneralizedComplex,
   complexDivide,
 } from '../numerics/numeric-complex.js';
+import { lerchPhiComplex } from '../numerics/lerch-phi.js';
 import {
   factorial2 as bigFactorial2,
   gcd as bigGcd,
@@ -2258,6 +2259,92 @@ function evaluateGeneralizedZeta(
   );
 }
 
+/**
+ * Evaluate LerchPhi(z,s,a) = Σ_{k≥0} zᵏ(k+a)^(−s), the Lerch transcendent
+ * (ported from enumeratio's `lerch-phi.ts`; the machine kernel is
+ * `numerics/lerch-phi.ts`'s `lerchPhiComplex`). Generalizes `HurwitzZeta`
+ * (z = 1), delegated below so it inherits the same exact closed forms.
+ */
+function evaluateLerchPhi(
+  engine: ComputeEngine,
+  z: Expression,
+  s: Expression,
+  a: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const finite = isFiniteNumberLiteral;
+
+  // Φ(1,s,a) = ζ(s,a): the same exact closed forms and EM kernel as
+  // `HurwitzZeta`.
+  if (isNumber(z) && z.im === 0 && z.re === 1)
+    return engine
+      .function('HurwitzZeta', [s, a])
+      .evaluate({ numericApproximation });
+
+  // Φ(0,s,a) = a^(−s): only the k = 0 term survives (0⁰ = 1).
+  if (isNumber(z) && z.isSame(0))
+    return engine
+      .function('Power', [a, engine.function('Negate', [s])])
+      .evaluate({ numericApproximation });
+
+  // Φ(z,0,a) = 1/(1 − z), independent of a — the geometric series and its
+  // continuation.
+  const sInt = asSmallInteger(s);
+  if (sInt === 0)
+    return engine
+      .function('Divide', [
+        engine.number(1),
+        engine.function('Subtract', [engine.number(1), z]),
+      ])
+      .evaluate({ numericApproximation });
+
+  // a a non-positive integer, Re(s) > 0, z ≠ 0: the (k+a) = 0 term
+  // diverges — the same pole `evaluateHurwitzZeta` gives `HurwitzZeta` at a
+  // non-positive integer base point, since a nonzero zᵏ never cancels it.
+  const aNonposInt =
+    isNumber(a) && a.im === 0 && Number.isInteger(a.re) && a.re <= 0;
+  if (aNonposInt && finite(s) && s.re > 0 && !(isNumber(z) && z.isSame(0)))
+    return engine.ComplexInfinity;
+  // Re(s) = 0, s ≠ 0, same base point, z ≠ 0: 0^(−s) = 0^(−i·Im(s)) doesn't
+  // converge to any value (it winds the unit circle) — the same
+  // indeterminate case `evaluateHurwitzZeta` answers `NaN` for under `N()`.
+  if (
+    numericApproximation &&
+    aNonposInt &&
+    finite(s) &&
+    s.re === 0 &&
+    s.im !== 0 &&
+    !(isNumber(z) && z.isSame(0))
+  )
+    return engine.NaN;
+
+  if (
+    !shouldNumericize(numericApproximation, z, s, a) ||
+    !finite(z) ||
+    !finite(s) ||
+    !finite(a)
+  )
+    return undefined; // stay symbolic
+
+  const result = lerchPhiComplex(
+    new Complex(z.re, z.im),
+    new Complex(s.re, s.im),
+    new Complex(a.re, a.im)
+  );
+  if (result === undefined) return undefined; // continuation declined; stay symbolic
+
+  // Real when every operand is real, z is off the [1, ∞) branch cut, and
+  // a ≥ 0 or s is an integer keeps every term real — the same predicate
+  // `evaluateHurwitzZeta` uses, restricted to the cut-free side of z.
+  const real =
+    z.im === 0 &&
+    s.im === 0 &&
+    a.im === 0 &&
+    z.re < 1 &&
+    (a.re >= 0 || Number.isInteger(s.re));
+  return boxComplexResult(engine, result, real);
+}
+
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   {
     //
@@ -3818,6 +3905,50 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           engine,
           ops[0],
           ops[1],
+          numericApproximation
+        );
+      },
+    },
+
+    // Lerch transcendent Φ(z,s,a) = Σ_{k=0}^∞ zᵏ(k+a)^{-s} (Wolfram's
+    // `LerchPhi[z,s,a]`), generalizing the Hurwitz zeta above (z = 1,
+    // folded into `HurwitzZeta`) and the polylogarithm (a = 1, not wired
+    // up here — a separate widening of `PolyLog`).
+    LerchPhi: {
+      description: 'Lerch transcendent Φ(z,s,a) = Σ_{k=0}^∞ zᵏ(k+a)^{-s}',
+      complexity: 8600,
+      broadcastable: true,
+      // Every operand is a plain complex number: no infinite-point limit
+      // is implemented here (unlike `Zeta`/`HurwitzZeta` above), so an
+      // infinite operand stays symbolic rather than boxing against the
+      // wrong carrier.
+      signature: '(complex, complex, complex) -> number',
+      nanBehavior: 'propagate',
+      // Real only on the branch-cut-free, real-operand side: a ≥ 0 keeps
+      // every term's base (k+a) non-negative, so its (−s) power is real
+      // for a real s; elsewhere (a < 0, z on the [1, ∞) cut, or any
+      // non-real operand) the value can be complex, or the pole `~oo` (a
+      // non-positive integer a with Re(s) > 0), so the claim stays
+      // `number` there — matching `evaluateLerchPhi`'s `real` predicate,
+      // less precisely since the cut and the s-integer case aren't
+      // visible to the type layer.
+      type: (ops, context) => {
+        const t = specialFunctionType(ops);
+        const a = ops[2];
+        const realBranch =
+          a !== undefined && operandSgnOnTypes(a) === 'positive';
+        return BoxedType.forResult(
+          t !== undefined && !realBranch ? 'number' : t,
+          context.engine._typeResolver
+        );
+      },
+      evaluate: (ops, { numericApproximation, engine }) => {
+        if (ops.length !== 3) return undefined;
+        return evaluateLerchPhi(
+          engine,
+          ops[0],
+          ops[1],
+          ops[2],
           numericApproximation
         );
       },

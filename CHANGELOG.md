@@ -211,6 +211,23 @@
 
 ### New Features
 
+- **`LerchPhi` is new** (#340, contributed by
+  [enumeratio](https://github.com/enumeratio)). `LerchPhi(z, s, a)` is the
+  Lerch transcendent `Φ(z,s,a) = Σ zᵏ(k+a)^(−s)`, generalizing `HurwitzZeta`
+  (`LerchPhi(1, s, a)` reduces to it exactly). `LerchPhi(0.5, 2, 1).N()`
+  evaluates by direct summation, `LerchPhi(3, 2, 1).N()` continues past the
+  unit disk through the incomplete gamma function, and `LerchPhi(-1, 1, 1)`
+  is `ln 2` on the disk's rim, where direct summation alone would need an
+  impractical number of terms. A base point `a` at a non-positive integer is
+  the pole `ComplexInfinity` when `Re(s) > 0`, as for `HurwitzZeta`. Past the
+  unit disk it stays symbolic under `N()` wherever the incomplete gamma
+  function's argument `−a·log z` has a negative real part and modulus above
+  2.5, where `Gamma`'s own numeric kernel loses digits (#353). Values are
+  computed at machine precision only, even when `precision` is higher. `LerchPhi` compiles to JavaScript,
+  GLSL and WGSL for real operands; the compiled lane is `NaN` past the unit
+  disk, where the continuation needs a complex incomplete gamma function
+  neither target has a kernel for.
+
 - **`ce.number({ re, im })` builds a complex number from two parts, each a
   JavaScript number or a `BigDecimal`.** `ce.number({ re: ce.bignum('1e-800'),
   im: ce.bignum('2') })` keeps both parts at full precision; a zero imaginary

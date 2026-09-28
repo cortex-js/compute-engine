@@ -3003,6 +3003,7 @@ const GPU_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'Factorial',
   'Zeta',
   'HurwitzZeta',
+  'LerchPhi',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of the shader targets. The base
@@ -7061,6 +7062,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_gpu_hurwitz_zeta(${compile(args[0])}, ${compile(args[1])})`;
   },
+  // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_lerch_phi` is NaN past
+  // |z| = 1, where the continuation needs a complex incomplete Γ this
+  // target has no kernel for (`_gpu_gamma` is real-only) — see there.
+  LerchPhi: (args, compile) => {
+    if (args.length !== 3)
+      throw new Error(
+        'Could not compile `LerchPhi`: it takes exactly three operands'
+      );
+    return `_gpu_lerch_phi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+  },
   Binomial: gpuBinomial,
   // `Choose(n, k)` is the binomial coefficient — same lowering (the two heads
   // share `evaluateBinomial` in the interpreter, so they must agree here too).
@@ -9024,6 +9035,160 @@ fn _gpu_zeta_generalized(s: f32, a: f32) -> f32 {
   var cur = a + f32(n);
   if (cur == 0.0) { cur = 1.0; } // drop the (k + a) = 0 term
   return sum + _gpu_hurwitz_zeta(s, cur);
+}
+`;
+
+/**
+ * GPU Lerch transcendent Φ(z,s,a), real-valued (f32) — ported from
+ * `lerchSeriesComplex`/`lerchEulerComplex` in `numerics/lerch-phi.ts`, at
+ * im = 0 throughout. GLSL syntax.
+ *
+ * Past |z| = 1 the interpreter continues Φ through a complex incomplete Γ
+ * (`lerchContinuedComplex`), which has no GPU kernel — `_gpu_gamma` is
+ * real-only — so `_gpu_lerch_phi` answers NaN there instead of the
+ * continued value, along with everywhere else the value would be complex
+ * (a < 0 with a non-integer s).
+ *
+ * - `_gpu_lerch_series` is the direct sum, for 0 <= z < 1.
+ * - `_gpu_lerch_euler` is the van Wijngaarden Euler transform (Numerical
+ *   Recipes' `eulsum`), for −1 <= z < 0 — direct summation there is only
+ *   conditionally convergent and stalls approaching the rim; the
+ *   repeated-averaging table reaches f32 precision in a few dozen terms.
+ *   `LERCH_EULER_TERMS` bounds the table: GLSL/WGSL arrays need a
+ *   compile-time size, and the loop already breaks once its terms stop
+ *   shrinking.
+ */
+const LERCH_EULER_TERMS = 64;
+export const GPU_LERCH_PREAMBLE_GLSL = `
+float _gpu_lerch_series(float z, float s, float a) {
+  int n = int(ceil(log(1e-6) / log(abs(z))) + 16.0);
+  n = clamp(n, 8, 4096);
+  float sum = 0.0;
+  float zk = 1.0;
+  for (int k = 0; k < n; k++) {
+    float b = a + float(k);
+    if (b != 0.0) sum += zk * _gpu_zeta_pow(b, -s);
+    zk *= z;
+  }
+  return sum;
+}
+
+float _gpu_lerch_euler(float z, float s, float a) {
+  float w[${LERCH_EULER_TERMS + 1}];
+  int nterm = 0;
+  float sum = 0.0;
+  float zPow = 1.0;
+  for (int k = 0; k < ${LERCH_EULER_TERMS}; k++) {
+    float b = a + float(k);
+    float cur = (b != 0.0) ? zPow * _gpu_zeta_pow(b, -s) : 0.0;
+    float inc;
+    if (k == 0) {
+      nterm = 1;
+      w[1] = cur;
+      inc = 0.5 * cur;
+    } else {
+      float tmp = w[1];
+      w[1] = cur;
+      for (int j = 1; j <= nterm - 1; j++) {
+        float dum = w[j + 1];
+        w[j + 1] = 0.5 * (w[j] + tmp);
+        tmp = dum;
+      }
+      w[nterm + 1] = 0.5 * (w[nterm] + tmp);
+      if (abs(w[nterm + 1]) <= abs(w[nterm])) {
+        nterm++;
+        inc = 0.5 * w[nterm];
+      } else {
+        inc = w[nterm + 1];
+      }
+    }
+    sum += inc;
+    zPow *= z;
+    if (k > 4 && abs(inc) < 1e-6 * (abs(sum) + 1e-6)) break;
+  }
+  return sum;
+}
+
+float _gpu_lerch_phi(float z, float s, float a) {
+  if (z == 1.0) return _gpu_hurwitz_zeta(s, a);
+  if (z == 0.0) return _gpu_zeta_pow(a, -s); // only the k = 0 term survives
+  if (s == 0.0) return 1.0 / (1.0 - z);
+  bool aNonposInt = a <= 0.0 && a == floor(a);
+  if (aNonposInt && s > 0.0) return _gpu_inf(); // (k+a) = 0 diverges, z != 0
+  if (abs(z) >= 1.0) return _gpu_nan(); // needs the continuation; no GPU kernel
+  if (a < 0.0 && s != floor(s)) return _gpu_nan(); // complex value
+  if (z < 0.0) return _gpu_lerch_euler(z, s, a);
+  return _gpu_lerch_series(z, s, a);
+}
+`;
+
+/**
+ * GPU Lerch transcendent (WGSL syntax). See `GPU_LERCH_PREAMBLE_GLSL`; the
+ * pole and NaN are spelled inline as bit patterns (see
+ * `GPU_GAMMA_PREAMBLE_WGSL`), and the Euler-transform table is a
+ * fixed-size `array<f32, N>` rather than a GLSL braceless local array.
+ */
+export const GPU_LERCH_PREAMBLE_WGSL = `
+fn _gpu_lerch_series(z: f32, s: f32, a: f32) -> f32 {
+  var n = i32(ceil(log(1e-6) / log(abs(z))) + 16.0);
+  n = clamp(n, 8, 4096);
+  var sum: f32 = 0.0;
+  var zk: f32 = 1.0;
+  for (var k: i32 = 0; k < n; k = k + 1) {
+    let b = a + f32(k);
+    if (b != 0.0) { sum = sum + zk * _gpu_zeta_pow(b, -s); }
+    zk = zk * z;
+  }
+  return sum;
+}
+
+fn _gpu_lerch_euler(z: f32, s: f32, a: f32) -> f32 {
+  var w: array<f32, ${LERCH_EULER_TERMS + 1}>;
+  var nterm: i32 = 0;
+  var sum: f32 = 0.0;
+  var zPow: f32 = 1.0;
+  for (var k: i32 = 0; k < ${LERCH_EULER_TERMS}; k = k + 1) {
+    let b = a + f32(k);
+    var cur: f32 = 0.0;
+    if (b != 0.0) { cur = zPow * _gpu_zeta_pow(b, -s); }
+    var inc: f32;
+    if (k == 0) {
+      nterm = 1;
+      w[1] = cur;
+      inc = 0.5 * cur;
+    } else {
+      var tmp = w[1];
+      w[1] = cur;
+      for (var j: i32 = 1; j <= nterm - 1; j = j + 1) {
+        let dum = w[j + 1];
+        w[j + 1] = 0.5 * (w[j] + tmp);
+        tmp = dum;
+      }
+      w[nterm + 1] = 0.5 * (w[nterm] + tmp);
+      if (abs(w[nterm + 1]) <= abs(w[nterm])) {
+        nterm = nterm + 1;
+        inc = 0.5 * w[nterm];
+      } else {
+        inc = w[nterm + 1];
+      }
+    }
+    sum = sum + inc;
+    zPow = zPow * z;
+    if (k > 4 && abs(inc) < 1e-6 * (abs(sum) + 1e-6)) { break; }
+  }
+  return sum;
+}
+
+fn _gpu_lerch_phi(z: f32, s: f32, a: f32) -> f32 {
+  if (z == 1.0) { return _gpu_hurwitz_zeta(s, a); }
+  if (z == 0.0) { return _gpu_zeta_pow(a, -s); }
+  if (s == 0.0) { return 1.0 / (1.0 - z); }
+  let aNonposInt = a <= 0.0 && a == floor(a);
+  if (aNonposInt && s > 0.0) { return bitcast<f32>(0x7f800000u); }
+  if (abs(z) >= 1.0) { return bitcast<f32>(0x7fc00000u); }
+  if (a < 0.0 && s != floor(s)) { return bitcast<f32>(0x7fc00000u); }
+  if (z < 0.0) { return _gpu_lerch_euler(z, s, a); }
+  return _gpu_lerch_series(z, s, a);
 }
 `;
 
@@ -13014,9 +13179,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // The zeta helpers call `_gpu_nan()` from their bodies too (a complex
     // value, or an f32 overflow), so they force the GLSL NaN helper as well.
     const usesZeta = /_gpu_(hurwitz_)?zeta/.test(code);
+    // `_gpu_lerch_phi` calls both `_gpu_nan()` (past |z| = 1, or a < 0 with
+    // a non-integer s) and `_gpu_hurwitz_zeta` (z = 1) from its own body,
+    // the same gap `usesZeta` closes for the zeta helpers.
+    const usesLerch = /_gpu_lerch/.test(code);
     if (
       code.includes('_gpu_nan') ||
-      (!isWGSL && (atWidths.length > 0 || texAtWidths.length > 0 || usesZeta))
+      (!isWGSL &&
+        (atWidths.length > 0 ||
+          texAtWidths.length > 0 ||
+          usesZeta ||
+          usesLerch))
     )
       preamble += GPU_NAN_PREAMBLE_GLSL;
     // `_gpu_gamma` calls `_gpu_inf()` from its BODY at a pole (the float
@@ -13024,10 +13197,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // ruling 2026-08-28), so it forces the GLSL Infinity helper for the same
     // reason `_gpu_at*` forces the NaN helper: these scans read the EMITTED
     // code and never a helper body. The zeta helpers call `_gpu_inf()` at
-    // their own pole the same way.
+    // their own pole the same way, and `_gpu_lerch_phi` at its own pole (a
+    // non-positive integer a with s > 0).
     if (
       code.includes('_gpu_inf') ||
-      (!isWGSL && (code.includes('_gpu_gamma') || usesZeta))
+      (!isWGSL && (code.includes('_gpu_gamma') || usesZeta || usesLerch))
     )
       preamble += GPU_INF_PREAMBLE_GLSL;
     // AFTER the NaN branches, and that ORDER is load-bearing: GLSL requires a
@@ -13064,14 +13238,25 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // (`_gpu_hurwitz_zeta`, `_gpu_zeta_generalized`) can reach `_gpu_zeta`
     // — the same "scan reads emitted code, not helper bodies" gap
     // `_gpu_gamma`'s `_gpu_inf()` call has above, so force Γ's preamble in
-    // whenever any zeta helper is needed.
+    // whenever any zeta (or, transitively through it, Lerch) helper is
+    // needed.
     preamble += gpuLibrarySubset(
-      usesZeta ? `${code} _gpu_gamma(` : code,
+      usesZeta || usesLerch ? `${code} _gpu_gamma(` : code,
       isWGSL ? GPU_GAMMA_PREAMBLE_WGSL : GPU_GAMMA_PREAMBLE_GLSL
     );
+    // `_gpu_lerch_phi` calls `_gpu_zeta_pow` and `_gpu_hurwitz_zeta` from
+    // its own body without naming them in the emitted code (only
+    // `_gpu_lerch_phi` itself appears there), the same gap as above — force
+    // both names in so the subset scan pulls their definitions in too.
+    preamble += gpuLibrarySubset(
+      usesLerch ? `${code} _gpu_zeta_pow( _gpu_hurwitz_zeta(` : code,
+      isWGSL ? GPU_ZETA_PREAMBLE_WGSL : GPU_ZETA_PREAMBLE_GLSL
+    );
+    // AFTER the zeta preamble: `_gpu_lerch_phi` calls `_gpu_zeta_pow` and
+    // `_gpu_hurwitz_zeta`, and GLSL requires their declaration first.
     preamble += gpuLibrarySubset(
       code,
-      isWGSL ? GPU_ZETA_PREAMBLE_WGSL : GPU_ZETA_PREAMBLE_GLSL
+      isWGSL ? GPU_LERCH_PREAMBLE_WGSL : GPU_LERCH_PREAMBLE_GLSL
     );
     preamble += gpuLibrarySubset(
       code,

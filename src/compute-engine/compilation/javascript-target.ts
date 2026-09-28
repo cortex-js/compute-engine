@@ -523,6 +523,7 @@ import {
   gammaQ,
   betaRegularized,
 } from '../numerics/special-functions.js';
+import { lerchPhiReal } from '../numerics/lerch-phi.js';
 import { choose } from '../boxed-expression/expand.js';
 import {
   correlation,
@@ -3014,6 +3015,7 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'BesselJ',
   'Zeta',
   'HurwitzZeta',
+  'LerchPhi',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of this target. */
@@ -6980,6 +6982,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         'Could not compile `HurwitzZeta`: only the two-operand form `HurwitzZeta(s, a)` compiles'
       );
     return `_SYS.hurwitzZeta(${compile(args[0])}, ${compile(args[1])})`;
+  },
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.lerchPhi` is NaN wherever
+  // the value is genuinely complex, matching the interpreter's `LerchPhi`.
+  LerchPhi: (args, compile) => {
+    if (args.length !== 3)
+      throw new Error(
+        'Could not compile `LerchPhi`: it takes exactly three operands'
+      );
+    return `_SYS.lerchPhi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
   },
   LambertW: '_SYS.lambertW',
 
@@ -11644,6 +11655,7 @@ const SYS_HELPERS = {
   zeta,
   hurwitzZeta,
   zetaGeneralized,
+  lerchPhi: lerchPhiReal,
   lambertW,
   besselJ,
   besselY,

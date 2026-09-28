@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-26.
+**Last updated:** 2026-09-27.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -4666,3 +4666,23 @@ them before blaming the change under test. Added 2026-09-22:
 evaluates promptly" — a canary-normalized timing assertion (limit 5000 canary
 units) read 6251 in a six-worker full run on a box at load 4 and passed alone
 (70 of 70), while the same tree's other timing pins held.
+
+### `LerchPhi` past |z| = 1 has no compiled (JavaScript/GPU) lane (OPEN, capability gap — found 2026-09-27 while adding `LerchPhi`, #340)
+
+`LerchPhi(z,s,a)` continues past the unit disk (and on its rim) through the
+upper incomplete gamma function at a complex argument — the interpreter has
+one (`incompleteGammaUpperComplex`, `numerics/numeric-complex.ts`), but
+neither the JavaScript nor the GPU (GLSL/WGSL) target does; `Gamma`'s own
+compiled lowering is real-only. `_gpu_lerch_phi`/`_SYS.lerchPhi` answer `NaN`
+there instead. A complex incomplete gamma kernel for those targets would
+close the gap for `LerchPhi` and widen `Gamma`'s own compiled two-operand
+form at the same time. Demand-gated: no compile-target consumer has asked for
+`LerchPhi` past the unit disk yet.
+
+### `LerchPhi` past |z| = 1 declines where `Gamma(s, x)` is inaccurate (OPEN, correctness, blocked on #353)
+
+The continuation calls `incompleteGammaUpperComplex(1 − s, −a·log z)`. Measured
+against mpmath, that kernel stays within 1e−13 only while |x| ≤ 2.75 when
+Re(x) < 0, so `lerchContinuedComplex` declines past |x| = 2.5 there. In a
+random sweep past the unit disk that is most points. Fixing #353 widens
+`LerchPhi` with it.
