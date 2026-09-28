@@ -34,20 +34,6 @@
 
 ### Issues Resolved
 
-- **`Zeta(s, a)` and `HurwitzZeta(s, a)` honor `ce.precision` for real `s` and
-  `a`** (part of #340, contributed by
-  [enumeratio](https://github.com/enumeratio)). Both were machine precision only
-  at every engine precision; `HurwitzZeta(3, 1/2).N()` at `ce.precision = 50`
-  now returns 50 correct digits
-  (`8.4143983221171599977981671305801499353549040463835`) instead of a double's
-  ~16. The digits are significant digits at every magnitude:
-  `HurwitzZeta(200, 10)` (about `1e-200`) and `HurwitzZeta(-400.5, 0.3)` (about
-  `7.75e549`, past the double range) are correct to the last digit. A value
-  the kernel cannot reach within its limits (s below about −1279) falls back to
-  the double kernel, and stays symbolic where the double overflows. A complex
-  operand still evaluates at machine precision — the complex special-function
-  kernels do, at every engine precision.
-
 - **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and the
   sign of a numeric fraction moves in front of it.** `Beta(2, 3)` wrote
   `\Beta(2, 3)` (capital beta is roman, not a separate glyph — MathLive
@@ -76,6 +62,21 @@
   applied to `A`, the same gap `\operatorname{lcm}` (→ `LCM`) already covered
   for a different head (#345, contributed by
   [enumeratio](https://github.com/enumeratio)).
+
+- **`Zeta(s, a)` and `HurwitzZeta(s, a)` honor `ce.precision` for real `s` and
+  `a`** (part of #340, contributed by
+  [enumeratio](https://github.com/enumeratio)). Both were machine precision only
+  at every engine precision; `HurwitzZeta(3, 1/2).N()` at `ce.precision = 50`
+  now returns 50 correct digits
+  (`8.4143983221171599977981671305801499353549040463835`) instead of a double's
+  ~16. The digits are significant digits at every magnitude:
+  `HurwitzZeta(200, 10)` (about `1e-200`) and `HurwitzZeta(-400.5, 0.3)` (about
+  `7.75e549`, past the double range) are correct to the last digit. A value
+  the kernel cannot reach within its limits (s below about −1279) falls back to
+  the double kernel, and stays symbolic where the double overflows. A complex
+  operand still evaluates at machine precision — the complex special-function
+  kernels do, at every engine precision.
+
 - **`a * 2n` parses in Epsil.** The right operand of an explicit `*` or `/`
   refused an invisible multiplication, so `a * 2n` parsed as `a * 2` with an
   `unexpected-symbol` diagnostic for `n` — and the serializer writes that form.
@@ -116,6 +117,16 @@
 
 ### New Features
 
+- **`PolyGamma(m, z)`, `Digamma(z)` and `Trigamma(z)` evaluate at a complex
+  `z`** (#340, contributed by [enumeratio](https://github.com/enumeratio)).
+  `PolyGamma(1, 1+2i).N()` is `0.1249311621409446 − 0.4778255501472298i`:
+  ψ⁽ᵐ⁾(z) = (−1)^(m+1) m! ζ(m+1, z) for m ≥ 1 (DLMF 5.15.2), and an asymptotic
+  series for the digamma. Left of the imaginary axis the reflection formula
+  is used, so the cost does not depend on `Re(z)` (`PolyGamma(8, -10^12+i)`
+  answers at once). The order is limited to 10 000. A value outside the
+  range of a double stays unevaluated, not `~oo` or `0`. The compiled
+  JavaScript `PolyGamma` is now marked real-only, as `Zeta` is: a complex
+  argument there ran the real kernel.
 - **`LerchPhi` is new** (#340, contributed by
   [enumeratio](https://github.com/enumeratio)). `LerchPhi(z, s, a)` is the
   Lerch transcendent `Φ(z,s,a) = Σ zᵏ(k+a)^(−s)`, generalizing `HurwitzZeta`
@@ -142,17 +153,39 @@
   `Φ` is a rational function of `z`), and inside it wherever its f32 sums
   cannot converge within their term budget (`|z|` closer to 1 than about
   0.995) or have cancelled too far.
+- **`PolyLog` now evaluates at a non-integer or complex order** (#340,
+  contributed by [enumeratio](https://github.com/enumeratio)). `PolyLog(s,
+  z)` previously answered only an integer order `s ≥ 2`; `PolyLog(2.5,
+  0.5).N()` is now `0.5549972787175124` and `PolyLog(1.5+0.5i, 0.5).N()` is
+  `0.6126403889001154 - 0.05103210425890372i`, both by `Liₛ(z) = z·Φ(z,s,1)`
+  through the `LerchPhi` kernel at base point `a = 1`. Past `|z| = 1`, where
+  that kernel's continuation declines, Jonquière's inversion formula takes
+  over: `PolyLog(1.5, -3).N()` is `-1.679089730504828` (a real order gives a
+  real value everywhere on the real axis below `-1`). `PolyLog(s, 1)` and `PolyLog(s, -1)`
+  now reduce exactly to `Zeta(s)` and the Dirichlet eta identity
+  `(2^(1-s) - 1)·Zeta(s)` for every order, not only an integer one (the
+  kernel answers instead for an order within `1e-6` of 1 at `z = -1`, where
+  the identity cancels). A negative integer order from `-2` to `-12` at a
+  number `z` uses its rational closed form, so `PolyLog(-2, 1/2)` is the
+  exact `6` and `PolyLog(-2, -2)` the exact `2/27`. Every existing
+  integer-order and elementary-form result is unchanged. The widened kernel
+  declines (stays symbolic) rather than answer a value it cannot certify to
+  `1e-12`: within `1e-3` of the `z = 1` branch point, where `s` sits within
+  0.05 of a positive integer on or past the unit circle, where `Re(s)` is
+  too negative for the series inside the disk, and past the disk where the
+  inversion formula loses digits (an order with `|Im s| > 1.5`, or
+  `Re(s) > 2` with `|z|` above about 32). `numerics/polylog.ts` records the
+  measured boundaries. `PolyLog` compiles to JavaScript, GLSL and WGSL for
+  real operands; it was not compilable at all before. The JavaScript lane
+  answers every order the way the interpreter does. The GPU lane answers the
+  orders `1`, `0`, `-1` and `-2` to `-12` in closed form and other orders
+  only for `|z| < 1` and at `z = 1`.
+- **`PolyLog` of a real order and a real `z` is typed `real` only when `z` is
+  known to be at most 1** (or the order is an integer `≤ 0`). The value is
+  complex on the cut `z > 1` (`PolyLog(1.5, 2)` is
+  `1.549 - 2.951i`), and the type used to say `real`. A float order now
+  makes a closed-form result a float: `PolyLog(0.0, 1/2)` is the float `1`.
 
-- **`PolyGamma(m, z)`, `Digamma(z)` and `Trigamma(z)` evaluate at a complex
-  `z`** (#340, contributed by [enumeratio](https://github.com/enumeratio)).
-  `PolyGamma(1, 1+2i).N()` is `0.1249311621409446 − 0.4778255501472298i`:
-  ψ⁽ᵐ⁾(z) = (−1)^(m+1) m! ζ(m+1, z) for m ≥ 1 (DLMF 5.15.2), and an asymptotic
-  series for the digamma. Left of the imaginary axis the reflection formula
-  is used, so the cost does not depend on `Re(z)` (`PolyGamma(8, -10^12+i)`
-  answers at once). The order is limited to 10 000. A value outside the
-  range of a double stays unevaluated, not `~oo` or `0`. The compiled
-  JavaScript `PolyGamma` is now marked real-only, as `Zeta` is: a complex
-  argument there ran the real kernel.
 - **Examples for the arithmetic, trigonometry and linear-algebra libraries**,
   with a hand-written introduction for each reference page: 97, 84 and 40
   examples, each executed when the pages are generated.

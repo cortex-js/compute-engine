@@ -51,6 +51,12 @@ import {
   polylog,
 } from '../numerics/special-functions.js';
 import {
+  EULERIAN_MAX_ORDER,
+  eulerianRow,
+  polylogOrderReal,
+  polylogOrderComplex,
+} from '../numerics/polylog.js';
+import {
   ellipticKComplex,
   ellipticEComplex,
   ellipticFComplex,
@@ -488,7 +494,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
     },
 
     PolyLog: {
-      description: 'Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ.',
+      description:
+        'Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ, at any real or complex order s.',
       wikidata: 'Q320067',
       complexity: 8700,
       // Both slots take the carrier `complex | infinity`; an infinite
@@ -518,10 +525,22 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           (intervalOfType(s.type)?.hi ?? Infinity) <= 1
         )
           return BoxedType.forResult('number', context.engine._typeResolver);
-        return BoxedType.forResult(
-          numericTypeHandlerOnTypes([s, z]),
-          context.engine._typeResolver
-        );
+        // A real order and a real z still give a complex value on the cut
+        // z > 1 (`PolyLog(1.5, 2)` is 1.549 − 2.951i), so the result is
+        // `real` only when z is proven ≤ 1 (a literal, or a type whose
+        // upper bound is at most 1), or when the order is a literal integer
+        // ≤ 0 (then Liₛ(z) is a rational function of z, real on the whole
+        // real axis).
+        const t = numericTypeHandlerOnTypes([s, z]);
+        if (s !== undefined && z !== undefined && isSubtype(t, 'real')) {
+          const order = operandLiteralValue(s);
+          const realValued =
+            (intervalOfType(z.type)?.hi ?? Infinity) <= 1 ||
+            (order !== undefined && Number.isInteger(order) && order <= 0);
+          if (!realValued)
+            return BoxedType.forResult('number', context.engine._typeResolver);
+        }
+        return BoxedType.forResult(t, context.engine._typeResolver);
       },
       evaluate: (ops, { numericApproximation, engine }) => {
         const [s, z] = ops;
@@ -532,17 +551,30 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const held = symbolicAtInfinity(ops, engine);
         if (held !== undefined) return held ?? undefined;
         // Exact reductions (see `polylogReduce`). Evaluate the reduced form so
-        // an inexact argument still numericizes (exactness contract).
+        // an inexact argument still numericizes (exactness contract). Some
+        // reductions do not read the order (`Li₀(z) = z/(1 − z)`), so a float
+        // order such as `0.0` must still make the result a float.
         const reduced = polylogReduce(engine, s, z);
         if (reduced !== undefined)
-          return reduced.evaluate({ numericApproximation });
+          return floatIfFloatOperand(
+            ops,
+            reduced.evaluate({ numericApproximation })
+          );
 
-        // Numeric kernel: integer order s ≥ 2 only (dilog/trilog/Li₄ …).
-        // Other orders have no kernel here → stay symbolic.
+        // Integer order s ≥ 2 (dilog/trilog/Li₄ …): the dedicated kernel,
+        // accurate over the whole plane (`polylog`/`polylogComplex`).
         const sInt = asSmallInteger(s);
-        if (sInt === null || sInt < 2) return undefined;
+        if (sInt !== null && sInt >= 2)
+          return shouldNumericize(numericApproximation, s, z)
+            ? applyN([s, z], polylog, undefined, polylogComplex)
+            : undefined;
+
+        // Non-integer or negative order (cortex-js/compute-engine#340):
+        // Liₛ(z) = z·Φ(z,s,1), the Lerch transcendent at base point a = 1
+        // (`polylogOrderReal`/`polylogOrderComplex`, `numerics/polylog.ts`).
+        // NaN where the underlying continuation declines → stays symbolic.
         return shouldNumericize(numericApproximation, s, z)
-          ? applyN([s, z], polylog, undefined, polylogComplex)
+          ? applyN([s, z], polylogOrderReal, undefined, polylogOrderComplex)
           : undefined;
       },
     },
@@ -851,8 +883,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
  *   Li₁(z)  = −ln(1 − z)
  *   Li₀(z)  = z/(1 − z)
  *   Li₋₁(z) = z/(1 − z)²
- *   Liₙ(1)  = ζ(n)             (integer n ≥ 2)
- *   Liₙ(−1) = (2^{1−n} − 1) ζ(n)   (integer n ≥ 2)
+ *   Liₛ(1)  = ζ(s)             (any s ≠ 1, cortex-js/compute-engine#340)
+ *   Liₛ(−1) = (2^{1−s} − 1) ζ(s)   (any s with |s − 1| ≥ 1e−6, the
+ *                                  Dirichlet eta identity)
+ *   Li₋ₙ(z) = z·Σₖ A(n,k) zᵏ / (1 − z)ⁿ⁺¹   (2 ≤ n ≤ 12, a number z ≠ 1;
+ *                                  A(n,k) are the Eulerian numbers)
  */
 function polylogReduce(
   engine: IComputeEngine,
@@ -876,17 +911,63 @@ function polylogReduce(
       engine.function('Power', [oneMinusZ(), engine.number(2)]),
     ]);
 
-  // z = ±1 with integer order n ≥ 2.
-  if (sInt !== null && sInt >= 2 && isNumber(z) && !z.isComplex) {
-    if (z.isSame(1)) return engine.function('Zeta', [s]);
-    if (z.isSame(-1))
-      return engine.function('Multiply', [
-        engine.function('Subtract', [
-          engine.function('Power', [engine.number(2), engine.number(1 - sInt)]),
-          engine.One,
+  // z = 1, any remaining order: Liₛ(1) = ζ(s) (cortex-js/compute-engine#340)
+  // — the Hurwitz-zeta continuation's OWN point value at z = 1 (mpmath and
+  // Wolfram's `PolyLog[s,1] = Zeta[s]`), distinct from — and, for a
+  // non-positive integer s, discontinuous with — the z → 1 boundary limit
+  // of a FIXED order's rational closed form; the sInt ∈ {−1, 0, 1} forms
+  // above already answer that limit (a pole) unconditionally on z, ahead
+  // of this branch.
+  if (isNumber(z) && !z.isComplex && z.isSame(1))
+    return engine.function('Zeta', [s]);
+
+  // z = −1, any remaining order: the Dirichlet eta identity
+  // Liₛ(−1) = (2^{1−s} − 1) ζ(s) = −η(s), valid for every s (not only an
+  // integer one). Close to s = 1 the identity multiplies a factor near 0 by
+  // ζ(s) near its pole, and evaluating it numerically loses about
+  // −log₁₀|s − 1| digits of the working precision: `PolyLog(1.000000000001,
+  // -1).N()` came out as −0.6931471810004 against −0.6931471805601. There
+  // the numeric kernel, which has no such cancellation, answers instead.
+  const nearOrderOne = isNumber(s) && Math.hypot(s.re - 1, s.im) < 1e-6;
+  if (isNumber(z) && !z.isComplex && z.isSame(-1) && !nearOrderOne)
+    return engine.function('Multiply', [
+      engine.function('Subtract', [
+        engine.function('Power', [
+          engine.number(2),
+          sInt !== null
+            ? engine.number(1 - sInt)
+            : engine.function('Subtract', [engine.One, s]),
         ]),
-        engine.function('Zeta', [s]),
-      ]);
+        engine.One,
+      ]),
+      engine.function('Zeta', [s]),
+    ]);
+
+  // A negative integer order −n, 2 ≤ n ≤ EULERIAN_MAX_ORDER, and a number
+  // z (z = 1 took the ζ point value above): the rational closed form
+  //   Li₋ₙ(z) = z·Σₖ A(n,k) zᵏ / (1 − z)ⁿ⁺¹,
+  // with the Eulerian numbers A(n,k) (`eulerianRow`). An exact z gives an
+  // exact value (`PolyLog(-2, 1/2)` is 6). A symbolic z stays symbolic
+  // rather than turn into a large rational function.
+  if (
+    sInt !== null &&
+    sInt <= -2 &&
+    sInt >= -EULERIAN_MAX_ORDER &&
+    isNumber(z)
+  ) {
+    const a = eulerianRow(-sInt);
+    return engine.function('Divide', [
+      engine.function(
+        'Add',
+        a.map((ak, k) =>
+          engine.function('Multiply', [
+            engine.number(ak),
+            engine.function('Power', [z, engine.number(k + 1)]),
+          ])
+        )
+      ),
+      engine.function('Power', [oneMinusZ(), engine.number(1 - sInt)]),
+    ]);
   }
   return undefined;
 }

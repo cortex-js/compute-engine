@@ -3004,6 +3004,7 @@ const GPU_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'Zeta',
   'HurwitzZeta',
   'LerchPhi',
+  'PolyLog',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of the shader targets. The base
@@ -7073,6 +7074,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_gpu_lerch_phi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
   },
+  // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_poly_log` answers the
+  // orders 1, 0, −1 and −2 … −12 in closed form and every other order as
+  // `z · _gpu_lerch_phi(z, s, 1.0)`, so it is NaN there wherever
+  // `_gpu_lerch_phi` is (past |z| = 1, or a genuinely complex value).
+  PolyLog: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        'Could not compile `PolyLog`: it takes exactly two operands'
+      );
+    return `_gpu_poly_log(${compile(args[0])}, ${compile(args[1])})`;
+  },
   Binomial: gpuBinomial,
   // `Choose(n, k)` is the binomial coefficient — same lowering (the two heads
   // share `evaluateBinomial` in the interpreter, so they must agree here too).
@@ -9189,6 +9201,51 @@ float _gpu_lerch_phi(float z, float s, float a) {
   if (z == -1.0) return _gpu_nan(); // s < 0: diverges, no valid transform
   return _gpu_lerch_series(z, s, a);
 }
+
+// PolyLog(s, z). The integer orders the interpreter answers in closed form
+// come first, so the shader agrees with it there: z = 0 is 0; the orders 1,
+// 0 and -1 are -ln(1 - z), z/(1 - z) and z/(1 - z)^2, with a pole (+inf)
+// at z = 1; an order -n, 2 <= n <= 12, is the Eulerian closed form
+// z * sum_k A(n,k) z^k / (1 - z)^(n+1). Every other order uses
+// Li_s(z) = z * Phi(z, s, 1) through _gpu_lerch_phi, so it is NaN where
+// _gpu_lerch_phi is (|z| >= 1 off z = 1). This includes an integer order
+// >= 2 below z = -1 and any non-integer order below z = -1, which the
+// interpreter reaches by an inversion formula that needs a complex Hurwitz
+// zeta function this target does not have.
+float _gpu_poly_log(float s, float z) {
+  if (z == 0.0) return 0.0;
+  if (s == 1.0) {
+    if (z == 1.0) return _gpu_inf();
+    return z < 1.0 ? -log(1.0 - z) : _gpu_nan();
+  }
+  if (s == 0.0) {
+    if (z == 1.0) return _gpu_inf();
+    return z / (1.0 - z);
+  }
+  if (s == -1.0) {
+    if (z == 1.0) return _gpu_inf();
+    return z / ((1.0 - z) * (1.0 - z));
+  }
+  if (s <= -2.0 && s >= -12.0 && s == floor(s) && z != 1.0) {
+    int n = int(-s);
+    // Row n of the Eulerian numbers, built in place from row 0 = [1]:
+    // A(m,k) = (k+1) A(m-1,k) + (m-k) A(m-1,k-1), updated from the top so
+    // each entry still reads the previous row's values.
+    float row[13];
+    row[0] = 1.0;
+    for (int i = 1; i < 13; i++) row[i] = 0.0;
+    for (int m = 1; m <= n; m++) {
+      for (int k = m - 1; k >= 1; k--)
+        row[k] = float(k + 1) * row[k] + float(m - k) * row[k - 1];
+    }
+    float p = 0.0;
+    for (int k = n - 1; k >= 0; k--) p = p * z + row[k];
+    float den = 1.0;
+    for (int i = 0; i <= n; i++) den *= 1.0 - z;
+    return z * p / den;
+  }
+  return z * _gpu_lerch_phi(z, s, 1.0);
+}
 `;
 
 /**
@@ -9310,6 +9367,43 @@ fn _gpu_lerch_phi(z: f32, s: f32, a: f32) -> f32 {
   if (z < 0.0 && s > 0.0) { return _gpu_lerch_euler(z, s, a); }
   if (z == -1.0) { return bitcast<f32>(0x7fc00000u); }
   return _gpu_lerch_series(z, s, a);
+}
+
+// PolyLog(s, z): see _gpu_poly_log in GPU_LERCH_PREAMBLE_GLSL for the
+// cases (closed forms for the orders 1, 0, -1 and -2 ... -12, then
+// z * _gpu_lerch_phi(z, s, 1.0)).
+fn _gpu_poly_log(s: f32, z: f32) -> f32 {
+  if (z == 0.0) { return 0.0; }
+  if (s == 1.0) {
+    if (z == 1.0) { return bitcast<f32>(0x7f800000u); }
+    if (z < 1.0) { return -log(1.0 - z); }
+    return bitcast<f32>(0x7fc00000u);
+  }
+  if (s == 0.0) {
+    if (z == 1.0) { return bitcast<f32>(0x7f800000u); }
+    return z / (1.0 - z);
+  }
+  if (s == -1.0) {
+    if (z == 1.0) { return bitcast<f32>(0x7f800000u); }
+    return z / ((1.0 - z) * (1.0 - z));
+  }
+  if (s <= -2.0 && s >= -12.0 && s == floor(s) && z != 1.0) {
+    let n = i32(-s);
+    var row: array<f32, 13>;
+    row[0] = 1.0;
+    for (var i: i32 = 1; i < 13; i = i + 1) { row[i] = 0.0; }
+    for (var m: i32 = 1; m <= n; m = m + 1) {
+      for (var k: i32 = m - 1; k >= 1; k = k - 1) {
+        row[k] = f32(k + 1) * row[k] + f32(m - k) * row[k - 1];
+      }
+    }
+    var p: f32 = 0.0;
+    for (var k: i32 = n - 1; k >= 0; k = k - 1) { p = p * z + row[k]; }
+    var den: f32 = 1.0;
+    for (var i: i32 = 0; i <= n; i = i + 1) { den = den * (1.0 - z); }
+    return z * p / den;
+  }
+  return z * _gpu_lerch_phi(z, s, 1.0);
 }
 `;
 
@@ -13302,8 +13396,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const usesZeta = /_gpu_(hurwitz_)?zeta/.test(code);
     // `_gpu_lerch_phi` calls both `_gpu_nan()` (past |z| = 1, or a < 0 with
     // a non-integer s) and `_gpu_hurwitz_zeta` (z = 1) from its own body,
-    // the same gap `usesZeta` closes for the zeta helpers.
-    const usesLerch = /_gpu_lerch/.test(code);
+    // the same gap `usesZeta` closes for the zeta helpers. `_gpu_poly_log`
+    // calls `_gpu_lerch_phi` without naming it in the emitted code either
+    // (only `_gpu_poly_log` itself appears there), so it shares this flag.
+    const usesLerch = /_gpu_(lerch|poly_log)/.test(code);
     if (
       code.includes('_gpu_nan') ||
       (!isWGSL &&

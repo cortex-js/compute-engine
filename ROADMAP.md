@@ -4827,3 +4827,35 @@ uses its Taylor shift only when the shifted base point is within its radius,
 and the imaginary part of `a` counts toward that distance; otherwise it falls
 back to the Euler–Maclaurin sum, which cancels for `Re(s) < 0`. `LerchPhi` at
 `z = −1` uses `HurwitzZeta` only for a real `a` because of this.
+Another witness, found while widening `PolyLog`: `HurwitzZeta(-11.5, 0.5 - 1.0994i).N()` is
+`-8.914 + 9.012i`; mpmath gives `-9.526 + 9.526i`. At `s = −2.9`, `a = 0.5 − 0.7329i` the
+error is 5.8e−11 relative. This is the reason for the `PolyLog` inversion limit above.
+
+### `PolyLog` past |z| = 1 still declines for a large order at a large |z| (OPEN, found 2026-09-28 while widening `PolyLog`, #340)
+
+Past the unit disk, `PolyLog(s, z)` at a non-integer order uses the `LerchPhi`
+continuation, and where that declines (most of the plane, see the `LerchPhi`
+item above, #353) Jonquière's inversion formula
+(`polylogInversionComplex`, `numerics/polylog.ts`). The inversion calls
+`hurwitzZetaComplex(1 − s, a)` with `a = 1/2 + ln(−z)/(2πi)`, and that
+function is inaccurate at a negative order with a complex `a` whose
+imaginary part is above about 0.55 (the `HurwitzZeta` entry below). So the inversion declines
+(`N()` stays symbolic) when `Re(s) > 2` and `|z|` is above about 32, for
+example `PolyLog(4.5, -1000)` (mpmath −181.98765816781016), and when
+`|Im s| > 1.5`. The GPU lane has neither the continuation nor the inversion:
+`_gpu_poly_log` is `NaN` for every non-integer order with `|z| > 1`, and for
+an integer order `≥ 2` below `z = −1`. Fixing that entry widens the
+interpreter and the JavaScript lane at once.
+
+### The machine-precision `Zeta` kernels are inaccurate for a small negative order (OPEN, correctness, found 2026-09-28 while widening `PolyLog`, #340)
+
+`zeta(s)` (`numerics/special-functions.ts`) and `zetaComplex`/
+`hurwitzZetaComplex(s, 1)` (`numerics/numeric-complex.ts`) lose digits as `s`
+approaches 0 from below: at `s = −1e−9` they return `−0.4999999577` where
+the value is `−0.4999999991` (8e−8 relative), at `s = −1e−6` the error is
+1.2e−11. The interpreter's `Zeta(-1e-9).N()` is correct (it uses big
+decimals), but the compiled `Zeta` and the compiled `PolyLog(s, 1)` use the
+machine kernel and return the wrong digits. The loss probably comes from the
+reflection formula, which multiplies `sin(πs/2)` (near 0) by `ζ(1 − s)` (near
+its pole).
+

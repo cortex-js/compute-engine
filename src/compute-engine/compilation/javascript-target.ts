@@ -524,6 +524,7 @@ import {
   betaRegularized,
 } from '../numerics/special-functions.js';
 import { lerchPhiReal } from '../numerics/lerch-phi.js';
+import { polylogOrderReal } from '../numerics/polylog.js';
 import { choose } from '../boxed-expression/expand.js';
 import {
   correlation,
@@ -3022,6 +3023,7 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   // `Digamma`/`Trigamma`'s plain-name mappings.
   'PolyGamma',
   'LerchPhi',
+  'PolyLog',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of this target. */
@@ -7003,6 +7005,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         'Could not compile `LerchPhi`: it takes exactly three operands'
       );
     return `_SYS.lerchPhi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+  },
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.polyLog` is
+  // `polylogOrderReal` (`numerics/polylog.ts`), which answers every order
+  // the way the interpreter does (the closed forms and the dedicated
+  // integer-order kernel first) and is NaN for a complex value or where
+  // the interpreter's kernel declines.
+  PolyLog: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        'Could not compile `PolyLog`: it takes exactly two operands'
+      );
+    return `_SYS.polyLog(${compile(args[0])}, ${compile(args[1])})`;
   },
   LambertW: '_SYS.lambertW',
 
@@ -11668,6 +11682,7 @@ const SYS_HELPERS = {
   hurwitzZeta,
   zetaGeneralized,
   lerchPhi: lerchPhiReal,
+  polyLog: polylogOrderReal,
   lambertW,
   besselJ,
   besselY,
