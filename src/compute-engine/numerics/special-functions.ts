@@ -4,6 +4,7 @@ import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { hurwitzZetaComplex } from './numeric-complex.js';
+import { bernoulliRational } from './bernoulli.js';
 
 const gammaG = 7;
 const lanczos_7_c = [
@@ -1434,6 +1435,258 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
   return eta.div(
     BigDecimal.ONE.sub(new BigDecimal(2).pow(BigDecimal.ONE.sub(s)))
   );
+}
+
+//
+// ---------------- Bignum Hurwitz / generalized zeta (real) --------------
+//
+// Euler-Maclaurin (DLMF 25.11.9), real s and a only — `evaluateHurwitzZeta`
+// / `evaluateGeneralizedZeta` (library/arithmetic.ts) reach this kernel
+// only on their real branch; a complex operand stays on the double
+// `hurwitzZetaComplex` kernel (the complex special-function kernels run at
+// machine precision at every engine precision).
+//
+//   ζ(s,a) = Σ_{k<N} (k+a)^{-s} + z^{1-s}/(s-1) + ½z^{-s}
+//            + Σ_{j=1}^{M} B₂ⱼ/(2j)! (s)₂ⱼ₋₁ z^{-s-2j+1},   z = N + a.
+//
+// Left of Re(s) = 0 the direct terms grow like N^(−s) and cancel; Hurwitz's
+// a ≠ 1 has no single reflection point the way ζ(s) = ζ(s,1) does (see
+// `zetaCore` above), so instead the working precision is raised by the
+// digits the cancellation costs — sized once from doubles (`hurwitzZetaBigPlan`)
+// and, when the result turns out smaller than 1, once more from the actual
+// magnitude.
+
+/** Past this many working digits, the cancellation left of the strip costs
+ * more than it is worth; the caller falls back to the double kernel. */
+const HURWITZ_BIG_MAX_WORKING_DIGITS = 1200;
+
+interface HurwitzEMPlan {
+  /** Direct terms Σ_{k<N} (k+a)^{-s}. */
+  terms: number;
+  /** Euler-Maclaurin Bernoulli-pair corrections. */
+  pairs: number;
+  /** log10 of the largest single term — how many digits the sum cancels. */
+  largest: number;
+}
+
+/** ln|(k+a)^{-s}| for real k+a, s. */
+function lnAbsHurwitzTerm(w: number, s: number): number {
+  return -s * Math.log(Math.abs(w));
+}
+
+/**
+ * Choose N (direct terms) and M (Bernoulli pairs) so the Euler-Maclaurin
+ * tail's first omitted term is below 10^(−digits), from doubles only —
+ * this sizes the sum, it does not compute it. `sRe`/`aRe` are the real
+ * s, a as doubles; the actual sum is taken in `BigNum` by `hurwitzZetaBigEM`.
+ */
+function hurwitzZetaBigPlan(
+  sRe: number,
+  aRe: number,
+  digits: number
+): HurwitzEMPlan | undefined {
+  const LN_2PI = Math.log(2 * Math.PI);
+  const target = -digits * Math.LN10 - Math.LN10;
+  const n0 = Math.max(0, Math.ceil(1 - aRe)); // z = a + n ≥ 1
+  const maxPairs = 4 * digits + 50;
+  let best: HurwitzEMPlan | undefined;
+  let bestCost = Infinity;
+  let firstN = -1;
+  for (
+    let n = n0;
+    firstN < 0 || n <= 2 * firstN + 8;
+    n += Math.max(1, Math.ceil((n - n0) / 16))
+  ) {
+    if (n > n0 + 1e6) break;
+    const z = aRe + n;
+    const lnZ = Math.log(Math.abs(z));
+    const lnZs = lnAbsHurwitzTerm(z, sRe); // ln |z^{-s}|
+    let lnPoch = Math.log(Math.abs(sRe)); // ln |(s)_1|
+    let largest = lnZs + lnZ - Math.log(Math.abs(sRe - 1)); // z^{1-s}/(s-1)
+    let prev = Infinity;
+    let pairs = -1;
+    for (let j = 1; j <= maxPairs; j++) {
+      // |B₂ⱼ/(2j)!| ≈ 2/(2π)^{2j}; z^{-s-2j+1} = z^{-s}·z^{1-2j}
+      const t = Math.LN2 - 2 * j * LN_2PI + lnPoch + lnZs - (2 * j - 1) * lnZ;
+      if (t === -Infinity || t < target) {
+        pairs = j - 1;
+        break;
+      }
+      if (t > prev) break; // past the smallest term: this N can't get there
+      largest = Math.max(largest, t);
+      prev = t;
+      lnPoch +=
+        Math.log(Math.abs(sRe + 2 * j - 1)) + Math.log(Math.abs(sRe + 2 * j));
+    }
+    if (pairs < 0) continue;
+    if (firstN < 0) firstN = n;
+    for (let k = 0; k < n; k++) {
+      const w = aRe + k;
+      if (w === 0) continue;
+      largest = Math.max(largest, lnAbsHurwitzTerm(w, sRe));
+    }
+    const cost = n + pairs / 8;
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = { terms: n, pairs, largest: largest / Math.LN10 };
+    }
+  }
+  return best;
+}
+
+/** B₂ⱼ/(2j)!, cached at the most digits any call has wanted so far and
+ * downsampled to fewer when asked. */
+let hurwitzEmCoeffCache: BigNum[] = [];
+let hurwitzEmCoeffDigits = 0;
+function hurwitzEmCoeff(j: number, digits: number): BigNum {
+  if (digits > hurwitzEmCoeffDigits) {
+    hurwitzEmCoeffCache = [];
+    hurwitzEmCoeffDigits = digits;
+  }
+  if (hurwitzEmCoeffCache[j] === undefined) {
+    const saved = BigDecimal.precision;
+    BigDecimal.precision = hurwitzEmCoeffDigits;
+    try {
+      let fact = 1n;
+      for (let i = 2n; i <= BigInt(2 * j); i++) fact *= i;
+      const [num, den] = bernoulliRational(2 * j);
+      hurwitzEmCoeffCache[j] = new BigDecimal(num).div(
+        new BigDecimal(den * fact)
+      );
+    } finally {
+      BigDecimal.precision = saved;
+    }
+  }
+  return digits === hurwitzEmCoeffDigits
+    ? hurwitzEmCoeffCache[j]
+    : hurwitzEmCoeffCache[j].toPrecision(digits);
+}
+
+/**
+ * Euler-Maclaurin sum for a `plan`, run with `BigDecimal.precision` already
+ * set to `workDigits`. Every intermediate is rounded to `workDigits`: `add`
+ * and `mul` are exact and unrounded (see `BigDecimal.mul`'s doc comment),
+ * so an accumulating product (`poch`, `zPow`) left unrounded would grow its
+ * significand every step.
+ */
+function hurwitzZetaBigEM(
+  ce: ComputeEngine,
+  s: BigNum,
+  a: BigNum,
+  plan: HurwitzEMPlan,
+  workDigits: number
+): BigNum {
+  const rnd = (x: BigNum): BigNum => x.toPrecision(workDigits);
+  const negS = s.neg();
+  let sum = BigDecimal.ZERO;
+  for (let k = 0; k < plan.terms; k++) {
+    if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    const w = a.add(k);
+    if (w.isZero()) continue; // Wolfram's HurwitzZeta drops the (k+a) = 0 term
+    sum = rnd(sum.add(rnd(w.pow(negS))));
+  }
+  const z = a.add(plan.terms);
+  const zNegS = rnd(z.pow(negS));
+  sum = rnd(sum.add(rnd(zNegS.mul(z).div(s.sub(1))))); // z^{1-s}/(s-1)
+  sum = rnd(sum.add(rnd(zNegS.mul(BigDecimal.HALF)))); // ½z^{-s}
+  const zInv2 = rnd(BigDecimal.ONE.div(z.mul(z)));
+  let zPow = rnd(zNegS.div(z)); // z^{-s-2j+1}, starting from j = 1
+  let poch = s; // (s)_{2j-1}
+  for (let j = 1; j <= plan.pairs; j++) {
+    if ((j & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    sum = rnd(
+      sum.add(rnd(rnd(poch.mul(zPow)).mul(hurwitzEmCoeff(j, workDigits))))
+    );
+    poch = rnd(rnd(poch.mul(s.add(2 * j - 1))).mul(s.add(2 * j)));
+    zPow = rnd(zPow.mul(zInv2));
+  }
+  return sum;
+}
+
+/**
+ * Bignum Hurwitz zeta ζ(s,a) for real s, a, via Euler-Maclaurin, ported
+ * from enumeratio's `hurwitz-zeta-big.ts`. Drops the (k+a) = 0 term
+ * (Wolfram's `HurwitzZeta` convention, matching `hurwitzZetaComplex`)
+ * rather than diverging there — the caller decides pole vs. finite for a
+ * non-positive integer `a` itself.
+ *
+ * Returns `undefined` when reaching the requested precision would cost
+ * more than `HURWITZ_BIG_MAX_WORKING_DIGITS` (far left of the critical
+ * strip) — the caller falls back to the double `hurwitzZetaComplex` kernel
+ * there, at reduced precision.
+ */
+export function bigHurwitzZeta(
+  ce: ComputeEngine,
+  s: BigNum,
+  a: BigNum
+): BigNum | undefined {
+  if (!s.isFinite() || !a.isFinite()) return undefined;
+  if (s.eq(1)) return undefined; // pole; caller special-cases s = 1
+
+  const sRe = s.toNumber();
+  const aRe = a.toNumber();
+  const requested = BigDecimal.precision;
+  let absolute = requested + SPECIAL_FN_GUARD;
+
+  // A result smaller than 1 has fewer correct significant digits than
+  // `absolute` asked for; once its size is known, widen and go again —
+  // once, since a second short result would mean the value keeps shrinking
+  // (e.g. a trivial-zero neighborhood) rather than settling.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const plan = hurwitzZetaBigPlan(sRe, aRe, absolute);
+    if (plan === undefined) return undefined;
+    const working = absolute + Math.max(0, Math.ceil(plan.largest)) + 12;
+    if (working > HURWITZ_BIG_MAX_WORKING_DIGITS) return undefined;
+
+    const saved = BigDecimal.precision;
+    BigDecimal.precision = working;
+    let r: BigNum;
+    try {
+      r = hurwitzZetaBigEM(ce, s, a, plan, working);
+    } finally {
+      BigDecimal.precision = saved;
+    }
+    const rn = r.toNumber();
+    const short =
+      r.isZero() || !Number.isFinite(rn)
+        ? 0
+        : Math.ceil(-Math.log10(Math.abs(rn)));
+    if (attempt > 0 || !(short > SPECIAL_FN_GUARD / 2))
+      return r.toPrecision(requested);
+    absolute += Math.min(short, 2 * requested);
+  }
+  return undefined; // unreachable
+}
+
+/**
+ * Bignum generalized zeta Zeta(s,a) in Wolfram's convention (see
+ * `zetaGeneralizedComplex`), for real s, a: the terms with k+a < 0 as
+ * |k+a|^(-s) — always real, since |k+a| > 0 — then `bigHurwitzZeta` from
+ * the first k with k+a ≥ 0, dropping a k+a = 0 there rather than treating
+ * it as a pole.
+ */
+export function bigZetaGeneralized(
+  ce: ComputeEngine,
+  s: BigNum,
+  a: BigNum
+): BigNum | undefined {
+  const front: BigNum[] = [];
+  let rest = a;
+  while (rest.isNegative()) {
+    front.push(rest);
+    rest = rest.add(1);
+  }
+  if (rest.isZero()) rest = BigDecimal.ONE;
+  const tail = bigHurwitzZeta(ce, s, rest);
+  if (tail === undefined) return undefined;
+  if (front.length === 0) return tail;
+
+  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    const negS = s.neg();
+    let acc = tail;
+    for (const w of front) acc = acc.add(w.abs().pow(negS));
+    return acc;
+  });
 }
 
 /** Halley refinement of a BigDecimal Lambert W estimate `w` toward the root of

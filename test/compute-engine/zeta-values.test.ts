@@ -315,6 +315,109 @@ describe('Two-argument Zeta/HurwitzZeta precision at Re(s) << 0, a != 1', () => 
   });
 });
 
+/** Run `fn` at the working precision `precision`, then restore it. */
+function atPrecision<T>(precision: number, fn: () => T): T {
+  const saved = ce.precision;
+  try {
+    ce.precision = precision;
+    return fn();
+  } finally {
+    ce.precision = saved;
+  }
+}
+
+describe('Two-argument Zeta/HurwitzZeta beyond double precision (bigHurwitzZeta / bigZetaGeneralized)', () => {
+  // Real s and a follow `ce.precision`, the way the one-operand `Zeta`
+  // already does via `bigZeta`; a complex operand stays on the double
+  // `hurwitzZetaComplex` kernel above. Every expected value was computed
+  // independently with Python mpmath at dps 90, then rounded to the
+  // working precision (`mpmath.nstr(x, precision)`) — comfortably more
+  // digits than any case here needs, since mpmath's own Hurwitz zeta is
+  // not always accurate to its nominal `dps` at extreme arguments (e.g.
+  // `zeta(20, 10)` at dps 60 first disagrees with its dps-100 value around
+  // digit 48).
+  const cases: [
+    op: 'HurwitzZeta' | 'Zeta',
+    s: number,
+    a: number | [number, number],
+    precision: number,
+    expected: string,
+  ][] = [
+    // Positive integer a past `HURWITZ_PEEL_LIMIT`'s exact route (N()
+    // always numericizes, so this is the kernel, not the peel rewrite).
+    ['HurwitzZeta', 3, [1, 2], 30, '8.41439832211715999779816713058'],
+    [
+      'HurwitzZeta',
+      3,
+      [1, 2],
+      50,
+      '8.4143983221171599977981671305801499353549040463835',
+    ],
+    // Re(s) << 0: the direct Euler-Maclaurin terms cancel heavily: the
+    // working precision is raised by the digits the cancellation costs
+    // (`hurwitzZetaBigPlan`'s `largest`) rather than reflected, since
+    // a != 1 has no single reflection point the way ζ(s) = ζ(s,1) does.
+    ['HurwitzZeta', -20.5, [1, 4], 30, '108.217475046805511094674035008'],
+    [
+      'HurwitzZeta',
+      -20.5,
+      [1, 4],
+      50,
+      '108.21747504680551109467403500768857532969106471109',
+    ],
+    // a < 0, real only because s is an integer (a term (k+a)^{-s} with
+    // k+a < 0 is complex for a non-integer s).
+    ['HurwitzZeta', 6, [-5, 2], 30, '128.184500400219198408324643294'],
+    // Zeta(s,a), a <= 0: the generalized (always-finite) convention —
+    // terms off the positive axis are |k+a|^{-s}, real for any real s.
+    [
+      'Zeta',
+      4,
+      [-7, 2],
+      50,
+      '32.464643259910417981002559240261738285452281190459',
+    ],
+    ['Zeta', 5, [-5, 2], 30, '64.2866876522428216257373506563'],
+    [
+      'Zeta',
+      5,
+      [-5, 2],
+      50,
+      '64.286687652242821625737350656299746452567862414024',
+    ],
+    ['Zeta', 2.5, -6, 50, '2.642892756568173658272776649181863820806977067801'],
+    // Large s, tiny result: `bigHurwitzZeta`'s two-attempt widening
+    // (`short`) catches a result smaller than 1 having fewer correct
+    // significant digits than the first pass carried.
+    [
+      'HurwitzZeta',
+      20,
+      10,
+      50,
+      '1.18160477582516795534661414027181923713723074538e-20',
+    ],
+  ];
+
+  for (const [op, s, a, precision, expected] of cases) {
+    const aExpr = Array.isArray(a) ? ['Rational', a[0], a[1]] : a;
+    test(`${op}(${s}, ${JSON.stringify(a)}) at precision ${precision} = ${expected}`, () => {
+      // The value's displayed digit count follows the *current* engine
+      // precision, not just the precision it was computed at: `toString()`
+      // must run inside `atPrecision`, before it restores.
+      atPrecision(precision, () => {
+        expect(ce.box([op, s, aExpr]).N().toString()).toBe(expected);
+      });
+    });
+  }
+
+  test('the bignum kernel returns more digits than the double kernel carries', () => {
+    atPrecision(50, () => {
+      const z = ce.expr(['HurwitzZeta', 3, ['Rational', 1, 2]]).N();
+      expect(z.toString().replace(/[-.]/g, '').length).toBeGreaterThan(30);
+    });
+  });
+});
+
 describe('HurwitzZeta vs Zeta at a <= 0 (Wolfram distinguishes the two)', () => {
   // Zeta[s,a] drops the (k+a) = 0 term and stays real there; HurwitzZeta[s,a]
   // (mpmath's zeta(s,a)) is the plain series and is genuinely complex at a

@@ -109,6 +109,8 @@ import {
   bigPolygamma,
   bigBeta,
   bigZeta,
+  bigHurwitzZeta,
+  bigZetaGeneralized,
   bigLambertW,
   besselJ,
   besselY,
@@ -2188,6 +2190,21 @@ function evaluateHurwitzZeta(
   // non-integer s, so the value is real when a ≥ 0 or s is an integer.
   const real =
     !s.isComplex && !a.isComplex && (a.re >= 0 || Number.isInteger(s.re));
+
+  // At the engine's precision, real s and a: the bignum kernel follows
+  // `ce.precision` the way `bigZeta` does for the one-operand form. A
+  // complex operand stays on the double kernel below — the complex
+  // special-function kernels run at machine precision at every engine
+  // precision.
+  if (real && bignumPreferred(engine)) {
+    const big = bigHurwitzZeta(
+      engine,
+      s.bignumRe ?? engine.bignum(s.re),
+      a.bignumRe ?? engine.bignum(a.re)
+    );
+    if (big !== undefined) return boxBignumResult(engine, big);
+  }
+
   // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
   // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   return boxComplexResult(
@@ -2249,12 +2266,23 @@ function evaluateGeneralizedZeta(
 
   // Real s and real a: the terms off the positive axis are |k + a|^(−s)
   // and the rest is a Hurwitz ζ at a positive base point, all real.
+  const real = !s.isComplex && !a.isComplex;
+
+  if (real && bignumPreferred(engine)) {
+    const big = bigZetaGeneralized(
+      engine,
+      s.bignumRe ?? engine.bignum(s.re),
+      a.bignumRe ?? engine.bignum(a.re)
+    );
+    if (big !== undefined) return boxBignumResult(engine, big);
+  }
+
   // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
   // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   return boxComplexResult(
     engine,
     zetaGeneralizedComplex(new Complex(s.re, s.im), new Complex(a.re, a.im)),
-    !s.isComplex && !a.isComplex
+    real
   );
 }
 
@@ -9819,10 +9847,5 @@ function bigRealOf(x: Expression | undefined): BigDecimal | undefined {
  * `BigDecimal.add()` is exact.
  */
 function floorModFloat(a: Expression, b: Expression): Expression | undefined {
-  return apply2(
-    a,
-    b,
-    floorModDouble,
-    (a, b) => a.mod(b).add(b).mod(b)
-  );
+  return apply2(a, b, floorModDouble, (a, b) => a.mod(b).add(b).mod(b));
 }
