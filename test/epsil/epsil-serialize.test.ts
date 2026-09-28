@@ -226,10 +226,17 @@ describe('EPSIL SERIALIZING DICTIONARIES', () => {
     // Empty dictionary
     expect(serializeEpsil({ dict: {} })).toMatchInlineSnapshot(`"{ -> }"`);
 
-    //Regular dictionary
+    // Regular dictionary. A `{dict}` value is read as the engine reads it: a
+    // bare string is a string and an array is a list of values, so
+    // `['Add', 2, 'x']` is the list of a string, a number and a string. An
+    // expression value is an expression OBJECT (`{fn: …}`).
     expect(
-      serializeEpsil({ dict: { x: 1, y: 2, z: ['Add', 2, 'x'] } })
-    ).toMatchInlineSnapshot(`"{"x" -> 1, "y" -> 2, "z" -> 2 + x}"`);
+      serializeEpsil({
+        dict: { x: 1, y: 2, z: ['Add', 2, 'x'], e: { fn: ['Add', 2, 'x'] } },
+      })
+    ).toMatchInlineSnapshot(
+      `"{"x" -> 1, "y" -> 2, "z" -> ["Add", 2, "x"], "e" -> 2 + x}"`
+    );
 
     // Nested dictionary
     expect(
@@ -237,7 +244,18 @@ describe('EPSIL SERIALIZING DICTIONARIES', () => {
         dict: { x: { dict: { a: 7, b: 5 } }, y: 2, z: ['Add', 2, 'x'] },
       })
     ).toMatchInlineSnapshot(
-      `"{"x" -> {"a" -> 7, "b" -> 5}, "y" -> 2, "z" -> 2 + x}"`
+      `"{"x" -> {"a" -> 7, "b" -> 5}, "y" -> 2, "z" -> ["Add", 2, "x"]}"`
+    );
+
+    // The JSON of a boxed dictionary that holds a list, a boolean list and a
+    // string — what the REPL prints for `let d = {"xs" -> [1, 2]}; d`. The
+    // list's first element was taken for a call head and threw before.
+    expect(
+      serializeEpsil({
+        dict: { xs: [1, 2], flags: [true, false], s: 'hi', n: [[1, 2], [3]] },
+      })
+    ).toMatchInlineSnapshot(
+      `"{"xs" -> [1, 2], "flags" -> [True, False], "s" -> "hi", "n" -> [[1, 2], [3]]}"`
     );
     // @todo:indexed-access
 

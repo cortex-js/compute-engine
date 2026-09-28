@@ -53,21 +53,6 @@ Remaining work:
 
 ## Runtime and representation
 
-- **A `{dict}` value that is an array.** The serializer reads an array
-  value of a MathJSON `{dict: …}` object as a nested expression
-  (`{dict: {z: ["Add", 2, "x"]}}` prints `{"z" -> 2 + x}`, pinned by the
-  dictionary serialization tests), while the engine reads it as a list of
-  values (`ce.box` makes it the list `["Add", 2, "x"]` of two strings and
-  a number, and a bare string value the string, not a symbol). An array
-  that is not an expression under the serializer's reading throws:
-  `serializeEpsil({dict: {xs: [1, 2]}})` and `{dict: {flags: [true,
-  false]}}` fail with a `TypeError` (found 2026-09-27 by the review of the
-  serializer spelling round). A decision is needed: follow the engine (an
-  array is a list, a string is a string; the pinned `2 + x` reading
-  changes), or keep the expression reading and print an array with a
-  non-operator head as a list. A boxed dictionary's `.json` is the
-  `["Dictionary", ["KeyValuePair", …]]` form, which prints correctly on
-  every value, so the CLI and the MCP server are not affected.
 - **Comment fidelity.** Parsing discards comments and serialization can emit
   only a single normalized MathJSON `comment` field. A first useful rung is
   leading comments on statements in raw parse/serialize workflows. Trailing,

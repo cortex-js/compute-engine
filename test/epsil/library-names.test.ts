@@ -268,6 +268,17 @@ describe('the resolution pass', () => {
       ],
     });
     expect(runSymbol('max(pi, pi) == pi')).toBe('True');
+    // The heuristic reads a candidate at a VARIABLE position only: the
+    // expansion point of a `Series` is not one.
+    expect(resolved('series(x + pi, x, pi, 3)')).toEqual({
+      fn: [
+        'Series',
+        { fn: ['Add', { sym: 'x' }, { sym: 'Pi' }] },
+        { sym: 'x' },
+        { sym: 'Pi' },
+        { num: '3' },
+      ],
+    });
     expect(resolved('nothing')).toEqual({ sym: 'Nothing' });
     expect(resolved('missing')).toEqual({ sym: 'Missing' });
     expect(resolved('goldenRatio')).toEqual({ sym: 'GoldenRatio' });
@@ -374,6 +385,52 @@ describe('the resolution pass', () => {
         },
         { sym: 'sum' },
       ],
+    });
+    // Operators that take their variables as `any`: the variable list of a
+    // `JacobianMatrix`, the parameter and variable specs of a `FindFit`.
+    expect(resolved('jacobianMatrix(sin^2, [sin])')).toEqual({
+      fn: [
+        'JacobianMatrix',
+        { fn: ['Power', { sym: 'sin' }, { num: '2' }] },
+        { fn: ['List', { sym: 'sin' }] },
+      ],
+    });
+    expect(resolved('findFit(data, sum * t, [sum], [t])')).toEqual({
+      fn: [
+        'FindFit',
+        { sym: 'data' },
+        { fn: ['Multiply', { sym: 'sum' }, { sym: 't' }] },
+        { fn: ['List', { sym: 'sum' }] },
+        { fn: ['List', { sym: 't' }] },
+      ],
+    });
+    // A fit's trailing operand is a variable only when it is a bare
+    // symbol: a trailing data list is data.
+    expect(resolved('linearRegression([pi, 2 * pi], [pi, 2 * pi])')).toEqual({
+      fn: [
+        'LinearRegression',
+        {
+          fn: [
+            'List',
+            { sym: 'Pi' },
+            { fn: ['Multiply', { num: '2' }, { sym: 'Pi' }] },
+          ],
+        },
+        {
+          fn: [
+            'List',
+            { sym: 'Pi' },
+            { fn: ['Multiply', { num: '2' }, { sym: 'Pi' }] },
+          ],
+        },
+      ],
+    });
+    // An operator named like an `Object.prototype` property does not reach
+    // the prototype.
+    const ce = new ComputeEngine();
+    ce.declare('constructor', '(number) -> number');
+    expect(resolved('constructor(1)', ce)).toEqual({
+      fn: ['constructor', { num: '1' }],
     });
     // A name used as a call head in the same call is a function, not a
     // variable: both `sin` here are the sine.
@@ -583,24 +640,34 @@ describe('the serializer', () => {
   });
 
   test('a boolean dictionary value is not a name', () => {
-    // A `{dict}` value can be a raw JS boolean; the written-name walk skips
-    // it (it reached `'sym' in true` before). A boolean nested in an ARRAY
-    // value cannot be printed at all — the serializer reads such an array
-    // as a nested expression, the engine as a list; that conflict is an
-    // open item of `docs/epsil/ROADMAP.md`.
+    // A `{dict}` value can be a raw JS boolean, at the top level or inside
+    // an array value (a list); the written-name walk skips both (it reached
+    // `'sym' in true` before).
     expect(
       serializeEpsil([
         'Add',
         'Pi',
-        { dict: { ok: true } },
+        { dict: { ok: true, flags: [true, false] } },
       ] as unknown as MathJsonExpression)
-    ).toBe('pi + {"ok" -> True}');
+    ).toBe('pi + {"ok" -> True, "flags" -> [True, False]}');
   });
 
   test('a repeated constant reads back as the constant', () => {
     const ce = new ComputeEngine();
     for (const [expr, expected] of [
       [['List', 'Pi', 'Pi'], { fn: ['List', { sym: 'Pi' }, { sym: 'Pi' }] }],
+      [
+        ['Series', ['Add', 'x', 'Pi'], 'x', 'Pi', 3],
+        {
+          fn: [
+            'Series',
+            { fn: ['Add', { sym: 'x' }, { sym: 'Pi' }] },
+            { sym: 'x' },
+            { sym: 'Pi' },
+            { num: '3' },
+          ],
+        },
+      ],
       [
         ['Max', 'Pi', ['Multiply', 2, 'Pi']],
         {
@@ -619,6 +686,37 @@ describe('the serializer', () => {
         expected,
       ]);
     }
+  });
+
+  test('a library name the expression binds keeps its spelling', () => {
+    // `let Pi = 3; f(Pi) = Pi; f(4)` binds the user's own `Pi`: respelling
+    // the `let` to `pi` but not the parameter made `f(4)` read the outer
+    // binding (3 instead of 4). A bound library name is written as is.
+    const source = 'let Pi = 3\nf(Pi) = Pi\nf(4)';
+    const [ast] = parseEpsil(source);
+    const text = serializeEpsil(ast);
+    expect(text).toBe('let Pi = 3\nf(Pi) = Pi\nf(4)');
+    expect(run(text)).toBe('4');
+    // The variable operand of a binder, a loop index, a pattern.
+    expect(serializeEpsil(['D', ['Power', 'Pi', 2], 'Pi'])).toBe(
+      'D(Pi ^ 2, Pi)'
+    );
+    expect(serializeEpsil(['Sum', 'Pi', ['Element', 'Pi', 'xs']])).toBe(
+      'sum(Pi, Pi in xs)'
+    );
+    expect(serializeEpsil(['Match', 0, ['MatchCase', '_Pi', 'Pi']])).toBe(
+      'match 0 {\n  Pi => Pi\n}'
+    );
+    // A quantifier binds operand 0, not its predicate.
+    expect(serializeEpsil(['ForAll', 'Pi', ['Greater', 'Pi', 0]])).toBe(
+      'forAll(Pi, Pi > 0)'
+    );
+    expect(serializeEpsil(['Exists', 'Pi', ['Less', 'Pi', 0]])).toBe(
+      'exists(Pi, Pi < 0)'
+    );
+    // An underscore outside a pattern is part of the name: `_pi` binds
+    // nothing, so `Pi` is still spelled `pi`.
+    expect(serializeEpsil(['Add', '_pi', 'Pi'])).toBe('_pi + pi');
   });
 
   test('a name bound outside the expression keeps the MathJSON name', () => {

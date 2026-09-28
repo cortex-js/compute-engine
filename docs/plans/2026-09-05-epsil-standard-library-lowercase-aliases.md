@@ -632,8 +632,14 @@ resolves back to its library name. The dual review of the round found that
 the resolution pass's variable heuristic (section 11) ran for every
 operator and read a repeated value as a variable (`[pi, pi]` stayed
 unresolved); it now runs only for an operator that takes a variable
-operand (`takesVariableOperand`: `Limit`, `Solve`, or a `symbol`-typed
-parameter in the signature).
+operand, and only at the operand positions that hold the variable
+(`variableOperandPositions`: a `symbol`-typed parameter position in the
+signature, or a listed position for `Limit`, `Solve`, `JacobianMatrix`,
+`CharacteristicPolynomial`, `FindRoot`, `FindFit`, `LinearRegression` and
+`PolynomialFit`, which type their variable `any`). The staged review also
+found that a library name the expression itself binds (`let Pi = 3`) was
+respelled inconsistently; the serializer now collects the bound names too
+(`collectNames`) and keeps such a name's MathJSON spelling.
 
 The expanded reference of section 8.2 shipped the same day as
 `scripts/build-library-reference.ts` (the generator; the shared helpers of

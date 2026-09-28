@@ -28,6 +28,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { ComputeEngine } from '../src/compute-engine/index.js';
 import type { DocEntry } from '../src/cli/doc.js';
 import {
+  assertBalancedBackticks,
   exampleBlock,
   librarySections,
   mdx,
@@ -57,9 +58,16 @@ function headline(entry: DocEntry): string {
 
 function entrySection(row: Row, page: string): string {
   const { entry } = row;
-  const lines: string[] = [`### ${heading(entry)}`, '', headline(entry)];
+  const lines: string[] = [
+    `### ${heading(entry)}`,
+    '',
+    assertBalancedBackticks(headline(entry), entry.id, page),
+  ];
   for (const paragraph of entry.description ?? []) {
-    lines.push('', mdx(paragraph, false));
+    lines.push(
+      '',
+      assertBalancedBackticks(mdx(paragraph, false), entry.id, page)
+    );
   }
   if (entry.url !== undefined) lines.push('', `See ${entry.url}.`);
   for (const example of row.examples)

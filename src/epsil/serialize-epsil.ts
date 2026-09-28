@@ -150,16 +150,15 @@ export function serializeEpsil(
     isBound?: (name: string) => boolean;
   }
 ): string {
-  // The names written in the expression, collected once on first use: a
-  // library name whose Epsil spelling is among them keeps its MathJSON
-  // spelling (see `libraryName`).
-  let writtenNames: Set<string> | undefined;
-  const isWritten = (name: string): boolean => {
-    if (writtenNames === undefined) {
-      writtenNames = new Set();
-      collectWrittenNames(expr, writtenNames);
+  // The names written and bound in the expression, collected once on first
+  // use (see `collectNames`).
+  let names: ExpressionNames | undefined;
+  const namesOf = (): ExpressionNames => {
+    if (names === undefined) {
+      names = { written: new Set(), bound: new Set() };
+      collectNames(expr, names);
     }
-    return writtenNames.has(name);
+    return names;
   };
   const spellings = new Map<string, string>();
 
@@ -168,9 +167,11 @@ export function serializeEpsil(
    * spelling (`sin` for `Sin`) under `libraryNames: 'epsil'`, unless the
    * spelling is written elsewhere in the expression or bound outside it
    * (`options.isBound`), in which case the spelling would read back as that
-   * binding and the MathJSON name is kept. A name with no spelling, or whose
-   * spelling does not name it back (a user name that merely looks like a
-   * library name), is written as is.
+   * binding, or the library name itself is bound in the expression
+   * (`let Pi = 3`), in which case it is the user's name; in both cases the
+   * MathJSON name is kept. A name with no spelling, or whose spelling does
+   * not name it back (a user name that merely looks like a library name),
+   * is written as is.
    */
   const libraryName = (name: string): string => {
     if (options?.libraryNames === 'mathjson') return name;
@@ -180,7 +181,8 @@ export function serializeEpsil(
     const written =
       spelling === undefined ||
       canonicalLibraryName(spelling) !== name ||
-      isWritten(spelling) ||
+      namesOf().written.has(spelling) ||
+      namesOf().bound.has(name) ||
       options?.isBound?.(spelling) === true
         ? name
         : spelling;
@@ -2926,14 +2928,25 @@ export function serializeEpsil(
  * and a raw cast would hand `true` to `serializeExpression()`, which matches
  * no expression shape and renders EMPTY (`{"alias" -> }`, unparseable).
  *
- * Map the booleans back to the symbols they canonicalized from. Every other
- * `DictionaryValue` is passed through as before: a bare string keeps reading
- * as a symbol shorthand and an array as a nested expression, which is the
- * convention the dictionary serialization tests pin (`z: ['Add', 2, 'x']` →
- * `"z" -> 2 + x`).
+ * The value is read the way the engine reads it (`ce.box({dict: …})`,
+ * `dictionaryValueToBoxedExpression` in
+ * `boxed-expression/boxed-dictionary.ts`): a boolean is the `True`/`False`
+ * symbol it canonicalized from, a number is a number, a bare string is a
+ * STRING (`{dict: {t: "x"}}` is the entry `"t" -> "x"`, not the symbol
+ * `x`), an array is a LIST of values (`{dict: {xs: [1, 2]}}` is
+ * `"xs" -> [1, 2]`, and `["Add", 2, "x"]` is the list of a string, a number
+ * and a string), and an expression object (`{fn: …}`, `{sym: …}`, `{num: …}`,
+ * `{str: …}`, `{dict: …}`) is that expression. Before 2026-09-27 a bare
+ * string was read as a symbol and an array as a nested expression, so a
+ * boxed dictionary holding a list — `let d = {"xs" -> [1, 2]}` in the REPL,
+ * whose value's JSON is `{dict: {xs: [1, 2]}}` — could not be printed at
+ * all (the array's first element, `1`, was taken for a call head).
  */
 function dictionaryValueToExpression(v: unknown): MathJsonExpression {
   if (typeof v === 'boolean') return v ? 'True' : 'False';
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') return { str: v };
+  if (Array.isArray(v)) return ['List', ...v.map(dictionaryValueToExpression)];
   return v as MathJsonExpression;
 }
 
@@ -3063,21 +3076,28 @@ function escapeString(s: string): string {
 // the output stays lexically balanced (single line, closed backticks), and
 // re-parses with an `invalid-symbol-name` diagnostic.
 /**
- * Every name written in `expr` — each symbol and each string call head, at
- * any depth, including inside dictionary values — added to `into`. A binding
- * form writes the name it binds (`let sin = 3` is `Declare(sin, …)`, a
- * parameter is a symbol of the `Function` node, a loop or match pattern is
- * made of symbols), so a library spelling absent from this set is bound
- * nowhere in the expression. A match pattern encodes the name it binds
- * with a leading underscore (`_pi` binds `pi`, `___rest` is the rest
- * capture `...rest`), so the encoded symbol contributes its decoded name
- * too — without it, `match 0 { pi => Pi }` printed the body as `pi`, the
- * pattern's own variable.
+ * The names of `expr`: every name WRITTEN in it (`written`: each symbol
+ * and each string call head, at any depth, including inside dictionary
+ * values) and every name it BINDS (`bound`: the target of a `let`, an
+ * assignment or a function definition, a parameter, a loop or comprehension
+ * index, a match-pattern binding, and the variable operand of a binder
+ * such as `D`, `Integrate`, `Sum`, `Limit` or `Solve` — see
+ * `BINDING_OPERANDS`). `libraryName` keeps the MathJSON spelling of a
+ * library name when its Epsil spelling is written anywhere (the spelling
+ * would read back as that name) and when the library name itself is bound
+ * anywhere (`let Pi = 3; f(Pi) = Pi`: respelling the `let` but not the
+ * parameter changed `f(4)` from 4 to 3, and respelling every occurrence
+ * would rename the user's binding).
  *
- * The set is over the WHOLE expression, not per scope: one `let sin = 3`
+ * A match pattern encodes the name it binds with a leading underscore
+ * (`_pi` binds `pi`, `___rest` is the rest capture `...rest`); inside a
+ * pattern the decoded name is bound. Outside a pattern an underscore is
+ * part of an ordinary name and is not decoded.
+ *
+ * Both sets are over the WHOLE expression, not per scope: one `let sin = 3`
  * anywhere keeps every `Sin` in the expression at its MathJSON name, in
  * unrelated scopes too. That is deliberate — the MathJSON name reads back
- * the same under any binding, so the flat set is always safe, where a
+ * the same under any binding, so the flat sets are always safe, where a
  * scope-local answer would have to reproduce the resolution pass's scope
  * walk (`documentBindings`) on a tree that has no source offsets.
  *
@@ -3085,48 +3105,144 @@ function escapeString(s: string): string {
  * JS booleans (`{flags: [true, false]}`): a boolean, like a number, names
  * nothing and is skipped before the object shapes are tested.
  */
-function collectWrittenNames(
+type ExpressionNames = { written: Set<string>; bound: Set<string> };
+
+/**
+ * The operands, from index 1 on, that a binding head may hold as bare
+ * variable symbols (or as symbols inside a `Tuple`, `List` or `Set`
+ * operand): the index of a `D`, an `Integrate` or a `Series`, the
+ * `(i, 1, n)` clause of a `Sum`, the variable of a `Limit` or a `Solve`.
+ * The `Element` and `Limits` clause forms bind their first operand and are
+ * recognized on their own. Marking a name bound only keeps its MathJSON
+ * spelling, so the list errs on the side of inclusion.
+ *
+ * The quantifiers are in `QUANTIFIERS` instead: their variable is operand
+ * 0 and operand 1 is the predicate (`ForAll(x, x > 0)`, the engine's
+ * `limitsIndexSites(0)` in `library/logic.ts`).
+ */
+const QUANTIFIERS: ReadonlySet<string> = new Set([
+  'ForAll',
+  'NotForAll',
+  'Exists',
+  'NotExists',
+  'ExistsUnique',
+]);
+
+const BINDING_OPERANDS: ReadonlySet<string> = new Set([
+  'D',
+  'Integrate',
+  'NIntegrate',
+  'Series',
+  'Residue',
+  'Limit',
+  'Solve',
+  'Sum',
+  'Product',
+  'JacobianMatrix',
+  'CharacteristicPolynomial',
+  'FindRoot',
+  'FindFit',
+]);
+
+function collectNames(
   expr: MathJsonExpression | null,
-  into: Set<string>
+  names: ExpressionNames,
+  pattern = false
 ): void {
   if (expr === null || (typeof expr !== 'object' && typeof expr !== 'string'))
     return;
   if (typeof expr === 'string') {
     if (!matchesString(expr) && !matchesNumber(expr))
-      addWrittenName(expr, into);
+      addName(expr, names, pattern);
     return;
   }
   if (Array.isArray(expr)) {
-    const [head, ...args] = expr;
-    if (typeof head === 'string') into.add(head);
-    else collectWrittenNames(head as MathJsonExpression, into);
-    for (const arg of args)
-      collectWrittenNames(arg as MathJsonExpression, into);
+    collectCall(
+      expr[0] as MathJsonExpression,
+      expr.slice(1) as MathJsonExpression[],
+      names,
+      pattern
+    );
     return;
   }
   if ('sym' in expr) {
-    addWrittenName(expr.sym, into);
+    addName(expr.sym, names, pattern);
     return;
   }
   if ('fn' in expr) {
-    const [head, ...args] = expr.fn;
-    if (typeof head === 'string') addWrittenName(head, into);
-    else collectWrittenNames(head, into);
-    for (const arg of args) collectWrittenNames(arg, into);
+    collectCall(expr.fn[0], expr.fn.slice(1), names, pattern);
     return;
   }
   if ('dict' in expr)
     for (const value of Object.values(expr.dict))
-      collectWrittenNames(dictionaryValueToExpression(value), into);
+      collectNames(dictionaryValueToExpression(value), names, pattern);
 }
 
-/** `name` and, for a pattern-encoded symbol (`_pi`, `___rest`), the name
- * it binds (`pi`, `rest`). */
-function addWrittenName(name: string, into: Set<string>): void {
-  into.add(name);
-  if (name.startsWith('_')) {
+function collectCall(
+  head: MathJsonExpression | string,
+  args: MathJsonExpression[],
+  names: ExpressionNames,
+  pattern: boolean
+): void {
+  if (typeof head === 'string') names.written.add(head);
+  else collectNames(head, names, pattern);
+  // The binding positions of this head.
+  if (typeof head === 'string') {
+    if (head === 'Declare' || head === 'Assign' || head === 'DefineFunction')
+      bindLeaves(args[0], names);
+    if (head === 'Function')
+      for (const param of args.slice(1)) bindLeaves(param, names);
+    if (head === 'Element' || head === 'Limits') bindLeaves(args[0], names);
+    if (BINDING_OPERANDS.has(head))
+      for (const op of args.slice(1)) bindLeaves(op, names, true);
+    if (QUANTIFIERS.has(head)) bindLeaves(args[0], names, true);
+    if (head === 'MatchCase') {
+      collectNames(args[0], names, true);
+      for (const arg of args.slice(1)) collectNames(arg, names, pattern);
+      return;
+    }
+  }
+  for (const arg of args) collectNames(arg, names, pattern);
+}
+
+/**
+ * The symbols a binding operand names: a bare symbol, a `Typed(symbol, T)`
+ * annotation, a `Spread(symbol)` or `___rest` rest parameter, and the
+ * leaves of a destructuring `Tuple` or `List`. With `shallow`, a group's
+ * leaves are read but not a nested group's (the `[x, y]` of a `Solve`, not
+ * a list of tuples of initial values).
+ */
+function bindLeaves(
+  op: MathJsonExpression | null | undefined,
+  names: ExpressionNames,
+  shallow = false
+): void {
+  if (op === null || op === undefined) return;
+  const name = symbol(op);
+  if (name !== null) {
+    names.bound.add(name.replace(/^_+/, ''));
+    return;
+  }
+  const head = operator(op);
+  if (head === 'Typed' || head === 'Spread') {
+    bindLeaves(operand(op, 1), names, shallow);
+    return;
+  }
+  if (head === 'Tuple' || head === 'List' || head === 'Set')
+    for (const leaf of operands(op))
+      if (!shallow || symbol(leaf) !== null) bindLeaves(leaf, names, shallow);
+}
+
+/** `name` is written; inside a match pattern, a pattern-encoded symbol
+ * (`_pi`, `___rest`) also binds its decoded name (`pi`, `rest`). */
+function addName(name: string, names: ExpressionNames, pattern: boolean): void {
+  names.written.add(name);
+  if (pattern && name.startsWith('_')) {
     const decoded = name.replace(/^_+/, '');
-    if (decoded !== '') into.add(decoded);
+    if (decoded !== '') {
+      names.written.add(decoded);
+      names.bound.add(decoded);
+    }
   }
 }
 

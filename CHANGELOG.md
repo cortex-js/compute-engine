@@ -25,9 +25,31 @@
 - **A repeated constant in a call resolves.** The Epsil resolution pass read a
   symbol operand that also occurs in another operand of the same call as the
   call's variable, for every operator: `[pi, pi]`, `max(pi, 2 * pi)` and
-  `(pi, pi)` left `pi` unresolved. The rule now applies only to an operator
-  that takes a variable operand (`limit`, `solve`, and every operator whose
-  signature types a parameter `symbol`: `D`, `series`, `factor`, …).
+  `(pi, pi)` left `pi` unresolved, and so did `series(x + pi, x, pi, 3)`. The
+  rule now reads only the operand positions that hold a variable: the
+  positions whose parameter is typed `symbol` in the signature (`D`, `series`,
+  `factor`, …), and a listed position for the operators that type their
+  variable loosely (`limit`, `solve`, `jacobianMatrix`,
+  `characteristicPolynomial`, `findRoot`, `findFit`, and the trailing
+  variable of `linearRegression` and `polynomialFit` when it is a bare
+  symbol).
+- **A user binding named like a library name keeps its spelling.** With the
+  lowercase output, `let Pi = 3; f(Pi) = Pi; f(4)` was written `let pi = 3;
+  f(Pi) = pi; f(4)`, which reads the outer binding (3 instead of 4). A library
+  name the expression binds — by `let`, assignment, function name, parameter,
+  loop index, match pattern or the variable operand of a binder — is written
+  as is.
+- **A dictionary holding a list prints in Epsil.** `serializeEpsil` read a
+  value of the MathJSON `{dict: …}` form as a nested expression when it was an
+  array and as a symbol when it was a bare string, so the JSON of a boxed
+  dictionary holding a list (`let d = {"xs" -> [1, 2]}; d` in the REPL, whose
+  value serializes as `{dict: {xs: [1, 2]}}`) threw a `TypeError` in the
+  `--epsil` output mode. A `{dict}` value is now read as the engine reads it:
+  an array is a list of values, a bare string is a string, a boolean is a
+  boolean, and an expression is an expression object (`{fn: …}`). The JSON
+  `{dict: {z: ["Add", 2, "x"]}}` therefore prints `{"z" -> ["Add", 2, "x"]}`
+  (a list of a string, a number and a string), where it printed
+  `{"z" -> 2 + x}` before.
 - **`Limits` has no Epsil spelling.** `limits` is the type the engine declares
   for an indexing clause, so the spelling could never resolve to the operator;
   the Standard Library page lists `Limits` with no Epsil column.
