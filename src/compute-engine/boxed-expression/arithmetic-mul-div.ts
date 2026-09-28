@@ -1912,8 +1912,9 @@ export function canonicalMultiply(
           continue;
         }
 
-        // Is it preceded by a rational?
-        if (x.type.matches('rational')) {
+        // Is it preceded by an exact rational? A float (`2.0·√2`) is not
+        // folded into an exact radical: the product is a float.
+        if (x.isExact && x.type.matches('rational')) {
           const rational = x.numericValue;
           const [num, den] =
             typeof rational === 'number'
@@ -1935,7 +1936,8 @@ export function canonicalMultiply(
         ) {
           // We have a number (n) followed by a radical (r)
           // Convert to a numeric value
-          const r = asRational(x);
+          // (only an exact number: a float `2.0` times `√2` is a float)
+          const r = x.isExact ? asRational(x) : undefined;
           if (r) {
             ys.push(
               ce.number(

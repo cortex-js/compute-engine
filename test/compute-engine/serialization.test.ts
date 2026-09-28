@@ -450,15 +450,15 @@ describe('DISPLAY DIGITS', () => {
       // string form of a formatted float).
       const a = ce.parse('1500.0');
       expect(a.toMathJson(frac2)).toEqual('1500.00');
-      expect(a.toMathJson(sig3)).toEqual('1500');
+      expect(a.toMathJson(sig3)).toEqual('1500.0');
 
       const b = ce.parse('7.0');
       expect(b.toMathJson(frac2)).toEqual('7.00');
-      expect(b.toMathJson(sig3)).toEqual('7');
+      expect(b.toMathJson(sig3)).toEqual('7.0');
 
       const c = ce.parse('123456.0');
       expect(c.toMathJson(frac2)).toEqual('123456.00');
-      expect(c.toMathJson(sig3)).toEqual('123456');
+      expect(c.toMathJson(sig3)).toEqual('123456.0');
     });
 
     test('0.00123456 (float) → 3 sig figs / 2 fractional', () => {

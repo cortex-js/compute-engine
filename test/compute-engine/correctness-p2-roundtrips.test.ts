@@ -56,17 +56,19 @@ describe('P2 round-trips: toMathJson exclude for number literals (#1)', () => {
 });
 
 describe('P2 round-trips: exact large power LaTeX (#2)', () => {
-  // `.latex` of an exact `10^{300}` is the compact `10^{300}`, which re-parses
-  // as `Power(10, 300)` rather than a single number literal. That is accepted
-  // behavior: there is no compact LaTeX literal for such a magnitude, and the
-  // *value* round-trips through evaluation.
-  test('latex is compact 10^{300}', () => {
-    expect(ce.box({ num: '1e300' }).latex).toBe('10^{300}');
+  // `.latex` of an exact `10^{300}` writes the mantissa `1`:
+  // `1\cdot10^{300}` re-parses as a single number literal, while the compact
+  // `10^{300}` would re-parse as `Power(10, 300)`.
+  test('latex of the exact 1e300 is 1\\cdot10^{300}', () => {
+    expect(ce.box({ num: '1e300' }).latex).toBe('1\\cdot10^{300}');
+    expect(ce.parse('1\\cdot10^{300}').isNumberLiteral).toBe(true);
   });
   // A JavaScript number past the safe integers boxes as a float, not as an
-  // exact integer, so the double `1e300` also writes the compact `10^{300}`.
-  test('latex of the double 1e300 is compact 10^{300}', () => {
-    expect(ce.box(1e300).latex).toBe('10^{300}');
+  // exact integer. A float is written with a fraction part, so that it is
+  // read back as a float: the double `1e300` writes `1.0\cdot10^{300}`.
+  test('latex of the double 1e300 has a fraction part', () => {
+    expect(ce.box(1e300).latex).toBe('1.0\\cdot10^{300}');
+    expect(ce.parse(ce.box(1e300).latex).isExact).toBe(false);
   });
   test('value is preserved through parse + evaluate', () => {
     const roundtrip = ce.parse(ce.box(1e300).latex).N();
@@ -89,7 +91,8 @@ describe('P2 round-trips: negative zero normalizes to +0 (#3)', () => {
     expect(ce.box({ num: '-0' }).json).toBe(0);
   });
   test('parse("-0.0") is +0', () => {
-    expect(ce.parse('-0.0').json).toBe(0);
+    // `-0.0` is a float: its zero is written `0.0`
+    expect(ce.parse('-0.0').json).toEqual({ num: '0.0' });
   });
 });
 

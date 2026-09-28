@@ -24,7 +24,7 @@ exports[`simplify: absolute value |x^2| 1`] = `["Square", "x"]`;
 
 exports[`simplify: absolute value |x|^2 1`] = `["Square", "x"]`;
 
-exports[`simplify: arithmetic \\frac{1}{2} + 0.5 1`] = `1`;
+exports[`simplify: arithmetic \\frac{1}{2} + 0.5 1`] = `{num: "1.0"}`;
 
 exports[`simplify: arithmetic \\frac{3.1}{2.8} 1`] = `1.10714285714285714285714285714285714285714285714285714285714285714285714285714285714285714285714285701`;
 
@@ -114,7 +114,7 @@ exports[`simplify: polynomials 1 \\cdot x 1`] = `x`;
 
 exports[`simplify: polynomials 2(-x) 1`] = `["Multiply", -2, "x"]`;
 
-exports[`simplify: polynomials 2(13.1+x) - 26.2 - 2x 1`] = `0`;
+exports[`simplify: polynomials 2(13.1+x) - 26.2 - 2x 1`] = `{num: "0.0"}`;
 
 exports[`simplify: polynomials 2(13.1+x) 1`] = `["Add", ["Multiply", 2, "x"], 26.2]`;
 

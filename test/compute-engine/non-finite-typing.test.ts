@@ -518,7 +518,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
         expect(engine.box(['Complex', inf, 1]).json).toEqual([
           'Complex',
           'PositiveInfinity',
-          1,
+          { num: '1.0' },
         ]);
     });
 

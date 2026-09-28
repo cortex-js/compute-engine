@@ -3015,6 +3015,12 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'BesselJ',
   'Zeta',
   'HurwitzZeta',
+  // `PolyGamma` has a complex kernel in the interpreter (`polygammaComplex`,
+  // cortex-js/compute-engine#340), but `_SYS.polygamma` below is the
+  // real-valued kernel: a function-codegen lowering, so
+  // `stringHelperIsRealOnly` does not catch it the way it does
+  // `Digamma`/`Trigamma`'s plain-name mappings.
+  'PolyGamma',
   'LerchPhi',
 ]);
 

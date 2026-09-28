@@ -355,7 +355,8 @@ export class BoxedNumber
     //    literal when re-boxed — `ce.expr(x.json).isSame(x)` holds (RT-P1-1);
     //  - machine floats serialize as JSON numbers, big floats keep every stored
     //    digit, and non-finite values map to `NaN`/`PositiveInfinity`/
-    //    `NegativeInfinity`.
+    //    `NegativeInfinity`. An integer-valued float has a fraction part
+    //    (`{ num: "2.0" }`), so that it is read back as a float.
     // (Historically this path could emit a rounded numeric approximation; the
     // P0-32/P0-33 fidelity fixes made it lossless.)
 
@@ -825,6 +826,34 @@ export class BoxedNumber
           return q === 1
             ? ce.number(p)
             : ce.number(ce._numericValue({ rational: [p, q] }));
+        }
+      }
+    }
+
+    // The reciprocal of such a power: log_b(1/q) = −log_b(q), so
+    // `log(1/8, 2)` is `−3` and `log(1/100)` is `−2`, as `log(8, 2)` is `3`.
+    if (base !== undefined && isNumber(base) && base.isInteger) {
+      const v = this._value;
+      const b = base.re;
+      if (
+        v instanceof ExactNumericValue &&
+        v.radical === 1 &&
+        !v.isComplex &&
+        v.rational[0] === 1 &&
+        Number.isInteger(b) &&
+        b > 1 &&
+        b < Number.MAX_SAFE_INTEGER
+      ) {
+        const q = Number(v.rational[1]);
+        const r =
+          q > 1 && q < Number.MAX_SAFE_INTEGER
+            ? integerLogRational(q, b)
+            : null;
+        if (r !== null) {
+          const [p, d] = r;
+          return d === 1
+            ? ce.number(-p)
+            : ce.number(ce._numericValue({ rational: [-p, d] }));
         }
       }
     }

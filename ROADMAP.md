@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-27.
+**Last updated:** 2026-09-28.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -108,6 +108,54 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ---
 
 ## Remaining work
+
+### `PolyGamma`/`Digamma`/`Trigamma` have no GPU shader lowering (OPEN, capability gap — found 2026-09-28 widening `PolyGamma` to a complex `z` for #340)
+
+Neither `gpu-target.ts` shader (GLSL or WGSL) declares a lowering for these
+three heads at all, unlike every other special function in `arithmetic.ts`
+(`Zeta`, `HurwitzZeta`, `Gamma`, `Erf`, …). This already fails closed — a
+`PolyGamma`/`Digamma`/`Trigamma` call in a GPU-compiled expression declines
+to the interpreter rather than emitting anything wrong — so it is not a
+correctness bug, only a missing capability: a plot or shader that calls
+these compiles the rest of the expression and evaluates this part off the
+GPU. Fix: port `numerics/special-functions.ts`'s real `digamma`/`trigamma`/
+`polygamma` (recurrence + asymptotic series, the same shape already used for
+`_gpu_gamma`) to GLSL/WGSL helpers and wire them into `GPU_FUNCTIONS`.
+
+### `HurwitzZeta(s, a)` at a complex `a` far left of the imaginary axis does not finish (OPEN — found 2026-09-28 reviewing #340)
+
+`HurwitzZeta(2, -10^7+i).N()` takes 0.9 s and `HurwitzZeta(2, -10^12+i).N()`
+does not finish. `hurwitzEMComplex` (`numerics/numeric-complex.ts`) sums one
+direct term for each unit of −Re(a) before its Euler-Maclaurin tail. The same
+loop made `PolyGamma(m, z)` hang at a large negative Re(z); `polygammaComplex`
+now avoids it with the reflection formula, which applies to an integer `s`
+only. Fix: for an integer `s >= 2`, use the same reflection
+(ζ(s, a) = (−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s−1)!); for another `s`, a representation whose
+cost does not grow with −Re(a), or a cost limit that leaves the application
+symbolic.
+
+### `PolyGamma(m, z)` of an order above 100 stays symbolic close to a half-integer on the real axis (OPEN — found 2026-09-28 reviewing #340)
+
+`PolyGamma(120, -1/2 + 10^{-5} i).N()` stays unevaluated, although mpmath
+gives a value near 8.6e232, inside the range of a double (at `Im(z) = 10^{-4}`
+it answers). For `Re(z) < 0`, `polygammaComplex` needs the m-th derivative
+of cot(πz). Close to a half-integer with a small `Im(z)`, the two series it
+can use for that derivative both lose all their digits (the two halves of
+the partial-fraction series are near-conjugates, and the Fourier series
+needs too many terms), and its third form, a polynomial in cot(πz), is used
+only up to order 100 because its coefficients overflow a double from order
+120 on. Fix: carry the polynomial coefficients in scaled form (a mantissa
+and a power-of-two exponent, as `ScaledComplex` does), then raise
+`COT_POLYNOMIAL_MAX_ORDER` to `POLYGAMMA_MAX_ORDER`.
+
+### `PolyGamma` of a very high order at a real argument does not finish (OPEN — found 2026-09-28 reviewing #340)
+
+At the default precision, `PolyGamma(100000, 2.5).N()` runs for more than
+20 seconds (order 1000 takes 17 ms): the big-decimal kernel `bigPolygamma`
+has no limit on the order. At machine precision the same expression answers
+`NaN`, although the value is only too large for a double. The complex kernel
+`polygammaComplex` leaves an order above 10 000 symbolic, and a value outside
+the range of a double symbolic. Fix: give the real route the same limits.
 
 ### Next items to pick up, ranked (2026-09-23)
 
@@ -257,6 +305,57 @@ Defects:
    builder's tail at every read (`recursive-list-builder.test.ts`,
    "an effectful bound keeps one evaluation per recursive call" went from 3
    calls to 7) and spends extra random draws.
+
+### `.N()` rounds an exact operand before a special function sees it (OPEN — found 2026-09-28 by the review of PR #360)
+
+At `ce.precision = 50`, `HurwitzZeta(3, 1/3).N()` is
+`27.561061199700803776227877977407509284542095313016`; the correct value ends
+`…313015` (it is `…3130148811…`). `Digamma(1/3).N()` ends `…67205` where the
+correct value ends `…67204` (it is `…672041806…`). The cause is not the
+kernels: a `.N()` evaluates each operand numerically first, so `1/3` reaches
+the evaluate handler as a 50-digit decimal, and the rounding error of that
+operand reaches the last digit of the result. The same call on the
+`.evaluate()` route with an inexact `s` keeps `a` exact, and
+`HurwitzZeta(3.0, 1/3).evaluate()` is correct to the last digit (the bignum
+Hurwitz kernel converts an exact rational at its own working precision). A
+fix is either an engine-wide one (evaluate the operands of a numeric
+evaluation with guard digits, or pass exact operands through) or a per-operator
+one (hold the operands of `Zeta`, `HurwitzZeta`, `Digamma` and similar
+functions and evaluate them in the handler).
+
+### The machine-precision Hurwitz zeta loses digits left of the critical strip (OPEN, small — found 2026-09-28 by the review of PR #360)
+
+The double kernel `hurwitzZetaComplex` (`numerics/numeric-complex.ts`) is
+off by more than a few units in the last place for some real s ≤ 0
+(compared with mpmath at the double that `0.3` rounds to):
+
+- `HurwitzZeta(-1.5, 0.3)` is `-0.008185560485836074`; the value is
+  `-0.0081855604858359760…` (13 correct digits).
+- `HurwitzZeta(0, 0.3)` is `0.1999999999999993`; the value is
+  `0.2000000000000000111…` (ζ(0, a) = 1/2 − a).
+- `HurwitzZeta(-200.5, 0.3)` is `2.92337138062847e+215`; the value is
+  `2.9233713806280506e+215` (13 correct digits).
+
+The first and third go through the Taylor expansion about a = 1
+(`zetaNearOneComplex`), which sums values of ζ at shifted arguments; the
+second goes through the Euler-Maclaurin sum (`hurwitzEMComplex`), whose
+terms 1/(s − 1)·z^(1−s) and the direct terms cancel to the small result. At `ce.precision` above 15 the bignum
+kernel `bigHurwitzZeta` gives the correct digits for all three.
+`HurwitzZeta(1.0000001, 1)` = `10000000.571377004` is NOT a defect: the
+double nearest `1.0000001` is `1.0000001000000000583…`, and ζ at that double
+is `10000000.5713770004…`; the pole at s = 1 amplifies the rounding of the
+input.
+
+### A matrix to a non-integer power is element-wise (OPEN, decision — found 2026-09-28 by the agents writing the linear-algebra examples)
+
+`[[1, 2], [3, 4]] ^ (1/2)` is `[[1, √2], [√3, 2]]`, the square root of each
+entry, while an integer exponent is the matrix power (`^2` is
+`[[7, 10], [15, 22]]`, `^-1` the inverse). `canonicalPower`
+(`arithmetic-power.ts`) says element-wise power "is not expressed via `^`"
+and leaves non-integer exponents "to other handling", which is the
+broadcast. The decision: a matrix function (`A^(1/2)` the principal square
+root, computed or left symbolic), an error, or the element-wise reading kept
+and documented.
 
 ### A calculus operator over a function parameter is folded before the argument arrives (OPEN — found 2026-09-27 while writing the core reference examples)
 
@@ -545,13 +644,19 @@ Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
   `L\{c\} < 3` is typed `list<boolean | missing>`, but when `L` is absent
   the value is `Missing` for the whole list, not a list; the type should be
   `missing | list<boolean>`.
-- **A float serializes as an integer when its value is one.** Since the
-  2026-09-27 machine-precision decision a machine float `2.0` is inexact, but
-  its MathJSON is the plain `2`, which re-boxes as the exact `2`: `Sin(2.0)`
-  numericizes, the round-tripped `Sin(2)` stays symbolic. The same holds for
-  LaTeX (item 7 of "Residues of the exactness-by-route rule"). A decision:
-  serialize an integer-valued float as `{num: "2.0"}` (and `2.0` in LaTeX),
-  which changes the MathJSON and LaTeX of every integer-valued float result.
+- **Other code may box an integer-valued double as exact.** Until
+  2026-09-28 an exact `1` and a float `1` serialized the same way, so a site
+  that boxes a double result with `ce.number(n)` was invisible; since the
+  `2.0` spelling it shows. The full suite found one (the compiled `N()` of a
+  lazy `Map`, fixed); kernel bridges and compiled-value readers that call
+  `ce.number(double)` need an audit (the float lane is
+  `ce._inexactNumericValue`). Also: at machine precision `1.0e800`
+  overflows to `PositiveInfinity`, which reports `isExact === true`.
+  Also: the compiled `N()` of a lazy `Map` boxes an integer-valued result as
+  exact when its operands and the lambda are exact; an elementary function
+  of an exact integer whose double is exactly an integer near 2^53
+  (`exp(36)`) is then exact where the interpreter gives a float (found
+  2026-09-28, rare).
 - **Float Gaussian integers are still exact.** `(2.0i)^2` evaluates to the
   exact `-4`, `2.0i + 3` canonicalizes to the exact `3 + 2i`, and
   `(3.0+2i)(1+i)` is exact: several places keep a Gaussian integer exact
