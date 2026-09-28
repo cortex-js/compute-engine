@@ -4154,6 +4154,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // the two routes and the serializer see the same node.
         const attrs = args[2] !== undefined ? [args[2].canonical] : [];
         const attributes = definitionAttributes(args[2]);
+        // An absence marker cannot be rebound: install nothing (the install
+        // below runs at canonicalization, so an evaluate-time refusal alone
+        // left `function Undefined(x) { x }` callable), and let the evaluate
+        // handler return the `absence-marker-binding` error.
+        const markerName = sym(symbol);
+        if (markerName !== undefined && ABSENCE_MARKERS.has(markerName))
+          return ce._fn('DefineFunction', [
+            symbol,
+            args[1].canonical,
+            ...attrs,
+          ]);
         // The clause operand must be an explicit `Function` literal — the
         // shorthand lift (`canonicalFunctionLiteral(5)` → constant lambda)
         // must NOT apply here, or any value would silently become a clause.
@@ -4733,8 +4744,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return result;
       },
       evaluate: ([op1, op2], { engine: ce, numericApproximation }) => {
-        const refused = absenceMarkerBindingError(ce, sym(op1));
-        if (refused !== undefined) return refused;
+        // Every name the assignment binds: the symbol target, each leaf of a
+        // destructuring tuple (`(a, Missing) := t`), and the base of a
+        // sequence definition (`Missing_0 := 1`).
+        const boundNames = isFunction(op1, 'Tuple')
+          ? tuplePatternNames(op1)
+          : isFunction(op1, 'Subscript')
+            ? [sym(op1.op1)]
+            : [sym(op1)];
+        for (const name of boundNames) {
+          const refused = absenceMarkerBindingError(ce, name);
+          if (refused !== undefined) return refused;
+        }
         //
         // Check for Subscript LHS (sequence definition)
         // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1

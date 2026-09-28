@@ -116,8 +116,15 @@ makes `Square(3)` call that function. Shadowing a name that an operator
 builds changes the operator too: `+` is `Add`, so a user `Add` is what `+`
 calls in its scope, and a definition such as `function Add(x, y) { x + y }`
 calls itself without end. Compiled code does not use a shadowed library
-operator: the call is interpreted instead. `Nothing` is the one name that
-cannot be rebound: it also marks an operand to drop.
+operator: the call is interpreted instead.
+
+The absence markers `Nothing`, `Missing` and `Undefined` are the exception:
+they cannot be rebound, and a binding of one of them is an error
+(`absence-marker-binding`). The engine recognizes them by their name — it
+drops `Nothing` from an argument list and reads a `Missing` operand as
+absent — so a binding could never behave like the value it holds. In a
+`match`, test for a marker with `== Missing`: a bare `Missing` there would
+be a new variable.
 
 To name a raw symbol that happens to spell a library name, use the verbatim
 form: `` `sin` `` is the symbol `sin`, not the sine function.

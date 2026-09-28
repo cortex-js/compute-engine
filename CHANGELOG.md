@@ -56,7 +56,15 @@
   `Subtract` already did. Compiled code does not use a shadowed library
   operator: `compile()` of such a call fails closed and falls back to the
   interpreter (it emitted the library operator before, `y * y` for a user
-  `Square`, and so for a user `Abs` or `Sin`). `Nothing` cannot be rebound.
+  `Square`, and so for a user `Abs` or `Sin`).
+- **A binding of `Nothing`, `Missing` or `Undefined` is an error.** These
+  absence markers are recognized by their name (an operand named `Missing` is
+  read as absent whatever it is bound to), so they cannot be rebound. `let
+  Missing = 3` and the other binding forms (an assignment, a function, a
+  parameter, a loop variable, a `match` pattern) report
+  `absence-marker-binding`, and the declaration evaluates to that error. Before,
+  `let Nothing = 3` was silently ignored, and `let Undefined = 3; Undefined + 0`
+  was `NaN`.
 
 - **`Length` of an infinite collection is `+oo`.** `Length(Integers)`,
   `Length(Repeat(5))`, `Length(Cycle([1, 2]))` and `Length(Interval(0, 1))`

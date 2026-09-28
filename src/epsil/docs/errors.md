@@ -201,6 +201,12 @@ A lambda and its type annotation name the same parameter differently — `const 
 
 Rename one side so the two agree — the quick fix renames the annotation's parameters to match the lambda's — or leave the annotation's parameters unnamed (`(number) -> number`): an annotation's parameter names are optional documentation, while the lambda's are the real binding.
 
+## `absence-marker-binding`
+
+A binding names one of the absence markers `Nothing`, `Missing` or `Undefined`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable or a `match` pattern. The engine recognizes these markers by their name wherever they appear — `Nothing` is dropped from an argument list, and an arithmetic operand named `Missing` or `Undefined` is read as absent — so a binding of one of them could never behave like the value it holds. They are the only library names that cannot be rebound; every other one, including `Pi` and `Square`, is shadowed by a user binding.
+
+Choose another name. In a `match`, a bare name is a new variable, not a comparison: to test for the marker, write `== Missing`.
+
 ## `variable-redeclaration`
 
 A `let` or `const` declares a name that the same scope already declares: an earlier `let`/`const` of the same block or program, a parameter of the function whose body this is, or the index of the loop whose body this is. In `function f(x) { let x = x + 1 … }` the second `x` is such a re-declaration.

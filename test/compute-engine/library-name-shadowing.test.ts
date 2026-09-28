@@ -28,8 +28,9 @@ describe('a user binding shadows an interned library constant', () => {
     ['let Pi = 3\nPi + 1', '4'],
     ['do { let Pi = 3; Pi }', '3'],
     ['let ExponentialE = 3\nExponentialE', '3'],
-    ['let Missing = 3\nMissing', '3'],
-    ['let Undefined = 3\nUndefined', '3'],
+    // The absence markers `Nothing`, `Missing` and `Undefined` are the
+    // exception: a binding of one is an error
+    // (`test/epsil/absence-marker-binding.test.ts`).
   ])('%j', (source, value) => {
     expect(run(source)).toBe(value);
   });
