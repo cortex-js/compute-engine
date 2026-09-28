@@ -13,7 +13,6 @@
   or `digits: {fractional: 0}` (MathJSON) the integer spelling is kept, as
   requested.
 
-
 - **An Epsil decimal literal keeps its value, and a literal with a fraction
   part is a float.** The Epsil parser summed the fraction digits one float at a
   time, so `0.75` read as `0.7500000000000001`, `0.3` as `0.30000000000000004`
@@ -21,7 +20,9 @@
   exactly. It also dropped the decimal point while normalizing, so `1.0`,
   `2.0` and `1.5e3` were the exact integers `1`, `2` and `1500`; they are now
   floats, as on the LaTeX route (the 0.139.0 rule that a literal with a
-  fraction part is a float). `1e3` and `3` stay exact.
+  fraction part is a float). `1e3`, `3` and `2.` (a point with no digit after
+  it) stay exact. A literal a double cannot hold keeps its digits: `1e-400`
+  was the exact `0`, and `5e-324` lost digits.
 - **A float `Measurement` error evaluates.** `Measurement(5, 0.2) + 3` was
   `8 ± sqrt(0.2^2)` under `evaluate()` and is now `8.00 ± 0.20`. An exact error
   stays exact (`Measurement(5, 1) * Measurement(2, 1)` is `10 ± √29`).
@@ -45,14 +46,26 @@
   values (`Arccot(1)` is `π/4`, `Arccot(-1)` is `3π/4`). `Sinc(Pi)` is exactly
   `0` (it was `1.2e-25` under `N`) and `Sinc(Pi/2)` is `2/π`.
   `TrigExpand(Sin(x + Pi/2))` is `cos(x)` (it left `cos(π/2)` and `sin(π/2)`
-  unreduced).
+  unreduced), and `TrigExpand(Tan(x + Pi/2))` is `-cos(x)/sin(x)`.
 - **Arithmetic.** `Log(1/8, 2)` and `Lb(1/8)` are `-3` (they stayed
   symbolic, while `Log(8, 2)` was `3`). `ComplexRoots(1, 4)` is `[1, i, -1,
   -i]`, exactly and under `N` (it was `[1, 6.1e-17 + i, …]`), and the roots of
   an exact real are exact (`ComplexRoots(8, 3)` is `[2, -1 + √3 i, -1 - √3 i]`).
   `Supremum` and `Infimum` of an open interval are its endpoints (they stayed
   symbolic). `Interpret(1 + 2 + … + n)` works from Epsil, whose left-nested
-  sum the recognizer did not match.
+  sum the recognizer did not match. `PreIncrement(5)` is `6` and
+  `PreDecrement(5)` is `4` (they had no evaluate handler). `Sum(2^(-k), (k, 0,
+  oo))` is `2`, as `Sum((1/2)^k, …)` was: the geometric-series rule did not
+  read a negated index.
+- **Exact 3×3 eigenvalues.** A matrix of exact rationals whose characteristic
+  polynomial has a rational root has exact eigenvalues:
+  `Eigenvalues([[2, 0, 0], [0, 3, 4], [0, 4, 9]])` is `[11, 2, 1]` (it was
+  `[11, 1.000000000000003, 2.0000000000000018]`), and
+  `Eigenvalues([[2, 1, 0], [1, 2, 1], [0, 1, 2]])` is `[2 + √2, 2, 2 − √2]`.
+  The exact eigenvalues are ordered by decreasing real part. `N(Eigenvalues(…))`
+  gives their values.
+- **`N(Arcosh(x))` for a real `x` in [−1, 1] is purely imaginary**
+  (`N(Arcosh(1/2))` was `5.6e-17 + 1.047…i`).
 
 ### New Features
 
