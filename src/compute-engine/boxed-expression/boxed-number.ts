@@ -314,7 +314,10 @@ export class BoxedNumber
     // are equal whenever the exact values are (and coincide for some values
     // that are not exactly equal, `1/3` and `0.333…`: a collision, which the
     // hash contract allows). `-0` and `0` are `isSame` and spell alike here;
-    // every NaN spells `NaN`.
+    // every NaN spells `NaN`. The imaginary part is hashed from its double,
+    // not from `bignumIm`: `bignumIm` of a radical is rounded to the working
+    // precision, so two equal `√2·i` literals hashed at different precisions
+    // would get different hashes.
     this._hash ??= hashCode(`${this.re}:${this.im}`);
     return this._hash;
   }
@@ -1371,22 +1374,23 @@ export class BoxedNumber
         const tol = tolerance ?? this.engine.tolerance;
         const d = this._value.sub(otherValue);
         const re = d.re;
-        const im = d.im;
-        if (Number.isFinite(re) && Number.isFinite(im))
-          return Math.abs(re) <= tol && Math.abs(im) <= tol;
         // The double of an exact rational divides the double of its
         // numerator by the double of its denominator. When both are above
         // the largest double, this is `∞/∞ = NaN`, also for a small value
         // (`1/3 - (10^400 + 1)/(3·10^400 + 10^390)` is about `1.1e-11`).
         // The big-decimal values do not have this limit.
-        const bigRe = d.bignumRe;
+        const reWithin = Number.isFinite(re)
+          ? Math.abs(re) <= tol
+          : !!d.bignumRe?.abs().lte(tol);
+        if (!reWithin) return false;
+        if (!d.isComplex) return true;
+        // The imaginary part of a complex difference is read from its big
+        // decimal: its double is `0` for `10^{-800}` (which is within the
+        // tolerance, as it must be) and `Infinity` for `10^{800}`.
         const bigIm = d.bignumIm;
-        return (
-          (Number.isFinite(re)
-            ? Math.abs(re) <= tol
-            : !!bigRe?.abs().lte(tol)) &&
-          (Number.isFinite(im) ? Math.abs(im) <= tol : !!bigIm?.abs().lte(tol))
-        );
+        return bigIm !== undefined
+          ? bigIm.abs().lte(tol)
+          : Math.abs(d.im) <= tol;
       }
     }
 
@@ -1395,13 +1399,13 @@ export class BoxedNumber
       if (typeof other === 'number') {
         return (
           Math.abs(this.re - other) <= tolerance &&
-          Math.abs(this.im) <= tolerance
+          imaginaryPartWithin(this, tolerance)
         );
       }
       if (typeof other === 'bigint') {
         return (
           Math.abs(this.re - Number(other)) <= tolerance &&
-          Math.abs(this.im) <= tolerance
+          imaginaryPartWithin(this, tolerance)
         );
       }
     }
@@ -1421,7 +1425,7 @@ export class BoxedNumber
     const tol = tolerance ?? this.engine.tolerance;
     return (
       Math.abs(this.re - nOther.re) <= tol &&
-      Math.abs(this.im - nOther.im) <= tol
+      imaginaryPartsWithin(this, nOther, tol)
     );
   }
 
@@ -1611,6 +1615,45 @@ function bigIntegerLogRational(
   if (n !== 1n) return null;
   const g = gcd(p, q);
   return [p / g, q / g];
+}
+
+/** A number literal, as read by `imaginaryPartWithin()` and
+ * `imaginaryPartsWithin()`. */
+type ImaginaryPartOperand = {
+  readonly isComplex: boolean;
+  readonly bignumIm: BigDecimal | undefined;
+  readonly im: number;
+};
+
+/** True if the imaginary part of the number literal `x` is at most `tol` in
+ * magnitude.
+ *
+ * The imaginary part of a complex value is read from its big decimal
+ * (`bignumIm`): its double `im` is `0` for `10^{-800}` and `Infinity` for
+ * `10^{800}`. */
+function imaginaryPartWithin(x: ImaginaryPartOperand, tol: number): boolean {
+  if (!x.isComplex) return true;
+  const big = x.bignumIm;
+  return big !== undefined ? big.abs().lte(tol) : Math.abs(x.im) <= tol;
+}
+
+/** True if the imaginary parts of the number literals `a` and `b` differ by
+ * at most `tol`.
+ *
+ * When either value is complex, the imaginary parts are read from their big
+ * decimals (`bignumIm`): the double `im` is `0` for `10^{-800}` and
+ * `Infinity` for `10^{800}`, so the difference of the doubles of two equal
+ * values `10^{800}·i` is `NaN`. */
+function imaginaryPartsWithin(
+  a: ImaginaryPartOperand,
+  b: ImaginaryPartOperand,
+  tol: number
+): boolean {
+  if (!a.isComplex && !b.isComplex) return true;
+  const x = a.bignumIm;
+  const y = b.bignumIm;
+  if (x === undefined || y === undefined) return Math.abs(a.im - b.im) <= tol;
+  return x.sub(y).abs().lte(tol);
 }
 
 export function canonicalNumber(

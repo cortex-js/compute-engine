@@ -37,7 +37,11 @@ export class MachineNumericValue extends NumericValue {
             : value.re;
 
       this.decimal = decimal;
-      this.im = value.im ?? 0;
+      // Every part of this class is a double: a big-decimal imaginary part is
+      // converted to the nearest double (`0` on underflow, `±Infinity` on
+      // overflow), as the real part is above.
+      this.im =
+        value.im instanceof BigDecimal ? value.im.toNumber() : (value.im ?? 0);
       // Complex infinity or NaN?
       if (!isFinite(this.im)) this.decimal = this.im;
     }
@@ -769,6 +773,11 @@ export class MachineNumericValue extends NumericValue {
     // comparing it here would make an inexact `0` equal to that value from
     // this side only. Delegating keeps `eq` symmetric.
     if (other instanceof ExactNumericValue) return other.eq(this);
+    // A big-decimal operand (the only other lane with a `bignumRe`) compares
+    // the pair itself, with its parts as big decimals: comparing its double
+    // projections here would make `1 + (1 + 10^{-20})i` equal to `1 + i`
+    // from this side only. Delegating keeps `eq` symmetric.
+    if (other.bignumRe !== undefined) return other.eq(this);
     if (other.isNaN) return false;
     if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
     return this.decimal === other.re && this.im === other.im;

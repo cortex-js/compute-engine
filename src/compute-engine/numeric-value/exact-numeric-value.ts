@@ -414,8 +414,11 @@ export class ExactNumericValue extends NumericValue {
   /** The float-lane representation of this value (used when an operation
    * result leaves the exact representable set). */
   private _toFloat(): NumericValue {
-    if (this.im === 0) return this.factory(this.bignumRe);
-    return this.factory({ re: this.bignumRe, im: this.im });
+    if (!this.isComplex) return this.factory(this.bignumRe);
+    // The imaginary part is passed as a big decimal: its double `im` is `0`
+    // for `10^{-800}` and `Infinity` for `10^{800}`, and it has only 16
+    // digits.
+    return this.factory({ re: this.bignumRe, im: this.bignumIm });
   }
 
   /** Lift a Gaussian-integer value from the inexact lane (e.g. the machine

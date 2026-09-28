@@ -4,6 +4,7 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression, IComputeEngine } from '../global-types.js';
 
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
+import type { NumericValue } from '../numeric-value/types.js';
 import { SMALL_INTEGER } from '../numerics/numeric.js';
 import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
@@ -125,11 +126,61 @@ function boxKernelResult(
   return boxBignumResult(ce, result);
 }
 
+/**
+ * The value of an operator at operands of which one at least is complex,
+ * computed with the big-decimal methods of `NumericValue` (`sqrt()`, `pow()`,
+ * `root()`, `ln()`, `exp()`, the arithmetic) instead of a `complex-esm`
+ * kernel.
+ *
+ * In an engine working above machine precision, a `BigNumericValue` holds
+ * both parts of a complex value as big decimals, and its methods compute
+ * both parts at the working precision. The `complex-esm` kernels compute in
+ * doubles: they give 16 digits, and they read an imaginary part too small
+ * or too large for a double (`10^{-800}`, `10^{800}`) as `0` or `Infinity`.
+ *
+ * Each operand is converted to an inexact big-decimal value first, so an
+ * exact operand is computed at the working precision. Returns `undefined` when the
+ * engine works at machine precision, when an operand is a machine value (it
+ * holds only doubles, so the double kernel gives the same answer), or when
+ * the method gives `NaN`: the caller then uses its double kernel.
+ *
+ * Design note: `docs/plans/2026-09-27-big-decimal-imaginary-part.md` §2.3.
+ */
+export function complexNumericValueRoute(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  fn: ((...xs: NumericValue[]) => NumericValue | undefined) | undefined
+): Expression | undefined {
+  if (fn === undefined || !bignumPreferred(ce)) return undefined;
+  const values: NumericValue[] = [];
+  for (const op of ops) {
+    if (!isNumber(op)) return undefined;
+    const nv = op.numericValue;
+    const value = (typeof nv === 'number' ? ce._numericValue(nv) : nv).N();
+    if (value instanceof MachineNumericValue) return undefined;
+    // `N()` keeps an exact integer (and `0`, `1`, `-1`) exact, and the
+    // methods of an exact value compute a complex operand in doubles
+    // (`ExactNumericValue.pow` with a complex exponent), so `2^{i·10^{-800}}`
+    // would lose its imaginary part. Every operand is therefore rebuilt with
+    // the inexact factory of the engine, from its big-decimal parts.
+    values.push(
+      ce._inexactNumericValue({
+        re: value.bignumRe ?? value.re,
+        im: value.bignumIm ?? value.im,
+      })
+    );
+  }
+  const result = fn(...values);
+  if (result === undefined || result.isNaN) return undefined;
+  return ce.number(result);
+}
+
 export function apply(
   expr: Expression,
   fn: (x: number) => number | Complex,
   bigFn?: (x: BigDecimal) => BigDecimal | Complex | number,
-  complexFn?: (x: Complex) => number | Complex
+  complexFn?: (x: Complex) => number | Complex,
+  numericValueFn?: (x: NumericValue) => NumericValue | undefined
 ): Expression | undefined {
   if (!isNumber(expr)) return undefined;
   const ce = expr.engine;
@@ -152,8 +203,19 @@ export function apply(
   // receive the double projections `re` and `im`, and for that value they see
   // an imaginary part of `0`. The same rule applies in `applyN` and `apply2`.
   // Design note: `docs/plans/2026-09-27-big-decimal-imaginary-part.md` §5.
-  if (expr.isComplex) result = complexFn?.(ce.complex(expr.re, expr.im));
-  else {
+  if (expr.isComplex) {
+    // An operator that has a big-decimal method (`numericValueFn`) computes
+    // both parts at the working precision. Only the others use the double
+    // kernel: the complex transcendental kernels stay machine precision at
+    // every engine precision (decision D4 of the design note).
+    const viaNumericValue = complexNumericValueRoute(
+      ce,
+      [expr],
+      numericValueFn
+    );
+    if (viaNumericValue !== undefined) return viaNumericValue;
+    result = complexFn?.(ce.complex(expr.re, expr.im));
+  } else {
     const re = expr.re;
     const bigRe = expr.bignumRe;
     if (bigRe !== undefined && bignumPreferred(ce) && bigFn)
@@ -212,6 +274,9 @@ export function applyN(
         : r.isNaN());
 
   if (ops.some((op) => op.isComplex)) {
+    // The complex kernels of the special functions compute in doubles at
+    // every engine precision (decision D4 of
+    // `docs/plans/2026-09-27-big-decimal-imaginary-part.md`).
     result = complexFn?.(...ops.map((op) => ce.complex(op.re, op.im)));
   } else {
     // Cascade: bignum (if preferred) → machine → complex. A NaN from a
@@ -253,7 +318,11 @@ export function apply2(
   expr2: Expression,
   fn: (x1: number, x2: number) => number | Complex,
   bigFn?: (x1: BigDecimal, x2: BigDecimal) => BigDecimal | Complex | number,
-  complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
+  complexFn?: (x1: Complex, x2: number | Complex) => Complex | number,
+  numericValueFn?: (
+    x1: NumericValue,
+    x2: NumericValue
+  ) => NumericValue | undefined
 ): Expression | undefined {
   if (!isNumber(expr1) || !isNumber(expr2)) return undefined;
 
@@ -277,6 +346,15 @@ export function apply2(
     // application stays symbolic: the real branches below read only `.re`,
     // so falling through would silently DROP the imaginary part and answer
     // the value at a different point.
+    // An operator with a big-decimal method computes at the working
+    // precision; the double kernel is used otherwise (decision D4, see
+    // `apply`).
+    const viaNumericValue = complexNumericValueRoute(
+      ce,
+      [expr1, expr2],
+      numericValueFn
+    );
+    if (viaNumericValue !== undefined) return viaNumericValue;
     if (!complexFn) return undefined;
     result = complexFn(
       ce.complex(expr1.re, expr1.im),

@@ -685,3 +685,42 @@ describe('Repeating decimal arc after a leading separator (REVIEW.md C6)', () =>
     expect(withoutLeadingZero).toBe(`["Rational", 1, 3]`);
   });
 });
+
+// An imaginary part outside the double range (`10^{-800}`, `10^{800}`) is
+// held exactly (a rational) or as a big decimal, never as the double it
+// rounds to (`0`, `Infinity`). The LaTeX serializer reads the digits of the
+// part, not its double, so the round trip parse → serialize → parse keeps the
+// value. Design note: `docs/plans/2026-09-27-big-decimal-imaginary-part.md`
+// §2.5.
+describe('Round trip of an imaginary part outside the double range', () => {
+  for (const [latex, printed] of [
+    ['10^{-800}i', '1e-800i'],
+    ['10^{800}i', '1e+800i'],
+  ] as const) {
+    test(`${latex}, exact`, () => {
+      const value = ce.parse(latex).evaluate();
+      const again = ce.parse(value.latex).evaluate();
+      expect(again.isSame(value)).toBe(true);
+      expect(again.json).toEqual(value.json);
+    });
+
+    test(`${latex}, big-number form`, () => {
+      const value = ce.parse(latex).N();
+      expect(value.toString()).toBe(printed);
+      const again = ce.parse(value.latex).N();
+      expect(again.isSame(value)).toBe(true);
+      expect(again.toString()).toBe(printed);
+    });
+  }
+
+  test('an inexact part below the double range is not serialized as 0', () => {
+    const value = ce.box(['Complex', 0, { num: '2.5e-800' }]);
+    expect(value.latex).toBe('25\\cdot10^{-801}\\imaginaryI');
+    expect(ce.parse(value.latex).isSame(value)).toBe(true);
+  });
+
+  test('a real part below the double range is not dropped', () => {
+    const value = ce.box(['Complex', { num: '2.5e-800' }, 1]);
+    expect(value.latex).toBe('25\\cdot10^{-801}+\\imaginaryI');
+  });
+});

@@ -10,7 +10,10 @@
  * and `(5.224851674121679747327997452771991010463873012 + 5.22485167412168i)`
  * at the default 21 digits.
  *
- * The imaginary part is a machine double and prints as one.
+ * The imaginary part is a big decimal too (design note
+ * `docs/plans/2026-09-27-big-decimal-imaginary-part.md`, Phase 2), and it is
+ * rounded to the working precision in the same way. It was a machine double
+ * and printed 17 digits.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -41,7 +44,7 @@ describe('COMPLEX PRINT PRECISION', () => {
     expect(significantDigits(re)).toBeLessThanOrEqual(ce.precision);
     // √2 = 1.41421356237309504880168872…, rounded to 21 digits.
     expect(re).toBe('1.4142135623730950488');
-    expect(s).toBe('(1.4142135623730950488 + 1.4142135623730951i)');
+    expect(s).toBe('(1.4142135623730950488 + 1.4142135623730950488i)');
   });
 
   test('(√2/2)(1 + i) · e² under N()', () => {

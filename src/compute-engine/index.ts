@@ -338,6 +338,14 @@ import type {
 import { compile as _compile } from './compilation/compile-expression.js';
 import { fu as _fu } from './symbolic/fu.js';
 
+/** True if `x`, a part of a complex value given as a double or a big
+ * decimal, is zero. `undefined` (a part that is not given) is zero. */
+function isZeroLike(x: number | BigDecimal | undefined): boolean {
+  if (x === undefined) return true;
+  if (typeof x === 'number') return x === 0;
+  return x.isZero();
+}
+
 /**
  *
  * To use the Compute Engine, create a `ComputeEngine` instance:
@@ -2175,7 +2183,20 @@ export class ComputeEngine implements IComputeEngine {
     return this._numericConfiguration.bignum(a);
   }
 
-  /** Create a complex number.
+  /** Create a complex number whose parts are machine doubles.
+   *
+   * The result is a `Complex` object: its real part and its imaginary part
+   * are always JavaScript `number` values. A `BigDecimal` argument is
+   * converted to the nearest double, so its digits beyond 16 are lost, a
+   * part too small for a double (`1e-800`) becomes `0` and a part too large
+   * (`1e800`) becomes `Infinity`.
+   *
+   * To create a complex number without that loss, use one of these:
+   * - `ce.number({ re, im })`, whose parts can be `BigDecimal` values;
+   * - the MathJSON `Complex` expression, for example
+   *   `ce.box(["Complex", {num: "1e-800"}, {num: "2"}])`;
+   * - LaTeX, for example `ce.parse("10^{-800} + 2i")`.
+   *
    * The return value is an object with methods to perform arithmetic
    * operations:
    * - `re` (real part, as a JavaScript `number`)
@@ -2304,8 +2325,9 @@ export class ComputeEngine implements IComputeEngine {
     //
 
     if ('im' in value || 're' in value) {
-      if (value.im !== undefined && value.im !== 0)
-        return makeNumericValue(value);
+      // The imaginary part is a double or a big decimal. A big decimal is an
+      // object, so `im !== 0` is not a zero test for it.
+      if (!isZeroLike(value.im)) return makeNumericValue(value);
 
       // A real part that is a safe-integer double is an exact integer (a big
       // decimal real part stays a float, see above)
@@ -2317,7 +2339,13 @@ export class ComputeEngine implements IComputeEngine {
           },
           makeNumericValue
         );
-      return makeNumericValue(value);
+      // A zero imaginary part held as a big decimal is passed on as the
+      // double `0`, so the value is built as a real value.
+      return makeNumericValue(
+        value.im === undefined || typeof value.im === 'number'
+          ? value
+          : { ...value, im: 0 }
+      );
     }
 
     if ('radical' in value || 'rational' in value) {
@@ -3856,6 +3884,9 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * This function tries to avoid creating a boxed number if `num` corresponds
    * to a common value for which we have a shared instance (-1, 0, NaN, etc...)
+   *
+   * A `{ re, im }` object is a complex number whose parts are each a
+   * `number` or a `BigDecimal`: see `IComputeEngine.number()`.
    */
   number(
     value:
@@ -3866,10 +3897,35 @@ export class ComputeEngine implements IComputeEngine {
       | MathJsonNumberObject
       | BigDecimal
       | Complex
-      | Rational,
+      | Rational
+      | { re: number | BigDecimal; im: number | BigDecimal },
     options?: { metadata: Metadata; canonical: CanonicalOptions }
   ): Expression {
-    return createNumberExpression(this, this._commonNumbers, value, options);
+    // A `{ re, im }` object (not a `Complex`, whose parts are doubles and
+    // which `canonicalNumber()` reads itself) keeps a big-decimal part
+    // without rounding it to a double.
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      !(value instanceof NumericValue) &&
+      !(value instanceof Complex) &&
+      !(value instanceof BigDecimal) &&
+      're' in value &&
+      'im' in value
+    )
+      return createNumberExpression(
+        this,
+        this._commonNumbers,
+        this._numericValue({ re: value.re, im: value.im }),
+        options
+      );
+    return createNumberExpression(
+      this,
+      this._commonNumbers,
+      value as Parameters<typeof createNumberExpression>[2],
+      options
+    );
   }
 
   rules(

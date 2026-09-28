@@ -11,6 +11,7 @@ import {
   isEmptySequence,
   missingIfEmpty,
   isNumberExpression,
+  isNumberObject,
   MISSING,
   getSequence,
 } from '../../../math-json/utils.js';
@@ -700,6 +701,54 @@ function serializeAdd(
 }
 
 /**
+ * The facts about a part of a `Complex` expression that its serializer
+ * needs: is it zero, `1` or `-1`, is it negative. `null` when the part is
+ * not a number literal (an exact part such as `['Sqrt', 2]`).
+ *
+ * A number literal written as a string of digits is read from its digits,
+ * not only from its double: `2.5e-800` rounds to the double `0` and
+ * `1.00000000000000000001` rounds to `1`, but the first is not zero and the
+ * second is not one. A literal with at most 15 significant digits is equal
+ * to `1` exactly when its double is.
+ */
+function complexPartShape(x: MathJsonExpression | null | undefined): {
+  isZero: boolean;
+  isOne: boolean;
+  isNegativeOne: boolean;
+  isNegative: boolean;
+} | null {
+  const value = machineValue(x);
+  if (value === null) return null;
+  const fromDouble = {
+    isZero: value === 0,
+    isOne: value === 1,
+    isNegativeOne: value === -1,
+    isNegative: value < 0,
+  };
+  const literal = x ?? null;
+  const digits =
+    typeof literal === 'string'
+      ? literal
+      : isNumberObject(literal) && typeof literal.num === 'string'
+        ? literal.num
+        : undefined;
+  if (digits === undefined || !Number.isFinite(value)) return fromDouble;
+  const match = /^([+-]?)(\d*)\.?(\d*)(?:[eE][+-]?\d+)?$/.exec(digits.trim());
+  if (match === null) return fromDouble;
+  const significant = (match[2] + match[3])
+    .replace(/^0+/, '')
+    .replace(/0+$/, '');
+  const isZero = significant.length === 0;
+  const exact = significant.length <= 15;
+  return {
+    isZero,
+    isOne: exact && value === 1,
+    isNegativeOne: exact && value === -1,
+    isNegative: !isZero && match[1] === '-',
+  };
+}
+
+/**
  * Serialize a term of a sum or a difference, in parentheses when its
  * precedence is lower than `prec` (the precedence of `Add` by default). A pure imaginary number
  * `['Complex', 0, im]` has no parentheses: it serializes as a product
@@ -714,7 +763,10 @@ function wrapAddTerm(
   term: MathJsonExpression,
   prec: number = ADDITION_PRECEDENCE
 ): string {
-  if (operator(term) === 'Complex' && machineValue(operand(term, 1)) === 0)
+  if (
+    operator(term) === 'Complex' &&
+    complexPartShape(operand(term, 1))?.isZero
+  )
     return serializer.serialize(term);
   return serializer.wrap(term, prec);
 }
@@ -1882,8 +1934,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const rePart = serializer.serialize(operand(expr, 1));
 
-      const im = machineValue(operand(expr, 2));
-      if (im === 0) return rePart;
+      const im = complexPartShape(operand(expr, 2));
+      if (im?.isZero) return rePart;
 
       // An exact imaginary part is a symbolic expression (`√2` is
       // `['Sqrt', 2]`), for which `machineValue` is `null`. Its sign comes
@@ -1905,19 +1957,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
                     '\\imaginaryI',
                   ]),
             ])
-          : im === 1
+          : im?.isOne
             ? '\\imaginaryI'
-            : im === -1
+            : im?.isNegativeOne
               ? '-\\imaginaryI'
               : joinLatex([
                   serializer.serialize(operand(expr, 2)),
                   '\\imaginaryI',
                 ]);
 
-      const re = machineValue(operand(expr, 1));
-      if (re === 0) return imPart;
+      if (complexPartShape(operand(expr, 1))?.isZero) return imPart;
 
-      if ((im !== null && im < 0) || negImMagnitude !== null)
+      if (im?.isNegative || negImMagnitude !== null)
         return joinLatex([rePart, imPart]);
 
       return joinLatex([rePart, '+', imPart]);

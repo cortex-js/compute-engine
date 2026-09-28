@@ -109,10 +109,11 @@ describe('EXACT PRODUCT OF A RADICAL AND A COMPLEX VALUE', () => {
       '["Complex",["Divide",["Sqrt",2],2],["Negate",["Divide",["Sqrt",2],2]]]'
     ));
 
-  // The printed real part is rounded to the working precision (21 digits).
+  // Both printed parts are rounded to the working precision (21 digits):
+  // √2 = 1.41421356237309504880168…
   test('.N() gives the float', () =>
     expect(ce.parse('\\sqrt{2}(1+\\imaginaryI)').N().toString()).toBe(
-      '(1.4142135623730950488 + 1.4142135623730951i)'
+      '(1.4142135623730950488 + 1.4142135623730950488i)'
     ));
 
   test('an inexact factor makes the product a float', () =>
@@ -120,9 +121,11 @@ describe('EXACT PRODUCT OF A RADICAL AND A COMPLEX VALUE', () => {
       '["Complex",1.5,1.5]'
     ));
 
+  // √2/2 = 0.70710678118654752440084436…; the MathJSON keeps the guard
+  // digits of the unrounded product for both parts.
   test('an inexact factor beside a radical makes the product a float', () =>
     expect(parse('\\sqrt{2}(1+\\imaginaryI)\\cdot 0.5')).toBe(
-      '["Complex",{"num":"0.7071067811865475244008445"},0.7071067811865476]'
+      '["Complex",{"num":"0.7071067811865475244008445"},{"num":"0.7071067811865475244008445"}]'
     ));
 });
 
@@ -162,13 +165,16 @@ describe('EXACT MODULUS OF A CONSTANT COMPLEX VALUE', () => {
   test('the modulus of a Gaussian integer is unchanged', () =>
     expect(box(['Abs', ['Complex', 1, 1]])).toBe('["Sqrt",2]'));
 
+  // π = 3.14159265358979323846…, 21 digits.
   test('.N() gives the float', () =>
     expect(ce.parse('|\\pi\\imaginaryI|').N().toString()).toBe(
-      '3.141592653589793'
+      '3.14159265358979323846'
     ));
 
+  // 1.5π = 4.71238898038468985769396507…; the MathJSON keeps the guard
+  // digits of the unrounded product, as the real product `1.5·π` does.
   test('an inexact factor makes the modulus a float', () =>
     expect(box(['Abs', ['Multiply', 1.5, 'Pi', 'ImaginaryUnit']])).toBe(
-      '4.71238898038469'
+      '{"num":"4.7123889803846898576939645"}'
     ));
 });

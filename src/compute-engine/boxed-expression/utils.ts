@@ -856,6 +856,12 @@ function imaginaryPart(x: Expression): Expression {
     const json = x.json;
     if (Array.isArray(json) && json[0] === 'Complex') return ce.box(json[2]);
   }
+  // An inexact imaginary part held as a big decimal keeps its digits: the
+  // double `im` of `1152921504606846977.5` is `1152921504606846976`, which
+  // loses the parity of the half-turns in `e^{1152921504606846977.5·iπ}`.
+  const nv = isNumber(x) ? x.numericValue : undefined;
+  const big = typeof nv === 'object' ? nv.bignumIm : undefined;
+  if (big !== undefined) return ce.number(ce._numericValue(big));
   return ce.number(x.im);
 }
 

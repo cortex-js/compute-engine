@@ -1548,6 +1548,34 @@ export interface IComputeEngine {
     options?: Record<string, unknown>
   ): RuleStep | undefined;
 
+  /**
+   * Create a complex number from its real part and its imaginary part, each
+   * a JavaScript `number` or a `BigDecimal`.
+   *
+   * When the engine works above machine precision (`ce.precision` greater
+   * than 15), a `BigDecimal` part is kept at the precision it holds: a part
+   * too small or too large for a double (`1e-800`, `1e800`) or with more
+   * than 16 significant digits is not rounded to a double. This is the
+   * lossless alternative to `ce.number(ce.complex(re, im))`: `ce.complex()`
+   * returns a `Complex` object, whose parts are always doubles. At machine
+   * precision, both parts are rounded to doubles: there
+   * `{ re: ce.bignum('1e-800'), im: ce.bignum(2) }` gives `2i`.
+   *
+   * When the imaginary part is zero (a `number` or a `BigDecimal`), the
+   * result is a real number.
+   *
+   * ```js
+   * ce.precision = 30;
+   * ce.number({ re: ce.bignum('1e-800'), im: ce.bignum(2) });
+   * // ➔ a complex number with the real part 1e-800 and the imaginary part 2
+   * ce.number({ re: 1, im: 0 });
+   * // ➔ 1
+   * ```
+   */
+  number(
+    value: { re: number | BigNum; im: number | BigNum },
+    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
+  ): Expression;
   number(
     value:
       | number
@@ -1616,11 +1644,7 @@ export interface IComputeEngine {
 
   rules(
     rules:
-      | Rule
-      | ReadonlyArray<Rule | BoxedRule>
-      | BoxedRuleSet
-      | undefined
-      | null,
+      Rule | ReadonlyArray<Rule | BoxedRule> | BoxedRuleSet | undefined | null,
     options?: {
       canonical?: boolean;
       /** Default purpose applied to any rule in the set that doesn't carry
@@ -1775,8 +1799,7 @@ export interface IComputeEngine {
    * @internal
    */
   _activeSymbolOracle:
-    | ((symbol: MathJsonSymbol) => SymbolResolution | undefined)
-    | undefined;
+    ((symbol: MathJsonSymbol) => SymbolResolution | undefined) | undefined;
   /** The declared type of an active shadowed parameter, if any. @internal */
   _shadowedParameterType(name: string): Type | undefined;
   /** The scope enclosing the construct that shadows `name` — the scope a

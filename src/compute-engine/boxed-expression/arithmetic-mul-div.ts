@@ -1974,7 +1974,12 @@ export function canonicalMultiply(
               i++;
               continue;
             } else if (!nv.isExact) {
-              ys.push(ce.number(ce.complex(0, nv.re)));
+              // Keep the big decimal of the coefficient: the double
+              // constructor `ce.complex()` would round `2·10^{-800}` to `0`
+              // and drop the digits beyond 16 of a high-precision value.
+              ys.push(
+                ce.number(ce._numericValue({ re: 0, im: nv.bignumRe ?? nv.re }))
+              );
               i++;
               continue;
             }

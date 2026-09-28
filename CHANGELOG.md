@@ -2,6 +2,18 @@
 
 ### Behavior Changes
 
+- **The imaginary part of a numeric result has the working precision.**
+  `.N()` of `√2 + √2i` printed `1.4142135623730950488 + 1.4142135623730951i`
+  (21 digits on the real part, 16 on the imaginary part); both parts now have
+  21 digits, or the engine's precision. `Ln`, `Exp`, `Power`, `Root` and `Sqrt`
+  of a complex argument compute both parts at the working precision above
+  machine precision (`Ln(1.1+1.1i).N()`, `e^{1+2i}` at 50 digits). The
+  other complex transcendental functions (`Sin`, `Gamma`, `Zeta`, …) keep
+  machine precision. The rounding noise a complex kernel removes is now
+  relative to the working precision (`10^{2−precision}` times the modulus,
+  it was `10^{-14}`), and a component that is small but real is kept:
+  `e^{i·10^{-800}}` is `1 + 10^{-800}i`.
+
 - **The Epsil serializer writes the lowercase spelling of a library name.**
   `serializeEpsil(["Sin", "x"])` is `sin(x)`, `"Pi"` is `pi`, and
   `["Map", "Sin", "xs"]` is `map(sin, xs)`; the `epsil format` command, the
@@ -56,6 +68,17 @@
 
 ### Issues Resolved
 
+- **A complex numeric value whose imaginary part is outside the double range
+  keeps it.** `(1+i)10^{800}` under `.N()` was `~oo` and is
+  `1e+800 + 1e+800i`; `(10^{-200}(1+i))^2` was `0` and is `2e-400i`;
+  `\sqrt{i\cdot10^{-600}}` was `0`; `2\cdot10^{-800}i` evaluated to `0`; a
+  complex part below the double range serialized to LaTeX as `0`. The
+  inexact complex value now holds its imaginary part as a big decimal. See
+  `docs/plans/2026-09-27-big-decimal-imaginary-part.md`.
+- **`Exp(Ln(−2)).N()` is `−2`.** It printed `−1.99…98 + 4.8e-16i`: the
+  logarithm of a negative real took a 16-digit imaginary part, whose rounding
+  error the working-precision `Exp` then read as a value.
+
 - **An exact complex number whose imaginary part is too small or too large
   for a double keeps it.** `i\cdot10^{-800}` evaluated to `0`, `(1+i)10^{-800}`
   to `1/1e+800` with the imaginary part lost, `(10^{-200}i)^2` and
@@ -73,6 +96,15 @@
   is Phase 1 of `docs/plans/2026-09-27-big-decimal-imaginary-part.md`; the
   inexact route (`.N()` of such values, and the imaginary part's printed
   precision) is unchanged until Phase 2.
+
+### New Features
+
+- **`ce.number({ re, im })` builds a complex number from two parts, each a
+  JavaScript number or a `BigDecimal`.** `ce.number({ re: ce.bignum('1e-800'),
+  im: ce.bignum('2') })` keeps both parts at full precision; a zero imaginary
+  part gives a real number. `ce.complex(a, b)` is unchanged: it returns a
+  machine-precision `Complex` (its documentation now says so and points at
+  the lossless routes, this overload and the MathJSON `Complex` node).
 
 ## 0.139.0 _2026-09-27_
 

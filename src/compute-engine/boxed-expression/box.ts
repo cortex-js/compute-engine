@@ -32,7 +32,6 @@ import { checkDeadline } from '../../common/interruptible.js';
 
 import { isOne } from '../numerics/rationals.js';
 import { asBigint } from './numerics.js';
-import { isExactDouble } from '../numerics/numeric-bignum.js';
 
 import { canonicalAdd } from './arithmetic-add.js';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
@@ -101,7 +100,7 @@ import {
 } from '../../common/type/instantiate.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
-import { boxBignumResult, isValueDef } from './utils.js';
+import { isValueDef } from './utils.js';
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
@@ -589,10 +588,20 @@ function boxFunctionInternal(
         }
 
         const re = reOp.re;
-        const im = imOp.re;
-        if (im !== null && re !== null && !isNaN(im) && !isNaN(re)) {
-          if (im === 0 && re === 0) return ce.Zero;
-          if (im !== 0) {
+        const imDouble = imOp.re;
+        if (
+          imDouble !== null &&
+          re !== null &&
+          !isNaN(imDouble) &&
+          !isNaN(re)
+        ) {
+          // Read the imaginary part from its big decimal when it has one: the
+          // double is `0` for `10^{-800}` and `Infinity` for `10^{800}`.
+          const im = imOp.bignumRe ?? imDouble;
+          const imIsZero = typeof im === 'number' ? im === 0 : im.isZero();
+          const reIsZero = reOp.bignumRe?.isZero() ?? re === 0;
+          if (imIsZero && reIsZero) return ce.Zero;
+          if (!imIsZero) {
             const bignumRe = reOp.bignumRe;
             return ce.number(
               ce._numericValue(
@@ -3736,22 +3745,12 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
   if (value.isComplex && value instanceof ExactNumericValue)
     return ce.number(value);
 
-  if (!value.isExact) {
-    const im = value.im;
-    // A float with an integer value (`2.0`) stays a float: box the value
-    // itself, not its big decimal, which `ce.number()` reads as exact.
-    if (im === 0) return ce.number(value);
-    if (value.re === 0) return ce.number(ce.complex(0, im));
-    // A complex literal holds its real part as a double, so a big-decimal real
-    // part that is not exactly a double is kept in a separate term.
-    if (value.bignumRe !== undefined && !isExactDouble(value.bignumRe)) {
-      return canonicalAdd(ce, [
-        boxBignumResult(ce, value.bignumRe),
-        ce.number(ce.complex(0, im)),
-      ]);
-    }
-    return ce.number(ce.complex(value.re, value.im));
-  }
+  // An inexact value is boxed as it is. A float with an integer value (`2.0`)
+  // stays a float, and a complex value keeps both parts at the precision it
+  // holds them (a big-decimal imaginary part such as `10^{-800}` is not
+  // rebuilt through the double constructor `ce.complex()`, which would round
+  // it to `0`).
+  if (!value.isExact) return ce.number(value);
 
   const terms: Expression[] = [];
 
@@ -3801,10 +3800,13 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
   //
   // Imaginary Part
   //
-  if (terms.length === 0) return ce.number(ce.complex(0, value.im));
+  const imaginary = ce.number(
+    ce._numericValue({ re: 0, im: value.bignumIm ?? value.im })
+  );
+  if (terms.length === 0) return imaginary;
 
   result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
-  return canonicalAdd(ce, [result, ce.number(ce.complex(0, value.im))]);
+  return canonicalAdd(ce, [result, imaginary]);
 }
 
 export function semiCanonical(

@@ -97,9 +97,9 @@ export function exactComplexLiteral(
  * An exact coefficient (an integer of any size, a rational, a radical) gives
  * the EXACT pure-imaginary literal, the same value that `["Complex", 0, c]`
  * boxes to and that `i · c` multiplies to, so that `√(4i)` is `√2(1 + i)` and
- * `(4i)²` is computed exactly. `ce.complex()` builds an INEXACT
- * (floating-point) value, which is what an inexact coefficient (`1.5i`) must
- * remain. A zero coefficient is the real zero.
+ * `(4i)²` is computed exactly. An inexact coefficient (`1.5i`) gives an
+ * INEXACT (floating-point) value, with the precision of the coefficient. A
+ * zero coefficient is the real zero.
  */
 export function imaginaryNumber(
   ce: ComputeEngine,
@@ -119,5 +119,13 @@ export function imaginaryNumber(
         options
       );
   }
-  return ce.number(ce.complex(0, coefficient.re ?? NaN), options);
+  // An inexact coefficient keeps its big decimal when it has one: the double
+  // constructor `ce.complex()` would round `10^{-800}` to `0`.
+  return ce.number(
+    ce._numericValue({
+      re: 0,
+      im: coefficient.bignumRe ?? coefficient.re ?? NaN,
+    }),
+    options
+  );
 }

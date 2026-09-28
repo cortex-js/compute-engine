@@ -12,9 +12,9 @@ import {
 import type { Rational } from '../numerics/types.js';
 
 import { asRational } from './numerics.js';
-import { getImaginaryFactor } from './utils.js';
+import { bignumPreferred, getImaginaryFactor } from './utils.js';
 import { halfTurnAngle, halfTurns, radiansToAngle } from './trigonometry.js';
-import { apply, apply2 } from './apply.js';
+import { apply, apply2, complexNumericValueRoute } from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { realExponentValue, isGaussianIntegerValue } from './imaginary-part.js';
 import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
@@ -1158,8 +1158,21 @@ function complexPowN(
   if ([x.re, x.im, expRe, expIm].some((v) => Number.isNaN(v))) return ce.NaN;
   // A zero base: 0^w is 0 when the real part of w is positive. Otherwise it
   // has no value (a pole or an undefined point), so the result is NaN, and
-  // the polar form below must not run (ln 0 is -∞).
-  if (x.re === 0 && x.im === 0) return expRe > 0 ? ce.Zero : ce.NaN;
+  // the polar form below must not run (ln 0 is -∞). The test reads the
+  // numeric value, not the double projections `re` and `im`: a base whose
+  // big-decimal parts are too small for a double (`10^{-800}(1+i)`) has
+  // double projections `0` and `0`, but it is not zero.
+  const baseValue = x.numericValue;
+  if (typeof baseValue === 'number' ? baseValue === 0 : baseValue.isZero)
+    return expRe > 0 ? ce.Zero : ce.NaN;
+  // Above machine precision, the big-decimal power computes both parts at
+  // the working precision. The double kernel below is used otherwise.
+  const viaNumericValue = complexNumericValueRoute(
+    ce,
+    [x, typeof exp === 'number' ? ce.number(exp) : exp],
+    (base, exponent) => base.pow(exponent)
+  );
+  if (viaNumericValue !== undefined) return viaNumericValue;
   let z: { re: number; im: number } = ce
     .complex(x.re, x.im)
     .pow(ce.complex(expRe, expIm));
@@ -1588,7 +1601,10 @@ export function pow(
         return ce.number(ce._numericValue(exp).exp());
       } else if (isNumber(exp)) {
         const xv = ce._numericValue(exp.numericValue);
-        if (!xv.isComplex) return ce.number(xv.exp());
+        // A complex exponent above machine precision uses the big-decimal
+        // `exp` too: `e` pre-rounded to the working precision and raised to
+        // `z` loses a digit (`e^{1+2i}` at 50 digits was one unit off).
+        if (!xv.isComplex || bignumPreferred(ce)) return ce.number(xv.exp());
         const eNv = numericValue(ce.E.N());
         if (eNv !== undefined) return ce.number(ce._numericValue(eNv).pow(xv));
       }
@@ -1880,6 +1896,16 @@ export function root(
           },
           (a, b) => {
             const result = a.pow(typeof b === 'number' ? 1 / b : b.inverse());
+            if (isNegative && !isEven) return result.neg();
+            return result;
+          },
+          // A complex operand above machine precision: the big-decimal root
+          // or power computes both parts at the working precision.
+          (a, b) => {
+            const result =
+              !b.isComplex && Number.isInteger(b.re)
+                ? a.root(b.re)
+                : a.pow(b.inv());
             if (isNegative && !isEven) return result.neg();
             return result;
           }

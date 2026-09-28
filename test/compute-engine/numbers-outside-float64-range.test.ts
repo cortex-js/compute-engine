@@ -657,7 +657,7 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
     else expect(Math.abs(actual.im - im)).toBeLessThanOrEqual(scale);
   }
 
-  describe.each(engines)('%s', (_, engine) => {
+  describe.each(engines)('%s', (engineName, engine) => {
     let e: ComputeEngine;
     beforeAll(() => {
       e = engine();
@@ -680,7 +680,26 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
       expect(e.parse('\\sqrt{-4}').N().toString()).toBe('2i');
       expect(e.parse('(2i)^2').N().toString()).toBe('-4');
       expectComplex(e._numericValue({ re: 0, im: 1.5 }).pow(3), 0, -3.375);
-      expectComplex(e._numericValue({ re: 0, im: Math.PI }).exp(), -1, 0);
+      // π at the working precision of the engine: `e^{iπ}` is `-1`, and the
+      // imaginary part (about 10^{-precision}) is rounding noise.
+      const pi = e.symbol('Pi').N();
+      expectComplex(
+        e._numericValue({ re: 0, im: pi.bignumRe ?? pi.re }).exp(),
+        -1,
+        0
+      );
+    });
+
+    // `Math.PI` is the decimal 3.141592653589793, which is π − 2.38·10^{-16}.
+    // At machine precision, sin of it is rounding noise and is removed. At
+    // the default precision (21 digits) the big-decimal kernel computes
+    // sin(3.141592653589793) = 2.38462643383279502884·10^{-16} (Python
+    // `mpmath`), which is not noise at 21 digits, so it is kept: the noise
+    // ratio is 10^(2−precision), not the 10^{-14} of a double.
+    test('e^{i·3.141592653589793}', () => {
+      const r = e._numericValue({ re: 0, im: Math.PI }).exp();
+      if (engineName === 'machine precision') expectComplex(r, -1, 0);
+      else expectComplex(r, -1, 2.384626433832795e-16);
     });
 
     test('the numeric-value kernels keep a small result', () => {
@@ -752,13 +771,22 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
         m2 * Math.cos(-Math.PI / 8),
         m2 * Math.sin(-Math.PI / 8)
       );
-      // A result that overflows is complex infinity, not NaN.
+      // A result that overflows the double range is complex infinity, not
+      // NaN, at machine precision. At the default precision the parts are
+      // big decimals and the result is finite:
+      // (10^{300}(1+i))^{1.5} = 2^{0.75}·10^{450}·e^{i·3π/8}, whose parts to
+      // 21 digits (Python `mpmath`) are 6.43594252905582624735e+449 and
+      // 1.55377397403003730734e+450.
       expect(
         e
           .box(['Power', ['Complex', 1e300, 1e300], 1.5])
           .N()
           .toString()
-      ).toBe('~oo');
+      ).toBe(
+        engineName === 'machine precision'
+          ? '~oo'
+          : '(6.43594252905582624735e+449 + 1.55377397403003730734e+450i)'
+      );
     });
   });
 
@@ -801,8 +829,13 @@ describe('COMPLEX POWER WITH A MODULUS ABOVE THE LARGEST DOUBLE', () => {
   test('finite parts with an overflowing modulus', () => {
     const ce = new ComputeEngine();
     const z = ce.box(['Power', ['Complex', 1.5e308, 1.5e308], 0.3]).N();
-    expect(z.re).toBeCloseTo(3.0606480553398345e92, -78);
-    expect(z.im).toBeCloseTo(7.347965871069578e91, -77);
+    // (1.5·10^{308}(1+i))^{0.3}, computed with Python `mpmath` for the
+    // decimal parts 1.5e308: 3.06064805533990338732e+92 +
+    // 7.34796587106974328166e+91i. (The previous expected values,
+    // 3.0606480553398345e92 and 7.347965871069578e91, were a machine
+    // computation, wrong from the 14th digit.)
+    expect(z.re).toBeCloseTo(3.0606480553399034e92, -78);
+    expect(z.im).toBeCloseTo(7.347965871069743e91, -77);
   });
   test('an infinite part gives the complex infinity', () => {
     const ce = new ComputeEngine();
@@ -1324,21 +1357,15 @@ describe('BIG-DECIMAL REAL PART OUTSIDE THE FLOAT64 RANGE, BOXED ROUTES', () => 
       expect(re.toString()).toMatch(/^1\.4142135623730950488\d*e-800$/);
     }));
 
-  // (10^{-800} + 2i)^2 = -4 + 4·10^{-800}·i + 10^{-1600}. The boxed route no
-  // longer lifts the base to the exact `2i`, but the big-decimal power itself
-  // still holds its imaginary part as a double, so `4·10^{-800}` underflows
-  // to `0` and the result is `-4`. That is fixed by the big-decimal imaginary
-  // part (design note `docs/plans/2026-09-27-big-decimal-imaginary-part.md`
-  // §2.3, Phase 2). `test.failing` records the known-wrong result: when
-  // Phase 2 lands this test starts to pass, jest reports it, and the
-  // `.failing` marker must then be removed.
-  test.failing(
-    'Power(10^{-800} + 2i, 2) keeps the imaginary part 4·10^{-800}',
-    () =>
-      withPrecision1000(() => {
-        const r = ce.function('Power', [z(), ce.number(2)]).evaluate();
-        expect(r.isSame(-4)).toBe(false);
-        expect(r.bignumIm?.isZero()).toBe(false);
-      })
-  );
+  // (10^{-800} + 2i)^2 = -4 + 4·10^{-800}·i + 10^{-1600}. The boxed route
+  // does not lift the base to the exact `2i`, and the big-decimal power holds
+  // its imaginary part as a big decimal, so `4·10^{-800}` is kept. The real
+  // part `-4 + 10^{-1600}` is `-4` at 1000 digits.
+  test('Power(10^{-800} + 2i, 2) keeps the imaginary part 4·10^{-800}', () =>
+    withPrecision1000(() => {
+      const r = ce.function('Power', [z(), ce.number(2)]).evaluate();
+      expect(r.isSame(-4)).toBe(false);
+      expect(r.bignumRe!.eq(-4)).toBe(true);
+      expect(r.bignumIm!.eq(ce.bignum('4e-800'))).toBe(true);
+    }));
 });

@@ -90,9 +90,9 @@ export function isImaginaryPartSafeInteger(x: ImaginaryPartReceiver): boolean {
  * For an exact value this is read from the exact fields: the real part is
  * zero and the imaginary part is `1` with no radical. The doubles `re` and
  * `im` are not enough: the exact `10^{-800} + i` has `re === 0` and
- * `im === 1`, but it is not `i`. For a machine or big-decimal value the
- * doubles are the value itself (in this version the imaginary part of every
- * inexact value is a double), so the double test is used. */
+ * `im === 1`, but it is not `i`. A big-decimal value reads its big-decimal
+ * imaginary part (`1 + 10^{-30}` projects to the double `1`); a machine value
+ * is its doubles. */
 export function isImaginaryUnitValue(
   nv: number | NumericValue | undefined
 ): boolean {
@@ -104,7 +104,9 @@ export function isImaginaryUnitValue(
       isOne(nv.imRational) &&
       nv.imRadical === 1
     );
-  return isRealPartZero(nv) && nv.im === 1;
+  if (!isRealPartZero(nv)) return false;
+  const bigIm = nv.bignumIm;
+  return bigIm !== undefined ? bigIm.eq(1) : nv.im === 1;
 }
 
 /** True if the real part of `nv` is zero.

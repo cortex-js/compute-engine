@@ -51,7 +51,10 @@ export type ExactNumericValueData = {
 /** @category Numerics */
 export type NumericValueData = {
   re?: BigDecimal | number; // A floating point number (non-integer)
-  im?: number; // The imaginary part of the number
+  // The imaginary part of the number. A big decimal keeps an imaginary part
+  // that a double cannot hold (`10^{-800}`, `10^{800}`, or more than 16
+  // digits). A `MachineNumericValue` converts it to the nearest double.
+  im?: BigDecimal | number;
 };
 
 /** @category Numerics */

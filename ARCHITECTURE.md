@@ -755,11 +755,16 @@ for two different tolerances:
    mathematically-real result with a dust-sized imaginary part (e.g.
    `Complex(0.5, 0).asin()` → `im: 5.55e-17`, from the complex log/sqrt
    formulation). Whether that is noise is a property of the _arithmetic_ — the
-   scale is machine roundoff — and does not depend on any user setting. The
-   test is RELATIVE: a component is dust only when it is at most `1e-14`
-   times the modulus of the result (`chopComplexDust` and `isComplexDust`,
-   `numeric-value/roundoff.ts`). An absolute cut erased small results:
-   `(10^{-10} i)^2` gave 0 instead of `-10^{-20}` until 2026-09-26.
+   scale is the rounding error of the kernel — and does not depend on any
+   user setting. The test is RELATIVE: a component is dust only when it is
+   at most a fixed ratio times the modulus of the result. For the machine
+   kernels (`chopComplexDust`, `numeric-value/roundoff.ts`) the ratio is
+   `1e-14`. For the big-decimal kernels of `BigNumericValue`
+   (`isComplexDust`, `complexNoiseRatio`) it is `10^(2−precision)`, where
+   `precision` is the working precision, because these kernels compute at
+   the working precision, not at the precision of a double. An absolute cut
+   erased small results: `(10^{-10} i)^2` gave 0 instead of `-10^{-20}`
+   until 2026-09-26.
 2. **Comparison tolerance** — should two values be considered equal _for the
    user_? That is `ce.tolerance` (default `1e-10`, user-configurable), used by
    `Equal`, the relational operators, `.is()`, and the `Chop` operator.
@@ -769,9 +774,34 @@ The invariant for complex values:
 - **Chop dust at creation, at kernel boundaries only.** Every path that
   manufactures a complex float from a transcendental kernel chops the dust
   components before the value escapes: `boxed-expression/apply.ts`
-  (`apply`/`apply2`/`applyN`), the `pow`/`exp` complex branches of
+  (`apply`/`apply2`/`applyN`), the `pow`/`root`/`exp` complex branches of
   `MachineNumericValue`/`BigNumericValue`, and the compiled JavaScript
   target's `wrapRealOnly` projection.
+- **In `BigNumericValue`, a legitimately small component does not reach the
+  chop, except in one case named below.** Magnitude alone cannot tell rounding noise from a small correct
+  component: `e^{iπ}` computes `-1 + 1.2e-21i` at 21 digits (noise), and
+  `e^{i·10^{-800}}` is `1 + 10^{-800}i` (correct), whose imaginary part is
+  smaller still. So the big-decimal kernels have two regimes. In the
+  small-component regime, one part of the input is less than
+  `10^(2−precision)` times the other (for `exp` and for the angle of a
+  complex power, the angle is less than `10^(2−precision)`). There the kernel
+  uses the first-order expansion, which is exact to the working precision
+  and has no cancellation: `exp(a + ib) = e^a·(1 + ib)`,
+  `ln(a + ib) = ln a + i·b/a`, `(a + ib)^n = a^n·(1 + i·n·b/a)`, and the
+  Cartesian `sqrt` (which computes the smaller part from `b/(2·larger)`).
+  Nothing is chopped in this regime. An integer power in the normal regime
+  uses repeated multiplication, which makes no polar noise, and is not
+  chopped either. A power of a value with a negative real part, an
+  imaginary part smaller than the real part and a real non-integer exponent
+  splits the angle into `±π·n`, whose unit `e^{±iπn}` alone is chopped, and
+  the small angle `n·atan(b/a)`, which is not. In the normal regime, the
+  kernel uses the polar form at the working precision (with guard digits),
+  rounds each part to the working precision, and chops a part that is at
+  most `10^(2−precision)` times the modulus of the result. One case still
+  loses a legitimate small part there: a COMPLEX exponent whose real part is
+  a half-integer, at a base near the negative real axis — at 40 digits,
+  `(-4 + 10^{-800}i)^{1.5 + 10^{-50}i}` gives `-8i`, where the real part is
+  about `1.1·10^{-49}`.
 - **Never chop in ring arithmetic or constructors.** Results of
   `add`/`mul`/`div` can be legitimately tiny (`(10⁻⁶ i)²`, user input
   `1e-12i`); `chop()` is an _absolute_-tolerance test and would destroy them.
@@ -787,11 +817,13 @@ The invariant for complex values:
   (`ce._numericValue`'s exact `im === 0` collapse to a real value is likewise
   correct by construction.)
 
-The roundoff scale is `ROUNDOFF_TOLERANCE` (`1e-14`) in `numerics/numeric.ts`
-— complex kernels run at machine precision regardless of `ce.precision`, so
-their dust is machine-scale. All kernel-boundary chops use it (`apply.ts`, the
-angular-unit conversion in `boxed-expression/trigonometry.ts`, the
-`numeric-value/` classes). Using `ce.tolerance` there miscoupled the user knob
+The roundoff scale of the machine kernels is `ROUNDOFF_TOLERANCE` (`1e-14`)
+in `numerics/numeric.ts` — these complex kernels run at machine precision
+regardless of `ce.precision`, so their dust is machine-scale. The machine
+kernel-boundary chops use it (`apply.ts`, the angular-unit conversion in
+`boxed-expression/trigonometry.ts`, `MachineNumericValue`). The big-decimal
+kernels of `BigNumericValue` use `10^(2−precision)` instead, as described
+above. Using `ce.tolerance` there miscoupled the user knob
 — tightening it below dust scale re-introduced the 2026-07-30 regression where
 the compiled `arcsin`, projected to the real lane, returned `NaN` across its
 whole domain, and loosening it silently projected genuinely complex results to

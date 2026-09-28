@@ -237,27 +237,6 @@ Defects:
    argument near `5e199` (`new Complex(5e199, -5e199).atan()` is `NaN`).
    Found 2026-09-27 while scaling the interpreter's complex division; the
    fix is a scaled `atan`/`asin` kernel, or a reduction for large arguments.
-2. **A complex number whose imaginary part is outside the double range:
-   the inexact route (Phases 2 and 3 of
-   `docs/plans/2026-09-27-big-decimal-imaginary-part.md`).** Phase 1 landed
-   2026-09-27: every numeric value answers `isComplex` from a representation
-   that holds its imaginary part (the exact Gaussian fields, or the double for
-   the two inexact classes), and the "is complex?" tests across the engine
-   read it instead of the double projection `im`, so the EXACT route is
-   right: `i\cdot10^{-800}` and `(1+i)10^{-800}` evaluate to their exact
-   values, `(10^{-200}i)^2` is `-10^{-400}`, `Mean([1, 10^{400}i, 3])` is
-   `4/3 + (10^{400}/3)i`. What remains is the inexact route, where
-   `BigNumericValue` still holds a machine-double imaginary part:
-   `(1+i)10^{800}` `.N()` is `~oo` instead of `1e+800 + 1e+800i`,
-   `(10^{-200}(1+i))^2` `.N()` is `0` (the true value `2e-400i`),
-   `\sqrt{i\cdot10^{-600}}` `.N()` is `0`, `e^{i\,10^{-800}}` `.N()` drops
-   the part, `.N()` prints 21 digits on the real part and 16 on the
-   imaginary; the parser's `c·i` fold still builds a machine complex literal
-   from an inexact coefficient, so `2\cdot10^{-800}i` evaluates to `0`
-   (§2.5 of the note, Phase 3); `ExactNumericValue.eq` against an inexact
-   value and the two inexact classes' `eq` still compare the double
-   projections (Phase 2's symmetry item). The design, the kernels, the dust
-   rule and the acceptance tests are in the note, decided 2026-09-27.
 3. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is
    absent stays unevaluated.** `Map(f, Join(Missing, [3]))` should be
    `Missing`, as `Map(f, Missing)` is. The source correctly declines to
@@ -679,19 +658,34 @@ doubles, so an argument within about `10⁻¹⁵` relative of a pole is refused 
 every precision (`Γ(−3 + 10⁻³⁰)` against `0` stays undecided at 50 digits):
 never a wrong order, a lost answer.
 
-### The imaginary part of an inexact number is a machine double (OPEN, decided — design in `docs/plans/2026-09-27-big-decimal-imaginary-part.md`, Phases 2 and 3)
+### Complex transcendental functions keep machine precision (OPEN, capability — decision D4 of `docs/plans/2026-09-27-big-decimal-imaginary-part.md`)
 
-`BigNumericValue.im` is a `number`, so `.N()` of a complex value has the working
-precision (21 digits by default) on the real part and 16 digits on the imaginary
-part: `.N()` of `√2 + √2 i` is
-`1.414213562373095 + 1.4142135623730951i` (since 2026-09-27 the real part
-prints at the working precision). The big-decimal imaginary part is decided
-(2026-09-27, decisions D1 to D6 of the note); Phase 1 (the exact route)
-landed 2026-09-27, Phases 2 and 3 (`imDecimal` in `BigNumericValue` with the
-kernels and the dust rule, the boundary sites, the public
-`ce.number({ re, im })` overload) are next. Also left for Phase 2: `Sin`,
-`Gamma` and the other complex transcendentals keep machine precision at every
-engine precision (decision D4, a separate capability item once Phase 2 lands).
+Since 2026-09-27 an inexact complex value holds its imaginary part as a big
+decimal, and `Ln`, `Exp`, `Power`, `Root`, `Sqrt` and the arithmetic compute
+both parts at the working precision. `Sin`, `Cos`, `Tan` and the other
+trigonometric and hyperbolic functions, `Gamma`, `Zeta`, the Bessel family
+and every other complex kernel still compute in doubles (`complex-esm`,
+`numerics/numeric-complex.ts`) at every engine precision: `Sin(1+i).N()` at
+50 digits has 16 correct digits, and an imaginary part below the double
+range reaches those kernels as `0`. The fix is a big-decimal complex kernel
+per function family (the real `BigDecimal` kernels exist). Also:
+`e^{1152921504606846977.5 i\pi}` `.N()` at precision 50 is `4.5e-32 − i`,
+the rounding of `c·π` for a 19-digit `c` at 50 digits, which is expected
+float behaviour.
+Related, in the `e^{iθ}` Euler branch (`boxed-expression/arithmetic-power.ts`,
+`halfTurns`): a large FLOAT angle is reduced modulo π at the working
+precision with no extra digits, so `e^{10^{30} i}` at 40 digits has about 10
+correct digits (`-0.99593119441358739…`, true `-0.99593119440539570…`);
+`BigNumericValue.exp` called directly is correct. The reduction needs about
+`log10|θ|` more digits, or a float angle above machine precision should take
+`exp` directly (found 2026-09-27 by the review of the big-decimal imaginary
+part).
+Also: a negative real base with a tiny imaginary part raised to a COMPLEX
+exponent near a half-integer loses a legitimate small part to the polar
+chop: `(-4 + 10^{-800}i)^{1.5 + 10^{-50}i}` gives `-8i`, the real part is
+`1.109e-49` (mpmath). The real-exponent case splits the angle exactly
+(`e^{iπn·sgn(b)}` chopped alone); the complex-exponent case needs the same
+split (`ARCHITECTURE.md`, the dust-rule bullet, names it).
 
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 

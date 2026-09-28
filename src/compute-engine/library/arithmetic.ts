@@ -4195,6 +4195,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const special = logarithmAtExceptionalPoint(engine, z, undefined, true);
         if (special !== undefined) return special;
 
+        // A negative real above machine precision: `ln(−x) = ln(x) + iπ`
+        // with both parts at the working precision. The machine route below
+        // (`engine.complex(x).log()`) gives a 16-digit imaginary part, and a
+        // big-decimal kernel downstream then reads its rounding error as a
+        // value (`Exp(Ln(−2)).N()` gave `−1.99…98 + 4.8e-16i`).
+        if (
+          isNumber(z) &&
+          !z.isComplex &&
+          z.isNegative === true &&
+          bignumPreferred(engine)
+        ) {
+          const bigRe = z.bignumRe ?? engine.bignum(z.re);
+          if (bigRe.isFinite())
+            return engine.number(engine._numericValue(bigRe).ln());
+        }
+
         return apply(
           z,
           (x) =>
@@ -4209,7 +4225,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               : !x.isNegative()
                 ? x.ln()
                 : engine.complex(x.toNumber()).log(),
-          (z) => (z.isZero() ? NaN : z.log())
+          (z) => (z.isZero() ? NaN : z.log()),
+          (z) => z.ln()
         );
       },
     },
