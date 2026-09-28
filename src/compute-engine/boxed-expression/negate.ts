@@ -94,6 +94,10 @@ export function canonicalNegate(expr: Expression): Expression {
   const negatedTuple = negateTupleComponents(expr);
   if (negatedTuple !== undefined) return negatedTuple;
 
+  // Fold the sign into a product's numeric factor, as `-2x` already is, so
+  // `-\frac{x}{2}` and `-\frac{1}{2}x` have one canonical form.
+  if (isFunction(expr, 'Multiply')) return negateProduct(expr.engine, expr.ops);
+
   return expr.engine._fn('Negate', [expr]);
 }
 

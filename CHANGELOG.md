@@ -48,6 +48,27 @@
 
 ### Resolved Issues
 
+- **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and a
+  fraction's sign moves in front of it.** `Beta(2, 3)` wrote `\Beta(2, 3)`
+  (capital beta is roman, not a separate glyph — MathLive renders it as an
+  error) and `Zeta(3)` wrote `\Zeta(3)`; both came from the fallback that
+  spells an unrecognized function head as its symbol's notation, which for
+  these two names is the Greek-letter entry. They now write `\mathrm{B}(2,
+  3)` and `\zeta(3)`; the old spellings still parse. `Lb(x)` wrote `\lb(x)`,
+  not a standard LaTeX command, and now writes `\log_2(x)` (which already
+  parsed to `Lb`). Separately, a fraction's negative sign was written inside
+  the numerator or denominator — `Rational(-1, 2)` as `\frac{-1}{2}`,
+  `Divide(x, -4)` as `\frac{x}{-4}` — or, for `Negate` of a fraction, with a
+  redundant parenthesis (`Negate(Rational(3, 4))` as `-(\frac{3}{4})`); all
+  three now write the sign in front: `-\frac{1}{2}`, `-\frac{x}{4}`,
+  `-\frac{3}{4}`. So these round-trip, `Negate` of a product now folds its
+  sign into the numeric factor: `-\frac{x}{2}` is `Multiply(-1/2, x)`, as
+  `-\frac{1}{2}x` and `-2x` already were, not `Negate(Multiply(1/2, x))`
+  (#345, contributed by [enumeratio](https://github.com/enumeratio)).
+- **`\operatorname{rank}(A)` parses to `MatrixRank`.** It parsed to the free
+  symbol `rank` applied to `A`, the same gap `\operatorname{lcm}` (→ `LCM`)
+  already covered for a different head (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)).
 - **An exact coefficient raised to a rational power stays exact.**
   `(8x+8)^{2/3}·y` evaluated to `3.99999999999999944548·y·(x+1)^(2/3)` (an
   exact input gave a float with a wrong last digit) and

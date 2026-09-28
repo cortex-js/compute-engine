@@ -225,7 +225,7 @@ describe('SERIALIZING Negative factors', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () => {
     expect(
       engine.parse('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}').latex
-    ).toMatchInlineSnapshot(`\\frac{-6xy}{5}`);
+    ).toMatchInlineSnapshot(`-\\frac{6xy}{5}`);
   });
 });
 

@@ -426,6 +426,15 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     arguments: 'implicit',
   },
 
+  // `\operatorname{rank}(A)` has no dedicated macro (unlike `\det`/`\ker`), so
+  // only the `\operatorname{}` spelling is claimed, the same as `lcm` below.
+  {
+    symbolTrigger: 'rank',
+    kind: 'function',
+    parse: 'MatrixRank',
+    arguments: 'implicit',
+  },
+
   // MatrixMultiply serializes as multiplication with \cdot
   {
     name: 'MatrixMultiply',

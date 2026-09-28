@@ -1346,8 +1346,19 @@ function serializeFraction(
   // console.assert(getFunctionName(expr) === 'Divide');
   if (expr === null) return '';
 
-  const numer = missingIfEmpty(operand(expr, 1));
-  const denom = missingIfEmpty(operand(expr, 2));
+  let numer = missingIfEmpty(operand(expr, 1));
+  let denom = missingIfEmpty(operand(expr, 2));
+
+  // The sign of a fraction belongs in front of it, not inside the numerator
+  // or the denominator: `-\frac{1}{2}`, not `\frac{-1}{2}` or
+  // `\frac{1}{-2}`. `unsign()` recognizes a negative sign from either
+  // operand's shape (a literal negative number, `Negate`, or a leading
+  // negative `Multiply` coefficient) and returns the un-signed operand.
+  const [unsignedNumer, numerSign] = unsign(numer);
+  const [unsignedDenom, denomSign] = unsign(denom);
+  numer = unsignedNumer;
+  denom = unsignedDenom;
+  const sign = numerSign * denomSign < 0 ? '-' : '';
 
   const style = serializer.options.prettify
     ? serializer.fractionStyle(expr, serializer.level)
@@ -1356,14 +1367,16 @@ function serializeFraction(
     const numerStr = serializer.wrapShort(numer);
     const denomStr = serializer.wrapShort(denom);
 
-    if (style === 'inline-solidus') return `${numerStr}/${denomStr}`;
-    return `{}^{${numerStr}}\\!\\!/\\!{}_{${denomStr}}`;
+    if (style === 'inline-solidus') return `${sign}${numerStr}/${denomStr}`;
+    return `${sign}{}^{${numerStr}}\\!\\!/\\!{}_{${denomStr}}`;
   } else if (style === 'reciprocal') {
-    if (machineValue(numer) === 1) return serializer.wrap(denom) + '^{-1}';
-    return serializer.wrap(numer) + serializer.wrap(denom) + '^{-1}';
+    if (machineValue(numer) === 1)
+      return sign + serializer.wrap(denom) + '^{-1}';
+    return sign + serializer.wrap(numer) + serializer.wrap(denom) + '^{-1}';
   } else if (style === 'factor') {
-    if (machineValue(denom) === 1) return serializer.wrap(numer);
+    if (machineValue(denom) === 1) return sign + serializer.wrap(numer);
     return (
+      sign +
       '\\frac{1}{' +
       serializer.serialize(denom) +
       '}' +
@@ -1381,7 +1394,7 @@ function serializeFraction(
 
   const numerLatex = serializer.serialize(numer);
   const denomLatex = serializer.serialize(denom);
-  return `${cmd}{${numerLatex}}{${denomLatex}}`;
+  return `${sign}${cmd}{${numerLatex}}{${denomLatex}}`;
 }
 
 /** Parse `\binom{n}{k}` (and the `\dbinom`/`\tbinom` display/text variants)
@@ -2067,16 +2080,31 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'Gamma',
   },
   // Riemann zeta function - \zeta parses to Zeta function when followed by arguments
-  // Note: \zeta without arguments is handled by definitions-symbols.ts as Greek letter
+  // Note: \zeta without arguments is handled by definitions-symbols.ts as Greek letter.
+  // The serializer for a *called* `Zeta` (writing the conventional `\zeta(3)`
+  // instead of the capital-letter, non-standard `\Zeta(3)`) is on the shared
+  // `name: 'Zeta'` entry in `definitions-symbols.ts`, since a dictionary name
+  // must be unique and that entry already claims it for the bare letter.
   {
     latexTrigger: ['\\zeta'],
     kind: 'function',
     parse: 'Zeta',
   },
   // Beta function - \Beta parses to Beta function when followed by arguments
-  // Note: \Beta without arguments is handled by definitions-symbols.ts as Greek letter
+  // Note: \Beta without arguments is handled by definitions-symbols.ts as Greek letter.
+  // `\Beta` is not a real LaTeX command (capital beta is roman, not a
+  // separate glyph); the serializer that writes the conventional
+  // `\mathrm{B}(...)` instead lives on the shared `name: 'Beta'` entry in
+  // `definitions-symbols.ts` (see the `Zeta` comment above). The old
+  // `\Beta(...)` spelling still parses, for inputs that used it.
   {
     latexTrigger: ['\\Beta'],
+    kind: 'function',
+    parse: 'Beta',
+  },
+  // `\mathrm{B}(2, 3)`: the conventional spelling this now serializes to.
+  {
+    latexTrigger: ['\\mathrm', '<{>', 'B', '<}>'],
     kind: 'function',
     parse: 'Beta',
   },
@@ -2299,6 +2327,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     standaloneSymbol: true,
     latexTrigger: '\\lb',
     parse: (parser: Parser) => parseLb(parser),
+    // `\lb` is not a standard LaTeX command, so an *applied* `Lb` writes the
+    // conventional `\log_2(x)` (which already parses back to `Lb`, see
+    // `parseLog`'s `sub === 2` case). The bare function symbol still
+    // serializes as `\lb`: it has no base to subscript, and the old spelling
+    // continues to parse as input either way.
+    serialize: (serializer, expr) =>
+      symbol(expr) !== null
+        ? '\\lb'
+        : joinLatex(['\\log_{2}', serializer.wrap(operand(expr, 1))]),
   },
   // Function-style alias: `\operatorname{lb}(x)` (binary log).
   {
@@ -2744,6 +2781,19 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       if (rhs === null) return null;
 
       return ['Negate', rhs];
+    },
+    // The default prefix serializer parenthesizes any operand whose
+    // dictionary precedence is looser than `-`'s, which includes
+    // `Divide`/`Rational` (fraction precedence): `-(\frac{3}{4})`. A
+    // `\frac{}{}` (or `Rational`'s own fraction rendering) is already
+    // self-delimiting, so the parentheses are redundant; write the sign
+    // directly in front instead: `-\frac{3}{4}`.
+    serialize: (serializer, expr) => {
+      const rhs = operand(expr, 1);
+      if (rhs === null) return '';
+      if (operator(rhs) === 'Divide' || operator(rhs) === 'Rational')
+        return '-' + serializer.serialize(rhs);
+      return '-' + serializer.wrap(rhs, EXPONENTIATION_PRECEDENCE + 1);
     },
   },
 
