@@ -50,6 +50,7 @@ import {
   logIntegral,
   polylog,
 } from '../numerics/special-functions.js';
+import { polylogOrderReal, polylogOrderComplex } from '../numerics/polylog.js';
 import {
   ellipticKComplex,
   ellipticEComplex,
@@ -488,7 +489,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
     },
 
     PolyLog: {
-      description: 'Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ.',
+      description:
+        'Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ, at any real or complex order s.',
       wikidata: 'Q320067',
       complexity: 8700,
       // Both slots take the carrier `complex | infinity`; an infinite
@@ -537,12 +539,20 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (reduced !== undefined)
           return reduced.evaluate({ numericApproximation });
 
-        // Numeric kernel: integer order s ≥ 2 only (dilog/trilog/Li₄ …).
-        // Other orders have no kernel here → stay symbolic.
+        // Integer order s ≥ 2 (dilog/trilog/Li₄ …): the dedicated kernel,
+        // accurate over the whole plane (`polylog`/`polylogComplex`).
         const sInt = asSmallInteger(s);
-        if (sInt === null || sInt < 2) return undefined;
+        if (sInt !== null && sInt >= 2)
+          return shouldNumericize(numericApproximation, s, z)
+            ? applyN([s, z], polylog, undefined, polylogComplex)
+            : undefined;
+
+        // Non-integer or negative order (cortex-js/compute-engine#340):
+        // Liₛ(z) = z·Φ(z,s,1), the Lerch transcendent at base point a = 1
+        // (`polylogOrderReal`/`polylogOrderComplex`, `numerics/polylog.ts`).
+        // NaN where the underlying continuation declines → stays symbolic.
         return shouldNumericize(numericApproximation, s, z)
-          ? applyN([s, z], polylog, undefined, polylogComplex)
+          ? applyN([s, z], polylogOrderReal, undefined, polylogOrderComplex)
           : undefined;
       },
     },
@@ -851,8 +861,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
  *   Li₁(z)  = −ln(1 − z)
  *   Li₀(z)  = z/(1 − z)
  *   Li₋₁(z) = z/(1 − z)²
- *   Liₙ(1)  = ζ(n)             (integer n ≥ 2)
- *   Liₙ(−1) = (2^{1−n} − 1) ζ(n)   (integer n ≥ 2)
+ *   Liₛ(1)  = ζ(s)             (any s ≠ 1, cortex-js/compute-engine#340)
+ *   Liₛ(−1) = (2^{1−s} − 1) ζ(s)   (any s, the Dirichlet eta identity)
  */
 function polylogReduce(
   engine: IComputeEngine,
@@ -876,17 +886,22 @@ function polylogReduce(
       engine.function('Power', [oneMinusZ(), engine.number(2)]),
     ]);
 
-  // z = ±1 with integer order n ≥ 2.
-  if (sInt !== null && sInt >= 2 && isNumber(z) && !z.isComplex) {
-    if (z.isSame(1)) return engine.function('Zeta', [s]);
-    if (z.isSame(-1))
-      return engine.function('Multiply', [
-        engine.function('Subtract', [
-          engine.function('Power', [engine.number(2), engine.number(1 - sInt)]),
-          engine.One,
+  // z = ±1 at any remaining order: Liₛ(1) = ζ(s) and Liₛ(−1) = (2^{1−s} − 1)ζ(s).
+  if (isNumber(z) && z.im === 0 && z.isSame(1))
+    return engine.function('Zeta', [s]);
+
+  if (isNumber(z) && z.im === 0 && z.isSame(-1))
+    return engine.function('Multiply', [
+      engine.function('Subtract', [
+        engine.function('Power', [
+          engine.number(2),
+          sInt !== null
+            ? engine.number(1 - sInt)
+            : engine.function('Subtract', [engine.One, s]),
         ]),
-        engine.function('Zeta', [s]),
-      ]);
-  }
+        engine.One,
+      ]),
+      engine.function('Zeta', [s]),
+    ]);
   return undefined;
 }

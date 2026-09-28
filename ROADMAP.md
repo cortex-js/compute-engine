@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-27.
+**Last updated:** 2026-09-28.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -4686,3 +4686,13 @@ against mpmath, that kernel stays within 1e−13 only while |x| ≤ 2.75 when
 Re(x) < 0, so `lerchContinuedComplex` declines past |x| = 2.5 there. In a
 random sweep past the unit disk that is most points. Fixing #353 widens
 `LerchPhi` with it.
+
+### `PolyLog`'s widened order inherits both `LerchPhi` gaps above (OPEN, found 2026-09-28 while widening `PolyLog`, #340)
+
+`PolyLog(s, z)` at a non-integer or complex order now reduces to `z·Φ(z,s,1)`
+(`numerics/polylog.ts`), so both open `LerchPhi` items above carry over
+directly: past `|z| = 1`, the compiled (JavaScript/GPU) lane is `NaN`
+(no complex incomplete gamma kernel there), and `N()` declines past `|x| =
+2.5` in the same incomplete-gamma argument, blocked on the same #353. No
+separate fix is needed once those land — `PolyLog` widens for free.
+

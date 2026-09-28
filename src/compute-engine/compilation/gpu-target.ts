@@ -3004,6 +3004,7 @@ const GPU_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'Zeta',
   'HurwitzZeta',
   'LerchPhi',
+  'PolyLog',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of the shader targets. The base
@@ -7072,6 +7073,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_gpu_lerch_phi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
   },
+  // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_poly_log` is `z ·
+  // _gpu_lerch_phi(z, s, 1.0)`, so it is NaN everywhere `_gpu_lerch_phi`
+  // is (past |z| = 1, or a genuinely complex value off the real axis).
+  PolyLog: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        'Could not compile `PolyLog`: it takes exactly two operands'
+      );
+    return `_gpu_poly_log(${compile(args[0])}, ${compile(args[1])})`;
+  },
   Binomial: gpuBinomial,
   // `Choose(n, k)` is the binomial coefficient — same lowering (the two heads
   // share `evaluateBinomial` in the interpreter, so they must agree here too).
@@ -9120,6 +9131,14 @@ float _gpu_lerch_phi(float z, float s, float a) {
   if (z < 0.0) return _gpu_lerch_euler(z, s, a);
   return _gpu_lerch_series(z, s, a);
 }
+
+// PolyLog widened to a non-integer or complex order s
+// (cortex-js/compute-engine#340): Liₛ(z) = z·Φ(z,s,1), so this reuses
+// _gpu_lerch_phi at a = 1 rather than a second kernel; it is NaN
+// everywhere _gpu_lerch_phi is.
+float _gpu_poly_log(float s, float z) {
+  return z * _gpu_lerch_phi(z, s, 1.0);
+}
 `;
 
 /**
@@ -9189,6 +9208,14 @@ fn _gpu_lerch_phi(z: f32, s: f32, a: f32) -> f32 {
   if (a < 0.0 && s != floor(s)) { return bitcast<f32>(0x7fc00000u); }
   if (z < 0.0) { return _gpu_lerch_euler(z, s, a); }
   return _gpu_lerch_series(z, s, a);
+}
+
+// PolyLog widened to a non-integer or complex order s
+// (cortex-js/compute-engine#340): Liₛ(z) = z·Φ(z,s,1), so this reuses
+// _gpu_lerch_phi at a = 1 rather than a second kernel; it is NaN
+// everywhere _gpu_lerch_phi is.
+fn _gpu_poly_log(s: f32, z: f32) -> f32 {
+  return z * _gpu_lerch_phi(z, s, 1.0);
 }
 `;
 
@@ -13181,8 +13208,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const usesZeta = /_gpu_(hurwitz_)?zeta/.test(code);
     // `_gpu_lerch_phi` calls both `_gpu_nan()` (past |z| = 1, or a < 0 with
     // a non-integer s) and `_gpu_hurwitz_zeta` (z = 1) from its own body,
-    // the same gap `usesZeta` closes for the zeta helpers.
-    const usesLerch = /_gpu_lerch/.test(code);
+    // the same gap `usesZeta` closes for the zeta helpers. `_gpu_poly_log`
+    // calls `_gpu_lerch_phi` without naming it in the emitted code either
+    // (only `_gpu_poly_log` itself appears there), so it shares this flag.
+    const usesLerch = /_gpu_(lerch|poly_log)/.test(code);
     if (
       code.includes('_gpu_nan') ||
       (!isWGSL &&

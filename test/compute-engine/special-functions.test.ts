@@ -2461,9 +2461,12 @@ describe('POLYLOGARITHM Liₙ(z)', () => {
     expect(ce.box(['PolyLog', 1, 0.5]).evaluate().re).toBeCloseTo(Math.LN2, 14);
   });
 
-  test('stays symbolic outside the kernel domain', () => {
-    // Non-integer and symbolic orders have no kernel (n ≥ 2 only)
-    expect(ce.box(['PolyLog', 2.5, 0.5]).N().operator).toBe('PolyLog');
+  test('a non-integer numeric order now numericizes; a symbolic order still stays symbolic', () => {
+    // Non-integer order widened to the Lerch transcendent kernel
+    // (cortex-js/compute-engine#340, numerics/polylog.ts); see
+    // polylog-order.test.ts for the widened kernel's own coverage. A
+    // symbolic order still has no kernel to numericize against.
+    expect(ce.box(['PolyLog', 2.5, 0.5]).N().operator).not.toBe('PolyLog');
     expect(ce.box(['PolyLog', 's', 0.5]).N().operator).toBe('PolyLog');
   });
 

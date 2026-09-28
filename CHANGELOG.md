@@ -228,6 +228,24 @@
   disk, where the continuation needs a complex incomplete gamma function
   neither target has a kernel for.
 
+- **`PolyLog` now evaluates at a non-integer or complex order** (#340,
+  contributed by [enumeratio](https://github.com/enumeratio)). `PolyLog(s,
+  z)` previously answered only an integer order `s ≥ 2`; `PolyLog(2.5,
+  0.5).N()` is now `0.5549972787175124` and `PolyLog(1.5+0.5i, 0.5).N()` is
+  `0.6126403889001154 - 0.05103210425890372i`, both by `Liₛ(z) = z·Φ(z,s,1)`
+  through the `LerchPhi` kernel at base point `a = 1`. `PolyLog(s, 1)` and
+  `PolyLog(s, -1)` now reduce exactly to `Zeta(s)` and the Dirichlet eta
+  identity `(2^(1-s) - 1)·Zeta(s)` for every order, not only an integer one.
+  Every existing integer-order and elementary-form result is unchanged. The
+  widened kernel declines (stays symbolic) rather than answer a value it
+  cannot certify to machine precision: close to the `z = 1` branch point,
+  where `s` sits within 0.05 of a positive integer on or past the unit
+  circle, and on the real axis `z < 0` once `Re(s)` is too negative for the
+  van Wijngaarden Euler transform to stay accurate (see
+  `numerics/polylog.ts`'s reliability guards for the measured boundaries).
+  `PolyLog` compiles to JavaScript, GLSL and WGSL for real operands, with
+  the same reliability guards; it was not compilable at all before.
+
 - **`ce.number({ re, im })` builds a complex number from two parts, each a
   JavaScript number or a `BigDecimal`.** `ce.number({ re: ce.bignum('1e-800'),
   im: ce.bignum('2') })` keeps both parts at full precision; a zero imaginary
