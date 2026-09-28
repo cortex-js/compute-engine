@@ -4,9 +4,13 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression, IComputeEngine } from '../global-types.js';
 
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
-import { SMALL_INTEGER } from '../numerics/numeric.js';
+import type { NumericValue } from '../numeric-value/types.js';
 import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
+import {
+  isGaussianIntegerValue,
+  isImaginaryPartNaN,
+} from './imaginary-part.js';
 import { chopComplexDust } from '../numeric-value/roundoff.js';
 
 /**
@@ -21,16 +25,29 @@ import { chopComplexDust } from '../numeric-value/roundoff.js';
  * of a 16-digit value. A machine-precision operand then contaminates
  * downstream arithmetic to machine precision, mirroring float contagion.
  *
- * Small integers stay exact: machine kernels return them for exact special
- * values (e.g. `BesselI(0, 0)` = 1), and `ce.number()` interns them.
- * Non-finite values keep their canonical boxing (±oo, NaN).
+ * When an argument is a float, the result is a float, even when its value is
+ * an integer: at every precision, `2.0^2` is the float `4`, as
+ * `boxKernelResult()` does for a big-decimal result. A `MachineNumericValue`
+ * is never exact, so it carries that result.
+ *
+ * Otherwise a safe-integer result stays exact: machine kernels return them
+ * for exact special values (e.g. `BesselI(0, 0)` = 1), and `ce.number()`
+ * interns the small ones. Non-finite values keep their canonical boxing
+ * (±oo, NaN).
  */
-function boxMachineNumber(ce: IComputeEngine, value: number): Expression {
-  if (
-    bignumPreferred(ce) &&
-    Number.isFinite(value) &&
-    !(Number.isInteger(value) && Math.abs(value) <= SMALL_INTEGER)
-  )
+function boxMachineNumber(
+  ce: IComputeEngine,
+  value: number,
+  args: ReadonlyArray<Expression>
+): Expression {
+  if (!Number.isFinite(value)) return ce.number(value);
+  // A zero result is the float `+0`: `Math.ceil(-0.3)` is `-0`, and the
+  // engine does not keep the sign of a float zero anywhere else (the
+  // literal `-0.0` and the product `-1.0 · 0.0` are `+0`, and a big decimal
+  // has no negative zero).
+  if (args.some((x) => isNumber(x) && !x.isExact))
+    return ce.number(new MachineNumericValue(value === 0 ? 0 : value));
+  if (bignumPreferred(ce) && !Number.isSafeInteger(value))
     return ce.number(new MachineNumericValue(value));
   return ce.number(value);
 }
@@ -61,7 +78,7 @@ function boxMachineNumber(ce: IComputeEngine, value: number): Expression {
 export function isExactNumber(x: Expression): boolean {
   if (!isNumber(x)) return true;
   if (x.isExact) return true;
-  return x.im !== 0 && Number.isInteger(x.re) && Number.isInteger(x.im);
+  return x.isComplex && isGaussianIntegerValue(x.numericValue);
 }
 
 /**
@@ -121,11 +138,86 @@ function boxKernelResult(
   return boxBignumResult(ce, result);
 }
 
+/**
+ * Box the complex result of a double kernel, `{re, im}`. When an argument is
+ * a float, the result is a float, even when its value is a Gaussian integer
+ * or its imaginary part is `0`: at every precision `i^{2.0}` is the float
+ * `-1`, as `boxMachineNumber()` makes a real result a float.
+ * `_numericValue()` makes a safe-integer `{re, im: 0}` exact, which is what
+ * a caller that builds exact data wants, so the float is made here with the
+ * inexact factory of the engine. Otherwise the value is boxed as
+ * `_numericValue()` boxes it: exact when it is a Gaussian integer.
+ */
+export function boxComplexKernelResult(
+  ce: IComputeEngine,
+  value: { re: number; im: number },
+  args: ReadonlyArray<Expression>
+): Expression {
+  if (args.some((x) => isNumber(x) && !x.isExact))
+    return ce.number(
+      ce._inexactNumericValue({
+        re: value.re === 0 ? 0 : value.re,
+        im: value.im === 0 ? 0 : value.im,
+      })
+    );
+  return ce.number(ce._numericValue(value));
+}
+
+/**
+ * The value of an operator at operands of which one at least is complex,
+ * computed with the big-decimal methods of `NumericValue` (`sqrt()`, `pow()`,
+ * `root()`, `ln()`, `exp()`, the arithmetic) instead of a `complex-esm`
+ * kernel.
+ *
+ * In an engine working above machine precision, a `BigNumericValue` holds
+ * both parts of a complex value as big decimals, and its methods compute
+ * both parts at the working precision. The `complex-esm` kernels compute in
+ * doubles: they give 16 digits, and they read an imaginary part too small
+ * or too large for a double (`10^{-800}`, `10^{800}`) as `0` or `Infinity`.
+ *
+ * Each operand is converted to an inexact big-decimal value first, so an
+ * exact operand is computed at the working precision. Returns `undefined` when the
+ * engine works at machine precision, when an operand is a machine value (it
+ * holds only doubles, so the double kernel gives the same answer), or when
+ * the method gives `NaN`: the caller then uses its double kernel.
+ *
+ * Design note: `docs/plans/2026-09-27-big-decimal-imaginary-part.md` §2.3.
+ */
+export function complexNumericValueRoute(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  fn: ((...xs: NumericValue[]) => NumericValue | undefined) | undefined
+): Expression | undefined {
+  if (fn === undefined || !bignumPreferred(ce)) return undefined;
+  const values: NumericValue[] = [];
+  for (const op of ops) {
+    if (!isNumber(op)) return undefined;
+    const nv = op.numericValue;
+    const value = (typeof nv === 'number' ? ce._numericValue(nv) : nv).N();
+    if (value instanceof MachineNumericValue) return undefined;
+    // `N()` keeps an exact integer (and `0`, `1`, `-1`) exact, and the
+    // methods of an exact value compute a complex operand in doubles
+    // (`ExactNumericValue.pow` with a complex exponent), so `2^{i·10^{-800}}`
+    // would lose its imaginary part. Every operand is therefore rebuilt with
+    // the inexact factory of the engine, from its big-decimal parts.
+    values.push(
+      ce._inexactNumericValue({
+        re: value.bignumRe ?? value.re,
+        im: value.bignumIm ?? value.im,
+      })
+    );
+  }
+  const result = fn(...values);
+  if (result === undefined || result.isNaN) return undefined;
+  return ce.number(result);
+}
+
 export function apply(
   expr: Expression,
   fn: (x: number) => number | Complex,
   bigFn?: (x: BigDecimal) => BigDecimal | Complex | number,
-  complexFn?: (x: Complex) => number | Complex
+  complexFn?: (x: Complex) => number | Complex,
+  numericValueFn?: (x: NumericValue) => NumericValue | undefined
 ): Expression | undefined {
   if (!isNumber(expr)) return undefined;
   const ce = expr.engine;
@@ -138,11 +230,29 @@ export function apply(
   // the cascade reads the propagated NaN as a domain exit and the application
   // stays inert, which ERROR-MODEL §1 forbids as a terminal answer.
   // `applyN` carries the same guard for the n-ary kernels.
-  if (Number.isNaN(expr.re) || Number.isNaN(expr.im)) return ce.NaN;
+  if (Number.isNaN(expr.re) || isImaginaryPartNaN(expr)) return ce.NaN;
 
   let result: number | Complex | BigDecimal | undefined = undefined;
-  if (expr.im !== 0) result = complexFn?.(ce.complex(expr.re, expr.im));
-  else {
+  // The test is `isComplex`, not `im !== 0`: an exact value with an
+  // imaginary part too small for a double (`10^{-800}·i`) is complex and must
+  // reach the complex kernel, not the real branch, which reads only `re`. The
+  // complex kernels (`complex-esm`) compute in doubles by nature, so they
+  // receive the double projections `re` and `im`, and for that value they see
+  // an imaginary part of `0`. The same rule applies in `applyN` and `apply2`.
+  // Design note: `docs/plans/2026-09-27-big-decimal-imaginary-part.md` §5.
+  if (expr.isComplex) {
+    // An operator that has a big-decimal method (`numericValueFn`) computes
+    // both parts at the working precision. Only the others use the double
+    // kernel: the complex transcendental kernels stay machine precision at
+    // every engine precision (decision D4 of the design note).
+    const viaNumericValue = complexNumericValueRoute(
+      ce,
+      [expr],
+      numericValueFn
+    );
+    if (viaNumericValue !== undefined) return viaNumericValue;
+    result = complexFn?.(ce.complex(expr.re, expr.im));
+  } else {
     const re = expr.re;
     const bigRe = expr.bignumRe;
     if (bigRe !== undefined && bignumPreferred(ce) && bigFn)
@@ -159,8 +269,8 @@ export function apply(
 
   if (result === undefined) return undefined;
   if (result instanceof Complex)
-    return ce.number(ce._numericValue({ re: result.re, im: result.im }));
-  if (typeof result === 'number') return boxMachineNumber(ce, result);
+    return boxComplexKernelResult(ce, { re: result.re, im: result.im }, [expr]);
+  if (typeof result === 'number') return boxMachineNumber(ce, result, [expr]);
   return boxKernelResult(ce, result, [expr]);
 }
 
@@ -187,7 +297,7 @@ export function applyN(
   if (!ops.every((op) => isNumber(op))) return undefined;
   const ce = ops[0].engine;
 
-  if (ops.some((op) => Number.isNaN(op.re) || Number.isNaN(op.im)))
+  if (ops.some((op) => Number.isNaN(op.re) || isImaginaryPartNaN(op)))
     return ce.NaN;
 
   let result: number | Complex | BigDecimal | undefined = undefined;
@@ -200,7 +310,10 @@ export function applyN(
         ? r.isNaN()
         : r.isNaN());
 
-  if (ops.some((op) => op.im !== 0)) {
+  if (ops.some((op) => op.isComplex)) {
+    // The complex kernels of the special functions compute in doubles at
+    // every engine precision (decision D4 of
+    // `docs/plans/2026-09-27-big-decimal-imaginary-part.md`).
     result = complexFn?.(...ops.map((op) => ce.complex(op.re, op.im)));
   } else {
     // Cascade: bignum (if preferred) → machine → complex. A NaN from a
@@ -227,11 +340,15 @@ export function applyN(
     // a property of the arithmetic, not of the user's comparison tolerance.
     // The test is RELATIVE to the modulus of the result, so a small result
     // (`(10^{-10} i)^2 = -10^{-20}`) keeps both parts.
-    return ce.number(ce._numericValue(chopComplexDust(result.re, result.im)));
+    return boxComplexKernelResult(
+      ce,
+      chopComplexDust(result.re, result.im),
+      ops
+    );
   }
   if (typeof result === 'number') {
     if (Number.isNaN(result)) return undefined;
-    return boxMachineNumber(ce, result);
+    return boxMachineNumber(ce, result, ops);
   }
   if (result.isNaN()) return undefined;
   return boxKernelResult(ce, result, ops);
@@ -242,7 +359,11 @@ export function apply2(
   expr2: Expression,
   fn: (x1: number, x2: number) => number | Complex,
   bigFn?: (x1: BigDecimal, x2: BigDecimal) => BigDecimal | Complex | number,
-  complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
+  complexFn?: (x1: Complex, x2: number | Complex) => Complex | number,
+  numericValueFn?: (
+    x1: NumericValue,
+    x2: NumericValue
+  ) => NumericValue | undefined
 ): Expression | undefined {
   if (!isNumber(expr1) || !isNumber(expr2)) return undefined;
 
@@ -254,18 +375,27 @@ export function apply2(
   // propagated NaN as a report about the kernel's domain, which it is not.
   if (
     Number.isNaN(expr1.re) ||
-    Number.isNaN(expr1.im) ||
+    isImaginaryPartNaN(expr1) ||
     Number.isNaN(expr2.re) ||
-    Number.isNaN(expr2.im)
+    isImaginaryPartNaN(expr2)
   )
     return ce.NaN;
 
   let result: number | Complex | BigDecimal | undefined = undefined;
-  if (expr1.im !== 0 || expr2.im !== 0) {
+  if (expr1.isComplex || expr2.isComplex) {
     // A non-real operand needs the complex kernel. Without one the
     // application stays symbolic: the real branches below read only `.re`,
     // so falling through would silently DROP the imaginary part and answer
     // the value at a different point.
+    // An operator with a big-decimal method computes at the working
+    // precision; the double kernel is used otherwise (decision D4, see
+    // `apply`).
+    const viaNumericValue = complexNumericValueRoute(
+      ce,
+      [expr1, expr2],
+      numericValueFn
+    );
+    if (viaNumericValue !== undefined) return viaNumericValue;
     if (!complexFn) return undefined;
     result = complexFn(
       ce.complex(expr1.re, expr1.im),
@@ -302,12 +432,16 @@ export function apply2(
   if (result === undefined) return undefined;
   if (result instanceof Complex)
     // Relative roundoff scale, not `ce.tolerance`: see the first branch.
-    return ce.number(ce._numericValue(chopComplexDust(result.re, result.im)));
+    return boxComplexKernelResult(ce, chopComplexDust(result.re, result.im), [
+      expr1,
+      expr2,
+    ]);
   // Do not chop a real result: a legitimately-small value (e.g. 10^-100 from
   // `Power(10, -100)`) is not roundoff noise, and chopping it to 0 is both
   // wrong and inconsistent with the single-argument `apply` above. (The
   // complex branch removes a component only when it is tiny compared with
   // the modulus, which is typically trig roundoff.)
-  if (typeof result === 'number') return boxMachineNumber(ce, result);
+  if (typeof result === 'number')
+    return boxMachineNumber(ce, result, [expr1, expr2]);
   return boxKernelResult(ce, result, [expr1, expr2]);
 }

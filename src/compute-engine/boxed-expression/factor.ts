@@ -944,7 +944,7 @@ function factorUncached(expr: Expression): Expression {
       // meaningful gcd: `gcd` returns NaN, which would poison `common` and make
       // factor() return NaN (destroying a Gaussian integer at boxing time).
       // Leave such sums unfactored.
-      if (coeff.im !== 0) return expr;
+      if (coeff.isComplex) return expr;
       common = common ? common.gcd(coeff) : coeff;
       if (!coeff.isZero) terms.push({ coeff, term });
     }

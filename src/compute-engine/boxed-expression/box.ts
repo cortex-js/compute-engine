@@ -1,4 +1,5 @@
 import { Complex } from 'complex-esm';
+import { shadowsLibraryName } from '../library-shadowing.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type {
   ExpressionInput,
@@ -32,7 +33,6 @@ import { checkDeadline } from '../../common/interruptible.js';
 
 import { isOne } from '../numerics/rationals.js';
 import { asBigint } from './numerics.js';
-import { isExactDouble } from '../numerics/numeric-bignum.js';
 
 import { canonicalAdd } from './arithmetic-add.js';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
@@ -101,7 +101,7 @@ import {
 } from '../../common/type/instantiate.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
-import { boxBignumResult, isValueDef } from './utils.js';
+import { isValueDef } from './utils.js';
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
@@ -498,7 +498,20 @@ function boxFunctionInternal(
   // (!@note: this procedure is similarly repeated within the 'number'
   //  CanonicalForm, but the numberForm variant more simply applies to fully
   // BoxedExprs., and during partial canonicalization only)
-  if (canonicalNumber) {
+  //
+  // Skipped when a user definition shadows the head (`function Divide(x, y)
+  // { … }`): the fold would answer the library operator's value, not the
+  // user's (see `shadowsLibraryName`, `library-shadowing.ts`).
+  if (
+    canonicalNumber &&
+    !(
+      (name === 'Divide' ||
+        name === 'Rational' ||
+        name === 'Complex' ||
+        name === 'Negate') &&
+      shadowsLibraryName(ce, name)
+    )
+  ) {
     //
     // Rational (as Divide)
     //
@@ -589,10 +602,20 @@ function boxFunctionInternal(
         }
 
         const re = reOp.re;
-        const im = imOp.re;
-        if (im !== null && re !== null && !isNaN(im) && !isNaN(re)) {
-          if (im === 0 && re === 0) return ce.Zero;
-          if (im !== 0) {
+        const imDouble = imOp.re;
+        if (
+          imDouble !== null &&
+          re !== null &&
+          !isNaN(imDouble) &&
+          !isNaN(re)
+        ) {
+          // Read the imaginary part from its big decimal when it has one: the
+          // double is `0` for `10^{-800}` and `Infinity` for `10^{800}`.
+          const im = imOp.bignumRe ?? imDouble;
+          const imIsZero = typeof im === 'number' ? im === 0 : im.isZero();
+          const reIsZero = reOp.bignumRe?.isZero() ?? re === 0;
+          if (imIsZero && reIsZero) return ce.Zero;
+          if (!imIsZero) {
             const bignumRe = reOp.bignumRe;
             return ce.number(
               ce._numericValue(
@@ -3610,6 +3633,22 @@ function bindBindingSites(
   return ce._fn(name, next, { metadata, scope });
 }
 
+/** The heads `makeNumericFunction` canonicalizes by name, without looking
+ * up their definition. */
+const NUMERIC_SHORT_PATH_NAMES: ReadonlySet<string> = new Set([
+  'Add',
+  'Multiply',
+  'Negate',
+  'Square',
+  'Sqrt',
+  'Exp',
+  'Ln',
+  'Log',
+  'Power',
+  'Root',
+  'Divide',
+]);
+
 function makeNumericFunction(
   ce: ComputeEngine,
   name: MathJsonSymbol,
@@ -3617,6 +3656,14 @@ function makeNumericFunction(
   metadata?: Metadata,
   scope?: Scope
 ): Expression | null {
+  // A user definition of one of these names shadows the library operator,
+  // so the call must reach the generic route, which looks the definition up.
+  // The short path below folds by name (`Square(3)` → `9`), and it silently
+  // ignored `function Square(x) { x + 100 }` (user decision 2026-09-27: a
+  // capitalized library name is shadowed like any other). A consequence:
+  // shadowing `Add` also changes `+`, which builds an `Add`.
+  if (NUMERIC_SHORT_PATH_NAMES.has(name) && shadowsLibraryName(ce, name))
+    return null;
   let ops: ReadonlyArray<Expression> = [];
   if (name === 'Add' || name === 'Multiply')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), {
@@ -3701,7 +3748,17 @@ function makeNumericFunction(
       const base = ops[1];
       const baseIsOneOrNaN =
         base !== undefined && isNumber(base) && (base.isSame(1) || base.isNaN);
-      if (isNumber(ops[0]) && ops[0].isSame(1) && !baseIsOneOrNaN)
+      // Only an EXACT `1` with an exact or symbolic base folds: `Ln(1.0)`
+      // and `Log(1, 2.0)` stay, and evaluate to the float `0`, as a float
+      // operand gives a float result.
+      const baseIsFloat = base !== undefined && isNumber(base) && !base.isExact;
+      if (
+        isNumber(ops[0]) &&
+        ops[0].isExact &&
+        ops[0].isSame(1) &&
+        !baseIsOneOrNaN &&
+        !baseIsFloat
+      )
         return ce.Zero;
       // Ln(a) -> Ln(a), Log(a) -> Log(a)
       if (ops.length === 1)
@@ -3733,25 +3790,15 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
   // decomposing it into `re + im·i` terms would only re-fold to the same
   // literal (via canonicalAdd), and the machine-complex imaginary emission
   // below would degrade it to an inexact float.
-  if (value.im !== 0 && value instanceof ExactNumericValue)
+  if (value.isComplex && value instanceof ExactNumericValue)
     return ce.number(value);
 
-  if (!value.isExact) {
-    const im = value.im;
-    // A float with an integer value (`2.0`) stays a float: box the value
-    // itself, not its big decimal, which `ce.number()` reads as exact.
-    if (im === 0) return ce.number(value);
-    if (value.re === 0) return ce.number(ce.complex(0, im));
-    // A complex literal holds its real part as a double, so a big-decimal real
-    // part that is not exactly a double is kept in a separate term.
-    if (value.bignumRe !== undefined && !isExactDouble(value.bignumRe)) {
-      return canonicalAdd(ce, [
-        boxBignumResult(ce, value.bignumRe),
-        ce.number(ce.complex(0, im)),
-      ]);
-    }
-    return ce.number(ce.complex(value.re, value.im));
-  }
+  // An inexact value is boxed as it is. A float with an integer value (`2.0`)
+  // stays a float, and a complex value keeps both parts at the precision it
+  // holds them (a big-decimal imaginary part such as `10^{-800}` is not
+  // rebuilt through the double constructor `ce.complex()`, which would round
+  // it to `0`).
+  if (!value.isExact) return ce.number(value);
 
   const terms: Expression[] = [];
 
@@ -3792,7 +3839,7 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
 
   let result: Expression;
 
-  if (value.im === 0) {
+  if (!value.isComplex) {
     if (terms.length === 0) return ce.Zero;
     result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
     return result;
@@ -3801,10 +3848,13 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
   //
   // Imaginary Part
   //
-  if (terms.length === 0) return ce.number(ce.complex(0, value.im));
+  const imaginary = ce.number(
+    ce._numericValue({ re: 0, im: value.bignumIm ?? value.im })
+  );
+  if (terms.length === 0) return imaginary;
 
   result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
-  return canonicalAdd(ce, [result, ce.number(ce.complex(0, value.im))]);
+  return canonicalAdd(ce, [result, imaginary]);
 }
 
 export function semiCanonical(

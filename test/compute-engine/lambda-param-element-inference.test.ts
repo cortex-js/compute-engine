@@ -984,7 +984,11 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let rows: list<list<number>> = [[1,2],[3,4]]');
     const expr = ce.box(['Map', ['Function', ['Length', 'r'], 'r'], 'rows']);
-    expect(expr.ops[0].type.toString()).toBe('(r: list<number>) -> integer');
+    // `Length` of a list-typed operand admits `+oo` (a `list` value can be an
+    // infinite lazy list, such as `Repeat(5)`).
+    expect(expr.ops[0].type.toString()).toBe(
+      '(r: list<number>) -> integer | signed_infinity'
+    );
     expect(expr.evaluate().toString()).toBe('[2,2]');
   });
 });

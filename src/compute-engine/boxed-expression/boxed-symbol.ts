@@ -88,6 +88,7 @@ import {
   isNumber,
   isSymbol,
 } from './type-guards.js';
+import { realExponentValue } from './imaginary-part.js';
 import {
   memoDepsStillValid,
   snapshotMemoDeps,
@@ -470,7 +471,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   root(n: number | Expression): Expression {
-    const e = typeof n === 'number' ? n : n.im === 0 ? n.re : undefined;
+    const e =
+      typeof n === 'number'
+        ? n
+        : isNumber(n)
+          ? realExponentValue(n)
+          : n.im === 0
+            ? n.re
+            : undefined;
 
     const ce = this.engine;
     if (this.symbol === 'ComplexInfinity') return ce.NaN;

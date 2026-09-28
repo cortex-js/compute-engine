@@ -3,6 +3,11 @@ import { BigDecimal } from '../../big-decimal/index.js';
 
 import { euclideanNormType, pointNormBroadcasts } from './utils.js';
 import { bignumPreferred, boxBignumResult } from '../boxed-expression/utils.js';
+import {
+  asFloat,
+  floatIfFloatOperand,
+  hasFloatOperand,
+} from '../boxed-expression/float-result.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
   checkArity,
@@ -202,6 +207,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // Constants
     //
     Pi: {
+      examples: ['N(Pi)', 'Cos(Pi)'],
       description:
         "The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter.",
       // Bracketed like `ExponentialE` (lower bound = the machine double of
@@ -220,6 +226,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   },
   {
     Degrees: {
+      examples: ['Degrees(30)', 'Sin(Degrees(30))'],
       description: 'Convert an angle in degrees.',
       /* = Pi / 180 */
       signature: '(real) -> real',
@@ -308,6 +315,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     // DMS(degrees, minutes?, seconds?) — programmatic angle construction
     DMS: {
+      examples: ['DMS(30, 15)', 'N(DMS(30, 15))'],
       description: 'Construct an angle from degrees, minutes, and seconds.',
       // A complex component cannot be folded and leaves the call
       // unevaluated rather than truncated (see the evaluate handler), so the
@@ -392,6 +400,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     // Hypot: sqrt(x*x + y*y)
     Hypot: {
+      examples: ['Hypot(3, 4)', 'Hypot(1, 1)'],
       description: 'Hypotenuse length: sqrt(x^2 + y^2).',
       broadcastable: true,
       // The carrier is the finite reals plus EVERY infinity, because
@@ -530,6 +539,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // The definition of other trig functions may rely on Sin, so it is defined
     // first in this preliminary section
     Sin: {
+      examples: ['Sin(Pi / 6)', 'Sin(1)', 'N(Sin(1))'],
       ...trigFunction('Sin', 5000, 'Sine of an angle.', 'complex'),
       keywords: ['sine'],
       // The carrier is the FINITE complex numbers: sine is entire but has
@@ -556,6 +566,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // (may be used in the definition of other functions below)
     //
     Arctan: {
+      examples: ['Arctan(1)', 'N(Arctan(2))'],
       description: 'Inverse tangent.',
       keywords: ['atan'],
       wikidata: 'Q2257242',
@@ -618,6 +629,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
 
     Arctan2: {
+      examples: ['Arctan2(1, -1)', 'Arctan2(-1, -1)'],
       description: 'Two-argument arctangent giving the angle of a vector.',
       keywords: ['atan2'],
       wikidata: 'Q776598',
@@ -656,7 +668,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // BOTH paths rather than let evaluate() continue analytically via
         // Arctan (e.g. 0.549i) while .N()/apply2 silently reads the real
         // part (0).
-        if ((isNumber(y) && y.im !== 0) || (isNumber(x) && x.im !== 0))
+        if ((isNumber(y) && y.isComplex) || (isNumber(x) && x.isComplex))
           return undefined;
 
         // Like the other inverse trig functions, the result is an angle in
@@ -674,7 +686,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         }
 
-        if (numericApproximation)
+        // A float operand makes the angle a float, as `Arctan(0.5)` is:
+        // `Arctan2(0.0, 1)` is the float `0`, and `Arctan2(0.0, -1)` the
+        // float `3.14…`, not the exact `π` of the exact branches below.
+        if (numericApproximation || hasFloatOperand([y, x]))
           return radiansToAngle(
             apply2(y, x, Math.atan2, (a, b) => BigDecimal.atan2(a, b))
           );
@@ -713,6 +728,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
 
     Cos: {
+      examples: ['Cos(Pi / 3)', 'N(Cos(1))'],
       // Like `Sin`: no value at any infinity (oscillates toward the real
       // infinities, no limit at `~oo`).
       ...trigFunction('Cos', 5050, 'Cosine of an angle.', 'complex'),
@@ -720,6 +736,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
 
     Tan: {
+      examples: ['Tan(Pi / 3)', 'N(Tan(1))'],
       // No value at any infinity. The POLES (odd multiples of π/2) are
       // in-carrier finite points whose VALUE is `~oo` — the carrier
       // restricts arguments, not results.
@@ -746,14 +763,18 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // treatment (symbolic under `evaluate()`, machine complex under
     // `.N()`); no value at `~oo` (the `Ln(~oo)` ruling — the modulus
     // diverges in every direction but the limit point does not exist).
-    Arcosh: trigFunction(
-      'Arcosh',
-      6200,
-      'Inverse hyperbolic cosine (area hyperbolic cosine).',
-      'complex | signed_infinity'
-    ),
+    Arcosh: {
+      ...trigFunction(
+        'Arcosh',
+        6200,
+        'Inverse hyperbolic cosine (area hyperbolic cosine).',
+        'complex | signed_infinity'
+      ),
+      examples: ['Arcosh(1)', 'N(Arcosh(2))'],
+    },
 
     Arcsin: {
+      examples: ['Arcsin(1/2)', 'N(Arcsin(2))'],
       ...trigFunction(
         'Arcsin',
         5500,
@@ -773,25 +794,32 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     // `Arsinh(±∞) = ±∞` (odd, increasing on the whole real line); the two
     // signs disagree, so no value at `~oo`.
-    Arsinh: trigFunction(
-      'Arsinh',
-      6100,
-      'Inverse hyperbolic sine (area hyperbolic sine).',
-      'complex | signed_infinity'
-    ),
+    Arsinh: {
+      ...trigFunction(
+        'Arsinh',
+        6100,
+        'Inverse hyperbolic sine (area hyperbolic sine).',
+        'complex | signed_infinity'
+      ),
+      examples: ['Arsinh(0)', 'N(Arsinh(1))'],
+    },
 
     // `Artanh(±∞) = ∓(π/2)i` — the imaginary asymptotes of the principal
     // branch (ruled 2026-09-01: a finite imaginary value at a real
     // infinity is encoded, not rejected). The two signs disagree, so no
     // value at `~oo`.
-    Artanh: trigFunction(
-      'Artanh',
-      6300,
-      'Inverse hyperbolic tangent (area hyperbolic tangent).',
-      'complex | signed_infinity'
-    ),
+    Artanh: {
+      ...trigFunction(
+        'Artanh',
+        6300,
+        'Inverse hyperbolic tangent (area hyperbolic tangent).',
+        'complex | signed_infinity'
+      ),
+      examples: ['Artanh(0)', 'N(Artanh(1/2))'],
+    },
 
     Cosh: {
+      examples: ['Cosh(0)', 'N(Cosh(1))'],
       // `Cosh(±∞) = +∞`; no value at `~oo` (oscillates along the
       // imaginary directions).
       ...trigFunction(
@@ -805,28 +833,38 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     // Cot/Csc/Sec: like the other circular functions, no value at any
     // infinity; their poles are in-carrier finite points valued `~oo`.
-    Cot: trigFunction(
-      'Cot',
-      5600,
-      'Cotangent, the reciprocal of tangent.',
-      'complex'
-    ),
+    Cot: {
+      ...trigFunction(
+        'Cot',
+        5600,
+        'Cotangent, the reciprocal of tangent.',
+        'complex'
+      ),
+      examples: ['Cot(Pi / 6)', 'N(Cot(1))'],
+    },
 
-    Csc: trigFunction(
-      'Csc',
-      5600,
-      'Cosecant, the reciprocal of sine.',
-      'complex'
-    ),
+    Csc: {
+      ...trigFunction(
+        'Csc',
+        5600,
+        'Cosecant, the reciprocal of sine.',
+        'complex'
+      ),
+      examples: ['Csc(Pi / 6)', 'N(Csc(1))'],
+    },
 
-    Sec: trigFunction(
-      'Sec',
-      5600,
-      'Secant, the reciprocal of cosine.',
-      'complex'
-    ),
+    Sec: {
+      ...trigFunction(
+        'Sec',
+        5600,
+        'Secant, the reciprocal of cosine.',
+        'complex'
+      ),
+      examples: ['Sec(Pi / 3)', 'N(Sec(1))'],
+    },
 
     Sinh: {
+      examples: ['Sinh(0)', 'N(Sinh(1))'],
       // `Sinh(±∞) = ±∞`; the two signs disagree, so no value at `~oo`.
       ...trigFunction(
         'Sinh',
@@ -839,6 +877,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** = sin(z/2)^2 = (1 - cos z) / 2*/
     Haversine: {
+      examples: ['Haversine(Pi / 3)', 'Haversine(x)'],
       description: 'Haversine function.',
       wikidata: 'Q2528380',
       broadcastable: true,
@@ -867,6 +906,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** = 2 * Arcsin(Sqrt(z)) */
     InverseHaversine: {
+      examples: ['InverseHaversine(1/2)', 'N(InverseHaversine(1/4))'],
       description: 'Inverse haversine function.',
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
       broadcastable: true,
@@ -893,21 +933,28 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   {
     // `Csch(±∞) = Sech(±∞) = 0`; no value at `~oo` (both oscillate along
     // the imaginary directions, where cosh/sinh have zeros).
-    Csch: trigFunction(
-      'Csch',
-      6200,
-      'Hyperbolic cosecant, the reciprocal of hyperbolic sine.',
-      'complex | signed_infinity'
-    ),
+    Csch: {
+      ...trigFunction(
+        'Csch',
+        6200,
+        'Hyperbolic cosecant, the reciprocal of hyperbolic sine.',
+        'complex | signed_infinity'
+      ),
+      examples: ['N(Csch(1))'],
+    },
 
-    Sech: trigFunction(
-      'Sech',
-      6200,
-      'Hyperbolic secant, the reciprocal of hyperbolic cosine.',
-      'complex | signed_infinity'
-    ),
+    Sech: {
+      ...trigFunction(
+        'Sech',
+        6200,
+        'Hyperbolic secant, the reciprocal of hyperbolic cosine.',
+        'complex | signed_infinity'
+      ),
+      examples: ['Sech(0)', 'N(Sech(1))'],
+    },
 
     Tanh: {
+      examples: ['Tanh(0)', 'N(Tanh(1))'],
       // `Tanh(±∞) = ±1` (the horizontal asymptotes); the two signs
       // disagree, so no value at `~oo`.
       ...trigFunction(
@@ -921,6 +968,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   },
   {
     Arccos: {
+      examples: ['Arccos(1/2)', 'N(Arccos(1/3))'],
       // Like `Arcsin`: extends to the whole finite complex plane but
       // diverges toward every infinity — no value at any of them.
       ...trigFunction(
@@ -936,64 +984,85 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // (0, π) branch). The two disagree, so no value at `~oo` — this head
     // used to answer `Arccot(~oo) = 0`, which contradicted its own
     // `Arccot(−∞)`; the flip makes `~oo` an incompatible-type error.
-    Arccot: trigFunction(
-      'Arccot',
-      5650,
-      'Arccotangent, the inverse cotangent function.',
-      'complex | signed_infinity'
-    ),
+    Arccot: {
+      ...trigFunction(
+        'Arccot',
+        5650,
+        'Arccotangent, the inverse cotangent function.',
+        'complex | signed_infinity'
+      ),
+      examples: ['N(Arccot(1))', 'N(Arccot(-1))'],
+    },
 
     // Arcoth/Arcsch/Arcsec/Arccsc admit EVERY infinity (ruled
     // 2026-09-01): each is a composition through `1/x` whose inner head
     // (artanh, arsinh, arccos, arcsin) is continuous at 0, so all
     // directions of infinity — `+∞`, `−∞` and `~oo` alike — give the same
     // genuine value (0, 0, π/2, 0).
-    Arcoth: trigFunction(
-      'Arcoth',
-      6350,
-      'Inverse hyperbolic cotangent (area hyperbolic cotangent).',
-      'complex | infinity'
-    ),
+    Arcoth: {
+      ...trigFunction(
+        'Arcoth',
+        6350,
+        'Inverse hyperbolic cotangent (area hyperbolic cotangent).',
+        'complex | infinity'
+      ),
+      examples: ['N(Arcoth(2))'],
+    },
 
-    Arcsch: trigFunction(
-      'Arcsch',
-      6250,
-      'Inverse hyperbolic cosecant (area hyperbolic cosecant).',
-      'complex | infinity'
-    ),
+    Arcsch: {
+      ...trigFunction(
+        'Arcsch',
+        6250,
+        'Inverse hyperbolic cosecant (area hyperbolic cosecant).',
+        'complex | infinity'
+      ),
+      examples: ['N(Arcsch(1))'],
+    },
 
-    Arcsec: trigFunction(
-      'Arcsec',
-      5650,
-      'Arcsecant, the inverse secant function.',
-      'complex | infinity'
-    ),
+    Arcsec: {
+      ...trigFunction(
+        'Arcsec',
+        5650,
+        'Arcsecant, the inverse secant function.',
+        'complex | infinity'
+      ),
+      examples: ['Arcsec(2)', 'N(Arcsec(3))'],
+    },
 
     // `Arsech(±∞) = (π/2)i` — both real approaches give `arcosh(0)`
     // (ruled 2026-09-01, the imaginary-value ruling) — but the complex
     // directions disagree (arcosh's branch cut passes through 0), so
     // unlike its four neighbors above `~oo` is off-carrier.
-    Arsech: trigFunction(
-      'Arsech',
-      6250,
-      'Inverse hyperbolic secant (area hyperbolic secant).',
-      'complex | signed_infinity'
-    ),
+    Arsech: {
+      ...trigFunction(
+        'Arsech',
+        6250,
+        'Inverse hyperbolic secant (area hyperbolic secant).',
+        'complex | signed_infinity'
+      ),
+      examples: ['Arsech(1)', 'N(Arsech(1/2))'],
+    },
 
-    Arccsc: trigFunction(
-      'Arccsc',
-      5650,
-      'Arccosecant, the inverse cosecant function.',
-      'complex | infinity'
-    ),
+    Arccsc: {
+      ...trigFunction(
+        'Arccsc',
+        5650,
+        'Arccosecant, the inverse cosecant function.',
+        'complex | infinity'
+      ),
+      examples: ['Arccsc(2)', 'N(Arccsc(3))'],
+    },
 
     // `Coth(±∞) = ±1`; the two signs disagree, so no value at `~oo`.
-    Coth: trigFunction(
-      'Coth',
-      6300,
-      'Hyperbolic cotangent, the reciprocal of hyperbolic tangent.',
-      'complex | signed_infinity'
-    ),
+    Coth: {
+      ...trigFunction(
+        'Coth',
+        6300,
+        'Hyperbolic cotangent, the reciprocal of hyperbolic tangent.',
+        'complex | signed_infinity'
+      ),
+      examples: ['N(Coth(1))'],
+    },
 
     //
     // Sinc/FresnelS/FresnelC/SinIntegral/CosIntegral follow the same pattern
@@ -1009,6 +1078,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** sinc(x) = sin(x)/x with sinc(0) = 1 (unnormalized cardinal sine) */
     Sinc: {
+      examples: ['Sinc(0)', 'N(Sinc(1))'],
       description: 'Unnormalized sinc function: sin(x)/x with sinc(0)=1.',
       complexity: 5100,
       broadcastable: true,
@@ -1028,10 +1098,33 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           boundedEntireRealType(x),
           context.engine._typeResolver
         ),
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
+      evaluate: ([x], { numericApproximation, engine: ce, expression }) => {
+        // An exact constant argument (`Pi`, `Pi / 2`): sin(x)/x when sin(x)
+        // has an exact value, so `sinc(π)` is exactly 0 and `sinc(π/2)` is
+        // 2/π. Read on the operand BEFORE its numeric evaluation (under
+        // `.N()` the handler receives the float `3.14…`, whose sinc is
+        // `1.2e-25`), as the trigonometric factory reads its raw operand.
+        const raw =
+          isFunction(expression) && expression.nops === 1
+            ? expression.op1
+            : x;
+        // Not at 0 (the evaluated operand): `sinc(0) = 1` below, where
+        // sin(x)/x would be 0/0 — as when a bound index `n` is 0 in a sum.
+        if (
+          !isNumber(raw) &&
+          !(isNumber(x) && x.isSame(0)) &&
+          raw.unknowns.length === 0 &&
+          raw.type.matches('real')
+        ) {
+          const s = ce.function('Sin', [raw]).evaluate();
+          if (isNumber(s) && s.isExact) {
+            const exact = ce.function('Divide', [s, raw]).evaluate();
+            return numericApproximation ? exact.N() : exact;
+          }
+        }
+        if (!isNumber(x) || x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.One;
+        if (x.isSame(0)) return floatIfFloatOperand([x], ce.One);
         if (x.isInfinity) return ce.Zero;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
@@ -1044,6 +1137,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** FresnelS(x) = ∫₀ˣ sin(πt²/2) dt — odd function, S(∞) = 1/2 */
     FresnelS: {
+      examples: ['FresnelS(+oo)', 'N(FresnelS(1))'],
       description: 'Fresnel sine integral.',
       complexity: 5200,
       broadcastable: true,
@@ -1059,9 +1153,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
+        if (!isNumber(x) || x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.Zero;
+        if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
         if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
@@ -1074,6 +1168,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** FresnelC(x) = ∫₀ˣ cos(πt²/2) dt — odd function, C(∞) = 1/2 */
     FresnelC: {
+      examples: ['FresnelC(+oo)', 'N(FresnelC(1))'],
       description: 'Fresnel cosine integral.',
       complexity: 5200,
       broadcastable: true,
@@ -1089,9 +1184,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
+        if (!isNumber(x) || x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.Zero;
+        if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
         if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
@@ -1109,6 +1204,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      * machine precision (ROADMAP B1).
      */
     SinIntegral: {
+      examples: ['SinIntegral(+oo)', 'N(SinIntegral(1))'],
       description: 'Sine integral: ∫₀ˣ sin(t)/t dt.',
       complexity: 5200,
       broadcastable: true,
@@ -1154,7 +1250,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation ? v.N() : v;
         }
         if (point !== undefined) return ce.NaN;
-        if (x.im === 0 && x.isSame(0)) return ce.Zero;
+        if (!x.isComplex && x.isSame(0))
+          return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the E₁-based kernel.
         return apply(x, (x) => sinIntegral(x), undefined, sinIntegralComplex);
@@ -1170,6 +1267,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      * batch 8). Machine-precision only (no bignum kernel; ROADMAP B1).
      */
     CosIntegral: {
+      examples: ['N(CosIntegral(1))'],
       description: 'Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt.',
       complexity: 5200,
       broadcastable: true,
@@ -1218,7 +1316,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation ? v.N() : v;
         }
         if (point !== undefined) return ce.NaN;
-        if (x.im === 0 && x.isSame(0)) return ce.NegativeInfinity;
+        if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // A non-negative real argument uses the machine kernel; a negative
         // real one is the principal value `Ci(−x) = Ci(x) + iπ`, built from
@@ -1239,6 +1337,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      * Machine-precision only (no bignum kernel; ROADMAP B1).
      */
     SinhIntegral: {
+      examples: ['SinhIntegral(0)', 'N(SinhIntegral(1))'],
       description: 'Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt.',
       complexity: 5200,
       broadcastable: true,
@@ -1276,7 +1375,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.NegativeInfinity;
         if (point !== undefined) return ce.NaN;
-        if (x.im === 0 && x.isSame(0)) return ce.Zero;
+        if (!x.isComplex && x.isSame(0))
+          return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the Si-based kernel.
         return apply(x, (x) => sinhIntegral(x), undefined, sinhIntegralComplex);
@@ -1290,6 +1390,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      * Machine-precision only (no bignum kernel; ROADMAP B1).
      */
     CoshIntegral: {
+      examples: ['N(CoshIntegral(1))'],
       description:
         'Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.',
       complexity: 5200,
@@ -1340,7 +1441,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
             ? ce.number(ce.complex(Infinity, Math.PI))
             : undefined;
         if (point !== undefined) return ce.NaN;
-        if (x.im === 0 && x.isSame(0)) return ce.NegativeInfinity;
+        if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // A non-negative real argument uses the machine kernel; a negative
         // real one is the principal value `Chi(−x) = Chi(x) + iπ`, built
@@ -1361,6 +1462,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     //   outputDomain: ['TupleOf', 'RealNumbers', 'RealNumbers'],
     // },
     InverseFunction: {
+      examples: ['InverseFunction(Sin)', 'InverseFunction(Tan)(1)'],
       description: 'Inverse of a function.',
       lazy: true,
       signature: '(function) -> function',
@@ -1383,6 +1485,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   //
   {
     TrigExpand: {
+      examples: ['TrigExpand(Sin(a + b))', 'TrigExpand(Cos(2 * x))'],
       description:
         'Expand trigonometric and hyperbolic functions of sums and integer ' +
         'multiples of angles. ' +
@@ -1398,6 +1501,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
 
     TrigToExp: {
+      examples: ['TrigToExp(Cos(x))'],
       description:
         'Rewrite trigonometric and hyperbolic functions in terms of the ' +
         'complex exponential, exactly. ' +
@@ -1412,6 +1516,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
 
     TrigReduce: {
+      examples: ['TrigReduce(Sin(x)^2)', 'TrigReduce(Sin(x) * Cos(x))'],
       description:
         'Rewrite products and integer powers of trigonometric and hyperbolic ' +
         'functions as a linear combination of functions of multiple angles ' +
@@ -1486,7 +1591,7 @@ function angularQuantityToRadians(expr: Expression): Expression | null {
  * An absent optional component is foldable: the fold defaults it to 0.
  */
 function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
-  return ops.every((op) => op === undefined || (isNumber(op) && op.im === 0));
+  return ops.every((op) => op === undefined || (isNumber(op) && !op.isComplex));
 }
 
 /**
@@ -1705,8 +1810,13 @@ function trigFunction(
       // with `evaluate()` (the float kernel gives `Arcsch(0)` a signed
       // infinity). The same helper serves the `constructible value` simplify
       // rule, so `simplify()` agrees too.
+      // A float argument gives a float value (`sinh(0.0)` is the float `0`);
+      // a non-finite value (`coth(0.0) = ~oo`) has no float form and stays.
       const exact = hyperbolicExactValue(operator, x);
-      if (exact) return numericApproximation ? exact.N() : exact;
+      if (exact) {
+        if (hasFloatOperand([x])) return asFloat(exact.N());
+        return numericApproximation ? exact.N() : exact;
+      }
       // The operand before its numeric evaluation lets the kernel read an
       // exact large angle without rounding it first (`12345678901234567890123`
       // or `10³⁰·π`). It is the operand of `x` only when the node has one

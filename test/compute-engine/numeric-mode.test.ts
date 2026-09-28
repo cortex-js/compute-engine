@@ -124,7 +124,9 @@ describe('NUMERIC MODE bignum 7', () => {
     expect(N('0.1 + 0.2')).toMatchInlineSnapshot(`0.30000000000000004`));
 
   test(`\\sqrt{-1}`, () =>
-    expect(N('\\sqrt{-1}')).toMatchInlineSnapshot(`["Complex", 0, 1]`));
+    expect(N('\\sqrt{-1}')).toMatchInlineSnapshot(
+      `["Complex", {num: "0.0"}, {num: "1.0"}]`
+    ));
 
   test(`\\frac{1}{7}`, () =>
     expect(N('\\frac{1}{7}')).toMatchInlineSnapshot(`0.14285714285714285`));
@@ -132,7 +134,8 @@ describe('NUMERIC MODE bignum 7', () => {
   test(`\\frac{\\pi}{4}`, () =>
     expect(N('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`0.7853981633974483`));
 
-  test('e^{i\\pi}', () => expect(N('e^{i\\pi}')).toMatchInlineSnapshot(`-1`));
+  test('e^{i\\pi}', () =>
+    expect(N('e^{i\\pi}')).toMatchInlineSnapshot(`{num: "-1.0"}`));
 });
 
 //

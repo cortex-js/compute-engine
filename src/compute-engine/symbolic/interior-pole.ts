@@ -77,7 +77,7 @@ function finiteRealValue(expr: Expression | undefined): number | null {
   if (expr === undefined) return null;
   const n = expr.N();
   if (!isNumber(n) || !n.isNumberLiteral) return null;
-  if (n.im !== 0) return null;
+  if (n.isComplex) return null;
   return Number.isFinite(n.re) ? n.re : null;
 }
 
@@ -99,7 +99,7 @@ function numericCoefficients(
 
   const numeric: number[] = [];
   for (const c of coeffs) {
-    if (!isNumber(c) || !c.isNumberLiteral || c.im !== 0) return null;
+    if (!isNumber(c) || !c.isNumberLiteral || c.isComplex) return null;
     if (!Number.isFinite(c.re)) return null;
     numeric.push(c.re);
   }
@@ -347,7 +347,7 @@ function valueAt(
   ce: ComputeEngine
 ): number {
   const v = integrand.subs({ [variable]: ce.number(x) }).N();
-  if (!isNumber(v) || !v.isNumberLiteral || v.im !== 0) return NaN;
+  if (!isNumber(v) || !v.isNumberLiteral || v.isComplex) return NaN;
   return v.re;
 }
 

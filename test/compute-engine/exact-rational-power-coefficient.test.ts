@@ -80,3 +80,55 @@ describe('The coefficient of a power in a product', () => {
     );
   });
 });
+
+//
+// The double of an exact rational exponent can be an integer although the
+// rational is not one: `(10^400 + 1)/10^400` projects to the double `1`.
+// The integer-power folds must read the exact rational, not that double, so
+// `2^((10^400 + 1)/10^400)` stays a power instead of folding to `2`.
+//
+describe('An exact exponent whose double is an integer', () => {
+  const num = { num: '1' + '0'.repeat(399) + '1' };
+  const den = { num: '1e400' };
+
+  test('Power(2, (10^400 + 1)/10^400) stays a power', () => {
+    const e = ce.box(['Power', 2, ['Rational', num, den]]);
+    expect(e.operator).toBe('Power');
+    expect(e.evaluate().operator).toBe('Power');
+    expect(e.evaluate().isSame(2)).toBe(false);
+  });
+
+  test('Power(2, -(10^400 + 1)/10^400) stays a power under evaluate()', () => {
+    const e = ce.box([
+      'Power',
+      2,
+      ['Rational', { num: '-' + num.num }, den],
+    ]);
+    expect(e.evaluate().operator).toBe('Power');
+  });
+
+  test('Root(2, (10^400 + 1)/10^400) is not 2', () => {
+    const e = ce.box(['Root', 2, ['Rational', num, den]]);
+    expect(e.isSame(2)).toBe(false);
+  });
+
+  test('2^{2.0} still folds (a float exponent keeps the float rule)', () => {
+    expect(ce.parse('2^{2.0}').evaluate().re).toBe(4);
+    expect(ce.box(['Power', 2, 2.0]).evaluate().re).toBe(4);
+  });
+
+  test('.N() at precision 500 gives 2 + 2·ln(2)·10^-400', () => {
+    const saved = ce.precision;
+    try {
+      ce.precision = 500;
+      const e = ce.box(['Power', 2, ['Rational', num, den]]);
+      // 2^(1 + 10^-400) = 2·e^(ln(2)·10^-400) = 2 + 1.3862943611…·10^-400,
+      // computed independently with Python's `decimal` module at 520 digits.
+      expect(e.N().toString()).toMatch(
+        new RegExp('^2\\.' + '0'.repeat(399) + '13862943611198906188344642')
+      );
+    } finally {
+      ce.precision = saved;
+    }
+  });
+});

@@ -184,7 +184,7 @@ function isNonReducingPower(u: Expression, index: string): boolean {
   if (!overIndex(u.op1) || exponent.has(index)) return false;
   return !(
     isNumber(exponent) &&
-    exponent.im === 0 &&
+    !exponent.isComplex &&
     Number.isInteger(exponent.re) &&
     exponent.re > 0
   );
@@ -2190,7 +2190,7 @@ function numericPartialFractions(
   const coeffs: number[] = [];
   for (const cf of coeffExprs) {
     const v = cf.N();
-    if (!isNumber(v) || v.im !== 0 || !Number.isFinite(v.re)) return null;
+    if (!isNumber(v) || v.isComplex || !Number.isFinite(v.re)) return null;
     coeffs.push(v.re);
   }
   if (coeffs[coeffs.length - 1] === 0) return null;

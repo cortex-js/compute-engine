@@ -40,7 +40,7 @@ function denestSqrt(arg: Expression): Expression | undefined {
 
   // Extract the surd b·√c (exact, real, with an integer radical c > 1).
   const snv = surd.numericValue;
-  if (!(snv instanceof ExactNumericValue) || snv.im !== 0) return undefined;
+  if (!(snv instanceof ExactNumericValue) || snv.isComplex) return undefined;
   const c = snv.radical;
   if (!Number.isInteger(c) || c <= 1) return undefined;
   const bn = Number(snv.rational[0]);
@@ -111,7 +111,7 @@ function denestSqrt3(arg: Expression): Expression | undefined {
   for (const t of arg.ops!) {
     if (!isNumber(t)) return undefined;
     const nv = t.numericValue;
-    if (!(nv instanceof ExactNumericValue) || nv.im !== 0) return undefined;
+    if (!(nv instanceof ExactNumericValue) || nv.isComplex) return undefined;
     if (nv.radical <= 1) {
       if (aTerm) return undefined; // more than one rational term
       aTerm = t;
@@ -180,7 +180,7 @@ function denestCubeRoot(arg: Expression): Expression | undefined {
     !aRat ||
     aRat[1] !== 1 ||
     !(snv instanceof ExactNumericValue) ||
-    snv.im !== 0 ||
+    snv.isComplex ||
     snv.rational[1] !== 1 ||
     !Number.isInteger(snv.radical) ||
     snv.radical <= 1
@@ -233,14 +233,14 @@ function squaresToRational(t: Expression): boolean {
   if (!isNumber(t)) return false;
   if (asRational(t)) return true;
   const nv = t.numericValue;
-  return nv instanceof ExactNumericValue && nv.im === 0;
+  return nv instanceof ExactNumericValue && !nv.isComplex;
 }
 
 /** A genuine surd `r√c` with c > 1 (as opposed to a pure rational). */
 function isSurd(t: Expression): boolean {
   if (!isNumber(t)) return false;
   const nv = t.numericValue;
-  return nv instanceof ExactNumericValue && nv.im === 0 && nv.radical > 1;
+  return nv instanceof ExactNumericValue && !nv.isComplex && nv.radical > 1;
 }
 
 /**
@@ -254,7 +254,7 @@ function sqrtRadicand(t: Expression): Expression | null {
   if (isFunction(t, 'Sqrt') && t.op1) return t.op1;
   if (isNumber(t)) {
     const nv = t.numericValue;
-    if (nv instanceof ExactNumericValue && nv.im === 0 && nv.radical > 1) {
+    if (nv instanceof ExactNumericValue && !nv.isComplex && nv.radical > 1) {
       // By invariant rational is a pair of integers (possibly unreduced).
       const p = BigInt(nv.rational[0]);
       const q = BigInt(nv.rational[1]);

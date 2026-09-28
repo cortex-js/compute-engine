@@ -1013,7 +1013,7 @@ class Harvester {
     if (node.ops.length !== 2) return false;
     if (node.operator === 'Power')
       return (
-        isNumber(node.ops[1]) && node.ops[1].re === 2 && node.ops[1].im === 0
+        isNumber(node.ops[1]) && node.ops[1].re === 2 && !node.ops[1].isComplex
       );
     return (
       node.operator === 'Multiply' &&

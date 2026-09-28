@@ -28,6 +28,11 @@ import {
   isContinuationOperand,
 } from './type-guards.js';
 import {
+  isImaginaryPartSafeInteger,
+  isRealPartZero,
+} from './imaginary-part.js';
+import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
+import {
   isBroadcastCollectionType,
   isNumericTupleCarrier,
   isPointListCarrier,
@@ -220,11 +225,7 @@ export function canonicalAdd(
         // A machine/big Gaussian integer (e.g. the literal `3i`, whose
         // NumericValue lives in the inexact lane) is exactly representable:
         // fold it as an exact value so `Add(2, 3i)` stays exact (CORR #11).
-        if (
-          nv.im !== 0 &&
-          Number.isSafeInteger(nv.re) &&
-          Number.isSafeInteger(nv.im)
-        ) {
+        if (nv.isComplex && isGaussianInteger(nv)) {
           exactNumerics.push(
             ce._numericValue({
               rational: [nv.re, 1],
@@ -265,13 +266,17 @@ export function canonicalAdd(
     if (!isNumber(op) || op.isInfinity || op.isNaN) return false;
     const nv = op.numericValue;
     if (typeof nv === 'number' || nv.isExact) return false;
-    return nv.im === 0 || nv.re === 0;
+    return !nv.isComplex || isRealPartZero(nv);
   });
   const isExactComplexLiteral = (op: Expression): boolean => {
     if (!isNumber(op)) return false;
     const nv = op.numericValue;
-    if (typeof nv === 'number' || nv.im === 0 || !nv.isExact) return false;
-    return !(hasInexactPartner && nv.re === 0 && Number.isSafeInteger(nv.im));
+    if (typeof nv === 'number' || !nv.isComplex || !nv.isExact) return false;
+    return !(
+      hasInexactPartner &&
+      isRealPartZero(nv) &&
+      isImaginaryPartSafeInteger(nv)
+    );
   };
 
   // First pass: check if there are any imaginary terms (otherwise skip entirely)
@@ -985,7 +990,7 @@ export class Terms {
       // exactly the undirected one: a real ±∞ has `im === 0`.
       // `isNumber` is tested first: it is cheap, and `isInfinity` on a
       // function expression computes the type of the whole expression.
-      if (isNumber(term) && term.isInfinity && term.im !== 0) {
+      if (isNumber(term) && term.isInfinity && term.isComplex) {
         this.terms = [{ term: ce.ComplexInfinity, coef: [] }];
         return;
       }

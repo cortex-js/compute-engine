@@ -1227,7 +1227,7 @@ function foldLiteralIndex(
   const [base, index] = expr.ops;
   if (!isFunction(base)) return undefined;
   if (options.skipHeads?.has(base.operator) === true) return undefined;
-  if (!isNumber(index) || index.im !== 0) return undefined;
+  if (!isNumber(index) || index.isComplex) return undefined;
   const k = index.re;
   if (!Number.isInteger(k) || k < 1) return undefined;
   // A literal range is read through its own indexed access; an index past

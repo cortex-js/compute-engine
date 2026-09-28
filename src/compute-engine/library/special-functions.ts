@@ -9,6 +9,7 @@ import type {
   IComputeEngine,
 } from '../global-types.js';
 import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
+import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
@@ -164,7 +165,7 @@ function agmValueAtInfinity(
   if (!isNumber(partner)) return undefined;
   if (partner.isSame(0)) return ce.Zero;
   if (point === '~oo') return ce.ComplexInfinity;
-  if (point === '+oo' && partner.im === 0 && partner.isPositive === true)
+  if (point === '+oo' && !partner.isComplex && partner.isPositive === true)
     return ce.PositiveInfinity;
   return ce.ComplexInfinity;
 }
@@ -200,7 +201,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         ),
       evaluate: ([m], { numericApproximation, engine }) => {
         // K(1) = +∞ exactly (Fungrim 45b157)
-        if (isNumber(m) && m.im === 0 && m.isSame(1))
+        if (isNumber(m) && !m.isComplex && m.isSame(1))
           return engine.PositiveInfinity;
         const point = infinitePoint(m);
         if (point === 'anonymous') return engine.NaN;
@@ -256,7 +257,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (ops.length === 2) {
           // Incomplete E(φ|m): E(0|m) = 0 exactly
           const [phi, m] = ops;
-          if (isNumber(phi) && phi.im === 0 && phi.isSame(0))
+          if (isNumber(phi) && !phi.isComplex && phi.isSame(0))
             return engine.Zero;
           const held = symbolicAtInfinity(ops, engine);
           if (held !== undefined) return held ?? undefined;
@@ -271,7 +272,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         }
         const m = ops[0];
         // E(1) = 1 exactly
-        if (isNumber(m) && m.im === 0 && m.isSame(1)) return engine.One;
+        if (isNumber(m) && !m.isComplex && m.isSame(1)) return engine.One;
         const point = infinitePoint(m);
         if (point === 'anonymous') return engine.NaN;
         if (point === '-oo') return engine.PositiveInfinity;
@@ -314,7 +315,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult('number', context.engine._typeResolver),
       evaluate: ([phi, m], { numericApproximation, engine }) => {
         // F(0|m) = 0 exactly
-        if (isNumber(phi) && phi.im === 0 && phi.isSame(0)) return engine.Zero;
+        if (isNumber(phi) && !phi.isComplex && phi.isSame(0))
+          return engine.Zero;
         const held = symbolicAtInfinity([phi, m], engine);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, phi, m)
@@ -350,7 +352,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (ops.length === 3) {
           const [n, phi, m] = ops;
           // Π(n; 0|m) = 0 exactly
-          if (isNumber(phi) && phi.im === 0 && phi.isSame(0))
+          if (isNumber(phi) && !phi.isComplex && phi.isSame(0))
             return engine.Zero;
           const held = symbolicAtInfinity(ops, engine);
           if (held !== undefined) return held ?? undefined;
@@ -432,7 +434,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₂F₁(a, b; c; 0) = 1 exactly
         const z = ops[3];
-        if (isNumber(z) && z.im === 0 && z.isSame(0)) return engine.One;
+        if (isNumber(z) && !z.isComplex && z.isSame(0))
+          return floatIfFloatOperand(ops, engine.One);
         const held = symbolicAtInfinity(ops, engine);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, ...ops)
@@ -469,10 +472,10 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const [, , , , x, y] = ops;
         if (
           isNumber(x) &&
-          x.im === 0 &&
+          !x.isComplex &&
           x.isSame(0) &&
           isNumber(y) &&
-          y.im === 0 &&
+          !y.isComplex &&
           y.isSame(0)
         )
           return engine.One;
@@ -524,7 +527,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const [s, z] = ops;
         // `Liₛ(0) = 0` for EVERY order, an infinite one included, so it is
         // decided before the infinity hold below.
-        if (isNumber(z) && z.im === 0 && z.isSame(0)) return engine.Zero;
+        if (isNumber(z) && !z.isComplex && z.isSame(0))
+          return floatIfFloatOperand(ops, engine.Zero);
         const held = symbolicAtInfinity(ops, engine);
         if (held !== undefined) return held ?? undefined;
         // Exact reductions (see `polylogReduce`). Evaluate the reduced form so
@@ -564,7 +568,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₁F₁(a; b; 0) = 1 exactly
         const z = ops[2];
-        if (isNumber(z) && z.im === 0 && z.isSame(0)) return engine.One;
+        if (isNumber(z) && !z.isComplex && z.isSame(0))
+          return floatIfFloatOperand(ops, engine.One);
         const held = symbolicAtInfinity(ops, engine);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, ...ops)
@@ -753,7 +758,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.Zero;
         if (point !== undefined) return ce.NaN;
-        if (x.im === 0 && x.isSame(0)) return ce.NegativeInfinity;
+        if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the E₁-based kernel.
         return applyN([x], expIntegralEi, undefined, expIntegralEiComplex);
@@ -825,8 +830,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (point === '-oo') return ce.ComplexInfinity;
         if (point !== undefined) return ce.NaN;
         // li is real only for x ≥ 0; stay symbolic for complex/negative.
-        if (x.im !== 0 || x.isNegative) return undefined;
-        if (x.isSame(0)) return ce.Zero;
+        if (x.isComplex || x.isNegative) return undefined;
+        if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
         if (x.isSame(1)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         return applyN([x], logIntegral);
@@ -855,7 +860,8 @@ function polylogReduce(
   z: Expression
 ): Expression | undefined {
   // Liₛ(0) = 0 (for any order).
-  if (isNumber(z) && z.im === 0 && z.isSame(0)) return engine.Zero;
+  if (isNumber(z) && !z.isComplex && z.isSame(0))
+    return floatIfFloatOperand([s, z], engine.Zero);
 
   const sInt = asSmallInteger(s);
 
@@ -871,7 +877,7 @@ function polylogReduce(
     ]);
 
   // z = ±1 with integer order n ≥ 2.
-  if (sInt !== null && sInt >= 2 && isNumber(z) && z.im === 0) {
+  if (sInt !== null && sInt >= 2 && isNumber(z) && !z.isComplex) {
     if (z.isSame(1)) return engine.function('Zeta', [s]);
     if (z.isSame(-1))
       return engine.function('Multiply', [

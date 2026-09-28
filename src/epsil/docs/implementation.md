@@ -122,6 +122,25 @@ does not preserve comments or the author's original whitespace. The serializer
 can still *emit* a `/* … */` comment when an expression carries a `comment`
 metadata field, but nothing on the parse side populates that field.
 
+A standard-library name is written with its Epsil spelling (see
+[Naming](/epsil/naming/)): `["Sin", "x"]` serializes to `sin(x)`, `"Pi"` to
+`pi`, `["Map", "Sin", "xs"]` to `map(sin, xs)`. The MathJSON name is kept
+where the spelling would read back as something else: when the expression
+writes the spelling anywhere (a `let sin = 3`, a parameter or a pattern
+named `sin` — every binding form writes the name it binds), and when the
+`isBound` option reports the name bound outside the expression (the CLI
+passes the session engine's `lookupDefinition`, so a result after
+`let sin = 3` in an earlier cell prints `Sin(x)`, not a call of the local).
+The `libraryNames: 'mathjson'` option writes the MathJSON names
+throughout:
+
+```js
+serializeEpsil(["Sin", "x"]);
+// ➔ "sin(x)"
+serializeEpsil(["Sin", "x"], { libraryNames: "mathjson" });
+// ➔ "Sin(x)"
+```
+
 ## How Epsil lowers to MathJSON
 
 The examples in this section omit the `sourceOffsets` metadata that every
@@ -1017,6 +1036,12 @@ applying:
   the same expression.
 - **`Element` spellings** — `is` and `in` produce the same `Element`
   expression, so a serialized program spells both of them `in`.
+- **Library spellings** — a library name is written with its Epsil spelling
+  (`sin(x)` for `["Sin", "x"]`), which `parseEpsil` alone reads as the raw
+  head `sin`; the resolution pass (`resolveLibraryNames`, run by
+  `executeEpsil` and the CLI) reads it back to `Sin`. A round trip through
+  the parser alone is exact with `serializeEpsil(e, { libraryNames:
+  "mathjson" })`.
 
 Comments are **not** preserved by a round-trip — see
 [Comments](/epsil/comments/).

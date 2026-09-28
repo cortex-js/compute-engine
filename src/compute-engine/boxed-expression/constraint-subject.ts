@@ -118,7 +118,7 @@ export function finiteNumericValue(
 function isFiniteRealNumber(
   term: Expression
 ): term is Expression & NumberLiteralInterface {
-  return isNumber(term) && term.isFinite === true && term.im === 0;
+  return isNumber(term) && term.isFinite === true && !term.isComplex;
 }
 
 /**

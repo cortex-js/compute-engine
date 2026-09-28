@@ -6,6 +6,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
+import { isValueDef } from '../boxed-expression/utils.js';
 import { expand, expandAll } from '../boxed-expression/expand.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
@@ -231,6 +232,29 @@ function argAtoms(arg: Expression): Atom[] {
 }
 
 /**
+ * `op(base)` for one atom of an expanded angle. A base built only from
+ * numbers and library constants is evaluated, so a special value folds
+ * (`cos(π/2)` is `0`, `sin(π)` is `0`) and `trigExpand(sin(x + π/2))` is
+ * `cos(x)`, not `sin(x)·cos(π/2) + sin(π/2)·cos(x)`. Evaluation keeps an
+ * exact non-special value symbolic (`sin(1)` stays `sin(1)`).
+ *
+ * A base with a variable is never evaluated, even when the variable has an
+ * assigned value: `TrigExpand` is a structural rewrite (the operator is
+ * lazy), and evaluating would substitute the value (`y := 5` made
+ * `trigExpand(sin(x + y))` read `sin(5)·cos(x) + …`). `unknowns` does not
+ * list an assigned symbol, so it cannot be the test.
+ */
+function trigAt(op: string, base: Expression): Expression {
+  const ce = base.engine;
+  const node = ce.function(op, [base]);
+  const constant = base.symbols.every((name) => {
+    const def = ce.lookupDefinition(name);
+    return isValueDef(def) && def.value.isConstant;
+  });
+  return constant ? node.evaluate() : node;
+}
+
+/**
  * Fold the atoms into the expanded `(sin, cos)` of their sum using the angle
  * addition identities. The products are multiplied out (via `mul`/`add`).
  */
@@ -239,9 +263,9 @@ function sinCosOfAtoms(atoms: Atom[]): { S: Expression; C: Expression } {
   let S: Expression = ce.Zero;
   let C: Expression = ce.One;
   for (const { base, neg } of atoms) {
-    const sinB = ce.function('Sin', [base]);
+    const sinB = trigAt('Sin', base);
     const s = neg ? sinB.neg() : sinB; // sin is odd
-    const c = ce.function('Cos', [base]); // cos is even
+    const c = trigAt('Cos', base); // cos is even
     // sin(A+u) = sin A cos u + cos A sin u
     // cos(A+u) = cos A cos u - sin A sin u
     const newS = add(mul(S, c), mul(C, s));
@@ -258,9 +282,9 @@ function sinhCoshOfAtoms(atoms: Atom[]): { Sh: Expression; Ch: Expression } {
   let Sh: Expression = ce.Zero;
   let Ch: Expression = ce.One;
   for (const { base, neg } of atoms) {
-    const sinhB = ce.function('Sinh', [base]);
+    const sinhB = trigAt('Sinh', base);
     const s = neg ? sinhB.neg() : sinhB; // sinh is odd
-    const c = ce.function('Cosh', [base]); // cosh is even
+    const c = trigAt('Cosh', base); // cosh is even
     // sinh(A+u) = sinh A cosh u + cosh A sinh u
     // cosh(A+u) = cosh A cosh u + sinh A sinh u
     const newSh = add(mul(Sh, c), mul(Ch, s));
@@ -276,7 +300,14 @@ function tanOfAtoms(atoms: Atom[]): Expression {
   const ce = atoms[0].base.engine;
   let T: Expression | null = null;
   for (const { base, neg } of atoms) {
-    const tanB = ce.function('Tan', [base]);
+    const tanB = trigAt('Tan', base);
+    // A pole (`tan(π/2)` is `~oo`) cannot enter the addition law: expand
+    // the tangent as sin/cos of the whole sum instead, so
+    // `trigExpand(tan(x + π/2))` is `−cos(x)/sin(x)`.
+    if (tanB.isFinite === false) {
+      const { S, C } = sinCosOfAtoms(atoms);
+      return ce.function('Divide', [S, C]);
+    }
     const t = neg ? tanB.neg() : tanB;
     if (T === null) {
       T = t;
@@ -296,7 +327,7 @@ function tanhOfAtoms(atoms: Atom[]): Expression {
   const ce = atoms[0].base.engine;
   let T: Expression | null = null;
   for (const { base, neg } of atoms) {
-    const tanhB = ce.function('Tanh', [base]);
+    const tanhB = trigAt('Tanh', base);
     const t = neg ? tanhB.neg() : tanhB;
     if (T === null) {
       T = t;
@@ -427,7 +458,7 @@ export function trigExpand(expr: Expression): Expression {
 
 /** True if `expr` contains a number literal with a non-zero imaginary part. */
 function containsImaginary(expr: Expression): boolean {
-  if (isNumber(expr)) return expr.im !== 0;
+  if (isNumber(expr)) return expr.isComplex;
   if (isFunction(expr)) return expr.ops.some(containsImaginary);
   return false;
 }

@@ -75,8 +75,16 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
     if (tryGetConstant(b) === 1 && gpuOperandShape(a) === 'scalar')
       return `fract(${compile(a)})`;
     // WGSL `%` on floats is the *truncated* remainder (sign of the dividend);
-    // the interpreter's `Mod` is *floored* (sign of the divisor, D1). Convert
-    // truncated → floored with `((a % b) + b) % b`, matching the JS target.
+    // the interpreter's `Mod` is *floored* (sign of the divisor, D1). With
+    // `r = a % b`, the floored modulo is `r - b · floor(r / b)`: `|r / b|` is
+    // below 1, so `floor(r / b)` is `-1` when `r` is not zero and its sign
+    // differs from the sign of `b`, and `0` otherwise. The divisor is then
+    // added only when it is needed, as the interpreter does
+    // (`floorModDouble`). The formula `((a % b) + b) % b` always added it,
+    // and in `f32` that sum is rounded as soon as it is larger than 2^24:
+    // `Mod(2, 16777215)` ran to `1`. The trailing `% b` maps a sum that
+    // rounds to exactly `b` back to `0`. Every piece is componentwise, so a
+    // vector operand beside a scalar one still lowers.
     // `compile()` emits sub-expressions without outer parentheses, and `%`
     // binds tighter than `+` — wrap before splicing next to `%`.
     // An IMPURE operand (the Random family) must be evaluated exactly once:
@@ -86,6 +94,8 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
     // temporaries; where there is no statement sink (a conditional arm), or
     // an operand is not a scalar, there is no safe reading — decline
     // (see `Remainder` in the shared GPU target).
+    const floored = (ca: string, cb: string) =>
+      `(((${ca} % ${cb}) - ${cb} * floor((${ca} % ${cb}) / ${cb})) % ${cb})`;
     if (a.isPure === false || b.isPure === false) {
       if (
         !BaseCompiler.canHoist(target) ||
@@ -104,11 +114,9 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
         `var ${ta}: f32 = ${compile(a)};`,
         `var ${tb}: f32 = ${compile(b)};`
       );
-      return `(((${ta} % ${tb}) + ${tb}) % ${tb})`;
+      return floored(ta, tb);
     }
-    const ca = `(${compile(a)})`;
-    const cb = `(${compile(b)})`;
-    return `(((${ca} % ${cb}) + ${cb}) % ${cb})`;
+    return floored(`(${compile(a)})`, `(${compile(b)})`);
   },
 
   // Override Hypot to use vec2f instead of vec2

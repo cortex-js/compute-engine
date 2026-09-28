@@ -1,4 +1,6 @@
-import type { LatexDictionary, SymbolEntry } from '../types.js';
+import type { LatexDictionary, Serializer, SymbolEntry } from '../types.js';
+import type { MathJsonExpression } from '../../../math-json/types.js';
+import { operator } from '../../../math-json/utils.js';
 
 // From mathlab: https://www.mathworks.com/help/symbolic/add-subscripts-superscripts-accents-to-symbolic-variables.html
 // subscript: '_'
@@ -107,14 +109,39 @@ export const SYMBOLS: [string, string, number][] = [
   ['natural', '\\natural', 0x266e],
 ];
 
+// `Zeta` and `Beta` name both a capital Greek letter (a bare symbol, spelled
+// `\Zeta`/`\Beta` by the default fallback below) and a function head (the
+// Riemann zeta / Euler beta function). Neither `\Zeta` nor `\Beta` is a real
+// LaTeX command for the *function*, so an applied call writes the
+// conventional notation instead: `\zeta(3)`, `\mathrm{B}(2, 3)`. A LaTeX
+// dictionary name must be unique, so this is added to the single entry below
+// that already claims `name: symbol`, rather than a second entry of the same
+// name (which the dictionary indexer rejects as a duplicate).
+const FUNCTION_SERIALIZE: Record<
+  string,
+  (serializer: Serializer, expr: MathJsonExpression) => string
+> = {
+  Zeta: (serializer, expr) => '\\zeta' + serializer.wrapArguments(expr),
+  Beta: (serializer, expr) => '\\mathrm{B}' + serializer.wrapArguments(expr),
+};
+
 export const DEFINITIONS_SYMBOLS: LatexDictionary = [
   ...SYMBOLS.map(([symbol, latex, _codepoint]) => {
-    return {
+    const entry: SymbolEntry = {
       kind: 'symbol',
       name: symbol,
       latexTrigger: [latex],
       parse: symbol,
-    } as SymbolEntry;
+    };
+    const serializeCall = FUNCTION_SERIALIZE[symbol];
+    if (serializeCall) {
+      // A bare symbol still falls through to the default letter spelling:
+      // `serializeSymbol` only uses this handler's result when
+      // `standaloneSymbol` is set, which this entry does not set.
+      entry.serialize = (serializer, expr) =>
+        operator(expr) === symbol ? serializeCall(serializer, expr) : '';
+    }
+    return entry;
   }),
   ...SYMBOLS.map(([symbol, _latex, codepoint]) => {
     return {

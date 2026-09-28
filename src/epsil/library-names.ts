@@ -160,6 +160,19 @@ const LITERAL_CONSTANTS: ReadonlySet<string> = new Set([
   'NaN',
 ]);
 
+/**
+ * Spellings that a fresh engine binds ITSELF, so the spelling can never
+ * stand for the library name: the resolution pass leaves an engine-bound
+ * name alone, and the serializer must not print the library name as that
+ * spelling (it would read back as the engine's binding). Keyed by the
+ * spelling. `limits` is the type the engine declares for an indexing
+ * clause (`declareType('limits', 'expression<Limits>')` in
+ * `src/compute-engine/index.ts`), so `Limits` has no spelling.
+ * `test/epsil/library-names.test.ts` checks that no other spelling is
+ * bound by a fresh engine.
+ */
+export const ENGINE_BOUND_SPELLINGS: ReadonlySet<string> = new Set(['limits']);
+
 const EPSIL_OPERATOR_NAMES: ReadonlySet<string> = new Set(
   OPERATORS.map((op) => op.name)
 );
@@ -191,7 +204,8 @@ export function lowercaseSpelling(name: string): string | undefined {
  * are variable names), when Epsil writes it as an operator symbol (`Add` is
  * `+`, `Pipe` is `|>`), when the spelling is a hard reserved word (`If`,
  * `Match`, `Function`), when the language has a syntax for it (the sets
- * above), or when the engine keeps it for itself.
+ * above), when the engine keeps it for itself, or when a fresh engine
+ * binds the spelling (`ENGINE_BOUND_SPELLINGS`).
  *
  * This is a rule over the NAME only; it does not check that the name exists
  * in the library. `canonicalLibraryName` is the checked reverse map.
@@ -202,6 +216,7 @@ export function epsilNameOf(name: string): string | undefined {
   if (spelling === undefined) return undefined;
   if (EPSIL_OPERATOR_NAMES.has(name)) return undefined;
   if (HARD_RESERVED_WORDS.has(spelling)) return undefined;
+  if (ENGINE_BOUND_SPELLINGS.has(spelling)) return undefined;
   if (
     GRAMMAR_CONSTRUCTS.has(name) ||
     LITERAL_CONSTRUCTORS.has(name) ||

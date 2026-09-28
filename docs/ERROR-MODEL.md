@@ -442,6 +442,18 @@ numeric marker, because the whole-collection rule above must keep an absent
 cell distinct from a `NaN` one, and each target's numeric absence test
 therefore reads the object null as absent too (2026-09-22).
 
+**An absent OBJECT in compiled arithmetic is the object null too** (user
+decision of 2026-09-27). On the JavaScript target, arithmetic whose operand
+is an absent point, tuple or list (`2·P\{c\}`, `P\{c\} + Q`, `L\{c\} + 1`)
+answers `undefined` for the whole value, and a list of points answers
+`undefined` in each absent cell; before, the same static type gave three
+spellings (`undefined` for a read, `[NaN, NaN]` for point + point, `NaN` for
+scalar × point). A numeric read of an absent object (`PointX(P\{c\})`,
+`|P\{c\}|`) is a numeric slot and stays `NaN`. The interpreter fallback of a
+compiled function spells an absent result by the type of its position, so it
+gives the same answers. Code for operands that cannot be absent is unchanged
+(`_SYS.bcastAbsent` is emitted only when a static type admits `missing`).
+
 **Absent values in collection operators: five rules** (user decisions of
 2026-09-26; the design record with the precedent for each rule is
 `docs/plans/2026-09-26-absent-values-in-collection-operators.md`; the tests are
@@ -1363,7 +1375,8 @@ document's history):
   only reader of it was the `Add` fold that turned it into `NaN`, Tycho's
   masked-point test reads `Missing`, and plots take the mask from compiled
   code, where every target already emitted `NaN`. The compiled lanes are
-  unchanged. The `When` type handler now answers `missing | T` for every
+  unchanged (amended 2026-09-27 for object values: an absent point, tuple
+  or list in compiled JavaScript arithmetic is `undefined`, see §3). The `When` type handler now answers `missing | T` for every
   condition except the literal `True` symbol (the same shape a default-less
   `Which` and the else-less `If` carry, Option A of the same day), and
   `list<T | missing>` for a list-of-booleans condition — so a list holding a

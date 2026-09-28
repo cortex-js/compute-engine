@@ -4,6 +4,7 @@ import {
   toInteger,
   toIntegerOperand,
 } from '../boxed-expression/numerics.js';
+import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import type {
   Expression,
   OperandDescriptor,
@@ -318,8 +319,8 @@ function evaluateBinomial(
   if (
     isNumber(nExpr) &&
     isNumber(kExpr) &&
-    nExpr.im === 0 &&
-    kExpr.im === 0 &&
+    !nExpr.isComplex &&
+    !kExpr.isComplex &&
     nExpr.isInteger &&
     kExpr.isInteger
   ) {
@@ -333,8 +334,8 @@ function evaluateBinomial(
 
   // Complex operands: no closed form implemented here; stay symbolic.
   if (
-    (isNumber(nExpr) && nExpr.im !== 0) ||
-    (isNumber(kExpr) && kExpr.im !== 0)
+    (isNumber(nExpr) && nExpr.isComplex) ||
+    (isNumber(kExpr) && kExpr.isComplex)
   )
     return undefined;
 
@@ -369,7 +370,7 @@ function evaluateBinomial(
   if (
     !isNumber(nExpr) &&
     isNumber(kExpr) &&
-    kExpr.im === 0 &&
+    !kExpr.isComplex &&
     kExpr.isInteger
   ) {
     const k = toBigint(kExpr);
@@ -515,7 +516,7 @@ function evaluatePochhammer(
   if (infinite !== undefined) return infinite;
 
   const k =
-    isNumber(kExpr) && kExpr.im === 0 && kExpr.isInteger === true
+    isNumber(kExpr) && !kExpr.isComplex && kExpr.isInteger === true
       ? toBigint(kExpr)
       : null;
   if (k !== null && k >= -SYMBOLIC_EXPANSION_CAP && k <= SYMBOLIC_EXPANSION_CAP)
@@ -595,7 +596,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
 
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
-        evaluateBinomial(n, k, numericApproximation, ce),
+        floatIfFloatOperand(
+          [n, k],
+          evaluateBinomial(n, k, numericApproximation, ce)
+        ),
     },
   },
 
@@ -666,7 +670,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       type: ([n, k], context) =>
         BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
-        evaluateBinomial(n, k, numericApproximation, ce),
+        floatIfFloatOperand(
+          [n, k],
+          evaluateBinomial(n, k, numericApproximation, ce)
+        ),
     },
     Pochhammer: {
       description:
@@ -713,7 +720,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([a, k], { numericApproximation, engine: ce }) =>
-        evaluatePochhammer(a, k, ce, numericApproximation),
+        floatIfFloatOperand(
+          [a, k],
+          evaluatePochhammer(a, k, ce, numericApproximation)
+        ),
     },
     CartesianProduct: {
       description: 'Return the Cartesian product of input sets.',

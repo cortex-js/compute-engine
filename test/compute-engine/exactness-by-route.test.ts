@@ -264,3 +264,219 @@ describe('ce.box() OF A NUMERIC VALUE', () => {
     expect(ce.box(ce._numericValue(-1)) === ce.NegativeOne).toBe(true);
   });
 });
+
+describe('MACHINE PRECISION', () => {
+  // The spelling rule holds at `precision: 'machine'` too (user decision of
+  // 2026-09-27, option 3A). Before, a machine value was exact whenever its
+  // value was a safe integer, so on a machine engine `2.0` was exact and
+  // `\sin(2.0)` stayed symbolic.
+  const mce = new ComputeEngine();
+  mce.precision = 'machine';
+
+  test.each([
+    ['2.0', 2],
+    ['1.0', 1],
+  ])('%s is a float', (latex, value) => {
+    const e = mce.parse(latex);
+    expect(e.isNumberLiteral).toBe(true);
+    expect(e.isExact).toBe(false);
+    expect(e.re).toBe(value);
+  });
+
+  test('1.0x keeps its float coefficient', () => {
+    expect(leaves(mce.parse('1.0x'))).toBe('Multiply(1~, x)');
+    expect(leaves(mce.parse('1.0x').evaluate())).toBe('Multiply(1~, x)');
+  });
+
+  test('\\frac{1.0}{3} is a float', () => {
+    const e = mce.parse('\\frac{1.0}{3}').evaluate();
+    expect(e.isExact).toBe(false);
+    expect(e.re).toBeCloseTo(1 / 3, 15);
+  });
+
+  test('\\sin(2.0) evaluates to a float', () => {
+    const e = mce.parse('\\sin(2.0)').evaluate();
+    expect(e.isNumberLiteral).toBe(true);
+    expect(e.isExact).toBe(false);
+    expect(e.re).toBeCloseTo(Math.sin(2), 15);
+  });
+
+  test('2.0^2 evaluates to a float', () => {
+    expect(leaves(mce.parse('2.0^2').evaluate())).toBe('4~');
+  });
+
+  test('ce.number(2) is exact', () => {
+    expect(mce.number(2).isExact).toBe(true);
+    expect(mce.number(2) === mce.Two).toBe(true);
+  });
+
+  test('\\sin(2) stays symbolic', () => {
+    expect(mce.parse('\\sin(2)').evaluate().json).toEqual(['Sin', 2]);
+  });
+});
+
+describe('FLOAT OPERANDS OF NUMERIC OPERATORS', () => {
+  // A float operand makes the result of a numeric operation a float, even
+  // when its value is an integer, at every precision (user decision of
+  // 2026-09-27). Before, each of these handlers had an exact shortcut that a
+  // float with the same value also took (`ln 1 = 0`, `sinh 0 = 0`,
+  // `log_b(b^k) = k`, the integer factorial, the real part of a literal, a
+  // canonical `x^{0.5} → √x`), or boxed the double result of a kernel as an
+  // exact integer. The exact operand keeps its exact result.
+  const engines = [
+    ['machine', new ComputeEngine()],
+    ['default', new ComputeEngine()],
+  ] as const;
+  engines[0][1].precision = 'machine';
+
+  describe.each(engines)('at %s precision', (_name, pce) => {
+    test.each([
+      ['e^{0.0}', '1~'],
+      ['\\exp(0.0)', '1~'],
+      ['i^{2.0}', '-1~'],
+      ['\\ln(1.0)', '0~'],
+      ['2.0!', '2~'],
+      ['3.0!!', '3~'],
+      ['\\binom{5.0}{2}', '10~'],
+      ['\\gcd(4.0,6)', '2~'],
+      ['\\operatorname{lcm}(4.0,6)', '12~'],
+      ['\\mod(7.0,3)', '1~'],
+      // The divisor is added to the truncated remainder only when their signs
+      // differ: `2 + (2^53 - 1)` is not a double, and adding it anyway gave
+      // `1` for the first one at machine precision.
+      ['\\mod(2.0,9007199254740991.0)', '2~'],
+      ['\\mod(-2.0,9007199254740991.0)', '9007199254740989~'],
+      ['\\mod(2.0,-9007199254740991.0)', '-9007199254740989~'],
+      ['\\mod(-7.0,3.0)', '2~'],
+      // A float base makes the result a float: `Log(1, 2.0)` does not fold to
+      // the exact `0` at canonicalization.
+      ['\\log_{2.0}(1)', '0~'],
+      ['\\sinh(0.0)', '0~'],
+      ['\\log_{10}(100.0)', '2~'],
+      ['\\log_2(8.0)', '3~'],
+      ['\\operatorname{Re}(2.0+3i)', '2~'],
+      ['\\operatorname{Im}(2.0+3i)', '3~'],
+      ['4^{0.5}', '2~'],
+      ['0^{2.0}', '0~'],
+      ['0.0-2', '-2~'],
+      ['\\operatorname{erf}(0.0)', '0~'],
+      ['\\operatorname{mean}([0.5, 1.5])', '1~'],
+      ['\\operatorname{total}([0.5, 0.5])', '1~'],
+    ])('%s evaluates to a float', (latex, expected) => {
+      expect(leaves(pce.parse(latex).evaluate())).toBe(expected);
+      expect(leaves(pce.parse(latex).N())).toBe(expected);
+    });
+
+    test.each([
+      ['e^{0}', '1'],
+      ['i^2', '-1'],
+      ['\\ln(1)', '0'],
+      ['2!', '2'],
+      ['\\binom{5}{2}', '10'],
+      ['\\gcd(4,6)', '2'],
+      ['\\mod(7,3)', '1'],
+      ['\\sinh(0)', '0'],
+      ['\\log_{10}(100)', '2'],
+      ['\\log_2(8)', '3'],
+      ['\\operatorname{Re}(2+3i)', '2'],
+      ['4^{1/2}', '2'],
+      ['\\operatorname{mean}([1, 3])', '2'],
+    ])('%s with exact operands stays exact', (latex, expected) => {
+      expect(leaves(pce.parse(latex).evaluate())).toBe(expected);
+    });
+
+    test('x^{0.5} keeps its float exponent, as x^{1.0} does', () => {
+      expect(leaves(pce.parse('x^{0.5}'))).toBe('Power(x, 0.5~)');
+      expect(leaves(pce.parse('x^{1/2}'))).toBe('Sqrt(x)');
+    });
+
+    // Kept as they are, as Mathematica does: `Max` returns one of its
+    // operands as it was given (`Max[2., 3]` is `3`), and the sign of a real
+    // number is the exact integer `1`, `0` or `-1` (`Sign[2.]` is `1`).
+    // Changing them needs a decision of its own.
+    test('Max returns its operand as given; Sign is an exact integer', () => {
+      expect(leaves(pce.parse('\\max(2.0,3)').evaluate())).toBe('3');
+      expect(leaves(pce.parse('\\max(2.0,1)').evaluate())).toBe('2~');
+      expect(leaves(pce.parse('\\operatorname{sign}(2.0)').evaluate())).toBe(
+        '1'
+      );
+    });
+  });
+
+  describe('a list of machine numbers computed on doubles', () => {
+    // At machine precision, arithmetic over a `List` of machine numbers is
+    // computed on doubles and answered as a list that holds them unboxed.
+    // The list records whether its integer-valued elements are floats.
+    const mce = new ComputeEngine();
+    mce.precision = 'machine';
+    const halves = Array.from({ length: 150 }, (_, i) => ({
+      num: `${i}.5`,
+    }));
+    const floats = Array.from({ length: 150 }, (_, i) => ({
+      num: `${i + 1}.0`,
+    }));
+    mce.assign('L', mce.box(['List', ...halves]));
+    mce.assign('F', mce.box(['List', ...floats]));
+    mce.assign(
+      'N',
+      mce.box(['List', ...Array.from({ length: 150 }, (_, i) => i + 1)])
+    );
+    const firstLast = (latex: string): string => {
+      const r = mce.parse(latex).evaluate();
+      return `${leaves(r.ops![0])} ${leaves(r.ops![1])} ${leaves(r.ops![149])}`;
+    };
+
+    test.each([
+      ['2L', '1~ 3~ 299~'],
+      ['2(2L)', '2~ 6~ 598~'],
+      ['L+0.5', '1~ 2~ 150~'],
+      ['\\lceil L\\rceil', '1~ 2~ 150~'],
+      ['\\lfloor L\\rfloor', '0~ 1~ 149~'],
+      ['2F', '2~ 4~ 300~'],
+      ['F+1', '2~ 3~ 151~'],
+      ['F^2', '1~ 4~ 22500~'],
+    ])('%s has float elements', (latex, expected) => {
+      expect(firstLast(latex)).toBe(expected);
+    });
+
+    test.each([
+      ['2N', '2 4 300'],
+      ['N+1', '2 3 151'],
+      ['N^2', '1 4 22500'],
+      ['\\lceil N\\rceil', '1 2 150'],
+    ])('%s over exact integers has exact elements', (latex, expected) => {
+      expect(firstLast(latex)).toBe(expected);
+    });
+
+    test('an element read with At is a float too', () => {
+      const r = mce.parse('2L').evaluate();
+      expect(leaves(r.at(1)!)).toBe('1~');
+      expect(leaves([...r.each()][1])).toBe('3~');
+    });
+
+    test('a reduction of a list of floats is a float', () => {
+      expect(leaves(mce.parse('\\operatorname{total}(2L)').evaluate())).toBe(
+        '22500~'
+      );
+      expect(leaves(mce.parse('\\operatorname{max}(2L)').evaluate())).toBe(
+        '299~'
+      );
+      expect(leaves(mce.parse('\\operatorname{total}(N)').evaluate())).toBe(
+        '11325'
+      );
+    });
+
+    test('a short list follows the same rule', () => {
+      expect(leaves(mce.parse('2[0.5,1.5]').evaluate())).toBe('List(1~, 3~)');
+      expect(leaves(mce.parse('[0.5, 1, 2] \\cdot 2').evaluate())).toBe(
+        'List(1~, 2, 4)'
+      );
+    });
+
+    test('ce.list() of integer doubles is exact', () => {
+      const l = mce.list([1, 2, 0.5]);
+      expect(leaves(l)).toBe('List(1, 2, 0.5~)');
+      expect(l.isMachineNumeric).toBe(true);
+    });
+  });
+});

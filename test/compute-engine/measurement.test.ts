@@ -381,14 +381,23 @@ describe('Measurement — units interaction (Phase 5)', () => {
     expect(unit).toBe('cm');
   });
 
-  test('evaluate() keeps a symbolic (exact) error, .N() floats it', () => {
+  test('evaluate() keeps an exact error exact and gives a float error a float', () => {
+    // Float errors: the propagated error is a float under evaluate(), as
+    // under N() — a float operand numericizes (the evaluate-vs-N contract).
     const sum = ce.function('Add', [QM(5, 0.2, 'cm'), QM(3, 0.1, 'cm')]);
     const ev = sum.evaluate();
     expect(ev.operator).toBe('Quantity');
     expect(ev.op1!.operator).toBe('Measurement');
-    // The error is a symbolic Sqrt under evaluate(), a float under N().
-    expect(ev.op1!.op2!.operator).toBe('Sqrt');
+    expect(error(ev.op1!)).toBeCloseTo(Math.hypot(0.2, 0.1), 8);
     expect(error(sum.N().op1!)).toBeCloseTo(Math.hypot(0.2, 0.1), 8);
+    // Exact errors: the propagated error stays exact (√2 is not a float).
+    const exact = ce
+      .function('Add', [
+        ce.box(['Measurement', 5, 1]),
+        ce.box(['Measurement', 3, 1]),
+      ])
+      .evaluate();
+    expect(exact.op2!.toString()).toBe('sqrt(2)');
   });
 
   test('parse: (5.1 ± 0.2) cm -> Quantity(Measurement(5.1, 0.2), cm)', () => {

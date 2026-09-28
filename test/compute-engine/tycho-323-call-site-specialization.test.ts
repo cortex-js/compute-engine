@@ -210,7 +210,11 @@ describe('SCALAR ARGUMENT WITH A NAN ARM', () => {
     ce.declare('a', 'nan | real');
     ce.declare('g', 'function');
     ce.assign('g', ce.parse('(l, b) \\mapsto l + b\\operatorname{Length}(l)'));
-    expect(ce.parse('g(L, a)').type.toString()).toBe('list<nan | real>');
+    // `Length(l)` of a `list<real>` admits `+oo` (a list value can be an
+    // infinite lazy list), so the sum's elements do too.
+    expect(ce.parse('g(L, a)').type.toString()).toBe(
+      'list<nan | real | signed_infinity>'
+    );
     expect(ce.parse('a L').type.toString()).toBe('list<nan | real>');
   });
 });

@@ -142,18 +142,14 @@ describe('J9a: the modulo template binds a divisor it would repeat', () => {
   test('a compound divisor is computed once', () => {
     const code = codeOf(ce, '2 \\bmod \\sin(0.2\\theta)');
     expect((code.match(/Math\.sin/g) ?? []).length).toBe(1);
-    expect(code).toBe(
-      '(() => { const _tv1 = Math.sin(0.2 * _.theta); return ((((2) % _tv1) + _tv1) % _tv1); })()'
-    );
+    expect(code).toBe('_SYS.floorMod(2, Math.sin(0.2 * _.theta))');
   });
 
-  test('a symbol or a literal divisor stays inline', () => {
+  test('a symbol or a literal divisor is passed to the helper as it is', () => {
     expect(codeOf(ce, '(x + 29) \\bmod 900')).toBe(
-      '((((_.x + 29) % (900)) + (900)) % (900))'
+      '_SYS.floorMod(_.x + 29, 900)'
     );
-    expect(codeOf(ce, 'm \\bmod n')).toBe(
-      '((((_.m) % (_.n)) + (_.n)) % (_.n))'
-    );
+    expect(codeOf(ce, 'm \\bmod n')).toBe('_SYS.floorMod(_.m, _.n)');
   });
 
   test('the compiled value matches the interpreter, including negatives', () => {
@@ -179,10 +175,9 @@ describe('J9a: the modulo template binds a divisor it would repeat', () => {
     const r = compile(ce.box(['Mod', ['Add', 'x', 1], ['Random']]), {
       fallback: false,
     });
-    expect(r.code).toBe(
-      '(() => { const _tv1 = _.x + 1, _tv2 = _SYS.drawNextRandomNumber(); ' +
-        'return (((_tv1 % _tv2) + _tv2) % _tv2); })()'
-    );
+    // `_SYS.floorMod` is a call, and a call evaluates its arguments once,
+    // from left to right.
+    expect(r.code).toBe('_SYS.floorMod(_.x + 1, _SYS.drawNextRandomNumber())');
   });
 });
 

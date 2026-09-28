@@ -1,6 +1,8 @@
 import type { Expression } from '../global-types.js';
 import type { NumericValue } from '../numeric-value/types.js';
 import { isNumber, isSymbol } from './type-guards.js';
+import { isImaginaryPartFinite } from './imaginary-part.js';
+import { asFloat, hasFloatOperand } from './float-result.js';
 
 /**
  * Whether a number literal's value has an infinite component although it is
@@ -14,7 +16,7 @@ export function hasInfiniteComponent(nv: NumericValue | number): boolean {
   if (typeof nv === 'number') return !Number.isFinite(nv);
   const reFinite =
     nv.bignumRe !== undefined ? nv.bignumRe.isFinite() : Number.isFinite(nv.re);
-  return !reFinite || !Number.isFinite(nv.im);
+  return !reFinite || !isImaginaryPartFinite(nv);
 }
 
 /**
@@ -134,6 +136,9 @@ export function logarithmAtExceptionalPoint(
   numericApproximation: boolean
 ): Expression | undefined {
   const natural = base === undefined || isSymbol(base, 'ExponentialE');
+  // A float argument or base gives the float `0`, not the exact `0`:
+  // `\ln(1.0)` is the float `0`, as `\ln(1.5)` is a float.
+  const zero = hasFloatOperand([x, base]) ? asFloat(ce.Zero) : ce.Zero;
   const n = classify(x);
   const d = natural ? undefined : classify(base!);
   if (n === 'nan' || d === 'nan') return ce.NaN;
@@ -141,12 +146,12 @@ export function logarithmAtExceptionalPoint(
   // A symbolic argument: nothing to say. A symbolic BASE: only `Log(1, b)`
   // answers (the generic-point 0).
   if (n === undefined) return undefined;
-  if (!natural && d === undefined) return n === 'one' ? ce.Zero : undefined;
+  if (!natural && d === undefined) return n === 'one' ? zero : undefined;
 
   // The natural logarithm (or the quotient by `ln e = 1`).
   if (natural) {
     if (n === 'zero') return ce.NegativeInfinity;
-    if (n === 'one') return ce.Zero;
+    if (n === 'one') return zero;
     if (n === 'pos-inf') return ce.PositiveInfinity;
     if (n === 'complex-inf') return ce.ComplexInfinity;
     if (n === 'directed-inf')
@@ -163,11 +168,11 @@ export function logarithmAtExceptionalPoint(
 
   // An infinite `ln base` (base 0, ±∞, or ~oo): a finite numerator gives 0,
   // an infinite one the indeterminate `∞/∞`.
-  if (isInfinitePoint(d!)) return isInfinitePoint(n) ? ce.NaN : ce.Zero;
+  if (isInfinitePoint(d!)) return isInfinitePoint(n) ? ce.NaN : zero;
 
   // A finite base other than 0 and 1: `ln base` is finite and non-zero.
   if (n === 'finite') return undefined;
-  if (n === 'one') return ce.Zero;
+  if (n === 'one') return zero;
   if (n === 'complex-inf') return ce.ComplexInfinity;
   const sign = lnBaseSign(base!);
   if (n === 'zero' || n === 'pos-inf') {

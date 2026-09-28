@@ -27,6 +27,7 @@ import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import { isImaginaryUnitValue, isRealPartZero } from './imaginary-part.js';
 import { functionLiteralParameterName } from './function-literal.js';
 import {
   hasProvisionalDependents,
@@ -587,7 +588,7 @@ export function reduceStructuralIndex(expr: Expression): Expression {
   if (!isNumber(index)) return self;
   // A complex index (`1 + 2i`) is not a valid list position: decline rather
   // than silently projecting on its real part.
-  if (index.im !== 0) return self;
+  if (index.isComplex) return self;
   const k = index.re;
   if (!Number.isInteger(k) || k === 0) return self;
 
@@ -769,7 +770,7 @@ export function canonicalAngle(
   // as `0.500…001` where `sin(π/6)` is `0.5`. A radical multiple (`√2·π`)
   // has no exact reduction and takes the float route below.
   let k2: NumericValue;
-  if (k instanceof ExactNumericValue && k.im === 0 && k.radical === 1) {
+  if (k instanceof ExactNumericValue && !k.isComplex && k.radical === 1) {
     const half = k.div(2);
     // The sign is read from the exact value: the double of a rational whose
     // denominator overflows (`−1/10³¹⁰`) is `−0`, which is not negative.
@@ -800,7 +801,8 @@ export function getImaginaryFactor(
   // The structure is read first, and the numeric value of the expression
   // only at the end: an exact factor (`π/3` in `e^{iπ/3}`) stays exact, and
   // the numeric value of `iπ/3` would give the float `1.047…`.
-  if (isNumber(expr)) return expr.re === 0 ? imaginaryPart(expr) : undefined;
+  if (isNumber(expr))
+    return isRealPartZero(expr.numericValue) ? imaginaryPart(expr) : undefined;
 
   if (isFunction(expr, 'Negate')) return getImaginaryFactor(expr.op1)?.neg();
 
@@ -819,7 +821,7 @@ export function getImaginaryFactor(
     for (const op of expr.ops) {
       const im = isSymbol(op, 'ImaginaryUnit')
         ? ce.One
-        : isNumber(op) && op.re === 0 && op.im !== 0
+        : isNumber(op) && isRealPartZero(op.numericValue) && op.isComplex
           ? imaginaryPart(op)
           : undefined;
       if (im !== undefined) {
@@ -854,6 +856,17 @@ function imaginaryPart(x: Expression): Expression {
     const json = x.json;
     if (Array.isArray(json) && json[0] === 'Complex') return ce.box(json[2]);
   }
+  // An inexact imaginary part held as a big decimal keeps its digits: the
+  // double `im` of `1152921504606846977.5` is `1152921504606846976`, which
+  // loses the parity of the half-turns in `e^{1152921504606846977.5·iπ}`.
+  const nv = isNumber(x) ? x.numericValue : undefined;
+  const big = typeof nv === 'object' ? nv.bignumIm : undefined;
+  if (big !== undefined) return ce.number(ce._numericValue(big));
+  // The imaginary part of a float is a float, even when its value is an
+  // integer: the imaginary part of the real float `0.0` is the float `0`,
+  // and `e^{0.0}` is then the float `1`. `ce.number(0)` would be the exact 0.
+  if (isNumber(x) && !x.isExact)
+    return ce.number(ce._inexactNumericValue(x.im));
   return ce.number(x.im);
 }
 
@@ -870,7 +883,7 @@ export function isImaginaryUnit(expr: Expression): boolean {
   // Shortcut: boxed engine imaginary unit
   if (expr === engine.I) return true;
 
-  if (isNumber(expr)) return expr.re === 0 && expr.im === 1;
+  if (isNumber(expr)) return isImaginaryUnitValue(expr.numericValue);
 
   // A symbol IS the imaginary unit when its assigned value resolves to the
   // number i — an EXPLICIT dereference (`.isSame()` is strictly syntactic and
@@ -882,7 +895,7 @@ export function isImaginaryUnit(expr: Expression): boolean {
     const visited = new Set<string>([expr.symbol]);
     let v: Expression | undefined = expr.canonical.value;
     while (v !== undefined) {
-      if (isNumber(v)) return v.re === 0 && v.im === 1;
+      if (isNumber(v)) return isImaginaryUnitValue(v.numericValue);
       if (!isSymbol(v)) return false;
       if (visited.has(v.symbol)) return false;
       visited.add(v.symbol);

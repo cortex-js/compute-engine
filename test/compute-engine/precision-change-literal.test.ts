@@ -52,25 +52,28 @@ describe('A LITERAL MADE AT MACHINE PRECISION', () => {
   });
 });
 
-describe('AN EXACT RESULT OF THE ARITHMETIC OF A MACHINE FLOAT', () => {
+describe('THE ARITHMETIC OF A MACHINE FLOAT', () => {
   const bigDecimalPrecision = BigDecimal.precision;
   afterAll(() => {
     BigDecimal.precision = bigDecimalPrecision;
   });
 
-  // The float `3` (from `1.5 + 1.5`) times the rational `1/7` is the exact
-  // rational `3/7`. It was made by the machine float, whose factory always
-  // makes a machine float; the literal gets the factory of the engine.
-  test('gets all the digits of a raised precision', () => {
+  // The float `3` (from `1.5 + 1.5`) is a float, even though its value is an
+  // integer (user decision of 2026-09-27: the spelling rule holds at machine
+  // precision too). Its product with the rational `1/7` is a machine float,
+  // and a raised precision does not add digits to it. Before, a machine
+  // float with an integer value was exact, and the product was `3/7`.
+  test('stays a machine float at a raised precision', () => {
     const e = new ComputeEngine({ precision: 'machine' });
     const three = e.parse('1.5+1.5').evaluate();
+    expect(three.isExact).toBe(false);
     const product = three.mul(e.box(['Rational', 1, 7]));
     const quotient = three.div(e.number(7));
-    expect(product.toString()).toBe('3/7');
+    expect(product.isExact).toBe(false);
+    expect(product.toString()).toBe('0.42857142857142855');
     e.precision = 50;
-    const digits = '0.42857142857142857142857142857142857142857142857143';
-    expect(product.N().toString()).toBe(digits);
-    expect(quotient.N().toString()).toBe(digits);
+    expect(product.N().toString()).toBe('0.42857142857142855');
+    expect(quotient.N().toString()).toBe('0.42857142857142855');
   });
 });
 

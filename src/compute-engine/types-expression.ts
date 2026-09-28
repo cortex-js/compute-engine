@@ -2793,17 +2793,21 @@ export interface Expression {
    * For a `List`: `true` when `array` is defined and `ce.list(expr.array)`
    * is this list element for element, as the interpreter computes with it.
    * A list built by `ce.list()` answers `true` in constant time. An
-   * ordinary list answers `true` when every element is a float or an
-   * integer a double holds, and `false` when some element is an exact
-   * non-integer such as the rational `1/2`: `array` admits it, since a
+   * ordinary list answers `true` when every element is a float with a
+   * fraction part or an exact integer a double holds. It answers `false`
+   * when some element is a float with an integer value, such as `2.0`:
+   * `ce.list()` boxes the double `2` as the exact integer `2`. It answers
+   * `false` too when some element is an exact non-integer such as the
+   * rational `1/2`: `array` admits it, since a
    * double holds `0.5` with no rounding, but re-boxing `0.5` gives a float,
    * which computes as one (`0.5 / 3` is `0.1666…` where `1/2 ÷ 3` is
    * `1/6`). A consumer that must keep exact values exact takes `array` only
    * when this is `true`.
    *
-   * For a number: `true` when the number is a float, an integer a double
-   * holds, `NaN` or an infinity; `false` for an exact non-integer, a
-   * radical or a complex number.
+   * For a number: `true` when the number is a float with a fraction part
+   * or past the safe integers, an exact integer a double holds, `NaN` or an
+   * infinity; `false` for a float with a safe-integer value (`2.0`), an
+   * exact non-integer, a radical or a complex number.
    *
    * `false` for every other expression.
    *
@@ -2988,6 +2992,13 @@ export interface Expression {
 export interface NumberLiteralInterface {
   readonly numericValue: number | NumericValue;
   readonly isExact: boolean;
+  /** True if the imaginary part of this number is not zero.
+   *
+   * Unlike a test of `im !== 0`, this is `true` for an imaginary part too
+   * small or too large for a double (the exact `10^{-800}·i`), because it is
+   * read from the numeric value itself, not from its double projection
+   * `im`. */
+  readonly isComplex: boolean;
   readonly isNumberLiteral: true;
 }
 
@@ -3022,6 +3033,21 @@ export interface FunctionInterface {
    * The public view is `array`.
    */
   readonly _numericStore: readonly number[] | undefined;
+  /**
+   * Internal. Are the integer-valued elements of the numeric store floats?
+   * `true` when a float computation produced the store (`2·L` with the
+   * element `0.5` holds the float `1`): the operand at that position is
+   * then a float, not `engine.number(store[i])`. `false` for `ce.list()`
+   * and when there is no store.
+   */
+  readonly _numericStoreFloats: boolean;
+  /**
+   * Internal. The exactness of the integer-valued elements of a `List` of
+   * machine numbers: `false` exact, `true` floats, `undefined` when the
+   * list is not a list of machine numbers or mixes both kinds. See
+   * `BoxedFunction._machineFloats`.
+   */
+  readonly _machineFloats: boolean | undefined;
   /**
    * Internal. Is this node written-out DATA: a canonical `List` or `Tuple`
    * bound to the standard library whose every element is a number literal,

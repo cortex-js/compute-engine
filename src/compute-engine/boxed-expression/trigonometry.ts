@@ -573,7 +573,7 @@ export function radiansToAngle(
   if (
     nv !== undefined &&
     typeof nv !== 'number' &&
-    nv.im === 0 &&
+    !nv.isComplex &&
     nv.bignumRe !== undefined
   ) {
     const big = nv.bignumRe;
@@ -638,6 +638,15 @@ function chopBignumDust(
 /**
  * The rounding error of the angle `x` (in radians) that `chopBignumDust`
  * and `bigPoleDust` allow: `min(1, |x|)·10^(2−precision)`.
+ *
+ * The scale is capped at `|x| = 1` on purpose, and the cap is a recorded rule
+ * (user decision 2026-09-27): the sine of a float argument is the sine of
+ * that float. `\sin(3141592.653589793)`, the double nearest to `10^6·π`, is
+ * `−3.8e-19` under both `evaluate()` and `.N()`, because that double is not
+ * `10^6·π`; a symbolic multiple of π (`\sin(10^{6}\pi)`) is reduced exactly
+ * before any float is formed, so it is `0`. A chop that grew with `|x|`
+ * would also chop `\sin(10^{22})`, whose value is `−0.85`, so a larger
+ * allowance would need its own cap and would only move the boundary.
  */
 function dustScale(ce: ComputeEngine, x: BigDecimal): BigDecimal {
   const limit = new BigDecimal(`1e${2 - ce.precision}`);
@@ -824,12 +833,20 @@ export function evalTrig(
     // NOT an angle: they are unit-independent and must not be scaled by
     // `angularUnit` (no `radiansToAngle` wrapper).
     case 'Arcosh':
+      // For a real x in [−1, 1], arcosh(x) is exactly i·arccos(x) (arccos in
+      // radians: an area, not an angle). The real kernels answer NaN there
+      // and the complex kernel then left a spurious real part
+      // (`N(arcosh(1/2))` was `5.6e-17 + 1.047…i`).
       return apply(
         op,
-        Math.acosh,
+        (x) =>
+          x >= -1 && x < 1 ? new Complex(0, Math.acos(x)) : Math.acosh(x),
         // `BigDecimal.acosh()`, not `ln(x + √(x² − 1))`: the direct formula
         // loses relative precision near 1 and for a large `x`.
-        (x) => x.acosh(),
+        (x) =>
+          x.gte(-1) && x.lt(1)
+            ? new Complex(0, Number(x.acos().toString()))
+            : x.acosh(),
         (x) => x.acosh()
       );
     case 'Arcoth':
@@ -1055,30 +1072,38 @@ function isInverseTrigFunc(name: string): boolean {
   return false;
 }
 
+/** Each trigonometric or hyperbolic function and its inverse, both ways. A
+ * `Map`, so a name such as `constructor` does not read an inherited
+ * `Object.prototype` member. */
+const INVERSE_TRIG_FUNCTION: ReadonlyMap<string, string> = new Map([
+  ['Sin', 'Arcsin'],
+  ['Cos', 'Arccos'],
+  ['Tan', 'Arctan'],
+  ['Cot', 'Arccot'],
+  ['Sec', 'Arcsec'],
+  ['Csc', 'Arccsc'],
+  ['Sinh', 'Arsinh'],
+  ['Cosh', 'Arcosh'],
+  ['Tanh', 'Artanh'],
+  ['Coth', 'Arcoth'],
+  ['Sech', 'Arsech'],
+  ['Csch', 'Arcsch'],
+  ['Arcsin', 'Sin'],
+  ['Arccos', 'Cos'],
+  ['Arctan', 'Tan'],
+  ['Arccot', 'Cot'],
+  ['Arcsec', 'Sec'],
+  ['Arccsc', 'Csc'],
+  ['Arsinh', 'Sinh'],
+  ['Arcosh', 'Cosh'],
+  ['Artanh', 'Tanh'],
+  ['Arcoth', 'Coth'],
+  ['Arsech', 'Sech'],
+  ['Arcsch', 'Csch'],
+]);
+
 function inverseTrigFuncName(name: string): string | undefined {
-  return {
-    Sin: 'Arcsin',
-    Cos: 'Arccos',
-    Tan: 'Arctan',
-    Sec: 'Arcsec',
-    Csc: ' Arccsc',
-    Sinh: 'Arsinh',
-    Cosh: 'Arcosh',
-    Tanh: 'Artanh',
-    Sech: 'Arsech',
-    Csch: 'Arcsch',
-    Arcosh: 'Cosh',
-    Arccos: 'Cos',
-    Arccsc: 'Csc',
-    Arcsch: 'Csch',
-    // '??': 'Cot',
-    // '??': 'Coth',
-    Arcsec: 'Sec',
-    Arcsin: 'Sin',
-    Arsinh: 'Sinh',
-    Arctan: 'Tan',
-    Artanh: 'Tanh',
-  }[name];
+  return INVERSE_TRIG_FUNCTION.get(name);
 }
 
 export function processInverseFunction(
@@ -1155,7 +1180,12 @@ function constructibleValuesInverse(
 
   let quadrant = 0;
   if (x_N < 0) {
-    quadrant = trigFuncParity(inv_operator!) == -1 ? -1 : 1;
+    // An odd function's inverse is odd (`arcsin(−x) = −arcsin(x)`); an even
+    // one's inverse, and `Arccot`, take their principal value in (0, π) and
+    // reflect about π/2 (`arcsec(−x) = π − arcsec(x)`, `arccot(−1) = 3π/4`,
+    // as the numeric kernel `atan2(1, x)` answers), although `cot` is odd.
+    quadrant =
+      operator !== 'Arccot' && trigFuncParity(inv_operator!) == -1 ? -1 : 1;
     // shift x to quadrant 0 to match the key in specialInverseValues
     x_N = -x_N;
     x = x.neg();
@@ -1247,7 +1277,7 @@ export function hyperbolicExactValue(
   operator: string,
   x: Expression | undefined
 ): Expression | undefined {
-  if (!isNumber(x) || x.im !== 0) return undefined;
+  if (!isNumber(x) || x.isComplex) return undefined;
   const ce = x.engine;
   switch (operator) {
     case 'Sinh':
@@ -1491,7 +1521,7 @@ const SPECIAL_ANGLE_DENOMINATORS: readonly bigint[] = [
  * are at least `1/132` apart), and is not read.
  */
 function floatSpecialCoefficient(c: Expression): [bigint, bigint] | undefined {
-  if (!isNumber(c) || c.isExact !== false || c.im !== 0) return undefined;
+  if (!isNumber(c) || c.isExact !== false || c.isComplex) return undefined;
   const big = c.bignumRe ?? new BigDecimal(c.re);
   if (!big.isFinite()) return undefined;
   if (big.isZero()) return [0n, 1n];
@@ -1557,7 +1587,7 @@ function quadrant(theta: Expression): [number | undefined, number | undefined] {
   }
 
   if (!theta.isValid || !isNumber(theta)) return [undefined, undefined];
-  if (theta.im !== 0) return [undefined, undefined];
+  if (theta.isComplex) return [undefined, undefined];
   if (!Number.isFinite(theta.re)) return [undefined, undefined];
 
   const ce = theta.engine;

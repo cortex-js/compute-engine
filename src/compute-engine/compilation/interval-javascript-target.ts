@@ -260,7 +260,7 @@ function literalRangeElements(
 ): ReadonlyArray<Expression> | undefined {
   const ce = node.engine;
   const nums = node.ops.map((op) =>
-    isNumber(op) && op.im === 0 && Number.isFinite(op.re) ? op.re : undefined
+    isNumber(op) && !op.isComplex && Number.isFinite(op.re) ? op.re : undefined
   );
   if (nums.some((n) => n === undefined)) return undefined;
   let lo: number, hi: number, step: number;
@@ -622,7 +622,7 @@ function seededRandomChoicePlan(
   if (body.ops.length !== 2) return 'expected exactly two arguments.';
   let folded: [number, number];
   if (isString(seed)) folded = foldSeed(seed.string);
-  else if (isNumber(seed) && seed.im === 0 && Number.isFinite(seed.re))
+  else if (isNumber(seed) && !seed.isComplex && Number.isFinite(seed.re))
     folded = foldSeed(seed.re);
   else
     return (
@@ -657,7 +657,7 @@ function seededRandomChoicePlan(
  */
 function seededChoiceDomain(domain: Expression): string | undefined {
   const real = (x: Expression): number | undefined =>
-    isNumber(x) && x.im === 0 && Number.isFinite(x.re) ? x.re : undefined;
+    isNumber(x) && !x.isComplex && Number.isFinite(x.re) ? x.re : undefined;
   // `String(x)` spells every finite double exactly, except that it loses the
   // sign of `-0`.
   const num = (x: number): string => (Object.is(x, -0) ? '-0' : String(x));
@@ -1747,7 +1747,7 @@ function tryGetIntervalComplexParts(
     const scaleOf = (op: Expression): number | undefined =>
       isSymbol(op, 'ImaginaryUnit')
         ? 1
-        : isNumber(op) && op.re === 0 && op.im !== 0
+        : isNumber(op) && op.re === 0 && op.isComplex
           ? op.im
           : undefined;
     const i = ops.findIndex((op) => scaleOf(op) !== undefined);
@@ -2286,7 +2286,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         return undefined;
       return selected < 0 ? INTERVAL_ABSENCE : compile(elements[selected]);
     };
-    if (ops !== undefined && isNumber(index) && index.im === 0) {
+    if (ops !== undefined && isNumber(index) && !index.isComplex) {
       const i = index.re;
       if (Number.isInteger(i)) {
         const selected = select(ops, i);
@@ -2386,7 +2386,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_IA.exp(${compile(exp)})`;
     }
     // Check if exponent is a constant number
-    if (isNumber(exp) && exp.im === 0) {
+    if (isNumber(exp) && !exp.isComplex) {
       const expVal = exp.re;
       if (expVal === 0.5) return `_IA.sqrt(${compile(base)})`;
       if (expVal === 2) return `_IA.square(${compile(base)})`;
@@ -2415,7 +2415,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (arg === null) throw new Error('Could not compile `Root`: no argument');
     if (exp === null) return `_IA.sqrt(${compile(arg)})`;
     if (exp?.re === 2) return `_IA.sqrt(${compile(arg)})`;
-    if (isNumber(exp) && exp.im === 0) {
+    if (isNumber(exp) && !exp.isComplex) {
       // Integer degree: `nthRoot` gives the real root for an odd degree over a
       // negative base (the interpreter's convention, e.g. Root(-8, 3) = -2);
       // an even degree reduces to x^(1/n) (no real value for a negative base).
@@ -2434,7 +2434,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // constant-`n` form is representable here (the factor must be a point);
     // a non-constant precision throws to fail closed to scalar JS.
     const n = args[1];
-    if (!isNumber(n) || n.im !== 0 || !Number.isInteger(n.re))
+    if (!isNumber(n) || n.isComplex || !Number.isInteger(n.re))
       throw new Error(
         'Could not compile `Round`: interval target requires a constant precision'
       );
@@ -2735,7 +2735,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // out-of-range error an invalid seed raises. Fail closed instead.
     const seed = args[0];
     const literalSeed =
-      (isNumber(seed) && seed.im === 0 && Number.isFinite(seed.re)) ||
+      (isNumber(seed) && !seed.isComplex && Number.isFinite(seed.re)) ||
       isString(seed);
     if (!literalSeed)
       throw new Error(

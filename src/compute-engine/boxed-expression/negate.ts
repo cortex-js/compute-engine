@@ -2,7 +2,12 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isNumber, isFunction, isAbsentSymbol } from './type-guards.js';
+import {
+  isNumber,
+  isFunction,
+  isAbsentSymbol,
+  isContinuationOperand,
+} from './type-guards.js';
 import { sortAddTerms, sortProductOperands } from './order.js';
 import {
   couldBeNumericTuple,
@@ -93,6 +98,19 @@ export function canonicalNegate(expr: Expression): Expression {
   // A tuple (point/vector) negates component-wise.
   const negatedTuple = negateTupleComponents(expr);
   if (negatedTuple !== undefined) return negatedTuple;
+
+  // Fold the sign into a product's numeric factor, as `-2x` already is, so
+  // `-\frac{x}{2}` and `-\frac{1}{2}x` have one canonical form. A product
+  // with a direct `ContinuationPlaceholder` operand (`2 · 4 · … · 2n`) is a
+  // notational object, not an arithmetic one: folding the sign into its
+  // first factor would misread the elided pattern, so it stays wrapped in
+  // `Negate` (the ellipsis fold barrier, see `negateProduct`'s caller in
+  // `arithmetic-mul-div.ts`).
+  if (
+    isFunction(expr, 'Multiply') &&
+    !expr.ops.some((op) => isContinuationOperand(op))
+  )
+    return negateProduct(expr.engine, expr.ops);
 
   return expr.engine._fn('Negate', [expr]);
 }

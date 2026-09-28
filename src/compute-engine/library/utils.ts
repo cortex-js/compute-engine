@@ -683,7 +683,7 @@ function asReadableFraction(z: Expression, ce: ComputeEngine): Expression {
   let coeff: Expression | undefined;
   const rest: Expression[] = [];
   for (const op of z.ops) {
-    if (coeff === undefined && isNumber(op) && op.im === 0) coeff = op;
+    if (coeff === undefined && isNumber(op) && !op.isComplex) coeff = op;
     else rest.push(op);
   }
   if (coeff === undefined || rest.length === 0) return z;
@@ -719,7 +719,7 @@ function pSeriesClosedForm(
   const base = body.op1;
   const exp = body.op2;
   if (!(isSymbol(base) && base.symbol === index)) return undefined;
-  if (!isNumber(exp) || exp.im !== 0) return undefined;
+  if (!isNumber(exp) || exp.isComplex) return undefined;
   const r = exp.re;
   // s = −exp must be a real > 1 for absolute convergence (s = 1 is the
   // harmonic/ζ(1) pole; s ≤ 1 diverges).
@@ -779,11 +779,25 @@ function geometricSumClosedForm(
   }
 
   if (!isFunction(power, 'Power')) return undefined;
-  const r = power.op1;
+  const base = power.op1;
   const exp = power.op2;
-  // The exponent must be exactly the summation index, and the ratio free of it.
-  if (!(isSymbol(exp) && exp.symbol === index)) return undefined;
-  if (r.has(index)) return undefined;
+  // The exponent must be the summation index, and the ratio free of it. A
+  // NEGATED index is the reciprocal ratio: `2^(−k)`, the canonical form of
+  // `1/2^k`, is `(1/2)^k` (it was not recognized, so `Σ 2^(−k)` stayed
+  // symbolic while `Σ (1/2)^k` was 2).
+  const isIndex = (e: Expression): boolean =>
+    isSymbol(e) && e.symbol === index;
+  const negatedIndex =
+    (isFunction(exp, 'Negate') && isIndex(exp.op1)) ||
+    (isFunction(exp, 'Multiply') &&
+      exp.nops === 2 &&
+      exp.op1.isSame(-1) &&
+      isIndex(exp.op2));
+  if (!isIndex(exp) && !negatedIndex) return undefined;
+  if (base.has(index)) return undefined;
+  const r = negatedIndex
+    ? ce.function('Divide', [ce.One, base]).evaluate()
+    : base;
 
   // value = c·r^{n₀} / (1 − r)
   const rPow = n0 === 0 ? ce.One : ce.function('Power', [r, ce.number(n0)]);

@@ -287,10 +287,10 @@ describe('EPSIL COMPREHENSIONS — serialization', () => {
   });
 
   test('other SetFrom and DictionaryFrom shapes keep the call form', () => {
-    expect(serializeEpsil(['SetFrom', 'xs'])).toBe('SetFrom(xs)');
-    expect(serializeEpsil(['SetFrom', 'xs', 'ys'])).toBe('SetFrom(xs, ys)');
+    expect(serializeEpsil(['SetFrom', 'xs'])).toBe('setFrom(xs)');
+    expect(serializeEpsil(['SetFrom', 'xs', 'ys'])).toBe('setFrom(xs, ys)');
     expect(serializeEpsil(['DictionaryFrom', 'pairs'])).toBe(
-      'DictionaryFrom(pairs)'
+      'dictionaryFrom(pairs)'
     );
     // A dictionary comprehension whose body is not a pair.
     expect(
@@ -298,7 +298,7 @@ describe('EPSIL COMPREHENSIONS — serialization', () => {
         'DictionaryFrom',
         ['Comprehension', 'p', ['Element', 'p', 'pairs']],
       ])
-    ).toBe('DictionaryFrom([p for p in pairs])');
+    ).toBe('dictionaryFrom([p for p in pairs])');
   });
 
   test("the engine's set-builder prints as a set comprehension", () => {

@@ -176,10 +176,10 @@ describe('PARSING OF NUMBER', () => {
       `["Equal", "x", 0.123]`
     );
     expect(parse('x=.123\\ldots e4')).toMatchInlineSnapshot(
-      `["Equal", "x", 1230]`
+      `["Equal", "x", {num: "1230.0"}]`
     );
     expect(parse('x=.123\\ldots e4+1')).toMatchInlineSnapshot(
-      `["Equal", "x", ["Add", 1, 1230]]`
+      `["Equal", "x", ["Add", 1, {num: "1230.0"}]]`
     );
     expect(parse('x=.123\\ldots e-423+1')).toMatchInlineSnapshot(
       `["Equal", "x", ["Add", 1, "1.23e-424"]]`
@@ -427,7 +427,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
       `124\\,200\\,000\\,000`
     );
     expect(reformat('12420.54\\times10^{7}')).toMatchInlineSnapshot(
-      `124\\,205\\,400\\,000`
+      `124\\,205\\,400\\,000.0`
     );
 
     // *NOT* a repeating pattern (fewer digits than precision)
@@ -443,9 +443,9 @@ describe('SERIALIZATION OF NUMBERS', () => {
       });
     expect(reformat('0')).toMatchInlineSnapshot(`0`);
     expect(reformat('1')).toMatchInlineSnapshot(`1`);
-    expect(reformat('0.00001')).toMatchInlineSnapshot(`1\\times10^{-5}`);
+    expect(reformat('0.00001')).toMatchInlineSnapshot(`1.0\\times10^{-5}`);
     expect(reformat('0.0123')).toMatchInlineSnapshot(`1.23\\times10^{-2}`);
-    expect(reformat('0.001')).toMatchInlineSnapshot(`1\\times10^{-3}`);
+    expect(reformat('0.001')).toMatchInlineSnapshot(`1.0\\times10^{-3}`);
     expect(reformat('0.123')).toMatchInlineSnapshot(`1.23\\times10^{-1}`);
     expect(reformat('5')).toMatchInlineSnapshot(`5`);
     expect(reformat('5.1234')).toMatchInlineSnapshot(`5.123\\,4`);
@@ -479,10 +479,10 @@ describe('SERIALIZATION OF NUMBERS', () => {
       });
     expect(reformat('0')).toMatchInlineSnapshot(`0`);
     expect(reformat('1')).toMatchInlineSnapshot(`1`);
-    expect(reformat('0.00001')).toMatchInlineSnapshot(`100\\times10^{-3}`);
+    expect(reformat('0.00001')).toMatchInlineSnapshot(`100.0\\times10^{-3}`);
     expect(reformat('0.0123')).toMatchInlineSnapshot(`12.3\\times10^{-3}`);
-    expect(reformat('0.001')).toMatchInlineSnapshot(`1\\times10^{-3}`);
-    expect(reformat('0.123')).toMatchInlineSnapshot(`123\\times10^{-3}`);
+    expect(reformat('0.001')).toMatchInlineSnapshot(`1.0\\times10^{-3}`);
+    expect(reformat('0.123')).toMatchInlineSnapshot(`123.0\\times10^{-3}`);
     expect(reformat('5')).toMatchInlineSnapshot(`5`);
     expect(reformat('5.1234')).toMatchInlineSnapshot(`5.123\\,4`);
     expect(reformat('42')).toMatchInlineSnapshot(`42`);
@@ -548,7 +548,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
       notation: 'auto',
     });
     expect(result).toMatchInlineSnapshot(
-      `14\\,285\\,714\\,285\\,714\\,286\\cdot10^{-24}`
+      `1.428\\,571\\,428\\,571\\,428\\,6\\cdot10^{-8}`
     );
   });
 
@@ -634,7 +634,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
 
     // Single digit mantissa
     expect(reformat('5e10')).toMatchInlineSnapshot(`5\\times10^{10}`);
-    expect(reformat('5e-10')).toMatchInlineSnapshot(`5\\times10^{-10}`);
+    expect(reformat('5e-10')).toMatchInlineSnapshot(`5.0\\times10^{-10}`);
 
     // Edge case: mantissa with trailing zeros
     expect(reformat('1.20e5')).toMatchInlineSnapshot(`1.2\\times10^{5}`);
@@ -651,7 +651,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
 
     // Engineering notation uses exponents that are multiples of 3
     // 6.02e23 -> exponent 23 rounds to 21, so 602e21
-    expect(reformat('6.02e23')).toMatchInlineSnapshot(`602\\times10^{21}`);
+    expect(reformat('6.02e23')).toMatchInlineSnapshot(`602.0\\times10^{21}`);
     expect(reformat('6.02e24')).toMatchInlineSnapshot(`6.02\\times10^{24}`);
     expect(reformat('6.02e25')).toMatchInlineSnapshot(`60.2\\times10^{24}`);
   });
@@ -683,5 +683,44 @@ describe('Repeating decimal arc after a leading separator (REVIEW.md C6)', () =>
     const withoutLeadingZero = exprToString(parse('.\\wideparen{3}'));
     expect(withoutLeadingZero).toBe(withLeadingZero);
     expect(withoutLeadingZero).toBe(`["Rational", 1, 3]`);
+  });
+});
+
+// An imaginary part outside the double range (`10^{-800}`, `10^{800}`) is
+// held exactly (a rational) or as a big decimal, never as the double it
+// rounds to (`0`, `Infinity`). The LaTeX serializer reads the digits of the
+// part, not its double, so the round trip parse → serialize → parse keeps the
+// value. Design note: `docs/plans/2026-09-27-big-decimal-imaginary-part.md`
+// §2.5.
+describe('Round trip of an imaginary part outside the double range', () => {
+  for (const [latex, printed] of [
+    ['10^{-800}i', '1e-800i'],
+    ['10^{800}i', '1e+800i'],
+  ] as const) {
+    test(`${latex}, exact`, () => {
+      const value = ce.parse(latex).evaluate();
+      const again = ce.parse(value.latex).evaluate();
+      expect(again.isSame(value)).toBe(true);
+      expect(again.json).toEqual(value.json);
+    });
+
+    test(`${latex}, big-number form`, () => {
+      const value = ce.parse(latex).N();
+      expect(value.toString()).toBe(printed);
+      const again = ce.parse(value.latex).N();
+      expect(again.isSame(value)).toBe(true);
+      expect(again.toString()).toBe(printed);
+    });
+  }
+
+  test('an inexact part below the double range is not serialized as 0', () => {
+    const value = ce.box(['Complex', 0, { num: '2.5e-800' }]);
+    expect(value.latex).toBe('2.5\\cdot10^{-800}\\imaginaryI');
+    expect(ce.parse(value.latex).isSame(value)).toBe(true);
+  });
+
+  test('a real part below the double range is not dropped', () => {
+    const value = ce.box(['Complex', { num: '2.5e-800' }, 1]);
+    expect(value.latex).toBe('2.5\\cdot10^{-800}+\\imaginaryI');
   });
 });

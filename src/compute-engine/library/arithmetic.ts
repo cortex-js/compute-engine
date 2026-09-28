@@ -1,4 +1,5 @@
 import { Complex } from 'complex-esm';
+import type { MathJsonExpression } from '../../math-json/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { factsOf } from '../../common/type/facts.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -36,6 +37,7 @@ import {
   holdsDoubles,
   machineListOf,
 } from '../boxed-expression/machine-broadcast.js';
+import { boxStoreElement } from '../boxed-expression/machine-number.js';
 import { withEvaluationEffects } from '../effects-registry.js';
 import { polynomialGCDMulti } from '../boxed-expression/polynomials.js';
 import {
@@ -61,6 +63,11 @@ import {
   shouldNumericize,
   isExactNumber,
 } from '../boxed-expression/apply.js';
+import {
+  asFloat,
+  floatIfFloatOperand,
+  hasFloatOperand,
+} from '../boxed-expression/float-result.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { rangeCount } from '../numerics/range-count.js';
 
@@ -121,8 +128,10 @@ import {
   realGcd,
   realLcm,
   roundHalfAway,
+  floorModDouble,
 } from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
+import type { NumberLiteralInterface } from '../types-expression.js';
 import { isComposite, isPrime } from '../boxed-expression/predicates.js';
 
 import {
@@ -1729,7 +1738,7 @@ function polygammaValueAtExceptionalPoint(
   if (point !== undefined && point !== '+oo') return ce.NaN;
   if (order === null || order < 0) return undefined;
   if (point === '+oo') return order === 0 ? ce.PositiveInfinity : ce.Zero;
-  if (x.im === 0 && x.isInteger === true && x.isNonPositive === true)
+  if (!x.isComplex && x.isInteger === true && x.isNonPositive === true)
     return ce.ComplexInfinity;
   return undefined;
 }
@@ -1777,7 +1786,7 @@ function besselValueAtExceptionalPoint(
     if (kind === 'K') return ce.ComplexInfinity;
     return n % 2 === 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
   }
-  if ((kind === 'Y' || kind === 'K') && x.im === 0 && x.isSame(0)) {
+  if ((kind === 'Y' || kind === 'K') && !x.isComplex && x.isSame(0)) {
     if (n !== 0) return ce.ComplexInfinity;
     return kind === 'Y' ? ce.NegativeInfinity : ce.PositiveInfinity;
   }
@@ -1878,7 +1887,7 @@ function betaValueAtInfinity(
   const positiveInteger = (x: Expression): boolean =>
     isNumber(x) &&
     infinitePoint(x) === undefined &&
-    x.im === 0 &&
+    !x.isComplex &&
     x.isInteger === true &&
     x.isPositive === true;
   if (
@@ -1933,7 +1942,7 @@ function incompleteGammaValueAtInfinity(
   if (pz !== undefined) return isNumber(s) ? ce.NaN : undefined;
   // s is the infinite operand and z is finite.
   if (ps === '~oo' || ps === 'anonymous') return ce.NaN;
-  if (!isNumber(z) || z.im !== 0 || z.isPositive !== true) return undefined;
+  if (!isNumber(z) || z.isComplex || z.isPositive !== true) return undefined;
   if (ps === '+oo') return ce.PositiveInfinity;
   if (z.isGreaterEqual(1) === true) return ce.Zero;
   if (z.isLess(1) === true) return ce.PositiveInfinity;
@@ -2040,7 +2049,9 @@ function boxComplexResult(
 }
 
 /** Both components of a number literal are finite machine numbers. */
-function isFiniteNumberLiteral(x: Expression): boolean {
+function isFiniteNumberLiteral(
+  x: Expression
+): x is Expression & NumberLiteralInterface {
   return isNumber(x) && Number.isFinite(x.re) && Number.isFinite(x.im);
 }
 
@@ -2069,7 +2080,7 @@ function zetaAtInfiniteOperand(
   if (sPoint !== undefined) {
     if (!isFiniteNumberLiteral(a)) return null;
     if (sPoint !== '+oo') return engine.NaN;
-    if (a.im !== 0 || !(a.re > 0)) return null;
+    if (a.isComplex || !(a.re > 0)) return null;
     if (a.re > 1) return engine.Zero;
     if (a.re === 1) return engine.One;
     return engine.PositiveInfinity;
@@ -2116,7 +2127,7 @@ function evaluateHurwitzZeta(
 
   const finite = isFiniteNumberLiteral;
   const aNonposInt =
-    isNumber(a) && a.im === 0 && Number.isInteger(a.re) && a.re <= 0;
+    isNumber(a) && !a.isComplex && Number.isInteger(a.re) && a.re <= 0;
 
   // a a non-positive integer: the (k+a) = 0 term diverges when Re(s) > 0,
   // and is indeterminate on Re(s) = 0 for a non-real s.
@@ -2126,7 +2137,7 @@ function evaluateHurwitzZeta(
     aNonposInt &&
     finite(s) &&
     s.re === 0 &&
-    s.im !== 0
+    s.isComplex
   )
     return engine.NaN;
 
@@ -2151,11 +2162,11 @@ function evaluateHurwitzZeta(
   // ζ(s, m) is small next to ζ(s) (HurwitzZeta(100, 5) ≈ 5^(−100), but both
   // ζ(100) and the sum round to 1), so only the exact route rewrites, and
   // only for m ≤ HURWITZ_PEEL_LIMIT; a numeric request uses the kernel.
-  const complexS = finite(s) && s.im !== 0;
+  const complexS = finite(s) && s.isComplex;
   if (
     !complexS &&
     isNumber(a) &&
-    a.im === 0 &&
+    !a.isComplex &&
     Number.isInteger(a.re) &&
     a.re >= 1
   ) {
@@ -2178,7 +2189,9 @@ function evaluateHurwitzZeta(
   // Real s and real a: a term (k + a)^(−s) with k + a < 0 is complex for a
   // non-integer s, so the value is real when a ≥ 0 or s is an integer.
   const real =
-    s.im === 0 && a.im === 0 && (a.re >= 0 || Number.isInteger(s.re));
+    !s.isComplex && !a.isComplex && (a.re >= 0 || Number.isInteger(s.re));
+  // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
+  // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   return boxComplexResult(
     engine,
     hurwitzZetaComplex(new Complex(s.re, s.im), new Complex(a.re, a.im)),
@@ -2207,7 +2220,7 @@ function evaluateGeneralizedZeta(
   if (!isNumber(a) || a.re > 0)
     return evaluateHurwitzZeta(engine, s, a, numericApproximation);
 
-  if (a.im === 0 && a.re === 0)
+  if (!a.isComplex && a.re === 0)
     return engine.function('Zeta', [s]).evaluate({ numericApproximation });
 
   const atInfinity = zetaAtInfiniteOperand(engine, s, a);
@@ -2238,10 +2251,12 @@ function evaluateGeneralizedZeta(
 
   // Real s and real a: the terms off the positive axis are |k + a|^(−s)
   // and the rest is a Hurwitz ζ at a positive base point, all real.
+  // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
+  // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   return boxComplexResult(
     engine,
     zetaGeneralizedComplex(new Complex(s.re, s.im), new Complex(a.re, a.im)),
-    s.im === 0 && a.im === 0
+    !s.isComplex && !a.isComplex
   );
 }
 
@@ -2272,6 +2287,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // lane (`typeCouldBeNumericTuple`, validate.ts), not by this
       // carrier.
       signature: '(complex | infinity) -> number',
+      examples: ['[Abs(-3), Abs(3 - 4i)]'],
       nanBehavior: 'propagate',
       // A TYPE test, not an `operator === 'Tuple'` check: a tuple-TYPED
       // symbol or lambda parameter is a point too, even without a literal
@@ -2323,6 +2339,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       // Accept numbers, vectors, and matrices for element-wise addition
       signature: '(value+) -> value',
+      examples: ['1 + x + 2 + x'],
       // The `value`-typed signature would default to `pass-through`; declare
       // `propagate` so an absent operand yields `NaN` (every cell `Add`
       // computes on is numeric — §3.A/§5 of the missing-value typing design).
@@ -2539,6 +2556,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // one. (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4
       // "Choosing carriers".)
       signature: '(real | signed_infinity) -> integer | signed_infinity',
+      examples: ['[Ceil(2.3), Ceil(-2.7)]'],
       // Explicit: the DERIVED default answers `reject` for an
       // extended-real carrier, and `Ceil(NaN)` must be `NaN`.
       nanBehavior: 'propagate',
@@ -2570,6 +2588,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
 
       signature: '(T) -> T where T: number',
+      examples: ['Chop([1e-20, 0.5, 3 + 1e-15i])'],
       evaluate: (ops, { numericApproximation }) => {
         const op = ops[0];
         const ce = op.engine;
@@ -2601,6 +2620,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q11567',
       complexity: 500,
       signature: '(real: number, imaginary: number) -> complex',
+      examples: ['[Complex(3, 4), Complex(1, -2)]'],
     },
 
     Divide: {
@@ -2636,6 +2656,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // - if numer product of numbers, or denom product of numbers,
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
       signature: '(complex | infinity, (complex | infinity)+) -> number',
+      examples: ['[6 / 4, x / 2]'],
       nanBehavior: 'propagate',
       type: (ops, context) => {
         const [num, den] = ops;
@@ -2972,6 +2993,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // incompatible-type error (the exponent slot excludes `~oo`),
       // `Exp(NaN)` propagates, `Exp(±∞)` keeps its values (+∞ and 0).
       signature: '(number) -> number',
+      examples: ['[Exp(1), Exp(Ln(x)), N(Exp(2))]'],
       // Because it gets canonicalized to Power, the sgn handler is not called
       // sgn: ([x]) => {
       //   if (
@@ -3009,6 +3031,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 3500,
       broadcastable: true,
       signature: '(number) -> number',
+      examples: ['[Exp2(10), Exp2(1/2)]'],
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args, 1);
         // See the `Exp` guard above: `['Exp2', 11, 12]` used to canonicalize
@@ -3045,6 +3068,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // numeric point in the carrier, the evaluate handler then has nothing
       // to enforce but the NaN arm.
       signature: '(complex | infinity) -> number',
+      examples: ['[5!, 20!]'],
       nanBehavior: 'propagate',
       // The negative-integer branch widens the claim to `number` on the
       // Γ(x+1) pole. On a compound operand (`Negate(Floor(Abs(r)))`) that
@@ -3113,8 +3137,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const infinite = infiniteGammaFamilyValue(x, ce);
         if (infinite !== undefined) return infinite;
 
-        // Is the argument a complex number?
-        if (x.im !== 0 && x.im !== undefined)
+        // Is the argument a complex number? `isComplex` decides, but the
+        // kernel reads the double `im`: the complex-esm kernels are doubles by
+        // nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
+        if (x.isComplex && x.im !== undefined)
           return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
 
         // The argument is real...
@@ -3133,16 +3159,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // stays symbolic on the exact route (the value is a perfectly good
         // integer the machine cannot hold) and overflows to `+oo` under
         // `numericApproximation`, the float reading of Γ(x+1) there.
+        // A float argument with an integer value gives a float: `2.0!` is
+        // the float `2`, and above the exact cap the float reading of Γ(x+1).
+        const float = !x.isExact;
         if (estimatedFactorialDigits(x.re) > MAX_EXACT_FACTORIAL_DIGITS)
-          return numericApproximation ? ce.number(gamma(1 + x.re)) : undefined;
+          return numericApproximation || float
+            ? ce.number(gamma(1 + x.re))
+            : undefined;
         try {
-          return ce.number(
+          const result = ce.number(
             run(
               bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
               ce._timeRemaining,
               ce._deadlineFrame
             )
           );
+          return float ? asFloat(result) : result;
         } catch (e) {
           if (e instanceof CancellationError) throw e;
           // We can get here if the factorial is too large
@@ -3163,8 +3195,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const infinite = infiniteGammaFamilyValue(x, ce);
         if (infinite !== undefined) return infinite;
 
-        // Is the argument a complex number?
-        if (x.im !== 0 && x.im !== undefined)
+        // Is the argument a complex number? `isComplex` decides, but the
+        // kernel reads the double `im`: the complex-esm kernels are doubles by
+        // nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
+        if (x.isComplex && x.im !== undefined)
           return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
 
         // The argument is real...
@@ -3178,12 +3212,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // A positive non-integer real is `Γ(x+1)`, not the rounded factorial.
         if (!x.isInteger) return ce.number(gamma(1 + x.re));
-        // Above the exact digit cap — see the synchronous handler above.
+        // Above the exact digit cap, and a float argument — see the
+        // synchronous handler above.
+        const float = !x.isExact;
         if (estimatedFactorialDigits(x.re) > MAX_EXACT_FACTORIAL_DIGITS)
-          return numericApproximation ? ce.number(gamma(1 + x.re)) : undefined;
+          return numericApproximation || float
+            ? ce.number(gamma(1 + x.re))
+            : undefined;
 
         try {
-          return ce.number(
+          const result = ce.number(
             await runAsync(
               bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
               (ce._deadline ?? Infinity) - Date.now(),
@@ -3191,6 +3229,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ce._deadlineFrame
             )
           );
+          return float ? asFloat(result) : result;
         } catch (e) {
           if (e instanceof CancellationError) throw e;
           // We can get here if the factorial is too large
@@ -3214,6 +3253,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // capability gap, not an off-carrier point. No `canonical` handler,
       // so a proven off-carrier operand (a string) is rejected at boxing.
       signature: '(complex | infinity) -> number',
+      examples: ['[Factorial2(7), Factorial2(8)]'],
       nanBehavior: 'propagate',
       // Same shape as `Factorial` above: the negative-integer branch widens
       // the claim to `number`, and on a compound operand that negative sign
@@ -3286,20 +3326,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           n >= 0 &&
           estimatedFactorialDigits(n) / 2 > MAX_EXACT_FACTORIAL_DIGITS
         )
-          return numericApproximation ? ce.number(factorial2(n)) : undefined;
+          return numericApproximation || hasFloatOperand([x])
+            ? ce.number(factorial2(n))
+            : undefined;
         // The big-decimal product of integers is exact, so the result is an
         // exact integer at any magnitude (`ce.number()` of an integer-valued
-        // big decimal), not a numeric result.
+        // big decimal), not a numeric result. A float argument with an
+        // integer value gives a float: `3.0!!` is the float `3`.
         if (bignumPreferred(ce))
-          return ce.number(
-            run(
-              bigFactorial2(ce.bignum(n)),
-              ce._timeRemaining,
-              ce._deadlineFrame
+          return floatIfFloatOperand(
+            [x],
+            ce.number(
+              run(
+                bigFactorial2(ce.bignum(n)),
+                ce._timeRemaining,
+                ce._deadlineFrame
+              )
             )
           );
 
-        return ce.number(factorial2(n));
+        return floatIfFloatOperand([x], ce.number(factorial2(n)));
       },
     },
 
@@ -3316,6 +3362,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // the slim handler narrowing to `integer` / the signed pair where
       // the operand proves it.
       signature: '(real | signed_infinity) -> integer | signed_infinity',
+      examples: ['[Floor(2.7), Floor(-2.3)]'],
       nanBehavior: 'propagate',
       partiality: 'total',
       type: ([x], context) =>
@@ -3352,6 +3399,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Ruling recorded in `docs/plans/2026-08-30-error-model-implementation.md`,
       // Phase F batch 10.
       signature: '(real | signed_infinity) -> real<0..1>',
+      examples: ['[Fract(3.75), Fract(-3.25)]'],
       nanBehavior: 'propagate',
       definedWhen: ([x]) => {
         if (x === undefined) return undefined;
@@ -3387,7 +3435,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Exact fractional part for an exact real argument: x - floor(x),
         // computed exactly (rational arithmetic) so `Fract(1/2) → 1/2`, not
         // `0.5`. Only an inexact (float) argument numericizes.
-        if (!numericApproximation && isNumber(x) && x.isExact && x.im === 0) {
+        if (!numericApproximation && isNumber(x) && x.isExact && !x.isComplex) {
           const fl = ce.function('Floor', [x]).evaluate();
           if (isNumber(fl) && fl.isExact)
             return ce.function('Subtract', [x, fl]).evaluate();
@@ -3421,6 +3469,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // off-carrier operand is rejected at BOXING; with every numeric
       // point in the carrier, that seam only ever sees a non-number.
       signature: '(complex | infinity, (complex | infinity)?) -> number',
+      examples: ['[Gamma(1/2), N(Gamma(1/2)), N(Gamma(5))]', 'N(Gamma(2, 1))'],
       nanBehavior: 'propagate',
       // Γ(z) has poles (value `~oo`) at the non-positive integers; the
       // incomplete Γ(s, z) keeps the generic handler. A provably-NaN
@@ -3476,7 +3525,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         // Gamma has poles at the non-positive integers (0, -1, -2, ...).
         // This is exact, so return it regardless of numericApproximation.
-        if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
+        if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
           return engine.ComplexInfinity;
         // Γ at an infinite argument. Also exact, so it does not wait for
         // `numericApproximation` either.
@@ -3501,6 +3550,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `ln Γ` has a value at every finite complex point (`+∞` at the
       // poles) and takes the Γ-family values at the infinite points.
       signature: '(complex | infinity) -> number',
+      examples: ['N(GammaLn(100))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -3513,7 +3563,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // At the poles of Γ (the non-positive integers) |Γ| → ∞, so
         // ln Γ → +∞ (as in Mathematica's LogGamma and SymPy's loggamma).
         // This is exact, so return it regardless of numericApproximation.
-        if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
+        if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
           return engine.PositiveInfinity;
         // ln Γ(x) → +∞ as x → +∞ (ln Γ(10¹²) ≈ 2.66·10¹³), and it has no
         // limit as x → −∞, nor at the unsigned `~∞` — same reasons as Γ
@@ -3546,6 +3596,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // non-real finite argument stays symbolic: there is no complex
       // kernel, a capability gap and not an off-carrier point.
       signature: '(complex | infinity) -> number',
+      examples: ['[Digamma(1), N(Digamma(1))]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -3571,6 +3622,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // As `Digamma` above: the exceptional points are
       // `polygammaValueAtExceptionalPoint`'s (`ψ₁(+∞) = 0`).
       signature: '(complex | infinity) -> number',
+      examples: ['N(Trigamma(1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -3606,6 +3658,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `hurwitzZetaComplex` for m >= 1 (DLMF 5.15.2), its own asymptotic
       // series for m = 0 (ζ(1, z) is the pole ψ itself sits at).
       signature: '(order: integer, complex | infinity) -> number',
+      examples: ['N(PolyGamma(2, 1))'],
       nanBehavior: 'propagate',
       // ψⁿ(x) has poles (value `~oo`) at the non-positive integers. A
       // provably-NaN operand declines (`specialFunctionType` records what
@@ -3671,6 +3724,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // keeps the generic `specialFunctionType` claim below rather than the
       // single-argument pole refinement.
       signature: '(complex | infinity, (complex | infinity)?) -> number',
+      examples: ['[Zeta(2), Zeta(-1), N(Zeta(3))]'],
       nanBehavior: 'propagate',
       // ζ(1) is the pole; its value `~oo` is neither finite nor a member of
       // the signed pair `+oo | -oo`, so only `number` admits it. The
@@ -3720,7 +3774,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const point = infinitePoint(x);
           if (point === '+oo') return engine.One;
           if (point !== undefined) return engine.NaN;
-          if (x.im === 0 && x.isSame(1)) return engine.ComplexInfinity;
+          if (!x.isComplex && x.isSame(1)) return engine.ComplexInfinity;
         }
         if (shouldNumericize(numericApproximation, x))
           return apply(x, zeta, (x) => bigZeta(engine, x), zetaComplex);
@@ -3768,6 +3822,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // symbolic, but the signature still admits it: those rules box
       // against this same head and must not fail to box.
       signature: '(complex | infinity, complex | infinity, integer?) -> number',
+      examples: ['HurwitzZeta(2, 2)'],
       nanBehavior: 'propagate',
       // Real operands give a real value only on the real branch: a proven
       // positive a (no (k + a) ≤ 0 term) and s not the pole 1 (the
@@ -3811,6 +3866,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // a proven off-carrier operand is rejected at boxing. A non-real
       // finite operand stays symbolic — no complex kernel.
       signature: '(complex | infinity, complex | infinity) -> number',
+      examples: ['[Beta(2, 3), N(Beta(1/2, 1/2))]'],
       nanBehavior: 'propagate',
       // B(a, b) has Γ-poles (value `~oo`) where a or b is a non-positive
       // integer (unless cancelled). Such an argument may be a pole → claim the
@@ -3840,7 +3896,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // non-positive integer into silent overflow garbage (e.g. B(−1, 2)
         // → −2.97e49); the exact rational form below is correct on both the
         // finite (`B(−2, 2) = 1/2`) and the pole (`B(−1, 2) = ~oo`) branches.
-        if (isNumber(a) && isNumber(b) && a.im === 0 && b.im === 0) {
+        if (isNumber(a) && isNumber(b) && !a.isComplex && !b.isComplex) {
           const ai = a.isInteger ? asSmallInteger(a) : null;
           const bi = b.isInteger ? asSmallInteger(b) : null;
           // B(a, m) = (m−1)! / (a(a+1)…(a+m−1)) — an exact rational function of
@@ -3850,8 +3906,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             reduced = betaPositiveIntegerArg(engine, a, bi);
           else if (ai !== null && ai > 0)
             reduced = betaPositiveIntegerArg(engine, b, ai);
+          // A float argument gives a float: `B(1.0, 1)` is the float `1`.
           if (reduced !== undefined)
-            return numericApproximation ? reduced.N() : reduced;
+            return floatIfFloatOperand(
+              [a, b],
+              numericApproximation ? reduced.N() : reduced
+            );
           // Remaining pole cases: a or b a non-positive integer with no
           // positive-integer partner to cancel it → Γ-pole (B is infinite).
           if ((ai !== null && ai <= 0) || (bi !== null && bi <= 0))
@@ -3902,6 +3962,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // No `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
       signature: '(complex | infinity, number?) -> number',
+      examples: ['[LambertW(1), N(LambertW(1))]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -3967,6 +4028,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: complex, complex | infinity) -> number',
+      examples: ['N(BesselJ(0, 1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -3986,6 +4048,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Signature shape and seams: see `BesselJ` above.
       signature: '(order: complex, complex | infinity) -> number',
+      examples: ['N(BesselY(0, 1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -4004,6 +4067,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Signature shape and seams: see `BesselJ` above.
       signature: '(order: complex, complex | infinity) -> number',
+      examples: ['N(BesselI(0, 1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -4024,6 +4088,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Signature shape and seams: see `BesselJ` above.
       signature: '(order: complex, complex | infinity) -> number',
+      examples: ['N(BesselK(0, 1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -4050,6 +4115,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `complex`). No `canonical` handler, so a proven off-carrier
       // operand is rejected at boxing.
       signature: '(complex | infinity) -> number',
+      examples: ['N(AiryAi(1))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -4071,6 +4137,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Signature and seams: see `AiryAi` above.
       signature: '(complex | infinity) -> number',
+      examples: ['N(AiryBi(0))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -4092,6 +4159,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Signature and seams: see `AiryAi` above.
       signature: '(complex | infinity) -> number',
+      examples: ['N(AiryAiPrime(0))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -4113,6 +4181,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Signature and seams: see `AiryAi` above.
       signature: '(complex | infinity) -> number',
+      examples: ['N(AiryBiPrime(0))'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -4128,6 +4197,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Ln: {
       description: 'Natural Logarithm',
+      examples: ['[Ln(1), Ln(2), N(Ln(2))]', 'Ln(8, 2)'],
       wikidata: 'Q204037',
       complexity: 4000,
       broadcastable: true,
@@ -4193,6 +4263,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const special = logarithmAtExceptionalPoint(engine, z, undefined, true);
         if (special !== undefined) return special;
 
+        // A negative real above machine precision: `ln(−x) = ln(x) + iπ`
+        // with both parts at the working precision. The machine route below
+        // (`engine.complex(x).log()`) gives a 16-digit imaginary part, and a
+        // big-decimal kernel downstream then reads its rounding error as a
+        // value (`Exp(Ln(−2)).N()` gave `−1.99…98 + 4.8e-16i`).
+        if (
+          isNumber(z) &&
+          !z.isComplex &&
+          z.isNegative === true &&
+          bignumPreferred(engine)
+        ) {
+          const bigRe = z.bignumRe ?? engine.bignum(z.re);
+          if (bigRe.isFinite())
+            return engine.number(engine._numericValue(bigRe).ln());
+        }
+
         return apply(
           z,
           (x) =>
@@ -4207,7 +4293,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               : !x.isNegative()
                 ? x.ln()
                 : engine.complex(x.toNumber()).log(),
-          (z) => (z.isZero() ? NaN : z.log())
+          (z) => (z.isZero() ? NaN : z.log()),
+          (z) => z.ln()
         );
       },
     },
@@ -4233,6 +4320,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // finite complex numbers, every infinity, and NaN, and the per-call
       // sharpness lives in the type handler.
       signature: '(complex | infinity, base: complex | infinity?) -> number',
+      examples: ['[Log(1000), Log(8, 2)]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -4377,6 +4465,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number) -> number',
+      examples: ['[Lb(8), N(Lb(3))]'],
       sgn: ([x]) => lnSign(x),
       canonical: ([x], { engine }) => engine._fn('Log', [x, engine.number(2)]),
     },
@@ -4387,6 +4476,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 4100,
       broadcastable: true,
       signature: '(number) -> number',
+      examples: ['[Lg(100), N(Lg(2))]'],
       sgn: ([x]) => lnSign(x),
       canonical: ([x], { engine }) => engine._fn('Log', [x]),
     },
@@ -4396,6 +4486,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 4100,
       broadcastable: true,
       signature: '(number) -> number',
+      examples: ['[Log10(1000), N(Log10(2))]'],
       sgn: ([x]) => lnSign(x),
       canonical: ([x], { engine }) => engine._fn('Log', [x]),
     },
@@ -4405,6 +4496,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 4100,
       broadcastable: true,
       signature: '(number) -> number',
+      examples: ['[Log2(32), N(Log2(3))]'],
       sgn: ([x]) => lnSign(x),
       canonical: ([x], { engine }) => engine._fn('Log', [x, engine.number(2)]),
     },
@@ -4427,6 +4519,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // named by `definedWhen` below, which the gate routes to the codomain
       // marker (`Mod(1, 0)` → `NaN`), never to `Error`.
       signature: '(real, real) -> real',
+      examples: ['[7 % 3, -7 % 3]'],
       nanBehavior: 'propagate',
       // The named domain condition (Contract B, `docs/ERROR-MODEL.md` §4):
       // inside the carrier, a floored remainder exists exactly for a
@@ -4509,7 +4602,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // divisor). Both lanes must agree with the `evaluate` handler
             // below, or `.sgn` and `.evaluate()` disagree on the same
             // expression (P0-7).
-            (a, b) => ((a % b) + b) % b,
+            floorModDouble,
             (a, b) => a.mod(b).add(b).mod(b)
           );
           return v?.sgn ?? undefined;
@@ -4517,6 +4610,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([a, b], { engine: ce }) => {
+        // A float operand makes the result a float, even when its value is
+        // an integer (`Mod(7.0, 3)` is the float `1`): the exact paths below
+        // are for exact operands only, and a float operand takes the float
+        // lanes of `apply2()`.
+        if (hasFloatOperand([a, b])) return floorModFloat(a, b);
+
         // Exact-integer fast path for a non-negative dividend and a positive
         // modulus (where modulo and remainder coincide, so both `apply2` lanes
         // agree). This avoids the bignum float lane, which extracts operands
@@ -4580,15 +4679,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
-        return apply2(
-          a,
-          b,
-          // In JavaScript, the % is remainder, not modulo
-          // so adapt it to return a modulo (floored: sign follows the
-          // divisor, matching the machine lane and the fast paths above).
-          (a, b) => ((a % b) + b) % b,
-          (a, b) => a.mod(b).add(b).mod(b)
-        );
+        return floorModFloat(a, b);
       },
     },
 
@@ -4615,6 +4706,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       lazy: true,
       signature: '(number*) -> number',
+      examples: ['2 * x * 3 * x'],
       type: (ops, { engine, derive }) => {
         if (ops.length === 0)
           return BoxedType.forResult('integer', engine._typeResolver); // = 1
@@ -5378,6 +5470,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // sharply than the unfolded node, and the folded value is exactly
       // what the gate would answer.
       signature: '(complex | infinity) -> number',
+      examples: ['-(x - 1)'],
       nanBehavior: 'propagate',
       partiality: 'total',
       // The echo must REFLECT any range the operand type carries: `−|x|`
@@ -5449,6 +5542,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       lazy: true,
       signature: '(value, value) -> value',
+      examples: [
+        'Measurement(9.81, 0.02)',
+        'N(Measurement(5, 0.2) * Measurement(3, 0.4))',
+      ],
       type: (ops, context) =>
         BoxedType.forResult(
           measurementTypeOnTypes(ops),
@@ -5508,6 +5605,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q120812',
       complexity: 1200,
       signature: '(T, U) -> tuple<T, U> where T: value, U: value',
+      examples: ['PlusMinus(1, 0.1)'],
       canonical: (args, { engine: ce }) => {
         args = checkNumericArgs(ce, args, 2);
         if (args.length === 0) return ce.error('missing');
@@ -5556,6 +5654,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // javascript-target.ts), and the per-call sharpness lives in the
       // type handler below.
       signature: '(complex | infinity, complex | signed_infinity) -> number',
+      examples: ['[2^10, 2^(1/2), x^2 * x^3]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         withZeroToZeroNaN(
@@ -6000,6 +6099,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // argument would silently become plain division (`Rational(3, 2.5)`
       // evaluated to `1.2`), which almost always indicates a caller error.
       signature: '((real) -> rational) | ((integer, integer) -> rational)',
+      examples: ['[Rational(3, 6), Rational(1.25)]'],
       sgn: ([n]) => n.sgn,
       canonical: (args, { engine }) => {
         const ce = engine;
@@ -6041,7 +6141,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // exponential) `.N()` walk the `isNumber` test would then reject.
           if (ops[0].unknowns.length > 0) return undefined;
           const f = ops[0].N();
-          if (!isNumber(f) || f.im !== 0) return undefined;
+          if (!isNumber(f) || f.isComplex) return undefined;
           return ce.number(rationalize(f.re));
         }
 
@@ -6088,10 +6188,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // See `Rational`: a symbolic argument cannot numericize.
         if (ops[0].unknowns.length > 0) return undefined;
         const f = ops[0].N();
-        if (!isNumber(f) || f.im !== 0) return undefined;
+        if (!isNumber(f) || f.isComplex) return undefined;
         if (ops.length >= 2) {
           const tol = ops[1].N();
-          if (!isNumber(tol) || tol.im !== 0) return undefined;
+          if (!isNumber(tol) || tol.isComplex) return undefined;
           return ce.number(rationalize(f.re, tol.re));
         }
         return ce.number(rationalize(f.re));
@@ -6122,6 +6222,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `reject`). The values are folded by `root()` (arithmetic-power.ts),
       // which delegates the non-finite cases to `pow`.
       signature: '(complex | infinity, complex | infinity) -> number',
+      examples: ['[Root(8, 3), N(Root(2, 3))]'],
       nanBehavior: 'propagate',
       requires: ([, n]) => {
         if (n === undefined || !isNumber(n)) return undefined;
@@ -6229,7 +6330,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // a root in the double range (`Root(10^{-900}, 3)` is `1e-300`). The
         // root is computed with big decimals, as `exp(ln(x) / n)`. A negative
         // radicand has a real root only for an odd integer index.
-        if (numericApproximation && isNumber(n) && n.im === 0) {
+        if (numericApproximation && isNumber(n) && !n.isComplex) {
           const big = bigRealOf(
             exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
           );
@@ -6259,6 +6360,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 2500,
       broadcastable: true,
       signature: '(T, T) -> T where T: number',
+      examples: ['[Remainder(7, 3), Remainder(-7, 3)]'],
       evaluate: ([a, b]) =>
         apply2(
           a,
@@ -6304,6 +6406,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (`docs/ERROR-MODEL.md` §4; the Phase F record in
       // `docs/plans/2026-08-30-error-model-implementation.md`.)
       signature: '(real | signed_infinity, integer?) -> real | signed_infinity',
+      examples: ['[Round(2.5), Round(-2.5), Round(3.14159, 2)]'],
       nanBehavior: ['propagate'],
       type: ([x, n], context) => {
         const t = roundingFunctionTypeOnTypes(x);
@@ -6384,6 +6487,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // used to compute is now read off this declaration by the generic
       // derivation).
       signature: '(real | signed_infinity) -> rational<0..1>',
+      examples: ['[Heaviside(-2), Heaviside(0), Heaviside(3)]'],
       // Explicit: the DERIVED default answers `reject` for this carrier
       // (an extended-real carrier is not a subtype of `complex`, which is
       // the mechanical propagate test), and `H(NaN)` must be `NaN` — the
@@ -6430,6 +6534,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // adds the `nan` arm exactly where the argument can carry one.
       // (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4.)
       signature: '(complex | signed_infinity) -> complex',
+      examples: ['[Sign(-3), Sign(0), Sign(3 + 4i)]'],
       type: ([x], context) => {
         if (x === undefined)
           return BoxedType.forResult('complex', context.engine._typeResolver);
@@ -6487,7 +6592,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A complex number literal off the real line: `z/|z|`, exact when
         // the modulus is (`Sign(3 + 4i)` is `3/5 + 4i/5`). A symbolic
         // operand stays symbolic.
-        if (isNumber(x) && x.im !== 0) {
+        if (isNumber(x) && x.isComplex) {
           const unit = engine.function('Divide', [
             x,
             engine.function('Abs', [x]),
@@ -6527,6 +6632,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // needs the `infinity` arm because `√(−∞)` and `√(~oo)` are `~oo`,
       // which the signed pair excludes.
       signature: '(complex | infinity) -> complex | infinity',
+      examples: ['[Sqrt(8), Sqrt(-4), N(Sqrt(2))]'],
       // Explicit: the DERIVED default answers `reject` for a carrier that
       // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
       nanBehavior: 'propagate',
@@ -6692,6 +6798,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `~oo` is `~oo` in every direction of approach). A precise carrier
       // declared here would be a claim nothing consults.
       signature: '(number) -> number',
+      examples: ['[Square(3), Square(x + 1)]'],
       sgn: ([x]) => {
         if (x.isSame(0)) return 'zero';
         if (x.isExtendedReal) {
@@ -6732,6 +6839,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
       // left-associative: a - b - c -> (a - b) - c
       signature: '(number+) -> number',
+      examples: ['5 - 3 - x'],
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args);
         if (args.length === 0) return engine.error('missing');
@@ -6757,6 +6865,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Same domain-signature shape and rationale as `Ceil`/`Floor`
       // above.
       signature: '(real | signed_infinity) -> integer | signed_infinity',
+      examples: ['[Truncate(2.7), Truncate(-2.7)]'],
       nanBehavior: 'propagate',
       partiality: 'total',
       type: ([x], context) =>
@@ -6786,6 +6895,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     //
     ImaginaryUnit: {
       description: 'The imaginary unit, whose square is −1.',
+      examples: ['[ImaginaryUnit^2, Sqrt(-9)]'],
       type: 'imaginary',
       isConstant: true,
       holdUntil: 'never',
@@ -6796,6 +6906,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Alias of 'ImaginaryUnit'
     i: {
       description: 'The imaginary unit, whose square is −1.',
+      examples: ['[i^2, (1 + i)^2]'],
       type: 'imaginary',
       isConstant: true,
       holdUntil: 'never',
@@ -6805,6 +6916,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     ExponentialE: {
       description:
         "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
+      examples: ['[Ln(ExponentialE^2), N(ExponentialE)]'],
       keywords: ['euler number'],
       // The declared type brackets the value (the lower bound is the
       // machine double of e), so the TYPE channel alone proves e > 0 —
@@ -6826,6 +6938,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     e: {
       description:
         "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
+      examples: ['[Ln(e^3), N(e)]'],
       // Same value bracket as `ExponentialE`: the alias's value is that
       // SYMBOL, whose static type carries the bracket, so the declaration
       // check accepts it — unlike `GoldenRatio`, whose value is an
@@ -6839,6 +6952,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     ComplexInfinity: {
       description:
         'Complex infinity, a single unsigned infinity in the complex plane.',
+      examples: ['[1/0, ComplexInfinity + 1]'],
       // `number`, not `complex`: the non-finite typing convention
       // (ARCHITECTURE.md, "Non-finite typing convention for type handlers")
       // admits `~oo` and NaN at the top type only, which is how every derived
@@ -6851,6 +6965,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     PositiveInfinity: {
       description: 'Positive infinity (+∞).',
+      examples: ['[PositiveInfinity + 1, PositiveInfinity > 10^100]'],
       // The exact singleton, not the signed pair `+oo | -oo`: this
       // constant has one value, and its value's own type is that singleton,
       // so declaring the pair would make the declaration weaker than the
@@ -6863,6 +6978,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     NegativeInfinity: {
       description: 'Negative infinity (−∞).',
+      examples: ['[NegativeInfinity - 1, NegativeInfinity < -10^100]'],
       // The exact singleton, for the same reason as `PositiveInfinity`.
       type: '-oo',
       isConstant: true,
@@ -6873,6 +6989,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     NaN: {
       description:
         'Not a Number, the result of an undefined or unrepresentable numeric operation.',
+      examples: ['[NaN + 1, 0/0]'],
       type: 'number',
       isConstant: true,
       holdUntil: 'never',
@@ -6882,6 +6999,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     ContinuationPlaceholder: {
       description:
         'This symbol indicates that some elements in a collection have been omitted, for example in a long list of numbers, or in an infinite set',
+      examples: ['[1, 2, ContinuationPlaceholder, 10]'],
       type: 'unknown',
       isConstant: true,
     },
@@ -6896,6 +7014,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
        */
       description:
         'The difference between 1 and the next larger floating point number (machine epsilon).',
+      examples: ['N(MachineEpsilon)'],
       type: 'real',
       holdUntil: 'N',
       isConstant: true,
@@ -6903,6 +7022,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
     Half: {
       description: 'The rational number one half (1/2).',
+      examples: ['[Half, Half + 1]'],
       // NOT value-bracketed like `EulerGamma`: `holdUntil: 'never'` means
       // every use substitutes the literal `1/2` at canonicalization, whose
       // own handler-visible type already carries the exact value — a
@@ -6914,6 +7034,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
     GoldenRatio: {
       description: 'The golden ratio φ = (1+√5)/2 ≈ 1.618.',
+      examples: ['N(GoldenRatio)'],
       // Value-bracket ranged type. The value is the EXPRESSION `(1+√5)/2`,
       // whose static type cannot witness the bracket — the declaration is
       // accepted because standard-library definitions are TRUSTED
@@ -6928,6 +7049,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
     CatalanConstant: {
       description: "Catalan's constant G ≈ 0.9160.",
+      examples: ['N(CatalanConstant)'],
       // Value-bracket ranged type (G = 0.91596559417721901…); see
       // `GoldenRatio`.
       type: 'real<0.915965594177219..0.9159655941772191>',
@@ -6961,6 +7083,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
     EulerGamma: {
       description: 'The Euler–Mascheroni constant γ ≈ 0.5772.',
+      examples: ['N(EulerGamma)'],
       keywords: ['euler-mascheroni', 'euler gamma'],
       // Value-bracket ranged type (γ = 0.57721566490153286…); see
       // `GoldenRatio`.
@@ -6984,16 +7107,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
   {
     PreIncrement: {
+      examples: ['PreIncrement(5)'],
       description: 'Increment a number by one.',
       signature: '(number) -> number',
+      // The value `x + 1`, built with `ce.function` (the `.add()` method folds
+      // exact literals to a float). It had no evaluate handler, so
+      // `PreIncrement(5)` stayed unevaluated.
+      evaluate: ([x], { engine: ce }) =>
+        ce.function('Add', [x, ce.One]).evaluate(),
       // n + 1 stays in the operand's numeric kind (except `imaginary`, which
       // the handler widens to complex), so the result claims that kind.
       type: (ops, context) =>
         BoxedType.forResult(kindClosureType(ops), context.engine._typeResolver),
     },
     PreDecrement: {
+      examples: ['PreDecrement(5)'],
       description: 'Decrement a number by one.',
       signature: '(number) -> number',
+      // The value `x − 1`, built with `ce.function` (the `.add()` method folds
+      // exact literals to a float). It had no evaluate handler, so
+      // `PreDecrement(5)` stayed unevaluated.
+      evaluate: ([x], { engine: ce }) =>
+        ce.function('Subtract', [x, ce.One]).evaluate(),
       // n - 1 stays in the operand's numeric kind (except `imaginary`, which
       // the handler widens to complex), so the result claims that kind.
       type: (ops, context) =>
@@ -7037,6 +7172,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // enforced in the handler instead, where it answers the same
       // `incompatible-type` error without touching inference.
       signature: '(number) -> boolean',
+      examples: ['[IsPrime(17), IsPrime(21)]'],
       nanBehavior: 'handle',
       evaluate: ([n], { engine }) => {
         const outOfDomain = infiniteOperandOfIntegerPredicate(engine, n);
@@ -7061,6 +7197,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // The same carrier as `IsPrime`, for the same reasons — see there.
       signature: '(number) -> boolean',
+      examples: ['[IsComposite(21), IsComposite(7)]'],
       nanBehavior: 'handle',
       // A composite number is a positive integer greater than 1 that is not
       // prime, so `0`, `1`, the negative integers and every non-integer are
@@ -7095,6 +7232,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // whose answer is no). See the `IsPrime` comment for why the exclusion
       // of the infinities is not written into the declaration.
       signature: '(number) -> boolean',
+      examples: ['[IsOdd(7), IsOdd(8)]'],
       nanBehavior: 'handle',
       evaluate: ([n], { engine }) => parityPredicate(engine, n, 'odd'),
     },
@@ -7112,6 +7250,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (and `IsEven(x)` printed as `¬IsOdd(x)`). Same carrier and NaN
       // policy as `IsOdd`.
       signature: '(number) -> boolean',
+      examples: ['[IsEven(7), IsEven(8)]'],
       nanBehavior: 'handle',
       evaluate: ([n], { engine }) => parityPredicate(engine, n, 'even'),
     },
@@ -7124,6 +7263,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
       signature: '(any*) -> number',
+      examples: ['[GCD(12, 18), GCD(12, 18, 27)]'],
       // Integer operands → a positive integer; polynomial operands → a
       // (monic) polynomial whose type and sign aren't known statically.
       type: (ops, context) =>
@@ -7163,6 +7303,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Integer operands → a positive integer; non-integer real operands →
       // a (non-negative) real via the tolerant float LCM.
       signature: '(any*) -> number',
+      examples: ['[LCM(4, 6), LCM(4, 6, 10)]'],
       type: (ops, context) =>
         BoxedType.forResult(
           ops.every((x) => factsOf(x.type).integer) ? 'integer' : 'number',
@@ -7203,6 +7344,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Phase F batch 10. The same holds for `Denominator` and
       // `NumeratorDenominator` below.
       signature: '(number) -> number | nothing',
+      examples: ['[Numerator(3/4), Numerator(x / y)]'],
       nanBehavior: 'handle',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Numerator to work on non-canonical
@@ -7248,6 +7390,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // A structural accessor over the whole of `number`, `NaN` handled —
       // see `Numerator`.
       signature: '(number) -> number | nothing',
+      examples: ['[Denominator(3/4), Denominator(x / y)]'],
       nanBehavior: 'handle',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Denominator to work on non-canonical
@@ -7291,6 +7434,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // A structural accessor over the whole of `number`, `NaN` handled —
       // see `Numerator`.
       signature: '(number) -> tuple<number, number> | nothing',
+      examples: ['NumeratorDenominator(3/4)'],
       nanBehavior: 'handle',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want NumeratorDenominator to work on non-canonical
@@ -7347,6 +7491,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
       signature: '(value*) -> number',
+      examples: ['[Max(3, 7, 2), Max([3, 7, 2])]'],
       // A data-consuming aggregate: it OWNS its `Missing` runtime (§3.C). An
       // absent datum (a `Missing` operand or element, or a `NaN`) or empty
       // input evaluates to `NaN` (I6 absorption). `missingStrip: 'all'` (the
@@ -7388,6 +7533,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
       signature: '(value+) -> number',
+      examples: ['[Min(3, 7, 2), Min([3, 7, 2])]'],
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -7437,6 +7583,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     ElementMax: {
       description:
         'Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.',
+      examples: ['ElementMax([1, 5, 3], [4, 2, 6])'],
       complexity: 1200,
       broadcastable: true,
       // See the shared note above the `ElementMax` entry for the carrier.
@@ -7457,6 +7604,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     ElementMin: {
       description:
         'Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.',
+      examples: ['ElementMin([1, 5, 3], [4, 2, 6])'],
       complexity: 1200,
       broadcastable: true,
       // See the shared note above the `ElementMax` entry for the carrier.
@@ -7477,6 +7625,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     Clamp: {
       description:
         'Clamp a value to the range [lo, hi] = min(max(x, lo), hi). Broadcasts over collection arguments.',
+      examples: ['[Clamp(12, 0, 10), Clamp(-3, 0, 10), Clamp(5, 0, 10)]'],
       complexity: 1200,
       broadcastable: true,
       // See the shared note above the `ElementMax` entry for the carrier.
@@ -7506,6 +7655,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // including collections
 
       signature: '(value*) -> number',
+      examples: ['[Supremum(1, 3, 2), Supremum(Interval(0, 1))]'],
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -7522,6 +7672,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // including collections
 
       signature: '(value*) -> number',
+      examples: ['[Infimum(1, 3, 2), Infimum(Interval(0, 1))]'],
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
@@ -7534,6 +7685,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     Distance: {
       description:
         'Euclidean distance between two points, broadcasting over a list of points.',
+      examples: ['[Distance((0, 0), (3, 4)), Distance([1, 2, 3], [4, 6, 3])]'],
       complexity: 6000,
       // The parameter admits a POINT (a `tuple`, or the flat `list<number>`
       // spelling a data import produces) and a LIST of points (`list<tuple>`,
@@ -7698,6 +7850,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature: '(any, tuple*) -> number',
+      examples: ['Product(k, (k, 1, 5))', 'Product(1 - 1/k^2, (k, 2, 10))'],
       type: (ops, context) =>
         BoxedType.forResult(
           bigOpResultTypeOnTypes(ops, 'Product'),
@@ -7940,6 +8093,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature: '(any, tuple*) -> number',
+      examples: ['Sum(k^2, (k, 1, 10))', 'Sum(1/k^2, (k, 1, oo))'],
       type: (ops, context) =>
         BoxedType.forResult(
           bigOpResultTypeOnTypes(ops, 'Sum'),
@@ -7971,7 +8125,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // A `List` of machine numbers is summed on its doubles: see
           // `machineSum`.
           const summed = machineSum(first);
-          if (typeof summed === 'number') return engine.number(summed);
+          if (typeof summed === 'number' || Array.isArray(summed))
+            return boxMachineTotal(engine, summed);
           // The operand `machineSum` evaluated is walked below in place of
           // `first`, so that it is not evaluated a second time.
           const source = summed ?? first;
@@ -8072,7 +8227,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 const total = machineListTotal(collection);
                 return total === undefined
                   ? undefined
-                  : sumOf(engine.number(total));
+                  : sumOf(boxMachineTotal(engine, total));
               },
               numericApproximation: numeric,
             }
@@ -8243,7 +8398,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   const total = machineListTotal(collection);
                   return total === undefined
                     ? undefined
-                    : sumOf(engine.number(total));
+                    : sumOf(boxMachineTotal(engine, total));
                 },
                 numericApproximation: numeric,
               }
@@ -8270,6 +8425,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Interpret: {
+      examples: ['Interpret(1 + 2 + ContinuationPlaceholder + n)'],
       description:
         'Interpret a notational expression as its mathematical meaning. In v1: a continuation-bearing `Add`/`Multiply` (e.g. `1 + 2 + \\dots + n`) becomes a `Sum`/`Product`. Returns the argument unchanged when the (strict) inference gate does not pass',
       complexity: 9000,
@@ -8280,13 +8436,42 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any) -> any',
 
-      evaluate: ([arg]) => {
+      evaluate: ([arg], { engine: ce }) => {
         if (!arg) return undefined;
-        return inferContinuationPattern(arg) ?? arg;
+        // Epsil (and any left-associative parse) builds `1 + 2 + … + n` as a
+        // nested `Add(Add(Add(1, 2), …), n)`; the recognizer reads one flat
+        // `Add` in written order. Flatten same-head chains without folding or
+        // reordering (a full canonicalization would fold `1 + 2` to `3`).
+        const flat = flattenSameHeadChain(arg.json);
+        const operand =
+          flat === arg.json ? arg : ce.box(flat, { form: 'raw' });
+        return inferContinuationPattern(operand) ?? arg;
       },
     },
   },
 ];
+
+/**
+ * `json` with its LEFT-nested chain of the same `Add` or `Multiply` head
+ * spliced into one node, in written order: `Add(Add(Add(1, 2), c), n)` is
+ * `Add(1, 2, c, n)`. A left-associative parse nests only through the first
+ * operand, so only that operand is followed: a same-head operand elsewhere
+ * is a term the author wrote (the `2n` anchor of `2 · 4 · … · 2n` is the
+ * operand `Multiply(2, n)`) and is kept whole. Returns `json` itself when
+ * nothing was spliced.
+ */
+function flattenSameHeadChain(json: MathJsonExpression): MathJsonExpression {
+  if (!Array.isArray(json)) return json;
+  const [head, first, ...rest] = json as [
+    string,
+    MathJsonExpression,
+    ...MathJsonExpression[],
+  ];
+  if (head !== 'Add' && head !== 'Multiply') return json;
+  if (!Array.isArray(first) || first[0] !== head) return json;
+  const inner = flattenSameHeadChain(first) as unknown as MathJsonExpression[];
+  return [head, ...inner.slice(1), ...rest] as MathJsonExpression;
+}
 
 /**
  * Exact Beta reduction when one argument is a positive integer `m`:
@@ -8892,7 +9077,7 @@ function sqrtOfSquareFactors(x: Expression): Expression | undefined {
       (isFunction(abs, 'Abs') && !isFunction(base, 'Abs')) ||
       n === undefined ||
       !isNumber(n) ||
-      n.im !== 0 ||
+      n.isComplex ||
       !Number.isInteger(n.re) ||
       n.re <= 0 ||
       n.re % 2 !== 0
@@ -8937,7 +9122,7 @@ function evaluateAbs(
     // |a+bi| = √(a²+b²), built exactly (`|1+i| → √2`) instead of the machine
     // hypot float. `Abs(3+4i)` already gave 5 because 25 is a perfect square;
     // this extends the exact path to every integer a, b. `.N()` numericizes.
-    if (num.im !== 0) {
+    if (num.isComplex) {
       // An exact complex value `√r·(a+bi)`: its modulus `√(r·(a²+b²))` is
       // exact when the root has an exact form (`|√2·(1000+1000i)|` is 2000,
       // `|√3·(1+2i)|` is `√15`).
@@ -9022,7 +9207,7 @@ function evaluateAbs(
         // real constant expression (`|e + π·i|²` is `e² + π²`, and the
         // result is `√(e² + π²)`).
         const isRealConstant = isNumber(mVal)
-          ? mVal.im === 0
+          ? !mVal.isComplex
           : mVal.isConstant && mVal.type.matches('real');
         if (isRealConstant && mVal.isNonNegative === true) {
           const modSq = zre * zre + zim * zim;
@@ -9061,7 +9246,17 @@ function processMinMaxItem(
 
   // An interval is continuous
   if (isFunction(item, 'Interval')) {
-    const b = upper ? item.op2 : item.op1;
+    let b = upper ? item.op2 : item.op1;
+    // An endpoint marked `Closed(a)` is attained, so it is the maximum or
+    // minimum. One marked `Open(a)` is still the supremum or infimum — the
+    // least upper bound need not belong to the set — but the interval has no
+    // maximum or minimum there, so `Max`/`Min` stay symbolic.
+    if (isFunction(b, 'Closed')) b = b.op1;
+    else if (
+      isFunction(b, 'Open') &&
+      (mode === 'Supremum' || mode === 'Infimum')
+    )
+      b = b.op1;
 
     if (!b.isNumber || !isNumber(b)) return [undefined, [item]];
     return [b, []];
@@ -9130,7 +9325,17 @@ function processMinMaxItem(
   // `machineExtremum`.
   if (isMachineDoubleList(item)) {
     const extremum = machineExtremum(item.array, upper, ce);
-    if (extremum !== undefined) return [ce.number(extremum), []];
+    // The extremum is one of the elements, boxed as the list boxes it: an
+    // integer value is a float in a list of floats (`_machineFloats`).
+    if (extremum !== undefined)
+      return [
+        boxStoreElement(
+          ce,
+          extremum,
+          isFunction(item) && item._machineFloats === true
+        ),
+        [],
+      ];
   }
 
   if (item.isCollection) {
@@ -9178,7 +9383,7 @@ function processMinMaxItem(
   // a value that is not real stays in the unevaluated result.
   if (item.isConstant && item.type.matches('number')) {
     const value = item.N();
-    if (isNumber(value) && value.im === 0 && !value.isNaN) return [item, []];
+    if (isNumber(value) && !value.isComplex && !value.isNaN) return [item, []];
   }
   return [undefined, [item]];
 }
@@ -9194,7 +9399,7 @@ function isMachineDoubleList(
 ): x is Expression & { array: readonly number[] } {
   return (
     isFunction(x, 'List') &&
-    x.isMachineNumeric &&
+    x._machineFloats !== undefined &&
     !bignumPreferred(x.engine) &&
     holdsDoubles(x)
   );
@@ -9209,11 +9414,12 @@ function isMachineDoubleList(
  *
  * The fold adds the elements in order with `add()`, starting from `0`. Each
  * `add()` of a float is the addition of two doubles, in the same order as
- * here. A partial sum that has an integer value is an EXACT integer in the
- * fold, also when floats produced it (`0.5 + 0.5`), and the fold then adds
- * integers exactly, past the safe range too. So this function declines as
- * soon as a partial sum is an integer past the safe range, where a double
- * no longer holds what the fold holds. A non-finite element declines: the
+ * here. A partial sum of exact integers is an EXACT integer in the fold,
+ * which adds integers exactly, past the safe range too; once a float term
+ * is added the partial sum is a float, even when its value is an integer
+ * (`0.5 + 0.5` is the float `1`). This function declines as soon as a
+ * partial sum is an integer past the safe range, where a double may no
+ * longer hold what the fold holds. A non-finite element declines: the
  * fold decides `∞ − ∞` and `NaN`.
  *
  * The value of a symbol is read, never evaluated (`machineListOf`). An
@@ -9224,7 +9430,9 @@ function isMachineDoubleList(
  * that one, so the operand is evaluated once. A lazy collection with its own
  * iterator (`Map`, `Range`) is left to the fold.
  */
-function machineSum(operand: Expression): number | Expression | undefined {
+function machineSum(
+  operand: Expression
+): number | [number] | Expression | undefined {
   const evaluatedByWalk =
     isFunction(operand) &&
     operand.operator !== 'List' &&
@@ -9242,22 +9450,38 @@ function machineSum(operand: Expression): number | Expression | undefined {
  * The sum of the doubles of `list`, when `list` is a `List` of machine
  * numbers at machine precision (`isMachineDoubleList`) and the doubles give
  * the value the element-by-element fold gives: see `machineSum` for the
- * rules. `undefined` otherwise.
+ * rules. `undefined` otherwise. The sum is a number when every element is
+ * an exact integer, and a one-element array when some element is a float:
+ * the sum is then a float, even when its value is an integer (`0.5 + 0.5`
+ * is the float `1`).
  */
-function machineListTotal(list: Expression): number | undefined {
+function machineListTotal(list: Expression): number | [number] | undefined {
   if (!isMachineDoubleList(list)) return undefined;
   const values = list.array;
   const frame = list.engine._deadlineFrame;
+  let float = isFunction(list) && list._machineFloats === true;
   let total = 0;
   for (let i = 0; i < values.length; i++) {
     if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE) checkDeadline(frame);
     const v = values[i];
     if (!Number.isFinite(v)) return undefined;
+    if (!Number.isInteger(v)) float = true;
     total += v;
     if (Number.isInteger(total) && !Number.isSafeInteger(total))
       return undefined;
   }
-  return total === 0 ? 0 : total;
+  if (total === 0) total = 0;
+  return float ? [total] : total;
+}
+
+/** The boxed sum that `machineListTotal()` answers: an exact integer or a
+ * float for a number, a float for a one-element array. */
+function boxMachineTotal(
+  ce: ComputeEngine,
+  total: number | [number]
+): Expression {
+  if (typeof total === 'number') return ce.number(total);
+  return ce.number(ce._inexactNumericValue(total[0]));
 }
 
 /**
@@ -9322,7 +9546,7 @@ function scalarExtremum(
 ): Expression | undefined {
   const ce = a.engine;
   if (a.isNaN === true || b.isNaN === true) return ce.NaN;
-  if ((isNumber(a) && a.im !== 0) || (isNumber(b) && b.im !== 0))
+  if ((isNumber(a) && a.isComplex) || (isNumber(b) && b.isComplex))
     return undefined;
   // `undefined` when the comparison is not decidable (a free symbol); ties
   // keep `a`, unless `b` is a number literal and `a` is not (see
@@ -9378,7 +9602,7 @@ function foldExtremumValue(
   rest: Expression[],
   upper: boolean
 ): Expression | undefined {
-  if (isNumber(val) && val.im !== 0) {
+  if (isNumber(val) && val.isComplex) {
     rest.push(val);
     return current;
   }
@@ -9541,12 +9765,15 @@ function evaluateGcdLcm(
   if (
     ops.length > 0 &&
     ops.some((x) => isNumber(x) && !x.isExact) &&
-    ops.every((x) => isNumber(x) && Number.isFinite(x.re) && !x.im)
+    ops.every((x) => isNumber(x) && Number.isFinite(x.re) && !x.isComplex)
   ) {
     const rfn = mode === 'LCM' ? realLcm : realGcd;
     let acc = Math.abs(ops[0].re);
     for (let i = 1; i < ops.length; i++) acc = rfn(acc, ops[i].re);
-    return ce.number(acc);
+    // The result is a float, even when its value is an integer:
+    // `GCD(4.0, 6)` is the float `2`. (Mathematica refuses the GCD of a
+    // real number; the float reading keeps the result a number.)
+    return ce.number(ce._inexactNumericValue(acc));
   }
 
   const rest: Expression[] = [];
@@ -9619,7 +9846,7 @@ function divideFromExactValues(
       x = exact;
       rescued = true;
     }
-    if (!isNumber(x) || x.im !== 0) return undefined;
+    if (!isNumber(x) || x.isComplex) return undefined;
     const nv = x.numericValue;
     values.push(typeof nv === 'number' ? ce._numericValue(nv) : nv);
   }
@@ -9726,7 +9953,25 @@ function bigRealOf(x: Expression | undefined): BigDecimal | undefined {
   const nv = x.numericValue;
   if (typeof nv === 'number')
     return Number.isFinite(nv) ? new BigDecimal(nv) : undefined;
-  if (nv.im !== 0) return undefined;
+  if (nv.isComplex) return undefined;
   const big = nv.bignumRe ?? new BigDecimal(nv.re);
   return big.isFinite() ? big : undefined;
+}
+
+/**
+ * The floored remainder of `a` by `b` computed with the float lanes of
+ * `apply2()` (machine or big decimal). In JavaScript, `%` is the truncated
+ * remainder, so it is adapted to a floored modulo: the sign of the result
+ * follows the divisor, as in the exact paths of the `Mod` handler. The
+ * double lane adds the divisor only when it is needed (`floorModDouble`);
+ * the big-decimal lane always adds it, which is safe because
+ * `BigDecimal.add()` is exact.
+ */
+function floorModFloat(a: Expression, b: Expression): Expression | undefined {
+  return apply2(
+    a,
+    b,
+    floorModDouble,
+    (a, b) => a.mod(b).add(b).mod(b)
+  );
 }

@@ -54,14 +54,22 @@ export function formatValue(
   // meant for LaTeX display: Epsil source spells a square `x ^ 2` (or `x²` in
   // fancy-symbol mode), so that one rewrite is excluded here. The other
   // prettifier rewrites produce ordinary Epsil (`1 / x`, `Exp(x)`) and stay.
-  if (mode === 'epsil')
+  // A library name is written with its Epsil spelling (`sin(x)`), unless the
+  // session binds the spelling (`let sin = 3` in an earlier cell): then the
+  // MathJSON name is kept, so the printed text reads back as the value.
+  if (mode === 'epsil') {
+    const engine = result.value.engine;
     return serializeEpsil(
       result.value.toMathJson({
         fractionalDigits: 'auto',
         exclude: ['Square'],
       }),
-      { fancySymbols: options?.fancySymbols === true }
+      {
+        fancySymbols: options?.fancySymbols === true,
+        isBound: (name) => engine.lookupDefinition(name) !== undefined,
+      }
     );
+  }
   // A `Nothing` result is not echoed in the human-facing mode: a program
   // whose last statement is a `print(…)` (or a declaration, or a loop)
   // produces Nothing, and printing the word after the program's own output
@@ -483,6 +491,8 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `The protocol "${args[0]}" is declared twice in this program; a name may only be declared once per program (re-running an edited declaration in a later program still replaces it)`;
     case 'function-redefinition':
       return `Two clauses of "${args[0]}" in this program have the same parameter list, so the second would silently replace the first; give them different parameter lists to dispatch between them (re-running an edited definition in a later program still replaces it)`;
+    case 'absence-marker-binding':
+      return `"${args[0]}" is an absence marker and cannot be rebound: the engine recognizes it by its name, so a binding of it could never behave like the value it holds. Choose another name (to test for it in a match, write "== ${args[0]}")`;
     case 'variable-redeclaration':
       return `"${args[0]}" is already declared in this scope; assign to it with "${args[0]} = …" to update it, or choose another name (a "let" in a nested block may shadow it)`;
     case 'protocol-declaration-not-top-level':

@@ -606,5 +606,43 @@ that also occurs as a value in another operand of the call, is the call's
 variable; a name used as a call head anywhere in the call is a function. A
 verbatim callee borrows nothing from the library.
 
-Not done, by decision: the serializer keeps printing the MathJSON names;
-the expanded reference of section 8.2 is a later round.
+Not done in that round, by decision: the serializer kept printing the
+MathJSON names; the expanded reference of section 8.2 was left for a later
+round.
+
+## 12. Serializer round (2026-09-27)
+
+Decision 1 of section 9 is reversed: `serializeEpsil` writes the Epsil
+spelling by default (`sin(x)`, `pi`, `map(sin, xs)`). The reverse scope
+check is by WRITTEN name: every binding form writes the name it binds, so a
+library name whose spelling occurs anywhere in the expression as a symbol
+or a call head keeps its MathJSON name (a superset of "bound in scope",
+always safe: `Sin(x)` reads back as `Sin` under any binding). Bindings
+outside the expression are the caller's: the `isBound` option, which the
+CLI's `--epsil` output mode passes as the session engine's
+`lookupDefinition`. `libraryNames: 'mathjson'` restores the old output;
+the raw-grammar round-trip harnesses (`epsil-parse.test.ts`,
+`if-let.test.ts`) use it, and `round-trip.test.ts` resolves the re-parsed
+tree instead. A spelling a fresh engine binds itself (`limits`, the
+engine's clause type) is excluded from the table (`ENGINE_BOUND_SPELLINGS`),
+since it could never resolve to the library name; the drift guard in
+`test/epsil/library-names.test.ts` checks that no other spelling is engine
+bound, and that every spelling in the table serializes, parses and
+resolves back to its library name. The dual review of the round found that
+the resolution pass's variable heuristic (section 11) ran for every
+operator and read a repeated value as a variable (`[pi, pi]` stayed
+unresolved); it now runs only for an operator that takes a variable
+operand, and only at the operand positions that hold the variable
+(`variableOperandPositions`: a `symbol`-typed parameter position in the
+signature, or a listed position for `Limit`, `Solve`, `JacobianMatrix`,
+`CharacteristicPolynomial`, `FindRoot`, `FindFit`, `LinearRegression` and
+`PolynomialFit`, which type their variable `any`). The staged review also
+found that a library name the expression itself binds (`let Pi = 3`) was
+respelled inconsistently; the serializer now collects the bound names too
+(`collectNames`) and keeps such a name's MathJSON spelling.
+
+The expanded reference of section 8.2 shipped the same day as
+`scripts/build-library-reference.ts` (the generator; the shared helpers of
+the two generators are in `scripts/library-docs-shared.ts`). The
+introductions and the missing examples are tracked in
+`docs/epsil/ROADMAP.md`.

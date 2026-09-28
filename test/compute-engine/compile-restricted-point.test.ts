@@ -80,8 +80,12 @@ describe('A restricted point in arithmetic, JavaScript target', () => {
     );
   });
 
-  test('a scalar times the point is NaN when the point is absent', () => {
-    expect(run(['Multiply', 't', gated()], 0.5)).toBeNaN();
+  // The interpreter answers `Missing` when the point is absent, and the
+  // compiled code answers `undefined`, the JavaScript spelling of an absent
+  // point (user decision of 2026-09-27, which replaces the `NaN` pinned here
+  // before; see `compile-absent-point-spelling.test.ts`).
+  test('a scalar times the point is undefined when the point is absent', () => {
+    expect(run(['Multiply', 't', gated()], 0.5)).toBeUndefined();
   });
 
   test('the magnitude of the point is its norm', () => {
@@ -107,10 +111,12 @@ describe('A restricted point in arithmetic, JavaScript target', () => {
     expect(run(json, 2)).toEqual(expected);
   });
 
-  test('a list of numbers times the point is NaN per element when the point is absent', () => {
+  // Each element is an absent point, `undefined` (user decision of
+  // 2026-09-27, which replaces the `NaN` per element pinned here before).
+  test('a list of numbers times the point is undefined per element when the point is absent', () => {
     const r = run(['Multiply', ['List', 1, 2, 3], gated()], 0.5) as unknown[];
+    expect(r).toEqual([undefined, undefined, undefined]);
     expect(r).toHaveLength(3);
-    for (const x of r) expect(x).toBeNaN();
   });
 });
 

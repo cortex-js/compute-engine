@@ -25,6 +25,10 @@ import {
   FatalParsingError,
   ParsingDiagnostic,
 } from './diagnostics.js';
+import {
+  isFunction,
+  isString,
+} from '../compute-engine/boxed-expression/type-guards.js';
 import { parseEpsil } from './parse-epsil.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 import { epsilNameOf } from './library-names.js';
@@ -373,14 +377,37 @@ function executeEpsilBatch(
     // A top-level re-declaration the static pass already reported (with the
     // first declaration's site as a note) is not reported a second time as a
     // `runtime-error`: it is one problem, and the value carries it.
+    // The same holds for a binding of an absence marker (`let Missing =
+    // 3`): the static pass reports it at the binding, and the statement's
+    // `absence-marker-binding` error value is that same problem.
+    const markerError = value.errors[0];
+    const markerCode =
+      isFunction(markerError, 'Error') &&
+      isFunction(markerError.op1, 'ErrorCode')
+        ? markerError.op1.ops
+        : undefined;
+    const markerName =
+      markerCode !== undefined &&
+      isString(markerCode[0]) &&
+      markerCode[0].string === 'absence-marker-binding' &&
+      isString(markerCode[1])
+        ? markerCode[1].string
+        : undefined;
     const reportedStatically =
-      redeclared !== undefined &&
-      diagnostics.some(
-        (d) =>
-          Array.isArray(d.message) &&
-          d.message[0] === 'variable-redeclaration' &&
-          d.message[1] === redeclared
-      );
+      (redeclared !== undefined &&
+        diagnostics.some(
+          (d) =>
+            Array.isArray(d.message) &&
+            d.message[0] === 'variable-redeclaration' &&
+            d.message[1] === redeclared
+        )) ||
+      (markerName !== undefined &&
+        diagnostics.some(
+          (d) =>
+            Array.isArray(d.message) &&
+            d.message[0] === 'absence-marker-binding' &&
+            d.message[1] === markerName
+        ));
     if (i < statements.length - 1 && !reportedStatically) {
       const errors = value.errors;
       if (errors.length > 0) {

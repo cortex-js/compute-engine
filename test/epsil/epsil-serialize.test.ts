@@ -11,15 +11,15 @@ describe('EPSIL SERIALIZING', () => {
       `"-1_234_567.89"`
     );
     expect(serializeEpsil(-1234567.89e-123)).toMatchInlineSnapshot(
-      `"-123_456_789e-125"`
+      `"-1.234_567_89e-117"`
     );
     expect(serializeEpsil({ num: '-1234567.890e-123' })).toMatchInlineSnapshot(
-      `"-1_234_567_890e-126"`
+      `"-1_234_567.890e-123"`
     );
     expect(
       serializeEpsil({ num: '-123456789012345678901234567890.890e-123' })
     ).toMatchInlineSnapshot(
-      `"-123_456_789_012_345_678_901_234_567_890_890e-126"`
+      `"-123_456_789_012_345_678_901_234_567_890.890e-123"`
     );
     // Epsil's canonical infinity spelling is unsigned (`Infinity`); the
     // `+Infinity` payload spelling is input-only.
@@ -66,7 +66,7 @@ describe('EPSIL SERIALIZING COMMENTS', () => {
         fn: ['Multiply', 'Pi', 'x'],
         comment: 'This is a single line-comment',
       })
-    ).toMatchInlineSnapshot(`"/* This is a single line-comment */Pi * x"`);
+    ).toMatchInlineSnapshot(`"/* This is a single line-comment */pi * x"`);
     expect(
       serializeEpsil({
         fn: ['Multiply', 'Pi', 'x'],
@@ -74,7 +74,7 @@ describe('EPSIL SERIALIZING COMMENTS', () => {
       })
     ).toMatchInlineSnapshot(`
       "/* This is a multi-line-comment
-      This is the second line. */Pi * x"
+      This is the second line. */pi * x"
     `);
     expect(
       serializeEpsil({
@@ -88,7 +88,7 @@ describe('EPSIL SERIALIZING COMMENTS', () => {
 describe('EPSIL SERIALIZING SPACES', () => {
   test('Spacing', () => {
     expect(serializeEpsil(['Multiply', 'Pi', 'x'])).toMatchInlineSnapshot(
-      `"Pi * x"`
+      `"pi * x"`
     );
   });
 });
@@ -126,19 +126,19 @@ describe('EPSIL SERIALIZING STRINGS', () => {
 
   test('Strings escaping', () => {
     expect(serializeEpsil(['Print', "'hello 21 \"world'"])).toMatch(
-      'Print("hello 21 \\"world")'
+      'print("hello 21 \\"world")'
     );
     expect(serializeEpsil(['Print', "'hello\n world'"])).toMatch(
-      'Print("hello\\n world")'
+      'print("hello\\n world")'
     );
     expect(serializeEpsil(['Print', "'hello\u000a world'"])).toMatch(
-      'Print("hello\\n world")'
+      'print("hello\\n world")'
     );
     expect(serializeEpsil(['Print', "'LaTeX loves \\'"])).toMatch(
-      'Print("LaTeX loves \\\\")'
+      'print("LaTeX loves \\\\")'
     );
     expect(serializeEpsil(['Print', "'hello'", "'\nworld'"])).toMatch(
-      'Print("hello", "\\nworld")'
+      'print("hello", "\\nworld")'
     );
   });
 });
@@ -226,10 +226,17 @@ describe('EPSIL SERIALIZING DICTIONARIES', () => {
     // Empty dictionary
     expect(serializeEpsil({ dict: {} })).toMatchInlineSnapshot(`"{ -> }"`);
 
-    //Regular dictionary
+    // Regular dictionary. A `{dict}` value is read as the engine reads it: a
+    // bare string is a string and an array is a list of values, so
+    // `['Add', 2, 'x']` is the list of a string, a number and a string. An
+    // expression value is an expression OBJECT (`{fn: …}`).
     expect(
-      serializeEpsil({ dict: { x: 1, y: 2, z: ['Add', 2, 'x'] } })
-    ).toMatchInlineSnapshot(`"{"x" -> 1, "y" -> 2, "z" -> 2 + x}"`);
+      serializeEpsil({
+        dict: { x: 1, y: 2, z: ['Add', 2, 'x'], e: { fn: ['Add', 2, 'x'] } },
+      })
+    ).toMatchInlineSnapshot(
+      `"{"x" -> 1, "y" -> 2, "z" -> ["Add", 2, "x"], "e" -> 2 + x}"`
+    );
 
     // Nested dictionary
     expect(
@@ -237,7 +244,18 @@ describe('EPSIL SERIALIZING DICTIONARIES', () => {
         dict: { x: { dict: { a: 7, b: 5 } }, y: 2, z: ['Add', 2, 'x'] },
       })
     ).toMatchInlineSnapshot(
-      `"{"x" -> {"a" -> 7, "b" -> 5}, "y" -> 2, "z" -> 2 + x}"`
+      `"{"x" -> {"a" -> 7, "b" -> 5}, "y" -> 2, "z" -> ["Add", 2, "x"]}"`
+    );
+
+    // The JSON of a boxed dictionary that holds a list, a boolean list and a
+    // string — what the REPL prints for `let d = {"xs" -> [1, 2]}; d`. The
+    // list's first element was taken for a call head and threw before.
+    expect(
+      serializeEpsil({
+        dict: { xs: [1, 2], flags: [true, false], s: 'hi', n: [[1, 2], [3]] },
+      })
+    ).toMatchInlineSnapshot(
+      `"{"xs" -> [1, 2], "flags" -> [True, False], "s" -> "hi", "n" -> [[1, 2], [3]]}"`
     );
     // @todo:indexed-access
 
@@ -362,10 +380,10 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
     );
     expect(
       serializeEpsil(['IdenticallyEqual', 'a', 'b'])
-    ).toMatchInlineSnapshot(`"IdenticallyEqual(a, b)"`);
+    ).toMatchInlineSnapshot(`"identicallyEqual(a, b)"`);
     expect(
       serializeEpsil(['Not', ['IdenticallyEqual', 'a', 'b']])
-    ).toMatchInlineSnapshot(`"!IdenticallyEqual(a, b)"`);
+    ).toMatchInlineSnapshot(`"!identicallyEqual(a, b)"`);
     expect(
       serializeEpsil(['And', ['And', 'x', 'y'], ['Or', 'a', 'b']])
     ).toMatchInlineSnapshot(`"x && y && (a || b)"`);
@@ -449,7 +467,7 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
     expect(fancy(['Sqrt', ['Power', 'x', 'y']])).toBe('√(x ^ y)');
     expect(fancy(['Root', 'x', 3])).toBe('∛x');
     expect(fancy(['Root', 'x', 4])).toBe('∜x');
-    expect(fancy(['Root', 'x', 5])).toBe('Root(x, 5)');
+    expect(fancy(['Root', 'x', 5])).toBe('root(x, 5)');
     // Superscript exponents for integer literals only.
     expect(fancy(['Power', 'x', 2])).toBe('x²');
     expect(fancy(['Power', 'x', 10])).toBe('x¹⁰');
@@ -480,7 +498,7 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
       'x ^ 2.000_000_000_000_000_1'
     );
     expect(fancy(['Root', 'x', { num: '3.0000000000000001' }])).toBe(
-      'Root(x, 3.000_000_000_000_000_1)'
+      'root(x, 3.000_000_000_000_000_1)'
     );
     expect(fancy(['Power', 'x', { num: '12' }])).toBe('x¹²');
     expect(fancy(['Power', 'x', { num: '100000000000000000000' }])).toBe(
@@ -493,10 +511,10 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
       'Subscript(x, k + 1)'
     );
     expect(fancy(['Integrate', ['Divide', 1, 'x'], 'x'])).toBe(
-      'Integrate(1 ÷ x, x)'
+      'integrate(1 ÷ x, x)'
     );
     // The default output is unchanged.
-    expect(serializeEpsil(['Sqrt', 2])).toBe('Sqrt(2)');
+    expect(serializeEpsil(['Sqrt', 2])).toBe('sqrt(2)');
     expect(serializeEpsil(['Power', 'x', 2])).toBe('x ^ 2');
   });
 

@@ -3114,8 +3114,8 @@ function gpuCheckOperandShapes(
 
   if (call === undefined) {
     // Not a single call: an infix operator emission or a compound lowering
-    // lowering (WGSL's `Mod` → `(((a % b) + b) % b)`, `Log10` →
-    // `log(a) / log(10.0)`). Aggregate-consuming lowerings have already
+    // lowering (WGSL's `Mod` → `(((a % b) - b * floor((a % b) / b)) % b)`,
+    // `Log10` → `log(a) / log(10.0)`). Aggregate-consuming lowerings have already
     // returned above through an explicit capability. Other compound lowerings
     // still need array, matrix, and vector-width checks.
     const sym = GPU_OPERATORS[head]?.[0];
@@ -4415,7 +4415,7 @@ type GPUAtEntry = 'int' | 'bool' | 'other-literal' | 'dyn-bool' | 'dyn';
 function gpuAtEntryKind(e: Expression): GPUAtEntry {
   if (isSymbol(e, 'True') || isSymbol(e, 'False')) return 'bool';
   if (isNumber(e))
-    return e.im === 0 && Number.isInteger(e.re) ? 'int' : 'other-literal';
+    return !e.isComplex && Number.isInteger(e.re) ? 'int' : 'other-literal';
   // Every OTHER literal is likewise an entry that selects no element — a
   // string, a nested collection, the absence marker. Classifying them 'dyn'
   // handed them the demand-gated dynamic-gather text, which describes a
@@ -5991,7 +5991,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const iIndex = args.findIndex(
       (op) =>
         isSymbol(op, 'ImaginaryUnit') ||
-        (isNumber(op) && op.re === 0 && op.im !== 0)
+        (isNumber(op) && op.re === 0 && op.isComplex)
     );
     if (iIndex >= 0) {
       const iFactor = args[iIndex];
@@ -6059,7 +6059,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Could not compile `Negate`: no argument');
     const c = tryGetConstant(x);
     if (c !== undefined) return formatFloat(-c, target.language);
-    if (isNumber(x) && x.im !== 0) {
+    if (isNumber(x) && x.isComplex) {
       return `${gpuVec2(target)}(${formatFloat(
         -x.re,
         target.language

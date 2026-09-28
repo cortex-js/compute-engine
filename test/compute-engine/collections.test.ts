@@ -3980,6 +3980,22 @@ describe('COLLECTION NITS (Take preview, Sort boolean comparator, GroupBy typo)'
       )
     ).toBe('{"dict":{"False":[1,3],"True":[2,4]}}');
   });
+
+  test('GroupBy with a character key groups under the unquoted text', () => {
+    // `First` of a string is a character; a character is the same value as
+    // the one-character string, so it keys the same group, without quotes.
+    expect(
+      JSON.stringify(
+        engine
+          .box([
+            'GroupBy',
+            ['List', "'apple'", "'avocado'", "'banana'"],
+            ['Function', ['First', 's'], 's'],
+          ])
+          .evaluate().json
+      )
+    ).toBe('{"dict":{"a":["apple","avocado"],"b":["banana"]}}');
+  });
 });
 
 // Tycho item 26: iterating a lazy lambda-applying collection whose body cannot
@@ -5563,10 +5579,14 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
         .toString()
     ).toBe('10');
     expect(String(ce2.expr(['Length', ['Range', 1, 10]]).type)).toBe('integer');
-    // An `Interval` keeps the inert form.
-    expect(ce2.expr(['Length', ['Interval', 0, 1]]).evaluate().operator).toBe(
-      'Length'
-    );
+    // An `Interval` is an infinite collection: `+oo`, as `Count` answers
+    // (user decision 2026-09-27).
+    expect(
+      ce2
+        .expr(['Length', ['Interval', 0, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
   });
 
   test('the type Length reports satisfies the type Length declares', () => {
@@ -5712,5 +5732,52 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
         .evaluate()
         .toString()
     ).toBe('NaN');
+  });
+});
+
+describe('Length of an infinite collection', () => {
+  // User decision 2026-09-27: `Length` answers `+oo` for every collection
+  // whose count is infinite, as `Count` does. It answered only for an
+  // unbounded `Range` before, and stayed unevaluated otherwise.
+  const ce = new ComputeEngine();
+  test.each([
+    'Integers',
+    'PositiveIntegers',
+    'Primes',
+    ['Interval', 0, 1],
+    ['Repeat', 5],
+    ['Cycle', ['List', 1, 2]],
+    ['Range', 1, 'PositiveInfinity'],
+  ])('%j', (xs) => {
+    expect(ce.box(['Length', xs] as any).evaluate().toString()).toBe('+oo');
+    expect(ce.box(['Count', xs] as any).evaluate().toString()).toBe('+oo');
+  });
+
+  test('a collection whose size is not known stays unevaluated', () => {
+    const filtered = [
+      'Filter',
+      ['Range', 1, 'PositiveInfinity'],
+      ['Function', ['Greater', 'x', 2], 'x'],
+    ];
+    expect(ce.box(['Length', filtered] as any).evaluate().operator).toBe(
+      'Length'
+    );
+  });
+
+  test('the type is exact only when the operand is finite by construction', () => {
+    // A tuple, a string, a literal list or set, a dimensioned list type and
+    // a `Range` with finite literal bounds cannot be infinite. A `list`
+    // TYPE can hold an infinite lazy list (`Repeat(5)` is typed `list`),
+    // so a list-typed symbol admits `+oo`.
+    const ce2 = new ComputeEngine();
+    ce2.declare('xs', 'list<real>');
+    const typeOf = (x: any) => ce2.box(['Length', x]).type.toString();
+    expect(typeOf(['Tuple', 1, 2])).toBe('integer');
+    expect(typeOf("'abc'")).toBe('integer');
+    expect(typeOf(['List', 1, 2, 3])).toBe('integer');
+    expect(typeOf(['Set', 1, 2])).toBe('integer');
+    expect(typeOf(['Range', 1, 10])).toBe('integer');
+    expect(typeOf('xs')).toBe('integer | signed_infinity');
+    expect(typeOf('Integers')).toBe('integer | signed_infinity');
   });
 });

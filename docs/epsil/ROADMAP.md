@@ -22,17 +22,41 @@ free occurrences before a program is boxed, and the spelling table with its
 exclusions is `src/epsil/library-names.ts`. Design, audit, and the decisions
 taken: `docs/plans/2026-09-05-epsil-standard-library-lowercase-aliases.md`.
 
+The serializer prints the lowercase spelling since 2026-09-27
+(`serializeEpsil` in `src/epsil/serialize-epsil.ts`: a name whose spelling
+the expression writes, or that the `isBound` option reports bound, keeps
+the MathJSON name; `libraryNames: 'mathjson'` restores the old output).
+
+The per-category reference pages (`src/epsil/docs/reference/<category>.md`,
+one per library, every definition with both spellings, its signature, its
+full description and its executed examples) are generated since
+2026-09-27 by `scripts/build-library-reference.ts` (run by `npm run doc`);
+`library.md` links each category to its page. A hand-written introduction
+is spliced in from `reference/<category>.intro.md` when that file exists.
+
 Remaining work:
 
-- **Serializer output.** The Epsil serializer still prints the MathJSON
-  names (`Sin(x)`). Printing the lowercase spelling needs the reverse scope
-  check (a program with `let sin = 3` in scope must not get `Sin(x)` printed
-  as `sin(x)`) and touches every Epsil snapshot and documentation example.
-- **Expanded library reference.** One page per library category in Epsil
-  syntax, mirroring `doc/*-reference-*.md`: a generated part per entry (both
-  spellings, the full description, executed examples) and a hand-written
-  introduction per category spliced in by the generator. Section 8.2 of the
-  plan above has the shape; the generator comes first.
+- **Reference introductions.** Five pages have a hand-written
+  introduction (`core`, `collections` since 2026-09-27; `arithmetic`,
+  `trigonometry`, `linear-algebra` since 2026-09-28). Every other page opens
+  with one generated sentence. The prose sections of the matching website
+  reference page (`doc/*-reference-*.md`) are to be ported to Epsil syntax,
+  one category at a time: control structures, logic and calculus next.
+- **Examples.** 230 of the 679 definitions have no `examples` field, so
+  their reference entry is a description alone (per category, measured
+  2026-09-28: relations 30, statistics 29 of 35, logic 27, colors 20,
+  calculus 19, number theory 17 of 52, polynomials 17, control structures
+  14, special functions 14, combinatorics 11, physics 11, core 7, units 7,
+  regular expressions 4, fractals 2, collections 1). The definitions left without one in the finished
+  categories are engine-internal or display heads (`ApplyWhole`,
+  `BaseForm`, `Colon`, `HorizontalSpacing`, `Object`, `Unevaluated`,
+  `MemberCall`) and `Input` (its example would wait on standard input in the
+  documentation test). An
+  example is Epsil source in the definition (`BaseDefinition.examples`),
+  executed at generation and checked by the documentation test; an example
+  the generator classifies as impure (a `let`, a declaration, a random
+  draw) is written without a `// ➔` annotation and only its diagnostics
+  are checked.
 
 
 ## Runtime and representation
@@ -43,10 +67,11 @@ Remaining work:
   orphan, multiple, and through-boxing comments require a broader metadata
   model. The current lossy contract remains public in
   `src/epsil/docs/comments.md`.
-- **Compilation tails.** Epsil has no comprehension syntax (`Map`/`Filter`
-  and the pipe are the idiom), and the engine's `Comprehension`, stepped or
-  descending `Range`, multi-`Element` `Loop`, and destructuring `for (p, q)
-  in pairs` loop binder all compile on the JavaScript target; the Python
+- **Compilation tails.** Epsil comprehensions (`[x^2 for x in 1..10 if x %
+  2 == 1]`, with set and dictionary forms, tuple patterns and guards, since
+  2026-09-27) lower to the engine's `Comprehension`, which, with a stepped
+  or descending `Range`, a multi-`Element` `Loop`, and the destructuring
+  `for (p, q) in pairs` loop binder, compiles on the JavaScript target; the Python
   target lowers the same forms to nested `for` statements, a native `range`
   for integer literal bounds, a tuple pattern, and a list comprehension. A
   destructuring binder compiles only when the source's static element type

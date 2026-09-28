@@ -58,6 +58,8 @@ import {
 } from '../compute-engine/boxed-expression/type-guards.js';
 
 import type { ParsingDiagnostic } from './diagnostics.js';
+import { documentBindings } from './occurrences.js';
+import { binderSitesOf } from './resolve-library-names.js';
 import { serializeEpsil } from './serialize-epsil.js';
 import { definitionSites } from './definition-sites.js';
 import { enclosingFrame, locateError } from './error-location.js';
@@ -840,6 +842,8 @@ function canonicalizationDiagnostics(
   // for the statements that follow (see `match-exhaustiveness.ts`).
   const annotations: AnnotationScope = new Map();
 
+  diagnostics.push(...absenceMarkerBindingDiagnostics(ce, ast, source));
+
   for (const statement of statements) {
     const redefinition = redefinitionDiagnostic(
       statement,
@@ -1111,8 +1115,7 @@ function canonicalizationDiagnostics(
         // not import.
         const faulted = (
           boxedErr as
-            | { ops?: readonly ReturnType<ComputeEngine['box']>[] }
-            | undefined
+            { ops?: readonly ReturnType<ComputeEngine['box']>[] } | undefined
         )?.ops?.[1];
         const cause = operand(error, 1);
         const expectedText =
@@ -1335,6 +1338,59 @@ function redefinitionDiagnostic(
   }
 
   return undefined;
+}
+
+/** The names that cannot be rebound: see `ABSENCE_MARKERS` in
+ * `library/core.ts`, whose declaration handlers refuse them at run time. */
+const ABSENCE_MARKER_NAMES: ReadonlySet<string> = new Set([
+  'Nothing',
+  'Missing',
+  'Undefined',
+]);
+
+/**
+ * A binding of an absence marker — `let Missing = 3`, `Nothing = 1`, a
+ * parameter, loop variable, match pattern or function named `Undefined` —
+ * is an error (user decision 2026-09-27): the engine recognizes each marker
+ * by its name, so a user binding of it could never behave like the value it
+ * holds. One diagnostic per binding site, over the whole program, found with
+ * the scope walker the language server uses for rename
+ * (`documentBindings`), fed the engine's binding sites so a variable a
+ * library call binds (`sum(Missing, Missing in xs)`) is found too. The
+ * declaration, assignment and definition statements are also refused at run
+ * time, by their handlers.
+ */
+function absenceMarkerBindingDiagnostics(
+  ce: ComputeEngine,
+  ast: MathJsonExpression,
+  source: string
+): ParsingDiagnostic[] {
+  const found: ParsingDiagnostic[] = [];
+  const groups = documentBindings(ast, source, {
+    binderSites: (node) => binderSitesOf(ce, node, source),
+  });
+  for (const group of groups) {
+    if (group.kind === 'free' || !ABSENCE_MARKER_NAMES.has(group.name))
+      continue;
+    // Every binding site: the definition, and each later assignment to the
+    // same name (`Missing = 1; Missing = 2` — the walker records the second
+    // as a `write`). A variable a library call binds (`sum(Missing, Missing
+    // in xs)`) has neither: the walker records its uses as reads, and its
+    // first occurrence stands for the binding.
+    const definitions = group.occurrences.filter(
+      (occurrence) =>
+        occurrence.role === 'definition' || occurrence.role === 'write'
+    );
+    const sites =
+      definitions.length > 0 ? definitions : group.occurrences.slice(0, 1);
+    for (const occurrence of sites)
+      found.push({
+        severity: 'error',
+        message: ['absence-marker-binding', group.name],
+        range: [occurrence.start, occurrence.end, occurrence.start],
+      });
+  }
+  return found;
 }
 
 /**

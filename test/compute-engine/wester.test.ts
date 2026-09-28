@@ -84,7 +84,7 @@ describe('Numbers', () => {
     expect(
       ce.expr(['Exp', ['Multiply', 'Pi', ['Sqrt', 163]]]).N().json
     ).toEqual({
-      num: '262537412640768744',
+      num: '262537412640768744.0',
     });
   });
 
@@ -535,10 +535,12 @@ describe('Sums and products', () => {
 describe('Complex domain', () => {
   test(`N(ln(3 + 4i)) = ln 5 + i arctan(4/3)`, () => {
     // evaluate() correctly keeps the exact value symbolic: Ln((3 + 4i)).
+    // Both parts at the working precision (21 digits): ln 5 =
+    // 1.60943791243410037460…, arctan(4/3) = 0.927295218001612232428…
     expect(ce.expr(['Ln', ['Complex', 3, 4]]).N().json).toEqual([
       'Complex',
-      1.6094379124341003,
-      0.9272952180016122,
+      { num: '1.6094379124341003746' },
+      { num: '0.927295218001612232429' },
     ]);
   });
 

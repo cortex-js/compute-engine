@@ -44,10 +44,13 @@ describe('WGSL COMPILATION', () => {
 
     it('should compile mod as a floored helper (interpreter Mod is floored)', () => {
       // WGSL `%` is truncated; the interpreter's Mod is floored (D1), so the
-      // target emits `((a % b) + b) % b` to convert truncated → floored.
+      // target emits `(r - b * floor(r / b)) % b` with `r = a % b` to convert
+      // truncated → floored.
       const expr = ce.expr(['Mod', 'x', 'y']);
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`((((x) % (y)) + (y)) % (y))`);
+      expect(code).toMatchInlineSnapshot(
+        `((((x) % (y)) - (y) * floor(((x) % (y)) / (y))) % (y))`
+      );
     });
   });
 
@@ -971,7 +974,9 @@ describe('WGSL Mod with an impure operand draws once', () => {
   it('a pure Mod emission is unchanged', () => {
     const target = ce._getCompilationTarget('wgsl')!;
     const code = target.compile(ce.box(['Mod', ['Add', 'x', 29], 900])).code;
-    expect(code).toBe('((((x + 29.0) % (900.0)) + (900.0)) % (900.0))');
+    expect(code).toBe(
+      '((((x + 29.0) % (900.0)) - (900.0) * floor(((x + 29.0) % (900.0)) / (900.0))) % (900.0))'
+    );
   });
 });
 

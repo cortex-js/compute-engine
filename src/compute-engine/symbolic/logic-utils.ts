@@ -39,6 +39,34 @@ function normalizeAbsentOperands(
   return args.map((arg) => (isAbsenceName(sym(arg)) ? ce.Missing : arg));
 }
 
+/**
+ * Is this operand a decided truth value (`True` or `False`)?
+ */
+function isTruthValue(arg: Expression): boolean {
+  const name = sym(arg);
+  return name === 'True' || name === 'False';
+}
+
+/**
+ * The Kleene answer of a connective that no operand has decided, when some
+ * operand is absent. If every other operand is a truth value, the absent
+ * operand leaves the result undecided, so the result is `Missing`. If some
+ * operand is an unknown (for example a free boolean symbol), the result stays
+ * symbolic, with each absent operand spelled `Missing` — exactly as
+ * `And(A, Missing)` stays `And(A, Missing)`. Returns `undefined` when no
+ * operand is absent, so the caller continues with its ordinary reduction.
+ */
+function undecidedWithAbsence(
+  name: string,
+  args: ReadonlyArray<Expression>,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!args.some((arg) => isAbsenceName(sym(arg)))) return undefined;
+  if (args.every((arg) => isTruthValue(arg) || isAbsenceName(sym(arg))))
+    return ce.Missing;
+  return ce._fn(name, normalizeAbsentOperands(args, ce));
+}
+
 /** Helper to get `.op1` from a function expression, or undefined. */
 function fnOp1(expr: Expression): Expression | undefined {
   return isFunction(expr) ? expr.op1 : undefined;
@@ -403,10 +431,10 @@ export function evaluateEquivalent(
   )
     return ce.False;
   // Kleene over absence: flipping either operand flips the equivalence, so
-  // no value of the other operand decides it, and an absent operand makes
-  // the equivalence absent.
-  if (isAbsenceName(lhs) || isAbsenceName(rhs)) return ce.Missing;
-  return undefined;
+  // no value of the other operand decides it. An absent operand makes the
+  // equivalence absent, unless the other operand is an unknown: then the
+  // equivalence stays symbolic, as `And(A, Missing)` does.
+  return undecidedWithAbsence('Equivalent', args, ce);
 }
 
 export function evaluateImplies(
@@ -422,10 +450,15 @@ export function evaluateImplies(
   )
     return ce.True;
   if (lhs === 'True' && rhs === 'False') return ce.False;
-  // Kleene over absence: `False ⇒ q` and `p ⇒ True` are decided above; every
-  // other implication with an absent side is itself absent.
-  if (isAbsenceName(lhs) || isAbsenceName(rhs)) return ce.Missing;
-  return undefined;
+  // `False ⇒ q` and `p ⇒ True` are `True` for every `q` and every `p`, so
+  // they are decided even when the other side is absent or unknown (Kleene
+  // three-valued logic, as `Or(Missing, True)` is `True`: `p ⇒ q` is
+  // `¬p ∨ q`).
+  if (lhs === 'False' || rhs === 'True') return ce.True;
+  // Kleene over absence: no side decided the implication, so an absent side
+  // makes it absent (`True ⇒ Missing`, `Missing ⇒ False`), unless the other
+  // side is an unknown: then it stays symbolic, as `And(A, Missing)` does.
+  return undecidedWithAbsence('Implies', args, ce);
 }
 
 export function evaluateXor(
@@ -437,15 +470,17 @@ export function evaluateXor(
   if (args.length === 0) return ce.False;
 
   // Kleene over absence: flipping any one operand flips the parity, so no
-  // value of the other operands decides it, and an absent operand makes the
-  // exclusive or absent.
-  if (args.some((arg) => isAbsenceName(sym(arg)))) return ce.Missing;
-
+  // value of the other operands decides it. The absent operands are counted
+  // apart: two absent operands do not cancel, since each stands for its own
+  // undecided value.
+  let absentCount = 0;
   let trueCount = 0;
   const unknowns: Expression[] = [];
 
   for (const arg of args) {
-    if (sym(arg) === 'True') {
+    if (isAbsenceName(sym(arg))) {
+      absentCount++;
+    } else if (sym(arg) === 'True') {
       trueCount++;
     } else if (sym(arg) === 'False') {
       // False doesn't change parity
@@ -466,6 +501,18 @@ export function evaluateXor(
   }
 
   const oddTrue = trueCount % 2 === 1;
+
+  // An absent operand makes the exclusive or absent, unless an unknown
+  // survives the cancellation: then the exclusive or stays symbolic, with
+  // each absent operand spelled `Missing`, as `And(A, Missing)` does.
+  if (absentCount > 0) {
+    if (reduced.length === 0) return ce.Missing;
+    return ce._fn('Xor', [
+      ...(oddTrue ? [ce.True] : []),
+      ...reduced,
+      ...new Array<Expression>(absentCount).fill(ce.Missing),
+    ]);
+  }
 
   // All unknowns cancelled: the result is determined by the True parity alone.
   if (reduced.length === 0) return oddTrue ? ce.True : ce.False;
@@ -494,8 +541,10 @@ export function evaluateNand(
     if (sym(arg) === 'False') return ce.True;
   }
   // Kleene over absence: no `False` decided it, so an absent operand makes
-  // the conjunction — and its negation — absent.
-  if (args.some((arg) => isAbsenceName(sym(arg)))) return ce.Missing;
+  // the conjunction — and its negation — absent, unless an operand is an
+  // unknown: then the result stays symbolic, as `And(A, Missing)` does.
+  const absent = undecidedWithAbsence('Nand', args, ce);
+  if (absent) return absent;
 
   // Check if all are True
   let allTrue = true;
@@ -524,8 +573,10 @@ export function evaluateNor(
     if (sym(arg) === 'True') return ce.False;
   }
   // Kleene over absence: no `True` decided it, so an absent operand makes
-  // the disjunction — and its negation — absent.
-  if (args.some((arg) => isAbsenceName(sym(arg)))) return ce.Missing;
+  // the disjunction — and its negation — absent, unless an operand is an
+  // unknown: then the result stays symbolic, as `Or(A, Missing)` does.
+  const absent = undecidedWithAbsence('Nor', args, ce);
+  if (absent) return absent;
 
   // Check if all are False
   let allFalse = true;

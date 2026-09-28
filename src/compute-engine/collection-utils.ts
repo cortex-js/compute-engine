@@ -21,7 +21,10 @@ import {
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../common/type/primitive.js';
 import { numericStoreTiers } from './boxed-expression/literal-tier.js';
-import { machineNumberOf } from './boxed-expression/machine-number.js';
+import {
+  boxStoreElement,
+  machineNumberOf,
+} from './boxed-expression/machine-number.js';
 import { machineBroadcast } from './boxed-expression/machine-broadcast.js';
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
@@ -3182,7 +3185,12 @@ function basicCollectionIndexWhere(
   const store = expr._numericStore;
   if (store !== undefined) {
     for (let i = 0; i !== store.length; i += 1)
-      if (predicate(expr.engine.number(store[i]))) return i + 1;
+      if (
+        predicate(
+          boxStoreElement(expr.engine, store[i], expr._numericStoreFloats)
+        )
+      )
+        return i + 1;
     return undefined;
   }
   for (let i = 0; i !== expr.nops; i += 1)
@@ -3279,7 +3287,13 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
           const i = index - 1 - 1;
           return {
             value:
-              store !== undefined ? expr.engine.number(store[i]) : expr.ops[i],
+              store !== undefined
+                ? boxStoreElement(
+                    expr.engine,
+                    store[i],
+                    expr._numericStoreFloats
+                  )
+                : expr.ops[i],
             done: false as const,
           };
         },
@@ -3301,7 +3315,12 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
       if (index < 0) index = expr.nops + index + 1;
       if (index < 1 || index > expr.nops) return undefined;
       const store = expr._numericStore;
-      if (store !== undefined) return expr.engine.number(store[index - 1]);
+      if (store !== undefined)
+        return boxStoreElement(
+          expr.engine,
+          store[index - 1],
+          expr._numericStoreFloats
+        );
       return expr.ops[index - 1];
     },
 

@@ -29,7 +29,7 @@ describe('A scalar times a vector of machine numbers', () => {
     const ce = machineEngine();
     const r = ce.box(['Multiply', 2, ['List', 0.5, 1.25, -3.75]]).evaluate();
     expect(unboxed(r)).toBe(true);
-    expect(r.json).toEqual(['List', 1, 2.5, -7.5]);
+    expect(r.json).toEqual(['List', { num: '1.0' }, 2.5, -7.5]);
     expect(r.type.toString()).toBe(
       ce.box(['List', 1, 2.5, -7.5]).evaluate().type.toString()
     );
@@ -117,14 +117,15 @@ describe('The general route is kept where the doubles would differ', () => {
     // The cell products read a numeric vector from the packed tensor, which
     // holds doubles, so the digits of such an element never reached the
     // product: `3 · [N(1/3), 1]` was `[1, 3]` before the doubles were
-    // multiplied directly, and it still is.
+    // multiplied directly, and it still is. The first element is the float
+    // `1.0`, the second the exact `3`.
     const ce = new ComputeEngine();
     ce.precision = 25;
     const third = ce.box(['Divide', 1, 3]).N();
     ce.precision = 'machine';
     const vector = ce.function('List', [third, ce.number(1)]);
     const r = ce.function('Multiply', [ce.number(3), vector]).evaluate();
-    expect(r.json).toEqual(['List', 1, 3]);
+    expect(r.json).toEqual(['List', { num: '1.0' }, 3]);
   });
 
   test('an integer product past the safe range is not rounded', () => {

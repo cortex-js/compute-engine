@@ -526,7 +526,7 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
   test('JS: pure operands keep the direct emission (byte-identical pins)', () => {
     expect(
       compile(ce.box(['Mod', ['Add', 'x', 29], 900]), { fallback: false }).code
-    ).toBe('((((_.x + 29) % (900)) + (900)) % (900))');
+    ).toBe('_SYS.floorMod(_.x + 29, 900)');
     expect(
       compile(ce.box(['Remainder', 'x', 2]), { fallback: false }).code
     ).toBe('((_.x) - (2) * Math.round((_.x) / (2)))');

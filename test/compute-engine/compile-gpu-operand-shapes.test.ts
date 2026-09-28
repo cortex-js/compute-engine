@@ -248,7 +248,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     // WGSL is unaffected: it lowers `Mod` to `%`, whose scalar/vector mixed
     // forms ARE defined, so there is no builtin overload to violate.
     expect(w(['Mod', 1, V3])).toBe(
-      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) + (vec3f(1.0, 2.0, 3.0))) % (vec3f(1.0, 2.0, 3.0)))'
+      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) - (vec3f(1.0, 2.0, 3.0)) * floor(((1.0) % (vec3f(1.0, 2.0, 3.0))) / (vec3f(1.0, 2.0, 3.0)))) % (vec3f(1.0, 2.0, 3.0)))'
     );
   });
 

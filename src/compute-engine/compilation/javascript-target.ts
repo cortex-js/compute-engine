@@ -448,6 +448,7 @@ import {
   cotWithPole,
   secWithPole,
   cscWithPole,
+  floorModDouble,
 } from '../numerics/numeric.js';
 import {
   parseColor,
@@ -2925,7 +2926,7 @@ function tryGetJSComplexParts(
     const scaleOf = (op: Expression): number | undefined =>
       isSymbol(op, 'ImaginaryUnit')
         ? 1
-        : isNumber(op) && op.re === 0 && op.im !== 0
+        : isNumber(op) && op.re === 0 && op.isComplex
           ? op.im
           : undefined;
     const i = ops.findIndex((op) => scaleOf(op) !== undefined);
@@ -6512,12 +6513,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (a === null || b === null)
       throw new Error('Could not compile `Mod`: missing argument');
     // For non-negative integers, plain `%` is correct Euclidean modulo, and it
-    // splices each operand once. Every other pair needs the floored-modulo
-    // template, which splices the DIVISOR three times.
+    // splices each operand once. Every other pair needs the floored modulo,
+    // `_SYS.floorMod`. The DIVISOR must be non-negative too: for a negative
+    // divisor the floored modulo takes the sign of the divisor, and `%` the
+    // sign of the dividend (`Mod(7, -3)` is `-2`, `7 % -3` is `1`). A zero
+    // divisor gives `NaN` on both.
     const fastPath =
       BaseCompiler.isIntegerValued(a) &&
       BaseCompiler.isIntegerValued(b) &&
-      BaseCompiler.isNonNegative(a);
+      BaseCompiler.isNonNegative(a) &&
+      BaseCompiler.isNonNegative(b);
     // An IMPURE operand (the Random family) must be evaluated exactly once:
     // a spliced draw re-draws at run time (`Mod(x, Random())` consumed three
     // draws).
@@ -6545,44 +6550,33 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // allocates a closure per evaluation at every such site (the Tycho
     // corpus has about a thousand of them, nearly all with a call as the
     // dividend), where the helper call is a plain call the engine inlines.
-    if (!fastPath && isNumber(b) && b.re === 1 && b.im === 0) {
+    if (!fastPath && isNumber(b) && b.re === 1 && !b.isComplex) {
       const spliceableDividend =
         isNumber(a) || (isSymbol(a) && !target.varsKeys?.has(a.symbol));
       if (impure || !spliceableDividend) return `_SYS.fract(${compile(a)})`;
       const ca = compile(a);
       return `((${ca} - Math.floor(${ca})) % 1)`;
     }
-    // A divisor the floored template splices three times is also COMPUTED
-    // three times when it is spliced directly. A symbol reference and a
-    // number literal cost nothing to repeat; anything else — a call such as
-    // `Mod(2, Sin(0.2·theta))`, an arithmetic sub-expression — is bound to a
-    // temporary so the emitted code evaluates it once. The Tycho
-    // code-generation audit of 2026-09-08 found the three-times shape in the
-    // emitted JavaScript of a plotted curve.
-    const repeatedDivisor =
-      !fastPath && !isSymbol(b) && !isNumber(b) && !impure;
-    const bind = impure || repeatedDivisor;
-    // The dividend is spliced once by both templates, so it needs a temporary
-    // only to keep the interpreter's a-then-b evaluation order. That order is
-    // at risk as soon as EITHER operand is impure: the divisor is then bound
-    // to a temporary, and the binding runs it before the spliced dividend.
-    // Binding the dividend as well puts the two back in order.
-    const bindA = impure;
-    const ta = bindA ? BaseCompiler.tempVar(target) : '';
-    const tb = bind ? BaseCompiler.tempVar(target) : '';
+    // Every other pair calls `_SYS.floorMod`, the function the interpreter
+    // uses on doubles (`floorModDouble`). It adds the divisor to the
+    // truncated remainder only when their signs differ. The inline template
+    // `((a % b) + b) % b` always added it, and that sum is rounded when it is
+    // larger than 2^53: `Mod(2, 2^53 - 1)` ran to `1`. A call evaluates each
+    // operand once, in order, so an impure operand (the Random family) or a
+    // computed divisor needs no temporary.
+    if (!fastPath) return `_SYS.floorMod(${compile(a)}, ${compile(b)})`;
     // `compile()` emits sub-expressions without outer parentheses (`x + 29`),
     // and `%` binds tighter than `+` — wrap before splicing next to `%`.
-    const ca = bindA ? ta : `(${compile(a)})`;
-    const cb = bind ? tb : `(${compile(b)})`;
-    const core = fastPath
-      ? `(${ca} % ${cb})`
-      : `(((${ca} % ${cb}) + ${cb}) % ${cb})`;
-    if (!bind) return core;
-    const bindings = [
-      ...(bindA ? [`${ta} = ${compile(a)}`] : []),
-      `${tb} = ${compile(b)}`,
-    ];
-    return boundJSResult(target, `const ${bindings.join(', ')};`, core);
+    // An impure operand is bound to a temporary, so that the dividend and
+    // the divisor are each evaluated once, in order.
+    if (!impure) return `((${compile(a)}) % (${compile(b)}))`;
+    const ta = BaseCompiler.tempVar(target);
+    const tb = BaseCompiler.tempVar(target);
+    return boundJSResult(
+      target,
+      `const ${ta} = ${compile(a)}, ${tb} = ${compile(b)};`,
+      `(${ta} % ${tb})`
+    );
   },
   Truncate: (args, compile, target) => {
     if (BaseCompiler.isIntegerValued(args[0]))
@@ -8876,6 +8870,66 @@ function bcast(
 }
 
 /**
+ * `bcast` for operands that may hold an ABSENT OBJECT: a restricted point or
+ * list (`When((0, 1), c)` is `undefined` when `c` fails), or a list whose
+ * elements may be absent points.
+ *
+ * The absent object is spelled `undefined` on the JavaScript target
+ * (`docs/ERROR-MODEL.md` §3), and so is the result of arithmetic on it: the
+ * interpreter answers `Missing` for `t·P`, `P + Q` or `−P` when the point `P`
+ * is absent, so the whole point is absent, not a point of `NaN` coordinates
+ * (user decision of 2026-09-27). The plain `bcast` cannot give this answer:
+ * it applies its closure to an `undefined` operand as to a scalar, which
+ * gives `NaN`.
+ *
+ * `depths[j]` is the set of array levels at which operand `j` can hold an
+ * absent object, as a bit set: bit 0 when the operand itself can be absent,
+ * bit 1 when its elements can be absent (a list of possibly absent points),
+ * both for a restricted list of possibly absent points (`[P{c}, Q]{d}`),
+ * and `0` when it cannot hold one (a number, a point, a list of numbers). An
+ * operand that is `undefined` at a level where it can hold an absent object
+ * makes that position of the result `undefined`: the whole result at level
+ * 0, one cell of a list at level 1. Below the deepest such level, and for
+ * the operands that cannot hold an absent object, the rules of `bcast` apply
+ * unchanged, so a missing NUMBER still gives `NaN` (a numeric slot).
+ *
+ * The descent through the levels where an absent object can appear follows
+ * `bcastWith`: array operands must share one length (a mismatch is `NaN`),
+ * an empty position is the empty list, and a scalar operand is reused at
+ * every position. A rotation view is never passed here.
+ */
+function bcastAbsent(
+  depths: ReadonlyArray<number>,
+  f: (...xs: BcastValue[]) => BcastValue,
+  ...args: unknown[]
+): BcastValue | undefined {
+  let deeper = false;
+  for (let j = 0; j < args.length; j++) {
+    const d = depths[j] ?? 0;
+    if ((d & 1) !== 0 && args[j] === undefined) return undefined;
+    if (d > 1) deeper = true;
+  }
+  if (!deeper) return bcastWith(f, args);
+  let n = -1;
+  for (const a of args) {
+    if (!Array.isArray(a)) continue;
+    if (n < 0) n = a.length;
+    else if (a.length !== n) return NaN;
+  }
+  if (n < 0) return bcastWith(f, args);
+  if (n === 0) return [];
+  const inner = depths.map((d) => d >> 1);
+  const out: Array<BcastValue | undefined> = new Array(n);
+  for (let i = 0; i < n; i++)
+    out[i] = bcastAbsent(
+      inner,
+      f,
+      ...args.map((a) => (Array.isArray(a) ? a[i] : a))
+    );
+  return out as BcastValue;
+}
+
+/**
  * `bcast` for a USER-FUNCTION application (`q(L)` — see
  * `tryCompileUserFunction`). An operator position and a function application
  * follow the same element-wise rule, including at an empty position, where
@@ -10417,6 +10471,7 @@ const SYS_HELPERS = {
   // interpreter's `count`.
   rangeCount,
   bcast,
+  bcastAbsent,
   bcastFn,
   bcastColor,
   // Establish the representation used by the fused numeric selection loop.
@@ -10637,6 +10692,10 @@ const SYS_HELPERS = {
   // rounds up to exactly `1` (a tiny negative `x`) back into `[0, 1)`; it
   // is exact everywhere else on that range. NaN and the infinities give NaN.
   fract: (x: number) => (x - Math.floor(x)) % 1,
+  // The floored remainder, the value of `Mod(a, b)`, as the interpreter
+  // computes it on doubles: the divisor is added only when the signs of the
+  // truncated remainder and of the divisor differ (see `floorModDouble`).
+  floorMod: floorModDouble,
   pow4: (x: number) => {
     const s = x * x;
     return s * s;
@@ -14202,7 +14261,7 @@ function infiniteRangeStep(expr: Expression): number | undefined {
   const ops = expr.ops;
   if (ops.length < 2 || ops.length > 3) return undefined;
   const stop = ops[1];
-  if (!isNumber(stop) || stop.im !== 0) return undefined;
+  if (!isNumber(stop) || stop.isComplex) return undefined;
   if (stop.re !== Infinity && stop.re !== -Infinity) return undefined;
   const dir = stop.re === Infinity ? 1 : -1;
   if (ops[0] === undefined || isNonFiniteBound(ops[0])) return undefined;
@@ -14703,7 +14762,7 @@ function stringArg(
  * a run-time guard instead.
  */
 function literalInteger(x: Expression | undefined): number | undefined {
-  if (x === undefined || !isNumber(x) || x.im !== 0) return undefined;
+  if (x === undefined || !isNumber(x) || x.isComplex) return undefined;
   const n = x.re;
   return Number.isInteger(n) ? n : undefined;
 }
@@ -15183,7 +15242,7 @@ function assertDrawableRange(op: string, n: number): void {
 
 /** A finite real literal operand, or `undefined`. */
 function literalReal(x: Expression | undefined): number | undefined {
-  if (x === undefined || !isNumber(x) || x.im !== 0) return undefined;
+  if (x === undefined || !isNumber(x) || x.isComplex) return undefined;
   return Number.isFinite(x.re) ? x.re : undefined;
 }
 

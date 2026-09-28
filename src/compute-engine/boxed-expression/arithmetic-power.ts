@@ -12,12 +12,20 @@ import {
 import type { Rational } from '../numerics/types.js';
 
 import { asRational } from './numerics.js';
-import { getImaginaryFactor } from './utils.js';
+import { bignumPreferred, getImaginaryFactor } from './utils.js';
 import { halfTurnAngle, halfTurns, radiansToAngle } from './trigonometry.js';
-import { apply, apply2 } from './apply.js';
+import {
+  apply,
+  apply2,
+  boxComplexKernelResult,
+  complexNumericValueRoute,
+} from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import { realExponentValue, isGaussianIntegerValue } from './imaginary-part.js';
+import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { chopComplexDust } from '../numeric-value/roundoff.js';
+import { asFloat, hasFloatOperand } from './float-result.js';
 
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
  * type must answer no: `never` is a subtype of `matrix` (of everything),
@@ -106,7 +114,7 @@ function complexBaseAtInfiniteExponent(
   ce: Expression['engine'],
   expPositive: boolean
 ): Expression | undefined {
-  if (!isNumber(a) || a.im === 0) return undefined;
+  if (!isNumber(a) || !a.isComplex) return undefined;
   if (!Number.isFinite(a.re) || !Number.isFinite(a.im)) {
     // The literal itself is finite — the caller handles infinite operands
     // — so a non-finite double read means an exact component OVERFLOWED
@@ -469,8 +477,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // exponent, before the numeric-exponent guard below.
   if (isNumber(a) && a.isSame(0) && !b.isSame(0) && !b.isInfinity) {
     // 0^positive = 0, 0^negative = ComplexInfinity. A float base `0.0`
-    // gives a float `0`.
-    if (b.isPositive === true) return a.isExact ? ce.Zero : a;
+    // or a float exponent (`0^{2.0}`) gives a float `0`.
+    if (b.isPositive === true)
+      return !a.isExact ? a : hasFloatOperand([b]) ? asFloat(a) : ce.Zero;
     if (b.isNegative === true) return ce.ComplexInfinity;
   }
 
@@ -744,7 +753,10 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
   // Fractional exponents
   //---------------------
-  if (b.isSame(0.5))
+  // Only an EXACT `1/2` makes a square root. A float exponent `0.5` is kept,
+  // as a float `1.0` is (`isExactLiteral` above): `4^{0.5}` evaluates to the
+  // float `2`, and `x^{0.5}` stays `x^{0.5}`, as in Mathematica.
+  if (isExactLiteral(b, 0.5))
     return a.isCanonical || a.isStructural
       ? canonicalRoot(a, 2)
       : ce._fn('Sqrt', [a], { canonical: false });
@@ -774,8 +786,10 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // Only when both base and exponent are exact, and exponent is a real
   // integer (a pure-imaginary exponent like `i` has re = 0, which must NOT
   // fold as a^0)
-  if (isNumber(a) && isNumber(b) && b.isExact && b.im === 0) {
-    const e = b.re;
+  if (isNumber(a) && isNumber(b) && b.isExact && !b.isComplex) {
+    // `realExponentValue`, not `b.re`: the double of an exact non-integer
+    // rational can be an integer (`(10^{400}+1)/10^{400}` projects to `1`).
+    const e = realExponentValue(b);
     if (typeof e === 'number' && Number.isInteger(e) && Math.abs(e) <= 64) {
       const n = a.numericValue;
       if (typeof n === 'number') {
@@ -803,7 +817,10 @@ export function canonicalRoot(
   let exp: number | undefined = undefined;
   if (typeof b === 'number') exp = b;
   else {
-    if (isNumber(b) && b.im === 0) exp = b.re;
+    // `realExponentValue` is `undefined` for an exact non-integer index whose
+    // double is an integer (`(10^{400}+1)/10^{400}` projects to `1`); the
+    // exact rational index is then handled by the `p/q` rewrite below.
+    if (isNumber(b) && !b.isComplex) exp = realExponentValue(b);
   }
 
   if (exp === 1) return a;
@@ -874,9 +891,8 @@ export function canonicalRoot(
   if (
     typeof b !== 'number' &&
     isNumber(b) &&
-    b.im === 0 &&
-    exp !== undefined &&
-    !Number.isInteger(exp) &&
+    !b.isComplex &&
+    (exp === undefined || !Number.isInteger(exp)) &&
     (a.isCanonical || a.isStructural)
   ) {
     const r = asRational(b);
@@ -906,6 +922,32 @@ function integerDigitCount(v: bigint | number): number {
   return a < 1 ? 1 : Math.floor(Math.log10(a)) + 1;
 }
 
+/** The base-10 logarithm of `|v|` for an integer `v`, `-Infinity` for `0`.
+ * A bigint beyond the double range is read through its decimal digits, so
+ * the result stays finite for any finite integer. */
+function log10OfInteger(v: bigint | number): number {
+  if (typeof v === 'number') return Math.log10(Math.abs(v));
+  const s = (v < 0n ? -v : v).toString();
+  if (s.length <= 15) return Math.log10(Number(s));
+  return s.length - 1 + Math.log10(Number(s.slice(0, 15)) / 1e14);
+}
+
+/** The base-10 logarithm of the modulus of an exact complex value, computed
+ * from its exact components (`rational·√radical` for each part), so that it
+ * is correct for components that underflow or overflow a double.
+ * `-Infinity` for zero. */
+function exactLog10Modulus(v: ExactNumericValue): number {
+  const part = (r: Rational, radical: number): number =>
+    log10OfInteger(r[0]) - log10OfInteger(r[1]) + 0.5 * Math.log10(radical);
+  const a = part(v.rational, v.radical);
+  const b = part(v.imRational, v.imRadical);
+  const m = Math.max(a, b);
+  const n = Math.min(a, b);
+  if (m === -Infinity) return -Infinity;
+  // The modulus is sqrt(10^{2m} + 10^{2n}); this is its base-10 logarithm.
+  return m + 0.5 * Math.log10(1 + 10 ** (2 * (n - m)));
+}
+
 /**
  * `x^e` for an integer exponent `e` and an EXACT base `x`, computed exactly:
  *  - integer / rational base → exact bigint rational power;
@@ -927,12 +969,12 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
   //
   // Complex base: an exact complex value, or a machine/big Gaussian integer
   //
-  if (x.im !== 0) {
+  if (x.isComplex) {
     const nv = x.numericValue;
     if (typeof nv === 'number') return undefined; // a JS number is never complex
     let exact: ExactNumericValue | undefined;
     if (nv instanceof ExactNumericValue) exact = nv;
-    else if (Number.isSafeInteger(nv.re) && Number.isSafeInteger(nv.im))
+    else if (isGaussianInteger(nv))
       // A Gaussian-integer literal from the inexact lane is exactly
       // representable: lift it so the powering is exact (WP-2.16)
       exact = ce._numericValue({
@@ -942,9 +984,15 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
     if (exact === undefined) return undefined;
 
     // Magnitude guard: |z^e| = |z|^e — keep pathological powers symbolic
-    // rather than materializing huge exact components.
-    const magLog10 = 0.5 * Math.abs(e) * Math.log10(x.re * x.re + x.im * x.im);
-    if (!Number.isFinite(magLog10) || magLog10 > MAX_EXACT_POW_DIGITS)
+    // rather than materializing huge exact components. The modulus is read
+    // from the exact components, not from the doubles `re` and `im`: those
+    // are `0` or `Infinity` for a component beyond the double range
+    // (`10^{-800}i`), and their squares underflow sooner (`10^{-200}i`). A
+    // result with very many digits in its DENOMINATOR (a tiny modulus to a
+    // large power) is as costly as one with a huge numerator, so the guard
+    // bounds the digit count on both sides.
+    const magLog10 = Math.abs(e) * exactLog10Modulus(exact);
+    if (!Number.isFinite(magLog10) || Math.abs(magLog10) > MAX_EXACT_POW_DIGITS)
       return undefined;
 
     const v = exact.pow(e);
@@ -1029,7 +1077,7 @@ function eulerQuarterTurn(theta: Expression): number | undefined {
   if (!isFunction(theta, 'Multiply') || theta.nops !== 2) return undefined;
   const [c, pi] = theta.ops;
   if (!isSymbol(pi, 'Pi')) return undefined;
-  if (!isNumber(c) || c.isExact || c.im !== 0) return undefined;
+  if (!isNumber(c) || c.isExact || c.isComplex) return undefined;
   const twice = (c.bignumRe ?? new BigDecimal(c.re)).mul(2);
   if (!twice.isFinite() || !twice.isInteger()) return undefined;
   return Number(((twice.toBigInt() % 4n) + 4n) % 4n);
@@ -1120,8 +1168,21 @@ function complexPowN(
   if ([x.re, x.im, expRe, expIm].some((v) => Number.isNaN(v))) return ce.NaN;
   // A zero base: 0^w is 0 when the real part of w is positive. Otherwise it
   // has no value (a pole or an undefined point), so the result is NaN, and
-  // the polar form below must not run (ln 0 is -∞).
-  if (x.re === 0 && x.im === 0) return expRe > 0 ? ce.Zero : ce.NaN;
+  // the polar form below must not run (ln 0 is -∞). The test reads the
+  // numeric value, not the double projections `re` and `im`: a base whose
+  // big-decimal parts are too small for a double (`10^{-800}(1+i)`) has
+  // double projections `0` and `0`, but it is not zero.
+  const baseValue = x.numericValue;
+  if (typeof baseValue === 'number' ? baseValue === 0 : baseValue.isZero)
+    return expRe > 0 ? ce.Zero : ce.NaN;
+  // Above machine precision, the big-decimal power computes both parts at
+  // the working precision. The double kernel below is used otherwise.
+  const viaNumericValue = complexNumericValueRoute(
+    ce,
+    [x, typeof exp === 'number' ? ce.number(exp) : exp],
+    (base, exponent) => base.pow(exponent)
+  );
+  if (viaNumericValue !== undefined) return viaNumericValue;
   let z: { re: number; im: number } = ce
     .complex(x.re, x.im)
     .pow(ce.complex(expRe, expIm));
@@ -1162,7 +1223,12 @@ function complexPowN(
       return ce.ComplexInfinity;
     return undefined;
   }
-  return ce.number(ce._numericValue(chopComplexDust(z.re, z.im)));
+  // A float operand makes the result a float (`i^{2.0}` is the float `-1`).
+  return boxComplexKernelResult(
+    ce,
+    chopComplexDust(z.re, z.im),
+    typeof exp === 'number' ? [x] : [x, exp]
+  );
 }
 
 /**
@@ -1252,7 +1318,7 @@ export function pow(
       if (x.re > 2.718 && x.re < 2.719 && x === ce.E.N()) {
         if (typeof exp === 'number')
           return ce.number(ce._numericValue(exp).exp());
-        if (isNumber(exp) && exp.im === 0)
+        if (isNumber(exp) && !exp.isComplex)
           return ce.number(ce._numericValue(exp.numericValue).exp());
       }
 
@@ -1269,11 +1335,11 @@ export function pow(
         const eVal =
           typeof exp === 'number'
             ? exp
-            : isNumber(exp) && exp.im === 0
+            : isNumber(exp) && !exp.isComplex
               ? exp.re
               : undefined;
         const negativeBase =
-          x.isNegative === true && x.im === 0 && eVal !== undefined;
+          x.isNegative === true && !x.isComplex && eVal !== undefined;
         // Recover the exponent's rational p/q — from its EXACT terms when it
         // still has them, otherwise from the float. Under .N() the `exp`
         // argument reaches here already numericized, so the exact terms come
@@ -1302,8 +1368,10 @@ export function pow(
         // says the value is complex. When the raw exponent is in hand its own
         // reduced denominator decides; a pure-float exponent has nothing but
         // the double, and keeps it.
+        // The same holds for an exact exponent passed directly: the double
+        // of `(10^{400}+1)/10^{400}` is `1`, but its denominator is not.
         const isIntegerExponent =
-          rawExact !== undefined && terms !== undefined
+          exact !== undefined && terms !== undefined
             ? terms[1] === 1
             : Number.isInteger(eVal);
         if (negativeBase && !isIntegerExponent) {
@@ -1340,7 +1408,7 @@ export function pow(
             magNV !== null &&
             magNV !== undefined &&
             typeof magNV !== 'number' &&
-            magNV.im === 0 &&
+            !magNV.isComplex &&
             magNV.bignumRe !== undefined
           ) {
             const magBig = magNV.bignumRe;
@@ -1364,11 +1432,11 @@ export function pow(
       // a NaN part for finite operands. When it cannot give a value (it
       // returns undefined), the result is the exact or symbolic power.
       if (typeof exp === 'number') {
-        if (x.im !== 0)
+        if (x.isComplex)
           return (
             complexPowN(x, exp) ?? pow(x, exp, { numericApproximation: false })
           );
-      } else if (isNumber(exp) && (x.im !== 0 || exp.im !== 0))
+      } else if (isNumber(exp) && (x.isComplex || exp.isComplex))
         return (
           complexPowN(x, exp) ?? pow(x, exp, { numericApproximation: false })
         );
@@ -1406,7 +1474,14 @@ export function pow(
   const canonicalResult = canonicalPower(x, ce.expr(exp));
   if (canonicalResult.operator !== 'Power') return canonicalResult;
 
-  const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
+  const e =
+    typeof exp === 'number'
+      ? exp
+      : isNumber(exp)
+        ? realExponentValue(exp)
+        : exp.im === 0
+          ? exp.re
+          : undefined;
 
   if (isSymbol(x, 'ExponentialE')) {
     // e^(ln(y)) = y. (Previously this only reduced because `ln(y)` of a
@@ -1541,7 +1616,10 @@ export function pow(
         return ce.number(ce._numericValue(exp).exp());
       } else if (isNumber(exp)) {
         const xv = ce._numericValue(exp.numericValue);
-        if (xv.im === 0) return ce.number(xv.exp());
+        // A complex exponent above machine precision uses the big-decimal
+        // `exp` too: `e` pre-rounded to the working precision and raised to
+        // `z` loses a digit (`e^{1+2i}` at 50 digits was one unit off).
+        if (!xv.isComplex || bignumPreferred(ce)) return ce.number(xv.exp());
         const eNv = numericValue(ce.E.N());
         if (eNv !== undefined) return ce.number(ce._numericValue(eNv).pow(xv));
       }
@@ -1642,8 +1720,7 @@ export function pow(
     // yield an EXACT result — never a rounded bignum (`Power(2,127)`), a float
     // (`Power(2,-2)`), or a float residue (`(1+i)^2`). That's the exactness
     // contract: numericizing an exact argument is the `.N()` path's job.
-    const isGaussianInt =
-      x.im !== 0 && Number.isInteger(x.re) && Number.isInteger(x.im);
+    const isGaussianInt = x.isComplex && isGaussianIntegerValue(x.numericValue);
     if (x.isExact || isGaussianInt) {
       const exact = exactIntegerPow(x, e!);
       if (exact !== undefined) return exact;
@@ -1679,7 +1756,7 @@ export function pow(
   // only an odd denominator is admitted: an even root is complex (e.g.
   // (-4)^{3/2} = -8i), whose exact value only arises through dusty complex
   // arithmetic, so it is left symbolic here and evaluated by N().
-  if (isNumber(x) && x.im === 0 && typeof exp !== 'number' && isNumber(exp)) {
+  if (isNumber(x) && !x.isComplex && typeof exp !== 'number' && isNumber(exp)) {
     const r = asRational(exp);
     if (r !== undefined) {
       const p = Number(r[0]);
@@ -1836,6 +1913,16 @@ export function root(
             const result = a.pow(typeof b === 'number' ? 1 / b : b.inverse());
             if (isNegative && !isEven) return result.neg();
             return result;
+          },
+          // A complex operand above machine precision: the big-decimal root
+          // or power computes both parts at the working precision.
+          (a, b) => {
+            const result =
+              !b.isComplex && Number.isInteger(b.re)
+                ? a.root(b.re)
+                : a.pow(b.inv());
+            if (isNegative && !isEven) return result.neg();
+            return result;
           }
         ) ?? root(a, b, { numericApproximation: false })
       );
@@ -1843,7 +1930,7 @@ export function root(
   }
 
   if (isNumber(a) && isNumber(b) && b.isInteger) {
-    const e = typeof b === 'number' ? b : b.im === 0 ? b.re : undefined;
+    const e = typeof b === 'number' ? b : !b.isComplex ? b.re : undefined;
 
     // a^(1/b): evaluate if b is an integer and a is exact
 
@@ -1897,7 +1984,7 @@ export function root(
       const n =
         exact instanceof ExactNumericValue &&
         exact.radical === 1 &&
-        exact.im === 0 &&
+        !exact.isComplex &&
         exact.rational[1] === 1n
           ? exact.rational[0]
           : a.re;

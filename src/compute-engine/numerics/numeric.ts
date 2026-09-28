@@ -431,6 +431,28 @@ function trigPole(y: number, x: number): number {
   return isMachineTrigPole(y, x) ? Infinity : y;
 }
 
+/**
+ * The floored remainder of two doubles, the value of `Mod(a, b)`: the sign
+ * of the result follows the divisor. The divisor is added to the truncated
+ * remainder `a % b` only when the remainder is not zero and its sign differs
+ * from the sign of the divisor. The formula `((a % b) + b) % b` always adds
+ * the divisor, and that sum is rounded when it is larger than 2^53:
+ * `((2 % N) + N) % N` is `1`, not `2`, for `N = 2^53 - 1`.
+ *
+ * The trailing `% b` after the correction maps a sum that rounds to exactly
+ * `b` (a tiny negative remainder, `-1e-20 % 1`) back to `0`, inside the
+ * range of the floored modulo; it is exact everywhere else. A non-finite
+ * operand gives the value of the old formula (`NaN` for an infinite
+ * divisor). The interpreter (`Mod` in `library/arithmetic.ts`) and the
+ * compiled JavaScript (`_SYS.floorMod`) both use this function.
+ */
+export function floorModDouble(a: number, b: number): number {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return ((a % b) + b) % b;
+  const r = a % b;
+  if (r === 0) return 0;
+  return r < 0 !== b < 0 ? (r + b) % b : r;
+}
+
 export const tanWithPole = (x: number): number => trigPole(Math.tan(x), x);
 export const cotWithPole = (x: number): number => trigPole(1 / Math.tan(x), x);
 export const secWithPole = (x: number): number => trigPole(1 / Math.cos(x), x);

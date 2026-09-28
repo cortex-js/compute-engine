@@ -166,7 +166,7 @@ describe('EPSIL EFFECTS — definition form (block)', () => {
   });
 
   test('block-form definitions round-trip byte for byte', () => {
-    expectRoundTrip('function roll(n) random -> integer {Random(Range(1, n))}');
+    expectRoundTrip('function roll(n) random -> integer {random(Range(1, n))}');
     expectRoundTrip('function tick() scope {count := count + 1}');
     expectRoundTrip('function h(x) pure -> real {x + 1}');
     expectRoundTrip('function m(x: integer, y) random scope -> real {x}');
@@ -190,7 +190,7 @@ describe('EPSIL EFFECTS — definition form (math)', () => {
         'x',
       ],
     ]);
-    expectRoundTrip('f(x) random -> integer = Random(Range(1, x))');
+    expectRoundTrip('f(x) random -> integer = random(Range(1, x))');
   });
 
   test('the specifier is claimed only WITH the arrow', () => {

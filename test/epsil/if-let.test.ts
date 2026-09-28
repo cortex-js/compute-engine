@@ -45,11 +45,13 @@ function strip(e: unknown): unknown {
 }
 
 /** Serialize `source`, assert the output re-parses cleanly to the same
- * structure, and return the output. */
+ * structure, and return the output. The comparison is between RAW parse
+ * trees, so the serializer is asked for the MathJSON names: a `Length(xs)`
+ * in the source would otherwise come back as the spelling `length(xs)`. */
 function roundTrip(source: string): string {
   const [parsed, diags] = parseEpsil(source);
   expect(diags).toEqual([]);
-  const out = serializeEpsil(parsed!);
+  const out = serializeEpsil(parsed!, { libraryNames: 'mathjson' });
   const [reparsed, reDiags] = parseEpsil(out);
   expect(reDiags).toEqual([]);
   expect(strip(reparsed)).toEqual(strip(parsed));

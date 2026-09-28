@@ -22,9 +22,14 @@ map(sin, [0, pi / 2])
 // ➔ [0, 1]
 ```
 
-The lowercase spelling is the style of the language. The capitalized
-spelling is what MathJSON uses and what the engine reports: a value prints
-back with the MathJSON names, and a diagnostic names the operator as `Sin`.
+The lowercase spelling is the style of the language, and it is the
+spelling Epsil writes: the serializer (`serializeEpsil`), the `format`
+command, the `--epsil` output mode and the snippet a diagnostic quotes all
+write a library name in lowercase (`sin(x)`, `map(sin, xs)`, `pi`). A
+program that binds the lowercase spelling itself (`let sin = 3`, a
+parameter named `pi`) is written with the capitalized name for that
+library member, so the text reads back as the same program. The
+capitalized spelling is what MathJSON uses, and what an engine error names.
 
 ## How the spelling is formed
 
@@ -105,6 +110,22 @@ The constants `e` and `i` are lowercase library values already: `e^2` is
 the exponential, `i^2` is `-1`, and `1 + 2i` is a complex number. They
 shadow like any other name — `let e = 3; e^2` is `9`.
 
+The capitalized spelling shadows the same way: `let Pi = 3` makes `Pi` the
+number `3` for the rest of its scope, and `function Square(x) { x + 100 }`
+makes `Square(3)` call that function. Shadowing a name that an operator
+builds changes the operator too: `+` is `Add`, so a user `Add` is what `+`
+calls in its scope, and a definition such as `function Add(x, y) { x + y }`
+calls itself without end. Compiled code does not use a shadowed library
+operator: the call is interpreted instead.
+
+The absence markers `Nothing`, `Missing` and `Undefined` are the exception:
+they cannot be rebound, and a binding of one of them is an error
+(`absence-marker-binding`). The engine recognizes them by their name — it
+drops `Nothing` from an argument list and reads a `Missing` operand as
+absent — so a binding could never behave like the value it holds. In a
+`match`, test for a marker with `== Missing`: a bare `Missing` there would
+be a new variable.
+
 To name a raw symbol that happens to spell a library name, use the verbatim
 form: `` `sin` `` is the symbol `sin`, not the sine function.
 
@@ -113,7 +134,7 @@ form: `` `sin` `` is the symbol `sin`, not the sine function.
 A few mathematical glyphs are **input aliases** for library symbols,
 canonicalized at the lexer — every position (expression, parameter,
 binding, match pattern) treats the glyph exactly like its ASCII spelling,
-and serialization emits the canonical name:
+and serialization writes the library spelling (`pi` for `π`):
 
 | Glyph | Symbol            |
 | :---- | :---------------- |

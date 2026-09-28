@@ -104,6 +104,7 @@ import {
   isContinuationOperand,
   isFoldBarrierProduct,
 } from './type-guards.js';
+import { realExponentValue } from './imaginary-part.js';
 import { scopeForRebuild } from './binding-sites.js';
 import {
   armHasValueParam,
@@ -134,7 +135,12 @@ import {
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
 import { numericStoreTiers } from './literal-tier.js';
-import { machineNumberOf, isExactNonInteger } from './machine-number.js';
+import {
+  boxStoreElement,
+  integerExactnessClass,
+  machineNumberOf,
+  isExactNonInteger,
+} from './machine-number.js';
 import {
   broadcastResultType,
   nestedBroadcastResultType,
@@ -420,13 +426,24 @@ export class BoxedFunction
    * The numeric store of a `List` built by `ce.list()`: the list's elements
    * as plain JS numbers, frozen, with `-0` normalized to `+0`. It is the
    * ORIGIN of the operands, not a cache derived from them: the operand at
-   * position `i` is exactly `engine.number(store[i])`, boxed on the first
+   * position `i` is exactly `engine.number(store[i])` (a float for an
+   * integer value when `_numericStoreFloats`), boxed on the first
    * read of `.ops`. The facets that need only the numbers (`nops`, `count`,
    * `at`, `type`, `hash`, `isSame`, `unknowns`, effects, ...) answer from
    * the store and never box. `undefined` for every other node. Design:
    * `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
    */
   readonly _numericStore: readonly number[] | undefined;
+
+  /**
+   * Are the elements of the numeric store that have an integer value
+   * floats? `true` for a list that a float computation produced (`2·L` with
+   * the element `0.5` holds the float `1`), `false` for a list of exact
+   * integers and doubles (`ce.list()`). An element with a fraction part is a
+   * float in both cases. See `boxStoreElement()`. `false` when there is no
+   * store.
+   */
+  readonly _numericStoreFloats: boolean;
 
   /** The `array` facet of an ordinary `List` (one without a store), computed
    * once: the elements as machine numbers, or `null` when some element is
@@ -437,6 +454,12 @@ export class BoxedFunction
    * exactness included? `false` when some element is an exact non-integer
    * a double holds (`1/2`), which `array` admits. See `get isMachineNumeric()`. */
   private _derivedArrayIsMachine: boolean | undefined;
+
+  /** Computed with `_derivedArray`: the exactness class of the elements
+   * with an integer value (`integerExactnessClass()`), or `null` when the
+   * list is not a list of machine numbers or mixes exact integers with
+   * integer-valued floats. See `get _machineFloats()`. */
+  private _derivedArrayFloats: boolean | null | undefined;
 
   /** Is this node written-out DATA, which evaluates to itself? Computed
    * once: `0` no, `1` under `evaluate()`, `2` under a numeric approximation
@@ -449,8 +472,9 @@ export class BoxedFunction
     if (this._opsStorage !== undefined) return this._opsStorage;
     const store = this._numericStore!;
     const ops = new Array<Expression>(store.length);
+    const floats = this._numericStoreFloats;
     for (let i = 0; i < store.length; i++)
-      ops[i] = this.engine.number(store[i]);
+      ops[i] = boxStoreElement(this.engine, store[i], floats);
     this._opsStorage = ops;
     return ops;
   }
@@ -686,6 +710,9 @@ export class BoxedFunction
       /** A numeric store in place of boxed operands (`_numericStore`).
        * Only a `List` may carry one; `ops` is then omitted. */
       numericStore?: readonly number[];
+      /** Are the integer-valued elements of the store floats
+       * (`_numericStoreFloats`)? */
+      numericStoreFloats?: boolean;
     }
   ) {
     super(ce, options?.metadata);
@@ -710,6 +737,8 @@ export class BoxedFunction
       throw new Error(`"${operator}" has neither operands nor a numeric store`);
     }
     this._numericStore = store;
+    this._numericStoreFloats =
+      store !== undefined && !!options?.numericStoreFloats;
     this._opsStorage = ops;
     this._localScope = options?.scope;
 
@@ -1176,6 +1205,7 @@ export class BoxedFunction
       if (x === undefined) {
         this._derivedArray = null;
         this._derivedArrayIsMachine = false;
+        this._derivedArrayFloats = null;
         return undefined;
       }
       if (machine && isExactNonInteger(ops[i], x)) machine = false;
@@ -1183,7 +1213,11 @@ export class BoxedFunction
       out[i] = x === 0 ? 0 : x;
     }
     this._derivedArray = Object.freeze(out);
-    this._derivedArrayIsMachine = machine;
+    const kind = machine ? integerExactnessClass(ops, out) : undefined;
+    this._derivedArrayFloats = kind === undefined ? null : kind === 'float';
+    // A list with an integer-valued float (`[0.5, 2.0]`) is not reproduced
+    // by `ce.list(array)`, which boxes the double `2` as an exact integer.
+    this._derivedArrayIsMachine = kind === 'exact';
     return this._derivedArray;
   }
 
@@ -1193,8 +1227,12 @@ export class BoxedFunction
    * interpreter computes with it?
    *
    * A store-backed list (`ce.list()`) answers `true` in constant time: its
-   * operands ARE `engine.number(store[i])`. An ordinary `List` answers
-   * `true` when `array` is defined and no element is an exact non-integer:
+   * operands ARE `engine.number(store[i])`. A store whose integer-valued
+   * elements are floats (`_numericStoreFloats`) answers `false`: re-boxing
+   * the double `1` gives the exact `1`. An ordinary `List` answers
+   * `true` when `array` is defined, no element is a float with an integer
+   * value (`2.0`), for the same reason, and no element is an exact
+   * non-integer:
    * `array` admits the exact rationals a double holds without rounding
    * (`1/2`, `3/4`), but re-boxing `0.5` gives a float that computes as one
    * (`0.5 / 3` is `0.1666…` where `1/2 ÷ 3` is `1/6`). An integer is
@@ -1203,10 +1241,29 @@ export class BoxedFunction
    * other expression, including a nested list.
    */
   get isMachineNumeric(): boolean {
-    if (this._numericStore !== undefined) return true;
+    if (this._numericStore !== undefined) return !this._numericStoreFloats;
     if (this._operator !== 'List') return false;
     if (this._derivedArrayIsMachine === undefined) void this.array;
     return this._derivedArrayIsMachine!;
+  }
+
+  /**
+   * Internal. The exactness of the integer-valued elements of a list of
+   * machine numbers, for the routes that compute on its doubles
+   * (`machine-broadcast.ts`): `false` when they are exact integers (the
+   * list is `isMachineNumeric`), `true` when they are floats (a list such
+   * as `[0.5, 2.0]`, or a store with `_numericStoreFloats`), `undefined`
+   * when the list is not a list of machine numbers, holds an exact
+   * non-integer, or mixes exact integers with integer-valued floats. With
+   * the doubles of `array`, the answer tells whether each element is exact:
+   * an element with a fraction part is a float, an element with an integer
+   * value is a float exactly when the answer is `true`.
+   */
+  get _machineFloats(): boolean | undefined {
+    if (this._numericStore !== undefined) return this._numericStoreFloats;
+    if (this._operator !== 'List') return undefined;
+    if (this._derivedArrayFloats === undefined) void this.array;
+    return this._derivedArrayFloats ?? undefined;
   }
 
   get op1(): Expression {
@@ -1556,7 +1613,11 @@ export class BoxedFunction
     }
 
     if (isFunction(expr, 'Root')) {
-      const exp = expr.op2.re;
+      // `realExponentValue` is `undefined` (read as `NaN`) for an exact
+      // non-integer index whose double is an integer.
+      const exp = isNumber(expr.op2)
+        ? (realExponentValue(expr.op2) ?? NaN)
+        : expr.op2.re;
       if (isNaN(exp) || expr.op2.im !== 0) return [ce._numericValue(1), this];
 
       const [coef, rest] = expr.op1.toNumericValue();
@@ -2165,7 +2226,14 @@ export class BoxedFunction
     )
       throw new Error('Not canonical');
 
-    const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
+    const e =
+      typeof exp === 'number'
+        ? exp
+        : isNumber(exp)
+          ? realExponentValue(exp)
+          : exp.im === 0
+            ? exp.re
+            : undefined;
 
     if (e === 0) return this.engine.NaN;
     if (e === 1) return this;

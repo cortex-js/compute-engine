@@ -11,10 +11,12 @@ import {
   isEmptySequence,
   missingIfEmpty,
   isNumberExpression,
+  isNumberObject,
   MISSING,
   getSequence,
 } from '../../../math-json/utils.js';
 import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
+import { isFloatSpelling } from '../../numerics/expression.js';
 import {
   Serializer,
   Parser,
@@ -700,6 +702,54 @@ function serializeAdd(
 }
 
 /**
+ * The facts about a part of a `Complex` expression that its serializer
+ * needs: is it zero, `1` or `-1`, is it negative. `null` when the part is
+ * not a number literal (an exact part such as `['Sqrt', 2]`).
+ *
+ * A number literal written as a string of digits is read from its digits,
+ * not only from its double: `2.5e-800` rounds to the double `0` and
+ * `1.00000000000000000001` rounds to `1`, but the first is not zero and the
+ * second is not one. A literal with at most 15 significant digits is equal
+ * to `1` exactly when its double is.
+ */
+function complexPartShape(x: MathJsonExpression | null | undefined): {
+  isZero: boolean;
+  isOne: boolean;
+  isNegativeOne: boolean;
+  isNegative: boolean;
+} | null {
+  const value = machineValue(x);
+  if (value === null) return null;
+  const fromDouble = {
+    isZero: value === 0,
+    isOne: value === 1,
+    isNegativeOne: value === -1,
+    isNegative: value < 0,
+  };
+  const literal = x ?? null;
+  const digits =
+    typeof literal === 'string'
+      ? literal
+      : isNumberObject(literal) && typeof literal.num === 'string'
+        ? literal.num
+        : undefined;
+  if (digits === undefined || !Number.isFinite(value)) return fromDouble;
+  const match = /^([+-]?)(\d*)\.?(\d*)(?:[eE][+-]?\d+)?$/.exec(digits.trim());
+  if (match === null) return fromDouble;
+  const significant = (match[2] + match[3])
+    .replace(/^0+/, '')
+    .replace(/0+$/, '');
+  const isZero = significant.length === 0;
+  const exact = significant.length <= 15;
+  return {
+    isZero,
+    isOne: exact && value === 1,
+    isNegativeOne: exact && value === -1,
+    isNegative: !isZero && match[1] === '-',
+  };
+}
+
+/**
  * Serialize a term of a sum or a difference, in parentheses when its
  * precedence is lower than `prec` (the precedence of `Add` by default). A pure imaginary number
  * `['Complex', 0, im]` has no parentheses: it serializes as a product
@@ -714,7 +764,10 @@ function wrapAddTerm(
   term: MathJsonExpression,
   prec: number = ADDITION_PRECEDENCE
 ): string {
-  if (operator(term) === 'Complex' && machineValue(operand(term, 1)) === 0)
+  if (
+    operator(term) === 'Complex' &&
+    complexPartShape(operand(term, 1))?.isZero
+  )
     return serializer.serialize(term);
   return serializer.wrap(term, prec);
 }
@@ -947,6 +1000,17 @@ function serializeMultiply(
         : isFoldBarrierFactor(arg)
           ? serializer.wrap(arg, MULTIPLICATION_PRECEDENCE + 1)
           : serializer.wrap(arg, MULTIPLICATION_PRECEDENCE);
+
+    // A factor that serializes with a leading sign (a fraction such as
+    // `Divide(x, -4)`, written `-\frac{x}{4}`) gives its sign to the whole
+    // product. Juxtaposed as is, the sign would read as a subtraction:
+    // `y-\frac{x}{4}`. A factor that was not wrapped and starts with `-`
+    // binds at least as tightly as a product, so the `-` applies to the
+    // whole factor.
+    if (term.startsWith('-')) {
+      term = term.slice(1);
+      isNegative = !isNegative;
+    }
 
     // 2.2. The terms can be separated by an invisible multiply.
     const isContinuation = symbol(arg) === 'ContinuationPlaceholder';
@@ -1346,8 +1410,30 @@ function serializeFraction(
   // console.assert(getFunctionName(expr) === 'Divide');
   if (expr === null) return '';
 
-  const numer = missingIfEmpty(operand(expr, 1));
-  const denom = missingIfEmpty(operand(expr, 2));
+  let numer = missingIfEmpty(operand(expr, 1));
+  let denom = missingIfEmpty(operand(expr, 2));
+
+  // The sign of a numeric fraction goes in front of it, not inside the
+  // numerator or the denominator: `-\frac{1}{2}`, `-\frac{x}{2}`, not
+  // `\frac{-1}{2}` or `\frac{x}{-2}`. `unsign()` recognizes a negative sign
+  // from either operand's shape (a literal negative number, `Negate`, or a
+  // leading negative `Multiply` coefficient) and returns the un-signed
+  // operand.
+  //
+  // The sign moves only for a `Rational`, or when the denominator is a number
+  // literal. There, `-\frac{x}{2}` parses back to the same canonical
+  // expression, because the canonical `Negate` folds its sign into the
+  // numeric coefficient of the product `x/2`. With a symbolic denominator it
+  // does not: `-\frac{1}{x}` parses to `Negate(Divide(1, x))`, not to
+  // `Divide(-1, x)`, so the sign stays in the numerator, `\frac{-1}{x}`.
+  let sign = '';
+  const [unsignedNumer, numerSign] = unsign(numer);
+  const [unsignedDenom, denomSign] = unsign(denom);
+  if (operator(expr) === 'Rational' || isNumberExpression(unsignedDenom)) {
+    numer = unsignedNumer;
+    denom = unsignedDenom;
+    if (numerSign * denomSign < 0) sign = '-';
+  }
 
   const style = serializer.options.prettify
     ? serializer.fractionStyle(expr, serializer.level)
@@ -1356,14 +1442,16 @@ function serializeFraction(
     const numerStr = serializer.wrapShort(numer);
     const denomStr = serializer.wrapShort(denom);
 
-    if (style === 'inline-solidus') return `${numerStr}/${denomStr}`;
-    return `{}^{${numerStr}}\\!\\!/\\!{}_{${denomStr}}`;
+    if (style === 'inline-solidus') return `${sign}${numerStr}/${denomStr}`;
+    return `${sign}{}^{${numerStr}}\\!\\!/\\!{}_{${denomStr}}`;
   } else if (style === 'reciprocal') {
-    if (machineValue(numer) === 1) return serializer.wrap(denom) + '^{-1}';
-    return serializer.wrap(numer) + serializer.wrap(denom) + '^{-1}';
+    if (machineValue(numer) === 1)
+      return sign + serializer.wrap(denom) + '^{-1}';
+    return sign + serializer.wrap(numer) + serializer.wrap(denom) + '^{-1}';
   } else if (style === 'factor') {
-    if (machineValue(denom) === 1) return serializer.wrap(numer);
+    if (machineValue(denom) === 1) return sign + serializer.wrap(numer);
     return (
+      sign +
       '\\frac{1}{' +
       serializer.serialize(denom) +
       '}' +
@@ -1381,7 +1469,7 @@ function serializeFraction(
 
   const numerLatex = serializer.serialize(numer);
   const denomLatex = serializer.serialize(denom);
-  return `${cmd}{${numerLatex}}{${denomLatex}}`;
+  return `${sign}${cmd}{${numerLatex}}{${denomLatex}}`;
 }
 
 /** Parse `\binom{n}{k}` (and the `\dbinom`/`\tbinom` display/text variants)
@@ -1430,7 +1518,9 @@ function serializePower(
     );
 
   if (serializer.options.prettify) {
-    const val2 = machineValue(exp) ?? 1;
+    // A float exponent (`x^{-1.0}`, `x^{-0.5}`) is written as it is: the
+    // rewrites below write an exact exponent, which reads back exact
+    const val2 = isFloatSpelling(exp) ? 1 : (machineValue(exp) ?? 1);
     if (val2 === -1) {
       return serializer.serialize(['Divide', '1', base]);
     } else if (val2 < 0) {
@@ -1882,8 +1972,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const rePart = serializer.serialize(operand(expr, 1));
 
-      const im = machineValue(operand(expr, 2));
-      if (im === 0) return rePart;
+      const im = complexPartShape(operand(expr, 2));
+      if (im?.isZero) return rePart;
 
       // An exact imaginary part is a symbolic expression (`√2` is
       // `['Sqrt', 2]`), for which `machineValue` is `null`. Its sign comes
@@ -1893,6 +1983,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // `\sqrt{2}-\sqrt{2}\imaginaryI`, not `\sqrt{2}+-\sqrt{2}\imaginaryI`.
       const negImMagnitude =
         im === null ? negatedMagnitude(operand(expr, 2)) : null;
+
+      // A float imaginary part `±1.0` with no real part keeps its
+      // coefficient: `1.0\imaginaryI`, not `\imaginaryI`, which is read
+      // back as the exact `i`. With a real part, the real part makes the
+      // value a float.
+      const reIsZero = complexPartShape(operand(expr, 1))?.isZero === true;
+      const imOperand = operand(expr, 2);
+      const unitCoefficient = !(
+        reIsZero &&
+        imOperand !== null &&
+        isFloatSpelling(imOperand)
+      );
 
       const imPart =
         negImMagnitude !== null
@@ -1905,19 +2007,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
                     '\\imaginaryI',
                   ]),
             ])
-          : im === 1
+          : im?.isOne && unitCoefficient
             ? '\\imaginaryI'
-            : im === -1
+            : im?.isNegativeOne && unitCoefficient
               ? '-\\imaginaryI'
               : joinLatex([
                   serializer.serialize(operand(expr, 2)),
                   '\\imaginaryI',
                 ]);
 
-      const re = machineValue(operand(expr, 1));
-      if (re === 0) return imPart;
+      if (reIsZero) return imPart;
 
-      if ((im !== null && im < 0) || negImMagnitude !== null)
+      if (im?.isNegative || negImMagnitude !== null)
         return joinLatex([rePart, imPart]);
 
       return joinLatex([rePart, '+', imPart]);
@@ -2067,18 +2168,42 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'Gamma',
   },
   // Riemann zeta function - \zeta parses to Zeta function when followed by arguments
-  // Note: \zeta without arguments is handled by definitions-symbols.ts as Greek letter
+  // Note: \zeta without arguments is handled by definitions-symbols.ts as Greek letter.
+  // The serializer for a *called* `Zeta` (writing the conventional `\zeta(3)`
+  // instead of the capital-letter, non-standard `\Zeta(3)`) is on the shared
+  // `name: 'Zeta'` entry in `definitions-symbols.ts`, since a dictionary name
+  // must be unique and that entry already claims it for the bare letter.
   {
     latexTrigger: ['\\zeta'],
     kind: 'function',
     parse: 'Zeta',
   },
   // Beta function - \Beta parses to Beta function when followed by arguments
-  // Note: \Beta without arguments is handled by definitions-symbols.ts as Greek letter
+  // Note: \Beta without arguments is handled by definitions-symbols.ts as Greek letter.
+  // `\Beta` is not a real LaTeX command (capital beta is roman, not a
+  // separate glyph); the serializer that writes the conventional
+  // `\mathrm{B}(...)` instead lives on the shared `name: 'Beta'` entry in
+  // `definitions-symbols.ts` (see the `Zeta` comment above). The old
+  // `\Beta(...)` spelling still parses, for inputs that used it.
   {
     latexTrigger: ['\\Beta'],
     kind: 'function',
     parse: 'Beta',
+  },
+  // `\mathrm{B}(2, 3)`: the conventional spelling this now serializes to.
+  // Only a parenthesized list of exactly two arguments (the arity of the Beta
+  // function) makes it `Beta`. Otherwise this returns `null`, so the generic
+  // parser reads the upright letter `B_upright` as before: a bare
+  // `\mathrm{B}` or `\mathrm{B}x` is the symbol, and `\mathrm{B}(x+1)` is
+  // that symbol applied to `x+1`.
+  {
+    latexTrigger: ['\\mathrm', '<{>', 'B', '<}>'],
+    kind: 'function',
+    parse: (parser: Parser) => {
+      const args = parser.parseArguments('enclosure');
+      if (args === null || args.length !== 2) return null;
+      return ['Beta', ...args] as MathJsonExpression;
+    },
   },
   // Lambert W function (product logarithm)
   {
@@ -2299,6 +2424,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     standaloneSymbol: true,
     latexTrigger: '\\lb',
     parse: (parser: Parser) => parseLb(parser),
+    // `\lb` is not a standard LaTeX command, so an *applied* `Lb` writes the
+    // conventional `\log_2(x)` (which already parses back to `Lb`, see
+    // `parseLog`'s `sub === 2` case). The bare function symbol still
+    // serializes as `\lb`: it has no base to subscript, and the old spelling
+    // continues to parse as input either way.
+    serialize: (serializer, expr) =>
+      symbol(expr) !== null
+        ? '\\lb'
+        : joinLatex(['\\log_{2}', serializer.wrap(operand(expr, 1))]),
   },
   // Function-style alias: `\operatorname{lb}(x)` (binary log).
   {
@@ -2744,6 +2878,25 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       if (rhs === null) return null;
 
       return ['Negate', rhs];
+    },
+    // The default prefix serializer parenthesizes any operand whose
+    // dictionary precedence is looser than `-`'s, which includes
+    // `Divide`/`Rational` (fraction precedence): `-(\frac{3}{4})`. A
+    // `\frac{}{}` (or `Rational`'s own fraction rendering) is already
+    // self-delimiting, so the parentheses are redundant; write the sign
+    // directly in front instead: `-\frac{3}{4}`.
+    serialize: (serializer, expr) => {
+      const rhs = operand(expr, 1);
+      if (rhs === null) return '';
+      if (operator(rhs) === 'Divide' || operator(rhs) === 'Rational') {
+        // A fraction that already writes its own sign keeps the
+        // parentheses: `-(-\frac{3}{4})`, not `--\frac{3}{4}`.
+        const fraction = serializer.serialize(rhs);
+        return fraction.startsWith('-')
+          ? '-' + serializer.wrapString(fraction, 'normal')
+          : '-' + fraction;
+      }
+      return '-' + serializer.wrap(rhs, EXPONENTIATION_PRECEDENCE + 1);
     },
   },
 
@@ -3603,8 +3756,13 @@ function unsign(expr: MathJsonExpression): [MathJsonExpression, -1 | 1] {
       const [first, firstSign] = unsign(operand(expr, 1)!);
       if (firstSign < 0) {
         sign *= -1;
-        if (first === 1) newExpr = ['Multiply', ...operands(expr).slice(1)];
-        else newExpr = ['Multiply', first, ...operands(expr).slice(1)];
+        const rest = operands(expr).slice(1);
+        // A single remaining factor is returned bare: a one-operand
+        // `Multiply` would serialize with parentheses around a sum,
+        // `\frac{(a+b)}{2}`.
+        if (first !== 1) newExpr = ['Multiply', first, ...rest];
+        else if (rest.length === 1) newExpr = rest[0];
+        else newExpr = ['Multiply', ...rest];
       }
     } else if (fnName === 'Divide' || fnName === 'Rational') {
       const [numer, numerSign] = unsign(operand(expr, 1)!);
@@ -3613,10 +3771,13 @@ function unsign(expr: MathJsonExpression): [MathJsonExpression, -1 | 1] {
         newExpr = [fnName, numer, operand(expr, 2)!];
       }
     } else {
-      const val = machineValue(expr);
-      if (val !== null && val < 0) {
+      // Remove the sign from the digit string (`{num: "-123…"}` →
+      // `{num: "123…"}`), never through a JavaScript double: a double
+      // would round a big integer or a long decimal.
+      const magnitude = negatedNumber(expr);
+      if (magnitude !== null) {
         sign *= -1;
-        newExpr = -val;
+        newExpr = magnitude;
       }
     }
   } while (newExpr !== expr);

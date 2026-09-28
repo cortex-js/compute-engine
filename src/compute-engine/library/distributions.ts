@@ -81,7 +81,7 @@ function distOps(dist: Expression): ReadonlyArray<Expression> {
  * projects `re` to `Infinity` and is nonetheless a finite real.
  */
 function isFiniteRealLiteral(x: Expression): boolean {
-  return isNumber(x) && x.im === 0 && x.isFinite === true;
+  return isNumber(x) && !x.isComplex && x.isFinite === true;
 }
 
 /**
@@ -536,7 +536,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           );
 
         if (!isNumber(a) || !isNumber(z)) return undefined;
-        if (a.im !== 0 || z.im !== 0) return undefined; // complex → symbolic
+        if (a.isComplex || z.isComplex) return undefined; // complex → symbolic
 
         // A negative non-integer a with z > 0: Q(a, z) = Γ(a, z)/Γ(a), both
         // finite — Γ(a) off its poles, and the upper incomplete gamma
@@ -642,7 +642,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           if (isNumber(x) && x.isSame(1)) return ce.One;
         }
         if (!isNumber(x) || !isNumber(a) || !isNumber(b)) return undefined;
-        if (x.im !== 0 || a.im !== 0 || b.im !== 0) return undefined;
+        if (x.isComplex || a.isComplex || b.isComplex) return undefined;
         if (!shouldNumericize(numericApproximation, x, a, b)) return undefined;
         return applyN(
           [x, a, b],

@@ -4,7 +4,7 @@ import { canonicalAngle } from './utils.js';
 
 /** True if the expression carries the imaginary unit anywhere. */
 function containsImaginary(e: Expression): boolean {
-  if (isNumber(e)) return e.im !== 0;
+  if (isNumber(e)) return e.isComplex;
   if (isSymbol(e, 'ImaginaryUnit')) return true;
   if (isFunction(e)) return e.ops.some(containsImaginary);
   return false;

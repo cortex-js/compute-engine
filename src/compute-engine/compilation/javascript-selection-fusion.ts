@@ -64,7 +64,7 @@ export function compileNumericSelection(
   const plan = (expr: Expression): Value | undefined => {
     if (--remaining < 0 || expr.isPure !== true) return undefined;
     let value: Value;
-    if (isNumber(expr) && expr.im === 0) {
+    if (isNumber(expr) && !expr.isComplex) {
       value = { expr, kind: 'literal', array: false, args: [] };
     } else if (isSymbol(expr)) {
       if (
@@ -112,7 +112,7 @@ export function compileNumericSelection(
         expr.nops <= 2 &&
         (expr.nops === 1 ||
           (isNumber(expr.op2) &&
-            expr.op2.im === 0 &&
+            !expr.op2.isComplex &&
             Number.isFinite(expr.op2.re)))
       ) {
         const base = plan(expr.op1);
@@ -124,7 +124,7 @@ export function compileNumericSelection(
         if (
           op === 'Power' &&
           (!isNumber(expr.op2) ||
-            expr.op2.im !== 0 ||
+            expr.op2.isComplex ||
             !Number.isInteger(expr.op2.re) ||
             expr.op2.re < 2 ||
             expr.op2.re > 5)

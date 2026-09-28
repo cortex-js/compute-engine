@@ -79,7 +79,9 @@ import {
   isNumber,
   isSymbol,
 } from './type-guards.js';
+import { isImaginaryPartFinite } from './imaginary-part.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
+import { asFloat, hasFloatOperand } from './float-result.js';
 import {
   hasInfiniteComponent,
   logarithmAtExceptionalPoint,
@@ -313,7 +315,10 @@ export class BoxedNumber
     // are equal whenever the exact values are (and coincide for some values
     // that are not exactly equal, `1/3` and `0.333…`: a collision, which the
     // hash contract allows). `-0` and `0` are `isSame` and spell alike here;
-    // every NaN spells `NaN`.
+    // every NaN spells `NaN`. The imaginary part is hashed from its double,
+    // not from `bignumIm`: `bignumIm` of a radical is rounded to the working
+    // precision, so two equal `√2·i` literals hashed at different precisions
+    // would get different hashes.
     this._hash ??= hashCode(`${this.re}:${this.im}`);
     return this._hash;
   }
@@ -350,7 +355,8 @@ export class BoxedNumber
     //    literal when re-boxed — `ce.expr(x.json).isSame(x)` holds (RT-P1-1);
     //  - machine floats serialize as JSON numbers, big floats keep every stored
     //    digit, and non-finite values map to `NaN`/`PositiveInfinity`/
-    //    `NegativeInfinity`.
+    //    `NegativeInfinity`. An integer-valued float has a fraction part
+    //    (`{ num: "2.0" }`), so that it is read back as a float.
     // (Historically this path could emit a rounded numeric approximation; the
     // P0-32/P0-33 fidelity fixes made it lossless.)
 
@@ -380,7 +386,7 @@ export class BoxedNumber
     if (this._value.isNegativeInfinity) return 'NegativeInfinity';
 
     // Check for complex numbers (non-zero imaginary part)
-    if (this._value.im !== 0) return 'Complex';
+    if (this._value.isComplex) return 'Complex';
 
     // Map the type property to operator string
     const type = this._value.type;
@@ -448,6 +454,20 @@ export class BoxedNumber
     return this._value.im;
   }
 
+  /** True if the imaginary part of this number is not zero.
+   *
+   * `im` is the double nearest the imaginary part, a projection for
+   * computations in doubles: it is `0` for an imaginary part too small for a
+   * double (the exact `10^{-800}·i`). `isComplex` is read from the numeric
+   * value's own representation, which holds the imaginary part without loss,
+   * so it is `true` for that value. Use `isComplex`, not `im !== 0`, to
+   * decide whether a number is complex. A number stored as a plain
+   * JavaScript number is never complex. */
+  get isComplex(): boolean {
+    if (typeof this._value === 'number') return false;
+    return this._value.isComplex;
+  }
+
   get bignumRe(): BigDecimal | undefined {
     if (typeof this._value === 'number') return undefined;
     return this._value.bignumRe;
@@ -478,7 +498,7 @@ export class BoxedNumber
         this.engine._numericValue({ rational: [1, this._value] })
       );
     }
-    if (Math.abs(this.re) === 1 && this.im === 0) return this;
+    if (Math.abs(this.re) === 1 && !this.isComplex) return this;
     return this.engine.number(this._value.inv());
   }
 
@@ -502,7 +522,10 @@ export class BoxedNumber
       if (isAbsentSymbol(rhs)) return ce.NaN;
       if (isAbsentArithmeticOperand(rhs)) return add(this, rhs.canonical);
     }
-    if (this.isSame(0)) return ce.expr(rhs);
+    // Only an exact 0 is an identity here. A float 0 (the literal `0.0`)
+    // makes the sum numeric, as any other float term does: `0.0 + (-2)` is
+    // the float `-2`, and `0.0 + x` stays a sum.
+    if (this.isSame(0) && this.isExact) return ce.expr(rhs);
     if (typeof rhs === 'number') {
       // @fastpath
       if (rhs === 0) return this;
@@ -554,8 +577,13 @@ export class BoxedNumber
       // `Product.mul`.
       if (rhs === 0)
         return this.isFinite === false ? this.engine.NaN : this.engine.Zero;
+      // A float 0 times a finite number is the float 0 (`0.0 · 3`).
       if (this.isSame(0))
-        return Number.isFinite(rhs) ? this.engine.Zero : this.engine.NaN;
+        return Number.isFinite(rhs)
+          ? this.isExact
+            ? this.engine.Zero
+            : this
+          : this.engine.NaN;
       if (rhs === -1) return this.neg();
       return ce.number(
         typeof this._value === 'number'
@@ -675,7 +703,7 @@ export class BoxedNumber
     // direction-less `~oo` otherwise. The generic complex kernel below
     // computes `∞ − ∞` for it and answers NaN.
     if (hasInfiniteComponent(this._value))
-      return this.re === Infinity && Number.isFinite(this.im)
+      return this.re === Infinity && isImaginaryPartFinite(this)
         ? ce.PositiveInfinity
         : ce.ComplexInfinity;
     // @fastpath
@@ -747,6 +775,12 @@ export class BoxedNumber
     const special = logarithmAtExceptionalPoint(ce, this, base, false);
     if (special !== undefined) return special;
 
+    // A float argument or base makes the result a float, even when its value
+    // is an integer (`\log_{10}(100.0)` is the float `2`): the exact
+    // reductions below apply only to exact operands.
+    const float = hasFloatOperand([this, base]);
+    if (float) return asFloat(this._lnOfFloat(base));
+
     if (base && this.isSame(base)) return ce.One;
     if (
       (!base || isSymbol(base, 'ExponentialE')) &&
@@ -784,7 +818,7 @@ export class BoxedNumber
         // times c divides the argument, in bigint arithmetic.
         const v = this._value;
         const r =
-          v instanceof ExactNumericValue && v.radical === 1 && v.im === 0
+          v instanceof ExactNumericValue && v.radical === 1 && !v.isComplex
             ? bigIntegerLogRational(v.rational, b)
             : null;
         if (r !== null) {
@@ -792,6 +826,34 @@ export class BoxedNumber
           return q === 1
             ? ce.number(p)
             : ce.number(ce._numericValue({ rational: [p, q] }));
+        }
+      }
+    }
+
+    // The reciprocal of such a power: log_b(1/q) = −log_b(q), so
+    // `log(1/8, 2)` is `−3` and `log(1/100)` is `−2`, as `log(8, 2)` is `3`.
+    if (base !== undefined && isNumber(base) && base.isInteger) {
+      const v = this._value;
+      const b = base.re;
+      if (
+        v instanceof ExactNumericValue &&
+        v.radical === 1 &&
+        !v.isComplex &&
+        v.rational[0] === 1 &&
+        Number.isInteger(b) &&
+        b > 1 &&
+        b < Number.MAX_SAFE_INTEGER
+      ) {
+        const q = Number(v.rational[1]);
+        const r =
+          q > 1 && q < Number.MAX_SAFE_INTEGER
+            ? integerLogRational(q, b)
+            : null;
+        if (r !== null) {
+          const [p, d] = r;
+          return d === 1
+            ? ce.number(-p)
+            : ce.number(ce._numericValue({ rational: [-p, d] }));
         }
       }
     }
@@ -827,6 +889,13 @@ export class BoxedNumber
       return ce._fn('Log', [this, base]);
     }
 
+    return this._lnOfFloat(base);
+  }
+
+  /** The logarithm of this number in `base` (the natural logarithm when
+   * `base` is `undefined`), computed numerically. */
+  private _lnOfFloat(base: Expression | undefined): Expression {
+    const ce = this.engine;
     // Inexact argument or base: numericize. A negative real argument has a
     // complex principal logarithm (`ln x = ln|x| + iπ`); route it through the
     // complex path so `evaluate()` agrees with `.N()` (which already returns
@@ -836,6 +905,13 @@ export class BoxedNumber
       const lnBase = base !== undefined ? Math.log(base.re) : 1;
       if (this._value < 0)
         return ce.number(ce.complex(this._value).log().div(lnBase));
+      // A base of 10 or 2 uses its own primitive, as the `N()` route and
+      // `MachineNumericValue.ln()` do: `Math.log(1000) / Math.log(10)` is
+      // `2.9999999999999996`, `Math.log10(1000)` is `3`.
+      if (base !== undefined && base.im === 0 && base.re === 10)
+        return ce.number(Math.log10(this._value));
+      if (base !== undefined && base.im === 0 && base.re === 2)
+        return ce.number(Math.log2(this._value));
       const l = Math.log(this._value);
       return ce.number(base !== undefined ? l / lnBase : l);
     }
@@ -961,7 +1037,7 @@ export class BoxedNumber
     // Any OTHER complex literal has no singleton spelling — a value node
     // carries one JavaScript number, and `∞ + i` needs two — so its tier
     // answers on its own.
-    if (v.im !== 0) return undefined;
+    if (v.isComplex) return undefined;
     const tier = v.type;
     if (tier !== 'integer' && tier !== 'rational' && tier !== 'real')
       return undefined;
@@ -1090,7 +1166,7 @@ export class BoxedNumber
       return null;
     }
     // NumericValue — check it's a pure rational (no radical, no imaginary)
-    if (this._value.im !== 0) return null;
+    if (this._value.isComplex) return null;
     const exact = this._value.asExact;
     if (!exact) return null;
     const ev = exact as ExactNumericValue;
@@ -1280,8 +1356,10 @@ export class BoxedNumber
   /**
    * Is this number a machine number, exactness included — does
    * `engine.number(x)` of its machine value reproduce it? `true` for a
-   * float (machine or bignum, when the double is the same value), for a
-   * safe integer (`3`), for `NaN` and the infinities. `false` for an exact
+   * float with a fraction part or past the safe integers (machine or
+   * bignum, when the double is the same value), for an exact safe integer
+   * (`3`), for `NaN` and the infinities. `false` for a float with a
+   * safe-integer value (`2.0`), which re-boxes as the exact `2`. `false` for an exact
    * non-integer, even one a double holds: `1/2` re-boxes as the float `0.5`,
    * which computes as a float where `1/2` computes exactly. `false` for an
    * exact integer past the safe integers (`2^70`), which re-boxes as a float
@@ -1290,7 +1368,10 @@ export class BoxedNumber
    */
   get isMachineNumeric(): boolean {
     const x = machineNumberOf(this);
-    return x !== undefined && !isExactNonInteger(this, x);
+    if (x === undefined || isExactNonInteger(this, x)) return false;
+    // A float with a safe-integer value (`2.0`) re-boxes as the exact
+    // integer `2`.
+    return this.isExact || !Number.isSafeInteger(x);
   }
 
   get isExact(): boolean {
@@ -1356,22 +1437,23 @@ export class BoxedNumber
         const tol = tolerance ?? this.engine.tolerance;
         const d = this._value.sub(otherValue);
         const re = d.re;
-        const im = d.im;
-        if (Number.isFinite(re) && Number.isFinite(im))
-          return Math.abs(re) <= tol && Math.abs(im) <= tol;
         // The double of an exact rational divides the double of its
         // numerator by the double of its denominator. When both are above
         // the largest double, this is `∞/∞ = NaN`, also for a small value
         // (`1/3 - (10^400 + 1)/(3·10^400 + 10^390)` is about `1.1e-11`).
         // The big-decimal values do not have this limit.
-        const bigRe = d.bignumRe;
+        const reWithin = Number.isFinite(re)
+          ? Math.abs(re) <= tol
+          : !!d.bignumRe?.abs().lte(tol);
+        if (!reWithin) return false;
+        if (!d.isComplex) return true;
+        // The imaginary part of a complex difference is read from its big
+        // decimal: its double is `0` for `10^{-800}` (which is within the
+        // tolerance, as it must be) and `Infinity` for `10^{800}`.
         const bigIm = d.bignumIm;
-        return (
-          (Number.isFinite(re)
-            ? Math.abs(re) <= tol
-            : !!bigRe?.abs().lte(tol)) &&
-          (Number.isFinite(im) ? Math.abs(im) <= tol : !!bigIm?.abs().lte(tol))
-        );
+        return bigIm !== undefined
+          ? bigIm.abs().lte(tol)
+          : Math.abs(d.im) <= tol;
       }
     }
 
@@ -1380,13 +1462,13 @@ export class BoxedNumber
       if (typeof other === 'number') {
         return (
           Math.abs(this.re - other) <= tolerance &&
-          Math.abs(this.im) <= tolerance
+          imaginaryPartWithin(this, tolerance)
         );
       }
       if (typeof other === 'bigint') {
         return (
           Math.abs(this.re - Number(other)) <= tolerance &&
-          Math.abs(this.im) <= tolerance
+          imaginaryPartWithin(this, tolerance)
         );
       }
     }
@@ -1406,7 +1488,7 @@ export class BoxedNumber
     const tol = tolerance ?? this.engine.tolerance;
     return (
       Math.abs(this.re - nOther.re) <= tol &&
-      Math.abs(this.im - nOther.im) <= tol
+      imaginaryPartsWithin(this, nOther, tol)
     );
   }
 
@@ -1448,7 +1530,7 @@ export class BoxedNumber
       // a double, so only the rational part is compared.
       if (v instanceof ExactNumericValue && v.type !== 'integer')
         return (
-          v.im === 0 &&
+          !v.isComplex &&
           v.radical === 1 &&
           orderExactAgainstInexact(v, other) === 0
         );
@@ -1596,6 +1678,45 @@ function bigIntegerLogRational(
   if (n !== 1n) return null;
   const g = gcd(p, q);
   return [p / g, q / g];
+}
+
+/** A number literal, as read by `imaginaryPartWithin()` and
+ * `imaginaryPartsWithin()`. */
+type ImaginaryPartOperand = {
+  readonly isComplex: boolean;
+  readonly bignumIm: BigDecimal | undefined;
+  readonly im: number;
+};
+
+/** True if the imaginary part of the number literal `x` is at most `tol` in
+ * magnitude.
+ *
+ * The imaginary part of a complex value is read from its big decimal
+ * (`bignumIm`): its double `im` is `0` for `10^{-800}` and `Infinity` for
+ * `10^{800}`. */
+function imaginaryPartWithin(x: ImaginaryPartOperand, tol: number): boolean {
+  if (!x.isComplex) return true;
+  const big = x.bignumIm;
+  return big !== undefined ? big.abs().lte(tol) : Math.abs(x.im) <= tol;
+}
+
+/** True if the imaginary parts of the number literals `a` and `b` differ by
+ * at most `tol`.
+ *
+ * When either value is complex, the imaginary parts are read from their big
+ * decimals (`bignumIm`): the double `im` is `0` for `10^{-800}` and
+ * `Infinity` for `10^{800}`, so the difference of the doubles of two equal
+ * values `10^{800}·i` is `NaN`. */
+function imaginaryPartsWithin(
+  a: ImaginaryPartOperand,
+  b: ImaginaryPartOperand,
+  tol: number
+): boolean {
+  if (!a.isComplex && !b.isComplex) return true;
+  const x = a.bignumIm;
+  const y = b.bignumIm;
+  if (x === undefined || y === undefined) return Math.abs(a.im - b.im) <= tol;
+  return x.sub(y).abs().lte(tol);
 }
 
 export function canonicalNumber(

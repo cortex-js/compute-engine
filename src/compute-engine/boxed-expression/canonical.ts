@@ -312,10 +312,17 @@ function numberForm(
       const exact = parts === null ? null : exactComplexLiteral(ce, parts);
       if (exact !== null) return exact;
       const re = ops[0].re;
-      const im = ops[1].re;
-      if (im !== null && re !== null && !isNaN(im) && !isNaN(re)) {
-        if (im === 0 && re === 0) return ce.Zero;
-        if (im !== 0) return ce.number(ce._numericValue({ re, im }));
+      const imDouble = ops[1].re;
+      if (imDouble !== null && re !== null && !isNaN(imDouble) && !isNaN(re)) {
+        // Read both parts from their big decimals when they have one: the
+        // double is `0` for `10^{-800}` and `Infinity` for `10^{800}`.
+        const im = ops[1].bignumRe ?? imDouble;
+        const bignumRe = ops[0].bignumRe;
+        const imIsZero = typeof im === 'number' ? im === 0 : im.isZero();
+        const reIsZero = bignumRe?.isZero() ?? re === 0;
+        if (imIsZero && reIsZero) return ce.Zero;
+        if (!imIsZero)
+          return ce.number(ce._numericValue({ re: bignumRe ?? re, im }));
         return ops[0];
       }
       return ce._fn(

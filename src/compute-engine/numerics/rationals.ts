@@ -51,8 +51,91 @@ export function machineDenominator(x: Rational): number {
   return Number(x[1]);
 }
 
+/**
+ * The double nearest the rational `x`: `0` (or `-0`) when the value is below
+ * the double range, `±Infinity` when it is above it.
+ *
+ * When the numerator and the denominator each convert to a finite double,
+ * the result is `Number(numerator) / Number(denominator)`, as it always was,
+ * so every ordinary value keeps the same double bit for bit. (A bigint part
+ * between `2^53` and the largest double is rounded when it is converted, so
+ * that quotient is rounded twice and can be one unit in the last place from
+ * the nearest double; this is kept so the doubles do not change.)
+ *
+ * A bigint numerator or denominator can be larger than the largest double
+ * (about `1.8·10^308`). Its `Number()` is then `Infinity`, and the quotient
+ * of the two conversions is wrong: `(10^400 + 1)/10^400` gave
+ * `Infinity/Infinity = NaN` although its nearest double is `1`, and
+ * `1/10^400` gave `0` correctly only by chance. In that case the quotient is
+ * computed from the bigints (`bigRatioToFloat()`), so that a finite rational
+ * always projects to a finite double, or to `0` or `±Infinity` when its
+ * magnitude is out of the double range.
+ */
 export function rationalAsFloat(x: Rational): number {
-  return Number(x[0]) / Number(x[1]);
+  const n = Number(x[0]);
+  const d = Number(x[1]);
+  if (
+    typeof x[0] === 'bigint' &&
+    (!Number.isFinite(n) || !Number.isFinite(d))
+  )
+    return bigRatioToFloat(x[0], x[1] as bigint);
+  return n / d;
+}
+
+/**
+ * The double nearest `n/d` for bigints of any size (`d ≠ 0`), computed
+ * without converting `n` or `d` to a double first.
+ *
+ * The quotient is scaled by a power of two `2^-e` so that its integer part
+ * `q` has 64 or 65 bits, one more than a double can hold. The lowest bit of
+ * `q` is set when the division has a remainder, so the conversion
+ * `Number(q)`, which rounds to 53 bits, rounds a truncated value that is
+ * just above a halfway point in the correct direction. The scale `2^e` is
+ * then applied in two steps, so that `2^(e/2)` stays in the double range
+ * for every `|e|` up to about 2046; beyond that the product is `0` or
+ * `±Infinity`, which is the nearest double. Multiplying by a power of two
+ * is exact while the result is a normal double, so a normal result is
+ * rounded once, by `Number(q)`.
+ *
+ * A subnormal result (below `2^-1022`) has fewer than 53 significant bits,
+ * so the multiplication by `2^e` would round a second time, and two
+ * roundings can give the wrong double: `(2^54 + 1)/2^1129` is just above
+ * half of `2^-1074`, but `Number(q)` rounds it to exactly half, and the
+ * product then rounds the tie to `0`. So when the value can be below
+ * `2^-1022`, the quotient `a·2^1074/b` is rounded to an integer `k` with
+ * the remainder, half to even, and the result is `k·2^-1074`, which is
+ * exact. When `k` is `2^52` or more, the value is normal and takes the
+ * path above.
+ */
+function bigRatioToFloat(n: bigint, d: bigint): number {
+  if (d === 0n) return n === 0n ? NaN : n > 0n ? Infinity : -Infinity;
+  if (n === 0n) return 0;
+  const negative = n < 0n !== d < 0n;
+  const a = n < 0n ? -n : n;
+  const b = d < 0n ? -d : d;
+  const la = a.toString(2).length;
+  const lb = b.toString(2).length;
+  // `a/b < 2^(la - lb + 1)`, so the value can be subnormal only when
+  // `la - lb + 1 <= -1022`.
+  if (la - lb <= -1023) {
+    const num = a << 1074n;
+    let k = num / b;
+    const twiceRemainder = 2n * (num - k * b);
+    if (twiceRemainder > b || (twiceRemainder === b && (k & 1n) === 1n))
+      k += 1n;
+    if (k <= 2n ** 52n) {
+      const result = Number(k) * Number.MIN_VALUE;
+      return negative ? -result : result;
+    }
+  }
+  const e = la - lb - 64;
+  const num = e < 0 ? a << BigInt(-e) : a;
+  const den = e > 0 ? b << BigInt(e) : b;
+  let q = num / den;
+  if (q * den !== num) q |= 1n;
+  const half = Math.trunc(e / 2);
+  const result = Number(q) * 2 ** half * 2 ** (e - half);
+  return negative ? -result : result;
 }
 
 export function isNeg(x: Rational): boolean {

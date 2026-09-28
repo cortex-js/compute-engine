@@ -20,6 +20,11 @@ import {
   containsContinuationOperand,
 } from './type-guards.js';
 import {
+  isImaginaryPartFinite,
+  isImaginaryUnitValue,
+} from './imaginary-part.js';
+import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
+import {
   isTuple,
   isTupleCarrier,
   isPointListCarrier,
@@ -311,8 +316,8 @@ export class Product {
             // signed rule below cannot express that — `sgn()` of a non-real
             // coefficient is `undefined`, which it reads as positive.
             if (
-              (isNumber(term) && term.im !== 0) ||
-              this.coefficient.im !== 0
+              (isNumber(term) && term.isComplex) ||
+              this.coefficient.isComplex
             ) {
               this.coefficient = this.engine._numericValue({
                 re: Infinity,
@@ -573,7 +578,7 @@ export class Product {
       !product.isNaN &&
       this.coefficient.isExact &&
       factor.isExact &&
-      (this.coefficient.im !== 0 || factor.im !== 0)
+      (this.coefficient.isComplex || factor.isComplex)
     )
       return false;
     this.coefficient = product;
@@ -1361,8 +1366,8 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   const v2 = numericValue(op2);
   if (v1 !== undefined && v2 !== undefined) {
     if (
-      (typeof v1 !== 'number' && v1.im !== 0) ||
-      (typeof v2 !== 'number' && v2.im !== 0)
+      (typeof v1 !== 'number' && v1.isComplex) ||
+      (typeof v2 !== 'number' && v2.isComplex)
     ) {
       // If we have an imaginary part, keep the division
       return ce._fn('Divide', [op1, op2]);
@@ -1804,11 +1809,7 @@ export function canonicalMultiply(
         }
         // A machine/big Gaussian integer (e.g. the literal `3i`) is exactly
         // representable: fold it as an exact value.
-        if (
-          nv.im !== 0 &&
-          Number.isSafeInteger(nv.re) &&
-          Number.isSafeInteger(nv.im)
-        ) {
+        if (nv.isComplex && isGaussianInteger(nv)) {
           exactNumerics.push(
             ce._numericValue({
               rational: [nv.re, 1],
@@ -1833,7 +1834,7 @@ export function canonicalMultiply(
         if (
           !candidate.isExact &&
           !candidate.isNaN &&
-          (product.im !== 0 || next.im !== 0)
+          (product.isComplex || next.isComplex)
         ) {
           nonNumeric.push(ce.number(next));
           continue;
@@ -1861,7 +1862,7 @@ export function canonicalMultiply(
       // which reparses as `Negate(Multiply(…))` — a second canonical spelling
       // of the same negated product (round-trip class
       // negate-vs-multiply-minus-one).
-      if (product.im === 0 && product.sgn() === -1) {
+      if (!product.isComplex && product.sgn() === -1) {
         sign = -sign;
         product = product.neg();
       }
@@ -1911,8 +1912,9 @@ export function canonicalMultiply(
           continue;
         }
 
-        // Is it preceded by a rational?
-        if (x.type.matches('rational')) {
+        // Is it preceded by an exact rational? A float (`2.0·√2`) is not
+        // folded into an exact radical: the product is a float.
+        if (x.isExact && x.type.matches('rational')) {
           const rational = x.numericValue;
           const [num, den] =
             typeof rational === 'number'
@@ -1934,7 +1936,8 @@ export function canonicalMultiply(
         ) {
           // We have a number (n) followed by a radical (r)
           // Convert to a numeric value
-          const r = asRational(x);
+          // (only an exact number: a float `2.0` times `√2` is a float)
+          const r = x.isExact ? asRational(x) : undefined;
           if (r) {
             ys.push(
               ce.number(
@@ -1944,7 +1947,7 @@ export function canonicalMultiply(
             i++;
             continue;
           }
-        } else if (nextNv.re === 0 && nextNv.im === 1) {
+        } else if (isImaginaryUnitValue(nextNv)) {
           // "Next" is an imaginary unit. Is it preceded by a real number?
           const nv = x.numericValue;
           if (typeof nv === 'number') {
@@ -1956,7 +1959,7 @@ export function canonicalMultiply(
             );
             i++;
             continue;
-          } else if (nv.im === 0) {
+          } else if (!nv.isComplex) {
             const exact = nv.asExact;
             if (exact instanceof ExactNumericValue) {
               // An exact real (integer, rational or radical): promote to an
@@ -1973,7 +1976,12 @@ export function canonicalMultiply(
               i++;
               continue;
             } else if (!nv.isExact) {
-              ys.push(ce.number(ce.complex(0, nv.re)));
+              // Keep the big decimal of the coefficient: the double
+              // constructor `ce.complex()` would round `2·10^{-800}` to `0`
+              // and drop the digits beyond 16 of a high-precision value.
+              ys.push(
+                ce.number(ce._numericValue({ re: 0, im: nv.bignumRe ?? nv.re }))
+              );
               i++;
               continue;
             }
@@ -2284,7 +2292,7 @@ function isExactRealLiteral(x: Expression): boolean {
   if (typeof nv === 'number') return Number.isInteger(nv);
   return (
     nv.isExact &&
-    nv.im === 0 &&
+    !nv.isComplex &&
     nv instanceof ExactNumericValue &&
     nv.radical === 1
   );
@@ -2301,7 +2309,7 @@ export function isOutOfDoubleRangeLiteral(x: Expression): boolean {
   if (!isNumber(x)) return false;
   const nv = x.numericValue;
   if (typeof nv === 'number') return isOutsideNormalDoubleRange(nv);
-  if (nv.im !== 0 || !isOutsideNormalDoubleRange(nv.re)) return false;
+  if (nv.isComplex || !isOutsideNormalDoubleRange(nv.re)) return false;
   if (nv.isZero || nv.isNaN || nv.isPositiveInfinity || nv.isNegativeInfinity)
     return true;
   // A value with a big-decimal part (an exact value, or a big decimal) holds
@@ -2321,7 +2329,7 @@ function isExactRealValue(x: Expression): boolean {
   if (!isNumber(x)) return false;
   const nv = x.numericValue;
   if (typeof nv === 'number') return Number.isInteger(nv);
-  return nv instanceof ExactNumericValue && nv.im === 0;
+  return nv instanceof ExactNumericValue && !nv.isComplex;
 }
 
 /**
@@ -2387,15 +2395,15 @@ function foldOutOfDoubleRange(
     // `(10 + 10i)/y`.
     if (
       isNumber(y) &&
-      y.im !== 0 &&
+      y.isComplex &&
       !outOfRange &&
       Number.isFinite(y.re) &&
-      Number.isFinite(y.im)
+      isImaginaryPartFinite(y)
     ) {
       complexFactors.push(y);
       continue;
     }
-    if (!isNumber(y) || y.im !== 0) return undefined;
+    if (!isNumber(y) || y.isComplex) return undefined;
     const nv = y.numericValue!;
     if (ex !== undefined && outOfRange && !ex.isSame(0)) rescued = true;
     // `bignumRe` of an exact rational has at least 25 digits (see
@@ -2427,7 +2435,7 @@ function exactCoefficientOutOfRange(
   if (!isNumber(c) || !(c.numericValue instanceof ExactNumericValue))
     return undefined;
   const nv = c.numericValue;
-  if (nv.im !== 0 || nv.isZero || !isOutsideNormalDoubleRange(nv.re))
+  if (nv.isComplex || nv.isZero || !isOutsideNormalDoubleRange(nv.re))
     return undefined;
   const rest =
     op === 'Divide'
@@ -2904,9 +2912,13 @@ function mulTensors(
  * about 3.5 µs a cell: `Sum(2·L)` over ten thousand numbers took 48 ms, most
  * of it here. The doubles are the same values under these conditions:
  *
- * - the vector is MACHINE NUMERIC (`isMachineNumeric`): every element is a
- *   machine number and none is an exact rational such as `1/2`, whose
- *   product must stay exact; the scalar is one too;
+ * - the vector is a list of machine numbers (`_machineFloats` is defined):
+ *   every element is a machine number and none is an exact rational such as
+ *   `1/2`, whose product must stay exact; the scalar is one too;
+ * - a product with a float factor is a float, even when its value is an
+ *   integer (`2 · 0.5` is the float `1`), and a product of two exact
+ *   integers is exact; one flag of the answer records which it is for all
+ *   the integer-valued products, so a mix of the two declines;
  * - every value is finite, so no `0 · ∞` or `NaN` is decided here;
  * - the products are exact integers (both factors integers, the product a
  *   safe integer), or the engine computes floats as doubles (machine
@@ -2918,23 +2930,31 @@ function mulTensors(
  *   the doubles give `0.30000000000000004`. The ELEMENTS need no such test:
  *   the cell products read them from the packed tensor, which holds doubles.
  *
- * The answer is a list that holds its numbers unboxed (`ce.list`), whose
- * elements are exactly `ce.number(product)`.
+ * The answer is a list that holds its numbers unboxed (`ce._list`).
  */
 function scaleMachineVector(
   ce: ComputeEngine,
   vector: Expression,
   scalar: Expression
 ): Expression | undefined {
-  if (!isFunction(vector, 'List') || vector.isMachineNumeric !== true)
-    return undefined;
+  if (!isFunction(vector, 'List')) return undefined;
+  // `true` when the integer-valued elements are floats (`[0.5, 2.0]`)
+  const vectorFloats = vector._machineFloats;
+  if (vectorFloats === undefined) return undefined;
   const k = machineNumberOf(scalar);
   if (k === undefined || !Number.isFinite(k) || isExactNonInteger(scalar, k))
     return undefined;
   const values = vector.array;
   if (values === undefined) return undefined;
   const floatsAreDoubles = !bignumPreferred(ce) && isStoredAsDouble(scalar);
-  const integerScalar = Number.isInteger(k);
+  const exactIntegerScalar =
+    Number.isInteger(k) && isNumber(scalar) && scalar.isExact;
+  // A product with a float factor is a float, even when its value is an
+  // integer (`2 · 0.5` is the float `1`). The list records it for all its
+  // integer-valued elements, so a result that would mix exact integers and
+  // integer-valued floats declines.
+  let exactInteger = false;
+  let floatInteger = false;
   const out = new Array<number>(values.length);
   for (let i = 0; i < values.length; i++) {
     const v = values[i];
@@ -2945,12 +2965,18 @@ function scaleMachineVector(
     // integer, and `ce.number()` of the double is a float (only a
     // safe-integer double is boxed as an exact integer).
     if (Number.isInteger(p) && !Number.isSafeInteger(p)) return undefined;
-    if (!(integerScalar && Number.isInteger(v)) && !floatsAreDoubles)
-      return undefined;
+    const exactCell =
+      exactIntegerScalar && Number.isInteger(v) && !vectorFloats;
+    if (!exactCell && !floatsAreDoubles) return undefined;
+    if (Number.isInteger(p)) {
+      if (exactCell) exactInteger = true;
+      else floatInteger = true;
+      if (exactInteger && floatInteger) return undefined;
+    }
     // `-0` is stored as `0`, as the `array` of a list stores it.
     out[i] = p === 0 ? 0 : p;
   }
-  return ce.list(out);
+  return ce._list(out, floatInteger);
 }
 
 /**

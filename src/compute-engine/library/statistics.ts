@@ -9,6 +9,7 @@ import {
 import {
   type DataConstraint,
   dataConstraintError,
+  hasFiniteImaginaryPart,
   hasNonFiniteImaginaryPart,
   isComplexDatum,
   nonFiniteDatum,
@@ -28,6 +29,7 @@ import {
 } from '../numerics/special-functions.js';
 import { erfComplex, erfiComplex } from '../numerics/numeric-complex.js';
 import { apply, shouldNumericize } from '../boxed-expression/apply.js';
+import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import {
   isAbsentValue,
@@ -400,9 +402,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
+        if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
-          if (x.isSame(0)) return ce.Zero;
+          if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
           if (x.isInfinity) return x.isPositive ? ce.One : ce.NegativeOne;
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -448,9 +450,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
+        if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
-          if (x.isSame(0)) return ce.One;
+          if (x.isSame(0)) return floatIfFloatOperand([x], ce.One);
           if (x.isInfinity) return x.isPositive ? ce.Zero : ce.number(2);
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -531,9 +533,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (infinitePoint(x) !== undefined) return ce.NaN;
         // A non-real argument, or a real one outside [−1, 1], has a value
         // the real kernel cannot compute: stay symbolic, under N() too.
-        if (x.im !== 0) return undefined;
+        if (x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.Zero;
+        if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
         if (x.isSame(1)) return ce.PositiveInfinity;
         if (x.isSame(-1)) return ce.NegativeInfinity;
         if (x.re < -1 || x.re > 1) return undefined;
@@ -584,9 +586,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
+        if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
-          if (x.isSame(0)) return ce.Zero;
+          if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
           if (x.isInfinity)
             return x.isPositive ? ce.PositiveInfinity : ce.NegativeInfinity;
         }
@@ -661,11 +663,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return boxedMean(engine, vals);
         }
-        return boxBignumResult(
-          engine,
-          bignumPreferred(engine)
-            ? bigMean(bigScalarsOf(xs))
-            : mean(scalarsOf(xs))
+        // A float datum makes the mean a float, even when its value is an
+        // integer (`Mean([0.5, 1.5])` is the float `1`); the same holds for
+        // the other statistics below, except `Mode`, which returns a datum.
+        return floatIfFloatOperand(
+          xs,
+          boxBignumResult(
+            engine,
+            bignumPreferred(engine)
+              ? bigMean(bigScalarsOf(xs))
+              : mean(scalarsOf(xs))
+          )
         );
       },
     },
@@ -715,11 +723,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return exactMedianOf(engine, sorted);
           }
         }
-        return boxBignumResult(
-          engine,
-          bignumPreferred(engine)
-            ? bigMedian(bigScalarsOf(xs))
-            : median(scalarsOf(xs))
+        return floatIfFloatOperand(
+          xs,
+          boxBignumResult(
+            engine,
+            bignumPreferred(engine)
+              ? bigMedian(bigScalarsOf(xs))
+              : median(scalarsOf(xs))
+          )
         );
       },
     },
@@ -780,11 +791,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, false);
         }
-        return boxBignumResult(
-          engine,
-          bignumPreferred(engine)
-            ? bigVariance(bigScalarsOf(xs))
-            : variance(scalarsOf(xs))
+        return floatIfFloatOperand(
+          xs,
+          boxBignumResult(
+            engine,
+            bignumPreferred(engine)
+              ? bigVariance(bigScalarsOf(xs))
+              : variance(scalarsOf(xs))
+          )
         );
       },
     },
@@ -837,11 +851,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, true);
         }
-        return boxBignumResult(
-          engine,
-          bignumPreferred(engine)
-            ? bigPopulationVariance(bigScalarsOf(xs))
-            : populationVariance(scalarsOf(xs))
+        return floatIfFloatOperand(
+          xs,
+          boxBignumResult(
+            engine,
+            bignumPreferred(engine)
+              ? bigPopulationVariance(bigScalarsOf(xs))
+              : populationVariance(scalarsOf(xs))
+          )
         );
       },
     },
@@ -909,11 +926,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
               .function('Sqrt', [exactVariance(engine, vals, false)])
               .evaluate();
         }
-        return boxBignumResult(
-          engine,
-          bignumPreferred(engine)
-            ? bigVariance(bigScalarsOf(xs)).sqrt()
-            : Math.sqrt(variance(scalarsOf(xs)))
+        return floatIfFloatOperand(
+          xs,
+          boxBignumResult(
+            engine,
+            bignumPreferred(engine)
+              ? bigVariance(bigScalarsOf(xs)).sqrt()
+              : Math.sqrt(variance(scalarsOf(xs)))
+          )
         );
       },
     },
@@ -972,11 +992,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
               .function('Sqrt', [exactVariance(engine, vals, true)])
               .evaluate();
         }
-        return boxBignumResult(
-          engine,
-          bignumPreferred(engine)
-            ? bigPopulationVariance(bigScalarsOf(xs)).sqrt()
-            : Math.sqrt(populationVariance(scalarsOf(xs)))
+        return floatIfFloatOperand(
+          xs,
+          boxBignumResult(
+            engine,
+            bignumPreferred(engine)
+              ? bigPopulationVariance(bigScalarsOf(xs)).sqrt()
+              : Math.sqrt(populationVariance(scalarsOf(xs)))
+          )
         );
       },
     },
@@ -1017,11 +1040,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return exactKurtosis(engine, vals);
         }
-        return boxBignumResult(
-          engine,
-          bignumPreferred(engine)
-            ? bigKurtosis(bigScalarsOf(xs))
-            : kurtosis(scalarsOf(xs))
+        return floatIfFloatOperand(
+          xs,
+          boxBignumResult(
+            engine,
+            bignumPreferred(engine)
+              ? bigKurtosis(bigScalarsOf(xs))
+              : kurtosis(scalarsOf(xs))
+          )
         );
       },
     },
@@ -1062,11 +1088,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return exactSkewness(engine, vals);
         }
-        return boxBignumResult(
-          engine,
-          bignumPreferred(engine)
-            ? bigSkewness(bigScalarsOf(xs))
-            : skewness(scalarsOf(xs))
+        return floatIfFloatOperand(
+          xs,
+          boxBignumResult(
+            engine,
+            bignumPreferred(engine)
+              ? bigSkewness(bigScalarsOf(xs))
+              : skewness(scalarsOf(xs))
+          )
         );
       },
     },
@@ -1199,7 +1228,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           bignumPreferred(engine)
             ? bigQuartiles(bigScalarsOf(xs))
             : quartiles(scalarsOf(xs))
-        ).map((v) => boxBignumResult(engine, v));
+        ).map((v) => floatIfFloatOperand(xs, boxBignumResult(engine, v))!);
         return engine.tuple(lower, mid, upper);
       },
     },
@@ -1258,11 +1287,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return subtract(engine, q3, q1);
           }
         }
-        return boxBignumResult(
-          engine,
-          bignumPreferred(engine)
-            ? bigInterquartileRange(bigScalarsOf(xs))
-            : interquartileRange(scalarsOf(xs))
+        return floatIfFloatOperand(
+          xs,
+          boxBignumResult(
+            engine,
+            bignumPreferred(engine)
+              ? bigInterquartileRange(bigScalarsOf(xs))
+              : interquartileRange(scalarsOf(xs))
+          )
         );
       },
     },
@@ -1822,7 +1854,7 @@ function isRealConstantDatum(v: Expression): boolean {
   // `n.isFinite` reads the value itself, not its machine projection: the
   // constant `π·10^400` is finite, although its `.re` overflows to
   // `+Infinity`. A number literal `10^400` is data too.
-  return isNumber(n) && n.isFinite === true && n.im === 0;
+  return isNumber(n) && n.isFinite === true && !n.isComplex;
 }
 
 /**
@@ -1900,7 +1932,7 @@ function exactData(data: ReadonlyArray<Expression>): Expression[] | null {
     // `collectData` admits a datum that is not a number literal only when it
     // is a real constant.
     if (!isNumber(v)) continue;
-    if (v.isExact !== true || v.im !== 0 || v.isFinite !== true) return null;
+    if (v.isExact !== true || v.isComplex || v.isFinite !== true) return null;
   }
   return [...data];
 }
@@ -1996,7 +2028,7 @@ function squaredMagnitude(ce: ComputeEngine, d: Expression): Expression {
       powi(ce, ce.function('Re', [d]).evaluate(), 2),
       powi(ce, ce.function('Im', [d]).evaluate(), 2),
     ]);
-  if (d.im === 0) return multiply(ce, [d, d]);
+  if (!d.isComplex) return multiply(ce, [d, d]);
   if (isNumber(d) && d.isExact)
     return powi(ce, ce.function('Abs', [d]).evaluate(), 2);
   return ce.number(d.re * d.re + d.im * d.im);
@@ -2180,7 +2212,12 @@ function exactMode(
 /** True if every value is an exact, finite, real number literal. */
 function allExact(vals: ReadonlyArray<Expression>): boolean {
   for (const v of vals)
-    if (!isNumber(v) || v.isExact !== true || v.im !== 0 || v.isFinite !== true)
+    if (
+      !isNumber(v) ||
+      v.isExact !== true ||
+      v.isComplex ||
+      v.isFinite !== true
+    )
       return false;
   return true;
 }
@@ -2271,7 +2308,7 @@ const bigVals = (vals: ReadonlyArray<Expression>) =>
  */
 function bigProjection(v: Expression) {
   const n = numberLiteralOf(v);
-  if (!n || !Number.isFinite(n.im)) return v.engine.bignum(NaN);
+  if (!n || !hasFiniteImaginaryPart(n)) return v.engine.bignum(NaN);
   return n.bignumRe ?? v.engine.bignum(n.re);
 }
 
@@ -2363,7 +2400,7 @@ function hasNaNDatum(
   for (const vals of data)
     for (const v of vals) {
       if (isAbsentValue(v)) return true;
-      if (isNumber(v) && (v.isNaN === true || !Number.isFinite(v.im)))
+      if (isNumber(v) && (v.isNaN === true || !hasFiniteImaginaryPart(v)))
         return true;
     }
   return false;
@@ -2434,18 +2471,27 @@ function evaluateCovariance(
   if (!numericApproximation && allExact(xs) && allExact(ys))
     return exactCovariance(ce, xs, ys, population);
 
+  // A float datum makes the covariance a float, even when its value is an
+  // integer.
+  const data = [...xs, ...ys];
   if (bignumPreferred(ce))
-    return boxBignumResult(
-      ce,
+    return floatIfFloatOperand(
+      data,
+      boxBignumResult(
+        ce,
+        population
+          ? bigPopulationCovariance(bigVals(xs), bigVals(ys))
+          : bigCovariance(bigVals(xs), bigVals(ys))
+      )
+    )!;
+  return floatIfFloatOperand(
+    data,
+    ce.number(
       population
-        ? bigPopulationCovariance(bigVals(xs), bigVals(ys))
-        : bigCovariance(bigVals(xs), bigVals(ys))
-    );
-  return ce.number(
-    population
-      ? populationCovariance(machineVals(xs), machineVals(ys))
-      : covariance(machineVals(xs), machineVals(ys))
-  );
+        ? populationCovariance(machineVals(xs), machineVals(ys))
+        : covariance(machineVals(xs), machineVals(ys))
+    )
+  )!;
 }
 
 function evaluateCorrelation(
@@ -2483,7 +2529,8 @@ function evaluateCorrelation(
   const r = bignumPreferred(ce)
     ? bigCorrelation(bigVals(xs), bigVals(ys))
     : correlation(machineVals(xs), machineVals(ys));
-  const num = boxBignumResult(ce, r);
+  // A float datum makes the coefficient a float, even when it is `±1`.
+  const num = floatIfFloatOperand([...xs, ...ys], boxBignumResult(ce, r))!;
   if (!num.isNaN) return num;
   // A `NaN` from the kernel is not by itself evidence of a zero variance: the
   // machine kernel also answers `NaN` when the sums of squares overflow, which

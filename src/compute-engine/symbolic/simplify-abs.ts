@@ -90,7 +90,7 @@ function simplifyAbsCore(x: Expression): RuleStep | undefined {
   // true constant modulus (|3+4i| -> 5) fold.
   if (op.unknowns.length === 0 && !hasAssignedVariable(op)) {
     const evaluated = x.evaluate();
-    if (isNumber(evaluated) && evaluated.im === 0 && !evaluated.isSame(x))
+    if (isNumber(evaluated) && !evaluated.isComplex && !evaluated.isSame(x))
       return { value: evaluated, because: '|z| -> exact modulus' };
   }
 

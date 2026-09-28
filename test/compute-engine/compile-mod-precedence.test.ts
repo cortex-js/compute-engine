@@ -3,6 +3,7 @@ import { implicitCompile } from '../../src/compute-engine/implicit-compile';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // Regression (2026-07-31): the `Mod` and `Remainder` compile templates spliced
 // `compile()` output — which carries no outer parentheses — directly next to
@@ -50,7 +51,9 @@ describe('compiled Mod/Remainder operand parenthesization', () => {
     const code = wgsl.compile(ce.box(['Mod', ['Add', 'x', 29], 900]), {
       vars: { x: 'u_x' },
     }).code;
-    expect(code).toBe('((((u_x + 29.0) % (900.0)) + (900.0)) % (900.0))');
+    expect(code).toBe(
+      '((((u_x + 29.0) % (900.0)) - (900.0) * floor(((u_x + 29.0) % (900.0)) / (900.0))) % (900.0))'
+    );
   });
 
   it('GLSL Remainder parenthesizes the compiled dividend', () => {
@@ -69,5 +72,59 @@ describe('compiled Mod/Remainder operand parenthesization', () => {
       vars: { x: 'x' },
     }).code;
     expect(code).toBe('((x + 29) - (9) * np.round((x + 29) / (9)))');
+  });
+});
+
+// The floored template `((a % b) + b) % b` always added the divisor to the
+// truncated remainder, and that sum is rounded when it is larger than 2^53:
+// compiled `Mod(x, 2^53 - 1)` ran to `1` at `x = 2` and to `3` at `x = 2.5`.
+// `_SYS.floorMod` adds the divisor only when the signs of the remainder and
+// the divisor differ, as the interpreter does. A proven non-negative integer
+// dividend over a NEGATIVE divisor took the plain `%` spelling, whose result
+// has the sign of the dividend (`Mod(n, -3)` ran to `1` at `n = 7`, not
+// `-2`); that spelling now also requires a non-negative divisor.
+describe('compiled Mod agrees with the interpreter', () => {
+  const N = 9007199254740991; // 2^53 - 1
+  const run = (json: unknown, vars: Record<string, number>) => {
+    const r = compile(ce.box(json as never), { fallback: false });
+    expect(r.success).toBe(true);
+    return r.run!(vars as never) as number;
+  };
+  const interpreted = (a: number, b: number) => ce.box(['Mod', a, b]).N().re;
+
+  it.each([
+    [2, N, 2],
+    [2.5, N, 2.5],
+    [-2, N, 9007199254740989],
+    [7, 3, 1],
+    [-7, 3, 2],
+    [7, -3, -2],
+    [-7, -3, -1],
+    [-7.5, 2, 0.5],
+  ])('Mod(%p, %p) is %p', (x, b, expected) => {
+    expect(run(['Mod', 'x', b], { x })).toBe(expected);
+    expect(interpreted(x, b)).toBe(expected);
+  });
+
+  it('a tiny negative dividend stays inside [0, 2)', () => {
+    // `-1e-20 + 2` rounds to `2`; the trailing `% b` maps it back to `0`.
+    // The interpreter computes the same on doubles at machine precision (at
+    // the default precision it computes `2 - 10^-20` with big decimals).
+    expect(run(['Mod', 'x', 2], { x: -1e-20 })).toBe(0);
+    const m = new ComputeEngine();
+    m.precision = 'machine';
+    expect(m.box(['Mod', -1e-20, 2]).N().re).toBe(0);
+  });
+
+  it('a non-negative integer dividend over a negative divisor', () => {
+    const e = new ComputeEngine();
+    e.declare('n', 'integer');
+    e.assume(e.parse('n \\ge 0'));
+    const r = compile(e.box(['Mod', 'n', -3]), { fallback: false });
+    for (const n of [0, 1, 2, 7, 9]) {
+      const expected = e.box(['Mod', n, -3]).evaluate().re;
+      expect(r.run!({ n } as never)).toBe(expected);
+    }
+    expect(r.run!({ n: 7 } as never)).toBe(-2);
   });
 });

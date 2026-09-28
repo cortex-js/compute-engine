@@ -133,7 +133,7 @@ describe('`Mod(a, 1)` is the fractional part', () => {
   });
 
   test('a divisor that is not one keeps the floored template', () => {
-    expect(codeOf(ce, 'a \\bmod 2')).toBe('((((_.a) % (2)) + (2)) % (2))');
+    expect(codeOf(ce, 'a \\bmod 2')).toBe('_SYS.floorMod(_.a, 2)');
   });
 
   test('the result stays inside the codomain for a tiny negative dividend', () => {

@@ -1,6 +1,10 @@
 import type { Expression } from '../types-expression.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
-import { isExactNonInteger, machineNumberOf } from './machine-number.js';
+import {
+  integerExactnessClass,
+  isExactNonInteger,
+  machineNumberOf,
+} from './machine-number.js';
 import {
   isMachineTrigPole,
   MACHINE_PRECISION,
@@ -62,7 +66,7 @@ function rationalScalarOf(op: Expression): [number, number] | undefined {
  * route it took before.
  *
  * - **Operands.** Each operand is a `List` of machine numbers
- *   (`isMachineNumeric`: no exact rational such as `1/2`, no radical, no
+ *   (`_machineFloats` is defined: no exact rational such as `1/2`, no radical, no
  *   complex number, no symbol, no nested list), a symbol whose value is such a
  *   list, or a machine number; in a sum or a product of two operands, also an
  *   exact rational scalar (see `rationalScalarOf`). All the lists have the
@@ -79,10 +83,17 @@ function rationalScalarOf(op: Expression): [number, number] | undefined {
  *   when the engine is later set to machine precision, and the interpreter
  *   multiplies those digits (`0.1 · 3` is `0.3` for such a `0.1`, where the
  *   doubles give `0.30000000000000004`).
- * - **Integers stay exact.** When every operand of a cell is an integer, the
- *   interpreter answers an exact integer. The double is that integer when the
- *   operands and the result are safe integers; otherwise the function
- *   declines.
+ * - **Integers stay exact.** When every operand of a cell is an exact
+ *   integer, the interpreter answers an exact integer. The double is that
+ *   integer when the operands and the result are safe integers; otherwise the
+ *   function declines.
+ * - **A float operand gives a float.** When an operand of a cell is a float
+ *   (a value with a fraction part, a float scalar, or an integer-valued
+ *   element of a list of floats), the result is a float, even when its value
+ *   is an integer (`2 · 0.5` is the float `1`; user decision 2026-09-27). The
+ *   answer records it (`_numericStoreFloats`). One flag covers all the
+ *   integer-valued elements, so when some are exact and some are floats the
+ *   function declines.
  * - **Heads.** `Add` and `Multiply` of two or more operands, `Negate`, and
  *   the functions of one machine number that {@link FUNCTION_KERNELS} and
  *   {@link powerKernel} list, each with the inputs it must decline. A sum or
@@ -117,6 +128,10 @@ export function machineBroadcast(
 
   let length: number | undefined = undefined;
   const columns: (readonly number[] | number)[] = [];
+  // Is each column a float: a float scalar, or a list whose integer-valued
+  // elements are floats (`listFloats`)? A value with a fraction part is a
+  // float in every column.
+  const columnFloats: boolean[] = [];
   // An exact rational scalar (`L / 3` is `Multiply(1/3, L)`) is admitted in a
   // sum or a product of TWO operands. With a float, the interpreter makes one
   // operation: `x + (p/q)` with the rational turned into its double, and
@@ -141,6 +156,7 @@ export function machineBroadcast(
         if (operator === 'Multiply') rationalProduct = q;
         listColumn = 1 - columns.length;
         columns.push(q[0] / q[1]);
+        columnFloats.push(false);
         continue;
       }
     }
@@ -152,6 +168,7 @@ export function machineBroadcast(
       length = values.length;
       if (!holdsDoubles(list)) return undefined;
       columns.push(values);
+      columnFloats.push(listFloats(list));
       continue;
     }
     const k = machineNumberOf(op);
@@ -159,14 +176,17 @@ export function machineBroadcast(
       return undefined;
     if (!isStoredAsDouble(op)) return undefined;
     columns.push(k);
+    columnFloats.push(isNumber(op) && !op.isExact);
   }
   if (length === undefined || length === 0) return undefined;
 
   const out = new Array<number>(length);
   const cell = new Array<number>(columns.length);
+  const floats = new IntegerResultExactness();
   for (let i = 0; i < length; i++) {
     if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE)
       checkDeadline(ce._deadlineFrame);
+    let cellFloat = false;
     for (let c = 0; c < columns.length; c++) {
       const column = columns[c];
       const x = typeof column === 'number' ? column : column[i];
@@ -175,9 +195,11 @@ export function machineBroadcast(
       // interpreter, which the double does not hold (the double boxes as a
       // float).
       if (Number.isInteger(x) && !Number.isSafeInteger(x)) return undefined;
-      // An integer with an exact rational: an exact rational result.
-      if (rationalScalar && typeof column !== 'number' && Number.isInteger(x))
+      const float = columnFloats[c] || !Number.isInteger(x);
+      // An exact integer with an exact rational: an exact rational result.
+      if (rationalScalar && typeof column !== 'number' && !float)
         return undefined;
+      if (float) cellFloat = true;
       cell[c] = x;
     }
     const r =
@@ -192,10 +214,40 @@ export function machineBroadcast(
     // interpreter.
     if (r === undefined || !Number.isFinite(r)) return undefined;
     if (Number.isInteger(r) && !Number.isSafeInteger(r)) return undefined;
+    if (!floats.note(r, cellFloat)) return undefined;
     // `-0` is stored as `0`, as the `array` of a list stores it.
     out[i] = r === 0 ? 0 : r;
   }
-  return ce.list(out);
+  return ce._list(out, floats.floats);
+}
+
+/**
+ * The exactness of the integer-valued results of a computation on doubles,
+ * recorded cell by cell. A cell with a float operand gives a float, even when
+ * its value is an integer (`2 · 0.5` is the float `1`); a cell of exact
+ * integers gives an exact integer. A result with a fraction part is a float
+ * either way. The list that holds the results records one flag for all its
+ * integer-valued elements (`_numericStoreFloats`), so the two kinds cannot be
+ * mixed: `note()` answers `false` when a result would mix them, and the
+ * caller then declines, for the interpreter to compute the cells one by one.
+ */
+class IntegerResultExactness {
+  private exact = false;
+  /** Is some integer-valued result a float? */
+  floats = false;
+
+  note(r: number, cellFloat: boolean): boolean {
+    if (!Number.isInteger(r)) return true;
+    if (cellFloat) this.floats = true;
+    else this.exact = true;
+    return !(this.floats && this.exact);
+  }
+}
+
+/** Are the integer-valued elements of this list of machine numbers floats
+ * (`FunctionInterface._machineFloats`)? */
+function listFloats(list: Expression): boolean {
+  return isFunction(list) && list._machineFloats === true;
 }
 
 /**
@@ -432,10 +484,16 @@ function machineFunctionBroadcast(
 ): Expression | undefined {
   let kernel: MachineFunctionKernel | undefined;
   let operand: Expression | undefined;
+  // Is the other operand of the kernel a float (the exponent of a power, the
+  // base of a logarithm, or the numeric `e` of `N()`)? Every result is then
+  // a float.
+  let scalarFloat = false;
   if (operator === 'Power') {
     const found = powerKernel(ce, ops, numericApproximation);
     if (found === undefined) return undefined;
     [kernel, operand] = found;
+    const other = operand === ops[0] ? ops[1] : ops[0];
+    scalarFloat = isNumber(other) && !other.isExact;
   } else if (operator === 'Log' && ops.length === 2) {
     // `Lb(x)` is canonically `Log(x, 2)`. A base of 2 or 10 has its own
     // primitive on the scalar route (`Math.log2`, `Math.log10`); another base
@@ -444,6 +502,7 @@ function machineFunctionBroadcast(
     if (base !== 2 && base !== 10) return undefined;
     kernel = FUNCTION_KERNELS[base === 2 ? 'Lb' : 'Log'];
     operand = ops[0];
+    scalarFloat = isNumber(ops[1]) && !ops[1].isExact;
   } else {
     if (ops.length !== 1) return undefined;
     kernel = FUNCTION_KERNELS[operator];
@@ -458,14 +517,21 @@ function machineFunctionBroadcast(
   const values = list.array;
   if (values === undefined || values.length === 0) return undefined;
 
+  // An integer-valued element of a list of floats is a float, which every
+  // kernel admits: `Sin(1.0)` is the float `Math.sin(1)`.
+  const floatElements = listFloats(list);
   const admitsIntegers = numericApproximation || kernel.integers;
+  const floats = new IntegerResultExactness();
   const out = new Array<number>(values.length);
   for (let i = 0; i < values.length; i++) {
     if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE)
       checkDeadline(ce._deadlineFrame);
     const x = values[i];
     if (!Number.isFinite(x)) return undefined;
-    if (!admitsIntegers && Number.isInteger(x)) return undefined;
+    // A float scalar operand (`L^{0.5}`, `Log(L, 10.0)`) makes the element a
+    // float cell too, so an integer element is admitted.
+    const float = floatElements || scalarFloat || !Number.isInteger(x);
+    if (!admitsIntegers && !float) return undefined;
     if (kernel.domain !== undefined && !kernel.domain(x)) return undefined;
     if (!numericApproximation && kernel.avoid !== undefined && kernel.avoid(x))
       return undefined;
@@ -473,9 +539,10 @@ function machineFunctionBroadcast(
     if (!Number.isFinite(r)) return undefined;
     if (kernel.pole === true && isMachineTrigPole(r, x)) return undefined;
     if (Number.isInteger(r) && !Number.isSafeInteger(r)) return undefined;
+    if (!floats.note(r, float)) return undefined;
     out[i] = r === 0 ? 0 : r;
   }
-  return ce.list(out);
+  return ce._list(out, floats.floats);
 }
 
 /** Does the engine compute a float as a double? The test is the one
@@ -539,7 +606,10 @@ function isLibraryOperator(
 
 /**
  * The `List` of machine numbers that `x` is, or that the symbol `x` holds, or
- * `undefined`.
+ * `undefined`. The list may hold floats with an integer value (`[0.5, 2.0]`,
+ * or a list that a float computation produced): its `_machineFloats` says
+ * whether its integer-valued elements are floats, and a list that mixes
+ * exact integers with such floats is not answered.
  *
  * The value of a symbol is READ (`value`), never evaluated. A list of machine
  * numbers is written-out data, which evaluates to itself, so reading it is
@@ -556,7 +626,7 @@ export function machineListOf(x: Expression): Expression | undefined {
     list = list.value;
   }
   if (list === undefined) return undefined;
-  if (!isFunction(list, 'List') || list.isMachineNumeric !== true)
+  if (!isFunction(list, 'List') || list._machineFloats === undefined)
     return undefined;
   return list;
 }
@@ -601,7 +671,11 @@ export function machineListFrom(
       return undefined;
     out[i] = x === 0 ? 0 : x;
   }
-  return ce.list(out);
+  // The integer-valued elements must be all exact or all floats, which the
+  // one flag of the store records.
+  const kind = integerExactnessClass(elements, out);
+  if (kind === undefined) return undefined;
+  return ce._list(out, kind === 'float');
 }
 
 /** The answer of {@link holdsDoubles} for a list, which does not change: the

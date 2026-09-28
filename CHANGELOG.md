@@ -1,5 +1,333 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **An integer-valued float is written with a fraction part, so it reads
+  back as a float.** A float whose value is an integer serializes as
+  `{num: "2.0"}` in MathJSON and `2.0` in LaTeX (a large one as `1.0e+800`
+  and `1.0\cdot10^{800}`); it was `2`, which reads back as the exact `2`, so
+  `Sin(2.0)` numericized while its round trip `Sin(2)` stayed symbolic (user
+  decision 2026-09-28). An exact integer is still written `2`. A float in
+  LaTeX with a negative exponent now keeps its fraction part too
+  (`123.0\cdot10^{-3}`), which read back as an exact rational before. With `fractionalDigits: 0` (LaTeX)
+  or `digits: {fractional: 0}` (MathJSON) the integer spelling is kept, as
+  requested.
+
+- **An Epsil decimal literal keeps its value, and a literal with a fraction
+  part is a float.** The Epsil parser summed the fraction digits one float at a
+  time, so `0.75` read as `0.7500000000000001`, `0.3` as `0.30000000000000004`
+  and `0.000001` as `0.0000010000000000000002`. It now reads the decimal
+  exactly. It also dropped the decimal point while normalizing, so `1.0`,
+  `2.0` and `1.5e3` were the exact integers `1`, `2` and `1500`; they are now
+  floats, as on the LaTeX route (the 0.139.0 rule that a literal with a
+  fraction part is a float). `1e3`, `3` and `2.` (a point with no digit after
+  it) stay exact. A literal a double cannot hold keeps its digits: `1e-400`
+  was the exact `0`, and `5e-324` lost digits.
+- **The negation of a product folds its sign into the numeric factor.**
+  `-(2x)` (MathJSON `["Negate", ["Multiply", 2, "x"]]`) canonicalizes to
+  `Multiply(-2, x)`; it was `Negate(Multiply(2, x))`. `-\frac{x}{2}` is now
+  `Multiply(-1/2, x)`, the same expression as `-\frac{1}{2}x`, so the sign
+  of a fraction written in front of it reads back unchanged (#345).
+- **A float `Measurement` error evaluates.** `Measurement(5, 0.2) + 3` was
+  `8 ± sqrt(0.2^2)` under `evaluate()` and is now `8.00 ± 0.20`. An exact error
+  stays exact (`Measurement(5, 1) * Measurement(2, 1)` is `10 ± √29`).
+
+### Issues Resolved
+
+- **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and the
+  sign of a numeric fraction moves in front of it.** `Beta(2, 3)` wrote
+  `\Beta(2, 3)` (capital beta is roman, not a separate glyph — MathLive
+  renders it as an error) and `Zeta(3)` wrote `\Zeta(3)`; both came from the
+  fallback that spells an unrecognized function head as its symbol's
+  notation, which for these two names is the Greek-letter entry. They now
+  write `\mathrm{B}(2, 3)` and `\zeta(3)`; the old spellings still parse, and
+  a bare `\mathrm{B}` is still the upright letter `B`. `Lb(x)` wrote `\lb(x)`,
+  not a standard LaTeX command, and now writes `\log_2(x)` (which already
+  parsed to `Lb`). A negative `Rational`, or a fraction with a number
+  denominator, wrote its sign inside the numerator or the denominator —
+  `Rational(-1, 2)` as `\frac{-1}{2}`, `Divide(x, -4)` as `\frac{x}{-4}` — or,
+  for `Negate` of a fraction, with a redundant parenthesis
+  (`Negate(Rational(3, 4))` as `-(\frac{3}{4})`); all three now write the sign
+  in front: `-\frac{1}{2}`, `-\frac{x}{4}`, `-\frac{3}{4}`. A fraction with a
+  symbolic denominator keeps the sign in the numerator (`\frac{-1}{x}`), since
+  `-\frac{1}{x}` reads back as a different expression (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+- **A negative big number keeps its digits when its sign moves.** The LaTeX
+  serializer removed the sign of a negative literal in a sum through a
+  JavaScript double, so `Add(x, -9007199254740993)` wrote
+  `x-9\,007\,199\,254\,740\,992`. The sign is now removed from the digit
+  string.
+- **`\operatorname{rank}(A)` parses to `MatrixRank`, and `MatrixRank(A)`
+  writes `\operatorname{rank}(A)`.** It parsed to the free symbol `rank`
+  applied to `A`, the same gap `\operatorname{lcm}` (→ `LCM`) already covered
+  for a different head (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+- **`a * 2n` parses in Epsil.** The right operand of an explicit `*` or `/`
+  refused an invisible multiplication, so `a * 2n` parsed as `a * 2` with an
+  `unexpected-symbol` diagnostic for `n` — and the serializer writes that form.
+  `a * 2n` is now `a·(2n)` and `a / 2n` is `a/(2n)`.
+- **Exact 2×2 eigenvalues.** `Eigenvalues([[1, 2], [3, 4]])` was
+  `[5.372…, -0.372…]`; it is now `[(5 + √33)/2, (5 − √33)/2]`.
+- **`AdjugateMatrix` and `PseudoInverse` evaluate.** Both stayed unevaluated
+  for every matrix. `AdjugateMatrix` is the transposed cofactor matrix, for any
+  square matrix. `PseudoInverse` is computed for a full-rank matrix: the
+  inverse of an invertible square matrix, `(A*A)⁻¹A*` with full column rank,
+  `A*(AA*)⁻¹` with full row rank; a rank-deficient matrix stays unevaluated.
+- **Trigonometry.** `InverseFunction(Csc)` returned an `invalid-symbol` error,
+  and `InverseFunction(Cot)`, `(Coth)` stayed unevaluated; every circular and
+  hyperbolic function now maps to its inverse. `Arccot` has exact special
+  values (`Arccot(1)` is `π/4`, `Arccot(-1)` is `3π/4`). `Sinc(Pi)` is exactly
+  `0` (it was `1.2e-25` under `N`) and `Sinc(Pi/2)` is `2/π`.
+  `TrigExpand(Sin(x + Pi/2))` is `cos(x)` (it left `cos(π/2)` and `sin(π/2)`
+  unreduced), and `TrigExpand(Tan(x + Pi/2))` is `-cos(x)/sin(x)`.
+- **Arithmetic.** `Log(1/8, 2)` and `Lb(1/8)` are `-3` (they stayed
+  symbolic, while `Log(8, 2)` was `3`). `ComplexRoots(1, 4)` is `[1, i, -1,
+  -i]`, exactly and under `N` (it was `[1, 6.1e-17 + i, …]`), and the roots of
+  an exact real are exact (`ComplexRoots(8, 3)` is `[2, -1 + √3 i, -1 - √3 i]`).
+  `Supremum` and `Infimum` of an open interval are its endpoints (they stayed
+  symbolic). `Interpret(1 + 2 + … + n)` works from Epsil, whose left-nested
+  sum the recognizer did not match. `PreIncrement(5)` is `6` and
+  `PreDecrement(5)` is `4` (they had no evaluate handler). `Sum(2^(-k), (k, 0,
+  oo))` is `2`, as `Sum((1/2)^k, …)` was: the geometric-series rule did not
+  read a negated index.
+- **Exact 3×3 eigenvalues.** A matrix of exact rationals whose characteristic
+  polynomial has a rational root has exact eigenvalues:
+  `Eigenvalues([[2, 0, 0], [0, 3, 4], [0, 4, 9]])` is `[11, 2, 1]` (it was
+  `[11, 1.000000000000003, 2.0000000000000018]`), and
+  `Eigenvalues([[2, 1, 0], [1, 2, 1], [0, 1, 2]])` is `[2 + √2, 2, 2 − √2]`.
+  The exact eigenvalues are ordered by decreasing real part. `N(Eigenvalues(…))`
+  gives their values.
+- **`N(Arcosh(x))` for a real `x` in [−1, 1] is purely imaginary**
+  (`N(Arcosh(1/2))` was `5.6e-17 + 1.047…i`).
+
+### New Features
+
+- **Examples for the arithmetic, trigonometry and linear-algebra libraries**,
+  with a hand-written introduction for each reference page: 97, 84 and 40
+  examples, each executed when the pages are generated.
+
+## 0.140.0 _2026-09-27_
+
+### Behavior Changes
+
+- **The spelling rule holds at machine precision, and a float operand makes
+  a numeric result a float.** On a `precision: 'machine'` engine,
+  `ce.parse('2.0')` was exact, so `\sin(2.0)` stayed symbolic there while it
+  evaluated at the default precision; a machine number is now always
+  inexact, and exact integers are the exact class, as `ce.number(2)` already
+  was. `2.0^2`, `\ln(1.0)`, `2.0!`, `\sinh(0.0)`, `4^{0.5}` and similar
+  results of a float operand are floats at every precision (user decision
+  2026-09-27). `\max(2.0, 3)` still returns its operand `3` as given, and
+  `\operatorname{sign}(2.0)` is still the integer `1`, as in Mathematica. A
+  consequence at machine precision: `(1.5+1.5)·(1/7)` is the float
+  `0.42857142857142855`, not the exact `3/7`.
+  Also: `x^{0.5}` stays `Power(x, 0.5)` (only an exact `1/2` becomes
+  `\sqrt{x}`), as `x^{1.0}` already stayed; a float `0` is no identity in a
+  sum (`0.0 - 2` is the float `-2`); `\gcd(4.0, 6)` is the float `2`; the
+  statistics of float data are floats (`Mean([1.0, 3.0])` is `2.`); a list of
+  more than 100 numbers computed from floats keeps its integer-valued
+  elements as floats. `isMachineNumeric` is now `false` for a number or list
+  that holds an integer-valued float such as `2.0`, because re-boxing it with
+  `ce.list(...)` would make it exact.
+
+- **`Integrate` of a tuple integrates each coordinate.** `\int_0^1 (x, 2x)\,dx`
+  stayed unevaluated; it is `(1/2, 1)`, as `\sum_{n=1}^3 (n, 2n)` is
+  `(6, 12)` (user decision 2026-09-27). The indefinite integral gives
+  `(x^2/2, x^2)`, and a list bound gives one tuple per element of the bound
+  (`\int_0^{[1,2,3]} (x, 2x)\,dx` is `[(1/2, 1), (2, 4), (9/2, 9)]`).
+- **`Implies`, `Nand`, `Nor`, `Xor` and `Equivalent` follow the three-valued
+  rules of `And` and `Or` for an absent operand** (user decision 2026-09-27).
+  An operand that decides the result wins (`Implies(Missing, True)` is
+  `True`; it was `Missing`); beside an unknown symbol the expression stays
+  symbolic (`Nand(A, Missing)` was `Missing`), as `And(A, Missing)` does; the
+  result is `Missing` only when the other operands are decided and do not
+  decide it (`Nand(True, Missing)`). The same rule decides an implication
+  beside an unknown: `Implies(A, True)` and `Implies(False, A)` are `True`
+  (they stayed unevaluated).
+- **Compiled JavaScript spells an absent point, tuple or list `undefined` in
+  arithmetic.** `2·P` and `P + Q` with an absent point `P` gave `NaN` and
+  `[NaN, NaN]`; they give `undefined`, as a read of the absent point already
+  did and as the interpreter fallback does (user decision 2026-09-27). A
+  coordinate read (`PointX(P)`) stays `NaN`.
+
+
+- **A user binding shadows a capitalized library name.** `let Pi = 3; Pi` was
+  `Pi` (π) and is now `3`; so for `ExponentialE`, `Missing`, `Undefined`,
+  `True`, `False`, `All` and `None`. `function Square(x) { x + 100 };
+  Square(3)` was `9` and is now `103`; so for a user `Sqrt`, `Negate`, `Exp`,
+  `Ln`, `Log`, `Power`, `Root`, `Divide`, `Add` and `Multiply`, on the Epsil
+  and the box routes. These names are interned constants, or heads that
+  canonicalization folds by name, and both paths returned the library
+  definition without looking the name up. Shadowing `Add` (or `Multiply`,
+  `Divide`, `Power`, `Negate`) also changes the operator that builds it
+  (`+`, `*`, `/`, `^`, unary `-`) within the binding's scope, as shadowing
+  `Subtract` already did. Compiled code does not use a shadowed library
+  operator: `compile()` of such a call fails closed and falls back to the
+  interpreter (it emitted the library operator before, `y * y` for a user
+  `Square`, and so for a user `Abs` or `Sin`).
+- **A binding of `Nothing`, `Missing` or `Undefined` is an error.** These
+  absence markers are recognized by their name (an operand named `Missing` is
+  read as absent whatever it is bound to), so they cannot be rebound. `let
+  Missing = 3` and the other binding forms (an assignment, a function, a
+  parameter, a loop variable, a `match` pattern) report
+  `absence-marker-binding`, and the declaration evaluates to that error. Before,
+  `let Nothing = 3` was silently ignored, and `let Undefined = 3; Undefined + 0`
+  was `NaN`.
+
+- **`Length` of an infinite collection is `+oo`.** `Length(Integers)`,
+  `Length(Repeat(5))`, `Length(Cycle([1, 2]))` and `Length(Interval(0, 1))`
+  stayed unevaluated; they are now `+oo`, the answer `Count` gives. Only an
+  unbounded `Range` answered `+oo` before. A collection whose size is not known
+  (a `Filter` over an infinite source) still stays unevaluated. The reported
+  type follows: `Length` of a tuple, a string, a literal list or set, a
+  dimensioned list or a `Range` with finite literal bounds is `integer`, and
+  `Length` of any other operand, including a symbol typed `list<…>`, is
+  `integer | infinity`, because a `list` value can be an infinite lazy list.
+  A function declared to return `integer` whose body is `Length(xs)` keeps its
+  declared type.
+
+- **`StringFrom` of a string, a character or a symbol returns its text.**
+  `StringFrom("hi")` returned `"\"hi\""` and `StringFrom(True)` returned
+  `"\"True\""`: the printed form of those values carries quotes, and
+  `StringFrom` used the printed form. It now returns `"hi"` and `"True"`, as
+  its description says, and a symbol such as `integer` converts to its bare
+  name. Other values keep their printed form (`StringFrom(x + 1)` is
+  `"x + 1"`, `StringFrom(Pi)` is `"pi"`).
+- **`Timing` declares an unnamed tuple.** Its result type was
+  `tuple<time: number, result: value>`, but the value carries no element
+  names, so `Timing(expr).result` was an `incompatible-type` error. The
+  declared type is now `tuple<number, value>`; read the parts as
+  `Timing(expr)[1]` and `Timing(expr)[2]`.
+
+- **The imaginary part of a numeric result has the working precision.**
+  `.N()` of `√2 + √2i` printed `1.4142135623730950488 + 1.4142135623730951i`
+  (21 digits on the real part, 16 on the imaginary part); both parts now have
+  21 digits, or the engine's precision. `Ln`, `Exp`, `Power`, `Root` and `Sqrt`
+  of a complex argument compute both parts at the working precision above
+  machine precision (`Ln(1.1+1.1i).N()`, `e^{1+2i}` at 50 digits). The
+  other complex transcendental functions (`Sin`, `Gamma`, `Zeta`, …) keep
+  machine precision. The rounding noise a complex kernel removes is now
+  relative to the working precision (`10^{2−precision}` times the modulus,
+  it was `10^{-14}`), and a component that is small but real is kept:
+  `e^{i·10^{-800}}` is `1 + 10^{-800}i`.
+
+- **The Epsil serializer writes the lowercase spelling of a library name.**
+  `serializeEpsil(["Sin", "x"])` is `sin(x)`, `"Pi"` is `pi`, and
+  `["Map", "Sin", "xs"]` is `map(sin, xs)`; the `epsil format` command, the
+  `--epsil` output mode of the CLI and the MCP server, and the snippet a
+  diagnostic quotes follow. Before, the serializer wrote the MathJSON names
+  (`Sin(x)`). A library name keeps its MathJSON spelling where the lowercase
+  one would read back as something else: when the expression binds or
+  mentions the spelling (`let sin = 3`, a parameter named `pi`), and when
+  the new `isBound` option reports it bound outside the expression (the CLI
+  passes the session's bindings). The new option `libraryNames: 'mathjson'`
+  restores the previous output. A round trip through `parseEpsil` alone now
+  yields the raw lowercase head (`["sin", "x"]`); `resolveLibraryNames`, which
+  `executeEpsil` and the CLI already run, reads it back to `Sin`.
+- **Epsil library reference pages.** `src/epsil/docs/reference/<category>.md`,
+  one page per library category (19 pages), lists every definition under its
+  Epsil spelling with its MathJSON name, its signature, its full description
+  and its executed examples; the Standard Library page links each category to
+  its reference page. `npm run doc` generates them
+  (`scripts/build-library-reference.ts`); a hand-written introduction in
+  `reference/<category>.intro.md` is spliced in when present.
+- **A repeated constant in a call resolves.** The Epsil resolution pass read a
+  symbol operand that also occurs in another operand of the same call as the
+  call's variable, for every operator: `[pi, pi]`, `max(pi, 2 * pi)` and
+  `(pi, pi)` left `pi` unresolved, and so did `series(x + pi, x, pi, 3)`. The
+  rule now reads only the operand positions that hold a variable: the
+  positions whose parameter is typed `symbol` in the signature (`D`, `series`,
+  `factor`, …), and a listed position for the operators that type their
+  variable loosely (`limit`, `solve`, `jacobianMatrix`,
+  `characteristicPolynomial`, `findRoot`, `findFit`, and the trailing
+  variable of `linearRegression` and `polynomialFit` when it is a bare
+  symbol).
+- **A user binding named like a library name keeps its spelling.** With the
+  lowercase output, `let Pi = 3; f(Pi) = Pi; f(4)` was written `let pi = 3;
+  f(Pi) = pi; f(4)`, which reads the outer binding (3 instead of 4). A library
+  name the expression binds — by `let`, assignment, function name, parameter,
+  loop index, match pattern or the variable operand of a binder — is written
+  as is.
+- **A dictionary holding a list prints in Epsil.** `serializeEpsil` read a
+  value of the MathJSON `{dict: …}` form as a nested expression when it was an
+  array and as a symbol when it was a bare string, so the JSON of a boxed
+  dictionary holding a list (`let d = {"xs" -> [1, 2]}; d` in the REPL, whose
+  value serializes as `{dict: {xs: [1, 2]}}`) threw a `TypeError` in the
+  `--epsil` output mode. A `{dict}` value is now read as the engine reads it:
+  an array is a list of values, a bare string is a string, a boolean is a
+  boolean, and an expression is an expression object (`{fn: …}`). The JSON
+  `{dict: {z: ["Add", 2, "x"]}}` therefore prints `{"z" -> ["Add", 2, "x"]}`
+  (a list of a string, a number and a string), where it printed
+  `{"z" -> 2 + x}` before.
+- **`Limits` has no Epsil spelling.** `limits` is the type the engine declares
+  for an indexing clause, so the spelling could never resolve to the operator;
+  the Standard Library page lists `Limits` with no Epsil column.
+
+### Issues Resolved
+
+- **`Mod` of a float near the double range keeps its remainder.** At machine
+  precision `Mod(2.0, 9007199254740991.0)` was `1` (the formula added the
+  divisor before the second remainder, and `2 + 9007199254740991` rounds);
+  it is `2`. Compiled JavaScript `Mod(x, 9007199254740991)` had the same
+  defect (`1` for `x = 2`). The base-10 and base-2 logarithms of a machine
+  float now use the correctly rounded primitives on every route, so a short
+  list and a long list agree in the last digit, and `\log_{10.0}(1000)` is
+  `3`.
+
+- **Compiled `And`, `Or` and `Not` with an absent operand follow the
+  three-valued tables when used as a value.** With `M` absent at run time,
+  compiled `And(M, False)` gave `undefined` (the interpreter: `False`),
+  `Or(M, False)` gave `false` (the interpreter: `Missing`) and `Not(M)` gave
+  `true`, in JavaScript and in Python; the condition position of `If` and
+  `Which` was already right. Ordinary booleans keep the plain `&&`/`||`.
+
+
+- **`GroupBy` with a character key.** A key function that returns a character
+  (`GroupBy(["apple", "avocado", "banana"], s => First(s))`) grouped under the
+  quoted text (`"\"a\""`), because a character key was stringified with its
+  quotes. A character is the same value as the one-character string, so it now
+  keys the group `a`, as `Take(s, 1)` does.
+
+- **A complex numeric value whose imaginary part is outside the double range
+  keeps it.** `(1+i)10^{800}` under `.N()` was `~oo` and is
+  `1e+800 + 1e+800i`; `(10^{-200}(1+i))^2` was `0` and is `2e-400i`;
+  `\sqrt{i\cdot10^{-600}}` was `0`; `2\cdot10^{-800}i` evaluated to `0`; a
+  complex part below the double range serialized to LaTeX as `0`. The
+  inexact complex value now holds its imaginary part as a big decimal. See
+  `docs/plans/2026-09-27-big-decimal-imaginary-part.md`.
+- **`Exp(Ln(−2)).N()` is `−2`.** It printed `−1.99…98 + 4.8e-16i`: the
+  logarithm of a negative real took a 16-digit imaginary part, whose rounding
+  error the working-precision `Exp` then read as a value.
+
+- **An exact complex number whose imaginary part is too small or too large
+  for a double keeps it.** `i\cdot10^{-800}` evaluated to `0`, `(1+i)10^{-800}`
+  to `1/1e+800` with the imaginary part lost, `(10^{-200}i)^2` and
+  `(10^{400}i)^2` stayed symbolic, `Mean([1, 10^{400}i, 3])` read the exact
+  datum as complex infinity, and an exact `10^{-800} + i` was taken for `i`
+  by the imaginary-unit recognizer: the exact value stored its imaginary part
+  exactly but every "is this complex?" test read the cached machine double,
+  which underflows to `0` or overflows to `Infinity`. Every numeric value now
+  answers `isComplex` from its own representation (`NumericValue.isComplex`,
+  `BoxedNumber.isComplex`, public on the number-literal interface), the
+  finiteness, integrality and "is the real part zero?" tests on exact values
+  read the exact fields, and the exact-to-double projection of a large
+  rational is finite (`(10^{400}+1)/10^{400}` projected to `NaN`; it is `1`).
+  The double `im` stays available as a projection for double kernels. This
+  is Phase 1 of `docs/plans/2026-09-27-big-decimal-imaginary-part.md`; the
+  inexact route (`.N()` of such values, and the imaginary part's printed
+  precision) is unchanged until Phase 2.
+
+### New Features
+
+- **`ce.number({ re, im })` builds a complex number from two parts, each a
+  JavaScript number or a `BigDecimal`.** `ce.number({ re: ce.bignum('1e-800'),
+  im: ce.bignum('2') })` keeps both parts at full precision; a zero imaginary
+  part gives a real number. `ce.complex(a, b)` is unchanged: it returns a
+  machine-precision `Complex` (its documentation now says so and points at
+  the lossless routes, this overload and the MathJSON `Complex` node).
+
+## 0.139.0 _2026-09-27_
+
 ### New Features
 
 - **Epsil comprehensions.** A `for` clause inside a list or brace literal builds

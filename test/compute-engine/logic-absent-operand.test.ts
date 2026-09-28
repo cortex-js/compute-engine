@@ -4,11 +4,14 @@ import { ComputeEngine } from '../../src/compute-engine';
 // which is read the same way) by the same Kleene rule: an operand that
 // decides the result wins, otherwise the result is the absence marker
 // `Missing`. `Xor` and `Equivalent` have no deciding operand — flipping any
-// one operand flips the result — so an absent operand always makes them
-// absent. Before the user decision of 2026-09-27, `Xor` and `Equivalent`
-// rejected a `Missing` operand with `incompatible-type` at canonicalization,
-// and kept an `Undefined` operand symbolic (`Xor(True, Undefined)` evaluated
-// to `Not(Undefined)`), while `And`, `Or` and `Not` answered `Missing`.
+// one operand flips the result — so an absent operand makes them absent,
+// unless another operand is an unknown symbol: then they stay symbolic, as
+// `And(A, Missing)` does (a second user decision of 2026-09-27; before it,
+// `Xor(A, Missing)` was `Missing`). Before the first user decision of
+// 2026-09-27, `Xor` and `Equivalent` rejected a `Missing` operand with
+// `incompatible-type` at canonicalization, and kept an `Undefined` operand
+// symbolic (`Xor(True, Undefined)` evaluated to `Not(Undefined)`), while
+// `And`, `Or` and `Not` answered `Missing`.
 //
 // `docs/ERROR-MODEL.md` §3 is the reference for the absence contract.
 //
@@ -20,7 +23,7 @@ const ce = new ComputeEngine();
 const evalJson = (expr: any) => ce.box(expr).evaluate().json;
 
 describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — box route', () => {
-  const table: [any, string][] = [
+  const table: [any, any][] = [
     [['And', 'True', 'Missing'], 'Missing'],
     [['Or', 'False', 'Missing'], 'Missing'],
     [['Not', 'Missing'], 'Missing'],
@@ -32,13 +35,27 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — box route', () => {
     [['Xor', 'True', 'Undefined'], 'Missing'],
     [['Xor', 'Missing', 'True'], 'Missing'],
     [['Xor', 'True', 'False', 'Missing'], 'Missing'],
-    [['Xor', 'A', 'Missing'], 'Missing'],
+    [
+      ['Xor', 'A', 'Missing'],
+      ['Xor', 'A', 'Missing'],
+    ],
+    [
+      ['Xor', 'A', 'Undefined'],
+      ['Xor', 'A', 'Missing'],
+    ],
     [['Equivalent', 'True', 'Missing'], 'Missing'],
     [['Equivalent', 'False', 'Missing'], 'Missing'],
     [['Equivalent', 'True', 'Undefined'], 'Missing'],
     [['Equivalent', 'Missing', 'False'], 'Missing'],
     [['Equivalent', 'Missing', 'Missing'], 'Missing'],
-    [['Equivalent', 'A', 'Missing'], 'Missing'],
+    [
+      ['Equivalent', 'A', 'Missing'],
+      ['Equivalent', 'A', 'Missing'],
+    ],
+    [
+      ['Equivalent', 'A', 'Undefined'],
+      ['Equivalent', 'A', 'Missing'],
+    ],
   ];
   test.each(table)('%j evaluates to %s', (expr, expected) => {
     const boxed = ce.box(expr);

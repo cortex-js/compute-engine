@@ -250,34 +250,6 @@ Defects:
    argument near `5e199` (`new Complex(5e199, -5e199).atan()` is `NaN`).
    Found 2026-09-27 while scaling the interpreter's complex division; the
    fix is a scaled `atan`/`asin` kernel, or a reduction for large arguments.
-2. **A complex number whose imaginary part is outside the double range is
-   wrong (silent wrong results).** Measured 2026-09-26 at the default
-   precision: `i\cdot10^{-800}` evaluates to `0`; `(1+i)10^{-800}`
-   evaluates to `1/1e+800` (the imaginary part is lost);
-   `(2+3i)\cdot10^{-400}` evaluates to `1/5e+399`; `(1+i)10^{800}` `.N()`
-   is `~oo` instead of `1e+800 + 1e+800i`. The cause: `ExactNumericValue`
-   stores the imaginary part exactly but caches its double in `im`, and about
-   650 read sites test `im !== 0` to decide that a value is complex, so an
-   imaginary part whose double underflows reads as real. `BigNumericValue`
-   has a big-decimal real part but a machine-number imaginary part, so no
-   float value at the default precision can hold `10^{-800}i` either. A fix
-   on 2026-09-26 kept `im = ±Number.MIN_VALUE` as a nonzero marker; review
-   found the marker leaking into the function kernels
-   (`Ln(i\cdot10^{-800}).N()` gave `-744.44 + 1.5708i`), into `isSame` and
-   into compiled code, so it was removed. The fix is a redesign: a
-   big-decimal imaginary part in `BigNumericValue`, and an explicit
-   "is complex" flag in `ExactNumericValue` instead of the `im !== 0` test.
-   Related: at the default precision, the reciprocal of `1e-200+1e-200i`
-   gives re = `1e200` (should be `5e199`) and im = `-Infinity`, because
-   `d·d` underflows in double arithmetic (fixed 2026-09-27 by the scaled
-   division); `(10^{-200}(1+i))^2` `.N()` is `0` at the default precision
-   (the true value `2e-400i` needs a big-decimal imaginary part; at machine
-   precision `0` is the correctly rounded double);
-   `\sqrt{i\cdot10^{-600}}` `.N()` is `0`; `e^{i\,10^{-800}}` `.N()`
-   drops the imaginary part. Also `\frac{1}{10^{308}+10^{308}i}` under
-   `evaluate()` is `1/2e+308` with no imaginary part: the exact inverse is
-   right, but the cached double of the imaginary part `-1/2e308` reads as
-   `0`.
 3. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is
    absent stays unevaluated.** `Map(f, Join(Missing, [3]))` should be
    `Missing`, as `Map(f, Missing)` is. The source correctly declines to
@@ -298,6 +270,52 @@ Defects:
    builder's tail at every read (`recursive-list-builder.test.ts`,
    "an effectful bound keeps one evaluation per recursive call" went from 3
    calls to 7) and spends extra random draws.
+
+### A matrix to a non-integer power is element-wise (OPEN, decision — found 2026-09-28 by the agents writing the linear-algebra examples)
+
+`[[1, 2], [3, 4]] ^ (1/2)` is `[[1, √2], [√3, 2]]`, the square root of each
+entry, while an integer exponent is the matrix power (`^2` is
+`[[7, 10], [15, 22]]`, `^-1` the inverse). `canonicalPower`
+(`arithmetic-power.ts`) says element-wise power "is not expressed via `^`"
+and leaves non-integer exponents "to other handling", which is the
+broadcast. The decision: a matrix function (`A^(1/2)` the principal square
+root, computed or left symbolic), an error, or the element-wise reading kept
+and documented.
+
+### A calculus operator over a function parameter is folded before the argument arrives (OPEN — found 2026-09-27 while writing the core reference examples)
+
+`g(f) = D(f, x); g(x^2)` evaluates to `0`, and so do `(f => D(f, x))(x^2)`
+and the box route `["Apply", ["Function", ["D", "f", "x"], "f"], ["Power",
+"x", 2]]`; the answer is `2x`. `g(f) = Integrate(f, x); g(x^2)` gives
+`x·x^2`; the answer is `x^3/3`. The LaTeX route shows the mechanism:
+`g(f) := \frac{d}{dx} f` canonicalizes to `(f) => D((x) => f, x)`. The body
+is canonicalized when the function is defined, the integrand is lifted with
+`f` as a symbol free of `x`, and the derivative (or antiderivative) of an
+`x`-free symbol is folded before the call substitutes `x^2` for `f`. An
+operator that does not fold on a parameter is not affected: `g(f) = f + 1`
+and `g(f) = Expand(f)` answer correctly. The fix is in the binder handling
+of `D`/`Integrate` (`liftIntegrand`, `boxed-expression/utils.ts`, and the
+canonical handlers): a symbol bound by an enclosing `Function` is not a
+constant of the differentiation variable, so the fold must wait until the
+argument is substituted.
+
+### Engine code that builds a node by name picks up a user binding in the active scope (OPEN — found 2026-09-27 by the dual review of the shadowing change)
+
+Inside a function body, a local definition named like a library operator is
+seen by engine code that runs during that body's evaluation:
+`function f() { function Add(a, b) { 12345 }; expand((y + 1) * (y + 2)) };
+f()` evaluates to `152399025` (the user `Add` applied to the terms `Expand`
+builds), `function f() { function Add(a, b) { 999 }; D(y^2 + y, y) }; f()`
+is `999`, and `function f() { function Sin(a) { 999 }; D(cos(y), y) }; f()`
+is `-999`. Measured identical on the tree before 2026-09-27, so the
+shadowing change did not introduce it. The same shadow in a `do { }` block
+does not reproduce it. Engine code (`Expand`, `D`, the polynomial and
+simplification code) builds `Add`/`Multiply`/`Sin` nodes by name while the
+user's function scope is the current scope, and name resolution cannot tell
+that construction from a user-written call. The fix direction: engine-built
+nodes resolve their head against the system scope (a construction route
+that does not consult the current scope), leaving scope-based resolution to
+user-written code.
 
 ### A function-typed factor is a product under juxtaposition and a type error under an explicit operator (OPEN, ruling — found 2026-09-22 while fixing the MathNet round-trip check)
 
@@ -472,26 +490,6 @@ whose result is a complex scalar. Also, `\sum_{k=1}^{3} p((x, \sqrt{x-5}))`
 declines in `auto` mode (inlining refuses because the body's `k` would be
 captured by the index); strict mode compiles it.
 
-### Residues of the 2026-09-24 fix round (OPEN, small — found by the review of the fixes)
-
-Found by the review of the fixes of 2026-09-24, not fixed in that round (the
-bigint root extraction, the `e^{1 + 0.5iπ}` dust and the mutually recursive
-diagnostic landed 2026-09-25; a float multiple of π that is a special angle is exact in
-every angular unit since 2026-09-27, user decision — what that left:
-`e^{1+0.25iπ}` stays a float in every unit because the canonical exponent is
-already a float complex literal with no structure left to read, which
-`trig-structural-fixes.test.ts` pins for `e^{1+0.5iπ}`): (1) The dust limit is capped at
-`|x| ≥ 1`, so `sin(10^6π).N()` is `−3.8e-19` while `evaluate()` is `0`, and
-`tan(10^6π + π/2).N()` is `2.6e18` while `evaluate()` is `~oo` (the cap exists
-so that `sin(10^22)` is not chopped; the two routes disagree for multiples of π
-above `10^2`). Note that since 2026-09-25 a LITERAL `10^6π` argument is reduced
-exactly (`\sin(10^{6}\pi).N()` is `0`); the cap still applies to a float
-argument near a multiple of π. (2) A float near a special angle gives the sine
-of the DECIMAL literal on the scalar route (`Sin(3.141592653589793)` is
-`2.38e-16`, 21 digits) and the sine of the DOUBLE inside a machine list
-(`1.22e-16`, `Math.sin`), a factor of 2 at a zero crossing; both are exact
-readings of their literal.
-
 ### Residues of the exactness-by-route rule (OPEN, decisions — 2026-09-27)
 
 Since 2026-09-27 (user decision) exactness is decided by the route: a literal
@@ -555,6 +553,59 @@ value): `x4[1,2]` (the left side is already the product `x·4`), `2^3[1,2]` and
 `\sin 4[1,2]` (read as an index, `At(…)`, then a type error), and `4[x=0]` (an
 Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
 `Tuple(4, Interval(…))`, which is probably not what an author means.
+
+### Residues of the 2026-09-27 decision batch (OPEN, small — found by the implementation of decisions 1A, 2A and 4A)
+
+- **Compiled division by zero of a point cell.** `[P\{c\}, (3,4)] / t` at
+  `t = 0` gives `[Infinity, Infinity]` for the present cell when compiled,
+  and the interpreter fallback gives the complex infinity
+  `{re: Infinity, im: Infinity}`. A decision: whether `Infinity` per
+  coordinate is the accepted real-target spelling of complex infinity.
+- **Point arithmetic that still refuses to compile** (a refusal, not a wrong
+  value): `P\{c\} + [Q_1, Q_2]` ("may be a point or a list of points at run
+  time", the `'runtime-list'` emission), `[P\{c\}, Q] + R` and
+  `[1,2]·P\{c\} + Q` ("scalar arithmetic over a list-valued operand").
+- **The type of an element-wise comparison over an absent list.**
+  `L\{c\} < 3` is typed `list<boolean | missing>`, but when `L` is absent
+  the value is `Missing` for the whole list, not a list; the type should be
+  `missing | list<boolean>`.
+- **Other code may box an integer-valued double as exact.** Until
+  2026-09-28 an exact `1` and a float `1` serialized the same way, so a site
+  that boxes a double result with `ce.number(n)` was invisible; since the
+  `2.0` spelling it shows. The full suite found one (the compiled `N()` of a
+  lazy `Map`, fixed); kernel bridges and compiled-value readers that call
+  `ce.number(double)` need an audit (the float lane is
+  `ce._inexactNumericValue`). Also: at machine precision `1.0e800`
+  overflows to `PositiveInfinity`, which reports `isExact === true`.
+  Also: the compiled `N()` of a lazy `Map` boxes an integer-valued result as
+  exact when its operands and the lambda are exact; an elementary function
+  of an exact integer whose double is exactly an integer near 2^53
+  (`exp(36)`) is then exact where the interpreter gives a float (found
+  2026-09-28, rare).
+- **Float Gaussian integers are still exact.** `(2.0i)^2` evaluates to the
+  exact `-4`, `2.0i + 3` canonicalizes to the exact `3 + 2i`, and
+  `(3.0+2i)(1+i)` is exact: several places keep a Gaussian integer exact
+  (`isExactNumber` in `apply.ts`, `ExactNumericValue.sum`, `_liftComplex`,
+  the fold in `arithmetic-add.ts`), from when the literal `3i` was a float.
+  A decision: whether `ce.number(new Complex(2, 3))` (a `complex-esm` value,
+  doubles by definition) is exact; if not, these exceptions go.
+- **Integer functions of a float argument answer exactly.** `Fibonacci(5.0)`,
+  `Lucas`, `BellNumber`, `CatalanNumber`, `NthPrime`, `PrimePi`, `Totient`,
+  `DigitSum`, `Subfactorial`, `StirlingS1`, `BernoulliB`,
+  `HurwitzZeta(0.0, 2)` give exact results. Mathematica refuses a real
+  argument for most of them. A decision: refuse (a type error), or answer a
+  float. (`Arg(2.0)`, `Im(2.0)`, `Heaviside`, `KroneckerDelta`, `Denominator`,
+  `Rationalize`, `MatrixRank` are exact in Mathematica too and stay.)
+- **WGSL `Mod` when the quotient underflows.** The componentwise floor-mod
+  `(((a % b) - b * floor((a % b) / b)) % b)` (2026-09-27, it replaced
+  `((a % b) + b) % b`, which rounded in `f32`) makes no correction when
+  `(a % b) / b` underflows to `-0`, so the result keeps the wrong sign for a
+  tiny remainder of the opposite sign.
+- **Unfolded identities beside an unknown.** `Nand(True, A)`, `Nor(False, A)`,
+  `Implies(True, A)`, `Implies(A, False)`, `Implies(A, A)`, `Nand(A, A)`,
+  `Equivalent(A, A)` stay unevaluated while `And(True, A)` evaluates to `A`;
+  each value is correct. Folding them (to `¬A`, `¬A`, `A`, `¬A`, `True`,
+  `¬A`, `True`) is new work.
 
 ### Compiled callbacks: an inline lambda ignores its parameter annotation, and a folded `Map` over per-element errors (OPEN — found 2026-09-27)
 
@@ -719,23 +770,34 @@ doubles, so an argument within about `10⁻¹⁵` relative of a pole is refused 
 every precision (`Γ(−3 + 10⁻³⁰)` against `0` stays undecided at 50 digits):
 never a wrong order, a lost answer.
 
-### The imaginary part of an inexact number is a machine double (OPEN, scheduled — 2026-09-24)
+### Complex transcendental functions keep machine precision (OPEN, capability — decision D4 of `docs/plans/2026-09-27-big-decimal-imaginary-part.md`)
 
-`BigNumericValue.im` is a `number`, so `.N()` of a complex value has the working
-precision (21 digits by default) on the real part and 16 digits on the imaginary
-part: `.N()` of `√2 + √2 i` is
-`1.414213562373095 + 1.4142135623730951i` (since 2026-09-27 the real part
-prints at the working precision; before, the complex branch of
-`BigNumericValue.toString()` did not round it and printed 25 or 46 digits). A
-big-decimal imaginary part is scheduled (user decision 2026-09-24), not done.
-Related, a decision (found 2026-09-27): `numericCostFunction`
-(`cost-function.ts`) prices the imaginary radical of an exact complex literal
-but not its real radical, so `√2 + √2i` costs 9 where `i√2` costs 8. Pricing
-the real radical the same way (13) was tried and reverted: `simplify()` then
-kept `∜(−16)` instead of rewriting it to `√2 + √2i`, which
-`imaginary-unit-spelling.test.ts` pins (the exact `∜(−1)` decision of
-2026-09-25). Either the real radical stays unpriced, or the cost of a `Root`
-of a negative radicand rises with it.
+Since 2026-09-27 an inexact complex value holds its imaginary part as a big
+decimal, and `Ln`, `Exp`, `Power`, `Root`, `Sqrt` and the arithmetic compute
+both parts at the working precision. `Sin`, `Cos`, `Tan` and the other
+trigonometric and hyperbolic functions, `Gamma`, `Zeta`, the Bessel family
+and every other complex kernel still compute in doubles (`complex-esm`,
+`numerics/numeric-complex.ts`) at every engine precision: `Sin(1+i).N()` at
+50 digits has 16 correct digits, and an imaginary part below the double
+range reaches those kernels as `0`. The fix is a big-decimal complex kernel
+per function family (the real `BigDecimal` kernels exist). Also:
+`e^{1152921504606846977.5 i\pi}` `.N()` at precision 50 is `4.5e-32 − i`,
+the rounding of `c·π` for a 19-digit `c` at 50 digits, which is expected
+float behaviour.
+Related, in the `e^{iθ}` Euler branch (`boxed-expression/arithmetic-power.ts`,
+`halfTurns`): a large FLOAT angle is reduced modulo π at the working
+precision with no extra digits, so `e^{10^{30} i}` at 40 digits has about 10
+correct digits (`-0.99593119441358739…`, true `-0.99593119440539570…`);
+`BigNumericValue.exp` called directly is correct. The reduction needs about
+`log10|θ|` more digits, or a float angle above machine precision should take
+`exp` directly (found 2026-09-27 by the review of the big-decimal imaginary
+part).
+Also: a negative real base with a tiny imaginary part raised to a COMPLEX
+exponent near a half-integer loses a legitimate small part to the polar
+chop: `(-4 + 10^{-800}i)^{1.5 + 10^{-50}i}` gives `-8i`, the real part is
+`1.109e-49` (mpmath). The real-exponent case splits the angle exactly
+(`e^{iπn·sgn(b)}` chopped alone); the complex-exponent case needs the same
+split (`ARCHITECTURE.md`, the dust-rule bullet, names it).
 
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 

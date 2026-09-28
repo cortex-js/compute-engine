@@ -124,6 +124,11 @@ interface MapCompileCache {
    * cleared `{symbol}` mark can re-attempt on an at()-only pattern).
    * Legitimate recompiles of a previously-compiled function bypass this. */
   attemptedThisDrain?: boolean;
+  /** Marked tier only: true if the lambda, the values it captures and the
+   * user functions it calls hold no float literal (`isExactBody()`). Then an
+   * integer result of exact operands is exact in the interpreter too (see
+   * the runner). */
+  exactBody?: boolean;
 }
 
 /**
@@ -200,7 +205,9 @@ function markedMapLambda(
 
 /** Is `x` a finite real number literal (a literal loop bound)? */
 function isLiteralBound(x: Expression | undefined): boolean {
-  return x !== undefined && isNumber(x) && x.im === 0 && Number.isFinite(x.re);
+  return (
+    x !== undefined && isNumber(x) && !x.isComplex && Number.isFinite(x.re)
+  );
 }
 
 /**
@@ -394,6 +401,41 @@ function resolveDep(ce: ComputeEngine, name: string): MapCompileDep {
   };
 }
 
+/** True if the expression holds no float (inexact) number literal. */
+function hasNoFloatLiteral(e: Expression): boolean {
+  if (isNumber(e)) return e.isExact;
+  return !isFunction(e) || e.ops.every(hasNoFloatLiteral);
+}
+
+/**
+ * True if the lambda `fn`, the values of its captures `deps` and the
+ * `Function` literals of the user functions it calls hold no float literal
+ * (a user function with no `Function` literal is not checked: false). With
+ * exact operands, the interpreter's `N()` of such a body gives an exact value
+ * when the value is an integer: `N(x^2)` at `4` is `16`, `N(k·x)` with `k = 3`
+ * at `2` is `6`. With a float literal the value can be a float
+ * (`N(Sec(1e-13·x))` at `1` is `1.0`).
+ */
+function isExactBody(
+  ce: ComputeEngine,
+  fn: Expression,
+  deps: MapCompileDep[]
+): boolean {
+  if (!hasNoFloatLiteral(fn)) return false;
+  for (const dep of deps) {
+    if (dep.operatorDef !== undefined) {
+      // A user function: its `Function` literal is checked. The compiled
+      // code's captures include the captures of the functions it calls.
+      const literal = userFnLiteral(ce, dep.name);
+      if (literal === undefined || !hasNoFloatLiteral(literal)) return false;
+      continue;
+    }
+    const value = dep.valueDef?.value;
+    if (value !== undefined && !hasNoFloatLiteral(value)) return false;
+  }
+  return true;
+}
+
 /** Has `dep`'s resolution changed since it was snapshotted? */
 function depChanged(ce: ComputeEngine, dep: MapCompileDep): boolean {
   const binding = lookup(dep.name, ce.context.lexicalScope);
@@ -551,11 +593,13 @@ function attemptCompile(
         return noCompile('structural');
   }
 
+  const resolvedDeps = [...deps].map((name) => resolveDep(ce, name));
   return {
     state: 'compiled',
     tier,
     fn: result.run as (...args: unknown[]) => unknown,
-    deps: [...deps].map((name) => resolveDep(ce, name)),
+    deps: resolvedDeps,
+    exactBody: tier === 'marked' && isExactBody(ce, literal, resolvedDeps),
     generation: ce._semanticVersion,
     epoch: ce._worldVersion,
     tolerance: ce.tolerance,
@@ -749,7 +793,7 @@ export function mapAutoCompileRunner(
         const b = sourceBounds[i];
         if (
           b === undefined ||
-          item.im !== 0 ||
+          item.isComplex ||
           !item.isExact ||
           !Number.isSafeInteger(item.re) ||
           item.re < b.lo ||
@@ -759,7 +803,7 @@ export function mapAutoCompileRunner(
           return undefined;
         }
       }
-      args.push(item.im !== 0 ? { re: item.re, im: item.im } : item.re);
+      args.push(item.isComplex ? { re: item.re, im: item.im } : item.re);
     }
 
     // Draw-counter rollback: a compiled body can draw from the ambient
@@ -775,6 +819,20 @@ export function mapAutoCompileRunner(
     const fallback = (): undefined => {
       if (frame !== undefined) frame.next = drawsBefore;
       return undefined;
+    };
+
+    // An integer value of the marked tier: see the comment where a real
+    // result is handled
+    const integerResult = (r: number): Expression | undefined => {
+      if (
+        cache.exactBody === true &&
+        Number.isSafeInteger(r) &&
+        items.every((item) => isNumber(item) && item.isExact)
+      ) {
+        _mapAutoCompileStats.compiledHits++;
+        return ce.number(r);
+      }
+      return fallback();
     };
 
     // Runtime throws propagate (D4) — a runaway recursive user function
@@ -806,8 +864,18 @@ export function mapAutoCompileRunner(
           return ce.number(r);
         }
       } else {
+        // The marked tier computes a numeric approximation, as `N()` does in
+        // the interpreter. A value that is not an integer is a float in the
+        // interpreter too. An integer value can be exact or a float there:
+        // `N(x^2)` at `4` is the exact `16` and `N(Sign(2.5))` the exact `1`,
+        // but `N(Sec(x))` at the float `1e-13` is the float `1.0`, and
+        // `N(Sec(1e-13·x))` is the exact `1` at `0` and the float `1.0` at
+        // `1`. A safe integer from exact operands and a body with no float
+        // literal (`exactBody`) is exact. Any other integer value is computed
+        // again by the interpreter, which alone can tell.
+        if (Number.isInteger(r)) return integerResult(r);
         _mapAutoCompileStats.compiledHits++;
-        return ce.number(r);
+        return ce.number(ce._inexactNumericValue(r));
       }
     }
     if (
@@ -824,8 +892,12 @@ export function mapAutoCompileRunner(
           _mapAutoCompileStats.nanDoubleChecks++;
           return fallback();
         }
+        // A real value (`im === 0`) with an integer value follows the rule
+        // for a real result (see above). A complex value is a float, as it
+        // is in the interpreter (`N(√x)` at `-4` is the float `2.0i`).
+        if (im === 0 && Number.isInteger(re)) return integerResult(re);
         _mapAutoCompileStats.compiledHits++;
-        return ce.number(im === 0 ? re : ce.complex(re, im));
+        return ce.number(ce._inexactNumericValue(im === 0 ? re : { re, im }));
       }
     }
 

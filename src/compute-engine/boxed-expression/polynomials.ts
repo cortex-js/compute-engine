@@ -505,7 +505,7 @@ const SHORT_DECIMAL_DIGITS = 15;
  */
 function shortExactCoefficient(coef: Expression): Expression | undefined {
   if (!hasInexactNumber(coef)) return coef;
-  if (!isNumber(coef) || coef.im !== 0) return undefined;
+  if (!isNumber(coef) || coef.isComplex) return undefined;
   const d = coef.bignumRe ?? new BigDecimal(coef.re);
   if (!d.isFinite() || d._digitCount() > SHORT_DECIMAL_DIGITS) return undefined;
   if (d.exponent >= 0)

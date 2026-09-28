@@ -3674,7 +3674,7 @@ function isProvablyNonIntegerIndex(index: Expression): boolean {
   // is not an integer, however close to one (`1.0000000001`, `10⁹ + 1/2`).
   // The margin below is for an exact SYMBOLIC constant only.
   if (isNumber(index)) {
-    if (index.im !== 0 || !Number.isFinite(index.re)) return false;
+    if (index.isComplex || !Number.isFinite(index.re)) return false;
     return !index.isInteger;
   }
   const own = index.re;
@@ -3686,7 +3686,7 @@ function isProvablyNonIntegerIndex(index: Expression): boolean {
     // applies, for the same reason: no discarded numeric work).
     if (index.unknowns.length > 0) return false;
     const approx = index.N();
-    if (!isNumber(approx) || approx.im !== 0) return false;
+    if (!isNumber(approx) || approx.isComplex) return false;
     value = approx.re;
   }
   if (!Number.isFinite(value) || Number.isInteger(value)) return false;
@@ -4537,6 +4537,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Data Structures
   //
   List: {
+    examples: ['List(1, 2, 3)'],
     description: 'An ordered collection of elements (a list).',
     // A pure container: it STORES its operands, and no position ever invokes
     // a function-valued one (`List(randomF)` is pure to build). See the
@@ -4635,6 +4636,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Comprehensions are not literal 2-element sets: their elements are the
   // substituted bodies over the (filtered) domain.
   Set: {
+    examples: ['{3, 1, 2, 1}'],
     description: 'An unordered collection of distinct elements (a set).',
     // A pure container: it STORES its operands, and no position ever invokes
     // a function-valued one (`List(randomF)` is pure to build). See the
@@ -4810,8 +4812,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   } as OperatorDefinition,
 
   Length: {
+    examples: ['Length([5, 6, 7])', 'Length("hello")'],
     description:
-      'Number of elements in a collection. Returns +oo for an unbounded Range, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for an infinite collection whose length is not decided.',
+      'Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `Integers`, `Repeat(5)`, an interval), as `Count` does, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for a collection whose size is not known (a `Filter` over an infinite source).',
     keywords: ['size'],
     complexity: 4000,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
@@ -4829,14 +4832,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Declared here because the parameter is `any`, which the default policy
     // does not read as a collection.
     missingBehavior: 'propagate',
-    // Only an unbounded `Range` can produce the infinite length the signature
-    // admits; every other collection either has a finite length or leaves
-    // `Length` unevaluated. Report the exact `integer` for those, so a length
-    // used as an index or a loop bound is not widened by a case that cannot
-    // arise there. The endpoints are read through the TYPE channel only (a
-    // type handler must not evaluate: evaluating a compound bound pushes
-    // scopes and advances the invalidation axes), which decides the literal
-    // `Range(1, oo)` and leaves a computed infinite bound to the signature.
+    // `Length` answers `+oo` for every collection whose count is infinite,
+    // as `Count` does (user decision 2026-09-27: `Length(Integers)` is
+    // `+oo`; it was confined to an unbounded `Range` before). The type claim
+    // therefore follows `Count`'s one-operand rule: the exact `integer` for
+    // the cases that are finite by construction and can be decided without
+    // dispatching a collection handler — a literal `List`/`Set` node, a list
+    // type with declared DIMENSIONS, a tuple, a string, and a `Range` whose
+    // bounds are finite number literals — and `integer | +oo` otherwise. A
+    // collection TYPE does not tell a finite value from an infinite one
+    // (`Repeat(5)` is typed `list`, like a list of three strings), so a
+    // symbol or a parameter typed `list<…>` gets the wide claim. Asking the
+    // source whether it is finite would dispatch its
+    // `isFinite` handler, which may WALK a lazy source and run a
+    // caller-supplied callback; a type handler must not do that (see the
+    // comment on `Count`).
     //
     // The handler's `+oo` singleton does not survive as written: a handler
     // result is passed through `widenValueTypes()`
@@ -4844,19 +4854,38 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // type into its ordinary counterpart, so the call reports
     // `integer | infinity`. The DECLARATION is spelled `infinity` for that
     // reason: a declared `+oo` names a type no stored result can ever have,
-    // so the reported type would not be a subtype of the declared one. The
-    // handler keeps the tighter `+oo` because a length is never negatively
-    // infinite, and nothing is lost by it — the two spellings report the same
-    // type once the widening has run, so there is no open question here about
-    // exempting this result from that widening.
+    // so the reported type would not be a subtype of the declared one.
     type: ([xs], context) => {
-      const source = xs?.structureOf?.();
-      return BoxedType.forResult(
-        source?.kind === 'application' &&
+      if (xs !== undefined) {
+        const source = xs.structureOf?.();
+        if (
+          source?.kind === 'list-literal' ||
+          (source?.kind === 'application' && source.head === 'Set')
+        )
+          return BoxedType.forResult('integer', context.engine._typeResolver);
+        if (source?.kind === 'tuple')
+          return BoxedType.forResult('integer', context.engine._typeResolver);
+        if (
+          source?.kind === 'application' &&
           source.head === 'Range' &&
-          source.children.some((op) => isSubtype(op.type, 'infinity'))
-          ? COUNT_OR_INFINITE
-          : 'integer',
+          source.children.length > 0 &&
+          source.children.every(
+            (op) =>
+              op.structureOf?.()?.kind === 'number' &&
+              !isSubtype(op.type, 'infinity')
+          )
+        )
+          return BoxedType.forResult('integer', context.engine._typeResolver);
+        const t = xs.type;
+        if (
+          t === 'string' ||
+          (typeof t !== 'string' &&
+            ((t.kind === 'list' && t.dimensions) || t.kind === 'tuple'))
+        )
+          return BoxedType.forResult('integer', context.engine._typeResolver);
+      }
+      return BoxedType.forResult(
+        COUNT_OR_INFINITE,
         context.engine._typeResolver
       );
     },
@@ -4916,17 +4945,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // empty collection; emptiness is consulted only for a collection that
       // knows it is empty without knowing its size.
       const n = xs.count;
-      // An unbounded `Range` has an infinite EXTENT, and reading that extent
-      // is what `Length` is for here: an infinite endpoint does not name a
-      // last element (ruling L10), so the honest length of `Range(1, +oo)` is
-      // `+oo`, not an unevaluated form. This arm is deliberately confined to
-      // `Range`: no convention has been settled for the length of the other
-      // infinite collections — an `Interval` is a continuum, so a COUNT of
-      // elements is not what its extent means — and they keep the inert form
-      // below.
-      if (n === Infinity && isFunction(xs, 'Range'))
-        return engine.PositiveInfinity;
-      // Guard infinite collections (e.g. Length(Repeat(5))).
+      // An infinite collection has length `+oo`, whatever its kind: an
+      // unbounded `Range`, a number set (`Integers`), `Repeat(5)`, an
+      // interval — the answer `Count` gives (user decision 2026-09-27). A
+      // collection whose count is not known (a `Filter` over an infinite
+      // source) keeps the inert form below.
+      if (n === Infinity) return engine.PositiveInfinity;
       if (n === undefined || !isFinite(n))
         return xs.isEmptyCollection ? engine.Zero : undefined;
       return engine.number(n);
@@ -4934,6 +4958,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Tuple: {
+    examples: ['(1, "a", True)'],
     description: 'A fixed number of heterogeneous elements',
     // A pure container: it STORES its operands, and no position ever invokes
     // a function-valued one (`List(randomF)` is pure to build). See the
@@ -5018,6 +5043,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // aggregate into every point. Lowering narrower than typing is intended.
   // See `docs/COLLECTIONS-MODEL.md` predicate.
   PointList: {
+    examples: ['PointList([1, 2, 3], [4, 5, 6])'],
     description:
       'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
     complexity: 8200,
@@ -5326,6 +5352,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   } as OperatorDefinition,
 
   KeyValuePair: {
+    examples: ['Dictionary(KeyValuePair("a", 1), KeyValuePair("b", 2))'],
     description: 'A key/value pair',
     // A pure container: it STORES its operands, and no position ever invokes
     // a function-valued one (`List(randomF)` is pure to build). See the
@@ -5345,6 +5372,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Dictionary: {
+    examples: ['{"a" -> 1, "b" -> 2}["b"]'],
     description:
       'A collection of key -> value entries with string keys (`{x -> 1, y -> 2}` in Epsil).',
     // Boxing intercepts `["Dictionary", …]` structurally and constructs the
@@ -5431,6 +5459,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Keys: {
+    examples: ['Keys({"a" -> 1, "b" -> 2})'],
     description: 'Return a list of the keys of a dictionary.',
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
@@ -5460,6 +5489,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Values: {
+    examples: ['Values({"a" -> 1, "b" -> 2})'],
     description: 'Return a list of the values of a dictionary.',
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
@@ -5503,6 +5533,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Single: {
+    examples: ['Single(5)'],
     description: 'A tuple with a single element',
     // A pure container: it STORES its operands, and no position ever invokes
     // a function-valued one (`List(randomF)` is pure to build). See the
@@ -5514,6 +5545,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Pair: {
+    examples: ['Pair(1, 2)'],
     description: 'A tuple of two elements',
     // A pure container: it STORES its operands, and no position ever invokes
     // a function-valued one (`List(randomF)` is pure to build). See the
@@ -5525,6 +5557,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Triple: {
+    examples: ['Triple(1, 2, 3)'],
     description: 'A tuple of three elements',
     // A pure container: it STORES its operands, and no position ever invokes
     // a function-valued one (`List(randomF)` is pure to build). See the
@@ -5542,6 +5575,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   //
 
   Range: {
+    examples: ['1..5', 'Range(1, 10, 3)'],
     description:
       'A sequence of numbers from a start to an end value with an optional step.',
     complexity: 8200,
@@ -5950,17 +5984,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // pure value. The signature admits an infinite endpoint (`Open(-oo)` is the
   // open end of a ray).
   Open: {
+    examples: ['0 in Interval(Open(0), 1)'],
     description:
       'Open(x): the endpoint x of an Interval, marked as excluded. A marker with no value of its own.',
     signature: '(number) -> number',
   },
   Closed: {
+    examples: ['1 in Interval(0, Closed(1))'],
     description:
       'Closed(x): the endpoint x of an Interval, marked as included. A marker with no value of its own; Interval normalizes it away.',
     signature: '(number) -> number',
   },
 
   Interval: {
+    examples: ['0.5 in Interval(0, 1)'],
     description:
       'A set of real numbers between two endpoints. The endpoints may or may not be included.',
     complexity: 8200,
@@ -6216,6 +6253,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   } as OperatorDefinition,
 
   Linspace: {
+    examples: ['Linspace(0, 1, 5)'],
     description:
       'A sequence of evenly spaced numbers between a start and end value, both endpoints included.',
     complexity: 8200,
@@ -6340,6 +6378,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   //
 
   Contains: {
+    examples: ['Contains([1, 2, 3], 2)'],
     description:
       'Return True if the collection contains the given element (structural identity, like `===`), False otherwise. An absent element is found where the same marker sits: `Contains([1, NaN], NaN)` is True.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.',
     complexity: 8200,
@@ -6397,6 +6436,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Count: {
+    examples: ['Count([1, 2, 1, 3, 1], 1)'],
     description: [
       '`Count(xs)`: the number of elements in the collection.',
       '`Count(xs, v)`: how many elements are structurally the same as `v`.',
@@ -6615,6 +6655,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   IsEmpty: {
+    examples: ['IsEmpty([])'],
     description: ['Return True if the collection is empty, False otherwise.'],
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
@@ -6663,6 +6704,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // predicate is optional so a collection of booleans can be tested directly,
   // like Julia's `any(itr)`.
   Any: {
+    examples: ['Any([1, 3, 4], x => x % 2 == 0)'],
     description:
       'Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) => e === v)`.',
     complexity: 8200,
@@ -6700,6 +6742,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // (or, without a predicate, if every element is itself True). Vacuously True
   // for an empty collection, like Julia's `all(itr)`.
   All: {
+    examples: ['All([2, 4, 6], x => x % 2 == 0)'],
     description:
       'Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given).',
     complexity: 8200,
@@ -6734,6 +6777,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // { f(x) for x in xs }
   // { 2x | x ∈ [ 1 , 10 ] }
   Map: {
+    examples: ['Map(x => x^2, [1, 2, 3])'],
     description: [
       'Return the collection where each element has been transformed by the mapping function.',
       'With a single collection, equivalent to `[f(x) for x in xs]`. With',
@@ -7066,6 +7110,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Filter: {
+    examples: ['Filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)'],
     description: [
       'Return the elements of the collection for which the predicate function returns True.',
       'Equivalent to `[x for x in xs if p(x)]`.',
@@ -7373,6 +7418,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Haskell: "foldl"
   // For "foldr", apply Reverse() first
   Reduce: {
+    examples: ['Reduce([1, 2, 3, 4], (a, b) => a * b)'],
     description:
       'Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value.',
     complexity: 8200,
@@ -7449,6 +7495,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // c)`. Canonicalizes directly to the equivalent `Reduce(list, f, x)`, so it
   // shares Reduce's evaluation, laziness, and inert-when-symbolic behavior.
   Fold: {
+    examples: ['Fold((a, b) => a + b, 0, [1, 2, 3, 4])'],
     description:
       'Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value.',
     complexity: 8200,
@@ -7494,6 +7541,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // `y1 = f(initial, x1)`. Lazy — the running accumulator is computed
   // incrementally, so `Take(Scan(Range(1, 10^9), Add), 5)` stays fast.
   Scan: {
+    examples: ['Scan([1, 2, 3, 4], (a, b) => a + b)'],
     description:
       'Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value).',
     complexity: 8200,
@@ -7598,6 +7646,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // collection, `yk = x(k+1) − xk`. Length n−1. Lazy — keeps only the previous
   // element.
   Differences: {
+    examples: ['Differences([1, 4, 9, 16])'],
     description:
       'Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input.',
     complexity: 8200,
@@ -7696,6 +7745,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Haskell `takeWhile`: the leading run of elements for which the predicate is
   // True; stops at (and excludes) the first element that is not True.
   TakeWhile: {
+    examples: ['TakeWhile([1, 2, 3, 10, 4], x => x < 5)'],
     description: [
       'Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not.',
     ],
@@ -7843,6 +7893,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // predicate is True, then yield everything after (the predicate is not
   // applied past the first non-True element).
   DropWhile: {
+    examples: ['DropWhile([1, 2, 3, 10, 4], x => x < 5)'],
     description: [
       'Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered.',
     ],
@@ -7936,6 +7987,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // single element (singleton coercion — a CAS should not error on
   // `FlatMap([1, 2], x -> x^2)`).
   FlatMap: {
+    examples: ['FlatMap([1, 2, 3], x => [x, x])'],
     description: [
       'Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements.',
     ],
@@ -8077,6 +8129,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Join: {
+    examples: ['Join([1, 2], [3, 4])', 'Join("ab", "cd")'],
     description: [
       'Join the elements of some collections into a flat collection.',
       'A tuple operand is appended as a single element, not spliced.',
@@ -8433,6 +8486,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // (`Append([[1,2],[3,4]], [5,6])` → 3 rows) and a point appended to a point
   // list (`Append([(1,2)], (3,4))` → 2 points) are load-bearing behaviors.
   Append: {
+    examples: ['Append([1, 2], 3, 4)'],
     description: ['Add one or more elements to the end of a collection.'],
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
@@ -8672,6 +8726,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   //
 
   Field: {
+    examples: ['{x -> 1, y -> 2}.y'],
     description: [
       'Access a named field of a value: `p.x` in Epsil.',
       'On a record or dictionary value, `Field(d, "x")` behaves exactly as `d["x"]` (`At` semantics, including the absence marker for a key a dictionary may not have).',
@@ -8984,6 +9039,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   At: {
+    examples: ['[10, 20, 30][2]', '[10, 20, 30][-1]'],
     description: [
       'Access an element of an indexed collection.',
       'If the index is negative, it is counted from the end.',
@@ -9605,6 +9661,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // Miranda: `take` (also Haskell)
   Take: {
+    examples: ['Take([1, 2, 3, 4, 5], 2)'],
     description: ['Return `n` elements from a collection.'],
     complexity: 8200,
     // The leading arm is the string-preservation rule: taking a prefix of a
@@ -9720,6 +9777,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // Miranda: `drop` (also Haskell)
   Drop: {
+    examples: ['Drop([1, 2, 3, 4, 5], 2)'],
     description: ['Return the collection without the first n elements.'],
     complexity: 8200,
     // The leading arm is the string-preservation rule: dropping a prefix of a
@@ -9839,6 +9897,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // application's codomain instead: `NaN` for a numeric element, `Missing`
   // for a point, a row, a string or an element of unknown type.
   First: {
+    examples: ['First([7, 8, 9])'],
     description: 'The first element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
@@ -9858,6 +9917,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Second: {
+    examples: ['Second([7, 8, 9])'],
     description: 'The second element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
@@ -9874,6 +9934,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Third: {
+    examples: ['Third([7, 8, 9])'],
     description: 'The third element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
@@ -9914,6 +9975,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // numeric `T`) — which the §3.E gate substitutes before the evaluate
   // handler runs.
   PointX: {
+    examples: ['PointX((3, 4))', 'PointX([(1, 2), (3, 4)])'],
     description:
       'The x-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
@@ -9939,6 +10001,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   PointY: {
+    examples: ['PointY((3, 4))'],
     description:
       'The y-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
@@ -9961,6 +10024,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   PointZ: {
+    examples: ['PointZ((3, 4, 5))'],
     description:
       'The z-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
@@ -10004,6 +10068,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Last: {
+    examples: ['Last([7, 8, 9])'],
     description: 'The last element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
@@ -10020,6 +10085,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Rest: {
+    examples: ['Rest([7, 8, 9])'],
     description: [
       'Return the collection without the first element.',
       'If the collection has only one element, return an empty collection.',
@@ -10108,6 +10174,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Most: {
+    examples: ['Most([7, 8, 9])'],
     complexity: 8200,
     description: [
       'Return the collection without the last element.',
@@ -10184,6 +10251,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Slice: {
+    examples: ['Slice([10, 20, 30, 40, 50], 2, 4)'],
     description: [
       'Return a contiguous run of elements from an indexed collection.',
       'Given `start` and `end` (1-based, inclusive), a negative index is counted from the end and out-of-bounds indices are clamped.',
@@ -10352,6 +10420,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // APL: rotate ⌽
   Reverse: {
+    examples: ['Reverse([1, 2, 3])'],
     description: 'Reverse the order of the elements of an indexed collection.',
     complexity: 8200,
     // Per-kind result rule (`docs/STRING_ROADMAP.md`, "Signature refinement",
@@ -10452,6 +10521,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // result head is always `List` (rebuilding a Range/other structured source
   // from its materialized operands would be wrong).
   Insert: {
+    examples: ['Insert([1, 2, 4], 3, 3)'],
     description: [
       'Return a copy of the indexed collection with `value` inserted before the 1-based `index`.',
       '`index` may range from 1 to n+1 (n+1 appends). A negative index counts from the end, with -1 appending at the end (Elixir semantics).',
@@ -10584,6 +10654,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Elixir `List.delete_at/2`: return a copy with the element at the 1-based
   // `index` removed. Eager on finite indexed collections; inert otherwise.
   DeleteAt: {
+    examples: ['DeleteAt([1, 2, 3, 4], 2)'],
     description: [
       'Return a copy of the indexed collection with the element at the 1-based `index` removed.',
       'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
@@ -10696,6 +10767,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // `index` replaced by `value`. Eager on finite indexed collections; inert
   // otherwise.
   ReplaceAt: {
+    examples: ['ReplaceAt([1, 2, 3], 2, 20)'],
     description: [
       'Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.',
       'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
@@ -10804,6 +10876,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   RotateLeft: {
+    examples: ['RotateLeft([1, 2, 3, 4])'],
     description:
       'Rotate the elements of the collection to the left by n positions.',
     complexity: 8200,
@@ -10920,6 +10993,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   RotateRight: {
+    examples: ['RotateRight([1, 2, 3, 4])'],
     description:
       'Rotate the elements of the collection to the right by n positions.',
     complexity: 8200,
@@ -11005,6 +11079,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // ["Join", ["List", 1, 2, 3], ["List", 4, 5, 6]] -> ["List", 1, 2, 3, 4, 5, 6]
 
   IndexOf: {
+    examples: ['IndexOf([10, 20, 30], 20)'],
     description:
       'Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2.',
     complexity: 8200,
@@ -11042,6 +11117,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // distinct from `IndexOf`/`Contains` (element search) and what makes
   // `RangeOf([[1,2],[3,4]], [3,4])` unambiguous.
   RangeOf: {
+    examples: ['RangeOf([10, 20, 30, 40], [30, 40])'],
     description: [
       'Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Nothing` when it does not occur.',
       "The search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Nothing`.",
@@ -11114,6 +11190,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   ContainsSequence: {
+    examples: ['ContainsSequence([1, 2, 3, 4], [2, 3])'],
     description: [
       'Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection.',
       'Unlike `Contains`, which tests membership of a single element, the needle is read as a sequence: `ContainsSequence("abc", "ab")` is `True` while `Contains("abc", "ab")` is `False`.',
@@ -11139,6 +11216,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   StartsWith: {
+    examples: ['StartsWith([1, 2, 3], [1, 2])'],
     description: [
       'Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence.',
       'On a string the prefix is matched character by character, so a prefix that would end inside a grapheme cluster does not match. An empty prefix matches everything.',
@@ -11160,6 +11238,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   EndsWith: {
+    examples: ['EndsWith([1, 2, 3], [2, 3])'],
     description: [
       'Return `True` when the indexed collection ends with `suffix` as a contiguous subsequence.',
       'On a string the suffix is matched character by character, so a suffix that would begin inside a grapheme cluster does not match. An empty suffix matches everything.',
@@ -11187,6 +11266,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   IndexWhere: {
+    examples: ['IndexWhere([1, 4, 9, 16], x => x > 5)'],
     description:
       'Return the 1-based index of the first element satisfying the predicate, or 0 if not found.',
     complexity: 8200,
@@ -11225,6 +11305,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Find: {
+    examples: ['Find([1, 4, 9, 16], x => x > 5)'],
     description:
       'Return the first element of the collection satisfying the predicate, or Nothing if none found.',
     complexity: 8200,
@@ -11275,6 +11356,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   CountIf: {
+    examples: ['CountIf([1, 4, 9, 16], x => x > 5)'],
     description:
       'Return the number of elements in the collection satisfying the predicate.',
     complexity: 8200,
@@ -11319,6 +11401,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Position: {
+    examples: ['Position([1, 4, 9, 16], x => x > 5)'],
     description:
       'Return a list of indexes of elements in the collection satisfying the predicate.',
     complexity: 8200,
@@ -11361,6 +11444,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // APL: Grade Up `⍋` and Grade Down `⍒`
   // Mathematica: `Ordering`
   Ordering: {
+    examples: ['Ordering([30, 10, 20])'],
     description: 'Return the indexes that would sort the collection.',
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
@@ -11401,6 +11485,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Sort: {
+    examples: ['Sort([3, 1, 2])', 'Sort(["pear", "fig", "apple"], Length)'],
     description:
       'Return the elements of the collection sorted according to the given comparison function.',
     complexity: 8200,
@@ -11459,6 +11544,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // key `f(x)`. First occurrence wins ties. Eager and inert (undefined) on a
   // non-finite or empty collection, or when a key comparison is undetermined.
   MaxBy: {
+    examples: ['MaxBy(["pear", "fig", "apple"], Length)'],
     description:
       'Return the element of the collection that maximizes the given key function.',
     complexity: 8200,
@@ -11498,6 +11584,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   MinBy: {
+    examples: ['MinBy(["pear", "fig", "apple"], Length)'],
     description:
       'Return the element of the collection that minimizes the given key function.',
     complexity: 8200,
@@ -11541,6 +11628,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // is absent. First occurrence wins ties. Inert on non-finite/empty
   // collections or undetermined comparisons.
   ArgMax: {
+    examples: ['ArgMax([3, 9, 2])'],
     description:
       'Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
@@ -11586,6 +11674,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   ArgMin: {
+    examples: ['ArgMin([3, 9, 2])'],
     description:
       'Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
@@ -11629,6 +11718,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // `WithRandomSeed`; there is no seed argument (see
   // `docs/RANDOMNESS-MODEL.md` §5).
   RandomShuffle: {
+    examples: ['RandomShuffle([1, 2, 3, 4])'],
     description:
       'Randomize the order of the elements in the collection. ' +
       'Shuffling a string yields a string. ' +
@@ -11730,6 +11820,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Tabulate: {
+    examples: ['Tabulate((i, j) => i * j, 2, 3)'],
     description:
       'Create a collection by applying a function to each index in the specified dimensions.',
     keywords: ['table'],
@@ -11821,6 +11912,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Table: {
+    examples: ['Table(i^2, (i, 1, 5))'],
     description: [
       'An alias for `Tabulate` (the preferred name) that additionally accepts',
       'Mathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or',
@@ -11908,6 +12000,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
    * Ex: Tally([a, c, a, d, a, c]) = [[a, c, d], [3, 2, 1]]
    */
   Tally: {
+    examples: ['Tally(["a", "b", "a", "c", "a"])'],
     description:
       'Return a tuple with the unique elements of the collection and their respective counts.',
     complexity: 8200,
@@ -11933,6 +12026,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Equivalent to `Union` in Mathematica, `distinct` in Scala,
   // Unique or Nub ∪, ↑ in APL
   Unique: {
+    examples: ['Unique([1, 2, 1, 3, 2])'],
     description: 'Return a list of the unique elements of the collection.',
     complexity: 8200,
     // The LEADING arm is the string-preservation rule: the distinct characters
@@ -11975,6 +12069,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // ALL duplicates globally): `Dedup([1,1,2,2,1])` is `[1,2,1]` whereas
   // `Unique([1,1,2,2,1])` is `[1,2]`. Lazy — keeps only the previous element.
   Dedup: {
+    examples: ['Dedup([1, 1, 2, 2, 1])'],
     description: [
       'Return the collection with consecutive duplicate elements collapsed to a single element.',
       'Only immediately-adjacent equal elements are removed; unlike `Unique`, a value that recurs after a different element is kept.',
@@ -12114,6 +12209,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Partition a collection into fixed-size chunks, sliding windows, or by a
   // predicate function. See `Chunk` for splitting into k nearly-equal groups.
   Partition: {
+    examples: [
+      'Partition([1, 2, 3, 4, 5], 2)',
+      'Partition([1, 2, 3, 4, 5], x => x % 2 == 0)',
+    ],
     description: [
       'Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length.',
       'With a third argument `step`, produce sliding windows of length `n` whose starts are `step` apart, keeping only complete windows.',
@@ -12320,6 +12419,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Chunk: {
+    examples: ['Chunk([1, 2, 3, 4, 5, 6], 3)'],
     description:
       'Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks.',
     complexity: 8200,
@@ -12403,6 +12503,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // split the collection into maximal runs of CONSECUTIVE elements over which
   // the unary key `f(x)` yields the same value. Returns a list of lists.
   ChunkBy: {
+    examples: ['ChunkBy([1, 3, 2, 4, 5], x => x % 2)'],
     description: [
       'Split the collection into maximal runs of consecutive elements over which the key function yields the same value.',
       'Returns a list of lists. Unlike `GroupBy`, only adjacent elements are grouped, so a key value that recurs after a different run starts a new chunk.',
@@ -12573,6 +12674,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   GroupBy: {
+    examples: ['GroupBy(["apple", "fig", "pear", "kiwi"], Length)'],
     description: [
       'Partition the collection into a dictionary of lists based on the key returned by the function.',
     ],
@@ -12622,9 +12724,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           }
         }
 
+        // A character key is the same value as the one-character string
+        // (`ce.string('a').isSame(ce.character('a'))`), so it groups under
+        // the same text key: `toString()` would quote it (`"a"`).
         const key =
           (isSymbol(keyExpr) ? keyExpr.symbol : undefined) ??
-          (isString(keyExpr) ? keyExpr.string : undefined) ??
+          (isString(keyExpr) || isCharacter(keyExpr)
+            ? keyExpr.string
+            : undefined) ??
           keyExpr.toString();
 
         if (!(key in groups)) groups[key] = [];
@@ -12645,6 +12752,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // The length of the result is the length of the shortest argument
   // Ex: Zip([a, b, c], [1, 2]) = [[a, 1], [b, 2]]
   Zip: {
+    examples: ['Zip([1, 2, 3], ["a", "b", "c"])'],
     description:
       'Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input.',
     complexity: 8200,
@@ -12746,6 +12854,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   //
   // A UNARY function is applied to the accumulator alone — see `iterateArgs`.
   Iterate: {
+    examples: ['Take(Iterate(x => 2x, 1), 5)'],
     description: [
       'Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value.',
       'The function is invoked as `f(index, acc)`: `index` is the 1-based position of the element being produced, and `acc` is the previous element — the `initial` value when producing element 1. Element `k` is therefore `f(k, element(k-1))`.',
@@ -12818,6 +12927,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Repeat(x) -> [x, x, ...]        — infinite sequence
   // Repeat(x, n) -> [x, x, ..., x]  — finite list of n copies
   Repeat: {
+    examples: ['Repeat(0, 3)'],
     description:
       'Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies.',
     complexity: 8200,
@@ -12902,6 +13012,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Cycle(list) -> [list[1], list[2], ...]
   // -> repeats infinitely
   Cycle: {
+    examples: ['Take(Cycle([1, 2]), 5)'],
     description:
       'Produce an infinite sequence by cycling through the elements of a finite collection.',
     complexity: 8200,
@@ -12971,6 +13082,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Fill a nxm matrix with the result of f(i, j)
   // Fill( Random(5), [3, 3] )
   Fill: {
+    examples: ['Fill((i, j) => 10i + j, (2, 3))'],
     description:
       'Produce a 2D list (matrix) by applying a function to each pair of row and column indexes.',
     complexity: 8200,
@@ -13045,6 +13157,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Create eager collections from other collections.
   //
   ListFrom: {
+    examples: ['ListFrom({1, 2}, 3..4)'],
     description: 'Create a list from the elements of a collection.',
     complexity: 8200,
     signature: '(value*) -> list',
@@ -13125,6 +13238,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   SetFrom: {
+    examples: ['SetFrom([1, 2, 2, 3])'],
     description: 'Create a set from the elements of a collection.',
     complexity: 8200,
     signature: '(value*) -> set',
@@ -13165,6 +13279,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   TupleFrom: {
+    examples: ['TupleFrom([1, 2, 3])'],
     description: 'Create a tuple from the elements of a collection.',
     complexity: 8200,
     signature: '(value*) -> tuple',
@@ -13191,6 +13306,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   DictionaryFrom: {
+    examples: ['DictionaryFrom([("a", 1), ("b", 2)])'],
     description:
       'Create a dictionary from the elements of a collection of (key, value) pairs.',
     complexity: 8200,

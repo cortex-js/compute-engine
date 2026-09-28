@@ -781,7 +781,7 @@ export function cmp(
       // Check if b is a symbol with inequality assumptions
       if (isSymbol(b)) {
         // A non-real (complex) number cannot be ordered against a real symbol
-        if (a.im !== 0) return undefined;
+        if (a.isComplex) return undefined;
         const bounds = getInequalityBoundsFromAssumptions(a.engine, b.symbol);
         const aNum =
           typeof a.numericValue === 'number'
@@ -992,7 +992,7 @@ export function cmp(
     // Check inequality assumptions for the symbol.
     // Only compare against a provably real number (a complex value is unordered
     // and its bounds relationship is indeterminate).
-    if (isNumber(b) && b.im === 0) {
+    if (isNumber(b) && !b.isComplex) {
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
       // The bound is compared with `b` exactly, as in the number-to-symbol
       // branch above.
@@ -1353,7 +1353,7 @@ const atTransientPrecision = new WeakSet<Expression['engine']>();
 /** True when the value of `x` is a finite real number. */
 function isRealValue(x: Expression): boolean {
   const v = x.N();
-  return isNumber(v) && v.im === 0 && v.isFinite === true;
+  return isNumber(v) && !v.isComplex && v.isFinite === true;
 }
 
 /**
@@ -1366,7 +1366,7 @@ function isRealValue(x: Expression): boolean {
 function isWithinTolerance(a: Expression, b: Expression): boolean {
   const x = a.N();
   const y = b.N();
-  if (!isNumber(x) || !isNumber(y) || x.im !== 0 || y.im !== 0) return false;
+  if (!isNumber(x) || !isNumber(y) || x.isComplex || y.isComplex) return false;
   const u = bigDecimalOf(x);
   const v = bigDecimalOf(y);
   if (!u.isFinite() || !v.isFinite()) return false;
@@ -1392,7 +1392,7 @@ function correctlyRoundedMachineValue(x: Expression): number | undefined {
     if (x.symbol === 'ExponentialE') return Math.E;
     y = x.value;
   }
-  if (y === undefined || !isNumber(y) || y.im !== 0) return undefined;
+  if (y === undefined || !isNumber(y) || y.isComplex) return undefined;
   const v = y.re;
   return Number.isFinite(v) ? v : undefined;
 }
@@ -1484,7 +1484,7 @@ function machineSpecialValue(
   // The reflection formula of the machine Γ loses digits near a pole.
   if (x.operator === 'Gamma' && !(c > 0)) return undefined;
   const v = x.N();
-  if (!isNumber(v) || v.im !== 0) return undefined;
+  if (!isNumber(v) || v.isComplex) return undefined;
   const value = v.re;
   if (!Number.isFinite(value) || value === 0) return undefined;
   const logValue =
@@ -1595,7 +1595,7 @@ function orderByValue(
     !containsInexactLiteral(b);
 
   // An exact difference has an exact sign (`(x + 1) − (x + 2)` is `−1`).
-  if (tolerance === 0 && isNumber(diff0) && diff0.isExact && diff0.im === 0) {
+  if (tolerance === 0 && isNumber(diff0) && diff0.isExact && !diff0.isComplex) {
     if (diff0.isSame(0)) return '=';
     // A complex value that is not real has no order, also when the
     // imaginary parts cancel in the difference: `z < z + 1` is undecided
@@ -1618,7 +1618,7 @@ function orderByValue(
   const bN = b.N();
   if (!isNumber(aN) || !isNumber(bN)) return undefined;
   if (aN.isNaN === true || bN.isNaN === true) return undefined;
-  if (aN.im !== 0 || bN.im !== 0) {
+  if (aN.isComplex || bN.isComplex) {
     // With no tolerance, a computed zero can be the rounding of a value that
     // is not zero, so only an EXACT zero difference is a tie.
     if (tolerance === 0)
@@ -1670,7 +1670,7 @@ function orderFromDifference(
     if (tolerance === 0 ? v === 0 : Math.abs(v) <= tolerance) return '=';
     return v < 0 ? '<' : '>';
   }
-  if (v.isNaN || v.im !== 0) return undefined;
+  if (v.isNaN || v.isComplex) return undefined;
   if (tolerance === 0 ? v.isZero : v.isZeroWithTolerance(tolerance)) return '=';
   return v.lt(0) ? '<' : '>';
 }
@@ -1805,7 +1805,7 @@ function bigDecimalOf(v: Expression): BigDecimal {
 function realParts(
   v: Expression
 ): { sign: -1 | 0 | 1; logMagnitude: number } | undefined {
-  if (!isNumber(v) || v.im !== 0) return undefined;
+  if (!isNumber(v) || v.isComplex) return undefined;
   const nv = v.numericValue;
   if (typeof nv === 'number') {
     if (!Number.isFinite(nv)) return undefined;

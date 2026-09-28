@@ -273,7 +273,7 @@ describe('EPSIL MATCH — diagnostics', () => {
     // print-sugar is a named follow-up of the first-class-types plan's R6
     // sugar revisit (`docs/TYPE-SYSTEM.md`).
     expect(serializeEpsil(expr!)).toBe(
-      'match n {\n  a => 1\n  b if MatchesType(b, TypeFrom("integer")) => 2\n  _ => 3\n}'
+      'match n {\n  a => 1\n  b if MatchesType(b, typeFrom("integer")) => 2\n  _ => 3\n}'
     );
   });
 

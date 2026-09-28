@@ -314,8 +314,8 @@ describe('CANONICAL FORMS', () => {
       `);
       expect(checkPower('0^{1.1}')).toMatchInlineSnapshot(`
         box        = ["Power", 0, 1.1]
-        canonForms = 0
-        canonical  = 0
+        canonForms = {num: "0.0"}
+        canonical  = {num: "0.0"}
       `);
       expect(checkPower('0^{-1}')).toMatchInlineSnapshot(`
         box        = ["Power", 0, -1]
@@ -697,8 +697,8 @@ describe('CANONICAL FORMS', () => {
       `);
       expect(checkPower('{7\\sqrt{13}}^{0.5}')).toMatchInlineSnapshot(`
         box        = ["Power", ["InvisibleOperator", 7, ["Sqrt", 13]], 0.5]
-        canonForms = ["Sqrt", ["InvisibleOperator", 7, ["Sqrt", 13]]]
-        canonical  = ["Sqrt", ["Multiply", 7, ["Sqrt", 13]]]
+        canonForms = ["Power", ["InvisibleOperator", 7, ["Sqrt", 13]], 0.5]
+        canonical  = ["Power", ["Multiply", 7, ["Sqrt", 13]], 0.5]
       `);
       //note: for the following two cases, 'fully'-canonical transforms 'Divide -> Multiply' (this
       //being preferred to facilitate further ops.)

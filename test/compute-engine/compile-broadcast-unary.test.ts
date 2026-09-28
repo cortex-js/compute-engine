@@ -236,10 +236,12 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       );
       // The two exponents both containers agree on stay admitted: a
       // non-negative integer, and a provably non-integer one (`v ** 0.5` is a
-      // float on a plain list and on an integer ndarray alike — here it
-      // canonicalizes to `Sqrt`, which NumPy broadcasts natively).
+      // float on a plain list and on an integer ndarray alike). The float
+      // exponent `0.5` stays a `Power`: only the exact `1/2` canonicalizes to
+      // `Sqrt` (user decision 2026-09-27: a float operand is kept).
       expect(p(['Power', 'L', 3])).toBe('[_tv1 ** 3 for _tv1 in L]');
-      expect(p(['Power', 'L', 0.5])).toBe('np.emath.sqrt(L)');
+      expect(p(['Power', 'L', 0.5])).toBe('[_tv1 ** 0.5 for _tv1 in L]');
+      expect(p(['Power', 'L', ['Rational', 1, 2]])).toBe('np.emath.sqrt(L)');
     });
 
     it('fans out over a merely collection-TYPED operand as well', () => {

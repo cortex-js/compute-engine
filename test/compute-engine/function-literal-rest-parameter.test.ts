@@ -363,7 +363,7 @@ describe('Rest parameter — typing', () => {
   test('a rest-only literal has an all-variadic signature', () => {
     const ce = new ComputeEngine();
     const f = ce.box(['Function', ['Length', 'args'], ['Spread', 'args']]);
-    expect(f.type.toString()).toBe('(any*) -> integer');
+    expect(f.type.toString()).toBe('(any*) -> integer | signed_infinity');
   });
 });
 
@@ -422,7 +422,9 @@ describe('Rest parameter — named definitions', () => {
       'f',
       ce.box(['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']])
     );
-    expect(ce.symbol('f').type.toString()).toBe('(unknown, any*) -> integer');
+    expect(ce.symbol('f').type.toString()).toBe(
+      '(unknown, any*) -> integer | signed_infinity'
+    );
   });
 
   test('the Assign box route agrees with ce.assign', () => {
@@ -432,7 +434,9 @@ describe('Rest parameter — named definitions', () => {
       'g',
       ['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']],
     ]).evaluate();
-    expect(ce.symbol('g').type.toString()).toBe('(unknown, any*) -> integer');
+    expect(ce.symbol('g').type.toString()).toBe(
+      '(unknown, any*) -> integer | signed_infinity'
+    );
   });
 
   test('a rest-only definition has an all-variadic signature', () => {
@@ -441,7 +445,9 @@ describe('Rest parameter — named definitions', () => {
       'f',
       ce.box(['Function', ['Length', 'args'], ['Spread', 'args']])
     );
-    expect(ce.symbol('f').type.toString()).toBe('(any*) -> integer');
+    expect(ce.symbol('f').type.toString()).toBe(
+      '(any*) -> integer | signed_infinity'
+    );
   });
 
   test('call arities on the box route', () => {
@@ -471,7 +477,7 @@ describe('Rest parameter — named definitions', () => {
       ])
     );
     expect(ce.symbol('g').type.toString()).toBe(
-      '(a: integer, any*) -> integer'
+      '(a: integer, any*) -> integer | signed_infinity'
     );
     expect(ce.box(['g', 1]).evaluate().toString()).toBe('0');
     expect(ce.box(['g', 1, 2, 3]).evaluate().toString()).toBe('2');
@@ -538,9 +544,9 @@ describe('Rest parameter — named definitions', () => {
   });
 
   test.each([
-    'h(a, ...rest) = Length(rest)',
-    'h(...all) = Length(all)',
-    'function h(a, ...rest) {Length(rest)}',
+    'h(a, ...rest) = length(rest)',
+    'h(...all) = length(all)',
+    'function h(a, ...rest) {length(rest)}',
   ])('Epsil round-trips the named form %p', (source) => {
     const [ast, diagnostics] = parseEpsil(source);
     expect(diagnostics).toEqual([]);
@@ -700,9 +706,11 @@ describe('Rest parameter — declared signatures', () => {
     const stored = (
       ce.lookupDefinition('g') as { value?: { value?: { json: unknown } } }
     ).value?.value;
+    // The body's `Length(a)` admits `+oo` (a list value can be an infinite
+    // lazy list), so the declared `integer` result is ascribed onto it.
     expect(stored?.json).toEqual([
       'Function',
-      ['Block', ['Length', 'a']],
+      ['Block', ['Typed', ['Length', 'a'], "'integer'"]],
       ['Typed', 'a', "'list<integer>'"],
       ['Spread', 'rest'],
     ]);

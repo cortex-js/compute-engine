@@ -332,10 +332,10 @@ describe('functions of one machine number on doubles', () => {
       sameAsScalar([head, symbol], source, route, (x) => [head, x]);
   });
 
-  // `Math.log10` and `Math.log2` are the primitives of the `N()` route and of
-  // the compiled code. `evaluate()` of a scalar computes the logarithm another
-  // way, one unit in the last place apart on about half of the arguments; the
-  // list answers the primitive on both routes.
+  // `Math.log10` and `Math.log2` are the primitives of the `N()` route, of
+  // the compiled code, and of `evaluate()` of a machine float. The list
+  // answers the primitive on both routes, so a long list and a scalar agree
+  // to the last digit.
   test('Log and Lb compute the base-10 and base-2 primitives', () => {
     for (const route of ['evaluate', 'N'] as const) {
       // `Lb(x)` is canonically `Log(x, 2)`.
@@ -350,6 +350,9 @@ describe('functions of one machine number on doubles', () => {
     }
     sameAsScalar(['Log', 'P'], POSITIVE, 'N', (x) => ['Log', x]);
     sameAsScalar(['Log', 'P', 10], POSITIVE, 'N', (x) => ['Log', x, 10]);
+    sameAsScalar(['Log', 'P'], POSITIVE, 'evaluate', (x) => ['Log', x]);
+    sameAsScalar(['Log', 'P', 10], POSITIVE, 'evaluate', (x) => ['Log', x, 10]);
+    sameAsScalar(['Lb', 'P'], POSITIVE, 'evaluate', (x) => ['Lb', x]);
     // Another base is a quotient of two logarithms; a negative argument has a
     // complex logarithm.
     expect(isUnboxedList(ce.box(['Log', 'P', 3]).evaluate())).toBe(false);
@@ -541,26 +544,27 @@ describe('reductions of a list of machine numbers fold its doubles', () => {
     });
   });
 
-  // A partial sum of floats that has an integer value is an exact integer in
-  // the element-by-element fold (`0.5 + 0.5` is `1`), which then adds
-  // integers exactly. A sum of doubles would lose the `1` against `2^53`.
-  // `2^53` is written as a string of digits, which boxes as an exact
-  // integer; the JavaScript number `2^53` is past the safe integers and
-  // boxes as a float, so that sum is a sum of floats and loses the `1`.
-  test('Sum keeps an integer partial sum exact past the safe range', () => {
+  // A partial sum of floats is a float, even when its value is an integer
+  // (`0.5 + 0.5` is the float `1`; user decision of 2026-09-27: the spelling
+  // rule holds at machine precision too). The element-by-element fold then
+  // adds the exact `2^53` to a double, which loses the `1`. `2^53` is written
+  // as a string of digits, which boxes as an exact integer; the JavaScript
+  // number `2^53` is past the safe integers and boxes as a float, so that sum
+  // is a sum of floats and loses the `1` too.
+  test('Sum of a float partial sum past the safe range is a float', () => {
     const big = { num: '9007199254740992' };
     const negBig = { num: '-9007199254740992' };
-    expect(
-      ce.box(['Sum', ['List', 0.5, 0.5, big, negBig]]).evaluate().json
-    ).toEqual(1);
+    const sum = ce.box(['Sum', ['List', 0.5, 0.5, big, negBig]]).evaluate();
+    expect(sum.json).toEqual({ num: '0.0' });
+    expect(sum.isExact).toBe(false);
     expect(
       ce.box(['Sum', ['List', 0.5, 0.5, big, negBig, 0.25]]).evaluate().json
-    ).toEqual(1.25);
+    ).toEqual(0.25);
     expect(
       ce
         .box(['Sum', ['List', 0.5, 0.5, 9007199254740992, -9007199254740992]])
         .evaluate().json
-    ).toEqual(0);
+    ).toEqual({ num: '0.0' });
   });
 
   test('a symbol that does not hold a list of machine numbers', () => {
@@ -882,5 +886,71 @@ describe('the engine tolerance does not make a float special', () => {
     expect(
       [...r.each()].pop()!.isSame(ce.box(['Arcsin', 0.5000001]).evaluate())
     ).toBe(true);
+  });
+});
+
+describe('a list and a short list answer the same logarithm', () => {
+  // A list of more than a hundred elements is computed on doubles, a shorter
+  // one element by element by the interpreter. At machine precision both
+  // routes compute a base-10 or base-2 logarithm with `Math.log10` or
+  // `Math.log2`: `Log(3.0, 10)` is `0.47712125471966244` on both, and not
+  // `Math.log(3) / Math.log(10) = 0.4771212547196623` on one of them.
+  const ce = new ComputeEngine();
+  ce.precision = 'machine';
+  const VALUES = ['3.0', '7.0', '1000.0', '0.3', '3.5', '123.456'];
+  const latexList = (n: number) =>
+    `[${Array.from({ length: n }, (_, i) => VALUES[i % VALUES.length]).join(',')}]`;
+
+  test.each([10, 2])('base %i', (base) => {
+    const short = ce.parse(`\\log_{${base}}(${latexList(6)})`).evaluate();
+    const long = ce.parse(`\\log_{${base}}(${latexList(200)})`).evaluate();
+    expect(isUnboxedList(short)).toBe(false);
+    expect(isUnboxedList(long)).toBe(true);
+    const primitive = base === 10 ? Math.log10 : Math.log2;
+    const expected = VALUES.map((v) => primitive(Number.parseFloat(v)));
+    expect([...short.each()].map((x) => x.re)).toEqual(expected);
+    expect([...long.each()].slice(0, 6).map((x) => x.re)).toEqual(expected);
+    for (const x of [...short.each(), ...[...long.each()].slice(0, 6)])
+      expect(x.isExact).toBe(false);
+  });
+
+  test('an exact argument with a float base of 10', () => {
+    // `Math.log(1000) / Math.log(10)` is `2.9999999999999996`.
+    const r = ce.box(['Log', 1000, { num: '10.0' }]).evaluate();
+    expect(r.re).toBe(3);
+    expect(r.isExact).toBe(false);
+  });
+});
+
+describe('a float scalar operand over a list of exact integers', () => {
+  // A float exponent or base makes every cell a float, so a list of exact
+  // integers is computed on doubles too (it answered a lazy `Map` before).
+  // Each cell is compared with the same cell of a short list, which the
+  // interpreter computes element by element.
+  const ce = new ComputeEngine();
+  ce.precision = 'machine';
+  const INTS = Array.from({ length: 20000 }, (_, i) => i + 1);
+  ce.declare('I', { value: ce.box(['List', ...INTS]) });
+  const SAMPLE = [1, 2, 3, 4, 100, 1000, 12345, 20000];
+
+  test.each([
+    ['Power', { num: '0.5' }],
+    ['Log', { num: '10.0' }],
+    ['Log', { num: '2.0' }],
+  ] as const)('%s with a float %j', (head, scalar) => {
+    const r = ce.box([head, 'I', scalar] as never).evaluate();
+    expect(isUnboxedList(r)).toBe(true);
+    expect(r.count).toBe(INTS.length);
+    const short = ce
+      .box([head, ['List', ...SAMPLE], scalar] as never)
+      .evaluate();
+    expect(isUnboxedList(short)).toBe(false);
+    const expected = [...short.each()];
+    SAMPLE.forEach((x, i) => {
+      const cell = r.at(x)!;
+      expect(cell.isExact).toBe(false);
+      expect(expected[i].isExact).toBe(false);
+      expect(cell.re).toBe(expected[i].re);
+    });
   });
 });
