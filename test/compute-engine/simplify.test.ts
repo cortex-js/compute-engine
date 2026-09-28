@@ -1316,9 +1316,10 @@ describe('POWER DISTRIBUTION GUARDS', () => {
       `["Divide", ["Power", "Pi", 3], ["Power", "x", 3]]`
     ));
 
-  test('(-x)^{0.5} stays as Sqrt(-x)', () =>
+  // The float exponent `0.5` is written as it is, not as `Sqrt`
+  test('(-x)^{0.5} is not distributed', () =>
     expect(simplify('(-x)^{0.5}')).toMatchInlineSnapshot(
-      `["Sqrt", ["Negate", "x"]]`
+      `["Power", ["Negate", "x"], 0.5]`
     ));
 
   test('(2*3)^{1/2} stays as Sqrt(6)', () =>

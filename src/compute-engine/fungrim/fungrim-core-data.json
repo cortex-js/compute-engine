@@ -112,7 +112,6 @@
 "Lattice": {"signature":"(any+) -> set","description":"Complex lattice with periods a, b","arity":2},
 "LegendrePolynomial": {"signature":"(integer, complex) -> complex","description":null,"arity":2},
 "LegendrePolynomialZero": {"signature":"(integer, integer) -> complex","description":null,"arity":2},
-"LerchPhi": {"signature":"(integer, integer, complex) -> complex","description":null,"arity":3},
 "LiouvilleLambda": {"signature":"(integer) -> complex","description":null,"arity":1},
 "LogBarnesG": {"signature":"(complex) -> complex","description":"Logarithmic Barnes G-function","arity":1},
 "LogBarnesGRemainder": {"signature":"(integer, complex) -> complex","description":"Remainder term in asymptotic expansion of logarithmic Barnes G-function","arity":2},

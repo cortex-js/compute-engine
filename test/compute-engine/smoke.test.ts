@@ -225,7 +225,7 @@ describe('SERIALIZING Negative factors', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () => {
     expect(
       engine.parse('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}').latex
-    ).toMatchInlineSnapshot(`\\frac{-6xy}{5}`);
+    ).toMatchInlineSnapshot(`-\\frac{6xy}{5}`);
   });
 });
 
@@ -772,7 +772,7 @@ describe('NUMERIC EVALUATION arithmetic', () => {
 });
 
 describe('NUMERIC EVALUATION trigonometry', () => {
-  test(`N('\\sin\\pi')`, () => expect(NToJson('\\sin\\pi')).toEqual(0));
+  test(`N('\\sin\\pi')`, () => expect(NToJson('\\sin\\pi')).toEqual({ num: '0.0' }));
 
   test(`N('\\cos\\frac{\\pi}{7}')`, () => {
     expect(NToJson('\\cos\\frac{\\pi}{7}')).toMatch(

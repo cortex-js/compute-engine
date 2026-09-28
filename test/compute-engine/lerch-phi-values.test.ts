@@ -184,14 +184,21 @@ describe('LerchPhi past |z| = 1: the Hermite integral continuation', () => {
 
 describe('LerchPhi at real z < −1: declines rather than trust the incomplete Γ near its branch cut', () => {
   // For real z < −1, log z = ln|z| + iπ, so the continuation's incomplete-Γ
-  // argument always lands close to the negative real axis, where
-  // `incompleteGammaUpperComplex` is unreliable (cortex-js/compute-engine#353).
-  // A 300-point mpmath sweep found wrong, uncaught values here (the
-  // cancellation estimate in `lerchContinuedComplex` does not see the
-  // error); these five are the reported witnesses, each confirmed against
-  // mpmath's `lerchphi` to differ from the naive continued value by more
-  // than 1e-9 relative. `LerchPhi` declines the whole z < −1 branch instead
-  // (see `lerchPhiComplex`).
+  // argument x = −b·log z has Re(x) = −b·ln|z| < 0 and Im(x) = −π·b, with
+  // b ≥ 1 after the base-point shift: |x| ≥ π > 2.5 always. Against mpmath,
+  // `incompleteGammaUpperComplex` loses digits there
+  // (cortex-js/compute-engine#353), so its error estimate
+  // (`incompleteGammaRelativeError`, numerics/lerch-phi.ts) is infinite and
+  // `lerchContinuedComplex` declines every real z < −1. No code tests the
+  // sign of z: the decline comes from that radius requirement alone.
+  //
+  // A 300-point mpmath sweep of the continuation before that requirement
+  // found wrong values here that the cancellation estimate did not see.
+  // These five are the reported witnesses, each confirmed against mpmath's
+  // `lerchphi` to differ from the unchecked continued value by more than
+  // 1e-9 relative. They are the regression witnesses for when the radius
+  // is widened (once #353 is fixed): each must then match mpmath, not
+  // return the values below.
   test.each([
     [-3, 3.118, 2.864], // mpmath: 0.018570430819231976 (we returned 0.018570430815360785, 2e-10 off)
     [-3, 4.269, 3.146], // mpmath: 0.0041635178924785445 (we returned 0.004163517891707492, 2e-10 off)
@@ -204,8 +211,8 @@ describe('LerchPhi at real z < −1: declines rather than trust the incomplete �
   });
 
   test('the decline covers the whole z < −1 real axis, not only these five points', () => {
-    // Every (s, a) in a grid at a few representative z < −1 declines too —
-    // the branch is dropped outright rather than patched pointwise.
+    // Every (s, a) in a grid at a few representative z < −1 declines too,
+    // since |x| > 2.5 with Re(x) < 0 holds at every such point.
     for (const z of [-1.01, -1.5, -2, -3.7, -5]) {
       for (const s of [-3.5, 0.5, 2, 5.5]) {
         for (const a of [0.25, 1.5, 4.5]) {
@@ -225,6 +232,95 @@ describe('LerchPhi at real z < −1: declines rather than trust the incomplete �
         .evaluate()
         .isSame(ce.expr(['Divide', 1, ['Subtract', 1, -3]]).evaluate())
     ).toBe(true);
+  });
+});
+
+describe('LerchPhi: convergence is checked, not assumed', () => {
+  test('the terms at a negative base point are summed before any convergence test', () => {
+    // The term at k = 9 is (9 − 9.000000001)² ≈ 1e-18, which used to stop
+    // the sum and drop a tail of about 0.0117.
+    // mpmath: lerchphi(0.5,-2,-9.000000001) = 132.000000032
+    const z = phi(0.5, -2, -9.000000001).N();
+    expect(Math.abs(z.re - 132.000000032)).toBeLessThan(1e-11 * 132);
+  });
+
+  test.each([
+    // mpmath: lerchphi(-0.99,-12,1) = -13.854855276583912
+    [-0.99, -12, 1, -13.854855276583912],
+    // mpmath: lerchphi(-0.3,-30,1) = -76976750575807653.0
+    [-0.3, -30, 1, -76976750575807653],
+    // mpmath: lerchphi(-1,-2.5,1) = -0.087841120721362842
+    [-1, -2.5, 1, -0.087841120721362842],
+  ])(
+    'Re(s) < 0 at real z < 0: LerchPhi(%p, %p, %p) matches mpmath',
+    (zv, s, a, expected) => {
+      // The Euler transform assumes decreasing terms and is not used here.
+      const z = phi(zv, s, a).N();
+      expect(Math.abs(z.re - expected)).toBeLessThan(
+        1e-11 * Math.abs(expected)
+      );
+    }
+  );
+
+  test('terms that cancel too far stay symbolic rather than answer a wrong value', () => {
+    // mpmath: lerchphi(-0.999,-6,1) = 0.0010640944052320294, from terms of
+    // order 1e6: this used to return 0.278.
+    expect(phi(-0.999, -6, 1).N().numericValue).toBeUndefined();
+  });
+
+  test('a base point too far left to shift stays symbolic, promptly', () => {
+    // Adding 1 to −1e20 does not change the double: the shift used to
+    // loop forever.
+    expect(phi(2, -1, -1e20).N().numericValue).toBeUndefined();
+    expect(phi(0.5, 2, -1000000.5).N().numericValue).toBeUndefined();
+  });
+
+  test('the rim at a large base point answers within 1e-11 or stays symbolic', () => {
+    // The continuation's incomplete gamma argument is −20·log(i) = −10πi,
+    // where that kernel's accuracy cannot be certified.
+    // mpmath: lerchphi(1j,2,20) = 0.0013737855467179791 + 0.0012408125223750873j
+    const z = phi(['Complex', 0, 1], 2, 20).N();
+    if (z.numericValue !== undefined) {
+      expect(
+        Math.hypot(z.re - 0.0013737855467179791, z.im - 0.0012408125223750873)
+      ).toBeLessThan(1e-11 * 0.00185);
+    }
+  });
+});
+
+describe('LerchPhi: exactness', () => {
+  test('a symbolic z is not assumed nonzero at the pole', () => {
+    // z = 0 gives Φ(0,2,−1) = (−1)^(−2) = 1, not a pole.
+    expect(phi('z', 2, -1).evaluate().operator).toBe('LerchPhi');
+    expect(phi(0.4, 2, -1).evaluate().isSame(ce.ComplexInfinity)).toBe(true);
+  });
+
+  test('a float operand gives a float, through the shortcuts too', () => {
+    const atOne = phi(ce.number('1.0'), 2, 1).evaluate();
+    expect(atOne.isNumberLiteral && !atOne.isExact).toBe(true);
+    expect(atOne.re).toBeCloseTo(Math.PI ** 2 / 6, 14);
+    const atZero = phi(ce.number('0.0'), 2, 3).evaluate();
+    expect(atZero.isNumberLiteral && !atZero.isExact).toBe(true);
+    expect(atZero.re).toBeCloseTo(1 / 9, 15);
+  });
+
+  test('an integer-valued machine result is a float, not an exact integer', () => {
+    // mpmath: lerchphi(0.5,-3,1) = 52.0
+    for (const e of [
+      phi(['Rational', 1, 2], -3, 1).N(),
+      phi(0.5, -3, 1).evaluate(),
+    ]) {
+      expect(e.isExact).toBe(false);
+      expect(e.re).toBeCloseTo(52, 12);
+    }
+    // The same boxing serves HurwitzZeta. mpmath: zeta(-3,0.5) = -0.0072916666666666667
+    const hz = ce.expr(['HurwitzZeta', -3, 0.5]).N();
+    expect(hz.isExact).toBe(false);
+    expect(hz.re).toBeCloseTo(-0.0072916666666666667, 15);
+  });
+
+  test('an exact operand set stays symbolic under evaluate()', () => {
+    expect(phi(['Rational', 1, 2], -3, 1).evaluate().operator).toBe('LerchPhi');
   });
 });
 
@@ -252,9 +348,24 @@ describe('LerchPhi at a negative base point', () => {
 });
 
 describe('LerchPhi result types', () => {
-  test('the real branch (a ≥ 0) types real', () => {
+  test('the real branch (real z < 1, a > 0) types real', () => {
     const t = phi(0.5, 2, 1).type;
     expect(t.matches('real')).toBe(true);
+  });
+
+  test('z on the [1, ∞) branch cut or at the z = 1 pole does not type real', () => {
+    // mpmath: lerchphi(3,2,1) = 0.77339347443769947 - 1.1504640984077342j
+    expect(phi(3, 2, 1).type.matches('real')).toBe(false);
+    expect(phi(1, 1, 1).type.matches('real')).toBe(false);
+    // A real z of unknown size is not proven below 1.
+    ce.declare('lp_real_z', 'real');
+    expect(phi('lp_real_z', 2, 1).type.matches('real')).toBe(false);
+  });
+
+  test('the imaginary part of a value on the cut is not folded to 0', () => {
+    const im = ce.expr(['Imaginary', ['LerchPhi', 3, 2, 1]]);
+    expect(im.evaluate().isSame(0)).toBe(false);
+    expect(im.N().re).toBeCloseTo(-1.1504640984077342, 12);
   });
 
   test('a negative base point types the wider number', () => {
@@ -291,8 +402,35 @@ describe('LerchPhi JS compile', () => {
     expectParity(run?.({ lp_z: z, lp_s: s, lp_a: a }), z, s, a);
   });
 
-  test('past |z| = 1 the real-only compiled lane is NaN (no GPU/JS incomplete-Γ kernel)', () => {
+  test('real z > 1 is on the branch cut, where the value is complex: NaN', () => {
     expect(run?.({ lp_z: 3, lp_s: 2, lp_a: 1 })).toBeNaN();
+    // Just past z = 1 the imaginary part is tiny (mpmath: lerchphi(1.0000000001,
+    // 2, 1) = 1.6449340690863183 − 3.1415929e-10j), but it is not rounding
+    // noise: the value is complex.
+    expect(run?.({ lp_z: 1.0000000001, lp_s: 2, lp_a: 1 })).toBeNaN();
+    expect(phi(1.0000000001, 2, 1).N().im).toBeCloseTo(
+      -3.141592913055096e-10,
+      15
+    );
+  });
+
+  test('the poles match the interpreter: +Infinity where it is ComplexInfinity', () => {
+    for (const [z, s, a] of [
+      [0.5, 2, 0],
+      [0.5, 2, -3],
+      [-0.5, 1.5, -1],
+    ]) {
+      expect(phi(z, s, a).N().isSame(ce.ComplexInfinity)).toBe(true);
+      expect(run?.({ lp_z: z, lp_s: s, lp_a: a })).toBe(Infinity);
+    }
+    // z = 1 is the Hurwitz zeta, whose pole is s = 1.
+    expect(phi(1, 1, 1).evaluate().isSame(ce.ComplexInfinity)).toBe(true);
+    expect(run?.({ lp_z: 1, lp_s: 1, lp_a: 1 })).toBe(Infinity);
+  });
+
+  test('a real value past |z| = 1 (s a non-positive integer, no branch cut)', () => {
+    // Φ(2,−1,1) = 1/(1−2)² = 1. mpmath: lerchphi(2,-1,1) = 1.0
+    expect(run?.({ lp_z: 2, lp_s: -1, lp_a: 1 })).toBeCloseTo(1, 12);
   });
 });
 
@@ -311,6 +449,15 @@ describe('GPU LerchPhi preamble', () => {
       const r = target.compile(ce.box(['LerchPhi', 'gl_z', 'gl_s', 'gl_a']));
       expect(r.success).toBe(true);
       expect(r.preamble ?? '').toContain(hzDecl);
+    }
+  );
+
+  test.each(targets)(
+    '%s: z = −1 reaches the Euler transform (only |z| > 1 is NaN)',
+    (_name, target) => {
+      const r = target.compile(ce.box(['LerchPhi', 'gl_z', 'gl_s', 'gl_a']));
+      expect(r.preamble ?? '').toMatch(/abs\(z\) > 1\.0/);
+      expect(r.preamble ?? '').not.toMatch(/abs\(z\) >= 1\.0/);
     }
   );
 

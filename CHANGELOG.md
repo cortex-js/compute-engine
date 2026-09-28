@@ -2,6 +2,198 @@
 
 ### Behavior Changes
 
+- **An integer-valued float is written with a fraction part, so it reads
+  back as a float.** A float whose value is an integer serializes as
+  `{num: "2.0"}` in MathJSON and `2.0` in LaTeX (a large one as `1.0e+800`
+  and `1.0\cdot10^{800}`); it was `2`, which reads back as the exact `2`, so
+  `Sin(2.0)` numericized while its round trip `Sin(2)` stayed symbolic (user
+  decision 2026-09-28). An exact integer is still written `2`. A float in
+  LaTeX with a negative exponent now keeps its fraction part too
+  (`123.0\cdot10^{-3}`), which read back as an exact rational before. With `fractionalDigits: 0` (LaTeX)
+  or `digits: {fractional: 0}` (MathJSON) the integer spelling is kept, as
+  requested.
+
+- **An Epsil decimal literal keeps its value, and a literal with a fraction
+  part is a float.** The Epsil parser summed the fraction digits one float at a
+  time, so `0.75` read as `0.7500000000000001`, `0.3` as `0.30000000000000004`
+  and `0.000001` as `0.0000010000000000000002`. It now reads the decimal
+  exactly. It also dropped the decimal point while normalizing, so `1.0`,
+  `2.0` and `1.5e3` were the exact integers `1`, `2` and `1500`; they are now
+  floats, as on the LaTeX route (the 0.139.0 rule that a literal with a
+  fraction part is a float). `1e3`, `3` and `2.` (a point with no digit after
+  it) stay exact. A literal a double cannot hold keeps its digits: `1e-400`
+  was the exact `0`, and `5e-324` lost digits.
+- **The negation of a product folds its sign into the numeric factor.**
+  `-(2x)` (MathJSON `["Negate", ["Multiply", 2, "x"]]`) canonicalizes to
+  `Multiply(-2, x)`; it was `Negate(Multiply(2, x))`. `-\frac{x}{2}` is now
+  `Multiply(-1/2, x)`, the same expression as `-\frac{1}{2}x`, so the sign
+  of a fraction written in front of it reads back unchanged (#345).
+- **A float `Measurement` error evaluates.** `Measurement(5, 0.2) + 3` was
+  `8 ± sqrt(0.2^2)` under `evaluate()` and is now `8.00 ± 0.20`. An exact error
+  stays exact (`Measurement(5, 1) * Measurement(2, 1)` is `10 ± √29`).
+
+### Issues Resolved
+
+- **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and the
+  sign of a numeric fraction moves in front of it.** `Beta(2, 3)` wrote
+  `\Beta(2, 3)` (capital beta is roman, not a separate glyph — MathLive
+  renders it as an error) and `Zeta(3)` wrote `\Zeta(3)`; both came from the
+  fallback that spells an unrecognized function head as its symbol's
+  notation, which for these two names is the Greek-letter entry. They now
+  write `\mathrm{B}(2, 3)` and `\zeta(3)`; the old spellings still parse, and
+  a bare `\mathrm{B}` is still the upright letter `B`. `Lb(x)` wrote `\lb(x)`,
+  not a standard LaTeX command, and now writes `\log_2(x)` (which already
+  parsed to `Lb`). A negative `Rational`, or a fraction with a number
+  denominator, wrote its sign inside the numerator or the denominator —
+  `Rational(-1, 2)` as `\frac{-1}{2}`, `Divide(x, -4)` as `\frac{x}{-4}` — or,
+  for `Negate` of a fraction, with a redundant parenthesis
+  (`Negate(Rational(3, 4))` as `-(\frac{3}{4})`); all three now write the sign
+  in front: `-\frac{1}{2}`, `-\frac{x}{4}`, `-\frac{3}{4}`. A fraction with a
+  symbolic denominator keeps the sign in the numerator (`\frac{-1}{x}`), since
+  `-\frac{1}{x}` reads back as a different expression (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+- **A negative big number keeps its digits when its sign moves.** The LaTeX
+  serializer removed the sign of a negative literal in a sum through a
+  JavaScript double, so `Add(x, -9007199254740993)` wrote
+  `x-9\,007\,199\,254\,740\,992`. The sign is now removed from the digit
+  string.
+- **`\operatorname{rank}(A)` parses to `MatrixRank`, and `MatrixRank(A)`
+  writes `\operatorname{rank}(A)`.** It parsed to the free symbol `rank`
+  applied to `A`, the same gap `\operatorname{lcm}` (→ `LCM`) already covered
+  for a different head (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **`Zeta(s, a)` and `HurwitzZeta(s, a)` honor `ce.precision` for real `s` and
+  `a`** (part of #340, contributed by
+  [enumeratio](https://github.com/enumeratio)). Both were machine precision only
+  at every engine precision; `HurwitzZeta(3, 1/2).N()` at `ce.precision = 50`
+  now returns 50 correct digits
+  (`8.4143983221171599977981671305801499353549040463835`) instead of a double's
+  ~16. The digits are significant digits at every magnitude:
+  `HurwitzZeta(200, 10)` (about `1e-200`) and `HurwitzZeta(-400.5, 0.3)` (about
+  `7.75e549`, past the double range) are correct to the last digit. A value
+  the kernel cannot reach within its limits (s below about −1279) falls back to
+  the double kernel, and stays symbolic where the double overflows. A complex
+  operand still evaluates at machine precision — the complex special-function
+  kernels do, at every engine precision.
+
+- **`a * 2n` parses in Epsil.** The right operand of an explicit `*` or `/`
+  refused an invisible multiplication, so `a * 2n` parsed as `a * 2` with an
+  `unexpected-symbol` diagnostic for `n` — and the serializer writes that form.
+  `a * 2n` is now `a·(2n)` and `a / 2n` is `a/(2n)`.
+- **Exact 2×2 eigenvalues.** `Eigenvalues([[1, 2], [3, 4]])` was
+  `[5.372…, -0.372…]`; it is now `[(5 + √33)/2, (5 − √33)/2]`.
+- **`AdjugateMatrix` and `PseudoInverse` evaluate.** Both stayed unevaluated
+  for every matrix. `AdjugateMatrix` is the transposed cofactor matrix, for any
+  square matrix. `PseudoInverse` is computed for a full-rank matrix: the
+  inverse of an invertible square matrix, `(A*A)⁻¹A*` with full column rank,
+  `A*(AA*)⁻¹` with full row rank; a rank-deficient matrix stays unevaluated.
+- **Trigonometry.** `InverseFunction(Csc)` returned an `invalid-symbol` error,
+  and `InverseFunction(Cot)`, `(Coth)` stayed unevaluated; every circular and
+  hyperbolic function now maps to its inverse. `Arccot` has exact special
+  values (`Arccot(1)` is `π/4`, `Arccot(-1)` is `3π/4`). `Sinc(Pi)` is exactly
+  `0` (it was `1.2e-25` under `N`) and `Sinc(Pi/2)` is `2/π`.
+  `TrigExpand(Sin(x + Pi/2))` is `cos(x)` (it left `cos(π/2)` and `sin(π/2)`
+  unreduced), and `TrigExpand(Tan(x + Pi/2))` is `-cos(x)/sin(x)`.
+- **Arithmetic.** `Log(1/8, 2)` and `Lb(1/8)` are `-3` (they stayed
+  symbolic, while `Log(8, 2)` was `3`). `ComplexRoots(1, 4)` is `[1, i, -1,
+  -i]`, exactly and under `N` (it was `[1, 6.1e-17 + i, …]`), and the roots of
+  an exact real are exact (`ComplexRoots(8, 3)` is `[2, -1 + √3 i, -1 - √3 i]`).
+  `Supremum` and `Infimum` of an open interval are its endpoints (they stayed
+  symbolic). `Interpret(1 + 2 + … + n)` works from Epsil, whose left-nested
+  sum the recognizer did not match. `PreIncrement(5)` is `6` and
+  `PreDecrement(5)` is `4` (they had no evaluate handler). `Sum(2^(-k), (k, 0,
+  oo))` is `2`, as `Sum((1/2)^k, …)` was: the geometric-series rule did not
+  read a negated index.
+- **Exact 3×3 eigenvalues.** A matrix of exact rationals whose characteristic
+  polynomial has a rational root has exact eigenvalues:
+  `Eigenvalues([[2, 0, 0], [0, 3, 4], [0, 4, 9]])` is `[11, 2, 1]` (it was
+  `[11, 1.000000000000003, 2.0000000000000018]`), and
+  `Eigenvalues([[2, 1, 0], [1, 2, 1], [0, 1, 2]])` is `[2 + √2, 2, 2 − √2]`.
+  The exact eigenvalues are ordered by decreasing real part. `N(Eigenvalues(…))`
+  gives their values.
+- **`N(Arcosh(x))` for a real `x` in [−1, 1] is purely imaginary**
+  (`N(Arcosh(1/2))` was `5.6e-17 + 1.047…i`).
+
+### New Features
+
+- **`PolyGamma(m, z)`, `Digamma(z)` and `Trigamma(z)` evaluate at a complex
+  `z`** (#340, contributed by [enumeratio](https://github.com/enumeratio)).
+  `PolyGamma(1, 1+2i).N()` is `0.1249311621409446 − 0.4778255501472298i`:
+  ψ⁽ᵐ⁾(z) = (−1)^(m+1) m! ζ(m+1, z) for m ≥ 1 (DLMF 5.15.2), and an asymptotic
+  series for the digamma. Left of the imaginary axis the reflection formula
+  is used, so the cost does not depend on `Re(z)` (`PolyGamma(8, -10^12+i)`
+  answers at once). The order is limited to 10 000. A value outside the
+  range of a double stays unevaluated, not `~oo` or `0`. The compiled
+  JavaScript `PolyGamma` is now marked real-only, as `Zeta` is: a complex
+  argument there ran the real kernel.
+- **`LerchPhi` is new** (#340, contributed by
+  [enumeratio](https://github.com/enumeratio)). `LerchPhi(z, s, a)` is the
+  Lerch transcendent `Φ(z,s,a) = Σ zᵏ(k+a)^(−s)`, generalizing `HurwitzZeta`
+  (`LerchPhi(1, s, a)` reduces to it exactly). `LerchPhi(0.5, 2, 1).N()`
+  evaluates by direct summation, `LerchPhi(3, 2, 1).N()` continues past the
+  unit disk through the incomplete gamma function, and `LerchPhi(-1, 1, 1)`
+  is `ln 2` on the disk's rim, where direct summation alone would need an
+  impractical number of terms. A base point `a` at a non-positive integer is
+  the pole `ComplexInfinity` when `Re(s) > 0` and `z` is provably nonzero,
+  as for `HurwitzZeta`. Values are computed at machine precision only, even
+  when `precision` is higher, and are within about 1e−11 relative of the
+  true value (measured against mpmath). Where the kernel cannot vouch for
+  that accuracy, `LerchPhi` stays symbolic under `N()` instead of returning
+  a wrong value: past the unit disk and on its rim wherever the incomplete
+  gamma function it needs is inaccurate (#353), when the terms of a sum
+  cancel too far (for example `LerchPhi(-0.99, -12, 1)`), and when the base
+  point is further left than `a = −10⁶`. A float operand gives a float
+  result (`LerchPhi(1.0, 2, 1)` is `1.6449…`, not `π²/6`). `LerchPhi`
+  compiles to JavaScript, GLSL and WGSL for real operands. The JavaScript
+  lane runs the interpreter's kernel and is `NaN` where the value is complex
+  (real `z > 1`, or `a < 0` with a non-integer `s`) and for real `z < −1`,
+  where the value is real but the kernel declines until #353 is fixed. The
+  GPU lane is `NaN` past the unit disk (except for `s = 0, −1, −2`, where
+  `Φ` is a rational function of `z`), and inside it wherever its f32 sums
+  cannot converge within their term budget (`|z|` closer to 1 than about
+  0.995) or have cancelled too far.
+- **`PolyLog` now evaluates at a non-integer or complex order** (#340,
+  contributed by [enumeratio](https://github.com/enumeratio)). `PolyLog(s,
+  z)` previously answered only an integer order `s ≥ 2`; `PolyLog(2.5,
+  0.5).N()` is now `0.5549972787175124` and `PolyLog(1.5+0.5i, 0.5).N()` is
+  `0.6126403889001154 - 0.05103210425890372i`, both by `Liₛ(z) = z·Φ(z,s,1)`
+  through the `LerchPhi` kernel at base point `a = 1`. Past `|z| = 1`, where
+  that kernel's continuation declines, Jonquière's inversion formula takes
+  over: `PolyLog(1.5, -3).N()` is `-1.679089730504828` (a real order gives a
+  real value everywhere on the real axis below `-1`). `PolyLog(s, 1)` and `PolyLog(s, -1)`
+  now reduce exactly to `Zeta(s)` and the Dirichlet eta identity
+  `(2^(1-s) - 1)·Zeta(s)` for every order, not only an integer one (the
+  kernel answers instead for an order within `1e-6` of 1 at `z = -1`, where
+  the identity cancels). A negative integer order from `-2` to `-12` at a
+  number `z` uses its rational closed form, so `PolyLog(-2, 1/2)` is the
+  exact `6` and `PolyLog(-2, -2)` the exact `2/27`. Every existing
+  integer-order and elementary-form result is unchanged. The widened kernel
+  declines (stays symbolic) rather than answer a value it cannot certify to
+  `1e-12`: within `1e-3` of the `z = 1` branch point, where `s` sits within
+  0.05 of a positive integer on or past the unit circle, where `Re(s)` is
+  too negative for the series inside the disk, and past the disk where the
+  inversion formula loses digits (an order with `|Im s| > 1.5`, or
+  `Re(s) > 2` with `|z|` above about 32). `numerics/polylog.ts` records the
+  measured boundaries. `PolyLog` compiles to JavaScript, GLSL and WGSL for
+  real operands; it was not compilable at all before. The JavaScript lane
+  answers every order the way the interpreter does. The GPU lane answers the
+  orders `1`, `0`, `-1` and `-2` to `-12` in closed form and other orders
+  only for `|z| < 1` and at `z = 1`.
+- **`PolyLog` of a real order and a real `z` is typed `real` only when `z` is
+  known to be at most 1** (or the order is an integer `≤ 0`). The value is
+  complex on the cut `z > 1` (`PolyLog(1.5, 2)` is
+  `1.549 - 2.951i`), and the type used to say `real`. A float order now
+  makes a closed-form result a float: `PolyLog(0.0, 1/2)` is the float `1`.
+
+- **Examples for the arithmetic, trigonometry and linear-algebra libraries**,
+  with a hand-written introduction for each reference page: 97, 84 and 40
+  examples, each executed when the pages are generated.
+
+## 0.140.0 _2026-09-27_
+
+### Behavior Changes
+
 - **The spelling rule holds at machine precision, and a float operand makes
   a numeric result a float.** On a `precision: 'machine'` engine,
   `ce.parse('2.0')` was exact, so `\sin(2.0)` stayed symbolic there while it
@@ -210,41 +402,6 @@
   precision) is unchanged until Phase 2.
 
 ### New Features
-
-- **`LerchPhi` is new** (#340, contributed by
-  [enumeratio](https://github.com/enumeratio)). `LerchPhi(z, s, a)` is the
-  Lerch transcendent `Φ(z,s,a) = Σ zᵏ(k+a)^(−s)`, generalizing `HurwitzZeta`
-  (`LerchPhi(1, s, a)` reduces to it exactly). `LerchPhi(0.5, 2, 1).N()`
-  evaluates by direct summation, `LerchPhi(3, 2, 1).N()` continues past the
-  unit disk through the incomplete gamma function, and `LerchPhi(-1, 1, 1)`
-  is `ln 2` on the disk's rim, where direct summation alone would need an
-  impractical number of terms. A base point `a` at a non-positive integer is
-  the pole `ComplexInfinity` when `Re(s) > 0`, as for `HurwitzZeta`. Past the
-  unit disk it stays symbolic under `N()` wherever the incomplete gamma
-  function's argument `−a·log z` has a negative real part and modulus above
-  2.5, where `Gamma`'s own numeric kernel loses digits (#353). Values are
-  computed at machine precision only, even when `precision` is higher. `LerchPhi` compiles to JavaScript,
-  GLSL and WGSL for real operands; the compiled lane is `NaN` past the unit
-  disk, where the continuation needs a complex incomplete gamma function
-  neither target has a kernel for.
-
-- **`PolyLog` now evaluates at a non-integer or complex order** (#340,
-  contributed by [enumeratio](https://github.com/enumeratio)). `PolyLog(s,
-  z)` previously answered only an integer order `s ≥ 2`; `PolyLog(2.5,
-  0.5).N()` is now `0.5549972787175124` and `PolyLog(1.5+0.5i, 0.5).N()` is
-  `0.6126403889001154 - 0.05103210425890372i`, both by `Liₛ(z) = z·Φ(z,s,1)`
-  through the `LerchPhi` kernel at base point `a = 1`. `PolyLog(s, 1)` and
-  `PolyLog(s, -1)` now reduce exactly to `Zeta(s)` and the Dirichlet eta
-  identity `(2^(1-s) - 1)·Zeta(s)` for every order, not only an integer one.
-  Every existing integer-order and elementary-form result is unchanged. The
-  widened kernel declines (stays symbolic) rather than answer a value it
-  cannot certify to machine precision: close to the `z = 1` branch point,
-  where `s` sits within 0.05 of a positive integer on or past the unit
-  circle, and on the real axis `z < 0` once `Re(s)` is too negative for the
-  van Wijngaarden Euler transform to stay accurate (see
-  `numerics/polylog.ts`'s reliability guards for the measured boundaries).
-  `PolyLog` compiles to JavaScript, GLSL and WGSL for real operands, with
-  the same reliability guards; it was not compilable at all before.
 
 - **`ce.number({ re, im })` builds a complex number from two parts, each a
   JavaScript number or a `BigDecimal`.** `ce.number({ re: ce.bignum('1e-800'),

@@ -74,8 +74,14 @@ function makeMeasurement(
   value: Expression,
   error: Expression
 ): Expression {
-  if (error.isSame(0)) return value;
-  return ce.function('Measurement', [value, error]);
+  // The error is evaluated: `evaluate()` keeps an exact error exact
+  // (`√(1/4 + 1/9)` stays exact, `√2` stays `√2`) and gives a float for a
+  // float error, the evaluate-vs-N contract. Left as built, a float error
+  // stayed the unevaluated `√(0.2²)` under `evaluate()`
+  // (`Measurement(5, 0.2) + 3` printed `8 ± sqrt(0.2^2)`).
+  const evaluated = error.evaluate();
+  if (evaluated.isSame(0)) return value;
+  return ce.function('Measurement', [value, evaluated]);
 }
 
 // ---------------------------------------------------------------------------

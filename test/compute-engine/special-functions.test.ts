@@ -2455,7 +2455,7 @@ describe('POLYLOGARITHM Liₙ(z)', () => {
     // Liₙ(±1)
     expect(ce.box(['PolyLog', 3, 1]).evaluate().toString()).toBe('Zeta(3)');
     expect(ce.box(['PolyLog', 2, -1]).evaluate().latex).toBe(
-      '\\frac{-\\pi^2}{12}'
+      '-\\frac{\\pi^2}{12}'
     );
     // Exactness contract: inexact argument numericizes through the reduction
     expect(ce.box(['PolyLog', 1, 0.5]).evaluate().re).toBeCloseTo(Math.LN2, 14);

@@ -500,7 +500,7 @@ describe('NORM ORDER SUBSCRIPT', () => {
     expect(Number('1e400')).toBe(Infinity);
     const expr = engine.box(['Norm', ['List', 3, 4], { num: '1e400' }]);
     expect(expr.latex).toBe(
-      '\\left\\Vert \\bigl\\lbrack3, 4\\bigr\\rbrack\\right\\Vert_{10^{400}}'
+      '\\left\\Vert \\bigl\\lbrack3, 4\\bigr\\rbrack\\right\\Vert_{1\\cdot10^{400}}'
     );
     expect(expr.latex).not.toContain('\\infty');
   });

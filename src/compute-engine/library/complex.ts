@@ -44,6 +44,7 @@ import { reduceType } from '../../common/type/reduce.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { neg } from '../numerics/rationals.js';
 import { measurementLipschitzUnary } from './measurement-arithmetic.js';
+import { halfTurnAngle } from '../boxed-expression/trigonometry.js';
 import {
   functionLiteralParameterName,
   isRestParameter,
@@ -480,6 +481,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // `nan` for `~oo`, neither of which is below `real`; the handler
       // tightens the claim per call (the `Abs` arrangement).
       signature: '(complex | infinity) -> number',
+      examples: ['Real(3 + 4i)'],
       nanBehavior: 'propagate',
       type: realPartType,
       sgn: ([op], { engine: ce }) => {
@@ -534,6 +536,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // Top numeric result for the same reason as `Real`: the handler
       // claims `nan` for `~oo`.
       signature: '(complex | infinity) -> number',
+      examples: ['Imaginary(3 + 4i)'],
       nanBehavior: 'propagate',
       type: imaginaryPartType,
       sgn: ([op], { engine: ce }) => {
@@ -589,6 +592,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(complex | infinity) -> number',
+      examples: ['Re(3 + 4i)'],
       nanBehavior: 'propagate',
       type: realPartType,
       canonical: (ops, { engine: ce }) => ce.function('Real', ops),
@@ -600,6 +604,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(complex | infinity) -> number',
+      examples: ['Im(3 + 4i)'],
       nanBehavior: 'propagate',
       type: imaginaryPartType,
       canonical: (ops, { engine: ce }) => ce.function('Imaginary', ops),
@@ -612,6 +617,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // Top numeric result for the same reason as `Real`: the handler
       // claims `nan` for `~oo`.
       signature: '(complex | infinity) -> number',
+      examples: ['[Argument(1 + i), Argument(-1)]'],
       nanBehavior: 'propagate',
       type: argumentType,
       // Sign from assumed bounds on `arg:op` (design §5.1b); values are
@@ -697,6 +703,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(complex | infinity) -> number',
+      examples: ['[Arg(i), Arg(1 + i)]'],
       nanBehavior: 'propagate',
       type: argumentType,
       canonical: (ops, { engine: ce }) => ce.function('Argument', ops),
@@ -715,6 +722,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // bare marker, not to a tuple of markers (ruled 2026-09-02; batch 9
       // of `docs/plans/2026-08-30-error-model-implementation.md`).
       signature: '(complex | infinity) -> tuple<real | +oo, real>',
+      examples: ['[AbsArg(1 + i), AbsArg(-2)]'],
       nanBehavior: 'propagate',
       type: absArgType,
       // Complete precondition: the evaluate guard (`isNumber`) on the ground
@@ -778,6 +786,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // threading over a collection operand and the `number` narrowing of a
       // valueless symbol that the handler-less path used to provide.
       signature: '(T) -> T where T: number',
+      examples: ['Conjugate(3 + 4i)'],
       nanBehavior: 'propagate',
       canonical: (ops, { engine: ce }) => {
         const [f] = ops;
@@ -812,6 +821,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
     },
 
     ComplexRoots: {
+      examples: ['ComplexRoots(1, 4)', 'ComplexRoots(8, 3)'],
       description: 'All n-th complex roots of a number.',
       broadcastable: true,
       complexity: 1200,
@@ -851,7 +861,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // roots stay symbolic, so the promise must decline too.
         return Number.isInteger(n) && n > 0 && n <= MAX_COMPLEX_ROOTS;
       },
-      evaluate: (ops, { engine: ce }) => {
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
         const re = ops[0].re;
         if (isNaN(re)) return undefined;
         const n = ops[1].re;
@@ -859,6 +869,54 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // The result has `n` elements, so the loop scales with the operand
         // VALUE: past the cap the roots stay symbolic.
         if (n > MAX_COMPLEX_ROOTS) return undefined;
+
+        // An exact REAL radicand has exact roots: its argument is 0 or π, so
+        // each root is ⁿ√|z|·(cos θ + i·sin θ) with θ = (arg + 2πk)/n a
+        // rational multiple of π, whose cosine and sine evaluate exactly
+        // (`complexRoots(1, 4)` is `[1, i, −1, −i]`, `complexRoots(8, 3)` is
+        // `[2, −1 + √3·i, −1 − √3·i]`) or stay symbolic (`cos(2π/7)`).
+        // The float route below gave rounding noise (`6.1e-17 + i`). Under
+        // `.N()` the exact roots are numericized, so `N(complexRoots(1, 4))`
+        // is `[1, i, −1, −i]` too.
+        const z = ops[0];
+        if (
+          isNumber(z) &&
+          z.isExact === true &&
+          z.im === 0
+        ) {
+          // The modulus is read off the exact value (`z.abs()`), not off the
+          // double `re`: `1/8` stayed a float, and `10²⁰ + 1` lost its last
+          // digit. The angle is a fraction of a half turn in the ENGINE's
+          // angular unit (`halfTurnAngle`), because `Cos`/`Sin` read their
+          // argument in that unit: `π` in degree mode is not half a turn.
+          const modulusRoot = ce
+            .function('Root', [z.abs(), ce.number(n)])
+            .evaluate();
+          const halfTurn = halfTurnAngle(ce);
+          const exactRoots: Expression[] = [];
+          for (let k = 0; k < n; k++) {
+            const theta = ce
+              .function('Multiply', [
+                ce.number([(re < 0 ? 1 : 0) + 2 * k, n]),
+                halfTurn,
+              ])
+              .evaluate();
+            const cos = ce.function('Cos', [theta]).evaluate();
+            const sin = ce.function('Sin', [theta]).evaluate();
+            const real = ce.function('Multiply', [modulusRoot, cos]).evaluate();
+            const imag = ce.function('Multiply', [modulusRoot, sin]).evaluate();
+            exactRoots.push(
+              ce
+                .function('Add', [
+                  real,
+                  ce.function('Multiply', [imag, ce.I]),
+                ])
+                .evaluate()
+            );
+          }
+          const list = ce.function('List', exactRoots);
+          return numericApproximation ? list.N() : list;
+        }
 
         const roots: [number, number][] = [];
 

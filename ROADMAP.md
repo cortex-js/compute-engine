@@ -109,6 +109,54 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### `PolyGamma`/`Digamma`/`Trigamma` have no GPU shader lowering (OPEN, capability gap — found 2026-09-28 widening `PolyGamma` to a complex `z` for #340)
+
+Neither `gpu-target.ts` shader (GLSL or WGSL) declares a lowering for these
+three heads at all, unlike every other special function in `arithmetic.ts`
+(`Zeta`, `HurwitzZeta`, `Gamma`, `Erf`, …). This already fails closed — a
+`PolyGamma`/`Digamma`/`Trigamma` call in a GPU-compiled expression declines
+to the interpreter rather than emitting anything wrong — so it is not a
+correctness bug, only a missing capability: a plot or shader that calls
+these compiles the rest of the expression and evaluates this part off the
+GPU. Fix: port `numerics/special-functions.ts`'s real `digamma`/`trigamma`/
+`polygamma` (recurrence + asymptotic series, the same shape already used for
+`_gpu_gamma`) to GLSL/WGSL helpers and wire them into `GPU_FUNCTIONS`.
+
+### `HurwitzZeta(s, a)` at a complex `a` far left of the imaginary axis does not finish (OPEN — found 2026-09-28 reviewing #340)
+
+`HurwitzZeta(2, -10^7+i).N()` takes 0.9 s and `HurwitzZeta(2, -10^12+i).N()`
+does not finish. `hurwitzEMComplex` (`numerics/numeric-complex.ts`) sums one
+direct term for each unit of −Re(a) before its Euler-Maclaurin tail. The same
+loop made `PolyGamma(m, z)` hang at a large negative Re(z); `polygammaComplex`
+now avoids it with the reflection formula, which applies to an integer `s`
+only. Fix: for an integer `s >= 2`, use the same reflection
+(ζ(s, a) = (−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s−1)!); for another `s`, a representation whose
+cost does not grow with −Re(a), or a cost limit that leaves the application
+symbolic.
+
+### `PolyGamma(m, z)` of an order above 100 stays symbolic close to a half-integer on the real axis (OPEN — found 2026-09-28 reviewing #340)
+
+`PolyGamma(120, -1/2 + 10^{-5} i).N()` stays unevaluated, although mpmath
+gives a value near 8.6e232, inside the range of a double (at `Im(z) = 10^{-4}`
+it answers). For `Re(z) < 0`, `polygammaComplex` needs the m-th derivative
+of cot(πz). Close to a half-integer with a small `Im(z)`, the two series it
+can use for that derivative both lose all their digits (the two halves of
+the partial-fraction series are near-conjugates, and the Fourier series
+needs too many terms), and its third form, a polynomial in cot(πz), is used
+only up to order 100 because its coefficients overflow a double from order
+120 on. Fix: carry the polynomial coefficients in scaled form (a mantissa
+and a power-of-two exponent, as `ScaledComplex` does), then raise
+`COT_POLYNOMIAL_MAX_ORDER` to `POLYGAMMA_MAX_ORDER`.
+
+### `PolyGamma` of a very high order at a real argument does not finish (OPEN — found 2026-09-28 reviewing #340)
+
+At the default precision, `PolyGamma(100000, 2.5).N()` runs for more than
+20 seconds (order 1000 takes 17 ms): the big-decimal kernel `bigPolygamma`
+has no limit on the order. At machine precision the same expression answers
+`NaN`, although the value is only too large for a double. The complex kernel
+`polygammaComplex` leaves an order above 10 000 symbolic, and a value outside
+the range of a double symbolic. Fix: give the real route the same limits.
+
 ### Next items to pick up, ranked (2026-09-23)
 
 The entries below are the ones judged worth starting next, most valuable first.
@@ -257,6 +305,57 @@ Defects:
    builder's tail at every read (`recursive-list-builder.test.ts`,
    "an effectful bound keeps one evaluation per recursive call" went from 3
    calls to 7) and spends extra random draws.
+
+### `.N()` rounds an exact operand before a special function sees it (OPEN — found 2026-09-28 by the review of PR #360)
+
+At `ce.precision = 50`, `HurwitzZeta(3, 1/3).N()` is
+`27.561061199700803776227877977407509284542095313016`; the correct value ends
+`…313015` (it is `…3130148811…`). `Digamma(1/3).N()` ends `…67205` where the
+correct value ends `…67204` (it is `…672041806…`). The cause is not the
+kernels: a `.N()` evaluates each operand numerically first, so `1/3` reaches
+the evaluate handler as a 50-digit decimal, and the rounding error of that
+operand reaches the last digit of the result. The same call on the
+`.evaluate()` route with an inexact `s` keeps `a` exact, and
+`HurwitzZeta(3.0, 1/3).evaluate()` is correct to the last digit (the bignum
+Hurwitz kernel converts an exact rational at its own working precision). A
+fix is either an engine-wide one (evaluate the operands of a numeric
+evaluation with guard digits, or pass exact operands through) or a per-operator
+one (hold the operands of `Zeta`, `HurwitzZeta`, `Digamma` and similar
+functions and evaluate them in the handler).
+
+### The machine-precision Hurwitz zeta loses digits left of the critical strip (OPEN, small — found 2026-09-28 by the review of PR #360)
+
+The double kernel `hurwitzZetaComplex` (`numerics/numeric-complex.ts`) is
+off by more than a few units in the last place for some real s ≤ 0
+(compared with mpmath at the double that `0.3` rounds to):
+
+- `HurwitzZeta(-1.5, 0.3)` is `-0.008185560485836074`; the value is
+  `-0.0081855604858359760…` (13 correct digits).
+- `HurwitzZeta(0, 0.3)` is `0.1999999999999993`; the value is
+  `0.2000000000000000111…` (ζ(0, a) = 1/2 − a).
+- `HurwitzZeta(-200.5, 0.3)` is `2.92337138062847e+215`; the value is
+  `2.9233713806280506e+215` (13 correct digits).
+
+The first and third go through the Taylor expansion about a = 1
+(`zetaNearOneComplex`), which sums values of ζ at shifted arguments; the
+second goes through the Euler-Maclaurin sum (`hurwitzEMComplex`), whose
+terms 1/(s − 1)·z^(1−s) and the direct terms cancel to the small result. At `ce.precision` above 15 the bignum
+kernel `bigHurwitzZeta` gives the correct digits for all three.
+`HurwitzZeta(1.0000001, 1)` = `10000000.571377004` is NOT a defect: the
+double nearest `1.0000001` is `1.0000001000000000583…`, and ζ at that double
+is `10000000.5713770004…`; the pole at s = 1 amplifies the rounding of the
+input.
+
+### A matrix to a non-integer power is element-wise (OPEN, decision — found 2026-09-28 by the agents writing the linear-algebra examples)
+
+`[[1, 2], [3, 4]] ^ (1/2)` is `[[1, √2], [√3, 2]]`, the square root of each
+entry, while an integer exponent is the matrix power (`^2` is
+`[[7, 10], [15, 22]]`, `^-1` the inverse). `canonicalPower`
+(`arithmetic-power.ts`) says element-wise power "is not expressed via `^`"
+and leaves non-integer exponents "to other handling", which is the
+broadcast. The decision: a matrix function (`A^(1/2)` the principal square
+root, computed or left symbolic), an error, or the element-wise reading kept
+and documented.
 
 ### A calculus operator over a function parameter is folded before the argument arrives (OPEN — found 2026-09-27 while writing the core reference examples)
 
@@ -545,13 +644,19 @@ Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
   `L\{c\} < 3` is typed `list<boolean | missing>`, but when `L` is absent
   the value is `Missing` for the whole list, not a list; the type should be
   `missing | list<boolean>`.
-- **A float serializes as an integer when its value is one.** Since the
-  2026-09-27 machine-precision decision a machine float `2.0` is inexact, but
-  its MathJSON is the plain `2`, which re-boxes as the exact `2`: `Sin(2.0)`
-  numericizes, the round-tripped `Sin(2)` stays symbolic. The same holds for
-  LaTeX (item 7 of "Residues of the exactness-by-route rule"). A decision:
-  serialize an integer-valued float as `{num: "2.0"}` (and `2.0` in LaTeX),
-  which changes the MathJSON and LaTeX of every integer-valued float result.
+- **Other code may box an integer-valued double as exact.** Until
+  2026-09-28 an exact `1` and a float `1` serialized the same way, so a site
+  that boxes a double result with `ce.number(n)` was invisible; since the
+  `2.0` spelling it shows. The full suite found one (the compiled `N()` of a
+  lazy `Map`, fixed); kernel bridges and compiled-value readers that call
+  `ce.number(double)` need an audit (the float lane is
+  `ce._inexactNumericValue`). Also: at machine precision `1.0e800`
+  overflows to `PositiveInfinity`, which reports `isExact === true`.
+  Also: the compiled `N()` of a lazy `Map` boxes an integer-valued result as
+  exact when its operands and the lambda are exact; an elementary function
+  of an exact integer whose double is exactly an integer near 2^53
+  (`exp(36)`) is then exact where the interpreter gives a float (found
+  2026-09-28, rare).
 - **Float Gaussian integers are still exact.** `(2.0i)^2` evaluates to the
   exact `-4`, `2.0i + 3` canonicalizes to the exact `3 + 2i`, and
   `(3.0+2i)(1+i)` is exact: several places keep a Gaussian integer exact
@@ -4667,32 +4772,90 @@ evaluates promptly" — a canary-normalized timing assertion (limit 5000 canary
 units) read 6251 in a six-worker full run on a box at load 4 and passed alone
 (70 of 70), while the same tree's other timing pins held.
 
-### `LerchPhi` past |z| = 1 has no compiled (JavaScript/GPU) lane (OPEN, capability gap — found 2026-09-27 while adding `LerchPhi`, #340)
+### `LerchPhi` past |z| = 1 has no GPU lane (OPEN, capability gap — found 2026-09-27 while adding `LerchPhi`, #340)
 
 `LerchPhi(z,s,a)` continues past the unit disk (and on its rim) through the
-upper incomplete gamma function at a complex argument — the interpreter has
-one (`incompleteGammaUpperComplex`, `numerics/numeric-complex.ts`), but
-neither the JavaScript nor the GPU (GLSL/WGSL) target does; `Gamma`'s own
-compiled lowering is real-only. `_gpu_lerch_phi`/`_SYS.lerchPhi` answer `NaN`
-there instead. A complex incomplete gamma kernel for those targets would
-close the gap for `LerchPhi` and widen `Gamma`'s own compiled two-operand
-form at the same time. Demand-gated: no compile-target consumer has asked for
-`LerchPhi` past the unit disk yet.
+upper incomplete gamma function at a complex argument. The interpreter and the
+JavaScript target have one (`incompleteGammaUpperComplex`,
+`numerics/numeric-complex.ts`; `_SYS.lerchPhi` calls the interpreter's
+kernel), but the GPU (GLSL/WGSL) targets do not: `Gamma`'s own compiled
+lowering is real-only, so `_gpu_lerch_phi` answers `NaN` past the unit disk
+(except for `s = 0, −1, −2`, where it has a closed form). A complex incomplete
+gamma kernel for those targets would close the gap for `LerchPhi` and widen
+`Gamma`'s own compiled two-operand form at the same time. Demand-gated: no
+compile-target consumer has asked for `LerchPhi` past the unit disk yet.
+
+The JavaScript lane is `NaN` for real `z < −1` although the value is real
+(`LerchPhi(-3, 1.5, 0.7)` = 1.10658 in mpmath): the interpreter declines there
+too, for the reason in the next entry.
 
 ### `LerchPhi` past |z| = 1 declines where `Gamma(s, x)` is inaccurate (OPEN, correctness, blocked on #353)
 
-The continuation calls `incompleteGammaUpperComplex(1 − s, −a·log z)`. Measured
-against mpmath, that kernel stays within 1e−13 only while |x| ≤ 2.75 when
-Re(x) < 0, so `lerchContinuedComplex` declines past |x| = 2.5 there. In a
-random sweep past the unit disk that is most points. Fixing #353 widens
-`LerchPhi` with it.
+The continuation calls `incompleteGammaUpperComplex(1 − s, −a·log z)`, and
+declines wherever that kernel's error estimate (`incompleteGammaRelativeError`
+in `numerics/lerch-phi.ts`) exceeds 1e−12. For real `z < −1` the argument has
+a negative real part and a modulus above 2.5, and on the rim `|z| = 1` it is
+close to the imaginary axis with a large modulus when `a` is large
+(`LerchPhi(i, 2, 20)`), so most of those points stay symbolic. Fixing the
+kernel (next entry) widens `LerchPhi` with it.
 
-### `PolyLog`'s widened order inherits both `LerchPhi` gaps above (OPEN, found 2026-09-28 while widening `PolyLog`, #340)
+### `Gamma(s, x)` is inaccurate for a complex `x` of moderate modulus (OPEN, correctness — found 2026-09-28 while reviewing `LerchPhi`, possibly the same defect as #353)
 
-`PolyLog(s, z)` at a non-integer or complex order now reduces to `z·Φ(z,s,1)`
-(`numerics/polylog.ts`), so both open `LerchPhi` items above carry over
-directly: past `|z| = 1`, the compiled (JavaScript/GPU) lane is `NaN`
-(no complex incomplete gamma kernel there), and `N()` declines past `|x| =
-2.5` in the same incomplete-gamma argument, blocked on the same #353. No
-separate fix is needed once those land — `PolyLog` widens for free.
+`incompleteGammaUpperComplex` (`numerics/numeric-complex.ts`) loses digits
+outside a small disk, and not only for `Re(x) < 0`. Measured against mpmath's
+`gammainc` with `|s| ≤ 13`:
+
+- The asymptotic series is used from `|x| > |s| + 14`, but it is truncated at
+  its smallest term, which is still about 1e−3 of the sum at `|x| − |s| = 15`
+  and falls below 1e−14 only past `|x| − |s| ≈ 50`.
+- For an integer `s ≤ 0`, the downward recurrence from `E₁(x)` uses `E₁`'s
+  power series up to `|x| = 20` (and for every `x` with `Re(x) ≤ 0`), which
+  cancels: errors of 1e−5 at `|x| = 10` and of order 1 at `|x| = 15`.
+- Otherwise `Γ(s) − γ(s, x)` cancels when `Γ(s, x)` is small.
+
+Public probes: `Gamma(-2, 10+10i).N()` is `1.3133260e−8 + 4.4992e−9i`, mpmath
+`1.3133115e−8 + 4.4997e−9i`; `Gamma(-11.93, 11.44+2.304i).N()` has real part
+`4.116e−21`, mpmath `5.076e−21`. The continued fraction branch (`Re(x) > 0`,
+`|x| ≥ |s| + 1`) is accurate to 1e−14 and could be used for more of the right
+half-plane.
+
+### `HurwitzZeta(s, a)` is inaccurate for a complex `a` and `Re(s) < 0` (OPEN, correctness — found 2026-09-28 while reviewing `LerchPhi`)
+
+`HurwitzZeta(-11.801, 0.4265 − 1.271i).N()` is `2.2188 + 50.186i`; mpmath's
+`zeta(-11.801, 0.4265 − 1.271j)` is `5.6234 + 46.077i`. `hurwitzZetaComplex`
+uses its Taylor shift only when the shifted base point is within its radius,
+and the imaginary part of `a` counts toward that distance; otherwise it falls
+back to the Euler–Maclaurin sum, which cancels for `Re(s) < 0`. `LerchPhi` at
+`z = −1` uses `HurwitzZeta` only for a real `a` because of this.
+Another witness, found while widening `PolyLog`: `HurwitzZeta(-11.5, 0.5 - 1.0994i).N()` is
+`-8.914 + 9.012i`; mpmath gives `-9.526 + 9.526i`. At `s = −2.9`, `a = 0.5 − 0.7329i` the
+error is 5.8e−11 relative. This is the reason for the `PolyLog` inversion limit above.
+
+### `PolyLog` past |z| = 1 still declines for a large order at a large |z| (OPEN, found 2026-09-28 while widening `PolyLog`, #340)
+
+Past the unit disk, `PolyLog(s, z)` at a non-integer order uses the `LerchPhi`
+continuation, and where that declines (most of the plane, see the `LerchPhi`
+item above, #353) Jonquière's inversion formula
+(`polylogInversionComplex`, `numerics/polylog.ts`). The inversion calls
+`hurwitzZetaComplex(1 − s, a)` with `a = 1/2 + ln(−z)/(2πi)`, and that
+function is inaccurate at a negative order with a complex `a` whose
+imaginary part is above about 0.55 (the `HurwitzZeta` entry below). So the inversion declines
+(`N()` stays symbolic) when `Re(s) > 2` and `|z|` is above about 32, for
+example `PolyLog(4.5, -1000)` (mpmath −181.98765816781016), and when
+`|Im s| > 1.5`. The GPU lane has neither the continuation nor the inversion:
+`_gpu_poly_log` is `NaN` for every non-integer order with `|z| > 1`, and for
+an integer order `≥ 2` below `z = −1`. Fixing that entry widens the
+interpreter and the JavaScript lane at once.
+
+### The machine-precision `Zeta` kernels are inaccurate for a small negative order (OPEN, correctness, found 2026-09-28 while widening `PolyLog`, #340)
+
+`zeta(s)` (`numerics/special-functions.ts`) and `zetaComplex`/
+`hurwitzZetaComplex(s, 1)` (`numerics/numeric-complex.ts`) lose digits as `s`
+approaches 0 from below: at `s = −1e−9` they return `−0.4999999577` where
+the value is `−0.4999999991` (8e−8 relative), at `s = −1e−6` the error is
+1.2e−11. The interpreter's `Zeta(-1e-9).N()` is correct (it uses big
+decimals), but the compiled `Zeta` and the compiled `PolyLog(s, 1)` use the
+machine kernel and return the wrong digits. The loss probably comes from the
+reflection formula, which multiplies `sin(πs/2)` (near 0) by `ζ(1 − s)` (near
+its pole).
 

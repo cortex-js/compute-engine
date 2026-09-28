@@ -214,7 +214,7 @@ describe('SUBTRACT', () => {
       ce
         .expr(['Subtract', ['Multiply', 0.5, 'x'], ['Divide', 'x', 2]])
         .evaluate()
-    ).toMatchInlineSnapshot(`0`));
+    ).toMatchInlineSnapshot(`{num: "0.0"}`));
 
   test(`Subtract`, () =>
     expect(ce.expr(['Subtract', 2.5]).evaluate()).toMatchSnapshot());

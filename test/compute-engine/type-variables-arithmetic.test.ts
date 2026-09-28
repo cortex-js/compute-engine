@@ -111,9 +111,10 @@ describe('TYPE VARIABLES / Chop — `(T) -> T where T: number`', () => {
       2,
       3,
     ]);
+    // The chopped float `1e-12` is the float zero `0.0`
     expect(
       ce.box(['Chop', ['List', 1, 1e-12, 3]]).evaluate().json
-    ).toEqual(['List', 1, 0, 3]);
+    ).toEqual(['List', 1, { num: '0.0' }, 3]);
   });
 });
 
