@@ -73,3 +73,52 @@ export function isExactNonInteger(target: Expression, x: number): boolean {
   if (typeof nv === 'number') return false;
   return nv.isExact && !Number.isSafeInteger(x);
 }
+
+/**
+ * The boxed element of a list of machine numbers that holds the double `v`.
+ *
+ * A double with a fraction part is always a float (`engine.number(0.5)`).
+ * A double with an integer value is an exact integer (`engine.number(2)`),
+ * unless `floats` is `true`: the list then records that its integer-valued
+ * elements are floats, because a float computation produced them (`2 · 0.5`
+ * is the float `1`), and the element is boxed as a float with the inexact
+ * factory of the engine. Whether a number is exact depends on how it was
+ * written or computed, not on its value (user decision 2026-09-27), so the
+ * double alone cannot tell.
+ */
+export function boxStoreElement(
+  engine: Expression['engine'],
+  v: number,
+  floats: boolean
+): Expression {
+  if (floats && Number.isSafeInteger(v))
+    return engine.number(engine._inexactNumericValue(v));
+  return engine.number(v);
+}
+
+/**
+ * The exactness class of the machine numbers of a list, read from its
+ * elements: `'exact'` when no element is a float with an integer value (so
+ * `ce.list(array)` reproduces the list), `'float'` when every element with
+ * an integer value is a float (and there is at least one), `undefined` when
+ * both kinds are present (an exact `1` beside a float `2.0`), which no
+ * single `floats` flag of a numeric store records.
+ */
+export function integerExactnessClass(
+  elements: ReadonlyArray<Expression>,
+  values: readonly number[]
+): 'exact' | 'float' | undefined {
+  let exact = false;
+  let float = false;
+  for (let i = 0; i < values.length; i++) {
+    const x = values[i];
+    // Only a safe integer: `ce.number()` boxes a double past the safe
+    // integers (`2^70`) as a float whatever it was, so it reproduces.
+    if (!Number.isSafeInteger(x)) continue;
+    const el = elements[i];
+    if (isNumber(el) && !el.isExact) float = true;
+    else exact = true;
+    if (exact && float) return undefined;
+  }
+  return float ? 'float' : 'exact';
+}

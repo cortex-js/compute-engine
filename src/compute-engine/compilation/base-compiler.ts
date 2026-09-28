@@ -1,4 +1,5 @@
 import { describeType } from '../boxed-expression/operand-descriptor.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
 import { deriveApplicationType } from '../boxed-expression/derive-application-type.js';
 import type {
   Expression,
@@ -1318,12 +1319,12 @@ function isRuntimePointShaped(a: Expression): boolean {
  * `missing` arm, and `unionAdmitsIndexedCollection` does not see it either,
  * because a tuple arm is atomic there. Without this test, `t·P` with a
  * restricted point `P` compiled to the scalar `_.t * [0, 1]`, which runs to
- * `NaN` where the interpreter answers the point `(0, t)`. The absent value
- * needs no special lowering: `_SYS.bcast` applies its closure to it as a
- * scalar and the arithmetic answers `NaN`. The interpreter answers `Missing`
- * (the absent point) for the product of a number and an absent point; a
- * compiled numeric lane may answer `NaN` for an absent value instead
- * (user decision of 2026-09-09, recorded in `ERROR-MODEL.md`).
+ * `NaN` where the interpreter answers the point `(0, t)`. The interpreter
+ * answers `Missing` (the absent point) for the product of a number and an
+ * absent point, and the broadcast lowering answers `undefined`, the
+ * JavaScript spelling of an absent object (user decision of 2026-09-27,
+ * which replaces the `NaN` of the decision of 2026-09-09; see
+ * `objectAbsenceLevels`).
  *
  * A NOMINAL value is atomic whatever its representation, as for
  * `unionAdmitsIndexedCollection` above.
@@ -1351,7 +1352,11 @@ function isGatedPoint(a: Expression): boolean {
  * not one.
  */
 function gatedCollectionArms(a: Expression): Type[] | undefined {
-  const raw = a.type.type;
+  return gatedCollectionArmsOfType(a.type.type);
+}
+
+/** `gatedCollectionArms` for a type rather than an operand. */
+function gatedCollectionArmsOfType(raw: Type): Type[] | undefined {
   if (BaseCompiler.isNominalAtomicType(raw)) return undefined;
   const r = resolveTypeForCompilation(raw);
   if (typeof r === 'string' || r.kind !== 'union') return undefined;
@@ -1373,6 +1378,49 @@ function gatedCollectionArms(a: Expression): Type[] | undefined {
 }
 
 /**
+ * The array levels at which a value of type `raw` can hold an ABSENT OBJECT
+ * (a point, a list, or another indexed collection that may be `undefined`
+ * at run time), as a bit set: bit `k` is set when level `k` can hold one.
+ * `0` (no bit set) means the value cannot hold an absent object.
+ *
+ * - Level `0`: the value itself can be absent. Its type is a gated indexed
+ *   collection (`gatedCollectionArms`), such as the restricted point
+ *   `When((0, 1), c)`, typed `missing | tuple<integer, integer>`.
+ * - Level `k + 1`: the value is a list (not a tuple) whose elements can hold
+ *   an absent object at level `k`, such as `[P{c}, Q]`, typed
+ *   `list<missing | tuple<…>>`, at level 1.
+ *
+ * A value can have more than one level. The restricted list of points
+ * `[P{c}, Q]{d}`, typed `missing | list<missing | tuple<…>>`, is absent
+ * when `d` fails (level 0), and when it is present its first element is
+ * absent when `c` fails (level 1): its set is `0b11`. The present arm of a
+ * gated type is read for its own levels for this reason.
+ *
+ * A tuple has no level of its own: its components are numeric slots, where
+ * an absent value is `NaN`. Read by `tryCompileBroadcast`, which routes an
+ * operand with a level through `_SYS.bcastAbsent`, so that arithmetic on an
+ * absent point answers `undefined` for the whole point, as the interpreter
+ * answers `Missing` (`docs/ERROR-MODEL.md` §3).
+ */
+function objectAbsenceLevels(raw: Type, depth = 0): number {
+  if (depth > 4 || BaseCompiler.isNominalAtomicType(raw)) return 0;
+  const arms = gatedCollectionArmsOfType(raw);
+  if (arms !== undefined) {
+    // Level 0, and the levels a present arm can hold.
+    let levels = 1;
+    for (const arm of arms) levels |= objectAbsenceLevels(arm, depth + 1);
+    return levels;
+  }
+  const r = resolveTypeForCompilation(raw);
+  if (typeof r === 'string' || r.kind === 'tuple') return 0;
+  if (isSubtype(r, 'string') || !isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE))
+    return 0;
+  const elt = collectionElementType(r);
+  if (elt === undefined) return 0;
+  return objectAbsenceLevels(elt, depth + 1) << 1;
+}
+
+/**
  * The compilation type of `a` without its absence: for a GATED indexed
  * collection with one present arm (`isGatedIndexedCollection`, such as the
  * restricted list of points `PointList(When(A, 0 < t), B)`, typed
@@ -1382,9 +1430,10 @@ function gatedCollectionArms(a: Expression): Type[] | undefined {
  * `tryCompileBroadcast` read an operand's element type to prove that it is
  * a list of points, and the `missing` arm hid it: `(A\{0<t\}, B) + (1, 1)`
  * declined to compile where the interpreter answers the shifted points.
- * Those plans emit `NaN` for a source that is not an array at run time, the
- * value a compiled numeric lane gives an absent operand (`A\{0<t\} + 1`
- * runs to `NaN` when `t` is negative; see `isGatedIndexedCollection`).
+ * Those plans emit `NaN` for a source that is not an array at run time, or
+ * `undefined` for an absent source when the result can be absent
+ * (`A\{0<t\} + 1` runs to `undefined` when `t` is negative; see
+ * `objectAbsenceLevels`).
  */
 function presentCompilationType(a: Expression): Type {
   const arms = gatedCollectionArms(a);
@@ -6926,6 +6975,30 @@ export class BaseCompiler {
         prec
       );
 
+    // A user definition that shadows a library operator (`function
+    // Square(x) { x + 100 }`) is what the interpreter calls, but the target's
+    // built-in lowering of the head (`Square(y)` → `y * y`, `Sin` →
+    // `Math.sin`) is the library's. Fail closed rather than emit the library
+    // operator: the interpreter evaluates the call instead. A shadowing
+    // definition that brings its own `compile` handler is exempt: the
+    // compiler consults that handler ahead of the built-in mapping.
+    if (isFunction(expr)) {
+      const head = expr.operator;
+      if (
+        (target.functions?.(head) !== undefined ||
+          target.operators?.(head) !== undefined) &&
+        shadowsLibraryName(expr.engine, head, { customLibrary: false })
+      ) {
+        const shadow = expr.engine.lookupDefinition(head);
+        if (!(isOperatorDef(shadow) && shadow.operator.compile !== undefined))
+          throw new Error(
+            `Could not compile \`${head}\`: a user definition shadows the library ` +
+              `operator \`${head}\`, and the target lowers \`${head}\` as the ` +
+              `library operator. The interpreter evaluates it instead.`
+          );
+      }
+    }
+
     // Is it a symbol?
     if (isSymbol(expr)) {
       const s = expr.symbol;
@@ -7507,6 +7580,14 @@ export class BaseCompiler {
       }
     }
 
+    // `And`/`Or`/`Not` used as a VALUE over an operand that may be ABSENT
+    // (typed `boolean | missing`, `undefined` or `None` at run time) follow
+    // the Kleene tables, as in the interpreter. See `kleeneValueConnective`.
+    {
+      const kleene = BaseCompiler.kleeneValueConnective(h, args, target);
+      if (kleene !== undefined) return kleene;
+    }
+
     // Arithmetic, or a function applied to each coordinate (`Sin`, `Ln`,
     // `Floor`, …), over a `Tuple` with a LIST coordinate (`Tuple(A, B)` with
     // `A`, `B` declared lists, built as MathJSON) fails closed. Such a tuple
@@ -7612,7 +7693,8 @@ export class BaseCompiler {
         engine,
         h,
         args,
-        target
+        target,
+        node
       );
       if (broadcast !== null) return broadcast;
       // The broadcast closure declines a REAL-ONLY head (`Floor`, `Mod`,
@@ -10938,7 +11020,10 @@ export class BaseCompiler {
     engine: ComputeEngine,
     h: string,
     args: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    /** The node being lowered, when the caller has it: its type decides
+     * whether the result can be an absent object (see `absentMode`). */
+    node?: Expression
   ): string | null {
     const def = engine.lookupDefinition(h);
     if (!isOperatorDef(def) || def.operator.broadcastable !== true) return null;
@@ -11284,10 +11369,8 @@ export class BaseCompiler {
       // the outer broadcast walks the list and the gated point is kept
       // whole. The other array operands must provably hold numbers
       // (`isScalarElementSource`), or the outer broadcast would descend into
-      // a point. When the point is absent, the inner broadcast applies the
-      // closure to the absent value as to a scalar, and every element is
-      // `NaN` where the interpreter answers `Missing` (the absent value on a
-      // compiled numeric lane, see the comment of `isGatedIndexedCollection`).
+      // a point. When the point is absent, every element is `undefined`, as
+      // the interpreter answers `Missing` for each (`_SYS.bcastAbsent`).
       if (otherArrays.length > 0) {
         if (
           h !== 'Multiply' ||
@@ -11735,8 +11818,60 @@ export class BaseCompiler {
     // The number of components this application has when every operand's
     // width is known at compile time — the run-time dispatch is then replaced
     // by one expression per component, further down.
+    //
+    // An operand that may hold an ABSENT OBJECT (`objectAbsenceLevels`: a
+    // restricted point or list, or a list of possibly absent points) is read
+    // by `_SYS.bcastAbsent` instead: the absent point is spelled `undefined`,
+    // and arithmetic on it answers `undefined` for the whole point (for one
+    // cell of a list of points), where the interpreter answers `Missing`
+    // (`docs/ERROR-MODEL.md` §3, user decision of 2026-09-27). The component
+    // fan-out and the rotation views would read the absent value as an
+    // array, so neither is used then. When no operand can hold an absent
+    // object, the emission is unchanged.
+    //
+    // The RESULT must be able to hold an absent object too. The interpreter
+    // answers `Missing` for `t·P` with an absent point (typed
+    // `missing | tuple<…>`), but `[1, 2] + L` with an absent list `L` is the
+    // list `[NaN, NaN]` (typed `vector<2>`): the present list gives the
+    // shape, and the absent operand is `NaN` in each numeric cell. The plain
+    // `_SYS.bcast` already answers that. An element type that admits
+    // `missing` counts as well: an ordering of a restricted list,
+    // `L{c} < 3`, is typed `list<boolean | missing>`, and the interpreter
+    // answers `Missing` for the whole list when `L` is absent.
+    // Each entry is a bit set of levels (`objectAbsenceLevels`); `0` is an
+    // operand that cannot hold an absent object.
+    let absentLevels = args.map((a) => objectAbsenceLevels(a.type.type));
+    if (absentLevels.some((d) => d !== 0)) {
+      const result = node?.type.type ?? engine.function(h, [...args]).type.type;
+      const resolved = resolveTypeForCompilation(result);
+      const elt =
+        typeof resolved !== 'string' && resolved.kind === 'list'
+          ? collectionElementType(resolved)
+          : undefined;
+      if (
+        objectAbsenceLevels(result) === 0 &&
+        !(
+          elt !== undefined &&
+          typeof elt !== 'string' &&
+          elt.kind === 'union' &&
+          elt.types.some((b) => resolveTypeForCompilation(b) === 'missing')
+        )
+      )
+        absentLevels = absentLevels.map(() => 0);
+    }
+    const absentMode = absentLevels.some((d) => d !== 0);
+    /** A `_SYS.bcast` call, or `_SYS.bcastAbsent` when one of the level sets
+     * in `levels` is not empty. */
+    const bcastCall = (
+      fnText: string,
+      levels: ReadonlyArray<number>,
+      sources: ReadonlyArray<string>
+    ): string =>
+      levels.some((d) => d !== 0)
+        ? `_SYS.bcastAbsent([${levels.join(', ')}], ${fnText}, ${sources.join(', ')})`
+        : `_SYS.bcast(${fnText}, ${sources.join(', ')})`;
     const componentWidth =
-      atomicTuple === undefined
+      atomicTuple === undefined && !absentMode
         ? BaseCompiler.staticBroadcastWidth(h, args, isArrayOperand)
         : undefined;
 
@@ -11868,6 +12003,7 @@ export class BaseCompiler {
     // avoid on a forty-thousand-element board.
     const viewsAllowed =
       componentWidth === undefined &&
+      !absentMode &&
       admission !== undefined &&
       admission.isOverriddenOperator?.(h) !== true &&
       args.every((a) => a.isPure === true && !isCallerMapped(a, admission));
@@ -12037,6 +12173,8 @@ export class BaseCompiler {
         const src = bound[m];
         const p = BaseCompiler.tempVar(target);
         const inner = bound.map((b, i) => (i === m ? p : b));
+        // Each element of a list of points is one level below the list.
+        const innerLevels = absentLevels.map((d, i) => (i === m ? d >> 1 : d));
         // An EMPTY array takes the point-list branch and maps to the empty
         // list, the answer the provable point-list lane below also gives:
         // a point of the declared arity is never an empty array at run
@@ -12045,20 +12183,32 @@ export class BaseCompiler {
           `((${bound.join(', ')}) => ` +
           `(Array.isArray(${src}) && ` +
           `(${src}.length === 0 || Array.isArray(${src}[0])) ? ` +
-          `${src}.map((${p}) => _SYS.bcast(${closure}, ${inner.join(', ')})) : ` +
-          `_SYS.bcast(${closure}, ${bound.join(', ')})))` +
+          `${src}.map((${p}) => ${bcastCall(closure, innerLevels, inner)}) : ` +
+          `${bcastCall(closure, absentLevels, bound)}))` +
           `(${compiledArgs.join(', ')})`
         );
       }
       const outerParams: string[] = [];
       const outerSources: string[] = [];
+      // Whether each outer source can be absent itself (level `0`) — the
+      // outer level only walks the list — and, for the inner call, the
+      // levels of every operand as the inner call sees them: an element of a
+      // walked list is one level below the list.
+      const outerLevels: number[] = [];
+      const innerLevels: number[] = [];
       const innerArgs = args.map((a, i) => {
-        if (a === atomicTuple || !isArrayOperand(a)) return bound[i];
+        if (a === atomicTuple || !isArrayOperand(a)) {
+          innerLevels.push(absentLevels[i]);
+          return bound[i];
+        }
         const p = BaseCompiler.tempVar(target);
         outerParams.push(p);
         outerSources.push(bound[i]);
+        outerLevels.push(absentLevels[i] & 1);
+        innerLevels.push(absentLevels[i] >> 1);
         return p;
       });
+      const innerCall = bcastCall(closure, innerLevels, innerArgs);
       // A point added to a list of POINTS: the outer level walks the list
       // ONE level deep, handing each point whole to the inner `_SYS.bcast`,
       // which zips it against the atomic point (`[x, y] + [1, 2]` →
@@ -12072,16 +12222,15 @@ export class BaseCompiler {
         return (
           `((${bound.join(', ')}) => ` +
           `(Array.isArray(${outerSources[0]}) ? ` +
-          `${outerSources[0]}.map((${outerParams[0]}) => ` +
-          `_SYS.bcast(${closure}, ${innerArgs.join(', ')})) : NaN))` +
+          `${outerSources[0]}.map((${outerParams[0]}) => ${innerCall}) : ` +
+          `${(outerLevels[0] & 1) !== 0 ? `${outerSources[0]} === undefined ? undefined : ` : ''}NaN))` +
           `(${compiledArgs.join(', ')})`
         );
       }
       return (
         `((${bound.join(', ')}) => ` +
-        `_SYS.bcast((${outerParams.join(', ')}) => ` +
-        `_SYS.bcast(${closure}, ${innerArgs.join(', ')}), ` +
-        `${outerSources.join(', ')}))(${compiledArgs.join(', ')})`
+        `${bcastCall(`(${outerParams.join(', ')}) => ${innerCall}`, outerLevels, outerSources)})` +
+        `(${compiledArgs.join(', ')})`
       );
     }
     // Fusion moves the element reads of an absorbed operand after the
@@ -12090,6 +12239,7 @@ export class BaseCompiler {
     // when no source has an effect and none is caller-supplied code
     // (`isCallerMapped`: an emitter this compiler does not see may hand a
     // mutable array on) — the admission the rotation views ask for.
+    if (absentMode) return bcastCall(closure, absentLevels, compiledArgs);
     const fusionAllowed =
       admission !== undefined &&
       args.every((a) => a.isPure === true && !isCallerMapped(a, admission));
@@ -12488,6 +12638,97 @@ export class BaseCompiler {
       target
     );
     return out === undefined || out === '' ? undefined : out;
+  }
+
+  /**
+   * The three-valued (Kleene) value of an `And`, `Or` or `Not` in VALUE
+   * position, or `undefined` when the plain infix lowering applies.
+   *
+   * The plain lowering is the target's `&&`/`||`/`!` (JavaScript) or
+   * `and`/`or`/`not` (Python). These decide by truthiness and return an
+   * operand, so an absent operand (`undefined` or `None`, the spelling of
+   * `Missing`) gives the wrong answer: with `M` absent, `M && false` is
+   * `undefined` where the interpreter answers `False` (a `false` operand
+   * settles an `And`), `M || false` is `false` where it answers `Missing`,
+   * and `!M` is `true` where it answers `Missing`. The Kleene tables:
+   *
+   * - `And` is `false` when one operand is `false`, `true` when every operand
+   *   is `true`, and undecided otherwise. `Or` is the mirror image.
+   * - `Not` is undecided exactly when its operand is.
+   *
+   * The undecided value is the target's object null (`undefined`, `None`).
+   *
+   * The lowering is lazy, like the condition lowering (`kleeneCondition`):
+   * each operand is bound before the next one is written, and an operand that
+   * follows a settling one (`false` in an `And`, `true` in an `Or`) is never
+   * evaluated. An operand that follows an undecided one is evaluated, because
+   * the table needs it.
+   *
+   * Applied only when an operand's static type has a `missing` arm and every
+   * operand is a boolean or absent, on the targets with an object null
+   * (JavaScript, Python). An ordinary boolean connective keeps the plain
+   * infix lowering, with no extra code.
+   */
+  private static kleeneValueConnective(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    if (h !== 'And' && h !== 'Or' && h !== 'Not') return undefined;
+    if (target.language !== 'javascript' && target.language !== 'python')
+      return undefined;
+    if (args.length === 0 || (h === 'Not' && args.length !== 1))
+      return undefined;
+    // A caller-supplied lowering of the head (an identifier other than the
+    // target's own keyword) takes responsibility for its operands.
+    const opMap = target.operators?.(h);
+    if (
+      opMap !== undefined &&
+      /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]) &&
+      !['and', 'or', 'not'].includes(opMap[0])
+    )
+      return undefined;
+    /** The arms of `a`'s type: `missing`, or a boolean. `undefined` when an
+     * arm is anything else. */
+    const arms = (a: Expression): string[] | undefined => {
+      const r = resolveTypeForCompilation(a.type.type);
+      const types = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
+      const out: string[] = [];
+      for (const b of types) {
+        const t = resolveTypeForCompilation(b);
+        if (t === 'missing') out.push('missing');
+        else if (t === 'never') continue;
+        else if (isSubtype(t, 'boolean')) out.push('boolean');
+        else return undefined;
+      }
+      return out;
+    };
+    const operandArms = args.map(arms);
+    if (operandArms.some((a) => a === undefined)) return undefined;
+    if (!operandArms.some((a) => a!.includes('missing'))) return undefined;
+    const d = BaseCompiler.conditionDialectOf(target);
+    const code = (a: Expression) => BaseCompiler.compileValueOperand(a, target);
+    if (h === 'Not') {
+      const k = BaseCompiler.tempVar(target);
+      return d.bind([k], d.kleeneOfValue(k, true), [code(args[0])]);
+    }
+    const settles = h === 'And' ? d.isFalse : d.isTrue;
+    const settled = h === 'And' ? d.falseValue : d.trueValue;
+    const unsettled = h === 'And' ? d.isTrue : d.isFalse;
+    const other = h === 'And' ? d.trueValue : d.falseValue;
+    const names = args.map(() => BaseCompiler.tempVar(target));
+    // Every operand was reached and none settled the result: it is the other
+    // decided value when every operand holds it, undecided otherwise.
+    let body = d.ternary(
+      names.map((k) => `(${unsettled(k)})`).join(` ${d.and} `),
+      other,
+      d.undecided
+    );
+    for (let i = args.length - 1; i >= 0; i--)
+      body = d.bind([names[i]], d.ternary(settles(names[i]), settled, body), [
+        code(args[i]),
+      ]);
+    return body;
   }
 
   /**

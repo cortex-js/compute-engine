@@ -1174,8 +1174,9 @@ describe('A restricted list of points plus a point compiles to JavaScript', () =
   // `list<tuple<real, real>> | missing`. The interpreter adds the point to
   // every point of the list, or answers `Missing` when `t` fails the
   // condition. The compiled code gives the same points; for an absent list it
-  // answers `NaN`, the value a compiled numeric lane gives an absent operand
-  // (as `A\{0<t\} + 1` does).
+  // answers `undefined`, the JavaScript spelling of an absent list (user
+  // decision of 2026-09-27, which replaces the `NaN` pinned here before; see
+  // `compile-absent-point-spelling.test.ts`).
   function restrictedEngine(valued: boolean): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('A', 'list<real>');
@@ -1253,6 +1254,6 @@ describe('A restricted list of points plus a point compiles to JavaScript', () =
     } as any);
     expect(r.success).toBe(true);
     close((r.run as any)({ ...values, t: 1 }), expected);
-    expect((r.run as any)({ ...values, t: -1 })).toBeNaN();
+    expect((r.run as any)({ ...values, t: -1 })).toBeUndefined();
   });
 });

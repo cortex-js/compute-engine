@@ -203,8 +203,8 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
   afterAll(() => warn.mockRestore());
 
   it('WGSL `Mod` over mismatched widths declines, as GLSL already did', () => {
-    // WGSL lowers `Mod` to `(((a % b) + b) % b)` — not a single call, so the
-    // gate used to step aside for it.
+    // WGSL lowers `Mod` to `(((a % b) - b * floor((a % b) / b)) % b)` — not a
+    // single call, so the gate used to step aside for it.
     for (const emit of [g, w])
       expect(() => emit(['Mod', 'P', 'Q'], cev)).toThrow(
         /^Could not compile `Mod`: its operands lower to shader vectors of different widths \(vec3, vec2\).*$/s
@@ -233,10 +233,10 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // WGSL §8.7 defines the mixed scalar/vector arithmetic operators, so this
     // is valid source and must not be "fixed".
     expect(w(['Mod', 1, V3])).toBe(
-      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) + (vec3f(1.0, 2.0, 3.0))) % (vec3f(1.0, 2.0, 3.0)))'
+      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) - (vec3f(1.0, 2.0, 3.0)) * floor(((1.0) % (vec3f(1.0, 2.0, 3.0))) / (vec3f(1.0, 2.0, 3.0)))) % (vec3f(1.0, 2.0, 3.0)))'
     );
     expect(w(['Mod', V3, 1])).toBe(
-      '((((vec3f(1.0, 2.0, 3.0)) % (1.0)) + (1.0)) % (1.0))'
+      '((((vec3f(1.0, 2.0, 3.0)) % (1.0)) - (1.0) * floor(((vec3f(1.0, 2.0, 3.0)) % (1.0)) / (1.0))) % (1.0))'
     );
   });
 

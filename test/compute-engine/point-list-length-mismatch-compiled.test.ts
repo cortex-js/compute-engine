@@ -71,12 +71,14 @@ describe('restricted point-list arithmetic with an untyped variable', () => {
     expect(r.run!({ t: 2 } as never)).toEqual([4, 3]);
   });
 
-  // Compiled arithmetic with an absent POINT gives a point of `NaN`
-  // coordinates where the interpreter gives `Missing` (the recorded rule of
-  // `compile-restricted-point.test.ts`); the untyped coordinates follow it.
-  test('the absent case gives a point of NaN coordinates', () => {
+  // Compiled arithmetic with an absent POINT answers `undefined`, the
+  // JavaScript spelling of the absent point, where the interpreter gives
+  // `Missing` (user decision of 2026-09-27, which replaces the point of
+  // `NaN` coordinates pinned here before; see
+  // `compile-absent-point-spelling.test.ts`).
+  test('the absent case gives the absent point', () => {
     const r = compile(expr, { to: 'javascript' });
     expect(r.success).toBe(true);
-    expect(r.run!({ t: 0 } as never)).toEqual([NaN, NaN]);
+    expect(r.run!({ t: 0 } as never)).toBeUndefined();
   });
 });

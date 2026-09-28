@@ -85,19 +85,22 @@ export class MachineNumericValue extends NumericValue {
     return 'real';
   }
 
-  // A machine double is exact only when it is a SAFE integer
-  // (`Number.isSafeInteger`): every integer of that range has exactly one
-  // double, so the value denotes that integer and nothing else. A double
-  // past the safe integers (`1e200`) is a rounded value — its integer
-  // reading (the binary value of the double) is an artifact of the
-  // rounding, so it stays a float.
+  // A machine double is never exact, as a big decimal is never exact
+  // (`BigNumericValue.isExact`). Whether a number is exact depends on how it
+  // is written, not on its value: a literal with a fraction part (`2.0`) and
+  // the result of a float computation are floats even when their value is an
+  // integer. An exact integer is an `ExactNumericValue`: the engine factory
+  // `_numericValue()` makes one for a safe-integer JavaScript number, and the
+  // exact results of the kernels of this class use `_makeExact()`. Before,
+  // this class was exact for every safe-integer value, so at
+  // `precision: 'machine'` the literal `2.0` was exact and `\sin(2.0)` stayed
+  // symbolic, while at a higher precision it evaluated to a float.
   get isExact(): boolean {
-    return !this.isComplex && Number.isSafeInteger(this.decimal);
+    return false;
   }
 
   get asExact(): NumericValue | undefined {
-    if (!this.isExact) return undefined;
-    return this._makeExact(this.decimal);
+    return undefined;
   }
 
   toJSON(): MathJsonExpression {
@@ -692,7 +695,8 @@ export class MachineNumericValue extends NumericValue {
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
 
     if (!this.isComplex) {
-      if (this.isOne) return this._makeExact(0);
+      // A float argument gives a float result: `ln(1.0)` is the float `0`.
+      if (this.isOne) return this.clone(0);
       // Negative real: principal branch ln(x) = ln|x| + iπ (both parts
       // divided by ln(base) when a base is given). Previously every negative
       // real except -1 returned NaN, disagreeing with the complex logarithm
@@ -706,6 +710,13 @@ export class MachineNumericValue extends NumericValue {
       }
 
       if (base === undefined) return this.clone(Math.log(this.decimal));
+      // A base of 10 or 2 uses its own primitive, as the `N()` route, the
+      // machine list kernels (`machine-broadcast.ts`) and the compiled code
+      // do: `Math.log10(3)` and `Math.log(3) / Math.log(10)` differ in the
+      // last digit, and the quotient is one ulp off at some powers of the
+      // base.
+      if (base === 10) return this.clone(Math.log10(this.decimal));
+      if (base === 2) return this.clone(Math.log2(this.decimal));
       return this.clone(Math.log(this.decimal) / Math.log(base));
     }
 
@@ -727,7 +738,8 @@ export class MachineNumericValue extends NumericValue {
 
   exp(): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
-    if (this.isZero) return this._makeExact(1);
+    // A float argument gives a float result: `exp(0.0)` is the float `1`.
+    if (this.isZero) return this.clone(1);
     if (this.isNegativeInfinity) return this._makeExact(0);
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
     if (this.isComplex) {

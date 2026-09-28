@@ -937,7 +937,8 @@ export class BigNumericValue extends NumericValue {
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
 
     if (!this.isComplex) {
-      if (this.isOne) return this._makeExact(0);
+      // A float argument gives a float result: `ln(1.0)` is the float `0`.
+      if (this.isOne) return this.clone(0);
       // Negative real: principal branch ln(x) = ln|x| + iπ (both parts
       // divided by ln(base) when a base is given). Previously every negative
       // real except -1 returned NaN, disagreeing with the complex logarithm
@@ -982,7 +983,8 @@ export class BigNumericValue extends NumericValue {
 
   exp(): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
-    if (this.isZero) return this._makeExact(1);
+    // A float argument gives a float result: `exp(0.0)` is the float `1`.
+    if (this.isZero) return this.clone(1);
     if (this.isNegativeInfinity) return this._makeExact(0);
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
     if (this.isComplex) {

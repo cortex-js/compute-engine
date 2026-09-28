@@ -641,3 +641,132 @@ describe('COMPILE three-valued connectives — GPU and interval targets untouche
     );
   });
 });
+
+/**
+ * `And`/`Or`/`Not` used as a VALUE, not as a branch condition. With an
+ * operand typed `boolean | missing` (absent at run time: `undefined` in
+ * JavaScript, `None` in Python), the plain `&&`/`||`/`!` decide by
+ * truthiness and return an operand: `M && false` was `undefined` where the
+ * interpreter answers `False`, `M || false` was `false` where it answers
+ * `Missing`, and `!M` was `true`. They now follow the Kleene tables, and the
+ * undecided value is the target's object null. Each answer is compared with
+ * the interpreter.
+ */
+describe('COMPILE three-valued connectives — value position', () => {
+  const ce = new ComputeEngine();
+  ce.declare('M', 'boolean | missing');
+  ce.declare('N', 'boolean | missing');
+  ce.declare('p', 'boolean');
+  ce.declare('q', 'boolean');
+
+  /** A run-time value, and the symbol the interpreter reads for it. */
+  const values: Array<[boolean | undefined, string]> = [
+    [true, 'True'],
+    [false, 'False'],
+    [undefined, 'Missing'],
+  ];
+  /** The interpreter's answer as the JavaScript value that spells it. */
+  const interpreted = (json: unknown, subs: Record<string, string>) => {
+    const s: Record<string, any> = {};
+    for (const [k, v] of Object.entries(subs)) s[k] = ce.symbol(v);
+    const r = ce
+      .box(json as any)
+      .subs(s)
+      .evaluate().symbol;
+    return r === 'True' ? true : r === 'False' ? false : r === 'Missing' ? undefined : r;
+  };
+
+  const pairs = values.flatMap(([a, as]) =>
+    values.map(([b, bs]) => [a, as, b, bs] as const)
+  );
+
+  for (const head of ['And', 'Or']) {
+    test.each(pairs)(
+      `${head}(%s, %s) matches the interpreter`,
+      (a, as, b, bs) => {
+        const json = [head, 'M', 'N'];
+        const expected = interpreted(json, { M: as, N: bs });
+        expect(expected === undefined || typeof expected === 'boolean').toBe(
+          true
+        );
+        expect(js(ce, json).run({ M: a, N: b })).toBe(expected);
+      }
+    );
+  }
+
+  test.each(values)('Not(%s) matches the interpreter', (a, as) => {
+    const json = ['Not', 'M'];
+    expect(js(ce, json).run({ M: a })).toBe(interpreted(json, { M: as }));
+  });
+
+  it('a false operand settles an And whose other operand is absent', () => {
+    expect(js(ce, ['And', 'M', 'False']).run({ M: undefined })).toBe(false);
+  });
+
+  it('an Or of an absent operand and false is undecided', () => {
+    expect(js(ce, ['Or', 'M', 'False']).run({ M: undefined })).toBeUndefined();
+  });
+
+  it('does not evaluate an operand after a settling one', () => {
+    // The second operand is the argument of an inner arrow function, entered
+    // only when the first operand is not `false`. (The run-time wrapper reads
+    // every entry of `vars` up front, so the order is checked on the code.)
+    const { code, run } = js(ce, [
+      'And',
+      'M',
+      ['Greater', ['Divide', 1, 'x'], 1],
+    ]);
+    expect(code).toContain('(_tv1 === false ? false : ((_tv2) =>');
+    expect(code.indexOf('_tv1 === false')).toBeLessThan(code.indexOf('1 / _.x'));
+    expect(run({ M: false, x: 0.5 })).toBe(false);
+    expect(run({ M: undefined, x: 0.5 })).toBe(undefined);
+    expect(run({ M: undefined, x: 2 })).toBe(false);
+  });
+
+  it('keeps the plain infix spelling when no operand can be absent', () => {
+    expect(js(ce, ['And', 'p', 'q']).code).toBe('_.p && _.q');
+    expect(js(ce, ['Or', 'p', ['Not', 'q']]).code).toBe('_.p || !_.q');
+  });
+
+  it('spells the Python And table with lambdas and None', () => {
+    const python = new PythonTarget();
+    const source = python.compile(ce.expr(['And', 'M', 'N'] as any)).code;
+    expect(source).toBe(
+      '(lambda _tv1: (False if _tv1 is not None and not _tv1 else ' +
+        '(lambda _tv2: (False if _tv2 is not None and not _tv2 else ' +
+        '(True if (_tv1 is not None and _tv1) and (_tv2 is not None and _tv2) ' +
+        'else None)))(N)))(M)'
+    );
+    expect(python.compile(ce.expr(['And', 'p', 'q'] as any)).code).toBe(
+      'p and q'
+    );
+  });
+});
+
+describePython('COMPILE three-valued connectives — Python value position', () => {
+  const ce = new ComputeEngine();
+  ce.declare('M', 'boolean | missing');
+  ce.declare('N', 'boolean | missing');
+  const python = new PythonTarget();
+
+  function runPython(source: string, M: string, N: string): string {
+    const script = `import numpy as np\nM = ${M}\nN = ${N}\nprint(repr(${source}))\n`;
+    return execFileSync(VENV_PYTHON, ['-c', script], {
+      encoding: 'utf-8',
+    }).trim();
+  }
+
+  it('follows the Kleene tables with None', () => {
+    const and = python.compile(ce.expr(['And', 'M', 'N'] as any)).code;
+    const or = python.compile(ce.expr(['Or', 'M', 'N'] as any)).code;
+    const not = python.compile(ce.expr(['Not', 'M'] as any)).code;
+    expect(runPython(and, 'None', 'False')).toBe('False');
+    expect(runPython(and, 'None', 'True')).toBe('None');
+    expect(runPython(and, 'True', 'True')).toBe('True');
+    expect(runPython(or, 'None', 'False')).toBe('None');
+    expect(runPython(or, 'None', 'True')).toBe('True');
+    expect(runPython(or, 'False', 'False')).toBe('False');
+    expect(runPython(not, 'None', 'None')).toBe('None');
+    expect(runPython(not, 'False', 'None')).toBe('True');
+  });
+});

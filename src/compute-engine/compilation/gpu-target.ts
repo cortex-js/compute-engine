@@ -3114,8 +3114,8 @@ function gpuCheckOperandShapes(
 
   if (call === undefined) {
     // Not a single call: an infix operator emission or a compound lowering
-    // lowering (WGSL's `Mod` → `(((a % b) + b) % b)`, `Log10` →
-    // `log(a) / log(10.0)`). Aggregate-consuming lowerings have already
+    // lowering (WGSL's `Mod` → `(((a % b) - b * floor((a % b) / b)) % b)`,
+    // `Log10` → `log(a) / log(10.0)`). Aggregate-consuming lowerings have already
     // returned above through an explicit capability. Other compound lowerings
     // still need array, matrix, and vector-width checks.
     const sym = GPU_OPERATORS[head]?.[0];

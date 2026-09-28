@@ -862,6 +862,11 @@ function imaginaryPart(x: Expression): Expression {
   const nv = isNumber(x) ? x.numericValue : undefined;
   const big = typeof nv === 'object' ? nv.bignumIm : undefined;
   if (big !== undefined) return ce.number(ce._numericValue(big));
+  // The imaginary part of a float is a float, even when its value is an
+  // integer: the imaginary part of the real float `0.0` is the float `0`,
+  // and `e^{0.0}` is then the float `1`. `ce.number(0)` would be the exact 0.
+  if (isNumber(x) && !x.isExact)
+    return ce.number(ce._inexactNumericValue(x.im));
   return ce.number(x.im);
 }
 

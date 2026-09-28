@@ -14,12 +14,18 @@ import type { Rational } from '../numerics/types.js';
 import { asRational } from './numerics.js';
 import { bignumPreferred, getImaginaryFactor } from './utils.js';
 import { halfTurnAngle, halfTurns, radiansToAngle } from './trigonometry.js';
-import { apply, apply2, complexNumericValueRoute } from './apply.js';
+import {
+  apply,
+  apply2,
+  boxComplexKernelResult,
+  complexNumericValueRoute,
+} from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { realExponentValue, isGaussianIntegerValue } from './imaginary-part.js';
 import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { chopComplexDust } from '../numeric-value/roundoff.js';
+import { asFloat, hasFloatOperand } from './float-result.js';
 
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
  * type must answer no: `never` is a subtype of `matrix` (of everything),
@@ -471,8 +477,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // exponent, before the numeric-exponent guard below.
   if (isNumber(a) && a.isSame(0) && !b.isSame(0) && !b.isInfinity) {
     // 0^positive = 0, 0^negative = ComplexInfinity. A float base `0.0`
-    // gives a float `0`.
-    if (b.isPositive === true) return a.isExact ? ce.Zero : a;
+    // or a float exponent (`0^{2.0}`) gives a float `0`.
+    if (b.isPositive === true)
+      return !a.isExact ? a : hasFloatOperand([b]) ? asFloat(a) : ce.Zero;
     if (b.isNegative === true) return ce.ComplexInfinity;
   }
 
@@ -746,7 +753,10 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
   // Fractional exponents
   //---------------------
-  if (b.isSame(0.5))
+  // Only an EXACT `1/2` makes a square root. A float exponent `0.5` is kept,
+  // as a float `1.0` is (`isExactLiteral` above): `4^{0.5}` evaluates to the
+  // float `2`, and `x^{0.5}` stays `x^{0.5}`, as in Mathematica.
+  if (isExactLiteral(b, 0.5))
     return a.isCanonical || a.isStructural
       ? canonicalRoot(a, 2)
       : ce._fn('Sqrt', [a], { canonical: false });
@@ -1213,7 +1223,12 @@ function complexPowN(
       return ce.ComplexInfinity;
     return undefined;
   }
-  return ce.number(ce._numericValue(chopComplexDust(z.re, z.im)));
+  // A float operand makes the result a float (`i^{2.0}` is the float `-1`).
+  return boxComplexKernelResult(
+    ce,
+    chopComplexDust(z.re, z.im),
+    typeof exp === 'number' ? [x] : [x, exp]
+  );
 }
 
 /**

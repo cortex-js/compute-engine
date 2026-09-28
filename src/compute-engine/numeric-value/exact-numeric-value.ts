@@ -729,7 +729,9 @@ export class ExactNumericValue extends NumericValue {
         });
       return this._toFloat().add(other);
     }
-    if (other.isZero) return this;
+    // Only an exact 0 is an identity: a float 0 makes the sum a float
+    // (`-2 + 0.0` is the float `-2`), which the float lane below computes.
+    if (other.isZero && other.isExact) return this;
     if (this.isZero) return other;
 
     if (!(other instanceof ExactNumericValue)) {

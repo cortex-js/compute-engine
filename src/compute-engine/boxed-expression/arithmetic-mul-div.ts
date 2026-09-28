@@ -2910,9 +2910,13 @@ function mulTensors(
  * about 3.5 µs a cell: `Sum(2·L)` over ten thousand numbers took 48 ms, most
  * of it here. The doubles are the same values under these conditions:
  *
- * - the vector is MACHINE NUMERIC (`isMachineNumeric`): every element is a
- *   machine number and none is an exact rational such as `1/2`, whose
- *   product must stay exact; the scalar is one too;
+ * - the vector is a list of machine numbers (`_machineFloats` is defined):
+ *   every element is a machine number and none is an exact rational such as
+ *   `1/2`, whose product must stay exact; the scalar is one too;
+ * - a product with a float factor is a float, even when its value is an
+ *   integer (`2 · 0.5` is the float `1`), and a product of two exact
+ *   integers is exact; one flag of the answer records which it is for all
+ *   the integer-valued products, so a mix of the two declines;
  * - every value is finite, so no `0 · ∞` or `NaN` is decided here;
  * - the products are exact integers (both factors integers, the product a
  *   safe integer), or the engine computes floats as doubles (machine
@@ -2924,23 +2928,31 @@ function mulTensors(
  *   the doubles give `0.30000000000000004`. The ELEMENTS need no such test:
  *   the cell products read them from the packed tensor, which holds doubles.
  *
- * The answer is a list that holds its numbers unboxed (`ce.list`), whose
- * elements are exactly `ce.number(product)`.
+ * The answer is a list that holds its numbers unboxed (`ce._list`).
  */
 function scaleMachineVector(
   ce: ComputeEngine,
   vector: Expression,
   scalar: Expression
 ): Expression | undefined {
-  if (!isFunction(vector, 'List') || vector.isMachineNumeric !== true)
-    return undefined;
+  if (!isFunction(vector, 'List')) return undefined;
+  // `true` when the integer-valued elements are floats (`[0.5, 2.0]`)
+  const vectorFloats = vector._machineFloats;
+  if (vectorFloats === undefined) return undefined;
   const k = machineNumberOf(scalar);
   if (k === undefined || !Number.isFinite(k) || isExactNonInteger(scalar, k))
     return undefined;
   const values = vector.array;
   if (values === undefined) return undefined;
   const floatsAreDoubles = !bignumPreferred(ce) && isStoredAsDouble(scalar);
-  const integerScalar = Number.isInteger(k);
+  const exactIntegerScalar =
+    Number.isInteger(k) && isNumber(scalar) && scalar.isExact;
+  // A product with a float factor is a float, even when its value is an
+  // integer (`2 · 0.5` is the float `1`). The list records it for all its
+  // integer-valued elements, so a result that would mix exact integers and
+  // integer-valued floats declines.
+  let exactInteger = false;
+  let floatInteger = false;
   const out = new Array<number>(values.length);
   for (let i = 0; i < values.length; i++) {
     const v = values[i];
@@ -2951,12 +2963,18 @@ function scaleMachineVector(
     // integer, and `ce.number()` of the double is a float (only a
     // safe-integer double is boxed as an exact integer).
     if (Number.isInteger(p) && !Number.isSafeInteger(p)) return undefined;
-    if (!(integerScalar && Number.isInteger(v)) && !floatsAreDoubles)
-      return undefined;
+    const exactCell =
+      exactIntegerScalar && Number.isInteger(v) && !vectorFloats;
+    if (!exactCell && !floatsAreDoubles) return undefined;
+    if (Number.isInteger(p)) {
+      if (exactCell) exactInteger = true;
+      else floatInteger = true;
+      if (exactInteger && floatInteger) return undefined;
+    }
     // `-0` is stored as `0`, as the `array` of a list stores it.
     out[i] = p === 0 ? 0 : p;
   }
-  return ce.list(out);
+  return ce._list(out, floatInteger);
 }
 
 /**

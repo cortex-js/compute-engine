@@ -9,6 +9,7 @@ import type {
   IComputeEngine,
 } from '../global-types.js';
 import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
+import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
@@ -433,7 +434,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₂F₁(a, b; c; 0) = 1 exactly
         const z = ops[3];
-        if (isNumber(z) && !z.isComplex && z.isSame(0)) return engine.One;
+        if (isNumber(z) && !z.isComplex && z.isSame(0))
+          return floatIfFloatOperand(ops, engine.One);
         const held = symbolicAtInfinity(ops, engine);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, ...ops)
@@ -525,7 +527,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const [s, z] = ops;
         // `Liₛ(0) = 0` for EVERY order, an infinite one included, so it is
         // decided before the infinity hold below.
-        if (isNumber(z) && !z.isComplex && z.isSame(0)) return engine.Zero;
+        if (isNumber(z) && !z.isComplex && z.isSame(0))
+          return floatIfFloatOperand(ops, engine.Zero);
         const held = symbolicAtInfinity(ops, engine);
         if (held !== undefined) return held ?? undefined;
         // Exact reductions (see `polylogReduce`). Evaluate the reduced form so
@@ -565,7 +568,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₁F₁(a; b; 0) = 1 exactly
         const z = ops[2];
-        if (isNumber(z) && !z.isComplex && z.isSame(0)) return engine.One;
+        if (isNumber(z) && !z.isComplex && z.isSame(0))
+          return floatIfFloatOperand(ops, engine.One);
         const held = symbolicAtInfinity(ops, engine);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, ...ops)
@@ -827,7 +831,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (point !== undefined) return ce.NaN;
         // li is real only for x ≥ 0; stay symbolic for complex/negative.
         if (x.isComplex || x.isNegative) return undefined;
-        if (x.isSame(0)) return ce.Zero;
+        if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
         if (x.isSame(1)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         return applyN([x], logIntegral);
@@ -856,7 +860,8 @@ function polylogReduce(
   z: Expression
 ): Expression | undefined {
   // Liₛ(0) = 0 (for any order).
-  if (isNumber(z) && !z.isComplex && z.isSame(0)) return engine.Zero;
+  if (isNumber(z) && !z.isComplex && z.isSame(0))
+    return floatIfFloatOperand([s, z], engine.Zero);
 
   const sInt = asSmallInteger(s);
 

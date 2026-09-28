@@ -5,7 +5,6 @@ import type { Expression, IComputeEngine } from '../global-types.js';
 
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 import type { NumericValue } from '../numeric-value/types.js';
-import { SMALL_INTEGER } from '../numerics/numeric.js';
 import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
 import {
@@ -26,16 +25,29 @@ import { chopComplexDust } from '../numeric-value/roundoff.js';
  * of a 16-digit value. A machine-precision operand then contaminates
  * downstream arithmetic to machine precision, mirroring float contagion.
  *
- * Small integers stay exact: machine kernels return them for exact special
- * values (e.g. `BesselI(0, 0)` = 1), and `ce.number()` interns them.
- * Non-finite values keep their canonical boxing (±oo, NaN).
+ * When an argument is a float, the result is a float, even when its value is
+ * an integer: at every precision, `2.0^2` is the float `4`, as
+ * `boxKernelResult()` does for a big-decimal result. A `MachineNumericValue`
+ * is never exact, so it carries that result.
+ *
+ * Otherwise a safe-integer result stays exact: machine kernels return them
+ * for exact special values (e.g. `BesselI(0, 0)` = 1), and `ce.number()`
+ * interns the small ones. Non-finite values keep their canonical boxing
+ * (±oo, NaN).
  */
-function boxMachineNumber(ce: IComputeEngine, value: number): Expression {
-  if (
-    bignumPreferred(ce) &&
-    Number.isFinite(value) &&
-    !(Number.isInteger(value) && Math.abs(value) <= SMALL_INTEGER)
-  )
+function boxMachineNumber(
+  ce: IComputeEngine,
+  value: number,
+  args: ReadonlyArray<Expression>
+): Expression {
+  if (!Number.isFinite(value)) return ce.number(value);
+  // A zero result is the float `+0`: `Math.ceil(-0.3)` is `-0`, and the
+  // engine does not keep the sign of a float zero anywhere else (the
+  // literal `-0.0` and the product `-1.0 · 0.0` are `+0`, and a big decimal
+  // has no negative zero).
+  if (args.some((x) => isNumber(x) && !x.isExact))
+    return ce.number(new MachineNumericValue(value === 0 ? 0 : value));
+  if (bignumPreferred(ce) && !Number.isSafeInteger(value))
     return ce.number(new MachineNumericValue(value));
   return ce.number(value);
 }
@@ -124,6 +136,31 @@ function boxKernelResult(
   )
     return ce.number(ce._numericValue(result));
   return boxBignumResult(ce, result);
+}
+
+/**
+ * Box the complex result of a double kernel, `{re, im}`. When an argument is
+ * a float, the result is a float, even when its value is a Gaussian integer
+ * or its imaginary part is `0`: at every precision `i^{2.0}` is the float
+ * `-1`, as `boxMachineNumber()` makes a real result a float.
+ * `_numericValue()` makes a safe-integer `{re, im: 0}` exact, which is what
+ * a caller that builds exact data wants, so the float is made here with the
+ * inexact factory of the engine. Otherwise the value is boxed as
+ * `_numericValue()` boxes it: exact when it is a Gaussian integer.
+ */
+export function boxComplexKernelResult(
+  ce: IComputeEngine,
+  value: { re: number; im: number },
+  args: ReadonlyArray<Expression>
+): Expression {
+  if (args.some((x) => isNumber(x) && !x.isExact))
+    return ce.number(
+      ce._inexactNumericValue({
+        re: value.re === 0 ? 0 : value.re,
+        im: value.im === 0 ? 0 : value.im,
+      })
+    );
+  return ce.number(ce._numericValue(value));
 }
 
 /**
@@ -232,8 +269,8 @@ export function apply(
 
   if (result === undefined) return undefined;
   if (result instanceof Complex)
-    return ce.number(ce._numericValue({ re: result.re, im: result.im }));
-  if (typeof result === 'number') return boxMachineNumber(ce, result);
+    return boxComplexKernelResult(ce, { re: result.re, im: result.im }, [expr]);
+  if (typeof result === 'number') return boxMachineNumber(ce, result, [expr]);
   return boxKernelResult(ce, result, [expr]);
 }
 
@@ -303,11 +340,15 @@ export function applyN(
     // a property of the arithmetic, not of the user's comparison tolerance.
     // The test is RELATIVE to the modulus of the result, so a small result
     // (`(10^{-10} i)^2 = -10^{-20}`) keeps both parts.
-    return ce.number(ce._numericValue(chopComplexDust(result.re, result.im)));
+    return boxComplexKernelResult(
+      ce,
+      chopComplexDust(result.re, result.im),
+      ops
+    );
   }
   if (typeof result === 'number') {
     if (Number.isNaN(result)) return undefined;
-    return boxMachineNumber(ce, result);
+    return boxMachineNumber(ce, result, ops);
   }
   if (result.isNaN()) return undefined;
   return boxKernelResult(ce, result, ops);
@@ -391,12 +432,16 @@ export function apply2(
   if (result === undefined) return undefined;
   if (result instanceof Complex)
     // Relative roundoff scale, not `ce.tolerance`: see the first branch.
-    return ce.number(ce._numericValue(chopComplexDust(result.re, result.im)));
+    return boxComplexKernelResult(ce, chopComplexDust(result.re, result.im), [
+      expr1,
+      expr2,
+    ]);
   // Do not chop a real result: a legitimately-small value (e.g. 10^-100 from
   // `Power(10, -100)`) is not roundoff noise, and chopping it to 0 is both
   // wrong and inconsistent with the single-argument `apply` above. (The
   // complex branch removes a component only when it is tiny compared with
   // the modulus, which is typically trig roundoff.)
-  if (typeof result === 'number') return boxMachineNumber(ce, result);
+  if (typeof result === 'number')
+    return boxMachineNumber(ce, result, [expr1, expr2]);
   return boxKernelResult(ce, result, [expr1, expr2]);
 }

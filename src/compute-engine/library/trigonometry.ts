@@ -3,6 +3,11 @@ import { BigDecimal } from '../../big-decimal/index.js';
 
 import { euclideanNormType, pointNormBroadcasts } from './utils.js';
 import { bignumPreferred, boxBignumResult } from '../boxed-expression/utils.js';
+import {
+  asFloat,
+  floatIfFloatOperand,
+  hasFloatOperand,
+} from '../boxed-expression/float-result.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
   checkArity,
@@ -674,7 +679,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         }
 
-        if (numericApproximation)
+        // A float operand makes the angle a float, as `Arctan(0.5)` is:
+        // `Arctan2(0.0, 1)` is the float `0`, and `Arctan2(0.0, -1)` the
+        // float `3.14…`, not the exact `π` of the exact branches below.
+        if (numericApproximation || hasFloatOperand([y, x]))
           return radiansToAngle(
             apply2(y, x, Math.atan2, (a, b) => BigDecimal.atan2(a, b))
           );
@@ -1031,7 +1039,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.One;
+        if (x.isSame(0)) return floatIfFloatOperand([x], ce.One);
         if (x.isInfinity) return ce.Zero;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
@@ -1061,7 +1069,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.Zero;
+        if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
         if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
@@ -1091,7 +1099,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.isComplex) return undefined;
         // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.Zero;
+        if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
         if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
@@ -1154,7 +1162,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation ? v.N() : v;
         }
         if (point !== undefined) return ce.NaN;
-        if (!x.isComplex && x.isSame(0)) return ce.Zero;
+        if (!x.isComplex && x.isSame(0))
+          return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the E₁-based kernel.
         return apply(x, (x) => sinIntegral(x), undefined, sinIntegralComplex);
@@ -1276,7 +1285,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.NegativeInfinity;
         if (point !== undefined) return ce.NaN;
-        if (!x.isComplex && x.isSame(0)) return ce.Zero;
+        if (!x.isComplex && x.isSame(0))
+          return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the Si-based kernel.
         return apply(x, (x) => sinhIntegral(x), undefined, sinhIntegralComplex);
@@ -1705,8 +1715,13 @@ function trigFunction(
       // with `evaluate()` (the float kernel gives `Arcsch(0)` a signed
       // infinity). The same helper serves the `constructible value` simplify
       // rule, so `simplify()` agrees too.
+      // A float argument gives a float value (`sinh(0.0)` is the float `0`);
+      // a non-finite value (`coth(0.0) = ~oo`) has no float form and stays.
       const exact = hyperbolicExactValue(operator, x);
-      if (exact) return numericApproximation ? exact.N() : exact;
+      if (exact) {
+        if (hasFloatOperand([x])) return asFloat(exact.N());
+        return numericApproximation ? exact.N() : exact;
+      }
       // The operand before its numeric evaluation lets the kernel read an
       // exact large angle without rounding it first (`12345678901234567890123`
       // or `10³⁰·π`). It is the operand of `x` only when the node has one

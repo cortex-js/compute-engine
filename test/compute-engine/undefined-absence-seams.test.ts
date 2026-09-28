@@ -152,11 +152,20 @@ describe('UNDEFINED reads like MISSING — seam 1: relational and logic', () => 
     });
 
     it('Implies, Nand and Nor read both absence symbols alike', () => {
+      // `p ⇒ True` is `True` for every `p`, so an absent antecedent does not
+      // make it absent (Kleene, user decision of 2026-09-27; it was
+      // `Missing` before). `Missing ⇒ False` is undecided, so it is absent.
       expect(ce.box(['Implies', 'Missing', 'True']).evaluate().toString()).toBe(
-        '"Missing"'
+        '"True"'
       );
       expect(
         ce.box(['Implies', 'Undefined', 'True']).evaluate().toString()
+      ).toBe('"True"');
+      expect(
+        ce.box(['Implies', 'Missing', 'False']).evaluate().toString()
+      ).toBe('"Missing"');
+      expect(
+        ce.box(['Implies', 'Undefined', 'False']).evaluate().toString()
       ).toBe('"Missing"');
       expect(ce.box(['Nand', 'Missing', 'True']).evaluate().toString()).toBe(
         '"Missing"'

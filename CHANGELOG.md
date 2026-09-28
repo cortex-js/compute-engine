@@ -2,6 +2,74 @@
 
 ### Behavior Changes
 
+- **The spelling rule holds at machine precision, and a float operand makes
+  a numeric result a float.** On a `precision: 'machine'` engine,
+  `ce.parse('2.0')` was exact, so `\sin(2.0)` stayed symbolic there while it
+  evaluated at the default precision; a machine number is now always
+  inexact, and exact integers are the exact class, as `ce.number(2)` already
+  was. `2.0^2`, `\ln(1.0)`, `2.0!`, `\sinh(0.0)`, `4^{0.5}` and similar
+  results of a float operand are floats at every precision (user decision
+  2026-09-27). `\max(2.0, 3)` still returns its operand `3` as given, and
+  `\operatorname{sign}(2.0)` is still the integer `1`, as in Mathematica. A
+  consequence at machine precision: `(1.5+1.5)·(1/7)` is the float
+  `0.42857142857142855`, not the exact `3/7`.
+  Also: `x^{0.5}` stays `Power(x, 0.5)` (only an exact `1/2` becomes
+  `\sqrt{x}`), as `x^{1.0}` already stayed; a float `0` is no identity in a
+  sum (`0.0 - 2` is the float `-2`); `\gcd(4.0, 6)` is the float `2`; the
+  statistics of float data are floats (`Mean([1.0, 3.0])` is `2.`); a list of
+  more than 100 numbers computed from floats keeps its integer-valued
+  elements as floats. `isMachineNumeric` is now `false` for a number or list
+  that holds an integer-valued float such as `2.0`, because re-boxing it with
+  `ce.list(...)` would make it exact.
+
+- **`Integrate` of a tuple integrates each coordinate.** `\int_0^1 (x, 2x)\,dx`
+  stayed unevaluated; it is `(1/2, 1)`, as `\sum_{n=1}^3 (n, 2n)` is
+  `(6, 12)` (user decision 2026-09-27). The indefinite integral gives
+  `(x^2/2, x^2)`, and a list bound gives one tuple per element of the bound
+  (`\int_0^{[1,2,3]} (x, 2x)\,dx` is `[(1/2, 1), (2, 4), (9/2, 9)]`).
+- **`Implies`, `Nand`, `Nor`, `Xor` and `Equivalent` follow the three-valued
+  rules of `And` and `Or` for an absent operand** (user decision 2026-09-27).
+  An operand that decides the result wins (`Implies(Missing, True)` is
+  `True`; it was `Missing`); beside an unknown symbol the expression stays
+  symbolic (`Nand(A, Missing)` was `Missing`), as `And(A, Missing)` does; the
+  result is `Missing` only when the other operands are decided and do not
+  decide it (`Nand(True, Missing)`). The same rule decides an implication
+  beside an unknown: `Implies(A, True)` and `Implies(False, A)` are `True`
+  (they stayed unevaluated).
+- **Compiled JavaScript spells an absent point, tuple or list `undefined` in
+  arithmetic.** `2·P` and `P + Q` with an absent point `P` gave `NaN` and
+  `[NaN, NaN]`; they give `undefined`, as a read of the absent point already
+  did and as the interpreter fallback does (user decision 2026-09-27). A
+  coordinate read (`PointX(P)`) stays `NaN`.
+
+
+- **A user binding shadows a capitalized library name.** `let Pi = 3; Pi` was
+  `Pi` (π) and is now `3`; so for `ExponentialE`, `Missing`, `Undefined`,
+  `True`, `False`, `All` and `None`. `function Square(x) { x + 100 };
+  Square(3)` was `9` and is now `103`; so for a user `Sqrt`, `Negate`, `Exp`,
+  `Ln`, `Log`, `Power`, `Root`, `Divide`, `Add` and `Multiply`, on the Epsil
+  and the box routes. These names are interned constants, or heads that
+  canonicalization folds by name, and both paths returned the library
+  definition without looking the name up. Shadowing `Add` (or `Multiply`,
+  `Divide`, `Power`, `Negate`) also changes the operator that builds it
+  (`+`, `*`, `/`, `^`, unary `-`) within the binding's scope, as shadowing
+  `Subtract` already did. Compiled code does not use a shadowed library
+  operator: `compile()` of such a call fails closed and falls back to the
+  interpreter (it emitted the library operator before, `y * y` for a user
+  `Square`, and so for a user `Abs` or `Sin`). `Nothing` cannot be rebound.
+
+- **`Length` of an infinite collection is `+oo`.** `Length(Integers)`,
+  `Length(Repeat(5))`, `Length(Cycle([1, 2]))` and `Length(Interval(0, 1))`
+  stayed unevaluated; they are now `+oo`, the answer `Count` gives. Only an
+  unbounded `Range` answered `+oo` before. A collection whose size is not known
+  (a `Filter` over an infinite source) still stays unevaluated. The reported
+  type follows: `Length` of a tuple, a string, a literal list or set, a
+  dimensioned list or a `Range` with finite literal bounds is `integer`, and
+  `Length` of any other operand, including a symbol typed `list<…>`, is
+  `integer | infinity`, because a `list` value can be an infinite lazy list.
+  A function declared to return `integer` whose body is `Length(xs)` keeps its
+  declared type.
+
 - **`StringFrom` of a string, a character or a symbol returns its text.**
   `StringFrom("hi")` returned `"\"hi\""` and `StringFrom(True)` returned
   `"\"True\""`: the printed form of those values carries quotes, and
@@ -80,6 +148,23 @@
   the Standard Library page lists `Limits` with no Epsil column.
 
 ### Issues Resolved
+
+- **`Mod` of a float near the double range keeps its remainder.** At machine
+  precision `Mod(2.0, 9007199254740991.0)` was `1` (the formula added the
+  divisor before the second remainder, and `2 + 9007199254740991` rounds);
+  it is `2`. Compiled JavaScript `Mod(x, 9007199254740991)` had the same
+  defect (`1` for `x = 2`). The base-10 and base-2 logarithms of a machine
+  float now use the correctly rounded primitives on every route, so a short
+  list and a long list agree in the last digit, and `\log_{10.0}(1000)` is
+  `3`.
+
+- **Compiled `And`, `Or` and `Not` with an absent operand follow the
+  three-valued tables when used as a value.** With `M` absent at run time,
+  compiled `And(M, False)` gave `undefined` (the interpreter: `False`),
+  `Or(M, False)` gave `false` (the interpreter: `Missing`) and `Not(M)` gave
+  `true`, in JavaScript and in Python; the condition position of `If` and
+  `Which` was already right. Ordinary booleans keep the plain `&&`/`||`.
+
 
 - **`GroupBy` with a character key.** A key function that returns a character
   (`GroupBy(["apple", "avocado", "banana"], s => First(s))`) grouped under the

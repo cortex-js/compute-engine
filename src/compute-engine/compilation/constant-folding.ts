@@ -23,6 +23,7 @@ import {
   cotWithPole,
   secWithPole,
   cscWithPole,
+  floorModDouble,
 } from '../numerics/numeric.js';
 import { gamma } from '../numerics/special-functions.js';
 import { Complex } from 'complex-esm';
@@ -1123,6 +1124,9 @@ const JAVASCRIPT_EMITTED_FOLD: EmittedFoldDialect = {
     '_SYS.sec': unaryFold(secWithPole),
     '_SYS.csc': unaryFold(cscWithPole),
     '_SYS.pow3': unaryFold((x) => x * x * x),
+    // `_SYS.floorMod` is the lowering of `Mod`; it folds with the function
+    // the runtime calls.
+    '_SYS.floorMod': binaryFold(floorModDouble),
     '_SYS.pow4': unaryFold((x) => {
       const s = x * x;
       return s * s;

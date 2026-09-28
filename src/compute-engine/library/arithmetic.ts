@@ -36,6 +36,7 @@ import {
   holdsDoubles,
   machineListOf,
 } from '../boxed-expression/machine-broadcast.js';
+import { boxStoreElement } from '../boxed-expression/machine-number.js';
 import { withEvaluationEffects } from '../effects-registry.js';
 import { polynomialGCDMulti } from '../boxed-expression/polynomials.js';
 import {
@@ -61,6 +62,11 @@ import {
   shouldNumericize,
   isExactNumber,
 } from '../boxed-expression/apply.js';
+import {
+  asFloat,
+  floatIfFloatOperand,
+  hasFloatOperand,
+} from '../boxed-expression/float-result.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { rangeCount } from '../numerics/range-count.js';
 
@@ -120,6 +126,7 @@ import {
   realGcd,
   realLcm,
   roundHalfAway,
+  floorModDouble,
 } from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
 import type { NumberLiteralInterface } from '../types-expression.js';
@@ -3141,16 +3148,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // stays symbolic on the exact route (the value is a perfectly good
         // integer the machine cannot hold) and overflows to `+oo` under
         // `numericApproximation`, the float reading of Γ(x+1) there.
+        // A float argument with an integer value gives a float: `2.0!` is
+        // the float `2`, and above the exact cap the float reading of Γ(x+1).
+        const float = !x.isExact;
         if (estimatedFactorialDigits(x.re) > MAX_EXACT_FACTORIAL_DIGITS)
-          return numericApproximation ? ce.number(gamma(1 + x.re)) : undefined;
+          return numericApproximation || float
+            ? ce.number(gamma(1 + x.re))
+            : undefined;
         try {
-          return ce.number(
+          const result = ce.number(
             run(
               bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
               ce._timeRemaining,
               ce._deadlineFrame
             )
           );
+          return float ? asFloat(result) : result;
         } catch (e) {
           if (e instanceof CancellationError) throw e;
           // We can get here if the factorial is too large
@@ -3188,12 +3201,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // A positive non-integer real is `Γ(x+1)`, not the rounded factorial.
         if (!x.isInteger) return ce.number(gamma(1 + x.re));
-        // Above the exact digit cap — see the synchronous handler above.
+        // Above the exact digit cap, and a float argument — see the
+        // synchronous handler above.
+        const float = !x.isExact;
         if (estimatedFactorialDigits(x.re) > MAX_EXACT_FACTORIAL_DIGITS)
-          return numericApproximation ? ce.number(gamma(1 + x.re)) : undefined;
+          return numericApproximation || float
+            ? ce.number(gamma(1 + x.re))
+            : undefined;
 
         try {
-          return ce.number(
+          const result = ce.number(
             await runAsync(
               bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
               (ce._deadline ?? Infinity) - Date.now(),
@@ -3201,6 +3218,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ce._deadlineFrame
             )
           );
+          return float ? asFloat(result) : result;
         } catch (e) {
           if (e instanceof CancellationError) throw e;
           // We can get here if the factorial is too large
@@ -3296,20 +3314,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           n >= 0 &&
           estimatedFactorialDigits(n) / 2 > MAX_EXACT_FACTORIAL_DIGITS
         )
-          return numericApproximation ? ce.number(factorial2(n)) : undefined;
+          return numericApproximation || hasFloatOperand([x])
+            ? ce.number(factorial2(n))
+            : undefined;
         // The big-decimal product of integers is exact, so the result is an
         // exact integer at any magnitude (`ce.number()` of an integer-valued
-        // big decimal), not a numeric result.
+        // big decimal), not a numeric result. A float argument with an
+        // integer value gives a float: `3.0!!` is the float `3`.
         if (bignumPreferred(ce))
-          return ce.number(
-            run(
-              bigFactorial2(ce.bignum(n)),
-              ce._timeRemaining,
-              ce._deadlineFrame
+          return floatIfFloatOperand(
+            [x],
+            ce.number(
+              run(
+                bigFactorial2(ce.bignum(n)),
+                ce._timeRemaining,
+                ce._deadlineFrame
+              )
             )
           );
 
-        return ce.number(factorial2(n));
+        return floatIfFloatOperand([x], ce.number(factorial2(n)));
       },
     },
 
@@ -3852,8 +3876,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             reduced = betaPositiveIntegerArg(engine, a, bi);
           else if (ai !== null && ai > 0)
             reduced = betaPositiveIntegerArg(engine, b, ai);
+          // A float argument gives a float: `B(1.0, 1)` is the float `1`.
           if (reduced !== undefined)
-            return numericApproximation ? reduced.N() : reduced;
+            return floatIfFloatOperand(
+              [a, b],
+              numericApproximation ? reduced.N() : reduced
+            );
           // Remaining pole cases: a or b a non-positive integer with no
           // positive-integer partner to cancel it → Γ-pole (B is infinite).
           if ((ai !== null && ai <= 0) || (bi !== null && bi <= 0))
@@ -4528,7 +4556,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // divisor). Both lanes must agree with the `evaluate` handler
             // below, or `.sgn` and `.evaluate()` disagree on the same
             // expression (P0-7).
-            (a, b) => ((a % b) + b) % b,
+            floorModDouble,
             (a, b) => a.mod(b).add(b).mod(b)
           );
           return v?.sgn ?? undefined;
@@ -4536,6 +4564,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([a, b], { engine: ce }) => {
+        // A float operand makes the result a float, even when its value is
+        // an integer (`Mod(7.0, 3)` is the float `1`): the exact paths below
+        // are for exact operands only, and a float operand takes the float
+        // lanes of `apply2()`.
+        if (hasFloatOperand([a, b])) return floorModFloat(a, b);
+
         // Exact-integer fast path for a non-negative dividend and a positive
         // modulus (where modulo and remainder coincide, so both `apply2` lanes
         // agree). This avoids the bignum float lane, which extracts operands
@@ -4599,15 +4633,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
-        return apply2(
-          a,
-          b,
-          // In JavaScript, the % is remainder, not modulo
-          // so adapt it to return a modulo (floored: sign follows the
-          // divisor, matching the machine lane and the fast paths above).
-          (a, b) => ((a % b) + b) % b,
-          (a, b) => a.mod(b).add(b).mod(b)
-        );
+        return floorModFloat(a, b);
       },
     },
 
@@ -7990,7 +8016,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // A `List` of machine numbers is summed on its doubles: see
           // `machineSum`.
           const summed = machineSum(first);
-          if (typeof summed === 'number') return engine.number(summed);
+          if (typeof summed === 'number' || Array.isArray(summed))
+            return boxMachineTotal(engine, summed);
           // The operand `machineSum` evaluated is walked below in place of
           // `first`, so that it is not evaluated a second time.
           const source = summed ?? first;
@@ -8091,7 +8118,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 const total = machineListTotal(collection);
                 return total === undefined
                   ? undefined
-                  : sumOf(engine.number(total));
+                  : sumOf(boxMachineTotal(engine, total));
               },
               numericApproximation: numeric,
             }
@@ -8262,7 +8289,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   const total = machineListTotal(collection);
                   return total === undefined
                     ? undefined
-                    : sumOf(engine.number(total));
+                    : sumOf(boxMachineTotal(engine, total));
                 },
                 numericApproximation: numeric,
               }
@@ -9149,7 +9176,17 @@ function processMinMaxItem(
   // `machineExtremum`.
   if (isMachineDoubleList(item)) {
     const extremum = machineExtremum(item.array, upper, ce);
-    if (extremum !== undefined) return [ce.number(extremum), []];
+    // The extremum is one of the elements, boxed as the list boxes it: an
+    // integer value is a float in a list of floats (`_machineFloats`).
+    if (extremum !== undefined)
+      return [
+        boxStoreElement(
+          ce,
+          extremum,
+          isFunction(item) && item._machineFloats === true
+        ),
+        [],
+      ];
   }
 
   if (item.isCollection) {
@@ -9213,7 +9250,7 @@ function isMachineDoubleList(
 ): x is Expression & { array: readonly number[] } {
   return (
     isFunction(x, 'List') &&
-    x.isMachineNumeric &&
+    x._machineFloats !== undefined &&
     !bignumPreferred(x.engine) &&
     holdsDoubles(x)
   );
@@ -9228,11 +9265,12 @@ function isMachineDoubleList(
  *
  * The fold adds the elements in order with `add()`, starting from `0`. Each
  * `add()` of a float is the addition of two doubles, in the same order as
- * here. A partial sum that has an integer value is an EXACT integer in the
- * fold, also when floats produced it (`0.5 + 0.5`), and the fold then adds
- * integers exactly, past the safe range too. So this function declines as
- * soon as a partial sum is an integer past the safe range, where a double
- * no longer holds what the fold holds. A non-finite element declines: the
+ * here. A partial sum of exact integers is an EXACT integer in the fold,
+ * which adds integers exactly, past the safe range too; once a float term
+ * is added the partial sum is a float, even when its value is an integer
+ * (`0.5 + 0.5` is the float `1`). This function declines as soon as a
+ * partial sum is an integer past the safe range, where a double may no
+ * longer hold what the fold holds. A non-finite element declines: the
  * fold decides `∞ − ∞` and `NaN`.
  *
  * The value of a symbol is read, never evaluated (`machineListOf`). An
@@ -9243,7 +9281,9 @@ function isMachineDoubleList(
  * that one, so the operand is evaluated once. A lazy collection with its own
  * iterator (`Map`, `Range`) is left to the fold.
  */
-function machineSum(operand: Expression): number | Expression | undefined {
+function machineSum(
+  operand: Expression
+): number | [number] | Expression | undefined {
   const evaluatedByWalk =
     isFunction(operand) &&
     operand.operator !== 'List' &&
@@ -9261,22 +9301,38 @@ function machineSum(operand: Expression): number | Expression | undefined {
  * The sum of the doubles of `list`, when `list` is a `List` of machine
  * numbers at machine precision (`isMachineDoubleList`) and the doubles give
  * the value the element-by-element fold gives: see `machineSum` for the
- * rules. `undefined` otherwise.
+ * rules. `undefined` otherwise. The sum is a number when every element is
+ * an exact integer, and a one-element array when some element is a float:
+ * the sum is then a float, even when its value is an integer (`0.5 + 0.5`
+ * is the float `1`).
  */
-function machineListTotal(list: Expression): number | undefined {
+function machineListTotal(list: Expression): number | [number] | undefined {
   if (!isMachineDoubleList(list)) return undefined;
   const values = list.array;
   const frame = list.engine._deadlineFrame;
+  let float = isFunction(list) && list._machineFloats === true;
   let total = 0;
   for (let i = 0; i < values.length; i++) {
     if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE) checkDeadline(frame);
     const v = values[i];
     if (!Number.isFinite(v)) return undefined;
+    if (!Number.isInteger(v)) float = true;
     total += v;
     if (Number.isInteger(total) && !Number.isSafeInteger(total))
       return undefined;
   }
-  return total === 0 ? 0 : total;
+  if (total === 0) total = 0;
+  return float ? [total] : total;
+}
+
+/** The boxed sum that `machineListTotal()` answers: an exact integer or a
+ * float for a number, a float for a one-element array. */
+function boxMachineTotal(
+  ce: ComputeEngine,
+  total: number | [number]
+): Expression {
+  if (typeof total === 'number') return ce.number(total);
+  return ce.number(ce._inexactNumericValue(total[0]));
 }
 
 /**
@@ -9565,7 +9621,10 @@ function evaluateGcdLcm(
     const rfn = mode === 'LCM' ? realLcm : realGcd;
     let acc = Math.abs(ops[0].re);
     for (let i = 1; i < ops.length; i++) acc = rfn(acc, ops[i].re);
-    return ce.number(acc);
+    // The result is a float, even when its value is an integer:
+    // `GCD(4.0, 6)` is the float `2`. (Mathematica refuses the GCD of a
+    // real number; the float reading keeps the result a number.)
+    return ce.number(ce._inexactNumericValue(acc));
   }
 
   const rest: Expression[] = [];
@@ -9748,4 +9807,22 @@ function bigRealOf(x: Expression | undefined): BigDecimal | undefined {
   if (nv.isComplex) return undefined;
   const big = nv.bignumRe ?? new BigDecimal(nv.re);
   return big.isFinite() ? big : undefined;
+}
+
+/**
+ * The floored remainder of `a` by `b` computed with the float lanes of
+ * `apply2()` (machine or big decimal). In JavaScript, `%` is the truncated
+ * remainder, so it is adapted to a floored modulo: the sign of the result
+ * follows the divisor, as in the exact paths of the `Mod` handler. The
+ * double lane adds the divisor only when it is needed (`floorModDouble`);
+ * the big-decimal lane always adds it, which is safe because
+ * `BigDecimal.add()` is exact.
+ */
+function floorModFloat(a: Expression, b: Expression): Expression | undefined {
+  return apply2(
+    a,
+    b,
+    floorModDouble,
+    (a, b) => a.mod(b).add(b).mod(b)
+  );
 }

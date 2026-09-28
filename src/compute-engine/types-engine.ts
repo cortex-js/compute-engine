@@ -1640,6 +1640,11 @@ export interface IComputeEngine {
    */
   list(values: ArrayLike<number>): Expression;
 
+  /** @internal A `List` in a numeric store, as `list()` builds it; with
+   * `floats`, its integer-valued elements are floats (see
+   * `FunctionInterface._numericStoreFloats`). */
+  _list(values: ArrayLike<number>, floats: boolean): Expression;
+
   type(type: Type | TypeString | BoxedType): BoxedType;
 
   rules(

@@ -210,9 +210,13 @@ describe('small/fractional integer powers unchanged (controls)', () => {
   test('Power(2,10) → 1024', () => {
     expect(evalStr(['Power', 2, 10])).toEqual('1024');
   });
-  test('Power(2,1/2) and Power(2,0.5) → sqrt(2)', () => {
+  test('Power(2,1/2) → sqrt(2); Power(2,0.5) is a float', () => {
     expect(evalStr(['Power', 2, ['Rational', 1, 2]])).toEqual('sqrt(2)');
-    expect(evalStr(['Power', 2, 0.5])).toEqual('sqrt(2)');
+    // A float exponent makes the power a float (user decision 2026-09-27):
+    // `2^{0.5}` is not the exact `√2`.
+    const half = ce.box(['Power', 2, 0.5]).evaluate();
+    expect(half.isNumberLiteral && !half.isExact).toBe(true);
+    expect(half.re).toBeCloseTo(Math.SQRT2, 15);
   });
   test('inexact (float) base still numericizes: Power(2.5,3) → 15.625', () => {
     expect(evalStr(['Power', 2.5, 3])).toEqual('15.625');

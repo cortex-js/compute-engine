@@ -70,6 +70,7 @@ import {
 import {
   typeCouldBeNumericCollection,
   typeCouldBeNumericTuple,
+  isTupleShapedType,
 } from '../collection-utils.js';
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
@@ -381,6 +382,13 @@ function integralTypeOf(t: Readonly<Type> | undefined): Type {
   if (t === undefined) return 'number';
   if (typeof t === 'object' && t.kind === 'list')
     return { ...t, elements: integralTypeOf(t.elements) };
+  // A tuple integrand is integrated coordinate by coordinate: the integral
+  // is a tuple with one element per coordinate.
+  if (typeof t === 'object' && t.kind === 'tuple')
+    return {
+      kind: 'tuple',
+      elements: t.elements.map((e) => ({ ...e, type: integralTypeOf(e.type) })),
+    };
   if (typeof t === 'string' && t !== 'unknown' && isSubtype(t, 'list<any>'))
     return { kind: 'list', elements: 'number' };
   return 'number';
@@ -403,8 +411,14 @@ function integralTypeOf(t: Readonly<Type> | undefined): Type {
  * `incompatible-dimensions` error, as a mismatch of the two list bounds of
  * one limit is.
  *
- * A tuple integrand is not a list (a point is not a list), and is not
- * distributed.
+ * A TUPLE integrand (`∫_0^1 (x, 2x) dx`) is integrated coordinate by
+ * coordinate, as `Sum` sums a tuple summand coordinate by coordinate: the
+ * value is the tuple of the integrals of the coordinates, `(1/2, 1)`. A
+ * tuple is a point, not a list, so its coordinates are never paired with the
+ * elements of a list bound. A list bound instead gives one integral of the
+ * whole tuple per element of the bound, and the value is a list of tuples:
+ * `∫_0^{[1, 2]} (x, 2x) dx` is `[(1/2, 1), (2, 4)]`. When several bounds are
+ * lists, they are paired element by element and their lengths must agree.
  */
 function integrateListIntegrand(
   ce: ComputeEngine,
@@ -416,13 +430,14 @@ function integrateListIntegrand(
   // is typed as a list. Checking the type first means that an integrand that
   // is not a list is not evaluated here.
   let value: Expression | undefined;
-  if (isFunction(integrand, 'List')) value = integrand;
+  if (isFunction(integrand, 'List') || isFunction(integrand, 'Tuple'))
+    value = integrand;
   else if (isFunction(integrand, 'Function')) {
     const result = functionResult(integrand.type.type);
     if (
       result === undefined ||
       result === 'unknown' ||
-      !isSubtype(result, 'list<any>')
+      !(isSubtype(result, 'list<any>') || isTupleShapedType(result))
     )
       return undefined;
   } else return undefined;
@@ -447,6 +462,8 @@ function integrateListIntegrand(
     // with a free outer integration variable has no numeric value, but its
     // exact value can be a list of expressions in that variable.
     value ??= liftIntegrand(integrand).evaluate();
+    if (isFunction(value, 'Tuple'))
+      return integrateTupleIntegrand(ce, value, limits, numericApproximation);
     if (!isFunction(value, 'List')) return undefined;
     const elements = value.ops;
     const count = elements.length;
@@ -481,6 +498,70 @@ function integrateListIntegrand(
     });
     return ce.function('List', results);
   });
+}
+
+/**
+ * The integral of a tuple, `value`, which is the evaluated integrand of
+ * `integrateListIntegrand`. The caller has shielded the integration
+ * variables from their global values.
+ *
+ * When no bound is a list, the value is the tuple of the integrals of the
+ * coordinates. When a bound is a list, the value is a list with one integral
+ * of the whole tuple per element of the bound (each a tuple). Return `null`
+ * under `N()`, and an `incompatible-dimensions` error under `evaluate()`,
+ * when two list bounds have different lengths, as for a list integrand.
+ */
+function integrateTupleIntegrand(
+  ce: ComputeEngine,
+  value: Expression & import('../global-types.js').FunctionInterface,
+  limits: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression | null {
+  const integrate = (limits: ReadonlyArray<Expression>) => (x: Expression) => {
+    const integral = ce.function('Integrate', [x, ...limits]);
+    return numericApproximation ? integral.N() : integral.evaluate();
+  };
+
+  // Evaluate each bound once, and find the length of the list bounds.
+  let count: number | undefined;
+  const bounds: (Expression[] | undefined)[] = [];
+  for (const l of limits) {
+    if (!isFunction(l, 'Limits')) {
+      bounds.push(undefined);
+      continue;
+    }
+    const values = [l.op2, l.op3].map((b) =>
+      sym(b) === 'Nothing' ? b : numericApproximation ? b.N() : b.evaluate()
+    );
+    for (const b of values) {
+      if (!isFunction(b, 'List')) continue;
+      if (count === undefined) count = b.nops;
+      else if (count !== b.nops) {
+        if (numericApproximation) return null;
+        return ce.error('incompatible-dimensions', `${count} vs ${b.nops}`);
+      }
+    }
+    bounds.push(values);
+  }
+
+  // The limits of the integral for element `i` of the list bounds. The
+  // bound values computed above are used, so that a bound with side effects
+  // (`Random()`) is evaluated once, and all the coordinates see one value.
+  const limitsAt = (i: number) =>
+    limits.map((l, k) => {
+      const b = bounds[k];
+      if (!isFunction(l, 'Limits') || b === undefined) return l;
+      const [lo, hi] = b.map((x) => (isFunction(x, 'List') ? x.ops[i] : x));
+      return ce.function('Limits', [l.op1, lo, hi]);
+    });
+
+  if (count === undefined)
+    return ce.function('Tuple', value.ops.map(integrate(limitsAt(0))));
+
+  const results: Expression[] = [];
+  for (let i = 0; i < count; i++)
+    results.push(ce.function('Tuple', value.ops.map(integrate(limitsAt(i)))));
+  return ce.function('List', results);
 }
 
 /**
@@ -2279,7 +2360,8 @@ volumes
       // `docs/SCOPING-MODEL.md`). The integrand's
       // own variable stays owned by its `Function` literal.
       scoped: indexingSetSites(1),
-      signature: '(function, limits+) -> number | list<number>',
+      signature:
+        '(function, limits+) -> number | list<number> | tuple | list<tuple>',
       // An integral where a lower or upper bound is a LIST
       // (`∫_{-∞}^{G} f(Z) dZ` with `G = [-1, 0, 1]`) is one integral per
       // element, and its value is the list of those integrals. This applies
@@ -2295,13 +2377,14 @@ volumes
       // error, although the type is still `list<number>`.
       // An integrand whose value is a list is also one integral per element
       // (`integrateListIntegrand`), so the integral has the shape of the
-      // integrand's list type, with number elements.
+      // integrand's list type, with number elements. A tuple integrand is
+      // integrated coordinate by coordinate, and gives a tuple, or a list of
+      // tuples when a bound is a list (`integrateTupleIntegrand`). The
+      // signature's `tuple` and `list<tuple>` admit these results.
       type: (ops, { engine }) => {
         // The integrand is a function literal: its result type is the type
         // of the integrand's value.
         const listType = integralTypeOf(functionResult(ops[0]?.type));
-        if (listType !== 'number')
-          return BoxedType.forResult(listType, engine._typeResolver);
         const hasListBound = ops.slice(1).some((op) => {
           const limit = op.structureOf?.();
           return (
@@ -2312,6 +2395,16 @@ volumes
               .some((bound) => isSubtype(bound.type, 'list<any>'))
           );
         });
+        // A tuple integrand with a list bound is one tuple per element of
+        // the bound (`integrateTupleIntegrand`). A list integrand pairs its
+        // elements with the elements of the bound and keeps its own type.
+        if (typeof listType === 'object' && listType.kind === 'tuple')
+          return BoxedType.forResult(
+            hasListBound ? { kind: 'list', elements: listType } : listType,
+            engine._typeResolver
+          );
+        if (listType !== 'number')
+          return BoxedType.forResult(listType, engine._typeResolver);
         return BoxedType.forResult(
           hasListBound ? 'list<number>' : 'number',
           engine._typeResolver

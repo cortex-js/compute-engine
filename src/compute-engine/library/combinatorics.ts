@@ -4,6 +4,7 @@ import {
   toInteger,
   toIntegerOperand,
 } from '../boxed-expression/numerics.js';
+import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import type {
   Expression,
   OperandDescriptor,
@@ -595,7 +596,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
 
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
-        evaluateBinomial(n, k, numericApproximation, ce),
+        floatIfFloatOperand(
+          [n, k],
+          evaluateBinomial(n, k, numericApproximation, ce)
+        ),
     },
   },
 
@@ -666,7 +670,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       type: ([n, k], context) =>
         BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
-        evaluateBinomial(n, k, numericApproximation, ce),
+        floatIfFloatOperand(
+          [n, k],
+          evaluateBinomial(n, k, numericApproximation, ce)
+        ),
     },
     Pochhammer: {
       description:
@@ -713,7 +720,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([a, k], { numericApproximation, engine: ce }) =>
-        evaluatePochhammer(a, k, ce, numericApproximation),
+        floatIfFloatOperand(
+          [a, k],
+          evaluatePochhammer(a, k, ce, numericApproximation)
+        ),
     },
     CartesianProduct: {
       description: 'Return the Cartesian product of input sets.',

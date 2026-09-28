@@ -277,6 +277,34 @@ import { reduceType } from '../../common/type/reduce.js';
  * literal narrows to nothing and falls through to the ordinary
  * `incompatible-type` declared-type diagnostic.
  */
+/**
+ * The absence markers: `Nothing` (an operand to drop), `Missing` (an absent
+ * value with a position) and `Undefined` (an absent value of unknown type).
+ * They cannot be rebound (user decision 2026-09-27): the engine recognizes
+ * each one by its NAME in many places — `Nothing` is erased from operand
+ * lists, and arithmetic reads a `Missing` or `Undefined` operand as absent
+ * whatever it is bound to — so a user binding of one of these names could
+ * never behave like the value it holds. A declaration, an assignment or a
+ * function definition of one of them evaluates to the
+ * `absence-marker-binding` error; the Epsil static pass reports every other
+ * binding form (a parameter, a loop variable, a match pattern) as well.
+ */
+const ABSENCE_MARKERS: ReadonlySet<string> = new Set([
+  'Nothing',
+  'Missing',
+  'Undefined',
+]);
+
+/** The `absence-marker-binding` error when `name` is an absence marker. */
+function absenceMarkerBindingError(
+  ce: ComputeEngine,
+  name: string | undefined
+): Expression | undefined {
+  return name !== undefined && ABSENCE_MARKERS.has(name)
+    ? ce.error(['absence-marker-binding', name])
+    : undefined;
+}
+
 function narrowDeclaredCharacter(
   ce: ComputeEngine,
   declared: Type | undefined,
@@ -4415,6 +4443,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([op1, op2, op3], { engine: ce }) => {
         const name = sym(op1);
+        const refused = absenceMarkerBindingError(ce, name);
+        if (refused !== undefined) return refused;
         const attributes = definitionAttributes(op3);
         if (name === undefined)
           return ce._fn('Error', [
@@ -4703,6 +4733,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return result;
       },
       evaluate: ([op1, op2], { engine: ce, numericApproximation }) => {
+        const refused = absenceMarkerBindingError(ce, sym(op1));
+        if (refused !== undefined) return refused;
         //
         // Check for Subscript LHS (sequence definition)
         // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
@@ -5218,6 +5250,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return null;
       },
       evaluate: (ops, { engine: ce }) => {
+        for (const name of isFunction(ops[0], 'Tuple')
+          ? tuplePatternNames(ops[0])
+          : [sym(ops[0])]) {
+          const refused = absenceMarkerBindingError(ce, name);
+          if (refused !== undefined) return refused;
+        }
         // Separate an optional trailing attributes dictionary. When the last
         // operand (with arity ≥ 2) is a `Dictionary`, it carries definition
         // attributes (`type`, `value`, `constant`, `holdUntil`); the

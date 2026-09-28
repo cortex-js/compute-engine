@@ -317,6 +317,45 @@ but an unbounded `Range`, so making `Length(Integers)` answer `+oo` also
 changes its type there. The decision: `Length` answers `+oo` for every
 collection whose count is known infinite (as `Count` does), or `Count`
 stays the only one that does and the `Length` description says so.
+### Rebinding an absence marker: `Nothing`, `Missing`, `Undefined` (OPEN, decision — found 2026-09-27)
+
+A user binding shadows a capitalized library name since 2026-09-27 (`let Pi
+= 3; Pi` is `3`, `function Square(x) { x + 100 }; Square(3)` is `103`). The
+three absence markers do not shadow consistently:
+
+- `Nothing` cannot be rebound, by an explicit engine rule: `declare` and
+  `assign` return early for it (`engine-declarations.ts`, "The special id
+  `Nothing` can never be redeclared"), because `Nothing` also marks an
+  operand to drop. The refusal is silent: `let Nothing = 3; Nothing` is
+  `Nothing`, with no diagnostic.
+- `Missing` and `Undefined` rebind, and a bare reference reads the user's
+  value (`let Missing = 3; [Missing, 1]` is `[3, 1]`), but arithmetic
+  recognizes an absence marker by its SPELLING (`isAbsentSymbol`,
+  `boxed-expression/type-guards.ts`), so `let Undefined = 3; Undefined + 0`
+  is `NaN`. This predates the 2026-09-27 change (measured on the tree
+  before it).
+
+The decision: refuse rebinding all three absence markers with a diagnostic
+(the simplest consistent rule), or make every absence check binding-aware
+so they shadow like other names.
+
+### Engine code that builds a node by name picks up a user binding in the active scope (OPEN — found 2026-09-27 by the dual review of the shadowing change)
+
+Inside a function body, a local definition named like a library operator is
+seen by engine code that runs during that body's evaluation:
+`function f() { function Add(a, b) { 12345 }; expand((y + 1) * (y + 2)) };
+f()` evaluates to `152399025` (the user `Add` applied to the terms `Expand`
+builds), `function f() { function Add(a, b) { 999 }; D(y^2 + y, y) }; f()`
+is `999`, and `function f() { function Sin(a) { 999 }; D(cos(y), y) }; f()`
+is `-999`. Measured identical on the tree before 2026-09-27, so the
+shadowing change did not introduce it. The same shadow in a `do { }` block
+does not reproduce it. Engine code (`Expand`, `D`, the polynomial and
+simplification code) builds `Add`/`Multiply`/`Sin` nodes by name while the
+user's function scope is the current scope, and name resolution cannot tell
+that construction from a user-written call. The fix direction: engine-built
+nodes resolve their head against the system scope (a construction route
+that does not consult the current scope), leaving scope-based resolution to
+user-written code.
 
 ### A function-typed factor is a product under juxtaposition and a type error under an explicit operator (OPEN, ruling — found 2026-09-22 while fixing the MathNet round-trip check)
 
@@ -554,6 +593,53 @@ value): `x4[1,2]` (the left side is already the product `x·4`), `2^3[1,2]` and
 `\sin 4[1,2]` (read as an index, `At(…)`, then a type error), and `4[x=0]` (an
 Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
 `Tuple(4, Interval(…))`, which is probably not what an author means.
+
+### Residues of the 2026-09-27 decision batch (OPEN, small — found by the implementation of decisions 1A, 2A and 4A)
+
+- **Compiled division by zero of a point cell.** `[P\{c\}, (3,4)] / t` at
+  `t = 0` gives `[Infinity, Infinity]` for the present cell when compiled,
+  and the interpreter fallback gives the complex infinity
+  `{re: Infinity, im: Infinity}`. A decision: whether `Infinity` per
+  coordinate is the accepted real-target spelling of complex infinity.
+- **Point arithmetic that still refuses to compile** (a refusal, not a wrong
+  value): `P\{c\} + [Q_1, Q_2]` ("may be a point or a list of points at run
+  time", the `'runtime-list'` emission), `[P\{c\}, Q] + R` and
+  `[1,2]·P\{c\} + Q` ("scalar arithmetic over a list-valued operand").
+- **The type of an element-wise comparison over an absent list.**
+  `L\{c\} < 3` is typed `list<boolean | missing>`, but when `L` is absent
+  the value is `Missing` for the whole list, not a list; the type should be
+  `missing | list<boolean>`.
+- **A float serializes as an integer when its value is one.** Since the
+  2026-09-27 machine-precision decision a machine float `2.0` is inexact, but
+  its MathJSON is the plain `2`, which re-boxes as the exact `2`: `Sin(2.0)`
+  numericizes, the round-tripped `Sin(2)` stays symbolic. The same holds for
+  LaTeX (item 7 of "Residues of the exactness-by-route rule"). A decision:
+  serialize an integer-valued float as `{num: "2.0"}` (and `2.0` in LaTeX),
+  which changes the MathJSON and LaTeX of every integer-valued float result.
+- **Float Gaussian integers are still exact.** `(2.0i)^2` evaluates to the
+  exact `-4`, `2.0i + 3` canonicalizes to the exact `3 + 2i`, and
+  `(3.0+2i)(1+i)` is exact: several places keep a Gaussian integer exact
+  (`isExactNumber` in `apply.ts`, `ExactNumericValue.sum`, `_liftComplex`,
+  the fold in `arithmetic-add.ts`), from when the literal `3i` was a float.
+  A decision: whether `ce.number(new Complex(2, 3))` (a `complex-esm` value,
+  doubles by definition) is exact; if not, these exceptions go.
+- **Integer functions of a float argument answer exactly.** `Fibonacci(5.0)`,
+  `Lucas`, `BellNumber`, `CatalanNumber`, `NthPrime`, `PrimePi`, `Totient`,
+  `DigitSum`, `Subfactorial`, `StirlingS1`, `BernoulliB`,
+  `HurwitzZeta(0.0, 2)` give exact results. Mathematica refuses a real
+  argument for most of them. A decision: refuse (a type error), or answer a
+  float. (`Arg(2.0)`, `Im(2.0)`, `Heaviside`, `KroneckerDelta`, `Denominator`,
+  `Rationalize`, `MatrixRank` are exact in Mathematica too and stay.)
+- **WGSL `Mod` when the quotient underflows.** The componentwise floor-mod
+  `(((a % b) - b * floor((a % b) / b)) % b)` (2026-09-27, it replaced
+  `((a % b) + b) % b`, which rounded in `f32`) makes no correction when
+  `(a % b) / b` underflows to `-0`, so the result keeps the wrong sign for a
+  tiny remainder of the opposite sign.
+- **Unfolded identities beside an unknown.** `Nand(True, A)`, `Nor(False, A)`,
+  `Implies(True, A)`, `Implies(A, False)`, `Implies(A, A)`, `Nand(A, A)`,
+  `Equivalent(A, A)` stay unevaluated while `And(True, A)` evaluates to `A`;
+  each value is correct. Folding them (to `¬A`, `¬A`, `A`, `¬A`, `True`,
+  `¬A`, `True`) is new work.
 
 ### Compiled callbacks: an inline lambda ignores its parameter annotation, and a folded `Map` over per-element errors (OPEN — found 2026-09-27)
 

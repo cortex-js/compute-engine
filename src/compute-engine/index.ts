@@ -2270,12 +2270,11 @@ export class ComputeEngine implements IComputeEngine {
     if (value instanceof NumericValue) {
       const exact = value.asExact;
       if (exact === undefined) return value;
-      // An exact value made by another numeric value (the exact integer of
-      // an integer-valued machine float, `MachineNumericValue.asExact`, and
-      // the exact results of its arithmetic) or by another engine has a
-      // factory that does not follow the precision of this engine: the
-      // factory of a machine float always makes a machine float. A finite
-      // value of this kind gets the factory of this engine.
+      // An exact value made by another numeric value (the exact results of
+      // the kernels of a machine float, such as `floor()`) or by another
+      // engine has a factory that does not follow the precision of this
+      // engine: the factory of a machine float always makes a machine float.
+      // A finite value of this kind gets the factory of this engine.
       if (
         exact instanceof ExactNumericValue &&
         exact.factory !== this._inexactNumericValue &&
@@ -3809,6 +3808,14 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   list(values: ArrayLike<number>): Expression {
+    return this._list(values, false);
+  }
+
+  /** @internal A `List` of numbers held in a numeric store, as `list()`
+   * builds it. When `floats` is `true`, the elements with an integer value
+   * are floats (`_numericStoreFloats`): a float computation produced them,
+   * and `2·0.5` is the float `1`, not the exact `1`. */
+  _list(values: ArrayLike<number>, floats: boolean): Expression {
     const n = values.length;
     if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 0)
       throw new TypeError(
@@ -3830,6 +3837,7 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedFunction(this, 'List', undefined, {
       canonical: true,
       numericStore: Object.freeze(store),
+      numericStoreFloats: floats,
     });
   }
 

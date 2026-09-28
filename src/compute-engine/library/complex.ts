@@ -18,7 +18,6 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
 import { exactOrder } from '../boxed-expression/compare.js';
-import { boxBignumResult } from '../boxed-expression/utils.js';
 import { complexParts } from './complex-parts.js';
 import {
   infinitePoint,
@@ -523,7 +522,9 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
           return ce.number(
             ce._numericValue({ rational: op.rational, radical: op.radical })
           );
-        return boxBignumResult(ce, op.bignumRe ?? op.re);
+        // A float complex value has a float real part, even when its value
+        // is an integer: `Re(2.0 + 3i)` is the float `2`.
+        return ce.number(ce._inexactNumericValue(op.bignumRe ?? op.re));
       },
     },
     Imaginary: {
@@ -569,7 +570,9 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
           return ce.number(
             ce._numericValue({ rational: op.imRational, radical: op.imRadical })
           );
-        return ce.number(op.im);
+        // A float complex value has a float imaginary part, even when its
+        // value is an integer: `Im(2.0 + 3i)` is the float `3`.
+        return ce.number(ce._inexactNumericValue(op.bignumIm ?? op.im));
       },
     },
     // The three aliases below (`Re`, `Im` and `Arg`) are canonical REWRITES to

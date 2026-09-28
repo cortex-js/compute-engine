@@ -81,6 +81,7 @@ import {
 } from './type-guards.js';
 import { isImaginaryPartFinite } from './imaginary-part.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
+import { asFloat, hasFloatOperand } from './float-result.js';
 import {
   hasInfiniteComponent,
   logarithmAtExceptionalPoint,
@@ -520,7 +521,10 @@ export class BoxedNumber
       if (isAbsentSymbol(rhs)) return ce.NaN;
       if (isAbsentArithmeticOperand(rhs)) return add(this, rhs.canonical);
     }
-    if (this.isSame(0)) return ce.expr(rhs);
+    // Only an exact 0 is an identity here. A float 0 (the literal `0.0`)
+    // makes the sum numeric, as any other float term does: `0.0 + (-2)` is
+    // the float `-2`, and `0.0 + x` stays a sum.
+    if (this.isSame(0) && this.isExact) return ce.expr(rhs);
     if (typeof rhs === 'number') {
       // @fastpath
       if (rhs === 0) return this;
@@ -572,8 +576,13 @@ export class BoxedNumber
       // `Product.mul`.
       if (rhs === 0)
         return this.isFinite === false ? this.engine.NaN : this.engine.Zero;
+      // A float 0 times a finite number is the float 0 (`0.0 · 3`).
       if (this.isSame(0))
-        return Number.isFinite(rhs) ? this.engine.Zero : this.engine.NaN;
+        return Number.isFinite(rhs)
+          ? this.isExact
+            ? this.engine.Zero
+            : this
+          : this.engine.NaN;
       if (rhs === -1) return this.neg();
       return ce.number(
         typeof this._value === 'number'
@@ -765,6 +774,12 @@ export class BoxedNumber
     const special = logarithmAtExceptionalPoint(ce, this, base, false);
     if (special !== undefined) return special;
 
+    // A float argument or base makes the result a float, even when its value
+    // is an integer (`\log_{10}(100.0)` is the float `2`): the exact
+    // reductions below apply only to exact operands.
+    const float = hasFloatOperand([this, base]);
+    if (float) return asFloat(this._lnOfFloat(base));
+
     if (base && this.isSame(base)) return ce.One;
     if (
       (!base || isSymbol(base, 'ExponentialE')) &&
@@ -845,6 +860,13 @@ export class BoxedNumber
       return ce._fn('Log', [this, base]);
     }
 
+    return this._lnOfFloat(base);
+  }
+
+  /** The logarithm of this number in `base` (the natural logarithm when
+   * `base` is `undefined`), computed numerically. */
+  private _lnOfFloat(base: Expression | undefined): Expression {
+    const ce = this.engine;
     // Inexact argument or base: numericize. A negative real argument has a
     // complex principal logarithm (`ln x = ln|x| + iπ`); route it through the
     // complex path so `evaluate()` agrees with `.N()` (which already returns
@@ -854,6 +876,13 @@ export class BoxedNumber
       const lnBase = base !== undefined ? Math.log(base.re) : 1;
       if (this._value < 0)
         return ce.number(ce.complex(this._value).log().div(lnBase));
+      // A base of 10 or 2 uses its own primitive, as the `N()` route and
+      // `MachineNumericValue.ln()` do: `Math.log(1000) / Math.log(10)` is
+      // `2.9999999999999996`, `Math.log10(1000)` is `3`.
+      if (base !== undefined && base.im === 0 && base.re === 10)
+        return ce.number(Math.log10(this._value));
+      if (base !== undefined && base.im === 0 && base.re === 2)
+        return ce.number(Math.log2(this._value));
       const l = Math.log(this._value);
       return ce.number(base !== undefined ? l / lnBase : l);
     }
@@ -1298,8 +1327,10 @@ export class BoxedNumber
   /**
    * Is this number a machine number, exactness included — does
    * `engine.number(x)` of its machine value reproduce it? `true` for a
-   * float (machine or bignum, when the double is the same value), for a
-   * safe integer (`3`), for `NaN` and the infinities. `false` for an exact
+   * float with a fraction part or past the safe integers (machine or
+   * bignum, when the double is the same value), for an exact safe integer
+   * (`3`), for `NaN` and the infinities. `false` for a float with a
+   * safe-integer value (`2.0`), which re-boxes as the exact `2`. `false` for an exact
    * non-integer, even one a double holds: `1/2` re-boxes as the float `0.5`,
    * which computes as a float where `1/2` computes exactly. `false` for an
    * exact integer past the safe integers (`2^70`), which re-boxes as a float
@@ -1308,7 +1339,10 @@ export class BoxedNumber
    */
   get isMachineNumeric(): boolean {
     const x = machineNumberOf(this);
-    return x !== undefined && !isExactNonInteger(this, x);
+    if (x === undefined || isExactNonInteger(this, x)) return false;
+    // A float with a safe-integer value (`2.0`) re-boxes as the exact
+    // integer `2`.
+    return this.isExact || !Number.isSafeInteger(x);
   }
 
   get isExact(): boolean {
