@@ -2013,7 +2013,10 @@ describe('a wide index-slot union is not string evidence', () => {
     // is an `integer`, so a numeric ordering against it compiles — and a
     // STRING opposite it is still the mixed pair, which declines.
     ce.declare('sl', 'list<string>');
-    expect(ce.box(['Length', 'sl']).type.toString()).toBe('integer');
+    // A `list` value can be an infinite lazy list, so `Length` admits `+oo`.
+    expect(ce.box(['Length', 'sl']).type.toString()).toBe(
+      'integer | signed_infinity'
+    );
     const numeric = compile(ce.box(['Less', 1, ['Length', 'sl']]), {
       fallback: false,
     });

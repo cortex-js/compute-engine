@@ -378,9 +378,16 @@ describe('a collection that DECLINES to enumerate still keeps consumers inert', 
     ).toBe('0');
   });
 
-  test('Length of an infinite collection stays symbolic', () => {
-    expect(ce.box(['Length', ['Repeat', 5]]).evaluate().operator) //
-      .toBe('Length');
+  test('Length of an infinite collection is +oo', () => {
+    // User decision 2026-09-27: `Length` answers `+oo` for every infinite
+    // collection, as `Count` does.
+    expect(
+      ce
+        .box(['Length', ['Repeat', 5]])
+        .evaluate()
+        .toString()
+    ) //
+      .toBe('+oo');
   });
 });
 

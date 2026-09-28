@@ -240,7 +240,7 @@ describe('all-numeric absences still absorb into `NaN`', () => {
     // A callback whose result type does not admit the element type: the
     // only element of a one-element list is returned as it is.
     expect(type(['Reduce', 'S', ['Function', ['Length', 'a'], 'a', 'x']])).toBe(
-      'integer | string'
+      'integer | signed_infinity | string'
     );
   });
 

@@ -4814,7 +4814,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Length: {
     examples: ['Length([5, 6, 7])', 'Length("hello")'],
     description:
-      'Number of elements in a collection. Returns +oo for an unbounded Range, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for an infinite collection whose length is not decided.',
+      'Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `Integers`, `Repeat(5)`, an interval), as `Count` does, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for a collection whose size is not known (a `Filter` over an infinite source).',
     keywords: ['size'],
     complexity: 4000,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
@@ -4832,14 +4832,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Declared here because the parameter is `any`, which the default policy
     // does not read as a collection.
     missingBehavior: 'propagate',
-    // Only an unbounded `Range` can produce the infinite length the signature
-    // admits; every other collection either has a finite length or leaves
-    // `Length` unevaluated. Report the exact `integer` for those, so a length
-    // used as an index or a loop bound is not widened by a case that cannot
-    // arise there. The endpoints are read through the TYPE channel only (a
-    // type handler must not evaluate: evaluating a compound bound pushes
-    // scopes and advances the invalidation axes), which decides the literal
-    // `Range(1, oo)` and leaves a computed infinite bound to the signature.
+    // `Length` answers `+oo` for every collection whose count is infinite,
+    // as `Count` does (user decision 2026-09-27: `Length(Integers)` is
+    // `+oo`; it was confined to an unbounded `Range` before). The type claim
+    // therefore follows `Count`'s one-operand rule: the exact `integer` for
+    // the cases that are finite by construction and can be decided without
+    // dispatching a collection handler — a literal `List`/`Set` node, a list
+    // type with declared DIMENSIONS, a tuple, a string, and a `Range` whose
+    // bounds are finite number literals — and `integer | +oo` otherwise. A
+    // collection TYPE does not tell a finite value from an infinite one
+    // (`Repeat(5)` is typed `list`, like a list of three strings), so a
+    // symbol or a parameter typed `list<…>` gets the wide claim. Asking the
+    // source whether it is finite would dispatch its
+    // `isFinite` handler, which may WALK a lazy source and run a
+    // caller-supplied callback; a type handler must not do that (see the
+    // comment on `Count`).
     //
     // The handler's `+oo` singleton does not survive as written: a handler
     // result is passed through `widenValueTypes()`
@@ -4847,19 +4854,38 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // type into its ordinary counterpart, so the call reports
     // `integer | infinity`. The DECLARATION is spelled `infinity` for that
     // reason: a declared `+oo` names a type no stored result can ever have,
-    // so the reported type would not be a subtype of the declared one. The
-    // handler keeps the tighter `+oo` because a length is never negatively
-    // infinite, and nothing is lost by it — the two spellings report the same
-    // type once the widening has run, so there is no open question here about
-    // exempting this result from that widening.
+    // so the reported type would not be a subtype of the declared one.
     type: ([xs], context) => {
-      const source = xs?.structureOf?.();
-      return BoxedType.forResult(
-        source?.kind === 'application' &&
+      if (xs !== undefined) {
+        const source = xs.structureOf?.();
+        if (
+          source?.kind === 'list-literal' ||
+          (source?.kind === 'application' && source.head === 'Set')
+        )
+          return BoxedType.forResult('integer', context.engine._typeResolver);
+        if (source?.kind === 'tuple')
+          return BoxedType.forResult('integer', context.engine._typeResolver);
+        if (
+          source?.kind === 'application' &&
           source.head === 'Range' &&
-          source.children.some((op) => isSubtype(op.type, 'infinity'))
-          ? COUNT_OR_INFINITE
-          : 'integer',
+          source.children.length > 0 &&
+          source.children.every(
+            (op) =>
+              op.structureOf?.()?.kind === 'number' &&
+              !isSubtype(op.type, 'infinity')
+          )
+        )
+          return BoxedType.forResult('integer', context.engine._typeResolver);
+        const t = xs.type;
+        if (
+          t === 'string' ||
+          (typeof t !== 'string' &&
+            ((t.kind === 'list' && t.dimensions) || t.kind === 'tuple'))
+        )
+          return BoxedType.forResult('integer', context.engine._typeResolver);
+      }
+      return BoxedType.forResult(
+        COUNT_OR_INFINITE,
         context.engine._typeResolver
       );
     },
@@ -4919,17 +4945,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // empty collection; emptiness is consulted only for a collection that
       // knows it is empty without knowing its size.
       const n = xs.count;
-      // An unbounded `Range` has an infinite EXTENT, and reading that extent
-      // is what `Length` is for here: an infinite endpoint does not name a
-      // last element (ruling L10), so the honest length of `Range(1, +oo)` is
-      // `+oo`, not an unevaluated form. This arm is deliberately confined to
-      // `Range`: no convention has been settled for the length of the other
-      // infinite collections — an `Interval` is a continuum, so a COUNT of
-      // elements is not what its extent means — and they keep the inert form
-      // below.
-      if (n === Infinity && isFunction(xs, 'Range'))
-        return engine.PositiveInfinity;
-      // Guard infinite collections (e.g. Length(Repeat(5))).
+      // An infinite collection has length `+oo`, whatever its kind: an
+      // unbounded `Range`, a number set (`Integers`), `Repeat(5)`, an
+      // interval — the answer `Count` gives (user decision 2026-09-27). A
+      // collection whose count is not known (a `Filter` over an infinite
+      // source) keeps the inert form below.
+      if (n === Infinity) return engine.PositiveInfinity;
       if (n === undefined || !isFinite(n))
         return xs.isEmptyCollection ? engine.Zero : undefined;
       return engine.number(n);

@@ -934,7 +934,7 @@ last([7, 8, 9])
 
 MathJSON `Length` · `(any) -> infinity | integer`
 
-Number of elements in a collection. Returns +oo for an unbounded Range, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for an infinite collection whose length is not decided.
+Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `Integers`, `Repeat(5)`, an interval), as `Count` does, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for a collection whose size is not known (a `Filter` over an infinite source).
 
 ```epsil
 length([5, 6, 7])

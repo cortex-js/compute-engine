@@ -114,10 +114,14 @@ describe('A6 polish — operatorInfo gaps', () => {
     expect(expr.toString()).toContain('incompatible-type');
   });
 
-  test('Length on an infinite collection returns unevaluated', () => {
+  test('Length on an infinite collection is +oo', () => {
+    // User decision 2026-09-27: `Length` answers `+oo` for every infinite
+    // collection, as `Count` does.
     const ce = new ComputeEngine();
-    const expr = ce.parse('\\operatorname{count}(\\operatorname{repeat}(5))').evaluate();
-    expect(expr.operator).toEqual('Length'); // still unevaluated
+    const expr = ce
+      .parse('\\operatorname{count}(\\operatorname{repeat}(5))')
+      .evaluate();
+    expect(expr.toString()).toBe('+oo');
   });
 
   test('Length on a value-bound symbol resolves through the binding', () => {

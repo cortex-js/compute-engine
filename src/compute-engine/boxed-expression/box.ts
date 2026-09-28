@@ -1,4 +1,5 @@
 import { Complex } from 'complex-esm';
+import { shadowsLibraryName } from '../library-shadowing.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type {
   ExpressionInput,
@@ -497,7 +498,20 @@ function boxFunctionInternal(
   // (!@note: this procedure is similarly repeated within the 'number'
   //  CanonicalForm, but the numberForm variant more simply applies to fully
   // BoxedExprs., and during partial canonicalization only)
-  if (canonicalNumber) {
+  //
+  // Skipped when a user definition shadows the head (`function Divide(x, y)
+  // { … }`): the fold would answer the library operator's value, not the
+  // user's (see `shadowsLibraryName`, `library-shadowing.ts`).
+  if (
+    canonicalNumber &&
+    !(
+      (name === 'Divide' ||
+        name === 'Rational' ||
+        name === 'Complex' ||
+        name === 'Negate') &&
+      shadowsLibraryName(ce, name)
+    )
+  ) {
     //
     // Rational (as Divide)
     //
@@ -3619,6 +3633,22 @@ function bindBindingSites(
   return ce._fn(name, next, { metadata, scope });
 }
 
+/** The heads `makeNumericFunction` canonicalizes by name, without looking
+ * up their definition. */
+const NUMERIC_SHORT_PATH_NAMES: ReadonlySet<string> = new Set([
+  'Add',
+  'Multiply',
+  'Negate',
+  'Square',
+  'Sqrt',
+  'Exp',
+  'Ln',
+  'Log',
+  'Power',
+  'Root',
+  'Divide',
+]);
+
 function makeNumericFunction(
   ce: ComputeEngine,
   name: MathJsonSymbol,
@@ -3626,6 +3656,14 @@ function makeNumericFunction(
   metadata?: Metadata,
   scope?: Scope
 ): Expression | null {
+  // A user definition of one of these names shadows the library operator,
+  // so the call must reach the generic route, which looks the definition up.
+  // The short path below folds by name (`Square(3)` → `9`), and it silently
+  // ignored `function Square(x) { x + 100 }` (user decision 2026-09-27: a
+  // capitalized library name is shadowed like any other). A consequence:
+  // shadowing `Add` also changes `+`, which builds an `Add`.
+  if (NUMERIC_SHORT_PATH_NAMES.has(name) && shadowsLibraryName(ce, name))
+    return null;
   let ops: ReadonlyArray<Expression> = [];
   if (name === 'Add' || name === 'Multiply')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), {
@@ -3710,7 +3748,17 @@ function makeNumericFunction(
       const base = ops[1];
       const baseIsOneOrNaN =
         base !== undefined && isNumber(base) && (base.isSame(1) || base.isNaN);
-      if (isNumber(ops[0]) && ops[0].isSame(1) && !baseIsOneOrNaN)
+      // Only an EXACT `1` with an exact or symbolic base folds: `Ln(1.0)`
+      // and `Log(1, 2.0)` stay, and evaluate to the float `0`, as a float
+      // operand gives a float result.
+      const baseIsFloat = base !== undefined && isNumber(base) && !base.isExact;
+      if (
+        isNumber(ops[0]) &&
+        ops[0].isExact &&
+        ops[0].isSame(1) &&
+        !baseIsOneOrNaN &&
+        !baseIsFloat
+      )
         return ce.Zero;
       // Ln(a) -> Ln(a), Log(a) -> Log(a)
       if (ops.length === 1)

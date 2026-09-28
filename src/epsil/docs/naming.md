@@ -110,6 +110,15 @@ The constants `e` and `i` are lowercase library values already: `e^2` is
 the exponential, `i^2` is `-1`, and `1 + 2i` is a complex number. They
 shadow like any other name — `let e = 3; e^2` is `9`.
 
+The capitalized spelling shadows the same way: `let Pi = 3` makes `Pi` the
+number `3` for the rest of its scope, and `function Square(x) { x + 100 }`
+makes `Square(3)` call that function. Shadowing a name that an operator
+builds changes the operator too: `+` is `Add`, so a user `Add` is what `+`
+calls in its scope, and a definition such as `function Add(x, y) { x + y }`
+calls itself without end. Compiled code does not use a shadowed library
+operator: the call is interpreted instead. `Nothing` is the one name that
+cannot be rebound: it also marks an operand to drop.
+
 To name a raw symbol that happens to spell a library name, use the verbatim
 form: `` `sin` `` is the symbol `sin`, not the sine function.
 

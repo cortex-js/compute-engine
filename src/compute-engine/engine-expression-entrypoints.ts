@@ -243,9 +243,23 @@ export function createSymbolExpression(
   const result = Object.hasOwn(commonSymbols, name)
     ? commonSymbols[name]
     : undefined;
-  if (result) return result;
-
   let def = engine.lookupDefinition(name);
+  // An interned symbol (`Pi`, `ExponentialE`, `Nothing`, …) is created once,
+  // at startup, bound to its LIBRARY definition. Return it only while that is
+  // still the definition the name resolves to: a user binding of the same
+  // name (`let Pi = 3` in a program scope, a user function named `Pi`)
+  // shadows the library name, and the symbol must then bind to the user's
+  // definition, like any other name. Returning the interned symbol
+  // unconditionally made `let Pi = 3; Pi` evaluate to π on the Epsil route.
+  if (
+    result &&
+    (def === undefined ||
+      (isValueDef(def) &&
+        result instanceof BoxedSymbol &&
+        def.value === result.valueDefinition))
+  )
+    return result;
+
   if (isValueDef(def) && def.value.holdUntil === 'never')
     return def.value.value ?? engine.Nothing;
 
