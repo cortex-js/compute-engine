@@ -523,6 +523,7 @@ import {
   gammaQ,
   betaRegularized,
 } from '../numerics/special-functions.js';
+import { lerchPhiReal } from '../numerics/lerch-phi.js';
 import { choose } from '../boxed-expression/expand.js';
 import {
   correlation,
@@ -3020,6 +3021,7 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   // `stringHelperIsRealOnly` does not catch it the way it does
   // `Digamma`/`Trigamma`'s plain-name mappings.
   'PolyGamma',
+  'LerchPhi',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of this target. */
@@ -6986,6 +6988,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         'Could not compile `HurwitzZeta`: only the two-operand form `HurwitzZeta(s, a)` compiles'
       );
     return `_SYS.hurwitzZeta(${compile(args[0])}, ${compile(args[1])})`;
+  },
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.lerchPhi` (`lerchPhiReal`)
+  // runs the interpreter's machine kernel, the continuation past |z| = 1
+  // included, and is NaN wherever the value is genuinely complex (real
+  // z > 1 is on the branch cut, a < 0 with a non-integer s) or the kernel
+  // declines. For real z < −1 the value is real, but the continuation
+  // declines there until the incomplete gamma kernel is accurate for an
+  // argument with a negative real part (cortex-js/compute-engine#353), so
+  // it is NaN there too.
+  LerchPhi: (args, compile) => {
+    if (args.length !== 3)
+      throw new Error(
+        'Could not compile `LerchPhi`: it takes exactly three operands'
+      );
+    return `_SYS.lerchPhi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
   },
   LambertW: '_SYS.lambertW',
 
@@ -11650,6 +11667,7 @@ const SYS_HELPERS = {
   zeta,
   hurwitzZeta,
   zetaGeneralized,
+  lerchPhi: lerchPhiReal,
   lambertW,
   besselJ,
   besselY,

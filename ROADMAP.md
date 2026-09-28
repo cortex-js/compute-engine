@@ -4771,3 +4771,59 @@ them before blaming the change under test. Added 2026-09-22:
 evaluates promptly" — a canary-normalized timing assertion (limit 5000 canary
 units) read 6251 in a six-worker full run on a box at load 4 and passed alone
 (70 of 70), while the same tree's other timing pins held.
+
+### `LerchPhi` past |z| = 1 has no GPU lane (OPEN, capability gap — found 2026-09-27 while adding `LerchPhi`, #340)
+
+`LerchPhi(z,s,a)` continues past the unit disk (and on its rim) through the
+upper incomplete gamma function at a complex argument. The interpreter and the
+JavaScript target have one (`incompleteGammaUpperComplex`,
+`numerics/numeric-complex.ts`; `_SYS.lerchPhi` calls the interpreter's
+kernel), but the GPU (GLSL/WGSL) targets do not: `Gamma`'s own compiled
+lowering is real-only, so `_gpu_lerch_phi` answers `NaN` past the unit disk
+(except for `s = 0, −1, −2`, where it has a closed form). A complex incomplete
+gamma kernel for those targets would close the gap for `LerchPhi` and widen
+`Gamma`'s own compiled two-operand form at the same time. Demand-gated: no
+compile-target consumer has asked for `LerchPhi` past the unit disk yet.
+
+The JavaScript lane is `NaN` for real `z < −1` although the value is real
+(`LerchPhi(-3, 1.5, 0.7)` = 1.10658 in mpmath): the interpreter declines there
+too, for the reason in the next entry.
+
+### `LerchPhi` past |z| = 1 declines where `Gamma(s, x)` is inaccurate (OPEN, correctness, blocked on #353)
+
+The continuation calls `incompleteGammaUpperComplex(1 − s, −a·log z)`, and
+declines wherever that kernel's error estimate (`incompleteGammaRelativeError`
+in `numerics/lerch-phi.ts`) exceeds 1e−12. For real `z < −1` the argument has
+a negative real part and a modulus above 2.5, and on the rim `|z| = 1` it is
+close to the imaginary axis with a large modulus when `a` is large
+(`LerchPhi(i, 2, 20)`), so most of those points stay symbolic. Fixing the
+kernel (next entry) widens `LerchPhi` with it.
+
+### `Gamma(s, x)` is inaccurate for a complex `x` of moderate modulus (OPEN, correctness — found 2026-09-28 while reviewing `LerchPhi`, possibly the same defect as #353)
+
+`incompleteGammaUpperComplex` (`numerics/numeric-complex.ts`) loses digits
+outside a small disk, and not only for `Re(x) < 0`. Measured against mpmath's
+`gammainc` with `|s| ≤ 13`:
+
+- The asymptotic series is used from `|x| > |s| + 14`, but it is truncated at
+  its smallest term, which is still about 1e−3 of the sum at `|x| − |s| = 15`
+  and falls below 1e−14 only past `|x| − |s| ≈ 50`.
+- For an integer `s ≤ 0`, the downward recurrence from `E₁(x)` uses `E₁`'s
+  power series up to `|x| = 20` (and for every `x` with `Re(x) ≤ 0`), which
+  cancels: errors of 1e−5 at `|x| = 10` and of order 1 at `|x| = 15`.
+- Otherwise `Γ(s) − γ(s, x)` cancels when `Γ(s, x)` is small.
+
+Public probes: `Gamma(-2, 10+10i).N()` is `1.3133260e−8 + 4.4992e−9i`, mpmath
+`1.3133115e−8 + 4.4997e−9i`; `Gamma(-11.93, 11.44+2.304i).N()` has real part
+`4.116e−21`, mpmath `5.076e−21`. The continued fraction branch (`Re(x) > 0`,
+`|x| ≥ |s| + 1`) is accurate to 1e−14 and could be used for more of the right
+half-plane.
+
+### `HurwitzZeta(s, a)` is inaccurate for a complex `a` and `Re(s) < 0` (OPEN, correctness — found 2026-09-28 while reviewing `LerchPhi`)
+
+`HurwitzZeta(-11.801, 0.4265 − 1.271i).N()` is `2.2188 + 50.186i`; mpmath's
+`zeta(-11.801, 0.4265 − 1.271j)` is `5.6234 + 46.077i`. `hurwitzZetaComplex`
+uses its Taylor shift only when the shifted base point is within its radius,
+and the imaginary part of `a` counts toward that distance; otherwise it falls
+back to the Euler–Maclaurin sum, which cancels for `Re(s) < 0`. `LerchPhi` at
+`z = −1` uses `HurwitzZeta` only for a real `a` because of this.
