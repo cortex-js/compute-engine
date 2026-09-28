@@ -258,6 +258,66 @@ Defects:
    "an effectful bound keeps one evaluation per recursive call" went from 3
    calls to 7) and spends extra random draws.
 
+### A calculus operator over a function parameter is folded before the argument arrives (OPEN — found 2026-09-27 while writing the core reference examples)
+
+`g(f) = D(f, x); g(x^2)` evaluates to `0`, and so do `(f => D(f, x))(x^2)`
+and the box route `["Apply", ["Function", ["D", "f", "x"], "f"], ["Power",
+"x", 2]]`; the answer is `2x`. `g(f) = Integrate(f, x); g(x^2)` gives
+`x·x^2`; the answer is `x^3/3`. The LaTeX route shows the mechanism:
+`g(f) := \frac{d}{dx} f` canonicalizes to `(f) => D((x) => f, x)`. The body
+is canonicalized when the function is defined, the integrand is lifted with
+`f` as a symbol free of `x`, and the derivative (or antiderivative) of an
+`x`-free symbol is folded before the call substitutes `x^2` for `f`. An
+operator that does not fold on a parameter is not affected: `g(f) = f + 1`
+and `g(f) = Expand(f)` answer correctly. The fix is in the binder handling
+of `D`/`Integrate` (`liftIntegrand`, `boxed-expression/utils.ts`, and the
+canonical handlers): a symbol bound by an enclosing `Function` is not a
+constant of the differentiation variable, so the fold must wait until the
+argument is substituted.
+
+### A user binding of a capitalized library name is silently ignored for some names (OPEN — found 2026-09-27 while writing the collections reference examples)
+
+`src/epsil/docs/naming.md` promises that a user binding shadows a library
+name "whichever spelling the library name has". Measured with `executeEpsil`
+on a fresh engine, it does not for two groups of names, and no diagnostic is
+reported in either case:
+
+- **Interned constants.** `let Pi = 3; Pi` evaluates to the constant `Pi`,
+  and so do `let ExponentialE = 3; ExponentialE` and `let Nothing = 3;
+  Nothing`, also inside a block (`do { let Pi = 3; Pi }`). `let GoldenRatio
+  = 3`, `let Half = 3`, `let CatalanConstant = 3`, `let E = 3`, `let Mean =
+  3` and the lowercase `let pi = 3` all shadow correctly. The box route
+  shadows too: `ce.box(["Block", ["Declare", "Pi", {dict: {value: 3}}],
+  "Pi"]).evaluate()` is `3`. The failing names are the ones the engine
+  hands out as shared symbol objects (`ce.symbol("Pi")` returns the library
+  constant, the trap `CLAUDE.md` records), so the Epsil statement path
+  likely boxes the reference through that shared object instead of looking
+  it up in the program scope.
+- **Heads rewritten at canonicalization.** `function Square(x) { x + 100 };
+  Square(3)` is `9`, and so are `Square(x) = x + 100`, `type Square =
+  tuple<side: number>; Square(3)`, `function Sqrt(x) { x + 100 }; Sqrt(4)`
+  (`2`) and `function Negate(x) { x + 100 }; Negate(3)` (`-3`). `Sin` and
+  `Abs` defined the same way are called as the user wrote them (`103`). The
+  canonical form rewrites `Square(3)` to `Power(3, 2)` (and `Sqrt`,
+  `Negate` likewise) before the user definition is consulted.
+
+A decision is needed on the direction: make these bindings shadow as the
+guide says, or refuse them with a diagnostic (a user may not rebind a name
+the canonical form rewrites or interns). Either is better than the current
+silent answer.
+
+### `Length` and `Count` disagree on an infinite set (OPEN, decision — found 2026-09-27 while writing the collections reference examples)
+
+`Count(Integers)` evaluates to `+oo`, while `Length(Integers)` and
+`Length(PositiveIntegers)` stay unevaluated. `Length(1..oo)` is `+oo`. The
+`Length` description says it stays unevaluated only for "an infinite
+collection whose length is not decided", and `Count` decides it. `Length`'s
+type handler (`library/collections.ts`) reports `integer` for every operand
+but an unbounded `Range`, so making `Length(Integers)` answer `+oo` also
+changes its type there. The decision: `Length` answers `+oo` for every
+collection whose count is known infinite (as `Count` does), or `Count`
+stays the only one that does and the `Length` description says so.
+
 ### A function-typed factor is a product under juxtaposition and a type error under an explicit operator (OPEN, ruling — found 2026-09-22 while fixing the MathNet round-trip check)
 
 In one engine, after `ce.parse('f(x)')` has declared `f` a function, `fy` parses

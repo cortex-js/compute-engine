@@ -2,6 +2,19 @@
 
 ### Behavior Changes
 
+- **`StringFrom` of a string, a character or a symbol returns its text.**
+  `StringFrom("hi")` returned `"\"hi\""` and `StringFrom(True)` returned
+  `"\"True\""`: the printed form of those values carries quotes, and
+  `StringFrom` used the printed form. It now returns `"hi"` and `"True"`, as
+  its description says, and a symbol such as `integer` converts to its bare
+  name. Other values keep their printed form (`StringFrom(x + 1)` is
+  `"x + 1"`, `StringFrom(Pi)` is `"pi"`).
+- **`Timing` declares an unnamed tuple.** Its result type was
+  `tuple<time: number, result: value>`, but the value carries no element
+  names, so `Timing(expr).result` was an `incompatible-type` error. The
+  declared type is now `tuple<number, value>`; read the parts as
+  `Timing(expr)[1]` and `Timing(expr)[2]`.
+
 - **The imaginary part of a numeric result has the working precision.**
   `.N()` of `√2 + √2i` printed `1.4142135623730950488 + 1.4142135623730951i`
   (21 digits on the real part, 16 on the imaginary part); both parts now have
@@ -67,6 +80,12 @@
   the Standard Library page lists `Limits` with no Epsil column.
 
 ### Issues Resolved
+
+- **`GroupBy` with a character key.** A key function that returns a character
+  (`GroupBy(["apple", "avocado", "banana"], s => First(s))`) grouped under the
+  quoted text (`"\"a\""`), because a character key was stringified with its
+  quotes. A character is the same value as the one-character string, so it now
+  keys the group `a`, as `Take(s, 1)` does.
 
 - **A complex numeric value whose imaginary part is outside the double range
   keeps it.** `(1+i)10^{800}` under `.N()` was `~oo` and is

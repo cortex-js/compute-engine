@@ -359,6 +359,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // Constants
   //
   EmptySet: {
+    examples: ['IsEmpty(EmptySet)'],
     type: 'set',
     isConstant: true,
     wikidata: 'Q226183',
@@ -387,6 +388,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Numbers: {
+    examples: ['2 + 3i in Numbers'],
     type: 'set<number>',
     isConstant: true,
     description: 'The set of all numbers.',
@@ -406,6 +408,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ComplexNumbers: {
+    examples: ['2 + 3i in ComplexNumbers'],
     type: 'set<complex>',
     isConstant: true,
     description: 'The set of all finite complex numbers.',
@@ -423,6 +426,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedComplexNumbers: {
+    examples: ['ComplexInfinity in ExtendedComplexNumbers'],
     type: 'set<complex | infinity>',
     isConstant: true,
     description: 'The set of all complex numbers, including infinities.',
@@ -443,6 +447,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ImaginaryNumbers: {
+    examples: ['3i in ImaginaryNumbers'],
     type: 'set<imaginary>',
     isConstant: true,
     description: 'The set of all imaginary numbers.',
@@ -459,6 +464,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   RealNumbers: {
+    examples: ['i in RealNumbers'],
     type: 'set<real>',
     isConstant: true,
     description: 'The set of all finite real numbers.',
@@ -475,6 +481,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedRealNumbers: {
+    examples: ['-Infinity in ExtendedRealNumbers'],
     type: 'set<real | +oo | -oo>',
     isConstant: true,
     description: 'The set of all real numbers, including infinities.',
@@ -491,6 +498,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Integers: {
+    examples: ['-7 in Integers'],
     type: 'set<integer>',
     isConstant: true,
     description: 'The set of all finite integers.',
@@ -507,6 +515,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedIntegers: {
+    examples: ['Infinity in ExtendedIntegers'],
     type: 'set<integer | +oo | -oo>',
     isConstant: true,
     description: 'The set of all integers, including infinities.',
@@ -523,6 +532,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   RationalNumbers: {
+    examples: ['Sqrt(2) in RationalNumbers'],
     type: 'set<rational>',
     isConstant: true,
     description: 'The set of all finite rational numbers.',
@@ -539,6 +549,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedRationalNumbers: {
+    examples: ['-Infinity in ExtendedRationalNumbers'],
     type: 'set<rational | +oo | -oo>',
     isConstant: true,
     description: 'The set of all rational numbers, including infinities.',
@@ -559,6 +570,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   // < 0
   NegativeNumbers: {
+    examples: ['-0.5 in NegativeNumbers'],
     type: 'set<real>',
     isConstant: true,
     description: 'The set of all negative real numbers.',
@@ -576,6 +588,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   // <= 0
   NonPositiveNumbers: {
+    examples: ['0 in NonPositiveNumbers'],
     type: 'set<real>',
     isConstant: true,
     description: 'The set of all non-positive real numbers.',
@@ -594,6 +607,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   // >= 0
   NonNegativeNumbers: {
+    examples: ['0 in NonNegativeNumbers'],
     type: 'set<real>',
     isConstant: true,
     description: 'The set of all non-negative real numbers.',
@@ -612,6 +626,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   // > 0
   PositiveNumbers: {
+    examples: ['0 in PositiveNumbers'],
     type: 'set<real>',
     isConstant: true,
     description: 'The set of all positive real numbers.',
@@ -628,6 +643,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   // <= -1
   NegativeIntegers: {
+    examples: ['-3 in NegativeIntegers'],
     type: 'set<integer>',
     isConstant: true,
     description: 'The set of all negative integers.',
@@ -645,6 +661,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   // <= 0
   NonPositiveIntegers: {
+    examples: ['0 in NonPositiveIntegers'],
     type: 'set<integer>',
     isConstant: true,
     description: 'The set of all non-positive integers.',
@@ -666,6 +683,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   // >= 0
   NonNegativeIntegers: {
+    examples: ['0 in NonNegativeIntegers'],
     type: 'set<integer>',
     isConstant: true,
     description: 'The set of all non-negative integers.',
@@ -687,6 +705,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   // >= 1
   PositiveIntegers: {
+    examples: ['0 in PositiveIntegers'],
     type: 'set<integer>',
     isConstant: true,
     description: 'The set of all positive integers.',
@@ -710,6 +729,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // a proper subset of the positive integers — so membership and inclusion
   // are decided here rather than by `declareTypeSaturatedSet`.
   Primes: {
+    examples: ['Filter(1..30, x => x in Primes)'],
     type: 'set<integer>',
     isConstant: true,
     description: 'The set of all prime numbers.',
@@ -737,6 +757,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // validation seam that checks a `canonical`-handler head against its
   // declaration.
   Element: {
+    examples: ['3 in {1, 2, 3}'],
     // A restricted collection, `[1]{c}`, is threaded whole, as `Contains`
     // threads its collection: the answer is computed on the present
     // collection and is absent once `c` fails. The value (position 0) is not
@@ -913,6 +934,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   NotElement: {
+    examples: ['4 !in {1, 2, 3}'],
     // A restricted collection, `[1]{c}`, is threaded whole, as `Contains`
     // threads its collection: the answer is computed on the present
     // collection and is absent once `c` fails. The value (position 0) is not
@@ -959,6 +981,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // for "on a subset of D") with `missing`. The negated relations have no
   // canonical handler and no chain form; they keep `(any, any)`.
   Subset: {
+    examples: ['Subset({1, 2}, {1, 2, 3})'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -980,6 +1003,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   SubsetEqual: {
+    examples: ['SubsetEqual({1, 2, 3}, {1, 2, 3})'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1001,6 +1025,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   NotSubset: {
+    examples: ['NotSubset({1, 4}, {1, 2, 3})'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1017,6 +1042,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Superset: {
+    examples: ['Superset({1, 2, 3}, {1, 2})'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1038,6 +1064,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   SupersetEqual: {
+    examples: ['SupersetEqual({1, 2}, {1, 2})'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1060,6 +1087,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   NotSuperset: {
+    examples: ['NotSuperset({1, 2}, {1, 2, 3})'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1076,6 +1104,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   NotSupersetEqual: {
+    examples: ['NotSupersetEqual({1, 2}, {1, 2, 3})'],
     complexity: 11200,
     // A set relation over an absent set is absent: it computes on the whole
     // collection, so it answers the marker of a boolean codomain, `Missing`.
@@ -1120,6 +1149,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // neither declares an `evaluate` handler.
   //
   Adjoin: {
+    examples: ['Adjoin(Integers, Sqrt(2))'],
     description: [
       'The ring obtained by adjoining one or more elements to a base ring.',
       '`Adjoin(Integers, Sqrt(2))` is ℤ[√2]; `Adjoin(Integers, ["Complex", 0, 1])` is the Gaussian integers ℤ[i]; `Adjoin(Integers, "x")` is the polynomial ring ℤ[x].',
@@ -1138,6 +1168,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   QuotientRing: {
+    examples: ['QuotientRing(Integers, 5)'],
     description: [
       'The quotient of a ring by the ideal generated by the second argument.',
       '`QuotientRing(Integers, n)` is ℤ/nℤ, the integers modulo `n`.',
@@ -1163,6 +1194,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Complement: {
+    examples: ['ListFrom(Complement({1, 2, 3, 4}, {2, 4}))'],
     // Return the elements of the first argument that are not in any of
     // the subsequent sets
     wikidata: 'Q242767',
@@ -1194,6 +1226,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Intersection: {
+    examples: ['Intersection({1, 2, 3}, {2, 3, 4})'],
     // notation: \cap
     // Accepts any finite collection operand (e.g. a `List`), not just sets:
     // list operands are coerced to a set (deduped) by `intersection`, so
@@ -1243,6 +1276,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Union: {
+    examples: ['Union({1, 2}, {2, 3})'],
     // Works on set, but can also work on lists
     wikidata: 'Q185359',
     // An absent collection operand (`Missing`, or a restricted set whose
@@ -1306,6 +1340,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   SetMinus: {
+    examples: ['SetMinus({1, 2, 3, 4}, 2, 4)'],
     wikidata: 'Q18192442',
     // An absent first operand (`Missing`, or a restricted set whose
     // condition is false) makes the result `Missing`, as a collection
@@ -1360,6 +1395,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     },
   },
   SymmetricDifference: {
+    examples: ['SymmetricDifference({1, 2, 3}, {2, 3, 4})'],
     // symmetric difference = disjunctive union  (circled minus)
     /* = Union(Complement(a, b), Complement(b, a) */
     /* Corresponds to XOR in boolean logic */

@@ -36,19 +36,28 @@ is spliced in from `reference/<category>.intro.md` when that file exists.
 
 Remaining work:
 
-- **Reference introductions.** No `reference/<category>.intro.md` exists
-  yet: each page opens with one generated sentence. The prose sections of
-  the matching website reference page (`doc/*-reference-*.md`, for example
-  "Trigonometric Transformations") are to be ported to Epsil syntax, one
-  category at a time, starting with the categories an author meets first
-  (core, collections, arithmetic, control structures, strings).
-- **Examples.** 637 of the 679 definitions have no `examples` field, so
+- **Reference introductions.** `core.intro.md` and `collections.intro.md`
+  exist (2026-09-27); every other page opens with one generated sentence.
+  The prose sections of the matching website reference page
+  (`doc/*-reference-*.md`, for example "Trigonometric Transformations") are
+  to be ported to Epsil syntax, one category at a time: arithmetic, control
+  structures and strings next.
+- **Examples.** 410 of the 679 definitions have no `examples` field, so
   their reference entry is a description alone (per category, measured
-  2026-09-27: core 111 of 111, collections 124 of 124, arithmetic 96 of 97,
-  trigonometry 42 of 42, linear algebra 42 of 42, logic 27, relations 30,
-  statistics 29 of 35, number theory 17 of 52, the rest all of theirs). An
+  2026-09-27 after the core and collections round: arithmetic 96 of 97,
+  trigonometry 42 of 42, linear algebra 42 of 42, relations 30, statistics
+  29 of 35, logic 27, colors 20, calculus 19, polynomials 17, number theory
+  17 of 52, control structures 14, special functions 14, combinatorics 11,
+  physics 11, units 7, core 7, regular expressions 4, fractals 2,
+  collections 1). The core and collections definitions left without one are
+  engine-internal or display heads (`ApplyWhole`, `BaseForm`, `Colon`,
+  `HorizontalSpacing`, `Object`, `Unevaluated`, `MemberCall`) and `Input`,
+  whose example would wait on standard input in the documentation test. An
   example is Epsil source in the definition (`BaseDefinition.examples`),
-  executed at generation and checked by the documentation test.
+  executed at generation and checked by the documentation test; an example
+  the generator classifies as impure (a `let`, a declaration, a random
+  draw) is written without a `// ➔` annotation and only its diagnostics
+  are checked.
 
 
 ## Runtime and representation

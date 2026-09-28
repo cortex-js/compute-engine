@@ -3980,6 +3980,22 @@ describe('COLLECTION NITS (Take preview, Sort boolean comparator, GroupBy typo)'
       )
     ).toBe('{"dict":{"False":[1,3],"True":[2,4]}}');
   });
+
+  test('GroupBy with a character key groups under the unquoted text', () => {
+    // `First` of a string is a character; a character is the same value as
+    // the one-character string, so it keys the same group, without quotes.
+    expect(
+      JSON.stringify(
+        engine
+          .box([
+            'GroupBy',
+            ['List', "'apple'", "'avocado'", "'banana'"],
+            ['Function', ['First', 's'], 's'],
+          ])
+          .evaluate().json
+      )
+    ).toBe('{"dict":{"a":["apple","avocado"],"b":["banana"]}}');
+  });
 });
 
 // Tycho item 26: iterating a lazy lambda-applying collection whose body cannot

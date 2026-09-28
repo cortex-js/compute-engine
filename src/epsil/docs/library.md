@@ -2,7 +2,7 @@
 title: Epsil Standard Library
 sidebar_label: Standard Library
 slug: /epsil/library/
-description: "Every function and constant of the Epsil standard library, by category, with signatures, summaries, and executable examples."
+description: "Every function and constant of the Epsil standard library, by category, with signatures and summaries, linked to the per-category reference pages."
 hide_title: true
 date: Last Modified
 # GENERATED FILE — do not edit. Source: the library definitions
@@ -15,11 +15,8 @@ The 679 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
-shows as a hover. The full description of every definition is on the
-category's reference page, linked from each heading. The examples are
-executed when this page is generated, and the value each one evaluates to
-is written after it as `// ➔`; the documentation test runs them again, so
-an example that stops being true fails the build.
+shows as a hover. The full description and the executed examples of every
+definition are on the category's reference page, linked from each heading.
 
 To search the library by concept rather than by name, use
 `epsil doc <keywords>` (see the [CLI](/epsil/cli/)); the
@@ -47,7 +44,7 @@ To search the library by concept rather than by name, use
 
 ## Core
 
-The [Core reference](/epsil/reference/core/) has the full description of each definition.
+The [Core reference](/epsil/reference/core/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -143,7 +140,7 @@ The [Core reference](/epsil/reference/core/) has the full description of each de
 | `symbol` | `Symbol` | `function` | Construct a new symbol with a name formed by concatenating the arguments |
 | `tail` | `Tail` | `(any) -> collection` | Return the tail of an expression, the operands of the expression |
 | — | `Text` | `(any*) -> string` | A sequence of strings, annotated expressions and other Text expressions |
-| `timing` | `Timing` | `(value, repeat: integer?) -> tuple<time: number, result: value>` | `Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value. |
+| `timing` | `Timing` | `(value, repeat: integer?) -> tuple<number, value>` | `Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value; read them as `Timing(expr)[1]` and `Timing(expr)[2]`. |
 | `to` | `To` | `(any, any) -> nothing` | Action arrow / mapping (`a \to b`) — opaque typed head. |
 | `toLowerCase` | `ToLowerCase` | `(string) -> string` | ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings. |
 | `toUpperCase` | `ToUpperCase` | `(string) -> string` | ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. |
@@ -165,7 +162,7 @@ The [Core reference](/epsil/reference/core/) has the full description of each de
 
 ## Control structures
 
-The [Control structures reference](/epsil/reference/control-structures/) has the full description of each definition.
+The [Control structures reference](/epsil/reference/control-structures/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -186,7 +183,7 @@ The [Control structures reference](/epsil/reference/control-structures/) has the
 
 ## Logic
 
-The [Logic reference](/epsil/reference/logic/) has the full description of each definition.
+The [Logic reference](/epsil/reference/logic/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -220,7 +217,7 @@ The [Logic reference](/epsil/reference/logic/) has the full description of each 
 
 ## Collections
 
-The [Collections reference](/epsil/reference/collections/) has the full description of each definition.
+The [Collections reference](/epsil/reference/collections/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -351,7 +348,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 
 ## Colors
 
-The [Colors reference](/epsil/reference/colors/) has the full description of each definition.
+The [Colors reference](/epsil/reference/colors/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -378,7 +375,7 @@ The [Colors reference](/epsil/reference/colors/) has the full description of eac
 
 ## Regular expressions
 
-The [Regular expressions reference](/epsil/reference/regexp/) has the full description of each definition.
+The [Regular expressions reference](/epsil/reference/regexp/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -389,7 +386,7 @@ The [Regular expressions reference](/epsil/reference/regexp/) has the full descr
 
 ## Fractals
 
-The [Fractals reference](/epsil/reference/fractals/) has the full description of each definition.
+The [Fractals reference](/epsil/reference/fractals/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -398,7 +395,7 @@ The [Fractals reference](/epsil/reference/fractals/) has the full description of
 
 ## Relations
 
-The [Relations reference](/epsil/reference/relop/) has the full description of each definition.
+The [Relations reference](/epsil/reference/relop/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -435,7 +432,7 @@ The [Relations reference](/epsil/reference/relop/) has the full description of e
 
 ## Arithmetic
 
-The [Arithmetic reference](/epsil/reference/arithmetic/) has the full description of each definition.
+The [Arithmetic reference](/epsil/reference/arithmetic/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -537,21 +534,9 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | — | `e` | constant `real<2.718281828459045..2.718281828459046>` = `e` | Euler's number e ≈ 2.71828, the base of the natural logarithm. |
 | — | `i` | constant `imaginary` = `i` | The imaginary unit, whose square is −1. |
 
-### Examples
-
-```epsil
-rationalize(1.75)
-// ➔ 7/4
-```
-
-```epsil
-rationalize(sqrt(3), 1/500)
-// ➔ 26/15
-```
-
 ## Trigonometry
 
-The [Trigonometry reference](/epsil/reference/trigonometry/) has the full description of each definition.
+The [Trigonometry reference](/epsil/reference/trigonometry/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -600,7 +585,7 @@ The [Trigonometry reference](/epsil/reference/trigonometry/) has the full descri
 
 ## Calculus
 
-The [Calculus reference](/epsil/reference/calculus/) has the full description of each definition.
+The [Calculus reference](/epsil/reference/calculus/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -626,7 +611,7 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description of
 
 ## Polynomials
 
-The [Polynomials reference](/epsil/reference/polynomials/) has the full description of each definition.
+The [Polynomials reference](/epsil/reference/polynomials/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -650,7 +635,7 @@ The [Polynomials reference](/epsil/reference/polynomials/) has the full descript
 
 ## Combinatorics
 
-The [Combinatorics reference](/epsil/reference/combinatorics/) has the full description of each definition.
+The [Combinatorics reference](/epsil/reference/combinatorics/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -668,7 +653,7 @@ The [Combinatorics reference](/epsil/reference/combinatorics/) has the full desc
 
 ## Number theory
 
-The [Number theory reference](/epsil/reference/number-theory/) has the full description of each definition.
+The [Number theory reference](/epsil/reference/number-theory/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -725,195 +710,9 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `stirlingS1` | `StirlingS1` | `(integer, integer) -> integer` | Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). |
 | `totient` | `Totient` | `(integer) -> integer` | Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n. |
 
-### Examples
-
-```epsil
-bernoulliB(2)
-// ➔ 1/6
-```
-
-```epsil
-carmichaelLambda(15)
-// ➔ 4
-```
-
-```epsil
-catalanNumber(5)
-// ➔ 42
-```
-
-```epsil
-chineseRemainder([2, 3, 2], [3, 5, 7])
-// ➔ 23
-```
-
-```epsil
-continuedFraction(43/19)
-// ➔ [2,3,1,4]
-```
-
-```epsil
-digitCount(122, 10, 2)
-// ➔ 2
-```
-
-```epsil
-digitSum(1234)
-// ➔ 10
-```
-
-```epsil
-divides(3, 12)
-// ➔ "True"
-```
-
-```epsil
-divisorSigma(2, 6)
-// ➔ 50
-```
-
-```epsil
-divisors(12)
-// ➔ [1,2,3,4,6,12]
-```
-
-```epsil
-extendedGCD(12, 18)
-// ➔ (6, -1, 1)
-```
-
-```epsil
-factorInteger(360)
-// ➔ [(2, 3),(3, 2),(5, 1)]
-```
-
-```epsil
-fromContinuedFraction([2, 3, 1, 4])
-// ➔ 43/19
-```
-
-```epsil
-fromDigits([1, 2, 3, 4])
-// ➔ 1234
-```
-
-```epsil
-integerDigits(255, 16)
-// ➔ [15,15]
-```
-
-```epsil
-integerSqrt(17)
-// ➔ 4
-```
-
-```epsil
-isPerfectPower(64)
-// ➔ "True"
-```
-
-```epsil
-isSquareFree(30)
-// ➔ "True"
-```
-
-```epsil
-jacobiSymbol(5, 21)
-// ➔ 1
-```
-
-```epsil
-legendreSymbol(3, 7)
-// ➔ -1
-```
-
-```epsil
-lucasL(10)
-// ➔ 123
-```
-
-```epsil
-modularInverse(3, 7)
-// ➔ 5
-```
-
-```epsil
-modularInverse(3, -7)
-// ➔ -2
-```
-
-```epsil
-moebiusMu(30)
-// ➔ -1
-```
-
-```epsil
-multiplicativeOrder(2, 7)
-// ➔ 3
-```
-
-```epsil
-nextPrime(10)
-// ➔ 11
-```
-
-```epsil
-nextPrime(10, -1)
-// ➔ 7
-```
-
-```epsil
-nthPrime(10)
-// ➔ 29
-```
-
-```epsil
-powerMod(2, 10, 1000)
-// ➔ 24
-```
-
-```epsil
-primeFactors(360)
-// ➔ [2,3,5]
-```
-
-```epsil
-primeNu(360)
-// ➔ 3
-```
-
-```epsil
-primeOmega(360)
-// ➔ 6
-```
-
-```epsil
-primePi(10)
-// ➔ 4
-```
-
-```epsil
-primitiveRoot(7)
-// ➔ 3
-```
-
-```epsil
-radical(360)
-// ➔ 30
-```
-
-```epsil
-randomPrime(100)
-```
-
-```epsil
-stirlingS1(5, 2)
-// ➔ -50
-```
-
 ## Special functions
 
-The [Special functions reference](/epsil/reference/special-functions/) has the full description of each definition.
+The [Special functions reference](/epsil/reference/special-functions/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -934,7 +733,7 @@ The [Special functions reference](/epsil/reference/special-functions/) has the f
 
 ## Linear algebra
 
-The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full description of each definition.
+The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -983,7 +782,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 
 ## Statistics
 
-The [Statistics reference](/epsil/reference/statistics/) has the full description of each definition.
+The [Statistics reference](/epsil/reference/statistics/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -1023,46 +822,9 @@ The [Statistics reference](/epsil/reference/statistics/) has the full descriptio
 | `uniformDistribution` | `UniformDistribution` | `(real, real) -> expression<UniformDistribution>` | Continuous uniform distribution on the interval [a, b]. |
 | `variance` | `Variance` | `((collection<any> \| distribution \| number)+) -> nan \| real<0..>` | Sample variance of a collection of numbers. |
 
-### Examples
-
-```epsil
-binCounts([1, 2, 2, 3], 3)
-// ➔ [1,2,1]
-```
-
-```epsil
-histogram([1, 2, 2, 3], 3)
-// ➔ [(1, 1),(1.6666666666666665, 2),(2.333333333333333, 1)]
-```
-
-```epsil
-median([3, 1, 4, 2])
-// ➔ 5/2
-```
-
-```epsil
-mode([1, 2, 2, 3])
-// ➔ 2
-```
-
-```epsil
-quartiles([1, 2, 3, 4, 5])
-// ➔ (3/2, 3, 9/2)
-```
-
-```epsil
-slidingWindow([1, 2, 3, 4], 2)
-// ➔ [[1,2],[2,3],[3,4]]
-```
-
-```epsil
-slidingWindow("abcd", 2)
-// ➔ ["ab","bc","cd"]
-```
-
 ## Units
 
-The [Units reference](/epsil/reference/units/) has the full description of each definition.
+The [Units reference](/epsil/reference/units/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
@@ -1076,7 +838,7 @@ The [Units reference](/epsil/reference/units/) has the full description of each 
 
 ## Physics
 
-The [Physics reference](/epsil/reference/physics/) has the full description of each definition.
+The [Physics reference](/epsil/reference/physics/) has the full description and the examples of each definition.
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|

@@ -111,6 +111,27 @@ describe('StringJoin joins a collection of strings', () => {
   });
 });
 
+describe('StringFrom with the default format', () => {
+  // The value converts to its text, not to its printed form: a string and a
+  // character keep their content, and a symbol (a boolean, a name that spells
+  // a type) its bare name — the printed forms carry quotes.
+  test.each([
+    [['StringFrom', 'True'], 'True'],
+    [['StringFrom', 'False'], 'False'],
+    [['StringFrom', "'abc'"], 'abc'],
+    [['StringFrom', ['First', "'abc'"]], 'a'],
+    [['StringFrom', 'integer'], 'integer'],
+    [['StringFrom', 'x'], 'x'],
+    // A symbol whose printed form is not its quoted name keeps the printed
+    // form.
+    [['StringFrom', 'Pi'], 'pi'],
+    [['StringFrom', ['Add', 'x', 1]], 'x + 1'],
+  ])('%j', (expr, text) => {
+    const ce = new ComputeEngine();
+    expect(ce.box(expr as any).evaluate().string).toBe(text);
+  });
+});
+
 describe('StringFrom joins a collection of code points', () => {
   // Regression: `StringFrom` was declared `broadcastable: true`, so a list
   // argument was mapped element-wise BEFORE the evaluate handler ran, defeating
@@ -171,17 +192,18 @@ describe('StringFrom with no format decodes numbers as code points', () => {
     expect(from(ce, 65).string).toBe('A');
   });
 
-  // The printed form of a string and of a boolean carries the quotes the
-  // engine puts around them. That is the behavior `StringFrom` had before
-  // this change, and it is not touched here.
-  test('a string keeps the printed form', () => {
+  // A string converts to its content and a boolean to its name. Their
+  // printed forms carry quotes (`True.toString()` is `"True"` with the
+  // quotes), which `StringFrom` returned until 2026-09-27; the description
+  // promises `StringFrom(True)` is `"True"`.
+  test('a string converts to its content', () => {
     const ce = new ComputeEngine();
-    expect(from(ce, { str: 'hi' }).string).toBe('"hi"');
+    expect(from(ce, { str: 'hi' }).string).toBe('hi');
   });
 
-  test('a boolean keeps the printed form', () => {
+  test('a boolean converts to its name', () => {
     const ce = new ComputeEngine();
-    expect(from(ce, 'True').string).toBe('"True"');
+    expect(from(ce, 'True').string).toBe('True');
   });
 
   test('a symbol keeps the printed form', () => {

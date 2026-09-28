@@ -2783,6 +2783,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Nothing: {
       description: 'The absence of a value; the sole member of the unit type.',
       type: 'nothing',
+      examples: ['[1, Nothing, 2]'],
     },
 
     // The sole member of the unit type, `missing`.
@@ -2799,6 +2800,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A value that is absent but whose position is preserved (Julia `missing`, R `NA`); the sole member of the `missing` type.',
       type: 'missing',
+      examples: ['Missing + 1'],
     },
   },
 
@@ -2886,6 +2888,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       complexity: 9000,
       lazy: true,
       signature: 'function',
+      examples: ['InvisibleOperator(2, x)'],
       // Note: since the canonical form will be a different operator,
       // no need to calculate the result type
       canonical: (x, { engine }) => {
@@ -2908,6 +2911,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Ordered sequence of expressions.',
       lazy: true,
       signature: 'function',
+      examples: ['[0, Sequence(1, 2), 3]'],
       type: (args, context) => {
         if (args.length === 0)
           return BoxedType.forResult('nothing', context.engine._typeResolver);
@@ -2945,6 +2949,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       complexity: 9000,
       lazy: true,
       signature: '(any, string?) -> any',
+      examples: ['Delimiter(1 + 2)'],
       // Echoes the body operand's type; nothing but the type is read.
       type: (args, context) => {
         if (args.length === 0)
@@ -3100,6 +3105,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       complexity: 500,
       signature: '((string|expression<ErrorCode>), expression?) -> nothing',
+      examples: ['[1, RuntimeError("zero")]'],
       // To make a canonical expression, don't canonicalize the args
       canonical: (args, { engine: ce }) => ce._fn('Error', args),
     },
@@ -3109,6 +3115,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       complexity: 500,
       lazy: true,
       signature: '(string, any*) -> error',
+      examples: ['[1, RuntimeError(ErrorCode("out-of-range", 5))]'],
       canonical: (args, { engine: ce }) => {
         const checked = checkType(ce, args[0], 'string');
         const code = isString(checked) ? checked.string : undefined;
@@ -3139,6 +3146,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Evaluates to `Error(code)`.',
       complexity: 500,
       signature: '(string|expression<ErrorCode>) -> never',
+      examples: ['IsError(RuntimeError("oops"))'],
       evaluate: ([code], { engine: ce }) => {
         if (code === undefined) return undefined;
         if (isString(code)) return ce.error(code.string);
@@ -3168,6 +3176,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '(R’s `is.nan`).',
       complexity: 500,
       signature: '(any) -> boolean',
+      examples: ['[IsMissing(Missing), IsMissing(NaN), IsMissing(0)]'],
       evaluate: ([x], { engine: ce }) =>
         x !== undefined && isAbsentValue(x) ? ce.True : ce.False,
     },
@@ -3193,6 +3202,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // whole point) — declared `handle`, stripping every position (§3.A).
       missingBehavior: 'handle',
       signature: '(any+) -> unknown',
+      examples: ['Coalesce(Missing, NaN, 3, 4)'],
       // Result type `T₁° | … | Tₙ₋₁° | Tₙ` (§3.D): every operand but the last
       // contributes its stripped type (its `| missing` arm removed), the last
       // its full type. An arm-free final operand yields an arm-free result
@@ -3265,6 +3275,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // total on any operand.
       inspectsErrors: true,
       signature: '(any) -> unknown',
+      examples: ['Hold(1 + 2)'],
       // Note: the operator is lazy and doesn't have a canonical handler:
       // the argument is not canonicalized. The `'types'`-shape handler reads
       // the operand's raw structure through its descriptor — the same
@@ -3310,6 +3321,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `effectsOf(Hold(Random()))` is empty.
       holdClass: 'release',
       signature: '(any) -> unknown',
+      examples: ['ReleaseHold(Hold(1 + 2))'],
       // The result type of releasing a literal `Hold` is its content's type
       // (the descriptor of the held operand's first child); anything else
       // keeps its own type. `'nothing'` for the degenerate argument-less
@@ -3352,6 +3364,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Annotated: {
       description: 'Attach metadata or style annotations to an expression.',
       signature: '(expression, dictionary<any>) -> expression',
+      examples: ['Annotated(x^2, {"color" -> "blue"})'],
       // Transparent to the type system: the annotated expression's own type.
       type: ([x], context) =>
         BoxedType.forResult(x.type, context.engine._typeResolver),
@@ -3392,6 +3405,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // was rejected.
       invokes: false,
       signature: '(any, string | symbol) -> unknown',
+      examples: ['Typed(2 + 3, "integer")'],
       // The ascribed type is read from the second operand's inert structure —
       // a string literal's text, or a type-name symbol's name — and resolved
       // with the engine's type resolver, which is a pure read.
@@ -3468,6 +3482,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A sequence of strings, annotated expressions and other Text expressions',
       signature: '(any*) -> string',
+      examples: ['Text("Total: ", 42)'],
       evaluate: (ops, { engine: ce }) => {
         if (ops.length === 0) return ce.string('');
         const parts: string[] = [];
@@ -3501,6 +3516,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // values only): a `value` entry may legitimately be an absence marker
       // such as `Missing`.
       signature: '(any) -> dictionary<any>',
+      examples: ['About(Pi)'],
       evaluate: ([x], { engine: ce }) => {
         // Entries are collected in display order, then assembled into a
         // `Dictionary` expression (the documented contract: `About` yields a
@@ -3668,6 +3684,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Return the head of an expression, the name of the operator',
       lazy: true,
       signature: '(any) -> symbol',
+      examples: ['Head(x^2)'],
       canonical: (args, { engine: ce }) => {
         // **IMPORTANT** Head should work on non-canonical expressions
         if (args.length !== 1) return null;
@@ -3692,6 +3709,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Return the tail of an expression, the operands of the expression',
       lazy: true,
       signature: '(any) -> collection',
+      examples: ['[Tail(Max(a, b, c))]'],
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return null;
         const op1 = args[0];
@@ -3715,6 +3733,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       lazy: true,
       signature: '(any) -> unknown',
+      examples: ['Max(...(4, 9, 2))'],
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return null;
         // `op.canonical` is value-safe: it binds structure but does not
@@ -3747,6 +3766,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       lazy: true,
       signature: '(string, any) -> nothing',
+      examples: ['((x, y) => x - y)(y: 2, x: 10)'],
       // Consumed by `makeCanonicalFunction` (see
       // `boxed-expression/named-arguments.ts`) before this handler could run,
       // for every callee whose declaration supplies parameter names — a single
@@ -3777,6 +3797,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Identity: {
       description: 'Return the argument unchanged',
       signature: '(T) -> T where T',
+      examples: ['Identity(x + 1)'],
       evaluate: ([x]) => x,
     },
   },
@@ -3796,6 +3817,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `Nothing` (a call typed `nothing`) is bound, never erased — erasure
       // is a rule on the WRITTEN argument.
       signature: '(name:any, arguments:any*) -> unknown',
+      examples: ['Apply(Sqrt, 16)'],
       // An ANONYMOUS application instantiates its callee's `where` clause here
       // (generic-function-literals design §2.5). This is the one application
       // seam that crosses NO symbol/definition boundary — the callee is an
@@ -3951,6 +3973,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // means (rung 2 — `apply()` bubbles it) instead of freezing with it.
       inspectsErrors: true,
       signature: '(value, function) -> unknown',
+      examples: ['Pipe([3, 1, 2], Sort)', '16 |> Sqrt'],
       // `Pipe(x, f)` is `f(x)`, so its type is `f`'s result type — EXCEPT when
       // the stage implicitly maps (`pipeImplicitMapType`), where the pipe is a
       // collection of that result rather than the result itself.
@@ -4088,6 +4111,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'dispatch to the most specific clause admitting the arguments.',
       lazy: true,
       signature: '(symbol, function, dictionary<any>?) scope -> nothing',
+      examples: ['fact(0) = 1\nfact(n) = n * fact(n - 1)\nfact(5)'],
       invokes: false,
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2 && args.length !== 3) return null;
@@ -4445,6 +4469,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // have said "unclassified impurity"). Impure, but owing the random
       // stream nothing — a surviving `Assign` must not pin a seed frame.
       signature: '(symbol | expression, any) scope -> any',
+      examples: ['let x = 3\nx = x + 1\nx'],
       // A STORING writer: the target is written, the value is stored, and
       // neither position ever applies a function-valued operand. So
       // `Assign(f, randomLambda)` is `{scope}`, not `{scope, random}` — the
@@ -5122,6 +5147,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // "internal-error") are not valid symbol names, so a symbol result
       // rendered as an invalid-symbol Error for exactly the failure cases.
       signature: '(any) scope -> string',
+      examples: ['Assume(x > 0)'],
       evaluate: (ops, { engine: ce }) => ce.string(ce.assume(ops[0])),
     },
 
@@ -5142,6 +5168,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // 2026-08-17, which went inert on exactly that `let`).
       signature:
         '(symbol, type: (string | symbol)?, value: any?, attributes: dictionary<any>?) scope -> any',
+      examples: ['let x: integer = 5\nx + 1'],
       // A STORING writer, like `Assign`: no position applies a function-valued
       // operand, so `Declare(f, "function", randomLambda)` is `{scope}`. The
       // value's PRODUCTION effects still count.
@@ -5594,6 +5621,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // the `scope` label (see `Declare`).
       signature:
         '(symbol|string, type: string|symbol|type, attributes: dictionary<any>?) scope -> nothing',
+      examples: ['type point = tuple<x: number, y: number>\npoint(1, 2)'],
       // A STORING writer, like `Declare`: no position applies a
       // function-valued operand.
       invokes: false,
@@ -5661,6 +5689,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Introduces type bindings (and their constructors) in a scope that
       // outlives the application: the `scope` label, as `DeclareType`.
       signature: '(symbol|string, any*) scope -> nothing',
+      examples: [
+        'type shape = circle(r: number) | square(s: number)\nmatch square(3) {\n  circle(r) => pi * r^2\n  square(s) => s^2\n}',
+      ],
       // A STORING writer, like `DeclareType`.
       invokes: false,
       canonical: (args, { engine: ce }) => {
@@ -5701,6 +5732,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Introduces an engine-global declaration that outlives the
       // application: the `scope` label (see `DeclareType`).
       signature: '(symbol|string, members: dictionary<any>?) scope -> nothing',
+      examples: [
+        'protocol Area { function area(self: Self) -> number }\ntype square = tuple<side: number> is Area {\n  function area(self: square) -> number { self.side^2 }\n}\narea(square(3))',
+      ],
       // A STORING writer, like `DeclareType`: no position applies a
       // function-valued operand.
       invokes: false,
@@ -5740,6 +5774,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature:
         '(target: string|symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary<any>?) scope -> nothing',
+      examples: [
+        'protocol Copyable {}\ntype string is Copyable\n"abc" is Copyable',
+      ],
       invokes: false,
       canonical: (args, { engine: ce }) => {
         const err = withStatementRoute(ce, (route) =>
@@ -5776,6 +5813,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'decide the question leaves the call symbolic.',
       signature:
         '(protocol: string, member: string, arguments: any*) -> unknown',
+      examples: [
+        'protocol Negatable { function negated(self: Self) -> Self }\ntype number is Negatable { function negated(self) -> number { -self } }\nNegatable.negated(5)',
+      ],
       canonical: (ops, { engine: ce }) => canonicalProtocolMember(ce, ops),
       // The handler reads the operands' names and types only, through the
       // read-only engine view's protocol registry.
@@ -5834,6 +5874,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'the runtime type of the receiver is invoked.',
       signature:
         '(protocol: string, property: string, receiver: any, value: any?) -> unknown',
+      examples: [
+        'protocol Signed { readonly sign: string }\ntype number is Signed {\n  get sign(self) -> string { if (self < 0) { "-" } else { "+" } }\n}\nlet x = -12\nx.(Signed.sign)',
+      ],
       // See `ProtocolMember`: names and types only, no operand expression.
       type: (ops, { engine: ce }) =>
         BoxedType.forResult(
@@ -5863,6 +5906,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `("a" + 1) |> Type`, `Apply(Type, …)`.
       inspectsErrors: true,
       signature: '(any) -> type',
+      examples: ['Type("hi")', 'Type([1, 2, 3])'],
       // `inspectsErrors` deliberately lets a well-formed `Type(Error(...))`
       // observe the operand instead of propagating it. It also lets the
       // evaluate handler see Error nodes inserted by arity validation, so
@@ -5926,6 +5970,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // evaluation is what settles it. A literal operand settles at
       // canonicalization instead, surfacing a typo at the author's line.
       signature: '(text: string) -> type',
+      examples: ['TypeFrom("integer | real") == TypeFrom("real")'],
       invokes: false,
       canonical: (ops, { engine: ce }) => {
         const xs = checkArity(ce, ops, 1);
@@ -5995,6 +6040,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'annotations and signatures use. Operands are type values or type ' +
         'text; a quantified (`where`) type is not comparable and errors.',
       signature: '(subtype: string|type, supertype: string|type) -> boolean',
+      examples: ['Subtype("integer", "number")'],
       canonical: (ops, { engine: ce }) => {
         const xs = checkArity(ce, ops, 2);
         // Rewrite a LITERAL string operand to a settled type value, so a typo
@@ -6064,6 +6110,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       inspectsErrors: true,
       signature: '(subject: any, type: string|type) -> boolean',
+      examples: ['MatchesType([1, 2], "list<integer>")'],
       canonical: (ops, { engine: ce }) => {
         const xs = checkArity(ce, ops, 2);
         const err = xs.find((x) => isFunction(x, 'Error'));
@@ -6142,6 +6189,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       inspectsErrors: true,
       signature: '(subject: any, protocols: string+) -> boolean',
+      examples: [
+        'protocol Copyable {}\ntype string is Copyable\nConforms("abc", "Copyable")',
+      ],
       canonical: (ops, { engine: ce }) => {
         if (ops.length < 2) {
           const xs = checkArity(ce, ops, 2);
@@ -6231,6 +6281,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // (`pure: true`) even though they evaluate their held operand. `IsError`
       // mirrors that verbatim rather than inventing a third rule.
       signature: '(any) -> boolean',
+      examples: ['IsError(Ln("a"))', 'IsError(1 + 1)'],
       canonical: (ops, { engine: ce }) => {
         // Arity is enforced HERE, not by the signature: `inspectsErrors` makes
         // the evaluate handler run even on an invalid node, so `IsError()`
@@ -6260,6 +6311,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Evaluate an expression.',
       lazy: true,
       signature: '(any) -> unknown',
+      examples: ['Evaluate(x + x)'],
       type: ([x], context) =>
         BoxedType.forResult(x.type, context.engine._typeResolver),
       canonical: (ops, { engine: ce }) => {
@@ -6282,6 +6334,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Evaluate a function at one point or between two bounds.',
       lazy: true,
       signature: '(function, lower:expression, upper:expression) -> unknown',
+      examples: ['EvaluateAt(x => x^2, 1, 3)'],
       type: ([x], context) =>
         BoxedType.forResult(
           functionResult(x.type) ?? 'number',
@@ -6357,6 +6410,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       complexity: 9876,
       lazy: true,
       signature: '(symbol | string) -> symbol',
+      examples: ['BuiltinFunction("Sqrt")(16)'],
       canonical: ([symbolArg], { engine: ce }) =>
         ce.symbol(
           sym(symbolArg) ??
@@ -6372,6 +6426,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // A parameter is a bare symbol or an annotated `["Typed", symbol, type]`
       // expression, so parameters are `symbol | function`.
       signature: '(expression, (symbol | function)*) -> function',
+      examples: ['(x => x^2 + 1)(3)'],
       // No `type` handler, deliberately: a `Function` literal's arrow —
       // parameters, result and effect specifier — is built by
       // `functionLiteralSignatureType`
@@ -6398,6 +6453,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature:
         '(match: expression, replace: expression, predicate: function?) -> expression',
+      examples: ['ReplaceAll(x + y, Rule(x, 2))'],
       evaluate: ([_match, _replace, _predicate], { engine: _ce }) => {
         return undefined;
       },
@@ -6419,6 +6475,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // simplifies the result — no throw, no assert.
       inspectsErrors: true,
       signature: '(any, any?) -> expression',
+      examples: ['Simplify(Sin(x)^2 + Cos(x)^2)', 'Simplify(Sqrt(x^2), x > 0)'],
       // Simplification is type-preserving in the handler's view: report the
       // operand's own type.
       type: ([x], context) =>
@@ -6479,6 +6536,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // same-named assigned value would substitute first.
       lazy: true,
       signature: '(any, any?) -> expression',
+      examples: [
+        'let x = 5\nlet y = 2\n(x + y, HoldValues(x + y), HoldValues(x + y, [y]))',
+      ],
       type: ([x], context) =>
         BoxedType.forResult(x?.type ?? undefined, context.engine._typeResolver),
       canonical: (rawOps, { engine: ce }) => {
@@ -6551,6 +6611,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Hold the body: it must NOT evaluate before the frame exists.
       lazy: true,
       signature: '(real | string, any) -> expression',
+      examples: [
+        'WithRandomSeed(42, [Random(1..6), Random(1..6), Random(1..6)])',
+      ],
       // Carry the body's type through. Load-bearing, not cosmetic: a bare
       // `expression` makes a framed draw opaque, and a comparison over an
       // operand that might be a collection is declined by the compiler
@@ -6634,6 +6697,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // specs may be omitted entirely (the unknown is then inferred from the
       // equation). See `boxed-expression/solve-domain.ts`.
       signature: '(any, any*) -> list',
+      examples: [
+        'Solve(x^2 - 1 == 0, x)',
+        'Solve([x + y == 3, x - y == 1], [x, y])',
+      ],
       canonical: (ops, { engine: ce }) => canonicalSolve(ce, ops),
       evaluate: (ops, { engine: ce }) => evaluateSolve(ce, ops),
     },
@@ -6653,6 +6720,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // before solving.
       lazy: true,
       signature: '(any, any) -> dictionary',
+      examples: ['FindRoot(x^2 - 2, [(x, 1)])'],
       evaluate: (ops, { engine: ce }) => findRoot(ce, ops),
     },
 
@@ -6660,7 +6728,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: [
         'ReplaceAll(expr, rules): apply one or more replacement rules to `expr`,',
         'then evaluate the result (Mathematica `expr /. rules`).',
-        'A rule is `lhs -> rhs` (parsed as `To`) or `Rule(lhs, rhs)`. Several',
+        'A rule is `Rule(lhs, rhs)`, or `lhs -> rhs` in LaTeX (parsed as `To`;',
+        'in Epsil `->` builds a dictionary entry, which is not a rule). Several',
         'rules may be given as extra arguments or as a `List`/`Set` of rules;',
         'they are applied simultaneously in a single pass.',
       ],
@@ -6668,6 +6737,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // and the rules carry raw `To`/`Rule` forms.
       lazy: true,
       signature: '(any, any+) -> any',
+      examples: ['ReplaceAll(x^2 + x, Rule(x, 3))'],
       canonical: (ops, { engine: ce }) => {
         if (ops.length < 2) return ce._fn('ReplaceAll', checkArity(ce, ops, 2));
         return ce._fn('ReplaceAll', ops);
@@ -6723,6 +6793,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       lazy: true,
       signature: '(any, symbol*) -> any',
+      examples: ['CanonicalForm(Hold(1 + x), "Order")'],
       // Do not canonicalize the arguments, we want to preserve
       // the original form before modifying it
       canonical: (ops) => {
@@ -6743,6 +6814,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       lazy: true,
       signature: '(any, integer?) -> unknown',
+      examples: ['N(Pi)', 'N(1/3, 4)'],
       type: ([x], context) =>
         BoxedType.forResult(x.type, context.engine._typeResolver),
       canonical: (ops, { engine: ce }) => {
@@ -6821,6 +6893,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // effect set: it consumes draws from the ambient seeded stream, hence
       // impure (the derived `pure`/`drawsRandom` getters read it).
       signature: '((collection<any> | set<real>)?) random -> any',
+      examples: ['Random()', 'Random(1..6)'],
       type: ([domain], context) => {
         if (domain === undefined)
           return BoxedType.forResult('real', context.engine._typeResolver);
@@ -6940,6 +7013,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Same spelling as `RandomSample` (`library/statistics.ts`).
       signature:
         '((T, number) random -> T where T: string) & ((collection<any> | set<real>, number) random -> list<any>)',
+      examples: ['RandomChoice(["a", "b", "c"], 5)'],
       type: ([domain, k], context) =>
         BoxedType.forResult(
           randomListType(domain, k),
@@ -7012,6 +7086,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Return the signature string of an operator.',
       lazy: true,
       signature: '(symbol) -> string | nothing',
+      examples: ['Signature(StringRepeat)'],
       evaluate: ([x], { engine: ce }) => {
         const def = operatorDefinitionOfHeldSymbol(ce, x);
         if (!def) return ce.Nothing;
@@ -7048,6 +7123,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
 
       signature: '(collection<any>, any) -> any',
+      examples: ['Subscript([10, 20, 30], 2)'],
       // Everything the handler needs is in the operands' types and their
       // inert structure (is the base a string literal? a symbol? is the
       // subscript a small integer, a name, or an `InvisibleOperator` of
@@ -7279,6 +7355,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       lazy: true,
       signature: 'function',
+      examples: ['Symbol("x", 2)'],
       // Arity is all the handler reads.
       type: (args, context) => {
         if (args.length === 0)
@@ -7330,9 +7407,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     Timing: {
       description:
-        '`Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value. `Timing(expr, n)` evaluates `expr` n times (at least 3), drops the fastest and the slowest run, and returns the mean time of the others',
-      signature:
-        '(value, repeat: integer?) -> tuple<time:number, result:value>',
+        '`Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value; read them as `Timing(expr)[1]` and `Timing(expr)[2]`. `Timing(expr, n)` evaluates `expr` n times (at least 3), drops the fastest and the slowest run, and returns the mean time of the others',
+      // An unnamed tuple: the handler builds `Tuple(time, value)`, and a
+      // tuple value carries no element names, so a declared
+      // `tuple<time: …, result: …>` promised a `.result` field access that
+      // failed with `incompatible-type`.
+      signature: '(value, repeat: integer?) -> tuple<number, value>',
+      examples: ['Timing(2 + 2)[2]'],
       // `lazy` so the handler receives the RAW operand: `Timing` must time
       // the evaluation itself. As a non-lazy operator the driver evaluated
       // the operand *before* the handler, so the handler was timing a
@@ -7382,6 +7463,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Wildcard: {
       description: 'Single-expression pattern wildcard.',
       signature: '(symbol) -> symbol',
+      examples: ['Wildcard(x)'],
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return ce.symbol('_');
         return ce.symbol('_' + (sym(args[0]) ?? ''));
@@ -7390,6 +7472,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     WildcardSequence: {
       description: 'Pattern wildcard matching one or more expressions.',
       signature: '(symbol) -> symbol',
+      examples: ['WildcardSequence(x)'],
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return ce.symbol('__');
         return ce.symbol('__' + (sym(args[0]) ?? ''));
@@ -7398,6 +7481,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     WildcardOptionalSequence: {
       description: 'Pattern wildcard matching zero or more expressions.',
       signature: '(symbol) -> symbol',
+      examples: ['WildcardOptionalSequence(x)'],
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return ce.symbol('___');
         return ce.symbol('___' + (sym(args[0]) ?? ''));
@@ -7413,12 +7497,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Value preserving type conversion/tag indicating the string is a LaTeX string',
       signature: '(string) -> string',
+      examples: ['Parse(LatexString(#"\\frac{1}{2}"#))'],
       evaluate: ([s]) => s,
     },
 
     Latex: {
       description: 'Serialize an expression to LaTeX',
       signature: '(any+) -> string',
+      examples: ['Latex(Sqrt(x) / 2)'],
       evaluate: (ops, { engine: ce }) =>
         ce.expr([
           'LatexString',
@@ -7430,6 +7516,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Parse a LaTeX string and evaluate to a corresponding expression',
       signature: '(string) -> any',
+      examples: ['Parse(#"\\frac{\\pi}{2}"#)'],
       evaluate: ([s], { engine: ce }) =>
         ce.expr(parseLatex(isString(s) ? s.string : '') ?? 'Nothing'),
     },
@@ -7450,6 +7537,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // coercing-join-with-broadcast semantics.
       broadcastExemptions: ['single-collection-join'],
       signature: '(any*) -> string',
+      examples: ['String("x", 2)'],
       evaluate: (ops, { engine }) => {
         if (ops.length === 0) return engine.string('');
         // SINGLE-COLLECTION JOIN. `String` is `broadcastable`, and a
@@ -7533,6 +7621,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `StringJoin(Characters(s))` and `StringJoin(s)` must type-check.
       signature:
         '(collection<string | character>, separator: string?) -> string',
+      examples: ['StringJoin(["a", "b", "c"], "-")'],
       evaluate: ([xs, separator], { engine }) => {
         if (xs === undefined) return undefined;
         let sep = '';
@@ -7569,6 +7658,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'normalization; an empty or multi-character string is an error.',
       ],
       signature: '(string) -> character',
+      examples: ['CharacterFrom("é")'],
       canonical: (ops, { engine: ce }) => {
         const xs = flatten(ops);
         // A one-cluster string LITERAL becomes the character value right here.
@@ -7624,6 +7714,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'A non-string argument leaves the expression unevaluated.',
       ],
       signature: '(string) -> list<character>',
+      examples: ['Characters("héllo")'],
       // The evaluate guard (`isString`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
@@ -7668,6 +7759,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // same result type whichever arm most-specific-wins picks.
       signature:
         '((string, string?) -> list<string>) & ((string, regexp) -> list<string>)',
+      examples: [
+        'StringSplit("a,b,c", ",")',
+        'StringSplit("  one two  three ")',
+      ],
       // Complete precondition: op1 must be a string; a PRESENT separator must
       // be a string or a compiled pattern (an absent separator selects the
       // whitespace split).
@@ -7763,6 +7858,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '((string, string, string, count: integer?) -> string) & ' +
         '((string, regexp, string, count: integer?) -> string) & ' +
         '((string, regexp, function, count: integer?) -> string)',
+      examples: [
+        'StringReplace("banana", "a", "o")',
+        'StringReplace("banana", "a", "o", 1)',
+      ],
       evaluate: ([s, target, replacement, count], { engine: ce }) => {
         if (!isString(s)) return undefined;
         // A PATTERN target: `replaceByPattern` owns the whole call, including
@@ -7828,6 +7927,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       signature:
         '(string, chars: (string | character | collection<string | character>)?) -> string',
+      examples: ['Trim("  hi  ")', 'Trim("--hi--", "-")'],
       evaluate: ([s, chars], { engine }) => {
         if (!isString(s)) return undefined;
         const set = trimCharacterSet(chars);
@@ -7845,6 +7945,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       signature:
         '(string, chars: (string | character | collection<string | character>)?) -> string',
+      examples: ['TrimStart("007", "0")'],
       evaluate: ([s, chars], { engine }) => {
         if (!isString(s)) return undefined;
         const set = trimCharacterSet(chars);
@@ -7862,6 +7963,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       signature:
         '(string, chars: (string | character | collection<string | character>)?) -> string',
+      examples: ['TrimEnd("hi!!", "!")'],
       evaluate: ([s, chars], { engine }) => {
         if (!isString(s)) return undefined;
         const set = trimCharacterSet(chars);
@@ -7882,6 +7984,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'error.',
       ],
       signature: '(string, n: integer) -> string',
+      examples: ['StringRepeat("ab", 3)'],
       evaluate: ([s, n], { engine: ce }) => {
         if (!isString(s)) return undefined;
         const count = asSmallInteger(n);
@@ -7910,6 +8013,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'unevaluated.',
       ],
       signature: '(string, n: integer, pad: string?) -> string',
+      examples: ['PadStart("42", 5, "0")'],
       evaluate: ([s, n, pad], { engine: ce }) => {
         if (!isString(s)) return undefined;
         const width = asSmallInteger(n);
@@ -7939,6 +8043,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'unevaluated.',
       ],
       signature: '(string, n: integer, pad: string?) -> string',
+      examples: ['PadEnd("abc", 6, ".")'],
       evaluate: ([s, n, pad], { engine: ce }) => {
         if (!isString(s)) return undefined;
         const width = asSmallInteger(n);
@@ -7973,6 +8078,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'count can change ("ß" uppercases to "SS").',
       ],
       signature: '(string) -> string',
+      examples: ['ToUpperCase("straße")'],
       evaluate: ([s], { engine }) => {
         if (!isString(s)) return undefined;
         return engine.string(s.string.toUpperCase());
@@ -7985,6 +8091,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'Unicode default (locale-independent) mappings.',
       ],
       signature: '(string) -> string',
+      examples: ['ToLowerCase("Hello World")'],
       evaluate: ([s], { engine }) => {
         if (!isString(s)) return undefined;
         return engine.string(s.string.toLowerCase());
@@ -8015,6 +8122,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'ignoring case. An approximation of Unicode full case folding.',
       ],
       signature: '(string) -> string',
+      examples: [
+        'CaseFold("Straße")',
+        'CaseFold("Hello") == CaseFold("HELLO")',
+      ],
       evaluate: ([s], { engine }) => {
         if (!isString(s)) return undefined;
         return engine.string(
@@ -8042,6 +8153,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'units, which would sort astral characters below U+E000..U+FFFF).',
       ],
       signature: '(string, string) -> integer',
+      examples: ['StringCompare("apple", "banana")'],
       evaluate: ([a, b], { engine }) => {
         if (!isString(a) || !isString(b)) return undefined;
         return engine.number(
@@ -8058,6 +8170,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '(`StringFrom(True)` is `"True"`). The formats are `"default"` ' +
         '(print the value), `"unicode-scalars"`, `"utf-8"` and `"utf-16"`.',
       signature: '(any, format:string?) -> string',
+      examples: ['StringFrom(65)', 'StringFrom([72, 105])'],
       evaluate: ([value, format], { engine }) => {
         if (value === undefined) return engine.string('');
         let fmt = (isString(format) ? format.string : undefined) ?? 'default';
@@ -8080,7 +8193,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // `t` (the text is already settled).
           const typeText = settledTypeText(value);
           if (typeText !== undefined) return engine.string(typeText);
-          return engine.string(value.toString());
+          // A string or a character is already text: its content, not its
+          // printed form, which carries the quotes (`StringFrom("a")` was
+          // `"\"a\""`). The printed form of some symbols is their name in
+          // quotes (`True.toString()` is `"True"` with the quotes, and so is a
+          // name that spells a type, such as `integer`): those drop the
+          // quotes, as the description promises for `StringFrom(True)`.
+          // Every other symbol keeps its printed form, which is not always
+          // its name (`Pi` prints `pi`, `ExponentialE` prints `e`).
+          if (isString(value) || isCharacter(value))
+            return engine.string(value.string);
+          const printed = value.toString();
+          if (isSymbol(value) && printed === `"${value.symbol}"`)
+            return engine.string(value.symbol);
+          return engine.string(printed);
         }
 
         /**
@@ -8155,6 +8281,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Utf8: {
       description: 'A collection of UTF-8 code units from a string.',
       signature: '(string) -> list<integer>',
+      examples: ['Utf8("A€")'],
       // The evaluate guard (`isString`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
@@ -8173,6 +8300,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Utf16: {
       description: 'A collection of UTF-16 code units from a string.',
       signature: '(string) -> list<integer>',
+      examples: ['Utf16("A😀")'],
       // The evaluate guard (`isString`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
@@ -8196,6 +8324,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A collection of Unicode scalars from a string, same as UTF-32',
       signature: '(string) -> list<integer>',
+      examples: ['UnicodeScalars("A😀")'],
       // The evaluate guard (`isString`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
@@ -8216,6 +8345,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A collection of grapheme clusters from a string. Synonym of Characters.',
       signature: '(string) -> list<character>',
+      examples: ['GraphemeClusters("héllo")'],
       // The evaluate guard (`isString`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
@@ -8243,6 +8373,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // @todo could accept optional third parameter as the (padded) length of the output
 
       signature: '(string, (string|integer)?) -> integer',
+      examples: ['DigitsFrom("ff", 16)', 'DigitsFrom("1010", 2)'],
 
       evaluate: (ops, { engine }) => {
         let op1str = isString(ops[0]) ? ops[0].string : undefined;
@@ -8325,6 +8456,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'only integer numerals are accepted.',
       ],
       signature: '(string, base: (string|integer)?) -> number',
+      examples: ['NumberFrom("3.25")', 'NumberFrom("ff", 16)'],
       evaluate: ([s, baseArg], { engine: ce }) => {
         if (!isString(s)) return undefined;
         const invalid = (): Expression =>
@@ -8385,6 +8517,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // @todo could accept optional third parameter as the (padded) length of the output
       broadcastable: true,
       signature: '(integer, integer?) -> string',
+      examples: ['IntegerString(255, 16)', 'IntegerString(10, 2)'],
       evaluate: (ops, { engine }) => {
         const ce = engine;
         const op1 = ops[0];
@@ -8430,6 +8563,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `docs/EFFECTS-MODEL.md`). `entropy` is an impurity, so `pure` is still
       // false, but `drawsRandom` is false and the frame is never pinned.
       signature: '() entropy -> expression',
+      examples: ['RandomExpression()'],
       evaluate: (_ops, { engine, effects }) => {
         const entropy = effects.entropy;
         if (entropy === null) return capabilityDenied(engine, 'entropy');
@@ -8462,6 +8596,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'nothing. When the host denies console access, evaluates to a ' +
         '`capability-denied` error.',
       signature: '(any*) console -> nothing',
+      examples: ['Print("Hello", 42)'],
       evaluate: (ops, { engine: ce, effects }) => {
         const console_ = effects.console;
         if (console_ === null) return capabilityDenied(ce, 'console');
@@ -8510,23 +8645,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Triangle: {
       description: 'Triangle primitive — opaque typed head.',
       signature: '(any+) -> expression',
+      examples: ['Triangle(A, B, C)'],
     },
     GeometricVector: {
       description:
         'Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `Vector` operator.',
       signature: '(any, any) -> expression',
+      examples: ['GeometricVector(A, B)'],
     },
     Sphere: {
       description: 'Sphere primitive — opaque typed head.',
       signature: '(any+) -> expression',
+      examples: ['Sphere(O, r)'],
     },
     Segment: {
       description: 'Segment primitive — opaque typed head.',
       signature: '(any+) -> expression',
+      examples: ['Segment(A, B)'],
     },
     Polygon: {
       description: 'Polygon primitive — opaque typed head.',
       signature: '(any+) -> expression',
+      examples: ['Polygon(A, B, C, D)'],
     },
 
     // Euclidean-geometry notation, transcribed as inert heads (no evaluator);
@@ -8538,6 +8678,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Angle mark / measure (`\\angle ABC`, `\\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated.',
       signature: '(any+) -> number',
+      examples: ['Angle(A, B, C)'],
     },
     IndexedSequence: {
       // Scripted-brace sequence notation `\{a_n\}_{n=1}^{\infty}`:
@@ -8551,21 +8692,25 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Indexed sequence `\\{a_n\\}_{n=1}^{\\infty}` — inert head `IndexedSequence(term, index, lower, upper?)`; not evaluated.',
       lazy: true,
       signature: '(any, symbol, any, any?) -> expression',
+      examples: ['IndexedSequence(1/n, n, 1, oo)'],
     },
     Quadrilateral: {
       description:
         'Quadrilateral mark (`\\square ABCD`) — opaque typed head; not evaluated.',
       signature: '(any+) -> expression',
+      examples: ['Quadrilateral(A, B, C, D)'],
     },
     Perpendicular: {
       description:
         'Perpendicularity relation (`AB \\perp CD`) — opaque typed head; not evaluated.',
       signature: '(any, any) -> expression',
+      examples: ['Perpendicular(l, m)'],
     },
     Parallel: {
       description:
         'Parallelism relation (`AB \\parallel CD`) — opaque typed head; not evaluated.',
       signature: '(any, any) -> expression',
+      examples: ['Parallel(l, m)'],
     },
     Arc: {
       // Return type `number`: an arc measure composes in arithmetic
@@ -8573,15 +8718,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Arc / wide-hat accent measure (`\\widehat{ABC}`) — opaque typed head; not evaluated.',
       signature: '(any+) -> number',
+      examples: ['Arc(A, B, C)'],
     },
     OverParen: {
       description:
         'Over-paren accent (`\\overparen{BC}`) — opaque typed head; not evaluated.',
       signature: '(any+) -> expression',
+      examples: ['OverParen(B, C)'],
     },
     To: {
       description: 'Action arrow / mapping (`a \\to b`) — opaque typed head.',
       signature: '(any, any) -> nothing',
+      examples: ['ReplaceAll(x^2 + x, To(x, 3))'],
     },
     Colon: {
       description: 'Type annotation (`a : b`) — opaque typed head.',
@@ -8594,6 +8742,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `a'` on a number-valued symbol is another value (so `\sin a'`
       // type-checks), `f'` on a function is a function. Mirror the type.
       signature: '(T, integer?) -> T where T',
+      examples: ['Prime(f)'],
     },
   },
 ];

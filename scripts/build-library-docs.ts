@@ -5,19 +5,12 @@
 // page cannot drift from what the engine actually defines.
 //
 // Each definition contributes one table row (name, signature or type, the
-// first sentence of its description). A definition that declares `examples`
-// also contributes one fenced `epsil` block per example, with the value the
-// example EVALUATES to written as a `// ➔` annotation: the documentation
-// test (`test/epsil/documentation.test.ts`) executes every block of this
-// page and compares the annotation against a fresh run, so an example that
-// stops being true fails the build rather than misleading a reader. An
-// example that does not parse or evaluates to an error fails THIS script.
-// An example whose result is not reproducible (a random draw) is written
-// without an annotation. Examples are Epsil source (`BaseDefinition.examples`).
-//
-// The full description of every definition is on the per-category pages
-// that `build-library-reference.ts` generates; each category heading here
-// links to its page. The helpers the two generators share are in
+// first sentence of its description). The full description and the
+// executed examples of every definition are on the per-category pages that
+// `build-library-reference.ts` generates; each category heading here links
+// to its page. This page carried the examples too until 2026-09-27, when
+// the examples of the core and collections libraries made it several
+// thousand lines long. The helpers the two generators share are in
 // `library-docs-shared.ts`.
 //
 // Run via `npm run doc` (scripts/doc.sh) or directly:
@@ -28,7 +21,6 @@ import { writeFileSync } from 'node:fs';
 import { ComputeEngine } from '../src/compute-engine/index.js';
 import {
   assertBalancedBackticks,
-  exampleBlock,
   headingSlug,
   librarySections,
   mdx,
@@ -40,8 +32,6 @@ import {
 const PAGE = 'library.md';
 const engine = new ComputeEngine();
 const sections = librarySections(engine);
-let exampleCount = 0;
-
 const anchor = (s: Section): string => headingSlug(s.title);
 
 const contents = sections
@@ -61,15 +51,7 @@ const body = sections
           `| ${r.entry.epsilName === undefined ? '—' : `\`${r.entry.epsilName}\``} | \`${r.entry.id}\` | ${assertBalancedBackticks(mdx(shape(r.entry)), r.entry.id, PAGE)} | ${assertBalancedBackticks(mdx(summary(r.entry)), r.entry.id, PAGE)} |`
       ),
     ].join('\n');
-    const examples = s.rows
-      .flatMap((r) =>
-        r.examples.map((example) => {
-          exampleCount += 1;
-          return exampleBlock(example, r.entry.id, PAGE, engine);
-        })
-      )
-      .join('\n\n');
-    return `## ${s.title}\n\nThe [${s.title} reference](/epsil/reference/${s.name}/) has the full description of each definition.\n\n${table}${examples ? `\n\n### Examples\n\n${examples}` : ''}`;
+    return `## ${s.title}\n\nThe [${s.title} reference](/epsil/reference/${s.name}/) has the full description and the examples of each definition.\n\n${table}`;
   })
   .join('\n\n');
 
@@ -81,7 +63,7 @@ const page = `---
 title: Epsil Standard Library
 sidebar_label: Standard Library
 slug: /epsil/library/
-description: "Every function and constant of the Epsil standard library, by category, with signatures, summaries, and executable examples."
+description: "Every function and constant of the Epsil standard library, by category, with signatures and summaries, linked to the per-category reference pages."
 hide_title: true
 date: Last Modified
 # GENERATED FILE — do not edit. Source: the library definitions
@@ -94,11 +76,8 @@ The ${total} functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description \`epsil doc <name>\` prints in full and the editor
-shows as a hover. The full description of every definition is on the
-category's reference page, linked from each heading. The examples are
-executed when this page is generated, and the value each one evaluates to
-is written after it as \`// ➔\`; the documentation test runs them again, so
-an example that stops being true fails the build.
+shows as a hover. The full description and the executed examples of every
+definition are on the category's reference page, linked from each heading.
 
 To search the library by concept rather than by name, use
 \`epsil doc <keywords>\` (see the [CLI](/epsil/cli/)); the
@@ -111,5 +90,5 @@ ${body}
 
 writeFileSync(new URL('../src/epsil/docs/library.md', import.meta.url), page);
 console.log(
-  `library.md: ${total} definitions in ${sections.length} categories, ${exampleCount} examples written to src/epsil/docs/library.md`
+  `library.md: ${total} definitions in ${sections.length} categories written to src/epsil/docs/library.md`
 );
