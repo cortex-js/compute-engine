@@ -223,7 +223,9 @@ describe('EPSIL PARSING NUMBERS', () => {
       num: '-12345678901234567890.5',
     });
     expect(num('1e400')).toMatchObject({ num: '1e400' });
-    expect(num('0001.2000e+5')).toMatchObject({ num: '120000' });
+    // A literal written with a fraction part is a float (the 0.139.0 rule),
+    // so its normalized text keeps a decimal point.
+    expect(num('0001.2000e+5')).toMatchObject({ num: '120000.0' });
     expect(num('1.234567890123456789e-300')).toMatchObject({
       num: '1.234567890123456789e-300',
     });
@@ -276,7 +278,8 @@ describe('EPSIL PARSING NUMBERS', () => {
       ['Multiply', 2, 'et'],
     ]);
     // `k-13`: the number abuts `k` (invisible multiplication); the `-` has no
-    // whitespace on either side, so it is an infix Subtract.
+    // whitespace on either side, so it is an infix Subtract. A trailing `.`
+    // with no digit is not a fraction part, so the literal stays exact.
     expect(invalidEpsil('62_73_7547.k-13')).toStrictEqual([
       'UnexpectedSuccess',
       ['Subtract', ['Multiply', 62737547, 'k'], 13],

@@ -1,3 +1,53 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **An Epsil decimal literal keeps its value, and a literal with a fraction
+  part is a float.** The Epsil parser summed the fraction digits one float at a
+  time, so `0.75` read as `0.7500000000000001`, `0.3` as `0.30000000000000004`
+  and `0.000001` as `0.0000010000000000000002`. It now reads the decimal
+  exactly. It also dropped the decimal point while normalizing, so `1.0`,
+  `2.0` and `1.5e3` were the exact integers `1`, `2` and `1500`; they are now
+  floats, as on the LaTeX route (the 0.139.0 rule that a literal with a
+  fraction part is a float). `1e3` and `3` stay exact.
+- **A float `Measurement` error evaluates.** `Measurement(5, 0.2) + 3` was
+  `8 ± sqrt(0.2^2)` under `evaluate()` and is now `8.00 ± 0.20`. An exact error
+  stays exact (`Measurement(5, 1) * Measurement(2, 1)` is `10 ± √29`).
+
+### Issues Resolved
+
+- **`a * 2n` parses in Epsil.** The right operand of an explicit `*` or `/`
+  refused an invisible multiplication, so `a * 2n` parsed as `a * 2` with an
+  `unexpected-symbol` diagnostic for `n` — and the serializer writes that form.
+  `a * 2n` is now `a·(2n)` and `a / 2n` is `a/(2n)`.
+- **Exact 2×2 eigenvalues.** `Eigenvalues([[1, 2], [3, 4]])` was
+  `[5.372…, -0.372…]`; it is now `[(5 + √33)/2, (5 − √33)/2]`.
+- **`AdjugateMatrix` and `PseudoInverse` evaluate.** Both stayed unevaluated
+  for every matrix. `AdjugateMatrix` is the transposed cofactor matrix, for any
+  square matrix. `PseudoInverse` is computed for a full-rank matrix: the
+  inverse of an invertible square matrix, `(A*A)⁻¹A*` with full column rank,
+  `A*(AA*)⁻¹` with full row rank; a rank-deficient matrix stays unevaluated.
+- **Trigonometry.** `InverseFunction(Csc)` returned an `invalid-symbol` error,
+  and `InverseFunction(Cot)`, `(Coth)` stayed unevaluated; every circular and
+  hyperbolic function now maps to its inverse. `Arccot` has exact special
+  values (`Arccot(1)` is `π/4`, `Arccot(-1)` is `3π/4`). `Sinc(Pi)` is exactly
+  `0` (it was `1.2e-25` under `N`) and `Sinc(Pi/2)` is `2/π`.
+  `TrigExpand(Sin(x + Pi/2))` is `cos(x)` (it left `cos(π/2)` and `sin(π/2)`
+  unreduced).
+- **Arithmetic.** `Log(1/8, 2)` and `Lb(1/8)` are `-3` (they stayed
+  symbolic, while `Log(8, 2)` was `3`). `ComplexRoots(1, 4)` is `[1, i, -1,
+  -i]`, exactly and under `N` (it was `[1, 6.1e-17 + i, …]`), and the roots of
+  an exact real are exact (`ComplexRoots(8, 3)` is `[2, -1 + √3 i, -1 - √3 i]`).
+  `Supremum` and `Infimum` of an open interval are its endpoints (they stayed
+  symbolic). `Interpret(1 + 2 + … + n)` works from Epsil, whose left-nested
+  sum the recognizer did not match.
+
+### New Features
+
+- **Examples for the arithmetic, trigonometry and linear-algebra libraries**,
+  with a hand-written introduction for each reference page: 97, 84 and 40
+  examples, each executed when the pages are generated.
+
 ## 0.140.0 _2026-09-27_
 
 ### Behavior Changes

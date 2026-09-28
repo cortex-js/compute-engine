@@ -766,33 +766,122 @@ export abstract class AbstractTensor<
 
   // A^+ is the Moore-Penrose pseudoinverse of A. https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
   // Pseudoinverse can also be defined for scalars: the pseudoinverse of a scalar is its reciprocal if it is non-zero, and zero otherwise.
+  /**
+   * The Moore-Penrose pseudoinverse of a FULL-RANK matrix, by the closed
+   * forms, with `A*` the conjugate transpose:
+   *
+   * - a square invertible matrix: its inverse;
+   * - full column rank (m ≥ n): `(A*A)⁻¹A*`, a left inverse;
+   * - full row rank (m ≤ n): `A*(AA*)⁻¹`, a right inverse.
+   *
+   * The Gram matrix `A*A` (or `AA*`) is invertible exactly when the matrix
+   * has full column (or row) rank, so a failed inverse is the rank test.
+   * A rank-deficient matrix needs the singular value decomposition and is
+   * not computed here: the result is `undefined` and the call stays
+   * unevaluated.
+   */
   pseudoInverse(): undefined | AbstractTensor<DT> {
     // Boolean tensors have no arithmetic field (`mul`/`add`/`div` are not
     // meaningful): bail out rather than crash. Reachable since overlap-
     // deferred validation (§D6.2) — a `list`-typed operand may evaluate to a
     // boolean tensor; the handler then declines (inert) instead of throwing.
     if (this.dtype === 'bool') return undefined;
-
-    // @todo tensor
+    if (this.rank !== 2) return undefined;
+    const [m, n] = this.shape;
+    if (m === n) {
+      const inverse = this.inverse();
+      if (inverse !== undefined) return inverse;
+    }
+    const adjoint = this.conjugateTranspose(1, 2);
+    if (adjoint === undefined) return undefined;
+    if (m >= n) {
+      const gramInverse = this.matrixProduct(adjoint, this)?.inverse();
+      if (gramInverse !== undefined)
+        return this.matrixProduct(gramInverse, adjoint);
+    }
+    if (m <= n) {
+      const gramInverse = this.matrixProduct(this, adjoint)?.inverse();
+      if (gramInverse !== undefined)
+        return this.matrixProduct(adjoint, gramInverse);
+    }
     return undefined;
   }
 
+  /** The matrix product `lhs · rhs` of two rank-2 tensors of this field, or
+   * `undefined` when the inner dimensions differ. */
+  private matrixProduct(
+    lhs: AbstractTensor<DT>,
+    rhs: AbstractTensor<DT>
+  ): undefined | AbstractTensor<DT> {
+    if (lhs.rank !== 2 || rhs.rank !== 2) return undefined;
+    const [m, k] = lhs.shape;
+    const [k2, n] = rhs.shape;
+    if (k !== k2) return undefined;
+    const add = this.field.add.bind(this.field);
+    const mul = this.field.mul.bind(this.field);
+    const data: DataTypeMap[DT][] = [];
+    for (let i = 0; i < m; i++)
+      for (let j = 0; j < n; j++) {
+        let sum = this.field.zero;
+        for (let t = 0; t < k; t++)
+          sum = add(sum, mul(lhs.data[i * k + t], rhs.data[t * n + j]));
+        data.push(sum);
+      }
+    return makeTensor(this.ce, { dtype: this.dtype, shape: [m, n], data });
+  }
+
   // The adjugate, classical adjoint, or adjunct of a square matrix is the transpose of its cofactor matrix. https://en.wikipedia.org/wiki/Adjugate_matrix
+  /**
+   * The adjugate: the transpose of the cofactor matrix, so entry (i, j) is
+   * `(−1)^(i+j)` times the minor of (j, i). Defined for every square matrix,
+   * singular or not; `A · adj(A) = det(A) · I`. The adjugate of a 1×1
+   * matrix is `[[1]]`.
+   */
   adjugateMatrix(): undefined | AbstractTensor<DT> {
     // Boolean tensors have no arithmetic field (`mul`/`add`/`div` are not
     // meaningful): bail out rather than crash. Reachable since overlap-
     // deferred validation (§D6.2) — a `list`-typed operand may evaluate to a
     // boolean tensor; the handler then declines (inert) instead of throwing.
     if (this.dtype === 'bool') return undefined;
-
-    // @todo tensor
-    return undefined;
+    if (this.rank !== 2) return undefined;
+    const [m, n] = this.shape;
+    if (m !== n) return undefined;
+    if (n === 1)
+      return makeTensor(this.ce, {
+        dtype: this.dtype,
+        shape: [1, 1],
+        data: [this.field.one],
+      });
+    const neg = this.field.neg.bind(this.field);
+    const data: DataTypeMap[DT][] = [];
+    for (let i = 1; i <= n; i++)
+      for (let j = 1; j <= n; j++) {
+        const minor = this.minor(j, i);
+        if (minor === undefined) return undefined;
+        data.push((i + j) % 2 === 0 ? minor : neg(minor));
+      }
+    return makeTensor(this.ce, { dtype: this.dtype, shape: [n, n], data });
   }
 
   // The determinant of the matrix obtained by deleting row i and column j from this matrix. https://en.wikipedia.org/wiki/Minor_(linear_algebra)
-  minor(_i: number, _j: number): undefined | DataTypeMap[DT] {
-    // @todo tensor
-    return undefined;
+  /** The minor of (i, j), 1-based: the determinant of the matrix with row
+   * `i` and column `j` removed. `undefined` for a matrix that is not square
+   * or is smaller than 2×2. */
+  minor(i: number, j: number): undefined | DataTypeMap[DT] {
+    if (this.dtype === 'bool' || this.rank !== 2) return undefined;
+    const [m, n] = this.shape;
+    if (m !== n || n < 2 || i < 1 || i > n || j < 1 || j > n) return undefined;
+    const data: DataTypeMap[DT][] = [];
+    for (let r = 0; r < n; r++) {
+      if (r === i - 1) continue;
+      for (let c = 0; c < n; c++)
+        if (c !== j - 1) data.push(this.data[r * n + c]);
+    }
+    return makeTensor(this.ce, {
+      dtype: this.dtype,
+      shape: [n - 1, n - 1],
+      data,
+    }).determinant();
   }
 
   map1(

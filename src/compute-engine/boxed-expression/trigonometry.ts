@@ -833,12 +833,20 @@ export function evalTrig(
     // NOT an angle: they are unit-independent and must not be scaled by
     // `angularUnit` (no `radiansToAngle` wrapper).
     case 'Arcosh':
+      // For a real x in [−1, 1], arcosh(x) is exactly i·arccos(x) (arccos in
+      // radians: an area, not an angle). The real kernels answer NaN there
+      // and the complex kernel then left a spurious real part
+      // (`N(arcosh(1/2))` was `5.6e-17 + 1.047…i`).
       return apply(
         op,
-        Math.acosh,
+        (x) =>
+          x >= -1 && x < 1 ? new Complex(0, Math.acos(x)) : Math.acosh(x),
         // `BigDecimal.acosh()`, not `ln(x + √(x² − 1))`: the direct formula
         // loses relative precision near 1 and for a large `x`.
-        (x) => x.acosh(),
+        (x) =>
+          x.gte(-1) && x.lt(1)
+            ? new Complex(0, Number(x.acos().toString()))
+            : x.acosh(),
         (x) => x.acosh()
       );
     case 'Arcoth':
@@ -1064,30 +1072,38 @@ function isInverseTrigFunc(name: string): boolean {
   return false;
 }
 
+/** Each trigonometric or hyperbolic function and its inverse, both ways. A
+ * `Map`, so a name such as `constructor` does not read an inherited
+ * `Object.prototype` member. */
+const INVERSE_TRIG_FUNCTION: ReadonlyMap<string, string> = new Map([
+  ['Sin', 'Arcsin'],
+  ['Cos', 'Arccos'],
+  ['Tan', 'Arctan'],
+  ['Cot', 'Arccot'],
+  ['Sec', 'Arcsec'],
+  ['Csc', 'Arccsc'],
+  ['Sinh', 'Arsinh'],
+  ['Cosh', 'Arcosh'],
+  ['Tanh', 'Artanh'],
+  ['Coth', 'Arcoth'],
+  ['Sech', 'Arsech'],
+  ['Csch', 'Arcsch'],
+  ['Arcsin', 'Sin'],
+  ['Arccos', 'Cos'],
+  ['Arctan', 'Tan'],
+  ['Arccot', 'Cot'],
+  ['Arcsec', 'Sec'],
+  ['Arccsc', 'Csc'],
+  ['Arsinh', 'Sinh'],
+  ['Arcosh', 'Cosh'],
+  ['Artanh', 'Tanh'],
+  ['Arcoth', 'Coth'],
+  ['Arsech', 'Sech'],
+  ['Arcsch', 'Csch'],
+]);
+
 function inverseTrigFuncName(name: string): string | undefined {
-  return {
-    Sin: 'Arcsin',
-    Cos: 'Arccos',
-    Tan: 'Arctan',
-    Sec: 'Arcsec',
-    Csc: ' Arccsc',
-    Sinh: 'Arsinh',
-    Cosh: 'Arcosh',
-    Tanh: 'Artanh',
-    Sech: 'Arsech',
-    Csch: 'Arcsch',
-    Arcosh: 'Cosh',
-    Arccos: 'Cos',
-    Arccsc: 'Csc',
-    Arcsch: 'Csch',
-    // '??': 'Cot',
-    // '??': 'Coth',
-    Arcsec: 'Sec',
-    Arcsin: 'Sin',
-    Arsinh: 'Sinh',
-    Arctan: 'Tan',
-    Artanh: 'Tanh',
-  }[name];
+  return INVERSE_TRIG_FUNCTION.get(name);
 }
 
 export function processInverseFunction(
@@ -1164,7 +1180,12 @@ function constructibleValuesInverse(
 
   let quadrant = 0;
   if (x_N < 0) {
-    quadrant = trigFuncParity(inv_operator!) == -1 ? -1 : 1;
+    // An odd function's inverse is odd (`arcsin(−x) = −arcsin(x)`); an even
+    // one's inverse, and `Arccot`, take their principal value in (0, π) and
+    // reflect about π/2 (`arcsec(−x) = π − arcsec(x)`, `arccot(−1) = 3π/4`,
+    // as the numeric kernel `atan2(1, x)` answers), although `cot` is odd.
+    quadrant =
+      operator !== 'Arccot' && trigFuncParity(inv_operator!) == -1 ? -1 : 1;
     // shift x to quadrant 0 to match the key in specialInverseValues
     x_N = -x_N;
     x = x.neg();

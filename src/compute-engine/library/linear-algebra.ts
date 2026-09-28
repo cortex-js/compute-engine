@@ -1756,6 +1756,7 @@ function canEnumerateTensorOperands(expr: Expression): boolean | undefined {
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     Matrix: {
+      examples: ['Matrix([[1, 2], [3, 4]])'],
       description: 'Matrix constructor and canonicalizer.',
       complexity: 9000,
       lazy: true,
@@ -1772,6 +1773,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Vector is a specialized collection to represent a column vector.
     // ["Vector", a, b, c] is a shorthand for ["List", ["List", a], ["List", b], ["List", c]]
     Vector: {
+      examples: ['Vector(1, 2, 3)'],
       description: 'Construct a column vector.',
       complexity: 9000,
       lazy: true,
@@ -1806,6 +1808,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     // Corresponds to monadic Shape `⍴` in APL
     Shape: {
+      examples: ['Shape([[1, 2, 3], [4, 5, 6]])'],
       description: 'Return the shape tuple of an expression.',
       complexity: 8200,
       signature: '(value) -> tuple',
@@ -1817,6 +1820,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Rank: {
+      examples: ['Rank([[1, 2, 3], [4, 5, 6]])'],
       description:
         'The length of the shape of the expression. Note this is not the matrix rank (the number of linearly independent rows or columns in the matrix)',
       complexity: 8200,
@@ -1835,6 +1839,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Corresponds to ArrayReshape in Mathematica
     // and dyadic Shape `⍴` in APL
     Reshape: {
+      examples: ['Reshape([1, 2, 3, 4, 5, 6], (2, 3))'],
       description: 'Reshape a tensor or collection to a target shape.',
       complexity: 8200,
       signature: '(value, tuple) -> value',
@@ -1922,6 +1927,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Corresponds to Ravel `,` in APL
     // Also Enlist `∊``⍋` in APL
     Flatten: {
+      examples: ['Flatten([[1, 2], [3, 4]])'],
       description: 'Flatten a tensor or collection into a list.',
       complexity: 8200,
       signature: '(value, integer?) -> list',
@@ -1995,6 +2001,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Ex: Transpose([[a, b, c], [1, 2, 3]]) = [[a, 1], [b, 2], [c, 3]]
     // For rank > 2: Default swaps last two axes, or specify explicit axes
     Transpose: {
+      examples: ['Transpose([[1, 2, 3], [4, 5, 6]])'],
       description: 'Transpose a matrix or swap two tensor axes.',
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
@@ -2052,6 +2059,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Conjugate transpose (Hermitian adjoint): transpose + complex conjugate
     // For rank > 2: Default swaps last two axes, or specify explicit axes
     ConjugateTranspose: {
+      examples: ['ConjugateTranspose([[1, 2 + i], [3 - i, 4]])'],
       description:
         'Conjugate transpose (Hermitian adjoint) of a matrix or tensor.',
       complexity: 8200,
@@ -2109,6 +2117,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Determinant: {
+      examples: ['Determinant([[1, 2], [3, 4]])'],
       description: 'Determinant of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> number',
@@ -2201,6 +2210,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Inverse: {
+      examples: ['Inverse([[1, 2], [3, 4]])'],
       description: 'Multiplicative inverse of a square matrix.',
       complexity: 8200,
       signature: '(T) -> T where T: matrix',
@@ -2271,6 +2281,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     PseudoInverse: {
+      examples: ['PseudoInverse([[1, 2], [3, 4], [5, 6]])'],
       description: 'Moore-Penrose pseudoinverse of a matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
@@ -2296,6 +2307,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     // Solve the linear system A·x = b for the unknown vector (or matrix) x.
     LinearSolve: {
+      examples: ['LinearSolve([[2, 1], [1, 3]], [3, 5])'],
       description: 'Solve the linear system A·x = b for x.',
       keywords: ['linear system', 'solve'],
       complexity: 8300,
@@ -2338,6 +2350,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // },
 
     AdjugateMatrix: {
+      examples: ['AdjugateMatrix([[1, 2], [3, 4]])'],
       description: 'Adjugate (classical adjoint) of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
@@ -2372,6 +2385,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // For rank > 2 tensors: returns tensor of traces over last two axes (batch trace)
     // Optional axis1, axis2 to specify which axes to trace over (default: last two)
     Trace: {
+      examples: ['Trace([[1, 2], [3, 4]])'],
       description: 'Trace of a matrix or pair of tensor axes.',
       complexity: 8200,
       // The operand is a scalar (the 1×1 matrix) or a numeric tensor; a
@@ -2482,6 +2496,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Kernel: {
+      examples: ['Kernel([[1, 2], [2, 4]])'],
       description: 'Kernel (null space) of a linear map',
       complexity: 8200,
       signature: '(value) -> list',
@@ -2535,6 +2550,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Dimension: {
+      examples: ['Dimension([[1, 2, 3], [4, 5, 6]])'],
       description: 'Dimension of an object',
       complexity: 8200,
       signature: '(value) -> integer',
@@ -2570,6 +2586,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Degree: {
+      examples: ['Degree(x^3 + 2 * x + 1)'],
       description: 'Degree of an object',
       complexity: 8200,
       signature: '(value) -> integer',
@@ -2594,6 +2611,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Hom: {
+      examples: ['Dimension(Hom([1, 2], [3, 4, 5]))'],
       description: 'Hom-set of morphisms between objects',
       complexity: 8200,
       signature: '(value*) -> value',
@@ -2605,6 +2623,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Matrix multiplication: A (m×n) × B (n×p) → result (m×p)
     // Handles matrix × matrix, matrix × vector, vector × matrix
     MatrixMultiply: {
+      examples: ['MatrixMultiply([[1, 2], [3, 4]], [[5, 6], [7, 8]])'],
       description: 'Matrix and vector multiplication.',
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
@@ -2743,6 +2762,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Dot: {
+      examples: ['Dot([1, 2, 3], [4, 5, 6])'],
       description: 'Dot product (vector inner product) or matrix product.',
       keywords: ['dot product', 'inner product', 'scalar product'],
       complexity: 8300,
@@ -3052,6 +3072,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     HadamardProduct: {
+      examples: ['HadamardProduct([[1, 2], [3, 4]], [[5, 6], [7, 8]])'],
       description:
         'Hadamard (element-wise) product of two vectors or matrices of the same shape.',
       complexity: 8300,
@@ -3087,6 +3108,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     MatrixRank: {
+      examples: ['MatrixRank([[1, 2], [2, 4]])'],
       description:
         'Rank of a matrix (number of linearly independent rows/columns).',
       complexity: 8200,
@@ -3164,6 +3186,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     IsSquareMatrix: {
+      examples: ['IsSquareMatrix([[1, 2], [3, 4]])'],
       description: 'Whether the value is a square matrix.',
       complexity: 8200,
       signature: '(value) -> boolean',
@@ -3178,6 +3201,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     IsSymmetric: {
+      examples: ['IsSymmetric([[1, 2], [2, 3]])'],
       description: 'Whether the matrix is symmetric (A equals its transpose).',
       complexity: 8200,
       signature: '(value) -> boolean',
@@ -3192,6 +3216,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     IsDiagonal: {
+      examples: ['IsDiagonal([[1, 0], [0, 5]])'],
       description:
         'Whether the matrix is diagonal (all off-diagonal entries are zero).',
       complexity: 8200,
@@ -3207,6 +3232,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Cross: {
+      examples: ['Cross([1, 0, 0], [0, 1, 0])'],
       description: 'Cross product of two 3-vectors.',
       complexity: 8300,
       // Numeric tuples (points in ℝ³, incl. a `PointList` row) are accepted
@@ -3354,6 +3380,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     MatrixPower: {
+      examples: ['MatrixPower([[1, 1], [1, 0]], 10)'],
       description:
         'Square matrix raised to a power. Integer powers are the repeated ' +
         'matrix product; a half-integer power (e.g. 1/2) of an exact 2×2 ' +
@@ -3479,6 +3506,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     CharacteristicPolynomial: {
+      examples: ['CharacteristicPolynomial([[2, 1], [1, 2]], x)'],
       description:
         'Characteristic polynomial det(x·I − A) of a square matrix (monic).',
       complexity: 8700,
@@ -3515,6 +3543,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     RowReduce: {
+      examples: ['RowReduce([[1, 2, 3], [4, 5, 6]])'],
       description: 'Reduced row echelon form (RREF) of a matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
@@ -3559,6 +3588,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // 2. Extract the diagonal from a matrix as a vector
     // 3. For a scalar, return the scalar (or could create 1x1 matrix)
     Diagonal: {
+      examples: ['Diagonal([[1, 2], [3, 4]])', 'Diagonal([1, 2, 3])'],
       description: 'Extract a matrix diagonal or build a diagonal matrix.',
       complexity: 8200,
       signature: '(value) -> value',
@@ -3618,6 +3648,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     // Creates an n×n identity matrix
     IdentityMatrix: {
+      examples: ['IdentityMatrix(3)'],
       description: 'n-by-n identity matrix.',
       complexity: 8100,
       signature: '(integer) -> matrix',
@@ -3648,6 +3679,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     // Creates an m×n matrix of zeros
     ZeroMatrix: {
+      examples: ['ZeroMatrix(2, 3)'],
       description: 'Matrix filled with zeros.',
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
@@ -3686,6 +3718,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     // Creates an m×n matrix of ones
     OnesMatrix: {
+      examples: ['OnesMatrix(2, 3)'],
       description: 'Matrix filled with ones.',
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
@@ -3733,6 +3766,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     //   - order 2: the spectral norm, the largest singular value
     //   - order 1: max column sum; order ∞: max row sum
     Norm: {
+      examples: ['Norm([3, 4])', 'Norm([3, 4], 1)'],
       description: 'Vector or matrix norm.',
       complexity: 8200,
       // The operand is a scalar, a numeric tensor (a vector or a matrix), a
@@ -4302,6 +4336,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // For 2×2 matrices: uses characteristic polynomial (symbolic)
     // For larger matrices: uses QR algorithm (numeric)
     Eigenvalues: {
+      examples: ['Eigenvalues([[2, 1], [1, 2]])'],
       description: 'Eigenvalues of a square matrix.',
       complexity: 8500,
       signature: '(matrix) -> list',
@@ -4309,7 +4344,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // value); success is not cheaply decidable — a full ground test would
       // walk every entry. See `canEnumerateFiniteSource`.
       canEnumerate: canEnumerateFiniteSource,
-      evaluate: (ops, { engine: ce }): Expression | undefined => {
+      evaluate: (
+        ops,
+        { engine: ce, numericApproximation }
+      ): Expression | undefined => {
         const M = ops[0];
 
         if (!isTensorValue(M)) return undefined;
@@ -4356,16 +4394,33 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const disc = trace.mul(trace).sub(det.mul(ce.number(4)));
 
           // λ = (trace ± √disc) / 2
+          // Built with `ce.function`, not the `.add()`/`.sub()` methods: those
+          // fold two exact number literals to a machine float, so an exact
+          // matrix with an irrational spectrum (`[[1, 2], [3, 4]]`) answered
+          // `5.372…` instead of `(5 + √33)/2`.
           const sqrtDisc = ce.expr(['Sqrt', disc]).evaluate();
-          const lambda1 = trace.add(sqrtDisc).div(ce.number(2)).evaluate();
-          const lambda2 = trace.sub(sqrtDisc).div(ce.number(2)).evaluate();
+          const lambda1 = ce
+            .function('Divide', [
+              ce.function('Add', [trace, sqrtDisc]),
+              ce.number(2),
+            ])
+            .evaluate();
+          const lambda2 = ce
+            .function('Divide', [
+              ce.function('Subtract', [trace, sqrtDisc]),
+              ce.number(2),
+            ])
+            .evaluate();
 
-          return ce.expr(['List', lambda1, lambda2]);
+          // The exact route answers radicals; `.N()` wants their values.
+          const pair = ce.expr(['List', lambda1, lambda2]);
+          return numericApproximation ? pair.N() : pair;
         }
 
         // 3×3 case: solve cubic characteristic polynomial
         if (n === 3) {
-          return computeEigenvalues3x3(M, ce);
+          const values = computeEigenvalues3x3(M, ce);
+          return numericApproximation ? values?.N() : values;
         }
 
         // For larger matrices: use numeric QR algorithm
@@ -4376,6 +4431,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Compute the eigenvectors of a square matrix
     // Returns a list of eigenvectors (as column vectors)
     Eigenvectors: {
+      examples: ['Eigenvectors([[2, 1], [1, 2]])'],
       description: 'Eigenvectors of a square matrix.',
       complexity: 8600,
       signature: '(matrix) -> list',
@@ -4439,6 +4495,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Compute both eigenvalues and eigenvectors
     // Returns a tuple: [eigenvalues, eigenvectors]
     Eigen: {
+      examples: ['Eigen([[2, 1], [1, 2]])'],
       description: 'Eigenvalue-eigenvector decomposition of a square matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
@@ -4478,6 +4535,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // LU Decomposition: A = LU (or PA = LU with pivoting)
     // Returns [L, U] for no pivoting or [P, L, U] with pivoting
     LUDecomposition: {
+      examples: ['LUDecomposition([[4, 3], [2, 1]])'],
       description: 'LU decomposition of a square matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
@@ -4508,6 +4566,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // QR Decomposition: A = QR
     // Returns [Q, R] where Q is orthogonal and R is upper triangular
     QRDecomposition: {
+      examples: ['QRDecomposition([[0, 1], [1, 1]])'],
       description: 'QR decomposition of a matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
@@ -4538,6 +4597,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Cholesky Decomposition: A = LL^T (for positive definite matrices)
     // Returns L (lower triangular matrix)
     CholeskyDecomposition: {
+      examples: ['CholeskyDecomposition([[4, 2], [2, 5]])'],
       description: 'Cholesky decomposition of a positive-definite matrix.',
       complexity: 8600,
       signature: '(matrix) -> matrix',
@@ -4560,6 +4620,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Singular Value Decomposition: A = UΣV^T
     // Returns [U, Σ, V] where U and V are orthogonal, Σ is diagonal
     SVD: {
+      examples: ['SVD([[3, 0], [0, 4]])'],
       description: 'Singular value decomposition of a matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
@@ -4596,6 +4657,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     SingularValues: {
+      examples: ['SingularValues([[3, 0], [0, 4]])'],
       description:
         'The singular values of a matrix, sorted in descending order ' +
         '(including any zero values). Exact for a matrix whose Gram matrix ' +
@@ -5504,11 +5566,138 @@ function checkDiagonalOrTriangular(M: Expression, n: number): boolean {
 /**
  * Compute eigenvalues for a 3×3 matrix using Cardano's formula
  */
+/**
+ * The exact eigenvalues of a 3×3 matrix of exact RATIONAL entries whose
+ * characteristic polynomial has a rational root, or `undefined`.
+ *
+ * The characteristic polynomial P(λ) = λ³ − tr·λ² + m·λ − det has rational
+ * coefficients (tr the trace, m the sum of the principal 2×2 minors). Scaled
+ * to integers k₃λ³ + k₂λ² + k₁λ + k₀, a rational root p/q in lowest terms
+ * has p dividing k₀ and q dividing k₃ (the rational root theorem), so the
+ * candidates are finite and each is tested exactly. A root r deflates P to
+ * λ² + bλ + c with b = r − tr and c = m + r·b, whose roots come from the
+ * exact quadratic formula. `Eigenvalues([[2, 0, 0], [0, 3, 4], [0, 4, 9]])`
+ * is then `[11, 2, 1]`, where the numeric cubic solver answered
+ * `1.000000000000003`. A matrix with no rational eigenvalue (an irreducible
+ * cubic) keeps the numeric route.
+ */
+function exactEigenvalues3x3(
+  M: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  const entries: Expression[][] = [1, 2, 3].map((i) =>
+    [1, 2, 3].map((j) => getElement(M, i, j, ce))
+  );
+  if (
+    !entries.every((row) =>
+      row.every((x) => isNumber(x) && x.isExact && asRational(x) !== undefined)
+    )
+  )
+    return undefined;
+  const f = (head: string, ops: Expression[]): Expression =>
+    ce.function(head, ops).evaluate();
+  const minor = (i: number, j: number): Expression =>
+    f('Subtract', [
+      f('Multiply', [entries[i][i], entries[j][j]]),
+      f('Multiply', [entries[i][j], entries[j][i]]),
+    ]);
+  const tr = f('Add', [entries[0][0], entries[1][1], entries[2][2]]);
+  const m = f('Add', [minor(0, 1), minor(0, 2), minor(1, 2)]);
+  const det = f('Determinant', [M]);
+
+  const rational = (x: Expression): [bigint, bigint] | undefined => {
+    const r = asRational(x);
+    return r === undefined ? undefined : [BigInt(r[0]), BigInt(r[1])];
+  };
+  const trR = rational(tr);
+  const mR = rational(m);
+  const detR = rational(det);
+  if (!trR || !mR || !detR) return undefined;
+
+  const gcd = (a: bigint, b: bigint): bigint => {
+    a = a < 0n ? -a : a;
+    b = b < 0n ? -b : b;
+    while (b !== 0n) [a, b] = [b, a % b];
+    return a;
+  };
+  const lcm = (a: bigint, b: bigint): bigint => (a / gcd(a, b)) * b;
+  const L = lcm(lcm(trR[1], mR[1]), detR[1]);
+  const k3 = L;
+  const k2 = (-trR[0] * L) / trR[1];
+  const k1 = (mR[0] * L) / mR[1];
+  const k0 = (-detR[0] * L) / detR[1];
+
+  // The divisors of |n|, or `undefined` past a cap that keeps the search
+  // short (a larger constant term keeps the numeric route).
+  const divisors = (n: bigint): bigint[] | undefined => {
+    n = n < 0n ? -n : n;
+    if (n > 10n ** 12n) return undefined;
+    const result: bigint[] = [];
+    for (let d = 1n; d * d <= n; d += 1n)
+      if (n % d === 0n) {
+        result.push(d);
+        if (d * d !== n) result.push(n / d);
+      }
+    return result;
+  };
+
+  let root: [bigint, bigint] | undefined = k0 === 0n ? [0n, 1n] : undefined;
+  if (root === undefined) {
+    const ps = divisors(k0);
+    const qs = divisors(k3);
+    if (!ps || !qs) return undefined;
+    search: for (const p of ps)
+      for (const q of qs)
+        for (const sp of [p, -p])
+          if (
+            k3 * sp ** 3n +
+              k2 * sp ** 2n * q +
+              k1 * sp * q ** 2n +
+              k0 * q ** 3n ===
+            0n
+          ) {
+            root = [sp, q];
+            break search;
+          }
+  }
+  if (root === undefined) return undefined;
+
+  const g = gcd(root[0], root[1]);
+  const r = ce.number([Number(root[0] / g), Number(root[1] / g)]);
+  const b = f('Subtract', [r, tr]);
+  const c = f('Add', [m, f('Multiply', [r, b])]);
+  const sqrtDisc = f('Sqrt', [
+    f('Subtract', [f('Multiply', [b, b]), f('Multiply', [ce.number(4), c])]),
+  ]);
+  const minusB = f('Negate', [b]);
+  const lambda2 = f('Divide', [f('Add', [minusB, sqrtDisc]), ce.number(2)]);
+  const lambda3 = f('Divide', [
+    f('Subtract', [minusB, sqrtDisc]),
+    ce.number(2),
+  ]);
+  // Ordered by decreasing real part, then decreasing imaginary part: the
+  // rational root the search finds first is not the largest, and the
+  // eigenvector listing follows this order.
+  const key = (x: Expression): [number, number] => {
+    const v = x.N();
+    return [v.re, v.im];
+  };
+  const values = [r, lambda2, lambda3].sort((u, w) => {
+    const [ur, ui] = key(u);
+    const [wr, wi] = key(w);
+    return wr - ur || wi - ui;
+  });
+  return ce.function('List', values);
+}
+
 function computeEigenvalues3x3(
   M: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
+
+  const exact = exactEigenvalues3x3(M, ce);
+  if (exact !== undefined) return exact;
 
   // The cubic solver below is real-only, and computes with machine numbers.
   // `tensorToNumericMatrix` is the conversion every float kernel uses: it

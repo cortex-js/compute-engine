@@ -829,6 +829,34 @@ export class BoxedNumber
       }
     }
 
+    // The reciprocal of such a power: log_b(1/q) = −log_b(q), so
+    // `log(1/8, 2)` is `−3` and `log(1/100)` is `−2`, as `log(8, 2)` is `3`.
+    if (base !== undefined && isNumber(base) && base.isInteger) {
+      const v = this._value;
+      const b = base.re;
+      if (
+        v instanceof ExactNumericValue &&
+        v.radical === 1 &&
+        !v.isComplex &&
+        v.rational[0] === 1 &&
+        Number.isInteger(b) &&
+        b > 1 &&
+        b < Number.MAX_SAFE_INTEGER
+      ) {
+        const q = Number(v.rational[1]);
+        const r =
+          q > 1 && q < Number.MAX_SAFE_INTEGER
+            ? integerLogRational(q, b)
+            : null;
+        if (r !== null) {
+          const [p, d] = r;
+          return d === 1
+            ? ce.number(-p)
+            : ce.number(ce._numericValue({ rational: [-p, d] }));
+        }
+      }
+    }
+
     const f = this.re;
     if (Number.isInteger(f) && f > 0) {
       let [factor, root] = canonicalInteger(f, 3);

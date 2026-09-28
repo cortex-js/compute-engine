@@ -258,6 +258,17 @@ Defects:
    "an effectful bound keeps one evaluation per recursive call" went from 3
    calls to 7) and spends extra random draws.
 
+### A matrix to a non-integer power is element-wise (OPEN, decision — found 2026-09-28 by the agents writing the linear-algebra examples)
+
+`[[1, 2], [3, 4]] ^ (1/2)` is `[[1, √2], [√3, 2]]`, the square root of each
+entry, while an integer exponent is the matrix power (`^2` is
+`[[7, 10], [15, 22]]`, `^-1` the inverse). `canonicalPower`
+(`arithmetic-power.ts`) says element-wise power "is not expressed via `^`"
+and leaves non-integer exponents "to other handling", which is the
+broadcast. The decision: a matrix function (`A^(1/2)` the principal square
+root, computed or left symbolic), an error, or the element-wise reading kept
+and documented.
+
 ### A calculus operator over a function parameter is folded before the argument arrives (OPEN — found 2026-09-27 while writing the core reference examples)
 
 `g(f) = D(f, x); g(x^2)` evaluates to `0`, and so do `(f => D(f, x))(x^2)`
@@ -545,13 +556,19 @@ Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
   `L\{c\} < 3` is typed `list<boolean | missing>`, but when `L` is absent
   the value is `Missing` for the whole list, not a list; the type should be
   `missing | list<boolean>`.
-- **A float serializes as an integer when its value is one.** Since the
-  2026-09-27 machine-precision decision a machine float `2.0` is inexact, but
-  its MathJSON is the plain `2`, which re-boxes as the exact `2`: `Sin(2.0)`
-  numericizes, the round-tripped `Sin(2)` stays symbolic. The same holds for
-  LaTeX (item 7 of "Residues of the exactness-by-route rule"). A decision:
-  serialize an integer-valued float as `{num: "2.0"}` (and `2.0` in LaTeX),
-  which changes the MathJSON and LaTeX of every integer-valued float result.
+- **Other code may box an integer-valued double as exact.** Until
+  2026-09-28 an exact `1` and a float `1` serialized the same way, so a site
+  that boxes a double result with `ce.number(n)` was invisible; since the
+  `2.0` spelling it shows. The full suite found one (the compiled `N()` of a
+  lazy `Map`, fixed); kernel bridges and compiled-value readers that call
+  `ce.number(double)` need an audit (the float lane is
+  `ce._inexactNumericValue`). Also: at machine precision `1.0e800`
+  overflows to `PositiveInfinity`, which reports `isExact === true`.
+  Also: the compiled `N()` of a lazy `Map` boxes an integer-valued result as
+  exact when its operands and the lambda are exact; an elementary function
+  of an exact integer whose double is exactly an integer near 2^53
+  (`exp(36)`) is then exact where the interpreter gives a float (found
+  2026-09-28, rare).
 - **Float Gaussian integers are still exact.** `(2.0i)^2` evaluates to the
   exact `-4`, `2.0i + 3` canonicalizes to the exact `3 + 2i`, and
   `(3.0+2i)(1+i)` is exact: several places keep a Gaussian integer exact

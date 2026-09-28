@@ -1319,17 +1319,15 @@ describe('PseudoInverse', () => {
 
   it('should calculate the pseudo inverse of a numeric matrix', () => {
     const result = ce.expr(['PseudoInverse', sq2_n]).evaluate();
-    // Moore-Penrose pseudoinverse not yet fully implemented
-    expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse([[1,2],[3,4]])`
-    );
+    // An invertible square matrix: the pseudoinverse is the inverse.
+    expect(result.toString()).toMatchInlineSnapshot(`[[-2,1],[3/2,-1/2]]`);
   });
 
   it('should calculate the pseudo inverse of a matrix with unknowns', () => {
     const result = ce.expr(['PseudoInverse', sq2_x]).evaluate();
-    // Moore-Penrose pseudoinverse not yet fully implemented
+    // A generic symbolic matrix is invertible: its inverse.
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse([[a,b],[c,d]])`
+      `[[d / (-b * c + a * d),-b / (-b * c + a * d)],[-c / (-b * c + a * d),a / (-b * c + a * d)]]`
     );
   });
 
@@ -2301,7 +2299,8 @@ describe('Eigenvalues and Eigenvectors (LA-5)', () => {
           ['List', ['List', 6, -1, 0], ['List', -1, 5, -1], ['List', 0, -1, 4]],
         ])
         .evaluate();
-      const eigenvalues = result.ops?.map((e) => e.re ?? 0) ?? [];
+      // The eigenvalues are exact (5 and 5 ± √3); compare their values.
+      const eigenvalues = result.ops?.map((e) => e.N().re ?? 0) ?? [];
       expect(eigenvalues.length).toBe(3);
       // Check eigenvalues are approximately correct (order may vary)
       eigenvalues.sort((a, b) => b - a);

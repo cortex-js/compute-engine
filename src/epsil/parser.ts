@@ -6508,11 +6508,23 @@ export class Parser {
         // whitespace) by a token that begins a primary (`2x`, `2(x+1)`). Binds
         // at `Multiply` precedence, so `^` stays tighter (`3x^3` is
         // `3·(x^3)`).
+        //
+        // It is also read in the RIGHT operand of an explicit `*` or `/`,
+        // which is parsed one level above `Multiply` (left associativity):
+        // `a * 2n` is `a·(2n)` and `a / 2n` is `a/(2n)`. Refusing it there
+        // parsed `a * 2n` as `a * 2` and reported the `n` as an unexpected
+        // symbol, and the serializer writes `a * 2x` for that product. The
+        // right operand of `^` binds tighter still, so `2^2x` stays a
+        // diagnostic.
         if (
           this.startsInvisibleMultiply(left) &&
-          MULTIPLY_PRECEDENCE >= minPrecedence
+          MULTIPLY_PRECEDENCE + 1 >= minPrecedence
         ) {
-          const right = this.parseExpression(MULTIPLY_PRECEDENCE + 1);
+          // The right factor is parsed one level above the `*`/`/` right
+          // operand, so an invisible multiplication inside it does not start
+          // a nested product: `2√3x` stays the left-nested `(2·√3)·x` chain.
+          // No operator has that precedence, so it binds the same operators.
+          const right = this.parseExpression(MULTIPLY_PRECEDENCE + 2);
           if (right === null) break;
           const start = this.localStart(left) ?? 0;
           const end = this.localEnd(right) ?? this.previousEnd();
@@ -9362,15 +9374,21 @@ function numberPayload(text: string, negative: boolean): string {
     if (negative) return v === 0n ? '0' : '-' + v.toString();
     return v.toString();
   }
+  // A binary or hexadecimal literal with a fraction part (`0x1.8p1`) is a
+  // float, as a decimal one is.
   if (/^0[bB]/.test(t)) {
     let v = binaryValue(t);
     if (negative) v = -v;
-    return v.toString();
+    return hasFractionDigits(t, true)
+      ? asFloatText(v.toString())
+      : v.toString();
   }
   if (/^0[xX]/.test(t)) {
     let v = hexValue(t);
     if (negative) v = -v;
-    return v.toString();
+    return hasFractionDigits(t, true)
+      ? asFloatText(v.toString())
+      : v.toString();
   }
 
   // Decimal.
@@ -9380,18 +9398,75 @@ function numberPayload(text: string, negative: boolean): string {
     return t;
   }
 
-  let v = decimalValue(t);
-  if (negative) v = -v;
   // A decimal a machine float holds exactly — at most 15 significant digits
   // and a finite magnitude — takes the float's shortest spelling, which is
   // the normalized form (`1.2000` → `1.2`, `1.5e3` → `1500`). Any other
   // decimal keeps its own digits: `12345678901234567890.5` would otherwise
   // round to `12345678901234570000`, and `1e400` to `Infinity`. The `{num}`
   // payload is an exact decimal string, so every digit written survives.
+  //
+  // The float is `Number()` of the exact decimal text, which rounds the
+  // decimal correctly. `decimalValue` sums the fraction digits one by one
+  // (`0.1·7 + 0.01·5`), rounding at each step, and gave `0.75` as
+  // `0.7500000000000001` and `0.3` as `0.30000000000000004`. It is kept for
+  // the spellings `exactDecimalText` does not cover (a binary exponent).
+  //
+  // A literal with a fraction part is a float on every route (the 0.139.0
+  // exactness rule: the LaTeX `1.0` is the float `1`). The normalized text
+  // must therefore keep a decimal point when the literal had one: `1.0`
+  // normalized to `1`, and `1.5e3` to `1500`, which box as EXACT integers.
+  const hasFraction = hasFractionDigits(t, false);
   const exact = exactDecimalText(t);
-  if (exact !== null && (!Number.isFinite(v) || exact.digits > 15))
-    return (negative ? '-' : '') + exact.text;
-  return v.toString();
+  if (exact !== null) {
+    const v = Number(exact.text);
+    // The literal's own digits are kept when a double cannot hold them: more
+    // than 15 significant digits, an overflow (`1e400`), an underflow to 0 of
+    // a nonzero literal (`1e-400` gave the exact `0`), and a subnormal
+    // (`5e-324`, which a double holds with too few digits).
+    const underflow =
+      (v === 0 && exact.digits > 0) ||
+      (v !== 0 && Math.abs(v) < Number.MIN_VALUE * 2 ** 52);
+    const normalized =
+      !Number.isFinite(v) || exact.digits > 15 || underflow
+        ? exact.text
+        : Math.abs(v).toString();
+    return (
+      (negative ? '-' : '') +
+      (hasFraction ? asFloatText(normalized) : normalized.replace('e+', 'e'))
+    );
+  }
+  let v = decimalValue(t);
+  if (negative) v = -v;
+  const normalized = v.toString();
+  return hasFraction ? asFloatText(normalized) : normalized.replace('e+', 'e');
+}
+
+/**
+ * Whether a numeric literal (digit separators removed) has a fraction part:
+ * a decimal point followed by at least one digit. A trailing point with no
+ * digit (`2.`) is not a fraction part: `2.` is the exact `2`, as `1500.` is
+ * in LaTeX (and `2.k` reads `2` then `.k`). Fullwidth points and digits
+ * count, and `hex` admits the hexadecimal digits.
+ */
+function hasFractionDigits(t: string, hex: boolean): boolean {
+  return hex
+    ? /[.．][0-9a-fA-F０-９Ａ-Ｆａ-ｆ]/.test(t)
+    : /[.．][0-9０-９]/.test(t);
+}
+
+/**
+ * The normalized text of a literal written with a fraction part, marked as a
+ * float: a decimal point in the mantissa (`1` → `1.0`, `1e21` → `1.0e21`,
+ * `1e400` → `1.0e400`), and no `+` in the exponent (`1.5e+30` → `1.5e30`,
+ * the spelling `exactDecimalText` uses). A number whose text has neither a
+ * point nor an exponent boxes as an exact integer.
+ */
+function asFloatText(text: string): string {
+  const [mantissa, exponent] = text.replace('e+', 'e').split(/e/i);
+  const floatMantissa = /[.]/.test(mantissa) ? mantissa : `${mantissa}.0`;
+  return exponent === undefined
+    ? floatMantissa
+    : `${floatMantissa}e${exponent}`;
 }
 
 /**
