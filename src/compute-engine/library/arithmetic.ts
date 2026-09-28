@@ -111,6 +111,9 @@ import {
   bigPolygamma,
   bigBeta,
   bigZeta,
+  bigHurwitzZeta,
+  bigZetaGeneralized,
+  type HurwitzOperand,
   bigLambertW,
   besselJ,
   besselY,
@@ -2190,6 +2193,27 @@ function evaluateHurwitzZeta(
   // non-integer s, so the value is real when a ≥ 0 or s is an integer.
   const real =
     !s.isComplex && !a.isComplex && (a.re >= 0 || Number.isInteger(s.re));
+
+  // At the engine's precision, real s and a: the bignum kernel follows
+  // `ce.precision` the way `bigZeta` does for the one-operand form. A
+  // complex operand stays on the double kernel below — the complex
+  // special-function kernels run at machine precision at every engine
+  // precision.
+  if (real && bignumPreferred(engine)) {
+    const big = bigHurwitzZeta(
+      engine,
+      hurwitzOperand(engine, s),
+      hurwitzOperand(engine, a)
+    );
+    if (big !== undefined) return boxBignumResult(engine, big);
+    // The bignum kernel declined. The double kernel's answer is used only
+    // when it is finite: past the double range it overflows to ∞ or NaN
+    // for a value that is finite, so the expression stays symbolic instead.
+    const z = hurwitzZetaComplex(new Complex(s.re, 0), new Complex(a.re, 0));
+    if (!Number.isFinite(z.re)) return undefined;
+    return boxComplexResult(engine, z, real);
+  }
+
   // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
   // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   return boxComplexResult(
@@ -2197,6 +2221,19 @@ function evaluateHurwitzZeta(
     hurwitzZetaComplex(new Complex(s.re, s.im), new Complex(a.re, a.im)),
     real
   );
+}
+
+/**
+ * A real operand for the bignum Hurwitz kernels. An exact rational stays a
+ * `[numerator, denominator]` pair so the kernel converts it at its raised
+ * working precision: `a.bignumRe` of 1/3 is already rounded to
+ * `ce.precision` digits, and that rounding reaches the last digit of the
+ * result.
+ */
+function hurwitzOperand(engine: ComputeEngine, x: Expression): HurwitzOperand {
+  const r = asRational(x);
+  if (r !== undefined) return [BigInt(r[0]), BigInt(r[1])];
+  return x.bignumRe ?? engine.bignum(x.re);
 }
 
 /**
@@ -2251,12 +2288,31 @@ function evaluateGeneralizedZeta(
 
   // Real s and real a: the terms off the positive axis are |k + a|^(−s)
   // and the rest is a Hurwitz ζ at a positive base point, all real.
+  const real = !s.isComplex && !a.isComplex;
+
+  if (real && bignumPreferred(engine)) {
+    const big = bigZetaGeneralized(
+      engine,
+      hurwitzOperand(engine, s),
+      hurwitzOperand(engine, a)
+    );
+    if (big !== undefined) return boxBignumResult(engine, big);
+    // As in `evaluateHurwitzZeta`: a non-finite double answer for a finite
+    // value stays symbolic.
+    const z = zetaGeneralizedComplex(
+      new Complex(s.re, 0),
+      new Complex(a.re, 0)
+    );
+    if (!Number.isFinite(z.re)) return undefined;
+    return boxComplexResult(engine, z, real);
+  }
+
   // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
   // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   return boxComplexResult(
     engine,
     zetaGeneralizedComplex(new Complex(s.re, s.im), new Complex(a.re, a.im)),
-    !s.isComplex && !a.isComplex
+    real
   );
 }
 

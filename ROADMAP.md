@@ -306,6 +306,46 @@ Defects:
    "an effectful bound keeps one evaluation per recursive call" went from 3
    calls to 7) and spends extra random draws.
 
+### `.N()` rounds an exact operand before a special function sees it (OPEN — found 2026-09-28 by the review of PR #360)
+
+At `ce.precision = 50`, `HurwitzZeta(3, 1/3).N()` is
+`27.561061199700803776227877977407509284542095313016`; the correct value ends
+`…313015` (it is `…3130148811…`). `Digamma(1/3).N()` ends `…67205` where the
+correct value ends `…67204` (it is `…672041806…`). The cause is not the
+kernels: a `.N()` evaluates each operand numerically first, so `1/3` reaches
+the evaluate handler as a 50-digit decimal, and the rounding error of that
+operand reaches the last digit of the result. The same call on the
+`.evaluate()` route with an inexact `s` keeps `a` exact, and
+`HurwitzZeta(3.0, 1/3).evaluate()` is correct to the last digit (the bignum
+Hurwitz kernel converts an exact rational at its own working precision). A
+fix is either an engine-wide one (evaluate the operands of a numeric
+evaluation with guard digits, or pass exact operands through) or a per-operator
+one (hold the operands of `Zeta`, `HurwitzZeta`, `Digamma` and similar
+functions and evaluate them in the handler).
+
+### The machine-precision Hurwitz zeta loses digits left of the critical strip (OPEN, small — found 2026-09-28 by the review of PR #360)
+
+The double kernel `hurwitzZetaComplex` (`numerics/numeric-complex.ts`) is
+off by more than a few units in the last place for some real s ≤ 0
+(compared with mpmath at the double that `0.3` rounds to):
+
+- `HurwitzZeta(-1.5, 0.3)` is `-0.008185560485836074`; the value is
+  `-0.0081855604858359760…` (13 correct digits).
+- `HurwitzZeta(0, 0.3)` is `0.1999999999999993`; the value is
+  `0.2000000000000000111…` (ζ(0, a) = 1/2 − a).
+- `HurwitzZeta(-200.5, 0.3)` is `2.92337138062847e+215`; the value is
+  `2.9233713806280506e+215` (13 correct digits).
+
+The first and third go through the Taylor expansion about a = 1
+(`zetaNearOneComplex`), which sums values of ζ at shifted arguments; the
+second goes through the Euler-Maclaurin sum (`hurwitzEMComplex`), whose
+terms 1/(s − 1)·z^(1−s) and the direct terms cancel to the small result. At `ce.precision` above 15 the bignum
+kernel `bigHurwitzZeta` gives the correct digits for all three.
+`HurwitzZeta(1.0000001, 1)` = `10000000.571377004` is NOT a defect: the
+double nearest `1.0000001` is `1.0000001000000000583…`, and ζ at that double
+is `10000000.5713770004…`; the pole at s = 1 amplifies the rounding of the
+input.
+
 ### A matrix to a non-integer power is element-wise (OPEN, decision — found 2026-09-28 by the agents writing the linear-algebra examples)
 
 `[[1, 2], [3, 4]] ^ (1/2)` is `[[1, √2], [√3, 2]]`, the square root of each
