@@ -34,6 +34,20 @@
 
 ### Issues Resolved
 
+- **`Zeta(s, a)` and `HurwitzZeta(s, a)` honor `ce.precision` for real `s` and
+  `a`** (part of #340, contributed by
+  [enumeratio](https://github.com/enumeratio)). Both were machine precision only
+  at every engine precision; `HurwitzZeta(3, 1/2).N()` at `ce.precision = 50`
+  now returns 50 correct digits
+  (`8.4143983221171599977981671305801499353549040463835`) instead of a double's
+  ~16. The digits are significant digits at every magnitude:
+  `HurwitzZeta(200, 10)` (about `1e-200`) and `HurwitzZeta(-400.5, 0.3)` (about
+  `7.75e549`, past the double range) are correct to the last digit. A value
+  the kernel cannot reach within its limits (s below about −1279) falls back to
+  the double kernel, and stays symbolic where the double overflows. A complex
+  operand still evaluates at machine precision — the complex special-function
+  kernels do, at every engine precision.
+
 - **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and the
   sign of a numeric fraction moves in front of it.** `Beta(2, 3)` wrote
   `\Beta(2, 3)` (capital beta is roman, not a separate glyph — MathLive
@@ -274,15 +288,6 @@
   the Standard Library page lists `Limits` with no Epsil column.
 
 ### Issues Resolved
-
-- **`Zeta(s, a)` and `HurwitzZeta(s, a)` honor `ce.precision` for real `s` and
-  `a`** (part of #340, contributed by
-  [enumeratio](https://github.com/enumeratio)). Both were machine precision only
-  at every engine precision; `HurwitzZeta(3, 1/2).N()` at `ce.precision = 50`
-  now returns 50 correct digits
-  (`8.4143983221171599977981671305801499353549040463835`) instead of a double's
-  ~16. A complex operand still evaluates at machine precision — the complex
-  special-function kernels do, at every engine precision.
 
 - **`Mod` of a float near the double range keeps its remainder.** At machine
   precision `Mod(2.0, 9007199254740991.0)` was `1` (the formula added the

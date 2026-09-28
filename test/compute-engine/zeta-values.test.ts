@@ -386,15 +386,72 @@ describe('Two-argument Zeta/HurwitzZeta beyond double precision (bigHurwitzZeta 
       '64.286687652242821625737350656299746452567862414024',
     ],
     ['Zeta', 2.5, -6, 50, '2.642892756568173658272776649181863820806977067801'],
-    // Large s, tiny result: `bigHurwitzZeta`'s two-attempt widening
-    // (`short`) catches a result smaller than 1 having fewer correct
-    // significant digits than the first pass carried.
+    // Large s, tiny result: the kernel sizes its absolute target from the
+    // magnitude of the result, so a result far below 1 keeps every
+    // significant digit.
     [
       'HurwitzZeta',
       20,
       10,
       50,
       '1.18160477582516795534661414027181923713723074538e-20',
+    ],
+    [
+      'HurwitzZeta',
+      200,
+      10,
+      50,
+      '1.0000000052657832700923535130413277541009039345515e-200',
+    ],
+    // The first term alone is 1e-300: the absolute target must follow it.
+    [
+      'HurwitzZeta',
+      300,
+      10,
+      50,
+      '1.000000000000382115322198140527897353092511626405e-300',
+    ],
+    // Far left of the strip, the value is past the double range: the
+    // cancellation allowance is relative to the size of the result.
+    [
+      'HurwitzZeta',
+      -400.5,
+      [3, 10],
+      50,
+      '7.7543378591304661179704156019730554339937054497715e+549',
+    ],
+    [
+      'HurwitzZeta',
+      -1000.5,
+      [3, 10],
+      50,
+      '9.5187462016086319918612913868370220573301387092098e+1769',
+    ],
+    // A shift by 10^6 or 10^8 terms off the positive axis: summed as a
+    // difference of two Hurwitz values, not term by term. Zeta(2, −10^8) is
+    // 2ζ(2) − ζ(2, 10^8 + 1) (mpmath).
+    [
+      'Zeta',
+      2,
+      [-2000001, 2],
+      50,
+      '9.869603401090358617917825083208955302292865909473',
+    ],
+    [
+      'Zeta',
+      2,
+      -100000000,
+      50,
+      '3.2898681236964529229448301666253837117712364690803',
+    ],
+    // An odd integer s with a < 0: the terms off the positive axis are
+    // negative, (k + a)^(−3), and cancel the tail ζ(3, 1/2) to about 1e-9.
+    [
+      'HurwitzZeta',
+      3,
+      [-40001, 2],
+      50,
+      '1.2498750085932812706698405172720947685614585123452e-9',
     ],
   ];
 
@@ -414,6 +471,81 @@ describe('Two-argument Zeta/HurwitzZeta beyond double precision (bigHurwitzZeta 
     atPrecision(50, () => {
       const z = ce.expr(['HurwitzZeta', 3, ['Rational', 1, 2]]).N();
       expect(z.toString().replace(/[-.]/g, '').length).toBeGreaterThan(30);
+    });
+  });
+
+  test('an exact rational base point keeps every digit (mpmath at dps 120)', () => {
+    // A float s puts the call on the numeric branch of `.evaluate()`, which
+    // keeps the rational a exact; the kernel converts it at its own working
+    // precision. (`.N()` rounds 1/3 to `ce.precision` digits before the
+    // handler sees it; see ROADMAP.md.)
+    atPrecision(50, () => {
+      const f = (op: string, a: [number, number]) =>
+        ce
+          .box([op, { num: '3.0' }, ['Rational', ...a]])
+          .evaluate()
+          .toString();
+      expect(f('HurwitzZeta', [1, 3])).toBe(
+        '27.561061199700803776227877977407509284542095313015'
+      );
+      expect(f('HurwitzZeta', [-1, 3])).toBe(
+        '-23.307581717551352355834685778109809524652451712162'
+      );
+      expect(f('Zeta', [-1, 3])).toBe(
+        '30.692418282448647644165314221890190475347548287838'
+      );
+    });
+  });
+
+  test('s = −2 + 10^−30 is not the integer −2 (mpmath at dps 80)', () => {
+    // As a double, s is −2, and (s + 2) = 0 would end the Euler-Maclaurin
+    // corrections as if s were the integer −2.
+    atPrecision(50, () => {
+      const s = ce.box(['Add', -2, ['Power', 10, -30]]);
+      expect(ce.box(['HurwitzZeta', s, 2]).N().toString()).toBe(
+        '-1.0000000000000000000000000000000304484570583932708'
+      );
+    });
+  });
+
+  test('an integer s ≤ 0 at a zero of the Bernoulli polynomial is 0', () => {
+    // ζ(−2, 1/2) = −B₃(1/2)/3 = 0: the terminating series leaves only a
+    // rounding residue, which no relative-precision check can accept.
+    atPrecision(50, () => {
+      expect(
+        ce
+          .box(['HurwitzZeta', { num: '-2.0' }, { num: '0.5' }])
+          .N()
+          .toString()
+      ).toBe('0');
+    });
+  });
+
+  test('beyond the kernel, a value past the double range stays symbolic', () => {
+    // s < −1279 needs more Bernoulli pairs than the kernel allows; the
+    // double kernel overflows there, so the call does not become +oo.
+    atPrecision(50, () => {
+      const z = ce.box(['HurwitzZeta', -2000.5, ['Rational', 3, 10]]).N();
+      expect(z.operator).toBe('HurwitzZeta');
+    });
+  });
+
+  test('a machine-precision engine keeps the double kernel', () => {
+    const mce = new ComputeEngine({ precision: 'machine' });
+    const z = mce.box(['HurwitzZeta', 3, ['Rational', 1, 2]]).N();
+    expect(typeof z.re).toBe('number');
+    expect(z.re).toBeCloseTo(8.41439832211716, 13);
+    expect(z.toString().replace(/[-.]/g, '').length).toBeLessThanOrEqual(17);
+  });
+
+  test('the exact form at an integer s ≤ 0 is unchanged', () => {
+    atPrecision(50, () => {
+      expect(
+        ce
+          .box(['HurwitzZeta', -3, ['Rational', 1, 2]])
+          .evaluate()
+          .toString()
+      ).toBe('-7/960');
     });
   });
 });
