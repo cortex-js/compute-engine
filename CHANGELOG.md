@@ -2,6 +2,124 @@
 
 ### Behavior Changes
 
+- **An integer-valued float is written with a fraction part, so it reads
+  back as a float.** A float whose value is an integer serializes as
+  `{num: "2.0"}` in MathJSON and `2.0` in LaTeX (a large one as `1.0e+800`
+  and `1.0\cdot10^{800}`); it was `2`, which reads back as the exact `2`, so
+  `Sin(2.0)` numericized while its round trip `Sin(2)` stayed symbolic (user
+  decision 2026-09-28). An exact integer is still written `2`. A float in
+  LaTeX with a negative exponent now keeps its fraction part too
+  (`123.0\cdot10^{-3}`), which read back as an exact rational before. With `fractionalDigits: 0` (LaTeX)
+  or `digits: {fractional: 0}` (MathJSON) the integer spelling is kept, as
+  requested.
+
+- **An Epsil decimal literal keeps its value, and a literal with a fraction
+  part is a float.** The Epsil parser summed the fraction digits one float at a
+  time, so `0.75` read as `0.7500000000000001`, `0.3` as `0.30000000000000004`
+  and `0.000001` as `0.0000010000000000000002`. It now reads the decimal
+  exactly. It also dropped the decimal point while normalizing, so `1.0`,
+  `2.0` and `1.5e3` were the exact integers `1`, `2` and `1500`; they are now
+  floats, as on the LaTeX route (the 0.139.0 rule that a literal with a
+  fraction part is a float). `1e3`, `3` and `2.` (a point with no digit after
+  it) stay exact. A literal a double cannot hold keeps its digits: `1e-400`
+  was the exact `0`, and `5e-324` lost digits.
+- **The negation of a product folds its sign into the numeric factor.**
+  `-(2x)` (MathJSON `["Negate", ["Multiply", 2, "x"]]`) canonicalizes to
+  `Multiply(-2, x)`; it was `Negate(Multiply(2, x))`. `-\frac{x}{2}` is now
+  `Multiply(-1/2, x)`, the same expression as `-\frac{1}{2}x`, so the sign
+  of a fraction written in front of it reads back unchanged (#345).
+- **A float `Measurement` error evaluates.** `Measurement(5, 0.2) + 3` was
+  `8 ± sqrt(0.2^2)` under `evaluate()` and is now `8.00 ± 0.20`. An exact error
+  stays exact (`Measurement(5, 1) * Measurement(2, 1)` is `10 ± √29`).
+
+### Issues Resolved
+
+- **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and the
+  sign of a numeric fraction moves in front of it.** `Beta(2, 3)` wrote
+  `\Beta(2, 3)` (capital beta is roman, not a separate glyph — MathLive
+  renders it as an error) and `Zeta(3)` wrote `\Zeta(3)`; both came from the
+  fallback that spells an unrecognized function head as its symbol's
+  notation, which for these two names is the Greek-letter entry. They now
+  write `\mathrm{B}(2, 3)` and `\zeta(3)`; the old spellings still parse, and
+  a bare `\mathrm{B}` is still the upright letter `B`. `Lb(x)` wrote `\lb(x)`,
+  not a standard LaTeX command, and now writes `\log_2(x)` (which already
+  parsed to `Lb`). A negative `Rational`, or a fraction with a number
+  denominator, wrote its sign inside the numerator or the denominator —
+  `Rational(-1, 2)` as `\frac{-1}{2}`, `Divide(x, -4)` as `\frac{x}{-4}` — or,
+  for `Negate` of a fraction, with a redundant parenthesis
+  (`Negate(Rational(3, 4))` as `-(\frac{3}{4})`); all three now write the sign
+  in front: `-\frac{1}{2}`, `-\frac{x}{4}`, `-\frac{3}{4}`. A fraction with a
+  symbolic denominator keeps the sign in the numerator (`\frac{-1}{x}`), since
+  `-\frac{1}{x}` reads back as a different expression (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+- **A negative big number keeps its digits when its sign moves.** The LaTeX
+  serializer removed the sign of a negative literal in a sum through a
+  JavaScript double, so `Add(x, -9007199254740993)` wrote
+  `x-9\,007\,199\,254\,740\,992`. The sign is now removed from the digit
+  string.
+- **`\operatorname{rank}(A)` parses to `MatrixRank`, and `MatrixRank(A)`
+  writes `\operatorname{rank}(A)`.** It parsed to the free symbol `rank`
+  applied to `A`, the same gap `\operatorname{lcm}` (→ `LCM`) already covered
+  for a different head (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+- **`a * 2n` parses in Epsil.** The right operand of an explicit `*` or `/`
+  refused an invisible multiplication, so `a * 2n` parsed as `a * 2` with an
+  `unexpected-symbol` diagnostic for `n` — and the serializer writes that form.
+  `a * 2n` is now `a·(2n)` and `a / 2n` is `a/(2n)`.
+- **Exact 2×2 eigenvalues.** `Eigenvalues([[1, 2], [3, 4]])` was
+  `[5.372…, -0.372…]`; it is now `[(5 + √33)/2, (5 − √33)/2]`.
+- **`AdjugateMatrix` and `PseudoInverse` evaluate.** Both stayed unevaluated
+  for every matrix. `AdjugateMatrix` is the transposed cofactor matrix, for any
+  square matrix. `PseudoInverse` is computed for a full-rank matrix: the
+  inverse of an invertible square matrix, `(A*A)⁻¹A*` with full column rank,
+  `A*(AA*)⁻¹` with full row rank; a rank-deficient matrix stays unevaluated.
+- **Trigonometry.** `InverseFunction(Csc)` returned an `invalid-symbol` error,
+  and `InverseFunction(Cot)`, `(Coth)` stayed unevaluated; every circular and
+  hyperbolic function now maps to its inverse. `Arccot` has exact special
+  values (`Arccot(1)` is `π/4`, `Arccot(-1)` is `3π/4`). `Sinc(Pi)` is exactly
+  `0` (it was `1.2e-25` under `N`) and `Sinc(Pi/2)` is `2/π`.
+  `TrigExpand(Sin(x + Pi/2))` is `cos(x)` (it left `cos(π/2)` and `sin(π/2)`
+  unreduced), and `TrigExpand(Tan(x + Pi/2))` is `-cos(x)/sin(x)`.
+- **Arithmetic.** `Log(1/8, 2)` and `Lb(1/8)` are `-3` (they stayed
+  symbolic, while `Log(8, 2)` was `3`). `ComplexRoots(1, 4)` is `[1, i, -1,
+  -i]`, exactly and under `N` (it was `[1, 6.1e-17 + i, …]`), and the roots of
+  an exact real are exact (`ComplexRoots(8, 3)` is `[2, -1 + √3 i, -1 - √3 i]`).
+  `Supremum` and `Infimum` of an open interval are its endpoints (they stayed
+  symbolic). `Interpret(1 + 2 + … + n)` works from Epsil, whose left-nested
+  sum the recognizer did not match. `PreIncrement(5)` is `6` and
+  `PreDecrement(5)` is `4` (they had no evaluate handler). `Sum(2^(-k), (k, 0,
+  oo))` is `2`, as `Sum((1/2)^k, …)` was: the geometric-series rule did not
+  read a negated index.
+- **Exact 3×3 eigenvalues.** A matrix of exact rationals whose characteristic
+  polynomial has a rational root has exact eigenvalues:
+  `Eigenvalues([[2, 0, 0], [0, 3, 4], [0, 4, 9]])` is `[11, 2, 1]` (it was
+  `[11, 1.000000000000003, 2.0000000000000018]`), and
+  `Eigenvalues([[2, 1, 0], [1, 2, 1], [0, 1, 2]])` is `[2 + √2, 2, 2 − √2]`.
+  The exact eigenvalues are ordered by decreasing real part. `N(Eigenvalues(…))`
+  gives their values.
+- **`N(Arcosh(x))` for a real `x` in [−1, 1] is purely imaginary**
+  (`N(Arcosh(1/2))` was `5.6e-17 + 1.047…i`).
+
+### New Features
+
+- **`PolyGamma(m, z)`, `Digamma(z)` and `Trigamma(z)` evaluate at a complex
+  `z`** (#340, contributed by [enumeratio](https://github.com/enumeratio)).
+  `PolyGamma(1, 1+2i).N()` is `0.1249311621409446 − 0.4778255501472298i`:
+  ψ⁽ᵐ⁾(z) = (−1)^(m+1) m! ζ(m+1, z) for m ≥ 1 (DLMF 5.15.2), and an asymptotic
+  series for the digamma. Left of the imaginary axis the reflection formula
+  is used, so the cost does not depend on `Re(z)` (`PolyGamma(8, -10^12+i)`
+  answers at once). The order is limited to 10 000. A value outside the
+  range of a double stays unevaluated, not `~oo` or `0`. The compiled
+  JavaScript `PolyGamma` is now marked real-only, as `Zeta` is: a complex
+  argument there ran the real kernel.
+- **Examples for the arithmetic, trigonometry and linear-algebra libraries**,
+  with a hand-written introduction for each reference page: 97, 84 and 40
+  examples, each executed when the pages are generated.
+
+## 0.140.0 _2026-09-27_
+
+### Behavior Changes
+
 - **The spelling rule holds at machine precision, and a float operand makes
   a numeric result a float.** On a `precision: 'machine'` engine,
   `ce.parse('2.0')` was exact, so `\sin(2.0)` stayed symbolic there while it

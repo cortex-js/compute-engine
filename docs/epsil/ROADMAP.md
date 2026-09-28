@@ -36,23 +36,22 @@ is spliced in from `reference/<category>.intro.md` when that file exists.
 
 Remaining work:
 
-- **Reference introductions.** `core.intro.md` and `collections.intro.md`
-  exist (2026-09-27); every other page opens with one generated sentence.
-  The prose sections of the matching website reference page
-  (`doc/*-reference-*.md`, for example "Trigonometric Transformations") are
-  to be ported to Epsil syntax, one category at a time: arithmetic, control
-  structures and strings next.
-- **Examples.** 410 of the 679 definitions have no `examples` field, so
+- **Reference introductions.** Five pages have a hand-written
+  introduction (`core`, `collections` since 2026-09-27; `arithmetic`,
+  `trigonometry`, `linear-algebra` since 2026-09-28). Every other page opens
+  with one generated sentence. The prose sections of the matching website
+  reference page (`doc/*-reference-*.md`) are to be ported to Epsil syntax,
+  one category at a time: control structures, logic and calculus next.
+- **Examples.** 230 of the 679 definitions have no `examples` field, so
   their reference entry is a description alone (per category, measured
-  2026-09-27 after the core and collections round: arithmetic 96 of 97,
-  trigonometry 42 of 42, linear algebra 42 of 42, relations 30, statistics
-  29 of 35, logic 27, colors 20, calculus 19, polynomials 17, number theory
-  17 of 52, control structures 14, special functions 14, combinatorics 11,
-  physics 11, units 7, core 7, regular expressions 4, fractals 2,
-  collections 1). The core and collections definitions left without one are
-  engine-internal or display heads (`ApplyWhole`, `BaseForm`, `Colon`,
-  `HorizontalSpacing`, `Object`, `Unevaluated`, `MemberCall`) and `Input`,
-  whose example would wait on standard input in the documentation test. An
+  2026-09-28: relations 30, statistics 29 of 35, logic 27, colors 20,
+  calculus 19, number theory 17 of 52, polynomials 17, control structures
+  14, special functions 14, combinatorics 11, physics 11, core 7, units 7,
+  regular expressions 4, fractals 2, collections 1). The definitions left without one in the finished
+  categories are engine-internal or display heads (`ApplyWhole`,
+  `BaseForm`, `Colon`, `HorizontalSpacing`, `Object`, `Unevaluated`,
+  `MemberCall`) and `Input` (its example would wait on standard input in the
+  documentation test). An
   example is Epsil source in the definition (`BaseDefinition.examples`),
   executed at generation and checked by the documentation test; an example
   the generator classifies as impure (a `let`, a declaration, a random

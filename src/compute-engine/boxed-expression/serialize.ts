@@ -20,8 +20,9 @@ import {
   numberToString,
   roundToSignificant,
   roundToDecimalPlace,
+  withFractionPart,
 } from '../numerics/strings.js';
-import { numberToExpression } from '../numerics/expression.js';
+import { isFloatSpelling, numberToExpression } from '../numerics/expression.js';
 
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -152,7 +153,9 @@ function structuralNumeratorDenominator(
           ce._fn('Power', [base, exp.op1], { canonical: false })
         );
       } else {
-        const n = isNumber(exp) ? asSmallInteger(exp) : null;
+        // A float exponent (`x^{-1.0}`) is kept: `1/x` would read back
+        // with the exact exponent `-1`
+        const n = isNumber(exp) && exp.isExact ? asSmallInteger(exp) : null;
         if (n === -1) denominator.push(base);
         else if (n !== null && n < 0)
           denominator.push(
@@ -167,8 +170,10 @@ function structuralNumeratorDenominator(
     ) {
       const num = arg.op1;
       const den = arg.op2;
-      if (!isNumber(num) || asSmallInteger(num) !== 1) numerator.push(num);
-      if (!isNumber(den) || asSmallInteger(den) !== 1) denominator.push(den);
+      if (!isNumber(num) || !num.isExact || asSmallInteger(num) !== 1)
+        numerator.push(num);
+      if (!isNumber(den) || !den.isExact || asSmallInteger(den) !== 1)
+        denominator.push(den);
     } else {
       // A bare literal rational factor (not a `Divide`/`Rational` function
       // form) also contributes a denominator part, mirroring the
@@ -249,7 +254,14 @@ function serializePrettyJsonFunction(
   }
 
   if (name === 'Multiply' && !exclusions.includes('Negate')) {
-    if (args[0].im === 0 && args[0].re === -1) {
+    // Only an exact `-1` is written as a negation: `-1.0·x` keeps its float
+    // coefficient
+    if (
+      isNumber(args[0]) &&
+      args[0].isExact &&
+      args[0].im === 0 &&
+      args[0].re === -1
+    ) {
       if (args.length === 2)
         return serializeJsonFunction(ce, 'Negate', [args[1]], options);
       const rest = [...args.slice(1)];
@@ -324,7 +336,10 @@ function serializePrettyJsonFunction(
     if (!exclusions.includes('Exp') && isSymbol(args[0], 'ExponentialE'))
       return serializeJsonFunction(ce, 'Exp', [args[1]], options, metadata);
 
-    if (isNumber(args[1])) {
+    // Only an exact exponent is rewritten (`Square`, `Divide`, `Sqrt`,
+    // `Root`): the rewrite writes an exact exponent, so `x^{2.0}` would read
+    // back as `x^2`
+    if (isNumber(args[1]) && args[1].isExact) {
       const exp = asSmallInteger(args[1]);
       // x^2 -> Square(x)
       if (exp === 2 && !exclusions.includes('Square'))
@@ -403,7 +418,9 @@ function serializePrettyJsonFunction(
   }
 
   if (name === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
-    if (isNumber(args[1])) {
+    // Only an exact negative term is written as a subtraction of its
+    // magnitude: `x - 2` would read back with the exact `2`
+    if (isNumber(args[1]) && args[1].isExact) {
       const t1 = asSmallInteger(args[1]);
       if (t1 !== null && t1 < 0)
         return serializeJsonFunction(
@@ -571,7 +588,12 @@ function serializeJsonFunction(
         metadata
       );
 
-    if (name === 'Root' && args.length === 2 && isNumber(args[1])) {
+    if (
+      name === 'Root' &&
+      args.length === 2 &&
+      isNumber(args[1]) &&
+      args[1].isExact
+    ) {
       const n = asSmallInteger(args[1]);
       if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]], options);
 
@@ -869,6 +891,96 @@ function effectiveDigits(
 }
 
 function serializeJsonNumber(
+  ce: ComputeEngine,
+  value: number | bigint | NumericValue | BigDecimal | Complex | Rational,
+  options: Readonly<JsonSerializationOptions>,
+  metadata?: Metadata
+): MathJsonExpression {
+  const json = serializeJsonNumberSpelling(ce, value, options, metadata);
+  // A float (a big or machine numeric value) is written with a fraction part
+  // so that it is read back as a float.
+  if (value instanceof NumericValue && !value.isExact)
+    return floatSpelling(ce, json, options);
+  return json;
+}
+
+/**
+ * Give the MathJSON number `json`, the serialization of a float (inexact)
+ * value, a fraction part if it has none: `2` becomes `{ num: "2.0" }` and
+ * `{ num: "1e+800" }` becomes `{ num: "1.0e+800" }`. The exactness of a
+ * number literal follows its spelling: a literal with a fraction part is a
+ * float, and a safe-integer JSON number or a `{ num }` string without a
+ * fraction part is an exact integer. Any other JSON number (`1.5`, `1e+30`)
+ * is read back as a float, and is kept. The parts of a `Complex` are handled
+ * the same way, unless one of them is already read back as a float.
+ *
+ * A caller that asked for no digits after the decimal point
+ * (`digits: { fractional: 0 }`) gets the integer spelling it asked for.
+ */
+function floatSpelling(
+  ce: ComputeEngine,
+  json: MathJsonExpression,
+  options: Readonly<JsonSerializationOptions>
+): MathJsonExpression {
+  const digits = effectiveDigits(options);
+  if (typeof digits === 'object' && 'fractional' in digits)
+    if (digits.fractional === 0) return json;
+
+  if (typeof json === 'number') {
+    if (!Number.isSafeInteger(json)) return json;
+    return { num: withFractionPart(numberToString(json)) };
+  }
+  // A number shorthand written as a string. `withFractionPart()` returns a
+  // string that is not a plain decimal number (a symbol name) unchanged.
+  if (typeof json === 'string') return withFractionPart(json);
+
+  // A `Complex` with one part spelled as a float is read back as a float,
+  // and is kept: `["Complex", 0, -1.1]`. Otherwise every part is given a
+  // fraction part.
+  if (Array.isArray(json)) {
+    if (json[0] !== 'Complex') return json;
+    const parts = json.slice(1) as MathJsonExpression[];
+    if (parts.some(isFloatSpelling)) return json;
+    return [
+      json[0],
+      ...parts.map((x) => floatSpelling(ce, x, options)),
+    ] as MathJsonExpression;
+  }
+  if (typeof json === 'object' && json !== null) {
+    if ('num' in json && typeof json.num === 'string') {
+      const num = withFractionPart(json.num);
+      if (num === json.num) return json;
+      // A `latex` metadata that was written from the integer spelling is
+      // written again from the float spelling. A verbatim `latex` (the
+      // source of a parsed number) is kept.
+      if (
+        typeof json.latex === 'string' &&
+        ce.latexSyntax &&
+        json.latex === _serializeLatexMetadata(ce, { num: json.num })
+      )
+        return { ...json, num, latex: _serializeLatexMetadata(ce, { num }) };
+      return { ...json, num };
+    }
+    if (
+      'fn' in json &&
+      Array.isArray(json.fn) &&
+      json.fn[0] === 'Complex' &&
+      !(json.fn.slice(1) as MathJsonExpression[]).some(isFloatSpelling)
+    )
+      return {
+        ...json,
+        fn: [
+          json.fn[0],
+          ...json.fn
+            .slice(1)
+            .map((x) => floatSpelling(ce, x as MathJsonExpression, options)),
+        ],
+      } as MathJsonExpression;
+  }
+  return json;
+}
+
+function serializeJsonNumberSpelling(
   ce: ComputeEngine,
   value: number | bigint | NumericValue | BigDecimal | Complex | Rational,
   options: Readonly<JsonSerializationOptions>,

@@ -787,6 +787,458 @@ export function zetaGeneralizedComplex(s: Complex, a: Complex): Complex {
   return acc.add(hurwitzZetaComplex(s, cur));
 }
 
+//
+// ---------------- Digamma / polygamma (complex) --------------------------
+//
+// cortex-js/compute-engine#340: PolyGamma(m, z) at a complex z. The native
+// `PolyGamma` already covers every real z at every integer order m >= 0
+// (`special-functions.ts`); this widens it to a complex z, reusing
+// `hurwitzZetaComplex` above for m >= 1 via DLMF 5.15.2,
+// ψ⁽ᵐ⁾(z) = (−1)^(m+1) m! ζ(m+1, z). ζ(1, z) is itself the pole ψ(z) sits
+// at, so m = 0 (the digamma) has no such form and gets its own asymptotic
+// series below.
+
+/** B₂ₖ/(2k), k = 1..14 — the digamma asymptotic tail coefficients. */
+const DIGAMMA_COEFF: number[] = (() => {
+  const c: number[] = [0];
+  for (let k = 1; k <= 14; k++) {
+    const [num, den] = bernoulliRational(2 * k);
+    c[k] = Number(num) / Number(den) / (2 * k);
+  }
+  return c;
+})();
+
+/** Shift z into Re(z) >= this before the asymptotic series, where the
+ * 14-term Bernoulli tail below reaches full double precision. */
+const DIGAMMA_SHIFT = 18;
+
+/**
+ * cot(πz) for Im(z) >= 0, from q = e^(2πiz): cot(πz) = −i·(1 + q)/(1 − q).
+ * The real part of z is first reduced modulo 1 to x, |x| <= 1/2 (cot(πz)
+ * has period 1, and the reduction of a double is exact), so a large Re(z)
+ * costs nothing and loses no digits. For a large Im(z), q is tiny and the
+ * quotient is close to −i without the overflow of sin/cos at a large
+ * imaginary argument.
+ *
+ * With a = 2π·Im(z) and e = e^(−a), the parts of 1 ± q are formed from
+ * sin(πx) and cos(πx) as sums of non-negative terms:
+ * 1 + q = (1 − e) + 2e·cos²(πx) + 2i·e·sin(πx)·cos(πx), and
+ * 1 − q = (1 − e) + 2e·sin²(πx) − 2i·e·sin(πx)·cos(πx).
+ * So neither cancels when q is close to 1 (z close to an integer) or to −1
+ * (z close to a half-integer), where Im(z) small makes 1 − e small too.
+ * cos(πx) is computed as sin(π·(1/2 − |x|)), which is exactly 0 at a
+ * half-integer.
+ */
+function cotPiUpperHalfPlane(z: Complex): Complex {
+  const x = z.re - Math.round(z.re);
+  const e = Math.exp(-2 * Math.PI * z.im);
+  const oneMinusE = -Math.expm1(-2 * Math.PI * z.im);
+  const sx = Math.sin(Math.PI * x);
+  const cx = Math.sin(Math.PI * (0.5 - Math.abs(x)));
+  const im = 2 * e * sx * cx;
+  const onePlusQ = new Complex(oneMinusE + 2 * e * cx * cx, im);
+  const oneMinusQ = new Complex(oneMinusE + 2 * e * sx * sx, -im);
+  const r = complexDivide(onePlusQ, oneMinusQ);
+  return new Complex(r.im, -r.re); // −i·r
+}
+
+/**
+ * The principal logarithm ln|z| + i·arg(z). `Complex.log()` squares the parts
+ * of z (halved) to form ln|z|, which overflows to `∞` once a part is above
+ * about 1e154. Here the parts are scaled by a power of two first.
+ */
+function complexLog(z: Complex): Complex {
+  const k = pairExponent(z.re, z.im);
+  const abs = Math.hypot(
+    scaleByPowerOfTwo(z.re, -k),
+    scaleByPowerOfTwo(z.im, -k)
+  );
+  return new Complex(Math.log(abs) + k * Math.LN2, Math.atan2(z.im, z.re));
+}
+
+/**
+ * ψ(z) for Re(z) >= 1/2: the derivative of `gammaln`'s Stirling series,
+ * ψ(w) ~ ln w − 1/(2w) − Σ_{k>=1} B₂ₖ/(2k) w^(−2k) for a large w, reached by
+ * the recurrence ψ(z) = ψ(z+n) − Σ_{k<n} 1/(z+k) with at most
+ * `DIGAMMA_SHIFT` steps. The tail is built from powers of 1/w², so a huge w
+ * makes its terms underflow to 0 (where they are negligible) instead of
+ * overflowing the powers of w.
+ */
+function digammaRightHalfPlane(z: Complex): Complex {
+  const n = Math.max(0, Math.ceil(DIGAMMA_SHIFT - z.re));
+  let shift = C_ZERO;
+  for (let k = 0; k < n; k++)
+    shift = shift.add(complexInverse(new Complex(z.re + k, z.im)));
+  const w = new Complex(z.re + n, z.im);
+  const inv = complexInverse(w);
+  const inv2 = inv.mul(inv);
+  let r = complexLog(w).sub(inv.mul(0.5)); // ln w − 1/(2w)
+  let p = inv2; // w^(−2k)
+  for (let k = 1; k < DIGAMMA_COEFF.length; k++) {
+    r = r.sub(p.mul(DIGAMMA_COEFF[k]));
+    p = p.mul(inv2);
+  }
+  return r.sub(shift);
+}
+
+/**
+ * ψ(z) for a complex z with Im(z) >= 0. Left of Re(z) = 1/2 it uses the
+ * reflection formula ψ(z) = ψ(1 − z) − π·cot(πz) (DLMF 5.5.4), so the cost
+ * does not grow with −Re(z) and the recurrence never sums across the left
+ * half-plane.
+ */
+function digammaComplex(z: Complex): Complex {
+  if (z.re < 0.5)
+    return digammaRightHalfPlane(new Complex(1 - z.re, -z.im)).sub(
+      cotPiUpperHalfPlane(z).mul(Math.PI)
+    );
+  return digammaRightHalfPlane(z);
+}
+
+/**
+ * A complex value `m·2^e`, with `e` an integer. The polygamma of a high
+ * order is `m!` times a Hurwitz zeta value: either factor alone can be far
+ * outside the range of a double (100! ≈ 9e157, ζ(101, 10⁴) ≈ 1e−404) while
+ * their product is not. The binary exponent is carried in `e` so that no
+ * intermediate value overflows or underflows.
+ */
+interface ScaledComplex {
+  m: Complex;
+  e: number;
+}
+
+const SCALED_ZERO: ScaledComplex = { m: C_ZERO, e: 0 };
+
+/** Move the binary exponent of the larger part of `x.m` into `x.e`. */
+function scaledNormalize(x: ScaledComplex): ScaledComplex {
+  const k = pairExponent(x.m.re, x.m.im);
+  if (k === 0) return x;
+  return {
+    m: new Complex(
+      scaleByPowerOfTwo(x.m.re, -k),
+      scaleByPowerOfTwo(x.m.im, -k)
+    ),
+    e: x.e + k,
+  };
+}
+
+function scaledMul(x: ScaledComplex, c: Complex | number): ScaledComplex {
+  return scaledNormalize({ m: x.m.mul(c), e: x.e });
+}
+
+function scaledAdd(a: ScaledComplex, b: ScaledComplex): ScaledComplex {
+  if (a.m.isZero()) return b;
+  if (b.m.isZero()) return a;
+  const e = Math.max(a.e, b.e);
+  return scaledNormalize({
+    m: new Complex(
+      scaleByPowerOfTwo(a.m.re, a.e - e) + scaleByPowerOfTwo(b.m.re, b.e - e),
+      scaleByPowerOfTwo(a.m.im, a.e - e) + scaleByPowerOfTwo(b.m.im, b.e - e)
+    ),
+    e,
+  });
+}
+
+/** log₂ |x|, or −∞ when x is 0. */
+function scaledLog2Abs(x: ScaledComplex): number {
+  return x.e + Math.log2(Math.hypot(x.m.re, x.m.im));
+}
+
+/** b^p for a real exponent p, as `ScaledComplex`: |b|^p is formed as a power
+ * of two, so it cannot overflow or underflow. */
+function scaledPow(b: Complex, p: number): ScaledComplex {
+  const lg = complexLog(b); // ln|b| + i·arg(b)
+  const l2 = (p * lg.re) / Math.LN2;
+  const e = Math.floor(l2);
+  const mag = 2 ** (l2 - e);
+  const phase = p * lg.im;
+  return { m: new Complex(mag * Math.cos(phase), mag * Math.sin(phase)), e };
+}
+
+/**
+ * ζ(s, a) for an integer s >= 2 and Re(a) >= 0, a ≠ 0, as `ScaledComplex`:
+ * the same Euler-Maclaurin sum as `hurwitzEMComplex` (direct terms up to a
+ * base point, then the integral, the half-term and the Bernoulli
+ * corrections), with every term carried in scaled form.
+ *
+ * With Re(a) >= 0 every base a + k lies in the closed right half-plane, and
+ * the sum does not cancel: ζ(s, a) is at least comparable to its largest
+ * term. `largestLog2` is log₂ of the largest term magnitude, so that the
+ * caller can check this (see `POLYGAMMA_CANCELLATION_LIMIT`).
+ */
+function hurwitzZetaScaled(
+  s: number,
+  a: Complex
+): { value: ScaledComplex; largestLog2: number } {
+  const n = Math.max(8, Math.ceil(emEdge(new Complex(s, 0)) - a.re));
+  let sum = SCALED_ZERO;
+  let largestLog2 = -Infinity;
+  const add = (t: ScaledComplex) => {
+    sum = scaledAdd(sum, t);
+    largestLog2 = Math.max(largestLog2, scaledLog2Abs(t));
+  };
+  for (let k = 0; k < n; k++) {
+    const b = new Complex(a.re + k, a.im);
+    if (b.re === 0 && b.im === 0) continue;
+    add(scaledPow(b, -s));
+  }
+  const z = new Complex(a.re + n, a.im);
+  const zInv = complexInverse(z);
+  const zNegS = scaledPow(z, -s);
+  add(scaledMul(scaledPow(z, 1 - s), 1 / (s - 1)));
+  add(scaledMul(zNegS, 0.5));
+  // Σ_{k≥1} cₖ·(s)_{2k-1}·z^{-(s+2k-1)}, rolling the Pochhammer and z-power.
+  let zPow = scaledMul(zNegS, zInv);
+  const zInv2 = zInv.mul(zInv);
+  let poch = s;
+  for (let k = 1; k <= EM_PAIRS; k++) {
+    add(scaledMul(zPow, poch * EM_COEFF[k]));
+    poch *= (s + 2 * k - 1) * (s + 2 * k);
+    zPow = scaledMul(zPow, zInv2);
+  }
+  return { value: sum, largestLog2 };
+}
+
+function scaledTimes(a: ScaledComplex, b: ScaledComplex): ScaledComplex {
+  return scaledNormalize({ m: a.m.mul(b.m), e: a.e + b.e });
+}
+
+/**
+ * −π·dᵐ/dzᵐ cot(πz) for m >= 1 and Im(z) >= 0, with log₂ of the largest
+ * magnitude added to form it. `factorial` is m! in scaled form. Two series
+ * give this value, and each one cancels in a different region, so the one
+ * with the smaller largest term is used:
+ *
+ * - The partial-fraction series (DLMF 4.22.3, differentiated m times):
+ *   −π·dᵐ/dzᵐ cot(πz) = (−1)^(m+1)·m!·Σ_{n∈ℤ} (z+n)^(−s), s = m + 1. It
+ *   depends only on z modulo 1: with z' = z − ⌊Re z⌋, the sum is
+ *   ζ(s, z') + (−1)^s·ζ(s, 1−z'). Its two halves cancel when Im(z) is large
+ *   compared with m, because the value is then exponentially small.
+ * - The Fourier series in q = e^(2πiz) (from cot(πz) = −i − 2i·Σ_{n>=1} qⁿ):
+ *   −π·dᵐ/dzᵐ cot(πz) = (2πi)^s·Σ_{n>=1} nᵐ·qⁿ. Its terms are largest near
+ *   n = m/(2π·Im z), so it cancels when Im(z) is small compared with m.
+ * - For m <= `COT_POLYNOMIAL_MAX_ORDER`, a polynomial in c = cot(πz):
+ *   dᵐ/dzᵐ cot(πz) = Pₘ(c), with P₀(c) = c and
+ *   Pₖ₊₁(c) = −π·(1 + c²)·Pₖ′(c) (from d/dz cot(πz) = −π·(1 + c²)). Its
+ *   terms cancel when c is close to ±i (a large Im z), but not when c is
+ *   small. c is small near a half-integer z, where both series above
+ *   cancel when Im(z) is also small: the two halves of the partial-fraction
+ *   series are then near-conjugates, and the Fourier series has too many
+ *   terms.
+ */
+function cotDerivativeTerm(
+  m: number,
+  z: Complex,
+  factorial: ScaledComplex
+): { value: ScaledComplex; largestLog2: number } {
+  const s = m + 1;
+  const sign = m % 2 === 0 ? -1 : 1; // (−1)^(m+1), which is also (−1)^s
+  const zr = new Complex(z.re - Math.floor(z.re), z.im);
+  const near = hurwitzZetaScaled(s, zr);
+  const nearReflected = hurwitzZetaScaled(s, new Complex(1 - zr.re, -zr.im));
+  const partialFractions = {
+    value: scaledMul(
+      scaledTimes(
+        scaledAdd(near.value, scaledMul(nearReflected.value, sign)),
+        factorial
+      ),
+      sign
+    ),
+    largestLog2:
+      scaledLog2Abs(factorial) +
+      Math.max(near.largestLog2, nearReflected.largestLog2),
+  };
+  const lossOf = (x: { value: ScaledComplex; largestLog2: number }) =>
+    x.largestLog2 - scaledLog2Abs(x.value);
+  if (lossOf(partialFractions) <= 4) return partialFractions;
+  let best = partialFractions;
+  for (const other of [cotFourierTerm(m, z), cotPolynomialTerm(m, z)])
+    if (other !== undefined && lossOf(other) < lossOf(best)) best = other;
+  return best;
+}
+
+/**
+ * The Fourier series of `cotDerivativeTerm`, or `undefined` when Im(z) is 0
+ * or so small that the series needs too many terms. Term n has log₂
+ * magnitude (m·ln n − 2π·n·Im z)/ln 2 and phase 2π·n·x, where x is Re(z)
+ * reduced modulo 1. The sum goes past the largest term until the terms are
+ * 2⁻⁶⁴ of it.
+ */
+function cotFourierTerm(
+  m: number,
+  z: Complex
+): { value: ScaledComplex; largestLog2: number } | undefined {
+  if (z.im <= 0) return undefined;
+  const s = m + 1;
+  const x = z.re - Math.round(z.re);
+  const peak = m / (2 * Math.PI * z.im);
+  if (peak > 100_000) return undefined;
+  let sum = SCALED_ZERO;
+  let largest = -Infinity;
+  for (let n = 1; ; n++) {
+    if (n > 1_000_000) return undefined;
+    const l2 = (m * Math.log(n) - 2 * Math.PI * n * z.im) / Math.LN2;
+    if (n > peak && l2 < largest - 64) break;
+    largest = Math.max(largest, l2);
+    const e = Math.floor(l2);
+    const mag = 2 ** (l2 - e);
+    const phase = 2 * Math.PI * ((n * x) % 1);
+    sum = scaledAdd(sum, {
+      m: new Complex(mag * Math.cos(phase), mag * Math.sin(phase)),
+      e,
+    });
+  }
+  // (2πi)^s = (2π)^s·i^s
+  const iPower = [
+    C_ONE,
+    new Complex(0, 1),
+    new Complex(-1, 0),
+    new Complex(0, -1),
+  ][s % 4];
+  const twoPiS = scaledPow(new Complex(2 * Math.PI, 0), s);
+  return {
+    value: scaledMul(scaledTimes(sum, twoPiS), iPower),
+    largestLog2: largest + scaledLog2Abs(twoPiS),
+  };
+}
+
+/** The highest order for which `cotPolynomialTerm` is tried. At order 100
+ * the largest coefficient is about 2e217 and the sum of |aⱼ|·4ʲ about 2e269;
+ * from order 120 on they overflow a double. */
+const COT_POLYNOMIAL_MAX_ORDER = 100;
+
+/**
+ * −π·Pₘ(cot(πz)) = −π·dᵐ/dzᵐ cot(πz) for Im(z) >= 0, with log₂ of the largest
+ * magnitude added by the Horner evaluation (the sum of |aⱼ|·|c|ʲ), or
+ * `undefined` when m is above `COT_POLYNOMIAL_MAX_ORDER` or |c| > 4 (where
+ * the partial-fraction series does not cancel). See `cotDerivativeTerm`.
+ */
+function cotPolynomialTerm(
+  m: number,
+  z: Complex
+): { value: ScaledComplex; largestLog2: number } | undefined {
+  if (m > COT_POLYNOMIAL_MAX_ORDER) return undefined;
+  const c = cotPiUpperHalfPlane(z);
+  const cAbs = Math.hypot(c.re, c.im);
+  if (!(cAbs <= 4)) return undefined;
+  // Coefficients of Pₖ, lowest degree first. Pₖ has degree k + 1.
+  let a = [0, 1];
+  for (let k = 0; k < m; k++) {
+    const next = new Array<number>(a.length + 1).fill(0);
+    for (let j = 1; j < a.length; j++) {
+      const b = -Math.PI * j * a[j]; // −π·(coefficient of c^(j−1) in Pₖ′)
+      next[j - 1] += b;
+      next[j + 1] += b;
+    }
+    a = next;
+  }
+  let value = C_ZERO;
+  let bound = 0;
+  for (let j = a.length - 1; j >= 0; j--) {
+    value = value.mul(c).add(a[j]);
+    bound = bound * cAbs + Math.abs(a[j]);
+  }
+  return {
+    value: scaledNormalize({ m: value.mul(-Math.PI), e: 0 }),
+    largestLog2: Math.log2(Math.PI * bound),
+  };
+}
+
+/**
+ * A safety net: the largest magnitude added to form the result of
+ * `polygammaComplex` (m >= 1) may be at most this many times the magnitude of
+ * the result. A larger ratio means that most of the digits cancelled, and
+ * the result is not trusted (the polygamma stays symbolic). The sums of
+ * `hurwitzZetaScaled` have Re(a) >= 0 and do not cancel, and
+ * `cotDerivativeTerm` uses the series that cancels less, so this is expected
+ * to trigger only close to a zero of ψ⁽ᵐ⁾. The direct sum across the left
+ * half-plane, used before the reflection formula, tripped it often.
+ */
+const POLYGAMMA_CANCELLATION_LIMIT = 100;
+
+/**
+ * The highest order `polygammaComplex` computes. The cost of the
+ * Euler-Maclaurin sum grows linearly with the order (about m + 6 direct
+ * terms), so a higher order stays symbolic instead of running for a long
+ * time. At such an order the value is representable as a double only in a
+ * narrow band of |z| near m/e.
+ */
+const POLYGAMMA_MAX_ORDER = 10_000;
+
+/**
+ * ψ⁽ᵐ⁾(z) for a complex z and integer order m >= 0, matching mpmath's
+ * `polygamma`/Wolfram's `PolyGamma` (poles at the non-positive integers).
+ * Callers keep a real non-positive-integer z symbolic themselves — see
+ * `polygammaValueAtExceptionalPoint` in `library/arithmetic.ts`.
+ *
+ * - ψ⁽ᵐ⁾ is real on the real axis, so ψ⁽ᵐ⁾(z̄) is the conjugate of ψ⁽ᵐ⁾(z),
+ *   and the computation is done with Im(z) >= 0.
+ * - m = 0: `digammaComplex`.
+ * - m >= 1: ψ⁽ᵐ⁾(z) = (−1)^(m+1)·m!·ζ(m+1, z) (DLMF 5.15.2). For Re(z) >= 0
+ *   ζ(s, z) is summed directly. For Re(z) < 0 the direct sum would take
+ *   one term per unit of −Re(z), and its terms cancel. The reflection
+ *   formula (DLMF 5.15.6) is used instead:
+ *   ψ⁽ᵐ⁾(z) = −π·dᵐ/dzᵐ cot(πz) + (−1)^m·ψ⁽ᵐ⁾(1 − z)
+ *           = −π·dᵐ/dzᵐ cot(πz) − m!·ζ(s, 1 − z), s = m + 1,
+ *   with the derivative of cot from `cotDerivativeTerm`, which depends only
+ *   on z modulo 1. Every sum then has Re(a) >= 0, so the cost does not
+ *   depend on Re(z). (A closed form of the derivative as a polynomial in
+ *   cot(πz) was not used: its coefficients grow like m!, and they cancel
+ *   when cot(πz) is close to ±i, which is the case for a large |Im z|.)
+ * - The factor m! and the zeta values are carried in scaled form. A result
+ *   that is not finite, or whose magnitude is below the smallest normal
+ *   double, is not representable to full precision: the answer is NaN (the
+ *   caller keeps the expression symbolic) rather than ±∞ or 0.
+ */
+export function polygammaComplex(m: number, z: Complex | number): Complex {
+  const c = typeof z === 'number' ? new Complex(z, 0) : z;
+  if (!Number.isInteger(m) || m < 0 || m > POLYGAMMA_MAX_ORDER) return C_NAN;
+  if (!Number.isFinite(c.re) || !Number.isFinite(c.im)) return C_NAN;
+  if (c.im === 0 && c.re <= 0 && Number.isInteger(c.re)) return C_NAN; // pole
+  if (c.im < 0) return polygammaComplex(m, c.conjugate()).conjugate();
+  if (m === 0) return digammaComplex(c);
+
+  const s = m + 1;
+  const sign = m % 2 === 0 ? -1 : 1; // (−1)^(m+1), which is also (−1)^s
+  let factorial: ScaledComplex = { m: C_ONE, e: 0 };
+  for (let k = 2; k <= m; k++) factorial = scaledMul(factorial, k);
+  const log2Factorial = scaledLog2Abs(factorial);
+
+  // `largestLog2` is log₂ of the largest magnitude that was added to form
+  // the result (see `POLYGAMMA_CANCELLATION_LIMIT`).
+  let result: ScaledComplex;
+  let largestLog2: number;
+  if (c.re >= 0) {
+    const direct = hurwitzZetaScaled(s, c);
+    result = scaledMul(scaledTimes(direct.value, factorial), sign);
+    largestLog2 = direct.largestLog2 + log2Factorial;
+  } else {
+    // ψ⁽ᵐ⁾(z) = −π·dᵐ/dzᵐ cot(πz) − m!·ζ(s, 1 − z)
+    const far = hurwitzZetaScaled(s, new Complex(1 - c.re, -c.im));
+    const cot = cotDerivativeTerm(m, c, factorial);
+    result = scaledAdd(
+      cot.value,
+      scaledMul(scaledTimes(far.value, factorial), -1)
+    );
+    largestLog2 = Math.max(cot.largestLog2, far.largestLog2 + log2Factorial);
+  }
+  if (
+    largestLog2 - scaledLog2Abs(result) >
+    Math.log2(POLYGAMMA_CANCELLATION_LIMIT)
+  )
+    return C_NAN;
+
+  const value = new Complex(
+    scaleByPowerOfTwo(result.m.re, result.e),
+    scaleByPowerOfTwo(result.m.im, result.e)
+  );
+  // `Math.hypot`, not `Complex.abs()`: the latter squares the parts, and
+  // that underflows to 0 for a result near 1e−200.
+  const size = Math.hypot(value.re, value.im);
+  if (!Number.isFinite(size) || size < MIN_NORMAL_DOUBLE) return C_NAN;
+  return value;
+}
+
 const SQRT_PI = Math.sqrt(Math.PI);
 
 /** Gauss error function erf(z) for complex z. */

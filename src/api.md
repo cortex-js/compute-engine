@@ -993,6 +993,57 @@ _getCompilationTarget(name):
 
 ##### ExpressionComputeEngine.~~number()~~ {#number-2}
 
+###### number(value, options)
+
+```ts
+number(value, options?): Expression
+```
+
+Create a complex number from its real part and its imaginary part, each
+a JavaScript `number` or a `BigDecimal`.
+
+When the engine works above machine precision (`ce.precision` greater
+than 15), a `BigDecimal` part is kept at the precision it holds: a part
+too small or too large for a double (`1e-800`, `1e800`) or with more
+than 16 significant digits is not rounded to a double. This is the
+lossless alternative to `ce.number(ce.complex(re, im))`: `ce.complex()`
+returns a `Complex` object, whose parts are always doubles. At machine
+precision, both parts are rounded to doubles: there
+`{ re: ce.bignum('1e-800'), im: ce.bignum(2) }` gives `2i`.
+
+When the imaginary part is zero (a `number` or a `BigDecimal`), the
+result is a real number.
+
+```js
+ce.precision = 30;
+ce.number({ re: ce.bignum('1e-800'), im: ce.bignum(2) });
+// ➔ a complex number with the real part 1e-800 and the imaginary part 2
+ce.number({ re: 1, im: 0 });
+// ➔ 1
+```
+
+####### value
+
+####### re
+
+`number` \| `BigDecimal`
+
+####### im
+
+`number` \| `BigDecimal`
+
+####### options?
+
+####### metadata?
+
+[`Metadata`](#metadata-1)
+
+####### canonical?
+
+[`CanonicalOptions`](#canonicaloptions)
+
+###### number(value, options)
+
 ```ts
 number(value, options?): Expression
 ```
@@ -2343,6 +2394,23 @@ readonly isExact: boolean;
 
 <MemberCard>
 
+##### NumberLiteralInterface.isComplex {#iscomplex-1}
+
+```ts
+readonly isComplex: boolean;
+```
+
+True if the imaginary part of this number is not zero.
+
+Unlike a test of `im !== 0`, this is `true` for an imaginary part too
+small or too large for a double (the exact `10^{-800}·i`), because it is
+read from the numeric value itself, not from its double projection
+`im`.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### NumberLiteralInterface.isNumberLiteral {#isnumberliteral}
 
 ```ts
@@ -2417,6 +2485,37 @@ the first read of `ops`. `undefined` for every other function
 expression. A walker that only looks for symbols or effects skips a node
 with a store instead of reading `ops`, which would box every element.
 The public view is `array`.
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionInterface.\_numericStoreFloats {#_numericstorefloats}
+
+```ts
+readonly _numericStoreFloats: boolean;
+```
+
+Internal. Are the integer-valued elements of the numeric store floats?
+`true` when a float computation produced the store (`2·L` with the
+element `0.5` holds the float `1`): the operand at that position is
+then a float, not `engine.number(store[i])`. `false` for `ce.list()`
+and when there is no store.
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionInterface.\_machineFloats {#_machinefloats}
+
+```ts
+readonly _machineFloats: boolean | undefined;
+```
+
+Internal. The exactness of the integer-valued elements of a `List` of
+machine numbers: `false` exact, `true` floats, `undefined` when the
+list is not a list of machine numbers or mixes both kinds. See
+`BoxedFunction._machineFloats`.
 
 </MemberCard>
 
@@ -7967,7 +8066,7 @@ imaginary component (e.g. `1 + √2·i`) is NOT representable exactly.
 ```ts
 type NumericValueData = {
   re: BigDecimal | number;
-  im: number;
+  im: BigDecimal | number;
 };
 ```
 
@@ -8003,9 +8102,15 @@ new NumericValue(): NumericValue
 im: number;
 ```
 
-The imaginary part of this numeric value.
+The imaginary part of this numeric value, as the double nearest to it.
 
 Can be negative, zero or positive.
+
+This is a PROJECTION for computations in doubles. It is `0` when the
+true imaginary part is too small for a double (`10^{-800}`) and
+`±Infinity` when it is too large (`10^{800}`). So do not use it to decide
+whether the value is complex (use `isComplex`), nor whether the
+imaginary part is finite or an integer.
 
 </MemberCard>
 
@@ -8050,6 +8155,23 @@ Can be negative, 0 or positive.
 ##### NumericValue.bignumRe {#bignumre}
 
 bignum version of .re, if available
+
+</MemberCard>
+
+<MemberCard>
+
+##### NumericValue.isComplex {#iscomplex}
+
+True if the imaginary part of this numeric value is not zero.
+
+This is read from a representation that holds the imaginary part without
+loss (the exact rational of an `ExactNumericValue`), so it is true for an
+imaginary part whose double projection `im` is `0`, such as the exact
+`10^{-800}·i`. Use it, not `im !== 0`, to decide whether a value is
+complex.
+
+A value with a NaN imaginary part is NaN; do not rely on `isComplex` to
+detect it.
 
 </MemberCard>
 
@@ -10801,6 +10923,57 @@ _getCompilationTarget(name):
 <MemberCard>
 
 ##### IComputeEngine.number() {#number-1}
+
+###### number(value, options)
+
+```ts
+number(value, options?): Expression
+```
+
+Create a complex number from its real part and its imaginary part, each
+a JavaScript `number` or a `BigDecimal`.
+
+When the engine works above machine precision (`ce.precision` greater
+than 15), a `BigDecimal` part is kept at the precision it holds: a part
+too small or too large for a double (`1e-800`, `1e800`) or with more
+than 16 significant digits is not rounded to a double. This is the
+lossless alternative to `ce.number(ce.complex(re, im))`: `ce.complex()`
+returns a `Complex` object, whose parts are always doubles. At machine
+precision, both parts are rounded to doubles: there
+`{ re: ce.bignum('1e-800'), im: ce.bignum(2) }` gives `2i`.
+
+When the imaginary part is zero (a `number` or a `BigDecimal`), the
+result is a real number.
+
+```js
+ce.precision = 30;
+ce.number({ re: ce.bignum('1e-800'), im: ce.bignum(2) });
+// ➔ a complex number with the real part 1e-800 and the imaginary part 2
+ce.number({ re: 1, im: 0 });
+// ➔ 1
+```
+
+####### value
+
+####### re
+
+`number` \| `BigDecimal`
+
+####### im
+
+`number` \| `BigDecimal`
+
+####### options?
+
+####### metadata?
+
+[`Metadata`](#metadata-1)
+
+####### canonical?
+
+[`CanonicalOptions`](#canonicaloptions)
+
+###### number(value, options)
 
 ```ts
 number(value, options?): Expression
@@ -14208,17 +14381,21 @@ Does `array` reproduce this expression, exactness included?
 For a `List`: `true` when `array` is defined and `ce.list(expr.array)`
 is this list element for element, as the interpreter computes with it.
 A list built by `ce.list()` answers `true` in constant time. An
-ordinary list answers `true` when every element is a float or an
-integer a double holds, and `false` when some element is an exact
-non-integer such as the rational `1/2`: `array` admits it, since a
+ordinary list answers `true` when every element is a float with a
+fraction part or an exact integer a double holds. It answers `false`
+when some element is a float with an integer value, such as `2.0`:
+`ce.list()` boxes the double `2` as the exact integer `2`. It answers
+`false` too when some element is an exact non-integer such as the
+rational `1/2`: `array` admits it, since a
 double holds `0.5` with no rounding, but re-boxing `0.5` gives a float,
 which computes as one (`0.5 / 3` is `0.1666…` where `1/2 ÷ 3` is
 `1/6`). A consumer that must keep exact values exact takes `array` only
 when this is `true`.
 
-For a number: `true` when the number is a float, an integer a double
-holds, `NaN` or an infinity; `false` for an exact non-integer, a
-radical or a complex number.
+For a number: `true` when the number is a float with a fraction part
+or past the safe integers, an exact integer a double holds, `NaN` or an
+infinity; `false` for a float with a safe-integer value (`2.0`), an
+exact non-integer, a radical or a complex number.
 
 `false` for every other expression.
 

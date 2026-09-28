@@ -555,7 +555,7 @@ describe('reductions of a list of machine numbers fold its doubles', () => {
     const big = { num: '9007199254740992' };
     const negBig = { num: '-9007199254740992' };
     const sum = ce.box(['Sum', ['List', 0.5, 0.5, big, negBig]]).evaluate();
-    expect(sum.json).toEqual(0);
+    expect(sum.json).toEqual({ num: '0.0' });
     expect(sum.isExact).toBe(false);
     expect(
       ce.box(['Sum', ['List', 0.5, 0.5, big, negBig, 0.25]]).evaluate().json
@@ -564,7 +564,7 @@ describe('reductions of a list of machine numbers fold its doubles', () => {
       ce
         .box(['Sum', ['List', 0.5, 0.5, 9007199254740992, -9007199254740992]])
         .evaluate().json
-    ).toEqual(0);
+    ).toEqual({ num: '0.0' });
   });
 
   test('a symbol that does not hold a list of machine numbers', () => {

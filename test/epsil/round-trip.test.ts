@@ -609,3 +609,31 @@ describe('EPSIL vs loose math parser', () => {
     expect(epsil('2x')).not.toEqual(loose('2x'));
   });
 });
+
+// An Epsil literal with a fraction part is a float, even when its value is an
+// integer (`2.0`), and an integer literal is exact (`2`). The parsed `{num}`
+// keeps the fraction part, and the serializer writes an integer-valued float
+// with one, so the value is a float again when it is read back (user decision
+// of 2026-09-28, the same rule as for LaTeX and MathJSON).
+describe('EPSIL FLOAT LITERAL ROUND-TRIP', () => {
+  const ce = new ComputeEngine();
+  const read = (src: string) =>
+    ce.box(parseEpsil(src)[0] as MathJsonExpression);
+
+  test.each([
+    ['2.0', '2.0', false],
+    ['-2.0', '-2.0', false],
+    ['1_000.0', '1_000.0', false],
+    ['2.5', '2.5', false],
+    ['2', '2', true],
+  ] as const)('%s', (src, printed, exact) => {
+    const x = read(src);
+    expect(x.isExact).toBe(exact);
+    const text = serializeEpsil(x.json);
+    expect(text).toBe(printed);
+    const y = read(text);
+    expect(y.isExact).toBe(exact);
+    expect(y.isSame(x)).toBe(true);
+  });
+
+});

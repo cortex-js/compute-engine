@@ -594,7 +594,7 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description an
 | — | `D` | `(expression, variables: symbol*) -> expression` | Symbolic partial derivative with respect to one or more variables. |
 | `dSolve` | `DSolve` | `(expression, symbol, symbol) -> expression` | Symbolic differential equation solver. |
 | `derivative` | `Derivative` | `(function, order: number*) -> function` | Derivative operator that returns a derivative function. |
-| `integrate` | `Integrate` | `(function, limits+) -> list<number> \| number` | Symbolic integral with optional bounds. |
+| `integrate` | `Integrate` | `(function, limits+) -> list<number> \| list<tuple> \| number \| tuple` | Symbolic integral with optional bounds. |
 | `interpolatingFunction` | `InterpolatingFunction` | `(list<any>, number?) -> number` | Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `NDSolveFunction`). |
 | `jacobianMatrix` | `JacobianMatrix` | `(any, any?) -> value` | JacobianMatrix(fs, vars): the matrix of partial derivatives |
 | `limit` | `Limit` | `(function, point: number, direction: number?) -> number` | Limit of a function |

@@ -131,8 +131,9 @@ describe('Sum/Product with a non-finite bound fails closed', () => {
 
   it('the interpreter still evaluates the series', () => {
     expect(INFINITE_SUM().N().re).toBeCloseTo(1, 10);
-    // `evaluate()` keeps it symbolic (exactness contract), it does not error
-    expect(INFINITE_SUM().evaluate().operator).toBe('Sum');
+    // `evaluate()` gives the exact closed form of the geometric series
+    // (`2^{-i}` is the ratio 1/2 since 2026-09-28), and does not error.
+    expect(INFINITE_SUM().evaluate().toString()).toBe('1');
   });
 
   it('an explicit iterationBudget is exempt — the budget guard terminates', () => {

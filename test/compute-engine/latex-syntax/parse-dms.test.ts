@@ -83,7 +83,7 @@ describe('Negative Angles', () => {
   test('negative DMS evaluates correctly', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse("-9°30'");
-    expect(expr.simplify().latex).toBe('\\frac{-19\\pi}{360}');
+    expect(expr.simplify().latex).toBe('-\\frac{19\\pi}{360}');
   });
 
   test('negative full DMS', () => {
@@ -275,7 +275,7 @@ describe('DMS Function', () => {
   test('Negate(DMS(9, 30, 15)) works', () => {
     const ce = new ComputeEngine();
     const expr = ce.expr(['Negate', ['DMS', 9, 30, 15]]);
-    expect(expr.simplify().latex).toBe('\\frac{-2\\,281\\pi}{43\\,200}');
+    expect(expr.simplify().latex).toBe('-\\frac{2\\,281\\pi}{43\\,200}');
   });
 
   test('DMS serialization produces DMS notation', () => {

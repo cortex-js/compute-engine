@@ -7,7 +7,7 @@ describe('LATEX SERIALIZING', () => {
     expect(latex(-123)).toMatch('-123');
     expect(latex(-1234567.89)).toMatch('-1\\,234\\,567.89');
     expect(latex(-1234567.89e-123)).toMatchInlineSnapshot(
-      `-123\\,456\\,789\\cdot10^{-125}`
+      `-1.234\\,567\\,89\\cdot10^{-117}`
     );
     expect(ce.expr({ num: '-1234567.890e-123' })).toMatchInlineSnapshot(
       `-1.23456789e-117`
@@ -15,21 +15,25 @@ describe('LATEX SERIALIZING', () => {
 
     // Should remove fractional part. Avoid exponent in range [-7, 20]
     expect(latex('-1234567.89e10')).toMatchInlineSnapshot(
-      `-12\\,345\\,678\\,900\\,000\\,000`
+      `-12\\,345\\,678\\,900\\,000\\,000.0`
     );
     // Keep exponent...
     expect(latex('-1234567.89e23')).toMatchInlineSnapshot(
-      `-123\\,456\\,789\\cdot10^{21}`
+      `-1.234\\,567\\,89\\cdot10^{29}`
     );
 
-    // Should not `1\\times` as `1\\times10^{199}`
-    expect(latex({ num: '1e199' })).toMatchInlineSnapshot(`10^{199}`);
-    // Should not `-1\\times` as `-1\\times10^{-199}`
-    expect(latex({ num: '-1e-199' })).toMatchInlineSnapshot(`-10^{-199}`);
+    // The mantissa `1` is written: `10^{199}` would read back as a power,
+    // not as a number literal
+    expect(latex({ num: '1e199' })).toMatchInlineSnapshot(`1\\cdot10^{199}`);
+    // A float keeps a fraction part: `-1.0\\cdot10^{-199}`, not
+    // `-10^{-199}`, which is read back as an exact rational
+    expect(latex({ num: '-1e-199' })).toMatchInlineSnapshot(
+      `-1.0\\cdot10^{-199}`
+    );
     expect(
       latex({ num: '-123456789012345678901234567890.890e-123' })
     ).toMatchInlineSnapshot(
-      `-12\\,345\\,678\\,901\\,234\\,567\\,890\\,123\\,456\\,789\\,089\\cdot10^{-125}`
+      `-1.234\\,567\\,890\\,123\\,456\\,789\\,012\\,345\\,678\\,908\\,9\\cdot10^{-94}`
     );
     expect(latex({ num: '+Infinity' })).toMatchInlineSnapshot(`\\infty`);
     expect(latex({ num: '-Infinity' })).toMatchInlineSnapshot(`-\\infty`);
@@ -279,7 +283,7 @@ describe('CUSTOM LATEX SERIALIZING', () => {
   test('Custom Multiply', () => {
     const expr = ce.expr(3.123e-200);
     expect(expr.toLatex({ exponentProduct: `\\otimes` })).toMatchInlineSnapshot(
-      `3\\,123\\otimes10^{-203}`
+      `3.123\\otimes10^{-200}`
     );
 
     // Multiply of two numbers
