@@ -3818,7 +3818,9 @@ describe('the arithmetic core declares its domains', () => {
     // `Divide`: these heads have no `canonical` handler, so the signature
     // validation — which is what infers — actually runs. The clamp itself
     // lies between its bounds whatever the operand is (2026-09-26).
-    expect(ce.box(['Clamp', 'cB11', 0, 1]).type.toString()).toBe('real<0..1>');
+    expect(ce.box(['Clamp', 'cB11', 0, 1]).type.toString()).toBe(
+      'real<0..1>'
+    );
     expect(ce.box('cB11').type.toString()).toBe('real | signed_infinity');
   });
 });

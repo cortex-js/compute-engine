@@ -3593,8 +3593,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The values at the exceptional points — `ψ(+∞) = +∞`, `NaN` at `−∞`,
       // `~oo` and an anonymous infinity, `~oo` at the poles — are
       // `polygammaValueAtExceptionalPoint`'s, answered on both routes. A
-      // non-real finite argument stays symbolic: there is no complex
-      // kernel, a capability gap and not an off-carrier point.
+      // non-real finite argument uses the complex kernel of `PolyGamma`
+      // (`polygammaComplex` of order 0).
       signature: '(complex | infinity) -> number',
       examples: ['[Digamma(1), N(Digamma(1))]'],
       nanBehavior: 'propagate',
@@ -3606,9 +3606,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(0, x, engine);
         if (special !== undefined) return special;
-        return shouldNumericize(numericApproximation, x)
-          ? apply(x, digamma, (x) => bigDigamma(engine, x))
-          : undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
+        const result = apply(
+          x,
+          digamma,
+          (x) => bigDigamma(engine, x),
+          (x) => polygammaComplex(0, x)
+        );
+        // As for `PolyGamma` below: a NaN from the complex kernel is a
+        // decline, and the application stays symbolic.
+        if (result?.isNaN === true && isNumber(x) && x.isComplex && !x.isNaN)
+          return undefined;
+        return result;
       },
     },
 
@@ -3632,9 +3641,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(1, x, engine);
         if (special !== undefined) return special;
-        return shouldNumericize(numericApproximation, x)
-          ? apply(x, trigamma, (x) => bigTrigamma(engine, x))
-          : undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
+        const result = apply(
+          x,
+          trigamma,
+          (x) => bigTrigamma(engine, x),
+          (x) => polygammaComplex(1, x)
+        );
+        // As for `PolyGamma` below: a NaN from the complex kernel is a
+        // decline, and the application stays symbolic.
+        if (result?.isNaN === true && isNumber(x) && x.isComplex && !x.isNaN)
+          return undefined;
+        return result;
       },
     },
 
@@ -3652,11 +3670,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `Digamma` above. The exceptional points of the argument are
       // `polygammaValueAtExceptionalPoint`'s and need a KNOWN non-negative
       // order (`+∞` for order 0 at `+∞`, else 0; `~oo` at the poles); a
-      // symbolic or negative order leaves them symbolic. Unlike `Digamma`
-      // and `Trigamma`, a non-real finite argument has a kernel
-      // (`polygammaComplex`, cortex-js/compute-engine#340): ψ⁽ᵐ⁾(z) via
-      // `hurwitzZetaComplex` for m >= 1 (DLMF 5.15.2), its own asymptotic
-      // series for m = 0 (ζ(1, z) is the pole ψ itself sits at).
+      // symbolic or negative order leaves them symbolic. A non-real finite
+      // argument uses `polygammaComplex` (cortex-js/compute-engine#340),
+      // shared with `Digamma` and `Trigamma`: ψ⁽ᵐ⁾(z) = (−1)^(m+1)·m!·ζ(m+1, z)
+      // for m >= 1 (DLMF 5.15.2), an asymptotic series for m = 0, and the
+      // reflection formula left of the imaginary axis.
       signature: '(order: integer, complex | infinity) -> number',
       examples: ['N(PolyGamma(2, 1))'],
       nanBehavior: 'propagate',
@@ -3695,9 +3713,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           (n, x) => bigPolygamma(engine, n, x),
           (n, x) => polygammaComplex(n.re, x)
         );
-        // `polygammaComplex` answers NaN where cancellation leaves no
-        // accurate digits: stay symbolic there rather than report `NaN`.
-        if (result?.isNaN === true && x.im !== 0 && !x.isNaN) return undefined;
+        // `polygammaComplex` answers NaN where it cannot give an accurate
+        // double (the value overflows or underflows a double, the order is
+        // above its limit, or cancellation leaves no accurate digits): stay
+        // symbolic there rather than report `NaN`.
+        if (result?.isNaN === true && isNumber(x) && x.isComplex && !x.isNaN)
+          return undefined;
         return result;
       },
     },

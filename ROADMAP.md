@@ -122,6 +122,41 @@ GPU. Fix: port `numerics/special-functions.ts`'s real `digamma`/`trigamma`/
 `polygamma` (recurrence + asymptotic series, the same shape already used for
 `_gpu_gamma`) to GLSL/WGSL helpers and wire them into `GPU_FUNCTIONS`.
 
+### `HurwitzZeta(s, a)` at a complex `a` far left of the imaginary axis does not finish (OPEN — found 2026-09-28 reviewing #340)
+
+`HurwitzZeta(2, -10^7+i).N()` takes 0.9 s and `HurwitzZeta(2, -10^12+i).N()`
+does not finish. `hurwitzEMComplex` (`numerics/numeric-complex.ts`) sums one
+direct term for each unit of −Re(a) before its Euler-Maclaurin tail. The same
+loop made `PolyGamma(m, z)` hang at a large negative Re(z); `polygammaComplex`
+now avoids it with the reflection formula, which applies to an integer `s`
+only. Fix: for an integer `s >= 2`, use the same reflection
+(ζ(s, a) = (−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s−1)!); for another `s`, a representation whose
+cost does not grow with −Re(a), or a cost limit that leaves the application
+symbolic.
+
+### `PolyGamma(m, z)` of an order above 100 stays symbolic close to a half-integer on the real axis (OPEN — found 2026-09-28 reviewing #340)
+
+`PolyGamma(120, -1/2 + 10^{-5} i).N()` stays unevaluated, although mpmath
+gives a value near 8.6e232, inside the range of a double (at `Im(z) = 10^{-4}`
+it answers). For `Re(z) < 0`, `polygammaComplex` needs the m-th derivative
+of cot(πz). Close to a half-integer with a small `Im(z)`, the two series it
+can use for that derivative both lose all their digits (the two halves of
+the partial-fraction series are near-conjugates, and the Fourier series
+needs too many terms), and its third form, a polynomial in cot(πz), is used
+only up to order 100 because its coefficients overflow a double from order
+120 on. Fix: carry the polynomial coefficients in scaled form (a mantissa
+and a power-of-two exponent, as `ScaledComplex` does), then raise
+`COT_POLYNOMIAL_MAX_ORDER` to `POLYGAMMA_MAX_ORDER`.
+
+### `PolyGamma` of a very high order at a real argument does not finish (OPEN — found 2026-09-28 reviewing #340)
+
+At the default precision, `PolyGamma(100000, 2.5).N()` runs for more than
+20 seconds (order 1000 takes 17 ms): the big-decimal kernel `bigPolygamma`
+has no limit on the order. At machine precision the same expression answers
+`NaN`, although the value is only too large for a double. The complex kernel
+`polygammaComplex` leaves an order above 10 000 symbolic, and a value outside
+the range of a double symbolic. Fix: give the real route the same limits.
+
 ### Next items to pick up, ranked (2026-09-23)
 
 The entries below are the ones judged worth starting next, most valuable first.
