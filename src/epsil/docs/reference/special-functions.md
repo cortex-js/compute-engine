@@ -103,4 +103,4 @@ Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x).
 
 MathJSON `PolyLog` · `(complex | infinity, complex | infinity) -> number`
 
-Polylogarithm Liₛ(z) = Σ_&#123;k≥1&#125; zᵏ/kˢ.
+Polylogarithm Liₛ(z) = Σ_&#123;k≥1&#125; zᵏ/kˢ, at any real or complex order s.

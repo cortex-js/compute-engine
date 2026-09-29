@@ -927,6 +927,12 @@ Base-2 Logarithm
 // ➔ [3,1.58496250072115618145]
 ```
 
+### lerchPhi
+
+MathJSON `LerchPhi` · `(complex, complex, complex) -> number`
+
+Lerch transcendent Φ(z,s,a) = Σ_&#123;k=0&#125;^∞ zᵏ(k+a)^&#123;-s&#125;
+
 ### lg
 
 MathJSON `Lg` · `(number) -> number`
