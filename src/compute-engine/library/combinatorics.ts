@@ -11,7 +11,11 @@ import type {
   SymbolDefinitions,
 } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
-import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  indeterminateFormAnswer,
+} from '../boxed-expression/type-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { negativeSign, nonNegativeSign } from '../boxed-expression/sgn.js';
 import { operandNonFiniteNumber, operandSgn } from './type-handlers.js';
@@ -156,22 +160,27 @@ function binomialBigint(
  *   NON-INTEGER `k` the value oscillates in sign and modulus between
  *   consecutive poles without settling (`C(−10⁶−0.1, 0.5) = 3473`,
  *   `C(−10⁶−0.5, 0.5) = 0`, `C(−10⁶−0.9, 0.5) = −3473`), so there is no
- *   limit: `NaN`.
+ *   limit: `Indeterminate` (`NaN` for a float `k`).
  * - `C(~oo, k)`: the polynomial arm again. `1` for `k = 0` and `~oo` for a
  *   positive integer `k` — the modulus diverges in every direction while the
  *   direction itself does not settle. For a non-integer `k` the negative
- *   real axis is again a line of poles, so there is no limit: `NaN`.
+ *   real axis is again a line of poles, so there is no limit:
+ *   `Indeterminate` (`NaN` for a float `k`).
  * - `C(n, ±∞)` is decided by the same asymptotic read in `k`:
  *   `|C(n, k)| ~ |Γ(n+1)/π|·|sin(π(n−k+1))|·k^(−n−1)`. For a finite real
  *   `n > −1` the power wins and the value is `0` (`C(0.5, −10⁶) =
  *   2.8·10⁻¹⁰`); for `n ≤ −1` the power diverges while the sine oscillates,
- *   so there is no limit: `NaN` (`C(−2.5, 10⁶) = 7.5·10⁸` against
- *   `C(−2.5, 10⁶+0.5) = 0`).
- * - `C(n, ~oo)`: `NaN`. The modulus wanders between 0 and `+∞` with the
+ *   so there is no limit: `Indeterminate`, or `NaN` for a float `n`
+ *   (`C(−2.5, 10⁶) = 7.5·10⁸` against `C(−2.5, 10⁶+0.5) = 0`).
+ * - `C(n, ~oo)`: `Indeterminate` (`NaN` for a float `n`). The modulus wanders between 0 and `+∞` with the
  *   direction (`C(5, 10⁶·e^{i}) = 10¹¹⁴⁸⁰⁴⁸` against
  *   `C(5, −10⁶) = 1.5·10⁻⁴⁴`).
- * - Two infinite operands, or an anonymous infinity such as `∞ + i` in
- *   either slot: `NaN` (the uniform rule of the special-function heads).
+ * - Two infinite operands: `Indeterminate`. An anonymous infinity such as
+ *   `∞ + i` in either slot (a float literal): `NaN`, the uniform rule of the
+ *   special-function heads.
+ *
+ * `Indeterminate` is the exact answer to a form with no value; a float
+ * operand makes it `NaN` (`indeterminateFormAnswer()`).
  *
  * A finite operand that is not a real literal (a complex number, a symbol)
  * leaves the application symbolic: nothing here is proven for it.
@@ -189,7 +198,8 @@ function binomialValueAtInfinity(
   // The zero function: `C(n, k) = 0` for every negative integer `k`.
   if (pk === undefined && isNegativeIntegerLiteral(k)) return ce.Zero;
 
-  if (pn !== undefined && pk !== undefined) return ce.NaN;
+  if (pn !== undefined && pk !== undefined)
+    return indeterminateFormAnswer(ce, [n, k]);
 
   if (pn !== undefined) {
     // `n` is infinite, `k` is finite.
@@ -199,7 +209,7 @@ function binomialValueAtInfinity(
       return k.isPositive === true ? ce.PositiveInfinity : ce.Zero;
     // `-oo` and `~oo`: only the polynomial (non-negative integer `k`) arm
     // has a limit; the negative-integer `k` is already answered above.
-    if (k.isInteger !== true) return ce.NaN;
+    if (k.isInteger !== true) return indeterminateFormAnswer(ce, [n, k]);
     if (pn === '~oo') return ce.ComplexInfinity;
     const ki = toBigint(k);
     if (ki === null) return undefined;
@@ -207,10 +217,10 @@ function binomialValueAtInfinity(
   }
 
   // `k` is infinite, `n` is finite.
-  if (pk === '~oo') return ce.NaN;
+  if (pk === '~oo') return indeterminateFormAnswer(ce, [n, k]);
   if (!isRealLiteral(n)) return undefined;
   if (n.isGreater(-1) === true) return ce.Zero;
-  if (n.isLessEqual(-1) === true) return ce.NaN;
+  if (n.isLessEqual(-1) === true) return indeterminateFormAnswer(ce, [n, k]);
   return undefined;
 }
 
@@ -434,22 +444,27 @@ function negativeGammaSign(
  *   `(a)_k = 1/((a−1)⋯(a+k))`, which has no pole for large `|a|`
  *   (`(−10⁶−½)_{−2} = 10⁻¹²`). For a NON-INTEGER `k` the poles of `Γ(a+k)`
  *   sit between the zeros of `1/Γ(a)`, so the value alternates between `0`
- *   and an infinite value without settling: `NaN` (`(−10⁶−¼)_{0.5} = −1000`,
+ *   and an infinite value without settling: `Indeterminate`, or `NaN` for a
+ *   float `k` (`(−10⁶−¼)_{0.5} = −1000`,
  *   `(−10⁶−½)_{0.5} = ∞`, `(−10⁶−¾)_{0.5} = +1000`).
  * - `(a)_{+∞}`: `0` when `a` is a non-positive integer (`1/Γ(a) = 0`), and
  *   otherwise `sign(Γ(a))·∞` — `+∞` for `a > 0`, and the alternating sign of
  *   `Γ` below zero (`(−2.5)_{10⁶}` is negative, `Γ(−2.5) = −0.95`).
- * - `(a)_{−∞}`: `0` when `a` is a non-positive integer, `NaN` otherwise.
+ * - `(a)_{−∞}`: `0` when `a` is a non-positive integer, `Indeterminate`
+ *   otherwise (`NaN` for a float `a`).
  *   `Γ(a+k)` has a pole at every `k` with `a + k` a non-positive integer, so
  *   for any other `a` the value is unbounded arbitrarily far out
  *   (`(0.5)_{−10⁶} = 2·10⁻⁵⁵⁶⁵⁷⁰⁶` but `(0.5)_{−10⁶−½} = ∞`); the poles are
  *   cancelled by the pole of `Γ(a)` exactly when `a` is a non-positive
  *   integer.
- * - `(a)_{~oo}`: `NaN`. `|Γ(a+k)|` decays like `e^{−π|Im k|/2}` in the
+ * - `(a)_{~oo}`: `Indeterminate` (`NaN` for a float `a`). `|Γ(a+k)|` decays like `e^{−π|Im k|/2}` in the
  *   imaginary direction and diverges along the positive real axis, so the
  *   modulus has no limit.
- * - Two infinite operands, or an anonymous infinity such as `∞ + i` in
- *   either slot: `NaN`.
+ * - Two infinite operands: `Indeterminate`. An anonymous infinity such as
+ *   `∞ + i` in either slot (a float literal): `NaN`.
+ *
+ * `Indeterminate` is the exact answer to a form with no value; a float
+ * operand makes it `NaN` (`indeterminateFormAnswer()`).
  */
 function pochhammerValueAtInfinity(
   a: Expression,
@@ -460,7 +475,8 @@ function pochhammerValueAtInfinity(
   const pk = infinitePoint(k);
   if (pa === undefined && pk === undefined) return undefined;
   if (pa === 'anonymous' || pk === 'anonymous') return ce.NaN;
-  if (pa !== undefined && pk !== undefined) return ce.NaN;
+  if (pa !== undefined && pk !== undefined)
+    return indeterminateFormAnswer(ce, [a, k]);
 
   if (pa !== undefined) {
     // `a` is infinite, `k` is finite.
@@ -468,7 +484,7 @@ function pochhammerValueAtInfinity(
     if (k.isSame(0)) return ce.One;
     if (pa === '+oo')
       return k.isPositive === true ? ce.PositiveInfinity : ce.Zero;
-    if (k.isInteger !== true) return ce.NaN;
+    if (k.isInteger !== true) return indeterminateFormAnswer(ce, [a, k]);
     if (k.isNegative === true) return ce.Zero;
     if (pa === '~oo') return ce.ComplexInfinity;
     const ki = toBigint(k);
@@ -477,10 +493,10 @@ function pochhammerValueAtInfinity(
   }
 
   // `k` is infinite, `a` is finite.
-  if (pk === '~oo') return ce.NaN;
+  if (pk === '~oo') return indeterminateFormAnswer(ce, [a, k]);
   if (!isRealLiteral(a)) return undefined;
   if (isNonPositiveIntegerLiteral(a)) return ce.Zero;
-  if (pk === '-oo') return ce.NaN;
+  if (pk === '-oo') return indeterminateFormAnswer(ce, [a, k]);
   if (a.isPositive === true) return ce.PositiveInfinity;
   const sign = negativeGammaSign(a, ce);
   if (sign === undefined) return undefined;

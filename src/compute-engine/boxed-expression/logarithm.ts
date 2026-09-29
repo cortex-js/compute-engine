@@ -1,6 +1,6 @@
 import type { Expression } from '../global-types.js';
 import type { NumericValue } from '../numeric-value/types.js';
-import { isNumber, isSymbol } from './type-guards.js';
+import { isNumber, isSymbol, indeterminateFormAnswer } from './type-guards.js';
 import { isImaginaryPartFinite } from './imaginary-part.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
 
@@ -112,9 +112,11 @@ function machineLnOfBase(base: Expression): number {
  * extended arithmetic (ruled 2026-09-01). The building blocks are
  * `ln 0 = −∞`, `ln 1 = 0`, `ln(+∞) = +∞`, `ln(−∞) = ∞ + iπ`,
  * `ln(~oo) = ~oo` (the modulus grows without bound in every direction), and
- * the quotient rules `finite/0 = ~oo`, `finite/∞ = 0`, `∞/∞ = NaN`,
- * `0/0 = NaN`. So `Log(8, 1) = ~oo`, `Log(8, 0) = 0`, `Log(0, 1/2) = +∞`,
- * `Log(+∞, +∞) = NaN`, `Log(1, 1) = NaN`, `Log(8, ~oo) = 0`.
+ * the quotient rules `finite/0 = ~oo`, `finite/∞ = 0`, and the
+ * indeterminate forms `∞/∞` and `0/0` (`Indeterminate`, or `NaN` with a
+ * float operand). So `Log(8, 1) = ~oo`, `Log(8, 0) = 0`,
+ * `Log(0, 1/2) = +∞`, `Log(+∞, +∞) = Indeterminate`,
+ * `Log(1, 1) = Indeterminate`, `Log(8, ~oo) = 0`.
  *
  * `NaN` in either operand propagates. An operand with no known value has
  * no exceptional-point answer, with one generic-point exception: `Log(1, b)`
@@ -163,12 +165,18 @@ export function logarithmAtExceptionalPoint(
     return undefined;
   }
 
-  // `ln base = 0` (base 1): a non-zero numerator over 0 is `~oo`; `0/0` NaN.
-  if (d === 'one') return n === 'one' ? ce.NaN : ce.ComplexInfinity;
+  // `ln base = 0` (base 1): a non-zero numerator over 0 is `~oo`; `0/0` is
+  // the indeterminate form (`Indeterminate`, or `NaN` with a float operand,
+  // see `indeterminateFormAnswer()`).
+  if (d === 'one')
+    return n === 'one'
+      ? indeterminateFormAnswer(ce, [x, base!])
+      : ce.ComplexInfinity;
 
   // An infinite `ln base` (base 0, ±∞, or ~oo): a finite numerator gives 0,
-  // an infinite one the indeterminate `∞/∞`.
-  if (isInfinitePoint(d!)) return isInfinitePoint(n) ? ce.NaN : zero;
+  // an infinite one the indeterminate form `∞/∞`.
+  if (isInfinitePoint(d!))
+    return isInfinitePoint(n) ? indeterminateFormAnswer(ce, [x, base!]) : zero;
 
   // A finite base other than 0 and 1: `ln base` is finite and non-zero.
   if (n === 'finite') return undefined;

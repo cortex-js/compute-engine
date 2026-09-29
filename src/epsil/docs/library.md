@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 680 functions and constants of the standard library, by category.
+The 681 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -30,7 +30,7 @@ To search the library by concept rather than by name, use
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
 - [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
-- [Arithmetic](#arithmetic) — 98 definitions · [full reference](/epsil/reference/arithmetic/)
+- [Arithmetic](#arithmetic) — 99 definitions · [full reference](/epsil/reference/arithmetic/)
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
 - [Calculus](#calculus) — 19 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 17 definitions · [full reference](/epsil/reference/polynomials/)
@@ -99,7 +99,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `N` | `(any, integer?) -> unknown` | N(expr): numerically evaluate an expression |
 | — | `NamedArgument` | `(string, any) -> nothing` | NamedArgument(name, value): one named argument of a call (Epsil |
 | `nothing` | `Nothing` | variable `nothing` | The absence of a value; the sole member of the unit type. |
-| `numberFrom` | `NumberFrom` | `(string, base: (integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN". |
+| `numberFrom` | `NumberFrom` | `(string, base: (integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |
 | — | `Object` | `(any, string?) -> unknown` | Provenance head for the snapshot of a mutable object: `["Object", <record>, "'TypeName'"]`. |
 | — | `OverParen` | `(any+) -> expression` | Over-paren accent (`\overparen{BC}`) — opaque typed head; not evaluated. |
 | `padEnd` | `PadEnd` | `(string, n: integer, pad: string?) -> string` | PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
@@ -483,6 +483,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `im` | `Im` | `(complex \| infinity) -> number` | `Im` is an alias for `Imaginary`, which is the preferred name. |
 | `imaginary` | `Imaginary` | `(complex \| infinity) -> number` | Imaginary part of a complex number. |
 | `imaginaryUnit` | `ImaginaryUnit` | constant `imaginary` = `i` | The imaginary unit, whose square is −1. |
+| — | `Indeterminate` | constant `number` = `Indeterminate` | Indeterminate, the exact answer to an indeterminate form such as 0/0: a number with no value. |
 | `infimum` | `Infimum` | `(value*) -> number` | Like Min, but defined for open sets |
 | `interpret` | `Interpret` | `(any) -> any` | Interpret a notational expression as its mathematical meaning. |
 | `isComposite` | `IsComposite` | `(number) -> boolean` | `IsComposite(n)` returns `True` if `n` is a composite number |
@@ -504,7 +505,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `min` | `Min` | `(value+) -> number` | Minimum of two or more numbers |
 | — | `Mod` | `(real, real) -> real` | Modulo: the remainder of the floored division of x by y. |
 | — | `Multiply` | `(number*) -> number` | Product of two or more values. |
-| — | `NaN` | constant `number` = `NaN` | Not a Number, the result of an undefined or unrepresentable numeric operation. |
+| — | `NaN` | constant `number` = `NaN` | Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0. |
 | — | `Negate` | `(complex \| infinity) -> number` | Additive Inverse |
 | `negativeInfinity` | `NegativeInfinity` | constant `-oo` = `-oo` | Negative infinity (−∞). |
 | `numerator` | `Numerator` | `(number) -> nothing \| number` | Numerator of an expression |

@@ -11,7 +11,10 @@ import type {
 import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
-import { isNumber } from '../boxed-expression/type-guards.js';
+import {
+  isNumber,
+  indeterminateFormAnswer,
+} from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 // Every `type` handler in this file is on the `'types'` (operand-descriptor)
 // shape, so the helpers all come from the descriptor-shape module. The
@@ -789,7 +792,9 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const point = infinitePoint(x);
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.Zero;
-        if (point !== undefined) return ce.NaN;
+        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
+        // infinity such as `∞ + i`, a float literal).
+        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the E₁-based kernel.
@@ -860,7 +865,9 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const point = infinitePoint(x);
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.ComplexInfinity;
-        if (point !== undefined) return ce.NaN;
+        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
+        // infinity such as `∞ + i`, a float literal).
+        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         // li is real only for x ≥ 0; stay symbolic for complex/negative.
         if (x.isComplex || x.isNegative) return undefined;
         if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);

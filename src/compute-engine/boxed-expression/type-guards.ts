@@ -174,6 +174,37 @@ export function nanOperandAnswer(
   return sawIndeterminate ? ce.Indeterminate : ce.NaN;
 }
 
+/**
+ * The answer of an exact indeterminate form, such as `0/0`, `0·∞`, `∞ − ∞`,
+ * `0^0` or `Mod(5, 0)`: an operation whose operands have values but whose
+ * result has none. The answer is `Indeterminate` when every operand is exact
+ * (an exact number, an infinity, or `Indeterminate` itself), and `NaN` when
+ * any operand is inexact (`isInexactOperand()`: a float or the `NaN`
+ * literal), absent (`Missing`, `Undefined`) or a symbol whose value is
+ * `NaN`. So `0/0` is `Indeterminate`, and `0/0.0` and `0.0·∞` are `NaN`, as a
+ * float operand makes a numeric result a float.
+ *
+ * `ops` are the operands of the form, not the arguments of the whole
+ * expression. A caller must use this only where the form has no value: a
+ * pole (`5/0` is `~oo`), a value outside the domain of a function, or a
+ * failure of a numeric kernel stays `NaN`.
+ *
+ * Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §6, Phase 2.
+ */
+export function indeterminateFormAnswer(
+  ce: Expression['engine'],
+  ops: ReadonlyArray<Expression>
+): Expression {
+  for (const x of ops) {
+    if (isNumber(x)) {
+      if (isInexactOperand(x)) return ce.NaN;
+    } else if (isSymbol(x) && (isAbsentSymbol(x) || x.isNaN === true)) {
+      return ce.NaN;
+    }
+  }
+  return ce.Indeterminate;
+}
+
 export function isFunction(
   expr: Expression | null | undefined,
   operator?: string

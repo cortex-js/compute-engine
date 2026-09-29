@@ -165,11 +165,12 @@ apart.
   direction. Arithmetic on a signed
   infinity (`oo`, `-oo`) gives a signed infinity.
 - An **indeterminate form**, such as `0/0`, `oo - oo` or `oo * 0`, gives
-  `NaN`.
+  `Indeterminate`: an exact question with no value. With a float operand
+  (`0.0/0.0`), and under `N`, it gives `NaN`.
 
 ```epsil
 [1/0, 0/0, oo + 1, oo - oo, oo * 0, 1/oo]
-// ➔ [~oo, NaN, +oo, NaN, NaN, 0]
+// ➔ [~oo, Indeterminate, +oo, Indeterminate, Indeterminate, 0]
 ```
 
 `NaN` propagates: a numeric function of `NaN` is `NaN`. This is true for

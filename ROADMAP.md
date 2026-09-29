@@ -790,12 +790,77 @@ rational with a zero denominator also makes `[n, 0]` `NaN` for `n ≠ 0`
 integer is `NaN`, because the rational helpers map any non-finite machine
 rational to `NaN` (`numerics/rationals.ts:192`, `:208`, `:213`):
 `inv(0).mul(2)` is `NaN`, not `Infinity`. No boxed route reaches these
-today (the boxed folds answer `~oo` and `∞` before the lane is used), but
-they are a trap for Phase 2 of the plan above, which switches exact
-producers of `NaN` to `Indeterminate` one site at a time: a pole or an
-infinity that becomes `NaN` in the exact lane must not be read as an
-indeterminate form. The fix gives `n/0` the value `±∞` (or `~oo` for a
-complex `n`) and lets the rational helpers carry a signed infinity.
+today (the boxed folds answer `~oo` and `∞` before the lane is used).
+Phase 2 of the plan above switched no producer that routes through the
+lane, so a pole is not read as an indeterminate form (`5/0`,
+`Rational(5, 0)`, `Divide(5, 0)`, `1/0` and `-1/0` are still `~oo`, pinned
+in `test/compute-engine/indeterminate.test.ts`); a later change that maps
+an exact-lane `NaN` to `Indeterminate` must fix this first. The fix gives
+`n/0` the value `±∞` (or `~oo` for a complex `n`) and lets the rational
+helpers carry a signed infinity.
+
+### Three special-function points answer `NaN` where a signed or complex infinity exists (OPEN, decision — found 2026-09-29 by Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
+
+Three values at an infinite point are `NaN` by a recorded ruling (Phase F
+batch 8 of `docs/plans/2026-08-30-error-model-implementation.md`) because
+the answer depends on the other operand, although for given operands a
+limit exists: `Gamma(s, −∞)` (for a positive integer `s`,
+`Γ(n, x) = (n−1)!·e^{−x}·Σ_{k<n} x^k/k!` gives `(−1)^{n−1}·∞`:
+`Γ(2, −100) = −2.7·10⁴⁵`, `Γ(3, −100) = +2.6·10⁴⁷`; for a non-integer `s`
+the value is complex with an unbounded modulus, `~oo`); `Beta(+∞, b)` for a
+`b` with a non-positive real part (`B(a, b) ~ Γ(b)·a^{−b}`, so
+`B(+∞, −1/2) = −∞` since `Γ(−1/2) = −2√π`); `GammaRegularized(a, −∞)` for
+a non-integer `a` (complex, with an unbounded modulus). Phase 2 kept `NaN`
+there, because `Indeterminate` would state that the form has no value.
+Example today: `Gamma(2, -oo)` → `NaN`. Options: (a) answer the limit
+(`-oo` for `Gamma(2, −∞)`, `~oo` for a non-integer `s`), (b) keep `NaN`
+(nothing changes).
+
+### A float absorbed by an infinity is not seen by the float rule of `Indeterminate` (OPEN, small — found 2026-09-29 in the review of Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
+
+An indeterminate form with a float operand answers `NaN` (`0.0·∞` is `NaN`),
+but the rule reads the operands of the form as they are when the form is
+built. When a float was first absorbed by an infinity, it is gone by then:
+`Fract(∞ + 0.5)` and `0·(∞ + 0.5)` evaluate to `Indeterminate`, because
+`∞ + 0.5` is the exact `∞` before `Fract` or the product sees it. The
+absorption itself is correct (`∞ + 0.5` is `∞`). A fix would have `∞ + x`
+with a float `x` keep a mark that it came from a float, which the infinity
+literal cannot carry today. Both answers are pinned in
+`test/compute-engine/indeterminate.test.ts`.
+
+### `Remainder` and `Variance` are typed or computed as if every datum were finite (OPEN, small — found 2026-09-29 in the review of Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
+
+`Remainder(5, 0)` evaluates to `Indeterminate` (a zero divisor, as
+`Mod(5, 0)`), but its type is `integer`: the type handler of the polytype
+signature `(T, T) -> T` does not add `| nan` for a divisor that may be 0,
+where `Mod` does through its `definedWhen` predicate. `Mod` could not be
+followed exactly: the codomain marker of `definedWhen` is read from the
+declared result, and the polytype `T` is not provably a number, so it
+answered `Missing`. Separately, `Variance([+∞, 1])` is `NaN` from the machine
+kernel, where the deviations `∞ − ∞` make it the indeterminate form (as
+`Mean([+∞, −∞])` now answers `Indeterminate`); the same holds for the other
+statistics that subtract the mean.
+
+### `simplify()` leaves a function of `NaN` or `Indeterminate` inert (OPEN, small — found 2026-09-29 by Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
+
+`ce.box(["Sin", "NaN"]).simplify()` is `sin(NaN)` and
+`ce.box(["Sin", "Indeterminate"]).simplify()` is `sin(Indeterminate)`, where
+`evaluate()` answers `NaN` and `Indeterminate` through the propagate gate of
+`boxed-function.ts`. The simplifier does not run the gate. The question is
+decided, and `docs/ERROR-MODEL.md` §1 forbids an inert expression as its
+final answer. (A sum or a product with such a term does simplify to the
+value: `x + 0/0` simplifies to `Indeterminate`.)
+
+### An exact `0` times a float is exact through `.mul()` in one operand order only (OPEN, small — found 2026-09-29 by Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
+
+`ce.Zero.mul(ce.number(2.5))` is the exact `0`, and
+`ce.number(2.5).mul(ce.Zero)` is the float `0.0`
+(`boxed-expression/boxed-number.ts`, `BoxedNumber.mul`). The `Multiply`
+operator answers the exact `0` in both orders (`Multiply(0, 2.5)` and
+`Multiply(2.5, 0)`), as Mathematica does. The two orders of the method
+should agree. (The pairwise fold that reaches the exact `0` also hid the
+float factor of `0 · 2.5 · ∞`; Phase 2 reads the operands of an
+`Indeterminate` product again in `mulImpl`, so that product is `NaN`.)
 
 ### `Integrate(0/0, x)` is `NaN` under `evaluate()` but inert under `.N()` (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
 

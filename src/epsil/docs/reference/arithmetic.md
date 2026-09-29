@@ -179,11 +179,12 @@ apart.
   direction. Arithmetic on a signed
   infinity (`oo`, `-oo`) gives a signed infinity.
 - An **indeterminate form**, such as `0/0`, `oo - oo` or `oo * 0`, gives
-  `NaN`.
+  `Indeterminate`: an exact question with no value. With a float operand
+  (`0.0/0.0`), and under `N`, it gives `NaN`.
 
 ```epsil
 [1/0, 0/0, oo + 1, oo - oo, oo * 0, 1/oo]
-// ➔ [~oo, NaN, +oo, NaN, NaN, 0]
+// ➔ [~oo, Indeterminate, +oo, Indeterminate, Indeterminate, 0]
 ```
 
 `NaN` propagates: a numeric function of `NaN` is `NaN`. This is true for
@@ -816,6 +817,17 @@ The imaginary unit, whose square is −1.
 // ➔ [-1,3i]
 ```
 
+### Indeterminate
+
+constant `number` = `Indeterminate`
+
+Indeterminate, the exact answer to an indeterminate form such as 0/0: a number with no value. Its numeric approximation is NaN.
+
+```epsil
+[0/0, Indeterminate + 1, N(0/0)]
+// ➔ [Indeterminate,Indeterminate,NaN]
+```
+
 ### infimum
 
 MathJSON `Infimum` · `(value*) -> number`
@@ -1050,10 +1062,10 @@ Product of two or more values.
 
 constant `number` = `NaN`
 
-Not a Number, the result of an undefined or unrepresentable numeric operation.
+Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0. An exact form with no value, such as 0/0, is Indeterminate.
 
 ```epsil
-[NaN + 1, 0/0]
+[NaN + 1, 0.0/0.0]
 // ➔ [NaN,NaN]
 ```
 

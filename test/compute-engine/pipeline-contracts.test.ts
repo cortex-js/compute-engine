@@ -569,10 +569,10 @@ describe('CONTRACT 4: re-binding of a cached boxed expression', () => {
     const cached = ce.box(json as any); // canonicalizes to 1 (generic-symbol fold)
     expect(cached.json).toBe(1);
     ce.assign('x', 0);
-    // Cached already folded to 1 — it cannot observe the 0/0 = NaN.
+    // Cached already folded to 1 — it cannot observe the indeterminate 0/0.
     expect(cached.evaluate().toString()).toBe('1');
-    // Re-boxing after the assignment yields NaN.
-    expect(ce.box(json as any).evaluate().toString()).toBe('NaN');
+    // Re-boxing after the assignment yields the indeterminate form.
+    expect(ce.box(json as any).evaluate().toString()).toBe('Indeterminate');
   });
 
   test('re-box REQUIRED: Subscript(a,1) stays a symbol until a is a collection', () => {

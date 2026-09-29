@@ -228,14 +228,16 @@ describe('Canonicalization: Operations Involving 0', () => {
   test('0*pi = 0', () => checkSimplify('0*\\pi', 0));
   test('x-0 = x', () => checkSimplify('x-0', 'x'));
   test('sin(x)+0 = sin(x)', () => checkSimplify('\\sin(x)+0', '\\sin(x)'));
-  test('0/0 = NaN', () => checkSimplify('0/0', NaN));
+  test('0/0 = Indeterminate', () =>
+    checkSimplify('0/0', '\\operatorname{Indeterminate}'));
   test('2/0 = ComplexInfinity', () => checkSimplify('2/0', '\\tilde\\infty'));
   test('0^pi = 0', () => checkSimplify('0^\\pi', 0));
   test('0^{-2} = complex infinity', () =>
     checkSimplify('0^{-2}', '\\tilde\\infty'));
   test('0^{-pi} = complex infinity', () =>
     checkSimplify('0^{-\\pi}', '\\tilde\\infty'));
-  test('0^0 = NaN', () => checkSimplify('0^0', NaN));
+  test('0^0 = Indeterminate', () =>
+    checkSimplify('0^0', '\\operatorname{Indeterminate}'));
   test('2^0 = 1', () => checkSimplify('2^0', 1));
   test('pi^0 = 1', () => checkSimplify('\\pi^0', 1));
   test('0/2 = 0', () => checkSimplify('0/2', 0));
@@ -340,8 +342,8 @@ describe('Canonicalization: Division and Infinity', () => {
 });
 
 describe('Canonicalization: Addition/Subtraction and Infinity', () => {
-  test('infinity - infinity = NaN', () =>
-    checkSimplify('\\infty-\\infty', NaN));
+  test('infinity - infinity = Indeterminate', () =>
+    checkSimplify('\\infty-\\infty', '\\operatorname{Indeterminate}'));
   test('-infinity - infinity = -infinity', () =>
     checkSimplify('-\\infty-\\infty', '-\\infty'));
   test('infinity + infinity = infinity', () =>
@@ -722,9 +724,12 @@ describe('Rules: Powers and Infinity', () => {
     checkSimplify('(-\\infty)^{1/3}', '-\\infty'));
   test('infinity^{1/3} = infinity', () =>
     checkSimplify('\\infty^{1/3}', '\\infty'));
-  test('1^{-infinity} = NaN', () => checkSimplify('1^{-\\infty}', NaN));
-  test('1^{infinity} = NaN', () => checkSimplify('1^{\\infty}', NaN));
-  test('infinity^0 = NaN', () => checkSimplify('\\infty^0', NaN));
+  test('1^{-infinity} = Indeterminate', () =>
+    checkSimplify('1^{-\\infty}', '\\operatorname{Indeterminate}'));
+  test('1^{infinity} = Indeterminate', () =>
+    checkSimplify('1^{\\infty}', '\\operatorname{Indeterminate}'));
+  test('infinity^0 = Indeterminate', () =>
+    checkSimplify('\\infty^0', '\\operatorname{Indeterminate}'));
   test('infinity^{-3} = 0', () => checkSimplify('\\infty^{-3}', '0'));
   test('(-infinity)^{-5} = 0', () => checkSimplify('(-\\infty)^{-5}', '0'));
   test('infinity^{1.4} = infinity', () =>
@@ -733,8 +738,8 @@ describe('Rules: Powers and Infinity', () => {
 });
 
 describe('Rules: Logs and Infinity', () => {
-  test('log_infinity(infinity) = NaN', () =>
-    checkSimplify('\\log_\\infty(\\infty)', NaN));
+  test('log_infinity(infinity) = Indeterminate', () =>
+    checkSimplify('\\log_\\infty(\\infty)', '\\operatorname{Indeterminate}'));
   // Note: this test case has a parse error in original (mismatched braces)
   // '\\log_{1/5}(\\infty}' — skipping
   test('log_{0.5}(infinity) = -infinity', () =>
@@ -747,15 +752,17 @@ describe('Rules: Roots and Infinity', () => {
 });
 
 describe('Rules: Multiplication and Infinity', () => {
-  test('0*infinity = NaN', () => checkSimplify('0*\\infty', NaN));
-  test('0*(-infinity) = NaN', () => checkSimplify('0*(-\\infty)', NaN));
+  test('0*infinity = Indeterminate', () =>
+    checkSimplify('0*\\infty', '\\operatorname{Indeterminate}'));
+  test('0*(-infinity) = Indeterminate', () =>
+    checkSimplify('0*(-\\infty)', '\\operatorname{Indeterminate}'));
   test('(-0.5)*infinity = -infinity', () =>
     checkSimplify('(-0.5)*\\infty', '-\\infty'));
 });
 
 describe('Rules: Division and Infinity', () => {
-  test('infinity/infinity = NaN', () =>
-    checkSimplify('\\infty/\\infty', '\\operatorname{NaN}'));
+  test('infinity/infinity = Indeterminate', () =>
+    checkSimplify('\\infty/\\infty', '\\operatorname{Indeterminate}'));
   test('(-infinity)/(1-3) = infinity', () =>
     checkSimplify('(-\\infty)/(1-3)', '\\infty'));
   test('infinity/2 = infinity', () => checkSimplify('\\infty/2', '\\infty'));
@@ -765,8 +772,8 @@ describe('Rules: Division and Infinity', () => {
     checkSimplify('(-\\infty)/2', '-\\infty'));
   test('(-infinity)/(-2) = infinity', () =>
     checkSimplify('(-\\infty)/(-2)', '\\infty'));
-  test('(-infinity)/infinity = NaN', () =>
-    checkSimplify('(-\\infty)/\\infty', NaN));
+  test('(-infinity)/infinity = Indeterminate', () =>
+    checkSimplify('(-\\infty)/\\infty', '\\operatorname{Indeterminate}'));
   test('infinity/0.5 = infinity', () =>
     checkSimplify('\\infty/0.5', '\\infty'));
   test('infinity/0 = complex infinity', () =>
@@ -1538,34 +1545,48 @@ describe('LOGARITHM COMBINATION RULES', () => {
 });
 
 describe('INDETERMINATE FORMS', () => {
-  test('0 * infinity = NaN', () =>
-    expect(simplify('0 \\times \\infty')).toMatchInlineSnapshot(`NaN`));
-
-  test('0 * (-infinity) = NaN', () =>
-    expect(simplify('0 \\times (-\\infty)')).toMatchInlineSnapshot(`NaN`));
-
-  test('infinity * 0 = NaN', () =>
-    expect(simplify('\\infty \\times 0')).toMatchInlineSnapshot(`NaN`));
-
-  test('(-infinity) * 0 = NaN', () =>
-    expect(simplify('(-\\infty) \\times 0')).toMatchInlineSnapshot(`NaN`));
-
-  test('infinity / infinity = NaN', () =>
-    expect(simplify('\\frac{\\infty}{\\infty}')).toMatchInlineSnapshot(`NaN`));
-
-  test('(-infinity) / infinity = NaN', () =>
-    expect(simplify('\\frac{-\\infty}{\\infty}')).toMatchInlineSnapshot(`NaN`));
-
-  test('infinity / (-infinity) = NaN', () =>
-    expect(simplify('\\frac{\\infty}{-\\infty}')).toMatchInlineSnapshot(`NaN`));
-
-  test('(-infinity) / (-infinity) = NaN', () =>
-    expect(simplify('\\frac{-\\infty}{-\\infty}')).toMatchInlineSnapshot(
-      `NaN`
+  test('0 * infinity = Indeterminate', () =>
+    expect(simplify('0 \\times \\infty')).toMatchInlineSnapshot(
+      `Indeterminate`
     ));
 
-  test('infinity^0 = NaN', () =>
-    expect(simplify('\\infty^0')).toMatchInlineSnapshot(`NaN`));
+  test('0 * (-infinity) = Indeterminate', () =>
+    expect(simplify('0 \\times (-\\infty)')).toMatchInlineSnapshot(
+      `Indeterminate`
+    ));
+
+  test('infinity * 0 = Indeterminate', () =>
+    expect(simplify('\\infty \\times 0')).toMatchInlineSnapshot(
+      `Indeterminate`
+    ));
+
+  test('(-infinity) * 0 = Indeterminate', () =>
+    expect(simplify('(-\\infty) \\times 0')).toMatchInlineSnapshot(
+      `Indeterminate`
+    ));
+
+  test('infinity / infinity = Indeterminate', () =>
+    expect(simplify('\\frac{\\infty}{\\infty}')).toMatchInlineSnapshot(
+      `Indeterminate`
+    ));
+
+  test('(-infinity) / infinity = Indeterminate', () =>
+    expect(simplify('\\frac{-\\infty}{\\infty}')).toMatchInlineSnapshot(
+      `Indeterminate`
+    ));
+
+  test('infinity / (-infinity) = Indeterminate', () =>
+    expect(simplify('\\frac{\\infty}{-\\infty}')).toMatchInlineSnapshot(
+      `Indeterminate`
+    ));
+
+  test('(-infinity) / (-infinity) = Indeterminate', () =>
+    expect(simplify('\\frac{-\\infty}{-\\infty}')).toMatchInlineSnapshot(
+      `Indeterminate`
+    ));
+
+  test('infinity^0 = Indeterminate', () =>
+    expect(simplify('\\infty^0')).toMatchInlineSnapshot(`Indeterminate`));
 });
 
 //

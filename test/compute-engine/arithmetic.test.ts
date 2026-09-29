@@ -498,14 +498,14 @@ describe('MULTIPLY', () => {
           .toString()
       ).toBe('+oo');
     });
-    test('0 · +∞ = NaN', () => {
+    test('0 · +∞ = Indeterminate', () => {
       const c = new ComputeEngine();
       expect(
         c
           .box(['Multiply', 0, { num: '+Infinity' }])
           .evaluate()
           .toString()
-      ).toBe('NaN');
+      ).toBe('Indeterminate');
     });
   });
 });
@@ -2847,22 +2847,23 @@ describe('the Γ family at ±∞', () => {
     }
   });
 
-  it('has no limit at −∞, so the value is NaN', () => {
+  it('has no limit at −∞, so the value is Indeterminate (NaN under N())', () => {
     for (const head of ['Factorial', 'Factorial2', 'Gamma', 'GammaLn']) {
-      expect(value([head, 'NegativeInfinity'])).toBe('NaN');
+      expect(value([head, 'NegativeInfinity'])).toBe('Indeterminate');
       expect(numeric([head, 'NegativeInfinity'])).toBe('NaN');
     }
   });
 
-  it('has no limit at the unsigned ~∞ either, so the value is NaN', () => {
+  it('has no limit at the unsigned ~∞ either, so the value is Indeterminate', () => {
     // An argument approaching the single point at infinity from no fixed
-    // direction has no limit, so the answer is NaN for the whole family.
+    // direction has no limit, so the answer is `Indeterminate` (`NaN` under
+    // N()) for the whole family.
     // `Gamma`, `GammaLn` and `Factorial` already reached NaN here through
     // their own numeric routes; `Factorial2` used to stop at its
     // integrality test and stay inert, which `docs/ERROR-MODEL.md` §1
     // forbids as the terminal answer to a decided question.
     for (const head of ['Factorial', 'Factorial2', 'Gamma', 'GammaLn']) {
-      expect(value([head, 'ComplexInfinity'])).toBe('NaN');
+      expect(value([head, 'ComplexInfinity'])).toBe('Indeterminate');
       expect(numeric([head, 'ComplexInfinity'])).toBe('NaN');
     }
   });

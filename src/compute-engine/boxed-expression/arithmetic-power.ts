@@ -25,6 +25,7 @@ import {
   isFunction,
   isSymbol,
   nanOperandAnswer,
+  indeterminateFormAnswer,
   numericValue,
 } from './type-guards.js';
 import { realExponentValue, isGaussianIntegerValue } from './imaginary-part.js';
@@ -133,7 +134,9 @@ function complexBaseAtInfiniteExponent(
     const nv = a.numericValue;
     if (nv instanceof ExactNumericValue) {
       const t = exactModulusSquaredVsOne(nv);
-      if (t === 0) return ce.NaN;
+      // An exact base on the unit circle, other than 1, oscillates with no
+      // limit: the indeterminate form `Indeterminate` (`i^∞`).
+      if (t === 0) return indeterminateFormAnswer(ce, [a]);
       if (t === 1) return expPositive ? ce.ComplexInfinity : ce.Zero;
       if (t === -1) return expPositive ? ce.Zero : ce.ComplexInfinity;
     }
@@ -534,9 +537,12 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // A literal only: `isNaN` of a symbol reads its current value, which a
     // canonical form must not depend on (see `canonicalDivide`).
     if (isNumber(b) && b.isNaN) return nanOperandAnswer(ce, [a, b]);
-    if (b.type.matches('imaginary' as NumericPrimitiveType)) return ce.NaN;
+    // `0^(imaginary)` and `0^0` have no value: `Indeterminate`, or `NaN`
+    // when an operand is a float (`indeterminateFormAnswer()`).
+    if (b.type.matches('imaginary' as NumericPrimitiveType))
+      return indeterminateFormAnswer(ce, [a, b]);
 
-    if (b.isSame(0)) return ce.NaN;
+    if (b.isSame(0)) return indeterminateFormAnswer(ce, [a, b]);
 
     if (b.isInfinity) {
       // 0^∞ = 0 (because for all complex numbers z near 0, z^∞ -> 0).
@@ -579,12 +585,13 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       (a.isFinite === false || isExactLiteral(b, 0))
     )
       // A `NaN`-valued base is forwarded (`Indeterminate^0` is
-      // `Indeterminate`); an infinite base is the indeterminate form `∞^0`.
+      // `Indeterminate`); an infinite base is the indeterminate form `∞^0`
+      // (`Indeterminate`, or `NaN` with a float exponent `0.0`).
       return a.isFinite
         ? ce.One
         : a.isNaN === true
           ? nanOperandAnswer(ce, [a, b])
-          : ce.NaN;
+          : indeterminateFormAnswer(ce, [a, b]);
     return unchanged();
   }
 
@@ -598,7 +605,8 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   if (aIsNum && isExactLiteral(a, 1)) {
     if (b.isFinite) return ce.One;
     if (isComplexInfinityLiteral(b)) return unchanged();
-    return ce.NaN;
+    if (isNumber(b) && b.isNaN) return nanOperandAnswer(ce, [a, b]);
+    return indeterminateFormAnswer(ce, [a, b]);
   }
 
   // One as exponent
@@ -644,9 +652,11 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // e^∞ = ∞ (handle explicitly before general case)
       if (isSymbol(a, 'ExponentialE')) return ce.PositiveInfinity;
 
-      // (-1)^∞ = NaN
-      // Because of oscillations in the limit.
-      if (a.isSame(-1)) return ce.NaN;
+      // (-1)^∞ = Indeterminate, because of oscillations in the limit (`NaN`
+      // for the float `-1.0`). A float base `1.0` is the form `1^∞`: `NaN`
+      // (an exact `1` was handled above; the float fell to the `0` below).
+      if (a.isSame(-1) || a.isSame(1))
+        return indeterminateFormAnswer(ce, [a, b]);
 
       // An infinite base: (+∞)^∞ = +∞, because the DIRECTION is known —
       // nⁿ grows through +∞ (10¹⁰, 100¹⁰⁰ = 10²⁰⁰, 1000¹⁰⁰⁰ overflows the
@@ -689,7 +699,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // e^(-∞) = 0 (handle explicitly before general case)
       if (isSymbol(a, 'ExponentialE')) return ce.Zero;
 
-      if (a.isSame(-1)) return ce.NaN;
+      // (-1)^-∞ = Indeterminate, and the float `1.0^-∞` is `NaN`, as for +∞.
+      if (a.isSame(-1) || a.isSame(1))
+        return indeterminateFormAnswer(ce, [a, b]);
       //Same result for all infinity types...
       if (a.isInfinity) return ce.Zero;
 
@@ -763,7 +775,8 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
     // If the exponent is pure imaginary, the result is NaN
     //(↓fix?:ensure both these cases narrow down to 'b' being a num./symbol literal)
-    if (b.type.matches('imaginary')) return ce.NaN;
+    // (the indeterminate form `Indeterminate`, or `NaN` with a float operand)
+    if (b.type.matches('imaginary')) return indeterminateFormAnswer(ce, [a, b]);
     if (b.type.matches('complex') && !isNaN(b.re)) {
       if (b.re > 0) return ce.ComplexInfinity;
       if (b.re < 0) return ce.Zero;
@@ -1869,7 +1882,8 @@ function rootAtExceptionalPoint(
       // The exponent `1/b` is 0: `a^0` is 1 for a finite non-zero base and
       // the indeterminate NaN for a zero or infinite one.
       if (!isNumber(a)) return undefined;
-      if (a.isSame(0) || a.isInfinity === true) return ce.NaN;
+      if (a.isSame(0) || a.isInfinity === true)
+        return indeterminateFormAnswer(ce, [a, b]);
       return ce.One;
     }
   }

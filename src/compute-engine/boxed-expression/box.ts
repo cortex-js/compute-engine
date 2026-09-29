@@ -118,6 +118,7 @@ import {
   isFunction,
   isSymbol,
   adoptsForeignEngineObject,
+  indeterminateFormAnswer,
 } from './type-guards.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import { symbolAtSite, replaceAtSite } from './binding-sites.js';
@@ -520,8 +521,16 @@ function boxFunctionInternal(
       if (n !== null) {
         const d = asBigint(ops[1]);
         if (d !== null) {
-          // Handle division by zero: 0/0 = NaN, a/0 = ~∞
-          if (d === 0n) return n === 0n ? ce.NaN : ce.ComplexInfinity;
+          // Handle division by zero: a/0 = ~∞ (a pole), and 0/0 is the
+          // indeterminate form: `Indeterminate`, or `NaN` when an operand is
+          // a float (`asBigint` reads the float `0.0` as the integer 0).
+          if (d === 0n)
+            return n === 0n
+              ? indeterminateFormAnswer(ce, [
+                  box(ce, ops[0], options),
+                  box(ce, ops[1], options),
+                ])
+              : ce.ComplexInfinity;
           return ce.number([n, d], options);
         }
       }

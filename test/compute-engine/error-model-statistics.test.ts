@@ -218,12 +218,13 @@ describe('the variance family', () => {
     }
   });
 
-  test('the sample forms are NaN for one datum, the population forms 0', () => {
+  test('the sample forms are Indeterminate for one datum, the population forms 0', () => {
     // `n − 1` is zero for a single datum: the sample variance genuinely has
-    // no value, which the `nan` arm covers. The population divisor is `n`.
+    // no value (the exact form `0/0`, `Indeterminate`), which the `nan` arm
+    // covers. The population divisor is `n`.
     const ce = new ComputeEngine();
-    expect(evaluated(ce, ['Variance', 5])).toBe('NaN');
-    expect(evaluated(ce, ['StandardDeviation', 5])).toBe('NaN');
+    expect(evaluated(ce, ['Variance', 5])).toBe('Indeterminate');
+    expect(evaluated(ce, ['StandardDeviation', 5])).toBe('Indeterminate');
     expect(evaluated(ce, ['PopulationVariance', 5])).toBe('0');
     expect(evaluated(ce, ['PopulationStandardDeviation', 5])).toBe('0');
   });

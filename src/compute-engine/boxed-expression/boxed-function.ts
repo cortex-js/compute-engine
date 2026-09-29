@@ -104,6 +104,7 @@ import {
   isContinuationOperand,
   isFoldBarrierProduct,
   nanOperandAnswer,
+  indeterminateFormAnswer,
 } from './type-guards.js';
 import { realExponentValue } from './imaginary-part.js';
 import { scopeForRebuild } from './binding-sites.js';
@@ -5049,14 +5050,18 @@ export class BoxedFunction
         }
         if (definedVerdict === false) {
           // The codomain marker (`docs/ERROR-MODEL.md` §2 rule 4), read
-          // off the RESOLVED arm for an overload set: `NaN` into a
-          // numeric codomain; `Missing` — the one primitive quiet datum —
-          // for a settled non-numeric or indeterminate one.
+          // off the RESOLVED arm for an overload set: into a numeric
+          // codomain, the indeterminate form `Indeterminate` (`Mod(5, 0)`,
+          // `Fract(∞)`: the operands are inside the carrier, and the
+          // operation has no value there), or `NaN` when an operand is a
+          // float (`indeterminateFormAnswer()`); `Missing` — the one
+          // primitive quiet datum — for a settled non-numeric or
+          // indeterminate one.
           const markerArm = contractBArm();
           const resultT =
             functionResult(markerArm ?? def.signature.type) ?? 'unknown';
           return isSubtype(resultT, 'number')
-            ? this.engine.NaN
+            ? indeterminateFormAnswer(this.engine, tail)
             : this.engine.Missing;
         }
       }
@@ -5957,14 +5962,18 @@ export class BoxedFunction
         }
         if (definedVerdict === false) {
           // The codomain marker (`docs/ERROR-MODEL.md` §2 rule 4), read
-          // off the RESOLVED arm for an overload set: `NaN` into a
-          // numeric codomain; `Missing` — the one primitive quiet datum —
-          // for a settled non-numeric or indeterminate one.
+          // off the RESOLVED arm for an overload set: into a numeric
+          // codomain, the indeterminate form `Indeterminate` (`Mod(5, 0)`,
+          // `Fract(∞)`: the operands are inside the carrier, and the
+          // operation has no value there), or `NaN` when an operand is a
+          // float (`indeterminateFormAnswer()`); `Missing` — the one
+          // primitive quiet datum — for a settled non-numeric or
+          // indeterminate one.
           const markerArm = contractBArm();
           const resultT =
             functionResult(markerArm ?? def.signature.type) ?? 'unknown';
           return isSubtype(resultT, 'number')
-            ? this.engine.NaN
+            ? indeterminateFormAnswer(this.engine, tail)
             : this.engine.Missing;
         }
       }
@@ -9383,8 +9392,28 @@ installBroadcastLiftHooks({
  * `BoxedFunction.N()` calls, and of its asynchronous twin
  * (`BoxedNumber.N()` answers `NaN` for the literal itself).
  *
- * Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4.
+ * The map reaches the cells of a `List` or a `Tuple` result, at any depth:
+ * a broadcast or a matrix kernel computes its cells with the arithmetic
+ * methods (`.mul()`, `.add()`), which do not know that the route is numeric,
+ * so `[0, 1]·∞` and `MatrixPower([[∞, 0], [0, 1]], 2)` would otherwise keep an
+ * `Indeterminate` cell under `.N()`. Other heads are not entered: their
+ * operands are not values of the result.
+ *
+ * Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4 and §6
+ * (Phase 2).
  */
 function indeterminateAsNaN(result: Expression): Expression {
-  return result.isIndeterminate ? result.engine.NaN : result;
+  if (result.isIndeterminate) return result.engine.NaN;
+  if (
+    !isFunction(result) ||
+    (result.operator !== 'List' && result.operator !== 'Tuple')
+  )
+    return result;
+  let changed = false;
+  const ops = result.ops.map((x) => {
+    const y = indeterminateAsNaN(x);
+    if (y !== x) changed = true;
+    return y;
+  });
+  return changed ? result.engine.function(result.operator, ops) : result;
 }

@@ -82,6 +82,7 @@ import {
   isNumber,
   isSymbol,
   nanOperandAnswer,
+  indeterminateFormAnswer,
 } from './type-guards.js';
 import { isImaginaryPartFinite } from './imaginary-part.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
@@ -566,6 +567,22 @@ export class BoxedNumber
         this,
         typeof rhs === 'number' ? ce.number(rhs) : rhs,
       ]);
+    // `∞ + (−∞)` is the indeterminate form, as in the `Add` fold (`Terms`):
+    // `Indeterminate`, or `NaN` with a float operand. The numeric-value
+    // arithmetic below would answer the `NaN` literal. The broadcast and
+    // matrix kernels compute their cells with this method, so
+    // `[∞, 1] + [−∞, 2]` depends on it. (`~oo` plus anything is `~oo`, as
+    // in the fold, which the arithmetic below already answers.)
+    if (this.isInfinity === true && !this.isComplex) {
+      const other = typeof rhs === 'number' ? ce.number(rhs) : rhs;
+      if (
+        isNumber(other) &&
+        other.isInfinity === true &&
+        !other.isComplex &&
+        other.isPositive !== this.isPositive
+      )
+        return indeterminateFormAnswer(ce, [this, other]);
+    }
     // `0 + x` is `x`, but `0 + Missing` is `NaN`, not the absent symbol:
     // arithmetic with an absent operand is `NaN` (user decision of
     // 2026-09-25). A negation or product of an absent value (`-Missing`,
@@ -640,19 +657,22 @@ export class BoxedNumber
     // @fastpath
     if (typeof rhs === 'number') {
       if (rhs === 1) return this;
-      // A zero factor annihilates only a FINITE cofactor: 0·±∞, 0·~oo and
-      // 0·NaN are indeterminate (`isFinite === false` covers all four
-      // non-finite values), matching the canonical `Multiply` fold and
-      // `Product.mul`.
+      // A zero factor annihilates only a FINITE cofactor: 0·±∞ and 0·~oo
+      // are the indeterminate form, and 0·NaN is `NaN` (`isFinite === false`
+      // covers all four non-finite values), matching the canonical
+      // `Multiply` fold and `Product.mul`. The form is `Indeterminate`, or
+      // `NaN` when a factor is a float or `NaN` (`indeterminateFormAnswer()`).
       if (rhs === 0)
-        return this.isFinite === false ? this.engine.NaN : this.engine.Zero;
+        return this.isFinite === false
+          ? indeterminateFormAnswer(ce, [this])
+          : this.engine.Zero;
       // A float 0 times a finite number is the float 0 (`0.0 · 3`).
       if (this.isSame(0))
         return Number.isFinite(rhs)
           ? this.isExact
             ? this.engine.Zero
             : this
-          : this.engine.NaN;
+          : indeterminateFormAnswer(ce, [this, ce.number(rhs)]);
       if (rhs === -1) return this.neg();
       return ce.number(
         typeof this._value === 'number'
@@ -670,14 +690,15 @@ export class BoxedNumber
       // Same indeterminate-form guard as the JS-number fastpath above:
       // `NumericValue.mul` answers 0 for a zero times a non-finite value.
       if (this.isSame(0) && !rhs.isZero) {
+        if (rhs.isNaN) return this.engine.NaN;
         if (
-          rhs.isNaN ||
           rhs.isPositiveInfinity ||
           rhs.isNegativeInfinity ||
           rhs.isComplexInfinity
         )
-          return this.engine.NaN;
-      } else if (rhs.isZero && this.isFinite === false) return this.engine.NaN;
+          return indeterminateFormAnswer(ce, [this]);
+      } else if (rhs.isZero && this.isFinite === false)
+        return indeterminateFormAnswer(ce, [this, ce.number(rhs)]);
       return ce.number(rhs.mul(this._value));
     }
 
@@ -687,7 +708,7 @@ export class BoxedNumber
         (this.isSame(0) && rhs.isFinite === false) ||
         (rhs.isSame(0) && this.isFinite === false)
       )
-        return this.engine.NaN;
+        return indeterminateFormAnswer(ce, [this, rhs]);
       return ce.number(ce._numericValue(this._value).mul(rhs.numericValue));
     }
 

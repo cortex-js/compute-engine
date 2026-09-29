@@ -1,15 +1,16 @@
 /**
- * The `Indeterminate` value (Phase 1 of
+ * The `Indeterminate` value (Phases 1 and 2 of
  * `docs/plans/2026-09-28-indeterminate-value.md`).
  *
  * `Indeterminate` is the exact answer to an indeterminate form such as `0/0`:
  * a number literal whose double value is `NaN`, marked `isIndeterminate`, and
  * a different value from the `NaN` literal (the result of a floating-point
- * computation that failed). Phase 1 adds the value and every mechanism that
- * carries it, and switches NO producer: `0/0` still evaluates to `NaN`, so
- * every test here gives `Indeterminate` as INPUT (`ce.Indeterminate`, the
- * MathJSON symbol `"Indeterminate"`, the LaTeX `\operatorname{Indeterminate}`
- * or the Epsil word `Indeterminate`).
+ * computation that failed). Phase 1 added the value and every mechanism that
+ * carries it; most tests here give `Indeterminate` as INPUT
+ * (`ce.Indeterminate`, the MathJSON symbol `"Indeterminate"`, the LaTeX
+ * `\operatorname{Indeterminate}` or the Epsil word `Indeterminate`). Phase 2
+ * switched the exact producers (`0/0`, `0·∞`, `Mod(5, 0)` and the others): the
+ * `describe` blocks named "the producers" pin them.
  *
  * One `describe` per row of the decision table (§5 of the design note), on the
  * box, parse and Epsil routes.
@@ -72,7 +73,7 @@ describe('INDETERMINATE — the value', () => {
     expect(ce.NaN.isIndeterminate).toBe(false);
     expect(ce.number(NaN).isIndeterminate).toBe(false);
     expect(ce.box('x').isIndeterminate).toBe(false);
-    expect(ce.box(['Divide', 0, 0]).isIndeterminate).toBe(false);
+    expect(ce.box(['Divide', 1, 2]).isIndeterminate).toBe(false);
     expect(ce.box(['Sin', 'x']).isIndeterminate).toBe(false);
   });
 
@@ -104,32 +105,6 @@ describe('INDETERMINATE — the value', () => {
     expect(ce2.box('y').evaluate().isIndeterminate).toBe(true);
     expect(ce2.box(['Add', 'y', 1]).evaluate().isIndeterminate).toBe(true);
     expect(ce2.box('y').N().toString()).toBe('NaN');
-  });
-});
-
-describe('INDETERMINATE — no producer is switched in Phase 1', () => {
-  test.each([
-    [['Divide', 0, 0]],
-    [['Power', 0, 0]],
-    [['Multiply', 0, 'PositiveInfinity']],
-    [['Subtract', 'PositiveInfinity', 'PositiveInfinity']],
-    [['Mod', 5, 0]],
-    [['Fract', 'PositiveInfinity']],
-    [['Power', -1, 'PositiveInfinity']],
-  ] as MathJsonExpression[][])('%j is still NaN', (json) => {
-    const x = box(json);
-    expect(x.toString()).toBe('NaN');
-    expect(x.isIndeterminate).toBe(false);
-    expect(boxN(json).toString()).toBe('NaN');
-    expect(ce.box(json).evaluate({ numericApproximation: true }).toString()).toBe(
-      'NaN'
-    );
-  });
-
-  test('the float and non-kind-1 answers are unchanged', () => {
-    expect(parse('\\frac{0.0}{0.0}').toString()).toBe('NaN');
-    expect(ce.number([5, 0]).toString()).toBe('NaN');
-    expect(box(['Ln', -2]).toString()).toBe('ln(-2)');
   });
 });
 
@@ -947,5 +922,500 @@ describe('INDETERMINATE — the arithmetic methods do not read a symbol value', 
     expect(q.evaluate().toString()).toBe('2');
     expect(p.evaluate().toString()).toBe('8');
     expect(s.evaluate().toString()).toBe('5');
+  });
+});
+
+//
+// Phase 2: the exact producers. An exact-route answer that was `NaN` because
+// the form has no value is `Indeterminate`; a float operand, an absent
+// operand, `.N()` and the compiled routes still give `NaN`.
+//
+
+describe('INDETERMINATE — the producers: the arithmetic forms', () => {
+  const INDET = 'Indeterminate';
+  // [input, canonical form]: the forms that fold at canonicalization give the
+  // value itself, the others keep their structure until `evaluate()`.
+  test.each([
+    [['Divide', 0, 0], INDET],
+    [['Rational', 0, 0], INDET],
+    [['Divide', 'PositiveInfinity', 'PositiveInfinity'], INDET],
+    [['Divide', 'NegativeInfinity', 'PositiveInfinity'], INDET],
+    [
+      ['Multiply', 0, 'PositiveInfinity'],
+      ['Multiply', 0, 'PositiveInfinity'],
+    ],
+    [
+      ['Multiply', 0, 'ComplexInfinity'],
+      ['Multiply', 0, 'ComplexInfinity'],
+    ],
+    [['Multiply', 2, 0, 'PositiveInfinity'], INDET],
+    [
+      ['Subtract', 'PositiveInfinity', 'PositiveInfinity'],
+      ['Add', 'NegativeInfinity', 'PositiveInfinity'],
+    ],
+    [['Power', 0, 0], INDET],
+    [['Power', 'PositiveInfinity', 0], INDET],
+    [['Power', 'ComplexInfinity', 0], INDET],
+    [['Power', 1, 'PositiveInfinity'], INDET],
+    [['Power', 1, 'NegativeInfinity'], INDET],
+    [['Power', -1, 'PositiveInfinity'], INDET],
+    [['Power', -1, 'NegativeInfinity'], INDET],
+    [['Power', 'ImaginaryUnit', 'PositiveInfinity'], INDET],
+    [['Power', 'PositiveInfinity', 'ImaginaryUnit'], INDET],
+    [['Power', 0, 'ImaginaryUnit'], INDET],
+    [
+      ['Root', 0, 'PositiveInfinity'],
+      ['Root', 0, 'PositiveInfinity'],
+    ],
+    [
+      ['Mod', 5, 0],
+      ['Mod', 5, 0],
+    ],
+    [
+      ['Mod', 'x', 0],
+      ['Mod', 'x', 0],
+    ],
+    [
+      ['Fract', 'PositiveInfinity'],
+      ['Fract', 'PositiveInfinity'],
+    ],
+    [
+      ['Fract', 'NegativeInfinity'],
+      ['Fract', 'NegativeInfinity'],
+    ],
+    [
+      ['Log', 1, 1],
+      ['Log', 1, 1],
+    ],
+    [
+      ['Log', 'PositiveInfinity', 'PositiveInfinity'],
+      ['Log', 'PositiveInfinity', 'PositiveInfinity'],
+    ],
+  ] as [MathJsonExpression, MathJsonExpression][])(
+    '%j is Indeterminate, NaN under N()',
+    (json, canonical) => {
+      const boxed = ce.box(json);
+      expect(boxed.json).toEqual(canonical);
+      const value = boxed.evaluate();
+      expect(value.isIndeterminate).toBe(true);
+      expect(value.toString()).toBe('Indeterminate');
+      // `isNaN` still holds; `isSame(ce.NaN)` does not.
+      expect(value.isNaN).toBe(true);
+      expect(value.isSame(ce.NaN)).toBe(false);
+      expect(boxN(json).toString()).toBe('NaN');
+      expect(
+        ce.box(json).evaluate({ numericApproximation: true }).toString()
+      ).toBe('NaN');
+      // The raw form keeps the structure, and evaluates to the same value.
+      const raw = ce.box(json, { form: 'raw' });
+      expect(raw.json).toEqual(json);
+      expect(raw.evaluate().toString()).toBe('Indeterminate');
+    }
+  );
+
+  test('the parse route', () => {
+    for (const latex of [
+      '\\frac{0}{0}',
+      '0^0',
+      '\\infty-\\infty',
+      '0\\cdot\\infty',
+      '1^\\infty',
+      '\\frac{\\infty}{\\infty}',
+      '(-1)^\\infty',
+      '\\infty^0',
+      '\\operatorname{mod}(5,0)',
+    ]) {
+      expect([latex, parse(latex).toString()]).toEqual([
+        latex,
+        'Indeterminate',
+      ]);
+      expect([latex, ce.parse(latex).N().toString()]).toEqual([latex, 'NaN']);
+    }
+    expect(ce.parse('\\frac{0}{0}').latex).toBe(I);
+  });
+
+  test('the Epsil route', () => {
+    for (const source of [
+      '0/0',
+      'oo - oo',
+      '0 * oo',
+      '0^0',
+      '1^oo',
+      '(-1)^oo',
+      'oo^i',
+      '0^i',
+      'fract(oo)',
+      'Mod(5, 0)',
+      'x = 0; x/x',
+    ])
+      expect([source, epsil(source).toString()]).toEqual([
+        source,
+        'Indeterminate',
+      ]);
+    expect(epsil('N(0/0)').toString()).toBe('NaN');
+  });
+});
+
+describe('INDETERMINATE — the producers: a float operand gives NaN', () => {
+  test.each([
+    [['Divide', { num: '0.0' }, { num: '0.0' }]],
+    [['Divide', 0, { num: '0.0' }]],
+    [['Divide', { num: '0.0' }, 0]],
+    [['Multiply', { num: '0.0' }, 'PositiveInfinity']],
+    [['Multiply', { num: '2.5' }, 'PositiveInfinity', 0]],
+    [['Add', 'PositiveInfinity', 'NegativeInfinity', { num: '1.5' }]],
+    [['Power', { num: '0.0' }, 0]],
+    [['Power', 0, { num: '0.0' }]],
+    [['Power', 'PositiveInfinity', { num: '0.0' }]],
+    [['Power', { num: '1.0' }, 'PositiveInfinity']],
+    [['Power', { num: '1.0' }, 'NegativeInfinity']],
+    [['Power', { num: '-1.0' }, 'PositiveInfinity']],
+    [['Power', 0, ['Complex', 0, 2.5]]],
+    [['Mod', { num: '5.0' }, 0]],
+    [['Mod', 5, { num: '0.0' }]],
+    [['Log', { num: '1.0' }, 1]],
+  ] as MathJsonExpression[][])('%j is NaN', (json) => {
+    const value = box(json);
+    expect(value.toString()).toBe('NaN');
+    expect(value.isIndeterminate).toBe(false);
+  });
+
+  test('on the parse and Epsil routes', () => {
+    expect(parse('\\frac{0.0}{0.0}').toString()).toBe('NaN');
+    expect(parse('\\frac{0}{0.0}').toString()).toBe('NaN');
+    expect(epsil('0.0/0.0').toString()).toBe('NaN');
+    expect(epsil('0/0.0').toString()).toBe('NaN');
+    expect(epsil('0.0 * oo').toString()).toBe('NaN');
+  });
+});
+
+describe('INDETERMINATE — the producers: the poles and the other NaN are unchanged', () => {
+  test('a pole is ~oo, not Indeterminate', () => {
+    for (const json of [
+      ['Divide', 5, 0],
+      ['Rational', 5, 0],
+      ['Divide', 1, 0],
+      ['Divide', -1, 0],
+      ['Tan', ['Divide', 'Pi', 2]],
+      ['Gamma', 0],
+      ['Gamma', -1],
+      ['Zeta', 1],
+    ] as MathJsonExpression[])
+      expect([json, box(json).toString()]).toEqual([json, '~oo']);
+    expect(box(['Ln', 0]).toString()).toBe('-oo');
+    expect(parse('\\frac{5}{0}').toString()).toBe('~oo');
+    expect(epsil('5/0').toString()).toBe('~oo');
+  });
+
+  test('the exact-lane funnel is not switched', () => {
+    // `ce.number([5, 0])` reaches the exact numeric lane, where `n/0` is
+    // `NaN` for every `n`: that `NaN` is kept, since it also spells a pole.
+    expect(ce.number([5, 0]).toString()).toBe('NaN');
+    expect(ce.number([0, 0]).toString()).toBe('NaN');
+    expect(box(['Ln', -2]).toString()).toBe('ln(-2)');
+  });
+
+  test('an absent operand still gives NaN', () => {
+    expect(box(['Add', 'Missing', 2]).toString()).toBe('NaN');
+    expect(box(['Multiply', 'Missing', 0]).toString()).toBe('NaN');
+    expect(box(['Divide', 'Missing', 0]).toString()).toBe('NaN');
+    expect(box(['Length', 'Missing']).toString()).toBe('NaN');
+    expect(box(['Multiply', 'NaN', 0]).toString()).toBe('NaN');
+    expect(box(['Power', 'NaN', 0]).toString()).toBe('NaN');
+  });
+
+  test('0/∞ is 0, on the canonical route and through .div()', () => {
+    expect(box(['Divide', 0, 'PositiveInfinity']).toString()).toBe('0');
+    expect(ce.Zero.div(ce.PositiveInfinity).toString()).toBe('0');
+    expect(ce.Zero.div(ce.ComplexInfinity).toString()).toBe('0');
+    expect(ce.Zero.div(Infinity).toString()).toBe('0');
+    expect(ce.Zero.div(0).toString()).toBe('Indeterminate');
+    expect(ce.Zero.div(ce.Zero).toString()).toBe('Indeterminate');
+  });
+});
+
+describe('INDETERMINATE — the producers: special functions at an infinite point', () => {
+  test('no limit: Indeterminate, NaN under N()', () => {
+    for (const json of [
+      ['Gamma', 'NegativeInfinity'],
+      ['Gamma', 'ComplexInfinity'],
+      ['Factorial', 'NegativeInfinity'],
+      ['Digamma', 'NegativeInfinity'],
+      ['Zeta', 'NegativeInfinity'],
+      ['Zeta', 'ComplexInfinity'],
+      ['AiryAi', 'ComplexInfinity'],
+      ['AiryAiPrime', 'NegativeInfinity'],
+      ['BesselJ', 0, 'ComplexInfinity'],
+      ['Beta', 'NegativeInfinity', ['Rational', 1, 2]],
+      ['Gamma', 2, 'ComplexInfinity'],
+      ['Gamma', 'PositiveInfinity', 'PositiveInfinity'],
+      ['GammaRegularized', 'NegativeInfinity', 2],
+      ['Binomial', 'NegativeInfinity', ['Rational', 1, 2]],
+      ['Pochhammer', 2, 'ComplexInfinity'],
+      ['ErfInv', 'PositiveInfinity'],
+      ['SinIntegral', 'ComplexInfinity'],
+      ['ExpIntegralEi', 'ComplexInfinity'],
+      ['Real', 'ComplexInfinity'],
+      ['Argument', 'ComplexInfinity'],
+    ] as MathJsonExpression[]) {
+      expect([json, box(json).toString()]).toEqual([json, 'Indeterminate']);
+      expect([json, boxN(json).toString()]).toEqual([json, 'NaN']);
+    }
+    expect(parse('\\Gamma(-\\infty)').toString()).toBe('Indeterminate');
+  });
+
+  test('a divergence whose sign depends on the other operand stays NaN', () => {
+    expect(box(['Gamma', 2, 'NegativeInfinity']).toString()).toBe('NaN');
+    expect(
+      box(['Beta', 'PositiveInfinity', ['Rational', -1, 2]]).toString()
+    ).toBe('NaN');
+    expect(
+      box([
+        'GammaRegularized',
+        ['Rational', 1, 2],
+        'NegativeInfinity',
+      ]).toString()
+    ).toBe('NaN');
+  });
+
+  test('an anonymous infinity (a float literal) gives NaN', () => {
+    const anon: MathJsonExpression = ['Complex', 'PositiveInfinity', 1];
+    for (const head of ['Gamma', 'Zeta', 'AiryAi', 'ErfInv'])
+      expect([head, box([head, anon]).toString()]).toEqual([head, 'NaN']);
+  });
+});
+
+describe('INDETERMINATE — the producers: library answers', () => {
+  test('the sample variance of one datum', () => {
+    expect(box(['Variance', ['List', 5]]).toString()).toBe('Indeterminate');
+    expect(box(['StandardDeviation', ['List', 5]]).toString()).toBe(
+      'Indeterminate'
+    );
+    expect(boxN(['Variance', ['List', 5]]).toString()).toBe('NaN');
+    expect(box(['Variance', ['List', 5.5]]).toString()).toBe('NaN');
+    expect(epsil('variance([5])').toString()).toBe('Indeterminate');
+  });
+
+  test('a broadcast quotient and product, a matrix power', () => {
+    expect(box(['Divide', ['List', 0, 1], 0]).toString()).toBe(
+      '[Indeterminate,~oo]'
+    );
+    expect(boxN(['Divide', ['List', 0, 1], 0]).toString()).toBe('[NaN,~oo]');
+    expect(epsil('[0, 1]/0').toString()).toBe('[Indeterminate,~oo]');
+    expect(
+      box(['Multiply', ['List', 0, 1], 'PositiveInfinity']).toString()
+    ).toBe('[Indeterminate,+oo]');
+    // The final map of `.N()` reaches the cells a kernel computed.
+    expect(
+      boxN(['Multiply', ['List', 0, 1], 'PositiveInfinity']).toString()
+    ).toBe('[NaN,+oo]');
+    const power: MathJsonExpression = [
+      'MatrixPower',
+      ['List', ['List', 'PositiveInfinity', 0], ['List', 0, 1]],
+      2,
+    ];
+    expect(box(power).toString()).toBe(
+      '[[+oo,Indeterminate],[Indeterminate,1]]'
+    );
+    expect(boxN(power).toString()).toBe('[[+oo,NaN],[NaN,1]]');
+  });
+});
+
+describe('INDETERMINATE — the producers: symbols, simplification, compilation', () => {
+  test('a symbol holding 0 evaluates the form', () => {
+    const ce2 = new ComputeEngine();
+    // Unassigned, `x/x` folds to 1 at canonicalization (the generic-symbol
+    // convention), and that form survives a later assignment.
+    const cached = ce2.box(['Divide', 'x', 'x']);
+    expect(cached.json).toBe(1);
+    ce2.assign('x', 0);
+    expect(cached.evaluate().toString()).toBe('1');
+    // Boxed after the assignment, the quotient keeps its structure and
+    // evaluates to the indeterminate form.
+    const quotient = ce2.box(['Divide', 'x', 'x']);
+    expect(quotient.json).toEqual(['Divide', 'x', 'x']);
+    expect(quotient.evaluate().toString()).toBe('Indeterminate');
+    expect(quotient.N().toString()).toBe('NaN');
+    expect(ce2.box(['Power', 'x', 'x']).evaluate().toString()).toBe(
+      'Indeterminate'
+    );
+    ce2.assign('x', 0.0);
+    ce2.assign('y', { num: '0.0' });
+    expect(ce2.box(['Divide', 'y', 'y']).evaluate().toString()).toBe('NaN');
+  });
+
+  test('simplification absorbs the value', () => {
+    const ce2 = new ComputeEngine();
+    expect(ce2.parse('x + \\frac{0}{0}').simplify().toString()).toBe(
+      'Indeterminate'
+    );
+    expect(ce2.parse('0 \\cdot \\infty + x').simplify().toString()).toBe(
+      'Indeterminate'
+    );
+    expect(
+      ce2
+        .box(['Simplify', ['Add', 'x', ['Divide', 0, 0]]])
+        .evaluate()
+        .toString()
+    ).toBe('Indeterminate');
+  });
+
+  test('the compiled routes answer the IEEE NaN', () => {
+    const quotient = compile(ce.box(['Divide', 0, 0]));
+    expect(quotient.success).toBe(true);
+    expect(quotient.run!({})).toBeNaN();
+    const product = compile(ce.box(['Multiply', 0, 'PositiveInfinity']));
+    expect(product.run!({})).toBeNaN();
+    expect(
+      compile(ce.box(['Divide', 'x', 'y'])).run!({ x: 0, y: 0 })
+    ).toBeNaN();
+  });
+});
+
+describe('INDETERMINATE — the producers: review round', () => {
+  test('a float order of a Bessel or polygamma head gives NaN', () => {
+    expect(box(['BesselI', { num: '2.0' }, 'ComplexInfinity']).toString()).toBe(
+      'NaN'
+    );
+    expect(box(['BesselJ', { num: '0.0' }, 'ComplexInfinity']).toString()).toBe(
+      'NaN'
+    );
+    expect(
+      box(['PolyGamma', { num: '1.0' }, 'NegativeInfinity']).toString()
+    ).toBe('NaN');
+    // The exact orders are the indeterminate form.
+    expect(box(['BesselJ', 0, 'ComplexInfinity']).toString()).toBe(
+      'Indeterminate'
+    );
+    expect(box(['PolyGamma', 1, 'NegativeInfinity']).toString()).toBe(
+      'Indeterminate'
+    );
+  });
+
+  test('∞ + (−∞) through .add() and the kernels that use it', () => {
+    expect(ce.PositiveInfinity.add(ce.NegativeInfinity).toString()).toBe(
+      'Indeterminate'
+    );
+    expect(ce.NegativeInfinity.add(ce.PositiveInfinity).toString()).toBe(
+      'Indeterminate'
+    );
+    expect(ce.PositiveInfinity.add(-Infinity).toString()).toBe('Indeterminate');
+    // `~oo` absorbs a sum, as in the `Add` fold.
+    expect(ce.ComplexInfinity.add(ce.PositiveInfinity).toString()).toBe('~oo');
+    expect(ce.PositiveInfinity.add(ce.PositiveInfinity).toString()).toBe('+oo');
+    const cases: [MathJsonExpression, string][] = [
+      [
+        [
+          'Add',
+          ['List', 'PositiveInfinity', 1],
+          ['List', 'NegativeInfinity', 2],
+        ],
+        '[Indeterminate,3]',
+      ],
+      [
+        [
+          'Subtract',
+          ['List', 'PositiveInfinity'],
+          ['List', 'PositiveInfinity'],
+        ],
+        '[Indeterminate]',
+      ],
+      [
+        [
+          'Add',
+          ['List', ['List', 'PositiveInfinity']],
+          ['List', ['List', 'NegativeInfinity']],
+        ],
+        '[[Indeterminate]]',
+      ],
+      [
+        ['Mean', ['List', 'PositiveInfinity', 'NegativeInfinity']],
+        'Indeterminate',
+      ],
+    ];
+    for (const [json, expected] of cases) {
+      expect([json, box(json).toString()]).toEqual([json, expected]);
+      expect([json, boxN(json).toString()]).toEqual([
+        json,
+        expected.replace(/Indeterminate/g, 'NaN'),
+      ]);
+    }
+    // A float in the same cell, or in the data, makes it NaN.
+    expect(
+      box([
+        'Add',
+        ['List', 'PositiveInfinity', 1],
+        ['List', 'NegativeInfinity', 2],
+        ['List', { num: '1.5' }, 0],
+      ]).toString()
+    ).toBe('[NaN,3]');
+    expect(
+      box([
+        'Mean',
+        ['List', 'PositiveInfinity', 'NegativeInfinity', { num: '1.5' }],
+      ]).toString()
+    ).toBe('NaN');
+  });
+
+  test('Beta with two infinite operands', () => {
+    // B(a, b) ≤ 1/a for b ≥ 1, so B(+∞, +∞) = 0.
+    expect(
+      box(['Beta', 'PositiveInfinity', 'PositiveInfinity']).toString()
+    ).toBe('0');
+    for (const [a, b] of [
+      ['PositiveInfinity', 'NegativeInfinity'],
+      ['PositiveInfinity', 'ComplexInfinity'],
+      ['NegativeInfinity', 'PositiveInfinity'],
+    ])
+      expect([a, b, box(['Beta', a, b]).toString()]).toEqual([
+        a,
+        b,
+        'Indeterminate',
+      ]);
+    // One infinite operand with a finite b of non-positive real part keeps
+    // the recorded NaN.
+    expect(
+      box(['Beta', 'PositiveInfinity', ['Rational', -1, 2]]).toString()
+    ).toBe('NaN');
+  });
+
+  test('a float numerator over an infinity is the float 0', () => {
+    expect(ce.box(['Divide', { num: '0.0' }, 'PositiveInfinity']).json).toEqual(
+      { num: '0.0' }
+    );
+    expect(ce.box(['Divide', { num: '2.5' }, 'PositiveInfinity']).json).toEqual(
+      { num: '0.0' }
+    );
+    expect(ce.box(['Divide', 2, 'PositiveInfinity']).json).toBe(0);
+    expect(ce.box({ num: '0.0' }).div(ce.PositiveInfinity).json).toEqual({
+      num: '0.0',
+    });
+  });
+
+  test('Remainder by zero is the indeterminate form, as Mod', () => {
+    expect(box(['Remainder', 5, 0]).toString()).toBe('Indeterminate');
+    expect(boxN(['Remainder', 5, 0]).toString()).toBe('NaN');
+    expect(box(['Remainder', 'x', 0]).toString()).toBe('Indeterminate');
+    expect(box(['Remainder', { num: '5.0' }, 0]).toString()).toBe('NaN');
+    expect(box(['Remainder', 5, { num: '0.0' }]).toString()).toBe('NaN');
+    expect(box(['Remainder', 7, 3]).toString()).toBe('1');
+  });
+
+  test('a float absorbed by an infinity at canonicalization is not seen', () => {
+    // A KNOWN LIMIT of the float rule, pinned as it is: the rule reads the
+    // operands of the form as they are when the form is built, and `∞ + 0.5`
+    // is the exact `∞` by then, so these answer `Indeterminate` although a
+    // float was written. (`docs/plans/2026-09-28-indeterminate-value.md`,
+    // Phase 2 results.)
+    expect(
+      box(['Fract', ['Add', 'PositiveInfinity', { num: '0.5' }]]).toString()
+    ).toBe('Indeterminate');
+    expect(
+      box([
+        'Multiply',
+        0,
+        ['Add', 'PositiveInfinity', { num: '0.5' }],
+      ]).toString()
+    ).toBe('Indeterminate');
   });
 });

@@ -15,6 +15,7 @@ import {
   isFunction,
   isNumber,
   isSymbol,
+  indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
 import { exactOrder } from '../boxed-expression/compare.js';
@@ -510,7 +511,8 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // type handlers). A signed infinity is its own real part and an
         // anonymous infinity reads its infinite real component: both take
         // the ordinary arms below.
-        if (infinitePoint(ops[0]) === '~oo') return ce.NaN;
+        if (infinitePoint(ops[0]) === '~oo')
+          return indeterminateFormAnswer(ce, ops);
         const op = ops[0].numericValue;
         // A real value is its own real part: return the operand unchanged so an
         // exact real (`1/2`, `√2`) stays exact instead of being rounded to a
@@ -563,7 +565,8 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // propagates it); the arm keeps the handler honest on the routes
         // that call it directly. `~oo` has no imaginary part.
         if (ops[0].isNaN === true) return ce.NaN;
-        if (infinitePoint(ops[0]) === '~oo') return ce.NaN;
+        if (infinitePoint(ops[0]) === '~oo')
+          return indeterminateFormAnswer(ce, ops);
         const op = ops[0].numericValue;
         if (typeof op === 'number' || !op.isComplex) return ce.Zero;
         // Exact operand: the imaginary part is an exact component too
@@ -663,7 +666,8 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // (`Argument(−∞) = π`) through the real branch, and an anonymous
         // infinity (`∞ + i`) keeps the direction of its vector through
         // `Arctan2` (0 or π).
-        if (infinitePoint(ops[0]) === '~oo') return ce.NaN;
+        if (infinitePoint(ops[0]) === '~oo')
+          return indeterminateFormAnswer(ce, ops);
         const op = ops[0].numericValue;
         if (typeof op === 'number' || !op.isComplex) {
           const isNonNegative = typeof op === 'number' ? op >= 0 : op.re >= 0;

@@ -34,6 +34,7 @@ import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import {
   isAbsentValue,
   nanOperandAnswer,
+  indeterminateFormAnswer,
   isFunction,
   isNumber,
   isString,
@@ -529,9 +530,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
         if (x.isNaN === true) return ce.NaN;
-        // No limit at any infinity: NaN on both routes (the real kernel used
-        // to answer NaN for ±∞ and the others stayed inert).
-        if (infinitePoint(x) !== undefined) return ce.NaN;
+        // No limit at any infinity: the indeterminate form on both routes
+        // (`NaN` for an anonymous infinity such as `∞ + i`, a float literal;
+        // the real kernel used to answer NaN for ±∞ and the others stayed
+        // inert).
+        if (infinitePoint(x) !== undefined)
+          return indeterminateFormAnswer(ce, [x]);
         // A non-real argument, or a real one outside [−1, 1], has a value
         // the real kernel cannot compute: stay symbolic, under N() too.
         if (x.isComplex) return undefined;
@@ -664,6 +668,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(xs);
           if (vals) return boxedMean(engine, vals);
         }
+        // Data holding both `+∞` and `−∞` sums to the indeterminate form
+        // `∞ − ∞`: `Indeterminate`, or `NaN` with a float datum
+        // (`indeterminateFormAnswer()`). The machine kernel below would
+        // answer the `NaN` literal.
+        if (
+          xs.some((x) => x.isInfinity === true && x.isPositive === true) &&
+          xs.some((x) => x.isInfinity === true && x.isNegative === true)
+        )
+          return indeterminateFormAnswer(engine, xs);
         // A float datum makes the mean a float, even when its value is an
         // integer (`Mean([0.5, 1.5])` is the float `1`); the same holds for
         // the other statistics below, except `Mode`, which returns a datum.

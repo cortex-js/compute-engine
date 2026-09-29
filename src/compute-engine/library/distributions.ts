@@ -12,6 +12,7 @@ import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import {
   isAbsentValue,
   nanOperandAnswer,
+  indeterminateFormAnswer,
   isFunction,
   isNumber,
 } from '../boxed-expression/type-guards.js';
@@ -248,6 +249,20 @@ function isProvablyFinite(x: Expression): boolean {
 }
 
 /**
+ * Is Γ(a) positive at a NEGATIVE NON-INTEGER real literal `a`? Γ alternates
+ * sign between consecutive poles: it is negative on (−1, 0), positive on
+ * (−2, −1), negative on (−3, −2), … — positive exactly when ⌊−a⌋ is odd.
+ * Read from the sign rule, not from the machine `gamma(a)`, which underflows
+ * to 0 past a ≈ −171 and would then report the wrong sign.
+ */
+function gammaIsPositiveAt(a: Expression): boolean {
+  const big = a.bignumRe;
+  const k =
+    big !== undefined ? big.neg().floor().toNumber() : Math.floor(-a.re);
+  return k % 2 === 1;
+}
+
+/**
  * The value of `GammaRegularized(a, z) = Γ(a, z)/Γ(a)` when at least one
  * operand is an infinite point, or `undefined` when both are finite. Exact,
  * so given on `evaluate()` and `.N()` alike. Each limit was verified against
@@ -257,7 +272,8 @@ function isProvablyFinite(x: Expression): boolean {
  *   `Γ(a, z)` vanishes while `Γ(a)` stays put (`Q(2, 10⁶) = 10^(−434289)`),
  *   and where `Γ(a)` is a pole `Q` is identically 0 anyway. An `a` whose
  *   finiteness is NOT proven — a symbol whose type admits an infinity — stays
- *   symbolic, because the value at an infinite `a` is different (`NaN`) and
+ *   symbolic, because the value at an infinite `a` is different
+ *   (`Indeterminate`) and
  *   the fold could not be taken back.
  * - `Q(+∞, z) = 1` for every provably finite `z`, negative `z` included
  *   (`Q(10⁶, −5) = 1`): the mass of `Γ(a, ·)` moves out past any fixed `z`.
@@ -279,26 +295,17 @@ function isProvablyFinite(x: Expression): boolean {
  *   literal stays SYMBOLIC — a symbol declared `integer` may hold a positive
  *   integer, whose value is `±∞` by the rows above, and `NaN` could not be
  *   taken back.
- * - `Q(−∞, z)`: `NaN`. `Q` is identically 0 at every negative integer `a`
+ * - `Q(−∞, z)`: `Indeterminate`. `Q` is identically 0 at every negative integer `a`
  *   (a pole of `Γ(a)`) and diverges to `−∞` between consecutive poles
  *   (`Q(−10⁶−¼, 2) = −7·10^5264672`), so there is no limit.
- * - `~oo` in either slot, an anonymous infinity such as `∞ + i`, or two
- *   infinite operands: `NaN`.
+ * - `~oo` in either slot, or two infinite operands: `Indeterminate`. An
+ *   anonymous infinity such as `∞ + i` (a float literal): `NaN`.
+ *
+ * `Indeterminate` is the exact answer to a form with no value; a float
+ * operand makes it `NaN` (`indeterminateFormAnswer()`). `Q(a, −∞)` for a
+ * non-integer `a` is `NaN`, not `Indeterminate`: there the value is complex
+ * with an unbounded modulus, not a form with no value.
  */
-/**
- * Is Γ(a) positive at a NEGATIVE NON-INTEGER real literal `a`? Γ alternates
- * sign between consecutive poles: it is negative on (−1, 0), positive on
- * (−2, −1), negative on (−3, −2), … — positive exactly when ⌊−a⌋ is odd.
- * Read from the sign rule, not from the machine `gamma(a)`, which underflows
- * to 0 past a ≈ −171 and would then report the wrong sign.
- */
-function gammaIsPositiveAt(a: Expression): boolean {
-  const big = a.bignumRe;
-  const k =
-    big !== undefined ? big.neg().floor().toNumber() : Math.floor(-a.re);
-  return k % 2 === 1;
-}
-
 function gammaRegularizedValueAtInfinity(
   a: Expression,
   z: Expression,
@@ -308,7 +315,8 @@ function gammaRegularizedValueAtInfinity(
   const pz = infinitePoint(z);
   if (pa === undefined && pz === undefined) return undefined;
   if (pa === 'anonymous' || pz === 'anonymous') return ce.NaN;
-  if (pa !== undefined && pz !== undefined) return ce.NaN;
+  if (pa !== undefined && pz !== undefined)
+    return indeterminateFormAnswer(ce, [a, z]);
   if (pz === '+oo') return isProvablyFinite(a) ? ce.Zero : undefined;
   if (pz === '-oo') {
     // Only a LITERAL `a` is classified. A symbol — declared `integer`, or
@@ -329,9 +337,9 @@ function gammaRegularizedValueAtInfinity(
     if (a.isInteger === false) return ce.NaN;
     return undefined;
   }
-  if (pz !== undefined) return ce.NaN;
+  if (pz !== undefined) return indeterminateFormAnswer(ce, [a, z]);
   if (pa === '+oo') return isProvablyFinite(z) ? ce.One : undefined;
-  return ce.NaN;
+  return indeterminateFormAnswer(ce, [a, z]);
 }
 
 /**

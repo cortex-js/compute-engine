@@ -302,10 +302,12 @@ describe('SCALED COMPLEX DIVISION: helpers', () => {
 });
 
 describe('SCALED COMPLEX DIVISION: zero, infinite and NaN operands keep their values', () => {
-  // Measured before the scaled division was introduced (2026-09-27).
-  const cases: [string, any, string][] = [
+  // Measured before the scaled division was introduced (2026-09-27). The
+  // fourth entry, when present, is the answer of evaluate() where it differs
+  // from N(): the exact indeterminate form `0/0` is `Indeterminate`.
+  const cases: [string, any, string, string?][] = [
     ['(1 + i) / 0', ['Divide', ['Complex', 1, 1], 0], '~oo'],
-    ['0 / 0', ['Divide', 0, 0], 'NaN'],
+    ['0 / 0', ['Divide', 0, 0], 'NaN', 'Indeterminate'],
     ['(1 + i) / NaN', ['Divide', ['Complex', 1, 1], 'NaN'], 'NaN'],
     ['NaN / (1 + i)', ['Divide', 'NaN', ['Complex', 1, 1]], 'NaN'],
     ['(1 + i) / +oo', ['Divide', ['Complex', 1, 1], 'PositiveInfinity'], '0'],
@@ -313,10 +315,10 @@ describe('SCALED COMPLEX DIVISION: zero, infinite and NaN operands keep their va
     ['~oo / (1 + i)', ['Divide', 'ComplexInfinity', ['Complex', 1, 1]], '~oo'],
     ['(1 + i) / ~oo', ['Divide', ['Complex', 1, 1], 'ComplexInfinity'], '0'],
   ];
-  for (const [label, json, expected] of cases) {
+  for (const [label, json, expected, exact] of cases) {
     test(label, () => {
       expect(ce.box(json).N().toString()).toBe(expected);
-      expect(ce.box(json).evaluate().toString()).toBe(expected);
+      expect(ce.box(json).evaluate().toString()).toBe(exact ?? expected);
     });
   }
 });

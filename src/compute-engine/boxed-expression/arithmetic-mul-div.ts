@@ -20,7 +20,9 @@ import {
   containsContinuationOperand,
   isInexactOperand,
   nanOperandAnswer,
+  indeterminateFormAnswer,
 } from './type-guards.js';
+import { asFloat } from './float-result.js';
 import {
   isImaginaryPartFinite,
   isImaginaryUnitValue,
@@ -181,6 +183,11 @@ export class Product {
   // at any position, before or after the `NaN`.
   private _nanFromIndeterminate: boolean | undefined = undefined;
   private _sawInexact = false;
+  // `true` when the coefficient became `NaN` because the product is an
+  // indeterminate form of its own (`0·∞`, `0·~oo`), not because of a
+  // `NaN`-valued factor. Such a product is `Indeterminate` when no factor is
+  // inexact (`0·∞`), and `NaN` otherwise (`0.0·∞`).
+  private _indeterminateForm = false;
 
   static from(expr: Expression): Product {
     return new Product(expr.engine, [expr]);
@@ -298,11 +305,13 @@ export class Product {
             this.coefficient.isNegativeInfinity ||
             this.coefficient.isComplexInfinity
           ) {
+            this._indeterminateForm = true;
             this.coefficient = this.engine._numericValue(NaN);
             return;
           }
           // A float `0` absorbs the product and keeps it a float: `0.0·x`
-          // is the float `0`
+          // is the float `0`. A zero exponent is the indeterminate form `0^0`.
+          if (isZero(exp)) this._indeterminateForm = true;
           this.coefficient =
             isZero(exp) || !isNumber(term) || term.isExact
               ? this.engine._numericValue(isZero(exp) ? NaN : 0)
@@ -323,6 +332,7 @@ export class Product {
         if (term.isInfinity) {
           // 0 * infinity -> NaN (indeterminate form)
           if (this.coefficient.isZero) {
+            this._indeterminateForm = true;
             this.coefficient = this.engine._numericValue(NaN);
             return;
           }
@@ -802,7 +812,7 @@ export class Product {
       this.coefficient = coef;
       if (grouped === null) return ce.NaN;
       const rest = termsAsExpression(ce, grouped);
-      if (isLiteral(rest, 0)) return ce.NaN;
+      if (isLiteral(rest, 0)) return this._formAnswer(rest);
       if (rest.isPositive === true) return infinity;
       if (rest.isNegative === true)
         return coef.isPositiveInfinity
@@ -832,11 +842,23 @@ export class Product {
   }
 
   /** The answer of a product whose coefficient is `NaN`: see
-   * `_nanFromIndeterminate`. */
+   * `_nanFromIndeterminate` and `_indeterminateForm`. */
   private _nanAnswer(): Expression {
-    return this._nanFromIndeterminate === true && !this._sawInexact
+    const fromIndeterminate =
+      this._nanFromIndeterminate === true ||
+      (this._nanFromIndeterminate === undefined && this._indeterminateForm);
+    return fromIndeterminate && !this._sawInexact
       ? this.engine.Indeterminate
       : this.engine.NaN;
+  }
+
+  /** The answer of the form `∞·0`, where the factors other than the infinite
+   * coefficient multiply to the literal `rest` = 0: `Indeterminate`, or `NaN`
+   * when a factor is inexact (`indeterminateFormAnswer()`). */
+  private _formAnswer(rest: Expression): Expression {
+    return this._sawInexact
+      ? this.engine.NaN
+      : indeterminateFormAnswer(this.engine, [rest]);
   }
 
   /** The product, expressed as a numerator and denominator */
@@ -863,7 +885,10 @@ export class Product {
       this.coefficient = coef;
       if (grouped === null) return [ce.NaN, ce.NaN];
       const rest = termsAsExpression(ce, grouped);
-      if (isLiteral(rest, 0)) return [ce.NaN, ce.NaN];
+      if (isLiteral(rest, 0)) {
+        const answer = this._formAnswer(rest);
+        return [answer, answer];
+      }
       if (rest.isPositive === true) return [infinity, ce.One];
       if (rest.isNegative === true)
         return [
@@ -1252,7 +1277,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // which would let expressions like tan(π/2) slip through the guard.
   const op2IsConstantExpression = op2.unknowns.length === 0 && !isNumber(op2);
 
-  // 0/0 = NaN, a/0 = ~∞ (a≠0)
+  // 0/0 = Indeterminate (`NaN` with a float operand), a/0 = ~∞ (a≠0)
   // Note: literal checks only — no value following (see isLiteral), and no
   // .N() either, because .N() can be expensive (e.g., Monte Carlo
   // integration) and canonicalization must be fast. Expressions like (1-1)/0
@@ -1272,7 +1297,9 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   if (isLiteral(op2, 0)) {
     if (typeMayCarryQuotientShape(op1.type.type))
       return ce._fn('Divide', [op1, op2]);
-    return isLiteral(op1, 0) ? ce.NaN : ce.ComplexInfinity;
+    return isLiteral(op1, 0)
+      ? indeterminateFormAnswer(ce, [op1, op2])
+      : ce.ComplexInfinity;
   }
 
   // 0/a = 0 (a≠0, a is finite)
@@ -1288,14 +1315,16 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     return isNumber(op1) && !op1.isExact ? op1 : ce.Zero;
   }
 
-  // a/∞ = 0, ∞/∞ = NaN (check before a/a = 1 rule)
+  // a/∞ = 0, ∞/∞ = Indeterminate (check before a/a = 1 rule)
   if (op2.isInfinity) {
-    if (op1.isInfinity) return ce.NaN;
+    if (op1.isInfinity) return indeterminateFormAnswer(ce, [op1, op2]);
     // Same shape exemption as the a/0 rule above: [1,2]/∞ broadcasts to
     // [0, 0] at evaluation rather than collapsing to the scalar 0.
     if (typeMayCarryQuotientShape(op1.type.type))
       return ce._fn('Divide', [op1, op2]);
-    return ce.Zero;
+    // A float numerator gives the float `0` (`2.5/∞` is `0.0`): a float
+    // operand makes a numeric result a float.
+    return isNumber(op1) && !op1.isExact ? asFloat(ce.Zero) : ce.Zero;
   }
 
   // ∞/a = ±∞ for a finite and definitely nonzero (with a known sign). Mirrors
@@ -1424,7 +1453,10 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       typeof v2 === 'number' &&
       Number.isInteger(v2)
     ) {
-      if (v2 === 0) return v1 === 0 ? ce.NaN : ce.ComplexInfinity;
+      if (v2 === 0)
+        return v1 === 0
+          ? indeterminateFormAnswer(ce, [op1, op2])
+          : ce.ComplexInfinity;
       return ce.number([v1, v2]);
     }
 
@@ -1602,8 +1634,10 @@ export function div(num: Expression, denom: number | Expression): Expression {
   if (typeof denom === 'number') {
     if (isNaN(denom)) return ce.NaN;
     if (isLiteral(num, 0)) {
-      // 0/0 = NaN, 0/±∞ = NaN
-      if (denom === 0 || !isFinite(denom)) return ce.NaN;
+      // 0/0 is the indeterminate form (`NaN` with a float zero). 0/±∞ is 0,
+      // as `canonicalDivide` answers for `Divide(0, ∞)`: it is not an
+      // indeterminate form (it answered `NaN` here before).
+      if (denom === 0) return indeterminateFormAnswer(ce, [num, ce.Zero]);
       return num; // 0
     }
     // a/1 = a
@@ -1640,8 +1674,13 @@ export function div(num: Expression, denom: number | Expression): Expression {
     if (isNumber(denom) && denom.isNaN)
       return nanOperandAnswer(ce, [num, denom]);
     if (isLiteral(num, 0)) {
-      if (isLiteral(denom, 0) || denom.isFinite === false) return ce.NaN;
-      return ce.Zero;
+      // 0/0 is the indeterminate form. 0/∞ and 0/~oo are 0, as
+      // `canonicalDivide` answers (not an indeterminate form; this answered
+      // `NaN` before). A `NaN` divisor was handled above.
+      if (isLiteral(denom, 0)) return indeterminateFormAnswer(ce, [num, denom]);
+      // A float `0` numerator is kept (`0.0/∞` is the float `0`), as in the
+      // JavaScript-number branch above.
+      return isNumber(num) && !num.isExact ? num : ce.Zero;
     }
 
     // a/1 = a
@@ -1892,10 +1931,13 @@ export function canonicalMultiply(
         product = candidate;
       }
       if (product.isZero) {
-        // 0 * ±∞ = NaN, 0 * NaN = NaN, and 0 times an absent factor is NaN
-        // (arithmetic with an absent operand is `NaN`)
-        if (hasAbsentFactor || nonNumeric.some((x) => x.isInfinity || x.isNaN))
-          return ce.NaN;
+        // 0 * ±∞ is the indeterminate form (`Indeterminate`, or `NaN` when
+        // a factor is a float), 0 * NaN = NaN, 0 * Indeterminate is
+        // `Indeterminate`, and 0 times an absent factor is NaN (arithmetic
+        // with an absent operand is `NaN`)
+        if (hasAbsentFactor) return ce.NaN;
+        if (nonNumeric.some((x) => x.isInfinity || x.isNaN))
+          return indeterminateFormAnswer(ce, nonNumeric);
         // A factor typed `error` always evaluates to an error (such as
         // `Sin((A, B))` with `A`, `B` lists). The zero must not erase it:
         // keep the product as `0` times the other factors, so that
@@ -2319,15 +2361,25 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   // unconditionally changed the folding ORDER of an ordinary numeric product,
   // and `-2 · 3.1 · ∞ · ∞ · x` then came back `+∞·x` at machine precision
   // instead of `-∞·x`. With no reachable sum, `mulFactored` is `mul`.
+  // The pairwise fold of `expandProducts` can lose a float factor before the
+  // product meets its indeterminate form: `0 · 2.5` folds to the exact `0`,
+  // and `0 · ∞` is then `Indeterminate`. A float operand makes the answer
+  // `NaN` (`indeterminateFormAnswer()`), so the operands are read again when
+  // the product is `Indeterminate`.
+  const operands = xs;
+  const floatContact = (result: Expression): Expression =>
+    result.isIndeterminate && operands.some((x) => isInexactOperand(x))
+      ? ce.NaN
+      : result;
   if (expand || !xs.some(hasDistributableSum)) {
     const exp = expandProducts(ce, xs);
     if (exp) {
-      if (exp.operator !== 'Multiply') return exp;
+      if (exp.operator !== 'Multiply') return floatContact(exp);
       if (isFunction(exp)) xs = exp.ops;
     }
   }
 
-  return new Product(ce, xs).asRationalExpression();
+  return floatContact(new Product(ce, xs).asRationalExpression());
 }
 
 /**

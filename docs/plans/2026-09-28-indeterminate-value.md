@@ -10,12 +10,12 @@ eight findings of §6 Phase 0 are resolved in §4, §5, §6 (Phases 1–3) and
 §7 — the forwarding rule moves into the `Sum`/`Product` fold classes and
 the reducers, D7 is applied to the shared absence test, `.N()` gets a
 final map, and D5 is widened to every exact form with no value while the
-exact-lane funnel is NOT switched (the user decided the narrower D5 list;
-the widening is recorded in §7 D5). Revised the same day after a
+exact-lane funnel is NOT switched (the user confirmed the widened D5 on
+2026-09-29; recorded in §7 D5). Revised the same day after a
 spec review (one reviewer, 18 findings, all folded in; the second reviewer
 was unavailable). Proposed by the reporter of GitHub issue #355
 (enumeratio); the direction was accepted by the user on 2026-09-28, with the
-design written before any code. Phase 0 done 2026-09-28 (results in §6; they correct §2 and found eight places where §4–§5 could not be implemented as first written, resolved in the amendment above). Every fact in §2 was read from the
+design written before any code. Phase 0 done 2026-09-28 (results in §6; they correct §2 and found eight places where §4–§5 could not be implemented as first written, resolved in the amendment above). Phase 1 (the value, no producer switched) done 2026-09-28. Phase 2 (the exact producers switched) done 2026-09-29, results in §6 Phase 2. Every fact in §2 was read from the
 code at commit `af09cc1c` (all paths under `src/compute-engine/` unless
 stated).
 
@@ -572,6 +572,121 @@ that answer `NaN` for an `Indeterminate` operand. Snapshots updated with
 the Phase 0 count stated (46 tests, 19 inline snapshots, 11 files, before
 the widening of D5).
 
+**Phase 2 results (done 2026-09-29).** One helper decides every switched
+site: `indeterminateFormAnswer(ce, operands)` (`type-guards.ts`) answers
+`Indeterminate`, or `NaN` when an operand of the form is a float, the `NaN`
+literal, an absent symbol or a symbol whose value is `NaN` (D3). Line
+numbers are those of the Phase 2 tree; all paths are under
+`src/compute-engine/`.
+
+- Canonicalization and division: the integer `0/0` fold in boxing
+  (`boxed-expression/box.ts:529`; `asBigint` reads the float `0.0` as the
+  integer 0, so the operands are boxed and tested); `canonicalDivide` `0/0`
+  (`arithmetic-mul-div.ts:1301`), `∞/∞` (`:1320`) and the integer-literal
+  `0/0` (`:1458`); `div()` `0/0` (`:1640`, `:1680`).
+- Products: the `Product` fold marks its own indeterminate forms
+  (`_indeterminateForm`, set at `arithmetic-mul-div.ts:308` `~oo·0` and
+  `±∞·0`, `:314` `0^0` as a factor, `:335` `0·±∞`) and answers them in
+  `_nanAnswer()` (`:846`) and `_formAnswer()` (`:858`); the canonical
+  `0·∞` fold (`:1940`); `BoxedNumber.mul` guards (`boxed-number.ts:667`,
+  `:675`, `:699`, `:701`, `:711`).
+- Sums: `∞ − ∞` in the `Terms` fold (`arithmetic-add.ts:1032`) and in
+  `BoxedNumber.add` (`boxed-number.ts:584`, review round), which the
+  broadcast and matrix kernels use for their cells (`[∞, 1] + [−∞, 2]` is
+  `[Indeterminate, 3]`); `Mean` of data holding `+∞` and `−∞`
+  (`library/statistics.ts:679`, review round).
+- Powers (`arithmetic-power.ts`): an exact unit-modulus base to `±∞`
+  (`:139`); `0^(imaginary)` (`:543`); `0^0` (`:545`); `∞^0` (`:594`);
+  `1^±∞` (`:609`); `(−1)^∞` (`:659`) and `(−1)^−∞` (`:704`);
+  `∞^(imaginary)` (`:779`); `Root(0, ∞)` and `Root(∞, ∞)` (`:1886`).
+- The Contract B `definedWhen` marker, so `Mod(x, 0)` and `Fract(±∞)`
+  (`boxed-function.ts:5064`, `:5976`).
+- `Log(1, 1)` (`0/0`) and `Log(∞, ∞)` (`∞/∞`) in
+  `logarithmAtExceptionalPoint` (`boxed-expression/logarithm.ts:173`,
+  `:179`).
+- Special functions at an infinite point with no limit
+  (`library/arithmetic.ts`): the Γ family at `−∞` and `~oo` (`:1756`); the
+  polygammas (`:1798`) and Bessel at `~oo` (`:1850`), both reading the
+  ORDER as an expression too, so that a float order (`BesselJ(0.0, ~oo)`)
+  gives `NaN` (review round); Airy `Ai′`/`Bi′` at `−∞` and every Airy head
+  at `~oo` (`:1927`, `:1928`); `Beta` (`:1987`, `:1992`: two infinite
+  operands are `0` for `B(+∞, +∞)`, verified with mpmath
+  `beta(1e6, 1e6) = 3.6e-602063` and `beta(1e3, 1e9) = 4.0e-6436`, and
+  `Indeterminate` for every other pair, review round; one infinite operand
+  at `−∞`/`~oo` is `Indeterminate`); the upper incomplete gamma with two
+  infinite operands, an infinite `s` at `z = +∞`, `z = ~oo`, and `s = ~oo`
+  (`:2028`, `:2030`, `:2035`, `:2038`); Hurwitz `Zeta(s, a)` at
+  `s = −∞`/`~oo` (`:2178`); `Zeta` at `−∞`/`~oo` (`:4047`); `Remainder(x,
+  0)`, as `Mod(x, 0)` (`:6695`, in the handler, review round). Found beyond the Phase 0 list, with the
+  same meaning: `Binomial` and `Pochhammer` at the points their comments
+  call "no limit" (`library/combinatorics.ts:202`, `:212`, `:220`, `:223`,
+  `:479`, `:487`, `:496`, `:499`); `GammaRegularized` (`Q(−∞, z)`, `~oo`,
+  two infinities; `library/distributions.ts:319`, `:340`, `:342`);
+  `ErfInv` at every infinity (`library/statistics.ts:538`);
+  `SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral` at `~oo`
+  (`library/trigonometry.ts:1255`, `:1323`, `:1384`, `:1452`);
+  `ExpIntegralEi` and `LogIntegral` at `~oo`
+  (`library/special-functions.ts:797`, `:870`); `Real`, `Imaginary` and
+  `Argument` of `~oo` (`library/complex.ts:515`, `:569`, `:670`; so the
+  `AbsArg(~oo)` pair is `(+∞, Indeterminate)`).
+
+Kept `NaN`, each for a stated reason: an anonymous infinity such as
+`∞ + i` (a float literal; the helper answers `NaN` for it by itself);
+`Γ(s, −∞)`, `B(+∞, b)` for a `b` with a non-positive real part, and
+`Q(a, −∞)` for a non-integer `a` (the recorded rulings answer `NaN`
+because the divergence has a sign or a complex direction that depends on
+the other operand, not because the form has no value — switching them
+would state a false "no value"; the correct answers would be signed or
+complex infinities, a decision for the user); `AGM` with two infinite
+operands (not documented as "no limit"); `Root(x, 0)` and `root(0)` (a
+precondition error on the boxed route); the numeric-only cases of the
+Hurwitz and Lerch zeta at `Re(s) = 0` (they run under `.N()` only); the
+exact-lane funnel (`ce.number([5, 0])` and `ce.number([0, 0])` are still
+`NaN`).
+
+Three changes were needed beyond the one-line switches. (1) `.N()` of a
+broadcast or a matrix kernel kept an `Indeterminate` cell (`[0, 1]·∞`,
+`MatrixPower([[∞, 0], [0, 1]], 2)`): the kernels compute the cells with
+`.mul()`, which does not know the route is numeric. The final map
+`indeterminateAsNaN()` (`boxed-function.ts:9405`) now reaches the cells of a
+`List` or `Tuple` result at any depth. (2) The pairwise fold of
+`expandProducts` turns `0 · 2.5` into the exact `0`, so `0 · 2.5 · ∞` was
+`Indeterminate`; `mulImpl` reads the operands again when the product is
+`Indeterminate` (`arithmetic-mul-div.ts:2370`) and answers `NaN` for a
+float operand. (3) Two defects met in the code switched: `div()` answered
+`NaN` for `0/∞` and `0/~oo` where `Divide(0, ∞)` is `0` (it is not an
+indeterminate form; now `0`), and a float base `1.0` to `±∞` answered `0`
+(the `−1 < a < 1` arm) where `1^∞` has no value (now `NaN`, the float
+twin of `Indeterminate`). In the review round, the `a/∞ = 0` folds keep a float: a float
+numerator over an infinity is the float `0` (`Divide(2.5, ∞)` and
+`Divide(0.0, ∞)` are `0.0`; `arithmetic-mul-div.ts:1327`, `:1683`).
+
+A known limit of the float rule: it reads the operands of a form as they
+are when the form is built. A float first absorbed by an infinity is gone
+by then, so `Fract(∞ + 0.5)` and `0·(∞ + 0.5)` are `Indeterminate` although
+a float was written (`∞ + 0.5` is the exact `∞`). Both answers are pinned in
+`indeterminate.test.ts` and recorded in ROADMAP. `Quotient(5, 0)` stays
+inert because `Quotient` is not a library operator (it is an undefined
+function head), so there is no answer to switch.
+
+Expectations changed (tests edited by hand; no `-u`): `simplify.test.ts`
+20 tests (11 comparisons, 9 inline snapshots), `canonical-form.test.ts` 6
+tests (10 inline snapshots), `error-model.test.ts` 10 tests (a helper
+`isIndeterminateValue` and a route-aware `both` check: `Indeterminate` under
+`evaluate()`, `NaN` under `.N()`), `points-arithmetic.test.ts` 5,
+`non-finite-typing.test.ts` 4, `arithmetic.test.ts` 3,
+`pipeline-contracts.test.ts` 1, `error-model-statistics.test.ts` 1,
+`error-model-linear-algebra.test.ts` 1, `complex-division-scaling.test.ts`
+1, the Epsil documentation test 1 (`src/epsil/docs/reference/arithmetic.md`:
+the introduction example, and the `NaN` entry whose example `0/0` became
+`0.0/0.0`), `error-model-combinatorics.test.ts` 6 (`Binomial`,
+`Pochhammer` and `GammaRegularized` at their points with no limit, with a
+route-aware check), and the 8 Phase 1 pins of `indeterminate.test.ts` that
+asserted "no producer is switched" (replaced by the Phase 2 `describe`
+blocks). In all: 67 tests in 13 files, 19 inline snapshots. Every changed expectation
+is an exact form with no value; none was a float, absence or domain case.
+The review round changed no existing expectation (only new tests). Full suite after the review round: 959 suites passed (10 skipped), 41669 tests passed (904 skipped, 1 todo), 4268 snapshots passed, exit 0.
+
 **Phase 3 — documents and consumers.** ERROR-MODEL §1 (the `IsMissing`
 information loss now applies to `NaN` only), §3 (the absence test
 `isAbsentValue` no longer covers `Indeterminate`, and the forwarding rules
@@ -622,7 +737,8 @@ formatter). Reply on #355.
   representation limits among the exact-lane `NaN` values. As decided on
   2026-09-28 before Phase 0, (a) named only the arithmetic forms plus the
   funnel; the widening to the other forms with no value and the removal of
-  the funnel follow from the Phase 0 findings. (b) Also the absent-value minting
+  the funnel follow from the Phase 0 findings, and the user confirmed the
+  widened (a) on 2026-09-29. (b) Also the absent-value minting
   sites: rejected here, because a missing value is not an indeterminate form,
   and the 2026-09-26 rules were decided with `NaN` as their marker.
 - **D6 — where the gate does not run.** (a) Those handlers answer `NaN`

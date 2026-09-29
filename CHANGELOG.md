@@ -13,6 +13,71 @@
   a binding). The type grammar reads `Indeterminate` as the value type of
   that literal, and `NumberFrom("Indeterminate")` reads it back.
 
+- **An exact indeterminate form evaluates to `Indeterminate`, not `NaN`.**
+  An exact question whose answer has no value now answers the exact value
+  `Indeterminate` (see New Features); `NaN` stays the answer of a
+  floating-point computation that failed. The printed answer changes from
+  `NaN` to `Indeterminate` for:
+  - the arithmetic forms, at canonicalization and at evaluation: `0/0`,
+    `∞/∞`, `0·∞`, `0·~oo`, `∞ − ∞`, `0^0`, `∞^0`, `1^±∞`, `(−1)^±∞`,
+    `i^∞` (an exact base on the unit circle other than 1, to `±∞`),
+    `∞^(imaginary)`, `0^(imaginary)`, `Root(0, ∞)`, `Root(∞, ∞)`,
+    `Log(1, 1)` and `Log(∞, ∞)`. The ones that fold at canonicalization
+    (`["Divide", 0, 0]`, `0^0`, `∞/∞`, `∞^0`, `1^∞`) now have the canonical
+    form `"Indeterminate"`;
+  - `Mod(x, 0)` and `Remainder(x, 0)` (`Mod(5, 0)`, and `Mod(x, 0)` for a
+    symbol `x`) and `Fract(±∞)`;
+  - the special functions at an infinite point where the limit does not
+    exist: `Gamma`, `GammaLn`, `Factorial`, `Factorial2`, `Digamma`,
+    `Trigamma`, `PolyGamma` and `Zeta` at `−∞` and `~oo`; the Bessel
+    functions, `AiryAi`, `AiryBi` and their derivatives at `~oo`, and
+    `AiryAiPrime`, `AiryBiPrime` at `−∞`; `Beta` at `−∞` or `~oo`; the upper
+    incomplete `Gamma(s, z)` at `z = ~oo`, `s = ~oo` or two infinite
+    operands; `GammaRegularized` at `a = −∞`, at `~oo` or at two infinite
+    operands; the points of `Binomial` and `Pochhammer` with no limit;
+    `ErfInv` at every infinity; `SinIntegral`, `CosIntegral`,
+    `SinhIntegral`, `CoshIntegral`, `ExpIntegralEi` and `LogIntegral` at
+    `~oo`; `Real`, `Imaginary` and `Argument` of `~oo` (so `AbsArg(~oo)` is
+    `(+∞, Indeterminate)`); `Beta(+∞, −∞)`, `Beta(+∞, ~oo)` and
+    `Beta(−∞, +∞)` (two infinite operands with no limit), while
+    `Beta(+∞, +∞)` is now `0` (it was `NaN`; `B(a, b) ≤ 1/a` for `b ≥ 1`);
+  - three library answers that reach one of these forms: the sample
+    `Variance([5])` and `StandardDeviation([5])` of one datum (`0/0`), the
+    cells of `MatrixPower` that compute `0·∞`
+    (`MatrixPower([[∞, 0], [0, 1]], 2)` is `[[+∞, Indeterminate],
+    [Indeterminate, 1]]`), the cells of a broadcast (`[0, 1]/0` is
+    `[Indeterminate, ~oo]`, `[0, 1]·∞` is `[Indeterminate, +∞]`,
+    `[∞, 1] + [−∞, 2]` is `[Indeterminate, 3]`), and `Mean([+∞, −∞])`. The
+    `.add()` method follows the `Add` operator: `ce.PositiveInfinity.add(
+    ce.NegativeInfinity)` is `Indeterminate`.
+
+  What does not change: a float operand anywhere in the form gives `NaN`
+  (`0.0/0.0`, `0/0.0`, `0.0·∞`, `0·2.5·∞`, `Mod(5.0, 0)`, `1.0^∞`); an
+  absent operand gives `NaN` (`Missing + 2`, `Missing·0`, `Length(Missing)`);
+  a `NaN` operand gives `NaN`; `.N()` and
+  `evaluate({numericApproximation: true})` of every form above give `NaN`,
+  including the cells of a list or tuple result; the compiled routes answer
+  the target's IEEE `NaN`; a pole is unchanged (`5/0` is `~oo`); a point
+  where the value has a direction that depends on the other operand keeps
+  `NaN` (`Gamma(2, −∞)`, `Beta(∞, −1/2)`); an anonymous infinity such as
+  `∞ + i` gives `NaN`; `ce.number([5, 0])` and `ce.number([0, 0])` are still
+  `NaN`. Code that tested the answer with `x.isSame(ce.NaN)` no longer
+  matches an exact indeterminate form: use `x.isNaN`, which is `true` for
+  both values, or `x.isIndeterminate`. `IsMissing(0/0)` is now `False` and
+  `Coalesce(0/0, 5)` is `Indeterminate`: an indeterminate form is a value,
+  not an absent entry. The operators whose handler runs without the
+  evaluation gate (the lazy operators other than `Add` and `Multiply`, and
+  the operators with an `inert` or `handle` policy other than the reducers)
+  answer `NaN` for an `Indeterminate` operand. The expectations changed in
+  the test suite: 67 tests in 13 files, 19 inline snapshots.
+
+- **`0/∞` through `.div()` is `0`.** `ce.Zero.div(ce.PositiveInfinity)`,
+  `.div(ce.ComplexInfinity)` and `.div(Infinity)` answered `NaN`, where the
+  `Divide` operator answers `0`; they now answer `0`. A float numerator over
+  an infinity is the float `0`: `Divide(2.5, ∞)` and `Divide(0.0, ∞)` were
+  the exact `0` and are `0.0`. A float base `1.0` to `±∞` answered `0` and is
+  now `NaN` (the float twin of the form `1^∞`).
+
 - **An integer-valued float is written with a fraction part, so it reads
   back as a float.** A float whose value is an integer serializes as
   `{num: "2.0"}` in MathJSON and `2.0` in LaTeX (a large one as `1.0e+800`

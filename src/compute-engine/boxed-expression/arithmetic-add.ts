@@ -27,6 +27,7 @@ import {
   isAbsentArithmeticOperand,
   isContinuationOperand,
   nanOperandAnswer,
+  indeterminateFormAnswer,
 } from './type-guards.js';
 import {
   isImaginaryPartSafeInteger,
@@ -1025,8 +1026,10 @@ export class Terms {
       } else this._add(coef, rest);
     }
 
+    // `∞ − ∞` is the indeterminate form: `Indeterminate`, or `NaN` when a
+    // term is a float (`indeterminateFormAnswer()`).
     if (posInfinityCount > 0 && negInfinityCount > 0) {
-      this.terms = [{ term: ce.NaN, coef: [] }];
+      this.terms = [{ term: indeterminateFormAnswer(ce, terms), coef: [] }];
       return;
     }
     if (posInfinityCount > 0) {

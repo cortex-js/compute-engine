@@ -42,6 +42,7 @@ import {
   isFunction,
   isNumber,
   isSymbol,
+  indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
@@ -1249,7 +1250,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           const v = point === '+oo' ? ce.Pi.div(2) : ce.Pi.div(-2);
           return numericApproximation ? v.N() : v;
         }
-        if (point !== undefined) return ce.NaN;
+        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
+        // infinity such as `∞ + i`, a float literal).
+        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0))
           return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -1315,7 +1318,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           const v = ce.I.mul(ce.Pi);
           return numericApproximation ? v.N() : v;
         }
-        if (point !== undefined) return ce.NaN;
+        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
+        // infinity such as `∞ + i`, a float literal).
+        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // A non-negative real argument uses the machine kernel; a negative
@@ -1374,7 +1379,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const point = infinitePoint(x);
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.NegativeInfinity;
-        if (point !== undefined) return ce.NaN;
+        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
+        // infinity such as `∞ + i`, a float literal).
+        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0))
           return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -1440,7 +1447,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation
             ? ce.number(ce.complex(Infinity, Math.PI))
             : undefined;
-        if (point !== undefined) return ce.NaN;
+        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
+        // infinity such as `∞ + i`, a float literal).
+        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // A non-negative real argument uses the machine kernel; a negative
