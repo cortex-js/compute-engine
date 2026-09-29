@@ -284,6 +284,14 @@
 
 ### New Features
 
+- **`ce.conformsTo(type, protocol)`: a public conformance query**
+  ([#362](https://github.com/cortex-js/compute-engine/issues/362),
+  contributed by [enumeratio](https://github.com/enumeratio)). Answers
+  whether `type` conforms to `protocol`, inheritance and conditional
+  conformance included, without calling one of the protocol's members and
+  reading `protocol-implementation-missing` as "no". `type` may be a plain
+  type string, parsed the way `ce.type()` parses one; an unknown protocol
+  name answers `false` rather than throwing.
 - **`ce.withStepBudget({ steps, label }, fn)`: a deterministic hang guard.**
   Runs `fn` with at most `steps` steps of engine work, where a step is one of
   the engine's cooperative cancellation checks: the count of a computation on

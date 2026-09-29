@@ -966,6 +966,13 @@ export class ComputeEngine implements IComputeEngine {
     declareProtocolImplementationImpl(this, type, protocol, impl, options);
   }
 
+  /** See `IComputeEngine.conformsTo`. */
+  conformsTo(type: Type | TypeString, protocol: string): boolean {
+    return (
+      this._typeResolver.conformsTo?.(this.type(type).type, protocol) ?? false
+    );
+  }
+
   /** @internal */
   private __typeResolver: TypeResolver | undefined;
 

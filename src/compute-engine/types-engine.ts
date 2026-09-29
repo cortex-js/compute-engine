@@ -788,6 +788,19 @@ export interface IComputeEngine {
     options?: { where?: string }
   ): void;
 
+  /**
+   * Whether `type` conforms to `protocol`, answered without calling any of
+   * the protocol's members. An unknown protocol answers `false`.
+   *
+   * Inheritance included: a conformance registered for a supertype answers
+   * for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
+   * P`) recurses, deciding itself against `type`'s own arguments.
+   *
+   * `type` may be a `TypeString`, parsed the way {@link IComputeEngine.type}
+   * parses one.
+   */
+  conformsTo(type: Type | TypeString, protocol: string): boolean;
+
   /** Depth of enclosing static type-check passes (the Epsil pre-pass).
    * Non-zero while `staticDiagnostics` canonicalizes a program under its
    * 'epsil:static-check' frame; the `DeclareType` top-level surrogate check

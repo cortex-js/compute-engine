@@ -1996,6 +1996,20 @@ re-declaration (see "Scope and lifecycle"); the Epsil route emits
 diagnostics and replaces on statement re-run. Route-parity tests must
 exercise both routes (cf. the box/parse-route convention in `CLAUDE.md`).
 
+The registry also answers a plain conformance query, without calling a
+member and reading `protocol-implementation-missing` as "no":
+
+```ts
+ce.conformsTo(type: Type | TypeString, protocol: string): boolean;
+```
+
+Inheritance included (a conformance registered for a supertype answers for
+its subtypes) and conditional conformance included (`list<string>` answers
+for a `list<T> is P where T is P` conformance the same way dispatch would).
+An unknown protocol name answers `false` rather than throwing — the
+question is "does this conform", and a protocol that does not exist is
+answered the same as one nothing conforms to yet.
+
 ### Trust model
 
 Conformance is engine-global and monotonic: any Epsil input can attach
