@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 // Tycho item 167 (2026-08-11): `.count` was `undefined` on an un-evaluated
 // arithmetic broadcast, even when the length was recoverable without
@@ -261,5 +262,118 @@ describe('the broadcast count does not leak onto reshaping operators', () => {
         ce.box(['GroupBy', ['List', 1, 2, 3], ['Function', 'x', 'x']]).count
       ).toBeUndefined();
     });
+  });
+});
+
+// Tycho item 326 (2026-09-28): the same question for a broadcast CALL of a
+// user function literal. `S(L)` with `S := x ↦ (x, x²)` and `L` a counted
+// list typed `list<tuple<number, number>>` yet answered `count: undefined`
+// (and so did `d·S(L)` through `Multiply`), while `d·L` answered the length.
+// The walk exists and is lazy — `each()` evaluates the call to a lazy view
+// over the mapped argument — so the count is the argument's. The participant
+// predicate is shared with the type derivation (`isLambdaBroadcastParticipant`).
+describe('Tycho item 326: count of an un-evaluated broadcast call', () => {
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+    ce.declare('S', '(real) -> tuple<number, number>');
+    ce.assign('S', ce.parse('x \\mapsto (x, x^2)'));
+    ce.assign('g', ce.parse('x \\mapsto 2x'));
+    ce.assign('f', ce.box(['Function', ['List', 'x', ['Negate', 'x']], 'x']));
+    ce.assign('two', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']));
+    ce.declare('d', 'real');
+    ce.declare('w', 'number | list<number>');
+    ce.declare('b', '(broadcastable<number>) -> number');
+    ce.assign('b', ce.parse('x \\mapsto x + 1'));
+    ce.assign('L', ce.parse('[0..40]'));
+    ce.assign('M', ce.parse('[1,2,3]'));
+  });
+
+  const answered: [string, number][] = [
+    ['S(L)', 41], // declared then assigned
+    ['d S(L)', 41], // through Multiply's own count
+    ['2 S(L)', 41],
+    ['g(L)', 41], // bare-assigned lambda
+    ['g(L+1)', 41], // collection-TYPED operand (item 73)
+    ['g(2L)', 41],
+    ['g(1..99)', 99],
+    ['f(M)', 3], // collection-valued result nests INSIDE the mapped length
+  ];
+  for (const [latex, expected] of answered) {
+    test(`${latex} -> ${expected}, and agrees with evaluate().count`, () => {
+      const e = ce.parse(latex);
+      expect(e.count).toBe(expected);
+      expect(e.evaluate().count).toBe(expected);
+    });
+  }
+
+  test('the count is read without walking: a call over two million elements', () => {
+    ce.assign('B', ce.parse('[0..2000000]'));
+    const t0 = performance.now();
+    expect(ce.parse('S(B)').count).toBe(2000001);
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
+
+  const notAnswered: [string, string][] = [
+    ['S(3)', 'a scalar argument: no broadcast'],
+    ['S((1,2))', 'a numeric tuple binds whole and types `any`'],
+    ['two(L, M)', 'participants of different lengths'],
+    ['g(w)', 'a lone scalar-or-collection union has no length'],
+    ['b(M)', 'a declared `broadcastable<T>` slot maps by its own plan'],
+  ];
+  for (const [latex, why] of notAnswered) {
+    test(`${latex} -> undefined (${why})`, () => {
+      expect(ce.parse(latex).count).toBeUndefined();
+    });
+  }
+
+  // Shapes at the edge of the arm: each answers the walk's length or
+  // nothing, never a number the walk does not deliver. Boxed rather than
+  // parsed, since a multi-letter name in LaTeX is a product of symbols.
+  describe('edge shapes agree with evaluate() or stay unanswered', () => {
+    function edges(ce: ComputeEngine): [string, unknown, number | undefined][] {
+      ce.declare('wild', 'function');
+      ce.assign('wild', ce.parse('x \\mapsto 2x'));
+      ce.declare('gen', '(T) -> T where T');
+      ce.assign('gen', ce.parse('x \\mapsto x'));
+      ce.declare('pt', '(tuple<number,number>) -> number');
+      ce.assign('pt', ce.box(['Function', ['PointX', 'p'], 'p']));
+      ce.assign('PL', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+      executeEpsil(
+        ce,
+        'function mc(x: number) { x + 1 }\nfunction mc(x: number, y: number) { x + y }'
+      );
+      ce.declare('ov', '(number) -> number & (string) -> string');
+      ce.assign('ov', ce.parse('x \\mapsto x'));
+      ce.declare('Mm', 'list<number> | missing');
+      return [
+        ['a bare `function` wildcard declaration', ['wild', 'M'], 3],
+        ['a multi-clause definition (the lifted-operator arm)', ['mc', 'M'], 3],
+        ['an overload set, read through its resolved arm', ['ov', 'M'], 3],
+        ['a generic signature', ['gen', 'M'], undefined],
+        ['a point-typed parameter over a point list', ['pt', 'PL'], undefined],
+        ['an argument that may be absent as a whole', ['wild', 'Mm'], undefined],
+        ['more arguments than the signature admits', ['wild', 'M', 'M'], undefined],
+        ['no argument at all', ['wild'], undefined],
+      ];
+    }
+    for (const [why, json, expected] of edges(new ComputeEngine())) {
+      test(`${why} -> ${expected}`, () => {
+        edges(ce);
+        const e = ce.box(json as any);
+        expect(e.count).toBe(expected);
+        if (expected !== undefined) expect(e.evaluate().count).toBe(expected);
+      });
+    }
+  });
+
+  test('a call parsed before its function is reassigned follows the new value', () => {
+    ce.declare('h', 'function');
+    ce.assign('h', ce.parse('x \\mapsto 2x'));
+    const call = ce.parse('h(M)');
+    expect(call.count).toBe(3);
+    ce.assign('h', ce.box(['Function', ['Length', 'q'], 'q']));
+    expect(call.count).toBeUndefined();
+    expect(call.evaluate().count).toBeUndefined();
   });
 });

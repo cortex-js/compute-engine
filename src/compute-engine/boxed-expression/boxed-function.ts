@@ -3624,8 +3624,11 @@ export class BoxedFunction
     //
     // Nor does a bound head that does not LIFT: agreement is the length rule
     // for a broadcasting operator only. Every other collection-typed operator
-    // decides its own length — and answers it with `elementCount` when it can.
-    if (this.operatorDefinition?.broadcastable !== true) return undefined;
+    // decides its own length — and answers it with `elementCount` when it
+    // can. One more shape is read here: a user function literal applied to a
+    // collection argument (`_lambdaBroadcastCount`).
+    if (this.operatorDefinition?.broadcastable !== true)
+      return this._lambdaBroadcastCount();
     const ops = this.ops;
     if (ops === undefined) return undefined;
     let count: number | undefined;
@@ -3633,6 +3636,94 @@ export class BoxedFunction
       // A scalar operand is a LIFT, not a participant. Broadcast participants
       // are UNKEYED collections only — keyed operands are never admitted.
       if (!typeCouldBeUnkeyedCollection(op.type.type)) continue;
+      const c = op.count;
+      if (c === undefined) return undefined;
+      if (count === undefined) count = c;
+      else if (count !== c) return undefined;
+    }
+    return count;
+  }
+
+  /**
+   * The element count of an un-evaluated broadcast CALL of a user function
+   * literal — `S(L)` with `S := x ↦ (x, x²)` and `L` a counted list — read
+   * from the mapped argument, as `_broadcastCount` reads the participants of
+   * a lifted arithmetic operator (Tycho item 326, 2026-09-28: `S(L)` and
+   * `d·S(L)` typed `list<tuple<…>>` yet answered `undefined`, while `d·L`
+   * answered the length).
+   *
+   * The count never outruns the walk: `each()` evaluates the call, which
+   * yields a lazy view over the mapped argument (the first element of a call
+   * over two million elements arrives in milliseconds), so the elements
+   * delivered are exactly the argument's.
+   *
+   * Answered for the PLAIN shape only, where the application's collection
+   * type can come from nothing but the lambda broadcast: a function literal
+   * (assigned bare, or declared then assigned) whose parameters are all
+   * scalar, whose signature is neither polymorphic nor declares a
+   * `broadcastable<T>` or point-typed slot (each of those maps by its own
+   * plan), called with no numeric tuple (a tuple binds whole and the
+   * application types `any`). The participants are the operands
+   * `lambdaBroadcastType` maps, read through the shared
+   * `isLambdaBroadcastParticipant`, so type and count cannot disagree on who
+   * participates; the result's own shape does not matter, since a
+   * collection-valued per-element result nests INSIDE the mapped length
+   * (`f := x ↦ [x, -x]` over `[1, 2]` is `list<vector<2>>` with two
+   * elements). The agreement rule is the lifted operator's: a disagreement
+   * or an unknown participant length answers `undefined`, and so does a
+   * participant that is a lone scalar-or-collection union, whose own count
+   * is unknown.
+   *
+   * Two more shapes are left unanswered on purpose. A call whose argument
+   * count the signature does not admit (`g(L, L)` for `g := x ↦ 2x`) is an
+   * error at evaluation, so it has no elements to count. A lambda operator
+   * definition with no signature at all is treated as scalar by the type
+   * derivation (`paramsAreScalar` answers `true` for it) but answers
+   * `undefined` here; that can only withhold a count, never overstate one.
+   * An overload set is read through the arm the call resolves to
+   * (`resolvedArm`), as the type derivation reads it. A multi-clause
+   * definition never reaches this arm: it derives `broadcastable`, so the
+   * lifted-operator rule above answers for it.
+   */
+  private _lambdaBroadcastCount(): number | undefined {
+    const ops = this.ops;
+    if (ops === undefined) return undefined;
+    let source: Type | undefined;
+    const def = this.operatorDefinition;
+    if (def !== undefined) {
+      if (!isLambdaDef(def)) return undefined;
+      source = def.signature?.type;
+    } else {
+      const valueDef = this.valueDefinition;
+      if (valueDef === undefined) return undefined;
+      if (!isFunction(valueDef.value, 'Function')) return undefined;
+      // A bare `function` wildcard declaration carries no signature of its
+      // own: the assigned literal's type is the only one there is, as the
+      // type derivation reads it.
+      const declared = valueDef.type.type;
+      source = isWildcardFunctionType(declared)
+        ? (valueDef.value.type.type ?? declared)
+        : declared;
+    }
+    if (source === undefined) return undefined;
+    const sig = resolvedArm(this, source) ?? source;
+    if (isPolymorphicType(sig)) return undefined;
+    if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
+    if (!paramsAreScalar(sig)) return undefined;
+    if (
+      broadcastableParamSlots(sig) !== undefined ||
+      pointListParamSlots(sig) !== undefined
+    )
+      return undefined;
+    const required = sig.args?.length ?? 0;
+    const optional = sig.optArgs?.length ?? 0;
+    if (ops.length < required) return undefined;
+    if (sig.variadicArg === undefined && ops.length > required + optional)
+      return undefined;
+    if (ops.some((x) => isNumericTuple(x))) return undefined;
+    let count: number | undefined;
+    for (const op of ops) {
+      if (!isLambdaBroadcastParticipant(op)) continue;
       const c = op.count;
       if (c === undefined) return undefined;
       if (count === undefined) count = c;
@@ -6929,6 +7020,27 @@ function threadConditional(
   return undefined;
 }
 
+/**
+ * Is `x` an operand a user function literal maps over when applied to it?
+ * A materialized finite collection, or a collection-TYPED operand (Tycho
+ * item 73): `h(L+1)` / `h(2L)` — an unevaluated expression statically typed
+ * as a list/vector broadcasts through the lambda at runtime (the post-eval
+ * lambda-broadcast arm maps it element-wise), so the static type must be
+ * the lifted list as well, exactly as at the generic wrapper's arm 1.
+ *
+ * ONE predicate for the two readers that must agree: the application's
+ * type (`lambdaBroadcastType`) and its element count
+ * (`BoxedFunction._lambdaBroadcastCount`). A scalar operand is a lift and
+ * never participates.
+ */
+function isLambdaBroadcastParticipant(x: Expression): boolean {
+  return (
+    isFiniteBroadcastParticipant(x) ||
+    isBroadcastCollectionType(x) ||
+    isFixedShapeCollection(x)
+  );
+}
+
 /** Return the type of the value of the expression, without actually
  * evaluating it */
 /**
@@ -6981,17 +7093,7 @@ function lambdaBroadcastType(
 
   const mappable = (i: number) => slots === undefined || slots.at(i).mappable;
   const mapped = ops.filter(
-    (x, i) =>
-      mappable(i) &&
-      (isFiniteBroadcastParticipant(x) ||
-        // Collection-TYPED operands too (Tycho item 73): `h(L+1)` / `h(2L)`
-        // — an unevaluated expression statically typed as a list/vector
-        // broadcasts through the lambda at runtime (the post-eval
-        // lambda-broadcast arm maps it element-wise), so the static type
-        // must be the lifted list as well, exactly as at the generic
-        // wrapper's arm 1.
-        isBroadcastCollectionType(x) ||
-        isFixedShapeCollection(x))
+    (x, i) => mappable(i) && isLambdaBroadcastParticipant(x)
   );
   if (mapped.length > 0) {
     // D10 (§4.4, re-ruled 2026-08-04): `perElementResult` is the
