@@ -345,6 +345,17 @@ describe('SCOPED_UNKNOWNS', () => {
     expect(block.unknowns).not.toContain('z');
   });
 
+  it('Block: should exclude a function the block defines', () => {
+    // `f` is defined by the block (the Epsil `f(x) = x + 1`); `z` is free.
+    const block = engine.expr([
+      'Block',
+      ['DefineFunction', 'f', ['Function', ['Add', 'x', 1], 'x']],
+      ['f', 'z'],
+    ]);
+    expect(block.unknowns).toEqual(['z']);
+    expect(block.defines).toContain('f');
+  });
+
   it('D: differentiation variable remains free', () => {
     // In D(x^2 + a, x), both x and a are free — x is still in the result
     const d = engine.expr(['D', ['Add', ['Power', 'x', 2], 'a'], 'x']);

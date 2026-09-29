@@ -990,3 +990,213 @@ describe('Epsil CLI multiline input', () => {
     expect(isRecoverable(source, session.parse(source))).toBe(false);
   });
 });
+
+describe('Epsil CLI --compile', () => {
+  test('parses the option', () => {
+    expect(parseCliArguments(['--compile', '-e', '1'], {}).compile).toBe(true);
+    expect(parseCliArguments(['-e', '1'], {}).compile).toBe(false);
+  });
+
+  test('runs the compiled program and prints its value', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(await main(['--compile', '-e', 'f(x) = x^2 + 1\nf(3)'], io)).toBe(0);
+    expect(stderr()).toBe('');
+    expect(stdout()).toBe('10\n');
+  });
+
+  test('a compiled number is a float, as compiled arithmetic is', async () => {
+    const { io, stdout } = makeIo();
+    // The interpreter answers the exact `3`; the generated JavaScript
+    // computes a double, and the value says so.
+    expect(await main(['--compile', '--json', '-e', '1 + 2'], io)).toBe(0);
+    expect(JSON.parse(stdout())).toEqual({ num: '3.0' });
+  });
+
+  test('resolves the library spellings', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(await main(['--compile', '-e', 'sqrt(2)'], io)).toBe(0);
+    expect(stderr()).toBe('');
+    expect(stdout()).toBe('1.4142135623730951\n');
+  });
+
+  test('keeps the tuple and list shapes of the program', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(
+        [
+          '--compile',
+          '--json',
+          '-e',
+          'let a = 2\n((a, a + 1), [k for k in 1..3])',
+        ],
+        io
+      )
+    ).toBe(0);
+    expect(JSON.parse(stdout())).toEqual([
+      'Pair',
+      ['Pair', { num: '2.0' }, { num: '3.0' }],
+      ['List', { num: '1.0' }, { num: '2.0' }, { num: '3.0' }],
+    ]);
+  });
+
+  test('boxes strings, booleans, complex numbers and colors', async () => {
+    const cases: [source: string, expected: unknown][] = [
+      ['"hello"', "'hello'"],
+      ['3 > 2', 'True'],
+      ['0.5 + 2i', ['Complex', 0.5, 2]],
+      // A compiled color is answered in its canonical space (OKLCh), as
+      // the compiled targets do everywhere (`library.md`, contrastingColor).
+      ['oklch(0.5, 0.1, 30)', ['Oklch', 0.5, 0.1, 30]],
+    ];
+    for (const [source, expected] of cases) {
+      const { io, stdout } = makeIo();
+      expect(await main(['--compile', '--json', '-e', source], io)).toBe(0);
+      expect(JSON.parse(stdout())).toEqual(expected);
+    }
+  });
+
+  test('every output mode applies', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['--compile', '--epsil', '-e', '1/4'], io)).toBe(0);
+    expect(stdout()).toBe('0.25\n');
+    const latex = makeIo();
+    expect(await main(['--compile', '--latex', '-e', '"ab"'], latex.io)).toBe(
+      0
+    );
+    expect(latex.stdout()).toBe('\\text{ab}\n');
+  });
+
+  test('compiles a LaTeX expression with --from latex', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(
+      await main(['--compile', '--from', 'latex', '-e', '\\sin(\\pi/2)+1'], io)
+    ).toBe(0);
+    expect(stderr()).toBe('');
+    expect(stdout()).toBe('2\n');
+  });
+
+  test('a symbol with no value is an error, not a symbolic result', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(await main(['--compile', '-e', 'x + y'], io)).toBe(1);
+    expect(stdout()).toBe('');
+    expect(stderr()).toContain(
+      'Runtime error: unbound symbol: `x`, `y` have no value; a compiled program cannot keep a symbol symbolic'
+    );
+  });
+
+  test('a function the program defines is not a free symbol', async () => {
+    // `f` is defined by the block the program compiles to (`let f = …`),
+    // so only `z` is an input the generated code reads.
+    const { io, stderr } = makeIo();
+    expect(await main(['--compile', '-e', 'f(x) = x + 1\nf(z)'], io)).toBe(1);
+    expect(stderr()).toContain('`z` has no value');
+    expect(stderr()).not.toContain('`f`');
+  });
+
+  test('a decline of the JavaScript target is an error with its reason', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(await main(['--compile', '-e', 'Simplify(2 + 2x)'], io)).toBe(1);
+    expect(stdout()).toBe('');
+    expect(stderr()).toContain('Runtime error: compile declined:');
+    expect(stderr()).toContain('`Simplify`');
+    // The decline is reported once, as the error value; the interpreter
+    // fallback's console warning does not fire.
+    expect(stderr()).not.toContain('Compilation fallback');
+  });
+
+  test('a program whose value is a function cannot be printed', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['--compile', '-e', 'let f = (x) => x + 1\nf'], io)).toBe(
+      1
+    );
+    expect(stderr()).toContain(
+      'Runtime error: unprintable value: the compiled program evaluates to a function'
+    );
+  });
+
+  test('reports parse errors and static type errors as the interpreter does', async () => {
+    const parse = makeIo();
+    expect(await main(['--compile', '-e', '1 +'], parse.io)).toBe(1);
+    expect(parse.stderr()).toContain('Unexpected symbol "+"');
+    expect(parse.stdout()).toBe('');
+
+    const typed = makeIo();
+    expect(
+      await main(
+        ['--compile', '--diagnostics', 'json', '-e', '"a" + 1\n2'],
+        typed.io
+      )
+    ).toBe(1);
+    expect(JSON.parse(typed.stderr())[0]).toMatchObject({
+      severity: 'error',
+      code: 'static-type-error',
+    });
+    expect(typed.stdout()).toBe('');
+  });
+
+  test('a pole and an indeterminate form are the IEEE values', async () => {
+    // Compiled code answers `Infinity` and `NaN` where the interpreter
+    // answers `~oo` and `NaN`; the values print as the engine prints them.
+    // (`1/0` is folded to `~oo` when the program is canonicalized, and the
+    // target reads that as `Infinity`; the division by a local is the
+    // machine division itself.)
+    const cases: [source: string, expected: string][] = [
+      ['1/0', '+oo'],
+      ['let z = 0\n0 - 1/z', '-oo'],
+      ['0/0', 'NaN'],
+    ];
+    for (const [source, expected] of cases) {
+      const { io, stdout } = makeIo();
+      expect(await main(['--compile', '-e', source], io)).toBe(0);
+      expect(stdout()).toBe(`${expected}\n`);
+    }
+  });
+
+  test('a throw from the generated code is an error value', async () => {
+    // An unbounded recursion overflows the JavaScript stack; the throw is
+    // reported as the program's error value, not as a crash of the CLI.
+    const { io, stdout, stderr } = makeIo();
+    expect(
+      await main(['--compile', '-e', 'f(n) = f(n + 1) + 1\nf(0)'], io)
+    ).toBe(1);
+    expect(stdout()).toBe('');
+    expect(stderr()).toContain('Runtime error:');
+  });
+
+  test('is refused when the REPL would start', async () => {
+    const { io, stderr } = makeIo();
+    (io.stdin as { isTTY?: boolean }).isTTY = true;
+    expect(await main(['--compile'], io)).toBe(2);
+    expect(stderr()).toContain('The --compile option requires');
+  });
+
+  test('an empty program prints nothing', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(await main(['--compile', '-e', '// nothing\n'], io)).toBe(0);
+    expect(stdout()).toBe('');
+    expect(stderr()).toBe('');
+  });
+
+  // The deadline covers parsing and compiling (an antiderivative search can
+  // take long); the generated code itself runs to completion, since it
+  // carries no deadline checks.
+  test('a timeout is the same error value as on the interpreted route', async () => {
+    const { io, stderr } = makeIo();
+    expect(
+      await main(
+        [
+          '--compile',
+          '--from',
+          'latex',
+          '--time-limit',
+          '1',
+          '-e',
+          '\\int_0^x \\frac{\\sin(t)^{7}\\cos(t)^{5}}{1+t^{4}}\\,dt',
+        ],
+        io
+      )
+    ).toBe(1);
+    // The cause operand is not rendered as a site ("… at `timeout`").
+    expect(stderr()).toContain('Runtime error: Timeout exceeded\n');
+  });
+});

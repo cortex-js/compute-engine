@@ -21,6 +21,7 @@ import {
 } from '../common/interruptible.js';
 import { compile } from '../compute-engine/compilation/compile-expression.js';
 import type { CompileMode } from '../compute-engine/compilation/types.js';
+import { resolveLibraryNames } from '../epsil/resolve-library-names.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
 import { checkSource, effectSummaryToJson, parseSource } from './check.js';
@@ -803,6 +804,10 @@ class McpServer {
           parsed.diagnostics.some((x) => x.severity === 'error')
         )
           return { ok: false, target: to, diagnostics, ...extra };
+        // The library spellings (`sqrt`, `pi`) become library names (`Sqrt`,
+        // `Pi`) before the tree is boxed, as `executeEpsil` and `check` do;
+        // without this step `sqrt(2)` declined with "Unknown operator".
+        resolveLibraryNames(parsed.ast, source, ce);
         expr = ce.box(parsed.ast);
       }
       if (diagnostics.length > 0)

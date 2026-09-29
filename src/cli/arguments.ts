@@ -40,6 +40,7 @@ export function parseCliArguments(
         'diagnostics': { type: 'string' },
         'no-color': { type: 'boolean' },
         'time-limit': { type: 'string' },
+        'compile': { type: 'boolean' },
       },
     });
   } catch (error) {
@@ -81,6 +82,7 @@ export function parseCliArguments(
     diagnosticsFormat: parseDiagnosticsFormat(values.diagnostics),
     color: values['no-color'] !== true && env.NO_COLOR === undefined,
     timeLimit: parseTimeLimit(timeLimit),
+    compile: values.compile === true,
   };
 }
 

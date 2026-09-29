@@ -24,6 +24,9 @@ export interface CliOptions {
   diagnosticsFormat: DiagnosticsFormat;
   color: boolean;
   timeLimit: number;
+  /** Compile the program to JavaScript and run the generated code instead
+   * of interpreting it (see `evaluateCompiled`, `cli/compile.ts`). */
+  compile: boolean;
 }
 
 export interface CheckOptions {
@@ -78,6 +81,15 @@ export interface EpsilSession {
    * breach, is an error in the value (`value.errors`): there are no
    * diagnostics, since the error expressions carry no source offsets. */
   evaluateLatex(latex: string): EvaluationResult;
+  /** Compile the program (or, with `inputFormat: 'latex'`, the LaTeX
+   * expression) to JavaScript and run the generated code. A decline of the
+   * JavaScript target, a symbol with no value, or a value the compiled code
+   * answers that cannot be printed (a function) is an error in the value. */
+  compile(
+    source: string,
+    inputFormat: InputFormat,
+    url?: string
+  ): EvaluationResult;
   parse(source: string, url?: string): ParsingDiagnostic[];
   reset(): void;
 }

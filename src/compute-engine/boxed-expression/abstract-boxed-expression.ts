@@ -1665,8 +1665,14 @@ function collectReferences(
       isSymbol(op.op1)
     )
       indexVars.add(op.op1.symbol);
+    // A `DefineFunction` statement (`f(x) = x + 1` in Epsil) introduces a
+    // local too: the name it defines is bound by the block, not read from
+    // the enclosing scope, so a program that defines `f` and then applies
+    // it has no free `f`.
     if (
-      (op.operator === 'Assign' || op.operator === 'Declare') &&
+      (op.operator === 'Assign' ||
+        op.operator === 'Declare' ||
+        op.operator === 'DefineFunction') &&
       isSymbol(op.op1)
     )
       localVars.add(op.op1.symbol);
@@ -1717,7 +1723,11 @@ function collectReferences(
 function getDefines(expr: Expression, result: Set<string>): void {
   if (!isFunction(expr)) return;
   const operator = expr.operator;
-  if (operator === 'Assign' || operator === 'Declare') {
+  if (
+    operator === 'Assign' ||
+    operator === 'Declare' ||
+    operator === 'DefineFunction'
+  ) {
     if (isSymbol(expr.op1)) result.add(expr.op1.symbol);
     return;
   }

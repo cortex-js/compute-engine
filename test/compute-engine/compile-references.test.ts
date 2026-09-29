@@ -500,4 +500,20 @@ describe('COMPILE reference analysis of a declaration', () => {
     ]);
     expect(compile(expr, { to: 'glsl' }).freeSymbols).toEqual(['u']);
   });
+
+  // A `DefineFunction` statement (`f(x) = x + 1` in Epsil) is a local the
+  // generated code declares, not an input: the block's own function name
+  // was listed as free.
+  it('does not list a function the block defines as a free symbol', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Block',
+      ['DefineFunction', 'f', ['Function', ['Add', 'x', 1], 'x']],
+      ['f', 'z'],
+    ]);
+    const r = compile(expr, { to: 'javascript' });
+    expect(r.success).toBe(true);
+    expect(r.freeSymbols).toEqual(['z']);
+    expect(r.run({ z: 2 })).toBe(3);
+  });
 });

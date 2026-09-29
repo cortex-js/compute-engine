@@ -8,7 +8,8 @@ import {
 } from '../common/interruptible.js';
 import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
 
-import type { EpsilSession, EvaluationResult } from './types.js';
+import { evaluateCompiled } from './compile.js';
+import type { EpsilSession, EvaluationResult, InputFormat } from './types.js';
 
 export function makeEpsilSession(timeLimit: number): EpsilSession {
   let engine = new ComputeEngine();
@@ -65,6 +66,10 @@ export function makeEpsilSession(timeLimit: number): EpsilSession {
         diagnostics: [],
         elapsedMs: performance.now() - start,
       };
+    },
+
+    compile(source: string, inputFormat: InputFormat, url?: string) {
+      return evaluateCompiled(engine, source, { url, inputFormat, timeLimit });
     },
 
     parse(source: string, url?: string): ParsingDiagnostic[] {

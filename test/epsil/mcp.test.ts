@@ -547,6 +547,19 @@ describe('MCP server compile tool', () => {
     expect(Object.keys(result.freeSymbolTypes)).toEqual(['x']);
   });
 
+  // The Epsil spellings of the library resolve before the compile, as they
+  // do for `evaluate` and `check`: `sqrt(2)` declined with "Unknown
+  // operator `sqrt`" before.
+  test('resolves the library spellings of an Epsil program', async () => {
+    const [response] = await runServer([
+      callTool(1, 'compile', { source: 'sqrt(x) + pi' }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(true);
+    expect(result.code).toContain('sqrt');
+    expect(Object.keys(result.freeSymbolTypes)).toEqual(['x']);
+  });
+
   test('warns when a declaration replaces a library definition', async () => {
     const [plain, constant] = await runServer([
       callTool(1, 'compile', { source: 'x + 1', declarations: { x: 'real' } }),

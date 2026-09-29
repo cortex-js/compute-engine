@@ -51,6 +51,13 @@ Options:
                           (√x, x², ×, ⩽, …) instead of the ASCII spellings
       --diagnostics <fmt> print diagnostics as "text" (default) or "json"
       --time-limit <ms>   evaluation deadline; 0 disables it (default: 10000)
+      --compile           compile the program to JavaScript and run the
+                          generated code instead of interpreting it; the
+                          arithmetic is then machine arithmetic, every
+                          symbol must have a value, and a construct the
+                          JavaScript target declines is an error; the time
+                          limit covers parsing and compiling, and the
+                          generated code then runs to completion
       --transport <type>  MCP transport: "stdio" (default) or
                           "streamable-http"
       --host <address>    MCP HTTP bind address (default: 127.0.0.1)
@@ -105,7 +112,16 @@ export async function main(
     options.eval === undefined &&
     options.file === undefined &&
     io.stdin.isTTY
-  )
+  ) {
+    // The REPL interprets its inputs (its definitions persist from one
+    // input to the next, which a compiled program has no way to do), so the
+    // option is refused rather than silently ignored.
+    if (options.compile) {
+      io.stderr.write(
+        'The --compile option requires a file, --eval, or a program on standard input.\nTry "epsil --help" for more information.\n'
+      );
+      return 2;
+    }
     return runRepl(session, {
       color: options.color && Boolean(io.stdout.isTTY),
       outputMode: options.outputMode,
@@ -114,11 +130,13 @@ export async function main(
       input: io.stdin,
       output: io.stdout,
     });
+  }
 
   try {
     const { source, url } = await readSource(options.eval, options.file, io);
-    const result =
-      options.inputFormat === 'latex'
+    const result = options.compile
+      ? session.compile(source, options.inputFormat, url)
+      : options.inputFormat === 'latex'
         ? session.evaluateLatex(source)
         : session.evaluate(source, url);
     if (options.diagnosticsFormat === 'json') {

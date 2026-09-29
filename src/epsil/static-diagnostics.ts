@@ -2014,7 +2014,18 @@ export function describeError(error: MathJsonExpression): string {
   // breadcrumb (identified by head, never by position; it is rendered
   // separately by `errorFrameChain`).
   const second = operand(error, 2);
-  const where = operator(second) === 'ErrorTrace' ? null : second;
+  // The second operand of a cancellation value (`["Error", "Timeout
+  // exceeded", "timeout"]`, built by `executeEpsil` and the CLI session) is
+  // the machine-readable cause, not a site: the message already says what
+  // happened, and rendering the cause as a site read "Timeout exceeded at
+  // `timeout`".
+  // Only the two-string shape is a cancellation value; an `ErrorCode` error
+  // whose site happens to be the text "timeout" keeps its site.
+  const where =
+    operator(second) === 'ErrorTrace' ||
+    (stringValue(cause) !== null && isCancellationCauseOperand(second))
+      ? null
+      : second;
 
   let code = 'error';
   const payload: string[] = [];
@@ -2158,6 +2169,18 @@ export function describeError(error: MathJsonExpression): string {
   }
 
   return site === '' ? detail : `${detail} ${site}`;
+}
+
+/** Whether `expr` is the cause operand of a cancellation error value: one
+ * of the `CancellationCause` spellings (`common/interruptible.ts`). */
+function isCancellationCauseOperand(expr: MathJsonExpression | null): boolean {
+  const cause = expr === null ? null : stringValue(expr);
+  return (
+    cause === 'timeout' ||
+    cause === 'step-budget' ||
+    cause === 'iteration-limit-exceeded' ||
+    cause === 'recursion-depth-exceeded'
+  );
 }
 
 /** The text of a MathJSON string operand, or its Epsil form. */

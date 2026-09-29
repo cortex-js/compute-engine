@@ -45,6 +45,23 @@
 
 ### Issues Resolved
 
+- **The MCP `compile` tool resolves the library spellings of an Epsil
+  program.** `sqrt(2)` (or `pi`, `sin(x)`) declined with "Unknown operator
+  `sqrt`": the tool boxed the parsed program without turning the Epsil
+  spellings into the library names, as `evaluate` and `check` do. It now
+  compiles `sqrt(x) + pi` to `Math.sqrt(x) + Math.PI`.
+- **A function a program defines is not one of its free symbols.** For a
+  `Block` holding a `DefineFunction` statement (the Epsil `f(x) = x + 1`),
+  `unknowns` and a compilation's `freeSymbols` listed `f` beside the genuine
+  inputs, and `defines` did not list it; the generated code declares `f` as a
+  local. `Block(DefineFunction(f, …), f(z))` now reports `z` as its only
+  unknown and free symbol, and `f` as defined.
+- **A cancellation's cause is no longer rendered as the site of the error.**
+  A program stopped by its deadline was reported as "Runtime error: Timeout
+  exceeded at `timeout`": the second operand of the error value,
+  `["Error", "Timeout exceeded", "timeout"]`, is the machine-readable cause,
+  which the description read as a site. It reads "Runtime error: Timeout
+  exceeded" now, for every cancellation cause.
 - **A broadcast call of a user function reports its element count without
   evaluating.** With `S := x ↦ (x, x²)` and `L` a counted list, `S(L)` and
   `d·S(L)` typed `list<tuple<number, number>>` yet answered `count:
@@ -271,6 +288,15 @@
 
 ### New Features
 
+- **`epsil --compile`: run an Epsil program as compiled JavaScript.** The
+  CLI compiles the program (or, with `--from latex`, the LaTeX expression) to
+  JavaScript and runs the generated code instead of interpreting it, and
+  writes the value as it writes an interpreted result, under every output
+  option. Compiled arithmetic is machine arithmetic, so `2 + 1` is the float
+  `3.0` and `sqrt(2)` is `1.4142135623730951`; a symbol with no value is a
+  runtime error, since compiled code has no symbolic values; and a construct
+  the JavaScript target declines is a runtime error naming it, never an
+  interpreter fallback. See "Running a Compiled Program" in the CLI guide.
 - **`ce.withStepBudget({ steps, label }, fn)`: a deterministic hang guard.**
   Runs `fn` with at most `steps` steps of engine work, where a step is one of
   the engine's cooperative cancellation checks: the count of a computation on

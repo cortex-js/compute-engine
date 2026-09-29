@@ -28112,6 +28112,12 @@ export class BaseCompiler {
             if (isSymbol(stmt.ops[0])) locals.push(stmt.ops[0].symbol);
             else if (isFunction(stmt.ops[0], 'Tuple'))
               collectPatternLeaves(stmt.ops[0]);
+          } else if (isFunction(stmt, 'DefineFunction')) {
+            // A function the block defines (`f(x) = x + 1`) is a local the
+            // generated code declares (`let f = …`), not an input the caller
+            // supplies; without this the program's own function name was
+            // reported as a free symbol.
+            if (isSymbol(stmt.ops[0])) locals.push(stmt.ops[0].symbol);
           }
         const inner = locals.length ? union(bound, locals) : bound;
         // Typed block locals extend the declared-type frame (the mirror of
