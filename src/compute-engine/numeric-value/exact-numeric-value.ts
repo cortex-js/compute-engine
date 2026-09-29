@@ -1707,8 +1707,7 @@ export class ExactNumericValue extends NumericValue {
         console.assert(
           isSubtype(value.type, 'integer') || isGaussianInteger(value)
         );
-        if (value.isComplex)
-          imRationalSum = add(imRationalSum, [value.im, 1]);
+        if (value.isComplex) imRationalSum = add(imRationalSum, [value.im, 1]);
         // Use bignumRe to avoid precision loss for large integers. A
         // MachineNumericValue has no bignumRe: its integral `re` converts
         // to BigInt exactly.

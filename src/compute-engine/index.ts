@@ -2816,8 +2816,8 @@ export class ComputeEngine implements IComputeEngine {
    * interface. Saved and restored around each parse, so a parse made from
    * inside a handler sees its own. @internal */
   _activeSymbolOracle:
-    | ((symbol: MathJsonSymbol) => SymbolResolution | undefined)
-    | undefined = undefined;
+    ((symbol: MathJsonSymbol) => SymbolResolution | undefined) | undefined =
+    undefined;
 
   /** Stack of parameter-name sets active while canonicalizing function bodies.
    * Each frame optionally carries declared types for annotated parameters so
@@ -3991,11 +3991,7 @@ export class ComputeEngine implements IComputeEngine {
 
   rules(
     rules:
-      | Rule
-      | ReadonlyArray<Rule | BoxedRule>
-      | BoxedRuleSet
-      | undefined
-      | null,
+      Rule | ReadonlyArray<Rule | BoxedRule> | BoxedRuleSet | undefined | null,
     options?: {
       canonical?: boolean;
       /** Default purpose applied to any rule in the set that doesn't carry

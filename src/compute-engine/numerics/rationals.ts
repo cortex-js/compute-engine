@@ -74,10 +74,7 @@ export function machineDenominator(x: Rational): number {
 export function rationalAsFloat(x: Rational): number {
   const n = Number(x[0]);
   const d = Number(x[1]);
-  if (
-    typeof x[0] === 'bigint' &&
-    (!Number.isFinite(n) || !Number.isFinite(d))
-  )
+  if (typeof x[0] === 'bigint' && (!Number.isFinite(n) || !Number.isFinite(d)))
     return bigRatioToFloat(x[0], x[1] as bigint);
   return n / d;
 }

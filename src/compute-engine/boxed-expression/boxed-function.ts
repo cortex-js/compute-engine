@@ -8971,13 +8971,11 @@ function handlerThrowToErrorValue(
       ['capability-denied', (e as { capability?: string }).capability ?? ''],
       operator
     );
-  if (
-    !(
-      e instanceof TypeError ||
-      e instanceof RangeError ||
-      e instanceof ReferenceError
-    )
-  )
+  if (!(
+    e instanceof TypeError ||
+    e instanceof RangeError ||
+    e instanceof ReferenceError
+  ))
     throw e;
   // Defensive only: `CancellationError` extends plain `Error`, so the gate
   // above already rethrew it. This line exists so that WIDENING the

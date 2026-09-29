@@ -525,7 +525,7 @@ function isFullyParenthesized(s: string): boolean {
     return false;
 
   let depth = 0;
-  for (let i = 0; i < s.length; ) {
+  for (let i = 0; i < s.length;) {
     const open = PAREN_FENCES.find(([o]) => s.startsWith(o, i));
     if (open) {
       depth++;

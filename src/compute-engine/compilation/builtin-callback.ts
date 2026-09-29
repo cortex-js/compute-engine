@@ -45,8 +45,7 @@ export function systemScopeBinding(
 ): BoxedDefinition | undefined {
   if (engine._customLibraryOperators.has(name)) return undefined;
   return engine.contextStack[0]?.lexicalScope.bindings.get(name) as
-    | BoxedDefinition
-    | undefined;
+    BoxedDefinition | undefined;
 }
 
 /**

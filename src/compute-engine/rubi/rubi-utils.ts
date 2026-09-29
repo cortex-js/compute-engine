@@ -2116,9 +2116,7 @@ function trinomialPartsX(u: Expression, x: string): TriParts | null {
       // transcribing the Rubi sum cases
       let constA = ce.Zero;
       type Acc =
-        | { kind: 'bin'; p: BinParts }
-        | { kind: 'tri'; p: TriParts }
-        | null;
+        { kind: 'bin'; p: BinParts } | { kind: 'tri'; p: TriParts } | null;
       let acc: Acc = null;
       for (const t of sumTermsX(u)) {
         if (!t.has(x)) {
@@ -6995,14 +6993,12 @@ function conjugateSumQ(B: Expression, x: string): boolean {
 function isConjugatePower(e: Expression, x: string): boolean {
   if (e.operator !== 'Power' || !e.ops || e.ops.length !== 2) return false;
   const n = e.ops[1];
-  if (
-    !(
-      isNumber(n) &&
-      n.isInteger === true &&
-      typeof n.re === 'number' &&
-      n.re < 0
-    )
-  )
+  if (!(
+    isNumber(n) &&
+    n.isInteger === true &&
+    typeof n.re === 'number' &&
+    n.re < 0
+  ))
     return false;
   // Bound the exponent magnitude: `conjugateRadicalRationalization` EAGERLY
   // `expand()`s `(c₁√L₁−c₂√L₂)^n`, so a large `n` would fire a runaway binomial

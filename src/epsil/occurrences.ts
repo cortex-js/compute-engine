@@ -45,13 +45,7 @@ export type Occurrence = {
 /** What form of construct bound the group's name — or `free` when nothing in
  * the document did (an undeclared symbol, or a library name). */
 export type BindingKind =
-  | 'function'
-  | 'parameter'
-  | 'variable'
-  | 'loop'
-  | 'pattern'
-  | 'type'
-  | 'free';
+  'function' | 'parameter' | 'variable' | 'loop' | 'pattern' | 'type' | 'free';
 
 /**
  * Every occurrence in the document that resolves to ONE binding — renaming

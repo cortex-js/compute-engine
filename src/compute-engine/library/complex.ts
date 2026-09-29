@@ -883,11 +883,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // `.N()` the exact roots are numericized, so `N(complexRoots(1, 4))`
         // is `[1, i, −1, −i]` too.
         const z = ops[0];
-        if (
-          isNumber(z) &&
-          z.isExact === true &&
-          z.im === 0
-        ) {
+        if (isNumber(z) && z.isExact === true && z.im === 0) {
           // The modulus is read off the exact value (`z.abs()`), not off the
           // double `re`: `1/8` stayed a float, and `10²⁰ + 1` lost its last
           // digit. The angle is a fraction of a half turn in the ENGINE's
@@ -911,10 +907,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
             const imag = ce.function('Multiply', [modulusRoot, sin]).evaluate();
             exactRoots.push(
               ce
-                .function('Add', [
-                  real,
-                  ce.function('Multiply', [imag, ce.I]),
-                ])
+                .function('Add', [real, ce.function('Multiply', [imag, ce.I])])
                 .evaluate()
             );
           }

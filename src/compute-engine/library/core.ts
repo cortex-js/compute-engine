@@ -893,12 +893,10 @@ function pipeImplicitMapType(
 
   const topicType = heldOperandType(context, topic);
   if (isSubtype(topicType, 'string')) return undefined;
-  if (
-    !(
-      topic.facts.collection === true ||
-      isSubtype(topicType, PIPE_COLLECTION_SHAPE_TYPE)
-    )
-  )
+  if (!(
+    topic.facts.collection === true ||
+    isSubtype(topicType, PIPE_COLLECTION_SHAPE_TYPE)
+  ))
     return undefined;
   if (param.annotated !== undefined && isSubtype(topicType, param.annotated))
     return undefined;

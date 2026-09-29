@@ -5963,8 +5963,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         .join(' + ');
     }
     // Every operand decomposes — collect re and im parts, fold each
-    const parts = args.map(
-      (a) => tryGetComplexParts(a, compile, target.language)!
+    const parts = args.map((a) =>
+      tryGetComplexParts(a, compile, target.language)!
     );
     const reParts: string[] = [];
     const imParts: string[] = [];

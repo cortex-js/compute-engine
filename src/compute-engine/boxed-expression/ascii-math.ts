@@ -980,8 +980,7 @@ export function toAsciiMath(
   if (isNumber(expr)) {
     const num = expr.numericValue;
     // `Indeterminate` has the value `NaN` but its own spelling.
-    if (expr.isIndeterminate)
-      return serializeSymbol('Indeterminate', options);
+    if (expr.isIndeterminate) return serializeSymbol('Indeterminate', options);
     if (expr.isNaN) return serializeSymbol('NaN', options);
     if (expr.isFinite === false) {
       if (expr.isNegative !== true && expr.isPositive !== true)

@@ -726,12 +726,7 @@ export type NumberFormat = {
   truncationMarker: LatexString;
 
   repeatingDecimal:
-    | 'auto'
-    | 'vinculum'
-    | 'dots'
-    | 'parentheses'
-    | 'arc'
-    | 'none';
+    'auto' | 'vinculum' | 'dots' | 'parentheses' | 'arc' | 'none';
 };
 
 /** @category Serialization */
@@ -758,9 +753,7 @@ export type NumberSerializationFormat = NumberFormat & {
   fractionalDigits: 'auto' | 'max' | number;
   notation: 'auto' | 'engineering' | 'scientific' | 'adaptiveScientific'; // @todo: add | 'percent'
   avoidExponentsInRange:
-    | undefined
-    | null
-    | [negativeExponent: number, positiveExponent: number];
+    undefined | null | [negativeExponent: number, positiveExponent: number];
 };
 
 /**
@@ -1444,10 +1437,7 @@ export type PowerStyle = 'root' | 'solidus' | 'quotient';
  * @category Latex Parsing and Serialization
  */
 export type NumericSetStyle =
-  | 'compact'
-  | 'regular'
-  | 'interval'
-  | 'set-builder';
+  'compact' | 'regular' | 'interval' | 'set-builder';
 
 /** How to serialize collection indexing (the `At` operator).
  *
@@ -1461,8 +1451,7 @@ export type IndexStyle = 'subscript' | 'bracket';
  * @category Latex Parsing and Serialization
  */
 export type StyleOption<T extends string> =
-  | T
-  | ((expr: MathJsonExpression, level: number) => T);
+  T | ((expr: MathJsonExpression, level: number) => T);
 
 /**
  *

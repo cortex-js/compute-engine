@@ -1716,15 +1716,12 @@ function compileJSSelection(
     // instances and a subexpression shared by a condition and an arm is still
     // bound once. A caller that hands no factory compiles the branch without
     // indices, which inlines such a subexpression at each position.
-    const fused = compileNumericSelection(
-      args,
-      target,
-      (fallbackTarget) =>
-        compileJSSelection(
-          args,
-          compileUnder?.(fallbackTarget) ??
-            ((expr) => BaseCompiler.compileValueOperand(expr, fallbackTarget))
-        )!
+    const fused = compileNumericSelection(args, target, (fallbackTarget) =>
+      compileJSSelection(
+        args,
+        compileUnder?.(fallbackTarget) ??
+          ((expr) => BaseCompiler.compileValueOperand(expr, fallbackTarget))
+      )!
     );
     if (fused !== undefined) return fused;
   }
@@ -12943,7 +12940,7 @@ function memoizeSharedDefinitions(
   for (const [name, code] of defs)
     varsReads.set(name, varsObject ? varsObjectReads(code) : new Set());
   const varying = new Set<string>();
-  for (let changed = true; changed; ) {
+  for (let changed = true; changed;) {
     changed = false;
     for (const [name, code] of defs) {
       if (!varying.has(name)) {

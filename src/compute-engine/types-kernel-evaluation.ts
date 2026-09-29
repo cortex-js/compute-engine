@@ -107,11 +107,7 @@ export type FactRecord<Def = unknown> = Readonly<{
 
 /** @category Assumptions */
 export type AssumeResult =
-  | 'internal-error'
-  | 'not-a-predicate'
-  | 'contradiction'
-  | 'tautology'
-  | 'ok';
+  'internal-error' | 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok';
 
 /** Options for `Expression.evaluate()`
  *
@@ -300,10 +296,7 @@ export type Rule<Expr = unknown, SemiExpr = unknown, CE = unknown> =
   | {
       match?: LatexString | SemiExpr | Expr;
       replace:
-        | LatexString
-        | SemiExpr
-        | RuleReplaceFunction<Expr>
-        | RuleFunction<Expr>;
+        LatexString | SemiExpr | RuleReplaceFunction<Expr> | RuleFunction<Expr>;
       condition?: LatexString | RuleConditionFunction<Expr, CE>;
       useVariations?: boolean;
       /** Dispatch hint: this rule can only ever apply to expressions whose

@@ -807,7 +807,7 @@ function reduceIntersectionType(type: AlgebraicType): Type {
     // Where the merged result goes back, so a merge cannot reorder the arms:
     // the slot of the FIRST member it absorbed, or the end if it absorbed none.
     let at = -1;
-    for (let i = 0; i < members.length; ) {
+    for (let i = 0; i < members.length;) {
       const m = meet2(members[i], merged);
       if (m !== undefined && isEmptyType(m)) return 'never';
       if (m === undefined) {

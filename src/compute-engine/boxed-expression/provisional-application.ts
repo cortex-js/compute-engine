@@ -55,8 +55,7 @@ import { activeRollbackFrame } from '../inference-rollback.js';
  * value definition is read as an application by
  * `canonicalInvisibleOperator` too, so it is exactly as order-dependent. */
 export type ProvisionalDependent =
-  | BoxedOperatorDefinition
-  | BoxedValueDefinition;
+  BoxedOperatorDefinition | BoxedValueDefinition;
 
 /** What a `Function` literal needs to be re-derived: the raw operands it was
  * canonicalized from, the scope it was canonicalized in, and the symbols whose

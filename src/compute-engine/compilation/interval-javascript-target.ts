@@ -780,11 +780,8 @@ function compileIntervalRestrictedValue(
   if (compileIntervalCollectionValue(value, target) === undefined)
     return undefined;
   BaseCompiler.assertScalarCondition(cond);
-  const spelled = BaseCompiler.withCseOperand(
-    when,
-    0,
-    target,
-    () => compileIntervalCollectionValue(value, target)!
+  const spelled = BaseCompiler.withCseOperand(when, 0, target, () =>
+    compileIntervalCollectionValue(value, target)!
   );
   return `_IA.restrict(${BaseCompiler.compileValueOperand(cond, target)}, () => ${spelled})`;
 }

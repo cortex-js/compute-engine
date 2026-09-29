@@ -70,8 +70,7 @@ function storageKindOf(name: string, value: unknown): StorageKind {
 export function assertStorageHintsShape(
   storage: unknown
 ): asserts storage is
-  | Readonly<Record<MathJsonSymbol, StorageHint>>
-  | undefined {
+  Readonly<Record<MathJsonSymbol, StorageHint>> | undefined {
   if (storage === undefined) return;
   if (storage === null || typeof storage !== 'object' || Array.isArray(storage))
     invalid('expected an object mapping symbol names to storage kinds');

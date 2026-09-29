@@ -795,8 +795,7 @@ export class _BoxedValueDefinition
     this._placeholderSkeleton = s._placeholderSkeleton as Type | undefined;
     this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
     this._typeProvenance = s._typeProvenance as
-      | TypeProvenanceEntry[]
-      | undefined;
+      TypeProvenanceEntry[] | undefined;
     this.effectsDeclared = s.effectsDeclared as boolean;
     this._isConstant = s._isConstant as boolean;
     this._deadStack = s._deadStack as string | undefined;
@@ -991,8 +990,8 @@ export class _BoxedValueDefinition
   /** Memo for {@link type}'s merge, keyed on the fact index it was computed
    * from and on this record's own write counter. */
   private _effectiveType:
-    | { index: FactIndex; writeVersion: number; type: BoxedType }
-    | undefined = undefined;
+    { index: FactIndex; writeVersion: number; type: BoxedType } | undefined =
+    undefined;
 
   /**
    * Revision of an INFERRED type against its own value (user-ruled

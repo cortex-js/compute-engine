@@ -506,9 +506,7 @@ export function indexLatexDictionary(
       }
       if (kind === 'operator' && def.latexTrigger && def.latexTrigger !== '') {
         const operatorDef = def as
-          | IndexedInfixEntry
-          | IndexedPrefixEntry
-          | IndexedPostfixEntry;
+          IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry;
         const defs = result.operatorByTrigger.get(def.latexTrigger);
         if (defs) defs.push(operatorDef);
         else result.operatorByTrigger.set(def.latexTrigger, [operatorDef]);

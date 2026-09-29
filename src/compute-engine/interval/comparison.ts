@@ -34,10 +34,7 @@ function isVerdict(x: unknown): x is BoolInterval {
  * answer, so a caller inside the library sees the real domain.
  */
 export type IntervalModelValue =
-  | Interval
-  | IntervalResult
-  | BoolInterval
-  | IntervalModelValue[];
+  Interval | IntervalResult | BoolInterval | IntervalModelValue[];
 
 /**
  * `asResult` over any value of this target's value model: an interval is
@@ -237,8 +234,7 @@ export function not(a: BoolInterval): BoolInterval {
 function piecewiseRaw(
   xOrCond: Interval | IntervalResult | BoolInterval,
   conditionOrTrue:
-    | ((x: Interval) => BoolInterval)
-    | (() => Interval | IntervalResult),
+    ((x: Interval) => BoolInterval) | (() => Interval | IntervalResult),
   trueOrFalse:
     | ((x: Interval) => Interval | IntervalResult)
     | (() => Interval | IntervalResult),

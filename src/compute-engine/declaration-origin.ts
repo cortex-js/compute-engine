@@ -20,9 +20,7 @@ import type { DeclarationOrigin } from '../common/type/types.js';
  * (the static pass emits them as `ParsingDiagnostic`s, the statement route as
  * error VALUES), so one problem reads the same wherever it is reported. */
 export type RedefinitionCode =
-  | 'type-redefinition'
-  | 'protocol-redefinition'
-  | 'function-redefinition';
+  'type-redefinition' | 'protocol-redefinition' | 'function-redefinition';
 
 /**
  * A declaration refused because the name was already declared by a DIFFERENT

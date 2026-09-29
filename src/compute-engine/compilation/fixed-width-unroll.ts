@@ -150,9 +150,7 @@ export interface UnrollOptions {
  */
 export function overriddenCompilationHeads(
   operators:
-    | Readonly<Record<string, unknown>>
-    | ((op: string) => unknown)
-    | undefined,
+    Readonly<Record<string, unknown>> | ((op: string) => unknown) | undefined,
   functions: Readonly<Record<string, unknown>> | undefined
 ): ReadonlySet<string> | undefined {
   if (typeof operators === 'function') return REWRITTEN_HEADS;

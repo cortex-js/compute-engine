@@ -8835,8 +8835,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `Add` in written order. Flatten same-head chains without folding or
         // reordering (a full canonicalization would fold `1 + 2` to `3`).
         const flat = flattenSameHeadChain(arg.json);
-        const operand =
-          flat === arg.json ? arg : ce.box(flat, { form: 'raw' });
+        const operand = flat === arg.json ? arg : ce.box(flat, { form: 'raw' });
         return inferContinuationPattern(operand) ?? arg;
       },
     },
@@ -10410,10 +10409,5 @@ function bigRealOf(x: Expression | undefined): BigDecimal | undefined {
  * `BigDecimal.add()` is exact.
  */
 function floorModFloat(a: Expression, b: Expression): Expression | undefined {
-  return apply2(
-    a,
-    b,
-    floorModDouble,
-    (a, b) => a.mod(b).add(b).mod(b)
-  );
+  return apply2(a, b, floorModDouble, (a, b) => a.mod(b).add(b).mod(b));
 }

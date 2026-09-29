@@ -137,9 +137,7 @@ export type ValueDefinition = BaseDefinition & {
    * `Pi`, the actual value depends on the `precision` setting of the
    * `ComputeEngine` and possible other environment settings */
   value:
-    | LatexString
-    | ExpressionInput
-    | ((ce: ComputeEngine) => Expression | null);
+    LatexString | ExpressionInput | ((ce: ComputeEngine) => Expression | null);
 
   eq: (a: Expression) => boolean | undefined;
   neq: (a: Expression) => boolean | undefined;
@@ -1275,8 +1273,7 @@ export type PartialSymbolDefinition<T = SymbolDefinition> = T extends unknown
  * @category Definitions
  */
 export type SymbolDefinitionInput =
-  | PartialSymbolDefinition
-  | BoxedOperatorDefinition;
+  PartialSymbolDefinition | BoxedOperatorDefinition;
 
 export type SymbolDefinitions = Readonly<{
   [id: string]: PartialSymbolDefinition;
@@ -2422,8 +2419,7 @@ export type OperatorDefinitionFlags = {
    * **Default:** discharge nothing — propagation is the sound default.
    */
   discharges:
-    | { readonly [operandIndex: number]: readonly EffectLabel[] }
-    | undefined;
+    { readonly [operandIndex: number]: readonly EffectLabel[] } | undefined;
 
   /**
    * How a **held** (`lazy`) operand position is treated by the projection rule
@@ -2576,10 +2572,7 @@ export interface BoxedOperatorDefinition
    * across a signature mutation.
    */
   readonly resolvedMissingBehavior:
-    | 'reject'
-    | 'propagate'
-    | 'handle'
-    | 'pass-through';
+    'reject' | 'propagate' | 'handle' | 'pass-through';
 
   /** True if a `missing` arm is stripped from parameter position `i` before
    * validation (§3.A). Only `propagate`/`handle` operators strip; `missingStrip`

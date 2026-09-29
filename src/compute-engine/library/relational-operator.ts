@@ -1272,12 +1272,7 @@ function relationalAbsenceType(ops: ReadonlyArray<OperandDescriptor>) {
 }
 
 type ComparisonHead =
-  | 'Less'
-  | 'LessEqual'
-  | 'Greater'
-  | 'GreaterEqual'
-  | 'Equal'
-  | 'NotEqual';
+  'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual' | 'Equal' | 'NotEqual';
 
 /**
  * A comparison's VALUE type — `true` or `false` — when the operands' TYPES

@@ -1303,8 +1303,7 @@ function bareFunctionLambda(
 
   // A named function: its operator definition holds the lambda literal.
   const opDef = (def as { operator?: unknown } | undefined)?.operator as
-    | { _isLambda?: boolean; _lambdaLiteral?: Expression }
-    | undefined;
+    { _isLambda?: boolean; _lambdaLiteral?: Expression } | undefined;
   if (opDef?._isLambda && opDef._lambdaLiteral)
     return lambdaFromLiteral(opDef._lambdaLiteral);
 
@@ -1786,8 +1785,7 @@ function numericApplier(
     return NaN;
   };
   const run = implicitCompile(ce, lit)?.run as
-    | ((x: number) => unknown)
-    | undefined;
+    ((x: number) => unknown) | undefined;
   if (run === undefined) return interpreted;
   return (x) => {
     const value = run(x);

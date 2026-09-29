@@ -83,10 +83,7 @@ export type ParseDiagnostic = {
  * @category Serialization
  */
 export type DisplayDigits =
-  | 'auto'
-  | 'max'
-  | { significant: number }
-  | { fractional: number };
+  'auto' | 'max' | { significant: number } | { fractional: number };
 
 /**
  * Options to control serialization to MathJSON when using
@@ -126,12 +123,7 @@ export type JsonSerializationOptions = {
    * **Default**: `["all"]`
    */
   shorthands: (
-    | 'all'
-    | 'number'
-    | 'symbol'
-    | 'function'
-    | 'string'
-    | 'dictionary'
+    'all' | 'number' | 'symbol' | 'function' | 'string' | 'dictionary'
   )[];
 
   /**
@@ -338,11 +330,7 @@ export type CanonicalOptions = boolean | CanonicalForm | CanonicalForm[];
  * @category Boxed Expression
  */
 export type FormOption =
-  | 'canonical'
-  | 'structural'
-  | 'raw'
-  | CanonicalForm
-  | CanonicalForm[];
+  'canonical' | 'structural' | 'raw' | CanonicalForm | CanonicalForm[];
 
 /**
  * Metadata that can be associated with a MathJSON expression.

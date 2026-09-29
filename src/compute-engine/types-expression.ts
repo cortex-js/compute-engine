@@ -296,8 +296,7 @@ type OperatorDefinitionFlags = {
   /** Per operand position (0-based index), the effects this operator ABSORBS
    * rather than re-emits. See `types-definitions.ts`. */
   discharges:
-    | { readonly [operandIndex: number]: readonly EffectLabel[] }
-    | undefined;
+    { readonly [operandIndex: number]: readonly EffectLabel[] } | undefined;
   /** How a HELD operand position is treated by the projection rule:
    * `'evaluate'` (may-evaluate, the default), `'quote'` (`Hold` — never
    * evaluated, contribution ∅) or `'release'` (`ReleaseHold` — forces a quote,
@@ -435,10 +434,7 @@ interface BoxedOperatorDefinition
     readonly clauseLocal?: boolean;
   }[];
   readonly resolvedMissingBehavior:
-    | 'reject'
-    | 'propagate'
-    | 'handle'
-    | 'pass-through';
+    'reject' | 'propagate' | 'handle' | 'pass-through';
   stripsMissingAt(i: number): boolean;
   /** True if a conditional value in operand position `i` moves out of the
    * application at evaluation. See `types-definitions.ts`. */
@@ -549,8 +545,7 @@ interface BoxedOperatorDefinition
 }
 
 type BoxedDefinition =
-  | { value: BoxedValueDefinition }
-  | { operator: BoxedOperatorDefinition };
+  { value: BoxedValueDefinition } | { operator: BoxedOperatorDefinition };
 
 type Scope = KernelScope<BoxedDefinition>;
 type EvaluateOptions = KernelEvaluateOptions;

@@ -315,10 +315,7 @@ export class BoxedNumber
   constructor(
     ce: ComputeEngine,
     value:
-      | SmallInteger
-      | NumericValueData
-      | ExactNumericValueData
-      | NumericValue,
+      SmallInteger | NumericValueData | ExactNumericValueData | NumericValue,
     options?: { metadata?: Metadata; indeterminate?: boolean }
   ) {
     super(ce, options?.metadata);

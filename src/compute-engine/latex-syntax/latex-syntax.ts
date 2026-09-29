@@ -90,9 +90,7 @@ export interface LatexSyntaxOptions {
 
   /** @default `[-7, 20]` */
   avoidExponentsInRange?:
-    | undefined
-    | null
-    | [negativeExponent: number, positiveExponent: number];
+    undefined | null | [negativeExponent: number, positiveExponent: number];
 
   /** @default `true` */
   prettify?: boolean;
@@ -210,8 +208,7 @@ export class LatexSyntax {
   private _options: LatexSyntaxOptions;
   private _indexed: IndexedLatexDictionary | undefined;
   private _namedTriggers:
-    | ReadonlyArray<{ name: string; triggers: string[] }>
-    | undefined;
+    ReadonlyArray<{ name: string; triggers: string[] }> | undefined;
 
   constructor(options?: LatexSyntaxOptions) {
     this._options = options ?? {};

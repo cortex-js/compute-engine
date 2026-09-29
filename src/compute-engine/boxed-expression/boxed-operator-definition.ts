@@ -427,8 +427,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * `undefined` (the default) discharges nothing, which is the sound default:
    * propagation is what gives `Map(f, xs)` per-call-site precision. */
   discharges:
-    | { readonly [operandIndex: number]: readonly EffectLabel[] }
-    | undefined = undefined;
+    { readonly [operandIndex: number]: readonly EffectLabel[] } | undefined =
+    undefined;
 
   /** How a HELD operand position is treated by the projection rule:
    * `'evaluate'` (may-evaluate — the operator may evaluate the operand under
@@ -944,10 +944,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * where that scan was the whole of the per-element subtype work.
    */
   get resolvedMissingBehavior():
-    | 'reject'
-    | 'propagate'
-    | 'handle'
-    | 'pass-through' {
+    'reject' | 'propagate' | 'handle' | 'pass-through' {
     if (this.missingBehavior) return this.missingBehavior;
     const signature = this.signature.type;
     const inferred = this.inferredSignature === true;

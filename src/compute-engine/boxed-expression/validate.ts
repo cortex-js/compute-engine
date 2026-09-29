@@ -341,9 +341,7 @@ export function inferCollectionSourceArgs(
   // Most applications hold no candidate: test the operands before the
   // signature is grounded, which allocates.
   if (
-    !ops.some(
-      (x) => isSymbol(x) && x.value === undefined && x.type.isUnknown
-    )
+    !ops.some((x) => isSymbol(x) && x.value === undefined && x.type.isUnknown)
   )
     return;
   const grounded = readTypeVariablesAsBounds(signature);
@@ -2688,22 +2686,20 @@ export function validateArguments(
     // `evidenceGuardedNarrow` reads the operand's type and the held value in
     // the same bracket, for the same reason.
     const narrowVerdict = ce._withoutFacts(() => {
-      if (
-        !(
-          !paramStillOpen &&
-          op.valueDefinition?.inferredType &&
-          isSubtype(param, op.type.type) &&
-          !hasValueComponent(param) &&
-          // Design E §3: never narrow a symbol's type TO an arrow slot's
-          // arrow — the slot is a per-call supply, not evidence of the
-          // symbol's own signature, and the write would manufacture a
-          // contract that makes a later, differently-instantiated call
-          // reject a symbol that both calls admit. The compatibility gate
-          // below admits with no write instead.
-          paramArrowArms(param) === undefined &&
-          narrowingPreservesEffects(op.type.type, param)
-        )
-      )
+      if (!(
+        !paramStillOpen &&
+        op.valueDefinition?.inferredType &&
+        isSubtype(param, op.type.type) &&
+        !hasValueComponent(param) &&
+        // Design E §3: never narrow a symbol's type TO an arrow slot's
+        // arrow — the slot is a per-call supply, not evidence of the
+        // symbol's own signature, and the write would manufacture a
+        // contract that makes a later, differently-instantiated call
+        // reject a symbol that both calls admit. The compatibility gate
+        // below admits with no write instead.
+        paramArrowArms(param) === undefined &&
+        narrowingPreservesEffects(op.type.type, param)
+      ))
         return 'fall-through';
 
       // EVIDENCE BEATS REQUIREMENT (`docs/INFERENCE_ROADMAP.md`, Phase 0
@@ -2970,16 +2966,14 @@ export function validateArguments(
     // write are fact-blind for the reason given at the required-parameter
     // gate above.
     const optNarrowVerdict = ce._withoutFacts(() => {
-      if (
-        !(
-          !paramStillOpen &&
-          op.valueDefinition?.inferredType &&
-          isSubtype(param, op.type.type) &&
-          !hasValueComponent(param) &&
-          paramArrowArms(param) === undefined &&
-          narrowingPreservesEffects(op.type.type, param)
-        )
-      )
+      if (!(
+        !paramStillOpen &&
+        op.valueDefinition?.inferredType &&
+        isSubtype(param, op.type.type) &&
+        !hasValueComponent(param) &&
+        paramArrowArms(param) === undefined &&
+        narrowingPreservesEffects(op.type.type, param)
+      ))
         return 'fall-through';
       return evidenceGuardedNarrow(ce, op, param, internals?.noInference);
     });
@@ -3195,16 +3189,14 @@ export function validateArguments(
       // and write are fact-blind for the reason given at the
       // required-parameter gate above.
       const varNarrowVerdict = ce._withoutFacts(() => {
-        if (
-          !(
-            !paramStillOpen &&
-            op.valueDefinition?.inferredType &&
-            isSubtype(varParam, op.type.type) &&
-            !hasValueComponent(varParam) &&
-            paramArrowArms(varParam) === undefined &&
-            narrowingPreservesEffects(op.type.type, varParam)
-          )
-        )
+        if (!(
+          !paramStillOpen &&
+          op.valueDefinition?.inferredType &&
+          isSubtype(varParam, op.type.type) &&
+          !hasValueComponent(varParam) &&
+          paramArrowArms(varParam) === undefined &&
+          narrowingPreservesEffects(op.type.type, varParam)
+        ))
           return 'fall-through';
         return evidenceGuardedNarrow(ce, op, varParam, internals?.noInference);
       });

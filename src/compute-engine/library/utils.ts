@@ -785,8 +785,7 @@ function geometricSumClosedForm(
   // NEGATED index is the reciprocal ratio: `2^(−k)`, the canonical form of
   // `1/2^k`, is `(1/2)^k` (it was not recognized, so `Σ 2^(−k)` stayed
   // symbolic while `Σ (1/2)^k` was 2).
-  const isIndex = (e: Expression): boolean =>
-    isSymbol(e) && e.symbol === index;
+  const isIndex = (e: Expression): boolean => isSymbol(e) && e.symbol === index;
   const negatedIndex =
     (isFunction(exp, 'Negate') && isIndex(exp.op1)) ||
     (isFunction(exp, 'Multiply') &&

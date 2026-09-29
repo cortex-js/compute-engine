@@ -1106,9 +1106,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // `.N()` the handler receives the float `3.14…`, whose sinc is
         // `1.2e-25`), as the trigonometric factory reads its raw operand.
         const raw =
-          isFunction(expression) && expression.nops === 1
-            ? expression.op1
-            : x;
+          isFunction(expression) && expression.nops === 1 ? expression.op1 : x;
         // Not at 0 (the evaluated operand): `sinc(0) = 1` below, where
         // sin(x)/x would be 0/0 — as when a bound index `n` is 0 in a sum.
         if (
@@ -1754,9 +1752,7 @@ function trigFunction(
   // parameter after the optional ones above) so an omitted argument fails
   // loudly at the first infinity instead of silently admitting one.
   carrier:
-    | 'complex'
-    | 'complex | signed_infinity'
-    | 'complex | infinity' = 'complex'
+    'complex' | 'complex | signed_infinity' | 'complex | infinity' = 'complex'
 ): OperatorDefinition {
   // Parsed once per head at module load, for the incompatible-type error
   // value the evaluate seam produces.
