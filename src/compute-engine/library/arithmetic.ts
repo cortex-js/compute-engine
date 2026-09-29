@@ -443,6 +443,52 @@ function oppositeSgn(x: Sign | undefined): Sign | undefined {
 }
 
 /**
+ * Rounds a real number to an integer with `fn` (machine lane) or `bigFn`
+ * (big-decimal lane), and boxes a finite result as an EXACT integer, also
+ * when the argument is a float.
+ *
+ * The rounding family (`Round`, `Floor`, `Ceil`, `Truncate`) is an exception
+ * to the rule that a float operand makes a numeric result a float: as in
+ * Mathematica, `Floor(2.7)` is the integer `2`, not the float `2.0`. The
+ * integer that a rounding function returns is exact even when its argument
+ * is not, because there is no rounding error left to carry. The precision
+ * form `Round(x, n)` builds on this: it divides the exact integer by the
+ * exact `10ⁿ`, so `Round(3.14159, 2)` is the exact rational `157/50`.
+ *
+ * `apply()` boxes the result of a float argument as a float; this function
+ * re-boxes it. A machine integer beyond the safe-integer range is still an
+ * integer (a double of that size has no fractional part), so it is boxed
+ * from a `bigint` and keeps all its digits. The non-finite results (`±∞`,
+ * `NaN`) are returned unchanged. Under a numeric approximation (`.N()`)
+ * the result stays a float: `Round(3.14159, 2).N()` is the float `3.14`.
+ *
+ * Reported in cortex-js/compute-engine#351.
+ */
+function applyRounding(
+  x: Expression,
+  fn: (x: number) => number,
+  bigFn: (x: BigDecimal) => BigDecimal,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const result = apply(x, fn, bigFn);
+  if (numericApproximation) return result;
+  if (result === undefined || !isNumber(result) || result.isExact)
+    return result;
+  if (result.isFinite !== true || result.isComplex) return result;
+  const ce = x.engine;
+  const big = result.bignumRe;
+  if (big !== undefined) {
+    if (!big.isInteger()) return result;
+    return ce.number(big.toBigInt());
+  }
+  const re = result.re;
+  if (!Number.isInteger(re)) return result;
+  // `Math.ceil(-0.3)` is `-0`; the exact integer zero has no sign.
+  if (Number.isSafeInteger(re)) return ce.number(re === 0 ? 0 : re);
+  return ce.number(BigInt(re));
+}
+
+/**
  * Determines sgn of ln(x).
  *
  * `x` is compared with 1 and 0 with no tolerance (see `exactOrder`): with
@@ -2732,7 +2778,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x]) => apply(x, Math.ceil, (x) => x.ceil()),
+      evaluate: ([x], { numericApproximation }) =>
+        applyRounding(x, Math.ceil, (x) => x.ceil(), numericApproximation),
     },
 
     Chop: {
@@ -3532,7 +3579,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         return undefined;
       },
-      evaluate: ([x]) => apply(x, Math.floor, (x) => x.floor()),
+      evaluate: ([x], { numericApproximation }) =>
+        applyRounding(x, Math.floor, (x) => x.floor(), numericApproximation),
     },
 
     Fract: {
@@ -6618,12 +6666,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // the explicit declaration). The declared result is
       // `real | signed_infinity`, not the family's
       // `integer | signed_infinity`, because the precision form is
-      // generally non-integer (`Round(3.14159, 2)` is `3.14`); the
-      // handler below restores the sharp `integer` claim for the
-      // single-argument form. The precision slot keeps the DERIVED `NaN`
-      // policy for an integer carrier (`reject`): a `NaN` digit count is
-      // an error, not a value to propagate — which is why `nanBehavior`
-      // is the one-element array (slot 0 only) rather than operator-wide.
+      // generally non-integer (`Round(3.14159, 2)` is the exact rational
+      // `157/50`, see `applyRounding()`); the handler below restores the
+      // sharp `integer` claim for the single-argument form. The precision
+      // slot keeps the DERIVED `NaN` policy for an integer carrier
+      // (`reject`): a `NaN` digit count is an error, not a value to
+      // propagate — which is why `nanBehavior` is the one-element array
+      // (slot 0 only) rather than operator-wide.
       // NO `partiality: 'total'` claim, deliberately: the precision form
       // computes `10^n` first, and an exact power beyond the
       // materialization limit stays symbolic, so an in-carrier call such
@@ -6639,7 +6688,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (n === undefined)
           return BoxedType.forResult(t, context.engine._typeResolver);
         // With a precision arg the result is generally non-integer
-        // (`Round(3.14159, 2)` is `3.14`): keep the non-finite
+        // (`Round(3.14159, 2)` is `157/50`): keep the non-finite
         // classification, but replace the integer claim by `real`.
         // The replacement must apply to EVERY operand that rounds to
         // `integer`, including a bare `real` symbol of unknown
@@ -6676,15 +6725,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x, n], { engine: ce }) => {
+      evaluate: ([x, n], { engine: ce, numericApproximation }) => {
         // A half rounds AWAY FROM ZERO at every precision (`Round(-0.5)` is
         // `-1`, `Round(2.5)` is `3`; user decision, 2026-09-21). The
         // big-number lane `BigDecimal.round()` already does that; the machine
         // lane needs `roundHalfAway`, because JavaScript `Math.round` rounds
         // a half toward `+∞`. The precision form below inherits the rule: it
-        // rounds the SCALED value with the same helper.
+        // rounds the SCALED value with the same helper. `applyRounding()`
+        // boxes the rounded value as an exact integer also for a float `x`,
+        // so the precision form divides two exact numbers and its result is
+        // an exact rational (`Round(3.14159, 2)` is `157/50`, as in
+        // Mathematica).
         const roundToInteger = (v: Expression) =>
-          apply(v, roundHalfAway, (v) => v.round());
+          applyRounding(
+            v,
+            roundHalfAway,
+            (v) => v.round(),
+            numericApproximation
+          );
         if (n === undefined) return roundToInteger(x);
         // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places.
         if (!isNumber(n) || n.isFinite !== true) return undefined;
@@ -7109,7 +7167,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x]) => apply(x, Math.trunc, (x) => x.trunc()),
+      evaluate: ([x], { numericApproximation }) =>
+        applyRounding(x, Math.trunc, (x) => x.trunc(), numericApproximation),
     },
   },
   {

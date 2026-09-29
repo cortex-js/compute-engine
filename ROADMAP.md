@@ -680,7 +680,10 @@ Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
   `HurwitzZeta(0.0, 2)` give exact results. Mathematica refuses a real
   argument for most of them. A decision: refuse (a type error), or answer a
   float. (`Arg(2.0)`, `Im(2.0)`, `Heaviside`, `KroneckerDelta`, `Denominator`,
-  `Rationalize`, `MatrixRank` are exact in Mathematica too and stay.)
+  `Rationalize`, `MatrixRank` are exact in Mathematica too and stay.) The
+  rounding family (`Round`, `Floor`, `Ceil`, `Truncate`) is decided the
+  Mathematica way: a float argument gives an exact integer, and
+  `Round(3.14159, 2)` is `157/50` (cortex-js/compute-engine#351).
 - **WGSL `Mod` when the quotient underflows.** The componentwise floor-mod
   `(((a % b) - b * floor((a % b) / b)) % b)` (2026-09-27, it replaced
   `((a % b) + b) % b`, which rounded in `f32`) makes no correction when

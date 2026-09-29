@@ -1262,7 +1262,7 @@ Rounds a number to the nearest integer, or (with a precision argument) to `n` de
 
 ```epsil
 [round(2.5), round(-2.5), round(3.14159, 2)]
-// ➔ [3,-3,3.14]
+// ➔ [3,-3,157/50]
 ```
 
 ### sign

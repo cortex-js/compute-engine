@@ -280,6 +280,11 @@ function listFloats(list: Expression): boolean {
  *   argument is within its rounding error of a pole (`isMachineTrigPole`:
  *   `|value|·min(|x|, 2⁴⁰)·100·2⁻⁵³ ≥ 1`). The kernel declines such an
  *   element, and the scalar route answers it.
+ * - `exactResult`: the result under `evaluate()` is an exact integer, also
+ *   for a float argument. The rounding functions (`Floor`, `Ceil`, `Round`)
+ *   do this on the scalar route, as in Mathematica: `Floor(2.7)` is the
+ *   integer `2`, not the float `2.0` (cortex-js/compute-engine#351). Under
+ *   `N()` the result is a float, as for the other kernels.
  * - The trigonometric heads read `ce.angularUnit`: in another unit than
  *   radians the argument is converted first, which the kernel does not do.
  */
@@ -291,6 +296,7 @@ interface MachineFunctionKernel {
   avoid?: (x: number) => boolean;
   pole?: boolean;
   angle?: boolean;
+  exactResult?: boolean;
 }
 
 const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
@@ -386,13 +392,23 @@ const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
     domain: (x) => x >= 0,
   },
   Abs: { apply: Math.abs, routes: 'both', integers: true },
-  Floor: { apply: Math.floor, routes: 'both', integers: true },
-  Ceil: { apply: Math.ceil, routes: 'both', integers: true },
+  Floor: {
+    apply: Math.floor,
+    routes: 'both',
+    integers: true,
+    exactResult: true,
+  },
+  Ceil: { apply: Math.ceil, routes: 'both', integers: true, exactResult: true },
   // A half rounds AWAY FROM ZERO at every precision (`Round(-0.5)` is `-1`,
   // `Round(2.5)` is `3`; user decision, 2026-09-21), which is what the scalar
   // route answers. JavaScript `Math.round` rounds a half toward `+∞`, so the
   // kernel is `roundHalfAway`, not the bare primitive.
-  Round: { apply: roundHalfAway, routes: 'both', integers: true },
+  Round: {
+    apply: roundHalfAway,
+    routes: 'both',
+    integers: true,
+    exactResult: true,
+  },
 };
 
 /**
@@ -539,7 +555,9 @@ function machineFunctionBroadcast(
     if (!Number.isFinite(r)) return undefined;
     if (kernel.pole === true && isMachineTrigPole(r, x)) return undefined;
     if (Number.isInteger(r) && !Number.isSafeInteger(r)) return undefined;
-    if (!floats.note(r, float)) return undefined;
+    const floatResult =
+      float && (numericApproximation || kernel.exactResult !== true);
+    if (!floats.note(r, floatResult)) return undefined;
     out[i] = r === 0 ? 0 : r;
   }
   return ce._list(out, floats.floats);

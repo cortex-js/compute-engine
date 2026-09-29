@@ -118,3 +118,72 @@ describe('Round at a half in compiled JavaScript', () => {
     expect(tens!.run({ x: -1250 })).toBe(-1300);
   });
 });
+
+/**
+ * The rounding family answers an EXACT number for a float argument, as in
+ * Mathematica (cortex-js/compute-engine#351): `Round(2.5)` is the integer `3`,
+ * not the float `3.0`, and `Round(3.14159, 2)` is the rational `157/50`. This
+ * is an exception to the rule that a float operand makes a numeric result a
+ * float. Under `.N()` the result is a float.
+ */
+describe('Rounding a float gives an exact result', () => {
+  test('the precision form gives an exact rational', () => {
+    const ce = engineAt('machine');
+    const r = ce.box(['Round', 3.14159, 2]).evaluate();
+    expect(r.json).toEqual(['Rational', 157, 50]);
+    expect(r.isExact).toBe(true);
+    // A negative `n` rounds to hundreds and gives an exact integer.
+    const tens = ce.box(['Round', 1234.5, -2]).evaluate();
+    expect(tens.json).toBe(1200);
+    expect(tens.isExact).toBe(true);
+  });
+
+  test('Round, Floor, Ceil and Truncate give exact integers', () => {
+    const ce = engineAt('machine');
+    const cases: [string, number, number][] = [
+      ['Round', 2.5, 3],
+      ['Floor', 2.7, 2],
+      ['Ceil', 2.2, 3],
+      ['Truncate', -2.7, -2],
+    ];
+    for (const [op, x, want] of cases) {
+      const r = ce.box([op, x]).evaluate();
+      expect([op, x, r.json, r.isExact]).toEqual([op, x, want, true]);
+    }
+  });
+
+  test('a big-decimal float rounds to an exact integer', () => {
+    const ce = engineAt(30);
+    const x = ce.parse('2.5');
+    expect(x.isExact).toBe(false);
+    const r = ce.box(['Round', x]).evaluate();
+    expect(r.json).toBe(3);
+    expect(r.isExact).toBe(true);
+  });
+
+  test('a large float keeps all its digits', () => {
+    const ce = engineAt('machine');
+    const r = ce.parse('\\lfloor 10^{20} + 0.5 \\rfloor').evaluate();
+    expect(r.isExact).toBe(true);
+    expect(r.isSame(ce.number(10n ** 20n))).toBe(true);
+    const m = ce.box(['Floor', 1e20]).evaluate();
+    expect(m.isExact).toBe(true);
+    expect(m.isSame(ce.number(10n ** 20n))).toBe(true);
+  });
+
+  test('infinities and NaN are unchanged', () => {
+    const ce = engineAt('machine');
+    expect(ce.box(['Round', 'PositiveInfinity']).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    expect(ce.box(['Round', 'NaN']).evaluate().json).toBe('NaN');
+  });
+
+  test('under N the result is a float', () => {
+    const ce = engineAt('machine');
+    const r = ce.box(['Round', 3.14159, 2]).N();
+    expect(r.isExact).toBe(false);
+    expect(r.re).toBeCloseTo(3.14, 12);
+    expect(ce.box(['Round', 2.5]).N().json).toEqual({ num: '3.0' });
+  });
+});

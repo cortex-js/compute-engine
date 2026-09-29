@@ -392,7 +392,10 @@ describe('FLOAT OPERANDS OF NUMERIC OPERATORS', () => {
 
     // Kept as they are, as Mathematica does: `Max` returns one of its
     // operands as it was given (`Max[2., 3]` is `3`), and the sign of a real
-    // number is the exact integer `1`, `0` or `-1` (`Sign[2.]` is `1`).
+    // number is the exact integer `1`, `0` or `-1` (`Sign[2.]` is `1`). The
+    // rounding functions `Round`, `Floor`, `Ceil` and `Truncate` of a float
+    // are exact too (`Floor[2.7]` is `2`, `Round[3.14159, 10^-2]` is
+    // `157/50`); `round-tie-rule.test.ts` tests them.
     // Changing them needs a decision of its own.
     test('Max returns its operand as given; Sign is an exact integer', () => {
       expect(leaves(pce.parse('\\max(2.0,3)').evaluate())).toBe('3');
@@ -430,8 +433,6 @@ describe('FLOAT OPERANDS OF NUMERIC OPERATORS', () => {
       ['2L', '1~ 3~ 299~'],
       ['2(2L)', '2~ 6~ 598~'],
       ['L+0.5', '1~ 2~ 150~'],
-      ['\\lceil L\\rceil', '1~ 2~ 150~'],
-      ['\\lfloor L\\rfloor', '0~ 1~ 149~'],
       ['2F', '2~ 4~ 300~'],
       ['F+1', '2~ 3~ 151~'],
       ['F^2', '1~ 4~ 22500~'],
@@ -445,6 +446,15 @@ describe('FLOAT OPERANDS OF NUMERIC OPERATORS', () => {
       ['N^2', '1 4 22500'],
       ['\\lceil N\\rceil', '1 2 150'],
     ])('%s over exact integers has exact elements', (latex, expected) => {
+      expect(firstLast(latex)).toBe(expected);
+    });
+
+    // The rounding functions give exact integers for float elements too, as
+    // for a single float (`Floor(2.7)` is `2`; cortex-js/compute-engine#351).
+    test.each([
+      ['\\lceil L\\rceil', '1 2 150'],
+      ['\\lfloor L\\rfloor', '0 1 149'],
+    ])('%s over floats has exact elements', (latex, expected) => {
       expect(firstLast(latex)).toBe(expected);
     });
 

@@ -31,6 +31,17 @@
 - **A float `Measurement` error evaluates.** `Measurement(5, 0.2) + 3` was
   `8 ± sqrt(0.2^2)` under `evaluate()` and is now `8.00 ± 0.20`. An exact error
   stays exact (`Measurement(5, 1) * Measurement(2, 1)` is `10 ± √29`).
+- **Rounding a float gives an exact number.** `Round`, `Floor`, `Ceil` and
+  `Truncate` of a float now give an exact integer under `evaluate()`:
+  `Round(2.5)` was the float `3.0` and is the integer `3`; `Floor(2.7)` is
+  `2`, `Ceil(2.2)` is `3`, `Truncate(-2.7)` is `-2`. `Round(x, n)` of a float
+  gives an exact rational: `Round(3.14159, 2)` was `3.14` and is `157/50`, and
+  `Round(1234.5, -2)` is the integer `1200`. A list of floats rounds to a list
+  of exact integers too. This follows Mathematica (`Round[3.14159, 10^-2]` is
+  `157/50`) and reverses, for the rounding family only, the 0.140.0 rule that
+  a float operand makes a numeric result a float. Under `.N()` the result is
+  still a float, and `±∞` and `NaN` are unchanged.
+  ([#351](https://github.com/cortex-js/compute-engine/issues/351))
 
 ### Issues Resolved
 
