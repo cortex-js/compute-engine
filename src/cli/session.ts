@@ -2,7 +2,10 @@ import { performance } from 'node:perf_hooks';
 
 import { ComputeEngine, executeEpsil, parseEpsil } from '../epsil.js';
 import type { BoxedExpression } from '../compute-engine.js';
-import { isTimeoutCancellation } from '../common/interruptible.js';
+import {
+  budgetCauseOf,
+  isTimeoutCancellation,
+} from '../common/interruptible.js';
 import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
 
 import type { EpsilSession, EvaluationResult } from './types.js';
@@ -53,7 +56,7 @@ export function makeEpsilSession(timeLimit: number): EpsilSession {
         value = engine.box([
           'Error',
           { str: error instanceof Error ? error.message : 'Timeout exceeded' },
-          { str: 'timeout' },
+          { str: budgetCauseOf(error) },
         ]);
       }
       return {

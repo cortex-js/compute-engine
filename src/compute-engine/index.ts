@@ -1729,6 +1729,57 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * Run `fn` with **at most** `limit.steps` steps of engine work — a hang
+   * guard that fires at the same point on every machine, whatever its speed
+   * or load, unlike a wall-clock limit.
+   *
+   * A step is one of the engine's cooperative cancellation checks. The
+   * checks are amortized in hot loops and sit at fixed points of the
+   * evaluator, the numeric integrators, the series and limit code and the
+   * integration rules, so the count for one computation on one engine state
+   * is the same on every run, but it is an **opaque unit**: it is not a
+   * measure of the computation's cost or complexity, it is not comparable
+   * across engine versions, and code that does not reach a check (a single
+   * large numeric operation) spends no steps while it runs. Tune the budget
+   * empirically against the computations it must admit, and keep a
+   * `withTimeLimit` span outside it as the guard of last resort.
+   *
+   * A spent budget throws a `CancellationError` with `cause: 'step-budget'`
+   * (a time expiry has `cause: 'timeout'`), the span's `label` as its
+   * `attribution`, and the active span labels in `spans`. Spans nest: a step
+   * counts against every active budget, and the deadline of an enclosing
+   * `withTimeLimit` span still applies inside. `steps` must be a
+   * non-negative integer (`Infinity` and `NaN` are contract errors, not
+   * budgets); `steps: 0` lets `fn` start and throws at its first check.
+   *
+   * ```ts
+   * try {
+   *   ce.withStepBudget({ steps: 20_000, label: 'classify' }, () =>
+   *     expr.evaluate()
+   *   );
+   * } catch (e) {
+   *   if (e.name === 'CancellationError' && e.cause === 'step-budget')
+   *     report('too complex');
+   * }
+   * ```
+   *
+   * **⚠️ `fn` MUST be synchronous**, for the reason given at
+   * `withTimeLimit`: the span ends when `fn` returns, so work that resumes
+   * after an `await` runs outside it.
+   */
+  withStepBudget<T>(
+    limit: { steps: number; label?: string },
+    fn: () => T extends Promise<unknown> ? never : T
+  ): T {
+    const { steps, label } = limit;
+    if (!Number.isInteger(steps) || steps < 0)
+      throw new Error(
+        `withStepBudget: \`steps\` must be a non-negative integer, got ${String(steps)}`
+      );
+    return this._withBudget({ steps, label }, fn);
+  }
+
+  /**
    * Run `fn` in a span with a wall-clock limit (`ms`), a step budget
    * (`steps`, see `StepBudget` in `common/interruptible.ts`), or both. With
    * neither, the span only adds its label. `withTimeLimit` is this with

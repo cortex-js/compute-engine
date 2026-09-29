@@ -15,7 +15,10 @@ import {
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
 import { explainErrorCode } from '../epsil/error-explanations.js';
-import { isTimeoutCancellation } from '../common/interruptible.js';
+import {
+  budgetCauseOf,
+  isTimeoutCancellation,
+} from '../common/interruptible.js';
 import { compile } from '../compute-engine/compilation/compile-expression.js';
 import type { CompileMode } from '../compute-engine/compilation/types.js';
 
@@ -842,7 +845,7 @@ class McpServer {
         ok: false,
         target: to,
         error: message,
-        diagnostic: { code: 'timeout', message },
+        diagnostic: { code: budgetCauseOf(error), message },
         diagnostics: [],
         ...extra,
       });
@@ -889,11 +892,15 @@ function latexDiagnostics(
   return errors.map((error) => {
     const [first, ...rest] = isFunction(error) ? error.ops : [];
     // A timeout is `["Error", message, "timeout"]`, the error value of a
-    // deadline breach.
-    if (isString(rest[0]) && rest[0].string === 'timeout')
+    // deadline breach; a spent step budget writes `"step-budget"` in the
+    // same slot.
+    if (
+      isString(rest[0]) &&
+      (rest[0].string === 'timeout' || rest[0].string === 'step-budget')
+    )
       return {
         severity: 'error',
-        code: 'timeout',
+        code: rest[0].string,
         message: isString(first) ? first.string : 'Timeout exceeded',
       };
     // The cause is a plain string code (`"unexpected-operator"`), or an

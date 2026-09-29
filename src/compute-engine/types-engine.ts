@@ -1177,6 +1177,23 @@ export interface IComputeEngine {
   ): T;
 
   /**
+   * Run `fn` with at most `limit.steps` steps of engine work: a hang guard
+   * that fires at the same point on every machine, unlike a wall-clock
+   * limit. A step is one of the engine's cooperative cancellation checks —
+   * an opaque unit, deterministic for one computation on one engine state,
+   * but not a measure of cost and not comparable across engine versions;
+   * tune the budget empirically and keep a `withTimeLimit` span outside it.
+   * A spent budget throws a `CancellationError` with `cause: 'step-budget'`
+   * and the span's `label` as its `attribution`.
+   *
+   * **⚠️ `fn` MUST be synchronous**, as for `withTimeLimit`.
+   */
+  withStepBudget<T>(
+    limit: { steps: number; label?: string },
+    fn: () => T extends Promise<unknown> ? never : T
+  ): T;
+
+  /**
    * Run `fn` in a span with a wall-clock limit (`ms`), a step budget
    * (`steps`), or both. A step budget bounds an internal search on every
    * machine at the same point, so its result does not depend on the speed or

@@ -8,6 +8,8 @@
  *
  *  - `'timeout'`: an enclosing `ce.withTimeLimit(...)` span's deadline was
  *    exceeded.
+ *  - `'step-budget'`: an enclosing `ce.withStepBudget(...)` span (or an
+ *    internal step budget) was spent — a deterministic budget, not the clock.
  *  - `'iteration-limit-exceeded'`: a loop/iterator exceeded
  *    `engine.iterationLimit`.
  *  - `'recursion-depth-exceeded'`: user-function recursion exceeded
@@ -15,6 +17,7 @@
  */
 export type CancellationCause =
   | 'timeout'
+  | 'step-budget'
   | 'iteration-limit-exceeded'
   | 'recursion-depth-exceeded';
 
@@ -70,10 +73,12 @@ export interface DeadlineFrame {
  *
  * A nested span shares the object with its parent, so a step counts against
  * every budget that is active. When `left` goes below zero, `checkDeadline`
- * throws a timeout `CancellationError` with the budget's `owner` as its
- * attribution, the same error the expiry of a labelled `withTimeLimit` span
- * gives. So the code that armed the budget can catch it and fall back, and
- * every other catch block lets it through (`throwIfCallerCancellation`).
+ * throws a `CancellationError` with `cause: 'step-budget'` and the budget's
+ * `owner` as its attribution. It is a budget expiry like the expiry of a
+ * labelled `withTimeLimit` span, and `isTimeoutCancellation` answers `true`
+ * for both, so the code that armed the budget can catch it and fall back,
+ * and every other catch block lets it through (`throwIfCallerCancellation`);
+ * the distinct cause lets a host tell a deterministic budget from the clock.
  * Once spent, a budget stays spent: each later check throws again.
  */
 export interface StepBudget {
@@ -193,7 +198,7 @@ export function checkDeadline(
   }
   if (spent !== undefined)
     throw new CancellationError({
-      cause: 'timeout',
+      cause: 'step-budget',
       message: 'Step budget exhausted',
       attribution: spent.owner,
       // All the spans active now, as for an expired time.
@@ -222,11 +227,12 @@ export function checkDeadlineEvery(
 }
 
 /**
- * True when `e` is a `CancellationError` raised by an expired time budget
- * (`cause: 'timeout'`), as opposed to an abort signal, an iteration-limit or
- * recursion-depth breach, or any other error.
+ * True when `e` is a `CancellationError` raised by an expired budget — the
+ * wall clock of a span (`cause: 'timeout'`) or a spent step budget
+ * (`cause: 'step-budget'`) — as opposed to an abort signal, an
+ * iteration-limit or recursion-depth breach, or any other error.
  *
- * Only an expired time budget licenses a caller to convert a throw into a
+ * Only an expired budget licenses a caller to convert a throw into a
  * partial, in-band result; every other cancellation must propagate.
  *
  * Identified by NAME (and `cause`), never `instanceof`: plugin bundles
@@ -237,8 +243,22 @@ export function isTimeoutCancellation(e: unknown): boolean {
   return (
     e instanceof Error &&
     e.name === 'CancellationError' &&
-    (e as { cause?: unknown }).cause === 'timeout'
+    ((e as { cause?: unknown }).cause === 'timeout' ||
+      (e as { cause?: unknown }).cause === 'step-budget')
   );
+}
+
+/**
+ * Which budget an expired-budget cancellation names: `'step-budget'` for a
+ * spent step budget, `'timeout'` for everything else `isTimeoutCancellation`
+ * admits. The spelling every route writes into an error value or a
+ * diagnostic (`["Error", message, "step-budget"]`), so the Epsil, CLI and
+ * MCP routes agree on it.
+ */
+export function budgetCauseOf(e: unknown): 'timeout' | 'step-budget' {
+  return (e as { cause?: unknown }).cause === 'step-budget'
+    ? 'step-budget'
+    : 'timeout';
 }
 
 /**

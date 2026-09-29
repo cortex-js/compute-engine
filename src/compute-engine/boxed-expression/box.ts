@@ -2963,8 +2963,9 @@ function withSourceOffsets(
  * Identified by NAME, never `instanceof`: plugin bundles re-bundle engine
  * code, so a `CancellationError` crossing a bundle boundary is not an instance
  * of the host's class. `isTimeoutCancellation` is deliberately NOT reused —
- * it admits only `cause: 'timeout'`, and an abort or an iteration-limit breach
- * must propagate here for the same reason a timeout must.
+ * it admits only an expired budget (`cause: 'timeout'` or `'step-budget'`),
+ * and an abort or an iteration-limit breach must propagate here for the same
+ * reason a timeout must.
  */
 function isCancellation(e: unknown): boolean {
   return e instanceof Error && e.name === 'CancellationError';

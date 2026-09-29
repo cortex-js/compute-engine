@@ -2396,9 +2396,11 @@ export interface Expression {
    *
    * **Time and recursion limits**: if the evaluation runs inside an enclosing
    * {@linkcode IComputeEngine.withTimeLimit | ComputeEngine.withTimeLimit}
-   * span and exceeds its deadline, or
-   * exceeds the recursion limit, a `CancellationError` is thrown (its `cause`
-   * is `'timeout'` or `'recursion-depth-exceeded'`). Catch it to distinguish
+   * span and exceeds its deadline, spends an enclosing
+   * {@linkcode IComputeEngine.withStepBudget | ComputeEngine.withStepBudget}
+   * budget, or exceeds the recursion limit, a `CancellationError` is thrown
+   * (its `cause` is `'timeout'`, `'step-budget'` or
+   * `'recursion-depth-exceeded'`). Catch it to distinguish
    * an interrupted evaluation from a symbolic (inert) result.
    *
    */

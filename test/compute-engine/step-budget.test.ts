@@ -31,7 +31,7 @@ function thrown(fn: () => unknown): any {
 describe('the step budget of a span', () => {
   const ce = new ComputeEngine();
 
-  test('a spent budget throws a timeout with the label of its span', () => {
+  test('a spent budget throws a step-budget cancellation with the label of its span', () => {
     let checks = 0;
     const e = thrown(() =>
       ce._withBudget({ steps: 3, label: 'search' }, () => {
@@ -42,9 +42,11 @@ describe('the step budget of a span', () => {
       })
     );
     expect(checks).toBe(3);
+    // Since 2026-09-28 a spent step budget has its own cause, distinct from
+    // the wall clock's `'timeout'` (public `ce.withStepBudget`, Tycho 326).
     expect(e).toMatchObject({
       name: 'CancellationError',
-      cause: 'timeout',
+      cause: 'step-budget',
       message: 'Step budget exhausted',
       attribution: 'search',
     });
@@ -127,7 +129,7 @@ describe('the step budget of the Rubi driver', () => {
         driver.int(integrand, 'x')
       )
     );
-    expect(e).toMatchObject({ cause: 'timeout', attribution: 'caller' });
+    expect(e).toMatchObject({ cause: 'step-budget', attribution: 'caller' });
   });
 
   test('loadIntegrationRules passes its step budget on', () => {

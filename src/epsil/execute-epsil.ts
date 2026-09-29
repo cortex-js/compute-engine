@@ -9,6 +9,7 @@ import {
 } from '../math-json/utils.js';
 import { isLiteralParamName } from '../math-json/symbols.js';
 import {
+  budgetCauseOf,
   checkDeadline,
   isTimeoutCancellation,
   type CancellationCause,
@@ -188,7 +189,9 @@ function executeEpsilBatch(
         value: ce.box([
           'Error',
           { str: e instanceof Error ? e.message : 'Timeout exceeded' },
-          { str: 'timeout' },
+          // A spent step budget is a budget expiry too (the host's
+          // deterministic guard); the error value names which one fired.
+          { str: budgetCauseOf(e) },
         ]),
         diagnostics,
         valueRange: [0, source.length],
@@ -457,7 +460,7 @@ function executeEpsilBatch(
     // per-construct configuration, not a shared budget: the next statement
     // gets a fresh allowance, so a breach there is an ordinary error value
     // and the program continues (see `docs/TIMEOUT-MODEL.md` §9).
-    if (cancellation === 'timeout') break;
+    if (cancellation === 'timeout' || cancellation === 'step-budget') break;
 
     // "Did you mean?" — calling an unknown function stays *silently* symbolic
     // (an inert `["Quartile", …]` value), so the user never learns it did not
@@ -1033,6 +1036,7 @@ function cancellationCause(e: unknown): CancellationCause | undefined {
   const cause = (e as { cause?: unknown }).cause;
   if (
     cause === 'timeout' ||
+    cause === 'step-budget' ||
     cause === 'iteration-limit-exceeded' ||
     cause === 'recursion-depth-exceeded'
   )
