@@ -471,7 +471,7 @@ characters("héllo")
 
 `(any+) -> unknown`
 
-Return the first operand that is not ABSENT (`Missing`, `Undefined` or `NaN`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent).
+Return the first operand that is not ABSENT (`Missing`, `Undefined` or `NaN`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Indeterminate` is a value and is not absent.
 
 ```epsil
 Coalesce(missing, NaN, 3, 4)
@@ -828,7 +828,7 @@ isError(1 + 1)
 
 MathJSON `IsMissing` · `(any) -> boolean`
 
-True if the value is ABSENT — the `Missing` or `Undefined` symbol, or a `NaN` number (regardless of provenance). R’s `is.na` (`TRUE` for both `NA` and `NaN`). There is no NaN-specific test operator (R’s `is.nan`).
+True if the value is ABSENT — the `Missing` or `Undefined` symbol, or a `NaN` number (regardless of provenance). R’s `is.na` (`TRUE` for both `NA` and `NaN`). There is no NaN-specific test operator (R’s `is.nan`). `Indeterminate`, the exact answer to an indeterminate form such as `0/0`, is a value and is not absent.
 
 ```epsil
 [isMissing(missing), isMissing(NaN), isMissing(0)]
@@ -937,7 +937,7 @@ The absence of a value; the sole member of the unit type.
 
 MathJSON `NumberFrom` · `(string, base: (integer | string)?) -> number`
 
-NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN". The integer part may be omitted before a fraction (".5" is 0.5); a trailing "." with no fraction digits ("5.") is not accepted. Any other text, including "", is an error value (never NaN).
+NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". The integer part may be omitted before a fraction (".5" is 0.5); a trailing "." with no fraction digits ("5.") is not accepted. Any other text, including "", is an error value (never NaN).
 
 NumberFrom(s, base): the integer `s` denotes in `base` (2 to 36); only integer numerals are accepted.
 

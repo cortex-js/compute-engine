@@ -220,6 +220,21 @@ readonly NaN: Expression;
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~Indeterminate~~ {#indeterminate-1}
+
+```ts
+readonly Indeterminate: Expression;
+```
+
+The exact answer to an indeterminate form such as `0/0`: a number with
+no value. Its double value is `NaN`, but it is a different value from
+`NaN`, which is the result of a floating-point computation that failed.
+Its numeric approximation (`.N()`) is `NaN`.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~PositiveInfinity~~ {#positiveinfinity-2}
 
 ```ts
@@ -3880,6 +3895,7 @@ type OperandStructure =
   name: string;
   system: boolean;
   inferred: boolean;
+  local: boolean;
  }
   | {
   kind: "string";
@@ -3930,6 +3946,7 @@ holding an expression.
   `name`: `string`;
   `system`: `boolean`;
   `inferred`: `boolean`;
+  `local`: `boolean`;
  \}
 
 #### OperandStructure.system?
@@ -3955,6 +3972,19 @@ Present (`true`) when the symbol's recorded type was INFERRED
 `Multiply` and `List`-fold handlers consult when deciding how much
 to trust an operand's type. Lives on the structure node, not in
 `OperandFacts`: it is a property of this symbol, not of a type.
+
+#### OperandStructure.local?
+
+```ts
+optional local?: boolean;
+```
+
+Present (`true`) when the symbol is a block-local binding a `Block`
+hoisted for a `let` or a block-introducing assignment, still waiting
+for the statement that gives it a value. The `List`-fold handler
+reads it to keep the generic-symbol fold (an unknown bare symbol is
+a number) for FREE symbols only: such a local is not a generic
+value, its type is simply not known yet.
 
 \{
   `kind`: `"string"`;
@@ -10188,6 +10218,21 @@ readonly NaN: Expression;
 
 <MemberCard>
 
+##### IComputeEngine.Indeterminate {#indeterminate}
+
+```ts
+readonly Indeterminate: Expression;
+```
+
+The exact answer to an indeterminate form such as `0/0`: a number with
+no value. Its double value is `NaN`, but it is a different value from
+`NaN`, which is the result of a floating-point computation that failed.
+Its numeric approximation (`.N()`) is `NaN`.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.PositiveInfinity {#positiveinfinity-1}
 
 ```ts
@@ -12650,13 +12695,39 @@ The  value of this expression is &lt;= 0, same as `isLessEqual(0)`
 readonly isNaN: boolean | undefined;
 ```
 
-If true, the value of this expression is "Not a Number".
+If true, the value of this expression is a number with no value: either
+`NaN` or `Indeterminate`.
 
-A value representing undefined result of computations, such as `0/0`,
-as per the floating point format standard IEEE-754.
+`NaN` ("Not a Number", from the floating point format standard IEEE-754)
+is the result of a floating-point computation with no value, such as
+`0.0/0.0`, and the marker of an absent numeric operand. `Indeterminate`
+is the result of an exact form with no value, such as `0/0`. Both report
+`isNaN === true`; `isIndeterminate` tells them apart.
 
 Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
 number).
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.isIndeterminate {#isindeterminate}
+
+```ts
+readonly isIndeterminate: boolean;
+```
+
+If true, this expression is the `Indeterminate` number literal
+(`ce.Indeterminate`): the exact answer to an indeterminate form such as
+`0/0`, a number with no value.
+
+Its double value is `NaN`, so `isNaN` is also true. It differs from the
+`NaN` literal, which is the result of a floating-point computation that
+failed: the two are different values (`isSame` is false between them).
+A numeric approximation (`.N()`) of `Indeterminate` is `NaN`.
+
+`false` for every other expression, including an unevaluated expression
+whose value would be `Indeterminate`.
 
 </MemberCard>
 
@@ -18318,6 +18389,30 @@ object identity is not a reliable test.
 
 </MemberCard>
 
+<MemberCard>
+
+### INDETERMINATE\_VALUE {#indeterminate_value}
+
+```ts
+const INDETERMINATE_VALUE: Readonly<{
+  indeterminate: true;
+}>;
+```
+
+The value carried by the type of the `Indeterminate` literal: the exact
+answer to an indeterminate form (such as `0/0`), a number with no value.
+Its double value is `NaN`, like the IEEE `NaN` literal, but the two are
+DIFFERENT values: `NaN` is the result of a floating-point failure and
+`Indeterminate` the result of an exact computation. A JavaScript `NaN`
+cannot tell them apart, so this frozen tagged object is the value of the
+`Indeterminate` value type. It widens to `nan`, like the `NaN` value
+type. Test for it with [`isIndeterminateValue`](#isindeterminatevalue), which reads the
+TAG, for the reason given for [`COMPLEX_INFINITY_VALUE`](#complex_infinity_value).
+
+Provenance: `docs/plans/2026-09-28-indeterminate-value.md`.
+
+</MemberCard>
+
 ----
 
 <MemberCard>
@@ -18330,6 +18425,24 @@ function isComplexInfinityValue(v): v is Readonly<{ complexInfinity: true }>
 
 True if `v` is the [`COMPLEX_INFINITY_VALUE`](#complex_infinity_value) sentinel, i.e. the
 value of the `~oo` value-literal type. Reads the tag, never the identity.
+
+##### v
+
+`unknown`
+
+</MemberCard>
+
+<MemberCard>
+
+### isIndeterminateValue() {#isindeterminatevalue}
+
+```ts
+function isIndeterminateValue(v): v is Readonly<{ indeterminate: true }>
+```
+
+True if `v` is the [`INDETERMINATE_VALUE`](#indeterminate_value) sentinel, i.e. the
+value of the `Indeterminate` value-literal type. Reads the tag, never the
+identity.
 
 ##### v
 
