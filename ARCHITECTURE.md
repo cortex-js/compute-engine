@@ -248,7 +248,7 @@ trade exactness at a measure-zero point for a simpler canonical form.
 
 The cancellation **asserts genericity**: `x/x → 1` treats `x` as a generic
 (hence non-zero) value. This is why the fold survives a later substitution —
-`ce.parse('\\frac{x}{x}').subs({ x: 0 })` is `1`, not `NaN`, because the `.json`
+`ce.parse('\\frac{x}{x}').subs({ x: 0 })` is `1`, not `Indeterminate`, because the `.json`
 is already the literal `1` before the substitution reaches it. To recover the
 true value at an excluded point, keep the expression uncanonicalized
 (`{ canonical: false }`) and evaluate after substituting.
@@ -258,10 +258,11 @@ carry a free variable. A numerator or denominator that is a *constant
 expression* is never collapsed by the generic rules; it is evaluated instead, so
 a provably-zero constant denominator surfaces the true indeterminate:
 
-- `0 / (1 − 1)` canonicalizes to `NaN` — the denominator evaluates to `0`,
-  giving `0/0` — **not** to `0`: the `0/x → 0` fold does not reach a constant
-  zero.
-- `(1 − 1) / 0` and `0 / 0` likewise canonicalize to `NaN`.
+- `0 / (1 − 1)` canonicalizes to `Indeterminate` — the denominator evaluates
+  to `0`, giving `0/0` — **not** to `0`: the `0/x → 0` fold does not reach a
+  constant zero.
+- `(1 − 1) / 0` and `0 / 0` likewise canonicalize to `Indeterminate`. With a
+  float operand (`0.0 / 0.0`) the canonical form is `NaN`.
 - `(π + 1)/(π + 1)` is left as a fraction at canonicalization (a constant, so the
   identical-operand fold is skipped); it reduces to `1` only under `.simplify()`,
   which first proves the denominator non-zero.
@@ -357,7 +358,8 @@ Every operator `type` handler follows these rules:
 
 The **values** type onto the new names: `oo` and `-oo` carry the singleton
 value-literal types `+oo`/`-oo` (widening to `infinity`); the value `~oo`
-carries the `~oo` singleton (also below `infinity`); NaN types `nan`; a value
+carries the `~oo` singleton (also below `infinity`); NaN and `Indeterminate`
+type `nan`; a value
 with an infinite real or imaginary part and a finite other part (`∞ + i`)
 types `infinity`. Every spelling of the same value — the `ComplexInfinity`
 constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`, `Gamma(-2)`,
@@ -366,6 +368,15 @@ constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`, `Gamma(-2)`,
 `src/common/type/primitive.ts`), and the value predicate for it is
 `isExtendedReal` — the former `isReal`, renamed when bare `real` became a
 finiteness promise; NaN answers `false` to it.
+
+Three non-finite results are kept apart. A pole is `~oo` (`5/0`, `Gamma(0)`).
+An exact form with no value (`0/0`, `0·∞`, `∞ − ∞`, `0^0`, `Mod(5, 0)`) is
+`Indeterminate` on the exact route. A floating-point failure or an absent
+numeric operand is `NaN` (`0.0/0.0`, `Missing + 2`), and `.N()` and every
+compiled target answer `NaN` for `Indeterminate` too. `Indeterminate` and
+`NaN` are both number literals with `isNaN` true and both type `nan`; only
+`Indeterminate` has `isIndeterminate` true, and `isSame` does not match one
+with the other (design: `docs/plans/2026-09-28-indeterminate-value.md`).
 
 On a float-only compile target, a `~oo` lowers to IEEE `+Infinity` (ruled
 2026-08-28): the pole's magnitude survives, and the direction `~oo` never had

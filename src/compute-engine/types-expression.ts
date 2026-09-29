@@ -2119,10 +2119,14 @@ export interface Expression {
   isGreaterEqual(other: number | Expression): boolean | undefined;
 
   /**
-   * If true, the value of this expression is "Not a Number".
+   * If true, the value of this expression is a number with no value: either
+   * `NaN` or `Indeterminate`.
    *
-   * A value representing undefined result of computations, such as `0/0`,
-   * as per the floating point format standard IEEE-754.
+   * `NaN` ("Not a Number", from the floating point format standard IEEE-754)
+   * is the result of a floating-point computation with no value, such as
+   * `0.0/0.0`, and the marker of an absent numeric operand. `Indeterminate`
+   * is the result of an exact form with no value, such as `0/0`. Both report
+   * `isNaN === true`; `isIndeterminate` tells them apart.
    *
    * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
    * number).

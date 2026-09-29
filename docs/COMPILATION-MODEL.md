@@ -23,6 +23,16 @@ runtime spellings of the same pole agree. `NaN` remains reserved for the
 genuinely indeterminate (`0/0`, `0 · ∞`) and for NaN propagation under
 Contract B's `propagate` policy.
 
+For an indeterminate form the two routes spell the answer differently, and
+the compiled output did not change for it. Since 2026-09-29 the
+interpreter's exact route answers `Indeterminate` for an exact form with no
+value (`0/0`, `0 · ∞`, `0^0`, `Mod(x, 0)`), and answers `NaN` for the same
+form with a float operand and under `.N()`. Every compiled target has only
+the IEEE `NaN`, so it answers `NaN` for both: an `Indeterminate` constant
+compiles to `NaN` in JavaScript, `np.nan` in Python and `_gpu_nan()` in the
+shaders. This agrees with the interpreter's numeric route. Design:
+`docs/plans/2026-09-28-indeterminate-value.md`.
+
 The projection is applied where the pole is spelled, not at the result
 boundary, so a SIGNED cofactor can give the two routes different signs:
 `-2 · (-1)!` folds as a whole to the interpreter's `~oo` and embeds

@@ -47,7 +47,9 @@ value type ever admits it.
 
 **`NaN` — the in-band numeric indeterminacy value.** `NaN` means *the
 mathematics was performed and has no answer in the numeric codomain*:
-`Mod(1, 0)`, `0 * oo`. It carries no provenance and follows IEEE 754
+`Mod(1, 0)`, `0 * oo` (on the exact route these two answer the second
+member of `nan`, `Indeterminate`, described below; with a float operand or
+under `.N()` they answer `NaN`). It carries no provenance and follows IEEE 754
 semantics: quiet, absorbing through numeric operations, `NaN == NaN` is
 `False`. Its lattice position: `NaN` is admitted **only by the top type
 `number` and by its own type `nan`** — every other numeric type excludes
@@ -62,6 +64,29 @@ therefore decomposes with nothing left over —
 `src/common/type/types.ts` documents the numeric tower.) By the missing-value ruling of 2026-07-24 (next paragraph) `NaN`
 also serves as the *absence* marker inside numeric domains.
 
+**`Indeterminate` — the exact-route answer to a form with no value**
+(shipped 2026-09-29). The type `nan` has two members. `NaN` is the
+floating-point failure and the numeric absence marker, as described above.
+`Indeterminate` is the answer of the EXACT route to a form that has no
+value: `0/0`, `∞/∞`, `0·∞`, `∞ − ∞`, `0^0`, `∞^0`, `1^∞`, `(−1)^±∞`,
+`Mod(x, 0)`, `Remainder(x, 0)`, `Fract(±∞)`, `Log(1, 1)`, a special
+function at an infinite point where it has no limit (`Gamma(−∞)`), and
+`Variance([5])`. The same form with a float operand (`0.0/0.0`,
+`Mod(5.0, 0)`), every form under `.N()` or
+`evaluate({numericApproximation: true})`, and every compiled target answer
+`NaN`: a float operand makes a numeric result a float, and the final step
+of numeric evaluation maps `Indeterminate` to `NaN`. Both values are number
+literals with `isNaN` true; only `Indeterminate` has `isIndeterminate`
+true. `isExact` is `false` for both, so a numeric function of either still
+evaluates and does not stay inert. `isSame` holds for each value only to
+itself (`Indeterminate.isSame(NaN)` is `false`), and `Equal` with either on
+a side is `False`. The spellings are the MathJSON symbol
+`"Indeterminate"`, the LaTeX `\operatorname{Indeterminate}` and the Epsil
+name `Indeterminate`. A pole stays `~oo` (`5/0`, `Gamma(0)`), and an absent
+operand still gives `NaN` (`Missing + 2`, `Length(Missing)`). The design
+and the list of switched producers are in
+`docs/plans/2026-09-28-indeterminate-value.md`.
+
 **`Missing` — the position-preserving absent datum.** For non-numeric
 domains, "there is no element there" is answered by the `Missing` symbol
 (type `missing`), with Kleene three-valued comparison semantics. In
@@ -70,7 +95,12 @@ because compile targets are float-only and `NaN` propagates there for
 free, whereas a symbolic marker cannot compile. This is an accepted,
 deliberate **information loss** and should be understood as such:
 `IsMissing(NaN) → True` means the engine cannot distinguish "a numeric
-datum was absent" from "a numeric computation produced `NaN`". (The
+datum was absent" from "a numeric computation produced `NaN`". The loss
+applies to `NaN` only: an exact indeterminate form answers `Indeterminate`,
+which is a value and not an absence, so `IsMissing(0/0)` and
+`IsMissing(Indeterminate)` are `False` under `evaluate()`. Under `.N()` the
+operand is numericized to `NaN` before `IsMissing` reads it, so there the
+answer is `True`. (The
 propagation behavior is analogous to Julia's `missing`; note that Julia
 itself keeps `missing` as a distinct singleton type separate from `NaN` —
 the conflation is this engine's trade, made for the compile-target
@@ -194,7 +224,8 @@ re-check whenever new evidence settles.
    mismatch, an ill-formed index kind are contract violations (`requires`
    conditions, §4) and belong to rules 1/6. The marker is a function of the
    declared result type: `NaN` when the result type is numeric
-   (`Mod(1, 0) → NaN`), `Missing` when it is a settled non-numeric type
+   (`Mod(1, 0) → Indeterminate` on the exact route and `NaN` under `.N()`,
+   both members of `nan`, §1), `Missing` when it is a settled non-numeric type
    (carried through comparisons by Kleene semantics, discharged by
    `IsMissing`/`Coalesce`), the union of the two when it is
    indeterminate. This is conceptually the same `marker(T)` rule the
@@ -322,6 +353,31 @@ Aggregates propagate it (`Max(1, NaN, 3) → NaN`) and absence-discharge
 operators treat it as absent (`IsMissing(NaN) → True`) — with the
 information loss stated in §1.
 
+**`Indeterminate` propagates as `NaN` does, and keeps its name while no
+float is involved** (shipped 2026-09-29). The propagate gate is the check
+that runs before the handler when an operand of a `propagate` slot is
+`NaN`-valued. It answers `Indeterminate` when every `NaN`-valued operand is
+`Indeterminate` and no operand is inexact, and `NaN` otherwise:
+`Sqrt(Indeterminate)`, `Sin(Indeterminate)` and `Factorial(Indeterminate)`
+are `Indeterminate`, and `Arctan2(Indeterminate, NaN)` is `NaN`. The
+`reject` policy is unchanged (an error). `Add` and `Multiply` are lazy and
+do not run the gate, so their fold classes `Sum` and `Product` apply the
+same rule themselves: `Indeterminate + 1` and `2·Indeterminate` are
+`Indeterminate`; `Indeterminate + 1.5` and `Indeterminate·NaN` are `NaN`.
+The reducers that do not run the gate — `Max`, `Min`, the statistics
+reducers (`Mean`, `Median`, the variance family) and the quantile family —
+apply the rule in their handlers: `Max(1, Indeterminate)` and
+`Mean([1, Indeterminate])` are `Indeterminate`, and
+`Max(Indeterminate, NaN)` is `NaN`. Any other handler that receives an
+`Indeterminate` operand computes through its numeric kernel and answers
+`NaN` (`GCD(Indeterminate, 2)` is `NaN`). The absence-discharge operators
+do not treat `Indeterminate` as absent: `IsMissing(Indeterminate)` is
+`False` and `Coalesce(Indeterminate, 5)` is `Indeterminate`, where
+`IsMissing(NaN)` is `True` and `Coalesce(NaN, 5)` is `5`. Comparisons
+(`Equal`, `Less`) with `Indeterminate` are `False`, and a Boolean context
+(`And`, `Not`, `If`) rejects it with `incompatible-type`, as for `NaN`.
+Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4 and §5.
+
 **`Missing` propagates by Kleene** in comparisons (`Less(Missing, 1) →
 Missing`) and is never erased. In a *numeric* slot, `Missing` is
 normalized to `NaN` at the boundary (numeric domains absorb absence, per
@@ -383,6 +439,9 @@ all run is `isAbsentValue`
 (`src/compute-engine/boxed-expression/type-guards.ts`), which now shares its
 absence-SYMBOL choke point, `isAbsentSymbol`, with the numeric gate's
 `isAbsentScalarSymbol`; `isAbsentValue` adds the `NaN` arm on top of it.
+Since 2026-09-29 that arm excludes `Indeterminate` (a `NaN`-valued literal
+that is not absent), so none of the operators that call `isAbsentValue`
+reads an exact indeterminate form as a missing datum.
 
 Two families are deliberately NOT covered, because their scalar arm reads the
 `Missing` symbol BY NAME on a separate Kleene route rather than through that
@@ -633,7 +692,8 @@ is mandatory:
    (rule 4), so a non-numeric-result operator handles or rejects.
 3. **A partiality declaration.** Being inside the carrier types does
    **not** prove success — `Mod(1, 0)` has both arguments proven finite
-   integers and still has no answer; `0 · oo` makes `NaN` from
+   integers and still has no answer; `0 · oo` makes a `nan` value
+   (`Indeterminate` on the exact route, `NaN` under `.N()`) from
    `NaN`-free inputs. Two *distinct* kinds of condition attach to a
    declaration, because they feed different channels — the distinction
    is central to the taxonomy:
@@ -978,6 +1038,18 @@ member of `infinity`. This replaces the settled placement premise
 above: the directed infinities no longer inhabit `real`/`complex`, and
 the pins on `matches('real')` for `±oo` flipped with it.
 
+Amendment — the `Indeterminate` value
+(`docs/plans/2026-09-28-indeterminate-value.md`), decided 2026-09-28 and
+shipped 2026-09-29. The word "singleton" above no longer applies to `nan`:
+the type `nan` has two members, `NaN` (the floating-point failure and the
+numeric absence marker) and `Indeterminate` (the exact-route answer to a
+form with no value, §1). Each literal has its own value type, printed
+`NaN` and `Indeterminate`, and both value types widen to `nan`, so
+`matches('nan')` is `true` for both and a list `[1, 0/0]` is still typed
+`list<integer | nan^2>`. No type-keyed guard changed, because the type
+`nan` itself did not change; the decomposition
+`number = complex ⊔ infinity ⊔ nan` stands.
+
 ## 6. Interpreter vs. compiled code — Settled: compilation is fail-closed
 
 Compilation policy is owned by `docs/COMPILATION-MODEL.md`, which is
@@ -1006,6 +1078,11 @@ maps its channels onto it:
   value.
 - Any native-semantics escape hatch must be an **explicitly named unsafe
   mode**, chosen by the caller — never a silent default.
+- The compiled targets have only the IEEE `NaN`, so an `Indeterminate`
+  constant and every exact indeterminate form compile to the target's
+  `NaN` (`NaN` in JavaScript, `np.nan` in Python, `_gpu_nan()` in the
+  shaders). This agrees with `.N()`, which also answers `NaN` for
+  `Indeterminate` (§1), so it is not a divergence.
 
 An earlier revision of this document proposed that compiled code "sheds
 the Error channel" and leaves residual failures to target semantics; that
@@ -1035,7 +1112,7 @@ numericization (§1) — it is not rule-7 inertness.
 | `Factorial(-2)` | inert | `~oo` | `~oo` | conforms (rule 3) |
 | `Arcsin(2)` | exact, unreduced | exact, unreduced | complex value | conforms (rule 3) |
 | `Ln(0)` | exact, unreduced | `-oo` | `-oo` | conforms (rule 3) |
-| `Mod(1, 0)` | inert | `NaN` | `NaN` | conforms (rule 4) |
+| `Mod(1, 0)` | inert | `Indeterminate` | `NaN` | conforms (rule 4; `Indeterminate` since 2026-09-29, §1) |
 | `At([1,2], 99)` | inert | `NaN` | `NaN` | conforms (rule 5, numeric elements) |
 | `First([])` | inert | `Missing` | `Missing` | conforms (rule 5) |
 | `Sin(NaN)` | inert | `NaN` | `NaN` | conforms (§4 propagate) |
@@ -1232,7 +1309,8 @@ answer and the fix landed. An entry with no FIXED date is still open.
   `Factorial` negative-integer pole and the GPU `Gamma` pole guard were
   aligned (they answered `NaN`, so the same pole spelled differently by
   fold and by runtime). `NaN` stays reserved for the indeterminate
-  (`0/0`, `0·∞`) and for `propagate`. Documented as the float-target
+  (`0/0`, `0·∞`, which the interpreter's exact route answers with
+  `Indeterminate` since 2026-09-29) and for `propagate`. Documented as the float-target
   carve-out in `docs/COMPILATION-MODEL.md`; conformed pins in the suite.
 - **RULED 2026-08-30 (pole-encoding extension, shipped): the projection
   also applies at the argument boundary** — a `~oo` value passed into

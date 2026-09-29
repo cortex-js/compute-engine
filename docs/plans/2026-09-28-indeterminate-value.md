@@ -15,7 +15,7 @@ exact-lane funnel is NOT switched (the user confirmed the widened D5 on
 spec review (one reviewer, 18 findings, all folded in; the second reviewer
 was unavailable). Proposed by the reporter of GitHub issue #355
 (enumeratio); the direction was accepted by the user on 2026-09-28, with the
-design written before any code. Phase 0 done 2026-09-28 (results in §6; they correct §2 and found eight places where §4–§5 could not be implemented as first written, resolved in the amendment above). Phase 1 (the value, no producer switched) done 2026-09-28. Phase 2 (the exact producers switched) done 2026-09-29, results in §6 Phase 2. Every fact in §2 was read from the
+design written before any code. Phase 0 done 2026-09-28 (results in §6; they correct §2 and found eight places where §4–§5 could not be implemented as first written, resolved in the amendment above). Phase 1 (the value, no producer switched) done 2026-09-28. Phase 2 (the exact producers switched) done 2026-09-29, results in §6 Phase 2. Phase 3 (the documents) done 2026-09-29, results in §6 Phase 3; the Tycho notice and the reply on #355 are drafted and not yet sent. Every fact in §2 was read from the
 code at commit `af09cc1c` (all paths under `src/compute-engine/` unless
 stated).
 
@@ -695,6 +695,33 @@ of the fold classes and reducers) and §5 (two members of
 reference; a Tycho notice (Tycho reads `isNaN` and the compiled `NaN`, so
 nothing breaks, but a displayed `Indeterminate` symbol is new to their
 formatter). Reply on #355.
+
+**Phase 3 results (done 2026-09-29).** Every statement added was probed
+against the Phase 2 tree. Amended: `docs/ERROR-MODEL.md` §1 (a paragraph
+that introduces `Indeterminate` as the second member of `nan`; the
+`IsMissing(NaN)` information loss applies to `NaN` only, with the `.N()`
+exception: the operand is numericized first, so
+`IsMissing(Indeterminate).N()` is `True`), §2 rule 4 and §4 (the `Mod(1, 0)`
+and `0 · oo` examples), §3 (the forwarding rule of the gate, the fold classes
+and the reducers; the absence-discharge operators and `isAbsentValue`
+exclude `Indeterminate`), §5 (an amendment paragraph: `nan` has two members),
+§6 (the compiled targets spell both values as IEEE `NaN`) and §7 (the
+`Mod(1, 0)` row and the pole-encoding entry); `ARCHITECTURE.md`, the
+non-finite typing section (`0 / (1 − 1)`, `(1 − 1) / 0` and `0 / 0`
+canonicalize to `Indeterminate`; a paragraph that separates `~oo`,
+`Indeterminate` and `NaN`); `docs/COMPILATION-MODEL.md`, the pole-encoding
+carve-out (the interpreter's exact route answers `Indeterminate`, every
+compiled target answers `NaN`, compiled output unchanged). Outside the
+tracked tree: the published guides `doc/12-guide-numerical-evaluations.md`
+(a section "Indeterminate Forms") and `doc/80-reference-arithmetic.md` (an
+`Indeterminate` paragraph next to `NaN`, and the `0/0`, `∞ − ∞`, `∞·0`
+examples corrected). Both guides also claimed that `Sin(+∞)` stays
+symbolic; it is an `incompatible-type` error (the trigonometric carrier is
+finite, pinned in `boxing-seam-canonical-heads.test.ts`), so the example
+became `Arctan(+∞)`, which evaluates to the exact `π/2`. The Epsil reference was already
+amended in Phase 2. The bullet for the "Common API Traps" section of
+`CLAUDE.md` (a gitignored file) is drafted with the Tycho notice and the
+#355 reply.
 
 ## 7. Decisions for the user
 
