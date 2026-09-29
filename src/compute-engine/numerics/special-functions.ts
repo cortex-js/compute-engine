@@ -3,7 +3,10 @@ import type { IComputeEngine as ComputeEngine } from '../global-types.js';
 import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
-import { hurwitzZetaComplex } from './numeric-complex.js';
+import {
+  hurwitzZetaComplex,
+  hypergeometric2F1Complex,
+} from './numeric-complex.js';
 import { bernoulliPolynomialRational } from './bernoulli.js';
 
 const gammaG = 7;
@@ -203,7 +206,8 @@ function upperGammaNegIntReal(s: number, z: number): number {
  *
  * Regime split (NR §6.2), plus an E₁-seeded recurrence for the
  * non-positive-integer s where the Γ(s) − γ(s,z) decomposition is invalid:
- *   - s a non-positive integer → downward recurrence from Γ(0,z) = E₁(z)
+ *   - s a non-positive integer → Legendre continued fraction for z ≥ 1,
+ *     downward recurrence from Γ(0,z) = E₁(z) for z < 1
  *   - z < s + 1                → Γ(s,z) = Γ(s) − γ(s,z) (lower Tricomi series)
  *   - z ≥ s + 1                → Legendre continued fraction
  */
@@ -212,7 +216,15 @@ export function incompleteGammaUpper(s: number, z: number): number {
   if (z < 0) return NaN; // complex result — defer to the complex kernel
   if (z === 0) return gamma(s); // Γ(s,0) = Γ(s) (∞ at non-positive integer s)
 
-  if (Number.isInteger(s) && s <= 0) return upperGammaNegIntReal(s, z);
+  // For a non-positive integer s, the downward recurrence from E₁(z)
+  // subtracts two nearly equal numbers once z is more than a few units (at
+  // s = −15, z = 60 the relative error was 3e-2). The continued fraction is
+  // accurate there: measured against mpmath for s from 0 to −30 and
+  // 1 ≤ z ≤ 200 (and at s = −100 for z = 1, 3, 50), the relative error is
+  // below 4e-14. The recurrence stays
+  // for z < 1, where it is accurate and the fraction converges slowly.
+  if (Number.isInteger(s) && s <= 0)
+    return z >= 1 ? upperGammaCFReal(s, z) : upperGammaNegIntReal(s, z);
   if (z < s + 1) return gamma(s) - lowerGammaSeriesReal(s, z);
   return upperGammaCFReal(s, z);
 }
@@ -4639,25 +4651,69 @@ function isNonPositiveInteger(x: number): boolean {
 }
 
 /**
- * Direct Gauss series Σ (a)ₙ(b)ₙ/((c)ₙ n!) zⁿ. Assumes the caller has
- * established convergence (|z| < 1, or a terminating parameter).
+ * The Gauss series Σ (a)ₙ(b)ₙ/((c)ₙ n!)·zⁿ and `big`, the magnitude of its
+ * largest term. The sum is NaN when the series has not converged within
+ * `maxTerms` terms, unless `polynomial` (the last of `maxTerms` terms is
+ * then the last term). A small term ends the sum only from the index
+ * `gauss2F1SeriesStart` on, since before it the terms can grow again.
  */
+function gauss2F1SeriesBig(
+  a: number,
+  b: number,
+  c: number,
+  z: number,
+  maxTerms = 10_000,
+  polynomial = false
+): { sum: number; big: number } {
+  const start = gauss2F1SeriesStart(a, b, c, z);
+  let term = 1;
+  let sum = 1;
+  let big = 1;
+  for (let n = 0; n < maxTerms; n++) {
+    const ratio = ((a + n) * (b + n) * z) / ((c + n) * (n + 1));
+    term *= ratio;
+    // A term of exactly 0 ends a polynomial (a + n or b + n is 0); any
+    // other 0 is an underflow, which ends the sum only from `start` on.
+    if (term === 0) {
+      const ends = a + n === 0 || b + n === 0 || n >= start;
+      return { sum: ends ? sum : NaN, big };
+    }
+    big = Math.max(big, Math.abs(term));
+    sum += term;
+    // A small term ends the sum only while the terms decrease: just after
+    // n = −c the terms can grow again from a very small value.
+    if (
+      n >= start &&
+      Math.abs(ratio) < 1 &&
+      Math.abs(term) <= Number.EPSILON * Math.abs(sum)
+    )
+      return { sum, big };
+  }
+  return { sum: polynomial ? sum : NaN, big };
+}
+
+// The largest ratio of the largest term to the result that the machine
+// ₂F₁ kernel accepts: about 10 correct digits. A result with more
+// cancellation is evaluated by `hypergeometric2F1Complex` instead, which
+// tries other transformations and returns NaN when none is accurate.
+const GAUSS_2F1_MAX_LOSS = 1e6;
+
+// The largest ratio of a part of the connection formula at 1−z to the
+// result that the machine ₂F₁ kernel accepts (see `hypergeometric2F1Real`).
+const CONNECTION_2F1_MAX_LOSS = 1e3;
+
+/** The Gauss series, or NaN when it did not converge or cancels too much. */
 function gauss2F1Series(
   a: number,
   b: number,
   c: number,
   z: number,
-  maxTerms = 10_000
+  maxTerms = 10_000,
+  polynomial = false
 ): number {
-  let term = 1;
-  let sum = 1;
-  for (let n = 0; n < maxTerms; n++) {
-    term *= ((a + n) * (b + n) * z) / ((c + n) * (n + 1));
-    if (term === 0) return sum; // terminating (polynomial) case
-    sum += term;
-    if (n > 2 && Math.abs(term) <= Number.EPSILON * Math.abs(sum)) return sum;
-  }
-  return sum;
+  const { sum, big } = gauss2F1SeriesBig(a, b, c, z, maxTerms, polynomial);
+  const scale = sum === 0 ? 1 : Math.abs(sum);
+  return big <= GAUSS_2F1_MAX_LOSS * scale ? sum : NaN;
 }
 
 /**
@@ -4677,6 +4733,26 @@ export function hypergeometric2F1(
   c: number,
   z: number
 ): number {
+  const r = hypergeometric2F1Real(a, b, c, z);
+  if (!Number.isNaN(r) || [a, b, c, z].some(Number.isNaN) || z >= 1) return r;
+  // The real formulas declined (no convergence, or too much cancellation):
+  // the complex kernel tries the other transformations, and its value is
+  // real for real parameters and z < 1.
+  const v = hypergeometric2F1Complex(
+    new Complex(a, 0),
+    new Complex(b, 0),
+    new Complex(c, 0),
+    new Complex(z, 0)
+  );
+  return v.im === 0 ? v.re : NaN;
+}
+
+function hypergeometric2F1Real(
+  a: number,
+  b: number,
+  c: number,
+  z: number
+): number {
   if ([a, b, c, z].some(Number.isNaN)) return NaN;
 
   // Terminating cases: a or b ∈ {0, −1, −2, …} → polynomial of degree −a/−b
@@ -4687,7 +4763,8 @@ export function hypergeometric2F1(
     // Pole at c unless the series terminates before reaching it
     if (nTerms === Infinity || nTerms > -c) return NaN;
   }
-  if (nTerms !== Infinity) return gauss2F1Series(a, b, c, z, nTerms + 1);
+  if (nTerms !== Infinity)
+    return nTerms > 1_000_000 ? NaN : gauss2F1Series(a, b, c, z, nTerms, true);
 
   if (z === 0) return 1;
   if (z === 1) {
@@ -4700,7 +4777,9 @@ export function hypergeometric2F1(
 
   if (z < 0) {
     // Pfaff: ₂F₁(a,b;c;z) = (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1)), maps z<0 → (0,1)
-    return Math.pow(1 - z, -a) * hypergeometric2F1(a, c - b, c, z / (z - 1));
+    return (
+      Math.pow(1 - z, -a) * hypergeometric2F1Real(a, c - b, c, z / (z - 1))
+    );
   }
 
   if (z <= 0.5) return gauss2F1Series(a, b, c, z);
@@ -4716,21 +4795,40 @@ export function hypergeometric2F1(
     // beyond it rather than returning a low-precision answer. Extends the
     // former z ≤ 0.95 gate to ~0.999, closing the integer-(c−a−b) gap for
     // z ∈ (0.95, 1) and its Pfaff images z ≲ −19. (NU-P1-2)
+    //
+    // The count starts where the terms stop growing (`gauss2F1SeriesStart`,
+    // about 900 for ₂F₁(102, 1; 2; 0.9)); from twice that index on, the
+    // ratio of consecutive terms is at most about (1+z)/2. Counting from
+    // n = 0 with the rate z instead stopped ₂F₁(102, 1; 2; 0.9) after
+    // about 400 terms, at 1.15e87 instead of 1.10e99.
     if (z < 1) {
-      const termsNeeded = Math.ceil(17 / -Math.log10(z));
+      const termsNeeded =
+        Math.ceil(2 * gauss2F1SeriesStart(a, b, c, z)) +
+        Math.ceil(17 / -Math.log10((1 + z) / 2));
       if (termsNeeded <= 400_000)
         return gauss2F1Series(a, b, c, z, termsNeeded + 10);
     }
     return NaN;
   }
-  const t1 =
-    ((gamma(c) * gamma(s)) / (gamma(c - a) * gamma(c - b))) *
-    gauss2F1Series(a, b, 1 - s, 1 - z);
-  const t2 =
-    ((gamma(c) * gamma(-s)) / (gamma(a) * gamma(b))) *
-    Math.pow(1 - z, s) *
-    gauss2F1Series(c - a, c - b, 1 + s, 1 - z);
-  return t1 + t2;
+  // The two parts can cancel: the result is NaN (and the complex kernel
+  // is tried) when a part is more than CONNECTION_2F1_MAX_LOSS times the
+  // result. A part is measured by the larger of its largest term and its
+  // sum: when the terms have one sign, the sum is many times the largest
+  // term, and the cancellation is between the two sums. The bound is
+  // smaller than GAUSS_2F1_MAX_LOSS because the prefactors (Γ of large
+  // arguments, (1−z)^s) have relative errors of up to about 100ε, and
+  // the cancellation multiplies those errors too.
+  const g1 = (gamma(c) * gamma(s)) / (gamma(c - a) * gamma(c - b));
+  const g2 =
+    ((gamma(c) * gamma(-s)) / (gamma(a) * gamma(b))) * Math.pow(1 - z, s);
+  const s1 = gauss2F1SeriesBig(a, b, 1 - s, 1 - z);
+  const s2 = gauss2F1SeriesBig(c - a, c - b, 1 + s, 1 - z);
+  const value = g1 * s1.sum + g2 * s2.sum;
+  const big = Math.max(
+    Math.abs(g1) * Math.max(s1.big, Math.abs(s1.sum)),
+    Math.abs(g2) * Math.max(s2.big, Math.abs(s2.sum))
+  );
+  return big <= CONNECTION_2F1_MAX_LOSS * Math.abs(value) ? value : NaN;
 }
 
 /** Direct Kummer series Σ (a)ₙ/((b)ₙ n!) zⁿ — converges for all z. */
@@ -4827,30 +4925,85 @@ function bigIsNonPositiveInteger(x: BigNum): boolean {
   return x.isInteger() && !x.isPositive();
 }
 
-/** Bignum Gauss series at current precision; tolerance from precision. */
+/**
+ * The first index from which a small term of the Gauss series
+ * Σ (a)ₙ(b)ₙ/((c)ₙ n!)·zⁿ (|z| < 1) can end the sum. Before it the terms can
+ * shrink and then grow again: a negative c makes them grow near n = −c,
+ * and the ratio of consecutive terms, about |z|·(1 + (a+b−c−1)/n) for a
+ * large n, is above 1 until n is about |z|·|a+b−c−1|/(1−|z|). For
+ * ₂F₁(102, 1; 2; 0.9) the terms grow until n ≈ 900.
+ */
+function gauss2F1SeriesStart(a: number, b: number, c: number, z: number) {
+  const zAbs = Math.abs(z);
+  if (!(zAbs < 1)) return Infinity;
+  return Math.max(3, -c, (zAbs * Math.abs(a + b - c - 1)) / (1 - zAbs));
+}
+
+/**
+ * Bignum Gauss series at the current precision; tolerance from precision.
+ * Returns NaN when the series has not converged within `maxTerms` terms,
+ * unless `polynomial` (the last of `maxTerms` terms is then the last term).
+ * When the largest term exceeds the sum by more than 8 digits (the callers
+ * add 10 guard digits), the sum is computed again with that many more
+ * digits, so that the cancellation does not reach the result; beyond 1000
+ * lost digits it is NaN.
+ */
 function bigGauss2F1Series(
   ce: ComputeEngine,
   a: BigNum,
   b: BigNum,
   c: BigNum,
   z: BigNum,
-  maxTerms: number
+  maxTerms: number,
+  polynomial = false,
+  retried = false
 ): BigNum {
   const tol = new BigDecimal(10).pow(-(BigDecimal.precision + 2));
+  const start = gauss2F1SeriesStart(
+    a.toNumber(),
+    b.toNumber(),
+    c.toNumber(),
+    z.toNumber()
+  );
   let term: BigNum = BigDecimal.ONE;
   let sum: BigNum = BigDecimal.ONE;
+  let big: BigNum = BigDecimal.ONE;
+  let done = polynomial;
   for (let n = 0; n < maxTerms; n++) {
     if ((n & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     const nn = new BigDecimal(n);
+    const previous = term;
     term = term
       .mul(a.add(nn))
       .mul(b.add(nn))
       .mul(z)
       .div(c.add(nn).mul(new BigDecimal(n + 1)));
-    if (term.isZero()) return sum;
+    if (term.isZero()) {
+      done = true;
+      break;
+    }
+    if (term.abs().gt(big)) big = term.abs();
     sum = sum.add(term);
-    if (n > 2 && term.abs().lt(tol.mul(sum.abs().add(BigDecimal.ONE))))
-      return sum;
+    // A small term ends the sum only while the terms decrease: just after
+    // n = −c the terms can grow again from a very small value.
+    if (
+      n >= start &&
+      term.abs().lt(previous.abs()) &&
+      term.abs().lt(tol.mul(sum.abs().add(BigDecimal.ONE)))
+    ) {
+      done = true;
+      break;
+    }
+  }
+  if (!done) return BigDecimal.NAN;
+  if (!retried && !sum.isZero()) {
+    const lost = Math.log10(big.div(sum.abs()).toNumber());
+    // More than 1000 lost digits: the sum is not computed.
+    if (!(lost <= 1000)) return BigDecimal.NAN;
+    if (lost > 8)
+      return withExtraPrecision(lost + 2, () =>
+        bigGauss2F1Series(ce, a, b, c, z, maxTerms, polynomial, true)
+      );
   }
   return sum;
 }
@@ -4881,7 +5034,7 @@ export function bigHypergeometric2F1(
   }
   if (nTerms !== Infinity && nTerms < maxTerms) {
     return withExtraPrecision(guard, () =>
-      bigGauss2F1Series(ce, a, b, c, z, nTerms + 1)
+      bigGauss2F1Series(ce, a, b, c, z, nTerms, true)
     ).toPrecision(p);
   }
 
@@ -4926,9 +5079,25 @@ export function bigHypergeometric2F1(
     // return a low-precision answer. Extends the former z ≤ 0.95 gate,
     // closing the integer-(c−a−b) gap for z ∈ (0.95, 1) and its Pfaff images
     // z ≲ −19. (NU-P1-2)
+    //
+    // The count starts where the terms stop growing (`gauss2F1SeriesStart`,
+    // about 900 for ₂F₁(102, 1; 2; 0.9)); from twice that index on, the
+    // ratio of consecutive terms is at most about (1+z)/2, which sets the
+    // number of further terms. Counting from n = 0 with the rate z instead
+    // stopped ₂F₁(102, 1; 2; 0.9) after 1020 terms, at 2.05e98 instead of
+    // 1.10e99.
     const zNum = z.toNumber();
     if (zNum < 1) {
-      const slowMax = Math.ceil((p + guard + 2) / -Math.log10(zNum)) + 100;
+      const start = gauss2F1SeriesStart(
+        a.toNumber(),
+        b.toNumber(),
+        c.toNumber(),
+        zNum
+      );
+      const slowMax =
+        Math.ceil(2 * start) +
+        Math.ceil((p + guard + 2) / -Math.log10((1 + zNum) / 2)) +
+        100;
       if (slowMax <= 2_000_000)
         return withExtraPrecision(guard, () =>
           bigGauss2F1Series(ce, a, b, c, z, slowMax)
@@ -4936,28 +5105,45 @@ export function bigHypergeometric2F1(
     }
     return BigDecimal.NAN; // too slow: stays symbolic
   }
-  return withExtraPrecision(guard, () => {
-    const oneMinusZ = one.sub(z);
-    const t1 = bigGamma(ce, c)
-      .mul(bigGamma(ce, s))
-      .div(bigGamma(ce, c.sub(a)).mul(bigGamma(ce, c.sub(b))))
-      .mul(bigGauss2F1Series(ce, a, b, one.sub(s), oneMinusZ, maxTerms));
-    const t2 = bigGamma(ce, c)
-      .mul(bigGamma(ce, s.neg()))
-      .div(bigGamma(ce, a).mul(bigGamma(ce, b)))
-      .mul(s.mul(oneMinusZ.ln()).exp()) // (1−z)^s
-      .mul(
-        bigGauss2F1Series(
-          ce,
-          c.sub(a),
-          c.sub(b),
-          one.add(s),
-          oneMinusZ,
-          maxTerms
-        )
-      );
-    return t1.add(t2);
-  }).toPrecision(p);
+  // The two parts t1 and t2 of the connection formula can cancel. The
+  // number of digits lost is log10(max(|t1|, |t2|)/|t1 + t2|). When it is
+  // more than the guard digits can absorb, the formula is evaluated again
+  // with that many more digits; beyond 1000 lost digits the result is NaN.
+  const connection = (extra: number): { value: BigNum; lost: number } => {
+    let lost = Infinity;
+    const value = withExtraPrecision(extra, () => {
+      const oneMinusZ = one.sub(z);
+      const t1 = bigGamma(ce, c)
+        .mul(bigGamma(ce, s))
+        .div(bigGamma(ce, c.sub(a)).mul(bigGamma(ce, c.sub(b))))
+        .mul(bigGauss2F1Series(ce, a, b, one.sub(s), oneMinusZ, maxTerms));
+      const t2 = bigGamma(ce, c)
+        .mul(bigGamma(ce, s.neg()))
+        .div(bigGamma(ce, a).mul(bigGamma(ce, b)))
+        .mul(s.mul(oneMinusZ.ln()).exp()) // (1−z)^s
+        .mul(
+          bigGauss2F1Series(
+            ce,
+            c.sub(a),
+            c.sub(b),
+            one.add(s),
+            oneMinusZ,
+            maxTerms
+          )
+        );
+      const sum = t1.add(t2);
+      const big = t1.abs().gt(t2.abs()) ? t1.abs() : t2.abs();
+      if (!sum.isZero()) lost = Math.log10(big.div(sum.abs()).toNumber());
+      return sum;
+    });
+    return { value, lost };
+  };
+  let r = connection(guard);
+  if (r.lost > guard - 2) {
+    if (!(r.lost <= 1000)) return BigDecimal.NAN;
+    r = connection(guard + r.lost + 2);
+  }
+  return r.value.toPrecision(p);
 }
 
 /** Bignum Kummer series at current precision. */

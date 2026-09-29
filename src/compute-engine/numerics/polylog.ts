@@ -148,38 +148,6 @@ function nearBranchPointUnreliable(zRe: number, zIm: number): boolean {
 }
 
 /**
- * True where the continuation loses more than 1e−12 relative accuracy
- * because s sits close to a positive integer: `Γ(1−s)` has a pole at every
- * positive integer, so nearby the closed-form term and the rest of
- * `lerchContinuedComplex`'s sum swing through a large intermediate value
- * before mostly cancelling, and the reported `lost` estimate (tuned to
- * 1e−10) does not catch it this close in. Cross-checked against mpmath at
- * z ≈ −0.86 − 0.51i (on the rim): s = 5 − 0.05 (9.2e−14, safe), s = 5 −
- * 0.02 (4.6e−13, safe), s = 5 − 0.01 (6.3e−12, fails). The distance is
- * measured in the complex plane: a complex order next to the integer fails
- * the same way (s = 5 + 1e−6i gives 3e−4 at that z, s = 3 + 1e−3i 3e−10).
- * An exactly integer real order never reaches this kernel (see
- * `polylogIntegerOrderComplex`). Only engages where the continuation (not
- * the interior series) is actually doing the work: a real z in [−1, 0)
- * goes to the Euler transform instead, which stays below 6e−16 against
- * mpmath at s ∈ {1 + 1e−12, 1 + 1e−9i, 2 − 1e−6, 3 + 1e−3i, 4.98972,
- * 5 + 1e−6i, 6 − 0.02} and z ∈ {−0.9, −0.95, −0.99, −0.999, −1}.
- */
-function nearPositiveIntegerOrderUnreliable(
-  sRe: number,
-  sIm: number,
-  zRe: number,
-  zIm: number
-): boolean {
-  if (zRe === 1 && zIm === 0) return false;
-  const absZ = Math.hypot(zRe, zIm);
-  if (absZ < 0.9 || (zIm === 0 && zRe < 0 && absZ <= 1)) return false;
-  const nearest = Math.round(sRe);
-  if (nearest < 1 || (sIm === 0 && sRe === nearest)) return false;
-  return Math.hypot(sRe - nearest, sIm) < 0.05;
-}
-
-/**
  * Liₛ(z) for |z| > 1 by Jonquière's inversion formula (DLMF 25.12.13,
  * with the Hurwitz zeta form of the right-hand side):
  *
@@ -242,8 +210,7 @@ function polylogInversionComplex(s: Complex, z: Complex): Complex {
 function polylogInsideDisk(s: Complex, z: Complex): Complex {
   if (
     seriesUnreliable(s.re, s.im, z.re, z.im) ||
-    nearBranchPointUnreliable(z.re, z.im) ||
-    nearPositiveIntegerOrderUnreliable(s.re, s.im, z.re, z.im)
+    nearBranchPointUnreliable(z.re, z.im)
   )
     return C_NAN;
   const phi = lerchPhiComplex(z, s, C_ONE);
@@ -268,13 +235,9 @@ export function polylogOrderComplex(s: Complex, z: Complex): Complex {
     if (r !== undefined) return r;
   }
   if (z.abs() <= 1) return polylogInsideDisk(s, z);
-  // Past the disk: the Lerch continuation first; it declines on most of
-  // the plane (see `lerchContinuedComplex`), and there the inversion takes
-  // over.
-  if (
-    !nearBranchPointUnreliable(z.re, z.im) &&
-    !nearPositiveIntegerOrderUnreliable(s.re, s.im, z.re, z.im)
-  ) {
+  // Past the disk: the Lerch continuation first; where it declines (see
+  // `lerchContinuedComplex`), the inversion takes over.
+  if (!nearBranchPointUnreliable(z.re, z.im)) {
     const phi = lerchPhiComplex(z, s, C_ONE);
     if (phi !== undefined && !phi.isNaN()) return z.mul(phi);
   }

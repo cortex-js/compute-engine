@@ -65,6 +65,17 @@ The callback's result is returned unchanged. An expired deadline throws a
 `CancellationError`; ordinary expression-domain failures remain `Error`
 values.
 
+`withStepBudget()` (public since 2026-09-28) arms a step budget instead of a
+deadline — the deterministic hang guard of §7.4:
+
+```ts
+ce.withStepBudget({ steps: 20_000, label: "classify" }, () => expr.evaluate());
+```
+
+A spent budget throws a `CancellationError` with `cause: 'step-budget'`, so a
+host can tell it from the clock's `'timeout'`; both are budget expiries for
+`isTimeoutCancellation` and the fallback rules of §2.
+
 The deadline stack is engine state. Entry pushes a frame and every exit path —
 normal return, cancellation, or another exception — restores the exact prior
 frame.
@@ -139,14 +150,17 @@ A wall-clock sub-budget makes a RESULT depend on the machine: an internal
 search that gives up after 2 s closes an integral on a fast machine and leaves
 it unevaluated on a slow or loaded one. An internal search whose result
 changes when it gives up therefore uses a step budget
-(`engine._withBudget({ steps, ms, label }, fn)`, internal):
+(`engine._withBudget({ steps, ms, label }, fn)`, internal; a host arms one
+with the public `ce.withStepBudget({ steps, label }, fn)`, which documents
+the step as an opaque unit — deterministic, not a measure of cost):
 
 - A step is one call of `checkDeadline` with the engine frame. The frame
   holds the step budgets of the active spans (`DeadlineFrame.budgets`), and
   each call counts one step against each of them.
-- A spent budget throws the same error as an expired labelled span: a timeout
-  `CancellationError` with the span's label as its attribution (message "Step
-  budget exhausted"). So the rules of §2 apply unchanged: the code that armed
+- A spent budget throws a `CancellationError` with `cause: 'step-budget'`
+  (since 2026-09-28; it was `'timeout'`), the span's label as its attribution
+  and the message "Step budget exhausted". `isTimeoutCancellation` answers
+  `true` for it as for a time expiry, so the rules of §2 apply unchanged: the code that armed
   the budget falls back, and every catch block inside the span throws the
   error again, because the frame it sees is spent. A spent budget stays
   spent, so a catch block that ignores the error meets it again at the next

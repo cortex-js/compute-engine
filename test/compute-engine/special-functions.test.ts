@@ -1,6 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { erfInv, gamma } from '../../src/compute-engine/numerics/special-functions';
+import { hypergeometric2F1Complex } from '../../src/compute-engine/numerics/numeric-complex';
+import { Complex } from 'complex-esm';
 import { engine } from '../utils';
 
 const ce = engine;
@@ -2088,12 +2090,12 @@ describe('GAUSS HYPERGEOMETRIC ₂F₁: ANALYTIC CONTINUATION z ≥ 1', () => {
       -0.661768020759984578967052612674
     ));
 
-  test('doubly degenerate ₂F₁(1,1;2;4) = −ln(1−z)/z (perturbed path, ~1e-9)', () =>
+  test('doubly degenerate ₂F₁(1,1;2;4) = −ln(1−z)/z (logarithmic case)', () =>
     check2F1(
       [1, 1, 2, 4],
       -0.274653072167027422848811309231,
       -0.78539816339744830961566084582,
-      1e-8
+      1e-13
     ));
 
   test('near-degenerate parameters: ₂F₁(2.5,1.5;4.001;2.5)', () =>
@@ -2128,6 +2130,348 @@ describe('GAUSS HYPERGEOMETRIC ₂F₁: ANALYTIC CONTINUATION z ≥ 1', () => {
     const onCut = ce.expr(['Hypergeometric2F1', 0.7, 1.3, 2.1, 2]).N();
     expect(Math.abs(onCut.im - below.im)).toBeLessThan(1e-6);
     expect(onCut.im).toBeLessThan(0);
+  });
+});
+
+describe('GAUSS HYPERGEOMETRIC ₂F₁: INTEGER b − a AND c − a − b (#354)', () => {
+  // When b − a is an integer, the two-term connection formulas at 1/z and
+  // 1/(1−z) have a removable singularity, and when c − a − b is an integer
+  // so do the ones at 1 − z and 1 − 1/z. The value comes from their
+  // logarithmic limits (DLMF 15.8.8–15.8.11). These inputs had both
+  // differences integral and were evaluated by averaging two
+  // parameter-perturbed values, with a relative error up to 1e-5.
+  // Reference values from mpmath 1.4 hyp2f1 (mp.dps = 30); the complex
+  // arguments are the doubles nearest to the decimal inputs.
+  const checkRel = (
+    args: (number | unknown[])[],
+    re: number,
+    im: number,
+    tol = 1e-13
+  ) => {
+    const r = ce.expr(['Hypergeometric2F1', ...args] as any).N();
+    const err = Math.hypot(r.re - re, r.im - im) / Math.hypot(re, im);
+    expect(err).toBeLessThan(tol);
+  };
+
+  test('₂F₁(−½, ½; 1; 1.17 + 0.45i)', () =>
+    checkRel(
+      [-0.5, 0.5, 1, ['Complex', 1.17, 0.45]],
+      0.678161041593025939876190730963,
+      -0.231833110136017025187184840211
+    ));
+
+  test('₂F₁(−½, ½; 1; 2.5 + i)', () =>
+    checkRel(
+      [-0.5, 0.5, 1, ['Complex', 2.5, 1]],
+      0.566040177231780980117018764427,
+      -0.622083318044884915752341339099
+    ));
+
+  test('₂F₁(½, ½; 1; 1.17 + 0.45i)', () =>
+    checkRel(
+      [0.5, 0.5, 1, ['Complex', 1.17, 0.45]],
+      1.14387985545200665095535187086,
+      0.534168523406259053956325898534
+    ));
+
+  test('b − a = −2 at a large |z|: ₂F₁(5/2, ½; 3; −20 + 5i)', () =>
+    checkRel(
+      [2.5, 0.5, 3, ['Complex', -20, 5]],
+      0.239574142074376352448658543422,
+      0.0275961301300816860564032046174
+    ));
+
+  test('b − a = 4 with c − a − b = 4: ₂F₁(−5/2, 3/2; 3; 1.5 − 1.5i)', () =>
+    checkRel(
+      [-2.5, 1.5, 3, ['Complex', 1.5, -1.5]],
+      -0.283212285282432843623528634838,
+      -0.377712758851470528918430767741
+    ));
+
+  test('b − a = 20: ₂F₁(½, 41/2; 3; 0.9 + 0.9i)', () =>
+    checkRel(
+      [0.5, 20.5, 3, ['Complex', 0.9, 0.9]],
+      0.125113342383747864912312640906,
+      0.278966856689211284432133400189
+    ));
+
+  // Each of the next three inputs was checked (with a temporary trace) to
+  // be evaluated by the named formula.
+  test('the 1/(1−z) formula: ₂F₁(½, 3/2; 9/4; 0.2 + 1.2i)', () =>
+    checkRel(
+      [0.5, 1.5, 2.25, ['Complex', 0.2, 1.2]],
+      0.851544404274845750538828455642,
+      0.310909610986915931097514078063
+    ));
+
+  test('the 1 − 1/z formula: ₂F₁(0.3, 1.2; 3.5; 0.8 + 0.7i)', () =>
+    checkRel(
+      [0.3, 1.2, 3.5, ['Complex', 0.8, 0.7]],
+      1.06480820190400323879415959872,
+      0.11737134791778677330196165008
+    ));
+
+  test('c − a − b = −3 with c − a = −1, a polynomial after the Euler transformation: ₂F₁(3/2, 2; ½; 1.2 + 0.3i)', () =>
+    checkRel(
+      [1.5, 2, 0.5, ['Complex', 1.2, 0.3]],
+      92.6263086026399966939865576572,
+      37.6877560309512828703914564408
+    ));
+
+  // For a large difference m, the Γ-factors and factorials of the formulas
+  // are far outside the range of a double; the terms are scaled so that
+  // they are not. These inputs overflowed, gave NaN, or lost all digits.
+  test.each([
+    [102, 1.00976970108881608187977135025, 0.00308823617528400773360558473896],
+    [122, 1.00813873894755354362257136474, 0.00256104104747633261906681064289],
+    [142, 1.00697440895475360170008001098, 0.00218758154666710075859283335521],
+    [402, 1.00243875323696433699998064866, 0.000755421151622583889169770700703],
+  ])('c − a − b = c − 2: ₂F₁(½, 3/2; %d; 1.3 + 0.4i)', (c, re, im) =>
+    checkRel([0.5, 1.5, c, ['Complex', 1.3, 0.4]], re, im, 1e-12)
+  );
+
+  test.each([
+    [100.5, 0.0858749613406527306517834350307, 0.00707182476338193371150804148488],
+    [120.5, 0.0784083516209218764488857793666, 0.00646238007877289241124550052964],
+    [140.5, 0.0726022824337347833939003136116, 0.00598742935344498575993891140021],
+    [400.5, 0.0429754730037853791965055523483, 0.00355236248461086637471617281097],
+  ])('b − a = b − ½: ₂F₁(½, %d; 3; −3 + 0.5i)', (b, re, im) =>
+    checkRel([0.5, b, 3, ['Complex', -3, 0.5]], re, im, 1e-12)
+  );
+
+  test('a badly conditioned polynomial is rejected: ₂F₁(102, 1; 2; 0.9)', () => {
+    // After the Euler transformation this is (1−z)^(−101)·₂F₁(−100, 1; 2; z),
+    // whose terms reach 1e24 for a sum of 0.011. The direct series is used.
+    // The complex kernel is called directly: with real arguments the engine
+    // evaluates ₂F₁ by another method.
+    const r = hypergeometric2F1Complex(
+      new Complex(102, 0),
+      new Complex(1, 0),
+      new Complex(2, 0),
+      new Complex(0.9, 0)
+    );
+    const ref = 1.100110011001124754492271352e99;
+    expect(Math.hypot(r.re - ref, r.im) / ref).toBeLessThan(1e-13);
+  });
+
+  test('a difference within rounding of an integer: ₂F₁(0.3, 2.3; 2.6; 1.17 + 0.45i)', () =>
+    // In doubles 2.3 − 0.3 = 1.9999999999999998 and 2.6 − 0.3 − 2.3 = 4.4e-16.
+    checkRel(
+      [0.3, 2.3, 2.6, ['Complex', 1.17, 0.45]],
+      1.11717091723909966297484925864,
+      0.593188641608016245115252512551
+    ));
+
+  test('a digamma value at a large imaginary part: ₂F₁(½, ½; 0.99 − 400i; −3000 + i)', () => {
+    // The 1/z formula needs ψ(0.49 − 400i) and ln Γ(0.99 − 400i); the
+    // cotangent and the reciprocal of sin(πz) of their reflection formulas
+    // overflowed or underflowed for this imaginary part.
+    const r = hypergeometric2F1Complex(
+      new Complex(0.5, 0),
+      new Complex(0.5, 0),
+      new Complex(0.99, -400),
+      new Complex(-3000, 1)
+    );
+    const re = 0.625813602151132049107027715794;
+    const im = -0.2241316825355887396611937422;
+    expect(Math.hypot(r.re - re, r.im - im) / Math.hypot(re, im)).toBeLessThan(
+      1e-12
+    );
+  });
+
+  test('a huge parameter returns quickly: ₂F₁(1e20, 1e20; ½; 2)', () => {
+    // b − a = 0 selects the 1/z formula, whose first term needs
+    // 1/Γ(c − a) near the pole −1e20; it overflows and the formula is
+    // rejected. It must not loop over 1e20 factorial factors.
+    const start = Date.now();
+    const r = hypergeometric2F1Complex(
+      new Complex(1e20, 0),
+      new Complex(1e20, 0),
+      new Complex(0.5, 0),
+      new Complex(2, 0)
+    );
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Number.isNaN(r.re) || Number.isFinite(r.re)).toBe(true);
+  });
+});
+
+describe('GAUSS HYPERGEOMETRIC ₂F₁: CANCELLATION AND SLOW CONVERGENCE', () => {
+  // Reference values from mpmath 1.4 hyp2f1 (mp.dps = 30 or 70).
+  const rel = (r: { re: number; im: number }, re: number, im: number) =>
+    Math.hypot(r.re - re, r.im - im) / Math.hypot(re, im);
+
+  // ₂F₁(½, ½+m; 3/2; 2.5+i) through the 1 − 1/z formula: its series
+  // ₂F₁(1, ½; 3/2−m; w) has terms that shrink below ε·sum (or underflow to
+  // 0) before they grow again near n = m, and the sum used to stop there
+  // with a relative error of 1 for m ≥ 41.
+  test.each([
+    [60.5, 0.0132129072203262185329305575701, 0.0686091095322326088919432227347],
+    [95.5, 0.0104924975323882294577031401878, 0.0544831580561519332205868526268],
+  ])('₂F₁(½, %d; 3/2; 2.5 + i)', (b, re, im) => {
+    const r = hypergeometric2F1Complex(
+      new Complex(0.5, 0),
+      new Complex(b, 0),
+      new Complex(1.5, 0),
+      new Complex(2.5, 1)
+    );
+    expect(rel(r, re, im)).toBeLessThan(1e-11);
+  });
+
+  test('a polynomial of degree 1e20 returns NaN at once', () => {
+    const start = Date.now();
+    const r = hypergeometric2F1Complex(
+      new Complex(-1e20, 0),
+      new Complex(0.5, 0),
+      new Complex(1.5, 0),
+      new Complex(2, 0)
+    );
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Number.isNaN(r.re)).toBe(true);
+  });
+
+  test('a polynomial whose terms cancel is NaN, not wrong digits: ₂F₁(−100, 1; 2; 0.9)', () => {
+    // The terms reach 1e24 for a value of 0.011.
+    const r = hypergeometric2F1Complex(
+      new Complex(-100, 0),
+      new Complex(1, 0),
+      new Complex(2, 0),
+      new Complex(0.9, 0)
+    );
+    expect(Number.isNaN(r.re)).toBe(true);
+  });
+
+  // Real arguments: the machine kernel and the big-decimal kernel. The
+  // series of these functions grows for about |z|·|a+b−c−1|/(1−|z|) terms
+  // (900 for the first) before it decreases; the term count used to be
+  // computed as if it decreased from the first term, and the sum stopped
+  // early: ₂F₁(102, 1; 2; 0.9) was 1.15e87 (machine) and 2.05e98
+  // (big decimal) instead of 1.10e99.
+  const cases: [number[], string][] = [
+    [[102, 1, 2, 0.9], '1.100110011001100110011001100110011001100110011001100110011e+99'],
+    [[50, 1, 2, 0.95], '1.20934469048616970998925886143931256713211600429645542427497e+62'],
+    [[20.5, 1.5, 3, 0.99], '2.71203213966410486597234418245988801216354998889910247738128e+36'],
+    [[0.5, 0.5, 1, 0.999], '3.08196070869881629860053972066904513637649051472030934300473'],
+  ];
+  // The significant digits of a number written in decimal.
+  const digits = (x: string) =>
+    x
+      .replace(/^-/, '')
+      .split('e')[0]
+      .replace('.', '')
+      .replace(/^0+/, '');
+
+  let savedPrecision: number;
+  let mCe: InstanceType<typeof ComputeEngine>;
+  let bigCe: InstanceType<typeof ComputeEngine>;
+  beforeAll(() => {
+    savedPrecision = ce.precision;
+    mCe = new ComputeEngine();
+    mCe.precision = 'machine';
+    bigCe = new ComputeEngine();
+    bigCe.precision = 50;
+  });
+  afterAll(() => {
+    // BigDecimal.precision is process-global: re-sync it for the shared engine
+    ce.precision = savedPrecision;
+  });
+
+  test.each(cases)('machine ₂F₁(%j)', (args, ref) => {
+    const v = mCe.expr(['Hypergeometric2F1', ...args] as any).N().re;
+    expect(Math.abs(v - Number(ref)) / Number(ref)).toBeLessThan(1e-12);
+  });
+
+  test.each(cases)('default precision ₂F₁(%j)', (args, ref) => {
+    ce.precision = savedPrecision;
+    const v = ce.expr(['Hypergeometric2F1', ...args] as any).N().toString();
+    expect(digits(v).substring(0, 18)).toBe(digits(ref).substring(0, 18));
+    expect(v.split('e')[1]).toBe(ref.split('e')[1]);
+  });
+
+  test.each(cases)('50-digit ₂F₁(%j)', (args, ref) => {
+    const v = bigCe
+      .expr(['Hypergeometric2F1', ...args] as any)
+      .N()
+      .toString();
+    expect(digits(v).substring(0, 45)).toBe(digits(ref).substring(0, 45));
+    expect(v.split('e')[1]).toBe(ref.split('e')[1]);
+  });
+});
+
+describe('HYPERGEOMETRIC 2F1 CANCELLATION IN THE CONNECTION FORMULAS', () => {
+  // References: mpmath 1.4.1 hyp2f1 (mp.dps = 50).
+  let saved: number;
+  let mCe: InstanceType<typeof ComputeEngine>;
+  let bigCe: InstanceType<typeof ComputeEngine>;
+  beforeAll(() => {
+    saved = ce.precision;
+    mCe = new ComputeEngine();
+    mCe.precision = 'machine';
+    bigCe = new ComputeEngine();
+    bigCe.precision = 30;
+  });
+  afterAll(() => {
+    // BigDecimal.precision is process-global: re-sync the shared engine.
+    ce.precision = saved;
+  });
+
+  // The two parts of the connection formula at 1 − z (directly, or after
+  // the Pfaff map for z < 0) cancel more than the largest term of each
+  // series shows: the sums of the series are many times their largest
+  // terms. These had 7 to 9 correct digits.
+  test.each([
+    [[14.31, 4, 42.19, 0.752], 3.4347882158117818547445677404],
+    [[19.06, 0.8, 22.79, 0.703], 2.0559600389539591332357824301],
+    [[26.12, 5.86, 40.61, 0.905], 296.27811446417902742302601112],
+    [[8.93, 7.16, 29.22, -12.378], 0.0000694827824578090118408145062],
+  ])('machine ₂F₁(%j)', (args, ref) => {
+    const v = mCe.expr(['Hypergeometric2F1', ...args] as any).N().re;
+    expect(Math.abs(v - ref) / ref).toBeLessThan(1e-12);
+  });
+
+  test('machine ₂F₁ series that grows again after n = −c', () => {
+    // The series ₂F₁(a, b; 1 − s; 1 − z) of the connection formula has the
+    // third parameter −40.708: its terms fall to about 1e-23 near n = 30,
+    // then grow again after n = 41. It was stopped at n = 41 (6 correct
+    // digits).
+    const v = mCe
+      .expr(['Hypergeometric2F1', 6.066, -9.19, 38.584, 0.5193])
+      .N().re;
+    const ref = 0.47497593674824356389859405666854622777513636520702;
+    expect(Math.abs(v - ref) / ref).toBeLessThan(1e-12);
+  });
+
+  test('machine ₂F₁ declines a result with about 10 correct digits', () => {
+    // The best formula loses more than 1e4 to cancellation: the value
+    // stays symbolic instead of a result with a relative error of 2.6e-10
+    // (mpmath: −51478700.730699926 + 7336690.4400987610i).
+    const v = mCe
+      .expr([
+        'Hypergeometric2F1',
+        19.093,
+        21.093,
+        -14.428,
+        ['Complex', -0.4589, -2.4856],
+      ])
+      .N();
+    expect(v.operator).toBe('Hypergeometric2F1');
+  });
+
+  // The two parts t₁ and t₂ of the big-decimal connection formula cancel by
+  // about 7 digits: with 10 guard digits these had 23 correct digits of 30.
+  test.each([
+    [[26.91, 7.09, 38.36, 0.689], '141.2303583945563162585611974049'],
+    [[19.06, 7.13, 30, 0.591], '34.82968428543563545350725152039'],
+  ])('precision 30 ₂F₁(%j)', (args, ref) => {
+    const v = bigCe
+      .expr([
+        'Hypergeometric2F1',
+        ...args.map((x) => ({ num: String(x) })),
+      ] as any)
+      .N()
+      .toString();
+    expect(v.replace('.', '').substring(0, 29)).toBe(
+      ref.replace('.', '').substring(0, 29)
+    );
   });
 });
 

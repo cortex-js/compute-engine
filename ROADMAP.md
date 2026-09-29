@@ -109,26 +109,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### A broadcast call of a bound user function has no element count (OPEN, decision — found 2026-09-28 answering Tycho item 326)
-
-With `S` declared `(real) -> tuple<number, number>` and `L := [0..40]`, the
-call `S(L)` types `list<tuple<number, number>>`, and so does `d·S(L)`, yet
-both answer `count: undefined`, while `d·L` answers 41. The count facet for
-an un-evaluated broadcast (`_broadcastCount` in `boxed-function.ts`) is gated
-to the LIFTED arithmetic operators (`broadcastable: true`); a broadcast CALL
-of a bound user function, whose scalar parameter receives a counted list, is
-not covered, so its length is only known by materializing it. Tycho asks the
-length question before deciding whether to evaluate a classification probe
-(item 326), and this is the one static query in that discussion CE does not
-answer today. The facet's invariant is "count never outruns the walk"
-(`test/compute-engine/tycho-item-167-broadcast-count.test.ts`), so the
-decision is whether `S(L).each()` walks the broadcast lazily; if it does,
-the count is the counted argument's, and the fix is a second arm in
-`_broadcastCount` for a bound head whose declared scalar parameter receives
-an unkeyed collection. If it does not, the count must stay `undefined`, and
-the answer to Tycho is "declare the carrier's type and count in the
-classification engine".
-
 ### A list of numbers plus a point is typed `indexed_collection<integer>` and evaluates to a list of errors (OPEN, small — found 2026-09-28 answering Tycho item 326)
 
 With `L := [0..3]`, `L + (1, 1)` types `indexed_collection<integer>` and
@@ -756,6 +736,34 @@ unevaluated under `.N()`, because `tycho-325-integrate-list-limit-broadcast.test
 pins that `.N()` leaves mismatched list bounds unevaluated; the two modes
 should agree.
 
+### Definite integrals of `Abs` and `Sign`: what the fix of issue #352 left (OPEN, small — found 2026-09-28)
+
+A definite integral whose integrand has `Abs(u)` or `Sign(u)` is now split at
+the points where `u` changes sign, and each piece is integrated with `Abs(u)`
+replaced by `±u` and `Sign(u)` by `±1` (`integrateAcrossKinks`,
+`library/calculus.ts`). Two cases are not covered:
+
+- The split applies only when `u` is linear in the integration variable. With
+  a nonlinear argument, such as `\int_{-1}^{1} |x^2 - 1/4|\,dx` (value `1/2`),
+  the integral is not split and stays unevaluated, because the built-in
+  antiderivative of `|x^2 - 1/4|` is not found. The fix would find the real
+  roots of a polynomial `u` in the interval and split there in the same way.
+- When the position of a sign change relative to the bounds cannot be
+  decided, the integral is not split, and an antiderivative with a
+  `Sign(u)` term that depends on the variable now leaves the integral
+  unevaluated, because `F(b) − F(a)` includes the jump of that term if the
+  sign change is between the bounds. This also leaves unevaluated some
+  integrals that had a value that was correct for part of the parameter
+  range: `\int_2^a |x|\cos x\,dx` gave
+  `\sin(a)|a| + \cos(a)\operatorname{sgn}(a) - 2\sin 2 - \cos 2`, which is
+  correct for `a > 0` and wrong for `a < 0`; it now stays unevaluated.
+  `\int_0^1 |x - c|\cos x\,dx` is the same case. A conditional value (a
+  `When` over the sign of `a`, or of `c`), or a use of the assumptions on
+  `a`, would give these a value again. A nonlinear `Sign` argument does not
+  reach this check today: the built-in antiderivative and the Rubi rules
+  both leave `\int_2^3 x\operatorname{sgn}(x^2-1)\,dx` unevaluated, before
+  and after the change.
+
 ### Residues of the absent-value round (OPEN, small — found 2026-09-25)
 
 The round of that date made arithmetic with an absent operand `NaN`, an
@@ -874,6 +882,64 @@ decides it). The intervals for Γ, ζ, arcosh and artanh are computed with
 doubles, so an argument within about `10⁻¹⁵` relative of a pole is refused at
 every precision (`Γ(−3 + 10⁻³⁰)` against `0` stays undecided at 50 digits):
 never a wrong order, a lost answer.
+
+### `Hypergeometric2F1` at machine precision: up to 2e-11 relative error (OPEN, small — found 2026-09-28)
+
+Over 1,000 random real arguments (`a`, `b` from −25 to 25, `c` from −25 to
+45, `z` from 0.5 to 1 or below −1), measured against mpmath, 936 have a
+machine value and 5 of them have a relative error above 1e-12 (the largest
+2e-11, `Hypergeometric2F1(-8.613, 24.352, 29.789, 0.6065)`). Over 700
+arguments with an integer `b − a` or `c − a − b` and a complex `z`, 622 have
+a value and 9 have an error above 1e-12 (the largest 7e-11). The
+connection formulas are accepted when their two parts exceed the result by
+at most a factor of 1e3 (1e4 when no other formula applies), and the
+prefactors are not accurate enough for that factor: the complex `gamma()`
+(`numerics/numeric-complex.ts`) evaluates `t^(z + 1/2)` directly, so
+`Γ(54.731)` has a relative error of 2.6e-14 (about 100ε), where the real
+`gamma()` (`numerics/special-functions.ts`) shifts the argument down first
+and is accurate to a few ε. A lower bound would decline more arguments. The fix
+is a more accurate complex `gamma()` for a large argument (the same shift
+as the real one), or a Γ ratio computed as one quotient.
+
+### Upper incomplete gamma: where the machine kernels still decline or lose digits (OPEN — found 2026-09-28 while fixing issue #353)
+
+The complex kernel `incompleteGammaUpperComplex`
+(`numerics/numeric-complex.ts`) returns NaN, so `Gamma(s, x).N()` stays
+unevaluated, where it cannot certify about 12 digits in doubles. Its series
+forms carry an error estimate that bounds the actual error (measured against
+mpmath on about 7500 points); where no method passes, it declines. The
+regions:
+
+- `s` close to `0, −1, −2, …` and `x` near the negative real axis
+  (`|x| + Re x ≤ 3`). `Γ(s)` and the `k = n` term of the power series are
+  both about `1/(s + n)` and cancel. Whether the kernel declines depends on
+  `x` as well as on the distance `|s + n|`: on 3000 points with `|s + n|`
+  from `10⁻⁹` to `10⁻²` it answered 60% at `10⁻⁹` and 98% at `10⁻³`, all
+  with an error of at most `4.5e−13`. Example: `Gamma(-1 + 10^{-6}, -3)`
+  stays unevaluated; mpmath gives `3.2386482740815 + 3.1416041563344i`. The
+  fix is to sum `Γ(s) − (−1)ⁿ z^{s+n}/(n!(s+n))` as one expression in
+  `ε = s + n`, using `expm1(ε ln z)/ε` and a series for
+  `(n!(−1)ⁿ ε Γ(−n+ε) − 1)/ε` (the method of Temme).
+- `|Im s| > 10` and `|x| < 3|s|`, with `Re x < 0`, or with `Re s < 0` and
+  `|x| < |s| + 1`. The continued fraction converges there but to a wrong
+  value (error `2e−8` at `s = −0.41 − 23.9i`, `x = 0.088 − 4.0i`), and the
+  power series often cancel too far. On 2500 random points with
+  `|Re s|, |Im s| ≤ 30` and `0.01 ≤ |x| ≤ 600`, 86 declines are in this
+  region. Example: `Gamma(19.427 + 13.838i, -8.4445 - 49.849i)`; mpmath
+  gives `-2.3715013352684768e45 - 1.8981893850660706e44i`. Uniform
+  asymptotic expansions for a large `|s|` would cover it.
+- `|x| > 700` near the negative real axis, where only the asymptotic series
+  is available, when the part of `Γ(s, x)` that it omits (about
+  `2π·e^{π|Im s|}/|Γ(1 − s)|`) is not negligible, for example
+  `Gamma(100 + 600i, -800)` (mpmath `4.714e−133 − 1.980e−133i`).
+
+For a large `|s|` the accuracy is that of the complex `Γ(s)` (Lanczos
+formula): the relative error of `Γ(s)` grows from about `5ε` at `|s| < 1` to
+`500ε` at `|s| = 13` and `5300ε` at `|s| = 790`, and `Gamma(s, x)` inherits
+it (`1.1e−12` at `s = 106 + 657i`, `x = −205 + 517i`). The error bound the
+kernel states (`incompleteGammaUpperComplexErrorBound`) grows with it. A
+more accurate `Γ(s)` for a large `|s|` (Stirling series with the argument
+shifted) would tighten both.
 
 ### Complex transcendental functions keep machine precision (OPEN, capability — decision D4 of `docs/plans/2026-09-27-big-decimal-imaginary-part.md`)
 
@@ -4815,39 +4881,34 @@ gamma kernel for those targets would close the gap for `LerchPhi` and widen
 `Gamma`'s own compiled two-operand form at the same time. Demand-gated: no
 compile-target consumer has asked for `LerchPhi` past the unit disk yet.
 
-The JavaScript lane is `NaN` for real `z < −1` although the value is real
-(`LerchPhi(-3, 1.5, 0.7)` = 1.10658 in mpmath): the interpreter declines there
-too, for the reason in the next entry.
+### `LerchPhi` past |z| = 1 still declines at a few points (OPEN, found 2026-09-28 while adapting `LerchPhi` to the fixed incomplete gamma kernel, #353)
 
-### `LerchPhi` past |z| = 1 declines where `Gamma(s, x)` is inaccurate (OPEN, correctness, blocked on #353)
+The continuation (`lerchContinuedComplex`, `numerics/lerch-phi.ts`) computes
+`Φ(z,s,a)` from three terms, one of them `Γ(1 − s, −a·log z)`. It declines
+(`N()` stays symbolic) where it cannot vouch for 1e−11 relative accuracy. On
+a sweep of 1588 random points against mpmath's `lerchphi` (inside the disk,
+on the rim, past it, real `z < −1` and `z > 1`, complex `s`, `a` from −8 to
+30), it answers 1532 (before the #353 fix: 339), with a worst error of
+4.3e−13, and declines 56. They are of two kinds:
 
-The continuation calls `incompleteGammaUpperComplex(1 − s, −a·log z)`, and
-declines wherever that kernel's error estimate (`incompleteGammaRelativeError`
-in `numerics/lerch-phi.ts`) exceeds 1e−12. For real `z < −1` the argument has
-a negative real part and a modulus above 2.5, and on the rim `|z| = 1` it is
-close to the imaginary axis with a large modulus when `a` is large
-(`LerchPhi(i, 2, 20)`), so most of those points stay symbolic. Fixing the
-kernel (next entry) widens `LerchPhi` with it.
-
-### `Gamma(s, x)` is inaccurate for a complex `x` of moderate modulus (OPEN, correctness — found 2026-09-28 while reviewing `LerchPhi`, possibly the same defect as #353)
-
-`incompleteGammaUpperComplex` (`numerics/numeric-complex.ts`) loses digits
-outside a small disk, and not only for `Re(x) < 0`. Measured against mpmath's
-`gammainc` with `|s| ≤ 13`:
-
-- The asymptotic series is used from `|x| > |s| + 14`, but it is truncated at
-  its smallest term, which is still about 1e−3 of the sum at `|x| − |s| = 15`
-  and falls below 1e−14 only past `|x| − |s| ≈ 50`.
-- For an integer `s ≤ 0`, the downward recurrence from `E₁(x)` uses `E₁`'s
-  power series up to `|x| = 20` (and for every `x` with `Re(x) ≤ 0`), which
-  cancels: errors of 1e−5 at `|x| = 10` and of order 1 at `|x| = 15`.
-- Otherwise `Γ(s) − γ(s, x)` cancels when `Γ(s, x)` is small.
-
-Public probes: `Gamma(-2, 10+10i).N()` is `1.3133260e−8 + 4.4992e−9i`, mpmath
-`1.3133115e−8 + 4.4997e−9i`; `Gamma(-11.93, 11.44+2.304i).N()` has real part
-`4.116e−21`, mpmath `5.076e−21`. The continued fraction branch (`Re(x) > 0`,
-`|x| ≥ |s| + 1`) is accurate to 1e−14 and could be used for more of the right
-half-plane.
+- `s` within about 1e−2 of a positive integer, with `x = −a·log z` in the
+  band `|x| + Re x ≤ 3` around the negative real axis (for `a = 1`, every
+  `z` on or past the unit circle; for a larger `a`, `z` near the real axis
+  past 1). The incomplete gamma kernel sums a power series there whose
+  error grows like `1/|1 − s + n|` near the poles of `Γ(1 − s)`, and it
+  declines where it cannot certify its result. On 600 points with `s`
+  within 1e−9 to 0.2 of 1 … 9, 482 answer and 118 decline, spread over
+  every distance below 1e−2. Example: `LerchPhi(2, 3.000001, 3.5)`; mpmath
+  gives `0.0090998751173185692 − 0.066706054562371451i`. The fix is the
+  kernel's own open item (the Temme-style expansion in "Upper incomplete
+  gamma: where the machine kernels still decline or lose digits").
+- The closed incomplete gamma term is hundreds of times larger than `Φ`,
+  so the kernel's error bound (`incompleteGammaUpperComplexErrorBound`,
+  3e−13 relative for a small `|1 − s|`) times that term exceeds 1e−11 of
+  the value, although the actual error is usually far smaller. This happens
+  mostly for `Re(s) < 0`, for example `LerchPhi(-2, -3.5, 1.5)` (mpmath
+  0.0024505235336676858). A per-point error estimate from the kernel would
+  recover most of them.
 
 ### `HurwitzZeta(s, a)` is inaccurate for a complex `a` and `Re(s) < 0` (OPEN, correctness — found 2026-09-28 while reviewing `LerchPhi`)
 
@@ -4859,23 +4920,23 @@ back to the Euler–Maclaurin sum, which cancels for `Re(s) < 0`. `LerchPhi` at
 `z = −1` uses `HurwitzZeta` only for a real `a` because of this.
 Another witness, found while widening `PolyLog`: `HurwitzZeta(-11.5, 0.5 - 1.0994i).N()` is
 `-8.914 + 9.012i`; mpmath gives `-9.526 + 9.526i`. At `s = −2.9`, `a = 0.5 − 0.7329i` the
-error is 5.8e−11 relative. This is the reason for the `PolyLog` inversion limit above.
+error is 5.8e−11 relative. It limits `PolyLog`'s inversion formula (`polylogInversionComplex`), which now matters only where the `LerchPhi` continuation declines.
 
-### `PolyLog` past |z| = 1 still declines for a large order at a large |z| (OPEN, found 2026-09-28 while widening `PolyLog`, #340)
+### `PolyLog` has no GPU lane past |z| = 1 (OPEN, capability gap — found 2026-09-28 while widening `PolyLog`, #340)
 
 Past the unit disk, `PolyLog(s, z)` at a non-integer order uses the `LerchPhi`
-continuation, and where that declines (most of the plane, see the `LerchPhi`
-item above, #353) Jonquière's inversion formula
-(`polylogInversionComplex`, `numerics/polylog.ts`). The inversion calls
-`hurwitzZetaComplex(1 − s, a)` with `a = 1/2 + ln(−z)/(2πi)`, and that
-function is inaccurate at a negative order with a complex `a` whose
-imaginary part is above about 0.55 (the `HurwitzZeta` entry below). So the inversion declines
-(`N()` stays symbolic) when `Re(s) > 2` and `|z|` is above about 32, for
-example `PolyLog(4.5, -1000)` (mpmath −181.98765816781016), and when
-`|Im s| > 1.5`. The GPU lane has neither the continuation nor the inversion:
-`_gpu_poly_log` is `NaN` for every non-integer order with `|z| > 1`, and for
-an integer order `≥ 2` below `z = −1`. Fixing that entry widens the
-interpreter and the JavaScript lane at once.
+continuation, and where that declines Jonquière's inversion formula
+(`polylogInversionComplex`, `numerics/polylog.ts`). In the interpreter and
+the JavaScript lane these decline together only for some orders within about
+1e−2 of a positive integer, on or past the unit circle (the `LerchPhi` entry
+above; for example `PolyLog(3.000001, 2)`). Measured on 900 points against
+mpmath's `polylog` (orders within 1e−8 to 0.2 of 1 … 12, `|z|` from 0.9 to
+61): 869 answer, none off by more than 6.4e−14, and the 31 declines are
+spread over the distances from 1e−8 to 1e−2. On another 400 such points, 392
+answer, none off by more than 4.6e−14. The GPU lane has
+neither the continuation nor the inversion: `_gpu_poly_log` is `NaN` for
+every non-integer order with `|z| > 1`, and for an integer order `≥ 2` below
+`z = −1`.
 
 ### The machine-precision `Zeta` kernels are inaccurate for a small negative order (OPEN, correctness, found 2026-09-28 while widening `PolyLog`, #340)
 

@@ -38,6 +38,7 @@ import {
   limitsIndexSites,
 } from '../boxed-expression/binding-sites.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
+import { boundVariableNamesInOperand } from '../boxed-expression/binders.js';
 import { BoxedNumber } from '../boxed-expression/boxed-number.js';
 
 import {
@@ -75,6 +76,10 @@ import {
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
+import {
+  getPolynomialCoefficients,
+  polynomialDegree,
+} from '../boxed-expression/polynomials.js';
 import {
   interiorPoleVerdict,
   type PoleVerdict,
@@ -255,6 +260,242 @@ function improperEndpointValue(
   if (fLower === undefined) return undefined;
   const result = fUpper.sub(fLower).evaluate({ numericApproximation });
   return result.isNaN === true ? undefined : result;
+}
+
+/** An `Abs(u)` or `Sign(u)` subexpression of an integrand whose argument is
+ * linear in the integration variable, `u = k·x + m` with `k` and `m` free of
+ * the variable. The integrand has a kink (or a jump) at `root = −m/k`. */
+type IntegrandKink = {
+  arg: Expression;
+  k: Expression;
+  m: Expression;
+  root: Expression;
+};
+
+/** Whether operand `index` of `expr` is inside a nested binder of the name
+ * `variable`: an inner `Integrate`, `Sum`, function literal, etc. that binds
+ * its own variable with that name. There, an occurrence of the name is the
+ * inner variable, not the integration variable of the outer integral, and
+ * it must be neither collected as a kink nor replaced. In
+ * `∫_0^1 (∫_{−a}^{a} |x| cos x dx) dx`, the `|x|` belongs to the inner
+ * integral, and replacing it by `x` changed the inner value. */
+function bindsVariableInOperand(
+  expr: Expression,
+  index: number,
+  variable: string
+): boolean {
+  return boundVariableNamesInOperand(expr, index).includes(variable);
+}
+
+/** Collect the kinks of `expr` in `variable` (see `IntegrandKink`). An `Abs`
+ * or `Sign` whose argument is not linear in the variable is not collected;
+ * its own argument is still searched. The operands of a nested binder of
+ * the same name are not searched (see `bindsVariableInOperand`). */
+function collectIntegrandKinks(
+  expr: Expression,
+  variable: string,
+  out: IntegrandKink[]
+): void {
+  if (!isFunction(expr)) return;
+  if (
+    (expr.operator === 'Abs' || expr.operator === 'Sign') &&
+    expr.nops === 1 &&
+    expr.op1.has(variable) &&
+    polynomialDegree(expr.op1, variable) === 1 &&
+    !out.some((kink) => kink.arg.isSame(expr.op1))
+  ) {
+    const coefs = getPolynomialCoefficients(expr.op1, variable);
+    if (coefs && coefs.length === 2) {
+      const ce = expr.engine;
+      const [m, k] = coefs.map((c) => c.evaluate());
+      if (!k.isSame(0)) {
+        const root = ce.function('Divide', [ce.function('Negate', [m]), k]);
+        out.push({ arg: expr.op1, k, m, root: root.evaluate() });
+        return;
+      }
+    }
+  }
+  expr.ops.forEach((op, i) => {
+    if (!bindsVariableInOperand(expr, i, variable))
+      collectIntegrandKinks(op, variable, out);
+  });
+}
+
+/** The sign of `value` (`−1`, `0` or `1`), or `undefined` when it cannot be
+ * decided: the value has free symbols, is not real, or is so close to zero
+ * that a machine-precision comparison cannot be trusted. */
+function decidedSign(value: Expression): -1 | 0 | 1 | undefined {
+  const v = value.evaluate();
+  if (v.isSame(0)) return 0;
+  if (v.isPositive === true) return 1;
+  if (v.isNegative === true) return -1;
+  const n = v.N();
+  if (!isNumber(n) || n.isComplex) return undefined;
+  const r = n.re;
+  if (Number.isNaN(r) || Math.abs(r) < 1e-10) return undefined;
+  return r > 0 ? 1 : -1;
+}
+
+/**
+ * Evaluate a definite integral whose integrand has kinks (`Abs(u)` or
+ * `Sign(u)` with `u` linear in the integration variable) by splitting the
+ * interval at the kinks.
+ *
+ * The fundamental theorem of calculus needs an antiderivative that is
+ * continuous on the whole interval. The antiderivative of such an integrand
+ * often has a `Sign(u)` term (`∫ |x| cos x dx = sin(x)|x| + cos(x)·sgn(x)`),
+ * which jumps where `u` changes sign. When that point is inside the bounds,
+ * `F(b) − F(a)` adds the jump to the result (`∫_{−π}^{π} |x| cos x dx` gave
+ * `−2`, the correct value is `−4`). When the point is at a bound, `Sign(0) = 0`
+ * is neither one-sided value and `F(b) − F(a)` is wrong too.
+ *
+ * On each piece between consecutive kinks, each `u` keeps one sign, so
+ * `Abs(u)` is replaced by `u` or `−u` and `Sign(u)` by `1` or `−1`. Each
+ * piece is then integrated separately and the results are added.
+ *
+ * Returns:
+ * - the value of the integral when every piece has a closed form;
+ * - `'inert'` when a piece has no closed form: the caller keeps the whole
+ *   definite integral unevaluated rather than returning a partial sum;
+ * - `undefined` when the integrand has no kink or the position of a kink
+ *   relative to the bounds cannot be decided (symbolic bounds). The caller
+ *   then continues with the whole-interval antiderivative.
+ */
+function integrateAcrossKinks(
+  ce: ComputeEngine,
+  integrand: Expression,
+  variable: string,
+  lower: Expression,
+  upper: Expression,
+  numericApproximation: boolean
+): Expression | 'inert' | undefined {
+  const kinks: IntegrandKink[] = [];
+  collectIntegrandKinks(integrand, variable, kinks);
+  if (kinks.length === 0) return undefined;
+
+  // A kink whose coefficient is not real, as in `|x + i|`, is not a kink:
+  // `|x + i| = √(x² + 1)` is smooth, and `u` has no real point where it
+  // changes sign. The built-in antiderivative of `|u|` and `sgn(u)` is valid
+  // only for a real `u`, so keep the integral unevaluated.
+  const notReal = (e: Expression) => {
+    const n = e.N();
+    return isNumber(n) && n.isComplex;
+  };
+  if (kinks.some(({ k, m }) => notReal(k) || notReal(m))) return 'inert';
+
+  const diff = (a: Expression, b: Expression) =>
+    decidedSign(ce.function('Subtract', [a, b]));
+
+  // `dir` is the direction of integration: 1 when `lower < upper`, −1 when
+  // the bounds are reversed. The cuts are ordered in that direction, which
+  // keeps `∫_a^b = Σ ∫_{p_i}^{p_{i+1}}` valid in both cases.
+  const dir = diff(upper, lower);
+  if (dir === undefined || dir === 0) return undefined;
+
+  // The kinks STRICTLY inside the bounds, deduplicated and sorted in the
+  // direction of integration. A kink at a bound or outside the bounds does
+  // not cut the interval, but its `Abs`/`Sign` is still resolved below.
+  const cuts: Expression[] = [];
+  for (const { root } of kinks) {
+    const afterLower = diff(root, lower);
+    const beforeUpper = diff(upper, root);
+    if (afterLower === undefined || beforeUpper === undefined) return undefined;
+    if (afterLower * dir <= 0 || beforeUpper * dir <= 0) continue;
+    let at = cuts.length;
+    for (let i = 0; i < cuts.length; i++) {
+      const order = diff(root, cuts[i]);
+      if (order === undefined) return undefined;
+      if (order === 0) {
+        at = -1;
+        break;
+      }
+      if (order * dir < 0) {
+        at = i;
+        break;
+      }
+    }
+    if (at >= 0) cuts.splice(at, 0, root);
+  }
+
+  const points = [lower, ...cuts, upper];
+  const pieces: Expression[] = [];
+  for (let i = 0; i + 1 < points.length; i++) {
+    const [p, q] = [points[i], points[i + 1]];
+    // A point strictly inside the piece, where the sign of each `u` is read.
+    // No kink is strictly inside the piece, so any such point gives the sign
+    // `u` has on the whole piece.
+    const sample =
+      p.isInfinity === true && q.isInfinity === true
+        ? ce.Zero
+        : p.isInfinity === true
+          ? ce.function('Subtract', [q, ce.number(dir)])
+          : q.isInfinity === true
+            ? ce.function('Add', [p, ce.number(dir)])
+            : ce.function('Divide', [ce.function('Add', [p, q]), ce.number(2)]);
+    const signs: number[] = [];
+    for (const { k, m } of kinks) {
+      const s = decidedSign(
+        ce.function('Add', [ce.function('Multiply', [k, sample]), m])
+      );
+      if (s === undefined || s === 0) return undefined;
+      signs.push(s);
+    }
+    const resolve = (e: Expression): Expression => {
+      if (!isFunction(e)) return e;
+      if ((e.operator === 'Abs' || e.operator === 'Sign') && e.nops === 1) {
+        const j = kinks.findIndex((kink) => kink.arg.isSame(e.op1));
+        if (j >= 0) {
+          if (e.operator === 'Sign') return ce.number(signs[j]);
+          return signs[j] > 0 ? e.op1 : ce.function('Negate', [e.op1]);
+        }
+      }
+      const ops = e.ops.map((op, n) =>
+        bindsVariableInOperand(e, n, variable) ? op : resolve(op)
+      );
+      if (ops.every((op, n) => op === e.ops[n])) return e;
+      return ce.function(e.operator, ops);
+    };
+    const piece = ce
+      .function('Integrate', [
+        resolve(integrand),
+        ce.function('Limits', [ce.symbol(variable), p, q]),
+      ])
+      .evaluate({ numericApproximation });
+    if (piece.has('Integrate')) return 'inert';
+    pieces.push(piece);
+  }
+  return ce.function('Add', pieces).evaluate({ numericApproximation });
+}
+
+/** `expr` with each inner `Integrate` subexpression replaced by its value,
+ * when that value has no `Integrate` left. Otherwise the inner integral is
+ * kept as it is. An inner integral binds its own variable, so its value can
+ * be computed before the outer integral: `∫_0^1 x·(∫_{−1}^{1} x² dx) dx` is
+ * `∫_0^1 (2/3)·x dx`. The operands of other binders (a `Sum`, a function
+ * literal) are not searched. */
+function evaluateInnerIntegrals(expr: Expression): Expression {
+  if (!isFunction(expr)) return expr;
+  if (expr.operator === 'Integrate') {
+    const value = expr.evaluate();
+    return value.has('Integrate') ? expr : value;
+  }
+  let changed = false;
+  const ops = expr.ops.map((op, i) => {
+    if (boundVariableNamesInOperand(expr, i).length > 0) return op;
+    const value = evaluateInnerIntegrals(op);
+    if (value !== op) changed = true;
+    return value;
+  });
+  return changed ? expr.engine.function(expr.operator, ops) : expr;
+}
+
+/** Whether `expr` has a `Sign(u)` subexpression whose argument depends on
+ * `variable`. Such a term of an antiderivative jumps where `u` changes sign,
+ * so the antiderivative may not be continuous between the bounds. */
+function hasVariableSign(expr: Expression, variable: string): boolean {
+  if (!isFunction(expr)) return false;
+  if (expr.operator === 'Sign' && expr.has(variable)) return true;
+  return expr.ops.some((op) => hasVariableSign(op, variable));
 }
 
 /** A numeric integrand split into its real and imaginary parts.
@@ -2478,6 +2719,45 @@ volumes
         if (perElement === null) return undefined;
         if (perElement !== undefined) return perElement;
 
+        // The integration variable(s) are bound by `Integrate`: a same-named
+        // global assignment (`x := 5`) must not substitute into the
+        // antiderivative computation or its result. Shield them for the whole
+        // symbolic pass so `∫ x² dx` stays `x³/3` (not `125/3`) and
+        // `∫₀¹ x² dx` is `1/3` (not `0`). The names come from the limits and,
+        // as a fallback, the integrand function-literal's parameters.
+        //
+        // The numeric route below needs the same shield. Outside a call, a
+        // function literal's parameter reads the value of a same-named
+        // assigned symbol, so compiling `x ↦ |x| cos x` with `x := 5` saw a
+        // positive `x`, dropped the `Abs`, and `∫_{−π}^{π} |x| cos x dx`
+        // numericized to `0` instead of `−4`.
+        const intVarNames: string[] = [];
+        for (const l of ops.slice(1))
+          if (isFunction(l)) {
+            const v = sym(l.op1);
+            if (v && v !== 'Nothing') intVarNames.push(v);
+          }
+        if (isFunction(ops[0]))
+          for (const p of ops[0].ops.slice(1)) {
+            const n = sym(p);
+            if (n) intVarNames.push(n);
+          }
+
+        // Over structurally equal bounds (`∫_a^a`, `∫_1^1`) the integral is
+        // zero. This is decided before the numeric route too, which cannot
+        // evaluate a symbolic bound and would keep the integral unevaluated.
+        // Only the structural test is used here: deciding the sign of
+        // `hi − lo` would evaluate each bound once more, and a bound with an
+        // effect (`∫_0^{Random()}`) must be evaluated exactly once, by the
+        // route that consumes it. The symbolic route below still decides a
+        // zero difference for bounds that are equal in value but not in form.
+        for (const l of ops.slice(1)) {
+          if (!isFunction(l, 'Limits')) continue;
+          const [lo, hi] = [l.op2, l.op3];
+          if (sym(lo) === 'Nothing' || sym(hi) === 'Nothing') continue;
+          if (lo.isSame(hi)) return ce.Zero;
+        }
+
         if (numericApproximation) {
           // If a numeric approximation is requested, equivalent to NIntegrate
           const f = ops[0];
@@ -2551,7 +2831,9 @@ volumes
           // The bound values computed above are passed on, so that a bound
           // is not evaluated a second time.
           if (ops.length > 2)
-            return nIntegrateMultiple(ce, f, ops.slice(1), limitValues);
+            return withValueShield(ce, intVarNames, () =>
+              nIntegrateMultiple(ce, f, ops.slice(1), limitValues)
+            );
 
           const firstLimit = ops[1];
           if (!isFunction(firstLimit) || limitValues[0].length !== 2)
@@ -2595,12 +2877,14 @@ volumes
           // (a spare formal parameter could otherwise read a same-named
           // global). The iterated form runs the same check per dimension in
           // `nIntegrateMultiple`.
-          const pole = interiorPoleVerdict(
-            isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr,
-            variable,
-            lower,
-            upper,
-            ce
+          const pole = withValueShield(ce, intVarNames, () =>
+            interiorPoleVerdict(
+              isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr,
+              variable,
+              lower,
+              upper,
+              ce
+            )
           );
           if (pole !== undefined)
             return pole.sign === 'positive'
@@ -2609,7 +2893,9 @@ volumes
                 ? ce.NegativeInfinity
                 : ce.NaN;
 
-          const compiled = implicitCompile(ce, fnExpr);
+          const compiled = withValueShield(ce, intVarNames, () =>
+            implicitCompile(ce, fnExpr)
+          );
           const raw: (x: number) => unknown = compiled?.success
             ? (compiled.run as (x: number) => unknown)
             : (
@@ -2718,24 +3004,6 @@ volumes
           return undefined;
         }
 
-        // The integration variable(s) are bound by `Integrate`: a same-named
-        // global assignment (`x := 5`) must not substitute into the
-        // antiderivative computation or its result. Shield them for the whole
-        // symbolic pass so `∫ x² dx` stays `x³/3` (not `125/3`) and
-        // `∫₀¹ x² dx` is `1/3` (not `0`). The names come from the limits and,
-        // as a fallback, the integrand function-literal's parameters.
-        const intVarNames: string[] = [];
-        for (const l of limitsSequence)
-          if (isFunction(l)) {
-            const v = sym(l.op1);
-            if (v && v !== 'Nothing') intVarNames.push(v);
-          }
-        if (isFunction(ops[0]))
-          for (const p of ops[0].ops.slice(1)) {
-            const n = sym(p);
-            if (n) intVarNames.push(n);
-          }
-
         const result = withValueShield(ce, intVarNames, () => {
           let expr = ops[0];
           const argNames = isFunction(expr)
@@ -2776,7 +3044,59 @@ volumes
             // `Function`/`Block` scaffolding anyway, and lifting it here
             // re-binds its symbols to the caller's, so they agree with the
             // occurrences these paths mint themselves (`liftIntegrand`).
-            const integrand = liftIntegrand(expr);
+            // The integrand of an iterated integral written as nested
+            // integrals (`\int\int |x-y|\,dx\,dy` on the parse route) is,
+            // or contains, an unevaluated inner `Integrate`
+            // (`∫_0^1 x ∫_{−1}^{1} |x| dx dx`). Evaluate each inner integral
+            // first, so that the split at the kinks and the antiderivative
+            // below see its closed form (see `evaluateInnerIntegrals`).
+            const integrand = evaluateInnerIntegrals(liftIntegrand(expr));
+            const isDefinite =
+              sym(lower) !== 'Nothing' && sym(upper) !== 'Nothing';
+            // A definite integral whose integrand has `Abs(u)` or `Sign(u)`
+            // with `u` linear in the variable is integrated piece by piece
+            // between the points where `u` changes sign. The whole-interval
+            // antiderivative can have a jump at those points, and the
+            // fundamental theorem of calculus would add the jump to the
+            // result (see `integrateAcrossKinks`).
+            // Over proven-equal bounds (`∫_1^1`, `∫_a^a`) the integral is
+            // zero. This is decided first: the split below declines an empty
+            // interval, and the whole-interval antiderivative can have a
+            // `Sign(u)` term, which leaves the integral unevaluated.
+            if (
+              isDefinite &&
+              (lower.isSame(upper) ||
+                decidedSign(ce.function('Subtract', [upper, lower])) === 0)
+            ) {
+              isIndefinite = false;
+              expr = ce.Zero;
+              continue;
+            }
+            if (isDefinite) {
+              const split = integrateAcrossKinks(
+                ce,
+                integrand,
+                variable,
+                lower,
+                upper,
+                numericApproximation ?? false
+              );
+              if (split !== undefined) {
+                isIndefinite = false;
+                expr =
+                  split === 'inert'
+                    ? ce.function('Integrate', [
+                        expr,
+                        ce.function('Limits', [
+                          ce.symbol(variable),
+                          lower,
+                          upper,
+                        ]),
+                      ])
+                    : split;
+                continue;
+              }
+            }
             if (ce._integrationProvider) {
               try {
                 antideriv = ce._integrationProvider(integrand, variable);
@@ -2801,7 +3121,10 @@ volumes
               // an `Add` such as `5x + Integrate(g, x)` when only some terms
               // integrate).
               expr = antideriv;
-            } else if (antideriv.has('Integrate')) {
+            } else if (
+              antideriv.has('Integrate') ||
+              hasVariableSign(antideriv, variable)
+            ) {
               // The antiderivative could NOT be fully found — the result is
               // either an inert `Integrate` (e.g. an unknown integrand, or
               // `√(1−x²)/(1+x²)`) or an `Add` that still contains one (e.g.
@@ -2812,6 +3135,13 @@ volumes
               // value (∫₋₁¹ √(1−x²)/(1+x²) dx → 0, the `+5` case → 10, etc.).
               // The `.N()` path (NIntegrate quadrature) still gives the value.
               // See CORRECTNESS_FINDINGS P0-1.
+              //
+              // The same applies when the antiderivative has a `Sign(u)` term
+              // with `u` depending on the variable, and the integral could not
+              // be split where `u` changes sign (the bounds are symbolic, as
+              // in `∫_{−a}^{a} |x| cos x dx`). That term jumps where `u`
+              // changes sign, and if that point is between the bounds,
+              // `F(b) − F(a)` includes the jump and is wrong.
               isIndefinite = false;
               expr = ce.function('Integrate', [
                 expr,

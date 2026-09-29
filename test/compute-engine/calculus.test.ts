@@ -2521,3 +2521,287 @@ describe('INTEGRATE: divergence verdict — orientation, sign crossings, truncat
     expect(r.operator).toBe('Integrate');
   });
 });
+
+describe('INTEGRATE: Abs and Sign of a linear argument (issue #352)', () => {
+  // The antiderivative of such an integrand can have a `Sign(u)` term, which
+  // jumps where `u` changes sign. A definite integral is split at those
+  // points, so the jump is not added to the result. Expected values checked
+  // with mpmath quadrature.
+  const ce = new ComputeEngine();
+  const ev = (s: string) => ce.parse(s).evaluate();
+
+  test('∫_{−π}^{π} |x| cos x dx = −4', () => {
+    expect(ev('\\int_{-\\pi}^{\\pi} |x|\\cos x\\,dx').toString()).toBe('-4');
+  });
+
+  test('∫_{−π}^{π} |x| e^{−ix} dx = −4', () => {
+    expect(ev('\\int_{-\\pi}^{\\pi} |x| e^{-ix}\\,dx').toString()).toBe('-4');
+  });
+
+  test('∫_{−1}^{1} |x| cos x dx = 2(cos 1 + sin 1) − 2', () => {
+    const v = ev('\\int_{-1}^{1} |x|\\cos x\\,dx');
+    expect(v.has('Sign')).toBe(false);
+    expect(v.has('Integrate')).toBe(false);
+    expect(v.N().re).toBeCloseTo(2 * (Math.cos(1) + Math.sin(1)) - 2, 12);
+  });
+
+  test('reversed bounds: ∫_{π}^{−π} |x| cos x dx = 4', () => {
+    expect(ev('\\int_{\\pi}^{-\\pi} |x|\\cos x\\,dx').toString()).toBe('4');
+  });
+
+  test('kink at a bound: ∫_0^π |x| cos x dx = −2', () => {
+    expect(ev('\\int_0^{\\pi} |x|\\cos x\\,dx').toString()).toBe('-2');
+  });
+
+  test('∫_0^2 |x − 1| x dx = 1', () => {
+    expect(ev('\\int_0^2 |x-1| x\\,dx').toString()).toBe('1');
+  });
+
+  test('∫_{−1}^{1} sgn(x) x dx = 1', () => {
+    expect(ev('\\int_{-1}^{1} \\operatorname{sgn}(x) x\\,dx').toString()).toBe(
+      '1'
+    );
+  });
+
+  test('∫_{−2}^{3} |2x − 1| dx = 25/2', () => {
+    expect(ev('\\int_{-2}^{3} |2x-1|\\,dx').toString()).toBe('25/2');
+  });
+
+  test('two kinks: ∫_{−1}^{1} |x|·|x − 1/2| dx = 17/24', () => {
+    expect(ev('\\int_{-1}^{1} |x|\\cdot|x-\\frac12|\\,dx').toString()).toBe(
+      '17/24'
+    );
+  });
+
+  test('kink outside the bounds: ∫_1^2 |x| cos x dx = ∫_1^2 x cos x dx', () => {
+    const v = ev('\\int_1^2 |x|\\cos x\\,dx');
+    expect(v.isSame(ev('\\int_1^2 x\\cos x\\,dx'))).toBe(true);
+    expect(v.N().re).toBeCloseTo(
+      2 * Math.sin(2) + Math.cos(2) - Math.sin(1) - Math.cos(1),
+      12
+    );
+  });
+
+  test('unchanged: ∫_{−π}^{π} |x| dx = π², ∫_0^π x cos x dx = −2', () => {
+    expect(ev('\\int_{-\\pi}^{\\pi} |x|\\,dx').toString()).toBe('pi^2');
+    expect(ev('\\int_0^{\\pi} x\\cos x\\,dx').toString()).toBe('-2');
+  });
+
+  test('unchanged: ∫_0^a |x| dx with a symbolic bound has a closed form', () => {
+    expect(ev('\\int_0^a |x|\\,dx').toString()).toBe('1/2 * a * |a|');
+  });
+
+  test('unchanged: the indefinite integral keeps its Sign term', () => {
+    expect(ev('\\int |x|\\cos x\\,dx').toString()).toBe(
+      'sin(x) * |x| + cos(x) * Sign(x)'
+    );
+  });
+
+  test('∫_{−1}^{1} |x| sin|x| dx = 2(sin 1 − cos 1)', () => {
+    // Each piece needs `∫ x·sin(±x) dx`, which needs the antiderivative of a
+    // sine with a linear argument during integration by parts.
+    const v = ev('\\int_{-1}^{1} |x|\\sin(|x|)\\,dx');
+    expect(v.has('Integrate')).toBe(false);
+    expect(v.N().re).toBeCloseTo(2 * (Math.sin(1) - Math.cos(1)), 12);
+  });
+
+  test('symbolic bounds with a Sign in the antiderivative stay inert', () => {
+    // The antiderivative `sin(x)|x| + cos(x)·sgn(x)` jumps at 0, and whether
+    // 0 is between −a and a cannot be decided.
+    expect(ev('\\int_{-a}^{a} |x|\\cos x\\,dx').operator).toBe('Integrate');
+  });
+
+  test('equal bounds give 0', () => {
+    expect(ev('\\int_1^1 |x|\\cos x\\,dx').toString()).toBe('0');
+    expect(ev('\\int_0^0 |x|\\cos x\\,dx').toString()).toBe('0');
+    expect(ev('\\int_a^a |x|\\cos x\\,dx').toString()).toBe('0');
+  });
+
+  test('equal bounds give 0 under .N()', () => {
+    // The numeric route cannot evaluate the symbolic bound `a`: the test
+    // for equal bounds must come first.
+    expect(ce.parse('\\int_a^a |x|\\,dx').N().toString()).toBe('0');
+    expect(ce.parse('\\int_a^a |x|\\cos x\\,dx').N().toString()).toBe('0');
+  });
+
+  test('inner integral in a product: ∫_0^1 x·(∫_{−1}^{1} x² dx) dx = 1/3', () => {
+    const v = ce
+      .box([
+        'Integrate',
+        [
+          'Multiply',
+          'x',
+          ['Integrate', ['Power', 'x', 2], ['Limits', 'x', -1, 1]],
+        ],
+        ['Limits', 'x', 0, 1],
+      ])
+      .evaluate();
+    expect(v.toString()).toBe('1/3');
+  });
+
+  test('parse route: ∫_0^1 x ∫_{−1}^{1} |x| dx dx = 1/2', () => {
+    expect(ev('\\int_0^1 x\\int_{-1}^{1}|x|\\,dx\\,dx').toString()).toBe('1/2');
+  });
+
+  test('nested integral with the same variable name: value 1', () => {
+    // The inner `x` is bound by the inner integral: ∫_{−1}^{1} |x| dx = 1,
+    // then ∫_0^1 1 dx = 1.
+    const v = ce
+      .box([
+        'Integrate',
+        ['Integrate', ['Abs', 'x'], ['Limits', 'x', -1, 1]],
+        ['Limits', 'x', 0, 1],
+      ])
+      .evaluate();
+    expect(v.toString()).toBe('1');
+  });
+
+  test('nested integral with the same variable name: inner |x| is not replaced', () => {
+    // The inner integral stays unevaluated (symbolic bounds). The outer
+    // split must not replace its `|x|` by `x`: that gave
+    // `∫_{−a}^{a} x cos x dx = 0`.
+    const v = ce
+      .box([
+        'Integrate',
+        [
+          'Integrate',
+          ['Multiply', ['Abs', 'x'], ['Cos', 'x']],
+          ['Limits', 'x', ['Negate', 'a'], 'a'],
+        ],
+        ['Limits', 'x', 0, 1],
+      ])
+      .evaluate();
+    expect(v.has('Integrate')).toBe(true);
+    expect(v.has('Abs')).toBe(true);
+  });
+
+  test('nested integral with a different inner name still splits', () => {
+    // ∫_{−1}^{1} (∫_0^1 |x|·y dy) dx = 1/2 (mpmath).
+    const v = ce
+      .box([
+        'Integrate',
+        ['Integrate', ['Multiply', ['Abs', 'x'], 'y'], ['Limits', 'y', 0, 1]],
+        ['Limits', 'x', -1, 1],
+      ])
+      .evaluate();
+    expect(v.toString()).toBe('1/2');
+  });
+
+  test('parse route: ∫_{−1}^{1}∫_{−1}^{1} |x − y| dx dy = 8/3', () => {
+    expect(ev('\\int_{-1}^{1}\\int_{-1}^{1} |x-y|\\,dx\\,dy').toString()).toBe(
+      '8/3'
+    );
+  });
+
+  test('|x + i| has no real kink: the integral stays inert', () => {
+    // The value is √2 + arsinh(1) ≈ 2.29559 (mpmath); `u|u|/2` is not an
+    // antiderivative of `|u|` for a non-real `u`.
+    const e = ce.box([
+      'Integrate',
+      ['Abs', ['Add', 'x', 'ImaginaryUnit']],
+      ['Limits', 'x', -1, 1],
+    ]);
+    expect(e.evaluate().operator).toBe('Integrate');
+    expect(e.N().re).toBeCloseTo(Math.SQRT2 + Math.asinh(1), 10);
+    expect(
+      ce
+        .box(['Integrate', ['Abs', ['Add', 'x', 'ImaginaryUnit']], 'x'])
+        .evaluate().operator
+    ).toBe('Integrate');
+    expect(ev('\\int_{-1}^{1} |x|\\,dx').toString()).toBe('1');
+  });
+});
+
+describe('INTEGRATE: an argument with a zero coefficient of the variable', () => {
+  const ce = new ComputeEngine();
+  // Canonical form keeps `0·x` (it is not zero at an infinite `x`), so the
+  // argument contains `x` but does not depend on it.
+  test('∫ x sin(0x + 1) dx = sin(1) x²/2', () => {
+    const F = ce
+      .box([
+        'Integrate',
+        ['Multiply', 'x', ['Sin', ['Add', ['Multiply', 0, 'x'], 1]]],
+        'x',
+      ])
+      .evaluate();
+    expect(F.has('Integrate')).toBe(false);
+    for (const t of [0.5, -1.5, 3]) {
+      expect(F.subs({ x: ce.number(t) }).N().re).toBeCloseTo(
+        (Math.sin(1) * t * t) / 2,
+        10
+      );
+    }
+  });
+
+  test('∫ x cos(2x − 2x) dx = x²/2', () => {
+    expect(ce.parse('\\int x\\cos(2x-2x)\\,dx').evaluate().toString()).toBe(
+      '1/2 * x^2'
+    );
+  });
+
+  test('∫ sin(0x + 1) dx = x sin(1), ∫ cos(2x − 2x) dx = x', () => {
+    expect(
+      ce
+        .box(['Integrate', ['Sin', ['Add', ['Multiply', 0, 'x'], 1]], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('x * sin(1)');
+    expect(ce.parse('\\int \\cos(2x-2x)\\,dx').evaluate().toString()).toBe('x');
+  });
+});
+
+describe('INTEGRATE: .N() keeps the integration variable free of an assigned value', () => {
+  // A function literal's parameter read outside a call reads the value of a
+  // same-named assigned symbol. Compiling `x ↦ |x| cos x` for quadrature with
+  // `x := 5` read `x` as positive and dropped the `Abs`.
+  test('∫_{−π}^{π} |x| cos x dx with x := 5 is −4 under .N()', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    const v = ce.parse('\\int_{-\\pi}^{\\pi} |x|\\cos x\\,dx');
+    expect(v.N().re).toBeCloseTo(-4, 12);
+    expect(v.evaluate().toString()).toBe('-4');
+  });
+
+  test('∫_0^1 x² dx with x := 5 is 1/3 under .N()', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    const v = ce.parse('\\int_0^1 x^2\\,dx');
+    expect(v.N().re).toBeCloseTo(1 / 3, 12);
+  });
+
+  test('iterated: ∫_0^1 ∫_{−1}^{1} |x|·|y| dx dy with x := 5, y := −2 is 1/2', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    ce.assign('y', -2);
+    const v = ce.parse('\\int_0^1\\int_{-1}^{1} |x|\\cdot|y|\\,dx\\,dy');
+    expect(v.N().re).toBeCloseTo(0.5, 12);
+  });
+});
+
+describe('INTEGRATE: sine and cosine of a linear argument under integration by parts', () => {
+  const ce = new ComputeEngine();
+  // Each result is checked by differentiating it back to the integrand at a
+  // few sample points.
+  test.each([
+    'x\\sin(-x)',
+    'x\\cos(-x)',
+    'x\\sin(2x)',
+    'x\\sin(1-x)',
+    'x^2\\cos(3x+1)',
+  ])('∫ %s dx', (integrand) => {
+    const F = ce.parse(`\\int ${integrand}\\,dx`).evaluate();
+    expect(F.has('Integrate')).toBe(false);
+    const dF = ce.box(['D', F, 'x']).evaluate();
+    const f = ce.parse(integrand);
+    for (const t of [0.3, -1.2, 2.5]) {
+      const at = { x: ce.number(t) };
+      expect(dF.subs(at).N().re).toBeCloseTo(f.subs(at).N().re, 10);
+    }
+  });
+
+  test('∫ x sin(−x) dx = x cos x − sin x', () => {
+    expect(ce.parse('\\int x\\sin(-x)\\,dx').evaluate().toString()).toBe(
+      'x * cos(x) - sin(x)'
+    );
+  });
+});

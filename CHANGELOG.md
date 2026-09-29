@@ -34,6 +34,99 @@
 
 ### Issues Resolved
 
+- **A broadcast call of a user function reports its element count without
+  evaluating.** With `S := x ↦ (x, x²)` and `L` a counted list, `S(L)` and
+  `d·S(L)` typed `list<tuple<number, number>>` yet answered `count:
+  undefined`, while `d·L` answered the length; a caller deciding whether to
+  evaluate had to walk the call to learn its size (Tycho item 326). The count
+  is now the mapped argument's, read through the same participant rule the
+  type derivation uses, for a function literal with scalar parameters called
+  with a collection. A numeric-tuple argument, participants of different
+  lengths, a lone scalar-or-collection union, a declared `broadcastable<T>`
+  or point-typed slot, a generic signature, and an argument count the
+  signature does not admit still answer `undefined`.
+- **Definite integrals of `|u|` and `sgn(u)` with `u` linear**
+  ([#352](https://github.com/cortex-js/compute-engine/issues/352)). The
+  antiderivative of such an integrand can have a `sgn(u)` term, which jumps
+  where `u` changes sign, and the value of the integral included that jump.
+  `\int_{-\pi}^{\pi} |x|\cos x\,dx` evaluated to `-2`; it is now `-4`.
+  `\int_{-1}^{1} |x|\cos x\,dx` had the value `2(\cos 1 + \sin 1)`; it now
+  has the value `2(\cos 1 + \sin 1) - 2` (printed as
+  `-2 - \sin(-1) + \sin(1) + \cos(-1) + \cos(1)`).
+  `\int_0^{\pi} |x|\cos x\,dx` was `-1`; it is now `-2`. The integral is
+  now split at the points where `u` changes sign. This also gives a value to
+  integrals that stayed unevaluated before: `\int_0^2 |x-1|\,x\,dx = 1`,
+  `\int_{-1}^{1} \operatorname{sgn}(x)\,x\,dx = 1`, and the nested
+  `\int_{-1}^{1}\int_{-1}^{1} |x-y|\,dx\,dy = 8/3`.
+  When a bound is symbolic and the sign change could be between the bounds,
+  the integral now stays unevaluated instead of returning a wrong value:
+  `\int_{-a}^{a} |x|\cos x\,dx` was
+  `\sin(a)|a| + \cos(a)\operatorname{sgn}(a) - \ldots`.
+- **`|u|` with a non-real coefficient.** The antiderivative `u|u|/2` of `|u|`
+  is valid only for a real `u`. `\int_{-1}^{1} |x+i|\,dx` gave `\sqrt2`; the
+  value is `\sqrt2 + \operatorname{arsinh}(1)`, and the integral now stays
+  unevaluated (`.N()` gives `2.29559`). `\int |x+i|\,dx` also stays
+  unevaluated.
+- **Antiderivative of a function of an argument that does not depend on the
+  variable.** `\int x\sin(0x+1)\,dx` gave `\tilde\infty\cos(1)`,
+  `\int x\cos(2x-2x)\,dx` gave `\operatorname{NaN}` and
+  `\int\cos(2x-2x)\,dx` gave `0`: the coefficient of the variable was `0`
+  (or only the last linear term was read) and was used as a divisor. They
+  now have the values `\sin(1)\,x^2/2`, `x^2/2` and `x`.
+- **`.N()` of a definite integral when the integration variable has a
+  value.** With `x := 5`, `\int_{-\pi}^{\pi} |x|\cos x\,dx` gave about `0`
+  under `.N()`, because the integrand was compiled with `x` read as `5`, which
+  removed the `|x|`. It is now `-4`, as `evaluate()` already gave.
+- **Integration by parts with a sine or cosine of a linear argument.**
+  `\int x\sin(-x)\,dx` and `\int x\sin(2x)\,dx` stayed unevaluated; they
+  are now `x\cos x - \sin x` and `-\frac12 x\cos(2x) + \frac14\sin(2x)`.
+- **#354: `Hypergeometric2F1` with an integer `b − a` or `c − a − b` is
+  accurate to about 12 digits.** When `b − a` is an integer, the formulas that
+  continue ₂F₁ outside the unit disk through `1/z` and `1/(1−z)` have a removable
+  singularity; when `c − a − b` is an integer, so do the ones through `1 − z`
+  and `1 − 1/z`. When no other formula applied (typically with both
+  differences integral), the value was the average of two evaluations at
+  nearby parameters, which kept as few as 4 correct
+  digits: `Hypergeometric2F1(-0.5, 0.5, 1, 1.17 + 0.45i)` was
+  `0.67816275 − 0.23183000i` (relative error 5e-6) and is now
+  `0.67816104159303 − 0.23183311013602i`. These cases now use the logarithmic
+  limit of those formulas (DLMF 15.8.8–15.8.11). Over a grid of such
+  parameters and arguments outside the unit disk, the largest
+  relative error against mpmath went from 3e-4 to 1.2e-14. A difference up to
+  400 is evaluated this way (relative error below 5e-13 at 400); a difference
+  that rounding moved off the integer (`2.3 − 0.3` is `1.9999999999999998`)
+  counts as that integer.
+- **`Hypergeometric2F1` returns `NaN` (stays symbolic) instead of wrong
+  digits.** Every formula it uses is a sum whose terms can cancel, and none
+  was checked: a result is now rejected when its largest term (for a
+  formula with two parts, the larger part) exceeds it by more than a factor
+  of 1e3 (1e6 for the machine series with a real `z` from −1 to 1/2), and
+  another formula is tried; when no formula meets that bound,
+  the best one is used if its factor is at most 1e4 (about 11 correct
+  digits), and the result is `NaN` otherwise. Over 1,000 random real
+  arguments (`a`, `b` from −25 to 25, `c` from −25 to 45, `z` from 0.5 to
+  1 or below −1), 936 have a value, 5 of them with a relative error above
+  1e-12 (the largest 2e-11). `Hypergeometric2F1(14.31, 4, 42.19, 0.752)`
+  had 7 correct digits at machine precision. A series whose third
+  parameter is negative was also stopped at a small term just before `n =
+  −c`, after which its terms grow again:
+  `Hypergeometric2F1(6.066, -9.19, 38.584, 0.5193)` had 6 correct digits.
+  `Hypergeometric2F1(0.5, 60.5, 1.5, 2.5 + i)` was `1.3e-18 + 1.3e-18i`
+  and is now `0.0132129072203 + 0.0686091095322i`. A series that
+  shrank and then grew again (a negative third parameter, or large
+  parameters with `z` near 1) was stopped at its first small term; with real
+  arguments `Hypergeometric2F1(102, 1, 2, 0.9)` was `1.15e87` at machine
+  precision and `2.05e98` at the default precision, instead of `1.10e99`.
+  The big-decimal series adds working digits when its terms cancel, and so
+  does the big-decimal connection formula when its two parts cancel
+  (`Hypergeometric2F1(26.91, 7.09, 38.36, 0.689)` at precision 30 had 23
+  correct digits). The average of two evaluations at nearby parameters,
+  used when no formula
+  applies, kept as few as 4 correct digits when a parameter difference is a
+  nonzero integer: it is now used only when that difference is 0, and the
+  result is `NaN` otherwise. A polynomial of degree above one million (such
+  as `Hypergeometric2F1(-1e20, 0.5, 1.5, 2)`) is `NaN` instead of a
+  computation that does not end.
 - **A `vars`-mapped input reached through an assigned value is no longer
   baked into compiled code.** The compile-time folder stopped only at a
   subtree that mentioned a mapped name itself. With `a := sin(y_0)` and
@@ -131,9 +224,57 @@
   gives their values.
 - **`N(Arcosh(x))` for a real `x` in [−1, 1] is purely imaginary**
   (`N(Arcosh(1/2))` was `5.6e-17 + 1.047…i`).
+- **The upper incomplete gamma `Gamma(s, x)` for `Re(x) < 0`** (#353). On
+  the negative real axis `.N()` dropped a term once `|x|` grew:
+  `Gamma(-1, -20)` was `1357393.643181685`, it is now
+  `1357392.893567075 + 3.141592653589793i`; `Gamma(1/2, -20)` was
+  `-111433110.2i`, it is now `1.7724538509055159 - 111433109.93704489i`.
+  Off the axis the error grew with `|x|` wherever `Re(x) < 0`
+  (`Gamma(-0.7, -12+5i)` had 9 correct digits). The complex kernel now picks
+  a method without cancellation for each region; measured against mpmath,
+  the relative error is below `1e-13` for `|x|` up to 150 in every
+  direction. The same kernel gives `E₁`, `Ei`, `Si`, `Ci`, `Shi`, `Chi`,
+  `erf` and `erfi` for complex arguments, and they gain the same accuracy
+  (`Si(4+6.9i)` had 5 correct digits). For a negative integer `s` and a
+  complex `x` in the right half-plane the old kernel was also inaccurate:
+  `Gamma(-9, 13+7.5i)` was `3.5e-18 - 1.1e-17i`, it is now
+  `2.449e-18 + 7.84e-20i`. The real kernel had the same defect for a real
+  `x > 0`: `Gamma(-15, 60)` was `2.389e-55`, it is now `2.457e-55`, and
+  `Gamma(-9, 30)` had 8 correct digits, now 15. The complex `Gamma(s)` is
+  now accurate near its poles (`Gamma(-1.999999 + 10^{-9}i)` had 10 correct
+  digits, now 15). Where the kernel cannot certify about 12 digits, `.N()`
+  leaves `Gamma(s, x)` unevaluated: some `s` close to `0, -1, -2, …` with
+  `x` near the negative real axis (how close depends on `x`), and some
+  points with `|Im s| > 10` (on 2500 random points with `|Re s|, |Im s| ≤
+  30` and `0.01 ≤ |x| ≤ 600` it declines at 87 and answers the others with
+  an error below `1.7e-13`). A value or a factor outside the range of
+  doubles no longer spoils the result: `Gamma(-5, -712).N()` was `NaN`, it
+  is now `1.2778259067196765e+292`; `Gamma(-170, -100).N()` was `7.4e-308`,
+  it is now `3.925357618957481e-299`; a value above the range of doubles
+  (`Gamma(-5, -2000)`) stays unevaluated, where it was `~oo` (the pole of
+  the one-argument `Gamma` at `-5` was applied to the two-argument form).
+  The complex `Gamma(z)` had the same kind of defect: `Gamma(-2+300i).N()`
+  was `NaN`, it is now `3.448337914830325e-211 - 8.293880091137963e-212i`,
+  and `Gamma(150+i).N()` was `~oo`, it is now
+  `1.1034056813344657e+260 - 3.632309144571929e+260i`.
 
 ### New Features
 
+- **`ce.withStepBudget({ steps, label }, fn)`: a deterministic hang guard.**
+  Runs `fn` with at most `steps` steps of engine work, where a step is one of
+  the engine's cooperative cancellation checks: the count of a computation on
+  one engine state is the same on every machine, unlike a wall-clock limit,
+  so a host can bound a decision without letting the clock decide it (Tycho
+  item 326). The step is an opaque unit — deterministic, not a measure of
+  cost, and not comparable across engine versions — so a budget is tuned
+  empirically, with a `withTimeLimit` span outside it as the guard of last
+  resort. A spent budget throws a `CancellationError` with the new
+  `cause: 'step-budget'`, the span's `label` as its `attribution` and the
+  active labels in `spans`; a time expiry keeps `cause: 'timeout'`.
+  `CancellationCause` gains `'step-budget'`, and `isTimeoutCancellation`
+  answers `true` for both causes. An Epsil program stopped by a spent budget
+  answers `["Error", "Step budget exhausted", "step-budget"]`, as a timeout
+  answers `["Error", …, "timeout"]`.
 - **`PolyGamma(m, z)`, `Digamma(z)` and `Trigamma(z)` evaluate at a complex
   `z`** (#340, contributed by [enumeratio](https://github.com/enumeratio)).
   `PolyGamma(1, 1+2i).N()` is `0.1249311621409446 − 0.4778255501472298i`:
@@ -157,15 +298,15 @@
   when `precision` is higher, and are within about 1e−11 relative of the
   true value (measured against mpmath). Where the kernel cannot vouch for
   that accuracy, `LerchPhi` stays symbolic under `N()` instead of returning
-  a wrong value: past the unit disk and on its rim wherever the incomplete
-  gamma function it needs is inaccurate (#353), when the terms of a sum
-  cancel too far (for example `LerchPhi(-0.99, -12, 1)`), and when the base
-  point is further left than `a = −10⁶`. A float operand gives a float
+  a wrong value: past the unit disk, for some `s` within about `10⁻²` of a
+  positive integer when `z` is near the real axis (the incomplete gamma
+  function it needs is inaccurate there), when the terms of a sum cancel too
+  far (for example `LerchPhi(-0.999, -6, 1)` or `LerchPhi(-2, -3.5, 1.5)`),
+  and when the base point is further left than `a = −10⁶`. A float operand gives a float
   result (`LerchPhi(1.0, 2, 1)` is `1.6449…`, not `π²/6`). `LerchPhi`
   compiles to JavaScript, GLSL and WGSL for real operands. The JavaScript
   lane runs the interpreter's kernel and is `NaN` where the value is complex
-  (real `z > 1`, or `a < 0` with a non-integer `s`) and for real `z < −1`,
-  where the value is real but the kernel declines until #353 is fixed. The
+  (real `z > 1`, or `a < 0` with a non-integer `s`) or the kernel declines. The
   GPU lane is `NaN` past the unit disk (except for `s = 0, −1, −2`, where
   `Φ` is a rational function of `z`), and inside it wherever its f32 sums
   cannot converge within their term budget (`|z|` closer to 1 than about
@@ -175,10 +316,10 @@
   z)` previously answered only an integer order `s ≥ 2`; `PolyLog(2.5,
   0.5).N()` is now `0.5549972787175124` and `PolyLog(1.5+0.5i, 0.5).N()` is
   `0.6126403889001154 - 0.05103210425890372i`, both by `Liₛ(z) = z·Φ(z,s,1)`
-  through the `LerchPhi` kernel at base point `a = 1`. Past `|z| = 1`, where
-  that kernel's continuation declines, Jonquière's inversion formula takes
-  over: `PolyLog(1.5, -3).N()` is `-1.679089730504828` (a real order gives a
-  real value everywhere on the real axis below `-1`). `PolyLog(s, 1)` and `PolyLog(s, -1)`
+  through the `LerchPhi` kernel at base point `a = 1`. Past `|z| = 1` that
+  kernel's continuation answers, and where it declines Jonquière's inversion
+  formula takes over: `PolyLog(1.5, -3).N()` is `-1.6790897305048254` (a
+  real order gives a real value everywhere on the real axis below `-1`). `PolyLog(s, 1)` and `PolyLog(s, -1)`
   now reduce exactly to `Zeta(s)` and the Dirichlet eta identity
   `(2^(1-s) - 1)·Zeta(s)` for every order, not only an integer one (the
   kernel answers instead for an order within `1e-6` of 1 at `z = -1`, where
@@ -187,12 +328,12 @@
   exact `6` and `PolyLog(-2, -2)` the exact `2/27`. Every existing
   integer-order and elementary-form result is unchanged. The widened kernel
   declines (stays symbolic) rather than answer a value it cannot certify to
-  `1e-12`: within `1e-3` of the `z = 1` branch point, where `s` sits within
-  0.05 of a positive integer on or past the unit circle, where `Re(s)` is
-  too negative for the series inside the disk, and past the disk where the
-  inversion formula loses digits (an order with `|Im s| > 1.5`, or
-  `Re(s) > 2` with `|z|` above about 32). `numerics/polylog.ts` records the
-  measured boundaries. `PolyLog` compiles to JavaScript, GLSL and WGSL for
+  `1e-12`: within `1e-3` of the `z = 1` branch point, where `Re(s)` is too
+  negative for the series inside the disk, and past the disk where both the
+  continuation and the inversion formula decline (some orders within about
+  `1e-2` of a positive integer, on or past the unit circle, for example
+  `PolyLog(3.000001, 2)`). `numerics/polylog.ts` records
+  the measured boundaries. `PolyLog` compiles to JavaScript, GLSL and WGSL for
   real operands; it was not compilable at all before. The JavaScript lane
   answers every order the way the interpreter does. The GPU lane answers the
   orders `1`, `0`, `-1` and `-2` to `-12` in closed form and other orders

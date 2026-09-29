@@ -144,7 +144,7 @@ describe('PolyLog past |z| = 1 and on the rim, non-integer order', () => {
   });
 });
 
-describe('PolyLog past |z| = 1 by the inversion formula', () => {
+describe('PolyLog past |z| = 1: the continuation, or the inversion formula where it declines', () => {
   test.each([
     // mpmath: polylog(1.5,-3) = -1.6790897305048281353
     [1.5, -3, -1.6790897305048281353],
@@ -160,6 +160,12 @@ describe('PolyLog past |z| = 1 by the inversion formula', () => {
     const v = li(s, z).N();
     expect(v.im).toBe(0);
     expect(Math.abs(v.re - expected)).toBeLessThan(1e-13 * Math.abs(expected));
+  });
+
+  test('an order near a positive integer at a large |z| matches mpmath', () => {
+    // mpmath: polylog(4.02,-61) = -27.863090147910881766
+    const v = li(4.02, -61).N();
+    expect(Math.abs(v.re + 27.863090147910881766)).toBeLessThan(1e-11 * 27.87);
   });
 
   test('a complex order below −1 matches mpmath', () => {
@@ -294,13 +300,24 @@ describe('PolyLog declines rather than certify an unreliable widened value', () 
     expect(li(2.5, 0.999).N().re).toBeCloseTo(1.3389476332802494862, 12);
   });
 
-  test('a complex order next to a positive integer declines on the rim', () => {
-    // The distance to the integer is measured in the complex plane: the
-    // continuation is 3e−4 off here (mpmath: -0.84520374989768012881 -
-    // 0.48601214735116938011j).
+  test('a complex order next to a positive integer on the rim matches mpmath', () => {
+    // mpmath: polylog(5+1e-6j, -0.86-0.51j) = -0.84520374989768012881 - 0.48601214735116938011j
+    // (z from the doubles −0.86 and −0.51). Until the incomplete gamma fix
+    // (#353) a guard declined every order within 0.05 of a positive integer
+    // on or past the unit circle; the continuation is accurate here.
+    const v = li(['Complex', 5, 1e-6], ['Complex', -0.86, -0.51]).N();
     expect(
-      li(['Complex', 5, 1e-6], ['Complex', -0.86, -0.51]).N().numericValue
-    ).toBeUndefined();
+      Math.hypot(v.re + 0.84520374989768012881, v.im + 0.48601214735116938011)
+    ).toBeLessThan(1e-12);
+  });
+
+  test('an order next to a positive integer, with z on the cut, still declines', () => {
+    // mpmath: polylog(3.000001,2) = 2.7620716611878396 - 0.75469285643604317j
+    // The continuation needs Γ(1 − s, −log 2) next to a pole of Γ(1 − s)
+    // with its argument on the negative real axis, where the incomplete
+    // gamma kernel declines; the inversion formula declines within 1e-3 of
+    // an integer order.
+    expect(li(3.000001, 2).N().numericValue).toBeUndefined();
   });
 
   test('a negative order at a positive z answers (every term is positive)', () => {

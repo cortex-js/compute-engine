@@ -650,6 +650,43 @@ that point runs **outside** the deadline and is never cancelled (see
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~withStepBudget()~~ {#withstepbudget-1}
+
+```ts
+withStepBudget<T>(limit, fn): T
+```
+
+Run `fn` with at most `limit.steps` steps of engine work: a hang guard
+that fires at the same point on every machine, unlike a wall-clock
+limit. A step is one of the engine's cooperative cancellation checks —
+an opaque unit, deterministic for one computation on one engine state,
+but not a measure of cost and not comparable across engine versions;
+tune the budget empirically and keep a `withTimeLimit` span outside it.
+A spent budget throws a `CancellationError` with `cause: 'step-budget'`
+and the span's `label` as its `attribution`.
+
+**⚠️ `fn` MUST be synchronous**, as for `withTimeLimit`.
+
+• T
+
+####### limit
+
+####### steps
+
+`number`
+
+####### label?
+
+`string`
+
+####### fn
+
+() => `T` *extends* `Promise`\<`unknown`\> ? `never` : `T`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~withEffects()~~ {#witheffects-1}
 
 ```ts
@@ -10581,6 +10618,43 @@ that point runs **outside** the deadline and is never cancelled (see
 
 <MemberCard>
 
+##### IComputeEngine.withStepBudget() {#withstepbudget}
+
+```ts
+withStepBudget<T>(limit, fn): T
+```
+
+Run `fn` with at most `limit.steps` steps of engine work: a hang guard
+that fires at the same point on every machine, unlike a wall-clock
+limit. A step is one of the engine's cooperative cancellation checks —
+an opaque unit, deterministic for one computation on one engine state,
+but not a measure of cost and not comparable across engine versions;
+tune the budget empirically and keep a `withTimeLimit` span outside it.
+A spent budget throws a `CancellationError` with `cause: 'step-budget'`
+and the span's `label` as its `attribution`.
+
+**⚠️ `fn` MUST be synchronous**, as for `withTimeLimit`.
+
+• T
+
+####### limit
+
+####### steps
+
+`number`
+
+####### label?
+
+`string`
+
+####### fn
+
+() => `T` *extends* `Promise`\<`unknown`\> ? `never` : `T`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.withEffects() {#witheffects}
 
 ```ts
@@ -14098,9 +14172,11 @@ The result is in canonical form.
 
 **Time and recursion limits**: if the evaluation runs inside an enclosing
 [`ComputeEngine.withTimeLimit`](#withtimelimit)
-span and exceeds its deadline, or
-exceeds the recursion limit, a `CancellationError` is thrown (its `cause`
-is `'timeout'` or `'recursion-depth-exceeded'`). Catch it to distinguish
+span and exceeds its deadline, spends an enclosing
+[`ComputeEngine.withStepBudget`](#withstepbudget)
+budget, or exceeds the recursion limit, a `CancellationError` is thrown
+(its `cause` is `'timeout'`, `'step-budget'` or
+`'recursion-depth-exceeded'`). Catch it to distinguish
 an interrupted evaluation from a symbolic (inert) result.
 
 ####### options?

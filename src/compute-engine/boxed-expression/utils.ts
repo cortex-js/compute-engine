@@ -36,6 +36,7 @@ import {
   unregisterProvisionalDependent,
 } from './provisional-application.js';
 import {
+  binderBindingOf,
   boundVariableNames,
   boundVariableNamesInOperand,
   markShieldDeclaration,
@@ -1113,24 +1114,38 @@ function isAssignedVariableName(
 }
 
 /**
- * Run `fn` with each name in `names` shielded from its assigned value: for the
- * duration of the call, the symbol is shadow-declared VALUELESS (keeping its
- * declared type; in-scope assumptions survive) in a temporary scope.
+ * Is the value of an assigned symbol named `name` hidden only by the
+ * valueless variable of an enclosing binder?
  *
- * This is the shared mechanism behind the binder convention (ARCHITECTURE.md,
- * "Bound variables, free symbols, and assigned values"): a variable a binder
- * owns (`Solve`/`Integrate`/`Limit`/`D`/`Sum`/…) is a pure symbol, so a
- * same-named global assignment must not leak into the operation OR its result.
- *
- * Only names carrying a USER-ASSIGNED, non-constant value are shielded — a
- * valueless or built-in-constant name needs no shield (and a constant must not
- * be stripped). When none qualify, `fn` runs directly with no scope push, so
- * the common case (no contradictory assignment) has zero overhead and cannot
- * change behavior.
- *
- * Re-entrancy is naturally safe: a shielded symbol no longer reads as assigned,
- * so a nested `withValueShield` over the same name finds nothing to shield.
+ * Inside the evaluate handler of a binder such as `Integrate`, the innermost
+ * binding of the integration variable is the binder's own variable, which
+ * has no value, so `isAssignedVariableName` answers `false`. But a read of
+ * that name by an occurrence the binder does not own skips the binder's
+ * variable and reads the next binding outward (`bindingInContext`,
+ * `binders.ts`). A function literal's parameter read outside a call is such
+ * an occurrence: compiling `x ↦ |x|` inside `Integrate` with `x := 5` read
+ * `x` as positive and dropped the `Abs`. When this function answers `true`,
+ * the name needs a shield as much as a directly assigned one does.
  */
+function binderHidesAssignedValue(
+  ce: Expression['engine'],
+  name: string
+): boolean {
+  let scope: Scope | null = ce.context.lexicalScope;
+  while (scope) {
+    const found = scope.bindings.get(name);
+    if (found !== undefined) {
+      if (!('value' in found)) return false;
+      const value = found.value.value;
+      if (value !== undefined && value !== null)
+        return found.value.isConstant !== true;
+      if (binderBindingOf(ce, name, scope) === undefined) return false;
+    }
+    scope = scope.parent;
+  }
+  return false;
+}
+
 /**
  * Run `fn` with a `WithRandomSeed` frame seeded by `seed` installed as the
  * innermost frame: for the duration of the call, every `ce._random()` draw is
@@ -1214,6 +1229,35 @@ export function withDrawRollback<T>(ce: ComputeEngine, fn: () => T): T {
   return result;
 }
 
+/**
+ * Run `fn` with each name in `names` shielded from its assigned value: for the
+ * duration of the call, the symbol is shadow-declared VALUELESS (keeping its
+ * declared type; in-scope assumptions survive) in a temporary scope.
+ *
+ * This is the shared mechanism behind the binder convention (ARCHITECTURE.md,
+ * "Bound variables, free symbols, and assigned values"): a variable a binder
+ * owns (`Solve`/`Integrate`/`Limit`/`D`/`Sum`/…) is a pure symbol, so a
+ * same-named global assignment must not leak into the operation OR its result.
+ *
+ * A name is shielded in two cases:
+ * - its visible binding carries a user-assigned, non-constant value
+ *   (`isAssignedVariableName`);
+ * - its visible binding is the valueless variable of an enclosing binder, and
+ *   that binder variable hides an outer binding with an assigned value
+ *   (`binderHidesAssignedValue`). An occurrence of the name that the binder
+ *   does not own, such as a function literal's parameter read outside a
+ *   call, skips the binder's variable and reads the outer value.
+ *
+ * A valueless name that hides no value, or a built-in constant, is not
+ * shielded (a constant must not be stripped). When no name is shielded, `fn`
+ * runs directly with no scope push, so the common case (no contradictory
+ * assignment) has no overhead and cannot change behavior.
+ *
+ * Re-entrancy is safe: inside the shield, the visible binding of a shielded
+ * name is the valueless shield declaration. A shield declaration is not a
+ * binder's variable, so neither test above passes for it, and a nested
+ * `withValueShield` over the same name finds nothing more to shield.
+ */
 export function withValueShield<T>(
   ce: ComputeEngine,
   names: Iterable<string>,
@@ -1224,7 +1268,11 @@ export function withValueShield<T>(
   for (const name of names) {
     if (seen.has(name)) continue;
     seen.add(name);
-    if (!isAssignedVariableName(ce, name)) continue;
+    if (
+      !isAssignedVariableName(ce, name) &&
+      !binderHidesAssignedValue(ce, name)
+    )
+      continue;
     // Capture the declared type as a STRING; passing the BoxedType object to
     // `declare` throws "type invalid".
     shielded.push({ name, type: ce.box(name).type.toString() });

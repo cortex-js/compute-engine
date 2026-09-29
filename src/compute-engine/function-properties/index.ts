@@ -275,6 +275,11 @@ function argOnPole(
     if (r.property !== 'Poles') continue;
     if (r.assumptions != null || r.condition != null) continue;
     if (r.value == null || r.argIndex == null) continue;
+    // A record describes one arity of the operator (`["Gamma", "z"]`); it
+    // says nothing about another arity with the same name. The incomplete
+    // gamma function Γ(s, x) is entire in s for x ≠ 0, so the poles of
+    // Γ(s) at s = 0, −1, −2, … are not poles of Γ(s, x).
+    if (Array.isArray(r.expr) && r.expr.length - 1 !== ops.length) continue;
     const arg = ops[r.argIndex];
     if (arg !== undefined && isOnPoleSet(ce, arg, r.value)) return true;
   }

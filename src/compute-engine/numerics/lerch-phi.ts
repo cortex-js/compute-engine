@@ -1,8 +1,8 @@
 import { Complex } from 'complex-esm';
 import {
-  gamma,
   hurwitzZetaComplex,
   incompleteGammaUpperComplex,
+  incompleteGammaUpperComplexErrorBound,
 } from './numeric-complex.js';
 import { hurwitzZeta } from './special-functions.js';
 
@@ -83,6 +83,10 @@ function shiftBase(
  * kernels decline rather than return a value with too few correct digits.
  */
 const MAX_LOSS = 1e-12;
+
+/** The relative accuracy every value returned here is within (see the
+ * comment at the top of this file). */
+const ACCURACY = 1e-11;
 
 /**
  * Σ_{k≥0} zᵏ(k+a)^(−s) for |z| < 1, by direct summation, capped at 2 million
@@ -304,74 +308,14 @@ function hermiteTail(logZ: Complex, s: Complex, a: Complex): Complex {
   return sum.mul(-2);
 }
 
-/**
- * `incompleteGammaUpperComplex(σ, x)` is accurate only in part of the plane
- * (cortex-js/compute-engine#353). Measured against mpmath's `gammainc` for
- * the σ = 1 − s used here (|σ| ≤ 13), by the method the kernel selects:
- *
- * - Re(x) ≤ 0 and |x| > 2.5: digits lost (1e−9 and worse by |x| = 3).
- * - |x| > |σ| + 14 and |x| > 12, the asymptotic series: its error is the
- *   size of the smallest term, where the series is truncated. That term is
- *   still 1e−3 of the sum at |x| − |σ| = 15 and falls below 1e−14 only past
- *   about |x| − |σ| = 50.
- * - An integer σ ≤ 0 otherwise, the downward recurrence from E₁(x): within
- *   1e−13 for |x| ≤ 2.5, but past that E₁'s power series cancels, with
- *   errors of 1e−5 at |x| = 10 and of order 1 by |x| = 15.
- * - Re(x) > 0 and |x| ≥ |σ| + 1, the continued fraction: within 1e−14.
- * - Otherwise Γ(σ) − γ(σ,x), with γ by its power series: this cancels when
- *   Γ(σ,x) is small next to Γ(σ) or next to the largest series term, even
- *   for a small |x| when σ is close to a negative integer (7.7e−11 at
- *   σ = −3.003, x = 0.41 + 1.58i).
- *
- * This estimate follows that dispatch and returns a bound on the relative
- * error of `value` = Γ(σ,x): the smallest asymptotic term, a cancellation
- * estimate for Γ(σ) − γ(σ,x), 1e−14 for the continued fraction and for the
- * recurrence at |x| ≤ 2.5, and `Infinity` where the kernel is unreliable. The estimate
- * stays valid (it only becomes too cautious) when the kernel is improved.
- */
-const INCOMPLETE_GAMMA_SMALL_RADIUS = 2.5;
-
-function incompleteGammaRelativeError(
-  sigma: Complex,
-  x: Complex,
-  value: Complex
-): number {
-  const ax = x.abs();
-  if (!(x.re > 0) && ax > INCOMPLETE_GAMMA_SMALL_RADIUS) return Infinity;
-  const sAbs = sigma.abs();
-  if (ax > sAbs + 14 && ax > 12) {
-    // The asymptotic series Σ_k (σ−1)(σ−2)…(σ−k)/xᵏ, truncated at its
-    // smallest term, as `upperGammaAsymptoticComplex` does.
-    let term = 1;
-    let sum = new Complex(1, 0);
-    let t = new Complex(1, 0);
-    for (let k = 1; k < 1000; k++) {
-      const next = t.mul(sigma.sub(k)).div(x);
-      if (next.abs() > term) break;
-      t = next;
-      term = next.abs();
-      sum = sum.add(next);
-      if (term < 1e-17 * sum.abs()) break;
-    }
-    return term / sum.abs() + 1e-15;
-  }
-  if (sigma.im === 0 && Number.isInteger(sigma.re) && sigma.re <= 0)
-    return ax <= INCOMPLETE_GAMMA_SMALL_RADIUS ? 1e-14 : Infinity;
-  if (x.re > 0 && ax >= sAbs + 1) return 1e-14;
-  // γ(σ,x) = x^σ·e^(−x)·Σ_k xᵏ/(σ(σ+1)…(σ+k)): each term is rounded to
-  // about 1e−16 of its size, and Γ(σ) has an error of the same order. The
-  // factor 1e−14 (not 1e−16) is a safety margin: against mpmath, the actual
-  // error reached 30 times the 1e−16 estimate (σ = −8.063, where Γ(σ) comes
-  // from the reflection formula).
-  let term = 1 / sigma.abs();
-  let sizes = term;
-  for (let k = 1; k < 2000; k++) {
-    term = (term * ax) / sigma.add(k).abs();
-    sizes += term;
-    if (term < 1e-17 * sizes) break;
-  }
-  const scale = x.pow(sigma).mul(x.neg().exp()).abs();
-  return (1e-14 * (gamma(sigma).abs() + scale * sizes)) / value.abs();
+/** The bound on the relative error of `incompleteGammaUpperComplex(σ, x)`
+ * wherever it answers (a NaN result means that it declined). The kernel
+ * states it, with its measurements (`incompleteGammaUpperComplexErrorBound`):
+ * 3e−13 for |σ| up to about 11, growing with |σ| as the error of Γ(σ)
+ * does, and up to 1e−12 next to a pole of Γ(σ) at σ = 0, −1, −2, … when
+ * |x| + Re x ≤ 3. */
+function incompleteGammaError(sigma: Complex, x: Complex): number {
+  return incompleteGammaUpperComplexErrorBound(sigma, x);
 }
 
 /**
@@ -390,11 +334,13 @@ function incompleteGammaRelativeError(
  * does (`shiftBase`).
  *
  * Declines (returns `undefined`) when −Re(a) is too large for the shift
- * (`MAX_BASE_SHIFT`), when `incompleteGammaUpperComplex`'s
- * argument is outside its calibrated-reliable region
- * (`incompleteGammaRelativeError`) or when the head/tail split has
- * cancelled below what the cancellation estimate below can vouch for —
- * never a wrong number.
+ * (`MAX_BASE_SHIFT`), when `incompleteGammaUpperComplex` declines (returns
+ * NaN: for the σ = 1 − s used here, mostly when s is within 1e−2 of a
+ * positive integer and −a·log z is near the negative real axis, or when
+ * |Im s| > 10), or when
+ * the terms cancel so far that their rounding errors, or the incomplete
+ * gamma's error bound (`incompleteGammaError`) times the size of the
+ * closed term, exceed what the value can carry — never a wrong number.
  */
 function lerchContinuedComplex(
   z: Complex,
@@ -415,9 +361,8 @@ function lerchContinuedComplex(
   const x = negLogZ.mul(b);
   const sigma = new Complex(1, 0).sub(s);
   const upper = incompleteGammaUpperComplex(sigma, x);
+  // NaN: the kernel cannot vouch for about 12 digits here, so neither can Φ.
   if (upper.isNaN() || !upper.isFinite()) return undefined;
-  const upperError = incompleteGammaRelativeError(sigma, x, upper);
-  if (!(upperError <= 1e-12)) return undefined;
   const closed = negLogZ
     .mul(b)
     .exp()
@@ -430,18 +375,27 @@ function lerchContinuedComplex(
   ];
   const phi = terms.reduce((acc, t) => acc.add(t), C_ZERO);
   const out = head.add(zk.mul(phi));
-  // The terms can cancel far below double precision (Φ(10,10,10) ≈ 4e−11
-  // from terms of order 1): each carries a rounding error of about 1e−15 of
-  // its size, and the closed term also the incomplete gamma's own error.
-  // When the resulting relative error of the value exceeds `MAX_LOSS`,
-  // decline rather than ship a wrong number.
+  // The terms can cancel far below their size (Φ(−0.999,−6,1) ≈ 1e−3 from
+  // terms of order 0.5, and the closed one also of order 0.3): each carries a rounding error of about 1e−15 of
+  // its size (ten times the double precision, as a margin), and when that
+  // relative error of the value exceeds `MAX_LOSS`, decline. The closed
+  // term also carries the incomplete gamma's own error, whose bound
+  // (`incompleteGammaError`) is already a measured worst case with its own
+  // margin, so that part is checked, together with the rounding error,
+  // against the stated accuracy `ACCURACY` instead.
   const size = Math.max(
     head.abs(),
     zk.abs() * Math.max(...terms.map((t) => t.abs()))
   );
-  const lost =
-    (1e-15 * size + upperError * zk.abs() * closed.abs()) / out.abs();
-  if (!out.isFinite() || !(lost <= MAX_LOSS)) return undefined;
+  const rounding = (1e-15 * size) / out.abs();
+  const gammaLoss =
+    (incompleteGammaError(sigma, x) * zk.abs() * closed.abs()) / out.abs();
+  if (
+    !out.isFinite() ||
+    !(rounding <= MAX_LOSS) ||
+    !(rounding + gammaLoss <= ACCURACY)
+  )
+    return undefined;
   return out;
 }
 
@@ -464,11 +418,10 @@ export function lerchPhiComplex(
     return new Complex(1, 0).div(new Complex(1, 0).sub(z)); // Φ(z,0,a) = 1/(1−z)
   const absZ = z.abs();
   const onRim = z.im !== 0 && Math.abs(absZ - 1) < 1e-9;
-  // Past the unit disk and on its rim, `incompleteGammaUpperComplex`'s
-  // argument can land where that kernel is inaccurate (for example next to
-  // its negative real axis, for any real z < −1) — `lerchContinuedComplex`
-  // declines there itself, on the calibrated `incompleteGammaRelativeError`
-  // estimate, so this dispatcher does not need to special-case z.
+  // Past the unit disk and on its rim: the continuation. It declines by
+  // itself where `incompleteGammaUpperComplex` declines or where its terms
+  // cancel too far (see `lerchContinuedComplex`), so this dispatcher does
+  // not need to special-case z.
   if (absZ > 1 || onRim) return lerchContinuedComplex(z, s, a);
   // Real z in [−1, 0) with Re(s) > 0: the Euler transform. For Re(s) ≤ 0
   // its terms grow and the transform is not valid (see `lerchEulerComplex`):

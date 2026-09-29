@@ -228,6 +228,20 @@ function antiderivativeSimple(
     return ce.expr(['Negate', ['Cos', index]]);
   if (isFunction(fn, 'Cos') && sym(fn.op1) === index)
     return ce.expr(['Sin', index]);
+  // Basic trig with a linear argument: ∫sin(a·x+b) dx = −cos(a·x+b)/a and
+  // ∫cos(a·x+b) dx = sin(a·x+b)/a. Without this, integration by parts could
+  // not take `dv = sin(−x)` or `dv = sin(2x)`, and `∫ x·sin(−x) dx` stayed
+  // unevaluated while `∫ −x·sin(x) dx` had a closed form.
+  if (isFunction(fn, 'Sin') || isFunction(fn, 'Cos')) {
+    const a = linearIndexCoefficient(fn.op1, index);
+    if (a) {
+      if (fn.operator === 'Cos')
+        return ce.function('Divide', [ce.function('Sin', [fn.op1]), a]);
+      return ce.function('Negate', [
+        ce.function('Divide', [ce.function('Cos', [fn.op1]), a]),
+      ]);
+    }
+  }
 
   // Exponential with a linear argument: ∫e^{a·x+b} dx = e^{a·x+b}/a.
   // (Covers the plain `e^x` case with a = 1.) The exponent is linear in the
@@ -481,21 +495,26 @@ function tryLinearSubstitution(
     let linearTerm: Expression | null = null;
     const constantTerms: Expression[] = [];
 
+    // The coefficient of the index is the sum of the coefficients of all
+    // the linear terms: `-2x + 2x` has coefficient `0`, not the `2` of its
+    // last term.
+    const linearTerms: Expression[] = [];
     for (const term of terms) {
       if (!term.has(index)) {
         constantTerms.push(term);
       } else if (sym(term) === index) {
-        linearTerm = ce.One;
+        linearTerms.push(ce.One);
       } else if (isFunction(term, 'Multiply')) {
         const factors = term.ops;
         const varFactor = factors.find((f) => sym(f) === index);
         if (varFactor) {
           const constFactors = factors.filter((f) => f !== varFactor);
           if (constFactors.every((f) => !f.has(index))) {
-            linearTerm =
+            linearTerms.push(
               constFactors.length === 1
                 ? constFactors[0]
-                : ce.expr(['Multiply', ...constFactors]);
+                : ce.expr(['Multiply', ...constFactors])
+            );
           }
         }
       } else {
@@ -504,12 +523,32 @@ function tryLinearSubstitution(
       }
     }
 
+    if (linearTerms.length === 1) linearTerm = linearTerms[0];
+    else if (linearTerms.length > 1)
+      linearTerm = ce.function('Add', linearTerms);
+
     if (linearTerm) {
       coefficient = linearTerm;
     }
   }
 
   if (!coefficient) return null;
+
+  // A zero coefficient (`sin(0·x + 1)`: canonical form keeps `0·x`, because
+  // it is not zero at an infinite `x`) means the inner function does not
+  // depend on the index: its value is the sum of its constant terms. The
+  // integrand is then a constant, and dividing by the coefficient would give
+  // an infinite or NaN result.
+  if (coefficient.evaluate().isSame(0)) {
+    const terms = isFunction(inner, 'Add')
+      ? inner.ops.filter((t) => !t.has(index))
+      : [];
+    const value = terms.length === 0 ? ce.Zero : add(...terms);
+    return ce.function('Multiply', [
+      applyOuter(outer, value, ce),
+      ce.symbol(index),
+    ]);
+  }
 
   // Get the antiderivative of the outer function
   const dummy = ce.symbol('_u_');
@@ -537,6 +576,12 @@ function tryGetConstantRatio(
 
   // Simple case: exact match
   if (expr1.isSame(expr2)) return ce.One;
+
+  // No constant `c` gives `expr1 = c·0` for a nonzero `expr1`, and dividing
+  // by the zero would give an infinite ratio. A zero `expr2` is the
+  // derivative of an inner function that does not depend on the index, such
+  // as `0·x + 1` (canonical form keeps `0·x`).
+  if (expr2.isSame(0)) return null;
 
   // Try dividing
   const ratio = expr1.div(expr2).simplify();
@@ -783,6 +828,33 @@ function filter(sub: BoxedSubstitution): boolean {
   for (const [k, v] of Object.entries(sub)) {
     if (k !== 'x' && k !== '_x' && v.has('_x')) return false;
   }
+  // A zero coefficient `_a` of `_a·_x` (`sin(0·x + 1)`: canonical form keeps
+  // `0·x`) means the matched function does not depend on the index. The
+  // rules divide by `_a`, which would give an infinite or NaN result.
+  if (sub._a?.isSame(0)) return false;
+  return true;
+}
+
+/**
+ * Whether no coefficient captured by an `Abs` rule is known to be non-real.
+ *
+ * The antiderivative `u·|u|/(2a)` of `|u|`, with `u = a·x + b`, is valid only
+ * for a real `u`: its derivative is `|u|` because `d|u|/du = sgn(u)`, which
+ * holds for a real `u` only. For `u = x + i`, `|u| = √(x² + 1)` and the rule
+ * gave `√2` for `∫_{−1}^{1} |x + i| dx`, whose value is `√2 + asinh(1)`.
+ * A coefficient with no numeric value (an undeclared symbol) is accepted.
+ */
+function realAbsCoefficients(sub: BoxedSubstitution): boolean {
+  for (const key of ['_a', '__b']) {
+    const v = sub[key];
+    if (v === undefined) continue;
+    const terms = isFunction(v, 'Sequence') ? v.ops : [v];
+    for (const t of terms) {
+      // A constant is checked by its numeric value.
+      const n = t.N();
+      if (isNumber(n) && n.isComplex) return false;
+    }
+  }
   return true;
 }
 
@@ -840,7 +912,7 @@ const INTEGRATION_RULES: Rule[] = [
       ],
       ['Multiply', 2, '_a'],
     ],
-    condition: filter,
+    condition: (sub) => filter(sub) && realAbsCoefficients(sub),
   },
 
   // |x + b| -> (x + b)|x + b| / 2 (coefficient of x is implicitly 1)
@@ -851,7 +923,8 @@ const INTEGRATION_RULES: Rule[] = [
       ['Multiply', ['Add', '_x', '__b'], ['Abs', ['Add', '_x', '__b']]],
       2,
     ],
-    condition: (sub) => filter(sub) && isSymbol(sub._x),
+    condition: (sub) =>
+      filter(sub) && isSymbol(sub._x) && realAbsCoefficients(sub),
   },
 
   // |x| -> x|x| / 2

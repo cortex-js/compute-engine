@@ -255,6 +255,77 @@ export function complexInverse(z: Complex): Complex {
   return new Complex(q.re, q.im);
 }
 
+/** cos(πx) and sin(πx) with the argument reduced exactly before the
+ *  multiplication by π. `Math.sin(Math.PI * x)` loses relative accuracy
+ *  near every integer x (Math.PI·x is rounded, and sin is steep there
+ *  relative to its value), and `Math.cos(Math.PI / 2)` is 6e-17, not 0.
+ *  Here x is reduced to x = t + q/2 with |t| ≤ 1/4 (both steps are exact in
+ *  floating point), so the values are exact at multiples of 1/2 and
+ *  accurate to a few ulps elsewhere. */
+function cosSinPi(x: number): [number, number] {
+  const r = x - 2 * Math.round(x / 2); // r ∈ [−1, 1], same angle
+  const q = Math.round(2 * r); // −2 … 2
+  const t = r - q / 2; // |t| ≤ 1/4
+  const c = Math.cos(Math.PI * t);
+  const s = t === 0 ? 0 : Math.sin(Math.PI * t);
+  switch ((q + 4) % 4) {
+    case 0:
+      return [c, s];
+    case 1:
+      return [-s, c];
+    case 2:
+      return [-c, -s];
+    default:
+      return [s, -c];
+  }
+}
+
+/** sin(πz) for complex z, with the real part of the argument reduced by
+ *  `cosSinPi`: sin(π(x+iy)) = sin(πx)·cosh(πy) + i·cos(πx)·sinh(πy). */
+function sinPiComplex(z: Complex): Complex {
+  const [c, s] = cosSinPi(z.re);
+  const y = Math.PI * z.im;
+  // An exact zero from `cosSinPi` stays zero when cosh or sinh overflows
+  // (π|Im z| > 710): 0·∞ would be NaN.
+  return new Complex(
+    s === 0 ? 0 : s * Math.cosh(y),
+    c === 0 ? 0 : c * Math.sinh(y)
+  );
+}
+
+/** log sin(πz) for complex z, without overflow. For |Im z| ≤ 7 it is the
+ *  principal logarithm of `sinPiComplex(z)`. For a larger |Im z| it comes
+ *  from the exponential form: for Im z > 0,
+ *    sin(πz) = (i/2)·e^{−iπz}·(1 − e^{2iπz}),
+ *  and for Im z < 0,
+ *    sin(πz) = (−i/2)·e^{iπz}·(1 − e^{−2iπz}),
+ *  where the last factor is within e^{−14} of 1. The imaginary part of that
+ *  form is not reduced to (−π, π]: it is a logarithm, not necessarily the
+ *  principal one. */
+function logSinPi(z: Complex): Complex {
+  if (!(Math.abs(z.im) > 7)) return sinPiComplex(z).log();
+  const x = z.re - 2 * Math.round(z.re / 2); // same e^{iπx}, exact
+  const [c2, s2] = cosSinPi(2 * x);
+  if (z.im > 0) {
+    const w = new Complex(c2, s2).mul(Math.exp(-2 * Math.PI * z.im));
+    return new Complex(
+      Math.PI * z.im - Math.LN2,
+      Math.PI / 2 - Math.PI * x
+    ).add(C_ONE.sub(w).log());
+  }
+  const w = new Complex(c2, -s2).mul(Math.exp(2 * Math.PI * z.im));
+  return new Complex(-Math.PI * z.im - Math.LN2, Math.PI * x - Math.PI / 2).add(
+    C_ONE.sub(w).log()
+  );
+}
+
+/** True when `v` is a finite, non-zero complex number whose modulus is in
+ *  the normal range of doubles (not an underflowed value). */
+function isNormalComplex(v: Complex): boolean {
+  const a = v.abs();
+  return Number.isFinite(a) && a >= 1e-300;
+}
+
 const SQRT_2PI = Math.sqrt(2 * Math.PI);
 const HALF_LOG_2PI = 0.5 * Math.log(2 * Math.PI);
 
@@ -268,10 +339,20 @@ const HALF_LOG_2PI = 0.5 * Math.log(2 * Math.PI);
 export function gamma(c: Complex): Complex {
   if (c.re < 0.5) {
     // Γ(z) = π / (sin(πz) · Γ(1 − z))
-    const sinPiZ = c.mul(Math.PI).sin();
-    return new Complex(Math.PI, 0).div(
+    const sinPiZ = sinPiComplex(c);
+    const g = new Complex(Math.PI, 0).div(
       sinPiZ.mul(gamma(new Complex(1, 0).sub(c)))
     );
+    if (isNormalComplex(g) || isNonPositiveIntegerC(c)) return g;
+    // sin(πz) overflows for a large |Im z| (for example z = −2 + 300i), and
+    // Γ(1 − z) overflows for a large −Re z (z = −170.5), although Γ(z) can
+    // be representable. Then use the same formula in logarithmic form. It
+    // underflows or overflows only when Γ(z) does.
+    const l = new Complex(Math.log(Math.PI), 0)
+      .sub(logSinPi(c))
+      .sub(gammaln(new Complex(1, 0).sub(c)));
+    const e = l.exp();
+    return Number.isFinite(e.re) && Number.isFinite(e.im) ? e : g;
   }
 
   const z = c.sub(1);
@@ -282,10 +363,16 @@ export function gamma(c: Complex): Complex {
   const t = z.add(LANCZOS_G + 0.5);
 
   // √(2π) · t^(z + 0.5) · e^(−t) · x
-  return new Complex(SQRT_2PI, 0)
+  const g = new Complex(SQRT_2PI, 0)
     .mul(t.pow(z.add(0.5)))
     .mul(t.neg().exp())
     .mul(x);
+  if (Number.isFinite(g.re) && Number.isFinite(g.im)) return g;
+  // t^(z + 0.5) overflows for Re z > 142 although Γ(z) is representable up
+  // to Re z ≈ 171 (Γ(150) ≈ 3.8e260): combine the power and e^(−t) into one
+  // exponential, which overflows only when Γ(z) does.
+  const e = z.add(0.5).mul(t.log()).sub(t).exp().mul(x).mul(SQRT_2PI);
+  return Number.isFinite(e.re) && Number.isFinite(e.im) ? e : g;
 }
 
 /**
@@ -295,11 +382,18 @@ export function gamma(c: Complex): Complex {
 export function gammaln(c: Complex): Complex {
   if (c.re < 0.5) {
     // log Γ(z) = log(π / sin(πz)) − log Γ(1 − z)
-    const sinPiZ = c.mul(Math.PI).sin();
-    return new Complex(Math.PI, 0)
-      .div(sinPiZ)
-      .log()
-      .sub(gammaln(new Complex(1, 0).sub(c)));
+    const sinPiZ = sinPiComplex(c);
+    const q = new Complex(Math.PI, 0).div(sinPiZ);
+    if (!isNormalComplex(q) && !isNonPositiveIntegerC(c)) {
+      // sin(πz) overflows (or π/sin(πz) underflows) for a large |Im z|: use
+      // log π − log sin(πz), with its imaginary part reduced to (−π, π]
+      // so that it is the principal logarithm of π/sin(πz), as above.
+      const l = new Complex(Math.log(Math.PI), 0).sub(logSinPi(c));
+      return new Complex(l.re, Math.atan2(Math.sin(l.im), Math.cos(l.im))).sub(
+        gammaln(new Complex(1, 0).sub(c))
+      );
+    }
+    return q.log().sub(gammaln(new Complex(1, 0).sub(c)));
   }
 
   const z = c.sub(1);
@@ -326,81 +420,238 @@ const EULER_GAMMA = 0.5772156649015329;
 // ---------------- Upper incomplete gamma Γ(s, z) (complex) ----------------
 //
 // Γ(s, z) = ∫_z^∞ t^{s−1} e^{−t} dt, analytically continued over the complex
-// plane (principal branch of z^s). Mirrors the machine-real kernels in
-// numerics/special-functions.ts; this is the workhorse — the real kernel
-// returns NaN for z < 0 (a complex result) and applyN cascades here.
+// plane (principal branch of z^s). The machine-real kernel in
+// numerics/special-functions.ts returns NaN for z < 0 (a complex result), and
+// applyN cascades here.
 //
 
-/** E₁(z) = Γ(0, z) for complex z ≠ 0 (principal branch). Entire series
- *  (times −ln z) for modest |z|; Legendre continued fraction for large
- *  Re(z) > 0. */
-function e1Complex(z: Complex): Complex {
-  if (z.abs() < 20 || z.re <= 0) {
-    // E₁(z) = −γ − ln z − Σ_{k≥1} (−z)^k/(k·k!)
-    let sum = C_ZERO;
-    let term = C_ONE; // (−z)^k/k!
-    for (let k = 1; k < 500; k++) {
-      term = term.mul(z.neg()).div(k);
-      const add = term.div(-k);
-      sum = sum.add(add);
-      if (add.abs() < 1e-18 * (1 + sum.abs())) break;
-    }
-    return new Complex(-EULER_GAMMA, 0).sub(z.log()).add(sum);
+/** z^s on the principal branch. On the negative real axis with a real s the
+ *  phase is ±πs exactly (+ for a `+0` imaginary part, − for a `−0` one, the
+ *  signed-zero convention of the complex logarithm), computed with
+ *  `cosSinPi` so that, e.g., (−20)^{1/2} has a real part of exactly 0. */
+function powPrincipal(z: Complex, s: Complex): Complex {
+  if (z.im === 0 && z.re < 0 && s.im === 0) {
+    const m = Math.pow(-z.re, s.re);
+    const [c, sn] = cosSinPi(Object.is(z.im, -0) ? -s.re : s.re);
+    return new Complex(m * c, m * sn);
   }
-  // E₁(z) = e^{−z}·CF,  CF = 1/(z+1 − 1²/(z+3 − 2²/(z+5 − …)))  (Lentz)
-  const tiny = new Complex(1e-300, 0);
-  let b = z.add(1);
-  let c = C_ONE.div(tiny);
-  let d = C_ONE.div(b);
-  let h = d;
-  for (let i = 1; i < 500; i++) {
-    const a = -i * i;
-    b = b.add(2);
-    d = d.mul(a).add(b);
-    if (d.abs() < 1e-300) d = tiny;
-    c = b.add(c.inverse().mul(a));
-    if (c.abs() < 1e-300) c = tiny;
-    d = d.inverse();
-    const del = d.mul(c);
-    h = h.mul(del);
-    if (del.sub(C_ONE).abs() < 1e-16) break;
-  }
-  return h.mul(z.neg().exp());
+  return z.pow(s);
 }
 
-/** Lower incomplete gamma γ(s, z), complex (Tricomi series, s not a
- *  non-positive integer). */
-function lowerGammaSeriesComplex(s: Complex, z: Complex): Complex {
+/** log|z^s| and the phase e^{i·arg(z^s)} of z^s, on the principal branch
+ *  with the same conventions as `powPrincipal`. */
+function logPowPrincipal(z: Complex, s: Complex): [number, Complex] {
+  if (z.im === 0 && z.re < 0 && s.im === 0) {
+    const [c, sn] = cosSinPi(Object.is(z.im, -0) ? -s.re : s.re);
+    return [s.re * Math.log(-z.re), new Complex(c, sn)];
+  }
+  // As `Complex.pow` computes it: exp(s·log z), log z = ln|z| + i·arg z.
+  const l = z.log();
+  const phase = s.im * l.re + s.re * l.im;
+  return [
+    s.re * l.re - s.im * l.im,
+    new Complex(Math.cos(phase), Math.sin(phase)),
+  ];
+}
+
+/** z^s·e^{w}·x, principal branch of z^s (as `powPrincipal`), computed as
+ *  one exponential exp(Re(s·log z) + Re w + ln|x|). The product
+ *  underflows or overflows only when the result does, while z^s and e^{w}
+ *  separately can be outside the range of doubles (for s = −170 and
+ *  z = −100, z^s ≈ 1e−340 underflows to 0 but z^s·x ≈ 1e−299 when |x| is
+ *  about 1e41). */
+function powExpMul(z: Complex, s: Complex, w: Complex, x: Complex): Complex {
+  const ax = x.abs();
+  if (!(ax > 0 && Number.isFinite(ax)))
+    return powPrincipal(z, s).mul(w.exp()).mul(x);
+  const [logAbs, phase] = logPowPrincipal(z, s);
+  const rot =
+    w.im === 0 ? phase : phase.mul(new Complex(Math.cos(w.im), Math.sin(w.im)));
+  return rot.mul(x.div(ax)).mul(Math.exp(logAbs + w.re + Math.log(ax)));
+}
+
+/** |z^s·e^{w}|·a for a ≥ 0, without intermediate underflow or overflow. */
+function powExpAbs(z: Complex, s: Complex, w: Complex, a: number): number {
+  if (!(a > 0)) return 0;
+  return Math.exp(logPowPrincipal(z, s)[0] + w.re + Math.log(a));
+}
+
+/** A bound on the relative error of `gamma(s)`, in units of ε
+ *  (`Number.EPSILON`). Measured against mpmath at 9000 points (random with
+ *  |Re s| ≤ 150 and |Im s| ≤ 800, and 1500 points within 0.1 of a pole):
+ *  the error is at most about 5ε for |s| < 1 and 11ε for |s| < 2, and it
+ *  grows with |s| (Lanczos formula and reflection formula) to about 130ε at
+ *  |s| = 5, 500ε at |s| = 13, 940ε at |s| = 60 and 5300ε at |s| = 790.
+ *  The bound is above every measured value, by a factor of at least 1.35. */
+function gammaErrorWeight(s: Complex): number {
+  const a = s.abs();
+  return Math.min(12 + 5 * a * a, 1016) + 8 * a;
+}
+
+/**
+ * Γ(s, z) = Γ(s) − γ(s, z) with the lower function summed as the direct
+ * power series γ(s, z) = z^s Σ_{k≥0} (−z)^k / (k!·(s + k)).
+ *
+ * For s = −n (n = 0, 1, 2, …) Γ(s) has a pole that cancels the pole of the
+ * k = n term, and the limit is
+ *   Γ(−n, z) = (−1)^n/n!·(ψ(n+1) − ln z) − z^{−n} Σ_{k≠n} (−z)^k/(k!·(k − n)),
+ * with ψ(n+1) = −γ_Euler + H_n. For n = 0 this is the E₁ series.
+ *
+ * The terms have magnitude up to about e^{|z|} and the sum about e^{−Re z}
+ * (times powers of |z|), so the relative cancellation is about
+ * e^{|z| + Re z}: none near the negative real axis, e^{2|z|} on the positive
+ * one. The branch cut comes from z^s and ln z only, so a `−0` imaginary part
+ * on the negative real axis selects the lower lip.
+ *
+ * Returns the value and `scale`, the sum of the magnitudes of the parts
+ * that were added, each multiplied by the number of roundings it went
+ * through: `ε·scale/|value|` estimates the relative rounding error (see
+ * `seriesError`).
+ */
+function upperGammaDirectSeriesComplex(
+  s: Complex,
+  z: Complex
+): { value: Complex; scale: number } {
+  const az = z.abs();
+  const n = isNonPositiveIntegerC(s) ? -s.re : -1;
+  const mz = z.neg();
+  let term = C_ONE; // (−z)^k/k!
+  let sum = C_ZERO;
+  let absSum = 0;
+  let weightedSum = 0;
+  for (let k = 0; k < 3000; k++) {
+    if (k > 0) term = term.mul(mz).div(k);
+    if (k === n) continue;
+    const t = term.div(s.add(k));
+    sum = sum.add(t);
+    const at = t.abs();
+    absSum += at;
+    // The k-th term is the result of about k + 2 complex multiplications
+    // and divisions, each with a rounding error of a few ε.
+    weightedSum += (k + 2) * at;
+    // The terms grow until k ≈ |z|, so only stop past the peak. Also not
+    // before k = −Re s: for s near −n the k = n term has the factor
+    // 1/(s + n) and can be large after small terms (at s = −8 + 2.5e−9i,
+    // z = −0.0004 − 0.0084i it contributes 2e−12 of the value).
+    if (k > az && k > -s.re && at < 1e-17 * sum.abs()) break;
+  }
+  const power = n >= 0 ? new Complex(-n, 0) : s;
+  // z^s·sum is one exponential exp(s·log z + log sum) (see `powExpMul`):
+  // z^s alone underflows for s = −170, z = −100 although the product is
+  // about 1e−299. The exponential has a rounding error of about
+  // ε·|s·log z| relative to the product.
+  const tail = powExpMul(z, power, C_ZERO, sum);
+  const tailScale =
+    powExpAbs(z, power, C_ZERO, weightedSum) +
+    powExpAbs(z, power, C_ZERO, absSum) * power.abs() * z.log().abs();
+  if (n >= 0) {
+    let harmonic = 0;
+    let factorial = 1;
+    let logFactorial = 0;
+    for (let j = 1; j <= n; j++) {
+      harmonic += 1 / j;
+      factorial *= j;
+      logFactorial += Math.log(j);
+    }
+    const base = new Complex(-EULER_GAMMA + harmonic, 0).sub(z.log());
+    const sign = n % 2 === 0 ? 1 : -1;
+    // n! overflows for n ≥ 171: then divide by it in logarithmic form.
+    const lead = Number.isFinite(factorial)
+      ? base.div(sign * factorial)
+      : base.mul(
+          (sign * Math.exp(Math.log(base.abs()) - logFactorial)) / base.abs()
+        );
+    return { value: lead.sub(tail), scale: 4 * lead.abs() + tailScale };
+  }
+  const g = gamma(s);
+  return {
+    value: g.sub(tail),
+    scale: g.abs() * gammaErrorWeight(s) + tailScale,
+  };
+}
+
+/** Γ(s, z) = Γ(s) − γ(s, z) with the lower function summed in the Kummer
+ *  form γ(s, z) = z^s e^{−z} Σ_{k≥0} z^k/((s)(s+1)…(s+k)), s not a
+ *  non-positive integer. The terms decrease from the start when |z| < |s|,
+ *  where this form is accurate. Returns the value and the `scale` used for
+ *  the rounding-error estimate, as `upperGammaDirectSeriesComplex` does. */
+function upperGammaKummerComplex(
+  s: Complex,
+  z: Complex
+): { value: Complex; scale: number } {
+  const az = z.abs();
   let term = C_ONE.div(s); // k = 0 term
   let sum = term;
+  let absSum = term.abs();
+  let weightedSum = 2 * absSum;
   for (let k = 1; k < 2000; k++) {
     term = term.mul(z).div(s.add(k));
     sum = sum.add(term);
-    if (term.abs() < 1e-17 * sum.abs()) break;
+    absSum += term.abs();
+    weightedSum += (k + 2) * term.abs();
+    // Past k = −Re s the denominators only grow. Before that a small term
+    // can precede a large one: for s near −n, the k = n term has the
+    // factor 1/(s + n).
+    if (k > -s.re && term.abs() < 1e-17 * sum.abs()) break;
   }
-  return z.pow(s).mul(z.neg().exp()).mul(sum);
+  // z^s·e^{−z}·sum as one exponential (see `powExpMul`), with a rounding
+  // error of about ε·(|s·log z| + |z|) relative to the product, and the
+  // same error model as `upperGammaDirectSeriesComplex` otherwise.
+  const tail = powExpMul(z, s, z.neg(), sum);
+  const g = gamma(s);
+  return {
+    value: g.sub(tail),
+    scale:
+      g.abs() * gammaErrorWeight(s) +
+      powExpAbs(z, s, z.neg(), weightedSum) +
+      powExpAbs(z, s, z.neg(), absSum) * (s.abs() * z.log().abs() + az),
+  };
 }
 
 /** Upper incomplete gamma Γ(s, z), complex, via the divergent asymptotic
- *  series Γ(s,z) ~ z^{s−1} e^{−z} Σ_{k≥0} (s−1)(s−2)…(s−k)/z^k truncated at
- *  its smallest term. This is the only method that avoids catastrophic
- *  cancellation for large |z| with Re(z) < 0 (where the lower-series e^{−z}
- *  prefactor and the alternating sum each blow up); accuracy ≈ the smallest
- *  term, which falls with |z| relative to |s|. */
+ *  series Γ(s,z) ~ z^{s−1} e^{−z} Σ_{k≥0} (s−1)(s−2)…(s−k)/z^k. It is used
+ *  only for |z| > 700 near the negative real axis, where the direct series
+ *  would overflow. Returns NaN when the result is not accurate:
+ *   - when the terms start to grow before one of them is below 1e−17 of
+ *     the sum (|z| is not large enough next to |s|: for s = 100 + 600i
+ *     and z = −600 the first term is already larger than 1);
+ *   - when the part that the series omits is not negligible. Across the
+ *     cut, Γ(s, z e^{2πi}) − e^{2πis}·Γ(s, z) = Γ(s)(1 − e^{2πis}), while
+ *     the series takes the same factor e^{2πis}: so the series misses a
+ *     term of size about |Γ(s)(1 − e^{±2πis})| = 2π·|e^{±iπs}|/|Γ(1 − s)|,
+ *     at most 2π·e^{π|Im s|}/|Γ(1 − s)|, which must be below 1e−16 of the
+ *     value.
+ *  The prefactor z^{s−1}e^{−z} is one exponential (see `powExpMul`): e^{−z}
+ *  alone overflows for Re z < −709 when the value does not (Γ(−5, −712)
+ *  ≈ 1.28e292). */
 function upperGammaAsymptoticComplex(s: Complex, z: Complex): Complex {
   let term = C_ONE; // k = 0
   let sum = C_ONE;
+  let converged = false;
   for (let k = 1; k < 1000; k++) {
     const next = term.mul(s.sub(k)).div(z); // term_k = term_{k−1}·(s−k)/z
-    if (next.abs() > term.abs()) break; // smallest-term truncation
+    if (next.abs() > term.abs()) break; // the terms start to grow
     term = next;
     sum = sum.add(term);
-    if (term.abs() < 1e-17 * sum.abs()) break;
+    if (term.abs() < 1e-17 * sum.abs()) {
+      converged = true;
+      break;
+    }
   }
-  return z.pow(s.sub(1)).mul(z.neg().exp()).mul(sum);
+  if (!converged) return C_NAN;
+  const sm1 = s.sub(1);
+  const logValue = logPowPrincipal(z, sm1)[0] - z.re + Math.log(sum.abs());
+  const logOmitted =
+    Math.log(2 * Math.PI) + Math.PI * Math.abs(s.im) - gammaln(C_ONE.sub(s)).re;
+  if (!(logOmitted - logValue < Math.log(1e-16))) return C_NAN;
+  const v = powExpMul(z, sm1, z.neg(), sum);
+  return Number.isFinite(v.re) && Number.isFinite(v.im) ? v : C_NAN;
 }
 
-/** Upper incomplete gamma Γ(s, z), complex, Legendre continued fraction. */
+/** Upper incomplete gamma Γ(s, z), complex, Legendre continued fraction
+ *  (modified Lentz). The fraction converges in the plane cut along the
+ *  negative real axis, for every s. Returns NaN when it has not converged
+ *  after 2000 steps. */
 function upperGammaCFComplex(s: Complex, z: Complex): Complex {
   const tiny = new Complex(1e-300, 0);
   let b = z.add(1).sub(s); // z + 1 − s
@@ -417,34 +668,117 @@ function upperGammaCFComplex(s: Complex, z: Complex): Complex {
     d = d.inverse();
     const del = d.mul(c);
     h = h.mul(del);
-    if (del.sub(C_ONE).abs() < 1e-16) break;
+    // z^s·e^{−z}·h as one exponential (see `powExpMul`). NaN when it
+    // overflows: the value is then not representable.
+    if (del.sub(C_ONE).abs() < 1e-16) {
+      const v = powExpMul(z, s, z.neg(), h);
+      return Number.isFinite(v.re) && Number.isFinite(v.im) ? v : C_NAN;
+    }
   }
-  return z.pow(s).mul(z.neg().exp()).mul(h);
+  return C_NAN;
 }
 
-/** Γ(s, z) for s a non-positive integer, complex z, via downward recurrence
- *  Γ(s−1,z) = (Γ(s,z) − z^{s−1} e^{−z})/(s−1) seeded by Γ(0,z) = E₁(z). */
-function upperGammaNegIntComplex(sInt: number, z: Complex): Complex {
-  let g = e1Complex(z); // Γ(0, z)
-  const emz = z.neg().exp();
-  for (let cur = 0; cur > sInt; cur--)
-    g = g.sub(z.pow(cur - 1).mul(emz)).div(cur - 1);
-  return g;
+/** A series result is used without a fallback when its estimated relative
+ *  rounding error (`seriesError`) is at most this (or at most twice the
+ *  error bound of Γ(s), see `limitForOrder`). Measured against mpmath on
+ *  about 7500 points (random s and z, s next to a pole of Γ, |Im s| up to
+ *  700): wherever the estimate is between 1e−14 and 2e−12 (the range in
+ *  which this limit and `SERIES_DECLINE_LIMIT` decide), the actual error of
+ *  the direct series was at most 0.87 times the estimate and that of the
+ *  Kummer form at most 0.98 times. For a larger estimate (1e−7, next to a
+ *  pole) the actual error reached 1.2 times the estimate. */
+const SERIES_ERROR_LIMIT = 3e-13;
+
+/** A direct-series result whose estimated rounding error, relative to the
+ *  larger of |value| and |z^{s−1}e^{−z}|, is above this is not returned:
+ *  the kernel declines (NaN) rather than give fewer than about 12 correct
+ *  digits. */
+const SERIES_DECLINE_LIMIT = 1e-12;
+
+/** Estimated relative rounding error of a series result: ε·scale/|value|,
+ *  plus 8ε for the rounding of the final subtraction and of the result. */
+function seriesError(r: { value: Complex; scale: number }): number {
+  return Number.EPSILON * (r.scale / r.value.abs() + 8);
+}
+
+/** The limit `limit` on a relative error, raised to twice the error bound
+ *  of `gamma(s)` (`gammaErrorWeight`) when that is larger: a value that is
+ *  mostly Γ(s) cannot be more accurate than Γ(s). The bound reaches 3e−13
+ *  at |s| ≈ 11 and 1e−12 at |s| ≈ 155. */
+function limitForOrder(limit: number, s: Complex): number {
+  return Math.max(limit, 2 * Number.EPSILON * gammaErrorWeight(s));
+}
+
+function seriesIfAccurate(
+  r: { value: Complex; scale: number },
+  s: Complex
+): Complex {
+  return seriesError(r) <= limitForOrder(SERIES_ERROR_LIMIT, s)
+    ? r.value
+    : C_NAN;
 }
 
 /**
- * Upper incomplete gamma Γ(s, z) for complex s and z (z ≠ 0). Region split:
- *   - |z| large            → divergent asymptotic series (any s, any arg)
- *   - s a non-positive integer → recurrence from Γ(0,z) = E₁(z)
- *   - Re(z) > 0 and |z| ≥ |s|+1 → continued fraction
- *   - otherwise                → Γ(s) − γ(s,z) (lower series, entire in z)
+ * Upper incomplete gamma Γ(s, z) for complex s and z (z ≠ 0), principal
+ * branch. On the negative real axis a `+0` imaginary part (or a plain real
+ * z) selects the upper lip of the cut and a `−0` imaginary part the lower
+ * lip. NaN means "no accurate answer": the library then keeps the
+ * expression symbolic.
  *
- * Accurate to ~1e-10 across the plane EXCEPT a narrow band (Re(z) < 0, |z| ≈
- * 15–25, s a negative non-integer) where neither the cancelling lower series
- * nor the not-yet-converged asymptotic reaches full double precision — there
- * the worst case is ~2e-3 relative. Closing that band needs Temme's uniform
- * asymptotics or extended-precision summation (deferred — out of the Rubi-
- * verification regime, which mostly lands at smaller |z|).
+ * The series forms return an estimate of their rounding error
+ * (`seriesError`), which counts the error of Γ(s) (`gammaErrorWeight`), of
+ * each term (about k + 2 roundings for the k-th term) and of the power
+ * z^s. A series result is used when that estimate is at most 3e−13, or at
+ * most twice the error bound of Γ(s) when that is larger (`limitForOrder`).
+ *
+ * Region split:
+ *   1. |z| + Re z ≤ 3: the direct series Γ(s) − z^s Σ (−z)^k/(k!(s+k)). Its
+ *      cancellation factor is about e^{|z| + Re z}, so this region is where
+ *      it is accurate: a parabola-shaped band around the negative real axis
+ *      that includes the disk |z| ≤ 1.5. For |z| > 700 the terms would
+ *      overflow, and the asymptotic series is used instead (it declines
+ *      when its error cannot be made small; see
+ *      `upperGammaAsymptoticComplex`). When the estimate is too large (s
+ *      close to a non-positive integer, where Γ(s) and one term of the
+ *      series are both large and cancel), the kernel tries the Kummer form
+ *      with the same check if |Im s| > 10, or else the continued fraction
+ *      (not on the cut, where it does not converge, and not for |z| < 0.1).
+ *      Last, it accepts the direct series if its estimated error is at most
+ *      1e−12 relative to the value (or to the derivative, next to a zero of
+ *      Γ(s, ·)), and otherwise declines. Next to a pole the decline depends
+ *      on z as well as on the distance to the pole: on 3000 points with s
+ *      within 1e−9 to 1e−2 of −n (n = 0 … 8) and z in this band, the kernel
+ *      answered 2328 (from 60% at a distance of 1e−9 to 98% at 1e−3), all
+ *      with an error of at most 4.5e−13.
+ *   2. |Im s| > 10, |z| < 3|s|, and either Re z < 0 or (Re s < 0 and
+ *      |z| < |s| + 1): the continued fraction loses up to all its digits
+ *      here, although it converges (at s = −0.41 − 23.9i, z = 0.088 − 4.0i
+ *      its error was 2e−8). The direct series or the Kummer form is used when
+ *      its estimate passes the check; otherwise the kernel declines.
+ *   3. |z| ≥ |s| + 1 or Re s < 0: the Legendre continued fraction. It
+ *      converges in the whole cut plane; at the edge of region 1 it needs
+ *      about 60 steps.
+ *   4. Otherwise (|z| < |s| + 1 with Re s ≥ 0): Γ(s) − γ(s, z) with the
+ *      Kummer form of γ, whose terms decrease when |z| < |s|.
+ * The power z^s and the factor e^{−z} are combined into one exponential
+ * (`powExpMul`), so that a result is outside the range of doubles only when
+ * the value is; a value above that range is NaN.
+ *
+ * Measured against mpmath (`gammainc`, 30 to 60 digits):
+ *   - for s in {−9, −5, −2, −1, 0, 1, 3, ±1/2, −0.7, −1.5, −2.2, −3.1, 0.3,
+ *     2.5, 4.7, −2+i, 1.5−0.5i, 0.5+2i} and |z| from 1 to 150 in every
+ *     direction (including both lips of the negative real axis): no decline,
+ *     and a relative error below 5e−14 (below 3e−14 for |z| > 5);
+ *   - on 2500 random points with |Re s| ≤ 30, |Im s| ≤ 30 and
+ *     0.01 ≤ |z| ≤ 600: 87 declines (86 in region 2), and an error below
+ *     1.7e−13 wherever the kernel answers;
+ *   - on 1400 points with |Im s| from 3 to 30 and |Re z| ≤ 4 (both
+ *     half-planes): 55 declines, error below 3.7e−13;
+ *   - on 433 points with |s| up to 700 and |z| up to 800, and 344 points
+ *     with 700 ≤ |z| ≤ 1200 near the negative real axis: error below
+ *     1.2e−12, which is the accuracy of Γ(s) at |s| ≈ 700.
+ * On all of these, the error was at most 0.66 times the bound that
+ * `incompleteGammaUpperComplexErrorBound` states.
  */
 export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
   if (s.isNaN() || z.isNaN()) return C_NAN;
@@ -453,20 +787,97 @@ export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
   const az = z.abs();
   const sAbs = s.abs();
 
-  // Large |z| (any arg): the asymptotic series is the only cancellation-free
-  // method, and it works for every s (incl. non-positive integers, where the
-  // lower-series Γ(s) − γ split is invalid). The threshold keeps the smallest
-  // term small relative to |s|.
-  if (az > sAbs + 14 && az > 12) return upperGammaAsymptoticComplex(s, z);
+  const cfApplies = az >= sAbs + 1 || s.re < 0;
 
-  if (s.im === 0 && Number.isInteger(s.re) && s.re <= 0)
-    return upperGammaNegIntComplex(s.re, z);
+  // Region 1: near the negative real axis, or small |z|.
+  if (az + z.re <= 3) {
+    if (az > 700) return upperGammaAsymptoticComplex(s, z);
+    const direct = upperGammaDirectSeriesComplex(s, z);
+    if (seriesError(direct) <= limitForOrder(SERIES_ERROR_LIMIT, s))
+      return direct.value;
+    const onCut = z.im === 0 && z.re < 0;
+    if (Math.abs(s.im) > 10) {
+      // The continued fraction loses up to all its digits here, as in
+      // region 2.
+      const kummer = seriesIfAccurate(upperGammaKummerComplex(s, z), s);
+      if (!kummer.isNaN()) return kummer;
+    } else if ((cfApplies || sAbs < 1) && !onCut && az >= 0.1) {
+      // Not for |z| < 0.1: next to a pole of Γ(s) the fraction then has
+      // errors up to 3.5e−12 (s = −4 + 2e−8, z = 0.032 + 0.0006i), while for
+      // 0.1 ≤ |z| its error stayed below 4e−13 on 1500 points with s within
+      // 1e−2 of a pole. The fraction has no error estimate of its own.
+      const cf = upperGammaCFComplex(s, z);
+      if (!cf.isNaN()) return cf;
+    }
+    // Near a zero of Γ(s, ·) no method has a small relative error, so the
+    // decline test measures the absolute error against |z^{s−1}e^{−z}|, the
+    // modulus of the derivative ∂Γ(s, z)/∂z, times min(|z|, 1): an answer
+    // passes when it is the exact value at a point within about
+    // 1e−12·min(|z|, 1) of z. The factor min(|z|, 1) keeps this test from
+    // passing a large relative error for a small |z| next to a pole of Γ(s)
+    // (at s = −2 + 3e−8, z = 0.0044 − 0.0096i the derivative is 250 times
+    // the value, and the error estimate 1e−10 would have passed without it).
+    // When s is close to a non-positive integer the error scales with |Γ(s)|
+    // instead, and fails.
+    const slope = powExpAbs(z, s.sub(1), z.neg(), Math.min(az, 1));
+    return Number.EPSILON * direct.scale <=
+      limitForOrder(SERIES_DECLINE_LIMIT, s) *
+        Math.max(direct.value.abs(), slope)
+      ? direct.value
+      : C_NAN;
+  }
 
-  // Right half-plane, moderate |z|: continued fraction (no cancellation).
-  if (z.re > 0 && az >= sAbs + 1) return upperGammaCFComplex(s, z);
+  // Region 2: large imaginary part of s, |z| < 3|s|, and either Re z < 0
+  // or (Re s < 0 and |z| < |s| + 1).
+  if (
+    Math.abs(s.im) > 10 &&
+    az < 3 * sAbs &&
+    (z.re < 0 || (s.re < 0 && az < sAbs + 1))
+  ) {
+    const direct = seriesIfAccurate(upperGammaDirectSeriesComplex(s, z), s);
+    if (!direct.isNaN()) return direct;
+    return seriesIfAccurate(upperGammaKummerComplex(s, z), s);
+  }
 
-  // Small/moderate |z|: Γ(s) − γ(s,z) (lower Tricomi series, entire in z).
-  return gamma(s).sub(lowerGammaSeriesComplex(s, z));
+  // Region 3.
+  if (cfApplies) return upperGammaCFComplex(s, z);
+
+  // Region 4.
+  return upperGammaKummerComplex(s, z).value;
+}
+
+/**
+ * A bound on the relative error of a value that
+ * `incompleteGammaUpperComplex(s, z)` returns (it does not apply to a NaN,
+ * which means that the kernel declined). Away from a zero of Γ(s, ·) (where
+ * no method has a small relative error) the bound is:
+ *   - 3e−13, raised to twice the error bound of Γ(s) (`limitForOrder`)
+ *     when that is larger: 4.3e−13 at |s| = 13, 5.2e−13 at |s| = 20 and
+ *     2.9e−12 at |s| = 700;
+ *   - where |z| + Re z ≤ 3 and s is next to a pole of Γ(s) at
+ *     s = −n (n = 0, 1, 2, …), 4e−15/|s + n|, capped at the decline limit
+ *     1e−12 (raised in the same way for a large |s|). There the direct
+ *     series cancels and the kernel answers up to that limit.
+ * Measured against mpmath's `gammainc` (40 and 60 digits): on 3000 points
+ * next to the poles (n from 0 to 8, |s + n| from 1e−9 to 1e−2, z in that
+ * band) the error was at most 4.5e−13 and the error times |s + n| at most
+ * 9e−16; on all the sweeps (14800 answered points with |Re s| ≤ 150,
+ * |Im s| ≤ 700 and 0.01 ≤ |z| ≤ 1200) the error was at most 0.66 times
+ * this bound.
+ */
+export function incompleteGammaUpperComplexErrorBound(
+  s: Complex,
+  z: Complex
+): number {
+  const base = limitForOrder(3e-13, s);
+  if (z.abs() + z.re > 3) return base;
+  const n = Math.min(0, Math.round(s.re));
+  const distance = Math.hypot(s.re - n, s.im);
+  if (distance === 0) return base;
+  return Math.max(
+    base,
+    Math.min(limitForOrder(SERIES_DECLINE_LIMIT, s), 4e-15 / distance)
+  );
 }
 
 //
@@ -474,9 +885,7 @@ export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
 //
 // Ei, Si and Ci for complex arguments, all built on E₁(z) = Γ(0, z) via
 // `incompleteGammaUpperComplex(C_ZERO, ·)` so they inherit its region split
-// (divergent asymptotic series for large |z|, E₁ series/CF otherwise). Do NOT
-// call `e1Complex` directly here: its power-series branch runs for Re(z) ≤ 0 at
-// any modulus and cancels catastrophically at machine precision for large |z|.
+// and its accuracy.
 //
 // Branch conventions (validated against mpmath at 25 digits, all four quadrants
 // and both imaginary half-axes), with sign(0) = 0:
@@ -487,12 +896,12 @@ export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
 //   Ci(z) = −(E₁(iz) + E₁(−iz))/2, plus a +iπ·sign(Im z) correction when
 //           Re(z) < 0, or Re(z) = 0 and Im(z) < 0.
 //
-// Accuracy tracks the incomplete-Γ kernel: ≲1e-12 for small/moderate |z|,
-// degrading toward ~1e-10 in the large-|z| asymptotic region.
+// Accuracy tracks the incomplete-Γ kernel: measured against mpmath off the
+// real axis for |z| up to 60, the relative error is below 1e-14.
 //
 
-/** E₁(z) = Γ(0, z), routed through the incomplete-gamma dispatcher so the
- *  large-|z| asymptotic branch is used (avoids `e1Complex`'s cancellation).
+/** E₁(z) = Γ(0, z), routed through the incomplete-gamma dispatcher, which
+ *  picks a method without catastrophic cancellation for each z.
  *  On the negative real axis E₁ has a branch cut; for a real argument (which
  *  arises when z is purely imaginary) a spurious −0 imaginary part — from
  *  internal negations — would select the wrong side. Approach the cut from
@@ -597,8 +1006,8 @@ export function coshIntegralComplex(z: Complex): Complex {
 // give z² a −0 imaginary part there, selecting the wrong side of the cut (the
 // wrong sign of erf). In the reflected right half-plane the correct approach
 // is from above (+0i), so force Im(z²) = +0 when it is zero. Validated against
-// mpmath (erf/erfi) to ≲1e-12 for small/moderate |z|, degrading toward ~1e-7
-// in the large-|z| asymptotic region of the incomplete-gamma kernel.
+// mpmath (erf/erfi) for |z| up to 25 in every direction: the relative error is
+// below 2e-13.
 //
 
 //
@@ -1764,26 +2173,98 @@ function isNonPositiveIntegerC(x: Complex): boolean {
   return x.im === 0 && Number.isInteger(x.re) && x.re <= 0;
 }
 
+/**
+ * The Gauss series Σₙ (a)ₙ(b)ₙ/((c)ₙ·n!)·zⁿ, with `big`, the magnitude of
+ * its largest term. The ratio of `big` to the magnitude of the result
+ * (after any prefactor) is the factor by which cancellation amplifies the
+ * rounding errors of the terms. `converged` is false when the series
+ * neither converged nor ended (a term exactly 0) within `maxTerms` terms.
+ * A polynomial of degree N is summed with maxTerms = N: its last term is
+ * then the N-th, and the result counts as complete.
+ */
 function gauss2F1SeriesC(
   a: Complex,
   b: Complex,
   c: Complex,
   z: Complex,
   maxTerms = 10_000
-): Complex {
+): { sum: Complex; big: number; converged: boolean } {
+  // A small term ends the sum only from n = nMin on. Before, the terms
+  // can shrink and then grow again: a negative c makes them grow near
+  // n = −c, and the ratio of consecutive terms, about
+  // |z|·(1 + (a+b−c−1)/n) for a large n, is above 1 until n is about
+  // |z|·|a+b−c−1|/(1−|z|). With w = 1 − 1/(2.5 + i), ₂F₁(1, ½; −93.5; w)
+  // has terms near 2e-37 at n = 50 and near 5e28 at n = 280.
+  const zAbs = magC(z);
+  const nMin = Math.max(
+    3,
+    -c.re,
+    zAbs < 1 ? (zAbs * magC(a.add(b).sub(c).sub(1))) / (1 - zAbs) : Infinity
+  );
   let term: Complex = C_ONE;
   let sum: Complex = C_ONE;
+  let big = 1;
   for (let n = 0; n < maxTerms; n++) {
+    const previous = magC(term);
     term = term
       .mul(a.add(n))
       .mul(b.add(n))
       .mul(z)
       .div(c.add(n).mul(n + 1));
-    if (term.isZero()) return sum;
+    // A term of exactly 0 ends a polynomial (a + n or b + n is 0). Any
+    // other 0 is an underflow, which ends the sum only from n = nMin on.
+    if (term.isZero()) {
+      const ends = a.add(n).isZero() || b.add(n).isZero() || n >= nMin;
+      return { sum, big, converged: ends };
+    }
+    big = Math.max(big, magC(term));
     sum = sum.add(term);
-    if (n > 2 && term.abs() <= Number.EPSILON * sum.abs()) return sum;
+    // A small term ends the sum only while the terms decrease: just after
+    // n = −c the terms can grow again from a very small value.
+    if (
+      n >= nMin &&
+      magC(term) < previous &&
+      magC(term) <= Number.EPSILON * magC(sum)
+    )
+      return { sum, big, converged: true };
   }
-  return sum;
+  return { sum, big, converged: false };
+}
+
+/**
+ * The value p₁·S₁ + p₂·S₂ of a connection formula (p₂ and S₂ may be
+ * absent), and its loss: the larger of the largest term and the sum of
+ * either series, times its prefactor, over the magnitude of the value.
+ * The sum is included because, when the terms of a series have one sign,
+ * its sum is many times its largest term, and the two parts p₁·S₁ and
+ * p₂·S₂ can cancel each other. A zero prefactor (a pole of
+ * Γ in its denominator) makes its series contribute nothing to either; a
+ * series that did not converge makes the loss Infinity.
+ * A loss that is not a finite number is Infinity, which rejects the value.
+ */
+function withLossC(
+  p1: Complex,
+  s1: { sum: Complex; big: number; converged: boolean },
+  p2?: Complex,
+  s2?: { sum: Complex; big: number; converged: boolean }
+): { value: Complex; loss: number } {
+  const part = (
+    p: Complex,
+    t: { sum: Complex; big: number; converged: boolean }
+  ) =>
+    p.isZero()
+      ? 0
+      : t.converged
+        ? magC(p) * Math.max(t.big, magC(t.sum))
+        : Infinity;
+  let value = p1.isZero() ? C_ZERO : p1.mul(s1.sum);
+  let big = part(p1, s1);
+  if (p2 && s2) {
+    if (!p2.isZero()) value = value.add(p2.mul(s2.sum));
+    big = Math.max(big, part(p2, s2));
+  }
+  const loss = big / magC(value);
+  return { value, loss: Number.isFinite(loss) ? loss : Infinity };
 }
 
 /** Distance from a complex number to the nearest (real) integer. */
@@ -1813,11 +2294,416 @@ function gammaRatioC(
   return r;
 }
 
+/**
+ * Complex digamma ψ(z) = Γ′(z)/Γ(z): `polygammaComplex` of order 0. NaN at
+ * the poles z = 0, −1, −2, …. It uses the reflection formula with a cot(πz)
+ * that stays finite for a large |Im z|.
+ */
+function digammaC(z: Complex): Complex {
+  return polygammaComplex(0, z);
+}
+
+/** |x|, without the underflow of `Complex.abs()` to 0 below about 1e-154. */
+function magC(x: Complex): number {
+  return Math.hypot(x.re, x.im);
+}
+
+/**
+ * sign · exp(Σ logs) · ΠΓ(num) / ΠΓ(den). No argument may be a pole of Γ.
+ *
+ * When exp(Σ logs) and every Γ value are between 1e-80 and 1e80, the
+ * product is formed directly. Otherwise it is formed as one exponential of
+ * the sum of the logarithms (with `gammaln`), so that a quotient of very
+ * large and very small factors, such as Γ(c)/(Γ(a+m)·Γ(b+m)) with m = 150
+ * (about 1e260 in the numerator and in the denominator), does not overflow
+ * or underflow before the factors cancel. The logarithmic form has a
+ * relative error of about ε times the largest logarithm, which is why it is
+ * used only when the direct form is out of range. A result too large for a
+ * double is an infinity.
+ */
+function gammaProductC(
+  logs: ReadonlyArray<Complex>,
+  num: ReadonlyArray<Complex>,
+  den: ReadonlyArray<Complex>,
+  sign = 1
+): Complex {
+  let logSum: Complex = C_ZERO;
+  for (const x of logs) logSum = logSum.add(x);
+  const inRange = (x: Complex) => {
+    const r = magC(x);
+    return r > 1e-80 && r < 1e80;
+  };
+  if (Math.abs(logSum.re) < 180) {
+    const gNum = num.map((x) => gamma(x));
+    const gDen = den.map((x) => gamma(x));
+    if (gNum.every(inRange) && gDen.every(inRange)) {
+      let r = logSum.exp().mul(sign);
+      for (const g of gNum) r = r.mul(g);
+      for (const g of gDen) r = r.div(g);
+      return r;
+    }
+  }
+  let l = logSum;
+  for (const x of num) l = l.add(gammaln(x));
+  for (const x of den) l = l.sub(gammaln(x));
+  return l.exp().mul(sign);
+}
+
+// The largest integer difference m evaluated with the logarithmic
+// connection formulas. Measured against mpmath (2026-09-28) on five
+// parameter families (both kinds of difference, |z| from 1.4 to 21): the
+// relative error stays below 5e-13 up to m = 400, and grows to about 1e-12
+// at m = 500 to 1000, because the logarithms of Γ that form the first term
+// grow with m. A larger difference is treated as degenerate.
+const LOG_CASE_MAX_M = 400;
+
+// Every ₂F₁ map is a sum of terms that can cancel: a series whose terms
+// alternate and grow before they decrease (a large parameter, or a
+// negative third parameter), a connection formula whose two parts nearly
+// cancel, or a logarithmic formula whose finite sum and series nearly
+// cancel. The loss of a result is the ratio of its largest term to the
+// result: the factor by which rounding errors are amplified. A result is
+// accepted when its loss is at most HYP2F1_MAX_LOSS (12 to 13 correct
+// digits); otherwise the next map is tried. If no map is accepted, the
+// best rejected result is still returned when its loss is at most
+// HYP2F1_FALLBACK_LOSS (about 11 digits). A polynomial is returned when
+// its loss is at most HYP2F1_POLYNOMIAL_MAX_LOSS.
+//
+// Measured against mpmath (2026-09-28) on 700 points with an integer
+// b − a or c − a − b (a, b ∈ [−25, 25], c ∈ [−25, 45], complex z with
+// |z| from 0.2 to 4): a fallback bound of 1e6 answered 648 points, 34 of
+// them with a relative error above 1e-12 (the largest 1.2e-10); the bound
+// 1e4 answers 622 points, 9 above 1e-12 (the largest 7e-11). The
+// prefactors (Γ of large arguments, powers) have relative errors of up to
+// about 100ε, which the loss multiplies.
+const HYP2F1_MAX_LOSS = 1e3;
+const HYP2F1_FALLBACK_LOSS = 1e4;
+const HYP2F1_POLYNOMIAL_MAX_LOSS = 1e6;
+
+// The largest degree of a ₂F₁ polynomial (a or b a non-positive integer)
+// that is summed: one million terms take about 0.3 s.
+const HYP2F1_MAX_DEGREE = 1_000_000;
+
+// The smallest |w| a logarithmic formula is ranked at when the maps are
+// sorted (see `hypergeometric2F1Complex`). Measured against mpmath on
+// degenerate parameters: 0.7 gave the smallest largest error (1.2e-14 on a
+// grid of 540 points, against 3.2e-14 for 0.92 and 1.7e-14 for 0.8).
+const LOG_CASE_MIN_RANK = 0.7;
+
+/**
+ * ₂F₁(a, b; c; z) through one of the four connection formulas of the
+ * logarithmic (degenerate) case. These are the limits of the two-term
+ * Γ-connection formulas when a parameter difference is an integer m ≥ 0;
+ * each is a finite sum of m terms plus a series in the transformed argument
+ * w that contains a logarithm and digamma values. All four give the
+ * regularized function ₂F₁/Γ(c), and the result is multiplied by Γ(c).
+ *
+ * - `inv-z`, b = a + m, w = 1/z:
+ *   ₂F₁/Γ(c) = (−z)^(−a)/Γ(a+m) · Σ_{k<m} (a)ₖ(m−k−1)!/(k!·Γ(c−a−k))·z^(−k)
+ *     + (−z)^(−a)/Γ(a) · Σ_{k≥0} (a+m)ₖ/(k!(k+m)!·Γ(c−a−k−m))·(−1)ᵏz^(−k−m)
+ *       · [ln(−z) + ψ(k+1) + ψ(k+m+1) − ψ(a+k+m) − ψ(c−a−k−m)]
+ * - `inv-one-minus-z`, b = a + m, w = 1/(1−z):
+ *   ₂F₁/Γ(c) = (1−z)^(−a)/(Γ(a+m)Γ(c−a))
+ *       · Σ_{k<m} (a)ₖ(c−a−m)ₖ(m−k−1)!/k!·(z−1)^(−k)
+ *     + (−1)^m·(1−z)^(−a−m)/(Γ(a)Γ(c−a−m)) · Σ_{k≥0} (a+m)ₖ(c−a)ₖ/(k!(k+m)!)
+ *       ·(1−z)^(−k)·[ln(1−z) + ψ(k+1) + ψ(k+m+1) − ψ(a+k+m) − ψ(c−a+k)]
+ * - `one-minus-z`, c = a + b + m, w = 1 − z:
+ *   ₂F₁/Γ(c) = 1/(Γ(a+m)Γ(b+m)) · Σ_{k<m} (a)ₖ(b)ₖ(m−k−1)!/k!·(z−1)ᵏ
+ *     − (z−1)^m/(Γ(a)Γ(b)) · Σ_{k≥0} (a+m)ₖ(b+m)ₖ/(k!(k+m)!)·(1−z)ᵏ
+ *       · [ln(1−z) − ψ(k+1) − ψ(k+m+1) + ψ(a+k+m) + ψ(b+k+m)]
+ * - `one-minus-inv-z`, c = a + b + m, w = 1 − 1/z:
+ *   ₂F₁/Γ(c) = z^(−a)/Γ(a+m) · Σ_{k<m} (a)ₖ(m−k−1)!/(k!·Γ(b+m−k))·wᵏ
+ *     − z^(−a)/Γ(a) · Σ_{k≥0} (a+m)ₖ/(k!(k+m)!·Γ(b−k))·(−1)ᵏw^(k+m)
+ *       · [ln(1−z) − ln z − ψ(k+1) − ψ(k+m+1) + ψ(a+k+m) + ψ(b−k)]
+ *
+ * A digamma value at a pole of Γ appears only multiplied by a 1/Γ factor
+ * with a zero at the same point. At such a pole x = −j (j = 0, 1, 2, …) the
+ * limit of ψ(x)/Γ(x) is (−1)^(j+1)·j!, and the products are then carried
+ * through recurrences that stay valid at the poles, so the cases c − a ∈ ℤ
+ * (inv-z, inv-one-minus-z) and b ∈ ℤ (one-minus-inv-z) need no special
+ * handling. The caller guarantees that a and b are not non-positive
+ * integers (those are polynomials, evaluated directly).
+ *
+ * Every term carries its prefactor and the factor Γ(c): the first term of
+ * each sum is formed by `gammaProductC` (in logarithms when the Γ values
+ * are out of range) and the next terms by their ratio to the previous one.
+ * The factors Γ(c), 1/Γ(a+m), (m−1)!, (a)ₖ and z^(−m) are each far outside
+ * the range of a double for m near 150, but the terms they form are not.
+ * A seed that is not finite (for example (−1)^(j+1)·j! with j > 170) gives
+ * a NaN value, which the caller rejects.
+ *
+ * Provenance: DLMF 15.8.8, 15.8.9, 15.8.10 and 15.8.11 (A&S 15.3.10–15.3.14).
+ */
+function gauss2F1LogCaseC(
+  kind: 'inv-z' | 'inv-one-minus-z' | 'one-minus-z' | 'one-minus-inv-z',
+  a: Complex,
+  b: Complex,
+  c: Complex,
+  m: number,
+  z: Complex,
+  maxTerms: number
+): { value: Complex; loss: number } {
+  const one = C_ONE;
+  const mC = new Complex(m, 0); // Γ(m) = (m − 1)!
+  const m1C = new Complex(m + 1, 0); // Γ(m + 1) = m!
+
+  // ψ(k+1), ψ(k+m+1) and ψ(a+k+m), advanced by ψ(x+1) = ψ(x) + 1/x
+  let psi1 = new Complex(-EULER_GAMMA, 0);
+  let psiM = psi1;
+  for (let i = 1; i <= m; i++) psiM = psiM.add(1 / i);
+  let psiA = digammaC(a.add(m));
+
+  // Finite sum Σ_{k<m} Uₖ, with U₀ given and U_{k+1} = Uₖ·ratio(k).
+  // Returns the sum and its largest term magnitude.
+  const finiteSum = (
+    u0: Complex,
+    ratio: (k: number) => Complex
+  ): [Complex, number] => {
+    let sum: Complex = C_ZERO;
+    let big = 0;
+    let u = u0;
+    for (let k = 0; k < m; k++) {
+      big = Math.max(big, magC(u));
+      sum = sum.add(u);
+      if (k + 1 < m) u = u.mul(ratio(k));
+    }
+    return [sum, big];
+  };
+
+  // A term that is not finite ends the series: the value is then NaN and
+  // the caller rejects it.
+  const done = (t: Complex, sum: Complex, k: number) =>
+    !t.isFinite() || (k > 2 && magC(t) <= Number.EPSILON * magC(sum));
+
+  // The value is finite + series, both already multiplied by Γ(c).
+  let finite: Complex = C_ZERO;
+  let finiteBig = 0;
+  let series: Complex = C_ZERO;
+  let seriesBig = 0;
+
+  switch (kind) {
+    case 'inv-z': {
+      const mz = z.neg();
+      const L = mz.log();
+      const zInv = one.div(z);
+      const ca = c.sub(a);
+      const aLog = a.neg().mul(L); // ln of (−z)^(−a)
+      // Uₖ = Γ(c)·(−z)^(−a)/Γ(a+m)·(a)ₖ(m−k−1)!/(k!·Γ(c−a−k))·z^(−k).
+      // 1/Γ(c−a−k) is 0 from the first pole of Γ on: the ratio
+      // 1/Γ(y−1) = (y−1)/Γ(y) keeps it 0, and when c − a itself is a pole
+      // every term is 0.
+      if (m > 0 && !isNonPositiveIntegerC(ca))
+        [finite, finiteBig] = finiteSum(
+          gammaProductC([aLog], [c, mC], [a.add(m), ca]),
+          (k) =>
+            a
+              .add(k)
+              .mul(ca.sub(k + 1))
+              .mul(zInv)
+              .div((m - k - 1) * (k + 1))
+        );
+      // Q = Γ(c)·(−z)^(−a)/Γ(a)·Pₖ/Γ(x−k) and S = Q·ψ(x−k), with
+      // x = c−a−m and Pₖ = (a+m)ₖ(−1)ᵏz^(−k−m)/(k!(k+m)!). Since
+      // 1/Γ(y−1) = (y−1)/Γ(y) and ψ(y−1) = ψ(y) − 1/(y−1), the next values
+      // are Q' = r·(x−k−1)·Q and S' = r·((x−k−1)·S − Q), where
+      // r = Pₖ₊₁/Pₖ. These recurrences also hold at the poles of Γ, where
+      // S carries the finite limit.
+      const x = ca.sub(m);
+      const seriesLogs = [aLog, zInv.log().mul(m)];
+      let Q: Complex;
+      let S: Complex;
+      if (isNonPositiveIntegerC(x)) {
+        const j = -x.re;
+        Q = C_ZERO;
+        S = gammaProductC(
+          seriesLogs,
+          [c, new Complex(j + 1, 0)],
+          [a, m1C],
+          j % 2 === 0 ? -1 : 1
+        );
+      } else {
+        Q = gammaProductC(seriesLogs, [c], [a, m1C, x]);
+        S = Q.mul(digammaC(x));
+      }
+      for (let k = 0; k < maxTerms; k++) {
+        const t = Q.mul(L.add(psi1).add(psiM).sub(psiA)).sub(S);
+        seriesBig = Math.max(seriesBig, magC(t));
+        series = series.add(t);
+        if (done(t, series, k)) break;
+        const r = a
+          .add(m + k)
+          .neg()
+          .mul(zInv)
+          .div((k + 1) * (k + m + 1));
+        const xk = x.sub(k + 1);
+        const nextQ = r.mul(xk).mul(Q);
+        S = r.mul(xk.mul(S).sub(Q));
+        Q = nextQ;
+        psi1 = psi1.add(1 / (k + 1));
+        psiM = psiM.add(1 / (k + m + 1));
+        psiA = psiA.add(one.div(a.add(m + k)));
+      }
+      break;
+    }
+
+    case 'inv-one-minus-z': {
+      const w1 = one.sub(z); // 1 − z
+      const L = w1.log();
+      const w1Inv = one.div(w1);
+      const y = c.sub(a);
+      // Uₖ = Γ(c)·(1−z)^(−a)/(Γ(a+m)Γ(c−a))·(a)ₖ(c−a−m)ₖ(m−k−1)!/k!
+      //      ·(z−1)^(−k). Every term is 0 when c − a is a pole of Γ.
+      if (m > 0 && !isNonPositiveIntegerC(y))
+        [finite, finiteBig] = finiteSum(
+          gammaProductC([a.neg().mul(L)], [c, mC], [a.add(m), y]),
+          (k) =>
+            a
+              .add(k)
+              .mul(y.sub(m - k))
+              .mul(w1Inv.neg())
+              .div((m - k - 1) * (k + 1))
+        );
+      // A = Γ(c)·(−1)^m(1−z)^(−a−m)/Γ(a)·Pₖ·(y)ₖ/Γ(y−m) and B = A·ψ(y+k),
+      // with y = c − a and Pₖ = (a+m)ₖ(1−z)^(−k)/(k!(k+m)!). Since
+      // ψ(y+k+1) = ψ(y+k) + 1/(y+k), the next values are A' = r·(y+k)·A and
+      // B' = r·((y+k)·B + A), where r = Pₖ₊₁/Pₖ. B₀ contains the limit of
+      // ψ(y)/Γ(y−m): when y is a non-positive integer it equals the limit
+      // of ψ(y−m)/Γ(y−m); when y − m is a pole and y is not, it is 0.
+      const ym = y.sub(m);
+      const seriesLogs = [a.add(m).neg().mul(L)];
+      const sign = m % 2 === 0 ? 1 : -1;
+      let A: Complex = C_ZERO;
+      let B: Complex = C_ZERO;
+      if (!isNonPositiveIntegerC(ym)) {
+        A = gammaProductC(seriesLogs, [c], [a, m1C, ym], sign);
+        B = A.mul(digammaC(y));
+      } else if (isNonPositiveIntegerC(y)) {
+        const j = -ym.re;
+        B = gammaProductC(
+          seriesLogs,
+          [c, new Complex(j + 1, 0)],
+          [a, m1C],
+          j % 2 === 0 ? -sign : sign
+        );
+      }
+      for (let k = 0; k < maxTerms; k++) {
+        const t = A.mul(L.add(psi1).add(psiM).sub(psiA)).sub(B);
+        seriesBig = Math.max(seriesBig, magC(t));
+        series = series.add(t);
+        if (done(t, series, k)) break;
+        const r = a
+          .add(m + k)
+          .mul(w1Inv)
+          .div((k + 1) * (k + m + 1));
+        const yk = y.add(k);
+        const nextA = r.mul(yk).mul(A);
+        B = r.mul(yk.mul(B).add(A));
+        A = nextA;
+        psi1 = psi1.add(1 / (k + 1));
+        psiM = psiM.add(1 / (k + m + 1));
+        psiA = psiA.add(one.div(a.add(m + k)));
+      }
+      break;
+    }
+
+    case 'one-minus-z': {
+      const w = one.sub(z);
+      const L = w.log();
+      const zm1 = z.sub(1);
+      // Uₖ = Γ(c)/(Γ(a+m)Γ(b+m))·(a)ₖ(b)ₖ(m−k−1)!/k!·(z−1)ᵏ
+      if (m > 0)
+        [finite, finiteBig] = finiteSum(
+          gammaProductC([], [c, mC], [a.add(m), b.add(m)]),
+          (k) =>
+            a
+              .add(k)
+              .mul(b.add(k))
+              .mul(zm1)
+              .div((m - k - 1) * (k + 1))
+        );
+      // P = −Γ(c)·(z−1)^m/(Γ(a)Γ(b))·(a+m)ₖ(b+m)ₖ/(k!(k+m)!)·(1−z)ᵏ
+      let psiB = digammaC(b.add(m));
+      let P = gammaProductC([zm1.log().mul(m)], [c], [a, b, m1C], -1);
+      for (let k = 0; k < maxTerms; k++) {
+        const t = P.mul(L.sub(psi1).sub(psiM).add(psiA).add(psiB));
+        seriesBig = Math.max(seriesBig, magC(t));
+        series = series.add(t);
+        if (done(t, series, k)) break;
+        P = P.mul(a.add(m + k))
+          .mul(b.add(m + k))
+          .mul(w)
+          .div((k + 1) * (k + m + 1));
+        psi1 = psi1.add(1 / (k + 1));
+        psiM = psiM.add(1 / (k + m + 1));
+        psiA = psiA.add(one.div(a.add(m + k)));
+        psiB = psiB.add(one.div(b.add(m + k)));
+      }
+      break;
+    }
+
+    case 'one-minus-inv-z': {
+      const w = one.sub(one.div(z));
+      // ln(1 − z) − ln z, not the principal ln((1 − z)/z): (1 − z)/z = −w
+      // crosses the negative real axis inside |w| < 1, the difference of
+      // the two logarithms does not.
+      const L = one.sub(z).log().sub(z.log());
+      const aLog = a.neg().mul(z.log()); // ln of z^(−a)
+      // Uₖ = Γ(c)·z^(−a)/Γ(a+m)·(a)ₖ(m−k−1)!/(k!·Γ(b+m−k))·wᵏ, with
+      // 1/Γ(b+m−k−1) = (b+m−k−1)/Γ(b+m−k).
+      if (m > 0)
+        [finite, finiteBig] = finiteSum(
+          gammaProductC([aLog], [c, mC], [a.add(m), b.add(m)]),
+          (k) =>
+            a
+              .add(k)
+              .mul(b.add(m - k - 1))
+              .mul(w)
+              .div((m - k - 1) * (k + 1))
+        );
+      // Q = −Γ(c)·z^(−a)/Γ(a)·Pₖ/Γ(b−k) and S = Q·ψ(b−k), with
+      // Pₖ = (a+m)ₖ(−1)ᵏw^(k+m)/(k!(k+m)!): the same recurrences as for
+      // `inv-z`, with x = b. The caller guarantees b is not a pole.
+      let Q = gammaProductC([aLog, w.log().mul(m)], [c], [a, m1C, b], -1);
+      let S = Q.mul(digammaC(b));
+      for (let k = 0; k < maxTerms; k++) {
+        const t = Q.mul(L.sub(psi1).sub(psiM).add(psiA)).add(S);
+        seriesBig = Math.max(seriesBig, magC(t));
+        series = series.add(t);
+        if (done(t, series, k)) break;
+        const r = a
+          .add(m + k)
+          .neg()
+          .mul(w)
+          .div((k + 1) * (k + m + 1));
+        const xk = b.sub(k + 1);
+        const nextQ = r.mul(xk).mul(Q);
+        S = r.mul(xk.mul(S).sub(Q));
+        Q = nextQ;
+        psi1 = psi1.add(1 / (k + 1));
+        psiM = psiM.add(1 / (k + m + 1));
+        psiA = psiA.add(one.div(a.add(m + k)));
+      }
+      break;
+    }
+  }
+
+  const value = finite.add(series);
+  // Ratio of the largest term to the result: the factor by which rounding
+  // errors in the terms are amplified by cancellation. A ratio that is not
+  // a finite number (a NaN or zero value) rejects the result.
+  const loss = Math.max(finiteBig, seriesBig) / magC(value);
+  return { value, loss: Number.isFinite(loss) ? loss : Infinity };
+}
+
 // Treat a parameter difference within this distance of an integer as
 // degenerate: the two-term connection formulas have Γ-factors that blow up
 // like 1/dist, so closer than this the cancellation destroys the result.
-// Such cases are routed to another transformation, or evaluated by averaging
-// two parameter-perturbed evaluations (±1e-6), accurate to ~1e-9.
+// A difference that is exactly an integer uses the logarithmic connection
+// formulas (`gauss2F1LogCaseC`). A difference that is close to an integer
+// but not equal to it is routed to another transformation or, for a
+// difference close to 0 only, evaluated by averaging two
+// parameter-perturbed evaluations (±1e-6); see the accuracy measured where
+// that average is formed in `hypergeometric2F1Complex`.
 const DEGENERATE_TOL = 1e-7;
 
 // |w| bounds for the transformed series argument. Below W_PREFERRED the
@@ -1835,15 +2721,26 @@ const W_MAX = 0.99;
  * Picks among the six Kummer transformations the one with the smallest
  * transformed argument |w| (A&S 15.3.4–15.3.9): direct series, Pfaff
  * z/(z−1), and the two-term Γ-connection formulas in 1−z, 1/z, 1/(1−z),
- * and 1−1/z. Degenerate parameter differences (a−b ∈ ℤ for the 1/z and
- * 1/(1−z) maps, c−a−b ∈ ℤ for the 1−z and 1−1/z maps) are routed to a
- * non-degenerate map when one converges, otherwise handled by symmetric
- * parameter perturbation (~9 significant digits).
+ * and 1−1/z. When a parameter difference is an integer (a−b ∈ ℤ for the
+ * 1/z and 1/(1−z) maps, c−a−b ∈ ℤ for the 1−z and 1−1/z maps), those maps
+ * use the logarithmic connection formulas instead (`gauss2F1LogCaseC`), and
+ * take part in the smallest-|w| choice like the others. A difference that is
+ * within `DEGENERATE_TOL` of an integer without being one makes the map
+ * unusable.
+ *
+ * Every result is checked for cancellation: the ratio of its largest term
+ * to the result must be at most `HYP2F1_MAX_LOSS` (or `HYP2F1_FALLBACK_LOSS`
+ * when no map meets that bound), otherwise the next map is tried. When no
+ * map is accepted, the value is the average of two parameter-perturbed
+ * evaluations if every integer parameter difference is 0 (accurate to
+ * about 5e-10), and NaN otherwise.
  *
  * On the branch cut z ∈ (1, ∞) the principal branch is the limit from
  * below (the standard z − i0 convention).
  *
- * Returns NaN only near z = e^{±iπ/3} (all maps have |w| ≈ 1 there).
+ * Returns NaN near z = e^{±iπ/3} (all maps have |w| ≈ 1 there), for a
+ * polynomial of degree above `HYP2F1_MAX_DEGREE`, and when no map gives
+ * about 10 correct digits.
  */
 export function hypergeometric2F1Complex(
   a: Complex,
@@ -1860,7 +2757,18 @@ export function hypergeometric2F1Complex(
   if (isNonPositiveIntegerC(c)) {
     if (nTerms === Infinity || nTerms > -c.re) return C_NAN;
   }
-  if (nTerms !== Infinity) return gauss2F1SeriesC(a, b, c, z, nTerms + 1);
+  if (nTerms !== Infinity) {
+    // A polynomial of degree nTerms. Above HYP2F1_MAX_DEGREE terms its sum
+    // would take too long (a = −1e20 has 1e20 terms), and a result whose
+    // terms cancel too much has no correct digits: both give NaN. A sum of
+    // exactly 0 (₂F₁(−1, 1; 1; 1) = 1 − 1) is kept when its terms are at
+    // most HYP2F1_POLYNOMIAL_MAX_LOSS, so that its absolute error is below
+    // 1e-9.
+    if (nTerms > HYP2F1_MAX_DEGREE) return C_NAN;
+    const { sum, big } = gauss2F1SeriesC(a, b, c, z, nTerms);
+    const limit = HYP2F1_POLYNOMIAL_MAX_LOSS * (sum.isZero() ? 1 : magC(sum));
+    return big <= limit ? sum : C_NAN;
+  }
 
   if (z.isZero()) return C_ONE;
 
@@ -1879,11 +2787,24 @@ export function hypergeometric2F1Complex(
   // real z > 1, which is exactly the z − i0 limit.
   if (z.im === 0) z = new Complex(z.re, -0);
 
-  const sIsDegenerate = distToIntegerC(s) <= DEGENERATE_TOL;
-  const dIsDegenerate = distToIntegerC(d) <= DEGENERATE_TOL;
+  // An integer difference (up to LOG_CASE_MAX_M) uses the logarithmic
+  // connection formulas; a difference that is only close to an integer
+  // makes the map degenerate. A difference within a few rounding errors of
+  // the parameters of an integer counts as that integer: 2.3 − 0.3 is
+  // 1.9999999999999998 in doubles, and 2.6 − 0.3 − 2.3 is 4.4e-16.
+  const intTol = 8 * Number.EPSILON * Math.max(1, a.abs(), b.abs(), c.abs());
+  const isLogCase = (x: Complex) =>
+    Math.abs(x.im) <= intTol &&
+    Math.abs(x.re - Math.round(x.re)) <= intTol &&
+    Math.abs(Math.round(x.re)) <= LOG_CASE_MAX_M;
+  const sIsLogCase = isLogCase(s);
+  const dIsLogCase = isLogCase(d);
+  const sIsDegenerate = !sIsLogCase && distToIntegerC(s) <= DEGENERATE_TOL;
+  const dIsDegenerate = !dIsLogCase && distToIntegerC(d) <= DEGENERATE_TOL;
 
   // The six Kummer maps, by transformed argument. `degenerate` marks maps
-  // whose connection formula breaks down for the current parameters.
+  // whose connection formula breaks down for the current parameters,
+  // `logCase` those that use a logarithmic connection formula.
   const candidates: {
     kind:
       | 'direct'
@@ -1894,122 +2815,97 @@ export function hypergeometric2F1Complex(
       | 'one-minus-inv-z';
     w: Complex;
     degenerate: boolean;
+    logCase: boolean;
   }[] = [
-    { kind: 'direct', w: z, degenerate: false },
-    { kind: 'pfaff', w: z.div(z.sub(1)), degenerate: false },
-    { kind: 'one-minus-z', w: one.sub(z), degenerate: sIsDegenerate },
-    { kind: 'inv-z', w: one.div(z), degenerate: dIsDegenerate },
+    { kind: 'direct', w: z, degenerate: false, logCase: false },
+    { kind: 'pfaff', w: z.div(z.sub(1)), degenerate: false, logCase: false },
+    {
+      kind: 'one-minus-z',
+      w: one.sub(z),
+      degenerate: sIsDegenerate,
+      logCase: sIsLogCase,
+    },
+    {
+      kind: 'inv-z',
+      w: one.div(z),
+      degenerate: dIsDegenerate,
+      logCase: dIsLogCase,
+    },
     {
       kind: 'inv-one-minus-z',
       w: one.div(one.sub(z)),
       degenerate: dIsDegenerate,
+      logCase: dIsLogCase,
     },
     {
       kind: 'one-minus-inv-z',
       w: one.sub(one.div(z)),
       degenerate: sIsDegenerate,
+      logCase: sIsLogCase,
     },
   ];
-  candidates.sort((p, q) => p.w.abs() - q.w.abs());
+  // A logarithmic formula is ranked as if its |w| were at least
+  // LOG_CASE_MIN_RANK: it loses one or two more digits than the two-term
+  // formulas (its finite sum and its series partly cancel), so a map
+  // without the logarithm is preferred while it converges quickly.
+  const rank = (p: (typeof candidates)[number]) =>
+    p.logCase ? Math.max(p.w.abs(), LOG_CASE_MIN_RANK) : p.w.abs();
+  candidates.sort((p, q) => rank(p) - rank(q));
 
   let sawDegenerateCandidate = false;
+  let best: { value: Complex; loss: number } | undefined;
   for (const cand of candidates) {
     const { kind, w } = cand;
-    if (w.abs() > W_MAX) break; // sorted: no further candidate fits
+    if (rank(cand) > W_MAX) break; // sorted: no further candidate fits
     if (cand.degenerate) {
       sawDegenerateCandidate = true;
       continue;
     }
     const maxTerms = w.abs() <= W_PREFERRED ? 10_000 : 250_000;
 
-    switch (kind) {
-      case 'direct':
-        return gauss2F1SeriesC(a, b, c, z, maxTerms);
-
-      case 'pfaff':
-        // A&S 15.3.4: (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1))
-        return one
-          .sub(z)
-          .pow(a.neg())
-          .mul(gauss2F1SeriesC(a, c.sub(b), c, w, maxTerms));
-
-      case 'one-minus-z': {
-        // A&S 15.3.6, w = 1−z, s = c−a−b ∉ ℤ
-        const t1 = gammaRatioC([c, s], [c.sub(a), c.sub(b)]).mul(
-          gauss2F1SeriesC(a, b, one.sub(s), w, maxTerms)
-        );
-        const t2 = gammaRatioC([c, s.neg()], [a, b])
-          .mul(w.pow(s))
-          .mul(gauss2F1SeriesC(c.sub(a), c.sub(b), one.add(s), w, maxTerms));
-        return t1.add(t2);
+    if (
+      cand.logCase &&
+      (kind === 'inv-z' ||
+        kind === 'inv-one-minus-z' ||
+        kind === 'one-minus-z' ||
+        kind === 'one-minus-inv-z')
+    ) {
+      const r = hypergeometric2F1LogCase(kind, a, b, c, z, maxTerms);
+      if (r.value.isFinite() && Number.isFinite(r.loss)) {
+        if (r.loss <= HYP2F1_MAX_LOSS) return r.value;
+        if (!best || r.loss < best.loss) best = r;
       }
+      sawDegenerateCandidate = true;
+      continue;
+    }
 
-      case 'inv-z': {
-        // A&S 15.3.7, w = 1/z, b−a ∉ ℤ
-        const t1 = gammaRatioC([c, d], [b, c.sub(a)])
-          .mul(z.neg().pow(a.neg()))
-          .mul(
-            gauss2F1SeriesC(
-              a,
-              one.sub(c).add(a),
-              one.sub(b).add(a),
-              w,
-              maxTerms
-            )
-          );
-        const t2 = gammaRatioC([c, d.neg()], [a, c.sub(b)])
-          .mul(z.neg().pow(b.neg()))
-          .mul(
-            gauss2F1SeriesC(
-              b,
-              one.sub(c).add(b),
-              one.sub(a).add(b),
-              w,
-              maxTerms
-            )
-          );
-        return t1.add(t2);
-      }
-
-      case 'inv-one-minus-z': {
-        // A&S 15.3.8, w = 1/(1−z), b−a ∉ ℤ
-        const oneMinusZ = one.sub(z);
-        const t1 = gammaRatioC([c, d], [b, c.sub(a)])
-          .mul(oneMinusZ.pow(a.neg()))
-          .mul(gauss2F1SeriesC(a, c.sub(b), a.sub(b).add(1), w, maxTerms));
-        const t2 = gammaRatioC([c, d.neg()], [a, c.sub(b)])
-          .mul(oneMinusZ.pow(b.neg()))
-          .mul(gauss2F1SeriesC(b, c.sub(a), b.sub(a).add(1), w, maxTerms));
-        return t1.add(t2);
-      }
-
-      case 'one-minus-inv-z': {
-        // A&S 15.3.9, w = 1 − 1/z, s = c−a−b ∉ ℤ
-        const t1 = gammaRatioC([c, s], [c.sub(a), c.sub(b)])
-          .mul(z.pow(a.neg()))
-          .mul(
-            gauss2F1SeriesC(
-              a,
-              a.sub(c).add(1),
-              a.add(b).sub(c).add(1),
-              w,
-              maxTerms
-            )
-          );
-        const t2 = gammaRatioC([c, s.neg()], [a, b])
-          .mul(one.sub(z).pow(s))
-          .mul(z.pow(a.sub(c)))
-          .mul(gauss2F1SeriesC(c.sub(a), one.sub(a), s.add(1), w, maxTerms));
-        return t1.add(t2);
-      }
+    const r = kummerMapC(kind, a, b, c, z, w, maxTerms);
+    if (r.value.isFinite() && Number.isFinite(r.loss)) {
+      if (r.loss <= HYP2F1_MAX_LOSS) return r.value;
+      if (!best || r.loss < best.loss) best = r;
     }
   }
 
-  // Only degenerate maps converge: evaluate at symmetrically perturbed
-  // parameters and average. The perturbation (±ε on a, ±ε√2 on c) breaks
-  // both a−b ∈ ℤ and c−a−b ∈ ℤ; averaging cancels the O(ε) error, leaving
-  // O(ε²) + Γ-cancellation ≈ 1e-9 relative accuracy.
-  if (depth === 0 && sawDegenerateCandidate) {
+  if (best && best.loss <= HYP2F1_FALLBACK_LOSS) return best.value;
+
+  // The largest integer (or nearly integer) difference that made a map
+  // logarithmic or degenerate.
+  const degenerateM = Math.max(
+    sIsLogCase || sIsDegenerate ? Math.abs(Math.round(s.re)) : 0,
+    dIsLogCase || dIsDegenerate ? Math.abs(Math.round(d.re)) : 0
+  );
+
+  // No map was accepted. When every integer (or nearly integer) parameter
+  // difference is 0, the value is the average of two evaluations at
+  // symmetrically perturbed parameters (±ε on a, ±ε√2 on c), which break
+  // both a−b ∈ ℤ and c−a−b ∈ ℤ; averaging cancels the O(ε) error.
+  // Measured against mpmath (2026-09-28) on a grid of 540 points
+  // (a, b ∈ {−5/2, −1/2, 1/2, 3/2, 5/2}, c ∈ {1, 3/2, 9/4, 3}, nine z
+  // outside the unit disk), each evaluated this way: the relative error is
+  // at most 4.6e-10 when the integer differences are 0, but up to 2.4e-4
+  // when one of them is 1 to 8 (above 1e-9 at 192 of those 432 points).
+  // For a nonzero difference the function therefore returns NaN.
+  if (depth === 0 && sawDegenerateCandidate && degenerateM === 0) {
     const EPS = 1e-6;
     const f1 = hypergeometric2F1Complex(
       a.add(EPS),
@@ -2029,6 +2925,163 @@ export function hypergeometric2F1Complex(
   }
 
   return C_NAN; // near z = e^{±iπ/3}: no implemented map converges
+}
+
+/**
+ * ₂F₁(a, b; c; z) through one of the Kummer maps that need no logarithm,
+ * with the argument w of its series (A&S 15.3.4, 15.3.6–15.3.9), and the
+ * loss of the result (see `withLossC`). The caller does not use a
+ * connection formula when its parameter difference is an integer or close
+ * to one.
+ */
+function kummerMapC(
+  kind:
+    | 'direct'
+    | 'pfaff'
+    | 'one-minus-z'
+    | 'inv-z'
+    | 'inv-one-minus-z'
+    | 'one-minus-inv-z',
+  a: Complex,
+  b: Complex,
+  c: Complex,
+  z: Complex,
+  w: Complex,
+  maxTerms: number
+): { value: Complex; loss: number } {
+  const one = C_ONE;
+  const s = c.sub(a).sub(b); // c − a − b
+  const d = b.sub(a); // b − a
+  switch (kind) {
+    case 'direct':
+      return withLossC(one, gauss2F1SeriesC(a, b, c, z, maxTerms));
+
+    case 'pfaff':
+      // A&S 15.3.4: (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1))
+      return withLossC(
+        one.sub(z).pow(a.neg()),
+        gauss2F1SeriesC(a, c.sub(b), c, w, maxTerms)
+      );
+
+    case 'one-minus-z':
+      // A&S 15.3.6, w = 1−z, s = c−a−b ∉ ℤ
+      return withLossC(
+        gammaRatioC([c, s], [c.sub(a), c.sub(b)]),
+        gauss2F1SeriesC(a, b, one.sub(s), w, maxTerms),
+        gammaRatioC([c, s.neg()], [a, b]).mul(w.pow(s)),
+        gauss2F1SeriesC(c.sub(a), c.sub(b), one.add(s), w, maxTerms)
+      );
+
+    case 'inv-z':
+      // A&S 15.3.7, w = 1/z, b−a ∉ ℤ
+      return withLossC(
+        gammaRatioC([c, d], [b, c.sub(a)]).mul(z.neg().pow(a.neg())),
+        gauss2F1SeriesC(a, one.sub(c).add(a), one.sub(b).add(a), w, maxTerms),
+        gammaRatioC([c, d.neg()], [a, c.sub(b)]).mul(z.neg().pow(b.neg())),
+        gauss2F1SeriesC(b, one.sub(c).add(b), one.sub(a).add(b), w, maxTerms)
+      );
+
+    case 'inv-one-minus-z': {
+      // A&S 15.3.8, w = 1/(1−z), b−a ∉ ℤ
+      const oneMinusZ = one.sub(z);
+      return withLossC(
+        gammaRatioC([c, d], [b, c.sub(a)]).mul(oneMinusZ.pow(a.neg())),
+        gauss2F1SeriesC(a, c.sub(b), a.sub(b).add(1), w, maxTerms),
+        gammaRatioC([c, d.neg()], [a, c.sub(b)]).mul(oneMinusZ.pow(b.neg())),
+        gauss2F1SeriesC(b, c.sub(a), b.sub(a).add(1), w, maxTerms)
+      );
+    }
+
+    case 'one-minus-inv-z':
+      // A&S 15.3.9, w = 1 − 1/z, s = c−a−b ∉ ℤ
+      return withLossC(
+        gammaRatioC([c, s], [c.sub(a), c.sub(b)]).mul(z.pow(a.neg())),
+        gauss2F1SeriesC(
+          a,
+          a.sub(c).add(1),
+          a.add(b).sub(c).add(1),
+          w,
+          maxTerms
+        ),
+        gammaRatioC([c, s.neg()], [a, b])
+          .mul(one.sub(z).pow(s))
+          .mul(z.pow(a.sub(c))),
+        gauss2F1SeriesC(c.sub(a), one.sub(a), s.add(1), w, maxTerms)
+      );
+  }
+}
+
+/**
+ * ₂F₁(a, b; c; z) through a logarithmic connection formula, for the map
+ * `kind` whose parameter difference is an integer: b − a for the 1/z and
+ * 1/(1−z) maps, c − a − b for the 1−z and 1−1/z maps.
+ *
+ * The formulas in `gauss2F1LogCaseC` need that difference to be m ≥ 0.
+ * ₂F₁ is symmetric in a and b, so a negative b − a is handled by swapping
+ * them. A negative c − a − b is handled by the Euler transformation
+ * ₂F₁(a, b; c; z) = (1−z)^(c−a−b)·₂F₁(c−a, c−b; c; z), whose new parameter
+ * difference c − (c−a) − (c−b) = a + b − c is positive. If c − a or c − b
+ * is a non-positive integer, the transformed function is a polynomial and
+ * is summed directly.
+ */
+function hypergeometric2F1LogCase(
+  kind: 'inv-z' | 'inv-one-minus-z' | 'one-minus-z' | 'one-minus-inv-z',
+  a: Complex,
+  b: Complex,
+  c: Complex,
+  z: Complex,
+  maxTerms: number
+): { value: Complex; loss: number } {
+  // The difference is within rounding of the integer m (see `isLogCase`).
+  // If it is not exactly m, one parameter is moved by those few rounding
+  // errors so that the formulas see an exact integer difference.
+  if (kind === 'inv-z' || kind === 'inv-one-minus-z') {
+    const d = b.sub(a);
+    const m = Math.round(d.re);
+    if (d.re !== m || d.im !== 0) b = a.add(m);
+    return m >= 0
+      ? gauss2F1LogCaseC(kind, a, b, c, m, z, maxTerms)
+      : gauss2F1LogCaseC(kind, b, a, c, -m, z, maxTerms);
+  }
+  const s = c.sub(a).sub(b);
+  const m = Math.round(s.re);
+  if (s.re !== m || s.im !== 0) c = a.add(b).add(m);
+  if (m >= 0) return gauss2F1LogCaseC(kind, a, b, c, m, z, maxTerms);
+  const a1 = c.sub(a);
+  const b1 = c.sub(b);
+  const factor = C_ONE.sub(z).pow(new Complex(m, 0));
+  const nTerms = Math.min(
+    isNonPositiveIntegerC(a1) ? -a1.re : Infinity,
+    isNonPositiveIntegerC(b1) ? -b1.re : Infinity
+  );
+  if (nTerms !== Infinity) {
+    // The polynomial ₂F₁(c−a, c−b; c; z) of degree nTerms (at most −m,
+    // since a and b are not non-positive integers). Its terms can
+    // alternate and exceed the sum by many orders of magnitude: for
+    // ₂F₁(−100, 1; 2; 0.9) they reach 1e24 for a sum of 0.011. The ratio
+    // of the largest term to the sum is its loss, as for the other
+    // logarithmic results, so a poorly conditioned polynomial is rejected
+    // and another map is tried.
+    let term: Complex = C_ONE;
+    let sum: Complex = C_ONE;
+    let big = 1;
+    for (let n = 0; n < nTerms; n++) {
+      term = term
+        .mul(a1.add(n))
+        .mul(b1.add(n))
+        .mul(z)
+        .div(c.add(n).mul(n + 1));
+      big = Math.max(big, magC(term));
+      sum = sum.add(term);
+    }
+    const loss = big / magC(sum);
+    return {
+      value: factor.mul(sum),
+      loss: Number.isFinite(loss) ? loss : Infinity,
+    };
+  }
+  const r = gauss2F1LogCaseC(kind, a1, b1, c, -m, z, maxTerms);
+  return { value: factor.mul(r.value), loss: r.loss };
 }
 
 function kummer1F1SeriesC(
