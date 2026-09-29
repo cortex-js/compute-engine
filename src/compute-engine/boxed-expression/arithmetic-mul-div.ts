@@ -18,6 +18,8 @@ import {
   numericValue,
   isContinuationOperand,
   containsContinuationOperand,
+  isInexactOperand,
+  nanOperandAnswer,
 } from './type-guards.js';
 import {
   isImaginaryPartFinite,
@@ -167,6 +169,19 @@ export class Product {
   // If `false`, the running products are not calculated
   private _isCanonical = true;
 
+  // The `NaN` coefficient absorbs the product, and its answer is `NaN`,
+  // except that a product whose `NaN` came from an `Indeterminate` factor,
+  // with no inexact factor (a float, the `NaN` literal, an absent value), is
+  // `Indeterminate`: `2·Indeterminate` is `Indeterminate` and
+  // `Indeterminate·2.0` is `NaN`, as a float operand makes a numeric result
+  // a float. `_nanFromIndeterminate` is `true` when the coefficient became
+  // `NaN` from `Indeterminate` factors only, `false` when another `NaN`-valued
+  // factor was seen, and `undefined` when no factor made it `NaN` (the
+  // coefficient product itself did). `_sawInexact` records an inexact factor
+  // at any position, before or after the `NaN`.
+  private _nanFromIndeterminate: boolean | undefined = undefined;
+  private _sawInexact = false;
+
   static from(expr: Expression): Product {
     return new Product(expr.engine, [expr]);
   }
@@ -194,9 +209,20 @@ export class Product {
    */
   mul(term: Expression, exp?: Rational) {
     console.assert(term.isCanonical || term.isStructural);
-    if (this.coefficient.isNaN) return;
+    if (isInexactOperand(term) || isAbsentSymbol(term)) this._sawInexact = true;
+    // Only a NUMBER LITERAL whose value is `NaN` makes the coefficient `NaN`.
+    // `isNaN` of a symbol reads its current value, and a product built from
+    // the symbol must not depend on it (with `w := NaN`, `w·2` stayed `NaN`
+    // after `w := 4`): the symbol stays a factor, and `evaluate()` reads its
+    // value.
+    if (this.coefficient.isNaN) {
+      if (isNumber(term) && term.isNaN && !term.isIndeterminate)
+        this._nanFromIndeterminate = false;
+      return;
+    }
 
-    if (term.isNaN) {
+    if (isNumber(term) && term.isNaN) {
+      this._nanFromIndeterminate = term.isIndeterminate;
       this.coefficient = this.engine._numericValue(NaN);
       return;
     }
@@ -732,7 +758,8 @@ export class Product {
     const ce = this.engine;
 
     const coef = this.coefficient;
-    if (coef.isNaN) return ce.NaN;
+    if (coef.isNaN)
+      return options.numericApproximation ? ce.NaN : this._nanAnswer();
     if (coef.isZero) {
       // `0 · x → 0` is sound for any term that could still be a NUMBER at
       // run time (a free symbol, a `value`-typed operand). But a term whose
@@ -804,6 +831,14 @@ export class Product {
     return termsAsExpression(ce, groupedTerms);
   }
 
+  /** The answer of a product whose coefficient is `NaN`: see
+   * `_nanFromIndeterminate`. */
+  private _nanAnswer(): Expression {
+    return this._nanFromIndeterminate === true && !this._sawInexact
+      ? this.engine.Indeterminate
+      : this.engine.NaN;
+  }
+
   /** The product, expressed as a numerator and denominator */
   asNumeratorDenominator(): [Expression, Expression] {
     const ce = this.engine;
@@ -813,7 +848,7 @@ export class Product {
     // terms pushed BEFORE it in place, so without this guard a product such
     // as `(x + 1) · NaN` came back as an inert `NaN * (x + 1)` — which does
     // not even report `isNaN`, since an unevaluated function node cannot.
-    if (coef.isNaN) return [ce.NaN, ce.One];
+    if (coef.isNaN) return [this._nanAnswer(), ce.One];
     if (coef.isZero) return [coef.isExact ? ce.Zero : ce.number(coef), ce.One];
     if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
       const infinity = coef.isPositiveInfinity
@@ -1105,7 +1140,15 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   //   the `a/a -> 1` rule of `simplifyDivide` (symbolic/simplify-divide.ts),
   //   whose guards exclude 0 and the infinities but not `NaN`, and
   //   simplified to `1` against evaluation's `NaN`.
-  if (op1.isNaN || op2.isNaN) return ce.NaN;
+  // The fold forwards an `Indeterminate` operand when the other operand is
+  // not inexact, as a product does (`nanOperandAnswer()`):
+  // `Indeterminate / 2` is `Indeterminate`, `Indeterminate / 2.0` is `NaN`.
+  // Only a NUMBER LITERAL folds here: `isNaN` of a symbol reads its current
+  // value, and a canonical form must not depend on it (with `w := NaN`, a
+  // folded `w / 2` stayed `NaN` after `w := 4`). A symbol is left to
+  // `evaluate()`, which substitutes its value first.
+  if ((isNumber(op1) && op1.isNaN) || (isNumber(op2) && op2.isNaN))
+    return nanOperandAnswer(ce, [op1, op2]);
 
   // Tuples (points/vectors in ℝⁿ): `tuple / scalar` scales component-wise;
   // `scalar / tuple` and `tuple / tuple` are undefined.
@@ -1482,8 +1525,14 @@ export function div(num: Expression, denom: number | Expression): Expression {
   num = num.canonical;
   if (typeof denom !== 'number') denom = denom.canonical;
 
-  // If the numerator is NaN, return NaN
-  if (num.isNaN) return ce.NaN;
+  // If the numerator is NaN, return NaN (or `Indeterminate`, forwarded by the
+  // rule of `canonicalDivide`). A number literal only, for the reason given
+  // in `canonicalDivide`.
+  if (isNumber(num) && num.isNaN)
+    return nanOperandAnswer(ce, [
+      num,
+      typeof denom === 'number' ? ce.number(denom) : denom,
+    ]);
 
   // Tuple (point/vector in ℝⁿ) numerator: `tuple / scalar` scales
   // component-wise — the value-level twin of the tuple branch in
@@ -1588,7 +1637,8 @@ export function div(num: Expression, denom: number | Expression): Expression {
       }
     }
   } else {
-    if (denom.isNaN) return ce.NaN;
+    if (isNumber(denom) && denom.isNaN)
+      return nanOperandAnswer(ce, [num, denom]);
     if (isLiteral(num, 0)) {
       if (isLiteral(denom, 0) || denom.isFinite === false) return ce.NaN;
       return ce.Zero;

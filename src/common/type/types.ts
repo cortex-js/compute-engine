@@ -211,6 +211,36 @@ export function isComplexInfinityValue(
   );
 }
 
+/**
+ * The value carried by the type of the `Indeterminate` literal: the exact
+ * answer to an indeterminate form (such as `0/0`), a number with no value.
+ * Its double value is `NaN`, like the IEEE `NaN` literal, but the two are
+ * DIFFERENT values: `NaN` is the result of a floating-point failure and
+ * `Indeterminate` the result of an exact computation. A JavaScript `NaN`
+ * cannot tell them apart, so this frozen tagged object is the value of the
+ * `Indeterminate` value type. It widens to `nan`, like the `NaN` value
+ * type. Test for it with {@linkcode isIndeterminateValue}, which reads the
+ * TAG, for the reason given for {@linkcode COMPLEX_INFINITY_VALUE}.
+ *
+ * Provenance: `docs/plans/2026-09-28-indeterminate-value.md`.
+ */
+export const INDETERMINATE_VALUE = Object.freeze({
+  indeterminate: true as const,
+});
+
+/** True if `v` is the {@linkcode INDETERMINATE_VALUE} sentinel, i.e. the
+ * value of the `Indeterminate` value-literal type. Reads the tag, never the
+ * identity. */
+export function isIndeterminateValue(
+  v: unknown
+): v is typeof INDETERMINATE_VALUE {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    (v as { indeterminate?: unknown }).indeterminate === true
+  );
+}
+
 export type NamedElement = {
   name?: string;
   type: Type;

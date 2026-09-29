@@ -48,7 +48,10 @@ import {
   immutableNumericValueType,
 } from '../../common/type/immutable.js';
 import type { Type } from '../../common/type/types.js';
-import { COMPLEX_INFINITY_VALUE } from '../../common/type/types.js';
+import {
+  COMPLEX_INFINITY_VALUE,
+  INDETERMINATE_VALUE,
+} from '../../common/type/types.js';
 import {
   positiveRangeType,
   negativeRangeType,
@@ -78,6 +81,7 @@ import {
   isAbsentSymbol,
   isNumber,
   isSymbol,
+  nanOperandAnswer,
 } from './type-guards.js';
 import { isImaginaryPartFinite } from './imaginary-part.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
@@ -152,6 +156,13 @@ const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
 const COMPLEX_INFINITY_TYPE: Type = Object.freeze({
   kind: 'value',
   value: COMPLEX_INFINITY_VALUE,
+});
+
+/** The value type of the `Indeterminate` literal, printed `Indeterminate`.
+ * It widens to `nan`, like the value type of the `NaN` literal. */
+const INDETERMINATE_TYPE: Type = Object.freeze({
+  kind: 'value',
+  value: INDETERMINATE_VALUE,
 });
 
 /**
@@ -262,6 +273,22 @@ export class BoxedNumber
   private _hash: number | undefined;
   private _digest: string | undefined;
 
+  /** `true` only for the `Indeterminate` literal (`ce.Indeterminate`): the
+   * exact answer to an indeterminate form such as `0/0`. Its value is the
+   * double `NaN`, like the `NaN` literal, and this mark is what tells the two
+   * apart. A plain JavaScript `NaN` (or a `NumericValue`) cannot carry the
+   * mark, so every path that rebuilds a literal from its value (`ce.number`,
+   * the numeric kernels) gives the `NaN` literal: only the literal made by the
+   * engine at startup, and its unshared copies, carry it.
+   *
+   * `isExact` stays `false`, as for `NaN`: an exact mark would send the value
+   * into every "an exact argument stays symbolic" branch, and `sin(0/0)`
+   * would stay inert. The exactness the value stands for is a fact about the
+   * computation that produced it, which the mark records.
+   *
+   * Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4. */
+  private readonly _indeterminate: boolean;
+
   /** Memo for `_literalType` (`null` = computed, not eligible). The value
    * of a literal never changes, so the memo never invalidates. */
   private _literalTypeMemo: Type | null | undefined = undefined;
@@ -291,9 +318,10 @@ export class BoxedNumber
       | NumericValueData
       | ExactNumericValueData
       | NumericValue,
-    options?: { metadata?: Metadata }
+    options?: { metadata?: Metadata; indeterminate?: boolean }
   ) {
     super(ce, options?.metadata);
+    this._indeterminate = options?.indeterminate === true;
     // An exact value whose factory is not the one of this engine (see
     // `_numericValue()`) is made again with the factory of the engine, so
     // that its float value follows the precision of the engine.
@@ -319,7 +347,12 @@ export class BoxedNumber
     // not from `bignumIm`: `bignumIm` of a radical is rounded to the working
     // precision, so two equal `√2·i` literals hashed at different precisions
     // would get different hashes.
-    this._hash ??= hashCode(`${this.re}:${this.im}`);
+    // The one exception to "a function of the value": the `Indeterminate`
+    // literal has the value `NaN` but is not `isSame` to the `NaN` literal,
+    // so its hash has its own spelling.
+    this._hash ??= hashCode(
+      this._indeterminate ? 'Indeterminate' : `${this.re}:${this.im}`
+    );
     return this._hash;
   }
 
@@ -342,6 +375,7 @@ export class BoxedNumber
         latex: this.verbatimLatex,
         sourceOffsets: this.sourceOffsets,
       },
+      indeterminate: this._indeterminate,
     });
   }
 
@@ -361,6 +395,8 @@ export class BoxedNumber
     // P0-32/P0-33 fidelity fixes made it lossless.)
 
     const value = this._value;
+    // The `Indeterminate` literal is spelled by its symbol, as `NaN` is.
+    if (this._indeterminate) return 'Indeterminate';
     if (typeof value === 'number') {
       if (Number.isNaN(value)) return 'NaN';
       if (!Number.isFinite(value))
@@ -372,6 +408,7 @@ export class BoxedNumber
   }
 
   get operator(): string {
+    if (this._indeterminate) return 'Indeterminate';
     // Handle plain JavaScript numbers
     if (typeof this._value === 'number') {
       if (Number.isNaN(this._value)) return 'NaN';
@@ -483,6 +520,10 @@ export class BoxedNumber
   neg(): Expression {
     const n = this._value;
     if (n === 0) return this;
+    // The unary operations of the `Indeterminate` literal are
+    // `Indeterminate`: rebuilding a literal from its value (`ce.number`) would
+    // give the `NaN` literal, a different value.
+    if (this._indeterminate) return this;
 
     if (typeof n === 'number') return this.engine.number(-n);
 
@@ -490,6 +531,7 @@ export class BoxedNumber
   }
 
   inv(): Expression {
+    if (this._indeterminate) return this;
     if (typeof this._value === 'number') {
       if (Math.abs(this._value) === 1) return this;
       if (!Number.isInteger(this._value))
@@ -503,6 +545,7 @@ export class BoxedNumber
   }
 
   abs(): Expression {
+    if (this._indeterminate) return this;
     if (this.isPositive) return this;
     if (typeof this._value === 'number')
       return this.engine.number(-this._value);
@@ -512,6 +555,17 @@ export class BoxedNumber
 
   add(rhs: number | Expression): Expression {
     const ce = this.engine;
+    // A sum with an `Indeterminate` operand is `Indeterminate`, unless the
+    // other operand is inexact (a float, `NaN`) or absent: the rule of the
+    // `Add` fold (`nanOperandAnswer()`).
+    if (
+      this._indeterminate ||
+      (typeof rhs !== 'number' && isNumber(rhs) && rhs.isIndeterminate)
+    )
+      return nanOperandAnswer(ce, [
+        this,
+        typeof rhs === 'number' ? ce.number(rhs) : rhs,
+      ]);
     // `0 + x` is `x`, but `0 + Missing` is `NaN`, not the absent symbol:
     // arithmetic with an absent operand is `NaN` (user decision of
     // 2026-09-25). A negation or product of an absent value (`-Missing`,
@@ -547,6 +601,21 @@ export class BoxedNumber
   }
 
   mul(rhs: NumericValue | number | Expression): Expression {
+    // A product with an `Indeterminate` factor follows the rule of the sum
+    // (see `add()`).
+    if (
+      this._indeterminate ||
+      (typeof rhs !== 'number' &&
+        !(rhs instanceof NumericValue) &&
+        isNumber(rhs) &&
+        rhs.isIndeterminate)
+    )
+      return nanOperandAnswer(this.engine, [
+        this,
+        typeof rhs === 'number' || rhs instanceof NumericValue
+          ? this.engine.number(rhs)
+          : rhs,
+      ]);
     // `1 · x` is `x` and `-1 · x` is `-x`, but a product with an absent
     // operand is `NaN` (see `add()`). A negation or product of an absent
     // value goes to `mul()`, which reads it as `NaN` too, except when a
@@ -634,6 +703,7 @@ export class BoxedNumber
   }
 
   root(exp: number | Expression): Expression {
+    if (this._indeterminate) return this;
     if (typeof exp === 'number') {
       if (exp === 0) return this.engine.NaN;
       if (exp === 1) return this;
@@ -685,6 +755,7 @@ export class BoxedNumber
 
   sqrt(): Expression {
     const ce = this.engine;
+    if (this._indeterminate) return this;
     // Non-finite radicands, decided by the modulus (ruled 2026-09-01):
     // `√(+∞) = +∞`; `√(−∞) = i·∞`, the direction-less `~oo`; and
     // `√(~oo) = ~oo` — the modulus grows without bound in every direction
@@ -764,6 +835,12 @@ export class BoxedNumber
 
   ln(semiBase?: number | Expression): Expression {
     const ce = this.engine;
+    // `Ln(Indeterminate)` is `Indeterminate`, as for the other unary methods
+    // (see `neg()`); with a base, the rule of the sum applies to the two.
+    if (this._indeterminate)
+      return semiBase === undefined
+        ? this
+        : nanOperandAnswer(ce, [this, ce.expr(semiBase)]);
     const base = semiBase ? ce.expr(semiBase) : undefined;
 
     // The exceptional points — 0, 1, the infinities and NaN, in the
@@ -1018,6 +1095,9 @@ export class BoxedNumber
   }
 
   private _computeLiteralType(): Type | undefined {
+    // The `Indeterminate` literal has its own value type (a sentinel value,
+    // since its double `NaN` would name the `NaN` value type).
+    if (this._indeterminate) return INDETERMINATE_TYPE;
     const v = this._value;
     if (typeof v === 'number') {
       // A machine number holds NaN and ±∞ exactly, so each is its own
@@ -1311,6 +1391,10 @@ export class BoxedNumber
     return this._value.isNaN;
   }
 
+  override get isIndeterminate(): boolean {
+    return this._indeterminate;
+  }
+
   get isFinite(): boolean {
     return this.isInfinity === false && this.isNaN === false;
   }
@@ -1494,6 +1578,10 @@ export class BoxedNumber
 
   isSame(other: Expression | number | bigint | boolean | string): boolean {
     if (typeof other === 'number') {
+      // A JavaScript `NaN` stands for the `NaN` literal (`ce.number(NaN)` is
+      // `ce.NaN`), never for `Indeterminate`, and no other number is the
+      // same as `Indeterminate`.
+      if (this._indeterminate) return false;
       const v = this._value;
       if (typeof v === 'number') {
         // `===` treats +0 and -0 as equal (both normalize to +0 per the
@@ -1598,6 +1686,10 @@ export class BoxedNumber
   }
 
   N(): Expression {
+    // The numeric approximation of `Indeterminate` is the float `NaN`: every
+    // numeric route ends in the IEEE value, the one the compiled targets
+    // have.
+    if (this._indeterminate) return this.engine.NaN;
     const v = this._value;
     if (typeof v === 'number') return this;
     // NumericValue

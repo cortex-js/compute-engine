@@ -641,6 +641,9 @@ function boxFunctionInternal(
       if (typeof op1 === 'number') return ce.number(-op1, options);
       if (op1 instanceof BigDecimal) return ce.number(op1.neg(), options);
       const boxedop1 = ce.expr(op1, options);
+      // `-Indeterminate` is `Indeterminate`: the literal rebuilt from its
+      // value would be the `NaN` literal, a different value.
+      if (isNumber(boxedop1) && boxedop1.isIndeterminate) return boxedop1;
       if (isNumber(boxedop1)) {
         const num = boxedop1.numericValue;
         return ce.number(typeof num === 'number' ? -num : num.neg(), options);

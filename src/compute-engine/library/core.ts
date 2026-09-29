@@ -3201,7 +3201,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'True if the value is ABSENT — the `Missing` or `Undefined` symbol, ' +
         'or a `NaN` number (regardless of provenance). R’s `is.na` (`TRUE` ' +
         'for both `NA` and `NaN`). There is no NaN-specific test operator ' +
-        '(R’s `is.nan`).',
+        '(R’s `is.nan`). `Indeterminate`, the exact answer to an ' +
+        'indeterminate form such as `0/0`, is a value and is not absent.',
       complexity: 500,
       signature: '(any) -> boolean',
       examples: ['[IsMissing(Missing), IsMissing(NaN), IsMissing(0)]'],
@@ -3214,7 +3215,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Return the first operand that is not ABSENT (`Missing`, ' +
         '`Undefined` or `NaN`), evaluated left-to-right. If every operand ' +
         'is absent, the last operand’s value is returned verbatim (still ' +
-        'absent).',
+        'absent). `Indeterminate` is a value and is not absent.',
       complexity: 500,
       // Lazy so operands are evaluated on demand (short-circuit) rather than
       // all up front. Per the documented lazy-operator trap, a lazy operator
@@ -8489,7 +8490,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     // `e`/`E` exponent; the integer part may be omitted when a fraction is
     // present, so `".5"` reads as 0.5, but a trailing dot with no fraction
     // digits — `"5."` — is a reject; see `NUMBER_FROM_DECIMAL`) or one of the
-    // exact spellings `oo`, `+oo`, `-oo`, `NaN`. Anything else, INCLUDING the empty
+    // exact spellings `oo`, `+oo`, `-oo`, `NaN`, `Indeterminate`. Anything else, INCLUDING the empty
     // string, is an ERROR value and never NaN: `NaN` is a legitimate parse
     // RESULT for the literal `"NaN"`, so it cannot double as the failure
     // signal. `"1/3"` is not accepted (use `DigitsFrom` or arithmetic).
@@ -8507,7 +8508,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'NumberFrom(s): the number the string `s` denotes — optional ' +
           'surrounding whitespace, an optional sign, then ASCII digits with ' +
           'an optional "." fraction and an optional e/E exponent, or one of ' +
-          '"oo", "+oo", "-oo", "NaN". The integer part may be omitted before ' +
+          '"oo", "+oo", "-oo", "NaN", "Indeterminate". The integer part may ' +
+          'be omitted before ' +
           'a fraction (".5" is 0.5); a trailing "." with no fraction digits ' +
           '("5.") is not accepted. Any other text, including "", is an ' +
           'error value (never NaN).',
@@ -8560,6 +8562,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
 
         if (text === 'NaN') return ce.NaN;
+        // The spelling `String(Indeterminate)` produces reads back as the
+        // `Indeterminate` value, as `"NaN"` reads back as `NaN`.
+        if (text === 'Indeterminate') return ce.Indeterminate;
         if (text === 'oo' || text === '+oo') return ce.PositiveInfinity;
         if (text === '-oo') return ce.NegativeInfinity;
 

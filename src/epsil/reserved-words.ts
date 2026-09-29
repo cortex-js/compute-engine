@@ -42,6 +42,7 @@ export const LITERAL_WORDS: ReadonlySet<string> = new Set<string>([
   'Infinity',
   'oo',
   'NaN',
+  'Indeterminate',
 ]);
 
 /**
@@ -120,6 +121,7 @@ export const RESERVED_WORDS = new Set<string>([
   'goto', // Not in use
   'if', // ACTIVE — conditional head and conditional-expression infix
   'in', // ACTIVE — membership operator and loop separator
+  'Indeterminate', // LITERAL — numeric literal (the exact indeterminate form)
   'Infinity', // LITERAL — numeric literal (+∞); `oo` is an input alias
   'inline', // Not in use
   'inout', // Not in use — candidate parameter-mode keyword (EFFECTS-MODEL.md)

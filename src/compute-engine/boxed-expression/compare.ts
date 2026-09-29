@@ -343,9 +343,16 @@ export function same(
     // `sourceOffsets` metadata (which defeats interning). This mirrors the
     // explicit NaN check in the primitive overload of `BoxedNumber.isSame`
     // (#15). Tolerant `Equal` is unaffected and keeps IEEE semantics.
+    //
+    // The `Indeterminate` literal is the one exception to the comparison by
+    // value: its value is `NaN` too, but it is a different value from the
+    // `NaN` literal (the exact answer to an indeterminate form, not the result
+    // of a failed floating-point computation), so it is the same only as
+    // itself.
     const aNaN = typeof av === 'number' ? Number.isNaN(av) : av.isNaN;
     const bNaN = typeof bv === 'number' ? Number.isNaN(bv) : bv.isNaN;
-    if (aNaN || bNaN) return aNaN && bNaN;
+    if (aNaN || bNaN)
+      return aNaN && bNaN && a.isIndeterminate === b.isIndeterminate;
     if (typeof av === 'number') {
       if (typeof bv === 'number') return av === bv;
       return bv.eq(av);

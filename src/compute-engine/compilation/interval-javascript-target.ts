@@ -1669,6 +1669,8 @@ const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
   True: "'true'",
   False: "'false'",
   NaN: '{ lo: NaN, hi: NaN }',
+  // The exact indeterminate form has only the IEEE `NaN` as a machine value.
+  Indeterminate: '{ lo: NaN, hi: NaN }',
   ImaginaryUnit: '{ lo: NaN, hi: NaN }',
   Half: '_IA.point(0.5)',
   MachineEpsilon: '_IA.point(Number.EPSILON)',

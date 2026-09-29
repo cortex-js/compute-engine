@@ -8,7 +8,7 @@ import {
   isValidType,
   NUMERIC_TYPES_SET,
 } from './primitive.js';
-import { isComplexInfinityValue } from './types.js';
+import { isComplexInfinityValue, isIndeterminateValue } from './types.js';
 import { declarationOf } from './reference.js';
 import { typeToDedupKey, typeToString } from './serialize.js';
 import { isSubtype, provablyDisjoint, widen } from './subtype.js';
@@ -45,7 +45,9 @@ export function isNumericScalarType(t: Type): boolean {
   return (
     t.kind === 'numeric' ||
     (t.kind === 'value' &&
-      (typeof t.value === 'number' || isComplexInfinityValue(t.value)))
+      (typeof t.value === 'number' ||
+        isComplexInfinityValue(t.value) ||
+        isIndeterminateValue(t.value)))
   );
 }
 
@@ -97,6 +99,8 @@ export function stripNumericRanges(t: Type): Type {
       return t.type;
     case 'value': {
       const v = t.value;
+      // The `Indeterminate` literal strips to `nan`, as `NaN` does below.
+      if (isIndeterminateValue(v)) return 'nan';
       if (typeof v !== 'number') return t;
       // The tiers a non-finite literal strips to, matching `widenValueTypes`
       // (`widen-value.ts`) exactly: the three infinities share `infinity`, and

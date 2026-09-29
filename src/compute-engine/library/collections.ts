@@ -9501,7 +9501,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         // An absent INDEX (`Missing`/`NaN`) is absorbing too (`At` strips its
         // index position): the result is absence in the final domain.
-        if (isAbsentValue(opAtIndex))
+        // An `Indeterminate` index is not absent, but it names no position
+        // either, so there is no element to read: the answer is the same
+        // marker, not an inert `At` (a decided question must not stay
+        // unevaluated, `docs/ERROR-MODEL.md` §1).
+        if (
+          isAbsentValue(opAtIndex) ||
+          (isNumber(opAtIndex) && opAtIndex.isIndeterminate)
+        )
           return chainAbsorbMarker(ce, expr.type.type, ops, index);
 
         // Dictionary key access: a `dictionary` is a keyed (not indexed)
@@ -15759,7 +15766,10 @@ function isEvaluatedElement(
   numericApproximation: boolean
 ): boolean {
   if (isString(op)) return true;
-  if (isNumber(op)) return !numericApproximation || !op.isExact;
+  // An `Indeterminate` literal is not numeric yet: its numeric
+  // approximation is `NaN`.
+  if (isNumber(op))
+    return !numericApproximation || (!op.isExact && !op.isIndeterminate);
   return false;
 }
 

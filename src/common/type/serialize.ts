@@ -1,6 +1,6 @@
 import { NUMERIC_TYPES_SET } from './primitive.js';
 import { effectSetToString } from './effects.js';
-import { isComplexInfinityValue } from './types.js';
+import { isComplexInfinityValue, isIndeterminateValue } from './types.js';
 import type { NamedElement, NumericPrimitiveType, Type } from './types.js';
 
 // Binding tightness, ascending. A node is parenthesized when the context it is
@@ -85,6 +85,9 @@ export function typeToString(type: Type, precedence = 0): string {
       // so `toString()` on it would print `[object Object]` instead of a
       // spelling the parser can read back.
       else if (isComplexInfinityValue(type.value)) result = '~oo';
+      // The `Indeterminate` sentinel is an object too, spelled by its name,
+      // which the type lexer reads back as the same value type.
+      else if (isIndeterminateValue(type.value)) result = 'Indeterminate';
       // The signed infinities print as `+oo`/`-oo` — the spelling the
       // parser documents first and the one the retired
       // `non_finite_number` normalizes into, so an extended-real union

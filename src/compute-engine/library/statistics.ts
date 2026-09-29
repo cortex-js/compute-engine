@@ -33,6 +33,7 @@ import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import {
   isAbsentValue,
+  nanOperandAnswer,
   isFunction,
   isNumber,
   isString,
@@ -1201,8 +1202,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `(…, NaN, …)` tuple that a later assignment contradicts. See
         // `collectData`, which is the rule the whole aggregate family shares —
         // and whose single walk feeds both the exact and the float path below.
-        const xs = collectData(engine, 'Quartiles', ops, (ce) =>
-          ce.tuple(ce.NaN, ce.NaN, ce.NaN)
+        const xs = collectData(engine, 'Quartiles', ops, (ce, marker) =>
+          ce.tuple(marker, marker, marker)
         );
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
@@ -1709,6 +1710,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
  *   provably non-numeric datum earns, or the ABSENT answer — `NaN` by default,
  *   or whatever `absentAnswer` builds for a head whose codomain is not a
  *   number (`Quartiles` answers the triple `(NaN, NaN, NaN)`).
+ * - The `Indeterminate` answer, built the same way (`absentAnswer` receives
+ *   the marker): an `Indeterminate` datum is not absent, but it makes the
+ *   statistic `Indeterminate` when no datum is absent, `NaN` or inexact
+ *   (`Mean([1, Indeterminate])` is `Indeterminate`,
+ *   `Mean([Indeterminate, NaN])` is `NaN`). Like absence, it outranks
+ *   inertness and is outranked by a refused datum.
  * - `null`: no verdict, so the aggregate must stay INERT.
  *
  * A datum is refused when its type proves it is NOT a number — a string, a
@@ -1765,12 +1772,15 @@ function collectData(
   ce: ComputeEngine,
   name: string,
   ops: ReadonlyArray<Expression>,
-  absentAnswer?: (ce: ComputeEngine) => Expression
+  absentAnswer?: (ce: ComputeEngine, marker: Expression) => Expression
 ): Expression[] | Expression | null {
   const data: Expression[] = [];
   // An absent datum was seen: the head answers absent unless a refused datum
   // outranks it later in the walk.
   let absent = false;
+  // An `Indeterminate` datum was seen: the head answers `Indeterminate`
+  // unless an absent datum or a refused datum is seen too.
+  let indeterminate = false;
   // Some datum has no numeric reading: the head stays inert unless something
   // that outranks inertness is found.
   let inert = false;
@@ -1794,6 +1804,7 @@ function collectData(
         walked += 1;
         sawData = true;
         if (isAbsentValue(v)) absent = true;
+        else if (v.isIndeterminate) indeterminate = true;
         else if (isRealConstantDatum(v)) data.push(v);
         else if (!isNumber(v)) {
           if (isNonNumericDatum(v))
@@ -1808,6 +1819,7 @@ function collectData(
     } else {
       sawData = true;
       if (isAbsentValue(op)) absent = true;
+      else if (op.isIndeterminate) indeterminate = true;
       else if (isRealConstantDatum(op)) data.push(op);
       else if (!isNumber(op)) {
         // A COLLECTION-typed operand is a container, not a datum, even when
@@ -1824,7 +1836,13 @@ function collectData(
   // Empty input is absent — but only when every operand was decidably finite
   // and enumerable, since an undecidable one may yet hold the data.
   if (!sawData && !undecidable) absent = true;
-  if (absent) return absentAnswer?.(ce) ?? ce.NaN;
+  if (absent) return absentAnswer?.(ce, ce.NaN) ?? ce.NaN;
+  if (indeterminate) {
+    // `NaN` instead when a datum is inexact (a float), as a float operand
+    // makes a numeric result a float (`nanOperandAnswer()`).
+    const marker = nanOperandAnswer(ce, [ce.Indeterminate, ...data]);
+    return absentAnswer?.(ce, marker) ?? marker;
+  }
   if (inert) return null;
   return data;
 }
@@ -2383,7 +2401,8 @@ function nonRealOperand(
 }
 
 /**
- * True if some datum makes the statistic `NaN`: the datum is `NaN` itself, it
+ * The answer when some datum makes the statistic have no value, `undefined`
+ * otherwise. The answer is `NaN` when the datum is `NaN` itself, it
  * is ABSENT (the `Missing` symbol), or it is the complex infinity `~oo`, whose
  * imaginary part is infinite and whose real part carries no information (see
  * `realProjection` in `library/statistics-data.ts`).
@@ -2393,17 +2412,29 @@ function nonRealOperand(
  * reached only because `extractPairs` was asked to admit such a datum; before
  * that, `Covariance([1,2,3], [1, Missing, 3])` was refused as MIS-SHAPED data
  * while the identical input spelled with a `NaN` answered `NaN`.
+ *
+ * The answer is `Indeterminate` when a datum is the `Indeterminate` literal
+ * and no datum makes it `NaN` or is inexact.
  */
 function hasNaNDatum(
   ...data: ReadonlyArray<ReadonlyArray<Expression>>
-): boolean {
+): Expression | undefined {
+  let indeterminate: Expression | undefined = undefined;
   for (const vals of data)
     for (const v of vals) {
-      if (isAbsentValue(v)) return true;
+      // An `Indeterminate` datum makes the statistic `Indeterminate`, unless
+      // another datum makes it `NaN` or is inexact (the rule of
+      // `collectData`).
+      if (v.isIndeterminate) {
+        indeterminate = v;
+        continue;
+      }
+      if (isAbsentValue(v)) return v.engine.NaN;
       if (isNumber(v) && (v.isNaN === true || !hasFiniteImaginaryPart(v)))
-        return true;
+        return v.engine.NaN;
     }
-  return false;
+  if (indeterminate === undefined) return undefined;
+  return nanOperandAnswer(indeterminate.engine, data.flat());
 }
 
 /**
@@ -2466,7 +2497,8 @@ function evaluateCovariance(
   // A datum with no real value makes the covariance unknown on every path,
   // including the exact one, which would otherwise carry `~oo` into a
   // symbolic sum.
-  if (hasNaNDatum(xs, ys)) return ce.NaN;
+  const nanAnswer = hasNaNDatum(xs, ys);
+  if (nanAnswer) return nanAnswer;
 
   if (!numericApproximation && allExact(xs) && allExact(ys))
     return exactCovariance(ce, xs, ys, population);
@@ -2519,7 +2551,8 @@ function evaluateCorrelation(
   if (nonReal) return nonRealDataError(ce, 'Correlation', nonReal);
   // An unknown datum makes the whole coefficient unknown, exactly as it does
   // for `Covariance`.
-  if (hasNaNDatum(xs, ys)) return ce.NaN;
+  const nanAnswer = hasNaNDatum(xs, ys);
+  if (nanAnswer) return nanAnswer;
 
   if (!numericApproximation && allExact(xs) && allExact(ys)) {
     const r = exactCorrelation(ce, xs, ys);

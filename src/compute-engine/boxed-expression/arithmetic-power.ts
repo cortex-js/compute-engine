@@ -20,7 +20,13 @@ import {
   boxComplexKernelResult,
   complexNumericValueRoute,
 } from './apply.js';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import {
+  isNumber,
+  isFunction,
+  isSymbol,
+  nanOperandAnswer,
+  numericValue,
+} from './type-guards.js';
 import { realExponentValue, isGaussianIntegerValue } from './imaginary-part.js';
 import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -523,8 +529,12 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
   // Zero as base
   if (isNumber(a) && a.isSame(0)) {
-    if (b.type.matches('imaginary' as NumericPrimitiveType) || b.isNaN)
-      return ce.NaN;
+    // A `NaN`-valued exponent is forwarded (`Indeterminate` stays
+    // `Indeterminate`, see `nanOperandAnswer()`).
+    // A literal only: `isNaN` of a symbol reads its current value, which a
+    // canonical form must not depend on (see `canonicalDivide`).
+    if (isNumber(b) && b.isNaN) return nanOperandAnswer(ce, [a, b]);
+    if (b.type.matches('imaginary' as NumericPrimitiveType)) return ce.NaN;
 
     if (b.isSame(0)) return ce.NaN;
 
@@ -560,12 +570,21 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   if (b.isSame(0)) {
     // If 'isFinite' is a boolean, then 'a' has a value. A float exponent
     // `0.0` is not folded to the exact `1`: `2^{0.0}` evaluates to a float.
+    // A symbol whose value is `NaN` is left to `evaluate()`, which
+    // substitutes the value first (see `canonicalDivide`).
+    if (a.isNaN === true && !isNumber(a)) return unchanged();
     if (
       aIsNum &&
       a.isFinite !== undefined &&
       (a.isFinite === false || isExactLiteral(b, 0))
     )
-      return a.isFinite ? ce.One : ce.NaN;
+      // A `NaN`-valued base is forwarded (`Indeterminate^0` is
+      // `Indeterminate`); an infinite base is the indeterminate form `∞^0`.
+      return a.isFinite
+        ? ce.One
+        : a.isNaN === true
+          ? nanOperandAnswer(ce, [a, b])
+          : ce.NaN;
     return unchanged();
   }
 
@@ -639,7 +658,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
         return ce.ComplexInfinity;
       }
 
-      if (a.isNaN) return ce.NaN;
+      if (isNumber(a) && a.isNaN) return nanOperandAnswer(ce, [a, b]);
 
       //↓numeric-expr. bases included: e.g. '{2+3}^oo'
       if (a.isExtendedReal) {
@@ -674,7 +693,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       //Same result for all infinity types...
       if (a.isInfinity) return ce.Zero;
 
-      if (a.isNaN) return ce.NaN;
+      if (isNumber(a) && a.isNaN) return nanOperandAnswer(ce, [a, b]);
 
       if (a.isExtendedReal) {
         if (a.isGreater(0)) return a.isLess(1) ? ce.PositiveInfinity : ce.Zero;
@@ -1276,6 +1295,18 @@ export function pow(
   )
     return x.engine._fn('Power', [x, x.engine.expr(exp)], { canonical: false });
 
+  // A power with an `Indeterminate` operand is `Indeterminate` unless the
+  // other operand is inexact (`nanOperandAnswer()`), and `NaN` under a
+  // numeric approximation. The numeric kernels below would answer the `NaN`
+  // literal.
+  if (
+    (isNumber(x) && x.isIndeterminate) ||
+    (typeof exp !== 'number' && isNumber(exp) && exp.isIndeterminate)
+  )
+    return numericApproximation
+      ? x.engine.NaN
+      : nanOperandAnswer(x.engine, [x, x.engine.expr(exp)]);
+
   //
   // If a numeric approximation is requested, we try to evaluate the expression
   //
@@ -1830,7 +1861,8 @@ function rootAtExceptionalPoint(
 ): Expression | undefined {
   const ce = a.engine;
   if (!isNumber(a) && !isNumber(b)) return undefined;
-  if ((isNumber(a) && a.isNaN) || (isNumber(b) && b.isNaN)) return ce.NaN;
+  if ((isNumber(a) && a.isNaN) || (isNumber(b) && b.isNaN))
+    return nanOperandAnswer(ce, [a, b]);
   if (isNumber(b)) {
     if (b.isSame(0)) return undefined;
     if (b.isInfinity === true) {

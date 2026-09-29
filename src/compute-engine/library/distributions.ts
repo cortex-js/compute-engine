@@ -11,6 +11,7 @@ import {
 import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import {
   isAbsentValue,
+  nanOperandAnswer,
   isFunction,
   isNumber,
 } from '../boxed-expression/type-guards.js';
@@ -1360,10 +1361,15 @@ function empiricalQuantile(
   //   numeric expression such as `Sqrt(-2)` that stays symbolic — overlaps
   //   `number`, so the application stays INERT and a later assignment or a
   //   `.N()` can still answer it.
+  // - An `Indeterminate` datum is not absent, but it makes the quantile
+  //   `Indeterminate` when no datum is absent, `NaN` or inexact, as it does
+  //   for the statistics family (`collectData`).
   let absent = false;
+  let indeterminate = false;
   let inert = false;
   for (const v of data) {
     if (isAbsentValue(v)) absent = true;
+    else if (v.isIndeterminate) indeterminate = true;
     else if (!isNumber(v)) {
       // An `error` datum is exempt from the refusal: it already speaks the
       // Error channel and the engine propagates it on its own.
@@ -1373,6 +1379,7 @@ function empiricalQuantile(
     }
   }
   if (absent) return ce.NaN;
+  if (indeterminate) return nanOperandAnswer(ce, data);
   if (inert) return undefined;
 
   // A quantile is an order statistic and the complex numbers have no

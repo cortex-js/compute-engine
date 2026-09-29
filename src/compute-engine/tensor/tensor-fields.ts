@@ -542,6 +542,9 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
   if (isSymbol(expr)) {
     if (expr.symbol === 'True' || expr.symbol === 'False') return 'bool';
     if (expr.symbol === 'NaN') return 'float64';
+    // A float64 cell reads back as the IEEE `NaN`, which would lose the
+    // kind of the `Indeterminate` value (see the number arm below).
+    if (expr.symbol === 'Indeterminate') return 'expression';
     if (expr.symbol === 'PositiveInfinity') return 'float64';
     if (expr.symbol === 'NegativeInfinity') return 'float64';
     if (expr.symbol === 'ComplexInfinity') return 'complex128';
@@ -552,6 +555,10 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
   }
 
   if (isNumber(expr)) {
+    // The `Indeterminate` literal has the double value `NaN`, so a float64
+    // cell would read it back as the IEEE `NaN`, a different value. The
+    // `expression` field keeps it.
+    if (expr.isIndeterminate) return 'expression';
     // A literal's public type carries its value or an enclosing range since
     // ruling O9 (`5`, `rational<0.5..0.5>`, `real<1.4..1.5>`) — an OBJECT
     // node, which a string switch would send to the `expression` dtype,

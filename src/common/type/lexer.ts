@@ -8,6 +8,7 @@ export type TokenType =
   | 'TRUE'
   | 'FALSE'
   | 'NAN'
+  | 'INDETERMINATE'
   | 'INFINITY'
   | 'PLUS_INFINITY'
   | 'MINUS_INFINITY'
@@ -451,6 +452,10 @@ export class Lexer {
         // `NaN` or `Infinity`.
         case 'NaN':
           return this.createToken('NAN', value);
+        // The value literal of the exact indeterminate form (such as
+        // `0/0`), a second member of `nan` beside `NaN`.
+        case 'Indeterminate':
+          return this.createToken('INDETERMINATE', value);
         case 'Infinity':
         case 'oo':
           return this.createToken('INFINITY', value);

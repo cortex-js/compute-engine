@@ -352,6 +352,8 @@ import {
   isAbsentValue,
   isAbsentSymbol,
   isAbsentArithmeticOperand,
+  isInexactOperand,
+  nanOperandAnswer,
 } from '../boxed-expression/type-guards.js';
 import { cmp, exactOrder } from '../boxed-expression/compare.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
@@ -7281,6 +7283,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       value: (engine) => engine.NaN,
     },
 
+    // The symbol spelling of the `Indeterminate` number literal. It has its
+    // own definition, of the same shape as `NaN` above, because the value of
+    // the `NaN` symbol is the `NaN` literal: the string `"Indeterminate"`
+    // boxes to this symbol, whose value is `ce.Indeterminate`.
+    Indeterminate: {
+      description:
+        'Indeterminate, the exact answer to an indeterminate form such as 0/0: a number with no value. Its numeric approximation is NaN.',
+      examples: ['[Indeterminate + 1, N(Indeterminate)]'],
+      type: 'number',
+      isConstant: true,
+      holdUntil: 'never',
+      value: (engine) => engine.Indeterminate,
+    },
+
     ContinuationPlaceholder: {
       description:
         'This symbol indicates that some elements in a collection have been omitted, for example in a long list of numbers, or in an infinite set',
@@ -9512,9 +9528,21 @@ function evaluateAbs(
   return undefined;
 }
 
+/**
+ * What the walk of `Max`/`Min` saw that decides between `Indeterminate` and
+ * `NaN`: an `Indeterminate` operand gives `Indeterminate` only when no operand
+ * is inexact (`isInexactOperand()`). `inexact` records an inexact value met
+ * as an operand or an element. A list folded on its doubles
+ * (`isMachineDoubleList`) is recorded in `machineLists` instead: its doubles
+ * do not say which elements are floats (an exact `1/2` is the double `0.5`),
+ * so its elements are read only when an `Indeterminate` was seen.
+ */
+type ExtremumWalk = { inexact: boolean; machineLists: Expression[] };
+
 function processMinMaxItem(
   item: Expression,
-  mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
+  mode: 'Min' | 'Max' | 'Supremum' | 'Infimum',
+  walk: ExtremumWalk = { inexact: false, machineLists: [] }
 ): [Expression | undefined, ReadonlyArray<Expression>] {
   const ce = item.engine;
   const upper = mode === 'Max' || mode === 'Supremum';
@@ -9609,6 +9637,7 @@ function processMinMaxItem(
   // A `List` of machine numbers is folded on its doubles: see
   // `machineExtremum`.
   if (isMachineDoubleList(item)) {
+    walk.machineLists.push(item);
     const extremum = machineExtremum(item.array, upper, ce);
     // The extremum is one of the elements, boxed as the list boxes it: an
     // integer value is a float in a list of floats (`_machineFloats`).
@@ -9639,20 +9668,33 @@ function processMinMaxItem(
     let result: Expression | undefined = undefined;
     const rest: Expression[] = [];
     let walked = 0;
+    let sawIndeterminate = false;
     for (const op of item.each()) {
       walked += 1;
-      const [val, others] = processMinMaxItem(op, mode);
+      const [val, others] = processMinMaxItem(op, mode, walk);
       if (val) {
         // NaN absorbs, mirroring the top-level convention: an indeterminate
         // element makes the whole extremum indeterminate (Max([1, NaN, 3]) →
         // NaN, matching Max(1, NaN, 3)). Returning NaN as this item's value
         // lets the caller's top-level NaN check absorb it.
-        if (val.isNaN) return [ce.NaN, []];
+        // An `Indeterminate` element absorbs too, but a `NaN` element
+        // anywhere in the walk still wins: the walk continues, and the
+        // caller (`evaluateMinMax`) answers `Indeterminate` only when no
+        // element is `NaN` or inexact (`Max([1, Indeterminate])` is
+        // `Indeterminate`, `Max([Indeterminate, NaN])` and
+        // `Max([1.5, Indeterminate])` are `NaN`).
+        if (val.isNaN) {
+          if (!val.isIndeterminate) return [ce.NaN, []];
+          sawIndeterminate = true;
+          continue;
+        }
+        if (isInexactOperand(val)) walk.inexact = true;
         result = foldExtremumValue(val, result, rest, upper);
       }
       rest.push(...others);
     }
     if (enumerationDeclinedAfterWalk(item, walked)) return [undefined, [item]];
+    if (sawIndeterminate) return [ce.Indeterminate, []];
     return [result, rest];
   }
 
@@ -9830,7 +9872,10 @@ function scalarExtremum(
   numericApproximation: boolean
 ): Expression | undefined {
   const ce = a.engine;
-  if (a.isNaN === true || b.isNaN === true) return ce.NaN;
+  // A `NaN` operand gives `NaN`; an `Indeterminate` operand gives
+  // `Indeterminate` when the other operand is neither `NaN` nor inexact
+  // (`nanOperandAnswer()`, the rule of the reducers, see `evaluateMinMax`).
+  if (a.isNaN === true || b.isNaN === true) return nanOperandAnswer(ce, [a, b]);
   if ((isNumber(a) && a.isComplex) || (isNumber(b) && b.isComplex))
     return undefined;
   // `undefined` when the comparison is not decidable (a free symbol); ties
@@ -9949,18 +9994,39 @@ function evaluateMinMax(
 
   let result: Expression | undefined = undefined;
   const rest: Expression[] = [];
+  let sawIndeterminate = false;
+  const walk: ExtremumWalk = { inexact: false, machineLists: [] };
 
   for (const op of ops) {
-    const [val, others] = processMinMaxItem(op, mode);
+    const [val, others] = processMinMaxItem(op, mode, walk);
     if (val) {
       // NaN absorbs: Min/Max of an indeterminate value is indeterminate.
       // (Comparisons with NaN are themselves indeterminate, so without this
       // guard a NaN operand would be silently dropped.)
-      if (val.isNaN) return ce.NaN;
+      // The `Indeterminate` literal absorbs as well, unless a `NaN` operand
+      // is found later in the walk: `Max(1, Indeterminate)` is
+      // `Indeterminate`, `Max(Indeterminate, NaN)` and
+      // `Max(NaN, Indeterminate)` are `NaN`, and so is an extremum with an
+      // inexact operand or element (`Max(1.5, Indeterminate)`), as a float
+      // operand makes a numeric result a float
+      // (`docs/plans/2026-09-28-indeterminate-value.md` §4).
+      if (val.isNaN) {
+        if (!val.isIndeterminate) return ce.NaN;
+        sawIndeterminate = true;
+        continue;
+      }
+      if (isInexactOperand(val)) walk.inexact = true;
       result = foldExtremumValue(val, result, rest, upper);
     }
     rest.push(...others);
   }
+  if (sawIndeterminate)
+    return walk.inexact ||
+      walk.machineLists.some(
+        (list) => isFunction(list) && list.ops.some(isInexactOperand)
+      )
+      ? ce.NaN
+      : ce.Indeterminate;
 
   if (rest.length > 0)
     return ce.expr(result ? [mode, result, ...rest] : [mode, ...rest]);

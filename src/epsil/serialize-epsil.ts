@@ -230,7 +230,13 @@ export function serializeEpsil(
 
     if (!body) {
       const symName = symbol(expr);
-      if (symName !== null) body = fmt.text(escapeSymbol(libraryName(symName)));
+      // The symbol `Indeterminate` is spelled by its literal word, which
+      // parses back to the same symbol (unlike `NaN`, whose literal word
+      // parses to the number `{num: "NaN"}`, so the symbol keeps the
+      // verbatim form).
+      if (symName === 'Indeterminate') body = fmt.text('Indeterminate');
+      else if (symName !== null)
+        body = fmt.text(escapeSymbol(libraryName(symName)));
     }
     if (
       !body &&
@@ -1830,6 +1836,7 @@ export function serializeEpsil(
     '-Infinity': '-Infinity',
     'NaN': 'NaN',
     'nan': 'NaN',
+    'Indeterminate': 'Indeterminate',
   };
 
   const isValueTypeText = (t: string): boolean =>

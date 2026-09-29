@@ -2,6 +2,17 @@
 
 ### Behavior Changes
 
+- **The name `Indeterminate` is reserved.** It is now the library constant
+  for the `Indeterminate` value (see New Features): `ce.box("Indeterminate")`,
+  `\operatorname{Indeterminate}` and the Epsil word `Indeterminate` are that
+  value, where they were a free symbol typed `unknown` (and in LaTeX a
+  product of letters). A host symbol of that name changes meaning, an
+  `Indeterminate := 2` assignment is refused as for any constant, and in
+  Epsil the word is a literal like `NaN` (`let Indeterminate = 2` is a
+  `reserved-word` error; the verbatim form `` `Indeterminate` `` still names
+  a binding). The type grammar reads `Indeterminate` as the value type of
+  that literal, and `NumberFrom("Indeterminate")` reads it back.
+
 - **An integer-valued float is written with a fraction part, so it reads
   back as a float.** A float whose value is an integer serializes as
   `{num: "2.0"}` in MathJSON and `2.0` in LaTeX (a large one as `1.0e+800`
@@ -287,6 +298,29 @@
   `1.1034056813344657e+260 - 3.632309144571929e+260i`.
 
 ### New Features
+
+- **`Indeterminate`: the exact answer to an indeterminate form.** A second
+  number with no value beside `NaN`, `ce.Indeterminate` (MathJSON
+  `"Indeterminate"`, LaTeX `\operatorname{Indeterminate}`, Epsil
+  `Indeterminate`), is the answer an EXACT computation gives to a form such
+  as `0/0`, where `NaN` stays the result of a floating-point computation that
+  failed and the absence marker. Its double value is `NaN`, so `isNaN` is
+  true and its type widens to `nan` (its own value type prints
+  `Indeterminate`); the new `isIndeterminate` property is true for it only.
+  It is not the same value as `NaN` (`isSame` and `.is()` are false between
+  them, and each has its own hash); `Equal` is `False` for it as for `NaN`.
+  An operation forwards it when no operand is inexact: `Sin(Indeterminate)`,
+  `Indeterminate + 1`, `2·Indeterminate`, `Max(1, Indeterminate)` and
+  `Mean([1, Indeterminate])` are `Indeterminate`, while a float or `NaN`
+  operand gives `NaN` (`Indeterminate + 1.5`, `Max(Indeterminate, NaN)`,
+  `Max(1.5, Indeterminate)`),
+  and so does an operator that does not forward it (`Hypot`, `GCD`). `.N()`
+  of any result is `NaN`, and compiled code spells it as the target's `NaN`.
+  It is a value, not an absent entry: `IsMissing(Indeterminate)` is `False`
+  and `Coalesce(Indeterminate, 5)` is `Indeterminate`. **No computed answer
+  changes yet:** `0/0`, `0^0` and the other exact indeterminate forms still
+  evaluate to `NaN`; a later release switches them to `Indeterminate`
+  (`docs/plans/2026-09-28-indeterminate-value.md`, GitHub issue #355).
 
 - **`epsil --compile`: run an Epsil program as compiled JavaScript.** The
   CLI compiles the program (or, with `--from latex`, the LaTeX expression) to

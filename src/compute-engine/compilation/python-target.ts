@@ -117,6 +117,8 @@ const PYTHON_CONSTANTS: Record<string, string> = {
   ImaginaryUnit: '1j',
   Infinity: 'np.inf',
   NaN: 'np.nan',
+  // The exact indeterminate form has only the IEEE `NaN` as a machine value.
+  Indeterminate: 'np.nan',
   GoldenRatio: '((1 + np.sqrt(5)) / 2)',
   CatalanConstant: '0.915965594177219015054603514932384110774',
   EulerGamma: '0.5772156649015328606065120900824024310421',

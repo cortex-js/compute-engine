@@ -664,6 +664,8 @@ const JAVASCRIPT_CONSTANTS: Record<string, string> = {
   True: 'true',
   False: 'false',
   NaN: 'Number.NaN',
+  // The exact indeterminate form has only the IEEE `NaN` as a machine value.
+  Indeterminate: 'Number.NaN',
   ImaginaryUnit: '({ re: 0, im: 1 })',
   Half: '0.5',
   MachineEpsilon: 'Number.EPSILON',

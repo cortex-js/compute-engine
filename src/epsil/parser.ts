@@ -4184,6 +4184,10 @@ export class Parser {
     if (name === 'true') return this.wrap({ sym: 'True' }, start, end);
     if (name === 'false') return this.wrap({ sym: 'False' }, start, end);
     if (name === 'NaN') return this.wrap({ num: 'NaN' }, start, end);
+    // `Indeterminate` is a symbol in MathJSON, whose value is the
+    // `Indeterminate` number literal.
+    if (name === 'Indeterminate')
+      return this.wrap({ sym: 'Indeterminate' }, start, end);
     if (name === 'Infinity' || name === 'oo')
       return this.wrap({ num: '+Infinity' }, start, end);
 
@@ -5958,7 +5962,8 @@ export class Parser {
         tok.text === 'false' ||
         tok.text === 'Infinity' ||
         tok.text === 'oo' ||
-        tok.text === 'NaN')
+        tok.text === 'NaN' ||
+        tok.text === 'Indeterminate')
     );
   }
 
@@ -5996,6 +6001,10 @@ export class Parser {
       // name of the not-a-number PRIMITIVE type, which admits NaN as a member
       // of a tier rather than as the literal a clause dispatches on.
       typeText = 'NaN';
+    } else if (tok.type === 'SYMBOL' && tok.text === 'Indeterminate') {
+      // The `Indeterminate` value type admits exactly the `Indeterminate`
+      // literal, as the `NaN` value type admits exactly `NaN`.
+      typeText = 'Indeterminate';
     } else if (tok.type === 'STRING') {
       // Only a plain string is a literal — an interpolation hole is an
       // expression, and expressions are not parameters.
@@ -8118,6 +8127,12 @@ export class Parser {
     // serializer emits the canonical `Infinity`).
     if (token.text === 'NaN')
       return this.wrap({ num: 'NaN' }, token.start, token.end);
+    // `Indeterminate` is the literal word of the exact indeterminate form. In
+    // MathJSON it is the symbol `Indeterminate`, whose value is the
+    // `Indeterminate` number literal (`{num: "Indeterminate"}` is not a
+    // number spelling).
+    if (token.text === 'Indeterminate')
+      return this.wrap({ sym: 'Indeterminate' }, token.start, token.end);
     if (token.text === 'Infinity' || token.text === 'oo')
       return this.wrap({ num: '+Infinity' }, token.start, token.end);
 

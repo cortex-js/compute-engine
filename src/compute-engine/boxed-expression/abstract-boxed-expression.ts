@@ -1017,6 +1017,12 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
+  /** Only the `Indeterminate` number literal answers `true` (see
+   * `BoxedNumber`). */
+  get isIndeterminate(): boolean {
+    return false;
+  }
+
   get isInfinity(): boolean | undefined {
     return undefined;
   }

@@ -767,6 +767,88 @@ replaced by `±u` and `Sign(u)` by `±1` (`integrateAcrossKinks`,
   both leave `\int_2^3 x\operatorname{sgn}(x^2-1)\,dx` unevaluated, before
   and after the change.
 
+### `ce.number([5, 0])` is `NaN` where `Rational(5, 0)` is `~oo` (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
+
+The same quotient gives two answers by route. `ce.box(["Rational", 5, 0])`
+and `ce.box(["Divide", 5, 0])` are `~oo` (the integer fold in
+`boxed-expression/box.ts:524`), but `ce.number([5, 0])` is `NaN`: the
+rational pair goes through `canonicalNumber`, which answers `NaN` for any
+zero denominator (`boxed-expression/boxed-number.ts:1821`). A nonzero
+numerator over zero is a pole, so `ce.number([n, 0])` should be `~oo` for
+`n ≠ 0`, as the boxed routes are. `ce.number([0, 0])` stays the
+indeterminate form.
+
+### A `NaN` literal pattern never matches (OPEN, small — found 2026-09-28 by the `Indeterminate` Phase 1 work)
+
+### The exact numeric lane answers `n/0` and `∞·2` with `NaN` (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
+
+`ExactNumericValue.div(0)` (a JavaScript number `0`) returns `NaN` for
+every dividend (`numeric-value/exact-numeric-value.ts:907`): `5.div(0)` is
+`NaN`, while `5.div(<exact 0>)` is `Infinity`. The normalization of a
+rational with a zero denominator also makes `[n, 0]` `NaN` for `n ≠ 0`
+(`:474`). And an exact infinity (made by `inv()` of `0`, `:664`) times an
+integer is `NaN`, because the rational helpers map any non-finite machine
+rational to `NaN` (`numerics/rationals.ts:192`, `:208`, `:213`):
+`inv(0).mul(2)` is `NaN`, not `Infinity`. No boxed route reaches these
+today (the boxed folds answer `~oo` and `∞` before the lane is used), but
+they are a trap for Phase 2 of the plan above, which switches exact
+producers of `NaN` to `Indeterminate` one site at a time: a pole or an
+infinity that becomes `NaN` in the exact lane must not be read as an
+indeterminate form. The fix gives `n/0` the value `±∞` (or `~oo` for a
+complex `n`) and lets the rational helpers carry a signed infinity.
+
+### `Integrate(0/0, x)` is `NaN` under `evaluate()` but inert under `.N()` (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
+
+`ce.box(["Integrate", ["Divide", 0, 0], "x"]).evaluate()` is `NaN`, but
+`.N()` of the same expression is `int(NaN dx)`, unevaluated. The two routes
+must agree, and the `.N()` route must propagate the `NaN` integrand as the
+exact route does. `Integrate` is a `lazy` operator, so the `NaN` gate of
+`boxed-function.ts` does not run for it; the numeric handler must test for
+a `NaN` integrand itself.
+
+### `Integrate(NaN, x, 0, 1)` stays inert (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
+
+`ce.box(["Integrate", "NaN", ["Limits", "x", 0, 1]])` stays
+`int_(0)^(1)(NaN)` under both `evaluate()` and `.N()`. The question is
+decided (the answer is `NaN`), and `docs/ERROR-MODEL.md` §1 forbids an
+inert expression as the final answer to a decided question. `Integrate` is
+`lazy`, so the propagate gate does not run for it; its handler must answer
+`NaN` for a `NaN` integrand. `Sum(NaN, k, 1, 3)` already answers `NaN` and
+is the model.
+
+`match NaN { NaN => 1, _ => 2 }` answers `2`, and so does
+`Match(NaN, MatchCase(NaN, 1), MatchCase(_, 2))`. The pattern matcher compares
+a number-literal pattern with `pattern.isEqual(expr)`
+(`src/compute-engine/boxed-expression/match.ts:159`), which follows IEEE and
+is `false` for two `NaN` values. The Epsil parser says that numeric-constant
+literals match structurally (`finishBindingPattern`, `src/epsil/parser.ts`),
+and `Infinity` does match itself. The `Indeterminate` literal behaves the same
+way as `NaN` here. A structural test (`isSame`) for a `NaN`-valued pattern
+would match each value to itself only.
+
+### `At` with an infinite index stays inert (OPEN, small — found 2026-09-28 by the `Indeterminate` Phase 1 work)
+
+`At([1, 2], +oo)` and `At([1, 2], ~oo)` stay unevaluated under both
+`evaluate()` and `.N()`, where `At([1, 2], 1.5)` and `At([1, 2], NaN)` answer
+`NaN` (the absence marker of a read with no position). An inert result is not
+a valid final answer to a decided question (`docs/ERROR-MODEL.md` §1). The
+index test of chained `At` is in `src/compute-engine/library/collections.ts`
+(the `isAbsentValue(opAtIndex)` arm, about line 9509).
+
+### The zero-factor shortcuts read a symbol's assigned value at canonicalization (OPEN, small — found 2026-09-28 by the `Indeterminate` Phase 1 review)
+
+`BoxedSymbol.mul(0)` answers `NaN` when the symbol's assigned value is `NaN`
+or infinite, and `canonicalMultiply` folds an exact `0` beside a symbol whose
+VALUE is infinite or `NaN` to `NaN`, at canonicalization. Canonicalization is
+value-safe everywhere else (`op.canonical` binds structure and does not
+substitute an assigned value), and the same reading of a symbol's value in
+`canonicalDivide`, `canonicalPower`, `Product.mul` and `Terms` was removed in
+Phase 1 of `docs/plans/2026-09-28-indeterminate-value.md` because it froze
+the folded value across a reassignment (`w := NaN`, box `w/2`, `w := 4`, the
+old expression still evaluated to `NaN`) and lost the `Indeterminate` kind.
+The zero-factor shortcuts have the same two defects and should read number
+literals only, leaving a symbol to `evaluate()`.
+
 ### Residues of the absent-value round (OPEN, small — found 2026-09-25)
 
 The round of that date made arithmetic with an absent operand `NaN`, an

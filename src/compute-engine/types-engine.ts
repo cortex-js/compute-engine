@@ -448,6 +448,11 @@ export interface IComputeEngine {
   /** ImaginaryUnit */
   readonly I: Expression;
   readonly NaN: Expression;
+  /** The exact answer to an indeterminate form such as `0/0`: a number with
+   * no value. Its double value is `NaN`, but it is a different value from
+   * `NaN`, which is the result of a floating-point computation that failed.
+   * Its numeric approximation (`.N()`) is `NaN`. */
+  readonly Indeterminate: Expression;
   readonly PositiveInfinity: Expression;
   readonly NegativeInfinity: Expression;
   readonly ComplexInfinity: Expression;

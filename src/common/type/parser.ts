@@ -34,6 +34,7 @@ import {
 } from './ast-nodes.js';
 import {
   COMPLEX_INFINITY_VALUE,
+  INDETERMINATE_VALUE,
   EffectLabel,
   EffectSet,
   TypeParameter,
@@ -282,7 +283,7 @@ function normalizedTypeName(value: string): string {
 <value> ::= <string_literal>
           | <number_literal>
           | "true" | "false"
-          | "NaN" | "Infinity" | "+infinity" | "+Infinity" | "oo" | "∞" | "+oo" | "+∞"
+          | "NaN" | "Indeterminate" | "Infinity" | "+infinity" | "+Infinity" | "oo" | "∞" | "+oo" | "+∞"
           | "-infinity" | "-Infinity" | "-oo" | "-∞"
           | "~oo" | "~∞"
 
@@ -2337,6 +2338,14 @@ export class Parser {
         this.advance();
         value = NaN;
         valueType = 'nan';
+        break;
+      case 'INDETERMINATE':
+        // `Indeterminate` has the double value `NaN` but is a different
+        // value, so it carries the `INDETERMINATE_VALUE` sentinel, recognized
+        // with `isIndeterminateValue()`.
+        this.advance();
+        value = INDETERMINATE_VALUE;
+        valueType = 'indeterminate';
         break;
       case 'INFINITY':
       case 'PLUS_INFINITY':

@@ -178,6 +178,7 @@ export const CONSTANTS_LIST = [
   'true',
   'false',
   'NaN',
+  'Indeterminate',
   'Infinity',
   'oo',
   'Maybe',

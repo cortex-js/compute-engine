@@ -1,5 +1,8 @@
 import type { Type, TypeReference } from '../../common/type/types.js';
-import { isComplexInfinityValue } from '../../common/type/types.js';
+import {
+  isComplexInfinityValue,
+  isIndeterminateValue,
+} from '../../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 
 import type { Expression } from '../global-types.js';
@@ -417,8 +420,13 @@ function accepts(
  * very value the type names. */
 function acceptsValueLiteral(v: Expression, value: unknown): boolean {
   if (isComplexInfinityValue(value)) return isComplexInfinityLiteral(v);
+  // The `Indeterminate` value type holds only the `Indeterminate` literal,
+  // and the `NaN` value type only the `NaN` literal: the two have the same
+  // double value but are different values.
+  if (isIndeterminateValue(value)) return isNumber(v) && v.isIndeterminate;
   if (typeof value === 'number') {
-    if (Number.isNaN(value)) return isNumber(v) && v.isNaN === true;
+    if (Number.isNaN(value))
+      return isNumber(v) && v.isNaN === true && !v.isIndeterminate;
     if (!isNumber(v) || v.isNaN === true) return false;
     return v.isSame(v.engine.number(value));
   }

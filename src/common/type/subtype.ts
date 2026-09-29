@@ -19,7 +19,7 @@ import {
   STRING_STRUCTURAL_TYPE,
   VALUE_TYPES,
 } from './primitive.js';
-import { isComplexInfinityValue } from './types.js';
+import { isComplexInfinityValue, isIndeterminateValue } from './types.js';
 import type {
   BroadcastableType,
   CollectionType,
@@ -1162,6 +1162,9 @@ export function isSubtype(
       // branches because the sentinel is an object, not a number.
       if (isComplexInfinityValue(lhs.value))
         return isPrimitiveSubtype('infinity', rhs as PrimitiveType);
+      // The `Indeterminate` literal claims `nan`, as the `NaN` literal does.
+      if (isIndeterminateValue(lhs.value))
+        return isPrimitiveSubtype('nan', rhs as PrimitiveType);
       if (typeof lhs.value === 'number') {
         // Each numeric literal claims its PRINCIPAL type: NaN inhabits `nan`,
         // the marker type that names exactly that singleton; ±∞ inhabit
@@ -1843,6 +1846,8 @@ export function isSubtype(
     // The unsigned `~oo` is refused for the same reason NaN is below: it is
     // unordered against any bound, so no bounded range admits it.
     if (isComplexInfinityValue(lhs.value)) return false;
+    // `Indeterminate` has no value to order, as NaN below.
+    if (isIndeterminateValue(lhs.value)) return false;
     if (typeof lhs.value !== 'number') return false;
     // NaN is unordered: it inhabits no bounded range. (Without the explicit
     // check, `NaN < lower` and `NaN > upper` are both false and the range
@@ -1920,13 +1925,17 @@ export function isSubtype(
         Number.isNaN(rhs.value) &&
         typeof lhs.value === 'number' &&
         Number.isNaN(lhs.value)) ||
-      (isComplexInfinityValue(rhs.value) && isComplexInfinityValue(lhs.value))
+      (isComplexInfinityValue(rhs.value) &&
+        isComplexInfinityValue(lhs.value)) ||
+      (isIndeterminateValue(rhs.value) && isIndeterminateValue(lhs.value))
     );
 
   if (lhs.kind === 'value') {
     if (typeof lhs.value === 'boolean') return isSubtype('boolean', rhs);
     // `~oo` claims `infinity` — see the value-vs-primitive path above.
     if (isComplexInfinityValue(lhs.value)) return isSubtype('infinity', rhs);
+    // `Indeterminate` claims `nan`, as the `NaN` literal does.
+    if (isIndeterminateValue(lhs.value)) return isSubtype('nan', rhs);
     if (typeof lhs.value === 'number') {
       // Principal-type claims, matching the value-vs-primitive path above:
       // NaN → `nan`, ±∞ → `infinity`, finite literals → the bare tier
@@ -1963,7 +1972,11 @@ function isNumeric(type: Type): boolean {
   // The unsigned `~oo` sentinel is a numeric value literal, but it is not a
   // JavaScript number, so it needs its own test to agree with the subtype path.
   if (type.kind === 'value')
-    return typeof type.value === 'number' || isComplexInfinityValue(type.value);
+    return (
+      typeof type.value === 'number' ||
+      isComplexInfinityValue(type.value) ||
+      isIndeterminateValue(type.value)
+    );
   if (type.kind === 'numeric') return true;
   return false;
 }

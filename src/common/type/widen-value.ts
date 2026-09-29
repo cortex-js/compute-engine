@@ -1,5 +1,5 @@
 import type { Type } from './types.js';
-import { isComplexInfinityValue } from './types.js';
+import { isComplexInfinityValue, isIndeterminateValue } from './types.js';
 import { isSubtype } from './subtype.js';
 import { SIGNED_INFINITY_TYPE } from './primitive.js';
 import { reduceType } from './reduce.js';
@@ -123,6 +123,9 @@ function widenNode(
       // before the number check below, because it carries a sentinel object
       // rather than a JavaScript number.
       if (isComplexInfinityValue(v)) return 'infinity';
+      // The `Indeterminate` literal widens to `nan`, like the `NaN` literal:
+      // both are numbers with no value, and `nan` is the tier of both.
+      if (isIndeterminateValue(v)) return 'nan';
       if (typeof v !== 'number') return t; // string/boolean values: leaves
       // A NaN literal widens to `nan` — the tier that names exactly that
       // singleton. A SIGNED infinity widens to the PAIR `+oo | -oo`: since

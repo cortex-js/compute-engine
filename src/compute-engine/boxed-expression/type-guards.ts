@@ -107,9 +107,71 @@ export function isAbsentArithmeticOperand(
  * reducers, `Min`/`Max`, `Coalesce` and `IsMissing`. So
  * `Mean([1, Undefined, 3])` is `NaN` exactly as `Mean([1, Missing, 3])` is,
  * and `Coalesce(Undefined, 2)` is `2` (user ruling of 2026-09-22).
+ *
+ * The `Indeterminate` literal is NOT absent, although its value is `NaN`: it
+ * is the exact answer to an indeterminate form (`0/0`), a value with no
+ * number, not a missing entry. So `IsMissing(Indeterminate)` is `False`,
+ * `Coalesce(Indeterminate, 5)` is `Indeterminate`, and the reducers above
+ * forward it (`Mean([1, Indeterminate])` is `Indeterminate`, see
+ * `nanOperandAnswer()`). Decision D7 of
+ * `docs/plans/2026-09-28-indeterminate-value.md`.
  */
 export function isAbsentValue(expr: Expression | null | undefined): boolean {
-  return isAbsentSymbol(expr) || (isNumber(expr) && expr.isNaN === true);
+  return (
+    isAbsentSymbol(expr) ||
+    (isNumber(expr) && expr.isNaN === true && !expr.isIndeterminate)
+  );
+}
+
+/**
+ * Does the operand make a numeric result inexact: the `NaN` literal, or a
+ * finite float (a machine or big-decimal number that is not exact)? The
+ * `Indeterminate` literal is not inexact (it is the answer of an exact
+ * computation), and neither is an exact number or an infinity.
+ *
+ * This is the test of the rule that a float operand makes a numeric result a
+ * float (user decision of 2026-09-27), applied to `Indeterminate`: an
+ * operation with an `Indeterminate` operand answers `Indeterminate` only when
+ * no operand is inexact, and `NaN` otherwise (`Indeterminate + 1.5` is
+ * `NaN`).
+ */
+export function isInexactOperand(x: Expression): boolean {
+  if (!isNumber(x) || x.isIndeterminate) return false;
+  if (x.isNaN === true) return true;
+  return x.isFinite === true && !x.isExact;
+}
+
+/**
+ * The answer of an operation that has at least one operand whose value is
+ * `NaN` and that propagates it (the `propagate` policy of the evaluation
+ * gate, the `Add`/`Multiply` folds, the reducers `Max`, `Min`, `Mean` and
+ * the others): `Indeterminate` when an operand is the `Indeterminate` literal
+ * and no operand is inexact (`isInexactOperand()`: the `NaN` literal or a
+ * float), and `NaN` otherwise. So `Sqrt(Indeterminate)` and
+ * `Max(1, Indeterminate)` are `Indeterminate`, `Max(Indeterminate, NaN)` and
+ * `Arctan2(Indeterminate, 1.5)` are `NaN`.
+ *
+ * Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4.
+ */
+export function nanOperandAnswer(
+  ce: Expression['engine'],
+  ops: ReadonlyArray<Expression>
+): Expression {
+  let sawIndeterminate = false;
+  for (const x of ops) {
+    if (isNumber(x)) {
+      if (x.isIndeterminate) sawIndeterminate = true;
+      else if (isInexactOperand(x)) return ce.NaN;
+    } else if (isSymbol(x) && (isAbsentSymbol(x) || x.isNaN === true)) {
+      // An absent operand (`Missing`, `Undefined`) makes the answer `NaN`,
+      // the absence marker; so does a symbol whose value is `NaN`, which
+      // is not the `Indeterminate` literal. (A function operand is not
+      // asked: the question would compute its type, and a function
+      // expression never answers `isNaN === true`.)
+      return ce.NaN;
+    }
+  }
+  return sawIndeterminate ? ce.Indeterminate : ce.NaN;
 }
 
 export function isFunction(

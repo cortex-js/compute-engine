@@ -433,6 +433,7 @@ export class ComputeEngine implements IComputeEngine {
   readonly Two: Expression;
   readonly I: Expression;
   readonly NaN: Expression;
+  readonly Indeterminate: Expression;
   readonly PositiveInfinity: Expression;
   readonly NegativeInfinity: Expression;
   readonly ComplexInfinity: Expression;
@@ -1500,6 +1501,7 @@ export class ComputeEngine implements IComputeEngine {
     this.NegativeOne = commonNumbers.NegativeOne;
     this.Two = commonNumbers.Two;
     this.NaN = commonNumbers.NaN;
+    this.Indeterminate = commonNumbers.Indeterminate;
     this.PositiveInfinity = commonNumbers.PositiveInfinity;
     this.NegativeInfinity = commonNumbers.NegativeInfinity;
     this.I = commonNumbers.I;

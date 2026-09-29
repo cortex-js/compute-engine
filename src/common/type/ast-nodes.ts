@@ -191,12 +191,15 @@ export interface ValueNode extends ASTNode {
   // `complex_infinity` is the unsigned `~oo`. It is kept apart from `infinity`
   // (the signed `+oo`/`-oo`) because its `value` is the
   // `COMPLEX_INFINITY_VALUE` sentinel rather than a JavaScript number.
+  // `indeterminate` is the `Indeterminate` literal, whose `value` is the
+  // `INDETERMINATE_VALUE` sentinel for the same reason.
   valueType:
     | 'string'
     | 'number'
     | 'boolean'
     | 'infinity'
     | 'complex_infinity'
+    | 'indeterminate'
     | 'nan';
 }
 

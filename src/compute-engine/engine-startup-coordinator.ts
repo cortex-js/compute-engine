@@ -21,6 +21,7 @@ export type CommonNumberBindings = {
   Two: Expression;
   I: Expression;
   NaN: Expression;
+  Indeterminate: Expression;
   PositiveInfinity: Expression;
   NegativeInfinity: Expression;
   ComplexInfinity: Expression;
@@ -55,6 +56,12 @@ export class EngineStartupCoordinator {
       NegativeOne: new BoxedNumber(this.engine, -1),
       Two: new BoxedNumber(this.engine, 2),
       NaN: new BoxedNumber(this.engine, Number.NaN),
+      // The exact answer to an indeterminate form (`0/0`): the double value
+      // `NaN` with the `indeterminate` mark, which is what makes it a
+      // different value from `NaN` (see `BoxedNumber._indeterminate`).
+      Indeterminate: new BoxedNumber(this.engine, Number.NaN, {
+        indeterminate: true,
+      }),
       PositiveInfinity: new BoxedNumber(this.engine, Number.POSITIVE_INFINITY),
       NegativeInfinity: new BoxedNumber(this.engine, Number.NEGATIVE_INFINITY),
       // The imaginary unit is an EXACT constant (like `√2`), so it must be

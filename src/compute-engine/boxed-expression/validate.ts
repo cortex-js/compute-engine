@@ -949,7 +949,10 @@ export function markAbsentPointCells(
   // points) has its absent points in the inner lists. A `NaN` is looked for
   // in nested `List`s only, never inside a `Tuple`, where it is a coordinate
   // of a present point.
-  const isNaNCell = (x: Expression) => isNumber(x) && x.isNaN;
+  // An `Indeterminate` cell is a value (the exact answer to an indeterminate
+  // form), not an absent point, so it is kept.
+  const isNaNCell = (x: Expression) =>
+    isNumber(x) && x.isNaN && !x.isIndeterminate;
   // The walk is not bounded by the type: a list type without dimensions
   // (`list<missing | tuple<…>>`) describes the leaf cells at ANY depth, so a
   // matrix of points can carry it, and the value's own nesting is the only

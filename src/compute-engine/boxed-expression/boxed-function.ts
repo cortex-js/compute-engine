@@ -103,6 +103,7 @@ import {
   isSymbol,
   isContinuationOperand,
   isFoldBarrierProduct,
+  nanOperandAnswer,
 } from './type-guards.js';
 import { realExponentValue } from './imaginary-part.js';
 import { scopeForRebuild } from './binding-sites.js';
@@ -2698,10 +2699,14 @@ export class BoxedFunction
       // outside a span runs unbounded. Evaluation checkpoints the ambient
       // deadline (`engine._deadlineFrame`) if one is in effect.
       const canonical = this._canonicalToEvaluate();
-      if (canonical) return canonical.evaluate(options);
-      if (this._isMemoizableLazyCollection(options))
-        return this._memoizedLazyCollectionValue(options);
-      return this._computeValue(options)();
+      const result = canonical
+        ? canonical.evaluate(options)
+        : this._isMemoizableLazyCollection(options)
+          ? this._memoizedLazyCollectionValue(options)
+          : this._computeValue(options)();
+      return options?.numericApproximation
+        ? indeterminateAsNaN(result)
+        : result;
     } finally {
       engine._evaluationDepth -= 1;
       if (capturesEffects) engine._evaluationEffects = undefined;
@@ -3139,9 +3144,13 @@ export class BoxedFunction
       this.engine._inFlightAsyncEvaluations -= 1;
       throw error;
     }
-    return promise.finally(() => {
-      this.engine._inFlightAsyncEvaluations -= 1;
-    });
+    return promise
+      .then((result) =>
+        options?.numericApproximation ? indeterminateAsNaN(result) : result
+      )
+      .finally(() => {
+        this.engine._inFlightAsyncEvaluations -= 1;
+      });
   }
 
   private _evaluateAsyncUncounted(
@@ -3276,6 +3285,8 @@ export class BoxedFunction
   }
 
   N(): Expression {
+    // `evaluate()` maps an `Indeterminate` result to `NaN` under a numeric
+    // approximation (`indeterminateAsNaN()`).
     return this.evaluate({ numericApproximation: true });
   }
 
@@ -4973,6 +4984,10 @@ export class BoxedFunction
         // to reject — an absent operand at a `reject` operator, decided by
         // the missing gate below — that Error beats this quiet NaN, so fall
         // through instead of answering.
+        // The answer is `NaN`, except that an `Indeterminate` operand is
+        // forwarded when no operand is `NaN` or a float
+        // (`nanOperandAnswer()`): `Sin(Indeterminate)` is `Indeterminate`.
+        // A numeric approximation always answers `NaN`.
         if (
           sawPropagate &&
           !(
@@ -4980,7 +4995,9 @@ export class BoxedFunction
             tail.some(isAbsentScalarSymbol)
           )
         )
-          return this.engine.NaN;
+          return numericApproximation
+            ? this.engine.NaN
+            : nanOperandAnswer(this.engine, tail);
       }
 
       //
@@ -5884,6 +5901,10 @@ export class BoxedFunction
         // to reject — an absent operand at a `reject` operator, decided by
         // the missing gate below — that Error beats this quiet NaN, so fall
         // through instead of answering.
+        // The answer is `NaN`, except that an `Indeterminate` operand is
+        // forwarded when no operand is `NaN` or a float
+        // (`nanOperandAnswer()`): `Sin(Indeterminate)` is `Indeterminate`.
+        // A numeric approximation always answers `NaN`.
         if (
           sawPropagate &&
           !(
@@ -5891,7 +5912,9 @@ export class BoxedFunction
             tail.some(isAbsentScalarSymbol)
           )
         )
-          return this.engine.NaN;
+          return numericApproximation
+            ? this.engine.NaN
+            : nanOperandAnswer(this.engine, tail);
       }
 
       //
@@ -9349,3 +9372,19 @@ installBroadcastLiftHooks({
   // there); a user-defined operator goes through them.
   isLambda: (def) => isLambdaDef(def),
 });
+
+/**
+ * The final map of a numeric approximation: an `Indeterminate` result is the
+ * float `NaN`. A numeric route always ends in the IEEE `NaN`, whatever a
+ * producer knew about the exactness of its operands; some producers cannot
+ * know it, since a product is rebuilt through `Product.asExpression()`
+ * without the `numericApproximation` option under `.N()`. Applied to the
+ * result of `evaluate({ numericApproximation: true })`, which
+ * `BoxedFunction.N()` calls, and of its asynchronous twin
+ * (`BoxedNumber.N()` answers `NaN` for the literal itself).
+ *
+ * Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4.
+ */
+function indeterminateAsNaN(result: Expression): Expression {
+  return result.isIndeterminate ? result.engine.NaN : result;
+}

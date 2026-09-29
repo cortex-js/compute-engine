@@ -26,6 +26,7 @@ import {
   isAbsentSymbol,
   isAbsentArithmeticOperand,
   isContinuationOperand,
+  nanOperandAnswer,
 } from './type-guards.js';
 import {
   isImaginaryPartSafeInteger,
@@ -999,8 +1000,19 @@ export class Terms {
       // of the whole expression. So it is not asked of a function: for an
       // `Add` of many terms, that type walk made each addition cost as much
       // as the number of terms.
-      if ((!isFunction(term) && term.isNaN) || isSymbol(term, 'Undefined')) {
-        this.terms = [{ term: ce.NaN, coef: [] }];
+      //
+      // The answer is `NaN`, except that an `Indeterminate` term makes the
+      // sum `Indeterminate` when no term is `NaN`, a float or absent: every
+      // term is read (`nanOperandAnswer()`), not only the ones before this
+      // one, so that `Indeterminate + 1.5` is `NaN` as a float operand makes
+      // a numeric result a float, and `Indeterminate + 1` is `Indeterminate`.
+      //
+      // Only a NUMBER LITERAL is read here: `isNaN` of a symbol reads its
+      // current value, and a sum built from the symbol must not depend on it
+      // (with `w := NaN`, `w + 1` stayed `NaN` after `w := 4`). The symbol
+      // stays a term, and `evaluate()` reads its value.
+      if ((isNumber(term) && term.isNaN) || isSymbol(term, 'Undefined')) {
+        this.terms = [{ term: nanOperandAnswer(ce, terms), coef: [] }];
         return;
       }
 

@@ -4,6 +4,7 @@ import type {
   FunctionSignature,
   Type,
 } from '../common/type/types.js';
+import { isIndeterminateValue } from '../common/type/types.js';
 import { checkSameUnitClauseRedefinition } from './declaration-origin.js';
 import {
   clauseSignatureOf as clauseSignatureOfType,
@@ -1601,6 +1602,9 @@ function enumerateFiniteDomain(
     if (t.kind === 'value') {
       const v = t.value;
       if (typeof v === 'number') return [ce.number(v)];
+      // The `Indeterminate` value type holds the one literal of that kind
+      // (a sentinel value, not the double `NaN`, which would box `NaN`).
+      if (isIndeterminateValue(v)) return [ce.Indeterminate];
       if (typeof v === 'string') return [ce.string(v)];
       if (typeof v === 'boolean') return [v ? ce.True : ce.False];
       return undefined;

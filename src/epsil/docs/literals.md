@@ -63,7 +63,7 @@ The Verbatim Form must be used if the symbol name is a word the grammar
 claims.
 
 **Words the grammar claims** — the only ones a plain symbol may not spell —
-are the literals `true`, `false`, `Infinity`, `oo`, `NaN`, and the active
+are the literals `true`, `false`, `Infinity`, `oo`, `NaN`, `Indeterminate`, and the active
 keywords and word operators `break`, `const`, `continue`, `do`, `else`, `for`,
 `function`, `if`, `in`, `match`, `protocol`, `while`.
 
@@ -78,7 +78,7 @@ them as names.
 `await`, `begin`, `break`, `case`, `catch`, `class`, `const`, `continue`,
 `debugger`, `default`, `delete`, `dynamic`, `do`, `each`, `else`, `end`,
 `export`, `extern`, `false`, `finally`, `for`, `from`, `function`, `generator`,
-`get`, `global`, `goto`, `if`, `in`, `Infinity`, `inline`, `inout`, `interface`,
+`get`, `global`, `goto`, `if`, `in`, `Indeterminate`, `Infinity`, `inline`, `inout`, `interface`,
 `internal`, `import`, `iterator`, `label`, `lazy`, `local`, `loop`, `match`,
 `module`, `mutable`,
 `namespace`, `NaN`, `native`, `new`, `not`, `of`, `on`, `oo`, `optional`, `or`, `package`,

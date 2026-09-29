@@ -546,7 +546,13 @@ function serializeJsonFunction(
   // Negate(number) is always prettyfied as a negative number, since `-2` gets
   // parsed as `['Negate', 2]` and not `-2`.
   //
-  if (name === 'Negate' && args.length === 1 && isNumber(args[0])) {
+  // (Not `-Indeterminate`: its value `NaN` would print `NaN`.)
+  if (
+    name === 'Negate' &&
+    args.length === 1 &&
+    isNumber(args[0]) &&
+    !args[0].isIndeterminate
+  ) {
     const num0 = args[0].numericValue;
     if (num0 !== undefined) {
       if (typeof num0 === 'number')
@@ -1376,6 +1382,12 @@ function serializeJsonExpression(
   const wikidata = expr.wikidata;
 
   // Is it a number literal?
+  // The `Indeterminate` literal is spelled by its symbol, as `NaN` is (the
+  // numeric value it holds, the double `NaN`, would print `NaN`).
+  if (isNumber(expr) && expr.isIndeterminate)
+    return serializeJsonSymbol(ce, 'Indeterminate', options, {
+      latex: expr.verbatimLatex,
+    });
   if (isNumber(expr))
     return serializeJsonNumber(ce, expr.numericValue, options, {
       latex: expr.verbatimLatex,

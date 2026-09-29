@@ -1812,6 +1812,19 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\tilde', '<{>', '\\infty', '<}>'],
     parse: 'ComplexInfinity',
   },
+  // The exact answer to an indeterminate form (`0/0`). `NaN` is spelled by
+  // the `notANumber` serializer option instead of an entry; `Indeterminate`
+  // has no option of its own, so this entry both parses and serializes it.
+  {
+    name: 'Indeterminate',
+    standaloneSymbol: true,
+    latexTrigger: '\\operatorname{Indeterminate}',
+    serialize: '\\operatorname{Indeterminate}',
+  },
+  {
+    latexTrigger: '\\mathrm{Indeterminate}',
+    parse: 'Indeterminate',
+  },
   {
     name: 'Pi',
     standaloneSymbol: true,

@@ -31,13 +31,21 @@ import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
  * as an `IDENTIFIER` (`lexer.ts`), minus the words it lexes as keywords.
  *
  * The list must track the keyword table in `lexer.ts` exactly. It is the
- * CAPITALIZED `NaN` and `Infinity` that are keywords, together with `oo`; the
- * lowercase `nan` and `infinity` name the two numeric primitive types and lex
+ * CAPITALIZED `NaN`, `Indeterminate` and `Infinity` that are keywords,
+ * together with `oo`; the lowercase `nan` and `infinity` name the two numeric
+ * primitive types and lex
  * as ordinary identifiers, so they are legal keys like `real` and `number`. A
  * key wrongly listed here only costs precision (the type falls back to
  * `dictionary<T>`, a supertype), but a keyword wrongly MISSING produces a
  * record type that cannot be read back. */
-const TYPE_KEYWORD_KEYS = new Set(['true', 'false', 'NaN', 'Infinity', 'oo']);
+const TYPE_KEYWORD_KEYS = new Set([
+  'true',
+  'false',
+  'NaN',
+  'Indeterminate',
+  'Infinity',
+  'oo',
+]);
 function isRecordKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key) && !TYPE_KEYWORD_KEYS.has(key);
 }
@@ -576,7 +584,10 @@ function isEvaluatedValue(
   numericApproximation: boolean
 ): boolean {
   if (isString(v)) return true;
-  if (isNumber(v)) return !numericApproximation || !v.isExact;
+  // An `Indeterminate` literal is not numeric yet: its numeric
+  // approximation is `NaN`.
+  if (isNumber(v))
+    return !numericApproximation || (!v.isExact && !v.isIndeterminate);
   return false;
 }
 
