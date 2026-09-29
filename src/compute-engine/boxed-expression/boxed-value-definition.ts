@@ -178,6 +178,18 @@ export class _BoxedValueDefinition
   // If true, the `_type` is inferred
   inferredType = false;
 
+  /** True for a block-local binding that `canonicalBlock` hoisted for a
+   * `let` (or a block-introducing assignment) before the block's statements
+   * were canonicalized, so that a reference from a nested block finds it. Such
+   * a binding is `unknown`-typed until its statement runs or a literal
+   * initializer types it; it is NOT a free mathematical symbol, so the
+   * generic-symbol fold that reads an unknown bare symbol as a number
+   * (`classifyCellD`, `library/collections.ts`) does not apply to it: in
+   * `let c = match … ; out = join(out, [c])` the literal `[c]` is a `list`,
+   * not a `vector<1>`, and `out` is not typed `list<number>` from it.
+   * @internal */
+  _blockLocal = false;
+
   /** The declared PLACEHOLDER SKELETON, when the declaration's type was a
    * bare collection constructor (`list`, `set`, `dictionary`, `collection`,
    * `indexed_collection` — each the `<unknown>` synonym: "some X of values,
@@ -731,6 +743,7 @@ export class _BoxedValueDefinition
       _isSelfReferential: this._isSelfReferential,
       _type: this._type,
       inferredType: this.inferredType,
+      _blockLocal: this._blockLocal,
       _placeholderSkeleton: this._placeholderSkeleton,
       _signatureSkeleton: this._signatureSkeleton,
       // COPIED, not aliased: provenance is appended to in place, so a
@@ -778,6 +791,7 @@ export class _BoxedValueDefinition
     this._isSelfReferential = s._isSelfReferential as boolean;
     this._type = s._type as typeof this._type;
     this.inferredType = s.inferredType as boolean;
+    this._blockLocal = s._blockLocal as boolean;
     this._placeholderSkeleton = s._placeholderSkeleton as Type | undefined;
     this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
     this._typeProvenance = s._typeProvenance as

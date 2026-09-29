@@ -1067,14 +1067,23 @@ export interface IComputeEngine {
    * @internal */
   _nextFactId(): number;
 
-  /** Scopes that a computation currently on the stack pushed as SCRATCH and
-   * will pop. A `declare` whose resolved target scope is one of these advances
-   * no cache axis, because the binding dies with that scope; a declaration
-   * aimed at any other scope keeps its advance, even when made during the
-   * extent. Both declare routes (`declareSymbolValue`,
-   * `declareSymbolOperator`) apply the same test. Mutated in place by the
-   * bracketing computation — push before, pop in a `finally`. See
-   * `axisMaskOf`'s `declare` case. @internal */
+  /** Scopes that a computation currently on the stack registered as SCRATCH
+   * and discards when it returns. The only registrar is `withScratchScope`
+   * (`scratch-scopes.ts`), which pushes the scope before the computation and
+   * removes it in a `finally`.
+   *
+   * A binding whose scope is one of these, or a scope created under one, is
+   * a scratch binding: it dies with the computation. Three events on it are
+   * flagged `scratch`: its `declare` (`declareSymbolValue`,
+   * `declareSymbolOperator`), its `binding-repair` (`updateDef`), and an
+   * `inference` of its type or signature. None of them advances the
+   * `semantic` or `world` version or the definition version, which caches
+   * that outlive the computation key on. A scratch `binding-repair` or
+   * `inference` still advances `any` and `callable`, for the caches of the
+   * computation's own expressions; a scratch `declare` advances neither. A
+   * write to a binding in any other scope keeps its advances, even when made
+   * while the computation runs. See "Scratch events" in the documentation of
+   * `axisMaskOf`. @internal */
   readonly _scratchDeclarationScopes: object[];
 
   /** Run `fn` with the precision of the engine and of the big decimals set

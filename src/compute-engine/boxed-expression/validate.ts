@@ -10,6 +10,7 @@ import {
 } from '../collection-utils.js';
 
 import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
+import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { functionLiteralParameterType } from './function-literal.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
@@ -75,6 +76,7 @@ import {
 } from '../inference-rollback.js';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
+import { isScratchBinding } from '../scratch-scopes.js';
 import { isTensorValue } from './tensor-view.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
@@ -285,6 +287,106 @@ export function inferGenericBoundArgs(
       }
     });
   });
+}
+
+/**
+ * Post-handler inference for the COLLECTION operand of a `lazy` operator.
+ *
+ * A `lazy` operator receives its operands unbound, and its canonical handler
+ * builds the result itself (usually with `ce._fn`), so the signature
+ * validation that narrows a valueless symbol from the parameter it fills
+ * never runs on this route: `validateArguments` skips inference for a lazy
+ * operator, and the lazy branch of the boxing does not re-validate the
+ * handler's result. A symbol passed as the source of `Filter(xs, p)`,
+ * `Map(f, xs)`, `Reduce(xs, f, 0)`, `Any(xs, p)`, … therefore kept the type
+ * `unknown`. When that symbol is the parameter of a user function, an
+ * `unknown` parameter makes the function map over a list argument element by
+ * element, so `h(xs) = Filter(xs, p)` applied to `[1, 2, 3]` gave
+ * `[Filter(1, p), Filter(2, p), Filter(3, p)]` instead of the filtered list.
+ * The non-lazy siblings (`Find`, `Sort`, `Count`, …) validate in their
+ * handler and were typed correctly.
+ *
+ * This narrows each operand of the handler's result that is a symbol with no
+ * value and an `unknown` type, at a slot whose declared parameter type is a
+ * collection type, to that parameter type. The type variables of the
+ * signature read as their bounds (`unknown` when unbounded), which is the
+ * type the non-lazy validation writes for the same slot: `collection<T>`
+ * gives `collection<unknown>`, `collection<any>` stays `collection<any>`.
+ * Only the operands the handler already canonicalized are read: a callback
+ * operand is at a function-typed slot and is never touched, so its own
+ * parameters are not bound or evaluated here. A slot that also admits a
+ * scalar (`value`, `number | collection<any>`) is not a collection slot and
+ * writes nothing. Fact-blind, since the written type outlives the
+ * assumptions in force.
+ *
+ * The inference applies ONLY to the operators of `COLLECTION_SOURCE_OPERATORS`
+ * (`isCollectionSourceOperator`), and the caller checks both the operator
+ * being boxed and the head of the handler's result. It must not run for every
+ * lazy operator: many lazy operators have a collection-typed slot that is not
+ * a source. `Subscript` is `(collection<any>, any) -> any`, and its handler
+ * keeps `a_{n+1}` as a `Subscript` with an untyped base precisely so that `a`
+ * can still be a number; typing `a` a collection from that use made a second
+ * parse of `a_{n+1}` an element read (`At(a, n + 1)`). `Matrix`, `Dictionary`
+ * and the string-typed slots of `Delimiter` or `ErrorCode` are other such
+ * slots (a string is a collection of characters in the type lattice). An
+ * operator with an overloaded signature (an intersection of arms) is not
+ * narrowed either: another arm may fit the operand.
+ */
+export function inferCollectionSourceArgs(
+  ce: ComputeEngine,
+  signature: Type,
+  ops: ReadonlyArray<Expression>
+): void {
+  if (typeof signature === 'string' || signature.kind !== 'signature') return;
+  // Most applications hold no candidate: test the operands before the
+  // signature is grounded, which allocates.
+  if (
+    !ops.some(
+      (x) => isSymbol(x) && x.value === undefined && x.type.isUnknown
+    )
+  )
+    return;
+  const grounded = readTypeVariablesAsBounds(signature);
+  if (typeof grounded === 'string' || grounded.kind !== 'signature') return;
+  ce._withoutFacts(() => {
+    ops.forEach((x, i) => {
+      if (!isSymbol(x) || x.value !== undefined || !x.type.isUnknown) return;
+      const slot = signatureSlotType(grounded, i);
+      // A variable left after grounding is one the signature does not
+      // declare: a malformed signature, which writes nothing.
+      if (slot === undefined || freeTypeVariables(slot).size > 0) return;
+      if (!isSubtype(slot, COLLECTION_SHAPE_TYPE)) return;
+      x._infer(() => slot);
+    });
+  });
+}
+
+/**
+ * The lazy operators whose collection operand is a SOURCE: the operator reads
+ * the elements of that operand, so an untyped symbol there is a collection.
+ * See `inferCollectionSourceArgs` for why the list is explicit.
+ */
+const COLLECTION_SOURCE_OPERATORS: ReadonlySet<string> = new Set([
+  'Map',
+  'Filter',
+  'Reduce',
+  'Fold',
+  'Scan',
+  'Any',
+  'All',
+  'TakeWhile',
+  'DropWhile',
+  'FlatMap',
+  'MaxBy',
+  'MinBy',
+  'ArgMax',
+  'ArgMin',
+  'Dedup',
+  'Differences',
+]);
+
+export function isCollectionSourceOperator(name: string): boolean {
+  return COLLECTION_SOURCE_OPERATORS.has(name);
 }
 
 export function checkArity(
@@ -3510,9 +3612,18 @@ function repairFreshMatrixInference(
   const beforeTypes = new Map<string, BoxedType>();
   const freshlyAdded: BoxedValueDefinition[] = [];
   const frame = activeRollbackFrame(ce);
+  // True while every repaired definition is a binding under a registered
+  // scratch scope (`scratch-scopes.ts`). The inference events below are then
+  // flagged `scratch`: no cache that outlives the computation owning that
+  // scope can depend on the bindings, so the events leave the versions such
+  // caches key on alone (see "Scratch events" in the documentation of
+  // `axisMaskOf`). One binding outside a scratch scope keeps the full
+  // advance.
+  let allScratch = true;
   for (const name of names) {
     const def = ce.lookupDefinition(name);
     if (!def || !isValueDef(def) || !def.value.inferredType) return null;
+    if (!isScratchBinding(ce, def)) allScratch = false;
     snapshots.set(name, def.value._typeSlotSnapshot());
     histories.set(name, def.value._typeProvenance?.slice());
     beforeTypes.set(name, def.value.type);
@@ -3564,7 +3675,10 @@ function repairFreshMatrixInference(
       freshlyAdded.push(def.value);
     }
   }
-  ce._noteStateEvent({ kind: 'inference' });
+  ce._noteStateEvent({
+    kind: 'inference',
+    ...(allScratch ? { scratch: true } : {}),
+  });
 
   const repaired = ce.box(op.json);
   if (repaired.type.matches(expected)) {
@@ -3595,7 +3709,10 @@ function repairFreshMatrixInference(
     }
   }
   for (const fresh of freshlyAdded) ce._freshlyInferred?.delete(fresh);
-  ce._noteStateEvent({ kind: 'inference' });
+  ce._noteStateEvent({
+    kind: 'inference',
+    ...(allScratch ? { scratch: true } : {}),
+  });
   return null;
 }
 

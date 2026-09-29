@@ -63,6 +63,7 @@ import {
   type ProvisionalDependent,
 } from './boxed-expression/provisional-application.js';
 import { activeRollbackFrame } from './inference-rollback.js';
+import { isScratchBinding } from './scratch-scopes.js';
 import {
   effectsContractStateOf,
   recordEffectsTransition,
@@ -910,13 +911,14 @@ const MAX_REBUILDS_PER_WAVE = 2;
 export function repairProvisionalDependents(
   ce: ComputeEngine,
   name: string,
-  justInstalled?: ProvisionalDependent
+  justInstalled?: ProvisionalDependent,
+  declaredIn?: Scope
 ): void {
   const outermost = WAVE_DEPTH === 0;
   let firstError: { error: unknown } | undefined;
   WAVE_DEPTH += 1;
   try {
-    repairWave(ce, name, justInstalled);
+    repairWave(ce, name, justInstalled, declaredIn);
   } catch (error) {
     firstError = { error };
   } finally {
@@ -963,9 +965,29 @@ export function repairProvisionalDependents(
 function repairWave(
   ce: ComputeEngine,
   name: string,
-  justInstalled?: ProvisionalDependent
+  justInstalled?: ProvisionalDependent,
+  declaredIn?: Scope
 ): void {
-  const defs = takeProvisionalDependents(ce, name);
+  // When the new binding of `name` is in a known scope (`declaredIn`), only
+  // the dependents that can see it are taken: those whose literal was
+  // canonicalized in `declaredIn` or in a scope under it, read from the
+  // literal each one holds NOW, the scope the rebuild below uses. The others
+  // stay registered, since `name` still resolves for them as it did. A
+  // dependent with no recorded literal is taken, as before: the loop below
+  // drops it.
+  const defs = takeProvisionalDependents(
+    ce,
+    name,
+    declaredIn === undefined
+      ? undefined
+      : (def) => {
+          const home = provisionalLiteral(dependentLiteral(def))?.scope;
+          if (home === undefined) return true;
+          for (let s: Scope | null | undefined = home; s; s = s.parent)
+            if (s === declaredIn) return true;
+          return false;
+        }
+  );
   if (defs === undefined) return;
   // A rebuild can THROW: the definition constructors validate (a violated
   // effect contract, an invalid body). The queue has already been drained, so
@@ -1032,6 +1054,19 @@ function repairWave(
         // would silently answer a different question.
         if (rebuilt !== undefined && rebuilt !== literal) {
           installRebuiltLiteral(ce, def, rebuilt);
+          // The rebuilt literal is installed in place, without `updateDef`,
+          // so this is the repair event for it. It advances the definition
+          // version that memoized signatures key on
+          // (`declaredResultMemoKey`): a signature derived from the old
+          // literal may now be wrong. The `binding-repair` that `updateDef`
+          // emits for a FRESH declaration relies on this advance, since it
+          // does not advance the version itself. A dependent that is a
+          // scratch binding (`scratch-scopes.ts`) is flagged, as in
+          // `updateDef`.
+          ce._noteStateEvent({
+            kind: 'binding-repair',
+            ...(isScratchBinding(ce, def) ? { scratch: true } : {}),
+          });
           const installedName = dependentName(def);
           if (installedName !== undefined)
             cascade.push({ name: installedName, def });
@@ -2101,7 +2136,11 @@ export function resolveEscapingLambda(
   if (def && 'operator' in def) {
     const literal = (def.operator as { _lambdaLiteral?: Expression })
       ._lambdaLiteral;
-    if (literal !== undefined) return literal;
+    // The literal escapes as a closure: when it is defined in a nested block
+    // of a running function or loop, capture that block's bindings now, as
+    // the evaluation of a function literal does (`captureNestedLocals`).
+    if (literal !== undefined)
+      return captureNestedLocals(ce, literal) ?? literal;
   }
   return expr;
 }
@@ -2170,8 +2209,14 @@ function captureClosuresUncached(
       for (const [key, val] of innerBlock.localScope.bindings) {
         if (innerParamNames.has(key)) closureBindings.set(key, val);
       }
+      // A closure made in a nested block keeps the scopes that
+      // `captureNestedLocals` made for it when it was created: they hold the
+      // locals of that block. Only the end of their chain is re-rooted.
       const closureScope: Scope = {
-        parent: closureParent,
+        parent: rerootCapturedLocals(
+          innerBlock.localScope.parent,
+          closureParent
+        ),
         bindings: closureBindings,
       };
       // Rebuild the body's own ops against the NEW scope: a scoped `Block`
@@ -2514,6 +2559,270 @@ function wrapRecursion(
 }
 
 /**
+ * The scopes that the scoped subexpressions nested inside a function
+ * literal's body own: a `Loop` or `Comprehension` scope (its index
+ * variables), a `Sum`/`Product` scope (its index), the scope of a nested
+ * `Block` (its `let` locals), and so on. The body's own scope is excluded,
+ * because a call already gives its bindings a fresh per-call scope
+ * (`freshScope` in `makeLambda`).
+ *
+ * Canonical expressions are immutable, so the list is computed once per body
+ * and cached.
+ */
+const NESTED_BODY_SCOPES = new WeakMap<Expression, Scope[]>();
+
+function nestedBodyScopes(body: Expression): Scope[] {
+  const cached = NESTED_BODY_SCOPES.get(body);
+  if (cached !== undefined) return cached;
+  const found = new Set<Scope>();
+  const visited = new Set<Expression>();
+  const visit = (e: Expression): void => {
+    if (!isFunction(e) || visited.has(e)) return;
+    visited.add(e);
+    if (e !== body && e.isScoped && e.localScope) found.add(e.localScope);
+    for (const op of e.ops) visit(op);
+  };
+  visit(body);
+  const scopes = [...found];
+  NESTED_BODY_SCOPES.set(body, scopes);
+  return scopes;
+}
+
+/**
+ * For each nested scope, the number of evaluations currently on the stack
+ * that use it: the applications of a function literal whose body contains
+ * the scope, the walks of a comprehension that contains it, and the runs of
+ * a loop that owns or contains it.
+ */
+const liveNestedScopes = new WeakMap<Scope, number>();
+
+/** The bindings of one nested scope, and the stored value of each of its
+ * (non-constant) value definitions, at the entry of an application. */
+type NestedScopeSnapshot = {
+  scope: Scope;
+  entries: [string, BoxedDefinition][];
+  values: [BoxedValueDefinition, Expression | undefined][];
+};
+
+/**
+ * Make the nested scopes of a function literal's body private to each
+ * application of the literal. Call when the body is about to run, and pass
+ * the result to `exitNestedBodyScopes` when it has finished.
+ *
+ * A nested scope is created ONCE, when the body is canonicalized, and every
+ * application of the literal evaluates the same body, so every application
+ * reads and writes the same nested scopes. The parameters and the body's own
+ * `let` locals do not have this problem: each call binds them in a fresh
+ * scope. But a `for` loop variable, a `Sum` index, or a `let` local of a
+ * nested block lives in a nested scope. When the literal is RECURSIVE, the
+ * inner application runs its loop in the same scope as the outer
+ * application, and when the inner application returns, the outer loop
+ * variable holds the last value the inner loop gave it:
+ * `f(n) = { for c in [n*10, n*10+1] { …f(n+1)…; c } }` read `c` as 21, not 10,
+ * after the call `f(2)`.
+ *
+ * The fix is to save and restore. When an application starts while another
+ * application whose body contains the same nested scope is still running (a
+ * recursive or re-entrant call), this function records the bindings and the
+ * values of that scope. `exitNestedBodyScopes` puts them back when the
+ * application ends, so the enclosing application continues with its own
+ * values. An application that is not re-entrant records nothing: no other
+ * application uses its nested scopes, so there is nothing to protect.
+ *
+ * The values are put back with ephemeral writes, as the comprehension index
+ * frame does (`ComprehensionIndexFrame`, `library/control-structures.ts`):
+ * the write advances the definition's `_writeVersion` and the engine's
+ * `_anyVersion`, so caches that depend on the value are invalidated, but it
+ * is not a semantic change of the document.
+ */
+export type NestedBodyScopesToken = {
+  scopes: Scope[];
+  saved?: NestedScopeSnapshot[];
+};
+
+export function enterNestedBodyScopes(
+  body: Expression | undefined,
+  options?: {
+    /** Also mark the scope of `body` itself (a `Loop` marks its own index
+     * scope). Default: `false`. */
+    includeRoot?: boolean;
+    /** Save the scopes that are already in use, to put them back in
+     * `exitNestedBodyScopes`. Default: `true`. A loop only marks its scopes
+     * as in use (so that a closure created in its body captures them, see
+     * `captureNestedLocals`): it does not need to save them. */
+    save?: boolean;
+  }
+): NestedBodyScopesToken {
+  if (body === undefined) return { scopes: [] };
+  let scopes = nestedBodyScopes(body);
+  if (options?.includeRoot && isFunction(body) && body.localScope)
+    scopes = [body.localScope, ...scopes];
+  const save = options?.save ?? true;
+  let saved: NestedScopeSnapshot[] | undefined;
+  for (const scope of scopes) {
+    const live = liveNestedScopes.get(scope) ?? 0;
+    if (save && live > 0) {
+      const entries = [...scope.bindings];
+      const values: [BoxedValueDefinition, Expression | undefined][] = [];
+      for (const [, binding] of entries)
+        if ('value' in binding && !binding.value.isConstant)
+          values.push([binding.value, binding.value.storedValue]);
+      (saved ??= []).push({ scope, entries, values });
+    }
+    liveNestedScopes.set(scope, live + 1);
+  }
+  return { scopes, saved };
+}
+
+/** Undo `enterNestedBodyScopes`: put back the bindings and values it
+ * recorded (see there for why). */
+export function exitNestedBodyScopes(
+  ce: ComputeEngine,
+  token: NestedBodyScopesToken
+): void {
+  for (const scope of token.scopes) {
+    const live = liveNestedScopes.get(scope) ?? 0;
+    if (live <= 1) liveNestedScopes.delete(scope);
+    else liveNestedScopes.set(scope, live - 1);
+  }
+  if (token.saved === undefined) return;
+  for (const { scope, entries, values } of token.saved) {
+    const map = scope.bindings;
+    // A binding that the inner application added (a runtime `Declare`, a
+    // loop index declared on first use) is removed, and a binding it
+    // replaced is put back. The map writes are journaled like any other
+    // scope write, so that a checkpoint restore stays exact.
+    const names = new Set(entries.map(([name]) => name));
+    for (const name of [...map.keys()]) {
+      if (names.has(name)) continue;
+      journalCheckpointMapEntry(ce, map, name, name, undefined, scope);
+      map.delete(name);
+    }
+    for (const [name, binding] of entries) {
+      if (map.get(name) === binding) continue;
+      journalCheckpointMapEntry(ce, map, name, name, undefined, scope);
+      map.set(name, binding);
+    }
+    ce._ephemeralWriteDepth += 1;
+    try {
+      for (const [def, value] of values)
+        if (def.storedValue !== value) def.value = value;
+    } finally {
+      ce._ephemeralWriteDepth -= 1;
+    }
+  }
+}
+
+/**
+ * The scopes made by `captureNestedLocals`. `captureClosuresUncached` keeps
+ * them in the chain of a closure when it re-roots the closure on the call
+ * frame of the function that returns it.
+ */
+const CLOSURE_LOCALS_SCOPES = new WeakSet<Scope>();
+
+/**
+ * Capture, in a function literal created while its nested scopes are in use,
+ * the bindings of those scopes. Returns the literal rebuilt on the captured
+ * scopes, or `undefined` when there is nothing to capture.
+ *
+ * A function literal finds its free variables by name through the lexical
+ * chain of its body. When the literal is written in a nested block of a
+ * function body (an `if` branch, a loop body), the first scopes of that
+ * chain are nested scopes: they are created once, at canonicalization, and
+ * shared by every application of the enclosing function and by every
+ * iteration of a loop (see `enterNestedBodyScopes`). A closure that kept
+ * the chain would read what the next application or iteration writes there,
+ * and `captureClosures`, which re-roots a returned closure on the call frame,
+ * skipped those scopes, so a `let` local of an `if` branch read as its bare
+ * symbol. With `mk(n) = if n > 0 { let k = n * 10; () => k } else { 0 }`,
+ * `mk(1)()` returned `k`, not `10`.
+ *
+ * The capture happens when the literal is evaluated, that is when the
+ * closure is created. Each consecutive scope at the start of the chain that
+ * is in use is replaced by a new scope that holds the bindings it has now:
+ * - A `let` local keeps its binding (the same definition object). A closure
+ *   captures the binding, not a snapshot of the value: two closures made by
+ *   the same run of the block share the local, and a write that follows the
+ *   creation is visible. A local is not shared with the next run of the
+ *   block, because each run of a `Declare` statement after the first creates
+ *   a new definition (`declareOne` in the `Declare` handler, `library/
+ *   core.ts`). So each call of a counter factory counts separately.
+ * - A loop or big-operator index gets a new binding that holds its current
+ *   value, because the loop writes each value into the same definition: a
+ *   closure created in iteration `i` reads `i`, like a comprehension element
+ *   (`[x => x + i for i in 1..3]` closes over 1, 2, 3).
+ * - A valueless binding that no `Declare` statement made is left out. It is
+ *   a canonicalization-time placeholder that would hide the value of the
+ *   same name in an enclosing scope (see `sweepCanonicalizationBindings`,
+ *   `library/control-structures.ts`).
+ */
+export function captureNestedLocals(
+  ce: ComputeEngine,
+  fn: Expression | undefined
+): Expression | undefined {
+  if (fn === undefined || !isFunction(fn, 'Function')) return undefined;
+  const body = fn.op1;
+  if (!isFunction(body) || !body.localScope) return undefined;
+  const inUse: Scope[] = [];
+  let top: Scope | null = body.localScope.parent;
+  while (top && (liveNestedScopes.get(top) ?? 0) > 0) {
+    inUse.push(top);
+    top = top.parent;
+  }
+  if (inUse.length === 0) return undefined;
+  let parent: Scope | null = top;
+  for (let i = inUse.length - 1; i >= 0; i--) {
+    const source = inUse[i];
+    const captured: Scope = { parent, bindings: new Map() };
+    for (const [name, binding] of source.bindings) {
+      if (!('value' in binding)) {
+        captured.bindings.set(name, binding);
+        continue;
+      }
+      const value = binding.value.storedValue;
+      if (source.binderNames?.has(name)) {
+        ce.declare(
+          name,
+          value === undefined
+            ? { inferred: true, type: 'unknown' }
+            : { value, inferred: true },
+          captured
+        );
+        continue;
+      }
+      if (
+        value === undefined &&
+        (binding as { _declaredByStatement?: boolean })._declaredByStatement !==
+          true
+      )
+        continue;
+      captured.bindings.set(name, binding);
+    }
+    CLOSURE_LOCALS_SCOPES.add(captured);
+    parent = captured;
+  }
+  return captureClosures(ce, fn, parent!);
+}
+
+/**
+ * The chain of `captureNestedLocals` scopes that starts at `scope`, copied
+ * and re-rooted on `closureParent`. When `scope` is not such a scope, the
+ * result is `closureParent`.
+ */
+function rerootCapturedLocals(
+  scope: Scope | null,
+  closureParent: Scope
+): Scope {
+  if (scope === null || !CLOSURE_LOCALS_SCOPES.has(scope)) return closureParent;
+  const copy: Scope = {
+    parent: rerootCapturedLocals(scope.parent, closureParent),
+    bindings: scope.bindings,
+  };
+  CLOSURE_LOCALS_SCOPES.add(copy);
+  return copy;
+}
+
+/**
  * Substitute, in a HELD argument, every symbol bound in the CALLER's frames
  * that the callee cannot reach: a symbol whose live binding is found on the
  * current (caller's) scope chain but not on `captured` — the callee's
@@ -2624,7 +2933,17 @@ function makeLambda(
     //     instantiate, so evaluate it directly (fast path for plain thunks and
     //     bare-expression bodies).
     if (!onlyBody.isScoped || !onlyBody.localScope)
-      return wrapRecursion(ce, (_args, options) => onlyBody.evaluate(options));
+      return wrapRecursion(ce, (_args, options) => {
+        // The body may still contain scoped subexpressions (a loop, a `Sum`)
+        // whose scopes a recursive application would share: see
+        // `enterNestedBodyScopes`.
+        const nested = enterNestedBodyScopes(onlyBody);
+        try {
+          return onlyBody.evaluate(options);
+        } finally {
+          exitNestedBodyScopes(ce, nested);
+        }
+      });
 
     // (b) The body IS a scoped Block: it may declare mutable locals (`let`)
     //     captured by an escaping closure — e.g. a counter factory
@@ -2652,6 +2971,9 @@ function makeLambda(
       // condition then reads the valueless binding forever and never
       // terminates.
       const hiddenBindings = hideBodyScopeParams(bodyScope, []);
+      // The scopes nested in the body (loops, big-ops, inner blocks) are
+      // private to this application: see `enterNestedBodyScopes`.
+      const nested = enterNestedBodyScopes(nullaryBody);
       // Named 'call': a function-application activation frame. The debugger's
       // statement hook uses this to delimit stack frames (one per
       // activation — nested unnamed Block/loop contexts group into it).
@@ -2667,6 +2989,7 @@ function makeLambda(
         ce.popScope();
         bodyScope.parent = savedParent;
         restoreBodyScopeParams(bodyScope, hiddenBindings);
+        exitNestedBodyScopes(ce, nested);
       }
       return bodyResultValue(result);
     });
@@ -3091,6 +3414,9 @@ function makeLambda(
       bodyScope.parent = freshScope;
       const curryParamNames = boundPrefix.leaves.map((l) => l.name);
       const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
+      // The scopes nested in the body (loops, big-ops, inner blocks) are
+      // private to this application: see `enterNestedBodyScopes`.
+      const nested = enterNestedBodyScopes(bodyFn);
 
       // Named 'call': a function-application activation frame. The debugger's
       // statement hook uses this to delimit stack frames (one per
@@ -3103,6 +3429,7 @@ function makeLambda(
         ce.popScope();
         bodyScope.parent = savedParent;
         restoreBodyScopeParams(bodyScope, hiddenBindings);
+        exitNestedBodyScopes(ce, nested);
       }
 
       // Re-attach the original return-type ascription onto the curried literal
@@ -3276,6 +3603,11 @@ function makeLambda(
     const savedParent = bodyScope.parent;
     bodyScope.parent = freshScope;
     const hiddenBindings = hideBodyScopeParams(bodyScope, paramNames);
+    // The scopes nested in the body (loops, big-ops, inner blocks) are
+    // private to this application: a recursive call restores the caller's
+    // loop variables and inner-block locals when it returns. See
+    // `enterNestedBodyScopes`.
+    const nested = enterNestedBodyScopes(bodyFn);
 
     // Push fresh scope and evaluate block contents directly.
     // We evaluate bodyFn.ops (the Block's children) rather than calling
@@ -3391,6 +3723,7 @@ function makeLambda(
       ce.popScope();
       bodyScope.parent = savedParent;
       restoreBodyScopeParams(bodyScope, hiddenBindings);
+      exitNestedBodyScopes(ce, nested);
     }
 
     if (memoKey !== undefined) {

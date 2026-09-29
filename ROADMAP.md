@@ -109,6 +109,138 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A destructuring `let` inside a loop body does not compile (OPEN, small — found 2026-09-28 by the review fixes for Tycho item 332)
+
+`let n = 0` / `while n < 4 { let (a, x) = (2, 3); n = n + a }` / `n`
+declines on the JavaScript target with "Could not compile a destructuring
+declaration in value position". The interpreter evaluates it correctly. The
+same program declines with the 2026-09-28 changes turned off, so it is not
+caused by them: the statement lowering treats the last statement of a loop
+body block as a value position, and a destructuring declaration has no value
+lowering. The fix is to lower a loop body's statements in statement
+position, as the top-level block does. The destructuring `let` at the top
+level of a block compiles.
+
+### A user function whose body applies `Flatten` or `Mean` to its parameter is applied to each element of a list argument (OPEN, decision — found 2026-09-29 by the fix for the callback operators)
+
+`function h(xs) { mean(xs) }` applied to `[1, 2, 3]` returns `[1, 2, 3]`
+(the literal call returns `2`), and `function h(xs) { flatten(xs) }` applied
+to `[[1], [2, 3]]` returns `[[[1]], [[2], [3]]]` (the literal call returns
+`[1, 2, 3]`). The parameter IS inferred (`value` for `Flatten`,
+`collection<any> | distribution | number` for `Mean`), but a parameter type
+reaches the function's signature only when it excludes every scalar
+(`inferredCollectionParameterType`, `boxed-expression/effects-inference.ts`),
+a deliberate rule: the index slot of `At` accepts a number and a
+collection, and a parameter used there must still be applied element by
+element. Options. (A) Keep the parameter a collection when the operator is
+not element-wise (`broadcastable: false`, as `Mean` declares) and one arm
+of its slot is a collection: `h([1, 2, 3])` gives `2`; the risk is that
+`h(5)` starts to report a type error. (B) Nothing: the two wrong values
+stay. Related: a call with the operands in the wrong order inside a
+function, `map(xs, x => 2 * x)` (Epsil's `map` takes the function first),
+is applied to each element silently, where the same call on a literal is a
+type error.
+
+### `Join`/`Append` over an operand that may hold a set: the value depends on the materialization option and the static type does not admit it (OPEN, decision — found 2026-09-29 by the result-kind fix)
+
+With `P` declared `collection<number>` and holding `Set(3, 1)`,
+`Join(P, [5])` has the static type `list<number>`; `evaluate()` gives
+`Set(3, 1, 5)` and `evaluate({materialization: true})` gives the list
+`[3, 1, 5]`. The same reaches the list literal with a spread: `g(a) =
+[...a, 0]` is typed `(a: collection<any>) -> list<any>` (pinned by
+`test/compute-engine/tycho-item-331-spread-in-function-body.test.ts`), and
+`g(Set(9, 8))` is `Set(9, 8, 0)`, a set out of a list literal. Options.
+(A) Type the result `collection<T>` when an operand may hold a set: the
+type becomes sound, and the function type that Tycho item 331 pinned
+becomes `-> collection<any>`. (B) A, plus a list literal with a spread
+always gives a list (wrapping the segment in `ListFrom` is not enough, it
+stops the parameter being inferred as a collection, which item 331 needs):
+recommended, needs a short design. (C) Nothing: the value keeps depending
+on the materialization option.
+
+### A restriction with a list condition over a carrier that is not finite puts the whole carrier in each cell (OPEN, decision — found 2026-09-29 by the review of the fix for Tycho item 335)
+
+`When(Range(1, ∞), [True, False])` evaluates to `[Range(1, ∞), Missing]`:
+the evaluate handler zips the carrier with the mask only when the carrier's
+value is a FINITE collection, and otherwise treats it as one value repeated
+in every cell. The static type of a restriction over a carrier declared
+`indexed_collection<T>` or `collection<T>` therefore has to admit both
+shapes (`list<indexed_collection<T> | missing | T>`), which is what a
+consumer that declares lazy carriers reads. Options. (A) Zip a carrier of
+unknown or infinite length over the LENGTH OF THE MASK (the first k
+elements): the static type becomes `list<missing | T>` for every ordered
+carrier, and the value for an infinite carrier changes. (B) Keep the rule;
+a consumer that wants the element-only type declares the carrier
+`list<T>`. Doing nothing is B.
+
+### Registering a chain of `-> unknown` functions that each call the next twice re-enters the signature memo a number of times that doubles per level (OPEN, small — measured 2026-09-29 after the fix for Tycho item 336)
+
+With `W_k` declared `-> unknown` and each body calling `W_{k+1}` TWICE, one
+registration makes 14 077 calls to `_deriveSignature` at depth 8 (80 ms)
+and 163 493 at depth 12 (277 ms). They are memo HITS, not derivations (each
+body is boxed once, 12 boxings at depth 12): the type of a call is read
+again through `v.type` each time the `any` version moves, and every read
+walks the two callees. The definition version is not the cause (a fresh
+declaration no longer advances it, and the counts are the same with and
+without that exemption). A per-generation cache of the derived signature on
+the definition, read before the memo key is built, would make the count
+linear. Single-call chains are linear already (287 derivations at depth 10).
+
+### A signature derivation that runs inside a cached type read does not see a widening made in its own temporary scope until the read finishes (OPEN, small — found 2026-09-29 by the review of the fix for Tycho item 336)
+
+A value-type inference advances the `any` version only when no cached
+computation is running (`runWhenIdle`), so that it does not retire the type
+being computed. A derivation reached from a `_type` read runs inside one; a
+type its body cached before a WIDENING of one of its own temporary symbols
+can then be read once more, and the memoized result may be narrower than it
+should be. No reachable witness was found. Closing it needs an immediate
+advance for a widening inside the derivation's scope, which the deferred
+design avoids on purpose.
+
+### A broadcast operator over an operand declared `collection<T>` is typed as a scalar (OPEN, decision — found 2026-09-29 by the fix for Tycho item 335)
+
+`Greater(P, 1)`, `And`, `Not` and `Sin` over `P: collection<number>` are
+typed `boolean`/`number`, the scalar result. At evaluation a `List` value
+broadcasts to a list, while a `Set` value does not broadcast, so neither
+static answer is right for every value the declaration admits. The honest
+type is `broadcastable<…>` (the scalar or an indexed collection of it). The
+lift is the generic one in `boxed-expression/boxed-function.ts`, so changing
+it affects the static type of every broadcast operator over a non-indexed
+collection. Decision for the user: type such a call `broadcastable<R>`
+(honest, wider, compile shape gates then need the value's kind), or keep the
+scalar type and document that a carrier meant to broadcast must be declared
+`indexed_collection<T>` or `list<T>`. Doing nothing keeps the scalar type.
+
+### `Length(Range(0, n))` is typed `integer | signed_infinity` for an integer `n` (OPEN, small — found 2026-09-29 by the fix for Tycho item 334)
+
+A range whose bounds are typed `integer` cannot be infinite, so the length
+is a finite non-negative integer; the type handler reads only "a bound is
+not a known number" and admits the infinite length. Tightening it to
+`integer<0..>` when both bounds and the step are typed finite is a static
+precision improvement with no effect on values.
+
+### The static type of a block local narrowed by a use depends on statement order (OPEN, small — found 2026-09-28 by the fixpoint re-read of assignment evidence)
+
+The re-read of `let`/`Assign` value types (`library/assignment-evidence.ts`)
+excludes locals with a declared type, and a local that a USE narrows after
+its first recorded assignment type keeps the order-dependent result: a
+`mutate(v)` call placed before or after the assignment gives a different
+static type. Making the narrowing order-independent would treat use
+evidence and assignment evidence as two sets joined at the end of the block
+rather than as writes in statement order. Not a wrong value at runtime; a
+static-type imprecision.
+
+### A closure created before a `let` of the same body, on a later loop iteration, captures the previous iteration's binding (OPEN, small — found 2026-09-28 by the fix for Tycho item 330)
+
+In a loop body such as `for i in [1, 2] { fs = [...fs, () => k]; let k = i }`
+the closure of the second iteration captures the `k` binding of the first
+iteration, because the `let` that would re-create the binding has not run
+yet when the closure is made. JavaScript reports a temporal-dead-zone error
+there. Rare in practice (a closure over a local declared after it); left as
+is by the 2026-09-28 fix, which captures a nested block's locals at closure
+creation. A fix would either refuse the read (an error like JavaScript's) or
+pre-create the iteration's bindings when the body starts.
+
 ### A list of numbers plus a point is typed `indexed_collection<integer>` and evaluates to a list of errors (OPEN, small — found 2026-09-28 answering Tycho item 326)
 
 With `L := [0..3]`, `L + (1, 1)` types `indexed_collection<integer>` and

@@ -103,11 +103,12 @@ describe('the derived type is unchanged', () => {
       ['List', 1, 2, 3],
       ['Function', ['Map', ['Function', ['Power', 'k', 2], 'k'], '_1']],
     ]);
-    // The mapping body is an inner `Map` over the piped ELEMENT, which is an
-    // integer rather than a collection. The pipe reports exactly what the
-    // equivalent explicit `Map` reports for the same shape — that equivalence
-    // is what the implicit-map typing is defined by — so this row moves
-    // whenever the inner head's own answer moves.
+    // The stage's body is a `Map` over the stage's own parameter, so that
+    // parameter is typed a collection from its use (since 2026-09-29) and the
+    // stage receives the piped list WHOLE: the result is the list of squares.
+    // Before, the parameter stayed `unknown`, the stage was applied to each
+    // element, and the inner `Map` ran over an integer
+    // (`list<collection<number>>`).
     // `xs |> f` is `f(xs)` (user decision 2026-09-26): the pipe reports
     // what the same literal called on the list reports.
     const call = ce.box([
@@ -115,8 +116,14 @@ describe('the derived type is unchanged', () => {
       ['Function', ['Map', ['Function', ['Power', 'k', 2], 'k'], '_1'], '_1'],
       ['List', 1, 2, 3],
     ]);
-    expect(pipe.type.toString()).toBe('list<collection<number>>');
+    expect(pipe.type.toString()).toBe('collection<number>');
+    expect(pipe.type.toString()).toBe(call.type.toString());
     expect(pipe.evaluate().toString()).toBe(call.evaluate().toString());
+    // The value is the lazy `Map` over the whole list, not a list of
+    // per-element `Map`s.
+    const value = pipe.evaluate();
+    expect(value.operator).toBe('Map');
+    expect(value.ops![1].json).toEqual(['List', 1, 2, 3]);
   });
 });
 

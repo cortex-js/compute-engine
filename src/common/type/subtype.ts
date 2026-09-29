@@ -2224,6 +2224,32 @@ function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (isSubtype(a, b)) return a;
   if (isSubtype(b, a)) return b;
 
+  // A union meets arm by arm: `(A | B) ∧ C` is `(A ∧ C) | (B ∧ C)`, with the
+  // empty arms dropped. Without this a union was tested only as a whole, so
+  // `narrow('missing | vector<real^4>', 'indexed_collection | dictionary')`
+  // was `never` although the vector arm fits: a block local typed from an
+  // element read (`let e = circles[j]`, whose type admits absence) was then
+  // narrowed to `never` by its first indexed use, and the comparison built on
+  // it became a type error. The same rule is the one `meet2`
+  // (`common/type/reduce.ts`) applies for the intersection reducer.
+  const armsOf = (t: Readonly<Type>): ReadonlyArray<Readonly<Type>> | null =>
+    typeof t === 'object' && t.kind === 'union' ? t.types : null;
+  const armsA = armsOf(a);
+  const armsB = armsOf(b);
+  if (armsA !== null || armsB !== null) {
+    const left = armsA ?? [a];
+    const right = armsB ?? [b];
+    const kept: Type[] = [];
+    for (const x of left)
+      for (const y of right) {
+        const m = narrow2(x, y);
+        if (m !== 'never') kept.push(m as Type);
+      }
+    if (kept.length === 0) return 'never';
+    if (kept.length === 1) return kept[0];
+    return kept.reduce((u, t) => unionTypes(u, t));
+  }
+
   // Disjoint types have no common subtype: the narrowest common type is the
   // bottom type `never`. (Returning `superType` would *widen* — the opposite
   // of narrowing, e.g. `narrow('integer', 'string')` → `scalar`.)

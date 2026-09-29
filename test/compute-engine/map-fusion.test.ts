@@ -796,7 +796,10 @@ describe('Map fusion: annotated parameters', () => {
   test('an unprovable source element type declines', () => {
     const ce = new ComputeEngine();
     const m = annotated(ce, 'unknownSource', 'number');
-    expect(m.op2.type.toString()).toBe('unknown');
+    // An untyped symbol used as the source of a `Map` is typed a collection
+    // from that use since 2026-09-29; its ELEMENT type is still unknown,
+    // which is what makes the source unprovable.
+    expect(m.op2.type.toString()).toBe('collection<unknown>');
     expect(lowerMapSpine(m)).toBeUndefined();
   });
 

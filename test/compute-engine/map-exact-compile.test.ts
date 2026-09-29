@@ -938,7 +938,9 @@ describe('exact Map compile — annotated parameters', () => {
       ['Function', ['Add', '_1', 1], ['Typed', '_1', 'number']],
       'noSuchSource',
     ]);
-    expect(m.op2.type.toString()).toBe('unknown');
+    // Typed a collection from its use as a `Map` source since 2026-09-29;
+    // the element type is still unknown, so nothing is attempted.
+    expect(m.op2.type.toString()).toBe('collection<unknown>');
     drain(m.evaluate());
     expect(stats.attempts).toBe(0);
   });

@@ -207,18 +207,20 @@ describe('destructuring from a tuple-TYPED symbol', () => {
     agrees(expr, 34);
   });
 
-  test('a block LOCAL bound to a tuple stays fail-closed (type `unknown`)', () => {
-    // PINNED, not endorsed: a block local's declared type is `unknown` (the
-    // initializer does not narrow it at box time), so the arity is not
-    // statically known and the statement keeps the existing D6 refusal. The
-    // interpreter evaluates it correctly.
+  test('a block LOCAL bound to a tuple literal compiles: the hoist types it', () => {
+    // Until 2026-09-28 a block local's type was `unknown` at box time (the
+    // initializer did not type it), so the arity was not statically known
+    // and the statement kept the D6 refusal. The `Block` canonical hoist now
+    // records the type of a closed literal initializer (`tuple<integer,
+    // integer>` here), so the arity is known and the statement compiles.
+    // The interpreter and the compiled code agree.
     const expr = withDefsBlock(
       '',
       'do { let p = (3, 4); let (x, y) = p; 10*x + y }'
     );
     const r = compile(expr);
-    expect(r?.success).toBe(false);
-    expect(r?.error).toMatch(/statically-known tuple arity/);
+    expect(r?.success).toBe(true);
+    if (r?.success) expect(r.run({})).toBe(34);
     expect(expr.evaluate().isSame(34)).toBe(true);
   });
 });

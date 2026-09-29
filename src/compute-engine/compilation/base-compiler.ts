@@ -3713,6 +3713,18 @@ export class BaseCompiler {
     'Log',
   ]);
 
+  /** `t` without its `nan` member when it is a union with one (`nan | real`
+   * → `real`); any other type unchanged. */
+  static withoutNaNMember(t: Type | undefined): Type | undefined {
+    if (t === undefined || typeof t !== 'object' || t.kind !== 'union')
+      return t;
+    if (!t.types.includes('nan')) return t;
+    const rest = t.types.filter((m) => m !== 'nan');
+    if (rest.length === 0) return 'nan';
+    if (rest.length === 1) return rest[0];
+    return { kind: 'union', types: rest };
+  }
+
   /**
    * Is `expr` PROVABLY non-negative under the premise the strict-shaped
    * analysis already makes — that a WIDE-typed value is REAL? The engine's
@@ -3743,7 +3755,17 @@ export class BaseCompiler {
     // complex lane while its type, and so the parent's lane verdict, stayed
     // `real`. The parent then emitted real arithmetic around a `{re, im}`
     // object, which evaluates to NaN.
-    const exprType = expr.type?.type;
+    // The type is read WITHOUT its `nan` member: a `nan | real<0..>` operand
+    // (the element read `L[i]` types `nan | real`, since the index may be out
+    // of range, and `Max(0, L[i])` then types `nan | real<0..>`) is at run
+    // time either a non-negative double or NaN, and both keep the real kernel
+    // — `Math.sqrt(NaN)` is the NaN the interpreter answers for √NaN. The
+    // engine's own sign is undecided for such an operand (NaN is unsigned),
+    // so without this the radical promoted to the complex kernel, and in a
+    // compiled program every quantity built on `2√max(0, k₁k₂ + …)` became a
+    // complex object where the interpreted program kept a real (Tycho item
+    // 332).
+    const exprType = BaseCompiler.withoutNaNMember(expr.type?.type);
     if (exprType !== undefined && isSubtype(exprType, NON_NEGATIVE_REAL_TYPE))
       return true;
     // An unrolled `Sum`/`Product` term binds its index to a literal integer,
@@ -3786,6 +3808,18 @@ export class BaseCompiler {
       return BaseCompiler.assumedRealNonNegative(ops[0]);
     if (h === 'Add' || h === 'Multiply' || h === 'Divide')
       return ops.every((o) => BaseCompiler.assumedRealNonNegative(o));
+    // The largest of real-assumed operands is at least each of them, so ONE
+    // recognized operand is enough: `Max(0, x)`, the usual guard of a
+    // radicand, is non-negative whatever `x` is. The smallest needs every
+    // operand recognized. A list operand is not admitted: the extremum of an
+    // empty list is NaN, and its elements are not the operands tested here.
+    if ((h === 'Max' || h === 'Min') && ops.length > 0) {
+      if (!ops.every((o) => realAssumed(o) && o.isCollection !== true))
+        return false;
+      return h === 'Max'
+        ? ops.some((o) => BaseCompiler.assumedRealNonNegative(o))
+        : ops.every((o) => BaseCompiler.assumedRealNonNegative(o));
+    }
     return false;
   }
 
@@ -5150,6 +5184,27 @@ export class BaseCompiler {
     const elt = collectionElementType(r);
     if (elt === undefined) return false;
     return BaseCompiler.typeHasComplexLeaf(elt, seen);
+  }
+
+  /**
+   * Whether every leaf entry of the static type `t` is WIDE
+   * (`wideNumericType`: `number`, `unknown`, a non-real type), descending
+   * through collections, tuples and unions like `typeHasComplexLeaf`.
+   */
+  private static wideEntriesType(t: Type, seen?: AliasDescent): boolean {
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined) return false;
+    const r = unfolded.type;
+    seen = unfolded.seen;
+    if (typeof r !== 'string' && r.kind === 'tuple')
+      return r.elements.every((e) =>
+        BaseCompiler.wideEntriesType(e.type, seen)
+      );
+    if (typeof r !== 'string' && r.kind === 'union')
+      return r.types.every((m) => BaseCompiler.wideEntriesType(m, seen));
+    const elt = collectionElementType(r);
+    if (elt !== undefined) return BaseCompiler.wideEntriesType(elt, seen);
+    return BaseCompiler.wideNumericType(r);
   }
 
   /**
@@ -15059,6 +15114,68 @@ export class BaseCompiler {
   }
 
   /**
+   * The value shape the body of a loop must assume for the bare binder
+   * `leaf` of an `Element` clause over `source`.
+   *
+   * The body is compiled with the binder bound in the compile context, and a
+   * bound name is classified from its TYPE (`isComplexValued`), while the
+   * `for (const k of …)` header hands it the elements the SOURCE emits. The
+   * two disagree when the elements compile to `{re, im}` objects but the
+   * binder's type is real, or wide under the real discipline: a binder over
+   * `[a + √d, a - √d]` with `d` of unknown sign types `number`, each `√d`
+   * takes the complex lane, and the body then compared and divided the
+   * objects as numbers (`0 < k` is `false`, `1 / k` is `NaN`), a silent wrong
+   * answer. (Measured on the Apollonian-gasket program of Tycho ask 332: the
+   * compiled run returned 4 where the interpreter returns 224.)
+   *
+   * - `'as-typed'`: the binder's own classification already matches the
+   *   elements, or the source is a numeric `Range`/`Linspace` (a real
+   *   counter). Nothing to do.
+   * - `'complex'`: every element the source emits is complex-valued while
+   *   the binder reads real; the body must bind the name complex.
+   * - `'mixed'`: the source emits complex values, but not for every element,
+   *   or for elements that cannot be identified. No single lowering of the
+   *   body fits every element: a lane mismatch.
+   *
+   * Shared by the emitter (`compileElementLoops`) and the analysis
+   * (`binderParts`), so the loop body and the enclosing expression agree on
+   * the binder's value shape.
+   */
+  private static elementBinderLane(
+    leaf: Expression & { symbol: string },
+    source: Expression
+  ): 'as-typed' | 'complex' | 'mixed' {
+    if (isFunction(source, 'Range') || isFunction(source, 'Linspace'))
+      return 'as-typed';
+    const t = leaf.type.type;
+    if (isNonRealNumber(t) || BaseCompiler.wideIsComplex(t)) return 'as-typed';
+    // Under the complex discipline a read of a WIDE entry is lifted at its
+    // use (`_SYS.cplx`, idempotent), so a collection binder whose every leaf
+    // entry is wide reads a complex entry correctly wherever the element
+    // holds one.
+    if (
+      BaseCompiler.complexDiscipline &&
+      collectionElementType(t) !== undefined &&
+      BaseCompiler.wideEntriesType(t)
+    )
+      return 'as-typed';
+    // Under the complex discipline a mixed source is not a mismatch: the
+    // binder is bound complex and a real element is lifted at its read
+    // (`_SYS.cplx`), so the `auto` retry that the real-discipline `'mixed'`
+    // verdict asks for can succeed. Without this the retry raised the same
+    // lane mismatch and `auto` could not recover.
+    const mixed = BaseCompiler.complexDiscipline ? 'complex' : 'mixed';
+    const elements = BaseCompiler.elementComplexness(source);
+    if (elements !== undefined) {
+      if (elements.length === 0 || !elements.some((e) => e)) return 'as-typed';
+      return elements.every((e) => e) ? 'complex' : mixed;
+    }
+    // The elements cannot be identified (a symbol, a call): the source's own
+    // verdict describes whether it may hold a complex value anywhere.
+    return BaseCompiler.isComplexValued(source) ? mixed : 'as-typed';
+  }
+
+  /**
    * Build nested `for (const name of collection) { … }` loops from a list of
    * `Element` clauses. `makeInner` produces the innermost statement given the
    * loop-variable-aware `bodyTarget`. `prelude` is emitted at the top of the
@@ -15164,6 +15281,55 @@ export class BaseCompiler {
       }
     }
 
+    // A bare binder whose source emits complex-valued elements while the
+    // binder's type reads real is bound COMPLEX for the body and for the inner
+    // sources, which read it the same way (see `elementBinderLane`). A source
+    // whose elements disagree has no single lowering for the body under the
+    // real discipline: that is a lane mismatch, which `mode: 'auto'` answers
+    // by compiling again under the complex discipline (where a wide binder
+    // is lifted at each use) and `mode: 'strict'` by declining.
+    const complexFrame = new Map<string, boolean>();
+    for (const binder of binders) {
+      const leaf = binder.clause.ops[0];
+      if (!isSymbol(leaf)) continue;
+      const lane = BaseCompiler.elementBinderLane(leaf, binder.clause.ops[1]);
+      if (lane === 'mixed')
+        BaseCompiler.laneMismatch(
+          'Loop index',
+          `the loop variable \`${leaf.symbol}\``,
+          binder.clause.ops[1]
+        );
+      if (lane === 'complex') complexFrame.set(leaf.symbol, true);
+    }
+    if (complexFrame.size > 0) BaseCompiler._pushLocalComplex(complexFrame);
+    try {
+      return BaseCompiler.emitElementLoops(
+        narrowedElements,
+        binders,
+        target,
+        bodyTarget,
+        makeInner,
+        prelude,
+        needsWrap
+      );
+    } finally {
+      if (complexFrame.size > 0) BaseCompiler._popLocalComplex();
+    }
+  }
+
+  /**
+   * The emission half of `compileElementLoops`, run while the loop binders'
+   * complex frame (if any) is pushed.
+   */
+  private static emitElementLoops(
+    narrowedElements: ReadonlyArray<ElementBinder['clause']>,
+    binders: ReadonlyArray<ElementBinder>,
+    target: CompileTarget<Expression>,
+    bodyTarget: CompileTarget<Expression>,
+    makeInner: (bodyTarget: CompileTarget<Expression>) => string,
+    prelude: string,
+    needsWrap: boolean
+  ): string {
     // Build nested for-of loops from innermost to outermost. Inner collections
     // are compiled with `bodyTarget` so that references to outer loop variables
     // are wrapped consistently.
@@ -16630,22 +16796,37 @@ export class BaseCompiler {
 
   /**
    * Walk the statement forms nested in `stmt` (`If`/`Which` arms, `Loop`
-   * bodies, statement lists) for an `Assign` of a real-bound local of `frame`
-   * to a complex-shaped value, and raise the strict-mode block-local
-   * `LaneMismatch` for the first one. Never enters a `Function` literal or a
-   * nested `Block` (each is a scope of its own; a nested block's assignment to
-   * an OUTER local is left to that block's own frame handling, as today).
+   * bodies, nested statement lists) for an `Assign` of a real-bound local of
+   * `frame` to a complex-shaped value, and raise the strict-mode block-local
+   * `LaneMismatch` for the first one. Never enters a `Function` literal (a
+   * scope of its own whose body runs elsewhere).
+   *
+   * A nested `Block` IS entered: every braced body of an Epsil `if`/`for`/
+   * `while` is one, and an assignment there to an OUTER local writes that
+   * local. The nested block's own locals (and a loop's indices) shadow the
+   * outer names, which `shadow` accumulates; their complex-ness is inferred
+   * the way `compileLoopBody` infers it, so an assignment such as
+   * `r = r + t` with a nested local `t = 1 / k` is analyzed with `t` complex
+   * when it is. A `Loop` is walked with its binders masked (`binderParts`),
+   * so a loop index over complex elements reads complex here as it does in
+   * the emitted body. Before this, an accumulator `r = 0` updated by
+   * `r = r + 1 / k` inside a `for k in [a + √d, a − √d]` body was not
+   * checked: the loop body assigned a `{re, im}` object to a local every
+   * other statement reads as a number, and the second iteration
+   * concatenated the object into a string.
    */
   private static checkNestedComplexRebinding(
     stmt: Expression,
-    frame: Map<string, boolean>
+    frame: Map<string, boolean>,
+    shadow: ReadonlySet<string> = new Set()
   ): void {
     if (!isFunction(stmt)) return;
     const h = stmt.operator;
-    if (h === 'Function' || h === 'Block') return;
+    if (h === 'Function') return;
     if (h === 'Assign' && isSymbol(stmt.ops[0])) {
       const name = stmt.ops[0].symbol;
       if (
+        !shadow.has(name) &&
         frame.get(name) === false &&
         BaseCompiler.localIsBound(frame, name) &&
         stmt.ops[1] !== undefined &&
@@ -16658,9 +16839,55 @@ export class BaseCompiler {
         );
       return;
     }
-    if (h !== 'If' && h !== 'Which' && h !== 'Loop') return;
+    if (h === 'Block') {
+      const args = stmt.ops;
+      const inner = new Map<string, boolean>();
+      for (const arg of args)
+        if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0]))
+          inner.set(arg.ops[0].symbol, BaseCompiler.localComplexDefault());
+      const scope = stmt.localScope;
+      if (scope)
+        for (const arg of args)
+          if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0])) {
+            const name = arg.ops[0].symbol;
+            if (
+              !inner.has(name) &&
+              scope.bindings.has(name) &&
+              !BaseCompiler._boundVarsCtx?.has(name)
+            )
+              inner.set(name, BaseCompiler.localComplexDefault());
+          }
+      const innerShadow =
+        inner.size === 0 ? shadow : new Set([...shadow, ...inner.keys()]);
+      BaseCompiler._pushLocalComplex(inner);
+      try {
+        for (const arg of args) {
+          // The nested block's own locals, statement by statement (this also
+          // runs the same check for THEIR rebindings).
+          BaseCompiler.noteLocalComplex(arg, inner);
+          BaseCompiler.checkNestedComplexRebinding(arg, frame, innerShadow);
+        }
+      } finally {
+        BaseCompiler._popLocalComplex();
+      }
+      return;
+    }
+    if (h === 'Loop') {
+      const binder = BaseCompiler.binderParts(stmt);
+      if (binder === null) return;
+      const loopShadow =
+        binder.shielded.length === 0
+          ? shadow
+          : new Set([...shadow, ...binder.shielded]);
+      BaseCompiler.withBinderMask(binder, () => {
+        for (const op of stmt.ops)
+          BaseCompiler.checkNestedComplexRebinding(op, frame, loopShadow);
+      });
+      return;
+    }
+    if (h !== 'If' && h !== 'Which') return;
     for (const op of stmt.ops)
-      BaseCompiler.checkNestedComplexRebinding(op, frame);
+      BaseCompiler.checkNestedComplexRebinding(op, frame, shadow);
   }
 
   /**
@@ -16687,6 +16914,7 @@ export class BaseCompiler {
     bodies: ReadonlyArray<Expression>;
     real: string[];
     shielded: string[];
+    loopComplex: string[];
   } | null {
     const h = expr.operator;
     if (h === 'Function') {
@@ -16697,13 +16925,19 @@ export class BaseCompiler {
       // destructuring parameter contributes its LEAF names, which is what the
       // body actually references.
       const params = functionLiteralBoundNames(expr.ops.slice(1));
-      return { bodies: expr.ops.slice(0, 1), real: [], shielded: params };
+      return {
+        bodies: expr.ops.slice(0, 1),
+        real: [],
+        shielded: params,
+        loopComplex: [],
+      };
     }
     if (h !== 'Sum' && h !== 'Product' && h !== 'Loop' && h !== 'Comprehension')
       return null;
 
     const real: string[] = [];
     const shielded: string[] = [];
+    const loopComplex: string[] = [];
     for (const clause of expr.ops.slice(1)) {
       const isLimits = isFunction(clause, 'Limits');
       if (!isLimits && !isFunction(clause, 'Element')) continue;
@@ -16729,8 +16963,16 @@ export class BaseCompiler {
         isFunction(ops[1], 'Linspace')
       )
         real.push(name.symbol);
+      // An `Element` index whose source emits complex-valued elements while
+      // the index's type reads real: the loop body binds it complex (the
+      // same verdict `compileElementLoops` acts on).
+      else if (
+        !isLimits &&
+        BaseCompiler.elementBinderLane(name, ops[1]) === 'complex'
+      )
+        loopComplex.push(name.symbol);
     }
-    return { bodies: expr.ops.slice(0, 1), real, shielded };
+    return { bodies: expr.ops.slice(0, 1), real, shielded, loopComplex };
   }
 
   /**
@@ -16746,11 +16988,16 @@ export class BaseCompiler {
       shielded: ReadonlyArray<string>;
       /** Names bound COMPLEX for the duration (a complex-lane parameter). */
       complex?: ReadonlyArray<string>;
+      /** Loop indices bound COMPLEX for the duration: their elements are
+       * complex-valued, and may be collections, so no scalar fact is
+       * recorded for them. */
+      loopComplex?: ReadonlyArray<string>;
     },
     fn: () => T
   ): T {
     const frame = new Map<string, boolean>();
     for (const n of binder.real) frame.set(n, false);
+    for (const n of binder.loopComplex ?? []) frame.set(n, true);
     // A complex-lane name is a scalar complex object (the lane is granted
     // only for a provably scalar argument): record the SCALAR fact in the
     // vector frame as well, so a nested user call inside the analyzed body

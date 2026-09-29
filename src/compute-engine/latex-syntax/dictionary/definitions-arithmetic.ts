@@ -1127,7 +1127,9 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
   // Leibniz partial-derivative notation, assembled from the ∂ markers emitted
   // by the `\partial` parser: `∂f/∂x`, `∂/∂x f(x)`, `∂²f/∂x∂y`, `∂²f/∂x²`.
   // Each `PartialDerivative(fnOrVar, degree)` marker carries the numerator
-  // function or a denominator variable; the result canonicalizes to `D`.
+  // function of a first-order numerator (`∂f`) or a denominator variable; a
+  // numerator marker with a degree (`∂²`) carries `Nothing` and the
+  // differentiand follows it. The result canonicalizes to `D`.
   const denomPartials: MathJsonExpression[] =
     operator(denom) === 'PartialDerivative'
       ? [denom!]
@@ -1141,8 +1143,40 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     // The function being differentiated: the numerator's captured operand for
     // `∂f/∂x`, or — for the bare-numerator form `∂/∂x f(x)` — the expression
     // that follows the fraction.
-    let fn: MathJsonExpression | null =
-      operator(numer) === 'PartialDerivative' ? operand(numer, 1) : null;
+    //
+    // The numerator can also be a juxtaposition that starts with the marker:
+    // `\partial^{2}f` or `\partial^{2}(s^2t^2)` parse as
+    // `["InvisibleOperator", ["PartialDerivative", "Nothing", 2], …]`, because
+    // a marker with a degree does not capture its differentiand. The factors
+    // after the marker are then the differentiand. This is the spelling the
+    // `D` serializer writes for several variables.
+    let numerMarker: MathJsonExpression | null = null;
+    let fn: MathJsonExpression | null = null;
+    if (operator(numer) === 'PartialDerivative') {
+      numerMarker = numer;
+      fn = operand(numer, 1);
+    } else if (
+      operator(numer) === 'InvisibleOperator' ||
+      operator(numer) === 'Multiply' ||
+      operator(numer) === 'Sequence'
+    ) {
+      const factors = operands(numer);
+      if (factors.length > 1 && operator(factors[0]) === 'PartialDerivative') {
+        numerMarker = factors[0];
+        // A first-order marker captures a symbol (`\partial f(x,y)` gives
+        // the marker `f` followed by `(x,y)`): that symbol is the first
+        // factor of the differentiand.
+        const captured = operand(factors[0], 1);
+        const rest = [
+          ...(captured && captured !== 'Nothing' ? [captured] : []),
+          ...factors.slice(1),
+        ];
+        fn =
+          rest.length === 1
+            ? rest[0]
+            : ([operator(numer), ...rest] as MathJsonExpression);
+      }
+    }
     if (fn === null || fn === undefined || fn === 'Nothing')
       fn = unwrapSingleItemList(
         missingIfEmpty(
@@ -1152,15 +1186,45 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
 
     // Differentiation variables from the denominator's ∂ markers. Each marker
     // carries either a single variable or a `List` of them (a `∂x ∂y` chain).
+    //
+    // A marker with a degree and no variable, `PartialDerivative(Nothing, n)`,
+    // comes from a denominator that starts with `\partial^n x`: the `\partial`
+    // parser does not capture what follows a `\partial^n`. The factor that
+    // follows such a marker is its variable, repeated `n` times, so
+    // `\frac{\partial^2 f}{\partial^2 x}` reads as `D(f, x, x)`.
+    const denomTerms: ReadonlyArray<MathJsonExpression> =
+      operator(denom) === 'PartialDerivative' ? [denom!] : operands(denom);
     const vars: MathJsonExpression[] = [];
-    for (const p of denomPartials) {
+    for (let i = 0; i < denomTerms.length; i++) {
+      const p = denomTerms[i];
+      if (operator(p) !== 'PartialDerivative') continue;
       const arg = operand(p, 1);
+      if (arg === 'Nothing') {
+        const next = denomTerms[i + 1];
+        const n = machineValue(operand(p, 2));
+        if (
+          next !== undefined &&
+          operator(next) !== 'PartialDerivative' &&
+          n !== null &&
+          Number.isInteger(n) &&
+          n >= 1
+        ) {
+          for (let k = 0; k < n; k++) vars.push(next);
+          i += 1;
+        }
+        continue;
+      }
       const list = operator(arg) === 'List' ? operands(arg) : [arg];
       for (const v of list) if (v && v !== 'Nothing') vars.push(v);
     }
 
-    // A single variable with a numerator degree (∂²f/∂x²) repeats that variable.
-    const degree = machineValue(operand(numer, 2)) ?? 1;
+    // The denominator decides which variables are differentiated and how many
+    // times. The degree written in the numerator (the `2` of `∂²f`) is used
+    // only when the denominator has a single variable and no count of its
+    // own (`∂²f/∂x` reads as `∂²f/∂x²`). When the denominator has several
+    // variables, a numerator degree that does not match their number
+    // (`∂⁵f/∂x∂y`) is ignored, and the result is `D(f, x, y)`.
+    const degree = machineValue(operand(numerMarker, 2)) ?? 1;
     if (vars.length === 1 && degree > 1)
       for (let i = 1; i < degree; i++) vars.push(vars[0]);
 

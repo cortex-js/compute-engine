@@ -631,9 +631,12 @@ describe('Declare with a Tuple pattern: compilation', () => {
 
   test('a non-literal tuple value fails closed (interpreter fallback)', () => {
     const expr = boxed('do { let p = (3, 4); let (x, y) = p; 10*x + y }');
+    // Since 2026-09-28 the block hoist types `p` from its literal value
+    // (`tuple<integer, integer>`), so the arity is statically known and the
+    // statement compiles; it declined before. The interpreter agrees.
     const r = compile(expr);
-    expect(r?.success).toBe(false);
-    // The interpreter handles it correctly.
+    expect(r?.success).toBe(true);
+    if (r?.success) expect(r.run({})).toBe(34);
     expect(expr.evaluate().isSame(34)).toBe(true);
   });
 
@@ -754,7 +757,11 @@ describe('Assign with a Tuple pattern: compilation', () => {
     const expr = boxed(
       'do { let a=0; let b=0; let p = (3,4); (a,b) := p; 10*a+b }'
     );
-    expect(compile(expr)?.success).toBe(false);
+    // Compiles since 2026-09-28: the block hoist types `p` from its literal
+    // value, so the tuple arity is statically known (it declined before).
+    const r = compile(expr);
+    expect(r?.success).toBe(true);
+    if (r?.success) expect(r.run({})).toBe(34);
     expect(expr.evaluate().isSame(34)).toBe(true);
   });
 

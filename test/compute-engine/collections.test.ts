@@ -2659,10 +2659,18 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
       'First',
       ['Filter', ['Range', 1, 'Infinity'], neverTrue],
     ];
-    // Returning the absence marker at all is the assertion: an unguarded walk
-    // of an infinite never-matching Filter never returns. The jest per-test
-    // timeout below is the hang backstop, deliberately far above the real cost.
-    expect(ce.box(first).evaluate().isNaN).toBe(true);
+    // Returning at all is the assertion: an unguarded walk of an infinite
+    // never-matching Filter never returns. The jest per-test timeout below is
+    // the hang backstop, deliberately far above the real cost.
+    //
+    // Since 2026-09-29 the result is the unevaluated read, not the absence
+    // marker: a walk that stops at the iteration limit is a give-up, not a
+    // proof that the element is absent (the same source with the predicate
+    // `x > 10^6` HAS a first element beyond the limit), and the emptiness of
+    // this Filter is likewise answered `undefined` by the test above.
+    const r = ce.box(first).evaluate();
+    expect(r.operator).toBe('First');
+    expect(r.isNaN).not.toBe(true);
   }, 15_000);
 });
 
@@ -3700,8 +3708,12 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     // Producing a marker at all is the assertion — an unguarded walk of this
     // never-emitting source returns nothing, ever. The jest per-test timeout
     // below is the hang backstop, deliberately far above the real cost.
+    //
+    // Since 2026-09-29 a read that gives up at the iteration limit over a
+    // source not known to be finite stays unevaluated: the walk did not prove
+    // the element absent. Returning at all is still the assertion.
     const r = ce.box(second).evaluate();
-    expect(r.symbol === 'Missing' || r.isNaN === true).toBe(true);
+    expect(r.operator).toBe('Second');
   }, 15_000);
 
   // --- Insert ------------------------------------------------------------

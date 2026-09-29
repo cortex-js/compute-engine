@@ -251,7 +251,10 @@ function h() -> integer {
     expect(h.success).toBe(true);
     expect(h.run?.()()).toBe(60);
     expect(ce.box(['h'] as any).evaluate().toString()).toBe('60');
-    // An UNTYPED local still fails closed (no declared entry to read).
+    // A local with NO written type is typed from its initializer since
+    // 2026-09-28 (a `let` records its value's type as assignment evidence),
+    // so `q` is a `pt` here and the field read compiles; it failed closed
+    // before, when such a local stayed `unknown`.
     const u = executeEpsil(
       ce,
       `function u(p: pt) -> unknown {
@@ -260,7 +263,9 @@ function h() -> integer {
 }`
     ).diagnostics;
     expect(u).toEqual([]);
-    expect(compile(ce.box('u')).success).toBe(false);
+    const cu = compile(ce.box('u'));
+    expect(cu.success).toBe(true);
+    expect(cu.run?.()([3, 4])).toBe(4);
   });
 
   test('JS: a NESTED field chain on a typed local resolves too', () => {

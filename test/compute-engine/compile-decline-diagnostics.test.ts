@@ -153,13 +153,14 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
       expect(compile(cardinality())?.run?.({ n: 5 })).toBe(5);
     });
 
-    it('javascript names the unsupported arity', () => {
+    it('javascript names the unsupported value form; the predicate form compiles', () => {
+      // Since 2026-09-28 the predicate form lowers like `CountIf` (Tycho
+      // item 332); only the value form, which needs the interpreter's
+      // structural element equality, still declines.
       expect(() => new JavaScriptTarget().compile(byValue())).toThrow(
-        /Could not compile `Count`: only the single-argument cardinality form compiles/s
+        /Could not compile `Count`: .*value form \(`Count\(xs, v\)`\)/s
       );
-      expect(() => new JavaScriptTarget().compile(byPredicate())).toThrow(
-        /Could not compile `Count`: only the single-argument cardinality form compiles/
-      );
+      expect(new JavaScriptTarget().compile(byPredicate()).success).toBe(true);
     });
 
     it('python names the unsupported arity', () => {
@@ -177,8 +178,9 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
       const v = compile(byValue());
       expect(v?.success).toBe(false);
       expect(v?.run?.({ n: 5 })).toBe(1);
+      // The predicate form compiles now and must agree with the interpreter.
       const p = compile(byPredicate());
-      expect(p?.success).toBe(false);
+      expect(p?.success).toBe(true);
       expect(p?.run?.({ n: 5 })).toBe(3);
 
       const ce2 = new ComputeEngine();

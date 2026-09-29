@@ -46,6 +46,7 @@ import {
   canonicalFunctionLiteral,
   canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
+  captureNestedLocals,
   WILDCARD_SYMBOLS,
 } from '../function-utils.js';
 
@@ -55,6 +56,14 @@ import { fromDigits } from '../numerics/strings.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { randomCount } from './random-utils.js';
+import {
+  coarsenEvidenceType,
+  joinEvidenceTypes,
+  isDeclaredLocal,
+  isEvidenceLost,
+  markEvidenceLost,
+  registerEvidenceSite,
+} from './assignment-evidence.js';
 import { isRingConstant } from './ring-constructions.js';
 import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import {
@@ -117,6 +126,7 @@ import { findRoot } from '../nonlinear-fit.js';
 import type {
   IComputeEngine as ComputeEngine,
   BoxedOperatorDefinition,
+  BoxedValueDefinition,
   Expression,
   OperandDescriptor,
   OperandStructure,
@@ -1939,14 +1949,32 @@ function randomListType(
  * stays `inferred` and valueless: evaluation still creates the runtime
  * binding afresh and type-checks the assigned value there. Shared by the
  * plain-symbol and the destructuring targets of the `Assign` canonical
- * handler, the latter calling it once per pattern leaf.
+ * handler, the latter calling it once per pattern leaf, and by the `Declare`
+ * canonical handler for an untyped `let` with an initial value.
+ *
+ * `assignedType` returns the CURRENT static type of the assigned value, or
+ * `undefined` when the value is invalid or `unknown`-typed (nothing is
+ * recorded then). It is a function because the enclosing block reads it again
+ * after the whole block is canonicalized.
+ *
+ * With `currentScopeOnly`, the target is the binding of `name` in the
+ * CURRENT lexical scope, and nothing is recorded when that scope does not
+ * bind the name. A `let` uses it: at run time `Declare` creates (or
+ * upgrades) the binding in the current scope only, so a lookup through the
+ * scope chain could reach an OUTER binding of the same name (an
+ * auto-declared free symbol, a local of an enclosing block) that the `let`
+ * never writes, and record a type on it. An `Assign` writes the binding the
+ * name resolves to, and looks it up through the scope chain.
  */
 function joinAssignmentEvidence(
   ce: ComputeEngine,
   name: string,
-  assignedType: Type
+  assignedType: () => Type | undefined,
+  options?: { currentScopeOnly?: boolean }
 ): void {
-  const def = ce.lookupDefinition(name);
+  const def = options?.currentScopeOnly
+    ? ce.context.lexicalScope.bindings.get(name)
+    : ce.lookupDefinition(name);
   if (
     !def ||
     !isValueDef(def) ||
@@ -1955,23 +1983,85 @@ function joinAssignmentEvidence(
     def.value.value !== undefined
   )
     return;
+  const target = def.value;
+  const first = assignedType();
+  if (first !== undefined) joinEvidenceOnBinding(ce, target, first);
+  // The value's type is read NOW, but a read in the value of a local that a
+  // later statement widens (through a loop's back edge) makes it too narrow.
+  // The enclosing block canonicalization joins the value's type again after
+  // every statement is canonicalized, until no recorded type changes (see
+  // `withEvidenceSession`, `library/assignment-evidence.ts`). A block local
+  // with a declared type is excluded: its declared type is the contract,
+  // and a use of it (a call with a `list<real>` parameter) narrows it back
+  // after the first join, which a second join must not undo.
+  if (isDeclaredLocal(target)) return;
+  // Whether a read of the value's type has succeeded. A value whose type
+  // could not be read on the first read gave no information, and the site
+  // records nothing until a read succeeds. A value whose type could be read
+  // before but not now (its type became `unknown`, or a destructured leaf
+  // is no longer found in the value's tuple type) has LOST information: the
+  // type recorded from the earlier read may be too narrow for what the
+  // value now holds, so the site writes `unknown` on the binding, which is
+  // wide and therefore sound, and marks the binding so that no other site
+  // narrows it again in this session (`markEvidenceLost`).
+  let hasRead = first !== undefined;
+  registerEvidenceSite(ce, {
+    rejoin: (coarse) => {
+      if (isEvidenceLost(ce, target)) return false;
+      const t = assignedType();
+      if (t === undefined) {
+        if (!hasRead) return false;
+        markEvidenceLost(ce, target);
+        if (target.type.isUnknown) return false;
+        writeEvidenceType(ce, target, 'unknown');
+        return true;
+      }
+      hasRead = true;
+      return joinEvidenceOnBinding(ce, target, t, coarse);
+    },
+    reset: () => writeEvidenceType(ce, target, 'unknown'),
+  });
+}
+
+/** Join `assignedType` (widened) with the recorded type of the binding
+ * `target`. Return `true` when the recorded type changed. With `coarse`, the
+ * join is bounded in height by `coarsenEvidenceType`. */
+function joinEvidenceOnBinding(
+  ce: ComputeEngine,
+  target: BoxedValueDefinition,
+  assignedType: Type,
+  coarse = false
+): boolean {
+  // A binding whose evidence was lost in this session stays `unknown`.
+  if (isEvidenceLost(ce, target)) return false;
   const widened = widenAssignedType(ce, assignedType);
-  const recorded = def.value.type;
-  const next = recorded.isUnknown
+  const recorded = target.type;
+  const joined = recorded.isUnknown
     ? widened
-    : reduceType({ kind: 'union', types: [recorded.type, widened] });
-  if (next === undefined) return;
+    : joinEvidenceTypes(recorded.type, widened);
+  if (joined === undefined) return false;
+  const next = coarse ? coarsenEvidenceType(joined) : joined;
+  if (!recorded.isUnknown && isSubtype(next, recorded.type)) return false;
+  writeEvidenceType(ce, target, next);
+  return true;
+}
+
+/** Write the type `next` on the binding `target`, journaled for rollback. */
+function writeEvidenceType(
+  ce: ComputeEngine,
+  target: BoxedValueDefinition,
+  next: Type
+): void {
   // Rollback journal (family 1), as in the `Function` branch of the `Assign`
   // canonical handler: the binding may pre-exist the rollback frame, and the
   // static checking pass must be able to undo the write.
   const frame = activeRollbackFrame(ce);
   if (frame !== undefined) {
-    const target = def.value;
     const slots = target._typeSlotSnapshot();
     frame.record({ undo: () => target._restoreTypeSlots(slots) });
   }
-  const wasCallable = containsSignatureArm(recorded.type);
-  def.value._setType(() => ce.type(next));
+  const wasCallable = containsSignatureArm(target.type.type);
+  target._setType(() => ce.type(next));
   // The `_type` expression caches key on the engine's `any` axis, which a
   // `_setType()` write does not advance: without the event, an
   // expression typed before this join — a lambda body canonicalized earlier
@@ -1980,8 +2070,90 @@ function joinAssignmentEvidence(
   ce._noteStateEvent({
     kind: 'type-write',
     callableBefore: wasCallable,
-    callableAfter: containsSignatureArm(def.value.type.type),
+    callableAfter: containsSignatureArm(target.type.type),
   });
+}
+
+/**
+ * The static type of each leaf of the destructuring pattern `pattern` (a
+ * `Tuple` of names, `_` and nested patterns), read from the matching
+ * position of the tuple type `t`. A nested pattern descends into the nested
+ * tuple type; `_` and `Nothing` bind nothing; a leaf whose component type is
+ * `unknown` is left out. A union type is read arm by arm: the arms that are
+ * tuples of the pattern's shape are read, the other arms are skipped (a value
+ * of such an arm fails the destructuring at run time and writes no leaf), and
+ * each leaf's types from the read arms are joined; a leaf left out by one
+ * arm is left out of the join. The result is `undefined` when `t` (or, for a
+ * union, every arm) is not a tuple of the pattern's shape at some level,
+ * since the run-time destructuring is atomic: a shape mismatch anywhere in
+ * the pattern writes no leaf at all (`bindTuplePattern`).
+ */
+function tuplePatternLeafTypes(
+  pattern: Expression,
+  t: Type
+): Map<string, Type> | undefined {
+  if (!isFunction(pattern, 'Tuple')) return undefined;
+  const rt = resolveTypeAlias(t);
+  if (typeof rt !== 'string' && rt.kind === 'union') {
+    const armLeaves: Map<string, Type>[] = [];
+    for (const arm of rt.types) {
+      const leaves = tuplePatternLeafTypes(pattern, arm);
+      if (leaves !== undefined) armLeaves.push(leaves);
+    }
+    if (armLeaves.length === 0) return undefined;
+    const joined = new Map<string, Type>();
+    for (const name of armLeaves[0].keys()) {
+      const types = armLeaves.map((leaves) => leaves.get(name));
+      if (types.some((x) => x === undefined)) continue;
+      const join = reduceType({ kind: 'union', types: types as Type[] });
+      if (join !== undefined) joined.set(name, join);
+    }
+    return joined;
+  }
+  if (typeof rt === 'string' || rt.kind !== 'tuple') return undefined;
+  if (rt.elements.length !== pattern.nops) return undefined;
+  const leaves = new Map<string, Type>();
+  for (let i = 0; i < pattern.nops; i++) {
+    const leaf = pattern.ops[i];
+    const leafType = rt.elements[i].type;
+    if (isFunction(leaf, 'Tuple')) {
+      const nested = tuplePatternLeafTypes(leaf, leafType);
+      if (nested === undefined) return undefined;
+      for (const [name, type] of nested) leaves.set(name, type);
+      continue;
+    }
+    const name = sym(leaf);
+    if (name === undefined) return undefined;
+    if (name === '_' || name === 'Nothing') continue;
+    if (leafType !== 'unknown') leaves.set(name, leafType);
+  }
+  return leaves;
+}
+
+/**
+ * Record assignment evidence on each leaf of the destructuring pattern
+ * `pattern` from the value type `valueType()` (`tuplePatternLeafTypes`),
+ * one evidence site per leaf. Nothing is recorded when the first read of
+ * the value type does not fit the pattern. Each site reads the value type
+ * again when the enclosing block re-runs the sites, so a leaf that is no
+ * longer found in a later read loses its evidence (`joinAssignmentEvidence`).
+ * `options` is passed to `joinAssignmentEvidence` for each leaf.
+ */
+function recordPatternEvidence(
+  ce: ComputeEngine,
+  pattern: Expression,
+  valueType: () => Type,
+  options?: { currentScopeOnly?: boolean }
+): void {
+  const first = tuplePatternLeafTypes(pattern, valueType());
+  if (first === undefined) return;
+  for (const name of first.keys())
+    joinAssignmentEvidence(
+      ce,
+      name,
+      () => tuplePatternLeafTypes(pattern, valueType())?.get(name),
+      options
+    );
 }
 
 /**
@@ -4703,10 +4875,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (
           symbolName !== undefined &&
           !isFunction(canonRhs, 'Function') &&
-          canonRhs.isValid &&
-          !canonRhs.type.isUnknown
+          canonRhs.isValid
         )
-          joinAssignmentEvidence(ce, symbolName, canonRhs.type.type);
+          joinAssignmentEvidence(ce, symbolName, () =>
+            canonRhs.type.isUnknown ? undefined : canonRhs.type.type
+          );
         // A destructuring target `(x, y) := v` records the same evidence on
         // each pattern leaf, from the matching position of the RHS's static
         // tuple type: `(xs, n) := ([1, 2, 3], 2)` types `xs` a list and `n` an
@@ -4718,27 +4891,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // pattern first, and an RHS type that is not a tuple of the pattern's
         // arity at any level (a symbol of unknown type, an arity mismatch the
         // evaluation will report) records nothing, leaving every leaf
-        // `unknown`.
-        if (isFunction(symbol, 'Tuple') && canonRhs.isValid) {
-          const pairs: [name: string, type: Type][] = [];
-          const collect = (pattern: Expression, t: Type): boolean => {
-            const rt = resolveTypeAlias(t);
-            if (typeof rt === 'string' || rt.kind !== 'tuple') return false;
-            if (!isFunction(pattern, 'Tuple')) return false;
-            if (rt.elements.length !== pattern.nops) return false;
-            return pattern.ops.every((leaf, i) => {
-              const leafType = rt.elements[i].type;
-              if (isFunction(leaf, 'Tuple')) return collect(leaf, leafType);
-              const name = sym(leaf);
-              if (name === undefined) return false;
-              if (name === '_' || name === 'Nothing') return true;
-              if (leafType !== 'unknown') pairs.push([name, leafType]);
-              return true;
-            });
-          };
-          if (collect(symbol, canonRhs.type.type))
-            for (const [name, t] of pairs) joinAssignmentEvidence(ce, name, t);
-        }
+        // `unknown`. A union RHS type is read arm by arm
+        // (`tuplePatternLeafTypes`).
+        if (isFunction(symbol, 'Tuple') && canonRhs.isValid)
+          recordPatternEvidence(ce, symbol, () => canonRhs.type.type);
 
         const result = ce._fn('Assign', [symbol, canonRhs]);
 
@@ -5248,6 +5404,46 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         if (args.length === 1) return ce._fn('Declare', [symbolExpr]);
 
+        // A `let` with an initial value and no declared type is an
+        // assignment for typing purposes: the initializer's static type is
+        // recorded on the hoisted binding as assignment evidence
+        // (`joinAssignmentEvidence`, the rule `Assign` uses), so a later read
+        // of the local in the block — and the compile route, which never
+        // runs the `Declare` — sees the type the program gives it. Without
+        // this only a closed literal initializer typed the local (through
+        // the `Block` hoist), and `let cands = fourth(a, b)` or
+        // `let gap = queue[i]` stayed `unknown`, so `filter(cands, …)` and
+        // `gap[1]` failed the compiler's shape gates although the callee's
+        // declared result type and the list's element type were known (Tycho
+        // item 332, program a). A declared type is the contract and takes no
+        // evidence; a `Function` value goes through the function-definition
+        // route; an invalid or unknown-typed value records nothing. A
+        // destructuring `let (a, b) = v` records evidence on each leaf, as
+        // `(a, b) := v` does (`recordPatternEvidence`). The target of each
+        // write is the binding in the CURRENT scope only, the one the `let`
+        // creates at run time (see `joinAssignmentEvidence`).
+        const recordInitializerEvidence = (
+          typeOp: Expression | undefined,
+          value: Expression | undefined
+        ): void => {
+          if (typeOp !== undefined || value === undefined) return;
+          if (!value.isValid) return;
+          if (isFunction(value, 'Function')) return;
+          if (isFunction(symbolExpr, 'Tuple')) {
+            recordPatternEvidence(ce, symbolExpr, () => value.type.type, {
+              currentScopeOnly: true,
+            });
+            return;
+          }
+          if (!isSymbol(symbolExpr)) return;
+          joinAssignmentEvidence(
+            ce,
+            symbolExpr.symbol,
+            () => (value.type.isUnknown ? undefined : value.type.type),
+            { currentScopeOnly: true }
+          );
+        };
+
         if (args.length === 2) {
           // The second operand is either a type (kept raw, so that a
           // type-name symbol such as `real` is not auto-declared as a
@@ -5255,11 +5451,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // that its `.get(...)` accessor works during evaluation).
           const op =
             args[1].operator === 'Dictionary' ? args[1].canonical : args[1];
+          if (isDictionary(op) && op.get('type') === undefined)
+            recordInitializerEvidence(undefined, op.get('value'));
           return ce._fn('Declare', [symbolExpr, op]);
         }
 
-        if (args.length === 3)
-          return ce._fn('Declare', [symbolExpr, args[1], args[2].canonical]);
+        if (args.length === 3) {
+          const value = args[2].canonical;
+          recordInitializerEvidence(args[1], value);
+          return ce._fn('Declare', [symbolExpr, args[1], value]);
+        }
 
         if (args.length === 4)
           return ce._fn('Declare', [
@@ -6499,12 +6700,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       canonical: (args, { engine }) =>
         canonicalFunctionLiteralOperands(engine, args) ?? null,
 
-      evaluate: (_args) => {
+      evaluate: (_args, { engine, expression }) => {
         // "evaluating" a function literal is not the same as applying
         // arguments to it.
         // See `function apply()` for that.
-
-        return undefined;
+        //
+        // Evaluating the literal creates a closure. When the literal is
+        // written in a nested block of a running function or loop, the
+        // closure captures the bindings of that block now: a later
+        // application or iteration writes to the same nested scopes (see
+        // `captureNestedLocals`). Otherwise the literal is its own value.
+        return captureNestedLocals(engine, expression) ?? undefined;
       },
     },
 

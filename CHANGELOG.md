@@ -2,6 +2,90 @@
 
 ### Behavior Changes
 
+- **A user function that passes its parameter to a collection operator with
+  a callback types that parameter as a collection.** `function f(xs) {
+  filter(xs, x => x > 1) }` applied to `[1, 2, 3]` returned `[Filter(1, …),
+  Filter(2, …), Filter(3, …)]` and returns `[2, 3]`; the same body with
+  `reduce` returned a list of `Reduce(…)` and returns `6`. These operators
+  hold their operands, and a held operand was never checked against the
+  operator's signature, so the parameter stayed `unknown` and a function
+  with an `unknown` parameter is applied to each element of a list
+  argument. An untyped symbol at the collection operand of `Map`, `Filter`,
+  `Reduce`, `Scan`, `Fold`, `Any`, `All`, `TakeWhile`, `DropWhile`,
+  `FlatMap`, `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`, `Dedup` or `Differences`
+  is now typed from that operand's declared type, as it already was for
+  `Find`, `Count` or `Sort`. The function's type changes from `(unknown) ->
+  …` to `(collection<unknown>) -> …`. A symbol that has a declared type or a
+  value is not changed. The same holds for a pipe stage: `[1, 2, 3] |> (_1
+  ↦ Map(k ↦ k², _1))` applied the stage to each element and ran the inner
+  `Map` over an integer (typed `list<collection<number>>`); the stage now
+  receives the whole list and the result is the `Map` of squares over it
+  (typed `collection<number>`). The inference is limited to those sixteen
+  operators: the base of a compound subscript `a_{n+1}` stays untyped.
+- **A collection operator over a symbol declared with an abstract collection
+  type follows the value the symbol holds.** With `P` declared
+  `collection<number>` (also `collection<any>` or bare `collection`) and
+  holding a list or a range, `Map`, `Filter` and `Scan` over `P` were sets:
+  `Map(x ↦ 2x, P)` for `P = [3, 1, 1]` was `Set(6, 2)`, so order and
+  duplicates were lost. The result kind was read from the static type of
+  the lazy node, and an abstract `collection<T>` is not indexed. It is now
+  read from the value each collection operand holds, so the result is
+  `[6, 2, 2]`. Such a result also takes part in broadcasts
+  (`Map(x ↦ 2x, P) + 1` is `[7, 3, 3]`, it stayed symbolic) and is accepted
+  where an indexed collection is required (`Last(Map(x ↦ 2x, P))` is `2`,
+  it was a type error). A symbol that holds a set still gives a set, and
+  the static type is still `collection<T>`.
+- **A derivative with several variables keeps every variable in LaTeX.**
+  `D(s^2t^2, s, t)` serialized as `\frac{\mathrm{d}(s^2t^2)}{\mathrm{d}s}`,
+  dropping `t`, and `D(x^3, x, x)` serialized as a first derivative, so a
+  round trip through LaTeX changed the value (Tycho item 333). A `D` with
+  two or more variable operands now uses the partial-derivative spelling:
+  `\frac{\partial^{2}(s^2t^2)}{\partial s\,\partial t}` and
+  `\frac{\partial^{3}f}{\partial x^{2}\,\partial y}`. Variables keep their
+  order, and only consecutive repeats are grouped
+  (`\partial x\,\partial y\,\partial x`). A `D` with one variable keeps
+  the `\mathrm{d}` spelling, and a nested `D` is folded into its order only
+  when it has the same single variable (`D(D(f, x, y), x)` lost `y`). A
+  variable operand that is not a symbol falls back to `\operatorname{D}(…)`.
+  The parser now accepts `\,` between
+  `\partial` terms, and a differentiand after `\partial^{n}` in the
+  numerator that is not a plain symbol (`\partial^{2}x^3`,
+  `\partial^{2}(xy)`, `\partial^{2}f(x,y)`); those inputs gave a `missing`
+  error or a `Divide`.
+- **An element read by a literal index from a collection whose length is not
+  known stays unevaluated instead of giving `NaN`.** With `n` declared
+  `integer` and no value, `[0...n][1]`, `At(Range(1, n), -1)`,
+  `First(Range(0, n))`, `Last(Range(0, n))`, a gather such as
+  `At(Range(0, n), [1, 2])`, and the same reads through `Take`, `Drop`,
+  `Reverse`, `Map`, a broadcast such as `(0...n)^2`, or a `PointList` of
+  such ranges gave `NaN` (`At(Linspace(0, 1, n), 1)` gave `Missing`),
+  although the element exists for most values of `n`. They now stay
+  symbolic under `evaluate()` and `.N()`, as the read by a symbolic index
+  already did, and give the element once `n` has a value. Reads that are
+  provably out of range are unchanged: index 0, an index past a known
+  length (`[0...5][7]` is `NaN`), the end of an infinite collection, and a
+  FINITE walked collection that runs out (Tycho item 334). One more read
+  changes with the same rule: a read that gives up at the iteration limit
+  over a source not known to be finite stays unevaluated, where it answered
+  the absence marker. `First(Filter(Range(1, ∞), x ↦ x < 0))` was `NaN` and
+  `Second(Dedup(Cycle([1, 1])))` was `Missing`; a walk that stops at the
+  limit does not prove the element absent (with the predicate `x > 10^6`
+  the first element exists beyond the limit, and was answered `NaN` too).
+  Both calls still return after one bounded walk.
+- **A closure created in a nested block keeps that block's locals, and a
+  closure created in a loop captures the loop variable of its own
+  iteration.** `function mk(n) { if n > 0 { let k = n * 10; () => k } else
+  { 0 } }` gave closures that answered the symbol `k`; a closure created in
+  a `for` loop saw only the loop's last value (inside a function, the
+  escaped `i` became the imaginary unit); a counter declared in a nested
+  block did not count. A closure now captures the nested block's binding
+  when it is created (the binding, not a copy of the value: a later write in
+  the same run of the block is visible, and two closures made in one run
+  share the local), and a loop or `Sum` index is captured per iteration, as
+  a comprehension index already was: `for i in [1, 2] { fs = [...fs, () =>
+  i] }` gives closures that answer 1 and 2, where they answered 2 and 2.
+  Code that relied on a loop closure reading the loop's final value now reads
+  the value of its own iteration (found with Tycho item 330).
 - **The name `Indeterminate` is reserved.** It is now the library constant
   for the `Indeterminate` value (see New Features): `ce.box("Indeterminate")`,
   `\operatorname{Indeterminate}` and the Epsil word `Indeterminate` are that
@@ -248,6 +332,174 @@
   (`function w(x) {…}` twice in Epsil) is read clause by clause for both
   purposes, and `freeSymbols` now lists a symbol that only a clause body
   reads; it was missing.
+- **Reading the type of a product or a sum of calls to declared user
+  functions no longer takes exponential time when a function body reads an
+  undeclared name.** With `h` and `r` declared `(real) -> unknown` and
+  assigned bodies that read a free `T`, the type of `h(1) r(1)` cost 5 173
+  signature derivations and a 400-term sum of such calls did not finish in
+  60 s (Tycho item 329). Each derivation boxed the body again in a fresh
+  scope, declared a new `T` there, and narrowed it by its use; that
+  narrowing advanced the engine-wide definition version, which is part of
+  every derived-signature memo key, so each derivation threw away the memo
+  of every other declared function. A narrowing by a use no longer advances
+  that version (it can only leave a memoized result wider, never wrong; the
+  rollback of a narrowing still advances it). The sum now types in about
+  30 ms with 251 derivations, the same count as with `T` declared, and the
+  reported types are unchanged.
+- **Assigning a function that nests calls to functions declared with an
+  `unknown` result no longer takes exponential time.** With `W_1`, `W_2`
+  declared `(unknown, …) -> unknown`, their bodies applying undeclared names
+  (`b(x, y)`), and `E` assigned a body that nests them (`W_1(W_2(…))`), the
+  one `ce.assign` took 2 ms at depth 1, 3.5 s at depth 2 and more than 60 s
+  at depth 3, with 706 258 signature derivations (Tycho item 336, a
+  regression since 0.137.0; three consumer documents did not open). Boxing
+  a function literal that applies an undeclared name declares that name in
+  the literal's own scope; the engine then re-derived every stored
+  definition waiting on that name, although none of them can see that
+  scope, and each rebuild invalidated the memoized signature of every other
+  function. A definition is now re-derived only when the new binding is on
+  its scope chain, and the declarations a signature derivation makes in its
+  own temporary scope no longer invalidate other memos. Depth 6 takes about
+  5 ms and the derivation count grows linearly; the reported types are
+  unchanged, and a real declaration or assignment still updates them.
+- **A recursive call no longer overwrites the caller's loop variables,
+  big-operator indices, or inner-block locals.** A `for` loop variable, a
+  `Sum`/`Product` index, or a `let` inside a nested block of a function body
+  lives in a scope created once when the body is canonicalized, so every
+  application of the function shared it. After a recursive call returned,
+  the caller read the callee's last value: in `for c in [n*10, n*10+1] {
+  …f(n+1)…; out = [...out, c] }` the caller's `c` read `21`, not `10`, and a
+  recursive tree walk visited only the first branch below every node (Tycho
+  item 330). A re-entrant application now saves those scopes on entry and
+  restores them on exit; a call that is not re-entrant is unchanged. The
+  same holds for a recursive call made while a lazy comprehension built by
+  the function is read.
+- **A function that spreads a parameter into a list or set literal splices
+  the argument's elements.** `g(a) = [...a, 0]` gave `[[9, 0]]` for `g([9])`
+  and `h(a, x) = [...a, x]` under `reduce([1, 2, 3], h, [])` gave `[]`
+  (Tycho item 331). The body canonicalized to `Join(a, [0])` without
+  running `Join`'s own canonical handler, so the parameter was never typed
+  from its use and stayed `unknown`, and a user function with an `unknown`
+  parameter is applied to each element of a list argument. The parameter is
+  now typed as a collection, as it is for a body written `Join(a, [0])`, so
+  `g([9])` is `[9, 0]` and the reducer returns `[1, 2, 3]`. The set literal
+  `{...a, 0}` had the same defect.
+- **A block-local `let` with a literal value is typed from that value on
+  the routes that never run the `Declare`, and a nested block reads the
+  hoisted binding.** `let queue = [[…], …]` followed by
+  `while i <= Length(queue) { … queue = [...queue, g] … }` declined to
+  compile to JavaScript with "operand is not an indexed collection": the
+  hoisted binding stayed `unknown` until the `Declare` ran, so the first use
+  (`Length`, or the `Join` behind a spread) inferred the callee's loose
+  parameter type (`collection`, `collection<any>`) onto it, and the later
+  assignment could only widen that. Two fixes (Tycho item 332, programs b
+  and c). The `Block` canonical hoist now records the type of a closed
+  literal initial value (a number, a string, a `List`/`Tuple` of such),
+  widened through the assignment table as `Assign` does, so `let xs = []`
+  hoists `list<never>` and `let i = 1` hoists `integer`, not the singleton
+  `1`. And a reference to a hoisted local from a NESTED block (an `if`
+  branch, a loop body) now finds the hoisted binding one or more scopes up
+  instead of declaring a second `unknown` copy in the nested scope and
+  caching that copy as the name's binding for the rest of the block, which
+  left the hoisted binding, and any declared type on it, unused. With the
+  locals typed this precisely, one convention had to be narrowed: a list
+  literal reads an unknown bare symbol as a number (the generic-symbol fold,
+  `[x, y]` is a `vector<2>`), which typed `[c]` as `vector<1>` for a block
+  local `c` still waiting for its `let` to run, so `out = join(out, [c])`
+  made `out` a `list<number>` and a later `stringJoin(listFrom(out))` was
+  refused although `out` only ever held characters (the JSON parser example
+  of the Epsil documentation). A hoisted block local is no longer read as a
+  generic number by that fold: `[c]` is a `list` until `c` is typed. A
+  destructuring `let (x, y) = p` from a block-local tuple literal now
+  compiles too (the arity is statically known); it declined before.
+- **A compiled `for` loop whose list holds complex values no longer reads
+  the loop variable as a real number.** The JavaScript target shaped the
+  loop variable from its declared type (`number`, read as real) while the
+  `for (const k of …)` loop handed it the `{re, im}` objects the list
+  produced, so every comparison on `k` was false and every division gave
+  `NaN`: an Apollonian-gasket program returned 4 circles instead of 224
+  (Tycho ask 332). When every element of the list is complex the variable
+  is now shaped complex; when only some are, or their lanes cannot be told
+  apart, the compilation is a lane mismatch, which the default `auto` mode
+  answers by recompiling in complex mode and `strict` mode refuses. The
+  check that a local first assigned a real value is never later assigned a
+  complex one now also enters the braced bodies of `if`/`for`/`while`
+  (`r = r + 1/k` inside a loop put an object into `r`, and the next pass
+  turned it into a string). `Max`/`Min` of real operands now keep the
+  operands' bounds (`Max(0, x)` is `real<0..>`, it was `real`), so
+  `√(Max(0, x))` compiles to a real square root instead of the complex
+  route.
+- **A `let` with an initial value is typed from that value, on every
+  route, and the recorded type follows later widening.** Only `Assign`
+  recorded the static type of its value on the local at canonicalization;
+  a `let` did not, so `let cands = fourth(a, b)` or `let gap = queue[i]`
+  stayed `unknown` on the compile route, and `filter(cands, …)` or
+  `gap[1]` failed the compiler's shape gates although the callee's declared
+  result and the list's element type were known. `Declare` now records the
+  initializer's type as assignment evidence, as `Assign` does; a declared
+  type still wins. Reading the type once, at the statement, was too narrow
+  when a later statement of the same loop widened the source (`let e =
+  circles[j]` before `circles = [...circles, (k, x, y, depth)]` with `k:
+  number`): in the complex lane `e[1] - k` then read a `{re, im}` object as
+  a number, the de-duplication never fired, and the compiled gasket program
+  never ended. The block now re-reads each `let`/`Assign` value type and
+  each `for` index type after its statements are canonicalized, until they
+  stop changing; a type that keeps growing is capped, and a local that
+  never settles falls back to `unknown`. An element read of a union of
+  tuple types now gives the types at that index only. With type annotations
+  on its helpers, Tycho's gasket program a compiles and answers 224 in
+  about 18 ms; the interpreter takes 21 s (Tycho item 332).
+- **An Epsil program whose helper functions have no type annotations
+  compiles to JavaScript.** Tycho's gasket program a, as written, compiles
+  and answers `(224, [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0])` in about
+  4 ms; the interpreter takes 21 s (Tycho item 332, user decision
+  2026-09-29). Four changes. A parameter that the body only counts or
+  measures (`function seen(acc, c) { count(acc, e => …) > 0 }`) is typed
+  `collection` by inference, which also admits a set, and `Count`, `Length`
+  and the other list operators refused it. Such a parameter now compiles
+  with a check at run time that the value is an array; a set or a
+  dictionary that arrives there stops the run with a `RangeError`. A
+  DECLARED collection type still declines, so that the interpreter
+  evaluates it. `Max(0, x)` counts as non-negative in the compiler when `x`
+  is read as real, also when `x` may be NaN, so `√(Max(0, x))` keeps the
+  real square root. A sum and a square root of operands that may be NaN
+  keep their range (`p² + q²` for `p, q: nan | real` is `nan | real<0..>`,
+  and its square root `nan | real`, where they were `nan | real` and
+  `complex | nan`), so the inlined programs b and c now compile in the real
+  lane and run in about 5 ms. The types recorded for a local from its
+  assignments are joined by structure: two lists join their element types
+  and two tuples of one length join slot by slot, where the union of the
+  two list types reduced to a bare `list` and every local read from it
+  became `unknown`.
+- **`Count(xs, p)` with a predicate compiles to JavaScript.** It lowers as
+  `CountIf` does; only the value form `Count(xs, v)` still declines, since
+  it needs the interpreter's structural element equality.
+- **A restriction with a list-valued condition has the right static type
+  over every ordered carrier.** `P\{P.x > 1\}` with `P` declared
+  `indexed_collection<tuple<number, number>>`, `collection<…>` or `range`
+  was typed `list<indexed_collection<tuple<number, number>> | missing>`: the
+  whole collection type stood where the element type belongs, because the
+  type handler recognized only a `list` carrier while the evaluation zips
+  any finite collection. The cells are now typed from the element type
+  (`list<missing | tuple<number, number>>`) when the carrier is finite by
+  type (`list`, a vector or matrix, `range`, a dictionary or record). A
+  carrier whose finiteness the type does not decide (`indexed_collection<T>`,
+  `collection<T>`, which admit `Range(1, ∞)`) types its cells as the element
+  type joined with the carrier type (`list<indexed_collection<T> | missing |
+  T>`), because the evaluation puts the WHOLE value in the cell when it is
+  not finite. A condition that is a set or a `collection<boolean>` is a
+  mask too, as it is at evaluation. For the same reason
+  `PointX`/`PointY`/`PointZ` over a declared `collection` or `set` of
+  points is typed as a list of coordinates, not as a point, and `Which`/`If`
+  with a list condition over a `range` type their cells `integer`, not
+  `integer | range`. The evaluated values were right and are unchanged
+  (Tycho item 335).
+- **Narrowing a union type meets it arm by arm.** `narrow('missing |
+  vector<real^4>', 'indexed_collection | dictionary')` was `never`, because
+  the union was tested only as a whole; it is `vector<real^4>`. A local
+  typed from an element read, which admits absence, was narrowed to `never`
+  by its first indexed use and the expression built on it became a type
+  error.
 - **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and the
   sign of a numeric fraction moves in front of it.** `Beta(2, 3)` wrote
   `\Beta(2, 3)` (capital beta is roman, not a separate glyph — MathLive

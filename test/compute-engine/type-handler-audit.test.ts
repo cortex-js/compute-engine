@@ -375,7 +375,9 @@ describe('TYPE AUDIT: Max/Min extremum join', () => {
   it('narrows to the join tier when all operands are scalar numbers', () => {
     expect(typeOf(['Max', 'r', 'k'])).toBe('real');
     expect(typeOf(['Supremum', 'r', 'k'])).toBe('real');
-    expect(typeOf(['Min', 1, 2.5])).toBe('real');
+    // Scalar real operands also carry their range: the minimum of 1 and 2.5
+    // is at most 1 and at least 1 (Tycho item 332).
+    expect(typeOf(['Min', 1, 2.5])).toBe('real<1..1>');
   });
 
   it('keeps number when an unknown-number operand is present (§3.C)', () => {

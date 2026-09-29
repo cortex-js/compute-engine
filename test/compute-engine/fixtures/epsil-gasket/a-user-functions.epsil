@@ -1,0 +1,65 @@
+// Apollonian gasket (-1, 2, 2, 3) from Descartes' circle theorem.
+// A circle is the tuple (k, x, y): curvature and centre.
+const minR = 0.008
+// Complex square root of (re, im), principal branch.
+function csqrt(re, im) {
+  let m = sqrt(re^2 + im^2)
+  let a = sqrt(max(0, (m + re) / 2))
+  let b = sqrt(max(0, (m - re) / 2))
+  (a, b) if im >= 0 else (a, -b)
+}
+// The four candidates for a circle tangent to a, b and c.
+function fourth(a, b, c) {
+  let ka = a[1]; let kb = b[1]; let kc = c[1]
+  let disc = 2 * sqrt(max(0, ka * kb + kb * kc + kc * ka))
+  // kz = k * z as (re, im)
+  let ax = ka * a[2]; let ay = ka * a[3]
+  let bx = kb * b[2]; let by = kb * b[3]
+  let cx = kc * c[2]; let cy = kc * c[3]
+  let sx = ax + bx + cx; let sy = ay + by + cy
+  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)
+  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)
+  let (rx, ry) = csqrt(px, py)
+  rx = 2 * rx; ry = 2 * ry
+  let out: list<tuple<number, number, number>> = []
+  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {
+    for (zx, zy) in [(sx + rx, sy + ry), (sx - rx, sy - ry)] {
+      out = [...out, (k, zx / k, zy / k)]
+    }
+  }
+  out
+}
+function tangent(p, q) {
+  let d = sqrt((p[2] - q[2])^2 + (p[3] - q[3])^2)
+  let rp = 1 / p[1]; let rq = 1 / q[1]
+  abs(d - abs(rp + rq)) < 1e-6 || abs(d - abs(rp - rq)) < 1e-6
+}
+function seen(acc, c) {
+  count(acc, e => abs(e[1] - c[1]) < 1e-6 && abs(e[2] - c[2]) < 1e-6 && abs(e[3] - c[3]) < 1e-6) > 0
+}
+function ok(p, q, r, c) {
+  c[1] > 0 && 1 / c[1] >= minR && tangent(c, p) && tangent(c, q) && tangent(c, r)
+}
+const outer = (-1, 0, 0)
+const A = (2, 0.5, 0)
+const B = (2, -0.5, 0)
+let cands = fourth(outer, A, B)
+let C = first(filter(cands, c => c[1] > 0 && c[3] > 0))
+let D = first(filter(cands, c => c[1] > 0 && c[3] < 0))
+let circles = [(A[1], A[2], A[3], 1), (B[1], B[2], B[3], 1), (C[1], C[2], C[3], 1), (D[1], D[2], D[3], 1)]
+// Work queue of gaps (p, q, r, depth); no recursion.
+let queue = [(outer, A, C, 2), (outer, B, C, 2), (A, B, C, 2), (outer, A, D, 2), (outer, B, D, 2), (A, B, D, 2)]
+let i = 1
+while i <= length(queue) {
+  let gap = queue[i]
+  let p = gap[1]; let q = gap[2]; let r = gap[3]; let depth = gap[4]
+  for c in fourth(p, q, r) {
+    if ok(p, q, r, c) && !seen(circles, c) {
+      circles = [...circles, (c[1], c[2], c[3], depth)]
+      queue = [...queue, (p, q, c, depth + 1), (p, r, c, depth + 1), (q, r, c, depth + 1)]
+    }
+  }
+  i = i + 1
+}
+let counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))
+(length(circles), counts)

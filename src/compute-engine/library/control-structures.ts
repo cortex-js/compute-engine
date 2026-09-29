@@ -1,7 +1,9 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
+  enterNestedBodyScopes,
   evaluateStatements,
   evaluateStatementsAsync,
+  exitNestedBodyScopes,
   resolveEscapingLambda,
 } from '../function-utils.js';
 import {
@@ -35,7 +37,10 @@ import {
   isCollectionShaped,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
-import { isValidType } from '../../common/type/primitive.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  isValidType,
+} from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
@@ -57,11 +62,13 @@ import type {
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
   isFunction,
+  isNumber,
   isSymbol,
   isString,
   sym,
 } from '../boxed-expression/type-guards.js';
 import { isValueDef } from '../boxed-expression/utils.js';
+import { widenAssignedType } from '../boxed-expression/boxed-value-definition.js';
 import {
   elementMemoFillTo,
   ELEMENT_MEMO_CAP,
@@ -73,6 +80,39 @@ import {
   substituteBinderValues,
 } from './utils.js';
 import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
+import {
+  coarsenEvidenceType,
+  markDeclaredLocal,
+  registerEvidenceSite,
+  withEvidenceSession,
+} from './assignment-evidence.js';
+
+/**
+ * The supertype a `When` condition is checked against to be typed as a MASK
+ * (one boolean per cell of the value). The `evaluate` handler zips a
+ * condition whose value is a finite collection of boolean cells, whatever
+ * kind of collection it is: a list, a set, a tuple, an indexed collection. So
+ * the test is against the `collection<boolean>` family, which admits all of
+ * them, and not against `list<boolean>` or `indexed_collection<boolean>`: a
+ * `set<boolean>` condition was typed as a scalar condition while its value
+ * was a list of cells. A string condition is not a mask: its elements are
+ * characters, not booleans. A `missing` cell is not admitted: such a cell
+ * does not activate the zip at runtime, so the condition keeps the scalar
+ * typing.
+ */
+const BOOLEAN_MASK_TYPE = parseType('collection<boolean>')!;
+
+/**
+ * The collection types whose values are always FINITE: a list (and a
+ * dimensioned `vector`, `matrix` or tensor, which are lists), a dictionary, a
+ * record, and a `range`. A `Range` whose length is not known to be finite
+ * (`Range(1, ∞)`, `Range(1, n)`) is typed `indexed_collection<integer>`, not
+ * `range`. A `set` is not in this family: `Integers` is a `set<integer>` and
+ * has no end.
+ */
+const FINITE_COLLECTION_TYPE = parseType(
+  'list<any> | dictionary<any> | range'
+)!;
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
@@ -267,22 +307,52 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         );
       },
       canonical: (ops, options) => canonicalLoopLike('Loop', ops, options),
-      evaluate: (ops, { engine: ce }) =>
-        run(
-          runLoop(ops[0], ops.slice(1), ce),
-          ce._timeRemaining,
-          ce._deadlineFrame
-        ),
-      evaluateAsync: async (ops, { engine: ce, signal, effects }) =>
-        runAsync(
-          // The loop body is evaluated synchronously, and `runAsync` suspends
-          // this handler between time slices: every step must run with the
-          // host capability registry this evaluation captured.
-          withEvaluationEffects(ce, effects, runLoop(ops[0], ops.slice(1), ce)),
-          ce._timeRemaining,
-          signal,
-          ce._deadlineFrame
-        ),
+      // While the loop runs, its own scope (the index) and the scopes nested
+      // in its body are marked as in use, so that a function literal
+      // evaluated in the body captures the current index value and the
+      // current body locals instead of reading the shared scopes later (see
+      // `captureNestedLocals`, `function-utils.ts`).
+      evaluate: (ops, { engine: ce, expression }) => {
+        const nested = enterNestedBodyScopes(expression, {
+          includeRoot: true,
+          save: false,
+        });
+        try {
+          return run(
+            runLoop(ops[0], ops.slice(1), ce),
+            ce._timeRemaining,
+            ce._deadlineFrame
+          );
+        } finally {
+          exitNestedBodyScopes(ce, nested);
+        }
+      },
+      evaluateAsync: async (
+        ops,
+        { engine: ce, signal, effects, expression }
+      ) => {
+        const nested = enterNestedBodyScopes(expression, {
+          includeRoot: true,
+          save: false,
+        });
+        try {
+          return await runAsync(
+            // The loop body is evaluated synchronously, and `runAsync`
+            // suspends this handler between time slices: every step must run
+            // with the host capability registry this evaluation captured.
+            withEvaluationEffects(
+              ce,
+              effects,
+              runLoop(ops[0], ops.slice(1), ce)
+            ),
+            ce._timeRemaining,
+            signal,
+            ce._deadlineFrame
+          );
+        } finally {
+          exitNestedBodyScopes(ce, nested);
+        }
+      },
     },
 
     Comprehension: {
@@ -382,10 +452,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const condStructure = cond?.structureOf?.();
         if (condStructure?.kind === 'symbol' && condStructure.name === 'True')
           return BoxedType.forResult(expr.type, context.engine._typeResolver);
-        if (
-          cond !== undefined &&
-          isSubtype(cond.type, parseType('list<boolean>')!)
-        ) {
+        // The mask test accepts any collection of booleans, not only a
+        // `list` (see `BOOLEAN_MASK_TYPE`): the `evaluate` handler zips every
+        // finite collection of boolean cells, so a condition typed
+        // `set<boolean>` or `indexed_collection<boolean>` is a mask as much
+        // as a `list<boolean>` is.
+        if (cond !== undefined && isSubtype(cond.type, BOOLEAN_MASK_TYPE)) {
           // Built structurally, not from a type STRING: a literal element
           // type (`When(1, [c1, c2])` types `list<1 | missing>`) has no
           // string spelling the parser accepts inside a union.
@@ -396,9 +468,40 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           // `[10,20,30]{[1,2,3] > 2}` is `[Missing, Missing, 30]`, a
           // `list<integer | missing>`. A scalar `expr` is masked whole in
           // every cell.
-          const cell = isSubtype(expr.type, 'list<any>')
+          //
+          // The `evaluate` handler zips the value only when the VALUE is a
+          // finite collection that is not a tuple (a point is one value) and
+          // not a string (atomic under restriction). Otherwise each cell is
+          // the WHOLE value. The type follows the same rule:
+          // - a carrier that is finite by type (`FINITE_COLLECTION_TYPE`: a
+          //   `list<T>`, a `vector`, a `matrix`, a `dictionary`, a `record`,
+          //   a `range`) is always zipped, so each cell has its ELEMENT
+          //   type `T`;
+          // - a carrier of another collection type (`indexed_collection<T>`,
+          //   `collection<T>`, `set<T>`) can hold an infinite value, such as
+          //   `Range(1, ∞)` or `Integers`, which is not zipped: each cell is
+          //   then the whole value. So a cell can be either an element or
+          //   the whole value, and its type is the JOIN of the element type
+          //   and the carrier type. `When(Range(1, ∞), [True, False])`
+          //   evaluates to `[Range(1, ∞), Missing]`, which the element type
+          //   `integer` alone does not admit;
+          // - a tuple, a string or a scalar value is never zipped, so each
+          //   cell has the type of the whole value.
+          // The result is a `list` whatever the carrier is, because the
+          // value the `evaluate` handler builds is a `List`.
+          const zippable =
+            isSubtype(expr.type, COLLECTION_SHAPE_TYPE) &&
+            !isTupleShapedType(expr.type) &&
+            !isSubtype(expr.type, 'string');
+          const element = zippable
             ? (collectionElementType(expr.type) ?? 'unknown')
-            : expr.type;
+            : undefined;
+          const cell: Type =
+            element === undefined
+              ? expr.type
+              : isSubtype(expr.type, FINITE_COLLECTION_TYPE)
+                ? element
+                : reduceType({ kind: 'union', types: [element, expr.type] });
           // A masked NUMERIC cell is `NaN` (`maskedValue`), so the cells are
           // numbers, `list<number>`: the materialized list the mask answers
           // (`[NaN, NaN, 30]`) is typed by the `List` handler, which joins a
@@ -1538,7 +1641,16 @@ function elementwiseConditionShape(
  * `Which` that produces `list<tuple<…>>`.
  */
 function armElementType(t: Readonly<Type>): Type {
-  if (typeof t === 'string') return t;
+  // The unparameterized ORDERED collection names are indexed at runtime like
+  // their parameterized forms, so they contribute their element type too: a
+  // `range` arm contributes `integer` (its members are indices), and a bare
+  // `list` or `indexed_collection` contributes `unknown`. Returning the name
+  // itself put the whole collection type where a cell type belongs
+  // (`Which(P > 1, P, True, 0)` for `P: range` typed `list<integer | range>`).
+  if (typeof t === 'string')
+    return t === 'range' || t === 'list' || t === 'indexed_collection'
+      ? broadcastElementType(t)
+      : t;
   if (t.kind === 'union')
     return widen(...t.types.map((x) => armElementType(x)));
   if (t.kind === 'list' || t.kind === 'indexed_collection')
@@ -1980,6 +2092,32 @@ async function evaluateBlockAsync(
  *
  */
 
+/**
+ * The type of a CLOSED literal expression — a number, a string, or a
+ * `List`/`Tuple` whose operands are closed literals — read by canonicalizing
+ * it, which is side-effect free for such an expression (no symbol to bind,
+ * no scope to write). `undefined` for anything else. Used by `canonicalBlock`
+ * to hoist the static type of a `let` with a literal initial value.
+ */
+function closedLiteralType(
+  ce: ComputeEngine,
+  value: Expression
+): Type | undefined {
+  const closed = (e: Expression): boolean =>
+    isNumber(e) ||
+    isString(e) ||
+    ((isFunction(e, 'List') || isFunction(e, 'Tuple')) && e.ops.every(closed));
+  if (!closed(value)) return undefined;
+  const t = value.canonical.type;
+  // Widened through the same table an assignment uses (`widenAssignedType`):
+  // the literal `1` has the singleton type `1`, and a binding typed that
+  // precisely would let a loop condition such as `i <= 3` fold to a constant
+  // on the compile route; the assignment tier `integer` is the evidence the
+  // program gives. A collection literal keeps its type (`list<never>` for
+  // `[]`), which a later assignment joins with the assigned type.
+  return t.isUnknown ? undefined : widenAssignedType(ce, t.type);
+}
+
 function canonicalBlock(
   ops: ReadonlyArray<Expression>,
   options: { engine: ComputeEngine; scope: Scope | undefined }
@@ -2013,9 +2151,25 @@ function canonicalBlock(
   // a `TypeFrom(…)` expression) stays evaluation-time-only and the binding
   // stays `unknown`, as before.
   const declaredTypes = new Map<string, Type>();
+  // The names in `declaredTypes` whose type is DECLARED, not read from a
+  // literal initial value (see `markDeclaredLocal`).
+  const explicitlyDeclared = new Set<string>();
   for (const op of ops) {
     if (isFunction(op, 'Declare')) {
       const nameExpr = op.ops[0];
+      // A destructuring `Declare((a, b), …)` (`let (a, b) = v`) introduces
+      // each leaf of its pattern as a block local, as `Declare(a, …)` does
+      // for `a`: the leaves are hoisted into the block scope and shadow a
+      // same-named constant. Without this a leaf named `i` read later in
+      // the block folded to the imaginary unit (`let (i, x) = (2, 3)` then
+      // `i + 1` gave `1 + i`), and the `Declare` canonical handler found no
+      // binding in the current scope to record the leaf's type on. The
+      // pattern carries no type, so nothing else is read here.
+      if (nameExpr && isFunction(nameExpr, 'Tuple')) {
+        for (const name of tuplePatternNames(nameExpr))
+          if (name !== 'Nothing') declaredNames.push(name);
+        continue;
+      }
       if (nameExpr && isSymbol(nameExpr)) {
         declaredNames.push(nameExpr.symbol);
         // The type may be the positional operand (`Declare(d, "list<…>")`)
@@ -2027,6 +2181,11 @@ function canonicalBlock(
         // `let doc = {name: …}`, whose Dictionary operand is data the
         // evaluate handler will bind later).
         let typeOp: Expression | undefined = op.ops[1];
+        // The initial value, when the statement has one: the positional
+        // operand after the type (`Declare(d, "list", [])`), or the literal
+        // `value` entry of the attributes dictionary (`let d = []` in Epsil
+        // is `Declare(d, {value: []})`).
+        let valueOp: Expression | undefined = op.ops[2];
         if (typeOp !== undefined && typeOp.operator === 'Dictionary') {
           let entry: Expression | undefined = undefined;
           if (isFunction(typeOp)) {
@@ -2035,10 +2194,8 @@ function canonicalBlock(
               const key = isString(pair.ops[0])
                 ? pair.ops[0].string
                 : sym(pair.ops[0]);
-              if (key === 'type') {
-                entry = pair.ops[1];
-                break;
-              }
+              if (key === 'type') entry = pair.ops[1];
+              else if (key === 'value') valueOp = pair.ops[1];
             }
           }
           typeOp = entry;
@@ -2052,12 +2209,37 @@ function canonicalBlock(
         if (source !== undefined) {
           try {
             const parsed = parseType(source, ce._typeResolver);
-            if (isValidType(parsed)) declaredTypes.set(nameExpr.symbol, parsed);
+            if (isValidType(parsed)) {
+              declaredTypes.set(nameExpr.symbol, parsed);
+              explicitlyDeclared.add(nameExpr.symbol);
+            }
           } catch {
             // Not a type expression (e.g. a mistyped name): leave the
             // binding `unknown`; the `Declare` evaluate handler reports the
             // error on the routes that run it.
           }
+        } else if (valueOp !== undefined) {
+          // No declared type, but an initial value that is a CLOSED literal
+          // (a number, a string, or a `List`/`Tuple` of such, nested): its
+          // type is static evidence of the same standing as a declared type,
+          // so it rides on the hoisted binding too. Without it the binding
+          // stays `unknown` until the `Declare` runs, and the FIRST use of
+          // the local in the block — `Length(queue)` in a loop condition,
+          // `Join(xs, [4])` behind the spread `[...xs, 4]` — infers the
+          // callee's loose parameter type (`collection`, `collection<any>`)
+          // onto it; the later `Assign` can only WIDEN that, so `let xs = []`
+          // grown by a spread read as a `collection<any>` on the compile
+          // route, which never runs the `Declare`, and the JavaScript
+          // target's array-shape gate refused `Length(xs)` (Tycho item 332,
+          // programs b and c). With the value's type hoisted (`list<nothing>`
+          // for `[]`), the use narrows to the list and the assignment widens
+          // its element type (`list<integer>`), so the compiled shape is the
+          // one the program builds. Only a closed literal is read: an
+          // expression that mentions a symbol would have to be bound here,
+          // in the enclosing scope, before the block's own locals exist.
+          const literalType = closedLiteralType(ce, valueOp);
+          if (literalType !== undefined)
+            declaredTypes.set(nameExpr.symbol, literalType);
         }
       }
     }
@@ -2143,12 +2325,18 @@ function canonicalBlock(
   // program declared.
   if (scope) {
     for (const name of hoistedNames) {
-      if (name !== 'Nothing' && !scope.bindings.has(name))
-        ce._declareSymbolValue(
+      if (name !== 'Nothing' && !scope.bindings.has(name)) {
+        const hoisted = ce._declareSymbolValue(
           name,
           { type: declaredTypes.get(name) ?? 'unknown', inferred: true },
           scope
         );
+        // A block local, not a free symbol: see `_blockLocal`.
+        if (isValueDef(hoisted)) {
+          hoisted.value._blockLocal = true;
+          if (explicitlyDeclared.has(name)) markDeclaredLocal(hoisted.value);
+        }
+      }
     }
     for (const op of ops) {
       if (!isFunction(op, 'Assign')) continue;
@@ -2166,11 +2354,13 @@ function canonicalBlock(
       for (const name of names) {
         if (!name || name === 'Nothing') continue;
         if (scope.bindings.has(name) || ce.lookupDefinition(name)) continue;
-        ce._declareSymbolValue(
+        const hoisted = ce._declareSymbolValue(
           name,
           { type: 'unknown', inferred: true },
           scope
         );
+        // A block local introduced by assignment: see `_blockLocal`.
+        if (isValueDef(hoisted)) hoisted.value._blockLocal = true;
       }
     }
     // A one-step function definition written inside a block —
@@ -2213,8 +2403,14 @@ function canonicalBlock(
   try {
     // We canonicalize the statements in the local scope. A refused
     // re-declaration stands as its error value.
-    statements = ce._inScope(scope, () =>
-      ops.map((op) => refused.get(op) ?? canonicalStatement(ce, op))
+    // The evidence session re-reads the value type of every assignment
+    // canonicalized in this block (nested blocks included) once all of them
+    // are canonicalized, so that a read in a loop body sees the widening a
+    // later assignment of the same loop records (`withEvidenceSession`).
+    statements = withEvidenceSession(ce, () =>
+      ce._inScope(scope, () =>
+        ops.map((op) => refused.get(op) ?? canonicalStatement(ce, op))
+      )
     );
   } finally {
     ce._popShadowedParameters();
@@ -2404,20 +2600,19 @@ function canonicalLoopLike(
     // be narrowed by an assumption, and the index binding this write creates is
     // a contract that must not carry a fact the next statement can retract.
     let patternError: Expression | undefined;
-    ce._withoutFacts(() => {
-      const elt = collectionElementType(
-        resolveTypeForCompilation(collCanonical.type.type)
-      );
+    const currentElementType = (): Type | undefined =>
+      collectionElementType(resolveTypeForCompilation(collCanonical.type.type));
+    // Bind the index (or each leaf of a destructuring pattern) from the
+    // element type `elt` through `bindOne`. The leaves are looked up in the
+    // scope current NOW, since the second read (below) runs outside it.
+    const bindScope = ce.context.lexicalScope;
+    const bindFromElement = (
+      elt: Type | undefined,
+      bindOne: (binding: Expression, type: Type) => void
+    ): void => {
       if (elt === undefined || elt === 'any' || elt === 'unknown') return;
-      // The binding site is AUTHORITATIVE for the index's type: the element
-      // type is evidence from the collection, not a guess. The helper also
-      // takes the binding out of the fresh-inference set, so a body use that
-      // contradicts the element type is an error (`bindIndexAuthoritatively`,
-      // `library/utils.ts`, says why and how the removal is journaled).
-      const bindAuthoritatively = (binding: Expression, type: Type): void =>
-        bindIndexAuthoritatively(ce, binding, type);
       if (isSymbol(idxCanonical)) {
-        bindAuthoritatively(idxCanonical, elt);
+        bindOne(idxCanonical, elt);
         return;
       }
       // A destructuring pattern (`for (p, q) in pairs`) binds each leaf to
@@ -2431,15 +2626,71 @@ function canonicalLoopLike(
       // the first would fail on every value at run time (the same check
       // `collectTuplePattern` makes), the second would write two
       // authoritative types onto one binding.
-      const bound = new Set<string>();
-      const bindPattern = (pattern: Expression, elementType: Type): void => {
-        if (patternError !== undefined) return;
+      //
+      // An element type that is a UNION is read arm by arm: each arm that is
+      // a tuple of the pattern's shape gives a type for each leaf, and a
+      // leaf's type is the join of its types from those arms. An arm of
+      // another shape is skipped, since a value of that arm fails the
+      // destructuring at run time and binds nothing. A leaf that one of the
+      // read arms leaves untyped stays untyped. When no arm fits, nothing is
+      // bound and there is no error (as for any other element type that is
+      // not a tuple), unless every arm that has the pattern's arity reports
+      // an error, in which case the first arm's error stands.
+      //
+      // `readPattern` returns the leaf types and adds each name it meets to
+      // `bound`; the bindings are written once the whole pattern is read.
+      const readPattern = (
+        pattern: Expression,
+        elementType: Type,
+        bound: Set<string>
+      ): Map<string, Type> => {
+        const leaves = new Map<string, Type>();
+        if (patternError !== undefined) return leaves;
         // A component may be an alias or a nominal type of a tuple
         // (`list<tuple<integer, pt>>`): resolve it before reading its shape,
         // as the collection type itself was resolved above.
         const type = resolveTypeForCompilation(elementType);
-        if (typeof type === 'string' || type.kind !== 'tuple') return;
-        if (!isFunction(pattern, 'Tuple')) return;
+        if (!isFunction(pattern, 'Tuple')) return leaves;
+        if (typeof type !== 'string' && type.kind === 'union') {
+          const arms = type.types
+            .map((arm) => resolveTypeForCompilation(arm))
+            .filter(
+              (arm) =>
+                typeof arm !== 'string' &&
+                arm.kind === 'tuple' &&
+                arm.elements.length === pattern.nops
+            );
+          const armLeaves: Map<string, Type>[] = [];
+          let firstError: Expression | undefined;
+          const armBound = new Set<string>();
+          for (const arm of arms) {
+            const b = new Set(bound);
+            const read = readPattern(pattern, arm, b);
+            if (patternError !== undefined) {
+              firstError ??= patternError;
+              patternError = undefined;
+              continue;
+            }
+            armLeaves.push(read);
+            for (const name of b) armBound.add(name);
+          }
+          if (armLeaves.length === 0) {
+            patternError = firstError;
+            return leaves;
+          }
+          for (const name of armBound) bound.add(name);
+          for (const name of armLeaves[0].keys()) {
+            const types = armLeaves.map((read) => read.get(name));
+            if (types.some((t) => t === undefined)) continue;
+            const joined = reduceType({
+              kind: 'union',
+              types: types as Type[],
+            });
+            if (joined !== undefined) leaves.set(name, joined);
+          }
+          return leaves;
+        }
+        if (typeof type === 'string' || type.kind !== 'tuple') return leaves;
         if (pattern.nops !== type.elements.length) {
           patternError = ce.typeError(
             parseType(
@@ -2448,12 +2699,14 @@ function canonicalLoopLike(
             type,
             pattern
           );
-          return;
+          return leaves;
         }
         pattern.ops.forEach((leaf, i) => {
+          if (patternError !== undefined) return;
           const component = type.elements[i].type;
           if (isFunction(leaf, 'Tuple')) {
-            bindPattern(leaf, component);
+            for (const [name, t] of readPattern(leaf, component, bound))
+              leaves.set(name, t);
             return;
           }
           const name = sym(leaf);
@@ -2467,12 +2720,88 @@ function canonicalLoopLike(
           }
           bound.add(name);
           if (component === 'any' || component === 'unknown') return;
-          const binding = ce._bindingSymbol(name, ce.context.lexicalScope);
-          if (binding !== undefined) bindAuthoritatively(binding, component);
+          leaves.set(name, component);
         });
+        return leaves;
       };
-      bindPattern(idxCanonical, elt);
-    });
+      const leaves = readPattern(idxCanonical, elt, new Set());
+      if (patternError !== undefined) return;
+      for (const [name, type] of leaves) {
+        const binding = ce._bindingSymbol(name, bindScope);
+        if (binding !== undefined) bindOne(binding, type);
+      }
+    };
+    // The binding site is AUTHORITATIVE for the index's type: the element
+    // type is evidence from the collection, not a guess. The helper also
+    // takes the binding out of the fresh-inference set, so a body use that
+    // contradicts the element type is an error (`bindIndexAuthoritatively`,
+    // `library/utils.ts`, says why and how the removal is journaled).
+    ce._withoutFacts(() =>
+      bindFromElement(currentElementType(), (binding, type) =>
+        bindIndexAuthoritatively(ce, binding, type)
+      )
+    );
+    // The collection's type is read NOW, but it may read a local that a later
+    // statement of an enclosing loop widens: `for t in [p, q, r]` where `p`
+    // later holds a tuple of `number` elements. The index then claimed the
+    // narrower element type, and the compiled complex lane read a `{re, im}`
+    // element as a JavaScript number. So the enclosing block reads the
+    // element type again after all its statements are canonicalized, and
+    // widens the index to it (`withEvidenceSession`,
+    // `library/assignment-evidence.ts`). A pattern error found on that
+    // second read is ignored: the loop is already built. But when a later
+    // read gives no type for an index (or a leaf) that the first read typed
+    // — the element type became `unknown` or `any`, or is no longer a tuple
+    // of the pattern's arity — the first, narrower type may no longer hold
+    // for what the loop visits, so that index is widened to `unknown` (the
+    // same write as `reset`) and the site reports a change. After that the
+    // site writes nothing more for the rest of the session: `unknown` is
+    // already the widest type.
+    const indexBindings: Expression[] = [];
+    ce._withoutFacts(() =>
+      bindFromElement(currentElementType(), (binding) =>
+        indexBindings.push(binding)
+      )
+    );
+    if (patternError === undefined && indexBindings.length > 0) {
+      const lost = new Set<string>();
+      registerEvidenceSite(ce, {
+        rejoin: (coarse) => {
+          let changed = false;
+          const saved = patternError;
+          const typed = new Set<string>();
+          ce._withoutFacts(() =>
+            bindFromElement(currentElementType(), (binding, type) => {
+              const name = sym(binding);
+              if (name === undefined || lost.has(name)) return;
+              typed.add(name);
+              const before = binding.type.type;
+              if (isSubtype(type, before)) return;
+              binding._infer(
+                () => (coarse ? coarsenEvidenceType(type) : type),
+                'widen'
+              );
+              if (binding.type.type !== before) changed = true;
+            })
+          );
+          patternError = saved;
+          for (const binding of indexBindings) {
+            const name = sym(binding);
+            if (name === undefined || typed.has(name) || lost.has(name))
+              continue;
+            lost.add(name);
+            if (binding.type.isUnknown) continue;
+            binding._infer(() => 'unknown', 'replace');
+            changed = true;
+          }
+          return changed;
+        },
+        reset: () => {
+          for (const binding of indexBindings)
+            binding._infer(() => 'unknown', 'replace');
+        },
+      });
+    }
     // An optional GUARD, `Element(x, xs, cond)` — the three-operand indexing
     // set `Sum` and `Product` also take. It is canonicalized here, after the
     // index is declared, so its occurrences of the index bind to this loop's
@@ -2730,9 +3059,21 @@ function* comprehensionStream(
     let subs: Record<string, Expression> | undefined;
     if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
     frame.install();
+    // The scopes nested in the comprehension (an inner `Block` of the body,
+    // a `Sum` in it) are shared by every walk of this comprehension, like
+    // the index scope above. A walk can run outside any application of the
+    // function whose body contains the comprehension — a lazy comprehension
+    // is walked when its value is read, often after that function has
+    // returned — so a recursive call made from the body is not re-entrant
+    // for the function-application check. Marking the nested scopes as in
+    // use for the duration of the advance makes that inner application (and
+    // any inner walk of the same comprehension) save and restore them. See
+    // `enterNestedBodyScopes`.
+    const nested = enterNestedBodyScopes(expr);
     try {
       r = inner.next();
     } finally {
+      exitNestedBodyScopes(ce, nested);
       frame.captureAndRestore();
       if (scope) ce._popEvalContext();
     }

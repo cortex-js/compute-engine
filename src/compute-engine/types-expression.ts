@@ -202,6 +202,8 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   neq?: (a: Expression) => boolean | undefined;
   cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
   inferredType: boolean;
+  /** A hoisted block local (see `types-definitions.ts`). @internal */
+  _blockLocal: boolean;
   /** History of writes to this definition's type. Structural mirror of
    * `TypeProvenanceEntry[]` — the full type lives in `types-definitions.ts`,
    * which imports this file, so it cannot be named from here (same
@@ -326,7 +328,18 @@ type OperandFactsMirror = {
 };
 
 type OperandStructureMirror =
-  | { kind: 'symbol'; name: string; system?: boolean; inferred?: boolean }
+  /** `local`: the symbol is a block-local binding a `Block` hoisted for a
+   * `let` or a block-introducing assignment, still waiting for the statement
+   * that gives it a value. Present only when true. A list-literal type
+   * handler reads it to keep the generic-symbol fold (an unknown bare symbol
+   * is a number) for free symbols only. */
+  | {
+      kind: 'symbol';
+      name: string;
+      system?: boolean;
+      inferred?: boolean;
+      local?: boolean;
+    }
   | { kind: 'string'; text: string }
   | {
       kind: 'number';

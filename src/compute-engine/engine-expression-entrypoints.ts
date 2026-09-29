@@ -202,12 +202,45 @@ export function createSymbolExpression(
     let autoScope = engine.context.lexicalScope;
     while (autoScope.noAutoDeclare && autoScope.parent)
       autoScope = autoScope.parent;
-    // Reuse an existing local in this exact scope (a prior reference or a
-    // hoisted declaration here) rather than re-declaring; NEVER an outer
-    // binding — a parameter shadows, so resolving to a same-named global
-    // would write the body's type evidence onto it (and sever the
-    // parameter's own binding from that evidence).
-    const existingBare = autoScope.bindings.get(name);
+    // Reuse an existing local (a prior reference, or a binding a `Block`
+    // hoisted for its `let`) rather than re-declaring. The search runs from
+    // the current scope up to, and excluding, the boundary scope the name
+    // was pushed from: a `Block` hoists its locals into its own scope and
+    // pushes their names with the enclosing scope as the boundary, so a
+    // reference from a NESTED block (an `if` branch, a loop body) finds the
+    // hoisted binding one or more scopes up. Searching only the exact
+    // current scope declared a second, `unknown` binding in the nested
+    // scope for the first such reference and cached it as the name's
+    // binding, so every later reference in the block bound to that copy
+    // while the hoisted binding, which carries the declared or literal type
+    // of the `let`, was left unused: `let xs = []` followed by
+    // `while … { xs = [...xs, 4] }` typed `xs` as `collection<any>` from the
+    // `Join`, not as the list it holds (Tycho item 332). NEVER a binding at
+    // or beyond the boundary — a parameter shadows, so resolving to a
+    // same-named global would write the body's type evidence onto it (and
+    // sever the parameter's own binding from that evidence).
+    const boundary = engine._shadowedParameterBoundary(name);
+    // The walk is only safe when the boundary is an ancestor of the search
+    // start: `autoScope` was moved up past `noAutoDeclare` scopes and can sit
+    // at or above the boundary, and from there an unbounded walk would reach
+    // a same-named outer or global binding. In that case only the exact
+    // scope is searched, as before.
+    type Scope = import('./global-types.js').Scope;
+    let boundaryReachable = false;
+    for (let s: Scope | null = autoScope; s !== null; s = s.parent)
+      if (s === boundary) {
+        boundaryReachable = true;
+        break;
+      }
+    let existingBare: BoxedDefinition | undefined = undefined;
+    if (boundaryReachable) {
+      for (
+        let s: Scope | null = autoScope;
+        s !== null && s !== boundary && existingBare === undefined;
+        s = s.parent
+      )
+        existingBare = s.bindings.get(name);
+    } else existingBare = autoScope.bindings.get(name);
     const pdef =
       existingBare ??
       engine._declareSymbolValue(

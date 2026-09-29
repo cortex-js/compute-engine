@@ -14,6 +14,11 @@ import type {
 import { MACHINE_PRECISION, SMALL_INTEGER } from '../numerics/numeric.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
+import {
+  noteScratchBinding,
+  scratchRootOf,
+  scratchRootOfBinding,
+} from '../scratch-scopes.js';
 import { tombstoneBinding } from './binding-tombstone.js';
 import {
   effectsContractStateOf,
@@ -1442,7 +1447,16 @@ export function updateDef(
     | Partial<OperatorDefinition>
     | BoxedOperatorDefinition
     | Partial<ValueDefinition>
-    | BoxedValueDefinition
+    | BoxedValueDefinition,
+  /** The scope that holds the binding record `def`, when the caller knows
+   * it: the provisional repair below then skips the definitions that cannot
+   * see this binding (`repairProvisionalDependents`), and a binding in a
+   * scratch scope is marked as such (`scratch-scopes.ts`). */
+  scope?: Scope,
+  /** True when the caller is a declaration and the target scope held no
+   * binding of `name` before it (`declareSymbolValue`,
+   * `declareSymbolOperator`). See the `binding-repair` event below. */
+  fresh?: boolean
 ): void {
   const mutableDef = def as {
     value?: BoxedValueDefinition;
@@ -1491,6 +1505,20 @@ export function updateDef(
     mutableDef.operator = built;
     constructedOperatorHalf = built;
   } else return;
+
+  // A binding under a registered scratch scope (`scratch-scopes.ts`): the
+  // target scope is one, or the record was marked when it was declared in
+  // one. The update is then a write to a scratch binding, and the halves it
+  // constructed are marked too, so a later inference on them is recognized.
+  // A half supplied by the caller is not marked: it is installed by identity
+  // and can be shared with a binding outside the scratch scope.
+  const scratchRoot = scratchRootOf(ce, scope) ?? scratchRootOfBinding(ce, def);
+  if (scratchRoot !== undefined)
+    noteScratchBinding(scratchRoot, [
+      def,
+      constructedValueHalf,
+      constructedOperatorHalf,
+    ]);
 
   // Provenance-history survival + the redefinition (W1) effects entry
   // (`docs/EFFECTS-MODEL.md`). A definition
@@ -1665,14 +1693,42 @@ export function updateDef(
     // State event: `updateDef`'s own conditional bump is a `binding-repair`
     // emission (design §4) — the CALLERS emit their operation event
     // (`declare`/`redefine`) separately, after this returns.
-    ce._noteStateEvent({ kind: 'binding-repair' });
+    // A binding under a scratch scope (`scratch-scopes.ts`) is flagged: its
+    // repair advances no version that a cache outliving the scratch
+    // computation keys on (`noteStateEvent`).
+    //
+    // A FRESH declaration is flagged too, and its repair does not advance the
+    // definition version. The version is what the memo of a derived
+    // signature keys on (`declaredResultMemoKey`), and a fresh declaration
+    // cannot change a memoized signature by itself: it swaps no half that a
+    // derivation read, because the target scope held no binding of `name`.
+    // It can change a memoized signature in only two ways, and each is
+    // counted elsewhere. (1) It makes `name` resolve to a new binding from
+    // the scopes under the target scope: the memo key counts the
+    // declarations made in each scope on the home chain of the function and
+    // of its callees (`noteScopeDeclaration`, `calleeHomesDeclarationCount`),
+    // and a declaration that shadows a callable binding advances the version
+    // through its `declare` event (`shadowsCallable`). (2) It rebuilds a
+    // stored literal that waited on `name`: `repairWave`
+    // (`function-utils.ts`) advances the version for each literal it
+    // installs. Without this, every boxing of a function literal that applies
+    // an undeclared name, which declares that name in the literal's own new
+    // scope, advanced the version and invalidated every memoized signature:
+    // for a chain of functions in which each calls the next twice, the
+    // derivations grew exponentially with the length of the chain.
+    ce._noteStateEvent({
+      kind: 'binding-repair',
+      ...(scratchRoot !== undefined ? { scratch: true } : {}),
+      ...(fresh === true ? { fresh: true } : {}),
+    });
     // The definition installed just now is passed as `justInstalled` so a
     // recursive body — which noted its OWN name while canonicalizing — is not
     // re-derived against itself.
     repairProvisionalDependents(
       ce,
       name,
-      mutableDef.operator ?? (callableValue ? installedValue : undefined)
+      mutableDef.operator ?? (callableValue ? installedValue : undefined),
+      scope
     );
   }
 }

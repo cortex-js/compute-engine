@@ -1200,9 +1200,31 @@ export function hasErrorTypedOperand(
  * extended real line would be a tighter claim. Tightening it is a separate
  * behavior change with its own pins, not part of the handler machinery.
  */
-export function extremumType(ops: ReadonlyArray<OperandDescriptor>): Type {
+export function extremumType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  /** `Max` or `Min`: the range of the result is read off the operands'
+   * ranges when every operand is a scalar on the extended real line. */
+  kind?: 'max' | 'min'
+): Type {
   if (ops.length === 0) return 'number';
   if (hasErrorTypedOperand(ops)) return 'error';
+  // Scalar operands on the extended real line, with or without NaN: the
+  // result is one of them (or NaN), so its range is bounded by theirs, as
+  // for `ElementMax`/`ElementMin` (`extremumRangeType`). `Max(0, x)` for a
+  // real `x` is then `real<0..>`, which is what proves `Sqrt(Max(0, x))`
+  // real — typed `real`, the radicand is of unknown sign and the square
+  // root types `complex`, so every compiled route took the complex lane for
+  // the common clamp-before-square-root idiom. A collection operand (which
+  // may be empty) and a possibly non-real operand keep the ladder below.
+  if (
+    kind !== undefined &&
+    ops.every((d) =>
+      isSubtype(resolveTypeAlias(d.type), EXTENDED_REAL_OR_NAN_TYPE)
+    )
+  ) {
+    const ranged = extremumRangeType(kind, ops);
+    if (ranged !== undefined) return ranged;
+  }
   if (ops.every((d) => factsOf(d.type).belowNumber))
     for (const t of ['integer', 'rational', 'real'] as const)
       if (ops.every((d) => factsOf(d.type)[t])) return t;

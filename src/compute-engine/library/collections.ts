@@ -2902,6 +2902,20 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   }
   if (collectionBroadcastsPointsD(xs) === true)
     return { kind: 'list', elements: coordinate };
+  // An UNORDERED collection whose declared element type is a point
+  // (`collection<tuple<number, number>>`, `set<tuple<…>>`) broadcasts too,
+  // even when its finiteness is not known statically: `pointComponentAt`
+  // peeks the first element of any finite value, a list or a set, and
+  // answers the `List` of coordinates. Reading it as element indexing typed
+  // the coordinate as the whole POINT, `missing | tuple<number, number>`. A
+  // keyed collection (`dictionary`, `record`) is excluded: its synthesized
+  // `tuple<string, V>` element type reads as a point but is an entry.
+  if (
+    typeof t !== 'string' &&
+    (t.kind === 'collection' || t.kind === 'set') &&
+    hasPointElementTypeD(xs)
+  )
+    return { kind: 'list', elements: coordinate };
   return componentResultTypeD(xs, position);
 }
 
@@ -2929,7 +2943,16 @@ function classifyCellD(op: OperandDescriptor): Type | null {
   const t = op.type;
 
   if (t === 'unknown' || t === 'any') {
-    if (t === 'unknown' && s?.kind === 'symbol') return 'number';
+    // The generic-symbol fold is for a FREE symbol. A block-local binding a
+    // `Block` hoisted for a `let` that has not run yet (`s.local`) is not a
+    // generic value but a variable whose type is simply not known yet, so
+    // it blocks the shape claim and the literal falls back on the honest
+    // `list<unknown>`: with `let c = match …` and `out = join(out, [c])`,
+    // `out` was typed `list<number>` from the fold, and a later
+    // `stringJoin(listFrom(out))` was refused statically (and at run time)
+    // although `out` only ever held characters.
+    if (t === 'unknown' && s?.kind === 'symbol' && s.local !== true)
+      return 'number';
     return null;
   }
   if (isAtomicValueType(t)) return t;
@@ -3012,6 +3035,21 @@ function analyzeLevelD(
       }
 
   return { dims: [ops.length, ...firstDims], cells };
+}
+
+/**
+ * The element type of a literal `List` or `Set` from its components' stored
+ * types, for the case where no shape is claimed. An `unknown` component
+ * (an application whose result type is unknown, or a block local whose `let`
+ * has not run yet) makes the element type `unknown`: `widen` reads `unknown`
+ * as "no information" and would absorb it, so `[d, 1]` with `d` unknown was
+ * claimed a `list<integer>` and a compilation shaped its loop variable real
+ * while the list handed it a complex value (Tycho item 332). With no unknown
+ * component the join is `widenElementTypes` (the extended-real rule).
+ */
+function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
+  if (types.some((t) => t === 'unknown')) return 'unknown';
+  return widenElementTypes(types);
 }
 
 /**
@@ -3694,6 +3732,67 @@ function isProvablyNonIntegerIndex(index: Expression): boolean {
   return Math.abs(value - Math.round(value)) > margin;
 }
 
+/**
+ * Decide whether a positional read `xs.at(index)` that returned `undefined`
+ * missed because the index is OUTSIDE the collection, or because the
+ * collection could not produce the element.
+ *
+ * The `collection.at` handlers answer `undefined` in both cases: an index past
+ * the end, and an element they cannot compute. A `Range(0, n)` whose bound `n`
+ * has no value is the common example of the second case: its length is not
+ * known, so its handler cannot say whether position 1 exists (it exists only
+ * when `n ≥ 0`). Reading such a miss as "out of range" gave `NaN` for
+ * `At(Range(0, n), 1)`, a definite answer to a question the engine cannot
+ * decide.
+ *
+ * The answer is three-valued in effect: `true` when the miss is decided, so
+ * the caller returns the absence marker; `false` when it cannot be decided,
+ * so the caller leaves the read unevaluated (the same answer as for a
+ * symbolic index). When the unknown bound later gets a value, the held read
+ * evaluates again and gives the element.
+ *
+ * The miss is decided when:
+ * - the index is 0: positions are 1-based, so position 0 exists in no
+ *   collection;
+ * - the collection is known to be empty;
+ * - the collection's length is a known number, finite or infinite: the
+ *   handler then knows its own extent, so its miss is authoritative (the last
+ *   element of an infinite collection, the first element of a `Range` with an
+ *   infinite lower bound);
+ * - the length is not known but the collection is both FINITE and
+ *   enumerable: the handler walked all the elements and ran out, so the
+ *   position does not exist.
+ *
+ * An enumerable collection that is not known to be finite does not decide
+ * the miss. Its handler walks the elements only up to the iteration limit
+ * and answers `undefined` when it reaches the limit (`Filter.at` catches the
+ * `iteration-limit-exceeded` error). That is a give-up, not a proof: in
+ * `At(Filter(Range(1, ∞), x ↦ x > 10^6), 1)` the element exists past the
+ * limit, and in `Last(Filter(Range(1, ∞), x ↦ x < 5))` the walk never ends.
+ * Such a read stays unevaluated.
+ *
+ * A collection that has none of these properties — a `Range`, `Linspace`,
+ * `Map` or broadcast whose size depends on a symbol with no value — cannot
+ * say whether the position exists.
+ */
+function isProvablyOutOfRange(xs: Expression, index: number): boolean {
+  if (index === 0) return true;
+  // An enumerable collection that is not known to be finite is answered
+  // before `isEmptyCollection` is read: its emptiness check is the same walk,
+  // bounded by the same limit, so it could not decide the miss either, and
+  // reading it would walk the elements a second time.
+  if (
+    xs.isEnumerableCollection === true &&
+    xs.isFiniteCollection !== true &&
+    xs.count === undefined
+  )
+    return false;
+  if (xs.isEmptyCollection === true) return true;
+  const count = xs.count;
+  if (count !== undefined && !Number.isNaN(count)) return true;
+  return xs.isFiniteCollection === true && xs.isEnumerableCollection === true;
+}
+
 function absenceMarker(ce: ComputeEngine, xs?: Expression): Expression {
   if (xs === undefined) return ce.Missing;
 
@@ -3884,7 +3983,13 @@ function componentAt(
         'indexed_collection',
         xs.type.toString(),
       ]);
-    return xs.at(position) ?? absenceMarker(ce, xs);
+    const v = xs.at(position);
+    if (v !== undefined) return v;
+    // A miss is the absence marker only when the position is provably
+    // outside the collection. When the length is not known (`First(Range(0,
+    // n))` with `n` unassigned), the read stays unevaluated.
+    if (!isProvablyOutOfRange(xs, position)) return undefined;
+    return absenceMarker(ce, xs);
   }
   if (xs.type.matches('indexed_collection<any>')) return undefined;
   // A symbolic operand that may be absent as a whole — a symbol declared
@@ -4551,7 +4656,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         shapedListTypeD(ops) ??
           internType({
             kind: 'list',
-            elements: widenElementTypes(
+            elements: literalElementType(
               ops.map((op) => storedComponentTypeD(op))
             ),
           }),
@@ -4657,7 +4762,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return BoxedType.forResult(
         internType({
           kind: 'set',
-          elements: widenAll(ops.map((op) => storedComponentTypeD(op))),
+          elements: literalElementType(
+            ops.map((op) => storedComponentTypeD(op))
+          ),
         }),
         context.engine._typeResolver
       );
@@ -9136,9 +9243,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // The RAW type of the element(s) a single index selects (no absence
       // marker). Used as the inner element type of a gather and as the peeled
       // type of a chained step.
-      const elementType = (): Type => {
+      const elementType = (t: Type = ops[0].type): Type => {
         const xs = ops[0];
-        const t = xs.type;
         // A base inferred from its uses carries the two-arm shape `At`'s own
         // validation writes (`dictionary<T> | indexed_collection<T>`), and
         // `collectionElementType` answers nothing for a union. Read each arm
@@ -9209,9 +9315,67 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // out-of-band. An in-range literal tuple/record hit is exact (no marker);
       // an out-of-range literal misses to `marker(⊔S)`; a dynamic index gains
       // `T | marker(T)`.
-      const scalarResultType = (): Type => {
-        const t = ops[0].type;
+      const scalarResultType = (t: Type = ops[0].type): Type => {
         const key = ops[1];
+        // A tuple base: a literal in-range index selects that slot's type
+        // exactly, an out-of-range literal misses to `marker(⊔S)`, and a
+        // dynamic index gives `⊔S | marker(⊔S)`.
+        const tupleResult = (tt: TupleType): Type => {
+          const n = tt.elements.length;
+          const slots = widen(...tt.elements.map((x) => x.type)) as Type;
+          if (key !== undefined && isSubtype(key.type, 'integer')) {
+            const raw = descriptorLiteralValue(key);
+            if (typeof raw === 'number' && Number.isFinite(raw)) {
+              const i = raw < 0 ? n + raw + 1 : raw;
+              if (i >= 1 && i <= n) return tt.elements[i - 1].type; // in-range
+              return markerType(slots); // out-of-range literal → marker(⊔S)
+            }
+          }
+          return withMarker(slots); // dynamic int → ⊔S | marker(⊔S)
+        };
+        // A union with tuple arms is read arm by arm, so `At(g, 1)` over
+        // `tuple<A, B> | tuple<C, D>` is `A | C`. The union-wide
+        // `elementType()` fallback widens across ALL slots of every arm
+        // (`A | B | C | D`): a local read from a work queue of tuples then
+        // admitted the type of every other slot, and arithmetic on it failed
+        // the compiler's scalar gates. Each arm is resolved first (an alias
+        // of a tuple type is a tuple arm). A tuple arm is read by
+        // `tupleResult`; an absent arm (`missing`, `nothing`) is kept as it
+        // is, since the access of an absent operand is absent; the other
+        // arms are read together as one type by this same function, and the
+        // results are joined.
+        const rt = resolveTypeAlias(t);
+        if (
+          typeof rt !== 'string' &&
+          rt.kind === 'union' &&
+          rt.types.some((arm) => {
+            const r = resolveTypeAlias(arm);
+            return typeof r !== 'string' && r.kind === 'tuple';
+          })
+        ) {
+          const results: Type[] = [];
+          const others: Type[] = [];
+          for (const arm of rt.types) {
+            const r = resolveTypeAlias(arm);
+            if (r === 'missing' || r === 'nothing') results.push(r);
+            else if (typeof r !== 'string' && r.kind === 'tuple')
+              results.push(tupleResult(r));
+            else others.push(r);
+          }
+          if (others.length > 0)
+            results.push(
+              scalarResultType(
+                others.length === 1
+                  ? others[0]
+                  : (reduceType({ kind: 'union', types: others }) ?? 'any')
+              )
+            );
+          return reduceType({ kind: 'union', types: results }) ?? 'any';
+        }
+        // An alias of a tuple type is read as the tuple it names, like a
+        // tuple arm of a union above.
+        if (typeof rt !== 'string' && rt.kind === 'tuple')
+          return tupleResult(rt);
         if (typeof t === 'string') {
           if (t === 'dictionary' || t === 'record') return withMarker('any');
         } else if (t.kind === 'dictionary') {
@@ -9226,19 +9390,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           }
           return withMarker(fields); // dynamic string → ⊔V | marker(⊔V)
         } else if (t.kind === 'tuple') {
-          const n = t.elements.length;
-          const slots = widen(...t.elements.map((x) => x.type)) as Type;
-          if (key !== undefined && isSubtype(key.type, 'integer')) {
-            const raw = descriptorLiteralValue(key);
-            if (typeof raw === 'number' && Number.isFinite(raw)) {
-              const i = raw < 0 ? n + raw + 1 : raw;
-              if (i >= 1 && i <= n) return t.elements[i - 1].type; // in-range
-              return markerType(slots); // out-of-range literal → marker(⊔S)
-            }
-          }
-          return withMarker(slots); // dynamic int → ⊔S | marker(⊔S)
+          return tupleResult(t);
         }
-        return withMarker(elementType());
+        return withMarker(elementType(t));
       };
 
       // A COLLECTION-valued index (an integer gather or a boolean mask)
@@ -9631,6 +9785,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               }
               // Route through the dispatcher so negative indices normalize.
               const v = expr.at(k);
+              // A miss at a position that is not provably outside the
+              // collection (its length is not known) leaves the whole
+              // gather unevaluated, as a scalar index does below.
+              if (v === undefined && !isProvablyOutOfRange(expr, k))
+                return undefined;
               picked.push(v ?? (marker ??= absenceMarker(ce, expr)));
             }
           }
@@ -9655,6 +9814,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             : absenceMarker(ce, expr);
         }
         const v = expr.at(i);
+        // A miss is out-of-band only when the index is provably outside the
+        // collection. When the length is not known — `At(Range(0, n), 1)`
+        // with `n` unassigned — the read is undecided and `At` stays
+        // unevaluated, as it does for a symbolic index.
+        if (v === undefined && !isProvablyOutOfRange(expr, i)) return undefined;
         if (v === undefined)
           return index + 1 < ops.length
             ? chainAbsorbMarker(ce, expr.type.type, ops, index)
@@ -11532,6 +11696,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // (a `Range`/`Linspace` head would reinterpret the sorted elements as
       // lo/hi/step). Stay inert on non-finite or unknown-length input.
       if (xs.isFiniteCollection !== true) return undefined;
+      // The sort reads its source by position. A value that is not indexed (a
+      // `Set` held by a symbol declared with the abstract type
+      // `collection<T>`, which the signature admits) has no positions:
+      // `xs.at(i)` answered `undefined` and the comparison crashed on it with
+      // an internal error. It is the same type error the literal operand
+      // gets from the signature check (`Sort(Set(3, 1))`).
+      if (!isString(xs) && xs.isIndexedCollection !== true)
+        return ce.typeError('indexed_collection', xs.type, xs);
       const indices = sortedIndices(xs, fn);
       if (!indices) return undefined;
       const elements = indices.map((i) => xs.at(i)!);
@@ -13942,7 +14114,18 @@ function canonicalList(
     flushRun();
     // `Join` — unary for a lone spread: `[...xs]` is `Join(xs)`, the
     // list materialization of a non-tuple collection.
-    return ce._fn('Join', segments);
+    // Built through `ce.function`, not `ce._fn`, so that `Join`'s own
+    // canonical handler validates the segments against its signature. That
+    // validation is what records the use-site type evidence on an untyped
+    // symbol: in a function body `(a) ↦ [...a, 0]`, the parameter `a` is
+    // then inferred as `collection<any>`, exactly as it is for the
+    // equivalent body `Join(a, [0])`. With `ce._fn` the parameter stayed
+    // `unknown`, and a call such as `g([9])` then auto-broadcast the function
+    // over the elements of its list argument (`[[9, 0]]` instead of
+    // `[9, 0]`). The segments are already canonical, so the operand pass of
+    // `ce.function` leaves them as they are; what runs anew is `Join`'s own
+    // canonical handler, which is the point.
+    return ce.function('Join', segments);
   }
 
   // The framework's default flatten step, which this custom `canonical`
@@ -14001,7 +14184,13 @@ function canonicalSet(
     // recurse for the comprehension check and the dedup below.
     if (segments.length === 0) return canonicalSet(run, ctx);
     flushRun();
-    return engine._fn('SetFrom', [engine._fn('Join', segments)]);
+    // `Join` is built through `engine.function` so that its canonical
+    // handler validates the segments and infers an untyped spread operand
+    // (a function parameter) as a collection. See the same construction at
+    // the end of the spread branch of `canonicalList` for the defect this
+    // prevents: an `unknown` parameter makes the function auto-broadcast
+    // over the elements of a list argument.
+    return engine._fn('SetFrom', [engine.function('Join', segments)]);
   }
 
   // Since the `Set` operator is `lazy`, the canonical handler receives raw

@@ -159,6 +159,7 @@ function structureOfExpression(
     const def = op.valueDefinition;
     if (def !== undefined) {
       if (def.inferredType === true) node.inferred = true;
+      if (def._blockLocal === true) node.local = true;
       const systemBinding =
         op.engine.contextStack[0]?.lexicalScope.bindings.get(op.symbol);
       if (

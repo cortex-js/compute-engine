@@ -1833,6 +1833,54 @@ export function isIndexedCollectionOperand(e: Expression): boolean {
 }
 
 /**
+ * The compiled code of a SYMBOL whose static type says "a collection" without
+ * proving an indexed one, checked at run time to be a JavaScript array; or
+ * `undefined` when `e` is not such an operand.
+ *
+ * The witness is a parameter of a user function that the body only counts or
+ * searches: in `function seen(acc, c) { count(acc, e => …) > 0 }` the use
+ * narrows `acc` to the bare `collection`, which also admits a set or a
+ * dictionary, so the "provably indexed" test (`isIndexedCollectionOperand`)
+ * refused it and no program that passes a list to such a function compiled.
+ * The declared type is wider than the run-time value here, as it is for the
+ * base of an element read (`couldBeIndexedCollectionOperand`). `_SYS.arr`
+ * returns the value when it is an array and throws a `RangeError` otherwise,
+ * so a set or a dictionary that does arrive stops the run instead of being
+ * walked as if it were a list.
+ *
+ * A top type (`unknown`, `any`, `value`) is not admitted: it says nothing is
+ * known, not that a collection is expected. A DECLARED collection type is not
+ * admitted either: only a type inferred from the uses is wider than the
+ * author meant. A type with a text arm is not
+ * admitted either (see `couldBeStringOperand`). The set, dictionary and
+ * tuple tests below remove only the cases the static type shows. For every
+ * other value the run-time check is the one guard: a value that is not an
+ * array stops the compiled run, where the interpreter would have answered.
+ */
+function runtimeCheckedArrayCode(
+  kind: string,
+  e: Expression | undefined,
+  compile: (expr: Expression) => string
+): string | undefined {
+  if (e === undefined || !isSymbol(e)) return undefined;
+  const t = jsType(e);
+  if (t === 'unknown' || t === 'any' || t === 'value') return undefined;
+  if (!e.type.matches('collection<any>')) return undefined;
+  // Only a type the engine INFERRED from the uses. A declared
+  // `collection<number>` is a contract that admits a set, and the program
+  // then declines, so that the interpreter evaluates it.
+  if (e.valueDefinition?.inferredType !== true) return undefined;
+  if (couldBeStringOperand(e)) return undefined;
+  if (
+    e.type.matches('set<any>') ||
+    e.type.matches('dictionary<any>') ||
+    e.type.matches('tuple')
+  )
+    return undefined;
+  return `_SYS.arr(${compile(e)}, ${JSON.stringify(kind)})`;
+}
+
+/**
  * True when `e`'s static type ADMITS an indexed collection without proving one
  * — a union with an indexed-collection arm. The witness is a lambda parameter
  * indexed in its body: `At` narrows it to `indexed_collection | dictionary`,
@@ -3726,11 +3774,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`docs/STRING_ROADMAP.md`, decision D13.)
     if (isProvablyStringOperand(arg))
       return `_SYS.chars(${compile(arg)}).length`;
-    if (!isIndexedCollectionOperand(arg))
+    if (!isIndexedCollectionOperand(arg)) {
+      const checked = runtimeCheckedArrayCode('Length', arg, compile);
+      if (checked !== undefined) return `(${checked}).length`;
       throw new Error(
         `Could not compile \`Length\`: operand is not an indexed collection ` +
           `(list/vector/range).`
       );
+    }
     // A union with a text arm (`string | list<number>`) is a subtype of
     // `indexed_collection` — a string is one — and so passes the test above,
     // but `.length` on the JS string it may hold at run time counts UTF-16
@@ -4948,21 +4999,45 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     `((${elementsArg('IsEmpty', args[0], compile)}).length === 0)`,
   // Number of elements — same as `Length` for an indexed collection.
   //
-  // Only the 1-arg cardinality form. `Count(xs, v)` counts the elements equal
-  // to `v` and `Count(xs, p)` the elements satisfying the predicate `p`
-  // (`library/collections.ts`); `.length` answers neither, so compiling the
-  // 2-arg forms this way returned the whole size and diverged from the
-  // interpreter with no diagnostic. Decline instead, as `At` does for its
-  // multi-index form (D6 fail-closed): the interpreted fallback still
-  // evaluates them.
-  Count: (args, compile) => {
-    if (args.length !== 1)
-      throw new Error(
-        `Could not compile \`Count\`: only the single-argument cardinality form compiles; the ` +
-          `value and predicate forms (\`Count(xs, v)\`, \`Count(xs, p)\`) are ` +
-          `not supported.`
-      );
-    return `(${elementsArg('Count', args[0], compile)}).length`;
+  // Two forms compile. The one-argument form, `Count(xs)`, is the number of
+  // elements. The predicate form, `Count(xs, p)` with a function-typed `p`,
+  // is the number of elements the predicate admits. The value form,
+  // `Count(xs, v)`, counts the elements equal to `v` with the interpreter's
+  // element equality, which is structural on compound elements; the
+  // JavaScript `===` does not give that equality, so the value form is
+  // refused with an error rather than compiled to code that could silently
+  // give a different count. The interpreted fallback still evaluates it, as
+  // it does for the multi-index form of `At`, which is refused the same way.
+  Count: (args, compile, target) => {
+    if (args.length === 1)
+      return `(${elementsArg('Count', args[0], compile)}).length`;
+    // The predicate form uses the same lowering as `CountIf` and `Filter`:
+    // an element is counted when the compiled predicate returns a truthy
+    // value. When the elements of `xs` are themselves functions, a
+    // function-typed second operand could be a value to count as well as a
+    // predicate, so that case is refused too.
+    const elt = collectionElementType(jsType(args[0]));
+    const functionValued = (t: Type): boolean => {
+      const r = resolveTypeAlias(t);
+      if (typeof r !== 'string' && r.kind === 'union')
+        return r.types.some(functionValued);
+      return r !== 'never' && r !== 'nothing' && isSubtype(r, 'function');
+    };
+    if (
+      args.length === 2 &&
+      args[1] != null &&
+      args[1].type.matches('function') &&
+      (elt === undefined || !functionValued(elt))
+    ) {
+      const coll = elementsArg('Count', args[0], compile);
+      return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('Count', args[1], args[0], compile, [], target)})`;
+    }
+    throw new Error(
+      `Could not compile \`Count\`: only the single-argument cardinality form and the ` +
+        `predicate form (\`Count(xs, p)\`) compile; the value form (\`Count(xs, v)\`) is ` +
+        `not supported, and neither is a function operand over a collection of functions, ` +
+        `which could be either form.`
+    );
   },
   // Membership via SameValueZero (`includes`) — value equality only for
   // primitive elements, so compound element types fail closed.
@@ -11400,6 +11475,12 @@ const SYS_HELPERS = {
   // this. A non-finite entry (`NaN`, an infinity) leaves the interpreter's
   // `At` unevaluated — no value at all — so the WHOLE result is NaN, the
   // projection of "no value" on a real target.
+  // The operand of a list operator whose static type did not prove an
+  // array (`runtimeCheckedArrayCode`): the array itself, or a `RangeError`.
+  arr: (x: unknown, kind: string): unknown[] => {
+    if (Array.isArray(x)) return x;
+    throw new RangeError(`${kind}: the operand is not a list at run time`);
+  },
   at: (arr: unknown, i: number | unknown[]): number | unknown[] => {
     if (!Array.isArray(arr)) return NaN;
     const n = arr.length;
@@ -14429,11 +14510,14 @@ function collArg(
   compile: (expr: Expression) => string,
   position?: number
 ): string {
-  if (!arg || !isIndexedCollectionOperand(arg))
+  if (!arg || !isIndexedCollectionOperand(arg)) {
+    const checked = runtimeCheckedArrayCode(kind, arg, compile);
+    if (checked !== undefined) return checked;
     throw new Error(
       `Could not compile \`${kind}\`: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
         `is not an indexed collection (list/vector/range).`
     );
+  }
   // A union with a text arm (`string | list<number>`) passes the test above —
   // a string IS an indexed collection in the type lattice — but may be a JS
   // string at run time, where `.slice()`/`.reverse()`/spread walk UTF-16 code

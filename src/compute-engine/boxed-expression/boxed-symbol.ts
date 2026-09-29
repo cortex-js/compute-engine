@@ -1,3 +1,4 @@
+import { isScratchBinding } from '../scratch-scopes.js';
 import type {
   MathJsonExpression,
   MathJsonSymbol,
@@ -674,6 +675,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
               this.engine._noteStateEvent({
                 kind: 'inference',
                 valueType: true,
+                widening: true,
+                ...(isScratchBinding(this.engine, def)
+                  ? { scratch: true }
+                  : {}),
               });
             },
           });
@@ -698,8 +703,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // the write, because the cache advance it causes can run at once
         // (`noteStateEvent`): a type read and cached between an earlier
         // advance and the write would keep the old type of the symbol under
-        // the new generation.
-        this.engine._noteStateEvent({ kind: 'inference', valueType: true });
+        // the new generation. `widening` says whether the new type is NOT a
+        // subtype of the old one — a `widen` or `replace` write, or a
+        // `narrow` whose meet is not below the previous type. Only a true
+        // narrowing leaves the derived-signature memos merely loose; any
+        // other write can leave them wrong, so it must advance the
+        // definition version they key on (`noteStateEvent`).
+        this.engine._noteStateEvent({
+          kind: 'inference',
+          valueType: true,
+          widening:
+            inferenceMode !== 'narrow' ||
+            !isSubtype(inferred.type, previousType.type),
+          // A binding under a scratch scope (`scratch-scopes.ts`) dies with
+          // the computation that declared it: its inference advances no
+          // version that a cache outliving that computation keys on.
+          ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
+        });
         // Single emission point for the write's passive observers: the
         // provenance history, the fresh-inference set (unknown → concrete
         // during a boxing, for the fresh-matrix-inference repair), and the
@@ -757,6 +777,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         this.engine._noteStateEvent({
           kind: 'inference',
           symbolSignature: true,
+          ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
         });
         this.engine._noteInferenceWrite({
           name: this._id,

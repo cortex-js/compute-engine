@@ -3386,14 +3386,50 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         return `\\operatorname{D}(${args.join(', ')})`;
       }
 
+      // A `D` with several variable operands (`["D", f, s, t]`, and also
+      // `["D", f, x, x]`) is written in the partial-derivative spelling. The
+      // `\partial` parser reads that spelling back to a FLAT `D` that has the
+      // same variable operands in the same order. The ordinary `\mathrm{d}`
+      // spelling below is kept for a single variable operand: the parser
+      // reads `\frac{\mathrm{d}^2 f}{\mathrm{d}x^2}` back to the NESTED form
+      // `["D", ["D", f, x], x]`, so the `\mathrm{d}` spelling is only exact
+      // for a chain of one-variable `D`s.
+      //
+      // The `\partial` and `\mathrm{d}` spellings can only hold a variable
+      // that is a symbol. `derivativeVariables()` expands a
+      // `["Set", x, n]` order pair into `n` copies of `x`, as the canonical
+      // form of `D` does. When a variable operand is anything else (a number,
+      // a `Tuple`, a pair past the order cap), the `D` is written as a
+      // function call, `\operatorname{D}(…)`, which reads back unchanged.
+      const allVars = derivativeVariables((operands(expr) ?? []).slice(1));
+      if (allVars === null) {
+        const args = (operands(expr) ?? []).map((op) =>
+          serializer.serialize(op)
+        );
+        return `\\operatorname{D}(${args.join(', ')})`;
+      }
+      if (allVars.length > 1)
+        return serializeMultiVariableDerivative(serializer, fn, allVars);
+      const dVariable = allVars[0];
+
       // Count nested D expressions to determine the derivative order
       let order = 1;
       let innerFn = fn;
 
-      // Check for nested D with same variable
+      // Fold a nested `D` into the order only when it has exactly one
+      // variable operand and that variable is the same symbol:
+      // `["D", ["D", f, x], x]` is written as a second derivative. An inner
+      // `D` with several variables (`["D", ["D", f, x, y], x]`), or with a
+      // variable that is not a plain symbol, is not folded: it stays the
+      // differentiand and is written in its own spelling in the numerator,
+      // so none of its variables is lost.
       while (operator(innerFn) === 'D') {
-        const innerVar = operand(innerFn, 2);
-        if (symbol(innerVar) === symbol(variable)) {
+        const innerVars = (operands(innerFn) ?? []).slice(1);
+        if (
+          innerVars.length === 1 &&
+          symbol(innerVars[0]) !== null &&
+          symbol(innerVars[0]) === symbol(dVariable)
+        ) {
           order++;
           innerFn = operand(innerFn, 1)!;
         } else {
@@ -3415,7 +3451,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // and leaves symbols, numbers, function applications (`\sin(x)`) and
       // already delimited bodies untouched.
       const fnLatex = serializer.wrapShort(bodyToSerialize);
-      const varLatex = serializer.serialize(variable);
+      const varLatex = serializer.serialize(dVariable);
 
       // The differentiand always goes in the NUMERATOR
       // (`\frac{\mathrm{d}x^2}{\mathrm{d}x}`,
@@ -6252,4 +6288,108 @@ function parseAt(
     if (operator(rhs) === 'Sequence') return ['At', lhs, ...operands(rhs)];
     return ['At', lhs, rhs];
   };
+}
+
+/**
+ * The largest order of a `["Set", x, n]` pair that the canonical form of `D`
+ * expands into `n` copies of `x`. A larger pair is left as it is by the
+ * canonical form, so the serializer must not expand it either. This is the
+ * value of `MAX_DERIVATIVE_ORDER` in `library/calculus.ts`.
+ */
+const MAX_SERIALIZED_DERIVATIVE_ORDER = 1000;
+
+/**
+ * The variable operands of a `D`, as a list of symbols, or `null` when one of
+ * them cannot be written in the `\partial` or `\mathrm{d}` spelling.
+ *
+ * A symbol is kept as it is. A `["Set", x, n]` order pair, where `x` is a
+ * symbol and `n` is an integer from 1 to `MAX_SERIALIZED_DERIVATIVE_ORDER`,
+ * is expanded into `n` copies of `x`: the canonical form of `D` reads the pair
+ * the same way, so the expanded spelling parses back to the same canonical
+ * expression. Any other operand (a number, a `Tuple`, another `Set`) gives
+ * `null`.
+ */
+function derivativeVariables(
+  vars: ReadonlyArray<MathJsonExpression>
+): MathJsonExpression[] | null {
+  const result: MathJsonExpression[] = [];
+  for (const v of vars) {
+    if (symbol(v) !== null) {
+      result.push(v);
+      continue;
+    }
+    if (operator(v) === 'Set' && nops(v) === 2) {
+      const x = operand(v, 1);
+      const n = machineValue(operand(v, 2));
+      if (
+        x !== null &&
+        symbol(x) !== null &&
+        n !== null &&
+        Number.isInteger(n) &&
+        n >= 1 &&
+        n <= MAX_SERIALIZED_DERIVATIVE_ORDER
+      ) {
+        for (let k = 0; k < n; k++) result.push(x);
+        continue;
+      }
+    }
+    return null;
+  }
+  return result;
+}
+
+/**
+ * Serialize `["D", fn, v1, v2, …]` (two or more variable operands) in the
+ * Leibniz partial-derivative spelling, for example
+ * `\frac{\partial^{3}f}{\partial x^{2}\,\partial y}` for `["D", f, x, x, y]`.
+ *
+ * - The numerator holds the total order of the derivative, followed by the
+ *   differentiand. The differentiand is always in the numerator (never after
+ *   the fraction), because a differentiand that trails the fraction extends
+ *   to the end of the enclosing sum when it is parsed again.
+ * - The denominator lists the variables in the order of the operands. A run
+ *   of CONSECUTIVE equal variables is grouped as a power (`\partial x^{2}`).
+ *   Equal variables that are not consecutive are written separately
+ *   (`\partial x\,\partial y\,\partial x`), because grouping them would
+ *   change the order of the operands when the expression is parsed again.
+ * - The differentiand is delimited by the same rule as in the one-variable
+ *   spelling (`wrapShort`): a sum or a product is written in parentheses,
+ *   `\partial^{2}(xy)`, and a symbol, a power or a function application is
+ *   not, `\partial^{3}x^3`. The `\partial^{n}` marker in a numerator does
+ *   not capture what follows it, so the differentiand is parsed as an
+ *   ordinary expression.
+ *
+ * The parser (`parseFraction()` and the `\partial` entry in
+ * `definitions-other.ts`) reads this spelling back to a flat `D` with the
+ * same variable operands.
+ */
+function serializeMultiVariableDerivative(
+  serializer: Serializer,
+  fn: MathJsonExpression,
+  vars: ReadonlyArray<MathJsonExpression>
+): string {
+  // Use the body of a `Function` operand, as the one-variable spelling does:
+  // `["Function", ["Sin", "x"], "x"]` is written `\sin(x)`.
+  const body = operator(fn) === 'Function' ? (operand(fn, 1) ?? fn) : fn;
+
+  const fnLatex = serializer.wrapShort(body);
+
+  // Group consecutive runs of the same variable. Two variables are the same
+  // when they serialize to the same LaTeX.
+  const groups: { latex: string; count: number }[] = [];
+  for (const v of vars) {
+    const latex = serializer.serialize(v);
+    const last = groups[groups.length - 1];
+    if (last && last.latex === latex) last.count += 1;
+    else groups.push({ latex, count: 1 });
+  }
+
+  const denom = groups
+    .map(
+      ({ latex, count }) =>
+        `\\partial ${latex}` + (count > 1 ? `^{${count}}` : '')
+    )
+    .join('\\,');
+
+  return `\\frac{\\partial^{${vars.length}}${fnLatex}}{${denom}}`;
 }

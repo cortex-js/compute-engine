@@ -1,3 +1,4 @@
+import { isScratchBinding } from '../scratch-scopes.js';
 import { callResultType } from './call-result-type.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
@@ -81,6 +82,7 @@ import {
   zipParticipates,
   appliesToListCoordinateTuple,
   isAbsentScalarTerm,
+  isRecordShapedType,
 } from '../collection-utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
@@ -975,8 +977,13 @@ export class BoxedFunction
     def._resyncEffects();
 
     // Signature inference mutates a SHARED operator definition in place: a
-    // semantic change other expressions may depend on.
-    this.engine._noteStateEvent({ kind: 'inference' });
+    // semantic change other expressions may depend on. A definition declared
+    // under a scratch scope (`scratch-scopes.ts`) is shared only by the
+    // expressions of the computation that owns that scope.
+    this.engine._noteStateEvent({
+      kind: 'inference',
+      ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
+    });
 
     // Single emission point for the write's passive observers (provenance
     // history, narrowing sink — see `_noteInferenceWrite` in `index.ts`).
@@ -3394,7 +3401,34 @@ export class BoxedFunction
     // threaded WHOLE instead (`threadConditional`): `Sin([1,2,3]{0<t})` is
     // `[sin 1, sin 2, sin 3]{0<t}`, `Missing` once `t = -1`, where a
     // cell-by-cell map gave `[NaN, NaN, NaN]`.
-    return this.type.matches('indexed_collection<any>');
+    if (this.type.matches('indexed_collection<any>')) return true;
+
+    // An ABSTRACT collection type (`collection<T>`: not indexed, not a set,
+    // not keyed) does not decide the kind of the value, it only admits
+    // several kinds. A kind-preserving operator (`Map`, `Filter`, `Scan`)
+    // reports that type over a symbol DECLARED `collection<T>`, and such a
+    // symbol can hold a list, a set or a range. The answer then follows the
+    // values the operands hold now, the same way a symbol answers from its
+    // value (`BoxedSymbol.isIndexedCollection`): the node is indexed when
+    // every collection operand holds an indexed value. This is what makes
+    // `Map(x -> 2x, P)`, with `P` declared `collection<number>` and holding
+    // `[3, 1, 1]`, materialize as the list `[6, 2, 2]` (order and duplicates
+    // kept) and take part in a broadcast (`Map(x -> 2x, P) + 1`), where it
+    // used to materialize as `Set(6, 2)`. With `P` holding a set, the answer
+    // stays `false` and the result is a set. The static type is not changed:
+    // it stays `collection<T>`, a supertype of every kind `P` may hold.
+    //
+    // Canonicalization and type derivation read this predicate too (the
+    // `indexed` fact of an operand descriptor, the `Subscript` to `At`
+    // rewrite, the lone-operand rule of `Add`), so for such a node they
+    // follow the value the source holds when they run, exactly as they
+    // already do for a bare symbol declared `collection<T>`. That value
+    // dependence is the symbol's contract extended to the lazy nodes built
+    // over it, not an oversight.
+    return (
+      isAbstractCollectionType(this.type) &&
+      abstractSourcesHoldIndexedValues(this)
+    );
   }
 
   get isLazyCollection(): boolean {
@@ -9215,6 +9249,10 @@ function materialize(
   // holding a `Set` does not) — NOT an `at(1)` probe, which misclassifies
   // operators like `Filter` that answer `at` by sequential scan over
   // non-indexed sources.
+  //
+  // A static type that is an ABSTRACT collection (`collection<T>` over a
+  // symbol declared with that type) is resolved by `isIndexedCollection`
+  // itself, from the values the operands hold now.
   const t = expr.type.type;
   const isIndexed =
     expr.isIndexedCollection ||
@@ -9364,6 +9402,48 @@ function materialize(
   if (isIndexed) return expr.engine._fn('List', materialized);
 
   return expr.engine.function('Set', [...materialized]);
+}
+
+/**
+ * Whether `type` is a collection type that does not fix the kind of its
+ * value: it matches `collection<any>`, but it is not an indexed collection, a
+ * set, a dictionary or a record. A value of such a type may be a list, a set
+ * or a range.
+ */
+function isAbstractCollectionType(type: BoxedType): boolean {
+  return (
+    type.matches('collection<any>') &&
+    !type.matches('indexed_collection<any>') &&
+    !type.matches('set<any>') &&
+    !type.matches('dictionary<any>') &&
+    !isRecordShapedType(type.type)
+  );
+}
+
+/**
+ * Whether the SOURCES of `expr` hold indexed collection values now. A source
+ * is an operand whose own static type is an abstract collection
+ * (`isAbstractCollectionType`): those operands are what left the kind of the
+ * node undecided. An operand with a concrete type does not decide anything
+ * here, because the node's static type already accounts for it: the seed of
+ * a `Scan` may be a `Set` or a dictionary while the scanned source is a
+ * list, and the callback of a `Map` or the count of a `Take` is not a
+ * collection at all.
+ *
+ * A symbol answers from the value it holds, not from its declared type, so a
+ * symbol declared `collection<number>` that holds `[3, 1, 1]` answers `true`
+ * and one that holds `Set(3, 1)` answers `false`. A source that holds no
+ * value yet answers `false`: nothing says that it will hold a list. The
+ * answer is `false` too when there is no source.
+ */
+function abstractSourcesHoldIndexedValues(expr: BoxedFunction): boolean {
+  let found = false;
+  for (const op of expr.ops) {
+    if (!isAbstractCollectionType(op.type)) continue;
+    if (op.isIndexedCollection !== true) return false;
+    found = true;
+  }
+  return found;
 }
 
 // The descriptor route's broadcast lift reads three things about an

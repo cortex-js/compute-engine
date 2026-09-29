@@ -514,6 +514,13 @@ export type OperandStructure =
        * to trust an operand's type. Lives on the structure node, not in
        * `OperandFacts`: it is a property of this symbol, not of a type. */
       inferred?: boolean;
+      /** Present (`true`) when the symbol is a block-local binding a `Block`
+       * hoisted for a `let` or a block-introducing assignment, still waiting
+       * for the statement that gives it a value. The `List`-fold handler
+       * reads it to keep the generic-symbol fold (an unknown bare symbol is
+       * a number) for FREE symbols only: such a local is not a generic
+       * value, its type is simply not known yet. */
+      local?: boolean;
     }
   | { kind: 'string'; text: string }
   | {
@@ -1736,6 +1743,13 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * A type that is not inferred, but has been set explicitly, cannot be updated.
    */
   inferredType: boolean;
+
+  /** True for a block-local binding hoisted by a `Block` for a `let` or a
+   * block-introducing assignment before the statement that gives it a value
+   * runs. Not a free mathematical symbol: the generic-symbol fold of a list
+   * literal (an unknown bare symbol is a number) does not apply to it.
+   * @internal */
+  _blockLocal: boolean;
 
   /** When the declaration's type was a bare collection constructor (`list`,
    * `set`, `dictionary`, `collection`, `indexed_collection` — the

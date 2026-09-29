@@ -298,10 +298,21 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       const items: MathJsonExpression[] = [];
       const grabItem = () => {
         parser.skipSpace();
+        // A term of a chain can put its repeat count on the `\partial`
+        // (`\partial x\,\partial^2 y`) instead of on the variable
+        // (`\partial y^2`). Both spellings repeat the variable.
+        let reps = 1;
+        let preReps: number | null = null;
+        if (parser.match('^')) {
+          const e = parser.parseGroup() ?? parser.parseToken();
+          preReps = machineValue(e) ?? 1;
+          parser.skipSpace();
+        }
         let v: MathJsonExpression =
           parser.parseGroup() ?? parser.parseSymbol() ?? 'Nothing';
-        let reps = 1;
-        if (operator(v) === 'Power') {
+        if (preReps !== null) {
+          reps = preReps;
+        } else if (operator(v) === 'Power') {
           reps = machineValue(operand(v, 2)) ?? 1;
           v = operand(v, 1) ?? v;
         } else if (parser.match('^')) {
@@ -310,11 +321,59 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
         }
         for (let i = 0; i < reps; i++) items.push(v);
       };
-      grabItem();
-      while (true) {
+      // Skip the space between two terms of a chain and consume the
+      // `\partial` of the next term. When no `\partial` follows, the index is
+      // restored, so a space after the last term stays in the input.
+      // `skipVisualSpace()` does nothing when the `skipSpace` option is off,
+      // so `skipSpace()` is called first: it always skips `{}`.
+      const matchNextTerm = (): boolean => {
+        const start = parser.index;
         parser.skipSpace();
-        if (!parser.match('\\partial')) break;
+        parser.skipVisualSpace();
+        if (parser.match('\\partial')) return true;
+        parser.index = start;
+        return false;
+      };
+
+      // `∂^n` with a degree and no subscript is either the numerator of a
+      // Leibniz derivative (`\frac{\partial^2 f}{\partial x\,\partial y}`),
+      // or a denominator term that repeats its variable `n` times
+      // (`\frac{\partial^3 f}{\partial^2 x\,\partial y}`).
+      //
+      // When another `\partial` follows the first term, this is a
+      // denominator chain: the degree repeats the first variable, and the
+      // rest of the chain is absorbed below.
+      //
+      // Otherwise the term after `∂^n` is NOT captured here: the group
+      // parser reads it as an ordinary expression after the marker. In a
+      // numerator, `parseFraction` takes the factors that follow the marker
+      // as the differentiand; in a denominator (`\partial^2 x` alone), it
+      // takes the factor that follows the marker as the variable, repeated
+      // `n` times. Capturing a numerator term with the denominator rules
+      // would read a superscript as a repeat count, so `\partial^2 x^3`
+      // would lose the exponent `3`.
+      if (sup !== 'Nothing') {
+        const start = parser.index;
+        const n = machineValue(sup);
+        parser.skipSpace();
+        const first = parser.parseGroup() ?? parser.parseSymbol();
+        if (
+          first === null ||
+          n === null ||
+          !Number.isInteger(n) ||
+          n < 1 ||
+          !matchNextTerm()
+        ) {
+          parser.index = start;
+          return ['PartialDerivative', 'Nothing', sup] as MathJsonExpression;
+        }
+        for (let i = 0; i < n; i++) items.push(first);
+        // `matchNextTerm()` has consumed the `\partial` of the second term.
+        do grabItem();
+        while (matchNextTerm());
+      } else {
         grabItem();
+        while (matchNextTerm()) grabItem();
       }
       if (items.length === 1)
         return ['PartialDerivative', items[0], sup] as MathJsonExpression;

@@ -263,6 +263,7 @@ import {
   operandLiteralValue as operandLiteralValueOnTypes,
   operandSgn as operandSgnOnTypes,
   provablyLess as provablyLessOnTypes,
+  provablyGreaterEqual as provablyGreaterEqualOnTypes,
   operandNonFiniteNumber as operandNonFiniteNumberOnTypes,
   absFunctionType as absFunctionTypeOnTypes,
   broadcastOperandType,
@@ -1684,17 +1685,29 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
   // Ranges and sign exclusions are stripped from the join inputs: a sum does
   // not lie in the union of its terms' ranges. The SOUND bound is recomputed
   // below by interval arithmetic over the operands.
-  const t = widenAll(args.map((x) => stripNumericRanges(x.type)));
+  //
+  // A term whose type admits NaN beside other values (`nan | real<0..>`, the
+  // type of the square of an element read) is summed WITHOUT its `nan`
+  // member, and the member is added back to the result: the sum is NaN when
+  // that term is, and otherwise lies in the sum of the ranges. Read with the
+  // member in place, the term has no interval at all, so the whole range was
+  // dropped: `p² + q²` for `p, q: nan | real` typed `nan | real`, its square
+  // root then typed `complex | nan`, and the compiled program carried the
+  // distance `√(p² + q²)` as a complex object (Tycho item 332). `Multiply`,
+  // `Power` and `Divide` already keep the range of such operands.
+  const present = args.map((x) => withoutNaN(x.type));
+  const hasNaN = present.some((p, i) => p !== args[i].type);
+  const t = widenAll(present.map((p) => stripNumericRanges(p)));
   // `imaginary + imaginary` is not closed under addition: the imaginary
   // parts can cancel to 0, which is real. `complex` covers both.
-  if (t === 'imaginary') return 'complex';
-  return attachInterval(
-    t,
-    foldIntervalsOfTypes(
-      args.map((x) => x.type),
-      addIntervals
-    )
-  );
+  if (t === 'imaginary')
+    return hasNaN
+      ? reduceType({ kind: 'union', types: ['complex', 'nan'] })
+      : 'complex';
+  const ranged = attachInterval(t, foldIntervalsOfTypes(present, addIntervals));
+  return hasNaN
+    ? reduceType({ kind: 'union', types: [ranged, 'nan'] })
+    : ranged;
 }
 
 /** A literal-only boolean claim for a number-theory predicate: when the
@@ -6982,19 +6995,39 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A proven-NaN operand: decline, so the framework's proven-NaN arm
         // answers the sharp `nan` (the propagated value's own type).
         if (provablyNaNOperand(x)) return undefined;
+        // An operand whose TYPE admits NaN beside other values (`nan | real`,
+        // the type of an element read whose index may be out of range) has
+        // √NaN = NaN, so the claim keeps a `nan` member, and the other values
+        // are typed from the operand WITHOUT that member: √q for
+        // `q: nan | real<0..>` is `nan | real`, not the top `number` the
+        // non-finite arm below answered for it. That top type sent
+        // `2√max(0, k)` — `k` an element read — through the complex square
+        // root in the compiled program, and every later coordinate became a
+        // complex object where the interpreter kept a real (Tycho item 332).
+        // (`Abs` treats a NaN-admitting operand the same way, user decision
+        // 2026-09-26.) A bare `number` also admits NaN, but has no member to
+        // strip and keeps its own arm below.
+        let nanArm = false;
+        if (x.type !== 'nan' && isSubtype('nan', x.type)) {
+          const present = withoutNaN(x.type);
+          if (present !== x.type) {
+            nanArm = true;
+            x = { type: present, facts: x.facts, structureOf: x.structureOf };
+          }
+        }
+        const result = (t: string) =>
+          BoxedType.forResult(
+            nanArm ? `${t} | nan` : t,
+            context.engine._typeResolver
+          );
         if (operandNonFiniteNumberOnTypes(x)) {
           // √(−∞) = i·∞ = ~oo (complex infinity), not a real ±∞ — and the
           // signed pair `+oo | -oo` excludes `~oo`, so only the top
           // type admits it (non-finite typing convention).
           const s = operandSgnOnTypes(x);
-          if (negativeSign(s) === true)
-            return BoxedType.forResult('number', context.engine._typeResolver);
-          if (nonNegativeSign(s) === true)
-            return BoxedType.forResult(
-              '+oo | -oo',
-              context.engine._typeResolver
-            );
-          return BoxedType.forResult('number', context.engine._typeResolver);
+          if (negativeSign(s) === true) return result('number');
+          if (nonNegativeSign(s) === true) return result('+oo | -oo');
+          return result('number');
         }
         // Whether the operand's TYPE proves it finite.
         // A subtype test against `complex` is the engine's canonical
@@ -7033,22 +7066,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // the `complex` hedge while its compiled bytes are
           // unchanged. See the §5.4 `Sqrt` row of
           // `docs/plans/2026-08-22-type-handlers-on-types.md`.
-          if (nonNegativeSign(operandSgnOnTypes(x)) === true)
-            return BoxedType.forResult(
-              finiteOperand ? 'real' : 'real | +oo | -oo',
-              context.engine._typeResolver
-            );
-          return BoxedType.forResult(
-            finiteOperand ? 'complex' : 'number',
-            context.engine._typeResolver
-          );
+          // The sign is read from the value channel (`sgn`) AND from the
+          // type's lower bound: the descriptor built above for a NaN-admitting
+          // operand carries the original facts, whose sign is undecided
+          // because NaN is unsigned, while its type (`real<0..>`) states the
+          // bound outright.
+          if (
+            nonNegativeSign(operandSgnOnTypes(x)) === true ||
+            provablyGreaterEqualOnTypes(x, 0)
+          )
+            return result(finiteOperand ? 'real' : 'real | +oo | -oo');
+          return result(finiteOperand ? 'complex' : 'number');
         }
         // An operand that is not on the extended real line keeps the generic-
         // point convention the other numeric handlers use (`numericTypeHandler`,
         // `library/type-handlers.ts`): merely-possible non-finiteness does not
         // demote the claim, only a PROVABLE one does, and that was answered
         // above.
-        return BoxedType.forResult('number', context.engine._typeResolver);
+        return result('number');
       },
       // @fastpath: canonicalization is done in the function
       // makeNumericFunction().
@@ -7856,7 +7891,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumTypeOnTypes(ops),
+          extremumTypeOnTypes(ops, 'max'),
           context.engine._typeResolver
         ),
       sgn: (ops) => {
@@ -7894,7 +7929,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumTypeOnTypes(ops),
+          extremumTypeOnTypes(ops, 'min'),
           context.engine._typeResolver
         ),
       sgn: (ops) => {

@@ -94,7 +94,8 @@ describe('An operator with an operand typed error', () => {
     ce.declare('x', 'real');
     expect(ce.box(['Add', 1, ['Sin', 'x']]).type.toString()).not.toBe('error');
     expect(ce.box(['Sin', ['Add', 1, 'x']]).type.toString()).toBe('real');
-    expect(ce.box(['Max', 'x', 1]).type.toString()).toBe('real');
+    // `Max` over scalar reals carries the operands' range (Tycho item 332).
+    expect(ce.box(['Max', 'x', 1]).type.toString()).toBe('real<1..>');
     expect(ce.box(['Abs', 'x']).type.toString()).not.toBe('error');
   });
 });

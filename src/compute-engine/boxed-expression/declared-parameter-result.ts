@@ -1,10 +1,11 @@
 import type { Type } from '../../common/type/types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
-import type { Expression, IComputeEngine } from '../global-types.js';
+import type { Expression, IComputeEngine, Scope } from '../global-types.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { functionResult, returnTypeText } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
 import { scopeChainDeclarationCount } from '../scope-declaration-count.js';
+import { withScratchScope } from '../scratch-scopes.js';
 
 /**
  * The scope the function literal `literal` was defined in: the parent of the
@@ -82,8 +83,33 @@ export function resultUnderDeclaredParameters(
     // signature is read from: read from inside another function's body, a
     // parameter of that function with the same name as a free name of this
     // one would otherwise capture it.
-    const typed = ce._inScope(home, () =>
-      ce.box(['Function', literal.ops[0].json, ...stamped])
+    //
+    // It is boxed in a scope of its own, created under the home scope and
+    // registered as scratch for the duration of the boxing
+    // (`withScratchScope`). The scope starts empty, so every name that the
+    // home scope chain declares resolves as it does from the home scope. What
+    // the boxing declares lands in the local scope of the typed copy, which
+    // is created under this scope: the parameters, every undeclared name the
+    // body applies (`b` in `b(x, y)`), which the boxing declares as a
+    // function, and every other undeclared free name the body reads, which
+    // the boxing auto-declares. None of it lands in the home scope (before
+    // this scope existed, the local scope of the typed copy was created under
+    // the home scope, with the same effect). All of it is discarded with the
+    // typed copy. Writing these bindings (declaring them, repairing them,
+    // inferring their types) advances no engine-wide version that the memo
+    // of this result, or of the signature of any other function, keys on
+    // (`noteStateEvent` in `engine-configuration-lifecycle.ts`). No stored
+    // definition can see them either, so declaring them does not re-derive
+    // the definitions that wait on the same name
+    // (`repairProvisionalDependents` in `provisional-application.ts`). Before
+    // both, typing nested calls of functions declared `-> unknown` whose
+    // bodies apply undeclared names took exponential time in the nesting
+    // depth (Tycho item 336).
+    const scratch: Scope = { parent: home, bindings: new Map() };
+    const typed = withScratchScope(ce, scratch, () =>
+      ce._inScope(scratch, () =>
+        ce.box(['Function', literal.ops[0].json, ...stamped])
+      )
     );
     result = functionResult(typed.type.type);
   } catch {

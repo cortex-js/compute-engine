@@ -73,6 +73,8 @@ import { sortOperands } from './order.js';
 import {
   validateArguments,
   checkNumericArgs,
+  inferCollectionSourceArgs,
+  isCollectionSourceOperator,
   inferGenericBoundArgs,
   inferNumericArgs,
   runtimeCheckExemptParam,
@@ -3051,7 +3053,30 @@ function applyOperatorDefinition(
     if (opDef.canonical) {
       try {
         result = opDef.canonical(xs, { engine: ce, scope });
-        if (result) return withSourceOffsets(result, metadata);
+        if (result) {
+          // The handler canonicalized the operands it consumes, but no
+          // signature validation ran on them, so a valueless symbol passed as
+          // a collection operand (`Filter(xs, p)`) got no type from its use.
+          // Narrow it from the declared parameter of the RESULT's operator,
+          // which is this operator unless the handler rewrote the head
+          // (`Fold(f, x, xs)` becomes `Reduce(xs, f, x)`). See
+          // `inferCollectionSourceArgs`.
+          if (
+            isFunction(result) &&
+            result.isValid &&
+            isCollectionSourceOperator(name) &&
+            isCollectionSourceOperator(result.operator)
+          ) {
+            const resultDef = result.operatorDefinition;
+            if (resultDef && !resultDef.inferredSignature)
+              inferCollectionSourceArgs(
+                ce,
+                resultDef.signature.type,
+                result.ops
+              );
+          }
+          return withSourceOffsets(result, metadata);
+        }
       } catch (e) {
         if (mustPropagate(e)) throw e;
         // Multi-arg form: a non-Error thrown value keeps its structure in the

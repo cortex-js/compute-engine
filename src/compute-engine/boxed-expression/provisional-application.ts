@@ -300,8 +300,6 @@ export function unregisterProvisionalDependent(def: object | undefined): void {
   }
 }
 
-/** The definitions waiting on `name`, removed from the registry. A repaired
- * definition re-registers itself for whatever names remain provisional. */
 /**
  * How many definitions are currently waiting on `name` in this engine's
  * forward-reference registry. **Test-only**: the registry is otherwise
@@ -325,14 +323,28 @@ export function hasProvisionalDependents(
   return DEPENDENTS.get(ce)?.has(name) === true;
 }
 
+/** Remove from the registry the definitions waiting on `name` and return
+ * them. With `select`, only the definitions it accepts are removed and
+ * returned; the others stay registered under `name`. */
 export function takeProvisionalDependents(
   ce: IComputeEngine,
-  name: string
+  name: string,
+  select?: (def: ProvisionalDependent) => boolean
 ): ProvisionalDependent[] | undefined {
   const byName = DEPENDENTS.get(ce);
-  const defs = byName?.get(name);
-  if (defs === undefined) return undefined;
-  byName!.delete(name);
+  const waiting = byName?.get(name);
+  if (waiting === undefined) return undefined;
+  let defs: Iterable<ProvisionalDependent> = waiting;
+  let taken: ProvisionalDependent[] | undefined;
+  if (select !== undefined) {
+    taken = [];
+    for (const def of waiting) if (select(def)) taken.push(def);
+    if (taken.length === 0) return undefined;
+    if (taken.length === waiting.size) taken = undefined;
+    else defs = taken;
+  }
+  if (taken === undefined) byName!.delete(name);
+  else for (const def of taken) waiting.delete(def);
   const frame = activeRollbackFrame(ce);
   const window = ce._checkpointWindow;
   // Reverse-index entries this take actually removed `name` from, captured
@@ -373,7 +385,7 @@ export function takeProvisionalDependents(
     frame?.record({ undo });
     window?.recordDelta(undo);
   }
-  return [...defs];
+  return taken ?? [...waiting];
 }
 
 //
@@ -383,7 +395,8 @@ export function takeProvisionalDependents(
 type RepairFn = (
   ce: IComputeEngine,
   name: string,
-  justInstalled?: ProvisionalDependent
+  justInstalled?: ProvisionalDependent,
+  declaredIn?: Scope
 ) => void;
 
 let _repair: RepairFn | undefined;
@@ -403,8 +416,25 @@ export function _setProvisionalRepair(fn: RepairFn): void {
 export function repairProvisionalDependents(
   ce: IComputeEngine,
   name: string,
-  justInstalled?: ProvisionalDependent
+  justInstalled?: ProvisionalDependent,
+  declaredIn?: Scope
 ): void {
   if (DEPENDENTS.get(ce)?.has(name) !== true) return;
-  _repair?.(ce, name, justInstalled);
+  // `declaredIn` is the scope that now holds the new binding of `name`, when
+  // the caller knows it. A waiting literal resolves `name` from the scope it
+  // was canonicalized in, through that scope's ancestors. The repair
+  // re-derives only the waiting definitions whose literal has `declaredIn` on
+  // that chain, and leaves the others registered: for them `name` resolves as
+  // before, so there is nothing to repair yet. Without this, every `Function`
+  // literal that APPLIES an undeclared name, which declares that name in the
+  // literal's own new scope, re-derived every definition waiting on the same
+  // name, and each re-derivation declared the name again in a new scope of
+  // its own. Deriving the signature of a function declared `-> unknown` boxes
+  // its body in a new scope too, so typing nested calls of such functions
+  // replaced their stored literals over and over, invalidated each other's
+  // memoized signatures, and took exponential time in the nesting depth
+  // (Tycho item 336, `test/compute-engine/tycho-item-336-nested-signature-derivation.test.ts`).
+  // A declaration in a scope on a waiting literal's chain (the global scope,
+  // or the scope a definition was made in) still repairs that definition.
+  _repair?.(ce, name, justInstalled, declaredIn);
 }

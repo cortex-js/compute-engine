@@ -1,4 +1,5 @@
 import { noteScopeDeclaration } from './scope-declaration-count.js';
+import { noteScratchBinding, scratchRootOf } from './scratch-scopes.js';
 import type {
   DeclarationOrigin,
   FunctionSignature,
@@ -497,6 +498,24 @@ function journalDeclaration(
   });
 }
 
+/** Record the binding record `boxedDef` and the placeholder half that the
+ * declaration constructed as scratch bindings, when `scope` is a registered
+ * scratch scope or a scope created under one. Later writes to the binding
+ * (an inference, an update) then advance no version that a cache outliving
+ * the scratch computation keys on (`scratch-scopes.ts`). `updateDef` marks
+ * the halves it constructs itself. A half that a caller supplies is never
+ * marked: it is installed by identity and can be shared with a binding
+ * outside the scratch scope. */
+function noteScratchDeclaration(
+  ce: IComputeEngine,
+  scope: Scope,
+  boxedDef: BoxedDefinition
+): void {
+  const root = scratchRootOf(ce, scope);
+  if (root === undefined) return;
+  noteScratchBinding(root, [boxedDef, (boxedDef as { value?: object }).value]);
+}
+
 export function declareSymbolValue(
   ce: IComputeEngine,
   name: MathJsonSymbol,
@@ -536,6 +555,10 @@ export function declareSymbolValue(
   // would destroy a binding this declare merely shadowed.
   journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
 
+  // A FRESH declaration: the target scope held no binding of `name` before
+  // this one. Read before the placeholder below is installed. See `updateDef`.
+  const fresh = !scope.bindings.has(name);
+
   // Insert a placeholder in the bindings to handle recursive calls
   // (the value could be a function that references itself)
   scope.bindings.set(name, {
@@ -558,7 +581,8 @@ export function declareSymbolValue(
   // The placeholder half is constructed here, so a restore through the
   // current window orphans it and must dispose it (§6 step 5).
   if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
-  updateDef(ce, name, boxedDef, def);
+  noteScratchDeclaration(ce, scope, boxedDef);
+  updateDef(ce, name, boxedDef, def, scope, fresh);
 
   noteScopeDeclaration(scope);
   ce._noteStateEvent({
@@ -568,7 +592,7 @@ export function declareSymbolValue(
     // Keyed on the RESOLVED target scope, never on "is a scratch extent
     // running": a declaration made during one but aimed at a longer-lived
     // scope outlives it and must keep its axis advance. See `axisMaskOf`.
-    ...(ce._scratchDeclarationScopes.includes(scope) ? { scratch: true } : {}),
+    ...(scratchRootOf(ce, scope) !== undefined ? { scratch: true } : {}),
   });
 
   return boxedDef;
@@ -597,6 +621,10 @@ export function declareSymbolOperator(
   // Checkpoint journal (funnel 4) — see `declareSymbolValue` above.
   journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
 
+  // A FRESH declaration: the target scope held no binding of `name` before
+  // this one. Read before the placeholder below is installed. See `updateDef`.
+  const fresh = !scope.bindings.has(name);
+
   // Insert a placeholder in the bindings to handle recursive calls
   // (the function is not yet defined)
   scope.bindings.set(name, {
@@ -615,7 +643,8 @@ export function declareSymbolOperator(
     );
   // The placeholder half is constructed here — see `declareSymbolValue`.
   if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
-  updateDef(ce, name, boxedDef, def);
+  noteScratchDeclaration(ce, scope, boxedDef);
+  updateDef(ce, name, boxedDef, def, scope, fresh);
 
   noteScopeDeclaration(scope);
   ce._noteStateEvent({
@@ -625,7 +654,7 @@ export function declareSymbolOperator(
     // Same resolved-scope test as `declareSymbolValue` above: the two routes
     // must agree, or an operator-shaped stand-in would reintroduce the churn
     // the exemption removes.
-    ...(ce._scratchDeclarationScopes.includes(scope) ? { scratch: true } : {}),
+    ...(scratchRootOf(ce, scope) !== undefined ? { scratch: true } : {}),
   });
 
   return boxedDef;

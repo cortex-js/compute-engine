@@ -1,0 +1,47 @@
+// Apollonian gasket (-1, 2, 2, 3), every helper inlined, no tuples: a circle
+// is a list [k, x, y, depth] and a gap is a flat list of three circles and a
+// depth. Same result as a-user-functions.
+let circles = [[2, 0.5, 0, 1], [2, -0.5, 0, 1], [3, 0, 0.6666666666666666, 1], [3, 0, -0.6666666666666666, 1]]
+let queue = [[-1, 0, 0, 2, 0.5, 0, 3, 0, 0.6666666666666666, 2], [-1, 0, 0, 2, -0.5, 0, 3, 0, 0.6666666666666666, 2], [2, 0.5, 0, 2, -0.5, 0, 3, 0, 0.6666666666666666, 2], [-1, 0, 0, 2, 0.5, 0, 3, 0, -0.6666666666666666, 2], [-1, 0, 0, 2, -0.5, 0, 3, 0, -0.6666666666666666, 2], [2, 0.5, 0, 2, -0.5, 0, 3, 0, -0.6666666666666666, 2]]
+let i = 1
+while i <= Length(queue) {
+  let g = queue[i]
+  let ka = g[1]; let kb = g[4]; let kc = g[7]; let depth = g[10]
+  let disc = 2 * Sqrt(Max(0, ka * kb + kb * kc + kc * ka))
+  let ax = ka * g[2]; let ay = ka * g[3]
+  let bx = kb * g[5]; let by = kb * g[6]
+  let cx = kc * g[8]; let cy = kc * g[9]
+  let sx = ax + bx + cx; let sy = ay + by + cy
+  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)
+  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)
+  let m = Sqrt(px^2 + py^2)
+  let rx = 2 * Sqrt(Max(0, (m + px) / 2))
+  let ry = 2 * Sqrt(Max(0, (m - px) / 2))
+  if py < 0 { ry = -ry }
+  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {
+    for z in [[sx + rx, sy + ry], [sx - rx, sy - ry]] {
+      let x = z[1] / k
+      let y = z[2] / k
+      let good = k > 0 && 1 / k >= 0.008
+      for t in [[g[1], g[2], g[3]], [g[4], g[5], g[6]], [g[7], g[8], g[9]]] {
+        let d = Sqrt((x - t[2])^2 + (y - t[3])^2)
+        let rt = 1 / t[1]
+        if !(Abs(d - Abs(1 / k + rt)) < 1e-6 || Abs(d - Abs(1 / k - rt)) < 1e-6) { good = false }
+      }
+      if good {
+        let j = 1
+        while j <= Length(circles) {
+          let e = circles[j]
+          if Abs(e[1] - k) < 1e-6 && Abs(e[2] - x) < 1e-6 && Abs(e[3] - y) < 1e-6 { good = false }
+          j = j + 1
+        }
+      }
+      if good {
+        circles = [...circles, [k, x, y, depth]]
+        queue = [...queue, [g[1], g[2], g[3], g[4], g[5], g[6], k, x, y, depth + 1], [g[1], g[2], g[3], g[7], g[8], g[9], k, x, y, depth + 1], [g[4], g[5], g[6], g[7], g[8], g[9], k, x, y, depth + 1]]
+      }
+    }
+  }
+  i = i + 1
+}
+Length(circles)
