@@ -45,6 +45,15 @@
 
 ### Issues Resolved
 
+- **A protocol member call no longer re-parses the member's signature.** A
+  signature that names `Self` bypasses the type parser's shared cache, so
+  every dispatched call parsed it twice, and the first attempt threw and
+  built an error on the way. The parsed signature is now kept per protocol,
+  member and receiver type until the declarations change. A member call on a
+  scalar receiver went from about 12× the cost of an equivalent plain
+  function to about 1.3× (#363, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 - **A broadcast call of a user function reports its element count without
   evaluating.** With `S := x ↦ (x, x²)` and `L` a counted list, `S(L)` and
   `d·S(L)` typed `list<tuple<number, number>>` yet answered `count:
