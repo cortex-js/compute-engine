@@ -1815,24 +1815,38 @@ type number is Comparable {
 }
 ```
 
-**Static checking (ruling).** At a call site, `Self` binds to the *static
-type of the first argument*; every other `Self`-typed parameter is then
-checked as an ordinary argument against that binding. There is no joining
-of `Self` across arguments:
+**Static checking (ruling).** At a call site, `Self` binds to the
+*conformance target that dispatch would select* for the first argument's
+static type — the most specific implementation target that type admits —
+not to the first argument's own type. Every other `Self`-typed parameter is
+then checked as an ordinary argument against that binding. There is no
+joining of `Self` across arguments: both positions are checked against the
+same target, never a join of what each argument itself contributes.
+
+```epsil
+compare(3, 2.5)
+// `real`'s Comparable conformance is the most specific edge admitting the
+// receiver's static type (`integer`), so Self binds to `real`
+// -> argument 2 (`2.5: real`) matches; the call is valid regardless of
+//    which side carries which numeric subtype
+```
 
 ```epsil
 compare("a", 3)
-// Self binds to `string` (the type of the first argument)
+// `string`'s own conformance IS the target here (an exact match), so this
+// case is unchanged: Self binds to `string`
 // -> incompatible-type: argument 2 has type `integer`; expected `string`
 //    (`Comparable.compare` at `Self = string`)
 ```
 
 If the first argument's static type neither conforms nor has any conforming
 subtype, the call is a static diagnostic
-(`protocol-implementation-missing`); if conformance cannot be decided
-statically (e.g. the static type is `value`, or a union only some arms of
-which conform), the call is checked dynamically and produces the ordinary
-runtime error value when no implementation applies.
+(`protocol-implementation-missing`) — binding `Self` to the conformance
+target never widens who is admitted as a RECEIVER, only what the other
+`Self` positions are checked against once one applies. If conformance
+cannot be decided statically (e.g. the static type is `value`, or a union
+only some arms of which conform), the call is checked dynamically and
+produces the ordinary runtime error value when no implementation applies.
 
 **Name resolution.** A bare (unqualified) call resolves through this pipeline:
 

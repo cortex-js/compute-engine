@@ -4197,18 +4197,56 @@ function candidateRecords(
 }
 
 /**
+ * The conformance target `Self` binds to for `record` at a receiver whose
+ * static type is `receiver` — the MOST SPECIFIC applicable edge, the same
+ * specificity rule dispatch itself uses ({@link bestCandidates}), so the
+ * static check and the runtime selection never disagree about what `Self`
+ * means. With `compare` implemented on `real`, `Self` is `real` for
+ * `compare(5, 1/2)`: bound to the receiver's own type (`integer`) instead,
+ * the call would reject `1/2` while `compare(1/2, 5)` passes.
+ *
+ * `receiver` itself when the record carries no applicable conformance yet —
+ * there is nothing to be more specific than, and a member declared before
+ * any conformance is implemented refutes nothing. `null` when two incomparable edges are both most specific: left
+ * unchecked here, exactly as an undecided binding is, since the true
+ * ambiguity is `dispatchMember`'s to report.
+ */
+function selfBindingTarget(
+  ce: ProtocolReadView,
+  record: ProtocolRecord,
+  receiver: Type
+): Type | null {
+  const admitted: Type[] = [];
+  for (const edge of record.conformances) {
+    const target = edgeTargetAt(ce, edge, receiver);
+    if (target !== null) admitted.push(target);
+  }
+  if (admitted.length === 0) return receiver;
+  const minimal = admitted.filter(
+    (t) => !admitted.some((u) => u !== t && isSubtype(u, t) && !isSubtype(t, u))
+  );
+  const distinct = [
+    ...new Map(minimal.map((t) => [typeToString(t), t])).values(),
+  ];
+  return distinct.length === 1 ? distinct[0]! : null;
+}
+
+/**
  * P1's static check, shared by the bare dispatcher and the qualified
  * `ProtocolMember` form: exact arity (when the candidate requirements agree on
  * one), then EVERY argument against the requirement's parameter type with
- * `Self` bound to the first argument's STATIC type — so a `Self` position is
- * checked against that binding (no joining of `Self` across arguments), and an
- * ordinary parameter against its own declared type. A mismatch is reported the
- * way every other signature violation is: the offending ARGUMENT is replaced by
+ * `Self` bound to the conformance target dispatch would select for the
+ * receiver ({@link selfBindingTarget}), not the receiver's own static type —
+ * so a `Self` position is checked against that binding (no joining of `Self`
+ * across arguments: both positions are checked against the same target,
+ * never a join of what each argument itself contributes), and an ordinary
+ * parameter against its own declared type. A mismatch is reported the way
+ * every other signature violation is: the offending ARGUMENT is replaced by
  * an `incompatible-type` error (`checkType`), so `compare("a", 3)` names
  * argument 2.
  *
  * With SEVERAL candidate protocols, a position is checked against the JOIN of
- * what they declare there — the same widening {@link dispatcherResultType}
+ * what they declare there — the same widening {@link dispatcherResultTypeOfDescriptors}
  * applies to the result: any of the candidates may be the one that applies, so
  * a call the qualified form would accept must not be rejected here.
  */
@@ -4231,11 +4269,15 @@ function checkMemberArguments(
   // decided statically … the call is checked dynamically").
   if (selfType === undefined || !isDecidedReceiverType(selfType)) return xs;
 
-  // The candidate requirements at `Self` = the receiver's static type. One that
-  // does not parse there decides nothing about ANY position: leave them all to
-  // the run time rather than check against a partial set.
-  const requirements = records.map((r) =>
-    requirementAt(ce, r, member, selfType)
+  // Each candidate's own conformance target, the type dispatch binds `Self`
+  // to. A binding that comes back `null` (an unresolved ambiguity between
+  // equally specific edges) decides nothing about ANY position: leave them
+  // all to the run time rather than check against a partial set.
+  const bindings = records.map((r) => selfBindingTarget(ce, r, selfType));
+  if (bindings.some((b) => b === null)) return xs;
+
+  const requirements = records.map((r, i) =>
+    requirementAt(ce, r, member, bindings[i]!)
   );
   if (requirements.some((s) => s === null)) return xs;
 
@@ -4355,7 +4397,11 @@ function dispatcherResultTypeOfDescriptors(
 
   const results: Type[] = [];
   for (const record of records) {
-    const requirement = requirementAt(ce, record, member, selfType);
+    // A `-> Self` result binds to the record's conformance target, as an
+    // argument does.
+    const binding = selfBindingTarget(ce, record, selfType);
+    if (binding === null) return undefined;
+    const requirement = requirementAt(ce, record, member, binding);
     if (requirement === null) return undefined;
     results.push(unwrapIndeterminateSelf(requirement.result));
   }
@@ -4512,9 +4558,12 @@ function dispatchMember(
   // was undecided or the operands arrived raw), so this is the only place an
   // implementation — a host callback in particular, which is trusted with
   // whatever it is handed — is guaranteed to be called within its contract.
+  // `Self` binds to the selected edge's target (`selected.target`, from
+  // `bestCandidates`), not the receiver's runtime type, as it does in
+  // `checkMemberArguments`.
   const mismatch = argumentTypeError(
     ce,
-    requirementAt(ce, selected.record, member, runtime),
+    requirementAt(ce, selected.record, member, selected.target),
     ops
   );
   if (mismatch !== null) return mismatch;

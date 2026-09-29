@@ -45,6 +45,19 @@
 
 ### Issues Resolved
 
+- **A protocol member's `Self` binds to the conformance target dispatch
+  selects, not the first argument's static type**
+  ([#362](https://github.com/cortex-js/compute-engine/issues/362),
+  contributed by [enumeratio](https://github.com/enumeratio)). With
+  `Compare: "(Self, Self) -> number"` implemented on `real`,
+  `Compare(5, 1/2)` and `Compare(3, 2.5)` were rejected as
+  `incompatible-type` while `Compare(1/2, 5)` and `Compare(2.5, 3)` passed —
+  acceptance depended on which argument happened to already have the exact
+  declared type. `Self` now binds to the most specific conformance edge the
+  receiver's type admits (`real` here) at every call, statically and at
+  runtime, so both argument orders and any mix of `integer`, `rational` and
+  `real` are accepted alike; a `-> Self` result type binds the same way. A
+  nominal type that conforms to nothing is still refused in either position.
 - **A broadcast call of a user function reports its element count without
   evaluating.** With `S := x ↦ (x, x²)` and `L` a counted list, `S(L)` and
   `d·S(L)` typed `list<tuple<number, number>>` yet answered `count:
