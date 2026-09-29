@@ -22,6 +22,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 describe('COMPILE: assigned-symbol folding', () => {
   describe('JavaScript target', () => {
@@ -304,5 +305,175 @@ describe('COMPILE: non-finite numbers on GPU targets', () => {
       ._getCompilationTarget('javascript')!
       .compile(ce.parse('x + \\infty')).code;
     expect(code).toContain('Infinity');
+  });
+});
+
+/**
+ * A `vars`-mapped input reached THROUGH an assigned value or a user-function
+ * body (Tycho item 328, 2026-09-28).
+ *
+ * The compile-time folder evaluates a subtree through the engine, and the
+ * engine reads every assigned value it reaches. With `a := sin(y_0)` and
+ * `y_0` a mapped input that also holds a value, `cos(a)` mentions no mapped
+ * name itself, so the folder used to bake `y_0`'s current value into the
+ * code — the input existed in the argument bag but changing it changed
+ * nothing (a slider-dependent document definition drew outdated geometry).
+ * The guard is now transitive (`BaseCompiler.reachesExcludedName`): the value
+ * is compiled as code that reads the input, on every target.
+ */
+describe('COMPILE: a mapped input reached through an assigned value (item 328)', () => {
+  // `y_0` holds a value AND is mapped: the shape that folded. A valueless
+  // `y_0` never folded, because the engine could not evaluate `sin(y_0)`.
+  function engine() {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('y_0', 'real');
+    ce.assign('y_0', ce.box(0.5));
+    ce.assign('a', ce.parse('\\sin(y_0)'));
+    ce.assign('c', ce.parse('2a'));
+    ce.declare('u', '(real) -> real');
+    ce.assign('u', ce.parse('L \\mapsto 2L - a'));
+    return ce;
+  }
+  const vars = { y_0: '_.y_0' };
+
+  it('control: with no mapping, the value-dependent subtree still folds', () => {
+    const ce = engine();
+    const code = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('\\cos(a)')).code;
+    expect(code).toBe(String(Math.cos(Math.sin(0.5))));
+  });
+
+  it('JavaScript: the value is bound as code reading the input, at the top level and in a function body', () => {
+    const ce = engine();
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('\\cos(a) + u(y_0)'), { vars });
+    expect(r.preamble).toContain('const _val_a = Math.sin(_.y_0)');
+    expect(r.preamble).toContain('const _fn_u = (L) => 2 * L + -_val_a');
+    expect(r.code).toContain('Math.cos(_val_a)');
+    expect(r.freeSymbols).toEqual(['y_0']);
+    const f = (y: number) => Math.cos(Math.sin(y)) + 2 * y - Math.sin(y);
+    expect(r.run!({ y_0: 0.5 })).toBeCloseTo(f(0.5), 12);
+    expect(r.run!({ y_0: 1 })).toBeCloseTo(f(1), 12);
+  });
+
+  it('JavaScript: a call with a constant argument is not folded when the body reads such a value', () => {
+    const ce = engine();
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('u(1)'), { vars });
+    expect(r.code).toBe('_fn_u(1)');
+    expect(r.preamble).toContain('Math.sin(_.y_0)');
+    expect(r.run!({ y_0: 0.5 })).toBeCloseTo(2 - Math.sin(0.5), 12);
+    expect(r.run!({ y_0: 1 })).toBeCloseTo(2 - Math.sin(1), 12);
+  });
+
+  it('JavaScript: the dependency is followed through a chain of values', () => {
+    const ce = engine();
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('c + y_0'), { vars });
+    expect(r.preamble).toContain('const _val_a = Math.sin(_.y_0)');
+    expect(r.preamble).toContain('const _val_c = 2 * _val_a');
+    expect(r.run!({ y_0: 1 })).toBeCloseTo(2 * Math.sin(1) + 1, 12);
+  });
+
+  it('JavaScript: a definite integral over such a value stays a run-time integral', () => {
+    const ce = engine();
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('\\int_0^1 a x\\,dx'), { vars });
+    expect(r.code).toContain('_SYS.integrate(');
+    expect(r.preamble).toContain('Math.sin(_.y_0)');
+    expect(r.run!({ y_0: 0.5 })).toBeCloseTo(Math.sin(0.5) / 2, 8);
+    expect(r.run!({ y_0: 1 })).toBeCloseTo(Math.sin(1) / 2, 8);
+  });
+
+  it('GLSL: the value is emitted inline as code reading the uniform', () => {
+    const ce = engine();
+    const r = ce
+      ._getCompilationTarget('glsl')!
+      .compile(ce.parse('\\cos(a) + u(y_0)'), { vars: { y_0: 'u_y0' } });
+    expect(r.code).toBe('cos(sin(u_y0)) + _fn_u(u_y0)');
+    expect(r.preamble).toContain('return 2.0 * L + -sin(u_y0);');
+  });
+
+  it('interval-js: unchanged — it never folded through the value', () => {
+    const ce = engine();
+    const r = ce
+      ._getCompilationTarget('interval-js')!
+      .compile(ce.parse('\\cos(a) + u(y_0)'), { vars });
+    expect(r.preamble).toContain('const _val_a = _IA.sin(_.y_0)');
+    expect(r.code).toBe('_IA.add(_IA.cos(_val_a), _fn_u(_.y_0))');
+  });
+
+  it('a caller-overridden function reached through a value runs the caller’s code', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('g', '(real) -> real');
+    ce.assign('g', ce.parse('t \\mapsto t^2'));
+    ce.assign('q', ce.parse('g(3)'));
+    expect(ce.parse('q + 1').evaluate().re).toBe(10);
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('q + 1'), { functions: { g: '((t) => 100)' } });
+    // Folding `q` would evaluate the engine's `g` (10), bypassing the
+    // caller's implementation the `functions` option promises to run.
+    expect(r.run!({})).toBe(101);
+  });
+
+  it('the mapped name itself is read inside a called function body on every target (the item as filed)', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('y_0', 'real');
+    ce.declare('a', 'real');
+    ce.assign('a', ce.box(0.7));
+    ce.declare('u', '(real) -> real');
+    ce.assign('u', ce.parse('L \\mapsto 2L - a'));
+    const expr = ce.parse('\\cos(a) + u(y_0)');
+    const js = ce
+      ._getCompilationTarget('javascript')!
+      .compile(expr, { vars: { a: '_.a' } });
+    expect(js.preamble).toContain('const _fn_u = (L) => 2 * L + -_.a');
+    expect(js.freeSymbols).toEqual(['a', 'y_0']);
+    expect(js.run!({ a: 0.1, y_0: 0.2 })).toBeCloseTo(
+      Math.cos(0.1) + 0.4 - 0.1,
+      12
+    );
+    const glsl = ce
+      ._getCompilationTarget('glsl')!
+      .compile(expr, { vars: { a: 'u_a' } });
+    expect(glsl.code).toBe('cos(u_a) + _fn_u(y_0)');
+    expect(glsl.preamble).toContain('return 2.0 * L + -u_a;');
+    const ia = ce
+      ._getCompilationTarget('interval-js')!
+      .compile(expr, { vars: { a: '_.a' } });
+    expect(ia.preamble).toContain('_IA.sub(_IA.scale(_k1, L), _.a)');
+  });
+});
+
+describe('COMPILE: a mapped input reached through a multi-clause function body', () => {
+  it('walks every clause body: the call is not folded and the input is reported', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('y_0', 'real');
+    ce.assign('y_0', ce.box(0.5));
+    ce.assign('a', ce.parse('\\sin(y_0)'));
+    executeEpsil(
+      ce,
+      'function w(x: number) { x - a }\nfunction w(x: number, y: number) { x + y }'
+    );
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.box(['w', 1]), { vars: { y_0: '_.y_0' } });
+    expect(r.code).toBe('_fn_w(1)');
+    expect(r.preamble).toContain('const _val_a = Math.sin(_.y_0)');
+    // The reference analysis had no notion of a clause set, so `y_0`, read
+    // only through a clause body, was missing from `freeSymbols`.
+    expect(r.freeSymbols).toEqual(['y_0']);
+    expect(r.run!({ y_0: 0.5 })).toBeCloseTo(1 - Math.sin(0.5), 12);
+    expect(r.run!({ y_0: 1 })).toBeCloseTo(1 - Math.sin(1), 12);
   });
 });

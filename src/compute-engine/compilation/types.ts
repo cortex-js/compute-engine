@@ -914,6 +914,19 @@ export interface CompileTarget<Expr = unknown> {
   varsKeys?: ReadonlySet<string>;
 
   /**
+   * Per-compilation memo for `BaseCompiler.reachesExcludedName`: for a symbol
+   * name, whether its assigned value or its user-function body reaches a
+   * `vars`-mapped input or a caller-overridden operator (`foldExcludedOps`).
+   * The answer depends only on the engine's definitions, which do not change
+   * while one expression compiles, so it is computed once per name. Created
+   * lazily on the target that first asks; a nested target spread from it
+   * after that shares the map, one spread before it starts its own. Either
+   * way the answers agree, since `varsKeys` and `foldExcludedOps` are set
+   * once per compilation and never changed by a spread.
+   */
+  foldReachMemo?: Map<string, boolean>;
+
+  /**
    * Per-level subdivision count chosen by the OUTERMOST `Integrate` lowering
    * of the interval target for every integral in its subtree — see the
    * sizing model in `compileIntervalIntegrate`

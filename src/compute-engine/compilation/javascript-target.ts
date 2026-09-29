@@ -15686,12 +15686,11 @@ function symbolicLimitAttemptAllowed(
   for (const op of ops) if (op.unknowns.length > 0) return false;
   if (f.engine.angularUnit !== 'rad') return false;
   if (f.isPure !== true) return false;
-  if (target.varsKeys !== undefined && target.varsKeys.size > 0)
-    for (const op of ops)
-      for (const s of op.symbols) if (target.varsKeys.has(s)) return false;
-  if (target.foldExcludedOps !== undefined)
-    for (const name of target.foldExcludedOps)
-      for (const op of ops) if (op.has(name)) return false;
+  // The attempt evaluates through the engine, so a `vars`-mapped input or a
+  // caller-overridden function reached through an assigned value or a
+  // user-function body declines it too (`reachesExcludedName`).
+  for (const op of ops)
+    if (BaseCompiler.reachesExcludedName(op, target)) return false;
   let nodes = 0;
   for (const op of ops) {
     nodes += nodeCountCapped(op, SYMBOLIC_LIMIT_MAX_NODES - nodes);

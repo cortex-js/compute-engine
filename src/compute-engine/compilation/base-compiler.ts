@@ -5593,6 +5593,110 @@ export class BaseCompiler {
   }
 
   /**
+   * Whether evaluating `expr` at compile time would bake in something that
+   * must stay live at run time: `expr` mentions a `vars`-mapped input or a
+   * caller-overridden operator (see `mentionsExcludedName`) either directly,
+   * or through the assigned value of a symbol it reads, or through the body
+   * of a user-defined function it calls or passes as a value — at any depth.
+   *
+   * The compile-time folder evaluates a subtree through the engine, and the
+   * engine reads every assigned value and applies every user function it
+   * reaches. With `a := sin(y_0)` and `y_0` a `vars`-mapped input that also
+   * holds a value, `cos(a)` mentions no mapped name itself, yet folding it
+   * bakes `y_0`'s current value into the code, and a later write to the input
+   * has no effect: a slider-dependent document definition drew outdated
+   * geometry (Tycho item 328). The same holds for the body of `u := L ↦ 2L −
+   * a` under the call `u(1)`, and for a caller-overridden function reached
+   * through a value, which the fold would evaluate through the engine
+   * instead of running the caller's implementation.
+   *
+   * The answer for a name depends only on the engine's definitions, which do
+   * not change while one expression compiles, so it is memoized per name in
+   * `target.foldReachMemo`, and a function node already walked in this call
+   * is not walked again. A name whose walk is in progress (a value that
+   * refers to itself) answers `false` at the re-entry, and that answer is
+   * provisional: a walk that met such a re-entry may have been cut short by
+   * the cycle, so its `false` is not memoized, while a walk that met none is
+   * complete and is. A `true` is memoized from any depth. Definitions rarely
+   * form a cycle (the engine cannot evaluate one), so in practice every name
+   * is walked once and a tower of definitions sharing dependencies costs
+   * linear work.
+   *
+   * A parameter or binder index that shadows a same-named engine symbol is
+   * not tracked: its engine value is walked too, which can only report a
+   * mention that is not there, and a spurious mention costs one fold, never
+   * a wrong value.
+   */
+  static reachesExcludedName(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): boolean {
+    const vars = target.varsKeys;
+    const ops = target.foldExcludedOps;
+    if (
+      (vars === undefined || vars.size === 0) &&
+      (ops === undefined || ops.size === 0)
+    )
+      return false;
+    const memo = (target.foldReachMemo ??= new Map());
+    const engine = expr.engine;
+    const walking = new Set<string>();
+    const seen = new Set<Expression>();
+    // How many times a walk short-circuited on a name already in progress.
+    // A name's walk compares the count before and after: unchanged means no
+    // cycle cut it short and its `false` is final.
+    let reentries = 0;
+    const viaName = (s: string): boolean => {
+      const known = memo.get(s);
+      if (known !== undefined) return known;
+      if (walking.has(s)) {
+        reentries += 1;
+        return false;
+      }
+      walking.add(s);
+      const before = reentries;
+      let hit = false;
+      try {
+        const value = engine._getSymbolValue(s);
+        if (value !== undefined) hit = visit(value);
+        if (!hit) {
+          const literal = BaseCompiler.userFunctionLiteral(engine, s);
+          if (literal !== undefined && literal !== value) hit = visit(literal);
+        }
+        // A multi-clause function has no single literal: each clause's body
+        // is read, as `foldValueImpure` reads them.
+        if (!hit) {
+          const clauses = multiClauseState(engine.lookupDefinition(s))?.clauses;
+          if (clauses !== undefined)
+            hit = clauses.some((c) => visit(c.literal));
+        }
+      } finally {
+        walking.delete(s);
+      }
+      if (hit || reentries === before) memo.set(s, hit);
+      return hit;
+    };
+    const visit = (e: Expression): boolean => {
+      if (isSymbol(e)) {
+        const s = e.symbol;
+        if (vars?.has(s) === true || ops?.has(s) === true) return true;
+        return viaName(s);
+      }
+      if (isDictionary(e)) return e.values.some(visit);
+      if (isFunction(e)) {
+        if (seen.has(e)) return false;
+        seen.add(e);
+        const h = e.operator;
+        if (ops?.has(h) === true) return true;
+        if (e.ops.some(visit)) return true;
+        return viaName(h);
+      }
+      return false;
+    };
+    return visit(expr);
+  }
+
+  /**
    * Whether the subtree contains a `Sum`/`Product` with a non-finite bound in
    * an INDEXING-SET operand (everything after the body: `Limits`, `Element`,
    * and the raw spellings). Such a node must never constant-fold — see the
@@ -6248,15 +6352,10 @@ export class BaseCompiler {
     // it from the space `colorSpaceOf` reports for the unfolded expression.
     if (target.language === 'javascript' && isColorValued(expr))
       return undefined;
-    if (
-      (target.varsKeys !== undefined || target.foldExcludedOps !== undefined) &&
-      BaseCompiler.mentionsExcludedName(
-        expr,
-        target.varsKeys,
-        target.foldExcludedOps
-      )
-    )
-      return undefined;
+    // Transitive on purpose: a mapped input reached through a symbol's
+    // assigned value or a called function's body must not be baked either
+    // (see `reachesExcludedName`).
+    if (BaseCompiler.reachesExcludedName(expr, target)) return undefined;
     // `quadrature: 'monte-carlo'` is an explicit request for the stochastic
     // runtime estimator — a DIFFERENT result on each call, by contract.
     // Folding a constant integral to one fixed value would override that
@@ -10513,7 +10612,10 @@ export class BaseCompiler {
       //     mapped, the compiler emits its binding inline or as a baked
       //     constant, so the binding is exactly what runs.)
       // Both decline, keeping the fail-closed behavior the declaration asks
-      // for.
+      // for. The mention check is on the operand's own names, not transitive
+      // through assigned values (`reachesExcludedName`): this reads the
+      // SHAPE of the binding, which a mapped input inside the value does not
+      // change, and evaluates nothing.
       if (BaseCompiler.isCompileBoundName(a.symbol)) return false;
       if (
         target !== undefined &&
@@ -17994,18 +18096,17 @@ export class BaseCompiler {
   }
 
   /**
-   * Whether any operand of the integral references a `vars`-mapped symbol — one
-   * the caller pinned to a runtime input. Such a symbol must not be folded, so
-   * the antiderivative-first path is skipped when the integral touches one.
+   * Whether any operand of the integral reaches a `vars`-mapped symbol — one
+   * the caller pinned to a runtime input — directly or through an assigned
+   * value or a user-function body (`reachesExcludedName`). Such a symbol must
+   * not be folded, so the antiderivative-first path, which resolves the
+   * integral through `evaluate()`, is skipped when the integral touches one.
    */
   private static referencesVarsSymbol(
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): boolean {
-    const keys = target.varsKeys;
-    if (!keys || keys.size === 0) return false;
-    for (const k of keys) if (args.some((a) => a.has(k))) return true;
-    return false;
+    return args.some((a) => BaseCompiler.reachesExcludedName(a, target));
   }
 
   /**
@@ -27767,6 +27868,17 @@ export class BaseCompiler {
         target.operators?.(h) === undefined
           ? BaseCompiler.userFunctionLiteral(engine, h)
           : undefined;
+      // A multi-clause function has no single literal: its clause bodies are
+      // walked below as a literal body is, so a symbol that only a clause
+      // reads is surfaced as an input (the emitted `_fn_w$c1` reads it).
+      const userClauses =
+        userLiteral === undefined &&
+        target.userFunctions !== undefined &&
+        !BaseCompiler.STRUCTURAL_HEADS.has(h) &&
+        target.functions?.(h) === undefined &&
+        target.operators?.(h) === undefined
+          ? multiClauseState(engine.lookupDefinition(h))?.clauses
+          : undefined;
 
       // A head whose operator definition supplies a custom `compile` handler
       // (the public per-operator extension point) MAY be lowerable via that
@@ -27908,6 +28020,7 @@ export class BaseCompiler {
         target.functions?.(h) === undefined &&
         target.operators?.(h) === undefined &&
         userLiteral === undefined &&
+        userClauses === undefined &&
         !hasCustomCompile &&
         protocolPlan === undefined
       )
@@ -27927,6 +28040,16 @@ export class BaseCompiler {
           visitLiteralBody(userLiteral, bound);
         }
         // The call arguments are evaluated in the surrounding scope.
+        for (const op of ops) visit(op, bound);
+        return;
+      }
+      if (userClauses !== undefined) {
+        if (!userFnSeen.has(h)) {
+          userFnSeen.add(h);
+          for (const c of userClauses)
+            if (isFunction(c.literal, 'Function'))
+              visitLiteralBody(c.literal, bound);
+        }
         for (const op of ops) visit(op, bound);
         return;
       }

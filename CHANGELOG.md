@@ -34,6 +34,23 @@
 
 ### Issues Resolved
 
+- **A `vars`-mapped input reached through an assigned value is no longer
+  baked into compiled code.** The compile-time folder stopped only at a
+  subtree that mentioned a mapped name itself. With `a := sin(y_0)` and
+  `y_0` mapped in `vars` while also holding a value, `cos(a)` folded to a
+  number, the body of `u := L ↦ 2L − a` under the call `u(1)` folded, and so
+  did a definite integral or a limit over such a value: the input was in the
+  argument bag but changing it changed nothing (a slider-dependent document
+  definition drew outdated geometry; Tycho item 328). The guard now follows
+  assigned values and user-function bodies at any depth, on every target, so
+  the value is emitted as code reading the input (`const _val_a =
+  Math.sin(_.y_0)`; inline `sin(u_y0)` on GLSL/WGSL). The same guard makes a
+  function the caller overrides through the `functions` option run the
+  caller's code when it is reached through a symbol's value (`q := g(3)`
+  with `functions: { g }` ran the engine's `g`). A multi-clause function
+  (`function w(x) {…}` twice in Epsil) is read clause by clause for both
+  purposes, and `freeSymbols` now lists a symbol that only a clause body
+  reads; it was missing.
 - **`Beta`, `Zeta` and `Lb` write conventional LaTeX when applied, and the
   sign of a numeric fraction moves in front of it.** `Beta(2, 3)` wrote
   `\Beta(2, 3)` (capital beta is roman, not a separate glyph — MathLive

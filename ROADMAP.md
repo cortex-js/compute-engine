@@ -109,6 +109,36 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A broadcast call of a bound user function has no element count (OPEN, decision — found 2026-09-28 answering Tycho item 326)
+
+With `S` declared `(real) -> tuple<number, number>` and `L := [0..40]`, the
+call `S(L)` types `list<tuple<number, number>>`, and so does `d·S(L)`, yet
+both answer `count: undefined`, while `d·L` answers 41. The count facet for
+an un-evaluated broadcast (`_broadcastCount` in `boxed-function.ts`) is gated
+to the LIFTED arithmetic operators (`broadcastable: true`); a broadcast CALL
+of a bound user function, whose scalar parameter receives a counted list, is
+not covered, so its length is only known by materializing it. Tycho asks the
+length question before deciding whether to evaluate a classification probe
+(item 326), and this is the one static query in that discussion CE does not
+answer today. The facet's invariant is "count never outruns the walk"
+(`test/compute-engine/tycho-item-167-broadcast-count.test.ts`), so the
+decision is whether `S(L).each()` walks the broadcast lazily; if it does,
+the count is the counted argument's, and the fix is a second arm in
+`_broadcastCount` for a bound head whose declared scalar parameter receives
+an unkeyed collection. If it does not, the count must stay `undefined`, and
+the answer to Tycho is "declare the carrier's type and count in the
+classification engine".
+
+### A list of numbers plus a point is typed `indexed_collection<integer>` and evaluates to a list of errors (OPEN, small — found 2026-09-28 answering Tycho item 326)
+
+With `L := [0..3]`, `L + (1, 1)` types `indexed_collection<integer>` and
+evaluates to four `incompatible-type` errors (`2 + (1, 1)` alone is one such
+error, typed `error`). The type and the value disagree: the type promises a
+collection of integers that no evaluation produces. Either the type should be
+`error` like the scalar case, or `list<error>`; the broadcast type derivation
+lifts the scalar operator's type over the list without seeing that the scalar
+case is an error.
+
 ### `PolyGamma`/`Digamma`/`Trigamma` have no GPU shader lowering (OPEN, capability gap — found 2026-09-28 widening `PolyGamma` to a complex `z` for #340)
 
 Neither `gpu-target.ts` shader (GLSL or WGSL) declares a lowering for these
