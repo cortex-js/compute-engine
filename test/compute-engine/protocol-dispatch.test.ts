@@ -12,10 +12,11 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // A protocol's FUNCTION members become callable by their bare name: each name
 // gets ONE global operator definition — the dispatcher — whose `evaluate`
 // selects the most specific conformance implementation for the RUNTIME type of
-// the first argument, and whose `canonical`/`type` handlers bind `Self` to its
-// STATIC type. The qualified form `Comparable.compare(x, y)` parses as
-// `Apply(Field(Comparable, "compare"), x, y)` and reaches the same dispatch
-// restricted to one protocol.
+// the first argument, and whose `canonical`/`type` handlers bind `Self` to the
+// CONFORMANCE TARGET dispatch would select for its STATIC type — not to that
+// static type itself (#362). The qualified form `Comparable.compare(x, y)`
+// parses as `Apply(Field(Comparable, "compare"), x, y)` and reaches the same
+// dispatch restricted to one protocol.
 //
 // Protocols are engine-global, so every block below uses a fresh engine.
 //
@@ -277,9 +278,12 @@ type string is Comparable {
   function compare(self: Self, other: Self) -> string { "proto" }
 }`;
 
-  test('`Self` binds to ops[0] and argument 2 is checked against it', () => {
+  test('`Self` binds to the conformance target and argument 2 is checked against it', () => {
     // Appendix A's example: `compare("a", 3)` is an `incompatible-type` on
-    // ARGUMENT 2 — not a join of `Self` across the arguments.
+    // ARGUMENT 2 — not a join of `Self` across the arguments. `string`'s own
+    // conformance is the target here (an exact match with ops[0]'s type), so
+    // this case does not exercise the target/receiver distinction #362 fixed
+    // — see the dedicated describe block below for that.
     const ce = engineFor(STRING_ONLY);
     const expr = ce.box(['compare', { str: 'a' }, 3] as any);
     expect(expr.toString()).toBe(
@@ -420,6 +424,100 @@ type string is Copyable {
       'string'
     );
     expect(call(ce, 'copy', { str: 'a' })).toBe('"a"');
+  });
+});
+
+describe('#362: `Self` binds to the conformance target, not the receiver', () => {
+  // arnog's repro: `PartialOrder.compare` declared once, on `real` — every
+  // real-conforming receiver should accept every real-conforming argument,
+  // in either order.
+  const REAL_PARTIAL_ORDER = () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('PartialOrder', {
+      functions: { compare: '(self: Self, other: Self) -> integer' },
+    });
+    ce.declareProtocolImplementation('real', 'PartialOrder', {
+      functions: { compare: (a: any, b: any) => Math.sign(a.re - b.re) },
+    });
+    return ce;
+  };
+
+  // [receiver, other, expected sign], mixing integer, rational and real —
+  // every one of `real`'s subtypes — in both argument orders.
+  const MIXED_ARGUMENT_ORDERS: [unknown, unknown, number][] = [
+    [5, ['Rational', 1, 2], 1],
+    [['Rational', 1, 2], 5, -1],
+    [3, 2.5, 1],
+    [2.5, 3, -1],
+    [['Rational', 1, 2], ['Rational', 1, 2], 0],
+  ];
+
+  for (const [self, other, sign] of MIXED_ARGUMENT_ORDERS) {
+    const label = `compare(${JSON.stringify(self)}, ${JSON.stringify(other)})`;
+
+    test(`${label} canonicalizes with no incompatible-type error`, () => {
+      const ce = REAL_PARTIAL_ORDER();
+      const expr = ce.box(['compare', self, other] as any);
+      expect(expr.isValid).toBe(true);
+      expect(expr.toString()).not.toContain('incompatible-type');
+    });
+
+    test(`${label} evaluates to ${sign}`, () => {
+      const ce = REAL_PARTIAL_ORDER();
+      expect(
+        ce
+          .box(['compare', self, other] as any)
+          .evaluate()
+          .toString()
+      ).toBe(String(sign));
+    });
+  }
+
+  test('a NOMINAL type that does not conform is still rejected, regardless of position', () => {
+    const ce = REAL_PARTIAL_ORDER();
+    run(
+      ce,
+      `type Thing = tuple<n: integer>
+let t = Thing(1)`
+    );
+    // The receiver is nominal and conforms to nothing: the static missing
+    // diagnostic, exactly as before this fix — binding `Self` to the
+    // conformance target never widens who is admitted as a RECEIVER, only
+    // what the OTHER `Self` positions are checked against once one applies.
+    const receiverIsThing = ce.box(['compare', 't', 3] as any);
+    expect(errorCode(receiverIsThing.toString())).toBe(
+      'protocol-implementation-missing'
+    );
+    // `Thing` in the second position is a decided argument that fails the
+    // `real` check: `incompatible-type`, named at argument 2.
+    const argIsThing = ce.box(['compare', 3, 't'] as any);
+    expect(errorCode(argIsThing.toString())).toBe('incompatible-type');
+  });
+
+  test('the `-> Self` result binds to the conformance target too', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Clamped', {
+      functions: { clampToSelf: '(self: Self, bound: Self) -> Self' },
+    });
+    ce.declareProtocolImplementation('real', 'Clamped', {
+      functions: { clampToSelf: (a: any, b: any) => (a.re < b.re ? b : a) },
+    });
+    // The receiver is `integer`, but the result type is the CONFORMANCE
+    // TARGET (`real`), not the receiver's own narrower type — the target is
+    // a supertype of every value the implementation can actually return.
+    expect(
+      ce.box(['clampToSelf', 3, ['Rational', 1, 2]] as any).type.toString()
+    ).toBe('real');
+  });
+
+  test('runtime dispatch (`dispatchMember`) agrees with the static check', () => {
+    // Before this fix, `checkMemberArguments` (canonical time) and
+    // `dispatchMember` (evaluate time) bound `Self` inconsistently — a
+    // canonical-only construction (`{ canonical: false }` then `.evaluate()`)
+    // exercises the runtime path on its own.
+    const ce = REAL_PARTIAL_ORDER();
+    const expr = ce.box(['compare', 3, 2.5] as any, { canonical: false });
+    expect(expr.evaluate().toString()).toBe('1');
   });
 });
 
@@ -725,7 +823,8 @@ const r = Map(Negatable.negated, [1, 2])`
     expect(long.isValid).toBe(false);
     expect(long.toString()).toContain('unexpected-argument');
 
-    // `Self` binds to argument 1 and argument 2 is checked against it — the
+    // `Self` binds to `string`'s own conformance (an exact match with
+    // argument 1's type) and argument 2 is checked against it — the
     // qualified spelling of Appendix A's `compare("a", 3)`.
     const mismatch = member({ str: 'a' }, 3);
     expect(mismatch.toString()).toBe(

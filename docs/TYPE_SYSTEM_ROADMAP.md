@@ -1815,24 +1815,38 @@ type number is Comparable {
 }
 ```
 
-**Static checking (ruling).** At a call site, `Self` binds to the *static
-type of the first argument*; every other `Self`-typed parameter is then
-checked as an ordinary argument against that binding. There is no joining
-of `Self` across arguments:
+**Static checking (ruling).** At a call site, `Self` binds to the
+*conformance target that dispatch would select* for the first argument's
+static type — the most specific implementation target that type admits —
+not to the first argument's own type. Every other `Self`-typed parameter is
+then checked as an ordinary argument against that binding. There is no
+joining of `Self` across arguments: both positions are checked against the
+same target, never a join of what each argument itself contributes.
+
+```epsil
+compare(3, 2.5)
+// `real`'s Comparable conformance is the most specific edge admitting the
+// receiver's static type (`integer`), so Self binds to `real`
+// -> argument 2 (`2.5: real`) matches; the call is valid regardless of
+//    which side carries which numeric subtype
+```
 
 ```epsil
 compare("a", 3)
-// Self binds to `string` (the type of the first argument)
+// `string`'s own conformance IS the target here (an exact match), so this
+// case is unchanged: Self binds to `string`
 // -> incompatible-type: argument 2 has type `integer`; expected `string`
 //    (`Comparable.compare` at `Self = string`)
 ```
 
 If the first argument's static type neither conforms nor has any conforming
 subtype, the call is a static diagnostic
-(`protocol-implementation-missing`); if conformance cannot be decided
-statically (e.g. the static type is `value`, or a union only some arms of
-which conform), the call is checked dynamically and produces the ordinary
-runtime error value when no implementation applies.
+(`protocol-implementation-missing`) — binding `Self` to the conformance
+target never widens who is admitted as a RECEIVER, only what the other
+`Self` positions are checked against once one applies. If conformance
+cannot be decided statically (e.g. the static type is `value`, or a union
+only some arms of which conform), the call is checked dynamically and
+produces the ordinary runtime error value when no implementation applies.
 
 **Name resolution.** A bare (unqualified) call resolves through this pipeline:
 
@@ -1981,6 +1995,20 @@ Host declarations validate eagerly and **throw** on error, including on
 re-declaration (see "Scope and lifecycle"); the Epsil route emits
 diagnostics and replaces on statement re-run. Route-parity tests must
 exercise both routes (cf. the box/parse-route convention in `CLAUDE.md`).
+
+The registry also answers a plain conformance query, without calling a
+member and reading `protocol-implementation-missing` as "no":
+
+```ts
+ce.conformsTo(type: Type | TypeString, protocol: string): boolean;
+```
+
+Inheritance included (a conformance registered for a supertype answers for
+its subtypes) and conditional conformance included (`list<string>` answers
+for a `list<T> is P where T is P` conformance the same way dispatch would).
+An unknown protocol name answers `false` rather than throwing — the
+question is "does this conform", and a protocol that does not exist is
+answered the same as one nothing conforms to yet.
 
 ### Trust model
 

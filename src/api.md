@@ -629,6 +629,51 @@ throws.
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~conformsTo()~~ {#conformsto-1}
+
+```ts
+conformsTo(type, protocol): boolean
+```
+
+Whether `type` conforms to `protocol`, answered without calling any of
+the protocol's members. An unknown protocol answers `false`.
+
+Inheritance included: a conformance registered for a supertype answers
+for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
+P`) recurses, deciding itself against `type`'s own arguments.
+
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
+parses one.
+
+####### type
+
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`ObjectType`](#objecttype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
+  \| [`TypeReference`](#typereference)
+
+####### protocol
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~withTimeLimit()~~ {#withtimelimit-1}
 
 ```ts
@@ -10620,6 +10665,51 @@ throws.
 ####### options?
 
 ####### where?
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.conformsTo() {#conformsto}
+
+```ts
+conformsTo(type, protocol): boolean
+```
+
+Whether `type` conforms to `protocol`, answered without calling any of
+the protocol's members. An unknown protocol answers `false`.
+
+Inheritance included: a conformance registered for a supertype answers
+for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
+P`) recurses, deciding itself against `type`'s own arguments.
+
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
+parses one.
+
+####### type
+
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`ObjectType`](#objecttype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
+  \| [`TypeReference`](#typereference)
+
+####### protocol
 
 `string`
 

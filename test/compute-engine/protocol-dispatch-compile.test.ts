@@ -155,6 +155,33 @@ type list<T> is Comparable where T is Comparable {
   });
 });
 
+describe('Self binds to the conformance target (#362)', () => {
+  // `Self` is `real` for every receiver the `real` edge serves, so an
+  // `integer`, `rational` or `real` operand fits either position; the
+  // compiled call answers what the interpreter answers, in both orders.
+  const cases: [unknown, unknown, number][] = [
+    [5, ['Rational', 1, 2], 4.5],
+    [['Rational', 1, 2], 5, -4.5],
+    [3, 2.5, 0.5],
+    [2.5, 3, -0.5],
+  ];
+  for (const [x, y, expected] of cases) {
+    test(`difference(${JSON.stringify(x)}, ${JSON.stringify(y)}) = ${expected}, compiled and evaluated`, () => {
+      const ce = engineFor(`protocol Subtractable {
+  function difference(self: Self, other: Self) -> real
+}
+type real is Subtractable {
+  function difference(self: Self, other: Self) -> real { self - other }
+}`);
+      const expr = ce.box(['difference', x, y] as any);
+      expect(expr.N().re).toBeCloseTo(expected, 12);
+      const result = compile(expr);
+      expect(result.success).toBe(true);
+      expect(result.run?.()).toBeCloseTo(expected, 12);
+    });
+  }
+});
+
 describe('tier B: reified dynamic dispatch', () => {
   test('an unknown receiver compiles to a guard chain agreeing with the interpreter', () => {
     const ce = engineFor(`${DESCRIBABLE}

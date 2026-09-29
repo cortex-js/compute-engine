@@ -1,3 +1,32 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **A protocol member's `Self` binds to the conformance target dispatch
+  selects, not the first argument's static type**
+  ([#362](https://github.com/cortex-js/compute-engine/issues/362),
+  contributed by [enumeratio](https://github.com/enumeratio)). With
+  `Compare: "(Self, Self) -> number"` implemented on `real`,
+  `Compare(5, 1/2)` and `Compare(3, 2.5)` were rejected as
+  `incompatible-type` while `Compare(1/2, 5)` and `Compare(2.5, 3)` passed —
+  acceptance depended on which argument happened to already have the exact
+  declared type. `Self` now binds to the most specific conformance edge the
+  receiver's type admits (`real` here) at every call, statically and at
+  runtime, so both argument orders and any mix of `integer`, `rational` and
+  `real` are accepted alike; a `-> Self` result type binds the same way. A
+  nominal type that conforms to nothing is still refused in either position.
+
+### New Features
+
+- **`ce.conformsTo(type, protocol)`: a public conformance query**
+  ([#362](https://github.com/cortex-js/compute-engine/issues/362),
+  contributed by [enumeratio](https://github.com/enumeratio)). Answers
+  whether `type` conforms to `protocol`, inheritance and conditional
+  conformance included, without calling one of the protocol's members and
+  reading `protocol-implementation-missing` as "no". `type` may be a plain
+  type string, parsed the way `ce.type()` parses one; an unknown protocol
+  name answers `false` rather than throwing.
+
 ## 0.141.0 _2026-09-29_
 
 ### Behavior Changes

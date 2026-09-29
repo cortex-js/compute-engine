@@ -434,6 +434,83 @@ describe('ce.declareProtocol (host route)', () => {
   });
 });
 
+describe('ce.conformsTo (host route, #362)', () => {
+  test('true: an exact conformance target', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Comparable', { functions: { compare: COMPARE_SIG } });
+    ce.declareProtocolImplementation('string', 'Comparable', {
+      functions: { compare: () => '=' },
+    });
+    expect(ce.conformsTo('string', 'Comparable')).toBe(true);
+  });
+
+  test('true: inheritance — a SUBTYPE of the conforming target answers too', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Comparable', { functions: { compare: COMPARE_SIG } });
+    ce.declareProtocolImplementation('real', 'Comparable', {
+      functions: { compare: () => '=' },
+    });
+    expect(ce.conformsTo('real', 'Comparable')).toBe(true);
+    expect(ce.conformsTo('integer', 'Comparable')).toBe(true);
+  });
+
+  test('false: the protocol has no conformance registered at all', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Comparable', { functions: { compare: COMPARE_SIG } });
+    expect(ce.conformsTo('string', 'Comparable')).toBe(false);
+  });
+
+  test('false: an unrelated type', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Comparable', { functions: { compare: COMPARE_SIG } });
+    ce.declareProtocolImplementation('string', 'Comparable', {
+      functions: { compare: () => '=' },
+    });
+    expect(ce.conformsTo('integer', 'Comparable')).toBe(false);
+  });
+
+  test('false: an unknown protocol name, rather than throwing', () => {
+    const ce = new ComputeEngine();
+    expect(ce.conformsTo('string', 'Nope')).toBe(false);
+  });
+
+  test('accepts a parsed `Type`, not only a `TypeString`', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Comparable', { functions: { compare: COMPARE_SIG } });
+    ce.declareProtocolImplementation('string', 'Comparable', {
+      functions: { compare: () => '=' },
+    });
+    expect(ce.conformsTo(ce.type('string').type, 'Comparable')).toBe(true);
+  });
+
+  describe('a CONDITIONAL conformance (`list<T> is P where T is P`)', () => {
+    const COMPARABLE = `protocol Comparable {
+  function compare(self: Self, other: Self) -> string
+}`;
+    const STRING_IS_COMPARABLE = `type string is Comparable {
+  function compare(self: Self, other: Self) -> string { "=" }
+}`;
+    const LIST_IS_COMPARABLE = `type list<T> is Comparable where T is Comparable {
+  function compare(self: list<T>, other: list<T>) -> string {
+    compare(self[1], other[1])
+  }
+}`;
+    const SOURCE = `${COMPARABLE}\n${STRING_IS_COMPARABLE}\n${LIST_IS_COMPARABLE}`;
+
+    test('true when the element type itself conforms', () => {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, SOURCE);
+      expect(ce.conformsTo('list<string>', 'Comparable')).toBe(true);
+    });
+
+    test('false when the element type does not conform', () => {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, SOURCE);
+      expect(ce.conformsTo('list<integer>', 'Comparable')).toBe(false);
+    });
+  });
+});
+
 describe('P8: protocols and types share no names', () => {
   test('HOST route: a protocol may not take a type name', () => {
     const ce = new ComputeEngine();
