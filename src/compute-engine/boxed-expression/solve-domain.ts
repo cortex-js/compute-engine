@@ -1,5 +1,8 @@
 import type { Type } from '../../common/type/types.js';
-import { collectionElementType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  isBooleanOrBroadcastableBooleanType,
+} from '../../common/type/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { implicitCompile } from '../implicit-compile.js';
 
@@ -44,13 +47,15 @@ const SIDE_CONDITION_OPERATORS = new Set([
 /**
  * Whether `item` is a side-condition predicate: a relational operator above, or
  * any boolean-typed expression that is not an `Equal` (an `Equal` defines the
- * equation to solve, never a filter).
+ * equation to solve, never a filter). A `broadcastable<boolean>` expression
+ * (a connective over a comparison whose operand may be a collection) is a
+ * predicate too (`isBooleanOrBroadcastableBooleanType`).
  */
 function isSideConditionPredicate(item: Expression): boolean {
   const op = item.operator;
   if (op && SIDE_CONDITION_OPERATORS.has(op)) return true;
   if (op === 'Equal') return false;
-  return item.type.matches('boolean');
+  return isBooleanOrBroadcastableBooleanType(item.type.type);
 }
 
 /**
@@ -820,7 +825,10 @@ function classifyPredicate(ceq: Expression): {
 } {
   if (isFunction(ceq, 'Equal'))
     return { predBody: ceq.op1.sub(ceq.op2), isEquation: true };
-  if (ceq.type.matches('boolean')) return { predBody: ceq, isEquation: false };
+  // A `broadcastable<boolean>` expression is a predicate as well
+  // (`isBooleanOrBroadcastableBooleanType`), not a residual to test against 0.
+  if (isBooleanOrBroadcastableBooleanType(ceq.type.type))
+    return { predBody: ceq, isEquation: false };
   return { predBody: ceq, isEquation: true };
 }
 

@@ -669,6 +669,36 @@ export function serializeEpsil(
       ),
 
     //
+    // ListJoin — the canonical form of a list literal with a spread
+    //
+    // `["ListJoin", "a", ["List", 0]]` prints `[...a, 0]`: a `List` operand
+    // contributes its elements, any other operand is spread. That source
+    // re-parses to the same `ListJoin`. A `Tuple` operand is one element of a
+    // `ListJoin`, but `...(1, 2)` in a list literal is a `spread-tuple` error,
+    // so a call with a literal tuple operand keeps the call form, which
+    // re-parses faithfully.
+    //
+    // The serializer sees MathJSON only, without types, so it can recognize a
+    // tuple operand only when it is a literal `Tuple`. An operand that is a
+    // tuple by its type, such as a symbol `p` that holds a point, is printed
+    // as a spread: `["ListJoin", "p", ["List", 0]]` prints `[...p, 0]`, and
+    // that source re-parses to a `spread-tuple` error, not to the
+    // `ListJoin`. This is a known limitation of the round trip.
+    //
+    ListJoin: (expr: MathJsonExpression): FormattingBlock => {
+      const ops = mapArgs<MathJsonExpression>(expr, (x) => x);
+      if (ops.some((x) => operator(x) === 'Tuple'))
+        return serializeGenericFunction(expr);
+      const items: FormattingBlock[] = [];
+      for (const x of ops) {
+        if (operator(x) === 'List')
+          items.push(...mapArgs<FormattingBlock>(x, serializeExpression));
+        else items.push(fmt.line('...', serializeExpression(x)));
+      }
+      return fmt.fencedList('[', fmt.separator(','), ']', items);
+    },
+
+    //
     // Set
     //
     Set: (expr: MathJsonExpression): FormattingBlock => {

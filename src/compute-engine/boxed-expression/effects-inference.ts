@@ -6,10 +6,12 @@ import type {
 } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import {
+  broadcastableBaseMatches,
   collectionElementType,
   hasFunctionSignature,
   signatureArms,
   signatureEffects,
+  signatureSlotType,
   stripMissingFromType,
   stripNumericRanges,
   typeContainsMissing,
@@ -18,6 +20,7 @@ import {
   isSubtype,
   objectLayoutOfType,
   provablyDisjoint,
+  widenAll,
 } from '../../common/type/subtype.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
@@ -613,6 +616,21 @@ export function matchesDeclaredTypeAxes(
   )
     return true;
 
+  // A value typed `broadcastable<R>` is the scalar `R` or an indexed
+  // collection of `R`, and which one it is is known only when it is
+  // evaluated: `Sin(P)`, with `P` declared `collection<number>` and no value,
+  // is a number when `P` holds a set and a list when `P` holds a list. Where
+  // `R` is admitted, such a value is admitted too, because its scalar arm may
+  // be the value. This is the admission a typed PARAMETER gives the same
+  // value (`broadcastableBaseMatches`, applied by `validateArguments` and
+  // `checkType` in `validate.ts`), so a declared symbol and a parameter of
+  // the same type accept the same expressions.
+  if (
+    !declared.isPolymorphic &&
+    broadcastableBaseMatches(value.type, declared.type)
+  )
+    return true;
+
   // A `Function` LITERAL under a GENERIC declaration is judged by the
   // generic-literals acceptance rule (§2.4 of
   // `docs/TYPE-SYSTEM.md`), NOT by
@@ -828,6 +846,179 @@ function excludesEveryScalar(t: Type): boolean {
   return !isScalarType(t);
 }
 
+/**
+ * The signature type of a bare parameter that the body CONSUMES WHOLE, or
+ * `undefined` when no use of the parameter does.
+ *
+ * A user function whose parameter slot reads as a scalar is applied to each
+ * element of a list argument (auto-broadcast). That is only right when every
+ * use of the parameter is element-wise. The body of
+ * `function h(xs) { mean(xs) }` reads a list argument as one data set, so
+ * `h([1, 2, 3])` must be `2`, not `[1, 2, 3]` (user decision 2026-09-29).
+ * The reference is the body with the argument substituted: the function
+ * applied to a list gives the same value as its body with that list in
+ * place of the parameter. So a parameter that is used both whole and
+ * element-wise (`mean(xs) + xs`) is consumed whole too: the element-wise
+ * use then broadcasts inside the body, as it does in the substituted body.
+ *
+ * A use is WHOLE only when all of these hold:
+ * - The parameter ITSELF is the operand. A chain through element-wise
+ *   operators does not count: `mean(xs^2)` and `variance(xs - c)` are applied
+ *   to each element. The compiled form of a user function types an
+ *   undeclared parameter from its uses, not from this signature slot, so
+ *   `xs^2` compiles to scalar code and an array argument gives `NaN`, while
+ *   the interpreter would give the mean of the squares. Until the compiled
+ *   function reads the lifted slot, a chained use stays element-wise so that
+ *   the two routes agree.
+ * - The parameter is the ONLY operand of that application: `mean(xs)`
+ *   counts, `mean(x, 1)`, `max(x, 0)` and `hypot(x, 1)` do not. With several
+ *   operands the operator reads each operand as one datum, and a function
+ *   such as `g(x) = mean(x, 1)` called with a list of sample values must give
+ *   one value per sample (`[1, 1.5, 2]` for `[1, 2, 3]`).
+ * - The operator is not element-wise (`broadcastable`), and its declared
+ *   slot type has a collection arm. A tuple, record or function arm does not
+ *   count: a tuple is a point or a color read as one atomic value, which the
+ *   broadcast never descends into. A slot typed only by a top type (`value`,
+ *   `any`) does not count either: those are containers and structural
+ *   operators such as `List`, `Tuple` or `Equal`, and `(t) ↦ (cos(t),
+ *   sin(t))` must keep mapping over a list of parameters. The exceptions are
+ *   the operators in {@link TOP_SLOT_WHOLE_COLLECTION_OPERATORS}.
+ * - The operator is not `Norm`. Its slot (`number | tensor | tuple |
+ *   list<tuple>`) has collection arms, but a graphing application calls
+ *   `d(p) = norm(p)` with a LIST OF POINTS and expects one norm per point,
+ *   and the compiled form reduces a whole array to one scalar
+ *   (`_SYS.norm`). A list of vectors given to `len(v) = norm(v)` is also
+ *   applied element by element on both routes, and must not become one
+ *   norm of the whole matrix.
+ *
+ * So the operators covered are `Mean`, `Median`, `Variance`,
+ * `StandardDeviation`, `Mode`, `Quartiles`, `Flatten`, `SetFrom` and
+ * `TupleFrom`. `String` is element-wise: `label(p) = String(p)` over a list
+ * gives one string per element.
+ *
+ * The returned slot is the unreduced union `collection<any> | value`. The
+ * collection arm makes `paramsAreScalar` read the slot as one that admits a
+ * collection, so a list argument is bound whole. The `value` arm admits
+ * every argument the unlifted `unknown` slot admitted: the type the body's
+ * uses infer for the parameter (often `real`) is not an argument contract,
+ * so a point, a complex number or a string is still accepted and reaches
+ * the body as before. Reducing the union would give `value`, which reads as
+ * a scalar slot.
+ *
+ * A parameter with a declared type is never lifted: it is not a bare symbol
+ * (it is a `Typed` operand of the `Function` literal), so this function
+ * returns `undefined` for it and the declaration is the slot.
+ *
+ * Limitations:
+ * - Only direct uses in the body are followed. A parameter that reaches the
+ *   operator through a local alias (`let ys = xs; mean(ys)`), through an
+ *   assignment or through a destructuring is not seen, and the function
+ *   stays element-wise. A call to another user function is a use like any
+ *   other: `k(xs) = h(xs)` is lifted when the slot of `h` is lifted, because
+ *   that slot then has a collection arm. It is the only way the lift reaches
+ *   through a function, and it reads the signature of `h` as it is when the
+ *   signature of `k` is derived (the tests in
+ *   `test/compute-engine/whole-collection-parameter.test.ts` pin that both
+ *   definition orders give the same result today).
+ * - An operator whose signature is an overload set (an intersection of
+ *   arms, such as `Take` and `Drop`) is not read. Those two check their
+ *   operands with their own validation.
+ * - Once one parameter is bound whole, NO parameter of the function is
+ *   applied element by element: a list given to another parameter is bound
+ *   whole too.
+ */
+export function wholeCollectionParameterType(
+  param: Expression | undefined,
+  body: Expression | undefined
+): Type | undefined {
+  if (param === undefined || body === undefined || !isSymbol(param))
+    return undefined;
+  const binding = param.valueDefinition;
+  if (binding === undefined) return undefined;
+
+  // A shared subexpression is walked once.
+  const seen = new Set<Expression>();
+  const arms: Type[] = [];
+  const visit = (expr: Expression): void => {
+    if (!isFunction(expr) || seen.has(expr)) return;
+    seen.add(expr);
+    const def = expr.operatorDefinition;
+    if (
+      def !== undefined &&
+      expr.nops === 1 &&
+      isSymbol(expr.op1) &&
+      expr.op1.valueDefinition === binding
+    ) {
+      const arm = wholeCollectionSlotArm(expr.operator, def);
+      if (arm !== undefined) arms.push(arm);
+    }
+    for (const op of expr.ops) visit(op);
+  };
+  visit(body);
+  if (arms.length === 0) return undefined;
+  return { kind: 'union', types: [widenAll(arms), 'value'] };
+}
+
+/**
+ * The operators whose slot type is a top type (`value` or `any`) but that
+ * read a collection operand WHOLE: `Flatten`, `SetFrom` and `TupleFrom` take
+ * the elements of the collection. Their signatures cannot say so: a slot
+ * written `collection<any> | value` does mark the collection arm, but a FREE
+ * symbol at that slot is then narrowed to that union, and an arithmetic use
+ * of the symbol (`x + 1`) is then typed as a collection instead of `number`.
+ * So the fact is recorded here, where only the signature of a user function
+ * reads it.
+ *
+ * `Max`, `Min`, `GCD`, `LCM` and `ListFrom` read a collection operand whole
+ * too, but they are NOT listed. The compiled body of a user function types
+ * its parameter from the body's uses (`value` here), not from the lifted
+ * signature slot, so these five compile their operand as a scalar:
+ * `Math.max(<array>)` is `NaN`. Listing them would make the interpreter
+ * answer `max([1, 2, 3])` = `3` while the compiled function answers `NaN`.
+ * The three operators listed do not compile such an operand: `SetFrom` and
+ * `TupleFrom` have no JavaScript lowering, and `Flatten` declines an operand
+ * that is not typed as an indexed collection. The compiled function then
+ * falls back to the interpreter, so the two routes agree.
+ */
+const TOP_SLOT_WHOLE_COLLECTION_OPERATORS: ReadonlySet<string> = new Set([
+  'Flatten',
+  'SetFrom',
+  'TupleFrom',
+]);
+
+/**
+ * The collection arm of the slot that the LONE operand of an application of
+ * `operator` (whose definition is `def`) fills, when that operand is consumed
+ * WHOLE; `undefined` when the operand is element-wise or the slot has no
+ * collection arm. See {@link wholeCollectionParameterType} for the rule.
+ */
+function wholeCollectionSlotArm(
+  operator: string,
+  def: BoxedOperatorDefinition
+): Type | undefined {
+  if (def.broadcastable || operator === 'Norm') return undefined;
+  const sig = def.signature?.type;
+  if (sig === undefined || typeof sig === 'string' || sig.kind !== 'signature')
+    return undefined;
+  const slot = signatureSlotType(sig, 0);
+  if (slot === undefined) return undefined;
+  const t = substituteDeclaredBounds(sig.typeParams, slot);
+  if (
+    (t === 'value' || t === 'any') &&
+    TOP_SLOT_WHOLE_COLLECTION_OPERATORS.has(operator)
+  )
+    return { kind: 'collection', elements: 'any' };
+  const members = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
+  const collections = members.filter(
+    (m) =>
+      !isScalarType(m) &&
+      !isSubtype(m, 'function') &&
+      !isSubtype(m, 'tuple') &&
+      !isSubtype(m, 'record')
+  );
+  return collections.length === 0 ? undefined : widenAll(collections);
+}
+
 export function functionLiteralSignatureType(expr: Expression): Type {
   const ce = expr.engine;
   const body = functionLiteralBody(expr)!;
@@ -878,7 +1069,11 @@ export function functionLiteralSignatureType(expr: Expression): Type {
             isDestructuringParameter(paramOps[i])
           )
             return { type: destructuringParameterType(paramOps[i]) };
-          const inferred = inferredCollectionParameterType(paramOps[i]);
+          // A parameter the body consumes whole is lifted too, even when
+          // its inferred type admits a scalar (`wholeCollectionParameterType`).
+          const inferred =
+            inferredCollectionParameterType(paramOps[i]) ??
+            wholeCollectionParameterType(paramOps[i], body);
           if (inferred !== undefined) return { name: p.name, type: inferred };
           return { type: 'unknown' as Type };
         })

@@ -121,58 +121,6 @@ lowering. The fix is to lower a loop body's statements in statement
 position, as the top-level block does. The destructuring `let` at the top
 level of a block compiles.
 
-### A user function whose body applies `Flatten` or `Mean` to its parameter is applied to each element of a list argument (OPEN, decision — found 2026-09-29 by the fix for the callback operators)
-
-`function h(xs) { mean(xs) }` applied to `[1, 2, 3]` returns `[1, 2, 3]`
-(the literal call returns `2`), and `function h(xs) { flatten(xs) }` applied
-to `[[1], [2, 3]]` returns `[[[1]], [[2], [3]]]` (the literal call returns
-`[1, 2, 3]`). The parameter IS inferred (`value` for `Flatten`,
-`collection<any> | distribution | number` for `Mean`), but a parameter type
-reaches the function's signature only when it excludes every scalar
-(`inferredCollectionParameterType`, `boxed-expression/effects-inference.ts`),
-a deliberate rule: the index slot of `At` accepts a number and a
-collection, and a parameter used there must still be applied element by
-element. Options. (A) Keep the parameter a collection when the operator is
-not element-wise (`broadcastable: false`, as `Mean` declares) and one arm
-of its slot is a collection: `h([1, 2, 3])` gives `2`; the risk is that
-`h(5)` starts to report a type error. (B) Nothing: the two wrong values
-stay. Related: a call with the operands in the wrong order inside a
-function, `map(xs, x => 2 * x)` (Epsil's `map` takes the function first),
-is applied to each element silently, where the same call on a literal is a
-type error.
-
-### `Join`/`Append` over an operand that may hold a set: the value depends on the materialization option and the static type does not admit it (OPEN, decision — found 2026-09-29 by the result-kind fix)
-
-With `P` declared `collection<number>` and holding `Set(3, 1)`,
-`Join(P, [5])` has the static type `list<number>`; `evaluate()` gives
-`Set(3, 1, 5)` and `evaluate({materialization: true})` gives the list
-`[3, 1, 5]`. The same reaches the list literal with a spread: `g(a) =
-[...a, 0]` is typed `(a: collection<any>) -> list<any>` (pinned by
-`test/compute-engine/tycho-item-331-spread-in-function-body.test.ts`), and
-`g(Set(9, 8))` is `Set(9, 8, 0)`, a set out of a list literal. Options.
-(A) Type the result `collection<T>` when an operand may hold a set: the
-type becomes sound, and the function type that Tycho item 331 pinned
-becomes `-> collection<any>`. (B) A, plus a list literal with a spread
-always gives a list (wrapping the segment in `ListFrom` is not enough, it
-stops the parameter being inferred as a collection, which item 331 needs):
-recommended, needs a short design. (C) Nothing: the value keeps depending
-on the materialization option.
-
-### A restriction with a list condition over a carrier that is not finite puts the whole carrier in each cell (OPEN, decision — found 2026-09-29 by the review of the fix for Tycho item 335)
-
-`When(Range(1, ∞), [True, False])` evaluates to `[Range(1, ∞), Missing]`:
-the evaluate handler zips the carrier with the mask only when the carrier's
-value is a FINITE collection, and otherwise treats it as one value repeated
-in every cell. The static type of a restriction over a carrier declared
-`indexed_collection<T>` or `collection<T>` therefore has to admit both
-shapes (`list<indexed_collection<T> | missing | T>`), which is what a
-consumer that declares lazy carriers reads. Options. (A) Zip a carrier of
-unknown or infinite length over the LENGTH OF THE MASK (the first k
-elements): the static type becomes `list<missing | T>` for every ordered
-carrier, and the value for an infinite carrier changes. (B) Keep the rule;
-a consumer that wants the element-only type declares the carrier
-`list<T>`. Doing nothing is B.
-
 ### Registering a chain of `-> unknown` functions that each call the next twice re-enters the signature memo a number of times that doubles per level (OPEN, small — measured 2026-09-29 after the fix for Tycho item 336)
 
 With `W_k` declared `-> unknown` and each body calling `W_{k+1}` TWICE, one
@@ -197,19 +145,106 @@ should be. No reachable witness was found. Closing it needs an immediate
 advance for a widening inside the derivation's scope, which the deferred
 design avoids on purpose.
 
-### A broadcast operator over an operand declared `collection<T>` is typed as a scalar (OPEN, decision — found 2026-09-29 by the fix for Tycho item 335)
+### An ordering comparison pairs a set with a list (OPEN — found 2026-09-29 while pinning the relational types over abstract collections)
 
-`Greater(P, 1)`, `And`, `Not` and `Sin` over `P: collection<number>` are
-typed `boolean`/`number`, the scalar result. At evaluation a `List` value
-broadcasts to a list, while a `Set` value does not broadcast, so neither
-static answer is right for every value the declaration admits. The honest
-type is `broadcastable<…>` (the scalar or an indexed collection of it). The
-lift is the generic one in `boxed-expression/boxed-function.ts`, so changing
-it affects the static type of every broadcast operator over a non-indexed
-collection. Decision for the user: type such a call `broadcastable<R>`
-(honest, wider, compile shape gates then need the value's kind), or keep the
-scalar type and document that a carrier meant to broadcast must be declared
-`indexed_collection<T>` or `list<T>`. Doing nothing keeps the scalar type.
+`Less(Set(5, 6), [1, 2])` evaluates to `[False, False]`, and
+`Less(Set(0), [1, 2])` to `[True]` (typed `list<boolean^1>` where the static
+type is `list<boolean^2>`): an unordered set is paired position by position
+with a list. The comment of `broadcastLiftType`
+(`boxed-expression/broadcast-lift-type.ts`) says a set beside a list gives
+an error value, and `Sin` of a set is already an `incompatible-type` error.
+It reaches a symbol declared `collection<number>` that holds a set
+(`P < [1, 2]`). Where the pairing happens is not traced yet.
+
+### A comparison with a list expands early over a valueless operand declared `number | collection<number>` (OPEN — found 2026-09-29, same probe)
+
+With `P` declared `number | collection<number>` and no value, `P < [1, 2]`
+evaluates to `[P < 1, P < 2]` and `P = [1, 2]` to `[P == 1, P == 2]`. The
+expansion assumes `P` is a number. When `P` is later assigned `[5, 6, 7]`
+the ORIGINAL expressions give a length error and `False`, the expanded
+forms give lists of lists: the result depends on when `P` gets its value.
+With `P` declared `collection<number>` the comparison stays unevaluated, as
+it should. The probable cause is the pre-evaluation broadcast in
+`boxed-expression/boxed-function.ts`, whose test for a valueless operand
+does not see the union declaration.
+
+### A connective over a comparison that failed with a length error gives a list of errors (OPEN, small — found 2026-09-29, same probe)
+
+`Or(Sin(P) < [1, 2], Sin(P) > 0)` with `P` holding `[5, 6, 7]` gives three
+cells, each the error `incompatible-dimensions (3 vs 2)`, where one error
+for the whole expression is the expected answer: the `Or` maps the error of
+its first operand over the three cells of its second.
+
+### `Join` of a dictionary and a list is an error that names an internal marker (OPEN, decision — found 2026-09-29 by the review fixes for the spread literal)
+
+`Join(Dictionary(x: 1), [2, 3])` evaluates to `Error(incompatible-type,
+tuple<string, unknown>, "symbol ContinuationPlaceholder")`. The keyed merge
+refuses an element that is not an entry, the materialization turns the
+refusal into the internal `ContinuationPlaceholder`, and `Dictionary` rejects
+that. What a dictionary joined with a list gives is a semantic decision (an
+error that names the offending element, or a list of the entries followed by
+the elements); the internal marker in the message is a defect either way.
+
+### `SetFrom` of an absent collection is `Set(Missing)`, and a set literal that spreads an absent operand is `Set(Missing, 0)` (OPEN — found 2026-09-29, same review)
+
+The rule of 2026-09-26 is that an operator over an absent collection is
+absent (`Missing`): `[...Missing, 0]` is `Missing` since 2026-09-29, but
+`{...Missing, 0}` is `Set(Missing, 0)` because `SetFrom` does not propagate
+an absent collection. Fixing `SetFrom` brings the set literal in line.
+
+### A function declared `(collection<any> | number) -> number` whose body is `Max(xs)` compiles to `Math.max(xs)` (OPEN — found 2026-09-29 by the whole-collection parameter work)
+
+The compiled function returns `NaN` for a list argument, where the
+interpreter returns the maximum. `couldBeIndexedCollectionOperand`
+(`compilation/javascript-target.ts`) accepts only indexed-collection arms,
+so a parameter whose declared type has a `collection<any>` arm is compiled
+as a scalar. A tested fix accepts a collection arm that can hold a list and
+excludes strings. The same gap is why `Max`, `Min`, `GCD`, `LCM` and
+`ListFrom` were left element-wise by the decision of 2026-09-29 on
+whole-collection parameters: covering them needs the compiled definition to
+type an undeclared parameter from its lifted signature slot.
+
+### `Append` over an operand typed `unknown` or `any` is typed `list` (OPEN, small — found 2026-09-29)
+
+`Join` over such an operand is typed `collection` since 2026-09-29, because
+the operand may hold a set. The same change on `Append` made the nested
+structural form and the flattened form of a variadic `Append` report
+different types (`append-variadic.test.ts`), so it was not applied.
+
+### The generator of `src/math-json/OPERATORS.json` no longer reproduces the tracked file (OPEN, small — found 2026-09-29)
+
+Running `generate_OPERATORS.ts` differs from the tracked file by about
+147 KB (the tracked file has no `examples` fields). The `ListJoin` entry was
+added by hand on 2026-09-29. The file must be regenerated on purpose, or the
+generator aligned with the tracked shape.
+
+### A parameter that reaches a whole-collection operator indirectly is still applied element by element (OPEN — recorded 2026-09-29 with the decision on whole-collection parameters)
+
+The decision of 2026-09-29 binds a list whole only when the bare parameter
+is the ONLY operand of `Mean`, `Median`, `Variance`, `StandardDeviation`,
+`Mode`, `Quartiles`, `Flatten`, `SetFrom` or `TupleFrom`. Three shapes still
+differ from the body with the list substituted: a use through another
+operator (`function h(xs) { mean(xs^2) }` over `[1, 2, 3]` gives `[1, 4, 9]`,
+the substitution gives `14/3`), a use through a local (`let ys = xs;
+mean(ys)`), and `Max`/`Min`/`GCD`/`LCM`/`ListFrom` of the parameter. The
+first and the third are held back by the compiled route: the compiled
+definition types an undeclared parameter from its uses, so `xs^2` compiles
+to scalar code and an array argument gives `NaN`. They can follow once the
+compiled definition types a lifted parameter from its signature slot (see
+the `Max` entry above). `norm(v)` over a list of numbers gives the list
+itself (the norm of each number), on both routes; whether `Norm` of an
+untyped parameter should read a list of numbers as one vector is part of
+the same question.
+
+### `Solve` over a `List` of conditions with a domain returns no solution (OPEN — found 2026-09-29 by the review fixes for the broadcast type)
+
+`Solve(List(n^2 = 4, n > 0), n ∈ Range(-20, 20))` returns `[]`. The same
+conditions written `And(n^2 = 4, n > 0)` or `Set(n^2 = 4, n > 0)` return
+`[2]`. It behaves the same with and without the 2026-09-29 changes. Either
+a list of conditions with a domain is meant to be read as a system, as the
+set is, and the list route misses the side condition, or a list is not an
+accepted spelling and the call must say so with an error instead of
+answering "no solution".
 
 ### `Length(Range(0, n))` is typed `integer | signed_infinity` for an integer `n` (OPEN, small — found 2026-09-29 by the fix for Tycho item 334)
 

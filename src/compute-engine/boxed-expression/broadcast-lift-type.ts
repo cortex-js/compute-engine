@@ -31,13 +31,17 @@
 import type { TupleType, Type } from '../../common/type/types.js';
 import {
   COLLECTION_SHAPE_TYPE,
+  DICTIONARY_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
 import {
   absorbNumericAbsence,
+  broadcastCellType,
   broadcastElementType,
   broadcastShapedResultType,
+  collectionElementType,
   isNumericScalarType,
+  nestedBroadcastResultType,
   resolveTypeAlias,
   staticCollectionDims,
   stripMissingFromType,
@@ -52,6 +56,7 @@ import type {
 } from '../global-types.js';
 import {
   dimensionlessIndexedElement,
+  isRecordShapedType,
   isTupleShapedType,
   loneUnionBroadcastResultType,
   scalarOrListUnionCellType,
@@ -86,6 +91,14 @@ export interface BroadcastOperandView {
   readonly matrixFact: boolean;
   /** `type.isUnknown` of the boxed type. */
   readonly typeIsUnknown: boolean;
+  /** The operand holds a collection value NOW whose kind is DECIDED as not
+   * indexed: a symbol declared `collection<T>` that holds a set, or a `Map`
+   * over such a symbol. An element-wise operator does not map over such a
+   * value, so the application is typed as a scalar application, from the
+   * value, the same way arm 1 types an operand that holds a list as a list.
+   * `false` when the kind is not decided yet (a `Map` over a symbol that
+   * holds no value): the value may still be a list. */
+  readonly holdsUnindexedCollection: boolean;
 }
 
 /** A view over an operand descriptor, for the descriptor route. */
@@ -116,6 +129,10 @@ export function viewOfDescriptor(d: OperandDescriptor): BroadcastOperandView {
       structure?.kind === 'list-literal' && structure.shape !== undefined,
     matrixFact: dims !== undefined && dims.length === 2,
     typeIsUnknown: t === 'unknown',
+    // A descriptor has no value channel that separates a symbol holding a
+    // set from a valueless one (its `collection` fact is also read from the
+    // type), so the application is typed from the declaration.
+    holdsUnindexedCollection: false,
   };
 }
 
@@ -171,6 +188,158 @@ export function isPossiblyCollectionTypedView(
  * `collection<any>`. */
 function matchesCollectionShape(t: Type): boolean {
   return isSubtype(t, COLLECTION_SHAPE_TYPE);
+}
+
+/** The absence-admitting top of the set family, for the shape test in
+ * {@link isAbstractCollectionTypeOf}. */
+const SET_SHAPE_TYPE: Type = Object.freeze({
+  kind: 'set',
+  elements: 'any',
+}) as Type;
+
+/**
+ * Whether `t` is an ABSTRACT collection type: it matches `collection<any>`,
+ * but it is not an indexed collection, a set, a dictionary or a record. Such a
+ * type does not fix the kind of its value: a symbol declared
+ * `collection<number>` can hold a list, a range or a set. An element-wise
+ * operator maps over the first two and does not map over the third, so its
+ * application over such an operand may or may not be a collection.
+ *
+ * The bottom type `never` answers `false`. It is a subtype of every type, so
+ * it matches `collection<any>`, but it is also a subtype of
+ * `indexed_collection<any>`, so the tests below reject it; the explicit test
+ * states the reason: a `never` operand has no value at all, so there is
+ * nothing to map over.
+ *
+ * `isAbstractCollectionType()` in `boxed-function.ts` reads a boxed type and
+ * delegates to this function.
+ */
+export function isAbstractCollectionTypeOf(t: Type): boolean {
+  if (t === 'never') return false;
+  return (
+    matchesCollectionShape(t) &&
+    !isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
+    !isSubtype(t, SET_SHAPE_TYPE) &&
+    !isSubtype(t, DICTIONARY_SHAPE_TYPE) &&
+    !isRecordShapedType(t)
+  );
+}
+
+/**
+ * Whether an operand of type `t` may hold a collection of any kind, so that
+ * the kind of a node built over it is known only from the value the operand
+ * holds: an abstract collection type (`isAbstractCollectionTypeOf`), or a
+ * type that says nothing about the value (`unknown`, `any`, `value`), such
+ * as the type of an unresolved call `f(x)` or of a symbol declared `any`.
+ *
+ * `Join` and `Append` type their result `collection<T>` over such an
+ * operand (`joinResultTypeD`, `library/collections.ts`), and the predicates
+ * that follow the held values read such an operand as a source whose value
+ * decides the kind (`abstractSourcesHoldIndexedValues`, `boxed-function.ts`,
+ * and `producesSet`, `library/collections.ts`).
+ */
+export function isKindOpenOperandType(t: Type): boolean {
+  return (
+    t === 'unknown' ||
+    t === 'any' ||
+    t === 'value' ||
+    isAbstractCollectionTypeOf(t)
+  );
+}
+
+/**
+ * How an operand whose type admits an abstract collection
+ * (`isAbstractCollectionTypeOf`) takes part in an element-wise broadcast.
+ */
+export interface AbstractCollectionCell {
+  /** The type one cell of the broadcast sees for the operand. A type handler
+   * called with this type answers the per-cell result of the operator;
+   * called with the collection type, it answers a type that no cell has,
+   * such as `collection<number> | integer` for `P + 1`. */
+  readonly cell: Type;
+  /** The element type of the abstract collection when that element is
+   * itself an indexed collection (`collection<list<number>>`), else
+   * `undefined`. The runtime broadcast descends into such an element to its
+   * leaves, so the per-cell result must be wrapped to the rank of the
+   * element (`nestedBroadcastResultType`): `Sin` of a held
+   * `[[1, 2], [3, 4]]` is `list<list<number>>`. */
+  readonly nestedElement: Type | undefined;
+}
+
+/**
+ * The broadcast cell of an operand of type `t` when `t` admits an abstract
+ * collection, or `undefined` when it does not, or when no sound cell can be
+ * given (then the application keeps the typing it had before abstract
+ * collections were lifted).
+ *
+ * Three spellings admit an abstract collection:
+ * - the abstract collection itself, `collection<T>`: the cell is `T`;
+ * - the same with an absence arm, `collection<T> | missing` (a restricted
+ *   collection): the `missing` arm is ignored here, and the caller adds the
+ *   absence back to the result as it does for any absent operand
+ *   (`absorbOperandAbsence`);
+ * - a union of scalar arms and an abstract collection,
+ *   `number | collection<number>`: the value is a scalar, which the operator
+ *   applies to, or a collection, which it may map over. The cell is the
+ *   union of the scalar arms and `T`.
+ *
+ * The element of a bare `collection` is the placeholder `unknown`. A type
+ * handler reads an `unknown` operand as "no evidence yet" and can type the
+ * result from the other operands alone: `Add` answers `integer` for
+ * `unknown + 1`, which a cell holding `0.5` contradicts. The elements of a
+ * bare collection are values (the bare name excludes absence markers), so
+ * the cell is typed as the values-only top `value` instead.
+ *
+ * When the element is itself an indexed collection, the runtime broadcast
+ * descends to its leaves, so the cell is the leaf type
+ * (`broadcastCellType`) and the element is reported in `nestedElement` for
+ * the rank wrap. A union with scalar arms has no single rank (a scalar cell
+ * has none, a collection cell has the element's), and an element that is a
+ * set, a dictionary, a record or another abstract collection is not mapped
+ * over in a way a single cell type describes: in these cases the answer is
+ * `undefined`. A string or a tuple element is a leaf of the broadcast.
+ */
+export function abstractCollectionCell(
+  t: Type
+): AbstractCollectionCell | undefined {
+  const r = resolveTypeAlias(t);
+  const arms =
+    typeof r !== 'string' && r.kind === 'union' ? r.types : [r as Type];
+  const scalars: Type[] = [];
+  const collections: Type[] = [];
+  for (const arm of arms) {
+    const a = resolveTypeAlias(arm);
+    if (a === 'missing' || a === 'never') continue;
+    // A string is a collection of its characters in the lattice, and a tuple
+    // is an indexed collection: neither is a scalar arm, and neither is an
+    // abstract collection, so the union is not one this function types.
+    if (isSubtype(a, 'string') || isTupleShapedType(a)) return undefined;
+    if (matchesCollectionShape(a)) collections.push(a);
+    else scalars.push(a);
+  }
+  if (collections.length === 0) return undefined;
+  const collection =
+    collections.length === 1 ? collections[0] : widen(...collections);
+  if (!isAbstractCollectionTypeOf(collection)) return undefined;
+  const raw = collectionElementType(collection);
+  const element: Type = raw === undefined || raw === 'unknown' ? 'value' : raw;
+  const e = resolveTypeAlias(element);
+  if (
+    !matchesCollectionShape(e) ||
+    isSubtype(e, 'string') ||
+    isTupleShapedType(e)
+  ) {
+    return {
+      cell: scalars.length === 0 ? element : widen(...scalars, element),
+      nestedElement: undefined,
+    };
+  }
+  if (scalars.length > 0 || !isSubtype(e, INDEXED_COLLECTION_SHAPE_TYPE))
+    return undefined;
+  // The leaf of a bare `list` element is `unknown`, typed `value` for the
+  // reason given above.
+  const leaf = broadcastCellType(e);
+  return { cell: leaf === 'unknown' ? 'value' : leaf, nestedElement: e };
 }
 
 /**
@@ -246,6 +415,9 @@ function presentView(v: BroadcastOperandView): BroadcastOperandView {
       return v.matrixFact;
     },
     typeIsUnknown: false,
+    get holdsUnindexedCollection() {
+      return v.holdsUnindexedCollection;
+    },
   };
 }
 
@@ -878,6 +1050,16 @@ export interface BroadcastLiftInput {
    * union or the handler declines. Read only when every broadcast trigger
    * is such a union. */
   readonly unionCellResult?: () => Type | undefined;
+  /** The per-element result of the handler called again with the operands
+   * that trigger the abstract-collection lift typed as their cell
+   * (`abstractCollectionCell`). `cells[i]` is the cell type of operand `i`,
+   * or `undefined` for an operand that is not such a trigger: that operand
+   * is described exactly as for the main handler call. `undefined` when the
+   * handler declines. Read only by arm 2, when an abstract collection
+   * operand is what makes the result possibly a collection. */
+  readonly abstractCellResult?: (
+    cells: ReadonlyArray<Type | undefined>
+  ) => Type | undefined;
 }
 
 /**
@@ -960,7 +1142,18 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
         (!deferToHandler && isFixedShapeCollectionTypeOf(v.type)))
   );
   if (broadcasting.length > 0) {
-    const types = broadcasting.map((v) => v.type);
+    // An operand of an abstract collection type whose element is itself an
+    // indexed collection (`collection<list<number>>`) takes part here
+    // because it holds a list now, and the broadcast descends into that
+    // list to its leaves. Its declared type has no rank (no dimensions), so
+    // it is shaped as the list of its element that it holds: `Sin` of a held
+    // `[[1, 2], [3, 4]]` is a list of lists, not a list of numbers.
+    const types = broadcasting.map((v) => {
+      const nested = abstractCollectionCell(v.type)?.nestedElement;
+      return nested === undefined
+        ? v.type
+        : ({ kind: 'list', elements: nested } as Type);
+    });
     // A point-or-point-list operand (a symbol declared
     // `tuple<number, number> | list<tuple<number, number>>` and left
     // valueless) is a lone scalar-or-collection union whose scalar branch is
@@ -1046,8 +1239,69 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   // Arm 2 (possibly a collection): the operand's collection-ness is not
   // statically knowable — it might broadcast at runtime or stay scalar, so
   // the honest result is `broadcastable<E>`.
-  if (views.some((v, i) => mappable(i) && isPossiblyCollectionTypedView(v)))
-    return { kind: 'broadcastable', elements: cellResult };
+  //
+  // An operand of an ABSTRACT collection type (`collection<T>`, see
+  // `isAbstractCollectionTypeOf`) is such an operand too, and so is an
+  // operand whose type is such a collection with an absence arm or with
+  // scalar arms (`abstractCollectionCell` lists the spellings). The declaration
+  // admits a list or a range, over which the operator maps (the value is a
+  // list), and a set, over which it does not map. So neither the scalar
+  // result nor a list type is true for every value the declaration admits,
+  // and `broadcastable<E>` (the scalar `E` or an indexed collection of `E`)
+  // is. An operand that holds a list or a range NOW is a
+  // `finiteBroadcastParticipant`, and arm 1 above has already typed the
+  // application as a list from that value, as it does for any symbol. An
+  // operand that holds a set NOW (`holdsUnindexedCollection`) is not mapped
+  // over, and the application keeps the scalar type the handler computed
+  // over it: for such an operand `broadcastable<E>` can be wrong, because
+  // the result is not an element-wise result (`Abs` of a set is not the
+  // absolute value of an element). Arm 1
+  // also wins when another operand is an indexed collection (`P + [1, 2]`).
+  // That is sound: the element-wise map then either gives a list or does not
+  // apply at all (a set against a list gives an error value, not a scalar),
+  // so the result is never the scalar `E`.
+  //
+  // The handler typed the cell from the COLLECTION type of the abstract
+  // operand, which is not the type of any cell, so the cell is typed again
+  // with each trigger typed as its cell (`abstractCellResult`). Only the
+  // triggers are retyped: an operand at a slot that takes the whole
+  // collection, and an operand that holds a set now, keep their own type.
+  //
+  // The predicates are tested in order of cost: the slot, then the type,
+  // and only then the value-level predicates, which are getters over the
+  // operand's value.
+  const abstractCells = views.map((v, i) => {
+    if (!mappable(i)) return undefined;
+    const cell = abstractCollectionCell(v.type);
+    if (cell === undefined) return undefined;
+    if (v.finiteBroadcastParticipant || v.holdsUnindexedCollection)
+      return undefined;
+    return cell;
+  });
+  const abstractTrigger = abstractCells.some((c) => c !== undefined);
+  if (
+    abstractTrigger ||
+    views.some((v, i) => mappable(i) && isPossiblyCollectionTypedView(v))
+  ) {
+    const abstractCell = abstractTrigger
+      ? input.abstractCellResult?.(abstractCells.map((c) => c?.cell))
+      : undefined;
+    let elements =
+      abstractCell === undefined
+        ? cellResult
+        : hasTupleBranch(abstractCell)
+          ? resolveTypeAlias(abstractCell)
+          : broadcastElementType(abstractCell);
+    // A trigger whose element is itself an indexed collection is mapped to
+    // its leaves, so the per-leaf result is wrapped back to the rank of that
+    // element (`AbstractCollectionCell.nestedElement`).
+    const nested = abstractCells.flatMap((c) =>
+      c?.nestedElement === undefined ? [] : [c.nestedElement]
+    );
+    if (nested.length > 0)
+      elements = nestedBroadcastResultType(nested, elements);
+    return { kind: 'broadcastable', elements };
+  }
 
   return undefined;
 }

@@ -12,6 +12,11 @@ import {
  */
 export interface ListRecursionPlan {
   step: Expression;
+  /** The head of the recursive arms: `Join`, or `ListJoin` for an arm
+   * written as a list literal with a spread. The result is rebuilt with this
+   * head, so that it has the same head as the result of the ordinary
+   * evaluation of the definition. */
+  head: 'Join' | 'ListJoin';
 }
 
 /**
@@ -51,7 +56,7 @@ export function listRecursionPlan(
   const eligible = (expr: Expression): boolean =>
     !containsSelf(expr) && expr.isPure;
   const clauses: Expression[] = [];
-  let recursive = false;
+  let head: 'Join' | 'ListJoin' | undefined;
   for (let i = 0; i < body.nops; i += 2) {
     const guard = body.ops[i];
     const arm = body.ops[i + 1];
@@ -62,7 +67,19 @@ export function listRecursionPlan(
       clauses.push(ce._fn('Tuple', [ce.Zero, arm]));
       continue;
     }
-    if (!isFunction(arm, 'Join') || arm.nops !== 2) return undefined;
+    // `[...prefix, ...F(n + 1)]` is canonically `ListJoin(prefix, F(n + 1))`;
+    // an arm written with `Join` has the same shape. Both are lists here: the
+    // prefix is a `List` literal and the call returns one of the base lists.
+    if (
+      !(isFunction(arm, 'Join') || isFunction(arm, 'ListJoin')) ||
+      arm.nops !== 2
+    )
+      return undefined;
+    // The recursive arms must all have the same head: the result is rebuilt
+    // with one head (`finish` in `evaluateListRecursion`). A definition that
+    // mixes `Join` and `ListJoin` arms is left to the ordinary evaluation.
+    if (head !== undefined && head !== arm.operator) return undefined;
+    head = isFunction(arm, 'Join') ? 'Join' : 'ListJoin';
     const [prefix, call] = arm.ops;
     if (!isFunction(prefix, 'List') || !eligible(prefix)) return undefined;
     if (
@@ -72,10 +89,11 @@ export function listRecursionPlan(
       !call.ops.every(eligible)
     )
       return undefined;
-    recursive = true;
     clauses.push(ce._fn('Tuple', [ce.One, prefix, ce._fn('Tuple', call.ops)]));
   }
-  return recursive ? { step: ce._fn('Which', clauses) } : undefined;
+  return head !== undefined
+    ? { step: ce._fn('Which', clauses), head }
+    : undefined;
 }
 
 /**
@@ -98,15 +116,17 @@ export function evaluateListRecursion(
     if (chunks.length === 0) return tail;
     // An invalid result freezes the original binary Join boundaries. Keep
     // those boundaries so diagnostics have the same enclosing expression.
+    // The head is the head of the recursive arms (`plan.head`), so that the
+    // result has the head the ordinary evaluation gives.
     if (!tail.isValid) {
       for (let i = chunks.length - 1; i >= 0; i--)
-        tail = ce.function('Join', [chunks[i], tail]).evaluate();
+        tail = ce.function(plan.head, [chunks[i], tail]).evaluate();
       return tail;
     }
     // Join folds literal lists once when they fit maxCollectionSize, and
-    // otherwise keeps a flat lazy view. Do not bypass that materialization
-    // cap with an unbounded array of elements.
-    return ce.function('Join', [...chunks, tail]).evaluate();
+    // otherwise keeps a flat lazy view (a `ListJoin` does the same). Do not
+    // bypass that materialization cap with an unbounded array of elements.
+    return ce.function(plan.head, [...chunks, tail]).evaluate();
   };
   let current = args;
   let iterations = 0;

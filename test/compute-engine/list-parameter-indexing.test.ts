@@ -615,6 +615,16 @@ describe('non-regressions', () => {
     expect(ce.box('n').type.toString()).toBe(
       '(unknown) -> nan | real | signed_infinity'
     );
+    // `Norm` does not bind a list parameter whole
+    // (`wholeCollectionParameterType`): a list argument is applied element
+    // by element, so a list of points gives one norm per point.
+    expect(ce.box(['n', -5]).evaluate().toString()).toBe('5');
+    expect(
+      ce
+        .box(['n', ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]]])
+        .evaluate()
+        .toString()
+    ).toBe('[5,10]');
   });
 
   test('a SCALAR-bodied function still broadcasts over a list argument', () => {

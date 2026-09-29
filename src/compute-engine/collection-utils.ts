@@ -1966,6 +1966,29 @@ export function isRecordShapedType(t: Type): boolean {
 }
 
 /**
+ * Whether the type `t`, or any arm of it when it is a union, is a TUPLE (a
+ * point) or a STRING. A value of such a type can be one atomic value under a
+ * restriction by a list of conditions, which never aligns its components
+ * with the conditions. A tuple and a string are indexed collections in the
+ * type lattice, so a union such as `tuple<number, number> |
+ * list<tuple<number, number>>` (a point or a point list) is a subtype of
+ * `indexed_collection<any>` although the value it holds can be a point:
+ * reading that union as an ordered collection would split the point into
+ * its coordinates. `isTupleShapedType` alone does not see the arms of a
+ * union, so a gate that must exclude such values tests this predicate.
+ *
+ * Used by the `When` operator (`isOrderedCarrierType`,
+ * `library/control-structures.ts`) and by the JavaScript compilation of a
+ * restriction (`base-compiler.ts`), which declines such a union.
+ */
+export function hasTupleOrStringArm(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r !== 'string' && r.kind === 'union')
+    return r.types.some(hasTupleOrStringArm);
+  return isTupleShapedType(r) || (r !== 'never' && isSubtype(r, 'string'));
+}
+
+/**
  * True when a type statically carries a SHAPE an arithmetic result must
  * preserve: a tuple, a list/collection kind, or a broadcast lift of one.
  * `broadcastable<number>` is NOT shaped — its runtime value may be a plain
@@ -3697,4 +3720,51 @@ export function searchMayStillMatch(
 
 function isAbsentElement(x: Expression): boolean {
   return isSymbol(x, 'Missing') || isSymbol(x, 'Undefined');
+}
+
+/**
+ * The operands of `expr` that are the SOURCES of the collection it produces:
+ * the operands whose elements become (or decide) the elements of the result.
+ * The other operands are not collections the result is built from: the
+ * appended ELEMENTS of `Append`, the callback of `Map`, the predicate of
+ * `Filter`, the callback and the seed of `Scan`.
+ *
+ * When the static type of a node is an abstract collection
+ * (`collection<T>`, which admits a list, a set and a range), the kind of the
+ * value of the node follows the values its abstract-typed SOURCES hold now.
+ * Two predicates read that: `BoxedFunction.isIndexedCollection` (through
+ * `abstractSourcesHoldIndexedValues`, `boxed-function.ts`) and the kind
+ * predicates of `Join` and `Append` (`producesSet` and `producesKeyed`,
+ * `library/collections.ts`). They must read the same operands, so the
+ * source positions are in this one table. For example `Append(acc, s)` with
+ * `acc` holding `[[1], [1]]` and `s` holding `Set(2, 3)` is a list with the
+ * set as its last element: `s` is an element, not a source, so it must not
+ * make the result a set.
+ *
+ * An operator that is not in the table has every operand as a source. This
+ * is correct for `Join` and `ListJoin`: every operand that is not atomic is
+ * spliced, and an atomic (tuple) operand is typed as a tuple, never as an
+ * abstract collection, so it is never read by the predicates.
+ */
+export function collectionSourceOperands(
+  expr: Expression
+): ReadonlyArray<Expression> {
+  if (!isFunction(expr)) return [];
+  switch (expr.operator) {
+    // The source is the first operand. The other operands are elements
+    // (`Append`), a predicate (`Filter`), or the callback and the seed
+    // (`Scan`).
+    case 'Append':
+    case 'Filter':
+    case 'Scan':
+      return expr.ops.slice(0, 1);
+    // The first operand of `Map` is the callback, and every other operand is
+    // a mapped collection.
+    case 'Map':
+      return expr.ops.slice(1);
+    // `Reduce` and `Fold` are not in the table: their value is the final
+    // accumulator, whose kind the collection they walk does not decide.
+    default:
+      return expr.ops;
+  }
 }

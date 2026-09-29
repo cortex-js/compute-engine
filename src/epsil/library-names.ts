@@ -28,7 +28,8 @@ import { HARD_RESERVED_WORDS } from './reserved-words.js';
  * Operators that Epsil writes with a dedicated syntax, so a function spelling
  * would be a second way to write a construct the language already has: the
  * statement forms (`let`, `type`, `protocol`, `function`, `if`/`else`,
- * `match`, the loops), the literal forms (tuples, `xs[i]`, `...xs`, `x: T`,
+ * `match`, the loops), the literal forms (tuples, `xs[i]`, `...xs`, whose
+ * list literal `[...xs, v]` is a `ListJoin`, `x: T`,
  * `name: value` arguments, `x^2`), the nodes the parser produces for its own
  * use (`Delimiter`, `Sequence`, `InvisibleOperator`, `Annotated`, the LaTeX
  * islands, spacing), and the pattern nodes (`Wildcard*`, `Condition`,
@@ -56,6 +57,7 @@ export const GRAMMAR_CONSTRUCTS: ReadonlySet<string> = new Set([
   'InvisibleOperator',
   'Latex',
   'LatexString',
+  'ListJoin',
   'Loop',
   'MatchCase',
   'MatchesType',

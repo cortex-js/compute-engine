@@ -644,14 +644,16 @@ describe('fixed-shape vs generic-collection broadcast typing', () => {
 
   test('generic collection<number>-typed operand does NOT type as a definite list', () => {
     const ce = new ComputeEngine();
-    // A generic `collection<number>` operand may be a non-indexed `set` at
-    // runtime, which the evaluator never broadcasts (the broadcast paths are
-    // all `isFiniteIndexedCollection`-gated). So `Sin(c)` must NOT be typed a
-    // definite `list<…>`; it keeps the scalar per-element result `number`
-    // (the sound type for the non-broadcasting value path).
+    // A generic `collection<number>` operand may hold a list, which the
+    // operator maps over, or a non-indexed `set`, which the evaluator never
+    // broadcasts (the broadcast paths are all
+    // `isFiniteIndexedCollection`-gated). So `Sin(c)` must NOT be typed a
+    // definite `list<…>`, and the scalar `number` does not admit the list
+    // result either: the type is `broadcastable<number>`, the scalar or an
+    // indexed collection of it (user decision 2026-09-29; it was `number`).
     ce.declare('c', 'collection<number>');
     const t = ce.box(['Sin', 'c']).type.toString();
-    expect(t).toBe('number');
+    expect(t).toBe('broadcastable<number>');
     expect(t.startsWith('list<')).toBe(false);
   });
 });

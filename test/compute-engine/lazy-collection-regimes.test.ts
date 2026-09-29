@@ -106,7 +106,9 @@ describe('lazy collection regimes', () => {
     // `Permutations` and `Combinations` (`library/combinatorics.ts`, both
     // genuine lazy views that the memo now covers) and `Tuple`, whose
     // `isLazy` handler exists but answers `false` for every instance — its
-    // membership here is inert (see the instance check below).
+    // membership here is inert (see the instance check below). `ListJoin`,
+    // the list literal with a spread, shares the collection handlers of
+    // `Join`.
     expect(namesIn('change-1')).toEqual([
       'Append',
       'Combinations',
@@ -116,6 +118,7 @@ describe('lazy collection regimes', () => {
       'Iterate',
       'Join',
       'Linspace',
+      'ListJoin',
       'Most',
       'Permutations',
       'Range',
@@ -162,7 +165,7 @@ describe('lazy collection regimes', () => {
 
   test('every collection operator lands in exactly one regime', () => {
     const regimes = collectionRegimes();
-    expect(regimes.size).toBe(47);
+    expect(regimes.size).toBe(48);
     for (const [name, regime] of regimes)
       expect([name, regime]).toEqual([
         name,
@@ -184,6 +187,7 @@ describe('lazy collection regimes', () => {
     Iterate: ['Iterate', ['Function', ['Multiply', '_', 2]], 1],
     Join: ['Join', ['Range', 1, 2], ['List', 3, 4]],
     Linspace: ['Linspace', 1, 10, 5],
+    ListJoin: ['ListJoin', ['Range', 1, 2], ['List', 3, 4]],
     Most: ['Most', ['List', 1, 2, 3]],
     Permutations: ['Permutations', ['List', 1, 2, 3]],
     Range: ['Range', 1, 10],

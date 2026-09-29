@@ -2,6 +2,78 @@
 
 ### Behavior Changes
 
+- **A restriction with a list of conditions pairs an ordered collection of
+  infinite or unknown length over the conditions' length** (user decision
+  2026-09-29). `When(Range(1, ∞), [True, False])` was `[Range(1, ∞),
+  Missing]`, the whole collection in each cell, and is now `[1, NaN]`; only
+  the elements needed are read, with one walk. A collection that ends before
+  the conditions do is truncated, as a finite one was. When the elements
+  cannot be read, the restriction stays unevaluated where it repeated the
+  whole collection: a range with a free bound, and a symbol declared
+  `list<number>` with no value (`[P, Missing, P]` is now the held
+  restriction). The static type of a restriction over a carrier declared
+  `indexed_collection<T>` is `list<missing | T>` (`list<number>` for a
+  numeric `T`), where it was `list<indexed_collection<T> | missing | T>`. A
+  tuple held by a symbol declared as an ordered collection of numbers is
+  paired element by element (`P = (1, 2)` gives `[1, NaN]`); a value held
+  under a type that admits a point or a string (`tuple<number, number> |
+  list<…>`) is still one value. A `collection<T>` or `set<T>` carrier keeps
+  the wider type, because it can hold an infinite set.
+- **A list literal with a spread is always a list** (user decision
+  2026-09-29). Its canonical form is the new operator `ListJoin`:
+  `[...a, 0]` is `ListJoin(a, [0])`, where it was `Join(a, [0])`. With
+  `g(a) = [...a, 0]`, `g({9, 8})` is `[9, 8, 0]`, where it was
+  `Set(9, 8, 0)`. `ListJoin` is lazy, keeps the elements of each operand in
+  their order, and keeps duplicates that come from different operands.
+  `.json`, `toString()` and LaTeX show the new head; Epsil writes it back as
+  `[...a, 0]`. A stored `Join(a, [0])` keeps its meaning: the result takes
+  the kind of its operands. `[...Missing, 0]` is `Missing`, where it was
+  `[Missing, 0]`.
+- **`Join` and `Append` over an operand that may hold a set have a type that
+  admits it, and their value no longer depends on the materialization
+  option** (user decision 2026-09-29). With `P` declared
+  `collection<number>`, `Join(P, [5])` is typed `collection<number>`, where
+  it was `list<number>`; with `P` holding `Set(3, 1)`,
+  `evaluate({materialization: true})` gives `Set(3, 1, 5)`, as `evaluate()`
+  does, where it gave `[3, 1, 5]`. The kind of the result follows the values
+  the SOURCES hold: every operand of `Join`, the first operand of `Append`
+  (`Append(acc, s)` with `s` holding a set stays a list when `acc` holds a
+  list). Compiled JavaScript that reads such a join (`Length(Join(a, [0]))`
+  in a function body) still compiles.
+- **A user function that passes its parameter, alone, to an operator that
+  reads a collection whole receives a list argument whole** (user decision
+  2026-09-29). It applies to `Mean`, `Median`, `Variance`,
+  `StandardDeviation`, `Mode`, `Quartiles`, `Flatten`, `SetFrom` and
+  `TupleFrom`, when the bare parameter is the only operand. Before, the
+  function was applied to each element of the list. `function h(xs) {
+  mean(xs) }` applied to `[1, 2, 3]` gives `2`, where it gave `[1, 2, 3]`;
+  `flatten` over `[[1], [2, 3]]` gives `[1, 2, 3]`; `mean(xs) + xs` gives
+  `[3, 4, 5]`, where it gave `[2, 4, 6]`. A function that only calls such a
+  function is bound whole too, and once one parameter is bound whole a list
+  given to another parameter is bound whole as well (`h(xs, k) = mean(xs)·k`
+  applied to `[1, 2, 3], [1, 10]` gives `[2, 20]`). A scalar argument gives
+  what it gave (`h(5)` is `5`), and the function accepts every argument it
+  accepted. Unchanged, still applied element by element: a use with several
+  operands (`mean(x, 1)` over `[1, 2, 3]` is `[1, 3/2, 2]`), a use through
+  another operator (`mean(xs^2)`), `norm(p)` (one norm per point over a list
+  of points), `String(p)`, `max(xs)`, and every parameter with a declared
+  type. The compiled JavaScript agrees with the interpreter on each of
+  these.
+- **An element-wise operator over an operand declared with an abstract
+  collection type is typed `broadcastable<R>`** (user decision 2026-09-29).
+  With `P` declared `collection<number>` and no value, `Sin(P)`, `P + 1` and
+  `P > 1` were typed `number`, `collection<number> | integer` and `boolean`;
+  they are `broadcastable<number>`, `broadcastable<number>` and
+  `broadcastable<boolean>`, the scalar or an indexed collection of it,
+  because `P` can hold a list, which the operator maps over, or a set, which
+  it does not. A `P` that holds a value is typed from that value. What was
+  accepted stays accepted: a symbol declared `number` can still be assigned
+  `Sin(P)`, and a condition such as `Sin(P) > x` is still read as a
+  condition by `Element`, `Solve` and the rules. The full suite showed one
+  pinned type and no value change. One evaluation does change: `Sin(P) =
+  [1, 2]` with `P` valueless stays unevaluated, where it expanded to
+  `[sin(P) == 1, sin(P) == 2]` on the assumption that `Sin(P)` is a number.
+
 - **A user function that passes its parameter to a collection operator with
   a callback types that parameter as a collection.** `function f(xs) {
   filter(xs, x => x > 1) }` applied to `[1, 2, 3]` returned `[Filter(1, …),

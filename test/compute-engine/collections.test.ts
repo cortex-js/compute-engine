@@ -5242,11 +5242,13 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
     expect(e.toString()).toContain('spread-tuple');
   });
 
-  test('a symbolic spread lowers to a direct Join', () => {
+  // The list literal with a spread lowers to `ListJoin`, the join whose
+  // result is always a list (user decision 2026-09-29).
+  test('a symbolic spread lowers to a direct ListJoin', () => {
     const ce2 = new ComputeEngine();
     const e = ce2.box(['List', ['Spread', 'xs'], 3, ['Spread', 'ys']]);
-    expect(e.operator).toBe('Join');
-    expect(e.json).toEqual(['Join', 'xs', ['List', 3], 'ys']);
+    expect(e.operator).toBe('ListJoin');
+    expect(e.json).toEqual(['ListJoin', 'xs', ['List', 3], 'ys']);
     ce2.box(['Assign', 'xs', ['List', 1, 2]]).evaluate();
     // A spread whose value turns out to be a tuple at evaluation follows
     // Join's atomic-tuple convention: ONE element, not a splice.
@@ -5254,16 +5256,19 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
     expect(e.evaluate().toString()).toBe('[1,2,3,(4, 5)]');
   });
 
-  test('a lone spread canonicalizes to unary Join (list materialization)', () => {
+  test('a lone spread canonicalizes to unary ListJoin (list materialization)', () => {
     const ce2 = new ComputeEngine();
-    expect(ce2.box(['List', ['Spread', 'xs']]).json).toEqual(['Join', 'xs']);
+    expect(ce2.box(['List', ['Spread', 'xs']]).json).toEqual([
+      'ListJoin',
+      'xs',
+    ]);
     expect(
       ce2
         .box(['List', ['Spread', ['Range', 1, 4]]])
         .evaluate()
         .toString()
     ).toBe('[1,2,3,4]');
-    // A scalar spread is one element: `Join(5)` is `[5]`.
+    // A scalar spread is one element: `ListJoin(5)` is `[5]`.
     expect(
       ce2
         .box(['List', ['Spread', 5]])

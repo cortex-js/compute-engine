@@ -8435,7 +8435,8 @@ export class Parser {
 
   /** `[a, b]` → `["List", a, b]`; `[]` → `["List"]`. A `...expr` element is
    * a spread (`["Spread", expr]`), spliced by `List`'s canonicalization:
-   * `[...xs, c]` is `Join`/`ListFrom` sugar (`library/collections.ts`). */
+   * `[...xs, c]` canonicalizes to `ListJoin(xs, [c])`, whose result is always
+   * a list (`canonicalList`, `library/collections.ts`). */
   private parseList(): MathJsonExpression {
     const { values, open, end, comprehension } = this.parseBracketedList(
       'CLOSE_BRACKET',

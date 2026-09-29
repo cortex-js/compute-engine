@@ -4,6 +4,7 @@ import {
   CancellationError,
   checkDeadline,
 } from '../../common/interruptible.js';
+import { isBooleanOrBroadcastableBooleanType } from '../../common/type/utils.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import type {
   BoxedRule,
@@ -177,7 +178,10 @@ export const ConditionParent = {
 };
 
 export const CONDITIONS = {
-  boolean: (x: Expression) => x.type.matches('boolean'),
+  // A `broadcastable<boolean>` expression (a comparison whose operand may be
+  // a collection or a scalar) may be a boolean, so it matches too
+  // (`isBooleanOrBroadcastableBooleanType`).
+  boolean: (x: Expression) => isBooleanOrBroadcastableBooleanType(x.type.type),
   string: (x: Expression) => isString(x),
   number: (x: Expression) => isNumber(x),
   symbol: (x: Expression) => isSymbol(x),

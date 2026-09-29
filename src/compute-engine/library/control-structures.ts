@@ -27,7 +27,9 @@ import {
 } from '../../common/type/utils.js';
 import {
   broadcastLengthMismatch,
+  hasTupleOrStringArm,
   isBroadcastableCollection,
+  isEnumerableSource,
   isFiniteBroadcastParticipant,
   isUnresolvedCollectionOperand,
   isTuple,
@@ -39,6 +41,7 @@ import {
 import { parseType } from '../../common/type/parse.js';
 import {
   COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
   isValidType,
 } from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -113,6 +116,91 @@ const BOOLEAN_MASK_TYPE = parseType('collection<boolean>')!;
 const FINITE_COLLECTION_TYPE = parseType(
   'list<any> | dictionary<any> | range'
 )!;
+
+/**
+ * Whether a restriction carrier of type `type` is an ORDERED collection that
+ * a mask condition zips element by element: a list, a vector, a matrix, a
+ * range or any other `indexed_collection<T>`, finite or not. A type with a
+ * tuple arm (a point) or a string arm is excluded, also when that arm is one
+ * arm of a union such as `tuple<number, number> | list<tuple<number,
+ * number>>`: such types are indexed collections, but a value of the tuple
+ * or string arm is one value under a restriction, never zipped. A `set`, a
+ * dictionary and a record are not indexed and are excluded too.
+ *
+ * A mask condition of length `k` pairs such a carrier with the mask over the
+ * MASK's length: cell `i` is element `i` of the carrier where the mask is
+ * true, and the absence marker of that element where it is false. The
+ * carrier is read at the first `k` positions only, so an infinite carrier
+ * such as `Range(1, ∞)` is never materialized (user decision 2026-09-29).
+ *
+ * The `evaluate` handler of `When` and `whenCollectionHandlers` both call
+ * this predicate with the static type of the carrier OPERAND as written (a
+ * symbol's declared type, not the type of the value it holds), so the held
+ * form and the evaluated form decide the same way.
+ */
+function isOrderedCarrierType(type: Type): boolean {
+  return (
+    isSubtype(type, INDEXED_COLLECTION_SHAPE_TYPE) && !hasTupleOrStringArm(type)
+  );
+}
+
+/**
+ * Whether the value `value` held by a restriction carrier whose operand has
+ * the static type `carrierType` is ONE value that a list of conditions never
+ * splits into its elements. A string is always one value. A tuple (a point)
+ * is one value, except when the carrier's static type is ordered
+ * (`isOrderedCarrierType`): a symbol declared `indexed_collection<number>`
+ * that holds `(1, 2)` is a collection of numbers by its declaration, so the
+ * tuple is zipped with the mask. The compiled `_SYS.restrict` agrees: it
+ * aligns an array with the mask and masks any other value whole, and a
+ * string is not an array at run time.
+ */
+function isAtomicCarrierValue(carrierType: Type, value: Expression): boolean {
+  if (isString(value)) return true;
+  return isTuple(value) && !isOrderedCarrierType(carrierType);
+}
+
+/**
+ * The first `k` elements of the ORDERED carrier `value`, read with ONE
+ * iterator that stops after `k` elements, so an infinite or very long
+ * carrier is never materialized and a lazy view (a `Filter`, a `Map`) calls
+ * its function once per element read.
+ *
+ * - When the iterator ends before `k` elements, the carrier is SHORTER than
+ *   the mask, and the elements read are returned: the restriction is
+ *   truncated to the carrier's length, as for a finite carrier.
+ * - When the elements cannot be read, the result is `undefined` and the
+ *   restriction is held whole. This is the case for a carrier that cannot be
+ *   enumerated (a valueless symbol, a range with a free or infinite lower
+ *   bound), and for a walk that stops at the iteration limit (a `Filter`
+ *   whose predicate rejects too many elements in a row): that stop is not a
+ *   proof that the carrier has no more elements. The same rule decides a
+ *   missed element read (`isProvablyOutOfRange`, `library/collections.ts`):
+ *   a miss is decided only when it is proven.
+ */
+function orderedCarrierPrefix(
+  value: Expression,
+  k: number
+): Expression[] | undefined {
+  if (!isEnumerableSource(value)) return undefined;
+  const elems: Expression[] = [];
+  if (k <= 0) return elems;
+  try {
+    for (const elem of value.each()) {
+      if (elem === undefined) return undefined;
+      elems.push(elem);
+      if (elems.length >= k) break;
+    }
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+  return elems;
+}
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
@@ -469,22 +557,34 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           // `list<integer | missing>`. A scalar `expr` is masked whole in
           // every cell.
           //
-          // The `evaluate` handler zips the value only when the VALUE is a
-          // finite collection that is not a tuple (a point is one value) and
-          // not a string (atomic under restriction). Otherwise each cell is
-          // the WHOLE value. The type follows the same rule:
+          // The `evaluate` handler zips a finite collection value that is
+          // not a tuple (a point is one value) and not a string (atomic
+          // under restriction), and it zips an ORDERED carrier
+          // (`isOrderedCarrierType`) whatever its length, reading only the
+          // elements the mask needs. When the elements of an ordered
+          // carrier cannot be read (a valueless symbol, a range with a free
+          // bound), the restriction is held whole, so its value is typed by
+          // this handler. Otherwise each cell is the WHOLE value. A type
+          // with a tuple or a string arm (`tuple<number, number> |
+          // list<tuple<number, number>>`) is not ordered: it takes the join
+          // branch below, because its value can be one point. The type
+          // follows the same rule:
           // - a carrier that is finite by type (`FINITE_COLLECTION_TYPE`: a
           //   `list<T>`, a `vector`, a `matrix`, a `dictionary`, a `record`,
-          //   a `range`) is always zipped, so each cell has its ELEMENT
-          //   type `T`;
-          // - a carrier of another collection type (`indexed_collection<T>`,
-          //   `collection<T>`, `set<T>`) can hold an infinite value, such as
-          //   `Range(1, ∞)` or `Integers`, which is not zipped: each cell is
-          //   then the whole value. So a cell can be either an element or
-          //   the whole value, and its type is the JOIN of the element type
-          //   and the carrier type. `When(Range(1, ∞), [True, False])`
-          //   evaluates to `[Range(1, ∞), Missing]`, which the element type
-          //   `integer` alone does not admit;
+          //   a `range`) or ordered by type (`indexed_collection<T>`, which
+          //   can be infinite, such as `Range(1, ∞)`) is always zipped, so
+          //   each cell has its ELEMENT type `T`. `When(Range(1, ∞),
+          //   [True, False])` evaluates to `[1, NaN]` (a masked number is
+          //   `NaN`);
+          // - a carrier of an UNORDERED collection type that is not finite
+          //   by type (`collection<T>`, `set<T>`) can hold an infinite set,
+          //   such as `Integers`, which has no first element and is not
+          //   zipped: each cell is then the whole value. So a cell can be
+          //   either an element (a finite set is zipped) or the whole value,
+          //   and its type is the JOIN of the element type and the carrier
+          //   type. `When(Integers, [True, False])` evaluates to
+          //   `[Integers, Missing]`, which the element type `integer` alone
+          //   does not admit;
           // - a tuple, a string or a scalar value is never zipped, so each
           //   cell has the type of the whole value.
           // The result is a `list` whatever the carrier is, because the
@@ -499,9 +599,28 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           const cell: Type =
             element === undefined
               ? expr.type
-              : isSubtype(expr.type, FINITE_COLLECTION_TYPE)
+              : isSubtype(expr.type, FINITE_COLLECTION_TYPE) ||
+                  // An ordered type that admits a STRING value
+                  // (`indexed_collection<character>`) takes the join branch:
+                  // a string is one value under a restriction, never zipped
+                  // (`isAtomicCarrierValue`), so a cell can be the whole
+                  // string, which the element type `character` does not
+                  // admit.
+                  (isOrderedCarrierType(expr.type) &&
+                    !isSubtype('string', expr.type))
                 ? element
-                : reduceType({ kind: 'union', types: [element, expr.type] });
+                : reduceType({
+                    kind: 'union',
+                    // A masked numeric element of a zipped finite set is
+                    // `NaN`, so a numeric element arm is `number`, the type
+                    // that admits `NaN`, as the zipped branch above answers
+                    // `list<number>`: `When({1, 2}, [True, False])` is
+                    // `[1, NaN]`.
+                    types: [
+                      isNumericValueType(element) ? 'number' : element,
+                      expr.type,
+                    ],
+                  });
           // A masked NUMERIC cell is `NaN` (`maskedValue`), so the cells are
           // numbers, `list<number>`: the materialized list the mask answers
           // (`[NaN, NaN, 30]`) is typed by the `List` handler, which joins a
@@ -612,13 +731,60 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             // zip, `(1, 2){[1, 2, 3] < 2}` answered `[1, Missing]`, the
             // point's coordinates masked cell by cell. A string is one value
             // too (the lattice reads it as a collection of its characters).
+            //
+            // A carrier whose static type is ORDERED (`isOrderedCarrierType`:
+            // a list, a vector, a range, an `indexed_collection<T>`) is
+            // zipped whatever its length, over the MASK's length (user
+            // decision 2026-09-29): `When(Range(1, ∞), [True, False])` is
+            // `[1, NaN]`, not `[Range(1, ∞), Missing]`. Only the first `k`
+            // elements are read, with one iterator
+            // (`orderedCarrierPrefix`), so an infinite carrier or a lazy
+            // view over one is never materialized. The static type of such
+            // a restriction is `list<missing | T>`, or `list<number>` when
+            // `T` is numeric, from the element type `T` alone, so the value
+            // must be the zipped cells:
+            // - a TUPLE value held by a symbol declared with an ordered type
+            //   (`P: indexed_collection<number>` assigned `(1, 2)`) is
+            //   zipped too, as the declaration says it is a collection of
+            //   elements (`isAtomicCarrierValue`). A tuple whose own type
+            //   says so is still one value, as above, and a STRING is one
+            //   value whatever the declaration;
+            // - a carrier with fewer elements than the mask follows the
+            //   finite rule: the result is truncated to the shorter length;
+            // - when the elements cannot be read — a valueless symbol
+            //   declared `list<number>`, a range with a free bound such as
+            //   `Range(1, n)`, a lazy `Filter` whose walk stops at the
+            //   iteration limit — the whole restriction is held
+            //   unevaluated, `When(carrier, mask)`, which is typed by the
+            //   type handler. Before, each cell was the whole carrier
+            //   (`[P, Missing, P]`), a value the element-only type does not
+            //   admit. The held form does not present as a collection
+            //   (`isCollection` is false, `count` is undefined) until the
+            //   carrier's elements can be read, as a restriction whose mask
+            //   is not resolved is held.
             const ev = expr.evaluate(options);
-            const zip =
+            const ordered = isOrderedCarrierType(expr.type.type);
+            const atomic = isAtomicCarrierValue(expr.type.type, ev);
+            let zip = false;
+            let elems: Expression[] = [];
+            if (ordered && !atomic) {
+              const prefix = ev.isCollection
+                ? orderedCarrierPrefix(ev, conds.length)
+                : undefined;
+              if (prefix === undefined) return ce._fn('When', [expr, c]);
+              elems = prefix;
+              zip = true;
+            } else if (
+              !atomic &&
               ev.isCollection &&
-              ev.isFiniteCollection &&
-              !isTuple(ev) &&
-              !isString(ev);
-            const elems = zip ? (Array.from(ev.each()) as Expression[]) : [];
+              ev.isFiniteCollection === true
+            ) {
+              // An unordered finite carrier (a finite set), or a carrier
+              // whose static type is not ordered but whose value is a finite
+              // collection: every element is read.
+              elems = Array.from(ev.each()) as Expression[];
+              zip = true;
+            }
             const n = zip ? Math.min(conds.length, elems.length) : conds.length;
             const result: Expression[] = [];
             for (let i = 0; i < n; i++) {
@@ -1015,16 +1181,30 @@ function whenCollectionHandlers(): CollectionHandlers {
     // restricted string, not a collection of restricted characters. This must
     // agree with the distribution gate in `When`'s evaluate handler, which
     // excludes the same two kinds.
-    if (!v.isCollection || isTuple(v) || isString(v)) return undefined;
+    // One exception, for a MASK condition only, again as the `evaluate`
+    // handler decides: a TUPLE value held by a symbol declared with an
+    // ORDERED collection type (`isOrderedCarrierType`) is zipped. The two
+    // sites call the same predicates (`isOrderedCarrierType`,
+    // `isAtomicCarrierValue`) with the same inputs: the static type of the
+    // carrier operand as written, and the value it holds. For a symbol, that
+    // value is the symbol's value, so a symbol declared `tuple<number,
+    // number> | list<number>` that holds `(1, 2)` is one point here, as it
+    // is when the restriction is evaluated.
+    if (!v.isCollection) return undefined;
+    const held = (isSymbol(v) ? v.value : undefined) ?? v;
+    const atomic = isTuple(held) || isString(held);
     const cond = expr.op2;
     const ce = expr.engine;
+    if (isAtomicCarrierValue(v.type.type, held)) return undefined;
     if (possiblyElementwiseCondition([cond.type.type])) return undefined;
-    if (!cond.type.matches('collection<any>'))
+    if (!cond.type.matches('collection<any>')) {
+      if (atomic) return undefined;
       return {
         value: v,
         count: v.count,
         restrict: (elem) => ce._fn('When', [elem, cond]),
       };
+    }
     // A mask: zip it with the value, to the shorter length. The mask cells
     // are read once per call of `parts`, not once per element.
     const vn = v.count;
@@ -2225,7 +2405,7 @@ function canonicalBlock(
           // so it rides on the hoisted binding too. Without it the binding
           // stays `unknown` until the `Declare` runs, and the FIRST use of
           // the local in the block — `Length(queue)` in a loop condition,
-          // `Join(xs, [4])` behind the spread `[...xs, 4]` — infers the
+          // `ListJoin(xs, [4])` behind the spread `[...xs, 4]` — infers the
           // callee's loose parameter type (`collection`, `collection<any>`)
           // onto it; the later `Assign` can only WIDEN that, so `let xs = []`
           // grown by a spread read as a `collection<any>` on the compile

@@ -177,6 +177,7 @@
       "Linspace",
       "List",
       "ListFrom",
+      "ListJoin",
       "Map",
       "MaxBy",
       "MemberCall",

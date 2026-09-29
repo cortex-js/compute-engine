@@ -7,7 +7,10 @@ import { kleeneAnd, kleeneNot, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import { isEmptyType } from '../../common/type/subtype.js';
-import { collectionElementType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  isBooleanOrBroadcastableBooleanType,
+} from '../../common/type/utils.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from '../boxed-expression/flatten.js';
@@ -873,7 +876,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
       // Validate optional third argument
       if (condition && sym(condition) !== 'Nothing') {
-        if (!condition.type.matches('boolean')) {
+        // A condition typed `broadcastable<boolean>` (`Sin(P) > x`, with `P`
+        // declared `collection<number>`) may be a boolean, so it is accepted
+        // (`isBooleanOrBroadcastableBooleanType`).
+        if (!isBooleanOrBroadcastableBooleanType(condition.type.type)) {
           return ce._fn('Element', [
             value.canonical,
             canonicalCollection,

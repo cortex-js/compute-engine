@@ -91,23 +91,6 @@ describe('Collection operators over a symbol declared with an abstract collectio
             );
             return;
           }
-          if ((op === 'Join' || op === 'Append') && valueName === 'set') {
-            // `Join` and `Append` over a symbol declared `collection<T>` are
-            // statically typed `list<T>`, although the value is a set when
-            // the symbol holds a set. `evaluate()` rebuilds the node over the
-            // set it holds and answers the set, but a materializing
-            // evaluation reads the kind off the static type and answers the
-            // list `[3,1,5]`. Widening the static type to `collection<T>`
-            // fixes both, and also changes the type of a list literal with a
-            // spread, `(a) -> [...a, 0]` (it lowers to `Join(a, [0])`), which
-            // `tycho-item-331-spread-in-function-body.test.ts` pins as
-            // `list<any>`. That needs a decision, so these rows check the
-            // plain evaluation only.
-            expect(ce.box(make(name)).evaluate().toString()).toEqual(
-              ce.box(make(value)).evaluate().toString()
-            );
-            return;
-          }
           const expr = ce.box(make(name));
           const result = materialized(make(name));
           const expected = materialized(make(value));
@@ -163,6 +146,10 @@ describe('Evaluated value of a kind-preserving operator over a declared collecti
     expect(r.toString()).toBe('[7,3,3]');
   });
 
+  // `Join` and `Append` adopt the kind of an operand, and an operand declared
+  // with an abstract collection type may hold a set: their static type is
+  // then `collection<T>`, and the value is a set with or without a
+  // materializing evaluation (user decision 2026-09-29).
   test('Join and Append over a declared collection holding a set are sets', () => {
     const name = declared('collection<number>', ['Set', 3, 1]);
     expect(
@@ -174,6 +161,16 @@ describe('Evaluated value of a kind-preserving operator over a declared collecti
     expect(ce.box(['Append', name, 5]).evaluate().toString()).toBe(
       'Set(3, 1, 5)'
     );
+    for (const json of [
+      ['Join', name, ['List', 5]],
+      ['Append', name, 5],
+    ]) {
+      const expr = ce.box(json);
+      expect(expr.type.toString()).toBe('collection<number>');
+      const r = expr.evaluate({ materialization: true });
+      expect(r.operator).toBe('Set');
+      expect(r.toString()).toBe('Set(3, 1, 5)');
+    }
   });
 });
 

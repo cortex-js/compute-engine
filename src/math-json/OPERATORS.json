@@ -3979,6 +3979,18 @@
       "description": "Create a list from the elements of a collection."
     },
     {
+      "name": "ListJoin",
+      "category": "Collections",
+      "arity": "variadic",
+      "signature": "(collection<any>*) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Join the elements of some collections into a list.\n\nThis is the canonical form of a list literal with a spread: `[...a, 0]` is `ListJoin(a, [0])`.\n\nThe result is a list whatever the kind of the operands: the elements of a set operand are included in the iteration order of the set, without deduplication.\n\nA tuple operand is included as a single element, and so is a scalar operand."
+    },
+    {
       "name": "Ln",
       "category": "Arithmetic",
       "arity": "optional",

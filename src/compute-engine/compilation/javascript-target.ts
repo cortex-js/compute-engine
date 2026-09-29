@@ -1826,7 +1826,11 @@ export function isIndexedCollectionOperand(e: Expression): boolean {
   // `indexed_collection<any>`: a `list<any>` is array-shaped even though it
   // is not a subtype of the values-only bare `list` (= `list<unknown>`,
   // user ruling 2026-08-17).
-  return t.matches('list<any>') || t.matches('indexed_collection<any>');
+  if (t.matches('list<any>') || t.matches('indexed_collection<any>'))
+    return true;
+  // A join over collections that are checked to be arrays at run time is an
+  // array, although its type is `collection<T>` (`compilesToCheckedArray`).
+  return compilesToCheckedArray(e, new Set());
 }
 
 /**
@@ -1859,22 +1863,89 @@ function runtimeCheckedArrayCode(
   e: Expression | undefined,
   compile: (expr: Expression) => string
 ): string | undefined {
-  if (e === undefined || !isSymbol(e)) return undefined;
+  if (e === undefined || !admitsRuntimeCheckedArray(e)) return undefined;
+  return `_SYS.arr(${compile(e)}, ${JSON.stringify(kind)})`;
+}
+
+/** Whether `e` is an operand that `runtimeCheckedArrayCode` compiles with a
+ * run-time array check: see there. */
+function admitsRuntimeCheckedArray(e: Expression): boolean {
+  if (!isSymbol(e)) return false;
   const t = jsType(e);
-  if (t === 'unknown' || t === 'any' || t === 'value') return undefined;
-  if (!e.type.matches('collection<any>')) return undefined;
+  if (t === 'unknown' || t === 'any' || t === 'value') return false;
+  if (!e.type.matches('collection<any>')) return false;
   // Only a type the engine INFERRED from the uses. A declared
   // `collection<number>` is a contract that admits a set, and the program
   // then declines, so that the interpreter evaluates it.
-  if (e.valueDefinition?.inferredType !== true) return undefined;
-  if (couldBeStringOperand(e)) return undefined;
+  if (e.valueDefinition?.inferredType !== true) return false;
+  if (couldBeStringOperand(e)) return false;
   if (
     e.type.matches('set<any>') ||
     e.type.matches('dictionary<any>') ||
     e.type.matches('tuple')
   )
-    return undefined;
-  return `_SYS.arr(${compile(e)}, ${JSON.stringify(kind)})`;
+    return false;
+  return true;
+}
+
+/**
+ * Whether `e` compiles to a JavaScript array although its static type is an
+ * abstract collection (`collection<T>`, which also admits a set) or another
+ * type that `isIndexedCollectionOperand` does not read as an array.
+ *
+ * A `Join` or an `Append` over an operand whose type is an abstract
+ * collection is typed `collection<T>`: in the interpreter, such an operand
+ * can hold a set, and the join is then a set. The compiled `Join`, `ListJoin`
+ * and `Append` build a JavaScript array literal, and each of their
+ * collection operands is compiled by `collArg`, which admits an operand only
+ * when it is provably an array or when it is checked to be an array at run
+ * time (`runtimeCheckedArrayCode`, which throws for a set or a dictionary).
+ * So when every collection operand (every operand that is not one element,
+ * and only the first operand of an `Append`) is admitted by one of these
+ * tests, the compiled value of the node is an array, and a consumer of the
+ * node (`Length`, `Sum`, a spread in a list literal) can read it as one. The
+ * witness is the parameter `a` of `f(a) = Join(a, [0])`: its type is
+ * inferred as `collection<any>` from the use, so the join is typed
+ * `collection<any>`, and `Length(Join(a, [0]))` must still compile.
+ *
+ * A call of a user function whose body is such a node compiles to the same
+ * array, so the call is admitted too: `Length(f(b))` with `f` defined as
+ * above. `visited` holds the user functions being looked through, so a
+ * recursive definition answers `false` instead of looping.
+ */
+function compilesToCheckedArray(e: Expression, visited: Set<string>): boolean {
+  if (!e.type.matches('collection<any>')) return false;
+  if (e.type.matches('set<any>') || e.type.matches('dictionary<any>'))
+    return false;
+  const isArraySource = (op: Expression): boolean =>
+    (!op.type.matches('string') &&
+      (op.type.matches('list<any>') ||
+        op.type.matches('indexed_collection<any>'))) ||
+    admitsRuntimeCheckedArray(op) ||
+    compilesToCheckedArray(op, visited);
+  if (isFunction(e, 'Join') || isFunction(e, 'ListJoin'))
+    return (
+      e.nops > 0 &&
+      e.ops.every((op) => isAtomicJSJoinOperand(op) || isArraySource(op))
+    );
+  if (isFunction(e, 'Append')) return e.nops > 0 && isArraySource(e.ops[0]);
+  // The literal of a user function: the value of the symbol, or the literal
+  // a `function` definition installed on the operator definition the call is
+  // bound to (a definition local to a block has no symbol value).
+  const literal = isFunction(e)
+    ? e.operatorDefinition?._lambdaLiteral
+    : undefined;
+  const fn = isFunction(literal, 'Function') ? literal : userFunctionLiteral(e);
+  const name = e.operator;
+  if (fn === undefined || typeof name !== 'string' || visited.has(name))
+    return false;
+  // The value of a one-statement block is that statement. A body with more
+  // statements is not read: a `Return` in an earlier statement could give
+  // the call another value.
+  let body: Expression | undefined = fn.ops[0];
+  while (isFunction(body, 'Block') && body.nops === 1) body = body.ops[0];
+  if (body === undefined) return false;
+  return compilesToCheckedArray(body, new Set([...visited, name]));
 }
 
 /**
@@ -2809,6 +2880,58 @@ function compileJSPointList(
     `${out}[${idx}] = [${parts.join(', ')}]; ` +
     `return ${out}; })()`
   );
+}
+
+/**
+ * Compile a `Join`, or a `ListJoin` (the list literal with a spread): a flat
+ * concatenation of the (top-level) elements of each collection operand.
+ *
+ * The string-preserving arm applies to `Join` only: when every operand is
+ * provably a string, `Join` is variadic concatenation and answers a
+ * `string`, not a `list<character>` (`Join("ab", "cd")` is `"abcd"`,
+ * probed). Spreading the operands into an array would answer
+ * `["a","b","c","d"]` instead, and would spread UTF-16 code units at that.
+ * Each operand goes through the interpreter's ingress conditioning
+ * (`_SYS.ct`) and the concatenation is NFC-normalized, since
+ * `engine.string()` stores every string in NFC. A mixed call
+ * (`Join("ab", ["c"])`) takes the generic arm in the interpreter and answers
+ * a `list<character | string>`; here it keeps failing closed, because
+ * `collArg` refuses a string operand — a string does not lower to a JS array.
+ */
+function compileJSJoin(
+  head: 'Join' | 'ListJoin',
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+): string {
+  if (args.length === 0) return '[]';
+  // An absent operand (`Missing`, `Undefined`) is an absent collection, and
+  // the interpreter answers `Missing` for the whole join (user decision
+  // 2026-09-26). The scalar arm below compiled it as one `undefined`
+  // element (`[undefined, 3]`), so the call fails closed.
+  const absent = args.findIndex(
+    (a) => isSymbol(a, 'Missing') || isSymbol(a, 'Undefined')
+  );
+  if (absent >= 0)
+    throw new Error(
+      `Could not compile \`${head}\`: operand ${absent + 1} is absent, and the ` +
+        `interpreter answers \`Missing\` for the whole join. The interpreter ` +
+        `evaluates it instead.`
+    );
+  if (head === 'Join' && args.every(isProvablyStringOperand))
+    return `([${args
+      .map((a) => `_SYS.ct(${compile(a)})`)
+      .join(', ')}].join("").normalize())`;
+  // An ATOMIC operand — a tuple (a point is one value, never spliced) or
+  // a scalar whose type proves it is not a collection — is one element,
+  // as the interpreter's `isAtomicJoinOperand` reads it: `Join([1, 2], 3)`
+  // is `[1, 2, 3]`. A tuple used to be spread into its components here.
+  return `[${args
+    .map((a, i) =>
+      isAtomicJSJoinOperand(a)
+        ? compile(a)
+        : `...(${collArg(head, a, compile, i + 1)})`
+    )
+    .join(', ')}]`;
 }
 
 /**
@@ -4149,50 +4272,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     assertNumericSortElements('Sort', args[0]!);
     return `(${coll}).slice().sort(${NAN_LAST_COMPARATOR})`;
   },
-  // Flat concatenation of the (top-level) elements of each collection operand.
-  //
-  // The string-preserving arm comes first: when every operand is provably a
-  // string, `Join` is variadic concatenation and answers a `string`, not a
-  // `list<character>` (`Join("ab", "cd")` is `"abcd"`, probed). Spreading the
-  // operands into an array would answer `["a","b","c","d"]` instead, and would
-  // spread UTF-16 code units at that. Each operand goes through the
-  // interpreter's ingress conditioning (`_SYS.ct`) and the concatenation is
-  // NFC-normalized, since `engine.string()` stores every string in NFC.
-  // A mixed call (`Join("ab", ["c"])`) takes the generic arm in the
-  // interpreter and answers a `list<character | string>`; here it keeps
-  // failing closed, because `collArg` refuses a string operand — a string does
-  // not lower to a JS array.
-  Join: (args, compile) => {
-    if (args.length === 0) return '[]';
-    // An absent operand (`Missing`, `Undefined`) is an absent collection, and
-    // the interpreter answers `Missing` for the whole join (user decision
-    // 2026-09-26). The scalar arm below compiled it as one `undefined`
-    // element (`[undefined, 3]`), so the call fails closed.
-    const absent = args.findIndex(
-      (a) => isSymbol(a, 'Missing') || isSymbol(a, 'Undefined')
-    );
-    if (absent >= 0)
-      throw new Error(
-        `Could not compile \`Join\`: operand ${absent + 1} is absent, and the ` +
-          `interpreter answers \`Missing\` for the whole join. The interpreter ` +
-          `evaluates it instead.`
-      );
-    if (args.every(isProvablyStringOperand))
-      return `([${args
-        .map((a) => `_SYS.ct(${compile(a)})`)
-        .join(', ')}].join("").normalize())`;
-    // An ATOMIC operand — a tuple (a point is one value, never spliced) or
-    // a scalar whose type proves it is not a collection — is one element,
-    // as the interpreter's `isAtomicJoinOperand` reads it: `Join([1, 2], 3)`
-    // is `[1, 2, 3]`. A tuple used to be spread into its components here.
-    return `[${args
-      .map((a, i) =>
-        isAtomicJSJoinOperand(a)
-          ? compile(a)
-          : `...(${collArg('Join', a, compile, i + 1)})`
-      )
-      .join(', ')}]`;
-  },
+  // Flat concatenation of the (top-level) elements of each collection operand
+  // (`compileJSJoin`).
+  Join: (args, compile) => compileJSJoin('Join', args, compile),
+  // The list literal with a spread, `[...xs, v]`. It compiles as `Join`,
+  // except that an all-string call is not a string concatenation: the
+  // literal is a list whatever its operands are, and a string operand, which
+  // does not lower to a JavaScript array, fails closed in `collArg`.
+  ListJoin: (args, compile) => compileJSJoin('ListJoin', args, compile),
   // Split a string into a list of user-perceived characters. The interpreter
   // segments grapheme clusters (UAX #29 via `Intl.Segmenter`, `library/core.ts`
   // `splitGraphemeClusters`), not code points or UTF-16 units, so neither
@@ -15892,8 +15979,9 @@ function rangeGatherSource(coll: Expression):
 /**
  * The segments of a gather index (see {@link GatherSegment}), or `undefined`
  * when the index is not a `Range` without a step, a literal `List` of
- * integer-typed scalars, or a `Join` of those. An empty `List` is a
- * zero-length segment; a `Join` with no admissible operand is not a gather.
+ * integer-typed scalars, or a `Join` of those (or a `ListJoin`, the list
+ * literal with a spread, `[...r1, ...r2]`). An empty `List` is a zero-length
+ * segment; a `Join` with no admissible operand is not a gather.
  */
 function gatherSegments(
   index: Expression
@@ -15913,7 +16001,10 @@ function gatherSegments(
     // own.
     return [{ kind: 'points', list: index, indices: index.ops }];
   }
-  if (isFunction(index, 'Join') && index.ops.length > 0) {
+  if (
+    (isFunction(index, 'Join') || isFunction(index, 'ListJoin')) &&
+    index.ops.length > 0
+  ) {
     const out: GatherSegment[] = [];
     for (const op of index.ops) {
       const piece = gatherSegments(op);

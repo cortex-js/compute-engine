@@ -125,7 +125,8 @@ n`,
     const outer = expr.ops![2].ops![0]; // the `xs` of `Length(xs)`
     let inner: Expression | undefined;
     const walk = (e: Expression): void => {
-      if (e.operator === 'Join') inner = e.ops![0];
+      // `[...xs, 4]` is canonically `ListJoin(xs, [4])`.
+      if (e.operator === 'ListJoin') inner = e.ops![0];
       for (const op of e.ops ?? []) walk(op);
     };
     walk(expr.ops![1]);

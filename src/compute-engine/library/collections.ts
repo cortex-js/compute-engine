@@ -42,8 +42,13 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   typeCouldBeCollection,
   windowedCollectionOps,
+  collectionSourceOperands,
   type WindowedParams,
 } from '../collection-utils.js';
+import {
+  isAbstractCollectionTypeOf,
+  isKindOpenOperandType,
+} from '../boxed-expression/broadcast-lift-type.js';
 import type { CollectionHandlers } from '../types-definitions.js';
 import {
   callbackArityError,
@@ -92,6 +97,7 @@ import {
   functionResult,
   functionArity,
   isAtomicValueType,
+  isBooleanOrBroadcastableBooleanType,
   isPointElementType,
   narrowingPreservesEffects,
   resolveTypeAlias,
@@ -838,10 +844,15 @@ const ANONYMOUS_PARAMETER_RE = /^_\d?$/;
  * operand is overloaded between a VALUE to match and a PREDICATE to apply:
  * the wildcard is what tells the two apart, so a plain boolean value
  * (`Count(xs, True)`) is still a value.
+ *
+ * A comparison over an operand that may be a collection is typed
+ * `broadcastable<boolean>`, not `boolean` (`_ > P` with `P` declared
+ * `collection<number>`): it is still a predicate, so the type test accepts
+ * it too (`isBooleanOrBroadcastableBooleanType`).
  */
 function isPredicateShorthand(op: Expression): boolean {
   return (
-    op.type.matches('boolean') &&
+    isBooleanOrBroadcastableBooleanType(op.type.type) &&
     op.symbols.some((x) => ANONYMOUS_PARAMETER_RE.test(x))
   );
 }
@@ -2408,7 +2419,48 @@ function isAtomicJoinOperandD(d: OperandDescriptor): boolean {
   return isSubtype(d.type, 'tuple');
 }
 
-/** Descriptor twin of {@link joinResultType}. */
+/**
+ * The element type of the list a list literal with a spread produces
+ * (`ListJoin`), or `undefined` when an operand's type does not say what its
+ * elements are. A tuple operand is one element (it does not splice), and any
+ * other operand contributes its elements, whatever the kind of collection it
+ * is: a set, a range, a dictionary (its entries) or a string (its
+ * characters).
+ */
+function joinedElementTypeD(
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  const eltTypes: Type[] = [];
+  for (const op of ops) {
+    if (isAtomicJoinOperandD(op)) {
+      eltTypes.push(op.type);
+      continue;
+    }
+    const elt = collectionElementType(op.type);
+    if (elt === undefined) return undefined;
+    eltTypes.push(elt);
+  }
+  if (eltTypes.length === 0) return undefined;
+  return widenAll(eltTypes);
+}
+
+/**
+ * The result type of `Join`, computed from operand descriptors (the twin of
+ * {@link joinResultType}, which reads boxed operands).
+ *
+ * `Join` adopts the kind of its operands: a set operand makes the result a
+ * set, and a keyed operand makes it keyed. An operand whose type is an
+ * ABSTRACT collection (`collection<number>`, see `isAbstractCollectionTypeOf`)
+ * may hold a set when the result is evaluated, so the result is then typed
+ * `collection<T>`: the type must admit a set, since `Join(P, [5])` with `P`
+ * holding `Set(3, 1)` is `Set(3, 1, 5)`. At evaluation, the kind of such a
+ * node follows the values its abstract operands hold (see
+ * `BoxedFunction.isIndexedCollection` and `producesSet`). An operand typed
+ * `unknown`, `any` or `value` (an unresolved call `f(x)`, a symbol declared
+ * `any`) does not say what it holds either, and it may hold a set too, so it
+ * also makes the result `collection`. When every operand is list- or
+ * indexed-typed, the result stays `list<T>`.
+ */
 function joinResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length > 0 && ops.every((op) => isSubtype(op.type, 'string')))
     return 'string';
@@ -2417,32 +2469,40 @@ function joinResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
     return 'dictionary';
   if (ops.some((op) => isSubtype(op.type, SET_SHAPE_TYPE))) return 'set';
 
-  const eltTypes: Type[] = [];
-  for (const op of ops) {
-    if (isAtomicJoinOperandD(op)) {
-      eltTypes.push(op.type);
-      continue;
-    }
-    const elt = collectionElementType(op.type);
-    if (elt === undefined) return 'list';
-    eltTypes.push(elt);
-  }
-  if (eltTypes.length === 0) return 'list';
-  return { kind: 'list', elements: widenAll(eltTypes) };
+  const kind = ops.some(
+    (op) => !isAtomicJoinOperandD(op) && isKindOpenOperandType(op.type)
+  )
+    ? 'collection'
+    : 'list';
+  const elements = joinedElementTypeD(ops);
+  if (elements === undefined) return kind;
+  return { kind, elements };
 }
 
-/** Descriptor twin of {@link appendResultType}. */
+/**
+ * The result type of `Append`, computed from operand descriptors (the twin
+ * of {@link appendResultType}).
+ *
+ * As for `Join` (see `joinResultTypeD`), a source whose type is an abstract
+ * collection may hold a set, and the result is then typed `collection<T>`.
+ * Unlike `Join`, a source whose type says nothing (`unknown`, `any`,
+ * `value`) keeps the result typed `list`: in the structural form of a
+ * nested `Append`, the source of the inner node is typed `unknown`, and
+ * typing that node `collection` made the outer node `collection<T>` while
+ * the flattened canonical form is `list<T>` (`append-variadic.test.ts`).
+ */
 function appendResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length === 0) return 'list';
   const source = ops[0].type;
   if (isRecordShapedType(source)) return 'record';
   if (isSubtype(source, DICTIONARY_SHAPE_TYPE)) return 'dictionary';
   if (isSubtype(source, SET_SHAPE_TYPE)) return 'set';
+  const kind = isAbstractCollectionTypeOf(source) ? 'collection' : 'list';
   const elements = collectionElementType(source);
-  if (elements === undefined) return 'list';
-  if (ops.length === 1) return { kind: 'list', elements };
+  if (elements === undefined) return kind;
+  if (ops.length === 1) return { kind, elements };
   return {
-    kind: 'list',
+    kind,
     elements: widen(elements, ...ops.slice(1).map((op) => op.type)),
   };
 }
@@ -4635,6 +4695,284 @@ const reduceEvaluate = (
   );
   if (enumerationDeclinedAfterWalk(collection, walked)) return undefined;
   return folded;
+};
+
+/**
+ * The collection handlers of `Join`, shared by `ListJoin` and by no other
+ * operator. They read the kind of the result (`producesSet`,
+ * `producesKeyed`) from the type of the node, and, when that type is an
+ * abstract collection (`collection<T>`), from the values the operands hold
+ * now. A `ListJoin` is always typed as a list, so it never deduplicates or
+ * merges keys: it enumerates the elements of each operand in order, and its
+ * `at` handler reads an operand that is not indexed (a set, a dictionary)
+ * by position through the iterator of that operand.
+ */
+const JOIN_COLLECTION_HANDLERS: CollectionHandlers = {
+  // A `Join` with an operand that can be absent is not a collection view
+  // (`mayBeAbsentCollectionOperand`): it is not enumerated, and it has no
+  // count and no finiteness. It evaluates to `Missing` (or to a threaded
+  // result for a restricted operand), and consumers read that value.
+  isCollection: (expr) =>
+    !isFunction(expr) || !expr.ops.some(mayBeAbsentCollectionOperand),
+  // An operand that is neither atomic (a tuple, one element) nor a
+  // collection now, and whose type does not say that it is a collection
+  // (`unknown`, `any`), is unresolved: a call of a function with no known
+  // result type, `f(x)`, may return a list, and the canonical handler kept
+  // it as a collection operand for that reason (a provable scalar was
+  // wrapped in a one-element list). The iterator enumerates such an operand
+  // with `each()`, which yields nothing, so the join cannot be enumerated
+  // now, as a join over a valueless collection symbol cannot. Before,
+  // `enumerableFromAllSources` read the operand as a scalar that contributes
+  // itself, the join reported itself enumerable, its materialization dropped
+  // the operand, and `Join(f(x), [1])` printed as `[1]`. An operand whose
+  // type is a collection, such as the eager `ListFrom(s)`, which has no
+  // collection handlers before it is evaluated, is enumerated through
+  // `each()` and is left to `enumerableFromAllSources`.
+  isEnumerable: (expr) => {
+    if (
+      isFunction(expr) &&
+      expr.ops.some(
+        (op) =>
+          !isAtomicJoinOperand(op) &&
+          !op.isCollection &&
+          !typeCouldBeCollection(op.type.type)
+      )
+    )
+      return false;
+    return enumerableFromAllSources(expr);
+  },
+  isLazy: (_expr) => true,
+  // Without this, `materialize()` never reaches its key-value branch (it
+  // tests `elttype` against `tuple<string, any>`), the node is not
+  // indexed, and a dictionary-kind `Join` fell through to
+  // `engine.function('Set', …)` — coming back as a SET OF ENTRY TUPLES.
+  // The HEAD changed, not just the element count.
+  elttype: (expr) =>
+    producesKeyed(expr) ? parseType('tuple<string, any>') : undefined,
+  // A set-kind result is indexed by walking the deduplicated enumeration
+  // from the start (`distinctAt`), so sequential indexing would be
+  // quadratic without a cache. `Join`'s elements are exactly its
+  // operands' elements, so they are as pure as those — the same premise
+  // `Map` relies on for its own `elementMemo`.
+  elementMemo: true,
+  count: (expr) => {
+    if (!isFunction(expr)) return undefined;
+    const isSet = producesSet(expr);
+    // A keyed result must read every entry before it can merge, so an
+    // infinite operand makes it unanswerable outright.
+    if (producesKeyed(expr) && expr.ops.some((op) => op.count === Infinity))
+      return undefined;
+    let total = 0;
+    for (const op of expr.ops) {
+      if (isAtomicJoinOperand(op)) {
+        total += 1;
+        continue;
+      }
+      const count = countOfSource(op);
+      if (count === undefined) return undefined;
+      if (!Number.isFinite(count)) {
+        // A concatenation containing an infinite operand is infinite
+        // whatever follows it, so answer now rather than scanning on —
+        // a LATER operand with an unknown count would otherwise mask a
+        // length we already know.
+        //
+        // Under set semantics that holds only when the infinite operand
+        // is ITSELF a set: its elements are already distinct, and `Join`
+        // passes them through unchanged, so deduplication cannot collapse
+        // infinitely many of them into finitely many. Any other infinite
+        // operand may repeat one value forever, so the number of DISTINCT
+        // elements is not decidable by a walk that terminates.
+        if (!isSet) return Infinity;
+        return op.type.matches('set<any>') ? Infinity : undefined;
+      }
+      total += count;
+    }
+    // A set-kind result counts DISTINCT elements and a keyed one counts
+    // distinct KEYS: the operands may repeat each other
+    // (`Join(Set(1, 2), Set(2, 3))` concatenates 4 elements but IS a
+    // 3-element set), so the concatenated length is only an upper bound.
+    // Both are counted by walking the rewritten enumeration the
+    // `iterator` handler already produces.
+    return producesMergedView(expr) ? distinctCount(expr, total) : total;
+  },
+  // `isEmpty` and `isFinite` are declared explicitly rather than left to
+  // the defaults, which derive both from `count`. A set-kind `count` can
+  // answer `undefined` — its deduplicating walk is bounded — and routing
+  // these through it would drag decidable answers down with it, including
+  // `materialize()`, which bails outright when `isEmptyCollection` is
+  // `undefined`, so the value would stop previewing too.
+  //
+  // Emptiness is dedup-invariant outright: deduplication cannot empty a
+  // non-empty collection, nor fill an empty one.
+  isEmpty: (expr) => {
+    if (!isFunction(expr)) return undefined;
+    if (expr.nops === 0) return true;
+    // An atomic (tuple) operand IS one element, so it is never empty.
+    return kleeneAnd(
+      expr.ops.map((op) =>
+        isAtomicJoinOperand(op) ? false : op.isEmptyCollection
+      )
+    );
+  },
+  // Finiteness is NOT dedup-invariant, and the implication runs the
+  // opposite way from the one it is tempting to write down: deduplication
+  // can only SHRINK a collection, so it can turn an infinite enumeration
+  // into a finite set — `Join(Set(1), Repeat(1))` enumerates forever and
+  // holds exactly one element. So an infinite operand settles finiteness
+  // only when it is ITSELF a set (already distinct, and `Join` passes its
+  // elements through unchanged); otherwise the answer is UNKNOWN, which
+  // is the convention `Dedup` already follows for the same reason.
+  isFinite: (expr) => {
+    if (!isFunction(expr)) return undefined;
+    const isSet = producesSet(expr);
+    return kleeneAnd(
+      expr.ops.map((op) => {
+        if (isAtomicJoinOperand(op)) return true;
+        const finite = finitenessOfSource(op);
+        if (finite !== false || !isSet) return finite;
+        return op.type.matches('set<any>') ? false : undefined;
+      })
+    );
+  },
+  contains: (expr, target) => {
+    if (!isFunction(expr)) return false;
+    // A keyed result answers from the MERGED entries: an entry whose key
+    // was overwritten by a later one is no longer a member, so asking the
+    // operands directly would report `("b", 2)` present in a dictionary
+    // whose `b` is now 3.
+    if (producesKeyed(expr)) {
+      // An operand that cannot be ENUMERATED yields nothing, and a walk
+      // over nothing is indistinguishable from a walk that found nothing:
+      // without this gate a keyed result over a valueless (but
+      // dictionary-typed) operand reports a definite `false` for a member
+      // it simply cannot see. `distinctCount` and `distinctAt` gate on the
+      // same predicate, for the same reason.
+      if (expr.isEnumerableCollection !== true) return undefined;
+      // The merged walk can decline (see `keyedMergeIterator`), and an
+      // undecidable membership is `undefined`, not `false`.
+      try {
+        for (const entry of expr.each()) if (entry.isSame(target)) return true;
+        return false;
+      } catch (e) {
+        if (
+          e instanceof CancellationError &&
+          e.cause === 'iteration-limit-exceeded'
+        )
+          return undefined;
+        throw e;
+      }
+    }
+    // Three-valued: an operand that cannot decide membership leaves the
+    // whole query undecided (`.some()` would report a definite `false`).
+    return kleeneOr(
+      expr.ops.map((op) =>
+        isAtomicJoinOperand(op) ? op.isSame(target) : op.contains(target)
+      )
+    );
+  },
+  iterator: (expr) => {
+    if (!isFunction(expr))
+      return { next: () => ({ value: undefined, done: true }) };
+    const sources = expr.ops.map((op) =>
+      isAtomicJoinOperand(op) ? op : op.each()
+    );
+    let index = 0;
+    const concatenation: Iterator<Expression> = {
+      next: () => {
+        while (true) {
+          if (index >= sources.length) return { value: undefined, done: true };
+          const source = sources[index];
+          if (!isIterator(source)) {
+            // An atomic (tuple) operand contributes exactly one element
+            index += 1;
+            return { value: source, done: false };
+          }
+          const { value, done } = source.next();
+          if (!done) return { value, done: false };
+          index += 1;
+        }
+      },
+    };
+    // A keyed result merges its entries by key (last value wins), and a
+    // set-kind one enumerates each element ONCE however often the operands
+    // repeat it. A keyed merge cannot stream, so it declines rather than
+    // yielding a wrong prefix — see `mergeKeyedEntries`, and
+    // `keyedMergeIterator` for why that decline is thrown.
+    if (producesKeyed(expr))
+      return keyedMergeIterator(
+        concatenation,
+        expr.engine.maxCollectionSize,
+        'Join'
+      );
+    return producesSet(expr)
+      ? deduplicatingIterator(
+          concatenation,
+          expr.engine.iterationLimit,
+          expr.operator
+        )
+      : concatenation;
+  },
+  at: (expr: Expression, index: number | string): undefined | Expression => {
+    if (typeof index !== 'number' || !isFunction(expr)) return undefined;
+
+    const countOf = (op: Expression): number | undefined =>
+      isAtomicJoinOperand(op) ? 1 : op.count;
+
+    // A set-kind result has to be indexed through the DEDUPLICATED
+    // enumeration, and a keyed one through the MERGED entries, so that
+    // `at`, `each` and `count` agree; the per-operand arithmetic below
+    // counts repeats and would skip past elements. The concatenated
+    // length is computed only if a negative index asks for it (see
+    // `distinctAt`).
+    if (producesMergedView(expr)) {
+      return distinctAt(expr, index, () => {
+        let total = 0;
+        for (const op of expr.ops) {
+          const count = countOf(op);
+          if (count === undefined || !Number.isFinite(count)) return undefined;
+          total += count;
+        }
+        return total;
+      });
+    }
+
+    // A negative index counts from the end of the joined collection
+    if (index < 0) {
+      let total = 0;
+      for (const op of expr.ops) {
+        const count = countOf(op);
+        if (count === undefined || !Number.isFinite(count)) return undefined;
+        total += count;
+      }
+      index = total + index + 1;
+    }
+    if (index < 1) return undefined;
+
+    // Walk the sources, skipping over each one's elements
+    for (const op of expr.ops) {
+      const count = countOf(op);
+      if (count === undefined) return undefined;
+      if (index <= count) {
+        if (isAtomicJoinOperand(op)) return op;
+        if (op.isIndexedCollection) return op.at(index);
+        // An operand that is not indexed (a set, a dictionary, or a lazy
+        // view over one) has no positional `at`: a dictionary answers `at`
+        // only for a key. A `ListJoin` is typed as a list, so it reports
+        // itself as indexed whatever its operands hold, and it must read
+        // such an operand by position through the operand's iterator, in
+        // the order `each()` and the `iterator` handler above enumerate it.
+        // The walk stops at the element asked for.
+        let i = 0;
+        for (const x of op.each()) {
+          i += 1;
+          if (i === index) return x;
+        }
+        return undefined;
+      }
+      index -= count;
+    }
+    return undefined;
+  },
 };
 
 export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
@@ -8288,296 +8626,53 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // being spliced; its own tuple operands stay atomic after the splice).
     // See the `Append` handler below for the validation-ordering guard and for
     // why there are NO cross-head (`Join`/`Append`) rewrites.
-    canonical: (ops, { engine: ce }) => {
-      // Run the framework's default flatten step (Sequence-splice + Nothing-
-      // drop) that this custom canonical handler would otherwise short-circuit.
-      ops = flatten(ops);
-      // A provably scalar operand is one element: wrapped as a one-element
-      // list BEFORE validation, so the signature admits it and the type and
-      // collection handlers see only collections and tuples.
-      ops = ops.map((op) => wrapScalarJoinOperand(ce, op));
-      // An absent operand is admitted (strip-before-validate), as the generic
-      // boxing route admits it: `Join` propagates absence, and the evaluation
-      // answers `Missing` (`wrapScalarJoinOperand`).
-      const args =
-        validateArguments(
-          ce,
-          ops,
-          JOIN_SIGNATURE,
-          false,
-          false,
-          undefined,
-          () => true
-        ) ?? ops;
-      if (args.some((x) => !x.isValid)) return ce._fn('Join', args);
-
-      const source = args[0];
-      const joined =
-        source !== undefined &&
-        isFunction(source, 'Join') &&
-        source.isCanonical &&
-        // Defensive: a `Join` never types as a tuple (`joinResultType` returns
-        // a list/set/record/dictionary), but an atomic operand must never be
-        // spliced.
-        !isAtomicJoinOperand(source)
-          ? [...source.ops, ...args.slice(1)]
-          : args;
-
-      // Literal-list fold: when every operand is a `List` literal, the join
-      // IS the literal list of their elements, so build that list now instead
-      // of a lazy view over it. The same splice the list literal's spread
-      // form performs eagerly (`[...[1, 2], 3]` is `[1, 2, 3]`, see
-      // `canonicalList`). This is what keeps each turn of an accumulator loop
-      // (`xs = Join(xs, [k])`) at the cost of one copy of the current list,
-      // the cost `[...xs, k]` already had: without it the loop's value is a
-      // `Join` with one operand PER TURN, and every evaluation of that node
-      // walks all of its operands several times over (validation, overload
-      // resolution for the type, finiteness, purity, the rebuilt result's
-      // type again). The loop as a whole is still quadratic in the number of
-      // elements, as any immutable append is. A `List` operand is always list-kind, so no set, keyed
-      // or string operand can be present and the result kind is a list. The
-      // fold is bounded by the engine's collection size cap, past which the
-      // lazy view is kept.
-      const folded = foldLiteralListJoin(ce, joined);
-      if (folded !== undefined) return folded;
-
-      return ce._fn('Join', joined);
-    },
+    canonical: (ops, { engine: ce }) => canonicalJoin(ce, 'Join', ops),
     type: (ops, context) =>
       BoxedType.forResult(joinResultTypeD(ops), context.engine._typeResolver),
-    collection: {
-      // A `Join` with an operand that can be absent is not a collection view
-      // (`mayBeAbsentCollectionOperand`): it is not enumerated, and it has no
-      // count and no finiteness. It evaluates to `Missing` (or to a threaded
-      // result for a restricted operand), and consumers read that value.
-      isCollection: (expr) =>
-        !isFunction(expr) || !expr.ops.some(mayBeAbsentCollectionOperand),
-      isEnumerable: enumerableFromAllSources,
-      isLazy: (_expr) => true,
-      // Without this, `materialize()` never reaches its key-value branch (it
-      // tests `elttype` against `tuple<string, any>`), the node is not
-      // indexed, and a dictionary-kind `Join` fell through to
-      // `engine.function('Set', …)` — coming back as a SET OF ENTRY TUPLES.
-      // The HEAD changed, not just the element count.
-      elttype: (expr) =>
-        producesKeyed(expr) ? parseType('tuple<string, any>') : undefined,
-      // A set-kind result is indexed by walking the deduplicated enumeration
-      // from the start (`distinctAt`), so sequential indexing would be
-      // quadratic without a cache. `Join`'s elements are exactly its
-      // operands' elements, so they are as pure as those — the same premise
-      // `Map` relies on for its own `elementMemo`.
-      elementMemo: true,
-      count: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        const isSet = producesSet(expr);
-        // A keyed result must read every entry before it can merge, so an
-        // infinite operand makes it unanswerable outright.
-        if (producesKeyed(expr) && expr.ops.some((op) => op.count === Infinity))
-          return undefined;
-        let total = 0;
-        for (const op of expr.ops) {
-          if (isAtomicJoinOperand(op)) {
-            total += 1;
-            continue;
-          }
-          const count = countOfSource(op);
-          if (count === undefined) return undefined;
-          if (!Number.isFinite(count)) {
-            // A concatenation containing an infinite operand is infinite
-            // whatever follows it, so answer now rather than scanning on —
-            // a LATER operand with an unknown count would otherwise mask a
-            // length we already know.
-            //
-            // Under set semantics that holds only when the infinite operand
-            // is ITSELF a set: its elements are already distinct, and `Join`
-            // passes them through unchanged, so deduplication cannot collapse
-            // infinitely many of them into finitely many. Any other infinite
-            // operand may repeat one value forever, so the number of DISTINCT
-            // elements is not decidable by a walk that terminates.
-            if (!isSet) return Infinity;
-            return op.type.matches('set<any>') ? Infinity : undefined;
-          }
-          total += count;
-        }
-        // A set-kind result counts DISTINCT elements and a keyed one counts
-        // distinct KEYS: the operands may repeat each other
-        // (`Join(Set(1, 2), Set(2, 3))` concatenates 4 elements but IS a
-        // 3-element set), so the concatenated length is only an upper bound.
-        // Both are counted by walking the rewritten enumeration the
-        // `iterator` handler already produces.
-        return producesMergedView(expr) ? distinctCount(expr, total) : total;
-      },
-      // `isEmpty` and `isFinite` are declared explicitly rather than left to
-      // the defaults, which derive both from `count`. A set-kind `count` can
-      // answer `undefined` — its deduplicating walk is bounded — and routing
-      // these through it would drag decidable answers down with it, including
-      // `materialize()`, which bails outright when `isEmptyCollection` is
-      // `undefined`, so the value would stop previewing too.
-      //
-      // Emptiness is dedup-invariant outright: deduplication cannot empty a
-      // non-empty collection, nor fill an empty one.
-      isEmpty: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        if (expr.nops === 0) return true;
-        // An atomic (tuple) operand IS one element, so it is never empty.
-        return kleeneAnd(
-          expr.ops.map((op) =>
-            isAtomicJoinOperand(op) ? false : op.isEmptyCollection
-          )
-        );
-      },
-      // Finiteness is NOT dedup-invariant, and the implication runs the
-      // opposite way from the one it is tempting to write down: deduplication
-      // can only SHRINK a collection, so it can turn an infinite enumeration
-      // into a finite set — `Join(Set(1), Repeat(1))` enumerates forever and
-      // holds exactly one element. So an infinite operand settles finiteness
-      // only when it is ITSELF a set (already distinct, and `Join` passes its
-      // elements through unchanged); otherwise the answer is UNKNOWN, which
-      // is the convention `Dedup` already follows for the same reason.
-      isFinite: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        const isSet = producesSet(expr);
-        return kleeneAnd(
-          expr.ops.map((op) => {
-            if (isAtomicJoinOperand(op)) return true;
-            const finite = finitenessOfSource(op);
-            if (finite !== false || !isSet) return finite;
-            return op.type.matches('set<any>') ? false : undefined;
-          })
-        );
-      },
-      contains: (expr, target) => {
-        if (!isFunction(expr)) return false;
-        // A keyed result answers from the MERGED entries: an entry whose key
-        // was overwritten by a later one is no longer a member, so asking the
-        // operands directly would report `("b", 2)` present in a dictionary
-        // whose `b` is now 3.
-        if (producesKeyed(expr)) {
-          // An operand that cannot be ENUMERATED yields nothing, and a walk
-          // over nothing is indistinguishable from a walk that found nothing:
-          // without this gate a keyed result over a valueless (but
-          // dictionary-typed) operand reports a definite `false` for a member
-          // it simply cannot see. `distinctCount` and `distinctAt` gate on the
-          // same predicate, for the same reason.
-          if (expr.isEnumerableCollection !== true) return undefined;
-          // The merged walk can decline (see `keyedMergeIterator`), and an
-          // undecidable membership is `undefined`, not `false`.
-          try {
-            for (const entry of expr.each())
-              if (entry.isSame(target)) return true;
-            return false;
-          } catch (e) {
-            if (
-              e instanceof CancellationError &&
-              e.cause === 'iteration-limit-exceeded'
-            )
-              return undefined;
-            throw e;
-          }
-        }
-        // Three-valued: an operand that cannot decide membership leaves the
-        // whole query undecided (`.some()` would report a definite `false`).
-        return kleeneOr(
-          expr.ops.map((op) =>
-            isAtomicJoinOperand(op) ? op.isSame(target) : op.contains(target)
-          )
-        );
-      },
-      iterator: (expr) => {
-        if (!isFunction(expr))
-          return { next: () => ({ value: undefined, done: true }) };
-        const sources = expr.ops.map((op) =>
-          isAtomicJoinOperand(op) ? op : op.each()
-        );
-        let index = 0;
-        const concatenation: Iterator<Expression> = {
-          next: () => {
-            while (true) {
-              if (index >= sources.length)
-                return { value: undefined, done: true };
-              const source = sources[index];
-              if (!isIterator(source)) {
-                // An atomic (tuple) operand contributes exactly one element
-                index += 1;
-                return { value: source, done: false };
-              }
-              const { value, done } = source.next();
-              if (!done) return { value, done: false };
-              index += 1;
-            }
-          },
-        };
-        // A keyed result merges its entries by key (last value wins), and a
-        // set-kind one enumerates each element ONCE however often the operands
-        // repeat it. A keyed merge cannot stream, so it declines rather than
-        // yielding a wrong prefix — see `mergeKeyedEntries`, and
-        // `keyedMergeIterator` for why that decline is thrown.
-        if (producesKeyed(expr))
-          return keyedMergeIterator(
-            concatenation,
-            expr.engine.maxCollectionSize,
-            'Join'
-          );
-        return producesSet(expr)
-          ? deduplicatingIterator(
-              concatenation,
-              expr.engine.iterationLimit,
-              expr.operator
-            )
-          : concatenation;
-      },
-      at: (
-        expr: Expression,
-        index: number | string
-      ): undefined | Expression => {
-        if (typeof index !== 'number' || !isFunction(expr)) return undefined;
+    collection: JOIN_COLLECTION_HANDLERS,
+  },
 
-        const countOf = (op: Expression): number | undefined =>
-          isAtomicJoinOperand(op) ? 1 : op.count;
-
-        // A set-kind result has to be indexed through the DEDUPLICATED
-        // enumeration, and a keyed one through the MERGED entries, so that
-        // `at`, `each` and `count` agree; the per-operand arithmetic below
-        // counts repeats and would skip past elements. The concatenated
-        // length is computed only if a negative index asks for it (see
-        // `distinctAt`).
-        if (producesMergedView(expr)) {
-          return distinctAt(expr, index, () => {
-            let total = 0;
-            for (const op of expr.ops) {
-              const count = countOf(op);
-              if (count === undefined || !Number.isFinite(count))
-                return undefined;
-              total += count;
-            }
-            return total;
-          });
-        }
-
-        // A negative index counts from the end of the joined collection
-        if (index < 0) {
-          let total = 0;
-          for (const op of expr.ops) {
-            const count = countOf(op);
-            if (count === undefined || !Number.isFinite(count))
-              return undefined;
-            total += count;
-          }
-          index = total + index + 1;
-        }
-        if (index < 1) return undefined;
-
-        // Walk the sources, skipping over each one's elements
-        for (const op of expr.ops) {
-          const count = countOf(op);
-          if (count === undefined) return undefined;
-          if (index <= count)
-            return isAtomicJoinOperand(op) ? op : op.at(index);
-          index -= count;
-        }
-        return undefined;
-      },
+  // The canonical form of a list literal with a spread: `[...a, 0]` is
+  // `ListJoin(a, [0])` (see `canonicalList`). It joins its operands as
+  // `Join` does (a tuple operand is one element, a scalar operand is one
+  // element, any other operand splices its elements, lazily), but the result
+  // is ALWAYS a list, whatever the operands hold: a set operand contributes
+  // its elements in its iteration order, without deduplication, and a string
+  // operand contributes its characters. `Join` instead adopts the kind of its
+  // operands, so `Join(a, [0])` with `a` holding `Set(9, 8)` is the set
+  // `Set(9, 8, 0)`, and a list literal must not give a set (user decision
+  // 2026-09-29).
+  //
+  // A separate head is what keeps both the list kind and the laziness: a
+  // `ListFrom` around the `Join` gives a list but materializes eagerly, so a
+  // spread of an infinite range would stop being a lazy list. The operands
+  // are canonicalized and validated as `Join`'s (`canonicalJoin`), which
+  // infers an untyped operand, such as the parameter `a` of
+  // `(a) -> [...a, 0]`, as `collection<any>`. The collection handlers are
+  // `Join`'s (`JOIN_COLLECTION_HANDLERS`): they read the kind of the result
+  // from the type of the node, which is a list here, so they never follow
+  // the values the operands hold, as they do for a `Join` typed
+  // `collection<T>`.
+  ListJoin: {
+    examples: ['ListJoin(Set(3, 1), [0])'],
+    description: [
+      'Join the elements of some collections into a list.',
+      'This is the canonical form of a list literal with a spread: `[...a, 0]` is `ListJoin(a, [0])`.',
+      'The result is a list whatever the kind of the operands: the elements of a set operand are included in the iteration order of the set, without deduplication.',
+      'A tuple operand is included as a single element, and so is a scalar operand.',
+    ],
+    complexity: 8200,
+    threadsConditionals: true,
+    signature: '(collection<any>*) -> list',
+    canonical: (ops, { engine: ce }) => canonicalJoin(ce, 'ListJoin', ops),
+    type: (ops, context) => {
+      const elements = joinedElementTypeD(ops);
+      return BoxedType.forResult(
+        elements === undefined ? 'list' : { kind: 'list', elements },
+        context.engine._typeResolver
+      );
     },
+    collection: JOIN_COLLECTION_HANDLERS,
   },
 
   // Mathematica `Append[collection, element]`: the collection with the trailing
@@ -14045,8 +14140,10 @@ function canonicalList(
   // the EAGER path's; a call's positional arity depends on the spread's
   // runtime value, a list literal's does not) and the rewrite is purely
   // structural — no deferral needed, the canonical form never contains a
-  // `Spread`. The semantics are `Join`'s (ruled 2026-08-14): any
-  // non-tuple collection splices, an infinite one lazily; a TUPLE does not
+  // `Spread`. The canonical form is a `ListJoin`, whose result is always a
+  // list (user decision 2026-09-29). The splicing rules are `Join`'s (ruled
+  // 2026-08-14): any non-tuple collection splices, an infinite one lazily;
+  // a TUPLE does not
   // spread — tuples are units, and `ListFrom` is the explicit converter —
   // so a provably-tuple operand is a loud `spread-tuple` error, and one
   // that only turns out to be a tuple at evaluation contributes itself as
@@ -14054,7 +14151,7 @@ function canonicalList(
   // operand is one element too (`[...5]` is `[5]` — `Join`'s scalar rule);
   // a string is a collection of characters and splices.
   if (ops.some((op) => isFunction(op, 'Spread') && op.nops === 1)) {
-    const segments: Expression[] = []; // `Join` operands
+    const segments: Expression[] = []; // `ListJoin` operands
     let run: Expression[] = []; // current run of ordinary elements
     // The ordinary elements of a run are accumulated as written and flattened
     // ONCE, when the run is flushed — the same `Sequence`-splice and
@@ -14082,6 +14179,17 @@ function canonicalList(
         // A literal list splices eagerly: `[...[1,2], 3]` → `[1,2,3]`.
         // (Canonicalization already erased any `Nothing` elements.)
         run.push(...x.ops);
+      } else if (isAbsentSymbol(x) || mayBeAbsentCollectionOperand(x)) {
+        // An absent operand (`Missing`, `Undefined`), or one that may be an
+        // absent collection (`Sort(Missing)`, typed `missing`, which reads
+        // as a scalar), is an absent collection, not one element (user
+        // decision 2026-09-26): it is a segment of the `ListJoin`, which then
+        // evaluates to `Missing`, as `wrapScalarJoinOperand` leaves such an
+        // operand of a `Join` unwrapped. Spliced as an element, `[...Missing,
+        // 0]` was `[Missing, 0]`, while the `ListJoin(Missing, [0])` that the
+        // Epsil serializer prints as `[...missing, 0]` is `Missing`.
+        flushRun();
+        segments.push(x);
       } else if (isFunction(x, 'Tuple') || x.type.matches('tuple')) {
         // Tuples do not spread. The error is an ELEMENT, so the list
         // freezes with the error cell in place (error-propagation §6a.2).
@@ -14091,15 +14199,15 @@ function canonicalList(
         run.push(x);
       } else {
         flushRun();
-        // A set/dictionary/record-kind segment must materialize through
-        // `ListFrom`: `Join` adopts those kinds from ANY operand
-        // (`joinResultType`), so a direct join made `[...{1,2}, 2]` a
-        // DEDUPLICATING set — a list literal must stay a list. The
-        // provably list/indexed segments (the lazy pipelines: `Range`,
-        // `Take`, `Map`) keep the direct join. A segment whose kind is
-        // only discovered at evaluation still follows `Join`'s adoption —
-        // the literal's kind promise is enforced as far as static types
-        // can prove.
+        // Any other segment, whatever the kind of collection it is or may
+        // hold at evaluation (a set, a range, a lazy view, a dictionary), is
+        // an operand of the `ListJoin`, which enumerates its elements into
+        // the list lazily. A segment whose TYPE is a set, a dictionary or a
+        // record is wrapped in `ListFrom` first: the value is the same (the
+        // `ListFrom` materializes it eagerly, as this literal always did),
+        // and the compiled targets lower `ListFrom` of such an operand,
+        // while their `ListJoin` (as their `Join`) accepts only indexed
+        // operands.
         segments.push(
           x.type.matches('set<any>') ||
             x.type.matches('dictionary<any>') ||
@@ -14112,20 +14220,20 @@ function canonicalList(
     // Every spread spliced eagerly (or errored): an ordinary literal.
     if (segments.length === 0) return ce._fn('List', flatten(run));
     flushRun();
-    // `Join` — unary for a lone spread: `[...xs]` is `Join(xs)`, the
-    // list materialization of a non-tuple collection.
-    // Built through `ce.function`, not `ce._fn`, so that `Join`'s own
-    // canonical handler validates the segments against its signature. That
-    // validation is what records the use-site type evidence on an untyped
-    // symbol: in a function body `(a) ↦ [...a, 0]`, the parameter `a` is
-    // then inferred as `collection<any>`, exactly as it is for the
-    // equivalent body `Join(a, [0])`. With `ce._fn` the parameter stayed
+    // `ListJoin` — unary for a lone spread: `[...xs]` is `ListJoin(xs)`, the
+    // list of the elements of a non-tuple collection.
+    // Built through `ce.function`, not `ce._fn`, so that the canonical
+    // handler of `ListJoin` (`canonicalJoin`) validates the segments against
+    // its signature. That validation is what records the use-site type
+    // evidence on an untyped symbol: in a function body `(a) ↦ [...a, 0]`,
+    // the parameter `a` is then inferred as `collection<any>`, exactly as it
+    // is for the body `Join(a, [0])`. With `ce._fn` the parameter stayed
     // `unknown`, and a call such as `g([9])` then auto-broadcast the function
     // over the elements of its list argument (`[[9, 0]]` instead of
     // `[9, 0]`). The segments are already canonical, so the operand pass of
-    // `ce.function` leaves them as they are; what runs anew is `Join`'s own
-    // canonical handler, which is the point.
-    return ce.function('Join', segments);
+    // `ce.function` leaves them as they are; what runs anew is the canonical
+    // handler, which is the point.
+    return ce.function('ListJoin', segments);
   }
 
   // The framework's default flatten step, which this custom `canonical`
@@ -14715,11 +14823,12 @@ function mayBeAbsentCollectionOperand(op: Expression): boolean {
     isFunction(op, 'If')
   )
     return true;
-  // A nested `Join` over such an operand may be absent too, and so may an
-  // `Append` whose SOURCE (its first operand) is: the appended values are
-  // elements, and an element that may be absent does not make the collection
-  // absent. The test reads the structure only: it never evaluates an operand.
-  if (isFunction(op, 'Join'))
+  // A nested `Join` (or `ListJoin`, the list literal with a spread) over such
+  // an operand may be absent too, and so may an `Append` whose SOURCE (its
+  // first operand) is: the appended values are elements, and an element that
+  // may be absent does not make the collection absent. The test reads the
+  // structure only: it never evaluates an operand.
+  if (isFunction(op, 'Join') || isFunction(op, 'ListJoin'))
     return op.ops.some((x) => mayBeAbsentCollectionOperand(x));
   // A collection operator that takes its source first passes an absent
   // source through (`Take(Missing, 1)` is `Missing`), so its source is read
@@ -14781,6 +14890,79 @@ function isProvablyScalarJoinOperand(op: Expression): boolean {
 }
 
 /**
+ * The canonical form of a `Join` or of a `ListJoin` (the list literal with a
+ * spread). Both heads take the same operands and canonicalize them the same
+ * way: the scalar operands are wrapped, the operands are validated against
+ * the signature `(collection<any>*) -> collection` (this validation is what
+ * infers an untyped symbol operand, such as a function parameter, as a
+ * collection), a first operand with the SAME head is spliced, and a join of
+ * `List` literals folds to one `List`. The heads differ only in the kind of
+ * their result, which their type handlers decide.
+ */
+function canonicalJoin(
+  ce: ComputeEngine,
+  head: 'Join' | 'ListJoin',
+  ops: ReadonlyArray<Expression>
+): Expression {
+  // Run the framework's default flatten step (Sequence-splice + Nothing-
+  // drop) that this custom canonical handler would otherwise short-circuit.
+  ops = flatten(ops);
+  // A provably scalar operand is one element: wrapped as a one-element
+  // list BEFORE validation, so the signature admits it and the type and
+  // collection handlers see only collections and tuples.
+  ops = ops.map((op) => wrapScalarJoinOperand(ce, op));
+  // An absent operand is admitted (strip-before-validate), as the generic
+  // boxing route admits it: `Join` and `ListJoin` propagate absence, and the
+  // evaluation answers `Missing` (`wrapScalarJoinOperand`).
+  const args =
+    validateArguments(
+      ce,
+      ops,
+      JOIN_SIGNATURE,
+      false,
+      false,
+      undefined,
+      () => true
+    ) ?? ops;
+  if (args.some((x) => !x.isValid)) return ce._fn(head, args);
+
+  const source = args[0];
+  const joined =
+    source !== undefined &&
+    isFunction(source, head) &&
+    source.isCanonical &&
+    // Defensive: a `Join` or a `ListJoin` never types as a tuple
+    // (`joinResultType` returns a list/set/record/dictionary/collection, and
+    // a `ListJoin` is a list), but an atomic operand must never be spliced.
+    !isAtomicJoinOperand(source)
+      ? [...source.ops, ...args.slice(1)]
+      : args;
+
+  // Literal-list fold: when every operand is a `List` literal, the join
+  // IS the literal list of their elements, so build that list now instead
+  // of a lazy view over it. The same splice the list literal's spread
+  // form performs eagerly (`[...[1, 2], 3]` is `[1, 2, 3]`, see
+  // `canonicalList`). This is what keeps each turn of an accumulator loop
+  // (`xs = Join(xs, [k])`) at the cost of one copy of the current list,
+  // the cost `[...xs, k]` already had: without it the loop's value is a
+  // `Join` with one operand PER TURN, and every evaluation of that node
+  // walks all of its operands several times over (validation, overload
+  // resolution for the type, finiteness, purity, the rebuilt result's
+  // type again). The loop as a whole is still quadratic in the number of
+  // elements, as any immutable append is. For a `Join`, the fold applies
+  // only when every operand is a `List` literal, which is always list-kind:
+  // no set, keyed or string operand can be present, and the result kind is
+  // a list. For a `ListJoin`, a `Set` literal operand folds too, because the
+  // result of a `ListJoin` is a list whatever its operands are (see
+  // `foldLiteralListJoin`). The fold is bounded by the engine's collection
+  // size cap, past which the lazy view is kept.
+  const folded = foldLiteralListJoin(ce, joined, head === 'ListJoin');
+  if (folded !== undefined) return folded;
+
+  return ce._fn(head, joined);
+}
+
+/**
  * The `List` literal a `Join` of `List` literals stands for, or `undefined`
  * when the fold does not apply: some operand is not a `List` literal (a
  * symbol, a lazy view, a tuple, a set, a string), or the folded list would
@@ -14792,23 +14974,42 @@ function isProvablyScalarJoinOperand(op: Expression): boolean {
  * elements are, so the result kind is a list and no deduplication or key
  * merge could apply. An empty operand list (`Join()`) is not folded, so the
  * empty join keeps its own node.
+ *
+ * With `admitSets` (the fold of a `ListJoin`, the list literal with a
+ * spread, whose result is a list whatever its operands are), a `Set` literal
+ * operand folds too, and contributes its elements in its iteration order.
+ * The elements keep their order, and nothing is deduplicated: an element of
+ * a `Set` operand that is equal to an element of ANOTHER operand is kept, as
+ * `[...Set(3, 1), 3]` is `[3, 1, 3]`. (The operands of one `Set` literal are
+ * already distinct.)
  */
 function foldLiteralListJoin(
   ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  admitSets = false
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
+  // With `admitSets` (a `ListJoin`, whose result is a list whatever its
+  // operands are), a `Set` literal operand folds too: its operands are its
+  // elements, in its iteration order. A set-builder (`Set(body, Element(…))`)
+  // is not a literal: its operands are not its elements.
+  const isLiteral = (op: Expression): op is Expression & FunctionInterface =>
+    op.isCanonical &&
+    (isFunction(op, 'List') ||
+      (admitSets &&
+        isFunction(op, 'Set') &&
+        parseSetComprehension(op.ops) === null));
   let total = 0;
   for (const op of ops) {
-    if (!isFunction(op, 'List') || !op.isCanonical) return undefined;
+    if (!isLiteral(op)) return undefined;
     total += op.nops;
   }
-  // One operand: the join IS that list, and nothing is copied, so the size
-  // cap (which bounds the COPY) does not apply.
-  if (ops.length === 1) return ops[0];
+  // One `List` operand: the join IS that list, and nothing is copied, so the
+  // size cap (which bounds the COPY) does not apply.
+  if (ops.length === 1 && isFunction(ops[0], 'List')) return ops[0];
   if (total > ce.maxCollectionSize) return undefined;
   const elements: Expression[] = [];
-  for (const op of ops) if (isFunction(op, 'List')) elements.push(...op.ops);
+  for (const op of ops) if (isLiteral(op)) elements.push(...op.ops);
   return ce._fn('List', elements);
 }
 
@@ -15140,20 +15341,95 @@ function isIterator(x: unknown): x is Iterator<Expression> {
  * `Append` pass their operands' elements through UNCHANGED, so an infinite
  * SET operand keeps infinitely many distinct elements, whereas `Map` applies
  * a callback that may collapse them all onto one value. See the infinite-
- * operand branches of their `count`/`isFinite` handlers. */
+ * operand branches of their `count`/`isFinite` handlers.
+ *
+ * A node typed with an ABSTRACT collection type (`collection<T>`: not
+ * indexed, not a set, not keyed) is built over a source whose type admits
+ * several kinds, such as a symbol declared `collection<number>`. Its kind is
+ * then the kind of the values its SOURCES hold now (the operands in the
+ * source positions of the operator, `collectionSourceOperands`: the appended
+ * elements of an `Append` and the seed of a `Scan` are not sources), the
+ * rule `BoxedFunction.isIndexedCollection` applies. The node is indexed when
+ * every such source holds an indexed value. It is keyed when one of them
+ * holds a dictionary or a record (see `producesKeyed`). Otherwise it is a
+ * set when one of them holds a value that is not indexed (a set, or a lazy
+ * view over one). This is the precedence the static type of `Join` and
+ * `Append` gives to the kinds of their operands (`joinResultTypeD`): a keyed
+ * operand before a set operand, a set operand before a list. Without this,
+ * `Join(P, [5, 3])` with `P` holding `Set(3, 1)` enumerated the repeated `3`
+ * although its value is the set `Set(3, 1, 5)`.
+ *
+ * A source that holds no value yet (a valueless symbol, which cannot be
+ * enumerated) does not make the node a set: its kind is not known, and the
+ * facts the handlers derive then are the ones that hold for a list. The
+ * count of `Join(Range(1, ∞), xs)` stays `∞`, which is true whatever `xs`
+ * holds. */
 function producesSet(expr: Expression): boolean {
-  return expr.type.matches('set<any>');
+  if (expr.type.matches('set<any>')) return true;
+  if (!isAbstractCollectionTypeOf(expr.type.type) || expr.isIndexedCollection)
+    return false;
+  if (producesKeyed(expr)) return false;
+  return collectionSourceOperands(expr).some(
+    (op) =>
+      isKindOpenOperandType(op.type.type) &&
+      op.isCollection &&
+      op.isEnumerableCollection !== false &&
+      op.isIndexedCollection === false
+  );
 }
 
 /** Does this node promise a KEYED collection — a `record` or a `dictionary`?
  *
  * `Join` and `Append` adopt those kinds from an operand exactly as they adopt
  * `set` (`joinResultType`, `appendResultType`), and a keyed collection owes
- * its keys the same distinctness a set owes its elements. */
+ * its keys the same distinctness a set owes its elements.
+ *
+ * A `Join` or an `Append` typed with an ABSTRACT collection type (see
+ * `producesSet`) is keyed when one of its abstract-typed sources holds a
+ * dictionary or a record now. The node then enumerates merged entries, and
+ * its `elttype` handler answers the entry tuple, so that `materialize()`
+ * rebuilds a `Dictionary`. Without this, `Join(a, b)` with `a` and `b`
+ * declared `collection` and holding dictionaries was a dictionary when
+ * evaluated (the evaluation rebuilds the join over the values, whose type is
+ * a dictionary), but a `Set` of entry tuples when evaluated with
+ * `materialization: true`. The rule reads the held values of `Join` and
+ * `Append` only: they are the operators that adopt the kind of their
+ * operands. */
 function producesKeyed(expr: Expression): boolean {
-  return (
-    isRecordShapedType(expr.type.type) || expr.type.matches('dictionary<any>')
+  return producesKeyedAt(expr, 0);
+}
+
+/** `producesKeyed` at a depth of the descent through the values of symbols
+ * and nested joins (see `holdsKeyedValue`). */
+function producesKeyedAt(expr: Expression, depth: number): boolean {
+  if (
+    isRecordShapedType(expr.type.type) ||
+    expr.type.matches('dictionary<any>')
+  )
+    return true;
+  if (!isFunction(expr, 'Join') && !isFunction(expr, 'Append')) return false;
+  if (!isAbstractCollectionTypeOf(expr.type.type)) return false;
+  return collectionSourceOperands(expr).some(
+    (op) =>
+      isKindOpenOperandType(op.type.type) && holdsKeyedValue(op, depth + 1)
   );
+}
+
+/** Whether `op` holds a keyed collection (a dictionary or a record) now: its
+ * type is keyed, or it is a symbol whose value holds one, or it is a `Join`
+ * or an `Append` that is keyed by the values its own sources hold. The
+ * descent through symbol values and nested joins is bounded: a chain deeper
+ * than the bound, or a cycle of symbols that hold each other
+ * (`a := Append(b, 1)` with `b := a`), answers `false`. */
+function holdsKeyedValue(op: Expression, depth: number): boolean {
+  if (depth > 16) return false;
+  if (isRecordShapedType(op.type.type) || op.type.matches('dictionary<any>'))
+    return true;
+  if (isSymbol(op)) {
+    const value = op.value;
+    return value !== undefined && holdsKeyedValue(value, depth + 1);
+  }
+  return producesKeyedAt(op, depth + 1);
 }
 
 /** Does this node's enumeration need rewriting before anyone reads it —

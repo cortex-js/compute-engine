@@ -2,7 +2,10 @@ import type {
   IComputeEngine as ComputeEngine,
   Expression,
 } from '../global-types.js';
-import { collectionElementType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  isBooleanOrBroadcastableBooleanType,
+} from '../../common/type/utils.js';
 
 import { isFunction, sym } from './type-guards.js';
 import { asRational, asBigint, asSmallInteger } from './numerics.js';
@@ -387,7 +390,7 @@ export function tryDiophantineSolve(
     let residual: Expression;
     if (isFunction(eq, 'Equal')) {
       residual = ce.function('Subtract', [eq.op1, eq.op2]);
-    } else if (eq.type.matches('boolean')) {
+    } else if (isBooleanOrBroadcastableBooleanType(eq.type.type)) {
       return undefined;
     } else {
       residual = eq;

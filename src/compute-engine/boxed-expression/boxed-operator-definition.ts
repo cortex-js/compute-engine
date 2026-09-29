@@ -28,6 +28,7 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
   inferredCollectionParameterType,
+  wholeCollectionParameterType,
   signatureEffects,
   stripArrowEffects,
   refineDeclaredPlaceholders,
@@ -1931,11 +1932,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             // signature): surfacing that keeps `paramsAreScalar` false, so a
             // list argument is applied to the function rather than broadcast
             // element-wise over it. Same rule, same helper as the literal's
-            // own arrow (`functionLiteralSignatureType`).
+            // own arrow (`functionLiteralSignatureType`). A parameter the body
+            // consumes WHOLE (`Mean(xs)`) is lifted the same way, although its
+            // type admits a scalar (`wholeCollectionParameterType`).
             ...(fixedParams.length > 0
               ? {
                   args: fixedParams.map((p) => ({
-                    type: inferredCollectionParameterType(p) ?? 'unknown',
+                    type:
+                      inferredCollectionParameterType(p) ??
+                      wholeCollectionParameterType(p, body) ??
+                      'unknown',
                   })),
                 }
               : {}),

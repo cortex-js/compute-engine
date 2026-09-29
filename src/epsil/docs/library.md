@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 681 functions and constants of the standard library, by category.
+The 682 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -25,7 +25,7 @@ To search the library by concept rather than by name, use
 - [Core](#core) — 111 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 14 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
-- [Collections](#collections) — 124 definitions · [full reference](/epsil/reference/collections/)
+- [Collections](#collections) — 125 definitions · [full reference](/epsil/reference/collections/)
 - [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
 - [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
@@ -277,6 +277,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `linspace` | `Linspace` | `(start: number, end: number?, count: number?) -> indexed_collection` | A sequence of evenly spaced numbers between a start and end value, both endpoints included. |
 | — | `List` | `(any*) -> list` | An ordered collection of elements (a list). |
 | `listFrom` | `ListFrom` | `(value*) -> list` | Create a list from the elements of a collection. |
+| — | `ListJoin` | `(collection<any>*) -> list` | Join the elements of some collections into a list. |
 | `map` | `Map` | `(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U` | Return the collection where each element has been transformed by the mapping function. |
 | `maxBy` | `MaxBy` | `(collection<T>, key: (T) any -> unknown) -> value where T` | Return the element of the collection that maximizes the given key function. |
 | — | `MemberCall` | `(receiver: any, member: string, arguments: any*) -> unknown` | Call the member `name` of a value with the value as its first argument: `c.area(2)` in Epsil. |

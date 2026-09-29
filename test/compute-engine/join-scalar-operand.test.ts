@@ -87,7 +87,8 @@ describe('a scalar spread in a literal is one element', () => {
 
   test('list literal with a lazy segment keeps the scalar in its run', () => {
     const e = ce.box(['List', ['Spread', 'L'], ['Spread', 4], 5]);
-    expect(e.json).toEqual(['Join', 'L', ['List', 4, 5]]);
+    // The list literal with a spread is canonically a `ListJoin`.
+    expect(e.json).toEqual(['ListJoin', 'L', ['List', 4, 5]]);
     expect(e.evaluate().toString()).toBe('[1,2,3,4,5]');
   });
 

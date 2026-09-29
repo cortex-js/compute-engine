@@ -979,6 +979,23 @@ listFrom({1, 2}, 3..4)
 // ➔ [1,2,3,4]
 ```
 
+### ListJoin
+
+`(collection<any>*) -> list`
+
+Join the elements of some collections into a list.
+
+This is the canonical form of a list literal with a spread: `[...a, 0]` is `ListJoin(a, [0])`.
+
+The result is a list whatever the kind of the operands: the elements of a set operand are included in the iteration order of the set, without deduplication.
+
+A tuple operand is included as a single element, and so is a scalar operand.
+
+```epsil
+ListJoin(Set(3, 1), [0])
+// ➔ [3,1,0]
+```
+
 ### map
 
 MathJSON `Map` · `(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U`

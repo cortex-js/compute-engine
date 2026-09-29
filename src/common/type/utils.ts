@@ -1957,6 +1957,26 @@ export function broadcastableBaseMatches(
 }
 
 /**
+ * Whether an expression of type `t` is accepted where a BOOLEAN is expected
+ * (a condition, a predicate, a `boolean` rule wildcard): `t` is a boolean
+ * type, or it is `broadcastable<R>` (alone or as an arm of a union) with a
+ * boolean `R`.
+ *
+ * `broadcastable<boolean>` is the type of a comparison whose operand may be
+ * a collection or a scalar until it is evaluated: `Sin(P) > x` with `P`
+ * declared `collection<number>` and no value. Its scalar arm may be the
+ * value, so it is admitted, as a typed parameter admits it
+ * (`broadcastableBaseMatches`).
+ */
+export function isBooleanOrBroadcastableBooleanType(
+  t: Readonly<Type>
+): boolean {
+  return (
+    isSubtype(t as Type, 'boolean') || broadcastableBaseMatches(t, 'boolean')
+  );
+}
+
+/**
  * True if `t` provably denotes a non-real number: a subtype of `complex` that
  * is not a subtype of `real` (`complex`, `imaginary`, …). The top numeric
  * name `number` answers `false` — it is a SUPERTYPE of `complex`, not a

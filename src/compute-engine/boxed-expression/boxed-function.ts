@@ -47,7 +47,10 @@ import {
   passesAbsentCellsThrough,
   threadedPresentType,
   withThreadedAbsence,
+  abstractCollectionCell,
   broadcastLiftType,
+  isAbstractCollectionTypeOf,
+  isKindOpenOperandType,
   skipBroadcastForVectorOpsOnViews,
   type BroadcastOperandView,
 } from './broadcast-lift-type.js';
@@ -82,7 +85,7 @@ import {
   zipParticipates,
   appliesToListCoordinateTuple,
   isAbsentScalarTerm,
-  isRecordShapedType,
+  collectionSourceOperands,
 } from '../collection-utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
@@ -6755,6 +6758,60 @@ class ExpressionOperandView implements BroadcastOperandView {
   get typeIsUnknown(): boolean {
     return this.x.type.isUnknown;
   }
+  get holdsUnindexedCollection(): boolean {
+    return holdsUnindexedCollection(this.x);
+  }
+}
+
+/** Whether `x` holds a collection value now whose kind is DECIDED as not
+ * indexed, such as a symbol declared `collection<T>` that holds a set. See
+ * `BroadcastOperandView.holdsUnindexedCollection`.
+ *
+ * `isIndexedCollection` alone cannot answer this: it is `false` both for a
+ * set and for a value whose kind is not decided yet. A `Map` or a `Filter`
+ * over a symbol declared `collection<number>` that holds no value is a
+ * collection (`isCollection` is `true`) that is not known to be indexed, but
+ * it becomes a list as soon as the symbol is given a list. So the answer is
+ * `true` only when {@link collectionKindDecided} says the kind is decided. */
+function holdsUnindexedCollection(x: Expression): boolean {
+  if (!x.isCollection || x.isIndexedCollection === true) return false;
+  return collectionKindDecided(x, 0);
+}
+
+/**
+ * Whether the collection kind of `x` (indexed or not) is decided by values
+ * that exist now, rather than left open by an abstract collection type
+ * (`isAbstractCollectionType`).
+ *
+ * - An expression whose own type is not abstract (a `Set`, a list, a
+ *   dictionary) has its kind in its type: decided.
+ * - A symbol is decided when it holds a value whose kind is decided. A
+ *   symbol that holds no value is not decided: its declaration admits a list
+ *   and a set.
+ * - An application of an abstract type (`Map(f, P)` with `P` declared
+ *   `collection<T>`) takes its kind from its abstract-typed source
+ *   operands (see `abstractSourcesHoldIndexedValues`), so it is decided
+ *   when it has such an operand and every one of them is decided.
+ *
+ * The descent is bounded: a chain of symbols deeper than the bound (or a
+ * cycle of symbols that hold each other) answers `false`, which keeps the
+ * application typed as possibly a collection.
+ */
+function collectionKindDecided(x: Expression, depth: number): boolean {
+  if (depth > 16) return false;
+  if (isSymbol(x)) {
+    const value = x.value;
+    return value !== undefined && collectionKindDecided(value, depth + 1);
+  }
+  if (!isAbstractCollectionType(x.type)) return true;
+  if (!isFunction(x)) return false;
+  let found = false;
+  for (const op of collectionSourceOperands(x)) {
+    if (!isKindOpenOperandType(op.type.type)) continue;
+    if (!collectionKindDecided(op, depth + 1)) return false;
+    found = true;
+  }
+  return found;
 }
 
 export function viewOfExpression(x: Expression): BroadcastOperandView {
@@ -7217,8 +7274,21 @@ function lambdaBroadcastType(
   // No operand is a statically-visible collection, but an operand's
   // collection-ness may not be statically knowable — it might broadcast at
   // runtime or stay scalar, so the honest result is `broadcastable<E>`, not
-  // a definite `list<E>`.
-  if (ops.some((x, i) => mappable(i) && isPossiblyCollectionTyped(x)))
+  // a definite `list<E>`. An operand of an ABSTRACT collection type
+  // (`collection<T>`) is such an operand: it may hold a list or a range,
+  // which the call maps over, or a set, which it does not map over (the
+  // same rule as arm 2 of `broadcastLiftType`, `broadcast-lift-type.ts`).
+  // An operand that holds a set now is typed from that value: the call does
+  // not map over it.
+  if (
+    ops.some(
+      (x, i) =>
+        mappable(i) &&
+        (isPossiblyCollectionTyped(x) ||
+          (abstractCollectionCell(x.type.type) !== undefined &&
+            !holdsUnindexedCollection(x)))
+    )
+  )
     return { kind: 'broadcastable', elements: perElementResult };
   return undefined;
 }
@@ -7488,6 +7558,12 @@ function type(expr: BoxedFunction): Type | BoxedType {
       return result === boxedHandlerResult?.type ? boxedHandlerResult : result;
     };
 
+    // The type each operand is described with for a call of the type handler
+    // (`undefined`: the operand's own type). Set by the main handler call
+    // below, and read again by the per-cell calls of the broadcast lift, so
+    // that every call of the handler sees the same operand types.
+    let handlerOperandType: (i: number) => Type | undefined = () => undefined;
+
     // If there is a type handler, call it. Strip-before-validate (§3.B step 3):
     // for a `propagate`/`handle` operator with an absent operand, convey the
     // stripped operand types via the `operandTypes` context override — a
@@ -7560,6 +7636,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
         if (stripped === 'never') return undefined;
         return stripped;
       };
+      handlerOperandType = strippedFor;
       // One descriptor memo for the whole application: a node shared
       // between two operands is described once (see `DescriptorMemo`).
       // Allocated only when two operands could share a node.
@@ -7666,6 +7743,32 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // WEAKER (bare `unknown`) than the `(number)` one it is meant to refine.
     // (`declaredSlots` is computed above, next to the arm resolution.)
     if ((def.broadcastable || declaredSlots) && !isLambdaDef(def)) {
+      // The type handler called again with the operands in `cells` typed as
+      // one cell of a broadcast (`cells[i]`), for the per-cell results the
+      // lift reads. Every other operand is described exactly as for the main
+      // handler call above (`handlerOperandType`: the `missing` arm removed
+      // for a `propagate` operator), and an answer that strips to `never`
+      // takes the declared codomain (`withCodomainForAbsentAnswer`), as the
+      // main answer does. `undefined` when no operand has a cell or the
+      // handler declines.
+      const cellHandlerResult = (
+        cells: ReadonlyArray<Type | undefined>
+      ): Type | undefined => {
+        if (typeof def.type !== 'function') return undefined;
+        if (cells.every((c) => c === undefined)) return undefined;
+        const descriptors = expr.ops.map((x, i) =>
+          describeOperand(x, cells[i] ?? handlerOperandType(i))
+        );
+        const t = guardedTypeHandlerCall(expr.engine, expr.operator, () =>
+          def.type!(descriptors, typeHandlerContext(expr.engine))
+        );
+        if (t === undefined) return undefined;
+        return withCodomainForAbsentAnswer(
+          BoxedType.forResult(t, expr.engine._typeResolver).type,
+          def,
+          expr.ops.map((x) => x.type.type)
+        );
+      };
       // The lift itself is shared with the descriptor route
       // (`broadcastLiftType`, `broadcast-lift-type.ts`); the operands are
       // viewed through the value-level predicates this route always read.
@@ -7680,22 +7783,14 @@ function type(expr: BoxedFunction): Type | BoxedType {
         broadcastsOverTuples: broadcastsOverTuples(expr.operator, def),
         // O(rank) candidate check — see the §D4.2 note at the sibling sites.
         hasTensors: expr.ops.some((x) => candidateShape(x) !== null),
-        unionCellResult: () => {
-          if (typeof def.type !== 'function') return undefined;
-          const cells = expr.ops.map((x) =>
-            scalarOrListUnionCellType(x.type.type)
-          );
-          if (cells.every((c) => c === undefined)) return undefined;
-          const descriptors = expr.ops.map((x, i) =>
-            describeOperand(x, cells[i])
-          );
-          const t = guardedTypeHandlerCall(expr.engine, expr.operator, () =>
-            def.type!(descriptors, typeHandlerContext(expr.engine))
-          );
-          return t === undefined
-            ? undefined
-            : BoxedType.forResult(t, expr.engine._typeResolver).type;
-        },
+        unionCellResult: () =>
+          cellHandlerResult(
+            expr.ops.map((x) => scalarOrListUnionCellType(x.type.type))
+          ),
+        // The handler typed again with each trigger of the abstract
+        // collection lift typed as its cell (`abstractCollectionCell`): the
+        // per-element result of a broadcast that may or may not happen.
+        abstractCellResult: (cells) => cellHandlerResult(cells),
       });
       if (lifted !== undefined) return maybeAbsorb(lifted);
     }
@@ -9406,38 +9501,39 @@ function materialize(
  * Whether `type` is a collection type that does not fix the kind of its
  * value: it matches `collection<any>`, but it is not an indexed collection, a
  * set, a dictionary or a record. A value of such a type may be a list, a set
- * or a range.
+ * or a range. The test is the one on plain types, `isAbstractCollectionTypeOf`
+ * (`broadcast-lift-type.ts`), applied to the type the boxed type holds; the
+ * bottom type `never` answers `false` (it has no value, so there is no kind
+ * to decide).
  */
 function isAbstractCollectionType(type: BoxedType): boolean {
-  return (
-    type.matches('collection<any>') &&
-    !type.matches('indexed_collection<any>') &&
-    !type.matches('set<any>') &&
-    !type.matches('dictionary<any>') &&
-    !isRecordShapedType(type.type)
-  );
+  return isAbstractCollectionTypeOf(type.type);
 }
 
 /**
  * Whether the SOURCES of `expr` hold indexed collection values now. A source
  * is an operand whose own static type is an abstract collection
- * (`isAbstractCollectionType`): those operands are what left the kind of the
- * node undecided. An operand with a concrete type does not decide anything
- * here, because the node's static type already accounts for it: the seed of
- * a `Scan` may be a `Set` or a dictionary while the scanned source is a
- * list, and the callback of a `Map` or the count of a `Take` is not a
- * collection at all.
+ * (`isAbstractCollectionType`), or a type that says nothing (`unknown`,
+ * `any`, `value`, see `isKindOpenOperandType`): those operands are what left
+ * the kind of the node undecided. An operand with a concrete type does not
+ * decide anything here, because the node's static type already accounts for
+ * it.
  *
  * A symbol answers from the value it holds, not from its declared type, so a
  * symbol declared `collection<number>` that holds `[3, 1, 1]` answers `true`
  * and one that holds `Set(3, 1)` answers `false`. A source that holds no
  * value yet answers `false`: nothing says that it will hold a list. The
  * answer is `false` too when there is no source.
+ *
+ * Only the operands in the source positions of the operator are read
+ * (`collectionSourceOperands`): the appended elements of an `Append` and the
+ * seed of a `Scan` are not sources, even when their type is an abstract
+ * collection.
  */
 function abstractSourcesHoldIndexedValues(expr: BoxedFunction): boolean {
   let found = false;
-  for (const op of expr.ops) {
-    if (!isAbstractCollectionType(op.type)) continue;
+  for (const op of collectionSourceOperands(expr)) {
+    if (!isKindOpenOperandType(op.type.type)) continue;
     if (op.isIndexedCollection !== true) return false;
     found = true;
   }

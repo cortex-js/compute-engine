@@ -49,6 +49,7 @@ import {
 import { lookupApplicable } from '../function-utils.js';
 import {
   couldBeNumericTuple,
+  hasTupleOrStringArm,
   isFiniteIndexedCollection,
   isNumericTuple,
   isPointListValue,
@@ -9609,16 +9610,12 @@ export class BaseCompiler {
         // aligns with the conditions.
         const point =
           isTupleShapedType(valueType.type) || isProvablyStringOperand(args[0]);
-        // A union with a point arm beside a list arm is neither: a tuple is
-        // an indexed collection in the lattice, so `indexed_collection<any>`
-        // alone would read such a union as a list.
-        const hasPointArm = (t: Type): boolean =>
-          typeof t !== 'string' && t.kind === 'union'
-            ? t.types.some(hasPointArm)
-            : isTupleShapedType(t);
+        // A union with a point or string arm beside a list arm is neither:
+        // a tuple and a string are indexed collections in the lattice, so
+        // `indexed_collection<any>` alone would read such a union as a list.
         const list =
           !point &&
-          !hasPointArm(valueType.type) &&
+          !hasTupleOrStringArm(valueType.type) &&
           (valueType.matches('list<any>') ||
             valueType.matches('indexed_collection<any>'));
         // A scalar is repeated. Anything else — a value whose type is wide
@@ -26350,7 +26347,7 @@ export class BaseCompiler {
    * when:
    *  - the target is not plain JavaScript (the shader targets forbid
    *    recursion and fail closed; Python has no definition lowering);
-   *  - the caller overrides `Which`, `Tuple`, `Join` or `List`
+   *  - the caller overrides `Which`, `Tuple`, `Join`, `ListJoin` or `List`
    *    (`target.unrollSkipHeads`): the step is built from `Tuple` control
    *    records and drops the body's `Join`, so an override of those heads
    *    would replace the records or lose the caller's implementation;
@@ -26380,7 +26377,9 @@ export class BaseCompiler {
     const overridden = target.unrollSkipHeads;
     if (
       overridden !== undefined &&
-      ['Which', 'Tuple', 'Join', 'List'].some((head) => overridden.has(head))
+      ['Which', 'Tuple', 'Join', 'ListJoin', 'List'].some((head) =>
+        overridden.has(head)
+      )
     )
       return undefined;
     const plan = listRecursionPlan(literal);

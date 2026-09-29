@@ -2109,6 +2109,44 @@ function compilePythonLogical(
  * Most functions are available in the numpy module with np. prefix.
  */
 /**
+ * Compile a `Join`, or a `ListJoin` (the list literal with a spread), as a
+ * Python list of the elements of its operands.
+ */
+function compilePyJoin(
+  head: 'Join' | 'ListJoin',
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+): string {
+  if (args.length === 0) return '[]';
+  // An absent operand (`Missing`, `Undefined`) is an absent collection, and
+  // the interpreter answers `Missing` for the whole join (user decision
+  // 2026-09-26). The scalar arm below compiled it as one `nan` element
+  // (`[math.nan, 3]`), so the call fails closed.
+  const absent = args.findIndex(
+    (a) => isSymbol(a, 'Missing') || isSymbol(a, 'Undefined')
+  );
+  if (absent >= 0)
+    throw new Error(
+      `Could not compile \`${head}\`: operand ${absent + 1} is absent, and the ` +
+        `interpreter answers \`Missing\` for the whole join. The interpreter ` +
+        `evaluates it instead.`
+    );
+  // A tuple (through an alias or an all-tuple union:
+  // `isProvablyTupleParticipant`), or a scalar whose type proves it is not
+  // a collection, is one ELEMENT, as the interpreter's `isAtomicJoinOperand`
+  // reads it (`Join([1, 2], 3)` is `[1, 2, 3]`); only a collection is
+  // unpacked.
+  const atomic = (a: Expression): boolean =>
+    isProvablyTupleParticipant(a) ||
+    !couldMatch(resolveTypeForCompilation(a.type.type), COLLECTION_SHAPE_TYPE);
+  return `[${args
+    .map((a, i) =>
+      atomic(a) ? compile(a) : `*${pyCollArg(head, a, compile, i + 1)}`
+    )
+    .join(', ')}]`;
+}
+
+/**
  * Compile a collection operand, failing closed if it is not an indexed
  * collection (list/vector/range) — the Python analog of the JavaScript
  * target's `collArg`. (Local copy of `isIndexedCollectionOperand` to avoid
@@ -3894,38 +3932,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `(lambda _l: [_i + 1 for _i in sorted(range(len(_l)), key=lambda _j: _l[_j])])(${pyCollArg('Ordering', args[0], compile)})`;
   },
-  Join: (args, compile) => {
-    if (args.length === 0) return '[]';
-    // An absent operand (`Missing`, `Undefined`) is an absent collection, and
-    // the interpreter answers `Missing` for the whole join (user decision
-    // 2026-09-26). The scalar arm below compiled it as one `nan` element
-    // (`[math.nan, 3]`), so the call fails closed.
-    const absent = args.findIndex(
-      (a) => isSymbol(a, 'Missing') || isSymbol(a, 'Undefined')
-    );
-    if (absent >= 0)
-      throw new Error(
-        `Could not compile \`Join\`: operand ${absent + 1} is absent, and the ` +
-          `interpreter answers \`Missing\` for the whole join. The interpreter ` +
-          `evaluates it instead.`
-      );
-    // A tuple (through an alias or an all-tuple union:
-    // `isProvablyTupleParticipant`), or a scalar whose type proves it is not
-    // a collection, is one ELEMENT, as the interpreter's `isAtomicJoinOperand`
-    // reads it (`Join([1, 2], 3)` is `[1, 2, 3]`); only a collection is
-    // unpacked.
-    const atomic = (a: Expression): boolean =>
-      isProvablyTupleParticipant(a) ||
-      !couldMatch(
-        resolveTypeForCompilation(a.type.type),
-        COLLECTION_SHAPE_TYPE
-      );
-    return `[${args
-      .map((a, i) =>
-        atomic(a) ? compile(a) : `*${pyCollArg('Join', a, compile, i + 1)}`
-      )
-      .join(', ')}]`;
-  },
+  Join: (args, compile) => compilePyJoin('Join', args, compile),
+  // The list literal with a spread, `[...xs, v]`: compiled as `Join`, whose
+  // compiled value is a Python list whatever its operands are.
+  ListJoin: (args, compile) => compilePyJoin('ListJoin', args, compile),
   // Variadic, like the interpreter and the JavaScript target
   // (`docs/COLLECTIONS-MODEL.md`, Change 2).
   Append: (args, compile) => {

@@ -214,6 +214,11 @@ export function deriveApplicationType(
         ? withThreadedAbsence(t)
         : t;
 
+  // The operands as the type handler sees them. Set by the main handler call
+  // below, and read again by the per-cell calls of the broadcast lift
+  // (`cellHandlerResult`), so that every call of the handler sees the same
+  // operand types.
+  let handlerOperandsSeen: ReadonlyArray<OperandDescriptor> = operands;
   if (typeof def.type === 'function') {
     const handlerOperands = propagate
       ? operands.map((d, i) => {
@@ -243,6 +248,7 @@ export function deriveApplicationType(
               : { type: present, facts: d.facts, structureOf: d.structureOf };
           })
         : operands;
+    handlerOperandsSeen = handlerOperands;
     const raw = guardedTypeHandlerCall(engine, operator, () =>
       def.type!(handlerOperands, typeHandlerContext(engine))
     );
@@ -294,6 +300,40 @@ export function deriveApplicationType(
     if (!(def.broadcastable || mappable !== 'no-plan')) return perElement;
     if (hooks.isLambda(def)) return perElement;
     const views = operands.map(viewOfDescriptor);
+    // The type handler called again with the operands in `cells` typed as
+    // one cell of a broadcast (`cells[i]`), for the per-cell results the
+    // lift reads, as on the expression route (`BoxedFunction.type`). Every
+    // other operand is the descriptor of the main handler call
+    // (`handlerOperandsSeen`), and an answer that strips to `never` takes the
+    // declared codomain (`withCodomainForAbsentAnswer`), as the main answer
+    // does. The facts of a retyped operand are read from its cell type
+    // (`describeType`): the operand's own facts describe the whole
+    // collection or union, and would contradict the narrower type (a
+    // possible collection beside a scalar type).
+    const cellHandlerResult = (
+      cells: ReadonlyArray<Type | undefined>
+    ): Type | undefined => {
+      if (typeof def.type !== 'function') return undefined;
+      if (cells.every((c) => c === undefined)) return undefined;
+      const cellOperands = handlerOperandsSeen.map((d, i) =>
+        cells[i] === undefined
+          ? d
+          : {
+              ...describeType(cells[i]!, d.facts.closed),
+              structureOf: d.structureOf,
+            }
+      );
+      const raw = guardedTypeHandlerCall(engine, operator, () =>
+        def.type!(cellOperands, typeHandlerContext(engine))
+      );
+      const t = BoxedType.forResult(raw, engine._typeResolver)?.type;
+      if (t === undefined) return undefined;
+      return withCodomainForAbsentAnswer(
+        t,
+        def,
+        operands.map((d) => d.type)
+      );
+    };
     return (
       broadcastLiftType({
         def,
@@ -305,26 +345,14 @@ export function deriveApplicationType(
         // The handler typed again with each scalar-or-list union operand
         // typed as its cell, as on the expression route
         // (`BoxedFunction.type`).
-        unionCellResult: () => {
-          if (typeof def.type !== 'function') return undefined;
-          const cells = operands.map((d) => scalarOrListUnionCellType(d.type));
-          if (cells.every((c) => c === undefined)) return undefined;
-          // The facts are read from the cell type (`describeType`): the
-          // operand's own facts describe the whole union, and would contradict
-          // the narrower type (a possible collection beside a scalar type).
-          const cellOperands = operands.map((d, i) =>
-            cells[i] === undefined
-              ? d
-              : {
-                  ...describeType(cells[i]!, d.facts.closed),
-                  structureOf: d.structureOf,
-                }
-          );
-          const raw = guardedTypeHandlerCall(engine, operator, () =>
-            def.type!(cellOperands, typeHandlerContext(engine))
-          );
-          return BoxedType.forResult(raw, engine._typeResolver)?.type;
-        },
+        unionCellResult: () =>
+          cellHandlerResult(
+            operands.map((d) => scalarOrListUnionCellType(d.type))
+          ),
+        // The handler typed again with each trigger of the abstract
+        // collection lift typed as its cell (`abstractCollectionCell`), as
+        // on the expression route.
+        abstractCellResult: (cells) => cellHandlerResult(cells),
       }) ?? perElement
     );
   }
