@@ -297,7 +297,10 @@ sort([3, 1, 4, 1, 5], (a, b) => a > b)
   iterated; e.g. a `take(xs, 3)` stored inside a tuple stays an unevaluated
   `Take(...)`), and a deferred mapping function reads variables **at
   materialization time**. Collection *literals* snapshot their element values
-  immediately. To force work now, aggregate or index where you stand.
+  immediately, and so does an **assignment**: `let ys = filter(xs, p)` and
+  `xs = filter(xs, p)` store the list of the elements when the generator is
+  finite and reads a variable. A generator with no last element
+  (`filter(1..oo, p)`) stays lazy when it is assigned.
 - **Output is the engine's textual form**: strings and booleans print
   *quoted* (`"True"`, `"florb"`) — that quoted `"True"` is a boolean, not a
   string. Derived collections (`Range`, `map`/`filter` results, loop-built

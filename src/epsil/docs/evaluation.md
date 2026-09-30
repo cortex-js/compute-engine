@@ -208,12 +208,27 @@ growing a list in a loop.)
 Lazy collection **operators** — `Range`, `map`, `filter`, `take`, `join` —
 are *generators*: their operands (bounds, sources, functions) are evaluated
 when the expression is, but enumeration is deferred until the collection is
-materialized (displayed, indexed, aggregated, or iterated). A deferred
-mapping function reads program state **at materialization time**, like a
-generator in Python — if it captures a variable that later changes, the
-materialized elements reflect the later value. To snapshot, force the work
-to happen where you stand: accumulate through a loop, or apply an eager
-operation (an aggregate, an index) at the point of definition.
+materialized (displayed, indexed, aggregated, or iterated).
+
+An **assignment** is a snapshot for them too. When the right-hand side of a
+`let` or an `=` is a finite lazy collection that reads a variable, the
+statement stores the list of its elements, computed with the values the
+variables have at that statement:
+
+```epsil
+let xs = [1, 2, 3]
+let ys = filter(xs, c => c > 1)
+xs = filter(xs, c => c > 2)
+(xs, ys)
+// ➔ ([3], [2, 3])
+```
+
+Two lazy collections stay lazy when they are assigned: one with no last
+element (`filter(1..oo, p)`), which cannot be listed, and one that reads no
+variable (`map(f, 1..1000000)`), which nothing can change. A lazy collection
+that is not assigned (an argument, an operand) still reads program state
+**at materialization time**, like a generator in Python. An unbounded one
+that captures a variable reflects the later value of that variable.
 
 ## Errors are values
 

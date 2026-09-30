@@ -13877,7 +13877,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           elements.push(xs);
         } else {
           if (!xs.isFiniteCollection) return undefined;
-          elements.push(...(Array.from(xs.each()) as Expression[]));
+          // One `push` per element: spreading the whole array into one call
+          // passes each element as an argument, and a collection of a few
+          // hundred thousand elements exceeded the argument limit
+          // (`ListFrom(Range(1, 300000))` was an `internal-error`,
+          // "Maximum call stack size exceeded").
+          for (const x of xs.each()) elements.push(x);
         }
       }
       return ce.function('List', elements);
@@ -13964,7 +13969,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           elements.push(xs);
         } else {
           if (!xs.isFiniteCollection) return undefined;
-          elements.push(...(Array.from(xs.each()) as Expression[]));
+          // One `push` per element, as in `ListFrom`: a spread of the whole
+          // array exceeds the argument limit for a very large collection.
+          for (const x of xs.each()) elements.push(x);
         }
       }
       return ce.function('Set', elements);
@@ -13993,7 +14000,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           elements.push(xs);
         } else {
           if (!xs.isFiniteCollection) return undefined;
-          elements.push(...(Array.from(xs.each()) as Expression[]));
+          // One `push` per element, as in `ListFrom`: a spread of the whole
+          // array exceeds the argument limit for a very large collection.
+          for (const x of xs.each()) elements.push(x);
         }
       }
       return ce.tuple(...elements);

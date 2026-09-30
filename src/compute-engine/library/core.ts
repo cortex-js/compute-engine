@@ -1926,6 +1926,95 @@ function randomListType(
 }
 
 /**
+ * The value an assignment STATEMENT (`Assign`, `Declare` with an initial
+ * value) stores for `value`, the evaluated right-hand side (user decision
+ * 2026-09-30).
+ *
+ * A lazy collection (`Filter`, `Map`, `Scan`, `TakeWhile`, a comprehension)
+ * evaluates to itself, and keeps by NAME each variable it reads. Stored as it
+ * is, it is a live view: after `let ys = filter(xs, p)`, a later `xs = [7, 8]`
+ * changed `ys`; `xs = filter(xs, p)` made `xs` read itself, so every later
+ * read was the same unevaluated expression (`xs = [f(c) for c in xs]`
+ * overflowed the stack); and a predicate written in a loop kept the loop
+ * variable by name after the loop had ended. An assignment is a statement
+ * of a sequential program: it stores what the right-hand side is worth NOW.
+ * So a lazy collection that is FINITE and reads a variable is replaced by
+ * the list (or the set) of its elements, computed with the values the
+ * variables hold at this statement. This is also what compiled code does,
+ * where a filter is an array. A callback with an effect therefore runs for
+ * every element at the assignment, once, and not at each later read.
+ *
+ * Left as they are:
+ *
+ * - a collection that is not known to be finite (`filter(1..oo, p)` cannot
+ *   be listed, and stays a live view of the variables it reads);
+ * - a lazy collection that reads no variable (a range, a `Map` over a range:
+ *   nothing can change under it, and listing a range of a million elements
+ *   would cost memory for no gain);
+ * - a lazy collection that is neither indexed (a list) nor typed as a set:
+ *   a `Filter` over a dictionary is a dictionary, and listing it would
+ *   store a list of key-value pairs, which no keyed read understands. It
+ *   stays a live view;
+ * - a collection whose elements could not be listed: the enumeration threw
+ *   (a predicate that does not answer a boolean) or did not answer a list or
+ *   a set. The lazy value is stored, and the failure is reported when the
+ *   collection is read, as before.
+ *
+ * The host function `ce.assign()` is not changed: a host that defines one
+ * name from another with an expression wants the live view.
+ */
+function assignedValue(ce: ComputeEngine, value: Expression): Expression {
+  if (!value.isValid || !value.isLazyCollection) return value;
+  if (value.isFiniteCollection !== true) return value;
+  // The kind of the stored value: a list for an indexed collection, read
+  // from the VALUE (the type of a `Filter` over a local whose type was
+  // inferred `collection<any>` does not say `list`), and a set for a value
+  // typed as a set. Anything else is left lazy.
+  const isSet = !value.isIndexedCollection && value.type.matches('set<any>');
+  if (!isSet && !value.isIndexedCollection) return value;
+  if (!readsVariable(ce, value)) return value;
+  try {
+    const listed = ce
+      .function(isSet ? 'SetFrom' : 'ListFrom', [value])
+      .evaluate();
+    return isFunction(listed, isSet ? 'Set' : 'List') ? listed : value;
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Whether `expr` reads a VARIABLE: a name with a value definition that is
+ * not a constant (a `let`, a parameter of the function being applied, a loop
+ * variable, a function held as a value), as an operand or as the head of a
+ * call (`c => f(c)` with `f` a variable). A library operator and a constant
+ * do not count.
+ *
+ * A user function defined with `function` does not count either. A program
+ * cannot define it twice (the second definition is a `function-redefinition`
+ * error), so it cannot change under the collection. And counting it would
+ * list every lazy collection whose callback is a user function, also over a
+ * literal source: the callback then runs for every element at the
+ * assignment, where the documented contract is that it runs only for the
+ * elements a consumer reads (`test/compute-engine/lazy-callback-count.test.ts`).
+ *
+ * A parameter of a function literal INSIDE `expr` (`c` in `c => c > k`) has
+ * no definition in this scope, unless a variable of the same name exists:
+ * the answer is then `true` although the literal reads its own parameter,
+ * and the caller lists a collection that did not need it, which is harmless.
+ */
+function readsVariable(ce: ComputeEngine, expr: Expression): boolean {
+  const isVariable = (name: string): boolean => {
+    const def = ce.lookupDefinition(name);
+    return def !== undefined && isValueDef(def) && !def.value.isConstant;
+  };
+  if (isSymbol(expr)) return isVariable(expr.symbol);
+  if (!isFunction(expr)) return false;
+  if (isVariable(expr.operator)) return true;
+  return expr.ops.some((op) => readsVariable(ce, op));
+}
+
+/**
  * Record ASSIGNMENT EVIDENCE at canonicalization time: the binding `name`,
  * when it is an inferred, valueless, non-constant one — the hoisted
  * block-local `canonicalBlock` creates, or an auto-declared symbol — takes
@@ -5178,7 +5267,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               // reached for the residuals `assertAssignable` leaves to the
               // install (a function literal, an operator-slot target).
               try {
-                ce.assign(name, el);
+                // Each leaf is stored as a plain assignment stores it
+                // (`assignedValue`).
+                ce.assign(name, assignedValue(ce, el));
               } catch (e) {
                 if (isEffectContractError(e))
                   return effectContractErrorValue(ce, e);
@@ -5356,7 +5447,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 declaredTypeOfSymbol(ce, symbolName),
                 op2
               )
-            : undefined) ?? op2.evaluate();
+            : undefined) ?? assignedValue(ce, op2.evaluate());
         // A property write in VALUE position — `x = ProtocolProperty(P, "n",
         // p, v)`, which a hand-built expression can spell — that was REFUSED
         // (a readonly property, a non-object receiver, a missing
@@ -5623,9 +5714,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // evaluation of the operand rather than being applied after it.
         let value: Expression | undefined;
         try {
+          // A lazy collection that reads a variable is stored as the list
+          // of its elements (`assignedValue`).
           value =
             narrowDeclaredCharacter(ce, type, valueSource) ??
-            (hasValue ? valueSource!.evaluate() : undefined);
+            (hasValue ? assignedValue(ce, valueSource!.evaluate()) : undefined);
         } finally {
           for (const [symbolName, def] of hiddenStatementBindings) {
             journalCheckpointMapEntry(
@@ -5886,7 +5979,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 ops[0],
                 value!,
                 (name, el) => {
-                  declareOne(name, el);
+                  // Each leaf is stored as a plain declaration stores it
+                  // (`assignedValue`).
+                  declareOne(name, assignedValue(ce, el));
                   return null;
                 },
                 validateOne

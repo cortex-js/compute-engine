@@ -838,6 +838,26 @@ behavior) is unchanged. `Indeterminate` is accepted in the same way. A
 number that is not `NaN` is checked as before (`1.5` at `integer` is
 refused), and library operators keep their own `NaN` policy.
 
+**A declared scalar parameter is checked against the evaluated argument —
+RULED 2026-09-30.** A function declared with
+`ce.declare(name, { signature })` and then assigned its body was checked at
+boxing only, against the static type of each argument. A NON-SCALAR
+declared type (a point, a list) is written on the stored literal and the
+application checks it; a scalar one is not written, because that would
+change how the body is canonicalized, so nothing checked the value: `f`
+declared `(integer) -> unknown` answered `2.5` for an argument whose value
+`1.5` is known only at evaluation, a declared `string` parameter received
+`Missing`, a declared `boolean` parameter received `5`. The evaluated
+arguments are now checked against the scalar parameter types of the
+declaration before the function is applied (`declaredScalarConformance`,
+`boxed-expression/boxed-function.ts`), and a value that does not fit is the
+`incompatible-type` error an Epsil `function` with the same annotation
+answers. Not checked: a symbolic argument; a collection or a point at a
+scalar parameter of a function that broadcasts (the function is applied to
+the elements); a slot declared `unknown` or `any`; `NaN`, and an absent
+value, at a numeric parameter. An absent value at another scalar parameter
+is refused unless the declared type has a `missing` member.
+
 **An accessor states the absent case only when it can happen — RULED
 2026-09-30.** `First`, `Second`, `Third`, `Last` and `At` with a literal
 index are typed `T | marker(T)` (§3.C) when the access can find nothing,

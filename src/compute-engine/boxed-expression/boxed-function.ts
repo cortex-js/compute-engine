@@ -242,6 +242,7 @@ import {
   isAbsentScalarSymbol,
   listCoordinateTupleOperandError,
   markAbsentPointCells,
+  runtimeCheckExemptParam,
   runtimeConformanceError,
 } from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
@@ -5440,10 +5441,14 @@ export class BoxedFunction
       // and threading steps so their semantics win, and per cell on the
       // broadcast route (each cell re-enters evaluation). Excluded: lazy
       // operators (their operands are raw here — they keep their own
-      // guards, §4.4/P4), user functions (`apply()` runs the runtime mode
-      // itself), inferred signatures (a guess must not refute), and
-      // non-strict engines (O8 — `strict: false` opts out of argument
-      // checking as such).
+      // guards, §4.4/P4), user functions whose signature is derived from
+      // their literal or from their clauses (`apply()` and the clause
+      // dispatch run the runtime check themselves), inferred signatures (a
+      // guess must not refute), and non-strict engines (O8 —
+      // `strict: false` opts out of argument checking as such). A function
+      // literal under a signature DECLARED on its name has the scalar
+      // parameters of the declaration checked here
+      // (`declaredScalarConformance`).
       //
       if (
         this.engine.strict &&
@@ -8005,6 +8010,100 @@ function type(expr: BoxedFunction): Type | BoxedType {
   return 'unknown';
 }
 
+/** The boxed form of the signature `declaredScalarConformance` checks
+ * against, kept per definition so that the conformance plan, which is cached
+ * by the identity of the boxed signature, is built once and not at every
+ * call. `source` is the type it was boxed from: a definition whose declared
+ * signature is replaced gets a new entry. */
+const declaredConformanceSignatures = new WeakMap<
+  object,
+  { source: Type; boxed: BoxedType }
+>();
+
+/**
+ * Check the EVALUATED arguments `ops` of a user function against the SCALAR
+ * parameter types its author DECLARED (`declared`), and return the
+ * `incompatible-type` error for the first argument that does not fit, or
+ * `undefined` when the call conforms (user decision 2026-09-30).
+ *
+ * A function declared with `ce.declare('f', { signature })` and then
+ * assigned its body is checked at boxing against the STATIC type of each
+ * argument. When the static type is not known (an argument typed `unknown`,
+ * or a computation whose value only exists at evaluation), nothing checked
+ * the VALUE against a scalar parameter: only a non-scalar declared type is
+ * written on the stored literal (`ascribeDeclaredParameterTypes`,
+ * `engine-declarations.ts`), and the application checks only the parameters
+ * the literal annotates. So `f` declared `(integer) -> unknown` answered
+ * `2.5` for the value `1.5`, a declared `string` parameter received
+ * `Missing`, and a declared `boolean` parameter received `5`, where the same
+ * function written as an Epsil `function` with annotations answers an
+ * error. This check closes that difference without writing the scalar type
+ * on the literal, which would change how the body is canonicalized.
+ *
+ * What is checked, and what is not:
+ *
+ * - Only a parameter whose declared type is scalar. A parameter typed as a
+ *   collection, a tuple, a function, `any` or `unknown` is exempt
+ *   (`runtimeCheckExemptParam`): the first three are checked by the
+ *   application, the last two promise nothing. `declared` must therefore
+ *   spell a placeholder slot `unknown` or `any`, not the type inferred for
+ *   it.
+ * - Only a concrete value. A symbolic argument is left alone.
+ * - A collection (a list, a tuple) at a scalar parameter of a function that
+ *   broadcasts is not an error: the function is applied to its elements.
+ * - `NaN` at a numeric parameter is accepted, and an absent value
+ *   (`Missing`, `Undefined`) at a numeric parameter is left to the body,
+ *   which computes `NaN` with it. An absent value at any other scalar
+ *   parameter is refused, unless the declared type has a `missing` member.
+ */
+function declaredScalarConformance(
+  ce: ComputeEngine,
+  cacheKey: object,
+  declared: Type,
+  broadcastable: boolean,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (typeof declared === 'string' || declared.kind !== 'signature')
+    return undefined;
+  const paramAt = (i: number): Type | undefined => {
+    const args = declared.args ?? [];
+    if (i < args.length) return args[i].type;
+    const opt = declared.optArgs ?? [];
+    if (i < args.length + opt.length) return opt[i - args.length].type;
+    return declared.variadicArg?.type;
+  };
+  const isNumericParam = (i: number): boolean => {
+    const p = paramAt(i);
+    return p !== undefined && isSubtype(p, 'number');
+  };
+  for (let i = 0; i < ops.length; i++) {
+    if (!isAbsentScalarSymbol(ops[i])) continue;
+    const p = paramAt(i);
+    if (
+      p === undefined ||
+      runtimeCheckExemptParam(p) ||
+      isSubtype(p, 'number') ||
+      isSubtype('missing', p)
+    )
+      continue;
+    return ce.typeError(p, ops[i].type, ops[i]);
+  }
+  let entry = declaredConformanceSignatures.get(cacheKey);
+  if (entry === undefined || entry.source !== declared) {
+    entry = { source: declared, boxed: ce.type(declared) };
+    declaredConformanceSignatures.set(cacheKey, entry);
+  }
+  return runtimeConformanceError(
+    ce,
+    cacheKey,
+    entry.boxed,
+    broadcastable,
+    ops,
+    // `NaN` is accepted at a numeric parameter and checked anywhere else.
+    (i) => (isNumericParam(i) ? 'handle' : 'reject')
+  );
+}
+
 function applyFunctionLiteral(
   expr: BoxedFunction,
   def: BoxedValueDefinition,
@@ -8051,6 +8150,29 @@ function applyFunctionLiteral(
     typeof declaredType === 'object' && declaredType.kind === 'signature'
       ? declaredType
       : value.type.type;
+  // The check of the evaluated arguments against the scalar parameter types
+  // the author declared (`declaredScalarConformance`). Only for a DECLARED
+  // signature: an inferred one is a reading of the literal, which checks its
+  // own annotations when it is applied. A signature declared with
+  // placeholder slots is read as it was written (`_signatureSkeleton`), so
+  // that a slot the author left `unknown` checks nothing.
+  //
+  // `mapsCollections` says that a collection argument at a scalar parameter
+  // is mapped over, so it is not an error of the argument as a whole (each
+  // element is checked where it is applied).
+  const scalarConformance = (
+    args: ReadonlyArray<Expression>,
+    mapsCollections = paramsAreScalar(broadcastGateType)
+  ): Expression | undefined =>
+    !expr.engine.strict || def.inferredType || declaredType === undefined
+      ? undefined
+      : declaredScalarConformance(
+          expr.engine,
+          def,
+          def._signatureSkeleton ?? declaredType,
+          mapsCollections,
+          args
+        );
   // The arguments are evaluated, so an infinite source (`Range(1, +∞)`,
   // `Cycle`) or one of unknown length maps too (`isUnknownLengthBroadcast`),
   // lazily, as at the operator-definition post-evaluation broadcast (step 4b).
@@ -8130,7 +8252,7 @@ function applyFunctionLiteral(
           results.push(
             zipped.some((x) => isFiniteBroadcastParticipant(x))
               ? expr.engine._fn(expr.operator, zipped).evaluate(options)
-              : apply(value, zipped, options)
+              : (scalarConformance(zipped) ?? apply(value, zipped, options))
           );
         }
       } catch (e) {
@@ -8147,6 +8269,16 @@ function applyFunctionLiteral(
       );
     }
   }
+
+  // The two maps below (the declared-`broadcastable<T>` map and the map
+  // over a list of points) apply the function once per element, and check
+  // the elements of each mapped argument, and of the collections beside it,
+  // in the cell where they are applied. A SCALAR argument beside them is not
+  // checked by the maps, so it is checked here: the verdict for a scalar
+  // slot must not depend on the shape of the other arguments. Collection
+  // arguments are left to the maps (`mapsCollections`).
+  const scalarBesideMap = scalarConformance(ops, true);
+  if (scalarBesideMap !== undefined) return scalarBesideMap;
 
   // The declared-`broadcastable<T>` elementwise map (Option A) — the value-def
   // twin of `_computeValue`'s step 2c. This is the route the
@@ -8196,6 +8328,8 @@ function applyFunctionLiteral(
   // operands — `R(3, 0, y)` for `R(3, Sin(0), y)`, the same inert form an
   // operator-definition-backed literal leaves — rather than becoming an
   // `Apply` of the literal.
+  const nonconforming = scalarConformance(ops);
+  if (nonconforming !== undefined) return nonconforming;
   return apply(
     value,
     ops,
@@ -9179,9 +9313,15 @@ function handlerThrowToErrorValue(
  *   `Degrees(i)` flows through the linear conversion despite `(real)`.
  *   Enforcing the declared signature here would refuse at evaluation what
  *   boxing deliberately admits on the literal route;
- * - a user function (lambda or multi-clause): `apply()` runs the runtime
- *   validation itself, and a multi-clause definition keeps its own dispatch
- *   and its `no-matching-clause` error (`multi-clause.ts`).
+ * - a user function whose signature is DERIVED from its literal, or a
+ *   multi-clause definition: `apply()` runs the runtime validation of the
+ *   annotated parameters itself, and a multi-clause definition keeps its
+ *   own dispatch and its `no-matching-clause` error (`multi-clause.ts`).
+ *
+ * One user function IS checked here: a function literal under a signature
+ * DECLARED on its name. `apply()` checks only what the literal annotates, so
+ * the scalar parameter types of the declaration are checked by
+ * `declaredScalarConformance`.
  */
 function genericRuntimeConformance(
   ce: ComputeEngine,
@@ -9192,7 +9332,24 @@ function genericRuntimeConformance(
   if (def.lazy === true || def.inferredSignature) return undefined;
   if (def.canonical !== undefined) return undefined;
   const isUserFn: boolean = isUserFunctionDef(def);
-  if (isUserFn) return undefined;
+  if (isUserFn) {
+    // A function literal under a signature its author DECLARED on the name
+    // (`ce.declare(f, { signature })`, then the body assigned a second
+    // time, which keeps the operator representation): the scalar parameter
+    // types of the declaration are checked here, as they are when the same
+    // function is held as a value (`declaredScalarConformance`). A
+    // signature DERIVED from the literal is not: the literal checks its own
+    // annotations when it is applied, and the types of its bare parameters
+    // are inferences. A multi-clause definition keeps its own dispatch.
+    if (!def._isLambda || def._derivedSignature) return undefined;
+    return declaredScalarConformance(
+      ce,
+      def,
+      def._validationSignature ?? def.signature.type,
+      def.broadcastable === true,
+      ops
+    );
+  }
   return runtimeConformanceError(
     ce,
     def,

@@ -136,17 +136,22 @@ available; `_` is the placeholder for the piped value.
 
 `Range`, `map`, `filter`, `take`, `drop`, `join` and a comprehension are
 **generators**, like Python's — they enumerate only when materialized
-(indexed, aggregated, or iterated). A deferred mapping function reads
-variables at *materialization* time, so the same "late binding in a closure"
-surprise applies:
+(indexed, aggregated, or iterated). One difference from Python: an
+**assignment** of a finite generator that reads a variable stores the list
+of its elements, so the "late binding in a closure" surprise does not apply
+to a variable:
 
 ```epsil
 let n = 1
 let m = map(k => k * n, 1..3)
 n = 10
 sum(m)
-// ➔ 60
+// ➔ 6
 ```
+
+A generator that is not assigned (an argument, an operand) reads variables
+at *materialization* time, and so does an assigned generator with no last
+element (`filter(1..oo, k => k > n)`).
 
 ## Control Flow
 

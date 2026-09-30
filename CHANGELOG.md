@@ -83,6 +83,48 @@
   `function` definition is, and the inferred type of its bare parameters is no
   longer enforced by the static check: `let k = (p, n: number) => p[1] + n`
   followed by `k(5, 1)` is reported when the call runs.
+- **An assignment statement stores the elements of a lazy collection that
+  reads a variable.** `Filter`, `Map`, `Scan`, `TakeWhile` and a comprehension
+  are lazy, and their value kept by name each variable it reads. So after
+  `let ys = filter(xs, c => c > 1)`, a later `xs = [7, 8]` changed `ys`;
+  `xs = filter(xs, c => c > 1)` made `xs` read itself and every later read
+  (`xs`, `length(xs)`, `first(xs)`) stayed unevaluated;
+  `xs = [c * 2 for c in xs]` overflowed the stack; and in
+  `for k in 1..3 { xs = filter(xs, c => c > k) }` the predicate kept `k` by
+  name after the loop. An assignment statement (`Assign`, `Declare` with a
+  value: the Epsil `=` and `let`, the LaTeX `:=`) now stores the list of the
+  elements (a set for a collection over a set) when the collection is finite
+  and reads a variable, computed with the values the variables have at that
+  statement. This is what compiled code already did. Two cases stay lazy: a
+  collection with no last element (`filter(1..oo, p)`, still a live view of
+  the variables it reads), and one that reads no variable (`map(f, 1..10^6)`).
+  The host function `ce.assign()` is not changed: it stores the value it is
+  given, so a host that defines one name from another keeps the live view.
+  A lazy collection over a dictionary also stays lazy (it is a dictionary,
+  not a list). What is lost: a program that relied on `ys` following `xs`
+  after `let ys = filter(xs, p)`; a large finite lazy collection that reads a
+  variable is computed at the assignment, not at its first read; and a
+  callback with an effect, in such a collection, runs for every element at the
+  assignment and not at each later read. A lazy collection over a literal
+  source (`let s = map(x => f(x), [1, 2, 3])`) reads no variable and keeps the
+  documented laziness: the callback runs only for the elements that are read.
+- **A declared scalar parameter is checked against the evaluated argument.**
+  For a function declared with `ce.declare(name, { signature })` and then
+  assigned its body, an argument was checked at boxing, against its static
+  type. When that type is not known before evaluation, a scalar parameter
+  accepted any value: `f` declared `(integer) -> unknown` with body `x ↦ x + 1`
+  answered `2.5` for the value `1.5`, a declared `(real)` accepted `1 + 2i`, a
+  declared `(string)` received `Missing` and a declared `(boolean)` received
+  `5`. The evaluated arguments are now checked against the scalar parameter
+  types of the declaration, and a value that does not fit answers
+  `Error(ErrorCode("incompatible-type", "integer", "1.5"), 1.5)`, as an Epsil
+  `function` with the same annotation does. In a broadcast over a list the
+  error is in the cell that does not fit. Not changed: a list, a range or a
+  point at a scalar parameter is still broadcast (`f([1, 2, 3])`,
+  `f((1, 2))`); a symbolic argument is left alone; a slot declared `unknown`
+  or `any` checks nothing; `NaN` and an absent value at a numeric parameter
+  answer `NaN`. What is lost: a call that relied on a declared scalar type
+  being advisory.
 - **`First`, `Second`, `Third`, `Last` and `At` with a literal index are typed
   without an absent member when the element exists.** `First([(1, 2), (3, 4)])`
   was typed `missing | tuple<integer, integer>` and `First([7, 8, 9])` was
@@ -186,6 +228,12 @@
 
 ### Issues Resolved
 
+- **`ListFrom`, `SetFrom` and `TupleFrom` of a very large collection were an
+  `internal-error`.** `ListFrom(Range(1, 300000))` answered
+  `Error(ErrorCode("internal-error", "Maximum call stack size exceeded", …))`:
+  the elements were passed to one function call as separate arguments, and a
+  few hundred thousand of them exceed the argument limit. The elements are now
+  added one at a time.
 - **A list variable reassigned in a loop could be typed `integer | list<…>`.**
   In `for gap in [(A, C), (A, C)] { circles = g(gap[1], 2, circles) }`, a first
   reading of the call's type, taken before the types of the loop were settled,

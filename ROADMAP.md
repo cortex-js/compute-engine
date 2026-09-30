@@ -242,7 +242,7 @@ so the hypothesis pass reads `unknown` from `G` and is refuted. A fix would
 treat the strongly connected component of the call graph as one unit, or
 retire a callee's memo when the function it was derived inside settles.
 
-### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — one decision, four defects)
+### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — five defects)
 
 The rule since 2026-09-30, for a function literal (an Epsil `function`, a
 lambda with an annotated parameter): at evaluation, an absent value
@@ -256,38 +256,16 @@ not numeric; the Epsil static pre-pass reports the first too. Pinned by
 `test/compute-engine/absent-argument-annotated-parameter.test.ts`. What is
 not settled:
 
-1. **A declared SCALAR parameter is not checked against the evaluated
-   argument on the declare-then-assign route (decision, measure first).**
-   Measured 2026-09-30 with `f` declared through
-   `ce.declare('f', { signature })`, then assigned its body, and called with
-   an argument whose type is not known at boxing (a symbol typed `unknown`
-   that holds the value when the call is evaluated), against the Epsil
-   `function` with the same annotation:
-
-   | Declared parameter | Value | Declared, then body | Epsil `function` |
-   | --- | --- | --- | --- |
-   | `integer` | `1.5` | `2.5` | `incompatible-type` error |
-   | `string` | `Missing` | `NaN` (from `Length(Missing)`) | `incompatible-type` error |
-   | `string` | `5` | an error from `Length` that names `collection` | `incompatible-type` error that names `string` |
-   | `boolean` | `Missing` | an error from `If` ("the condition is absent") | `incompatible-type` error |
-   | `boolean` | `5` | `If(5, 1, 2)`, not evaluated | `incompatible-type` error |
-   | `tuple<number, number>` | `Missing`, `5` | `incompatible-type` error | `incompatible-type` error |
-
-   A numeric parameter with `Missing` or `NaN` answers `NaN` on both routes.
-   Cause: `ascribeDeclaredParameterTypes` (`engine-declarations.ts`) writes
-   only a NON-SCALAR declared type on the stored literal, and the
-   application checks only the parameters the literal annotates. It skips
-   scalar types on purpose: stamping one re-canonicalizes the body against
-   a narrower parameter, which changed how a tuple argument broadcasts
-   through `x ↦ 2x`. So a declared scalar type is checked at boxing, against
-   the static type of the argument, and never against the value. Options:
-   (a) check the evaluated argument against the declared scalar type when
-   the function is applied, without stamping the literal; (b) keep the
-   declared scalar type a promise the host makes, as a declared RESULT type
-   is (decision of 2026-09-24), and say so in the guide. Tycho declares
-   `number` for a document-function parameter whose every use is scalar and
-   relies on a list argument being broadcast at such a parameter, so (a)
-   must keep the broadcast and needs a run of the Tycho gates.
+1. **A function declared with a parameter typed `T | missing` refuses a
+   body with a bare parameter (defect).** `ce.declare('f', { signature:
+   '(string | missing) -> unknown' })` followed by
+   `ce.assign('f', s ↦ IsMissing(s))` throws: "the value of type
+   `(unknown) -> boolean` is not compatible with the type
+   `(missing | string) -> boolean`". `unknown` excludes the absence
+   markers, so the literal's bare parameter is read as narrower than the
+   declaration. This is the declaration a host writes to accept an absent
+   argument, now that an absent value is refused at a declared scalar
+   parameter that is not numeric.
 2. **Compiled code does not check an annotated parameter (defect).**
    `function f(p: tuple<number, number>) { p[1] + 1 }` called with
    `first(filter([(1, 2)], c => c[1] > 9))` is an error in the interpreter
@@ -335,45 +313,23 @@ holds a list that is not empty. A position proved NOT to exist
 the marker: a chained read (`M[7][1]` over a matrix) chooses `NaN` or
 `Missing` from the element type the inner access states.
 
-### A variable assigned a lazy collection over a variable holds a live view of it, and over itself is never evaluated (OPEN, decision — found 2026-09-30)
+### Three lazy collections assigned to a variable are still a live view of the variables they read (OPEN, small — residue of the decision of 2026-09-30)
 
-Measured with `executeEpsil` on `bdb3c968`, with `let xs = [1, 2, 3]`:
-
-| Statement | `xs` afterwards | `let ys = …`, then `xs = [7, 8]`: `listFrom(ys)` |
-| --- | --- | --- |
-| `xs = filter(xs, c => c > 1)` | `Filter("xs", …)`, not evaluated | `[7, 8]` |
-| `xs = map(c => c + 1, xs)` | `Map(…, "xs")`, not evaluated | `[8, 9]` |
-| `xs = scan(xs, (a, b) => a + b)` | `Scan("xs", …)`, not evaluated | `[7, 15]` |
-| `xs = takeWhile(xs, c => c < 3)` | `TakeWhile("xs", …)`, not evaluated | `[]` |
-| `xs = [c * 2 for c in xs]` | "Maximum call stack size exceeded" | `[14, 16]` |
-| `take`, `drop`, `rest`, `reverse`, `sort`, `zip`, `join`, `[...xs, 9]`, `xs[2..3]`, `unique`, `xs + 1` | a list | the list built from the first `xs` |
-| `xs = listFrom(filter(xs, c => c > 1))` | `[2, 3]` | `[2, 3]` |
-
-`Filter`, `Map`, `Scan`, `TakeWhile` and a comprehension are lazy
-collections, and the value an assignment stores keeps the SYMBOL `xs` as
-its source (`ce.assign('ys', Filter(xs, …).evaluate())` on the engine does
-the same: the JSON of the evaluated `Filter` still names `xs`). So `ys`
-follows every later assignment of `xs`, and `xs = filter(xs, p)` makes `xs`
-refer to itself: each read finds the same unevaluated expression, with no
-diagnostic, and the comprehension overflows the stack. The loop
-`for k in [1, 2, 3] { xs = filter(xs, c => c > k) }` also keeps `k` by
-name in the predicate, and `k` no longer exists after the loop. A lazy
-result RETURNED by a function is not affected: the parameter it reads is
-replaced by the argument when the function returns.
-
-Decision needed on what an Epsil assignment (`let`, `=`) stores when the
-value is a lazy collection that reads a variable: (a) the materialized
-list, when the collection is finite: the assignment evaluates the filter
-now, with the values the variables have now; an unbounded collection
-(`filter(1..oo, p)`) stays lazy; (b) the lazy collection with each variable
-it reads replaced by its current value (a snapshot that stays lazy); the
-predicate's variables must be replaced too, inside the function literal;
-(c) the live view, as today, with an error for a collection that reads the
-variable it is assigned to. A host that assigns an expression with
-`ce.assign` to define one name from another (a Tycho document definition)
-wants the live view, so the change is for the Epsil statements, not for
-`ce.assign`. If nothing is decided, the idiom `xs = filter(xs, p)` leaves
-a program without an answer, and `xs = [f(c) for c in xs]` crashes.
+Since 2026-09-30 an assignment statement stores the elements of a FINITE
+lazy collection that reads a variable, as a list when the value is an
+indexed collection and as a set when it is typed as a set (`assignedValue`,
+`library/core.ts`). Three cases are left lazy and keep their variables by
+name. (1) A collection with no last element cannot be listed:
+`let big = filter(1..oo, c => c > k)` still keeps `k`, and a later `k = 10`
+changes `first(big)` from `4` to `11`. (2) A `Filter` over a dictionary is
+a dictionary, and no operator lists a lazy dictionary as a dictionary.
+(3) A `Filter` over a set held by a local whose type was inferred
+`collection<any>` is not typed as a set, and is not indexed. A fix replaces each variable the collection
+reads by its current value and keeps the collection lazy; the replacement
+must reach inside the function literal (the `k` of the predicate) without
+touching the literal's own parameters. The host function `ce.assign()`
+stores the value it is given, on purpose: a host that defines one name from
+another wants the live view.
 
 ### A parameter that reaches a whole-collection operator indirectly is still applied element by element (OPEN — recorded 2026-09-29 with the decision on whole-collection parameters)
 
