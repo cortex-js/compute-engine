@@ -271,13 +271,24 @@ describe('Compiled accessors of a restricted point', () => {
     expect(run(['PointX', RP], -1)).toBeNaN();
   });
 
-  test.each(['javascript', 'python'])(
-    'Cross of a restricted point fails closed on %s',
-    (to) => {
-      const r = compile(ce.box(['Cross', RP3, ['Tuple', 1, 1, 1]] as never), {
-        to,
-      } as never);
-      expect(r.success).toBe(false);
-    }
-  );
+  // On JavaScript a collection operand that can be absent as a whole is
+  // bound once and the operator is lowered on the present value under a
+  // test for the absent value (`absentCollectionOperandGuard`,
+  // `base-compiler.ts`, issue #383): the cross product of the present point
+  // is the interpreter's `(-1, 2, -1)`, and the absent point gives the
+  // absent object, as the interpreter answers `Missing`. This lowering was
+  // verified against the interpreter on JavaScript only; Python keeps its
+  // decline.
+  test('Cross of a restricted point compiles on javascript', () => {
+    const json = ['Cross', RP3, ['Tuple', 1, 1, 1]];
+    expect(run(json, 2)).toEqual([-1, 2, -1]);
+    expect(run(json, -1)).toBeUndefined();
+  });
+
+  test('Cross of a restricted point fails closed on python', () => {
+    const r = compile(ce.box(['Cross', RP3, ['Tuple', 1, 1, 1]] as never), {
+      to: 'python',
+    } as never);
+    expect(r.success).toBe(false);
+  });
 });

@@ -13,6 +13,7 @@ import {
   checkType,
   checkTypes,
   checkNumericArgs,
+  absentableCollectionOperandValue,
   absentScalarMarker,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
@@ -2515,6 +2516,32 @@ function evaluateLerchPhi(
     z.re < 1 &&
     (a.re >= 0 || Number.isInteger(s.re));
   return boxComplexResult(engine, result, real);
+}
+
+/**
+ * The operands of a one-operand `Sum`/`Product` (`Sum(xs)`, no indexing set)
+ * with an operand that can be ABSENT AS A WHOLE replaced by its value; the
+ * operands unchanged when the rule does not apply; and `undefined` when the
+ * operand is absent, in which case the caller answers `NaN`.
+ *
+ * The operand is typed `missing | list<…>`: a row read `At(x, i)` of a list
+ * of lists, a lazy view over one (`Map(f, At(x, i))`), or a restricted list
+ * `xs{c}`. `Sum` and `Product` hold their operands, so the absence test of
+ * the evaluation (`hasAbsentScalarOperand`) does not see an absence that the
+ * operand computes, and a lazy view over such an operand is not finite
+ * before its source is evaluated, so the fold stayed unevaluated:
+ * `Sum(Map(f, At(x, 7)))` for a list `x` with no seventh row, and
+ * `Product(xs{c})` with `c` false. The operand is read with
+ * `absentableCollectionOperandValue` (`validate.ts`).
+ */
+function withAbsentableOperandResolved(
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> | undefined {
+  if (ops.length !== 1 || ops[0] === undefined) return ops;
+  const value = absentableCollectionOperandValue(ops[0]);
+  if (value === undefined) return ops;
+  if (isAbsentScalarSymbol(value)) return undefined;
+  return [value];
 }
 
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
@@ -8298,6 +8325,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       evaluate: (ops, options) => {
         const ce = options.engine;
+        // One-operand form over an operand that can be absent as a whole
+        // (`missing | list<…>`, a restricted list or a row read): as in
+        // `Sum.evaluate`. The product of an absent collection is `NaN`; a
+        // present collection is folded below.
+        const resolved = withAbsentableOperandResolved(ops);
+        if (resolved === undefined) return ce.NaN;
+        ops = resolved;
         // EL-4 (revised): see the matching comment in `Sum.evaluate` — an
         // infinite domain stays symbolic under exact evaluate (`.N()` owns
         // the truncated numeric path); free bounds/body are never enumerable.
@@ -8389,6 +8423,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       evaluateAsync: async (ops, options) => {
         const ce = options.engine;
+        // As in the synchronous handler: a one-operand form over an operand
+        // that can be absent as a whole.
+        const resolved = withAbsentableOperandResolved(ops);
+        if (resolved === undefined) return ce.NaN;
+        ops = resolved;
         const numeric = options.numericApproximation;
         const bounds = ops.slice(1);
         // A body holding an asynchronous-only application is evaluated per
@@ -8551,6 +8590,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         [first, ...rest],
         { engine, numericApproximation, expression }
       ) => {
+        // Arity-1 form over an operand that can be absent as a whole (typed
+        // `missing | list<…>`: a lazy view over a row read of a list of
+        // lists, `Sum(Map(f, At(x, 1)))`, or over a restricted list). `Sum`
+        // holds its operand, and such a view is not finite before its source
+        // is evaluated, so the sum stayed unevaluated. The operand is
+        // evaluated here (`withAbsentableOperandResolved`): the sum of an
+        // absent collection is `NaN`, as `Sum(Missing)` is, and a present
+        // collection is summed below.
+        const resolved = withAbsentableOperandResolved([first, ...rest]);
+        if (resolved === undefined) return engine.NaN;
+        first = resolved[0];
         // Arity-1 collection-reducer form: Sum(L).
         if (rest.length === 0 && first?.isCollection) {
           // Non-finite collections stay symbolic — infinite iteration would
@@ -8688,6 +8738,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         [first, ...rest],
         { engine, signal, numericApproximation, effects, expression }
       ) => {
+        // Arity-1 form over an operand that can be absent as a whole: as in
+        // the synchronous handler.
+        const resolved = withAbsentableOperandResolved([first, ...rest]);
+        if (resolved === undefined) return engine.NaN;
+        first = resolved[0];
         // Arity-1 collection-reducer form: Sum(L). A literal collection
         // whose elements hold an asynchronous-only application is evaluated
         // first, which awaits them (`List` evaluates its elements); the

@@ -1331,7 +1331,7 @@ function isRuntimePointShaped(a: Expression): boolean {
  * A NOMINAL value is atomic whatever its representation, as for
  * `unionAdmitsIndexedCollection` above.
  */
-function isGatedIndexedCollection(a: Expression): boolean {
+export function isGatedIndexedCollection(a: Expression): boolean {
   return gatedCollectionArms(a) !== undefined;
 }
 
@@ -3474,6 +3474,142 @@ export class BaseCompiler {
       for (const a of bound) BaseCompiler._codeOverrides.delete(a);
       BaseCompiler._popComplexMemoLayer();
     }
+  }
+
+  /**
+   * The lowering of `h(args)` when a collection operand can be ABSENT AS A
+   * WHOLE, or `undefined` when the rule does not apply and the ordinary
+   * lowering of the head runs.
+   *
+   * An operand typed `missing | C`, where `C` is a list or another indexed
+   * collection (`gatedCollectionArms`), is a JavaScript array or the absent
+   * value `undefined` at run time. Three sources give this type: a row read
+   * of a list of lists whose length is not known (`At(x, 1)` with
+   * `x: list<list<integer>>` is typed `list<integer> | missing`, because the
+   * index can be past the end), a restricted list (`[1, 2, 3]{c}`), and a
+   * symbol declared with a `missing` arm.
+   *
+   * The interpreter answers the absence marker of the application's codomain
+   * when such an operand is absent, for every operator whose missing-value
+   * behavior is `propagate` (the absence test in `BoxedFunction.evaluate`,
+   * `absentScalarMarker` in `boxed-expression/validate.ts`): `Length` of an
+   * absent list is `NaN`, `Reverse` of an absent list is `Missing`. The
+   * collection lowerings of the target read an array (`.length`, `.slice()`,
+   * a loop), so they refuse an operand whose type has a `missing` arm, and
+   * `Length(At(x, 1))` did not compile.
+   *
+   * The lowering emitted here follows the interpreter's rule. Each operand
+   * that can be absent is compiled once and bound to a temporary. When a
+   * temporary holds the absent value, the result is the marker: the numeric
+   * marker (`NaN`) when the application's type, without its `missing` arm, is
+   * a number, and the absent object (`undefined`) otherwise. When every
+   * temporary holds a collection, the result is the ordinary lowering of the
+   * head, compiled with each of these operands replaced by a symbol that
+   * carries the PRESENT type and reads the temporary. The present type has no
+   * `missing` arm, so the rule does not apply again to the inner application.
+   *
+   *     Length(At(x, i))
+   *       ⟶  ((_tv1) => (_tv1 === undefined) ? Number.NaN : _tv1.length)(…)
+   *
+   * An operator with its own `compile` handler (`ListFrom`) takes the rule
+   * too: the handler lowers the inner application on the present collection.
+   *
+   * The rule does not apply in these cases:
+   * - the target is not JavaScript. The other targets keep their existing
+   *   decline: the lowering was verified against the interpreter on this
+   *   target only.
+   * - the head binds a variable (`Sum` with an indexing set, `Integrate`), or
+   *   is a control-flow head. The operand is evaluated before the head here,
+   *   which would move it out of the scope of the bound variable. The
+   *   one-operand forms `Sum(xs)` and `Product(xs)` bind nothing and are
+   *   admitted, although their missing-value behavior is not `propagate`:
+   *   the interpreter answers `NaN` for the sum of an absent collection from
+   *   the evaluate handler, and their array lowering returned a non-array
+   *   operand unchanged, so the compiled sum of an absent collection was
+   *   `undefined`.
+   * - the operator is broadcastable. Its element-wise lowering already
+   *   answers the absent value for an absent operand (`_SYS.bcastAbsent`).
+   * - another operand is not pure. The interpreter evaluates every operand
+   *   before it tests for an absent one, and the lowering emitted here
+   *   evaluates the other operands only when the collection is present, so an
+   *   operand with an effect (a `Random` draw) would run a different number
+   *   of times.
+   */
+  private static absentCollectionOperandGuard(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
+    if (target.language !== 'javascript') return undefined;
+    const absence = target.absence;
+    if (absence?.object === undefined || target.bindExpr === undefined)
+      return undefined;
+    const reduction = (h === 'Sum' || h === 'Product') && args.length === 1;
+    if (BaseCompiler.CONTROL_FLOW_HEADS.has(h) && !reduction) return undefined;
+    const def = lookupApplicable(h, engine.context.lexicalScope);
+    if (!isOperatorDef(def)) return undefined;
+    const operator = def.operator;
+    if (
+      !reduction &&
+      (operator.broadcastable ||
+        operator.resolvedMissingBehavior !== 'propagate')
+    )
+      return undefined;
+    const guarded = args.map(
+      (a, i) =>
+        (reduction || operator.stripsMissingAt(i)) &&
+        !BaseCompiler._codeOverrides.has(a) &&
+        gatedCollectionArms(a) !== undefined
+    );
+    if (!guarded.some((x) => x)) return undefined;
+    if (args.some((a, i) => !guarded[i] && a.isPure === false))
+      return undefined;
+    const application = node ?? engine._fn(h, [...args]);
+    if (declaredBinders(application, 'post') !== undefined) return undefined;
+
+    // The marker of the application's codomain, as `absentScalarMarker`
+    // decides it: the numeric marker when the type, without its `missing`
+    // arm, is a number. A type with nothing but the `missing` arm says nothing
+    // about the codomain, and the declared result of the operator is read
+    // instead.
+    const present = stripMissingFromType(
+      resolveTypeForCompilation(application.type.type)
+    );
+    const codomain =
+      present === 'never'
+        ? (functionResult(operator.signature.type) ?? 'unknown')
+        : present;
+    const marker =
+      codomain !== 'never' && isSubtype(codomain, 'number')
+        ? absence.numeric.make()
+        : absence.object.nullLiteral;
+
+    const names: string[] = [];
+    const bindings: Array<[string, TargetSource]> = [];
+    const presentArgs = args.map((a, i) => {
+      if (!guarded[i]) return a;
+      const arms = gatedCollectionArms(a)!;
+      const name = BaseCompiler.tempVar(target);
+      names.push(name);
+      bindings.push([name, BaseCompiler.compileValueOperand(a, target)]);
+      return BaseCompiler.typedTemp(
+        engine,
+        name,
+        arms.length === 1 ? arms[0] : { kind: 'union', types: arms }
+      );
+    });
+    // The temporaries are parameters of the binding emitted below, so they
+    // are read by their own names, not as keys of the variables object.
+    const inner: CompileTarget<Expression> = {
+      ...target,
+      var: (id) => (names.includes(id) ? id : target.var(id)),
+      boundVars: BaseCompiler.withBoundNames(target, names),
+    };
+    const body = BaseCompiler.compile(engine._fn(h, presentArgs), inner);
+    const absent = names.map((n) => absence.object!.isAbsent(n)).join(' || ');
+    return target.bindExpr(bindings, `(${absent} ? ${marker} : ${body})`);
   }
 
   /**
@@ -7661,6 +7797,22 @@ export class BaseCompiler {
       return `(${args
         .map((arg) => BaseCompiler.compile(arg, target, prec))
         .join(', ')})`;
+    }
+
+    // A collection operand that can be absent as a whole (`missing | list<…>`)
+    // at an operator that answers the absence marker for an absent operand:
+    // the operand is bound once, and the operator is lowered on the present
+    // collection under a test for the absent value. See
+    // `absentCollectionOperandGuard`.
+    {
+      const guarded = BaseCompiler.absentCollectionOperandGuard(
+        engine,
+        h,
+        args,
+        target,
+        node
+      );
+      if (guarded !== undefined) return guarded;
     }
 
     if (h === 'Sum' || h === 'Product') {

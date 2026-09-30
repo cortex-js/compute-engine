@@ -228,6 +228,42 @@
 
 ### Issues Resolved
 
+- **A collection operand that can be absent as a whole compiles on the
+  JavaScript target** (issue #383). With `x: list<list<integer>>`, the row read
+  `At(x, i)` is typed `list<integer> | missing` (the index can be past the end),
+  and `Length(At(x, i))`, `Count(At(x, i))` and every other collection operator
+  over it refused to compile ("operand is not an indexed collection"), where the
+  same read of a `tuple<list<integer>, list<integer>>` compiled. The same held
+  for a restricted list `xs{c}` and for a symbol declared `list<integer> |
+  missing`. The compiled code now binds the operand once and tests it for the
+  absent value: `Length(At(x, i))` runs to the row's length, and to `NaN` when
+  the row is absent, as the interpreter answers `NaN` for `Length(Missing)`;
+  `Reverse`, `Take`, `Sort`, `Join`, `Map`, `Filter`, `Reduce`, `Any`, `Dot`,
+  `Cross`, `ListFrom`, `Last` and the other collection operators follow the
+  same rule, with the absent object (`undefined`) as the marker of a
+  non-numeric result. `Sum` and `Product` of such an operand answered
+  `undefined` and now answer `NaN`. The rule applies on the JavaScript target
+  only; the Python and shader targets keep their decline.
+- **`Sum` of a list of points, or of a list of lists, compiled to a complex
+  `NaN`.** `Sum(pts)` with `pts: list<tuple<real, real>>` folded each point as a
+  number and answered `{ re: NaN, im: NaN }`, where the interpreter answers the
+  sum point `(4, 6)`. The compiled sum and product now combine the elements
+  element-wise, as the interpreter does; `Product` of a list of points declines,
+  as the interpreter reports an error (there is no product of two points).
+- **Lazy collection operators over an operand that can be absent as a whole
+  stayed unevaluated in the interpreter.** `Filter(At(x, 7), p)`,
+  `Reduce(At(x, 7), Add, 0)`, `Any(At(x, 7), p)` and `Scan(At(x, 7), f)`, with
+  `x` a list of lists that has no seventh row, stayed unevaluated, where
+  `Length(At(x, 7))` is `NaN`; `Map(f, At(x, 1))`, `Sum(Map(f, At(x, 1)))` and
+  `Product(xs{c})` stayed unevaluated for a present row as well. They now
+  answer the marker of their codomain (`Missing`, `NaN`) for an absent operand
+  and compute over the present collection. `Reduce(At(t, 1), f, 0)` and
+  `Length(Filter(At(t, 1), p))` with `t` a tuple of lists also evaluate now.
+  Under `evaluate({ materialization: true })`, a view over such an operand was
+  materialized as a `Set` built from the walk of the unevaluated view
+  (`Append(At(x, 1), 2)` gave `Set(3, 1, 2)`, the duplicate lost; `Reverse` of
+  an absent restricted list gave `Set(NaN)`): the view is now evaluated first,
+  so the result is the list, or `Missing`.
 - **`ListFrom`, `SetFrom` and `TupleFrom` of a very large collection were an
   `internal-error`.** `ListFrom(Range(1, 300000))` answered
   `Error(ErrorCode("internal-error", "Maximum call stack size exceeded", …))`:

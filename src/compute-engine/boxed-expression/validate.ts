@@ -47,6 +47,7 @@ import {
 import { parseType } from '../../common/type/parse.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
+import { threadedPresentType } from './broadcast-lift-type.js';
 import {
   freeTypeVariables,
   parameterPositions,
@@ -1020,6 +1021,60 @@ export function absentScalarMarker(
       : ce.Missing;
   }
   return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
+}
+
+/**
+ * Whether `op` is a collection operand that can be ABSENT AS A WHOLE, for an
+ * operator that holds its operands: its type has a `missing` member of its
+ * own beside a collection (`missing | list<…>`), and it is pure.
+ *
+ * Such an operand — a row read `At(x, 1)` of a list of lists whose length is
+ * not known, a restricted list `xs{c}` — holds a collection or the absent
+ * value `Missing`. Its type is not a collection type, so a lazy view over it
+ * does not read it as a source, and an operator that holds its operands does
+ * not see the absence. Such an operator evaluates the operand and continues
+ * with the value that `settledAbsentableValue` reads off the result.
+ *
+ * An operand that is not pure is excluded: a value that is neither absent
+ * nor a collection would be discarded by the caller, which would then
+ * evaluate the operand a second time (a `Random` draw consumed twice).
+ */
+export function isAbsentableCollectionOperand(op: Expression): boolean {
+  if (isAbsentScalarSymbol(op)) return false;
+  const present = threadedPresentType(op.type.type);
+  if (present === undefined || !typeCouldBeCollection(present)) return false;
+  return op.isPure;
+}
+
+/**
+ * The value of an operand admitted by `isAbsentableCollectionOperand`, once
+ * evaluated, when that value settles the question: the absent value
+ * (`Missing` or `Undefined`, tested with `isAbsentScalarSymbol`), or a
+ * collection that cannot be absent. `undefined` otherwise: an operand that
+ * does not evaluate yet, and a restricted list whose condition is not
+ * decided, which is still typed `missing | list<…>`; the caller then keeps
+ * the operand as it is.
+ */
+export function settledAbsentableValue(
+  value: Expression
+): Expression | undefined {
+  if (isAbsentScalarSymbol(value)) return value;
+  if (!value.isCollection) return undefined;
+  return threadedPresentType(value.type.type) === undefined ? value : undefined;
+}
+
+/**
+ * `settledAbsentableValue` of the evaluation of `op`, when `op` is admitted
+ * by `isAbsentableCollectionOperand`; `undefined` otherwise. The synchronous
+ * form; the asynchronous evaluation route evaluates the operand itself and
+ * calls `settledAbsentableValue` on the result.
+ */
+export function absentableCollectionOperandValue(
+  op: Expression,
+  evaluate: (x: Expression) => Expression = (x) => x.evaluate()
+): Expression | undefined {
+  if (!isAbsentableCollectionOperand(op)) return undefined;
+  return settledAbsentableValue(evaluate(op));
 }
 
 /**

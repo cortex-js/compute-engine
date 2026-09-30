@@ -244,6 +244,8 @@ import {
   markAbsentPointCells,
   runtimeCheckExemptParam,
   runtimeConformanceError,
+  isAbsentableCollectionOperand,
+  settledAbsentableValue,
 } from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
 import { isScalarType } from './function-literal.js';
@@ -4872,6 +4874,26 @@ export class BoxedFunction
       }
 
       //
+      // 2c'/ A LAZY operator over a collection operand that can be absent as
+      // a whole (`resolveAbsentableLazyOperands`): the operand is evaluated.
+      // When it is absent, the answer is the marker of the codomain, as the
+      // absence test (step 4a) answers for an operand that is evaluated.
+      // Otherwise the operator is evaluated over the collection the operand
+      // holds.
+      //
+      {
+        const resolved = resolveAbsentableLazyOperands(def, this._ops!, (x) =>
+          x.evaluate(operandOptions(options))
+        );
+        if (resolved !== undefined) {
+          if (resolved.absent) return absentScalarMarker(this.engine, this);
+          return this._withParseScope(() =>
+            this.engine.function(this._operator, resolved.ops)
+          ).evaluate(options);
+        }
+      }
+
+      //
       // 2d/ A lazy collection that PROMISES a string
       //
       const preserved = evaluateStringPreservingCollection(this, def);
@@ -4880,7 +4902,12 @@ export class BoxedFunction
       //
       // 3/ Handle evaluation of lazy collections
       //
-      if (materialization !== false && !def.evaluate && this.isLazyCollection)
+      if (
+        materialization !== false &&
+        !def.evaluate &&
+        this.isLazyCollection &&
+        !mayBeAbsentAsWhole(this)
+      )
         return materialize(this, def, options);
 
       //
@@ -5839,6 +5866,25 @@ export class BoxedFunction
       // the `!def.evaluate` gate below already has, and no collection operator
       // is in that shape today.
       //
+      // A lazy operator over a collection operand that can be absent as a
+      // whole: mirrors the sync path's step 2c'. The operand is evaluated on
+      // the asynchronous route, so an operand that holds an
+      // asynchronous-only application is evaluated as its operator would
+      // evaluate it.
+      {
+        const resolved = await resolveAbsentableLazyOperandsAsync(
+          def,
+          this._ops!,
+          (x) => x.evaluateAsync(operandOptions(options))
+        );
+        if (resolved !== undefined) {
+          if (resolved.absent) return absentScalarMarker(this.engine, this);
+          return await this._withParseScope(() =>
+            this.engine.function(this._operator, resolved.ops)
+          ).evaluateAsync(options);
+        }
+      }
+
       // A lazy collection that PROMISES a string — mirrors the sync path's
       // step 2d. The join is synchronous (a string is finite and its
       // characters are already segmented), so there is no async variant.
@@ -5846,7 +5892,14 @@ export class BoxedFunction
       if (preserved) return preserved;
 
       const materialization = options?.materialization ?? false;
-      if (materialization !== false && !def.evaluate && this.isLazyCollection)
+      // As on the sync route (step 3): a node that can be absent as a whole
+      // is evaluated the ordinary way (`mayBeAbsentAsWhole`).
+      if (
+        materialization !== false &&
+        !def.evaluate &&
+        this.isLazyCollection &&
+        !mayBeAbsentAsWhole(this)
+      )
         return materialize(this, def, options);
 
       //
@@ -9515,6 +9568,130 @@ function evaluateStringPreservingResult(result: Expression): Expression {
   // collection handler (which also rules out re-entrancy through `each()`),
   // laziness, an exact `string` type, and a proof that the walk terminates.
   return evaluateStringPreservingCollection(result, def) ?? result;
+}
+
+/**
+ * Whether the value of `expr` can be the absent value instead of a
+ * collection: its type is a union with a `missing` member of its own
+ * (`list<integer> | missing`). A `missing` member of the ELEMENT type
+ * (`list<integer | missing>`, a list with absent cells) does not count: that
+ * value is always a collection.
+ *
+ * Such a node is not materialized before its operands are evaluated (step 3
+ * of the evaluation). The walk of the unevaluated node cannot tell an absent
+ * source from an empty one, and its type is not a list type, so the literal
+ * was built as a `Set`: `Append(At(x, 1), 2)`, with `x` a list of lists
+ * whose first row is `[3, 1, 2]`, materialized to `Set(3, 1, 2)` (the
+ * duplicate `2` lost), and `Reverse` of a restricted list whose condition is
+ * false materialized to `Set(NaN)`. The ordinary evaluation answers for both
+ * cases: the absence test answers the marker for an absent operand, and the
+ * result over a present operand is a list, which is then materialized
+ * (`materializeLazyResult`).
+ */
+function mayBeAbsentAsWhole(expr: Expression): boolean {
+  return threadedPresentType(expr.type.type) !== undefined;
+}
+
+/**
+ * The operands of a LAZY operator that propagates absence, with each
+ * collection operand that can be absent as a whole replaced by its value; or
+ * `undefined` when no operand is replaced. `absent` is true when a replaced
+ * operand is the absent value.
+ *
+ * A lazy operator (`Map`, `Filter`, `Reduce`, `Any`) holds its operands, so
+ * the absence test of the evaluation (step 4a) sees an absent operand only
+ * when `Missing` is written in the source. An absence that the operand
+ * COMPUTES was not seen: with `x` a list of lists, `Filter(At(x, 7), p)` and
+ * `Reduce(At(x, 7), Add, 0)` stayed unevaluated when `x` has no seventh row,
+ * where `Length(At(x, 7))`, whose operand is evaluated, is `NaN`. The present
+ * case failed too: the type of the operand, `list<integer> | missing`, is not
+ * a collection type, so the lazy view did not read it as a source, and
+ * `Map(f, At(x, 1))` stayed unevaluated.
+ *
+ * Each operand at a position that strips `missing` (`missingStrip`) that
+ * `isAbsentableCollectionOperand` (`validate.ts`) admits is evaluated, and
+ * replaced by its value when `settledAbsentableValue` says the value settles
+ * the question. The operand is evaluated once: the operator is evaluated
+ * again over the value, not over the operand. A second evaluation of an
+ * operand whose value does not settle the question (an unassigned symbol
+ * declared `list<integer> | missing`, a restriction whose condition is not
+ * decided) is answered by the lazy-collection evaluate memo: ten nested
+ * views over such an operand evaluate in the same time as one (measured
+ * 2026-09-30).
+ *
+ * An operator that binds a variable (`scoped`) is left alone: the operand
+ * can mention the bound variable, which has no value here. A broadcastable
+ * operator (`Multiply`, `Add`) is left alone too: beside a collection
+ * operand its absent operand lands in each cell of the result
+ * (`[1, 2, 3] · P` with the restricted point `P` absent is three absent
+ * cells, not one absent value), which its own handler computes.
+ */
+function resolveAbsentableLazyOperands(
+  def: BoxedOperatorDefinition,
+  ops: ReadonlyArray<Expression>,
+  evaluate: (x: Expression) => Expression
+): { ops: ReadonlyArray<Expression>; absent: boolean } | undefined {
+  const positions = absentableLazyOperandPositions(def, ops);
+  if (positions.length === 0) return undefined;
+  return settleAbsentableLazyOperands(
+    ops,
+    positions,
+    positions.map((i) => evaluate(ops[i]))
+  );
+}
+
+/** `resolveAbsentableLazyOperands` on the asynchronous evaluation route: the
+ * operands are evaluated with the asynchronous evaluator. */
+async function resolveAbsentableLazyOperandsAsync(
+  def: BoxedOperatorDefinition,
+  ops: ReadonlyArray<Expression>,
+  evaluate: (x: Expression) => Promise<Expression>
+): Promise<{ ops: ReadonlyArray<Expression>; absent: boolean } | undefined> {
+  const positions = absentableLazyOperandPositions(def, ops);
+  if (positions.length === 0) return undefined;
+  const values: Expression[] = [];
+  for (const i of positions) values.push(await evaluate(ops[i]));
+  return settleAbsentableLazyOperands(ops, positions, values);
+}
+
+/** The positions of the operands `resolveAbsentableLazyOperands` evaluates:
+ * none for an operator the rule does not apply to. */
+function absentableLazyOperandPositions(
+  def: BoxedOperatorDefinition,
+  ops: ReadonlyArray<Expression>
+): number[] {
+  if (
+    def.lazy !== true ||
+    def.scoped !== false ||
+    def.broadcastable ||
+    def.resolvedMissingBehavior !== 'propagate'
+  )
+    return [];
+  const positions: number[] = [];
+  for (let i = 0; i < ops.length; i++)
+    if (def.stripsMissingAt(i) && isAbsentableCollectionOperand(ops[i]))
+      positions.push(i);
+  return positions;
+}
+
+/** The operands with each evaluated operand whose value settles the question
+ * (`settledAbsentableValue`) replaced by that value; see
+ * `resolveAbsentableLazyOperands`. */
+function settleAbsentableLazyOperands(
+  ops: ReadonlyArray<Expression>,
+  positions: ReadonlyArray<number>,
+  values: ReadonlyArray<Expression>
+): { ops: ReadonlyArray<Expression>; absent: boolean } | undefined {
+  let resolved: Expression[] | undefined;
+  let absent = false;
+  positions.forEach((i, k) => {
+    const value = settledAbsentableValue(values[k]);
+    if (value === undefined) return;
+    if (isAbsentScalarSymbol(value)) absent = true;
+    resolved ??= [...ops];
+    resolved[i] = value;
+  });
+  return resolved === undefined ? undefined : { ops: resolved, absent };
 }
 
 /**

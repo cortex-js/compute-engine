@@ -569,6 +569,7 @@ import {
   compilationType,
   couldBeCollectionParticipant,
   isFlatAllStringComparisonParticipant,
+  isGatedIndexedCollection,
   isNumericTupleParticipant,
   isProvablyCharacterOperand,
   isProvablyStringComparisonParticipant,
@@ -4301,8 +4302,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   //
   // `Last` is the last element (`At(coll, -1)`); an empty collection yields NaN
   // (the interpreter's `Nothing` projected onto a real target).
-  Last: (args, compile) =>
-    `_SYS.at(${elementsArg('Last', args[0], compile)}, -1)`,
+  //
+  // A collection that can be absent as a whole (typed `missing | list<…>`: a
+  // row read of a list of lists, a restricted list) is lowered as the read
+  // `At(coll, -1)`. The `At` lowering reads such a base through its present
+  // type and answers the marker of the element domain when the base is
+  // absent: `NaN` for numbers, `undefined` for any other element, as the
+  // interpreter answers `NaN` and `Missing`. `elementsArg` refuses the
+  // operand, because its type has a `missing` arm.
+  Last: (args, compile) => {
+    const coll = args[0];
+    if (coll != null && isGatedIndexedCollection(coll))
+      return compile(coll.engine._fn('At', [coll, coll.engine.number(-1)]));
+    return `_SYS.at(${elementsArg('Last', coll, compile)}, -1)`;
+  },
   // All-but-first / all-but-first-n / first-n. `Take`/`Drop` clamp the count to
   // ≥ 0 so a negative count matches the interpreter (`Take(xs, -2) = []`,
   // `Drop(xs, -2) = xs`), and JS `slice` already clamps a count past the end.
@@ -14564,8 +14577,42 @@ function compileSumProduct(
     // returns itself, matching the interpreter's `Sum(scalar) = scalar`).
     // A dictionary/string/statically-scalar operand fails closed, matching
     // `Length`/`At`/`Reduce`.
-    if (isIndexedCollectionOperand(args[0]))
+    if (isIndexedCollectionOperand(args[0])) {
+      // Elements that are themselves collections (a list of points, the rows
+      // of a matrix or of a list of lists) are combined element-wise, as the
+      // interpreter combines them: `Sum([(1, 2), (3, 4)])` is `(4, 6)` and
+      // `Sum([[1, 2], [3, 4]])` is `[4, 6]`. The scalar fold below adds with
+      // `+` or with the number-or-complex combiner, which reads an array
+      // operand as a number: the sum of a `list<tuple<real, real>>` compiled
+      // to `{ re: NaN, im: NaN }`. The element-wise combiners of the guarded
+      // fold (`_SYS.add`, `_SYS.mul`) are used instead.
+      const elt = collectionElementType(
+        resolveTypeForCompilation(jsType(args[0]))
+      );
+      const element =
+        elt === undefined ? undefined : resolveTypeForCompilation(elt);
+      if (
+        element !== undefined &&
+        element !== 'never' &&
+        !isSubtype(element, 'string') &&
+        isSubtype(element, INDEXED_COLLECTION_SHAPE_TYPE)
+      ) {
+        // The interpreter has no product between two points (its answer is
+        // the error `no-product-between-points`), and `_SYS.mul` would
+        // multiply the coordinates.
+        if (
+          kind === 'Product' &&
+          (element === 'tuple' ||
+            (typeof element !== 'string' && element.kind === 'tuple'))
+        )
+          throw new Error(
+            'Could not compile `Product`: the elements are points, and there is no product between two points. ' +
+              'The interpreter reports the error instead.'
+          );
+        return emitCollectionReduce(kind, args[0], target, true);
+      }
       return emitCollectionReduce(kind, args[0], target, false);
+    }
     if (isPossiblyCollectionTypedJS(args[0]))
       return emitCollectionReduce(kind, args[0], target, true);
     throw new Error(`Could not compile \`${kind}\`: no indexing set`);

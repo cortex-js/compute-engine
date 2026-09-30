@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-29.
+**Last updated:** 2026-09-30.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -241,6 +241,39 @@ signature is derived while `F`'s is, reads the re-entrancy guard's
 so the hypothesis pass reads `unknown` from `G` and is refuted. A fix would
 treat the strongly connected component of the call graph as one unit, or
 retire a callee's memo when the function it was derived inside settles.
+
+### Lazy collection operators over an eager source stay unevaluated (OPEN, decision — found 2026-09-30 by the fix for issue #383)
+
+With `t: tuple<list<integer>, list<integer>>` assigned `([3, 1, 2], [4])`, the
+read `At(t, 1)` is typed `list<integer>` and its value is the list, but it is an
+eager operator with no collection handlers before it is evaluated. A lazy view
+over it reads `isFiniteCollection` and `isEnumerableCollection` off the
+unevaluated read, both `undefined`, and stays unevaluated: `ArgMax(At(t, 1))`,
+`ArgMin`, `Dedup`, `Differences`, `FlatMap`, `Scan(At(t, 1), f)` and
+`TakeWhile`/`DropWhile` under a plain `evaluate()`; `Numerator(At(t, 1))` and
+`Denominator` report an `incompatible-type` error naming `vector<integer^3>`
+where the literal list broadcasts. `Reverse(At(t, 1)).evaluate({ materialization:
+true })` also returns the unevaluated view: the materialization step (step 3 of
+`_computeValue`, `boxed-function.ts`) runs before the operands are evaluated,
+and `materialize()` returns the node itself when the walk cannot start; the
+`toLatex()` contract of Tycho item 247 (a symbolic carrier prints without
+evaluation) depends on that return. `Reduce` and the count of `Filter` resolve
+such a source with `eagerViewSource` since 2026-09-30, as `Join`, `Reverse` and
+`Take` did before; the operators above do not. A general fix would evaluate an
+eager source once when the lazy node is evaluated, which is a change to the
+laziness contract (`docs/COLLECTIONS-MODEL.md`) and needs a decision.
+
+### `Sum` of a list of points is typed `number` (OPEN, small — found 2026-09-30 by the fix for issue #383)
+
+`bigOpResultType` (`library/type-handlers.ts`) types the one-operand
+`Sum(pts)` as `number` for every collection operand; with `pts:
+list<tuple<real, real>>` the value is the point `(4, 6)`, and with `m:
+list<list<real>>` it is the row `[4, 6]`. The compiled `Sum(pts)` now answers
+the array, so a consumer that reads the compiled value as a scalar (an
+arithmetic parent emitted from the `number` type) is wrong. The element type of
+the collection should decide: a collection of collections sums to its element
+type. `Length(At(x, i))` has the same shape of defect at a smaller scale: typed
+`number` where `integer | nan` is the value.
 
 ### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — five defects)
 

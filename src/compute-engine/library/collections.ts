@@ -4863,9 +4863,17 @@ function pointComponentAt(
  * overflow check in the `Reduce` definition.
  */
 const reduceEvaluate = (
-  [collection, fn, initial]: ReadonlyArray<Expression>,
+  [source, fn, initial]: ReadonlyArray<Expression>,
   { engine: ce, numericApproximation }: EvaluateHandlerOptions
 ): Expression | undefined => {
+  // `Reduce` holds its operands, so a source that is an EAGER operator (an
+  // element read `At(t, 1)` whose value is a list, a `Sort`) arrives
+  // unevaluated. Such an operator has no collection handlers before it is
+  // evaluated, its finiteness is not known, and the fold stayed unevaluated:
+  // `Reduce(At(t, 1), Add, 0)` with `t` a pair of lists, where
+  // `Sum(At(t, 1))` was the sum. The source is resolved as the lazy views
+  // resolve theirs (`eagerViewSource`).
+  const collection = eagerViewSource(source);
   if (!collection.isFiniteCollection) return undefined;
   // A collection may report a finite count yet decline enumeration
   // (e.g. Linspace(a, 1, 3) with a symbolic endpoint: size 3, but the
@@ -8029,7 +8037,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // unknown (`undefined`) — never `Infinity`, since a filter of an
         // infinite source may still have a finite count.
         if (!isFunction(expr)) return undefined;
-        if (expr.op1.isFiniteCollection !== true) return undefined;
+        // `finitenessOfSource`, as the `isFinite` handler above: a source
+        // that is an eager operator (`At(t, 1)` whose value is a list) has
+        // no finiteness of its own before it is evaluated, and the count of
+        // `Filter(At(t, 1), p)` was unknown although the filter is finite
+        // and its walk reads the evaluated source.
+        if (finitenessOfSource(expr.op1) !== true) return undefined;
         // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
@@ -8361,6 +8374,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // accumulator stays bare (see `Reduce` for why a fold never stamps its
     // accumulator). The RESULT stays with the `type:` handler below: the
     // source's shape with the fold's result as its elements.
+    //
+    // An absent collection scans to `Missing`, as every collection operator
+    // answers for an absent operand (user decision 2026-09-25). Declared
+    // here, as on `Reduce`, because the optional `initial` parameter is a
+    // `value`, which the default policy (`signatureParamsPropagateAbsence`)
+    // does not read as a collection: without it `Scan(Missing, f)` and the
+    // scan of an absent row (`Scan(At(x, 7), f)`) stayed unevaluated.
+    missingBehavior: 'propagate',
     signature:
       '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
     // Same shape/indexed-ness as the source, but elements are the fold's
@@ -8597,7 +8618,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // the taken prefix (bounded); an infinite source stays unknown.
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (expr.op1.isFiniteCollection !== true) return undefined;
+        // `finitenessOfSource`, as the `isFinite` handler above: a source
+        // that is an eager operator (`At(t, 1)` whose value is a list) has
+        // no finiteness of its own before it is evaluated, and the count of
+        // `Filter(At(t, 1), p)` was unknown although the filter is finite
+        // and its walk reads the evaluated source.
+        if (finitenessOfSource(expr.op1) !== true) return undefined;
         // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
@@ -8742,7 +8768,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // infinite/unknown source stays unknown.
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (expr.op1.isFiniteCollection !== true) return undefined;
+        // `finitenessOfSource`, as the `isFinite` handler above: a source
+        // that is an eager operator (`At(t, 1)` whose value is a list) has
+        // no finiteness of its own before it is evaluated, and the count of
+        // `Filter(At(t, 1), p)` was unknown although the filter is finite
+        // and its walk reads the evaluated source.
+        if (finitenessOfSource(expr.op1) !== true) return undefined;
         // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
@@ -12783,7 +12814,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // the deduped result (bounded); an infinite source stays unknown.
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (expr.op1.isFiniteCollection !== true) return undefined;
+        // `finitenessOfSource`, as the `isFinite` handler above: a source
+        // that is an eager operator (`At(t, 1)` whose value is a list) has
+        // no finiteness of its own before it is evaluated, and the count of
+        // `Filter(At(t, 1), p)` was unknown although the filter is finite
+        // and its walk reads the evaluated source.
+        if (finitenessOfSource(expr.op1) !== true) return undefined;
         // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
@@ -13264,7 +13300,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // an infinite/unknown source stays unknown.
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (expr.op1.isFiniteCollection !== true) return undefined;
+        // `finitenessOfSource`, as the `isFinite` handler above: a source
+        // that is an eager operator (`At(t, 1)` whose value is a list) has
+        // no finiteness of its own before it is evaluated, and the count of
+        // `Filter(At(t, 1), p)` was unknown although the filter is finite
+        // and its walk reads the evaluated source.
+        if (finitenessOfSource(expr.op1) !== true) return undefined;
         // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
