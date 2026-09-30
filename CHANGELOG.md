@@ -2,6 +2,22 @@
 
 ### Issues Resolved
 
+- **`HurwitzZeta(s,a)` at a non-positive integer order `s` is the Bernoulli
+  polynomial in `a`, exact for a symbolic or rational `a` and, for a float or
+  complex `a`, computed by exact bigint-rational arithmetic rather than
+  floating-point Horner evaluation.** `HurwitzZeta(-1, "a").evaluate()` stayed
+  unevaluated; it is now `-a^2/2 + a/2 - 1/12`, and `HurwitzZeta(0,
+  "a").evaluate()` is `1/2 - a`. `HurwitzZeta(-3, 1+i).N()` was
+  `0.00833333333675815 + 0.5000000000012541i`, where the exact value is
+  `1/120 + i/2`; it is now `0.008333333333333333333 + 0.5i`. A float or
+  complex `a` with |a| > 1 lost several more digits still: Horner's own terms
+  grow like `a^(n+1)`, far past the polynomial's result, so
+  `HurwitzZeta(-40, 2.7).N()` was `-2920835055257310.67…`, where the correct
+  value (`ζ(-40, 2.7)` at 40 digits) is `-2920835055257291.93…`; it is now
+  exact to the requested precision throughout. The order is capped at 100 as
+  elsewhere in this family; past it the expression stays symbolic. (#374,
+  contributed by [enumeratio](https://github.com/enumeratio))
+
 - **A self-recursive function that builds a list is typed `list<T>`.** With
   `F` declared `(unknown, unknown) -> unknown` and assigned
   `(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the

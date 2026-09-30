@@ -116,6 +116,33 @@ export function bernoulliPolynomialRational(
 }
 
 /**
+ * Coefficients of the Bernoulli polynomial Bₙ(x) = Σ_{k=0}^n C(n,k)·Bₖ·x^{n−k},
+ * as exact reduced rationals ordered from the x^n term to the x^0 term
+ * (Horner order, index k holds the coefficient of x^{n−k}).
+ *
+ * `bernoulliPolynomialRational` evaluates Bₙ(x) directly at a rational point
+ * x; this returns the coefficients themselves, for building Bₙ(a) as a
+ * compute-engine expression in `a` when `a` is not a rational point — a
+ * symbolic, float, or complex base point
+ * (`library/arithmetic.ts`'s `hurwitzZetaNegativeIntegerExpression`).
+ */
+export function bernoulliPolynomialCoefficients(n: number): [bigint, bigint][] {
+  if (!Number.isInteger(n) || n < 0)
+    throw new RangeError(
+      `bernoulliPolynomialCoefficients: invalid degree ${n}`
+    );
+  const coefficients: [bigint, bigint][] = [];
+  let binom = 1n; // C(n, k), starts at k = 0 → C(n, 0) = 1
+  for (let k = 0; k <= n; k++) {
+    const [bNum, bDen] = bernoulliRational(k);
+    coefficients.push(reduce(binom * bNum, bDen));
+    // C(n, k+1) = C(n, k) · (n−k)/(k+1)
+    if (k < n) binom = (binom * BigInt(n - k)) / BigInt(k + 1);
+  }
+  return coefficients;
+}
+
+/**
  * The exact rational c such that ζ(2k) = c·π^{2k}, for integer k ≥ 1.
  *
  * From ζ(2k) = (−1)^{k+1}·B₂ₖ·(2π)^{2k} / (2·(2k)!) and the sign alternation
@@ -160,6 +187,68 @@ export function hurwitzZetaNegativeInteger(
     throw new RangeError(`hurwitzZetaNegativeInteger: invalid index ${n}`);
   const [num, den] = bernoulliPolynomialRational(n + 1, a);
   return reduce(-num, den * BigInt(n + 1));
+}
+
+/** A complex value with exact bigint-rational real and imaginary parts. */
+export interface GaussianRational {
+  re: [bigint, bigint];
+  im: [bigint, bigint];
+}
+
+function addRational(
+  a: [bigint, bigint],
+  b: [bigint, bigint]
+): [bigint, bigint] {
+  return reduce(a[0] * b[1] + b[0] * a[1], a[1] * b[1]);
+}
+
+function mulRational(
+  a: [bigint, bigint],
+  b: [bigint, bigint]
+): [bigint, bigint] {
+  return reduce(a[0] * b[0], a[1] * b[1]);
+}
+
+/**
+ * ζ(−n,a) for integer n ≥ 0 and a Gaussian rational base point
+ * a = p/q + i·r/s, as an exact reduced Gaussian rational: ζ(−n,a) =
+ * −Bₙ₊₁(a)/(n+1), the Bernoulli polynomial (DLMF 25.11.14), computed by
+ * Horner's method in bigint-rational arithmetic throughout. Generalizes
+ * `hurwitzZetaNegativeInteger` (real a) to a complex base point.
+ *
+ * Evaluating the same polynomial in floating point instead loses several
+ * digits at these orders: Horner's intermediate terms grow like aⁿ⁺¹, which
+ * for |a| > 1 is far past the polynomial's own magnitude — at n = 40,
+ * a = 2.7, the BigDecimal Horner evaluation this function replaced was off
+ * from the 11th significant digit on (#374). Bigint-rational arithmetic has
+ * no working precision to lose it from.
+ */
+export function hurwitzZetaNegativeIntegerGaussian(
+  n: number,
+  a: GaussianRational
+): GaussianRational {
+  if (!Number.isInteger(n) || n < 0)
+    throw new RangeError(
+      `hurwitzZetaNegativeIntegerGaussian: invalid index ${n}`
+    );
+  const coefficients = bernoulliPolynomialCoefficients(n + 1);
+  let re: [bigint, bigint] = coefficients[0];
+  let im: [bigint, bigint] = [0n, 1n];
+  for (let i = 1; i < coefficients.length; i++) {
+    // p = p * a
+    const nextRe = addRational(
+      mulRational(re, a.re),
+      mulRational(im, [-a.im[0], a.im[1]])
+    );
+    const nextIm = addRational(mulRational(re, a.im), mulRational(im, a.re));
+    re = nextRe;
+    im = nextIm;
+    const c = coefficients[i];
+    if (c[0] !== 0n) re = addRational(re, c);
+  }
+  // p * (-1/(n+1))
+  const scale: [bigint, bigint] = [-1n, BigInt(n + 1)];
+  return { re: mulRational(re, scale), im: mulRational(im, scale) };
 }
 
 /**
