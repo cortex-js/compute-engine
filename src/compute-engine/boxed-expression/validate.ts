@@ -1547,9 +1547,10 @@ function evidenceGuardedNarrow(
  *   refuted a rank mismatch would undo D6.2 (`typesOverlap` reads
  *   `list<number> ∧ matrix` as the inhabited `list<never>`, since the empty
  *   list inhabits it), re-admitting after `arrowSlotAdmission` refused
- *   would undo Design E, and a nested-top operand (`tuple<any>`) must stay
- *   refused at a tuple parameter (D8 waives TOP-LEVEL tops only —
- *   `admission-gate-parity` pins both routes).
+ *   would undo Design E, and a nested `any` operand (`tuple<any>`) must stay
+ *   refused at a tuple parameter (D8 waives a TOP-LEVEL `any` only; a
+ *   nested `unknown` is deferred by `overlapsForDeferredValidation` itself
+ *   since 2026-09-30 — `admission-gate-parity` pins both routes).
  * - Never inside a FIRST-PASS overload-resolution trial: arm viability
  *   keeps the strict reading, or a narrower arm becomes spuriously viable
  *   and captures the call — `p: ((integer) -> integer) & ((number) ->

@@ -1693,6 +1693,20 @@ function bareTupleAdmitsSlot(t: Readonly<Type>): boolean {
   return isSubtype(t, 'value');
 }
 
+/** Whether a tuple slot's type is itself a tuple or a list, collection or
+ * indexed collection: the kinds `overlapsForDeferredValidation` compares
+ * structurally. */
+function isCompositeSlotType(t: Readonly<Type>): boolean {
+  if (tupleSlots(t) !== 'not-a-tuple') return true;
+  if (typeof t === 'string')
+    return t === 'list' || t === 'collection' || t === 'indexed_collection';
+  return (
+    t.kind === 'list' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection'
+  );
+}
+
 export function overlapsForDeferredValidation(
   t: Readonly<Type>,
   param: Readonly<Type>
@@ -1775,10 +1789,32 @@ export function overlapsForDeferredValidation(
         opName !== paramName
       )
         return false;
-      const opSlotIsTop = opSlot === 'any' || opSlot === 'unknown';
+      // An `unknown` slot in the operand is a placeholder, not a top the
+      // operand claims: nothing is known about that component yet, so it
+      // refutes nothing and the slot is deferred to the runtime check, as a
+      // whole operand typed `unknown` is (user decision 2026-09-30). A list
+      // of tuples built from element reads of values whose types are not
+      // known yet, `[(A[1], A[2], A[3], 1)]` typed
+      // `list<tuple<unknown, unknown, unknown, integer>>`, was refused at a
+      // parameter declared `list<tuple<number, number, number, number>>`.
+      // `any` stays refuted: it admits the absence markers, which a value
+      // slot of the parameter does not.
+      if (opSlot === 'unknown') continue;
       const paramSlotIsTop = paramSlot === 'any' || paramSlot === 'unknown';
-      if (opSlotIsTop && !paramSlotIsTop) return false;
-      if (!isSubtype(opSlot, paramSlot) && !isSubtype(paramSlot, opSlot))
+      if (opSlot === 'any' && !paramSlotIsTop) return false;
+      // Two COMPOSITE slots (a tuple or a collection each) are compared by
+      // this function again, so that an `unknown` component nested deeper
+      // defers too. A scalar or union slot keeps the either-direction test
+      // alone.
+      if (
+        !isSubtype(opSlot, paramSlot) &&
+        !isSubtype(paramSlot, opSlot) &&
+        !(
+          isCompositeSlotType(opSlot) &&
+          isCompositeSlotType(paramSlot) &&
+          overlapsForDeferredValidation(opSlot, paramSlot)
+        )
+      )
         return false;
     }
     return true;
@@ -1846,7 +1882,18 @@ export function overlapsForDeferredValidation(
   const opLeaf = collectionLeafType(t);
   const paramLeaf = collectionLeafType(param);
   if (opLeaf !== null && paramLeaf !== null) {
-    if (!isSubtype(opLeaf, paramLeaf) && !isSubtype(paramLeaf, opLeaf))
+    if (
+      !isSubtype(opLeaf, paramLeaf) &&
+      !isSubtype(paramLeaf, opLeaf) &&
+      // Two TUPLE leaves are compared slot by slot (the tuple arm above),
+      // so that a tuple element with `unknown` components defers as the
+      // same tuple does when it is the whole operand.
+      !(
+        tupleSlots(opLeaf) !== 'not-a-tuple' &&
+        tupleSlots(paramLeaf) !== 'not-a-tuple' &&
+        overlapsForDeferredValidation(opLeaf, paramLeaf)
+      )
+    )
       return false;
   }
 
@@ -2335,4 +2382,55 @@ export function signatureSlotType(
   if (i < required.length + optional.length)
     return optional[i - required.length].type;
   return sig.variadicArg?.type;
+}
+
+/**
+ * `derived` (a declared signature with its `unknown` slots refined from the
+ * assigned body) with every PARAMETER that is a placeholder in `skeleton`
+ * (the signature as the author declared it) replaced by `replacement`.
+ * `derived` unchanged when there is no skeleton, when the two do not pair
+ * parameter by parameter, or when no parameter is a placeholder.
+ *
+ * A placeholder slot is one the author did not give a type to: with `f`
+ * declared `(unknown) -> unknown` and assigned `p ↦ p[1] + 1`, the reported
+ * signature is `(indexed_collection<number>) -> number`, where the parameter
+ * type was inferred from the use `p[1]`. Only a parameter the author typed
+ * is a contract (user decision 2026-09-30), so that inferred type must not
+ * refuse an argument: `f(First(xs))`, whose argument is typed
+ * `missing | tuple<…>`, was refused at boxing, and answered an
+ * `incompatible-type` error when the value was absent, although the same
+ * body with no declaration accepts the call and answers `NaN`. A slot the
+ * author did type (`(unknown, number) -> unknown`) keeps its type. Two
+ * readings are built from this:
+ *
+ * - with `'any'`, the signature a CALL validates its arguments against
+ *   (`any`, not `unknown`, because `unknown` excludes the absence markers);
+ * - with `'unknown'`, the signature whose parameter types are stamped onto
+ *   the stored literal (`ascribeDeclaredParameterTypes`, which stamps
+ *   nothing for `unknown`): a stamped parameter is an annotation, and the
+ *   application of the literal enforces its annotations at run time.
+ */
+export function placeholderSlotsAs(
+  derived: Type,
+  skeleton: Type | undefined,
+  replacement: 'any' | 'unknown'
+): Type {
+  if (
+    skeleton === undefined ||
+    typeof skeleton !== 'object' ||
+    skeleton.kind !== 'signature' ||
+    typeof derived !== 'object' ||
+    derived.kind !== 'signature'
+  )
+    return derived;
+  const declared = skeleton.args ?? [];
+  const args = derived.args ?? [];
+  if (declared.length !== args.length) return derived;
+  if (!declared.some((a) => a.type === 'unknown')) return derived;
+  return {
+    ...derived,
+    args: args.map((a, i) =>
+      declared[i].type === 'unknown' ? { ...a, type: replacement } : a
+    ),
+  };
 }

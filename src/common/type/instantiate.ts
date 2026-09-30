@@ -1096,6 +1096,16 @@ export interface InferenceOptions {
    * `3`, or of an application typed `3`. Read only for a value variable, only
    * at depth 0. Omitted ⇒ the (widened) actual is read. */
   rawType?: (index: number) => Type | undefined;
+  /** An `unknown` nested under a constructor of an operand's type
+   * (`tuple<unknown>`) satisfies the upper bounds of the variable it binds
+   * PROVISIONALLY, as a top-level `unknown` always does (D8). Set only by
+   * the CALL validation (`solveArm`, `generic-instantiation.ts`): a call has
+   * the runtime conformance check to fall back on, and the ground path
+   * defers the same operand (`overlapsForDeferredValidation`), so the two
+   * readings stay in parity (user decision 2026-09-30). Signature
+   * subtyping (`Poly <: Ground`) has no runtime re-check and leaves it
+   * unset: there a nested `unknown` still refutes. */
+  waiveNestedUnknown?: boolean;
 }
 
 /** Why an instantiation is unsatisfiable (§8 blame). */
@@ -1135,7 +1145,8 @@ export interface TypeInferenceResult {
   /** Variables solved to a TOP-LEVEL absorbed top type — `unknown` or `any`
    * contributed by the whole operand at a bare-variable pattern (§4.3 table):
    * their upper bounds are provisionally satisfied (D8). A top type nested
-   * under a constructor still absorbs the JOIN, but is NOT listed here. */
+   * under a constructor still absorbs the JOIN, but is NOT listed here,
+   * except a nested `unknown` under `InferenceOptions.waiveNestedUnknown`. */
   absorbed: ReadonlySet<string>;
   /** Variables that got NO call-site bound AND carry no declared bound, so S3
    * fell back to `unknown`. Used for DISPLAY only: an error message reads
@@ -1365,7 +1376,7 @@ export function solveTypeArguments(
     const lowers = s.lower.get(p.name);
     const uppers = uppersOf(s, p.name);
     if (lowers && lowers.length > 0) {
-      const joined = joinBounds(lowers);
+      const joined = joinBounds(lowers, opts?.waiveNestedUnknown === true);
       bindings[p.name] = joined.type;
       if (joined.absorbed) absorbed.add(p.name);
     } else if (uppers.length > 0) {
@@ -1403,7 +1414,8 @@ export function solveTypeArguments(
     // D8: a TOP-LEVEL absorbed top type (`unknown` or `any` — the whole
     // operand's own type) satisfies every upper bound PROVISIONALLY — the
     // runtime stays the honest party, and §4.5 parity is preserved. A NESTED
-    // one does not waive anything (see `joinBounds`).
+    // one does not waive anything, except a nested `unknown` at a call (see
+    // `joinBounds`).
     if (absorbed.has(p.name)) continue;
     // D10: a lift-admitted operand at a bare-variable pattern was admitted at
     // its SCALAR BASE; re-checking the DECLARED bound against the (collection)
@@ -1743,7 +1755,10 @@ function describePositions(bounds: ReadonlyArray<Bound>): string {
  * NOT raw `widen`: `widen(unknown, X)` returns `X`, which would DISCARD a
  * non-inferable unknown and overstate the result.
  */
-function joinBounds(bounds: ReadonlyArray<Bound>): {
+function joinBounds(
+  bounds: ReadonlyArray<Bound>,
+  waiveNestedUnknown = false
+): {
   type: Type;
   absorbed: boolean;
 } {
@@ -1753,11 +1768,32 @@ function joinBounds(bounds: ReadonlyArray<Bound>): {
   // on, and the only one the ground path has a counterpart for: the
   // unknown/`any` gate in `validateArguments` admits a top-typed OPERAND
   // unconditionally, so `(T) -> T where T: indexed_collection` must admit
-  // one too (§4.5 parity). A NESTED top type has no such counterpart —
-  // `isSubtype(tuple<any>, tuple<number>)` is false, so the ground signature
-  // rejects and the generic one must as well; waiving there would loosen past
-  // the ground reading, and `matches`/`Poly <: Ground` have no runtime
-  // re-check to fall back on. `unknown` and `any` behave identically.
+  // one too (§4.5 parity). A NESTED top type has no such counterpart in
+  // general — `isSubtype(tuple<any>, tuple<number>)` is false, so the ground
+  // signature rejects and the generic one must as well; waiving there would
+  // loosen past the ground reading, and `matches`/`Poly <: Ground` have no
+  // runtime re-check to fall back on.
+  //
+  // The one exception is a nested `unknown` at a CALL (`waiveNestedUnknown`,
+  // see `InferenceOptions`): an `unknown` component is a placeholder, the
+  // ground path defers it to the runtime check, and the generic path waives
+  // it to match (the block below). A nested `any` is never waived: it admits
+  // the absence markers, which a value slot does not.
+  if (waiveNestedUnknown) {
+    // A nested `unknown` contributes nothing when another bound says
+    // something: `(tuple<T>, tuple<T>) -> T where T: number` applied to a
+    // `tuple<unknown>` and a `tuple<string>` must still refuse the string,
+    // as the ground signature does, and applied to a `tuple<unknown>` and a
+    // `tuple<integer>` it solves `T = integer`. Only when every bound is a
+    // nested `unknown` is the variable waived.
+    const isNestedUnknown = (b: Bound) =>
+      b.type === 'unknown' && b.top !== true;
+    if (bounds.some(isNestedUnknown)) {
+      const rest = bounds.filter((b) => !isNestedUnknown(b));
+      if (rest.length === 0) return { type: 'unknown', absorbed: true };
+      return joinBounds(rest, true);
+    }
+  }
   const absorbed = bounds.some(
     (b) => b.top === true && (b.type === 'unknown' || b.type === 'any')
   );

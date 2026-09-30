@@ -1,5 +1,41 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **A function that annotates some of its parameters enforces only the
+  annotated ones at a call.** With `function k(p, n: number) { p[1] + n }`,
+  the type of `p` in the reported signature, `indexed_collection<number>`, is
+  inferred from the use `p[1]`. One annotation made the whole derived
+  signature a contract, so that inferred type was enforced at every call,
+  while the same function with no annotation is not validated at all. A call
+  such as `fill(a, b, c, 2, xs)` with `c` typed `missing | tuple<number,
+  number, number>` (a `first(filter(…))` result) was refused at an inferred
+  slot although the interpreter runs it. A bare slot now admits any argument,
+  as it does when nothing is annotated; an annotated slot is enforced as
+  before, and the reported signature is unchanged. What is lost: an argument
+  that cannot fit a bare slot of a partly annotated function (`k(5, 1)`) is
+  reported when the call runs, not when it is boxed. Annotate the parameter to
+  keep the static check. The same rule holds for a function declared with
+  placeholder slots and then assigned its body, which is how a host declares
+  a function before its body is known: with `f` declared
+  `(unknown) -> unknown` and assigned `p ↦ p[1] + 1`, the reported signature
+  is `(indexed_collection<number>) -> number`, and `f(First(xs))`, whose
+  argument is typed `missing | tuple<…>`, was refused at boxing. It is now
+  admitted, answers the value when it is present and `NaN` when it is absent,
+  as the same body does with no declaration. A slot declared with a type
+  (`(unknown, number) -> unknown`) is enforced as before.
+- **An argument whose components are typed `unknown` is admitted at a declared
+  parameter.** A whole argument typed `unknown` was always admitted, since it
+  claims nothing a declaration can refute; a composite with `unknown`
+  components was refused. `[(A[1], A[2], A[3], 1)]`, typed
+  `list<tuple<unknown, unknown, unknown, integer>>` while the type of `A` is
+  not known, is now accepted at a parameter declared
+  `list<tuple<number, number, number, number>>`, and checked when the call
+  runs. A component typed `any` is still refused (it admits the absence
+  markers), and so is a known component that does not fit. A generic
+  signature (`(tuple<T>) -> T where T: number`) admits the same arguments as
+  the ground one; signature subtyping is unchanged.
+
 ### Issues Resolved
 
 - **A recursive Epsil program that builds a list through a local copied from

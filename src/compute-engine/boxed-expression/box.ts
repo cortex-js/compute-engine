@@ -94,6 +94,7 @@ import {
 import {
   isWildcardFunctionType,
   resolveTypeForCompilation as resolveType,
+  placeholderSlotsAs,
 } from '../../common/type/utils.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -2648,9 +2649,12 @@ function makeCanonicalFunctionCore(
       // A statically pinned literal is checked as its own application would
       // check it (`pinnedValidationSignature`); a declared signature is
       // checked whole.
+      // A signature declared with placeholder slots validates those slots
+      // as `any`: their refined types were inferred from the body, not
+      // written by the author (`placeholderSlotsAs`).
       const checkedType = def.value.inferredType
         ? pinnedValidationSignature(valueType, boxedOps.length)
-        : valueType;
+        : placeholderSlotsAs(valueType, def.value._signatureSkeleton, 'any');
       const invalid = validateArguments(
         ce,
         boxedOps,
@@ -2668,7 +2672,13 @@ function makeCanonicalFunctionCore(
         // binds WHOLE (`list<…>`, `tuple<…>`, a callback) is validated as
         // usual, or `(broadcastable<number>, list<string>)` would admit a
         // `list<number>` at the second slot unchecked.
-        threadableGate(checkedType, paramsAreScalar(checkedType)),
+        // The gate reads the signature as reported: a placeholder slot read
+        // as `any` for validation is still a scalar slot for threading when
+        // its refined type is one.
+        threadableGate(
+          def.value.inferredType ? checkedType : valueType,
+          paramsAreScalar(def.value.inferredType ? checkedType : valueType)
+        ),
         undefined,
         undefined,
         {
@@ -3123,7 +3133,9 @@ function applyOperatorDefinition(
         : (validateArguments(
             ce,
             xs,
-            opDef.signature.type,
+            // A partly annotated literal validates its bare slots as `any`
+            // (`OperatorDefinition._validationSignature`).
+            opDef._validationSignature ?? opDef.signature.type,
             opDef.lazy,
             // Declared-`broadcastable<T>` slots are threadable by declaration,
             // per position — see the value-definition site above.
@@ -3337,12 +3349,18 @@ function applyOperatorDefinition(
   // signature is attached to the constructed call for result typing
   // (`_resolvedOverload`, phase 2c).
   const resolutionOut: { resolution?: OverloadResolution } = {};
+  // A partly annotated literal validates its bare slots as `any`
+  // (`OperatorDefinition._validationSignature`). The inferred types of those
+  // slots still narrow an untyped symbol argument, as they do for a literal
+  // with no annotation above.
+  if (opDef._validationSignature !== undefined)
+    narrowArgsFromInferredSignature(opDef.signature.type, args);
   const adjustedArgs = opDef.inferredSignature
     ? null
     : validateArguments(
         ce,
         args,
-        opDef.signature.type,
+        opDef._validationSignature ?? opDef.signature.type,
         opDef.lazy,
         // Declared-`broadcastable<T>` slots are threadable by declaration, per
         // position — see the value-definition site above.

@@ -26,6 +26,7 @@ import {
   signatureArms,
   widen,
   containsSignatureArm,
+  placeholderSlotsAs,
 } from '../common/type/utils.js';
 import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
 import { clearClauseProvenance } from './clause-identity.js';
@@ -2148,7 +2149,9 @@ export function declareFn(
           ascribeDeclaredParameterTypes(
             ce,
             def.value as Expression,
-            declaredType
+            // As on the assign routes: a placeholder slot is not stamped
+            // (`placeholderSlotsAs`).
+            placeholderSlotsAs(declaredType, declaredType0, 'unknown')
           ),
           typedResult === undefined
             ? declaredType
@@ -2452,7 +2455,14 @@ export function assignFn(
       // whenever there is a typed result, and `unknown` ascribes nothing.
       const reconciled = reconcileFunctionLiteralReturn(
         ce,
-        ascribeDeclaredParameterTypes(ce, literal, declaredType.type),
+        ascribeDeclaredParameterTypes(
+          ce,
+          literal,
+          // A placeholder slot's refined type is inferred from this very
+          // literal; stamping it would make it an annotation, which the
+          // application enforces at run time (`placeholderSlotsAs`).
+          placeholderSlotsAs(declaredType.type, declaredType0.type, 'unknown')
+        ),
         typedResult === undefined
           ? declaredType.type
           : withSignatureResult(declaredType.type, 'unknown')
@@ -2644,7 +2654,14 @@ export function assignFn(
         // As on the value-slot route: reconciled against the DECLARED result.
         const reconciled = reconcileFunctionLiteralReturn(
           ce,
-          ascribeDeclaredParameterTypes(ce, literal, declaredType.type),
+          ascribeDeclaredParameterTypes(
+            ce,
+            literal,
+            // A placeholder slot's refined type is inferred from this very
+            // literal; stamping it would make it an annotation, which the
+            // application enforces at run time (`placeholderSlotsAs`).
+            placeholderSlotsAs(declaredType.type, declaredType0.type, 'unknown')
+          ),
           typedResult === undefined
             ? declaredType.type
             : withSignatureResult(declaredType.type, 'unknown')
@@ -2709,6 +2726,25 @@ export function assignFn(
             // def must not launder an assign-derived signature into a
             // declaration (nor a declaration into a derived one).
             _derivedSignature: def.operator._derivedSignature,
+            // A DERIVED signature keeps enforcing only the slots the literal
+            // annotates (`validationSignatureOf`), read off the literal as
+            // written, before the declared types were ascribed onto its bare
+            // parameters: assigning the same partly annotated literal twice
+            // must validate calls as the first assignment did. A signature
+            // DECLARED on the name is the author's contract on every slot.
+            // Declared with placeholder slots (`(unknown) -> unknown`): the
+            // refined type of a placeholder slot is inferred from the body
+            // and must not refuse an argument either
+            // (`placeholderSlotsAs`).
+            _validationSignature: def.operator._derivedSignature
+              ? validationSignatureOf(literal, declaredType.type)
+              : hasSignaturePlaceholder(declaredType0.type)
+                ? placeholderSlotsAs(
+                    declaredType.type,
+                    declaredType0.type,
+                    'any'
+                  )
+                : undefined,
           };
           if (shadowBuiltin) ce._declareSymbolOperator(id, lambdaDef);
           else {
@@ -3334,6 +3370,9 @@ export function assignValueAsOperatorDef(
       // declared on the NAME. A later UNTYPED assign full-replaces it (D6)
       // instead of checking the new body against the old annotation.
       _derivedSignature: true,
+      // Only the ANNOTATED slots are the author's contract: a bare slot
+      // admits any argument at the call (`validationSignatureOf`).
+      _validationSignature: validationSignatureOf(body, stripped),
     };
   }
 
@@ -3341,6 +3380,52 @@ export function assignValueAsOperatorDef(
   // the body. This ensures inferredSignature = true, which allows the return
   // type to be properly narrowed during type checking (e.g., in Add operands).
   return { evaluate: body };
+}
+
+/**
+ * The signature a call of the annotated function literal `literal` validates
+ * its arguments against: `signature` (the literal's derived arrow) with the
+ * type of each BARE parameter replaced by `any`. `undefined` when every
+ * parameter is annotated (the derived signature is then the contract as it
+ * stands), when the literal is generic, or when its parameters do not pair
+ * with the signature's required arguments (a trailing rest parameter is
+ * paired with the signature's variadic argument and is accepted).
+ *
+ * A bare parameter's type in the derived signature is inferred from its uses
+ * in the body (`p[1]` gives `indexed_collection<number>`). It is a reading,
+ * not something the author wrote, and a function with no annotation at all
+ * is not validated at its calls. So an annotation on ONE parameter must not
+ * turn the inferred types of the others into contracts (user decision
+ * 2026-09-30): with `fill(p, q, r, depth, acc: list<…>)`, the call
+ * `fill(a, b, c, 2, xs)` with `c` typed `missing | tuple<number, number,
+ * number>` was refused at the inferred slot `r`, although the interpreter
+ * runs it and the same function with `acc` bare accepts it. `any`, not
+ * `unknown`, because `unknown` excludes the absence markers.
+ */
+function validationSignatureOf(
+  literal: Expression,
+  signature: Type
+): Type | undefined {
+  if (typeof signature !== 'object' || signature.kind !== 'signature')
+    return undefined;
+  if (isPolymorphicType(signature)) return undefined;
+  const params = functionLiteralParameters(literal);
+  const args = signature.args ?? [];
+  // A rest parameter (`(n: number, p, ...rest) ↦ …`) is the last parameter
+  // of the literal and the variadic argument of the signature (`any*`,
+  // which already admits everything), so the literal then has one parameter
+  // more than the signature has required arguments.
+  const hasRest =
+    params.length === args.length + 1 && signature.variadicArg !== undefined;
+  if (params.length !== args.length && !hasRest) return undefined;
+  const leading = params.slice(0, args.length);
+  if (!leading.some((p) => p.type === undefined)) return undefined;
+  return {
+    ...signature,
+    args: args.map((a, i) =>
+      leading[i].type === undefined ? { ...a, type: 'any' } : a
+    ),
+  };
 }
 
 /** True if a canonical `Function` literal carries at least one type annotation

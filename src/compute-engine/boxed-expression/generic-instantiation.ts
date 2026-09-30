@@ -287,6 +287,10 @@ export function solveArmOverActuals(
       // The `where T is P` oracle (protocols design P19), supplied by the
       // CALLER's engine — see `ArmInferenceContext.resolver`.
       resolver: ctx?.resolver,
+      // This is the solve of a CALL: an `unknown` component of an operand
+      // (`tuple<unknown>`) is waived provisionally, in parity with the
+      // ground path (`InferenceOptions.waiveNestedUnknown`).
+      waiveNestedUnknown: true,
       skip: (i) => {
         if (ctx?.lazy) return true;
         const op = ops[i];

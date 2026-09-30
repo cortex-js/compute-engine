@@ -411,6 +411,10 @@ interface BoxedOperatorDefinition
    * pinned signature was derived from an annotated function literal at assign
    * time, not declared by the author. @internal */
   _derivedSignature: boolean;
+  /** See `OperatorDefinition._validationSignature` (types-definitions.ts):
+   * the signature a call's arguments are validated against, when it differs
+   * from `signature`. @internal */
+  _validationSignature: Type | undefined;
   /** Declared signature skeleton of a lambda assigned under a signature with
    * `unknown` slots — mirror of the member documented in
    * `types-definitions.ts`. @internal */

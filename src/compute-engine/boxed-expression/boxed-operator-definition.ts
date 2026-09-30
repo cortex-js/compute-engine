@@ -552,6 +552,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /** See `OperatorDefinition._derivedSignature`. */
   _derivedSignature = false;
 
+  /** See `OperatorDefinition._validationSignature`. */
+  _validationSignature: Type | undefined = undefined;
+
   /** True if this operator definition was created from a user-defined
    * function literal (e.g. via `ce.assign('f', ce.parse('x \\mapsto x^2'))`).
    * Used to enable auto-broadcasting when applied to indexed collections.
@@ -1547,6 +1550,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // COPIED, not aliased: provenance is appended to in place.
       _typeProvenance: this._typeProvenance?.slice(),
       _derivedSignature: this._derivedSignature,
+      _validationSignature: this._validationSignature,
       _signatureSkeleton: this._signatureSkeleton,
       _isLambda: this._isLambda,
       _lambdaLiteral: this._lambdaLiteral,
@@ -1620,6 +1624,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.inferredSignature = s.inferredSignature;
     this._typeProvenance = s._typeProvenance;
     this._derivedSignature = s._derivedSignature;
+    this._validationSignature = s._validationSignature;
     this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
     this._isLambda = s._isLambda;
     this._lambdaLiteral = s._lambdaLiteral;
@@ -1817,6 +1822,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
       if ('_derivedSignature' in def)
         this._derivedSignature = def._derivedSignature as boolean;
+
+      // A signature write replaces the validation signature with the one the
+      // new definition carries, or clears it: the previous one described the
+      // parameters of the previous literal.
+      this._validationSignature = def._validationSignature;
 
       // Effects written in the signature's specifier slot are the same
       // statement as the `effects:` field. (This is also how the effects of a

@@ -139,8 +139,7 @@ describe('PARSE / SERIALIZE ROUND TRIP', () => {
   test('isPolymorphic is set on the boxed type', () => {
     expect(ce.type('(T) -> T where T').isPolymorphic).toBe(true);
     expect(
-      ce.type('((list<T>) -> T where T) & ((integer) -> integer)')
-        .isPolymorphic
+      ce.type('((list<T>) -> T where T) & ((integer) -> integer)').isPolymorphic
     ).toBe(true);
     expect(ce.type('(integer) -> integer').isPolymorphic).toBe(false);
     expect(ce.type('number').isPolymorphic).toBe(false);
@@ -239,9 +238,7 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
     // A UNION arm is no longer one of them (Rule U) — see
     // `union-position-polytypes.test.ts`.
     expect(ce.type('(T | string) -> T where T').isPolymorphic).toBe(true);
-    expect(ce.type('(list<T | string>) -> T where T').isPolymorphic).toBe(
-      true
-    );
+    expect(ce.type('(list<T | string>) -> T where T').isPolymorphic).toBe(true);
     expect(codeOf(() => ce.type('(T & number) -> T where T'))).toBe(
       'unsupported-variable-position'
     );
@@ -259,9 +256,9 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
     // Rule U supplied the inference rule this position was missing: a union
     // arm no longer forbids what it contains, so a nested arrow reached
     // through one is an ordinary nested arrow.
-    expect(
-      ce.type('(((T) -> T) | string) -> T where T').isPolymorphic
-    ).toBe(true);
+    expect(ce.type('(((T) -> T) | string) -> T where T').isPolymorphic).toBe(
+      true
+    );
     expect(
       ce.type('((integer) -> (T | string)) -> T where T').isPolymorphic
     ).toBe(true);
@@ -303,18 +300,18 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
   });
 
   test('a NESTED clause — parameter, result, element or bound position', () => {
-    expect(
-      codeOf(() => ce.type('(((U) -> U where U)) -> T where T'))
-    ).toBe('unsupported-variable-position');
+    expect(codeOf(() => ce.type('(((U) -> U where U)) -> T where T'))).toBe(
+      'unsupported-variable-position'
+    );
     expect(codeOf(() => ce.type('(T) -> ((U) -> U where U) where T'))).toBe(
       'unsupported-variable-position'
     );
     expect(
       codeOf(() => ce.type('(T) -> list<((U) -> U where U)> where T'))
     ).toBe('unsupported-variable-position');
-    expect(
-      codeOf(() => ce.type('(T) -> T where T: ((U) -> U where U)'))
-    ).toBe('unsupported-variable-position');
+    expect(codeOf(() => ce.type('(T) -> T where T: ((U) -> U where U)'))).toBe(
+      'unsupported-variable-position'
+    );
   });
 
   test('a free variable outside a function signature (object route)', () => {
@@ -348,7 +345,10 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
       codeOf(() =>
         ce.type({
           kind: 'tuple',
-          elements: [{ type: 'integer' }, { type: { kind: 'variable', name: 'T' } }],
+          elements: [
+            { type: 'integer' },
+            { type: { kind: 'variable', name: 'T' } },
+          ],
         } as Type)
       )
     ).toBe('unresolved-type-variable');
@@ -387,9 +387,7 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
   test('a quantified name does not leak out of its arm', () => {
     // The second arm does not quantify `T`, so `T` is an unknown type there.
     expect(
-      codeOf(() =>
-        ce.type('((list<T>) -> T where T) & ((set<T>) -> boolean)')
-      )
+      codeOf(() => ce.type('((list<T>) -> T where T) & ((set<T>) -> boolean)'))
     ).toMatch(/Unknown type "T"/);
   });
 });
@@ -602,13 +600,13 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
       // NESTED under a constructor there is no such counterpart:
       // `isSubtype(tuple<any>, tuple<number>)` is false, so the bound is
       // enforced and the solve FAILS, exactly as the ground reading does.
-      expect(solve('(tuple<T>) -> T where T: number', [`tuple<${top}>`])).toMatch(
-        /^FAIL .*is declared with bound `number`/
-      );
+      expect(
+        solve('(tuple<T>) -> T where T: number', [`tuple<${top}>`])
+      ).toMatch(/^FAIL .*is declared with bound `number`/);
       // The JOIN itself is unchanged — `T` still solves to the top type.
-      expect(solvedVar('(tuple<T>) -> T where T: number', [`tuple<${top}>`], 'T')).toBe(
-        top
-      );
+      expect(
+        solvedVar('(tuple<T>) -> T where T: number', [`tuple<${top}>`], 'T')
+      ).toBe(top);
     }
     // An UNBOUNDED variable is unaffected either way.
     expect(solve('(tuple<T>) -> T where T', ['tuple<any>'])).toBe(
@@ -674,33 +672,22 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // Under `(T, T) -> T` the JOIN violates the bound, but only ONE operand is
     // at fault: blaming the first PINNING position named the innocent one.
     expect(
-      blame('(T, T) -> T where T: number', [
-        'integer',
-        'matrix<integer^(2x2)>',
-      ])
+      blame('(T, T) -> T where T: number', ['integer', 'matrix<integer^(2x2)>'])
     ).toBe(1);
     expect(
-      blame('(T, T) -> T where T: number', [
-        'matrix<integer^(2x2)>',
-        'integer',
-      ])
+      blame('(T, T) -> T where T: number', ['matrix<integer^(2x2)>', 'integer'])
     ).toBe(0);
     // Deterministic: the EARLIEST individually-violating position, never the
     // last one, when several are at fault.
     expect(
-      blame('(T, T) -> T where T: number', [
-        'matrix<integer^(2x2)>',
-        'string',
-      ])
+      blame('(T, T) -> T where T: number', ['matrix<integer^(2x2)>', 'string'])
     ).toBe(0);
     expect(
       blame('(T, T, T) -> T where T: number', ['integer', 'real', 'string'])
     ).toBe(2);
     // A widening join (no union in sight) is blamed the same way: `real` is the
     // operand that does not fit `T: integer`.
-    expect(
-      blame('(T, T) -> T where T: integer', ['integer', 'real'])
-    ).toBe(1);
+    expect(blame('(T, T) -> T where T: integer', ['integer', 'real'])).toBe(1);
     // The single-position case is unchanged.
     expect(blame('(T) -> T where T: number', ['string'])).toBe(0);
     // NOTE: the "every contribution individually satisfies the bound but the
@@ -822,17 +809,17 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
       solvedVar('(broadcastable<T>) -> T where T', ['list<real>'], 'T')
     ).toBe('real');
     expect(
-      solvedVar('(broadcastable<T>) -> T where T', ['broadcastable<string>'], 'T')
+      solvedVar(
+        '(broadcastable<T>) -> T where T',
+        ['broadcastable<string>'],
+        'T'
+      )
     ).toBe('string');
   });
 
   test('a UNION actual distributes — every arm contributes a bound', () => {
     expect(
-      solvedVar(
-        '(list<T>) -> T where T',
-        ['list<integer> | list<string>'],
-        'T'
-      )
+      solvedVar('(list<T>) -> T where T', ['list<integer> | list<string>'], 'T')
     ).toBe('integer | string');
   });
 
@@ -961,10 +948,12 @@ describe('END TO END — a user-declared generic operator', () => {
       'integer'
     );
 
-    ce.declare('swap', { signature: '(tuple<T, U>) -> tuple<U, T> where T, U' });
-    expect(
-      ce.box(['swap', ['Tuple', 1, ce.string('a')]]).type.toString()
-    ).toBe('tuple<string, integer>');
+    ce.declare('swap', {
+      signature: '(tuple<T, U>) -> tuple<U, T> where T, U',
+    });
+    expect(ce.box(['swap', ['Tuple', 1, ce.string('a')]]).type.toString()).toBe(
+      'tuple<string, integer>'
+    );
 
     ce.declare('pack', { signature: '(T+) -> list<T> where T' });
     expect(ce.box(['pack', 1, 2.5]).type.toString()).toBe('list<real>');
@@ -982,9 +971,7 @@ describe('END TO END — a user-declared generic operator', () => {
     });
     const m = ce.box(['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
     expect(m.type.toString()).toBe('matrix<integer^(2x3)>');
-    expect(ce.box(['rev', m]).type.toString()).toBe(
-      'matrix<integer^(2x3)>'
-    );
+    expect(ce.box(['rev', m]).type.toString()).toBe('matrix<integer^(2x3)>');
   });
 
   test('a violated declared bound is an `incompatible-type` naming the BOUND (§8)', () => {
@@ -1122,7 +1109,10 @@ describe('END TO END — a user-declared generic operator', () => {
     });
     // A GROUND broadcastable is the reference answer: the wrapper builds the
     // operand's shape around the scalar per-element result.
-    ce.declare('gEcho', { signature: '(number) -> number', broadcastable: true });
+    ce.declare('gEcho', {
+      signature: '(number) -> number',
+      broadcastable: true,
+    });
     const m22 = ['List', ['List', 1, 2], ['List', 3, 4]] as any;
     expect(ce.box(['gEcho', m22]).type.toString()).toBe('matrix<2x2>');
     // The polytype arm binds `T` to the operand's ELEMENT under D10 (re-ruled
@@ -1174,26 +1164,20 @@ describe('END TO END — a user-declared generic operator', () => {
     ce.declare('vTuple', '(T) -> tuple<T> where T');
     ce.declare('vList', '(T) -> list<T> where T');
     const xs = ['List', 1, 2, 3] as any;
-    expect(ce.box(['vEcho', xs]).type.toString()).toBe(
-      'vector<integer^3>'
-    );
-    expect(ce.box(['vTuple', xs]).type.toString()).toBe(
-      'list<tuple<integer>>'
-    );
-    expect(ce.box(['vList', xs]).type.toString()).toBe(
-      'list<list<integer>>'
-    );
+    expect(ce.box(['vEcho', xs]).type.toString()).toBe('vector<integer^3>');
+    expect(ce.box(['vTuple', xs]).type.toString()).toBe('list<tuple<integer>>');
+    expect(ce.box(['vList', xs]).type.toString()).toBe('list<list<integer>>');
     // A BOUNDED echo is still an echo.
     ce.declare('vBounded', '(T) -> T where T: indexed_collection');
-    expect(ce.box(['vBounded', xs]).type.toString()).toBe(
-      'vector<integer^3>'
-    );
+    expect(ce.box(['vBounded', xs]).type.toString()).toBe('vector<integer^3>');
   });
 
   test('a POLYTYPE actual is admitted against the instantiated expected arrow', () => {
     const ce = fresh();
     ce.declare('gid', '(T) -> T where T');
-    ce.declare('useIt', { signature: '((integer) -> integer, integer) -> integer' });
+    ce.declare('useIt', {
+      signature: '((integer) -> integer, integer) -> integer',
+    });
     expect(ce.box(['useIt', 'gid', 3]).isValid).toBe(true);
   });
 
@@ -1273,18 +1257,21 @@ describe('GROUND-INVARIANT REGRESSION (§4.2 rule 1)', () => {
     ['(integer, T?) -> T where T', (ce) => ce.box(['g', 1, 'q'])],
     ['(T+) -> list<T> where T', (ce) => ce.box(['g', 'q'])],
   ];
-  test.each(shapes)('%s narrows an inferred symbol to a ground type', (sig, call) => {
-    const ce = fresh();
-    ce.declare('g', { signature: sig });
-    ce.box(['Add', 'q', 1]).evaluate(); // `q` is now INFERRED
-    expect(() => call(ce)).not.toThrow();
-    const e = call(ce);
-    expect(e.isValid).toBe(true);
-    // Ground: the symbol's type never mentions a type variable.
-    expect(ce.box('q').type.toString()).not.toMatch(/\bT\b/);
-    expect(freeTypeVariables(ce.box('q').type.type).size).toBe(0);
-    expect(freeTypeVariables(e.type.type).size).toBe(0);
-  });
+  test.each(shapes)(
+    '%s narrows an inferred symbol to a ground type',
+    (sig, call) => {
+      const ce = fresh();
+      ce.declare('g', { signature: sig });
+      ce.box(['Add', 'q', 1]).evaluate(); // `q` is now INFERRED
+      expect(() => call(ce)).not.toThrow();
+      const e = call(ce);
+      expect(e.isValid).toBe(true);
+      // Ground: the symbol's type never mentions a type variable.
+      expect(ce.box('q').type.toString()).not.toMatch(/\bT\b/);
+      expect(freeTypeVariables(ce.box('q').type.type).size).toBe(0);
+      expect(freeTypeVariables(e.type.type).size).toBe(0);
+    }
+  );
 });
 
 describe('ADMISSION-GATE PARITY (§4.5)', () => {
@@ -1362,20 +1349,25 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
     expect(ce2.function('Reverse', [ce2.box('rvSet')]).isValid).toBe(false);
   });
 
-  test('a NESTED top type is NOT waived — both routes refuse (D8 is top-level)', () => {
+  test('a NESTED any is NOT waived, a nested unknown is — on both routes', () => {
     // The D8 waiver above is for a top type arriving as the WHOLE operand's
-    // type. Under a constructor there is no ground counterpart to preserve:
-    // `(tuple<number>) -> number` refuses a `tuple<any>` operand, so the
-    // generic reading must refuse it too rather than loosen past the ground
-    // signature.
-    for (const nested of ['tuple<any>', 'tuple<unknown>']) {
+    // type. Under a constructor a nested `any` has no ground counterpart to
+    // preserve: `(tuple<number>) -> number` refuses a `tuple<any>` operand,
+    // so the generic reading must refuse it too rather than loosen past the
+    // ground signature. A nested `unknown` is a placeholder component and is
+    // deferred to the runtime check by both readings (user decision
+    // 2026-09-30).
+    for (const [nested, admitted] of [
+      ['tuple<any>', false],
+      ['tuple<unknown>', true],
+    ] as const) {
       const [g, r] = parity(
         '(tuple<T>) -> T where T: number',
         '(tuple<number>) -> number',
         (ce) => ce.box(['p', 'n']),
         (ce) => ce.declare('n', nested)
       );
-      expect([nested, g, r]).toEqual([nested, false, false]);
+      expect([nested, g, r]).toEqual([nested, admitted, admitted]);
     }
     // Control: the same shape with an in-bound element is admitted by both.
     const [g2, r2] = parity(
@@ -1799,9 +1791,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
       signature: '((list<T>) -> T where T) & ((set<T>) -> boolean where T)',
     });
     // The operand kind selects the arm, and each arm solves its own `T`.
-    expect(ce.box(['pick', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'integer'
-    );
+    expect(ce.box(['pick', ['List', 1, 2, 3]]).type.toString()).toBe('integer');
     expect(ce.box(['pick', ['Set', 1, 2]]).type.toString()).toBe('boolean');
     // An operand no arm admits: the diagnosis reports the INSTANTIATED
     // parameters, never a bare type variable.
@@ -1876,9 +1866,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
       // Control: at an operand the generic arm instantiates STRICTLY more
       // specifically (`integer<0..10>` <: `integer`), D11 does not apply and
       // the generic arm wins — the tie-break is a tie-break only.
-      expect(ce.box(['tie', 'm']).type.toString()).toBe(
-        'list<integer<0..10>>'
-      );
+      expect(ce.box(['tie', 'm']).type.toString()).toBe('list<integer<0..10>>');
       // And where the ground arm does not apply at all, the generic one takes
       // the call.
       expect(ce.box(['tie', ce.string('a')]).type.toString()).toBe(

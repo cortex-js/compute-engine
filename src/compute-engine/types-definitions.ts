@@ -754,6 +754,24 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      */
     _derivedSignature?: boolean;
 
+    /** The signature the ARGUMENTS of a call are validated against, when it
+     * differs from `signature`. Set for a function literal that annotates
+     * some of its parameters and leaves others bare (`(p, acc: list<number>)
+     * ↦ …`): the annotated slots are the author's contract and keep their
+     * types, and each bare slot, whose type in `signature` was only inferred
+     * from the uses in the body, admits any argument (`any`), exactly as
+     * every slot does when nothing is annotated (user decision 2026-09-30).
+     * Before, one annotation made the whole derived signature a contract,
+     * so an inferred slot refused an argument the interpreter accepts (a
+     * `first(…)` result typed `missing | tuple<…>` at a slot inferred
+     * `indexed_collection<number>`). `signature` itself is unchanged: it is
+     * what the definition reports, what result typing reads and what
+     * decides broadcasting. `undefined` for every other definition.
+     *
+     * @internal
+     */
+    _validationSignature?: Type;
+
     /** Return the sign of the function expression.
      *
      * If the sign cannot be determined, return `undefined`.
@@ -2549,6 +2567,11 @@ export interface BoxedOperatorDefinition
    * author's declaration.
    * @internal */
   _derivedSignature: boolean;
+  /** See {@link OperatorDefinition._validationSignature}: the signature a
+   * call's arguments are validated against, when it differs from
+   * `signature`.
+   * @internal */
+  _validationSignature: Type | undefined;
 
   /** When a user lambda was assigned under a declared signature with
    * `unknown` slots, that signature as written. The reported `signature` is

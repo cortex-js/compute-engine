@@ -176,4 +176,21 @@ let counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))
       [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0],
     ]);
   });
+
+  // The accumulator annotated: before 2026-09-30 one annotation made the
+  // whole derived signature a contract, and the inferred slot `r` refused
+  // `gap[3]`, typed `missing | tuple<…>` from `first(filter(…))`. Only the
+  // annotated slot is enforced now.
+  test('the variant with an annotated accumulator compiles too', () => {
+    const annotated = PROGRAM.replace(
+      'function fill(p, q, r, depth, acc) {',
+      'function fill(p, q, r, depth, acc: list<tuple<number, number, number, number>>) {'
+    );
+    expect(annotated).not.toBe(PROGRAM);
+    const { expr } = box(annotated);
+    expect(compiled(expr)).toEqual([
+      224,
+      [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0],
+    ]);
+  });
 });

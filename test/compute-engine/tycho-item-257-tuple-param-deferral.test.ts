@@ -51,9 +51,9 @@ describe('the deferral authority covers tuple parameters', () => {
 
   // The tuple counterparts of the rank and leaf refutations the list arm has.
   test('arity is refuted', () => {
-    expect(defer('tuple<number, number, number>', 'tuple<number, number>')).toBe(
-      false
-    );
+    expect(
+      defer('tuple<number, number, number>', 'tuple<number, number>')
+    ).toBe(false);
   });
 
   test('a disjoint slot is refuted', () => {
@@ -74,9 +74,26 @@ describe('the deferral authority covers tuple parameters', () => {
   // the either-direction slot check would otherwise waive it: `any` is a
   // supertype of `number`, so a top slot reads exactly like the ordinary
   // deferral case (a `number` slot that may hold an integer at run time).
-  test('a NESTED top slot in the operand is refuted', () => {
+  // A nested `unknown` is different (user decision 2026-09-30): it is a
+  // placeholder for a component whose type is not known yet, so it refutes
+  // nothing and the slot is deferred to the runtime check, in a tuple and in
+  // the tuple elements of a list.
+  test('a NESTED any slot in the operand is refuted, a nested unknown defers', () => {
     expect(defer('tuple<any>', 'tuple<number>')).toBe(false);
-    expect(defer('tuple<unknown>', 'tuple<number>')).toBe(false);
+    expect(defer('tuple<unknown>', 'tuple<number>')).toBe(true);
+    expect(
+      defer(
+        'list<tuple<unknown, unknown, integer>>',
+        'list<tuple<number, number, number>>'
+      )
+    ).toBe(true);
+    expect(
+      defer('list<tuple<any, integer>>', 'list<tuple<number, number>>')
+    ).toBe(false);
+    // A known component that does not fit still refutes.
+    expect(defer('tuple<unknown, string>', 'tuple<number, number>')).toBe(
+      false
+    );
     // Narrower-than-the-parameter slots still defer, which is the control the
     // clause above must not break.
     expect(defer('tuple<integer>', 'tuple<number>')).toBe(true);
