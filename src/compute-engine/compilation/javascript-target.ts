@@ -3976,6 +3976,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `has a string arm), and \`.length\` counts UTF-16 code units, not ` +
           `characters. The interpreter evaluates it instead.`
       );
+    // `Length(Filter(1..n, p))` counts the selected elements in a loop over
+    // the range instead of building the range and the filtered list
+    // (`emitPredicateRangeWalk`, issue #373).
+    if (isWalkableRangeFilter(arg, target))
+      return emitPredicateRangeWalk(
+        'Filter',
+        arg.ops[0],
+        arg.ops[1],
+        compile,
+        target,
+        countingWalkPlan(target)
+      );
     // A positional gather (a range, a literal list of indices, or a `Join`
     // of those) is POSITION-PRESERVING — an out-of-band index contributes an
     // absence marker in place rather than being dropped — so its length is
@@ -4965,9 +4977,30 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `((_f) => (${coll}).map((_x) => _f(_x)))(${fnArg('Map', args[0], args[1], compile, [], target)})`;
   },
   Filter: (args, compile, target) => {
-    const coll = elementsArg('Filter', args[0], compile);
+    // Over a finite range, push the selected elements into one list as the
+    // range is walked, instead of building the range and filtering it into
+    // a second array (`emitPredicateRangeWalk`). The source is compiled by
+    // whichever lowering runs, and once.
+    const walk = isWalkableRange(args[0], target);
+    const coll = walk ? '' : elementsArg('Filter', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Filter`: missing predicate');
+    if (walk) {
+      const out = BaseCompiler.tempVar(target);
+      return emitPredicateRangeWalk(
+        'Filter',
+        args[0],
+        args[1],
+        compile,
+        target,
+        {
+          init: `const ${out} = [];`,
+          body: (element, selected) =>
+            `if (${selected}) ${out}.push(${element});`,
+          result: out,
+        }
+      );
+    }
     return joinIfString(
       args[0],
       `((_f) => (${coll}).filter((_x) => _f(_x)))(${fnArg('Filter', args[1], args[0], compile, [], target)})`
@@ -4975,9 +5008,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // Number of elements satisfying the predicate.
   CountIf: (args, compile, target) => {
-    const coll = elementsArg('CountIf', args[0], compile);
+    // Over a finite range, count in a loop instead of building the range
+    // and the filtered list (`emitPredicateRangeWalk`, issue #373).
+    const walk = isWalkableRange(args[0], target);
+    const coll = walk ? '' : elementsArg('CountIf', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `CountIf`: missing predicate');
+    if (walk)
+      return emitPredicateRangeWalk(
+        'CountIf',
+        args[0],
+        args[1],
+        compile,
+        target,
+        countingWalkPlan(target)
+      );
     return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('CountIf', args[1], args[0], compile, [], target)})`;
   },
   // First element satisfying the predicate; none → NaN (the interpreter's
@@ -5180,8 +5225,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // give a different count. The interpreted fallback still evaluates it, as
   // it does for the multi-index form of `At`, which is refused the same way.
   Count: (args, compile, target) => {
-    if (args.length === 1)
+    if (args.length === 1) {
+      // `Count(Filter(1..n, p))` counts in a loop over the range instead of
+      // building the range and the filtered list (`emitPredicateRangeWalk`,
+      // issue #373). The predicate is compiled under the `Filter` label, as
+      // the `Filter` handler would compile it, so a refusal reads the same.
+      if (isWalkableRangeFilter(args[0], target))
+        return emitPredicateRangeWalk(
+          'Filter',
+          args[0].ops[0],
+          args[0].ops[1],
+          compile,
+          target,
+          countingWalkPlan(target)
+        );
       return `(${elementsArg('Count', args[0], compile)}).length`;
+    }
     // The predicate form uses the same lowering as `CountIf` and `Filter`:
     // an element is counted when the compiled predicate returns a truthy
     // value. When the elements of `xs` are themselves functions, a
@@ -5200,6 +5259,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       args[1].type.matches('function') &&
       (elt === undefined || !functionValued(elt))
     ) {
+      if (isWalkableRange(args[0], target))
+        return emitPredicateRangeWalk(
+          'Count',
+          args[0],
+          args[1],
+          compile,
+          target,
+          countingWalkPlan(target)
+        );
       const coll = elementsArg('Count', args[0], compile);
       return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('Count', args[1], args[0], compile, [], target)})`;
     }
@@ -5404,21 +5472,40 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // booleans, which a numeric collection cannot prove — the interpreter
   // stays inert there.
   Any: (args, compile, target) => {
-    const coll = elementsArg('Any', args[0], compile);
+    // Over a finite range, walk it and stop at the first selected element,
+    // as `some` stops, with no range built (`emitPredicateRangeWalk`).
+    const walk = isWalkableRange(args[0], target);
+    const coll = walk ? '' : elementsArg('Any', args[0], compile);
     if (args[1] == null)
       throw new Error(
         `Could not compile \`Any\`: only the predicate form compiles.`
       );
     refuseKleeneQuantifier('Any', args[0], args[1]);
+    if (walk)
+      return emitPredicateRangeWalk('Any', args[0], args[1], compile, target, {
+        init: '',
+        body: (_element, selected, exit) => `if (${selected}) ${exit('true')}`,
+        result: 'false',
+      });
     return `((_f) => (${coll}).some((_x) => _f(_x)))(${fnArg('Any', args[1], args[0], compile, [], target)})`;
   },
   All: (args, compile, target) => {
-    const coll = elementsArg('All', args[0], compile);
+    // Over a finite range, walk it and stop at the first element the
+    // predicate rejects, as `every` stops (`emitPredicateRangeWalk`).
+    const walk = isWalkableRange(args[0], target);
+    const coll = walk ? '' : elementsArg('All', args[0], compile);
     if (args[1] == null)
       throw new Error(
         `Could not compile \`All\`: only the predicate form compiles.`
       );
     refuseKleeneQuantifier('All', args[0], args[1]);
+    if (walk)
+      return emitPredicateRangeWalk('All', args[0], args[1], compile, target, {
+        init: '',
+        body: (_element, selected, exit) =>
+          `if (!(${selected})) ${exit('false')}`,
+        result: 'true',
+      });
     return `((_f) => (${coll}).every((_x) => _f(_x)))(${fnArg('All', args[1], args[0], compile, [], target)})`;
   },
   // Longest prefix satisfying the predicate / the rest after that prefix.
@@ -16328,6 +16415,197 @@ function emitMappedReduction(
 }
 
 /**
+ * Whether `range` is a finite `Range` operand that a consumer may WALK in a
+ * counted loop instead of materializing it with the `Range` handler
+ * (`emitPredicateRangeWalk`). The test reads no code and compiles nothing, so
+ * a caller may ask it before it commits to the loop: `BaseCompiler.compile`
+ * mints temporaries and advances the common-subexpression accounting, so an
+ * operand must be compiled once, by the emitter that uses the result.
+ *
+ * The loop declines, and the consumer keeps its array lowering, when:
+ *
+ * - the operand is not a `Range` of one to three operands;
+ * - a bound is statically non-finite (`Range(1, +oo)`): the `Range` handler
+ *   fails closed on it, so the whole consumer falls back to the interpreter,
+ *   as before, while a loop over it would never end;
+ * - a bound is provably not a number (a collection, a string): the `Range`
+ *   handler fails closed on it too;
+ * - the step is the literal `0`, which the `Range` handler refuses;
+ * - the caller re-mapped `Range` through the `functions`/`operators` options:
+ *   the caller's lowering is free to answer a different collection, and the
+ *   loop would never emit it;
+ * - the `Range` value is shared by common-subexpression elimination: it is
+ *   materialized once for every consumer, and the loop would compute a
+ *   second copy of it.
+ */
+function isWalkableRange(
+  range: Expression | undefined,
+  target: CompileTarget<Expression>
+): range is Expression & FunctionInterface {
+  if (range === undefined || !isFunction(range, 'Range')) return false;
+  if (range.nops === 0 || range.nops > 3) return false;
+  if (range.ops.some((a) => isNonFiniteBound(a))) return false;
+  if (range.ops.some((a) => !couldMatch(compilationType(a), 'number')))
+    return false;
+  if (range.nops === 3 && tryGetConstant(range.ops[2]) === 0) return false;
+  if (isCallerMapped(range, target.cse?.harvestOptions)) return false;
+  if (BaseCompiler.hasSharedExpression(range, target)) return false;
+  return true;
+}
+
+/**
+ * Whether `filter` is `Filter(range, predicate)` over a range
+ * {@link isWalkableRange} accepts, and the `Filter` node itself may be
+ * bypassed: not re-mapped by the caller (a caller-supplied `Filter` lowering
+ * must run) and not shared by common-subexpression elimination (a shared
+ * filtered list is built once and read by every consumer).
+ */
+function isWalkableRangeFilter(
+  filter: Expression | undefined,
+  target: CompileTarget<Expression>
+): filter is Expression & FunctionInterface {
+  return (
+    filter !== undefined &&
+    isFunction(filter, 'Filter') &&
+    filter.nops === 2 &&
+    !isCallerMapped(filter, target.cse?.harvestOptions) &&
+    !BaseCompiler.hasSharedExpression(filter, target) &&
+    isWalkableRange(filter.ops[0], target)
+  );
+}
+
+/**
+ * What a consumer does with each element of a walked range
+ * (`emitPredicateRangeWalk`). `exit` is the statement that answers the whole
+ * expression early (`Any` answers `true` at the first selected element).
+ */
+type RangeWalkPlan = {
+  /** Declarations before the loop: the accumulator, the output list. */
+  init: string;
+  /**
+   * The statements run for one element. `element` names the element,
+   * `selected` is the compiled predicate applied to it, as a JavaScript
+   * expression.
+   */
+  body: (
+    element: string,
+    selected: string,
+    exit: (value: string) => string
+  ) => string;
+  /** The answer once the loop has walked every element. */
+  result: string;
+};
+
+/**
+ * Apply `predicate` to each element of a finite `Range` in a counted loop,
+ * without materializing the range.
+ *
+ * `Count(Filter(1..n, p))` is the common shape of a combinatorics statistic:
+ * count the `k` in `1..n` with some property. Its array lowering built the
+ * whole range with `Array.from`, filtered it into a second array through the
+ * predicate, and read the length: at `n = 10⁶` that ran in about 27 ms where
+ * a loop that counts runs in under 2 ms (issue #373). The same walk serves
+ * `Length(Filter(…))`, `Count(range, p)`, `CountIf`, `Any`, `All`, the
+ * collection form of `Sum`/`Product` over a filtered range, and a bare
+ * `Filter` over a range, which pushes the selected elements into one list
+ * instead of building two.
+ *
+ * The values are the array lowering's, element for element:
+ *
+ * - the element count is `_SYS.rangeCount`, the interpreter's own count
+ *   (`numerics/range-count.ts`), so an empty, reversed, zero-step or `NaN`
+ *   bound answers exactly what the materialized range answered;
+ * - element `i` is `start + i × step`, the `Range` handler's formula; a
+ *   two-operand range resolves its direction at run time (`stop >= start ?
+ *   1 : -1`), as the handler does, and `start + i × (−1)` is exactly
+ *   `start − i` in floating point;
+ * - the predicate is compiled by `fnArg`, exactly as the array lowering
+ *   compiles it — same annotation checks, same loop-invariant hoist, same
+ *   broadcast wrapper — and called with the element alone, as the array
+ *   callbacks `(_x) => _f(_x)` called it;
+ * - the operands are evaluated once each and in the array lowering's order:
+ *   the predicate first (it was the argument of the outer arrow), then the
+ *   start, the stop and the step (the arguments of the `Range` arrow).
+ *
+ * Every name the loop declares is a fresh temporary, so no compiled operand
+ * can be captured by a loop variable (the `Range` handler's issue #367
+ * lesson: a callback index named `i` shadowed a user's `i`). Where the target
+ * has a statement sink the loop is emitted as statements, otherwise as an
+ * immediately applied arrow. Every operand is compiled BEFORE the sink is
+ * asked for the body, because the sink may run the body more than once
+ * (`emitRangeGatherReduction` explains the constraint).
+ */
+function emitPredicateRangeWalk(
+  kind: string,
+  range: Expression,
+  predicate: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>,
+  plan: RangeWalkPlan
+): string {
+  // The callers test `isWalkableRange` first; this re-test only narrows the
+  // type, since the answer of that test cannot be carried in a boolean.
+  if (!isFunction(range, 'Range'))
+    throw new Error(`Could not compile \`${kind}\`: expected a \`Range\`.`);
+  const fn = fnArg(kind, predicate, range, compile, [], target);
+  const operand = (a: Expression): string => compileRealOperand(a, compile);
+  const bounds: string[] =
+    range.nops === 1
+      ? ['1', operand(range.ops[0])]
+      : range.ops.map((a) => operand(a));
+  const [start, stop] = bounds as [string, string];
+  const step: string | undefined = range.nops === 3 ? bounds[2] : undefined;
+
+  const f = BaseCompiler.tempVar(target);
+  const a = BaseCompiler.tempVar(target);
+  const b = BaseCompiler.tempVar(target);
+  const s = BaseCompiler.tempVar(target);
+  const n = BaseCompiler.tempVar(target);
+  const i = BaseCompiler.tempVar(target);
+  const x = BaseCompiler.tempVar(target);
+
+  // A one-operand range (`Range(n)`) is `1..n`, step 1; a two-operand range
+  // auto-descends when the stop is below the start, as the interpreter's
+  // does (`Range(5, 1)` is `[5, 4, 3, 2, 1]`).
+  const stepCode =
+    step !== undefined
+      ? step
+      : range.nops === 1
+        ? '1'
+        : `${b} >= ${a} ? 1 : -1`;
+
+  // A bound that is infinite at RUN time (`n = Infinity` handed to a
+  // symbolic bound) gives an infinite count: `_SYS.rangeCount` answers
+  // `Infinity` for a non-finite bound. The array lowering threw there, since
+  // `Array.from` refuses a length above 2³² − 1, where this loop would never
+  // return. The same limit, tested the same way, keeps that refusal; a `NaN`
+  // count fails the test and walks nothing, as `Array.from` built nothing.
+  const build = (exit: (value: string) => string): string =>
+    `const ${f} = ${fn}; const ${a} = ${start}; const ${b} = ${stop}; ` +
+    `const ${s} = ${stepCode}; const ${n} = _SYS.rangeCount(${a}, ${b}, ${s}); ` +
+    `if (${n} > 4294967295) throw new RangeError('Range: the element count exceeds the array limit'); ` +
+    (plan.init === '' ? '' : `${plan.init} `) +
+    `for (let ${i} = 0; ${i} < ${n}; ${i}++) { ` +
+    `const ${x} = ${a} + ${i} * ${s}; ${plan.body(x, `${f}(${x})`, exit)} } ` +
+    exit(plan.result);
+
+  return (
+    javascriptStatements(target)?.expression(build) ??
+    `(() => { ${build((v) => `return ${v};`)} })()`
+  );
+}
+
+/** The {@link RangeWalkPlan} that counts the selected elements. */
+function countingWalkPlan(target: CompileTarget<Expression>): RangeWalkPlan {
+  const count = BaseCompiler.tempVar(target);
+  return {
+    init: `let ${count} = 0;`,
+    body: (_element, selected) => `if (${selected}) ${count}++;`,
+    result: count,
+  };
+}
+
+/**
  * Compile the collection form of `Sum`/`Product` — a reduce over the elements
  * of an indexed collection (e.g. `[3,4,5].total` → `Sum([3,4,5])`). The
  * identity seed (`0` for Sum, `1` for Product) makes the empty collection agree
@@ -16343,6 +16621,32 @@ function emitCollectionReduce(
   if (!guarded) {
     const mapped = emitMappedReduction(kind, coll, target);
     if (mapped !== undefined) return mapped;
+    // `Sum(Filter(1..n, p))` walks the range and folds the selected elements
+    // as it goes, with neither the range nor the filtered list built. Only a
+    // fold whose elements are provably real (`collectionFoldsReal`): this
+    // loop accumulates with the raw JavaScript operator, and a source that
+    // may hold a `{re, im}` takes the shape-agnostic fold below.
+    if (
+      isWalkableRangeFilter(coll, target) &&
+      BaseCompiler.collectionFoldsReal(coll)
+    ) {
+      const acc = BaseCompiler.tempVar(target);
+      const compile = (expr: Expression): string =>
+        BaseCompiler.compile(expr, target);
+      return emitPredicateRangeWalk(
+        'Filter',
+        coll.ops[0],
+        coll.ops[1],
+        compile,
+        target,
+        {
+          init: `let ${acc} = ${kind === 'Sum' ? '0' : '1'};`,
+          body: (element, selected) =>
+            `if (${selected}) ${acc} ${kind === 'Sum' ? '+' : '*'}= ${element};`,
+          result: acc,
+        }
+      );
+    }
     // `total(P[a...b])`, `total(P[Join([i], a...b)])` and their `Product`
     // twins walk the gathered positions with a counted loop instead of
     // building the index list and the slice.
