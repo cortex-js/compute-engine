@@ -304,3 +304,29 @@ describe('CartesianProduct / PowerSet membership is three-valued', () => {
     ).toBe('False');
   });
 });
+
+// From about n = 10²⁰, the big-number Γ(n + 1) overflows and the quotient
+// Γ(n+1)/(Γ(k+1)·Γ(n−k+1)) was NaN. The log form gives the value. The
+// references are mpmath `binomial` at 60 digits.
+describe('Binomial of a huge n and a non-integer k', () => {
+  test.each([
+    [1e300, 0.5, '1.1283791670955125739e+150'],
+    [1e20, 0.5, '11283791670.955125739'],
+    [1e15, 0.25, '6204.10181376777712735'],
+    [1e20, -0.5, '5.64189583547756286946e-11'],
+    [1e20, -1.5, '-2.82094791773878143469e-31'],
+    [1e25, 3.5, '2.71866531985184169835e+86'],
+  ])('Binomial(%p, %p).N()', (n, k, expected) => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Binomial', ce.number(n), ce.number(k)]).N().toString()
+    ).toBe(expected);
+  });
+
+  test('the machine-precision route gives the same value', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    const v = ce.box(['Binomial', ce.number(1e300), ce.number(0.5)]).N().re;
+    expect(Math.abs(v / 1.1283791670955126e150 - 1)).toBeLessThan(1e-12);
+  });
+});

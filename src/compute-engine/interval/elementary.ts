@@ -1092,6 +1092,10 @@ const GAMMA_MIN_Y = 0.8856031944108887;
 //   values on the Γ-ratio route.
 const GAMMA_SAFE_INTEGER_LIMIT = 19;
 
+// A kernel value below this magnitude is treated as underflowed: its digits
+// are not reliable, but the true value is known to be below this bound.
+const UNDERFLOW_BOUND = 1e-280;
+
 /** Bound on the relative error of `scalarGamma(x)`, in ulps. */
 function gammaErrorUlps(x: number): number {
   const base = 256 + 8 * Math.abs(x);
@@ -1117,6 +1121,17 @@ function gammaPointEnclosure(x: number): Interval {
   const v = scalarGamma(x);
   if (Number.isInteger(x) && x > 0 && x <= GAMMA_SAFE_INTEGER_LIMIT)
     return { lo: v, hi: v };
+  // Below about x = −171.6 the reflection formula divides by `Γ(1 − x)`,
+  // which overflows, so the kernel returns `0` or a subnormal value with
+  // no correct digits. The true value is still below `1e-280` there:
+  // `|Γ(x)| = π / (|sin(πx)|·Γ(1 − x))` with `Γ(1 − x) > 1.7e308`, and
+  // `|sin(πx)| > 1e-13` at every double this far from zero, because doubles
+  // near 172 are 2.8e-14 apart. The enclosure keeps the sign of `Γ` on
+  // the strip.
+  if (x < 0 && Math.abs(v) < UNDERFLOW_BOUND)
+    return Math.floor(x) % 2 === 0
+      ? { lo: 0, hi: UNDERFLOW_BOUND }
+      : { lo: -UNDERFLOW_BOUND, hi: 0 };
   return widenRelative(v, gammaErrorUlps(x));
 }
 
@@ -1420,6 +1435,76 @@ function enumerateInteger2(
 const BINOMIAL_FALLING_FACTORIAL_LIMIT = 1000;
 
 /**
+ * An enclosure of `1/Γ(x)` over the interval `x`, or `undefined` when it
+ * has no bound. `1/Γ` is an entire function: it has no pole, and it is `0`
+ * at each non-positive integer, where `Γ` has its poles.
+ *
+ * - Where the `Γ` enclosure (`_gamma()`) has one sign, the reciprocal of
+ *   its bounds. An upper bound of `Γ` that overflowed is replaced by the
+ *   largest double, and a lower bound that overflowed means `1/Γ` is below
+ *   `1e-300`.
+ * - Otherwise (the interval contains a pole of `Γ`, or the `Γ` enclosure
+ *   reaches `0`): `|1/Γ(x)|` is below `1/0.8856` for `x > 0`, because the
+ *   smallest value of `Γ` on the positive axis is `0.8856` at `x ≈ 1.4616`.
+ *   For `x < 0`, the reflection formula `1/Γ(x) = sin(πx)·Γ(1 − x)/π`
+ *   bounds it by `Γ(1 − x)/π`. On `[1, 1 − lo]`, `Γ` is largest at an end:
+ *   `Γ(1) = 1` or `Γ(1 − lo)`.
+ */
+function reciprocalGammaEnclosure(x: Interval): Interval | undefined {
+  const g = _gamma(x);
+  if (g.kind === 'interval' && (g.value.lo > 0 || g.value.hi < 0)) {
+    const { lo, hi } = g.value;
+    return {
+      lo: Number.isFinite(hi) ? nextDown(1 / hi) : lo > 0 ? 0 : -1e-300,
+      hi: Number.isFinite(lo) ? nextUp(1 / lo) : hi < 0 ? 0 : 1e-300,
+    };
+  }
+  let m = nextUp(1 / nextDown(GAMMA_MIN_Y));
+  if (x.lo < 0) {
+    const reflected = gammaPointEnclosure(nextUp(1 - x.lo)).hi;
+    if (!Number.isFinite(reflected)) return undefined;
+    m = Math.max(m, nextUp(Math.max(1, reflected) / Math.PI) * (1 + 1e-15));
+  }
+  return { lo: -m, hi: m };
+}
+
+/**
+ * `C(n, k) = Γ(n+1) · (1/Γ(k+1)) · (1/Γ(n−k+1))` over the intervals `n` and
+ * `k`, with each factor enclosed separately. The arguments are formed with
+ * outward rounding. Sound for every `n` and `k`, but wider than the true
+ * range, because `k` appears in two factors; a plot refines it by splitting
+ * the interval.
+ *
+ * - A pole of `Γ(n+1)` inside the `n` interval: with a point `k` that is not
+ *   an integer it is a pole of `C` (`n − k + 1` is not an integer there), so
+ *   the result is `singular` at the first pole. With any other `k` the poles
+ *   of `Γ(n+1)` and `Γ(k+1)` or `Γ(n−k+1)` can cancel to a finite value, and
+ *   the result is the whole real line.
+ * - `Γ(n+1)` that overflows, or a `1/Γ` with no bound: the whole real line.
+ */
+function binomialGammaProduct(nVal: Interval, kVal: Interval): IntervalResult {
+  const nPlus1 = addOutward(nVal, point(1));
+  const numerator = gammaRaw(nPlus1);
+  if (numerator.kind === 'singular') {
+    if (kVal.lo === kVal.hi && !Number.isInteger(kVal.lo))
+      return numerator.at === undefined
+        ? { kind: 'singular' }
+        : { kind: 'singular', at: numerator.at - 1 };
+    return { kind: 'entire' };
+  }
+  const g = getValue(numerator);
+  if (!g || !Number.isFinite(g.lo) || !Number.isFinite(g.hi))
+    return { kind: 'entire' };
+  const kPlus1 = getValue(addOutward(kVal, point(1)));
+  const nkPlus1 = getValue(subOutward(nPlus1, kVal));
+  if (!kPlus1 || !nkPlus1) return { kind: 'entire' };
+  const rk = reciprocalGammaEnclosure(kPlus1);
+  const rnk = reciprocalGammaEnclosure(nkPlus1);
+  if (!rk || !rnk) return { kind: 'entire' };
+  return mulOutward(mulOutward(g, rk), rnk);
+}
+
+/**
  * Binomial coefficient `C(n, k) = Γ(n+1)/(Γ(k+1)·Γ(n−k+1))` on intervals,
  * for real operands, as the interpreter and the JS target define it
  * (`binomial()` in `numerics/special-functions.ts`).
@@ -1435,15 +1520,15 @@ const BINOMIAL_FALLING_FACTORIAL_LIMIT = 1000;
  *   `n`. At a negative integer `n ≥ k` the poles of `Γ(n+1)` and `Γ(k+1)`
  *   cancel and the value is not `0` (`C(−3, −5) = 6`), so the result is a
  *   jump whose value encloses `0` and the values at those integers.
- * - `k` a point that is not an integer: the quotient of the `Γ` enclosures.
- *   An interval with a pole of `Γ(n+1)` is `singular`; one with a pole of
- *   `Γ(n−k+1)` (a zero of `C`) is the whole real line.
- * - `k` an interval with a point `n > −1`, inside `(−1, n + 1)`: the
- *   endpoint values and the value nearest `k = n/2` (see the comment in the
- *   code for why this is the range).
- * - Any other `k` interval (with an `n` interval, or reaching `k ≤ −1` or
- *   `k ≥ n + 1`, where the `Γ` ratio changes sign between its zeros): the
- *   whole real line.
+ * - `k` a point that is not an integer: where `n + 1` and `n − k + 1` are
+ *   positive, the values at the two ends of `n` (`C` is monotone in `n`
+ *   there); elsewhere the `Γ` product below.
+ * - `k` an interval, with `n > −1`, `k > −1` and `n − k > −1` over the box:
+ *   `C` is monotone in `n` and log-concave in `k`, so a few point values
+ *   give its range (see the comment in the code).
+ * - Any other case: the product `Γ(n+1) · (1/Γ(k+1)) · (1/Γ(n−k+1))` of
+ *   interval enclosures (`binomialGammaProduct()`). It is sound but wider
+ *   than the true range, because `k` appears in two factors.
  *
  * Every scalar value is widened by a bound on the kernel's error
  * (`binomialPointEnclosure()`).
@@ -1460,30 +1545,41 @@ function binomialRaw(
   const [kVal] = uK;
   if (isNaNInterval(nVal) || isNaNInterval(kVal)) return ok(NAN_INTERVAL);
   if (kVal.lo !== kVal.hi) {
-    // A point `n > −1` and `k` in `(−1, n + 1)`: the three `Γ` arguments are
-    // positive, and `ln Γ` is convex there, so `ln C(n, k)` is concave in
-    // `k`. `C(n, k)` is positive, symmetric about `k = n/2`, and has its only
-    // maximum there: the enclosure runs from the smaller endpoint value to
-    // the value at the point of the interval closest to `n/2`.
-    const nPoint = nVal.lo;
+    // Where `n > −1`, `k > −1` and `n − k > −1` over the whole box, the three
+    // `Γ` arguments are positive and `C(n, k)` is positive. Two facts give
+    // its range from a few point values:
+    // - For a fixed `n`, `ln Γ` is convex, so `ln C(n, k)` is concave in `k`:
+    //   `C` is smallest at an end of the `k` interval and largest at the `k`
+    //   nearest `n/2`, where it is symmetric.
+    // - For a fixed `k`, `d/dn ln C(n, k) = ψ(n+1) − ψ(n−k+1)` has the sign
+    //   of `k`, because the digamma function `ψ` increases. So for `k ≥ 0`,
+    //   `C` is largest at the top of the `n` interval and smallest at the
+    //   bottom; for `k < 0` the other way round.
+    // The `k` interval is split at `0` and the two parts are joined. The
+    // `1e-9` margin keeps the rounded differences away from the boundary.
     if (
-      nVal.lo === nVal.hi &&
-      nPoint > -1 &&
-      kVal.lo > -1 &&
-      kVal.hi < nPoint + 1
+      nVal.lo > -1 + 1e-9 &&
+      kVal.lo > -1 + 1e-9 &&
+      nVal.lo - kVal.hi > -1 + 1e-9
     ) {
-      const kPeak = Math.min(Math.max(nPoint / 2, kVal.lo), kVal.hi);
-      const lo = Math.min(
-        binomialPointEnclosure(nPoint, kVal.lo).lo,
-        binomialPointEnclosure(nPoint, kVal.hi).lo
-      );
+      let lo = Infinity;
+      let hi = -Infinity;
+      const part = (nMax: number, nMin: number, kLo: number, kHi: number) => {
+        const kPeak = Math.min(Math.max(nMax / 2, kLo), kHi);
+        hi = Math.max(hi, binomialPointEnclosure(nMax, kPeak).hi);
+        lo = Math.min(
+          lo,
+          binomialPointEnclosure(nMin, kLo).lo,
+          binomialPointEnclosure(nMin, kHi).lo
+        );
+      };
+      if (kVal.hi >= 0)
+        part(nVal.hi, nVal.lo, Math.max(kVal.lo, 0), kVal.hi);
+      if (kVal.lo < 0) part(nVal.lo, nVal.hi, kVal.lo, Math.min(kVal.hi, 0));
       // An overflow is a finite value above the largest double.
-      return ok({
-        lo: lo === Infinity ? Number.MAX_VALUE : lo,
-        hi: binomialPointEnclosure(nPoint, kPeak).hi,
-      });
+      return ok({ lo: lo === Infinity ? Number.MAX_VALUE : lo, hi });
     }
-    return { kind: 'entire' };
+    return binomialGammaProduct(nVal, kVal);
   }
   const kPoint = kVal.lo;
 
@@ -1516,39 +1612,12 @@ function binomialRaw(
         hi: Math.max(atLo.hi, atHi.hi),
       });
     }
-    // `C(n, k) = Γ(n+1) / Γ(n−k+1) / Γ(k+1)` with interval arithmetic. The
-    // arguments `n + 1`, `n − k + 1` and `k + 1` are formed with outward
-    // rounding, so each `Γ` enclosure holds the value at the exact argument.
-    const nPlus1 = addOutward(nVal, point(1));
-    const numerator = gammaRaw(nPlus1);
-    // A pole of `Γ(n+1)` is a pole of `C(n, k)`: at an integer `n` the
-    // argument `n − k + 1` of the denominator is not an integer, so it is
-    // not a pole there. `at` is moved from the coordinate `n + 1` to `n`.
-    if (numerator.kind === 'singular')
-      return numerator.at === undefined
-        ? { kind: 'singular' }
-        : { kind: 'singular', at: numerator.at - 1 };
-    const denominator = gammaRaw(subOutward(nPlus1, point(kPoint)));
-    // A pole of `Γ(n−k+1)` is a zero of `C(n, k)`, where `1/Γ` changes sign;
-    // this routine has no enclosure of `1/Γ` across it.
-    if (denominator.kind !== 'interval') return { kind: 'entire' };
-    const gammaK = gammaRaw(addOutward(point(kPoint), point(1)));
-    if (gammaK.kind !== 'interval') return { kind: 'entire' };
-    // A `Γ` value that overflows to `±Infinity` or underflows towards `0`
-    // (at a large negative argument) has lost the value; the quotient of
-    // such bounds does not enclose `C(n, k)`.
-    for (const g of [numerator, denominator, gammaK]) {
-      if (g.kind !== 'interval') return { kind: 'entire' };
-      const { lo, hi } = g.value;
-      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { kind: 'entire' };
-      if (Math.min(Math.abs(lo), Math.abs(hi)) < 1e-290)
-        return { kind: 'entire' };
-    }
-    return div(div(numerator, denominator), gammaK);
+    return binomialGammaProduct(nVal, kVal);
   }
 
   if (kPoint >= 0) {
-    if (kPoint > BINOMIAL_FALLING_FACTORIAL_LIMIT) return { kind: 'entire' };
+    if (kPoint > BINOMIAL_FALLING_FACTORIAL_LIMIT)
+      return binomialGammaProduct(nVal, kVal);
     let product: IntervalResult = ok({ lo: 1, hi: 1 });
     for (let i = 0; i < kPoint; i++) {
       const factor = div(subOutward(nVal, point(i)), point(i + 1));

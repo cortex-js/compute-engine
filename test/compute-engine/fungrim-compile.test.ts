@@ -458,9 +458,19 @@ describe('compileEntries: orientation, dedup and self-test', () => {
     entry('fix006', ['Equal', ['BarG', ['BarG', 'y']], ['FooF', 'y']], ['y']),
     // (e) canonicalizing the match loses the wildcard (x/x → 1)
     entry('fix007', ['Equal', ['Divide', 'x', 'x'], 1], ['x']),
-    // (f) no-fire: Ln(1) canonicalizes to 0, so the rule can never rewrite
-    //     anything (CE's canonical form already covers it)
-    entry('fix008', ['Equal', ['Ln', 1], 0], [], null, 'specific-value'),
+    // (f) no-fire: the left side stays a function application after
+    //     canonicalization, but no value satisfies both guards (x > 1 and
+    //     x < 0), so the rule never fires on a seeded instantiation
+    entry(
+      'fix008',
+      ['Equal', ['FooF', 'x'], ['BarG', 'x']],
+      ['x'],
+      ['And', ['Greater', 'x', 1], ['Less', 'x', 0]]
+    ),
+    // (f') Ln(1) canonicalizes to the number 0: a left side that is not a
+    //     function application after canonicalization is rejected before
+    //     the rule is tried (CE's canonical form already covers it)
+    entry('fix010', ['Equal', ['Ln', 1], 0], [], null, 'specific-value'),
     // (g) Q3: symbol-LHS specific value is excluded, no recognition rule
     entry(
       'fix009',
@@ -534,6 +544,13 @@ describe('compileEntries: orientation, dedup and self-test', () => {
   it('rejects rules that do not fire on their seeded instantiation', () => {
     expect(ruleOf('fix008')).toBeUndefined();
     expect(skipOf('fix008')?.reason).toBe('no-fire');
+    // The guards x > 1 and x < 0 reject every seed, symbolic and numeric.
+    expect(skipOf('fix008')?.detail).toBe('no seed satisfying the guards');
+  });
+
+  it('rejects an entry whose left side canonicalizes to a number', () => {
+    expect(ruleOf('fix010')).toBeUndefined();
+    expect(skipOf('fix010')?.reason).toBe('unorientable');
   });
 
   it('excludes symbol-LHS specific values (Q3: lhs-not-value-form)', () => {

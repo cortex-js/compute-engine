@@ -883,9 +883,33 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
     expect((fn.run!({ n: { lo: -3, hi: -3 } }) as any).kind).toBe('singular');
   });
 
-  test('Binomial over a k interval that reaches past n + 1 is the whole line', () => {
+  // Past k = n + 1, C(5, k) changes sign between the zeros of 1/Γ(6 − k).
+  // The enclosure is the product of the Γ and 1/Γ enclosures: finite and
+  // sound, but wider than the true range [−0.0219, 10.865].
+  test('Binomial over a k interval that reaches past n + 1 is finite', () => {
     const fn = compile(ce.expr(['Binomial', 5, 'k']), { to: 'interval-js' });
-    expect((fn.run!({ k: { lo: 2, hi: 7 } }) as any).kind).toBe('entire');
+    const val = unwrapInterval(fn.run!({ k: { lo: 2, hi: 7 } }));
+    expect(Number.isFinite(val.lo) && Number.isFinite(val.hi)).toBe(true);
+    expect(val.lo).toBeLessThanOrEqual(-0.0219);
+    expect(val.hi).toBeGreaterThanOrEqual(10.865);
+  });
+
+  // With n > −1, k > −1 and n − k > −1 over the box, C is monotone in n and
+  // log-concave in k, so the enclosure is the true range.
+  test('Binomial over an n interval and a k interval', () => {
+    const fn = compile(ce.expr(['Binomial', 'n', 'k']), { to: 'interval-js' });
+    const val = unwrapInterval(
+      fn.run!({ n: { lo: 4, hi: 6 }, k: { lo: 1, hi: 3 } })
+    );
+    expect(val.lo).toBeCloseTo(4, 12);
+    expect(val.hi).toBeCloseTo(20, 12);
+  });
+
+  test('Binomial(n, 0.5) over an n interval with a pole of Γ(n + 1) is singular', () => {
+    const fn = compile(ce.expr(['Binomial', 'n', 0.5]), { to: 'interval-js' });
+    const result = fn.run!({ n: { lo: -2.5, hi: -1.2 } }) as any;
+    expect(result.kind).toBe('singular');
+    expect(result.at).toBe(-2);
   });
 
   test('Factorial encloses Γ(x + 1)', () => {
@@ -914,9 +938,16 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
     const precise = new ComputeEngine();
     precise.precision = 50;
     const contains = (result: any, ref: MathJsonExpression) => {
-      const value = result.kind === 'interval' ? result.value : result.value;
-      const exact = precise.box(ref).N().bignumRe!;
-      expect(exact.gte(value.lo) && exact.lte(value.hi)).toBe(true);
+      const value = result.value;
+      const reference = precise.box(ref).N();
+      if (!reference.isFinite) return;
+      // A value computed in machine precision has no big-decimal part.
+      const exact = reference.bignumRe;
+      if (exact) expect(exact.gte(value.lo) && exact.lte(value.hi)).toBe(true);
+      else {
+        expect(reference.re).toBeGreaterThanOrEqual(value.lo);
+        expect(reference.re).toBeLessThanOrEqual(value.hi);
+      }
     };
     const run = (expr: MathJsonExpression, args: Record<string, unknown>) =>
       compile(ce.expr(expr), { to: 'interval-js' }).run!(args);
@@ -953,10 +984,43 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
       contains(result, ['Binomial', 839, 0.3]);
     });
 
+    test('Binomial(n, k) over boxes that cross the zeros of 1/Γ', () => {
+      const boxes: Array<[[number, number], [number, number]]> = [
+        [[5, 5], [5.5, 6.5]],
+        [[-3.7, -3.2], [0.4, 1.6]],
+        [[2.2, 3.1], [3.5, 5.5]],
+      ];
+      for (const [[n0, n1], [k0, k1]] of boxes) {
+        const result = run(['Binomial', 'n', 'k'], {
+          n: { lo: n0, hi: n1 },
+          k: { lo: k0, hi: k1 },
+        });
+        for (const n of [n0, (n0 + n1) / 2, n1])
+          for (const k of [k0, (k0 + k1) / 2, k1])
+            contains(result, ['Binomial', n, k]);
+      }
+    });
+
     test('GammaLn over [0.5, 2] contains the minimum near 1.4616', () => {
       const result = run(['GammaLn', 'x'], { x: { lo: 0.5, hi: 2 } });
       contains(result, ['GammaLn', 1.4616321449683622]);
       contains(result, ['GammaLn', 0.5]);
+    });
+
+    // Below about x = −171.6 the scalar Γ underflows to 0 or to a subnormal
+    // with no correct digits; the enclosure must still hold the true value.
+    test('Gamma below −171.6', () => {
+      const result = run(['Gamma', 'x'], { x: { lo: -173.3, hi: -173.2 } });
+      contains(result, ['Gamma', -173.25]);
+      contains(result, ['Gamma', -173.3]);
+    });
+
+    test('Binomial with n below −171.6', () => {
+      const box = { n: { lo: -174.8, hi: -174.6 }, k: { lo: -118.1, hi: -118.1 } };
+      const result = run(['Binomial', 'n', 'k'], box) as any;
+      expect(result.kind).toBe('interval');
+      for (const n of [-174.8, -174.7, -174.6])
+        contains(result, ['Binomial', n, -118.1]);
     });
 
     test('GammaLn on a negative strip', () =>

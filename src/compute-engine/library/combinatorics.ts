@@ -29,6 +29,8 @@ import {
 import {
   gamma,
   bigGamma,
+  bigBinomialLogForm,
+  binomial as machineBinomial,
   gammaln,
   estimatedFactorialDigits,
 } from '../numerics/special-functions.js';
@@ -360,15 +362,17 @@ function evaluateBinomial(
   const inexact =
     (isNumber(nExpr) && !nExpr.isExact) || (isNumber(kExpr) && !kExpr.isExact);
   if (numericApproximation || inexact) {
-    return apply2(
-      nExpr,
-      kExpr,
-      (n, k) => gamma(n + 1) / (gamma(k + 1) * gamma(n - k + 1)),
-      (n, k) =>
-        bigGamma(ce, n.add(1)).div(
-          bigGamma(ce, k.add(1)).mul(bigGamma(ce, n.sub(k).add(1)))
-        )
-    );
+    // The machine route uses the kernel of the compiled JS target, so the two
+    // agree. The big-number Γ quotient is `NaN` when a Γ value overflows
+    // (from about `n = 10²⁰`); the log form gives the value there
+    // (`Binomial(1e300, 0.5)` ≈ 1.128·10¹⁵⁰).
+    return apply2(nExpr, kExpr, machineBinomial, (n, k) => {
+      const r = bigGamma(ce, n.add(1)).div(
+        bigGamma(ce, k.add(1)).mul(bigGamma(ce, n.sub(k).add(1)))
+      );
+      if (r.isFinite()) return r;
+      return bigBinomialLogForm(ce, n, k) ?? r;
+    });
   }
 
   // Symbolic first argument with a small nonnegative integer second argument:

@@ -202,10 +202,19 @@ export function binomial(n: number, k: number): number {
     for (let i = 0; i < k; i++) product *= (n - i) / (i + 1);
     return product;
   }
-  const r = gamma(n + 1) / (gamma(k + 1) * gamma(n - k + 1));
-  if (Number.isFinite(r)) return r;
-  // The Γ ratio overflowed. Compute it in log form with the sign of each Γ
-  // factor.
+  // The Γ ratio, when each factor is a finite, non-zero double. A factor
+  // that overflows to `Infinity` or underflows to `0` makes the quotient
+  // `NaN`, `±Infinity` or a false `0` (`C(51.19, −162.95)` ≈ 3.1e-54 came out
+  // as `0`: `Γ(215.1)` overflows while `Γ(−161.95)` does not).
+  const gN = gamma(n + 1);
+  const gK = gamma(k + 1);
+  const gNK = gamma(n - k + 1);
+  const usable = (g: number) => Number.isFinite(g) && Math.abs(g) > 1e-280;
+  if (usable(gN) && usable(gK) && usable(gNK)) {
+    const r = gN / (gK * gNK);
+    if (Number.isFinite(r)) return r;
+  }
+  // Compute it in log form with the sign of each Γ factor.
   if (n + 1 < 0) {
     const [lnN, signN] = lnGammaSigned(n + 1);
     const [lnK, signK] = lnGammaSigned(k + 1);
@@ -847,6 +856,102 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
   }
 
   return result.sub(logProduct);
+}
+
+/**
+ * `ln Γ(a) − ln Γ(a − d)` for big numbers, with `a` and `a − d` large and
+ * positive. When both are large, the two log-Γ values are nearly equal and
+ * their difference loses about `log10(a)` digits: for `a = 10³⁰⁰` all of
+ * them. The Stirling series of the difference avoids that. With
+ * `b = a − d`:
+ *
+ *   `ln Γ(a) − ln Γ(b) = (b − ½)·ln(1 + d/b) + d·(ln a − 1) + S(a) − S(b)`
+ *
+ * where `S(w) = Σ B₂ⱼ / (2j(2j−1)·w^(2j−1))` is the Stirling correction. For
+ * `w` at least the working precision `p`, the series reaches `10^−(p+10)`
+ * in about `0.4·p` terms (the same choice as `gammalnCore()`).
+ *
+ * Returns `undefined` when `a` or `a − d` is below that size; the caller
+ * then uses `bigGammaln()` for both, where the cancellation is small.
+ */
+export function bigLnGammaRatio(
+  ce: ComputeEngine,
+  a: BigNum,
+  d: BigNum
+): BigNum | undefined {
+  const p = BigDecimal.precision;
+  const b = a.sub(d);
+  const minimum = new BigDecimal(Math.max(p, 20));
+  if (a.lt(minimum) || b.lt(minimum)) return undefined;
+  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    const q = BigDecimal.precision;
+    const main = b
+      .sub(BigDecimal.HALF)
+      .mul(d.div(b).log1p())
+      .add(d.mul(a.ln().sub(BigDecimal.ONE)));
+    const maxTerms = Math.max(20, Math.ceil(0.6 * q) + 20);
+    const bernoulliRationals = getBernoulliRationals(ce, maxTerms);
+    const tol = new BigDecimal(10).pow(-(q + 10));
+    const stirling = (w: BigNum): BigNum => {
+      const inv = BigDecimal.ONE.div(w);
+      const u = inv._mulToPrecision(inv, q);
+      let pw = inv;
+      let sum = BigDecimal.ZERO;
+      const nTerms = Math.min(maxTerms, bernoulliRationals.length);
+      for (let k = 0; k < nTerms; k++) {
+        const twoK = 2 * (k + 1);
+        const [bNum, bDen] = bernoulliRationals[k];
+        const coeff = new BigDecimal(bNum.toString()).div(
+          new BigDecimal((bDen * BigInt(twoK) * BigInt(twoK - 1)).toString())
+        );
+        const term = coeff._mulToPrecision(pw, q);
+        if (k > 0 && term.abs().lt(tol)) break;
+        sum = sum.add(term);
+        pw = pw._mulToPrecision(u, q);
+      }
+      return sum;
+    };
+    return main.add(stirling(a)).sub(stirling(b));
+  });
+}
+
+/**
+ * `C(n, k) = Γ(n+1)/(Γ(k+1)·Γ(n−k+1))` for big numbers in log form, for
+ * `n + 1 > 0` and `n − k + 1 > 0`. This is for the arguments where a `Γ`
+ * value overflows (from about `n = 10²⁰`) and the plain quotient is `NaN`.
+ * The numerator is paired with the larger denominator argument, whose
+ * log-Γ value is close to its own (`bigLnGammaRatio()`). Returns `undefined`
+ * outside that domain.
+ */
+export function bigBinomialLogForm(
+  ce: ComputeEngine,
+  n: BigNum,
+  k: BigNum
+): BigNum | undefined {
+  const nPlus1 = n.add(BigDecimal.ONE);
+  const nk = n.sub(k);
+  if (!nPlus1.isPositive() || !nk.add(BigDecimal.ONE).isPositive())
+    return undefined;
+  // The logarithm is computed with guard digits: `exp` turns its absolute
+  // error into a relative error of the result, and the logarithm of a large
+  // coefficient has many digits before the decimal point.
+  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    const small = k.lt(nk) ? k : nk;
+    const large = k.lt(nk) ? nk : k;
+    const lnRatio =
+      bigLnGammaRatio(ce, nPlus1, small) ??
+      bigGammaln(ce, nPlus1).sub(bigGammaln(ce, large.add(BigDecimal.ONE)));
+    const smallPlus1 = small.add(BigDecimal.ONE);
+    // Γ is positive for a positive argument; on (−m−1, −m) its sign is
+    // (−1)^(m+1).
+    // The parity is read as a bigint: `toNumber()` rounds a floor above
+    // 2^53 to an even double.
+    const negativeGamma =
+      smallPlus1.isNegative() &&
+      BigInt(smallPlus1.floor().toFixed(0)) % 2n !== 0n;
+    const value = lnRatio.sub(bigGammaln(ce, smallPlus1)).exp();
+    return negativeGamma ? value.neg() : value;
+  });
 }
 
 /**

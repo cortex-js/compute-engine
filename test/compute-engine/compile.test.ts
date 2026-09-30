@@ -965,6 +965,11 @@ describe('COMPILE Binomial matches evaluate() off 0 ≤ k ≤ n', () => {
     [-200.5, 3],
     // A negative integer n beyond 2^53 with a non-integer k is a pole.
     [-1e300, 0.5],
+    // One Γ factor overflows or underflows while the plain quotient still
+    // looks finite; the value comes from the log form.
+    [51.189566, -162.95419],
+    [-180.92399, -12.128067],
+    [112.15873, -135.79473],
   ];
 
   for (const [a, b] of points) {
