@@ -543,7 +543,7 @@ export function staticDiagnostics(
   // — the run time defers that refusal to the application itself. Restored
   // for the same reason as the evidence map.
   const enclosingPinnedCallees = ce._staticPinnedCallees;
-  ce._staticPinnedCallees = new Set();
+  ce._staticPinnedCallees = new Map();
   ce._factSuppressionDepth += 1;
   try {
     // One INFERENCE ROLLBACK FRAME spans the whole pass (phase 2b of
@@ -1668,7 +1668,7 @@ function registerPinnedSignature(
   // such a pin asks boxing to validate the arguments of later calls (the
   // `_staticPinnedCallees` registration below): an annotation pins a
   // DECLARED type, whose calls boxing validates on its own.
-  let literalCallee = false;
+  let literalCallee: ReturnType<ComputeEngine['box']> | undefined = undefined;
   if (isFunction(boxed, 'Assign')) {
     const target = boxed.ops[0];
     name = isSymbol(target) ? target.symbol : null;
@@ -1694,12 +1694,12 @@ function registerPinnedSignature(
       const def = sym.valueDefinition;
       if (def !== undefined) ce._staticPinnedCallees?.delete(def);
       if (rhs !== undefined && rhs.operator === 'Function')
-        replacePin(ce, name!, rhs.type.type, pinned);
+        replacePin(ce, name!, rhs, pinned);
       return;
     }
     if (rhs !== undefined && rhs.operator === 'Function') {
       type = rhs.type.type;
-      literalCallee = true;
+      literalCallee = rhs;
       // The target may be an EARLIER evaluation's `let` binding that holds
       // a function literal (a previous notebook cell's
       // `let k = (n: integer) => n + 1`): an inferred value definition with
@@ -1715,7 +1715,7 @@ function registerPinnedSignature(
           def.value.inferredType &&
           def.value.value?.operator === 'Function'
         ) {
-          replacePin(ce, name, type, pinned);
+          replacePin(ce, name, rhs, pinned);
           return;
         }
       }
@@ -1748,7 +1748,7 @@ function registerPinnedSignature(
         // calls that follow.
         const constant = isDictionary(last) ? last.get('constant') : undefined;
         firstWins = constant !== undefined && isSymbol(constant, 'True');
-        literalCallee = true;
+        literalCallee = init;
       }
     }
   }
@@ -1784,8 +1784,8 @@ function registerPinnedSignature(
   // `k(1.5)` clean for `let k = (n: integer) => n + 1` while both annotated
   // spellings of the same callee flagged the call.
   const pinnedDef = sym.valueDefinition;
-  if (literalCallee && pinnedDef !== undefined)
-    ce._staticPinnedCallees?.add(pinnedDef);
+  if (literalCallee !== undefined && pinnedDef !== undefined)
+    ce._staticPinnedCallees?.set(pinnedDef, literalCallee);
 }
 
 /** A function signature the pass registered for a name (see
@@ -1813,14 +1813,15 @@ type PinnedSignature = { type: Type; firstWins: boolean };
 function replacePin(
   ce: ComputeEngine,
   name: string,
-  signature: Type,
+  literal: ReturnType<ComputeEngine['box']>,
   pinned: Map<string, PinnedSignature>
 ): void {
+  const signature = literal.type.type;
   const sym = ce.box(name);
   if (!sym._infer(() => signature, 'replace')) return;
   pinned.set(name, { type: signature, firstWins: true });
   const def = sym.valueDefinition;
-  if (def !== undefined) ce._staticPinnedCallees?.add(def);
+  if (def !== undefined) ce._staticPinnedCallees?.set(def, literal);
 }
 
 /** Is `t` a function signature declaring at least one parameter NAME — the

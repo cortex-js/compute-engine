@@ -77,6 +77,7 @@ import {
   isCollectionSourceOperator,
   inferGenericBoundArgs,
   inferNumericArgs,
+  refusesAbsentArgument,
   runtimeCheckExemptParam,
 } from './validate.js';
 import {
@@ -123,6 +124,7 @@ import {
   adoptsForeignEngineObject,
   indeterminateFormAnswer,
 } from './type-guards.js';
+import { functionLiteralParameterType } from './function-literal.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import { symbolAtSite, replaceAtSite } from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
@@ -2107,22 +2109,41 @@ function staticallyPinnedCallee(
  *   the literal `(y) => 1 + y` — so only the supplied prefix of the
  *   parameters is checked, and nothing is reported missing;
  * - a BARE parameter imposes no constraint: its slot holds whatever
- *   inference left there (`unknown`), which is not a contract the author
- *   wrote, and `nothing` is deliberately not a subtype of `unknown` — so the
- *   slot is relaxed to `any` for validation, as the application relaxes it.
+ *   inference left there (`unknown`, or a type inferred from a use in the
+ *   body such as `indexed_collection<number>` from `p[1]`), which is not a
+ *   contract the author wrote, and `nothing` is deliberately not a subtype
+ *   of `unknown` — so the slot is relaxed to `any` for validation, as the
+ *   application relaxes it. With `literal`, the bare parameters are read
+ *   from the literal itself; without it, only an `unknown` slot is relaxed.
  *
  * A declared signature (`let k: (x: integer, y: integer) -> integer`) keeps
  * the full check: its application reports the missing argument, so the
  * static line is a true prediction there. Anything but a plain one-arm
  * signature is returned unchanged.
  */
-function pinnedValidationSignature(signature: Type, argCount: number): Type {
+function pinnedValidationSignature(
+  signature: Type,
+  argCount: number,
+  literal?: Expression
+): Type {
   if (typeof signature === 'string' || signature.kind !== 'signature')
     return signature;
   const args = signature.args ?? [];
   const kept = argCount < args.length ? args.slice(0, argCount) : args;
-  const relaxed = kept.map((arg) =>
-    arg.type === 'unknown' ? { ...arg, type: 'any' as Type } : arg
+  // The parameter operands of the literal pair one to one with the
+  // signature's required arguments, unless the literal has a rest parameter
+  // (it is the signature's variadic argument); then only `unknown` slots are
+  // relaxed.
+  const params =
+    literal !== undefined && isFunction(literal, 'Function')
+      ? literal.ops.slice(1)
+      : undefined;
+  const paired = params !== undefined && params.length === args.length;
+  const relaxed = kept.map((arg, i) =>
+    arg.type === 'unknown' ||
+    (paired && functionLiteralParameterType(params[i]) === undefined)
+      ? { ...arg, type: 'any' as Type }
+      : arg
   );
   // A signature rebuilt field-by-field must carry its adjuncts (`typeParams`,
   // `effects`, `optArgs`, `restArg`); the spread does that.
@@ -2652,9 +2673,30 @@ function makeCanonicalFunctionCore(
       // A signature declared with placeholder slots validates those slots
       // as `any`: their refined types were inferred from the body, not
       // written by the author (`placeholderSlotsAs`).
+      // The literal a statically pinned name holds (`let f = (p: T) => …`).
+      // Its application checks the parameters it ANNOTATES and nothing
+      // else, so the slot of a bare parameter, whose type was inferred from
+      // the body, validates as `any` here too.
+      // During the Epsil static pre-pass the name has no value yet, and the
+      // literal is the one the pass registered (`_staticPinnedCallees`).
+      const heldLiteral = def.value.value;
+      const pinnedLiteral = !def.value.inferredType
+        ? undefined
+        : (ce._staticPinnedCallees?.get(def.value) ??
+          (isFunction(heldLiteral, 'Function') ? heldLiteral : undefined));
       const checkedType = def.value.inferredType
-        ? pinnedValidationSignature(valueType, boxedOps.length)
+        ? pinnedValidationSignature(
+            valueType,
+            boxedOps.length,
+            pinnedLiteral
+          )
         : placeholderSlotsAs(valueType, def.value._signatureSkeleton, 'any');
+      const enforcesAnnotations =
+        pinnedLiteral !== undefined &&
+        isFunction(pinnedLiteral, 'Function') &&
+        pinnedLiteral.ops
+          .slice(1)
+          .some((p) => functionLiteralParameterType(p) !== undefined);
       const invalid = validateArguments(
         ce,
         boxedOps,
@@ -2687,6 +2729,10 @@ function makeCanonicalFunctionCore(
           // A list of points at a parameter declared as a point is mapped
           // over at evaluation (`isPointListArgumentType`).
           mapsPointLists: true,
+          // An absent argument at an annotated parameter of a pinned
+          // literal is refused, as at the call of a `function` definition
+          // (`refusesAbsentArgument`, `validate.ts`).
+          enforcesParameterAnnotations: enforcesAnnotations,
         }
       );
       if (invalid) {
@@ -2731,6 +2777,19 @@ function makeCanonicalFunctionCore(
             if (
               params.length > 0 &&
               params.every((p) => orig.type.isDisjointFrom(p))
+            )
+              return r;
+            // An argument refused because it is absent is refused by its
+            // `missing` member, which the type states whatever value the
+            // free variables take (`refusesAbsentArgument`, `validate.ts`).
+            if (
+              enforcesAnnotations &&
+              params.length > 0 &&
+              params.every((p) =>
+                refusesAbsentArgument(ce, orig, p, {
+                  enforcesParameterAnnotations: true,
+                })
+              )
             )
               return r;
             return orig;
@@ -3373,11 +3432,17 @@ function applyOperatorDefinition(
           : undefined,
         // Strip-before-validate (§3.B): a `propagate`/`handle` operator admits
         // an absent (`Missing`) or possibly-absent (`T | missing`) operand in a
-        // stripped position; the runtime gate carries the absence.
-        (i) => opDef.stripsMissingAt(i),
+        // stripped position; the runtime gate carries the absence. A function
+        // literal with annotated parameters admits it too: its application
+        // checks the VALUE against the annotation when the call runs
+        // (`enforcesParameterAnnotations`).
+        (i) => opDef.stripsMissingAt(i) || opDef.enforcesParameterAnnotations,
         {
           resolutionOut,
           operatorName: name,
+          // An absent argument at an annotated parameter of a function
+          // literal is refused (`refusesAbsentArgument`, `validate.ts`).
+          enforcesParameterAnnotations: opDef.enforcesParameterAnnotations,
           // Contract B NaN admission (`docs/ERROR-MODEL.md` §4): the policy
           // is tested ahead of carrier disjointness — see
           // `nanPolicyAdmitsParam` in `validate.ts`.

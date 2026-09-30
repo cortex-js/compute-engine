@@ -2216,6 +2216,59 @@ export interface ValidateArgumentsInternals {
    * checks it there. Library operators leave this unset: a tuple parameter
    * of theirs takes one tuple. */
   mapsPointLists?: boolean;
+  /** The callee is a function literal whose parameter annotations are
+   * enforced when it is applied (`enforcesParameterAnnotations`,
+   * `boxed-operator-definition.ts`). An argument that is absent, or that
+   * may be absent while an Epsil static pre-pass runs, is refused at a
+   * parameter whose annotation admits neither `missing` nor `nan` — see
+   * `refusesAbsentArgument`. */
+  enforcesParameterAnnotations?: boolean;
+}
+
+/**
+ * Whether the argument `op` is refused at the annotated parameter `param` of
+ * a function literal because it is absent (user decision 2026-09-30).
+ *
+ * At evaluation, a function literal answers an `incompatible-type` error for
+ * an absent argument (`Missing`) at a parameter annotated with a type that
+ * admits neither `missing` nor `nan` (`apply()`, `function-utils.ts`; a
+ * parameter that admits `nan`, such as `number`, reads the absent value as
+ * `NaN`). Two cases are refused here, at boxing:
+ *
+ * - The argument is typed `missing`: it is absent on every route, so the
+ *   call is an error whenever it runs.
+ * - The argument is typed `missing | T` and an Epsil static pre-pass is
+ *   running. The engine admits such an argument: its value is usually
+ *   present, and in a LaTeX document there is no way to write the absent
+ *   case out (`P[i]`, `First(xs)` and a restricted point are all typed
+ *   `missing | T`). An Epsil author can write it out
+ *   (`first(xs) ?? fallback`, `isMissing`, or a parameter annotated
+ *   `T | missing`), so the pre-pass, which is a linter and is stricter than
+ *   the engine, reports the argument. `_staticAssignmentEvidence` is defined
+ *   only while a pre-pass runs.
+ *
+ * A `missing` member inside a collection or a tuple (an absent cell) does
+ * not count: only the argument as a whole. A parameter typed `unknown` is a
+ * placeholder, not an annotation, and refuses nothing.
+ */
+export function refusesAbsentArgument(
+  ce: ComputeEngine,
+  op: Expression,
+  param: Type,
+  internals: ValidateArgumentsInternals | undefined
+): boolean {
+  if (internals?.enforcesParameterAnnotations !== true) return false;
+  if (
+    param === 'unknown' ||
+    isSubtype('missing', param) ||
+    isSubtype('nan', param)
+  )
+    return false;
+  const t = resolveTypeAlias(op.type.type);
+  if (t === 'missing') return true;
+  if (ce._staticAssignmentEvidence === undefined) return false;
+  if (typeof t === 'string' || t.kind !== 'union') return false;
+  return t.types.some((arm) => resolveTypeAlias(arm) === 'missing');
 }
 
 export function validateArguments(
@@ -2740,6 +2793,14 @@ export function validateArguments(
     }
 
     if (!op.type.matches(param)) {
+      // An absent argument at an annotated parameter of a function literal
+      // is refused before any provisional admission — see
+      // `refusesAbsentArgument`.
+      if (refusesAbsentArgument(ce, op, param, internals)) {
+        result.push(ce.typeError(displayParams[idx] ?? param, op.type, op));
+        isValid = false;
+        continue;
+      }
       // Design E §3: an arrow-typed slot admits by COMPATIBILITY, not
       // subtyping. Admitted operands carry no evidence of the slot's arrow
       // (it is a per-call supply, not the operand's own contract), so they
@@ -2990,6 +3051,16 @@ export function validateArguments(
       continue;
     }
     if (!op.type.matches(param)) {
+      // An absent argument at an annotated parameter of a function literal —
+      // see the required-param gate.
+      if (refusesAbsentArgument(ce, op, param, internals)) {
+        result.push(
+          ce.typeError(displayOptParams[i - params.length] ?? param, op.type, op)
+        );
+        isValid = false;
+        i += 1;
+        continue;
+      }
       // Design E §3 compatibility admission — see the required-param gate.
       const compat = arrowSlotAdmission(
         ce,

@@ -784,6 +784,55 @@ callable definition under a contract nothing proved. Only that value is
 refused: a gated scalar assigned to `number | (number) -> number` strips
 to `integer` and binds through the scalar arm.
 
+**An absent argument at an annotated parameter of a function literal —
+RULED 2026-09-30.** A function literal with at least one annotated
+parameter (an Epsil `function`, a lambda `(p: T) ↦ …`) checks each
+argument against the annotation when it is applied. It does not use the
+`missingBehavior` policy of a library operator: before this ruling, such a
+function whose parameters were all numeric or collections resolved to
+`propagate` and answered the absence marker without running its body,
+while the same function declared through `ce.declare` with a signature
+answered an error. The rule, for the value bound to one parameter:
+
+- annotated with a type that has no `missing` member (a point, a list, a
+  string): an absent value is an `incompatible-type` error.
+  `f(p: tuple<number, number>) = p[1] + 1` answers
+  `Error(ErrorCode("incompatible-type", "tuple<number, number>", "missing"), "Missing")`
+  for `f(Missing)`;
+- annotated with a type that has `nan` as a member (`number`): the absent
+  value is read as `NaN`, the marker of a numeric domain (§3).
+  `f(x: number) = x + 1` answers `NaN`. A numeric type that excludes `nan`
+  (`integer`, `real`) is in the first case: `f(x: real) = x + 1` answers
+  `Error(ErrorCode("incompatible-type", "real", "missing"), "Missing")`;
+- annotated `T | missing`: the body receives the absent value;
+- not annotated: the body runs with the absent value, as it does for a
+  function with no annotation at all.
+
+The type of the call is the type of a success, with no `missing` member
+added for an argument that may be absent. At boxing the engine still
+admits an argument typed `missing | T` at a parameter annotated `T`
+(`enforcesParameterAnnotations`, `boxed-operator-definition.ts`): the
+value is usually present, and a LaTeX document has no notation to remove
+the absent case from `P[i]`, `First(xs)` or a restricted point. An
+argument typed `missing` alone (the literal `Missing`) is absent on every
+route and is refused at boxing. The Epsil static pre-pass is stricter and
+also reports the argument that may be absent (`refusesAbsentArgument`,
+`boxed-expression/validate.ts`), because an Epsil author can write
+`first(xs) ?? fallback`. What remains open (a `NaN` value at an `integer`
+or `real` parameter, a declared scalar parameter on the declare-then-assign
+route, compiled code) is in `ROADMAP.md`.
+
+**An accessor states the absent case only when it can happen — RULED
+2026-09-30.** `First`, `Second`, `Third`, `Last` and `At` with a literal
+index are typed `T | marker(T)` (§3.C) when the access can find nothing,
+and `T` when the operand is proved to hold the position: a list type with
+a length (the type of a list literal), a string literal, a `Range` with
+literal bounds (`provenLengthD`, `library/collections.ts`).
+`First([(1, 2)])` is `tuple<integer, integer>`; `First(Filter(xs, p))` is
+`missing | tuple<integer, integer>`. A position proved not to exist keeps
+`T | marker(T)`, so that a chained read still chooses its marker from the
+element type (`M[7][1]` over a matrix is `NaN`).
+
 The three worked declarations:
 
 ```

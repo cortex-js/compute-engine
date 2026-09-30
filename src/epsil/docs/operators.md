@@ -240,6 +240,17 @@ let first = xs[1] ?? 0
 `??` discharges **absence**. It does _not_ rescue an `Error`: an error operand
 is an error, not a missing value, and propagates.
 
+A function does not accept an absent value at a parameter annotated with a
+type, unless the type says so. With `function f(p: tuple<number, number>)`,
+the call `f(first(filter(xs, c => c[1] > 0)))` is reported by the static
+check, because a filter can find nothing, and it is an `incompatible-type`
+error when the value is absent. Write `f(first(filter(…)) ?? (0, 0))` to give
+a fallback, or annotate the parameter `tuple<number, number> | missing` and
+test `isMissing(p)` in the body. A parameter with no annotation receives the
+absent value, and a parameter annotated `number` reads it as `NaN`.
+The first element of a list literal that has one (`first([(1, 2), (3, 4)])`)
+cannot be absent and needs no fallback.
+
 It is right-associative, so a chain falls through left to right:
 
 ```epsil

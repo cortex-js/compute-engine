@@ -2660,7 +2660,26 @@ export function assignFn(
             // A placeholder slot's refined type is inferred from this very
             // literal; stamping it would make it an annotation, which the
             // application enforces at run time (`placeholderSlotsAs`).
-            placeholderSlotsAs(declaredType.type, declaredType0.type, 'unknown')
+            //
+            // The same holds for a DERIVED signature, which is a record of
+            // the literal assigned before: the type of a parameter that
+            // literal left bare was inferred from its body. An Epsil
+            // `function` is assigned twice, when its definition is
+            // canonicalized and when it is evaluated, so the second
+            // assignment stamped `p: indexed_collection<number>` on the bare
+            // `p` of `function f(p, n: number) { p[1] + n }`, and the
+            // application then refused an absent `p` that the body accepts.
+            // A bare parameter of the new literal is not stamped
+            // (`validationSignatureOf` types its slot `any`, which the
+            // ascription skips).
+            def.operator._derivedSignature
+              ? (validationSignatureOf(literal, declaredType.type) ??
+                  declaredType.type)
+              : placeholderSlotsAs(
+                  declaredType.type,
+                  declaredType0.type,
+                  'unknown'
+                )
           ),
           typedResult === undefined
             ? declaredType.type

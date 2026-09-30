@@ -848,8 +848,14 @@ export interface IComputeEngine {
    * reports `k(1.5)` after `let k = (n: integer) => n + 1` — a refusal the run
    * time leaves to the literal itself, when applied, because the definition
    * stays INFERRED. `undefined` outside the pass.
+   *
+   * Each definition maps to the function LITERAL the pin came from. Boxing
+   * reads the literal's parameter operands to know which parameters the
+   * author annotated: only those are checked at a call, and the slot of a
+   * bare parameter, whose type was inferred from the body, admits any
+   * argument (`pinnedValidationSignature`, `box.ts`).
    * @internal */
-  _staticPinnedCallees: Set<BoxedValueDefinition> | undefined;
+  _staticPinnedCallees: Map<BoxedValueDefinition, Expression> | undefined;
 
   /** `true` only while the Epsil interpreter is canonicalizing or evaluating a
    * top-level statement whose AST head is `DeclareType`, `DeclareSumType` or

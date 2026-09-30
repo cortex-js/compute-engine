@@ -607,7 +607,8 @@ export class ComputeEngine implements IComputeEngine {
     undefined;
 
   /** See `IComputeEngine._staticPinnedCallees`. @internal */
-  _staticPinnedCallees: Set<BoxedValueDefinition> | undefined = undefined;
+  _staticPinnedCallees: Map<BoxedValueDefinition, Expression> | undefined =
+    undefined;
 
   /** See `IComputeEngine._epsilDeclarationRoute`. @internal */
   _epsilDeclarationRoute = false;

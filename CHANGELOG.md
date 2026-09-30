@@ -2,89 +2,100 @@
 
 ### Behavior Changes
 
-- **A function that annotates some of its parameters enforces only the
-  annotated ones at a call.** With `function k(p, n: number) { p[1] + n }`,
-  the type of `p` in the reported signature, `indexed_collection<number>`, is
-  inferred from the use `p[1]`. One annotation made the whole derived
-  signature a contract, so that inferred type was enforced at every call,
-  while the same function with no annotation is not validated at all. A call
-  such as `fill(a, b, c, 2, xs)` with `c` typed `missing | tuple<number,
-  number, number>` (a `first(filter(…))` result) was refused at an inferred
-  slot although the interpreter runs it. A bare slot now admits any argument,
-  as it does when nothing is annotated; an annotated slot is enforced as
-  before, and the reported signature is unchanged. What is lost: an argument
-  that cannot fit a bare slot of a partly annotated function (`k(5, 1)`) is
-  reported when the call runs, not when it is boxed. Annotate the parameter to
-  keep the static check. The same rule holds for a function declared with
-  placeholder slots and then assigned its body, which is how a host declares
-  a function before its body is known: with `f` declared
-  `(unknown) -> unknown` and assigned `p ↦ p[1] + 1`, the reported signature
-  is `(indexed_collection<number>) -> number`, and `f(First(xs))`, whose
-  argument is typed `missing | tuple<…>`, was refused at boxing. It is now
-  admitted, answers the value when it is present and `NaN` when it is absent,
-  as the same body does with no declaration. A slot declared with a type
+- **A function that annotates some of its parameters enforces only the annotated
+  ones at a call.** With `function k(p, n: number) { p[1] + n }`, the type of
+  `p` in the reported signature, `indexed_collection<number>`, is inferred from
+  the use `p[1]`. One annotation made the whole derived signature a contract, so
+  that inferred type was enforced at every call, while the same function with no
+  annotation is not validated at all. A call such as `fill(a, b, c, 2, xs)` with
+  `c` typed `missing | tuple<number, number, number>` (a `first(filter(…))`
+  result) was refused at an inferred slot although the interpreter runs it. A
+  bare slot now admits any argument, as it does when nothing is annotated; an
+  annotated slot is enforced as before, and the reported signature is unchanged.
+  What is lost: an argument that cannot fit a bare slot of a partly annotated
+  function (`k(5, 1)`) is reported when the call runs, not when it is boxed.
+  Annotate the parameter to keep the static check. The same rule holds for a
+  function declared with placeholder slots and then assigned its body, which is
+  how a host declares a function before its body is known: with `f` declared
+  `(unknown) -> unknown` and assigned `p ↦ p[1] + 1`, the reported signature is
+  `(indexed_collection<number>) -> number`, and `f(First(xs))`, whose argument
+  is typed `missing | tuple<…>`, was refused at boxing. It is now admitted,
+  answers the value when it is present and `NaN` when it is absent, as the same
+  body does with no declaration. A slot declared with a type
   (`(unknown, number) -> unknown`) is enforced as before.
 - **An argument whose components are typed `unknown` is admitted at a declared
   parameter.** A whole argument typed `unknown` was always admitted, since it
-  claims nothing a declaration can refute; a composite with `unknown`
-  components was refused. `[(A[1], A[2], A[3], 1)]`, typed
-  `list<tuple<unknown, unknown, unknown, integer>>` while the type of `A` is
-  not known, is now accepted at a parameter declared
-  `list<tuple<number, number, number, number>>`, and checked when the call
-  runs. A component typed `any` is still refused (it admits the absence
-  markers), and so is a known component that does not fit. A generic
-  signature (`(tuple<T>) -> T where T: number`) admits the same arguments as
-  the ground one; signature subtyping is unchanged.
-
-### Issues Resolved
-
-- **A recursive Epsil program that builds a list through a local copied from
-  an untyped parameter compiles.** `function fill(p, q, r, depth, acc) { let
-  out = acc; for c in … { out = [...out, c]; out = fill(…, out) } … }`
-  declined on the JavaScript target with "Could not compile `ListJoin`:
-  operand 1 is not an indexed collection", and the smaller
-  `function f(acc) { let out = acc; out = [...out, 1]; out }` compiled but
-  broadcast `f([0])` over the list. Two causes: the local copied from the
-  parameter kept the parameter untyped, so a use of the local as a collection
-  taught the parameter nothing; and a self-call inside a `function` body was
-  typed as a broadcast (`broadcastable<unknown>`) from the bare `function`
-  type the recursion knot declares, which widened the local past the list
-  its spread gives. Now the first use that narrows such a local narrows the
-  parameter it was copied from, and a self-call types `unknown` while the
-  clause canonicalizes and installs. The natural recursive spelling of the
-  Apollonian gasket compiles and computes its 224 circles in a few
-  milliseconds; the interpreter takes about 16 seconds. A self-recursive
-  function whose base clause reads its parameter whole now derives that
-  clause's result (`-> number`) instead of `-> broadcastable<unknown>`.
-  (Tycho row 339.)
-
-- **A self-recursive function that builds a list is typed `list<T>`.** With
-  `F` declared `(unknown, unknown) -> unknown` and assigned
-  `(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the
-  function derived `-> collection<number>`, since the recursive call read the
-  declared result `unknown` while the body was typed, and an `unknown` operand
-  of `Join` may hold a set. The derivation now re-types the body under the
-  hypothesis that the result is a list and keeps it only when that pass
-  reproduces it, so `F` derives `-> list<number>` and `F(0, 5)` compiles; a
-  base clause that builds a set still derives `-> set`. (Tycho row 338.)
-
-### Behavior Changes
-
-- **A parenthesized derivative operand is delimited by its parentheses**
-  (#336). `\frac{d}{dx}(x)+1` parsed as `D(x + 1, x)`: the operand of a
-  Leibniz fraction took the whole sum that followed it, so the `+1` moved
-  inside the derivative, and a product or quotient written after the
-  parentheses (`\frac{d}{dx}(x)\cdot 2`) was absorbed the same way. An
-  operand that starts with a parenthesis, plain or sized (`(…)`,
-  `\left(…\right)`, `\bigl(…\bigr)`), now ends at that parenthesis:
-  `\frac{d}{dx}(x)+1` is `D(x, x) + 1` and evaluates to `2`,
-  `\frac{d}{dx}(x)\cdot 2` is `2·D(x, x)`. A superscript, prime or factorial
-  attached to the parenthesis stays inside the operand (`\frac{d}{dx}(x+1)^2`
-  is still `D((x+1)^2, x)`). The rule covers `\frac{\partial}{\partial x}(…)`
-  and the higher-order `\frac{d^n}{dx^n}(…)` forms. What changes meaning: a
-  factor juxtaposed after the parenthesis is now outside the derivative,
-  `\frac{d}{dx}(x+1)(x-1)` is `D(x+1, x)·(x-1)` where it was
-  `D((x+1)(x-1), x)`; write `\frac{d}{dx}((x+1)(x-1))` for the derivative of
+  claims nothing a declaration can refute; a composite with `unknown` components
+  was refused. `[(A[1], A[2], A[3], 1)]`, typed
+  `list<tuple<unknown, unknown, unknown, integer>>` while the type of `A` is not
+  known, is now accepted at a parameter declared
+  `list<tuple<number, number, number, number>>`, and checked when the call runs.
+  A component typed `any` is still refused (it admits the absence markers), and
+  so is a known component that does not fit. A generic signature
+  (`(tuple<T>) -> T where T: number`) admits the same arguments as the ground
+  one; signature subtyping is unchanged.
+- **An absent argument at an annotated parameter of a function is an error.**
+  With `function f(p: tuple<number, number>) { p[1] + 1 }`, the call
+  `f(first(filter(xs, c => c[1] > 9)))` has the argument `Missing` when the
+  filter finds nothing. It answered `NaN` (`Missing` when the body returns a
+  point): a function whose parameters are all numbers or collections answered
+  the absence marker without running its body. It now answers
+  `Error(ErrorCode("incompatible-type", "tuple<number, number>", "missing"), "Missing")`,
+  as the same function declared with `ce.declare("f", { signature: … })`
+  already did. The rule applies to a function literal with at least one
+  annotated parameter (an Epsil `function`, a lambda `(p: T) ↦ …`). An absent
+  value at a parameter annotated with a type that has no `missing` member is an
+  error. That includes `integer` and `real`, which exclude `nan`:
+  `f(x: real) = x + 1` answered `NaN` for `f(Missing)` and now answers the
+  error. A parameter whose annotation admits `nan` (`number`) reads the absent
+  value as `NaN`, the absence marker of a numeric domain, so
+  `f(x: number) = x + 1` still answers `NaN`. At a parameter with no
+  annotation the body runs with the absent value, as before. The type of such a call no longer
+  has a `missing` member (`list<…>`, not `list<…> | missing`), so `Count` and
+  `Length` over its result compile. What is lost: a call that relied on the
+  quiet `NaN` or `Missing` for an absent point, list, string, `integer` or
+  `real` argument. To accept absence, annotate the parameter `T | missing` and
+  test `isMissing(p)`, or remove the absent case at the call
+  (`first(…) ?? fallback`). At boxing, an argument typed `missing | T` is still
+  admitted at a parameter annotated `T`; the literal `Missing` there is an
+  `incompatible-type` error at boxing. Library operators are not affected
+  (`Sin(Missing)` is `NaN`).
+- **The Epsil static check reports an argument that may be absent at an
+  annotated parameter.** With `f(p: tuple<number, number>)`, the call
+  `f(first(filter(xs, p)))` is reported before the program runs: "expected
+  `tuple<number, number>`, got `missing | tuple<…>`". The program still runs.
+  Nothing is reported at a parameter with no annotation, at a parameter
+  annotated `T | missing` or `number`, or when the absent case is removed with
+  `??`. The engine (`ce.box`, `ce.parse`, compilation) admits the argument as
+  before. A function literal bound with `let` or `const` is checked as a
+  `function` definition is, and the inferred type of its bare parameters is no
+  longer enforced by the static check: `let k = (p, n: number) => p[1] + n`
+  followed by `k(5, 1)` is reported when the call runs.
+- **`First`, `Second`, `Third`, `Last` and `At` with a literal index are typed
+  without an absent member when the element exists.** `First([(1, 2), (3, 4)])`
+  was typed `missing | tuple<integer, integer>` and `First([7, 8, 9])` was
+  `integer | nan`. They are `tuple<integer, integer>` and `integer`: the absent
+  member is stated only when the access can find nothing. The element is proved
+  to exist from a list type with a length (`list<T^3>`, which is the type of a
+  list literal), from a string literal, or from a `Range` with literal bounds.
+  `First(Filter(xs, p))`, `First(xs)` for `xs` declared `list<T>`, `xs[i]` with
+  a variable index and an index past the end (`At([7, 8, 9], 99)`) keep the
+  member. What to check: a pinned printed type of such an access.
+  `type.matches("number")` answers as before.
+- **A parenthesized derivative operand is delimited by its parentheses** (#336).
+  `\frac{d}{dx}(x)+1` parsed as `D(x + 1, x)`: the operand of a Leibniz fraction
+  took the whole sum that followed it, so the `+1` moved inside the derivative,
+  and a product or quotient written after the parentheses
+  (`\frac{d}{dx}(x)\cdot 2`) was absorbed the same way. An operand that starts
+  with a parenthesis, plain or sized (`(…)`, `\left(…\right)`, `\bigl(…\bigr)`),
+  now ends at that parenthesis: `\frac{d}{dx}(x)+1` is `D(x, x) + 1` and
+  evaluates to `2`, `\frac{d}{dx}(x)\cdot 2` is `2·D(x, x)`. A superscript,
+  prime or factorial attached to the parenthesis stays inside the operand
+  (`\frac{d}{dx}(x+1)^2` is still `D((x+1)^2, x)`). The rule covers
+  `\frac{\partial}{\partial x}(…)` and the higher-order `\frac{d^n}{dx^n}(…)`
+  forms. What changes meaning: a factor juxtaposed after the parenthesis is now
+  outside the derivative, `\frac{d}{dx}(x+1)(x-1)` is `D(x+1, x)·(x-1)` where it
+  was `D((x+1)(x-1), x)`; write `\frac{d}{dx}((x+1)(x-1))` for the derivative of
   the product. An operand without a parenthesis keeps its term extent:
   `\frac{d}{dx}x^2+1` is still `D(x^2 + 1, x)`, the `\int … dx` integrand
   convention, and so does an operand in another enclosure (`\frac{d}{dx}|x|+1`
@@ -111,23 +122,117 @@
   a list, or a pinned printed type such as `indexed_collection<integer>`, reads
   differently. (Tycho row 337.)
 
+### New Features
+
+- **A type variable in a collection's length slot**
+  ([#364](https://github.com/cortex-js/compute-engine/issues/364), proposed by
+  [enumeratio](https://github.com/enumeratio)). A `where` variable may now name
+  a length: `(a: vector<real^N>, b: vector<real^N>) -> real where N` rejects a
+  call with mismatched lengths at the call site (`dot([1,2,3], [4,5])` reports
+  `expected vector<real^3>, got vector<integer^2>` on the second operand), and
+  `(matrix<T^(MxN)>, matrix<T^(NxP)>) -> matrix<T^(MxP)> where T, M, N, P`
+  states the shape of its result. The same variable at a parameter or result
+  position is the integer with that value, bound from a literal argument:
+  `(n: N, x: vector<T^N>) -> T where T, N` accepts `foo(3, [1,2,3])` and rejects
+  `foo(4, [1,2,3])`, and `(list<T^N>) -> N` types `len([1,2,3])` as `3`. A
+  length variable is solved by equality across positions, may carry an integer
+  bound (`where N: integer<2..>`), and an operand whose type states no length is
+  admitted as it is at a literal length. A nominal type may take a length
+  parameter: `type permutation<N> = list<integer^N>` makes
+  `permutation([2,1,3])` a `permutation<3>`, unrelated to `permutation<4>`; an
+  unsolved length prints as the family `permutation<integer<1..>>`. In the Epsil
+  language the same spellings work on a `function` head, with a trailing `where`
+  clause or the `<N>` binder. Not supported yet: arithmetic between lengths
+  (`^(M+N)`). The parameter kind is a general value kind, so boolean and string
+  parameters can follow once those literals carry singleton types. One reading
+  changed with it: a dimensioned pattern now binds its element variable after
+  peeling as many axes as it states, so `(x: matrix<T>) -> T where T` on a 2×2
+  matrix binds `T` to the scalar element (`integer`) rather than to a row; no
+  built-in signature was affected.
+
+- **More spellings of the arc-minute and arc-second markers in DMS angles**
+  ([#338](https://github.com/cortex-js/compute-engine/pull/338), contributed by
+  [yelliver](https://github.com/yelliver)). After a degree marker (`°`,
+  `\degree`, `^{\circ}`, `^\circ`), the minutes now accept `'`, `\prime`,
+  `^{\prime}` and `^\prime`, and the seconds accept `"`, `\prime\prime`,
+  `\doubleprime`, `^{\doubleprime}`, `^{\prime\prime}` and `^\doubleprime` (and,
+  added alongside, the ASCII `''`). The superscript spellings were parsed as
+  products of primes (`9^{\circ}30^{\prime}` was `Degrees(9) · Prime(30)`);
+  every spelling of `9°30'15"` now parses to the exact `2281/240` degrees. The
+  `siunitx` commands `\minute` and `\second` are deliberately not accepted: in
+  that package they are the time units, not the angle units.
+- **`ce.conformsTo(type, protocol)`: a public conformance query**
+  ([#362](https://github.com/cortex-js/compute-engine/issues/362), contributed
+  by [enumeratio](https://github.com/enumeratio)). Answers whether `type`
+  conforms to `protocol`, inheritance and conditional conformance included,
+  without calling one of the protocol's members and reading
+  `protocol-implementation-missing` as "no". `type` may be a plain type string,
+  parsed the way `ce.type()` parses one; an unknown protocol name answers
+  `false` rather than throwing.
+
 ### Issues Resolved
 
+- **A list variable reassigned in a loop could be typed `integer | list<…>`.**
+  In `for gap in [(A, C), (A, C)] { circles = g(gap[1], 2, circles) }`, a first
+  reading of the call's type, taken before the types of the loop were settled,
+  was `never`. `never` matches every type, so the type recorded for `circles`
+  gained an `integer` member that no assignment gives it, and the JavaScript
+  target declined `Length(circles)` and `Count(circles, …)` ("operand is not an
+  indexed collection") while the interpreter computed the value. A value typed
+  `never` now records nothing.
+- **The JavaScript target answered a wrong value for a function declared in the
+  compiled program and called with a list of points.** With
+  `function f(p: tuple<number, number>) { p[1] + 1 }` inside the program and
+  `xs` a list of two points, the interpreter applies `f` to each point and
+  answers `[2, 4]`. The compiled call passed the list whole and answered the
+  string `"1,21"`. The compiled call now maps over the points, as it already
+  did for a function defined on the engine (`ce.assign`). When the parameter
+  has no annotation and its type is only inferred as a point, the call fails to
+  compile with a message that names the argument, and the interpreter answers.
+- **A recursive Epsil program that builds a list through a local copied from an
+  untyped parameter compiles.**
+  `function fill(p, q, r, depth, acc) { let out = acc; for c in … { out = [...out, c]; out = fill(…, out) } … }`
+  declined on the JavaScript target with "Could not compile `ListJoin`: operand
+  1 is not an indexed collection", and the smaller
+  `function f(acc) { let out = acc; out = [...out, 1]; out }` compiled but
+  broadcast `f([0])` over the list. Two causes: the local copied from the
+  parameter kept the parameter untyped, so a use of the local as a collection
+  taught the parameter nothing; and a self-call inside a `function` body was
+  typed as a broadcast (`broadcastable<unknown>`) from the bare `function` type
+  the recursion knot declares, which widened the local past the list its spread
+  gives. Now the first use that narrows such a local narrows the parameter it
+  was copied from, and a self-call types `unknown` while the clause
+  canonicalizes and installs. The natural recursive spelling of the Apollonian
+  gasket compiles and computes its 224 circles in a few milliseconds; the
+  interpreter takes about 16 seconds. A self-recursive function whose base
+  clause reads its parameter whole now derives that clause's result
+  (`-> number`) instead of `-> broadcastable<unknown>`. (Tycho row 339.)
+
+- **A self-recursive function that builds a list is typed `list<T>`.** With `F`
+  declared `(unknown, unknown) -> unknown` and assigned
+  `(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the function
+  derived `-> collection<number>`, since the recursive call read the declared
+  result `unknown` while the body was typed, and an `unknown` operand of `Join`
+  may hold a set. The derivation now re-types the body under the hypothesis that
+  the result is a list and keeps it only when that pass reproduces it, so `F`
+  derives `-> list<number>` and `F(0, 5)` compiles; a base clause that builds a
+  set still derives `-> set`. (Tycho row 338.)
+
 - **A predicate over a finite `Range` compiles to a counting loop on the
-  JavaScript target; the range is no longer built.** `Count(Filter(1..n, k ↦
-  k mod 3 = 0))` compiled to an `Array.from` of the whole range, a `.filter`
-  into a second array, and a `.length`: about 27 ms at n = 10⁶, where a loop
-  that counts runs in about 2 ms. The compiled code now walks the range with
-  a counted `for` loop and calls the predicate on each element, allocating
-  nothing. The same walk serves `Length(Filter(range, p))`, `Count(range,
-  p)`, `CountIf(range, p)`, `Any(range, p)` and `All(range, p)`, which stop at
-  the first decisive element, the collection form of `Sum`/`Product` over a
-  filtered range, and a bare `Filter(range, p)`, which pushes the selected
-  elements into one list. The values are unchanged: the element count is
-  `_SYS.rangeCount`, the interpreter's own, and element `i` is `start + i ×
-  step`, so an empty, reversed, zero-step or float-step range answers what
-  the array lowering answered. The loop is not used when the range or the
-  `Filter` is re-mapped by the caller, shared by common-subexpression
+  JavaScript target; the range is no longer built.**
+  `Count(Filter(1..n, k ↦ k mod 3 = 0))` compiled to an `Array.from` of the
+  whole range, a `.filter` into a second array, and a `.length`: about 27 ms at
+  n = 10⁶, where a loop that counts runs in about 2 ms. The compiled code now
+  walks the range with a counted `for` loop and calls the predicate on each
+  element, allocating nothing. The same walk serves `Length(Filter(range, p))`,
+  `Count(range, p)`, `CountIf(range, p)`, `Any(range, p)` and `All(range, p)`,
+  which stop at the first decisive element, the collection form of
+  `Sum`/`Product` over a filtered range, and a bare `Filter(range, p)`, which
+  pushes the selected elements into one list. The values are unchanged: the
+  element count is `_SYS.rangeCount`, the interpreter's own, and element `i` is
+  `start + i × step`, so an empty, reversed, zero-step or float-step range
+  answers what the array lowering answered. The loop is not used when the range
+  or the `Filter` is re-mapped by the caller, shared by common-subexpression
   elimination, or has a non-finite or non-number bound; those keep the array
   lowering. A `Range` consumed any other way (`Map`, `Sum(range)`, indexing)
   still materializes. (Issue #373.)
@@ -382,54 +487,6 @@
   receiver type until the declarations change. A member call on a scalar
   receiver went from about 12× the cost of an equivalent plain function to about
   1.3× (#363, contributed by [enumeratio](https://github.com/enumeratio)).
-
-### New Features
-
-- **A type variable in a collection's length slot**
-  ([#364](https://github.com/cortex-js/compute-engine/issues/364), proposed by
-  [enumeratio](https://github.com/enumeratio)). A `where` variable may now name
-  a length: `(a: vector<real^N>, b: vector<real^N>) -> real where N` rejects a
-  call with mismatched lengths at the call site (`dot([1,2,3], [4,5])` reports
-  `expected vector<real^3>, got vector<integer^2>` on the second operand), and
-  `(matrix<T^(MxN)>, matrix<T^(NxP)>) -> matrix<T^(MxP)> where T, M, N, P`
-  states the shape of its result. The same variable at a parameter or result
-  position is the integer with that value, bound from a literal argument:
-  `(n: N, x: vector<T^N>) -> T where T, N` accepts `foo(3, [1,2,3])` and rejects
-  `foo(4, [1,2,3])`, and `(list<T^N>) -> N` types `len([1,2,3])` as `3`. A
-  length variable is solved by equality across positions, may carry an integer
-  bound (`where N: integer<2..>`), and an operand whose type states no length is
-  admitted as it is at a literal length. A nominal type may take a length
-  parameter: `type permutation<N> = list<integer^N>` makes
-  `permutation([2,1,3])` a `permutation<3>`, unrelated to `permutation<4>`; an
-  unsolved length prints as the family `permutation<integer<1..>>`. In the Epsil
-  language the same spellings work on a `function` head, with a trailing `where`
-  clause or the `<N>` binder. Not supported yet: arithmetic between lengths
-  (`^(M+N)`). The parameter kind is a general value kind, so boolean and string
-  parameters can follow once those literals carry singleton types. One reading
-  changed with it: a dimensioned pattern now binds its element variable after
-  peeling as many axes as it states, so `(x: matrix<T>) -> T where T` on a 2×2
-  matrix binds `T` to the scalar element (`integer`) rather than to a row; no
-  built-in signature was affected.
-
-- **More spellings of the arc-minute and arc-second markers in DMS angles**
-  ([#338](https://github.com/cortex-js/compute-engine/pull/338), contributed by
-  [yelliver](https://github.com/yelliver)). After a degree marker (`°`,
-  `\degree`, `^{\circ}`, `^\circ`), the minutes now accept `'`, `\prime`,
-  `^{\prime}` and `^\prime`, and the seconds accept `"`, `\prime\prime`,
-  `\doubleprime`, `^{\doubleprime}`, `^{\prime\prime}` and `^\doubleprime` (and,
-  added alongside, the ASCII `''`). The superscript spellings were parsed as
-  products of primes (`9^{\circ}30^{\prime}` was `Degrees(9) · Prime(30)`);
-  every spelling of `9°30'15"` now parses to the exact `2281/240` degrees. The
-  `siunitx` commands `\minute` and `\second` are deliberately not accepted: in
-  that package they are the time units, not the angle units.
-- **`ce.conformsTo(type, protocol)`: a public conformance query**
-  ([#362](https://github.com/cortex-js/compute-engine/issues/362), contributed
-  by [enumeratio](https://github.com/enumeratio)). Answers whether `type`
-  conforms to `protocol`, inheritance and conditional conformance included,
-  without calling one of the protocol's members and reading
-  `protocol-implementation-missing` as "no". `type` may be a plain type string,
-  parsed the way `ce.type()` parses one; an unknown protocol name answers
-  `false` rather than throwing.
 
 ## 0.141.0 _2026-09-29_
 
@@ -19603,13 +19660,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-              a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-              $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-              $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-              symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-              it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-              returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-              complex eigenvalues are now returned as complex numbers.
+                a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+                $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+                $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+                symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+                it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+                returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+                complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

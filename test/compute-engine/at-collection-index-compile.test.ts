@@ -193,12 +193,14 @@ describe('a collection-valued At is typed as a LIST, so parents compose', () => 
     // §3.C: a gather is `list<T | marker(T)>`; the marker of a numeric `T` is
     // the `nan` singleton, so the arm is additive and the element tier
     // survives (it used to absorb to a bare `number`). A mask filters, so it
-    // carries no marker at all. A scalar index is `T | marker(T)`.
+    // carries no marker at all. A scalar index is `T | marker(T)`, unless
+    // the source is proved to hold that position (user decision 2026-09-30).
     expect(at(['List', 1, 3]).type.toString()).toBe('list<integer | nan>');
     expect(at(['List', 'True', 'False', 'True']).type.toString()).toBe(
       'list<integer>'
     );
-    expect(at(2).type.toString()).toBe('integer | nan');
+    expect(at(2).type.toString()).toBe('integer');
+    expect(at(9).type.toString()).toBe('integer | nan');
   });
 
   test('arithmetic over a gather broadcasts elementwise', () => {

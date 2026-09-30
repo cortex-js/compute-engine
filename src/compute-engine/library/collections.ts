@@ -122,6 +122,7 @@ import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
 import { rangeCount } from '../numerics/range-count.js';
+import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
@@ -2431,8 +2432,99 @@ function componentTypeD(xs: OperandDescriptor, position: number): Type {
   return collectionElementType(t) ?? 'any';
 }
 
-/** Descriptor twin of {@link componentResultType}. */
-function componentResultTypeD(xs: OperandDescriptor, position: number): Type {
+/**
+ * The number of elements the operand is PROVED to hold, or `undefined` when
+ * nothing proves it. Read from pure sources only:
+ *
+ * - a list type with a length (`list<T^3>`, `vector<3>`, the rows of a
+ *   matrix): a list literal carries its length in its type, so `[7, 8, 9]` is
+ *   `vector<integer^3>` and answers 3;
+ * - a list literal whose type has no length;
+ * - a string literal: its characters (grapheme clusters, as `BoxedString`
+ *   counts them);
+ * - a `Range` whose bounds and step are number literals, counted with
+ *   `rangeCount()`, the function its own `count` handler uses.
+ *
+ * A symbol declared `list<T>` with no length, a `Filter`, a `Rest`, a range
+ * with a symbolic bound answer `undefined`: their length is a fact of the
+ * value, which can change or is not known before evaluation. A tuple type is
+ * not read here; the callers take its component types, one per position.
+ */
+function provenLengthD(d: OperandDescriptor): number | undefined {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t !== 'string' && t.kind === 'list') {
+    const n = t.dimensions?.[0];
+    if (n !== undefined && n >= 0) return n;
+  }
+  const s = d.structureOf?.();
+  if (s === undefined) return undefined;
+  if (s.kind === 'list-literal') return s.elements.length;
+  if (s.kind === 'string') return splitGraphemeClusters(s.text).length;
+  if (s.kind === 'application' && s.head === 'Range') {
+    const bounds = s.children.map((c) => descriptorLiteralValue(c));
+    if (bounds.length === 0 || bounds.length > 3) return undefined;
+    if (bounds.some((b) => b === undefined || !Number.isFinite(b)))
+      return undefined;
+    // The defaults of `literalRange()`: one operand is the upper bound of a
+    // range that starts at 1, and a range with no step counts towards its
+    // upper bound.
+    const [lower, upper, step] =
+      bounds.length === 1
+        ? [1, bounds[0]!, 1]
+        : bounds.length === 2
+          ? [bounds[0]!, bounds[1]!, bounds[1]! >= bounds[0]! ? 1 : -1]
+          : [bounds[0]!, bounds[1]!, bounds[2]!];
+    const n = rangeCount(lower, upper, step);
+    return Number.isInteger(n) && n >= 0 ? n : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The result type of an access at the literal position `position` (1-based,
+ * negative from the end) into an operand PROVED to hold `length` elements of
+ * type `element`: the element type, when the position exists. `undefined`
+ * otherwise, and the caller then keeps its `T | marker(T)` answer: when the
+ * element type is not known (`unknown`, `any`), and when the position does
+ * not exist.
+ *
+ * The absent member of an accessor's result (`missing` for a point, a string
+ * or a row, `nan` for a number) says that the access can find nothing. It is
+ * left out when that cannot happen (user decision 2026-09-30):
+ * `First([(1, 2)])` is typed `tuple<integer, integer>`, not
+ * `missing | tuple<integer, integer>`, while `First(Filter(xs, p))` keeps the
+ * member, because a filter can find nothing.
+ *
+ * A position proved NOT to exist keeps `T | marker(T)` on purpose, although
+ * the value is always the marker. A chained read chooses its marker from the
+ * element type the inner access states: with `M` a matrix of two rows,
+ * `M[7]` is typed `missing | vector<…>`, so `M[7][1]` is typed
+ * `number | nan` and answers `NaN`. Typed `missing` alone, the inner access
+ * no longer says that a row holds numbers, and `M[7][1]` answered `Missing`.
+ */
+function provenAccessType(
+  element: Type,
+  length: number,
+  position: number
+): Type | undefined {
+  if (element === 'unknown' || element === 'any') return undefined;
+  const i = position < 0 ? length + position + 1 : position;
+  return i >= 1 && i <= length ? element : undefined;
+}
+
+/**
+ * Descriptor twin of {@link componentResultType}.
+ *
+ * `absentBase` is `true` when the operand as a whole may be absent (the
+ * caller removed a top-level `missing` arm from its type): the access of an
+ * absent operand is absent, so the marker arm stays whatever the length of
+ * the present operand.
+ */
+function componentResultTypeD(
+  xs: OperandDescriptor,
+  position: number,
+  absentBase = false
+): Type {
   const t = xs.type;
   if (typeof t !== 'string' && t.kind === 'tuple') {
     const n = t.elements.length;
@@ -2440,7 +2532,29 @@ function componentResultTypeD(xs: OperandDescriptor, position: number): Type {
     if (i >= 1 && i <= n) return t.elements[i - 1].type;
     return markerType(widenAll(t.elements.map((x) => x.type)) as Type);
   }
-  return withMarker(componentTypeD(xs, position));
+  const element = componentTypeD(xs, position);
+  if (!absentBase) {
+    const length = provenLengthD(xs);
+    const proven =
+      length === undefined
+        ? undefined
+        : provenAccessType(element, length, position);
+    if (proven !== undefined) return proven;
+  }
+  return withMarker(element);
+}
+
+/**
+ * The result type of `First`, `Second`, `Third` and `Last` (`position` 1, 2,
+ * 3 and -1) over the operand `xs`. These operators own their absence
+ * semantics (`missingBehavior: 'handle'`), so the operand reaches their type
+ * handler with its `missing` arm; the result is derived from the present
+ * operand (`presentArmOf`), and keeps its marker arm when the operand itself
+ * may be absent.
+ */
+function accessorResultTypeD(xs: OperandDescriptor, position: number): Type {
+  const present = presentArmOf(xs);
+  return componentResultTypeD(present, position, present !== xs);
 }
 
 /**
@@ -9747,6 +9861,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         } else if (t.kind === 'tuple') {
           return tupleResult(t);
         }
+        // A literal integer index into an operand PROVED to hold that
+        // position: the element type, with no marker (`provenAccessType`).
+        // Only for the operand's own type: the recursive call above reads a
+        // part of a union, which the operand's length says nothing about.
+        if (
+          t === ops[0].type &&
+          key !== undefined &&
+          isSubtype(key.type, 'integer')
+        ) {
+          const raw = descriptorLiteralValue(key);
+          const length = provenLengthD(ops[0]);
+          if (
+            length !== undefined &&
+            typeof raw === 'number' &&
+            Number.isInteger(raw)
+          ) {
+            const proven = provenAccessType(elementType(t), length, raw);
+            if (proven !== undefined) return proven;
+          }
+        }
         return withMarker(elementType(t));
       };
 
@@ -10437,7 +10571,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
-        componentResultTypeD(presentArmOf(xs), 1),
+        accessorResultTypeD(xs, 1),
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
@@ -10454,7 +10588,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
-        componentResultTypeD(presentArmOf(xs), 2),
+        accessorResultTypeD(xs, 2),
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
@@ -10471,7 +10605,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
-        componentResultTypeD(presentArmOf(xs), 3),
+        accessorResultTypeD(xs, 3),
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
@@ -10605,7 +10739,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
-        componentResultTypeD(presentArmOf(xs), -1),
+        accessorResultTypeD(xs, -1),
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),

@@ -2036,6 +2036,14 @@ function joinEvidenceOnBinding(
 ): boolean {
   // A binding whose evidence was lost in this session stays `unknown`.
   if (isEvidenceLost(ce, target)) return false;
+  // A value typed `never` claims no value, so it is no evidence. `never` is
+  // the bottom type and matches every type, so the widening table below read
+  // it as an integer, and the binding gained an `integer` member that no
+  // assignment gives it: with `circles` a list of points, a first read of
+  // `circles = g(gap[1], 2, circles)` inside a `for` loop, taken before the
+  // types of the loop settled, typed the call `never`, `circles` became
+  // `integer | list<…>`, and the JavaScript target declined `Length(circles)`.
+  if (assignedType === 'never') return false;
   const widened = widenAssignedType(ce, assignedType);
   const recorded = target.type;
   const joined = recorded.isUnknown

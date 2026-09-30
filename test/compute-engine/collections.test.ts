@@ -1143,9 +1143,13 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // (list<finite_…^dims>).
     expect(m.type.toString()).toMatchInlineSnapshot(`matrix<integer^(3x3)>`);
     // A single index into the matrix yields a row (vector), not a scalar. The
-    // access may be out of band, so the honest type carries the `| missing`
-    // arm (§3.C `T | marker(T)`).
+    // type of `mtx` states three rows, so row 2 exists and the type has no
+    // `| missing` arm (user decision 2026-09-30). A row that does not exist
+    // keeps `T | marker(T)` (§3.C).
     expect(engine.box(['At', 'mtx', 2]).type.toString()).toMatchInlineSnapshot(
+      `vector<integer^3>`
+    );
+    expect(engine.box(['At', 'mtx', 7]).type.toString()).toMatchInlineSnapshot(
       `missing | vector<integer^3>`
     );
     // Nested `At` validates and evaluates (1-based indexing): row 2, column 1.
@@ -1158,12 +1162,18 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     engine.assign('vec', engine.box(list));
     // Phase C representation unification: literal lists type honestly, so a
     // single index reports the honest element type.
-    // §3.C: `At(list<T>, i) : T | marker(T)`. The marker of a numeric `T` is
-    // the `nan` singleton, so the arm is ADDITIVE and the element tier
-    // survives. It used to absorb to a bare `number` on the reasoning that
-    // `NaN ∈ number`; the finite-by-default lattice flip repealed that
-    // premise (`docs/ERROR-MODEL.md` §7, the 2026-08-28 `markerType` entry).
+    // §3.C: `At(list<T>, i) : T | marker(T)` when the access may find
+    // nothing. The marker of a numeric `T` is the `nan` singleton, so the arm
+    // is ADDITIVE and the element tier survives. It used to absorb to a bare
+    // `number` on the reasoning that `NaN ∈ number`; the finite-by-default
+    // lattice flip repealed that premise (`docs/ERROR-MODEL.md` §7, the
+    // 2026-08-28 `markerType` entry). The type of `vec` states its length,
+    // so position 1 exists and is typed `integer` (user decision
+    // 2026-09-30); a position past the end keeps the marker.
     expect(engine.box(['At', 'vec', 1]).type.toString()).toMatchInlineSnapshot(
+      `integer`
+    );
+    expect(engine.box(['At', 'vec', 99]).type.toString()).toMatchInlineSnapshot(
       `integer | nan`
     );
     expect(evaluate(['At', 'vec', 1])).toMatchInlineSnapshot(`7`);

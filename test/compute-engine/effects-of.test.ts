@@ -240,9 +240,12 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
     // a union with one signature member and one that is not. The callable gate
     // must stay in lockstep with the reader, which unions across members:
     // bailing on the union would silently report a drawing callback pure.
+    // The index is a variable: with a literal index that the list is proved
+    // to hold, the access has no `missing` member and the type is not a union.
     const ce = new ComputeEngine();
     ce.assign('rf', ce.parse('x \\mapsto \\mathrm{Random}()'));
-    ce.assign('picked', ce.box(['At', ['List', 'rf'], 1]));
+    ce.declare('k', 'integer');
+    ce.assign('picked', ce.box(['At', ['List', 'rf'], 'k']));
     const def = ce.lookupDefinition('picked');
     const t = def !== undefined && 'value' in def ? def.value.type.toString() : '';
     expect(t).toContain('|');

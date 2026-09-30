@@ -32,6 +32,7 @@ import {
   isDictionary,
   isString,
   isNumber,
+  isAbsentSymbol,
   sym,
 } from './boxed-expression/type-guards.js';
 import {
@@ -3107,6 +3108,32 @@ function makeLambda(
     return changed ? { ...t, args: relaxed } : t;
   };
 
+  // The parameters whose annotation has `nan` as a member (`x: number`,
+  // `x: real | nan`). An absent value (`Missing`, `Undefined`) bound to one
+  // of them is read as `NaN`, the absence marker of a numeric domain
+  // (`docs/ERROR-MODEL.md` §3, "In a numeric slot, `Missing` is normalized to
+  // `NaN` at the boundary"): `f(x: number) = x + 1` answers `NaN` for
+  // `f(Missing)`, as `Missing + 1` does. At a parameter annotated with any
+  // other type the absent value stays as it is, and the validation below
+  // refuses it with `incompatible-type` unless the annotation has a
+  // `missing` member (user decision 2026-09-30). That includes a numeric
+  // type that excludes `nan` (`integer`, `real`): converting the value there
+  // gave an error that named `NaN`, a value the caller did not write, where
+  // the argument was `Missing`.
+  const nanParamIndexes = params.reduce<number[]>((acc, p, i) => {
+    const t = functionLiteralParameterType(p);
+    if (t !== undefined && isSubtype('nan', t)) acc.push(i);
+    return acc;
+  }, []);
+  const absorbAbsenceAtNumericParams = (
+    values: Expression[]
+  ): Expression[] =>
+    nanParamIndexes.length === 0
+      ? values
+      : values.map((v, i) =>
+          nanParamIndexes.includes(i) && isAbsentSymbol(v) ? ce.NaN : v
+        );
+
   // The return-type ascription operand (§4.2 marker: the last Block statement
   // wrapped in `["Typed", stmt, type]`), reused verbatim when re-attaching the
   // return type onto a curried literal (§6.5 point 3). `undefined` when the
@@ -3325,7 +3352,9 @@ function makeLambda(
       }
 
       // Evaluate body with known args in a fresh scope
-      let evaluatedKnownArgs = args.map(argValue);
+      let evaluatedKnownArgs = absorbAbsenceAtNumericParams(
+        args.map(argValue)
+      );
 
       // An argument that only became an error when EVALUATED (`f(g(1))` with
       // `g(1)` failing) bubbles like a literal one — see step 2.
@@ -3484,7 +3513,7 @@ function makeLambda(
     //
     // 4/ Evaluate arguments in the calling scope before switching context
     //
-    let evaluatedArgs = args.map(argValue);
+    let evaluatedArgs = absorbAbsenceAtNumericParams(args.map(argValue));
 
     // An argument that only became an error when EVALUATED (`f(g(1))` with
     // `g(1)` failing) bubbles like a literal one — see step 2.

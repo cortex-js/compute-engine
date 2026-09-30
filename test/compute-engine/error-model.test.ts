@@ -2936,14 +2936,25 @@ describe('ERROR-MODEL §5 — the absence marker of a numeric slot types `nan`',
     expect(ce.box(['At', ['List', 1, 2, 3], 99]).type.toString()).toBe(
       'integer | nan'
     );
-    expect(ce.box(['First', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'integer | nan'
-    );
-    expect(ce.box(['Last', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'integer | nan'
-    );
     expect(ce.box(['At', ['List', 1.5, 2.5], 9]).type.toString()).toBe(
       'nan | real'
+    );
+    // An access that may find nothing: the length of a filter's result is
+    // not known before evaluation.
+    const kept = ['Filter', ['List', 1, 2, 3], ['Function', ['Less', 'x', 9], 'x']];
+    expect(ce.box(['First', kept]).type.toString()).toBe('integer | nan');
+    expect(ce.box(['Last', kept]).type.toString()).toBe('integer | nan');
+  });
+
+  test('an access proved to find an element has no marker', () => {
+    // User decision 2026-09-30: the marker is stated only when the access
+    // can find nothing. A list literal carries its length in its type, so
+    // its first and last elements exist.
+    expect(ce.box(['First', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'integer'
+    );
+    expect(ce.box(['Last', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'integer'
     );
   });
 

@@ -463,11 +463,12 @@ describe('(e) point-accessor RESULT typing follows the runtime dispatch', () => 
   const ce = new ComputeEngine();
 
   test('the flat point spelling types a SCALAR', () => {
-    // A scalar, not a `vector<2>`. The `| nan` arm is the coordinate slot's
-    // absence marker (`withMarker`, §3.C): a numeric slot's marker is the
-    // `nan` singleton, so the arm is additive and the tier survives.
+    // A scalar, not a `vector<2>`. The list literal is proved to hold a
+    // first element, so the coordinate has no absence marker (user decision
+    // 2026-09-30); a list whose length is not known keeps `T | nan`
+    // (`withMarker`, §3.C).
     const e = ce.box(['PointX', ['List', 3, 4]]);
-    expect(e.type.toString()).toBe('integer | nan');
+    expect(e.type.toString()).toBe('integer');
     expect(e.evaluate().toString()).toBe('3');
   });
 

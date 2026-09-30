@@ -209,8 +209,17 @@ describe('P1 — out-of-band access markers (§3.C)', () => {
   });
 
   test('First(list<integer>) : integer | nan (T | marker(T), additive)', () => {
+    // The length of a filter's result is not known before evaluation, so
+    // its first element may be absent.
+    const kept = ['Filter', ['List', 1, 2, 3], ['Function', ['Less', 'x', 9], 'x']];
+    expect(ce.box(['First', kept]).type.toString()).toBe('integer | nan');
+  });
+
+  test('First of a list proved to hold an element : integer', () => {
+    // User decision 2026-09-30: no marker when the access cannot find
+    // nothing. A list literal carries its length in its type.
     expect(ce.box(['First', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'integer | nan'
+      'integer'
     );
   });
 });

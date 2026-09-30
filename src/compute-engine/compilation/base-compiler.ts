@@ -22684,6 +22684,102 @@ export class BaseCompiler {
 
     const declared = literal.type?.type;
 
+    // A LIST OF POINTS at a parameter ANNOTATED as a point
+    // (`isPointListArgumentType`). The interpreter applies the function to
+    // each point and answers the list of the results, and the compiled call
+    // does the same, with the map the engine-defined route emits
+    // (`tryCompilePointListCall`): `list.map((p) => f(p, …))`, every other
+    // argument evaluated once, before the map, and passed whole. The
+    // ordinary call passed the list whole: with
+    // `function f(p: tuple<number, number>) { p[1] + 1 }` and `xs` a list of
+    // two points, `f(xs)` read the first POINT as the first coordinate and
+    // answered the string `"1,21"`, where the interpreter answers `[2, 4]`.
+    //
+    // Only an annotation is mapped. The type the literal reports for a bare
+    // parameter is inferred from the body (`(p) => h(p)` with `h` taking a
+    // point), and the interpreter binds a list whole at a bare parameter
+    // (the map then happens inside the body, at the call of `h`). The
+    // compiled body was typed for ONE point, so its inner call is an
+    // ordinary call and would receive the list whole: that call fails
+    // closed below.
+    //
+    // The call fails closed where the engine-defined route does: on a target
+    // other than JavaScript, when two arguments are lists of points, and
+    // when another parameter is annotated with a complex type. A call with
+    // constant arguments never reaches this: it folded above.
+    const annotations = args.map((_a, i) =>
+      functionLiteralParameterType(literal.ops[i + 1])
+    );
+    const mapped = args.map((a, i) => {
+      const pt = annotations[i];
+      return (
+        pt !== undefined &&
+        !isTuple(a) &&
+        isPointListArgumentType(a.type.type, pt)
+      );
+    });
+    args.forEach((a, i) => {
+      if (annotations[i] !== undefined || isTuple(a)) return;
+      const inferred = BaseCompiler.signatureParamType(declared, i);
+      if (
+        inferred !== undefined &&
+        isPointListArgumentType(a.type.type, inferred)
+      )
+        throw new Error(
+          `Could not compile \`${h}\`: argument ${i + 1} is a list of points ` +
+            `at a parameter with no annotation, whose type is inferred as ` +
+            `one point from the body. The compiled body reads one point, so ` +
+            `it cannot receive the list. Annotate the parameter as a point ` +
+            `to apply the function to each point, or as a list of points.`
+        );
+    });
+    const at = mapped.indexOf(true);
+    if (at >= 0) {
+      const reason =
+        `Could not compile \`${h}\`: argument ${at + 1} is a list of points ` +
+        `at a parameter declared as a point, and the interpreter applies the ` +
+        `block-local function to each point.`;
+      if (target.language !== 'javascript')
+        throw new Error(
+          `${reason} A list of points is not a value the ` +
+            `'${target.language ?? 'unknown'}' target can map a function over.`
+        );
+      if (mapped.lastIndexOf(true) !== at)
+        throw new Error(
+          `${reason} More than one argument is a list of points, and the ` +
+            `compiled call maps over one list only.`
+        );
+      if (
+        annotations.some(
+          (pt, i) => i !== at && pt !== undefined && isNonRealNumber(pt)
+        )
+      )
+        throw new Error(
+          `${reason} Another argument is bound to a complex-typed parameter, ` +
+            `which the compiled map does not convert.`
+        );
+      const callee = target.var(h) ?? h;
+      const codes = args.map((a) =>
+        BaseCompiler.compileValueOperand(a, target)
+      );
+      const temps = args.map(() => BaseCompiler.tempVar(target));
+      const point = BaseCompiler.tempVar(target);
+      const callArgs = temps.map((t, i) => (i === at ? point : t));
+      // A list that may be absent, or whose points may be absent: `Missing`
+      // lowers to `undefined`, and the interpreter answers `Missing` for an
+      // absent list and for the cell of an absent point, so the map does
+      // the same.
+      const absent = typeContainsMissing(args[at].type.type);
+      const listGuard = absent
+        ? `${temps[at]} === undefined ? undefined : `
+        : '';
+      const pointGuard = absent ? `${point} === undefined ? undefined : ` : '';
+      return (
+        `((${temps.join(', ')}) => ${listGuard}${temps[at]}.map((${point}) => ` +
+        `${pointGuard}${callee}(${callArgs.join(', ')})))(${codes.join(', ')})`
+      );
+    }
+
     // The signature gates the ENGINE-defined route enforces, applied to the
     // declared LITERAL's signature. They are about what the emitted call would
     // COMPUTE, not about whether the callee can be emitted, so a local is no

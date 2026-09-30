@@ -2608,6 +2608,13 @@ export interface BoxedOperatorDefinition
    * selects the positions. */
   stripsMissingAt(i: number): boolean;
 
+  /** True for a function literal whose parameter annotations are enforced at
+   * a call (at least one annotated parameter). Such a function admits an
+   * argument typed `missing | T` at boxing, and answers an
+   * `incompatible-type` error when the value is absent at a parameter whose
+   * annotation has no `missing` member. */
+  readonly enforcesParameterAnnotations: boolean;
+
   /** True if the `threadsConditionals` flag of
    * {@link OperatorDefinitionFlags} selects operand position `i`: a
    * conditional value (`When`, `Which`) there moves out of the application at

@@ -1006,32 +1006,75 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     if (this.missingBehavior) return this.missingBehavior;
     const signature = this.signature.type;
     const inferred = this.inferredSignature === true;
+    const lambda = this._isLambda;
     const memo = this._resolvedMissingBehaviorMemo;
     if (
       memo !== undefined &&
       memo.signature === signature &&
-      memo.inferred === inferred
+      memo.inferred === inferred &&
+      memo.lambda === lambda
     )
       return memo.behavior;
     // undeclared ∧ ¬inferredSignature ∧ every parameter numeric, collection or
     // function, one of them numeric or collection → propagate
+    //
+    // A function literal never propagates (user decision 2026-09-30). Its
+    // application checks each argument against the parameter's annotation
+    // (`apply()`, `function-utils.ts`), so an absent argument at a parameter
+    // annotated `T` is an `incompatible-type` error, and at a bare parameter
+    // the body runs with the absent value. With `propagate`, the absence
+    // check answered the marker before the application ran: with
+    // `f(p: tuple<number, number>) = p[1] + 1`, `f(Missing)` was `NaN`,
+    // while the same function declared with `ce.declare` and a signature was
+    // an error. The type of the call also gained a `missing` member, which
+    // the compile targets decline (`Count` over `list<…> | missing`).
     const behavior =
-      !inferred && signatureParamsPropagateAbsence(signature)
+      !inferred && !lambda && signatureParamsPropagateAbsence(signature)
         ? 'propagate'
         : 'pass-through';
-    this._resolvedMissingBehaviorMemo = { signature, inferred, behavior };
+    this._resolvedMissingBehaviorMemo = {
+      signature,
+      inferred,
+      lambda,
+      behavior,
+    };
     return behavior;
   }
 
-  /** Memo of `resolvedMissingBehavior`, keyed by the signature object and
-   * the `inferredSignature` flag it was computed from. */
+  /** Memo of `resolvedMissingBehavior`, keyed by the signature object, the
+   * `inferredSignature` flag and the `_isLambda` flag it was computed from. */
   private _resolvedMissingBehaviorMemo:
     | {
         signature: Type;
         inferred: boolean;
+        lambda: boolean;
         behavior: 'propagate' | 'pass-through';
       }
     | undefined = undefined;
+
+  /**
+   * True for a function literal whose parameter annotations are enforced at
+   * a call: the literal annotates at least one parameter, so its signature
+   * is a contract and not an inference (`inferredSignature` is false).
+   *
+   * Two consequences at the call, both from the user decisions of
+   * 2026-09-30. An argument that MAY be absent (typed `missing | T`) is
+   * admitted at boxing when `T` fits the parameter, because its value is
+   * usually present and is checked when the call runs; the box route passes
+   * this flag as the `stripMissing` answer of `validateArguments()`. And the
+   * Epsil static pre-pass, which is stricter than the engine, reports such an
+   * argument at a parameter whose annotation admits neither `missing` nor
+   * `nan` (`refusesAbsentArgument`, `validate.ts`), since an Epsil author can
+   * remove the absent case with `??`. An argument typed `missing` alone is
+   * refused there on every route.
+   */
+  get enforcesParameterAnnotations(): boolean {
+    return (
+      this._isLambda &&
+      this.inferredSignature !== true &&
+      this.missingBehavior === undefined
+    );
+  }
 
   stripsMissingAt(i: number): boolean {
     const b = this.resolvedMissingBehavior;

@@ -440,6 +440,9 @@ interface BoxedOperatorDefinition
   readonly resolvedMissingBehavior:
     'reject' | 'propagate' | 'handle' | 'pass-through';
   stripsMissingAt(i: number): boolean;
+  /** True for a function literal whose parameter annotations are enforced at
+   * a call. See `types-definitions.ts`. */
+  readonly enforcesParameterAnnotations: boolean;
   /** True if a conditional value in operand position `i` moves out of the
    * application at evaluation. See `types-definitions.ts`. */
   threadsConditionalsAt(i: number): boolean;
