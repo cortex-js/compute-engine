@@ -592,6 +592,9 @@ describe('snapshot completeness — the drift guard', () => {
     '_signatureMemo',
     // A re-entrancy guard of `_deriveSignature`, true only during the call.
     '_derivingSignature',
+    // The list hypothesis a recursive call reads while `_deriveSignature`
+    // verifies it, set only during that pass.
+    '_recursionResult',
   ]);
 
   const OPERATOR_DEF_EXCLUSIONS = new Set([
@@ -608,6 +611,9 @@ describe('snapshot completeness — the drift guard', () => {
     '_signatureMemo',
     // A re-entrancy guard of `_deriveSignature`, true only during the call.
     '_derivingSignature',
+    // The list hypothesis a recursive call reads while `_deriveSignature`
+    // verifies it, set only during that pass.
+    '_recursionResult',
   ]);
 
   test('every mutable field of a value definition is in its snapshot', () => {

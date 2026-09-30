@@ -10,7 +10,9 @@ import {
   collectCalleeHomes,
   declaredResultMemoKey,
   noteCalleeHomes,
+  inListHypothesisPass,
   resultUnderDeclaredParameters,
+  verifiedListHypothesis,
   withSignatureResult,
   type HomeScope,
 } from './declared-parameter-result.js';
@@ -731,6 +733,26 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * transient re-entrancy guard, not state. */
   private _derivingSignature = false;
 
+  /** The result type a RECURSIVE call of this function reads while
+   * {@link _deriveSignature} runs its fixpoint: the re-entrant read answers
+   * the stored signature with its result slot replaced by this type. It is
+   * `undefined` outside the fixpoint, where the re-entrant read answers the
+   * stored signature unchanged. Transient, not state. */
+  private _recursionResult: Type | undefined = undefined;
+
+  /** The stored signature with its result slot replaced by the current
+   * recursion candidate, for a re-entrant read (see
+   * {@link _recursionResult}). */
+  private _recursiveReadSignature(): BoxedType {
+    const stored = this._signature;
+    const candidate = this._recursionResult;
+    if (candidate === undefined) return stored;
+    return new BoxedType(
+      withSignatureResult(stored.type, candidate),
+      this.engine._typeResolver
+    );
+  }
+
   private _deriveSignature(): BoxedType {
     const stored = this._signature;
     const skeleton = this._signatureSkeleton;
@@ -739,13 +761,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       skeleton === undefined ||
       literal === undefined ||
       !this._isLambda ||
-      this.inferredSignature ||
-      this._derivingSignature
+      this.inferredSignature
     )
       return stored;
     // A recursive body reads this signature while the lambda's type is
-    // computed. The re-entrant read gets the stored signature and is not
-    // memoized, so the cycle stops after one level.
+    // computed. The re-entrant read gets the stored signature (or, inside
+    // the recursion fixpoint below, the stored signature with the current
+    // candidate as its result) and is not memoized, so the cycle stops after
+    // one level.
+    if (this._derivingSignature) return this._recursiveReadSignature();
     let lambdaType: BoxedType;
     this._derivingSignature = true;
     try {
@@ -813,6 +837,33 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       } finally {
         this._derivingSignature = false;
       }
+      // A self-recursive body whose result is an abstract collection is
+      // re-typed under the hypothesis that the result is a list, and the
+      // hypothesis is kept only when that pass bears it out
+      // (`verifiedListHypothesis`, which explains the rule). The re-entrant
+      // read of a recursive call answers the hypothesis through
+      // `_recursionResult`.
+      const verified = verifiedListHypothesis(
+        this.engine,
+        literal,
+        skeleton,
+        this.name,
+        typedResult ?? functionResult(lambdaType.type),
+        (candidate, thunk) => {
+          this._recursionResult = candidate;
+          this._derivingSignature = true;
+          try {
+            return thunk();
+          } finally {
+            this._derivingSignature = false;
+            this._recursionResult = undefined;
+          }
+        }
+      );
+      if (verified !== undefined) {
+        typedResult = verified.result;
+        calleeHomes = verified.homes;
+      }
       type = new BoxedType(
         refineDeclaredPlaceholders(
           base,
@@ -828,7 +879,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // key, so a result computed in the discarded trial would still match
     // after the rollback (the effects memo below refuses to stamp there for
     // the same reason).
-    if (this.engine._rollbackFrames.length === 0)
+    // Nor while a list-hypothesis pass of any definition runs: this
+    // derivation may have read a hypothesis that is then refuted
+    // (`inListHypothesisPass`).
+    if (this.engine._rollbackFrames.length === 0 && !inListHypothesisPass())
       this._signatureMemo = {
         stored,
         skeleton,

@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- **A self-recursive function that builds a list is typed `list<T>`.** With
+  `F` declared `(unknown, unknown) -> unknown` and assigned
+  `(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the
+  function derived `-> collection<number>`, since the recursive call read the
+  declared result `unknown` while the body was typed, and an `unknown` operand
+  of `Join` may hold a set. The derivation now re-types the body under the
+  hypothesis that the result is a list and keeps it only when that pass
+  reproduces it, so `F` derives `-> list<number>` and `F(0, 5)` compiles; a
+  base clause that builds a set still derives `-> set`. (Tycho row 338.)
+
 ### Behavior Changes
 
 - **A `Range`, a `Linspace`, a comprehension and a `Tabulate` are typed

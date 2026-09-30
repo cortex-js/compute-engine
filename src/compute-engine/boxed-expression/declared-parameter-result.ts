@@ -1,6 +1,7 @@
 import type { Type } from '../../common/type/types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import type { Expression, IComputeEngine, Scope } from '../global-types.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { functionResult, returnTypeText } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
@@ -52,7 +53,15 @@ function homeScopeOf(literal: Expression) {
 export function resultUnderDeclaredParameters(
   ce: IComputeEngine,
   literal: Expression,
-  declared: Type
+  declared: Type,
+  options?: {
+    /** Box the literal again even when no parameter takes a declared type.
+     * The recursion fixpoint of `_deriveSignature`
+     * (`boxed-operator-definition.ts`) needs a fresh boxing of the body on
+     * every pass, since the stored literal's type is memoized and its
+     * recursive call was typed under an earlier result. */
+    rebox?: boolean;
+  }
 ): Type | undefined {
   if (
     !isFunction(literal, 'Function') ||
@@ -73,7 +82,7 @@ export function resultUnderDeclaredParameters(
     changed = true;
     return ['Typed', p.json, `'${returnTypeText(t)}'`] as MathJsonExpression;
   });
-  if (!changed) return undefined;
+  if (!changed && options?.rebox !== true) return undefined;
   const home = homeScopeOf(literal);
   if (home === undefined) return undefined;
   let result: Type | undefined;
@@ -243,4 +252,106 @@ export function calleeHomesDeclarationCount(
 /** `t` with its result replaced by `result`, when `t` is a signature. */
 export function withSignatureResult(t: Type, result: Type): Type {
   return typeof t === 'object' && t.kind === 'signature' ? { ...t, result } : t;
+}
+
+/**
+ * The list hypothesis for the result of a self-recursive function: `t` with
+ * every abstract `collection<T>` (and the bare `collection`) replaced by the
+ * `list` of the same elements, at the top level and in the arms of a union.
+ * `undefined` when `t` holds no abstract collection, so there is nothing to
+ * hypothesize.
+ */
+function listHypothesisOf(t: Type): Type | undefined {
+  if (t === 'collection') return 'list';
+  if (typeof t !== 'object') return undefined;
+  if (t.kind === 'collection') return { kind: 'list', elements: t.elements };
+  if (t.kind === 'union') {
+    let changed = false;
+    const types = t.types.map((arm) => {
+      const h = listHypothesisOf(arm);
+      if (h === undefined) return arm;
+      changed = true;
+      return h;
+    });
+    return changed ? { kind: 'union', types } : undefined;
+  }
+  return undefined;
+}
+
+/** The number of list-hypothesis passes in flight, in this process (a pass
+ * is a dynamic extent of the host call stack, as the object-dependency
+ * collectors are). Read by {@link inListHypothesisPass}. */
+let hypothesisPassDepth = 0;
+
+/**
+ * True while a list-hypothesis pass runs ({@link verifiedListHypothesis}).
+ * A signature derived inside the pass may have read the hypothesis through
+ * a mutual recursion (`F` calls `G`, `G` calls `F`, and `G`'s signature is
+ * derived while `F`'s pass re-boxes `F`'s body), so no signature memo may be
+ * written then: a memo written under a hypothesis that is then refuted would
+ * serve a result no derivation stands behind. Each `_deriveSignature` reads
+ * this before it stores its memo.
+ */
+export function inListHypothesisPass(): boolean {
+  return hypothesisPassDepth > 0;
+}
+
+/**
+ * The result type of a SELF-RECURSIVE function literal, verified under the
+ * hypothesis that it is a list, or `undefined` when the hypothesis does not
+ * apply or is refuted.
+ *
+ * The recursive call reads the declared result, `unknown`, while the body is
+ * typed, and an `unknown` operand of `Join` or `Append` says nothing about
+ * what it holds, so `Join([n], F(n + 1, K))` was typed `collection<number>`
+ * (an operand that may hold a set) although the recursive call returns the
+ * function's own result (row 338 of the Tycho ledger,
+ * `tycho/docs/COMPUTE_ENGINE.md`). The hypothesis replaces every abstract
+ * `collection<T>` of `derived` (the result the plain derivation gave) by
+ * `list<T>`, and the body is boxed once more with the recursive call reading
+ * it: `withCandidate` runs its thunk with the definition answering the
+ * hypothesis to a re-entrant signature read. The pass answers `result`, and
+ * the hypothesis is accepted when `result` is a subtype of it: the body's
+ * type equation `T = f(T)` is monotone in `T`, so a `T` with `f(T) <: T` lies
+ * above the least fixpoint, which is the function's true result, and so does
+ * `f(T)`, which is the tighter of the two and is what is returned. A base
+ * clause that builds a set refutes the hypothesis (the pass answers
+ * `set<T>`), and the caller keeps `derived`. Seeding a fixpoint iteration
+ * with `never` was tried first and rejected: an operand typed `never` is read
+ * as an absent value, and a conditional with such an arm is typed `never` as
+ * a whole. Only a body that names the function and derives an abstract
+ * collection is re-boxed; every other body pays nothing.
+ */
+export function verifiedListHypothesis(
+  ce: IComputeEngine,
+  literal: Expression,
+  skeleton: Type,
+  name: string,
+  derived: Type | undefined,
+  withCandidate: <T>(candidate: Type, thunk: () => T) => T
+): { result: Type; homes: HomeScope[] } | undefined {
+  if (
+    typeof skeleton !== 'object' ||
+    skeleton.kind !== 'signature' ||
+    skeleton.result !== 'unknown' ||
+    derived === undefined ||
+    !literal.has(name)
+  )
+    return undefined;
+  const hypothesis = listHypothesisOf(derived);
+  if (hypothesis === undefined) return undefined;
+  let result: Type | undefined;
+  let homes: HomeScope[] = [];
+  hypothesisPassDepth += 1;
+  try {
+    ({ result, homes } = withCandidate(hypothesis, () =>
+      collectCalleeHomes(() =>
+        resultUnderDeclaredParameters(ce, literal, skeleton, { rebox: true })
+      )
+    ));
+  } finally {
+    hypothesisPassDepth -= 1;
+  }
+  if (result === undefined || !isSubtype(result, hypothesis)) return undefined;
+  return { result, homes };
 }

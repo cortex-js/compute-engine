@@ -213,6 +213,35 @@ operand may hold a set. The same change on `Append` made the nested structural
 form and the flattened form of a variadic `Append` report different types
 (`append-variadic.test.ts`), so it was not applied.
 
+### A list-building self-recursion assigned WITHOUT a declaration is still typed `collection` (OPEN, small — found 2026-09-29 by the fix for Tycho row 338)
+
+With `F` declared `(unknown, unknown) -> unknown` and assigned
+`(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the
+derivation of the placeholder signature re-types the body under the
+hypothesis that the result is a list and keeps it when the pass reproduces
+it (`_deriveSignature` in `boxed-value-definition.ts` and
+`boxed-operator-definition.ts`), so `F` is `-> list<number>`. The same
+literal assigned to an UNDECLARED name (`ce.assign("G", literal)`) takes the
+inferred-signature route, where a call is typed from the literal per call:
+`G` reports `(unknown, unknown) -> collection` and `G(0, 5)` types
+`collection<integer>`. The hypothesis is not applied on that route. Tycho
+declares every document function first, so it does not meet this.
+
+### A mutually recursive pair that builds a list is typed `collection`, and a callee derived inside another function's derivation can keep `-> unknown` (OPEN, small — found 2026-09-29 by the fix for Tycho row 338)
+
+The list hypothesis of `_deriveSignature` runs only for a body that names
+its own function. With `F: (unknown, unknown) -> unknown` assigned
+`(n, K) ↦ { n = K - 1: [n], otherwise: join([n], G(n + 1, K)) }` and `G`
+assigned `(n, K) ↦ F(n, K)`, both derive `-> collection<number>` (pinned in
+`recursive-function-result-type.test.ts`). A pair that is also
+self-recursive (`F` names `F` and `G`) does not improve either: `G`'s
+signature is derived while `F`'s is, reads the re-entrancy guard's
+`unknown` for `F`, and is memoized as `-> unknown` (measured 2026-09-29:
+`F` is `-> collection<number>` and `G` stays `-> unknown` on later reads),
+so the hypothesis pass reads `unknown` from `G` and is refuted. A fix would
+treat the strongly connected component of the call graph as one unit, or
+retire a callee's memo when the function it was derived inside settles.
+
 ### A parameter that reaches a whole-collection operator indirectly is still applied element by element (OPEN — recorded 2026-09-29 with the decision on whole-collection parameters)
 
 The decision of 2026-09-29 binds a list whole only when the bare parameter is

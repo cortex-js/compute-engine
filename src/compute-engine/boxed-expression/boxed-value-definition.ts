@@ -12,7 +12,9 @@ import {
   collectCalleeHomes,
   declaredResultMemoKey,
   noteCalleeHomes,
+  inListHypothesisPass,
   resultUnderDeclaredParameters,
+  verifiedListHypothesis,
   withSignatureResult,
   type HomeScope,
 } from './declared-parameter-result.js';
@@ -23,6 +25,7 @@ import { typeToString } from '../../common/type/serialize.js';
 import {
   collectionElementType,
   containsSignatureArm,
+  functionResult,
   isValidType,
   widen,
 } from '../../common/type/utils.js';
@@ -239,6 +242,13 @@ export class _BoxedValueDefinition
   /** True while `_deriveSignature` reads the stored value's type. A
    * transient re-entrancy guard, not state. */
   private _derivingSignature = false;
+
+  /** The result type a RECURSIVE call of the stored function reads while
+   * `_deriveSignature` verifies its list hypothesis: the re-entrant read
+   * answers the recorded type with its result slot replaced by this type.
+   * `undefined` outside that pass, where the re-entrant read answers the
+   * recorded type unchanged. Transient, not state. */
+  private _recursionResult: Type | undefined = undefined;
 
   // History of writes to this definition's type (see `TypeProvenanceEntry`
   // in `types-definitions.ts` and the phase-1 design in
@@ -844,7 +854,15 @@ export class _BoxedValueDefinition
    * memoized, so the cycle stops after one level. */
   private _deriveSignature(recorded: BoxedType, skeleton: Type): BoxedType {
     const v = this.storedValue;
-    if (v === undefined || this._derivingSignature) return recorded;
+    if (v === undefined) return recorded;
+    if (this._derivingSignature) {
+      const candidate = this._recursionResult;
+      if (candidate === undefined) return recorded;
+      return new BoxedType(
+        withSignatureResult(recorded.type, candidate),
+        this._engine._typeResolver
+      );
+    }
     let valueType: BoxedType;
     this._derivingSignature = true;
     try {
@@ -889,6 +907,33 @@ export class _BoxedValueDefinition
     } finally {
       this._derivingSignature = false;
     }
+    // A self-recursive body whose result is an abstract collection is
+    // re-typed under the hypothesis that the result is a list, and the
+    // hypothesis is kept only when that pass bears it out
+    // (`verifiedListHypothesis`, which explains the rule). The re-entrant
+    // read of a recursive call answers the hypothesis through
+    // `_recursionResult`.
+    const verified = verifiedListHypothesis(
+      this._engine,
+      v,
+      skeleton,
+      this.name,
+      typedResult ?? functionResult(valueType.type),
+      (candidate, thunk) => {
+        this._recursionResult = candidate;
+        this._derivingSignature = true;
+        try {
+          return thunk();
+        } finally {
+          this._derivingSignature = false;
+          this._recursionResult = undefined;
+        }
+      }
+    );
+    if (verified !== undefined) {
+      typedResult = verified.result;
+      calleeHomes = verified.homes;
+    }
     const refined = refineDeclaredPlaceholders(
       skeleton,
       typedResult === undefined
@@ -903,7 +948,10 @@ export class _BoxedValueDefinition
     // declarations and types by raw writes that advance no counter of the
     // key, so a result computed in the discarded trial would still match
     // after the rollback.
-    if (this._engine._rollbackFrames.length === 0)
+    // Nor while a list-hypothesis pass of any definition runs: this
+    // derivation may have read a hypothesis that is then refuted
+    // (`inListHypothesisPass`).
+    if (this._engine._rollbackFrames.length === 0 && !inListHypothesisPass())
       this._signatureMemo = {
         skeleton,
         value: v,
