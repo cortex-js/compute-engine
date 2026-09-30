@@ -12,6 +12,9 @@ temp-docs/
 # OS Files
 .DS_Store
 
+# IntelliJ IDEA
+.idea/
+
 # Backup files
 *.bak
 
