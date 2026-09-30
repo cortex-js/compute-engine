@@ -575,7 +575,61 @@ describe('DROP 2', () => {
         14,
         17,
         20,
-        "ContinuationPlaceholder",
+        23,
+        26,
+        29,
+        32,
+        35,
+        38,
+        41,
+        44,
+        47,
+        50,
+        53,
+        56,
+        59,
+        62,
+        65,
+        68,
+        71,
+        74,
+        77,
+        80,
+        83,
+        86,
+        89,
+        92,
+        95,
+        98,
+        101,
+        104,
+        107,
+        110,
+        113,
+        116,
+        119,
+        122,
+        125,
+        128,
+        131,
+        134,
+        137,
+        140,
+        143,
+        146,
+        149,
+        152,
+        155,
+        158,
+        161,
+        164,
+        167,
+        170,
+        173,
+        176,
+        179,
+        182,
+        185,
         188,
         191,
         194,
@@ -594,7 +648,83 @@ describe('DROP 2', () => {
         6.454545454545454,
         7.568181818181818,
         8.681818181818182,
-        "ContinuationPlaceholder",
+        9.795454545454547,
+        10.909090909090908,
+        12.022727272727273,
+        13.136363636363637,
+        14.25,
+        15.363636363636363,
+        16.477272727272727,
+        17.590909090909093,
+        18.704545454545453,
+        19.818181818181817,
+        20.931818181818183,
+        22.045454545454547,
+        23.15909090909091,
+        24.272727272727273,
+        25.386363636363637,
+        26.5,
+        27.613636363636363,
+        28.727272727272727,
+        29.84090909090909,
+        30.954545454545453,
+        32.06818181818181,
+        33.18181818181819,
+        34.29545454545455,
+        35.40909090909091,
+        36.52272727272727,
+        37.63636363636363,
+        38.75,
+        39.86363636363637,
+        40.97727272727273,
+        42.09090909090909,
+        43.20454545454545,
+        44.31818181818182,
+        45.43181818181818,
+        46.54545454545455,
+        47.65909090909091,
+        48.77272727272727,
+        49.88636363636363,
+        51,
+        52.11363636363637,
+        53.22727272727273,
+        54.34090909090909,
+        55.45454545454545,
+        56.56818181818182,
+        57.68181818181818,
+        58.79545454545455,
+        59.90909090909091,
+        61.02272727272727,
+        62.13636363636363,
+        63.25,
+        64.36363636363637,
+        65.47727272727272,
+        66.5909090909091,
+        67.70454545454545,
+        68.81818181818181,
+        69.93181818181819,
+        71.04545454545455,
+        72.1590909090909,
+        73.27272727272727,
+        74.38636363636364,
+        75.5,
+        76.61363636363636,
+        77.72727272727273,
+        78.8409090909091,
+        79.95454545454545,
+        81.06818181818181,
+        82.18181818181819,
+        83.29545454545455,
+        84.4090909090909,
+        85.52272727272727,
+        86.63636363636364,
+        87.75,
+        88.86363636363636,
+        89.97727272727273,
+        91.0909090909091,
+        92.20454545454545,
+        93.31818181818181,
+        94.43181818181819,
         95.54545454545455,
         96.6590909090909,
         97.77272727272727,
@@ -2308,23 +2438,11 @@ describe('CONTINUATION PLACEHOLDER', () => {
         ["List", 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14]
       ]
     `);
-    expect(finite_list.evaluate({ materialization: true }))
-      .toMatchInlineSnapshot(`
-      [
-        "List",
-        1,
-        1,
-        4,
-        4,
-        9,
-        "ContinuationPlaceholder",
-        81,
-        100,
-        121,
-        144,
-        196
-      ]
-    `);
+    expect(
+      finite_list.evaluate({ materialization: true })
+    ).toMatchInlineSnapshot(
+      `["List", 1, 1, 4, 4, 9, 16, 49, 64, 81, 100, 121, 144, 196]`
+    );
     expect(finite_list.evaluate({ materialization: 2 })).toMatchInlineSnapshot(
       `["List", 1, "ContinuationPlaceholder", 196]`
     );
@@ -2360,7 +2478,7 @@ describe('CONTINUATION PLACEHOLDER', () => {
     expect(
       finite_set.evaluate({ materialization: true })
     ).toMatchInlineSnapshot(
-      `["Set", 1, 4, 9, 16, 25, "ContinuationPlaceholder"]`
+      `["Set", 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169]`
     );
     expect(finite_set.evaluate({ materialization: 2 })).toMatchInlineSnapshot(
       `["Set", 1, 4, "ContinuationPlaceholder"]`
@@ -3311,11 +3429,17 @@ describe('THE MATERIALIZATION OPTION DESCRIBES THE RESULT, NOT THE OPERANDS', ()
     expect(evaluate(['Sum', ['Range', 1, 5000]])).toBe('12502500');
   });
   test('the result itself is still materialized as asked', () => {
-    // A lazy node with no handler: the preview.
+    // A lazy node with no handler: `true` gives every element of a finite
+    // collection (issue #380), a `[head, tail]` pair gives the preview.
+    const all = engine
+      .box(['Range', 1, 5000])
+      .evaluate({ materialization: true });
+    expect(all.operator).toBe('List');
+    expect(all.nops).toBe(5000);
     expect(
       engine
         .box(['Range', 1, 5000])
-        .evaluate({ materialization: true })
+        .evaluate({ materialization: [5, 5] })
         .toString()
     ).toBe('[1,2,3,4,5,...,4996,4997,4998,4999,5000]');
     // A view a handler answers lazily (past the eager threshold) is
@@ -3324,7 +3448,18 @@ describe('THE MATERIALIZATION OPTION DESCRIBES THE RESULT, NOT THE OPERANDS', ()
       .box(['Insert', ['Range', 1, 200], 2, 99])
       .evaluate({ materialization: true });
     expect(view.operator).toBe('List');
-    expect(view.toString()).toBe('[1,99,2,3,4,...,196,197,198,199,200]');
+    expect(view.nops).toBe(201);
+    expect(view.ops[1].toString()).toBe('99');
+  });
+  test('`true` also materializes the lazy elements of the result', () => {
+    // Each element is evaluated with the same options, so an inner `Range`
+    // longer than the 5 + 5 display preview is given in full.
+    const nested = engine
+      .box(['Map', ['Function', ['Range', 1, 'k'], 'k'], ['Range', 11, 12]])
+      .evaluate({ materialization: true });
+    expect(nested.operator).toBe('List');
+    expect(nested.ops.map((x) => x.operator)).toEqual(['List', 'List']);
+    expect(nested.ops.map((x) => x.nops)).toEqual([11, 12]);
   });
   test('the arguments of a function literal and a broadcast lift are operands too', () => {
     const ce = new ComputeEngine();

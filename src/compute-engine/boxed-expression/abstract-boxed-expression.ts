@@ -158,6 +158,18 @@ function _couldBenefitFromExpand(
 }
 
 /**
+ * The preview that `toString()`, the `latex` getter and `toLatex()` (without a
+ * `materialization` option) give of a lazy collection: the first 5 and the
+ * last 5 elements of a finite indexed collection, with a
+ * `ContinuationPlaceholder` between them, or the first 5 elements and a
+ * placeholder for any other collection. The `materialization: true` evaluate
+ * option is NOT this preview: it asks for every element of a finite
+ * collection.
+ */
+export const DISPLAY_MATERIALIZATION: readonly [number, number] =
+  Object.freeze([5, 5] as const);
+
+/**
  * _BoxedExpression
  *
  * @internal
@@ -332,7 +344,9 @@ export abstract class _BoxedExpression implements Expression {
       // Exception: a symbol always serializes as its name — its spelling must
       // not depend on what the name currently holds (Tycho item 100).
       if (this.isLazyCollection && this.symbol === undefined) {
-        const materialized = this.evaluate({ materialization: true });
+        const materialized = this.evaluate({
+          materialization: DISPLAY_MATERIALIZATION,
+        });
         if (!materialized.isLazyCollection) return toAsciiMath(materialized);
       }
 
@@ -390,7 +404,9 @@ export abstract class _BoxedExpression implements Expression {
       // who set a budget must see it expire rather than get a silently
       // degraded spelling.
       try {
-        const materialized = this.evaluate({ materialization: true });
+        const materialized = this.evaluate({
+          materialization: DISPLAY_MATERIALIZATION,
+        });
         if (!materialized.isLazyCollection) return materialized.latex;
       } catch (e) {
         if (e instanceof CancellationError) throw e;
@@ -451,7 +467,7 @@ export abstract class _BoxedExpression implements Expression {
       // A CancellationError still propagates.
       try {
         const materialized = this.evaluate({
-          materialization: options?.materialization ?? true,
+          materialization: options?.materialization ?? DISPLAY_MATERIALIZATION,
         });
         if (!materialized.isLazyCollection)
           return materialized.toLatex(options);

@@ -189,7 +189,10 @@ import { pow } from './arithmetic-power.js';
 import { asSmallInteger } from './numerics.js';
 import { gcd } from '../numerics/numeric.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
-import { _BoxedExpression } from './abstract-boxed-expression.js';
+import {
+  _BoxedExpression,
+  DISPLAY_MATERIALIZATION,
+} from './abstract-boxed-expression.js';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order.js';
 import {
   digest128,
@@ -264,11 +267,6 @@ import {
   isEligibleRealRewrite,
   onBranchCut,
 } from '../function-properties/index.js';
-
-/** When `materialization` is true, display 10 items if the collection is
- * infinite, otherwise 5 from the head and 5 from the tail
- */
-const DEFAULT_MATERIALIZATION: [number, number] = [5, 5] as const;
 
 /** One memoized collection-facet answer (see `BoxedFunction._facetMemo`). The
  * value is wrapped so that a facet legitimately answering `undefined` is
@@ -9787,13 +9785,22 @@ function materializeLazyResult(
 
 /**  Eagerly evaluate xs by iterating over its elements.
  *
- * If eager is true, evaluate DEFAULT_MATERIALIZATION elements.
+ * If the `materialization` option is `true` and the collection is finite,
+ * evaluate every element. A finite collection with more elements than
+ * `engine.maxCollectionSize` stays in its lazy form. An infinite collection,
+ * or one whose finiteness is not known, cannot be walked to its end, so it
+ * gets the display preview (`DISPLAY_MATERIALIZATION`) instead.
  *
- * If eager is a number, evaluate that many elements, half in the head and
- * half in the tail.
+ * Each element is evaluated with the same options, so with `true` an element
+ * that is itself a finite lazy collection is also fully materialized. The
+ * total cost can reach `maxCollectionSize²` element evaluations. This is
+ * intended: the option promises the full result.
  *
- * If eager is a tuple [head, tail], evaluate that many elements in the head and
- * that many elements in the tail.
+ * If the option is a number, evaluate that many elements, half in the head
+ * and half in the tail.
+ *
+ * If the option is a tuple [head, tail], evaluate that many elements in the
+ * head and that many elements in the tail.
  */
 function materialize(
   expr: BoxedFunction,
@@ -9820,9 +9827,7 @@ function materialize(
   if (expr.isEmptyCollection !== true && expr.isEnumerableCollection === false)
     return expr;
 
-  let materialization = options?.materialization ?? false;
-  if (typeof materialization === 'boolean')
-    materialization = DEFAULT_MATERIALIZATION;
+  const option = options?.materialization ?? false;
 
   // Static-type indexed-ness, with a value-aware fallback: a lazy wrapper
   // over a declared-`unknown` symbol holding an indexed collection (e.g. a
@@ -9847,12 +9852,50 @@ function materialize(
       expr.op1.isIndexedCollection === true);
   const isFinite = expr.isFiniteCollection;
 
+  // `true` asks for EVERY element of a finite collection (issue #380: it
+  // used to give the 5 + 5 display preview, which the option's documentation
+  // does not describe). The walk is bounded by `maxCollectionSize`: a
+  // collection that turns out to be larger stays lazy, as an indexed one
+  // with a known count larger than the cap does below.
+  const full = option === true && isFinite === true;
+  const materialization: number | readonly [number, number] = full
+    ? expr.engine.maxCollectionSize
+    : typeof option === 'boolean'
+      ? DISPLAY_MATERIALIZATION
+      : option;
+
   // Leave oversized indexed collections in their lazy form. Consumers
   // can detect the size via `.count` without risking OOM.
   if (isIndexed && isFinite) {
     const count = expr.count;
     if (count !== undefined && count > expr.engine.maxCollectionSize)
       return expr;
+  }
+
+  // A full materialization of a collection with no known count must not
+  // evaluate up to `maxCollectionSize` elements and then discard them when
+  // the collection turns out to be larger. Count the elements first, without
+  // evaluating them, and stop at the cap. This walks the collection twice,
+  // but a walk that only counts is cheaper than one that evaluates each
+  // element. A walk that gives up with `iteration-limit-exceeded` (an
+  // unbroken run of duplicates, or a keyed merge over an element that is not
+  // an entry) is not a size result: the walk below meets the same
+  // cancellation and handles it.
+  if (full && !expr.isEmptyCollection && expr.count === undefined) {
+    const cap = expr.engine.maxCollectionSize;
+    let n = 0;
+    try {
+      for (const _ of expr.each()) {
+        n += 1;
+        if (n > cap) return expr;
+      }
+    } catch (e) {
+      if (
+        !(e instanceof CancellationError) ||
+        e.cause !== 'iteration-limit-exceeded'
+      )
+        throw e;
+    }
   }
 
   const xs: Expression[] = [];
@@ -9865,7 +9908,7 @@ function materialize(
     // `ContinuationPlaceholder` for a collection that had already ended.
     // Finiteness and exact count are separate questions: fall back to the
     // head-only walk, which probes the iterator for a genuine continuation.
-    if (!isIndexed || !isFinite || expr.count === undefined) {
+    if (full || !isIndexed || !isFinite || expr.count === undefined) {
       //
       // If we're not indexed, or not finite (or of unknown length), we can
       // only materialize the head
@@ -9878,6 +9921,9 @@ function materialize(
       try {
         for (const x of iter) {
           if (xs.length === last) {
+            // A full materialization that reaches the size cap leaves the
+            // collection lazy rather than returning a truncated list.
+            if (full) return expr;
             // Reaching another element with the head already full means the
             // collection continues past the preview, so mark the tail. `x`
             // ITSELF is that element — testing `iter.next()` instead asked
@@ -9913,7 +9959,7 @@ function materialize(
       //
       // We are indexed and finite, so we can materialize the head and tail
       //
-      const [headSize, tailSize]: [number, number] =
+      const [headSize, tailSize]: readonly [number, number] =
         typeof materialization === 'number'
           ? [
               Math.ceil(materialization / 2),

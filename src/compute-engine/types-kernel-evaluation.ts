@@ -128,7 +128,20 @@ export type EvaluateOptions = {
    * If `false`, and the result is a lazy collection, the collection remains
    * lazy and is not materialized.
    *
-   * If `true`, and the collection is finite, it is fully materialized.
+   * If `true`, and the collection is finite, it is fully materialized. A
+   * finite collection with more elements than `ce.maxCollectionSize` remains
+   * lazy. An infinite collection, or one whose finiteness is not known, is
+   * materialized as a preview: at most its first 5 elements, followed by a
+   * `ContinuationPlaceholder` when more elements follow. A deduplicating
+   * collection whose enumeration stops on a long run of duplicate elements
+   * (`Join(Set(1), Take(Repeat(1), 5000))`) also ends with a
+   * `ContinuationPlaceholder`, since the remaining elements could not be
+   * enumerated.
+   *
+   * Each element is evaluated with the same options, so an element that is
+   * itself a finite lazy collection is also fully materialized. A collection
+   * of `n` such elements, each with up to `m` elements, can therefore cost up
+   * to `n × m` element evaluations (at most `ce.maxCollectionSize²`).
    *
    * If an integer, evaluate at most that many elements.
    *
@@ -137,7 +150,7 @@ export type EvaluateOptions = {
    *
    * **Default**: `false`
    */
-  materialization: boolean | number | [number, number];
+  materialization: boolean | number | readonly [number, number];
 
   /** Cancellation signal for long-running evaluations. */
   signal: AbortSignal;

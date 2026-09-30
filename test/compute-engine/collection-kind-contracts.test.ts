@@ -302,9 +302,11 @@ describe('deduplication cannot wedge the iterator', () => {
     // does refuse.
     expect(j.isFiniteCollection).toBe(true);
     expect(j.isEmptyCollection).toBe(false);
-    expect(j.evaluate({ materialization: true }).toString()).toBe(
+    expect(j.evaluate({ materialization: [5, 5] }).toString()).toBe(
       'Set(1, 2, 3, 4, 5, ...)'
     );
+    // `true` walks the whole finite collection (issue #380).
+    expect(j.evaluate({ materialization: true }).nops).toBe(5000);
   });
 
   test('a stalled dedup walk previews as a continuation, never as an error', () => {
@@ -432,11 +434,17 @@ describe('a truncated preview says so', () => {
     // The head-only walk (taken by non-indexed collections, e.g. any set)
     // tested whether an element existed AFTER the one it was discarding, so a
     // collection of exactly `head + 1` elements dropped its last element and
-    // reported no continuation at all. `DEFAULT_MATERIALIZATION` heads at 5.
+    // reported no continuation at all. The display preview
+    // (`DISPLAY_MATERIALIZATION`) heads at 5.
     const six = ce.box(['Join', ['Set', 1, 2, 3, 4, 5], ['Set', 6]]).evaluate();
     expect(six.count).toBe(6);
-    expect(six.evaluate({ materialization: true }).toString()).toBe(
+    expect(six.evaluate({ materialization: [5, 5] }).toString()).toBe(
       'Set(1, 2, 3, 4, 5, ...)'
+    );
+    expect(six.toString()).toBe('Set(1, 2, 3, 4, 5, ...)');
+    // `true` gives every element of a finite collection (issue #380).
+    expect(six.evaluate({ materialization: true }).toString()).toBe(
+      'Set(1, 2, 3, 4, 5, 6)'
     );
   });
 

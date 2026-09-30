@@ -2,6 +2,21 @@
 
 ### Behavior Changes
 
+- **`evaluate({ materialization: true })` gives every element of a finite
+  lazy collection** ([#380](https://github.com/cortex-js/compute-engine/issues/380),
+  reported by [enumeratio](https://github.com/enumeratio)). The option was
+  documented as "if `true`, and the collection is finite, it is fully
+  materialized", but `true` gave the display preview: the first five and the
+  last five elements with a `ContinuationPlaceholder` between them.
+  `Range(1, 20)` evaluated to `[1, 2, 3, 4, 5, …, 16, 17, 18, 19, 20]` and now
+  evaluates to the 20 elements. A finite collection with more elements than
+  `ce.maxCollectionSize` stays in its lazy form, and an infinite collection, or
+  one whose finiteness is not known, still gives the preview. `toString()`,
+  `.latex` and `toLatex()` without a `materialization` option still print the
+  preview. To get the preview from `evaluate()`, pass
+  `materialization: [5, 5]`. `toLatex({ materialization: true })` now prints
+  every element, as its documentation says.
+
 - **A function that annotates some of its parameters enforces only the annotated
   ones at a call.** With `function k(p, n: number) { p[1] + n }`, the type of
   `p` in the reported signature, `indexed_collection<number>`, is inferred from
