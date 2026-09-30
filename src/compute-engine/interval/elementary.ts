@@ -7,6 +7,7 @@
 import type { Interval, IntervalResult } from './types.js';
 import {
   ok,
+  point,
   getValue,
   containsZero,
   isNegative,
@@ -14,7 +15,15 @@ import {
   liftJump,
   jump,
 } from './util.js';
-import { div, subUnrounded, mulUnrounded, divUnrounded } from './arithmetic.js';
+import {
+  add as addOutward,
+  sub as subOutward,
+  mul as mulOutward,
+  div,
+  subUnrounded,
+  mulUnrounded,
+  divUnrounded,
+} from './arithmetic.js';
 import {
   outward,
   outwardUnlessExact,
@@ -38,7 +47,6 @@ import {
   erfc as scalarErfc,
 } from '../numerics/special-functions.js';
 import {
-  factorial as scalarFactorial,
   factorial2 as scalarFactorial2,
   gcd as scalarGcd,
   lcm as scalarLcm,
@@ -1066,6 +1074,92 @@ const GAMMA_MIN_X = 1.4616321449683622;
 // gamma(GAMMA_MIN_X) ≈ 0.8856031944108887
 const GAMMA_MIN_Y = 0.8856031944108887;
 
+// The scalar Γ, ln Γ and binomial kernels are not correctly rounded: their
+// error is many ulps, more than the one-ulp outward step of `outward()`.
+// Every scalar value an enclosure uses is therefore widened here by a bound
+// on the kernel's relative error, in units of `Number.EPSILON`. The bounds
+// were set against 50-digit values of `Gamma`/`Binomial` (`.N()` with
+// `ce.precision = 50`) on 400 random points each (2026-09-30), and have a
+// margin of at least 4 over the largest error measured:
+// - `gamma(x)` for `x ≥ 0.5` (Lanczos and a product of up to 170 factors):
+//   up to 311 ulps at `x ≈ 148.6`, roughly `2|x|`.
+// - `gamma(x)` for `x < 0.5` goes through the reflection formula
+//   `π / (sin(πx)·Γ(1 − x))`. Rounding `πx` moves the sine by about
+//   `ε·π|x|`, a relative error of `ε·π|x| / |sin(πx)|`, which is large close
+//   to a pole.
+// - `binomial(n, k)`: up to 2611 ulps at `C(1043.1, 607.6)`, about 3.7 ulps
+//   per unit of `|ln C|` (the log-Γ route), plus the error of the three Γ
+//   values on the Γ-ratio route.
+const GAMMA_SAFE_INTEGER_LIMIT = 19;
+
+/** Bound on the relative error of `scalarGamma(x)`, in ulps. */
+function gammaErrorUlps(x: number): number {
+  const base = 256 + 8 * Math.abs(x);
+  if (x >= 0.5) return base;
+  return (
+    base + (16 * Math.PI * Math.abs(x)) / Math.abs(Math.sin(Math.PI * x))
+  );
+}
+
+/** `[v − r·|v|, v + r·|v|]` with `r = ulps·ε`, rounded outward. A
+ *  non-finite `v` is returned as a point. */
+function widenRelative(v: number, ulps: number): Interval {
+  if (!Number.isFinite(v)) return { lo: v, hi: v };
+  // `ulps · ε` first: `|v| · ulps` overflows for a `v` near the largest
+  // double.
+  const d = Math.abs(v) * (ulps * Number.EPSILON);
+  return { lo: nextDown(v - d), hi: nextUp(v + d) };
+}
+
+/** An enclosure of `Γ(x)` at a point that is not a pole. `Γ` of a positive
+ *  integer up to 19 is exact: the kernel multiplies integers below 2^53. */
+function gammaPointEnclosure(x: number): Interval {
+  const v = scalarGamma(x);
+  if (Number.isInteger(x) && x > 0 && x <= GAMMA_SAFE_INTEGER_LIMIT)
+    return { lo: v, hi: v };
+  return widenRelative(v, gammaErrorUlps(x));
+}
+
+/** An enclosure of `ln|Γ(x)|` at a point that is not a pole. The relative
+ *  error of `Γ` becomes an absolute error of its logarithm, and the
+ *  logarithm itself adds a relative error. */
+function gammalnPointEnclosure(x: number): Interval {
+  // `scalarGammaln` is defined for `x > 0` only. A negative `x` uses the
+  // reflection formula `ln|Γ(x)| = ln π − ln|sin(πx)| − ln Γ(1 − x)`.
+  const v =
+    x > 0
+      ? scalarGammaln(x)
+      : Math.log(Math.PI) -
+        Math.log(Math.abs(Math.sin(Math.PI * x))) -
+        scalarGammaln(1 - x);
+  if (!Number.isFinite(v)) return { lo: v, hi: v };
+  const d = (gammaErrorUlps(x) + 16 * Math.abs(v)) * Number.EPSILON;
+  return { lo: nextDown(v - d), hi: nextUp(v + d) };
+}
+
+/** An enclosure of `C(n, k)` at a point. A result at integer `n` and `k`
+ *  below 2^53 is exact: the product loop of `binomial()` never forms an
+ *  intermediate larger than its result. A `0` where a denominator `Γ`
+ *  factor is on a pole (`k` or `n − k` a negative integer) is exact; any
+ *  other `0` is a tiny value that underflowed. */
+function binomialPointEnclosure(n: number, k: number): Interval {
+  const v = scalarBinomial(n, k);
+  if (v === 0) {
+    const denominatorPole =
+      (Number.isInteger(k) && k < 0) || (Number.isInteger(n - k) && n - k < 0);
+    return denominatorPole ? { lo: 0, hi: 0 } : { lo: -1e-300, hi: 1e-300 };
+  }
+  if (Number.isInteger(n) && Number.isInteger(k) && Number.isSafeInteger(v))
+    return { lo: v, hi: v };
+  const ulps =
+    512 +
+    16 * Math.abs(Math.log(Math.abs(v))) +
+    gammaErrorUlps(n + 1) +
+    gammaErrorUlps(k + 1) +
+    gammaErrorUlps(n - k + 1);
+  return widenRelative(v, ulps);
+}
+
 /**
  * Gamma function on an interval.
  *
@@ -1108,8 +1202,9 @@ function _gamma(x: Interval): IntervalResult {
   // Check for poles: gamma has poles at every non-positive integer.
   // If the interval contains any non-positive integer, report singular.
   if (x.hi >= 0 && x.lo <= 0) {
-    // Interval crosses or touches zero — pole at 0
-    return { kind: 'singular', at: 0 };
+    // The interval crosses or touches zero. `at` names the first pole: the
+    // smallest non-positive integer in the interval.
+    return { kind: 'singular', at: x.lo < 0 ? Math.ceil(x.lo) : 0 };
   }
   if (x.lo < 0) {
     // Entirely negative: check if interval spans a negative integer
@@ -1120,17 +1215,17 @@ function _gamma(x: Interval): IntervalResult {
       return { kind: 'singular', at: ceilLo };
     }
     // No pole in interval, but gamma has one interior extremum on the strip.
-    const gLo = scalarGamma(x.lo);
-    const gHi = scalarGamma(x.hi);
-    let lo = Math.min(gLo, gHi);
-    let hi = Math.max(gLo, gHi);
+    const gLo = gammaPointEnclosure(x.lo);
+    const gHi = gammaPointEnclosure(x.hi);
+    let lo = Math.min(gLo.lo, gHi.lo);
+    let hi = Math.max(gLo.hi, gHi.hi);
     const xStar = gammaNegStripExtremum(x.lo);
     if (xStar !== null) {
       // Include the extremum if it lies within the interval.
       if (xStar >= x.lo && xStar <= x.hi) {
-        const g = scalarGamma(xStar);
-        lo = Math.min(lo, g);
-        hi = Math.max(hi, g);
+        const g = gammaPointEnclosure(xStar);
+        lo = Math.min(lo, g.lo);
+        hi = Math.max(hi, g.hi);
       }
     } else {
       // Past the table: the extremum value (closest to 0) has magnitude < 1e-3
@@ -1147,18 +1242,25 @@ function _gamma(x: Interval): IntervalResult {
 
   // Case 1: Entirely above the minimum — monotonically increasing
   if (x.lo >= GAMMA_MIN_X) {
-    return ok({ lo: scalarGamma(x.lo), hi: scalarGamma(x.hi) });
+    return ok({
+      lo: gammaPointEnclosure(x.lo).lo,
+      hi: gammaPointEnclosure(x.hi).hi,
+    });
   }
 
   // Case 2: Entirely below the minimum — monotonically decreasing
   if (x.hi <= GAMMA_MIN_X) {
-    return ok({ lo: scalarGamma(x.hi), hi: scalarGamma(x.lo) });
+    return ok({
+      lo: gammaPointEnclosure(x.hi).lo,
+      hi: gammaPointEnclosure(x.lo).hi,
+    });
   }
 
-  // Case 3: Interval crosses the minimum
+  // Case 3: Interval crosses the minimum. The double `GAMMA_MIN_Y` is the
+  // minimum rounded to nearest, so the double below it is a lower bound.
   return ok({
-    lo: GAMMA_MIN_Y,
-    hi: Math.max(scalarGamma(x.lo), scalarGamma(x.hi)),
+    lo: nextDown(GAMMA_MIN_Y),
+    hi: Math.max(gammaPointEnclosure(x.lo).hi, gammaPointEnclosure(x.hi).hi),
   });
 }
 
@@ -1167,9 +1269,9 @@ function _gamma(x: Interval): IntervalResult {
  *
  * gammaln(x) = ln(|gamma(x)|)
  *
- * Has the same poles as gamma (at non-positive integers), but approaches
- * -Infinity near poles instead of ±Infinity. For positive x, gammaln is
- * monotonically increasing.
+ * Has the same poles as gamma (at non-positive integers), and approaches
+ * +Infinity near each of them. For positive x, gammaln decreases up to the
+ * minimum of Γ at `GAMMA_MIN_X` and increases after it.
  */
 function gammalnRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
@@ -1182,8 +1284,9 @@ function gammalnRaw(x: Interval | IntervalResult): IntervalResult {
 function _gammaln(x: Interval): IntervalResult {
   // Check for poles: gammaln has poles at every non-positive integer.
   if (x.hi >= 0 && x.lo <= 0) {
-    // Interval crosses or touches zero — pole at 0
-    return { kind: 'singular', at: 0 };
+    // The interval crosses or touches zero. `at` names the first pole: the
+    // smallest non-positive integer in the interval.
+    return { kind: 'singular', at: x.lo < 0 ? Math.ceil(x.lo) : 0 };
   }
   if (x.lo < 0) {
     // Entirely negative: check if interval spans a negative integer
@@ -1195,14 +1298,14 @@ function _gammaln(x: Interval): IntervalResult {
     }
     // No pole in interval, but gammaln = ln|gamma| has one interior extremum
     // (a minimum, where |gamma| is smallest) on the strip.
-    const gLo = scalarGammaln(x.lo);
-    const gHi = scalarGammaln(x.hi);
-    let lo = Math.min(gLo, gHi);
-    const hi = Math.max(gLo, gHi);
+    const gLo = gammalnPointEnclosure(x.lo);
+    const gHi = gammalnPointEnclosure(x.hi);
+    let lo = Math.min(gLo.lo, gHi.lo);
+    const hi = Math.max(gLo.hi, gHi.hi);
     const xStar = gammaNegStripExtremum(x.lo);
     if (xStar !== null) {
       if (xStar >= x.lo && xStar <= x.hi)
-        lo = Math.min(lo, scalarGammaln(xStar));
+        lo = Math.min(lo, gammalnPointEnclosure(xStar).lo);
     } else {
       // Past the table: |gamma| at the extremum → 0, so ln|gamma| → −∞.
       lo = -Infinity;
@@ -1210,28 +1313,39 @@ function _gammaln(x: Interval): IntervalResult {
     return ok({ lo, hi });
   }
 
-  // x.lo > 0: entirely positive
-  // gammaln is monotonically increasing for x > 0
-  return ok({ lo: scalarGammaln(x.lo), hi: scalarGammaln(x.hi) });
+  // x.lo > 0: entirely positive. ln Γ decreases up to `GAMMA_MIN_X` and
+  // increases after it.
+  const eLo = gammalnPointEnclosure(x.lo);
+  const eHi = gammalnPointEnclosure(x.hi);
+  if (x.lo >= GAMMA_MIN_X) return ok({ lo: eLo.lo, hi: eHi.hi });
+  if (x.hi <= GAMMA_MIN_X) return ok({ lo: eHi.lo, hi: eLo.hi });
+  // The interval contains the minimum. `ln` of the lower bound of Γ there
+  // is a lower bound of ln Γ, widened for the rounding of `Math.log`.
+  return ok({
+    lo: nextDown(nextDown(Math.log(nextDown(GAMMA_MIN_Y)))),
+    hi: Math.max(eLo.hi, eHi.hi),
+  });
 }
 
 /**
- * Factorial function on an interval.
+ * Factorial on an interval, as `x! = Γ(x + 1)`. This is the real extension
+ * the interpreter uses (`Factorial(2.5)` is `Γ(3.5) ≈ 3.323`), so a plot of
+ * `x!` follows the Γ curve between the integers instead of rounding `x`.
  *
- * Factorial is only defined for non-negative integers and is monotonically
- * increasing. For interval arguments, we evaluate at both endpoints.
- * Non-integer or negative values produce NaN.
+ * `Γ` has a pole at every non-positive integer, so `x!` has one at every
+ * negative integer. The `Γ` enclosure (`gammaRaw()`) reports an interval that
+ * contains a pole as `singular`; its `at` is moved back by 1 to name the
+ * pole's location in `x`.
  */
 function factorialRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  if (xVal.lo < 0) return { kind: 'empty' };
-  const fLo = scalarFactorial(Math.round(xVal.lo));
-  const fHi = scalarFactorial(Math.round(xVal.hi));
-  if (!Number.isFinite(fLo) || !Number.isFinite(fHi))
-    return ok({ lo: Math.min(fLo, fHi), hi: Math.max(fLo, fHi) });
-  return ok({ lo: fLo, hi: fHi });
+  // `x + 1` rounded outward, so the shifted interval holds every `x + 1`.
+  const result = gammaRaw(addOutward(xVal, point(1)));
+  if (result.kind === 'singular' && result.at !== undefined)
+    return { ...result, at: result.at - 1 };
+  return result;
 }
 
 /**
@@ -1299,10 +1413,40 @@ function enumerateInteger2(
 }
 
 /**
- * Binomial coefficient C(n, k) on intervals.
+ * Largest literal integer `k` for which `binomialRaw()` encloses
+ * `C(n, k)` over an `n` interval with the falling factorial. Each factor is
+ * one outward-rounded interval product, so the cost grows with `k`.
+ */
+const BINOMIAL_FALLING_FACTORIAL_LIMIT = 1000;
+
+/**
+ * Binomial coefficient `C(n, k) = Γ(n+1)/(Γ(k+1)·Γ(n−k+1))` on intervals,
+ * for real operands, as the interpreter and the JS target define it
+ * (`binomial()` in `numerics/special-functions.ts`).
  *
- * Both arguments are rounded to nearest integer. C(n, k) is not monotone in k
- * (it peaks at k ≈ n/2), so the enclosure enumerates the integer grid.
+ * - Both operands a point: the scalar value. At a pole of `Γ(n+1)` (a
+ *   negative integer `n` with a non-integer `k`) the result is `singular`.
+ * - `k` a point at a non-negative integer: `C(n, k)` is the polynomial
+ *   `n(n−1)⋯(n−k+1)/k!` in `n`, enclosed by interval arithmetic on the
+ *   factors `(n − i)/(i + 1)`. Each step rounds outward, so the enclosure is
+ *   sound; it is wider than the true range when the interval contains a
+ *   root of the polynomial, because `n` appears in every factor.
+ * - `k` a point at a negative integer: `C(n, k)` is `0` for every non-integer
+ *   `n`. At a negative integer `n ≥ k` the poles of `Γ(n+1)` and `Γ(k+1)`
+ *   cancel and the value is not `0` (`C(−3, −5) = 6`), so the result is a
+ *   jump whose value encloses `0` and the values at those integers.
+ * - `k` a point that is not an integer: the quotient of the `Γ` enclosures.
+ *   An interval with a pole of `Γ(n+1)` is `singular`; one with a pole of
+ *   `Γ(n−k+1)` (a zero of `C`) is the whole real line.
+ * - `k` an interval with a point `n > −1`, inside `(−1, n + 1)`: the
+ *   endpoint values and the value nearest `k = n/2` (see the comment in the
+ *   code for why this is the range).
+ * - Any other `k` interval (with an `n` interval, or reaching `k ≤ −1` or
+ *   `k ≥ n + 1`, where the `Γ` ratio changes sign between its zeros): the
+ *   whole real line.
+ *
+ * Every scalar value is widened by a bound on the kernel's error
+ * (`binomialPointEnclosure()`).
  */
 function binomialRaw(
   n: Interval | IntervalResult,
@@ -1314,40 +1458,124 @@ function binomialRaw(
   if (!Array.isArray(uK)) return uK;
   const [nVal] = uN;
   const [kVal] = uK;
-  // A grid value that overflows to ±Infinity is a finite value above the
-  // largest double. `enumerateInteger2()` skips non-finite values, so record
-  // the overflows here and widen the enclosure to include them.
-  let overflowUp = false;
-  let overflowDown = false;
-  const enumerated = enumerateInteger2(nVal, kVal, (x, y) => {
-    const v = scalarBinomial(x, y);
-    if (v === Infinity) overflowUp = true;
-    else if (v === -Infinity) overflowDown = true;
-    return v;
-  });
-  const value = enumerated ? getValue(enumerated) : undefined;
-  if (value)
-    return ok({
-      lo: overflowDown ? -Infinity : value.lo,
-      hi: overflowUp ? Infinity : value.hi,
-    });
-  // Every grid value overflowed: the largest finite double bounds each
-  // value from the overflow side.
-  if (overflowUp || overflowDown)
-    return ok({
-      lo: overflowDown ? -Infinity : Number.MAX_VALUE,
-      hi: overflowUp ? Infinity : -Number.MAX_VALUE,
-    });
-  // Conservative fallback for very wide ranges. For integer n ≥ 0,
-  // C(n, k) ≥ 0 for every integer k (it is 0 outside 0 ≤ k ≤ n) and is
-  // largest, over all 0 ≤ n ≤ nMax, at the central coefficient
-  // C(nMax, ⌊nMax/2⌋). For a range that contains a negative n, the values
-  // can have both signs, and the whole real line is used as a conservative
-  // enclosure.
-  if (Math.round(nVal.lo) < 0) return ok({ lo: -Infinity, hi: Infinity });
-  const nMax = Math.round(nVal.hi);
-  if (!Number.isFinite(nMax)) return ok({ lo: 0, hi: Infinity });
-  return ok({ lo: 0, hi: scalarBinomial(nMax, Math.floor(nMax / 2)) });
+  if (isNaNInterval(nVal) || isNaNInterval(kVal)) return ok(NAN_INTERVAL);
+  if (kVal.lo !== kVal.hi) {
+    // A point `n > −1` and `k` in `(−1, n + 1)`: the three `Γ` arguments are
+    // positive, and `ln Γ` is convex there, so `ln C(n, k)` is concave in
+    // `k`. `C(n, k)` is positive, symmetric about `k = n/2`, and has its only
+    // maximum there: the enclosure runs from the smaller endpoint value to
+    // the value at the point of the interval closest to `n/2`.
+    const nPoint = nVal.lo;
+    if (
+      nVal.lo === nVal.hi &&
+      nPoint > -1 &&
+      kVal.lo > -1 &&
+      kVal.hi < nPoint + 1
+    ) {
+      const kPeak = Math.min(Math.max(nPoint / 2, kVal.lo), kVal.hi);
+      const lo = Math.min(
+        binomialPointEnclosure(nPoint, kVal.lo).lo,
+        binomialPointEnclosure(nPoint, kVal.hi).lo
+      );
+      // An overflow is a finite value above the largest double.
+      return ok({
+        lo: lo === Infinity ? Number.MAX_VALUE : lo,
+        hi: binomialPointEnclosure(nPoint, kPeak).hi,
+      });
+    }
+    return { kind: 'entire' };
+  }
+  const kPoint = kVal.lo;
+
+  if (nVal.lo === nVal.hi) {
+    const nPoint = nVal.lo;
+    if (Number.isInteger(nPoint) && nPoint < 0 && !Number.isInteger(kPoint))
+      return { kind: 'singular', at: nPoint };
+    const v = binomialPointEnclosure(nPoint, kPoint);
+    // An infinite value is an overflow (a finite value above the largest
+    // double) or the limit at an infinite operand; the enclosures below hold
+    // both.
+    if (v.hi === Infinity) return ok({ lo: Number.MAX_VALUE, hi: Infinity });
+    if (v.lo === -Infinity) return ok({ lo: -Infinity, hi: -Number.MAX_VALUE });
+    return ok(v);
+  }
+
+  if (!Number.isInteger(kPoint)) {
+    // Where `n + 1` and `n − k + 1` are both positive over the interval,
+    // `d/dn ln|C(n, k)| = ψ(n+1) − ψ(n−k+1)` has the sign of `k` because the
+    // digamma function `ψ` increases, and the sign of `C(n, k)` is the sign
+    // of `Γ(k+1)`. So `C(n, k)` is monotone in `n` and the values at the two
+    // ends enclose it. The scalar kernel computes large values in log form,
+    // where the `Γ` values below overflow. The `1e-9` margin keeps the
+    // rounded differences away from the boundary `−1`.
+    if (nVal.lo > -1 + 1e-9 && nVal.lo - kPoint > -1 + 1e-9) {
+      const atLo = binomialPointEnclosure(nVal.lo, kPoint);
+      const atHi = binomialPointEnclosure(nVal.hi, kPoint);
+      return ok({
+        lo: Math.min(atLo.lo, atHi.lo),
+        hi: Math.max(atLo.hi, atHi.hi),
+      });
+    }
+    // `C(n, k) = Γ(n+1) / Γ(n−k+1) / Γ(k+1)` with interval arithmetic. The
+    // arguments `n + 1`, `n − k + 1` and `k + 1` are formed with outward
+    // rounding, so each `Γ` enclosure holds the value at the exact argument.
+    const nPlus1 = addOutward(nVal, point(1));
+    const numerator = gammaRaw(nPlus1);
+    // A pole of `Γ(n+1)` is a pole of `C(n, k)`: at an integer `n` the
+    // argument `n − k + 1` of the denominator is not an integer, so it is
+    // not a pole there. `at` is moved from the coordinate `n + 1` to `n`.
+    if (numerator.kind === 'singular')
+      return numerator.at === undefined
+        ? { kind: 'singular' }
+        : { kind: 'singular', at: numerator.at - 1 };
+    const denominator = gammaRaw(subOutward(nPlus1, point(kPoint)));
+    // A pole of `Γ(n−k+1)` is a zero of `C(n, k)`, where `1/Γ` changes sign;
+    // this routine has no enclosure of `1/Γ` across it.
+    if (denominator.kind !== 'interval') return { kind: 'entire' };
+    const gammaK = gammaRaw(addOutward(point(kPoint), point(1)));
+    if (gammaK.kind !== 'interval') return { kind: 'entire' };
+    // A `Γ` value that overflows to `±Infinity` or underflows towards `0`
+    // (at a large negative argument) has lost the value; the quotient of
+    // such bounds does not enclose `C(n, k)`.
+    for (const g of [numerator, denominator, gammaK]) {
+      if (g.kind !== 'interval') return { kind: 'entire' };
+      const { lo, hi } = g.value;
+      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { kind: 'entire' };
+      if (Math.min(Math.abs(lo), Math.abs(hi)) < 1e-290)
+        return { kind: 'entire' };
+    }
+    return div(div(numerator, denominator), gammaK);
+  }
+
+  if (kPoint >= 0) {
+    if (kPoint > BINOMIAL_FALLING_FACTORIAL_LIMIT) return { kind: 'entire' };
+    let product: IntervalResult = ok({ lo: 1, hi: 1 });
+    for (let i = 0; i < kPoint; i++) {
+      const factor = div(subOutward(nVal, point(i)), point(i + 1));
+      product = mulOutward(product, factor);
+    }
+    return product;
+  }
+
+  // A negative integer `k`: `0`, plus the values at the negative integers
+  // `n` with `k ≤ n ≤ −1`, where the two poles cancel.
+  const lo = Math.max(Math.ceil(nVal.lo), kPoint);
+  const hi = Math.min(Math.floor(nVal.hi), -1);
+  let min = 0;
+  let max = 0;
+  let firstNonZero: number | undefined;
+  if (hi - lo > MAX_INT_ENUM_POINTS) return { kind: 'entire' };
+  for (let m = lo; m <= hi; m++) {
+    const v = binomialPointEnclosure(m, kPoint);
+    if (v.lo === 0 && v.hi === 0) continue;
+    firstNonZero ??= m;
+    if (v.lo < min) min = v.lo;
+    if (v.hi > max) max = v.hi;
+  }
+  // The values at those integers are isolated points of a function that is
+  // `0` around them: a discontinuity, reported as a jump at the first one.
+  if (firstNonZero === undefined) return ok({ lo: 0, hi: 0 });
+  return jump(firstNonZero, undefined, { lo: min, hi: max });
 }
 
 /**

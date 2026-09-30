@@ -1007,10 +1007,11 @@ describe('INTERVAL ENCLOSURE REGRESSIONS (REVIEW.md E8–E12)', () => {
     );
   });
 
-  // E11: binomial/gcd/lcm enumerate the integer grid (corners miss interior
-  // extrema of these non-monotone functions).
+  // E11: the enclosures of these non-monotone functions must include their
+  // interior extrema, which the corner values miss. gcd/lcm enumerate the
+  // integer grid; binomial uses the peak of C(n, k) at k = n/2.
   test('E11: binomial encloses the central coefficient', () => {
-    // C(10, k) for k ∈ [0,10] peaks at C(10,5) = 252 (corners are both 1).
+    // C(10, k) for real k ∈ [0,10] peaks at C(10,5) = 252 (corners are both 1).
     expectInterval(binomial({ lo: 10, hi: 10 }, { lo: 0, hi: 10 }), 1, 252, 1);
   });
 

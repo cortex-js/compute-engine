@@ -3,6 +3,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import type { MathJsonExpression } from '../../src/math-json/types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
@@ -839,15 +840,140 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
     expect(val.hi).toBe(Infinity);
   });
 
-  // C(1035, 512) is above the largest double. The enclosure must include it
-  // although the other grid values are finite.
-  test('Binomial enclosure includes a grid value that overflows', () => {
-    const fn = compile(ce.expr(['Binomial', 'n', 'k']), { to: 'interval-js' });
-    const val = unwrapInterval(
-      fn.run!({ n: { lo: 1020, hi: 1035 }, k: { lo: 510, hi: 512 } })
-    );
+  // C(1030, 500) is above the largest double and C(1030, 480) is not. The
+  // enclosure must include the overflowed value.
+  test('Binomial enclosure includes a value that overflows', () => {
+    const fn = compile(ce.expr(['Binomial', 1030, 'k']), { to: 'interval-js' });
+    const val = unwrapInterval(fn.run!({ k: { lo: 480, hi: 500 } }));
     expect(val.hi).toBe(Infinity);
     expect(Number.isFinite(val.lo)).toBe(true);
+  });
+
+  // The interval target encloses the real function, as the interpreter
+  // defines it through Γ, not the function on the integers.
+  test('Binomial(x, 2) encloses the parabola x(x − 1)/2', () => {
+    const fn = compile(ce.expr(['Binomial', 'x', 2]), { to: 'interval-js' });
+    // The point enclosure is widened by the error bound of the scalar
+    // kernel, so it is a few ulps wide around 12.375, not a single double.
+    const point = unwrapInterval(fn.run!({ x: { lo: 5.5, hi: 5.5 } }));
+    expect(point.lo).toBeLessThanOrEqual(12.375);
+    expect(point.hi).toBeGreaterThanOrEqual(12.375);
+    expect(point.hi - point.lo).toBeLessThan(1e-10);
+    const range = unwrapInterval(fn.run!({ x: { lo: 2.3, hi: 2.7 } }));
+    expect(range.lo).toBeCloseTo(1.495, 12);
+    expect(range.hi).toBeCloseTo(2.295, 12);
+    // The minimum −1/8 at x = 1/2 is inside the enclosure.
+    const aroundMin = unwrapInterval(fn.run!({ x: { lo: 0.2, hi: 0.8 } }));
+    expect(aroundMin.lo).toBeLessThanOrEqual(-0.125);
+    expect(aroundMin.hi).toBeGreaterThanOrEqual(-0.08);
+  });
+
+  test('Binomial(n, -3) is a jump that encloses 0 and the values at negative integers', () => {
+    const fn = compile(ce.expr(['Binomial', 'n', -3]), { to: 'interval-js' });
+    // C(−3, −3) = 1, C(−2, −3) = −2, C(−1, −3) = 1, and 0 elsewhere.
+    const result = fn.run!({ n: { lo: -6, hi: 2 } }) as any;
+    expect(result.kind).toBe('singular');
+    expect(result.at).toBe(-3);
+    expect(result.value.lo).toBeCloseTo(-2, 12);
+    expect(result.value.hi).toBeCloseTo(1, 12);
+  });
+
+  test('Binomial at a pole of Γ(n + 1) is singular', () => {
+    const fn = compile(ce.expr(['Binomial', 'n', 0.5]), { to: 'interval-js' });
+    expect((fn.run!({ n: { lo: -3, hi: -3 } }) as any).kind).toBe('singular');
+  });
+
+  test('Binomial over a k interval that reaches past n + 1 is the whole line', () => {
+    const fn = compile(ce.expr(['Binomial', 5, 'k']), { to: 'interval-js' });
+    expect((fn.run!({ k: { lo: 2, hi: 7 } }) as any).kind).toBe('entire');
+  });
+
+  test('Factorial encloses Γ(x + 1)', () => {
+    const fn = compile(ce.expr(['Factorial', 'x']), { to: 'interval-js' });
+    const point = unwrapInterval(fn.run!({ x: { lo: 2.5, hi: 2.5 } }));
+    expect(point.lo).toBeCloseTo(3.3233509704478426, 12);
+    const range = unwrapInterval(fn.run!({ x: { lo: 2.3, hi: 2.7 } }));
+    expect(range.lo).toBeCloseTo(2.6834373819557675, 12);
+    expect(range.hi).toBeCloseTo(4.170651783796603, 12);
+    // The minimum of x! near x = 0.4616 is inside the enclosure.
+    const aroundMin = unwrapInterval(fn.run!({ x: { lo: 0.3, hi: 0.7 } }));
+    expect(aroundMin.lo).toBeCloseTo(0.8856031944108887, 9);
+    const negative = unwrapInterval(fn.run!({ x: { lo: -0.5, hi: -0.5 } }));
+    expect(negative.lo).toBeCloseTo(Math.sqrt(Math.PI), 12);
+    // x! has a pole at x = −1.
+    const pole = fn.run!({ x: { lo: -1.5, hi: -0.5 } }) as any;
+    expect(pole.kind).toBe('singular');
+    expect(pole.at).toBe(-1);
+  });
+
+  // The enclosures must CONTAIN the true value, not be close to it: the
+  // scalar Γ and binomial kernels are off by hundreds to thousands of ulps,
+  // so a one-ulp outward step missed the value. The references are
+  // 50-digit values from a separate engine.
+  describe('Factorial, Gamma and Binomial enclosures contain the 50-digit value', () => {
+    const precise = new ComputeEngine();
+    precise.precision = 50;
+    const contains = (result: any, ref: MathJsonExpression) => {
+      const value = result.kind === 'interval' ? result.value : result.value;
+      const exact = precise.box(ref).N().bignumRe!;
+      expect(exact.gte(value.lo) && exact.lte(value.hi)).toBe(true);
+    };
+    const run = (expr: MathJsonExpression, args: Record<string, unknown>) =>
+      compile(ce.expr(expr), { to: 'interval-js' }).run!(args);
+    const at = (v: number) => ({ lo: v, hi: v });
+
+    test.each([2.5, 20.7, -2.5, -5.3, 100.5, 170.1])('Factorial(%p)', (x) =>
+      contains(run(['Factorial', 'x'], { x: at(x) }), ['Gamma', x + 1])
+    );
+
+    test.each([
+      [1000.5, 500.25],
+      [1043.137092590332, 607.6253779994079],
+      [50.5, 25],
+      [-200.5, 3],
+      [171.5, -1.5],
+    ])('Binomial(%p, %p)', (n, k) =>
+      contains(run(['Binomial', 'n', 'k'], { n: at(n), k: at(k) }), [
+        'Binomial',
+        n,
+        k,
+      ])
+    );
+
+    test('Binomial(50.5, k) over k ∈ [3, 25], at its peak k = 25', () =>
+      contains(run(['Binomial', 50.5, 'k'], { k: { lo: 3, hi: 25 } }), [
+        'Binomial',
+        50.5,
+        25,
+      ]));
+
+    test('Binomial(n, 0.3) over n ∈ [838, 839], where Γ(n + 1) overflows', () => {
+      const result = run(['Binomial', 'n', 0.3], { n: { lo: 838, hi: 839 } });
+      contains(result, ['Binomial', 838, 0.3]);
+      contains(result, ['Binomial', 839, 0.3]);
+    });
+
+    test('GammaLn over [0.5, 2] contains the minimum near 1.4616', () => {
+      const result = run(['GammaLn', 'x'], { x: { lo: 0.5, hi: 2 } });
+      contains(result, ['GammaLn', 1.4616321449683622]);
+      contains(result, ['GammaLn', 0.5]);
+    });
+
+    test('GammaLn on a negative strip', () =>
+      contains(run(['GammaLn', 'x'], { x: at(-8.95) }), ['GammaLn', -8.95]));
+  });
+
+  test('Factorial and Binomial stay exact at integer points', () => {
+    const f = compile(ce.expr(['Factorial', 'x']), { to: 'interval-js' });
+    expect(f.run!({ x: { lo: 5, hi: 5 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 120, hi: 120 },
+    });
+    const b = compile(ce.expr(['Binomial', 'n', 2]), { to: 'interval-js' });
+    expect(b.run!({ n: { lo: 5, hi: 5 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 10, hi: 10 },
+    });
   });
 
   test('GCD(12, 8) = 4', () => {
