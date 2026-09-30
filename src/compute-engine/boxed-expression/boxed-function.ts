@@ -4765,7 +4765,7 @@ export class BoxedFunction
         if (mismatch) return mismatch;
         return this.engine.function(
           this.operator,
-          this.ops!.map((x) => x.evaluate(options))
+          this.ops!.map((x) => x.evaluate(operandOptions(options)))
         );
       }
       if (lambdaElementwise) {
@@ -4897,7 +4897,10 @@ export class BoxedFunction
       //
       // 4/ Evaluate the applicable operands in the current scope
       //
-      const tail = holdMap(this, (x) => x.evaluate(options));
+      // Without `materialization`: that option describes the result, and a
+      // lazy operand must reach the handler in its lazy form
+      // (`operandOptions`).
+      const tail = holdMap(this, (x) => x.evaluate(operandOptions(options)));
 
       //
       // 4-err/ An operand has now evaluated to an error — either one held
@@ -5521,7 +5524,12 @@ export class BoxedFunction
       const preservedResult = evaluateStringPreservingResult(result);
       if (preservedResult !== result) return preservedResult;
 
-      // 6b/ Pole-aware numeric evaluation: at a known pole, N() yields
+      // 6b/ A lazy collection answered by the handler is materialized as
+      // asked (`materializeLazyResult`).
+      const materializedResult = materializeLazyResult(result, options);
+      if (materializedResult !== result) return materializedResult;
+
+      // 6c/ Pole-aware numeric evaluation: at a known pole, N() yields
       // ComplexInfinity rather than NaN/garbage (analytic-property store).
       if (numericApproximation)
         return applyPoleOverride(this.engine, this._operator, tail, result);
@@ -5711,7 +5719,9 @@ export class BoxedFunction
         if (mismatch) return mismatch;
         return this.engine.function(
           this.operator,
-          await Promise.all(this.ops!.map((x) => x.evaluateAsync(options)))
+          await Promise.all(
+            this.ops!.map((x) => x.evaluateAsync(operandOptions(options)))
+          )
         );
       }
       if (lambdaElementwise) {
@@ -5847,10 +5857,11 @@ export class BoxedFunction
       // 3/ Evaluate the applicable operands
       //
 
-      // Resolve all the operand promises
+      // Resolve all the operand promises. Without `materialization`, as on
+      // the sync route's step 4 (`operandOptions`).
       const tail = await holdMapAsync(
         this,
-        async (x) => await x.evaluateAsync(options)
+        async (x) => await x.evaluateAsync(operandOptions(options))
       );
 
       //
@@ -6384,7 +6395,12 @@ export class BoxedFunction
         const preservedResult = evaluateStringPreservingResult(result);
         if (preservedResult !== result) return preservedResult;
 
-        // 5b/ Pole-aware numeric evaluation (see the sync path).
+        // 5b/ A lazy collection answered by the handler is materialized as
+        // asked (`materializeLazyResult`); twin of step 6b in the sync path.
+        const materializedResult = materializeLazyResult(result, options);
+        if (materializedResult !== result) return materializedResult;
+
+        // 5c/ Pole-aware numeric evaluation (see the sync path).
         if (numericApproximation)
           return applyPoleOverride(engine, this._operator, tail, result);
         return result;
@@ -6638,10 +6654,14 @@ function evaluateBroadcastLiftsOnce(
   options: Partial<EvaluateOptions> | undefined
 ): ReadonlyArray<Expression> {
   if (!ops.some((op) => !isBroadcastParticipant(op))) return ops;
+  // A lift is an operand: evaluated without `materialization`
+  // (`operandOptions`), or a lift that reveals a lazy collection (a user
+  // function returning `Range(1, n)`) would broadcast over its display
+  // preview, placeholder included.
   return ops.map((op) =>
     isBroadcastParticipant(op)
       ? op
-      : normalizeLiftedAbsence(op, op.evaluate(options) ?? op)
+      : normalizeLiftedAbsence(op, op.evaluate(operandOptions(options)) ?? op)
   );
 }
 
@@ -6657,7 +6677,10 @@ async function evaluateBroadcastLiftsOnceAsync(
     ops.map(async (op) =>
       isBroadcastParticipant(op)
         ? op
-        : normalizeLiftedAbsence(op, (await op.evaluateAsync(options)) ?? op)
+        : normalizeLiftedAbsence(
+            op,
+            (await op.evaluateAsync(operandOptions(options))) ?? op
+          )
     )
   );
 }
@@ -6967,7 +6990,9 @@ function threadConditional(
   propagate: boolean,
   threadsAt?: (i: number) => boolean
 ): Expression | undefined {
-  const tail = lazy ? rawTail.map((x) => x.evaluate(options)) : rawTail;
+  const tail = lazy
+    ? rawTail.map((x) => x.evaluate(operandOptions(options)))
+    : rawTail;
   const isThreaded = (x: Expression, i: number, head: 'When' | 'Which') =>
     isFunction(x, head) && (threadsAt === undefined || threadsAt(i));
 
@@ -7956,7 +7981,11 @@ function applyFunctionLiteral(
     return expr.engine.typeError('function', value.type, value.toString());
   }
 
-  const ops = expr.ops.map((x) => x.evaluate(options));
+  // The arguments are operands: evaluated without `materialization`
+  // (`operandOptions`), so a body that reads a lazy argument as a collection
+  // reads the whole collection, not its display preview. The body itself
+  // keeps the caller's options, since it produces the result.
+  const ops = expr.ops.map((x) => x.evaluate(operandOptions(options)));
   if (!value || value.type.isUnknown) {
     // The cached `_def` may be a function-typed *value* placeholder (created
     // by the `Assign`/`Declare` canonical pass, e.g. a block-local one-step
@@ -9291,6 +9320,97 @@ function evaluateStringPreservingResult(result: Expression): Expression {
   // collection handler (which also rules out re-entrancy through `each()`),
   // laziness, an exact `string` type, and a proof that the walk terminates.
   return evaluateStringPreservingCollection(result, def) ?? result;
+}
+
+/**
+ * The options an OPERAND is evaluated with: the caller's options, minus
+ * `materialization`.
+ *
+ * That option describes the RESULT of the evaluation ("if the result is a
+ * lazy collection, materialize it"; `EvaluateOptions`). Forwarded to the
+ * operands, it materialized a lazy operand with no `evaluate` handler (a
+ * `Range`, a lazy `Map`) into the DISPLAY preview — the first five and the
+ * last five elements with a `ContinuationPlaceholder` between them — before
+ * the operator's handler read it, and the handler then counted or searched
+ * the preview: `Length(Range(1, 5000))` was `11`, `IndexOf(Range(1, 5000),
+ * 4000)` was `0` and `Contains(Range(1, 5000), 4000)` was `False` under
+ * `evaluate({ materialization: true })` (found 2026-09-29 by the fix for
+ * issue #368). A handler reads a lazy operand through `each()`, `at()` and
+ * `count`, so the lazy form is what it must receive. The result is still
+ * materialized as asked: a lazy node with no handler goes through
+ * `materialize()`, and a `List` literal materializes its elements in its own
+ * handler, which reads the option from the handler options, not from the
+ * operand evaluation.
+ */
+function operandOptions(
+  options: Partial<EvaluateOptions> | undefined
+): Partial<EvaluateOptions> | undefined {
+  if (options === undefined || (options.materialization ?? false) === false)
+    return options;
+  return { ...options, materialization: false };
+}
+
+/**
+ * A handler's result, materialized when the caller asked for it and the
+ * result is a LAZY collection: a view past the eager threshold
+ * (`Insert(Range(1, 200), 2, 99)`, `Partition(Range(1, 300), 3)`), or a
+ * `ListJoin` a spread literal folds to. Step 3 materializes a lazy node with
+ * NO handler before its operands are evaluated; a node WITH a handler
+ * reaches this point instead, and since its operands are evaluated without
+ * the option (`operandOptions`), this is the only place the option can be
+ * honored for such a result. Before the operands stopped materializing, these
+ * views were only ever built over a preview and so materialized "by
+ * accident", with the preview's content.
+ */
+/** The container literals whose elements the `materialization` option
+ * descends into (`materializeLazyResult`). `List` is listed so that a list
+ * NESTED in another container is evaluated again with the option; as a
+ * result head its own `evaluate` handler has already materialized its
+ * elements. */
+const CONTAINER_LITERAL_HEADS: ReadonlySet<string> = new Set([
+  'Tuple',
+  'Pair',
+  'Triple',
+  'Set',
+  'List',
+]);
+
+function materializeLazyResult(
+  result: Expression,
+  options: Partial<EvaluateOptions> | undefined
+): Expression {
+  if ((options?.materialization ?? false) === false) return result;
+  if (!(result instanceof BoxedFunction)) return result;
+  // A container LITERAL's elements are part of the result, so the option
+  // descends into them: `(Take(xs, 3), 1)` is a pair holding the
+  // materialized list (the Epsil CLI's `--json` output relies on this,
+  // `src/cli/format.ts`). The elements were evaluated as operands, without
+  // the option; a lazy element, or a nested container, is evaluated again
+  // with it. A `List` literal does this in its own handler, and a lazy `Set`
+  // (a comprehension) is a view, materialized below, not a literal.
+  if (
+    CONTAINER_LITERAL_HEADS.has(result.operator) &&
+    !result.isLazyCollection
+  ) {
+    const descends = (op: Expression) =>
+      op.isLazyCollection || CONTAINER_LITERAL_HEADS.has(op.operator);
+    if (!result.ops.some(descends)) return result;
+    return result.engine.function(
+      result.operator,
+      result.ops.map((op) => (descends(op) ? op.evaluate(options) : op))
+    );
+  }
+  if (!result.isLazyCollection) return result;
+  // A held conditional over a collection (`[5, 10] {0 < t}`, a `When` whose
+  // guard is not decided) is a lazy collection too, but it is a HELD form,
+  // not a view: walking it reads its restricted cells and builds a `Set` of
+  // them (`holdsConditionalValue`, `collection-utils.ts`, names the same
+  // three heads). Left as it is, it prints as the held list with its guard.
+  const h = result.operator;
+  if (h === 'When' || h === 'Which' || h === 'If') return result;
+  const def = result.operatorDefinition;
+  if (def === undefined) return result;
+  return materialize(result, def, options);
 }
 
 /**  Eagerly evaluate xs by iterating over its elements.

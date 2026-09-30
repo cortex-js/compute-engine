@@ -195,8 +195,11 @@ describe('COUNT', () => {
   test('Count range', () =>
     expect(evaluate(['Count', range])).toMatchInlineSnapshot(`9`));
 
+  // 89 elements. This pinned `11` while the file's `evaluate` helper, which
+  // passes `materialization: true`, materialized the operand to its display
+  // preview (5 head, 5 tail, one placeholder) before `Count` read it.
   test('Count linspace', () =>
-    expect(evaluate(['Count', linspace])).toMatchInlineSnapshot(`11`));
+    expect(evaluate(['Count', linspace])).toMatchInlineSnapshot(`89`));
 
   test('Count expression', () =>
     expect(evaluate(['Count', expression])).toMatchInlineSnapshot(`
@@ -3213,11 +3216,9 @@ describe('INDEX SEARCH OVER A SOURCE THAT CANNOT BE SEARCHED (issue #368)', () =
   // walk to the end of a finite source supports `0`; anything else stays
   // symbolic, as `Contains` and `IndexWhere` already did.
   //
-  // Evaluated WITHOUT the file's `evaluate` helper: its `materialization`
-  // option truncates a lazy operand to a preview before the operator sees it
-  // (`IndexOf(Range(1, 5000), 4000)` reads an 11-element list and answers 0;
-  // ROADMAP, "The `materialization` option truncates the operands of an eager
-  // operator").
+  // Compared as MathJSON rather than through the file's `evaluate` helper: a
+  // symbolic result must read as the operator over its operands, and the
+  // printed form quotes a multi-letter symbol (`IndexOf("xs", 0)`).
   const plain = (expr: Expression) =>
     JSON.stringify(engine.box(expr).evaluate().json);
   test('a valueless symbol stays symbolic', () => {
@@ -3282,6 +3283,64 @@ describe('INDEX SEARCH OVER A SOURCE THAT CANNOT BE SEARCHED (issue #368)', () =
   test('a finite source larger than the iteration limit is walked to its end', () => {
     expect(plain(['IndexOf', ['Range', 1, 5000], 4000])).toBe('4000');
     expect(plain(['IndexOf', ['Range', 1, 5000], 6000])).toBe('0');
+  });
+});
+
+describe('THE MATERIALIZATION OPTION DESCRIBES THE RESULT, NOT THE OPERANDS', () => {
+  // `evaluate({ materialization: true })` (what this file's `evaluate` helper
+  // passes, and what `toString()` passes to print a lazy collection) reached
+  // the OPERANDS of an eager operator: a lazy `Range` operand was
+  // materialized to its display preview (5 head, 5 tail, one placeholder)
+  // before the handler read it, so `Length(Range(1, 5000))` was 11 and
+  // `IndexOf(Range(1, 5000), 4000)` was 0 (found 2026-09-29 by the fix for
+  // issue #368). Operands now reach the handler in their lazy form.
+  test('an eager operator reads the whole lazy operand', () => {
+    expect(evaluate(['Length', ['Range', 1, 5000]])).toBe('5000');
+    expect(evaluate(['Count', ['Range', 1, 5000]])).toBe('5000');
+    expect(evaluate(['IndexOf', ['Range', 1, 5000], 4000])).toBe('4000');
+    expect(evaluate(['Sum', ['Range', 1, 5000]])).toBe('12502500');
+  });
+  test('the result itself is still materialized as asked', () => {
+    // A lazy node with no handler: the preview.
+    expect(
+      engine
+        .box(['Range', 1, 5000])
+        .evaluate({ materialization: true })
+        .toString()
+    ).toBe('[1,2,3,4,5,...,4996,4997,4998,4999,5000]');
+    // A view a handler answers lazily (past the eager threshold) is
+    // materialized after the handler, not before it.
+    const view = engine
+      .box(['Insert', ['Range', 1, 200], 2, 99])
+      .evaluate({ materialization: true });
+    expect(view.operator).toBe('List');
+    expect(view.toString()).toBe('[1,99,2,3,4,...,196,197,198,199,200]');
+  });
+  test('the arguments of a function literal and a broadcast lift are operands too', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(list) -> integer');
+    ce.assign('f', ce.box(['Function', ['Length', 'x'], 'x']));
+    expect(
+      ce.box(['f', ['Range', 1, 5000]]).evaluate({ materialization: true }).toString()
+    ).toBe('5000');
+    // A lift that reveals a lazy collection is broadcast over the whole
+    // collection, not over its preview.
+    ce.declare('g', '(integer) -> list');
+    ce.assign('g', ce.box(['Function', ['Range', 1, 'n'], 'n']));
+    expect(
+      ce
+        .box(['Length', ['Add', ['g', 5000], 1]])
+        .evaluate({ materialization: true })
+        .toString()
+    ).toBe('5000');
+  });
+  test('a held conditional over a list is left as the held form', () => {
+    const ce = new ComputeEngine();
+    const held = ce
+      .box(['When', ['List', 5, 10], ['Less', 0, 't']])
+      .evaluate({ materialization: true });
+    expect(held.operator).toBe('When');
+    expect(held.toString()).toBe('[5,10] {0 < t}');
   });
 });
 

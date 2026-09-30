@@ -2,6 +2,64 @@
 
 ### Issues Resolved
 
+- **The `materialization` option no longer truncates the operands of an eager
+  operator.** `Length(Range(1, 5000)).evaluate({ materialization: true })` was
+  `11`, and `IndexOf(Range(1, 5000), 4000)` and `Contains(Range(1, 5000),
+  4000)` under the same option were `0` and `False`: the option, which
+  describes the result ("if the result is a lazy collection, materialize it"),
+  was forwarded to the evaluation of each operand, and a lazy operand with no
+  `evaluate` handler was materialized to the display preview (the first five
+  and the last five elements with a placeholder between them) before the
+  operator's handler read it. Operands now reach the handler in their lazy
+  form on both the synchronous and the asynchronous route, and a lazy view a
+  handler answers (`Insert(Range(1, 200), 2, 99)`, `Partition(Range(1, 300),
+  3)`) is materialized after the handler instead, and the option still
+  descends into a container literal (`(Take(xs, 3), 1)` is a pair holding the
+  materialized list). A held conditional over a list (`[5, 10] {0 < t}`) is
+  left as the held form.
+- **A `Fold` that builds a list compiles, and so do `Length` and `At` of its
+  result** ([#369](https://github.com/cortex-js/compute-engine/issues/369),
+  reported by [enumeratio](https://github.com/enumeratio)).
+  `Fold((acc, i) => Join(acc, [2 p[i]]), [], 1..Length(p))` evaluates to
+  `[6, 2, 4]` for `p = [3, 1, 2]` but declined on the JavaScript target with
+  "Could not compile `Join`: operand 1 is not an indexed collection" (fixed in
+  0.141.0 by the run-time array check of an inferred collection parameter), and
+  `Length` or `At` of the fold, or of a block local holding it, still declined:
+  the engine types the fold `collection<any>`, from the bare accumulator's
+  inferred type. A seeded fold whose seed is an array and whose combiner returns
+  one is now read as an array, and `At` of a block local typed as an inferred
+  collection reads it through the same run-time check `Length` uses. An
+  ANNOTATED accumulator (`(acc: list<integer | nan>, i) => …`) declined as "the
+  type of the value it receives is not provable" on both the JavaScript and the
+  Python targets: the accumulator receives the seed, then the combiner's own
+  result, so it is now judged against the join of the two types, and admitted
+  when both provably satisfy the annotation. An annotation the body does not
+  provably return is still declined, and the diagnostic now names the argument
+  type (`list<integer | nan>`: `p[i]` may be out of range). A fold whose
+  combiner is a function defined in the same program (`function add(a, x) {
+  a + x }` then `Fold(add, 0, xs)`) declined as "the combiner has no compiled
+  function form": the combiner is now resolved through the compiled block's
+  own bindings, as a call of that function already was.
+- **A fold's accumulator is typed from its seed and its combiner's result**
+  (user decision 2026-09-29, from the investigation of
+  [#369](https://github.com/cortex-js/compute-engine/issues/369)). A bare
+  accumulator was typed from its uses only, so
+  `Fold((acc, i) => Join(acc, [2 p[i]]), [], 1..n)` was typed
+  `collection<any>` (a `Join` also accepts a set), and a view over it followed
+  the kind of a value the fold node did not hold: `Map(x => x + 1, fold)`
+  evaluated to `Set(7, 3, 5)` and `Filter(fold, x => x > 3)` to `Set(6, 4)`
+  where the fold's value is the list `[6, 2, 4]` and the compiled result was
+  the array `[7, 3, 5]`. The accumulator is now typed to the fixpoint of the
+  seed's type and the combiner's result type (`list<integer | nan>` here), as
+  an INFERRED type: the printed literal is unchanged, nothing is enforced at
+  apply time (a fold whose accumulator changes type mid-fold, `1 → 1/2 →
+  1/6`, still evaluates), and the same views now evaluate to the lists
+  `[7, 3, 5]` and `[6, 4]`. `Scan` and the seedless folds are typed the same
+  way. A fold whose accumulator already infers a precise type (a numeric
+  fold) is not re-canonicalized, so its cost is unchanged; a list-building
+  fold costs about one extra canonicalization of its combiner. What changes
+  for a caller: the type of such a fold, and a `Map`/`Filter`/`Take` over it
+  answers a list instead of a set.
 - **`IndexOf` and `IndexWhere` no longer answer `0` for a collection they
   cannot search**
   ([#368](https://github.com/cortex-js/compute-engine/issues/368), reported by
