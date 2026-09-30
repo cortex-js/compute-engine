@@ -14,6 +14,26 @@
 
 ### Behavior Changes
 
+- **A parenthesized derivative operand is delimited by its parentheses**
+  (#336). `\frac{d}{dx}(x)+1` parsed as `D(x + 1, x)`: the operand of a
+  Leibniz fraction took the whole sum that followed it, so the `+1` moved
+  inside the derivative, and a product or quotient written after the
+  parentheses (`\frac{d}{dx}(x)\cdot 2`) was absorbed the same way. An
+  operand that starts with a parenthesis, plain or sized (`(…)`,
+  `\left(…\right)`, `\bigl(…\bigr)`), now ends at that parenthesis:
+  `\frac{d}{dx}(x)+1` is `D(x, x) + 1` and evaluates to `2`,
+  `\frac{d}{dx}(x)\cdot 2` is `2·D(x, x)`. A superscript, prime or factorial
+  attached to the parenthesis stays inside the operand (`\frac{d}{dx}(x+1)^2`
+  is still `D((x+1)^2, x)`). The rule covers `\frac{\partial}{\partial x}(…)`
+  and the higher-order `\frac{d^n}{dx^n}(…)` forms. What changes meaning: a
+  factor juxtaposed after the parenthesis is now outside the derivative,
+  `\frac{d}{dx}(x+1)(x-1)` is `D(x+1, x)·(x-1)` where it was
+  `D((x+1)(x-1), x)`; write `\frac{d}{dx}((x+1)(x-1))` for the derivative of
+  the product. An operand without a parenthesis keeps its term extent:
+  `\frac{d}{dx}x^2+1` is still `D(x^2 + 1, x)`, the `\int … dx` integrand
+  convention, and so does an operand in another enclosure (`\frac{d}{dx}|x|+1`
+  is `D(|x| + 1, x)`).
+
 - **A `Range`, a `Linspace`, a comprehension and a `Tabulate` are typed
   `list<T>`; they were `indexed_collection<T>`.** A symbol declared `list` or
   `list<number>` refused every one of them: `ce.declare("L", "list")` followed

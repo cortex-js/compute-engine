@@ -1121,6 +1121,47 @@ function parseFractionArgument(parser: Parser): MathJsonExpression {
  */
 const DERIVATIVE_OPERAND_PRECEDENCE = ADDITION_PRECEDENCE;
 
+/**
+ * Parse the operand that follows a Leibniz derivative fraction.
+ *
+ * An operand that starts with a parenthesis, plain or sized
+ * (`\frac{d}{dx}(x^2+1)`, `\frac{d}{dx}\left(x\right)`, `\bigl(`…), is
+ * delimited by that parenthesis: the derivative is `D(x^2+1, x)`, and a sum,
+ * product or quotient written after the closing parenthesis applies to the
+ * derivative, not to its operand (`\frac{d}{dx}(x)+1` is `D(x, x) + 1`,
+ * `\frac{d}{dx}(x)\cdot 2` is `2·D(x, x)`). A superscript, prime or
+ * factorial attached to the parenthesis stays inside the operand
+ * (`\frac{d}{dx}(x+1)^2` is `D((x+1)^2, x)`), so the parenthesized operand is
+ * read at `POSTFIX_PRECEDENCE`: a primary with its scripts and postfix
+ * operators, and no infix operator.
+ *
+ * Only a parenthesis is a fence. Another enclosure — `|x|`, `\lfloor x\rfloor`,
+ * `[x]`, `\{x\}` — is not a grouping of the operand but a notation of its
+ * own, so it keeps the term extent below, like `\sin(x)` does:
+ * `\frac{d}{dx}|x|+1` is `D(|x|+1, x)`.
+ *
+ * Without a parenthesis the operand keeps the term extent described at
+ * `DERIVATIVE_OPERAND_PRECEDENCE`: `\frac{d}{dx}x^2+1` is `D(x^2+1, x)`.
+ *
+ * The parenthesis is detected on the tokens, not by a speculative enclosure
+ * parse: a speculation would parse the operand twice, and an operand that is
+ * itself a parenthesized derivative would double that at every level. An
+ * unclosed parenthesis (`\frac{d}{dx}(x`) fails to parse as a primary and
+ * reports the same missing-operand and unexpected-delimiter errors as before.
+ */
+function parseDerivativeOperand(parser: Parser): MathJsonExpression {
+  parser.skipSpace();
+  const start = parser.index;
+  const fenced = OPENING_PARENTHESIS.test(parser.latex(start, start + 2));
+  return unwrapSingleItemList(
+    missingIfEmpty(
+      parser.parseExpression({
+        minPrec: fenced ? POSTFIX_PRECEDENCE : DERIVATIVE_OPERAND_PRECEDENCE,
+      })
+    )
+  );
+}
+
 function parseFraction(parser: Parser): MathJsonExpression | null {
   const numer = parseFractionArgument(parser);
   const denom = parseFractionArgument(parser);
@@ -1178,11 +1219,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       }
     }
     if (fn === null || fn === undefined || fn === 'Nothing')
-      fn = unwrapSingleItemList(
-        missingIfEmpty(
-          parser.parseExpression({ minPrec: DERIVATIVE_OPERAND_PRECEDENCE })
-        )
-      );
+      fn = parseDerivativeOperand(parser);
 
     // Differentiation variables from the denominator's ∂ markers. Each marker
     // carries either a single variable or a `List` of them (a `∂x ∂y` chain).
@@ -1326,13 +1363,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     if (vars.length > 0) {
       // The function being differentiated is either folded into the numerator
       // (`\frac{d^n f}{dx^n}`) or follows the fraction (`\frac{d^n}{dx^n} f`).
-      const fn =
-        numerFn ??
-        unwrapSingleItemList(
-          missingIfEmpty(
-            parser.parseExpression({ minPrec: DERIVATIVE_OPERAND_PRECEDENCE })
-          )
-        );
+      const fn = numerFn ?? parseDerivativeOperand(parser);
       // Build the nested `D` form, e.g. `D(D(f, x), x)` for a second
       // derivative. This matches the Lagrange (`f''(x)`) parse and the `D`
       // serializer, which recovers the order by counting nested `D`s (a flat

@@ -320,6 +320,125 @@ describe('LEIBNIZ DERIVATIVE OPERAND EXTENT', () => {
       'x',
     ]);
   });
+
+  // A fenced operand is delimited by its fence (issue #336): what follows the
+  // fence applies to the derivative, not to its operand.
+  describe('fenced operand', () => {
+    test('a sum after the fence applies to the derivative', () => {
+      expect(ce.parse('\\frac{d}{dx}(x^2)+1').json).toEqual([
+        'Add',
+        ['D', ['Power', 'x', 2], 'x'],
+        1,
+      ]);
+      expect(ce.parse('\\frac{d}{dx}(x)+1', { form: 'raw' }).json).toEqual([
+        'Add',
+        ['D', ['Delimiter', 'x'], 'x'],
+        1,
+      ]);
+      expect(ce.parse('\\frac{d}{dx}(x^2)+1').evaluate().json).toEqual([
+        'Add',
+        ['Multiply', 2, 'x'],
+        1,
+      ]);
+    });
+
+    test('a product or quotient after the fence applies to the derivative', () => {
+      expect(ce.parse('\\frac{d}{dx}(x^2)\\cdot 2').json).toEqual([
+        'Multiply',
+        2,
+        ['D', ['Power', 'x', 2], 'x'],
+      ]);
+      expect(ce.parse('\\frac{d}{dx}(x^2)/2').json).toEqual([
+        'Multiply',
+        ['Rational', 1, 2],
+        ['D', ['Power', 'x', 2], 'x'],
+      ]);
+      expect(ce.parse('\\frac{d}{dx}(x+1)(x-1)').json).toEqual([
+        'Multiply',
+        ['Add', 'x', -1],
+        ['D', ['Add', 'x', 1], 'x'],
+      ]);
+    });
+
+    test('a \\left…\\right fence delimits the operand too', () => {
+      expect(ce.parse('\\frac{d}{dx}\\left(x^2\\right)+1').json).toEqual([
+        'Add',
+        ['D', ['Power', 'x', 2], 'x'],
+        1,
+      ]);
+    });
+
+    test('a partial derivative and a higher-order derivative stop at the fence', () => {
+      expect(ce.parse('\\frac{\\partial}{\\partial x}(x^2y)+y').json).toEqual([
+        'Add',
+        'y',
+        ['D', ['Multiply', 'y', ['Power', 'x', 2]], 'x'],
+      ]);
+      expect(ce.parse('\\frac{d^2}{dx^2}(x^3)+1').json).toEqual([
+        'Add',
+        ['D', ['D', ['Power', 'x', 3], 'x'], 'x'],
+        1,
+      ]);
+    });
+
+    test('a superscript attached to the fence stays inside the operand', () => {
+      expect(ce.parse('\\frac{d}{dx}(x+1)^2').json).toEqual([
+        'D',
+        ['Power', ['Add', 'x', 1], 2],
+        'x',
+      ]);
+      expect(ce.parse('\\frac{d}{dx}(x)^2+1').json).toEqual([
+        'Add',
+        ['D', ['Power', 'x', 2], 'x'],
+        1,
+      ]);
+    });
+
+    test('the fence still holds a whole sum', () => {
+      expect(ce.parse('\\frac{d}{dx}(x^3+\\cos(x))').json).toEqual([
+        'D',
+        ['Add', ['Power', 'x', 3], ['Cos', 'x']],
+        'x',
+      ]);
+    });
+
+    test('a comparison after the fence applies to the derivative', () => {
+      expect(ce.parse('\\frac{d}{dx}(x^2)>0').json).toEqual([
+        'Less',
+        0,
+        ['D', ['Power', 'x', 2], 'x'],
+      ]);
+    });
+
+    test('a space before the fence and a sized fence are accepted', () => {
+      expect(ce.parse('\\frac{d}{dx} (x^2) + 1').json).toEqual([
+        'Add',
+        ['D', ['Power', 'x', 2], 'x'],
+        1,
+      ]);
+      expect(ce.parse('\\frac{d}{dx}\\bigl(x^2\\bigr)+1').json).toEqual([
+        'Add',
+        ['D', ['Power', 'x', 2], 'x'],
+        1,
+      ]);
+    });
+
+    test('only a parenthesis is a fence: another enclosure keeps the term extent', () => {
+      expect(ce.parse('\\frac{d}{dx}|x|+1', { form: 'raw' }).json).toEqual([
+        'D',
+        ['Add', ['Abs', 'x'], 1],
+        'x',
+      ]);
+    });
+
+    test('an unclosed parenthesis reports the same errors as before', () => {
+      expect(ce.parse('\\frac{d}{dx}(x', { form: 'raw' }).json).toEqual([
+        'Sequence',
+        ['D', ['Error', "'missing'"], 'x'],
+        ['Error', "'unexpected-delimiter'", ['LatexString', "'('"]],
+      ]);
+    });
+  });
 });
 
 describe('DERIVATIVE EVALUATION', () => {
@@ -459,9 +578,7 @@ describe('PARTIAL DERIVATIVE NOTATION (∂)', () => {
   });
 
   test('a mixed partial serializes to Leibniz ∂ notation', () => {
-    const expr = ce
-      .box(['D', ['D', ['f', 'x', 'y'], 'x'], 'y'])
-      .evaluate();
+    const expr = ce.box(['D', ['D', ['f', 'x', 'y'], 'x'], 'y']).evaluate();
     expect(expr.latex).toBe(
       '\\frac{\\partial^{2}}{\\partial x \\partial y} f(x, y)'
     );
