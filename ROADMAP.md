@@ -109,6 +109,30 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### The `materialization` option truncates the operands of an eager operator to a preview (OPEN, decision — found 2026-09-29 by the fix for issue #368)
+
+`Length(Range(1, 5000)).evaluate({ materialization: true })` is `11`, and
+`IndexOf(Range(1, 5000), 4000)` and `Contains(Range(1, 5000), 4000)` under
+the same option answer `0` and `False`, where the plain `evaluate()` gives
+`5000`, `4000` and `True`. The evaluation of a function node passes its
+options to the evaluation of each operand, and a lazy operand with no
+`evaluate` handler (a `Range`, a lazy `Map`) is then materialized with the
+display preview (the first five and the last five elements, with an
+ellipsis marker between them) before the operator's handler reads it. The
+option's documentation promises that a finite collection is "fully
+materialized" under `true`; the preview is what the display route wants
+(`toString()` and `latex` evaluate with `materialization: true` to print a
+large collection), not what an operand should carry. Two ways to close it:
+evaluate operands with `materialization: false` and let the handler read the
+lazy source through `each()` (every collection handler already does), or
+make `true` mean the full materialization the documentation promises and
+have the display route ask for `[5, 5]` explicitly. The first keeps the
+display unchanged and is the recommendation. Fourteen test files evaluate
+through a helper that passes `materialization: true`, so an expectation
+that pinned a truncated intermediate would move; the new `IndexOf` tests in
+`test/compute-engine/collections.test.ts` evaluate without the option for
+this reason.
+
 ### A destructuring `let` inside a loop body does not compile (OPEN, small — found 2026-09-28 by the review fixes for Tycho item 332)
 
 `let n = 0` / `while n < 4 { let (a, x) = (2, 3); n = n + a }` / `n`

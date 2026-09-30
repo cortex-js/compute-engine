@@ -781,9 +781,9 @@ The set of all imaginary numbers.
 
 ### indexOf
 
-MathJSON `IndexOf` · `(collection<any>, any) -> integer`
+MathJSON `IndexOf` · `(indexed_collection<any>, any) -> integer`
 
-Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2.
+Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).
 
 ```epsil
 indexOf([10, 20, 30], 20)
@@ -792,9 +792,9 @@ indexOf([10, 20, 30], 20)
 
 ### indexWhere
 
-MathJSON `IndexWhere` · `(collection<T>, predicate: (T) any -> boolean) -> integer where T`
+MathJSON `IndexWhere` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T`
 
-Return the 1-based index of the first element satisfying the predicate, or 0 if not found.
+Return the 1-based index of the first element satisfying the predicate, or 0 if not found. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).
 
 ```epsil
 indexWhere([1, 4, 9, 16], x => x > 5)

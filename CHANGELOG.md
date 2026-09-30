@@ -2,6 +2,20 @@
 
 ### Issues Resolved
 
+- **`IndexOf` and `IndexWhere` no longer answer `0` for a collection they
+  cannot search**
+  ([#368](https://github.com/cortex-js/compute-engine/issues/368), reported by
+  [enumeratio](https://github.com/enumeratio)). `IndexOf(xs, 0)` for a symbol
+  `xs` with no value, for an unknown function `f(1, 0)` or for `Range(1, n)`
+  answered `0`, a claim that the element is absent, while `Contains(xs, 0)`
+  and `IndexWhere` stayed unevaluated: the handler read the "cannot search"
+  answer of the element scan as "not found". Both operators now stay
+  unevaluated unless a finite source was walked to its end. A set is refused
+  as `incompatible-type`, as `First` and `At` refuse it, instead of answering
+  `0` for every value. An unbounded source still answers a match
+  (`IndexOf(Repeat(5), 5)` is `1`) and a refutation (`IndexOf(Repeat(6), 5)` is
+  `0`); a search that finds nothing within the iteration limit stays
+  unevaluated instead of walking forever.
 - **A DMS angle may omit the minutes.** `9°30"` (9 degrees 30 seconds) was an
   `expected-closing-delimiter` error, `9°30''` and `9°30\prime\prime` parsed
   as the derivative of `9°30'`, and `9°30\doubleprime` as

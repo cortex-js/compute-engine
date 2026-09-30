@@ -195,20 +195,26 @@ describe('Parser: for-comprehensions', () => {
       expect(applied).toEqual(['11', '12', '13']);
     });
 
-    // C3: `IndexOf` over an infinite collection with no match must abort
-    // within the time budget rather than hang. Use a fresh engine and bound
-    // the work in a labelled span so the shared engine's limit is untouched.
-    test('IndexOf on an infinite Range aborts within a time-limited span (C3)', () => {
+    // C3: `IndexOf` over an infinite collection with no match must not hang.
+    // It used to walk until the deadline of a time-limited span and throw
+    // its cancellation. Since the fix for issue #368 the range REFUTES a
+    // value off its grid (`0.5` is never an element of `Range(1, +oo)`), so
+    // the search answers the not-found `0` without a walk; a walk that does
+    // run is capped at `ce.iterationLimit` elements and the search then stays
+    // symbolic (`IndexWhere(Repeat(6), x => x == 5)`, `collections.test.ts`).
+    // Use a fresh engine and bound the work in a labelled span so the shared
+    // engine's limit is untouched; the jest per-test timeout is the backstop
+    // for a hang, an elapsed-millisecond check would only add sensitivity to
+    // load on the machine.
+    test('IndexOf on an infinite Range answers within a time-limited span (C3)', () => {
       const ce2 = new ComputeEngine();
-      // Throwing IS the assertion: a search over an infinite Range with no
-      // match and no deadline check never returns and never throws. The jest
-      // per-test timeout is the backstop for that case; an elapsed-millisecond
-      // check would only add sensitivity to load on the machine.
-      expect(() =>
-        ce2.withTimeLimit({ ms: 300, label: 'test:indexof-infinite-range' }, () =>
-          ce2.expr(['IndexOf', ['Range', 1, Infinity], 0.5]).evaluate()
-        )
-      ).toThrow();
+      expect(
+        ce2
+          .withTimeLimit({ ms: 300, label: 'test:indexof-infinite-range' }, () =>
+            ce2.expr(['IndexOf', ['Range', 1, Infinity], 0.5]).evaluate()
+          )
+          .toString()
+      ).toBe('0');
     });
   });
 });

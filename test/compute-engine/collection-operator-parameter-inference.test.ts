@@ -122,7 +122,7 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'IndexWhere',
     'indexWhere(xs, x => x > 1)',
-    '(collection<unknown>) -> integer',
+    '(indexed_collection<unknown>) -> integer',
     [LIST],
   ],
   [

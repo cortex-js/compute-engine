@@ -788,6 +788,83 @@ function searchedValueStatus(
   return undefined;
 }
 
+/**
+ * The 1-based index of `value` in an UNBOUNDED `Range` on an integer grid
+ * (`Range(1, +oo)`, `Range(0, -oo, -2)`), computed from the grid rather than
+ * walked, or `undefined` when this shortcut does not apply.
+ *
+ * The walk of an unbounded source is capped at `ce.iterationLimit` elements
+ * (`searchIndex`), so `IndexOf(Range(1, +oo), 2000)` would stay symbolic
+ * where it answered `2000` by walking before the cap. The shortcut is limited
+ * to integer bounds and an integer NUMBER LITERAL in the safe-integer range,
+ * so its answer is the one a walk comparing with `isSame` gives: a float grid
+ * has rounding (`Range(0, 1, 0.1)` holds `0.30000000000000004`, not `0.3`), an
+ * expression whose real part is an integer (`Sqrt(9)`) is not the same as
+ * the element `3`, an integer past 2^53 rounds when read as a double, and a
+ * finite range is short enough to walk.
+ */
+function unboundedIntegerRangeIndex(
+  xs: Expression,
+  value: Expression
+): number | undefined {
+  if (xs.operator !== 'Range' || !isFunction(xs)) return undefined;
+  if (hasSymbolicRangeBounds(xs)) return undefined;
+  const [lower, upper, step] = range(xs);
+  if (!Number.isInteger(lower) || !Number.isInteger(step) || step === 0)
+    return undefined;
+  // The step must run toward the infinite end: `Range(1, +oo, -1)` and
+  // `Range(1, -oo, 1)` are EMPTY (`range()` passes an explicit step through
+  // as written), and an empty range holds no index.
+  if (!(upper === Infinity && step > 0) && !(upper === -Infinity && step < 0))
+    return undefined;
+  if (!isNumber(value) || value.im !== 0) return undefined;
+  const t = value.re;
+  if (!Number.isSafeInteger(t)) return undefined;
+  const k = (t - lower) / step;
+  if (!Number.isInteger(k) || k < 0) return undefined;
+  return k + 1;
+}
+
+/**
+ * The answer of an index search (`IndexOf`, `IndexWhere`) over `xs`: the
+ * 1-based index of the first element `predicate` accepts, `0` when the
+ * source was walked to its end without a match, and `undefined` when neither
+ * can be claimed, so the operator stays symbolic.
+ *
+ * `Expression.indexWhere` alone cannot support the not-found `0`: it answers
+ * `undefined` both when no element matches and when it cannot search at all —
+ * a valueless symbol, an unknown function, a `Range` with a symbolic bound, a
+ * source that is not indexed. Reading that `undefined` as `0` claimed an
+ * absence nothing supported (issue #368: `IndexOf(xs, 0)` for a valueless
+ * `xs` was `0`, where `Contains(xs, 0)` stays unevaluated).
+ *
+ * Only a source known to be finite supports the not-found `0`. A source that
+ * is not (`Repeat(5)`, `Cycle([1, 2])`, a `Filter` over an unbounded range)
+ * can still answer a MATCH, since the index of a match does not depend on
+ * the elements after it; its walk is capped at `ce.iterationLimit` elements
+ * by the synthesized `indexWhere` handler (`collectionIndexWhere`,
+ * `collection-utils.ts`), and a walk that reaches the cap, or that ends
+ * without a match on a source of unknown finiteness, has no answer.
+ */
+function searchIndex(
+  xs: Expression,
+  predicate: (element: Expression) => boolean
+): number | undefined {
+  if (!isEnumerableSource(xs)) return undefined;
+  if (xs.isIndexedCollection !== true) return undefined;
+  if (xs.isFiniteCollection === true) return xs.indexWhere(predicate) ?? 0;
+  try {
+    return xs.indexWhere(predicate);
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+}
+
 // Validate the collection operand of a LAZY collection operator's canonical
 // handler — like `checkType(engine, op, type)` but fail-open: an operand whose
 // type is not PROVABLY incompatible (`unknown`/`any`/`value`, or a
@@ -11347,7 +11424,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   IndexOf: {
     examples: ['IndexOf([10, 20, 30], 20)'],
     description:
-      'Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2.',
+      'Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).',
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
@@ -11367,11 +11444,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
     missingStrip: [0],
-    signature: '(collection<any>, any) -> integer',
+    // An index is a position, so the collection must be indexed: a set has
+    // no first element (`First`, `At` refuse it the same way). With the wider
+    // `collection<any>` a set reached the handler and answered `0` for every
+    // value, present or not.
+    signature: '(indexed_collection<any>, any) -> integer',
     evaluate: ([xs, value], { engine: ce }) => {
       if (searchedValueStatus(value) === 'undecided') return undefined;
-      const index = xs.indexWhere((x) => x.isSame(value)) ?? undefined;
-      return ce.number(index ?? 0);
+      // An unbounded source may refute membership without a walk: `Repeat(6)`
+      // and `Cycle([1, 2])` compare the value against what they repeat. That
+      // refutation is the not-found `0` a capped walk could never claim
+      // (`searchIndex`); a finite source is walked instead, so the answer and
+      // the walk never disagree.
+      if (xs.isFiniteCollection === false && xs.contains(value) === false)
+        return ce.Zero;
+      const gridIndex = unboundedIntegerRangeIndex(xs, value);
+      if (gridIndex !== undefined) return ce.number(gridIndex);
+      const index = searchIndex(xs, (x) => x.isSame(value));
+      return index === undefined ? undefined : ce.number(index);
     },
   },
 
@@ -11534,39 +11624,40 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   IndexWhere: {
     examples: ['IndexWhere([1, 4, 9, 16], x => x > 5)'],
     description:
-      'Return the 1-based index of the first element satisfying the predicate, or 0 if not found.',
+      'Return the 1-based index of the first element satisfying the predicate, or 0 if not found. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).',
     complexity: 8200,
     // Design D phase 1: the element-of link lives in the SIGNATURE (see
     // `CountIf`). The result type is unchanged.
+    // An index is a position, so the collection must be indexed (see
+    // `IndexOf`): with the wider `collection<T>` a set reached the handler and
+    // answered `0` whatever the predicate.
     signature:
-      '(collection<T>, predicate: (T) any -> boolean) -> integer where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'IndexWhere', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Zero;
-      // A source that cannot be enumerated has no first match to index AND no
-      // grounds for the NOT-FOUND `0` — stay inert (see `isEnumerableSource`).
-      if (!isEnumerableSource(xs)) return undefined;
       // An element-valued predicate failure (see `predicateErrorValue`) is
       // reported as the operator's result. Collected here rather than thrown:
       // stop the walk (by reporting a match) and return the error below.
       const predErrors: Expression[] = [];
-      const index =
-        xs.indexWhere((x) => {
-          const applied = f([x]);
-          const pred = selectionVerdict(applied);
-          if (pred === 'True') return true;
-          if (pred === 'False') return false;
-          const err = predicateErrorValue(applied);
-          if (err) {
-            predErrors.push(err);
-            return true;
-          }
-          throw predicateResultError('IndexWhere', fn);
-        }) ?? undefined;
+      // A source that cannot be searched has no first match to index AND no
+      // grounds for the NOT-FOUND `0` — stay inert (see `searchIndex`).
+      const index = searchIndex(xs, (x) => {
+        const applied = f([x]);
+        const pred = selectionVerdict(applied);
+        if (pred === 'True') return true;
+        if (pred === 'False') return false;
+        const err = predicateErrorValue(applied);
+        if (err) {
+          predErrors.push(err);
+          return true;
+        }
+        throw predicateResultError('IndexWhere', fn);
+      });
       if (predErrors.length > 0) return predErrors[0];
-      return ce.number(index ?? 0);
+      return index === undefined ? undefined : ce.number(index);
     },
   },
 

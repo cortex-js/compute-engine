@@ -3235,12 +3235,31 @@ function collectionIndexWhere(
   // never-matching value in an infinite collection — aborts at the active
   // `withTimeLimit` span deadline, if any
   // with the usual timeout `CancellationError` instead of hanging forever.
+  //
+  // The walk over a source that is not known to be finite is capped at
+  // `ce.iterationLimit` elements, with or without a deadline (the deadline is
+  // a wall-clock backstop, the cap bounds the work), and reports the
+  // `iteration-limit-exceeded` cancellation, as the `Filter` iterator does:
+  // `IndexOf(Repeat(6), 5)` walked forever (found 2026-09-29 with issue
+  // #368). The index-search operators turn that cancellation into "no
+  // answer" (`searchIndex`, `library/collections.ts`); the other consumer of
+  // this handler, the default `contains`, only reaches it for a finite
+  // source. A finite source is never capped, since the default limit (1024)
+  // is far below an ordinary list or range (`IndexOf(Range(1, 5000), 4000)`
+  // must answer).
   const deadline = expr.engine._deadline;
+  const limit =
+    expr.isFiniteCollection === true ? Infinity : expr.engine.iterationLimit;
   let i = 0;
   for (const op of expr.each()) {
     i += 1;
     if ((i & 0x3ff) === 0) checkDeadline(deadline);
     if (predicate(op)) return i;
+    if (i >= limit)
+      throw new CancellationError({
+        cause: 'iteration-limit-exceeded',
+        message: `Iteration limit of ${limit} exceeded while searching ${expr.operator}()`,
+      });
   }
 
   return undefined;

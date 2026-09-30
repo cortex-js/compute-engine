@@ -416,7 +416,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
     ['Find', '(collection<T>, predicate: (T) any -> boolean) -> any where T'],
     [
       'IndexWhere',
-      '(collection<T>, predicate: (T) any -> boolean) -> integer where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T',
     ],
     [
       'Position',

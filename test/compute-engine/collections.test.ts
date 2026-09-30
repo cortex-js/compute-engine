@@ -3206,6 +3206,85 @@ describe('INDEXOF ON A TENSOR-BACKED LIST', () => {
   });
 });
 
+describe('INDEX SEARCH OVER A SOURCE THAT CANNOT BE SEARCHED (issue #368)', () => {
+  // `IndexOf` answered the not-found `0` whenever the element scan answered
+  // `undefined`, which it also does when it cannot search at all: a symbol
+  // with no value, an unknown function, a range with a symbolic bound. Only a
+  // walk to the end of a finite source supports `0`; anything else stays
+  // symbolic, as `Contains` and `IndexWhere` already did.
+  //
+  // Evaluated WITHOUT the file's `evaluate` helper: its `materialization`
+  // option truncates a lazy operand to a preview before the operator sees it
+  // (`IndexOf(Range(1, 5000), 4000)` reads an 11-element list and answers 0;
+  // ROADMAP, "The `materialization` option truncates the operands of an eager
+  // operator").
+  const plain = (expr: Expression) =>
+    JSON.stringify(engine.box(expr).evaluate().json);
+  test('a valueless symbol stays symbolic', () => {
+    expect(plain(['IndexOf', 'xs', 0])).toBe('["IndexOf","xs",0]');
+    expect(
+      plain(['IndexWhere', 'xs', ['Function', ['Equal', 'x', 0], 'x']])
+    ).toMatch(/^\["IndexWhere","xs",/);
+  });
+  test('an unknown function stays symbolic', () => {
+    expect(plain(['IndexOf', ['f', 1, 0], 0])).toBe('["IndexOf",["f",1,0],0]');
+  });
+  test('a range with a symbolic bound stays symbolic', () => {
+    expect(plain(['IndexOf', ['Range', 1, 'n'], 3])).toBe(
+      '["IndexOf",["Range",1,"n"],3]'
+    );
+  });
+  test('a declared list with no value stays symbolic and answers once assigned', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<integer>');
+    expect(ce.box(['IndexOf', 'L', 2]).evaluate().toString()).toBe(
+      'IndexOf(L, 2)'
+    );
+    ce.assign('L', ce.box(['List', 3, 4, 5]));
+    expect(ce.box(['IndexOf', 'L', 5]).evaluate().toString()).toBe('3');
+    expect(ce.box(['IndexOf', 'L', 9]).evaluate().toString()).toBe('0');
+  });
+  test('a set has no index: refused as incompatible-type, as First and At refuse it', () => {
+    expect(plain(['IndexOf', ['Set', 1, 2], 2])).toMatch(/incompatible-type/);
+    expect(
+      plain(['IndexWhere', ['Set', 1, 2], ['Function', ['Equal', 'x', 2], 'x']])
+    ).toMatch(/incompatible-type/);
+  });
+  test('an unbounded source answers a match or a refutation, and stays symbolic otherwise', () => {
+    expect(plain(['IndexOf', ['Repeat', 5], 5])).toBe('1');
+    expect(plain(['IndexOf', ['Cycle', ['List', 1, 2]], 2])).toBe('2');
+    // `Repeat` and `Cycle` refute a value they never produce without a walk.
+    expect(plain(['IndexOf', ['Repeat', 6], 5])).toBe('0');
+    expect(plain(['IndexOf', ['Cycle', ['List', 1, 2]], 3])).toBe('0');
+    // A predicate has no refutation: the walk is capped at the iteration
+    // limit and the search stays symbolic (this walk never ended before).
+    expect(
+      plain(['IndexWhere', ['Repeat', 6], ['Function', ['Equal', 'x', 5], 'x']])
+    ).toMatch(/^\["IndexWhere",\["Repeat",6\],/);
+  });
+  test('an unbounded integer range answers from its grid, past the iteration limit too', () => {
+    expect(plain(['IndexOf', ['Range', 1, 'PositiveInfinity'], 3])).toBe('3');
+    expect(plain(['IndexOf', ['Range', 1, 'PositiveInfinity'], 2000])).toBe(
+      '2000'
+    );
+    expect(plain(['IndexOf', ['Range', 0, 'NegativeInfinity', -2], -6])).toBe(
+      '4'
+    );
+    // Not on the grid: refuted, not walked.
+    expect(plain(['IndexOf', ['Range', 1, 'PositiveInfinity'], 0.5])).toBe('0');
+    expect(plain(['IndexOf', ['Range', 1, 'PositiveInfinity'], -3])).toBe('0');
+    // A step that runs away from the infinite end makes the range empty.
+    expect(plain(['IndexOf', ['Range', 1, 'PositiveInfinity', -1], 0])).toBe(
+      '0'
+    );
+    expect(plain(['IndexOf', ['Range', 1, 'NegativeInfinity'], 5])).toBe('0');
+  });
+  test('a finite source larger than the iteration limit is walked to its end', () => {
+    expect(plain(['IndexOf', ['Range', 1, 5000], 4000])).toBe('4000');
+    expect(plain(['IndexOf', ['Range', 1, 5000], 6000])).toBe('0');
+  });
+});
+
 describe('COLLECTION EQUALITY IS REPRESENTATION-INSENSITIVE', () => {
   // `Equal` is lazy, so its operands reach the comparison unevaluated. The
   // collection `eq` handlers used to return a definitive `false` on operator

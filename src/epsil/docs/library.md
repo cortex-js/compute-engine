@@ -261,8 +261,8 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `fold` | `Fold` | `(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T` | Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value. |
 | `groupBy` | `GroupBy` | `(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T` | Partition the collection into a dictionary of lists based on the key returned by the function. |
 | `imaginaryNumbers` | `ImaginaryNumbers` | constant `set<imaginary>` | The set of all imaginary numbers. |
-| `indexOf` | `IndexOf` | `(collection<any>, any) -> integer` | Return the 1-based index of the first occurrence of value in collection, or 0 if not found. |
-| `indexWhere` | `IndexWhere` | `(collection<T>, predicate: (T) any -> boolean) -> integer where T` | Return the 1-based index of the first element satisfying the predicate, or 0 if not found. |
+| `indexOf` | `IndexOf` | `(indexed_collection<any>, any) -> integer` | Return the 1-based index of the first occurrence of value in collection, or 0 if not found. |
+| `indexWhere` | `IndexWhere` | `(indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T` | Return the 1-based index of the first element satisfying the predicate, or 0 if not found. |
 | `insert` | `Insert` | `(indexed_collection<T>, integer, T) -> list<T> where T` | Return a copy of the indexed collection with `value` inserted before the 1-based `index`. |
 | `integers` | `Integers` | constant `set<integer>` | The set of all finite integers. |
 | `intersection` | `Intersection` | `(any+) -> set` | Return the intersection of one or more collections as a set. |
