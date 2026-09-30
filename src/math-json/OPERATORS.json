@@ -274,7 +274,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for |x|, |y| < 1.",
       "wikidata": "Q2701540"
     },
@@ -1467,13 +1467,13 @@
       "name": "Comprehension",
       "category": "Control Structures",
       "arity": "variadic",
-      "signature": "(body:expression, iterators:expression+) -> indexed_collection",
+      "signature": "(body:expression, iterators:expression+) -> list",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into an indexed collection (a `List`). Later clauses see earlier bindings; independent clauses produce a Cartesian product. A clause with a third operand, `Element(x, xs, cond)`, is a guard: only the elements for which `cond` evaluates to `True` are visited."
+      "description": "Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into a list. Later clauses see earlier bindings; independent clauses produce a Cartesian product. A clause with a third operand, `Element(x, xs, cond)`, is a guard: only the elements for which `cond` evaluates to `True` are visited."
     },
     {
       "name": "Condition",
@@ -1917,7 +1917,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Dedekind eta function η(τ), Im(τ) > 0.",
       "wikidata": "Q1187208"
     },
@@ -2419,7 +2419,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Normalized Eisenstein series Eₛ(τ) of even weight s ≥ 2, Im(τ) > 0."
     },
     {
@@ -3471,7 +3471,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Kummer confluent hypergeometric function ₁F₁(a; b; z) = M(a, b, z).",
       "wikidata": "Q1331447"
     },
@@ -3484,7 +3484,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Gauss hypergeometric function ₂F₁(a, b; c; z).",
       "wikidata": "Q672619"
     },
@@ -4258,7 +4258,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Jacobi theta function θⱼ(z, τ), j ∈ {1,2,3,4}, nome q = e^{iπτ} (Fungrim convention).",
       "wikidata": "Q1154532"
     },
@@ -4589,7 +4589,7 @@
       "name": "Linspace",
       "category": "Collections",
       "arity": "optional",
-      "signature": "(start: number, end: number?, count: number?) -> indexed_collection",
+      "signature": "(start: number, end: number?, count: number?) -> list<number>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6111,7 +6111,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ, at any real or complex order s.",
       "wikidata": "Q320067"
     },
@@ -6767,7 +6767,7 @@
       "name": "Range",
       "category": "Collections",
       "arity": "optional",
-      "signature": "(number, number?, step: number?) -> indexed_collection<number>",
+      "signature": "(number, number?, step: number?) -> list<number>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -8091,7 +8091,7 @@
       "name": "Tabulate",
       "category": "Collections",
       "arity": "optional",
-      "signature": "(generator: function, integer, integer?) -> indexed_collection",
+      "signature": "(generator: function, integer, integer?) -> list",
       "associative": false,
       "commutative": false,
       "idempotent": false,
