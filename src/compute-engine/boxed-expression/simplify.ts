@@ -27,6 +27,7 @@ import {
   isFunction,
   isString,
   isContinuationOperand,
+  nanOperandAnswer,
 } from './type-guards.js';
 
 type InternalSimplifyOptions = SimplifyOptions & {
@@ -1004,6 +1005,14 @@ function simplifyExpression(
     expr = alt;
   }
 
+  // A `NaN` or `Indeterminate` operand at a position whose NaN policy is
+  // `propagate` decides the value, as it does for `evaluate()`:
+  // `sin(NaN)` simplifies to `NaN` and `sin(Indeterminate)` to
+  // `Indeterminate`.
+  const nanAnswer = propagatedNanOperand(expr);
+  if (nanAnswer !== undefined)
+    return [...steps, { value: nanAnswer, because: 'NaN operand' }];
+
   // Try to simplify the function expression
   const result = simplifyNonCommutativeFunction(expr, rules, options, steps);
 
@@ -1062,6 +1071,45 @@ function simplifyExpression(
   //    complexity.
 
   return steps;
+}
+
+/**
+ * The value of a function expression that has a `NaN` or `Indeterminate`
+ * number-literal operand at a position whose NaN policy is `propagate`, or
+ * `undefined` when no such operand decides the value.
+ *
+ * This applies to `simplify()` the NaN-policy step of evaluation
+ * (`BoxedFunction.evaluate()` in `boxed-function.ts`), with the same
+ * exclusions: a lazy operator and a user-defined function handle their own
+ * operands, and a broadcastable operator with a collection operand applies
+ * the policy to each element. Only number literals are read, not the value
+ * of a symbol, because `simplify()` does not substitute assigned values. A
+ * position whose policy is `reject` leaves the expression to `evaluate()`,
+ * which reports the error. The answer is `nanOperandAnswer()`:
+ * `Indeterminate` when an operand is `Indeterminate` and no operand is
+ * inexact, `NaN` otherwise.
+ */
+function propagatedNanOperand(expr: Expression): Expression | undefined {
+  if (!isFunction(expr)) return undefined;
+  const ops = expr.ops;
+  if (!ops.some((x) => isNumber(x) && x.isNaN === true)) return undefined;
+  const def = expr.operatorDefinition;
+  if (!def || def.lazy === true || def.isUserFunctionDefinition)
+    return undefined;
+  if (
+    def.broadcastable === true &&
+    ops.some((x) => x.isCollection || x.type.matches('collection<any>'))
+  )
+    return undefined;
+  let sawPropagate = false;
+  for (let i = 0; i < ops.length; i++) {
+    const x = ops[i];
+    if (!isNumber(x) || x.isNaN !== true) continue;
+    const policy = def.resolvedNanBehaviorAt(i);
+    if (policy === 'reject') return undefined;
+    if (policy === 'propagate') sawPropagate = true;
+  }
+  return sawPropagate ? nanOperandAnswer(expr.engine, ops) : undefined;
 }
 
 function simplifyNonCommutativeFunction(

@@ -107,6 +107,42 @@ describe('POLYGAMMA FUNCTION', () => {
   test('ψ⁽⁴⁾(2.5) ≈ -0.3137559995067314', () => {
     expectApprox(ce.expr(['PolyGamma', 4, 2.5]), -0.3137559995067314, 1e-12);
   });
+
+  // The big-decimal kernel had no limit on the order: ψ⁽¹⁰⁰⁰⁰⁰⁾(2.5) ran for
+  // minutes. An order above 10 000 (the limit of the complex kernel) stays
+  // symbolic.
+  test('an order above the limit stays symbolic, quickly', () => {
+    const start = Date.now();
+    const result = ce.expr(['PolyGamma', 100000, 2.5]).N();
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(result.operator).toBe('PolyGamma');
+  });
+
+  // References: mpmath @30 digits. A value outside the range of a double is
+  // checked on the mantissa of the big-decimal result.
+  test('ψ⁽¹⁰⁰⁰⁾(2.5) ≈ -1.84797265872726381747e+2169', () => {
+    expect(ce.expr(['PolyGamma', 1000, 2.5]).N().toString()).toMatch(
+      /^-1\.847972658727263817\d*e\+2169$/
+    );
+  });
+
+  // The asymptotic series diverged when the argument was shifted to less
+  // than the order: the result was wrong by a factor 10⁶.
+  test('ψ⁽¹⁰⁰⁰⁾(150) ≈ -2.17698593381945701014e+389', () => {
+    expect(ce.expr(['PolyGamma', 1000, 150]).N().toString()).toMatch(
+      /^-2\.176985933819457010\d*e\+389$/
+    );
+  });
+
+  // The Bernoulli tail stopped on an absolute tolerance, after one term for
+  // a small result: only 4 digits were right.
+  // (A relative check: `expectApprox` adds its tolerance as an absolute
+  // term too, which would accept any value of this size.)
+  test('ψ⁽²⁰⁰⁾(300) ≈ -2.0343035127674900862e-123', () => {
+    const value = ce.expr(['PolyGamma', 200, 300]).N().re;
+    const expected = -2.03430351276749008623934568086e-123;
+    expect(Math.abs(value / expected - 1)).toBeLessThan(1e-14);
+  });
 });
 
 describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
@@ -417,6 +453,23 @@ describe('MACHINE-PRECISION KERNELS (P0-20/P0-21 regressions)', () => {
 
   test('machine ψ⁽⁶⁾(0.5) ≈ -92203.45792380303', () => {
     expectApprox(mCe.expr(['PolyGamma', 6, 0.5]), -92203.45792380303, 1e-13);
+  });
+
+  test('machine ψ⁽¹⁰⁰⁰⁾(2.5) overflows a double: stays symbolic (was NaN)', () => {
+    expect(mCe.expr(['PolyGamma', 1000, 2.5]).N().operator).toBe('PolyGamma');
+  });
+
+  test('machine ψ⁽¹⁰⁰⁰⁰⁰⁾(2.5): order above the limit stays symbolic', () => {
+    expect(mCe.expr(['PolyGamma', 100000, 2.5]).N().operator).toBe(
+      'PolyGamma'
+    );
+  });
+
+  // n! overflows a double for n > 170, although the value does not.
+  test('machine ψ⁽²⁰⁰⁾(300.5) ≈ -1.4573267844436623e-123 (was NaN)', () => {
+    const value = mCe.expr(['PolyGamma', 200, 300.5]).N().re;
+    const expected = -1.4573267844436623001e-123;
+    expect(Math.abs(value / expected - 1)).toBeLessThan(1e-11);
   });
 
   test('compiled Zeta uses the fixed kernel (CO-P1-5)', () => {

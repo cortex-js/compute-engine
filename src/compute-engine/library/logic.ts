@@ -221,7 +221,15 @@ function evaluateShortCircuit(
       }
       values.push(v);
     }
-    return finishShortCircuit(ce, name, ops, values, reduce, evalOptions);
+    return finishShortCircuit(
+      ce,
+      name,
+      ops,
+      values,
+      decide,
+      reduce,
+      evalOptions
+    );
   };
 }
 
@@ -248,7 +256,15 @@ function evaluateShortCircuitAsync(
       }
       values.push(v);
     }
-    return finishShortCircuit(ce, name, ops, values, reduce, evalOptions);
+    return finishShortCircuit(
+      ce,
+      name,
+      ops,
+      values,
+      decide,
+      reduce,
+      evalOptions
+    );
   };
 }
 
@@ -309,9 +325,19 @@ function finishShortCircuit(
   name: ShortCircuitOperator,
   ops: ReadonlyArray<Expression>,
   values: ReadonlyArray<Expression>,
+  decide: Decider,
   reduce: Reducer,
   evalOptions: Partial<EvaluateOptions>
 ): Expression | undefined {
+  // On the element-wise path, an operand that evaluates to an error VALUE
+  // (an `Error` node, not a list with error cells) is the answer, unless an
+  // operand decides the result by itself (`And(False, e)` is `False`, as
+  // the symbolic reducer absorbs it). Broadcast, the one error was copied
+  // into every cell: `Or(Sin(P) < [1, 2], Sin(P) > 0)` with `P = [5, 6, 7]`
+  // was a list of three `incompatible-dimensions` errors.
+  const error = values.find((v) => v.operator === 'Error');
+  if (error && !values.some((v, i) => decide(ce, v, i) !== undefined))
+    return error;
   const isCollectionValue = (x: Expression) => isFiniteBroadcastParticipant(x);
   if (!ops.some(isCollectionValue) && values.some(isCollectionValue))
     return ce.function(name, values).evaluate(evalOptions);

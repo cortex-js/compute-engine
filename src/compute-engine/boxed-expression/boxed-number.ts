@@ -706,6 +706,11 @@ export class BoxedNumber
         (rhs.isSame(0) && this.isFinite === false)
       )
         return indeterminateFormAnswer(ce, [this, rhs]);
+      // An exact 0 times a finite number is the exact 0, in both operand
+      // orders, as the `Multiply` operator answers (`2.5 · 0` is `0`, not
+      // `0.0`).
+      if ((this.isExact && this.isSame(0)) || (rhs.isExact && rhs.isSame(0)))
+        return ce.Zero;
       return ce.number(ce._numericValue(this._value).mul(rhs.numericValue));
     }
 

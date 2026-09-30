@@ -10,7 +10,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, algebraic attributes, description, wikidata and url."
+      "description": "Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, algebraic attributes, description, wikidata and url.",
+      "examples": [
+        "About(Pi)"
+      ]
     },
     {
       "name": "Abs",
@@ -23,7 +26,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Absolute value (magnitude) of a number.",
-      "wikidata": "Q3317982"
+      "wikidata": "Q3317982",
+      "examples": [
+        "[Abs(-3), Abs(3 - 4i)]"
+      ]
     },
     {
       "name": "AbsArg",
@@ -35,7 +41,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Tuple of magnitude and argument of a complex number."
+      "description": "Tuple of magnitude and argument of a complex number.",
+      "examples": [
+        "[AbsArg(1 + i), AbsArg(-2)]"
+      ]
     },
     {
       "name": "Add",
@@ -48,7 +57,10 @@
       "lazy": true,
       "broadcastable": true,
       "description": "Sum of two or more values.",
-      "wikidata": "Q32043"
+      "wikidata": "Q32043",
+      "examples": [
+        "1 + x + 2 + x"
+      ]
     },
     {
       "name": "Adjoin",
@@ -60,7 +72,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The ring obtained by adjoining one or more elements to a base ring.\n\n`Adjoin(Integers, Sqrt(2))` is ℤ[√2]; `Adjoin(Integers, [\"Complex\", 0, 1])` is the Gaussian integers ℤ[i]; `Adjoin(Integers, \"x\")` is the polynomial ring ℤ[x].\n\nInert: the adjunction is not expanded, and membership in it is not decided."
+      "description": "The ring obtained by adjoining one or more elements to a base ring.\n\n`Adjoin(Integers, Sqrt(2))` is ℤ[√2]; `Adjoin(Integers, [\"Complex\", 0, 1])` is the Gaussian integers ℤ[i]; `Adjoin(Integers, \"x\")` is the polynomial ring ℤ[x].\n\nInert: the adjunction is not expanded, and membership in it is not decided.",
+      "examples": [
+        "Adjoin(Integers, Sqrt(2))"
+      ]
     },
     {
       "name": "AdjugateMatrix",
@@ -72,7 +87,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Adjugate (classical adjoint) of a square matrix."
+      "description": "Adjugate (classical adjoint) of a square matrix.",
+      "examples": [
+        "AdjugateMatrix([[1, 2], [3, 4]])"
+      ]
     },
     {
       "name": "AGM",
@@ -97,7 +115,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Airy function of the first kind",
-      "wikidata": "Q403629"
+      "wikidata": "Q403629",
+      "examples": [
+        "N(AiryAi(1))"
+      ]
     },
     {
       "name": "AiryAiPrime",
@@ -110,7 +131,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Derivative of the Airy function of the first kind",
-      "wikidata": "Q403629"
+      "wikidata": "Q403629",
+      "examples": [
+        "N(AiryAiPrime(0))"
+      ]
     },
     {
       "name": "AiryBi",
@@ -123,7 +147,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Airy function of the second kind",
-      "wikidata": "Q403629"
+      "wikidata": "Q403629",
+      "examples": [
+        "N(AiryBi(0))"
+      ]
     },
     {
       "name": "AiryBiPrime",
@@ -136,7 +163,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Derivative of the Airy function of the second kind",
-      "wikidata": "Q403629"
+      "wikidata": "Q403629",
+      "examples": [
+        "N(AiryBiPrime(0))"
+      ]
     },
     {
       "name": "All",
@@ -148,7 +178,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given)."
+      "description": "Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given).",
+      "examples": [
+        "All([2, 4, 6], x => x % 2 == 0)"
+      ]
     },
     {
       "name": "Alternatives",
@@ -185,7 +218,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Angle mark / measure (`\\angle ABC`, `\\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated."
+      "description": "Angle mark / measure (`\\angle ABC`, `\\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated.",
+      "examples": [
+        "Angle(A, B, C)"
+      ]
     },
     {
       "name": "Annotated",
@@ -197,7 +233,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Attach metadata or style annotations to an expression."
+      "description": "Attach metadata or style annotations to an expression.",
+      "examples": [
+        "Annotated(x^2, {\"color\" -> \"blue\"})"
+      ]
     },
     {
       "name": "Any",
@@ -209,7 +248,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) => e === v)`."
+      "description": "Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) => e === v)`.",
+      "examples": [
+        "Any([1, 3, 4], x => x % 2 == 0)"
+      ]
     },
     {
       "name": "Apart",
@@ -240,13 +282,16 @@
       "name": "Append",
       "category": "Collections",
       "arity": "variadic",
-      "signature": "(collection<any>, value+) -> collection",
+      "signature": "(collection<any>, (value | missing)+) -> collection",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Add one or more elements to the end of a collection."
+      "description": "Add one or more elements to the end of a collection.",
+      "examples": [
+        "Append([1, 2], 3, 4)"
+      ]
     },
     {
       "name": "Apply",
@@ -258,7 +303,22 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Apply a function to a list of arguments"
+      "description": "Apply a function to a list of arguments",
+      "examples": [
+        "Apply(Sqrt, 16)"
+      ]
+    },
+    {
+      "name": "ApplyWhole",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(name:any, arguments:any*) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Apply a function to arguments, each bound whole (engine-internal)."
     },
     {
       "name": "Approx",
@@ -306,7 +366,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Arc / wide-hat accent measure (`\\widehat{ABC}`) — opaque typed head; not evaluated."
+      "description": "Arc / wide-hat accent measure (`\\widehat{ABC}`) — opaque typed head; not evaluated.",
+      "examples": [
+        "Arc(A, B, C)"
+      ]
     },
     {
       "name": "Arccos",
@@ -318,7 +381,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Arccosine, the inverse cosine function."
+      "description": "Arccosine, the inverse cosine function.",
+      "examples": [
+        "Arccos(1/2)",
+        "N(Arccos(1/3))"
+      ]
     },
     {
       "name": "Arccot",
@@ -330,7 +397,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Arccotangent, the inverse cotangent function."
+      "description": "Arccotangent, the inverse cotangent function.",
+      "examples": [
+        "N(Arccot(1))",
+        "N(Arccot(-1))"
+      ]
     },
     {
       "name": "Arccsc",
@@ -342,7 +413,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Arccosecant, the inverse cosecant function."
+      "description": "Arccosecant, the inverse cosecant function.",
+      "examples": [
+        "Arccsc(2)",
+        "N(Arccsc(3))"
+      ]
     },
     {
       "name": "Arcosh",
@@ -354,7 +429,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Inverse hyperbolic cosine (area hyperbolic cosine)."
+      "description": "Inverse hyperbolic cosine (area hyperbolic cosine).",
+      "examples": [
+        "Arcosh(1)",
+        "N(Arcosh(2))"
+      ]
     },
     {
       "name": "Arcoth",
@@ -366,7 +445,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Inverse hyperbolic cotangent (area hyperbolic cotangent)."
+      "description": "Inverse hyperbolic cotangent (area hyperbolic cotangent).",
+      "examples": [
+        "N(Arcoth(2))"
+      ]
     },
     {
       "name": "Arcsch",
@@ -378,7 +460,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Inverse hyperbolic cosecant (area hyperbolic cosecant)."
+      "description": "Inverse hyperbolic cosecant (area hyperbolic cosecant).",
+      "examples": [
+        "N(Arcsch(1))"
+      ]
     },
     {
       "name": "Arcsec",
@@ -390,7 +475,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Arcsecant, the inverse secant function."
+      "description": "Arcsecant, the inverse secant function.",
+      "examples": [
+        "Arcsec(2)",
+        "N(Arcsec(3))"
+      ]
     },
     {
       "name": "Arcsin",
@@ -402,7 +491,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Arcsine, the inverse sine function."
+      "description": "Arcsine, the inverse sine function.",
+      "examples": [
+        "Arcsin(1/2)",
+        "N(Arcsin(2))"
+      ]
     },
     {
       "name": "Arctan",
@@ -415,7 +508,11 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Inverse tangent.",
-      "wikidata": "Q2257242"
+      "wikidata": "Q2257242",
+      "examples": [
+        "Arctan(1)",
+        "N(Arctan(2))"
+      ]
     },
     {
       "name": "Arctan2",
@@ -428,7 +525,11 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Two-argument arctangent giving the angle of a vector.",
-      "wikidata": "Q776598"
+      "wikidata": "Q776598",
+      "examples": [
+        "Arctan2(1, -1)",
+        "Arctan2(-1, -1)"
+      ]
     },
     {
       "name": "Arg",
@@ -440,7 +541,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "`Arg` is an alias for `Argument`, which is the preferred name. Returns the complex argument (phase angle) of a number."
+      "description": "`Arg` is an alias for `Argument`, which is the preferred name. Returns the complex argument (phase angle) of a number.",
+      "examples": [
+        "[Arg(i), Arg(1 + i)]"
+      ]
     },
     {
       "name": "ArgMax",
@@ -452,7 +556,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given)."
+      "description": "Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).",
+      "examples": [
+        "ArgMax([3, 9, 2])"
+      ]
     },
     {
       "name": "ArgMin",
@@ -464,7 +571,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given)."
+      "description": "Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).",
+      "examples": [
+        "ArgMin([3, 9, 2])"
+      ]
     },
     {
       "name": "Argument",
@@ -476,7 +586,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Complex argument (phase angle) of a number."
+      "description": "Complex argument (phase angle) of a number.",
+      "examples": [
+        "[Argument(1 + i), Argument(-1)]"
+      ]
     },
     {
       "name": "Arsech",
@@ -488,7 +601,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Inverse hyperbolic secant (area hyperbolic secant)."
+      "description": "Inverse hyperbolic secant (area hyperbolic secant).",
+      "examples": [
+        "Arsech(1)",
+        "N(Arsech(1/2))"
+      ]
     },
     {
       "name": "Arsinh",
@@ -500,7 +617,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Inverse hyperbolic sine (area hyperbolic sine)."
+      "description": "Inverse hyperbolic sine (area hyperbolic sine).",
+      "examples": [
+        "Arsinh(0)",
+        "N(Arsinh(1))"
+      ]
     },
     {
       "name": "Artanh",
@@ -512,7 +633,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Inverse hyperbolic tangent (area hyperbolic tangent)."
+      "description": "Inverse hyperbolic tangent (area hyperbolic tangent).",
+      "examples": [
+        "Artanh(0)",
+        "N(Artanh(1/2))"
+      ]
     },
     {
       "name": "AsHsl",
@@ -584,7 +709,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Assign a value to a symbol or define a sequence. The RHS is evaluated immediately and `ce.assign(name, val)` mutates the binding in the current scope chain. When used inside a `Block`, the assignment is visible to subsequent statements in the block (sequential semantics)."
+      "description": "Assign a value to a symbol or define a sequence. The RHS is evaluated immediately and `ce.assign(name, val)` mutates the binding in the current scope chain. When used inside a `Block`, the assignment is visible to subsequent statements in the block (sequential semantics).",
+      "examples": [
+        "let x = 3\nx = x + 1\nx"
+      ]
     },
     {
       "name": "Assume",
@@ -596,7 +724,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Record an assumption about a symbol. Evaluates to the outcome as a string: \"ok\", \"tautology\", \"contradiction\", \"not-a-predicate\" or \"internal-error\"."
+      "description": "Record an assumption about a symbol. Evaluates to the outcome as a string: \"ok\", \"tautology\", \"contradiction\", \"not-a-predicate\" or \"internal-error\".",
+      "examples": [
+        "Assume(x > 0)"
+      ]
     },
     {
       "name": "At",
@@ -608,7 +739,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Access an element of an indexed collection.\n\nIf the index is negative, it is counted from the end.\n\nMultiple indices can be provided to access nested collections (e.g., matrices).\n\nIf the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter, and its length must match the collection length; otherwise it is an error).\n\nIf the index is a finite collection of integers, returns the elements at those indices, preserving position: an out-of-range index yields the absence marker, it is not dropped.\n\nOut-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position.\n\nAn index that is provably not an integer (`2.5`, `3/2`, `5 + √17`), as a scalar or as an entry of an index list, selects no element and yields the same marker. An index that cannot be decided (an unknown, an exact constant within rounding of an integer) leaves `At` unevaluated."
+      "description": "Access an element of an indexed collection.\n\nIf the index is negative, it is counted from the end.\n\nMultiple indices can be provided to access nested collections (e.g., matrices).\n\nIf the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter, and its length must match the collection length; otherwise it is an error).\n\nIf the index is a finite collection of integers, returns the elements at those indices, preserving position: an out-of-range index yields the absence marker, it is not dropped.\n\nOut-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position.\n\nAn index that is provably not an integer (`2.5`, `3/2`, `5 + √17`), as a scalar or as an entry of an index list, selects no element and yields the same marker. An index that cannot be decided (an unknown, an exact constant within rounding of an integer) leaves `At` unevaluated.",
+      "examples": [
+        "[10, 20, 30][2]",
+        "[10, 20, 30][-1]"
+      ]
     },
     {
       "name": "BaseForm",
@@ -661,7 +796,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Modified Bessel function of the first kind",
-      "wikidata": "Q627488"
+      "wikidata": "Q627488",
+      "examples": [
+        "N(BesselI(0, 1))"
+      ]
     },
     {
       "name": "BesselJ",
@@ -674,7 +812,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Bessel function of the first kind",
-      "wikidata": "Q627488"
+      "wikidata": "Q627488",
+      "examples": [
+        "N(BesselJ(0, 1))"
+      ]
     },
     {
       "name": "BesselK",
@@ -687,7 +828,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Modified Bessel function of the second kind (Macdonald function)",
-      "wikidata": "Q627488"
+      "wikidata": "Q627488",
+      "examples": [
+        "N(BesselK(0, 1))"
+      ]
     },
     {
       "name": "BesselY",
@@ -700,7 +844,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Bessel function of the second kind (Neumann function)",
-      "wikidata": "Q627488"
+      "wikidata": "Q627488",
+      "examples": [
+        "N(BesselY(0, 1))"
+      ]
     },
     {
       "name": "Beta",
@@ -713,7 +860,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Euler beta function",
-      "wikidata": "Q189062"
+      "wikidata": "Q189062",
+      "examples": [
+        "[Beta(2, 3), N(Beta(1/2, 1/2))]"
+      ]
     },
     {
       "name": "BetaRegularized",
@@ -825,7 +975,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return a built-in function symbol by name."
+      "description": "Return a built-in function symbol by name.",
+      "examples": [
+        "BuiltinFunction(\"Sqrt\")(16)"
+      ]
     },
     {
       "name": "Cancel",
@@ -849,7 +1002,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the canonical form of an expression\n\nCan be used to sort arguments of an expression.\n\nSorting arguments of commutative functions is a weak form of canonicalization that can be useful in some cases, for example to accept \"x+1\" and \"1+x\" while rejecting \"x+1\" and \"2x-x+1\""
+      "description": "Return the canonical form of an expression\n\nCan be used to sort arguments of an expression.\n\nSorting arguments of commutative functions is a weak form of canonicalization that can be useful in some cases, for example to accept \"x+1\" and \"1+x\" while rejecting \"x+1\" and \"2x-x+1\"",
+      "examples": [
+        "CanonicalForm(Hold(1 + x), \"Order\")"
+      ]
     },
     {
       "name": "CarmichaelLambda",
@@ -889,7 +1045,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. An approximation of Unicode full case folding."
+      "description": "CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. An approximation of Unicode full case folding.",
+      "examples": [
+        "CaseFold(\"Straße\")",
+        "CaseFold(\"Hello\") == CaseFold(\"HELLO\")"
+      ]
     },
     {
       "name": "CatalanNumber",
@@ -928,7 +1088,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Rounds a number up to the next largest integer"
+      "description": "Rounds a number up to the next largest integer",
+      "examples": [
+        "[Ceil(2.3), Ceil(-2.7)]"
+      ]
     },
     {
       "name": "CharacterFrom",
@@ -940,7 +1103,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "CharacterFrom(s): the character `s` denotes. `s` must be exactly one user-perceived character (one grapheme cluster) after NFC normalization; an empty or multi-character string is an error."
+      "description": "CharacterFrom(s): the character `s` denotes. `s` must be exactly one user-perceived character (one grapheme cluster) after NFC normalization; an empty or multi-character string is an error.",
+      "examples": [
+        "CharacterFrom(\"é\")"
+      ]
     },
     {
       "name": "CharacteristicPolynomial",
@@ -952,7 +1118,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Characteristic polynomial det(x·I − A) of a square matrix (monic)."
+      "description": "Characteristic polynomial det(x·I − A) of a square matrix (monic).",
+      "examples": [
+        "CharacteristicPolynomial([[2, 1], [1, 2]], x)"
+      ]
     },
     {
       "name": "Characters",
@@ -964,7 +1133,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Characters(s): split a string into a list of user-perceived characters (grapheme clusters). Synonym: GraphemeClusters. For stable integer decompositions see UnicodeScalars, Utf8 and Utf16. A non-string argument leaves the expression unevaluated."
+      "description": "Characters(s): split a string into a list of user-perceived characters (grapheme clusters). Synonym: GraphemeClusters. For stable integer decompositions see UnicodeScalars, Utf8 and Utf16. A non-string argument leaves the expression unevaluated.",
+      "examples": [
+        "Characters(\"héllo\")"
+      ]
     },
     {
       "name": "ChineseRemainder",
@@ -991,7 +1163,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Cholesky decomposition of a positive-definite matrix."
+      "description": "Cholesky decomposition of a positive-definite matrix.",
+      "examples": [
+        "CholeskyDecomposition([[4, 2], [2, 5]])"
+      ]
     },
     {
       "name": "Choose",
@@ -1015,7 +1190,10 @@
       "idempotent": true,
       "lazy": false,
       "broadcastable": true,
-      "description": "Replace tiny numeric values with zero."
+      "description": "Replace tiny numeric values with zero.",
+      "examples": [
+        "Chop([1e-20, 0.5, 3 + 1e-15i])"
+      ]
     },
     {
       "name": "Chunk",
@@ -1027,7 +1205,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks."
+      "description": "Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks.",
+      "examples": [
+        "Chunk([1, 2, 3, 4, 5, 6], 3)"
+      ]
     },
     {
       "name": "ChunkBy",
@@ -1039,7 +1220,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Split the collection into maximal runs of consecutive elements over which the key function yields the same value.\n\nReturns a list of lists. Unlike `GroupBy`, only adjacent elements are grouped, so a key value that recurs after a different run starts a new chunk."
+      "description": "Split the collection into maximal runs of consecutive elements over which the key function yields the same value.\n\nReturns a list of lists. Unlike `GroupBy`, only adjacent elements are grouped, so a key value that recurs after a different run starts a new chunk.",
+      "examples": [
+        "ChunkBy([1, 3, 2, 4, 5], x => x % 2)"
+      ]
     },
     {
       "name": "CircularIntegrate",
@@ -1063,7 +1247,25 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Clamp a value to the range [lo, hi] = min(max(x, lo), hi). Broadcasts over collection arguments."
+      "description": "Clamp a value to the range [lo, hi] = min(max(x, lo), hi). Broadcasts over collection arguments.",
+      "examples": [
+        "[Clamp(12, 0, 10), Clamp(-3, 0, 10), Clamp(5, 0, 10)]"
+      ]
+    },
+    {
+      "name": "Closed",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Closed(x): the endpoint x of an Interval, marked as included. A marker with no value of its own; Interval normalizes it away.",
+      "examples": [
+        "1 in Interval(0, Closed(1))"
+      ]
     },
     {
       "name": "Coalesce",
@@ -1075,7 +1277,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the first operand that is not ABSENT (`Missing` or `NaN`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent)."
+      "description": "Return the first operand that is not ABSENT (`Missing`, `Undefined` or `NaN`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Indeterminate` is a value and is not absent.",
+      "examples": [
+        "Coalesce(Missing, NaN, 3, 4)"
+      ]
     },
     {
       "name": "CoefficientList",
@@ -1221,7 +1426,10 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the elements of the first set that are not in any of the subsequent sets.",
-      "wikidata": "Q242767"
+      "wikidata": "Q242767",
+      "examples": [
+        "ListFrom(Complement({1, 2, 3, 4}, {2, 4}))"
+      ]
     },
     {
       "name": "Complex",
@@ -1234,7 +1442,10 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Construct a complex number from real and imaginary parts. Converted directly to a BoxedNumber during boxing; this entry exists so `operatorInfo(\"Complex\")` returns a signature.",
-      "wikidata": "Q11567"
+      "wikidata": "Q11567",
+      "examples": [
+        "[Complex(3, 4), Complex(1, -2)]"
+      ]
     },
     {
       "name": "ComplexRoots",
@@ -1246,7 +1457,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "All n-th complex roots of a number."
+      "description": "All n-th complex roots of a number.",
+      "examples": [
+        "ComplexRoots(1, 4)",
+        "ComplexRoots(8, 3)"
+      ]
     },
     {
       "name": "Comprehension",
@@ -1258,7 +1473,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into an indexed collection (a `List`). Later clauses see earlier bindings; independent clauses produce a Cartesian product."
+      "description": "Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into an indexed collection (a `List`). Later clauses see earlier bindings; independent clauses produce a Cartesian product. A clause with a third operand, `Element(x, xs, cond)`, is a guard: only the elements for which `cond` evaluates to `True` are visited."
     },
     {
       "name": "Condition",
@@ -1282,7 +1497,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "True iff the subject conforms to EVERY named protocol. A `type` VALUE subject asks whether that type conforms (the branch is unambiguous because the `type` primitive itself declares no conformances); any other subject is evaluated once and its precise type is asked. This is the lowering of the Epsil `x is Hashable & Comparable` test. A valueless or unresolved subject stays symbolic; an unknown protocol name is an error; an Error-valued subject answers `False` (the `error` type declares no conformances). Conformance is monotone but late-bound: the answer reflects the registry at the moment of evaluation."
+      "description": "True iff the subject conforms to EVERY named protocol. A `type` VALUE subject asks whether that type conforms (the branch is unambiguous because the `type` primitive itself declares no conformances); any other subject is evaluated once and its precise type is asked. This is the lowering of the Epsil `x is Hashable & Comparable` test. A valueless or unresolved subject stays symbolic; an unknown protocol name is an error; an Error-valued subject answers `False` (the `error` type declares no conformances). Conformance is monotone but late-bound: the answer reflects the registry at the moment of evaluation.",
+      "examples": [
+        "protocol Copyable {}\ntype string is Copyable\nConforms(\"abc\", \"Copyable\")"
+      ]
     },
     {
       "name": "Congruent",
@@ -1306,7 +1524,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Complex conjugate of a number, or the pointwise conjugate of a function."
+      "description": "Complex conjugate of a number, or the pointwise conjugate of a function.",
+      "examples": [
+        "Conjugate(3 + 4i)"
+      ]
     },
     {
       "name": "ConjugateTranspose",
@@ -1318,7 +1539,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Conjugate transpose (Hermitian adjoint) of a matrix or tensor."
+      "description": "Conjugate transpose (Hermitian adjoint) of a matrix or tensor.",
+      "examples": [
+        "ConjugateTranspose([[1, 2 + i], [3 - i, 4]])"
+      ]
     },
     {
       "name": "Contains",
@@ -1330,7 +1554,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return True if the collection contains the given element (structural identity, like `===`), False otherwise.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value."
+      "description": "Return True if the collection contains the given element (structural identity, like `===`), False otherwise. An absent element is found where the same marker sits: `Contains([1, NaN], NaN)` is True.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.",
+      "examples": [
+        "Contains([1, 2, 3], 2)"
+      ]
     },
     {
       "name": "ContainsSequence",
@@ -1342,7 +1569,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection.\n\nUnlike `Contains`, which tests membership of a single element, the needle is read as a sequence: `ContainsSequence(\"abc\", \"ab\")` is `True` while `Contains(\"abc\", \"ab\")` is `False`."
+      "description": "Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection.\n\nUnlike `Contains`, which tests membership of a single element, the needle is read as a sequence: `ContainsSequence(\"abc\", \"ab\")` is `True` while `Contains(\"abc\", \"ab\")` is `False`.",
+      "examples": [
+        "ContainsSequence([1, 2, 3, 4], [2, 3])"
+      ]
     },
     {
       "name": "Continue",
@@ -1405,7 +1635,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Cosine of an angle."
+      "description": "Cosine of an angle.",
+      "examples": [
+        "Cos(Pi / 3)",
+        "N(Cos(1))"
+      ]
     },
     {
       "name": "Cosh",
@@ -1417,7 +1651,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic cosine."
+      "description": "Hyperbolic cosine.",
+      "examples": [
+        "Cosh(0)",
+        "N(Cosh(1))"
+      ]
     },
     {
       "name": "CoshIntegral",
@@ -1429,7 +1667,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt."
+      "description": "Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.",
+      "examples": [
+        "N(CoshIntegral(1))"
+      ]
     },
     {
       "name": "CosIntegral",
@@ -1441,7 +1682,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt."
+      "description": "Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt.",
+      "examples": [
+        "N(CosIntegral(1))"
+      ]
     },
     {
       "name": "Cot",
@@ -1453,7 +1697,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Cotangent, the reciprocal of tangent."
+      "description": "Cotangent, the reciprocal of tangent.",
+      "examples": [
+        "Cot(Pi / 6)",
+        "N(Cot(1))"
+      ]
     },
     {
       "name": "Coth",
@@ -1465,7 +1713,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic cotangent, the reciprocal of hyperbolic tangent."
+      "description": "Hyperbolic cotangent, the reciprocal of hyperbolic tangent.",
+      "examples": [
+        "N(Coth(1))"
+      ]
     },
     {
       "name": "Count",
@@ -1477,7 +1728,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "`Count(xs)`: the number of elements in the collection.\n\n`Count(xs, v)`: how many elements are structurally the same as `v`.\n\n`Count(xs, p)`: how many elements satisfy the predicate `p`."
+      "description": "`Count(xs)`: the number of elements in the collection.\n\n`Count(xs, v)`: how many elements are structurally the same as `v`.\n\n`Count(xs, p)`: how many elements satisfy the predicate `p`.",
+      "examples": [
+        "Count([1, 2, 1, 3, 1], 1)"
+      ]
     },
     {
       "name": "CountIf",
@@ -1489,7 +1743,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the number of elements in the collection satisfying the predicate."
+      "description": "Return the number of elements in the collection satisfying the predicate.",
+      "examples": [
+        "CountIf([1, 4, 9, 16], x => x > 5)"
+      ]
     },
     {
       "name": "Covariance",
@@ -1513,7 +1770,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Cross product of two 3-vectors."
+      "description": "Cross product of two 3-vectors.",
+      "examples": [
+        "Cross([1, 0, 0], [0, 1, 0])"
+      ]
     },
     {
       "name": "Csc",
@@ -1525,7 +1785,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Cosecant, the reciprocal of sine."
+      "description": "Cosecant, the reciprocal of sine.",
+      "examples": [
+        "Csc(Pi / 6)",
+        "N(Csc(1))"
+      ]
     },
     {
       "name": "Csch",
@@ -1537,7 +1801,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic cosecant, the reciprocal of hyperbolic sine."
+      "description": "Hyperbolic cosecant, the reciprocal of hyperbolic sine.",
+      "examples": [
+        "N(Csch(1))"
+      ]
     },
     {
       "name": "Cycle",
@@ -1549,7 +1816,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Produce an infinite sequence by cycling through the elements of a finite collection."
+      "description": "Produce an infinite sequence by cycling through the elements of a finite collection.",
+      "examples": [
+        "Take(Cycle([1, 2]), 5)"
+      ]
     },
     {
       "name": "D",
@@ -1573,7 +1843,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. With a value, evaluates to that value; otherwise evaluates to `Nothing`."
+      "description": "Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. With a value, evaluates to that value; otherwise evaluates to `Nothing`.",
+      "examples": [
+        "let x: integer = 5\nx + 1"
+      ]
     },
     {
       "name": "DeclareConformance",
@@ -1585,7 +1858,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. The target rides as a type-expression string and must be named and ground (not a union, an anonymous structural type or a `type alias` name); the protocols ride as a `List` of names. An optional trailing dictionary carries the implementation block, member name -> function literal (property handlers under the mangled keys `__get__x` / `__set__x`); it may only accompany a SINGLE protocol. A CONDITIONAL conformance carries, ahead of that block, the source text of its trailing `where` clause as a string: the target is then a head pattern naming the variables the clause binds (`list<T>` with `\"where T is Comparable\"`). Conformance is monotone — it can be added but never removed — and a re-declaration is a no-op. Evaluates to `Nothing`."
+      "description": "Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. The target rides as a type-expression string and must be named and ground (not a union, an anonymous structural type or a `type alias` name); the protocols ride as a `List` of names. An optional trailing dictionary carries the implementation block, member name -> function literal (property handlers under the mangled keys `__get__x` / `__set__x`); it may only accompany a SINGLE protocol. A CONDITIONAL conformance carries, ahead of that block, the source text of its trailing `where` clause as a string: the target is then a head pattern naming the variables the clause binds (`list<T>` with `\"where T is Comparable\"`). Conformance is monotone — it can be added but never removed — and a re-declaration is a no-op. Evaluates to `Nothing`.",
+      "examples": [
+        "protocol Copyable {}\ntype string is Copyable\n\"abc\" is Copyable"
+      ]
     },
     {
       "name": "DeclareProtocol",
@@ -1597,7 +1873,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> [\"Pair\", \"function\"|\"readonly\"|\"readwrite\", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). Evaluates to `Nothing`."
+      "description": "Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> [\"Pair\", \"function\"|\"readonly\"|\"readwrite\", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). Evaluates to `Nothing`.",
+      "examples": [
+        "protocol Area { function area(self: Self) -> number }\ntype square = tuple<side: number> is Area {\n  function area(self: square) -> number { self.side^2 }\n}\narea(square(3))"
+      ]
     },
     {
       "name": "DeclareSumType",
@@ -1609,7 +1888,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare a SUM TYPE: N nominal variants plus the transparent union that names them, in one statement — the lowering of the Epsil sugar `type node = lit(num: number) | plus(op1: node, op2: node)`. The name is a symbol (or a string); each variant is a `[\"Tuple\", name, payload]` pair whose payload is a type string (`\"nothing\"` for a nullary variant). An optional attributes dictionary at operand 1 — ahead of the variants — carries `typeParams -> \"T\"` for a generic sum, whose parameters are distributed to each variant by usage. The sum name is forward-registered before the variants are declared, so a payload may name it bare. A variant name that already names a type, is reserved, or is a builtin is rejected and NOTHING is declared. Types are engine-global, so this is only valid at the top level of a program. Evaluates to `Nothing`."
+      "description": "Declare a SUM TYPE: N nominal variants plus the transparent union that names them, in one statement — the lowering of the Epsil sugar `type node = lit(num: number) | plus(op1: node, op2: node)`. The name is a symbol (or a string); each variant is a `[\"Tuple\", name, payload]` pair whose payload is a type string (`\"nothing\"` for a nullary variant). An optional attributes dictionary at operand 1 — ahead of the variants — carries `typeParams -> \"T\"` for a generic sum, whose parameters are distributed to each variant by usage. The sum name is forward-registered before the variants are declared, so a payload may name it bare. A variant name that already names a type, is reserved, or is a builtin is rejected and NOTHING is declared. Types are engine-global, so this is only valid at the top level of a program. Evaluates to `Nothing`.",
+      "examples": [
+        "type shape = circle(r: number) | square(s: number)\nmatch square(3) {\n  circle(r) => pi * r^2\n  square(s) => s^2\n}"
+      ]
     },
     {
       "name": "DeclareType",
@@ -1621,7 +1903,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare a type. Types are engine-global (not lexically scoped), so this is only valid at the top level of a program — inside a block or function body it is an error. The name is a symbol (or a string) and the type a string holding a type expression, e.g. `\"tuple<x: integer, y: integer>\"`. The type is nominal by default; an optional trailing attributes dictionary with `alias -> True` makes it a structural alias instead, and an additional `typeParams -> \"T, U: number\"` entry makes it a GENERIC alias whose uses must be applied (`Pair<integer>`). The declaration also mints a value constructor of the same name — `[\"point\", 1, 2]`, an inert tagged value for a nominal type, a checked identity for an alias — except for a `record` body, which mints none. Evaluates to `Nothing`."
+      "description": "Declare a type. Types are engine-global (not lexically scoped), so this is only valid at the top level of a program — inside a block or function body it is an error. The name is a symbol (or a string) and the type a string holding a type expression, e.g. `\"tuple<x: integer, y: integer>\"`. The type is nominal by default; an optional trailing attributes dictionary with `alias -> True` makes it a structural alias instead, and an additional `typeParams -> \"T, U: number\"` entry makes it a GENERIC alias whose uses must be applied (`Pair<integer>`). The declaration also mints a value constructor of the same name — `[\"point\", 1, 2]`, an inert tagged value for a nominal type, a checked identity for an alias — except for a `record` body, which mints none. Evaluates to `Nothing`.",
+      "examples": [
+        "type point = tuple<x: number, y: number>\npoint(1, 2)"
+      ]
     },
     {
       "name": "DedekindEta",
@@ -1646,7 +1931,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the collection with consecutive duplicate elements collapsed to a single element.\n\nOnly immediately-adjacent equal elements are removed; unlike `Unique`, a value that recurs after a different element is kept."
+      "description": "Return the collection with consecutive duplicate elements collapsed to a single element.\n\nOnly immediately-adjacent equal elements are removed; unlike `Unique`, a value that recurs after a different element is kept.",
+      "examples": [
+        "Dedup([1, 1, 2, 2, 1])"
+      ]
     },
     {
       "name": "DefineFunction",
@@ -1658,7 +1946,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Define one clause of a (possibly multi-clause) function: `DefineFunction(f, Function(body, params…))`. Unlike `Assign` — which replaces the binding wholesale — `DefineFunction` ACCUMULATES: a clause with the same parameter domain replaces the earlier clause in place, any other clause is appended, and calls dispatch to the most specific clause admitting the arguments."
+      "description": "Define one clause of a (possibly multi-clause) function: `DefineFunction(f, Function(body, params…))`. Unlike `Assign` — which replaces the binding wholesale — `DefineFunction` ACCUMULATES: a clause with the same parameter domain replaces the earlier clause in place, any other clause is appended, and calls dispatch to the most specific clause admitting the arguments.",
+      "examples": [
+        "fact(0) = 1\nfact(n) = n * fact(n - 1)\nfact(5)"
+      ]
     },
     {
       "name": "Degree",
@@ -1670,7 +1961,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Degree of an object"
+      "description": "Degree of an object",
+      "examples": [
+        "Degree(x^3 + 2 * x + 1)"
+      ]
     },
     {
       "name": "Degrees",
@@ -1682,7 +1976,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Convert an angle in degrees."
+      "description": "Convert an angle in degrees.",
+      "examples": [
+        "Degrees(30)",
+        "Sin(Degrees(30))"
+      ]
     },
     {
       "name": "DeleteAt",
@@ -1694,7 +1992,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a copy of the indexed collection with the element at the 1-based `index` removed.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.\n\nDeleting from a string yields a string."
+      "description": "Return a copy of the indexed collection with the element at the 1-based `index` removed.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.\n\nDeleting from a string yields a string.",
+      "examples": [
+        "DeleteAt([1, 2, 3, 4], 2)"
+      ]
     },
     {
       "name": "Delimiter",
@@ -1706,7 +2007,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Group expressions with explicit delimiters."
+      "description": "Group expressions with explicit delimiters.",
+      "examples": [
+        "Delimiter(1 + 2)"
+      ]
     },
     {
       "name": "Denominator",
@@ -1718,7 +2022,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": true,
-      "description": "Denominator of an expression"
+      "description": "Denominator of an expression",
+      "examples": [
+        "[Denominator(3/4), Denominator(x / y)]"
+      ]
     },
     {
       "name": "Derivative",
@@ -1742,7 +2049,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Determinant of a square matrix."
+      "description": "Determinant of a square matrix.",
+      "examples": [
+        "Determinant([[1, 2], [3, 4]])"
+      ]
     },
     {
       "name": "Diagonal",
@@ -1754,7 +2064,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Extract a matrix diagonal or build a diagonal matrix."
+      "description": "Extract a matrix diagonal or build a diagonal matrix.",
+      "examples": [
+        "Diagonal([[1, 2], [3, 4]])",
+        "Diagonal([1, 2, 3])"
+      ]
     },
     {
       "name": "Dictionary",
@@ -1766,7 +2080,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "A collection of key -> value entries with string keys (`{x -> 1, y -> 2}` in Epsil)."
+      "description": "A collection of key -> value entries with string keys (`{x -> 1, y -> 2}` in Epsil).",
+      "examples": [
+        "{\"a\" -> 1, \"b\" -> 2}[\"b\"]"
+      ]
     },
     {
       "name": "DictionaryFrom",
@@ -1778,7 +2095,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Create a dictionary from the elements of a collection of (key, value) pairs."
+      "description": "Create a dictionary from the elements of a collection of (key, value) pairs.",
+      "examples": [
+        "DictionaryFrom([(\"a\", 1), (\"b\", 2)])"
+      ]
     },
     {
       "name": "Differences",
@@ -1790,7 +2110,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input."
+      "description": "Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input.",
+      "examples": [
+        "Differences([1, 4, 9, 16])"
+      ]
     },
     {
       "name": "Digamma",
@@ -1803,7 +2126,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Digamma function, the logarithmic derivative of the gamma function",
-      "wikidata": "Q1142755"
+      "wikidata": "Q1142755",
+      "examples": [
+        "[Digamma(1), N(Digamma(1))]"
+      ]
     },
     {
       "name": "DigitCount",
@@ -1830,7 +2156,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return an integer representation of the string `s` in base `base`."
+      "description": "Return an integer representation of the string `s` in base `base`.",
+      "examples": [
+        "DigitsFrom(\"ff\", 16)",
+        "DigitsFrom(\"1010\", 2)"
+      ]
     },
     {
       "name": "DigitSum",
@@ -1857,7 +2187,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Dimension of an object"
+      "description": "Dimension of an object",
+      "examples": [
+        "Dimension([[1, 2, 3], [4, 5, 6]])"
+      ]
     },
     {
       "name": "Discriminant",
@@ -1881,7 +2214,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Euclidean distance between two points, broadcasting over a list of points."
+      "description": "Euclidean distance between two points, broadcasting over a list of points.",
+      "examples": [
+        "[Distance((0, 0), (3, 4)), Distance([1, 2, 3], [4, 6, 3])]"
+      ]
     },
     {
       "name": "Distribute",
@@ -1906,7 +2242,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Quotient of a numerator and one or more denominators.",
-      "wikidata": "Q1226939"
+      "wikidata": "Q1226939",
+      "examples": [
+        "[6 / 4, x / 2]"
+      ]
     },
     {
       "name": "Divides",
@@ -1963,19 +2302,26 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Construct an angle from degrees, minutes, and seconds."
+      "description": "Construct an angle from degrees, minutes, and seconds.",
+      "examples": [
+        "DMS(30, 15)",
+        "N(DMS(30, 15))"
+      ]
     },
     {
       "name": "Dot",
       "category": "Linear Algebra",
       "arity": "2",
-      "signature": "(matrix|vector|tuple, matrix|vector|tuple) -> value",
+      "signature": "(matrix|vector|tuple|list<tuple>, matrix|vector|tuple|list<tuple>) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Dot product (vector inner product) or matrix product."
+      "description": "Dot product (vector inner product) or matrix product.",
+      "examples": [
+        "Dot([1, 2, 3], [4, 5, 6])"
+      ]
     },
     {
       "name": "Drop",
@@ -1987,7 +2333,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the collection without the first n elements."
+      "description": "Return the collection without the first n elements.",
+      "examples": [
+        "Drop([1, 2, 3, 4, 5], 2)"
+      ]
     },
     {
       "name": "DropWhile",
@@ -1999,7 +2348,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered."
+      "description": "Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered.",
+      "examples": [
+        "DropWhile([1, 2, 3, 10, 4], x => x < 5)"
+      ]
     },
     {
       "name": "DSolve",
@@ -2023,7 +2375,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Eigenvalue-eigenvector decomposition of a square matrix."
+      "description": "Eigenvalue-eigenvector decomposition of a square matrix.",
+      "examples": [
+        "Eigen([[2, 1], [1, 2]])"
+      ]
     },
     {
       "name": "Eigenvalues",
@@ -2035,7 +2390,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Eigenvalues of a square matrix."
+      "description": "Eigenvalues of a square matrix.",
+      "examples": [
+        "Eigenvalues([[2, 1], [1, 2]])"
+      ]
     },
     {
       "name": "Eigenvectors",
@@ -2047,7 +2405,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Eigenvectors of a square matrix."
+      "description": "Eigenvectors of a square matrix.",
+      "examples": [
+        "Eigenvectors([[2, 1], [1, 2]])"
+      ]
     },
     {
       "name": "EisensteinE",
@@ -2071,7 +2432,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether a value is an element of a collection. Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.\n\nElement supports two modes of operation:\n1. Set membership: Element(3, [List, 1, 2, 3]) checks if 3 is in the list\n2. Type-style membership: Element(x, integer) checks if x has type integer\n\nType-style membership works with:\n- Mathematical sets: Integers, RealNumbers, ComplexNumbers, etc.\n- Type names: integer, rational, real, number, positive_integer, etc.\n- Invalid type names remain unevaluated (e.g., Element(2, \"Booleans\"))"
+      "description": "Test whether a value is an element of a collection. Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.\n\nElement supports two modes of operation:\n1. Set membership: Element(3, [List, 1, 2, 3]) checks if 3 is in the list\n2. Type-style membership: Element(x, integer) checks if x has type integer\n\nType-style membership works with:\n- Mathematical sets: Integers, RealNumbers, ComplexNumbers, etc.\n- Type names: integer, rational, real, number, positive_integer, etc.\n- Invalid type names remain unevaluated (e.g., Element(2, \"Booleans\"))",
+      "examples": [
+        "3 in {1, 2, 3}"
+      ]
     },
     {
       "name": "ElementMax",
@@ -2083,7 +2447,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic."
+      "description": "Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.",
+      "examples": [
+        "ElementMax([1, 5, 3], [4, 2, 6])"
+      ]
     },
     {
       "name": "ElementMin",
@@ -2095,7 +2462,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic."
+      "description": "Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.",
+      "examples": [
+        "ElementMin([1, 5, 3], [4, 2, 6])"
+      ]
     },
     {
       "name": "EllipticE",
@@ -2159,7 +2529,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return `True` when the indexed collection ends with `suffix` as a contiguous subsequence.\n\nOn a string the suffix is matched character by character, so a suffix that would begin inside a grapheme cluster does not match. An empty suffix matches everything."
+      "description": "Return `True` when the indexed collection ends with `suffix` as a contiguous subsequence.\n\nOn a string the suffix is matched character by character, so a suffix that would begin inside a grapheme cluster does not match. An empty suffix matches everything.",
+      "examples": [
+        "EndsWith([1, 2, 3], [2, 3])"
+      ]
     },
     {
       "name": "Equal",
@@ -2195,7 +2568,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Gauss error function"
     },
     {
@@ -2207,7 +2580,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Complementary error function: 1 - Erf(x)"
     },
     {
@@ -2219,7 +2592,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Imaginary error function: -i·Erf(i·x)"
     },
     {
@@ -2231,7 +2604,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Inverse of the error function"
     },
     {
@@ -2244,7 +2617,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Represent an error expression."
+      "description": "Represent an error expression.",
+      "examples": [
+        "[1, RuntimeError(\"zero\")]"
+      ]
     },
     {
       "name": "ErrorCode",
@@ -2256,7 +2632,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Structured error code with optional arguments."
+      "description": "Structured error code with optional arguments.",
+      "examples": [
+        "[1, RuntimeError(ErrorCode(\"out-of-range\", 5))]"
+      ]
     },
     {
       "name": "Eulerian",
@@ -2280,7 +2659,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Evaluate an expression."
+      "description": "Evaluate an expression.",
+      "examples": [
+        "Evaluate(x + x)"
+      ]
     },
     {
       "name": "EvaluateAt",
@@ -2292,7 +2674,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Evaluate a function at one point or between two bounds."
+      "description": "Evaluate a function at one point or between two bounds.",
+      "examples": [
+        "EvaluateAt(x => x^2, 1, 3)"
+      ]
     },
     {
       "name": "Exists",
@@ -2329,7 +2714,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Natural exponential function: e^x. Applied to a matrix (or any collection), it broadcasts ELEMENTWISE — it is NOT the matrix exponential e^M (which is not currently implemented).",
-      "wikidata": "Q168698"
+      "wikidata": "Q168698",
+      "examples": [
+        "[Exp(1), Exp(Ln(x)), N(Exp(2))]"
+      ]
     },
     {
       "name": "Exp2",
@@ -2341,7 +2729,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Base-2 exponential: 2^x"
+      "description": "Base-2 exponential: 2^x",
+      "examples": [
+        "[Exp2(10), Exp2(1/2)]"
+      ]
     },
     {
       "name": "Expand",
@@ -2430,7 +2821,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Factorial function: the product of all positive integers less than or equal to n",
-      "wikidata": "Q120976"
+      "wikidata": "Q120976",
+      "examples": [
+        "[5!, 20!]"
+      ]
     },
     {
       "name": "Factorial2",
@@ -2442,7 +2836,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Double Factorial Function"
+      "description": "Double Factorial Function",
+      "examples": [
+        "[Factorial2(7), Factorial2(8)]"
+      ]
     },
     {
       "name": "FactorInteger",
@@ -2482,7 +2879,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Access a named field of a value: `p.x` in Epsil.\n\nOn a record or dictionary value, `Field(d, \"x\")` behaves exactly as `d[\"x\"]` (`At` semantics, including the absence marker for a key a dictionary may not have).\n\nOn a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p[\"x\"]` keep rejecting.\n\nA field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic."
+      "description": "Access a named field of a value: `p.x` in Epsil.\n\nOn a record or dictionary value, `Field(d, \"x\")` behaves exactly as `d[\"x\"]` (`At` semantics, including the absence marker for a key a dictionary may not have).\n\nOn a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p[\"x\"]` keep rejecting.\n\nA field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic.",
+      "examples": [
+        "{x -> 1, y -> 2}.y"
+      ]
     },
     {
       "name": "Fill",
@@ -2494,7 +2894,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Produce a 2D list (matrix) by applying a function to each pair of row and column indexes."
+      "description": "Produce a 2D list (matrix) by applying a function to each pair of row and column indexes.",
+      "examples": [
+        "Fill((i, j) => 10i + j, (2, 3))"
+      ]
     },
     {
       "name": "Filter",
@@ -2506,7 +2909,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the elements of the collection for which the predicate function returns True.\n\nEquivalent to `[x for x in xs if p(x)]`."
+      "description": "Return the elements of the collection for which the predicate function returns True.\n\nEquivalent to `[x for x in xs if p(x)]`.",
+      "examples": [
+        "Filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)"
+      ]
     },
     {
       "name": "Find",
@@ -2518,7 +2924,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the first element of the collection satisfying the predicate, or Nothing if none found."
+      "description": "Return the first element of the collection satisfying the predicate, or Nothing if none found.",
+      "examples": [
+        "Find([1, 4, 9, 16], x => x > 5)"
+      ]
     },
     {
       "name": "FindFit",
@@ -2542,7 +2951,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "FindRoot(equations, params): numerically find parameter values that\n\nzero the residuals. `equations` is an equation (`lhs == rhs`), a bare\n\nresidual expression (read as `= 0`), or a list of either. `params` is\n\na list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with\n\nbox constraints), matching `FindFit`. Returns a record\n\n{parameters, converged, residualNorm, iterations}."
+      "description": "FindRoot(equations, params): numerically find parameter values that\n\nzero the residuals. `equations` is an equation (`lhs == rhs`), a bare\n\nresidual expression (read as `= 0`), or a list of either. `params` is\n\na list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with\n\nbox constraints), matching `FindFit`. Returns a record\n\n{parameters, converged, residualNorm, iterations}.",
+      "examples": [
+        "FindRoot(x^2 - 2, [(x, 1)])"
+      ]
     },
     {
       "name": "First",
@@ -2554,7 +2966,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The first element of a collection."
+      "description": "The first element of a collection.",
+      "examples": [
+        "First([7, 8, 9])"
+      ]
     },
     {
       "name": "FixedPoint",
@@ -2578,7 +2993,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements."
+      "description": "Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements.",
+      "examples": [
+        "FlatMap([1, 2, 3], x => [x, x])"
+      ]
     },
     {
       "name": "Flatten",
@@ -2590,7 +3008,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Flatten a tensor or collection into a list."
+      "description": "Flatten a tensor or collection into a list.",
+      "examples": [
+        "Flatten([[1, 2], [3, 4]])"
+      ]
     },
     {
       "name": "Floor",
@@ -2603,7 +3024,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Rounds a number down to the nearest integer.",
-      "wikidata": "Q56860783"
+      "wikidata": "Q56860783",
+      "examples": [
+        "[Floor(2.7), Floor(-2.3)]"
+      ]
     },
     {
       "name": "Fold",
@@ -2615,7 +3039,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value."
+      "description": "Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value.",
+      "examples": [
+        "Fold((a, b) => a + b, 0, [1, 2, 3, 4])"
+      ]
     },
     {
       "name": "ForAll",
@@ -2639,7 +3066,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Fractional part of a number: x - floor(x)"
+      "description": "Fractional part of a number: x - floor(x)",
+      "examples": [
+        "[Fract(3.75), Fract(-3.25)]"
+      ]
     },
     {
       "name": "FresnelC",
@@ -2651,7 +3081,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Fresnel cosine integral."
+      "description": "Fresnel cosine integral.",
+      "examples": [
+        "FresnelC(+oo)",
+        "N(FresnelC(1))"
+      ]
     },
     {
       "name": "FresnelS",
@@ -2663,7 +3097,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Fresnel sine integral."
+      "description": "Fresnel sine integral.",
+      "examples": [
+        "FresnelS(+oo)",
+        "N(FresnelS(1))"
+      ]
     },
     {
       "name": "FromContinuedFraction",
@@ -2705,7 +3143,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "A function literal"
+      "description": "A function literal",
+      "examples": [
+        "(x => x^2 + 1)(3)"
+      ]
     },
     {
       "name": "Gamma",
@@ -2718,7 +3159,11 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt.",
-      "wikidata": "Q190573"
+      "wikidata": "Q190573",
+      "examples": [
+        "[Gamma(1/2), N(Gamma(1/2)), N(Gamma(5))]",
+        "N(Gamma(2, 1))"
+      ]
     },
     {
       "name": "GammaLn",
@@ -2730,7 +3175,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Natural logarithm of the gamma function."
+      "description": "Natural logarithm of the gamma function.",
+      "examples": [
+        "N(GammaLn(100))"
+      ]
     },
     {
       "name": "GammaRegularized",
@@ -2766,7 +3214,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Greatest Common Divisor"
+      "description": "Greatest Common Divisor",
+      "examples": [
+        "[GCD(12, 18), GCD(12, 18, 27)]"
+      ]
     },
     {
       "name": "GeometricVector",
@@ -2778,7 +3229,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `Vector` operator."
+      "description": "Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `Vector` operator.",
+      "examples": [
+        "GeometricVector(A, B)"
+      ]
     },
     {
       "name": "GraphemeClusters",
@@ -2790,7 +3244,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A collection of grapheme clusters from a string. Synonym of Characters."
+      "description": "A collection of grapheme clusters from a string. Synonym of Characters.",
+      "examples": [
+        "GraphemeClusters(\"héllo\")"
+      ]
     },
     {
       "name": "Greater",
@@ -2826,7 +3283,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Partition the collection into a dictionary of lists based on the key returned by the function."
+      "description": "Partition the collection into a dictionary of lists based on the key returned by the function.",
+      "examples": [
+        "GroupBy([\"apple\", \"fig\", \"pear\", \"kiwi\"], Length)"
+      ]
     },
     {
       "name": "HadamardProduct",
@@ -2838,7 +3298,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Hadamard (element-wise) product of two vectors or matrices of the same shape."
+      "description": "Hadamard (element-wise) product of two vectors or matrices of the same shape.",
+      "examples": [
+        "HadamardProduct([[1, 2], [3, 4]], [[5, 6], [7, 8]])"
+      ]
     },
     {
       "name": "Haversine",
@@ -2851,7 +3314,11 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Haversine function.",
-      "wikidata": "Q2528380"
+      "wikidata": "Q2528380",
+      "examples": [
+        "Haversine(Pi / 3)",
+        "Haversine(x)"
+      ]
     },
     {
       "name": "Head",
@@ -2863,7 +3330,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the head of an expression, the name of the operator"
+      "description": "Return the head of an expression, the name of the operator",
+      "examples": [
+        "Head(x^2)"
+      ]
     },
     {
       "name": "Heaviside",
@@ -2875,7 +3345,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Heaviside step function."
+      "description": "Heaviside step function.",
+      "examples": [
+        "[Heaviside(-2), Heaviside(0), Heaviside(3)]"
+      ]
     },
     {
       "name": "Histogram",
@@ -2902,7 +3375,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it"
+      "description": "Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it",
+      "examples": [
+        "Hold(1 + 2)"
+      ]
     },
     {
       "name": "HoldValues",
@@ -2914,7 +3390,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "HoldValues(body): evaluate `body` with its assigned free symbols\n\nshielded — each such symbol becomes a pure symbol (its declared type\n\nand in-scope assumptions apply, its assigned value does NOT) for the\n\nduration. The value-blind counterpart of evaluating `body` directly;\n\nanalogous to Mathematica's `Block[{x}, …]`.\n\nHoldValues(body, [x, y]): shield only the listed symbols (a List,\n\nSet, Tuple, or a single symbol); every other symbol resolves normally.\n\nConstants (`Pi`, `ExponentialE`, …) are never shielded, assumptions\n\nsurvive the shield, and the global values are intact afterwards."
+      "description": "HoldValues(body): evaluate `body` with its assigned free symbols\n\nshielded — each such symbol becomes a pure symbol (its declared type\n\nand in-scope assumptions apply, its assigned value does NOT) for the\n\nduration. The value-blind counterpart of evaluating `body` directly;\n\nanalogous to Mathematica's `Block[{x}, …]`.\n\nHoldValues(body, [x, y]): shield only the listed symbols (a List,\n\nSet, Tuple, or a single symbol); every other symbol resolves normally.\n\nConstants (`Pi`, `ExponentialE`, …) are never shielded, assumptions\n\nsurvive the shield, and the global values are intact afterwards.",
+      "examples": [
+        "let x = 5\nlet y = 2\n(x + y, HoldValues(x + y), HoldValues(x + y, [y]))"
+      ]
     },
     {
       "name": "Hom",
@@ -2926,7 +3405,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Hom-set of morphisms between objects"
+      "description": "Hom-set of morphisms between objects",
+      "examples": [
+        "Dimension(Hom([1, 2], [3, 4, 5]))"
+      ]
     },
     {
       "name": "HorizontalSpacing",
@@ -2965,6 +3447,22 @@
       "description": "HSV color (hue degrees, saturation/value 0-1, optional alpha)"
     },
     {
+      "name": "HurwitzZeta",
+      "category": "Arithmetic",
+      "arity": "optional",
+      "signature": "(complex | infinity, complex | infinity, integer?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Hurwitz zeta function ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s}",
+      "wikidata": "Q1638777",
+      "examples": [
+        "HurwitzZeta(2, 2)"
+      ]
+    },
+    {
       "name": "Hypergeometric1F1",
       "category": "special-functions",
       "arity": "3",
@@ -3000,7 +3498,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hypotenuse length: sqrt(x^2 + y^2)."
+      "description": "Hypotenuse length: sqrt(x^2 + y^2).",
+      "examples": [
+        "Hypot(3, 4)",
+        "Hypot(1, 1)"
+      ]
     },
     {
       "name": "IdenticallyEqual",
@@ -3024,7 +3526,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the argument unchanged"
+      "description": "Return the argument unchanged",
+      "examples": [
+        "Identity(x + 1)"
+      ]
     },
     {
       "name": "IdentityMatrix",
@@ -3036,7 +3541,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "n-by-n identity matrix."
+      "description": "n-by-n identity matrix.",
+      "examples": [
+        "IdentityMatrix(3)"
+      ]
     },
     {
       "name": "If",
@@ -3060,7 +3568,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "`Im` is an alias for `Imaginary`, which is the preferred name. Returns the imaginary part of a complex number."
+      "description": "`Im` is an alias for `Imaginary`, which is the preferred name. Returns the imaginary part of a complex number.",
+      "examples": [
+        "Im(3 + 4i)"
+      ]
     },
     {
       "name": "Imaginary",
@@ -3072,7 +3583,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Imaginary part of a complex number."
+      "description": "Imaginary part of a complex number.",
+      "examples": [
+        "Imaginary(3 + 4i)"
+      ]
     },
     {
       "name": "Implies",
@@ -3097,7 +3611,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Indexed sequence `\\{a_n\\}_{n=1}^{\\infty}` — inert head `IndexedSequence(term, index, lower, upper?)`; not evaluated."
+      "description": "Indexed sequence `\\{a_n\\}_{n=1}^{\\infty}` — inert head `IndexedSequence(term, index, lower, upper?)`; not evaluated.",
+      "examples": [
+        "IndexedSequence(1/n, n, 1, oo)"
+      ]
     },
     {
       "name": "IndexOf",
@@ -3109,7 +3626,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the 1-based index of the first occurrence of value in collection, or 0 if not found."
+      "description": "Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).",
+      "examples": [
+        "IndexOf([10, 20, 30], 20)"
+      ]
     },
     {
       "name": "IndexWhere",
@@ -3121,7 +3641,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the 1-based index of the first element satisfying the predicate, or 0 if not found."
+      "description": "Return the 1-based index of the first element satisfying the predicate, or 0 if not found. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).",
+      "examples": [
+        "IndexWhere([1, 4, 9, 16], x => x > 5)"
+      ]
     },
     {
       "name": "Infimum",
@@ -3133,7 +3656,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Like Min, but defined for open sets"
+      "description": "Like Min, but defined for open sets",
+      "examples": [
+        "[Infimum(1, 3, 2), Infimum(Interval(0, 1))]"
+      ]
     },
     {
       "name": "Input",
@@ -3157,7 +3683,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a copy of the indexed collection with `value` inserted before the 1-based `index`.\n\n`index` may range from 1 to n+1 (n+1 appends). A negative index counts from the end, with -1 appending at the end (Elixir semantics).\n\nAn out-of-range, zero, or non-integer index leaves the expression unevaluated."
+      "description": "Return a copy of the indexed collection with `value` inserted before the 1-based `index`.\n\n`index` may range from 1 to n+1 (n+1 appends). A negative index counts from the end, with -1 appending at the end (Elixir semantics).\n\nAn out-of-range, zero, or non-integer index leaves the expression unevaluated.",
+      "examples": [
+        "Insert([1, 2, 4], 3, 3)"
+      ]
     },
     {
       "name": "IntegerDigits",
@@ -3199,13 +3728,17 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "`IntegerString(n, base=10)`       return a string representation of the integer `n` in base `base`."
+      "description": "`IntegerString(n, base=10)`       return a string representation of the integer `n` in base `base`.",
+      "examples": [
+        "IntegerString(255, 16)",
+        "IntegerString(10, 2)"
+      ]
     },
     {
       "name": "Integrate",
       "category": "Calculus",
       "arity": "variadic",
-      "signature": "(function, limits+) -> number",
+      "signature": "(function, limits+) -> number | list<number> | tuple | list<tuple>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3236,7 +3769,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Interpret a notational expression as its mathematical meaning. In v1: a continuation-bearing `Add`/`Multiply` (e.g. `1 + 2 + \\dots + n`) becomes a `Sum`/`Product`. Returns the argument unchanged when the (strict) inference gate does not pass"
+      "description": "Interpret a notational expression as its mathematical meaning. In v1: a continuation-bearing `Add`/`Multiply` (e.g. `1 + 2 + \\dots + n`) becomes a `Sum`/`Product`. Returns the argument unchanged when the (strict) inference gate does not pass",
+      "examples": [
+        "Interpret(1 + 2 + ContinuationPlaceholder + n)"
+      ]
     },
     {
       "name": "InterquartileRange",
@@ -3261,7 +3797,10 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the intersection of one or more collections as a set.",
-      "wikidata": "Q185837"
+      "wikidata": "Q185837",
+      "examples": [
+        "Intersection({1, 2, 3}, {2, 3, 4})"
+      ]
     },
     {
       "name": "Interval",
@@ -3273,7 +3812,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "A set of real numbers between two endpoints. The endpoints may or may not be included."
+      "description": "A set of real numbers between two endpoints. The endpoints may or may not be included.",
+      "examples": [
+        "0.5 in Interval(0, 1)"
+      ]
     },
     {
       "name": "Inverse",
@@ -3285,7 +3827,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Multiplicative inverse of a square matrix."
+      "description": "Multiplicative inverse of a square matrix.",
+      "examples": [
+        "Inverse([[1, 2], [3, 4]])"
+      ]
     },
     {
       "name": "InverseFunction",
@@ -3297,7 +3842,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Inverse of a function."
+      "description": "Inverse of a function.",
+      "examples": [
+        "InverseFunction(Sin)",
+        "InverseFunction(Tan)(1)"
+      ]
     },
     {
       "name": "InverseHaversine",
@@ -3309,7 +3858,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Inverse haversine function."
+      "description": "Inverse haversine function.",
+      "examples": [
+        "InverseHaversine(1/2)",
+        "N(InverseHaversine(1/4))"
+      ]
     },
     {
       "name": "InvisibleOperator",
@@ -3321,7 +3874,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Implicit operator used for juxtapositions such as function application or multiplication."
+      "description": "Implicit operator used for juxtapositions such as function application or multiplication.",
+      "examples": [
+        "InvisibleOperator(2, x)"
+      ]
     },
     {
       "name": "IsAbundant",
@@ -3369,7 +3925,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "`IsComposite(n)` returns `True` if `n` is a composite number"
+      "description": "`IsComposite(n)` returns `True` if `n` is a composite number",
+      "examples": [
+        "[IsComposite(21), IsComposite(7)]"
+      ]
     },
     {
       "name": "IsDiagonal",
@@ -3381,7 +3940,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Whether the matrix is diagonal (all off-diagonal entries are zero)."
+      "description": "Whether the matrix is diagonal (all off-diagonal entries are zero).",
+      "examples": [
+        "IsDiagonal([[1, 0], [0, 5]])"
+      ]
     },
     {
       "name": "IsEmpty",
@@ -3393,7 +3955,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return True if the collection is empty, False otherwise."
+      "description": "Return True if the collection is empty, False otherwise.",
+      "examples": [
+        "IsEmpty([])"
+      ]
     },
     {
       "name": "IsError",
@@ -3405,7 +3970,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "True if the expression is an `Error` value, or a frozen expression embedding one (`\"a\" + 1`). False otherwise. Total."
+      "description": "True if the expression is an `Error` value, or a frozen expression embedding one (`\"a\" + 1`). False otherwise. Total.",
+      "examples": [
+        "IsError(Ln(\"a\"))",
+        "IsError(1 + 1)"
+      ]
     },
     {
       "name": "IsEven",
@@ -3417,7 +3986,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "`IsEven(n)` returns `True` if `n` is an even number"
+      "description": "`IsEven(n)` returns `True` if `n` is an even number",
+      "examples": [
+        "[IsEven(7), IsEven(8)]"
+      ]
     },
     {
       "name": "IsHappy",
@@ -3454,7 +4026,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "True if the value is ABSENT — the `Missing` symbol, or a `NaN` number (regardless of provenance). R’s `is.na` (`TRUE` for both `NA` and `NaN`). There is no NaN-specific test operator (R’s `is.nan`)."
+      "description": "True if the value is ABSENT — the `Missing` or `Undefined` symbol, or a `NaN` number (regardless of provenance). R’s `is.na` (`TRUE` for both `NA` and `NaN`). There is no NaN-specific test operator (R’s `is.nan`). `Indeterminate`, the exact answer to an indeterminate form such as `0/0`, is a value and is not absent.",
+      "examples": [
+        "[IsMissing(Missing), IsMissing(NaN), IsMissing(0)]"
+      ]
     },
     {
       "name": "IsOctahedral",
@@ -3478,7 +4053,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "`IsOdd(n)` returns `True` if `n` is an odd number"
+      "description": "`IsOdd(n)` returns `True` if `n` is an odd number",
+      "examples": [
+        "[IsOdd(7), IsOdd(8)]"
+      ]
     },
     {
       "name": "IsPerfect",
@@ -3519,7 +4097,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "`IsPrime(n)` returns `True` if `n` is a prime number",
-      "wikidata": "Q49008"
+      "wikidata": "Q49008",
+      "examples": [
+        "[IsPrime(17), IsPrime(21)]"
+      ]
     },
     {
       "name": "IsSame",
@@ -3582,7 +4163,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Whether the value is a square matrix."
+      "description": "Whether the value is a square matrix.",
+      "examples": [
+        "IsSquareMatrix([[1, 2], [3, 4]])"
+      ]
     },
     {
       "name": "IsSymmetric",
@@ -3594,7 +4178,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Whether the matrix is symmetric (A equals its transpose)."
+      "description": "Whether the matrix is symmetric (A equals its transpose).",
+      "examples": [
+        "IsSymmetric([[1, 2], [2, 3]])"
+      ]
     },
     {
       "name": "IsTautology",
@@ -3630,7 +4217,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value.\n\nThe function is invoked as `f(index, acc)`: `index` is the 1-based position of the element being produced, and `acc` is the previous element — the `initial` value when producing element 1. Element `k` is therefore `f(k, element(k-1))`.\n\nA function whose type says it is UNARY is applied to the accumulator alone (`Iterate(2 * _, 1)` produces `[2, 4, 8, 16, …]`); a statically-unknown arity keeps the two-argument form."
+      "description": "Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value.\n\nThe function is invoked as `f(index, acc)`: `index` is the 1-based position of the element being produced, and `acc` is the previous element — the `initial` value when producing element 1. Element `k` is therefore `f(k, element(k-1))`.\n\nA function whose type says it is UNARY is applied to the accumulator alone (`Iterate(2 * _, 1)` produces `[2, 4, 8, 16, …]`); a statically-unknown arity keeps the two-argument form.",
+      "examples": [
+        "Take(Iterate(x => 2x, 1), 5)"
+      ]
     },
     {
       "name": "JacobianMatrix",
@@ -3682,7 +4272,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Join the elements of some collections into a flat collection.\n\nA tuple operand is appended as a single element, not spliced.\n\nA scalar operand is appended as a single element too: `Join([1, 2], 3)` is `[1, 2, 3]`.\n\nWhen every operand is a string, the result is their concatenation as a string: `Join` is the variadic string concatenation."
+      "description": "Join the elements of some collections into a flat collection.\n\nA tuple operand is appended as a single element, not spliced.\n\nA scalar operand is appended as a single element too: `Join([1, 2], 3)` is `[1, 2, 3]`.\n\nWhen every operand is a string, the result is their concatenation as a string: `Join` is the variadic string concatenation.",
+      "examples": [
+        "Join([1, 2], [3, 4])",
+        "Join(\"ab\", \"cd\")"
+      ]
     },
     {
       "name": "Julia",
@@ -3706,7 +4300,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Kernel (null space) of a linear map"
+      "description": "Kernel (null space) of a linear map",
+      "examples": [
+        "Kernel([[1, 2], [2, 4]])"
+      ]
     },
     {
       "name": "Keys",
@@ -3718,7 +4315,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a list of the keys of a dictionary."
+      "description": "Return a list of the keys of a dictionary.",
+      "examples": [
+        "Keys({\"a\" -> 1, \"b\" -> 2})"
+      ]
     },
     {
       "name": "KeyValuePair",
@@ -3730,7 +4330,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A key/value pair"
+      "description": "A key/value pair",
+      "examples": [
+        "Dictionary(KeyValuePair(\"a\", 1), KeyValuePair(\"b\", 2))"
+      ]
     },
     {
       "name": "KroneckerDelta",
@@ -3767,7 +4370,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Lambert W function (product logarithm)",
-      "wikidata": "Q429963"
+      "wikidata": "Q429963",
+      "examples": [
+        "[LambertW(1), N(LambertW(1))]"
+      ]
     },
     {
       "name": "Last",
@@ -3779,7 +4385,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The last element of a collection."
+      "description": "The last element of a collection.",
+      "examples": [
+        "Last([7, 8, 9])"
+      ]
     },
     {
       "name": "Latex",
@@ -3791,7 +4400,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Serialize an expression to LaTeX"
+      "description": "Serialize an expression to LaTeX",
+      "examples": [
+        "Latex(Sqrt(x) / 2)"
+      ]
     },
     {
       "name": "LatexString",
@@ -3803,7 +4415,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Value preserving type conversion/tag indicating the string is a LaTeX string"
+      "description": "Value preserving type conversion/tag indicating the string is a LaTeX string",
+      "examples": [
+        "Parse(LatexString(#\"\\frac{1}{2}\"#))"
+      ]
     },
     {
       "name": "Lb",
@@ -3816,7 +4431,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Base-2 Logarithm",
-      "wikidata": "Q581168"
+      "wikidata": "Q581168",
+      "examples": [
+        "[Lb(8), N(Lb(3))]"
+      ]
     },
     {
       "name": "LCM",
@@ -3828,7 +4446,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Least Common Multiple"
+      "description": "Least Common Multiple",
+      "examples": [
+        "[LCM(4, 6), LCM(4, 6, 10)]"
+      ]
     },
     {
       "name": "LegendreSymbol",
@@ -3855,7 +4476,23 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Number of elements in a collection. Returns +oo for an unbounded Range, an `incompatible-type` error for an operand that is decidably not a collection, and stays unevaluated for an infinite collection whose length is not decided."
+      "description": "Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `Integers`, `Repeat(5)`, an interval), as `Count` does, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for a collection whose size is not known (a `Filter` over an infinite source).",
+      "examples": [
+        "Length([5, 6, 7])",
+        "Length(\"hello\")"
+      ]
+    },
+    {
+      "name": "LerchPhi",
+      "category": "Arithmetic",
+      "arity": "3",
+      "signature": "(complex, complex, complex) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Lerch transcendent Φ(z,s,a) = Σ_{k=0}^∞ zᵏ(k+a)^{-s}"
     },
     {
       "name": "Less",
@@ -3892,7 +4529,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Base-10 Logarithm",
-      "wikidata": "Q966582"
+      "wikidata": "Q966582",
+      "examples": [
+        "[Lg(100), N(Lg(2))]"
+      ]
     },
     {
       "name": "Limit",
@@ -3940,7 +4580,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Solve the linear system A·x = b for x."
+      "description": "Solve the linear system A·x = b for x.",
+      "examples": [
+        "LinearSolve([[2, 1], [1, 3]], [3, 5])"
+      ]
     },
     {
       "name": "Linspace",
@@ -3952,7 +4595,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A sequence of evenly spaced numbers between a start and end value, both endpoints included."
+      "description": "A sequence of evenly spaced numbers between a start and end value, both endpoints included.",
+      "examples": [
+        "Linspace(0, 1, 5)"
+      ]
     },
     {
       "name": "List",
@@ -3964,7 +4610,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "An ordered collection of elements (a list)."
+      "description": "An ordered collection of elements (a list).",
+      "examples": [
+        "List(1, 2, 3)"
+      ]
     },
     {
       "name": "ListFrom",
@@ -3976,7 +4625,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Create a list from the elements of a collection."
+      "description": "Create a list from the elements of a collection.",
+      "examples": [
+        "ListFrom({1, 2}, 3..4)"
+      ]
     },
     {
       "name": "ListJoin",
@@ -3988,7 +4640,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Join the elements of some collections into a list.\n\nThis is the canonical form of a list literal with a spread: `[...a, 0]` is `ListJoin(a, [0])`.\n\nThe result is a list whatever the kind of the operands: the elements of a set operand are included in the iteration order of the set, without deduplication.\n\nA tuple operand is included as a single element, and so is a scalar operand."
+      "description": "Join the elements of some collections into a list.\n\nThis is the canonical form of a list literal with a spread: `[...a, 0]` is `ListJoin(a, [0])`.\n\nThe result is a list whatever the kind of the operands: the elements of a set operand are included in the iteration order of the set, without deduplication.\n\nA tuple operand is included as a single element, and so is a scalar operand.",
+      "examples": [
+        "ListJoin(Set(3, 1), [0])"
+      ]
     },
     {
       "name": "Ln",
@@ -4001,7 +4656,11 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Natural Logarithm",
-      "wikidata": "Q204037"
+      "wikidata": "Q204037",
+      "examples": [
+        "[Ln(1), Ln(2), N(Ln(2))]",
+        "Ln(8, 2)"
+      ]
     },
     {
       "name": "Log",
@@ -4014,7 +4673,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Log(z, b = 10) = Logarithm of base b",
-      "wikidata": "Q11197"
+      "wikidata": "Q11197",
+      "examples": [
+        "[Log(1000), Log(8, 2)]"
+      ]
     },
     {
       "name": "Log10",
@@ -4026,7 +4688,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Base-10 Logarithm"
+      "description": "Base-10 Logarithm",
+      "examples": [
+        "[Log10(1000), N(Log10(2))]"
+      ]
     },
     {
       "name": "Log2",
@@ -4038,7 +4703,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Base-2 Logarithm"
+      "description": "Base-2 Logarithm",
+      "examples": [
+        "[Log2(32), N(Log2(3))]"
+      ]
     },
     {
       "name": "LogIntegral",
@@ -4102,7 +4770,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "LU decomposition of a square matrix."
+      "description": "LU decomposition of a square matrix.",
+      "examples": [
+        "LUDecomposition([[4, 3], [2, 1]])"
+      ]
     },
     {
       "name": "Mandelbrot",
@@ -4126,7 +4797,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the collection where each element has been transformed by the mapping function.\n\nWith a single collection, equivalent to `[f(x) for x in xs]`. With\n\nmultiple collections, combines them element-wise (like `zipWith`): \n\n`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the\n\nshortest input. The mapping function is always the FIRST argument."
+      "description": "Return the collection where each element has been transformed by the mapping function.\n\nWith a single collection, equivalent to `[f(x) for x in xs]`. With\n\nmultiple collections, combines them element-wise (like `zipWith`): \n\n`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the\n\nshortest input. The mapping function is always the FIRST argument.",
+      "examples": [
+        "Map(x => x^2, [1, 2, 3])"
+      ]
     },
     {
       "name": "Match",
@@ -4162,7 +4836,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "True iff the first operand, EVALUATED, is a value of the given type — the engine form of the Epsil `x is T` test and of `match` type patterns, which both lower here. The subject is never unwrapped: a type VALUE is a value like any other, so `MatchesType(TypeFrom(\"integer\"), \"number\")` is `False` while `MatchesType(TypeFrom(\"integer\"), \"type\")` is `True`; the type-to-type question is `Subtype`. A settled subject is decided both ways; a valueless or unresolved subject answers from its static type when that decides it, and stays symbolic otherwise."
+      "description": "True iff the first operand, EVALUATED, is a value of the given type — the engine form of the Epsil `x is T` test and of `match` type patterns, which both lower here. The subject is never unwrapped: a type VALUE is a value like any other, so `MatchesType(TypeFrom(\"integer\"), \"number\")` is `False` while `MatchesType(TypeFrom(\"integer\"), \"type\")` is `True`; the type-to-type question is `Subtype`. A settled subject is decided both ways; a valueless or unresolved subject answers from its static type when that decides it, and stays symbolic otherwise.",
+      "examples": [
+        "MatchesType([1, 2], \"list<integer>\")"
+      ]
     },
     {
       "name": "Matrix",
@@ -4174,7 +4851,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Matrix constructor and canonicalizer."
+      "description": "Matrix constructor and canonicalizer.",
+      "examples": [
+        "Matrix([[1, 2], [3, 4]])"
+      ]
     },
     {
       "name": "MatrixMultiply",
@@ -4186,7 +4866,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Matrix and vector multiplication."
+      "description": "Matrix and vector multiplication.",
+      "examples": [
+        "MatrixMultiply([[1, 2], [3, 4]], [[5, 6], [7, 8]])"
+      ]
     },
     {
       "name": "MatrixPower",
@@ -4198,7 +4881,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Square matrix raised to a power. Integer powers are the repeated matrix product; a half-integer power (e.g. 1/2) of an exact 2×2 positive-semidefinite matrix is the principal matrix square root."
+      "description": "Square matrix raised to a power. Integer powers are the repeated matrix product; a half-integer power (e.g. 1/2) of an exact 2×2 positive-semidefinite matrix is the principal matrix square root.",
+      "examples": [
+        "MatrixPower([[1, 1], [1, 0]], 10)"
+      ]
     },
     {
       "name": "MatrixRank",
@@ -4210,7 +4896,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Rank of a matrix (number of linearly independent rows/columns)."
+      "description": "Rank of a matrix (number of linearly independent rows/columns).",
+      "examples": [
+        "MatrixRank([[1, 2], [2, 4]])"
+      ]
     },
     {
       "name": "Max",
@@ -4222,7 +4911,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Maximum of two or more numbers"
+      "description": "Maximum of two or more numbers",
+      "examples": [
+        "[Max(3, 7, 2), Max([3, 7, 2])]"
+      ]
     },
     {
       "name": "MaxBy",
@@ -4234,7 +4926,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the element of the collection that maximizes the given key function."
+      "description": "Return the element of the collection that maximizes the given key function.",
+      "examples": [
+        "MaxBy([\"pear\", \"fig\", \"apple\"], Length)"
+      ]
     },
     {
       "name": "Mean",
@@ -4258,7 +4953,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "A nominal value carrying a 1σ absolute uncertainty."
+      "description": "A nominal value carrying a 1σ absolute uncertainty.",
+      "examples": [
+        "Measurement(9.81, 0.02)",
+        "N(Measurement(5, 0.2) * Measurement(3, 0.4))"
+      ]
     },
     {
       "name": "Median",
@@ -4297,7 +4996,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Minimum of two or more numbers"
+      "description": "Minimum of two or more numbers",
+      "examples": [
+        "[Min(3, 7, 2), Min([3, 7, 2])]"
+      ]
     },
     {
       "name": "MinBy",
@@ -4309,7 +5011,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the element of the collection that minimizes the given key function."
+      "description": "Return the element of the collection that minimizes the given key function.",
+      "examples": [
+        "MinBy([\"pear\", \"fig\", \"apple\"], Length)"
+      ]
     },
     {
       "name": "MinimalCNF",
@@ -4346,7 +5051,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Modulo: the remainder of the floored division of x by y. The sign of the result follows the sign of the divisor y (floored-division convention, matching most CAS). For a truncated/round-to-nearest remainder, see `Remainder`.",
-      "wikidata": "Q1799665"
+      "wikidata": "Q1799665",
+      "examples": [
+        "[7 % 3, -7 % 3]"
+      ]
     },
     {
       "name": "Mode",
@@ -4373,9 +5081,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` in [0, m) with `a·x ≡ 1 (mod m)`. Undefined when `a` and `m` are not coprime.",
+      "description": "Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. The sign of `x` follows the sign of `m` (the same floored-division convention as `Mod`). Undefined when `a` and `m` are not coprime.",
       "examples": [
-        "ModularInverse(3, 7)  // 5"
+        "ModularInverse(3, 7)  // 5",
+        "ModularInverse(3, -7)  // -2"
       ]
     },
     {
@@ -4403,7 +5112,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the collection without the last element.\n\nIf the collection has only one element, return an empty collection."
+      "description": "Return the collection without the last element.\n\nIf the collection has only one element, return an empty collection.",
+      "examples": [
+        "Most([7, 8, 9])"
+      ]
     },
     {
       "name": "Multinomial",
@@ -4444,7 +5156,10 @@
       "lazy": true,
       "broadcastable": true,
       "description": "Product of two or more values.",
-      "wikidata": "Q40276"
+      "wikidata": "Q40276",
+      "examples": [
+        "2 * x * 3 * x"
+      ]
     },
     {
       "name": "N",
@@ -4456,7 +5171,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "N(expr): numerically evaluate an expression\n\nN(expr, precision): evaluate to `precision` significant digits"
+      "description": "N(expr): numerically evaluate an expression\n\nN(expr, precision): evaluate to `precision` significant digits",
+      "examples": [
+        "N(Pi)",
+        "N(1/3, 4)"
+      ]
     },
     {
       "name": "NamedArgument",
@@ -4468,7 +5187,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "NamedArgument(name, value): one named argument of a call (Epsil\n\nsurface syntax: `f(rate: 0.05)`).\n\nA parse-level carrier, like `Spread`, but one that never survives:\n\nthe enclosing call consumes it at canonicalization, permuting the\n\nwritten arguments into the order its callee declares.\n\nReaching this definition therefore means the carrier was NOT\n\nconsumed — the callee supplied no parameter names to match — which\n\nis the `argument-names-unavailable` error."
+      "description": "NamedArgument(name, value): one named argument of a call (Epsil\n\nsurface syntax: `f(rate: 0.05)`).\n\nA parse-level carrier, like `Spread`, but one that never survives:\n\nthe enclosing call consumes it at canonicalization, permuting the\n\nwritten arguments into the order its callee declares.\n\nReaching this definition therefore means the carrier was NOT\n\nconsumed — the callee supplied no parameter names to match — which\n\nis the `argument-names-unavailable` error.",
+      "examples": [
+        "((x, y) => x - y)(y: 2, x: 10)"
+      ]
     },
     {
       "name": "Nand",
@@ -4530,7 +5252,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Additive Inverse",
-      "wikidata": "Q715358"
+      "wikidata": "Q715358",
+      "examples": [
+        "-(x - 1)"
+      ]
     },
     {
       "name": "NextPrime",
@@ -4595,7 +5320,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Vector or matrix norm."
+      "description": "Vector or matrix norm.",
+      "examples": [
+        "Norm([3, 4])",
+        "Norm([3, 4], 1)"
+      ]
     },
     {
       "name": "Normal",
@@ -4692,7 +5421,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether a value is not an element of a collection."
+      "description": "Test whether a value is not an element of a collection.",
+      "examples": [
+        "4 !in {1, 2, 3}"
+      ]
     },
     {
       "name": "NotEqual",
@@ -4801,7 +5533,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether the first collection is not a strict subset of the second."
+      "description": "Test whether the first collection is not a strict subset of the second.",
+      "examples": [
+        "NotSubset({1, 4}, {1, 2, 3})"
+      ]
     },
     {
       "name": "NotSucceeds",
@@ -4825,7 +5560,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether the first collection is not a strict superset of the second."
+      "description": "Test whether the first collection is not a strict superset of the second.",
+      "examples": [
+        "NotSuperset({1, 2}, {1, 2, 3})"
+      ]
     },
     {
       "name": "NotSupersetEqual",
@@ -4837,7 +5575,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether the first collection is not a superset (possibly equal) of the second."
+      "description": "Test whether the first collection is not a superset (possibly equal) of the second.",
+      "examples": [
+        "NotSupersetEqual({1, 2}, {1, 2, 3})"
+      ]
     },
     {
       "name": "NotTilde",
@@ -4912,7 +5653,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional \".\" fraction and an optional e/E exponent, or one of \"oo\", \"+oo\", \"-oo\", \"NaN\". The integer part may be omitted before a fraction (\".5\" is 0.5); a trailing \".\" with no fraction digits (\"5.\") is not accepted. Any other text, including \"\", is an error value (never NaN).\n\nNumberFrom(s, base): the integer `s` denotes in `base` (2 to 36); only integer numerals are accepted."
+      "description": "NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional \".\" fraction and an optional e/E exponent, or one of \"oo\", \"+oo\", \"-oo\", \"NaN\", \"Indeterminate\". The integer part may be omitted before a fraction (\".5\" is 0.5); a trailing \".\" with no fraction digits (\"5.\") is not accepted. Any other text, including \"\", is an error value (never NaN).\n\nNumberFrom(s, base): the integer `s` denotes in `base` (2 to 36); only integer numerals are accepted.",
+      "examples": [
+        "NumberFrom(\"3.25\")",
+        "NumberFrom(\"ff\", 16)"
+      ]
     },
     {
       "name": "Numerator",
@@ -4924,7 +5669,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": true,
-      "description": "Numerator of an expression"
+      "description": "Numerator of an expression",
+      "examples": [
+        "[Numerator(3/4), Numerator(x / y)]"
+      ]
     },
     {
       "name": "NumeratorDenominator",
@@ -4936,7 +5684,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": true,
-      "description": "Sequence of Numerator and Denominator of an expression"
+      "description": "Sequence of Numerator and Denominator of an expression",
+      "examples": [
+        "NumeratorDenominator(3/4)"
+      ]
     },
     {
       "name": "Object",
@@ -4984,7 +5735,25 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Matrix filled with ones."
+      "description": "Matrix filled with ones.",
+      "examples": [
+        "OnesMatrix(2, 3)"
+      ]
+    },
+    {
+      "name": "Open",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Open(x): the endpoint x of an Interval, marked as excluded. A marker with no value of its own.",
+      "examples": [
+        "0 in Interval(Open(0), 1)"
+      ]
     },
     {
       "name": "Or",
@@ -5009,7 +5778,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the indexes that would sort the collection."
+      "description": "Return the indexes that would sort the collection.",
+      "examples": [
+        "Ordering([30, 10, 20])"
+      ]
     },
     {
       "name": "OverParen",
@@ -5021,7 +5793,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Over-paren accent (`\\overparen{BC}`) — opaque typed head; not evaluated."
+      "description": "Over-paren accent (`\\overparen{BC}`) — opaque typed head; not evaluated.",
+      "examples": [
+        "OverParen(B, C)"
+      ]
     },
     {
       "name": "PadEnd",
@@ -5033,7 +5808,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "PadEnd(s, n, pad=\" \"): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). Returned unchanged when `s` already has `n` or more characters. `n` must be a non-negative integer; an empty `pad` is an error; a non-string `pad` leaves the expression unevaluated."
+      "description": "PadEnd(s, n, pad=\" \"): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). Returned unchanged when `s` already has `n` or more characters. `n` must be a non-negative integer; an empty `pad` is an error; a non-string `pad` leaves the expression unevaluated.",
+      "examples": [
+        "PadEnd(\"abc\", 6, \".\")"
+      ]
     },
     {
       "name": "PadStart",
@@ -5045,7 +5823,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "PadStart(s, n, pad=\" \"): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). Returned unchanged when `s` already has `n` or more characters. `n` must be a non-negative integer; an empty `pad` is an error; a non-string `pad` leaves the expression unevaluated."
+      "description": "PadStart(s, n, pad=\" \"): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). Returned unchanged when `s` already has `n` or more characters. `n` must be a non-negative integer; an empty `pad` is an error; a non-string `pad` leaves the expression unevaluated.",
+      "examples": [
+        "PadStart(\"42\", 5, \"0\")"
+      ]
     },
     {
       "name": "Pair",
@@ -5057,7 +5838,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A tuple of two elements"
+      "description": "A tuple of two elements",
+      "examples": [
+        "Pair(1, 2)"
+      ]
     },
     {
       "name": "Parallel",
@@ -5069,7 +5853,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Parallelism relation (`AB \\parallel CD`) — opaque typed head; not evaluated."
+      "description": "Parallelism relation (`AB \\parallel CD`) — opaque typed head; not evaluated.",
+      "examples": [
+        "Parallel(l, m)"
+      ]
     },
     {
       "name": "Parse",
@@ -5081,7 +5868,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Parse a LaTeX string and evaluate to a corresponding expression"
+      "description": "Parse a LaTeX string and evaluate to a corresponding expression",
+      "examples": [
+        "Parse(#\"\\frac{\\pi}{2}\"#)"
+      ]
     },
     {
       "name": "PartialFraction",
@@ -5106,7 +5896,11 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length.\n\nWith a third argument `step`, produce sliding windows of length `n` whose starts are `step` apart, keeping only complete windows.\n\nWith a predicate function instead of an integer, split into two groups: elements for which the predicate is true, and those for which it is false.\n\nAsymmetry: with no `step`, the trailing partial chunk is included; with an explicit `step`, only complete windows are returned.\n\nSee `Chunk` for splitting into a given number of nearly-equal groups.",
-      "wikidata": "Q381060"
+      "wikidata": "Q381060",
+      "examples": [
+        "Partition([1, 2, 3, 4, 5], 2)",
+        "Partition([1, 2, 3, 4, 5], x => x % 2 == 0)"
+      ]
     },
     {
       "name": "PDF",
@@ -5142,7 +5936,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Perpendicularity relation (`AB \\perp CD`) — opaque typed head; not evaluated."
+      "description": "Perpendicularity relation (`AB \\perp CD`) — opaque typed head; not evaluated.",
+      "examples": [
+        "Perpendicular(l, m)"
+      ]
     },
     {
       "name": "Pin",
@@ -5166,7 +5963,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Apply a function to a value: `Pipe(x, f)` evaluates to `f(x)`."
+      "description": "Apply a function to a value: `Pipe(x, f)` evaluates to `f(x)`.",
+      "examples": [
+        "Pipe([3, 1, 2], Sort)",
+        "16 |> Sqrt"
+      ]
     },
     {
       "name": "PlusMinus",
@@ -5179,7 +5980,10 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Plus or Minus",
-      "wikidata": "Q120812"
+      "wikidata": "Q120812",
+      "examples": [
+        "PlusMinus(1, 0.1)"
+      ]
     },
     {
       "name": "Pochhammer",
@@ -5204,7 +6008,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection."
+      "description": "A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.",
+      "examples": [
+        "PointList([1, 2, 3], [4, 5, 6])"
+      ]
     },
     {
       "name": "PointX",
@@ -5216,7 +6023,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The x-coordinate of a point, broadcasting over a list of points."
+      "description": "The x-coordinate of a point, broadcasting over a list of points.",
+      "examples": [
+        "PointX((3, 4))",
+        "PointX([(1, 2), (3, 4)])"
+      ]
     },
     {
       "name": "PointY",
@@ -5228,7 +6039,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The y-coordinate of a point, broadcasting over a list of points."
+      "description": "The y-coordinate of a point, broadcasting over a list of points.",
+      "examples": [
+        "PointY((3, 4))"
+      ]
     },
     {
       "name": "PointZ",
@@ -5240,7 +6054,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The z-coordinate of a point, broadcasting over a list of points."
+      "description": "The z-coordinate of a point, broadcasting over a list of points.",
+      "examples": [
+        "PointZ((3, 4, 5))"
+      ]
     },
     {
       "name": "PoissonDistribution",
@@ -5265,7 +6082,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Polygamma function, the n-th derivative of the digamma function",
-      "wikidata": "Q1817679"
+      "wikidata": "Q1817679",
+      "examples": [
+        "N(PolyGamma(2, 1))"
+      ]
     },
     {
       "name": "Polygon",
@@ -5277,7 +6097,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Polygon primitive — opaque typed head."
+      "description": "Polygon primitive — opaque typed head.",
+      "examples": [
+        "Polygon(A, B, C, D)"
+      ]
     },
     {
       "name": "PolyLog",
@@ -5289,7 +6112,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ.",
+      "description": "Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ, at any real or complex order s.",
       "wikidata": "Q320067"
     },
     {
@@ -5422,7 +6245,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a list of indexes of elements in the collection satisfying the predicate."
+      "description": "Return a list of indexes of elements in the collection satisfying the predicate.",
+      "examples": [
+        "Position([1, 4, 9, 16], x => x > 5)"
+      ]
     },
     {
       "name": "Power",
@@ -5435,7 +6261,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Exponentiation: raise a base to a power.",
-      "wikidata": "Q33456"
+      "wikidata": "Q33456",
+      "examples": [
+        "[2^10, 2^(1/2), x^2 * x^3]"
+      ]
     },
     {
       "name": "PowerMod",
@@ -5487,7 +6316,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Decrement a number by one."
+      "description": "Decrement a number by one.",
+      "examples": [
+        "PreDecrement(5)"
+      ]
     },
     {
       "name": "Predicate",
@@ -5511,7 +6343,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Increment a number by one."
+      "description": "Increment a number by one.",
+      "examples": [
+        "PreIncrement(5)"
+      ]
     },
     {
       "name": "Prime",
@@ -5523,7 +6358,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs."
+      "description": "Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs.",
+      "examples": [
+        "Prime(f)"
+      ]
     },
     {
       "name": "PrimeFactors",
@@ -5646,7 +6484,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Print the operands to the host console, separated by spaces and followed by a newline. String operands print their content (without quotes); other expressions print their text form. Evaluates to `Nothing`. On a host without a console, prints nothing. When the host denies console access, evaluates to a `capability-denied` error."
+      "description": "Print the operands to the host console, separated by spaces and followed by a newline. String operands print their content (without quotes); other expressions print their text form. Evaluates to `Nothing`. On a host without a console, prints nothing. When the host denies console access, evaluates to a `capability-denied` error.",
+      "examples": [
+        "Print(\"Hello\", 42)"
+      ]
     },
     {
       "name": "Product",
@@ -5659,7 +6500,11 @@
       "lazy": true,
       "broadcastable": false,
       "description": "`Product(f, a, b)` computes the product of `f` from `a` to `b`",
-      "wikidata": "Q901718"
+      "wikidata": "Q901718",
+      "examples": [
+        "Product(k, (k, 1, 5))",
+        "Product(1 - 1/k^2, (k, 2, 10))"
+      ]
     },
     {
       "name": "ProtocolMember",
@@ -5671,7 +6516,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a `MemberCall` on the protocol name, canonicalizes to `Apply(Field(Comparable, \"compare\"), x, y)`). The first two operands name the protocol and the member; the rest are the call arguments. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the first argument is invoked. Several equally specific implementations are `protocol-call-ambiguous`; none is `protocol-implementation-missing`; an argument whose type cannot decide the question leaves the call symbolic."
+      "description": "Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a `MemberCall` on the protocol name, canonicalizes to `Apply(Field(Comparable, \"compare\"), x, y)`). The first two operands name the protocol and the member; the rest are the call arguments. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the first argument is invoked. Several equally specific implementations are `protocol-call-ambiguous`; none is `protocol-implementation-missing`; an argument whose type cannot decide the question leaves the call symbolic.",
+      "examples": [
+        "protocol Negatable { function negated(self: Self) -> Self }\ntype number is Negatable { function negated(self) -> number { -self } }\nNegatable.negated(5)"
+      ]
     },
     {
       "name": "ProtocolProperty",
@@ -5683,7 +6531,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). The first two operands name the protocol and the property; the third is the receiver. A fourth operand makes it a property STORE — the qualified write `person.(Nameable.name) = v` — which invokes the `set` accessor against the receiver, discards what it returns, and evaluates to the value assigned; a receiver that is not an object is `immutable-value-assignment`. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the receiver is invoked."
+      "description": "Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). The first two operands name the protocol and the property; the third is the receiver. A fourth operand makes it a property STORE — the qualified write `person.(Nameable.name) = v` — which invokes the `set` accessor against the receiver, discards what it returns, and evaluates to the value assigned; a receiver that is not an object is `immutable-value-assignment`. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the receiver is invoked.",
+      "examples": [
+        "protocol Signed { readonly sign: string }\ntype number is Signed {\n  get sign(self) -> string { if (self < 0) { \"-\" } else { \"+\" } }\n}\nlet x = -12\nx.(Signed.sign)"
+      ]
     },
     {
       "name": "PseudoInverse",
@@ -5695,7 +6546,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Moore-Penrose pseudoinverse of a matrix."
+      "description": "Moore-Penrose pseudoinverse of a matrix.",
+      "examples": [
+        "PseudoInverse([[1, 2], [3, 4], [5, 6]])"
+      ]
     },
     {
       "name": "QRDecomposition",
@@ -5707,7 +6561,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "QR decomposition of a matrix."
+      "description": "QR decomposition of a matrix.",
+      "examples": [
+        "QRDecomposition([[0, 1], [1, 1]])"
+      ]
     },
     {
       "name": "Quadrilateral",
@@ -5719,7 +6576,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Quadrilateral mark (`\\square ABCD`) — opaque typed head; not evaluated."
+      "description": "Quadrilateral mark (`\\square ABCD`) — opaque typed head; not evaluated.",
+      "examples": [
+        "Quadrilateral(A, B, C, D)"
+      ]
     },
     {
       "name": "Quantile",
@@ -5795,7 +6655,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The quotient of a ring by the ideal generated by the second argument.\n\n`QuotientRing(Integers, n)` is ℤ/nℤ, the integers modulo `n`.\n\nInert: the residues are not enumerated, and membership is not decided."
+      "description": "The quotient of a ring by the ideal generated by the second argument.\n\n`QuotientRing(Integers, n)` is ℤ/nℤ, the integers modulo `n`.\n\nInert: the residues are not enumerated, and membership is not decided.",
+      "examples": [
+        "QuotientRing(Integers, 5)"
+      ]
     },
     {
       "name": "Radical",
@@ -5822,19 +6685,26 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Random(): non-deterministic real in [0, 1)\n\nRandom(Interval(a, b)): a real in [a, b) (endpoint markers ignored)\n\nRandom(Range(...)): an element of the range\n\nRandom(xs): an element of the finite collection `xs`"
+      "description": "Random(): non-deterministic real in [0, 1)\n\nRandom(Interval(a, b)): a real in [a, b) (endpoint markers ignored)\n\nRandom(Range(...)): an element of the range\n\nRandom(xs): an element of the finite collection `xs`",
+      "examples": [
+        "Random()",
+        "Random(1..6)"
+      ]
     },
     {
       "name": "RandomChoice",
       "category": "Core",
-      "arity": "2",
-      "signature": "(collection<any> | set<real>, number) random -> list<any>",
+      "arity": "1",
+      "signature": "((T, number) random -> T where T: string) & ((collection<any> | set<real>, number) random -> list<any>)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. `k` may exceed the size of the domain — that is what replacement means."
+      "description": "RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. `k` may exceed the size of the domain — that is what replacement means. Choosing from a string yields a string.",
+      "examples": [
+        "RandomChoice([\"a\", \"b\", \"c\"], 5)"
+      ]
     },
     {
       "name": "RandomExpression",
@@ -5846,7 +6716,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Generate a random expression."
+      "description": "Generate a random expression.",
+      "examples": [
+        "RandomExpression()"
+      ]
     },
     {
       "name": "RandomPrime",
@@ -5885,7 +6758,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Randomize the order of the elements in the collection. Shuffling a string yields a string. Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic."
+      "description": "Randomize the order of the elements in the collection. Shuffling a string yields a string. Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic.",
+      "examples": [
+        "RandomShuffle([1, 2, 3, 4])"
+      ]
     },
     {
       "name": "Range",
@@ -5897,7 +6773,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A sequence of numbers from a start to an end value with an optional step."
+      "description": "A sequence of numbers from a start to an end value with an optional step.",
+      "examples": [
+        "1..5",
+        "Range(1, 10, 3)"
+      ]
     },
     {
       "name": "RangeOf",
@@ -5909,7 +6789,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Nothing` when it does not occur.\n\nThe search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Nothing`.\n\nOn a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster."
+      "description": "Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Nothing` when it does not occur.\n\nThe search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Nothing`.\n\nOn a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster.",
+      "examples": [
+        "RangeOf([10, 20, 30, 40], [30, 40])"
+      ]
     },
     {
       "name": "Rank",
@@ -5921,7 +6804,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The length of the shape of the expression. Note this is not the matrix rank (the number of linearly independent rows or columns in the matrix)"
+      "description": "The length of the shape of the expression. Note this is not the matrix rank (the number of linearly independent rows or columns in the matrix)",
+      "examples": [
+        "Rank([[1, 2, 3], [4, 5, 6]])"
+      ]
     },
     {
       "name": "Rational",
@@ -5933,7 +6819,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Construct a rational number from a numerator and denominator."
+      "description": "Construct a rational number from a numerator and denominator.",
+      "examples": [
+        "[Rational(3, 6), Rational(1.25)]"
+      ]
     },
     {
       "name": "Rationalize",
@@ -5961,7 +6850,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "`Re` is an alias for `Real`, which is the preferred name. Returns the real part of a complex number."
+      "description": "`Re` is an alias for `Real`, which is the preferred name. Returns the real part of a complex number.",
+      "examples": [
+        "Re(3 + 4i)"
+      ]
     },
     {
       "name": "Real",
@@ -5973,7 +6865,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Real part of a complex number."
+      "description": "Real part of a complex number.",
+      "examples": [
+        "Real(3 + 4i)"
+      ]
     },
     {
       "name": "Reduce",
@@ -5985,7 +6880,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value."
+      "description": "Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value.",
+      "examples": [
+        "Reduce([1, 2, 3, 4], (a, b) => a * b)"
+      ]
     },
     {
       "name": "RegExp",
@@ -6009,7 +6907,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Release an expression held by `Hold`"
+      "description": "Release an expression held by `Hold`",
+      "examples": [
+        "ReleaseHold(Hold(1 + 2))"
+      ]
     },
     {
       "name": "Remainder",
@@ -6021,7 +6922,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`)"
+      "description": "IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`)",
+      "examples": [
+        "[Remainder(7, 3), Remainder(-7, 3)]"
+      ]
     },
     {
       "name": "Repeat",
@@ -6033,7 +6937,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies."
+      "description": "Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies.",
+      "examples": [
+        "Repeat(0, 3)"
+      ]
     },
     {
       "name": "ReplaceAll",
@@ -6045,7 +6952,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "ReplaceAll(expr, rules): apply one or more replacement rules to `expr`,\n\nthen evaluate the result (Mathematica `expr /. rules`).\n\nA rule is `lhs -> rhs` (parsed as `To`) or `Rule(lhs, rhs)`. Several\n\nrules may be given as extra arguments or as a `List`/`Set` of rules;\n\nthey are applied simultaneously in a single pass."
+      "description": "ReplaceAll(expr, rules): apply one or more replacement rules to `expr`,\n\nthen evaluate the result (Mathematica `expr /. rules`).\n\nA rule is `Rule(lhs, rhs)`, or `lhs -> rhs` in LaTeX (parsed as `To`;\n\nin Epsil `->` builds a dictionary entry, which is not a rule). Several\n\nrules may be given as extra arguments or as a `List`/`Set` of rules;\n\nthey are applied simultaneously in a single pass.",
+      "examples": [
+        "ReplaceAll(x^2 + x, Rule(x, 3))"
+      ]
     },
     {
       "name": "ReplaceAt",
@@ -6057,7 +6967,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated."
+      "description": "Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.",
+      "examples": [
+        "ReplaceAt([1, 2, 3], 2, 20)"
+      ]
     },
     {
       "name": "Reshape",
@@ -6069,7 +6982,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Reshape a tensor or collection to a target shape."
+      "description": "Reshape a tensor or collection to a target shape.",
+      "examples": [
+        "Reshape([1, 2, 3, 4, 5, 6], (2, 3))"
+      ]
     },
     {
       "name": "Residue",
@@ -6093,7 +7009,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the collection without the first element.\n\nIf the collection has only one element, return an empty collection."
+      "description": "Return the collection without the first element.\n\nIf the collection has only one element, return an empty collection.",
+      "examples": [
+        "Rest([7, 8, 9])"
+      ]
     },
     {
       "name": "Resultant",
@@ -6117,7 +7036,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Reverse the order of the elements of an indexed collection."
+      "description": "Reverse the order of the elements of an indexed collection.",
+      "examples": [
+        "Reverse([1, 2, 3])"
+      ]
     },
     {
       "name": "Rgb",
@@ -6141,7 +7063,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "n-th root of a value."
+      "description": "n-th root of a value.",
+      "examples": [
+        "[Root(8, 3), N(Root(2, 3))]"
+      ]
     },
     {
       "name": "RotateLeft",
@@ -6153,7 +7078,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Rotate the elements of the collection to the left by n positions."
+      "description": "Rotate the elements of the collection to the left by n positions.",
+      "examples": [
+        "RotateLeft([1, 2, 3, 4])"
+      ]
     },
     {
       "name": "RotateRight",
@@ -6165,7 +7093,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Rotate the elements of the collection to the right by n positions."
+      "description": "Rotate the elements of the collection to the right by n positions.",
+      "examples": [
+        "RotateRight([1, 2, 3, 4])"
+      ]
     },
     {
       "name": "Round",
@@ -6177,7 +7108,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Rounds a number to the nearest integer, or (with a precision argument) to `n` decimal places."
+      "description": "Rounds a number to the nearest integer, or (with a precision argument) to `n` decimal places.",
+      "examples": [
+        "[Round(2.5), Round(-2.5), Round(3.14159, 2)]"
+      ]
     },
     {
       "name": "RowReduce",
@@ -6189,7 +7123,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Reduced row echelon form (RREF) of a matrix."
+      "description": "Reduced row echelon form (RREF) of a matrix.",
+      "examples": [
+        "RowReduce([[1, 2, 3], [4, 5, 6]])"
+      ]
     },
     {
       "name": "RSolve",
@@ -6213,7 +7150,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Pattern replacement rule."
+      "description": "Pattern replacement rule.",
+      "examples": [
+        "ReplaceAll(x + y, Rule(x, 2))"
+      ]
     },
     {
       "name": "RuntimeError",
@@ -6225,7 +7165,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Construct an error value when evaluated: the runtime counterpart of a written `Error(…)`, which is a static diagnostic node. Evaluates to `Error(code)`."
+      "description": "Construct an error value when evaluated: the runtime counterpart of a written `Error(…)`, which is a static diagnostic node. Evaluates to `Error(code)`.",
+      "examples": [
+        "IsError(RuntimeError(\"oops\"))"
+      ]
     },
     {
       "name": "Same",
@@ -6249,7 +7192,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value)."
+      "description": "Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value).",
+      "examples": [
+        "Scan([1, 2, 3, 4], (a, b) => a + b)"
+      ]
     },
     {
       "name": "Sec",
@@ -6261,7 +7207,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Secant, the reciprocal of cosine."
+      "description": "Secant, the reciprocal of cosine.",
+      "examples": [
+        "Sec(Pi / 3)",
+        "N(Sec(1))"
+      ]
     },
     {
       "name": "Sech",
@@ -6273,7 +7223,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic secant, the reciprocal of hyperbolic cosine."
+      "description": "Hyperbolic secant, the reciprocal of hyperbolic cosine.",
+      "examples": [
+        "Sech(0)",
+        "N(Sech(1))"
+      ]
     },
     {
       "name": "Second",
@@ -6285,7 +7239,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The second element of a collection."
+      "description": "The second element of a collection.",
+      "examples": [
+        "Second([7, 8, 9])"
+      ]
     },
     {
       "name": "Segment",
@@ -6297,7 +7254,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Segment primitive — opaque typed head."
+      "description": "Segment primitive — opaque typed head.",
+      "examples": [
+        "Segment(A, B)"
+      ]
     },
     {
       "name": "Sequence",
@@ -6309,7 +7269,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Ordered sequence of expressions."
+      "description": "Ordered sequence of expressions.",
+      "examples": [
+        "[0, Sequence(1, 2), 3]"
+      ]
     },
     {
       "name": "Series",
@@ -6333,7 +7296,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "An unordered collection of distinct elements (a set)."
+      "description": "An unordered collection of distinct elements (a set).",
+      "examples": [
+        "{3, 1, 2, 1}"
+      ]
     },
     {
       "name": "SetFrom",
@@ -6345,7 +7311,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Create a set from the elements of a collection."
+      "description": "Create a set from the elements of a collection.",
+      "examples": [
+        "SetFrom([1, 2, 2, 3])"
+      ]
     },
     {
       "name": "SetMinus",
@@ -6358,7 +7327,10 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the set difference between the first set and subsequent values.",
-      "wikidata": "Q18192442"
+      "wikidata": "Q18192442",
+      "examples": [
+        "SetMinus({1, 2, 3, 4}, 2, 4)"
+      ]
     },
     {
       "name": "Shape",
@@ -6370,7 +7342,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the shape tuple of an expression."
+      "description": "Return the shape tuple of an expression.",
+      "examples": [
+        "Shape([[1, 2, 3], [4, 5, 6]])"
+      ]
     },
     {
       "name": "Sigma0",
@@ -6418,7 +7393,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle in its direction, for a complex `z`."
+      "description": "Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle in its direction, for a complex `z`.",
+      "examples": [
+        "[Sign(-3), Sign(0), Sign(3 + 4i)]"
+      ]
     },
     {
       "name": "Signature",
@@ -6430,7 +7408,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the signature string of an operator."
+      "description": "Return the signature string of an operator.",
+      "examples": [
+        "Signature(StringRepeat)"
+      ]
     },
     {
       "name": "Simplify",
@@ -6442,7 +7423,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Simplify(expr): simplify an expression.\n\nSimplify(expr, assumptions): simplify under one or more boolean\n\nassumptions (e.g. `x > 0`), or a `List`/`And` of them. The assumptions\n\nhold only for the duration of the simplification."
+      "description": "Simplify(expr): simplify an expression.\n\nSimplify(expr, assumptions): simplify under one or more boolean\n\nassumptions (e.g. `x > 0`), or a `List`/`And` of them. The assumptions\n\nhold only for the duration of the simplification.",
+      "examples": [
+        "Simplify(Sin(x)^2 + Cos(x)^2)",
+        "Simplify(Sqrt(x^2), x > 0)"
+      ]
     },
     {
       "name": "Sin",
@@ -6454,7 +7439,12 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Sine of an angle."
+      "description": "Sine of an angle.",
+      "examples": [
+        "Sin(Pi / 6)",
+        "Sin(1)",
+        "N(Sin(1))"
+      ]
     },
     {
       "name": "Sinc",
@@ -6466,7 +7456,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Unnormalized sinc function: sin(x)/x with sinc(0)=1."
+      "description": "Unnormalized sinc function: sin(x)/x with sinc(0)=1.",
+      "examples": [
+        "Sinc(0)",
+        "N(Sinc(1))"
+      ]
     },
     {
       "name": "Single",
@@ -6478,7 +7472,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A tuple with a single element"
+      "description": "A tuple with a single element",
+      "examples": [
+        "Single(5)"
+      ]
     },
     {
       "name": "SingularValues",
@@ -6490,7 +7487,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The singular values of a matrix, sorted in descending order (including any zero values). Exact for a matrix whose Gram matrix A^T·A (or A·A^T) is at most 2×2 with exact rational entries; numeric otherwise."
+      "description": "The singular values of a matrix, sorted in descending order (including any zero values). Exact for a matrix whose Gram matrix A^T·A (or A·A^T) is at most 2×2 with exact rational entries; numeric otherwise.",
+      "examples": [
+        "SingularValues([[3, 0], [0, 4]])"
+      ]
     },
     {
       "name": "Sinh",
@@ -6502,7 +7502,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic sine."
+      "description": "Hyperbolic sine.",
+      "examples": [
+        "Sinh(0)",
+        "N(Sinh(1))"
+      ]
     },
     {
       "name": "SinhIntegral",
@@ -6514,7 +7518,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt."
+      "description": "Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt.",
+      "examples": [
+        "SinhIntegral(0)",
+        "N(SinhIntegral(1))"
+      ]
     },
     {
       "name": "SinIntegral",
@@ -6526,7 +7534,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Sine integral: ∫₀ˣ sin(t)/t dt."
+      "description": "Sine integral: ∫₀ˣ sin(t)/t dt.",
+      "examples": [
+        "SinIntegral(+oo)",
+        "N(SinIntegral(1))"
+      ]
     },
     {
       "name": "Skewness",
@@ -6550,7 +7562,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a contiguous run of elements from an indexed collection.\n\nGiven `start` and `end` (1-based, inclusive), a negative index is counted from the end and out-of-bounds indices are clamped.\n\nGiven a `range` (an ascending index span such as `2..4`), returns the elements at those indices: `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`."
+      "description": "Return a contiguous run of elements from an indexed collection.\n\nGiven `start` and `end` (1-based, inclusive), a negative index is counted from the end and out-of-bounds indices are clamped.\n\nGiven a `range` (an ascending index span such as `2..4`), returns the elements at those indices: `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`.",
+      "examples": [
+        "Slice([10, 20, 30, 40, 50], 2, 4)"
+      ]
     },
     {
       "name": "SlidingWindow",
@@ -6578,7 +7593,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Solve(equation, unknown): the list of solutions of an equation for the\n\nunknown. The equation may be an `Equal` expression or a bare expression\n\n(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.\n\nThe unknown may be omitted: it defaults to the equation's single free\n\nvariable, or to `x` when there are several and one of them is `x`.\n\nSolve([eq1, eq2, …], [x, y, …]): solve a system of equations; each\n\nsolution is a tuple of values in the order of the variable list, e.g.\n\nSolve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)]."
+      "description": "Solve(equation, unknown): the list of solutions of an equation for the\n\nunknown. The equation may be an `Equal` expression or a bare expression\n\n(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.\n\nThe unknown may be omitted: it defaults to the equation's single free\n\nvariable, or to `x` when there are several and one of them is `x`.\n\nSolve([eq1, eq2, …], [x, y, …]): solve a system of equations; each\n\nsolution is a tuple of values in the order of the variable list, e.g.\n\nSolve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)].",
+      "examples": [
+        "Solve(x^2 - 1 == 0, x)",
+        "Solve([x + y == 3, x - y == 1], [x, y])"
+      ]
     },
     {
       "name": "Sort",
@@ -6590,7 +7609,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the elements of the collection sorted according to the given comparison function."
+      "description": "Return the elements of the collection sorted according to the given comparison function.",
+      "examples": [
+        "Sort([3, 1, 2])",
+        "Sort([\"pear\", \"fig\", \"apple\"], Length)"
+      ]
     },
     {
       "name": "Sphere",
@@ -6602,7 +7625,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Sphere primitive — opaque typed head."
+      "description": "Sphere primitive — opaque typed head.",
+      "examples": [
+        "Sphere(O, r)"
+      ]
     },
     {
       "name": "Spread",
@@ -6614,7 +7640,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Spread(t): splice the elements of the tuple `t` into the enclosing\n\nargument list (Epsil surface syntax: `f(...t)`).\n\nA literal tuple splices at canonicalization; a symbolic argument is\n\nspliced by the enclosing call at evaluation (step 0 of the evaluate\n\npath), which re-validates the resulting arity."
+      "description": "Spread(t): splice the elements of the tuple `t` into the enclosing\n\nargument list (Epsil surface syntax: `f(...t)`).\n\nA literal tuple splices at canonicalization; a symbolic argument is\n\nspliced by the enclosing call at evaluation (step 0 of the evaluate\n\npath), which re-validates the resulting arity.",
+      "examples": [
+        "Max(...(4, 9, 2))"
+      ]
     },
     {
       "name": "Sqrt",
@@ -6627,7 +7656,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Square Root",
-      "wikidata": "Q134237"
+      "wikidata": "Q134237",
+      "examples": [
+        "[Sqrt(8), Sqrt(-4), N(Sqrt(2))]"
+      ]
     },
     {
       "name": "Square",
@@ -6640,7 +7672,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Square of a number: x^2.",
-      "wikidata": "Q3075175"
+      "wikidata": "Q3075175",
+      "examples": [
+        "[Square(3), Square(x + 1)]"
+      ]
     },
     {
       "name": "StandardDeviation",
@@ -6664,7 +7699,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence.\n\nOn a string the prefix is matched character by character, so a prefix that would end inside a grapheme cluster does not match. An empty prefix matches everything."
+      "description": "Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence.\n\nOn a string the prefix is matched character by character, so a prefix that would end inside a grapheme cluster does not match. An empty prefix matches everything.",
+      "examples": [
+        "StartsWith([1, 2, 3], [1, 2])"
+      ]
     },
     {
       "name": "Stirling",
@@ -6703,7 +7741,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "A string created by joining its arguments. The arguments are converted to their default string representation."
+      "description": "A string created by joining its arguments. The arguments are converted to their default string representation.",
+      "examples": [
+        "String(\"x\", 2)"
+      ]
     },
     {
       "name": "StringCompare",
@@ -6715,7 +7756,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are equal, 1 when `a` sorts after `b`. The order compares Unicode scalar sequences code point by code point (NOT UTF-16 code units, which would sort astral characters below U+E000..U+FFFF)."
+      "description": "StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are equal, 1 when `a` sorts after `b`. The order compares Unicode scalar sequences code point by code point (NOT UTF-16 code units, which would sort astral characters below U+E000..U+FFFF).",
+      "examples": [
+        "StringCompare(\"apple\", \"banana\")"
+      ]
     },
     {
       "name": "StringFrom",
@@ -6727,7 +7771,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Create a string by converting its arguments to a string and joining them."
+      "description": "StringFrom(value, format?): create a string from `value`. With no format, a number or a list of numbers is read as Unicode scalar values (`StringFrom(65)` is `\"A\"`), and any other value is printed (`StringFrom(True)` is `\"True\"`). The formats are `\"default\"` (print the value), `\"unicode-scalars\"`, `\"utf-8\"` and `\"utf-16\"`.",
+      "examples": [
+        "StringFrom(65)",
+        "StringFrom([72, 105])"
+      ]
     },
     {
       "name": "StringJoin",
@@ -6739,7 +7787,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "StringJoin(xs): join the elements of the finite collection `xs` (strings or characters) into a string.\n\nStringJoin(xs, sep): the same, with `sep` between consecutive elements. The inverse of StringSplit. An empty collection joins to \"\", a one-element collection to that element. A non-text element, or a non-finite collection, leaves the expression unevaluated. For variadic concatenation use Join(a, b, …) or string interpolation."
+      "description": "StringJoin(xs): join the elements of the finite collection `xs` (strings or characters) into a string.\n\nStringJoin(xs, sep): the same, with `sep` between consecutive elements. The inverse of StringSplit. An empty collection joins to \"\", a one-element collection to that element. A non-text element, or a non-finite collection, leaves the expression unevaluated. For variadic concatenation use Join(a, b, …) or string interpolation.",
+      "examples": [
+        "StringJoin([\"a\", \"b\", \"c\"], \"-\")"
+      ]
     },
     {
       "name": "StringMatch",
@@ -6775,7 +7826,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "StringRepeat(s, n): `n` copies of the string `s`, concatenated. StringRepeat(s, 0) is \"\". A negative or non-integer `n` is an error."
+      "description": "StringRepeat(s, n): `n` copies of the string `s`, concatenated. StringRepeat(s, 0) is \"\". A negative or non-integer `n` is an error.",
+      "examples": [
+        "StringRepeat(\"ab\", 3)"
+      ]
     },
     {
       "name": "StringReplace",
@@ -6787,7 +7841,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "StringReplace(s, target, replacement): replace every non-overlapping occurrence of `target` in `s`, scanning left to right over whole characters.\n\nStringReplace(s, target, replacement, count): replace at most `count` occurrences, from the left. An empty `target` is an error (the \"insert at every boundary\" behavior is deliberately not inherited); an empty `replacement` means deletion. `count` must be a positive integer.\n\nStringReplace(s, pattern, replacement, count?): `target` may be a regular expression, matched with the host dialect. `$1`-style templates are NOT expanded in `replacement`.\n\nStringReplace(s, pattern, f, count?): `replacement` may be a function, called with the same match record StringMatch returns, so each replacement can be computed from its captures."
+      "description": "StringReplace(s, target, replacement): replace every non-overlapping occurrence of `target` in `s`, scanning left to right over whole characters.\n\nStringReplace(s, target, replacement, count): replace at most `count` occurrences, from the left. An empty `target` is an error (the \"insert at every boundary\" behavior is deliberately not inherited); an empty `replacement` means deletion. `count` must be a positive integer.\n\nStringReplace(s, pattern, replacement, count?): `target` may be a regular expression, matched with the host dialect. `$1`-style templates are NOT expanded in `replacement`.\n\nStringReplace(s, pattern, f, count?): `replacement` may be a function, called with the same match record StringMatch returns, so each replacement can be computed from its captures.",
+      "examples": [
+        "StringReplace(\"banana\", \"a\", \"o\")",
+        "StringReplace(\"banana\", \"a\", \"o\", 1)"
+      ]
     },
     {
       "name": "StringSplit",
@@ -6799,7 +7857,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "StringSplit(s): split a string on runs of whitespace (the Unicode White_Space code points), dropping empty parts.\n\nStringSplit(s, sep): split a string on the separator string `sep` (empty parts are kept). An empty separator splits into user-perceived characters (grapheme clusters), like Characters. A non-string argument leaves the expression unevaluated.\n\nStringSplit(s, pattern): split on each match of a regular expression, with the host dialect's own semantics — including splitting at a zero-width match. Captures are not interleaved into the result; use StringMatchAll for those."
+      "description": "StringSplit(s): split a string on runs of whitespace (the Unicode White_Space code points), dropping empty parts.\n\nStringSplit(s, sep): split a string on the separator string `sep` (empty parts are kept). An empty separator splits into user-perceived characters (grapheme clusters), like Characters. A non-string argument leaves the expression unevaluated.\n\nStringSplit(s, pattern): split on each match of a regular expression, with the host dialect's own semantics — including splitting at a zero-width match. Captures are not interleaved into the result; use StringMatchAll for those.",
+      "examples": [
+        "StringSplit(\"a,b,c\", \",\")",
+        "StringSplit(\"  one two  three \")"
+      ]
     },
     {
       "name": "Subfactorial",
@@ -6824,7 +7886,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Subscript notation for indexing or compound symbols."
+      "description": "Subscript notation for indexing or compound symbols.",
+      "examples": [
+        "Subscript([10, 20, 30], 2)"
+      ]
     },
     {
       "name": "Subset",
@@ -6836,7 +7901,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether the first collection is a strict subset of the second."
+      "description": "Test whether the first collection is a strict subset of the second.",
+      "examples": [
+        "Subset({1, 2}, {1, 2, 3})"
+      ]
     },
     {
       "name": "SubsetEqual",
@@ -6848,7 +7916,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether the first collection is a subset (possibly equal) of the second."
+      "description": "Test whether the first collection is a subset (possibly equal) of the second.",
+      "examples": [
+        "SubsetEqual({1, 2, 3}, {1, 2, 3})"
+      ]
     },
     {
       "name": "Subtract",
@@ -6861,7 +7932,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Difference between two or more values.",
-      "wikidata": "Q40754"
+      "wikidata": "Q40754",
+      "examples": [
+        "5 - 3 - x"
+      ]
     },
     {
       "name": "Subtype",
@@ -6873,7 +7947,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "True iff the FIRST operand is a subtype of the second — `Subtype(\"integer\", \"number\")` is `True`, `Subtype(\"number\", \"integer\")` is `False`. This is the same compatibility relation annotations and signatures use. Operands are type values or type text; a quantified (`where`) type is not comparable and errors."
+      "description": "True iff the FIRST operand is a subtype of the second — `Subtype(\"integer\", \"number\")` is `True`, `Subtype(\"number\", \"integer\")` is `False`. This is the same compatibility relation annotations and signatures use. Operands are type values or type text; a quantified (`where`) type is not comparable and errors.",
+      "examples": [
+        "Subtype(\"integer\", \"number\")"
+      ]
     },
     {
       "name": "Succeeds",
@@ -6898,7 +7975,11 @@
       "lazy": true,
       "broadcastable": false,
       "description": "`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`",
-      "wikidata": "Q218005"
+      "wikidata": "Q218005",
+      "examples": [
+        "Sum(k^2, (k, 1, 10))",
+        "Sum(1/k^2, (k, 1, oo))"
+      ]
     },
     {
       "name": "Superset",
@@ -6910,7 +7991,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether the first collection is a strict superset of the second."
+      "description": "Test whether the first collection is a strict superset of the second.",
+      "examples": [
+        "Superset({1, 2, 3}, {1, 2})"
+      ]
     },
     {
       "name": "SupersetEqual",
@@ -6922,7 +8006,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether the first collection is a superset (possibly equal) of the second."
+      "description": "Test whether the first collection is a superset (possibly equal) of the second.",
+      "examples": [
+        "SupersetEqual({1, 2}, {1, 2})"
+      ]
     },
     {
       "name": "Supremum",
@@ -6934,7 +8021,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Like Max, but defined for open sets"
+      "description": "Like Max, but defined for open sets",
+      "examples": [
+        "[Supremum(1, 3, 2), Supremum(Interval(0, 1))]"
+      ]
     },
     {
       "name": "SVD",
@@ -6946,7 +8036,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Singular value decomposition of a matrix."
+      "description": "Singular value decomposition of a matrix.",
+      "examples": [
+        "SVD([[3, 0], [0, 4]])"
+      ]
     },
     {
       "name": "Symbol",
@@ -6958,7 +8051,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": true,
-      "description": "Construct a new symbol with a name formed by concatenating the arguments"
+      "description": "Construct a new symbol with a name formed by concatenating the arguments",
+      "examples": [
+        "Symbol(\"x\", 2)"
+      ]
     },
     {
       "name": "SymmetricDifference",
@@ -6971,7 +8067,10 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the symmetric difference of two sets (elements in either set but not both).",
-      "wikidata": "Q1147242"
+      "wikidata": "Q1147242",
+      "examples": [
+        "SymmetricDifference({1, 2, 3}, {2, 3, 4})"
+      ]
     },
     {
       "name": "Table",
@@ -6983,7 +8082,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "An alias for `Tabulate` (the preferred name) that additionally accepts\n\nMathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or\n\n`Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling\n\n`Table(i^2, (i, 1, n))`."
+      "description": "An alias for `Tabulate` (the preferred name) that additionally accepts\n\nMathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or\n\n`Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling\n\n`Table(i^2, (i, 1, n))`.",
+      "examples": [
+        "Table(i^2, (i, 1, 5))"
+      ]
     },
     {
       "name": "Tabulate",
@@ -6995,7 +8097,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Create a collection by applying a function to each index in the specified dimensions."
+      "description": "Create a collection by applying a function to each index in the specified dimensions.",
+      "examples": [
+        "Tabulate((i, j) => i * j, 2, 3)"
+      ]
     },
     {
       "name": "Tail",
@@ -7007,7 +8112,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the tail of an expression, the operands of the expression"
+      "description": "Return the tail of an expression, the operands of the expression",
+      "examples": [
+        "[Tail(Max(a, b, c))]"
+      ]
     },
     {
       "name": "Take",
@@ -7019,7 +8127,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return `n` elements from a collection."
+      "description": "Return `n` elements from a collection.",
+      "examples": [
+        "Take([1, 2, 3, 4, 5], 2)"
+      ]
     },
     {
       "name": "TakeWhile",
@@ -7031,7 +8142,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not."
+      "description": "Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not.",
+      "examples": [
+        "TakeWhile([1, 2, 3, 10, 4], x => x < 5)"
+      ]
     },
     {
       "name": "Tally",
@@ -7043,7 +8157,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a tuple with the unique elements of the collection and their respective counts."
+      "description": "Return a tuple with the unique elements of the collection and their respective counts.",
+      "examples": [
+        "Tally([\"a\", \"b\", \"a\", \"c\", \"a\"])"
+      ]
     },
     {
       "name": "Tan",
@@ -7055,7 +8172,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Tangent of an angle."
+      "description": "Tangent of an angle.",
+      "examples": [
+        "Tan(Pi / 3)",
+        "N(Tan(1))"
+      ]
     },
     {
       "name": "Tanh",
@@ -7067,7 +8188,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic tangent."
+      "description": "Hyperbolic tangent.",
+      "examples": [
+        "Tanh(0)",
+        "N(Tanh(1))"
+      ]
     },
     {
       "name": "Text",
@@ -7079,7 +8204,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A sequence of strings, annotated expressions and other Text expressions"
+      "description": "A sequence of strings, annotated expressions and other Text expressions",
+      "examples": [
+        "Text(\"Total: \", 42)"
+      ]
     },
     {
       "name": "Third",
@@ -7091,7 +8219,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The third element of a collection."
+      "description": "The third element of a collection.",
+      "examples": [
+        "Third([7, 8, 9])"
+      ]
     },
     {
       "name": "Tilde",
@@ -7133,13 +8264,16 @@
       "name": "Timing",
       "category": "Core",
       "arity": "optional",
-      "signature": "(value, repeat: integer?) -> tuple<result:value, time:number>",
+      "signature": "(value, repeat: integer?) -> tuple<number, value>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "`Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation"
+      "description": "`Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value; read them as `Timing(expr)[1]` and `Timing(expr)[2]`. `Timing(expr, n)` evaluates `expr` n times (at least 3), drops the fastest and the slowest run, and returns the mean time of the others",
+      "examples": [
+        "Timing(2 + 2)[2]"
+      ]
     },
     {
       "name": "To",
@@ -7151,7 +8285,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Action arrow / mapping (`a \\to b`) — opaque typed head."
+      "description": "Action arrow / mapping (`a \\to b`) — opaque typed head.",
+      "examples": [
+        "ReplaceAll(x^2 + x, To(x, 3))"
+      ]
     },
     {
       "name": "ToCNF",
@@ -7199,7 +8336,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings."
+      "description": "ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings.",
+      "examples": [
+        "ToLowerCase(\"Hello World\")"
+      ]
     },
     {
       "name": "Totient",
@@ -7224,7 +8364,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. The character count can change (\"ß\" uppercases to \"SS\")."
+      "description": "ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. The character count can change (\"ß\" uppercases to \"SS\").",
+      "examples": [
+        "ToUpperCase(\"straße\")"
+      ]
     },
     {
       "name": "Trace",
@@ -7236,7 +8379,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Trace of a matrix or pair of tensor axes."
+      "description": "Trace of a matrix or pair of tensor axes.",
+      "examples": [
+        "Trace([[1, 2], [3, 4]])"
+      ]
     },
     {
       "name": "Transpose",
@@ -7248,7 +8394,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Transpose a matrix or swap two tensor axes."
+      "description": "Transpose a matrix or swap two tensor axes.",
+      "examples": [
+        "Transpose([[1, 2, 3], [4, 5, 6]])"
+      ]
     },
     {
       "name": "Triangle",
@@ -7260,7 +8409,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Triangle primitive — opaque typed head."
+      "description": "Triangle primitive — opaque typed head.",
+      "examples": [
+        "Triangle(A, B, C)"
+      ]
     },
     {
       "name": "Trigamma",
@@ -7273,7 +8425,10 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Trigamma function, the derivative of the digamma function",
-      "wikidata": "Q2371722"
+      "wikidata": "Q2371722",
+      "examples": [
+        "N(Trigamma(1))"
+      ]
     },
     {
       "name": "TrigExpand",
@@ -7285,7 +8440,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Expand trigonometric and hyperbolic functions of sums and integer multiples of angles. Example: TrigExpand(sin(a+b)) → sin(a)cos(b) + cos(a)sin(b), TrigExpand(sin(2x)) → 2 sin(x) cos(x)"
+      "description": "Expand trigonometric and hyperbolic functions of sums and integer multiples of angles. Example: TrigExpand(sin(a+b)) → sin(a)cos(b) + cos(a)sin(b), TrigExpand(sin(2x)) → 2 sin(x) cos(x)",
+      "examples": [
+        "TrigExpand(Sin(a + b))",
+        "TrigExpand(Cos(2 * x))"
+      ]
     },
     {
       "name": "TrigReduce",
@@ -7297,7 +8456,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Rewrite products and integer powers of trigonometric and hyperbolic functions as a linear combination of functions of multiple angles (the inverse of TrigExpand). Example: TrigReduce(sin(x)^2) → (1 - cos(2x))/2"
+      "description": "Rewrite products and integer powers of trigonometric and hyperbolic functions as a linear combination of functions of multiple angles (the inverse of TrigExpand). Example: TrigReduce(sin(x)^2) → (1 - cos(2x))/2",
+      "examples": [
+        "TrigReduce(Sin(x)^2)",
+        "TrigReduce(Sin(x) * Cos(x))"
+      ]
     },
     {
       "name": "TrigToExp",
@@ -7309,7 +8472,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Rewrite trigonometric and hyperbolic functions in terms of the complex exponential, exactly. Example: TrigToExp(sin(x)) → -(i/2) e^{ix} + (i/2) e^{-ix}"
+      "description": "Rewrite trigonometric and hyperbolic functions in terms of the complex exponential, exactly. Example: TrigToExp(sin(x)) → -(i/2) e^{ix} + (i/2) e^{-ix}",
+      "examples": [
+        "TrigToExp(Cos(x))"
+      ]
     },
     {
       "name": "Trim",
@@ -7321,7 +8487,11 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters).\n\nTrim(s, chars): remove leading and trailing characters that belong to `chars` — a SET of characters, given as a character, a string (meaning the set of that string's characters) or a collection whose elements each contribute their own characters."
+      "description": "Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters).\n\nTrim(s, chars): remove leading and trailing characters that belong to `chars` — a SET of characters, given as a character, a string (meaning the set of that string's characters) or a collection whose elements each contribute their own characters.",
+      "examples": [
+        "Trim(\"  hi  \")",
+        "Trim(\"--hi--\", \"-\")"
+      ]
     },
     {
       "name": "TrimEnd",
@@ -7333,7 +8503,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters).\n\nTrimEnd(s, chars): remove trailing characters that belong to `chars` — a SET of characters, as for Trim."
+      "description": "TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters).\n\nTrimEnd(s, chars): remove trailing characters that belong to `chars` — a SET of characters, as for Trim.",
+      "examples": [
+        "TrimEnd(\"hi!!\", \"!\")"
+      ]
     },
     {
       "name": "TrimStart",
@@ -7345,7 +8518,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "TrimStart(s): remove leading whitespace (the Unicode White_Space characters).\n\nTrimStart(s, chars): remove leading characters that belong to `chars` — a SET of characters, as for Trim."
+      "description": "TrimStart(s): remove leading whitespace (the Unicode White_Space characters).\n\nTrimStart(s, chars): remove leading characters that belong to `chars` — a SET of characters, as for Trim.",
+      "examples": [
+        "TrimStart(\"007\", \"0\")"
+      ]
     },
     {
       "name": "Triple",
@@ -7357,7 +8533,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A tuple of three elements"
+      "description": "A tuple of three elements",
+      "examples": [
+        "Triple(1, 2, 3)"
+      ]
     },
     {
       "name": "Truncate",
@@ -7369,7 +8548,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Rounds a number towards zero (removes the fractional part)"
+      "description": "Rounds a number towards zero (removes the fractional part)",
+      "examples": [
+        "[Truncate(2.7), Truncate(-2.7)]"
+      ]
     },
     {
       "name": "TruthTable",
@@ -7393,7 +8575,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A fixed number of heterogeneous elements"
+      "description": "A fixed number of heterogeneous elements",
+      "examples": [
+        "(1, \"a\", True)"
+      ]
     },
     {
       "name": "TupleFrom",
@@ -7405,7 +8590,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Create a tuple from the elements of a collection."
+      "description": "Create a tuple from the elements of a collection.",
+      "examples": [
+        "TupleFrom([1, 2, 3])"
+      ]
     },
     {
       "name": "Type",
@@ -7417,7 +8605,11 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "The STATIC type of an expression, as a type value: `Type(3)` is `TypeFrom(\"integer\")`. The observer does not evaluate its operand. Recover the text with `StringFrom(Type(x))`; in a string interpolation a type value renders as its text directly. BREAKING (2026-08-19, ruling R3 of `docs/TYPE-SYSTEM.md`): the result used to be a STRING, and `Type(x) == \"some text\"` is now always `False` — use `x is T`, `Subtype(Type(x), u)`, or compare `StringFrom` text."
+      "description": "The STATIC type of an expression, as a type value: `Type(3)` is `TypeFrom(\"integer\")`. The observer does not evaluate its operand. Recover the text with `StringFrom(Type(x))`; in a string interpolation a type value renders as its text directly. BREAKING (2026-08-19, ruling R3 of `docs/TYPE-SYSTEM.md`): the result used to be a STRING, and `Type(x) == \"some text\"` is now always `False` — use `x is T`, `Subtype(Type(x), u)`, or compare `StringFrom` text.",
+      "examples": [
+        "Type(\"hi\")",
+        "Type([1, 2, 3])"
+      ]
     },
     {
       "name": "Typed",
@@ -7429,7 +8621,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Ascribe a type to an expression. The type is asserted for the type system (ascription, not a check); evaluation is transparent. Used to annotate `Function` literal parameters and return types."
+      "description": "Ascribe a type to an expression. The type is asserted for the type system (ascription, not a check); evaluation is transparent. Used to annotate `Function` literal parameters and return types.",
+      "examples": [
+        "Typed(2 + 3, \"integer\")"
+      ]
     },
     {
       "name": "TypeFrom",
@@ -7441,7 +8636,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A type expression as a first-class value, constructed from its text: `TypeFrom(\"list<integer>\")`. The value SETTLES at construction — the text is parsed, reduced, and stored back as its canonical form — so two values built from equivalent spellings (`\"integer|real\"`, `\"real|integer\"`) are the same value. `==` between two type values is mutual subtyping (it also equates an alias with its body); `==` between a type value and anything else, a string included, is `False`. Construction never touches the type registry: a forward reference (`type X`) or an unknown name is an error, not a registration."
+      "description": "A type expression as a first-class value, constructed from its text: `TypeFrom(\"list<integer>\")`. The value SETTLES at construction — the text is parsed, reduced, and stored back as its canonical form — so two values built from equivalent spellings (`\"integer|real\"`, `\"real|integer\"`) are the same value. `==` between two type values is mutual subtyping (it also equates an alias with its body); `==` between a type value and anything else, a string included, is `False`. Construction never touches the type registry: a forward reference (`type X`) or an unknown name is an error, not a registration.",
+      "examples": [
+        "TypeFrom(\"integer | real\") == TypeFrom(\"real\")"
+      ]
     },
     {
       "name": "Unevaluated",
@@ -7465,7 +8663,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A collection of Unicode scalars from a string, same as UTF-32"
+      "description": "A collection of Unicode scalars from a string, same as UTF-32",
+      "examples": [
+        "UnicodeScalars(\"A😀\")"
+      ]
     },
     {
       "name": "UniformDistribution",
@@ -7490,7 +8691,10 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the union of two or more collections as a set.",
-      "wikidata": "Q185359"
+      "wikidata": "Q185359",
+      "examples": [
+        "Union({1, 2}, {2, 3})"
+      ]
     },
     {
       "name": "Unique",
@@ -7502,7 +8706,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a list of the unique elements of the collection."
+      "description": "Return a list of the unique elements of the collection.",
+      "examples": [
+        "Unique([1, 2, 1, 3, 2])"
+      ]
     },
     {
       "name": "UnitConvert",
@@ -7550,7 +8757,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A collection of UTF-16 code units from a string."
+      "description": "A collection of UTF-16 code units from a string.",
+      "examples": [
+        "Utf16(\"A😀\")"
+      ]
     },
     {
       "name": "Utf8",
@@ -7562,7 +8772,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A collection of UTF-8 code units from a string."
+      "description": "A collection of UTF-8 code units from a string.",
+      "examples": [
+        "Utf8(\"A€\")"
+      ]
     },
     {
       "name": "Values",
@@ -7574,7 +8787,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a list of the values of a dictionary."
+      "description": "Return a list of the values of a dictionary.",
+      "examples": [
+        "Values({\"a\" -> 1, \"b\" -> 2})"
+      ]
     },
     {
       "name": "Variance",
@@ -7598,7 +8814,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Construct a column vector."
+      "description": "Construct a column vector.",
+      "examples": [
+        "Vector(1, 2, 3)"
+      ]
     },
     {
       "name": "When",
@@ -7610,7 +8829,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Conditional/restriction value. `When(e, cond)` evaluates to:\n  - `e` when `cond` evaluates to `True`\n  - `Missing` when `cond` evaluates to `False` (the \"masking rule\": the position-preserving absent datum, the same answer a selection with no selected branch gives; consumers like 2D plotters skip masked points)\n  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\nStacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\nCompiles to ternary `(cond) ? (e) : NaN` in JS and GLSL."
+      "description": "Conditional/restriction value. `When(e, cond)` evaluates to:\n  - `e` when `cond` evaluates to `True`\n  - the absence marker of the type of `e` when `cond` evaluates to `False` (the \"masking rule\"): `NaN` for a number, `Missing` — the position-preserving absent datum, the answer a selection with no selected branch gives — for a point, a list, a string or a value not provably numeric; consumers like 2D plotters skip masked points\n  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\nStacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\nCompiles to ternary `(cond) ? (e) : NaN` in JS and GLSL."
     },
     {
       "name": "Which",
@@ -7634,7 +8853,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Single-expression pattern wildcard."
+      "description": "Single-expression pattern wildcard.",
+      "examples": [
+        "Wildcard(x)"
+      ]
     },
     {
       "name": "WildcardOptionalSequence",
@@ -7646,7 +8868,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Pattern wildcard matching zero or more expressions."
+      "description": "Pattern wildcard matching zero or more expressions.",
+      "examples": [
+        "WildcardOptionalSequence(x)"
+      ]
     },
     {
       "name": "WildcardSequence",
@@ -7658,7 +8883,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Pattern wildcard matching one or more expressions."
+      "description": "Pattern wildcard matching one or more expressions.",
+      "examples": [
+        "WildcardSequence(x)"
+      ]
     },
     {
       "name": "WithRandomSeed",
@@ -7670,7 +8898,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "WithRandomSeed(seed, body): evaluate `body` with a random seed frame\n\nseeded by `seed` (a finite real or a string). The block replays\n\nidentically, while repeated draws WITHIN the frame differ (the n-th\n\ndraw is hash(seed, n)).\n\nScoping is dynamic: the frame is active through user-function calls,\n\nnot just lexically inside `body`. Frames nest and the innermost wins.\n\nCounters are per-frame, so a nested frame does not perturb its\n\nparent's subsequent draws.\n\nOutside any frame, draws are live (non-deterministic)."
+      "description": "WithRandomSeed(seed, body): evaluate `body` with a random seed frame\n\nseeded by `seed` (a finite real or a string). The block replays\n\nidentically, while repeated draws WITHIN the frame differ (the n-th\n\ndraw is hash(seed, n)).\n\nScoping is dynamic: the frame is active through user-function calls,\n\nnot just lexically inside `body`. Frames nest and the innermost wins.\n\nCounters are per-frame, so a nested frame does not perturb its\n\nparent's subsequent draws.\n\nOutside any frame, draws are live (non-deterministic).",
+      "examples": [
+        "WithRandomSeed(42, [Random(1..6), Random(1..6), Random(1..6)])"
+      ]
     },
     {
       "name": "Xor",
@@ -7695,20 +8926,26 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Matrix filled with zeros."
+      "description": "Matrix filled with zeros.",
+      "examples": [
+        "ZeroMatrix(2, 3)"
+      ]
     },
     {
       "name": "Zeta",
       "category": "Arithmetic",
-      "arity": "1",
-      "signature": "(complex | infinity) -> number",
+      "arity": "optional",
+      "signature": "(complex | infinity, (complex | infinity)?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Riemann zeta function",
-      "wikidata": "Q187235"
+      "description": "Riemann zeta function; with two arguments, the Hurwitz zeta function ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s}.",
+      "wikidata": "Q187235",
+      "examples": [
+        "[Zeta(2), Zeta(-1), N(Zeta(3))]"
+      ]
     },
     {
       "name": "Zip",
@@ -7720,7 +8957,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input."
+      "description": "Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input.",
+      "examples": [
+        "Zip([1, 2, 3], [\"a\", \"b\", \"c\"])"
+      ]
     }
   ],
   "constants": [
@@ -7879,6 +9119,12 @@
       "wikidata": "Q193796"
     },
     {
+      "name": "Indeterminate",
+      "category": "Arithmetic",
+      "type": "number",
+      "description": "Indeterminate, the exact answer to an indeterminate form such as 0/0: a number with no value. Its numeric approximation is NaN."
+    },
+    {
       "name": "Integers",
       "category": "Collections",
       "type": "set<integer>",
@@ -7902,7 +9148,7 @@
       "name": "NaN",
       "category": "Arithmetic",
       "type": "number",
-      "description": "Not a Number, the result of an undefined or unrepresentable numeric operation."
+      "description": "Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0. An exact form with no value, such as 0/0, is Indeterminate."
     },
     {
       "name": "NegativeInfinity",

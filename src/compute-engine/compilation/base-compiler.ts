@@ -15900,9 +15900,15 @@ export class BaseCompiler {
       // `compileBlock`, inference included. This is the JavaScript-family
       // path, whose locals are untyped `let`s, and a vector-valued loop-body
       // local already agrees with the interpreter there.
-      const stmts = expr.ops.flatMap(
-        (s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]
-      );
+      //
+      // Destructuring DECLARES (`let (a, x) = (2, 3)`) are desugared into
+      // per-leaf declares first, in the same order as `compileBlock` does it.
+      // Every statement of a loop body is in statement position, the last one
+      // included, so each of them lowers. Without this step such a declare
+      // reached the value-position `Declare` handler, which fails closed.
+      const stmts = expr.ops
+        .flatMap((s) => BaseCompiler.desugarPatternDeclare(s, target) ?? [s])
+        .flatMap((s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]);
       // …and so does the `function`-definition rewrite, so a definition made
       // INSIDE a loop body lowers and is callable there, exactly as one made
       // in an ordinary block is. A loop body carries no value, hence
@@ -15953,9 +15959,16 @@ export class BaseCompiler {
       if (stmt !== undefined) return stmt;
     }
 
-    // …and the same statement as a bare (unwrapped) loop body.
-    if (h === 'Assign' && isFunction(expr.ops[0], 'Tuple')) {
-      const stmts = BaseCompiler.desugarPatternAssign(expr, target);
+    // …and the same statements as a bare (unwrapped) loop body: a
+    // destructuring declare or a destructuring assign.
+    if (
+      (h === 'Declare' || h === 'Assign') &&
+      isFunction(expr.ops[0], 'Tuple')
+    ) {
+      const stmts =
+        h === 'Declare'
+          ? BaseCompiler.desugarPatternDeclare(expr, target)
+          : BaseCompiler.desugarPatternAssign(expr, target);
       if (stmts !== null) {
         const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
         return stmts

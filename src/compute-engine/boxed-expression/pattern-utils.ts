@@ -94,3 +94,37 @@ export function wildcardType(
 
   return null;
 }
+
+/**
+ * Whether a number-literal pattern matches a number-literal subject.
+ *
+ * Numbers compare by mathematical equality (`isEqual`), so `1.0` matches `1`.
+ * `isEqual` follows IEEE for a value with no number (`NaN` is not equal to
+ * itself), so a pattern or a subject that is `NaN` or `Indeterminate`
+ * compares structurally (`isSame`) instead: `NaN` matches `NaN` and
+ * `Indeterminate` matches `Indeterminate`, but not each other, and neither
+ * matches any other number.
+ */
+export function numberPatternMatches(
+  pattern: Expression,
+  subject: Expression
+): boolean {
+  if (pattern.isNaN === true || subject.isNaN === true)
+    return pattern.isSame(subject);
+  return pattern.isEqual(subject) === true;
+}
+
+/**
+ * The names of the library symbols that box to a number literal (`NaN` boxes
+ * to the `NaN` literal, `PositiveInfinity` to `+∞`, and so on). A raw pattern
+ * keeps such a name as a symbol, but an evaluated subject is the number
+ * literal, so a pattern symbol with one of these names must be compared as
+ * that number literal.
+ */
+export const NUMBER_LITERAL_SYMBOLS: ReadonlySet<string> = new Set([
+  'NaN',
+  'Indeterminate',
+  'PositiveInfinity',
+  'NegativeInfinity',
+  'ComplexInfinity',
+]);

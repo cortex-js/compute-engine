@@ -71,6 +71,7 @@ import {
   normalizedUnknownsForSolve,
   updateDef,
   defIsCallableShaped,
+  hasAssignedVariable,
 } from './utils.js';
 import { pow } from './arithmetic-power.js';
 import { add } from './arithmetic-add.js';
@@ -448,11 +449,21 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
 
-    // `x·0 = 0` only when `x` is finite. A symbol with a *known infinite*
-    // value (or NaN) gives `∞·0 = NaN`; the fastpath used to short-circuit to
-    // Zero. Free symbols (infinity unknown) keep the conventional `·0 → 0`.
+    // `x·0 = 0` only when `x` is finite. A constant with an infinite (or
+    // NaN) value gives `∞·0 = NaN`. Free symbols (infinity unknown) keep the
+    // conventional `·0 → 0`. A variable with an assigned value is not folded:
+    // the product would keep the value the variable holds now after a later
+    // reassignment (`w := NaN`, then `w := 4`), so it stays the product
+    // `0·w` and `evaluate()` reads the value the variable holds then. This
+    // guard covers the number-zero spelling of the call (`w.mul(0)`, a
+    // machine `0` or a zero `NumericValue`) only: `w.mul(ce.Zero)` takes the
+    // `mul()` function of `arithmetic-mul-div.ts`, which still folds the
+    // product (ROADMAP.md, "`w.mul(ce.Zero)` folds a variable with an
+    // assigned value where `w.mul(0)` keeps the product").
     const isZeroRhs = rhs === 0 || (rhs instanceof NumericValue && rhs.isZero);
     if (isZeroRhs) {
+      if (hasAssignedVariable(this))
+        return this.engine.function('Multiply', [this.engine.Zero, this]);
       if (this.isNaN || this.isInfinity === true) return this.engine.NaN;
       return this.engine.Zero;
     }

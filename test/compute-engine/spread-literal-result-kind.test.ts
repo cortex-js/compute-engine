@@ -528,6 +528,45 @@ describe('A spread of an absent operand', () => {
     ).toBe('"Missing"');
   });
 
+  test('set literal and the collection converters', () => {
+    // `{...Missing, 0}` was `Set(Missing, 0)`, and `SetFrom` of an absent
+    // collection was `Set(Missing)`.
+    const ce = new ComputeEngine();
+    const e = ce.box(['Set', ['Spread', 'Missing'], 0]);
+    expect(e.json).toEqual(['SetFrom', ['Join', 'Missing', ['List', 0]]]);
+    expect(e.evaluate().toString()).toBe('"Missing"');
+    // The type admits the absence marker.
+    expect(e.type.toString()).toBe('missing | set');
+    expect(
+      ce
+        .box(['Set', ['Spread', ['Sort', 'Missing']], 0])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+    for (const op of ['SetFrom', 'ListFrom', 'TupleFrom']) {
+      expect(ce.box([op, 'Missing']).evaluate().toString()).toBe('"Missing"');
+      expect(
+        ce
+          .box([op, ['Join', 'Missing', ['List', 0]]])
+          .evaluate()
+          .toString()
+      ).toBe('"Missing"');
+    }
+    // A present collection is unchanged.
+    expect(
+      ce
+        .box(['Set', ['Spread', ['Range', 1, 3]], 0])
+        .evaluate()
+        .toString()
+    ).toBe('Set(1, 2, 3, 0)');
+    expect(
+      ce
+        .box(['SetFrom', ['List', 1, 2, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('Set(1, 2)');
+  });
+
   test('Epsil round trip', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['List', ['Spread', 'Missing'], 0]);

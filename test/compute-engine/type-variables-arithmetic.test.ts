@@ -214,7 +214,15 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
 
     ce.declare('remN', 'integer');
     ce.declare('remR', 'real');
-    expect(ce.box(['Remainder', 'remN', 'remR']).type.toString()).toBe('real');
+    expect(ce.box(['Remainder', 'remR', 'remN']).type.toString()).toBe(
+      'nan | real'
+    );
+    // A divisor that may be 0 adds `nan` (`Remainder(5, 0)` is
+    // `Indeterminate`); a nonzero literal divisor does not.
+    expect(ce.box(['Remainder', 'remN', 'remR']).type.toString()).toBe(
+      'nan | real'
+    );
+    expect(ce.box(['Remainder', 'remN', 2.5]).type.toString()).toBe('real');
   });
 
   test('D10 lifted echo over a collection operand', () => {

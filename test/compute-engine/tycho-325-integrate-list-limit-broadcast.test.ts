@@ -204,7 +204,7 @@ describe('Tycho 325: a multiple integral with a list bound', () => {
     expect(Math.abs(got[1] - 1)).toBeLessThan(1e-9);
   });
 
-  test('two list bounds of different lengths stay unevaluated under N()', () => {
+  test('two list bounds of different lengths are an error under N(), as under evaluate()', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Integrate',
@@ -212,7 +212,37 @@ describe('Tycho 325: a multiple integral with a list bound', () => {
       ['Limits', 'x', 0, ['List', 1, 2]],
       ['Limits', 'y', 0, ['List', 1, 2, 3]],
     ]);
-    expect(expr.N().operator).toBe('Integrate');
+    const error = [
+      'Error',
+      "'incompatible-dimensions'",
+      "'3 vs 2'",
+    ];
+    expect(expr.evaluate().json).toEqual(error);
+    expect(expr.N().json).toEqual(error);
+    // The two bounds of one limit.
+    const oneLimit = ce.box([
+      'Integrate',
+      'x',
+      ['Limits', 'x', ['List', 0, 0], ['List', 1, 2, 3]],
+    ]);
+    expect(oneLimit.N().json).toEqual(oneLimit.evaluate().json);
+    expect(oneLimit.N().operator).toBe('Error');
+  });
+
+  test('a list integrand and a list bound of different lengths are an error under N(), as under evaluate()', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Integrate',
+      ['List', 'x', ['Multiply', 2, 'x']],
+      ['Limits', 'x', 0, ['List', 1, 2, 3]],
+    ]);
+    const error = [
+      'Error',
+      "'incompatible-dimensions'",
+      "'2 vs 3'",
+    ];
+    expect(expr.evaluate().json).toEqual(error);
+    expect(expr.N().json).toEqual(error);
   });
 
   test('a scalar bound is evaluated once', () => {

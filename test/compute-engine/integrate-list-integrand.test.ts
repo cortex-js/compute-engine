@@ -114,7 +114,7 @@ describe('Two list bounds in one multiple integral', () => {
     expectClose(values(expr.N()), [1, 1]);
   });
 
-  test('different lengths: incompatible-dimensions under evaluate()', () => {
+  test('different lengths: incompatible-dimensions under evaluate() and N()', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Integrate',
@@ -125,8 +125,8 @@ describe('Two list bounds in one multiple integral', () => {
     const v = expr.evaluate();
     expect(v.operator).toBe('Error');
     expect(JSON.stringify(v.json)).toContain('incompatible-dimensions');
-    // Under N(), a mismatch of list bounds keeps the integral unevaluated.
-    expect(expr.N().operator).toBe('Integrate');
+    // `N()` gives the same error.
+    expect(expr.N().json).toEqual(v.json);
   });
 });
 
@@ -205,7 +205,7 @@ describe('A list integrand', () => {
     const v = expr.evaluate();
     expect(v.operator).toBe('Error');
     expect(JSON.stringify(v.json)).toContain('incompatible-dimensions');
-    expect(expr.N().operator).toBe('Integrate');
+    expect(expr.N().json).toEqual(v.json);
   });
 
   test('the compiled javascript route agrees', () => {
@@ -375,7 +375,7 @@ describe('A tuple integrand is integrated coordinate by coordinate', () => {
     const v = expr.evaluate();
     expect(v.operator).toBe('Error');
     expect(JSON.stringify(v.json)).toContain('incompatible-dimensions');
-    expect(expr.N().operator).toBe('Integrate');
+    expect(expr.N().json).toEqual(v.json);
   });
 
   // The signature's result admits `tuple` and `list<tuple>`, so the tuple

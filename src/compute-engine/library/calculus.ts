@@ -28,6 +28,7 @@ import {
   isFunction,
   isNumber,
   isSymbol,
+  nanOperandAnswer,
   sym,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
@@ -645,12 +646,9 @@ function integralTypeOf(t: Readonly<Type> | undefined): Type {
  * the bound, and the lengths must agree.
  *
  * Return `undefined` when the integrand is not a list: the caller then
- * integrates it as usual. Return `null` when the integrand is a list but the
- * integral cannot be evaluated: under `N()`, a list bound whose length is not
- * the length of the integrand keeps the integral unevaluated, as a mismatch
- * of two list bounds does. Under `evaluate()` that mismatch is the
- * `incompatible-dimensions` error, as a mismatch of the two list bounds of
- * one limit is.
+ * integrates it as usual. A list bound whose length is not the length of the
+ * integrand is the `incompatible-dimensions` error, under `evaluate()` and
+ * `N()` alike, as a mismatch of two list bounds is.
  *
  * A TUPLE integrand (`∫_0^1 (x, 2x) dx`) is integrated coordinate by
  * coordinate, as `Sum` sums a tuple summand coordinate by coordinate: the
@@ -666,7 +664,7 @@ function integrateListIntegrand(
   integrand: Expression,
   limits: ReadonlyArray<Expression>,
   numericApproximation: boolean
-): Expression | null | undefined {
+): Expression | undefined {
   // The integrand is a `List` value, or, for a function literal, its body
   // is typed as a list. Checking the type first means that an integrand that
   // is not a list is not evaluated here.
@@ -721,7 +719,6 @@ function integrateListIntegrand(
       );
       for (const b of values) {
         if (!isFunction(b, 'List') || b.nops === count) continue;
-        if (numericApproximation) return null;
         return ce.error('incompatible-dimensions', `${count} vs ${b.nops}`);
       }
       bounds.push(values);
@@ -748,16 +745,16 @@ function integrateListIntegrand(
  *
  * When no bound is a list, the value is the tuple of the integrals of the
  * coordinates. When a bound is a list, the value is a list with one integral
- * of the whole tuple per element of the bound (each a tuple). Return `null`
- * under `N()`, and an `incompatible-dimensions` error under `evaluate()`,
- * when two list bounds have different lengths, as for a list integrand.
+ * of the whole tuple per element of the bound (each a tuple). Two list
+ * bounds of different lengths are the `incompatible-dimensions` error, under
+ * `evaluate()` and `N()` alike, as for a list integrand.
  */
 function integrateTupleIntegrand(
   ce: ComputeEngine,
   value: Expression & import('../global-types.js').FunctionInterface,
   limits: ReadonlyArray<Expression>,
   numericApproximation: boolean
-): Expression | null {
+): Expression {
   const integrate = (limits: ReadonlyArray<Expression>) => (x: Expression) => {
     const integral = ce.function('Integrate', [x, ...limits]);
     return numericApproximation ? integral.N() : integral.evaluate();
@@ -777,10 +774,8 @@ function integrateTupleIntegrand(
     for (const b of values) {
       if (!isFunction(b, 'List')) continue;
       if (count === undefined) count = b.nops;
-      else if (count !== b.nops) {
-        if (numericApproximation) return null;
+      else if (count !== b.nops)
         return ce.error('incompatible-dimensions', `${count} vs ${b.nops}`);
-      }
     }
     bounds.push(values);
   }
@@ -2611,9 +2606,9 @@ volumes
       // numeric path in `evaluate` below, the symbolic path through
       // `EvaluateAt`). Type it as a list so the type agrees with the value.
       // The lengths of the lists are not known here: when two list bounds
-      // have different lengths, `N()` declines and the integral stays
-      // unevaluated, and `evaluate()` gives an `incompatible-dimensions`
-      // error, although the type is still `list<number>`.
+      // have different lengths, `evaluate()` and `N()` give an
+      // `incompatible-dimensions` error, although the type is still
+      // `list<number>`.
       // An integrand whose value is a list is also one integral per element
       // (`integrateListIntegrand`), so the integral has the shape of the
       // integrand's list type, with number elements. A tuple integrand is
@@ -2707,6 +2702,27 @@ volumes
       },
 
       evaluate: (ops, { engine: ce, numericApproximation }) => {
+        // An integrand that is the `NaN` or `Indeterminate` literal: the
+        // integral has no value, on the exact and the numeric route alike,
+        // with or without bounds. `Integrate` is lazy, so the NaN-policy
+        // step of evaluation does not run for it. The answer follows
+        // `nanOperandAnswer()`: `Indeterminate` when the integrand is
+        // `Indeterminate` and no bound is a float, `NaN` otherwise, and
+        // always `NaN` under `N()`.
+        // A held integrand can be the raw symbol `NaN`: `.canonical` makes
+        // it the number literal (and does not substitute assigned values).
+        // The body of a function literal can be a `Block` of one expression.
+        let body = (isFunction(ops[0], 'Function') ? ops[0].op1 : ops[0])
+          .canonical;
+        while (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
+        if (isNumber(body) && body.isNaN === true) {
+          if (numericApproximation) return ce.NaN;
+          const bounds = ops
+            .slice(1)
+            .flatMap((l) => (isFunction(l, 'Limits') ? [l.op2, l.op3] : []));
+          return nanOperandAnswer(ce, [body, ...bounds]);
+        }
+
         // A list-valued integrand: one integral per element.
         const perElement = integrateListIntegrand(
           ce,
@@ -2714,7 +2730,6 @@ volumes
           ops.slice(1),
           numericApproximation ?? false
         );
-        if (perElement === null) return undefined;
         if (perElement !== undefined) return perElement;
 
         // The integration variable(s) are bound by `Integrate`: a same-named
@@ -2789,7 +2804,8 @@ volumes
           // multiple integral in which each list bound is replaced by its
           // element `i`. When more than one bound is a list, the lists are
           // paired element by element, and they must have the same length;
-          // if they do not, stay unevaluated. Without this the bound's `.re`
+          // if they do not, the answer is the `incompatible-dimensions` error,
+          // as under `evaluate()`. Without this the bound's `.re`
           // read `NaN` and the integral stayed inert under `.N()`, while the
           // symbolic path (through `EvaluateAt`) already answered a list. The
           // `type` handler above reports `list<number>` for the same shapes.
@@ -2800,13 +2816,22 @@ volumes
               limitValues.push([]);
               continue;
             }
-            const bounds = [l.op2.N(), l.op3.N()];
+            limitValues.push([l.op2.N(), l.op3.N()]);
+          }
+          // The lengths are compared in the order the symbolic route reads
+          // the bounds (the last limit first, the lower bound before the
+          // upper), so that both routes name the lengths in one order in
+          // the `incompatible-dimensions` error.
+          for (const bounds of [...limitValues].reverse()) {
             for (const b of bounds) {
               if (!isFunction(b, 'List')) continue;
-              if (count !== undefined && count !== b.nops) return undefined;
+              if (count !== undefined && count !== b.nops)
+                return ce.error(
+                  'incompatible-dimensions',
+                  `${count} vs ${b.nops}`
+                );
               count = b.nops;
             }
-            limitValues.push(bounds);
           }
           if (count !== undefined) {
             const results: Expression[] = [];

@@ -58,7 +58,10 @@ describe('At over a provably non-integer scalar index', () => {
 
   test('an undecidable index stays inert', () => {
     expect(ev('L[x+1]')).toMatch(/^At\(/);
-    expect(ev('L[\\infty]')).toMatch(/^At\(/);
+  });
+
+  test('an infinite index names no position', () => {
+    expect(ev('L[\\infty]')).toBe('NaN');
   });
 
   test('a chained read absorbs into the final domain', () => {

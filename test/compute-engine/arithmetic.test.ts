@@ -2923,13 +2923,17 @@ describe('an infinite base at an infinite exponent', () => {
   });
 });
 
-// REVIEW.md A13: a symbol whose *value* is infinite, times 0, is NaN (not 0) —
-// the `BoxedSymbol.mul(0)` fastpath short-circuited to Zero.
+// REVIEW.md A13: a symbol whose *value* is infinite, times 0, is not 0 —
+// the `BoxedSymbol.mul(0)` fastpath short-circuited to Zero. The product
+// does not read the value at construction (a later reassignment must be
+// seen): it stays `0·bigval`, and evaluation gives the indeterminate form.
 describe('Infinite-symbol times zero (REVIEW.md A13)', () => {
-  it('∞·0 = NaN for a symbol with an infinite value', () => {
+  it('∞·0 is the indeterminate form for a symbol with an infinite value', () => {
     const e = new ComputeEngine();
     e.assign('bigval', e.PositiveInfinity);
-    expect(e.expr('bigval').mul(0).toString()).toBe('NaN');
+    const product = e.expr('bigval').mul(0);
+    expect(product.json).toEqual(['Multiply', 0, 'bigval']);
+    expect(product.evaluate().toString()).toBe('Indeterminate');
   });
   it('a free symbol keeps the conventional ·0 → 0', () => {
     const e = new ComputeEngine();

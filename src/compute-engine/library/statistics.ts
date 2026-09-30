@@ -758,9 +758,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // non-negative even for complex data (`Variance([1, 1+2i, 3])` is
       // `8/3` — see `complexVariance`), and infinite data has no variance at
       // all: every infinite datum makes the deviations `∞ − ∞` and the
-      // answer `NaN` (`Variance([1, +oo, 3])` and `Variance([+oo, +oo])` are
-      // both `NaN`, measured). Absent data and empty input are `NaN` too
-      // (§3.C), which is the second arm. The `handle` policies say so: the
+      // answer the indeterminate form (`Variance([1, +oo, 3])` is
+      // `Indeterminate`, and `NaN` with a float datum; see
+      // `infiniteDataAnswer`). Absent data and empty input are `NaN`
+      // (§3.C). Both values are typed `nan`, the second arm. The `handle` policies say so: the
       // derived NaN policy for a carrier that already admits `nan` is
       // `inert`, which would leave unsaid that this head ANSWERS `NaN`.
       //
@@ -801,6 +802,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const v = complexVariance(engine, xs, false);
           return numericApproximation ? v.N() : v;
         }
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, false);
@@ -827,8 +830,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // for complex data (`PopulationVariance([1, 1+2i, 3])` is `16/9` — see
       // `complexVariance`).
       // Infinite data has no variance at all: every infinite datum makes the
-      // deviations `∞ − ∞` and the answer `NaN`, which is also the answer for
-      // absent data and empty input (§3.C). That is the second arm. The
+      // deviations `∞ − ∞` and the answer the indeterminate form
+      // (`Indeterminate`, or `NaN` with a float datum; see
+      // `infiniteDataAnswer`). Absent data and empty input are `NaN` (§3.C).
+      // Both values are typed `nan`, the second arm. The
       // `handle` policies say so: the derived NaN policy for a carrier that
       // already admits `nan` is `inert`, which would leave unsaid that this
       // head ANSWERS `NaN`.
@@ -861,6 +866,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const v = complexVariance(engine, xs, true);
           return numericApproximation ? v.N() : v;
         }
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, true);
@@ -888,8 +895,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // (`StandardDeviation([1, 1+2i, 3])` is `2/3·√6` — see
       // `complexVariance`).
       // Infinite data has no standard deviation at all: every infinite datum makes the
-      // deviations `∞ − ∞` and the answer `NaN`, which is also the answer for
-      // absent data and empty input (§3.C). That is the second arm. The
+      // deviations `∞ − ∞` and the answer the indeterminate form
+      // (`Indeterminate`, or `NaN` with a float datum; see
+      // `infiniteDataAnswer`). Absent data and empty input are `NaN` (§3.C).
+      // Both values are typed `nan`, the second arm. The
       // `handle` policies say so: the derived NaN policy for a carrier that
       // already admits `nan` is `inert`, which would leave unsaid that this
       // head ANSWERS `NaN`.
@@ -933,6 +942,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             .evaluate();
           return numericApproximation ? s.N() : s;
         }
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals)
@@ -963,8 +974,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // (`PopulationStandardDeviation([1, 1+2i, 3])` is `4/3` — see
       // `complexVariance`).
       // Infinite data has no standard deviation at all: every infinite datum makes the
-      // deviations `∞ − ∞` and the answer `NaN`, which is also the answer for
-      // absent data and empty input (§3.C). That is the second arm. The
+      // deviations `∞ − ∞` and the answer the indeterminate form
+      // (`Indeterminate`, or `NaN` with a float datum; see
+      // `infiniteDataAnswer`). Absent data and empty input are `NaN` (§3.C).
+      // Both values are typed `nan`, the second arm. The
       // `handle` policies say so: the derived NaN policy for a carrier that
       // already admits `nan` is `inert`, which would leave unsaid that this
       // head ANSWERS `NaN`.
@@ -999,6 +1012,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             .evaluate();
           return numericApproximation ? s.N() : s;
         }
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals)
@@ -1028,8 +1043,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // outside the numeric lattice, so it neither confirms nor contradicts
       // this claim. A standardized moment divides by a power of the standard
       // deviation, so an infinite datum makes both parts non-finite and the
-      // answer `NaN` (`Kurtosis([1, +oo, 3])` is `NaN`, measured) — there is
-      // no infinite arm. Absent data and empty input are `NaN` too (§3.C).
+      // answer the indeterminate form (`Kurtosis([1, +oo, 3])` is
+      // `Indeterminate`, and `NaN` with a float datum; see
+      // `infiniteDataAnswer`) — there is no infinite arm. Absent data and empty input are `NaN` too (§3.C).
       // The `handle` policies say so: the derived NaN policy for a carrier
       // that already admits `nan` is `inert`, which would leave unsaid that
       // this head ANSWERS `NaN` for absent data.
@@ -1050,6 +1066,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(engine, 'Kurtosis', xs);
         if (nonReal) return nonReal;
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactKurtosis(engine, vals);
@@ -1076,8 +1094,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // outside the numeric lattice, so it neither confirms nor contradicts
       // this claim. A standardized moment divides by a power of the standard
       // deviation, so an infinite datum makes both parts non-finite and the
-      // answer `NaN` (`Skewness([1, +oo, 3])` is `NaN`, measured) — there is
-      // no infinite arm. Absent data and empty input are `NaN` too (§3.C).
+      // answer the indeterminate form (`Skewness([1, +oo, 3])` is
+      // `Indeterminate`, and `NaN` with a float datum; see
+      // `infiniteDataAnswer`) — there is no infinite arm. Absent data and empty input are `NaN` too (§3.C).
       // The `handle` policies say so: the derived NaN policy for a carrier
       // that already admits `nan` is `inert`, which would leave unsaid that
       // this head ANSWERS `NaN` for absent data.
@@ -1098,6 +1117,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(engine, 'Skewness', xs);
         if (nonReal) return nonReal;
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactSkewness(engine, vals);
@@ -2013,6 +2034,30 @@ function boxedMean(ce: ComputeEngine, vals: Expression[]): Expression {
  */
 function hasNonFiniteDatum(vals: ReadonlyArray<Expression>): boolean {
   return vals.some((v) => v.isFinite !== true);
+}
+
+/**
+ * The answer of a statistic that subtracts the mean from each datum (the
+ * variance, the standard deviation, the skewness and the kurtosis) when a
+ * datum is infinite, or `undefined` when no datum is.
+ *
+ * The mean of such data is infinite or the indeterminate form, so at least
+ * one deviation is `∞ − ∞` and the statistic is the indeterminate form:
+ * `Indeterminate`, or `NaN` when a datum is a float
+ * (`indeterminateFormAnswer()`), and always `NaN` under `N()`. The machine
+ * kernels would answer the `NaN` literal for all of these, which loses the
+ * difference between the two values. This is the rule `Mean` applies to data
+ * that holds both `+∞` and `−∞`.
+ */
+function infiniteDataAnswer(
+  engine: ComputeEngine,
+  xs: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!xs.some((x) => x.isInfinity === true)) return undefined;
+  return numericApproximation
+    ? engine.NaN
+    : indeterminateFormAnswer(engine, xs);
 }
 
 /**

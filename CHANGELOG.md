@@ -2,6 +2,112 @@
 
 ### Issues Resolved
 
+- **A destructuring `let` inside a loop body compiles.**
+  `let n = 0; while n < 4 { let (a, x) = (2, 3); n = n + a }; n` declined on the
+  JavaScript target with "Could not compile a destructuring declaration in value
+  position" wherever the `let` was in the body, although the interpreter
+  answered `4`: the loop-body lowering desugared a destructuring assignment but
+  not a destructuring declaration. A loop body's statements now go through the
+  same desugaring as a block's, in statement position.
+- **`Complex` keeps the `number` contract of its components on the literal
+  route.** `Complex("str", 2)` boxed to the float `NaN`, where `Add("str", 2)`
+  is an `incompatible-type` error: a component that is not a number literal is
+  now built as the sum `re + im·i` through the `Add` operator, which checks the
+  contract. A symbol component (`Complex(x, 2)` is `x + 2i`) and two number
+  literals (one complex literal) are unchanged.
+- **A set literal that spreads an absent operand is absent.** `{...Missing, 0}`
+  was `Set(Missing, 0)` where `[...Missing, 0]` is `Missing` (an operator over
+  an absent collection is absent, decision of 2026-09-26): `SetFrom`, `ListFrom`
+  and `TupleFrom` now propagate an absent collection (`SetFrom(Missing)` was an
+  `incompatible-type` error), and the set literal reads an absent spread operand
+  as a segment, as the list literal does.
+- **`Length(Range(0, n))` with `n` typed `integer` is typed `integer`.** It was
+  `integer | signed_infinity`: the `Length` type handler admitted the infinite
+  length for any bound that is not a number literal. A bound or step typed
+  finite (`integer`, `real`) cannot make the range unbounded. Static type only;
+  no value changes.
+- **A connective over an operand that failed is that error.**
+  `Or(Sin(P) < [1, 2], Sin(P) > 0)` with `P = [5, 6, 7]` was a list of three
+  `incompatible-dimensions` errors, the error of the first operand copied into
+  every cell of the second. `And`, `Or`, `Nand`, `Nor` and `Implies` now answer
+  the error itself, unless another operand decides the result by itself
+  (`And(False, e)` is still `False`). `Xor` and `Not` already did.
+- **`PolyGamma` of a very high order stays symbolic instead of running for
+  minutes, and the big-decimal kernel is correct at high orders.**
+  `PolyGamma(100000, 2.5).N()` did not finish at the default precision (the
+  big-decimal kernel had no order limit and built the exact factorial), and
+  answered `NaN` at machine precision (the double factorial overflows above
+  170). The real kernels now share the order limit of the complex kernel
+  (10 000) and stay symbolic above it; the machine kernel reaches the complex
+  kernel, which carries the factorial in scaled form, when its own intermediates
+  overflow (`PolyGamma(200, 300.5)` at machine precision is now a value, not
+  `NaN`). Two wrong values found on the way are fixed: the big-decimal kernel
+  shifted the argument only to the working precision, so its asymptotic series
+  diverged when the order was larger (`PolyGamma(1000, 150)` was wrong by a
+  factor 10⁶), and its tail stopped on an absolute tolerance, so a small result
+  kept 4 digits (`PolyGamma(200, 300)` is `−2.03430·10⁻¹²³`, was
+  `−2.03471·10⁻¹²³`). Order 10 000 at `x = 2.5` now takes 0.2 s (was 0.7 s to
+  2.5 s).
+- **A `NaN` literal pattern matches a `NaN` subject.**
+  `match NaN { NaN => 1, _ => 2 }` answered `2`: a number pattern compared with
+  `isEqual`, which follows IEEE. A pattern or subject that is `NaN` or
+  `Indeterminate` now compares structurally (`NaN` matches `NaN`,
+  `Indeterminate` matches `Indeterminate`, neither matches the other). The
+  MathJSON spelling of the pattern (`MatchCase(NaN, …)`, also
+  `PositiveInfinity`, `NegativeInfinity` and `ComplexInfinity`) never matched
+  either, because the raw pattern keeps the name as a symbol while the subject
+  is the number; those five names are now compared as their number.
+- **`ce.number([n, 0])` is `~oo` for `n ≠ 0`,** as `ce.box(["Rational", n, 0])`
+  is; it was `NaN`. `ce.number([0, 0])` is `Indeterminate`.
+- **`simplify()` propagates a `NaN` or `Indeterminate` operand.**
+  `ce.box(["Sin", "NaN"]).simplify()` stayed `sin(NaN)` where `evaluate()`
+  answers `NaN`. The simplifier now applies the operand's `propagate` NaN policy
+  as evaluation does, with the same exclusions (lazy operators, user functions,
+  a broadcast over a collection, a `reject` position), reading number literals
+  only. `Binomial(NaN, 0).simplify()` is `NaN`.
+- **An exact `0` times a float is the exact `0` in both operand orders of
+  `.mul()`.** `ce.number(2.5).mul(ce.Zero)` was the float `0.0` while
+  `ce.Zero.mul(ce.number(2.5))` was the exact `0`, as the `Multiply` operator
+  answers in both orders.
+- **`Integrate` of a `NaN` or `Indeterminate` integrand has no value on both
+  routes.** `Integrate(0/0, x)` was `NaN` under `evaluate()` but stayed
+  unevaluated under `.N()`, and `Integrate(NaN, x, 0, 1)` stayed unevaluated on
+  both. `Integrate` is lazy, so the NaN-policy step of evaluation does not run
+  for it; its handler now answers `Indeterminate` for an `Indeterminate`
+  integrand with exact bounds, and `NaN` otherwise and under `.N()`, for
+  indefinite, definite and multiple integrals.
+- **A list bound whose length does not match is the same error under `.N()` as
+  under `evaluate()`.** Two list bounds of different lengths, or a list
+  integrand and a list bound of different lengths, gave the
+  `incompatible-dimensions` error under `evaluate()` but left the integral
+  unevaluated under `.N()`; both routes now give the error, naming the lengths
+  in the same order.
+- **`At` with an infinite index is `NaN`.** `At([1, 2], +oo)` and
+  `At([1, 2], ~oo)` stayed unevaluated where `At([1, 2], 1.5)` and
+  `At([1, 2], NaN)` answer `NaN` (a read with no position). An infinite index
+  names no position either.
+- **`BoxedSymbol.mul(0)` no longer reads a variable's assigned value at
+  canonicalization.** With `w := NaN`, `ce.symbol("w").mul(0)` was the `NaN`
+  literal, frozen across a later `w := 4`. For a variable that holds a value the
+  product now stays `Multiply(0, w)` and `evaluate()` reads the value the
+  variable holds at that time (`Indeterminate` while `w` is `NaN`, `0` after
+  `w := 4`). A constant with an infinite value still gives `NaN`; a symbol with
+  no value still folds to `0`.
+- **`Remainder` is typed with `nan` when its divisor may be zero, and the
+  statistics that subtract the mean answer the indeterminate form for an
+  infinite datum.** `Remainder(5, 0)` evaluates to `Indeterminate` but was typed
+  `integer`; it now has a type handler modelled on `Mod`'s: a divisor that is
+  provably zero gives `nan`, one that may be zero gives the operands' kind
+  joined with `nan` (`Remainder(n, r)` with `r: real` is `nan | real`), and a
+  nonzero literal divisor leaves the polytype result. `Variance([+oo, 1])`,
+  `StandardDeviation`, `PopulationVariance`, `PopulationStandardDeviation`,
+  `Kurtosis` and `Skewness` answered `NaN` from the machine kernel where the
+  deviations `∞ − ∞` are the indeterminate form: they now answer `Indeterminate`
+  for an infinite datum with no float datum, `NaN` with a float datum or under
+  `.N()`, as `Mean([+oo, -oo])` does.
+- **`src/math-json/OPERATORS.json` and `CATEGORIES.json` are regenerated** from
+  the current library (the tracked files were behind by the operators added
+  since their last generation and by the `examples` fields).
 - **The `materialization` option no longer truncates the operands of an eager
   operator.** `Length(Range(1, 5000)).evaluate({ materialization: true })` was
   `11`, and `IndexOf(Range(1, 5000), 4000)` and `Contains(Range(1, 5000),

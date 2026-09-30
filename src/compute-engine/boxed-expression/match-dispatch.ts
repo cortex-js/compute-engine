@@ -15,7 +15,13 @@ import {
   isSymbol,
   sym,
 } from './type-guards.js';
-import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
+import {
+  isWildcard,
+  NUMBER_LITERAL_SYMBOLS,
+  numberPatternMatches,
+  wildcardName,
+  wildcardType,
+} from './pattern-utils.js';
 import { errorOpsWithoutTrace } from './error-value.js';
 import {
   isFiniteIndexedCollection,
@@ -693,7 +699,7 @@ function leafEquals(subject: Expression, value: Expression): boolean {
   if (isObject(value) || isObject(subject)) return subject === value;
   // The matcher treats an undecidable `isEqual` (undefined) as no-match.
   if (isNumber(value))
-    return isNumber(subject) && value.isEqual(subject) === true;
+    return isNumber(subject) && numberPatternMatches(value, subject);
   // Text compares by CONTENT across the string/character kind boundary, the
   // same bridge `isSame` implements: a one-cluster string literal in pattern
   // position must select a character subject (`match c { "[" => … }` over a
@@ -703,8 +709,16 @@ function leafEquals(subject: Expression, value: Expression): boolean {
       (isString(subject) || isCharacter(subject)) &&
       subject.string === value.string
     );
-  if (isSymbol(value))
-    return isSymbol(subject) && subject.symbol === value.symbol;
+  if (isSymbol(value)) {
+    if (isSymbol(subject)) return subject.symbol === value.symbol;
+    // A raw pattern keeps `NaN` or `PositiveInfinity` as a symbol, but the
+    // subject is the number literal the symbol boxes to.
+    return (
+      isNumber(subject) &&
+      NUMBER_LITERAL_SYMBOLS.has(value.symbol) &&
+      numberPatternMatches(subject.engine.box(value.symbol), subject)
+    );
+  }
   return subject.match(value) !== null;
 }
 

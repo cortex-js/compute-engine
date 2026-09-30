@@ -404,6 +404,23 @@ export function createNumberExpression(
     );
   }
 
+  // A rational pair with a zero denominator: a nonzero numerator over zero is
+  // a pole, `~oo`, and `0/0` is the indeterminate form. This is the answer
+  // `ce.box(["Rational", n, 0])` gives (`boxed-expression/box.ts`).
+  // `canonicalNumber()` returns a machine number or a `NumericValue`, which
+  // cannot hold `~oo` or `Indeterminate`, so the pair is read here first.
+  if (
+    isRational(value) &&
+    value.length === 2 &&
+    (typeof value[0] === 'number' || typeof value[0] === 'bigint') &&
+    (typeof value[1] === 'number' || typeof value[1] === 'bigint') &&
+    value[1] == 0
+  ) {
+    const n = value[0];
+    if (typeof n === 'number' && Number.isNaN(n)) return engine.NaN;
+    return n == 0 ? engine.Indeterminate : engine.ComplexInfinity;
+  }
+
   // If not a rational, it's always canonical
   const canonicalValue = canonicalNumber(engine, value);
 

@@ -637,7 +637,17 @@ function boxFunctionInternal(
           }
           return box(ce, ops[0], options);
         }
-        return box(ce, ops[0], options).add(box(ce, ops[1], options).mul(ce.I));
+        // A component that is not a number literal (a symbol, a string, a
+        // boolean, a list): the sum `re + im·i` through the `Add` operator,
+        // which checks the `number` contract of each operand. The `.add()`
+        // method does not check it: `Complex("str", 2)` was the float `NaN`
+        // where the symbol route gives an `incompatible-type` error. This
+        // branch runs only under the full canonical form (`canonicalNumber`
+        // above), so the canonical `Add` is the form the caller asked for.
+        return ce.function('Add', [
+          reOp,
+          ce.function('Multiply', [imOp, ce.I]),
+        ]);
       }
       throw new Error('Expected one or two arguments with Complex expression');
     }

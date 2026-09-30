@@ -252,3 +252,30 @@ describe('FromContinuedFraction: non-integer terms decline instead of rounding',
     expect(result.operator).toBe('FromContinuedFraction');
   });
 });
+
+describe('Complex: the literal route keeps the number contract of each component', () => {
+  // `Complex` has no canonical handler: the boxing step folds two number
+  // literals into one complex literal and builds `re + im·i` otherwise.
+  // A component that is not a number must be an `incompatible-type` error
+  // on that second route, as it is for `Add`; it was the float `NaN`.
+  test('a string real part is an incompatible-type error (was: NaN)', () => {
+    const expr = ce.box(['Complex', '"str"', 2]);
+    expect(expr.isValid).toBe(false);
+    expect(expr.evaluate().isNaN).not.toBe(true);
+    expect(expr.evaluate().toString()).toContain('incompatible-type');
+  });
+
+  test('a boolean imaginary part is an incompatible-type error', () => {
+    const expr = ce.box(['Complex', 1, 'True']);
+    expect(expr.isValid).toBe(false);
+  });
+
+  test('a symbol component still builds the symbolic sum', () => {
+    expect(ce.box(['Complex', 'x', 2]).toString()).toBe('x + 2i');
+    expect(ce.box(['Complex', 'x', 2]).isValid).toBe(true);
+  });
+
+  test('two number literals still fold to one complex literal', () => {
+    expect(ce.box(['Complex', 1, 2]).isNumberLiteral).toBe(true);
+  });
+});

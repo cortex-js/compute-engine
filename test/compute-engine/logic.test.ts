@@ -997,6 +997,31 @@ describe('And/Or are SHORT-CIRCUIT forms (fixed 2026-08-15)', () => {
     ]);
   });
 
+  it('an operand that evaluates to an error is the answer of an element-wise application', () => {
+    // `Sin(P) < [1, 2]` fails with a length error (3 vs 2). Broadcast, the
+    // one error was copied into each of the three cells of the other operand.
+    const ce = new ComputeEngine();
+    ce.assign('P', ce.expr(['List', 5, 6, 7]));
+    const bad = ['Less', ['Sin', 'P'], ['List', 1, 2]];
+    const good = ['Greater', ['Sin', 'P'], 0];
+    const err = 'Error("incompatible-dimensions", "3 vs 2")';
+    for (const op of ['And', 'Or', 'Xor', 'Nand', 'Nor', 'Implies']) {
+      expect(ce.expr([op, bad, good]).evaluate().toString()).toBe(err);
+      expect(ce.expr([op, good, bad]).evaluate().toString()).toBe(err);
+    }
+    expect(ce.expr(['Not', bad]).evaluate().toString()).toBe(err);
+    // An operand that decides the result still absorbs the error.
+    expect(ce.expr(['And', 'False', bad]).evaluate().symbol).toBe('False');
+    expect(ce.expr(['Or', bad, 'True']).evaluate().symbol).toBe('True');
+    // A genuine list-of-booleans broadcast is unchanged.
+    expect(
+      ce
+        .expr(['Or', ['List', 'True', 'False'], ['List', 'False', 'False']])
+        .evaluate()
+        .toString()
+    ).toBe('["True","False"]');
+  });
+
   it('Kleene over absence is unchanged: a deciding operand wins, Missing propagates', () => {
     expect(run(['And', 'Missing', 'False'])).toBe('False');
     expect(run(['And', 'True', 'Missing'])).toBe('Missing');

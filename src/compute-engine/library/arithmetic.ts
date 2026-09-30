@@ -3973,11 +3973,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           (n, x) => bigPolygamma(engine, n, x),
           (n, x) => polygammaComplex(n.re, x)
         );
-        // `polygammaComplex` answers NaN where it cannot give an accurate
-        // double (the value overflows or underflows a double, the order is
-        // above its limit, or cancellation leaves no accurate digits): stay
-        // symbolic there rather than report `NaN`.
-        if (result?.isNaN === true && isNumber(x) && x.isComplex && !x.isNaN)
+        // The kernels answer NaN where they cannot give an accurate value:
+        // the order is above `POLYGAMMA_MAX_ORDER` (all three kernels), the
+        // value overflows or underflows a double (the machine and complex
+        // kernels), or cancellation leaves no accurate digits (the complex
+        // kernel). The argument is then a finite ordinary point (the
+        // exceptional points and a negative order returned above), so stay
+        // symbolic rather than report `NaN`. A NaN operand has no small
+        // integer order or is itself NaN, and still propagates.
+        if (result?.isNaN === true && order !== null && isNumber(x) && !x.isNaN)
           return undefined;
         return result;
       },
@@ -6703,6 +6707,46 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // predicate is read from the declared result, and the polytype `T`
       // of this signature is not provably a number, so it would answer
       // `Missing`.
+      //
+      // For the same reason, the result type is given by this handler, not
+      // by `definedWhen`: a divisor that is provably zero gives `nan`, a
+      // divisor that may be zero gives the operands' numeric kind joined
+      // with `nan`, and a divisor that is provably not zero declines, so
+      // that the polytype result `T` applies. The kind is read from the
+      // static types of the operands (their element types under a
+      // broadcast), as in the type handler of `Mod`.
+      type: ([a, b], context) => {
+        if (!a || !b) return undefined;
+        const literalNonZero = nonZeroLiteral(b);
+        if (literalNonZero === false)
+          return BoxedType.forResult('nan', context.engine._typeResolver);
+        const bSgn = operandSgnOnTypes(b);
+        if (
+          literalNonZero === true ||
+          positiveSign(bSgn) === true ||
+          negativeSign(bSgn) === true ||
+          bSgn === 'not-zero'
+        )
+          return undefined;
+        const ta = broadcastCellType(a.type);
+        const tb = broadcastCellType(b.type);
+        // An operand that is not provably a number (`unknown`) makes the
+        // polytype result `unknown`, which already admits `nan`.
+        if (!isSubtype(ta, 'number') || !isSubtype(tb, 'number'))
+          return undefined;
+        const kind: Type =
+          factsOf(ta).integer && factsOf(tb).integer
+            ? 'integer'
+            : factsOf(ta).rational && factsOf(tb).rational
+              ? 'rational'
+              : factsOf(ta).real && factsOf(tb).real
+                ? 'real'
+                : 'number';
+        return BoxedType.forResult(
+          reduceType({ kind: 'union', types: [kind, 'nan'] }),
+          context.engine._typeResolver
+        );
+      },
       evaluate: ([a, b], { engine }) => {
         if (isNumber(b) && b.isSame(0))
           return indeterminateFormAnswer(engine, [a, b]);

@@ -172,8 +172,10 @@ describe('the simplify twins of the Binomial value rules', () => {
         // infinite point (C(10⁶, 10⁶+d) is 0 or unbounded depending on d,
         // so there is no limit), NaN at an anonymous infinity (a float
         // literal), and propagates a NaN operand. simplify() used to
-        // answer 1.
-        expect(ce.box([h, n, n] as any).simplify().operator).toBe(h);
+        // answer 1. A NaN operand propagates on simplify() too.
+        if (n === 'NaN')
+          expect(ce.box([h, n, n] as any).simplify().toString()).toBe('NaN');
+        else expect(ce.box([h, n, n] as any).simplify().operator).toBe(h);
         expect(ce.box([h, n, n] as any).evaluate().isNaN).toBe(true);
         expect(ce.box([h, n, n] as any).evaluate().isIndeterminate).toBe(
           n === POS || n === NEG || n === COO
@@ -194,9 +196,15 @@ describe('the simplify twins of the Binomial value rules', () => {
     for (const n of [POS, NEG, COO])
       expect(ce.box(['Binomial', n, 0] as any).simplify().isSame(1)).toBe(true);
     for (const n of ['NaN', ANON]) {
-      expect(ce.box(['Binomial', n, 0] as any).simplify().operator).toBe(
-        'Binomial'
-      );
+      // A NaN operand propagates on simplify(), as on evaluate().
+      if (n === 'NaN')
+        expect(ce.box(['Binomial', n, 0] as any).simplify().toString()).toBe(
+          'NaN'
+        );
+      else
+        expect(ce.box(['Binomial', n, 0] as any).simplify().operator).toBe(
+          'Binomial'
+        );
       expect(ce.box(['Binomial', n, 0] as any).evaluate().isSame(ce.NaN)).toBe(
         true
       );

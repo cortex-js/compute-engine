@@ -1570,9 +1570,10 @@ const POLYGAMMA_CANCELLATION_LIMIT = 100;
  * Euler-Maclaurin sum grows linearly with the order (about m + 6 direct
  * terms), so a higher order stays symbolic instead of running for a long
  * time. At such an order the value is representable as a double only in a
- * narrow band of |z| near m/e.
+ * narrow band of |z| near m/e. The real kernels `polygamma` and
+ * `bigPolygamma` (`numerics/special-functions.ts`) use the same limit.
  */
-const POLYGAMMA_MAX_ORDER = 10_000;
+export const POLYGAMMA_MAX_ORDER = 10_000;
 
 /**
  * ψ⁽ᵐ⁾(z) for a complex z and integer order m >= 0, matching mpmath's

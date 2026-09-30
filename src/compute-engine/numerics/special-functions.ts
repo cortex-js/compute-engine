@@ -6,6 +6,8 @@ import { checkDeadline } from '../../common/interruptible.js';
 import {
   hurwitzZetaComplex,
   hypergeometric2F1Complex,
+  polygammaComplex,
+  POLYGAMMA_MAX_ORDER,
 } from './numeric-complex.js';
 import { bernoulliPolynomialRational } from './bernoulli.js';
 
@@ -1003,10 +1005,16 @@ function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
  * Bignum Polygamma function ψₙ(z) = dⁿ/dzⁿ ψ(z)
  * Delegates to bigDigamma/bigTrigamma for n=0,1.
  * For n ≥ 2, uses recurrence + asymptotic expansion.
+ *
+ * An order above `POLYGAMMA_MAX_ORDER` answers NaN (the caller keeps the
+ * expression symbolic): the cost grows with the order, and without a limit
+ * an order of 10⁵ runs for minutes. The complex kernel `polygammaComplex`
+ * uses the same limit.
  */
 export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
   const nNum = n.toNumber();
-  if (!Number.isInteger(nNum) || nNum < 0) return BigDecimal.NAN;
+  if (!Number.isInteger(nNum) || nNum < 0 || nNum > POLYGAMMA_MAX_ORDER)
+    return BigDecimal.NAN;
   if (nNum === 0) return bigDigamma(ce, z); // already guarded
   if (nNum === 1) return bigTrigamma(ce, z); // already guarded
   if (!z.isFinite() || z.isZero()) return BigDecimal.NAN;
@@ -1014,18 +1022,24 @@ export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
 }
 
 function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
-  // Bignum factorial helper (small n, simple loop)
+  const p = BigDecimal.precision;
+  const guard = 10;
+
+  // Bignum factorial helper. Rounded at each step: the exact m! has about
+  // 35 000 digits for m = 10⁴, and arithmetic on it dominated the cost of a
+  // high order.
   const bigFactorial = (m: number): BigNum => {
     let r: BigNum = BigDecimal.ONE;
-    for (let i = 2; i <= m; i++) r = r.mul(i);
+    for (let i = 2; i <= m; i++) r = r.mul(i).toPrecision(p + guard);
     return r;
   };
 
-  const p = BigDecimal.precision;
-  const guard = 10;
   // Shift to w ≈ p so the asymptotic series converges in ≈0.4·p terms rather
-  // than running its full ≈π·w (see `gammalnCore`).
-  const shift = Math.max(7, Math.ceil(p));
+  // than running its full ≈π·w (see `gammalnCore`). The ratio of two
+  // consecutive terms of the series is about ((n + 2k)/(2πw))², so w must
+  // also be at least n: for n = 1000 at w = 150 the terms grow from the
+  // start, and the result was wrong by a factor 10⁶.
+  const shift = Math.max(7, Math.ceil(p), nNum);
 
   // Poles at z = 0, −1, −2, …
   let w = z;
@@ -1052,22 +1066,21 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
   //   ψ⁽ⁿ⁾(w) ~ (−1)^{n−1} [ (n−1)!/wⁿ + n!/(2w^{n+1})
   //             + Σ_{k≥1} B₂ₖ·(2k+n−1)!/((2k)!·w^{2k+n}) ]
   const signA = nNum % 2 === 0 ? -1 : 1; // (−1)^{n−1}
-  result = result.add(
-    new BigDecimal(signA).mul(bigFactorial(nNum - 1)).div(w.pow(nNum))
-  );
+  // (n−1)!, also used by the Bernoulli-term coefficients below
+  const factNm1 = bigFactorial(nNum - 1);
+  result = result.add(new BigDecimal(signA).mul(factNm1).div(w.pow(nNum)));
   result = result.add(
     new BigDecimal(signA).mul(bigFactN).div(w.pow(nNum + 1).mul(2))
   );
-
-  // (n−1)! as bigint, for the Bernoulli-term coefficients below
-  let factNm1 = 1n;
-  for (let j = 2; j <= nNum - 1; j++) factNm1 *= BigInt(j);
 
   // Higher-order terms using Bernoulli numbers. Round the running power each
   // step (un-rounded `mul` grows the significand; see `gammalnCore`).
   let wPow = w.pow(nNum + 2).toPrecision(p);
   const w2 = w._mulToPrecision(w, p);
-  const tol = new BigDecimal(10).pow(-(p + guard));
+  // The tolerance is relative to the result: an absolute one stopped the
+  // series after one term when |ψ⁽ⁿ⁾| is small (ψ⁽²⁰⁰⁾(300) ≈ −2·10⁻¹²³ was
+  // right to 4 digits only).
+  const tol = result.abs().mul(new BigDecimal(10).pow(-(p + guard)));
   const nTerms = Math.min(maxTerms, bernoulli.length);
   for (let k = 0; k < nTerms; k++) {
     const m = 2 * (k + 1);
@@ -1075,14 +1088,14 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
     // Coefficient (2k+n−1)!/(2k)! built as (n−1)!·n(n+1)⋯(n+2k−1)/(2k)!.
     // (A previous version dropped the (n−1)! factor — wrong for n ≥ 3.)
     let coeff = factNm1;
-    for (let j = 0; j < m; j++) coeff *= BigInt(nNum + j);
+    for (let j = 0; j < m; j++) coeff = coeff.mul(nNum + j);
     // (2k)! as bigint
     let factM = 1n;
     for (let j = 2; j <= m; j++) factM *= BigInt(j);
     // term = signA * B_{2k} * (2k+n−1)! / ((2k)! * w^{n+2k})
-    const term = new BigDecimal((BigInt(signA) * bNum * coeff).toString()).div(
-      new BigDecimal((bDen * factM).toString()).mul(wPow)
-    );
+    const term = new BigDecimal((BigInt(signA) * bNum).toString())
+      .mul(coeff)
+      .div(new BigDecimal((bDen * factM).toString()).mul(wPow));
     if (k > 0 && term.abs().lt(tol)) break;
     result = result.add(term);
     wPow = wPow._mulToPrecision(w2, p);
@@ -2161,7 +2174,8 @@ export function trigamma(x: number): number {
  * For n ≥ 2, uses recurrence + asymptotic expansion.
  */
 export function polygamma(n: number, x: number): number {
-  if (!Number.isInteger(n) || n < 0) return NaN;
+  // The same order limit as `polygammaComplex` and `bigPolygamma`.
+  if (!Number.isInteger(n) || n < 0 || n > POLYGAMMA_MAX_ORDER) return NaN;
   if (n === 0) return digamma(x);
   if (n === 1) return trigamma(x);
   if (!isFinite(x) || x === 0) return NaN;
@@ -2210,6 +2224,12 @@ export function polygamma(n: number, x: number): number {
     f *= ((m + n) * (m + n + 1)) / ((m + 1) * (m + 2) * z * z);
   }
 
+  // A result that is not finite comes from an intermediate that overflows a
+  // double (n! for n > 170, or a power of a small x), even when the value
+  // itself is representable (ψ⁽²⁰⁰⁾(300) ≈ −2.03·10⁻¹²³). `polygammaComplex`
+  // carries n! and the powers in scaled form: it gives the value, or NaN
+  // when the value is outside the range of a double.
+  if (!Number.isFinite(result)) return polygammaComplex(n, x).re;
   return result;
 }
 

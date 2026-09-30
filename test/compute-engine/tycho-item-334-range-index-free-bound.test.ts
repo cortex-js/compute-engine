@@ -88,6 +88,30 @@ describe('A literal index over a range with a free bound stays symbolic', () => 
   });
 });
 
+describe('The length of a range with bounds typed finite', () => {
+  // A range whose bounds and step are typed finite cannot be unbounded, so
+  // its length is typed `integer`, not `integer | signed_infinity`.
+  test('static type', () => {
+    const ce = engine();
+    ce.declare('x', 'real');
+    ce.declare('z', 'number');
+    const type = (json: MathJsonExpression) =>
+      ce.box(['Length', json]).type.toString();
+    expect(type(['Range', 0, 'n'])).toBe('integer');
+    expect(type(['Range', 'k', 'n', 2])).toBe('integer');
+    expect(type(['Range', 'n'])).toBe('integer');
+    expect(type(['Range', 0, 'x'])).toBe('integer');
+    expect(ce.parse('\\operatorname{Length}([0...n])').type.toString()).toBe(
+      'integer'
+    );
+    // A bound that may be infinite keeps the wide claim.
+    expect(type(['Range', 0, 'z'])).toBe('integer | signed_infinity');
+    expect(type(['Range', 0, 'PositiveInfinity'])).toBe(
+      'integer | signed_infinity'
+    );
+  });
+});
+
 describe('Provably out-of-range reads keep the absence marker', () => {
   test('known bounds', () => {
     const ce = engine();

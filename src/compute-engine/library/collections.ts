@@ -5487,7 +5487,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the cases that are finite by construction and can be decided without
     // dispatching a collection handler — a literal `List`/`Set` node, a list
     // type with declared DIMENSIONS, a tuple, a string, and a `Range` whose
-    // bounds are finite number literals — and `integer | +oo` otherwise. A
+    // bounds and step are finite number literals or are typed finite — and
+    // `integer | +oo` otherwise. A
     // collection TYPE does not tell a finite value from an infinite one
     // (`Repeat(5)` is typed `list`, like a list of three strings), so a
     // symbol or a parameter typed `list<…>` gets the wide claim. Asking the
@@ -5519,8 +5520,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           source.children.length > 0 &&
           source.children.every(
             (op) =>
-              op.structureOf?.()?.kind === 'number' &&
-              !isSubtype(op.type, 'infinity')
+              (op.structureOf?.()?.kind === 'number' &&
+                !isSubtype(op.type, 'infinity')) ||
+              // A bound or step TYPED finite (`integer`, `real`: those
+              // types exclude the infinities) cannot make the range
+              // unbounded either: `Range(0, n)` with `n: integer` has a
+              // finite length. Reading the type dispatches no handler.
+              isSubtype(op.type, 'finite_real')
           )
         )
           return BoxedType.forResult('integer', context.engine._typeResolver);
@@ -9982,10 +9988,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // An `Indeterminate` index is not absent, but it names no position
         // either, so there is no element to read: the answer is the same
         // marker, not an inert `At` (a decided question must not stay
-        // unevaluated, `docs/ERROR-MODEL.md` §1).
+        // unevaluated, `docs/ERROR-MODEL.md` §1). An infinite index (`+∞`,
+        // `-∞`, `~∞`) names no position either, as a non-integer index
+        // (`1.5`) does not.
         if (
           isAbsentValue(opAtIndex) ||
-          (isNumber(opAtIndex) && opAtIndex.isIndeterminate)
+          (isNumber(opAtIndex) &&
+            (opAtIndex.isIndeterminate || opAtIndex.isInfinity === true))
         )
           return chainAbsorbMarker(ce, expr.type.type, ops, index);
 
@@ -13677,6 +13686,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['ListFrom({1, 2}, 3..4)'],
     description: 'Create a list from the elements of a collection.',
     complexity: 8200,
+    // An absent collection answers `Missing` — see `SetFrom`.
+    missingBehavior: 'propagate',
     signature: '(value*) -> list',
     type: (ops, context) => {
       if (ops.length === 0)
@@ -13758,6 +13769,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['SetFrom([1, 2, 2, 3])'],
     description: 'Create a set from the elements of a collection.',
     complexity: 8200,
+    // An absent collection answers `Missing`, as the other collection
+    // operators do for an absent collection (user decision 2026-09-26):
+    // `SetFrom(Join(Missing, [0]))`, the canonical form of the set literal
+    // `{...Missing, 0}`, is `Missing`, as the list literal `[...Missing, 0]`
+    // is. Declared because the parameters are `value`, which the default
+    // policy does not read as a collection.
+    missingBehavior: 'propagate',
     signature: '(value*) -> set',
     type: (ops, context) => {
       if (ops.length === 0)
@@ -13799,6 +13817,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['TupleFrom([1, 2, 3])'],
     description: 'Create a tuple from the elements of a collection.',
     complexity: 8200,
+    // An absent collection answers `Missing` — see `SetFrom`.
+    missingBehavior: 'propagate',
     signature: '(value*) -> tuple',
     // Provable declines only — see `ListFrom`.
     canEnumerate: canEnumerateCollectionOperands,
@@ -14523,7 +14543,16 @@ function canonicalSet(
       }
       const x = op.ops[0].canonical;
       if (isFunction(x, 'List') || isFunction(x, 'Set')) run.push(...x.ops);
-      else if (isFunction(x, 'Tuple') || x.type.matches('tuple'))
+      else if (isAbsentSymbol(x) || mayBeAbsentCollectionOperand(x)) {
+        // An absent operand (`Missing`, `Undefined`), or one that may be an
+        // absent collection (`Sort(Missing)`), is an absent collection, not
+        // one element (user decision 2026-09-26), as in `canonicalList`: it
+        // is a segment of the `Join`, which then evaluates to `Missing`, and
+        // `SetFrom` propagates it. Spliced as an element, `{...Missing, 0}`
+        // was `Set(Missing, 0)`.
+        flushRun();
+        segments.push(x);
+      } else if (isFunction(x, 'Tuple') || x.type.matches('tuple'))
         run.push(engine.error(['spread-tuple'], x.toString()));
       else if (isProvablyScalarJoinOperand(x)) run.push(x);
       else {

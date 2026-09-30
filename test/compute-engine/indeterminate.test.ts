@@ -1107,11 +1107,15 @@ describe('INDETERMINATE — the producers: the poles and the other NaN are uncha
     expect(epsil('5/0').toString()).toBe('~oo');
   });
 
-  test('the exact-lane funnel is not switched', () => {
-    // `ce.number([5, 0])` reaches the exact numeric lane, where `n/0` is
-    // `NaN` for every `n`: that `NaN` is kept, since it also spells a pole.
-    expect(ce.number([5, 0]).toString()).toBe('NaN');
-    expect(ce.number([0, 0]).toString()).toBe('NaN');
+  test('a rational pair with a zero denominator is a pole or the form', () => {
+    // `ce.number([n, 0])` gives the answer of `Rational(n, 0)`: a pole for
+    // `n ≠ 0`, and the indeterminate form for `0/0`.
+    expect(ce.number([5, 0]).toString()).toBe('~oo');
+    expect(ce.number([-3, 0]).toString()).toBe('~oo');
+    expect(ce.number([BigInt(5), BigInt(0)]).toString()).toBe('~oo');
+    expect(ce.number([0, 0]).toString()).toBe('Indeterminate');
+    expect(box(['Rational', 0, 0]).toString()).toBe('Indeterminate');
+    expect(ce.number([1, 2]).toString()).toBe('1/2');
     expect(box(['Ln', -2]).toString()).toBe('ln(-2)');
   });
 
@@ -1417,5 +1421,153 @@ describe('INDETERMINATE — the producers: review round', () => {
         ['Add', 'PositiveInfinity', { num: '0.5' }],
       ]).toString()
     ).toBe('Indeterminate');
+  });
+});
+
+describe('INDETERMINATE — ROADMAP residues of the NaN and Indeterminate rounds', () => {
+  test('a NaN or Indeterminate literal pattern matches itself only', () => {
+    const match = (subject: MathJsonExpression, pattern: MathJsonExpression) =>
+      box(['Match', subject, ['MatchCase', pattern, 1], ['MatchCase', '_', 2]])
+        .re;
+    // The number-literal spelling (the one the Epsil parser emits).
+    expect(match({ num: 'NaN' }, { num: 'NaN' })).toBe(1);
+    // The symbol spelling of MathJSON.
+    expect(match('NaN', 'NaN')).toBe(1);
+    expect(match('Indeterminate', 'Indeterminate')).toBe(1);
+    expect(match(['Divide', 0, 0], 'Indeterminate')).toBe(1);
+    expect(match('NaN', 'Indeterminate')).toBe(2);
+    expect(match('Indeterminate', 'NaN')).toBe(2);
+    expect(match('NaN', 1)).toBe(2);
+    expect(match(1, 'NaN')).toBe(2);
+    // The infinities, which compared by value before, still match.
+    expect(match('PositiveInfinity', 'PositiveInfinity')).toBe(1);
+    expect(match('ComplexInfinity', 'ComplexInfinity')).toBe(1);
+    expect(match('NegativeInfinity', 'PositiveInfinity')).toBe(2);
+    // Numbers still compare by value.
+    expect(match({ num: '1.0' }, 1)).toBe(1);
+    expect(match(1, { num: '1.0' })).toBe(1);
+    // Inside a list pattern.
+    expect(match(['List', 'NaN'], ['List', 'NaN'])).toBe(1);
+    // The Epsil route.
+    expect(epsil('match NaN {\n NaN => 1\n _ => 2\n}').re).toBe(1);
+    expect(epsil('match 0/0 {\n Indeterminate => 1\n _ => 2\n}').re).toBe(1);
+    expect(epsil('match 0/0 {\n NaN => 1\n _ => 2\n}').re).toBe(2);
+    expect(epsil('match Infinity {\n Infinity => 1\n _ => 2\n}').re).toBe(1);
+  });
+
+  test('simplify() answers a function of NaN or Indeterminate', () => {
+    const simplify = (json: MathJsonExpression) =>
+      ce.box(json).simplify().toString();
+    expect(simplify(['Sin', 'NaN'])).toBe('NaN');
+    expect(simplify(['Sin', 'Indeterminate'])).toBe('Indeterminate');
+    expect(simplify(['Sqrt', 'Indeterminate'])).toBe('Indeterminate');
+    expect(simplify(['Cos', ['Add', 'x', 'NaN']])).toBe('NaN');
+    expect(simplify(['Arctan2', 'Indeterminate', { num: '1.5' }])).toBe('NaN');
+    expect(simplify(['Add', 'x', ['Divide', 0, 0]])).toBe('Indeterminate');
+    // An operator that reads NaN as a value is not affected.
+    expect(simplify(['IsMissing', 'NaN'])).toBe('IsMissing(NaN)');
+    // A broadcast applies the policy to each element, on evaluation.
+    expect(simplify(['Sin', ['List', 1, 'NaN']])).toBe('sin([1,NaN])');
+  });
+
+  test('an exact 0 times a float is the exact 0 through .mul(), in both orders', () => {
+    const f = ce.number(2.5);
+    expect(ce.Zero.mul(f).json).toBe(0);
+    expect(f.mul(ce.Zero).json).toBe(0);
+    expect(ce.number({ num: '0.0' } as never).mul(ce.number(3)).json).toEqual({
+      num: '0.0',
+    });
+    expect(f.mul(ce.NaN).toString()).toBe('NaN');
+    expect(ce.PositiveInfinity.mul(ce.Zero).toString()).toBe('Indeterminate');
+    expect(box(['Multiply', 0, { num: '2.5' }, 'PositiveInfinity']).toString()).toBe(
+      'NaN'
+    );
+  });
+
+  test('Integrate of a NaN or Indeterminate integrand', () => {
+    for (const [json, exact] of [
+      [['Integrate', ['Divide', 0, 0], 'x'], 'Indeterminate'],
+      [['Integrate', 'NaN', 'x'], 'NaN'],
+      [['Integrate', 'NaN', ['Limits', 'x', 0, 1]], 'NaN'],
+      [['Integrate', ['Divide', 0, 0], ['Limits', 'x', 0, 1]], 'Indeterminate'],
+      [['Integrate', ['Divide', 0, 0], ['Limits', 'x', 0, { num: '1.5' }]], 'NaN'],
+      [
+        [
+          'Integrate',
+          'Indeterminate',
+          ['Limits', 'x', 0, 1],
+          ['Limits', 'y', 0, 1],
+        ],
+        'Indeterminate',
+      ],
+    ] as [MathJsonExpression, string][]) {
+      expect([json, box(json).toString()]).toEqual([json, exact]);
+      expect([json, boxN(json).toString()]).toEqual([json, 'NaN']);
+    }
+    expect(parse('\\int_0^1 \\frac{0}{0}\\,dx').toString()).toBe('Indeterminate');
+    expect(box(['Sum', 'NaN', ['Limits', 'k', 1, 3]]).toString()).toBe('NaN');
+  });
+
+  test('At with an infinite index answers NaN', () => {
+    for (const index of [
+      'PositiveInfinity',
+      'NegativeInfinity',
+      'ComplexInfinity',
+    ] as MathJsonExpression[]) {
+      const json: MathJsonExpression = ['At', ['List', 1, 2], index];
+      expect([index, box(json).toString()]).toEqual([index, 'NaN']);
+      expect([index, boxN(json).toString()]).toEqual([index, 'NaN']);
+    }
+    expect(box(['At', ['List', 1, 2], -1]).toString()).toBe('2');
+  });
+
+  test('a symbol times 0 through .mul() does not read the value it holds', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', ce.NaN);
+    const product = ce.symbol('w').mul(0);
+    expect(product.json).toEqual(['Multiply', 0, 'w']);
+    expect(product.evaluate().toString()).toBe('NaN');
+    ce.assign('w', ce.PositiveInfinity);
+    expect(product.evaluate().toString()).toBe('Indeterminate');
+    ce.assign('w', 4);
+    expect(product.evaluate().toString()).toBe('0');
+    // A symbol with no value keeps the fold `x·0 = 0`.
+    expect(ce.symbol('z').mul(0).toString()).toBe('0');
+  });
+
+  test('the type of Remainder includes nan when the divisor may be 0', () => {
+    const ce = new ComputeEngine();
+    ce.declare('k', 'integer');
+    ce.declare('m', 'integer');
+    const type = (json: MathJsonExpression) => ce.box(json).type.toString();
+    expect(type(['Remainder', 5, 0])).toBe('nan');
+    expect(type(['Remainder', 'k', 'm'])).toBe('integer | nan');
+    expect(type(['Remainder', 'k', 3])).toBe('integer');
+    expect(type(['Remainder', 5, 2])).toBe('integer');
+    expect(type(['Remainder', { num: '5.5' }, 2])).toBe('real');
+    expect(ce.box(['Remainder', 5, 0]).evaluate().toString()).toBe(
+      'Indeterminate'
+    );
+  });
+
+  test('the statistics that subtract the mean, with an infinite datum', () => {
+    for (const op of [
+      'Variance',
+      'StandardDeviation',
+      'PopulationVariance',
+      'PopulationStandardDeviation',
+      'Kurtosis',
+      'Skewness',
+    ]) {
+      const exact: MathJsonExpression = [op, ['List', 'PositiveInfinity', 1]];
+      const float: MathJsonExpression = [
+        op,
+        ['List', 'PositiveInfinity', { num: '1.5' }],
+      ];
+      expect([op, box(exact).toString()]).toEqual([op, 'Indeterminate']);
+      expect([op, boxN(exact).toString()]).toEqual([op, 'NaN']);
+      expect([op, box(float).toString()]).toEqual([op, 'NaN']);
+    }
+    expect(box(['Variance', ['List', 1, 2, 3]]).toString()).toBe('1');
   });
 });

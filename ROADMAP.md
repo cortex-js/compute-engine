@@ -50,41 +50,41 @@ measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work is
 a small notation tail tracked below.
 
 **0.141.0 released 2026-09-29** (latest; adopted by Tycho the same day). The
-0.111–0.141 line is described release by release in `CHANGELOG.md`. The 0.97–0.110 line carried the
-Tycho-compatibility rounds through items 177–190 (the canonicalization-time
-facet-probe storm and its document-context survivor, the `Add` collection-view
-nesting fix, `broadcastable` divide admission, opt-in `complexPromotion`),
-compile-time constant folding on a deterministic cost estimate, named-argument
-calls, protocols with compiled dispatch, mutable objects phases 0–1, the
-`unknown`-as-placeholder ruling, the default-`!scope` ceiling, and the Epsil
-parameter-shadowing repair. **0.96.0** (2026-07-26) carried the
-**symbol-identity repair** — a stored value's free symbols now denote the
-binding they were canonicalized against, not whatever an inner scope calls that
-name, with dereference (`evaluateInOwnBindings`), named-parameter rebind, and
-the sanctioned **binder mechanism** (binding sites declared by a `scoped:`
-selector; see `docs/SCOPING-MODEL.md`) — plus all-branch union assignability,
-the peaked-quadrature and non-finite-integrand fixes, and deletion of the 0.95.0
-random-family tombstones. The 0.91–0.95 line carried `FindFit`/`FindRoot` (Tycho
-item 77), the `Nothing`-erasure/`Missing` marker work, overload sets, the
-**Random family redesign** (`WithRandomSeed` frames, PCG3D, domain-only `Random`
-— see `docs/RANDOMNESS-MODEL.md`), and Epsil spread/destructuring. The 0.87–0.90
-line carried the Tycho items 56–76 rounds (complex-compile emission, the
-timeout-span model replacing `ce.timeLimit`, compiled recursive lambdas,
-`RandomList`, `Abs(point)` = norm), the tensor unification (BoxedTensor removed;
-tensor values are canonical Lists with a lazy view), and honest shaped list
-types. The 0.74–0.86 line carried the Tycho-compatibility rounds (through items
-50–54: hybrid-lazy `PointList` transposes, the serialize→re-parse juxtaposition
-fixes, machine-precision exact-sum crash, `ce.withTimeLimit`), the
-collection-operator-gaps + laziness waves, the `broadcastable<T>` typing lift,
-conditional values (`When`/`Which`), typed function literals, Mathematica-style
-surface forms, `NDSolve` adaptive stepping + `NDSolveFunction`, the DSolve
-frontier round (SymPy parity on the ODE audit), and the disposition of the
-2026-07 correctness/symbolic/performance reviews — see `CHANGELOG.md`. Earlier
-milestones: **0.73.0** (2026-07-09; solving parity 38/40 with SymPy/Mathematica,
-Rubi R13–R16, `Interpret`, number theory) and the 0.7x `Measurement` MVP /
-control-flow-scoping / Desmos-lists releases. Neyret-corpus parse coverage
-92.9%; the remaining Desmos gaps are importer-side (tracked in tycho's
-`COMPUTE_ENGINE.md`), not engine items.
+0.111–0.141 line is described release by release in `CHANGELOG.md`. The
+0.97–0.110 line carried the Tycho-compatibility rounds through items 177–190
+(the canonicalization-time facet-probe storm and its document-context survivor,
+the `Add` collection-view nesting fix, `broadcastable` divide admission, opt-in
+`complexPromotion`), compile-time constant folding on a deterministic cost
+estimate, named-argument calls, protocols with compiled dispatch, mutable
+objects phases 0–1, the `unknown`-as-placeholder ruling, the default-`!scope`
+ceiling, and the Epsil parameter-shadowing repair. **0.96.0** (2026-07-26)
+carried the **symbol-identity repair** — a stored value's free symbols now
+denote the binding they were canonicalized against, not whatever an inner scope
+calls that name, with dereference (`evaluateInOwnBindings`), named-parameter
+rebind, and the sanctioned **binder mechanism** (binding sites declared by a
+`scoped:` selector; see `docs/SCOPING-MODEL.md`) — plus all-branch union
+assignability, the peaked-quadrature and non-finite-integrand fixes, and
+deletion of the 0.95.0 random-family tombstones. The 0.91–0.95 line carried
+`FindFit`/`FindRoot` (Tycho item 77), the `Nothing`-erasure/`Missing` marker
+work, overload sets, the **Random family redesign** (`WithRandomSeed` frames,
+PCG3D, domain-only `Random` — see `docs/RANDOMNESS-MODEL.md`), and Epsil
+spread/destructuring. The 0.87–0.90 line carried the Tycho items 56–76 rounds
+(complex-compile emission, the timeout-span model replacing `ce.timeLimit`,
+compiled recursive lambdas, `RandomList`, `Abs(point)` = norm), the tensor
+unification (BoxedTensor removed; tensor values are canonical Lists with a lazy
+view), and honest shaped list types. The 0.74–0.86 line carried the
+Tycho-compatibility rounds (through items 50–54: hybrid-lazy `PointList`
+transposes, the serialize→re-parse juxtaposition fixes, machine-precision
+exact-sum crash, `ce.withTimeLimit`), the collection-operator-gaps + laziness
+waves, the `broadcastable<T>` typing lift, conditional values (`When`/`Which`),
+typed function literals, Mathematica-style surface forms, `NDSolve` adaptive
+stepping + `NDSolveFunction`, the DSolve frontier round (SymPy parity on the ODE
+audit), and the disposition of the 2026-07 correctness/symbolic/performance
+reviews — see `CHANGELOG.md`. Earlier milestones: **0.73.0** (2026-07-09;
+solving parity 38/40 with SymPy/Mathematica, Rubi R13–R16, `Interpret`, number
+theory) and the 0.7x `Measurement` MVP / control-flow-scoping / Desmos-lists
+releases. Neyret-corpus parse coverage 92.9%; the remaining Desmos gaps are
+importer-side (tracked in tycho's `COMPUTE_ENGINE.md`), not engine items.
 
 **Epsil language shipped (2026-07-09):** the revived Epsil language (parser,
 serializer, `executeEpsil` interpreter — phases 0–5 of the revival) is published
@@ -111,9 +111,9 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
-`reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis
-and reads an all-zero shape as `nothing`. So `list<integer^(2x0)>`, two empty
-rows, reduces to `vector<integer^2>`, a list of two integers, and
+`reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and
+reads an all-zero shape as `nothing`. So `list<integer^(2x0)>`, two empty rows,
+reduces to `vector<integer^2>`, a list of two integers, and
 `list<integer^(0x2)>`, no rows, reduces the same way. Measured 2026-09-29:
 `2x0 → vector<integer^2>`, `0x2 → vector<integer^2>`, `0 → nothing`. The
 question is what a zero axis should mean: keep the axis (`matrix<integer^(2x0)>`
@@ -131,178 +131,134 @@ encoding bridge in `src/common/type/subtype.ts` reads a rank-2 list as a list of
 rows (`matrix<E^(2x3)> <: list<vector<E^3>>`) but not a list of rows as a rank-2
 list. A symbol declared `list<vector<integer^3>^2>` is therefore admitted at a
 `matrix<T^(MxN)>` parameter only provisionally, and its lengths pin nothing
-(`cols(nl)` is typed `integer<1..>`, where the flat `matrix<integer^(2x3)>` gives
-`3`). Literals never take the nested spelling (`staticCollectionDims` flattens
-them), so only declared types reach this. Fix: add the reverse bridge — a list
-whose element type is a dimensioned list reads as the concatenated shape — and
-then let the solver's dimension walk pin through it.
-
-### A destructuring `let` inside a loop body does not compile (OPEN, small — found 2026-09-28 by the review fixes for Tycho item 332)
-
-`let n = 0` / `while n < 4 { let (a, x) = (2, 3); n = n + a }` / `n`
-declines on the JavaScript target with "Could not compile a destructuring
-declaration in value position". The interpreter evaluates it correctly. The
-same program declines with the 2026-09-28 changes turned off, so it is not
-caused by them: the statement lowering treats the last statement of a loop
-body block as a value position, and a destructuring declaration has no value
-lowering. The fix is to lower a loop body's statements in statement
-position, as the top-level block does. The destructuring `let` at the top
-level of a block compiles.
+(`cols(nl)` is typed `integer<1..>`, where the flat `matrix<integer^(2x3)>`
+gives `3`). Literals never take the nested spelling (`staticCollectionDims`
+flattens them), so only declared types reach this. Fix: add the reverse bridge —
+a list whose element type is a dimensioned list reads as the concatenated shape
+— and then let the solver's dimension walk pin through it.
 
 ### Registering a chain of `-> unknown` functions that each call the next twice re-enters the signature memo a number of times that doubles per level (OPEN, small — measured 2026-09-29 after the fix for Tycho item 336)
 
 With `W_k` declared `-> unknown` and each body calling `W_{k+1}` TWICE, one
-registration makes 14 077 calls to `_deriveSignature` at depth 8 (80 ms)
-and 163 493 at depth 12 (277 ms). They are memo HITS, not derivations (each
-body is boxed once, 12 boxings at depth 12): the type of a call is read
-again through `v.type` each time the `any` version moves, and every read
-walks the two callees. The definition version is not the cause (a fresh
-declaration no longer advances it, and the counts are the same with and
-without that exemption). A per-generation cache of the derived signature on
-the definition, read before the memo key is built, would make the count
-linear. Single-call chains are linear already (287 derivations at depth 10).
+registration makes 14 077 calls to `_deriveSignature` at depth 8 (80 ms) and 163
+493 at depth 12 (277 ms). They are memo HITS, not derivations (each body is
+boxed once, 12 boxings at depth 12): the type of a call is read again through
+`v.type` each time the `any` version moves, and every read walks the two
+callees. The definition version is not the cause (a fresh declaration no longer
+advances it, and the counts are the same with and without that exemption). A
+per-generation cache of the derived signature on the definition, read before the
+memo key is built, would make the count linear. Single-call chains are linear
+already (287 derivations at depth 10).
 
 ### A signature derivation that runs inside a cached type read does not see a widening made in its own temporary scope until the read finishes (OPEN, small — found 2026-09-29 by the review of the fix for Tycho item 336)
 
 A value-type inference advances the `any` version only when no cached
 computation is running (`runWhenIdle`), so that it does not retire the type
-being computed. A derivation reached from a `_type` read runs inside one; a
-type its body cached before a WIDENING of one of its own temporary symbols
-can then be read once more, and the memoized result may be narrower than it
-should be. No reachable witness was found. Closing it needs an immediate
-advance for a widening inside the derivation's scope, which the deferred
-design avoids on purpose.
+being computed. A derivation reached from a `_type` read runs inside one; a type
+its body cached before a WIDENING of one of its own temporary symbols can then
+be read once more, and the memoized result may be narrower than it should be. No
+reachable witness was found. Closing it needs an immediate advance for a
+widening inside the derivation's scope, which the deferred design avoids on
+purpose.
 
 ### An ordering comparison pairs a set with a list (OPEN — found 2026-09-29 while pinning the relational types over abstract collections)
 
 `Less(Set(5, 6), [1, 2])` evaluates to `[False, False]`, and
 `Less(Set(0), [1, 2])` to `[True]` (typed `list<boolean^1>` where the static
-type is `list<boolean^2>`): an unordered set is paired position by position
-with a list. The comment of `broadcastLiftType`
-(`boxed-expression/broadcast-lift-type.ts`) says a set beside a list gives
-an error value, and `Sin` of a set is already an `incompatible-type` error.
-It reaches a symbol declared `collection<number>` that holds a set
-(`P < [1, 2]`). Where the pairing happens is not traced yet.
+type is `list<boolean^2>`): an unordered set is paired position by position with
+a list. The comment of `broadcastLiftType`
+(`boxed-expression/broadcast-lift-type.ts`) says a set beside a list gives an
+error value, and `Sin` of a set is already an `incompatible-type` error. It
+reaches a symbol declared `collection<number>` that holds a set (`P < [1, 2]`).
+Where the pairing happens is not traced yet.
 
 ### A comparison with a list expands early over a valueless operand declared `number | collection<number>` (OPEN — found 2026-09-29, same probe)
 
 With `P` declared `number | collection<number>` and no value, `P < [1, 2]`
 evaluates to `[P < 1, P < 2]` and `P = [1, 2]` to `[P == 1, P == 2]`. The
-expansion assumes `P` is a number. When `P` is later assigned `[5, 6, 7]`
-the ORIGINAL expressions give a length error and `False`, the expanded
-forms give lists of lists: the result depends on when `P` gets its value.
-With `P` declared `collection<number>` the comparison stays unevaluated, as
-it should. The probable cause is the pre-evaluation broadcast in
-`boxed-expression/boxed-function.ts`, whose test for a valueless operand
-does not see the union declaration.
-
-### A connective over a comparison that failed with a length error gives a list of errors (OPEN, small — found 2026-09-29, same probe)
-
-`Or(Sin(P) < [1, 2], Sin(P) > 0)` with `P` holding `[5, 6, 7]` gives three
-cells, each the error `incompatible-dimensions (3 vs 2)`, where one error
-for the whole expression is the expected answer: the `Or` maps the error of
-its first operand over the three cells of its second.
+expansion assumes `P` is a number. When `P` is later assigned `[5, 6, 7]` the
+ORIGINAL expressions give a length error and `False`, the expanded forms give
+lists of lists: the result depends on when `P` gets its value. With `P` declared
+`collection<number>` the comparison stays unevaluated, as it should. The
+probable cause is the pre-evaluation broadcast in
+`boxed-expression/boxed-function.ts`, whose test for a valueless operand does
+not see the union declaration.
 
 ### `Join` of a dictionary and a list is an error that names an internal marker (OPEN, decision — found 2026-09-29 by the review fixes for the spread literal)
 
-`Join(Dictionary(x: 1), [2, 3])` evaluates to `Error(incompatible-type,
-tuple<string, unknown>, "symbol ContinuationPlaceholder")`. The keyed merge
-refuses an element that is not an entry, the materialization turns the
-refusal into the internal `ContinuationPlaceholder`, and `Dictionary` rejects
-that. What a dictionary joined with a list gives is a semantic decision (an
-error that names the offending element, or a list of the entries followed by
+`Join(Dictionary(x: 1), [2, 3])` evaluates to
+`Error(incompatible-type, tuple<string, unknown>, "symbol ContinuationPlaceholder")`.
+The keyed merge refuses an element that is not an entry, the materialization
+turns the refusal into the internal `ContinuationPlaceholder`, and `Dictionary`
+rejects that. What a dictionary joined with a list gives is a semantic decision
+(an error that names the offending element, or a list of the entries followed by
 the elements); the internal marker in the message is a defect either way.
-
-### `SetFrom` of an absent collection is `Set(Missing)`, and a set literal that spreads an absent operand is `Set(Missing, 0)` (OPEN — found 2026-09-29, same review)
-
-The rule of 2026-09-26 is that an operator over an absent collection is
-absent (`Missing`): `[...Missing, 0]` is `Missing` since 2026-09-29, but
-`{...Missing, 0}` is `Set(Missing, 0)` because `SetFrom` does not propagate
-an absent collection. Fixing `SetFrom` brings the set literal in line.
 
 ### A function declared `(collection<any> | number) -> number` whose body is `Max(xs)` compiles to `Math.max(xs)` (OPEN — found 2026-09-29 by the whole-collection parameter work)
 
-The compiled function returns `NaN` for a list argument, where the
-interpreter returns the maximum. `couldBeIndexedCollectionOperand`
-(`compilation/javascript-target.ts`) accepts only indexed-collection arms,
-so a parameter whose declared type has a `collection<any>` arm is compiled
-as a scalar. A tested fix accepts a collection arm that can hold a list and
-excludes strings. The same gap is why `Max`, `Min`, `GCD`, `LCM` and
-`ListFrom` were left element-wise by the decision of 2026-09-29 on
-whole-collection parameters: covering them needs the compiled definition to
-type an undeclared parameter from its lifted signature slot.
+The compiled function returns `NaN` for a list argument, where the interpreter
+returns the maximum. `couldBeIndexedCollectionOperand`
+(`compilation/javascript-target.ts`) accepts only indexed-collection arms, so a
+parameter whose declared type has a `collection<any>` arm is compiled as a
+scalar. A tested fix accepts a collection arm that can hold a list and excludes
+strings. The same gap is why `Max`, `Min`, `GCD`, `LCM` and `ListFrom` were left
+element-wise by the decision of 2026-09-29 on whole-collection parameters:
+covering them needs the compiled definition to type an undeclared parameter from
+its lifted signature slot.
 
 ### `Append` over an operand typed `unknown` or `any` is typed `list` (OPEN, small — found 2026-09-29)
 
-`Join` over such an operand is typed `collection` since 2026-09-29, because
-the operand may hold a set. The same change on `Append` made the nested
-structural form and the flattened form of a variadic `Append` report
-different types (`append-variadic.test.ts`), so it was not applied.
-
-### The generator of `src/math-json/OPERATORS.json` no longer reproduces the tracked file (OPEN, small — found 2026-09-29)
-
-Running `generate_OPERATORS.ts` differs from the tracked file by about
-147 KB (the tracked file has no `examples` fields). The `ListJoin` entry was
-added by hand on 2026-09-29. The file must be regenerated on purpose, or the
-generator aligned with the tracked shape.
+`Join` over such an operand is typed `collection` since 2026-09-29, because the
+operand may hold a set. The same change on `Append` made the nested structural
+form and the flattened form of a variadic `Append` report different types
+(`append-variadic.test.ts`), so it was not applied.
 
 ### A parameter that reaches a whole-collection operator indirectly is still applied element by element (OPEN — recorded 2026-09-29 with the decision on whole-collection parameters)
 
-The decision of 2026-09-29 binds a list whole only when the bare parameter
-is the ONLY operand of `Mean`, `Median`, `Variance`, `StandardDeviation`,
-`Mode`, `Quartiles`, `Flatten`, `SetFrom` or `TupleFrom`. Three shapes still
-differ from the body with the list substituted: a use through another
-operator (`function h(xs) { mean(xs^2) }` over `[1, 2, 3]` gives `[1, 4, 9]`,
-the substitution gives `14/3`), a use through a local (`let ys = xs;
-mean(ys)`), and `Max`/`Min`/`GCD`/`LCM`/`ListFrom` of the parameter. The
-first and the third are held back by the compiled route: the compiled
-definition types an undeclared parameter from its uses, so `xs^2` compiles
-to scalar code and an array argument gives `NaN`. They can follow once the
-compiled definition types a lifted parameter from its signature slot (see
-the `Max` entry above). `norm(v)` over a list of numbers gives the list
-itself (the norm of each number), on both routes; whether `Norm` of an
-untyped parameter should read a list of numbers as one vector is part of
-the same question.
+The decision of 2026-09-29 binds a list whole only when the bare parameter is
+the ONLY operand of `Mean`, `Median`, `Variance`, `StandardDeviation`, `Mode`,
+`Quartiles`, `Flatten`, `SetFrom` or `TupleFrom`. Three shapes still differ from
+the body with the list substituted: a use through another operator
+(`function h(xs) { mean(xs^2) }` over `[1, 2, 3]` gives `[1, 4, 9]`, the
+substitution gives `14/3`), a use through a local (`let ys = xs; mean(ys)`), and
+`Max`/`Min`/`GCD`/`LCM`/`ListFrom` of the parameter. The first and the third are
+held back by the compiled route: the compiled definition types an undeclared
+parameter from its uses, so `xs^2` compiles to scalar code and an array argument
+gives `NaN`. They can follow once the compiled definition types a lifted
+parameter from its signature slot (see the `Max` entry above). `norm(v)` over a
+list of numbers gives the list itself (the norm of each number), on both routes;
+whether `Norm` of an untyped parameter should read a list of numbers as one
+vector is part of the same question.
 
 ### `Solve` over a `List` of conditions with a domain returns no solution (OPEN — found 2026-09-29 by the review fixes for the broadcast type)
 
 `Solve(List(n^2 = 4, n > 0), n ∈ Range(-20, 20))` returns `[]`. The same
-conditions written `And(n^2 = 4, n > 0)` or `Set(n^2 = 4, n > 0)` return
-`[2]`. It behaves the same with and without the 2026-09-29 changes. Either
-a list of conditions with a domain is meant to be read as a system, as the
-set is, and the list route misses the side condition, or a list is not an
-accepted spelling and the call must say so with an error instead of
-answering "no solution".
-
-### `Length(Range(0, n))` is typed `integer | signed_infinity` for an integer `n` (OPEN, small — found 2026-09-29 by the fix for Tycho item 334)
-
-A range whose bounds are typed `integer` cannot be infinite, so the length
-is a finite non-negative integer; the type handler reads only "a bound is
-not a known number" and admits the infinite length. Tightening it to
-`integer<0..>` when both bounds and the step are typed finite is a static
-precision improvement with no effect on values.
+conditions written `And(n^2 = 4, n > 0)` or `Set(n^2 = 4, n > 0)` return `[2]`.
+It behaves the same with and without the 2026-09-29 changes. Either a list of
+conditions with a domain is meant to be read as a system, as the set is, and the
+list route misses the side condition, or a list is not an accepted spelling and
+the call must say so with an error instead of answering "no solution".
 
 ### The static type of a block local narrowed by a use depends on statement order (OPEN, small — found 2026-09-28 by the fixpoint re-read of assignment evidence)
 
 The re-read of `let`/`Assign` value types (`library/assignment-evidence.ts`)
-excludes locals with a declared type, and a local that a USE narrows after
-its first recorded assignment type keeps the order-dependent result: a
-`mutate(v)` call placed before or after the assignment gives a different
-static type. Making the narrowing order-independent would treat use
-evidence and assignment evidence as two sets joined at the end of the block
-rather than as writes in statement order. Not a wrong value at runtime; a
-static-type imprecision.
+excludes locals with a declared type, and a local that a USE narrows after its
+first recorded assignment type keeps the order-dependent result: a `mutate(v)`
+call placed before or after the assignment gives a different static type. Making
+the narrowing order-independent would treat use evidence and assignment evidence
+as two sets joined at the end of the block rather than as writes in statement
+order. Not a wrong value at runtime; a static-type imprecision.
 
 ### A closure created before a `let` of the same body, on a later loop iteration, captures the previous iteration's binding (OPEN, small — found 2026-09-28 by the fix for Tycho item 330)
 
 In a loop body such as `for i in [1, 2] { fs = [...fs, () => k]; let k = i }`
 the closure of the second iteration captures the `k` binding of the first
-iteration, because the `let` that would re-create the binding has not run
-yet when the closure is made. JavaScript reports a temporal-dead-zone error
-there. Rare in practice (a closure over a local declared after it); left as
-is by the 2026-09-28 fix, which captures a nested block's locals at closure
-creation. A fix would either refuse the read (an error like JavaScript's) or
-pre-create the iteration's bindings when the body starts.
+iteration, because the `let` that would re-create the binding has not run yet
+when the closure is made. JavaScript reports a temporal-dead-zone error there.
+Rare in practice (a closure over a local declared after it); left as is by the
+2026-09-28 fix, which captures a nested block's locals at closure creation. A
+fix would either refuse the read (an error like JavaScript's) or pre-create the
+iteration's bindings when the body starts.
 
 ### A list of numbers plus a point is typed `indexed_collection<integer>` and evaluates to a list of errors (OPEN, small — found 2026-09-28 answering Tycho item 326)
 
@@ -319,13 +275,13 @@ case is an error.
 Neither `gpu-target.ts` shader (GLSL or WGSL) declares a lowering for these
 three heads at all, unlike every other special function in `arithmetic.ts`
 (`Zeta`, `HurwitzZeta`, `Gamma`, `Erf`, …). This already fails closed — a
-`PolyGamma`/`Digamma`/`Trigamma` call in a GPU-compiled expression declines
-to the interpreter rather than emitting anything wrong — so it is not a
-correctness bug, only a missing capability: a plot or shader that calls
-these compiles the rest of the expression and evaluates this part off the
-GPU. Fix: port `numerics/special-functions.ts`'s real `digamma`/`trigamma`/
-`polygamma` (recurrence + asymptotic series, the same shape already used for
-`_gpu_gamma`) to GLSL/WGSL helpers and wire them into `GPU_FUNCTIONS`.
+`PolyGamma`/`Digamma`/`Trigamma` call in a GPU-compiled expression declines to
+the interpreter rather than emitting anything wrong — so it is not a correctness
+bug, only a missing capability: a plot or shader that calls these compiles the
+rest of the expression and evaluates this part off the GPU. Fix: port
+`numerics/special-functions.ts`'s real `digamma`/`trigamma`/ `polygamma`
+(recurrence + asymptotic series, the same shape already used for `_gpu_gamma`)
+to GLSL/WGSL helpers and wire them into `GPU_FUNCTIONS`.
 
 ### `HurwitzZeta(s, a)` at a complex `a` far left of the imaginary axis does not finish (OPEN — found 2026-09-28 reviewing #340)
 
@@ -333,34 +289,34 @@ GPU. Fix: port `numerics/special-functions.ts`'s real `digamma`/`trigamma`/
 does not finish. `hurwitzEMComplex` (`numerics/numeric-complex.ts`) sums one
 direct term for each unit of −Re(a) before its Euler-Maclaurin tail. The same
 loop made `PolyGamma(m, z)` hang at a large negative Re(z); `polygammaComplex`
-now avoids it with the reflection formula, which applies to an integer `s`
-only. Fix: for an integer `s >= 2`, use the same reflection
-(ζ(s, a) = (−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s−1)!); for another `s`, a representation whose
-cost does not grow with −Re(a), or a cost limit that leaves the application
-symbolic.
+now avoids it with the reflection formula, which applies to an integer `s` only.
+Fix: for an integer `s >= 2`, use the same reflection (ζ(s, a) =
+(−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s−1)!); for another `s`, a representation whose cost does not
+grow with −Re(a), or a cost limit that leaves the application symbolic.
 
 ### `PolyGamma(m, z)` of an order above 100 stays symbolic close to a half-integer on the real axis (OPEN — found 2026-09-28 reviewing #340)
 
-`PolyGamma(120, -1/2 + 10^{-5} i).N()` stays unevaluated, although mpmath
-gives a value near 8.6e232, inside the range of a double (at `Im(z) = 10^{-4}`
-it answers). For `Re(z) < 0`, `polygammaComplex` needs the m-th derivative
-of cot(πz). Close to a half-integer with a small `Im(z)`, the two series it
-can use for that derivative both lose all their digits (the two halves of
-the partial-fraction series are near-conjugates, and the Fourier series
-needs too many terms), and its third form, a polynomial in cot(πz), is used
-only up to order 100 because its coefficients overflow a double from order
-120 on. Fix: carry the polynomial coefficients in scaled form (a mantissa
-and a power-of-two exponent, as `ScaledComplex` does), then raise
-`COT_POLYNOMIAL_MAX_ORDER` to `POLYGAMMA_MAX_ORDER`.
+`PolyGamma(120, -1/2 + 10^{-5} i).N()` stays unevaluated, although mpmath gives
+a value near 8.6e232, inside the range of a double (at `Im(z) = 10^{-4}` it
+answers). For `Re(z) < 0`, `polygammaComplex` needs the m-th derivative of
+cot(πz). Close to a half-integer with a small `Im(z)`, the two series it can use
+for that derivative both lose all their digits (the two halves of the
+partial-fraction series are near-conjugates, and the Fourier series needs too
+many terms), and its third form, a polynomial in cot(πz), is used only up to
+order 100 because its coefficients overflow a double from order 120 on. Fix:
+carry the polynomial coefficients in scaled form (a mantissa and a power-of-two
+exponent, as `ScaledComplex` does), then raise `COT_POLYNOMIAL_MAX_ORDER` to
+`POLYGAMMA_MAX_ORDER`.
 
-### `PolyGamma` of a very high order at a real argument does not finish (OPEN — found 2026-09-28 reviewing #340)
+### The machine-precision `PolyGamma` loses digits at a very high order (OPEN, small — found 2026-09-29 by the fix of the order limit)
 
-At the default precision, `PolyGamma(100000, 2.5).N()` runs for more than
-20 seconds (order 1000 takes 17 ms): the big-decimal kernel `bigPolygamma`
-has no limit on the order. At machine precision the same expression answers
-`NaN`, although the value is only too large for a double. The complex kernel
-`polygammaComplex` leaves an order above 10 000 symbolic, and a value outside
-the range of a double symbolic. Fix: give the real route the same limits.
+At machine precision, `PolyGamma(1000, 400).N()` has a relative error of about
+9·10⁻¹³ and `PolyGamma(10000, 3679).N()` (answered through the complex kernel,
+which carries the factorial in scaled form) about 3·10⁻¹², against mpmath. The
+default precision is not affected (the big-decimal kernel is correct to the
+working precision at these orders, checked 2026-09-29). Same class as the
+`Hypergeometric2F1` machine-precision entry below; whether this error is
+acceptable at machine precision is not decided.
 
 ### Next items to pick up, ranked (2026-09-23)
 
@@ -461,11 +417,10 @@ whole-collection equality with an absent cell, no one-argument `Clamp`, the
 shader statement order documented) are in `CHANGELOG.md`. Each left a residue
 that no ruling covers yet.
 
-- **Absence parity residues.** A comparison on `Undefined` TYPES `boolean`
-  while its value is `Missing` (the type handlers read a `missing`-typed
-  operand, not the symbol). `Xor` and `Equivalent` accept an absent operand
-  since 2026-09-27 (user decision: they answer `Missing`, as `And`, `Or` and
-  `Not` do).
+- **Absence parity residues.** A comparison on `Undefined` TYPES `boolean` while
+  its value is `Missing` (the type handlers read a `missing`-typed operand, not
+  the symbol). `Xor` and `Equivalent` accept an absent operand since 2026-09-27
+  (user decision: they answer `Missing`, as `And`, `Or` and `Not` do).
 
 ### What the second review of the 2026-09-23 to 2026-09-26 commits left open (OPEN — found 2026-09-26)
 
@@ -475,43 +430,43 @@ the fixes and four user decisions of the same day landed. These items remain.
 Defects:
 
 1. **Inverse trigonometric functions of a huge complex argument are `NaN`.**
-   `Arccot(10^{-200}+10^{-200}i).N()` and `Arccsc(10^{-200}+10^{-200}i).N()`
-   are `NaN`: the reciprocal is now right (`5e199 - 5e199i`, since
-   2026-09-27), but `complex-esm`'s `atan` and `asin` return `NaN` for an
-   argument near `5e199` (`new Complex(5e199, -5e199).atan()` is `NaN`).
-   Found 2026-09-27 while scaling the interpreter's complex division; the
-   fix is a scaled `atan`/`asin` kernel, or a reduction for large arguments.
-3. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is
-   absent stays unevaluated.** `Map(f, Join(Missing, [3]))` should be
-   `Missing`, as `Map(f, Missing)` is. The source correctly declines to
-   enumerate, but a lazy operator does not evaluate its collection operand,
-   and conditional threading reads only direct `When`/`Which` operands. An
-   `evaluate` handler on `Map`/`Filter` was tried and broke ordinary lazy
-   evaluation (45 suites). The fix belongs in the evaluation step
-   (`boxed-function.ts`): evaluate a lazy operator's `Join`/`Append`
-   operand when it may be absent, then thread the result.
+   `Arccot(10^{-200}+10^{-200}i).N()` and `Arccsc(10^{-200}+10^{-200}i).N()` are
+   `NaN`: the reciprocal is now right (`5e199 - 5e199i`, since 2026-09-27), but
+   `complex-esm`'s `atan` and `asin` return `NaN` for an argument near `5e199`
+   (`new Complex(5e199, -5e199).atan()` is `NaN`). Found 2026-09-27 while
+   scaling the interpreter's complex division; the fix is a scaled `atan`/`asin`
+   kernel, or a reduction for large arguments.
+2. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is absent
+   stays unevaluated.** `Map(f, Join(Missing, [3]))` should be `Missing`, as
+   `Map(f, Missing)` is. The source correctly declines to enumerate, but a lazy
+   operator does not evaluate its collection operand, and conditional threading
+   reads only direct `When`/`Which` operands. An `evaluate` handler on
+   `Map`/`Filter` was tried and broke ordinary lazy evaluation (45 suites). The
+   fix belongs in the evaluation step (`boxed-function.ts`): evaluate a lazy
+   operator's `Join`/`Append` operand when it may be absent, then thread the
+   result.
+
 ### `.N()` rounds an exact operand before a special function sees it (OPEN — found 2026-09-28 by the review of PR #360)
 
 At `ce.precision = 50`, `HurwitzZeta(3, 1/3).N()` is
 `27.561061199700803776227877977407509284542095313016`; the correct value ends
 `…313015` (it is `…3130148811…`). `Digamma(1/3).N()` ends `…67205` where the
-correct value ends `…67204` (it is `…672041806…`). The cause is not the
-kernels: a `.N()` evaluates each operand numerically first, so `1/3` reaches
-the evaluate handler as a 50-digit decimal, and the rounding error of that
-operand reaches the last digit of the result. The same call on the
-`.evaluate()` route with an inexact `s` keeps `a` exact, and
-`HurwitzZeta(3.0, 1/3).evaluate()` is correct to the last digit (the bignum
-Hurwitz kernel converts an exact rational at its own working precision). A
-fix is either an engine-wide one (evaluate the operands of a numeric
-evaluation with guard digits, or pass exact operands through) or a per-operator
-one (hold the operands of `Zeta`, `HurwitzZeta`, `Digamma` and similar
-functions and evaluate them in the handler).
+correct value ends `…67204` (it is `…672041806…`). The cause is not the kernels:
+a `.N()` evaluates each operand numerically first, so `1/3` reaches the evaluate
+handler as a 50-digit decimal, and the rounding error of that operand reaches
+the last digit of the result. The same call on the `.evaluate()` route with an
+inexact `s` keeps `a` exact, and `HurwitzZeta(3.0, 1/3).evaluate()` is correct
+to the last digit (the bignum Hurwitz kernel converts an exact rational at its
+own working precision). A fix is either an engine-wide one (evaluate the
+operands of a numeric evaluation with guard digits, or pass exact operands
+through) or a per-operator one (hold the operands of `Zeta`, `HurwitzZeta`,
+`Digamma` and similar functions and evaluate them in the handler).
 
 ### The machine-precision Hurwitz zeta loses digits left of the critical strip (OPEN, small — found 2026-09-28 by the review of PR #360)
 
-The double kernel `hurwitzZetaComplex` (`numerics/numeric-complex.ts`) is
-off by more than a few units in the last place for some real s ≤ 0
-(compared with mpmath at the double that `0.3` rounds to):
+The double kernel `hurwitzZetaComplex` (`numerics/numeric-complex.ts`) is off by
+more than a few units in the last place for some real s ≤ 0 (compared with
+mpmath at the double that `0.3` rounds to):
 
 - `HurwitzZeta(-1.5, 0.3)` is `-0.008185560485836074`; the value is
   `-0.0081855604858359760…` (13 correct digits).
@@ -521,60 +476,57 @@ off by more than a few units in the last place for some real s ≤ 0
   `2.9233713806280506e+215` (13 correct digits).
 
 The first and third go through the Taylor expansion about a = 1
-(`zetaNearOneComplex`), which sums values of ζ at shifted arguments; the
-second goes through the Euler-Maclaurin sum (`hurwitzEMComplex`), whose
-terms 1/(s − 1)·z^(1−s) and the direct terms cancel to the small result. At `ce.precision` above 15 the bignum
-kernel `bigHurwitzZeta` gives the correct digits for all three.
-`HurwitzZeta(1.0000001, 1)` = `10000000.571377004` is NOT a defect: the
-double nearest `1.0000001` is `1.0000001000000000583…`, and ζ at that double
-is `10000000.5713770004…`; the pole at s = 1 amplifies the rounding of the
-input.
+(`zetaNearOneComplex`), which sums values of ζ at shifted arguments; the second
+goes through the Euler-Maclaurin sum (`hurwitzEMComplex`), whose terms 1/(s −
+1)·z^(1−s) and the direct terms cancel to the small result. At `ce.precision`
+above 15 the bignum kernel `bigHurwitzZeta` gives the correct digits for all
+three. `HurwitzZeta(1.0000001, 1)` = `10000000.571377004` is NOT a defect: the
+double nearest `1.0000001` is `1.0000001000000000583…`, and ζ at that double is
+`10000000.5713770004…`; the pole at s = 1 amplifies the rounding of the input.
 
 ### A matrix to a non-integer power is element-wise (OPEN, decision — found 2026-09-28 by the agents writing the linear-algebra examples)
 
 `[[1, 2], [3, 4]] ^ (1/2)` is `[[1, √2], [√3, 2]]`, the square root of each
 entry, while an integer exponent is the matrix power (`^2` is
 `[[7, 10], [15, 22]]`, `^-1` the inverse). `canonicalPower`
-(`arithmetic-power.ts`) says element-wise power "is not expressed via `^`"
-and leaves non-integer exponents "to other handling", which is the
-broadcast. The decision: a matrix function (`A^(1/2)` the principal square
-root, computed or left symbolic), an error, or the element-wise reading kept
-and documented.
+(`arithmetic-power.ts`) says element-wise power "is not expressed via `^`" and
+leaves non-integer exponents "to other handling", which is the broadcast. The
+decision: a matrix function (`A^(1/2)` the principal square root, computed or
+left symbolic), an error, or the element-wise reading kept and documented.
 
 ### A calculus operator over a function parameter is folded before the argument arrives (OPEN — found 2026-09-27 while writing the core reference examples)
 
-`g(f) = D(f, x); g(x^2)` evaluates to `0`, and so do `(f => D(f, x))(x^2)`
-and the box route `["Apply", ["Function", ["D", "f", "x"], "f"], ["Power",
-"x", 2]]`; the answer is `2x`. `g(f) = Integrate(f, x); g(x^2)` gives
-`x·x^2`; the answer is `x^3/3`. The LaTeX route shows the mechanism:
-`g(f) := \frac{d}{dx} f` canonicalizes to `(f) => D((x) => f, x)`. The body
-is canonicalized when the function is defined, the integrand is lifted with
-`f` as a symbol free of `x`, and the derivative (or antiderivative) of an
-`x`-free symbol is folded before the call substitutes `x^2` for `f`. An
-operator that does not fold on a parameter is not affected: `g(f) = f + 1`
-and `g(f) = Expand(f)` answer correctly. The fix is in the binder handling
-of `D`/`Integrate` (`liftIntegrand`, `boxed-expression/utils.ts`, and the
-canonical handlers): a symbol bound by an enclosing `Function` is not a
+`g(f) = D(f, x); g(x^2)` evaluates to `0`, and so do `(f => D(f, x))(x^2)` and
+the box route
+`["Apply", ["Function", ["D", "f", "x"], "f"], ["Power", "x", 2]]`; the answer
+is `2x`. `g(f) = Integrate(f, x); g(x^2)` gives `x·x^2`; the answer is `x^3/3`.
+The LaTeX route shows the mechanism: `g(f) := \frac{d}{dx} f` canonicalizes to
+`(f) => D((x) => f, x)`. The body is canonicalized when the function is defined,
+the integrand is lifted with `f` as a symbol free of `x`, and the derivative (or
+antiderivative) of an `x`-free symbol is folded before the call substitutes
+`x^2` for `f`. An operator that does not fold on a parameter is not affected:
+`g(f) = f + 1` and `g(f) = Expand(f)` answer correctly. The fix is in the binder
+handling of `D`/`Integrate` (`liftIntegrand`, `boxed-expression/utils.ts`, and
+the canonical handlers): a symbol bound by an enclosing `Function` is not a
 constant of the differentiation variable, so the fold must wait until the
 argument is substituted.
 
 ### Engine code that builds a node by name picks up a user binding in the active scope (OPEN — found 2026-09-27 by the dual review of the shadowing change)
 
-Inside a function body, a local definition named like a library operator is
-seen by engine code that runs during that body's evaluation:
-`function f() { function Add(a, b) { 12345 }; expand((y + 1) * (y + 2)) };
-f()` evaluates to `152399025` (the user `Add` applied to the terms `Expand`
-builds), `function f() { function Add(a, b) { 999 }; D(y^2 + y, y) }; f()`
-is `999`, and `function f() { function Sin(a) { 999 }; D(cos(y), y) }; f()`
-is `-999`. Measured identical on the tree before 2026-09-27, so the
-shadowing change did not introduce it. The same shadow in a `do { }` block
-does not reproduce it. Engine code (`Expand`, `D`, the polynomial and
-simplification code) builds `Add`/`Multiply`/`Sin` nodes by name while the
-user's function scope is the current scope, and name resolution cannot tell
-that construction from a user-written call. The fix direction: engine-built
-nodes resolve their head against the system scope (a construction route
-that does not consult the current scope), leaving scope-based resolution to
-user-written code.
+Inside a function body, a local definition named like a library operator is seen
+by engine code that runs during that body's evaluation:
+`function f() { function Add(a, b) { 12345 }; expand((y + 1) * (y + 2)) }; f()`
+evaluates to `152399025` (the user `Add` applied to the terms `Expand` builds),
+`function f() { function Add(a, b) { 999 }; D(y^2 + y, y) }; f()` is `999`, and
+`function f() { function Sin(a) { 999 }; D(cos(y), y) }; f()` is `-999`.
+Measured identical on the tree before 2026-09-27, so the shadowing change did
+not introduce it. The same shadow in a `do { }` block does not reproduce it.
+Engine code (`Expand`, `D`, the polynomial and simplification code) builds
+`Add`/`Multiply`/`Sin` nodes by name while the user's function scope is the
+current scope, and name resolution cannot tell that construction from a
+user-written call. The fix direction: engine-built nodes resolve their head
+against the system scope (a construction route that does not consult the current
+scope), leaving scope-based resolution to user-written code.
 
 ### A function-typed factor is a product under juxtaposition and a type error under an explicit operator (OPEN, ruling — found 2026-09-22 while fixing the MathNet round-trip check)
 
@@ -694,9 +646,9 @@ expected effect on the corpus.
   nested radical as a product of powers without opening it, or simplify per
   order before differentiating again; either changes the shape of `evaluate()`
   results and needs a snapshot-churn measurement.
-- **RULED 2026-09-22 (a): first fix `factor()` on nested quotients, then
-  measure the snapshot blast radius of factored derivatives and decide on that
-  number.** The corpus row of Tycho item 284,
+- **RULED 2026-09-22 (a): first fix `factor()` on nested quotients, then measure
+  the snapshot blast radius of factored derivatives and decide on that number.**
+  The corpus row of Tycho item 284,
   `\sum_{i=0}^{3}\frac{(x-\epsilon)^i}{i!}F(\epsilon)[i+1]` with
   `F := [f, f', f'', f''']`, parses as the application of a list element since
   2026-09-29 (`["At", ["F", "epsilon"], ["Add", "i", 1]]` inside the `Sum`; it
@@ -723,37 +675,38 @@ With `k := i` and `p: (unknown) -> unknown`, `p(P) := P.x + k`: `p((x, 1)) + 1`,
 since 2026-09-29 through the point-specialized definition and run to `3+i`,
 `7+2i` and `5+i` at `x = 2`. What still declines, in both `auto` and `strict`
 mode: `\sum_{k=1}^{3} p((x, \sqrt{x-5}))`, with "argument 1 is a point with a
-complex-valued coordinate, and the emitted definition reads a point
-parameter's coordinates as real numbers".
+complex-valued coordinate, and the emitted definition reads a point parameter's
+coordinates as real numbers".
 
 ### Residues of the exactness-by-route rule (OPEN, decisions — 2026-09-27)
 
 Since 2026-09-27 (user decision) exactness is decided by the route: a literal
 with a fraction part (`1.0`, `2.0`, `{num: "1.0"}`) is a float on every route,
 and `ce.number(bigDecimal)` is exact for an integer-valued big decimal at any
-magnitude (`doc/12-guide-numerical-evaluations.md`, "Exact and Inexact
-Numbers: the Spelling Decides"). What that left:
+magnitude (`doc/12-guide-numerical-evaluations.md`, "Exact and Inexact Numbers:
+the Spelling Decides"). What that left:
 
 1. **A float exponent `1.0` is still an identity in `Power`, and exact `0`
    divided by a float is exact.** `x^{1.0}` evaluates to `x` (its MathJSON is
-   `"x"`, so the float does not survive a round trip) and exact `0` divided
-   by a float is exact `0`. `Add` and `Multiply` keep the float since
-   2026-09-29 (`1.0x` stays `1.0·x`, `1.0^x` stays `Power(1.0, x)`, `0.0 + x`
-   stays `Add(x, 0.0)`, `0.0x` is a float `0`, `2.0x + x` is `3.0x`); `Power`
-   and the exact-zero quotient need the same decision.
+   `"x"`, so the float does not survive a round trip) and exact `0` divided by a
+   float is exact `0`. `Add` and `Multiply` keep the float since 2026-09-29
+   (`1.0x` stays `1.0·x`, `1.0^x` stays `Power(1.0, x)`, `0.0 + x` stays
+   `Add(x, 0.0)`, `0.0x` is a float `0`, `2.0x + x` is `3.0x`); `Power` and the
+   exact-zero quotient need the same decision.
 2. **An exponent literal with no fraction part (`1e3`) is exact**, as
-   Mathematica's `1*^3` is; `1.5e3` is a float. It cannot become a float
-   without first changing the MathJSON serialization of a large exact integer,
-   which is `{num: "1e+30"}` today, and `numbers.test.ts` pins
+   Mathematica's `1*^3` is; `1.5e3` is a float. It cannot become a float without
+   first changing the MathJSON serialization of a large exact integer, which is
+   `{num: "1e+30"}` today, and `numbers.test.ts` pins
    `parse('1e100000').isInteger`.
 3. **A float quotient does not survive a LaTeX round trip.** `\frac{1.0}{3}`
-   evaluates to a float whose LaTeX is `0.\overline{3}`, which re-parses as
-   the exact `1/3` (true of any float with repeating digits). A fix needs
-   a LaTeX mark for an inexact number.
-4. `.N()` of an exact small integer stays exact (`\sqrt{4}.N()` at precision
-   30 is the exact `2`, `(\sqrt{2})^2.N()` too): `BoxedNumber.N()` returns a
-   small exact integer unchanged, on purpose. Under the exactness contract
-   `.N()` produces a float; changing it has a large effect and is a decision.
+   evaluates to a float whose LaTeX is `0.\overline{3}`, which re-parses as the
+   exact `1/3` (true of any float with repeating digits). A fix needs a LaTeX
+   mark for an inexact number.
+4. `.N()` of an exact small integer stays exact (`\sqrt{4}.N()` at precision 30
+   is the exact `2`, `(\sqrt{2})^2.N()` too): `BoxedNumber.N()` returns a small
+   exact integer unchanged, on purpose. Under the exactness contract `.N()`
+   produces a float; changing it has a large effect and is a decision.
+
 ### Residues of the fixes for Tycho asks 306–315 (OPEN — found 2026-09-24)
 
 Not fixed, accepted rule: on `javascript`, a list held by a free point
@@ -773,48 +726,47 @@ Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
 ### Residues of the 2026-09-27 decision batch (OPEN, small — found by the implementation of decisions 1A, 2A and 4A)
 
 - **Compiled division by zero of a point cell.** `[P\{c\}, (3,4)] / t` at
-  `t = 0` gives `[Infinity, Infinity]` for the present cell when compiled,
-  and the interpreter fallback gives the complex infinity
-  `{re: Infinity, im: Infinity}`. A decision: whether `Infinity` per
-  coordinate is the accepted real-target spelling of complex infinity.
+  `t = 0` gives `[Infinity, Infinity]` for the present cell when compiled, and
+  the interpreter fallback gives the complex infinity
+  `{re: Infinity, im: Infinity}`. A decision: whether `Infinity` per coordinate
+  is the accepted real-target spelling of complex infinity.
 - **Point arithmetic that still refuses to compile** (a refusal, not a wrong
   value): `P\{c\} + [Q_1, Q_2]` ("may be a point or a list of points at run
   time", the `'runtime-list'` emission), `[P\{c\}, Q] + R` and
   `[1,2]·P\{c\} + Q` ("scalar arithmetic over a list-valued operand").
-- **The type of an element-wise comparison over an absent list.**
-  `L\{c\} < 3` is typed `list<boolean | missing>`, but when `L` is absent
-  the value is `Missing` for the whole list, not a list; the type should be
+- **The type of an element-wise comparison over an absent list.** `L\{c\} < 3`
+  is typed `list<boolean | missing>`, but when `L` is absent the value is
+  `Missing` for the whole list, not a list; the type should be
   `missing | list<boolean>`.
-- **Other code may box an integer-valued double as exact.** Until
-  2026-09-28 an exact `1` and a float `1` serialized the same way, so a site
-  that boxes a double result with `ce.number(n)` was invisible; since the
-  `2.0` spelling it shows. The full suite found one (the compiled `N()` of a
-  lazy `Map`, fixed); kernel bridges and compiled-value readers that call
-  `ce.number(double)` need an audit (the float lane is
-  `ce._inexactNumericValue`). Also: at machine precision `1.0e800`
-  overflows to `PositiveInfinity`, which reports `isExact === true`.
-  Also: the compiled `N()` of a lazy `Map` boxes an integer-valued result as
-  exact when its operands and the lambda are exact; an elementary function
-  of an exact integer whose double is exactly an integer near 2^53
-  (`exp(36)`) is then exact where the interpreter gives a float (found
+- **Other code may box an integer-valued double as exact.** Until 2026-09-28 an
+  exact `1` and a float `1` serialized the same way, so a site that boxes a
+  double result with `ce.number(n)` was invisible; since the `2.0` spelling it
+  shows. The full suite found one (the compiled `N()` of a lazy `Map`, fixed);
+  kernel bridges and compiled-value readers that call `ce.number(double)` need
+  an audit (the float lane is `ce._inexactNumericValue`). Also: at machine
+  precision `1.0e800` overflows to `PositiveInfinity`, which reports
+  `isExact === true`. Also: the compiled `N()` of a lazy `Map` boxes an
+  integer-valued result as exact when its operands and the lambda are exact; an
+  elementary function of an exact integer whose double is exactly an integer
+  near 2^53 (`exp(36)`) is then exact where the interpreter gives a float (found
   2026-09-28, rare).
-- **Float Gaussian integers are still exact.** `(2.0i)^2` evaluates to the
-  exact `-4`, `2.0i + 3` canonicalizes to the exact `3 + 2i`, and
-  `(3.0+2i)(1+i)` is exact: several places keep a Gaussian integer exact
-  (`isExactNumber` in `apply.ts`, `ExactNumericValue.sum`, `_liftComplex`,
-  the fold in `arithmetic-add.ts`), from when the literal `3i` was a float.
-  A decision: whether `ce.number(new Complex(2, 3))` (a `complex-esm` value,
-  doubles by definition) is exact; if not, these exceptions go.
+- **Float Gaussian integers are still exact.** `(2.0i)^2` evaluates to the exact
+  `-4`, `2.0i + 3` canonicalizes to the exact `3 + 2i`, and `(3.0+2i)(1+i)` is
+  exact: several places keep a Gaussian integer exact (`isExactNumber` in
+  `apply.ts`, `ExactNumericValue.sum`, `_liftComplex`, the fold in
+  `arithmetic-add.ts`), from when the literal `3i` was a float. A decision:
+  whether `ce.number(new Complex(2, 3))` (a `complex-esm` value, doubles by
+  definition) is exact; if not, these exceptions go.
 - **Integer functions of a float argument answer exactly.** `Fibonacci(5.0)`,
   `Lucas`, `BellNumber`, `CatalanNumber`, `NthPrime`, `PrimePi`, `Totient`,
-  `DigitSum`, `Subfactorial`, `StirlingS1`, `BernoulliB`,
-  `HurwitzZeta(0.0, 2)` give exact results. Mathematica refuses a real
-  argument for most of them. A decision: refuse (a type error), or answer a
-  float. (`Arg(2.0)`, `Im(2.0)`, `Heaviside`, `KroneckerDelta`, `Denominator`,
-  `Rationalize`, `MatrixRank` are exact in Mathematica too and stay.) The
-  rounding family (`Round`, `Floor`, `Ceil`, `Truncate`) is decided the
-  Mathematica way: a float argument gives an exact integer, and
-  `Round(3.14159, 2)` is `157/50` (cortex-js/compute-engine#351).
+  `DigitSum`, `Subfactorial`, `StirlingS1`, `BernoulliB`, `HurwitzZeta(0.0, 2)`
+  give exact results. Mathematica refuses a real argument for most of them. A
+  decision: refuse (a type error), or answer a float. (`Arg(2.0)`, `Im(2.0)`,
+  `Heaviside`, `KroneckerDelta`, `Denominator`, `Rationalize`, `MatrixRank` are
+  exact in Mathematica too and stay.) The rounding family (`Round`, `Floor`,
+  `Ceil`, `Truncate`) is decided the Mathematica way: a float argument gives an
+  exact integer, and `Round(3.14159, 2)` is `157/50`
+  (cortex-js/compute-engine#351).
 - **WGSL `Mod` when the quotient underflows.** The componentwise floor-mod
   `(((a % b) - b * floor((a % b) / b)) % b)` (2026-09-27, it replaced
   `((a % b) + b) % b`, which rounded in `f32`) makes no correction when
@@ -823,48 +775,37 @@ Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
 - **Unfolded identities beside an unknown.** `Nand(True, A)`, `Nor(False, A)`,
   `Implies(True, A)`, `Implies(A, False)`, `Implies(A, A)`, `Nand(A, A)`,
   `Equivalent(A, A)` stay unevaluated while `And(True, A)` evaluates to `A`;
-  each value is correct. Folding them (to `¬A`, `¬A`, `A`, `¬A`, `True`,
-  `¬A`, `True`) is new work.
+  each value is correct. Folding them (to `¬A`, `¬A`, `A`, `¬A`, `True`, `¬A`,
+  `True`) is new work.
 
 ### A callback ignores the callee's parameter annotation on both routes, and a folded `Map` over per-element errors (OPEN — found 2026-09-27, widened 2026-09-29)
 
 `Map(k ↦ h(k), [1, 2.5])` with `h` declared `(x: integer) -> …` compiles to
 JavaScript and runs to `[2, 5]`, and since 2026-09-29 the interpreter answers
 `[2, 5]` too, although a direct `h(2.5)` is an `incompatible-type` error:
-neither route checks the parameter annotation inside a callback. The
-bare-symbol form `Map(h, …)` now compiles (to the constant `[2, 5]`) where it
-refused before. Related, recorded convention rather than a defect: under `.N()` a
-`Map` whose callback errors per element answers `NaN` cells (the lowered
-broadcast in `library/map-lowering.ts` turns a bad element into the
-collection's absence marker, pinned by `test/epsil/programs.test.ts` "errors
-are values: a bad element becomes NaN" and two more), while `evaluate()`
-keeps the `Error` elements. Since 2026-09-27 the constant fold declines a
-collection with a `NaN` element, because it cannot tell an error's `NaN`
-from a computed one, so `compile(Map(w, [1, 2, 3]))` with an unemittable `w`
-refuses as before instead of compiling `[NaN, NaN, NaN]`.
+neither route checks the parameter annotation inside a callback. The bare-symbol
+form `Map(h, …)` now compiles (to the constant `[2, 5]`) where it refused
+before. Related, recorded convention rather than a defect: under `.N()` a `Map`
+whose callback errors per element answers `NaN` cells (the lowered broadcast in
+`library/map-lowering.ts` turns a bad element into the collection's absence
+marker, pinned by `test/epsil/programs.test.ts` "errors are values: a bad
+element becomes NaN" and two more), while `evaluate()` keeps the `Error`
+elements. Since 2026-09-27 the constant fold declines a collection with a `NaN`
+element, because it cannot tell an error's `NaN` from a computed one, so
+`compile(Map(w, [1, 2, 3]))` with an unemittable `w` refuses as before instead
+of compiling `[NaN, NaN, NaN]`.
 
 ### `Map` with a bare symbol callback: what the 2026-09-27 decision left (OPEN, low)
 
 Since 2026-09-27 (user decision) a bare-symbol callback with a known signature
 types the elements of `Map` from that signature's result type, and the source
-type is copied only when the callback is unknown. Two residues: (1) the zip
-form `Map(Add, xs, ys)` is typed `list<value^2>` (it was `list<unknown^2>`)
-because `Add`'s declared result is `value`; no test covers it. (2) Only the
-declared signature is used; running the operator's own type handler on the
-source element type would give narrower types (`Sin` over integers gives
-`real`), and an assigned lambda `x ↦ x + 10` over integers now types
-`number` elements where the copied type said `integer`.
-
-### `Integrate` over a list bound of mismatched length: `evaluate()` errors while `.N()` stays inert (OPEN, small — found 2026-09-27)
-
-A list-valued integrand distributes since 2026-09-27 (user decision: one
-integral per element, matching the list-bound rule), and a tuple integrand
-distributes per coordinate (`\int_0^1 (x, 2x)\,dx` is `(1/2, 1)`, as
-`\sum_{n=1}^3 (n, 2n)` is `(6, 12)`). Left by the change: a length mismatch between a list bound and a list integrand is the
-`incompatible-dimensions` error under `evaluate()` but leaves the integral
-unevaluated under `.N()`, because `tycho-325-integrate-list-limit-broadcast.test.ts`
-pins that `.N()` leaves mismatched list bounds unevaluated; the two modes
-should agree.
+type is copied only when the callback is unknown. Two residues: (1) the zip form
+`Map(Add, xs, ys)` is typed `list<value^2>` (it was `list<unknown^2>`) because
+`Add`'s declared result is `value`; no test covers it. (2) Only the declared
+signature is used; running the operator's own type handler on the source element
+type would give narrower types (`Sin` over integers gives `real`), and an
+assigned lambda `x ↦ x + 10` over integers now types `number` elements where the
+copied type said `integer`.
 
 ### Definite integrals of `Abs` and `Sign`: what the fix of issue #352 left (OPEN, small — found 2026-09-28)
 
@@ -873,175 +814,93 @@ the points where `u` changes sign, and each piece is integrated with `Abs(u)`
 replaced by `±u` and `Sign(u)` by `±1` (`integrateAcrossKinks`,
 `library/calculus.ts`). Two cases are not covered:
 
-- The split applies only when `u` is linear in the integration variable. With
-  a nonlinear argument, such as `\int_{-1}^{1} |x^2 - 1/4|\,dx` (value `1/2`),
-  the integral is not split and stays unevaluated, because the built-in
+- The split applies only when `u` is linear in the integration variable. With a
+  nonlinear argument, such as `\int_{-1}^{1} |x^2 - 1/4|\,dx` (value `1/2`), the
+  integral is not split and stays unevaluated, because the built-in
   antiderivative of `|x^2 - 1/4|` is not found. The fix would find the real
   roots of a polynomial `u` in the interval and split there in the same way.
-- When the position of a sign change relative to the bounds cannot be
-  decided, the integral is not split, and an antiderivative with a
-  `Sign(u)` term that depends on the variable now leaves the integral
-  unevaluated, because `F(b) − F(a)` includes the jump of that term if the
-  sign change is between the bounds. This also leaves unevaluated some
-  integrals that had a value that was correct for part of the parameter
-  range: `\int_2^a |x|\cos x\,dx` gave
+- When the position of a sign change relative to the bounds cannot be decided,
+  the integral is not split, and an antiderivative with a `Sign(u)` term that
+  depends on the variable now leaves the integral unevaluated, because
+  `F(b) − F(a)` includes the jump of that term if the sign change is between the
+  bounds. This also leaves unevaluated some integrals that had a value that was
+  correct for part of the parameter range: `\int_2^a |x|\cos x\,dx` gave
   `\sin(a)|a| + \cos(a)\operatorname{sgn}(a) - 2\sin 2 - \cos 2`, which is
   correct for `a > 0` and wrong for `a < 0`; it now stays unevaluated.
-  `\int_0^1 |x - c|\cos x\,dx` is the same case. A conditional value (a
-  `When` over the sign of `a`, or of `c`), or a use of the assumptions on
-  `a`, would give these a value again. A nonlinear `Sign` argument does not
-  reach this check today: the built-in antiderivative and the Rubi rules
-  both leave `\int_2^3 x\operatorname{sgn}(x^2-1)\,dx` unevaluated, before
-  and after the change.
-
-### `ce.number([5, 0])` is `NaN` where `Rational(5, 0)` is `~oo` (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
-
-The same quotient gives two answers by route. `ce.box(["Rational", 5, 0])`
-and `ce.box(["Divide", 5, 0])` are `~oo` (the integer fold in
-`boxed-expression/box.ts:524`), but `ce.number([5, 0])` is `NaN`: the
-rational pair goes through `canonicalNumber`, which answers `NaN` for any
-zero denominator (`boxed-expression/boxed-number.ts:1821`). A nonzero
-numerator over zero is a pole, so `ce.number([n, 0])` should be `~oo` for
-`n ≠ 0`, as the boxed routes are. `ce.number([0, 0])` stays the
-indeterminate form.
-
-### A `NaN` literal pattern never matches (OPEN, small — found 2026-09-28 by the `Indeterminate` Phase 1 work)
-
-`match NaN { NaN => 1, _ => 2 }` answers `2`, and so does
-`Match(NaN, MatchCase(NaN, 1), MatchCase(_, 2))`. The pattern matcher compares
-a number-literal pattern with `pattern.isEqual(expr)`
-(`src/compute-engine/boxed-expression/match.ts:159`), which follows IEEE and
-is `false` for two `NaN` values. The Epsil parser says that numeric-constant
-literals match structurally (`finishBindingPattern`, `src/epsil/parser.ts`),
-and `Infinity` does match itself. The `Indeterminate` literal behaves the same
-way as `NaN` here. A structural test (`isSame`) for a `NaN`-valued pattern
-would match each value to itself only.
+  `\int_0^1 |x - c|\cos x\,dx` is the same case. A conditional value (a `When`
+  over the sign of `a`, or of `c`), or a use of the assumptions on `a`, would
+  give these a value again. A nonlinear `Sign` argument does not reach this
+  check today: the built-in antiderivative and the Rubi rules both leave
+  `\int_2^3 x\operatorname{sgn}(x^2-1)\,dx` unevaluated, before and after the
+  change.
 
 ### The exact numeric lane answers `n/0` and `∞·2` with `NaN` (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
 
-`ExactNumericValue.div(0)` (a JavaScript number `0`) returns `NaN` for
-every dividend (`numeric-value/exact-numeric-value.ts:907`): `5.div(0)` is
-`NaN`, while `5.div(<exact 0>)` is `Infinity`. The normalization of a
-rational with a zero denominator also makes `[n, 0]` `NaN` for `n ≠ 0`
-(`:474`). And an exact infinity (made by `inv()` of `0`, `:664`) times an
-integer is `NaN`, because the rational helpers map any non-finite machine
-rational to `NaN` (`numerics/rationals.ts:192`, `:208`, `:213`):
-`inv(0).mul(2)` is `NaN`, not `Infinity`. No boxed route reaches these
-today (the boxed folds answer `~oo` and `∞` before the lane is used).
-Phase 2 of the plan above switched no producer that routes through the
-lane, so a pole is not read as an indeterminate form (`5/0`,
-`Rational(5, 0)`, `Divide(5, 0)`, `1/0` and `-1/0` are still `~oo`, pinned
-in `test/compute-engine/indeterminate.test.ts`); a later change that maps
-an exact-lane `NaN` to `Indeterminate` must fix this first. The fix gives
-`n/0` the value `±∞` (or `~oo` for a complex `n`) and lets the rational
-helpers carry a signed infinity.
+`ExactNumericValue.div(0)` (a JavaScript number `0`) returns `NaN` for every
+dividend (`numeric-value/exact-numeric-value.ts:907`): `5.div(0)` is `NaN`,
+while `5.div(<exact 0>)` is `Infinity`. The normalization of a rational with a
+zero denominator also makes `[n, 0]` `NaN` for `n ≠ 0` (`:474`). And an exact
+infinity (made by `inv()` of `0`, `:664`) times an integer is `NaN`, because the
+rational helpers map any non-finite machine rational to `NaN`
+(`numerics/rationals.ts:192`, `:208`, `:213`): `inv(0).mul(2)` is `NaN`, not
+`Infinity`. No boxed route reaches these today (the boxed folds answer `~oo` and
+`∞` before the lane is used). Phase 2 of the plan above switched no producer
+that routes through the lane, so a pole is not read as an indeterminate form
+(`5/0`, `Rational(5, 0)`, `Divide(5, 0)`, `1/0` and `-1/0` are still `~oo`,
+pinned in `test/compute-engine/indeterminate.test.ts`); a later change that maps
+an exact-lane `NaN` to `Indeterminate` must fix this first. The fix gives `n/0`
+the value `±∞` (or `~oo` for a complex `n`) and lets the rational helpers carry
+a signed infinity.
 
 ### Three special-function points answer `NaN` where a signed or complex infinity exists (OPEN, decision — found 2026-09-29 by Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
 
-Three values at an infinite point are `NaN` by a recorded ruling (Phase F
-batch 8 of `docs/plans/2026-08-30-error-model-implementation.md`) because
-the answer depends on the other operand, although for given operands a
-limit exists: `Gamma(s, −∞)` (for a positive integer `s`,
+Three values at an infinite point are `NaN` by a recorded ruling (Phase F batch
+8 of `docs/plans/2026-08-30-error-model-implementation.md`) because the answer
+depends on the other operand, although for given operands a limit exists:
+`Gamma(s, −∞)` (for a positive integer `s`,
 `Γ(n, x) = (n−1)!·e^{−x}·Σ_{k<n} x^k/k!` gives `(−1)^{n−1}·∞`:
-`Γ(2, −100) = −2.7·10⁴⁵`, `Γ(3, −100) = +2.6·10⁴⁷`; for a non-integer `s`
-the value is complex with an unbounded modulus, `~oo`); `Beta(+∞, b)` for a
-`b` with a non-positive real part (`B(a, b) ~ Γ(b)·a^{−b}`, so
-`B(+∞, −1/2) = −∞` since `Γ(−1/2) = −2√π`); `GammaRegularized(a, −∞)` for
-a non-integer `a` (complex, with an unbounded modulus). Phase 2 kept `NaN`
-there, because `Indeterminate` would state that the form has no value.
-Example today: `Gamma(2, -oo)` → `NaN`. Options: (a) answer the limit
-(`-oo` for `Gamma(2, −∞)`, `~oo` for a non-integer `s`), (b) keep `NaN`
-(nothing changes).
+`Γ(2, −100) = −2.7·10⁴⁵`, `Γ(3, −100) = +2.6·10⁴⁷`; for a non-integer `s` the
+value is complex with an unbounded modulus, `~oo`); `Beta(+∞, b)` for a `b` with
+a non-positive real part (`B(a, b) ~ Γ(b)·a^{−b}`, so `B(+∞, −1/2) = −∞` since
+`Γ(−1/2) = −2√π`); `GammaRegularized(a, −∞)` for a non-integer `a` (complex,
+with an unbounded modulus). Phase 2 kept `NaN` there, because `Indeterminate`
+would state that the form has no value. Example today: `Gamma(2, -oo)` → `NaN`.
+Options: (a) answer the limit (`-oo` for `Gamma(2, −∞)`, `~oo` for a non-integer
+`s`), (b) keep `NaN` (nothing changes).
 
 ### A float absorbed by an infinity is not seen by the float rule of `Indeterminate` (OPEN, small — found 2026-09-29 in the review of Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
 
-An indeterminate form with a float operand answers `NaN` (`0.0·∞` is `NaN`),
-but the rule reads the operands of the form as they are when the form is
-built. When a float was first absorbed by an infinity, it is gone by then:
-`Fract(∞ + 0.5)` and `0·(∞ + 0.5)` evaluate to `Indeterminate`, because
-`∞ + 0.5` is the exact `∞` before `Fract` or the product sees it. The
-absorption itself is correct (`∞ + 0.5` is `∞`). A fix would have `∞ + x`
-with a float `x` keep a mark that it came from a float, which the infinity
-literal cannot carry today. Both answers are pinned in
-`test/compute-engine/indeterminate.test.ts`.
+An indeterminate form with a float operand answers `NaN` (`0.0·∞` is `NaN`), but
+the rule reads the operands of the form as they are when the form is built. When
+a float was first absorbed by an infinity, it is gone by then: `Fract(∞ + 0.5)`
+and `0·(∞ + 0.5)` evaluate to `Indeterminate`, because `∞ + 0.5` is the exact
+`∞` before `Fract` or the product sees it. The absorption itself is correct
+(`∞ + 0.5` is `∞`). A fix would have `∞ + x` with a float `x` keep a mark that
+it came from a float, which the infinity literal cannot carry today. Both
+answers are pinned in `test/compute-engine/indeterminate.test.ts`.
 
-### `Remainder` and `Variance` are typed or computed as if every datum were finite (OPEN, small — found 2026-09-29 in the review of Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
+### `w.mul(ce.Zero)` folds a variable with an assigned value where `w.mul(0)` keeps the product (OPEN, small — found 2026-09-29 by the fix of the zero-factor shortcut)
 
-`Remainder(5, 0)` evaluates to `Indeterminate` (a zero divisor, as
-`Mod(5, 0)`), but its type is `integer`: the type handler of the polytype
-signature `(T, T) -> T` does not add `| nan` for a divisor that may be 0,
-where `Mod` does through its `definedWhen` predicate. `Mod` could not be
-followed exactly: the codomain marker of `definedWhen` is read from the
-declared result, and the polytype `T` is not provably a number, so it
-answered `Missing`. Separately, `Variance([+∞, 1])` is `NaN` from the machine
-kernel, where the deviations `∞ − ∞` make it the indeterminate form (as
-`Mean([+∞, −∞])` now answers `Indeterminate`); the same holds for the other
-statistics that subtract the mean.
+`BoxedSymbol.mul(0)` on a variable that holds a value now stays the product
+`Multiply(0, w)`, so that `evaluate()` reads the value the variable holds at
+that time (`w := NaN` gives `NaN`, `w := 4` gives `0`). `w.mul(ce.Zero)` takes
+the other route, the `mul()` function of `arithmetic-mul-div.ts`, which still
+folds to the exact `0` while `w` holds `NaN` or an infinity. The two spellings
+of the same product should agree. `mul()` was left as is because several
+normalization steps depend on its folding (see "Common API Traps" in
+`CLAUDE.md`); making it keep `0·w` for a variable with a value needs a check
+that those steps still reach a fixpoint.
 
-### `simplify()` leaves a function of `NaN` or `Indeterminate` inert (OPEN, small — found 2026-09-29 by Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
+### `simplify()` leaves `Max(x, NaN)` inert (OPEN, small — found 2026-09-29 by the fix of `simplify()` over a `NaN` operand)
 
-`ce.box(["Sin", "NaN"]).simplify()` is `sin(NaN)` and
-`ce.box(["Sin", "Indeterminate"]).simplify()` is `sin(Indeterminate)`, where
-`evaluate()` answers `NaN` and `Indeterminate` through the propagate gate of
-`boxed-function.ts`. The simplifier does not run the gate. The question is
-decided, and `docs/ERROR-MODEL.md` §1 forbids an inert expression as its
-final answer. (A sum or a product with such a term does simplify to the
-value: `x + 0/0` simplifies to `Indeterminate`.)
-
-### An exact `0` times a float is exact through `.mul()` in one operand order only (OPEN, small — found 2026-09-29 by Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
-
-`ce.Zero.mul(ce.number(2.5))` is the exact `0`, and
-`ce.number(2.5).mul(ce.Zero)` is the float `0.0`
-(`boxed-expression/boxed-number.ts`, `BoxedNumber.mul`). The `Multiply`
-operator answers the exact `0` in both orders (`Multiply(0, 2.5)` and
-`Multiply(2.5, 0)`), as Mathematica does. The two orders of the method
-should agree. (The pairwise fold that reaches the exact `0` also hid the
-float factor of `0 · 2.5 · ∞`; Phase 2 reads the operands of an
-`Indeterminate` product again in `mulImpl`, so that product is `NaN`.)
-
-### `Integrate(0/0, x)` is `NaN` under `evaluate()` but inert under `.N()` (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
-
-`ce.box(["Integrate", ["Divide", 0, 0], "x"]).evaluate()` is `NaN`, but
-`.N()` of the same expression is `int(NaN dx)`, unevaluated. The two routes
-must agree, and the `.N()` route must propagate the `NaN` integrand as the
-exact route does. `Integrate` is a `lazy` operator, so the `NaN` gate of
-`boxed-function.ts` does not run for it; the numeric handler must test for
-a `NaN` integrand itself.
-
-### `Integrate(NaN, x, 0, 1)` stays inert (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
-
-`ce.box(["Integrate", "NaN", ["Limits", "x", 0, 1]])` stays
-`int_(0)^(1)(NaN)` under both `evaluate()` and `.N()`. The question is
-decided (the answer is `NaN`), and `docs/ERROR-MODEL.md` §1 forbids an
-inert expression as the final answer to a decided question. `Integrate` is
-`lazy`, so the propagate gate does not run for it; its handler must answer
-`NaN` for a `NaN` integrand. `Sum(NaN, k, 1, 3)` already answers `NaN` and
-is the model.
-
-### `At` with an infinite index stays inert (OPEN, small — found 2026-09-28 by the `Indeterminate` Phase 1 work)
-
-`At([1, 2], +oo)` and `At([1, 2], ~oo)` stay unevaluated under both
-`evaluate()` and `.N()`, where `At([1, 2], 1.5)` and `At([1, 2], NaN)` answer
-`NaN` (the absence marker of a read with no position). An inert result is not
-a valid final answer to a decided question (`docs/ERROR-MODEL.md` §1). The
-index test of chained `At` is in `src/compute-engine/library/collections.ts`
-(the `isAbsentValue(opAtIndex)` arm, about line 9509).
-
-### The zero-factor shortcuts read a symbol's assigned value at canonicalization (OPEN, small — found 2026-09-28 by the `Indeterminate` Phase 1 review)
-
-`BoxedSymbol.mul(0)` answers `NaN` when the symbol's assigned value is `NaN`
-or infinite, at canonicalization (`boxed-symbol.ts`, `this.isNaN ||
-this.isInfinity`); `canonicalMultiply` no longer folds an exact `0` beside such
-a symbol (`0v` with `v := +oo` stays `0v` and evaluates by the value `v` holds
-at that time). Canonicalization is
-value-safe everywhere else (`op.canonical` binds structure and does not
-substitute an assigned value), and the same reading of a symbol's value in
-`canonicalDivide`, `canonicalPower`, `Product.mul` and `Terms` was removed in
-Phase 1 of `docs/plans/2026-09-28-indeterminate-value.md` because it froze
-the folded value across a reassignment (`w := NaN`, box `w/2`, `w := 4`, the
-old expression still evaluated to `NaN`) and lost the `Indeterminate` kind.
-The `.mul(0)` shortcut has the same two defects and should read number
-literals only, leaving a symbol to `evaluate()`.
+`simplify()` now applies the `propagate` NaN policy of an operand position, as
+`evaluate()` does (`sin(NaN)` simplifies to `NaN`). `Max` and `Min` declare the
+policy `inert` and handle a `NaN` operand in their own evaluate handler, so
+`ce.box(["Max", "x", "NaN"]).simplify()` stays `max(x, NaN)` where `evaluate()`
+answers `NaN`. The same applies to every operator whose evaluate handler reads
+`NaN` itself under an `inert` policy. Either `simplify()` calls the evaluate
+handler for a `NaN` operand under that policy, or the handlers are reached
+through a shared step.
 
 ### Residues of the absent-value round (OPEN, small — found 2026-09-25)
 
@@ -1058,28 +917,28 @@ COMPILED route spells an absent point three ways for the same static type
 give `undefined`; point + absent point gives `[NaN, NaN]`
 (`point-list-length-mismatch-compiled.test.ts`); scalar × absent point gives
 `NaN` (`compile-restricted-point.test.ts`); the fallback follows the type and
-gives `undefined`, so the two arithmetic cases still differ by route. (b) A
-bare `Undefined` (type `unknown`) falls back to `NaN` while compiled code
-gives `undefined`. (c) The Python fallback gives `undefined` for an absent
-object result while a written `Missing` compiles to `math.nan` on that target.
-(d) On interval-js a present number is `{kind: 'interval', value: {lo, hi}}`
-compiled and `{lo, hi}` from the fallback, and a written `Missing` or an
-out-of-range `At` compiles to `{lo: NaN, hi: NaN}` while the fallback gives
+gives `undefined`, so the two arithmetic cases still differ by route. (b) A bare
+`Undefined` (type `unknown`) falls back to `NaN` while compiled code gives
+`undefined`. (c) The Python fallback gives `undefined` for an absent object
+result while a written `Missing` compiles to `math.nan` on that target. (d) On
+interval-js a present number is `{kind: 'interval', value: {lo, hi}}` compiled
+and `{lo, hi}` from the fallback, and a written `Missing` or an out-of-range
+`At` compiles to `{lo: NaN, hi: NaN}` while the fallback gives
 `{kind: 'empty'}`. Also found 2026-09-27, interpreter defects against
 `docs/ERROR-MODEL.md` §3: `Less(First([Missing, 1]), 0)` is `False` but `If`
 over it is an "absent condition" error, and `If(Less(Missing, t), …)` is that
 error where §3 says a branch on an undecided comparison takes no arm; compiled
 code answers `NaN` in both. `python-target.ts` calls `conditionDecidability`
 without a target at two sites (lines near 2409 and 2564); the absent-relation
-rule is handled inside `conditionNode` instead. Not a defect (checked 2026-09-27): the `.neg()`,
-`.inv()`, `.pow()` and `.sqrt()` methods keep an absent operand
-(`-"Missing"`, `1/"Missing"`; both evaluate to `NaN`) on purpose, because
-canonicalization builds a difference as `a + (-b)` and the kept
-`Negate(Missing)` is the marker that makes `(1, 2) - Missing` absent rather
-than a type error (`absent-point-arithmetic.test.ts` pins six such cases).
-Not a defect, recorded rule: compiled arithmetic with an absent POINT gives `NaN` where the
-interpreter gives `Missing` (`compile-restricted-point.test.ts`, as for
-`A\{0<t\} + 1`).
+rule is handled inside `conditionNode` instead. Not a defect (checked
+2026-09-27): the `.neg()`, `.inv()`, `.pow()` and `.sqrt()` methods keep an
+absent operand (`-"Missing"`, `1/"Missing"`; both evaluate to `NaN`) on purpose,
+because canonicalization builds a difference as `a + (-b)` and the kept
+`Negate(Missing)` is the marker that makes `(1, 2) - Missing` absent rather than
+a type error (`absent-point-arithmetic.test.ts` pins six such cases). Not a
+defect, recorded rule: compiled arithmetic with an absent POINT gives `NaN`
+where the interpreter gives `Missing` (`compile-restricted-point.test.ts`, as
+for `A\{0<t\} + 1`).
 
 ### An absent list carries no shape: `Missing + 2\{b>0\}` is a scalar (OPEN, small — found 2026-09-25)
 
@@ -1092,35 +951,34 @@ absent scalar and answers the numeric marker still gated by `b`. The two routes
 agree once `b` is decided too (`[NaN, NaN]` for `b = -1` with `a` free on both).
 The point case no longer shows it (probed 2026-09-29): at `t = −1`,
 `(A\{0<t\}, B) + (A, B)` is `(NaN, 2B)` typed `tuple<nan, number>`, so a point
-keeps its shape; the list case above still does not.
-A fix needs the absent value of a list to remember that it was a list (a typed
-absence), which `Missing` does not.
+keeps its shape; the list case above still does not. A fix needs the absent
+value of a list to remember that it was a list (a typed absence), which
+`Missing` does not.
 
 ### Residues of the tuple-of-lists change (OPEN, small — 2026-09-25)
 
-Block-local functions and variadic parameters do not map over a list of
-points. (Probed 2026-09-29: an untyped `k := P ↦ 2P` applied to
-`[Missing, (3,4)]` now compiles and runs to `[null, [6, 8]]`, the interpreter
-answers `[NaN, (6, 8)]` typed `list<nan | tuple<integer, integer>>`; a point
-list at an untyped parameter beside another collection argument compiles and
-agrees with the interpreter.)
+Block-local functions and variadic parameters do not map over a list of points.
+(Probed 2026-09-29: an untyped `k := P ↦ 2P` applied to `[Missing, (3,4)]` now
+compiles and runs to `[null, [6, 8]]`, the interpreter answers `[NaN, (6, 8)]`
+typed `list<nan | tuple<integer, integer>>`; a point list at an untyped
+parameter beside another collection argument compiles and agrees with the
+interpreter.)
 
 ### Extended-real declarations lose precision through a call of a function declared `function` (OPEN, low — reported by Tycho 2026-09-24; narrowed 2026-09-26)
 
-A host declares plot variables and list seams as
-`real | signed_infinity | nan` instead of `number` (Tycho, 2026-09-24), and
-reads `number` as possibly complex. Arithmetic, powers, the elementary
-functions, `Max`/`Min`, `Sum`/`Product`/`Mean` (with or without limits),
-literal lists, operations on a scalar-or-list union, and `Abs`/`Real`/
-`Imaginary`/`Arg` keep a narrow type since 2026-09-26. What still widens to
-`number`: a call of a function declared bare `function` with a union
-argument. A function declared with a result `unknown` reports the result of
-its body under the declared parameter types, and a declared result is used
-as given, but `callResultType` returns early when the declared result is a
-number type. Relaxing that early return typed every call from its body, and
-17 tests failed (calls took literal value types, `g(3)` → `integer<6..6>`,
-and a complex-mode compiled call lost its `_SYS.cplx` wrapper). Under the
-decision of 2026-09-26 (the host that constructs a function gives its
+A host declares plot variables and list seams as `real | signed_infinity | nan`
+instead of `number` (Tycho, 2026-09-24), and reads `number` as possibly complex.
+Arithmetic, powers, the elementary functions, `Max`/`Min`,
+`Sum`/`Product`/`Mean` (with or without limits), literal lists, operations on a
+scalar-or-list union, and `Abs`/`Real`/ `Imaginary`/`Arg` keep a narrow type
+since 2026-09-26. What still widens to `number`: a call of a function declared
+bare `function` with a union argument. A function declared with a result
+`unknown` reports the result of its body under the declared parameter types, and
+a declared result is used as given, but `callResultType` returns early when the
+declared result is a number type. Relaxing that early return typed every call
+from its body, and 17 tests failed (calls took literal value types, `g(3)` →
+`integer<6..6>`, and a complex-mode compiled call lost its `_SYS.cplx` wrapper).
+Under the decision of 2026-09-26 (the host that constructs a function gives its
 type), the host's declaration is the intended fix, so this is low priority.
 
 Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
@@ -1131,10 +989,9 @@ The call `h((1, 2))` with `h := x ↦ 2x` (declared `(real) -> real` or not)
 evaluates to `(2, 4)` and is typed `any`, since the body decides the shape
 (`x ↦ |x|` gives a scalar). Typing the body with the parameter typed as the
 tuple was tried on 2026-09-26 and removed: the descriptor-based derivation
-(`callResultType`) gave wrong narrow types for a nested user call inside a
-list (`P ↦ [q(P), q(P)]`), for `P ↦ P·Norm(P)`, and for
-`P ↦ P/(P[1] − 1)`. A precise type needs a tuple-aware derivation. The same
-holds for `Apply(x ↦ 2x, (1, 2))`.
+(`callResultType`) gave wrong narrow types for a nested user call inside a list
+(`P ↦ [q(P), q(P)]`), for `P ↦ P·Norm(P)`, and for `P ↦ P/(P[1] − 1)`. A precise
+type needs a tuple-aware derivation. The same holds for `Apply(x ↦ 2x, (1, 2))`.
 
 ### Ordering of constants with special functions: what stays open after the 2026-09-25 bounds (OPEN, low)
 
@@ -1153,84 +1010,81 @@ never a wrong order, a lost answer.
 
 ### `Hypergeometric2F1` at machine precision: up to 2e-11 relative error (OPEN, small — found 2026-09-28)
 
-Over 1,000 random real arguments (`a`, `b` from −25 to 25, `c` from −25 to
-45, `z` from 0.5 to 1 or below −1), measured against mpmath, 936 have a
-machine value and 5 of them have a relative error above 1e-12 (the largest
-2e-11, `Hypergeometric2F1(-8.613, 24.352, 29.789, 0.6065)`). Over 700
-arguments with an integer `b − a` or `c − a − b` and a complex `z`, 622 have
-a value and 9 have an error above 1e-12 (the largest 7e-11). The
-connection formulas are accepted when their two parts exceed the result by
-at most a factor of 1e3 (1e4 when no other formula applies), and the
-prefactors are not accurate enough for that factor: the complex `gamma()`
-(`numerics/numeric-complex.ts`) evaluates `t^(z + 1/2)` directly, so
-`Γ(54.731)` has a relative error of 2.6e-14 (about 100ε), where the real
-`gamma()` (`numerics/special-functions.ts`) shifts the argument down first
+Over 1,000 random real arguments (`a`, `b` from −25 to 25, `c` from −25 to 45,
+`z` from 0.5 to 1 or below −1), measured against mpmath, 936 have a machine
+value and 5 of them have a relative error above 1e-12 (the largest 2e-11,
+`Hypergeometric2F1(-8.613, 24.352, 29.789, 0.6065)`). Over 700 arguments with an
+integer `b − a` or `c − a − b` and a complex `z`, 622 have a value and 9 have an
+error above 1e-12 (the largest 7e-11). The connection formulas are accepted when
+their two parts exceed the result by at most a factor of 1e3 (1e4 when no other
+formula applies), and the prefactors are not accurate enough for that factor:
+the complex `gamma()` (`numerics/numeric-complex.ts`) evaluates `t^(z + 1/2)`
+directly, so `Γ(54.731)` has a relative error of 2.6e-14 (about 100ε), where the
+real `gamma()` (`numerics/special-functions.ts`) shifts the argument down first
 and is accurate to a few ε. A lower bound would decline more arguments. The fix
-is a more accurate complex `gamma()` for a large argument (the same shift
-as the real one), or a Γ ratio computed as one quotient.
+is a more accurate complex `gamma()` for a large argument (the same shift as the
+real one), or a Γ ratio computed as one quotient.
 
 ### Upper incomplete gamma: where the machine kernels still decline or lose digits (OPEN — found 2026-09-28 while fixing issue #353)
 
-The complex kernel `incompleteGammaUpperComplex`
-(`numerics/numeric-complex.ts`) returns NaN, so `Gamma(s, x).N()` stays
-unevaluated, where it cannot certify about 12 digits in doubles. Its series
-forms carry an error estimate that bounds the actual error (measured against
-mpmath on about 7500 points); where no method passes, it declines. The
-regions:
+The complex kernel `incompleteGammaUpperComplex` (`numerics/numeric-complex.ts`)
+returns NaN, so `Gamma(s, x).N()` stays unevaluated, where it cannot certify
+about 12 digits in doubles. Its series forms carry an error estimate that bounds
+the actual error (measured against mpmath on about 7500 points); where no method
+passes, it declines. The regions:
 
 - `s` close to `0, −1, −2, …` and `x` near the negative real axis
-  (`|x| + Re x ≤ 3`). `Γ(s)` and the `k = n` term of the power series are
-  both about `1/(s + n)` and cancel. Whether the kernel declines depends on
-  `x` as well as on the distance `|s + n|`: on 3000 points with `|s + n|`
-  from `10⁻⁹` to `10⁻²` it answered 60% at `10⁻⁹` and 98% at `10⁻³`, all
-  with an error of at most `4.5e−13`. Example: `Gamma(-1 + 10^{-6}, -3)`
-  stays unevaluated; mpmath gives `3.2386482740815 + 3.1416041563344i`. The
-  fix is to sum `Γ(s) − (−1)ⁿ z^{s+n}/(n!(s+n))` as one expression in
-  `ε = s + n`, using `expm1(ε ln z)/ε` and a series for
-  `(n!(−1)ⁿ ε Γ(−n+ε) − 1)/ε` (the method of Temme).
+  (`|x| + Re x ≤ 3`). `Γ(s)` and the `k = n` term of the power series are both
+  about `1/(s + n)` and cancel. Whether the kernel declines depends on `x` as
+  well as on the distance `|s + n|`: on 3000 points with `|s + n|` from `10⁻⁹`
+  to `10⁻²` it answered 60% at `10⁻⁹` and 98% at `10⁻³`, all with an error of at
+  most `4.5e−13`. Example: `Gamma(-1 + 10^{-6}, -3)` stays unevaluated; mpmath
+  gives `3.2386482740815 + 3.1416041563344i`. The fix is to sum
+  `Γ(s) − (−1)ⁿ z^{s+n}/(n!(s+n))` as one expression in `ε = s + n`, using
+  `expm1(ε ln z)/ε` and a series for `(n!(−1)ⁿ ε Γ(−n+ε) − 1)/ε` (the method of
+  Temme).
 - `|Im s| > 10` and `|x| < 3|s|`, with `Re x < 0`, or with `Re s < 0` and
-  `|x| < |s| + 1`. The continued fraction converges there but to a wrong
-  value (error `2e−8` at `s = −0.41 − 23.9i`, `x = 0.088 − 4.0i`), and the
-  power series often cancel too far. On 2500 random points with
-  `|Re s|, |Im s| ≤ 30` and `0.01 ≤ |x| ≤ 600`, 86 declines are in this
-  region. Example: `Gamma(19.427 + 13.838i, -8.4445 - 49.849i)`; mpmath
-  gives `-2.3715013352684768e45 - 1.8981893850660706e44i`. Uniform
-  asymptotic expansions for a large `|s|` would cover it.
-- `|x| > 700` near the negative real axis, where only the asymptotic series
-  is available, when the part of `Γ(s, x)` that it omits (about
+  `|x| < |s| + 1`. The continued fraction converges there but to a wrong value
+  (error `2e−8` at `s = −0.41 − 23.9i`, `x = 0.088 − 4.0i`), and the power
+  series often cancel too far. On 2500 random points with `|Re s|, |Im s| ≤ 30`
+  and `0.01 ≤ |x| ≤ 600`, 86 declines are in this region. Example:
+  `Gamma(19.427 + 13.838i, -8.4445 - 49.849i)`; mpmath gives
+  `-2.3715013352684768e45 - 1.8981893850660706e44i`. Uniform asymptotic
+  expansions for a large `|s|` would cover it.
+- `|x| > 700` near the negative real axis, where only the asymptotic series is
+  available, when the part of `Γ(s, x)` that it omits (about
   `2π·e^{π|Im s|}/|Γ(1 − s)|`) is not negligible, for example
   `Gamma(100 + 600i, -800)` (mpmath `4.714e−133 − 1.980e−133i`).
 
-For a large `|s|` the accuracy is that of the complex `Γ(s)` (Lanczos
-formula): the relative error of `Γ(s)` grows from about `5ε` at `|s| < 1` to
-`500ε` at `|s| = 13` and `5300ε` at `|s| = 790`, and `Gamma(s, x)` inherits
-it (`1.1e−12` at `s = 106 + 657i`, `x = −205 + 517i`). The error bound the
-kernel states (`incompleteGammaUpperComplexErrorBound`) grows with it. A
-more accurate `Γ(s)` for a large `|s|` (Stirling series with the argument
-shifted) would tighten both.
+For a large `|s|` the accuracy is that of the complex `Γ(s)` (Lanczos formula):
+the relative error of `Γ(s)` grows from about `5ε` at `|s| < 1` to `500ε` at
+`|s| = 13` and `5300ε` at `|s| = 790`, and `Gamma(s, x)` inherits it (`1.1e−12`
+at `s = 106 + 657i`, `x = −205 + 517i`). The error bound the kernel states
+(`incompleteGammaUpperComplexErrorBound`) grows with it. A more accurate `Γ(s)`
+for a large `|s|` (Stirling series with the argument shifted) would tighten
+both.
 
 ### Complex transcendental functions keep machine precision (OPEN, capability — decision D4 of `docs/plans/2026-09-27-big-decimal-imaginary-part.md`)
 
 Since 2026-09-27 an inexact complex value holds its imaginary part as a big
 decimal, and `Ln`, `Exp`, `Power`, `Root`, `Sqrt` and the arithmetic compute
 both parts at the working precision. `Sin`, `Cos`, `Tan` and the other
-trigonometric and hyperbolic functions, `Gamma`, `Zeta`, the Bessel family
-and every other complex kernel still compute in doubles (`complex-esm`,
-`numerics/numeric-complex.ts`) at every engine precision: `Sin(1+i).N()` at
-50 digits has 16 correct digits, and an imaginary part below the double
-range reaches those kernels as `0`. The fix is a big-decimal complex kernel
-per function family (the real `BigDecimal` kernels exist). Also:
-`e^{1152921504606846977.5 i\pi}` `.N()` at precision 50 is `4.5e-32 − i`,
-the rounding of `c·π` for a 19-digit `c` at 50 digits, which is expected
-float behaviour.
-Related, in the `e^{iθ}` Euler branch (`boxed-expression/arithmetic-power.ts`,
-`halfTurns`): a large FLOAT angle is reduced modulo π at the working
-precision with no extra digits, so `e^{10^{30} i}` at 40 digits has about 10
-correct digits (`-0.99593119441358739…`, true `-0.99593119440539570…`);
-`BigNumericValue.exp` called directly is correct. The reduction needs about
-`log10|θ|` more digits, or a float angle above machine precision should take
-`exp` directly (found 2026-09-27 by the review of the big-decimal imaginary
-part).
+trigonometric and hyperbolic functions, `Gamma`, `Zeta`, the Bessel family and
+every other complex kernel still compute in doubles (`complex-esm`,
+`numerics/numeric-complex.ts`) at every engine precision: `Sin(1+i).N()` at 50
+digits has 16 correct digits, and an imaginary part below the double range
+reaches those kernels as `0`. The fix is a big-decimal complex kernel per
+function family (the real `BigDecimal` kernels exist). Also:
+`e^{1152921504606846977.5 i\pi}` `.N()` at precision 50 is `4.5e-32 − i`, the
+rounding of `c·π` for a 19-digit `c` at 50 digits, which is expected float
+behaviour. Related, in the `e^{iθ}` Euler branch
+(`boxed-expression/arithmetic-power.ts`, `halfTurns`): a large FLOAT angle is
+reduced modulo π at the working precision with no extra digits, so
+`e^{10^{30} i}` at 40 digits has about 10 correct digits
+(`-0.99593119441358739…`, true `-0.99593119440539570…`); `BigNumericValue.exp`
+called directly is correct. The reduction needs about `log10|θ|` more digits, or
+a float angle above machine precision should take `exp` directly (found
+2026-09-27 by the review of the big-decimal imaginary part).
 
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 
@@ -1245,11 +1099,10 @@ column pivoting, then a one-sided Jacobi pass), which returns the complex `U`
 and `V`. Left open by the `SVD` change: a complex matrix of exact entries is
 decomposed only under `.N()`, while a real matrix of exact entries still
 decomposes to floats under `evaluate()` (`linear-algebra.test.ts` pins it);
-aligning real `SVD` with the exactness contract is a behaviour change that
-needs a decision. The same embedding
-gives the eigenvalues of a HERMITIAN matrix (run Jacobi on the embedding itself,
-take each eigenvalue once; an eigenvector `[x; y]` gives `x + iy`); a general
-complex matrix needs a complex QR iteration.
+aligning real `SVD` with the exactness contract is a behaviour change that needs
+a decision. The same embedding gives the eigenvalues of a HERMITIAN matrix (run
+Jacobi on the embedding itself, take each eigenvalue once; an eigenvector
+`[x; y]` gives `x + iy`); a general complex matrix needs a complex QR iteration.
 
 ### Compiled colour values: keep the colour space; non-rounding conversions in `@arnog/colors` (OPEN, design — found 2026-09-23 by the review of `168de97d`)
 
@@ -2085,16 +1938,6 @@ the audit recorded by `docs/plans/2026-08-22-type-handlers-on-types.md` §2.5;
 the design's success criterion — item-219 drift 0 with the `scratch` exemption
 made a no-op — is what closes each row.
 
-### `Complex` drops its `number` contract on the literal route (OPEN, low — found 2026-08-23 by the canonical-rewrite inventory)
-
-`Complex` (`(number, number)`, no canonical handler) canonicalizes to
-`Add(re, ImaginaryUnit·im)`. The dropped `number` contract is re-caught by the
-arithmetic evaluate guard on the symbol route, but the literal route builds a
-machine complex directly, so `Complex("str", 2)` yields `NaN` where the symbol
-route errors. Adjacent to, but not part of, the canonical-rewrite contract class
-closed 2026-08-24 (a canonical rewrite to another head now re-validates against
-the original head's stricter parameter contract).
-
 ### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
 
 Item 219 is the second time a computation has needed to VALIDATE an expression —
@@ -2222,10 +2065,10 @@ resolved 2026-09-14) is NOT a distinct color-broadcast gap (reproduced
 colors: `AsOklab` over a `list<color>` compiles to `_SYS.bcastColor`. These
 records trace to point-list arithmetic surfacing in color-heavy documents:
 
-- `s8ishknvhe`: `Abs(C_c)` over the wide union type (`indexed_collection<number
-  | tuple<…>> | list<tuple<…>> | tuple<…>`) compiles from source since
-  2026-09-29 (`_SYS.bcast((_tv1) => Math.abs(_tv1), _.C)`); whether the whole
-  document row compiles is Tycho's count to re-run.
+- `s8ishknvhe`: `Abs(C_c)` over the wide union type
+  (`indexed_collection<number | tuple<…>> | list<tuple<…>> | tuple<…>`) compiles
+  from source since 2026-09-29 (`_SYS.bcast((_tv1) => Math.abs(_tv1), _.C)`);
+  whether the whole document row compiles is Tycho's count to re-run.
 - `iqnkdz3ptt` (2 records): the failing row is a point plus a number list
   (`(⌊…⌋, …) + [0, 1]`), which the interpreter answers as an `incompatible-type`
   error per element (measured 2026-09-14) — so the decline matches
@@ -2485,16 +2328,17 @@ N-element list for each reference to `conj`. `\operatorname{conj}` now parses as
 `List`. Instrument on the Tycho side:
 `scripts/repros/2026-09-15-list-conditioned-piecewise-probe.mts` in `dev/tycho`.
 
-One defect remains; it does not depend on `conj`: any unknown function over
-the list inside the condition gives the same symbolic `Which` (measured with
-`foo` in place of `conj`). The time-limit overrun on the undecidable body that
-this entry recorded until 2026-09-29 no longer reproduces: 10 000 elements
-under `withTimeLimit(5000)` return the symbolic `Which` in about 0.2 s.
+One defect remains; it does not depend on `conj`: any unknown function over the
+list inside the condition gives the same symbolic `Which` (measured with `foo`
+in place of `conj`). The time-limit overrun on the undecidable body that this
+entry recorded until 2026-09-29 no longer reproduces: 10 000 elements under
+`withTimeLimit(5000)` return the symbolic `Which` in about 0.2 s.
 
-1. **The selection over a decidable list condition costs2. **The selection over a decidable list condition costs about 2 ms per element
-   for this body** (measured from source with `tsx`, which adds loader overhead:
-   500 points → 0.9–1.2 s, 2 000 points → 4.2 s; at 10 000 points the 5 s limit
-   refuses the evaluation). Two causes, measured 2026-09-18:
+1. **The selection over a decidable list condition costs2. **The selection over
+   a decidable list condition costs about 2 ms per element for this body**
+   (measured from source with `tsx`, which adds loader overhead: 500 points →
+   0.9–1.2 s, 2 000 points → 4.2 s; at 10 000 points the 5 s limit refuses the
+   evaluation). Two causes, measured 2026-09-18:
    - The body holds the same inner `Which` six times (Tycho expands the document
      functions `S`, `f` and `N` in place), and `evaluate()` computes each
      reference separately: one inner `Which` costs 130–190 ms at 500 points.
@@ -3310,15 +3154,14 @@ recorded in `docs/BROADCAST-MODEL.md`. Genuinely remaining:
   better.
 
 - **Python connectives over a boolean list may be wrong, not declined**
-  (reported by the roadmap audit of 2026-09-29, not yet independently
-  verified). Orderings over a list or `broadcastable<number>` operand compile
-  through the `_ce_ord` helper since 2026-08-08, but `And`/`Or`/`Not` over a
-  `list<boolean>` operand reportedly emit Python truthiness (`bs and q`,
-  `not bs`) where the interpreter broadcasts (`And([True, False], True)` is
-  `[True, False]`): a silent divergence. The target has no generic
-  scalar-closure broadcaster for connectives; until it does they must decline.
-  `_ce_bcast` matches the mismatch ruling for the heads it does cover
-  (`ElementMax`/`ElementMin`/`Clamp`).
+  (reported by the roadmap audit of 2026-09-29, not yet independently verified).
+  Orderings over a list or `broadcastable<number>` operand compile through the
+  `_ce_ord` helper since 2026-08-08, but `And`/`Or`/`Not` over a `list<boolean>`
+  operand reportedly emit Python truthiness (`bs and q`, `not bs`) where the
+  interpreter broadcasts (`And([True, False], True)` is `[True, False]`): a
+  silent divergence. The target has no generic scalar-closure broadcaster for
+  connectives; until it does they must decline. `_ce_bcast` matches the mismatch
+  ruling for the heads it does cover (`ElementMax`/`ElementMin`/`Clamp`).
 
 ### Compile-target coverage (ledger opened 2026-07-30)
 
@@ -3338,12 +3181,11 @@ rounds of 2026-07-30 to 2026-08-30 that this ledger used to narrate are in
 
 **JavaScript band.**
 
-- **JavaScript band** (230 members / 81 states fail).
-  Per the consumer's per-bucket provenance rules, **82 members / 25 states are
-  our target gaps**; the other 148/61 are their own unexpanded user-function
-  heads, unparsed LaTeX, and document-defined function heads. (Their first pass
-  called the whole remainder ours — 202/69 — and they corrected it in review.
-  Use 82/25.)
+- **JavaScript band** (230 members / 81 states fail). Per the consumer's
+  per-bucket provenance rules, **82 members / 25 states are our target gaps**;
+  the other 148/61 are their own unexpanded user-function heads, unparsed LaTeX,
+  and document-defined function heads. (Their first pass called the whole
+  remainder ours — 202/69 — and they corrected it in review. Use 82/25.)
 
 - **Multi-clause user functions** (feature-parity note, 2026-08-02, no corpus
   sizing yet): the §8 guard chain compiles on the **JavaScript target only**.
@@ -3409,15 +3251,15 @@ rounds of 2026-07-30 to 2026-08-30 that this ledger used to narrate are in
     `tuple`-typed or all-collection-union component as a list — so
     `PointList(k, P)` with `P: tuple` types `list<tuple<number, unknown>>` and,
     since 2026-09-29, also evaluates to a list whose second coordinate is the
-    whole point (`[(1, (5, 6)), (2, (5, 6))]`): the routes agree, but the
-    shape wants a decision. The compile predicates were
-    hardened against this (staged review 2026-07-31); aligning the type handler
-    is interpreter-visible and wants its own pass. Same-family holes, same pass:
-    `hasPointElementType` (`collections.ts` ~684) accepts only `{kind:'tuple'}`
-    nodes, not the bare `'tuple'` string; and projecting an **empty** point list
-    diverges (compiled `[]`, interpreter absence — the evaluated empty transpose
-    types `list<never>`, so the point-ness is unrecoverable; pinned as a known
-    parity edge in `pointlist-compile-zip.test.ts`).
+    whole point (`[(1, (5, 6)), (2, (5, 6))]`): the routes agree, but the shape
+    wants a decision. The compile predicates were hardened against this (staged
+    review 2026-07-31); aligning the type handler is interpreter-visible and
+    wants its own pass. Same-family holes, same pass: `hasPointElementType`
+    (`collections.ts` ~684) accepts only `{kind:'tuple'}` nodes, not the bare
+    `'tuple'` string; and projecting an **empty** point list diverges (compiled
+    `[]`, interpreter absence — the evaluated empty transpose types
+    `list<never>`, so the point-ness is unrecoverable; pinned as a known parity
+    edge in `pointlist-compile-zip.test.ts`).
   - No corpus re-measure yet: how much of the 11 st / 36 mem + 2 st actually
     closed is the consumer's count to re-run — do not mark this bucket resolved
     on our numbers.
@@ -4567,18 +4409,17 @@ The Stage-2 corpus audit (2026-07-10, all 57 topics) surfaced three
 engine/tooling items — all fixed; the full-corpus run grades **0 False** (True
 1589, seed 42).
 
-
 ### Test-suite ledger — skips and `@fixme` markers (sweep 2026-07-18)
 
 Deferred capability recorded directly in the test suite (beyond the Wester
 ledger, B13). Each entry's acceptance test already exists:
 
 - **Simplification gaps** — 12 `test.skip` in `simplify.test.ts`: common
-  denominator for
-  rational expressions (`1/(x+1) − 1/x → −1/(x²+x)`); ln→inverse-hyperbolic
-  recognition (six identities, e.g. `ln(x+√(x²+1)) → arsinh x`); inverse-trig
-  conversion (`arctan(x/√(1−x²)) → arcsin x`); `factor()` extracting common
-  factors from `Add` (`2π+2πe < 4π → 1+e < 2`); `(−x)^{3/4}`; `ln((x+1)/e^{2x})`
+  denominator for rational expressions (`1/(x+1) − 1/x → −1/(x²+x)`);
+  ln→inverse-hyperbolic recognition (six identities, e.g.
+  `ln(x+√(x²+1)) → arsinh x`); inverse-trig conversion
+  (`arctan(x/√(1−x²)) → arcsin x`); `factor()` extracting common factors from
+  `Add` (`2π+2πe < 4π → 1+e < 2`); `(−x)^{3/4}`; `ln((x+1)/e^{2x})`
   (canonicalization expands before log rules fire); the Fu-paper Phase-14
   multi-step trig identity.
 - **Parser `@fixme` clusters** (latex-syntax tests): pre-sub/superscripts
@@ -4586,9 +4427,9 @@ ledger, B13). Each entry's acceptance test already exists:
   `\over` mis-association (`errors.test.ts`); postfix `\degree` precedence
   (`trigonometry.test.ts`); partial-derivative fraction forms
   `\frac{\partial^2}{\partial_{x,y}} f(x,y)` (2 skips, `operators.test.ts`);
-  malformed integrand `\int\frac{3x}{5dx}` not rejected
-  (`calculus.test.ts`); lowercase-arrow `Implies`/`Equivalent` expectations
-  outdated by the issue-#156 `\rightarrow`→`To` change (`logic.test.ts`).
+  malformed integrand `\int\frac{3x}{5dx}` not rejected (`calculus.test.ts`);
+  lowercase-arrow `Implies`/`Equivalent` expectations outdated by the issue-#156
+  `\rightarrow`→`To` change (`logic.test.ts`).
 - **Numeric known-wrongs** (nightly + unit markers): bignum `Arccos` near 1
   loses ~8 digits (endpoint cancellation; per-case skip in
   `mpmath-kernels.test.ts`); `ζ(−0.5)` ~4 ulp (tolerance-relaxed); one
@@ -4686,12 +4527,12 @@ is in git history. The only items deliberately left open:
 - **Typed `Declare` does not survive a LaTeX round trip (RULED DEMAND-GATED
   2026-08-12).** A standalone `["Declare","s","'number'"]` round-trips typed
   since 2026-09-29 (`\mathrm{Declare}(s, \text{number})`), but a leading
-  `Declare` in an outer `Block` still vanishes (`Block(Declare(s,'number'),
-  Assign(s,1))` serializes to `s\coloneq1`): LaTeX has no spelling for a type
-  annotation, no consumer round-trips typed declarations through LaTeX today
-  (Tycho emits untyped ones), and the first real consumer's usage should pick
-  the notation. Re-open when one appears; until then the drop is silent — the
-  accepted cost of not guessing a notation.
+  `Declare` in an outer `Block` still vanishes
+  (`Block(Declare(s,'number'), Assign(s,1))` serializes to `s\coloneq1`): LaTeX
+  has no spelling for a type annotation, no consumer round-trips typed
+  declarations through LaTeX today (Tycho emits untyped ones), and the first
+  real consumer's usage should pick the notation. Re-open when one appears;
+  until then the drop is silent — the accepted cost of not guessing a notation.
 - **Dispatch admission residues, no witness (recorded 2026-08-12 with the
   multi-clause dispatch fix).** `accepts` (`value-membership.ts`), like
   `valueComponent`, reads `t.def` directly instead of `aliasDefinitionAt(t)`, so
@@ -4743,80 +4584,78 @@ units) read 6251 in a six-worker full run on a box at load 4 and passed alone
 `LerchPhi(z,s,a)` continues past the unit disk (and on its rim) through the
 upper incomplete gamma function at a complex argument. The interpreter and the
 JavaScript target have one (`incompleteGammaUpperComplex`,
-`numerics/numeric-complex.ts`; `_SYS.lerchPhi` calls the interpreter's
-kernel), but the GPU (GLSL/WGSL) targets do not: `Gamma`'s own compiled
-lowering is real-only, so `_gpu_lerch_phi` answers `NaN` past the unit disk
-(except for `s = 0, −1, −2`, where it has a closed form). A complex incomplete
-gamma kernel for those targets would close the gap for `LerchPhi` and widen
-`Gamma`'s own compiled two-operand form at the same time. Demand-gated: no
-compile-target consumer has asked for `LerchPhi` past the unit disk yet.
+`numerics/numeric-complex.ts`; `_SYS.lerchPhi` calls the interpreter's kernel),
+but the GPU (GLSL/WGSL) targets do not: `Gamma`'s own compiled lowering is
+real-only, so `_gpu_lerch_phi` answers `NaN` past the unit disk (except for
+`s = 0, −1, −2`, where it has a closed form). A complex incomplete gamma kernel
+for those targets would close the gap for `LerchPhi` and widen `Gamma`'s own
+compiled two-operand form at the same time. Demand-gated: no compile-target
+consumer has asked for `LerchPhi` past the unit disk yet.
 
 ### `LerchPhi` past |z| = 1 still declines at a few points (OPEN, found 2026-09-28 while adapting `LerchPhi` to the fixed incomplete gamma kernel, #353)
 
 The continuation (`lerchContinuedComplex`, `numerics/lerch-phi.ts`) computes
 `Φ(z,s,a)` from three terms, one of them `Γ(1 − s, −a·log z)`. It declines
-(`N()` stays symbolic) where it cannot vouch for 1e−11 relative accuracy. On
-a sweep of 1588 random points against mpmath's `lerchphi` (inside the disk,
-on the rim, past it, real `z < −1` and `z > 1`, complex `s`, `a` from −8 to
-30), it answers 1532 (before the #353 fix: 339), with a worst error of
-4.3e−13, and declines 56. They are of two kinds:
+(`N()` stays symbolic) where it cannot vouch for 1e−11 relative accuracy. On a
+sweep of 1588 random points against mpmath's `lerchphi` (inside the disk, on the
+rim, past it, real `z < −1` and `z > 1`, complex `s`, `a` from −8 to 30), it
+answers 1532 (before the #353 fix: 339), with a worst error of 4.3e−13, and
+declines 56. They are of two kinds:
 
-- `s` within about 1e−2 of a positive integer, with `x = −a·log z` in the
-  band `|x| + Re x ≤ 3` around the negative real axis (for `a = 1`, every
-  `z` on or past the unit circle; for a larger `a`, `z` near the real axis
-  past 1). The incomplete gamma kernel sums a power series there whose
-  error grows like `1/|1 − s + n|` near the poles of `Γ(1 − s)`, and it
-  declines where it cannot certify its result. On 600 points with `s`
-  within 1e−9 to 0.2 of 1 … 9, 482 answer and 118 decline, spread over
-  every distance below 1e−2. Example: `LerchPhi(2, 3.000001, 3.5)`; mpmath
-  gives `0.0090998751173185692 − 0.066706054562371451i`. The fix is the
-  kernel's own open item (the Temme-style expansion in "Upper incomplete
-  gamma: where the machine kernels still decline or lose digits").
-- The closed incomplete gamma term is hundreds of times larger than `Φ`,
-  so the kernel's error bound (`incompleteGammaUpperComplexErrorBound`,
-  3e−13 relative for a small `|1 − s|`) times that term exceeds 1e−11 of
-  the value, although the actual error is usually far smaller. This happens
-  mostly for `Re(s) < 0`, for example `LerchPhi(-2, -3.5, 1.5)` (mpmath
-  0.0024505235336676858). A per-point error estimate from the kernel would
-  recover most of them.
+- `s` within about 1e−2 of a positive integer, with `x = −a·log z` in the band
+  `|x| + Re x ≤ 3` around the negative real axis (for `a = 1`, every `z` on or
+  past the unit circle; for a larger `a`, `z` near the real axis past 1). The
+  incomplete gamma kernel sums a power series there whose error grows like
+  `1/|1 − s + n|` near the poles of `Γ(1 − s)`, and it declines where it cannot
+  certify its result. On 600 points with `s` within 1e−9 to 0.2 of 1 … 9, 482
+  answer and 118 decline, spread over every distance below 1e−2. Example:
+  `LerchPhi(2, 3.000001, 3.5)`; mpmath gives
+  `0.0090998751173185692 − 0.066706054562371451i`. The fix is the kernel's own
+  open item (the Temme-style expansion in "Upper incomplete gamma: where the
+  machine kernels still decline or lose digits").
+- The closed incomplete gamma term is hundreds of times larger than `Φ`, so the
+  kernel's error bound (`incompleteGammaUpperComplexErrorBound`, 3e−13 relative
+  for a small `|1 − s|`) times that term exceeds 1e−11 of the value, although
+  the actual error is usually far smaller. This happens mostly for `Re(s) < 0`,
+  for example `LerchPhi(-2, -3.5, 1.5)` (mpmath 0.0024505235336676858). A
+  per-point error estimate from the kernel would recover most of them.
 
 ### `HurwitzZeta(s, a)` is inaccurate for a complex `a` and `Re(s) < 0` (OPEN, correctness — found 2026-09-28 while reviewing `LerchPhi`)
 
 `HurwitzZeta(-11.801, 0.4265 − 1.271i).N()` is `2.2188 + 50.186i`; mpmath's
 `zeta(-11.801, 0.4265 − 1.271j)` is `5.6234 + 46.077i`. `hurwitzZetaComplex`
-uses its Taylor shift only when the shifted base point is within its radius,
-and the imaginary part of `a` counts toward that distance; otherwise it falls
-back to the Euler–Maclaurin sum, which cancels for `Re(s) < 0`. `LerchPhi` at
-`z = −1` uses `HurwitzZeta` only for a real `a` because of this.
-Another witness, found while widening `PolyLog`: `HurwitzZeta(-11.5, 0.5 - 1.0994i).N()` is
-`-8.914 + 9.012i`; mpmath gives `-9.526 + 9.526i`. At `s = −2.9`, `a = 0.5 − 0.7329i` the
-error is 5.8e−11 relative. It limits `PolyLog`'s inversion formula (`polylogInversionComplex`), which now matters only where the `LerchPhi` continuation declines.
+uses its Taylor shift only when the shifted base point is within its radius, and
+the imaginary part of `a` counts toward that distance; otherwise it falls back
+to the Euler–Maclaurin sum, which cancels for `Re(s) < 0`. `LerchPhi` at
+`z = −1` uses `HurwitzZeta` only for a real `a` because of this. Another
+witness, found while widening `PolyLog`: `HurwitzZeta(-11.5, 0.5 - 1.0994i).N()`
+is `-8.914 + 9.012i`; mpmath gives `-9.526 + 9.526i`. At `s = −2.9`,
+`a = 0.5 − 0.7329i` the error is 5.8e−11 relative. It limits `PolyLog`'s
+inversion formula (`polylogInversionComplex`), which now matters only where the
+`LerchPhi` continuation declines.
 
 ### `PolyLog` has no GPU lane past |z| = 1 (OPEN, capability gap — found 2026-09-28 while widening `PolyLog`, #340)
 
 Past the unit disk, `PolyLog(s, z)` at a non-integer order uses the `LerchPhi`
 continuation, and where that declines Jonquière's inversion formula
-(`polylogInversionComplex`, `numerics/polylog.ts`). In the interpreter and
-the JavaScript lane these decline together only for some orders within about
-1e−2 of a positive integer, on or past the unit circle (the `LerchPhi` entry
-above; for example `PolyLog(3.000001, 2)`). Measured on 900 points against
-mpmath's `polylog` (orders within 1e−8 to 0.2 of 1 … 12, `|z|` from 0.9 to
-61): 869 answer, none off by more than 6.4e−14, and the 31 declines are
-spread over the distances from 1e−8 to 1e−2. On another 400 such points, 392
-answer, none off by more than 4.6e−14. The GPU lane has
-neither the continuation nor the inversion: `_gpu_poly_log` is `NaN` for
-every non-integer order with `|z| > 1`, and for an integer order `≥ 2` below
-`z = −1`.
+(`polylogInversionComplex`, `numerics/polylog.ts`). In the interpreter and the
+JavaScript lane these decline together only for some orders within about 1e−2 of
+a positive integer, on or past the unit circle (the `LerchPhi` entry above; for
+example `PolyLog(3.000001, 2)`). Measured on 900 points against mpmath's
+`polylog` (orders within 1e−8 to 0.2 of 1 … 12, `|z|` from 0.9 to 61): 869
+answer, none off by more than 6.4e−14, and the 31 declines are spread over the
+distances from 1e−8 to 1e−2. On another 400 such points, 392 answer, none off by
+more than 4.6e−14. The GPU lane has neither the continuation nor the inversion:
+`_gpu_poly_log` is `NaN` for every non-integer order with `|z| > 1`, and for an
+integer order `≥ 2` below `z = −1`.
 
 ### The machine-precision `Zeta` kernels are inaccurate for a small negative order (OPEN, correctness, found 2026-09-28 while widening `PolyLog`, #340)
 
 `zeta(s)` (`numerics/special-functions.ts`) and `zetaComplex`/
 `hurwitzZetaComplex(s, 1)` (`numerics/numeric-complex.ts`) lose digits as `s`
-approaches 0 from below: at `s = −1e−9` they return `−0.4999999577` where
-the value is `−0.4999999991` (8e−8 relative), at `s = −1e−6` the error is
-1.2e−11. The interpreter's `Zeta(-1e-9).N()` is correct (it uses big
-decimals), but the compiled `Zeta` and the compiled `PolyLog(s, 1)` use the
-machine kernel and return the wrong digits. The loss probably comes from the
-reflection formula, which multiplies `sin(πs/2)` (near 0) by `ζ(1 − s)` (near
-its pole).
-
+approaches 0 from below: at `s = −1e−9` they return `−0.4999999577` where the
+value is `−0.4999999991` (8e−8 relative), at `s = −1e−6` the error is 1.2e−11.
+The interpreter's `Zeta(-1e-9).N()` is correct (it uses big decimals), but the
+compiled `Zeta` and the compiled `PolyLog(s, 1)` use the machine kernel and
+return the wrong digits. The loss probably comes from the reflection formula,
+which multiplies `sin(πs/2)` (near 0) by `ζ(1 − s)` (near its pole).

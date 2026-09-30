@@ -7,7 +7,13 @@ import type {
 
 import { permutations } from '../../common/utils.js';
 
-import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
+import {
+  isWildcard,
+  NUMBER_LITERAL_SYMBOLS,
+  numberPatternMatches,
+  wildcardName,
+  wildcardType,
+} from './pattern-utils.js';
 import { isOperatorDef } from './utils.js';
 import { sameSyntactic } from './compare.js';
 import {
@@ -156,7 +162,7 @@ function matchOnce(
   //
   if (isNumber(pattern)) {
     if (!isNumber(expr)) return null;
-    if (pattern.isEqual(expr)) return substitution;
+    if (numberPatternMatches(pattern, expr)) return substitution;
 
     // Attempt to match the expression to a variant of the pattern
     // (e.g. `5` to `5+_`).
@@ -179,6 +185,14 @@ function matchOnce(
   if (isSymbol(pattern)) {
     const symbol = pattern.symbol;
     if (isSymbol(expr) && symbol === expr.symbol) return substitution;
+    // A raw pattern keeps `NaN` or `PositiveInfinity` as a symbol, but the
+    // subject is the number literal the symbol boxes to.
+    if (
+      isNumber(expr) &&
+      NUMBER_LITERAL_SYMBOLS.has(symbol) &&
+      numberPatternMatches(expr.engine.box(symbol), expr)
+    )
+      return substitution;
     // Match the symbol to a variant of the pattern
     // (e.g. `x` to `0+x`).
     if (!acceptVariants) return null;

@@ -189,17 +189,24 @@ describe('the variance family', () => {
   });
 
   test('infinite data has no variance — the `nan` arm, not an infinite one', () => {
-    // Every deviation from an infinite mean is `∞ − ∞`. This is why the
+    // Every deviation from an infinite mean is `∞ − ∞`, the indeterminate
+    // form: `Indeterminate`, or `NaN` with a float datum. This is why the
     // declared result has no infinite arm where `Median` and `Mode` do.
     const ce = new ComputeEngine();
     for (const h of HEADS) {
       expect(
         `${h}: ${evaluated(ce, [h, ['List', 1, 'PositiveInfinity', 3]])}`
-      ).toBe(`${h}: NaN`);
+      ).toBe(`${h}: Indeterminate`);
       expect(
         `${h}: ${evaluated(ce, [
           h,
           ['List', 'PositiveInfinity', 'PositiveInfinity'],
+        ])}`
+      ).toBe(`${h}: Indeterminate`);
+      expect(
+        `${h}: ${evaluated(ce, [
+          h,
+          ['List', { num: '1.5' }, 'PositiveInfinity', 3],
         ])}`
       ).toBe(`${h}: NaN`);
     }
@@ -254,11 +261,16 @@ describe('Kurtosis and Skewness', () => {
 
   test('a standardized moment has no infinite arm', () => {
     // The numerator and the denominator are both non-finite for infinite
-    // data, so the quotient is `NaN` rather than an infinity.
-    for (const h of ['Kurtosis', 'Skewness'])
+    // data, so the quotient is the indeterminate form rather than an
+    // infinity: `Indeterminate`, or `NaN` with a float datum.
+    for (const h of ['Kurtosis', 'Skewness']) {
       expect(
         `${h}: ${evaluated(ce, [h, ['List', 1, 'PositiveInfinity', 3]])}`
+      ).toBe(`${h}: Indeterminate`);
+      expect(
+        `${h}: ${evaluated(ce, [h, ['List', { num: '1.5' }, 'PositiveInfinity', 3]])}`
       ).toBe(`${h}: NaN`);
+    }
   });
 
   test('skewness is signed, so the real arm carries no range', () => {
