@@ -43,30 +43,17 @@ describe('DMS Parsing', () => {
   });
 
   test('parse DMS with \\doubleprime', () => {
-    check('9°30\\prime 15\\doubleprime', [
-      'Degrees',
-      ['Rational', 2281, 240],
-    ]);
+    check('9°30\\prime 15\\doubleprime', ['Degrees', ['Rational', 2281, 240]]);
   });
 
   test('parse DMS seconds with two postfix \\prime tokens', () => {
-    check('9°30\\prime 15\\prime\\prime', [
-      'Degrees',
-      ['Rational', 2281, 240],
-    ]);
+    check('9°30\\prime 15\\prime\\prime', ['Degrees', ['Rational', 2281, 240]]);
   });
 
   test('parse DMS via \\degree trigger', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse("9\\degree 30'", { form: 'raw' });
     expect(expr.json).toEqual(['Degrees', ['Rational', 19, 2]]);
-  });
-
-  test('parse DMS with \\minute and \\second', () => {
-    check('9\\degree 30\\minute 15\\second', [
-      'Degrees',
-      ['Rational', 2281, 240],
-    ]);
   });
 
   test('parse DMS with superscript arc markers', () => {
@@ -83,8 +70,54 @@ describe('DMS Parsing', () => {
     ]);
   });
 
-  test('parse DMS degrees and minutes with \\minute', () => {
-    check('9\\degree 30\\minute', ['Degrees', ['Rational', 19, 2]]);
+  test('parse DMS seconds with two ASCII apostrophes', () => {
+    check("9°30'15''", ['Degrees', ['Rational', 2281, 240]]);
+  });
+
+  test('`\\minute` and `\\second` are not arc markers (siunitx time units)', () => {
+    // The angle stops at the degrees: the number that follows is not read
+    // as minutes or seconds, whatever becomes of the command itself.
+    const ce = new ComputeEngine();
+    const minute = ce.parse('9\\degree 30\\minute', { form: 'raw' }).json;
+    expect(minute).not.toEqual(['Degrees', ['Rational', 19, 2]]);
+    expect(JSON.stringify(minute)).toContain('["Degrees",9]');
+    const second = ce.parse("9°30'15\\second", { form: 'raw' }).json;
+    expect(second).not.toEqual(['Degrees', ['Rational', 2281, 240]]);
+    expect(JSON.stringify(second)).toContain('["Degrees",["Rational",19,2]]');
+  });
+});
+
+describe('DMS Parsing: seconds with the minutes omitted', () => {
+  // `9°30"` is 9 degrees and 30 seconds = 9 + 30/3600 = 1081/120 degrees.
+  // The seconds marker is tested before the minute marker: `''` and
+  // `\prime\prime` begin with a minute marker, and reading the first half
+  // as minutes left a stray prime that made the whole angle a derivative.
+  const SPELLINGS = [
+    '9°30"',
+    "9°30''",
+    '9°30\\prime\\prime',
+    '9°30\\doubleprime',
+    '9^{\\circ}30^{\\prime\\prime}',
+    '9^{\\circ}30^{\\doubleprime}',
+    '9\\degree 30\\doubleprime',
+  ];
+  for (const latex of SPELLINGS) {
+    test(`parse ${latex}`, () => {
+      check(latex, ['Degrees', ['Rational', 1081, 120]]);
+    });
+  }
+
+  test('symbolic degrees with seconds only', () => {
+    check('x°30"', [
+      'Add',
+      ['Quantity', 'x', 'deg'],
+      ['Quantity', 30, 'arcsec'],
+    ]);
+  });
+
+  test('a minute marker still reads as minutes', () => {
+    check("9°30'", ['Degrees', ['Rational', 19, 2]]);
+    check('9°30\\prime', ['Degrees', ['Rational', 19, 2]]);
   });
 });
 
@@ -100,9 +133,26 @@ describe('Prime Disambiguation', () => {
   test('degree followed by separate function with prime', () => {
     // 9° followed by f'(x) - they should be separate
     const ce = new ComputeEngine();
-    const expr = ce.parse('9° f\'(x)');
+    const expr = ce.parse("9° f'(x)");
     // Should parse as multiplication or sequence, not as DMS
-    expect(expr.json).not.toContain('arcmin');
+    expect(JSON.stringify(expr.json)).not.toContain('arcmin');
+  });
+
+  test('a derivative after a DMS angle is not read as arc-seconds', () => {
+    // The seconds marker is tested before the minute marker, and `''` is a
+    // seconds marker: it must still bind to `f`, not to the angle. Every
+    // marker check runs only after a NUMBER has been read, so `f` ends the
+    // angle and restores the position.
+    check("9°30' f''(x)", [
+      'InvisibleOperator',
+      ['Degrees', ['Rational', 19, 2]],
+      ['Apply', ['Derivative', 'f', 2], 'x'],
+    ]);
+    check("9° f''(x)", [
+      'InvisibleOperator',
+      ['Degrees', 9],
+      ['Apply', ['Derivative', 'f', 2], 'x'],
+    ]);
   });
 });
 
@@ -119,10 +169,7 @@ describe('Negative Angles', () => {
   });
 
   test('negative full DMS', () => {
-    check('-45°30\'15"', [
-      'Negate',
-      ['Degrees', ['Rational', 10921, 240]],
-    ]);
+    check('-45°30\'15"', ['Negate', ['Degrees', ['Rational', 10921, 240]]]);
   });
 
   test('Negate(Quantity) evaluates correctly', () => {
@@ -136,7 +183,7 @@ describe('Negative Angles', () => {
 describe('DMS Arithmetic', () => {
   test('add two DMS angles', () => {
     const ce = new ComputeEngine();
-    const expr = ce.parse("9°0'0\" + 1°0'0\"");
+    const expr = ce.parse('9°0\'0" + 1°0\'0"');
     expect(expr.simplify().latex).toBe('\\frac{\\pi}{18}');
   });
 
@@ -169,7 +216,7 @@ describe('Edge Cases', () => {
   });
 
   test('zero components', () => {
-    check("0°0'0\"", ['Degrees', 0]);
+    check('0°0\'0"', ['Degrees', 0]);
   });
 
   test('minutes only (no degree symbol) is derivative', () => {

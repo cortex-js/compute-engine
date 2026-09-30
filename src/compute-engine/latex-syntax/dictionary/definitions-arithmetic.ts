@@ -1643,16 +1643,53 @@ function serializePower(
 }
 
 /**
+ * Consume an arc-minute marker at the parser's position: `'`, `\prime`,
+ * `^{\prime}`, `^\prime`. Tried only AFTER {@link matchArcSecondMarker} has
+ * declined, because the two-glyph second markers (`''`, `\prime\prime`) begin
+ * with a minute marker.
+ */
+function matchArcMinuteMarker(parser: Parser): boolean {
+  return (
+    parser.match("'") ||
+    parser.match('\\prime') ||
+    parser.matchAll(['^', '<{>', '\\prime', '<}>']) ||
+    parser.matchAll(['^', '\\prime'])
+  );
+}
+
+/**
+ * Consume an arc-second marker at the parser's position: `"`, `''`,
+ * `\prime\prime`, `\doubleprime`, `^{\doubleprime}`, `^{\prime\prime}`,
+ * `^\doubleprime`.
+ */
+function matchArcSecondMarker(parser: Parser): boolean {
+  return (
+    parser.match('"') ||
+    parser.matchAll(["'", "'"]) ||
+    parser.matchAll(['\\prime', '\\prime']) ||
+    parser.match('\\doubleprime') ||
+    parser.matchAll(['^', '<{>', '\\doubleprime', '<}>']) ||
+    parser.matchAll(['^', '<{>', '\\prime', '\\prime', '<}>']) ||
+    parser.matchAll(['^', '\\doubleprime'])
+  );
+}
+
+/**
  * Parse degrees-minutes-seconds (DMS) angle notation.
  *
  * Degree markers: °, \degree, ^{\circ}, ^\circ
- * Minute markers: ', \prime, \minute, ^{\prime}, ^\prime
- * Second markers: ", \doubleprime, \prime\prime, \second,
+ * Minute markers: ', \prime, ^{\prime}, ^\prime
+ * Second markers: ", '', \prime\prime, \doubleprime,
  *                 ^{\doubleprime}, ^{\prime\prime}, ^\doubleprime
  *
- * A minute marker is recognized only after a degree marker, and a second
- * marker only after a recognized minute component. This context avoids
- * confusing arc markers with Prime (derivative) notation.
+ * The `siunitx` commands `\minute` and `\second` are NOT markers: in that
+ * package they are the TIME units (min, s); its angle units are `\arcminute`
+ * and `\arcsecond`. Neither pair renders in MathLive or KaTeX.
+ *
+ * A minute or second marker is recognized only after a degree marker, and a
+ * second marker also after a recognized minute component. This context avoids
+ * confusing arc markers with Prime (derivative) notation. The minutes may be
+ * omitted: `9°30"` is 9 degrees and 30 seconds.
  *
  * When all components are numeric, returns exact rational degrees
  * (3600·d + 60·m + s) / 3600 so downstream exact arithmetic works
@@ -1661,55 +1698,47 @@ function serializePower(
 function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
   parser.skipSpace();
 
-  // Check for arc-minutes: 30'
+  // The number after the degree marker is minutes or seconds, depending on
+  // the marker that follows it.
   const savepoint = parser.index;
-  const minExpr = parser.parseNumber();
-
-  let minNum: number | null = null;
-  let secNum: number | null = null;
-
-  if (
-    minExpr !== null &&
-    (parser.match("'") ||
-      parser.match('\\prime') ||
-      parser.match('\\minute') ||
-      parser.matchAll(['^', '<{>', '\\prime', '<}>']) ||
-      parser.matchAll(['^', '\\prime']))
-  ) {
-    // Found arc-minutes
-    minNum = machineValue(minExpr);
-    parser.skipSpace();
-
-    // Check for arc-seconds: 15"
-    const secSavepoint = parser.index;
-    const secExpr = parser.parseNumber();
-
-    if (
-      secExpr !== null &&
-      (parser.match('"') ||
-        parser.matchAll(['\\prime', '\\prime']) ||
-        parser.match('\\doubleprime') ||
-        parser.match('\\second') ||
-        parser.matchAll(['^', '<{>', '\\doubleprime', '<}>']) ||
-        parser.matchAll(['^', '<{>', '\\prime', '\\prime', '<}>']) ||
-        parser.matchAll(['^', '\\doubleprime']))
-    ) {
-      secNum = machineValue(secExpr);
-    } else {
-      // No arc-seconds, restore position
-      parser.index = secSavepoint;
-    }
-  } else {
-    // No arc-minutes, restore position
+  const first = parser.parseNumber();
+  if (first === null) {
     parser.index = savepoint;
     return ['Degrees', lhs];
   }
 
-  // Compute exact rational degrees when d and m are numeric.
+  let minExpr: MathJsonExpression | null = null;
+  let secExpr: MathJsonExpression | null = null;
+
+  // Seconds are tested BEFORE minutes: `''` and `\prime\prime` begin with a
+  // minute marker, so testing minutes first read `9°30''` as 30 minutes
+  // followed by a stray prime, which turned the whole angle into a
+  // derivative.
+  if (matchArcSecondMarker(parser)) {
+    // `9°30"`: the minutes are omitted.
+    secExpr = first;
+  } else if (matchArcMinuteMarker(parser)) {
+    minExpr = first;
+    parser.skipSpace();
+
+    // Check for arc-seconds: 15"
+    const secSavepoint = parser.index;
+    const next = parser.parseNumber();
+    if (next !== null && matchArcSecondMarker(parser)) secExpr = next;
+    else parser.index = secSavepoint;
+  } else {
+    // Neither marker: the number is not part of the angle.
+    parser.index = savepoint;
+    return ['Degrees', lhs];
+  }
+
+  // Compute exact rational degrees when every component is numeric.
   // This avoids Negate(Add(Quantity...)) which fails canonicalization.
   const degNum = machineValue(lhs);
-  if (degNum !== null && minNum !== null) {
-    const totalSec = 3600 * degNum + 60 * minNum + (secNum ?? 0);
+  const minNum = minExpr === null ? 0 : machineValue(minExpr);
+  const secNum = secExpr === null ? 0 : machineValue(secExpr);
+  if (degNum !== null && minNum !== null && secNum !== null) {
+    const totalSec = 3600 * degNum + 60 * minNum + secNum;
     // Decimal components (9°30.5', 9°30'15.5") make totalSec non-integer:
     // recover the exact decimal as a scaled rational, or fall back to
     // decimal degrees as a float.
@@ -1722,8 +1751,8 @@ function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
 
   // Fallback for symbolic values: return structured Add form
   const parts: MathJsonExpression[] = [['Quantity', lhs, 'deg']];
-  parts.push(['Quantity', minExpr!, 'arcmin']);
-  if (secNum !== null) parts.push(['Quantity', secNum, 'arcsec']);
+  if (minExpr !== null) parts.push(['Quantity', minExpr, 'arcmin']);
+  if (secExpr !== null) parts.push(['Quantity', secExpr, 'arcsec']);
   return ['Add', ...parts];
 }
 
@@ -1803,7 +1832,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return joinLatex([serializer.serialize(arg), '\\degree']);
     },
   },
-  // Superscript triggers omit precedence because grouping controls their binding.
+  // No `precedence` on the superscript entries: the dictionary validator
+  // (`definitions.ts`) fixes the precedence of a `^`/`_` trigger at 720 and
+  // asserts (`console.assert`, "'precedence' is fixed and cannot be modified
+  // with ^ and _ triggers") that the entry does not set one, since LaTeX
+  // grouping rules, not operator precedence, govern how such a trigger binds.
   {
     latexTrigger: ['^', '<{>', '\\circ', '<}>'],
     kind: 'postfix',
