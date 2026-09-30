@@ -50,6 +50,8 @@ import {
   toBigint,
   toInteger,
   provablyNonFiniteNumber,
+  nearJumpTolerance,
+  isNearRoundingJumpValue,
 } from '../boxed-expression/numerics.js';
 import { addOrder } from '../boxed-expression/order.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
@@ -368,6 +370,10 @@ import {
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
 import { cmp, exactOrder } from '../boxed-expression/compare.js';
+import {
+  isExactRealLiteral,
+  exactRealValueOf,
+} from '../boxed-expression/constraint-subject.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { expand } from '../boxed-expression/expand.js';
 import {
@@ -539,6 +545,189 @@ function roundExactReal(x: Expression, mode: RoundingMode): bigint | undefined {
 }
 
 /**
+ * True when the float `x` is so near a point where the rounding `mode`
+ * jumps (an integer for `floor`, `ceil` and `trunc`, a half-integer for
+ * `round`) that its rounding error can put it on the wrong side of that
+ * point. The distance is relative to `max(1, |x|)` (`nearJumpTolerance()`),
+ * so a float with no fractional digits left (`1.55e25` at 21 digits) is
+ * always near a jump.
+ */
+function isNearRoundingJump(x: Expression, mode: RoundingMode): boolean {
+  if (!isNumber(x) || x.isExact || x.isComplex || x.isFinite !== true)
+    return false;
+  return isNearRoundingJumpValue(x.engine, x.re, mode === 'round');
+}
+
+/**
+ * Under `.N()`, the exact value of the operand of a rounding function, or
+ * `undefined` when the numeric operand `x` decides the result.
+ *
+ * `x` is the operand after its numeric approximation, and `original` is the
+ * same operand before it. `.N()` promises a result correct to the working
+ * precision, and a rounding function jumps at a point: the float of an exact
+ * operand near that point can be on its other side. The float of
+ * `(25! − 1)/24!` at 21 digits is `25`, but its floor is `24`. So an exact
+ * operand is rounded exactly (`roundExactReal()`), as Mathematica does
+ * (`N[Floor[(25! − 1)/24!]]` is `24.`).
+ *
+ * An exact literal operand is always used, because this costs nothing. An
+ * expression is evaluated again, exactly, only when `x` is near a jump
+ * (`isNearRoundingJump()`) and the expression is pure
+ * (`exactRealValueOf()`): an exact evaluation can cost much more than the
+ * numeric one (the exact sum of 1000 fractions), and far from a jump the
+ * float decides the result.
+ */
+function exactRoundingOperand(
+  x: Expression,
+  mode: RoundingMode,
+  original: Expression | undefined
+): Expression | undefined {
+  if (isExactRealLiteral(x)) return x;
+  if (original === undefined) return undefined;
+  if (isNumber(original) || isNearRoundingJump(x, mode))
+    return exactRealValueOf(original);
+  return undefined;
+}
+
+/**
+ * Under `.N()`, the operand of a function that jumps at 0 (`Sign`,
+ * `Heaviside`): the exact value of the operand when the float `x` does not
+ * decide the result, and `x` otherwise.
+ *
+ * The float of an exact operand near 0 can have the wrong sign, because its
+ * rounding error can be larger than its value. So when the float is near 0
+ * (or the operand is an exact literal), the operand is evaluated again
+ * exactly (`exactRealValueOf()`, pure operands only), and an exact real
+ * value gives the exact sign.
+ */
+function exactZeroJumpOperand(
+  x: Expression,
+  numericApproximation: boolean | undefined,
+  expression: Expression | undefined
+): Expression {
+  if (!numericApproximation || isExactRealLiteral(x)) return x;
+  const original = originalOperand(expression, 0);
+  if (
+    original !== undefined &&
+    (isNumber(original) ||
+      (isNumber(x) &&
+        !x.isComplex &&
+        x.isFinite === true &&
+        Math.abs(x.re) <= nearJumpTolerance(x.engine)))
+  )
+    return exactRealValueOf(original) ?? x;
+  return x;
+}
+
+/**
+ * Under `.N()`, the value of `Mod(a, m)` computed from the EXACT values of
+ * its operands and then approximated, or `undefined` when the floats `a`
+ * and `m` decide the result.
+ *
+ * `Mod(a, m) = a − m·⌊a/m⌋` jumps where `a/m` is an integer, and the float
+ * of an exact operand near such a point can be on its other side: at 21
+ * digits, the float of `(25! − 1)/24!` is `25`, so `Mod` of it by `1` was
+ * `0`, but its exact value is `1 − 1/24!`. So the exact values of both
+ * operands are used when both are known. An exact literal is always used,
+ * because this costs nothing. An expression is evaluated again, exactly,
+ * only when `a/m` is near an integer and the expression is pure
+ * (`exactRealValueOf()`).
+ *
+ * The result is the exact remainder approximated. When `a` or `m` is a
+ * float, an integer result is boxed as a float, as the numeric result is:
+ * the form of the result must not depend on which of the two ways computed
+ * it.
+ */
+function exactModUnderN(
+  a: Expression,
+  m: Expression,
+  expression: Expression | undefined
+): Expression | undefined {
+  const ce = a.engine;
+  const near =
+    isNumber(a) &&
+    isNumber(m) &&
+    !a.isComplex &&
+    !m.isComplex &&
+    a.isFinite === true &&
+    m.isFinite === true &&
+    m.re !== 0 &&
+    isNearRoundingJumpValue(ce, a.re / m.re, false);
+  const exactOf = (x: Expression, index: number): Expression | undefined => {
+    if (isExactRealLiteral(x)) return x;
+    const original = originalOperand(expression, index);
+    if (original === undefined) return undefined;
+    if (isNumber(original) || near) return exactRealValueOf(original);
+    return undefined;
+  };
+  const ea = exactOf(a, 0);
+  if (ea === undefined) return undefined;
+  const em = exactOf(m, 1);
+  if (em === undefined || em.isSame(0)) return undefined;
+  const k = roundExactReal(
+    ce.function('Divide', [ea, em]).evaluate(),
+    'floor'
+  );
+  if (k === undefined) return undefined;
+  const exact = ce
+    .function('Add', [
+      ea,
+      ce.function('Multiply', [ce.number(-k), em]),
+    ])
+    .evaluate();
+  if (!isExactRealLiteral(exact)) return undefined;
+  const fromFloat =
+    (isNumber(a) && !a.isExact) || (isNumber(m) && !m.isExact);
+  const n = exact.isInteger ? roundExactReal(exact, 'floor') : undefined;
+  if (fromFloat && n !== undefined)
+    return ce.number(ce._numericValue(new BigDecimal(n.toString())));
+  return exact.N();
+}
+
+/** The operand at `index` of the expression that an `evaluate` handler
+ * receives in its options, before the operands were evaluated. */
+function originalOperand(
+  expression: Expression | undefined,
+  index: number
+): Expression | undefined {
+  if (expression === undefined || !isFunction(expression)) return undefined;
+  return expression.ops[index];
+}
+
+/**
+ * Whether `x` is in the relation `rel` with `k`, for the `sgn` handlers of
+ * the rounding functions: `true`, `false`, or `undefined` when it is not
+ * known.
+ *
+ * For an operand with no unknowns the order is exact (`exactOrder()`). The
+ * predicates `isLess()` and `isGreaterEqual()` compare two exact numbers
+ * exactly, but a constant that is not an exact number (`π − 3`) within the
+ * engine tolerance: with a tolerance, a value within `10⁻¹⁰` of `1/2` is
+ * equal to `1/2`, and the sign of its `Round` can be wrong. For an operand
+ * with unknowns (a symbol with assumed bounds), or when the exact order is
+ * not known, the predicates are used.
+ */
+function isOrdered(
+  x: Expression,
+  rel: '<' | '<=' | '>' | '>=',
+  k: Expression
+): boolean | undefined {
+  if (x.unknowns.length === 0) {
+    const order = exactOrder(x, k);
+    if (order !== undefined) {
+      if (rel === '<') return order < 0;
+      if (rel === '<=') return order <= 0;
+      if (rel === '>') return order > 0;
+      return order >= 0;
+    }
+  }
+  if (rel === '<') return x.isLess(k);
+  if (rel === '<=') return x.isLessEqual(k);
+  if (rel === '>') return x.isGreater(k);
+  return x.isGreaterEqual(k);
+}
+
+/**
  * Rounds a real number to an integer with `fn` (machine lane) or `bigFn`
  * (big-decimal lane), and boxes a finite result as an EXACT integer, also
  * when the argument is a float.
@@ -570,11 +759,23 @@ function applyRounding(
   mode: RoundingMode,
   fn: (x: number) => number,
   bigFn: (x: BigDecimal) => BigDecimal,
-  numericApproximation: boolean | undefined
+  numericApproximation: boolean | undefined,
+  original?: Expression
 ): Expression | undefined {
-  if (!numericApproximation) {
-    const exact = roundExactReal(x, mode);
-    if (exact !== undefined) return x.engine.number(exact);
+  // Under `.N()`, an operand whose exact value is known is rounded exactly
+  // too (`exactRoundingOperand()`). The integer is then boxed as a float, as
+  // the result of `.N()` is when the operand is approximated: the form of the
+  // result must not depend on which of the two ways computed it.
+  const exactOperand = numericApproximation
+    ? exactRoundingOperand(x, mode, original)
+    : x;
+  if (exactOperand !== undefined) {
+    const exact = roundExactReal(exactOperand, mode);
+    if (exact !== undefined) {
+      const ce = x.engine;
+      if (!numericApproximation) return ce.number(exact);
+      return ce.number(ce._numericValue(new BigDecimal(exact.toString())));
+    }
   }
   const result = apply(x, fn, bigFn);
   if (numericApproximation) return result;
@@ -3229,20 +3430,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       sgn: ([x]) => {
-        if (x.isLessEqual(-1)) return 'negative';
+        const minusOne = x.engine.NegativeOne;
+        if (isOrdered(x, '<=', minusOne)) return 'negative';
         if (x.isPositive) return 'positive';
         if (x.isNonNegative) return 'non-negative';
-        if (x.isNonPositive && x.isGreater(-1)) return 'zero';
+        if (x.isNonPositive && isOrdered(x, '>', minusOne)) return 'zero';
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x], { numericApproximation }) =>
+      evaluate: ([x], { numericApproximation, expression }) =>
         applyRounding(
           x,
           'ceil',
           Math.ceil,
           (x) => x.ceil(),
-          numericApproximation
+          numericApproximation,
+          originalOperand(expression, 0)
         ),
     },
 
@@ -4037,19 +4240,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       sgn: ([x]) => {
+        const one = x.engine.One;
         if (x.isNegative) return 'negative';
-        if (x.isGreaterEqual(1)) return 'positive';
-        if (x.isNonNegative && x.isLess(1)) return 'zero';
+        if (isOrdered(x, '>=', one)) return 'positive';
+        if (x.isNonNegative && isOrdered(x, '<', one)) return 'zero';
         if (x.isNonNegative) return 'non-negative';
         return undefined;
       },
-      evaluate: ([x], { numericApproximation }) =>
+      evaluate: ([x], { numericApproximation, expression }) =>
         applyRounding(
           x,
           'floor',
           Math.floor,
           (x) => x.floor(),
-          numericApproximation
+          numericApproximation,
+          originalOperand(expression, 0)
         ),
     },
 
@@ -4105,7 +4310,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return 'non-negative';
         return undefined;
       },
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: ([x], { numericApproximation, engine: ce, expression }) => {
         // Exact fractional part for an exact real argument: x - floor(x),
         // computed exactly (rational arithmetic) so `Fract(1/2) → 1/2`, not
         // `0.5`. Only an inexact (float) argument numericizes.
@@ -4113,6 +4318,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const fl = ce.function('Floor', [x]).evaluate();
           if (isNumber(fl) && fl.isExact)
             return ce.function('Subtract', [x, fl]).evaluate();
+        }
+        // Under `.N()`, an operand whose exact value is known
+        // (`exactRoundingOperand()`) has its fractional part computed
+        // exactly, and the result is approximated. The float of
+        // `(25! − 1)/3` at 21 digits has no fractional digits left, so
+        // `x − floor(x)` of the float is `0`, not `0.666…`.
+        if (numericApproximation) {
+          const exact = exactRoundingOperand(
+            x,
+            'floor',
+            originalOperand(expression, 0)
+          );
+          const k =
+            exact === undefined ? undefined : roundExactReal(exact, 'floor');
+          if (exact !== undefined && k !== undefined)
+            return ce
+              .function('Subtract', [exact, ce.number(k)])
+              .evaluate()
+              .N();
         }
         return apply(
           x,
@@ -5362,7 +5586,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: ([a, b], { engine: ce }) => {
+      evaluate: ([a, b], { engine: ce, numericApproximation, expression }) => {
+        // Under `.N()`, `Mod` jumps where `a/b` is an integer: the exact
+        // values of exact operands are used near such a point
+        // (`exactModUnderN()`).
+        if (numericApproximation) {
+          const exact = exactModUnderN(a, b, expression);
+          if (exact !== undefined) return exact;
+        }
         // A float operand makes the result a float, even when its value is
         // an integer (`Mod(7.0, 3)` is the float `1`): the exact paths below
         // are for exact operands only, and a float operand takes the float
@@ -7254,14 +7485,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return exact > 0n ? 'positive' : exact < 0n ? 'negative' : 'zero';
           return numberSgn(roundHalfAway(x.re));
         }
-        if (x.isGreaterEqual(0.5)) return 'positive';
-        if (x.isLessEqual(-0.5)) return 'negative';
-        if (x.isLess(0.5) && x.isGreater(-0.5)) return 'zero';
+        const half = x.engine.number([1, 2]);
+        const minusHalf = x.engine.number([-1, 2]);
+        if (isOrdered(x, '>=', half)) return 'positive';
+        if (isOrdered(x, '<=', minusHalf)) return 'negative';
+        if (isOrdered(x, '<', half) && isOrdered(x, '>', minusHalf))
+          return 'zero';
         if (x.isNonNegative) return 'non-negative';
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x, n], { engine: ce, numericApproximation }) => {
+      evaluate: ([x, n], { engine: ce, numericApproximation, expression }) => {
         // A half rounds AWAY FROM ZERO at every precision (`Round(-0.5)` is
         // `-1`, `Round(2.5)` is `3`; user decision, 2026-09-21). The
         // big-number lane `BigDecimal.round()` already does that; the machine
@@ -7272,18 +7506,40 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // so the precision form divides two exact numbers and its result is
         // an exact rational (`Round(3.14159, 2)` is `157/50`, as in
         // Mathematica).
-        const roundToInteger = (v: Expression) =>
+        const original = originalOperand(expression, 0);
+        const roundToInteger = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
             'round',
             roundHalfAway,
             (v) => v.round(),
-            numericApproximation
+            numericApproximation,
+            original
           );
-        if (n === undefined) return roundToInteger(x);
+        if (n === undefined) return roundToInteger(x, original);
         // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places.
         if (!isNumber(n) || n.isFinite !== true) return undefined;
         const factor = ce.number(10).pow(n);
+        if (numericApproximation) {
+          // Under `.N()`, an operand whose exact value is known is rounded
+          // exactly, as without `.N()`, and the RESULT is approximated
+          // (`exactRoundingOperand()` says when the exact value is used).
+          // The jump test reads the scaled float `x·10ⁿ`.
+          const scaledFloat = x.mul(factor);
+          const exactX = isExactRealLiteral(x)
+            ? x
+            : original !== undefined &&
+                (isNumber(original) || isNearRoundingJump(scaledFloat, 'round'))
+              ? exactRealValueOf(original)
+              : undefined;
+          const k =
+            exactX === undefined
+              ? undefined
+              : roundExactReal(exactX.mul(factor), 'round');
+          if (k !== undefined) return ce.number(k).div(factor).N();
+          const scaled = roundToInteger(scaledFloat);
+          return scaled === undefined ? undefined : scaled.div(factor);
+        }
         const scaled = roundToInteger(x.mul(factor));
         return scaled === undefined ? undefined : scaled.div(factor);
       },
@@ -7325,10 +7581,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // channel can be probed before validation settles, so the guard
       // stays: extended realness, matching the carrier.
       sgn: ([x]) => (x.type.facts.extendedReal ? 'non-negative' : undefined),
-      evaluate: ([x], { engine }) => {
+      evaluate: ([x], { engine, numericApproximation, expression }) => {
         // Only mathematics: the NaN arm this handler used to carry is the
         // generic policy gate's job now (`nanBehavior: 'propagate'`
         // above), and an off-carrier operand never reaches this handler.
+        //
+        // Under `.N()`, H jumps at 0, as `Sign` does: the exact value of an
+        // exact operand near 0 is used (`exactZeroJumpOperand()`).
+        x = exactZeroJumpOperand(x, numericApproximation, expression);
         if (x.isSame(0)) return engine.Half;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.Zero;
@@ -7403,10 +7663,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // extended real — the sign channel answers `unsigned`/`undefined`,
       // never a direction, for an operand not proven on the real line.
       sgn: ([x]) => x.sgn,
-      evaluate: ([x], { engine, numericApproximation }) => {
+      evaluate: ([x], { engine, numericApproximation, expression }) => {
         // Only mathematics: the NaN arm this handler used to carry is the
         // generic policy gate's job now (`nanBehavior: 'propagate'`
         // above), and an off-carrier operand never reaches this handler.
+        //
+        // Under `.N()`, the sign jumps at 0, and the float of an exact
+        // operand near 0 can have the wrong sign: the exact value of the
+        // operand is used then (`exactZeroJumpOperand()`).
+        x = exactZeroJumpOperand(x, numericApproximation, expression);
         if (x.isSame(0)) return engine.Zero;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.NegativeOne;
@@ -7719,20 +7984,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // trunc(x) = 0 for |x| < 1, so the sign of x alone is not enough
       // (trunc(1/2) = 0, not positive). Mirror the Floor/Ceil interval logic.
       sgn: ([x]) => {
-        if (x.isGreaterEqual(1)) return 'positive';
-        if (x.isLessEqual(-1)) return 'negative';
-        if (x.isGreater(-1) && x.isLess(1)) return 'zero';
+        const one = x.engine.One;
+        const minusOne = x.engine.NegativeOne;
+        if (isOrdered(x, '>=', one)) return 'positive';
+        if (isOrdered(x, '<=', minusOne)) return 'negative';
+        if (isOrdered(x, '>', minusOne) && isOrdered(x, '<', one))
+          return 'zero';
         if (x.isNonNegative) return 'non-negative';
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x], { numericApproximation }) =>
+      evaluate: ([x], { numericApproximation, expression }) =>
         applyRounding(
           x,
           'trunc',
           Math.trunc,
           (x) => x.trunc(),
-          numericApproximation
+          numericApproximation,
+          originalOperand(expression, 0)
         ),
     },
   },

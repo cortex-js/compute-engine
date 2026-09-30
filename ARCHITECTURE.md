@@ -756,6 +756,86 @@ fall back to floating or arbitrary precision when needed.
   and numeric integration/extrapolation. Complex numbers use the `complex-esm`
   package.
 
+### What `.N()` promises (user decision 2026-09-30)
+
+`evaluate()` returns the most exact form. `.N()` (the same as
+`evaluate({ numericApproximation: true })`) promises a **result** that is a
+numeric value correct to the working precision. It does NOT promise that every
+intermediate step is a float: a handler may compute exactly and approximate only
+its result, and several already do (`HurwitzZeta` at a negative integer order
+and `DivisorSum` return `numericApproximation ? exact.N() : exact`).
+Canonicalization also folds exact arithmetic before `.N()` runs, so
+`((1/3)·3).N()` is `1` and `((25! − 1) − 25!).N()` is `-1`.
+
+For most functions the order does not matter: a continuous function of an
+operand that is correct to the working precision is itself correct to about the
+working precision, so approximating the operands first is allowed, and it is
+usually faster.
+
+A function whose result **jumps** at a point is different. A change of the
+operand smaller than the working precision can move the result across the jump,
+and the answer is then wrong, not only less precise. With `b = 25! − 1`, the
+value `b/24!` is just below `25`; at 21 digits it rounds to `25`, so a `Floor`
+of the approximation is `25`, not `24`. These functions therefore read an EXACT
+operand (an integer, a rational, or a rational multiple of a square root)
+exactly, also under `.N()`, and only then approximate the result:
+
+- the rounding family `Floor`, `Ceil`, `Round`, `Truncate` (with
+  `roundExactReal` in `library/arithmetic.ts`), the precision form
+  `Round(x, n)`, and `Fract`;
+- the comparisons `Less`, `LessEqual`, `Greater`, `GreaterEqual`, `Equal`,
+  `NotEqual`;
+- `Sign`, `Heaviside` (jumps at 0) and `Mod` (jumps where `x/m` is an
+  integer).
+
+To keep `.N()` fast, the operand is still approximated first. The handler
+evaluates the original operand again, exactly, in two cases only: when it is
+already an exact number (which costs nothing), or when the approximation is
+within `max(tolerance, 10⁻¹⁰)·max(1, |v|)` of a point where the function jumps
+and the operand is pure (no random draw, no assignment), so a second evaluation
+has no side effect (`exactRoundingOperand()` in `library/arithmetic.ts`,
+`exactPairAtNearTie()` in `library/relational-operator.ts`). Evaluating every
+operand exactly first, as Mathematica does, was too slow (an exact
+`Sum(1/k², k, 1, 1000)` takes 80 ms, against 5 ms approximated) and changed the
+method of some operators (`Integrate` found the antiderivative instead of
+integrating numerically). An approximation whose error is larger than that band
+is not detected.
+
+The same rule applies when one of these functions is applied element-wise to a
+list or a tuple (`Floor(Range(1, 3)/3).N()` is `[0, 0, 1]`, although at 21
+digits `(1/3)·3` is `0.999…`): the element cells are built from the exact
+elements when an approximated element is near a jump and the collection operand
+is pure (`JUMP_BROADCAST_OPERATORS` and `exactJumpBroadcastOperands()` in
+`boxed-expression/boxed-function.ts`). A lazy element-wise result (more than
+100 elements) cannot check its elements without materializing them, so it
+always maps over the exact source when that source is pure and has no float
+literal, unless every operand is typed integer: then there is no fractional
+part to push across a jump, and the approximated source is kept (rebuilding it
+removed the marker that lets a chain of lazy maps fuse its levels,
+`lowerMapSpine()`). The comparisons build their element cells before the approximation,
+so they need no special case.
+
+This is how Mathematica's `N` works (checked with Mathematica 15.0):
+`N[Floor[(25!-1)/24!]]` is `24.`, while `Floor[N[(25!-1)/24!]]` is `25`, and
+`N[1/2 - 10^-30 < 1/2]` is `True`.
+
+Two limits of the rule:
+
+- **A float operand keeps float precision.** A float literal stands for a value
+  known only to its precision, so a comparison of an exact number with a float
+  is decided at the float's precision: `1/2 − 10⁻³⁰ < 0.5` is `False`, and
+  `1/10 = 0.1` is `True`. Mathematica gives the same answers.
+- **An operand that is exact but not an exact number** (`Floor(π·10³⁰)`) is not
+  covered: the engine does not raise the precision until the result is decided,
+  as Mathematica does, and `Floor(π·10³⁰)` stays unevaluated under
+  `evaluate()`.
+
+The form of the result does not depend on which of the two ways decided it:
+under `.N()`, the rounding family returns a float (`Floor(b/24!).N()` is the
+float `24`, as Mathematica's `24.`), and `Floor(b).N()` is `b` approximated to
+the working precision. Under `evaluate()` the rounding family returns an exact
+integer, also for a float operand (`Floor(2.7)` is the integer `2`).
+
 ### Chopping and the `im === 0` convention
 
 There are two distinct "is this zero?" questions in the engine, and they call
@@ -778,7 +858,19 @@ for two different tolerances:
    until 2026-09-26.
 2. **Comparison tolerance** — should two values be considered equal _for the
    user_? That is `ce.tolerance` (default `1e-10`, user-configurable), used by
-   `Equal`, the relational operators, `.is()`, and the `Chop` operator.
+   `Equal`, the relational operators, `.is()`, and the `Chop` operator. It
+   applies only when a float is involved: two EXACT numbers (integers,
+   rationals, rational multiples of a square root) are compared exactly, with
+   no tolerance, by the operators `Equal`, `NotEqual`, `Less`, `LessEqual`,
+   `Greater`, `GreaterEqual` and by the methods `.isEqual()`, `.isLess()`,
+   `.isLessEqual()`, `.isGreater()`, `.isGreaterEqual()` (user decision
+   2026-09-30). Before, `Equal` used the tolerance while `Less` sometimes did
+   not, so `1/2 − 10⁻³⁰` and `1/2` were both "equal" and "less than". Exactly
+   one of `<`, `=`, `>` now holds for two exact numbers, as in Mathematica
+   (`1/3 == 3333333333333/10^13` is `False` there). A float stands for a value
+   known only to its precision, so `1/10 = 0.1` is `True`. `.is()` keeps the
+   tolerance for exact numbers too: it is the loose check for external
+   callers.
 
 The invariant for complex values:
 

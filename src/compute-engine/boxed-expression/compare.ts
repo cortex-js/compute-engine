@@ -10,6 +10,8 @@ import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
 import {
   compareBounds,
   exactCompareNumbers,
+  exactRealValueOf,
+  isExactRealLiteral,
   relationFromChains,
 } from './constraint-subject.js';
 import {
@@ -603,7 +605,11 @@ function eqImpl(
       // No free variables, so `.N()` already evaluates the difference fully —
       // the intermediate `.simplify()` was redundant and a latent recursion
       // hazard (`eq` is reachable from `isEqual`, which evaluate handlers call).
-      if (a.isFinite && b.isFinite) return isZeroWithTolerance(a.sub(b).N());
+      if (a.isFinite && b.isFinite)
+        return (
+          isZeroWithTolerance(a.sub(b).N()) &&
+          !exactValuesDiffer(aExact, bExact)
+        );
       if (a.isNaN || b.isNaN) return false;
       if (a.isInfinity && b.isInfinity && a.sgn === b.sgn) return true;
       // One side is (determinately) infinite and it is not the same infinity
@@ -669,7 +675,10 @@ function eqImpl(
   // we want 0.9 and 9/10 to be considered equal
   //
   if (isNumber(a) && isNumber(b)) {
-    if (a.isFinite && b.isFinite) return isZeroWithTolerance(a.sub(b));
+    if (a.isFinite && b.isFinite)
+      return (
+        isZeroWithTolerance(a.sub(b)) && !exactValuesDiffer(aExact, bExact)
+      );
     if (a.isNaN || b.isNaN) return false;
     if (a.isInfinity && b.isInfinity && a.sgn === b.sgn) return true;
     return false;
@@ -713,6 +722,19 @@ function eqImpl(
 }
 
 /**
+ * True when `a` and `b` are two exact numbers, or pure expressions that
+ * evaluate to exact numbers, with different values. Two exact numbers are
+ * compared exactly, with no tolerance: `1/3` is not equal to
+ * `3333333333333/10¹³`, as the operator `Equal` says. The tolerance applies
+ * only when a float is involved (`1/10` is equal to `0.1`). Called only for
+ * two values that are equal within the tolerance: see `exactValueOrder()`.
+ */
+function exactValuesDiffer(a: Expression, b: Expression): boolean {
+  const order = exactValueOrder(a, b);
+  return order !== undefined && order !== 0;
+}
+
+/**
  * The relation between `a` and `b`, or `undefined` when it is not known.
  *
  * Two values that differ by `tolerance` or less are `'='`. The default is
@@ -724,6 +746,69 @@ export function cmp(
   a: Expression,
   b: number | Expression,
   tolerance: number = a.engine.tolerance
+): '<' | '=' | '>' | '>=' | '<=' | undefined {
+  const c = cmpWithTolerance(a, b, tolerance);
+  // Two exact numbers are compared exactly, with no tolerance: `1/3` is
+  // greater than `3333333333333/10¹³`, as the operator `Greater` says. The
+  // tolerance applies only when a float is involved. Outside of the
+  // tolerance the values decide the order correctly, so only a tie is
+  // examined again.
+  if (c !== '=' || tolerance === 0) return c;
+  const order = exactValueOrder(a, b);
+  if (order === undefined) return c;
+  return order < 0 ? '<' : order > 0 ? '>' : '=';
+}
+
+/**
+ * The order of the exact values of `a` and `b`: `-1`, `0` or `1`, when both
+ * are exact real numbers (integers, rationals, or rationals times the square
+ * root of an integer) or pure expressions that evaluate to one
+ * (`exactRealValueOf()`). Otherwise, `undefined`. A number `b` is an exact
+ * value only when it is an integer: `0.1` is a float.
+ *
+ * `eq()` and `cmp()` call this function only when the two values are equal
+ * within the engine tolerance, because an exact evaluation can cost much
+ * more than a numeric one.
+ *
+ * Two exact number literals are compared at once, with no evaluation. An
+ * operand that is an expression is evaluated exactly, and a comparison
+ * made during that evaluation (for example, by a condition in the
+ * expression) does not examine its own tie exactly: it uses the tolerance.
+ * This stops a recursion with no end, because an exact evaluation can
+ * compare the same values again.
+ */
+function exactValueOrder(
+  a: Expression,
+  b: number | Expression
+): -1 | 0 | 1 | undefined {
+  const ce = a.engine;
+  if (typeof b === 'number' && !Number.isInteger(b)) return undefined;
+  const bx = typeof b === 'number' ? ce.number(b) : b;
+  if (isExactRealLiteral(a) && isExactRealLiteral(bx))
+    return exactCompareNumbers(a, bx);
+  if (orderingExactValues.has(ce)) return undefined;
+  orderingExactValues.add(ce);
+  try {
+    const x = exactRealValueOf(a.isCanonical ? a : a.canonical);
+    if (x === undefined) return undefined;
+    const y = exactRealValueOf(bx.isCanonical ? bx : bx.canonical);
+    if (y === undefined) return undefined;
+    return exactCompareNumbers(x, y);
+  } finally {
+    orderingExactValues.delete(ce);
+  }
+}
+
+/** The engines for which `exactValueOrder` is running. See
+ *  `exactValueOrder`. */
+const orderingExactValues = new WeakSet<Expression['engine']>();
+
+/** The relation of `a` and `b` within `tolerance`: see `cmp`, which
+ *  compares two exact numbers again with no tolerance. */
+function cmpWithTolerance(
+  a: Expression,
+  b: number | Expression,
+  tolerance: number
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
   // A machine value's `isZeroWithTolerance(t)` tests `|x| < t`, which is
   // false for every `x` when `t` is 0. With no tolerance, only a zero is zero.
@@ -851,8 +936,10 @@ export function cmp(
       // `1 + π > 3` had one.
       if (isFunction(b)) {
         // Against a zero, `cmp(b, 0)` reads the sign of `b` first, as
-        // `cmp(b, a)` with `b` a function expression does.
-        const r = cmp(b, a.isSame(0) ? 0 : a, tolerance);
+        // `cmp(b, a)` with `b` a function expression does. The call is to
+        // `cmpWithTolerance()`, not `cmp()`: the outer `cmp()` examines a
+        // tie again exactly, and it must do so only once.
+        const r = cmpWithTolerance(b, a.isSame(0) ? 0 : a, tolerance);
         if (r === '<') return '>';
         if (r === '>') return '<';
         if (r === '<=') return '>=';

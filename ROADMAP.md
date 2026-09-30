@@ -109,6 +109,28 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A rounding function or a comparison of an exact constant is decided at the working precision (OPEN, small — found 2026-09-30 while reviewing issue #382)
+
+`Floor(π·10³⁰)` stays unevaluated under `evaluate()`, and `.N()` gives the
+21-digit float `3.14159265358979323846e+30`, not the 31-digit integer (measured
+2026-09-30). Mathematica 15.0 evaluates `Floor[Pi 10^30]` exactly
+(`3141592653589793238462643383279`): it raises the precision until the result is
+decided. A comparison of exact constants (`Less(π, 355/113)`) is decided on
+21-digit approximations, so it can give a wrong answer when the two values
+differ by less than about `10⁻²¹` of their size. Fix: for an exact operand
+that is not an exact number, evaluate with guard digits, raise the precision
+while the value is within the error bound of the jump, and stay unevaluated
+after a fixed limit.
+
+### A `Pipe` stage that uses no slot either errors or ignores the piped value (OPEN, decision — found 2026-09-30 while reviewing issue #381)
+
+`[1,2] |> 10 + 3` gives an `incompatible-type` error, but
+`[1,2] |> 10 + [3,4][1]` gives `13` and silently drops the piped value. With a
+nested pipe (`[1,2] |> 10 + ([3,4] |> _ * 2)`), the outer stage also uses no
+slot of its own and gives `[16,18]`. The question: is a stage that uses no slot
+(and is not a function) always an error? Recommendation: yes, consistently —
+dropping the piped value is almost certainly a mistake in the program.
+
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
 `reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and

@@ -122,6 +122,42 @@ function isFiniteRealNumber(
 }
 
 /**
+ * True when `x` is an EXACT real number literal with a finite value: an
+ * integer, a rational, or a rational times the square root of an integer.
+ * These are the values that can be rounded and ordered exactly with integer
+ * arithmetic.
+ */
+export function isExactRealLiteral(x: Expression): boolean {
+  return isNumber(x) && x.isExact && !x.isComplex && x.isFinite === true;
+}
+
+/**
+ * The exact value of `original`, when it is an exact real number literal
+ * (see `isExactRealLiteral()`), or `undefined`.
+ *
+ * `original` is an operand before its numeric approximation. A function
+ * whose result jumps at a point (`Floor`, `Round`, `Less`, `Sign`) must see
+ * an exact operand exactly under `.N()`, because the float of the operand
+ * can be on the other side of the point: the float of `(25! − 1)/24!` at 21
+ * digits is `25`, and its floor is `24`. A literal is returned as it is. An
+ * expression is evaluated exactly only when it is pure, so that an operand
+ * with a side effect (a random number, an assignment) is not evaluated a
+ * second time. The caller does this only when the float of the operand is
+ * near the point, because an exact evaluation can cost much more than a
+ * numeric one.
+ */
+export function exactRealValueOf(
+  original: Expression | undefined
+): Expression | undefined {
+  if (original === undefined) return undefined;
+  if (isNumber(original))
+    return isExactRealLiteral(original) ? original : undefined;
+  if (original.isPure !== true) return undefined;
+  const value = original.evaluate();
+  return isExactRealLiteral(value) ? value : undefined;
+}
+
+/**
  * Order two finite real number literals EXACTLY: `-1`, `0` or `1`, or
  * `undefined` when either side is not a finite real number literal.
  *

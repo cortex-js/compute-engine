@@ -55,6 +55,7 @@ import {
   type BroadcastOperandView,
 } from './broadcast-lift-type.js';
 import {
+  MAX_SIZE_EAGER_COLLECTION,
   broadcastLengthMismatch,
   hasUnresolvedCollectionOperand,
   isTupleShapedType,
@@ -186,7 +187,11 @@ import { explainExpression } from './explain.js';
 import { canonicalMultiply, mul, div, Product } from './arithmetic-mul-div.js';
 import { add } from './arithmetic-add.js';
 import { pow } from './arithmetic-power.js';
-import { asSmallInteger } from './numerics.js';
+import {
+  asSmallInteger,
+  isNearRoundingJumpValue,
+  nearJumpTolerance,
+} from './numerics.js';
 import { gcd } from '../numerics/numeric.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import {
@@ -5263,10 +5268,13 @@ export class BoxedFunction
         const mismatch = broadcastLengthMismatch(this.engine, tail);
         if (mismatch) return mismatch;
 
+        // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) maps over the
+        // exact sources (`exactJumpLazyBroadcastOperands()`).
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
-          tail,
+          exactJumpLazyBroadcastOperands(this, tail, numericApproximation) ??
+            tail,
           isBroadcastableCollection,
           numericApproximation
         );
@@ -5275,9 +5283,15 @@ export class BoxedFunction
         // For a user function a tuple (a point) is lifted whole into every
         // cell, not zipped; a builtin operator zips it (a tuple zipped
         // against a list supplies cells, pinned by its tests).
+        // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) builds its
+        // cells from the exact elements when a float is near a jump
+        // (`exactJumpBroadcastOperands()`).
         const items = lambdaBroadcast
           ? zipBroadcast(tail, isBroadcastableCollection)
-          : zip(tail);
+          : zip(
+              exactJumpBroadcastOperands(this, tail, numericApproximation) ??
+                tail
+            );
         if (items) {
           const results: Expression[] = [];
           // Element-wise context, for the LAMBDA broadcast only (see step 2b):
@@ -5330,7 +5344,14 @@ export class BoxedFunction
       // decided on the evaluated `tail` so an operand that only becomes a
       // tuple at evaluation broadcasts like a literal one.
       //
-      const tupleCells = tupleBroadcastCells(this, def, tail);
+      // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) builds its cells
+      // from the exact components when a float is near a jump
+      // (`exactJumpBroadcastOperands()`).
+      const tupleCells = tupleBroadcastCells(
+        this,
+        def,
+        exactJumpBroadcastOperands(this, tail, numericApproximation) ?? tail
+      );
       if (tupleCells !== undefined) {
         if (!Array.isArray(tupleCells)) return tupleCells;
         return this.engine._fn(
@@ -6186,10 +6207,13 @@ export class BoxedFunction
         const mismatch = broadcastLengthMismatch(this.engine, tail);
         if (mismatch) return mismatch;
 
+        // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) maps over the
+        // exact sources (`exactJumpLazyBroadcastOperands()`).
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
-          tail,
+          exactJumpLazyBroadcastOperands(this, tail, numericApproximation) ??
+            tail,
           isBroadcastableCollection,
           numericApproximation
         );
@@ -6198,9 +6222,14 @@ export class BoxedFunction
         // For a user function a tuple (a point) is lifted whole into every
         // cell, not zipped; a builtin operator zips it (a tuple zipped
         // against a list supplies cells, pinned by its tests).
+        // The async twin of the exact cells of a jump operator in the sync
+        // step 4b (`exactJumpBroadcastOperands()`).
         const items = lambdaBroadcast
           ? zipBroadcast(tail, isBroadcastableCollection)
-          : zip(tail);
+          : zip(
+              exactJumpBroadcastOperands(this, tail, numericApproximation) ??
+                tail
+            );
         if (items) {
           const results: Promise<Expression>[] = [];
           while (true) {
@@ -6261,7 +6290,11 @@ export class BoxedFunction
       // the sync step 4t.
       //
       if (def) {
-        const tupleCells = tupleBroadcastCells(this, def, tail);
+        const tupleCells = tupleBroadcastCells(
+          this,
+          def,
+          exactJumpBroadcastOperands(this, tail, numericApproximation) ?? tail
+        );
         if (tupleCells !== undefined) {
           if (!Array.isArray(tupleCells)) return tupleCells;
           const resolved = await Promise.all(
@@ -6627,6 +6660,212 @@ function tupleBroadcastCells(
   // A tuple whose components cannot all be walked (a lazy view that runs dry
   // before its advertised count) is left inert rather than silently shortened.
   return cells.length === length ? cells : undefined;
+}
+
+/**
+ * The operators whose result jumps at a point, and which a broadcast maps
+ * cell by cell with the handler of a scalar operand: `Floor`, `Ceil`,
+ * `Truncate` and `Fract` jump at an integer, `Round` at a half-integer,
+ * `Sign` and `Heaviside` at 0, and `Mod(a, m)` where `a/m` is an integer
+ * (either operand can be the collection). Under `.N()`, the handler of such an operator uses the exact
+ * value of an exact operand when the float of the operand is near the jump
+ * (`exactRoundingOperand()` in `library/arithmetic.ts`). The comparisons
+ * (`Less`, `Equal`, ...) are not in this set: they are lazy, their handler
+ * builds the cells from the operands before approximation, and it applies
+ * the same rule (`exactPairAtNearTie()` in `library/relational-operator.ts`).
+ */
+const JUMP_BROADCAST_OPERATORS: ReadonlyMap<
+  string,
+  'integer' | 'half' | 'zero' | 'quotient'
+> = new Map([
+  ['Floor', 'integer'],
+  ['Ceil', 'integer'],
+  ['Truncate', 'integer'],
+  ['Fract', 'integer'],
+  ['Round', 'half'],
+  ['Sign', 'zero'],
+  ['Heaviside', 'zero'],
+  ['Mod', 'quotient'],
+]);
+
+/**
+ * Under `.N()`, the operands of a broadcast of a jump operator
+ * (`JUMP_BROADCAST_OPERATORS`) with the collection operands replaced by
+ * their exact elements, or `undefined` when the operands in `tail` decide
+ * the result.
+ *
+ * `tail` holds the operands after their numeric approximation. A broadcast
+ * builds its cells from these, so the handler of each cell sees a float and
+ * has no exact operand to use: at 21 digits, the third element of
+ * `Range(1, 3)/3` is `0.999…`, and its floor is `0`, not `1`. So when the
+ * float of some element is near a jump of the operator, each pure
+ * collection operand is replaced: a `List` or `Tuple` literal by itself (its
+ * elements are then evaluated in their cells, and the handler applies its
+ * scalar rule to each), and another expression by its exact value. The
+ * handler of each cell then sees an exact operand before its approximation.
+ *
+ * Far from a jump, and for all the other operators, nothing is done, so an
+ * ordinary broadcast has no extra cost: an exact evaluation can cost much
+ * more than the numeric one.
+ */
+function exactJumpBroadcastOperands(
+  expr: Expression,
+  tail: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): ReadonlyArray<Expression> | undefined {
+  if (!numericApproximation) return undefined;
+  const jump = JUMP_BROADCAST_OPERATORS.get(expr.operator);
+  if (jump === undefined) return undefined;
+  if (!isFunction(expr)) return undefined;
+  const ops = expr.ops;
+  if (ops.length !== tail.length) return undefined;
+  const ce = expr.engine;
+
+  // The float of an element is multiplied by `10ⁿ` for `Round(x, n)`, whose
+  // jump is where `x·10ⁿ` is a half-integer. When `n` is not a real number
+  // literal, the scale is not known, and every element is taken as near a
+  // jump.
+  let scale = 1;
+  if (expr.operator === 'Round' && tail.length > 1) {
+    const n = tail[1];
+    if (!isNumber(n) || n.isComplex || n.isFinite !== true) scale = NaN;
+    else scale = Math.pow(10, n.re);
+  }
+  // `Mod(a, m)` jumps where `a/m` is an integer. When one operand is a real
+  // number literal and the other a collection, an element is near a jump
+  // when its quotient with that literal is near an integer. In all other
+  // cases (two collections), every element is taken as near a jump.
+  let dividend: number | undefined;
+  let divisor: number | undefined;
+  if (jump === 'quotient') {
+    const real = (x: Expression | undefined): number | undefined =>
+      x !== undefined &&
+      isNumber(x) &&
+      !x.isComplex &&
+      x.isFinite === true
+        ? x.re
+        : undefined;
+    divisor = real(tail[1]);
+    if (divisor === undefined) dividend = real(tail[0]);
+    if (divisor === 0 || (divisor === undefined && dividend === undefined))
+      scale = NaN;
+  }
+  const isNearJump = (x: Expression): boolean => {
+    if (!isNumber(x) || x.isExact || x.isComplex || x.isFinite !== true)
+      return false;
+    if (Number.isNaN(scale)) return true;
+    if (jump === 'zero') return Math.abs(x.re) <= nearJumpTolerance(ce);
+    if (jump === 'quotient') {
+      const q = divisor !== undefined ? x.re / divisor : dividend! / x.re;
+      return !Number.isFinite(q) || isNearRoundingJumpValue(ce, q, false);
+    }
+    return isNearRoundingJumpValue(ce, x.re * scale, jump === 'half');
+  };
+  const isCellCollection = (x: Expression): boolean =>
+    isFunction(x, 'List') || isFunction(x, 'Tuple');
+  if (
+    !tail.some(
+      (x) => isCellCollection(x) && isFunction(x) && x.ops.some(isNearJump)
+    )
+  )
+    return undefined;
+
+  let changed = false;
+  const result = tail.map((x, i) => {
+    if (!isCellCollection(x) || !isFunction(x)) return x;
+    const original = ops[i];
+    if (original === x || original.isPure !== true) return x;
+    const sameShape = (y: Expression) =>
+      isFunction(y) && y.operator === x.operator && y.nops === x.nops;
+    if (sameShape(original)) {
+      changed = true;
+      return original;
+    }
+    if (hasInexactNumberLiteral(original)) return x;
+    const exact = original.evaluate();
+    if (!sameShape(exact)) return x;
+    changed = true;
+    return exact;
+  });
+  return changed ? result : undefined;
+}
+
+/**
+ * True when `expr` has a float number literal (`1.5`) in its tree. The
+ * exact evaluation of such an expression gives floats too, so it is not
+ * made again to get exact values.
+ */
+function hasInexactNumberLiteral(expr: Expression): boolean {
+  if (isNumber(expr)) return !expr.isExact;
+  return isFunction(expr) && expr.ops.some(hasInexactNumberLiteral);
+}
+
+/**
+ * Under `.N()`, the operands of a LAZY broadcast (`lazyBroadcastMapIfNeeded()`)
+ * of a jump operator (`JUMP_BROADCAST_OPERATORS`) with each pure collection
+ * operand replaced by its exact value, or `undefined` when the broadcast is
+ * not lazy or nothing is replaced.
+ *
+ * A lazy broadcast (more than `MAX_SIZE_EAGER_COLLECTION` elements, or a
+ * source of unknown length) maps the operator over its sources, so a source
+ * approximated before the map gives each cell a float, and the result can
+ * be on the wrong side of a jump: at 21 digits, the floor of the third
+ * element of `Range(1, 300)/3` was `0`. Over the exact source, the handler
+ * of each cell sees an exact operand and applies its scalar rule. The
+ * elements are not examined first, as the eager broadcast does
+ * (`exactJumpBroadcastOperands()`), because this would materialize the
+ * lazy source.
+ */
+function exactJumpLazyBroadcastOperands(
+  expr: Expression,
+  tail: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): ReadonlyArray<Expression> | undefined {
+  if (!numericApproximation) return undefined;
+  if (!JUMP_BROADCAST_OPERATORS.has(expr.operator)) return undefined;
+  if (!isFunction(expr)) return undefined;
+  const ops = expr.ops;
+  if (ops.length !== tail.length) return undefined;
+  // The same test as `lazyBroadcastMapIfNeeded()`: the broadcast is lazy
+  // when some source has an unknown or infinite length, or more than
+  // `MAX_SIZE_EAGER_COLLECTION` elements (the lengths of the sources were
+  // already checked to agree).
+  const isLazySource = (x: Expression): boolean => {
+    if (!isBroadcastableCollection(x)) return false;
+    const n = x.count;
+    return (
+      x.isFiniteCollection !== true ||
+      typeof n !== 'number' ||
+      !Number.isFinite(n) ||
+      n > MAX_SIZE_EAGER_COLLECTION
+    );
+  };
+  if (!tail.some(isLazySource)) return undefined;
+  // When every operand is typed integer (scalars and collection elements
+  // alike), the approximated values are the integers themselves and there
+  // is no fractional part to push across a jump. The exact source is then
+  // not needed, and the approximated lazy source is kept: rebuilding it
+  // from the exact source removed the approximation marker that a chain of
+  // lazy maps uses to fuse its levels (`lowerMapSpine()`).
+  if (
+    ops.every(
+      (x) => x.type.matches('integer') || x.type.matches('collection<integer>')
+    )
+  )
+    return undefined;
+
+  let changed = false;
+  const result = tail.map((x, i) => {
+    if (!isBroadcastableCollection(x)) return x;
+    const original = ops[i];
+    if (original === x || original.isPure !== true) return x;
+    if (hasInexactNumberLiteral(original)) return x;
+    const exact = original.evaluate();
+    if (!isBroadcastableCollection(exact) || exact.count !== x.count) return x;
+    changed = true;
+    return exact;
+  });
+  return changed ? result : undefined;
 }
 
 /**

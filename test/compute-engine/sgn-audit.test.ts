@@ -217,3 +217,35 @@ describe('SGN HANDLERS ARE PURE (state-drift regression)', () => {
     ).toBe('number');
   });
 });
+
+// `.N()` promises a RESULT correct to the working precision (user decision,
+// 2026-09-30). `Sign` jumps at 0, so an operand near 0 whose exact value is
+// known gets its exact sign under `.N()`.
+describe('Sign of an exact operand under N', () => {
+  const ce = new ComputeEngine();
+
+  it('an exact value whose float is 0 has its exact sign', () => {
+    // (25! − 1)/24! − 25 = −1/24!, but its float at 21 digits is 0.
+    const x = [
+      'Subtract',
+      ['Divide', { num: '15511210043330985983999999' }, ['Factorial', 24]],
+      25,
+    ];
+    expect(ce.box(['Sign', x]).N().json).toBe(-1);
+    expect(ce.box(['Sign', x]).evaluate().json).toBe(-1);
+  });
+
+  it('the Mathematica example keeps its sign', () => {
+    // N[Sign[Sqrt[2] - 141421356237309504880/10^20]] is 1 in Mathematica 15.
+    const x = [
+      'Subtract',
+      ['Sqrt', 2],
+      [
+        'Rational',
+        { num: '141421356237309504880' },
+        { num: '100000000000000000000' },
+      ],
+    ];
+    expect(ce.box(['Sign', x]).N().json).toBe(1);
+  });
+});

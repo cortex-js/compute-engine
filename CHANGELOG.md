@@ -2,6 +2,37 @@
 
 ### Behavior Changes
 
+- **`.N()` of a rounding function, `Fract`, `Mod`, `Sign`, `Heaviside` or a
+  comparison uses the exact value of an exact operand.** `.N()` approximated the operand first, and
+  near a point where the result jumps, a tiny error changed the result by a
+  finite amount: `Floor((25! − 1)/24!).N()` was `25` (the value is just below
+  `25`, and its 21-digit approximation is `25`), and
+  `(1/2 − 10⁻³⁰ < 1/2).N()` was `False`. They are now `24` and `True`, as in
+  Mathematica, where `N[Floor[(25!-1)/24!]]` is `24.`. `.N()` promises a
+  result that is correct to the working precision, not that every
+  intermediate step is a float. The operand is still approximated first; its
+  exact value is used when it is an exact number (an integer, a rational, or a
+  rational multiple of a square root), or when its approximation is within
+  about `10⁻¹⁰` (relative) of a point where the result jumps. The result of a
+  rounding function under `.N()` is a float, as before: `Floor(25! − 1).N()`
+  is `25! − 1` approximated to the working precision. `Fract((25! − 1)/3).N()`
+  was `0` and is now `0.666666666666666666667`. A comparison with a float
+  operand is still decided at the precision of the float:
+  `(1/2 − 10⁻³⁰ < 0.5).N()` is `False`.
+- **Two exact numbers are compared exactly, with no tolerance.** The
+  comparison operators and the methods `.isEqual()`, `.isLess()`,
+  `.isLessEqual()`, `.isGreater()` and `.isGreaterEqual()` compared two
+  numbers whose difference was less than `ce.tolerance` (`10⁻¹⁰`) as equal,
+  also when both were exact, but `Less` and `Greater` sometimes compared
+  exactly: `Equal(1/2 − 10⁻³⁰, 1/2)` and `Less(1/2 − 10⁻³⁰, 1/2)` were both
+  `True`. Two exact numbers (integers, rationals, rational multiples of a
+  square root) are now equal only if they have the same value:
+  `Equal(1/3, 3333333333333/10^13)` was `True` and is now `False`, and
+  exactly one of `<`, `=` and `>` holds for two exact numbers, as in
+  Mathematica. The tolerance still applies when a float is involved:
+  `Equal(1/10, 0.1)` is `True`. `.is()` keeps the tolerance for exact numbers
+  too.
+
 - **`evaluate({ materialization: true })` gives every element of a finite
   lazy collection** ([#380](https://github.com/cortex-js/compute-engine/issues/380),
   reported by [enumeratio](https://github.com/enumeratio)). The option was

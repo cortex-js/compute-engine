@@ -37,7 +37,7 @@ import {
   intervalOfType,
 } from '../numerics/interval-arithmetic.js';
 import { operandLiteralValue } from './type-handlers.js';
-import { toBigint } from '../boxed-expression/numerics.js';
+import { toBigint, nearJumpTolerance } from '../boxed-expression/numerics.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 import {
   subjectOf,
@@ -45,6 +45,9 @@ import {
   hasAssumptions,
   decideComparisonFromBounds,
   signFromChains,
+  exactCompareNumbers,
+  isExactRealLiteral,
+  exactRealValueOf,
 } from '../boxed-expression/constraint-subject.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
 import { isQuantity } from './quantity-arithmetic.js';
@@ -194,16 +197,99 @@ function evaluateChainOperands(
   pairIsFalse: (lhs: Expression, rhs: Expression) => boolean
 ): Expression[] | Expression {
   const evalOptions = { numericApproximation };
-  if (rawOps.length <= 2 || rawOps.some(isCollectionShaped))
+  if (rawOps.some(isCollectionShaped))
     return rawOps.map((op) => op.evaluate(evalOptions));
+  if (rawOps.length <= 2) {
+    const ops = rawOps.map((op) => op.evaluate(evalOptions));
+    if (numericApproximation && ops.length === 2) {
+      const exact = exactPairAtNearTie(rawOps[0], ops[0], rawOps[1], ops[1]);
+      if (exact !== undefined) return exact;
+    }
+    return ops;
+  }
   const ops: Expression[] = [];
-  for (const raw of rawOps) {
-    const v = raw.evaluate(evalOptions);
+  for (let i = 0; i < rawOps.length; i++) {
+    let v = rawOps[i].evaluate(evalOptions);
     if (!v.isValid) return v;
+    if (numericApproximation && ops.length > 0) {
+      const exact = exactPairAtNearTie(
+        rawOps[i - 1],
+        ops[ops.length - 1],
+        rawOps[i],
+        v
+      );
+      if (exact !== undefined) {
+        ops[ops.length - 1] = exact[0];
+        v = exact[1];
+      }
+    }
     if (ops.length > 0 && pairIsFalse(ops[ops.length - 1], v)) return ce.False;
     ops.push(v);
   }
   return ops;
+}
+
+/**
+ * Under `.N()`, the exact values of two operands of a comparison whose
+ * floats are too near each other to decide it, or `undefined`.
+ *
+ * `rawA` and `rawB` are the operands before their numeric approximation,
+ * and `a` and `b` their floats. `.N()` promises a result correct to the
+ * working precision, and a comparison jumps where its two operands are
+ * equal: at 21 digits, the float of `1/2 − 10⁻³⁰` is `0.5`, but
+ * `1/2 − 10⁻³⁰ < 1/2` is `True`. So when the two floats are within
+ * `nearJumpTolerance()` of each other (relative to `max(1, |a|, |b|)`), the
+ * operands are evaluated again exactly (`exactRealValueOf()`, pure operands
+ * only), and when both exact values are exact real numbers, they are
+ * compared instead (`exactLiteralOrder()`), as Mathematica does
+ * (`N[1/2 − 10^-30 < 1/2]` is `True`). Far from a tie, the floats decide the
+ * comparison, and no exact evaluation is made: it can cost much more than
+ * the numeric one.
+ *
+ * A float operand (`0.5`) has no exact value, so a comparison with a float
+ * stays decided at the precision of the float: `1/2 − 10⁻³⁰ < 0.5` is
+ * `False`, and `1/10 = 0.1` is `True`, as in Mathematica.
+ */
+function exactPairAtNearTie(
+  rawA: Expression,
+  a: Expression,
+  rawB: Expression,
+  b: Expression
+): [Expression, Expression] | undefined {
+  if (!isNumber(a) || !isNumber(b)) return undefined;
+  if (isExactRealLiteral(a) && isExactRealLiteral(b)) return undefined;
+  if (a.isComplex || b.isComplex) return undefined;
+  if (a.isFinite !== true || b.isFinite !== true) return undefined;
+  const x = a.re;
+  const y = b.re;
+  const scale = Math.max(1, Math.abs(x), Math.abs(y));
+  if (Math.abs(x - y) > nearJumpTolerance(a.engine) * scale) return undefined;
+  // An operand that is already an exact real number is its own exact value:
+  // in a chain `a < b < c`, the middle operand is replaced by its exact
+  // value for the first pair, and it is not evaluated again for the second.
+  const exactA = isExactRealLiteral(a) ? a : exactRealValueOf(rawA);
+  if (exactA === undefined) return undefined;
+  const exactB = isExactRealLiteral(b) ? b : exactRealValueOf(rawB);
+  if (exactB === undefined) return undefined;
+  return [exactA, exactB];
+}
+
+/**
+ * The exact order of `a` and `b` when both are exact real numbers
+ * (integers, rationals, or rationals times the square root of an integer):
+ * `-1`, `0` or `1`. Otherwise, `undefined`.
+ *
+ * Two exact numbers are compared exactly, with no tolerance
+ * (`exactCompareNumbers()`): `isLess()` and `isEqual()` compare within the
+ * engine tolerance, and `√2` and `1414213562373095048801689/10²⁴` were
+ * then equal.
+ */
+function exactLiteralOrder(
+  a: Expression,
+  b: Expression
+): -1 | 0 | 1 | undefined {
+  if (!isExactRealLiteral(a) || !isExactRealLiteral(b)) return undefined;
+  return exactCompareNumbers(a, b);
 }
 
 /** The adjacent-pair deciders of `evaluateChainOperands`, one per chainable
@@ -213,18 +299,27 @@ const CHAIN_PAIR_IS_FALSE = {
   Equal: (ce: ComputeEngine) => (a: Expression, b: Expression) => {
     const q = quantityCompare(a, b);
     if (q !== null) return Math.abs(q) > ce.tolerance;
+    const o = exactLiteralOrder(a, b);
+    if (o !== undefined) return o !== 0;
     return eq(a, b) === false;
   },
-  NotEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) =>
-    a.isEqual(b) === true,
+  NotEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
+    const o = exactLiteralOrder(a, b);
+    if (o !== undefined) return o === 0;
+    return a.isEqual(b) === true;
+  },
   Less: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
     const q = quantityCompare(a, b);
     if (q !== null) return q >= 0;
+    const o = exactLiteralOrder(a, b);
+    if (o !== undefined) return o >= 0;
     return (a.isLess(b) ?? compareFromAssumedBounds(a, b, true)) === false;
   },
   LessEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
     const q = quantityCompare(a, b);
     if (q !== null) return q > 0;
+    const o = exactLiteralOrder(a, b);
+    if (o !== undefined) return o > 0;
     return (
       (a.isLessEqual(b) ?? compareFromAssumedBounds(a, b, false)) === false
     );
@@ -501,7 +596,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
             continue;
           }
 
-          const test = eq(lhs, arg);
+          const order = exactLiteralOrder(lhs, arg);
+          const test = order !== undefined ? order === 0 : eq(lhs, arg);
           if (test === false) return ce.False;
 
           // An undecidable comparison (free variables present, no proof
@@ -751,7 +847,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       for (const arg of ops!) {
         if (!lhs) lhs = arg;
         else {
-          const test = lhs.isEqual(arg);
+          const order = exactLiteralOrder(lhs, arg);
+          const test = order !== undefined ? order === 0 : lhs.isEqual(arg);
           if (test === true) return ce.False;
 
           // An undecidable comparison stays INERT (three-valued logic in
@@ -849,7 +946,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         // Try quantity comparison first
         const qcmp = quantityCompare(lhs, rhs);
         if (qcmp !== null) return qcmp < 0 ? ce.True : ce.False;
-        const cmp = lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true);
+        const order = exactLiteralOrder(lhs, rhs);
+        const cmp =
+          order !== undefined
+            ? order < 0
+            : (lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true));
         if (cmp === undefined) return inertRelation(ce, 'Less', rawOps, ops);
         return cmp ? ce.True : ce.False;
       }
@@ -863,8 +964,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           if (qcmp !== null) {
             if (qcmp >= 0) return ce.False;
           } else {
+            const order = exactLiteralOrder(lhs, arg);
             const cmp =
-              lhs.isLess(arg) ?? compareFromAssumedBounds(lhs, arg, true);
+              order !== undefined
+                ? order < 0
+                : (lhs.isLess(arg) ?? compareFromAssumedBounds(lhs, arg, true));
             if (cmp === undefined)
               return inertRelation(ce, 'Less', rawOps, ops);
             if (cmp === false) return ce.False;
@@ -975,8 +1079,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         const [lhs, rhs] = ops;
         const qcmp = quantityCompare(lhs, rhs);
         if (qcmp !== null) return qcmp <= 0 ? ce.True : ce.False;
+        const order = exactLiteralOrder(lhs, rhs);
         const cmp =
-          lhs.isLessEqual(rhs) ?? compareFromAssumedBounds(lhs, rhs, false);
+          order !== undefined
+            ? order <= 0
+            : (lhs.isLessEqual(rhs) ??
+              compareFromAssumedBounds(lhs, rhs, false));
         if (cmp === undefined)
           return inertRelation(ce, 'LessEqual', rawOps, ops);
         return cmp ? ce.True : ce.False;
@@ -991,8 +1099,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           if (qcmp !== null) {
             if (qcmp > 0) return ce.False;
           } else {
+            const order = exactLiteralOrder(lhs, arg);
             const cmp =
-              lhs.isLessEqual(arg) ?? compareFromAssumedBounds(lhs, arg, false);
+              order !== undefined
+                ? order <= 0
+                : (lhs.isLessEqual(arg) ??
+                  compareFromAssumedBounds(lhs, arg, false));
             if (cmp === undefined)
               return inertRelation(ce, 'LessEqual', rawOps, ops);
             if (cmp === false) return ce.False;

@@ -387,3 +387,34 @@ export function provablyNonFiniteNumber(x: Expression): boolean {
   if (x.isNaN === true || x.isInfinity === true) return true;
   return x.isFinite === false && x.type.matches('number');
 }
+
+/**
+ * The relative distance from a point where a function jumps (an integer for
+ * `Floor`, a half-integer for `Round`, a tie for a comparison) under which a
+ * float operand does not decide the result: its rounding error can put it
+ * on the wrong side of the point. It is the engine tolerance, and at least
+ * `10⁻¹⁰`, which is far above the rounding error of a double.
+ */
+export function nearJumpTolerance(ce: Expression['engine']): number {
+  return Math.max(ce.tolerance, 1e-10);
+}
+
+/**
+ * True when the finite real `x` is within `nearJumpTolerance()` of a point
+ * where a rounding function jumps: an integer for `Floor`, `Ceil`,
+ * `Truncate` and `Fract`, or a half-integer for `Round` (`halfInteger`).
+ * The distance is relative to `max(1, |x|)`, so a float with no fractional
+ * digits left is always near a jump.
+ */
+export function isNearRoundingJumpValue(
+  ce: Expression['engine'],
+  x: number,
+  halfInteger: boolean
+): boolean {
+  const a = Math.abs(x);
+  const frac = a - Math.floor(a);
+  const distance = halfInteger
+    ? Math.abs(frac - 0.5)
+    : Math.min(frac, 1 - frac);
+  return distance <= nearJumpTolerance(ce) * Math.max(1, a);
+}

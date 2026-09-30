@@ -883,3 +883,131 @@ describe('Exact ordering against the other lanes (review pins)', () => {
     expect(ce.parse('\\frac{1}{2}').isLess(0.5)).toBe(false);
   });
 });
+
+/**
+ * `.N()` promises a RESULT correct to the working precision (user decision,
+ * 2026-09-30). A comparison jumps where its operands are equal, so two
+ * operands whose exact values are known are compared exactly under `.N()`
+ * too. A comparison with a FLOAT operand is decided at the precision of the
+ * float. Each case was checked in Mathematica 15: `N[1/2 - 10^-30 < 1/2]` is
+ * `True`, `1/2 - 10^-30 < 0.5` is `False`, `1/10 == 0.1` is `True`.
+ */
+describe('Comparison of exact operands under N', () => {
+  const nearHalf = ['Subtract', ['Rational', 1, 2], ['Power', 10, -30]];
+  const half = ['Rational', 1, 2];
+  // 1.414213562373095048801689, just above √2 (checked with bigint below).
+  const aboveSqrt2 = [
+    'Rational',
+    { num: '1414213562373095048801689' },
+    { num: '1000000000000000000000000' },
+  ];
+
+  test('an exact difference below the working precision decides', () => {
+    for (const [expr, expected] of [
+      [['Less', nearHalf, half], 'True'],
+      [['LessEqual', half, nearHalf], 'False'],
+      [['Greater', half, nearHalf], 'True'],
+      [['GreaterEqual', nearHalf, half], 'False'],
+      [['Equal', nearHalf, half], 'False'],
+      [['NotEqual', nearHalf, half], 'True'],
+      [['Less', 0, nearHalf, half], 'True'],
+      [['Less', 0, half, nearHalf], 'False'],
+    ] as const) {
+      const e = ce.box(expr as any);
+      expect(e.N().json).toBe(expected);
+      expect(e.evaluate().json).toBe(expected);
+    }
+  });
+
+  test('a float operand is compared at its own precision', () => {
+    expect(ce.box(['Less', nearHalf, 0.5]).N().json).toBe('False');
+    expect(ce.box(['Equal', ['Rational', 1, 10], 0.1]).N().json).toBe('True');
+    expect(ce.box(['Equal', ['Rational', 1, 10], 0.1]).evaluate().json).toBe(
+      'True'
+    );
+  });
+
+  test('two exact numbers are compared with no tolerance', () => {
+    const q = 1414213562373095048801689n;
+    expect(q * q > 2n * 10n ** 48n).toBe(true);
+    expect(ce.box(['Less', ['Sqrt', 2], aboveSqrt2]).evaluate().json).toBe(
+      'True'
+    );
+    expect(ce.box(['Less', ['Sqrt', 2], aboveSqrt2]).N().json).toBe('True');
+    expect(ce.box(['Equal', ['Sqrt', 2], aboveSqrt2]).evaluate().json).toBe(
+      'False'
+    );
+    expect(ce.box(['Less', aboveSqrt2, ['Sqrt', 2]]).evaluate().json).toBe(
+      'False'
+    );
+    // 1/3 and 0.3333333333333 (as an exact rational) differ by 3·10⁻¹⁴.
+    const third = ['Rational', 1, 3];
+    const approx = [
+      'Rational',
+      { num: '3333333333333' },
+      { num: '10000000000000' },
+    ];
+    expect(ce.box(['Equal', third, approx]).evaluate().json).toBe('False');
+    expect(ce.box(['Less', approx, third]).evaluate().json).toBe('True');
+  });
+
+  test('the parse route compares the exact values', () => {
+    expect(ce.parse('\\frac12 - 10^{-30} < \\frac12').N().json).toBe('True');
+  });
+});
+
+describe('Element-wise comparison of exact operands under N', () => {
+  // At 21 digits, the third element of Range(1, 3)/3 is 0.999…, but its
+  // exact value is 1.
+  const thirds = ['Divide', ['Range', 1, 3], 3];
+  const exact = ['List', ['Rational', 1, 3], ['Rational', 2, 3], 1];
+
+  test('a list against a scalar', () => {
+    expect(ce.box(['Less', thirds, 1]).N().toString()).toBe(
+      '["True","True","False"]'
+    );
+    expect(ce.box(['LessEqual', 1, thirds]).N().toString()).toBe(
+      '["False","False","True"]'
+    );
+    expect(ce.box(['Equal', thirds, 1]).N().toString()).toBe(
+      '["False","False","True"]'
+    );
+    expect(ce.box(['NotEqual', thirds, 1]).N().toString()).toBe(
+      '["True","True","False"]'
+    );
+  });
+
+  test('a list against a list', () => {
+    expect(ce.box(['Less', thirds, exact]).N().toString()).toBe(
+      '["False","False","False"]'
+    );
+    expect(ce.box(['GreaterEqual', thirds, exact]).N().toString()).toBe(
+      '["True","True","True"]'
+    );
+  });
+
+  test('a lazy list (more than 100 elements)', () => {
+    const r = ce.box(['Less', ['Divide', ['Range', 1, 300], 3], 100]).N();
+    const at = (k: number) => ce.box(['At', r, k]).evaluate().json;
+    expect([at(299), at(300)]).toEqual(['True', 'False']);
+  });
+
+  test('the parse route and the async route', async () => {
+    expect(
+      ce.parse('\\frac{\\operatorname{Range}(1,3)}{3} < 1').N().toString()
+    ).toBe('["True","True","False"]');
+    const r = await ce
+      .box(['Less', thirds, 1])
+      .evaluateAsync({ numericApproximation: true });
+    expect(r.toString()).toBe('["True","True","False"]');
+  });
+
+  test('a comparison far from a tie does not change', () => {
+    expect(
+      ce
+        .box(['Less', ['Multiply', ['Range', 1, 3], 1.5], 3])
+        .N()
+        .toString()
+    ).toBe('["True","False","False"]');
+  });
+});
