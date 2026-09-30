@@ -2093,6 +2093,7 @@ function lerchPhiSeries(
   const rnd = (x: BigNum): BigNum => x.toPrecision(working);
   const negS = s.neg();
   const growth = Math.max(0, -sd); // max(0, −s), the ratio bound's growth term
+  if (!lerchPhiSeriesFits(working, zd, growth, ad)) return undefined;
   let sum = BigDecimal.ZERO;
   let zPow = BigDecimal.ONE; // zᵏ
   let largest = -Infinity;
@@ -2105,16 +2106,23 @@ function lerchPhiSeries(
     if (!power.isFinite()) return undefined; // w = 0, s > 0: a pole
     const term = rnd(zPow.mul(power));
     sum = rnd(sum.add(term));
-    if (!term.isZero()) largest = Math.max(largest, bigLog10Abs(term));
+    // Past k = 0, a zero term means zᵏ = 0 (z = 0): every later term is
+    // zero too, so the sum is complete.
+    if (term.isZero() && k > 0) return { sum, largest };
+    const termLog = term.isZero() ? -Infinity : bigLog10Abs(term);
+    largest = Math.max(largest, termLog);
 
+    // The tail bound is compared on base-10 exponents, never on doubles: a
+    // term or a sum outside the double range (above 1.8e308, or below
+    // 1e-308) would convert to Infinity or 0 and pass or fail the test for
+    // the wrong reason.
     const base = ad + k;
     const estimate = base > 0 ? zd * Math.exp(growth / base) : Infinity;
     const ratio = Math.abs(estimate);
-    const termAbs = term.isZero() ? 0 : Math.abs(term.toNumber());
-    if (ratio < 1 && termAbs > 0) {
-      const tail = termAbs * (ratio / (1 - ratio));
-      const sumAbs = sum.isZero() ? 0 : Math.abs(sum.toNumber());
-      if (tail === 0 || Math.log10(tail) < Math.log10(sumAbs || 1) - working) {
+    if (ratio < 1 && termLog > -Infinity) {
+      const tailLog = termLog + Math.log10(ratio / (1 - ratio));
+      const sumLog = sum.isZero() ? 0 : bigLog10Abs(sum);
+      if (tailLog < sumLog - working) {
         confirmed += 1;
         if (confirmed >= LERCH_BIG_CONSECUTIVE) return { sum, largest };
         zPow = rnd(zPow.mul(z));
@@ -2125,6 +2133,46 @@ function lerchPhiSeries(
     zPow = rnd(zPow.mul(z));
   }
   return undefined;
+}
+
+/**
+ * Whether `lerchPhiSeries` can meet its tail bound at `digits` significant
+ * digits within `LERCH_BIG_MAX_TERMS` terms. This is an estimate made before
+ * the sum starts, so that a case the series cannot finish declines at once
+ * instead of after summing to the cap.
+ *
+ * With L = −ln|z| and g = max(0, −s), the term magnitude is about
+ * |z|ᵏ(k+a)^g. It is largest near k* = g/L − a, and after that it falls. The
+ * sum stops when the tail after term N is below 10^(−digits) of the sum,
+ * and the sum is at least of the order of the largest term (a cancelling
+ * alternating sum is handled by `bigLerchPhi`'s guard-digit retry). So the
+ * series fits when, at N = `LERCH_BIG_MAX_TERMS`,
+ *
+ *   N·L − g·ln((N+a)/(k*+a)) − k*·L ≥ digits·ln 10 + ln(1/(1 − |z|)),
+ *
+ * where the last term is the factor R/(1 − R) of the tail bound. The left
+ * side increases with N past k*, so one evaluation at the cap decides.
+ * For s > 0 the (k+a)^(−s) factor makes the terms fall faster than |z|ᵏ;
+ * the estimate ignores that, so it can only overstate the terms needed.
+ */
+function lerchPhiSeriesFits(
+  digits: number,
+  zd: number,
+  growth: number,
+  ad: number
+): boolean {
+  const absZ = Math.abs(zd);
+  if (absZ === 0) return true;
+  if (!(absZ < 1)) return false;
+  const L = -Math.log(absZ);
+  const n = LERCH_BIG_MAX_TERMS;
+  const peak = Math.max(0, growth / L - ad);
+  if (peak >= n) return false;
+  const lhs =
+    n * L -
+    growth * Math.log(Math.max(1, n + ad) / Math.max(1, peak + ad)) -
+    peak * L;
+  return lhs >= digits * Math.LN10 - Math.log(1 - absZ);
 }
 
 /**
@@ -2139,9 +2187,20 @@ export function bigPolyLog(
   s: HurwitzOperand,
   z: HurwitzOperand
 ): BigNum | undefined {
-  const phi = bigLerchPhi(ce, z, s, [1n, 1n]);
-  if (phi === undefined) return undefined;
-  return hurwitzOperandBig(z).mul(phi).toPrecision(BigDecimal.precision);
+  // Φ is returned with 3 digits more than requested: rounding Φ to the
+  // requested digits first, then rounding the product z·Φ again, can move
+  // the last requested digit of Liₛ(z) by more than one unit. (`bigLerchPhi`
+  // keeps its own guard digits while it sums; these 3 only protect the
+  // final product, so they add few terms to the series.)
+  const requested = BigDecimal.precision;
+  BigDecimal.precision = requested + 3;
+  try {
+    const phi = bigLerchPhi(ce, z, s, [1n, 1n]);
+    if (phi === undefined) return undefined;
+    return hurwitzOperandBig(z).mul(phi).toPrecision(requested);
+  } finally {
+    BigDecimal.precision = requested;
+  }
 }
 
 /** Halley refinement of a BigDecimal Lambert W estimate `w` toward the root of

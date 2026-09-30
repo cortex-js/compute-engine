@@ -571,8 +571,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // precision: Liₛ(z) = z·Φ(z,s,1) on the arbitrary-precision Lerch
         // series (`bigPolyLog`/`bigLerchPhi`), ahead of both double kernels
         // below — the integer-order one included, which does not follow
-        // `ce.precision` (cortex-js/compute-engine#374).
+        // `ce.precision` (cortex-js/compute-engine#374). Like those kernels,
+        // it answers only for a numeric request (`.N()`, or an inexact
+        // operand): `evaluate()` of exact operands stays symbolic.
         if (
+          shouldNumericize(numericApproximation, s, z) &&
           isNumber(s) &&
           !s.isComplex &&
           isNumber(z) &&

@@ -200,3 +200,84 @@ describe('LerchPhi and PolyLog: the term cap', () => {
     expect(relErr).toBeGreaterThan(1e-20);
   });
 });
+
+describe('LerchPhi and PolyLog: evaluate() of exact operands stays exact', () => {
+  // `evaluate()` returns the most exact form; only `.N()` or an inexact
+  // operand numericizes, at any engine precision.
+  for (const digits of [MACHINE_PRECISION, 30]) {
+    test(`PolyLog(2,1/3) and LerchPhi(1/3,2,1) stay symbolic at ${digits} digits`, () => {
+      ce.precision = digits;
+      try {
+        expect(li(2, ['Rational', 1, 3]).evaluate().toString()).toBe(
+          'PolyLog(2, 1/3)'
+        );
+        expect(phi(['Rational', 1, 3], 2, 1).evaluate().toString()).toBe(
+          'LerchPhi(1/3, 2, 1)'
+        );
+      } finally {
+        ce.precision = MACHINE_PRECISION;
+      }
+    });
+  }
+});
+
+/** `got`'s arbitrary-precision value agrees with the decimal string
+ * `expected` to at least `digits` significant digits. The comparison is
+ * done on big decimals, since the values below are outside the double
+ * range. */
+function expectBigDigits(
+  got: ReturnType<typeof phi>,
+  expected: string,
+  digits: number
+) {
+  const value = got.bignumRe;
+  expect(value).toBeDefined();
+  const ref = ce.bignum(expected);
+  const rel = value!.sub(ref).div(ref).abs().toNumber();
+  expect(rel).toBeLessThan(10 ** (2 - digits));
+}
+
+describe('LerchPhi: values outside the double range', () => {
+  // A term or a sum above 1.8e308 or below 1e-308 must not end the series
+  // early (or keep it running to the term cap): the tail test is on
+  // base-10 exponents, not on doubles.
+  const cases: [string, unknown, unknown, unknown, string][] = [
+    // mpmath: lerchphi(mpf('0.5'), mpf('-159.5'), 1)
+    [
+      'LerchPhi(0.5,-159.5,1)',
+      0.5,
+      -159.5,
+      1,
+      '2.62784929555984310206038378766756995748391895560623866004106e+309',
+    ],
+    // mpmath: lerchphi(mpf('0.9'), mpf('-120.5'), 1)
+    [
+      'LerchPhi(0.9,-120.5,1)',
+      0.9,
+      -120.5,
+      1,
+      '4.53661623365548699349563246532011429001545471619281539376506e+318',
+    ],
+    // mpmath: fsum(mpf('0.5')**k * mpf(k+50)**-200 for k in range(2000))
+    // (`mpmath.lerchphi(0.5, 200, 50)` underflows to 0.0 here).
+    [
+      'LerchPhi(0.5,200,50)',
+      0.5,
+      200,
+      50,
+      '1.62240588233218200326285555901378136948829304537276526778249e-340',
+    ],
+  ];
+  for (const digits of [MACHINE_PRECISION, 30, 50]) {
+    for (const [name, z, s, a, expected] of cases) {
+      test(`${name} = ${expected} at ${digits} digits`, () => {
+        ce.precision = digits;
+        try {
+          expectBigDigits(phi(z, s, a).N(), expected, digits);
+        } finally {
+          ce.precision = MACHINE_PRECISION;
+        }
+      });
+    }
+  }
+});
