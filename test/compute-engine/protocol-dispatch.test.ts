@@ -428,7 +428,7 @@ type string is Copyable {
 });
 
 describe('#362: `Self` binds to the conformance target, not the receiver', () => {
-  // arnog's repro: `PartialOrder.compare` declared once, on `real` — every
+  // The issue's repro: `PartialOrder.compare` declared once, on `real` — every
   // real-conforming receiver should accept every real-conforming argument,
   // in either order.
   const REAL_PARTIAL_ORDER = () => {
@@ -510,14 +510,135 @@ let t = Thing(1)`
     ).toBe('real');
   });
 
-  test('runtime dispatch (`dispatchMember`) agrees with the static check', () => {
-    // Before this fix, `checkMemberArguments` (canonical time) and
-    // `dispatchMember` (evaluate time) bound `Self` inconsistently — a
-    // canonical-only construction (`{ canonical: false }` then `.evaluate()`)
-    // exercises the runtime path on its own.
+  test('runtime dispatch (`dispatchMember`) binds `Self` to the target on its own', () => {
+    // `.evaluate()` canonicalizes a raw expression first, so a
+    // `{ canonical: false }` box does NOT bypass `checkMemberArguments`. A
+    // receiver whose static type is a UNION is undecided for the static half
+    // (`isDecidedReceiverType`), which leaves every position unchecked at
+    // canonical time: the run-time check in `dispatchMember` is then the only
+    // one that runs. Before the fix it bound `Self` to the receiver's runtime
+    // type (`integer`) and rejected `2.5`.
     const ce = REAL_PARTIAL_ORDER();
-    const expr = ce.box(['compare', 3, 2.5] as any, { canonical: false });
+    ce.declare('u', 'integer | string');
+    ce.assign('u', 3);
+    const expr = ce.box(['compare', 'u', 2.5] as any);
+    expect(expr.isValid).toBe(true);
     expect(expr.evaluate().toString()).toBe('1');
+    // …and the same check still refuses an argument outside the target.
+    const bad = ce.box(['compare', 'u', { str: 'a' }] as any);
+    expect(errorCode(bad.evaluate().toString())).toBe('incompatible-type');
+  });
+
+  test('a block-less inheriting edge does not narrow `Self` below the edge that serves the call', () => {
+    // `type integer is PartialOrder` with no block is complete on the spot:
+    // it inherits `real`'s implementation and is non-pending, but carries no
+    // implementation of its own, so dispatch selects the `real` edge and
+    // binds `Self` to `real`. The static check must read the same edge:
+    // binding `Self` to the more specific but implementation-less `integer`
+    // edge rejected `compare(5, 1/2)` statically while the run time accepted
+    // it.
+    const ce = new ComputeEngine();
+    expect(
+      run(
+        ce,
+        `protocol PartialOrder {
+  function compare(self: Self, other: Self) -> integer
+}
+type real is PartialOrder {
+  function compare(self: Self, other: Self) -> integer { 1 }
+}
+type integer is PartialOrder`
+      )
+    ).toEqual([]);
+    // The `real` edge serves an integer receiver: no `protocol-implementation-
+    // pending` diagnostic above, and `real`'s body answers.
+    expect(
+      ce
+        .box(['compare', 5, 7] as any)
+        .evaluate()
+        .toString()
+    ).toBe('1');
+    for (const [self, other] of [
+      [5, ['Rational', 1, 2]],
+      [['Rational', 1, 2], 5],
+      [5, 2.5],
+    ]) {
+      const expr = ce.box(['compare', self, other] as any);
+      expect(expr.isValid).toBe(true);
+      expect(expr.evaluate().toString()).toBe('1');
+    }
+    // An `integer` edge that carries its OWN implementation is the one
+    // dispatch selects for an integer receiver, so `Self` narrows to it and
+    // a rational second argument is refused, in both halves.
+    expect(
+      run(
+        ce,
+        `type integer is PartialOrder {
+  function compare(self: Self, other: Self) -> integer { 2 }
+}`
+      )
+    ).toEqual([]);
+    const narrowed = ce.box(['compare', 5, ['Rational', 1, 2]] as any);
+    expect(errorCode(narrowed.toString())).toBe('incompatible-type');
+    expect(
+      ce
+        .box(['compare', 5, 7] as any)
+        .evaluate()
+        .toString()
+    ).toBe('2');
+    expect(
+      ce
+        .box(['compare', ['Rational', 1, 2], 5] as any)
+        .evaluate()
+        .toString()
+    ).toBe('1');
+  });
+
+  test('a `-> Self` result reads the serving edge too, past a block-less inheriting edge', () => {
+    const ce = new ComputeEngine();
+    expect(
+      run(
+        ce,
+        `protocol Clamped {
+  function clampToSelf(self: Self, bound: Self) -> Self
+}
+type real is Clamped {
+  function clampToSelf(self: Self, bound: Self) -> Self { self }
+}
+type integer is Clamped`
+      )
+    ).toEqual([]);
+    // The `integer` edge applies but carries no implementation; the call is
+    // served by `real`, so the result is `real`, not `integer`.
+    expect(
+      ce.box(['clampToSelf', 3, ['Rational', 1, 2]] as any).type.toString()
+    ).toBe('real');
+  });
+
+  test('when only a PENDING edge applies, `Self` binds to its target (declared conformance)', () => {
+    // `type real is PartialOrder` with no block and no supertype
+    // implementation is pending: dispatch can select nothing, so the static
+    // binding falls back to the declared edge. Its target is a known contract
+    // — a string argument is refused at canonical time — while a fitting call
+    // canonicalizes and fails at run time for the missing implementation.
+    const ce = new ComputeEngine();
+    expect(
+      run(
+        ce,
+        `protocol PartialOrder {
+  function compare(self: Self, other: Self) -> integer
+}
+type real is PartialOrder`
+      )
+    ).toEqual(['protocol-implementation-pending']);
+    const refused = ce.box(['compare', 5, { str: 'a' }] as any);
+    expect(errorCode(refused.toString())).toBe('incompatible-type');
+    expect(refused.toString()).toContain('"real"');
+    const fitting = ce.box(['compare', 5, ['Rational', 1, 2]] as any);
+    expect(fitting.isValid).toBe(true);
+    expect(errorCode(fitting.evaluate().toString())).toBe(
+      'protocol-implementation-missing'
+    );
   });
 });
 

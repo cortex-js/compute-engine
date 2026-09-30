@@ -3685,8 +3685,9 @@ export function declareProtocolImplementationImpl(
 // NAME, one global operator definition — the DISPATCHER (P13). Its `evaluate`
 // selects the most specific conformance implementation for the runtime type of
 // the first argument (the `Self` position, P1); its `canonical`/`type` handlers
-// perform P1's static half, binding `Self` to the first argument's STATIC type
-// and checking every other `Self` position against that binding.
+// perform P1's static half, binding `Self` to the conformance target dispatch
+// would select for the first argument's STATIC type (`selfBindingTarget`) and
+// checking every other `Self` position against that binding.
 //
 // The install pattern is `multi-clause.ts`'s `installClauseList`: build an
 // `OperatorDefinition`, `ce.declare()` it (or `updateDef()` an existing one)
@@ -4205,22 +4206,44 @@ function candidateRecords(
  * `compare(5, 1/2)`: bound to the receiver's own type (`integer`) instead,
  * the call would reject `1/2` while `compare(1/2, 5)` passes.
  *
+ * Only the edges dispatch can SELECT for `member` compete: non-pending ones
+ * that carry an implementation of it, the filter {@link bestCandidates}
+ * applies. A block-less `type integer is P` written after `real`'s
+ * implementation applies to an integer receiver, but the call is served by
+ * the `real` edge, so `Self` is `real` there too; reading the inheriting
+ * edge as the binding rejected `compare(5, 1/2)` statically while the run
+ * time accepted it. When no edge is selectable yet, every applicable edge
+ * counts — a pending edge is still declared conformance (P3), so its target
+ * is a known contract and an argument outside it is an `incompatible-type`
+ * at canonical time, before the run time reports
+ * `protocol-implementation-missing` for the still-missing implementation
+ * (unless another candidate protocol serves the same member name, in which
+ * case `dispatchMember` selects that one). A canonicalized call keeps the
+ * binding it was checked against: an implementation landing later on a
+ * WIDER target does not re-check it, as with every canonical-time verdict.
+ *
  * `receiver` itself when the record carries no applicable conformance yet —
  * there is nothing to be more specific than, and a member declared before
- * any conformance is implemented refutes nothing. `null` when two incomparable edges are both most specific: left
- * unchecked here, exactly as an undecided binding is, since the true
- * ambiguity is `dispatchMember`'s to report.
+ * any conformance is implemented refutes nothing. `null` when two
+ * incomparable edges are both most specific: left unchecked here, exactly as
+ * an undecided binding is, since the true ambiguity is `dispatchMember`'s to
+ * report.
  */
 function selfBindingTarget(
   ce: ProtocolReadView,
   record: ProtocolRecord,
+  member: string,
   receiver: Type
 ): Type | null {
-  const admitted: Type[] = [];
+  const served: Type[] = [];
+  const declared: Type[] = [];
   for (const edge of record.conformances) {
     const target = edgeTargetAt(ce, edge, receiver);
-    if (target !== null) admitted.push(target);
+    if (target === null) continue;
+    declared.push(target);
+    if (!edge.pending && edge.impl?.[member] !== undefined) served.push(target);
   }
+  const admitted = served.length > 0 ? served : declared;
   if (admitted.length === 0) return receiver;
   const minimal = admitted.filter(
     (t) => !admitted.some((u) => u !== t && isSubtype(u, t) && !isSubtype(t, u))
@@ -4273,7 +4296,9 @@ function checkMemberArguments(
   // to. A binding that comes back `null` (an unresolved ambiguity between
   // equally specific edges) decides nothing about ANY position: leave them
   // all to the run time rather than check against a partial set.
-  const bindings = records.map((r) => selfBindingTarget(ce, r, selfType));
+  const bindings = records.map((r) =>
+    selfBindingTarget(ce, r, member, selfType)
+  );
   if (bindings.some((b) => b === null)) return xs;
 
   const requirements = records.map((r, i) =>
@@ -4399,7 +4424,7 @@ function dispatcherResultTypeOfDescriptors(
   for (const record of records) {
     // A `-> Self` result binds to the record's conformance target, as an
     // argument does.
-    const binding = selfBindingTarget(ce, record, selfType);
+    const binding = selfBindingTarget(ce, record, member, selfType);
     if (binding === null) return undefined;
     const requirement = requirementAt(ce, record, member, binding);
     if (requirement === null) return undefined;

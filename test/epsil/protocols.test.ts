@@ -314,7 +314,11 @@ describe('EPSIL CONFORMANCE DECLARATIONS', () => {
     expect(validEpsil('let type = 5\ntype.x is integer')).toStrictEqual([
       'Block',
       ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
-      ['MatchesType', ['Field', 'type', { str: 'x' }], ['TypeFrom', { str: 'integer' }]],
+      [
+        'MatchesType',
+        ['Field', 'type', { str: 'x' }],
+        ['TypeFrom', { str: 'integer' }],
+      ],
     ]);
   });
 
@@ -373,14 +377,12 @@ describe('EPSIL CONFORMANCE DECLARATIONS', () => {
     // the linebreak boundary check (`i > from`), so `type` immediately
     // followed by a linebreak was hijacked; every later token was already
     // correctly checked.
-    expect(validEpsil('let type = 5\ntype\nstring is integer')).toStrictEqual(
-      [
-        'Block',
-        ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
-        'type',
-        ['MatchesType', 'string', ['TypeFrom', { str: 'integer' }]],
-      ]
-    );
+    expect(validEpsil('let type = 5\ntype\nstring is integer')).toStrictEqual([
+      'Block',
+      ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
+      'type',
+      ['MatchesType', 'string', ['TypeFrom', { str: 'integer' }]],
+    ]);
   });
 
   test('a malformed conformance tail does not leave the type name known', () => {
@@ -672,7 +674,9 @@ describe('EPSIL PROTOCOL EXECUTION', () => {
       'Sized',
       '',
     ]);
-    expect(source.slice(...d.range!)).toBe('type list<integer | string> is Sized');
+    expect(source.slice(...d.range!)).toBe(
+      'type list<integer | string> is Sized'
+    );
   });
 
   test('PENDING: a CONDITIONAL conformance anchors to its statement', () => {
@@ -896,7 +900,11 @@ describe('a protocol PROPERTY called as a function', () => {
     executeEpsil(ce, SIZED);
     const source = 'print(b, area(b))';
     const [d] = executeEpsil(ce, source).diagnostics;
-    expect(d.message).toEqual(['protocol-property-not-callable', 'area', 'Sized']);
+    expect(d.message).toEqual([
+      'protocol-property-not-callable',
+      'area',
+      'Sized',
+    ]);
     expect(d.severity).toBe('warning');
     // Anchored to `area(b)` — and reached at all only because the scan reads
     // the raw statement: `print` evaluates to `Nothing`, so the inert
@@ -1442,7 +1450,9 @@ type string is Comparable {
     ).toBe('"<"');
   });
 
-  test('`Self` binds to the first argument: argument 2 is checked against it', () => {
+  test('`Self` binds to the conformance target: argument 2 is checked against it', () => {
+    // `string`'s own conformance is the target here, an exact match with
+    // argument 1's type.
     const ce = new ComputeEngine();
     executeEpsil(ce, PROGRAM);
     const r = executeEpsil(ce, 'compare("a", 3)');

@@ -15,6 +15,12 @@
   runtime, so both argument orders and any mix of `integer`, `rational` and
   `real` are accepted alike; a `-> Self` result type binds the same way. A
   nominal type that conforms to nothing is still refused in either position.
+  When one applies, the binding reads only the edges dispatch can select —
+  those carrying an implementation of the member — so a block-less
+  `type integer is PartialOrder` that inherits `real`'s implementation does
+  not narrow `Self` to `integer` for the static check while the run time
+  serves the call through `real`; when none is selectable yet, it reads every
+  declared conformance, pending ones included.
 
 ### New Features
 
