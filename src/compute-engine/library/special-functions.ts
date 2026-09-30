@@ -430,6 +430,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       description: 'Gauss hypergeometric function ₂F₁(a, b; c; z).',
       wikidata: 'Q672619',
       complexity: 8700,
+      broadcastable: true,
       // Every slot takes the carrier `complex | infinity`; an infinite
       // operand stays symbolic (`symbolicAtInfinity`); `NaN` propagates
       // (explicit: the carrier is not a subtype of `complex`); no
@@ -466,6 +467,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         'Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for |x|, |y| < 1.',
       wikidata: 'Q2701540',
       complexity: 8800,
+      broadcastable: true,
       // Every slot takes the carrier `complex | infinity`; an infinite
       // operand stays symbolic (`symbolicAtInfinity`); `NaN` propagates
       // (explicit: the carrier is not a subtype of `complex`); no
@@ -504,6 +506,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         'Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ, at any real or complex order s.',
       wikidata: 'Q320067',
       complexity: 8700,
+      broadcastable: true,
       // Both slots take the carrier `complex | infinity`; an infinite
       // operand stays symbolic (`symbolicAtInfinity`, consulted BEFORE the
       // elementary reductions, which would otherwise turn `Li₀(+∞) =
@@ -614,6 +617,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         'Kummer confluent hypergeometric function ₁F₁(a; b; z) = M(a, b, z).',
       wikidata: 'Q1331447',
       complexity: 8700,
+      broadcastable: true,
       // Every slot takes the carrier `complex | infinity`; an infinite
       // operand stays symbolic (`symbolicAtInfinity`); `NaN` propagates
       // (explicit: the carrier is not a subtype of `complex`); no
@@ -650,6 +654,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         'Jacobi theta function θⱼ(z, τ), j ∈ {1,2,3,4}, nome q = e^{iπτ} (Fungrim convention).',
       wikidata: 'Q1154532',
       complexity: 8800,
+      broadcastable: true,
       // `j` is validated in the evaluate handler ('number' rather than
       // 'integer' so that rule-pattern wildcards — typed 'complex' — box).
       // The `z` and `τ` slots take the carrier `complex | infinity`; an
@@ -695,6 +700,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       description: 'Dedekind eta function η(τ), Im(τ) > 0.',
       wikidata: 'Q1187208',
       complexity: 8800,
+      broadcastable: true,
       // The carrier is `complex | infinity`. η is defined on the upper
       // half-plane, whose only point at infinity is the cusp `i·∞`, which
       // the engine spells `~oo` (`i·∞` boxes to `~oo`): `η(~oo) = 0`, the
@@ -731,6 +737,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Normalized Eisenstein series Eₛ(τ) of even weight s ≥ 2, Im(τ) > 0.',
       complexity: 8800,
+      broadcastable: true,
       // `s` is validated in the evaluate handler ('number' rather than
       // 'integer' so that rule-pattern wildcards — typed 'complex' — box; see
       // JacobiTheta). The `τ` slot takes the carrier `complex | infinity`,

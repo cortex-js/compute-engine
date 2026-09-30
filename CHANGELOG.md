@@ -227,6 +227,12 @@
 
 ### Issues Resolved
 
+- **`PolyLog`, the hypergeometric functions, `AppellF1`, `JacobiTheta`,
+  `DedekindEta` and `EisensteinE` thread over a list operand,** as `Zeta`,
+  `LerchPhi` and the elliptic integrals already did. `PolyLog(2, [0.1, 0.2])`
+  was an `incompatible-type` error and is now
+  `[0.1026177910993911, 0.2110037754397048]`; a scalar call is unchanged (#374,
+  contributed by [enumeratio](https://github.com/enumeratio)).
 - **`LerchPhi` and `PolyLog` answer to the engine precision for real arguments
   with |z| < 1.** They answered in machine precision whatever `ce.precision`
   was, where `HurwitzZeta` gave the requested digits. With `ce.precision = 50`,
