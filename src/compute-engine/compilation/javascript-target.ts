@@ -6353,30 +6353,36 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // from the (undefined) array element. Use `_e` for the unused element.
       return `((_a, _b) => Array.from({length: _SYS.rangeCount(_a, _b, _b >= _a ? 1 : -1)}, (_e, _i) => _b >= _a ? _a + _i : _a - _i))(${start}, ${stop})`;
     }
-    // An IMPURE operand (the Random family) must be evaluated exactly once:
-    // `start` and `step` are each spliced twice, and the SECOND splice is
-    // inside the `Array.from` callback — so a spliced draw is re-drawn once
-    // per element, and the length is computed from a different value than the
-    // elements (`Range(Random(), 10, 2)` consumed a draw for the length and
-    // one more per element). Bind the three bounds to IIFE parameters (the
-    // shape the symbolic 2-argument branch above uses); pure operands keep the
-    // direct emission byte-identical.
+    // Every operand is passed as an ARGUMENT of a small arrow function, and
+    // the `Array.from` callback reads only that function's own parameters.
+    // The shape carries two guarantees:
+    //
+    // - No callback name can capture a user variable. The direct emission
+    //   `Array.from({length: …}, (_e, i) => start + i * step)` spliced the
+    //   compiled `start` and `step` INTO the callback, where the index `i`
+    //   (or the element `_e`) shadowed a user variable of the same name: a
+    //   `Map` over `i` whose body ranged over `Range(i + 1, n)` read the
+    //   ARRAY INDEX instead of `i`, so every inner range started at
+    //   index + 1 and `Count(Filter(...))` answered 0 where the interpreter
+    //   answered 1 (issue #367). Here `start` and `step` are evaluated in
+    //   the argument list, outside the callback, whatever they are named.
+    // - An IMPURE operand (the Random family) is evaluated exactly once. In
+    //   the direct emission `start` and `step` were each spliced twice, the
+    //   second time inside the callback, so a spliced draw was re-drawn once
+    //   per element, and the length was computed from a different value than
+    //   the elements (`Range(Random(), 10, 2)` consumed a draw for the length
+    //   and one more per element).
+    //
+    // The same shape also makes parentheses unnecessary: a step compiled as
+    // the sum `_.d + -498` is bound whole to `_s` (Tycho item 324 was the
+    // direct emission reading it as `0 + i * _.d + -498`).
     //
     // The length is `_SYS.rangeCount`, the interpreter's own count
     // (`numerics/range-count.ts`): 0 for a zero step or a step that points
     // away from the stop, and an end point on the step grid in exact
     // arithmetic is counted even when the float quotient falls one rounding
     // error short of it (`Range(0, 0.3, 0.1)` has 4 elements).
-    //
-    // The element expression splices `start` and `step` into `start + i *
-    // step`, so an operand whose source is not a single token is wrapped in
-    // parentheses: a step `d - 498` compiles to `_.d + -498`, and spliced bare
-    // it read `0 + i * _.d + -498` — every element shifted by −498 (Tycho item
-    // 324). The count takes the operands as function arguments and needs no
-    // parentheses.
-    if (args.slice(0, 3).some((a) => a?.isPure === false))
-      return `((_a, _b, _s) => Array.from({length: _SYS.rangeCount(_a, _b, _s)}, (_e, _i) => _a + _i * _s))(${start}, ${stop}, ${step})`;
-    return `Array.from({length: _SYS.rangeCount(${start}, ${stop}, ${step})}, (_e, i) => ${spliceOperand(start)} + i * ${spliceOperand(step)})`;
+    return `((_a, _b, _s) => Array.from({length: _SYS.rangeCount(_a, _b, _s)}, (_e, _i) => _a + _i * _s))(${start}, ${stop}, ${step})`;
   },
   Root: ([arg, exp], compile, target) => {
     if (arg === null) throw new Error('Could not compile `Root`: no argument');
@@ -8917,16 +8923,6 @@ const colorHelpers = {
 /** A compiled numeric value: a scalar, a complex `{re,im}`, or a (possibly
  * nested) array of these. */
 type BcastValue = number | { re: number; im: number } | BcastValue[];
-
-/**
- * `code` ready to splice as an operand of a binary arithmetic operator: a
- * single token (a number literal, possibly negative, or a name such as `_.d`)
- * as it is, anything else in parentheses, so that the operator precedence of
- * the surrounding expression cannot split it.
- */
-function spliceOperand(code: string): string {
-  return /^-?[\w.$]+$/.test(code) ? code : `(${code})`;
-}
 
 /**
  * Compile an operand the lowering uses as a REAL number — a bound, a step, a

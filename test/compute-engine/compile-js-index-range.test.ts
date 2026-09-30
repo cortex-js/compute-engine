@@ -247,11 +247,13 @@ describe('Tycho 324: a compiled Range with a compound step', () => {
     expect(compiled).toEqual(interpreted);
   });
 
-  test('a compound step is parenthesized in the element expression', () => {
+  test('a compound step is bound whole, as an argument', () => {
     const ce = new ComputeEngine();
     ce.declare('d', 'real');
     const src = code(ce.box(['Range', 0, 10, ['Subtract', 'd', 498]] as any));
-    expect(src).toContain('i * (_.d + -498)');
+    // The step is passed to the range function, not spliced into the
+    // element expression, so no parentheses are needed around it.
+    expect(src).toContain('_a + _i * _s))(0, 10, _.d + -498)');
   });
 
   test('a Range inside a seeded shuffle keeps the interpreted count', () => {
@@ -263,6 +265,69 @@ describe('Tycho 324: a compiled Range with a compound step', () => {
       ['RandomShuffle', ['Range', 1, 4, ['Divide', 3, 'd']]],
     ] as any);
     expect(kernel(expr)({ d: 500 })).toHaveLength(501);
+  });
+});
+
+//
+// Issue #367: the runtime-length `Range` spliced its start and step into an
+// `Array.from` callback whose index was named `i`, so a start that read a
+// user variable `i` read the array index instead. Every operand is now
+// evaluated in an argument list outside the callback.
+//
+
+describe('issue #367: a Range operand that names a callback variable', () => {
+  /** For each `v`, the count of `j > v` with `p[v] > p[j]`. */
+  function inversions(v: string): any {
+    return [
+      'Map',
+      [
+        'Function',
+        [
+          'Count',
+          [
+            'Filter',
+            ['Range', ['Add', v, 1], ['Length', 'p'], 1],
+            ['Function', ['Greater', ['At', 'p', v], ['At', 'p', 'j']], 'j'],
+          ],
+        ],
+        v,
+      ],
+      ['Range', 1, ['Length', 'p'], 1],
+    ];
+  }
+
+  // `i` was the callback's index and `_e` its element parameter; `_i`, `_a`,
+  // `_b` and `_s` are the names the emitted function uses now, and must not
+  // capture either.
+  test.each(['i', 'k', '_e', '_i', '_a', '_b', '_s'])(
+    'the loop variable `%s` is the user variable, not the index',
+    (v) => {
+      const ce = new ComputeEngine();
+      ce.declare('p', 'list<integer>');
+      const expr = ce.box(inversions(v));
+      expect(kernel(expr)({ p: [2, 1] })).toEqual([1, 0]);
+      expect(kernel(expr)({ p: [3, 1, 2] })).toEqual([2, 0, 0]);
+    }
+  );
+
+  test('a start and a step that both read the variable', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    // For i in 1..3: Range(i, 2i + 4, i) — [1..6 by 1], [2..8 by 2], [3..10 by 3].
+    const expr = ce.box([
+      'Map',
+      ['Function', ['Range', 'i', ['Add', ['Multiply', 2, 'i'], 4], 'i'], 'i'],
+      ['Range', 1, 'n'],
+    ] as any);
+    const expected = [
+      ...(expr.subs({ n: 3 } as any).evaluate() as any).each(),
+    ].map((row: any) => [...row.each()].map((x: any) => x.re));
+    expect(expected).toEqual([
+      [1, 2, 3, 4, 5, 6],
+      [2, 4, 6, 8],
+      [3, 6, 9],
+    ]);
+    expect(kernel(expr)({ n: 3 })).toEqual(expected);
   });
 });
 

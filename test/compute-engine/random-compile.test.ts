@@ -723,12 +723,15 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
       expect(v[i] - v[i - 1]).toBeCloseTo(2, 12);
   });
 
-  test('JS: Range keeps the pure emission (byte-identical pins)', () => {
+  test('JS: a pure Range uses the same argument-passing shape (pins)', () => {
+    // The operands are evaluated in the argument list, outside the
+    // `Array.from` callback, so an impure operand is drawn once and no
+    // callback name can capture a user variable (issue #367).
     expect(jsCode(['Range', 'a', 'b', 'c'])).toBe(
-      'Array.from({length: _SYS.rangeCount(_.a, _.b, _.c)}, (_e, i) => _.a + i * _.c)'
+      '((_a, _b, _s) => Array.from({length: _SYS.rangeCount(_a, _b, _s)}, (_e, _i) => _a + _i * _s))(_.a, _.b, _.c)'
     );
     expect(jsCode(['Range', 1, 10, 2])).toBe(
-      'Array.from({length: _SYS.rangeCount(1, 10, 2)}, (_e, i) => 1 + i * 2)'
+      '((_a, _b, _s) => Array.from({length: _SYS.rangeCount(_a, _b, _s)}, (_e, _i) => _a + _i * _s))(1, 10, 2)'
     );
   });
 

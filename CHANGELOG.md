@@ -21,6 +21,20 @@
   the run time serves the call through `real`; when none is selectable yet, it
   reads every declared conformance, pending ones included.
 
+- **JavaScript compilation: a `Range` with a computed start or step no longer
+  captures a user variable named `i` or `_e`**
+  ([#367](https://github.com/cortex-js/compute-engine/issues/367), reported by
+  [enumeratio](https://github.com/enumeratio)). The runtime-length range spliced
+  its compiled start and step into an `Array.from` callback whose index
+  parameter was `i` and whose element parameter was `_e`, so a start that read a
+  user variable of either name read the callback's parameter instead: a `Map`
+  over `i` whose body counted the `j > i` with `p_i > p_j` over
+  `Range(i + 1, Length(p))` compiled to `[0, 0]` for `p = [2, 1]` where
+  `evaluate()` gives `[1, 0]`, while the same program over `k` compiled
+  correctly. Every operand is now passed as an argument of a small function,
+  outside the callback, the shape the impure-operand branch and the Python
+  target already used.
+
 - **A protocol member call no longer re-parses the member's signature.** A
   signature that names `Self` bypasses the type parser's shared cache, so every
   dispatched call parsed it twice, and the first attempt threw and built an
