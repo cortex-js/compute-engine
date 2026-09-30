@@ -93,7 +93,7 @@ export type SkipReason =
   | 'curated-exclude' // excluded via curation-overrides.json
   | 'compat-signature' // relies on a widened COMPAT signature (2-arg Digamma → polygamma order, …)
   | 'guard-uncompilable' // assumption outside the §2.2 mapping table (fail-closed)
-  | 'unorientable' // no viable direction (match not a function expr / wildcard subset fails)
+  | 'unorientable' // no viable direction (match not a function expr, raw or canonical / wildcard subset fails)
   | 'duplicate-undirected' // same undirected equality already emitted (§2.5)
   | 'box-error' // boxing the rule (or its sides) failed in the scratch engine
   | 'wildcard-loss' // canonicalizing the match pattern loses wildcards (mirrors applyRule)
@@ -1552,6 +1552,19 @@ export function compileEntries(
     }
     if (!isSubset(collectWildcards(oriented.match), collectWildcards(matchJson))) {
       skip(e, 'wildcard-loss');
+      continue;
+    }
+    // A match that canonicalization reduces to a symbol or a number is not a
+    // pattern for the corpus left side any more: it matches every occurrence
+    // of that value. Example: `Power(0, 0) = 1` canonicalizes its match to the
+    // symbol `Indeterminate`, which would give the rule
+    // `Indeterminate → 1` and rewrite every indeterminate form to 1.
+    if (!Array.isArray(matchJson)) {
+      skip(
+        e,
+        'unorientable',
+        `canonical match collapses to ${JSON.stringify(matchJson)}`.slice(0, 160)
+      );
       continue;
     }
 

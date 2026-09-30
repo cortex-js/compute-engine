@@ -9,8 +9,9 @@
     "duplicate-undirected": 15,
     "guard-uncompilable": 69,
     "lhs-not-value-form": 85,
-    "no-fire": 28,
+    "no-fire": 27,
     "not-equation": 8,
+    "unorientable": 1,
     "wildcard-loss": 1
   },
   "byPurpose": {
@@ -993,8 +994,8 @@
     },
     {
       "id": "d316bc",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "reason": "unorientable",
+      "detail": "canonical match collapses to \"Indeterminate\""
     },
     {
       "id": "d3cfc2",
