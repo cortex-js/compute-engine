@@ -1,6 +1,7 @@
 /**
- * A JavaScript model of the GPU Lerch transcendent and polylogarithm helpers
- * (`GPU_LERCH_PREAMBLE_GLSL`, `compilation/gpu-target.ts`), statement by
+ * A JavaScript model of the GPU Hurwitz zeta, Lerch transcendent and
+ * polylogarithm helpers (`GPU_ZETA_PREAMBLE_GLSL` and
+ * `GPU_LERCH_PREAMBLE_GLSL`, `compilation/gpu-target.ts`), statement by
  * statement, in f32: every arithmetic result is rounded with `Math.fround`,
  * and every transcendental function (exp, log, pow, sin, cos, atan) is the
  * double result rounded once to f32. A GPU's exp, log and pow are a few ulp
@@ -10,10 +11,10 @@
  * `compile-gpu-lerch-continuation.test.ts` pins the algorithm's values.
  *
  * Each function has the name of the shader function it models. When the
- * shader text changes, this model must change with it.
- *
- * Not modelled: z = 1 (the shader calls `_gpu_hurwitz_zeta`, from the zeta
- * preamble), which returns NaN here.
+ * shader text changes, this model must change with it. `_gpu_gamma` is the
+ * Lanczos helper of `GPU_GAMMA_PREAMBLE_GLSL`, which the zeta helpers call.
+ * Not modelled: `_gpu_zeta_generalized` (a sum of powers in front of
+ * `_gpu_hurwitz_zeta`).
  */
 
 let gpuModel = false;
@@ -102,6 +103,333 @@ function _gpu_zeta_pow(x: number, e: number): number {
   const r = pow(-x, e);
   if (abs(e) % 2 === 1) return -r;
   return r;
+}
+
+// ---- The zeta preamble (`GPU_ZETA_PREAMBLE_GLSL`) and `_gpu_gamma` ----
+
+/** The route the last `_gpu_hurwitz_zeta` call took (for measurements). */
+export let lastZetaRoute = '';
+
+const LANCZOS = [
+  676.5203681218851, -1259.1392167224028, 771.32342877765313,
+  -176.61502916214059, 12.507343278686905, -0.13857109526572012,
+  9.9843695780195716e-6, 1.5056327351493116e-7,
+].map(fr);
+
+/** `_gpu_gamma` (`GPU_GAMMA_PREAMBLE_GLSL`), the Lanczos approximation. */
+function _gpu_gamma(z: number): number {
+  if (z <= 0 && z === floor(z)) return Infinity;
+  let w = z;
+  if (z < 0.5) w = sub(1, z);
+  w = sub(w, 1);
+  let x = fr(0.99999999999980993);
+  for (let i = 0; i < 8; i++) x = add(x, div(LANCZOS[i], add(w, i + 1)));
+  const t = add(w, 7.5);
+  const g = mul(mul(mul(sqrt(mul(2, PI)), pow(t, add(w, 0.5))), exp(-t)), x);
+  if (z < 0.5) return div(PI, mul(sin(mul(PI, z)), g));
+  return g;
+}
+
+const ZETA_B = [
+  1 / 6,
+  -1 / 30,
+  1 / 42,
+  -1 / 30,
+  5 / 66,
+  -691 / 2730,
+  7 / 6,
+  -3617 / 510,
+  43867 / 798,
+  -174611 / 330,
+].map(fr);
+
+function _gpu_hurwitz_zeta_em(s: number, a: number, sm1: number): number {
+  let n = ceil(sub(15, a));
+  if (n < 0) n = 0;
+  let sum = 0;
+  let z = a;
+  for (let k = 0; k < n; k++) {
+    sum = add(sum, _gpu_zeta_pow(z, -s));
+    z = add(z, 1);
+  }
+  sum = add(sum, add(div(pow(z, -sm1), sm1), mul(0.5, pow(z, -s))));
+  let u = mul(div(s, 2), pow(z, -add(s, 1)));
+  let prevAbs = fr(3e38);
+  for (let j = 1; j <= 10; j++) {
+    const term = mul(u, ZETA_B[j - 1]);
+    if (abs(term) >= prevAbs) break;
+    sum = add(sum, term);
+    prevAbs = abs(term);
+    const m = 2 * j;
+    u = div(
+      mul(mul(u, sub(add(s, m), 1)), add(s, m)),
+      mul(mul(mul(m + 1, m + 2), z), z)
+    );
+  }
+  return sum;
+}
+
+/** [value, error estimate in units of EPS] — the shader's vec2. */
+type VE = [number, number];
+
+function _gpu_zeta_gamma_2pi(x: number): VE {
+  let p = 1;
+  let y = x;
+  for (let k = 0; k < 8; k++) {
+    if (y >= 8) break;
+    p = mul(p, y);
+    y = add(y, 1);
+  }
+  const y2 = mul(y, y);
+  const corr = div(
+    sub(div(1, 12), div(sub(div(1, 360), div(1, mul(1260, y2))), y2)),
+    y
+  );
+  const base = div(y, fr(17.079468445347132));
+  const v = mul(
+    mul(mul(pow(base, y), sqrt(div(mul(2, PI), y))), div(exp(corr), p)),
+    pow(mul(2, PI), sub(y, x))
+  );
+  return [v, mul(abs(v), add(add(12, abs(mul(y, log2(base)))), y))];
+}
+
+function _gpu_riemann_zeta(s: number, sm1: number): number {
+  if (sm1 === 0) return Infinity;
+  if (s === 0) return -0.5;
+  if (s < 0) {
+    if (s === floor(s) && s % 2 === 0) return 0;
+    if (s < -24.5) return NaN;
+    const hs = div(s, 2);
+    const n = floor(add(hs, 0.5));
+    let sinHalfPiS = sin(mul(PI, sub(hs, n)));
+    if (n % 2 !== 0) sinHalfPiS = -sinHalfPiS;
+    const oneMinusS = sub(1, s);
+    if (oneMinusS >= 8)
+      return mul(
+        mul(mul(2, _gpu_zeta_gamma_2pi(oneMinusS)[0]), sinHalfPiS),
+        _gpu_hurwitz_zeta_em(oneMinusS, 1, -s)
+      );
+    return mul(
+      mul(
+        mul(mul(pow(2, s), pow(PI, sub(s, 1))), sinHalfPiS),
+        _gpu_gamma(oneMinusS)
+      ),
+      _gpu_hurwitz_zeta_em(oneMinusS, 1, -s)
+    );
+  }
+  return _gpu_hurwitz_zeta_em(s, 1, sm1);
+}
+
+function _gpu_zeta(s: number): number {
+  return _gpu_riemann_zeta(s, sub(s, 1));
+}
+
+function _gpu_zeta_near_one(s: number, h: number): number {
+  let sum = _gpu_zeta(s);
+  let c = 1;
+  let hk = 1;
+  let largest = abs(sum);
+  let small = 0;
+  for (let k = 1; k < 100; k++) {
+    hk = mul(hk, h);
+    if (hk === 0) break;
+    const f = sub(1 - k, s);
+    if (f === 0) return add(sum, mul(mul(c, hk), div(-1, k)));
+    c = div(mul(c, f), k);
+    const term = mul(mul(c, hk), _gpu_riemann_zeta(add(s, k), -f));
+    sum = add(sum, term);
+    const size = abs(term);
+    largest = max(largest, size);
+    if (size <= mul(fr(1e-7), largest)) {
+      if (++small === 2) break;
+    } else small = 0;
+  }
+  return sum;
+}
+
+function _gpu_zeta_em1(y: number): number {
+  if (y < 0.25) {
+    let r = sub(1, div(y, 7));
+    r = sub(1, mul(div(y, 6), r));
+    r = sub(1, mul(div(y, 5), r));
+    r = sub(1, mul(div(y, 4), r));
+    r = sub(1, mul(div(y, 3), r));
+    r = sub(1, mul(div(y, 2), r));
+    return mul(y, r);
+  }
+  return sub(1, exp(-y));
+}
+
+/** The number of panels the last Hermite integral used (for measurements). */
+export let lastHermitePanels = 0;
+
+function _gpu_zeta_hermite(s: number, b: number): VE {
+  const k = div(pow(b, -s), mul(2, sub(s, 1)));
+  const c = add(s, max(sub(mul(2, b), 1), -1));
+  const closed = mul(k, c);
+  let err = add(
+    mul(abs(k), add(abs(c), b < 0.25 ? 1 : 0)),
+    mul(abs(closed), add(4, abs(mul(s, log2(b)))))
+  );
+  const b2 = mul(b, b);
+  const tPeak = max(0, div(-s, mul(2, PI)));
+  let sum = 0;
+  let largest = 0;
+  let x = 0;
+  let done = false;
+  let p = 0;
+  for (p = 0; p < 40; p++) {
+    const w = x === 0 ? mul(0.5, b) : min(x, 1);
+    const cc = add(x, mul(0.5, w));
+    const r = mul(0.5, w);
+    let size = 0;
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 2; j++) {
+        const t = add(cc, mul(j === 0 ? -r : r, GX[i]));
+        const y = mul(mul(2, PI), t);
+        const lr = log(add(b2, mul(t, t)));
+        const ex = sub(sub(mul(mul(-0.5, s), lr), y), log(_gpu_zeta_em1(y)));
+        const th = mul(s, atan(div(t, b)));
+        const q = mul(mul(r, GW[i]), exp(ex));
+        const f = mul(q, sin(th));
+        sum = add(sum, f);
+        size = add(size, abs(f));
+        err = add(
+          err,
+          mul(
+            2,
+            add(
+              mul(
+                abs(f),
+                add(add(6, abs(ex)), mul(mul(0.5, abs(s)), add(2, abs(lr))))
+              ),
+              mul(q, abs(th))
+            )
+          )
+        );
+      }
+    }
+    x = add(x, w);
+    const mean = div(size, w);
+    largest = max(largest, mean);
+    if (x > tPeak && x >= 1 && mean <= mul(fr(1e-9), largest)) {
+      done = true;
+      break;
+    }
+  }
+  lastHermitePanels = p + 1;
+  if (!done) return [0, fr(3e38)];
+  const v = add(closed, mul(2, sum));
+  return [v, add(err, mul(2, abs(v)))];
+}
+
+function _gpu_zeta_fourier(s: number, b: number): VE {
+  const g = _gpu_zeta_gamma_2pi(sub(1, s));
+  const hs = div(s, 2);
+  const ps = sub(hs, mul(2, floor(div(hs, 2))));
+  let sum = 0;
+  let err = 0;
+  for (let k = 1; k <= 64; k++) {
+    const kb = mul(k, b);
+    const ph = add(mul(2, sub(kb, floor(kb))), ps);
+    const n = floor(add(ph, 0.5));
+    let sn = sin(mul(PI, sub(ph, n)));
+    if (n % 2 !== 0) sn = -sn;
+    const pk = pow(k, sub(s, 1));
+    const t = mul(sn, pk);
+    sum = add(sum, t);
+    err = add(
+      err,
+      add(
+        mul(abs(t), add(4, abs(mul(sub(s, 1), log2(k))))),
+        mul(pk, mul(k, 20))
+      )
+    );
+  }
+  const tail = div(pow(64, s), -s);
+  return [
+    mul(mul(2, g[0]), sum),
+    add(
+      mul(mul(2, g[0]), add(add(err, div(tail, EPS)), mul(2, abs(sum)))),
+      mul(mul(2, g[1]), abs(sum))
+    ),
+  ];
+}
+
+/** `lastZetaRatio` is the error estimate over the value of the last shifted
+ * call (for measurements); with `noDecline` set the call answers anyway. */
+export let lastZetaRatio = 0;
+export const zetaModelOptions = { noDecline: false };
+
+function _gpu_zeta_shifted(s: number, a: number): number {
+  const m = sub(ceil(a), 1);
+  const b = sub(a, m);
+  let r: VE;
+  if (s <= -3) {
+    lastZetaRoute = 'fourier';
+    r = _gpu_zeta_fourier(s, b);
+  } else if (b < fr(0.0009765625)) {
+    lastZetaRoute = 'near-one';
+    const t = pow(b, -s);
+    const zn = _gpu_zeta_near_one(s, b);
+    r = [
+      add(zn, t),
+      add(mul(64, abs(zn)), mul(abs(t), add(3, abs(mul(s, log2(b)))))),
+    ];
+  } else {
+    lastZetaRoute = 'hermite';
+    r = _gpu_zeta_hermite(s, b);
+  }
+  let z = r[0];
+  let err = r[1];
+  for (let j = 0; j < 128; j++) {
+    if (j >= m) break;
+    const br = add(b, j);
+    const t = pow(br, -s);
+    z = sub(z, t);
+    err = add(err, mul(abs(t), add(add(3, j), abs(mul(s, log2(br))))));
+  }
+  err = add(err, mul(abs(z), add(m, 2)));
+  lastZetaRatio = (EPS * err) / Math.abs(z);
+  if (!zetaModelOptions.noDecline && !(mul(EPS, err) <= mul(TOL, abs(z))))
+    return NaN;
+  return z;
+}
+
+function _gpu_hurwitz_zeta(s: number, a: number): number {
+  lastZetaRoute = 'closed';
+  if (s === 1) return Infinity;
+  if (s === 0) return sub(0.5, a);
+  lastZetaRoute = 'riemann';
+  if (a === 1) return _gpu_zeta(s);
+  lastZetaRoute = 'closed';
+  const aNonposInt = a <= 0 && a === floor(a);
+  if (aNonposInt && s > 0) return Infinity;
+  if (a < 0 && s !== floor(s)) return NaN;
+  if (a < -1e6) return NaN;
+  const edge = max(12, ceil(abs(s)) + 6);
+  if (a > 0 && s >= -24.5 && s < 1 && (s < 0.5 ? a < mul(4, edge) : a < 1))
+    return _gpu_zeta_shifted(s, a);
+  lastZetaRoute = 'em';
+  if (s >= 0 || a >= mul(4, edge)) return _gpu_hurwitz_zeta_em(s, a, sub(s, 1));
+  lastZetaRoute = 'taylor';
+  const m = floor(sub(a, 0.5));
+  const h = sub(sub(a, m), 1);
+  if (abs(h) > 0.75) return _gpu_hurwitz_zeta_em(s, a, sub(s, 1));
+  let z = _gpu_zeta_near_one(s, h);
+  const steps = abs(m);
+  for (let j = 0; j < steps; j++) {
+    const br = m > 0 ? add(add(h, 1), j) : add(a, j);
+    if (br === 0) continue;
+    const t = _gpu_zeta_pow(br, -s);
+    z = m > 0 ? sub(z, t) : add(z, t);
+  }
+  return z;
+}
+
+/** The model of `_gpu_hurwitz_zeta(s, a)`, at the f32-rounded operands. */
+export function gpuHurwitzZetaModel(s: number, a: number): number {
+  return _gpu_hurwitz_zeta(fr(s), fr(a));
 }
 
 function _gpu_lerch_series(z: number, s: number, a: number): Result {
@@ -656,7 +984,7 @@ function _gpu_lerch_negative(z: number, s: number, a: number): Result {
 
 function _gpu_lerch_core(z: number, s: number, a: number): Result {
   lastRoute = 'closed';
-  if (z === 1) return [NaN, true]; // the Hurwitz zeta: not modelled
+  if (z === 1) return [_gpu_hurwitz_zeta(s, a), true];
   if (z === 0) return [_gpu_zeta_pow(a, -s), true];
   if (s === 0) return [div(1, sub(1, z)), true];
   if (s < 0 && s === floor(s) && s >= -LERCH_MAX_N) {
@@ -698,10 +1026,150 @@ function _gpu_lerch_core(z: number, s: number, a: number): Result {
   return _gpu_lerch_negative(z, s, a);
 }
 
+/** For measurements: with `noDecline` set, `_gpu_lerch_modes` answers
+ * whatever its error estimate; `lastModesRatio` is that estimate over the
+ * value, `lastModesCount` the number of modes summed. */
+export const lerchModesOptions = { noDecline: false };
+export let lastModesRatio = 0;
+export let lastModesCount = 0;
+
+const FLT_MIN = fr(1.18e-38);
+const FLT_BIG = fr(3.4e38);
+/** A finite f32 at least as large as the smallest normal one. */
+const normal = (x: number) => abs(x) >= FLT_MIN && abs(x) < FLT_BIG;
+/** The smallest normal f32 in units of EPS: a GPU flushes a smaller value
+ * to 0, so each value that can be flushed adds this to an error estimate. */
+const FLUSH = fr(2e-31);
+
+function _gpu_lerch_modes(z: number, s: number, a: number, c: number): Result {
+  if (s < -30 || abs(a) >= 100) return DECLINE;
+  let b = a;
+  let pre = 0;
+  let post = 0;
+  if (a <= 0) {
+    pre = floor(-a) + 1;
+    b = add(a, pre);
+  } else if (a > 1) {
+    post = ceil(a) - 1;
+    b = sub(a, post);
+  }
+  let head = 0;
+  let herr = 0;
+  let zk = 1;
+  for (let j = 0; j < 128; j++) {
+    if (j >= pre) break;
+    const bj = add(a, j);
+    if (bj !== 0) {
+      const t = mul(zk, _gpu_zeta_pow(bj, -s));
+      head = add(head, t);
+      herr = add(herr, mul(abs(t), add(add(3, j), abs(mul(s, log2(abs(bj)))))));
+    }
+    zk = mul(zk, z);
+  }
+  const L = log(-z);
+  const sm1 = sub(s, 1);
+  const hs = mul(0.5, sm1);
+  const ps = sub(hs, mul(2, floor(mul(0.5, hs))));
+  const L2 = mul(L, L);
+  const lr1 = log(add(L2, mul(PI, PI)));
+  let sum = 0;
+  let err = 0;
+  let tail = 0;
+  let n = 1;
+  for (n = 1; n <= 128; n++) {
+    const m = 2 * n - 1;
+    const x = mul(PI, m);
+    const lr = log(add(L2, mul(x, x)));
+    const at = div(atan(div(L, x)), PI);
+    const bm = mul(b, m);
+    const P = add(add(sub(bm, mul(2, floor(mul(0.5, bm)))), ps), mul(sm1, at));
+    const k = floor(add(P, 0.5));
+    let cs = cos(mul(PI, sub(P, k)));
+    if (k % 2 !== 0) cs = -cs;
+    const ex = mul(hs, sub(lr, lr1));
+    const mag = exp(ex);
+    const t = mul(mag, cs);
+    sum = add(sum, t);
+    err = add(
+      err,
+      add(
+        mul(abs(t), add(4, abs(ex))),
+        mul(
+          mag,
+          add(
+            mul(abs(hs), add(abs(lr), abs(lr1))),
+            mul(PI, add(add(abs(P), mul(abs(sm1), abs(at))), mul(b, m)))
+          )
+        )
+      )
+    );
+    tail = div(mul(mag, m), mul(-2, s));
+    if (tail <= fr(1e-9)) break;
+  }
+  lastModesCount = min(n, 128);
+  const lg = _gpu_lerch_lgamma(sub(1, s));
+  const scale = mul(2, exp(sub(add(lg, mul(hs, lr1)), mul(sub(b, c), L))));
+  let phib = mul(scale, sum);
+  if (!(scale < FLT_BIG && abs(phib) < FLT_BIG)) return DECLINE;
+  let eb = add(
+    mul(scale, add(add(err, div(tail, EPS)), mul(4, abs(sum)))),
+    mul(
+      abs(phib),
+      add(add(add(abs(lg), abs(mul(hs, lr1))), abs(mul(sub(b, c), L))), 12)
+    )
+  );
+  if (scale < FLT_MIN || abs(phib) < FLT_MIN)
+    eb = add(eb, mul(FLUSH, add(1, abs(sum))));
+  if (c > 0.5) phib = -phib;
+  let res: number;
+  let rerr: number;
+  if (post > 0) {
+    let acc = phib;
+    let aerr = eb;
+    let zj = 1;
+    for (let j = 0; j < 128; j++) {
+      if (j >= post) break;
+      const bj = add(b, j);
+      const t = mul(zj, pow(bj, -s));
+      acc = sub(acc, t);
+      aerr = add(aerr, mul(abs(t), add(add(3, j), abs(mul(s, log2(bj))))));
+      zj = mul(zj, z);
+    }
+    const zinv = pow(-z, -post);
+    if (!(normal(zinv) && normal(acc))) return DECLINE;
+    const sg = post % 2 === 0 ? 1 : -1;
+    res = mul(mul(sg, zinv), acc);
+    rerr = add(
+      mul(zinv, add(aerr, mul(abs(acc), post + 2))),
+      mul(abs(res), abs(mul(post, log2(-z))))
+    );
+  } else {
+    if (!normal(zk)) return DECLINE;
+    res = add(head, mul(zk, phib));
+    rerr = add(herr, mul(abs(zk), add(eb, mul(abs(phib), pre + 2))));
+  }
+  lastModesRatio = (EPS * rerr) / Math.abs(res);
+  if (
+    !lerchModesOptions.noDecline &&
+    (!normal(res) || !(rerr <= mul(500, abs(res))))
+  )
+    return DECLINE;
+  return [res, true];
+}
+
 /** The model of `_gpu_lerch_phi(z, s, a)`, at the f32-rounded operands. */
 export function gpuLerchPhiModel(z: number, s: number, a: number): number {
-  const r = _gpu_lerch_core(fr(z), fr(s), fr(a));
-  return r[1] ? r[0] : NaN;
+  z = fr(z);
+  s = fr(s);
+  a = fr(a);
+  const r = _gpu_lerch_core(z, s, a);
+  if (r[1]) return r[0];
+  if (z < 0 && s <= -3 && !(a < 0 && s !== floor(s))) {
+    lastRoute = 'modes';
+    const m = _gpu_lerch_modes(z, s, a, 0);
+    if (m[1]) return m[0];
+  }
+  return NaN;
 }
 
 const BERNOULLI = [
@@ -768,6 +1236,7 @@ function _gpu_poly_log_inversion(s: number, z: number): Result {
     ui = mul(c, add(mul(ur, iw2i), mul(ui, iw2r)));
     ur = nr;
   }
+  zerr = add(zerr, mul(44, FLUSH));
   const n = floor(add(s, 0.5));
   const d = sub(s, n);
   const sgn = n % 2 === 0 ? 1 : -1;
@@ -798,8 +1267,11 @@ function _gpu_poly_log_inversion(s: number, z: number): Result {
       const t = mul(wk, pow(k, -s));
       li = add(li, t);
       const size = abs(t);
-      lierr = add(lierr, mul(size, add(add(2, k), abs(mul(s, log2(k))))));
-      const rho = max(div(size, prevT), -iz);
+      lierr = add(
+        lierr,
+        add(mul(size, add(add(2, k), abs(mul(s, log2(k))))), FLUSH)
+      );
+      const rho = mul(-iz, pow(div(k + 1, k), -s));
       if (
         size < prevT &&
         rho < 1 &&
@@ -818,11 +1290,11 @@ function _gpu_poly_log_inversion(s: number, z: number): Result {
     lierr = mul(500, abs(li));
   }
   const res = sub(first, mul(mul(sgn, cos(mul(PI, d))), li));
-  const bound = mul(
-    EPS,
-    add(add(firstErr, mul(4, abs(first))), add(lierr, mul(2, abs(li))))
+  const bound = add(
+    add(add(firstErr, mul(4, abs(first))), add(lierr, mul(2, abs(li)))),
+    mul(4, FLUSH)
   );
-  if (!(bound <= mul(TOL, abs(res)))) return DECLINE;
+  if (!normal(res) || !(bound <= mul(500, abs(res)))) return DECLINE;
   return [res, true];
 }
 
@@ -870,11 +1342,20 @@ export function gpuPolyLogModel(s: number, z: number): number {
     return div(mul(z, p), den);
   }
   const r = _gpu_lerch_core(z, s, 1);
-  if (r[1]) return mul(z, r[0]);
+  if (
+    r[1] &&
+    (z >= -1 || (abs(r[0]) >= fr(3.9e-34) && abs(mul(z, r[0])) < FLT_BIG))
+  )
+    return mul(z, r[0]);
   if (z < -1 && s < 0 && s !== floor(s)) {
     const v = _gpu_poly_log_inversion(s, z);
     lastRoute = 'inversion';
     if (v[1]) return v[0];
+  }
+  if (z < 0 && s <= -3) {
+    lastRoute = 'modes';
+    const m = _gpu_lerch_modes(z, s, 1, 1);
+    if (m[1]) return m[0];
   }
   return NaN;
 }

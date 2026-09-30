@@ -3,7 +3,7 @@ import {
   gamma,
   gammaErrorWeight,
   gaussLegendreRule,
-  hurwitzZetaComplex,
+  hurwitzZetaComplexWithError,
   incompleteGammaUpperComplexWithError,
 } from './numeric-complex.js';
 import { hurwitzZeta } from './special-functions.js';
@@ -33,10 +33,13 @@ import { hurwitzZeta } from './special-functions.js';
 // reaches double precision in a few dozen. |z| ≥ 1 (off z = 1) needs
 // analytic continuation past the disk of convergence, by the Hermite-type
 // integral representation valid for Re(a) > 0 (`lerchContinuedComplex`).
-// Where its terms cancel too far (Re(s) < 0 with a large |z|), a real a
-// uses the expansion of Φ in the Fourier modes of the base point
-// (`lerchModesComplex`) and a complex a a Taylor series in a around a real
-// base point (`lerchTaylorComplex`).
+// Where its terms cancel too far (mostly a large |z|), a real a uses the
+// expansion of Φ in the Fourier modes of the base point
+// (`lerchModesComplex`); then, for Re(s) > 0, the integral above along a
+// path around its pole (`lerchIntegralComplex`); then Lerch's
+// transformation formula, which carries the modes by two Lerch
+// transcendents of order 1 − s and also applies to a complex a
+// (`lerchFunctionalComplex`).
 
 const C_ZERO = new Complex(0, 0);
 
@@ -162,6 +165,16 @@ function lerchSeriesComplex(
   s: Complex,
   a: Complex
 ): Complex | undefined {
+  return lerchSeriesWithError(z, s, a)?.value;
+}
+
+/** `lerchSeriesComplex` with the estimated relative error of its value: the
+ * two rounding estimates it checks against `MAX_LOSS`, added. */
+function lerchSeriesWithError(
+  z: Complex,
+  s: Complex,
+  a: Complex
+): { value: Complex; error: number } | undefined {
   const shifted = shiftBase(z, s, a, Number.MIN_VALUE);
   if (shifted === undefined) return undefined;
   const { head, zn, b } = shifted;
@@ -204,7 +217,10 @@ function lerchSeriesComplex(
         if (!((1e-16 * largest) / total <= MAX_LOSS)) return undefined;
         if (!((Number.EPSILON * weighted) / total <= MAX_LOSS))
           return undefined;
-        return head.add(sum);
+        return {
+          value: head.add(sum),
+          error: (1e-16 * largest + Number.EPSILON * weighted) / total,
+        };
       }
     } else settled = 0;
     previous = size;
@@ -436,6 +452,22 @@ function closedTermSheet(negLogZ: Complex, b: Complex, x: Complex): number {
   return Math.round((theta - Math.atan2(x.im, x.re)) / (2 * Math.PI));
 }
 
+/** The relative error of `gamma(x)` in units of ε, for the Γ(1 − s)
+ * factor of the modes and functional routes and the Γ(s) of the integral.
+ * `gammaErrorWeight` bounds the
+ * error for every complex argument; for a real argument from 1/2 to 140 the
+ * error is much smaller, and this returns 2·(8 + x·ln(x + 8)) there (1254ε
+ * against 232ε at x = 29.8). Measured against mpmath on 8340 real arguments
+ * from 1/2 to 170: the error was at most 1.04 times 8 + x·ln(x + 8) up to
+ * x = 140, and up to 1.9 times above, where `gamma` switches to its
+ * logarithmic form (1390ε at x = 145), so larger arguments keep
+ * `gammaErrorWeight`. */
+function gammaWeight(x: Complex): number {
+  if (x.im === 0 && x.re >= 0.5 && x.re <= 140)
+    return 2 * (8 + x.re * Math.log(x.re + 8));
+  return gammaErrorWeight(x);
+}
+
 /** 1/Γ(s) for a complex s, and its relative error in units of ε: 1/Γ(s)
  * for Re(s) ≥ 1/2, and sin(πs)·Γ(1 − s)/π (the reflection formula) below,
  * which is finite at the poles of Γ(s) and vanishes there. The sine has an
@@ -647,30 +679,30 @@ const MODES_MAX = 64;
 const MODES_DIRECT_ORDER = 8;
 
 /**
- * The error of `hurwitzZetaComplex(o, b)`, in units of ε, relative to the
- * larger of |ζ| and its envelope 2|Γ(σ)|(2π)^(−Re σ)cosh(π·Im σ/2)
- * (σ = 1 − o), for the orders the modes route asks for (real part from −7
- * to 1/2, 0 < b ≤ 1); `undefined` where the kernel is not accurate enough
- * to use. Measured against mpmath on 2500 orders with real part from −8 to
- * 0.5, |Im| ≤ 7 and 0.001 ≤ b ≤ 1, the largest errors were:
- *   - |Im o| < 4: 57ε;
- *   - 4 ≤ |Im o| < 7: 306ε to 13000ε for Re(o) ≥ 0 (a relative error up to
- *     4.6e−13, with b below 0.07; not used), 468ε for −2 ≤ Re(o) < 0 and
- *     74ε below;
- *   - |Im o| ≥ 8: a relative error up to 2.4e−11 (not used).
+ * The error of `hurwitzZetaComplexWithError(o, b)`, in units of ε, relative
+ * to the larger of |ζ| and its envelope 2|Γ(σ)|(2π)^(−Re σ)cosh(π·Im σ/2)
+ * (σ = 1 − o), for the orders the modes route asks for (0 < b ≤ 1);
+ * `undefined` above |Im o| = 20, where it is not measured. Measured against
+ * mpmath on 18 500 orders with real part from −8 to 13, |Im o| up to 20
+ * and 0.001 ≤ b ≤ 1 (b log-uniform on half of the points), with the kernel
+ * of 2026-09-30 (the routes for |Im o| ≥ 2 chosen by an error estimate):
+ * at most 52ε for |Im o| < 7 and 88ε from 7 to 20, and at most 0.43 times
+ * this weight. The kernel's own estimate is relative to |ζ| and is not a
+ * bound for a real order (up to 28 times too small where |ζ| is far below
+ * the envelope), so the modes route counts both. The kernel before that
+ * change was up to 4e6ε off for 0 ≤ Re(o) < 1/2 and |Im o| ≥ 5, which
+ * this weight then excluded.
  */
 function hurwitzKernelWeight(o: Complex): number | undefined {
   const im = Math.abs(o.im);
-  if (im < 4) return 80 + 20 * Math.abs(o.re);
-  if (im > 7 || o.re >= 0) return undefined;
-  if (o.re >= -2) return 1000;
-  return 150 + 20 * Math.abs(o.re);
+  if (im > 20) return undefined;
+  return 100 + 20 * Math.abs(o.re) + 5 * im;
 }
 
 /**
- * Φ(z,s,a) for a real a and Re(s) < 1/2, from the expansion of Φ in the
- * Fourier modes of the base point (the Hurwitz formula of the Hurwitz zeta
- * function, carried over to Φ): for 0 < b ≤ 1 and Re(s) < 0,
+ * Φ(z,s,a) for a real a, from the expansion of Φ in the Fourier modes of
+ * the base point (the Hurwitz formula of the Hurwitz zeta function, carried
+ * over to Φ): for 0 < b ≤ 1 and Re(s) < 0,
  *
  *   Φ(z,s,b) = Γ(1−s)·z^(−b)·Σ_{n∈ℤ} e^{2πinb}·(2πin − log z)^(s−1).
  *
@@ -684,7 +716,12 @@ function hurwitzKernelWeight(o: Complex): number | undefined {
  * With N = 0 this is Erdélyi's expansion of Φ in powers of log z; with more
  * modes it converges for every z, like (|log z|/(2π(N + 1)))^k, and it
  * holds for every s that is not a positive integer by analytic
- * continuation. Other real a are brought to (0, 1] by
+ * continuation: the sum over n alone converges only for Re(s) < 0 (its
+ * terms fall like |n|^(Re(s)−1)), but the ζ_N of the other modes are
+ * continued in s by `hurwitzZetaComplex`, so for Re(s) ≥ 0 only the finite
+ * sum of the explicit modes is summed directly. Next to a positive integer
+ * s, Γ(1 − s) and one ζ_N are large and cancel, and the estimate counts
+ * it. Other real a are brought to (0, 1] by
  * Φ(z,s,a) = a^(−s) + z·Φ(z,s,a+1) (a (a+k) = 0 term dropped, as
  * `shiftBase` does) or by Φ(z,s,a) = z^(−1)·(Φ(z,s,a−1) − (a−1)^(−s)).
  * On the cut (real z > 1) the n = 0 mode takes (−log z + 0i)^(s−1), the side
@@ -692,22 +729,33 @@ function hurwitzKernelWeight(o: Complex): number | undefined {
  *
  * This route has none of the cancellation of the continuation for Re(s) < 0
  * and a large |z|, where the three terms of the continuation are up to 1e5
- * times the value. It is used where the continuation declines. It does not
- * apply to a complex a: e^{2πinb} then grows in one direction of n and the
- * sum of the modes diverges.
+ * times the value, or for Re(s) ≥ 1/2 and |z| above about 1000, where the
+ * tail integral of the continuation cancels. It is used where the
+ * continuation declines. For a large Re(s) and a very large |z| (Re(s) ≳ 5,
+ * |z| ≳ 1e4) the explicit modes and the other modes cancel to up to 1e−5 of
+ * themselves, and it declines; the integral (`lerchIntegralComplex`) takes
+ * those. It does not apply to a complex a: e^{2πinb} then grows in one
+ * direction of n and the sum of the modes diverges
+ * (`lerchFunctionalComplex` takes that case).
  *
  * Declines (returns `undefined`) when it needs more than `MODES_MAX`
  * explicit modes, or when its estimated error, which counts the error of
- * Γ(1 − s) (`gammaErrorWeight`), the roundings of each mode and each term,
+ * Γ(1 − s) (`gammaWeight`), the roundings of each mode and each term,
  * the error of `hurwitzZetaComplex` (see `hurwitzKernelWeight`) and the terms
  * added to move a, is above
- * `ACCURACY` (the terms added to move a also against `MAX_LOSS`, as in the
- * continuation). Measured on 9058 points past the unit circle with a real a
- * and Re(s) < 1/2 (Re(s) down to −30, |z| up to 1e7, a from −8 to 30;
+ * `ACCURACY` (the largest term added to move a also against `MAX_LOSS`).
+ * Measured on 9058 points past the unit circle with a real a and
+ * Re(s) < 1/2 (Re(s) down to −30, |z| up to 1e7, a from −8 to 30;
  * references from mpmath at up to 250 digits, since `lerchphi` at 60 digits
  * is wrong for |z| near 1e6), whether or not the continuation answers there:
  * the actual error was at most 0.26 times this estimate, and the 9056
- * points whose estimate passes are all within 6.3e−13.
+ * points whose estimate passes are all within 6.3e−13. With Re(s) ≥ 1/2
+ * (added 2026-09-30), on the 16 point sets of `lerchFunctionalComplex`
+ * (among them 3000 points with Re(s) from 1/2 to 12, |z| up to 1e7 and a
+ * from −8 to 30, references from mpmath `lerchphi` at 60 and 150 digits,
+ * which agree): no answered value off by more than 7.2e−13, and the actual
+ * error at most 0.44 times the estimate (at |Im s| = 7.3, where the careful
+ * pass answers; below 0.31 elsewhere).
  */
 function lerchModesComplex(
   z: Complex,
@@ -720,8 +768,8 @@ function lerchModesComplex(
 
 /** `lerchModesComplex` with the estimated relative error of its value;
  * `undefined` where it declines whatever the accuracy asked for (a complex
- * a, Re(s) ≥ 1/2, too many modes, a value that is not finite, or terms
- * added to move a that cancel beyond `MAX_LOSS`). It first takes the terms
+ * a, too many modes, a value that is not finite, or terms added to move a
+ * that cancel beyond `MAX_LOSS`). It first takes the terms
  * with a small σ from `hurwitzZetaComplex` minus the explicit modes, and
  * where that is not accurate enough, from the Lerch transcendent on the unit
  * circle (`modesTailOnCircle`), which costs two continuations per term. */
@@ -731,9 +779,13 @@ function lerchModesWithError(
   a: Complex
 ): { value: Complex; error: number } | undefined {
   const quick = lerchModesWith(z, s, a, false);
-  if (quick === undefined || quick.error <= ACCURACY) return quick;
+  if (quick !== undefined && quick.error <= ACCURACY) return quick;
+  // The quick pass also declines where the Hurwitz zeta kernel is not
+  // accurate enough (`hurwitzKernelWeight`): the careful pass does not use
+  // the kernel for those terms.
   const careful = lerchModesWith(z, s, a, true);
   if (careful === undefined) return quick;
+  if (quick === undefined) return careful;
   return careful.error < quick.error ? careful : quick;
 }
 
@@ -757,10 +809,16 @@ function modesTailOnCircle(
   const base = new Complex(N + 1, 0);
   const halfTurn = sigma.mul(new Complex(0, Math.PI / 2)).exp(); // e^{iπσ/2}
   if (b === 1) {
-    const zeta = hurwitzZetaComplex(sigma, base);
+    // `hurwitzZetaComplexWithError` declines (`undefined`) where it cannot
+    // vouch for its value; so does this.
+    const zeta = hurwitzZetaComplexWithError(sigma, base);
+    if (zeta === undefined || zeta.value.isNaN()) return undefined;
     const cos = halfTurn.add(C_ONE.div(halfTurn)).mul(0.5);
-    const value = cos.mul(zeta);
-    return { value, error: 64 * Number.EPSILON * cos.abs() * zeta.abs() };
+    const value = cos.mul(zeta.value);
+    return {
+      value,
+      error: cos.abs() * (64 * Number.EPSILON * zeta.value.abs() + zeta.error),
+    };
   }
   const phase = 2 * Math.PI * b;
   if (Math.hypot(Math.cos(phase) - 1, Math.sin(phase)) < 1e-3) return undefined;
@@ -786,7 +844,7 @@ function lerchModesWith(
   a: Complex,
   onCircle: boolean
 ): { value: Complex; error: number } | undefined {
-  if (a.im !== 0 || !(s.re < 0.5)) return undefined;
+  if (a.im !== 0) return undefined;
   const eps = Number.EPSILON;
   const one = new Complex(1, 0);
   const negS = s.neg();
@@ -830,7 +888,7 @@ function lerchModesWith(
   if (N > MODES_MAX) return undefined;
   const sm1 = s.sub(one);
   const g = gamma(one.sub(s));
-  const gw = gammaErrorWeight(one.sub(s));
+  const gw = gammaWeight(one.sub(s));
 
   // The explicit modes |n| ≤ N (without the factor Γ(1 − s)).
   let modes = negLogZ.pow(sm1);
@@ -894,10 +952,14 @@ function lerchModesWith(
       // The Hurwitz zeta kernel is used only where its error is measured.
       const kernelWeight = hurwitzKernelWeight(s.sub(new Complex(k, 0)));
       if (kernelWeight === undefined) return undefined;
-      const full = hurwitzZetaComplex(
+      // The kernel declines (`undefined`, or NaN) where its own estimate
+      // is above 1e−12 of its value; the route then declines too.
+      const kernel = hurwitzZetaComplexWithError(
         s.sub(new Complex(k, 0)),
         new Complex(b, 0)
       );
+      if (kernel === undefined || kernel.value.isNaN()) return undefined;
+      const full = kernel.value;
       let first = C_ZERO;
       for (let n = 1; n <= N; n++)
         first = first.add(
@@ -910,10 +972,14 @@ function lerchModesWith(
       zetaN = full.sub(first);
       const envelope =
         2 * R.abs() * Math.cosh((Math.PI * Math.abs(sigma.im)) / 2);
+      // The measured weight (relative to the envelope) and the kernel's own
+      // estimate, which is relative to the value and is not a bound for a
+      // real order (up to 28 times too small there), are both counted.
       error +=
-        eps *
-        (kernelWeight * Math.max(full.abs(), envelope) +
-          rounding * first.abs()) *
+        (eps *
+          (kernelWeight * Math.max(full.abs(), envelope) +
+            rounding * first.abs()) +
+          kernel.error) *
         power.abs();
     }
     const t = zetaN.mul(power);
@@ -932,104 +998,443 @@ function lerchModesWith(
     (error / inner.abs() + eps * (b * absLog + 4)) * (main.abs() / out.abs());
   const headLoss =
     Math.max(1e-15 * headLargest, Number.EPSILON * headError) / out.abs();
-  if (!out.isFinite() || !(headLoss <= MAX_LOSS)) return undefined;
+  // Only the largest term is checked against `MAX_LOSS`; the rounding
+  // model of the terms (`headError`) is counted in the estimate, which is
+  // checked against `ACCURACY`. A very negative s makes the exponents of the
+  // powers large, and the model then exceeded `MAX_LOSS` where the values
+  // were within 6e−13: 5 points with Re(s) < −9 and |z| ≥ 1000 of the
+  // extended real sweep declined only for that.
+  if (!out.isFinite() || !((1e-15 * headLargest) / out.abs() <= MAX_LOSS))
+    return undefined;
   return { value: out, error: relative + headLoss + ESTIMATE_FLOOR };
 }
 
-/** The most terms `lerchTaylorComplex` sums; it declines when its series
- * would need more. */
-const TAYLOR_MAX_TERMS = 200;
-
-/** Φ(z,s,c) for a real base point c past the unit circle, with its
- * estimated relative error: the continuation, or the modes route where that
- * is more accurate. */
-function lerchRealBaseWithError(
-  z: Complex,
-  s: Complex,
-  c: Complex
-): { value: Complex; error: number } | undefined {
-  const continued = lerchContinuedWithError(z, s, c);
-  if (continued !== undefined && continued.error <= 1e-14) return continued;
-  const modes = lerchModesWithError(z, s, c);
-  if (continued === undefined) return modes;
-  if (modes === undefined) return continued;
-  return modes.error < continued.error ? modes : continued;
-}
-
-/**
- * Φ(z,s,a) past the unit circle for a complex a, where the continuation
- * declines and the modes route does not apply: the Taylor series in a
- * around a real base point c,
- *
- *   Φ(z,s,a) = Σ_{j≥0} (s)_j/j! · (c − a)^j · Φ(z,s+j,c),
- *
- * from ∂Φ/∂a = −s·Φ(z,s+1,a). Φ is analytic in a away from 0, −1, −2, …,
- * so the series converges when |a − c| < c. First a is moved to
- * Re(a) ≥ 1/2 as `shiftBase` does; then c = |a|²/Re(a), which makes the
- * ratio of the series |a − c|/c = |Im a|/|a| as small as it can be. Each
- * Φ(z,s+j,c) comes with its own error estimate
- * (`lerchRealBaseWithError`).
- *
- * The terms can be much larger than the value, mostly for a large |z| and a
- * small or negative Re(a). Called on 2464 points with a complex a past the
- * unit circle (|z| up to 1e7, Re(s) from −30 to 8, Re(a) from −6 to 8,
- * |Im a| up to 4) and judged against the reference with the right sheet
- * (see the comment at the top of this file), its estimate passed on 2152,
- * all within 2.4e−13, and the actual error was at most 0.12 times the
- * estimate. It declines (returns
- * `undefined`) when an inner value declines, when the series needs more than
- * `TAYLOR_MAX_TERMS` terms, or when the estimated error — the inner errors
- * and a few roundings per term, times the size of each term, and the terms
- * added to move a — is above `ACCURACY`.
- */
-function lerchTaylorComplex(
+/** `lerchIntegralWithError` where its estimate is within `ACCURACY`. */
+function lerchIntegralComplex(
   z: Complex,
   s: Complex,
   a: Complex
 ): Complex | undefined {
-  if (a.im === 0) return undefined;
+  const r = lerchIntegralWithError(z, s, a);
+  return r !== undefined && r.error <= ACCURACY ? r.value : undefined;
+}
+
+/** The most panels `lerchIntegralWithError` integrates over. */
+const INTEGRAL_MAX_PANELS = 600;
+
+/**
+ * Φ(z,s,a) for Re(s) > 0 and |z| ≥ e from the integral
+ *
+ *   Φ(z,s,a) = (1/Γ(s))·∫₀^∞ t^(s−1)·e^(−at)/(1 − z·e^(−t)) dt,
+ *
+ * valid for Re(a) > 0 and z off the cut [1, ∞); a is first moved to
+ * Re(a) ≥ 1/2 as `shiftBase` does. The integrand has poles at
+ * t = log z + 2πik. The one with k = 0 is at a distance |arg z| from the
+ * real axis, so the path of integration leaves the real axis around
+ * t = ln|z|, on the side away from that pole, by 1 (or less when ln|z| is
+ * small): t = x + i·H·(1 − u²)² with u = (x − ln|z|)/R, |u| < 1. On the cut
+ * (a real z > 1) Φ takes the side below it, the limit of a pole below the
+ * real axis, so the path goes above it. The other poles are at least
+ * 2π − |arg z| ≥ π from the real axis and stay on their side of the path.
+ * From 0 to t₁ = min(1, ln|z|/4) the integrand is t^(s−1) times the power
+ * series of e^(−at)/(1 − z·e^(−t)), whose radius |log z| is at least 4·t₁,
+ * integrated term by term; beyond t₁, 20-point Gauss–Legendre on panels.
+ *
+ * Its terms are of the size of the value: where |z| is large, the
+ * integrand is about −t^(s−1)·e^((1−a)t)/z up to t = ln|z|, with none of
+ * the 1/(2aˢ) term of the continuation, which cancels to about 1/|z| of
+ * itself there. The dispatcher uses it where the continuation and the
+ * modes decline, and `lerchFunctionalComplex` for its inner values of
+ * order 1 − s at a large |v|.
+ *
+ * The estimated error counts, for each node, ε times the size of its
+ * contribution times the size of the rounded exponents
+ * (|s − 1|·|log t| + |a·t| + |t| + 8) and the cancellation in
+ * 1 − z·e^(−t) next to the pole; the quadrature error of each panel as the
+ * difference of its 20-point and 10-point sums; the rounding of the
+ * recurrence for the power series coefficients, propagated linearly; and
+ * the error of Γ(s) (`gammaWeight`). Declines (returns `undefined`) when
+ * the panels run out before the integrand is negligible, or when the value
+ * is not finite. Measured on the 16 point sets of `lerchFunctionalComplex`
+ * (calling this route directly): 6669 answered, none off by more than
+ * 4.4e−13, and the actual error at most 0.31 times the estimate. It is
+ * the route that answers a real a with Re(s) from about 5 to 12 and |z|
+ * from 1e4 to 1e7, where the modes cancel: on 1000 points with Re(s) from
+ * 1/2 to 12 and |z| from 1000 to 1e7 it answers 996.
+ */
+function lerchIntegralWithError(
+  z: Complex,
+  s: Complex,
+  a: Complex
+): { value: Complex; error: number } | undefined {
+  if (!(s.re > 0)) return undefined;
+  const logZ = logAccurate(z);
+  const x0 = logZ.re;
+  if (!(x0 >= 1)) return undefined;
   const shifted = shiftBase(z, s, a, 0.5);
   if (shifted === undefined) return undefined;
   const { head, zn, b } = shifted;
-  const c = new Complex((b.re * b.re + b.im * b.im) / b.re, 0);
-  const d = c.sub(b);
-  // (|Im b|/|b|)^J·J^(|s|) reaching 1e−17 needs about this many terms.
-  const ratio = d.abs() / c.re;
-  if (!(ratio < 1)) return undefined;
-  if (Math.log(1e-17) / Math.log(ratio) > TAYLOR_MAX_TERMS) return undefined;
   const eps = Number.EPSILON;
-  let sum = C_ZERO;
-  let error = 0;
-  let coefficient = new Complex(1, 0); // (s)_j/j!·(c − a)^j
-  for (let j = 0; j < TAYLOR_MAX_TERMS; j++) {
-    if (j > 0)
-      coefficient = coefficient
-        .mul(s.add(new Complex(j - 1, 0)))
-        .div(j)
-        .mul(d);
-    const inner = lerchRealBaseWithError(z, s.add(new Complex(j, 0)), c);
-    if (inner === undefined) return undefined;
-    const t = coefficient.mul(inner.value);
-    sum = sum.add(t);
-    error += t.abs() * (inner.error + eps * (3 * j + 8));
-    if (j > 3 && t.abs() < 1e-17 * sum.abs()) {
-      const out = head.add(zn.mul(sum));
-      const headLoss = (1e-15 * shifted.largest) / out.abs();
-      const relative =
-        ((error / sum.abs()) * zn.mul(sum).abs()) / out.abs() + headLoss;
-      if (!out.isFinite() || !(headLoss <= MAX_LOSS) || !(relative <= ACCURACY))
-        return undefined;
-      return out;
+  const one = C_ONE;
+  const sm1 = s.sub(one);
+  const absSm1 = sm1.abs();
+  const absB = b.abs();
+
+  // [0, t₁]: Σ_k g_k·t₁^(s+k)/(s+k), with g = e^(−bt)/(1 − z·e^(−t)) =
+  // Σ g_k t^k from g·h = e, h = 1 − z·e^(−t), e = e^(−bt).
+  // |b|·t₁ ≤ 2 keeps the series of e^(−bt) from growing to e^(|b|·t₁)
+  // before it cancels.
+  const t1 = Math.min(1, x0 / 4, 2 / absB);
+  const h0 = one.sub(z);
+  const absH0 = h0.abs();
+  const g: Complex[] = [];
+  const gError: number[] = []; // absolute error of each g_k
+  let eK = one; // (−b)^k/k!
+  let zK = z.neg(); // the coefficient of t^k in −z·e^(−t): −z·(−1)^k/k!
+  const hK: Complex[] = [];
+  let series = C_ZERO;
+  let seriesError = 0;
+  const logT1 = Math.log(t1);
+  for (let k = 0; k < 80; k++) {
+    if (k > 0) {
+      eK = eK.mul(b.neg()).div(k);
+      zK = zK.neg().div(k);
+      hK[k] = zK; // h_k for k ≥ 1
     }
+    let num = eK;
+    let size = eK.abs();
+    let propagated = 0;
+    for (let j = 1; j <= k; j++) {
+      const p = hK[j].mul(g[k - j]);
+      num = num.sub(p);
+      size += p.abs();
+      propagated += hK[j].abs() * gError[k - j];
+    }
+    const gk = num.div(h0);
+    g.push(gk);
+    gError.push((eps * (k + 4) * size + propagated) / absH0);
+    // t₁^(s+k)/(s+k)
+    const sk = s.add(new Complex(k, 0));
+    const w = sk.mul(logT1).exp().div(sk);
+    const term = gk.mul(w);
+    series = series.add(term);
+    seriesError +=
+      w.abs() * gError[k] + eps * term.abs() * (sk.abs() * Math.abs(logT1) + 4);
+    if (k > 4 && term.abs() < 1e-18 * series.abs()) break;
+    if (k === 79) return undefined;
   }
-  return undefined;
+
+  // [t₁, ∞): panels along the path.
+  const onCut = z.im === 0 && z.re > 1;
+  const deform = onCut || Math.abs(logZ.im) < 1;
+  const R = Math.min(1.5, 0.9 * (x0 - t1));
+  const H = !deform ? 0 : (onCut ? 1 : -Math.sign(logZ.im)) * Math.min(1, R);
+  const integrand = (x: number) => {
+    const u = (x - x0) / R;
+    const inBump = H !== 0 && Math.abs(u) < 1;
+    const bump = inBump ? (1 - u * u) * (1 - u * u) : 0;
+    const t = new Complex(x, H * bump);
+    const dt = inBump ? new Complex(1, (H * -4 * u * (1 - u * u)) / R) : one;
+    const numerator = sm1.mul(t.log()).sub(b.mul(t)).exp();
+    const ze = z.mul(t.neg().exp());
+    const denominator = one.sub(ze);
+    const value = numerator.div(denominator).mul(dt);
+    const weight =
+      absSm1 * Math.abs(t.log().abs()) +
+      absB * t.abs() +
+      t.abs() +
+      8 +
+      ((t.abs() + 2) * ze.abs()) / denominator.abs();
+    return { value, weight };
+  };
+  // Panel widths: 1/4 around the pole, else up to 2, and short enough for
+  // the oscillation of e^(−i·Im(b)·t) and t^(i·Im(s)).
+  const oscillation = Math.abs(b.im) + Math.abs(s.im) + 1;
+  const peak = Math.max(0, sm1.re) / Math.max(b.re, 0.5);
+  let x = t1;
+  let quadrature = C_ZERO;
+  let rounding = 0;
+  let quadratureError = 0;
+  let absSum = 0;
+  let small = 0;
+  for (let p = 0; ; p++) {
+    if (p >= INTEGRAL_MAX_PANELS) return undefined;
+    // Around the pole, 12 panels across the bump; elsewhere up to 2, short
+    // enough for the oscillation, and ending where the bump starts.
+    const inside = x >= x0 - R - 1e-12 && x < x0 + R - 1e-12;
+    let width = inside
+      ? R / 6
+      : Math.min(2, Math.max(0.5, x / 8), 8 / oscillation);
+    if (x < x0 - R - 1e-12) width = Math.min(width, x0 - R - x);
+    // Next to t = 0, where t^(s−1) is not smooth, no wider than the
+    // distance to 0.
+    if (!inside) width = Math.min(width, x);
+    let panel = C_ZERO;
+    let panelAbs = 0;
+    for (let i = 0; i < GAUSS.x.length; i++) {
+      const xi = x + 0.5 * width * (1 + GAUSS.x[i]);
+      const { value, weight } = integrand(xi);
+      const term = value.mul(0.5 * width * GAUSS.w[i]);
+      panel = panel.add(term);
+      panelAbs += term.abs();
+      rounding += term.abs() * weight;
+    }
+    let check = C_ZERO;
+    for (let i = 0; i < GAUSS_CHECK.x.length; i++) {
+      const xi = x + 0.5 * width * (1 + GAUSS_CHECK.x[i]);
+      check = check.add(
+        integrand(xi).value.mul(0.5 * width * GAUSS_CHECK.w[i])
+      );
+    }
+    quadratureError += panel.sub(check).abs();
+    quadrature = quadrature.add(panel);
+    absSum += panelAbs;
+    x += width;
+    // Past the pole and the peak of t^(s−1)·e^(−bt), the integrand
+    // decreases: stop when three panels in a row are below 1e−18 of the sum.
+    if (x > x0 + R && x > peak && panelAbs < 1e-18 * absSum) {
+      if (++small === 3) break;
+    } else small = 0;
+  }
+  const integral = series.add(quadrature);
+  const absIntegral = integral.abs();
+  const gammaS = gamma(s);
+  const phiB = integral.div(gammaS);
+  const out = head.add(zn.mul(phiB));
+  const relativeIntegral =
+    (seriesError + eps * rounding + quadratureError) / absIntegral +
+    eps * gammaWeight(s);
+  const headLoss = (1e-15 * shifted.largest) / out.abs();
+  if (!out.isFinite() || !(headLoss <= MAX_LOSS)) return undefined;
+  return {
+    value: out,
+    error:
+      (relativeIntegral * zn.mul(phiB).abs()) / out.abs() +
+      headLoss +
+      ESTIMATE_FLOOR,
+  };
+}
+
+/**
+ * Φ(z,s,a) past the unit circle from Lerch's transformation formula, for a
+ * real or complex a. It is the expansion of `lerchModesComplex` with every
+ * mode other than n = 0 carried by two Lerch transcendents of order 1 − s:
+ * with L = log z, μ = L/(2πi), v = e^{2πib} and b = a moved to
+ * 0 ≤ Re(b) ≤ 1 (see below),
+ *
+ *   Φ(z,s,b) = Γ(1−s)·z^(−b)·[(−L)^(s−1)
+ *     + (2π)^(s−1)·(e^{iπ(s−1)/2}·v·Φ(v, 1−s, 1−μ)
+ *                   + e^{−iπ(s−1)/2}·v^(−1)·Φ(v^(−1), 1−s, 1+μ))].
+ *
+ * The two sums Σ_{n≥1} e^{±2πinb}(±2πin − L)^(s−1) of the modes route are
+ * these Lerch transcendents: ±2πin − L = ±2πi(n ∓ μ), and for |z| > 1 the
+ * powers split into principal powers because n ∓ μ is in the right
+ * half-plane with Im(n ∓ μ) of the sign that keeps the argument of
+ * ±i(n ∓ μ) inside (−π, π]. For a real b both v and v^(−1) are on the unit
+ * circle. For b = y·i + Re(b) with y ≠ 0 one of them is outside it, where
+ * the modes route diverges; this formula takes that one by analytic
+ * continuation, which is analytic in b as long as v and v^(−1) stay off the
+ * cut [1, ∞) of Φ, that is, for 0 < Re(b) < 1. At Re(b) = 0 or 1 the value
+ * is the limit from inside the strip: for y > 0, b is taken with
+ * 0 ≤ Re(b) < 1, so that v^(−1) is on the lower lip of the cut, and for
+ * y < 0 with 0 < Re(b) ≤ 1, so that v is on the lower lip, the side the
+ * continuation takes for a real argument above 1. Checked with mpmath at 40
+ * digits against the Hermite formula with the corrected sheet (see the
+ * comment at the top of this file) on 12 random points with Re(s) from −30
+ * to 0.4 and |Im b| up to 4: all agree to 5e−33 or better.
+ *
+ * The three parts are close to the value in size: in those checks the
+ * largest part was at most 6 times the value (for a real b, up to about 3
+ * times), so the formula has none of the cancellation of the continuation
+ * where Re(s) < 0 and |z| is large (for a real b next to 0 or 1 the two
+ * Lerch terms can cancel far, and the estimate declines). Φ at order 1 − s
+ * is taken by the direct series inside the unit circle and outside it by
+ * the continuation, the integral or the continuation with the base moved
+ * further right, whichever estimates best (see `inner` below). Where the
+ * argument is far outside the circle (|v| = e^{2π|Im b|}), the terms of the
+ * continuation are about |v| times the value, and the integral is then the
+ * accurate one.
+ *
+ * Measured on 16 point sets with 21 703 points past the unit circle (real
+ * and complex a and s, Re(s) from −30 to 12, |z| up to 1e7; the references
+ * as in the comment at the top of this file, and for a real a mpmath
+ * `lerchphi` at up to 250 digits), calling this route directly: 14 662
+ * answered, none off by more than 1.1e−12, and the actual error at most
+ * 0.44 times the estimate (at |Im s| = 7.3; below 0.33 elsewhere).
+ *
+ * Other a are brought to that strip by Φ(z,s,a) = a^(−s) + z·Φ(z,s,a+1)
+ * or Φ(z,s,a) = z^(−1)·(Φ(z,s,a−1) − (a−1)^(−s)), as `lerchModesComplex`
+ * does. Declines (returns `undefined`) at a positive integer s (a pole of
+ * Γ(1 − s) that cancels in the sum), when v or v^(−1) is within 1e−3 of the
+ * branch point 1 (a real a next to an integer, or a small |Im a| with Re(a)
+ * next to an integer), when an inner value declines, when the terms added to
+ * move a cancel beyond `MAX_LOSS`, or when the value is not finite. The
+ * estimated error counts the errors of the inner values, the roundings of
+ * the powers and exponentials (with exponents rounded to about ε times their
+ * size), the error of Γ(1 − s) (`gammaWeight`), and the change of each
+ * inner value when its argument v is rounded: ∂Φ(w,σ,c)/∂log w is
+ * Φ(w,σ−1,c) − c·Φ(w,σ,c), which this counts as (|c| + |σ| + 2) times |Φ|,
+ * plus (|σ − 1| + 1)/|log w| times |Φ| for the growth of Φ next to w = 1.
+ * Like the modes route, it checks only the largest term added to move a
+ * against `MAX_LOSS`, and counts their rounding in the estimate.
+ */
+function lerchFunctionalComplex(
+  z: Complex,
+  s: Complex,
+  a: Complex
+): Complex | undefined {
+  const r = lerchFunctionalWithError(z, s, a);
+  return r !== undefined && r.error <= ACCURACY ? r.value : undefined;
+}
+
+/** `lerchFunctionalComplex` with the estimated relative error of its value
+ * (see there); `undefined` where it declines whatever the accuracy asked
+ * for. */
+function lerchFunctionalWithError(
+  z: Complex,
+  s: Complex,
+  a: Complex
+): { value: Complex; error: number } | undefined {
+  if (!(z.abs() > 1)) return undefined;
+  if (s.im === 0 && s.re > 0 && Number.isInteger(s.re)) return undefined;
+  const eps = Number.EPSILON;
+  const one = C_ONE;
+  const negS = s.neg();
+  const absS = s.abs();
+  // Move a into the strip: Φ(z,s,a) = head + scale·Φ(z,s,b).
+  const upper = a.im > 0; // 0 ≤ Re(b) < 1; otherwise 0 < Re(b) ≤ 1
+  const below = (re: number) => (upper ? re < 0 : re <= 0);
+  const above = (re: number) => (upper ? re >= 1 : re > 1);
+  let b = a;
+  let head = C_ZERO;
+  let headLargest = 0;
+  // Each term is a power with an exponent rounded to about ε·|s|·|log b|,
+  // times a power of z (one rounding per step).
+  let headError = 0;
+  let scale = one;
+  let steps = 0;
+  while (below(b.re)) {
+    if (!(b.re === 0 && b.im === 0)) {
+      const t = scale.mul(b.pow(negS));
+      head = head.add(t);
+      headLargest = Math.max(headLargest, t.abs());
+      headError +=
+        t.abs() * (absS * (Math.abs(Math.log(b.abs())) + Math.PI) + steps + 4);
+    }
+    scale = scale.mul(z);
+    b = new Complex(b.re + 1, b.im);
+    if (++steps > MAX_BASE_SHIFT) return undefined;
+  }
+  while (above(b.re)) {
+    b = new Complex(b.re - 1, b.im);
+    scale = scale.div(z);
+    const t = scale.mul(b.pow(negS)).neg();
+    head = head.add(t);
+    headLargest = Math.max(headLargest, t.abs());
+    headError +=
+      t.abs() * (absS * (Math.abs(Math.log(b.abs())) + Math.PI) + steps + 4);
+    if (++steps > MAX_BASE_SHIFT) return undefined;
+  }
+  // The shift made no progress: a is so large that adding 1 does not
+  // change it.
+  if (below(b.re) || above(b.re)) return undefined;
+
+  // v = e^{2πib} and v^(−1). At Re(b) = 1 the phase is taken as 0, not as
+  // the rounded 2π, so that the argument on the cut is real and the
+  // continuation takes its lower lip (see above).
+  const phase = b.re === 1 ? 0 : 2 * Math.PI * b.re;
+  const cos = Math.cos(phase);
+  const sin = Math.sin(phase);
+  const grow = Math.exp(2 * Math.PI * b.im);
+  const v = new Complex(cos / grow, sin / grow);
+  const vInv = new Complex(cos * grow, -sin * grow);
+  if (!(v.sub(one).abs() >= 1e-3) || !(vInv.sub(one).abs() >= 1e-3))
+    return undefined;
+
+  const logZ = logAccurate(z);
+  // On the cut (real z > 1) Φ takes the side below it: see
+  // `lerchContinuedComplex`.
+  const negLogZ =
+    z.im === 0 && z.re > 1 ? new Complex(-logZ.re, 0) : logZ.mul(-1);
+  const mu = new Complex(logZ.im / (2 * Math.PI), -logZ.re / (2 * Math.PI));
+  const order = one.sub(s);
+  // Each inner value: the direct series inside the unit circle; outside it
+  // the continuation, then where that is not accurate enough the integral
+  // (`lerchIntegralWithError`, for a positive real part of the order),
+  // then the continuation with c moved to Re(c) ≥ 1 + |Im c|, which keeps
+  // the branch points t = ±i·c of its tail integral away from the real
+  // axis. The best estimate wins.
+  const inner = (w: Complex, c: Complex) => {
+    const series =
+      w.abs() < 0.9 ? lerchSeriesWithError(w, order, c) : undefined;
+    if (series !== undefined) return series;
+    let best = lerchContinuedWithError(w, order, c);
+    const better = (r: { value: Complex; error: number } | undefined) => {
+      if (r !== undefined && (best === undefined || r.error < best.error))
+        best = r;
+    };
+    if (best !== undefined && best.error <= 1e-13) return best;
+    better(lerchIntegralWithError(w, order, c));
+    if (best !== undefined && best.error <= 1e-13) return best;
+    better(lerchContinuedWithError(w, order, c, 1 + Math.abs(c.im)));
+    return best;
+  };
+  const cPlus = one.sub(mu);
+  const cMinus = one.add(mu);
+  const plus = inner(v, cPlus);
+  if (plus === undefined) return undefined;
+  const minus = inner(vInv, cMinus);
+  if (minus === undefined) return undefined;
+
+  const sm1 = s.sub(one);
+  const rotation = sm1.mul(new Complex(0, Math.PI / 2)).exp(); // e^{iπ(s−1)/2}
+  const twoPi = new Complex(2 * Math.PI, 0).pow(sm1);
+  const tPlus = twoPi.mul(rotation).mul(v).mul(plus.value);
+  const tMinus = twoPi.div(rotation).mul(vInv).mul(minus.value);
+  const n0 = negLogZ.pow(sm1);
+  const modes = n0.add(tPlus).add(tMinus);
+
+  // The rounding of v moves Φ(v, …) by about |∂Φ/∂log w| times the
+  // absolute error of log v, ε·(2π|b| + 2). Next to w = 1, Φ(w,σ,c) grows
+  // like Γ(1−σ)·(−log w)^(σ−1), whose logarithmic derivative is
+  // (σ − 1)/log w.
+  const vError = eps * (2 * Math.PI * b.abs() + 2);
+  const logV = v.log().abs();
+  const sensitivity = (c: Complex) =>
+    c.abs() + order.abs() + 2 + (order.sub(one).abs() + 1) / logV;
+  // e^{iπ(s−1)/2} and (2π)^(s−1) are exponentials of rounded arguments.
+  const factorError = eps * (sm1.abs() * (Math.PI / 2 + 1.84) + 8);
+  let error =
+    eps *
+      (sm1.abs() * (Math.abs(Math.log(negLogZ.abs())) + Math.PI) + 8) *
+      n0.abs() +
+    tPlus.abs() * (plus.error + factorError + vError * sensitivity(cPlus)) +
+    tMinus.abs() * (minus.error + factorError + vError * sensitivity(cMinus)) +
+    4 * eps * (n0.abs() + tPlus.abs() + tMinus.abs());
+
+  const g = gamma(order);
+  const main = scale.mul(g).mul(logZ.mul(b.neg()).exp()).mul(modes);
+  const out = head.add(main);
+  // Γ(1 − s), and z^(−b): an exponential with an argument rounded to about
+  // ε·|b|·|log z|.
+  const relative =
+    (error / modes.abs() +
+      eps * (gammaWeight(order) + b.abs() * logZ.abs() + 4)) *
+    (main.abs() / out.abs());
+  const headLoss = Math.max(1e-15 * headLargest, eps * headError) / out.abs();
+  // As in `lerchModesWith`, only the largest term moving a is checked
+  // against `MAX_LOSS`; the rounding model is in the estimate.
+  if (!out.isFinite() || !((1e-15 * headLargest) / out.abs() <= MAX_LOSS))
+    return undefined;
+  return { value: out, error: relative + headLoss + ESTIMATE_FLOOR };
 }
 
 /**
  * The Lerch transcendent Φ(z,s,a) = Σ_{k≥0} zᵏ(k+a)^(−s), within about
  * 1e−11 relative. Returns `undefined` where no method can vouch for that
  * accuracy (see `lerchSeriesComplex`, `lerchEulerComplex`,
- * `lerchContinuedComplex`, `lerchModesComplex` and `lerchTaylorComplex`) —
+ * `lerchContinuedComplex`, `lerchModesComplex`, `lerchIntegralComplex` and
+ * `lerchFunctionalComplex`) —
  * the caller keeps the expression symbolic
  * rather than ship an unverified number.
  */
@@ -1039,7 +1444,9 @@ export function lerchPhiComplex(
   a: Complex
 ): Complex | undefined {
   if (z.isNaN() || s.isNaN() || a.isNaN()) return C_NAN;
-  if (z.im === 0 && z.re === 1) return hurwitzZetaComplex(s, a); // Φ(1,s,a) = ζ(s,a)
+  // Φ(1,s,a) = ζ(s,a). A decline of the kernel (`undefined`) is a decline
+  // here; its NaN at the pole s = 1 is kept.
+  if (z.im === 0 && z.re === 1) return hurwitzZetaComplexWithError(s, a)?.value;
   if (z.isZero()) return a.pow(s.neg()); // Φ(0,s,a) = a^(−s): only k = 0 survives
   if (s.im === 0 && s.re === 0)
     return new Complex(1, 0).div(new Complex(1, 0).sub(z)); // Φ(z,0,a) = 1/(1−z)
@@ -1048,13 +1455,17 @@ export function lerchPhiComplex(
   // Past the unit disk and on its rim: the continuation. It declines by
   // itself where `incompleteGammaUpperComplex` declines or where its terms
   // cancel too far (see `lerchContinuedComplex`), so this dispatcher does
-  // not need to special-case z. Where it declines (mostly Re(s) < 0 with a
-  // large |z|), the modes route for a real a, then the Taylor series in a
-  // for a complex a. A complex a first tries the continuation again with a
-  // moved only to Re(a) ≥ 1/2: on the 245 complex-a points with
-  // 30 ≤ |z| ≤ 1000 of the sweeps, the target 1 alone answers 151 and the
-  // target 1/2 alone 166, every one of the 151 among them, none wrong. A
-  // target of 1/4 once answered a point 9.9e−11 off, when the error
+  // not need to special-case z. Where it declines (mostly a large |z|), the
+  // modes route for a real a, then the integral for Re(s) > 0, then Lerch's
+  // transformation formula for any a. The Taylor series in a around a real
+  // base point, which came last until 2026-09-30, answered no point of the
+  // complex-a sweeps (9700 points) that these do not, at up to 0.5 s per
+  // declined call, and was removed. A complex a first tries the
+  // continuation again with a moved only to Re(a) ≥ 1/2: on the 245
+  // complex-a points with 30 ≤ |z| ≤ 1000 of the sweeps, the target 1
+  // alone answers 151 and the target 1/2 alone 166, every one of the 151
+  // among them, none wrong. A target of 1/4 once answered a point 9.9e−11
+  // off, when the error
   // estimate did not count the quadrature error of the tail integral. The
   // estimate now counts it (see `hermiteTail`), but it is pessimistic for a
   // small Re(a): on 2400 points past the unit circle with a moved only to
@@ -1065,7 +1476,8 @@ export function lerchPhiComplex(
       lerchContinuedComplex(z, s, a) ??
       (a.im !== 0 ? lerchContinuedComplex(z, s, a, 0.5) : undefined) ??
       lerchModesComplex(z, s, a) ??
-      lerchTaylorComplex(z, s, a)
+      lerchIntegralComplex(z, s, a) ??
+      lerchFunctionalComplex(z, s, a)
     );
   // Real z in [−1, 0) with Re(s) > 0: the Euler transform. For Re(s) ≤ 0
   // its terms grow and the transform is not valid (see `lerchEulerComplex`):
@@ -1087,13 +1499,28 @@ export function lerchPhiComplex(
   // |Im a| ≤ 40): every point answers, the worst within 9.4e−13 relative.
   if (z.im === 0 && z.re === -1) {
     const half = new Complex(0.5, 0);
-    const even = hurwitzZetaComplex(s, a.mul(half));
-    const odd = hurwitzZetaComplex(s, a.add(new Complex(1, 0)).mul(half));
-    const scale = new Complex(2, 0).pow(s.neg());
-    const out = even.sub(odd).mul(scale);
-    const lost =
-      (1e-16 * Math.max(even.abs(), odd.abs()) * scale.abs()) / out.abs();
-    if (out.isFinite() && lost <= MAX_LOSS) return out;
+    // Either kernel value can decline (`undefined`); the direct series and
+    // the continuation below then take the point. The rounding of the
+    // difference is checked against `MAX_LOSS`, as before; the kernel's
+    // own error estimates, added to it, against `ACCURACY`. (Checking the
+    // sum against `MAX_LOSS` declined Φ(−1, −4.2, 0.1 − 0.00025i), whose
+    // odd term has a condition number of 1400 and whose value is within
+    // 1e−11; `zeta-values.test.ts` pins it.)
+    const even = hurwitzZetaComplexWithError(s, a.mul(half));
+    const odd = hurwitzZetaComplexWithError(
+      s,
+      a.add(new Complex(1, 0)).mul(half)
+    );
+    if (even !== undefined && odd !== undefined) {
+      const scale = new Complex(2, 0).pow(s.neg());
+      const out = even.value.sub(odd.value).mul(scale);
+      const lost =
+        (1e-16 * Math.max(even.value.abs(), odd.value.abs()) * scale.abs()) /
+        out.abs();
+      const kernelLoss = ((even.error + odd.error) * scale.abs()) / out.abs();
+      if (out.isFinite() && lost <= MAX_LOSS && lost + kernelLoss <= ACCURACY)
+        return out;
+    }
   }
   // |z| close enough to 1 that the direct series can't reach machine
   // precision within its term cap (see `lerchSeriesComplex`) falls back to

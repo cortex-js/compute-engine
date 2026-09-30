@@ -80,8 +80,8 @@ import {
   gammaln as lngammaComplex,
   incompleteGammaUpperComplex,
   zetaComplex,
-  hurwitzZetaComplex,
-  zetaGeneralizedComplex,
+  hurwitzZetaComplexWithError,
+  zetaGeneralizedComplexWithError,
   polygammaComplex,
   complexDivide,
 } from '../numerics/numeric-complex.js';
@@ -2850,18 +2850,25 @@ function evaluateHurwitzZeta(
     // The bignum kernel declined. The double kernel's answer is used only
     // when it is finite: past the double range it overflows to ∞ or NaN
     // for a value that is finite, so the expression stays symbolic instead.
-    const z = hurwitzZetaComplex(new Complex(s.re, 0), new Complex(a.re, 0));
-    if (!Number.isFinite(z.re)) return undefined;
+    const z = hurwitzZetaComplexWithError(
+      new Complex(s.re, 0),
+      new Complex(a.re, 0)
+    )?.value;
+    if (z === undefined || !Number.isFinite(z.re)) return undefined;
     return boxComplexResult(engine, z, real);
   }
 
   // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
   // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
-  return boxComplexResult(
-    engine,
-    hurwitzZetaComplex(new Complex(s.re, s.im), new Complex(a.re, a.im)),
-    real
+  // When the kernel declines (it cannot reach 1e−12 relative, or it would
+  // take too long), the expression stays symbolic rather than showing a
+  // value with wrong digits.
+  const z = hurwitzZetaComplexWithError(
+    new Complex(s.re, s.im),
+    new Complex(a.re, a.im)
   );
+  if (z === undefined) return undefined;
+  return boxComplexResult(engine, z.value, real);
 }
 
 /**
@@ -2956,21 +2963,24 @@ function evaluateGeneralizedZeta(
     if (big !== undefined) return boxBignumResult(engine, big);
     // As in `evaluateHurwitzZeta`: a non-finite double answer for a finite
     // value stays symbolic.
-    const z = zetaGeneralizedComplex(
+    const z = zetaGeneralizedComplexWithError(
       new Complex(s.re, 0),
       new Complex(a.re, 0)
-    );
-    if (!Number.isFinite(z.re)) return undefined;
+    )?.value;
+    if (z === undefined || !Number.isFinite(z.re)) return undefined;
     return boxComplexResult(engine, z, real);
   }
 
   // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
   // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
-  return boxComplexResult(
-    engine,
-    zetaGeneralizedComplex(new Complex(s.re, s.im), new Complex(a.re, a.im)),
-    real
+  // A kernel decline leaves the expression symbolic, as in
+  // `evaluateHurwitzZeta`.
+  const z = zetaGeneralizedComplexWithError(
+    new Complex(s.re, s.im),
+    new Complex(a.re, a.im)
   );
+  if (z === undefined) return undefined;
+  return boxComplexResult(engine, z.value, real);
 }
 
 /**

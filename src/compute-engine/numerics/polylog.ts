@@ -130,8 +130,10 @@ function polylogIntegerOrderComplex(
  * exactly integer real order never reaches this function
  * (`polylogIntegerOrderComplex`).
  *
- * Returns NaN for |Im s| > 1.5, when the inner Liₛ(1/z) declines, or when
- * the two terms cancel too far.
+ * Returns NaN for |Im s| > 1.5, when the inner Liₛ(1/z) declines, when
+ * `hurwitzZetaComplex` declines (it returns NaN where its own error
+ * estimate is above 1e−12 of its value; the NaN reaches the error check
+ * below, which then fails), or when the two terms cancel too far.
  */
 function polylogInversionComplex(s: Complex, z: Complex): Complex {
   const twoPiI = new Complex(0, 2 * Math.PI);

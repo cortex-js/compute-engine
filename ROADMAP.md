@@ -109,19 +109,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### A rounding function or a comparison of an exact constant is decided at the working precision (OPEN, small — found 2026-09-30 while reviewing issue #382)
-
-`Floor(π·10³⁰)` stays unevaluated under `evaluate()`, and `.N()` gives the
-21-digit float `3.14159265358979323846e+30`, not the 31-digit integer (measured
-2026-09-30). Mathematica 15.0 evaluates `Floor[Pi 10^30]` exactly
-(`3141592653589793238462643383279`): it raises the precision until the result is
-decided. A comparison of exact constants (`Less(π, 355/113)`) is decided on
-21-digit approximations, so it can give a wrong answer when the two values
-differ by less than about `10⁻²¹` of their size. Fix: for an exact operand
-that is not an exact number, evaluate with guard digits, raise the precision
-while the value is within the error bound of the jump, and stay unevaluated
-after a fixed limit.
-
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
 `reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and
@@ -264,28 +251,29 @@ unevaluated read, both `undefined`, and stays unevaluated: `ArgMax(At(t, 1))`,
 `ArgMin`, `Dedup`, `Differences`, `FlatMap`, `Scan(At(t, 1), f)` and
 `TakeWhile`/`DropWhile` under a plain `evaluate()`; `Numerator(At(t, 1))` and
 `Denominator` report an `incompatible-type` error naming `vector<integer^3>`
-where the literal list broadcasts. `Reverse(At(t, 1)).evaluate({ materialization:
-true })` also returns the unevaluated view: the materialization step (step 3 of
-`_computeValue`, `boxed-function.ts`) runs before the operands are evaluated,
-and `materialize()` returns the node itself when the walk cannot start; the
-`toLatex()` contract of Tycho item 247 (a symbolic carrier prints without
-evaluation) depends on that return. `Reduce` and the count of `Filter` resolve
-such a source with `eagerViewSource` since 2026-09-30, as `Join`, `Reverse` and
-`Take` did before; the operators above do not. A general fix would evaluate an
-eager source once when the lazy node is evaluated, which is a change to the
-laziness contract (`docs/COLLECTIONS-MODEL.md`) and needs a decision.
+where the literal list broadcasts.
+`Reverse(At(t, 1)).evaluate({ materialization: true })` also returns the
+unevaluated view: the materialization step (step 3 of `_computeValue`,
+`boxed-function.ts`) runs before the operands are evaluated, and `materialize()`
+returns the node itself when the walk cannot start; the `toLatex()` contract of
+Tycho item 247 (a symbolic carrier prints without evaluation) depends on that
+return. `Reduce` and the count of `Filter` resolve such a source with
+`eagerViewSource` since 2026-09-30, as `Join`, `Reverse` and `Take` did before;
+the operators above do not. A general fix would evaluate an eager source once
+when the lazy node is evaluated, which is a change to the laziness contract
+(`docs/COLLECTIONS-MODEL.md`) and needs a decision.
 
 ### `Sum` of a list of points is typed `number` (OPEN, small — found 2026-09-30 by the fix for issue #383)
 
-`bigOpResultType` (`library/type-handlers.ts`) types the one-operand
-`Sum(pts)` as `number` for every collection operand; with `pts:
-list<tuple<real, real>>` the value is the point `(4, 6)`, and with `m:
-list<list<real>>` it is the row `[4, 6]`. The compiled `Sum(pts)` now answers
-the array, so a consumer that reads the compiled value as a scalar (an
-arithmetic parent emitted from the `number` type) is wrong. The element type of
-the collection should decide: a collection of collections sums to its element
-type. `Length(At(x, i))` has the same shape of defect at a smaller scale: typed
-`number` where `integer | nan` is the value.
+`bigOpResultType` (`library/type-handlers.ts`) types the one-operand `Sum(pts)`
+as `number` for every collection operand; with `pts: list<tuple<real, real>>`
+the value is the point `(4, 6)`, and with `m: list<list<real>>` it is the row
+`[4, 6]`. The compiled `Sum(pts)` now answers the array, so a consumer that
+reads the compiled value as a scalar (an arithmetic parent emitted from the
+`number` type) is wrong. The element type of the collection should decide: a
+collection of collections sums to its element type. `Length(At(x, i))` has the
+same shape of defect at a smaller scale: typed `number` where `integer | nan` is
+the value.
 
 ### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — five defects)
 
@@ -4691,36 +4679,39 @@ evaluates promptly" — a canary-normalized timing assertion (limit 5000 canary
 units) read 6251 in a six-worker full run on a box at load 4 and passed alone
 (70 of 70), while the same tree's other timing pins held.
 
-### `LerchPhi` past |z| = 1 still declines for a complex `a` with `Re(s) < 0`, and for a real `a` at a large `|z|` (OPEN — residue of the 2026-09-30 round on `LerchPhi`, #340, #353)
+### `LerchPhi` past |z| = 1 still declines for a complex `a` whose shift terms dwarf the value (OPEN — residue of the two 2026-09-30 rounds, #340, #353)
 
 `lerchPhiComplex` (`numerics/lerch-phi.ts`) declines (`N()` stays symbolic)
 where no route can vouch for 1e−11 relative accuracy; it never returns a wrong
-number (every returned value on about 20 000 sweep points is within 1e−11 of a
-reference). Since 2026-09-30 the continuation is joined by a sum over the
-Fourier modes of the base point for a real `a` (`lerchModesComplex`) and a
-Taylor series in `a` around a real base point for a complex `a`
-(`lerchTaylorComplex`), which run only where the continuation declines. What
+number (every returned value on about 30 000 sweep points is within 1.1e−12 of a
+reference). The routes past the circle: the continuation
+(`lerchContinuedWithError`), the sum over the Fourier modes of the base point
+for a real `a` and every `s` that is not a positive integer
+(`lerchModesComplex`), an integral route for `Re(s) > 0`
+(`lerchIntegralComplex`), and Lerch's transformation formula for a complex `a`
+(`lerchFunctionalComplex`); a Taylor series in `a` was tried and removed (it
+answered no point the others miss and cost up to 0.5 s per declined call). What
 still declines:
 
-- A complex `a`, mostly with `Re(s) < 0`: on 900 points with `Re(s)` from −30 to
-  1, `|z|` up to 1e7 and `a` complex, 506 answer and 394 decline; on 1200 points
-  with `|z| < 32` and `|Im a|` up to 4, 1153 answer and 47 decline (`Re(a) < 0`
-  or a large `|Im a|`). Example:
-  `LerchPhi(-246.62-375.42i, -29.535, -5.5009-2.4185i)`; the reference is
-  `1.1285770581632545e21 − 1.6446479143332522e22i`. The Taylor series in `a` has
-  terms up to 1e13 times the value there, and the expansion in powers of `log z`
-  (`Φ = z^(−a)[Γ(1−s)(−log z)^(s−1) + Σ_k ζ(s−k, a)(log z)^k/k!]`,
-  `|log z| < 2π`) was within 1e−11 on only 6 of 70 such points, because
-  `hurwitzZetaComplex` loses digits at a complex order with a large imaginary
-  part (next entry) and its terms grow like `cosh(2π·Im a)`.
-- A real `a` with `Re(s) ≥ 1/2` and `|z| ≥ 1000`, where the continuation's tail
-  integral cancels: 24 of 3000 `PolyLog` points past the disk, for example
-  `PolyLog(2.5913, -187652.08)` (mpmath `0.00097720268138322143`). The modes
-  route stops at `Re(s) < 1/2`; its formula holds for every `s` that is not a
-  positive integer, so extending it there would probably cover these.
-- A real `a`, `Re(s) < −9`, `|z| ≥ 1000`: 5 of 3000 points, for example
-  `LerchPhi(23627.46+13892.73i, -28.756, -7.7568)` (reference
-  `−1.9352390388659670e33 − 1.0220779376714596e33i`).
+- A complex `a` with `Re(a) < 0` where the terms that move `a` into the strip
+  `0 ≤ Re(a) ≤ 1` are hundreds of times the value or more: 217 of 1197 points
+  (`Re(s)` from −30 to 1, `|z|` up to 1e7), 31 of 1200 with `|z| < 32`. Example:
+  `LerchPhi(-246.62-375.42i, -29.535, -5.5009-2.4185i)`, reference
+  `1.1285770581632545e21 − 1.6446479143332522e22i`. The formula's value is
+  3.6e−12 off there, but its estimate is 1.7e−10: the term for the rounding of
+  `v = e^{2πib}` is pessimistic at a large order. Extended precision for the
+  shift would answer the worst of them.
+- A complex `a` with `Re(s) ≥ 1/2`, `|Im a| ≳ 3` and `|z| ≥ 1000`, where the
+  integral oscillates: 44 of 800 points, for example
+  `LerchPhi(2626400, 7.1652, -5.2092-3.5859i)`.
+- A real `a`, `Re(s) < −9`, `|z| ≥ 1000`: 3 of 3000, where the estimate is 8 to
+  25 times the actual error. Example:
+  `LerchPhi(-552.66+1009.12i, -23.020, -6.1124)`, reference
+  `−4.7098482456230114e17 − 1.9081680693676611e18i`.
+
+Re-measured after the `hurwitzZetaComplex` change for `|Im s| ≥ 2` (same day):
+the same points decline; the kernel is no longer a limit of the modes route
+(within 88ε of its envelope up to `|Im s| = 20`, `hurwitzKernelWeight`).
 
 Do not take references for a complex `a` past the unit circle from mpmath's
 `lerchphi`: it returns a value on the wrong sheet of the incomplete gamma term
@@ -4730,39 +4721,74 @@ values). For `|z|` above about 1e5, `lerchphi` at 60 digits is also wrong
 (7.5e−7 at `lerchphi(-9959.2, -8.16, 1.25)`); use 200 digits or more, or the
 integral `(1/Γ(s))∫₀^∞ t^(s−1)e^(−at)/(1 − z·e^(−t)) dt` for `Re(s) > 0`.
 
-### `hurwitzZetaComplex` loses digits at a complex order with a large imaginary part and a small base point (OPEN, correctness — found 2026-09-30 while measuring the `LerchPhi` modes route)
+### `HurwitzZeta` declines some complex arguments with a large `|Im a|` and a large `|Im s|` (OPEN, capability — residue of the 2026-09-30 round)
 
-`hurwitzZetaComplex(s, a)` (`numerics/numeric-complex.ts`) has a relative error
-of up to 2.4e−11 for `|Im s| ≥ 8` with a small real `a` near 0 (for example
-`s = −0.76 + 8.33i`, `a = 0.067`), and up to 4.6e−13 for `4 ≤ |Im s| < 7` with
-`Re(s)` from 0 to 0.5 and `a < 0.07`. Elsewhere in `Re(s) < 1/2` it is within a
-few units in the last place of what the operands allow (measured 2026-09-30 on
-about 20 000 points against mpmath, after the Hermite-integral route replaced
-the Euler–Maclaurin fallback for a complex `a`). The `LerchPhi` modes route
-avoids these regions (`hurwitzKernelWeight`). Also, for a non-real `a` with
-`Re(a) ≤ 0`, 2 of 1500 random points are off by up to 4.2e−11: the value is
-small next to the terms passed over by the shift of `a` to the right.
+`hurwitzZetaComplexWithError` (`numerics/numeric-complex.ts`) declines, so the
+expression stays unevaluated, when its per-call error estimate is above 1e−12 of
+the value even after the powers are recomputed in double-double. On 11 900 sweep
+points against mpmath this happened at 26 points, all with `|Im a| ≥ 3.4` and
+`|Im s| ≥ 7` (20 of 1500 with `Re(a)` from −10 to 0, 3 of 2000 with
+`Re(a) > 0`). Example: `HurwitzZeta(-0.22+12.28i, -6.93-4.78i)`, mpmath
+`-1.9865506122150481e-14 - 1.4517190884718218e-13i`: the terms of every route
+are about 1e−7, so their sum in doubles loses the digits, while the condition
+number is small (below 4.4e−14), so a route that does not cancel would answer —
+a big-decimal complex Hurwitz kernel, or a representation that does not pass
+over the terms left of the imaginary axis. Another example with `Re(a) > 0`:
+`HurwitzZeta(-11.57+17.97i, 0.0085-4.458i)`, mpmath
+`-1.5251523329103249e-7 - 5.5532800426926228e-7i`. The kernel also declines for
+`|Im s|` above about 12 800 (unless `Re(a)` is large enough for the
+Euler–Maclaurin sum) and for `Re(a) < −2^20`, both to bound its work; and
+`HurwitzZeta(0.5, 0.5+1e300i)` is `NaN`, not a decline, because the modulus of
+`a` overflows. Do not take references for `Re(a)` far below 0 from mpmath's
+`zeta(s, a)`: at `s = 0.3+50i`, `a = −300.5+2i` it disagrees with its own sum of
+the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
-### GPU `LerchPhi` and `PolyLog` still answer NaN where the terms cancel in f32 (OPEN, capability — residue of the 2026-09-30 round, #340)
+### GPU `LerchPhi` and `PolyLog` still answer NaN where the terms cancel in f32 (OPEN, capability — residue of the 2026-09-30 rounds, #340)
 
 The shader targets (`GPU_LERCH_PREAMBLE_GLSL`/`_WGSL`,
 `compilation/gpu-target.ts`) compute `LerchPhi(z, s, a)` and `PolyLog(s, z)` for
 real operands past the unit disk since 2026-09-30 (a positive integral for
 `s > 0`, the Hermite form with a complex incomplete gamma for `s ≤ 0`, a
 rational form for an integer `s` from 0 to −16, the inversion formula for a
-negative non-integer order of `PolyLog`), within 1.5e−5 of the reference
-wherever they answer (worst 1.34e−5 on 4193 points, measured on an Apple M5 Max
-GPU through headless Chromium, GLSL and WGSL). Each method declines (NaN) when
-its own error estimate exceeds 3e−5 of the value. Where the JavaScript target
-answers and the shader does not: `s ≲ −3` next to and below `z = −1` (18 of 114
-points below `z = −1` with `s < 0`, 20 of 150 at `z = −1`, 34 of 455 with
-`−1 < z < 0`, 6 of 47 for `z > 1` with an integer `s`, 17 of 157 for `PolyLog`
-below −1 with `s ≈ −12`), for example `Φ(−1, −6.5, 1.3) = 0.10992`; values about
-1e37 next to `z = 1` (f32 overflow); `z < −1` with `a < 0` and an integer
-`s > 0` (the shifted terms cancel, `Φ(−5.76, 12, −8.464)`); and values below the
-smallest normal f32 (1.2e−38), which the GPU flushes to zero. A call costs at
-most about 1100 loop iterations below `z = −1`, and about 4700 next to `z = 1`
-with `s < 0` (the 4096-term series first). The f32 model of the shader text is
+negative non-integer order of `PolyLog`, and, tried after every other method,
+the sum over the Fourier modes of the base point `_gpu_lerch_modes` for `z < 0`
+and `−30 ≤ s ≤ −3`), within 1.5e−5 of the reference wherever they answer (worst
+1.38e−5 on 4193 + 900 points, measured on an Apple M5 Max GPU through headless
+Chromium, GLSL and WGSL). Each method declines (NaN) when its own error estimate
+exceeds 3e−5 of the value. On 600 `LerchPhi` and 300 `PolyLog` points with `s`
+from −16 to −3, the mode sum took NaN from 37 to 2 at `z = −1`, from 88 to 7
+below it, from 25 to 6 between −1 and −0.3, and from 84 to 25 for `PolyLog`
+below −1; values answered before are bit-identical. What remains:
+
+- Values small against the modes: `Φ(−0.8818, −13.863, 1.7443) = −35.664`,
+  `Li_{−11.65}(−22837.6) = −9.73e−6`.
+- `−3 < s < 0` below `z = −1`: `Φ(−381112, −2.5, 0.33116) = −7.403e−6`.
+- `z > 1` with an integer `s`: `Φ(1.617, −6, 5.7837) = −16191.1`.
+- Values about 1e37 next to `z = 1` (f32 overflow); `z < −1` with `a < 0` and an
+  integer `s > 0` (`Φ(−5.76, 12, −8.464)`, the shifted terms cancel); and values
+  below the smallest normal f32, which the GPU flushes to zero.
+
+Far below `z = −1` (review of the same day): the mode sum and Jonquière's
+inversion decline unless the value is a finite normal f32, their 3e−5 test is
+written `err ≤ 500·|value|` because the old form `ε·err ≤ 3e−5·|value|` flushed
+both sides to 0 below about 4e−34 and accepted 0 and ∞, `PolyLog` passes the
+factor `z` into the modes' exponent, and the inversion's `Li_s(1/z)` series
+stops on the ratio `|1/z|·((k+1)/k)^(−s)` (it stopped after one term for
+`s < −20`, 2.6× off at `|z| = 8e8`). On the M5 Max, over `z` in [−1e38, −1] and
+`s` in [−30, −3], values more than 1.5e−5 off fell from 786 of 3792 to 16 of
+3485 (`PolyLog`) and from 170 of 1141 to 17 of 960 (`LerchPhi`, 15 of them with
+a true value below the smallest normal f32). Two things stay open there: the
+3e−5 estimate test admits values up to 2.04e−5 off on this GPU (the inversion at
+`s < −20`, `|z| > 1e20`, and the modes), where the older domains state 1.5e−5 —
+a tighter test would decline more values, and the doc comment states 2.1e−5 for
+that region; and a `LerchPhi` true value below 1.18e−38 still returns 0 or a
+wrong subnormal through the core methods. In an f32 model whose `log2` is 2.5
+ulp off, the error estimates (built for about 1 ulp) do not cover the far domain
+(worst 1.24e−4).
+
+A call costs at most about 1100 loop iterations below `z = −1`, plus up to 128
+modes and 100 shift terms for the mode sum, and about 4700 next to `z = 1` with
+`s < 0` (the 4096-term series first). The f32 model of the shader text is
 `test/compute-engine/gpu-lerch-f32-model.ts`; keep it in step with the text.
 
 ### GLSL on ANGLE Metal: arithmetic with a constant infinity reads back 0 (OPEN — found 2026-09-30 while validating the WGSL non-finite constants)
@@ -4779,12 +4805,24 @@ used `Gamma`, `Zeta`, `HurwitzZeta`, `LerchPhi` or `PolyLog`, or any non-finite
 literal, compiled in a browser; both targets now spell them through
 `_gpu_nan()`/`_gpu_inf()`, and the WGSL versions bitcast a `let`.
 
-### The f32 shader Hurwitz zeta is up to 2.3e−5 off where its terms cancel (OPEN, small — found 2026-09-30 while validating the ZETA preamble on the GPU)
+### The f32 shader Hurwitz zeta answers NaN next to a zero of ζ(s, a) (OPEN, small — residue of the 2026-09-30 base-point round)
 
-`_gpu_hurwitz_zeta(0.5, 0.3)` is 2.3e−5 off on both targets, and in WGSL
-`ζ(−2 + 1e−6, 0.3)` is 1.35e−5 and `ζ(−7.25, 0.3)` 1.06e−5 off: the
-Euler–Maclaurin terms cancel to a small value. Elsewhere the helper is within
-5.1e−6 (23 values of `s` including `−1e−3`, `−1e−5`, `−4 ± 1e−6`, `−12 ± 1e−5`,
-after the 2026-09-30 fix of the rounded distance to the pole, which gave errors
-of 16% to 51% next to a negative even integer). The double kernel's
-Hermite-integral route would fix it.
+Where the Euler–Maclaurin terms cancel, `_gpu_hurwitz_zeta`
+(`GPU_ZETA_PREAMBLE_GLSL`/`_WGSL`, `compilation/gpu-target.ts`) takes ζ(s, b) at
+a base point `b` in (0, 1]: Hurwitz's Fourier formula for `s ≤ −3`, Hermite's
+integral for `−3 < s < 1`, and `b^(−s) + ζ(s, 1 + b)` from the Taylor series for
+`b < 2^−10`. It answers NaN when its error estimate exceeds 3e−5 of the value.
+On 18 361 points (`s` from −24.5 to 12, `a` from 0.01 to 30) every value is
+within 8.1e−6 on an Apple M5 Max GPU (before: 795 values above 1.5e−5, up to 77×
+off at `ζ(−23, 1/4)`), and 432 are NaN: 387 of them are points where a half-ulp
+change of `s` or `a` moves the value by more than 1e−5, and the other 45 have
+`−3 < s < 0` next to a zero where Hermite's closed terms and integral cancel,
+for example `ζ(−2, 0.4666789…) = −0.0027644` and
+`ζ(−2.99, 0.8854986…) = 0.0058845` (mpmath at the f32 operands). An error
+estimate on the Taylor series in `a − round(a)` recovers 11 of them; the double
+kernel's exact Bernoulli value plus a correction was not ported. In an f32 model
+whose `log2` is 2.5 ulp off, 17 values with `a > 16` and `s < −21` are up to
+1.7e−5 off. `_gpu_zeta` answers NaN below `s = −24.5`, although its Stirling
+prefactor would carry it to about `s = −63`. The Apple GPU compiler reassociates
+`s + (2b − 1)` into `(s + 2b) − 1` (6.7% error at `ζ(−1e−6, 1/2)`); the text
+guards it with `max(2b − 1, −1)`, and a test pins the guard.

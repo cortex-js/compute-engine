@@ -4,6 +4,15 @@ import {
   bernoulliRational,
   hurwitzZetaNegativeIntegerAt,
 } from './bernoulli.js';
+import {
+  type DD,
+  ddAdd,
+  ddDivD,
+  ddMul,
+  ddMulD,
+  twoProd,
+  twoSum,
+} from './double-double.js';
 
 // Lanczos approximation coefficients (g = 7, n = 9), accurate to ~15 digits
 // for the principal branch. See Numerical Recipes / mathjs gamma().
@@ -1209,6 +1218,10 @@ export function coshIntegralComplex(z: Complex): Complex {
 // - an a far from the origin, right of the imaginary axis: Euler-Maclaurin;
 // - otherwise a shift to a base point with real part in (0, 1] and
 //   Hermite's integral (`hermiteZetaComplex`).
+// For |Im s| ≥ 2 (and then also for Re(s) ≥ 1/2 at a non-real a), the last
+// three are replaced by a choice between the Euler-Maclaurin sum and
+// Hermite's integral at a base point up to about |Im s|/(2π) further right,
+// by the size of their terms (`largeImaginaryOrderShift`).
 // Measured against mpmath, with the error divided by the error that a
 // one-ulp change of s and a causes (the condition of the value): over 4900
 // real a from 0.01 to 60 with Re(s) from −210 to 0 (negative integers,
@@ -1221,6 +1234,22 @@ export function coshIntegralComplex(z: Complex): Complex {
 // worst relative error is 1.5e−13. The previous dispatch (Taylor series near the real axis,
 // Euler-Maclaurin elsewhere) reached a ratio of 1.1e8 on the same real a
 // points, and a relative error of 7.5e24 at a complex a.
+// Those points had small |Im s|. With |Im s| up to 30 and Re(s) from −30 to
+// 30 (about 12 000 points against mpmath at 40 digits), the error before
+// the large-|Im s| route reached 4.6e8 relative for a real a (at
+// s = −0.93 + 28.85i, a = 0.1334) and 3e−5 for Re(s) ≥ 1/2 at a complex a.
+// With it, and with the error estimate and the double-double retry of
+// `hurwitzZetaComplexWithError`: every value answered is within 4.3e−13
+// relative (3.7e−14 for a real a); 26 values are declined (3 of 2000
+// complex a with Re(a) in (0, 5], 20 of 1500 with Re(a) in [−10, 0], 3 of
+// 700 with Re(a) from 5 to 60 and |Im a| up to 20), all with |Im a| ≥ 3.4
+// and |Im s| ≥ 7. There the value is much smaller than the largest term of
+// every route (the value 1.4e−13 at s = −0.22 + 12.28i, a = −6.93 − 4.78i,
+// where the best route has terms of about 6e−8), and the sum of the terms
+// loses the digits even when each is formed to a few ε. The condition
+// number of these values is small (a one-ulp change of the operands moves
+// them by less than 4.4e−14 relative), so the loss is the kernel's, not
+// the problem's.
 
 /** cₖ = B₂ₖ/(2k)!, k = 1..EM_PAIRS — the Euler-Maclaurin tail coefficients. */
 const EM_PAIRS = 12;
@@ -1234,6 +1263,203 @@ const EM_COEFF: number[] = (() => {
   }
   return c;
 })();
+
+//
+// Double-double arithmetic for the powers of the Hurwitz zeta kernel (the
+// primitives are in `double-double.ts`). A value is a pair [hi, lo] of
+// doubles with |lo| ≤ ulp(hi)/2, about 32 significant digits.
+//
+const DD_LN2: DD = [0.6931471805599453, 2.3190468138462996e-17];
+const DD_PIO2: DD = [1.5707963267948966, 6.123233995736766e-17];
+const DD_TWO_PI: DD = [6.283185307179586, 2.4492935982947064e-16];
+
+/** x − k·c for an integer k, with c a double-double constant. */
+function ddReduce(x: DD, k: number, c: DD): DD {
+  const p = twoProd(k, c[0]);
+  return ddAdd(ddAdd(x, [-p[0], -p[1]]), [-k * c[1], 0]);
+}
+
+/** eˣ for a double x with |x| < 700: eʳ by its Taylor series at r/1024, squared 10 times, times 2ᵏ. */
+function ddExp(x: number): DD {
+  const k = Math.round(x / DD_LN2[0]);
+  const r = ddReduce([x, 0], k, DD_LN2);
+  const h: DD = [r[0] / 1024, r[1] / 1024];
+  let term: DD = h;
+  let sum = ddAdd([1, 0], h);
+  for (let j = 2; j <= 9; j++) {
+    term = ddDivD(ddMul(term, h), j);
+    sum = ddAdd(sum, term);
+  }
+  for (let j = 0; j < 10; j++) sum = ddMul(sum, sum);
+  const scale = Math.pow(2, k);
+  return [sum[0] * scale, sum[1] * scale];
+}
+
+/** ln q for q > 0: the double logarithm, corrected by q·e^(−ln q) − 1. */
+function ddLog(q: DD): DD {
+  const l0 = Math.log(q[0]);
+  const m = ddMul(q, ddExp(-l0));
+  return twoSum(l0, m[0] - 1 + m[1]);
+}
+
+/** [sin x, cos x] for a double x with |x| ≤ 4, by Taylor series after a reduction by π/2. */
+function ddSinCos(x: number): [DD, DD] {
+  const k = Math.round(x / DD_PIO2[0]);
+  const r = ddReduce([x, 0], k, DD_PIO2);
+  const r2 = ddMul(r, r);
+  let sinSum = r;
+  let cosSum: DD = [1, 0];
+  let sinTerm = r;
+  let cosTerm: DD = [1, 0];
+  for (let j = 1; j <= 13; j++) {
+    sinTerm = ddDivD(ddMul(sinTerm, r2), -(2 * j) * (2 * j + 1));
+    cosTerm = ddDivD(ddMul(cosTerm, r2), -(2 * j - 1) * (2 * j));
+    sinSum = ddAdd(sinSum, sinTerm);
+    cosSum = ddAdd(cosSum, cosTerm);
+  }
+  const neg = (v: DD): DD => [-v[0], -v[1]];
+  switch (((k % 4) + 4) % 4) {
+    case 0:
+      return [sinSum, cosSum];
+    case 1:
+      return [cosSum, neg(sinSum)];
+    case 2:
+      return [neg(sinSum), neg(cosSum)];
+    default:
+      return [neg(cosSum), sinSum];
+  }
+}
+
+/**
+ * arg(re + i·im): the double atan2, corrected by the angle between w and
+ * the direction it gives, (im·cos θ₀ − re·sin θ₀)/|w|.
+ */
+function ddArg(re: DD, im: DD): DD {
+  const t0 = Math.atan2(im[0], re[0]);
+  const [sn, cs] = ddSinCos(t0);
+  const cross = ddAdd(ddMul(im, cs), ddMul(re, [-sn[0], -sn[1]]));
+  const dot = re[0] * cs[0] + im[0] * sn[0];
+  return twoSum(t0, (cross[0] + cross[1]) / dot);
+}
+
+/**
+ * w^(−s)·e^(−logE) for w = re + i·im and logE given in double-double. The
+ * exponent −s·ln w − logE is formed in double-double and its imaginary part
+ * reduced by 2π before the double exp, cos and sin, so the power has a
+ * relative error of a few ε however large |s·ln w| is (in doubles it is
+ * about |s·ln w|·ε, see `powerErrorUnits`).
+ */
+function ddPower(re: DD, im: DD, negS: Complex, logE: DD): Complex {
+  const lnAbs = ddLog(ddAdd(ddMul(re, re), ddMul(im, im)));
+  lnAbs[0] *= 0.5;
+  lnAbs[1] *= 0.5;
+  const arg = ddArg(re, im);
+  const x = ddAdd(ddAdd(ddMulD(lnAbs, negS.re), ddMulD(arg, -negS.im)), [
+    -logE[0],
+    -logE[1],
+  ]);
+  const y = ddAdd(ddMulD(arg, negS.re), ddMulD(lnAbs, negS.im));
+  const yr = ddReduce(y, Math.round(y[0] / DD_TWO_PI[0]), DD_TWO_PI);
+  const mag = Math.exp(x[0]) * (1 + x[1]);
+  const c = Math.cos(yr[0]);
+  const sn = Math.sin(yr[0]);
+  return new Complex(mag * (c - sn * yr[1]), mag * (sn + c * yr[1]));
+}
+
+/**
+ * ln(e^(2πt) − 1) in double-double for t given in double-double: 2πt plus
+ * ln(1 − e^(−2πt)) past 2πt = 1, and ln(2πt) plus ln(expm1(2πt)/(2πt))
+ * below, so that its absolute error is a few ε at any t.
+ */
+function ddLogExpm1TwoPi(t: DD): DD {
+  const x = ddMul(DD_TWO_PI, t);
+  if (x[0] > 40) return x;
+  if (x[0] > 1) return ddAdd(x, [Math.log1p(-Math.exp(-x[0])), 0]);
+  return ddAdd(ddLog(x), [Math.log(Math.expm1(x[0]) / x[0]), 0]);
+}
+
+/**
+ * The rounding errors of the terms of a Hurwitz zeta sum, for the error
+ * estimate of `hurwitzZetaComplexWithError`. `s2` is the sum of the squares
+ * of the absolute errors of the terms: the terms' rounding errors are
+ * independent, so the error of their sum is about the square root of `s2`
+ * (see `HURWITZ_ERROR_SCALE`). With `dd`, the powers are formed in
+ * double-double (`ddPower`), with `DD_POWER_UNITS` units of ε each.
+ */
+interface RoundingTally {
+  s2: number;
+  dd?: boolean;
+}
+
+/** The relative error of a power from `ddPower`, in units of ε. */
+const DD_POWER_UNITS = 4;
+
+/**
+ * The relative error of w^(−s) = exp(−s·ln w − logE), in units of the unit
+ * roundoff ε. The exponent's real and imaginary parts are sums of products
+ * of s with ln|w| and arg w, each rounded, so the exponent carries an
+ * absolute error of about ε times the sum of the magnitudes of those
+ * products, and so does the power relatively. A large |Im s| makes these
+ * products large: at s = 0.3 + 26i and |w| = 10 they are about 60, and
+ * each power is then only accurate to about 60ε. The constant 3 counts the
+ * roundings of exp, cos and sin and the final products.
+ */
+function powerErrorUnits(w: Complex, negS: Complex, logE = 0): number {
+  const lnAbs = Math.log(w.abs());
+  const arg = Math.atan2(w.im, w.re);
+  return (
+    Math.abs(negS.re * lnAbs) +
+    Math.abs(negS.im * arg) +
+    Math.abs(negS.re * arg) +
+    Math.abs(negS.im * lnAbs) +
+    Math.abs(logE) +
+    3
+  );
+}
+
+/**
+ * w^(−s)·e^(−logE), written out as exp(x + iy) so that the magnitudes of the
+ * parts of the exponent are at hand, and the square of its absolute error
+ * (`powerErrorUnits` times its size times `weight`) added to `tally`. With
+ * `tally.dd`, w = (w.re + reLo) + i·(w.im + imLo) and logE + logELo are
+ * double-double values, and the power is formed by `ddPower`.
+ */
+function trackedPower(
+  w: Complex,
+  negS: Complex,
+  tally: RoundingTally,
+  logE = 0,
+  weight = 1,
+  reLo = 0,
+  imLo = 0,
+  logELo = 0
+): Complex {
+  if (tally.dd) {
+    const v = ddPower([w.re, reLo], [w.im, imLo], negS, [logE, logELo]);
+    const e = weight * v.abs() * DD_POWER_UNITS;
+    tally.s2 += e * e;
+    return v;
+  }
+  const lnAbs = Math.log(w.abs());
+  const arg = Math.atan2(w.im, w.re);
+  const xr = negS.re * lnAbs;
+  const xi = negS.im * arg;
+  const yr = negS.re * arg;
+  const yi = negS.im * lnAbs;
+  const mag = Math.exp(xr - xi - logE);
+  const y = yr + yi;
+  const e =
+    weight *
+    mag *
+    (Math.abs(xr) +
+      Math.abs(xi) +
+      Math.abs(yr) +
+      Math.abs(yi) +
+      Math.abs(logE) +
+      3);
+  tally.s2 += e * e;
+  return new Complex(mag * Math.cos(y), mag * Math.sin(y));
+}
 
 /** Where the EM tail's direct terms have pushed a+N far enough right. */
 function emEdge(s: Complex): number {
@@ -1255,26 +1481,67 @@ function emEdge(s: Complex): number {
 function hurwitzEMComplex(
   s: Complex,
   a: Complex,
-  sMinusOne: Complex = s.sub(1)
+  sMinusOne: Complex = s.sub(1),
+  tally?: RoundingTally
 ): Complex {
   const n = Math.max(8, Math.ceil(emEdge(s) - a.re));
   const negS = s.neg();
   let sum = C_ZERO;
   for (let k = 0; k < n; k++) {
-    const b = new Complex(a.re + k, a.im);
+    // In double-double, the real part a + k is kept exactly (`twoSum`).
+    const [bRe, bLo] = tally?.dd ? twoSum(a.re, k) : [a.re + k, 0];
+    const b = new Complex(bRe, a.im);
     if (b.re === 0 && b.im === 0) continue;
-    sum = sum.add(b.pow(negS));
+    sum = sum.add(
+      tally ? trackedPower(b, negS, tally, 0, 1, bLo) : b.pow(negS)
+    );
+    // For a large Re(s) the terms decrease fast, and the edge of the tail
+    // (about |s| terms) is far past the point where they stop mattering: at
+    // s = 1e9 the loop ran for 77 s. With x = Re(a) + k + 1 > 0, the terms
+    // after this one add up to at most
+    //   e^(max(0, Im(s)·arg(x + i·Im a)))·(x^(−Re s) + x^(1−Re s)/(Re s − 1)),
+    // since |a + j| ≥ Re(a + j) and arg(a + j) keeps its sign and decreases
+    // in size. Once that is below 1e−17 of the sum, the sum is the value.
+    if (s.re > 16) {
+      // A sum past the range of a double stays there (at s = 1e9, a = 0.5,
+      // the first term is already +∞).
+      if (!sum.isFinite()) return sum;
+      const x = b.re + 1;
+      if (x > 0) {
+        const logRest =
+          Math.max(0, s.im * Math.atan2(a.im, x)) -
+          s.re * Math.log(x) +
+          Math.log1p(x / (s.re - 1));
+        if (logRest < Math.log(1e-17 * sum.abs())) return sum;
+      }
+    }
   }
-  const z = new Complex(a.re + n, a.im);
-  const zNegS = z.pow(negS);
-  sum = sum.add(z.pow(sMinusOne.neg()).div(sMinusOne)).add(zNegS.mul(0.5));
+  const [zRe, zLo] = tally?.dd ? twoSum(a.re, n) : [a.re + n, 0];
+  const z = new Complex(zRe, a.im);
+  const zNegS = tally ? trackedPower(z, negS, tally, 0, 1, zLo) : z.pow(negS);
+  const zOneMinusS = tally
+    ? trackedPower(z, sMinusOne.neg(), tally, 0, 1, zLo)
+    : z.pow(sMinusOne.neg());
+  sum = sum.add(zOneMinusS.div(sMinusOne)).add(zNegS.mul(0.5));
 
   // Σ_{k≥1} cₖ·(s)_{2k-1}·z^{-(s+2k-1)}, rolling the Pochhammer and z-power.
+  // Each term carries the rounding error of z^(−s) (`powerErrorUnits`) plus
+  // about 4 roundings per step of the recurrence.
+  const zUnits = !tally
+    ? 0
+    : tally.dd
+      ? DD_POWER_UNITS
+      : powerErrorUnits(z, negS);
   let zPow = zNegS.div(z);
   const zInv2 = z.pow(-2);
   let poch = s;
   for (let k = 1; k <= EM_PAIRS; k++) {
-    sum = sum.add(poch.mul(zPow).mul(EM_COEFF[k]));
+    const t = poch.mul(zPow).mul(EM_COEFF[k]);
+    sum = sum.add(t);
+    if (tally) {
+      const e = t.abs() * (zUnits + 4 * k + 2);
+      tally.s2 += e * e;
+    }
     const m = 2 * k;
     poch = poch.mul(s.add(m - 1)).mul(s.add(m));
     zPow = zPow.mul(zInv2);
@@ -1417,6 +1684,67 @@ const EM_FAR = 4;
  */
 const HERMITE_MAX_RE_S = 0.5;
 /**
+ * From this |Im s| on, the route is chosen by the size of its terms (see
+ * `largeImaginaryOrderShift`), and for Re(s) ≥ 1/2 a non-real a no longer
+ * goes to the Euler-Maclaurin sum directly.
+ */
+const LARGE_IM_S = 2;
+/**
+ * Bounds on the work of `largeImaginaryOrderShift`, so that its cost stays
+ * bounded for a huge |Im s|: the Euler-Maclaurin sum is an option only up to
+ * this many direct terms (it has about |s| of them), and the base point is
+ * moved at most this far to the right (the shift is about |Im s|/(2π)).
+ */
+const LARGE_IM_EM_TERMS = 4096;
+const LARGE_IM_MAX_SHIFT = 2048;
+/** The unit roundoff of a double, 2⁻⁵³. */
+const EPSILON = 2 ** -53;
+/**
+ * `hurwitzZetaComplexWithError` declines when its error estimate is above
+ * this fraction of the value.
+ */
+const HURWITZ_MAX_ERROR = 1e-12;
+/**
+ * The error estimate of the tallied routes is this many times the square
+ * root of the tally, times ε (see `RoundingTally`); with 1, the measured
+ * error is at most 0.93 times the estimate (see
+ * `hurwitzZetaComplexWithError`).
+ */
+const HURWITZ_ERROR_SCALE = 1;
+/**
+ * The rounding errors the tally does not see on the first (double) pass of
+ * `hurwitzZetaComplexWithError`, in units of (|s·ln a| + 16)·ε of the
+ * value: the rounding of s·ln a in the value's own size. Without it the
+ * measured error reached 4.9 times the estimate where the estimate is
+ * small (4.4e−15 against 9e−16 at s = 9.75 + 23.73i, a = 0.037 − 0.116i).
+ */
+const HURWITZ_OWN_UNITS = 2;
+/**
+ * The rounding errors the tally does not see on the double-double pass of
+ * `hurwitzZetaComplexWithError` (the quadrature weights, the sums), in
+ * units of ε of the value: with it, the measured error is at most 0.93
+ * times the estimate (see `hurwitzZetaComplexWithError`).
+ */
+const HURWITZ_DD_FLOOR = 256;
+/**
+ * A value whose error estimate is above `HURWITZ_MAX_ERROR` is still
+ * answered when the estimate is within the error that a change of a by this
+ * many ulps causes (see `hurwitzZetaComplexWithError`).
+ */
+const HURWITZ_CONDITION_UNITS = 16;
+/**
+ * The error estimate of the routes that do not tally their terms, in units
+ * of ε of the value: the largest error measured against mpmath there on
+ * values whose condition number is small was 36ε (at s = −4.75 − 1.59i,
+ * a = 0.0133, on the Taylor route).
+ */
+const HURWITZ_NOMINAL_ERROR = 48;
+/**
+ * The most terms passed over between a and the base point: past this the
+ * kernel declines (at a = −1e12 + i it would add 1e12 terms).
+ */
+const HURWITZ_MAX_PASSED_TERMS = 2 ** 20;
+/**
  * Whether the Taylor series in h = a − m − 1 (m the integer nearest to
  * a − 1/2) is more accurate than Hermite's integral, for Re(s) < 0. Hermite's
  * integral runs at the base point b = a − ⌈a⌉ + 1 in (0, 1], and it loses
@@ -1480,6 +1808,21 @@ export function gaussLegendreRule(n: number): { x: number[]; w: number[] } {
 }
 
 const GAUSS_16 = gaussLegendreRule(16);
+/**
+ * The most the phase of the integrand of Hermite's integral turns across one
+ * 16-point panel (see `hermiteZetaComplex`).
+ */
+const PHASE_PER_PANEL = 6;
+
+/**
+ * ln(eˣ − 1) for x > 0. Past x = 40, e^(−x) is below 1e−17 and the value is
+ * x to double precision; computing it as x also avoids the overflow of eˣ
+ * past x ≈ 709 (t ≈ 113 in Hermite's integral), where ln(expm1(x)) is
+ * +∞ and the integrand would come out as 0.
+ */
+function logExpm1(x: number): number {
+  return x > 40 ? x : Math.log(Math.expm1(x));
+}
 
 /**
  * ζ(s, a) for Re(a) > 0 and s ≠ 1 by Hermite's integral (DLMF 25.11.29,
@@ -1495,6 +1838,10 @@ const GAUSS_16 = gaussLegendreRule(16);
  * Re(a) is in (0, 1]). A base point next to 1 at a small |s| is the one
  * weak case: there a^(−s)/2 and a^(1−s)/(s − 1) are near ±1/2 while the
  * value can be much smaller, so the caller uses the Taylor series there.
+ * A large |Im s| is the other: arg(a ± it) reaches ±π/2 while e^{2πt} − 1
+ * is still small, so the integrand grows to about e^(|Im s|·π/2) times the
+ * value at a small Re(a); for |Im s| ≥ 2 the caller chooses a base point
+ * further right (see `largeImaginaryOrderShift`).
  *
  * With `n`, the result is instead ζ(s, a) − ζ(−n, a), the same formula
  * with every power w^(−s) replaced by w^(−s) − wⁿ = wⁿ·expm1(−δ·ln w),
@@ -1506,18 +1853,31 @@ const GAUSS_16 = gaussLegendreRule(16);
  * at t = ±i, ±2i, …. So the panels are at most 1 wide, and they halve in
  * width toward t = 0 (down to min(|a|, 1)/2) and toward t = |Im a| (down to
  * Re(a)/2), which keeps every panel's distance to a singularity at least
- * its half-width. The sum stops past the peak of the envelope
+ * its half-width. For a large |Im s| they are also kept to a turn of the
+ * integrand's phase of `PHASE_PER_PANEL` radians: at s = −2.9 − 27.5i and
+ * the base point 0.43 + 3.43i the value was 4.6e−14 off with the wider
+ * panels, 1.3e−14 with these. The sum stops past the peak of the envelope
  * (|a| + t)^(−Re s)·e^{−2πt}, at t = −Re(s)/(2π) − |a|, when a panel's mean
  * size is below 1e−17 of the largest one. Each power is formed together
  * with the division by e^{2πt} − 1, as one exponential, so that a large
  * −Re(s) does not overflow before the exponential decay applies.
  */
-function hermiteZetaComplex(s: Complex, a: Complex, n?: number): Complex {
+function hermiteZetaComplex(
+  s: Complex,
+  a: Complex,
+  n?: number,
+  tally?: RoundingTally,
+  aLo = 0
+): Complex {
   const negS = s.neg();
   // With `n`, every power w^(−s) is replaced by its difference from w^n,
   // w^n·expm1(−δ·ln w) with δ = s + n (see `hermiteDifference`).
   const negDelta = n === undefined ? C_ZERO : new Complex(-(s.re + n), -s.im);
-  const power = (w: Complex, logE: Complex): Complex => {
+  // With `tally`, each power's rounding error, times the quadrature
+  // weight `weight` it is summed with, goes to the tally.
+  const power = (w: Complex, logE: Complex, weight: number): Complex => {
+    if (tally && n === undefined)
+      return trackedPower(w, negS, tally, logE.re, weight, aLo);
     const l = w.log();
     if (n === undefined) return l.mul(negS).sub(logE).exp();
     return l
@@ -1526,10 +1886,39 @@ function hermiteZetaComplex(s: Complex, a: Complex, n?: number): Complex {
       .exp()
       .mul(expm1Complex(l.mul(negDelta)));
   };
-  const integrand = (t: number): Complex => {
-    const logE = new Complex(Math.log(Math.expm1(2 * Math.PI * t)), 0);
-    const p = power(new Complex(a.re, a.im - t), logE);
-    const q = power(new Complex(a.re, a.im + t), logE);
+  // In double-double, t, a ± it and ln(e^(2πt) − 1) are kept to about 32
+  // digits: a rounded t moves the node, which changes the power by about
+  // |s|·ε relatively, as much as the rounding of the exponent does.
+  const ddIntegrand = (t: DD, weight: number): Complex => {
+    const logE = ddLogExpm1TwoPi(t);
+    const lower = ddAdd([a.im, 0], [-t[0], -t[1]]);
+    const upper = ddAdd([a.im, 0], t);
+    const p = trackedPower(
+      new Complex(a.re, lower[0]),
+      negS,
+      tally!,
+      logE[0],
+      weight,
+      aLo,
+      lower[1],
+      logE[1]
+    );
+    const q = trackedPower(
+      new Complex(a.re, upper[0]),
+      negS,
+      tally!,
+      logE[0],
+      weight,
+      aLo,
+      upper[1],
+      logE[1]
+    );
+    return new Complex(p.im - q.im, q.re - p.re);
+  };
+  const integrand = (t: number, weight: number): Complex => {
+    const logE = new Complex(logExpm1(2 * Math.PI * t), 0);
+    const p = power(new Complex(a.re, a.im - t), logE, weight);
+    const q = power(new Complex(a.re, a.im + t), logE, weight);
     // (p − q)/i
     return new Complex(p.im - q.im, q.re - p.re);
   };
@@ -1550,18 +1939,49 @@ function hermiteZetaComplex(s: Complex, a: Complex, n?: number): Complex {
   let largest = 0;
   let lo = 0;
   let next = 0;
-  // The envelope is below 1e−17 of its peak well within 60 past the peak,
-  // so the stop test below ends the loop first; the bound is a safety net.
-  while (lo < Math.max(0, tPeak) + 60) {
+  // With a large |Im s|, e^(|Im s|·arctan(t/Re a) − 2πt) is another part of
+  // the envelope. With g = |Im s|/(2π), its rate of change in t is
+  // 2π·(g·Re(a)/(Re(a)² + t²) − 1): it has a peak at √(Re(a)·(g − Re(a)))
+  // when Re(a) < g, and it decreases at a rate of at least π past
+  // √(Re(a)·(2g − Re(a))) (moved by up to |Im a| for a complex a). Before
+  // that it can decrease slowly: at s = −1.5 − 3000i and a base point
+  // 475.2 + 0.3i, the value 20625.47 − 27873.02i came out as
+  // 20614.22 − 27865.20i with the loop stopped at t = 95. Past the larger
+  // of these points and the peak of t^(−Re s)·e^(−2πt), the envelope is below
+  // 1e−17 of its peak well within 60, so the stop test below ends the loop
+  // first; the bound is a safety net.
+  const g = Math.abs(s.im) / (2 * Math.PI);
+  const tArc =
+    a.re < 2 * g ? Math.sqrt(a.re * (2 * g - a.re)) + Math.abs(a.im) : 0;
+  while (lo < Math.max(0, tPeak, tArc) + 60) {
     while (next < breaks.length && breaks[next] <= lo) next++;
-    const hi = next < breaks.length ? Math.min(breaks[next], lo + 1) : lo + 1;
+    // The phase of w^(−s) turns at the rate |Im s|/|w| in t, fast next to
+    // a branch point when |Im s| is large: a panel is kept to a turn of
+    // about `PHASE_PER_PANEL` radians, measured at its near end (the
+    // nearer branch point is at distance |a ∓ i·lo| from the path).
+    const near = Math.hypot(a.re, Math.abs(a.im) - lo);
+    const width = Math.min(
+      1,
+      Math.max(
+        (PHASE_PER_PANEL * near) / Math.abs(s.im),
+        Math.min(a.re, 1) / 64
+      )
+    );
+    const hi =
+      next < breaks.length ? Math.min(breaks[next], lo + width) : lo + width;
     const half = (hi - lo) / 2;
     let panel = C_ZERO;
     let size = 0;
     for (let i = 0; i < GAUSS_16.x.length; i++) {
-      const v = integrand(lo + half * (1 + GAUSS_16.x[i])).mul(
-        half * GAUSS_16.w[i]
-      );
+      const weight = half * GAUSS_16.w[i];
+      const v = (
+        tally?.dd && n === undefined
+          ? ddIntegrand(
+              ddAdd(twoSum(lo, half), twoProd(half, GAUSS_16.x[i])),
+              weight
+            )
+          : integrand(lo + half * (1 + GAUSS_16.x[i]), weight)
+      ).mul(weight);
       panel = panel.add(v);
       size += v.abs();
     }
@@ -1574,7 +1994,16 @@ function hermiteZetaComplex(s: Complex, a: Complex, n?: number): Complex {
     if (lo > tPeak && mean < 1e-17 * largest) break;
   }
   if (n === undefined) {
-    const aNegS = a.pow(negS);
+    const aNegS = tally ? trackedPower(a, negS, tally, 0, 1, aLo) : a.pow(negS);
+    if (tally) {
+      // The second closed term a^(1−s)/(s − 1), formed from a^(−s).
+      const e =
+        (aNegS.abs() *
+          a.abs() *
+          ((tally.dd ? DD_POWER_UNITS : powerErrorUnits(a, negS)) + 3)) /
+        s.sub(1).abs();
+      tally.s2 += e * e;
+    }
     return aNegS
       .mul(0.5)
       .add(aNegS.mul(a).div(s.sub(1)))
@@ -1607,17 +2036,22 @@ function addPassedOverTerms(
   s: Complex,
   a: Complex,
   m: number,
-  n?: number
+  n?: number,
+  tally?: RoundingTally
 ): Complex {
   const b = a.re - m; // the real part of the base point
   const negS = s.neg();
   const negDelta = n === undefined ? C_ZERO : new Complex(-(s.re + n), -s.im);
   for (let j = 0; j < Math.abs(m); j++) {
-    const br = m > 0 ? b + j : a.re + j;
+    // In double-double, the real part a + (j − m) or a + j is kept exactly.
+    const [br, brLo] = tally?.dd
+      ? twoSum(a.re, m > 0 ? j - m : j)
+      : [m > 0 ? b + j : a.re + j, 0];
     if (br === 0 && a.im === 0) continue;
     const w = new Complex(br, a.im);
     let t: Complex;
-    if (n === undefined) t = w.pow(negS);
+    if (n === undefined)
+      t = tally ? trackedPower(w, negS, tally, 0, 1, brLo) : w.pow(negS);
     else {
       const l = w.log();
       t = l
@@ -1643,6 +2077,9 @@ export function zetaComplex(s: Complex): Complex {
  * pole vs. finite for a non-positive integer a themselves — see
  * `library/arithmetic.ts`.
  *
+ * NaN where `hurwitzZetaComplexWithError` declines, as for a NaN operand;
+ * a caller that must tell the two apart uses that function.
+ *
  * `sMinusOne`, when given, is s − 1 known more accurately than `s.sub(1)`
  * can recover it (for s = 1 − σ computed from a small σ, it is −σ); it is
  * used for the pole term next to s = 1 (see `hurwitzEMComplex`).
@@ -1652,11 +2089,173 @@ export function hurwitzZetaComplex(
   a: Complex,
   sMinusOne?: Complex
 ): Complex {
-  if (s.isNaN() || a.isNaN()) return C_NAN;
+  return hurwitzZetaComplexWithError(s, a, sMinusOne)?.value ?? C_NAN;
+}
+
+/**
+ * `hurwitzZetaComplex` with an estimate of its absolute rounding error, or
+ * `undefined` when the kernel declines. A NaN operand or the pole s = 1
+ * gives NaN, not `undefined`.
+ *
+ * The routes of a complex s, or of a complex a with Re(s) < 1/2, add up
+ * the squares of the rounding errors of their terms (`RoundingTally`); the
+ * estimate is ε times the square root of that sum, plus the errors the
+ * tally does not see (`HURWITZ_OWN_UNITS`, `HURWITZ_DD_FLOOR`). The other
+ * routes (s and a real, a real s ≥ 1/2, the Taylor series and the exact
+ * value next to a negative integer order) have the nominal estimate
+ * `HURWITZ_NOMINAL_ERROR`·ε of the value. Measured against mpmath on
+ * 11 900 points (Re(s) from −30 to 30, |Im s| up to 30, real and complex a
+ * with Re(a) from −10 to 60): the error of an answered value is at most
+ * 0.93 times the estimate on the tallied routes, and at most 3.6 times the
+ * nominal estimate on the others, where the condition number explains it
+ * (at s = −24.24 + 0.0088i, a = 0.051, the error is 1.9e−14 and a one-ulp
+ * change of the operands moves the value by 8.6e−14).
+ *
+ * For |Im s| ≥ `LARGE_IM_S`, when the estimate is above
+ * `HURWITZ_MAX_ERROR` of the value, the route runs again with its powers
+ * in double-double (`ddPower`; such a call takes 2 to 4 ms, against 15
+ * to 150 µs in doubles), and when that estimate is still above it, the kernel declines, unless the estimate is
+ * within what a change of a by `HURWITZ_CONDITION_UNITS` ulps causes (next
+ * to a zero of ζ(s, a)). Of the 59 points of the sweep whose double value
+ * was more than 1e−12 off, the double-double pass answers 34, and 25 are
+ * declined (with one more whose double value was within 1e−12).
+ *
+ * The kernel also declines when a route would take too long: more than
+ * `HURWITZ_MAX_PASSED_TERMS` terms between a and the right half-plane, or
+ * an |Im s| so large that no base point within `LARGE_IM_MAX_SHIFT` of a
+ * keeps the terms small, while the Euler-Maclaurin sum would have more
+ * than `LARGE_IM_EM_TERMS` terms.
+ */
+export function hurwitzZetaComplexWithError(
+  s: Complex,
+  a: Complex,
+  sMinusOne?: Complex,
+  conditionAllowance = true
+): { value: Complex; error: number } | undefined {
+  if (s.isNaN() || a.isNaN()) return { value: C_NAN, error: 0 };
   // The pole; the caller special-cases s = 1.
-  if (sMinusOne ? sMinusOne.isZero() : s.re === 1 && s.im === 0) return C_NAN;
-  if (s.re >= HERMITE_MAX_RE_S || a.re >= EM_BEYOND * emEdge(s))
-    return hurwitzEMComplex(s, a, sMinusOne ?? s.sub(1));
+  if (sMinusOne ? sMinusOne.isZero() : s.re === 1 && s.im === 0)
+    return { value: C_NAN, error: 0 };
+  // A real s ≥ 1/2 (`Zeta`, the complex `PolyGamma`): the Euler-Maclaurin
+  // sum with a nominal estimate (see `trackable` below), without the setup
+  // of the other routes.
+  if (
+    s.im === 0 &&
+    s.re >= HERMITE_MAX_RE_S &&
+    -a.re <= HURWITZ_MAX_PASSED_TERMS
+  ) {
+    const value = hurwitzEMComplex(s, a, sMinusOne ?? s.sub(1));
+    return { value, error: HURWITZ_NOMINAL_ERROR * EPSILON * value.abs() };
+  }
+  // A complex order with a large imaginary part: the route is chosen by the
+  // size of its terms (see `largeImaginaryOrderShift`), and a value whose
+  // error estimate is too large is declined.
+  const largeIm = Math.abs(s.im) >= LARGE_IM_S;
+  const nominal = (value: Complex) => ({
+    value,
+    error: HURWITZ_NOMINAL_ERROR * EPSILON * value.abs(),
+  });
+  // The routes of a complex s, or of a complex a with Re(s) < 1/2, tally
+  // their terms. With s and a real the terms are formed by `Math.pow`,
+  // accurate to about 1 ulp; with a real s ≥ 1/2 (the complex `PolyGamma`)
+  // the Euler-Maclaurin terms have the modulus |a + k|^(−s) and do not
+  // cancel. Their estimate is nominal, which keeps their cost.
+  const trackable = s.im !== 0 || (a.im !== 0 && s.re < HERMITE_MAX_RE_S);
+  // A route that tallies its terms: first in doubles, then, for
+  // |Im s| ≥ `LARGE_IM_S` when the estimate is above `HURWITZ_MAX_ERROR` of
+  // the value, with the powers in double-double, then declined.
+  const tallied = (run: (tally?: RoundingTally) => Complex) => {
+    if (!trackable) return nominal(run());
+    // Rounding errors the tally does not see, in units of ε of the value
+    // (`HURWITZ_OWN_UNITS`, `HURWITZ_DD_FLOOR`).
+    const own = [
+      HURWITZ_OWN_UNITS * (s.abs() * (a.isZero() ? 0 : a.log().abs()) + 16),
+      HURWITZ_DD_FLOOR,
+    ];
+    let last: { value: Complex; error: number } | undefined;
+    for (const dd of [false, true]) {
+      const tally: RoundingTally = { s2: 0, dd };
+      const value = run(tally);
+      const error =
+        HURWITZ_ERROR_SCALE * EPSILON * Math.sqrt(tally.s2) +
+        own[dd ? 1 : 0] * EPSILON * value.abs();
+      // A value past the range of a double is declined too: with terms much
+      // larger than the value, an overflow does not show that the value
+      // itself is out of range.
+      if (!value.isFinite()) return undefined;
+      last = { value, error };
+      // For |Im s| < `LARGE_IM_S` the estimate is kept but the value is
+      // never declined: there the measured errors are within 7e−14
+      // relative wherever the condition number is small, and a larger
+      // estimate comes from the condition of the value (next to a zero of
+      // ζ(s, a), for example), which no route can remove.
+      if (!largeIm || error <= HURWITZ_MAX_ERROR * value.abs()) return last;
+    }
+    // Within what the operands allow: the error that a change of a by
+    // `HURWITZ_CONDITION_UNITS` ulps causes, |s·ζ(s + 1, a)·a|·ε per ulp
+    // (∂ζ(s, a)/∂a = −s·ζ(s + 1, a)). Next to a zero of ζ(s, a) the value
+    // is small next to its terms and to this bound alike, and no route can
+    // do better; where the terms cancel but the derivative does not, this
+    // bound is small and the value is declined.
+    if (last && conditionAllowance) {
+      const derivative = hurwitzZetaComplexWithError(
+        s.add(1),
+        a,
+        undefined,
+        false
+      );
+      const allowance = derivative
+        ? HURWITZ_CONDITION_UNITS *
+          EPSILON *
+          s.abs() *
+          a.abs() *
+          derivative.value.abs()
+        : 0;
+      if (last.error <= allowance) return last;
+    }
+    return undefined;
+  };
+  // Every route adds the terms from a to the right half-plane one at a
+  // time (at a = −1e12 + i, s = 2, one call would add 1e12 of them).
+  if (-a.re > HURWITZ_MAX_PASSED_TERMS) return undefined;
+  const emTerms = Math.max(8, Math.ceil(emEdge(s) - a.re));
+  const em = () =>
+    tallied((tally) => hurwitzEMComplex(s, a, sMinusOne ?? s.sub(1), tally));
+  // Hermite's integral at the base point a − m, plus the terms passed over;
+  // the base point's real part is kept exactly in double-double.
+  const hermiteAt = (m: number) => {
+    const [baseRe, baseLo] = twoSum(a.re, -m);
+    return tallied((tally) =>
+      addPassedOverTerms(
+        hermiteZetaComplex(
+          s,
+          new Complex(baseRe, a.im),
+          undefined,
+          tally,
+          tally?.dd ? baseLo : 0
+        ),
+        s,
+        a,
+        m,
+        undefined,
+        tally
+      )
+    );
+  };
+
+  if (a.re >= EM_BEYOND * emEdge(s)) return em();
+  // For Re(s) ≥ 1/2 the large-|Im s| route applies only to a non-real a, or
+  // when the Euler-Maclaurin sum would have more than `LARGE_IM_EM_TERMS`
+  // direct terms (about |s| of them; at s = 0.7 + 1e7i one call took 1.9 s):
+  // with a real a the terms (a + k)^(−s) have the modulus (a + k)^(−Re s),
+  // and they do not cancel.
+  if (
+    s.re >= HERMITE_MAX_RE_S &&
+    (!largeIm || (a.im === 0 && emTerms <= LARGE_IM_EM_TERMS))
+  )
+    return em();
+  // Every other route moves the base point by about a, one term at a time.
+  if (Math.abs(a.re) > HURWITZ_MAX_PASSED_TERMS) return undefined;
   // A real a and s next to a non-positive integer −n: the exact value at
   // −n plus the difference (see `hurwitzNearIntegerOrder`). At n = 0 a
   // non-positive integer a is left out: there the kernel drops the
@@ -1668,7 +2267,7 @@ export function hurwitzZetaComplex(
       Math.hypot(s.re + n, s.im) <= DELTA_RADIUS &&
       !(n === 0 && a.re <= 0 && Number.isInteger(a.re))
     )
-      return hurwitzNearIntegerOrder(s, a, n);
+      return nominal(hurwitzNearIntegerOrder(s, a, n));
   }
   // Otherwise the base point is moved to a − m by an integer m, with
   // ζ(s,a) = ζ(s,a+1) + a^(-s) carrying the passed-over terms (see
@@ -1676,20 +2275,32 @@ export function hurwitzZetaComplex(
   // series in h = a − m − 1, which is small there.
   const mTaylor = Math.floor(a.re - 0.5);
   const h = new Complex(a.re - mTaylor - 1, a.im);
-  if (s.re < 0 && taylorPreferred(s.re, h))
-    return addPassedOverTerms(zetaNearOneComplex(s, h), s, a, mTaylor);
+  // For |Im s| ≥ 2 the route of `largeImaginaryOrderShift` is used instead:
+  // over 1200 points with a within 0.2 of an integer, Re(s) from −12 to 0
+  // and |Im s| from 2 to 30, the Taylor series reached 6e−13 relative (77
+  // times the error that a one-ulp change of the operands causes), that
+  // route 2.8e−14 (4.8 times).
+  if (s.re < 0 && !largeIm && taylorPreferred(s.re, h))
+    return nominal(addPassedOverTerms(zetaNearOneComplex(s, h), s, a, mTaylor));
+  if (largeIm) {
+    // No base point within `LARGE_IM_MAX_SHIFT` of a is far enough right,
+    // and the Euler-Maclaurin sum is not an option: decline rather than
+    // return a value with no correct digit (at s = 0.1 − 20000i the
+    // integrand overflows) or run for seconds.
+    if (
+      Math.abs(s.im) / (2 * Math.PI) > LARGE_IM_MAX_SHIFT &&
+      !(a.re > 0 && emTerms <= LARGE_IM_EM_TERMS)
+    )
+      return undefined;
+    const m = largeImaginaryOrderShift(s, a);
+    return m === undefined ? em() : hermiteAt(m);
+  }
   // Far from the origin, right of the imaginary axis: the Euler-Maclaurin
   // sum, which does not cancel there.
   if (a.re > 0 && a.abs() >= EM_FAR * (s.abs() + 1))
-    return hurwitzEMComplex(s, a);
+    return tallied((tally) => hurwitzEMComplex(s, a, s.sub(1), tally));
   // Elsewhere, Hermite's integral at a base point with real part in (0, 1].
-  const m = hermiteShift(a.re);
-  return addPassedOverTerms(
-    hermiteZetaComplex(s, new Complex(a.re - m, a.im)),
-    s,
-    a,
-    m
-  );
+  return hermiteAt(hermiteShift(a.re));
 }
 
 /**
@@ -1700,6 +2311,144 @@ function hermiteShift(a: number): number {
   let m = Math.ceil(a) - 1;
   if (a - m < 1e-9) m -= 1;
   return m;
+}
+
+/**
+ * The route for |Im s| ≥ `LARGE_IM_S`: `undefined` for the Euler-Maclaurin
+ * sum at a, or the integer m for Hermite's integral at the base point a − m
+ * plus the terms passed over between them.
+ *
+ * With s = σ + iτ, a power w^(−s) has the modulus |w|^(−σ)·e^(τ·arg w). When
+ * |τ| is large, this factor makes the terms of every route much larger than
+ * the value, and each term keeps only its relative accuracy, so the error of
+ * the result is about 1e−16 times the largest term:
+ * - in Hermite's integral at a base point b with a small real part,
+ *   arg(b ± it) reaches ±π/2 while e^(2πt) − 1 is still small, and the
+ *   integrand grows to about e^(|τ|π/2) (ζ(−0.93 + 28.85i, 0.1334), about
+ *   −10.46 − 5.58i, came out as 1.5e8 + 5.4e9i). A base point with a
+ *   larger real part removes this: arg(b + it) grows at most at the rate
+ *   τ/Re(b) in t, which e^(−2πt) offsets for Re(b) ≥ |τ|/(2π);
+ * - the terms passed over between a and b, and the Euler-Maclaurin direct
+ *   terms, have the factor e^(τ·arg(a + k)) for a non-real a: when τ·Im(a) <
+ *   0 the first terms are small and the later ones large, and the value can
+ *   be much smaller than the later terms (ζ(0.5412 + 12.9103i, 0.1193 −
+ *   3.5489i), about 1.7e−10 in modulus, was off by 8.8e−7 relative with the
+ *   Euler-Maclaurin sum);
+ * - |w|^(−σ) grows with |w| when σ < 0, so a shift to the right has a cost.
+ *
+ * So each route's largest term is estimated from the logarithm of the
+ * modulus, −σ·ln|w| + τ·arg w, without forming any power: for the
+ * Euler-Maclaurin sum (only for Re(a) > 0), its direct terms and the
+ * leading terms of its tail; for Hermite's integral at the base points
+ * a − m with real part in (0, 1], (1, 2], …, up to past |τ|/(2π), the
+ * passed-over terms, the closed terms b^(−s)/2 and b^(1−s)/(s − 1), and the
+ * integrand sampled on a grid in t. The route with the smallest largest term
+ * is used; the Euler-Maclaurin sum, then the base points in increasing order,
+ * are kept unless a later route is smaller by a factor of 2 or more.
+ *
+ * The estimate costs about 5 to 15 µs, next to 50 to 150 µs for Hermite's
+ * integral. For |τ| above about 2π·`LARGE_IM_MAX_SHIFT` (12 800) the base
+ * point cannot move far enough, and the caller declines. Below that,
+ * measured at |τ| = 100, 1000, 3000, 5000 and 12 000, the error is within
+ * 7.7e−14 relative, from the double-double pass of
+ * `hurwitzZetaComplexWithError` (in doubles each power w^(−s) is only
+ * accurate to about |s·ln w|·1e−16 there, and the error reached 2.4e−12);
+ * a call at |τ| = 12 000 takes about 130 ms.
+ */
+function largeImaginaryOrderShift(s: Complex, a: Complex): number | undefined {
+  const logTerm = (re: number, im: number): number =>
+    -s.re * 0.5 * Math.log(re * re + im * im) + s.im * Math.atan2(im, re);
+  const logS1 = Math.log(Math.hypot(s.re - 1, s.im));
+  // The closed terms w^(−s)/2 and w^(1−s)/(s − 1) at w.
+  const logClosed = (re: number, im: number): number =>
+    logTerm(re, im) +
+    Math.max(-Math.LN2, 0.5 * Math.log(re * re + im * im) - logS1);
+
+  // The default is the base point with real part in (0, 1]. For Re(a) ≤ 0
+  // there is no Euler-Maclaurin option (see `EM_FAR`), nor when it would
+  // have more than `LARGE_IM_EM_TERMS` direct terms.
+  const m0 = hermiteShift(a.re);
+  let best: number | undefined = m0;
+  let bestLog = Infinity;
+  const n = Math.max(8, Math.ceil(emEdge(s) - a.re));
+  if (a.re > 0 && n <= LARGE_IM_EM_TERMS) {
+    let piece = logClosed(a.re + n, a.im);
+    for (let k = 0; k < n; k++)
+      piece = Math.max(piece, logTerm(a.re + k, a.im));
+    if (piece < bestLog) {
+      best = undefined;
+      bestLog = piece;
+    }
+  }
+
+  // The largest term passed over for the shift m = m0 − j. For m > 0 the
+  // terms have the real parts a − m, …, a − 1, and `dropped[j]` is the
+  // largest of them (one term fewer at each step of j). For m < 0 they have
+  // the real parts a, …, a − m − 1, one term more at each step of j, and
+  // `added` is the largest so far. So each step costs O(1).
+  const dropped: number[] = [];
+  if (m0 > 0) {
+    dropped[m0] = -Infinity;
+    for (let i = m0 - 1; i >= 0; i--)
+      dropped[i] = Math.max(dropped[i + 1], logTerm(a.re - m0 + i, a.im));
+  }
+  let added = -Infinity;
+  for (let k = 0; k < -m0; k++)
+    if (a.re + k !== 0 || a.im !== 0)
+      added = Math.max(added, logTerm(a.re + k, a.im));
+
+  const extra = Math.min(
+    Math.ceil(Math.abs(s.im) / (2 * Math.PI)),
+    LARGE_IM_MAX_SHIFT
+  );
+  // Past the larger of |Im a| (the branch point of one of the powers) and
+  // −σ/(2π) (the peak of t^(−σ)·e^(−2πt)), the integrand decreases, apart
+  // from the peak of the arctan factor, which is sampled on its own below.
+  // The grid has at most about 200 points.
+  const tMax = Math.max(Math.abs(a.im), -s.re / (2 * Math.PI)) + 2;
+  const tStep = Math.max(0.25, tMax / 200);
+  const stride = Math.max(1, Math.floor(extra / 64));
+  for (let j = 0; j <= extra; j++) {
+    const m = m0 - j;
+    const b = a.re - m;
+    if (m < 0 && j > 0 && (b - 1 !== 0 || a.im !== 0))
+      added = Math.max(added, logTerm(b - 1, a.im));
+    // Past the first 16 shifts, about 64 more are estimated, evenly spaced
+    // up to the last: the estimate changes slowly with the shift there.
+    if (j > 16 && j < extra && j % stride !== 0) continue;
+    let piece = Math.max(logClosed(b, a.im), m > 0 ? dropped[j] : added);
+    const sample = (t: number): void => {
+      const e = logExpm1(2 * Math.PI * t);
+      piece = Math.max(
+        piece,
+        logTerm(b, a.im - t) - e,
+        logTerm(b, a.im + t) - e
+      );
+    };
+    const t0 = Math.min(Math.hypot(b, a.im), 1) / 4;
+    for (let t = t0; t < 1; t *= 2) sample(t);
+    for (let t = 1; t <= tMax; t += tStep) sample(t);
+    // The closest approach to the branch point of one of the powers, where
+    // |w|^(−σ) peaks for σ > 0. Nearer to t = 0 the two powers are close to
+    // each other and their difference is much smaller than either, so a
+    // sample there would overstate the integrand by the factor 1/(2πt).
+    if (Math.abs(a.im) >= t0) sample(Math.abs(a.im));
+    // The peak of e^(|τ|·arctan(t/b))·e^(−2πt), at t* = √(b·(g − b)) with
+    // g = |τ|/(2π) when b < g, moved by ±Im a (see `hermiteZetaComplex`).
+    const g = Math.abs(s.im) / (2 * Math.PI);
+    if (b < g) {
+      const tArc = Math.sqrt(b * (g - b));
+      sample(tArc);
+      sample(tArc + Math.abs(a.im));
+      if (Math.abs(tArc - Math.abs(a.im)) >= t0)
+        sample(Math.abs(tArc - Math.abs(a.im)));
+    }
+    if (piece < bestLog - Math.LN2) {
+      best = m;
+      bestLog = piece;
+    }
+  }
+  return best;
 }
 
 /**
@@ -1733,16 +2482,118 @@ function hurwitzNearIntegerOrder(s: Complex, a: Complex, n: number): Complex {
  * Zeta(s, a) is finite at a = 0, -1, -2, ..., unlike HurwitzZeta.
  */
 export function zetaGeneralizedComplex(s: Complex, a: Complex): Complex {
-  if (s.isNaN() || a.isNaN()) return C_NAN;
+  return zetaGeneralizedComplexWithError(s, a)?.value ?? C_NAN;
+}
+
+/**
+ * `zetaGeneralizedComplex` with an estimate of its absolute rounding error,
+ * or `undefined` when the kernel declines (see
+ * `hurwitzZetaComplexWithError`): the Hurwitz part declines, more than
+ * `HURWITZ_MAX_PASSED_TERMS` terms lie left of the imaginary axis, or the
+ * estimate is above `HURWITZ_MAX_ERROR` of the value. For |Im s| ≥
+ * `LARGE_IM_S` the terms left of the axis are tallied as in the Hurwitz
+ * kernel; otherwise they add `HURWITZ_NOMINAL_ERROR` units of ε of their
+ * sum.
+ */
+export function zetaGeneralizedComplexWithError(
+  s: Complex,
+  a: Complex
+): { value: Complex; error: number } | undefined {
+  if (s.isNaN() || a.isNaN()) return { value: C_NAN, error: 0 };
+  if (-a.re > HURWITZ_MAX_PASSED_TERMS) return undefined;
   const negHalfS = s.mul(-0.5);
-  let acc = C_ZERO;
-  let cur = new Complex(a.re, a.im);
-  while (cur.re < 0) {
-    acc = acc.add(cur.mul(cur).pow(negHalfS));
-    cur = new Complex(cur.re + 1, cur.im);
+  let count = 0;
+  while (a.re + count < 0) count++;
+  let start = new Complex(a.re + count, a.im);
+  // drop (k+a) = 0 — no pole here
+  if (start.re === 0 && start.im === 0) start = C_ONE;
+  const rest = hurwitzZetaComplexWithError(s, start);
+  if (rest === undefined) return undefined;
+  // No terms left of the imaginary axis: the value is the Hurwitz value,
+  // which the Hurwitz kernel has already accepted (possibly through its
+  // condition allowance, next to a zero of ζ(s, a)). Checking its estimate
+  // again against `HURWITZ_MAX_ERROR` here would decline a value that
+  // `HurwitzZeta(s, a)` answers.
+  if (count === 0) return rest;
+  // The terms left of the imaginary axis, ((a + k)²)^(−s/2). With `tally`
+  // their rounding errors are tallied as in the Hurwitz kernel, and with
+  // `tally.dd` a + k and its square are kept in double-double.
+  const front = (tally?: RoundingTally): Complex => {
+    let acc = C_ZERO;
+    for (let k = 0; k < count; k++) {
+      if (!tally) {
+        const cur = new Complex(a.re + k, a.im);
+        acc = acc.add(cur.mul(cur).pow(negHalfS));
+        continue;
+      }
+      const re = tally.dd ? twoSum(a.re, k) : ([a.re + k, 0] as DD);
+      const sqRe = ddAdd(ddMul(re, re), [
+        -a.im * a.im,
+        -twoProd(a.im, a.im)[1],
+      ]);
+      const sqIm = ddMulD(re, 2 * a.im);
+      acc = acc.add(
+        trackedPower(
+          new Complex(sqRe[0], sqIm[0]),
+          negHalfS,
+          tally,
+          0,
+          1,
+          tally.dd ? sqRe[1] : 0,
+          tally.dd ? sqIm[1] : 0
+        )
+      );
+    }
+    return acc;
+  };
+  if (Math.abs(s.im) < LARGE_IM_S) {
+    const acc = front();
+    return {
+      value: acc.add(rest.value),
+      error: Math.hypot(
+        rest.error,
+        HURWITZ_NOMINAL_ERROR * EPSILON * acc.abs()
+      ),
+    };
   }
-  if (cur.re === 0 && cur.im === 0) cur = C_ONE; // drop (k+a) = 0 — no pole here
-  return acc.add(hurwitzZetaComplex(s, cur));
+  let last: { value: Complex; error: number } | undefined;
+  for (const dd of [false, true]) {
+    const tally: RoundingTally = { s2: 0, dd };
+    const value = front(tally).add(rest.value);
+    const error = Math.hypot(
+      rest.error,
+      HURWITZ_ERROR_SCALE * EPSILON * Math.sqrt(tally.s2)
+    );
+    if (!value.isFinite()) return undefined;
+    last = { value, error };
+    if (error <= HURWITZ_MAX_ERROR * value.abs()) return last;
+  }
+  // The condition allowance of the Hurwitz kernel: answer when the estimate
+  // is within the error that a change of a by `HURWITZ_CONDITION_UNITS`
+  // ulps causes. The derivative in a is −s·(ζ(s + 1, a + count) +
+  // Σₖ (a + k)·((a + k)²)^(−(s + 2)/2)), the sum over the terms left of the
+  // imaginary axis. Next to a zero of the value the estimate can be larger
+  // than `HURWITZ_MAX_ERROR` of the value, and no route can do better.
+  if (last) {
+    const derivative = hurwitzZetaComplexWithError(
+      s.add(1),
+      start,
+      undefined,
+      false
+    );
+    if (derivative) {
+      const negHalfS2 = s.add(2).mul(-0.5);
+      let d = derivative.value;
+      for (let k = 0; k < count; k++) {
+        const cur = new Complex(a.re + k, a.im);
+        d = d.add(cur.mul(cur.mul(cur).pow(negHalfS2)));
+      }
+      const allowance =
+        HURWITZ_CONDITION_UNITS * EPSILON * s.abs() * a.abs() * d.abs();
+      if (Number.isFinite(allowance) && last.error <= allowance) return last;
+    }
+  }
+  return undefined;
 }
 
 //

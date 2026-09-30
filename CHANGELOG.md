@@ -3,38 +3,61 @@
 ### Behavior Changes
 
 - **`.N()` of a rounding function, `Fract`, `Mod`, `Sign`, `Heaviside` or a
-  comparison uses the exact value of an exact operand.** `.N()` approximated the operand first, and
-  near a point where the result jumps, a tiny error changed the result by a
-  finite amount: `Floor((25! − 1)/24!).N()` was `25` (the value is just below
-  `25`, and its 21-digit approximation is `25`), and
+  comparison uses the exact value of an exact operand.** `.N()` approximated the
+  operand first, and near a point where the result jumps, a tiny error changed
+  the result by a finite amount: `Floor((25! − 1)/24!).N()` was `25` (the value
+  is just below `25`, and its 21-digit approximation is `25`), and
   `(1/2 − 10⁻³⁰ < 1/2).N()` was `False`. They are now `24` and `True`, as in
-  Mathematica, where `N[Floor[(25!-1)/24!]]` is `24.`. `.N()` promises a
-  result that is correct to the working precision, not that every
-  intermediate step is a float. The operand is still approximated first; its
-  exact value is used when it is an exact number (an integer, a rational, or a
-  rational multiple of a square root), or when its approximation is within
-  about `10⁻¹⁰` (relative) of a point where the result jumps. The result of a
-  rounding function under `.N()` is a float, as before: `Floor(25! − 1).N()`
-  is `25! − 1` approximated to the working precision. `Fract((25! − 1)/3).N()`
-  was `0` and is now `0.666666666666666666667`. A comparison with a float
-  operand is still decided at the precision of the float:
-  `(1/2 − 10⁻³⁰ < 0.5).N()` is `False`.
-- **Two exact numbers are compared exactly, with no tolerance.** The
-  comparison operators and the methods `.isEqual()`, `.isLess()`,
-  `.isLessEqual()`, `.isGreater()` and `.isGreaterEqual()` compared two
-  numbers whose difference was less than `ce.tolerance` (`10⁻¹⁰`) as equal,
-  also when both were exact, but `Less` and `Greater` sometimes compared
-  exactly: `Equal(1/2 − 10⁻³⁰, 1/2)` and `Less(1/2 − 10⁻³⁰, 1/2)` were both
-  `True`. Two exact numbers (integers, rationals, rational multiples of a
-  square root) are now equal only if they have the same value:
-  `Equal(1/3, 3333333333333/10^13)` was `True` and is now `False`, and
-  exactly one of `<`, `=` and `>` holds for two exact numbers, as in
-  Mathematica. The tolerance still applies when a float is involved:
+  Mathematica, where `N[Floor[(25!-1)/24!]]` is `24.`. `.N()` promises a result
+  that is correct to the working precision, not that every intermediate step is
+  a float. The operand is still approximated first; its exact value is used when
+  it is an exact number (an integer, a rational, or a rational multiple of a
+  square root), or when its approximation is within about `10⁻¹⁰` (relative) of
+  a point where the result jumps. The result of a rounding function under `.N()`
+  is a float, as before: `Floor(25! − 1).N()` is `25! − 1` approximated to the
+  working precision. `Fract((25! − 1)/3).N()` was `0` and is now
+  `0.666666666666666666667`. A comparison with a float operand is still decided
+  at the precision of the float: `(1/2 − 10⁻³⁰ < 0.5).N()` is `False`.
+- **Two exact numbers are compared exactly, with no tolerance.** The comparison
+  operators and the methods `.isEqual()`, `.isLess()`, `.isLessEqual()`,
+  `.isGreater()` and `.isGreaterEqual()` compared two numbers whose difference
+  was less than `ce.tolerance` (`10⁻¹⁰`) as equal, also when both were exact,
+  but `Less` and `Greater` sometimes compared exactly: `Equal(1/2 − 10⁻³⁰, 1/2)`
+  and `Less(1/2 − 10⁻³⁰, 1/2)` were both `True`. Two exact numbers (integers,
+  rationals, rational multiples of a square root) are now equal only if they
+  have the same value: `Equal(1/3, 3333333333333/10^13)` was `True` and is now
+  `False`, and exactly one of `<`, `=` and `>` holds for two exact numbers, as
+  in Mathematica. The tolerance still applies when a float is involved:
   `Equal(1/10, 0.1)` is `True`. `.is()` keeps the tolerance for exact numbers
   too.
 
-- **`evaluate({ materialization: true })` gives every element of a finite
-  lazy collection** ([#380](https://github.com/cortex-js/compute-engine/issues/380),
+- **The interval target encloses `Binomial` and `Factorial` as functions of real
+  operands.** It used to round each operand to the nearest integer, so its
+  enclosure did not contain the value the interpreter and the JS target give at
+  a non-integer point: `Binomial(5.5, 2)` gave `[15, 15]` instead of `12.375`,
+  `Factorial(2.5)` gave `[6, 6]` instead of `Γ(3.5) ≈ 3.323`, and
+  `Factorial(-0.5)` was empty instead of `√π`. A plot of `Binomial(x, 2)` or
+  `x!` showed steps. Now `Factorial(x)` is enclosed as `Γ(x + 1)`, with a pole
+  at each negative integer. `Binomial(n, k)` is enclosed through the falling
+  factorial `n(n−1)⋯(n−k+1)/k!` for an integer `k ≥ 0`. Where `n + 1`, `k + 1`
+  and `n − k + 1` are positive over the box, `C(n, k)` is monotone in `n` and
+  log-concave in `k`, so the enclosure is the true range (`Binomial(n, k)` over
+  `n ∈ [4, 6]`, `k ∈ [1, 3]` is `[4, 20]`). Elsewhere it is the product of
+  enclosures of `Γ(n+1)`, `1/Γ(k+1)` and `1/Γ(n−k+1)`. For a negative integer
+  `k` the result is a jump: `C(n, k)` is `0` except at the negative integers
+  `n ≥ k`. Integer points stay exact. What is lost: an interval of `n` that
+  contains a root of the polynomial gets a wider enclosure (`Binomial(n, 2)`
+  over `[0, 3]` is `[−1.5, 3]`; the true range over the reals is `[−0.125, 3]`),
+  the `Γ` product is wider than the true range (`Binomial(5, k)` over
+  `k ∈ [2, 7]` is `[−67.8, 67.8]`, true range `[−0.022, 10.87]`). An `n`
+  interval that contains a negative integer, together with a `k` interval or a
+  non-integer `k`, is reported as a pole: `C` is unbounded there. The interval
+  enclosure of the falling factorial (`k` up to 4096) no longer excludes the
+  value when a partial product overflows: `Binomial(n, 1000)` over
+  `n ∈ [1100, 1100.5]` gave `[1.8e308, ∞]` for a value of `1.4e144`.
+
+- **`evaluate({ materialization: true })` gives every element of a finite lazy
+  collection** ([#380](https://github.com/cortex-js/compute-engine/issues/380),
   reported by [enumeratio](https://github.com/enumeratio)). The option was
   documented as "if `true`, and the collection is finite, it is fully
   materialized", but `true` gave the display preview: the first five and the
@@ -44,9 +67,9 @@
   `ce.maxCollectionSize` stays in its lazy form, and an infinite collection, or
   one whose finiteness is not known, still gives the preview. `toString()`,
   `.latex` and `toLatex()` without a `materialization` option still print the
-  preview. To get the preview from `evaluate()`, pass
-  `materialization: [5, 5]`. `toLatex({ materialization: true })` now prints
-  every element, as its documentation says.
+  preview. To get the preview from `evaluate()`, pass `materialization: [5, 5]`.
+  `toLatex({ materialization: true })` now prints every element, as its
+  documentation says.
 
 - **A function that annotates some of its parameters enforces only the annotated
   ones at a call.** With `function k(p, n: number) { p[1] + n }`, the type of
@@ -273,6 +296,30 @@
 
 ### Issues Resolved
 
+- **`HurwitzZeta` and the two-operand `Zeta` are accurate at a complex order
+  with a large imaginary part, stay unevaluated where the double-precision
+  result would be wrong, and no longer hang on an extreme argument.**
+  `HurwitzZeta(-0.93+28.85i, 0.1334).N()` was `1.5e8 + 5.4e9i` and is now
+  `-10.482 - 5.546i`; `HurwitzZeta(-0.22+12.28i, -6.93-4.78i).N()` was off by
+  1e−9 and now stays `HurwitzZeta(…)`; `HurwitzZeta(0.7+1e7i, 0.3).N()` took two
+  seconds and `HurwitzZeta(1e9, 0.5).N()` more than a minute, and both now
+  return at once.
+- **`LerchPhi` past the unit circle evaluates in many cases that stayed
+  symbolic**: a real `a` with `Re(s) ≥ 1/2` at a large `|z|`
+  (`LerchPhi(-187652.08, 2.5913, 1).N()` is `0.00097720268138322`), a very
+  negative order with a negative `a`, and a complex `a` (on a random sweep with
+  `Re(s)` from −30 to 1 and `|z|` up to 1e7, 980 of 1197 points now evaluate, up
+  from 594). Every value is within 1e−11 of the reference, and the slow cases
+  are up to ten times faster.
+- **The GLSL and WGSL `HurwitzZeta`, `LerchPhi` and `PolyLog` are more
+  accurate.** `HurwitzZeta(s, a)` with `s < 1/2` used a sum whose terms
+  cancelled: `HurwitzZeta(1/2, 0.3)` was 2.3e−5 off and `HurwitzZeta(-23, 1/4)`
+  returned 0.016 for −0.000215. Every value is now within 1e−5, or `NaN` next to
+  a zero of the function where single precision cannot resolve it (some values
+  that were returned before, inaccurately, are `NaN` there now).
+  `LerchPhi(z, s, a)` and `PolyLog(s, z)` with `z < 0` and `s ≤ −3` return a
+  value in most cases that were `NaN`, for example `LerchPhi(-1, -6.5, 1.3)` is
+  `0.10992`.
 - **A `Pipe` stage that uses no topic slot and whose value is not a function is
   an error.** The piped value would be ignored. `[1, 2] |> 10 + 3` was already
   an `incompatible-type` error, but `[1, 2] |> 10 + [3, 4][1]` gave `13` and
@@ -281,29 +328,48 @@
   `incompatible-type` error, on the MathJSON, LaTeX and Epsil routes. So is
   `5 |> Max(3)`, a complete call whose value `3` is not a function (it gave
   `3`). A stage that is a function is unchanged: a function symbol
-  (`xs |> Sum`), a call missing its first argument (`xs |> Take(1)`), a
-  lambda, a stage with a topic slot (`xs |> _ * 2`), and a body whose unknowns
-  become its parameters (`5 |> y + 1` is `6`). A `_` inside a nested `Pipe`
-  stage belongs to that stage, not to the enclosing one. `Apply` keeps
-  treating a value that is not a function as a constant (`Apply(3, 5)` is
-  `3`).
+  (`xs |> Sum`), a call missing its first argument (`xs |> Take(1)`), a lambda,
+  a stage with a topic slot (`xs |> _ * 2`), and a body whose unknowns become
+  its parameters (`5 |> y + 1` is `6`). A `_` inside a nested `Pipe` stage
+  belongs to that stage, not to the enclosing one. `Apply` keeps treating a
+  value that is not a function as a constant (`Apply(3, 5)` is `3`).
+- **`Binomial(n, k).N()` for a huge `n` and a non-integer `k`.** From about
+  `n = 10²⁰`, `Γ(n + 1)` overflows, and the quotient `Γ(n+1)/(Γ(k+1)·Γ(n−k+1))`
+  gave `NaN`: `Binomial(1e300, 0.5).N()`, `Binomial(1e20, 0.5).N()`,
+  `Binomial(1e15, 0.25).N()`. The value is now computed in log form with the
+  Stirling series of `ln Γ(a) − ln Γ(a − d)`: `Binomial(1e300, 0.5).N()` is
+  `1.1283791670955125739e+150`. With `ce.precision = 'machine'`, `Binomial` uses
+  the same kernel as the compiled JavaScript target.
+
+- **The interval enclosures of `Gamma` and `GammaLn` contain the true value.**
+  They widened the scalar kernel's value by one ulp, but the kernel is off by up
+  to about 300 ulps (`Γ(148.6)`), and more close to a pole on the negative axis,
+  so an enclosure could miss the value: `Gamma(3.5)` gave
+  `[3.3233509704478443, 3.323350970447845]`, above the true
+  `3.32335097044784255…`. Each value is now widened by a measured bound on the
+  kernel's error. Two other `GammaLn` defects are fixed: an interval that
+  contains the minimum of `Γ` near `1.4616` was reversed (`[0.5, 2]` gave
+  `lo = 0.572`, `hi = 0`, while the true minimum is `−0.1215`), and every
+  interval on the negative axis gave `NaN`. A `Gamma` interval that contains
+  several poles now reports the first one.
+
 - **Compiled `Binomial` and `Choose` give the interpreter's values outside
   `0 ≤ k ≤ n`** ([#384](https://github.com/cortex-js/compute-engine/issues/384),
   reported by [enumeratio](https://github.com/enumeratio)). The JavaScript
   target's runtime was a Pascal-triangle table lookup: `Binomial(3, -1)` and
   `Binomial(2, 5)` gave `undefined` instead of `0`, and a negative or
-  non-integer `n` (`Binomial(-3, 2)`, `Binomial(5.5, 2)`) threw. The runtime
-  now follows `evaluate()`: `0` for `k < 0` or `k > n ≥ 0`, the extension to a
+  non-integer `n` (`Binomial(-3, 2)`, `Binomial(5.5, 2)`) threw. The runtime now
+  follows `evaluate()`: `0` for `k < 0` or `k > n ≥ 0`, the extension to a
   negative `n` (`Binomial(-3, 2) = 6`, `Binomial(-3, -5) = 6`), the Γ ratio for
   a non-integer operand, `0` or `Infinity` at the poles of the Γ factors, the
   limits at an infinite operand, and `NaN` for a `NaN` operand. Integer results
-  below 2^53 are exact. The interval target used the same table and threw for
-  an interval that contains a negative `n`; it now uses the same kernel. For a
-  very wide `n` interval, its fallback bound built a table with `n²/2` entries;
-  it now computes the one bound it needs, and gives the whole real line when
-  the interval contains a negative `n`. An enclosure that contains a value
-  above the largest double now extends to `Infinity`; before, the overflowed
-  grid values were skipped and the upper bound was too low.
+  below 2^53 are exact. The interval target used the same table and threw for an
+  interval that contains a negative `n`; it now uses the same kernel. For a very
+  wide `n` interval, its fallback bound built a table with `n²/2` entries; it
+  now computes the one bound it needs, and gives the whole real line when the
+  interval contains a negative `n`. An enclosure that contains a value above the
+  largest double now extends to `Infinity`; before, the overflowed grid values
+  were skipped and the upper bound was too low.
 
 - **`HurwitzZeta(-n, a)` at a non-positive integer order is the Bernoulli
   polynomial −Bₙ₊₁(a)/(n+1) for a symbolic or a complex `a`**, not only for a
@@ -371,16 +437,16 @@
   and `Length(At(x, i))`, `Count(At(x, i))` and every other collection operator
   over it refused to compile ("operand is not an indexed collection"), where the
   same read of a `tuple<list<integer>, list<integer>>` compiled. The same held
-  for a restricted list `xs{c}` and for a symbol declared `list<integer> |
-  missing`. The compiled code now binds the operand once and tests it for the
-  absent value: `Length(At(x, i))` runs to the row's length, and to `NaN` when
-  the row is absent, as the interpreter answers `NaN` for `Length(Missing)`;
-  `Reverse`, `Take`, `Sort`, `Join`, `Map`, `Filter`, `Reduce`, `Any`, `Dot`,
-  `Cross`, `ListFrom`, `Last` and the other collection operators follow the
-  same rule, with the absent object (`undefined`) as the marker of a
-  non-numeric result. `Sum` and `Product` of such an operand answered
-  `undefined` and now answer `NaN`. The rule applies on the JavaScript target
-  only; the Python and shader targets keep their decline.
+  for a restricted list `xs{c}` and for a symbol declared
+  `list<integer> | missing`. The compiled code now binds the operand once and
+  tests it for the absent value: `Length(At(x, i))` runs to the row's length,
+  and to `NaN` when the row is absent, as the interpreter answers `NaN` for
+  `Length(Missing)`; `Reverse`, `Take`, `Sort`, `Join`, `Map`, `Filter`,
+  `Reduce`, `Any`, `Dot`, `Cross`, `ListFrom`, `Last` and the other collection
+  operators follow the same rule, with the absent object (`undefined`) as the
+  marker of a non-numeric result. `Sum` and `Product` of such an operand
+  answered `undefined` and now answer `NaN`. The rule applies on the JavaScript
+  target only; the Python and shader targets keep their decline.
 - **`Sum` of a list of points, or of a list of lists, compiled to a complex
   `NaN`.** `Sum(pts)` with `pts: list<tuple<real, real>>` folded each point as a
   number and answered `{ re: NaN, im: NaN }`, where the interpreter answers the
@@ -392,9 +458,9 @@
   `Reduce(At(x, 7), Add, 0)`, `Any(At(x, 7), p)` and `Scan(At(x, 7), f)`, with
   `x` a list of lists that has no seventh row, stayed unevaluated, where
   `Length(At(x, 7))` is `NaN`; `Map(f, At(x, 1))`, `Sum(Map(f, At(x, 1)))` and
-  `Product(xs{c})` stayed unevaluated for a present row as well. They now
-  answer the marker of their codomain (`Missing`, `NaN`) for an absent operand
-  and compute over the present collection. `Reduce(At(t, 1), f, 0)` and
+  `Product(xs{c})` stayed unevaluated for a present row as well. They now answer
+  the marker of their codomain (`Missing`, `NaN`) for an absent operand and
+  compute over the present collection. `Reduce(At(t, 1), f, 0)` and
   `Length(Filter(At(t, 1), p))` with `t` a tuple of lists also evaluate now.
   Under `evaluate({ materialization: true })`, a view over such an operand was
   materialized as a `Set` built from the walk of the unevaluated view
@@ -19954,13 +20020,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-                  a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-                  $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-                  $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-                  symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-                  it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-                  returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-                  complex eigenvalues are now returned as complex numbers.
+                    a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+                    $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+                    $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+                    symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+                    it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+                    returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+                    complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

@@ -13,7 +13,11 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { zeta as zetaReal } from '../../src/compute-engine/numerics/special-functions';
 import { Complex } from 'complex-esm';
-import { hurwitzZetaComplex } from '../../src/compute-engine/numerics/numeric-complex';
+import {
+  hurwitzZetaComplex,
+  hurwitzZetaComplexWithError,
+  zetaGeneralizedComplexWithError,
+} from '../../src/compute-engine/numerics/numeric-complex';
 import {
   bernoulliRational,
   zetaEvenCoefficient,
@@ -21,6 +25,12 @@ import {
 } from '../../src/compute-engine/numerics/bernoulli';
 
 const ce = new ComputeEngine();
+
+// Timing is load-dependent (12 jest workers share the machine), so the
+// time limits are checked only in a `CE_PERF=1` run (`npm run test:perf`).
+// The default run checks the answer or the decline: the old code ran for
+// seconds or minutes, past the jest timeout of the test.
+const PERF = process.env.CE_PERF === '1';
 
 function zeta(s: number) {
   return ce.expr(['Zeta', s]).evaluate();
@@ -713,7 +723,7 @@ describe('Two-operand Zeta at edge operands', () => {
     // ζ(2, 2000) ≈ 1/1999.5, and must not build a 2000-term symbolic sum.
     const t0 = Date.now();
     const w = ce.expr(['Zeta', 2, 2000]).N();
-    expect(Date.now() - t0).toBeLessThan(200);
+    if (PERF) expect(Date.now() - t0).toBeLessThan(200);
     expect(w.re).toBeCloseTo(0.0005001250208333, 13);
     // The exact route stays symbolic past 20 terms.
     expect(ce.expr(['Zeta', 2, 25]).evaluate().operator).toBe('Zeta');
@@ -1028,5 +1038,194 @@ describe('Machine-precision HurwitzZeta for a real a left of the critical strip'
     expect(
       relErr(z, 0.0051691933507619109354, -0.0033016657734743167424)
     ).toBeLessThan(2e-15);
+  });
+});
+
+describe('HurwitzZeta at a complex order with a large imaginary part', () => {
+  // A power w^(−s) has the modulus |w|^(−Re s)·e^(Im s·arg w). With a large
+  // |Im s|, the terms of the kernel's routes were much larger than the value
+  // (up to about e^(|Im s|·π/2) in Hermite's integral at a small base
+  // point), and the result lost digits, or all of them. The kernel now
+  // chooses the route and the base point by the size of their terms. Each
+  // reference is mpmath at 40 digits; the comment gives the relative error
+  // before the change.
+  test.each([
+    // mpmath: zeta(mpc('-0.93','28.85'), '0.1334')
+    //   = -10.482272320167377 - 5.5459737349648873j (was 4.6e+8 off)
+    [-0.93, 28.85, 0.1334, 0, -10.482272320167377, -5.5459737349648873, 1e-14],
+    // mpmath: zeta(mpc('-0.76','8.33'), '0.067')
+    //   = 1.4969924804763189 - 0.066410360940659531j (was 2.4e-11 off)
+    [-0.76, 8.33, 0.067, 0, 1.4969924804763189, -0.066410360940659531, 1e-14],
+    // mpmath: zeta(mpc('0.17','6.9'), '0.016')
+    //   = -0.94147445326456275 - 0.16203090246493993j (was 1.3e-11 off)
+    [0.17, 6.9, 0.016, 0, -0.94147445326456275, -0.16203090246493993, 1e-14],
+    // mpmath: zeta(mpc('-5.7','-29.8'), '5.03')
+    //   = -12925.875141277155 + 7019.9658488894265j (was 1.7e+3 off)
+    [-5.7, -29.8, 5.03, 0, -12925.875141277155, 7019.9658488894265, 1e-14],
+    // mpmath: zeta(mpc('0.54','12.9'), mpc('0.12','-3.55'))
+    //   = -1.398892661921259e-10 - 9.9672977305178443e-11j (was 1.1e-6 off)
+    [
+      0.54, 12.9, 0.12, -3.55, -1.398892661921259e-10, -9.9672977305178443e-11,
+      1e-12,
+    ],
+    // mpmath: zeta(mpc('1.83','-23.4'), mpc('0.04','4.66'))
+    //   = 2.9111883161193008e-14 + 1.6454120785878907e-14j (was 3.0e-5 off)
+    [
+      1.83, -23.4, 0.04, 4.66, 2.9111883161193008e-14, 1.6454120785878907e-14,
+      1e-12,
+    ],
+    // mpmath: zeta(mpc('-2.4','28'), mpc('40','3.9'))
+    //   = -112930.43293920609 + 106594.24997242139j (was 5.9e-3 off)
+    [-2.4, 28, 40, 3.9, -112930.43293920609, 106594.24997242139, 1e-14],
+    // mpmath: zeta(mpc('0.32','26.2'), mpc('-9.8','-0.41'))
+    //   = 0.064546075073258998 + 0.072218860217818693j (was 4.3e+3 off)
+    [
+      0.32, 26.2, -9.8, -0.41, 0.064546075073258998, 0.072218860217818693,
+      1e-14,
+    ],
+  ])(
+    'hurwitzZetaComplex(%p + %pi, %p + %pi)',
+    (sRe, sIm, aRe, aIm, re, im, bound) => {
+      const z = hurwitzZetaComplex(
+        new Complex(sRe, sIm),
+        new Complex(aRe, aIm)
+      );
+      expect(relErr(z, re, im)).toBeLessThan(bound);
+    }
+  );
+});
+
+describe('HurwitzZeta declines rather than returning wrong digits', () => {
+  // The kernel estimates its rounding error from the terms it sums. When
+  // the estimate is above 1e−12 of the value even with the powers formed in
+  // double-double, or when every route would take too long, it declines,
+  // and the expression stays symbolic.
+  test('a value much smaller than every term stays symbolic', () => {
+    // mpmath: zeta(mpc(-0.22, 12.28), mpc(-6.93, -4.78))
+    //   = -1.98655…e-14 - 1.45171…e-13j, while the terms that sum to it are
+    //   about 1e-7: the double kernel was off by about 1e-9 relative.
+    const s = new Complex(-0.22, 12.28);
+    const a = new Complex(-6.93, -4.78);
+    expect(hurwitzZetaComplexWithError(s, a)).toBeUndefined();
+    expect(hurwitzZetaComplex(s, a).isNaN()).toBe(true);
+    const z = ce
+      .box([
+        'HurwitzZeta',
+        ['Complex', -0.22, 12.28],
+        ['Complex', -6.93, -4.78],
+      ])
+      .N();
+    expect(z.operator).toBe('HurwitzZeta');
+  });
+
+  test('a value the double-double powers recover is answered', () => {
+    // mpmath: zeta(mpc(0.26, 18.16), mpc(0.0065, -4.513))
+    //   = 5.8578692545746872804e-13 - 2.2172937502747674893e-13j
+    // In doubles the powers are only accurate to about |s·ln w|·ε, and the
+    // value was 3.6e-12 off; with the powers in double-double it is within
+    // about 1e-13.
+    const r = hurwitzZetaComplexWithError(
+      new Complex(0.26, 18.16),
+      new Complex(0.0065, -4.513)
+    );
+    expect(r).toBeDefined();
+    const err = relErr(
+      r!.value,
+      5.8578692545746872804e-13,
+      -2.2172937502747674893e-13
+    );
+    expect(err).toBeLessThan(1e-12);
+    expect(err).toBeLessThanOrEqual(r!.error / r!.value.abs());
+  });
+
+  test('Zeta(s, a) answers next to a zero where HurwitzZeta(s, a) does', () => {
+    // s is the double nearest to the first nontrivial zero of ζ, so the
+    // value is small next to its terms, and the Hurwitz kernel accepts it
+    // through its condition allowance. With Re(a) ≥ 0 there are no terms
+    // left of the imaginary axis, and the generalized zeta must give the
+    // same value (it declined: its estimate was checked again without the
+    // allowance).
+    // mpmath: zeta(mpc(0.5, 14.134725141734694))
+    //   = -1.0483650805588237e-16 + 6.5852592776051578e-16j
+    const s = new Complex(0.5, 14.134725141734694);
+    const h = hurwitzZetaComplexWithError(s, new Complex(1, 0));
+    expect(h).toBeDefined();
+    for (const a of [1, 0]) {
+      const z = zetaGeneralizedComplexWithError(s, new Complex(a, 0));
+      expect(z).toBeDefined();
+      expect(z!.value.re).toBe(h!.value.re);
+      expect(z!.value.im).toBe(h!.value.im);
+      const err = Math.hypot(
+        z!.value.re + 1.0483650805588237e-16,
+        z!.value.im - 6.5852592776051578e-16
+      );
+      expect(err).toBeLessThanOrEqual(z!.error);
+    }
+  });
+
+  test('a NaN operand still gives NaN', () => {
+    expect(ce.box(['HurwitzZeta', 'NaN', 2]).N().isNaN).toBe(true);
+    expect(ce.box(['HurwitzZeta', 2, 'NaN']).N().isNaN).toBe(true);
+    expect(ce.box(['Zeta', 2, 'NaN']).N().isNaN).toBe(true);
+    const r = hurwitzZetaComplexWithError(
+      new Complex(NaN, 0),
+      new Complex(2, 0)
+    );
+    expect(r?.value.isNaN()).toBe(true);
+  });
+
+  test.each([
+    // mpmath: zeta(2, mpc(0, 1e9)) = -5.0e-19 - 9.9999999999999999983e-10j
+    [2, 0, 0, 1e9, -5.0e-19, -9.9999999999999999983e-10],
+    // mpmath: zeta(mpc(0.7, 1000), 0.3)
+    //   = -0.27937899228169315784 - 0.86566654248732822318j
+    [0.7, 1000, 0.3, 0, -0.27937899228169315784, -0.86566654248732822318],
+  ])(
+    'hurwitzZetaComplex(%p + %pi, %p + %pi) is quick and accurate',
+    (sRe, sIm, aRe, aIm, re, im) => {
+      const start = Date.now();
+      const z = hurwitzZetaComplex(
+        new Complex(sRe, sIm),
+        new Complex(aRe, aIm)
+      );
+      if (PERF) expect(Date.now() - start).toBeLessThan(500);
+      expect(relErr(z, re, im)).toBeLessThan(1e-12);
+    }
+  );
+
+  test.each([
+    // The Euler-Maclaurin sum would have 1e7 terms (it took 1.9 s), and no
+    // base point of Hermite's integral within reach is far enough right.
+    [['Complex', 0.7, 1e7], 0.3],
+    [['Complex', 0.3, 1e5], 0.3],
+    // 1e12 terms from a to the right half-plane.
+    [2, ['Complex', -1e12, 1]],
+  ])('HurwitzZeta(%j, %j) stays symbolic, quickly', (s, a) => {
+    const start = Date.now();
+    const z = ce.box(['HurwitzZeta', s, a] as any).N();
+    if (PERF) expect(Date.now() - start).toBeLessThan(500);
+    expect(z.operator).toBe('HurwitzZeta');
+  });
+
+  test('a huge real order ends after the terms that matter', () => {
+    // It ran for 77 s, adding about 1e9 terms after the first one.
+    const start = Date.now();
+    const z = hurwitzZetaComplex(new Complex(1e9, 0), new Complex(0.5, 0));
+    if (PERF) expect(Date.now() - start).toBeLessThan(500);
+    expect(z.re).toBe(Infinity);
+    // mpmath: zeta(40, 0.5) = 1099511627776.0000000000909…
+    expect(hurwitzZetaComplex(new Complex(40, 0), new Complex(0.5, 0)).re).toBe(
+      1099511627776
+    );
+  });
+
+  test('the compiled HurwitzZeta reads a decline as NaN', () => {
+    ce.declare('hd_s', 'real');
+    ce.declare('hd_a', 'real');
+    const run = compile(ce.box(['HurwitzZeta', 'hd_s', 'hd_a']))?.run;
+    // A real a below −2^20: every route declines.
+    expect(run?.({ hd_s: 2, hd_a: -1e7 - 0.5 })).toBeNaN();
+    // mpmath: zeta(3, 0.25) = 64.663869968768460167
+    expect(run?.({ hd_s: 3, hd_a: 0.25 })).toBeCloseTo(64.66386996876846, 9);
   });
 });

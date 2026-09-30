@@ -8786,11 +8786,17 @@ fn _gpu_gammaln(z: f32) -> f32 {
  *   the sign (−1)^e, and a negative x with a non-integer e (a complex
  *   value) answers NaN.
  * - `_gpu_hurwitz_zeta_em` is the raw Euler-Maclaurin sum; `_gpu_zeta` and
- *   `_gpu_hurwitz_zeta` add the functional-equation / Taylor-shift dispatch
- *   that avoids its cancellation at s < 0.
- * - `_gpu_zeta` reflects only for s < 0 and returns NaN below s = −24.5:
- *   the f32 `_gpu_gamma(1 − s)` overflows to infinity once 1 − s reaches
- *   about 26 (its Lanczos power term passes the f32 maximum 3.4e38).
+ *   `_gpu_hurwitz_zeta` add the functional-equation / base-point dispatch
+ *   that avoids its cancellation at s < 1/2.
+ * - `_gpu_zeta` reflects only for s < 0 and returns NaN below s = −24.5,
+ *   where the Lanczos `_gpu_gamma(1 − s)` used to overflow. The reflection
+ *   takes 2^s π^(s−1) Γ(1 − s) = 2 Γ(1 − s)/(2π)^(1−s) from the Lanczos
+ *   `_gpu_gamma` for 1 − s < 8, and from Stirling's series
+ *   (`_gpu_zeta_gamma_2pi`) from 1 − s = 8 on: the pow arguments of the
+ *   Lanczos form grow to about 126 at s = −24, and in an f32 model whose
+ *   log2 is 2.5 ulp off (a worse GPU than the one measured) ζ(s) was up to
+ *   3.3e−5 off near s = −22; with Stirling's series that model is within
+ *   4.7e−6 for s <= −7.
  * - `_gpu_riemann_zeta(s, sm1)` is ζ(s) with sm1 = s − 1 given by the
  *   caller. The reflection needs ζ(1 − s) next to its pole when s is near
  *   0, and the rounded 1 − s leaves the pole term a relative error of about
@@ -8807,13 +8813,47 @@ fn _gpu_gammaln(z: f32) -> f32 {
  *   s = 0) and 2.4e−6 elsewhere.
  * - `_gpu_hurwitz_zeta(s, a)` is the pole (+∞) at s = 1 and at a
  *   non-positive integer a with s > 0, 1/2 − a at s = 0, and NaN at a < 0
- *   with a non-integer s, where the true value is complex.
+ *   with a non-integer s, where the true value is complex. For a > 0 it
+ *   uses the Euler-Maclaurin sum only where its terms do not cancel: for
+ *   s >= 1, for 1/2 <= s < 1 with a >= 1, and for s < 1/2 with
+ *   a >= 4·max(12, ⌈|s|⌉ + 6) (as `hurwitzZetaComplex` does). Elsewhere
+ *   (`_gpu_zeta_shifted`, for s >= −24.5) it moves a to the base point
+ *   b = a − ⌈a⌉ + 1 in (0, 1], subtracts the terms (b + j)^(−s) passed
+ *   over, and takes ζ(s, b) from Hurwitz's formula, the Fourier series in
+ *   b, for s <= −3 (`_gpu_zeta_fourier`, 64 terms that fall like k^(s−1)),
+ *   from Hermite's integral for −3 < s < 1 (`_gpu_zeta_hermite`), or, for
+ *   b < 2^−10, from b^(−s) + ζ(s, 1 + b) with the Taylor series in b. The
+ *   Euler-Maclaurin sum had cancelled there: ζ(1/2, 0.3) = 0.011 was
+ *   2.3e−5 off on the GPU, ζ(−23, 1/4) = −2.2e−4 answered 0.016, and 795
+ *   (GLSL) and 817 (WGSL) of the 18361 points below were more than 1.5e−5
+ *   off, all without a NaN. Each of the three methods returns an error
+ *   estimate (in units of the f32 rounding error, the rounding of each pow,
+ *   exp, log and sine argument, and the cancellation between the terms),
+ *   and `_gpu_zeta_shifted` answers NaN
+ *   when the estimate exceeds 3e−5 of the value: next to a zero of
+ *   ζ(s, a), where the value is small against the terms. Measured on an
+ *   Apple M5 Max GPU (WebGL2 through ANGLE Metal, and WebGPU; the two agree
+ *   within 5.5e−6) against mpmath at the f32-rounded operands, on 18361
+ *   points (317 values of s from −24.5 to 12: the integers, the
+ *   half-integers, the points 1e−6, 1e−4 and 1e−2 from each integer from
+ *   −24 to 1, and 80 random values; 58 values of a from 0.01 to 30): every
+ *   value that is not NaN is within 1e−5 relative (worst 8.1e−6), and 432
+ *   are NaN, 387 of them where a half-ulp change of s or a alone moves the
+ *   value by more than 1e−5. The f32 model of this text
+ *   (`test/compute-engine/gpu-lerch-f32-model.ts`) gives the same counts
+ *   and the same NaN (worst 6.6e−6); with its log2 2.5 ulp off, 17 values
+ *   with a > 16 and s < −21 are up to 1.7e−5 off (the pow of the
+ *   passed-over terms has an argument near 100).
  * - `_gpu_zeta_generalized(s, a)` is Wolfram's `Zeta[s, a]`: the terms with
  *   k + a < 0 are |k + a|^(−s), the (k + a) = 0 term is dropped, so it is
  *   real for every real s and a and its only pole is s = 1.
  *
  * Both base-point walks cost one term per unit of |a|, so a < −10⁶ answers
- * NaN instead of looping for that long.
+ * NaN instead of looping for that long. For a > 0, `_gpu_zeta_shifted`
+ * costs at most 123 passed-over terms (a < 124) plus 64 Fourier terms, or
+ * at most 17 Hermite panels of 8 nodes (136 nodes, each with an exp, two
+ * logs, an atan and a sine), or the Taylor series of `_gpu_zeta_near_one`
+ * (up to 100 terms, a few for b < 2^−10).
  */
 export const GPU_ZETA_PREAMBLE_GLSL = `
 float _gpu_zeta_pow(float x, float e) {
@@ -8856,6 +8896,30 @@ float _gpu_hurwitz_zeta_em(float s, float a, float sm1) {
   return sum;
 }
 
+// Gamma(x) / (2 pi)^x for x >= 1, as vec2(value, error estimate in units of
+// the f32 rounding error 6e-8). Stirling's series after a shift to y >= 8:
+// (y/(2 pi e))^y sqrt(2 pi/y) e^corr, divided by x (x+1) ... (y-1) and
+// multiplied by (2 pi)^(y-x). Neither Gamma(x) nor (2 pi)^x is formed (they
+// overflow f32 near x = 35 and x = 48), and the largest pow argument is
+// about y log2(y/(2 pi e)), 15 at x = 25.5, where the Lanczos _gpu_gamma
+// calls pow with an argument of about 126.
+vec2 _gpu_zeta_gamma_2pi(float x) {
+  const float PI = 3.14159265358979;
+  float p = 1.0;
+  float y = x;
+  for (int k = 0; k < 8; k++) {
+    if (y >= 8.0) break;
+    p *= y;
+    y += 1.0;
+  }
+  float y2 = y * y;
+  float corr = (1.0 / 12.0 - (1.0 / 360.0 - 1.0 / (1260.0 * y2)) / y2) / y;
+  float base = y / 17.079468445347132; // y / (2 pi e)
+  float v = pow(base, y) * sqrt(2.0 * PI / y) * (exp(corr) / p) *
+    pow(2.0 * PI, y - x);
+  return vec2(v, abs(v) * (12.0 + abs(y * log2(base)) + y));
+}
+
 // zeta(s), with sm1 = s - 1 passed by a caller that knows it more exactly
 // than s - 1.0 can recover it from a rounded s.
 float _gpu_riemann_zeta(float s, float sm1) {
@@ -8873,6 +8937,12 @@ float _gpu_riemann_zeta(float s, float sm1) {
     if (mod(n, 2.0) != 0.0) sinHalfPiS = -sinHalfPiS;
     // 1 - s is rounded, but its distance to the pole, -s, is exact.
     float oneMinusS = 1.0 - s;
+    // 2^s pi^(s-1) Gamma(1-s) = 2 Gamma(1-s)/(2 pi)^(1-s). From 1 - s = 8
+    // on, from Stirling's series: with the Lanczos Gamma, zeta(s) was up to
+    // 3.3e-5 off near s = -22 in an f32 model whose log2 is 2.5 ulp off.
+    if (oneMinusS >= 8.0)
+      return 2.0 * _gpu_zeta_gamma_2pi(oneMinusS).x * sinHalfPiS *
+        _gpu_hurwitz_zeta_em(oneMinusS, 1.0, -s);
     return pow(2.0, s) * pow(PI, s - 1.0) * sinHalfPiS *
       _gpu_gamma(oneMinusS) * _gpu_hurwitz_zeta_em(oneMinusS, 1.0, -s);
   }
@@ -8912,6 +8982,155 @@ float _gpu_zeta_near_one(float s, float h) {
   return sum;
 }
 
+// 1 - e^(-y) for y >= 0, without the cancellation of 1.0 - exp(-y) at a
+// small y (a Taylor polynomial below y = 0.25).
+float _gpu_zeta_em1(float y) {
+  if (y < 0.25) {
+    float r = 1.0 - y / 7.0;
+    r = 1.0 - y / 6.0 * r;
+    r = 1.0 - y / 5.0 * r;
+    r = 1.0 - y / 4.0 * r;
+    r = 1.0 - y / 3.0 * r;
+    r = 1.0 - y / 2.0 * r;
+    return y * r;
+  }
+  return 1.0 - exp(-y);
+}
+
+// zeta(s, b) for 0 < b <= 1 and s < 1 by Hermite's integral (DLMF
+// 25.11.29): b^(-s)/2 + b^(1-s)/(s-1) plus
+// 2 int_0^inf sin(s atan(t/b)) (b^2 + t^2)^(-s/2) / (e^(2 pi t) - 1) dt.
+// The two closed terms are one product, b^(-s) (s - 1 + 2b) / (2 (s - 1)):
+// 2b - 1 is exact for b >= 1/4, so the factor s + (2b - 1) has a single
+// rounding, relative to itself, where the two terms cancel (at s = 1/2,
+// b = 0.3 they are 0.91 and -1.10 and the value is 0.011). The integrand is formed
+// in one exp, so that a large -s does not overflow before e^(-2 pi t)
+// applies. 8-point Gauss-Legendre panels, b/2 wide from t = 0 and doubling
+// up to 1 wide (the integrand varies on the scale b next to t = 0, and has
+// poles at t = +-i), until the panel mean is below 1e-9 of the largest one
+// past the peak of the envelope at t = -s/(2 pi). Returns vec2(value, error
+// estimate in units of the f32 rounding error 6e-8): the rounding of the
+// closed product and, for each node, of its exp argument, of the log of
+// b^2 + t^2 (times s/2), and of the sine argument s atan(t/b). vec2(0,
+// 3e38) when 40 panels do not reach the stopping test (b >= 2^-10 takes
+// at most 17 on s from -3 to 1).
+vec2 _gpu_zeta_hermite(float s, float b) {
+  const float PI = 3.14159265358979;
+  const float gx[4] = float[4](0.1834346424956498, 0.5255324099163290,
+    0.7966664774136267, 0.9602898564975363);
+  const float gw[4] = float[4](0.3626837833783620, 0.3137066458778873,
+    0.2223810344533745, 0.1012285362903763);
+  float k = pow(b, -s) / (2.0 * (s - 1.0));
+  // max() keeps a fast-math compiler from reassociating the sum into
+  // (s + 2b) - 1, which loses s next to s = 0 (6.7% off at s = -1e-6,
+  // b = 1/2 on an Apple GPU, where 2b - 1 = 0).
+  float c = s + max(2.0 * b - 1.0, -1.0);
+  float closed = k * c;
+  float err = abs(k) * (abs(c) + (b < 0.25 ? 1.0 : 0.0)) +
+    abs(closed) * (4.0 + abs(s * log2(b)));
+  float b2 = b * b;
+  float tPeak = max(0.0, -s / (2.0 * PI));
+  float sum = 0.0;
+  float largest = 0.0;
+  float x = 0.0;
+  bool done = false;
+  for (int p = 0; p < 40; p++) {
+    float w = x == 0.0 ? 0.5 * b : min(x, 1.0);
+    float cc = x + 0.5 * w;
+    float r = 0.5 * w;
+    float size = 0.0;
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < 2; j++) {
+        float t = cc + (j == 0 ? -r : r) * gx[i];
+        float y = 2.0 * PI * t;
+        float lr = log(b2 + t * t);
+        float ex = -0.5 * s * lr - y - log(_gpu_zeta_em1(y));
+        float th = s * atan(t / b);
+        float q = r * gw[i] * exp(ex);
+        float f = q * sin(th);
+        sum += f;
+        size += abs(f);
+        err += 2.0 * (abs(f) * (6.0 + abs(ex) + 0.5 * abs(s) * (2.0 + abs(lr))) +
+          q * abs(th));
+      }
+    }
+    x += w;
+    float mean = size / w;
+    largest = max(largest, mean);
+    if (x > tPeak && x >= 1.0 && mean <= 1e-9 * largest) {
+      done = true;
+      break;
+    }
+  }
+  if (!done) return vec2(0.0, 3.0e38);
+  float v = closed + 2.0 * sum;
+  return vec2(v, err + 2.0 * abs(v));
+}
+
+// zeta(s, b) for s <= -3 and 0 < b <= 1 by Hurwitz's formula, the Fourier
+// series in the base point:
+// 2 Gamma(1-s)/(2 pi)^(1-s) sum_k sin(2 pi k b + pi s/2) / k^(1-s). Its
+// terms fall like k^(s-1) and do not cancel; 64 of them leave a tail below
+// 64^s/(-s) of the prefactor, 1.3e-6 at s = -3. The sine argument is
+// reduced exactly: pi (2 frac(k b) + (s/2 mod 2)), minus its nearest
+// integer n, with the sign (-1)^n. Returns vec2(value, error estimate in
+// units of 6e-8): the pow roundings, the rounding of the argument (about
+// 20 k units of each term's size), the tail and the prefactor.
+vec2 _gpu_zeta_fourier(float s, float b) {
+  const float PI = 3.14159265358979;
+  vec2 g = _gpu_zeta_gamma_2pi(1.0 - s);
+  float hs = s / 2.0;
+  float ps = hs - 2.0 * floor(hs / 2.0);
+  float sum = 0.0;
+  float err = 0.0;
+  for (int k = 1; k <= 64; k++) {
+    float fk = float(k);
+    float kb = fk * b;
+    float ph = 2.0 * (kb - floor(kb)) + ps;
+    float n = floor(ph + 0.5);
+    float sn = sin(PI * (ph - n));
+    if (mod(n, 2.0) != 0.0) sn = -sn;
+    float pk = pow(fk, s - 1.0);
+    float t = sn * pk;
+    sum += t;
+    err += abs(t) * (4.0 + abs((s - 1.0) * log2(fk))) + pk * (fk * 20.0);
+  }
+  float tail = pow(64.0, s) / (-s);
+  return vec2(2.0 * g.x * sum,
+    2.0 * g.x * (err + tail / 6.0e-8 + 2.0 * abs(sum)) + 2.0 * g.y * abs(sum));
+}
+
+// zeta(s, a) for a > 0 and -24.5 <= s < 1 from the base point b = a - m in
+// (0, 1]: zeta(s, a) = zeta(s, b) - sum_{j<m} (b + j)^(-s). zeta(s, b) is
+// the Fourier series for s <= -3, the Taylor series in b for b < 2^-10
+// (zeta(s, b) = b^(-s) + zeta(s, 1 + b), where Hermite's integral would
+// need more panels), and Hermite's integral otherwise. NaN when the error
+// estimate exceeds 3e-5 of the value (next to a zero of zeta(s, a)).
+float _gpu_zeta_shifted(float s, float a) {
+  float m = ceil(a) - 1.0;
+  float b = a - m;
+  vec2 r;
+  if (s <= -3.0) r = _gpu_zeta_fourier(s, b);
+  else if (b < 0.0009765625) {
+    float t = pow(b, -s);
+    float zn = _gpu_zeta_near_one(s, b);
+    r = vec2(zn + t, 64.0 * abs(zn) + abs(t) * (3.0 + abs(s * log2(b))));
+  } else r = _gpu_zeta_hermite(s, b);
+  float z = r.x;
+  float err = r.y;
+  // m <= 123: the caller keeps a below 4 * edge <= 124.
+  for (int j = 0; j < 128; j++) {
+    if (float(j) >= m) break;
+    float br = b + float(j);
+    float t = pow(br, -s);
+    z -= t;
+    err += abs(t) * (3.0 + float(j) + abs(s * log2(br)));
+  }
+  err += abs(z) * (m + 2.0);
+  if (!(6.0e-8 * err <= 3.0e-5 * abs(z))) return _gpu_nan();
+  return z;
+}
+
 float _gpu_hurwitz_zeta(float s, float a) {
   if (s == 1.0) return _gpu_inf(); // pole, every base point a
   if (s == 0.0) return 0.5 - a;
@@ -8921,6 +9140,10 @@ float _gpu_hurwitz_zeta(float s, float a) {
   if (a < 0.0 && s != floor(s)) return _gpu_nan(); // complex value
   if (a < -1.0e6) return _gpu_nan();
   float edge = max(12.0, ceil(abs(s)) + 6.0);
+  // Where the Euler-Maclaurin terms cancel: s < 1/2 short of a = 4 * edge,
+  // and 1/2 <= s < 1 below a = 1 (the zeros of zeta(s, a) there).
+  if (a > 0.0 && s >= -24.5 && s < 1.0 && (s < 0.5 ? a < 4.0 * edge : a < 1.0))
+    return _gpu_zeta_shifted(s, a);
   if (s >= 0.0 || a >= 4.0 * edge) return _gpu_hurwitz_zeta_em(s, a, s - 1.0);
   // Shift a to 1+h (|h| <= 3/4) and expand in Taylor series — see
   // hurwitzZetaComplex's doc comment for why EM alone cancels here.
@@ -8998,6 +9221,25 @@ fn _gpu_hurwitz_zeta_em(s: f32, a: f32, sm1: f32) -> f32 {
   return sum;
 }
 
+// Gamma(x) / (2 pi)^x for x >= 1, with an error estimate, from Stirling's
+// series — see GLSL's _gpu_zeta_gamma_2pi.
+fn _gpu_zeta_gamma_2pi(x: f32) -> vec2<f32> {
+  let PI = 3.14159265358979;
+  var p: f32 = 1.0;
+  var y: f32 = x;
+  for (var k: i32 = 0; k < 8; k = k + 1) {
+    if (y >= 8.0) { break; }
+    p = p * y;
+    y = y + 1.0;
+  }
+  let y2 = y * y;
+  let corr = (1.0 / 12.0 - (1.0 / 360.0 - 1.0 / (1260.0 * y2)) / y2) / y;
+  let base = y / 17.079468445347132; // y / (2 pi e)
+  let v = pow(base, y) * sqrt(2.0 * PI / y) * (exp(corr) / p) *
+    pow(2.0 * PI, y - x);
+  return vec2<f32>(v, abs(v) * (12.0 + abs(y * log2(base)) + y));
+}
+
 // zeta(s), with sm1 = s - 1 — see GLSL's _gpu_riemann_zeta.
 fn _gpu_riemann_zeta(s: f32, sm1: f32) -> f32 {
   let PI = 3.14159265358979;
@@ -9013,6 +9255,11 @@ fn _gpu_riemann_zeta(s: f32, sm1: f32) -> f32 {
     if ((n % 2.0) != 0.0) { sinHalfPiS = -sinHalfPiS; }
     // 1 - s is rounded, but its distance to the pole, -s, is exact.
     let oneMinusS = 1.0 - s;
+    // 2 Gamma(1-s)/(2 pi)^(1-s) from Stirling's series from 1 - s = 8 on.
+    if (oneMinusS >= 8.0) {
+      return 2.0 * _gpu_zeta_gamma_2pi(oneMinusS).x * sinHalfPiS *
+        _gpu_hurwitz_zeta_em(oneMinusS, 1.0, -s);
+    }
     return pow(2.0, s) * pow(PI, s - 1.0) * sinHalfPiS *
       _gpu_gamma(oneMinusS) * _gpu_hurwitz_zeta_em(oneMinusS, 1.0, -s);
   }
@@ -9049,6 +9296,133 @@ fn _gpu_zeta_near_one(s: f32, h: f32) -> f32 {
   return sum;
 }
 
+// 1 - e^(-y) for y >= 0 — see GLSL's _gpu_zeta_em1.
+fn _gpu_zeta_em1(y: f32) -> f32 {
+  if (y < 0.25) {
+    var r = 1.0 - y / 7.0;
+    r = 1.0 - y / 6.0 * r;
+    r = 1.0 - y / 5.0 * r;
+    r = 1.0 - y / 4.0 * r;
+    r = 1.0 - y / 3.0 * r;
+    r = 1.0 - y / 2.0 * r;
+    return y * r;
+  }
+  return 1.0 - exp(-y);
+}
+
+// zeta(s, b) for 0 < b <= 1 and s < 1 by Hermite's integral, as
+// vec2(value, error estimate) — see GLSL's _gpu_zeta_hermite.
+fn _gpu_zeta_hermite(s: f32, b: f32) -> vec2<f32> {
+  let PI = 3.14159265358979;
+  let gx = array<f32, 4>(0.1834346424956498, 0.5255324099163290,
+    0.7966664774136267, 0.9602898564975363);
+  let gw = array<f32, 4>(0.3626837833783620, 0.3137066458778873,
+    0.2223810344533745, 0.1012285362903763);
+  let k = pow(b, -s) / (2.0 * (s - 1.0));
+  // max() blocks a fast-math reassociation — see the GLSL version.
+  let c = s + max(2.0 * b - 1.0, -1.0);
+  let closed = k * c;
+  var lowB: f32 = 0.0;
+  if (b < 0.25) { lowB = 1.0; }
+  var err = abs(k) * (abs(c) + lowB) + abs(closed) * (4.0 + abs(s * log2(b)));
+  let b2 = b * b;
+  let tPeak = max(0.0, -s / (2.0 * PI));
+  var sum: f32 = 0.0;
+  var largest: f32 = 0.0;
+  var x: f32 = 0.0;
+  var done = false;
+  for (var p: i32 = 0; p < 40; p = p + 1) {
+    var w: f32 = min(x, 1.0);
+    if (x == 0.0) { w = 0.5 * b; }
+    let cc = x + 0.5 * w;
+    let r = 0.5 * w;
+    var size: f32 = 0.0;
+    for (var i: i32 = 0; i < 4; i = i + 1) {
+      for (var j: i32 = 0; j < 2; j = j + 1) {
+        var d = r;
+        if (j == 0) { d = -r; }
+        let t = cc + d * gx[i];
+        let y = 2.0 * PI * t;
+        let lr = log(b2 + t * t);
+        let ex = -0.5 * s * lr - y - log(_gpu_zeta_em1(y));
+        let th = s * atan(t / b);
+        let q = r * gw[i] * exp(ex);
+        let f = q * sin(th);
+        sum = sum + f;
+        size = size + abs(f);
+        err = err + 2.0 * (abs(f) * (6.0 + abs(ex) + 0.5 * abs(s) * (2.0 + abs(lr))) +
+          q * abs(th));
+      }
+    }
+    x = x + w;
+    let mean = size / w;
+    largest = max(largest, mean);
+    if (x > tPeak && x >= 1.0 && mean <= 1e-9 * largest) {
+      done = true;
+      break;
+    }
+  }
+  if (!done) { return vec2<f32>(0.0, 3.0e38); }
+  let v = closed + 2.0 * sum;
+  return vec2<f32>(v, err + 2.0 * abs(v));
+}
+
+// zeta(s, b) for s <= -3 and 0 < b <= 1 by Hurwitz's formula, as
+// vec2(value, error estimate) — see GLSL's _gpu_zeta_fourier.
+fn _gpu_zeta_fourier(s: f32, b: f32) -> vec2<f32> {
+  let PI = 3.14159265358979;
+  let g = _gpu_zeta_gamma_2pi(1.0 - s);
+  let hs = s / 2.0;
+  let ps = hs - 2.0 * floor(hs / 2.0);
+  var sum: f32 = 0.0;
+  var err: f32 = 0.0;
+  for (var k: i32 = 1; k <= 64; k = k + 1) {
+    let fk = f32(k);
+    let kb = fk * b;
+    let ph = 2.0 * (kb - floor(kb)) + ps;
+    let n = floor(ph + 0.5);
+    var sn = sin(PI * (ph - n));
+    if ((n % 2.0) != 0.0) { sn = -sn; }
+    let pk = pow(fk, s - 1.0);
+    let t = sn * pk;
+    sum = sum + t;
+    err = err + abs(t) * (4.0 + abs((s - 1.0) * log2(fk))) + pk * (fk * 20.0);
+  }
+  let tail = pow(64.0, s) / (-s);
+  return vec2<f32>(2.0 * g.x * sum,
+    2.0 * g.x * (err + tail / 6.0e-8 + 2.0 * abs(sum)) + 2.0 * g.y * abs(sum));
+}
+
+// zeta(s, a) for a > 0 and -24.5 <= s < 1 from the base point b = a - m
+// in (0, 1] — see GLSL's _gpu_zeta_shifted.
+fn _gpu_zeta_shifted(s: f32, a: f32) -> f32 {
+  let m = ceil(a) - 1.0;
+  let b = a - m;
+  var r: vec2<f32>;
+  if (s <= -3.0) {
+    r = _gpu_zeta_fourier(s, b);
+  } else if (b < 0.0009765625) {
+    let t = pow(b, -s);
+    let zn = _gpu_zeta_near_one(s, b);
+    r = vec2<f32>(zn + t, 64.0 * abs(zn) + abs(t) * (3.0 + abs(s * log2(b))));
+  } else {
+    r = _gpu_zeta_hermite(s, b);
+  }
+  var z = r.x;
+  var err = r.y;
+  // m <= 123: the caller keeps a below 4 * edge <= 124.
+  for (var j: i32 = 0; j < 128; j = j + 1) {
+    if (f32(j) >= m) { break; }
+    let br = b + f32(j);
+    let t = pow(br, -s);
+    z = z - t;
+    err = err + abs(t) * (3.0 + f32(j) + abs(s * log2(br)));
+  }
+  err = err + abs(z) * (m + 2.0);
+  if (!(6.0e-8 * err <= 3.0e-5 * abs(z))) { return _gpu_nan(); }
+  return z;
+}
+
 fn _gpu_hurwitz_zeta(s: f32, a: f32) -> f32 {
   if (s == 1.0) { return _gpu_inf(); } // pole, every base point a
   if (s == 0.0) { return 0.5 - a; }
@@ -9058,6 +9432,10 @@ fn _gpu_hurwitz_zeta(s: f32, a: f32) -> f32 {
   if (a < 0.0 && s != floor(s)) { return _gpu_nan(); } // complex value
   if (a < -1.0e6) { return _gpu_nan(); }
   let edge = max(12.0, ceil(abs(s)) + 6.0);
+  // Where the Euler-Maclaurin terms cancel — see the GLSL version.
+  var shifted = false;
+  if (s < 0.5) { shifted = a < 4.0 * edge; } else { shifted = a < 1.0; }
+  if (a > 0.0 && s >= -24.5 && s < 1.0 && shifted) { return _gpu_zeta_shifted(s, a); }
   if (s >= 0.0 || a >= 4.0 * edge) { return _gpu_hurwitz_zeta_em(s, a, s - 1.0); }
   // Shift a to 1+h (|h| <= 3/4) and expand in Taylor series — see
   // hurwitzZetaComplex's doc comment for why EM alone cancels here.
@@ -9154,9 +9532,31 @@ fn _gpu_zeta_generalized(s: f32, a: f32) -> f32 {
  *   most 16 panels. Its terms cancel as |z| grows.
  * - PolyLog below z = −1 with a negative non-integer order, where those
  *   decline: Jonquière's inversion formula (`_gpu_poly_log_inversion`).
+ * - Last, for z < 0 and −30 <= s <= −3, where every method above declines
+ *   (in `_gpu_lerch_phi` and `_gpu_poly_log`, so that no value they answer
+ *   changes): the sum over the Fourier modes of the base point
+ *   (`_gpu_lerch_modes`, the form of `lerchModesComplex` in
+ *   `numerics/lerch-phi.ts`). With b = a moved into (0, 1] and L = ln|z|,
+ *   Φ(z,s,b) = 2Γ(1−s)e^(−bL) Σ_{m odd} (L² + π²m²)^((s−1)/2)
+ *   cos(π(bm + (s−1)(1/2 + atan(L/(πm))/π))). The terms fall like m^(s−1)
+ *   and do not cancel, where the Hermite form's terms cancel next to and
+ *   below z = −1: Φ(−1, −6.5, 1.3) = 0.10992 was NaN. For PolyLog the
+ *   factor z of Liₛ(z) = z·Φ(z,s,1) goes into the exponent of the scale,
+ *   so that Liₛ(z) does not pass through Φ, which falls below the smallest
+ *   normal f32 before Liₛ(z) does.
  *
- * The integral, rational, Hermite and inversion methods and the series
- * decline when their own error estimate exceeds 3e−5 of the value. The
+ * The integral, rational, Hermite, inversion and mode methods and the
+ * series decline when their own error estimate exceeds 3e−5 of the
+ * value. The inversion and the modes also decline when the value, or a
+ * factor that multiplies it (z^(−m), z^m, the shifted sum), is not a
+ * finite normal f32: a GPU flushes a value below 1.18e−38 to 0, and a
+ * value past 3.4e38 is inf, and the test passed 0 and inf whatever the
+ * estimate. Their estimates count each value that a GPU can flush as a
+ * loss of 1.18e−38, and they test err <= 500·|value| (500 = 3e−5 / 6e−8),
+ * since 6e−8·err and 3e−5·|value| both flush to 0 for a value below about
+ * 4e−34. For PolyLog below z = −1, a Φ(z,s,1) below 3.9e−34 from the
+ * other methods goes to the inversion and the modes for the same reason.
+ * The
  * estimate adds, in units of the f32 rounding error, the error of each exp
  * and pow call (on a GPU it grows with the size of the argument: pow(b, e)
  * is within about 6e−8·(2 + |e·log2 b|) relative) and the cancellation
@@ -9168,10 +9568,12 @@ fn _gpu_zeta_generalized(s: f32, a: f32) -> f32 {
  * to 224 integrand values, each with a Horner sum of n + 1 <= 17 terms;
  * the Hermite form up to 199 continued-fraction steps and 128 integrand
  * values; the inversion 20 terms and an inner series of up to 199 terms (or
- * the integral and Hermite form again). The dispatcher tries at most three
- * of these per call: the worst case, near z = 1 with s < 0, is the 4096
- * series terms, then the integral, then the Hermite form (about 4700
- * iterations plus the Horner sums); below z = −1 at most about 1100.
+ * the integral and Hermite form again); the Fourier modes up to 128 modes
+ * and up to 100 shift terms. The dispatcher tries at most three of these
+ * per call, and the modes after them: the worst case, near z = 1 with
+ * s < 0, is the 4096 series terms, then the integral, then the Hermite form
+ * (about 4700 iterations plus the Horner sums); below z = −1 at most about
+ * 1100, and 230 more for the modes.
  *
  * Accuracy, measured on an Apple M5 Max GPU (WebGL2 through ANGLE Metal, and
  * WebGPU; the two agree within 2.6e−6 relative) against mpmath's lerchphi
@@ -9190,6 +9592,37 @@ fn _gpu_zeta_generalized(s: f32, a: f32) -> f32 {
  * model whose log2 is 2.5 ulp off (a worse GPU than the one measured) puts
  * some values at up to 2.4e−5: the error grows with the size of the pow and
  * exp arguments, |s·log2 a| for a large |s|.
+ *
+ * The Fourier modes, measured the same way on 900 points with z <= −0.3
+ * and s from −16 to −3 (600 of LerchPhi at z = −1, below it with |z| up to
+ * 1e6, and between −1 and −0.3; 300 of PolyLog below z = −1, half with s
+ * within 1 of −12), where the other methods left 234 values NaN: 40 are
+ * NaN now, and every value is within 1.4e−5 (worst 1.38e−5 for PolyLog,
+ * 8.5e−6 for LerchPhi). On 1500 further random points over the whole domain
+ * above (z from −1e6 to 1e3, s from −12 to 12, a from 0.05 to 50 and
+ * negative a with an integer s), 1469 answer instead of 1388, all within
+ * 1.05e−5, and the 1388 values answered before are bit-identical.
+ *
+ * Far below z = −1, on the same GPU against the CPU kernels (which agree
+ * with mpmath at 100 digits within 8e−13 on a sample of 350), on 4000
+ * PolyLog points (z from −1e38 to −1 with a log-uniform size, s from −30
+ * to −3) and 2000 LerchPhi points (the same z and s, a from 0.1 to 10):
+ * 3485 PolyLog values and 960 LerchPhi values answer. Before the
+ * finite-normal tests and the stopping rule of Liₛ(1/z) in the inversion
+ * (see `_gpu_poly_log_inversion`), 3792 and 1141 answered, of which 786
+ * and 170 were more than 1.5e−5 off: 0 for Li_{−24.8}(−1.1e35) = −3.7e−25,
+ * +inf for Φ(−7.6e6, −20.44, 5.78) = 1.02e7, 9.6 times too large for
+ * Li_{−28.97}(−8.7e8). Every value whose true value is a normal f32 is now
+ * within 2.1e−5: 16 PolyLog values (the inversion with s below −20 and |z|
+ * above 1e20, and the modes) and 2 LerchPhi values (the modes) are between
+ * 1.5e−5 and 2.04e−5, where the error estimates are just below 3e−5. 15
+ * LerchPhi values whose true value is below 1.18e−38 come back as 0 or a
+ * wrong subnormal, as above. On 3000 points each over the domain above
+ * (z from −1e6 to 1, s from −12 to 12, a from 0.05 to 50), the LerchPhi
+ * values are bit-identical to those before these changes; 92 PolyLog
+ * values of the modes moved by at most 2e−6 relative (the factor z is now
+ * in the exponent); one LerchPhi and one PolyLog value of the modes, off
+ * by the same amount before, are 1.85e−5 and 1.7e−5 off.
  */
 const LERCH_EULER_TERMS = 64;
 /** The largest n for which the Lerch helpers build the rational function
@@ -9791,9 +10224,140 @@ vec2 _gpu_lerch_core(float z, float s, float a) {
   return s > 0.0 ? _gpu_lerch_integral(z, s, a) : _gpu_lerch_negative(z, s, a);
 }
 
+// Phi(z, s, a) for z < 0, -30 <= s <= -3 and |a| < 100, from the Fourier
+// modes of the base point b = a moved into (0, 1] (the form of
+// lerchModesComplex, numerics/lerch-phi.ts, for a real z < 0):
+//   Phi(z, s, b) = 2 Gamma(1-s) e^(-b L) sum_{m = 1, 3, 5, ...}
+//     (L^2 + pi^2 m^2)^((s-1)/2) cos(pi (b m + (s-1) (1/2 + atan(L/(pi m))/pi))),
+// L = ln|z|: the modes n and 1 - n of the sum over all integers n, paired.
+// The terms fall like m^(s-1) and do not cancel the way the Hermite form's
+// terms do below z = -1. The sum stops when the bound m (pi m)^(s-1)/(2|s|)
+// on the modes left out, taken against the first one, is below 1e-9, and
+// after 128 modes at most (ln|z| near 7 at s = -4). The phase is kept in
+// units of pi and reduced to [-1/2, 1/2] before the cosine; b m and
+// (s-1)/2 are reduced modulo 2 exactly. The modes are summed relative to
+// the first one, and the factor 2 Gamma(1-s) e^(-bL) (L^2 + pi^2)^((s-1)/2)
+// is one exp. a <= 0 adds the terms z^j (a+j)^(-s) before b; a > 1 uses
+// Phi(z,s,a) = z^(-m) (Phi(z,s,b) - sum_{j<m} z^j (b+j)^(-s)). With c = 1
+// (only with a = 1) the value is z Phi(z, s, 1) = Li_s(z): the factor
+// z = -e^L goes into the exponent of the scale, so that Li_s(z) does not
+// pass through Phi, which falls below the smallest normal f32 (1.18e-38)
+// before Li_s(z) does. Returns vec2(value, 1), or vec2(0, 0) when the error
+// estimate (the roundings of the exp and log arguments and of the phase,
+// the modes left out, ln Gamma and the shift, in units of 6e-8) exceeds
+// 3e-5 of the value, when the value is not a finite normal f32, or when
+// z^(-m), the shifted sum or z^m is not: a GPU flushes a value below
+// 1.18e-38 to 0, and a value past 3.4e38 is inf. The test is
+// rerr <= 500 |res| (500 = 3e-5 / 6e-8): EPS rerr and 3e-5 |res| themselves
+// fall below 1.18e-38 when |res| is below about 4e-34.
+vec2 _gpu_lerch_modes(float z, float s, float a, float c) {
+  const float EPS = 6.0e-8;
+  const float FLUSH = 2.0e-31; // 1.18e-38 / EPS
+  const float PI = 3.14159265358979;
+  if (s < -30.0 || abs(a) >= 100.0) return vec2(0.0);
+  float b = a;
+  float pre = 0.0;
+  float post = 0.0;
+  if (a <= 0.0) {
+    pre = floor(-a) + 1.0;
+    b = a + pre;
+  } else if (a > 1.0) {
+    post = ceil(a) - 1.0;
+    b = a - post;
+  }
+  float head = 0.0;
+  float herr = 0.0;
+  float zk = 1.0;
+  for (int j = 0; j < 128; j++) {
+    if (float(j) >= pre) break;
+    float bj = a + float(j);
+    if (bj != 0.0) {
+      float t = zk * _gpu_zeta_pow(bj, -s);
+      head += t;
+      herr += abs(t) * (3.0 + float(j) + abs(s * log2(abs(bj))));
+    }
+    zk *= z;
+  }
+  float L = log(-z);
+  float sm1 = s - 1.0;
+  float hs = 0.5 * sm1;
+  float ps = hs - 2.0 * floor(0.5 * hs); // (s-1)/2 modulo 2
+  float L2 = L * L;
+  float lr1 = log(L2 + PI * PI);
+  float sum = 0.0;
+  float err = 0.0;
+  float tail = 0.0;
+  for (int n = 1; n <= 128; n++) {
+    float m = float(2 * n - 1);
+    float x = PI * m;
+    float lr = log(L2 + x * x);
+    float at = atan(L / x) / PI;
+    float bm = b * m;
+    float P = (bm - 2.0 * floor(0.5 * bm)) + ps + sm1 * at;
+    float k = floor(P + 0.5);
+    float cs = cos(PI * (P - k));
+    if (mod(k, 2.0) != 0.0) cs = -cs;
+    float ex = hs * (lr - lr1);
+    float mag = exp(ex);
+    float t = mag * cs;
+    sum += t;
+    err += abs(t) * (4.0 + abs(ex)) +
+      mag * (abs(hs) * (abs(lr) + abs(lr1)) + PI * (abs(P) + abs(sm1) * abs(at) + b * m));
+    tail = mag * m / (-2.0 * s);
+    if (tail <= 1e-9) break;
+  }
+  float lg = _gpu_lerch_lgamma(1.0 - s);
+  float scale = 2.0 * exp(lg + hs * lr1 - (b - c) * L);
+  float phib = scale * sum;
+  if (!(scale < 3.4e38 && abs(phib) < 3.4e38)) return vec2(0.0);
+  float eb = scale * (err + tail / EPS + 4.0 * abs(sum)) +
+    abs(phib) * (abs(lg) + abs(hs * lr1) + abs((b - c) * L) + 12.0);
+  // A GPU flushes a scale or Phi(z, s, b) below 1.18e-38 to 0: count the
+  // loss (FLUSH = 1.18e-38 in units of EPS) rather than decline, since
+  // next to the terms that a > 1 subtracts it can be negligible.
+  if (scale < 1.18e-38 || abs(phib) < 1.18e-38) eb += FLUSH * (1.0 + abs(sum));
+  if (c > 0.5) phib = -phib; // z = -e^L
+  float res;
+  float rerr;
+  if (post > 0.0) {
+    float acc = phib;
+    float aerr = eb;
+    float zj = 1.0;
+    for (int j = 0; j < 128; j++) {
+      if (float(j) >= post) break;
+      float bj = b + float(j);
+      float t = zj * pow(bj, -s);
+      acc -= t;
+      aerr += abs(t) * (3.0 + float(j) + abs(s * log2(bj)));
+      zj *= z;
+    }
+    float zinv = pow(-z, -post);
+    if (!(zinv >= 1.18e-38 && zinv < 3.4e38 && abs(acc) >= 1.18e-38 && abs(acc) < 3.4e38))
+      return vec2(0.0);
+    float sg = mod(post, 2.0) == 0.0 ? 1.0 : -1.0;
+    res = sg * zinv * acc;
+    rerr = zinv * (aerr + abs(acc) * (post + 2.0)) + abs(res) * abs(post * log2(-z));
+  } else {
+    if (!(abs(zk) >= 1.18e-38 && abs(zk) < 3.4e38)) return vec2(0.0);
+    res = head + zk * phib;
+    rerr = herr + abs(zk) * (eb + abs(phib) * (pre + 2.0));
+  }
+  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) || !(rerr <= 500.0 * abs(res)))
+    return vec2(0.0);
+  return vec2(res, 1.0);
+}
+
+// Where every method of _gpu_lerch_core declines, z < 0 with s <= -3 tries
+// the Fourier modes last, so that the values the other methods answer do
+// not change.
 float _gpu_lerch_phi(float z, float s, float a) {
   vec2 r = _gpu_lerch_core(z, s, a);
-  return r.y > 0.5 ? r.x : _gpu_nan();
+  if (r.y > 0.5) return r.x;
+  if (z < 0.0 && s <= -3.0 && !(a < 0.0 && s != floor(s))) {
+    r = _gpu_lerch_modes(z, s, a, 0.0);
+    if (r.y > 0.5) return r.x;
+  }
+  return _gpu_nan();
 }
 
 // Li_s(z) for z < -1 and a real s < 0 that is not an integer, by
@@ -9804,10 +10368,15 @@ float _gpu_lerch_phi(float z, float s, float a) {
 // tail integral, the half term and up to 8 Bernoulli corrections, in
 // complex f32. 1/Gamma(s) = sin(pi s) Gamma(1 - s) / pi, with sin(pi s)
 // taken from the distance of s to its nearest integer. Returns
-// vec2(value, 1), or vec2(0, 0) when Li_s(1/z) declines or the error
-// estimate exceeds 3e-5 of the value.
+// vec2(value, 1), or vec2(0, 0) when Li_s(1/z) declines, when the value is
+// not a finite normal f32, or when the error estimate exceeds 3e-5 of the
+// value. The estimate counts, for each value that a GPU can flush to 0
+// (below 1.18e-38), the loss of 1.18e-38 (FLUSH, in units of EPS): the
+// terms of zeta(1 - s, A), of which |A|^(s-1) falls below 1.18e-38 near
+// z = -1e38 when s is near -30, and the terms of Li_s(1/z).
 vec2 _gpu_poly_log_inversion(float s, float z) {
   const float EPS = 6.0e-8;
+  const float FLUSH = 2.0e-31; // 1.18e-38 / EPS
   const float PI = 3.14159265358979;
   const float B[8] = float[8](1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0,
     5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0);
@@ -9868,6 +10437,7 @@ vec2 _gpu_poly_log_inversion(float s, float z) {
     ui = c * (ur * iw2i + ui * iw2r);
     ur = nr;
   }
+  zerr += 44.0 * FLUSH; // at most 22 terms in each of zr and zi
   float n = floor(s + 0.5);
   float d = s - n;
   float sgn = mod(n, 2.0) == 0.0 ? 1.0 : -1.0;
@@ -9879,10 +10449,14 @@ vec2 _gpu_poly_log_inversion(float s, float z) {
   float firstErr = abs(fm) * zerr +
     abs(fm) * sqrt(zr * zr + zi * zi) * (30.0 + abs(lg1) + abs(s * 2.7));
   // Li_s(1/z): for |1/z| <= 1/2 its own series sum_k (1/z)^k k^(-s), with
-  // an error estimate, and the stopping rule of _gpu_lerch_series (the
-  // tail after a decreasing term t with ratio rho is below t rho/(1-rho));
-  // closer to the rim _gpu_lerch_negative (the integral, then the Hermite
-  // form) at 1/z.
+  // an error estimate, stopped when the tail after the term t is below
+  // t rho/(1-rho) <= 1e-8 of the sum, rho = |1/z| ((k+1)/k)^(-s): the ratio
+  // of the next term to t, which bounds every later ratio because it
+  // decreases with k for s < 0. (The ratio |1/z| alone does not bound it:
+  // the second term is 2^(-s) |1/z| times the first, 0.6 of it at
+  // z = -8.7e8, s = -29, where the sum stopped after one term and the value
+  // was 9.6 times too large.) Closer to the rim _gpu_lerch_negative (the
+  // integral, then the Hermite form) at 1/z.
   float iz = 1.0 / z;
   float li = 0.0;
   float lierr = 0.0;
@@ -9895,8 +10469,8 @@ vec2 _gpu_poly_log_inversion(float s, float z) {
       float t = wk * pow(float(k), -s);
       li += t;
       float size = abs(t);
-      lierr += size * (2.0 + float(k) + abs(s * log2(float(k))));
-      float rho = max(size / prev, -iz);
+      lierr += size * (2.0 + float(k) + abs(s * log2(float(k)))) + FLUSH;
+      float rho = -iz * pow(float(k + 1) / float(k), -s);
       if (size < prev && rho < 1.0 && size * rho / (1.0 - rho) <= 1e-8 * abs(li)) {
         done = true;
         break;
@@ -9911,8 +10485,11 @@ vec2 _gpu_poly_log_inversion(float s, float z) {
     lierr = 500.0 * abs(li); // the inner value is within 3e-5 = 500 EPS
   }
   float res = first - sgn * cos(PI * d) * li;
-  float bound = EPS * ((firstErr + 4.0 * abs(first)) + (lierr + 2.0 * abs(li)));
-  if (!(bound <= 3.0e-5 * abs(res))) return vec2(0.0);
+  // In units of EPS; the test is bound <= (3e-5 / EPS) |res|, since
+  // EPS bound and 3e-5 |res| fall below 1.18e-38 for a small |res|.
+  float bound = ((firstErr + 4.0 * abs(first)) + (lierr + 2.0 * abs(li))) + 4.0 * FLUSH;
+  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) || !(bound <= 500.0 * abs(res)))
+    return vec2(0.0);
   return vec2(res, 1.0);
 }
 
@@ -9970,11 +10547,21 @@ float _gpu_poly_log(float s, float z) {
     for (int i = 0; i <= n; i++) den *= 1.0 - z;
     return z * p / den;
   }
+  // Below z = -1, Phi(z, s, 1) = Li_s(z)/z falls below the smallest normal
+  // f32 before Li_s(z) does, and the 3e-5 test of the methods behind
+  // _gpu_lerch_core falls below it (a GPU flushes both sides to 0) when
+  // |Phi| < 1.18e-38 / 3e-5 = 3.9e-34: the inversion and the modes (with the
+  // factor z in the exponent) answer there instead.
   vec2 r = _gpu_lerch_core(z, s, 1.0);
-  if (r.y > 0.5) return z * r.x;
+  if (r.y > 0.5 && (z >= -1.0 || (abs(r.x) >= 3.9e-34 && abs(z * r.x) < 3.4e38)))
+    return z * r.x;
   if (z < -1.0 && s < 0.0 && s != floor(s)) {
     vec2 v = _gpu_poly_log_inversion(s, z);
     if (v.y > 0.5) return v.x;
+  }
+  if (z < 0.0 && s <= -3.0) {
+    r = _gpu_lerch_modes(z, s, 1.0, 1.0);
+    if (r.y > 0.5) return r.x;
   }
   return _gpu_nan();
 }
@@ -10519,9 +11106,114 @@ fn _gpu_lerch_core(z: f32, s: f32, a: f32) -> vec2<f32> {
   return _gpu_lerch_negative(z, s, a);
 }
 
+// Phi(z, s, a) for z < 0 and -30 <= s <= -3 from the Fourier modes of the
+// base point: see the GLSL preamble.
+fn _gpu_lerch_modes(z: f32, s: f32, a: f32, c: f32) -> vec2<f32> {
+  let EPS = 6.0e-8;
+  let FLUSH = 2.0e-31; // 1.18e-38 / EPS
+  let PI = 3.14159265358979;
+  if (s < -30.0 || abs(a) >= 100.0) { return vec2<f32>(0.0); }
+  var b = a;
+  var pre: f32 = 0.0;
+  var post: f32 = 0.0;
+  if (a <= 0.0) {
+    pre = floor(-a) + 1.0;
+    b = a + pre;
+  } else if (a > 1.0) {
+    post = ceil(a) - 1.0;
+    b = a - post;
+  }
+  var head: f32 = 0.0;
+  var herr: f32 = 0.0;
+  var zk: f32 = 1.0;
+  for (var j: i32 = 0; j < 128; j = j + 1) {
+    if (f32(j) >= pre) { break; }
+    let bj = a + f32(j);
+    if (bj != 0.0) {
+      let t = zk * _gpu_zeta_pow(bj, -s);
+      head = head + t;
+      herr = herr + abs(t) * (3.0 + f32(j) + abs(s * log2(abs(bj))));
+    }
+    zk = zk * z;
+  }
+  let L = log(-z);
+  let sm1 = s - 1.0;
+  let hs = 0.5 * sm1;
+  let ps = hs - 2.0 * floor(0.5 * hs); // (s-1)/2 modulo 2
+  let L2 = L * L;
+  let lr1 = log(L2 + PI * PI);
+  var sum: f32 = 0.0;
+  var err: f32 = 0.0;
+  var tail: f32 = 0.0;
+  for (var n: i32 = 1; n <= 128; n = n + 1) {
+    let m = f32(2 * n - 1);
+    let x = PI * m;
+    let lr = log(L2 + x * x);
+    let at = atan(L / x) / PI;
+    let bm = b * m;
+    let P = (bm - 2.0 * floor(0.5 * bm)) + ps + sm1 * at;
+    let k = floor(P + 0.5);
+    var cs = cos(PI * (P - k));
+    if ((k % 2.0) != 0.0) { cs = -cs; }
+    let ex = hs * (lr - lr1);
+    let mag = exp(ex);
+    let t = mag * cs;
+    sum = sum + t;
+    err = err + abs(t) * (4.0 + abs(ex)) +
+      mag * (abs(hs) * (abs(lr) + abs(lr1)) + PI * (abs(P) + abs(sm1) * abs(at) + b * m));
+    tail = mag * m / (-2.0 * s);
+    if (tail <= 1e-9) { break; }
+  }
+  let lg = _gpu_lerch_lgamma(1.0 - s);
+  let scale = 2.0 * exp(lg + hs * lr1 - (b - c) * L);
+  var phib = scale * sum;
+  if (!(scale < 3.4e38 && abs(phib) < 3.4e38)) { return vec2<f32>(0.0); }
+  var eb = scale * (err + tail / EPS + 4.0 * abs(sum)) +
+    abs(phib) * (abs(lg) + abs(hs * lr1) + abs((b - c) * L) + 12.0);
+  if (scale < 1.18e-38 || abs(phib) < 1.18e-38) { eb = eb + FLUSH * (1.0 + abs(sum)); }
+  if (c > 0.5) { phib = -phib; } // z = -e^L
+  var res: f32;
+  var rerr: f32;
+  if (post > 0.0) {
+    var acc = phib;
+    var aerr = eb;
+    var zj: f32 = 1.0;
+    for (var j: i32 = 0; j < 128; j = j + 1) {
+      if (f32(j) >= post) { break; }
+      let bj = b + f32(j);
+      let t = zj * pow(bj, -s);
+      acc = acc - t;
+      aerr = aerr + abs(t) * (3.0 + f32(j) + abs(s * log2(bj)));
+      zj = zj * z;
+    }
+    let zinv = pow(-z, -post);
+    if (!(zinv >= 1.18e-38 && zinv < 3.4e38 && abs(acc) >= 1.18e-38 && abs(acc) < 3.4e38)) {
+      return vec2<f32>(0.0);
+    }
+    var sg: f32 = -1.0;
+    if ((post % 2.0) == 0.0) { sg = 1.0; }
+    res = sg * zinv * acc;
+    rerr = zinv * (aerr + abs(acc) * (post + 2.0)) + abs(res) * abs(post * log2(-z));
+  } else {
+    if (!(abs(zk) >= 1.18e-38 && abs(zk) < 3.4e38)) { return vec2<f32>(0.0); }
+    res = head + zk * phib;
+    rerr = herr + abs(zk) * (eb + abs(phib) * (pre + 2.0));
+  }
+  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) || !(rerr <= 500.0 * abs(res))) {
+    return vec2<f32>(0.0);
+  }
+  return vec2<f32>(res, 1.0);
+}
+
+// The Fourier modes last, where every other method declines — see the GLSL
+// preamble.
 fn _gpu_lerch_phi(z: f32, s: f32, a: f32) -> f32 {
   let r = _gpu_lerch_core(z, s, a);
   if (r.y > 0.5) { return r.x; }
+  if (z < 0.0 && s <= -3.0 && !(a < 0.0 && s != floor(s))) {
+    let q = _gpu_lerch_modes(z, s, a, 0.0);
+    if (q.y > 0.5) { return q.x; }
+  }
   return _gpu_nan();
 }
 
@@ -10529,6 +11221,7 @@ fn _gpu_lerch_phi(z: f32, s: f32, a: f32) -> f32 {
 // inversion formula: see the GLSL preamble.
 fn _gpu_poly_log_inversion(s: f32, z: f32) -> vec2<f32> {
   let EPS = 6.0e-8;
+  let FLUSH = 2.0e-31; // 1.18e-38 / EPS
   let PI = 3.14159265358979;
   let B = array<f32, 8>(1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0,
     5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0);
@@ -10585,6 +11278,7 @@ fn _gpu_poly_log_inversion(s: f32, z: f32) -> vec2<f32> {
     ui = c * (ur * iw2i + ui * iw2r);
     ur = nr;
   }
+  zerr = zerr + 44.0 * FLUSH; // at most 22 terms in each of zr and zi
   let n = floor(s + 0.5);
   let d = s - n;
   let sgn = select(-1.0, 1.0, n % 2.0 == 0.0);
@@ -10607,8 +11301,8 @@ fn _gpu_poly_log_inversion(s: f32, z: f32) -> vec2<f32> {
       let t = wk * pow(f32(k), -s);
       li = li + t;
       let size = abs(t);
-      lierr = lierr + size * (2.0 + f32(k) + abs(s * log2(f32(k))));
-      let rho = max(size / prevT, -iz);
+      lierr = lierr + size * (2.0 + f32(k) + abs(s * log2(f32(k)))) + FLUSH;
+      let rho = -iz * pow(f32(k + 1) / f32(k), -s);
       if (size < prevT && rho < 1.0 && size * rho / (1.0 - rho) <= 1e-8 * abs(li)) {
         done = true;
         break;
@@ -10623,8 +11317,10 @@ fn _gpu_poly_log_inversion(s: f32, z: f32) -> vec2<f32> {
     lierr = 500.0 * abs(li);
   }
   let res = first - sgn * cos(PI * d) * li;
-  let bound = EPS * ((firstErr + 4.0 * abs(first)) + (lierr + 2.0 * abs(li)));
-  if (!(bound <= 3.0e-5 * abs(res))) { return vec2<f32>(0.0); }
+  let bound = ((firstErr + 4.0 * abs(first)) + (lierr + 2.0 * abs(li))) + 4.0 * FLUSH;
+  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) || !(bound <= 500.0 * abs(res))) {
+    return vec2<f32>(0.0);
+  }
   return vec2<f32>(res, 1.0);
 }
 
@@ -10673,11 +11369,19 @@ fn _gpu_poly_log(s: f32, z: f32) -> f32 {
     for (var i: i32 = 0; i <= n; i = i + 1) { den = den * (1.0 - z); }
     return z * p / den;
   }
+  // Below z = -1 a small Phi(z, s, 1) is left to the inversion and the
+  // modes: see the GLSL preamble.
   let r = _gpu_lerch_core(z, s, 1.0);
-  if (r.y > 0.5) { return z * r.x; }
+  if (r.y > 0.5 && (z >= -1.0 || (abs(r.x) >= 3.9e-34 && abs(z * r.x) < 3.4e38))) {
+    return z * r.x;
+  }
   if (z < -1.0 && s < 0.0 && s != floor(s)) {
     let v = _gpu_poly_log_inversion(s, z);
     if (v.y > 0.5) { return v.x; }
+  }
+  if (z < 0.0 && s <= -3.0) {
+    let q = _gpu_lerch_modes(z, s, 1.0, 1.0);
+    if (q.y > 0.5) { return q.x; }
   }
   return _gpu_nan();
 }

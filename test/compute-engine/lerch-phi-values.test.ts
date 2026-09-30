@@ -195,12 +195,19 @@ describe('LerchPhi past |z| = 1: the Hermite integral continuation', () => {
     );
   });
 
-  test('a cancellation too severe to certify stays symbolic rather than answer a wrong number', () => {
+  test('terms moving a that are 290 times the value are counted in the estimate, not declined outright', () => {
     // mpmath: lerchphi(-700,-5.001,-4.6) = 45176181.651086621756 - 47501391.476514206825j
-    // Every route declines here: moving a to (0, 1] adds five terms
-    // zᵏ(a+k)^(−s), the largest about 290 times the value, on top of the
-    // cancellation of each route.
-    expect(phi(-700, -5.001, -4.6).N().numericValue).toBeUndefined();
+    // (the same digits at 60 and 150 digits). Moving a to (0, 1] adds five
+    // terms zᵏ(a+k)^(−s), the largest about 290 times the value. Their
+    // rounding model once exceeded the loss that the routes accept before
+    // any estimate, and every route declined; it is now part of the
+    // estimate, and the modes of the base point answer within 3e−13.
+    const re = 45176181.651086621756;
+    const im = -47501391.476514206825;
+    const v = phi(-700, -5.001, -4.6).N();
+    expect(Math.hypot(v.re - re, v.im - im)).toBeLessThan(
+      1e-11 * Math.hypot(re, im)
+    );
   });
 
   test('s next to a positive integer, with −a·log z next to the negative real axis, is answered', () => {
@@ -609,8 +616,10 @@ describe('GPU LerchPhi preamble', () => {
 describe('LerchPhi with Re(s) < 0 where the continuation cancels', () => {
   // The three terms of the continuation are up to 1e5 times the value here,
   // and it declines. A real a uses the expansion of Φ in the Fourier modes
-  // of the base point, a complex a a Taylor series in a. mpmath `lerchphi`
-  // at 30 or 60 digits.
+  // of the base point. For the complex a below, the continuation now
+  // answers within its estimate (a Taylor series in a answered them when
+  // these tests were written; it was removed on 2026-09-30, see
+  // `lerchPhiComplex`). mpmath `lerchphi` at 30 or 60 digits.
   function expectClose(v: any, re: number, im: number) {
     expect(Math.hypot(v.re - re, (v.im ?? 0) - im)).toBeLessThan(
       1e-11 * Math.hypot(re, im)
@@ -666,13 +675,10 @@ describe('LerchPhi with Re(s) < 0 where the continuation cancels', () => {
       -40, 30, -2.2, 1.5, 0.4, -0.0041117712311858316696,
       0.0063300084953021698833,
     ],
-  ])(
-    'a complex a: Φ(%p+%pi, %p, %p+%pi), the Taylor series in a',
-    (zRe, zIm, s, aRe, aIm, re, im) => {
-      const z = zIm === 0 ? zRe : ['Complex', zRe, zIm];
-      expectClose(phi(z, s, ['Complex', aRe, aIm]).N(), re, im);
-    }
-  );
+  ])('a complex a: Φ(%p+%pi, %p, %p+%pi)', (zRe, zIm, s, aRe, aIm, re, im) => {
+    const z = zIm === 0 ? zRe : ['Complex', zRe, zIm];
+    expectClose(phi(z, s, ['Complex', aRe, aIm]).N(), re, im);
+  });
 
   test('a complex a with |Im a|/|a| = 0.93: the continuation with a moved to Re(a) ≥ 1/2', () => {
     // mpmath: lerchphi(-15-17j, -3.9, 0.9-2.3j)
@@ -802,5 +808,82 @@ describe('LerchPhi for a very negative order and a large |z|: the tail integral 
     expect(Math.hypot(v.re - re, (v.im ?? 0) - im)).toBeLessThan(
       1e-11 * Math.hypot(re, im)
     );
+  });
+});
+
+describe('LerchPhi past the unit circle where the continuation cancels: the modes for Re(s) ≥ 1/2, the integral and Lerch’s transformation formula', () => {
+  // Each of these declined before 2026-09-30 (the continuation cancels, the
+  // modes route took only Re(s) < 1/2, and the Taylor series in a had terms
+  // far larger than the value). References: for a real a, mpmath
+  // `lerchphi` at 60 and at 150 digits (they agree to 1e−28 or better; at
+  // 60 digits `lerchphi` alone is not reliable above |z| ≈ 1e5). For a
+  // complex a, not `lerchphi`, which takes the wrong sheet of its
+  // incomplete gamma term in part of the a plane: the Hermite formula with
+  // the sheet corrected (see `closedTermSheet` in `lerch-phi.ts`) at 60 and
+  // at 80 digits, with a moved to Re(a) ≥ 1 and to Re(a) ≥ 2 by
+  // Φ(z,s,a) = Σ_{k<m} zᵏ(a+k)^(−s) + zᵐ·Φ(z,s,a+m) (the four values agree to
+  // 1e−50 or better).
+  function expectClose(v: any, re: number, im: number) {
+    expect(Math.hypot(v.re - re, (v.im ?? 0) - im)).toBeLessThan(
+      1e-11 * Math.hypot(re, im)
+    );
+  }
+  const c = (re: number, im: number) => (im === 0 ? re : ['Complex', re, im]);
+
+  test.each([
+    // Φ(z,s,1) = PolyLog(s,z)/z past the disk, Re(s) ≥ 1/2: the modes of
+    // the base point. polylog(s, z) = −183.37411479092181721.
+    [
+      -187652.07902556862, 0, 2.5912957191467285, 0, 1, 0,
+      0.00097720268138322143448, 0,
+    ],
+    // A real a and Re(s) = 8: the modes of the base point.
+    [
+      -1392.1861777372978, 0, 8.033336951083374, 0, 8.097216843724244, 0,
+      1.0427270668144169044e-10, 0,
+    ],
+    // A real a, Re(s) = 3 and |z| = 6.2e6: the integral along a path
+    // around its pole.
+    [
+      -5798252.145494861, -2151570.45728764, 3.0014183712625044, 0,
+      0.05456592816281926, 0, 5832.9143426701038148, -18.474241580471887111,
+    ],
+    // A real a, Re(s) = −28.8, |z| = 2.7e4: moving a to (0, 1] adds terms
+    // 42 times the value. The modes of the base point, now that Γ(1 − s)
+    // at a real argument counts its measured error (232ε, not 1254ε) and
+    // the rounding of those terms is part of the estimate.
+    [
+      23627.455043141035, 13892.725569115037, -28.75630838493545, 0,
+      -7.756752794899793, 0, -1.9352390388659669865e33,
+      -1.0220779376714595833e33,
+    ],
+    // A complex a with Re(s) < 0: Lerch's transformation formula.
+    [
+      -165.9221781010155, 0, -26.65426561674182, 0, -0.5888105561169166,
+      -3.3968736045460775, -9169822745189.0283172, 1939357489693.8739238,
+    ],
+    [
+      -13861.87472644381, 0, -21.741212551596174, 0, 7.776176622573466,
+      -1.813599028666539, 147491478801209.90768, 100375768900938.06123,
+    ],
+    // A complex s and a complex a.
+    [
+      9727.301715941901, -3892.227523975649, -12.677975848352464,
+      3.3115969396265736, 2.944195988035979, 1.2812053721519536,
+      -7.5067089496858225352, 28.631141682759609726,
+    ],
+    // A complex a with Re(s) > 0: the integral.
+    [
+      -140304.70989763367, 0, 2.41945103198068, 0, 2.454571917297427,
+      -3.1733656910829433, -3.2137786898354271048e-7, 1.2873268377004431183e-7,
+    ],
+    // The same on the cut (a real z > 1, the side below it): the path of
+    // the integral passes above its pole.
+    [
+      1619407.0329602852, 0, 11.241325887748939, 0, 6.784884817353319,
+      -2.4736997041657807, 1.0958982835393004232e-16, 6.3858300472257632522e-16,
+    ],
+  ])('Φ(%p+%pi, %p+%pi, %p+%pi)', (zRe, zIm, sRe, sIm, aRe, aIm, re, im) => {
+    expectClose(phi(c(zRe, zIm), c(sRe, sIm), c(aRe, aIm)).N(), re, im);
   });
 });
