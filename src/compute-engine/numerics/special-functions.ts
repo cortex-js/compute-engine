@@ -1983,6 +1983,167 @@ export function bigZetaGeneralized(
   return bigZetaFront(ce, s, a, 1);
 }
 
+// --- LerchPhi / PolyLog, arbitrary precision -------------------------------
+// cortex-js/compute-engine#374: `LerchPhi` and `PolyLog` answer in doubles
+// at any engine precision, unlike `HurwitzZeta` above. For real z, s, a
+// inside the series' disk of convergence (|z| < 1), `bigLerchPhi` sums
+// Φ(z,s,a) = Σ zᵏ(k+a)^(−s) directly on `BigNum`, to the requested digits.
+// Outside that disk, or for a complex operand, the callers keep the
+// existing double kernels (`lerchPhiComplex`, `polylogOrderComplex`) — the
+// continuation those use (`lerch-phi-continuation.ts`) is a machine-only
+// path this series does not need to widen.
+
+/** Past this many terms, `bigLerchPhi` declines rather than keep summing:
+ * at 50 requested digits and |z| = 0.99, the series needs about 17,000
+ * terms ((digits + `SPECIAL_FN_GUARD`)·ln 10 / −ln|z|), so this leaves
+ * headroom for a guard-digit retry pass without letting z closer to the
+ * rim (`|z| = 0.9999` needs past 1.7 million) run unbounded. */
+const LERCH_BIG_MAX_TERMS = 30_000;
+
+/** `bigLerchPhi` accepts its analytic tail bound (see the function's doc
+ * comment) only once it has held for this many consecutive terms: a
+ * single term passing the bound is not proof the series has entered its
+ * decreasing regime — a negative order makes earlier terms grow first. */
+const LERCH_BIG_CONSECUTIVE = 3;
+
+/**
+ * Φ(z, s, a) = Σ_{k≥0} zᵏ(k+a)^(−s) at `BigDecimal.precision` significant
+ * digits, for real z, s, a with |z| < 1 — the arbitrary-precision twin of
+ * `numerics/lerch-phi.ts`'s double series (`lerchPhiComplex`), for the
+ * same disk of convergence. `PolyLog` rides on it at a = 1, via
+ * `bigPolyLog`: Liₛ(z) = z·Φ(z, s, 1).
+ *
+ * The ratio between consecutive terms is z·((k+a)/(k+1+a))^s. For s ≥ 0
+ * it is at most |z|; for s < 0 it is bounded by |z|·e^{−s/(k+a)} (since
+ * (k+1+a)/(k+a) = 1 + 1/(k+a) ≤ e^{1/(k+a)}), which still falls toward |z|
+ * as k grows. Once that bound R is below 1, the tail after term k is at
+ * most |term_k|·R/(1−R); `bigLerchPhi` sums until `LERCH_BIG_CONSECUTIVE`
+ * consecutive terms clear that bound at the requested precision, or
+ * declines after `LERCH_BIG_MAX_TERMS`.
+ *
+ * A (k+a) = 0 term is `w.pow(−s)`: 0^0 = 1 (only k = 0, a = 0), 0^positive
+ * = 0 (s < 0), and 0^negative is a pole (s > 0) — `bigLerchPhi` declines
+ * there, the same way `bigHurwitzZeta`'s caller decides pole vs. finite
+ * for `HurwitzZeta` at a non-positive integer base point. A negative w (a
+ * a negative integer; a non-integer a would need k + a ≥ 0 before k = 0)
+ * needs an integer s to stay real — `BigDecimal.pow` answers NaN
+ * otherwise, and `bigLerchPhi` declines there too.
+ *
+ * Pass an exact rational operand as `[numerator, denominator]` (see
+ * `HurwitzOperand`) so it converts only once the working precision below
+ * is raised — the same reason `hurwitzOperand` gives for `HurwitzZeta`.
+ */
+export function bigLerchPhi(
+  ce: ComputeEngine,
+  z: HurwitzOperand,
+  s: HurwitzOperand,
+  a: HurwitzOperand
+): BigNum | undefined {
+  const zd = hurwitzOperandNumber(z);
+  const sd = hurwitzOperandNumber(s);
+  const ad = hurwitzOperandNumber(a);
+  if (!(Math.abs(zd) < 1) || !Number.isFinite(sd) || !Number.isFinite(ad))
+    return undefined;
+
+  const requested = BigDecimal.precision;
+  let guard = SPECIAL_FN_GUARD;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    BigDecimal.precision = requested + guard;
+    let r: { readonly sum: BigNum; readonly largest: number } | undefined;
+    try {
+      r = lerchPhiSeries(
+        ce,
+        hurwitzOperandBig(z),
+        hurwitzOperandBig(s),
+        hurwitzOperandBig(a),
+        zd,
+        sd,
+        ad
+      );
+    } finally {
+      BigDecimal.precision = requested;
+    }
+    if (r === undefined) return undefined;
+    if (r.sum.isZero()) return r.sum.toPrecision(requested);
+    // Terms larger than the sum cancel (an alternating series, z < 0): if
+    // that ate into the guard, redo with the digits it ate added.
+    const lost = Math.ceil(r.largest - bigLog10Abs(r.sum));
+    if (lost <= guard - 8) return r.sum.toPrecision(requested);
+    if (!Number.isFinite(lost)) return undefined;
+    guard = lost + SPECIAL_FN_GUARD;
+  }
+  return undefined;
+}
+
+/** The series at `BigDecimal.precision` (already raised by the caller),
+ * with log10 of its largest term — how many digits the sum cancelled, if
+ * it ended up much smaller. `zd`/`sd`/`ad` are the operands as doubles,
+ * sizing the tail-bound estimate before paying for the exact `BigNum`
+ * check (see `bigLerchPhi`'s doc comment). */
+function lerchPhiSeries(
+  ce: ComputeEngine,
+  z: BigNum,
+  s: BigNum,
+  a: BigNum,
+  zd: number,
+  sd: number,
+  ad: number
+): { readonly sum: BigNum; readonly largest: number } | undefined {
+  const working = BigDecimal.precision;
+  const rnd = (x: BigNum): BigNum => x.toPrecision(working);
+  const negS = s.neg();
+  const growth = Math.max(0, -sd); // max(0, −s), the ratio bound's growth term
+  let sum = BigDecimal.ZERO;
+  let zPow = BigDecimal.ONE; // zᵏ
+  let largest = -Infinity;
+  let confirmed = 0; // consecutive terms that cleared the tail bound
+  for (let k = 0; k < LERCH_BIG_MAX_TERMS; k++) {
+    if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    const w = a.add(k);
+    const power = rnd(w.pow(negS));
+    if (power.isNaN()) return undefined; // w < 0, non-integer s: complex
+    if (!power.isFinite()) return undefined; // w = 0, s > 0: a pole
+    const term = rnd(zPow.mul(power));
+    sum = rnd(sum.add(term));
+    if (!term.isZero()) largest = Math.max(largest, bigLog10Abs(term));
+
+    const base = ad + k;
+    const estimate = base > 0 ? zd * Math.exp(growth / base) : Infinity;
+    const ratio = Math.abs(estimate);
+    const termAbs = term.isZero() ? 0 : Math.abs(term.toNumber());
+    if (ratio < 1 && termAbs > 0) {
+      const tail = termAbs * (ratio / (1 - ratio));
+      const sumAbs = sum.isZero() ? 0 : Math.abs(sum.toNumber());
+      if (tail === 0 || Math.log10(tail) < Math.log10(sumAbs || 1) - working) {
+        confirmed += 1;
+        if (confirmed >= LERCH_BIG_CONSECUTIVE) return { sum, largest };
+        zPow = rnd(zPow.mul(z));
+        continue;
+      }
+    }
+    confirmed = 0;
+    zPow = rnd(zPow.mul(z));
+  }
+  return undefined;
+}
+
+/**
+ * PolyLog's arbitrary-precision route: Liₛ(z) = z·Φ(z, s, 1) on
+ * `bigLerchPhi`, at `BigDecimal.precision` significant digits — the same
+ * identity the double kernel (`polylogOrderReal`/`polylogOrderComplex`)
+ * uses, but exact for a rational z or s and answering the requested
+ * digits above machine precision.
+ */
+export function bigPolyLog(
+  ce: ComputeEngine,
+  s: HurwitzOperand,
+  z: HurwitzOperand
+): BigNum | undefined {
+  const phi = bigLerchPhi(ce, z, s, [1n, 1n]);
+  if (phi === undefined) return undefined;
+  return hurwitzOperandBig(z).mul(phi).toPrecision(BigDecimal.precision);
+}
+
 /** Halley refinement of a BigDecimal Lambert W estimate `w` toward the root of
  *  w·e^w = x (branch-independent), rounded to working precision. `tol` is the
  *  convergence tolerance. */

@@ -227,6 +227,15 @@
 
 ### Issues Resolved
 
+- **`LerchPhi` and `PolyLog` answer to the engine precision for real arguments
+  with |z| < 1.** They answered in machine precision whatever `ce.precision`
+  was, where `HurwitzZeta` gave the requested digits. With `ce.precision = 50`,
+  `PolyLog(2, 1/3).N()` was `0.3662132299770634` and is now
+  `0.36621322997706348761674629766426276380206341558968`. A value outside the
+  machine range now also gets a numeric value: `LerchPhi(0.5, -159.5, 1).N()`
+  stayed unevaluated and is now `2.62784929555984310206e+309`. Outside the disk
+  |z| < 1, or for a complex argument, the answer keeps machine precision (#374,
+  contributed by [enumeratio](https://github.com/enumeratio)).
 - **A collection operand that can be absent as a whole compiles on the
   JavaScript target** (issue #383). With `x: list<list<integer>>`, the row read
   `At(x, i)` is typed `list<integer> | missing` (the index can be past the end),

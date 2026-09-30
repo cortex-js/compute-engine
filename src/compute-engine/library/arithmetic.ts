@@ -1,4 +1,5 @@
 import { Complex } from 'complex-esm';
+import type { BigNum } from '../numerics/types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { factsOf } from '../../common/type/facts.js';
@@ -115,6 +116,7 @@ import {
   bigZeta,
   bigHurwitzZeta,
   bigZetaGeneralized,
+  bigLerchPhi,
   type HurwitzOperand,
   bigLambertW,
   besselJ,
@@ -2158,6 +2160,22 @@ function boxComplexResult(
   return engine.number(engine._inexactNumericValue(im === 0 ? re : { re, im }));
 }
 
+/**
+ * Box a bignum result from `bigLerchPhi`/`bigPolyLog`. Both reach this only
+ * once `.N()` or an inexact operand already means the answer is a numeric
+ * approximation (`evaluateLerchPhi`'s `numeric`), so unlike `boxBignumResult`
+ * this never exactifies a small integer: `LerchPhi(1/2,-3,2).N()` lands on
+ * exactly 102, and `.N()`'s contract is an approximation regardless of
+ * magnitude — the same reason `boxComplexResult` above never exactifies the
+ * double kernels' integer-valued results.
+ */
+export function boxBignumApprox(
+  engine: ComputeEngine,
+  value: BigNum
+): Expression {
+  return engine.number(engine._numericValue(value));
+}
+
 /** Both components of a number literal are finite machine numbers. */
 function isFiniteNumberLiteral(
   x: Expression
@@ -2337,7 +2355,10 @@ function evaluateHurwitzZeta(
  * `ce.precision` digits, and that rounding reaches the last digit of the
  * result.
  */
-function hurwitzOperand(engine: ComputeEngine, x: Expression): HurwitzOperand {
+export function hurwitzOperand(
+  engine: ComputeEngine,
+  x: Expression
+): HurwitzOperand {
   const r = asRational(x);
   if (r !== undefined) return [BigInt(r[0]), BigInt(r[1])];
   return x.bignumRe ?? engine.bignum(x.re);
@@ -2498,6 +2519,27 @@ function evaluateLerchPhi(
     !finite(a)
   )
     return undefined; // stay symbolic
+
+  // Real z, s, a inside the series' disk of convergence, above machine
+  // precision: the arbitrary-precision series (`bigLerchPhi`) answers the
+  // requested digits directly, the way `bigHurwitzZeta` does for
+  // `HurwitzZeta` (cortex-js/compute-engine#374). Outside |z| < 1, or for
+  // a complex operand, the double continuation below is unchanged.
+  if (
+    !z.isComplex &&
+    !s.isComplex &&
+    !a.isComplex &&
+    Math.abs(z.re) < 1 &&
+    bignumPreferred(engine)
+  ) {
+    const big = bigLerchPhi(
+      engine,
+      hurwitzOperand(engine, z),
+      hurwitzOperand(engine, s),
+      hurwitzOperand(engine, a)
+    );
+    if (big !== undefined) return boxBignumApprox(engine, big);
+  }
 
   const result = lerchPhiComplex(
     new Complex(z.re, z.im),

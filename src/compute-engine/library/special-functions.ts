@@ -16,6 +16,8 @@ import {
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
+import { bignumPreferred } from '../boxed-expression/utils.js';
+import { hurwitzOperand, boxBignumApprox } from './arithmetic.js';
 // Every `type` handler in this file is on the `'types'` (operand-descriptor)
 // shape, so the helpers all come from the descriptor-shape module. The
 // `OnTypes` suffixes are kept while the expression-shape module still
@@ -52,6 +54,7 @@ import {
   expIntegralEi,
   logIntegral,
   polylog,
+  bigPolyLog,
 } from '../numerics/special-functions.js';
 import {
   EULERIAN_MAX_ORDER,
@@ -563,6 +566,27 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             ops,
             reduced.evaluate({ numericApproximation })
           );
+
+        // Real s, z inside the series' disk of convergence, above machine
+        // precision: Liₛ(z) = z·Φ(z,s,1) on the arbitrary-precision Lerch
+        // series (`bigPolyLog`/`bigLerchPhi`), ahead of both double kernels
+        // below — the integer-order one included, which does not follow
+        // `ce.precision` (cortex-js/compute-engine#374).
+        if (
+          isNumber(s) &&
+          !s.isComplex &&
+          isNumber(z) &&
+          !z.isComplex &&
+          Math.abs(z.re) < 1 &&
+          bignumPreferred(engine)
+        ) {
+          const big = bigPolyLog(
+            engine,
+            hurwitzOperand(engine, s),
+            hurwitzOperand(engine, z)
+          );
+          if (big !== undefined) return boxBignumApprox(engine, big);
+        }
 
         // Integer order s ≥ 2 (dilog/trilog/Li₄ …): the dedicated kernel,
         // accurate over the whole plane (`polylog`/`polylogComplex`).
