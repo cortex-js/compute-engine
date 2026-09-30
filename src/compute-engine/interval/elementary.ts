@@ -1429,10 +1429,14 @@ function enumerateInteger2(
 
 /**
  * Largest literal integer `k` for which `binomialRaw()` encloses
- * `C(n, k)` over an `n` interval with the falling factorial. Each factor is
- * one outward-rounded interval product, so the cost grows with `k`.
+ * `C(n, k)` over an `n` interval below `k − 1` with the falling factorial.
+ * Each factor is one outward-rounded interval product, so the cost grows
+ * with `k`; the limit is the same as `MAX_INT_ENUM_POINTS`, the largest
+ * number of scalar evaluations the other kernels of this file do. Above it,
+ * the `Γ` product is used, which has no bound where `Γ` overflows or where
+ * the `n` interval contains a negative integer.
  */
-const BINOMIAL_FALLING_FACTORIAL_LIMIT = 1000;
+const BINOMIAL_FALLING_FACTORIAL_LIMIT = 4096;
 
 /**
  * An enclosure of `1/Γ(x)` over the interval `x`, or `undefined` when it
@@ -1475,22 +1479,25 @@ function reciprocalGammaEnclosure(x: Interval): Interval | undefined {
  * range, because `k` appears in two factors; a plot refines it by splitting
  * the interval.
  *
- * - A pole of `Γ(n+1)` inside the `n` interval: with a point `k` that is not
- *   an integer it is a pole of `C` (`n − k + 1` is not an integer there), so
- *   the result is `singular` at the first pole. With any other `k` the poles
- *   of `Γ(n+1)` and `Γ(k+1)` or `Γ(n−k+1)` can cancel to a finite value, and
- *   the result is the whole real line.
+ * - A pole of `Γ(n+1)` inside the `n` interval, at a negative integer
+ *   `n = −m`: when `k` is not an integer point, the box holds a point
+ *   `(−m, k)` with a non-integer `k`, where `Γ(k+1)` and `Γ(n−k+1)` are
+ *   finite and `C` has a pole. The result is `singular` at the first pole.
+ *   With an integer point `k` the poles cancel to a finite value
+ *   (`C(−3, 2) = 6`); the product has no bound for that, and the result is
+ *   the whole real line (`binomialRaw()` uses the falling factorial for
+ *   an integer `k` up to `BINOMIAL_FALLING_FACTORIAL_LIMIT`).
  * - `Γ(n+1)` that overflows, or a `1/Γ` with no bound: the whole real line.
  */
 function binomialGammaProduct(nVal: Interval, kVal: Interval): IntervalResult {
   const nPlus1 = addOutward(nVal, point(1));
   const numerator = gammaRaw(nPlus1);
   if (numerator.kind === 'singular') {
-    if (kVal.lo === kVal.hi && !Number.isInteger(kVal.lo))
-      return numerator.at === undefined
-        ? { kind: 'singular' }
-        : { kind: 'singular', at: numerator.at - 1 };
-    return { kind: 'entire' };
+    if (kVal.lo === kVal.hi && Number.isInteger(kVal.lo))
+      return { kind: 'entire' };
+    return numerator.at === undefined
+      ? { kind: 'singular' }
+      : { kind: 'singular', at: numerator.at - 1 };
   }
   const g = getValue(numerator);
   if (!g || !Number.isFinite(g.lo) || !Number.isFinite(g.hi))
@@ -1512,10 +1519,12 @@ function binomialGammaProduct(nVal: Interval, kVal: Interval): IntervalResult {
  * - Both operands a point: the scalar value. At a pole of `Γ(n+1)` (a
  *   negative integer `n` with a non-integer `k`) the result is `singular`.
  * - `k` a point at a non-negative integer: `C(n, k)` is the polynomial
- *   `n(n−1)⋯(n−k+1)/k!` in `n`, enclosed by interval arithmetic on the
- *   factors `(n − i)/(i + 1)`. Each step rounds outward, so the enclosure is
- *   sound; it is wider than the true range when the interval contains a
- *   root of the polynomial, because `n` appears in every factor.
+ *   `n(n−1)⋯(n−k+1)/k!` in `n`. For `n ≥ k − 1` it increases with `n`, and
+ *   the values at the two ends enclose it. Below that, it is enclosed by
+ *   interval arithmetic on the factors `(n − i)/(i + 1)`. Each step rounds
+ *   outward, so the enclosure is sound; it is wider than the true range when
+ *   the interval contains a root of the polynomial, because `n` appears in
+ *   every factor.
  * - `k` a point at a negative integer: `C(n, k)` is `0` for every non-integer
  *   `n`. At a negative integer `n ≥ k` the poles of `Γ(n+1)` and `Γ(k+1)`
  *   cancel and the value is not `0` (`C(−3, −5) = 6`), so the result is a
@@ -1616,12 +1625,36 @@ function binomialRaw(
   }
 
   if (kPoint >= 0) {
+    // For `n ≥ k − 1` every factor `n − i` (`i < k`) is non-negative and
+    // increases with `n`, so `C(n, k)` increases with `n` and the values at
+    // the two ends enclose it. The scalar kernel computes them in log form,
+    // with no overflow in the partial products of the loop below.
+    if (nVal.lo >= kPoint - 1) {
+      const atLo = binomialPointEnclosure(nVal.lo, kPoint);
+      const atHi = binomialPointEnclosure(nVal.hi, kPoint);
+      // An overflow is a finite value above the largest double.
+      return ok({
+        lo: atLo.lo === Infinity ? Number.MAX_VALUE : atLo.lo,
+        hi: atHi.hi,
+      });
+    }
     if (kPoint > BINOMIAL_FALLING_FACTORIAL_LIMIT)
       return binomialGammaProduct(nVal, kVal);
     let product: IntervalResult = ok({ lo: 1, hi: 1 });
     for (let i = 0; i < kPoint; i++) {
       const factor = div(subOutward(nVal, point(i)), point(i + 1));
       product = mulOutward(product, factor);
+      // A partial product `C(n, i + 1)` can be far larger than `C(n, k)`.
+      // Once a bound overflows, the later factors (below 1 in size) cannot
+      // bring it back, and the result would exclude the true value. An
+      // infinite bound that comes from an infinite `n` is not an overflow.
+      const v = getValue(product);
+      if (
+        Number.isFinite(nVal.lo) &&
+        Number.isFinite(nVal.hi) &&
+        (!v || !Number.isFinite(v.lo) || !Number.isFinite(v.hi))
+      )
+        return { kind: 'entire' };
     }
     return product;
   }

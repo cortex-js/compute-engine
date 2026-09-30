@@ -859,9 +859,13 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
     expect(point.lo).toBeLessThanOrEqual(12.375);
     expect(point.hi).toBeGreaterThanOrEqual(12.375);
     expect(point.hi - point.lo).toBeLessThan(1e-10);
+    // The endpoint values are widened by the error bound of the scalar
+    // kernel (about 1e-12 here).
     const range = unwrapInterval(fn.run!({ x: { lo: 2.3, hi: 2.7 } }));
-    expect(range.lo).toBeCloseTo(1.495, 12);
-    expect(range.hi).toBeCloseTo(2.295, 12);
+    expect(range.lo).toBeCloseTo(1.495, 10);
+    expect(range.hi).toBeCloseTo(2.295, 10);
+    expect(range.lo).toBeLessThanOrEqual(1.495);
+    expect(range.hi).toBeGreaterThanOrEqual(2.295);
     // The minimum −1/8 at x = 1/2 is inside the enclosure.
     const aroundMin = unwrapInterval(fn.run!({ x: { lo: 0.2, hi: 0.8 } }));
     expect(aroundMin.lo).toBeLessThanOrEqual(-0.125);
@@ -903,6 +907,28 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
     );
     expect(val.lo).toBeCloseTo(4, 12);
     expect(val.hi).toBeCloseTo(20, 12);
+  });
+
+  // With a k interval, the box holds a point (−3, k) with a non-integer k,
+  // where Γ(n + 1) has a pole and the two denominator factors do not: C is
+  // unbounded, and the result names the pole.
+  test('Binomial over an n interval with a negative integer and a k interval is singular', () => {
+    const fn = compile(ce.expr(['Binomial', 'n', 'k']), { to: 'interval-js' });
+    const result = fn.run!({
+      n: { lo: -3.5, hi: -2.5 },
+      k: { lo: 1, hi: 2 },
+    }) as any;
+    expect(result.kind).toBe('singular');
+    expect(result.at).toBe(-3);
+  });
+
+  // With an integer k, C(n, k) is a polynomial in n: the poles cancel, and
+  // C(−3, 1500) = C(1502, 1500) = 1127251.
+  test('Binomial(n, 1500) over an n interval with a negative integer is finite', () => {
+    const fn = compile(ce.expr(['Binomial', 'n', 1500]), { to: 'interval-js' });
+    const val = unwrapInterval(fn.run!({ n: { lo: -3.5, hi: -2.5 } }));
+    expect(val.lo).toBeLessThanOrEqual(1127251);
+    expect(val.hi).toBeGreaterThanOrEqual(1127251);
   });
 
   test('Binomial(n, 0.5) over an n interval with a pole of Γ(n + 1) is singular', () => {
@@ -999,6 +1025,28 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
           for (const k of [k0, (k0 + k1) / 2, k1])
             contains(result, ['Binomial', n, k]);
       }
+    });
+
+    // A partial product C(n, i) of the falling factorial overflows although
+    // C(n, k) is finite; the enclosure must still contain the value.
+    test('Binomial(n, k) for a large integer k', () => {
+      const cases: Array<[[number, number], number]> = [
+        [[1100, 1100.5], 1000],
+        [[1999.5, 1999.6], 2000],
+        [[1040.5, 1040.6], 1041],
+      ];
+      for (const [[n0, n1], k] of cases) {
+        const result = run(['Binomial', 'n', k], { n: { lo: n0, hi: n1 } });
+        expect(result.kind).toBe('interval');
+        contains(result, ['Binomial', n0, k]);
+        contains(result, ['Binomial', n1, k]);
+      }
+    });
+
+    test('Binomial(-3, k) over a k interval is singular at -3', () => {
+      const result = run(['Binomial', -3, 'k'], { k: { lo: 1, hi: 2 } }) as any;
+      expect(result.kind).toBe('singular');
+      expect(result.at).toBe(-3);
     });
 
     test('GammaLn over [0.5, 2] contains the minimum near 1.4616', () => {
