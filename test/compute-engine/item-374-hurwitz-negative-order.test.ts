@@ -45,12 +45,14 @@ describe('HurwitzZeta at a non-positive integer order, symbolic a: the Bernoulli
     ).toBe(true);
   });
 
-  test('parse route: \\zeta(-1, a) parses to Zeta and matches HurwitzZeta(-1,a)', () => {
-    const parsed = ce.parse('\\zeta(-1, a)');
+  test('parse route: \\zeta(-1, a) parses to Zeta and matches HurwitzZeta(-1,a) for a positive a', () => {
+    const engine = new ComputeEngine();
+    engine.assume(engine.box(['Greater', 'a', 0]));
+    const parsed = engine.parse('\\zeta(-1, a)');
     expect(parsed.operator).toBe('Zeta');
-    expect(parsed.evaluate().isSame(hurwitzZeta(-1, 'a').evaluate())).toBe(
-      true
-    );
+    expect(
+      parsed.evaluate().isSame(engine.box(['HurwitzZeta', -1, 'a']).evaluate())
+    ).toBe(true);
   });
 
   test('compound argument: ζ(−1, x + 1 − x) reduces to the polynomial in x', () => {
@@ -204,8 +206,16 @@ describe('HurwitzZeta(s,a).N(): float/complex a with |a| > 1, exact to the digit
   // toBeCloseTo: Horner's method in floating point loses about 6 digits
   // here (terms grow like a^(n+1), past the result, for |a| > 1 — #374),
   // which a loose tolerance would not catch.
-  const precise = new ComputeEngine();
-  precise.precision = 40;
+  //
+  // The engine is built in `beforeAll`, not when the file loads: building an
+  // engine sets the module-global `BigDecimal.precision`, which the printed
+  // digits follow, so an engine built by an earlier test would otherwise
+  // reset it to 21 digits.
+  let precise: ComputeEngine;
+  beforeAll(() => {
+    precise = new ComputeEngine();
+    precise.precision = 40;
+  });
 
   test('ζ(−40,2.7) = -2920835055257291.932969050338742248757098', () => {
     const r = precise.box(['HurwitzZeta', -40, 2.7]).N();
@@ -257,15 +267,157 @@ describe('HurwitzZeta at a non-positive integer order: consistency and boundary 
     ).toBe(true);
   });
 
-  test('ζ(−100,a) still evaluates at the order cap', () => {
-    const r = hurwitzZeta(-100, 'a').evaluate();
+  test('ζ(−12,a) still evaluates at the order cap for a symbolic a', () => {
+    const r = hurwitzZeta(-12, 'a').evaluate();
     expect(r.operator).not.toBe('HurwitzZeta');
   });
 
-  test('ζ(−101,a) stays symbolic past the order cap', () => {
-    const r = hurwitzZeta(-101, 'a').evaluate();
+  test('ζ(−13,a) stays symbolic past the order cap for a symbolic a', () => {
+    const r = hurwitzZeta(-13, 'a').evaluate();
+    expect(r.json).toEqual(['HurwitzZeta', -13, 'a']);
+  });
+
+  test('ζ(−13,x+y) stays symbolic: the expansion is not built', () => {
+    const r = ce.expr(['HurwitzZeta', -13, ['Add', 'x', 'y']]).evaluate();
     expect(r.operator).toBe('HurwitzZeta');
-    expect(r.json).toEqual(['HurwitzZeta', -101, 'a']);
+  });
+
+  test('ζ(−100,2.5) still evaluates at the order cap for a numeric a', () => {
+    // mpmath (dps = 30): zeta(-100, 2.5) = -406561177535215237.397279707567
+    const r = hurwitzZeta(-100, 2.5).N();
+    expect(r.toString()).toBe('-406561177535215237.397');
+  });
+});
+
+describe('Zeta(s, a) with a symbolic a: the Bernoulli polynomial only for a positive a', () => {
+  // The two-operand `Zeta` is Wolfram's generalized zeta: a term with
+  // k + a < 0 is |k + a|^(−s), so for a negative a it differs from
+  // HurwitzZeta, whose value is the Bernoulli polynomial for every a.
+  test('Zeta(−1, a) with no assumption on a stays symbolic', () => {
+    const engine = new ComputeEngine();
+    const r = engine.box(['Zeta', -1, 'a']).evaluate();
+    expect(r.json).toEqual(['Zeta', -1, 'a']);
+  });
+
+  test('Zeta(−1, a) with a > 0 is the polynomial −a²/2 + a/2 − 1/12', () => {
+    const engine = new ComputeEngine();
+    engine.assume(engine.box(['Greater', 'a', 0]));
+    const expected = engine.box([
+      'Add',
+      ['Multiply', ['Rational', -1, 2], ['Power', 'a', 2]],
+      ['Multiply', ['Rational', 1, 2], 'a'],
+      ['Rational', -1, 12],
+    ]);
+    expect(engine.box(['Zeta', -1, 'a']).evaluate().isSame(expected)).toBe(
+      true
+    );
+  });
+
+  test('Zeta(−1, −5/2) = 109/24, HurwitzZeta(−1, −5/2) = −107/24', () => {
+    // Zeta: |−5/2| + |−3/2| + |−1/2| + ζ(−1, 1/2) = 9/2 + 1/24 = 109/24.
+    // HurwitzZeta: −B₂(−5/2)/2 = −(25/4 + 5/2 + 1/6)/2 = −107/24.
+    expect(
+      ce
+        .box(['Zeta', -1, ['Rational', -5, 2]])
+        .evaluate()
+        .isSame(ce.number([109, 24]))
+    ).toBe(true);
+    expect(
+      hurwitzZeta(-1, ['Rational', -5, 2])
+        .evaluate()
+        .isSame(ce.number([-107, 24]))
+    ).toBe(true);
+  });
+
+  test('HurwitzZeta(−1, a) with no assumption on a is the polynomial', () => {
+    const engine = new ComputeEngine();
+    const r = engine.box(['HurwitzZeta', -1, 'a']).evaluate();
+    expect(r.operator).not.toBe('HurwitzZeta');
+  });
+});
+
+describe('HurwitzZeta at a non-positive integer order: the cost is bounded', () => {
+  // Each of these took more than a minute when the exact value was
+  // reduced after every step of the evaluation.
+  test('ζ(−100, 1e−300).N() = 2.83822495706937069593e−222', () => {
+    // mpmath: zeta(-100, mpf('1e-300')) = 2.838224957069370695926415633648e-222
+    const r = ce.box(['HurwitzZeta', -100, { num: '1e-300' }]).N();
+    expect(r.toString()).toBe('2.83822495706937069593e-222');
+  });
+
+  test('ζ(−50, 1e−2000).N() = −7.50086674607696436686e−1976', () => {
+    // mpmath: zeta(-50, mpf('1e-2000')) = -7.500866746076964366863e-1976
+    const r = ce.box(['HurwitzZeta', -50, { num: '1e-2000' }]).N();
+    expect(r.toString()).toBe('-7.50086674607696436686e-1976');
+  });
+
+  test('ζ(−50, 1e−200000).N() = −7.50086674607696436686e−199976', () => {
+    // Past the size of the exact evaluation: the big-decimal kernel
+    // evaluates the polynomial by Horner's rule instead.
+    // mpmath: -bernpoly(51, mpf('1e-200000'))/51 = -7.500866746076964366856e-199976
+    const r = ce.box(['HurwitzZeta', -50, { num: '1e-200000' }]).N();
+    expect(r.toString()).toBe('-7.50086674607696436686e-199976');
+  });
+
+  test('ζ(−2.5, 1e−200000).N() at a non-integer order', () => {
+    // mpmath: zeta(-2.5, mpf('1e-200000')) = 0.008516928777850330542358567028
+    const r = ce.box(['HurwitzZeta', -2.5, { num: '1e-200000' }]).N();
+    expect(r.toString()).toBe('0.00851692877785033054236');
+  });
+
+  test('ζ(2.5, 1e−2000).N() = 1e+5000, not a pole', () => {
+    // The double of 1e−2000 is 0, a non-positive integer; the big decimal
+    // is not. mpmath: zeta(2.5, mpf('1e-2000')) = 1.0e+5000
+    const r = ce.box(['HurwitzZeta', 2.5, { num: '1e-2000' }]).N();
+    expect(r.toString()).toBe('1e+5000');
+  });
+
+  test('LerchPhi(0.5, 2.5, 1e−2000).N() = 1e+5000, not a pole', () => {
+    // The same double pole test in `LerchPhi`; the arbitrary-precision
+    // series answers. mpmath: lerchphi(mpf('0.5'), mpf('2.5'), mpf('1e-300'))
+    // = 1.0e+750 (the 1e−2000 point is beyond mpmath's exponent range at
+    // 30 digits; the value is a^(−s) to every printed digit).
+    expect(
+      ce
+        .box(['LerchPhi', 0.5, 2.5, { num: '1e-2000' }])
+        .N()
+        .toString()
+    ).toBe('1e+5000');
+    expect(
+      ce
+        .box(['LerchPhi', 0.5, 2.5, { num: '1e-300' }])
+        .N()
+        .toString()
+    ).toBe('1e+750');
+  });
+
+  test('ζ(−100, 1/3.0).N() at a precision of 100 digits', () => {
+    // mpmath (dps = 100): zeta(-100, mpf(1)/3) =
+    //   391198857634904826436744565576560122224802698855781321117933752755922224261470.1180067883935612620019
+    const engine = new ComputeEngine();
+    engine.precision = 100;
+    const r = engine
+      .box(['HurwitzZeta', -100, ['Divide', 1, { num: '3.0' }]])
+      .N();
+    expect(r.toString()).toBe(
+      '3.91198857634904826436744565576560122224802698855781321117933752755922224261470118006788393561262002e+77'
+    );
+  });
+
+  test('ζ(−100, 1/10³⁰⁰) stays symbolic under evaluate(): the exact value is too large', () => {
+    const r = ce
+      .box(['HurwitzZeta', -100, ['Rational', 1, { num: '1e300' }]])
+      .evaluate();
+    expect(r.operator).toBe('HurwitzZeta');
+  });
+
+  test('ζ(−60, 2+3i).N() at machine precision uses the exact polynomial', () => {
+    // mpmath: zeta(-60, 2+3j) = -919246731053263160871639644888.5 + 2.614935630046239774352e+41j
+    const engine = new ComputeEngine();
+    engine.precision = 'machine';
+    const r = engine.box(['HurwitzZeta', -60, ['Complex', 2, 3]]).N();
+    expect(r.re / -9.192467310532632e29).toBeCloseTo(1, 14);
+    expect(r.im / 2.61493563004624e41).toBeCloseTo(1, 14);
   });
 });
 

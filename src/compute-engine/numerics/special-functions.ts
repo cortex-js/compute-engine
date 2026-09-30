@@ -9,7 +9,10 @@ import {
   polygammaComplex,
   POLYGAMMA_MAX_ORDER,
 } from './numeric-complex.js';
-import { bernoulliPolynomialRational } from './bernoulli.js';
+import {
+  bernoulliPolynomialInteger,
+  hurwitzZetaNegativeIntegerGaussianParts,
+} from './bernoulli.js';
 
 const gammaG = 7;
 const lanczos_7_c = [
@@ -1755,16 +1758,21 @@ function hurwitzZetaBigEM(
   const rnd = (x: BigNum): BigNum => x.toPrecision(workDigits);
   const negS = s.neg();
   let sum = BigDecimal.ZERO;
+  // Every sum is rounded to the working digits with `addRounded`, which
+  // drops a term below the last working digit without the exact addition:
+  // the exact sum of a = 1e−200000 and k = 1 has a 200 000-digit
+  // significand (the logarithm inside `pow` of it takes seconds), and so
+  // has the sum of the first term (1e−200000)^(−2.5) = 1e500000 and 1.
   for (let k = 0; k < plan.terms; k++) {
     if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    const w = a.add(k);
+    const w = addRounded(a, new BigDecimal(k), workDigits);
     if (w.isZero()) continue; // Wolfram's HurwitzZeta drops the (k+a) = 0 term
-    sum = rnd(sum.add(rnd(w.pow(negS))));
+    sum = addRounded(sum, rnd(w.pow(negS)), workDigits);
   }
-  const z = a.add(plan.terms);
+  const z = addRounded(a, new BigDecimal(plan.terms), workDigits);
   const zNegS = rnd(z.pow(negS));
-  sum = rnd(sum.add(rnd(zNegS.mul(z).div(s.sub(1))))); // z^{1-s}/(s-1)
-  sum = rnd(sum.add(rnd(zNegS.mul(BigDecimal.HALF)))); // ½z^{-s}
+  sum = addRounded(sum, rnd(zNegS.mul(z).div(s.sub(1))), workDigits); // z^{1-s}/(s-1)
+  sum = addRounded(sum, rnd(zNegS.mul(BigDecimal.HALF)), workDigits); // ½z^{-s}
   if (plan.pairs === 0) return sum;
   const bernoulli = getBernoulliRationals(ce, plan.pairs);
   const zInv2 = rnd(BigDecimal.ONE.div(z.mul(z)));
@@ -1772,10 +1780,10 @@ function hurwitzZetaBigEM(
   let poch = s; // (s)_{2j-1}
   for (let j = 1; j <= plan.pairs; j++) {
     if ((j & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    sum = rnd(
-      sum.add(
-        rnd(rnd(poch.mul(zPow)).mul(hurwitzEmCoeff(bernoulli, j, workDigits)))
-      )
+    sum = addRounded(
+      sum,
+      rnd(rnd(poch.mul(zPow)).mul(hurwitzEmCoeff(bernoulli, j, workDigits))),
+      workDigits
     );
     poch = rnd(rnd(poch.mul(s.add(2 * j - 1))).mul(s.add(2 * j)));
     zPow = rnd(zPow.mul(zInv2));
@@ -1803,18 +1811,12 @@ function bigHurwitzZetaEM(
   if (!Number.isFinite(sRe) || !Number.isFinite(aRe)) return undefined;
   if (sInteger && sRe === 1) return undefined; // pole; caller special-cases s = 1
 
-  // s = −n, an integer ≤ 0: ζ(−n, a) = −Bₙ₊₁(a)/(n + 1), a polynomial in a,
-  // taken exactly. The series below terminates there too, but its rounding
-  // leaves a residue where the polynomial is zero (ζ(−2, 1/2) = 0), and the
+  // s = −n, an integer ≤ 0: ζ(−n, a) = −Bₙ₊₁(a)/(n + 1), a polynomial in a.
+  // The series below terminates there too, but its rounding leaves a
+  // residue where the polynomial is zero (ζ(−2, 1/2) = 0), and the
   // relative-precision check can never accept a residue.
-  if (sInteger && sRe <= 0 && sRe >= -100) {
-    const n = -sRe;
-    let x = hurwitzOperandRational(a);
-    if (x[0] === 0n) x = [1n, 1n]; // the k + a = 0 term is dropped
-    const [num, den] = bernoulliPolynomialRational(n + 1, x);
-    if (num === 0n) return BigDecimal.ZERO;
-    return new BigDecimal(-num).div(new BigDecimal(den * BigInt(n + 1)));
-  }
+  if (sInteger && sRe <= 0 && sRe >= -100)
+    return bigHurwitzZetaNegativeInteger(ce, -sRe, a, requested);
 
   let sDist = 0;
   if (!sInteger) {
@@ -1867,6 +1869,143 @@ function bigHurwitzZetaEM(
     } else absolute += relative;
   }
   return undefined;
+}
+
+/**
+ * The largest size, in decimal digits, of the exact evaluation of ζ(−n, a)
+ * in `bigHurwitzZetaNegativeInteger`: (n + 1) times the digit count of the
+ * numerator and the denominator of the exact rational `a`, which is about
+ * the digit count of the integers in that evaluation. At this size the
+ * evaluation and its one division take about 10 ms.
+ */
+const HURWITZ_EXACT_DIGIT_LIMIT = 120_000;
+
+/**
+ * ζ(−n, a) = −Bₙ₊₁(a)/(n + 1) for an integer 0 ≤ n ≤ 100 and a real a ≥ 0,
+ * rounded to `requested` digits. The (k + a) = 0 term is dropped: at a = 0
+ * the value is the one at a = 1.
+ *
+ * When the exact rational of `a` is small enough
+ * (`HURWITZ_EXACT_DIGIT_LIMIT`), the polynomial is evaluated exactly in
+ * integers (`hurwitzZetaNegativeIntegerGaussianParts`) and rounded once.
+ * The integers grow like (n + 1) times the digits of `a`: at n = 50 and
+ * a = 1e−200000 they would have ten million digits. Past the limit, the
+ * polynomial is evaluated by Horner's rule in big decimals instead
+ * (`bigBernoulliPolynomialHorner`), with guard digits for the cancellation
+ * between its terms.
+ */
+function bigHurwitzZetaNegativeInteger(
+  ce: ComputeEngine,
+  n: number,
+  a: HurwitzOperand,
+  requested: number
+): BigNum | undefined {
+  let x = hurwitzOperandRational(a);
+  if (x[0] === 0n) x = [1n, 1n]; // the k + a = 0 term is dropped
+  const bits = (v: bigint) => (v < 0n ? -v : v).toString(2).length;
+  const work = (n + 1) * (bits(x[0]) + bits(x[1])) * Math.log10(2);
+  if (work <= HURWITZ_EXACT_DIGIT_LIMIT) {
+    const { re, den } = hurwitzZetaNegativeIntegerGaussianParts(n, {
+      re: x,
+      im: [0n, 1n],
+    });
+    return bigDecimalQuotient(re, den, requested);
+  }
+  const xBig = isRationalOperand(a) || a.isZero() ? undefined : a;
+  const saved = BigDecimal.precision;
+  let guard = 10;
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      BigDecimal.precision = requested + guard;
+      const point = xBig ?? new BigDecimal(x[0]).div(new BigDecimal(x[1])); // a ≠ 0 here
+      const r = bigBernoulliPolynomialHorner(n + 1, point);
+      if (r === undefined) return undefined;
+      if (r.lost <= guard - 5) {
+        BigDecimal.precision = requested + guard;
+        return r.value
+          .div(n + 1)
+          .neg()
+          .toPrecision(requested);
+      }
+      // A result of 0 at the working precision leaves the loss unknown.
+      if (!Number.isFinite(r.lost)) return undefined;
+      guard = Math.ceil(r.lost) + 10;
+    }
+  } finally {
+    BigDecimal.precision = saved;
+  }
+  return undefined;
+}
+
+/**
+ * B_N(x) by Horner's rule in big decimals at `BigDecimal.precision`, with
+ * the number of digits lost to cancellation: the log10 of the largest term
+ * eⱼxʲ/D minus the log10 of the result (`lost` is `Infinity` when the
+ * result is 0). For an x with an extreme exponent the terms decrease (tiny
+ * |x|) or increase (huge |x|) steadily and nothing cancels; the loss is
+ * large only for a moderate |x| and a large N (about 50 digits at N = 101,
+ * x = 2.7), and the caller then repeats the evaluation with that many more
+ * guard digits.
+ */
+function bigBernoulliPolynomialHorner(
+  N: number,
+  x: BigNum
+): { value: BigNum; lost: number } | undefined {
+  if (!x.isFinite()) return undefined;
+  const { e, d } = bernoulliPolynomialInteger(N);
+  const prec = BigDecimal.precision;
+  let acc = new BigDecimal(e[N]);
+  for (let j = N - 1; j >= 0; j--)
+    acc = addRounded(acc.mul(x).toPrecision(prec), new BigDecimal(e[j]), prec);
+  const value = acc.div(new BigDecimal(d));
+  const log10x = bigLog10Abs(x);
+  let largest = -Infinity;
+  for (let j = 0; j <= N; j++) {
+    if (e[j] === 0n) continue;
+    largest = Math.max(largest, bigLog10Abs(new BigDecimal(e[j])) + j * log10x);
+  }
+  largest -= bigLog10Abs(new BigDecimal(d));
+  const lost = value.isZero() ? Infinity : largest - bigLog10Abs(value);
+  return { value, lost };
+}
+
+/**
+ * u + v rounded to `prec` digits. When one term is below the last digit of
+ * the other by more than 5 guard digits, it is dropped without the
+ * addition: `BigDecimal.add` aligns the two significands first, which for
+ * 1e−200000 + 1 builds a 200 000-digit integer.
+ */
+function addRounded(u: BigNum, v: BigNum, prec: number): BigNum {
+  if (u.isZero()) return v.toPrecision(prec);
+  if (v.isZero()) return u.toPrecision(prec);
+  const magnitude = (w: BigNum) => w.exponent + w._digitCount();
+  const mu = magnitude(u);
+  const mv = magnitude(v);
+  if (mu < mv - prec - 5) return v.toPrecision(prec);
+  if (mv < mu - prec - 5) return u.toPrecision(prec);
+  return u.add(v).toPrecision(prec);
+}
+
+/**
+ * num/den, with den > 0, as a big decimal rounded to `digits` significant
+ * digits. `new BigDecimal(den).div(...)` would first strip the trailing
+ * decimal zeros of `den` one small division at a time, which takes seconds
+ * for a 30 000-digit power of 10. Here the quotient is formed once, with 10
+ * guard digits, from the bit lengths of `num` and `den`.
+ */
+export function bigDecimalQuotient(
+  num: bigint,
+  den: bigint,
+  digits: number
+): BigNum {
+  if (num === 0n) return BigDecimal.ZERO;
+  const bits = (x: bigint) => (x < 0n ? -x : x).toString(2).length;
+  // 10^k·num/den has at least `digits + 10` digits.
+  const k =
+    digits + 10 + Math.ceil((bits(den) - bits(num) + 1) * Math.log10(2));
+  const q =
+    k >= 0 ? (num * 10n ** BigInt(k)) / den : num / (den * 10n ** BigInt(-k));
+  return new BigDecimal(`${q}e${-k}`).toPrecision(digits);
 }
 
 /**

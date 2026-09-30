@@ -270,6 +270,7 @@ export function hurwitzZetaNegativeIntegerAt(n: number, a: number): number {
   for (let j = N - 1; j >= 0; j--)
     acc = acc * p + (c.e[j] << (q * BigInt(N - j)));
   return rationalToDouble(-acc, c.d * (1n << (q * BigInt(N))) * BigInt(N));
+}
 
 /** A complex value with exact bigint-rational real and imaginary parts. */
 export interface GaussianRational {

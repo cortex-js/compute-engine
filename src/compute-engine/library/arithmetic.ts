@@ -96,7 +96,7 @@ import {
   hurwitzZetaNegativeInteger,
   generalizedZetaNegativeInteger,
   bernoulliPolynomialCoefficients,
-  hurwitzZetaNegativeIntegerGaussian,
+  hurwitzZetaNegativeIntegerGaussianParts,
   type GaussianRational,
 } from '../numerics/bernoulli.js';
 import {
@@ -118,6 +118,7 @@ import {
   bigBeta,
   bigZeta,
   bigHurwitzZeta,
+  bigDecimalQuotient,
   bigZetaGeneralized,
   bigLerchPhi,
   type HurwitzOperand,
@@ -2332,6 +2333,38 @@ const HURWITZ_PEEL_LIMIT = 20;
 const HURWITZ_NEGATIVE_ORDER_LIMIT = 100;
 
 /**
+ * The largest order n for which ζ(−n, a) with a SYMBOLIC `a` (a free
+ * variable, or an irrational constant such as `Pi`) is rewritten as the
+ * Bernoulli polynomial in `a`. The polynomial has n + 2 terms whose
+ * coefficients grow faster than n!: at n = 100 it is about 4700 characters
+ * long, and for a compound `a` such as `x + y` the expansion takes more
+ * than a second at n = 30. Past this order the expression stays symbolic.
+ * The limit is the one `PolyLog` uses for its symbolic closed form
+ * (`EULERIAN_MAX_ORDER` in `numerics/polylog.ts`, 12).
+ */
+const HURWITZ_SYMBOLIC_ORDER_LIMIT = 12;
+
+/**
+ * The largest size, in decimal digits, of the exact computation of ζ(−n, a)
+ * as a Bernoulli polynomial at a numeric `a`. The size
+ * (`gaussianRationalWorkDigits`) is (n + 1) times the total digit count of
+ * the numerators and denominators of the real and imaginary parts of `a`,
+ * which is about the digit count of the integers in that computation.
+ *
+ * For a float or complex literal `a` the result is rounded to the working
+ * precision, with one division: at `HURWITZ_FLOAT_DIGIT_LIMIT` that takes
+ * about 10 ms. A larger `a` (many digits, as at a high `ce.precision`, or a
+ * large exponent, as in `1e-5000`) uses the numeric kernel instead.
+ *
+ * For an exact rational `a` the result is an exact rational, which must be
+ * reduced: the gcd costs more, and at `HURWITZ_EXACT_DIGIT_LIMIT` building
+ * and boxing the result takes about 15 ms. Past it the expression stays
+ * symbolic under `evaluate()`.
+ */
+const HURWITZ_FLOAT_DIGIT_LIMIT = 120_000;
+const HURWITZ_EXACT_DIGIT_LIMIT = 4_000;
+
+/**
  * ζ(−n, a) = −Bₙ₊₁(a)/(n+1) (DLMF 25.11.14), as a compute-engine expression
  * in `a`, built by Horner's method from `bernoulliPolynomialCoefficients`
  * using CE's own (exact, symbolic) arithmetic.
@@ -2384,27 +2417,56 @@ function rationalFromBigDecimal(
  * `rationalFromBigDecimal`), or `undefined` when `a` carries no such exact
  * decimal value (a `NaN`/infinite component, or an exact irrational such as
  * a radical, which has no `bignumRe` decimal expansion to read as exact).
+ * At machine precision a float has no `bignumRe`/`bignumIm`: its double
+ * parts are read as the shortest decimal that rounds to them (`2.7` for the
+ * double nearest 2.7), as a literal at a higher precision is.
  */
 function gaussianRationalFromNumber(
-  a: Expression
+  a: Expression & NumberLiteralInterface
 ): GaussianRational | undefined {
-  const re = rationalFromBigDecimal(a.bignumRe);
+  const re = rationalFromBigDecimal(a.bignumRe ?? new BigDecimal(a.re));
   if (re === undefined) return undefined;
   if (!a.isComplex) return { re, im: [0n, 1n] };
-  const im = rationalFromBigDecimal(a.bignumIm);
+  const im = rationalFromBigDecimal(a.bignumIm ?? new BigDecimal(a.im));
   if (im === undefined) return undefined;
   return { re, im };
 }
 
-/** `value` as a compute-engine expression: a plain exact number when its
- * imaginary part is exactly 0, otherwise an exact `Complex`. */
-function gaussianRationalToExpression(
+/** The approximate number of decimal digits of the integers in the exact
+ * computation of ζ(−n, a) at the Gaussian rational `a` (see
+ * `HURWITZ_FLOAT_DIGIT_LIMIT`). */
+function gaussianRationalWorkDigits(n: number, a: GaussianRational): number {
+  const bits = (x: bigint) => (x < 0n ? -x : x).toString(2).length;
+  const total = bits(a.re[0]) + bits(a.re[1]) + bits(a.im[0]) + bits(a.im[1]);
+  return Math.ceil((n + 1) * total * Math.log10(2));
+}
+
+/** `gaussianRationalWorkDigits` for a real rational `a`. */
+function rationalWorkDigits(
+  n: number,
+  a: [number | bigint, number | bigint]
+): number {
+  return gaussianRationalWorkDigits(n, {
+    re: [BigInt(a[0]), BigInt(a[1])],
+    im: [0n, 1n],
+  });
+}
+
+/**
+ * num/den, with den > 0, as a big decimal rounded to the precision of
+ * `engine` (17 digits at machine precision, enough to round to the nearest
+ * double), with `bigDecimalQuotient` (`numerics/special-functions.ts`),
+ * which forms the quotient with one bigint division. It reads the engine's
+ * precision, not the module-global `BigDecimal.precision`, which the
+ * construction of another engine changes.
+ */
+function engineQuotient(
   engine: ComputeEngine,
-  value: GaussianRational
-): Expression {
-  const re = engine.number(value.re);
-  if (value.im[0] === 0n) return re;
-  return engine.function('Complex', [re, engine.number(value.im)]);
+  num: bigint,
+  den: bigint
+): BigDecimal {
+  const digits = bignumPreferred(engine) ? engine.precision : 17;
+  return bigDecimalQuotient(num, den, digits);
 }
 
 /**
@@ -2417,7 +2479,8 @@ function evaluateHurwitzZeta(
   engine: ComputeEngine,
   s: Expression,
   a: Expression,
-  numericApproximation: boolean | undefined
+  numericApproximation: boolean | undefined,
+  symbolicPolynomial = true
 ): Expression | undefined {
   const atInfinity = zetaAtInfiniteOperand(engine, s, a);
   if (atInfinity !== undefined) return atInfinity ?? undefined;
@@ -2427,9 +2490,13 @@ function evaluateHurwitzZeta(
   // arithmetic except the last:
   const sInt = asSmallInteger(s);
   if (sInt !== null && sInt <= 0 && -sInt <= HURWITZ_NEGATIVE_ORDER_LIMIT) {
-    // 1. `a` is already tagged an exact rational or integer.
+    // 1. `a` is already tagged an exact rational or integer, with at most
+    // `HURWITZ_EXACT_DIGIT_LIMIT` digits of work.
     const ra = asRational(a);
-    if (ra !== undefined) {
+    if (
+      ra !== undefined &&
+      rationalWorkDigits(-sInt, ra) <= HURWITZ_EXACT_DIGIT_LIMIT
+    ) {
       const exact = engine.number(
         hurwitzZetaNegativeInteger(-sInt, [BigInt(ra[0]), BigInt(ra[1])])
       );
@@ -2442,28 +2509,51 @@ function evaluateHurwitzZeta(
     // end, converting to a float — never inside Horner's method, where
     // `.mul`/`.add` at the engine's working precision would lose digits to
     // the same cancellation `hurwitzZetaNegativeIntegerGaussian` avoids.
-    // Float contagion (`shouldNumericize`): the result is numeric even
-    // under plain `evaluate()` once `a` itself is inexact.
+    // Float contagion: `a` is inexact, so the result is a float even under
+    // plain `evaluate()`. The integers in that computation have about
+    // `gaussianRationalWorkDigits` digits: past `HURWITZ_FLOAT_DIGIT_LIMIT`
+    // the numeric kernel below answers instead.
     if (isNumber(a) && !a.isExact) {
       const gaussian = gaussianRationalFromNumber(a);
-      if (gaussian !== undefined) {
-        const value = hurwitzZetaNegativeIntegerGaussian(-sInt, gaussian);
-        const exact = gaussianRationalToExpression(engine, value);
-        return shouldNumericize(numericApproximation, a) ? exact.N() : exact;
+      if (
+        gaussian !== undefined &&
+        gaussianRationalWorkDigits(-sInt, gaussian) <= HURWITZ_FLOAT_DIGIT_LIMIT
+      ) {
+        const { re, im, den } = hurwitzZetaNegativeIntegerGaussianParts(
+          -sInt,
+          gaussian
+        );
+        if (im === 0n)
+          return boxBignumResult(engine, engineQuotient(engine, re, den));
+        return engine.number(
+          engine._numericValue({
+            re: engineQuotient(engine, re, den),
+            im: engineQuotient(engine, im, den),
+          })
+        );
       }
     }
 
-    // 3. `a` is symbolic — a free variable, or a concrete irrational with
-    // no exact rational form (`Sqrt(2)`, reached because route 2 above
-    // requires a decimal `bignumRe`, which a radical does not have): build
-    // the polynomial as an expression in `a`. `evaluate()` (and `.N()` with
+    // 3. `a` is symbolic — a free variable, or an irrational constant or
+    // expression such as `Pi` (an exact radical literal such as `Sqrt(2)`
+    // is a number literal, so it does not reach this route and stays
+    // symbolic under `evaluate()`): build the polynomial as an expression
+    // in `a`. `evaluate()` (and `.N()` with
     // `a` still a free variable, so nothing to cancel) return it directly.
     // `.N()` on a concrete irrational `a` has no exact route above to fall
     // back on and would repeat the cancellation route 2 exists to avoid, so
     // it declines here instead of guessing a guard-digit count; the general
     // kernel below is the fallback, at whatever accuracy it measures for a
     // numeric literal.
-    if (!isNumber(a)) {
+    // `symbolicPolynomial` is false when the caller's convention differs
+    // from the Hurwitz one for some values of `a` (see
+    // `evaluateGeneralizedZeta`). Past `HURWITZ_SYMBOLIC_ORDER_LIMIT` the
+    // polynomial is too long to be useful, and the expression stays symbolic.
+    if (
+      !isNumber(a) &&
+      symbolicPolynomial &&
+      -sInt <= HURWITZ_SYMBOLIC_ORDER_LIMIT
+    ) {
       const polynomial = hurwitzZetaNegativeIntegerExpression(engine, -sInt, a);
       if (!shouldNumericize(numericApproximation, a))
         return polynomial.evaluate();
@@ -2474,8 +2564,13 @@ function evaluateHurwitzZeta(
   if (sInt === 1) return engine.ComplexInfinity; // pole, every a
 
   const finite = isFiniteNumberLiteral;
+  // The integer test reads the big decimal when there is one: the double
+  // `a.re` of 1e−2000 is 0, which would make it a pole.
   const aNonposInt =
-    isNumber(a) && !a.isComplex && Number.isInteger(a.re) && a.re <= 0;
+    isNumber(a) &&
+    !a.isComplex &&
+    (a.bignumRe?.isInteger() ?? Number.isInteger(a.re)) &&
+    a.re <= 0;
 
   // a a non-positive integer: the (k+a) = 0 term diverges when Re(s) > 0,
   // and is indeterminate on Re(s) = 0 for a non-real s.
@@ -2602,8 +2697,18 @@ function evaluateGeneralizedZeta(
   const sInt = asSmallInteger(s);
   if (sInt === 1) return engine.ComplexInfinity;
 
+  // A symbolic `a` gets the Bernoulli polynomial of `evaluateHurwitzZeta`
+  // only when `a` is known to be positive: for a negative `a` the terms with
+  // k + a < 0 are |k + a|^(−s) here, so at a = −5/2 Zeta(−1, a) is 109/24,
+  // while the polynomial −a²/2 + a/2 − 1/12 (the Hurwitz value) is −107/24.
   if (!isNumber(a) || a.re > 0)
-    return evaluateHurwitzZeta(engine, s, a, numericApproximation);
+    return evaluateHurwitzZeta(
+      engine,
+      s,
+      a,
+      numericApproximation,
+      isNumber(a) || a.isPositive === true
+    );
 
   if (!a.isComplex && a.re === 0)
     return engine.function('Zeta', [s]).evaluate({ numericApproximation });
@@ -2615,7 +2720,10 @@ function evaluateGeneralizedZeta(
   // and the rest is the Bernoulli closed form of `evaluateHurwitzZeta`.
   if (sInt !== null && sInt <= 0 && -sInt <= HURWITZ_NEGATIVE_ORDER_LIMIT) {
     const ra = asRational(a);
-    if (ra !== undefined) {
+    if (
+      ra !== undefined &&
+      rationalWorkDigits(-sInt, ra) <= HURWITZ_EXACT_DIGIT_LIMIT
+    ) {
       const value = generalizedZetaNegativeInteger(-sInt, [
         BigInt(ra[0]),
         BigInt(ra[1]),
@@ -2715,8 +2823,13 @@ function evaluateLerchPhi(
   // a a non-positive integer, Re(s) > 0, z ≠ 0: the (k+a) = 0 term
   // diverges — the same pole `evaluateHurwitzZeta` gives `HurwitzZeta` at a
   // non-positive integer base point, since a nonzero zᵏ never cancels it.
+  // The integer test reads the big decimal when there is one: the double
+  // `a.re` of 1e−2000 is 0, which would make it a pole.
   const aNonposInt =
-    isNumber(a) && !a.isComplex && Number.isInteger(a.re) && a.re <= 0;
+    isNumber(a) &&
+    !a.isComplex &&
+    (a.bignumRe?.isInteger() ?? Number.isInteger(a.re)) &&
+    a.re <= 0;
   if (aNonposInt && finite(s) && s.re > 0 && zNonZero)
     return engine.ComplexInfinity;
   // Re(s) = 0, s ≠ 0, same base point, z ≠ 0: 0^(−s) = 0^(−i·Im(s)) doesn't
