@@ -64,6 +64,7 @@ import {
 import {
   collectionElementType,
   finitePartOfType,
+  functionResult,
   isNonRealNumber,
   isPointElementType,
   nonNegativeRangeType,
@@ -13571,6 +13572,85 @@ export class BaseCompiler {
   }
 
   /**
+   * The `["Function", body, …params]` literal a callback operand stands for:
+   * the operand itself when it is a literal, or, for a SYMBOL, the block-local
+   * function the enclosing compiled block binds under that name
+   * (`CompileTarget.localFunctions`: `function step(acc, i) { … }` or
+   * `const step = (acc, i) => …` earlier in the same block), or else the
+   * engine definition the name resolves to (`userFunctionLiteral`).
+   * `undefined` when the operand names neither.
+   *
+   * The block-local registry is read FIRST, because a block local shadows an
+   * engine definition of the same name, and because the engine's own lookup
+   * cannot see it at all: the block's scope is not active while the block is
+   * compiled, so `Fold(step, 0, xs)` with a block-local `step` was refused as
+   * "no compiled function form" while `Map(step, xs)` compiled (the callback
+   * route compiles the symbol as a plain bare-name read and never asks for
+   * the literal). A name BOUND by an enclosing form (`target.boundVars`: a
+   * block local, a lambda parameter, a loop index) that has no function
+   * entry answers `undefined` rather than the engine definition it shadows:
+   * `let step = 5` in a block removes the registry entry of a same-named
+   * function, and the emitted code reads the local, not the function.
+   * Without a target only the engine definition is consulted.
+   */
+  static callbackLiteral(
+    op: Expression,
+    target?: CompileTarget<Expression>
+  ): (Expression & FunctionInterface) | undefined {
+    if (isFunction(op, 'Function')) return op;
+    if (!isSymbol(op)) return undefined;
+    const local = target?.localFunctions?.get(op.symbol);
+    if (local !== undefined)
+      return isFunction(local, 'Function') ? local : undefined;
+    if (target?.boundVars?.has(op.symbol)) return undefined;
+    return BaseCompiler.userFunctionLiteral(op.engine, op.symbol);
+  }
+
+  /**
+   * The provable type of the value a fold (`Reduce`, `Scan`) passes to its
+   * combiner's ACCUMULATOR parameter, or `undefined` when nothing is
+   * provable there.
+   *
+   * The accumulator receives the seed on the first step (the first element,
+   * for a seedless fold) and the combiner's own result on every later step,
+   * so its type is the join of the seed's type and the combiner's result
+   * type. The result type is the literal's own, computed with the
+   * accumulator bound to its annotation when it carries one. So for an
+   * accumulator annotated `X` the join is a subtype of `X` exactly when the
+   * seed satisfies `X` and a body that receives an `X` provably returns an
+   * `X`: the induction under which the interpreter's annotation check can
+   * never fire, which is what `assertCallbackAnnotations` needs.
+   *
+   * Before this the accumulator position was passed as "not provable", so
+   * every annotated accumulator declined, including the list-building fold
+   * `Fold((acc: list<integer | nan>, i) => Join(acc, [2 p[i]]), [], 1..n)`
+   * (issue #369). A `unknown`/`any` seed or result still answers
+   * `undefined`: nothing is provable from a top type.
+   */
+  static foldAccumulatorArgType(
+    coll: Expression,
+    op: Expression,
+    init: Expression | undefined | null,
+    target?: CompileTarget<Expression>
+  ): Type | undefined {
+    const literal = BaseCompiler.callbackLiteral(op, target);
+    if (literal === undefined) return undefined;
+    const result = functionResult(literal.type.type);
+    if (result === undefined || result === 'unknown' || result === 'any')
+      return undefined;
+    let seed: Type | undefined;
+    if (init === undefined || init === null) {
+      seed = BaseCompiler.collectionElementTypeOf(coll);
+    } else {
+      const seedExpr = init.isCanonical ? init : init.canonical;
+      seed = seedExpr.type.type;
+    }
+    if (seed === undefined || seed === 'unknown' || seed === 'any')
+      return undefined;
+    return widen(seed, result);
+  }
+
+  /**
    * Fail closed when a compiled CALLBACK carries a parameter annotation
    * whose enforcement the emitted code would silently drop.
    *
@@ -25216,7 +25296,8 @@ export class BaseCompiler {
   static combinerPlan(
     coll: Expression,
     op: Expression,
-    init: Expression | undefined | null
+    init: Expression | undefined | null,
+    target?: CompileTarget<Expression>
   ):
     | {
         op: Expression;
@@ -25225,9 +25306,9 @@ export class BaseCompiler {
         coerceSeed: boolean;
       }
     | undefined {
-    const literal = isSymbol(op)
-      ? BaseCompiler.userFunctionLiteral(op.engine, op.symbol)
-      : op;
+    // A block-local combiner is resolved through the compiler's own registry
+    // (`callbackLiteral`); the engine's definitions cannot see it.
+    const literal = BaseCompiler.callbackLiteral(op, target);
     if (literal === undefined) return undefined;
     if (!isFunction(literal, 'Function') || literal.nops !== 3)
       return undefined;

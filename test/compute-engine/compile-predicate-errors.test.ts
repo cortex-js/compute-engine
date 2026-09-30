@@ -264,9 +264,19 @@ describe('combiner and index callbacks', () => {
     ]);
   };
 
-  it('Reduce declines an annotated accumulator (its type is not provable)', () => {
-    expect(() => js(reduceExpr('integer', 'integer'))).toThrow(
-      /callback parameter 'a'/
+  // The accumulator receives the seed (`0`) and then the combiner's own
+  // result (`a + n`, an integer for an `integer` accumulator over integer
+  // elements), so an `integer` annotation is provably satisfied on every
+  // step (`BaseCompiler.foldAccumulatorArgType`, issue #369).
+  it('Reduce admits an annotated accumulator the seed and the body provably satisfy', () => {
+    expect(js(reduceExpr('integer', 'integer')).success).toBe(true);
+  });
+
+  it('Reduce declines an annotated accumulator the body does not provably return', () => {
+    // `a + n` over `number` elements is a `number`, not the `integer` the
+    // accumulator is annotated as.
+    expect(() => js(reduceExpr('integer', 'number', 'number'))).toThrow(
+      /callback parameter 'a' is annotated 'integer', which the argument type/
     );
   });
 

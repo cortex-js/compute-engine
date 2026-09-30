@@ -4185,10 +4185,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           `Could not compile \`Reduce\`: a custom combiner compiles only with an explicit ` +
             `initial value.`
         );
-      // The combiner is `(accumulator, element)`: only the element's type is
-      // provable, so an annotated accumulator declines.
+      // The combiner is `(accumulator, element)`: the accumulator receives
+      // the seed, then the combiner's own result
+      // (`BaseCompiler.foldAccumulatorArgType`), the element the source's
+      // element type.
       const fn = pyFnArg('Reduce', op, compile, [
-        undefined,
+        BaseCompiler.foldAccumulatorArgType(args[0]!, op, init),
         BaseCompiler.collectionElementTypeOf(args[0]),
       ]);
       return `__import__('functools').reduce(${fn}, ${coll}, ${compile(init)})`;
@@ -4219,7 +4221,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       builtin ??
       ((isFunction(op, 'Function') && op.nops - 1 === 2) || isSymbol(op)
         ? pyFnArg('Scan', op, compile, [
-            undefined,
+            BaseCompiler.foldAccumulatorArgType(args[0]!, op, init),
             BaseCompiler.collectionElementTypeOf(args[0]),
           ])
         : undefined);

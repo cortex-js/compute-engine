@@ -109,6 +109,61 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A fold with a bare accumulator is typed `collection<any>`, so a view over its result materializes as a `Set` (OPEN, decision — found 2026-09-29 by issue #369)
+
+`Fold((acc, i) => Join(acc, [2 p[i]]), [], 1..Length(p))` evaluates to the list
+`[6, 2, 4]` for `p = [3, 1, 2]`, but it is typed `collection<any>`: the
+accumulator parameter is not annotated, its type is inferred from its use in
+`Join` (`collection<any>`, since `Join` also accepts a set), and the fold's type
+is the combiner's result type. Two consequences:
+
+- `Map(x => x + 1, fold)` evaluates to `Set(7, 3, 5)` and
+  `Filter(fold, x => x > 3)` to `Set(6, 4)` on the interpreter, where the
+  compiled `Map` answers the array `[7, 3, 5]`. The view is typed with an
+  abstract collection type, so its kind follows the values its sources hold
+  (`abstractSourcesHoldIndexedValues`, `boxed-function.ts`); the fold node has
+  no collection handlers and holds no value, so it reads as "not indexed" and
+  the view materializes as a set. The source-resolution helper that evaluates an
+  eager producer to read its kind (`eagerViewSource`, `library/collections.ts`)
+  refuses a producer whose operands include an unevaluated function application,
+  which a fold's callback is, to bound the cost of recursive list builders.
+- The compiled consumers of the fold work only through run-time array checks
+  (landed for #369), and an element read of the result is typed `unknown`. With
+  a BLOCK-LOCAL combiner (`function step(acc, i) { … }` in the same program) the
+  fold itself is typed `unknown`, because the lazy `Reduce` never binds the
+  combiner symbol: `Length(Fold(step, …))` compiles (the fold is read from its
+  seed and its combiner), but `let q = Fold(step, …)` followed by `Length(q)`
+  declines, since a top-typed local is not read through the run-time check.
+
+The precise type is the fixpoint of
+`T = widen(type(seed), type(body with acc: T))`, here `list<integer | nan>`. The
+fold's `type:` handler reads operand descriptors and cannot re-type the
+combiner's body under a hypothesis, so the fixpoint has to be computed where the
+raw literal is available, in the canonical handlers of `Reduce`, `Fold` and
+`Scan`. Two ways to carry it, both need a decision:
+
+- Option A: canonicalize the literal with the accumulator PRE-DECLARED at the
+  fixpoint type as an inferred type, not an annotation. Nothing is enforced at
+  apply time, the printed literal is unchanged, and every type-reading consumer
+  sees the precise type, so the view above is typed `list<number>` and
+  materializes as a list. Cost: up to three canonicalizations of the body per
+  fold, and a more precise static type can surface new Epsil static diagnostics
+  in existing programs.
+- Option B: stamp the accumulator with a `Typed` annotation at the fixpoint
+  type. Enforced at apply time (an unsound corner of the type system would then
+  reject a valid fold), visible in `inferredAnnotations` output, and contrary to
+  the Design D audit that leaves the accumulator bare because "a fold's
+  accumulator may change type mid-fold"; the fixpoint covers that case, but the
+  decision of 2026-08-09 would have to be revisited.
+- Option C: leave the type as it is and make the kind decision of a view
+  evaluate a pure fold source once (the way `mapSource` evaluates an eager
+  source for `Map`), accepting the cost bound `eagerViewSource` protects.
+
+If nothing is decided, the compiled consumers keep working through the run-time
+checks, an annotated accumulator (`acc: list<integer | nan>`) is the way to a
+precise type on both routes, and a view over an unannotated fold's result stays
+a set on the interpreter.
+
 ### The `materialization` option truncates the operands of an eager operator to a preview (OPEN, decision — found 2026-09-29 by the fix for issue #368)
 
 `Length(Range(1, 5000)).evaluate({ materialization: true })` is `11`, and

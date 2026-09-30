@@ -1812,7 +1812,10 @@ function compileScalarBooleanBody(
  * `collection-utils`: importing that module here reorders module init and
  * breaks a runtime binding in the arithmetic broadcast path.
  */
-export function isIndexedCollectionOperand(e: Expression): boolean {
+export function isIndexedCollectionOperand(
+  e: Expression,
+  target?: CompileTarget<Expression>
+): boolean {
   const t = e.type;
   // A STRING is an indexed collection of its grapheme clusters in the type
   // lattice, so it MATCHES `indexed_collection` — but it does not lower to a
@@ -1830,7 +1833,9 @@ export function isIndexedCollectionOperand(e: Expression): boolean {
     return true;
   // A join over collections that are checked to be arrays at run time is an
   // array, although its type is `collection<T>` (`compilesToCheckedArray`).
-  return compilesToCheckedArray(e, new Set());
+  // The target, when the caller has one, lets a seeded fold's block-local
+  // combiner be resolved (`BaseCompiler.callbackLiteral`).
+  return compilesToCheckedArray(e, new Set(), target);
 }
 
 /**
@@ -1912,9 +1917,36 @@ function admitsRuntimeCheckedArray(e: Expression): boolean {
  * array, so the call is admitted too: `Length(f(b))` with `f` defined as
  * above. `visited` holds the user functions being looked through, so a
  * recursive definition answers `false` instead of looping.
+ *
+ * A SEEDED FOLD whose seed is an array source and whose combiner returns
+ * such a node compiles to the combiner's last value, an array, so it is
+ * admitted too. The witness is the list-building fold
+ * `Fold((acc, i) => Join(acc, [2 p[i]]), [], 1..n)` (issue #369): the
+ * engine types it `collection<any>` (the bare accumulator is inferred
+ * `collection<any>` from its use in `Join`), so `Length` and `At` of the
+ * fold refused it as "not an indexed collection" while the fold itself
+ * compiled. The combiner's accumulator parameter is an inferred-type
+ * symbol, which `admitsRuntimeCheckedArray` admits, so the body's `Join` is
+ * a checked array. A seedless fold is not admitted: its accumulator starts
+ * as the first element, whose shape this test does not read.
  */
-function compilesToCheckedArray(e: Expression, visited: Set<string>): boolean {
-  if (!e.type.matches('collection<any>')) return false;
+function compilesToCheckedArray(
+  e: Expression,
+  visited: Set<string>,
+  target?: CompileTarget<Expression>
+): boolean {
+  // A seeded fold whose combiner is a BLOCK-LOCAL function
+  // (`function step(acc, i) { … }` in the compiled block) is typed `unknown`,
+  // because the lazy `Reduce` never binds the combiner symbol and so cannot
+  // read its result type; such a fold is read from its seed and its combiner
+  // (below) whatever its static type says. A fold typed `unknown` for any
+  // other reason keeps failing the type test.
+  const blockLocalFold =
+    isFunction(e, 'Reduce') &&
+    e.nops === 3 &&
+    isSymbol(e.ops[1]) &&
+    target?.localFunctions?.has(e.ops[1].symbol) === true;
+  if (!blockLocalFold && !e.type.matches('collection<any>')) return false;
   if (e.type.matches('set<any>') || e.type.matches('dictionary<any>'))
     return false;
   const isArraySource = (op: Expression): boolean =>
@@ -1922,13 +1954,44 @@ function compilesToCheckedArray(e: Expression, visited: Set<string>): boolean {
       (op.type.matches('list<any>') ||
         op.type.matches('indexed_collection<any>'))) ||
     admitsRuntimeCheckedArray(op) ||
-    compilesToCheckedArray(op, visited);
+    compilesToCheckedArray(op, visited, target);
   if (isFunction(e, 'Join') || isFunction(e, 'ListJoin'))
     return (
       e.nops > 0 &&
       e.ops.every((op) => isAtomicJSJoinOperand(op) || isArraySource(op))
     );
   if (isFunction(e, 'Append')) return e.nops > 0 && isArraySource(e.ops[0]);
+  if (isFunction(e, 'Reduce') && e.nops === 3) {
+    const combiner = e.ops[1];
+    const name = isSymbol(combiner) ? combiner.symbol : undefined;
+    if (name !== undefined && visited.has(name)) return false;
+    const literal = BaseCompiler.callbackLiteral(combiner, target);
+    if (literal === undefined || literal.nops !== 3) return false;
+    // The value of a block body is its last statement. A body whose earlier
+    // statements are all declarations (`let v = …`) whose initializers
+    // mention no `Return` has no other exit, so its last statement is read;
+    // any other earlier statement (a `Return` inside an `If`, a loop, an
+    // assignment) could give the fold another value, and the body is then
+    // not read.
+    let body: Expression | undefined = literal.ops[0];
+    while (
+      isFunction(body, 'Block') &&
+      body.nops > 0 &&
+      body.ops
+        .slice(0, -1)
+        .every((s) => isFunction(s, 'Declare') && !s.has('Return'))
+    )
+      body = body.ops[body.nops - 1];
+    if (body === undefined || !isArraySource(e.ops[2])) return false;
+    const inner = name === undefined ? visited : new Set([...visited, name]);
+    return (
+      (!body.type.matches('string') &&
+        (body.type.matches('list<any>') ||
+          body.type.matches('indexed_collection<any>'))) ||
+      admitsRuntimeCheckedArray(body) ||
+      compilesToCheckedArray(body, inner, target)
+    );
+  }
   // The literal of a user function: the value of the symbol, or the literal
   // a `function` definition installed on the operator definition the call is
   // bound to (a definition local to a block has no symbol value).
@@ -1945,7 +2008,7 @@ function compilesToCheckedArray(e: Expression, visited: Set<string>): boolean {
   let body: Expression | undefined = fn.ops[0];
   while (isFunction(body, 'Block') && body.nops === 1) body = body.ops[0];
   if (body === undefined) return false;
-  return compilesToCheckedArray(body, new Set([...visited, name]));
+  return compilesToCheckedArray(body, new Set([...visited, name]), target);
 }
 
 /**
@@ -3894,7 +3957,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`docs/STRING_ROADMAP.md`, decision D13.)
     if (isProvablyStringOperand(arg))
       return `_SYS.chars(${compile(arg)}).length`;
-    if (!isIndexedCollectionOperand(arg)) {
+    if (!isIndexedCollectionOperand(arg, target)) {
       const checked = runtimeCheckedArrayCode('Length', arg, compile);
       if (checked !== undefined) return `(${checked}).length`;
       throw new Error(
@@ -3965,12 +4028,32 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // a surrogate pair.
     // (`docs/STRING_ROADMAP.md`, decision D13.)
     const stringBase = isProvablyStringOperand(coll);
-    const provablyIndexed = stringBase || isIndexedCollectionOperand(coll);
+    // A SYMBOL whose inferred type says "a collection" without proving an
+    // indexed one and without an indexed arm to admit it below
+    // (`let q = Fold((acc, i) => Join(acc, [p[i]]), [], 1..n)` infers
+    // `q: collection<any>`) is read through the run-time array check
+    // `_SYS.arr`, as `Length` and the list operators read it (issue #369): a
+    // set or a dictionary that does arrive throws instead of reading as a
+    // silent `NaN`. The index must be provably numeric, as for a base
+    // admitted by the "could be" test: such a base may hold a dictionary at
+    // run time, where the interpreter answers a keyed lookup, and a keyed
+    // access must decline here so that the interpreter evaluates it.
+    const checkedBase =
+      isIndexedCollectionOperand(coll, target) ||
+      couldBeIndexedCollectionOperand(coll) ||
+      !isNumericIndexOperand(index)
+        ? undefined
+        : runtimeCheckedArrayCode('At', coll, compile);
+    const provablyIndexed =
+      stringBase ||
+      checkedBase !== undefined ||
+      isIndexedCollectionOperand(coll, target);
     if (!provablyIndexed && !couldBeIndexedCollectionOperand(coll))
       throw new Error(
         `Could not compile \`At\`: first operand is not an indexed collection ` +
           `(list/vector/range).`
       );
+    const collCode = (): string => checkedBase ?? compile(coll);
     // A base admitted only by the "could be" path may be a dictionary at run
     // time, and keyed access has no compiled equivalent (`_SYS.at` answers NaN
     // for a non-array base, where the interpreter returns the stored value).
@@ -4025,9 +4108,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         if (cells !== undefined)
           return offset <= cells.length ? compile(cells[offset - 1]) : 'NaN';
       }
-      return `((${compile(coll)})[(${indexCode}) - 1] ?? NaN)`;
+      return `((${collCode()})[(${indexCode}) - 1] ?? NaN)`;
     }
-    const base = `_SYS.at(${stringBase ? `_SYS.chars(${compile(coll)})` : compile(coll)}, ${compile(index)})`;
+    const base = `_SYS.at(${stringBase ? `_SYS.chars(${collCode()})` : collCode()}, ${compile(index)})`;
     // `_SYS.at` marks an out-of-band SCALAR access with `NaN` (the numeric
     // absence marker). For an OBJECT-domain collection (non-numeric elements),
     // absence must instead be the target null (`undefined`, I6) so the object
@@ -4082,7 +4165,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const baseType = resolveTypeForCompilation(jsType(coll));
     const tupleBase = typeof baseType !== 'string' && baseType.kind === 'tuple';
     if (numericElement && !tupleBase && coll.unknowns.length > 0)
-      return `_SYS.atNumeric(${stringBase ? `_SYS.chars(${compile(coll)})` : compile(coll)}, ${compile(index)}, ${JSON.stringify(typeToString(eltT!))})`;
+      return `_SYS.atNumeric(${stringBase ? `_SYS.chars(${collCode()})` : collCode()}, ${compile(index)}, ${JSON.stringify(typeToString(eltT!))})`;
     return base;
   },
   // Fold a collection. CE `Reduce` canonicalizes `\sum_{i=d}^{d} d` to
@@ -4156,13 +4239,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
             `initial value.`
         );
       // The combiner is `(accumulator, element)`. The accumulator's type is
-      // the fold's own result, which `combinerPlan` decides: an accumulator
-      // annotated `complex` is satisfied when the plan puts the accumulator
-      // in the complex lane (a real seed is then lifted), and declines
-      // otherwise; any other annotation on that position declines.
-      const plan = BaseCompiler.combinerPlan(coll, op, init);
+      // the fold's own result: when `combinerPlan` puts the accumulator in
+      // the complex lane (a real seed is then lifted) an annotation is
+      // judged against `complex`; otherwise against the join of the seed's
+      // type and the combiner's result type
+      // (`BaseCompiler.foldAccumulatorArgType`), which is what an annotated
+      // accumulator provably receives on every step.
+      const plan = BaseCompiler.combinerPlan(coll, op, init, target);
       BaseCompiler.assertCallbackAnnotations('Reduce', op, [
-        plan?.accComplex ? 'complex' : undefined,
+        plan?.accComplex
+          ? 'complex'
+          : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
         BaseCompiler.collectionElementTypeOf(coll),
       ]);
       // ACCUMULATOR and ELEMENT lanes (`combinerPlan`): the combiner is
@@ -5392,14 +5479,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.foldLaneIsComplex(coll, init)
     );
     // As `Reduce`: the accumulator's annotation is judged against the lane
-    // `combinerPlan` chose.
+    // `combinerPlan` chose, or else against the join of the seed's type (the
+    // first element's, for a seedless scan) and the combiner's result type.
     const plan =
       builtin === undefined
-        ? BaseCompiler.combinerPlan(coll, op, init)
+        ? BaseCompiler.combinerPlan(coll, op, init, target)
         : undefined;
     if (builtin === undefined)
       BaseCompiler.assertCallbackAnnotations('Scan', op, [
-        plan?.accComplex ? 'complex' : undefined,
+        plan?.accComplex
+          ? 'complex'
+          : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
         BaseCompiler.collectionElementTypeOf(coll),
       ]);
     // Accumulator and element lanes as for `Reduce` above (`combinerPlan`).
@@ -14588,9 +14678,10 @@ function collArg(
   kind: string,
   arg: Expression | undefined,
   compile: (expr: Expression) => string,
-  position?: number
+  position?: number,
+  target?: CompileTarget<Expression>
 ): string {
-  if (!arg || !isIndexedCollectionOperand(arg)) {
+  if (!arg || !isIndexedCollectionOperand(arg, target)) {
     const checked = runtimeCheckedArrayCode(kind, arg, compile);
     if (checked !== undefined) return checked;
     throw new Error(
@@ -14758,7 +14849,8 @@ function elementsArg(
   kind: string,
   arg: Expression | undefined,
   compile: (expr: Expression) => string,
-  position?: number
+  position?: number,
+  target?: CompileTarget<Expression>
 ): string {
   if (arg !== undefined && isProvablyStringOperand(arg))
     return `_SYS.chars(${compile(arg)})`;
@@ -14766,7 +14858,7 @@ function elementsArg(
   // text (`string | list<number>`) is not segmented here — it would reach the
   // array lowering as a JS string. `collArg` refuses it (see
   // `couldBeStringOperand`), which is why this funnel needs no test of its own.
-  return collArg(kind, arg, compile, position);
+  return collArg(kind, arg, compile, position, target);
 }
 
 /**
@@ -15598,7 +15690,10 @@ function customCombiner(
   if (isFunction(op, 'Function')) {
     callable = op.nops - 1 === 2;
   } else if (isSymbol(op)) {
-    const literal = BaseCompiler.userFunctionLiteral(op.engine, op.symbol);
+    // A block-local function (`function add(a, x) { … }` in the compiled
+    // block) is found through the compiler's registry, an engine definition
+    // through the engine (`BaseCompiler.callbackLiteral`).
+    const literal = BaseCompiler.callbackLiteral(op, target);
     if (literal !== undefined) callable = literal.nops - 1 === 2;
     else
       callable =
