@@ -39,22 +39,26 @@ import { complexDivide } from '../numerics/numeric-complex.js';
  * spelling). A non-finite CONSTANT is the same value reached by another route,
  * so it gets the same spelling instead of failing the compilation.
  *
- * GLSL goes through the overridable preamble helpers `_gpu_nan()` /
- * `_gpu_inf()` — one symbol a host can redefine without touching the generated
- * code. WGSL uses an inline `bitcast`, matching the existing WGSL NaN
- * convention (its spelling is pinned by `compile-wgsl.test.ts`).
+ * Both targets go through the preamble helpers `_gpu_nan()` / `_gpu_inf()` —
+ * one symbol a host can redefine without touching the generated code. The
+ * helpers build the value from its bit pattern (`GPU_NAN_PREAMBLE_GLSL` and
+ * `GPU_NAN_PREAMBLE_WGSL` in `gpu-target.ts`). WGSL cannot spell it inline:
+ * a bitcast of a CONSTANT to a non-finite f32 is a const-expression, and a
+ * const-expression that evaluates to NaN or an infinity is a shader-creation
+ * error (Chrome's compiler reports "value nan cannot be represented as
+ * 'f32'"). Inside the helper the bit pattern is a `let`, a run-time value.
  *
  * Infinity is a BIT PATTERN, never `1.0 / 0.0`: a fast-math driver is licensed
  * to fold a division by a constant zero (ANGLE→Metal fast-math already
  * destroys compensated arithmetic in this project), and a bit pattern is not
  * foldable.
+ *
+ * The spelling is the same on both targets; `language` is kept for callers
+ * that pass it.
  */
-export function gpuNonFiniteLiteral(n: number, language?: string): string {
-  const isWGSL = language === 'wgsl';
-  if (Number.isNaN(n))
-    return isWGSL ? 'bitcast<f32>(0x7fc00000u)' : '_gpu_nan()';
-  const inf = isWGSL ? 'bitcast<f32>(0x7f800000u)' : '_gpu_inf()';
-  return n > 0 ? inf : `(-${inf})`;
+export function gpuNonFiniteLiteral(n: number, _language?: string): string {
+  if (Number.isNaN(n)) return '_gpu_nan()';
+  return n > 0 ? '_gpu_inf()' : '(-_gpu_inf())';
 }
 
 /**

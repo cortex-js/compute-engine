@@ -41,90 +41,89 @@
   point): a function whose parameters are all numbers or collections answered
   the absence marker without running its body. It now answers
   `Error(ErrorCode("incompatible-type", "tuple<number, number>", "missing"), "Missing")`,
-  as the same function declared with `ce.declare("f", { signature: … })`
-  already did. The rule applies to a function literal with at least one
-  annotated parameter (an Epsil `function`, a lambda `(p: T) ↦ …`). An absent
-  value at a parameter annotated with a type that has no `missing` member is an
-  error. A parameter annotated with a numeric type (`number`, `integer`,
-  `real`) reads the absent value as `NaN`, the absence marker of a numeric
-  domain, so `f(x: real) = x + 1` still answers `NaN` for `f(Missing)`. At a
-  parameter with no annotation the body runs with the absent value, as before. The type of such a call no longer
-  has a `missing` member (`list<…>`, not `list<…> | missing`), so `Count` and
-  `Length` over its result compile. What is lost: a call that relied on the
-  quiet `NaN` or `Missing` for an absent point, list or string argument. To
-  accept absence, annotate the parameter `T | missing` and test `isMissing(p)`,
-  or remove the absent case at the call (`first(…) ?? fallback`). At boxing, an
-  argument typed `missing | T` is still admitted at a parameter annotated `T`;
-  the literal `Missing` at a parameter that is not numeric is an
-  `incompatible-type` error at boxing. Library operators are not affected
-  (`Sin(Missing)` is `NaN`).
+  as the same function declared with `ce.declare("f", { signature: … })` already
+  did. The rule applies to a function literal with at least one annotated
+  parameter (an Epsil `function`, a lambda `(p: T) ↦ …`). An absent value at a
+  parameter annotated with a type that has no `missing` member is an error. A
+  parameter annotated with a numeric type (`number`, `integer`, `real`) reads
+  the absent value as `NaN`, the absence marker of a numeric domain, so
+  `f(x: real) = x + 1` still answers `NaN` for `f(Missing)`. At a parameter with
+  no annotation the body runs with the absent value, as before. The type of such
+  a call no longer has a `missing` member (`list<…>`, not `list<…> | missing`),
+  so `Count` and `Length` over its result compile. What is lost: a call that
+  relied on the quiet `NaN` or `Missing` for an absent point, list or string
+  argument. To accept absence, annotate the parameter `T | missing` and test
+  `isMissing(p)`, or remove the absent case at the call
+  (`first(…) ?? fallback`). At boxing, an argument typed `missing | T` is still
+  admitted at a parameter annotated `T`; the literal `Missing` at a parameter
+  that is not numeric is an `incompatible-type` error at boxing. Library
+  operators are not affected (`Sin(Missing)` is `NaN`).
 - **A user function accepts `NaN` at a parameter typed `integer` or `real`.**
   `function f(n: integer) { n + 1 }` called with a `NaN` value (a restricted
   number whose condition fails, `first(filter(xs, p))` over numbers when the
   filter finds nothing) answered
   `Error(ErrorCode("incompatible-type", "integer", "NaN"), NaN)`, while
   `f(n: number)` answered `NaN`, and so did the same body declared with
-  `ce.declare("f", { signature: "(integer) -> unknown" })`. The literal
-  `f(NaN)` was refused at boxing on both routes. A user function now accepts
-  `NaN` (and `Indeterminate`) at every parameter typed with a numeric type, and
-  its body computes with it: all of these answer `NaN`. A number that is not
-  `NaN` is checked as before (`f(1.5)` is an error for `n: integer`). Library
-  operators keep their own `NaN` policy. What is lost: a call that relied on
-  the error to detect a `NaN` argument at an `integer` or `real` parameter;
-  test `isNaN(n)` in the body.
+  `ce.declare("f", { signature: "(integer) -> unknown" })`. The literal `f(NaN)`
+  was refused at boxing on both routes. A user function now accepts `NaN` (and
+  `Indeterminate`) at every parameter typed with a numeric type, and its body
+  computes with it: all of these answer `NaN`. A number that is not `NaN` is
+  checked as before (`f(1.5)` is an error for `n: integer`). Library operators
+  keep their own `NaN` policy. What is lost: a call that relied on the error to
+  detect a `NaN` argument at an `integer` or `real` parameter; test `isNaN(n)`
+  in the body.
 - **The Epsil static check reports an argument that may be absent at an
   annotated parameter.** With `f(p: tuple<number, number>)`, the call
   `f(first(filter(xs, p)))` is reported before the program runs: "expected
   `tuple<number, number>`, got `missing | tuple<…>`". The program still runs.
   Nothing is reported at a parameter with no annotation, at a parameter
   annotated `T | missing` or with a numeric type, or when the absent case is
-  removed with `??`. The engine (`ce.box`, `ce.parse`, compilation) admits the argument as
-  before. A function literal bound with `let` or `const` is checked as a
-  `function` definition is, and the inferred type of its bare parameters is no
-  longer enforced by the static check: `let k = (p, n: number) => p[1] + n`
+  removed with `??`. The engine (`ce.box`, `ce.parse`, compilation) admits the
+  argument as before. A function literal bound with `let` or `const` is checked
+  as a `function` definition is, and the inferred type of its bare parameters is
+  no longer enforced by the static check: `let k = (p, n: number) => p[1] + n`
   followed by `k(5, 1)` is reported when the call runs.
-- **An assignment statement stores the elements of a lazy collection that
-  reads a variable.** `Filter`, `Map`, `Scan`, `TakeWhile` and a comprehension
-  are lazy, and their value kept by name each variable it reads. So after
+- **An assignment statement stores the elements of a lazy collection that reads
+  a variable.** `Filter`, `Map`, `Scan`, `TakeWhile` and a comprehension are
+  lazy, and their value kept by name each variable it reads. So after
   `let ys = filter(xs, c => c > 1)`, a later `xs = [7, 8]` changed `ys`;
   `xs = filter(xs, c => c > 1)` made `xs` read itself and every later read
   (`xs`, `length(xs)`, `first(xs)`) stayed unevaluated;
   `xs = [c * 2 for c in xs]` overflowed the stack; and in
-  `for k in 1..3 { xs = filter(xs, c => c > k) }` the predicate kept `k` by
-  name after the loop. An assignment statement (`Assign`, `Declare` with a
-  value: the Epsil `=` and `let`, the LaTeX `:=`) now stores the list of the
-  elements (a set for a collection over a set) when the collection is finite
-  and reads a variable, computed with the values the variables have at that
-  statement. This is what compiled code already did. Two cases stay lazy: a
-  collection with no last element (`filter(1..oo, p)`, still a live view of
-  the variables it reads), and one that reads no variable (`map(f, 1..10^6)`).
-  The host function `ce.assign()` is not changed: it stores the value it is
-  given, so a host that defines one name from another keeps the live view.
-  A lazy collection over a dictionary also stays lazy (it is a dictionary,
-  not a list). What is lost: a program that relied on `ys` following `xs`
-  after `let ys = filter(xs, p)`; a large finite lazy collection that reads a
-  variable is computed at the assignment, not at its first read; and a
-  callback with an effect, in such a collection, runs for every element at the
-  assignment and not at each later read. A lazy collection over a literal
-  source (`let s = map(x => f(x), [1, 2, 3])`) reads no variable and keeps the
+  `for k in 1..3 { xs = filter(xs, c => c > k) }` the predicate kept `k` by name
+  after the loop. An assignment statement (`Assign`, `Declare` with a value: the
+  Epsil `=` and `let`, the LaTeX `:=`) now stores the list of the elements (a
+  set for a collection over a set) when the collection is finite and reads a
+  variable, computed with the values the variables have at that statement. This
+  is what compiled code already did. Two cases stay lazy: a collection with no
+  last element (`filter(1..oo, p)`, still a live view of the variables it
+  reads), and one that reads no variable (`map(f, 1..10^6)`). The host function
+  `ce.assign()` is not changed: it stores the value it is given, so a host that
+  defines one name from another keeps the live view. A lazy collection over a
+  dictionary also stays lazy (it is a dictionary, not a list). What is lost: a
+  program that relied on `ys` following `xs` after `let ys = filter(xs, p)`; a
+  large finite lazy collection that reads a variable is computed at the
+  assignment, not at its first read; and a callback with an effect, in such a
+  collection, runs for every element at the assignment and not at each later
+  read. A lazy collection over a literal source
+  (`let s = map(x => f(x), [1, 2, 3])`) reads no variable and keeps the
   documented laziness: the callback runs only for the elements that are read.
-- **A declared scalar parameter is checked against the evaluated argument.**
-  For a function declared with `ce.declare(name, { signature })` and then
-  assigned its body, an argument was checked at boxing, against its static
-  type. When that type is not known before evaluation, a scalar parameter
-  accepted any value: `f` declared `(integer) -> unknown` with body `x ↦ x + 1`
-  answered `2.5` for the value `1.5`, a declared `(real)` accepted `1 + 2i`, a
-  declared `(string)` received `Missing` and a declared `(boolean)` received
-  `5`. The evaluated arguments are now checked against the scalar parameter
-  types of the declaration, and a value that does not fit answers
+- **A declared scalar parameter is checked against the evaluated argument.** For
+  a function declared with `ce.declare(name, { signature })` and then assigned
+  its body, an argument was checked at boxing, against its static type. When
+  that type is not known before evaluation, a scalar parameter accepted any
+  value: `f` declared `(integer) -> unknown` with body `x ↦ x + 1` answered
+  `2.5` for the value `1.5`, a declared `(real)` accepted `1 + 2i`, a declared
+  `(string)` received `Missing` and a declared `(boolean)` received `5`. The
+  evaluated arguments are now checked against the scalar parameter types of the
+  declaration, and a value that does not fit answers
   `Error(ErrorCode("incompatible-type", "integer", "1.5"), 1.5)`, as an Epsil
-  `function` with the same annotation does. In a broadcast over a list the
-  error is in the cell that does not fit. Not changed: a list, a range or a
-  point at a scalar parameter is still broadcast (`f([1, 2, 3])`,
-  `f((1, 2))`); a symbolic argument is left alone; a slot declared `unknown`
-  or `any` checks nothing; `NaN` and an absent value at a numeric parameter
-  answer `NaN`. What is lost: a call that relied on a declared scalar type
-  being advisory.
+  `function` with the same annotation does. In a broadcast over a list the error
+  is in the cell that does not fit. Not changed: a list, a range or a point at a
+  scalar parameter is still broadcast (`f([1, 2, 3])`, `f((1, 2))`); a symbolic
+  argument is left alone; a slot declared `unknown` or `any` checks nothing;
+  `NaN` and an absent value at a numeric parameter answer `NaN`. What is lost: a
+  call that relied on a declared scalar type being advisory.
 - **`First`, `Second`, `Third`, `Last` and `At` with a literal index are typed
   without an absent member when the element exists.** `First([(1, 2), (3, 4)])`
   was typed `missing | tuple<integer, integer>` and `First([7, 8, 9])` was
@@ -264,12 +263,71 @@
   (`Append(At(x, 1), 2)` gave `Set(3, 1, 2)`, the duplicate lost; `Reverse` of
   an absent restricted list gave `Set(NaN)`): the view is now evaluated first,
   so the result is the list, or `Missing`.
+- **`LerchPhi` with a complex `a` outside the unit circle returned a wrong value
+  in part of the `a` plane.** The continuation past the circle took the
+  principal branch of an incomplete gamma function, which is the wrong sheet
+  when the argument crosses its cut; for a real `z > 1` every `a` with a
+  positive imaginary part was affected. `LerchPhi(3, 2.5, 1.38+0.86i).N()` was
+  `−0.23906 − 0.28351i` and is now `−0.71263 − 0.72673i`. On 7000 random points,
+  575 values were wrong; none is now. (mpmath's `lerchphi` has the same defect,
+  so do not check these values against it.)
+- **`LerchPhi` and `PolyLog` no longer return wrong digits inside the unit disk,
+  next to the circle, next to `z = 1`, or for a very negative order past the
+  circle.** Inside the disk the direct series lost up to 10 digits for a large
+  negative order (`LerchPhi(0.9693+0.1294i, -5.84-1.357i, 6.235+0.793i)`,
+  2.5e−10 relative); next to the circle `PolyLog(-0.9, -0.9999).N()` was
+  `−0.27647181622385925` and is now `−0.27647181621858134`; within 1e−2 of
+  `z = 1` the logarithm of `z` had only 8 correct digits (1178 of 3000 values
+  off by up to 1.4e−7); and past the circle a very negative order returned wrong
+  values where the previous version stayed unevaluated
+  (`PolyLog(-19.5168, -941.72)`, wrong in the fifth digit). Every value that
+  `LerchPhi` returns is now within 1e−11 of the reference on about 20 000
+  points, and every `PolyLog` value within 1e−12 on 21 000 points.
+- **`LerchPhi`, `PolyLog` and the incomplete `Gamma(s, x)` now return a value
+  next to a pole of the gamma function, and `LerchPhi` with a negative order
+  returns a value for most arguments outside the unit circle.**
+  `LerchPhi(2, 3.000001, 3.5).N()`, `PolyLog(3.000001, 2).N()` and
+  `Gamma(-0.999999, -3).N()` stayed unevaluated and now evaluate
+  (`0.0091 − 0.0667i`, `2.7621 − 0.7547i`, `3.2386 + 3.1416i`);
+  `LerchPhi(-900, -2.5, 0.5).N()` is `−4.6136259e−5` (unevaluated before). For
+  `|z|` from 200 to 10⁴ with a real `a`, 3 of 400 random points answered before
+  and all do now. `PolyLog` inside the unit disk answers every point the kernel
+  computes accurately (it declined about half of them), and past the disk
+  `PolyLog(2.5, -1000000).N()` is `−220.36048147359768` (unevaluated before).
+- **Numeric `Zeta`, `HurwitzZeta`, `PolyLog` and `LerchPhi` are accurate next to
+  a negative order close to 0 or to a negative even integer, left of the
+  critical strip, and for a complex `a` with a negative real order.** The
+  compiled `Zeta(s)` at `s = -1e-9` was `−0.4999999577` and is now
+  `−0.4999999990810612`; at `s = -1e-17` it was `−Infinity`.
+  `HurwitzZeta(-11.801, 0.4265-1.271i).N()` was `2.2188 + 50.186i` and is now
+  `5.6234 + 46.077i`; `HurwitzZeta(-12, 1.5).N()` was `−0.00024414062499909618`
+  and is now exactly `−2^-12`; `HurwitzZeta(-200.5, 0.3).N()` was off by 1176
+  units in the last place and is now within 5. On 10 000 random points with a
+  complex `a` and a negative real order, about a third were off by more than
+  1e−12 (some by 20 orders of magnitude); none is now, and a call costs the same
+  or less.
+- **WGSL shaders that use NaN or infinity now compile in browsers.** Every WGSL
+  shader that contained a NaN or infinity constant, including those for `Gamma`,
+  `Zeta`, `HurwitzZeta`, `LerchPhi` and `PolyLog`, was rejected by the browser's
+  shader compiler (`value nan cannot be represented as 'f32'`). Both shader
+  targets now spell them as `_gpu_nan()` and `_gpu_inf()`. GLSL shaders that use
+  `LerchPhi` or `PolyLog` did not compile either (a GLSL keyword was used as a
+  variable name); they do now.
+- **The GLSL and WGSL targets compute `LerchPhi` and `PolyLog` past the unit
+  circle, and more accurately for a negative order.** For real operands (`z`
+  below −1, `z = −1` with `s < 0`, `z` close to 1) they return the real value
+  where they returned NaN: `LerchPhi(-3, 1.5, 0.7)` NaN → 1.10658,
+  `PolyLog(2, -1000000)` NaN → −97.0791, `PolyLog(2, -1e30)` NaN → −2387.50.
+  Every value returned is within 1.5e−5 of the reference, measured on the GPU;
+  the previous helpers returned values off by up to 5.6e−4 for a negative order
+  (`LerchPhi(-0.645, -10, 8.99)`: 1155547136 → 1154901726).
+
 - **`ListFrom`, `SetFrom` and `TupleFrom` of a very large collection were an
   `internal-error`.** `ListFrom(Range(1, 300000))` answered
   `Error(ErrorCode("internal-error", "Maximum call stack size exceeded", …))`:
-  the elements were passed to one function call as separate arguments, and a
-  few hundred thousand of them exceed the argument limit. The elements are now
-  added one at a time.
+  the elements were passed to one function call as separate arguments, and a few
+  hundred thousand of them exceed the argument limit. The elements are now added
+  one at a time.
 - **A list variable reassigned in a loop could be typed `integer | list<…>`.**
   In `for gap in [(A, C), (A, C)] { circles = g(gap[1], 2, circles) }`, a first
   reading of the call's type, taken before the types of the loop were settled,
@@ -283,10 +341,10 @@
   `function f(p: tuple<number, number>) { p[1] + 1 }` inside the program and
   `xs` a list of two points, the interpreter applies `f` to each point and
   answers `[2, 4]`. The compiled call passed the list whole and answered the
-  string `"1,21"`. The compiled call now maps over the points, as it already
-  did for a function defined on the engine (`ce.assign`). When the parameter
-  has no annotation and its type is only inferred as a point, the call fails to
-  compile with a message that names the argument, and the interpreter answers.
+  string `"1,21"`. The compiled call now maps over the points, as it already did
+  for a function defined on the engine (`ce.assign`). When the parameter has no
+  annotation and its type is only inferred as a point, the call fails to compile
+  with a message that names the argument, and the interpreter answers.
 - **A recursive Epsil program that builds a list through a local copied from an
   untyped parameter compiles.**
   `function fill(p, q, r, depth, acc) { let out = acc; for c in … { out = [...out, c]; out = fill(…, out) } … }`
@@ -19758,13 +19816,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-                a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-                $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-                $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-                symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-                it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-                returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-                complex eigenvalues are now returned as complex numbers.
+                  a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+                  $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+                  $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+                  symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+                  it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+                  returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+                  complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

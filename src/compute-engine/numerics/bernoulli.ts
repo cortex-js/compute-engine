@@ -162,6 +162,86 @@ export function hurwitzZetaNegativeInteger(
   return reduce(-num, den * BigInt(n + 1));
 }
 
+/** A finite double as the exact rational [numerator, 2^k]. */
+function doubleToRational(x: number): [bigint, bigint] {
+  if (x === 0) return [0n, 1n];
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, x);
+  const hi = view.getUint32(0);
+  const lo = view.getUint32(4);
+  const biased = (hi >>> 20) & 0x7ff;
+  let mantissa = (BigInt(hi & 0xfffff) << 32n) | BigInt(lo);
+  let exponent = -1074;
+  if (biased !== 0) {
+    mantissa |= 1n << 52n;
+    exponent = biased - 1075;
+  }
+  if (hi >>> 31) mantissa = -mantissa;
+  return exponent >= 0
+    ? [mantissa << BigInt(exponent), 1n]
+    : [mantissa, 1n << BigInt(-exponent)];
+}
+
+/**
+ * num/den as a double. The quotient is formed with at least 64 significant
+ * bits and then rounded once, so the result is within 1 ulp of the exact
+ * value (it is ±Infinity past the range of a double).
+ */
+function rationalToDouble(num: bigint, den: bigint): number {
+  if (num === 0n) return 0;
+  const negative = num < 0n !== den < 0n;
+  if (num < 0n) num = -num;
+  if (den < 0n) den = -den;
+  const shift = 64 - (num.toString(2).length - den.toString(2).length);
+  const q =
+    shift >= 0 ? (num << BigInt(shift)) / den : num / (den << BigInt(-shift));
+  // Scale in two steps, so that neither factor overflows or underflows on
+  // its own when the result is near the ends of the double range.
+  const half = Math.trunc(shift / 2);
+  const v = Number(q) * 2 ** -half * 2 ** -(shift - half);
+  return negative ? -v : v;
+}
+
+// For N = n + 1: the integers eⱼ = D·C(N, j)·B_{N−j}, j = 0 … N, with D a
+// common denominator of B₀ … B_N, so that D·B_N(x) = Σ eⱼ xʲ.
+const BERNOULLI_POLY_INTEGER: Map<number, { e: bigint[]; d: bigint }> =
+  new Map();
+
+/**
+ * ζ(−n, a) = −Bₙ₊₁(a)/(n+1) for integer n ≥ 0 at a double a, within 1 ulp:
+ * a double is the exact rational p/2^q, so the Bernoulli polynomial is
+ * evaluated exactly (Horner's rule over one common denominator, with no gcd
+ * reductions) and rounded once. At n = 0 it is 1/2 − a. The cost is about
+ * 50 µs at n = 210 and a few µs for n up to 30.
+ */
+export function hurwitzZetaNegativeIntegerAt(n: number, a: number): number {
+  const N = n + 1;
+  let c = BERNOULLI_POLY_INTEGER.get(N);
+  if (c === undefined) {
+    let d = 1n;
+    for (let k = 0; k <= N; k++) {
+      const den = bernoulliRational(k)[1];
+      d = (d / gcd(d, den)) * den;
+    }
+    const e: bigint[] = [];
+    let binom = 1n; // C(N, j)
+    for (let j = 0; j <= N; j++) {
+      if (j > 0) binom = (binom * BigInt(N - j + 1)) / BigInt(j);
+      const [bNum, bDen] = bernoulliRational(N - j);
+      e.push((binom * bNum * d) / bDen);
+    }
+    c = { e, d };
+    BERNOULLI_POLY_INTEGER.set(N, c);
+  }
+  const [p, den] = doubleToRational(a);
+  const q = BigInt(den.toString(2).length - 1); // den = 2^q
+  // Σ eⱼ (p/2^q)ʲ · 2^{qN} = Σ eⱼ pʲ 2^{q(N−j)}, by Horner in p.
+  let acc = c.e[N];
+  for (let j = N - 1; j >= 0; j--)
+    acc = acc * p + (c.e[j] << (q * BigInt(N - j)));
+  return rationalToDouble(-acc, c.d * (1n << (q * BigInt(N))) * BigInt(N));
+}
+
 /**
  * Wolfram's generalized `Zeta[−n, a]` for integer n ≥ 0 and rational a, as an
  * exact reduced rational: the terms with k + a < 0 are |k + a|ⁿ, the term

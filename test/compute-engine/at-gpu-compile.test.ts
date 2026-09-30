@@ -12,8 +12,7 @@
  * interpreter output: the interpreter's position-preserving absence marker
  * (`0` / out-of-range index) and its "no value at all" outcome (a non-integer
  * index leaves `At` unevaluated) both project to `NaN` (`_SYS.at`), and the
- * shader spells that `_gpu_nan()` on GLSL and `bitcast<f32>(0x7fc00000u)` on
- * WGSL — never a clamp. `at-collection-index-compile.test.ts` holds the
+ * shader spells that `_gpu_nan()` on both GLSL and WGSL — never a clamp. `at-collection-index-compile.test.ts` holds the
  * route-parity half of the story.
  */
 
@@ -73,7 +72,7 @@ const why = (expr: any): string => {
 };
 
 const GLSL_NAN = '_gpu_nan()';
-const WGSL_NAN = 'bitcast<f32>(0x7fc00000u)';
+const WGSL_NAN = '_gpu_nan()';
 
 const P: any = ['List', 10, 20, 30];
 
@@ -105,7 +104,7 @@ fn _gpu_at3(v: vec3f, i: f32) -> f32 {
   // outside int range), and makes both languages' out-of-bounds rules
   // (GLSL UB / WGSL indeterminate) unreachable.
   if (!(i >= -3.0 && i <= 3.0) || i != floor(i) || i == 0.0) {
-    return bitcast<f32>(0x7fc00000u);
+    return _gpu_nan();
   }
   let k = i32(i);
   return v[select(3 + k, k - 1, k > 0)];
@@ -220,10 +219,15 @@ describe('At — dynamic index through the `_gpu_atN` helper (D1)', () => {
     expect(gPre(['At', 'v', 'k'])).toContain(GLSL_AT3);
   });
 
-  test('the WGSL helper body is pinned verbatim — inline bitcast, no `_gpu_nan`', () => {
+  test('the WGSL helper body is pinned verbatim, with the WGSL NaN helper', () => {
+    // WGSL spells NaN through `_gpu_nan()` too: an inline constant bitcast
+    // to NaN is a shader-creation error. WGSL declarations are
+    // order-independent, so the helper is declared first here.
     const pre = wPre(['At', 'v', 'k']);
-    expect(pre).toBe(WGSL_AT3);
-    expect(pre).not.toContain('_gpu_nan');
+    expect(pre).toBe(
+      '\nfn _gpu_nan() -> f32 {\n  let bits = 0x7fc00000u;\n  return bitcast<f32>(bits);\n}\n' +
+        WGSL_AT3
+    );
   });
 
   test('the WGSL ARRAY helper copies its parameter to a local first', () => {

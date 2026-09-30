@@ -1005,9 +1005,10 @@ function gpuReciprocalComplex(
  *
  * Neither GLSL nor WGSL has a `NaN` identifier (the base compiler's default
  * `If`/`Which`/`When` emit a bare `NaN`, which fails to compile on GPU). WGSL
- * rejects a constant `0.0 / 0.0` during const-evaluation, so it uses a NaN bit
- * pattern inline. GLSL routes through the `_gpu_nan()` preamble helper (see
- * `GPU_NAN_PREAMBLE_GLSL`): a masked (`When`/`Which` else) branch's NaN is thus
+ * rejects a NaN or an infinity produced by any constant expression, `0.0 / 0.0`
+ * and a bitcast of a constant bit pattern alike. Both targets therefore route
+ * through the `_gpu_nan()` preamble helper (see `GPU_NAN_PREAMBLE_GLSL` and
+ * `GPU_NAN_PREAMBLE_WGSL`): a masked (`When`/`Which` else) branch's NaN is thus
  * centralized in one overridable symbol, so a host can redefine what a masked
  * branch produces without touching the generated code.
  *
@@ -1229,7 +1230,7 @@ export function assertGPUScalarComponents(
 
 /**
  * A NaN matching the SHAPE of `val`: scalar NaN for a scalar value, a
- * broadcast vector constructor (`vec2(_gpu_nan())` / `vec2f(bitcast<…>)`)
+ * broadcast vector constructor (`vec2(_gpu_nan())` / `vec2f(_gpu_nan())`)
  * for a vector-valued one. GLSL has no implicit float→vecN conversion in a
  * ternary, so a masked (`When`/`Which` else) branch whose value is a tuple
  * body (a restricted parametric `(x(t), y(t))`) must emit a NaN of the same
@@ -3731,11 +3732,7 @@ function compileGpuLast(
   compile: (e: Expression) => string
 ): string {
   const code = compile(arg).trim();
-  if (
-    code === gpuNonFiniteLiteral(NaN, 'glsl') ||
-    code === gpuNonFiniteLiteral(NaN, 'wgsl')
-  )
-    return code;
+  if (code === gpuNonFiniteLiteral(NaN)) return code;
   const t = gpuType(arg);
   const width =
     typeof t !== 'string'
@@ -3834,17 +3831,14 @@ function compilePointSwizzle(
 function gpuSwizzle(code: string, sw: string): string {
   const s = code.trim();
   // An absent operand (`Missing`, `Undefined`) compiles to the SCALAR NaN of
-  // the target (`_gpu_nan()` on GLSL, `bitcast<f32>(0x7fc00000u)` on WGSL).
-  // A scalar has no components: WGSL rejects `.x` on an `f32`, and GLSL
-  // before 4.20 rejects it on a `float`. Every coordinate of an absent point
-  // is NaN, so one component of that NaN is the NaN itself, and several
-  // components are a vector of it.
-  for (const lang of ['glsl', 'wgsl'] as const) {
-    if (s !== gpuNonFiniteLiteral(NaN, lang)) continue;
+  // the target (`_gpu_nan()`, on both targets). A scalar has no components:
+  // WGSL rejects `.x` on an `f32`, and GLSL before 4.20 rejects it on a
+  // `float`. Every coordinate of an absent point is NaN, so one component of
+  // that NaN is the NaN itself, and several components are a vector of it.
+  // `vecN(x)` is a splat in both languages (WGSL infers the element type).
+  if (s === gpuNonFiniteLiteral(NaN)) {
     if (sw.length === 1) return s;
-    return lang === 'glsl'
-      ? `vec${sw.length}(${s})`
-      : `vec${sw.length}<f32>(${s})`;
+    return `vec${sw.length}(${s})`;
   }
   if (gpuIsAtomicEmission(s)) return `${s}.${sw}`;
   const call = /^[A-Za-z_]\w*\(/.exec(s);
@@ -7063,10 +7057,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_gpu_hurwitz_zeta(${compile(args[0])}, ${compile(args[1])})`;
   },
-  // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_lerch_phi` is NaN past
-  // |z| = 1 (except for s = 0, −1, −2, where Φ is rational in z), where the
-  // continuation needs a complex incomplete Γ this target has no kernel
-  // for (`_gpu_gamma` is real-only) — see there.
+  // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_lerch_phi` takes real
+  // operands and is NaN where Φ is complex (real z > 1 with s not a
+  // non-positive integer, or a < 0 with a non-integer s), and where none of
+  // its methods can vouch for the value — see `GPU_LERCH_PREAMBLE_GLSL`.
   LerchPhi: (args, compile) => {
     if (args.length !== 3)
       throw new Error(
@@ -7076,8 +7070,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_poly_log` answers the
   // orders 1, 0, −1 and −2 … −12 in closed form and every other order as
-  // `z · _gpu_lerch_phi(z, s, 1.0)`, so it is NaN there wherever
-  // `_gpu_lerch_phi` is (past |z| = 1, or a genuinely complex value).
+  // z · Φ(z, s, 1), and below z = −1 with a negative non-integer order,
+  // where Φ declines, by Jonquière's inversion formula. It is NaN on the
+  // cut z > 1 (a complex value) and where both decline.
   PolyLog: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
@@ -8745,13 +8740,12 @@ fn _gpu_gamma(z: f32) -> f32 {
   let PI = 3.14159265358979;
   // See the GLSL preamble: a non-positive integer is a pole the reflection
   // formula misses; the pole answers the float projection of the undirected
-  // infinity, which is +Infinity (pole-encoding ruling 2026-08-28). WGSL has
-  // no helper for it, so the +Infinity bit pattern is spelled inline, as
-  // non-finite constants are everywhere else in this target. The lower
+  // infinity, which is +Infinity (pole-encoding ruling 2026-08-28), from the
+  // WGSL _gpu_inf() helper (GPU_INF_PREAMBLE_WGSL). The lower
   // bound keeps -Infinity out of the guard (it is not a pole). (No
   // backticks in this comment: it lives inside a TypeScript template
   // literal, which one would terminate.)
-  if (z <= 0.0 && z == floor(z) && z >= -3.4028234663852886e38) { return bitcast<f32>(0x7f800000u); }
+  if (z <= 0.0 && z == floor(z) && z >= -3.4028234663852886e38) { return _gpu_inf(); }
   var w = z;
   if (z < 0.5) { w = 1.0 - z; }
   w = w - 1.0;
@@ -8797,6 +8791,20 @@ fn _gpu_gammaln(z: f32) -> f32 {
  * - `_gpu_zeta` reflects only for s < 0 and returns NaN below s = −24.5:
  *   the f32 `_gpu_gamma(1 − s)` overflows to infinity once 1 − s reaches
  *   about 26 (its Lanczos power term passes the f32 maximum 3.4e38).
+ * - `_gpu_riemann_zeta(s, sm1)` is ζ(s) with sm1 = s − 1 given by the
+ *   caller. The reflection needs ζ(1 − s) next to its pole when s is near
+ *   0, and the rounded 1 − s leaves the pole term a relative error of about
+ *   6e−8/|s| (at s = −1e−8, 1 − s rounds to 1, and IEEE f32 arithmetic
+ *   gave an infinite result); the exact distance −s is passed instead.
+ *   The Taylor series in `_gpu_zeta_near_one` passes the exact distance
+ *   the same way. The reflection's sin(πs/2) is reduced by the nearest
+ *   integer to s/2 first, since next to an even s the product π·s/2 kept
+ *   only an absolute accuracy (up to 0.5 relative error in an f32
+ *   simulation at s = −8 ± 1e−6; on an Apple GPU, ζ(−4.0000005) was
+ *   −5.7e−9 instead of −3.807e−9). Simulated in f32 against mpmath at the
+ *   f32-rounded s, at distances 1e−7 to 0.3 from 0, 1 and each negative
+ *   integer down to −12: `_gpu_zeta` is within 5.6e−6 relative (next to
+ *   s = 0) and 2.4e−6 elsewhere.
  * - `_gpu_hurwitz_zeta(s, a)` is the pole (+∞) at s = 1 and at a
  *   non-positive integer a with s > 0, 1/2 − a at s = 0, and NaN at a < 0
  *   with a non-integer s, where the true value is complex.
@@ -8816,7 +8824,7 @@ float _gpu_zeta_pow(float x, float e) {
   return r;
 }
 
-float _gpu_hurwitz_zeta_em(float s, float a) {
+float _gpu_hurwitz_zeta_em(float s, float a, float sm1) {
   int n = int(ceil(15.0 - a));
   if (n < 0) n = 0;
   float sum = 0.0;
@@ -8825,8 +8833,9 @@ float _gpu_hurwitz_zeta_em(float s, float a) {
     sum += _gpu_zeta_pow(z, -s);
     z += 1.0;
   }
-  // Tail: closed-form integral + half-term (DLMF 25.11.9).
-  sum += pow(z, 1.0 - s) / (s - 1.0) + 0.5 * pow(z, -s);
+  // Tail: closed-form integral + half-term (DLMF 25.11.9). The integral
+  // term is the pole at s = 1: it uses sm1 = s - 1 as the caller knows it.
+  sum += pow(z, -sm1) / sm1 + 0.5 * pow(z, -s);
   // Bernoulli correction series, same ten B_2j as BERNOULLI_2K
   // (special-functions.ts); u carries the term divided by B_2j.
   float b[10] = float[10](
@@ -8847,18 +8856,31 @@ float _gpu_hurwitz_zeta_em(float s, float a) {
   return sum;
 }
 
-float _gpu_zeta(float s) {
+// zeta(s), with sm1 = s - 1 passed by a caller that knows it more exactly
+// than s - 1.0 can recover it from a rounded s.
+float _gpu_riemann_zeta(float s, float sm1) {
   const float PI = 3.14159265358979;
-  if (s == 1.0) return _gpu_inf(); // pole
+  if (sm1 == 0.0) return _gpu_inf(); // pole
   if (s == 0.0) return -0.5;
   if (s < 0.0) {
     if (s == floor(s) && mod(s, 2.0) == 0.0) return 0.0; // trivial zero
     if (s < -24.5) return _gpu_nan(); // f32 _gpu_gamma(1 - s) overflows
+    // sin(PI s/2) = (-1)^n sin(PI (s/2 - n)): s/2 - n is exact, so the
+    // sine keeps its relative accuracy next to an even s.
+    float hs = s / 2.0;
+    float n = floor(hs + 0.5);
+    float sinHalfPiS = sin(PI * (hs - n));
+    if (mod(n, 2.0) != 0.0) sinHalfPiS = -sinHalfPiS;
+    // 1 - s is rounded, but its distance to the pole, -s, is exact.
     float oneMinusS = 1.0 - s;
-    return pow(2.0, s) * pow(PI, s - 1.0) * sin(PI * s / 2.0) *
-      _gpu_gamma(oneMinusS) * _gpu_hurwitz_zeta_em(oneMinusS, 1.0);
+    return pow(2.0, s) * pow(PI, s - 1.0) * sinHalfPiS *
+      _gpu_gamma(oneMinusS) * _gpu_hurwitz_zeta_em(oneMinusS, 1.0, -s);
   }
-  return _gpu_hurwitz_zeta_em(s, 1.0);
+  return _gpu_hurwitz_zeta_em(s, 1.0, sm1);
+}
+
+float _gpu_zeta(float s) {
+  return _gpu_riemann_zeta(s, s - 1.0);
 }
 
 // zeta(s, 1+h) = sum C(-s,k) h^k zeta(s+k), |h| < 1 — no cancellation,
@@ -8874,10 +8896,12 @@ float _gpu_zeta_near_one(float s, float h) {
   for (int k = 1; k < 100; k++) {
     hk *= h;
     if (hk == 0.0) break;
-    float f = -s - float(k) + 1.0;
+    // f = 1 - k - s is exact when s is near 1 - k, and s + k - 1 = -f is
+    // then the exact distance from s + k to the pole of zeta.
+    float f = float(1 - k) - s;
     if (f == 0.0) return sum + c * hk * (-1.0 / float(k));
     c = c * f / float(k);
-    float term = c * hk * _gpu_zeta(s + float(k));
+    float term = c * hk * _gpu_riemann_zeta(s + float(k), -f);
     sum += term;
     float size = abs(term);
     largest = max(largest, size);
@@ -8897,12 +8921,12 @@ float _gpu_hurwitz_zeta(float s, float a) {
   if (a < 0.0 && s != floor(s)) return _gpu_nan(); // complex value
   if (a < -1.0e6) return _gpu_nan();
   float edge = max(12.0, ceil(abs(s)) + 6.0);
-  if (s >= 0.0 || a >= 4.0 * edge) return _gpu_hurwitz_zeta_em(s, a);
+  if (s >= 0.0 || a >= 4.0 * edge) return _gpu_hurwitz_zeta_em(s, a, s - 1.0);
   // Shift a to 1+h (|h| <= 3/4) and expand in Taylor series — see
   // hurwitzZetaComplex's doc comment for why EM alone cancels here.
   float m = floor(a - 0.5);
   float h = a - m - 1.0;
-  if (abs(h) > 0.75) return _gpu_hurwitz_zeta_em(s, a);
+  if (abs(h) > 0.75) return _gpu_hurwitz_zeta_em(s, a, s - 1.0);
   float z = _gpu_zeta_near_one(s, h);
   int steps = int(abs(m));
   for (int j = 0; j < steps; j++) {
@@ -8931,19 +8955,20 @@ float _gpu_zeta_generalized(float s, float a) {
 /**
  * GPU Hurwitz/Riemann/generalized zeta functions (WGSL syntax). See
  * `GPU_ZETA_PREAMBLE_GLSL`; WGSL has no implicit GLSL-style `float`/
- * braceless-`if` syntax, so a separate variant is required, and the pole
- * and NaN are spelled inline as bit patterns (see `GPU_GAMMA_PREAMBLE_WGSL`).
+ * braceless-`if` syntax, so a separate variant is required. The pole and NaN
+ * come from the WGSL `_gpu_inf()` / `_gpu_nan()` helpers
+ * (`GPU_NAN_PREAMBLE_WGSL`).
  */
 export const GPU_ZETA_PREAMBLE_WGSL = `
 fn _gpu_zeta_pow(x: f32, e: f32) -> f32 {
   if (x >= 0.0) { return pow(x, e); }
-  if (e != floor(e)) { return bitcast<f32>(0x7fc00000u); }
+  if (e != floor(e)) { return _gpu_nan(); }
   let r = pow(-x, e);
   if ((abs(e) % 2.0) == 1.0) { return -r; }
   return r;
 }
 
-fn _gpu_hurwitz_zeta_em(s: f32, a: f32) -> f32 {
+fn _gpu_hurwitz_zeta_em(s: f32, a: f32, sm1: f32) -> f32 {
   var n: i32 = i32(ceil(15.0 - a));
   if (n < 0) { n = 0; }
   var sum: f32 = 0.0;
@@ -8952,7 +8977,9 @@ fn _gpu_hurwitz_zeta_em(s: f32, a: f32) -> f32 {
     sum = sum + _gpu_zeta_pow(z, -s);
     z = z + 1.0;
   }
-  sum = sum + pow(z, 1.0 - s) / (s - 1.0) + 0.5 * pow(z, -s);
+  // The integral term is the pole at s = 1: it uses sm1 = s - 1 as the
+  // caller knows it.
+  sum = sum + pow(z, -sm1) / sm1 + 0.5 * pow(z, -s);
   let b = array<f32, 10>(
     1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0,
     -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0, 43867.0 / 798.0,
@@ -8971,18 +8998,29 @@ fn _gpu_hurwitz_zeta_em(s: f32, a: f32) -> f32 {
   return sum;
 }
 
-fn _gpu_zeta(s: f32) -> f32 {
+// zeta(s), with sm1 = s - 1 — see GLSL's _gpu_riemann_zeta.
+fn _gpu_riemann_zeta(s: f32, sm1: f32) -> f32 {
   let PI = 3.14159265358979;
-  if (s == 1.0) { return bitcast<f32>(0x7f800000u); } // pole
+  if (sm1 == 0.0) { return _gpu_inf(); } // pole
   if (s == 0.0) { return -0.5; }
   if (s < 0.0) {
     if (s == floor(s) && (s % 2.0) == 0.0) { return 0.0; } // trivial zero
-    if (s < -24.5) { return bitcast<f32>(0x7fc00000u); } // f32 gamma overflows
+    if (s < -24.5) { return _gpu_nan(); } // f32 gamma overflows
+    // sin(PI s/2) = (-1)^n sin(PI (s/2 - n)), with s/2 - n exact.
+    let hs = s / 2.0;
+    let n = floor(hs + 0.5);
+    var sinHalfPiS = sin(PI * (hs - n));
+    if ((n % 2.0) != 0.0) { sinHalfPiS = -sinHalfPiS; }
+    // 1 - s is rounded, but its distance to the pole, -s, is exact.
     let oneMinusS = 1.0 - s;
-    return pow(2.0, s) * pow(PI, s - 1.0) * sin(PI * s / 2.0) *
-      _gpu_gamma(oneMinusS) * _gpu_hurwitz_zeta_em(oneMinusS, 1.0);
+    return pow(2.0, s) * pow(PI, s - 1.0) * sinHalfPiS *
+      _gpu_gamma(oneMinusS) * _gpu_hurwitz_zeta_em(oneMinusS, 1.0, -s);
   }
-  return _gpu_hurwitz_zeta_em(s, 1.0);
+  return _gpu_hurwitz_zeta_em(s, 1.0, sm1);
+}
+
+fn _gpu_zeta(s: f32) -> f32 {
+  return _gpu_riemann_zeta(s, s - 1.0);
 }
 
 // zeta(s, 1+h) = sum C(-s,k) h^k zeta(s+k) — see GLSL's _gpu_zeta_near_one.
@@ -8995,10 +9033,11 @@ fn _gpu_zeta_near_one(s: f32, h: f32) -> f32 {
   for (var k = 1; k < 100; k = k + 1) {
     hk = hk * h;
     if (hk == 0.0) { break; }
-    let f = -s - f32(k) + 1.0;
+    // f = 1 - k - s, exact when s is near 1 - k (see the GLSL version).
+    let f = f32(1 - k) - s;
     if (f == 0.0) { return sum + c * hk * (-1.0 / f32(k)); }
     c = c * f / f32(k);
-    let term = c * hk * _gpu_zeta(s + f32(k));
+    let term = c * hk * _gpu_riemann_zeta(s + f32(k), -f);
     sum = sum + term;
     let size = abs(term);
     largest = max(largest, size);
@@ -9011,20 +9050,20 @@ fn _gpu_zeta_near_one(s: f32, h: f32) -> f32 {
 }
 
 fn _gpu_hurwitz_zeta(s: f32, a: f32) -> f32 {
-  if (s == 1.0) { return bitcast<f32>(0x7f800000u); } // pole, every base point a
+  if (s == 1.0) { return _gpu_inf(); } // pole, every base point a
   if (s == 0.0) { return 0.5 - a; }
   if (a == 1.0) { return _gpu_zeta(s); }
   let aNonposInt = a <= 0.0 && a == floor(a);
-  if (aNonposInt && s > 0.0) { return bitcast<f32>(0x7f800000u); } // (a+k) = 0 diverges
-  if (a < 0.0 && s != floor(s)) { return bitcast<f32>(0x7fc00000u); } // complex value
-  if (a < -1.0e6) { return bitcast<f32>(0x7fc00000u); }
+  if (aNonposInt && s > 0.0) { return _gpu_inf(); } // (a+k) = 0 diverges
+  if (a < 0.0 && s != floor(s)) { return _gpu_nan(); } // complex value
+  if (a < -1.0e6) { return _gpu_nan(); }
   let edge = max(12.0, ceil(abs(s)) + 6.0);
-  if (s >= 0.0 || a >= 4.0 * edge) { return _gpu_hurwitz_zeta_em(s, a); }
+  if (s >= 0.0 || a >= 4.0 * edge) { return _gpu_hurwitz_zeta_em(s, a, s - 1.0); }
   // Shift a to 1+h (|h| <= 3/4) and expand in Taylor series — see
   // hurwitzZetaComplex's doc comment for why EM alone cancels here.
   let m = floor(a - 0.5);
   let h = a - m - 1.0;
-  if (abs(h) > 0.75) { return _gpu_hurwitz_zeta_em(s, a); }
+  if (abs(h) > 0.75) { return _gpu_hurwitz_zeta_em(s, a, s - 1.0); }
   var z = _gpu_zeta_near_one(s, h);
   let steps = i32(abs(m));
   for (var j = 0; j < steps; j = j + 1) {
@@ -9038,10 +9077,10 @@ fn _gpu_hurwitz_zeta(s: f32, a: f32) -> f32 {
 }
 
 fn _gpu_zeta_generalized(s: f32, a: f32) -> f32 {
-  if (s == 1.0) { return bitcast<f32>(0x7f800000u); } // pole, every base point a
+  if (s == 1.0) { return _gpu_inf(); } // pole, every base point a
   if (a > 0.0) { return _gpu_hurwitz_zeta(s, a); }
   if (a == 0.0) { return _gpu_zeta(s); }
-  if (a < -1.0e6) { return bitcast<f32>(0x7fc00000u); }
+  if (a < -1.0e6) { return _gpu_nan(); }
   let n = i32(ceil(-a));
   var sum: f32 = 0.0;
   for (var k: i32 = 0; k < n; k = k + 1) { sum = sum + pow(-(a + f32(k)), -s); }
@@ -9052,69 +9091,152 @@ fn _gpu_zeta_generalized(s: f32, a: f32) -> f32 {
 `;
 
 /**
- * GPU Lerch transcendent Φ(z,s,a), real-valued (f32) — ported from
- * `lerchSeriesComplex`/`lerchEulerComplex` in `numerics/lerch-phi.ts`, at
- * im = 0 throughout. GLSL syntax.
+ * GPU Lerch transcendent Φ(z,s,a) = Σ zᵏ(k+a)^(−s) and polylogarithm
+ * Liₛ(z) = z·Φ(z,s,1), for real operands, real-valued (f32). GLSL syntax.
  *
- * Past |z| = 1 the interpreter continues Φ through a complex incomplete Γ
- * (`lerchContinuedComplex`), which has no GPU kernel — `_gpu_gamma` is
- * real-only — so `_gpu_lerch_phi` answers NaN there instead of the
- * continued value, along with everywhere else the value would be complex
- * (a < 0 with a non-integer s). The exceptions are s = 0, −1, −2, where Φ
- * is a rational function of z, computed from its closed form for every z:
- * 1/(1−z), a/(1−z) + z/(1−z)², and a²/(1−z) + 2az/(1−z)² + z(1+z)/(1−z)³.
+ * `_gpu_lerch_phi` answers NaN where the value is complex: a real z > 1 is on
+ * the branch cut (unless s is a non-positive integer, where Φ is a rational
+ * function of z and has no cut), and a < 0 with a non-integer s has complex
+ * terms. It also answers NaN where no method below can vouch for its value.
+ * The helpers behind it return vec2(value, 1), or vec2(0, 0) to decline, so
+ * that the dispatcher (`_gpu_lerch_core`) can try the next method: a NaN
+ * test (isnan, or x != x) is not reliable under the drivers' fast-math.
  *
- * - `_gpu_lerch_series` is the direct sum, for real |z| < 1 (and for
- *   z < 0 with s < 0, where the Euler transform is not valid). The terms
- *   with a + k <= 0 are summed first, without a convergence test, since
- *   they need not decrease. After them the sum stops when three
- *   consecutive terms each shrink and bound the tail below 1e−7 of the
- *   sum: the bound is |term|·ρ/(1−ρ), where ρ, the larger of the current
- *   term ratio and |z|, bounds every later ratio. When 4096 terms past the
- *   prefix do not reach that, it answers NaN rather than a truncated sum:
- *   the budget covers |z| up to about 0.995 for s near 0 (closer to 1
- *   when s is larger), and the f32 sum of that many terms is within about
- *   2e−5 relative. It also answers NaN when the sum is below 1/100 of its
- *   largest term: the f32 terms have cancelled too far (z < 0 with s < 0).
- * - `_gpu_lerch_euler` is the van Wijngaarden Euler transform (Numerical
- *   Recipes' `eulsum`), for −1 <= z < 0 and s > 0 — direct summation there
- *   is only conditionally convergent and stalls approaching the rim; the
- *   repeated-averaging table reaches f32 precision in a few dozen terms.
- *   The terms with a + k <= 0 are summed first, as in the series, so the
- *   transform sees only decreasing terms. It stops when three consecutive
- *   increments are below 1e−7 of the sum, and answers NaN when the
+ * The methods, in the order `_gpu_lerch_core` tries them:
+ * - z = 1 is the Hurwitz zeta ζ(s,a); z = 0 keeps only the k = 0 term;
+ *   s = 0 is 1/(1 − z).
+ * - A non-positive integer s = −n, n <= `LERCH_MAX_N`:
+ *   `_gpu_lerch_rational`, the rational function Φ(z,−n,a) = P_n(z)/(1−z)^(n+1),
+ *   for every z and every a, summed in u = z/(1 − z) and v = 1/(1 − z) (both
+ *   at most 1 in size below z = −1), where the old closed forms for s = −1
+ *   and −2 cancelled (2.9e−5 at Φ(−95.07, −2, 1.098)).
+ * - `_gpu_lerch_series`, the direct sum, for real |z| < 1 (and for z < 0
+ *   with s < 0, where the Euler transform is not valid). The terms with
+ *   a + k <= 0 are summed first, without a convergence test, since they need
+ *   not decrease. After them the sum stops when three consecutive terms each
+ *   shrink and bound the tail below 1e−7 of the sum: the bound is
+ *   |term|·ρ/(1−ρ), where ρ, the larger of the current term ratio and |z|,
+ *   bounds every later ratio. It declines when 4096 terms past the prefix
+ *   do not reach that (|z| above about 0.995 for s near 0, closer to 1 when
+ *   s is larger), or when its error estimate exceeds 3e−5 of the sum: the
+ *   terms weighted by the roundings of zᵏ and of pow(a + k, −s), whose GPU
+ *   error grows with |s·log2(a + k)|. (A cap of 100 on the ratio of the
+ *   largest term to the sum let 5.6e−4 through at Φ(−0.645, −10, 8.99).)
+ *   It also declines when |sum|·(1 − |z|) < 2^24 · 1.2e−38: a GPU flushes a
+ *   term below the smallest normal f32 (1.2e−38) to zero, and the flushed
+ *   tail, at most 1.2e−38/(1 − |z|), must stay below 2^−24 of the sum
+ *   (0.72% was lost at Φ(0.5, 12, 1000) ≈ 1.98e−36 without this test).
+ * - `_gpu_lerch_euler`, the van Wijngaarden Euler transform (Numerical
+ *   Recipes' `eulsum`), for −1 <= z < 0 and s > 0: direct summation there is
+ *   only conditionally convergent and stalls approaching the rim. The terms
+ *   with a + k <= 0 are summed first, as in the series. It stops when three
+ *   consecutive increments are below 1e−7 of the sum, and declines when the
  *   `LERCH_EULER_TERMS` budget runs out first (GLSL/WGSL arrays need a
- *   compile-time size) or when the sum has cancelled as above.
+ *   compile-time size) or when the sum is below 1/100 of its largest term.
+ *   It also declines when the transformed sum is below 2^24 · 1.2e−38, so
+ *   that the terms the stopping rule reads (down to 1e−7 of the sum) are
+ *   normal f32 values that a GPU does not flush to zero.
+ * - `_gpu_lerch_integral`, for s > 0 below z = −1 and where the series or
+ *   the transform declines: Φ = (1/Γ(s)) ∫₀^∞ t^(s−1) e^(−at) / (1 − z e^(−t)) dt,
+ *   whose integrand is positive for every z < 1. For a non-integer s < 0
+ *   (`_gpu_lerch_negative`, below z = −1, at z = −1 and where the series
+ *   declines) the same integral after n = ⌈−s⌉ integrations by parts, with
+ *   Φ(z e^(−t), −n, a) in the integrand; that integrand changes sign for
+ *   z < 0 and the error estimate measures the cancellation. 8-point
+ *   Gauss-Legendre panels that follow the step of the integrand at
+ *   t = ln|z|, so the whole f32 range (|z| up to 3.4e38) takes at most 22
+ *   of the 28 panels allowed.
+ * - `_gpu_lerch_hermite`, where the integral declines for s <= 0, and for
+ *   z > 1 with an integer s where the rational form declines: the
+ *   Hermite-type representation (mpmath's), with the upper incomplete gamma
+ *   at the complex argument −a·log z computed in f32 (series, continued
+ *   fraction, or the closed form for an integer s) and an integral of at
+ *   most 16 panels. Its terms cancel as |z| grows.
+ * - PolyLog below z = −1 with a negative non-integer order, where those
+ *   decline: Jonquière's inversion formula (`_gpu_poly_log_inversion`).
  *
- * Checked against mpmath by simulating these helpers in f32 (1400 real
- * points with −1 <= z < 1): every value that is not NaN is within 1.5e−5
- * relative of Φ at the f32-rounded operands.
+ * The integral, rational, Hermite and inversion methods and the series
+ * decline when their own error estimate exceeds 3e−5 of the value. The
+ * estimate adds, in units of the f32 rounding error, the error of each exp
+ * and pow call (on a GPU it grows with the size of the argument: pow(b, e)
+ * is within about 6e−8·(2 + |e·log2 b|) relative) and the cancellation
+ * between the terms.
+ *
+ * Cost of one call, in loop iterations: the series up to 4096 terms (plus
+ * one per unit of −a for a < 0); the transform up to 64 terms; the
+ * rational form up to 16 rows of at most 18 coefficients; the integral up
+ * to 224 integrand values, each with a Horner sum of n + 1 <= 17 terms;
+ * the Hermite form up to 199 continued-fraction steps and 128 integrand
+ * values; the inversion 20 terms and an inner series of up to 199 terms (or
+ * the integral and Hermite form again). The dispatcher tries at most three
+ * of these per call: the worst case, near z = 1 with s < 0, is the 4096
+ * series terms, then the integral, then the Hermite form (about 4700
+ * iterations plus the Horner sums); below z = −1 at most about 1100.
+ *
+ * Accuracy, measured on an Apple M5 Max GPU (WebGL2 through ANGLE Metal, and
+ * WebGPU; the two agree within 2.6e−6 relative) against mpmath's lerchphi
+ * and polylog at the f32-rounded operands, on 4130 random real points (z
+ * from −1e6 to 1, and up to 1e3 for an integer s <= −3; s from −12 to 12
+ * with integers, half-integers and near-integers; a from 0.05 to 50, and
+ * negative a with an integer s), and on 63 points with |z| from 1e8 to 3e38
+ * against 40-digit quadrature: every value that is not NaN is within 1.5e−5
+ * relative (worst 1.34e−5, from the Hermite form next to z = 1; every other
+ * method within 8.5e−6). A true value below the smallest normal f32
+ * (1.2e−38) comes back as 0 or a wrong subnormal: GPUs flush subnormals to
+ * zero. A value above it does not lose terms to the flush: the series and
+ * the Euler transform decline when a term they need can be below 1.2e−38
+ * (see above), and the integral sums nodes without the factor a^(−s) (and,
+ * below z = −1, with e^S) and applies that factor once at the end. An f32
+ * model whose log2 is 2.5 ulp off (a worse GPU than the one measured) puts
+ * some values at up to 2.4e−5: the error grows with the size of the pow and
+ * exp arguments, |s·log2 a| for a large |s|.
  */
 const LERCH_EULER_TERMS = 64;
+/** The largest n for which the Lerch helpers build the rational function
+ * Φ(w, −n, a) (their coefficient arrays hold n + 2 entries). */
+const LERCH_MAX_N = 16;
 export const GPU_LERCH_PREAMBLE_GLSL = `
-float _gpu_lerch_series(float z, float s, float a) {
+vec2 _gpu_lerch_series(float z, float s, float a) {
   int n0 = a < 0.0 ? int(ceil(-a)) : 0;
   float az = abs(z);
   float sum = 0.0;
   float zk = 1.0;
   float prev = 3.0e38;
-  float largest = 0.0;
+  // For the error estimate: the terms weighted by the roundings of z^k (k
+  // of them), their moduli, and the range of |a + k| (pow(b, -s) is within
+  // about 6e-8 (2 + |s log2 b|) relative on a GPU).
+  float err = 0.0;
+  float sizes = 0.0;
+  float bmin = 3.0e38;
+  float bmax = 0.0;
   int settled = 0;
   for (int k = 0; k < n0 + 4096; k++) {
     float b = a + float(k);
     float t = (b != 0.0) ? zk * _gpu_zeta_pow(b, -s) : 0.0;
     sum += t;
-    largest = max(largest, abs(t));
+    float size = abs(t);
+    err += size * (2.0 + float(k));
+    sizes += size;
+    if (b != 0.0) {
+      bmin = min(bmin, abs(b));
+      bmax = max(bmax, abs(b));
+    }
     if (b > 0.0) {
-      float size = abs(t);
       float rho = max(size / prev, az);
       if (size == 0.0 ||
           (size < prev && rho < 1.0 &&
            size * rho / (1.0 - rho) <= 1e-7 * abs(sum))) {
         settled++;
         if (settled == 3) {
-          if (largest > 100.0 * abs(sum)) return _gpu_nan();
-          return sum;
+          float lb = max(abs(log2(bmin)), abs(log2(bmax)));
+          float bound = 6.0e-8 * (err + sizes * (2.0 + abs(s * lb)));
+          if (!(bound <= 3.0e-5 * abs(sum))) return vec2(0.0);
+          // A GPU flushes a term below the smallest normal f32 (1.2e-38) to
+          // zero. The flushed tail is at most 1.2e-38 / (1 - |z|): decline
+          // unless that is below 2^-24 of the sum. (Not rho: after a flushed
+          // term, prev can be 0 and rho 0/0.)
+          if (abs(sum) * (1.0 - az) < 1.9721523e-31) return vec2(0.0);
+          return vec2(sum, 1.0);
         }
       } else {
         settled = 0;
@@ -9123,10 +9245,10 @@ float _gpu_lerch_series(float z, float s, float a) {
     }
     zk *= z;
   }
-  return _gpu_nan();
+  return vec2(0.0);
 }
 
-float _gpu_lerch_euler(float z, float s, float a) {
+vec2 _gpu_lerch_euler(float z, float s, float a) {
   int n0 = a <= 0.0 ? int(floor(-a)) + 1 : 0;
   float head = 0.0;
   float zn = 1.0;
@@ -9159,7 +9281,7 @@ float _gpu_lerch_euler(float z, float s, float a) {
         w[j + 1] = 0.5 * (w[j] + tmp);
         tmp = dum;
       }
-      if (nterm >= ${LERCH_EULER_TERMS}) return _gpu_nan();
+      if (nterm >= ${LERCH_EULER_TERMS}) return vec2(0.0);
       w[nterm + 1] = 0.5 * (w[nterm] + tmp);
       if (abs(w[nterm + 1]) <= abs(w[nterm])) {
         nterm++;
@@ -9173,45 +9295,637 @@ float _gpu_lerch_euler(float z, float s, float a) {
     if (k > 4 && abs(inc) <= 1e-7 * abs(sum)) {
       settled++;
       if (settled == 3) {
+        // A GPU flushes a term below the smallest normal f32 (1.2e-38) to
+        // zero: decline unless the terms the stopping rule reads, down to
+        // 1e-7 of the sum, are normal.
+        if (abs(sum) < 1.9721523e-31) return vec2(0.0);
         float tail = zn * sum;
-        float out = head + tail;
-        if (max(largest, abs(tail)) > 100.0 * abs(out)) return _gpu_nan();
-        return out;
+        float res = head + tail;
+        if (max(largest, abs(tail)) > 100.0 * abs(res)) return vec2(0.0);
+        return vec2(res, 1.0);
       }
     } else {
       settled = 0;
     }
   }
-  return _gpu_nan();
+  return vec2(0.0);
+}
+
+// 1 - e^(-t) for t >= 0, by its Taylor series below 1/4, where
+// 1.0 - exp(-t) would cancel.
+float _gpu_lerch_em(float t) {
+  if (t < 0.25)
+    return t * (1.0 - t / 2.0 * (1.0 - t / 3.0 * (1.0 - t / 4.0 *
+      (1.0 - t / 5.0 * (1.0 - t / 6.0 * (1.0 - t / 7.0))))));
+  return 1.0 - exp(-t);
+}
+
+// ln Gamma(s) for s > 0: shift the argument to x >= 8 (ln Gamma(s) =
+// ln Gamma(x) - ln(s (s+1) ... (x-1))), then the Stirling series. Within
+// about 1e-6 absolute. _gpu_gamma is not used here: its Lanczos sum
+// cancels in f32 near s = 0.
+float _gpu_lerch_lgamma(float s) {
+  float p = 1.0;
+  float x = s;
+  for (int k = 0; k < 8; k++) {
+    if (x >= 8.0) break;
+    p *= x;
+    x += 1.0;
+  }
+  float x2 = x * x;
+  float corr = (1.0 / 12.0 - (1.0 / 360.0 - 1.0 / (1260.0 * x2)) / x2) / x;
+  return (x - 0.5) * log(x) - x + (0.91893853320467274 + corr) - log(p);
+}
+
+// 1 / (1 - z e^(-t)) for t >= 0 and z < 1, without cancellation: for
+// 0 < z < 1 the denominator is (1 - z) + z (1 - e^(-t)), two terms >= 0.
+float _gpu_lerch_g(float z, float t) {
+  if (z < 0.0) return 1.0 / (1.0 - z * exp(-t));
+  return 1.0 / ((1.0 - z) + z * _gpu_lerch_em(t));
+}
+
+// One step of the polynomials P_m(w) = (1 - w)^(m+1) Phi(w, -m, a), in
+// place: P_(m+1)(w) = (1 - w)(a P_m + w P_m') + (m + 1) w P_m, that is
+// p'_k = (a + k) p_k + (m + 2 - a - k) p_(k-1), from P_0 = 1. It follows from
+// Phi(w, -m-1, a) = (a + w d/dw) Phi(w, -m, a). Updated from the top so
+// each entry still reads the previous row's values. c holds
+// LERCH_MAX_N + 2 entries.
+void _gpu_lerch_pstep(inout float c[${LERCH_MAX_N + 2}], float a, int m) {
+  for (int k = m + 1; k >= 0; k--) {
+    float hi = k <= m ? (a + float(k)) * c[k] : 0.0;
+    float lo = k >= 1 ? (float(m + 2) - a - float(k)) * c[k - 1] : 0.0;
+    c[k] = hi + lo;
+  }
+}
+
+// Phi(w, -n, a) = v sum_k p_k u^k v^(n-k), v = 1/(1 - w), u = w v, from
+// the coefficients of P_n: returns vec2(the sum without its factor v, the
+// sum of the moduli of its terms), by Horner in u with the powers of v
+// carried along. For w < -1, |u| and |v| are at most 1, so nothing
+// overflows. The caller applies the factor v, or folds it into an
+// exponent (see _gpu_lerch_integral).
+vec2 _gpu_lerch_poly(float c[${LERCH_MAX_N + 2}], int n, float u, float v) {
+  float au = abs(u);
+  float av = abs(v);
+  float r = c[n];
+  float ra = abs(c[n]);
+  float vp = v;
+  float avp = av;
+  for (int k = n - 1; k >= 0; k--) {
+    r = r * u + c[k] * vp;
+    ra = ra * au + abs(c[k]) * avp;
+    vp *= v;
+    avp *= av;
+  }
+  return vec2(r, ra);
+}
+
+// Phi(z, -n, a) for an integer 0 <= n <= LERCH_MAX_N: a rational function
+// of z, for every real z != 1 and every a (the (k + a) = 0 term is 0^n = 0,
+// dropped as the series drops it). It has no branch cut, so it holds for
+// z > 1 too. Returns vec2(value, 1), or vec2(0, 0) when the terms cancel so
+// far that the error estimate exceeds 3e-5 of the value (next to a zero of
+// Phi); the caller then tries its other methods.
+vec2 _gpu_lerch_rational(float z, int n, float a) {
+  const float EPS = 6.0e-8;
+  float c[${LERCH_MAX_N + 2}];
+  for (int i = 0; i < ${LERCH_MAX_N + 2}; i++) c[i] = 0.0;
+  c[0] = 1.0;
+  for (int m = 0; m < n; m++) _gpu_lerch_pstep(c, a, m);
+  float v = 1.0 / (1.0 - z);
+  vec2 q = _gpu_lerch_poly(c, n, z * v, v);
+  if (!(EPS * (float(n + 4) * q.y) <= 3.0e-5 * abs(q.x))) return vec2(0.0);
+  return vec2(q.x * v, 1.0);
+}
+
+// Phi(z,s,a) for real z < 1 (z != 0) and a > 0, from
+//   Phi(z,s,a) = 1/Gamma(s) Int_0^inf t^(s-1) e^(-a t) / (1 - z e^(-t)) dt
+// for s > 0, whose integrand is positive, so the sum has no cancellation at
+// any z. For s <= 0 (not an integer) it integrates by parts n = ceil(-s)
+// times first:
+//   Phi(z,s,a) = 1/Gamma(s+n) Int_0^inf t^(s+n-1) e^(-a t) R_n(z e^(-t)) dt,
+// R_n(w) = Phi(w, -n, a): the n-th derivative in t of
+// e^(-a t)/(1 - z e^(-t)) is (-1)^n e^(-a t) R_n(z e^(-t)), and the n signs
+// (-1) of the parts cancel it. That integrand is positive for 0 < z < 1
+// and changes sign for z < 0, where the error estimate measures the
+// cancellation. A negative a (s > 0 is then an integer) is first shifted to
+// a + n0 in (0, 1] by Phi(a) = sum_{k<n0} z^k (a+k)^(-s) + z^n0 Phi(a+n0).
+// With tau = a t the integral is a^(-(s+n)) times an integral against the
+// density tau^(s+n-1) e^(-tau) / Gamma(s+n). Its pieces: [0, e0] in closed
+// form from the first two Taylor terms of the integrand's smooth factor,
+// R_n(z) and -R_(n+1)(z); [e0, lam] (lam = min(1, 1/a)) in panels of width
+// <= 3 in ln t, which resolves the t^(s+n-1) singularity and, for z near 1,
+// the pole at t = ln z < 0; then panels in t up to where 1/(1 - z e^(-t))
+// has reached 1 (t = ln(-z) + 17 for z < 0) and the density is negligible
+// (tau = s + n + 30; for a > 1 and z < 0 the integrand decays like
+// e^(-(a-1) t) before that). A linear panel starting at x is at most 2x
+// wide (the singularity at t = 0), at most 8/a wide (e^(-a t)), and at most
+// max(4/(1 + n/4), 0.6 |x - L|) wide, L = ln|z|: the poles of the integrand
+// sit at t = L +- i pi (of order n + 1), so a panel far from the step at L
+// may be a fixed fraction of its distance to it, and next to it the panels
+// narrow as n grows. So the panel count does not grow with |z|: in
+// measurements the whole f32 range (|z| up to 3.4e38) takes at most 22
+// panels. Below z = -1 the factor 1/(1 - z e^(-t)) is carried as its log,
+// -softplus(L - t), inside the exponent of the density: the factor runs from
+// about 1/|z| to 1 and the density e^(-a t) down past e^(-88), so each alone
+// can fall under the smallest normal f32, which a GPU flushes to zero (the
+// value at z = -3e38 was 3% off), where their product does not. Every panel
+// is an 8-point Gauss-Legendre rule, at most 28 panels (224 integrand
+// values, each a Horner sum of n + 1 terms); past that it declines.
+// Returns vec2(value, 1) or vec2(0, 0) where it cannot vouch for the value:
+// the error estimate adds, in units of the f32 rounding error EPS, the
+// errors of the shifted terms, of each node (its exp argument, and the
+// moduli of the terms of R_n), of the closed-form head, of ln Gamma(s+n)
+// and of a^(-(s+n)), and declines above 3e-5 of the value.
+vec2 _gpu_lerch_integral(float z, float s, float a) {
+  const float EPS = 6.0e-8;
+  const float PI = 3.14159265358979;
+  const float gx[4] = float[4](0.1834346424956498, 0.5255324099163290,
+    0.7966664774136267, 0.9602898564975363);
+  const float gw[4] = float[4](0.3626837833783620, 0.3137066458778873,
+    0.2223810344533745, 0.1012285362903763);
+  int n = s > 0.0 ? 0 : int(ceil(-s));
+  float sn = s + float(n);
+  int n0 = a < 0.0 ? int(ceil(-a)) : 0;
+  float head = 0.0;
+  float zk = 1.0;
+  float err = 0.0;
+  for (int k = 0; k < n0; k++) {
+    float bk = a + float(k);
+    float t = zk * _gpu_zeta_pow(bk, -s);
+    head += t;
+    err += abs(t) * (2.0 + float(k) + abs(s * log2(abs(bk))));
+    zk *= z;
+  }
+  a += float(n0);
+  float c[${LERCH_MAX_N + 2}];
+  for (int i = 0; i < ${LERCH_MAX_N + 2}; i++) c[i] = 0.0;
+  c[0] = 1.0;
+  for (int m = 0; m < n; m++) _gpu_lerch_pstep(c, a, m);
+  float lg = _gpu_lerch_lgamma(sn);
+  float lam = min(1.0, 1.0 / a);
+  float delta = z > 0.0 ? -log(z) : PI;
+  float e0 = 1e-3 * min(lam, delta);
+  float la = log(a);
+  float tau0 = a * e0;
+  float L = z < 0.0 ? log(-z) : log(z);
+  bool big = z < -1.0;
+  // With the factor in the exponent, every node also carries e^S,
+  // S = min(a, 1) L, the size of the largest nodes (about |z|^(-min(a,1))),
+  // so that the nodes of a value near the smallest normal f32 do not flush
+  // to zero one by one; the sum is divided by e^S at the end, inside one
+  // exp (at z = -1e35 a value of 6e-37 was 0.4% off without it).
+  float S = big ? min(a, 1.0) * L : 0.0;
+  float lG0 = 0.0;
+  float v0h = 1.0 / (1.0 - z);
+  float u0 = z * v0h;
+  if (big) {
+    lG0 = -(L + log(1.0 + exp(-L)));
+    v0h = exp(lG0);
+    u0 = -exp(L + lG0);
+  }
+  vec2 f0 = _gpu_lerch_poly(c, n, u0, v0h);
+  float c1[${LERCH_MAX_N + 2}] = c;
+  _gpu_lerch_pstep(c1, a, n);
+  vec2 f1 = _gpu_lerch_poly(c1, n + 1, u0, v0h);
+  float p0 = big ? exp(sn * log(tau0) - lg + lG0 + S) : exp(sn * log(tau0) - lg) * v0h;
+  float d1 = -f1.x / a;
+  float sum = p0 * (f0.x / sn + d1 * tau0 / (sn + 1.0));
+  // The head's error: the rounding of Phi(z, -n, a) and Phi(z, -n-1, a),
+  // bounded by the moduli of their terms, and the exp that gives p0.
+  float ferr = abs(p0) * ((f0.y / sn + f1.y / a * tau0 / (sn + 1.0)) * float(n + 5)) +
+    abs(sum) * (abs(sn * log(tau0)) + abs(lg) + abs(L));
+  float v0 = log(e0);
+  float v1 = log(lam);
+  float nlog = max(1.0, ceil((v1 - v0) / 3.0));
+  float hv = (v1 - v0) / nlog;
+  float TG = max(L, 0.0) + 17.0;
+  float tw = (sn + 30.0) / a;
+  float tEnd = tw;
+  if (z < 0.0) tEnd = max(tw, a > 1.0 ? min(TG, (sn + 30.0) / (a - 1.0)) : TG);
+  float hW = 8.0 / a;
+  float x = lam;
+  for (int p = 0; p < 28; p++) {
+    bool logPanel = float(p) < nlog;
+    if (!logPanel && x >= tEnd) break;
+    float w = logPanel ? hv :
+      min(min(2.0 * x, hW), max(4.0 / (1.0 + 0.25 * float(n)), 0.6 * abs(x - L)));
+    float cc = logPanel ? v0 + (float(p) + 0.5) * hv : x + 0.5 * w;
+    float r = 0.5 * w;
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < 2; j++) {
+        float u = cc + (j == 0 ? -r : r) * gx[i];
+        float t = logPanel ? exp(u) : u;
+        float tau = a * t;
+        float e = logPanel ? sn * (u + la) : (sn - 1.0) * log(tau);
+        float vn;
+        float un;
+        float lG = 0.0;
+        if (big) {
+          float xs = L - t;
+          lG = -(max(xs, 0.0) + log(1.0 + exp(-abs(xs))));
+          vn = exp(lG);
+          un = -exp(xs + lG);
+        } else {
+          vn = _gpu_lerch_g(z, t);
+          un = z * exp(-t) * vn;
+        }
+        vec2 pv = _gpu_lerch_poly(c, n, un, vn);
+        float ex = e - tau - lg;
+        float q = r * gw[i] * ((logPanel ? 1.0 : a) * (big ? exp(ex + lG + S) : exp(ex) * vn));
+        sum += q * pv.x;
+        ferr += q * (abs(pv.x) * ((abs(e) + tau) + (abs(lG) + abs(L))) +
+          pv.y * (float(n + 3) + t));
+      }
+    }
+    if (!logPanel) x += w;
+  }
+  if (x < tEnd) return vec2(0.0); // the panel budget ran out
+  float scaled = big ? (sum < 0.0 ? -1.0 : 1.0) * exp(log(abs(sum)) - (S + sn * la))
+                     : pow(a, -sn) * sum;
+  float tail = zk * scaled;
+  float res = head + tail;
+  float rel = ferr / abs(sum) + (8.0 + abs(lg)) +
+    ((float(n0) + 2.0) + (abs(sn * log2(a)) + S));
+  float bound = EPS * (err + abs(tail) * rel);
+  if (!(bound <= 3.0e-5 * abs(res))) return vec2(0.0);
+  return vec2(res, 1.0);
+}
+
+// The three ways _gpu_lerch_hermite computes h = e^x x^(-sig) Gamma(sig, x)
+// at a complex x = (x.x, x.y), sig >= 1. Each returns vec4(Re h, Im h,
+// err, ok), with err an estimate of the absolute error of h in units of
+// the f32 rounding error.
+//
+// An integer sig = n + 1: Gamma(n+1, x) = n! e^(-x) sum_{k<=n} x^k / k!,
+// so h = (1/x) sum_{j<=n} n!/(n-j)! x^(-j), summed from the inside out.
+vec4 _gpu_lerch_h_integer(float sig, vec2 x) {
+  int n = int(sig) - 1;
+  float d = x.x * x.x + x.y * x.y;
+  float ir = x.x / d;
+  float ii = -x.y / d;
+  float ix = sqrt(ir * ir + ii * ii);
+  float rr = 1.0;
+  float ri = 0.0;
+  float ra = 1.0; // the same sum over the moduli
+  for (int j = 1; j <= n; j++) {
+    float tr = ir * rr - ii * ri;
+    float ti = ir * ri + ii * rr;
+    rr = 1.0 + float(j) * tr;
+    ri = float(j) * ti;
+    ra = 1.0 + float(j) * ix * ra;
+  }
+  return vec4(rr * ir - ri * ii, rr * ii + ri * ir, (float(n) + 3.0) * ra * ix, 1.0);
+}
+
+// |x| < sig: h = e^x x^(-sig) Gamma(sig) - sum_k x^k / (sig (sig+1) ... (sig+k)),
+// whose terms decrease from the first. (The continued fraction loses
+// digits in f32 there: 8% at sig = 12.9, x = -0.01 - 3.14i.)
+vec4 _gpu_lerch_h_series(float sig, vec2 x) {
+  float tr = 1.0 / sig;
+  float ti = 0.0;
+  float sr = tr;
+  float si = 0.0;
+  float sa = tr;
+  int k = 1;
+  for (k = 1; k < 100; k++) {
+    float f = sig + float(k);
+    float nr = (tr * x.x - ti * x.y) / f;
+    ti = (tr * x.y + ti * x.x) / f;
+    tr = nr;
+    sr += tr;
+    si += ti;
+    float ta = abs(tr) + abs(ti);
+    sa += ta;
+    if (ta < 1e-8 * (abs(sr) + abs(si))) break;
+  }
+  float er = x.x - sig * log(sqrt(x.x * x.x + x.y * x.y)) + _gpu_lerch_lgamma(sig);
+  // arg x. At z = -1, x.x is -0.0, and the two-argument atan of Apple's
+  // GPU (ANGLE Metal and WebGPU) then answers the wrong branch, so the
+  // imaginary axis is taken explicitly.
+  float arg = x.x == 0.0 ? (x.y < 0.0 ? -1.5707963267949 : 1.5707963267949) : atan(x.y, x.x);
+  float ei = x.y - sig * arg;
+  float m = exp(er);
+  return vec4(m * cos(ei) - sr, m * sin(ei) - si,
+    m * (24.0 + abs(er) + abs(ei)) + (float(k) + 3.0) * sa, 1.0);
+}
+
+// |x| >= sig: Legendre's continued fraction for h, by the modified Lentz
+// method, at most 200 steps.
+vec4 _gpu_lerch_h_cf(float sig, vec2 x) {
+  const float FPMIN = 1e-30;
+  float br = x.x - sig + 1.0;
+  float bi = x.y;
+  float cr = 1e30;
+  float ci = 0.0;
+  float dd = br * br + bi * bi;
+  float dr = br / dd;
+  float di = -bi / dd;
+  float hr = dr;
+  float hi = di;
+  for (int i = 1; i < 200; i++) {
+    float an = -float(i) * (float(i) - sig);
+    br += 2.0;
+    dr = an * dr + br;
+    di = an * di + bi;
+    if (abs(dr) + abs(di) < FPMIN) dr = FPMIN;
+    float cc = cr * cr + ci * ci;
+    cr = br + an * cr / cc;
+    ci = bi - an * ci / cc;
+    if (abs(cr) + abs(ci) < FPMIN) cr = FPMIN;
+    dd = dr * dr + di * di;
+    dr = dr / dd;
+    di = -di / dd;
+    float er = dr * cr - di * ci;
+    float ei = dr * ci + di * cr;
+    float nr = hr * er - hi * ei;
+    hi = hr * ei + hi * er;
+    hr = nr;
+    if (abs(er - 1.0) + abs(ei) < 1e-7)
+      return vec4(hr, hi, 35.0 * sqrt(hr * hr + hi * hi), 1.0);
+  }
+  return vec4(0.0);
+}
+
+// Phi(z,s,a) for real z != 0, 1 and s <= 0, from the Hermite-type
+// representation (valid for a > 0):
+//   Phi(z,s,a) = 1/(2 a^s) + a^(1-s) h - 2 Int_0^inf
+//     sin(t log z - s arctan(t/a)) / ((a^2+t^2)^(s/2) (e^(2 pi t) - 1)) dt,
+// with h = e^x x^(s-1) Gamma(1-s, x) at x = -a log z. (The middle term is
+// z^(-a) (-log z)^(s-1) Gamma(1-s, -a log z): e^x = z^(-a) and
+// x^(1-s) = a^(1-s) (-log z)^(1-s) for a real a > 0.) For z < 0,
+// log z = ln|z| + i pi; the three terms are then complex and their sum is
+// real, so only the real parts are summed, and the integrand's real part
+// is sin(t ln|z| - s arctan(t/a)) cosh(pi t) / (e^(2 pi t) - 1). First a is
+// shifted to b = a + m >= 1, which keeps |Im x| = pi b >= pi and the
+// integrand's branch points at t = +-ib clear of the real axis. The
+// integral is an 8-point Gauss-Legendre rule on at most 16 panels up to
+// where e^(-pi t) (b^2+t^2)^(-s/2) is negligible, each panel at most 1.5
+// wide (poles at t = +-i) and at most 4/|ln|z|| wide (the oscillation);
+// past 16 panels it declines. Returns vec2(value, 1) or vec2(0, 0) where
+// the error estimate (the pow and exp arguments, h's own error, and the
+// cancellation between the terms) exceeds 3e-5 of the value.
+vec2 _gpu_lerch_hermite(float z, float s, float a) {
+  const float EPS = 6.0e-8;
+  const float PI = 3.14159265358979;
+  const float gx[4] = float[4](0.1834346424956498, 0.5255324099163290,
+    0.7966664774136267, 0.9602898564975363);
+  const float gw[4] = float[4](0.3626837833783620, 0.3137066458778873,
+    0.2223810344533745, 0.1012285362903763);
+  if (s < -30.0) return vec2(0.0);
+  int m = a < 1.0 ? int(ceil(1.0 - a)) : 0;
+  float head = 0.0;
+  float zk = 1.0;
+  float err = 0.0;
+  for (int k = 0; k < m; k++) {
+    float bk = a + float(k);
+    if (bk != 0.0) {
+      float t = zk * _gpu_zeta_pow(bk, -s);
+      head += t;
+      err += abs(t) * (2.0 + float(k) + abs(s * log2(abs(bk))));
+    }
+    zk *= z;
+  }
+  float b = a + float(m);
+  float L = log(abs(z));
+  float sig = 1.0 - s;
+  vec2 x = vec2(-b * L, z < 0.0 ? -b * PI : 0.0);
+  vec4 h;
+  if (sig == floor(sig)) h = _gpu_lerch_h_integer(sig, x);
+  else if (sqrt(x.x * x.x + x.y * x.y) < sig) h = _gpu_lerch_h_series(sig, x);
+  else h = _gpu_lerch_h_cf(sig, x);
+  if (h.w < 0.5) return vec2(0.0);
+  float t1 = 0.5 * pow(b, -s);
+  float bs = pow(b, sig);
+  float t2 = bs * h.x;
+  // |h| up to a factor sqrt(2), without squaring: near z = 1 an integer
+  // order gives an h near 1e25, whose square overflows f32.
+  float t2abs = bs * (abs(h.x) + abs(h.y));
+  float q3 = max(-s, 0.0);
+  float t3end = (21.0 + q3 * log(1.0 + (q3 + 7.0) / b)) / PI;
+  float n3 = ceil(t3end / min(1.5, 4.0 / max(abs(L), 1e-3)));
+  if (n3 > 16.0) return vec2(0.0);
+  float h3 = t3end / n3;
+  float t3 = 0.0;
+  float a3 = 0.0;
+  float b2 = b * b;
+  for (int p = 0; p < 16; p++) {
+    if (float(p) >= n3) break;
+    float c = (float(p) + 0.5) * h3;
+    float r = 0.5 * h3;
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < 2; j++) {
+        float t = c + (j == 0 ? -r : r) * gx[i];
+        float y = 2.0 * PI * t;
+        float q = exp(-y);
+        float omq = _gpu_lerch_em(y);
+        float K = z < 0.0 ? exp(-PI * t) * (1.0 + q) / (2.0 * omq) : q / omq;
+        float f = sin(t * L - s * atan(t / b)) *
+          exp(-0.5 * s * log(b2 + t * t)) * K;
+        float wf = r * gw[i] * f;
+        t3 += wf;
+        a3 += abs(wf) * ((6.0 + 10.0 * t) +
+          (abs(s) * (2.0 + 0.5 * log2(b2 + t * t)) + abs(t * L)));
+      }
+    }
+  }
+  t3 = -2.0 * t3;
+  a3 = 2.0 * a3;
+  float phi = t1 + t2 + t3;
+  float res = head + zk * phi;
+  float e1 = t1 * (2.0 + abs(s * log2(b)));
+  float e2 = t2abs * (2.0 + abs(sig * log2(b))) + bs * h.z;
+  float ephi = (e1 + e2) + (a3 + 3.0 * (t1 + t2abs + abs(t3)));
+  float bound = EPS * (err + abs(zk) * (ephi + (float(m) + 2.0) * abs(phi)) + abs(res));
+  if (!(bound <= 3.0e-5 * abs(res))) return vec2(0.0);
+  return vec2(res, 1.0);
+}
+
+// Phi(z,s,a) for s <= 0: the integral after n integrations by parts (a
+// non-integer s >= -LERCH_MAX_N with a > 0), and where it declines the
+// Hermite form.
+vec2 _gpu_lerch_negative(float z, float s, float a) {
+  if (s != floor(s) && a > 0.0 && s >= -${LERCH_MAX_N}.0) {
+    vec2 r = _gpu_lerch_integral(z, s, a);
+    if (r.y > 0.5) return r;
+  }
+  return _gpu_lerch_hermite(z, s, a);
+}
+
+// Phi(z,s,a) as vec2(value, 1), or vec2(0, 0) where the value is complex
+// or no method can vouch for it. The cases, in order: z = 1 is the Hurwitz
+// zeta; z = 0 keeps only the k = 0 term; s = 0 is 1/(1 - z); a
+// non-positive integer s >= -LERCH_MAX_N is the rational function of
+// _gpu_lerch_rational, for every z, where it does not decline; a
+// non-positive integer a with s > 0 is the pole (+inf); a < 0 with a
+// non-integer s is complex; z > 1 is on the branch cut unless s is a
+// non-positive integer, where Phi has no cut (the Hermite form). Past
+// z = -1 and at z = -1: the positive integral for s > 0, and for s <= 0
+// _gpu_lerch_negative. Inside the unit interval: the Euler transform
+// (z < 0, s > 0) or the direct series, and where those decline the
+// integral (s > 0) or _gpu_lerch_negative (s <= 0).
+vec2 _gpu_lerch_core(float z, float s, float a) {
+  if (z == 1.0) return vec2(_gpu_hurwitz_zeta(s, a), 1.0);
+  if (z == 0.0) return vec2(_gpu_zeta_pow(a, -s), 1.0); // only the k = 0 term survives
+  if (s == 0.0) return vec2(1.0 / (1.0 - z), 1.0);
+  if (s < 0.0 && s == floor(s) && s >= -${LERCH_MAX_N}.0) {
+    vec2 q = _gpu_lerch_rational(z, int(-s), a);
+    if (q.y > 0.5) return q;
+  }
+  bool aNonposInt = a <= 0.0 && a == floor(a);
+  if (aNonposInt && s > 0.0) return vec2(_gpu_inf(), 1.0); // (k+a) = 0 diverges, z != 0
+  if (a < 0.0 && s != floor(s)) return vec2(0.0); // complex value
+  if (a < -1.0e6) return vec2(0.0); // one term per unit of -a
+  if (z > 1.0) {
+    if (s > 0.0 || s != floor(s)) return vec2(0.0); // on the branch cut
+    return _gpu_lerch_hermite(z, s, a);
+  }
+  if (z < -1.0) return s > 0.0 ? _gpu_lerch_integral(z, s, a) : _gpu_lerch_negative(z, s, a);
+  if (z < 0.0 && s > 0.0) {
+    vec2 e = _gpu_lerch_euler(z, s, a);
+    return e.y > 0.5 ? e : _gpu_lerch_integral(z, s, a);
+  }
+  if (z == -1.0) return _gpu_lerch_negative(z, s, a); // s < 0: the series diverges
+  vec2 r = _gpu_lerch_series(z, s, a);
+  if (r.y > 0.5) return r;
+  return s > 0.0 ? _gpu_lerch_integral(z, s, a) : _gpu_lerch_negative(z, s, a);
 }
 
 float _gpu_lerch_phi(float z, float s, float a) {
-  if (z == 1.0) return _gpu_hurwitz_zeta(s, a);
-  if (z == 0.0) return _gpu_zeta_pow(a, -s); // only the k = 0 term survives
-  float w = 1.0 - z;
-  if (s == 0.0) return 1.0 / w;
-  if (s == -1.0) return a / w + z / (w * w);
-  if (s == -2.0) return a * a / w + 2.0 * a * z / (w * w) + z * (1.0 + z) / (w * w * w);
-  bool aNonposInt = a <= 0.0 && a == floor(a);
-  if (aNonposInt && s > 0.0) return _gpu_inf(); // (k+a) = 0 diverges, z != 0
-  if (abs(z) > 1.0) return _gpu_nan(); // needs the continuation; no GPU kernel
-  if (a < 0.0 && s != floor(s)) return _gpu_nan(); // complex value
-  if (a < -1.0e6) return _gpu_nan(); // one term per unit of -a
-  if (z < 0.0 && s > 0.0) return _gpu_lerch_euler(z, s, a);
-  if (z == -1.0) return _gpu_nan(); // s < 0: diverges, no valid transform
-  return _gpu_lerch_series(z, s, a);
+  vec2 r = _gpu_lerch_core(z, s, a);
+  return r.y > 0.5 ? r.x : _gpu_nan();
+}
+
+// Li_s(z) for z < -1 and a real s < 0 that is not an integer, by
+// Jonquiere's inversion formula (DLMF 25.12.13 with the Hurwitz zeta form):
+//   Li_s(z) = Re[(2 pi)^s e^(i pi s/2) / Gamma(s) zeta(1 - s, A)]
+//             - cos(pi s) Li_s(1/z),   A = 1/2 - i ln(-z) / (2 pi).
+// zeta(1 - s, A) (1 - s > 1) is summed by Euler-Maclaurin: 12 terms, the
+// tail integral, the half term and up to 8 Bernoulli corrections, in
+// complex f32. 1/Gamma(s) = sin(pi s) Gamma(1 - s) / pi, with sin(pi s)
+// taken from the distance of s to its nearest integer. Returns
+// vec2(value, 1), or vec2(0, 0) when Li_s(1/z) declines or the error
+// estimate exceeds 3e-5 of the value.
+vec2 _gpu_poly_log_inversion(float s, float z) {
+  const float EPS = 6.0e-8;
+  const float PI = 3.14159265358979;
+  const float B[8] = float[8](1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0,
+    5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0);
+  float ai = -log(-z) / (2.0 * PI);
+  float sig = 1.0 - s;
+  float zr = 0.0;
+  float zi = 0.0;
+  float zerr = 0.0;
+  for (int k = 0; k < 12; k++) {
+    float wr = 0.5 + float(k);
+    float lnw = 0.5 * log(wr * wr + ai * ai);
+    float ph = -sig * atan(ai, wr);
+    float m = exp(-sig * lnw);
+    zr += m * cos(ph);
+    zi += m * sin(ph);
+    zerr += m * (4.0 + abs(sig * lnw) + abs(ph));
+  }
+  float wr = 12.5;
+  float lnw = 0.5 * log(wr * wr + ai * ai);
+  float th = atan(ai, wr);
+  // w^(1 - sig) / (sig - 1), with 1 - sig = s taken from s itself: near
+  // s = 0, (1 - s) - 1 would keep only a few digits of s.
+  float m1 = exp(s * lnw) / -s;
+  float p1 = s * th;
+  zr += m1 * cos(p1);
+  zi += m1 * sin(p1);
+  zerr += abs(m1) * (4.0 + abs(s * lnw) + abs(p1));
+  // w^(-sig) / 2
+  float m0 = exp(-sig * lnw);
+  float p0 = -sig * th;
+  zr += 0.5 * m0 * cos(p0);
+  zi += 0.5 * m0 * sin(p0);
+  zerr += 0.5 * m0 * (4.0 + abs(sig * lnw) + abs(p0));
+  // Bernoulli terms B_2j (sig)_(2j-1) / (2j)! w^(-sig-2j+1): u starts at
+  // (sig/2) w^(-sig-1) and gains (sig+2j-1)(sig+2j) / ((2j+1)(2j+2) w^2).
+  float mu1 = exp((-sig - 1.0) * lnw);
+  float pu1 = (-sig - 1.0) * th;
+  float ur = sig / 2.0 * mu1 * cos(pu1);
+  float ui = sig / 2.0 * mu1 * sin(pu1);
+  float w2r = wr * wr - ai * ai;
+  float w2i = 2.0 * wr * ai;
+  float w2d = w2r * w2r + w2i * w2i;
+  float iw2r = w2r / w2d;
+  float iw2i = -w2i / w2d;
+  float prev = 3.0e38;
+  for (int j = 1; j <= 8; j++) {
+    float tr = ur * B[j - 1];
+    float ti = ui * B[j - 1];
+    float ta = abs(tr) + abs(ti);
+    if (ta >= prev) break;
+    zr += tr;
+    zi += ti;
+    zerr += ta * (10.0 + abs(sig * lnw));
+    prev = ta;
+    float mm = float(2 * j);
+    float c = (sig + mm - 1.0) * (sig + mm) / ((mm + 1.0) * (mm + 2.0));
+    float nr = c * (ur * iw2r - ui * iw2i);
+    ui = c * (ur * iw2i + ui * iw2r);
+    ur = nr;
+  }
+  float n = floor(s + 0.5);
+  float d = s - n;
+  float sgn = mod(n, 2.0) == 0.0 ? 1.0 : -1.0;
+  float lg1 = _gpu_lerch_lgamma(sig);
+  float fm = sgn * sin(PI * d) * exp(s * log(2.0 * PI) + lg1) / PI;
+  float fre = fm * cos(0.5 * PI * s);
+  float fim = fm * sin(0.5 * PI * s);
+  float first = fre * zr - fim * zi;
+  float firstErr = abs(fm) * zerr +
+    abs(fm) * sqrt(zr * zr + zi * zi) * (30.0 + abs(lg1) + abs(s * 2.7));
+  // Li_s(1/z): for |1/z| <= 1/2 its own series sum_k (1/z)^k k^(-s), with
+  // an error estimate, and the stopping rule of _gpu_lerch_series (the
+  // tail after a decreasing term t with ratio rho is below t rho/(1-rho));
+  // closer to the rim _gpu_lerch_negative (the integral, then the Hermite
+  // form) at 1/z.
+  float iz = 1.0 / z;
+  float li = 0.0;
+  float lierr = 0.0;
+  if (iz >= -0.5) {
+    float wk = 1.0;
+    float prev = 3.0e38;
+    bool done = false;
+    for (int k = 1; k < 200; k++) {
+      wk *= iz;
+      float t = wk * pow(float(k), -s);
+      li += t;
+      float size = abs(t);
+      lierr += size * (2.0 + float(k) + abs(s * log2(float(k))));
+      float rho = max(size / prev, -iz);
+      if (size < prev && rho < 1.0 && size * rho / (1.0 - rho) <= 1e-8 * abs(li)) {
+        done = true;
+        break;
+      }
+      prev = size;
+    }
+    if (!done) return vec2(0.0);
+  } else {
+    vec2 inner = _gpu_lerch_negative(iz, s, 1.0);
+    if (inner.y < 0.5) return vec2(0.0);
+    li = iz * inner.x;
+    lierr = 500.0 * abs(li); // the inner value is within 3e-5 = 500 EPS
+  }
+  float res = first - sgn * cos(PI * d) * li;
+  float bound = EPS * ((firstErr + 4.0 * abs(first)) + (lierr + 2.0 * abs(li)));
+  if (!(bound <= 3.0e-5 * abs(res))) return vec2(0.0);
+  return vec2(res, 1.0);
 }
 
 // PolyLog(s, z). The integer orders the interpreter answers in closed form
 // come first, so the shader agrees with it there: z = 0 is 0; the orders 1,
 // 0 and -1 are -ln(1 - z), z/(1 - z) and z/(1 - z)^2, with a pole (+inf)
 // at z = 1; an order -n, 2 <= n <= 12, is the Eulerian closed form
-// z * sum_k A(n,k) z^k / (1 - z)^(n+1). Every other order uses
-// Li_s(z) = z * Phi(z, s, 1) through _gpu_lerch_phi, so it is NaN where
-// _gpu_lerch_phi is (|z| >= 1 off z = 1). This includes an integer order
-// >= 2 below z = -1 and any non-integer order below z = -1, which the
-// interpreter reaches by an inversion formula that needs a complex Hurwitz
-// zeta function this target does not have.
+// z * sum_k A(n,k) z^k / (1 - z)^(n+1), which for |z| > 1 is summed in
+// u = z/(1 - z) and v = 1/(1 - z) (|u|, |v| <= 1 for z < -1) so that it does
+// not overflow. Every other order uses Li_s(z) = z * Phi(z, s, 1), and where
+// that declines below z = -1 with a negative non-integer order, Jonquiere's
+// inversion formula (_gpu_poly_log_inversion). NaN on the cut z > 1 (except
+// the orders above) and where both decline.
 float _gpu_poly_log(float s, float z) {
   if (z == 0.0) return 0.0;
   if (s == 1.0) {
@@ -9238,48 +9952,79 @@ float _gpu_poly_log(float s, float z) {
       for (int k = m - 1; k >= 1; k--)
         row[k] = float(k + 1) * row[k] + float(m - k) * row[k - 1];
     }
+    if (abs(z) > 1.0) {
+      // sum_k A(n,k) u^(k+1) v^(n-k) = u v sum_k A(n,k) u^k v^(n-1-k)
+      float v = 1.0 / (1.0 - z);
+      float u = z * v;
+      float r = row[n - 1];
+      float vp = v;
+      for (int k = n - 2; k >= 0; k--) {
+        r = r * u + row[k] * vp;
+        vp *= v;
+      }
+      return u * v * r;
+    }
     float p = 0.0;
     for (int k = n - 1; k >= 0; k--) p = p * z + row[k];
     float den = 1.0;
     for (int i = 0; i <= n; i++) den *= 1.0 - z;
     return z * p / den;
   }
-  return z * _gpu_lerch_phi(z, s, 1.0);
+  vec2 r = _gpu_lerch_core(z, s, 1.0);
+  if (r.y > 0.5) return z * r.x;
+  if (z < -1.0 && s < 0.0 && s != floor(s)) {
+    vec2 v = _gpu_poly_log_inversion(s, z);
+    if (v.y > 0.5) return v.x;
+  }
+  return _gpu_nan();
 }
 `;
 
 /**
- * GPU Lerch transcendent (WGSL syntax). See `GPU_LERCH_PREAMBLE_GLSL`; the
- * pole and NaN are spelled inline as bit patterns (see
- * `GPU_GAMMA_PREAMBLE_WGSL`), and the Euler-transform table is a
- * fixed-size `array<f32, N>` rather than a GLSL braceless local array.
+ * GPU Lerch transcendent and polylogarithm (WGSL syntax). See
+ * `GPU_LERCH_PREAMBLE_GLSL` for the methods and their accuracy; the WGSL
+ * text follows the GLSL one statement by statement. The Euler-transform
+ * table is a fixed-size `array<f32, N>`, and the pole and NaN come from the
+ * WGSL `_gpu_inf()` / `_gpu_nan()` helpers (`GPU_NAN_PREAMBLE_WGSL`).
  */
 export const GPU_LERCH_PREAMBLE_WGSL = `
-fn _gpu_lerch_series(z: f32, s: f32, a: f32) -> f32 {
+fn _gpu_lerch_series(z: f32, s: f32, a: f32) -> vec2<f32> {
   var n0: i32 = 0;
   if (a < 0.0) { n0 = i32(ceil(-a)); }
   let az = abs(z);
   var sum: f32 = 0.0;
   var zk: f32 = 1.0;
   var prev: f32 = 3.0e38;
-  var largest: f32 = 0.0;
+  // The error estimate: see the GLSL preamble.
+  var err: f32 = 0.0;
+  var sizes: f32 = 0.0;
+  var bmin: f32 = 3.0e38;
+  var bmax: f32 = 0.0;
   var settled: i32 = 0;
   for (var k: i32 = 0; k < n0 + 4096; k = k + 1) {
     let b = a + f32(k);
     var t: f32 = 0.0;
     if (b != 0.0) { t = zk * _gpu_zeta_pow(b, -s); }
     sum = sum + t;
-    largest = max(largest, abs(t));
+    let size = abs(t);
+    err = err + size * (2.0 + f32(k));
+    sizes = sizes + size;
+    if (b != 0.0) {
+      bmin = min(bmin, abs(b));
+      bmax = max(bmax, abs(b));
+    }
     if (b > 0.0) {
-      let size = abs(t);
       let rho = max(size / prev, az);
       if (size == 0.0 ||
           (size < prev && rho < 1.0 &&
            size * rho / (1.0 - rho) <= 1e-7 * abs(sum))) {
         settled = settled + 1;
         if (settled == 3) {
-          if (largest > 100.0 * abs(sum)) { return bitcast<f32>(0x7fc00000u); }
-          return sum;
+          let lb = max(abs(log2(bmin)), abs(log2(bmax)));
+          let bound = 6.0e-8 * (err + sizes * (2.0 + abs(s * lb)));
+          if (!(bound <= 3.0e-5 * abs(sum))) { return vec2<f32>(0.0); }
+          if (abs(sum) * (1.0 - az) < 1.9721523e-31) { return vec2<f32>(0.0); }
+          return vec2<f32>(sum, 1.0);
         }
       } else {
         settled = 0;
@@ -9288,10 +10033,10 @@ fn _gpu_lerch_series(z: f32, s: f32, a: f32) -> f32 {
     }
     zk = zk * z;
   }
-  return bitcast<f32>(0x7fc00000u);
+  return vec2<f32>(0.0);
 }
 
-fn _gpu_lerch_euler(z: f32, s: f32, a: f32) -> f32 {
+fn _gpu_lerch_euler(z: f32, s: f32, a: f32) -> vec2<f32> {
   var n0: i32 = 0;
   if (a <= 0.0) { n0 = i32(floor(-a)) + 1; }
   var head: f32 = 0.0;
@@ -9326,7 +10071,7 @@ fn _gpu_lerch_euler(z: f32, s: f32, a: f32) -> f32 {
         w[j + 1] = 0.5 * (w[j] + tmp);
         tmp = dum;
       }
-      if (nterm >= ${LERCH_EULER_TERMS}) { return bitcast<f32>(0x7fc00000u); }
+      if (nterm >= ${LERCH_EULER_TERMS}) { return vec2<f32>(0.0); }
       w[nterm + 1] = 0.5 * (w[nterm] + tmp);
       if (abs(w[nterm + 1]) <= abs(w[nterm])) {
         nterm = nterm + 1;
@@ -9340,51 +10085,565 @@ fn _gpu_lerch_euler(z: f32, s: f32, a: f32) -> f32 {
     if (k > 4 && abs(inc) <= 1e-7 * abs(sum)) {
       settled = settled + 1;
       if (settled == 3) {
+        if (abs(sum) < 1.9721523e-31) { return vec2<f32>(0.0); }
         let tail = zn * sum;
-        let out = head + tail;
-        if (max(largest, abs(tail)) > 100.0 * abs(out)) { return bitcast<f32>(0x7fc00000u); }
-        return out;
+        let res = head + tail;
+        if (max(largest, abs(tail)) > 100.0 * abs(res)) { return vec2<f32>(0.0); }
+        return vec2<f32>(res, 1.0);
       }
     } else {
       settled = 0;
     }
   }
-  return bitcast<f32>(0x7fc00000u);
+  return vec2<f32>(0.0);
+}
+
+// 1 - e^(-t), t >= 0: see the GLSL preamble.
+fn _gpu_lerch_em(t: f32) -> f32 {
+  if (t < 0.25) {
+    return t * (1.0 - t / 2.0 * (1.0 - t / 3.0 * (1.0 - t / 4.0 *
+      (1.0 - t / 5.0 * (1.0 - t / 6.0 * (1.0 - t / 7.0))))));
+  }
+  return 1.0 - exp(-t);
+}
+
+// ln Gamma(s) for s > 0: see the GLSL preamble.
+fn _gpu_lerch_lgamma(s: f32) -> f32 {
+  var p: f32 = 1.0;
+  var x: f32 = s;
+  for (var k: i32 = 0; k < 8; k = k + 1) {
+    if (x >= 8.0) { break; }
+    p = p * x;
+    x = x + 1.0;
+  }
+  let x2 = x * x;
+  let corr = (1.0 / 12.0 - (1.0 / 360.0 - 1.0 / (1260.0 * x2)) / x2) / x;
+  return (x - 0.5) * log(x) - x + (0.91893853320467274 + corr) - log(p);
+}
+
+fn _gpu_lerch_g(z: f32, t: f32) -> f32 {
+  if (z < 0.0) { return 1.0 / (1.0 - z * exp(-t)); }
+  return 1.0 / ((1.0 - z) + z * _gpu_lerch_em(t));
+}
+
+// One step of the polynomials P_m of Phi(w, -m, a): see the GLSL preamble.
+fn _gpu_lerch_pstep(c: ptr<function, array<f32, ${LERCH_MAX_N + 2}>>, a: f32, m: i32) {
+  for (var k: i32 = m + 1; k >= 0; k = k - 1) {
+    var hi: f32 = 0.0;
+    var lo: f32 = 0.0;
+    if (k <= m) { hi = (a + f32(k)) * (*c)[k]; }
+    if (k >= 1) { lo = (f32(m + 2) - a - f32(k)) * (*c)[k - 1]; }
+    (*c)[k] = hi + lo;
+  }
+}
+
+// Phi(w, -n, a) without its factor v, and the sum of the moduli of its
+// terms: see the GLSL preamble.
+fn _gpu_lerch_poly(c: ptr<function, array<f32, ${LERCH_MAX_N + 2}>>, n: i32, u: f32, v: f32) -> vec2<f32> {
+  let au = abs(u);
+  let av = abs(v);
+  var r = (*c)[n];
+  var ra = abs((*c)[n]);
+  var vp = v;
+  var avp = av;
+  for (var k: i32 = n - 1; k >= 0; k = k - 1) {
+    r = r * u + (*c)[k] * vp;
+    ra = ra * au + abs((*c)[k]) * avp;
+    vp = vp * v;
+    avp = avp * av;
+  }
+  return vec2<f32>(r, ra);
+}
+
+// Phi(z, -n, a) for an integer n, in closed form: see the GLSL preamble.
+fn _gpu_lerch_rational(z: f32, n: i32, a: f32) -> vec2<f32> {
+  let EPS = 6.0e-8;
+  var c: array<f32, ${LERCH_MAX_N + 2}>;
+  c[0] = 1.0;
+  for (var m: i32 = 0; m < n; m = m + 1) { _gpu_lerch_pstep(&c, a, m); }
+  let v = 1.0 / (1.0 - z);
+  let q = _gpu_lerch_poly(&c, n, z * v, v);
+  if (!(EPS * (f32(n + 4) * q.y) <= 3.0e-5 * abs(q.x))) { return vec2<f32>(0.0); }
+  return vec2<f32>(q.x * v, 1.0);
+}
+
+// Phi(z,s,a) for z < 1 by the integral (after n integrations by parts for
+// s <= 0): see the GLSL preamble.
+fn _gpu_lerch_integral(z: f32, s: f32, a0: f32) -> vec2<f32> {
+  let EPS = 6.0e-8;
+  let PI = 3.14159265358979;
+  let gx = array<f32, 4>(0.1834346424956498, 0.5255324099163290,
+    0.7966664774136267, 0.9602898564975363);
+  let gw = array<f32, 4>(0.3626837833783620, 0.3137066458778873,
+    0.2223810344533745, 0.1012285362903763);
+  var n: i32 = 0;
+  if (s <= 0.0) { n = i32(ceil(-s)); }
+  let sn = s + f32(n);
+  var n0: i32 = 0;
+  if (a0 < 0.0) { n0 = i32(ceil(-a0)); }
+  var head: f32 = 0.0;
+  var zk: f32 = 1.0;
+  var err: f32 = 0.0;
+  for (var k: i32 = 0; k < n0; k = k + 1) {
+    let bk = a0 + f32(k);
+    let t = zk * _gpu_zeta_pow(bk, -s);
+    head = head + t;
+    err = err + abs(t) * (2.0 + f32(k) + abs(s * log2(abs(bk))));
+    zk = zk * z;
+  }
+  let a = a0 + f32(n0);
+  var c: array<f32, ${LERCH_MAX_N + 2}>;
+  c[0] = 1.0;
+  for (var m: i32 = 0; m < n; m = m + 1) { _gpu_lerch_pstep(&c, a, m); }
+  let lg = _gpu_lerch_lgamma(sn);
+  let lam = min(1.0, 1.0 / a);
+  var delta = PI;
+  if (z > 0.0) { delta = -log(z); }
+  let e0 = 1e-3 * min(lam, delta);
+  let la = log(a);
+  let tau0 = a * e0;
+  var L: f32;
+  if (z < 0.0) { L = log(-z); } else { L = log(z); }
+  let big = z < -1.0;
+  // The shift S: see the GLSL preamble.
+  var S: f32 = 0.0;
+  if (big) { S = min(a, 1.0) * L; }
+  var lG0: f32 = 0.0;
+  var v0h = 1.0 / (1.0 - z);
+  var u0 = z * v0h;
+  if (big) {
+    lG0 = -(L + log(1.0 + exp(-L)));
+    v0h = exp(lG0);
+    u0 = -exp(L + lG0);
+  }
+  let f0 = _gpu_lerch_poly(&c, n, u0, v0h);
+  var c1 = c;
+  _gpu_lerch_pstep(&c1, a, n);
+  let f1 = _gpu_lerch_poly(&c1, n + 1, u0, v0h);
+  var p0: f32;
+  if (big) { p0 = exp(sn * log(tau0) - lg + lG0 + S); } else { p0 = exp(sn * log(tau0) - lg) * v0h; }
+  let d1 = -f1.x / a;
+  var sum = p0 * (f0.x / sn + d1 * tau0 / (sn + 1.0));
+  var ferr = abs(p0) * ((f0.y / sn + f1.y / a * tau0 / (sn + 1.0)) * f32(n + 5)) +
+    abs(sum) * (abs(sn * log(tau0)) + abs(lg) + abs(L));
+  let v0 = log(e0);
+  let v1 = log(lam);
+  let nlog = max(1.0, ceil((v1 - v0) / 3.0));
+  let hv = (v1 - v0) / nlog;
+  let TG = max(L, 0.0) + 17.0;
+  let tw = (sn + 30.0) / a;
+  var tEnd = tw;
+  if (z < 0.0) {
+    if (a > 1.0) { tEnd = max(tw, min(TG, (sn + 30.0) / (a - 1.0))); } else { tEnd = max(tw, TG); }
+  }
+  let hW = 8.0 / a;
+  var x = lam;
+  for (var p: i32 = 0; p < 28; p = p + 1) {
+    let logPanel = f32(p) < nlog;
+    if (!logPanel && x >= tEnd) { break; }
+    var w: f32;
+    var cc: f32;
+    if (logPanel) {
+      w = hv;
+      cc = v0 + (f32(p) + 0.5) * hv;
+    } else {
+      w = min(min(2.0 * x, hW), max(4.0 / (1.0 + 0.25 * f32(n)), 0.6 * abs(x - L)));
+      cc = x + 0.5 * w;
+    }
+    let r = 0.5 * w;
+    for (var i: i32 = 0; i < 4; i = i + 1) {
+      for (var j: i32 = 0; j < 2; j = j + 1) {
+        let u = cc + select(r, -r, j == 0) * gx[i];
+        var t = u;
+        var e: f32;
+        var scale: f32 = a;
+        if (logPanel) {
+          t = exp(u);
+          e = sn * (u + la);
+          scale = 1.0;
+        } else {
+          e = (sn - 1.0) * log(a * t);
+        }
+        let tau = a * t;
+        var vn: f32;
+        var un: f32;
+        var lG: f32 = 0.0;
+        if (big) {
+          let xs = L - t;
+          lG = -(max(xs, 0.0) + log(1.0 + exp(-abs(xs))));
+          vn = exp(lG);
+          un = -exp(xs + lG);
+        } else {
+          vn = _gpu_lerch_g(z, t);
+          un = z * exp(-t) * vn;
+        }
+        let pv = _gpu_lerch_poly(&c, n, un, vn);
+        let ex = e - tau - lg;
+        var f: f32;
+        if (big) { f = exp(ex + lG + S); } else { f = exp(ex) * vn; }
+        let q = r * gw[i] * (scale * f);
+        sum = sum + q * pv.x;
+        ferr = ferr + q * (abs(pv.x) * ((abs(e) + tau) + (abs(lG) + abs(L))) +
+          pv.y * (f32(n + 3) + t));
+      }
+    }
+    if (!logPanel) { x = x + w; }
+  }
+  if (x < tEnd) { return vec2<f32>(0.0); } // the panel budget ran out
+  var scaled: f32;
+  if (big) {
+    scaled = select(1.0, -1.0, sum < 0.0) * exp(log(abs(sum)) - (S + sn * la));
+  } else {
+    scaled = pow(a, -sn) * sum;
+  }
+  let tail = zk * scaled;
+  let res = head + tail;
+  let rel = ferr / abs(sum) + (8.0 + abs(lg)) +
+    ((f32(n0) + 2.0) + (abs(sn * log2(a)) + S));
+  let bound = EPS * (err + abs(tail) * rel);
+  if (!(bound <= 3.0e-5 * abs(res))) { return vec2<f32>(0.0); }
+  return vec2<f32>(res, 1.0);
+}
+
+// h = e^x x^(-sig) Gamma(sig, x), integer sig: see the GLSL preamble.
+fn _gpu_lerch_h_integer(sig: f32, x: vec2<f32>) -> vec4<f32> {
+  let n = i32(sig) - 1;
+  let d = x.x * x.x + x.y * x.y;
+  let ir = x.x / d;
+  let ii = -x.y / d;
+  let ix = sqrt(ir * ir + ii * ii);
+  var rr: f32 = 1.0;
+  var ri: f32 = 0.0;
+  var ra: f32 = 1.0;
+  for (var j: i32 = 1; j <= n; j = j + 1) {
+    let tr = ir * rr - ii * ri;
+    let ti = ir * ri + ii * rr;
+    rr = 1.0 + f32(j) * tr;
+    ri = f32(j) * ti;
+    ra = 1.0 + f32(j) * ix * ra;
+  }
+  return vec4<f32>(rr * ir - ri * ii, rr * ii + ri * ir, (f32(n) + 3.0) * ra * ix, 1.0);
+}
+
+// h for |x| < sig, by the series: see the GLSL preamble.
+fn _gpu_lerch_h_series(sig: f32, x: vec2<f32>) -> vec4<f32> {
+  var tr: f32 = 1.0 / sig;
+  var ti: f32 = 0.0;
+  var sr: f32 = tr;
+  var si: f32 = 0.0;
+  var sa: f32 = tr;
+  var k: i32 = 1;
+  for (k = 1; k < 100; k = k + 1) {
+    let f = sig + f32(k);
+    let nr = (tr * x.x - ti * x.y) / f;
+    ti = (tr * x.y + ti * x.x) / f;
+    tr = nr;
+    sr = sr + tr;
+    si = si + ti;
+    let ta = abs(tr) + abs(ti);
+    sa = sa + ta;
+    if (ta < 1e-8 * (abs(sr) + abs(si))) { break; }
+  }
+  let er = x.x - sig * log(sqrt(x.x * x.x + x.y * x.y)) + _gpu_lerch_lgamma(sig);
+  // arg x, with the imaginary axis taken explicitly (see the GLSL preamble:
+  // atan2 of Apple's GPU answers the wrong branch at x.x = -0.0).
+  var arg = atan2(x.y, x.x);
+  if (x.x == 0.0) { arg = select(1.5707963267949, -1.5707963267949, x.y < 0.0); }
+  let ei = x.y - sig * arg;
+  let m = exp(er);
+  return vec4<f32>(m * cos(ei) - sr, m * sin(ei) - si,
+    m * (24.0 + abs(er) + abs(ei)) + (f32(k) + 3.0) * sa, 1.0);
+}
+
+// h for |x| >= sig, by the continued fraction: see the GLSL preamble.
+fn _gpu_lerch_h_cf(sig: f32, x: vec2<f32>) -> vec4<f32> {
+  let FPMIN = 1e-30;
+  var br = x.x - sig + 1.0;
+  let bi = x.y;
+  var cr: f32 = 1e30;
+  var ci: f32 = 0.0;
+  var dd = br * br + bi * bi;
+  var dr = br / dd;
+  var di = -bi / dd;
+  var hr = dr;
+  var hi = di;
+  for (var i: i32 = 1; i < 200; i = i + 1) {
+    let an = -f32(i) * (f32(i) - sig);
+    br = br + 2.0;
+    dr = an * dr + br;
+    di = an * di + bi;
+    if (abs(dr) + abs(di) < FPMIN) { dr = FPMIN; }
+    let cc = cr * cr + ci * ci;
+    cr = br + an * cr / cc;
+    ci = bi - an * ci / cc;
+    if (abs(cr) + abs(ci) < FPMIN) { cr = FPMIN; }
+    dd = dr * dr + di * di;
+    dr = dr / dd;
+    di = -di / dd;
+    let er = dr * cr - di * ci;
+    let ei = dr * ci + di * cr;
+    let nr = hr * er - hi * ei;
+    hi = hr * ei + hi * er;
+    hr = nr;
+    if (abs(er - 1.0) + abs(ei) < 1e-7) {
+      return vec4<f32>(hr, hi, 35.0 * sqrt(hr * hr + hi * hi), 1.0);
+    }
+  }
+  return vec4<f32>(0.0);
+}
+
+// Phi(z,s,a) for s <= 0 by the Hermite-type representation: see the GLSL
+// preamble.
+fn _gpu_lerch_hermite(z: f32, s: f32, a: f32) -> vec2<f32> {
+  let EPS = 6.0e-8;
+  let PI = 3.14159265358979;
+  let gx = array<f32, 4>(0.1834346424956498, 0.5255324099163290,
+    0.7966664774136267, 0.9602898564975363);
+  let gw = array<f32, 4>(0.3626837833783620, 0.3137066458778873,
+    0.2223810344533745, 0.1012285362903763);
+  if (s < -30.0) { return vec2<f32>(0.0); }
+  var m: i32 = 0;
+  if (a < 1.0) { m = i32(ceil(1.0 - a)); }
+  var head: f32 = 0.0;
+  var zk: f32 = 1.0;
+  var err: f32 = 0.0;
+  for (var k: i32 = 0; k < m; k = k + 1) {
+    let bk = a + f32(k);
+    if (bk != 0.0) {
+      let t = zk * _gpu_zeta_pow(bk, -s);
+      head = head + t;
+      err = err + abs(t) * (2.0 + f32(k) + abs(s * log2(abs(bk))));
+    }
+    zk = zk * z;
+  }
+  let b = a + f32(m);
+  let L = log(abs(z));
+  let sig = 1.0 - s;
+  var xi: f32 = 0.0;
+  if (z < 0.0) { xi = -b * PI; }
+  let x = vec2<f32>(-b * L, xi);
+  var h: vec4<f32>;
+  if (sig == floor(sig)) {
+    h = _gpu_lerch_h_integer(sig, x);
+  } else if (sqrt(x.x * x.x + x.y * x.y) < sig) {
+    h = _gpu_lerch_h_series(sig, x);
+  } else {
+    h = _gpu_lerch_h_cf(sig, x);
+  }
+  if (h.w < 0.5) { return vec2<f32>(0.0); }
+  let t1 = 0.5 * pow(b, -s);
+  let bs = pow(b, sig);
+  let t2 = bs * h.x;
+  let t2abs = bs * (abs(h.x) + abs(h.y)); // no square: see the GLSL preamble
+  let q3 = max(-s, 0.0);
+  let t3end = (21.0 + q3 * log(1.0 + (q3 + 7.0) / b)) / PI;
+  let n3 = ceil(t3end / min(1.5, 4.0 / max(abs(L), 1e-3)));
+  if (n3 > 16.0) { return vec2<f32>(0.0); }
+  let h3 = t3end / n3;
+  var t3: f32 = 0.0;
+  var a3: f32 = 0.0;
+  let b2 = b * b;
+  for (var p: i32 = 0; p < 16; p = p + 1) {
+    if (f32(p) >= n3) { break; }
+    let c = (f32(p) + 0.5) * h3;
+    let r = 0.5 * h3;
+    for (var i: i32 = 0; i < 4; i = i + 1) {
+      for (var j: i32 = 0; j < 2; j = j + 1) {
+        let t = c + select(r, -r, j == 0) * gx[i];
+        let y = 2.0 * PI * t;
+        let q = exp(-y);
+        let omq = _gpu_lerch_em(y);
+        var K = q / omq;
+        if (z < 0.0) { K = exp(-PI * t) * (1.0 + q) / (2.0 * omq); }
+        let f = sin(t * L - s * atan(t / b)) *
+          exp(-0.5 * s * log(b2 + t * t)) * K;
+        let wf = r * gw[i] * f;
+        t3 = t3 + wf;
+        a3 = a3 + abs(wf) * ((6.0 + 10.0 * t) +
+          (abs(s) * (2.0 + 0.5 * log2(b2 + t * t)) + abs(t * L)));
+      }
+    }
+  }
+  t3 = -2.0 * t3;
+  a3 = 2.0 * a3;
+  let phi = t1 + t2 + t3;
+  let res = head + zk * phi;
+  let e1 = t1 * (2.0 + abs(s * log2(b)));
+  let e2 = t2abs * (2.0 + abs(sig * log2(b))) + bs * h.z;
+  let ephi = (e1 + e2) + (a3 + 3.0 * (t1 + t2abs + abs(t3)));
+  let bound = EPS * (err + abs(zk) * (ephi + (f32(m) + 2.0) * abs(phi)) + abs(res));
+  if (!(bound <= 3.0e-5 * abs(res))) { return vec2<f32>(0.0); }
+  return vec2<f32>(res, 1.0);
+}
+
+// Phi(z,s,a) for s <= 0: the integral after n integrations by parts, then
+// the Hermite form (see the GLSL preamble).
+fn _gpu_lerch_negative(z: f32, s: f32, a: f32) -> vec2<f32> {
+  if (s != floor(s) && a > 0.0 && s >= -${LERCH_MAX_N}.0) {
+    let r = _gpu_lerch_integral(z, s, a);
+    if (r.y > 0.5) { return r; }
+  }
+  return _gpu_lerch_hermite(z, s, a);
+}
+
+// Phi(z,s,a) as vec2(value, 1), or vec2(0, 0): see the GLSL preamble.
+fn _gpu_lerch_core(z: f32, s: f32, a: f32) -> vec2<f32> {
+  if (z == 1.0) { return vec2<f32>(_gpu_hurwitz_zeta(s, a), 1.0); }
+  if (z == 0.0) { return vec2<f32>(_gpu_zeta_pow(a, -s), 1.0); }
+  if (s == 0.0) { return vec2<f32>(1.0 / (1.0 - z), 1.0); }
+  if (s < 0.0 && s == floor(s) && s >= -${LERCH_MAX_N}.0) {
+    let q = _gpu_lerch_rational(z, i32(-s), a);
+    if (q.y > 0.5) { return q; }
+  }
+  let aNonposInt = a <= 0.0 && a == floor(a);
+  if (aNonposInt && s > 0.0) { return vec2<f32>(_gpu_inf(), 1.0); }
+  if (a < 0.0 && s != floor(s)) { return vec2<f32>(0.0); }
+  if (a < -1.0e6) { return vec2<f32>(0.0); }
+  if (z > 1.0) {
+    if (s > 0.0 || s != floor(s)) { return vec2<f32>(0.0); }
+    return _gpu_lerch_hermite(z, s, a);
+  }
+  if (z < -1.0) {
+    if (s > 0.0) { return _gpu_lerch_integral(z, s, a); }
+    return _gpu_lerch_negative(z, s, a);
+  }
+  if (z < 0.0 && s > 0.0) {
+    let e = _gpu_lerch_euler(z, s, a);
+    if (e.y > 0.5) { return e; }
+    return _gpu_lerch_integral(z, s, a);
+  }
+  if (z == -1.0) { return _gpu_lerch_negative(z, s, a); }
+  let r = _gpu_lerch_series(z, s, a);
+  if (r.y > 0.5) { return r; }
+  if (s > 0.0) { return _gpu_lerch_integral(z, s, a); }
+  return _gpu_lerch_negative(z, s, a);
 }
 
 fn _gpu_lerch_phi(z: f32, s: f32, a: f32) -> f32 {
-  if (z == 1.0) { return _gpu_hurwitz_zeta(s, a); }
-  if (z == 0.0) { return _gpu_zeta_pow(a, -s); }
-  let w = 1.0 - z;
-  if (s == 0.0) { return 1.0 / w; }
-  if (s == -1.0) { return a / w + z / (w * w); }
-  if (s == -2.0) { return a * a / w + 2.0 * a * z / (w * w) + z * (1.0 + z) / (w * w * w); }
-  let aNonposInt = a <= 0.0 && a == floor(a);
-  if (aNonposInt && s > 0.0) { return bitcast<f32>(0x7f800000u); }
-  if (abs(z) > 1.0) { return bitcast<f32>(0x7fc00000u); }
-  if (a < 0.0 && s != floor(s)) { return bitcast<f32>(0x7fc00000u); }
-  if (a < -1.0e6) { return bitcast<f32>(0x7fc00000u); }
-  if (z < 0.0 && s > 0.0) { return _gpu_lerch_euler(z, s, a); }
-  if (z == -1.0) { return bitcast<f32>(0x7fc00000u); }
-  return _gpu_lerch_series(z, s, a);
+  let r = _gpu_lerch_core(z, s, a);
+  if (r.y > 0.5) { return r.x; }
+  return _gpu_nan();
+}
+
+// Li_s(z) for z < -1 and a negative non-integer s, by Jonquiere's
+// inversion formula: see the GLSL preamble.
+fn _gpu_poly_log_inversion(s: f32, z: f32) -> vec2<f32> {
+  let EPS = 6.0e-8;
+  let PI = 3.14159265358979;
+  let B = array<f32, 8>(1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0,
+    5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0);
+  let ai = -log(-z) / (2.0 * PI);
+  let sig = 1.0 - s;
+  var zr: f32 = 0.0;
+  var zi: f32 = 0.0;
+  var zerr: f32 = 0.0;
+  for (var k: i32 = 0; k < 12; k = k + 1) {
+    let wk = 0.5 + f32(k);
+    let lnwk = 0.5 * log(wk * wk + ai * ai);
+    let ph = -sig * atan2(ai, wk);
+    let m = exp(-sig * lnwk);
+    zr = zr + m * cos(ph);
+    zi = zi + m * sin(ph);
+    zerr = zerr + m * (4.0 + abs(sig * lnwk) + abs(ph));
+  }
+  let wr = 12.5;
+  let lnw = 0.5 * log(wr * wr + ai * ai);
+  let th = atan2(ai, wr);
+  // w^(1 - sig) / (sig - 1), from s itself (see the GLSL preamble).
+  let m1 = exp(s * lnw) / -s;
+  let p1 = s * th;
+  zr = zr + m1 * cos(p1);
+  zi = zi + m1 * sin(p1);
+  zerr = zerr + abs(m1) * (4.0 + abs(s * lnw) + abs(p1));
+  let m0 = exp(-sig * lnw);
+  let p0 = -sig * th;
+  zr = zr + 0.5 * m0 * cos(p0);
+  zi = zi + 0.5 * m0 * sin(p0);
+  zerr = zerr + 0.5 * m0 * (4.0 + abs(sig * lnw) + abs(p0));
+  let mu1 = exp((-sig - 1.0) * lnw);
+  let pu1 = (-sig - 1.0) * th;
+  var ur = sig / 2.0 * mu1 * cos(pu1);
+  var ui = sig / 2.0 * mu1 * sin(pu1);
+  let w2r = wr * wr - ai * ai;
+  let w2i = 2.0 * wr * ai;
+  let w2d = w2r * w2r + w2i * w2i;
+  let iw2r = w2r / w2d;
+  let iw2i = -w2i / w2d;
+  var prev: f32 = 3.0e38;
+  for (var j: i32 = 1; j <= 8; j = j + 1) {
+    let tr = ur * B[j - 1];
+    let ti = ui * B[j - 1];
+    let ta = abs(tr) + abs(ti);
+    if (ta >= prev) { break; }
+    zr = zr + tr;
+    zi = zi + ti;
+    zerr = zerr + ta * (10.0 + abs(sig * lnw));
+    prev = ta;
+    let mm = f32(2 * j);
+    let c = (sig + mm - 1.0) * (sig + mm) / ((mm + 1.0) * (mm + 2.0));
+    let nr = c * (ur * iw2r - ui * iw2i);
+    ui = c * (ur * iw2i + ui * iw2r);
+    ur = nr;
+  }
+  let n = floor(s + 0.5);
+  let d = s - n;
+  let sgn = select(-1.0, 1.0, n % 2.0 == 0.0);
+  let lg1 = _gpu_lerch_lgamma(sig);
+  let fm = sgn * sin(PI * d) * exp(s * log(2.0 * PI) + lg1) / PI;
+  let fre = fm * cos(0.5 * PI * s);
+  let fim = fm * sin(0.5 * PI * s);
+  let first = fre * zr - fim * zi;
+  let firstErr = abs(fm) * zerr +
+    abs(fm) * sqrt(zr * zr + zi * zi) * (30.0 + abs(lg1) + abs(s * 2.7));
+  let iz = 1.0 / z;
+  var li: f32 = 0.0;
+  var lierr: f32 = 0.0;
+  if (iz >= -0.5) {
+    var wk: f32 = 1.0;
+    var prevT: f32 = 3.0e38;
+    var done = false;
+    for (var k: i32 = 1; k < 200; k = k + 1) {
+      wk = wk * iz;
+      let t = wk * pow(f32(k), -s);
+      li = li + t;
+      let size = abs(t);
+      lierr = lierr + size * (2.0 + f32(k) + abs(s * log2(f32(k))));
+      let rho = max(size / prevT, -iz);
+      if (size < prevT && rho < 1.0 && size * rho / (1.0 - rho) <= 1e-8 * abs(li)) {
+        done = true;
+        break;
+      }
+      prevT = size;
+    }
+    if (!done) { return vec2<f32>(0.0); }
+  } else {
+    let inner = _gpu_lerch_negative(iz, s, 1.0);
+    if (inner.y < 0.5) { return vec2<f32>(0.0); }
+    li = iz * inner.x;
+    lierr = 500.0 * abs(li);
+  }
+  let res = first - sgn * cos(PI * d) * li;
+  let bound = EPS * ((firstErr + 4.0 * abs(first)) + (lierr + 2.0 * abs(li)));
+  if (!(bound <= 3.0e-5 * abs(res))) { return vec2<f32>(0.0); }
+  return vec2<f32>(res, 1.0);
 }
 
 // PolyLog(s, z): see _gpu_poly_log in GPU_LERCH_PREAMBLE_GLSL for the
 // cases (closed forms for the orders 1, 0, -1 and -2 ... -12, then
-// z * _gpu_lerch_phi(z, s, 1.0)).
+// z * Phi(z, s, 1), then the inversion formula).
 fn _gpu_poly_log(s: f32, z: f32) -> f32 {
   if (z == 0.0) { return 0.0; }
   if (s == 1.0) {
-    if (z == 1.0) { return bitcast<f32>(0x7f800000u); }
+    if (z == 1.0) { return _gpu_inf(); }
     if (z < 1.0) { return -log(1.0 - z); }
-    return bitcast<f32>(0x7fc00000u);
+    return _gpu_nan();
   }
   if (s == 0.0) {
-    if (z == 1.0) { return bitcast<f32>(0x7f800000u); }
+    if (z == 1.0) { return _gpu_inf(); }
     return z / (1.0 - z);
   }
   if (s == -1.0) {
-    if (z == 1.0) { return bitcast<f32>(0x7f800000u); }
+    if (z == 1.0) { return _gpu_inf(); }
     return z / ((1.0 - z) * (1.0 - z));
   }
   if (s <= -2.0 && s >= -12.0 && s == floor(s) && z != 1.0) {
@@ -9397,13 +10656,30 @@ fn _gpu_poly_log(s: f32, z: f32) -> f32 {
         row[k] = f32(k + 1) * row[k] + f32(m - k) * row[k - 1];
       }
     }
+    if (abs(z) > 1.0) {
+      let v = 1.0 / (1.0 - z);
+      let u = z * v;
+      var r = row[n - 1];
+      var vp = v;
+      for (var k: i32 = n - 2; k >= 0; k = k - 1) {
+        r = r * u + row[k] * vp;
+        vp = vp * v;
+      }
+      return u * v * r;
+    }
     var p: f32 = 0.0;
     for (var k: i32 = n - 1; k >= 0; k = k - 1) { p = p * z + row[k]; }
     var den: f32 = 1.0;
     for (var i: i32 = 0; i <= n; i = i + 1) { den = den * (1.0 - z); }
     return z * p / den;
   }
-  return z * _gpu_lerch_phi(z, s, 1.0);
+  let r = _gpu_lerch_core(z, s, 1.0);
+  if (r.y > 0.5) { return z * r.x; }
+  if (z < -1.0 && s < 0.0 && s != floor(s)) {
+    let v = _gpu_poly_log_inversion(s, z);
+    if (v.y > 0.5) { return v.x; }
+  }
+  return _gpu_nan();
 }
 `;
 
@@ -10855,7 +12131,7 @@ fn _gpu_gamut_map_oklch_in(lch: vec3f, p3: bool) -> vec3f {
   var H = lch.z;
   if (L != L || C != C || H != H) { return vec3f(L + C + H); }
   if (!(abs(L) <= 3.4028234663852886e38 && abs(C) <= 3.4028234663852886e38 && abs(H) <= 3.4028234663852886e38)) {
-    return vec3f(bitcast<f32>(0x7fc00000u));
+    return vec3f(_gpu_nan());
   }
   if (L >= 1.0) { return vec3f(1.0); }
   if (L <= 0.0) { return vec3f(0.0); }
@@ -11518,6 +12794,35 @@ float _gpu_inf() {
 `;
 
 /**
+ * WGSL NaN and +∞ helpers, the WGSL counterparts of `GPU_NAN_PREAMBLE_GLSL`
+ * and `GPU_INF_PREAMBLE_GLSL`, with the same names so that emitted code and
+ * helper bodies spell a non-finite value the same way on both targets.
+ *
+ * WGSL has no NaN or infinity literal, and it cannot build one from a
+ * constant: a const-expression that evaluates to NaN or an infinity is a
+ * shader-creation error, so the inline constant `bitcast<f32>(0x7fc00000u)`
+ * and `0.0 / 0.0` are both rejected (Chrome's WGSL compiler reports "value nan cannot be
+ * represented as 'f32'"). A `let` is not a const-expression, so the bitcast
+ * of a `let` holding the bit pattern is evaluated at run time and gives the
+ * value. Measured in Chrome 153 on an Apple M5 GPU: the helpers compile and
+ * read back as NaN and +∞. WGSL declarations are order-independent, so
+ * `preambleFor` adds these after scanning the whole preamble.
+ */
+const GPU_NAN_PREAMBLE_WGSL = `
+fn _gpu_nan() -> f32 {
+  let bits = 0x7fc00000u;
+  return bitcast<f32>(bits);
+}
+`;
+
+const GPU_INF_PREAMBLE_WGSL = `
+fn _gpu_inf() -> f32 {
+  let bits = 0x7f800000u;
+  return bitcast<f32>(bits);
+}
+`;
+
+/**
  * Sign-preserving integer power (GLSL syntax). GLSL `pow(x, n)` is
  * `exp2(n·log2(x))`, undefined for a negative base — it returns `+8` for
  * `pow(-2.0, 3.0)` (wrong sign) and NaN for even powers of a negative. Compute
@@ -11689,8 +12994,9 @@ const GPU_CONSTANTS: Record<string, string> = {
  * Both GLSL and WGSL require float literals to have a decimal point.
  *
  * A NON-FINITE value has no literal spelling in either language, but both can
- * MAKE the value from a bit pattern — which is what the masked-branch NaN
- * already does (`gpuNaN`). A `NaN` / `±∞` constant therefore routes through the
+ * MAKE the value from a bit pattern, in the `_gpu_nan()` / `_gpu_inf()`
+ * preamble helpers — which is what the masked-branch NaN already does
+ * (`gpuNaN`). A `NaN` / `±∞` constant therefore routes through the
  * same `gpuNonFiniteLiteral` symbols instead of failing the compilation, which
  * is why this formatter needs to know the language.
  *
@@ -13379,34 +14685,37 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     if (userDefs) code = `${code}\n${userDefs}`;
     let preamble = '';
     preamble += buildComplexPreamble(code, this.languageId);
-    // Only GLSL emits `_gpu_nan()` / `_gpu_inf()` (WGSL uses an inline bit
-    // pattern); both helpers are built the same way, from the ES 3.00
-    // `intBitsToFloat` this target already assumes.
+    // Both targets spell NaN and +∞ as `_gpu_nan()` / `_gpu_inf()`. On GLSL
+    // both helpers are built from the ES 3.00 `intBitsToFloat` this target
+    // already assumes, and must be declared before their first use, so they
+    // are emitted here, ahead of every helper that calls them.
     //
     // The `_gpu_at*` positional-access helpers call `_gpu_nan()` from their
     // BODIES, which these scans never see — they read the EMITTED code, never
     // a helper body — so an `At` lowering FORCES the GLSL NaN helper: a
     // compilation whose code contains only `_gpu_at3(…)` must still get it.
-    // WGSL has no `_gpu_nan` at all, so only GLSL is forced.
+    // WGSL declarations are order-independent, so the WGSL helpers are added
+    // at the end instead, from a scan of the finished preamble (see there).
     const isWGSL = this.languageId === 'wgsl';
     const atWidths = gpuAtHelperWidths(code);
     const texAtWidths = gpuTexAtHelperWidths(code);
     // The zeta helpers call `_gpu_nan()` from their bodies too (a complex
     // value, or an f32 overflow), so they force the GLSL NaN helper as well.
     const usesZeta = /_gpu_(hurwitz_)?zeta/.test(code);
-    // `_gpu_lerch_phi` calls both `_gpu_nan()` (past |z| = 1, or a < 0 with
-    // a non-integer s) and `_gpu_hurwitz_zeta` (z = 1) from its own body,
-    // the same gap `usesZeta` closes for the zeta helpers. `_gpu_poly_log`
-    // calls `_gpu_lerch_phi` without naming it in the emitted code either
-    // (only `_gpu_poly_log` itself appears there), so it shares this flag.
+    // `_gpu_lerch_phi` calls both `_gpu_nan()` (a complex value, or a value
+    // no method can vouch for) and `_gpu_hurwitz_zeta` (z = 1) from its own
+    // body, the same gap `usesZeta` closes for the zeta helpers.
+    // `_gpu_poly_log` calls the Lerch helpers without naming them in the
+    // emitted code either (only `_gpu_poly_log` itself appears there), so it
+    // shares this flag.
     const usesLerch = /_gpu_(lerch|poly_log)/.test(code);
     if (
-      code.includes('_gpu_nan') ||
-      (!isWGSL &&
-        (atWidths.length > 0 ||
-          texAtWidths.length > 0 ||
-          usesZeta ||
-          usesLerch))
+      !isWGSL &&
+      (code.includes('_gpu_nan') ||
+        atWidths.length > 0 ||
+        texAtWidths.length > 0 ||
+        usesZeta ||
+        usesLerch)
     )
       preamble += GPU_NAN_PREAMBLE_GLSL;
     // `_gpu_gamma` calls `_gpu_inf()` from its BODY at a pole (the float
@@ -13417,8 +14726,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // their own pole the same way, and `_gpu_lerch_phi` at its own pole (a
     // non-positive integer a with s > 0).
     if (
-      code.includes('_gpu_inf') ||
-      (!isWGSL && (code.includes('_gpu_gamma') || usesZeta || usesLerch))
+      !isWGSL &&
+      (code.includes('_gpu_inf') ||
+        code.includes('_gpu_gamma') ||
+        usesZeta ||
+        usesLerch)
     )
       preamble += GPU_INF_PREAMBLE_GLSL;
     // AFTER the NaN branches, and that ORDER is load-bearing: GLSL requires a
@@ -13558,6 +14870,18 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       code,
       isWGSL ? GPU_COLOR_LIBRARY_WGSL : GPU_COLOR_LIBRARY_GLSL
     );
+    // WGSL: the NaN and +∞ helpers go in when the emitted code, a user
+    // definition or ANY helper body included above calls them. Reading the
+    // finished preamble covers every helper that calls them from its body
+    // (the zeta, Lerch, Gamma, positional-access and colour helpers), with no
+    // per-helper forcing list to keep in step.
+    if (isWGSL) {
+      const all = `${preamble}\n${code}`;
+      if (/(?<![\w$])_gpu_inf\(/.test(all))
+        preamble = GPU_INF_PREAMBLE_WGSL + preamble;
+      if (/(?<![\w$])_gpu_nan\(/.test(all))
+        preamble = GPU_NAN_PREAMBLE_WGSL + preamble;
+    }
     if (!userDefs) return preamble;
     return preamble ? `${preamble}\n${userDefs}` : userDefs;
   }

@@ -2,6 +2,8 @@ import { Complex } from 'complex-esm';
 import {
   gamma as gammaComplex,
   incompleteGammaUpperComplex,
+  incompleteGammaUpperComplexErrorBound,
+  incompleteGammaUpperComplexWithError,
 } from '../../src/compute-engine/numerics/numeric-complex';
 import { engine } from '../utils';
 
@@ -151,19 +153,25 @@ describe('INCOMPLETE GAMMA Γ(s, x) FOR Re(x) < 0 (issue #353)', () => {
     expect(Math.hypot(v.re, v.im)).toBeLessThan(1e-14);
   });
 
-  test('s very close to a pole of Γ(s) near the cut: declines', () => {
-    // Γ(s) and one term of the series cancel; the kernel cannot give 12
-    // digits, so `.N()` keeps the expression. mpmath:
-    // Γ(−1 + 10⁻⁶, −3) = 3.2386482740815 + 3.1416041563344i.
+  test('s very close to a pole of Γ(s) near the cut: answers', () => {
+    // Γ(s) and the k = 1 term of the series are both about 10⁶ and cancel;
+    // the kernel sums them as one expression in s + 1 and answers.
+    // mpmath gammainc(-0.999999, -3) = 3.2386482740815018 + 3.1416041563343511i
     const v = incompleteGammaUpperComplex(
       new Complex(-1 + 1e-6, 0),
       new Complex(-3, 0)
     );
-    expect(v.isNaN()).toBe(true);
-    expect(ce.box(['Gamma', -0.999999, -3]).N().operator).toBe('Gamma');
-    // At a distance of 10⁻³ whether the kernel answers depends on x: the
-    // error estimate is a bound, and it is up to about 10 times the actual
-    // error there. Where it answers, the answer is accurate.
+    expect(
+      relativeError(v, 3.2386482740815018, 3.1416041563343511)
+    ).toBeLessThan(1e-13);
+    expect(
+      relativeError(
+        gammaN(-0.999999, 0, -3, 0),
+        3.2386482740815018,
+        3.1416041563343511
+      )
+    ).toBeLessThan(1e-13);
+    // At a distance of 10⁻³ as well.
     expect(
       relativeError(
         gammaN(-0.999, 0, -2, 1),
@@ -228,9 +236,9 @@ describe('INCOMPLETE GAMMA Γ(s, x) FOR A LARGE |Im s|, BOTH HALF-PLANES', () =>
 });
 
 describe('INCOMPLETE GAMMA Γ(s, x) NEXT TO A POLE OF Γ(s)', () => {
-  // Γ(s) and the k = n term of the direct series cancel. The error estimate
-  // counts the rounding error of each term, so the kernel declines instead
-  // of answering with 1e-11 (the error at these points before the fix).
+  // Γ(s) and the k = n term of the direct series cancel. Summed separately
+  // they gave 1e-11 at these points; then the kernel declined them; now it
+  // sums the two together and answers.
   const cases: Pin[] = [
     [
       -7.000000935, 0, -19.936, -1.1417, 0.026448745891215174,
@@ -239,8 +247,45 @@ describe('INCOMPLETE GAMMA Γ(s, x) NEXT TO A POLE OF Γ(s)', () => {
     [-5.999998, 0, -17.875, -0.805, -0.16021078320132406, -0.07229863162954078],
     [-0.999999, 0, -10, 0, 289.5830057473754, 3.1425037336642148],
   ];
-  test.each(cases)('Γ(%p+%pi, %p+%pi)', (...pin) => {
-    expectAccurateOrDeclined(pin as Pin);
+  test.each(cases)('Γ(%p+%pi, %p+%pi)', (sRe, sIm, xRe, xIm, re, im) => {
+    expect(relativeError(kernel(sRe, sIm, xRe, xIm), re, im)).toBeLessThan(
+      1e-13
+    );
+  });
+
+  // mpmath gammainc(s, x) at 40 digits, principal branch.
+  const nearPoles: Pin[] = [
+    // n = 3, a complex offset s + 3 = 2e−5 − 3e−5i
+    [-2.99998, -3e-5, -1.5, 0.7, -0.4650302826957338, 0.071852395051470437],
+    // n = 0, s = 1e−8
+    [1e-8, 0, -2, 0.5, -4.7257499394666152, -1.3323419707968966],
+    // n = 8, a purely imaginary offset 1e−7i
+    [-8, 1e-7, 0.05, -0.02, -1664563412.0948434, 124594200.45198027],
+    // n = 2 at a distance 0.3
+    [-2.3, 0, -1, 2, 0.028298857224995117, -0.13563345760777367],
+    // n = 5 at a distance 1e−9, on the cut
+    [-4.999999999, 0, -12, 0, 0.12689144047665213, 0.026179939223222254],
+  ];
+  test.each(nearPoles)(
+    'Γ(%p+%pi, %p+%pi) is answered',
+    (sRe, sIm, xRe, xIm, re, im) => {
+      expect(relativeError(kernel(sRe, sIm, xRe, xIm), re, im)).toBeLessThan(
+        1e-13
+      );
+    }
+  );
+
+  test('the lower lip of the cut next to a pole', () => {
+    // A −0 imaginary part selects the lower lip: for a real s the value is
+    // the conjugate of the one on the upper lip.
+    // mpmath conj(gammainc(-0.999999, -3)) = 3.2386482740815018 − 3.1416041563343511i
+    const v = incompleteGammaUpperComplex(
+      new Complex(-0.999999, 0),
+      new Complex(-3, -0)
+    );
+    expect(
+      relativeError(v, 3.2386482740815018, -3.1416041563343511)
+    ).toBeLessThan(1e-13);
   });
 
   test('a small |x|: the series does not stop before the pole term', () => {
@@ -400,5 +445,36 @@ describe('REAL KERNEL: Γ(s, x) FOR A NON-POSITIVE INTEGER s AND x > 0', () => {
     const v = ce.box(['Gamma', s, x]).N();
     expect(v.im).toBe(0);
     expect(Math.abs(v.re - expected) / expected).toBeLessThan(1e-13);
+  });
+});
+
+describe('INCOMPLETE GAMMA Γ(s, x): THE ERROR ESTIMATE AT ONE POINT', () => {
+  // mpmath gammainc(4.5, -1.0397207708399179 - 4.71238898038469j)
+  //   = 335.34914483174077 − 398.28123530121223i
+  // (the incomplete gamma term of LerchPhi(−2, −3.5, 1.5)).
+  test('the estimate is above the actual error and below the bound', () => {
+    const s = new Complex(4.5, 0);
+    const x = new Complex(-1.0397207708399179, -4.71238898038469);
+    const { value, error } = incompleteGammaUpperComplexWithError(s, x);
+    const actual = relativeError(
+      value,
+      335.34914483174077,
+      -398.28123530121223
+    );
+    expect(actual).toBeLessThan(error);
+    expect(error).toBeLessThan(
+      incompleteGammaUpperComplexErrorBound(s, x) / 10
+    );
+  });
+
+  test('a decline has no estimate', () => {
+    // |Im s| > 10 with Re x < 0: the continued fraction is not reliable and
+    // neither series passes its check.
+    const r = incompleteGammaUpperComplexWithError(
+      new Complex(19.427, 13.838),
+      new Complex(-8.4445, -49.849)
+    );
+    expect(r.value.isNaN()).toBe(true);
+    expect(r.error).toBeNaN();
   });
 });

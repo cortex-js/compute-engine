@@ -325,7 +325,7 @@ describe('GPU SHAPE GATE — the Max/Min reduction is DECLARED, not inferred', (
     // An empty collection contributes nothing; the WGSL NaN is a CALL, which
     // the gate would otherwise judge against the `array` shape of `[]`.
     expect(g(['Max', ['List'], 5])).toBe('(5.0)');
-    expect(w(['Max', ['List']])).toBe('(bitcast<f32>(0x7fc00000u))');
+    expect(w(['Max', ['List']])).toBe('(_gpu_nan())');
   });
 });
 

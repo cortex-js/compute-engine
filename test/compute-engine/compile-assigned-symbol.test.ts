@@ -253,11 +253,11 @@ describe('COMPILE: non-finite numbers on GPU targets', () => {
   // `_gpu_inf()` preamble helpers, WGSL through an inline `bitcast`.
   const NAN_CODE = {
     glsl: '_gpu_nan()',
-    wgsl: 'bitcast<f32>(0x7fc00000u)',
+    wgsl: '_gpu_nan()',
   } as const;
   const INF_CODE = {
     glsl: '_gpu_inf()',
-    wgsl: 'bitcast<f32>(0x7f800000u)',
+    wgsl: '_gpu_inf()',
   } as const;
 
   for (const target of ['glsl', 'wgsl'] as const) {

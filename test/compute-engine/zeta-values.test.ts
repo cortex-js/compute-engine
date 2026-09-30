@@ -12,6 +12,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { zeta as zetaReal } from '../../src/compute-engine/numerics/special-functions';
+import { Complex } from 'complex-esm';
+import { hurwitzZetaComplex } from '../../src/compute-engine/numerics/numeric-complex';
 import {
   bernoulliRational,
   zetaEvenCoefficient,
@@ -857,5 +859,174 @@ describe('GPU Zeta / HurwitzZeta preamble', () => {
   test('the two-operand Zeta lowers to the generalized helper', () => {
     const r = new GLSLTarget().compile(ce.box(['Zeta', 'gz_s', 'gz_a']));
     expect(r.code).toBe('_gpu_zeta_generalized(gz_s, gz_a)');
+  });
+});
+
+/** The relative distance from `got` to `re + i·im`. */
+function relErr(got: { re: number; im: number }, re: number, im = 0): number {
+  return Math.hypot(got.re - re, got.im - im) / Math.hypot(re, im);
+}
+
+describe('Machine-precision Zeta next to s = 0 and next to a negative even integer', () => {
+  // The reflection formula uses ζ(1 − s), which is next to its pole when s
+  // is next to 0: the rounded 1 − s left the result a relative error of
+  // about 1e−16/|s| (8e−8 at s = −1e−9, and −Infinity at s = −1e−17, where
+  // 1 − s rounds to 1). Next to a negative even integer, sin(πs/2) lost its
+  // relative accuracy the same way. The references are mpmath at 40 digits,
+  // at the double the literal rounds to.
+  ce.declare('zs_s', 'real');
+  ce.declare('zs_a', 'real');
+  ce.declare('zs_z', 'real');
+  const runZeta = compile(ce.box(['Zeta', 'zs_s']))?.run;
+  const runHurwitz = compile(ce.box(['HurwitzZeta', 'zs_s', 'zs_a']))?.run;
+  const runPolyLog = compile(ce.box(['PolyLog', 'zs_s', 'zs_z']))?.run;
+
+  test.each([
+    // mpmath: zeta(-1e-9) = -0.4999999990810614678
+    [-1e-9, -0.4999999990810614678],
+    // mpmath: zeta(-1e-6) = -0.49999908106246997255
+    [-1e-6, -0.49999908106246997255],
+    // mpmath: zeta(-1e-17) = -0.49999999999999999081
+    [-1e-17, -0.49999999999999999081],
+    // mpmath: zeta(-4.000000001) = -7.9838121079834372631e-12
+    [-4.000000001, -7.9838121079834372631e-12],
+    // mpmath: zeta(-2.00000001) = 3.0448456544526081345e-10
+    [-2.00000001, 3.0448456544526081345e-10],
+  ])('ζ(%p): the real kernel and the compiled Zeta', (s, expected) => {
+    expect(Math.abs(zetaReal(s) / expected - 1)).toBeLessThan(1e-14);
+    expect(
+      Math.abs((runZeta?.({ zs_s: s }) as number) / expected - 1)
+    ).toBeLessThan(1e-14);
+  });
+
+  test('the compiled PolyLog(s, 1) is ζ(s) next to s = 0', () => {
+    // mpmath: polylog(-1e-9, 1) = -0.4999999990810614678
+    const got = runPolyLog?.({ zs_s: -1e-9, zs_z: 1 }) as number;
+    expect(Math.abs(got / -0.4999999990810614678 - 1)).toBeLessThan(1e-14);
+  });
+
+  test('the compiled HurwitzZeta(s, a) next to s = 0, a ≠ 1', () => {
+    // The Taylor series in a has a term ζ(1 + s) next to its pole.
+    // mpmath: zeta(-1e-9, 0.3) = 0.19999999982314054921
+    const got = runHurwitz?.({ zs_s: -1e-9, zs_a: 0.3 }) as number;
+    expect(Math.abs(got / 0.19999999982314054921 - 1)).toBeLessThan(1e-14);
+  });
+
+  test('Zeta at a complex s next to 0', () => {
+    // mpmath: zeta(-1e-9+1e-9j) = -0.4999999990810614668 - 9.1893853119831634511e-10j
+    const z = ce.box(['Zeta', ['Complex', -1e-9, 1e-9]]).N();
+    expect(
+      relErr(z, -0.4999999990810614668, -9.1893853119831634511e-10)
+    ).toBeLessThan(1e-14);
+  });
+
+  test('HurwitzZeta at a complex s next to 0', () => {
+    // mpmath: zeta(-1e-8+1e-8j, 0.3) = 0.19999999823140539497 + 1.7685946720934388093e-9j
+    const z = ce.box(['HurwitzZeta', ['Complex', -1e-8, 1e-8], 0.3]).N();
+    expect(
+      relErr(z, 0.19999999823140539497, 1.7685946720934388093e-9)
+    ).toBeLessThan(1e-14);
+  });
+});
+
+describe('HurwitzZeta(s, a) at a complex a with Re(s) < 0', () => {
+  // Off the real axis, the Euler-Maclaurin sum cancels for Re(s) < 0 (the
+  // first witness was 2.2188 + 50.186i); the kernel uses Hermite's integral
+  // there. The references are mpmath at 40 digits.
+  test.each([
+    // mpmath: zeta(-11.801, 0.4265-1.271j) = 5.6234447340525381513 + 46.076938317428173499j
+    [-11.801, 0, 0.4265, -1.271, 5.6234447340525381513, 46.076938317428173499],
+    // mpmath: zeta(-11.5, 0.5-1.0994j) = -9.5260854219889552473 + 9.5260650281217040009j
+    [-11.5, 0, 0.5, -1.0994, -9.5260854219889552473, 9.5260650281217040009],
+    // mpmath: zeta(-2.9, 0.5-0.7329j) = -0.1476884840925461205 - 0.023378779140114999706j
+    [-2.9, 0, 0.5, -0.7329, -0.1476884840925461205, -0.023378779140114999706],
+    // mpmath: zeta(-20.3+2j, 0.7+15j) = 1.1644214205768092134e+25 - 5.4324870735228747795e+24j
+    [-20.3, 2, 0.7, 15, 1.1644214205768092134e25, -5.4324870735228747795e24],
+  ])('HurwitzZeta(%p + %pi, %p + %pi)', (sRe, sIm, aRe, aIm, re, im) => {
+    const z = ce
+      .box(['HurwitzZeta', ['Complex', sRe, sIm], ['Complex', aRe, aIm]])
+      .N();
+    expect(relErr(z, re, im)).toBeLessThan(1e-12);
+  });
+
+  test.each([
+    // mpmath: lerchphi(-1, -28.5, 5+2.4j) = -6337899538601815050.4 - 1238951242543507877.6j
+    [-28.5, 5, 2.4, -6337899538601815050.4, -1238951242543507877.6, 1e-12],
+    // mpmath: lerchphi(-1, -29, 5.5+0.001j) = 8767125475330398785.9 + 56421349704498153.511j
+    [-29, 5.5, 0.001, 8767125475330398785.9, 56421349704498153.511, 1e-12],
+    // mpmath: lerchphi(-1, -4.2, 0.1-0.00025j) = 0.00037341097979179704743 - 0.00013408919037676011523j
+    // The odd term ζ(−4.2, 0.55 − 0.000125i) = 3.2e−5 has a condition
+    // number of 1400 (a one-ulp change of its operands moves it by about
+    // 1.5e−13 relative), and the difference multiplies that by 18; the
+    // bound is the accuracy `lerchPhiComplex` states, 1e−11.
+    [
+      -4.2, 0.1, -0.00025, 0.00037341097979179704743,
+      -0.00013408919037676011523, 1e-11,
+    ],
+  ])(
+    'LerchPhi(−1, %p, %p + %pi) uses the two Hurwitz zeta values',
+    (s, aRe, aIm, re, im, bound) => {
+      // Φ(−1, s, a) = 2^(−s)·(ζ(s, a/2) − ζ(s, (a+1)/2)). The continuation
+      // declines these points, so they stayed unevaluated before the Hurwitz
+      // zeta kernel was accurate for a complex a.
+      const z = ce.box(['LerchPhi', -1, s, ['Complex', aRe, aIm]]).N();
+      expect(relErr(z, re, im)).toBeLessThan(bound);
+    }
+  );
+});
+
+describe('Machine-precision HurwitzZeta for a real a left of the critical strip', () => {
+  // The references are mpmath at 40 digits, at the double each literal
+  // rounds to. Each value is within a few units in the last place.
+  ce.declare('hw_s', 'real');
+  ce.declare('hw_a', 'real');
+  const run = compile(ce.box(['HurwitzZeta', 'hw_s', 'hw_a']))?.run;
+
+  test.each([
+    // mpmath: zeta(-1.5, 0.3) = -0.0081855604858359760572
+    [-1.5, 0.3, -0.0081855604858359760572],
+    // mpmath: zeta(-200.5, 0.3) = 2.9233713806280506208e+215
+    [-200.5, 0.3, 2.9233713806280506208e215],
+    // ζ(−12, 3/2) = ζ(−12, 1/2) − 2⁻¹² = −2⁻¹², exactly
+    [-12, 1.5, -0.000244140625],
+    // mpmath: zeta(1e-8, 0.5000001) = -1.0346573788938122525e-7
+    [1e-8, 0.5000001, -1.0346573788938122525e-7],
+    // mpmath: zeta(-1e-8, 0.4999999) = 1.0346573386645774404e-7
+    [-1e-8, 0.4999999, 1.0346573386645774404e-7],
+  ])('the compiled HurwitzZeta(%p, %p)', (s, a, expected) => {
+    const got = run?.({ hw_s: s, hw_a: a }) as number;
+    expect(Math.abs(got / expected - 1)).toBeLessThan(2e-15);
+  });
+
+  test('HurwitzZeta(0, a) is 1/2 − a in the kernel', () => {
+    // It was 0.1999999999999993 at a = 0.3 (the Euler-Maclaurin terms
+    // cancel to the small result).
+    const z = hurwitzZetaComplex(new Complex(0, 0), new Complex(0.3, 0));
+    expect(z.re).toBe(0.2);
+    expect(z.im).toBe(0);
+  });
+
+  test('HurwitzZeta next to a negative integer order, at a complex s', () => {
+    // mpmath: zeta(-12+1e-5j, 1.5) = -0.00024414062934736560327 - 6.3424361808430054027e-7j
+    const z = ce.box(['HurwitzZeta', ['Complex', -12, 1e-5], 1.5]).N();
+    expect(
+      relErr(z, -0.00024414062934736560327, -6.3424361808430054027e-7)
+    ).toBeLessThan(2e-15);
+  });
+
+  test('HurwitzZeta at a complex a left of the imaginary axis', () => {
+    // mpmath: zeta(-2.0179750353517525+4.791454460430932j, -26.746414464915123-0.7123398723351617j)
+    //   = 0.0051691933507619109354 - 0.0033016657734743167424j
+    // It was 0.005169193351002762 − 0.0033016657735622477i (4.2e−11).
+    const z = ce
+      .box([
+        'HurwitzZeta',
+        ['Complex', -2.0179750353517525, 4.791454460430932],
+        ['Complex', -26.746414464915123, -0.7123398723351617],
+      ])
+      .N();
+    expect(
+      relErr(z, 0.0051691933507619109354, -0.0033016657734743167424)
+    ).toBeLessThan(2e-15);
   });
 });

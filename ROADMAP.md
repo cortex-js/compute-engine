@@ -216,31 +216,30 @@ form and the flattened form of a variadic `Append` report different types
 ### A list-building self-recursion assigned WITHOUT a declaration is still typed `collection` (OPEN, small — found 2026-09-29 by the fix for Tycho row 338)
 
 With `F` declared `(unknown, unknown) -> unknown` and assigned
-`(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the
-derivation of the placeholder signature re-types the body under the
-hypothesis that the result is a list and keeps it when the pass reproduces
-it (`_deriveSignature` in `boxed-value-definition.ts` and
-`boxed-operator-definition.ts`), so `F` is `-> list<number>`. The same
-literal assigned to an UNDECLARED name (`ce.assign("G", literal)`) takes the
-inferred-signature route, where a call is typed from the literal per call:
-`G` reports `(unknown, unknown) -> collection` and `G(0, 5)` types
-`collection<integer>`. The hypothesis is not applied on that route. Tycho
-declares every document function first, so it does not meet this.
+`(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the derivation
+of the placeholder signature re-types the body under the hypothesis that the
+result is a list and keeps it when the pass reproduces it (`_deriveSignature` in
+`boxed-value-definition.ts` and `boxed-operator-definition.ts`), so `F` is
+`-> list<number>`. The same literal assigned to an UNDECLARED name
+(`ce.assign("G", literal)`) takes the inferred-signature route, where a call is
+typed from the literal per call: `G` reports `(unknown, unknown) -> collection`
+and `G(0, 5)` types `collection<integer>`. The hypothesis is not applied on that
+route. Tycho declares every document function first, so it does not meet this.
 
 ### A mutually recursive pair that builds a list is typed `collection`, and a callee derived inside another function's derivation can keep `-> unknown` (OPEN, small — found 2026-09-29 by the fix for Tycho row 338)
 
-The list hypothesis of `_deriveSignature` runs only for a body that names
-its own function. With `F: (unknown, unknown) -> unknown` assigned
+The list hypothesis of `_deriveSignature` runs only for a body that names its
+own function. With `F: (unknown, unknown) -> unknown` assigned
 `(n, K) ↦ { n = K - 1: [n], otherwise: join([n], G(n + 1, K)) }` and `G`
 assigned `(n, K) ↦ F(n, K)`, both derive `-> collection<number>` (pinned in
-`recursive-function-result-type.test.ts`). A pair that is also
-self-recursive (`F` names `F` and `G`) does not improve either: `G`'s
-signature is derived while `F`'s is, reads the re-entrancy guard's
-`unknown` for `F`, and is memoized as `-> unknown` (measured 2026-09-29:
-`F` is `-> collection<number>` and `G` stays `-> unknown` on later reads),
-so the hypothesis pass reads `unknown` from `G` and is refuted. A fix would
-treat the strongly connected component of the call graph as one unit, or
-retire a callee's memo when the function it was derived inside settles.
+`recursive-function-result-type.test.ts`). A pair that is also self-recursive
+(`F` names `F` and `G`) does not improve either: `G`'s signature is derived
+while `F`'s is, reads the re-entrancy guard's `unknown` for `F`, and is memoized
+as `-> unknown` (measured 2026-09-29: `F` is `-> collection<number>` and `G`
+stays `-> unknown` on later reads), so the hypothesis pass reads `unknown` from
+`G` and is refuted. A fix would treat the strongly connected component of the
+call graph as one unit, or retire a callee's memo when the function it was
+derived inside settles.
 
 ### Lazy collection operators over an eager source stay unevaluated (OPEN, decision — found 2026-09-30 by the fix for issue #383)
 
@@ -277,90 +276,88 @@ type. `Length(At(x, i))` has the same shape of defect at a smaller scale: typed
 
 ### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — five defects)
 
-The rule since 2026-09-30, for a function literal (an Epsil `function`, a
-lambda with an annotated parameter): at evaluation, an absent value
-(`Missing`) at a parameter annotated with a type that has no `missing`
-member is an `incompatible-type` error, a parameter annotated with a
-numeric type reads it as `NaN` (the absence marker of a numeric domain) and
-accepts `NaN`, and at a bare parameter the body runs with the absent value;
-at boxing, the engine admits an argument typed `missing | T` at a parameter
-annotated `T` and refuses one typed `missing` alone at a parameter that is
-not numeric; the Epsil static pre-pass reports the first too. Pinned by
-`test/compute-engine/absent-argument-annotated-parameter.test.ts`. What is
-not settled:
+The rule since 2026-09-30, for a function literal (an Epsil `function`, a lambda
+with an annotated parameter): at evaluation, an absent value (`Missing`) at a
+parameter annotated with a type that has no `missing` member is an
+`incompatible-type` error, a parameter annotated with a numeric type reads it as
+`NaN` (the absence marker of a numeric domain) and accepts `NaN`, and at a bare
+parameter the body runs with the absent value; at boxing, the engine admits an
+argument typed `missing | T` at a parameter annotated `T` and refuses one typed
+`missing` alone at a parameter that is not numeric; the Epsil static pre-pass
+reports the first too. Pinned by
+`test/compute-engine/absent-argument-annotated-parameter.test.ts`. What is not
+settled:
 
-1. **A function declared with a parameter typed `T | missing` refuses a
-   body with a bare parameter (defect).** `ce.declare('f', { signature:
-   '(string | missing) -> unknown' })` followed by
+1. **A function declared with a parameter typed `T | missing` refuses a body
+   with a bare parameter (defect).**
+   `ce.declare('f', { signature: '(string | missing) -> unknown' })` followed by
    `ce.assign('f', s ↦ IsMissing(s))` throws: "the value of type
    `(unknown) -> boolean` is not compatible with the type
-   `(missing | string) -> boolean`". `unknown` excludes the absence
-   markers, so the literal's bare parameter is read as narrower than the
-   declaration. This is the declaration a host writes to accept an absent
-   argument, now that an absent value is refused at a declared scalar
-   parameter that is not numeric.
+   `(missing | string) -> boolean`". `unknown` excludes the absence markers, so
+   the literal's bare parameter is read as narrower than the declaration. This
+   is the declaration a host writes to accept an absent argument, now that an
+   absent value is refused at a declared scalar parameter that is not numeric.
 2. **Compiled code does not check an annotated parameter (defect).**
    `function f(p: tuple<number, number>) { p[1] + 1 }` called with
-   `first(filter([(1, 2)], c => c[1] > 9))` is an error in the interpreter
-   and `NaN` from the JavaScript target. The target should emit the check or
-   decline the call.
+   `first(filter([(1, 2)], c => c[1] > 9))` is an error in the interpreter and
+   `NaN` from the JavaScript target. The target should emit the check or decline
+   the call.
 3. **A false report of the pre-pass on the gasket program (defect, not
    reduced).** With every parameter of `fill` annotated and the absent case
    removed (`let C = first(filter(…)) ?? (0, 0, 0)`), the program
    `tycho/scripts/repros/2026-09-28-epsil-gasket-compile/e-natural-recursion.epsil`
    runs, compiles and answers `(224, [4,6,18,54,86,28,8,8,4,4,4,0])`, and the
    pre-pass reports "expected `tuple<number, number, number>`, got
-   `dictionary<any> | indexed_collection<any>` at `gap[3]`". In the pre-pass
-   `C` is typed from its uses (`C[1]`), not from its initializer; boxed
-   whole, it is typed `tuple<number, number, number>`. The report predates
-   2026-09-30. Twelve smaller programs built from the same helper functions
-   did not reproduce it.
-4. **A list of points at a BARE parameter of a function declared in the
-   compiled program declines to compile (defect).** With
+   `dictionary<any> | indexed_collection<any>` at `gap[3]`". In the pre-pass `C`
+   is typed from its uses (`C[1]`), not from its initializer; boxed whole, it is
+   typed `tuple<number, number, number>`. The report predates 2026-09-30. Twelve
+   smaller programs built from the same helper functions did not reproduce it.
+4. **A list of points at a BARE parameter of a function declared in the compiled
+   program declines to compile (defect).** With
    `function h(q: tuple<number, number>) { q[1] + 1 }` and
    `const g = (p) => h(p)`, the type of `p` is inferred as one point, the
-   interpreter binds a list of points whole to `p` and maps at the call of
-   `h`, and answers `[2, 4]`. The body of `g` is compiled for one point, so
-   the JavaScript target declines `g(xs)` (`tryCompileLocalFunctionCall`,
-   `base-compiler.ts`); until 2026-09-30 it answered the string `"1,21"`.
-   An ANNOTATED point parameter is mapped by the compiled code. Fix: compile
-   the body of such a function for a parameter that may be a list.
-5. **`widenAssignedType('never')` answers `integer` (defect, no failing
-   input known).** `never` matches every type, so the first test of the
-   widening table (`boxed-value-definition.ts`) accepts it. The assignment
-   evidence join skips a `never`-typed value since 2026-09-30
-   (`joinEvidenceOnBinding`, `library/core.ts`); the two other callers (the
-   loop-variable type in `control-structures.ts`, a destructured leaf in
-   `epsil/static-diagnostics.ts`) do not. `for x in [] { s = s + x }` runs
-   and answers `0`.
+   interpreter binds a list of points whole to `p` and maps at the call of `h`,
+   and answers `[2, 4]`. The body of `g` is compiled for one point, so the
+   JavaScript target declines `g(xs)` (`tryCompileLocalFunctionCall`,
+   `base-compiler.ts`); until 2026-09-30 it answered the string `"1,21"`. An
+   ANNOTATED point parameter is mapped by the compiled code. Fix: compile the
+   body of such a function for a parameter that may be a list.
+5. **`widenAssignedType('never')` answers `integer` (defect, no failing input
+   known).** `never` matches every type, so the first test of the widening table
+   (`boxed-value-definition.ts`) accepts it. The assignment evidence join skips
+   a `never`-typed value since 2026-09-30 (`joinEvidenceOnBinding`,
+   `library/core.ts`); the two other callers (the loop-variable type in
+   `control-structures.ts`, a destructured leaf in
+   `epsil/static-diagnostics.ts`) do not. `for x in [] { s = s + x }` runs and
+   answers `0`.
 
-The accessor side of the same decision (`First`, `Second`, `Third`, `Last`,
-`At` with a literal index lose their absent member when the operand is
-proved to hold the position) reads the length from a list type with a
-length, a list literal, a string literal and a `Range` with literal bounds
-(`provenLengthD`, `library/collections.ts`). Not proved, so the member
-stays: `First(Rest(xs))` and `First(Take(xs, 2))` over a literal (the types
-of `Rest` and `Take` carry no length), and a symbol declared `list<T>` that
-holds a list that is not empty. A position proved NOT to exist
-(`At([7, 8, 9], 99)`) keeps `T | marker(T)` although its value is always
-the marker: a chained read (`M[7][1]` over a matrix) chooses `NaN` or
-`Missing` from the element type the inner access states.
+The accessor side of the same decision (`First`, `Second`, `Third`, `Last`, `At`
+with a literal index lose their absent member when the operand is proved to hold
+the position) reads the length from a list type with a length, a list literal, a
+string literal and a `Range` with literal bounds (`provenLengthD`,
+`library/collections.ts`). Not proved, so the member stays: `First(Rest(xs))`
+and `First(Take(xs, 2))` over a literal (the types of `Rest` and `Take` carry no
+length), and a symbol declared `list<T>` that holds a list that is not empty. A
+position proved NOT to exist (`At([7, 8, 9], 99)`) keeps `T | marker(T)`
+although its value is always the marker: a chained read (`M[7][1]` over a
+matrix) chooses `NaN` or `Missing` from the element type the inner access
+states.
 
 ### Three lazy collections assigned to a variable are still a live view of the variables they read (OPEN, small — residue of the decision of 2026-09-30)
 
-Since 2026-09-30 an assignment statement stores the elements of a FINITE
-lazy collection that reads a variable, as a list when the value is an
-indexed collection and as a set when it is typed as a set (`assignedValue`,
-`library/core.ts`). Three cases are left lazy and keep their variables by
-name. (1) A collection with no last element cannot be listed:
+Since 2026-09-30 an assignment statement stores the elements of a FINITE lazy
+collection that reads a variable, as a list when the value is an indexed
+collection and as a set when it is typed as a set (`assignedValue`,
+`library/core.ts`). Three cases are left lazy and keep their variables by name.
+(1) A collection with no last element cannot be listed:
 `let big = filter(1..oo, c => c > k)` still keeps `k`, and a later `k = 10`
-changes `first(big)` from `4` to `11`. (2) A `Filter` over a dictionary is
-a dictionary, and no operator lists a lazy dictionary as a dictionary.
-(3) A `Filter` over a set held by a local whose type was inferred
-`collection<any>` is not typed as a set, and is not indexed. A fix replaces each variable the collection
-reads by its current value and keeps the collection lazy; the replacement
-must reach inside the function literal (the `k` of the predicate) without
-touching the literal's own parameters. The host function `ce.assign()`
+changes `first(big)` from `4` to `11`. (2) A `Filter` over a dictionary is a
+dictionary, and no operator lists a lazy dictionary as a dictionary. (3) A
+`Filter` over a set held by a local whose type was inferred `collection<any>` is
+not typed as a set, and is not indexed. A fix replaces each variable the
+collection reads by its current value and keeps the collection lazy; the
+replacement must reach inside the function literal (the `k` of the predicate)
+without touching the literal's own parameters. The host function `ce.assign()`
 stores the value it is given, on purpose: a host that defines one name from
 another wants the live view.
 
@@ -620,28 +617,6 @@ own working precision). A fix is either an engine-wide one (evaluate the
 operands of a numeric evaluation with guard digits, or pass exact operands
 through) or a per-operator one (hold the operands of `Zeta`, `HurwitzZeta`,
 `Digamma` and similar functions and evaluate them in the handler).
-
-### The machine-precision Hurwitz zeta loses digits left of the critical strip (OPEN, small — found 2026-09-28 by the review of PR #360)
-
-The double kernel `hurwitzZetaComplex` (`numerics/numeric-complex.ts`) is off by
-more than a few units in the last place for some real s ≤ 0 (compared with
-mpmath at the double that `0.3` rounds to):
-
-- `HurwitzZeta(-1.5, 0.3)` is `-0.008185560485836074`; the value is
-  `-0.0081855604858359760…` (13 correct digits).
-- `HurwitzZeta(0, 0.3)` is `0.1999999999999993`; the value is
-  `0.2000000000000000111…` (ζ(0, a) = 1/2 − a).
-- `HurwitzZeta(-200.5, 0.3)` is `2.92337138062847e+215`; the value is
-  `2.9233713806280506e+215` (13 correct digits).
-
-The first and third go through the Taylor expansion about a = 1
-(`zetaNearOneComplex`), which sums values of ζ at shifted arguments; the second
-goes through the Euler-Maclaurin sum (`hurwitzEMComplex`), whose terms 1/(s −
-1)·z^(1−s) and the direct terms cancel to the small result. At `ce.precision`
-above 15 the bignum kernel `bigHurwitzZeta` gives the correct digits for all
-three. `HurwitzZeta(1.0000001, 1)` = `10000000.571377004` is NOT a defect: the
-double nearest `1.0000001` is `1.0000001000000000583…`, and ζ at that double is
-`10000000.5713770004…`; the pole at s = 1 amplifies the rounding of the input.
 
 ### A matrix to a non-integer power is element-wise (OPEN, decision — found 2026-09-28 by the agents writing the linear-algebra examples)
 
@@ -1184,29 +1159,23 @@ and is accurate to a few ε. A lower bound would decline more arguments. The fix
 is a more accurate complex `gamma()` for a large argument (the same shift as the
 real one), or a Γ ratio computed as one quotient.
 
-### Upper incomplete gamma: where the machine kernels still decline or lose digits (OPEN — found 2026-09-28 while fixing issue #353)
+### Upper incomplete gamma: where the machine kernels still decline or lose digits (OPEN — found 2026-09-28 while fixing issue #353; the region next to the poles closed 2026-09-30)
 
 The complex kernel `incompleteGammaUpperComplex` (`numerics/numeric-complex.ts`)
 returns NaN, so `Gamma(s, x).N()` stays unevaluated, where it cannot certify
 about 12 digits in doubles. Its series forms carry an error estimate that bounds
 the actual error (measured against mpmath on about 7500 points); where no method
-passes, it declines. The regions:
+passes, it declines. Next to the poles of `Γ(s)` (`s` within 0.5 of
+`0, −1, −2, …`, `x` in the band `|x| + Re x ≤ 3`) the kernel now sums `Γ(s)` and
+the cancelling term of its power series as one expression in `ε = s + n`: on
+6000 points within 1e−9 to 0.6 of the poles down to `n = 60`, all answer, worst
+error 6.2e−14. The regions that remain:
 
-- `s` close to `0, −1, −2, …` and `x` near the negative real axis
-  (`|x| + Re x ≤ 3`). `Γ(s)` and the `k = n` term of the power series are both
-  about `1/(s + n)` and cancel. Whether the kernel declines depends on `x` as
-  well as on the distance `|s + n|`: on 3000 points with `|s + n|` from `10⁻⁹`
-  to `10⁻²` it answered 60% at `10⁻⁹` and 98% at `10⁻³`, all with an error of at
-  most `4.5e−13`. Example: `Gamma(-1 + 10^{-6}, -3)` stays unevaluated; mpmath
-  gives `3.2386482740815 + 3.1416041563344i`. The fix is to sum
-  `Γ(s) − (−1)ⁿ z^{s+n}/(n!(s+n))` as one expression in `ε = s + n`, using
-  `expm1(ε ln z)/ε` and a series for `(n!(−1)ⁿ ε Γ(−n+ε) − 1)/ε` (the method of
-  Temme).
 - `|Im s| > 10` and `|x| < 3|s|`, with `Re x < 0`, or with `Re s < 0` and
   `|x| < |s| + 1`. The continued fraction converges there but to a wrong value
   (error `2e−8` at `s = −0.41 − 23.9i`, `x = 0.088 − 4.0i`), and the power
   series often cancel too far. On 2500 random points with `|Re s|, |Im s| ≤ 30`
-  and `0.01 ≤ |x| ≤ 600`, 86 declines are in this region. Example:
+  and `0.01 ≤ |x| ≤ 600`, 68 declines are in this region. Example:
   `Gamma(19.427 + 13.838i, -8.4445 - 49.849i)`; mpmath gives
   `-2.3715013352684768e45 - 1.8981893850660706e44i`. Uniform asymptotic
   expansions for a large `|s|` would cover it.
@@ -1218,10 +1187,12 @@ passes, it declines. The regions:
 For a large `|s|` the accuracy is that of the complex `Γ(s)` (Lanczos formula):
 the relative error of `Γ(s)` grows from about `5ε` at `|s| < 1` to `500ε` at
 `|s| = 13` and `5300ε` at `|s| = 790`, and `Gamma(s, x)` inherits it (`1.1e−12`
-at `s = 106 + 657i`, `x = −205 + 517i`). The error bound the kernel states
-(`incompleteGammaUpperComplexErrorBound`) grows with it. A more accurate `Γ(s)`
-for a large `|s|` (Stirling series with the argument shifted) would tighten
-both.
+at `s = 106 + 657i`, `x = −205 + 517i`). The per-point error estimate the kernel
+returns (`incompleteGammaUpperComplexWithError`) grows with it, and so does the
+cancellation check of `PolyLog`'s inversion formula (`polylogInversionComplex`,
+`numerics/polylog.ts`), which declines about 6% of the complex orders with
+`Re(s) < 0` past the unit disk for this reason. A more accurate `Γ(s)` for a
+large `|s|` (Stirling series with the argument shifted) would tighten all three.
 
 ### Complex transcendental functions keep machine precision (OPEN, capability — decision D4 of `docs/plans/2026-09-27-big-decimal-imaginary-part.md`)
 
@@ -4707,83 +4678,100 @@ evaluates promptly" — a canary-normalized timing assertion (limit 5000 canary
 units) read 6251 in a six-worker full run on a box at load 4 and passed alone
 (70 of 70), while the same tree's other timing pins held.
 
-### `LerchPhi` past |z| = 1 has no GPU lane (OPEN, capability gap — found 2026-09-27 while adding `LerchPhi`, #340)
+### `LerchPhi` past |z| = 1 still declines for a complex `a` with `Re(s) < 0`, and for a real `a` at a large `|z|` (OPEN — residue of the 2026-09-30 round on `LerchPhi`, #340, #353)
 
-`LerchPhi(z,s,a)` continues past the unit disk (and on its rim) through the
-upper incomplete gamma function at a complex argument. The interpreter and the
-JavaScript target have one (`incompleteGammaUpperComplex`,
-`numerics/numeric-complex.ts`; `_SYS.lerchPhi` calls the interpreter's kernel),
-but the GPU (GLSL/WGSL) targets do not: `Gamma`'s own compiled lowering is
-real-only, so `_gpu_lerch_phi` answers `NaN` past the unit disk (except for
-`s = 0, −1, −2`, where it has a closed form). A complex incomplete gamma kernel
-for those targets would close the gap for `LerchPhi` and widen `Gamma`'s own
-compiled two-operand form at the same time. Demand-gated: no compile-target
-consumer has asked for `LerchPhi` past the unit disk yet.
+`lerchPhiComplex` (`numerics/lerch-phi.ts`) declines (`N()` stays symbolic)
+where no route can vouch for 1e−11 relative accuracy; it never returns a wrong
+number (every returned value on about 20 000 sweep points is within 1e−11 of a
+reference). Since 2026-09-30 the continuation is joined by a sum over the
+Fourier modes of the base point for a real `a` (`lerchModesComplex`) and a
+Taylor series in `a` around a real base point for a complex `a`
+(`lerchTaylorComplex`), which run only where the continuation declines. What
+still declines:
 
-### `LerchPhi` past |z| = 1 still declines at a few points (OPEN, found 2026-09-28 while adapting `LerchPhi` to the fixed incomplete gamma kernel, #353)
+- A complex `a`, mostly with `Re(s) < 0`: on 900 points with `Re(s)` from −30 to
+  1, `|z|` up to 1e7 and `a` complex, 506 answer and 394 decline; on 1200 points
+  with `|z| < 32` and `|Im a|` up to 4, 1153 answer and 47 decline (`Re(a) < 0`
+  or a large `|Im a|`). Example:
+  `LerchPhi(-246.62-375.42i, -29.535, -5.5009-2.4185i)`; the reference is
+  `1.1285770581632545e21 − 1.6446479143332522e22i`. The Taylor series in `a` has
+  terms up to 1e13 times the value there, and the expansion in powers of `log z`
+  (`Φ = z^(−a)[Γ(1−s)(−log z)^(s−1) + Σ_k ζ(s−k, a)(log z)^k/k!]`,
+  `|log z| < 2π`) was within 1e−11 on only 6 of 70 such points, because
+  `hurwitzZetaComplex` loses digits at a complex order with a large imaginary
+  part (next entry) and its terms grow like `cosh(2π·Im a)`.
+- A real `a` with `Re(s) ≥ 1/2` and `|z| ≥ 1000`, where the continuation's tail
+  integral cancels: 24 of 3000 `PolyLog` points past the disk, for example
+  `PolyLog(2.5913, -187652.08)` (mpmath `0.00097720268138322143`). The modes
+  route stops at `Re(s) < 1/2`; its formula holds for every `s` that is not a
+  positive integer, so extending it there would probably cover these.
+- A real `a`, `Re(s) < −9`, `|z| ≥ 1000`: 5 of 3000 points, for example
+  `LerchPhi(23627.46+13892.73i, -28.756, -7.7568)` (reference
+  `−1.9352390388659670e33 − 1.0220779376714596e33i`).
 
-The continuation (`lerchContinuedComplex`, `numerics/lerch-phi.ts`) computes
-`Φ(z,s,a)` from three terms, one of them `Γ(1 − s, −a·log z)`. It declines
-(`N()` stays symbolic) where it cannot vouch for 1e−11 relative accuracy. On a
-sweep of 1588 random points against mpmath's `lerchphi` (inside the disk, on the
-rim, past it, real `z < −1` and `z > 1`, complex `s`, `a` from −8 to 30), it
-answers 1532 (before the #353 fix: 339), with a worst error of 4.3e−13, and
-declines 56. They are of two kinds:
+Do not take references for a complex `a` past the unit circle from mpmath's
+`lerchphi`: it returns a value on the wrong sheet of the incomplete gamma term
+in part of the `a` plane (the engine had the same defect until 2026-09-30; see
+`closedTermSheet` in `lerch-phi.ts` and the tests that pin the corrected
+values). For `|z|` above about 1e5, `lerchphi` at 60 digits is also wrong
+(7.5e−7 at `lerchphi(-9959.2, -8.16, 1.25)`); use 200 digits or more, or the
+integral `(1/Γ(s))∫₀^∞ t^(s−1)e^(−at)/(1 − z·e^(−t)) dt` for `Re(s) > 0`.
 
-- `s` within about 1e−2 of a positive integer, with `x = −a·log z` in the band
-  `|x| + Re x ≤ 3` around the negative real axis (for `a = 1`, every `z` on or
-  past the unit circle; for a larger `a`, `z` near the real axis past 1). The
-  incomplete gamma kernel sums a power series there whose error grows like
-  `1/|1 − s + n|` near the poles of `Γ(1 − s)`, and it declines where it cannot
-  certify its result. On 600 points with `s` within 1e−9 to 0.2 of 1 … 9, 482
-  answer and 118 decline, spread over every distance below 1e−2. Example:
-  `LerchPhi(2, 3.000001, 3.5)`; mpmath gives
-  `0.0090998751173185692 − 0.066706054562371451i`. The fix is the kernel's own
-  open item (the Temme-style expansion in "Upper incomplete gamma: where the
-  machine kernels still decline or lose digits").
-- The closed incomplete gamma term is hundreds of times larger than `Φ`, so the
-  kernel's error bound (`incompleteGammaUpperComplexErrorBound`, 3e−13 relative
-  for a small `|1 − s|`) times that term exceeds 1e−11 of the value, although
-  the actual error is usually far smaller. This happens mostly for `Re(s) < 0`,
-  for example `LerchPhi(-2, -3.5, 1.5)` (mpmath 0.0024505235336676858). A
-  per-point error estimate from the kernel would recover most of them.
+### `hurwitzZetaComplex` loses digits at a complex order with a large imaginary part and a small base point (OPEN, correctness — found 2026-09-30 while measuring the `LerchPhi` modes route)
 
-### `HurwitzZeta(s, a)` is inaccurate for a complex `a` and `Re(s) < 0` (OPEN, correctness — found 2026-09-28 while reviewing `LerchPhi`)
+`hurwitzZetaComplex(s, a)` (`numerics/numeric-complex.ts`) has a relative error
+of up to 2.4e−11 for `|Im s| ≥ 8` with a small real `a` near 0 (for example
+`s = −0.76 + 8.33i`, `a = 0.067`), and up to 4.6e−13 for `4 ≤ |Im s| < 7` with
+`Re(s)` from 0 to 0.5 and `a < 0.07`. Elsewhere in `Re(s) < 1/2` it is within a
+few units in the last place of what the operands allow (measured 2026-09-30 on
+about 20 000 points against mpmath, after the Hermite-integral route replaced
+the Euler–Maclaurin fallback for a complex `a`). The `LerchPhi` modes route
+avoids these regions (`hurwitzKernelWeight`). Also, for a non-real `a` with
+`Re(a) ≤ 0`, 2 of 1500 random points are off by up to 4.2e−11: the value is
+small next to the terms passed over by the shift of `a` to the right.
 
-`HurwitzZeta(-11.801, 0.4265 − 1.271i).N()` is `2.2188 + 50.186i`; mpmath's
-`zeta(-11.801, 0.4265 − 1.271j)` is `5.6234 + 46.077i`. `hurwitzZetaComplex`
-uses its Taylor shift only when the shifted base point is within its radius, and
-the imaginary part of `a` counts toward that distance; otherwise it falls back
-to the Euler–Maclaurin sum, which cancels for `Re(s) < 0`. `LerchPhi` at
-`z = −1` uses `HurwitzZeta` only for a real `a` because of this. Another
-witness, found while widening `PolyLog`: `HurwitzZeta(-11.5, 0.5 - 1.0994i).N()`
-is `-8.914 + 9.012i`; mpmath gives `-9.526 + 9.526i`. At `s = −2.9`,
-`a = 0.5 − 0.7329i` the error is 5.8e−11 relative. It limits `PolyLog`'s
-inversion formula (`polylogInversionComplex`), which now matters only where the
-`LerchPhi` continuation declines.
+### GPU `LerchPhi` and `PolyLog` still answer NaN where the terms cancel in f32 (OPEN, capability — residue of the 2026-09-30 round, #340)
 
-### `PolyLog` has no GPU lane past |z| = 1 (OPEN, capability gap — found 2026-09-28 while widening `PolyLog`, #340)
+The shader targets (`GPU_LERCH_PREAMBLE_GLSL`/`_WGSL`,
+`compilation/gpu-target.ts`) compute `LerchPhi(z, s, a)` and `PolyLog(s, z)` for
+real operands past the unit disk since 2026-09-30 (a positive integral for
+`s > 0`, the Hermite form with a complex incomplete gamma for `s ≤ 0`, a
+rational form for an integer `s` from 0 to −16, the inversion formula for a
+negative non-integer order of `PolyLog`), within 1.5e−5 of the reference
+wherever they answer (worst 1.34e−5 on 4193 points, measured on an Apple M5 Max
+GPU through headless Chromium, GLSL and WGSL). Each method declines (NaN) when
+its own error estimate exceeds 3e−5 of the value. Where the JavaScript target
+answers and the shader does not: `s ≲ −3` next to and below `z = −1` (18 of 114
+points below `z = −1` with `s < 0`, 20 of 150 at `z = −1`, 34 of 455 with
+`−1 < z < 0`, 6 of 47 for `z > 1` with an integer `s`, 17 of 157 for `PolyLog`
+below −1 with `s ≈ −12`), for example `Φ(−1, −6.5, 1.3) = 0.10992`; values about
+1e37 next to `z = 1` (f32 overflow); `z < −1` with `a < 0` and an integer
+`s > 0` (the shifted terms cancel, `Φ(−5.76, 12, −8.464)`); and values below the
+smallest normal f32 (1.2e−38), which the GPU flushes to zero. A call costs at
+most about 1100 loop iterations below `z = −1`, and about 4700 next to `z = 1`
+with `s < 0` (the 4096-term series first). The f32 model of the shader text is
+`test/compute-engine/gpu-lerch-f32-model.ts`; keep it in step with the text.
 
-Past the unit disk, `PolyLog(s, z)` at a non-integer order uses the `LerchPhi`
-continuation, and where that declines Jonquière's inversion formula
-(`polylogInversionComplex`, `numerics/polylog.ts`). In the interpreter and the
-JavaScript lane these decline together only for some orders within about 1e−2 of
-a positive integer, on or past the unit circle (the `LerchPhi` entry above; for
-example `PolyLog(3.000001, 2)`). Measured on 900 points against mpmath's
-`polylog` (orders within 1e−8 to 0.2 of 1 … 12, `|z|` from 0.9 to 61): 869
-answer, none off by more than 6.4e−14, and the 31 declines are spread over the
-distances from 1e−8 to 1e−2. On another 400 such points, 392 answer, none off by
-more than 4.6e−14. The GPU lane has neither the continuation nor the inversion:
-`_gpu_poly_log` is `NaN` for every non-integer order with `|z| > 1`, and for an
-integer order `≥ 2` below `z = −1`.
+### GLSL on ANGLE Metal: arithmetic with a constant infinity reads back 0 (OPEN — found 2026-09-30 while validating the WGSL non-finite constants)
 
-### The machine-precision `Zeta` kernels are inaccurate for a small negative order (OPEN, correctness, found 2026-09-28 while widening `PolyLog`, #340)
+On the Apple M5 Max through headless Chromium's WebGL2 (ANGLE over Metal),
+`z + _gpu_inf()` reads back `0.0`, while returning `_gpu_inf()` directly,
+negating it, `min`/`max` and comparisons are correct. Every constant spelling of
+the infinity was tried (a bit pattern, a global, a loop, `exp(1000)`); only a
+bit pattern computed from a run-time input works, so no helper can fix it; a
+uniform would. WGSL is correct. Related: the WGSL constant `bitcast<f32>` to NaN
+or infinity was a shader-creation error in Chrome ("value inf cannot be
+represented as 'f32'") at every site until 2026-09-30, so no WGSL shader that
+used `Gamma`, `Zeta`, `HurwitzZeta`, `LerchPhi` or `PolyLog`, or any non-finite
+literal, compiled in a browser; both targets now spell them through
+`_gpu_nan()`/`_gpu_inf()`, and the WGSL versions bitcast a `let`.
 
-`zeta(s)` (`numerics/special-functions.ts`) and `zetaComplex`/
-`hurwitzZetaComplex(s, 1)` (`numerics/numeric-complex.ts`) lose digits as `s`
-approaches 0 from below: at `s = −1e−9` they return `−0.4999999577` where the
-value is `−0.4999999991` (8e−8 relative), at `s = −1e−6` the error is 1.2e−11.
-The interpreter's `Zeta(-1e-9).N()` is correct (it uses big decimals), but the
-compiled `Zeta` and the compiled `PolyLog(s, 1)` use the machine kernel and
-return the wrong digits. The loss probably comes from the reflection formula,
-which multiplies `sin(πs/2)` (near 0) by `ζ(1 − s)` (near its pole).
+### The f32 shader Hurwitz zeta is up to 2.3e−5 off where its terms cancel (OPEN, small — found 2026-09-30 while validating the ZETA preamble on the GPU)
+
+`_gpu_hurwitz_zeta(0.5, 0.3)` is 2.3e−5 off on both targets, and in WGSL
+`ζ(−2 + 1e−6, 0.3)` is 1.35e−5 and `ζ(−7.25, 0.3)` 1.06e−5 off: the
+Euler–Maclaurin terms cancel to a small value. Elsewhere the helper is within
+5.1e−6 (23 values of `s` including `−1e−3`, `−1e−5`, `−4 ± 1e−6`, `−12 ± 1e−5`,
+after the 2026-09-30 fix of the rounded distance to the pole, which gave errors
+of 16% to 51% next to a negative even integer). The double kernel's
+Hermite-integral route would fix it.

@@ -142,9 +142,9 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       );
     });
 
-    it('uses the vecNf NaN bit pattern as the no-match value (R4)', () => {
+    it('uses the vecNf NaN helper as the no-match value (R4)', () => {
       expect(w(['Which', ['Equal', 'N4', 3], 1])).toBe(
-        'select(vec4f(bitcast<f32>(0x7fc00000u)), vec4f(1.0), ((u_n) == (vec4f(3.0))))'
+        'select(vec4f(_gpu_nan()), vec4f(1.0), ((u_n) == (vec4f(3.0))))'
       );
     });
 
@@ -218,9 +218,7 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       // NaN lane, which the `When` no-match lowering emits, so the shape is
       // admitted on both targets.
       expect(g(['List', ['Sin', 'x'], ['When', 'x', 'c']])).toMatch(/_gpu_nan/);
-      expect(w(['List', ['Sin', 'x'], ['When', 'x', 'c']])).toMatch(
-        /0x7fc00000/
-      );
+      expect(w(['List', ['Sin', 'x'], ['When', 'x', 'c']])).toMatch(/_gpu_nan/);
       // A default-less `Which` over a list types `missing | list<…>`: the
       // WHOLE list may be absent, and the no-match lowering would pair an
       // array arm with a scalar NaN. That stays fail-closed.

@@ -104,7 +104,7 @@ describe('a component read over an absent operand', () => {
           to: 'wgsl',
           fallback: false,
         });
-        expect(wgsl.code).toBe('bitcast<f32>(0x7fc00000u)');
+        expect(wgsl.code).toBe('_gpu_nan()');
         expect(wgsl.code).not.toMatch(/\.[xyzw]$/);
       });
 });
@@ -148,7 +148,7 @@ describe('a multi-component read of an absent operand', () => {
       /_gpu_nan\(\)\.[xyzw]{2,}/
     );
     expect(compile(p, { to: 'wgsl' }).code).not.toMatch(
-      /0x7fc00000u\)\.[xyzw]{2,}/
+      /_gpu_nan\(\)\.[xyzw]{2,}/
     );
   });
 });

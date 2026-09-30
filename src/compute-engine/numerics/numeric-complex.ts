@@ -1,6 +1,9 @@
 import { Complex } from 'complex-esm';
 import './complex-esm-augment.js'; // adds the 1-arg `Complex.equals` overload
-import { bernoulliRational } from './bernoulli.js';
+import {
+  bernoulliRational,
+  hurwitzZetaNegativeIntegerAt,
+} from './bernoulli.js';
 
 // Lanczos approximation coefficients (g = 7, n = 9), accurate to ~15 digits
 // for the principal branch. See Numerical Recipes / mathjs gamma().
@@ -483,10 +486,104 @@ function powExpAbs(z: Complex, s: Complex, w: Complex, a: number): number {
  *  grows with |s| (Lanczos formula and reflection formula) to about 130ε at
  *  |s| = 5, 500ε at |s| = 13, 940ε at |s| = 60 and 5300ε at |s| = 790.
  *  The bound is above every measured value, by a factor of at least 1.35. */
-function gammaErrorWeight(s: Complex): number {
+export function gammaErrorWeight(s: Complex): number {
   const a = s.abs();
   return Math.min(12 + 5 * a * a, 1016) + 8 * a;
 }
+
+/** e^w − 1 for a complex w, accurate relative to the result when |w| is
+ *  small: the real part is expm1(Re w)·cos(Im w) − 2·sin²(Im w / 2), with no
+ *  subtraction of two numbers close to 1. */
+function expm1Complex(w: Complex): Complex {
+  const h = Math.sin(0.5 * w.im);
+  return new Complex(
+    Math.expm1(w.re) * Math.cos(w.im) - 2 * h * h,
+    Math.exp(w.re) * Math.sin(w.im)
+  );
+}
+
+/** ζ(k) for k = 2 … 16 (mpmath). For k > 16, ζ(k) = Σ_{j=1}^{12} j^{−k}
+ *  to double precision: the rest is below 13^{1−k}/(k − 1) < 1e−19. */
+const ZETA_INTEGER = [
+  1.6449340668482264, 1.2020569031595942, 1.0823232337111381, 1.03692775514337,
+  1.0173430619844492, 1.008349277381923, 1.0040773561979444, 1.0020083928260821,
+  1.000994575127818, 1.0004941886041194, 1.000246086553308, 1.0001227133475785,
+  1.0000612481350588, 1.000030588236307, 1.0000152822594086,
+];
+
+function zetaInteger(k: number): number {
+  if (k <= 16) return ZETA_INTEGER[k - 2];
+  let sum = 0;
+  for (let j = 12; j >= 1; j--) sum += Math.pow(j, -k);
+  return sum;
+}
+
+/**
+ * For s = −n + ε next to the pole of Γ(s) at −n (n = 0, 1, 2, …, ε ≠ 0 and
+ * |ε| ≤ `NEAR_POLE_RADIUS`), the difference
+ *   Γ(s) − (−1)^n z^ε/(n!·ε),
+ * which is Γ(s) minus the k = n term of the direct power series of the
+ * lower function (z^s·(−z)^n/(n!·(s + n)) = (−1)^n z^ε/(n!·ε)). Both parts
+ * are about 1/(n!·ε) and cancel; this computes the difference as one
+ * expression in ε, with no cancellation (the method of N. M. Temme).
+ *
+ * From Γ(1 + ε) = ε(ε − 1)…(ε − n)·Γ(−n + ε):
+ *   (−1)^n·n!·ε·Γ(−n + ε) = Γ(1 + ε) / Π_{j=1..n} (1 − ε/j) = e^{h(ε)},
+ *   h(ε) = lnΓ(1 + ε) − Σ_{j=1..n} ln(1 − ε/j) = Σ_{k≥1} c_k ε^k,
+ *   c_1 = −γ + H_n = ψ(n + 1),
+ *   c_k = ((−1)^k ζ(k) + Σ_{j=1..n} j^{−k}) / k   (k ≥ 2),
+ * (the series of lnΓ(1 + ε) and of ln(1 − ε/j) converge for |ε| < 1). So
+ *   Γ(s) − (−1)^n z^ε/(n!·ε) = (−1)^n/n! · (g(ε) − (z^ε − 1)/ε),
+ *   g(ε) = (e^{h(ε)} − 1)/ε = (h/ε)·expm1(h)/h,
+ *   (z^ε − 1)/ε = expm1(ε·log z)/ε.
+ * As ε → 0 this becomes the limit (−1)^n/n!·(ψ(n + 1) − log z) that
+ * `upperGammaDirectSeriesComplex` uses at s = −n exactly.
+ *
+ * Returns the bracket g(ε) − expm1(ε·log z)/ε and an estimate of its
+ * absolute rounding error in units of ε, as the `scale` of the series forms.
+ * `log z` has the branch conventions of `powPrincipal` (a `−0` imaginary
+ * part on the negative real axis gives an argument of −π).
+ */
+function nearPoleBracket(
+  eps: Complex,
+  n: number,
+  z: Complex
+): { value: Complex; scale: number } {
+  // h/ε = Σ_{k≥1} c_k ε^{k−1}.
+  let harmonic = 0;
+  for (let j = 1; j <= n; j++) harmonic += 1 / j;
+  let hOverEps = new Complex(-EULER_GAMMA + harmonic, 0);
+  let absSum = hOverEps.abs();
+  let power = C_ONE; // ε^{k−1}
+  const ae = eps.abs();
+  for (let k = 2; k < 200; k++) {
+    power = power.mul(eps);
+    let partial = 0;
+    for (let j = 1; j <= n; j++) partial += Math.pow(j, -k);
+    const c = ((k % 2 === 0 ? 1 : -1) * zetaInteger(k) + partial) / k;
+    const term = power.mul(c);
+    hOverEps = hOverEps.add(term);
+    absSum += term.abs();
+    // |c_k| ≤ (ζ(k) + ζ(k))/k ≤ 4/k, so the tail after this term is below
+    // 4·|ε|^k/(1 − |ε|).
+    if ((4 * Math.pow(ae, k)) / (1 - ae) < 1e-17 * hOverEps.abs()) break;
+  }
+  const h = hOverEps.mul(eps);
+  const ratio = h.isZero() ? C_ONE : expm1Complex(h).div(h); // expm1(h)/h
+  const g = hOverEps.mul(ratio);
+  const e = expm1Complex(eps.mul(z.log())).div(eps);
+  return {
+    value: g.sub(e),
+    // Each part carries a few roundings: the sum h/ε relative to the sum of
+    // the moduli of its terms, and expm1(h)/h, expm1(ε·log z) and the
+    // divisions relative to their own size.
+    scale: 4 * absSum * ratio.abs() + 4 * g.abs() + 6 * e.abs(),
+  };
+}
+
+/** Within this distance |s + n| of a pole of Γ(s) at s = −n, the direct
+ *  series takes Γ(s) and its k = n term together (`nearPoleBracket`). */
+const NEAR_POLE_RADIUS = 0.5;
 
 /**
  * Γ(s, z) = Γ(s) − γ(s, z) with the lower function summed as the direct
@@ -496,6 +593,12 @@ function gammaErrorWeight(s: Complex): number {
  * k = n term, and the limit is
  *   Γ(−n, z) = (−1)^n/n!·(ψ(n+1) − ln z) − z^{−n} Σ_{k≠n} (−z)^k/(k!·(k − n)),
  * with ψ(n+1) = −γ_Euler + H_n. For n = 0 this is the E₁ series.
+ *
+ * For s within `NEAR_POLE_RADIUS` of −n (but not on it), Γ(s) and the k = n
+ * term are both about 1/(n!·|s + n|) and cancel: summed separately, the
+ * rounding error of Γ(s) alone is about ε/(n!·|s + n|). They are taken
+ * together instead (`nearPoleBracket`), and the loop skips the k = n term,
+ * as it does at s = −n.
  *
  * The terms have magnitude up to about e^{|z|} and the sum about e^{−Re z}
  * (times powers of |z|), so the relative cancellation is about
@@ -514,18 +617,22 @@ function upperGammaDirectSeriesComplex(
 ): { value: Complex; scale: number } {
   const az = z.abs();
   const n = isNonPositiveIntegerC(s) ? -s.re : -1;
+  // Next to a pole at s = −m (not on it), Γ(s) and the k = m term are
+  // taken together (`nearPoleBracket`), so the loop skips the k = m term.
+  const m = Math.round(-s.re);
+  const eps = n < 0 ? s.add(m) : C_ZERO;
+  const nearPole = n < 0 && m >= 0 && eps.abs() <= NEAR_POLE_RADIUS;
+  const skip = n >= 0 ? n : nearPole ? m : -1;
   const mz = z.neg();
   let term = C_ONE; // (−z)^k/k!
   let sum = C_ZERO;
-  let absSum = 0;
   let weightedSum = 0;
   for (let k = 0; k < 3000; k++) {
     if (k > 0) term = term.mul(mz).div(k);
-    if (k === n) continue;
+    if (k === skip) continue;
     const t = term.div(s.add(k));
     sum = sum.add(t);
     const at = t.abs();
-    absSum += at;
     // The k-th term is the result of about k + 2 complex multiplications
     // and divisions, each with a rounding error of a few ε.
     weightedSum += (k + 2) * at;
@@ -543,25 +650,34 @@ function upperGammaDirectSeriesComplex(
   const tail = powExpMul(z, power, C_ZERO, sum);
   const tailScale =
     powExpAbs(z, power, C_ZERO, weightedSum) +
-    powExpAbs(z, power, C_ZERO, absSum) * power.abs() * z.log().abs();
-  if (n >= 0) {
+    powExpAbs(z, power, C_ZERO, sum.abs()) * power.abs() * z.log().abs();
+  if (skip >= 0) {
     let harmonic = 0;
     let factorial = 1;
     let logFactorial = 0;
-    for (let j = 1; j <= n; j++) {
+    for (let j = 1; j <= skip; j++) {
       harmonic += 1 / j;
       factorial *= j;
       logFactorial += Math.log(j);
     }
-    const base = new Complex(-EULER_GAMMA + harmonic, 0).sub(z.log());
-    const sign = n % 2 === 0 ? 1 : -1;
+    // At s = −n: ψ(n + 1) − log z. Next to the pole: the bracket of
+    // `nearPoleBracket`, with its own rounding-error estimate.
+    const bracket = nearPole ? nearPoleBracket(eps, skip, z) : undefined;
+    const base =
+      bracket?.value ?? new Complex(-EULER_GAMMA + harmonic, 0).sub(z.log());
+    const sign = skip % 2 === 0 ? 1 : -1;
     // n! overflows for n ≥ 171: then divide by it in logarithmic form.
     const lead = Number.isFinite(factorial)
       ? base.div(sign * factorial)
       : base.mul(
           (sign * Math.exp(Math.log(base.abs()) - logFactorial)) / base.abs()
         );
-    return { value: lead.sub(tail), scale: 4 * lead.abs() + tailScale };
+    // The division by n! adds about two roundings.
+    const leadScale = bracket
+      ? (bracket.scale + 2 * base.abs()) *
+        (Number.isFinite(factorial) ? 1 / factorial : Math.exp(-logFactorial))
+      : 4 * lead.abs();
+    return { value: lead.sub(tail), scale: leadScale + tailScale };
   }
   const g = gamma(s);
   return {
@@ -582,12 +698,10 @@ function upperGammaKummerComplex(
   const az = z.abs();
   let term = C_ONE.div(s); // k = 0 term
   let sum = term;
-  let absSum = term.abs();
-  let weightedSum = 2 * absSum;
+  let weightedSum = 2 * term.abs();
   for (let k = 1; k < 2000; k++) {
     term = term.mul(z).div(s.add(k));
     sum = sum.add(term);
-    absSum += term.abs();
     weightedSum += (k + 2) * term.abs();
     // Past k = −Re s the denominators only grow. Before that a small term
     // can precede a large one: for s near −n, the k = n term has the
@@ -604,7 +718,7 @@ function upperGammaKummerComplex(
     scale:
       g.abs() * gammaErrorWeight(s) +
       powExpAbs(z, s, z.neg(), weightedSum) +
-      powExpAbs(z, s, z.neg(), absSum) * (s.abs() * z.log().abs() + az),
+      powExpAbs(z, s, z.neg(), sum.abs()) * (s.abs() * z.log().abs() + az),
   };
 }
 
@@ -650,9 +764,12 @@ function upperGammaAsymptoticComplex(s: Complex, z: Complex): Complex {
 
 /** Upper incomplete gamma Γ(s, z), complex, Legendre continued fraction
  *  (modified Lentz). The fraction converges in the plane cut along the
- *  negative real axis, for every s. Returns NaN when it has not converged
- *  after 2000 steps. */
-function upperGammaCFComplex(s: Complex, z: Complex): Complex {
+ *  negative real axis, for every s. The value is NaN when it has not
+ *  converged after 2000 steps; `steps` is the number of steps it took. */
+function upperGammaCFComplex(
+  s: Complex,
+  z: Complex
+): { value: Complex; steps: number } {
   const tiny = new Complex(1e-300, 0);
   let b = z.add(1).sub(s); // z + 1 − s
   let c = C_ONE.div(tiny);
@@ -672,10 +789,13 @@ function upperGammaCFComplex(s: Complex, z: Complex): Complex {
     // overflows: the value is then not representable.
     if (del.sub(C_ONE).abs() < 1e-16) {
       const v = powExpMul(z, s, z.neg(), h);
-      return Number.isFinite(v.re) && Number.isFinite(v.im) ? v : C_NAN;
+      return {
+        value: Number.isFinite(v.re) && Number.isFinite(v.im) ? v : C_NAN,
+        steps: i,
+      };
     }
   }
-  return C_NAN;
+  return { value: C_NAN, steps: 2000 };
 }
 
 /** A series result is used without a fallback when its estimated relative
@@ -695,6 +815,20 @@ const SERIES_ERROR_LIMIT = 3e-13;
  *  digits. */
 const SERIES_DECLINE_LIMIT = 1e-12;
 
+/** The continued fraction has no error estimate of its own. Where it
+ *  converges in at most this many steps, the kernel states the estimate
+ *  2ε·(2·steps + |s|·|log z| + |z| + 8) for it: a few roundings per step,
+ *  and the rounding of the exponential z^s·e^{−z}, whose argument has a
+ *  rounding error of about ε·(|s·log z| + |z|). Measured against mpmath on
+ *  6000 points where the fraction answers (4000 of them with |z| + Re z
+ *  from 3 to 40, just outside the band where the direct series is used),
+ *  the actual error was at most 0.49 times this estimate when it took at
+ *  most 80 steps. A fraction that takes more steps converges slowly, and
+ *  there its error reached 1.4 times the estimate (s = 11.5 + 9.96i,
+ *  z = −17.2 + 12.6i, 103 steps): the kernel states its worst-case bound
+ *  instead. */
+const CF_ESTIMATE_MAX_STEPS = 80;
+
 /** Estimated relative rounding error of a series result: ε·scale/|value|,
  *  plus 8ε for the rounding of the final subtraction and of the result. */
 function seriesError(r: { value: Complex; scale: number }): number {
@@ -707,15 +841,6 @@ function seriesError(r: { value: Complex; scale: number }): number {
  *  at |s| ≈ 11 and 1e−12 at |s| ≈ 155. */
 function limitForOrder(limit: number, s: Complex): number {
   return Math.max(limit, 2 * Number.EPSILON * gammaErrorWeight(s));
-}
-
-function seriesIfAccurate(
-  r: { value: Complex; scale: number },
-  s: Complex
-): Complex {
-  return seriesError(r) <= limitForOrder(SERIES_ERROR_LIMIT, s)
-    ? r.value
-    : C_NAN;
 }
 
 /**
@@ -738,18 +863,20 @@ function seriesIfAccurate(
  *      that includes the disk |z| ≤ 1.5. For |z| > 700 the terms would
  *      overflow, and the asymptotic series is used instead (it declines
  *      when its error cannot be made small; see
- *      `upperGammaAsymptoticComplex`). When the estimate is too large (s
- *      close to a non-positive integer, where Γ(s) and one term of the
- *      series are both large and cancel), the kernel tries the Kummer form
+ *      `upperGammaAsymptoticComplex`). Within 0.5 of a pole of Γ(s) at
+ *      s = −n, Γ(s) and the k = n term of the series cancel, and the series
+ *      takes them together as one expression in s + n (`nearPoleBracket`).
+ *      When the estimate is too large, the kernel tries the Kummer form
  *      with the same check if |Im s| > 10, or else the continued fraction
  *      (not on the cut, where it does not converge, and not for |z| < 0.1).
  *      Last, it accepts the direct series if its estimated error is at most
  *      1e−12 relative to the value (or to the derivative, next to a zero of
- *      Γ(s, ·)), and otherwise declines. Next to a pole the decline depends
- *      on z as well as on the distance to the pole: on 3000 points with s
- *      within 1e−9 to 1e−2 of −n (n = 0 … 8) and z in this band, the kernel
- *      answered 2328 (from 60% at a distance of 1e−9 to 98% at 1e−3), all
- *      with an error of at most 4.5e−13.
+ *      Γ(s, ·)), and otherwise declines. Next to a pole the kernel answers:
+ *      on 3000 points with s within 1e−9 to 1e−2 of −n (n = 0 … 8, real and
+ *      complex offsets) and z in this band (both lips of the cut included)
+ *      it answered all of them with an error of at most 4.5e−14, and on
+ *      3000 more with s within 1e−9 to 0.6 of −n (n = 0 … 60), all of them
+ *      with an error of at most 6.2e−14.
  *   2. |Im s| > 10, |z| < 3|s|, and either Re z < 0 or (Re s < 0 and
  *      |z| < |s| + 1): the continued fraction loses up to all its digits
  *      here, although it converges (at s = −0.41 − 23.9i, z = 0.088 − 4.0i
@@ -770,19 +897,63 @@ function seriesIfAccurate(
  *     direction (including both lips of the negative real axis): no decline,
  *     and a relative error below 5e−14 (below 3e−14 for |z| > 5);
  *   - on 2500 random points with |Re s| ≤ 30, |Im s| ≤ 30 and
- *     0.01 ≤ |z| ≤ 600: 87 declines (86 in region 2), and an error below
- *     1.7e−13 wherever the kernel answers;
- *   - on 1400 points with |Im s| from 3 to 30 and |Re z| ≤ 4 (both
- *     half-planes): 55 declines, error below 3.7e−13;
- *   - on 433 points with |s| up to 700 and |z| up to 800, and 344 points
- *     with 700 ≤ |z| ≤ 1200 near the negative real axis: error below
- *     1.2e−12, which is the accuracy of Γ(s) at |s| ≈ 700.
- * On all of these, the error was at most 0.66 times the bound that
- * `incompleteGammaUpperComplexErrorBound` states.
+ *     0.01 ≤ |z| ≤ 600: 68 declines, and an error below
+ *     1.9e−13 wherever the kernel answers;
+ *   - on 1400 points with |Im s| from 3 to 30, |Re z| ≤ 4 and |Im z| ≤ 40:
+ *     203 declines, error below 1.8e−13;
+ *   - on 800 points, half with |Re s| ≤ 150, |Im s| ≤ 700 and |z| up to 800,
+ *     half with 700 ≤ |z| ≤ 1200 near the negative real axis: 54 declines,
+ *     error below 7.3e−13, which is the accuracy of Γ(s) at |s| ≈ 700;
+ *   - on 4000 points where the continued fraction is used (|z| + Re z from
+ *     3 to 40, and random): no decline, error below 1.8e−13.
+ * On all of these, the error was at most 0.37 times the bound that
+ * `incompleteGammaUpperComplexErrorBound` states, and at most 1.11 times
+ * the estimate of `incompleteGammaUpperComplexWithError`.
  */
 export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
-  if (s.isNaN() || z.isNaN()) return C_NAN;
-  if (z.isZero()) return gamma(s);
+  return incompleteGammaUpperComplexWithError(s, z).value;
+}
+
+/**
+ * `incompleteGammaUpperComplex(s, z)` with an estimate of the relative error
+ * of that value at this point (NaN when the value is NaN). A caller that
+ * multiplies the value by a large factor, or subtracts it from a value of
+ * about the same size, can use it to decide whether the result is accurate
+ * enough; the worst-case bound `incompleteGammaUpperComplexErrorBound` is
+ * often a hundred times larger. The estimate is:
+ *   - for a series result, the rounding-error estimate of the series
+ *     (`seriesError`);
+ *   - for a continued fraction that converged in at most
+ *     `CF_ESTIMATE_MAX_STEPS` steps, 2ε·(2·steps + |s|·|log z| + |z| + 8),
+ *     capped at the bound (see `CF_ESTIMATE_MAX_STEPS`);
+ *   - otherwise (a slower continued fraction, the asymptotic series, the
+ *     continued fraction used next to a pole of Γ(s) in region 1, z = 0),
+ *     the bound.
+ *
+ * Measured against mpmath (`gammainc`, 45 or 60 digits) on 17400 points
+ * where the kernel answers (random s and z with |Re s|, |Im s| ≤ 30 and
+ * 0.01 ≤ |z| ≤ 600; s near the poles 0, −1, …, −60 with z in the band
+ * |z| + Re z ≤ 3; |Im s| from 3 to 30 with |Re z| ≤ 4; |s| up to 700; and
+ * points where the continued fraction is used), the actual error was at most
+ * 1.11 times this estimate (at s = 21.6 + 512i, z = 0.79 − 0.079i, where
+ * the error of Γ(s) dominates), and at most 0.95 times it for |Im s| ≤ 10.
+ * A caller should multiply it by a margin of at least 1.5.
+ */
+export function incompleteGammaUpperComplexWithError(
+  s: Complex,
+  z: Complex
+): { value: Complex; error: number } {
+  const bound = (value: Complex) => ({
+    value,
+    error: value.isNaN() ? NaN : incompleteGammaUpperComplexErrorBound(s, z),
+  });
+  const series = (r: { value: Complex; scale: number }) => ({
+    value: r.value,
+    error: r.value.isNaN() ? NaN : seriesError(r),
+  });
+  const declined = { value: C_NAN, error: NaN };
+  if (s.isNaN() || z.isNaN()) return declined;
+  if (z.isZero()) return bound(gamma(s));
 
   const az = z.abs();
   const sAbs = s.abs();
@@ -791,23 +962,24 @@ export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
 
   // Region 1: near the negative real axis, or small |z|.
   if (az + z.re <= 3) {
-    if (az > 700) return upperGammaAsymptoticComplex(s, z);
+    if (az > 700) return bound(upperGammaAsymptoticComplex(s, z));
     const direct = upperGammaDirectSeriesComplex(s, z);
     if (seriesError(direct) <= limitForOrder(SERIES_ERROR_LIMIT, s))
-      return direct.value;
+      return series(direct);
     const onCut = z.im === 0 && z.re < 0;
     if (Math.abs(s.im) > 10) {
       // The continued fraction loses up to all its digits here, as in
       // region 2.
-      const kummer = seriesIfAccurate(upperGammaKummerComplex(s, z), s);
-      if (!kummer.isNaN()) return kummer;
+      const kummer = upperGammaKummerComplex(s, z);
+      if (seriesError(kummer) <= limitForOrder(SERIES_ERROR_LIMIT, s))
+        return series(kummer);
     } else if ((cfApplies || sAbs < 1) && !onCut && az >= 0.1) {
       // Not for |z| < 0.1: next to a pole of Γ(s) the fraction then has
       // errors up to 3.5e−12 (s = −4 + 2e−8, z = 0.032 + 0.0006i), while for
       // 0.1 ≤ |z| its error stayed below 4e−13 on 1500 points with s within
       // 1e−2 of a pole. The fraction has no error estimate of its own.
-      const cf = upperGammaCFComplex(s, z);
-      if (!cf.isNaN()) return cf;
+      const cf = upperGammaCFComplex(s, z).value;
+      if (!cf.isNaN()) return bound(cf);
     }
     // Near a zero of Γ(s, ·) no method has a small relative error, so the
     // decline test measures the absolute error against |z^{s−1}e^{−z}|, the
@@ -817,14 +989,13 @@ export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
     // passing a large relative error for a small |z| next to a pole of Γ(s)
     // (at s = −2 + 3e−8, z = 0.0044 − 0.0096i the derivative is 250 times
     // the value, and the error estimate 1e−10 would have passed without it).
-    // When s is close to a non-positive integer the error scales with |Γ(s)|
-    // instead, and fails.
+    // The estimate returned with the value stays relative to the value.
     const slope = powExpAbs(z, s.sub(1), z.neg(), Math.min(az, 1));
     return Number.EPSILON * direct.scale <=
       limitForOrder(SERIES_DECLINE_LIMIT, s) *
         Math.max(direct.value.abs(), slope)
-      ? direct.value
-      : C_NAN;
+      ? series(direct)
+      : declined;
   }
 
   // Region 2: large imaginary part of s, |z| < 3|s|, and either Re z < 0
@@ -834,50 +1005,62 @@ export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
     az < 3 * sAbs &&
     (z.re < 0 || (s.re < 0 && az < sAbs + 1))
   ) {
-    const direct = seriesIfAccurate(upperGammaDirectSeriesComplex(s, z), s);
-    if (!direct.isNaN()) return direct;
-    return seriesIfAccurate(upperGammaKummerComplex(s, z), s);
+    const direct = upperGammaDirectSeriesComplex(s, z);
+    if (seriesError(direct) <= limitForOrder(SERIES_ERROR_LIMIT, s))
+      return series(direct);
+    const kummer = upperGammaKummerComplex(s, z);
+    return seriesError(kummer) <= limitForOrder(SERIES_ERROR_LIMIT, s)
+      ? series(kummer)
+      : declined;
   }
 
   // Region 3.
-  if (cfApplies) return upperGammaCFComplex(s, z);
+  if (cfApplies) {
+    const cf = upperGammaCFComplex(s, z);
+    if (cf.value.isNaN() || cf.steps > CF_ESTIMATE_MAX_STEPS)
+      return bound(cf.value);
+    return {
+      value: cf.value,
+      error: Math.min(
+        incompleteGammaUpperComplexErrorBound(s, z),
+        2 *
+          Number.EPSILON *
+          (2 * cf.steps + s.abs() * z.log().abs() + z.abs() + 8)
+      ),
+    };
+  }
 
   // Region 4.
-  return upperGammaKummerComplex(s, z).value;
+  return series(upperGammaKummerComplex(s, z));
 }
 
 /**
  * A bound on the relative error of a value that
  * `incompleteGammaUpperComplex(s, z)` returns (it does not apply to a NaN,
  * which means that the kernel declined). Away from a zero of Γ(s, ·) (where
- * no method has a small relative error) the bound is:
- *   - 3e−13, raised to twice the error bound of Γ(s) (`limitForOrder`)
- *     when that is larger: 4.3e−13 at |s| = 13, 5.2e−13 at |s| = 20 and
- *     2.9e−12 at |s| = 700;
- *   - where |z| + Re z ≤ 3 and s is next to a pole of Γ(s) at
- *     s = −n (n = 0, 1, 2, …), 4e−15/|s + n|, capped at the decline limit
- *     1e−12 (raised in the same way for a large |s|). There the direct
- *     series cancels and the kernel answers up to that limit.
- * Measured against mpmath's `gammainc` (40 and 60 digits): on 3000 points
- * next to the poles (n from 0 to 8, |s + n| from 1e−9 to 1e−2, z in that
- * band) the error was at most 4.5e−13 and the error times |s + n| at most
- * 9e−16; on all the sweeps (14800 answered points with |Re s| ≤ 150,
- * |Im s| ≤ 700 and 0.01 ≤ |z| ≤ 1200) the error was at most 0.66 times
- * this bound.
+ * no method has a small relative error) the bound is 3e−13, raised to twice
+ * the error bound of Γ(s) (`limitForOrder`) when that is larger: 4.3e−13 at
+ * |s| = 13, 5.2e−13 at |s| = 20 and 2.9e−12 at |s| = 700. In the band
+ * |z| + Re z ≤ 3 it is 1e−12 (raised the same way), because there the direct
+ * series is the last resort of region 1 and is accepted with an estimated
+ * error up to `SERIES_DECLINE_LIMIT`. Next to a pole of Γ(s) the direct
+ * series takes Γ(s) and the term that cancels it together
+ * (`nearPoleBracket`), so the error does not grow there as the distance to
+ * the pole shrinks.
+ * Measured against mpmath's `gammainc` (45 and 60 digits): on 6000 points
+ * within 1e−9 to 0.6 of a pole at s = −n (n from 0 to 60, z in the band
+ * |z| + Re z ≤ 3) the error was at most 6.2e−14, 0.12 times this bound; on
+ * all the sweeps (17400 answered points with |Re s| ≤ 150, |Im s| ≤ 700 and
+ * 0.01 ≤ |z| ≤ 1200) it was at most 0.37 times this bound.
+ * `incompleteGammaUpperComplexWithError` gives an estimate for one point,
+ * which is usually much smaller.
  */
 export function incompleteGammaUpperComplexErrorBound(
   s: Complex,
   z: Complex
 ): number {
-  const base = limitForOrder(3e-13, s);
-  if (z.abs() + z.re > 3) return base;
-  const n = Math.min(0, Math.round(s.re));
-  const distance = Math.hypot(s.re - n, s.im);
-  if (distance === 0) return base;
-  return Math.max(
-    base,
-    Math.min(limitForOrder(SERIES_DECLINE_LIMIT, s), 4e-15 / distance)
-  );
+  if (z.abs() + z.re <= 3) return limitForOrder(SERIES_DECLINE_LIMIT, s);
+  return limitForOrder(3e-13, s);
 }
 
 //
@@ -1014,10 +1197,30 @@ export function coshIntegralComplex(z: Complex): Complex {
 // ---------------- Hurwitz / Riemann / generalized zeta (complex) --------
 //
 // Ported from enumeratio's hurwitz-zeta.ts (WTFPL; ported here under MIT).
-// Euler-Maclaurin (DLMF 25.11.9) directly at Re(s) >= 0 or a far past its
-// edge. Elsewhere a naive EM cancels heavily, so a is shifted to within 3/4
-// of 1 and ζ(s, 1+h) expanded as Σ C(-s,k) hᵏ ζ(s+k), each ζ(s+k) reflected
-// to Re >= 0 — nothing cancels.
+// Euler-Maclaurin (DLMF 25.11.9) directly at Re(s) >= 1/2 or a far past its
+// edge. Elsewhere a naive EM cancels heavily: its direct terms (a + k)^(−s)
+// grow with k when Re(s) < 0, and they cancel to a small value next to
+// s = 0. So `hurwitzZetaComplex` chooses, for Re(s) < 1/2:
+// - a real a and s next to a non-positive integer −n: the exact
+//   −Bₙ₊₁(a)/(n+1) plus the difference to it (`hurwitzNearIntegerOrder`);
+// - an a next to an integer at a small |s|: a shift of a by an integer and
+//   the Taylor series ζ(s, 1+h) = Σ C(−s,k) hᵏ ζ(s+k), each ζ(s+k)
+//   reflected to Re >= 0 (`taylorPreferred`);
+// - an a far from the origin, right of the imaginary axis: Euler-Maclaurin;
+// - otherwise a shift to a base point with real part in (0, 1] and
+//   Hermite's integral (`hermiteZetaComplex`).
+// Measured against mpmath, with the error divided by the error that a
+// one-ulp change of s and a causes (the condition of the value): over 4900
+// real a from 0.01 to 60 with Re(s) from −210 to 0 (negative integers,
+// half-integers and points within 1e−9 … 1e−2 of them included), 1500
+// complex a with Re(a) > 0, 1500 with Re(a) ≤ 0, and 1500 points with
+// |s| from 1e−12 to 0.5, the ratio is at most 23, and every value is
+// within 2.4e−12 relative (the larger errors are where the condition number
+// is large). Between Re(s) = −265 and −210 (300 more points; below about
+// −270 every value with a up to 60 is outside the range of a double) the
+// worst relative error is 1.5e−13. The previous dispatch (Taylor series near the real axis,
+// Euler-Maclaurin elsewhere) reached a ratio of 1.1e8 on the same real a
+// points, and a relative error of 7.5e24 at a complex a.
 
 /** cₖ = B₂ₖ/(2k)!, k = 1..EM_PAIRS — the Euler-Maclaurin tail coefficients. */
 const EM_PAIRS = 12;
@@ -1042,8 +1245,18 @@ function emEdge(s: Complex): number {
  * tail's integral, half-term, and Bernoulli correction series. Drops the
  * (a+k) = 0 term (Wolfram's `HurwitzZeta` convention) rather than diverging
  * there — callers decide whether that term was actually a pole.
+ *
+ * `sMinusOne` is s − 1. The tail's integral term z^(1−s)/(s − 1) is the
+ * pole at s = 1, so its relative error is the relative error of s − 1. A
+ * caller that computed s itself as a rounded sum (s = 1 − σ for a small σ,
+ * for example) knows s − 1 more accurately than `s.sub(1)` can recover it,
+ * and passes it here.
  */
-function hurwitzEMComplex(s: Complex, a: Complex): Complex {
+function hurwitzEMComplex(
+  s: Complex,
+  a: Complex,
+  sMinusOne: Complex = s.sub(1)
+): Complex {
   const n = Math.max(8, Math.ceil(emEdge(s) - a.re));
   const negS = s.neg();
   let sum = C_ZERO;
@@ -1054,7 +1267,7 @@ function hurwitzEMComplex(s: Complex, a: Complex): Complex {
   }
   const z = new Complex(a.re + n, a.im);
   const zNegS = z.pow(negS);
-  sum = sum.add(z.pow(C_ONE.sub(s)).div(s.sub(1))).add(zNegS.mul(0.5));
+  sum = sum.add(z.pow(sMinusOne.neg()).div(sMinusOne)).add(zNegS.mul(0.5));
 
   // Σ_{k≥1} cₖ·(s)_{2k-1}·z^{-(s+2k-1)}, rolling the Pochhammer and z-power.
   let zPow = zNegS.div(z);
@@ -1069,15 +1282,22 @@ function hurwitzEMComplex(s: Complex, a: Complex): Complex {
   return sum;
 }
 
-/** ζ(s): reflection left of Re(s) = 0, EM across the strip, the bare series far right. */
-function riemannZetaComplex(s: Complex): Complex {
+/**
+ * ζ(s): reflection left of Re(s) = 0, EM across the strip, the bare series
+ * far right. `sMinusOne` is s − 1, passed by a caller that knows it more
+ * accurately than `s.sub(1)` (see `hurwitzEMComplex`).
+ */
+function riemannZetaComplex(
+  s: Complex,
+  sMinusOne: Complex = s.sub(1)
+): Complex {
   // Trivial zero, exact: the reflection formula's sin(πs/2) factor is only
   // zero up to rounding, which callers relying on an exact 0 (e.g. the
   // polylog Crandall expansion's break condition) cannot use.
   if (s.im === 0 && s.re < 0 && Number.isInteger(s.re) && s.re % 2 === 0)
     return C_ZERO;
   if (s.re < 0) return reflectedZetaComplex(s);
-  if (s.re < 16) return hurwitzEMComplex(s, C_ONE);
+  if (s.re < 16) return hurwitzEMComplex(s, C_ONE, sMinusOne);
   const n = Math.ceil(10 ** (17 / s.re));
   let z = C_ONE;
   for (let k = 2; k <= n; k++) z = z.add(new Complex(k, 0).pow(s.neg()));
@@ -1088,25 +1308,51 @@ function riemannZetaComplex(s: Complex): Complex {
  * ζ(s) = 2ˢ π^(s-1) sin(πs/2) Γ(1-s) ζ(1-s), Re(s) < 0. Every factor but
  * ζ(1-s) is taken as a log and summed, so a huge Γ and sin never meet
  * outside exp.
+ *
+ * Two factors are small near a point where the result needs full relative
+ * accuracy, and each gets an exact reduction:
+ * - ζ(1 − s) is near its pole when s is near 0. The rounded 1 − s carries
+ *   an absolute error of up to 1.1e−16, which is a relative error of
+ *   1.1e−16/|s| in the pole term (8e−8 at s = −1e−9). The distance to the
+ *   pole, (1 − s) − 1 = −s, is exact, and is passed to the Euler-Maclaurin
+ *   sum.
+ * - sin(πs/2) is near 0 when s is near an even integer. s/2 is exact, and
+ *   s/2 − n for the nearest integer n is exact too, so the argument of the
+ *   sine is reduced before it is multiplied by π; sin(π(t + n)) =
+ *   (−1)ⁿ sin(πt) adds iπ to the log for an odd n.
  */
 function reflectedZetaComplex(s: Complex): Complex {
   const r = new Complex(1 - s.re, -s.im);
+  const half = s.re / 2;
+  const n = Math.round(half);
   const log = s
     .mul(Math.LN2)
     .add(new Complex(s.re - 1, s.im).mul(Math.log(Math.PI)))
     .add(gammaln(r))
-    .add(logSinComplex(s.mul(Math.PI / 2)));
-  return log.exp().mul(hurwitzEMComplex(r, C_ONE));
+    .add(logSinComplex(new Complex((half - n) * Math.PI, (s.im * Math.PI) / 2)))
+    .add(new Complex(0, n % 2 === 0 ? 0 : Math.PI));
+  return log.exp().mul(hurwitzEMComplex(r, C_ONE, s.neg()));
 }
 
-/** ln sin(w), up to 2πi; stays finite for any |Im w| via e^(2iw) (|·| <= 1 above the axis). */
+/**
+ * ln sin(w), up to 2πi; stays finite for any |Im w| via e^(2iw) (|·| <= 1
+ * above the axis). 1 − e^(2iw) is computed as −expm1(2iw), with the real
+ * part of expm1(x + iy) written as expm1(x)·cos y − 2 sin²(y/2), so it
+ * keeps its relative accuracy when w is near 0 (a plain 1 − e^(2iw) loses
+ * about 1e−16/|w| there).
+ */
 function logSinComplex(w: Complex): Complex {
   if (w.im < 0) {
     const c = logSinComplex(new Complex(w.re, -w.im));
     return new Complex(c.re, -c.im);
   }
-  const u = new Complex(-2 * w.im, 2 * w.re).exp();
-  const l = new Complex(1 - u.re, -u.im).log();
+  const x = -2 * w.im;
+  const y = 2 * w.re;
+  const sinHalfY = Math.sin(w.re);
+  const l = new Complex(
+    2 * sinHalfY * sinHalfY - Math.expm1(x) * Math.cos(y),
+    -Math.exp(x) * Math.sin(y)
+  ).log();
   return new Complex(w.im + l.re - Math.LN2, -w.re + l.im + Math.PI / 2);
 }
 
@@ -1121,14 +1367,22 @@ function zetaNearOneComplex(s: Complex, h: Complex): Complex {
   for (let k = 1; k < cap; k++) {
     hk = hk.mul(h);
     if (hk.re === 0 && hk.im === 0) break;
-    const f = new Complex(-s.re - k + 1, -s.im);
+    // f = 1 − k − s, and s + k − 1 = −f, is the small distance from s + k
+    // to the pole of ζ when s is near 1 − k. Written as (1 − k) − s.re, the
+    // difference is exact there (the two are within a factor of 2, or 1 − k
+    // is 0). For k = 1 and s near 0, −s.re − k + 1 rounded −s.re − 1 first
+    // and kept only an absolute accuracy of 1e−16 in that distance. The
+    // exact distance is also passed to ζ(s + k), whose pole term needs it.
+    const f = new Complex(1 - k - s.re, -s.im);
     if (f.re === 0 && f.im === 0) {
       // s = 1-k, an integer: C(-s,k) -> 0 as ζ(s+k) -> ∞, product -> -C(-s,k-1)/k.
       // Every later term is 0 too (a Bernoulli polynomial) — the series ends here.
       return sum.add(c.mul(hk).mul(-1 / k));
     }
     c = c.mul(f).mul(1 / k);
-    const t = c.mul(hk).mul(riemannZetaComplex(new Complex(s.re + k, s.im)));
+    const t = c
+      .mul(hk)
+      .mul(riemannZetaComplex(new Complex(s.re + k, s.im), f.neg()));
     sum = sum.add(t);
     const size = t.abs();
     largest = Math.max(largest, size);
@@ -1142,8 +1396,239 @@ function zetaNearOneComplex(s: Complex, h: Complex): Complex {
 
 /** Past this many times `emEdge`, EM's own tail already costs no cancellation. */
 const EM_BEYOND = 4;
-/** How far from 1 (once shifted by an integer) a may sit for the Taylor series. */
-const TAYLOR_RADIUS = 0.75;
+/**
+ * For Re(s) < 1/2, Re(a) > 0 and |a| ≥ `EM_FAR`·(|s| + 1), the
+ * Euler-Maclaurin sum does not cancel (measured worst 2.3e−14 relative
+ * against mpmath; at 2·(|s| + 1) it is 6e−13, and closer to the origin it
+ * is wrong). For Re(a) ≤ 0 it is not used: there it reached 5.8e−10
+ * relative (at s = −2.2 + 4.9i, a = −28.7 − 1.1i) where Hermite's integral
+ * is within a few ulp.
+ */
+const EM_FAR = 4;
+/**
+ * Below this Re(s), the Euler-Maclaurin sum is replaced (see
+ * `hurwitzZetaComplex`): for 0 ≤ Re(s) < 1/2 its terms cancel to a value
+ * that is small next to s = 0 (ζ(0, a) = 1/2 − a came out as
+ * 0.1999999999999993 at a = 0.3). Measured against mpmath (1500 points,
+ * Re(s) from 0 to 1.5, real and complex a): below 1/2 the other routes
+ * reduce the worst error, relative to the condition of the value, from 150
+ * to 8.6 for a real a and from 690 to 82 for a complex a; from 1/2 on the
+ * Euler-Maclaurin sum is as accurate.
+ */
+const HERMITE_MAX_RE_S = 0.5;
+/**
+ * Whether the Taylor series in h = a − m − 1 (m the integer nearest to
+ * a − 1/2) is more accurate than Hermite's integral, for Re(s) < 0. Hermite's
+ * integral runs at the base point b = a − ⌈a⌉ + 1 in (0, 1], and it loses
+ * digits only when b is next to 1 at a small |s| (see `hermiteZetaComplex`),
+ * that is for a just below an integer (h < 0). So, measured against mpmath
+ * (the error relative to what a one-ulp change of the operands causes,
+ * over about 5000 real a from 0.01 to 60 and Re(s) from −210 to 0):
+ * - a real a just below or at an integer, −0.2 < h ≤ 0, with Re(s) > −12:
+ *   Taylor
+ *   (for 0.1 ≤ −h < 0.2 and Re(s) > −12, Taylor's worst is 23 times that
+ *   error and Hermite's 40; for −h < 0.03, 4.8 and 64);
+ * - a real a just above an integer, 0 ≤ h < 0.03, with Re(s) > −5: Taylor
+ *   (6.5 against 67); for a larger h Hermite is better (for 0.03 ≤ h < 0.1
+ *   and Re(s) > −12, 77 against 7.1);
+ * - a complex a with |h| < 0.1 and Re(s) > −12: Taylor (worst 12 times over
+ *   1500 complex a with Re(a) > 0 and 1500 with Re(a) ≤ 0, against 56 and
+ *   160 with the real a rule).
+ */
+function taylorPreferred(sRe: number, h: Complex): boolean {
+  if (h.im !== 0) return sRe > -12 && h.abs() < 0.1;
+  // h = 0 (an integer a) goes with h < 0: Hermite's base point is then 1.
+  if (h.re <= 0) return sRe > -12 && h.re > -0.2;
+  return sRe > -5 && h.re < 0.03;
+}
+/**
+ * For a real a, an s within `DELTA_RADIUS` of −n uses
+ * `hurwitzNearIntegerOrder`, for n up to `DELTA_MAX_ORDER`: the range
+ * measured against mpmath (the exact Bernoulli value costs about 50 µs at
+ * n = 210). Below Re(s) ≈ −270, ζ(s, a) is outside the range of a double
+ * for every a up to 60 (its part ζ(s, b), b in (0, 1], is about
+ * Γ(1 − s)/(2π)^(1−s)).
+ */
+const DELTA_RADIUS = 0.25;
+const DELTA_MAX_ORDER = 265;
+
+/** The nodes `x` and weights `w` of the n-point Gauss-Legendre rule on
+ * [−1, 1], by Newton's method on the Legendre polynomial Pₙ. */
+export function gaussLegendreRule(n: number): { x: number[]; w: number[] } {
+  const x: number[] = [];
+  const w: number[] = [];
+  for (let i = 1; i <= n; i++) {
+    let t = Math.cos((Math.PI * (i - 0.25)) / (n + 0.5));
+    let dp = 0;
+    for (let iter = 0; iter < 100; iter++) {
+      let p0 = 1;
+      let p1 = t;
+      for (let k = 2; k <= n; k++) {
+        const p2 = ((2 * k - 1) * t * p1 - (k - 1) * p0) / k;
+        p0 = p1;
+        p1 = p2;
+      }
+      dp = (n * (t * p1 - p0)) / (t * t - 1);
+      const step = p1 / dp;
+      t -= step;
+      if (Math.abs(step) < 1e-16) break;
+    }
+    x.push(t);
+    w.push(2 / ((1 - t * t) * dp * dp));
+  }
+  return { x, w };
+}
+
+const GAUSS_16 = gaussLegendreRule(16);
+
+/**
+ * ζ(s, a) for Re(a) > 0 and s ≠ 1 by Hermite's integral (DLMF 25.11.29,
+ * written with principal powers so that it also holds for a complex a):
+ *
+ *   ζ(s,a) = a^(−s)/2 + a^(1−s)/(s − 1)
+ *            + ∫₀^∞ ((a − it)^(−s) − (a + it)^(−s)) / (i·(e^{2πt} − 1)) dt.
+ *
+ * For a real a the integrand is 2·sin(s·arctan(t/a))/((a² + t²)^(s/2)
+ * (e^{2πt} − 1)). Unlike the Euler-Maclaurin sum at Re(s) < 0, whose direct
+ * terms (a + k)^(−s) grow with k and cancel, the integrand here has the
+ * size of the result when Re(a) is small (the caller shifts a so that
+ * Re(a) is in (0, 1]). A base point next to 1 at a small |s| is the one
+ * weak case: there a^(−s)/2 and a^(1−s)/(s − 1) are near ±1/2 while the
+ * value can be much smaller, so the caller uses the Taylor series there.
+ *
+ * With `n`, the result is instead ζ(s, a) − ζ(−n, a), the same formula
+ * with every power w^(−s) replaced by w^(−s) − wⁿ = wⁿ·expm1(−δ·ln w),
+ * δ = s + n, which keeps its relative accuracy when δ is small.
+ *
+ * The integral is summed with 16-point Gauss-Legendre panels. The integrand
+ * is singular at the branch points t = ±i·a, one of which is at distance
+ * Re(a) from the real axis, at t = |Im a|; and 1/(e^{2πt} − 1) has poles
+ * at t = ±i, ±2i, …. So the panels are at most 1 wide, and they halve in
+ * width toward t = 0 (down to min(|a|, 1)/2) and toward t = |Im a| (down to
+ * Re(a)/2), which keeps every panel's distance to a singularity at least
+ * its half-width. The sum stops past the peak of the envelope
+ * (|a| + t)^(−Re s)·e^{−2πt}, at t = −Re(s)/(2π) − |a|, when a panel's mean
+ * size is below 1e−17 of the largest one. Each power is formed together
+ * with the division by e^{2πt} − 1, as one exponential, so that a large
+ * −Re(s) does not overflow before the exponential decay applies.
+ */
+function hermiteZetaComplex(s: Complex, a: Complex, n?: number): Complex {
+  const negS = s.neg();
+  // With `n`, every power w^(−s) is replaced by its difference from w^n,
+  // w^n·expm1(−δ·ln w) with δ = s + n (see `hermiteDifference`).
+  const negDelta = n === undefined ? C_ZERO : new Complex(-(s.re + n), -s.im);
+  const power = (w: Complex, logE: Complex): Complex => {
+    const l = w.log();
+    if (n === undefined) return l.mul(negS).sub(logE).exp();
+    return l
+      .mul(n)
+      .sub(logE)
+      .exp()
+      .mul(expm1Complex(l.mul(negDelta)));
+  };
+  const integrand = (t: number): Complex => {
+    const logE = new Complex(Math.log(Math.expm1(2 * Math.PI * t)), 0);
+    const p = power(new Complex(a.re, a.im - t), logE);
+    const q = power(new Complex(a.re, a.im + t), logE);
+    // (p − q)/i
+    return new Complex(p.im - q.im, q.re - p.re);
+  };
+  const breaks: number[] = [];
+  const absA = a.abs();
+  for (let x = Math.min(absA, 1) / 2; x < 1; x *= 2) breaks.push(x);
+  const t0 = Math.abs(a.im);
+  if (t0 > 0) {
+    breaks.push(t0);
+    for (let x = a.re / 2; x < Math.max(1, t0); x *= 2) {
+      if (t0 - x > 0) breaks.push(t0 - x);
+      breaks.push(t0 + x);
+    }
+  }
+  breaks.sort((x, y) => x - y);
+  const tPeak = -s.re / (2 * Math.PI) - absA;
+  let sum = C_ZERO;
+  let largest = 0;
+  let lo = 0;
+  let next = 0;
+  // The envelope is below 1e−17 of its peak well within 60 past the peak,
+  // so the stop test below ends the loop first; the bound is a safety net.
+  while (lo < Math.max(0, tPeak) + 60) {
+    while (next < breaks.length && breaks[next] <= lo) next++;
+    const hi = next < breaks.length ? Math.min(breaks[next], lo + 1) : lo + 1;
+    const half = (hi - lo) / 2;
+    let panel = C_ZERO;
+    let size = 0;
+    for (let i = 0; i < GAUSS_16.x.length; i++) {
+      const v = integrand(lo + half * (1 + GAUSS_16.x[i])).mul(
+        half * GAUSS_16.w[i]
+      );
+      panel = panel.add(v);
+      size += v.abs();
+    }
+    sum = sum.add(panel);
+    // The value is past the range of a double: no later panel changes that.
+    if (!sum.isFinite()) break;
+    const mean = size / (hi - lo);
+    largest = Math.max(largest, mean);
+    lo = hi;
+    if (lo > tPeak && mean < 1e-17 * largest) break;
+  }
+  if (n === undefined) {
+    const aNegS = a.pow(negS);
+    return aNegS
+      .mul(0.5)
+      .add(aNegS.mul(a).div(s.sub(1)))
+      .add(sum);
+  }
+  // The closed terms' differences, with E = expm1(−δ·ln a):
+  //   a^(−s)/2 − aⁿ/2 = aⁿ·E/2,
+  //   a^(1−s)/(s−1) − a^(1+n)/(−n−1)
+  //     = a^(1+n)·((−n−1)·E − δ)/((s−1)·(−n−1)).
+  const logA = a.log();
+  const e = expm1Complex(logA.mul(negDelta));
+  const aN = logA.mul(n).exp();
+  const second = aN
+    .mul(a)
+    .mul(e.mul(-n - 1).add(negDelta))
+    .div(s.sub(1).mul(-n - 1));
+  return aN.mul(e).mul(0.5).add(second).add(sum);
+}
+
+/**
+ * Adds to `z` (ζ at the base point a − m) the terms passed over between a
+ * and a − m, by ζ(s,a) = ζ(s,a+1) + a^(−s): a^(−s) + … + (a−m−1)^(−s) for
+ * m < 0, and −(a−m)^(−s) − … − (a−1)^(−s) for m > 0. A term with a + k = 0
+ * is dropped (Wolfram's `HurwitzZeta` convention). With `n`, each term is
+ * the difference w^(−s) − wⁿ = wⁿ·expm1(−δ·ln w), δ = s + n, to go with a
+ * base value that is itself such a difference.
+ */
+function addPassedOverTerms(
+  z: Complex,
+  s: Complex,
+  a: Complex,
+  m: number,
+  n?: number
+): Complex {
+  const b = a.re - m; // the real part of the base point
+  const negS = s.neg();
+  const negDelta = n === undefined ? C_ZERO : new Complex(-(s.re + n), -s.im);
+  for (let j = 0; j < Math.abs(m); j++) {
+    const br = m > 0 ? b + j : a.re + j;
+    if (br === 0 && a.im === 0) continue;
+    const w = new Complex(br, a.im);
+    let t: Complex;
+    if (n === undefined) t = w.pow(negS);
+    else {
+      const l = w.log();
+      t = l
+        .mul(n)
+        .exp()
+        .mul(expm1Complex(l.mul(negDelta)));
+    }
+    z = m > 0 ? z.sub(t) : z.add(t);
+  }
+  return z;
+}
 
 /** Riemann zeta ζ(s) for complex s — `hurwitzZetaComplex(s, 1)`, direct (no shift needed at a = 1). */
 export function zetaComplex(s: Complex): Complex {
@@ -1157,23 +1642,87 @@ export function zetaComplex(s: Complex): Complex {
  * (drops the (a+k) = 0 term rather than diverging there). Callers decide
  * pole vs. finite for a non-positive integer a themselves — see
  * `library/arithmetic.ts`.
+ *
+ * `sMinusOne`, when given, is s − 1 known more accurately than `s.sub(1)`
+ * can recover it (for s = 1 − σ computed from a small σ, it is −σ); it is
+ * used for the pole term next to s = 1 (see `hurwitzEMComplex`).
  */
-export function hurwitzZetaComplex(s: Complex, a: Complex): Complex {
+export function hurwitzZetaComplex(
+  s: Complex,
+  a: Complex,
+  sMinusOne?: Complex
+): Complex {
   if (s.isNaN() || a.isNaN()) return C_NAN;
-  if (s.re === 1 && s.im === 0) return C_NAN; // pole; caller special-cases s = 1
-  if (s.re >= 0 || a.re >= EM_BEYOND * emEdge(s)) return hurwitzEMComplex(s, a);
-  const m = Math.floor(a.re - 0.5); // a - m has real part in [1/2, 3/2)
-  const h = new Complex(a.re - m - 1, a.im);
-  if (!(h.abs() <= TAYLOR_RADIUS)) return hurwitzEMComplex(s, a);
-  // ζ(s,a) = ζ(s,a+1) + a^(-s): walk a to 1+h, carrying the passed-over terms.
-  let z = zetaNearOneComplex(s, h);
-  for (let j = 0; j < Math.abs(m); j++) {
-    const br = m > 0 ? h.re + 1 + j : a.re + j;
-    if (br === 0 && a.im === 0) continue;
-    const t = new Complex(br, a.im).pow(s.neg());
-    z = m > 0 ? z.sub(t) : z.add(t);
+  // The pole; the caller special-cases s = 1.
+  if (sMinusOne ? sMinusOne.isZero() : s.re === 1 && s.im === 0) return C_NAN;
+  if (s.re >= HERMITE_MAX_RE_S || a.re >= EM_BEYOND * emEdge(s))
+    return hurwitzEMComplex(s, a, sMinusOne ?? s.sub(1));
+  // A real a and s next to a non-positive integer −n: the exact value at
+  // −n plus the difference (see `hurwitzNearIntegerOrder`). At n = 0 a
+  // non-positive integer a is left out: there the kernel drops the
+  // (a + k) = 0 term, which 1/2 − a counts as 0⁰ = 1.
+  if (a.im === 0) {
+    const n = -Math.round(s.re);
+    if (
+      n <= DELTA_MAX_ORDER &&
+      Math.hypot(s.re + n, s.im) <= DELTA_RADIUS &&
+      !(n === 0 && a.re <= 0 && Number.isInteger(a.re))
+    )
+      return hurwitzNearIntegerOrder(s, a, n);
   }
-  return z;
+  // Otherwise the base point is moved to a − m by an integer m, with
+  // ζ(s,a) = ζ(s,a+1) + a^(-s) carrying the passed-over terms (see
+  // `addPassedOverTerms`). Next to an integer a at a small |s|: the Taylor
+  // series in h = a − m − 1, which is small there.
+  const mTaylor = Math.floor(a.re - 0.5);
+  const h = new Complex(a.re - mTaylor - 1, a.im);
+  if (s.re < 0 && taylorPreferred(s.re, h))
+    return addPassedOverTerms(zetaNearOneComplex(s, h), s, a, mTaylor);
+  // Far from the origin, right of the imaginary axis: the Euler-Maclaurin
+  // sum, which does not cancel there.
+  if (a.re > 0 && a.abs() >= EM_FAR * (s.abs() + 1))
+    return hurwitzEMComplex(s, a);
+  // Elsewhere, Hermite's integral at a base point with real part in (0, 1].
+  const m = hermiteShift(a.re);
+  return addPassedOverTerms(
+    hermiteZetaComplex(s, new Complex(a.re - m, a.im)),
+    s,
+    a,
+    m
+  );
+}
+
+/**
+ * The integer m for which the real base point a − m is in (0, 1], or in
+ * (1, 2] when a − m would be below 1e−9 (to keep the panels near t = 0 few).
+ */
+function hermiteShift(a: number): number {
+  let m = Math.ceil(a) - 1;
+  if (a - m < 1e-9) m -= 1;
+  return m;
+}
+
+/**
+ * ζ(s, a) for a real a and s next to the non-positive integer −n:
+ * ζ(−n, a) = −Bₙ₊₁(a)/(n+1) exactly (`hurwitzZetaNegativeIntegerAt`), plus
+ * ζ(s, a) − ζ(−n, a) from Hermite's integral with every power replaced by
+ * its difference from the power at −n (`hermiteZetaComplex` with `n`). The
+ * difference keeps its relative accuracy, so the sum is accurate even
+ * where ζ(−n, a) is 0 or where the terms of a direct evaluation would
+ * cancel (ζ(−12, 3/2) = −2⁻¹² comes from ζ(−12, 1/2) = 0).
+ */
+function hurwitzNearIntegerOrder(s: Complex, a: Complex, n: number): Complex {
+  const exact = hurwitzZetaNegativeIntegerAt(n, a.re);
+  if (s.re === -n && s.im === 0) return new Complex(exact, 0);
+  const m = hermiteShift(a.re);
+  const difference = addPassedOverTerms(
+    hermiteZetaComplex(s, new Complex(a.re - m, 0), n),
+    s,
+    a,
+    m,
+    n
+  );
+  return difference.add(exact);
 }
 
 /**

@@ -276,7 +276,7 @@ describe('Which clauses that answer the same value', () => {
       '(((x < 1.0) || (x < 2.0) || (x < 3.0)) ? (0.5) : (_gpu_nan()))'
     );
     expect(wgsl(expr).code).toBe(
-      'select(bitcast<f32>(0x7fc00000u), 0.5, (x < 1.0) || (x < 2.0) || (x < 3.0))'
+      'select(_gpu_nan(), 0.5, (x < 1.0) || (x < 2.0) || (x < 3.0))'
     );
   });
 

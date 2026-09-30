@@ -124,12 +124,12 @@ describe('GPU Max/Min over a collection — REDUCES (was: returned a vector)', (
     // absent from `GPU_OPERATORS`. Two unrelated properties, coupled
     // implicitly; these are the witnesses that THROW (not merely differ) if
     // the parentheses are dropped, because the gate would then judge a bare
-    // `max(…)`/`bitcast<f32>(…)` call against operand shapes the emission no
+    // `max(…)`/`_gpu_nan()` call against operand shapes the emission no
     // longer contains:
     //   - a 5-element list is an `array` operand, and no builtin has an array
     //     overload;
     //   - on WGSL a `vec3f` mixed with a scalar has no `max` overload;
-    //   - the empty-collection NaN is a `bitcast<f32>(…)` CALL on WGSL.
+    //   - the empty-collection NaN is a `_gpu_nan()` CALL on WGSL.
     expect(() => g(['Max', ['List', 1, 2, 3, 4, 5]])).not.toThrow();
     expect(() => w(['Max', ['List', 1, 2, 3, 4, 5]])).not.toThrow();
     expect(() => w(['Max', ['List', 1, 2, 3], 5])).not.toThrow();
@@ -157,7 +157,7 @@ describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
     'emits the target NaN for %s',
     (_label, expr) => {
       expect(g(expr)).toBe('(_gpu_nan())');
-      expect(w(expr)).toBe('(bitcast<f32>(0x7fc00000u))');
+      expect(w(expr)).toBe('(_gpu_nan())');
     }
   );
 

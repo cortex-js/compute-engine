@@ -644,7 +644,7 @@ describe('WGSL COMPILATION', () => {
       const e = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
       const code = wgsl.compile(e).code;
       expect(code).toContain('select(');
-      expect(code).toContain('bitcast<f32>(0x7fc00000u)');
+      expect(code).toContain('_gpu_nan()');
       expect(/\bNaN\b/.test(code)).toBe(false);
     });
 
@@ -789,14 +789,14 @@ describe('WGSL When NaN branch matches the value shape (Tycho item 49)', () => {
       ])
     ).code;
     expect(code).toContain('vec2f(cos(t), sin(t))');
-    expect(code).toContain('vec2f(bitcast<f32>(0x7fc00000u))');
+    expect(code).toContain('vec2f(_gpu_nan())');
   });
 
   it('scalar bodies keep the scalar NaN bit pattern', () => {
     const code = wgsl.compile(
       ce.box(['When', ['Cos', 't'], ['LessEqual', 't', 1]])
     ).code;
-    expect(code).toContain('bitcast<f32>(0x7fc00000u)');
+    expect(code).toContain('_gpu_nan()');
     expect(code).not.toContain('vec2f(bitcast');
   });
 });

@@ -500,9 +500,7 @@ describe('WGSL sampler-backed At — the per-binding texel read', () => {
     expect(wgsl.compile(ce.box(['At', 'S', ['List', 1, 3]]), O).code).toBe(
       'vec2f(_gpu_texat_S_1600(1.0), _gpu_texat_S_1600(3.0))'
     );
-    expect(wgsl.compile(ce.box(['At', 'S', 0]), O).code).toBe(
-      'bitcast<f32>(0x7fc00000u)'
-    );
+    expect(wgsl.compile(ce.box(['At', 'S', 0]), O).code).toBe('_gpu_nan()');
   });
 
   test('a `vars` mapping that is not a plain identifier declines, naming the kind', () => {

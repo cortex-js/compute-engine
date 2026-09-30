@@ -183,6 +183,42 @@ describe('PolyLog past |z| = 1: the continuation, or the inversion formula where
   });
 });
 
+describe('PolyLog at a large |z| for an order above 2', () => {
+  // These points stayed unevaluated while the inversion formula was the
+  // only route: it needs ζ(1 − s, a) with |Im a| = ln|z|/(2π) > 0.55, which
+  // the Hurwitz zeta kernel did not compute accurately for a complex a.
+  ce.declare('pi_s', 'real');
+  ce.declare('pi_z', 'real');
+  const run = compile(ce.box(['PolyLog', 'pi_s', 'pi_z']))?.run;
+
+  test.each([
+    // mpmath: polylog(2.5, -1e6) = -220.36048147359768069
+    [2.5, -1e6, -220.36048147359768069],
+    // mpmath: polylog(4.5, -1e6) = -2946.0686419403702715
+    [4.5, -1e6, -2946.0686419403702715],
+    // mpmath: polylog(2.2, -50000) = -80.639275908333833447
+    [2.2, -50000, -80.639275908333833447],
+    // mpmath: polylog(5.5, -1e7) = -17640.592784737970857
+    [5.5, -1e7, -17640.592784737970857],
+  ])('Li_%p(%p), interpreted and compiled', (s, z, expected) => {
+    const v = li(s, z).N();
+    expect(v.im).toBe(0);
+    expect(Math.abs(v.re / expected - 1)).toBeLessThan(1e-12);
+    expect(
+      Math.abs((run?.({ pi_s: s, pi_z: z }) as number) / expected - 1)
+    ).toBeLessThan(1e-12);
+  });
+
+  test('a complex order at a large |z| matches mpmath', () => {
+    // mpmath: polylog(3.5+0.5j, -1e6) = -747.52940010291517685 - 558.60735316951430619j
+    const v = li(['Complex', 3.5, 0.5], -1e6).N();
+    expect(
+      Math.hypot(v.re + 747.52940010291517685, v.im + 558.60735316951430619) /
+        Math.hypot(747.52940010291517685, 558.60735316951430619)
+    ).toBeLessThan(1e-12);
+  });
+});
+
 describe('PolyLog of a negative integer order: the Eulerian closed form', () => {
   test('Li₋₂(1/2) is the exact 6', () => {
     // mpmath: polylog(-2,0.5) = 6.0
@@ -269,33 +305,53 @@ describe('PolyLog at z = 1 and z = −1 for the elementary orders', () => {
   });
 });
 
-describe('PolyLog declines rather than certify an unreliable widened value', () => {
-  test('a large negative order near, but not at, z = −1 (van Wijngaarden Euler transform) declines', () => {
-    // z = −1 exactly goes through the exact Dirichlet eta reduction below,
-    // not this numeric kernel — z = −0.99 does not. mpmath:
-    // polylog(-1.5,-0.99) = -0.119558829589013870122988613502, but the
-    // Euler transform's own accuracy there (see `seriesUnreliable`) is
-    // conservatively assumed unreliable past its linear bound.
-    expect(li(-1.5, -0.99).N().numericValue).toBeUndefined();
+describe('PolyLog next to the unit circle and next to z = 1', () => {
+  test('a negative order on the negative real axis inside the disk matches mpmath', () => {
+    // mpmath: polylog(-1.5,-0.99) = -0.119558829589013870902333243647
+    // This point stayed unevaluated while a guard declined every negative
+    // order close to the unit circle; the Lerch kernel now checks the
+    // rounding of its own sums.
+    const v = li(-1.5, -0.99).N();
+    expect(Math.abs(v.re / -0.11955882958901387 - 1)).toBeLessThan(1e-12);
+  });
+
+  test('a negative order next to the unit circle matches mpmath', () => {
+    // mpmath: polylog(-0.9,-0.9999) = -0.27647181621858134287
+    // The direct series needs about 1/(1 − |z|) terms that cancel here; it
+    // returned −0.27647181622385925 (1.9e−11 relative) before the kernel
+    // checked its rounding and took the continuation instead.
+    const v = li(-0.9, -0.9999).N();
+    expect(Math.abs(v.re / -0.27647181621858134 - 1)).toBeLessThan(1e-12);
   });
 
   test('a milder negative order at z = −1 answers exactly, via the Dirichlet eta reduction', () => {
     // z = −1 is an exact reduction for any order (see below), so this
-    // does not exercise `seriesUnreliable` at all.
+    // does not reach the numeric kernel at all.
     // mpmath: polylog(-0.9,-1) = -0.276474007004826964393747323089
     expect(li(-0.9, -1).N().re).toBeCloseTo(-0.276474007004826964, 12);
   });
 
-  test('close to the z = 1 branch point declines rather than trust the continuation there', () => {
-    // The Hermite-integral continuation's cancellation grows faster than
-    // its own `lost` guard catches within 1e−3 of the branch point (see
-    // `nearBranchPointUnreliable`); z = 1 itself is unaffected (the exact
-    // ζ(s) reduction above). The order 3.5 is far from an integer, so only
-    // that guard applies.
-    expect(li(3.5, 1.0001).N().numericValue).toBeUndefined();
+  test('close to the z = 1 branch point matches mpmath', () => {
+    // mpmath: polylog(3.5, 1.0001) = 1.12686802239611988470 - 9.4519056920011e-11j
+    // (z from the double 1.0001; a real z > 1 takes the side below the cut).
+    // The continuation raises log z to the power s − 1, so it needs log z
+    // accurate relative to its own size; the points within 1e−3 of z = 1
+    // stayed unevaluated before it was.
+    const v = li(3.5, 1.0001).N();
+    expect(
+      Math.hypot(v.re - 1.1268680223961199, v.im + 9.4519056920011e-11)
+    ).toBeLessThan(1e-12);
   });
 
-  test('just outside the branch-point guard the kernel answers', () => {
+  test('a complex z next to the branch point matches mpmath', () => {
+    // mpmath: polylog(2.5, 1+1e-6j) = 1.3414872555818667750 + 2.6107042644208e-6j
+    const v = li(2.5, ['Complex', 1, 1e-6]).N();
+    expect(
+      Math.hypot(v.re - 1.3414872555818668, v.im - 2.6107042644208e-6)
+    ).toBeLessThan(1e-12);
+  });
+
+  test('a real z just below the branch point matches mpmath', () => {
     // mpmath: polylog(2.5,0.999) = 1.3389476332802494862
     expect(li(2.5, 0.999).N().re).toBeCloseTo(1.3389476332802494862, 12);
   });
@@ -311,13 +367,16 @@ describe('PolyLog declines rather than certify an unreliable widened value', () 
     ).toBeLessThan(1e-12);
   });
 
-  test('an order next to a positive integer, with z on the cut, still declines', () => {
+  test('an order next to a positive integer, with z on the cut, is answered', () => {
     // mpmath: polylog(3.000001,2) = 2.7620716611878396 - 0.75469285643604317j
     // The continuation needs Γ(1 − s, −log 2) next to a pole of Γ(1 − s)
-    // with its argument on the negative real axis, where the incomplete
-    // gamma kernel declines; the inversion formula declines within 1e-3 of
-    // an integer order.
-    expect(li(3.000001, 2).N().numericValue).toBeUndefined();
+    // with its argument on the negative real axis. The incomplete gamma
+    // kernel declined there until it summed the pole of Γ with the term of
+    // its power series that cancels it.
+    const v = li(3.000001, 2).N();
+    expect(
+      Math.hypot(v.re - 2.7620716611878396, v.im + 0.75469285643604317)
+    ).toBeLessThan(1e-12 * 2.8634);
   });
 
   test('a negative order at a positive z answers (every term is positive)', () => {
@@ -407,8 +466,11 @@ describe('GPU PolyLog preamble', () => {
   ce.declare('gl_s', 'real');
   ce.declare('gl_z', 'real');
   const targets = [
-    ['GLSL', new GLSLTarget(), 'float _gpu_lerch_phi('],
-    ['WGSL', new WGSLTarget(), 'fn _gpu_lerch_phi('],
+    // `_gpu_poly_log` calls the Lerch dispatcher `_gpu_lerch_core` (it needs
+    // its decline flag to fall back to the inversion formula), not the
+    // NaN-returning `_gpu_lerch_phi`.
+    ['GLSL', new GLSLTarget(), 'vec2 _gpu_lerch_core('],
+    ['WGSL', new WGSLTarget(), 'fn _gpu_lerch_core('],
   ] as const;
 
   test.each(targets)(

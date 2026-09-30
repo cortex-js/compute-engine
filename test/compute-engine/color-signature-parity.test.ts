@@ -397,10 +397,17 @@ describe('the color ColorFromColorspace builds is consumed as a color', () => {
     const expected = [
       0.5794652253705687, 0.2883838518001147, 0.29455531221211584,
     ];
-    expect(interp(expr).ops!.map((op) => op.re)).toEqual(expected);
+    // The conversion rounds differently across platforms in the last bit
+    // (on the Linux runners the first two components come out one unit in
+    // the last place away), so the comparison allows a few units.
+    const close = (got: number[]) => {
+      expect(got).toHaveLength(expected.length);
+      got.forEach((v, i) => expect(v).toBeCloseTo(expected[i], 14));
+    };
+    close(interp(expr).ops!.map((op) => op.re));
     // On this target components are a plain array, the same one the
     // interpreter's `Tuple` holds.
-    expect(runJS(expr)).toEqual(expected);
+    close(runJS(expr) as number[]);
   });
 
   test('At refuses it on every route, because a color is not indexed', () => {
@@ -1206,7 +1213,7 @@ describe('a shader maps a color into the gamut as the interpreter does', () => {
     // lightness tests (WGSL has no `isinf`, so the test compares with the
     // largest finite 32-bit float).
     expect(r.preamble).toContain(
-      'if (!(abs(L) <= 3.4028234663852886e38 && abs(C) <= 3.4028234663852886e38 && abs(H) <= 3.4028234663852886e38)) {\n    return vec3f(bitcast<f32>(0x7fc00000u));'
+      'if (!(abs(L) <= 3.4028234663852886e38 && abs(C) <= 3.4028234663852886e38 && abs(H) <= 3.4028234663852886e38)) {\n    return vec3f(_gpu_nan());'
     );
   });
 });

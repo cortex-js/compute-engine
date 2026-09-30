@@ -6,7 +6,10 @@
  * value …"). But the mechanism to MAKE those values already existed and was
  * already in use for masked `When`/`Which` branches: a bit pattern, reached
  * through `gpuNonFiniteLiteral` — the overridable `_gpu_nan()` / `_gpu_inf()`
- * preamble helpers on GLSL, an inline `bitcast` on WGSL. The literal path could
+ * preamble helpers, on both targets. (WGSL used an inline
+ * `bitcast<f32>(0x7fc00000u)` until that was found to be a shader-creation
+ * error in Chrome: a constant expression may not evaluate to NaN or an
+ * infinity.) The literal path could
  * not reach it only because the formatter did not know the language.
  *
  * Consequently the constant-fold refusal for a provably non-real value is
@@ -45,8 +48,8 @@ const NO_FOLD = { constantFold: false } as const;
 const g = (expr: any): string => glsl.compile(ce.box(expr), NO_FOLD).code!;
 const w = (expr: any): string => wgsl.compile(ce.box(expr), NO_FOLD).code!;
 
-const NAN = { glsl: '_gpu_nan()', wgsl: 'bitcast<f32>(0x7fc00000u)' };
-const INF = { glsl: '_gpu_inf()', wgsl: 'bitcast<f32>(0x7f800000u)' };
+const NAN = { glsl: '_gpu_nan()', wgsl: '_gpu_nan()' };
+const INF = { glsl: '_gpu_inf()', wgsl: '_gpu_inf()' };
 
 describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () => {
   it('a NaN literal is the same symbol a masked branch produces', () => {
@@ -103,8 +106,10 @@ describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () =
 
     const wPre = wgsl.compile(ce.box(['Gamma', -2]), NO_FOLD).preamble ?? '';
     expect(wPre).toContain('z <= 0.0 && z == floor(z)');
-    // WGSL has no Infinity helper — the bit pattern is spelled inline there.
+    // WGSL declares the Infinity helper too (in any order: WGSL module
+    // declarations are order-independent).
     expect(wPre).toContain(INF.wgsl);
+    expect(wPre).toContain('fn _gpu_inf() -> f32');
   });
 
   it('GLSL declares `_gpu_inf()` beside `_gpu_nan()`, both overridable', () => {
@@ -120,9 +125,16 @@ describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () =
     expect(inf.preamble ?? '').not.toContain('_gpu_nan');
   });
 
-  it('WGSL emits no preamble for either (the bit pattern is inline)', () => {
-    expect(wgsl.compile(ce.box('NaN')).preamble ?? '').toBe('');
-    expect(wgsl.compile(ce.box('PositiveInfinity')).preamble ?? '').toBe('');
+  it('WGSL declares the helper each literal needs, through a let', () => {
+    // A constant bitcast to a non-finite f32 is a shader-creation error in
+    // WGSL; the helper bitcasts a `let`, a run-time value.
+    const nan = wgsl.compile(ce.box('NaN')).preamble ?? '';
+    const inf = wgsl.compile(ce.box('PositiveInfinity')).preamble ?? '';
+    expect(nan).toContain('fn _gpu_nan() -> f32 {\n  let bits = 0x7fc00000u;');
+    expect(inf).toContain('fn _gpu_inf() -> f32 {\n  let bits = 0x7f800000u;');
+    expect(nan).not.toContain('_gpu_inf');
+    expect(inf).not.toContain('_gpu_nan');
+    expect(nan + inf).not.toMatch(/bitcast<f32>\(0x/);
   });
 });
 

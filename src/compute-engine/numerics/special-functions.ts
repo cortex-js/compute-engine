@@ -2283,16 +2283,35 @@ export function zeta(s: number): number {
 
   // Functional equation for Re(s) < 0 (DLMF 25.4.2):
   // ζ(s) = 2^s π^{s-1} sin(πs/2) Γ(1-s) ζ(1-s)
+  // Two factors are small near a point where the result needs full relative
+  // accuracy, and each gets an exact reduction:
+  // - ζ(1 − s) is near its pole when s is near 0. The rounded 1 − s carries
+  //   an absolute error of up to 1.1e−16, a relative error of 1.1e−16/|s|
+  //   in the pole term (8e−8 at s = −1e−9), so the exact distance to the
+  //   pole, (1 − s) − 1 = −s, is passed along with it.
+  // - sin(πs/2) is near 0 when s is near an even integer. s/2 − n for the
+  //   nearest integer n is exact, and sin(π(t + n)) = (−1)ⁿ sin(πt).
   if (s < 0) {
+    const half = s / 2;
+    const n = Math.round(half);
+    const sinHalfPiS = (n % 2 === 0 ? 1 : -1) * Math.sin(Math.PI * (half - n));
     return (
       Math.pow(2, s) *
       Math.pow(Math.PI, s - 1) *
-      Math.sin((Math.PI * s) / 2) *
+      sinHalfPiS *
       gamma(1 - s) *
-      zeta(1 - s)
+      zetaRightOfZero(1 - s, -s)
     );
   }
+  return zetaRightOfZero(s, s - 1);
+}
 
+/**
+ * ζ(s) for s > 0, s ≠ 1. `sMinusOne` is s − 1: the reflection in `zeta`
+ * passes it exactly when s = 1 − σ was rounded (see there); the pole term
+ * 1/(1 − 2^{1−s}) is computed from it.
+ */
+function zetaRightOfZero(s: number, sMinusOne: number): number {
   // Large s: the Dirichlet series 1 + 2^{−s} + 3^{−s} + … converges to full
   // double precision in ≤ ~10^{18/s} terms (tail Σ_{m>M} m^{−s} < M^{1−s}/(s−1)).
   if (s >= 12) {
@@ -2328,7 +2347,7 @@ export function zeta(s: number): number {
     sum = u;
   }
   // 1 − 2^{1−s} = −expm1((1−s)·ln 2), computed without cancellation near s = 1
-  return sum / dn / -Math.expm1((1 - s) * Math.LN2);
+  return sum / dn / -Math.expm1(-sMinusOne * Math.LN2);
 }
 
 /**

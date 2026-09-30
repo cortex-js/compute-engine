@@ -2,6 +2,7 @@ import { Complex } from 'complex-esm';
 import { lerchPhiComplex } from './lerch-phi.js';
 import {
   gamma as gammaComplex,
+  gammaErrorWeight,
   hurwitzZetaComplex,
   polylogComplex,
 } from './numeric-complex.js';
@@ -86,68 +87,6 @@ function polylogIntegerOrderComplex(
 }
 
 /**
- * True where `lerchPhiComplex`'s interior summation (`lerchSeriesComplex`
- * inside the disk, `lerchEulerComplex` on the real negative axis) has been
- * measured to lose more than 1e−12 relative accuracy. Both sum a
- * formally divergent, growing-magnitude series once Re(s) is very
- * negative (the (k+1)^(−s) term grows like (k+1)^|s| before |z|ᵏ decay
- * catches up), and the accumulated rounding grows sharply as |z| → 1.
- * Cross-checked against mpmath (dps 30) on the real axis: at z = −1 the
- * error first exceeds 1e−12 between s = −1.2 (1.8e−14) and s = −1.3
- * (2.8e−12); at z = −0.9 between s = −2.5 (8.2e−13) and s = −3 (2.0e−12);
- * at z = −0.8 between s = −3.5 (6.5e−13) and s = −4 (6.6e−12); a complex
- * z inside the disk shows the same pattern (4.0e−12 at s = −3.7 + 2.8i,
- * z = −0.74i; 5.0e−12 at z = 0.19 − 0.71i, so a complex order needs the
- * bound in the right half of the disk too). This linear bound in |z|
- * stays clear of every measured failure, with margin to spare.
- *
- * A real order with a positive real z is exempt: every term of the series
- * is positive, so there is no cancellation. Measured against mpmath at
- * s ∈ {−1.5, −2.5, −3.5, −4.5, −5.3, −6.5, −7.7, −8.5, −10.5, −12.5} and
- * z ∈ {0.1, 0.3, 0.5, 0.7, 0.8, 0.9, 0.95, 0.99, 0.999}: every relative
- * error is below 4e−13.
- */
-function seriesUnreliable(
-  sRe: number,
-  sIm: number,
-  zRe: number,
-  zIm: number
-): boolean {
-  if (sIm === 0 && zIm === 0 && zRe > 0) return false;
-  // The Euler transform runs on the whole real negative axis, z = −1
-  // itself included (`lerchPhiComplex` dispatches every real z < 0 there
-  // regardless of |z|), so this branch is checked on |z| directly, ahead
-  // of the interior-only `absZ >= 1` exit below.
-  // A complex order loses digits sooner there: against mpmath, s = −0.9 +
-  // ti fails (1.0e−12 to 1.9e−12) at z = −1 and z = −0.999 for every t in
-  // [0.001, 3] tried, and s = −0.8 + 0.01i at z = −0.999 (1.2e−12).
-  if (zIm === 0 && zRe < 0)
-    return sRe < (sIm === 0 ? -1 : -0.7) - 4 * (1 - Math.abs(zRe));
-  const absZ = Math.hypot(zRe, zIm);
-  if (absZ >= 1) return false; // outside the disk: `nearBranchPointUnreliable` covers it
-  return sRe < -1 - 4 * (1 - absZ);
-}
-
-/**
- * True where the Hermite-integral continuation right at the z = 1 branch
- * point loses more than 1e−12 relative accuracy: the closed-form term
- * `Γ(1−s)(−log z)^(s−1)` grows without bound approaching z = 1, and its
- * cancellation against the rest grows faster than the kernel's own
- * `lost` guard (tuned to 1e−10) catches. Measured against mpmath at
- * s ∈ {−3.5, −1.5, 0.5, 1.5, 2.5, 3.5, 4.5, 2.5 + i} and z = 1 − d, 1 + d,
- * 1 + di, 1 + d − di: every point with |z − 1| ≥ 1e−3 stays below 1e−12,
- * the first failure is 1.1e−12 at s = −3.5, z = 1.0003 − 0.0003i
- * (|z − 1| ≈ 4.2e−4), and the error grows as z approaches 1 (2e−10 at
- * |z − 1| = 1e−6, 3e−8 at 1e−8). z = 1 itself is excluded:
- * `lerchPhiComplex` answers that point exactly, via `HurwitzZeta`, not
- * through this continuation.
- */
-function nearBranchPointUnreliable(zRe: number, zIm: number): boolean {
-  if (zRe === 1 && zIm === 0) return false;
-  return Math.hypot(zRe - 1, zIm) < 1e-3;
-}
-
-/**
  * Liₛ(z) for |z| > 1 by Jonquière's inversion formula (DLMF 25.12.13,
  * with the Hurwitz zeta form of the right-hand side):
  *
@@ -161,36 +100,44 @@ function nearBranchPointUnreliable(zRe: number, zIm: number): boolean {
  * (s, z) = (1.5, −3), (2.5, −1.5), (−0.5, −2), (0.5, −5), (1.5, −1.01),
  * (3.7, −10), (2.5, 3), (2.5, 2), (1.5 + 0.5i, −3), (2.5, −2 + i).
  *
- * `hurwitzZetaComplex` is accurate at the negative order 1 − s only while
- * it can use its Taylor route (|Im a| ≤ 0.55, about |z| ≤ 32); past that its
- * Euler–Maclaurin route loses digits once Re(s) > 2 (for example
- * ζ(−11.5, 0.5 − 1.1i) is 30% off). A large imaginary part of s also
- * loses digits (e^{π|Im s|} amplifies the cancellation between the two
- * terms). The guard below is the measured safe region: in a random sweep
- * of 1500 points against mpmath (|z| from 1 to 1e7, a third of them on the
- * negative real axis, Re(s) ∈ [−4, 7], Im(s) ∈ [−3, 3]) it accepted 844
- * points, all within 1e−12, and rejected every inaccurate one.
+ * The two terms of the right-hand side can cancel: for a complex order
+ * with Re(s) < 0 they are up to 1e4 times the value (e^{π|Im s|} scales
+ * one of them). Each term carries the rounding of its factors, the largest
+ * of which is that of Γ(s) (`gammaErrorWeight`: about 5ε at |s| < 1 and
+ * 1300ε at |s| = 30), so the value's error is about the cancellation ratio
+ * times that. The formula estimates the error as the ratio times
+ * (2ε·gammaErrorWeight(s) + 2e−13, the second term for the inner Liₛ(1/z)
+ * and ζ(1 − s, a), each measured within 1.3e−13) and declines above
+ * 2e−12. Measured against mpmath's `polylog` on 5859 answered points
+ * (|z| from 1 to 1e7, a third on the negative real axis, Re(s) from −30 to
+ * 12, a third of the orders with |Im s| up to 1.5): the actual error was
+ * at most 1.35 times ε·gammaErrorWeight(s)·ratio, and without the check
+ * 103 values were off by more than 1e−12 (up to 5.1e−10, all but two with
+ * a complex order); with it, every answered value is within 3.1e−13. A
+ * larger |Im s| loses digits faster (e^{π|Im s|} amplifies the
+ * cancellation; 1.3e−10 at |Im s| near 3), so the formula also declines
+ * for |Im s| > 1.5. Every Re(s) is accepted: `hurwitzZetaComplex` at the
+ * negative order 1 − s and a complex a is accurate for every |Im a|
+ * (|Im a| = ln|z|/(2π), 2.6 at |z| = 1e7).
  *
- * Next to an integer order, `hurwitzZetaComplex` works next to a pole of
- * ζ (and, at s = 0, of Γ(s) too), and the formula loses digits. Measured
- * against mpmath at a distance d from the integer (real, imaginary and
- * diagonal offsets; z from −1.001 to −1e4, −2 + i, 1.5 − 2i, 3): for
- * n = 0 … 4 the error is 2e−8 at d = 1e−9, 3e−12 at d = 1e−4 and at most
- * 2.5e−13 at d = 1e−3; for n = −1 it is 3.5e−12 at d = 1e−7 and 2.6e−13 at
- * d = 1e−6. An exactly integer real order never reaches this function
+ * Next to an integer order n the formula needs ζ(1 − s, a) next to its
+ * pole when n = 0 (and 1/Γ(s) next to its zero); the exact distance −s is
+ * passed to `hurwitzZetaComplex`, so the rounding of 1 − s does not
+ * matter. Measured against mpmath at distances d = 1e−9 … 1e−2 from
+ * n = −3 … 6 (real, imaginary and diagonal offsets; z = −1.001, −1.01,
+ * −1.5, −3, −10, −100, −1e4, −1e6, −2 + i, 1.5 − 2i, 3, 0.3 + 40i): every
+ * answer is within 1.4e−13. So no integer order needs a separate guard. An
+ * exactly integer real order never reaches this function
  * (`polylogIntegerOrderComplex`).
  *
- * Returns NaN outside the safe region, or when the inner Liₛ(1/z)
- * declines.
+ * Returns NaN for |Im s| > 1.5, when the inner Liₛ(1/z) declines, or when
+ * the two terms cancel too far.
  */
 function polylogInversionComplex(s: Complex, z: Complex): Complex {
   const twoPiI = new Complex(0, 2 * Math.PI);
   const negZ = new Complex(-z.re, z.im === 0 ? 0 : -z.im);
   const a = new Complex(0.5, 0).add(negZ.log().div(twoPiI));
-  if (Math.abs(s.im) > 1.5 || (s.re > 2 && Math.abs(a.im) > 0.55)) return C_NAN;
-  const nearest = Math.round(s.re);
-  if (Math.hypot(s.re - nearest, s.im) < (nearest >= 0 ? 1e-3 : 1e-6))
-    return C_NAN;
+  if (Math.abs(s.im) > 1.5) return C_NAN;
   const inner = polylogInsideDisk(s, z.inverse());
   if (inner.isNaN()) return C_NAN;
   const iPiS = new Complex(0, Math.PI).mul(s);
@@ -198,21 +145,34 @@ function polylogInversionComplex(s: Complex, z: Complex): Complex {
     .pow(s)
     .mul(iPiS.mul(0.5).exp())
     .div(gammaComplex(s));
-  const zeta = hurwitzZetaComplex(C_ONE.sub(s), a);
-  const result = factor.mul(zeta).sub(iPiS.exp().mul(inner));
+  // 1 − s is rounded; its exact distance to the pole of ζ at 1 is −s.
+  const zeta = hurwitzZetaComplex(C_ONE.sub(s), a, s.neg());
+  const first = factor.mul(zeta);
+  const second = iPiS.exp().mul(inner);
+  const result = first.sub(second);
   // A real order and a real z < −1 give a real value; drop the rounding
   // residue of the two complex terms.
-  if (s.im === 0 && z.im === 0 && z.re < 0) return new Complex(result.re, 0);
-  return result;
+  const value =
+    s.im === 0 && z.im === 0 && z.re < 0 ? new Complex(result.re, 0) : result;
+  const ratio = Math.max(first.abs(), second.abs()) / value.abs();
+  const error = ratio * (2 * Number.EPSILON * gammaErrorWeight(s) + 2e-13);
+  if (!(error <= 2e-12)) return C_NAN;
+  return value;
 }
 
-/** Liₛ(z) = z·Φ(z,s,1) for |z| ≤ 1 (the rim included), with the guards. */
+/**
+ * Liₛ(z) = z·Φ(z,s,1) for |z| ≤ 1 (the rim included). `lerchPhiComplex`
+ * checks the rounding of its own sums and declines, or takes its
+ * continuation, where the direct series cancels, so no guard is needed
+ * here. Measured against mpmath's `polylog` (40 digits) on 7000 points with
+ * Re(s) from −20 to 8, |Im s| up to 5, a seventh of the orders within 1e−9
+ * to 0.1 of an integer, and z over the disk, on the negative and positive
+ * real axes, within 1e−7 to 0.1 of the unit circle and on it: 6983 answer,
+ * none off by more than 2.0e−13. On 3000 points within 1e−8 to 1e−2 of the
+ * branch point z = 1 (inside and outside the disk): all answer, none off by
+ * more than 7.3e−13.
+ */
 function polylogInsideDisk(s: Complex, z: Complex): Complex {
-  if (
-    seriesUnreliable(s.re, s.im, z.re, z.im) ||
-    nearBranchPointUnreliable(z.re, z.im)
-  )
-    return C_NAN;
   const phi = lerchPhiComplex(z, s, C_ONE);
   return phi === undefined ? C_NAN : z.mul(phi);
 }
@@ -222,10 +182,9 @@ function polylogInsideDisk(s: Complex, z: Complex): Complex {
  * the closed forms and the dedicated kernel (`polylogIntegerOrderComplex`).
  * Any other order uses z·Φ(z,s,1): past |z| = 1 through the Lerch
  * continuation, and where that declines through Jonquière's inversion
- * (`polylogInversionComplex`). `NaN` where every route declines, or where a
- * reliability guard above catches an unreliable but not-NaN kernel answer —
- * the caller (`applyN`) reads a NaN kernel result as "stay symbolic" rather
- * than ship an unverified number.
+ * (`polylogInversionComplex`). `NaN` where every route declines: the caller
+ * (`applyN`) reads a NaN kernel result as "stay symbolic" rather than ship
+ * an unverified number.
  */
 export function polylogOrderComplex(s: Complex, z: Complex): Complex {
   if (s.isNaN() || z.isNaN()) return C_NAN;
@@ -237,11 +196,8 @@ export function polylogOrderComplex(s: Complex, z: Complex): Complex {
   if (z.abs() <= 1) return polylogInsideDisk(s, z);
   // Past the disk: the Lerch continuation first; where it declines (see
   // `lerchContinuedComplex`), the inversion takes over.
-  if (!nearBranchPointUnreliable(z.re, z.im)) {
-    const phi = lerchPhiComplex(z, s, C_ONE);
-    if (phi !== undefined && !phi.isNaN()) return z.mul(phi);
-  }
-  if (nearBranchPointUnreliable(z.re, z.im)) return C_NAN;
+  const phi = lerchPhiComplex(z, s, C_ONE);
+  if (phi !== undefined && !phi.isNaN()) return z.mul(phi);
   return polylogInversionComplex(s, z);
 }
 

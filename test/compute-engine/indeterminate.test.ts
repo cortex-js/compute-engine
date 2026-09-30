@@ -360,7 +360,7 @@ describe('INDETERMINATE — compiled routes', () => {
 
   test.each([
     ['glsl', 'x + _gpu_nan()'],
-    ['wgsl', 'x + bitcast<f32>(0x7fc00000u)'],
+    ['wgsl', 'x + _gpu_nan()'],
     ['python', 'x + np.nan'],
     ['interval-js', '_IA.add(_.x, _k1)'],
   ])('%s spells it as the target NaN', (to, code) => {
