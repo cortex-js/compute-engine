@@ -812,6 +812,44 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
     expect(val.hi).toBeCloseTo(10, 10);
   });
 
+  // Issue #384: the scalar kernel was a Pascal-triangle table lookup that
+  // threw on a negative `n`. `C(-3, 2) = 6`, as the interpreter gives.
+  test('Binomial(-3, 2) = 6', () => {
+    const expr = ce.expr(['Binomial', -3, 2]);
+    const fn = compile(expr, { to: 'interval-js', constantFold: false });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(6, 10);
+    expect(val.hi).toBeCloseTo(6, 10);
+  });
+
+  test('Binomial over an n range that crosses 0 encloses the negative-n values', () => {
+    const fn = compile(ce.expr(['Binomial', 'n', 2]), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    // n ∈ [-3, 3]: C(n, 2) takes the values 6, 3, 1, 0, 0, 1, 3.
+    const val = unwrapInterval(fn.run!({ n: { lo: -3, hi: 3 } }));
+    expect(val.lo).toBeLessThanOrEqual(0);
+    expect(val.hi).toBeGreaterThanOrEqual(6);
+  });
+
+  test('Binomial over an n range unbounded above has an unbounded enclosure', () => {
+    const fn = compile(ce.expr(['Binomial', 'n', 2]), { to: 'interval-js' });
+    const val = unwrapInterval(fn.run!({ n: { lo: 0, hi: Infinity } }));
+    expect(val.lo).toBeLessThanOrEqual(0);
+    expect(val.hi).toBe(Infinity);
+  });
+
+  // C(1035, 512) is above the largest double. The enclosure must include it
+  // although the other grid values are finite.
+  test('Binomial enclosure includes a grid value that overflows', () => {
+    const fn = compile(ce.expr(['Binomial', 'n', 'k']), { to: 'interval-js' });
+    const val = unwrapInterval(
+      fn.run!({ n: { lo: 1020, hi: 1035 }, k: { lo: 510, hi: 512 } })
+    );
+    expect(val.hi).toBe(Infinity);
+    expect(Number.isFinite(val.lo)).toBe(true);
+  });
+
   test('GCD(12, 8) = 4', () => {
     const expr = ce.expr(['GCD', 12, 8]);
     const fn = compile(expr, { to: 'interval-js' });

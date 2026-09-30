@@ -482,6 +482,7 @@ import {
 } from '../numerics/color-conversion.js';
 import type { ColorGamut } from '../numerics/color-conversion.js';
 import {
+  binomial,
   gamma,
   gammaln,
   erf,
@@ -525,7 +526,6 @@ import {
 } from '../numerics/special-functions.js';
 import { lerchPhiReal } from '../numerics/lerch-phi.js';
 import { polylogOrderReal } from '../numerics/polylog.js';
-import { choose } from '../boxed-expression/expand.js';
 import {
   correlation,
   covariance,
@@ -12099,7 +12099,11 @@ const SYS_HELPERS = {
     }
     return 1.0;
   },
-  binomial: choose,
+  // Integer-valued on the core domain 0 ≤ k ≤ n and extended like the
+  // interpreter's `Binomial` elsewhere: negative and non-integer operands,
+  // poles and infinite points (see `binomial()` in
+  // `numerics/special-functions.ts`).
+  binomial,
   fibonacci,
   // Complex helpers
   csin: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sin()),

@@ -112,6 +112,164 @@ export function gamma(z: number): number {
 }
 
 /**
+ * The binomial coefficient `C(n, k) = Γ(n+1)/(Γ(k+1)·Γ(n−k+1))` for machine
+ * numbers. It gives the same values as the interpreter's `Binomial`
+ * (`evaluateBinomial()` in `library/combinatorics.ts`) on the real line:
+ *
+ * - Integer `n` and `k`, any sign:
+ *   - `k < 0` gives `0`, because `1/Γ(k+1)` is `0` at a pole of `Γ`. The
+ *     exception is a negative `n` with `n ≥ k`: there `Γ(n+1)` is a pole too,
+ *     the two poles cancel, and the value is `(−1)^(n−k)·C(−k−1, −n−1)`
+ *     (`C(−3, −5) = 6`).
+ *   - `n < 0 ≤ k` gives `(−1)^k·C(k−n−1, k)` (`C(−3, 2) = 6`).
+ *   - `0 ≤ n < k` gives `0`.
+ *   The product loop divides out a common factor at each step, so the result
+ *   is exact while it is below 2^53. The loop stops when the value overflows
+ *   to `Infinity`, so a large `n` does not make it run long.
+ * - A non-integer operand: `0` when a denominator factor is on a pole
+ *   (`k` or `n − k` a negative integer), `Infinity` when only the numerator
+ *   `Γ(n+1)` is on a pole (the float spelling of the interpreter's `~oo`,
+ *   the same spelling `_SYS.gamma` uses), otherwise the Γ ratio. When the
+ *   ratio overflows, it is computed in log form with the sign of each Γ
+ *   factor.
+ * - An infinite operand gives the interpreter's limit: `C(±∞, 0) = 1`,
+ *   `C(+∞, k>0) = +∞`, `C(+∞, k<0) = 0`, `C(−∞, k) = (−1)^k·∞` for an integer
+ *   `k ≥ 1`, `C(n, ±∞) = 0` for `n > −1`. A form with no limit, and a `NaN`
+ *   operand, give `NaN`.
+ */
+export function binomial(n: number, k: number): number {
+  if (Number.isNaN(n) || Number.isNaN(k)) return NaN;
+  // A negative integer `k` makes `C(n, k)` zero for every non-integer `n`,
+  // infinite ones included. Integer `n` is handled below, where the poles of
+  // `Γ(n+1)` can cancel.
+  if (Number.isInteger(k) && k < 0 && !Number.isInteger(n)) return 0;
+
+  const nFinite = Number.isFinite(n);
+  const kFinite = Number.isFinite(k);
+  if (!nFinite || !kFinite) {
+    if (!nFinite && !kFinite) return NaN;
+    if (!nFinite) {
+      if (k === 0) return 1;
+      if (n > 0) return k > 0 ? Infinity : 0;
+      // `−∞`: only an integer `k ≥ 1` has a limit (the polynomial branch).
+      if (!Number.isInteger(k)) return NaN;
+      return k % 2 === 0 ? Infinity : -Infinity;
+    }
+    // `k` is infinite.
+    return n > -1 ? 0 : NaN;
+  }
+
+  if (Number.isInteger(n) && Number.isInteger(k)) {
+    if (k < 0) {
+      if (n >= 0 || n < k) return 0;
+      const inner = binomial(-k - 1, -n - 1);
+      return Math.abs(n - k) % 2 === 0 ? inner : -inner;
+    }
+    if (n < 0) {
+      const inner = binomial(k - n - 1, k);
+      return k % 2 === 0 ? inner : -inner;
+    }
+    if (k > n) return 0;
+    const kk = Math.min(k, n - k);
+    // After step `i`, `result` is `C(n − kk + i, i)`, an integer. Dividing
+    // `i` by `g = gcd(result, i)` first keeps the product at the size of the
+    // next value, so no intermediate exceeds the final value.
+    let result = 1;
+    for (let i = 1; i <= kk; i++) {
+      let a = result;
+      let b = i;
+      while (b !== 0) [a, b] = [b, a % b];
+      const g = a;
+      result = (result / g) * ((n - kk + i) / (i / g));
+      if (!Number.isFinite(result)) return result;
+    }
+    return result;
+  }
+
+  // At least one non-integer operand: first the poles of the Γ factors.
+  // A negative integer `n` is tested before `n − k`: with an integer `n` the
+  // operand `k` is not an integer, so `n − k` is not one either, but for
+  // |n| ≥ 2^53 the float subtraction `n − k` rounds to an integer.
+  if (Number.isInteger(k) && k < 0) return 0;
+  if (Number.isInteger(n) && n < 0) return Infinity;
+  if (Number.isInteger(n - k) && n - k < 0) return 0;
+  // A small non-negative integer `k`: the falling factorial
+  // `n(n−1)⋯(n−k+1)/k!`, which is what the interpreter and the GPU targets
+  // expand to. It has no pole, and it is more accurate than the Γ ratio
+  // for a negative `n`, where `Γ` goes through the reflection formula.
+  if (Number.isInteger(k) && k <= 100) {
+    let product = 1;
+    for (let i = 0; i < k; i++) product *= (n - i) / (i + 1);
+    return product;
+  }
+  const r = gamma(n + 1) / (gamma(k + 1) * gamma(n - k + 1));
+  if (Number.isFinite(r)) return r;
+  // The Γ ratio overflowed. Compute it in log form with the sign of each Γ
+  // factor.
+  if (n + 1 < 0) {
+    const [lnN, signN] = lnGammaSigned(n + 1);
+    const [lnK, signK] = lnGammaSigned(k + 1);
+    const [lnNK, signNK] = lnGammaSigned(n - k + 1);
+    return signN * signK * signNK * Math.exp(lnN - lnK - lnNK);
+  }
+  // `Γ(n+1) > 0`. The numerator is paired with the larger denominator
+  // argument, because their log-Γ values are close and their difference
+  // must be computed without cancellation (`lnGammaRatio()`).
+  const [small, large] = k < n - k ? [k, n - k] : [n - k, k];
+  const [lnSmall, signSmall] = lnGammaSigned(small + 1);
+  const logValue = lnGammaRatio(n + 1, small) - lnSmall;
+  return signSmall * Math.exp(logValue) * gammaSign(large + 1);
+}
+
+/** The sign of `Γ(x)` for a real `x` that is not a pole. */
+function gammaSign(x: number): number {
+  if (x > 0) return 1;
+  // For x < 0, Γ(x) is negative on (−1, 0), positive on (−2, −1), and so on.
+  return Math.floor(x) % 2 === 0 ? 1 : -1;
+}
+
+/**
+ * `[ln|Γ(x)|, sign(Γ(x))]` for a real `x` that is not a pole. A negative `x`
+ * uses the reflection formula `Γ(x) = π / (sin(πx)·Γ(1 − x))`.
+ */
+function lnGammaSigned(x: number): [number, number] {
+  if (x > 0) return [gammaln(x), 1];
+  const s = Math.sin(Math.PI * x);
+  return [
+    Math.log(Math.PI) - Math.log(Math.abs(s)) - gammaln(1 - x),
+    gammaSign(x),
+  ];
+}
+
+/**
+ * `ln|Γ(a)| − ln|Γ(a − d)|` for `a > 0`, where the result's sign factor
+ * `sign(Γ(a − d))` is applied by the caller (`gammaSign()`).
+ *
+ * When `a` and `a − d` are both large, the two log-Γ values are nearly equal,
+ * and subtracting them loses most digits (for `a = 10⁶`, `d = 0.5` the
+ * result is off in the 10th digit; for `a = 10³⁰⁰` it is `0`, because `a` and
+ * `a − d` are the same double). The Stirling series of the difference avoids
+ * this. With `b = a − d`:
+ *
+ *   `lnΓ(a) − lnΓ(b) = (b − ½)·ln(1 + d/b) + d·(ln a − 1) + S(a) − S(b)`
+ *
+ * where `S(x) = 1/(12x) − 1/(360x³) + 1/(1260x⁵)` is the Stirling correction.
+ * The truncation error of `S` is below 1/(1680·x⁷), under 1e-17 for x ≥ 100.
+ * `d` enters directly, never as the rounded difference `a − b`.
+ */
+function lnGammaRatio(a: number, d: number): number {
+  const b = a - d;
+  if (a >= 100 && b >= 100) {
+    const s = (x: number) => {
+      const x2 = x * x;
+      return (1 / 12 - (1 / 360 - 1 / (1260 * x2)) / x2) / x;
+    };
+    return (b - 0.5) * Math.log1p(d / b) + d * (Math.log(a) - 1) + s(a) - s(b);
+  }
+  return gammaln(a) - lnGammaSigned(b)[0];
+}
+
+/**
  * Exponential integral E₁(z) = Γ(0, z) = ∫_z^∞ e^{−t}/t dt, for real z > 0.
  *
  * Power series (DLMF 6.6.2) for small z, Legendre continued fraction

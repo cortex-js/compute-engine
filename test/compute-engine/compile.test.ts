@@ -916,6 +916,95 @@ describe('COMPILE integral special functions (Si/Ci/Ei/li)', () => {
   });
 });
 
+// Issue #384: the JS runtime `_SYS.binomial` was a Pascal-triangle table
+// lookup, so it gave `undefined` for k < 0 or k > n and threw for a negative
+// or non-integer n. The compiled value must equal `evaluate()` (or `.N()`,
+// which is the same number here) at every real point, including negative
+// operands, non-integer operands, the poles of the Γ factors and the infinite
+// points. `~oo` compiles to `Infinity`, the float spelling `_SYS.gamma` uses.
+describe('COMPILE Binomial matches evaluate() off 0 ≤ k ≤ n', () => {
+  const engine = new ComputeEngine();
+  engine.declare('a', 'real');
+  engine.declare('b', 'real');
+  const fn = compile(engine.box(['Binomial', 'a', 'b']))!;
+  const choose = compile(engine.box(['Choose', 'a', 'b']))!;
+
+  const points: Array<[number, number]> = [
+    [3, -1],
+    [2, 5],
+    [-3, 2],
+    [-2, 3],
+    [-1, 2],
+    [-3, -3],
+    [-3, -5],
+    [-5, -3],
+    [0, 0],
+    [30, 15],
+    [1000, 3],
+    [5.5, 2],
+    [5, 2.5],
+    [-2.5, -1.5],
+    [-3, 0.5],
+    [2.5, -2],
+    [Infinity, 2],
+    [Infinity, 0],
+    [Infinity, -2],
+    [-Infinity, 3],
+    [-Infinity, 4],
+    [-Infinity, 0.5],
+    [0.5, -Infinity],
+    [-2.5, Infinity],
+    // The Γ ratio overflows: the log form, with a negative Γ argument and
+    // with two nearly equal log-Γ values.
+    [171.5, -1.5],
+    [200.5, -3.5],
+    [1e6, 0.5],
+    [300.5, 150.25],
+    [-171.5, -1.25],
+    // A negative non-integer n with an integer k: the falling factorial.
+    [-200.5, 3],
+    // A negative integer n beyond 2^53 with a non-integer k is a pole.
+    [-1e300, 0.5],
+  ];
+
+  for (const [a, b] of points) {
+    it(`Binomial(${a}, ${b})`, () => {
+      expect(fn.success).toBe(true);
+      const want = engine.box(['Binomial', engine.number(a), engine.number(b)]).N();
+      const expected = want.operator === 'ComplexInfinity' ? Infinity : want.re;
+      for (const f of [fn, choose]) {
+        const got = f.run!({ a, b }) as number;
+        if (!Number.isFinite(expected)) expect(got).toBe(expected);
+        else if (expected === 0) expect(got).toBe(0);
+        else expect(Math.abs(got / expected - 1)).toBeLessThan(1e-12);
+      }
+    });
+  }
+
+  it('gives NaN for a NaN operand', () => {
+    expect(fn.run!({ a: NaN, b: 2 })).toBeNaN();
+    expect(fn.run!({ a: 2, b: NaN })).toBeNaN();
+  });
+
+  // n + 1 and n − k + 1 are the same double here, so a plain difference of
+  // log-Γ values gives 0 and the result 1. C(n, 1/2) ~ √n / Γ(3/2).
+  it('keeps its precision for a huge n and a non-integer k', () => {
+    const got = fn.run!({ a: 1e300, b: 0.5 }) as number;
+    expect(Math.abs(got / (1e150 / (Math.sqrt(Math.PI) / 2)) - 1)).toBeLessThan(
+      1e-12
+    );
+  });
+
+  it('stops at Infinity instead of looping over a huge k', () => {
+    expect(fn.run!({ a: 1e9, b: 5e8 })).toBe(Infinity);
+  });
+
+  it('is exact on integers below 2^53', () => {
+    expect(fn.run!({ a: 50, b: 25 })).toBe(126410606437752);
+    expect(fn.run!({ a: 56, b: 28 })).toBe(7648690600760440);
+  });
+});
+
 // Tier-2 special-function kernels that `.N()` produces as real floats — the
 // elliptic integrals, AGM, hypergeometric functions, Erfi, and the Choose
 // binomial — must also lower to JS so an "evaluate then compile" pipeline can

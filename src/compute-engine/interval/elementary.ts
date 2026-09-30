@@ -7,6 +7,7 @@
 import type { Interval, IntervalResult } from './types.js';
 import {
   ok,
+  getValue,
   containsZero,
   isNegative,
   unwrapOrPropagate,
@@ -30,6 +31,7 @@ import {
 } from './rounding.js';
 import { prodExact } from '../numerics/interval-arithmetic.js';
 import {
+  binomial as scalarBinomial,
   gamma as scalarGamma,
   gammaln as scalarGammaln,
   erf as scalarErf,
@@ -45,7 +47,6 @@ import {
   nextUp,
   roundHalfAway,
 } from '../numerics/numeric.js';
-import { choose as scalarBinomial } from '../boxed-expression/expand.js';
 
 /**
  * Square root of an interval (or IntervalResult).
@@ -1313,11 +1314,39 @@ function binomialRaw(
   if (!Array.isArray(uK)) return uK;
   const [nVal] = uN;
   const [kVal] = uK;
-  const enumerated = enumerateInteger2(nVal, kVal, scalarBinomial);
-  if (enumerated) return enumerated;
-  // Conservative fallback for very wide ranges: C(n, k) ≥ 0 and is maximized,
-  // over all n ≤ nMax, at the central coefficient C(nMax, ⌊nMax/2⌋).
+  // A grid value that overflows to ±Infinity is a finite value above the
+  // largest double. `enumerateInteger2()` skips non-finite values, so record
+  // the overflows here and widen the enclosure to include them.
+  let overflowUp = false;
+  let overflowDown = false;
+  const enumerated = enumerateInteger2(nVal, kVal, (x, y) => {
+    const v = scalarBinomial(x, y);
+    if (v === Infinity) overflowUp = true;
+    else if (v === -Infinity) overflowDown = true;
+    return v;
+  });
+  const value = enumerated ? getValue(enumerated) : undefined;
+  if (value)
+    return ok({
+      lo: overflowDown ? -Infinity : value.lo,
+      hi: overflowUp ? Infinity : value.hi,
+    });
+  // Every grid value overflowed: the largest finite double bounds each
+  // value from the overflow side.
+  if (overflowUp || overflowDown)
+    return ok({
+      lo: overflowDown ? -Infinity : Number.MAX_VALUE,
+      hi: overflowUp ? Infinity : -Number.MAX_VALUE,
+    });
+  // Conservative fallback for very wide ranges. For integer n ≥ 0,
+  // C(n, k) ≥ 0 for every integer k (it is 0 outside 0 ≤ k ≤ n) and is
+  // largest, over all 0 ≤ n ≤ nMax, at the central coefficient
+  // C(nMax, ⌊nMax/2⌋). For a range that contains a negative n, the values
+  // can have both signs, and the whole real line is used as a conservative
+  // enclosure.
+  if (Math.round(nVal.lo) < 0) return ok({ lo: -Infinity, hi: Infinity });
   const nMax = Math.round(nVal.hi);
+  if (!Number.isFinite(nMax)) return ok({ lo: 0, hi: Infinity });
   return ok({ lo: 0, hi: scalarBinomial(nMax, Math.floor(nMax / 2)) });
 }
 

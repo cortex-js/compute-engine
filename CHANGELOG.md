@@ -242,6 +242,24 @@
 
 ### Issues Resolved
 
+- **Compiled `Binomial` and `Choose` give the interpreter's values outside
+  `0 ≤ k ≤ n`** ([#384](https://github.com/cortex-js/compute-engine/issues/384),
+  reported by [enumeratio](https://github.com/enumeratio)). The JavaScript
+  target's runtime was a Pascal-triangle table lookup: `Binomial(3, -1)` and
+  `Binomial(2, 5)` gave `undefined` instead of `0`, and a negative or
+  non-integer `n` (`Binomial(-3, 2)`, `Binomial(5.5, 2)`) threw. The runtime
+  now follows `evaluate()`: `0` for `k < 0` or `k > n ≥ 0`, the extension to a
+  negative `n` (`Binomial(-3, 2) = 6`, `Binomial(-3, -5) = 6`), the Γ ratio for
+  a non-integer operand, `0` or `Infinity` at the poles of the Γ factors, the
+  limits at an infinite operand, and `NaN` for a `NaN` operand. Integer results
+  below 2^53 are exact. The interval target used the same table and threw for
+  an interval that contains a negative `n`; it now uses the same kernel. For a
+  very wide `n` interval, its fallback bound built a table with `n²/2` entries;
+  it now computes the one bound it needs, and gives the whole real line when
+  the interval contains a negative `n`. An enclosure that contains a value
+  above the largest double now extends to `Infinity`; before, the overflowed
+  grid values were skipped and the upper bound was too low.
+
 - **`HurwitzZeta(-n, a)` at a non-positive integer order is the Bernoulli
   polynomial −Bₙ₊₁(a)/(n+1) for a symbolic or a complex `a`**, not only for a
   rational `a`. `HurwitzZeta(-1, a)` stayed unevaluated and now evaluates to
