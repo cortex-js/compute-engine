@@ -910,10 +910,8 @@ describe('CANONICAL FORMS', () => {
         expr = ['Complex', 3, 4];
         expComplexNum(expr, 'complex');
 
-        //@fixme
-        //(A present bug: that bignum args. get truncated when canonicalized as a complex-number:
-        //regardless of set precision)
-        //@note: precision is '100' for the engine used here...
+        // A big-integer real part keeps every digit (the engine here runs at
+        // precision 100; the truncation this once pinned was fixed in 0.140.0).
         expr = ['Complex', '22975850700614579948873711', 4]; // bigIntRe
         expComplexNum(expr, 'complex');
 

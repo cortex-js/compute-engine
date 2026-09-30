@@ -287,9 +287,9 @@ describe('SUM with Element indexing set', () => {
     );
   });
 
-  test.skip('round-trip parse -> latex -> parse', () => {
-    // KNOWN ISSUE: Set serialization uses \lbrace/\rbrace but parser expects \{/\}
-    // This causes round-trip to fail for Set expressions
+  test('round-trip parse -> latex -> parse', () => {
+    // The serializer writes a set as \lbrace…\rbrace and the parser reads
+    // that spelling back, so a Set expression round-trips.
     const original = `\\sum_{n \\in \\{1,2,3\\}} n`;
     const parsed = ce.parse(original);
     const latex = parsed.latex;
