@@ -1046,6 +1046,25 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     expect(run('"abc" |> (c => c)').value.toString()).toBe('"abc"');
   });
 
+  test('a placeholder inside a nested literal does not make an implicit lambda', () => {
+    // The `_` belongs to the inner stage `_ * 2`, which the parser has
+    // already wrapped as a `Function` literal. The outer stage `10 + (…)` has
+    // no placeholder of its own, so it is not wrapped (GitHub issue #381).
+    const [ast] = parseEpsil('xs |> 10 + (ys |> _ * 2)');
+    const json = JSON.stringify(ast);
+    expect(json.match(/"Function"/g)?.length).toBe(1);
+    expect(json).toMatch(/^\{"fn":\["Pipe",\{"sym":"xs"[^}]*\},\{"fn":\["Add"/);
+  });
+
+  test('a placeholder that a nested lambda does not declare is the topic', () => {
+    // `y => y * _` declares only `y`, so its `_` is free there and the outer
+    // stage is an implicit lambda over the topic: `10 + _ * 3`.
+    expect(run('[1,2] |> 10 + ((y => y * _)(3))').value.toString()).toBe(
+      '[13,16]'
+    );
+    expect(run('[1,2] |> 10 + _ * 3').value.toString()).toBe('[13,16]');
+  });
+
   test('a placeholder in a CALL stage is still the topic', () => {
     // `_` as a call argument marks where the piped value goes — no implicit
     // Map, even over a collection topic.

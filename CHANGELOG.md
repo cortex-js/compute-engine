@@ -242,6 +242,19 @@
 
 ### Issues Resolved
 
+- **A `Function` literal with no parameter list no longer takes the `_1`, `_2` …
+  slots of a nested `Function` literal as its own parameters**
+  ([#381](https://github.com/cortex-js/compute-engine/issues/381), reported by
+  [enumeratio](https://github.com/enumeratio)).
+  `["Function", ["Add", "_1", [["Function", ["Multiply", "_1", "_2"]], 2, 3]]]`
+  had the parameters `_1` and `_2`, so applying it to `5` gave a function and
+  not `11`. The search for slots now stops at a nested `Function` with no
+  parameter list, whose slots belong to it. A nested literal with a parameter
+  list owns only the names it declares, and its other slots still refer to the
+  enclosing literal. The same correction applies to the shorthand callbacks of
+  `Map`, `Filter` and `Apply`, to a `Pipe` stage
+  (`Pipe([1, 2], Map(Function(_ + 1)))` gave a function and is now `[2, 3]`), to
+  the JSON serializer and to the `_` slot of the Epsil `|>` operator.
 - **`serializeEpsil` takes linear time in the nesting depth**
   ([#379](https://github.com/cortex-js/compute-engine/issues/379), reported by
   [enumeratio](https://github.com/enumeratio)). The formatter computed the cost

@@ -47,8 +47,8 @@ import {
   canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
   captureNestedLocals,
-  WILDCARD_SYMBOLS,
 } from '../function-utils.js';
+import { freeAnonymousSlots } from '../boxed-expression/function-literal.js';
 
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
 
@@ -400,7 +400,10 @@ function pipeStageWithImplicitTopic(
   if (!isFunction(rhs)) return undefined;
   const name = rhs.operator;
   if (name === 'Function') return undefined;
-  if (rhs.has(WILDCARD_SYMBOLS)) return undefined;
+  // A slot inside a nested `Function` literal belongs to that literal, so a
+  // stage such as `["Map", ["Function", ["Add", "_", 1]]]` has no slot of its
+  // own and still receives the topic as its missing operand.
+  if (freeAnonymousSlots(rhs).size > 0) return undefined;
   const def = ce.lookupDefinition(name);
   const opDef =
     def !== undefined && 'operator' in def ? def.operator : undefined;
@@ -752,9 +755,12 @@ function pipeLiteralStage(
   while (isFunction(stage, 'Delimiter') && stage.nops === 1) stage = stage.op1;
   if (!isFunction(stage, 'Function')) return undefined;
   if (stage.nops === 1) {
-    const usesUnderscore = stage.has('_');
-    const usesFirst = stage.has('_1');
-    if (usesUnderscore === usesFirst || stage.has('_2')) return undefined;
+    // Only the FREE slots of the body count: a slot that a nested literal
+    // binds is not a parameter of this stage (`freeAnonymousSlots`).
+    const slots = freeAnonymousSlots(stage.op1);
+    const usesUnderscore = slots.has('_');
+    const usesFirst = slots.has('_1');
+    if (usesUnderscore === usesFirst || slots.size !== 1) return undefined;
     // Give the shorthand literal its parameter explicitly.
     stage = ce._fn(
       'Function',

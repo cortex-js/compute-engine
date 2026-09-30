@@ -471,3 +471,81 @@ export function functionLiteralBody(expr: Expression): Expression | undefined {
   if (!isFunction(expr, 'Function')) return undefined;
   return expr.ops[0];
 }
+
+/** The anonymous-slot symbols of a shorthand function body: the bare `_`
+ * and the positional `_1`…`_9`. */
+const ANONYMOUS_SLOT_NAMES: ReadonlySet<string> = new Set([
+  '_',
+  '_1',
+  '_2',
+  '_3',
+  '_4',
+  '_5',
+  '_6',
+  '_7',
+  '_8',
+  '_9',
+]);
+
+/**
+ * The anonymous-slot names (`_`, `_1`…`_9`) that `expr` mentions as a
+ * symbol or as an operator name and that no `Function` literal inside
+ * `expr` binds. These are the slots that are FREE in `expr`.
+ *
+ * A `Function` node, including `expr` itself, is read as follows:
+ * - A literal with NO parameter list (a single operand) is a shorthand
+ *   literal. It takes its parameters from every slot its own body uses, so
+ *   none of its slots is free outside it, and the walk does not enter it.
+ *   For example, the body
+ *   `["Add", "_1", [["Function", ["Multiply", "_1", "_2"]], 2, 3]]` mentions
+ *   only `_1`, and the enclosing literal has one parameter, not two.
+ * - A literal WITH a parameter list binds only the names it declares. The
+ *   walk enters its body and ignores those names there. Any other slot in
+ *   that body is free and refers to the enclosing literal: in
+ *   `["Function", ["Apply", ["Function", ["Multiply", "_1", "x"], "x"], 2]]`
+ *   the `_1` is the parameter of the outer literal.
+ *
+ * Every reader that decides "which slots are the parameters of this
+ * shorthand body" must use this walk, so that the reading when boxing
+ * (`anonymousParameters`, `function-utils.ts`) agrees with the reading when
+ * serializing (`serializePrettyJsonFunction`, `serialize.ts`), which drops a
+ * parameter list only when boxing gives it back.
+ */
+export function freeAnonymousSlots(expr: Expression): Set<string> {
+  const result = new Set<string>();
+  // Shared subtrees are walked once. The dedup applies only outside every
+  // explicit-parameter literal: inside one, the same node can have a
+  // different set of bound names, so it is walked each time.
+  const visited = new Set<Expression>();
+  const pending: [Expression, ReadonlySet<string> | undefined][] = [
+    [expr, undefined],
+  ];
+  while (pending.length > 0) {
+    const [e, bound] = pending.pop()!;
+    const s = sym(e);
+    if (s !== undefined) {
+      if (ANONYMOUS_SLOT_NAMES.has(s) && !bound?.has(s)) result.add(s);
+      continue;
+    }
+    if (!isFunction(e)) continue;
+    if (bound === undefined) {
+      if (visited.has(e)) continue;
+      visited.add(e);
+    }
+    const op = e.operator;
+    if (op === 'Function') {
+      if (e.nops < 2) continue;
+      const names = new Set(bound);
+      for (const n of functionLiteralBoundNames(e.ops.slice(1))) names.add(n);
+      pending.push([e.ops[0], names]);
+      continue;
+    }
+    if (ANONYMOUS_SLOT_NAMES.has(op) && !bound?.has(op)) result.add(op);
+    // A store-backed list holds only numbers, which are never a slot, so it
+    // is not walked (walking it would box every element).
+    if ((e as { _numericStore?: unknown })._numericStore !== undefined)
+      continue;
+    for (const x of e.ops) pending.push([x, bound]);
+  }
+  return result;
+}

@@ -39,6 +39,7 @@ import type {
 } from '../global-types.js';
 import { boxBignumResult, isDictionary, isOperatorDef } from './utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
+import { freeAnonymousSlots } from './function-literal.js';
 import {
   isNumber,
   isSymbol,
@@ -484,13 +485,17 @@ function serializePrettyJsonFunction(
         // arity or drop the parameter. The former `["Function", "Add"]`
         // spelling for `_1, _2 \mapsto Add(_1, _2)` was dropped: boxed, it is
         // a function of no argument whose body is the symbol `Add`.
+        //
+        // The wildcards are read as boxing reads them: a wildcard inside a
+        // nested `Function` literal is that literal's parameter, not one of
+        // this literal's (`freeAnonymousSlots`). A parameter used only in a
+        // nested literal therefore keeps the list, or the shorthand would
+        // re-box with fewer parameters.
         const body = block.op1;
-        const bodyWildcards = new Set(
-          body.symbols.filter((s) => /^_[1-9]$/.test(s))
-        );
+        const bodyWildcards = freeAnonymousSlots(body);
         const wildcardParams =
           params.length <= 9 &&
-          !body.has('_') &&
+          !bodyWildcards.has('_') &&
           bodyWildcards.size === params.length &&
           params.every(
             (x, i) =>

@@ -41,6 +41,7 @@ import {
   functionLiteralParameterName,
   functionLiteralParameterNames,
   functionLiteralParameterType,
+  freeAnonymousSlots,
   isDestructuringParameter,
   isRestParameter,
   mentionsQuantifiedVariable,
@@ -485,14 +486,82 @@ function anonymousParameters(
   // body, and threw in `makeLambda`. The body is canonicalized by
   // `canonicalFunctionLiteralArguments`, inside the literal's own scope,
   // where the parameters are declared.
-  const body = expr.subs({ _: '_1' }, { canonical: false });
+  //
+  // Only the FREE slots count (`freeAnonymousSlots`): a slot inside a nested
+  // shorthand literal, or declared by a nested literal's parameter list, is
+  // that literal's own parameter. Before this, a whole-tree scan gave
+  // `["Function", ["Add", "_1", [["Function", ["Multiply", "_1", "_2"]], 2, 3]]]`
+  // the two parameters `_1`, `_2` instead of one (GitHub issue #381).
+  //
+  // The rename follows the same rule: it does not rename a `_` that a
+  // nested literal binds, because a nested literal may declare `_` as an
+  // explicit parameter next to `_1`, and renaming its `_` would give it two
+  // parameters named `_1`.
+  const slots = freeAnonymousSlots(expr);
+  // A nested literal that declares `_1` but not `_` can use the outer `_`:
+  // in `["Function", ["Apply", ["Function", ["Add", "_1", "_"], "_1"], 2]]`,
+  // the inner `_` is the outer parameter. Renaming it to `_1` would make it
+  // the inner parameter instead (the literal applied to 5 gave 4, not 7). In
+  // that case the outer parameter keeps the name `_`, which is a valid
+  // parameter name.
+  if (slots.has('_') && !slots.has('_1') && renameIsCaptured(expr))
+    return [expr, [expr.engine.symbol('_', { canonical: false })]];
+  const body = slots.has('_') ? renameBareSlot(expr) : expr;
+  if (slots.has('_')) slots.add('_1');
 
   const params: Expression[] = [];
   for (let i = 1; i < 10; i++)
-    if (body.has(`_${i}`))
+    if (slots.has(`_${i}`))
       params.push(body.engine.symbol(`_${i}`, { canonical: false }));
 
   return [body, params];
+}
+
+/** True if `renameBareSlot(expr)` would rename a `_` that is inside a
+ * nested literal which declares `_1` (and not `_`): the renamed symbol would
+ * then refer to the nested literal's parameter, not to the enclosing one.
+ * The walk enters the same nodes as `renameBareSlot`. */
+function renameIsCaptured(expr: Expression, insideBinderOf1 = false): boolean {
+  if (isSymbol(expr, '_')) return insideBinderOf1;
+  if (!isFunction(expr)) return false;
+  if ((expr as { _numericStore?: unknown })._numericStore !== undefined)
+    return false;
+  if (expr.operator === 'Function') {
+    if (expr.nops < 2) return false;
+    const bound = functionLiteralBoundNames(expr.ops.slice(1));
+    if (bound.includes('_')) return false;
+    return renameIsCaptured(
+      expr.ops[0],
+      insideBinderOf1 || bound.includes('_1')
+    );
+  }
+  return expr.ops.some((x) => renameIsCaptured(x, insideBinderOf1));
+}
+
+/** A raw copy of `expr` in which the bare slot `_` is renamed `_1` where it
+ * is free. A nested `Function` literal with no parameter list takes its own
+ * slots, so it is not entered. A nested literal with a parameter list is
+ * entered only when it does not declare `_`: its other `_` refer to the
+ * enclosing literal (`freeAnonymousSlots`). Unchanged subtrees are shared,
+ * not copied. */
+function renameBareSlot(expr: Expression): Expression {
+  if (isSymbol(expr, '_'))
+    return expr.engine.symbol('_1', { canonical: false });
+  if (!isFunction(expr)) return expr;
+  if (
+    expr.operator === 'Function' &&
+    (expr.nops < 2 ||
+      functionLiteralBoundNames(expr.ops.slice(1)).includes('_'))
+  )
+    return expr;
+  if ((expr as { _numericStore?: unknown })._numericStore !== undefined)
+    return expr;
+  const ops =
+    expr.operator === 'Function'
+      ? [renameBareSlot(expr.ops[0]), ...expr.ops.slice(1)]
+      : expr.ops.map(renameBareSlot);
+  if (ops.every((x, i) => x === expr.ops[i])) return expr;
+  return expr.engine.function(expr.operator, ops, { form: 'raw' });
 }
 
 /** Assuming that ops has the following form:
@@ -1647,25 +1716,11 @@ function typedBinding(
   return value.type.matches(t) ? t : undefined;
 }
 
-/** The shorthand-lambda placeholder symbols: `_` and `_1`…`_9`. An expression
- * containing any of these is a shorthand function body (case 6 of
- * `canonicalFunctionLiteral`). */
-export const WILDCARD_SYMBOLS = [
-  '_',
-  '_1',
-  '_2',
-  '_3',
-  '_4',
-  '_5',
-  '_6',
-  '_7',
-  '_8',
-  '_9',
-];
-
 /**
  * Canonicalize `expr` with the shorthand-lambda placeholders it mentions
- * (`_`, `_1`…`_9`) bound to FRESH, valueless locals.
+ * (`_`, `_1`…`_9`) bound to FRESH, valueless locals. A placeholder inside a
+ * nested `Function` literal is that literal's own parameter and is not
+ * pre-declared here (`freeAnonymousSlots`).
  *
  * `Pipe` is lazy, so it canonicalizes its held right operand in the CALLER's
  * scope — before `canonicalFunctionLiteral` wraps `Map(f, _1)` into
@@ -1686,7 +1741,14 @@ export const WILDCARD_SYMBOLS = [
  *
  */
 export function canonicalWithFreshPlaceholders(expr: Expression): Expression {
-  const names = WILDCARD_SYMBOLS.filter((name) => expr.has(name));
+  // When `expr` is itself a literal (a pipe stage), its own slot parameters
+  // are pre-declared too, so the body of the literal is read, not the
+  // literal: `freeAnonymousSlots` does not report the names a literal binds.
+  const names = [
+    ...freeAnonymousSlots(
+      isFunction(expr, 'Function') && expr.nops > 0 ? expr.ops[0] : expr
+    ),
+  ];
   if (names.length === 0) return expr.canonical;
   const ce = expr.engine;
   const scope: Scope = {
@@ -1752,7 +1814,7 @@ function denotesFunction(e: Expression | undefined | null): boolean {
     isFunction(e) &&
     e.operator !== 'Function' &&
     e.type.matches('function') &&
-    !e.has(WILDCARD_SYMBOLS)
+    freeAnonymousSlots(e).size === 0
   );
 }
 

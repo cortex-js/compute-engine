@@ -207,6 +207,193 @@ describe('Anonymous function with anonymous parameters', () => {
   });
 });
 
+// GitHub issue #381: a `Function` with no parameter list takes its
+// parameters from the anonymous slots (`_`, `_1`…`_9`) of its body. A slot
+// inside a NESTED shorthand `Function` literal belongs to that literal and is
+// not a parameter of the enclosing one. A nested literal WITH a parameter
+// list binds only the names it declares: another slot in its body refers to
+// the enclosing literal.
+describe('Anonymous parameters stop at a nested Function literal', () => {
+  test('a nested literal applied in place', () => {
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      ['Add', '_1', [['Function', ['Multiply', '_1', '_2']], 2, 3]],
+    ];
+    expect(ce.box(f).ops!.slice(1).map(String)).toEqual(['_1']);
+    expect(
+      ce
+        .box([f, 5] as Expression)
+        .evaluate()
+        .toString()
+    ).toBe('11');
+  });
+
+  test('the bare `_` in both literals', () => {
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      ['Add', '_', [['Function', ['Multiply', '_', 10]], 2]],
+    ];
+    expect(ce.box(f).ops!.slice(1).map(String)).toEqual(['_1']);
+    expect(
+      ce
+        .box([f, 1] as Expression)
+        .evaluate()
+        .toString()
+    ).toBe('21');
+  });
+
+  test('a nested literal whose explicit parameters are `_` and `_1`', () => {
+    // Renaming the outer `_` to `_1` must not rename the inner parameter `_`,
+    // or the inner literal would have two parameters named `_1`.
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      [
+        'Add',
+        '_',
+        ['Apply', ['Function', ['Subtract', '_', '_1'], '_', '_1'], 5, 2],
+      ],
+    ];
+    expect(
+      ce
+        .box([f, 1] as Expression)
+        .evaluate()
+        .toString()
+    ).toBe('4');
+  });
+
+  test('a nested literal that declares `_1` uses the outer `_`', () => {
+    // The outer `_` is not renamed `_1`: inside the nested literal, `_1` is
+    // that literal's parameter, so the renamed symbol would refer to it.
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      ['Apply', ['Function', ['Add', '_1', '_'], '_1'], 2],
+    ];
+    expect(ce.box(f).ops!.slice(1).map(String)).toEqual(['_']);
+    expect(ce.box(['Apply', f, 5]).evaluate().toString()).toBe('7');
+  });
+
+  test('a nested literal that is not applied in place', () => {
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      ['Map', ['Function', ['Add', '_1', '_1']], ['List', 1, 2]],
+    ];
+    expect(ce.box(f).nops).toBe(1);
+    expect(
+      ce
+        .box([f] as Expression)
+        .evaluate()
+        .toString()
+    ).toBe('[2,4]');
+  });
+
+  test('a nested literal with its own parameter list', () => {
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      ['Map', ['Function', ['Add', 'x', '_1'], '_1'], ['List', 1, 2]],
+    ];
+    expect(ce.box(f).nops).toBe(1);
+  });
+
+  test('a slot that a nested literal does not declare is the outer parameter', () => {
+    // The inner literal declares only `x`, so its `_1` is the parameter of
+    // the outer shorthand literal: (5 * 2).
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      ['Apply', ['Function', ['Multiply', '_1', 'x'], 'x'], 2],
+    ];
+    expect(ce.box(f).ops!.slice(1).map(String)).toEqual(['_1']);
+    expect(ce.box(['Apply', f, 5]).evaluate().toString()).toBe('10');
+  });
+
+  test('a bare `_` that a nested literal does not declare is the outer parameter', () => {
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      ['Apply', ['Function', ['Multiply', '_', 'x'], 'x'], 2],
+    ];
+    expect(ce.box(['Apply', f, 5]).evaluate().toString()).toBe('10');
+  });
+
+  test('a shorthand pipe stage whose nested literal uses `_1` is unary', () => {
+    // The `_1` belongs to the nested shorthand literal, so the stage has the
+    // one parameter `_` and the pipe canonicalizes it to a unary literal.
+    const ce = new ComputeEngine();
+    const pipe = ce.box([
+      'Pipe',
+      ['List', 1, 2],
+      [
+        'Function',
+        ['Add', '_', ['Apply', ['Function', ['Multiply', '_1', 10]], 1]],
+      ],
+    ]);
+    expect(pipe.op2.operator).toBe('Function');
+    expect(pipe.op2.nops).toBe(2);
+    expect(pipe.op2.toString()).toBe('(_) => _ + Apply((_) => 10 * _, 1)');
+    expect(pipe.evaluate().toString()).toBe('[11,12]');
+  });
+
+  test('the shorthand body of a callback', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'Map',
+          ['Add', '_', ['Apply', ['Function', ['Multiply', '_1', 10]], 1]],
+          ['List', 1, 2],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[11,12]');
+  });
+
+  test('a pipe stage whose only slot is in a nested literal gets the topic', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Pipe', ['List', 1, 2], ['Map', ['Function', ['Add', '_', 1]]]])
+        .evaluate()
+        .toString()
+    ).toBe('[2,3]');
+  });
+
+  test('the LaTeX `()\\mapsto` spelling', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .parse(
+          '(()\\mapsto\\operatorname{\\_1}+(()\\mapsto\\operatorname{\\_1}\\operatorname{\\_2})(2,3))(5)'
+        )
+        .evaluate()
+        .toString()
+    ).toBe('11');
+  });
+
+  test('a parameter used only in a nested literal keeps the parameter list', () => {
+    // The serializer drops a parameter list only when boxing reads it back.
+    // `_2` here is used only inside the nested literal, so boxing
+    // `["Function", body]` would give one parameter, not two.
+    const ce = new ComputeEngine();
+    const f = ce.box([
+      'Function',
+      ['Add', '_1', ['Apply', ['Function', ['Multiply', '_2', 3], '_2'], 4]],
+      '_1',
+      '_2',
+    ]);
+    const json = f.toMathJson({ prettify: true });
+    expect(JSON.stringify(json)).toBe(
+      '["Function",["Add","_1",["Apply",["Function",["Multiply",3,"_2"],"_2"],4]],"_1","_2"]'
+    );
+    expect(ce.box(json as Expression).nops).toBe(3);
+  });
+});
+
 describe('Currying', () => {
   test('f7 expects two arguments. Only one provided', () =>
     // The renamed parameters are printed: the parameter-less shorthand is

@@ -9637,22 +9637,65 @@ function scanExponent(t: string, i: number, isP: boolean): number | null {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 //
 
-/** Whether a node mentions a shorthand-lambda placeholder — the bare `_` or a
- * positional `_1`…`_9` — anywhere in its operands. Heads are not inspected. */
-function mentionsWildcard(node: MathJsonExpression): boolean {
+/** The operands of a function node (operator first), or `undefined` when
+ * the node is not a function node. */
+function nodeArgs(node: MathJsonExpression): MathJsonExpression[] | undefined {
+  if (Array.isArray(node)) return node as MathJsonExpression[];
+  if (typeof node === 'object' && node !== null && 'fn' in node)
+    return node.fn as MathJsonExpression[];
+  return undefined;
+}
+
+/** Add to `out` every name a lambda parameter node binds: a bare symbol, the
+ * symbol inside a `Typed` annotation or a rest parameter's `Spread`, and
+ * each leaf of a destructuring `Tuple` pattern. */
+function collectParamNames(p: MathJsonExpression, out: Set<string>): void {
+  const s = symbol(p);
+  if (s !== null) {
+    out.add(s);
+    return;
+  }
+  const args = nodeArgs(p);
+  if (args === undefined) return;
+  const head = symbol(args[0]);
+  if (head === 'Typed' || head === 'Spread') {
+    if (args[1] !== undefined) collectParamNames(args[1], out);
+  } else if (head === 'Tuple') {
+    for (let i = 1; i < args.length; i++) collectParamNames(args[i], out);
+  }
+}
+
+/** Whether a node mentions a FREE shorthand-lambda placeholder — the bare
+ * `_` or a positional `_1`…`_9` — in its operands. Heads are not inspected.
+ * A nested `Function` literal is read as `freeAnonymousSlots` in
+ * `boxed-expression/function-literal.ts` reads it:
+ * - a literal with no parameter list takes every placeholder in its body as
+ *   its own parameter, so the walk does not enter it, and
+ *   `1 + (ys |> _ * 2)` as a pipe stage is not an implicit lambda;
+ * - a literal with a parameter list binds only the names it declares, so
+ *   the walk enters its body and ignores those names. The `_` in
+ *   `10 + ((y => y * _)(3))` is free there and is the pipe topic. */
+function mentionsWildcard(
+  node: MathJsonExpression,
+  bound?: ReadonlySet<string>
+): boolean {
   const s = symbol(node);
   if (s !== null)
     return (
-      s === '_' ||
-      (s.length === 2 && s[0] === '_' && s[1] >= '1' && s[1] <= '9')
+      (s === '_' ||
+        (s.length === 2 && s[0] === '_' && s[1] >= '1' && s[1] <= '9')) &&
+      !bound?.has(s)
     );
-  let args: MathJsonExpression[] | undefined;
-  if (Array.isArray(node)) args = node as MathJsonExpression[];
-  else if (typeof node === 'object' && node !== null && 'fn' in node)
-    args = node.fn as MathJsonExpression[];
+  const args = nodeArgs(node);
   if (args === undefined) return false;
+  if (symbol(args[0]) === 'Function') {
+    if (args.length < 3) return false;
+    const names = new Set(bound);
+    for (let i = 2; i < args.length; i++) collectParamNames(args[i], names);
+    return mentionsWildcard(args[1], names);
+  }
   for (let i = 1; i < args.length; i++)
-    if (mentionsWildcard(args[i])) return true;
+    if (mentionsWildcard(args[i], bound)) return true;
   return false;
 }
 
