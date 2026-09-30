@@ -2,6 +2,26 @@
 
 ### Issues Resolved
 
+- **A recursive Epsil program that builds a list through a local copied from
+  an untyped parameter compiles.** `function fill(p, q, r, depth, acc) { let
+  out = acc; for c in … { out = [...out, c]; out = fill(…, out) } … }`
+  declined on the JavaScript target with "Could not compile `ListJoin`:
+  operand 1 is not an indexed collection", and the smaller
+  `function f(acc) { let out = acc; out = [...out, 1]; out }` compiled but
+  broadcast `f([0])` over the list. Two causes: the local copied from the
+  parameter kept the parameter untyped, so a use of the local as a collection
+  taught the parameter nothing; and a self-call inside a `function` body was
+  typed as a broadcast (`broadcastable<unknown>`) from the bare `function`
+  type the recursion knot declares, which widened the local past the list
+  its spread gives. Now the first use that narrows such a local narrows the
+  parameter it was copied from, and a self-call types `unknown` while the
+  clause canonicalizes and installs. The natural recursive spelling of the
+  Apollonian gasket compiles and computes its 224 circles in a few
+  milliseconds; the interpreter takes about 16 seconds. A self-recursive
+  function whose base clause reads its parameter whole now derives that
+  clause's result (`-> number`) instead of `-> broadcastable<unknown>`.
+  (Tycho row 339.)
+
 - **A self-recursive function that builds a list is typed `list<T>`.** With
   `F` declared `(unknown, unknown) -> unknown` and assigned
   `(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the

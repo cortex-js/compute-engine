@@ -7330,6 +7330,32 @@ function type(expr: BoxedFunction): Type | BoxedType {
   // `test/compute-engine/effects-seam.test.ts`.
   if (expr.operator === 'Function') return functionLiteralSignatureType(expr);
 
+  // A call to a function whose clause body is being canonicalized under the
+  // recursion knot of `DefineFunction` (`IComputeEngine._recursionKnots`)
+  // types `unknown` while the call still resolves to the knot's placeholder
+  // binding: the placeholder's bare `function` type says nothing about the
+  // result, and the broadcast lift below would guess one from a collection
+  // argument. The binding is compared by identity AND by shape (an
+  // INFERRED value binding typed the bare `function`, which is what the
+  // knot declares for an undeclared name): the install converts the SAME
+  // record into the clause's operator definition in place, so identity
+  // alone would still match a caller repaired during the install, whose
+  // call must be typed from the installed clause; and a name the author
+  // declared with the wildcard `function` type is a declaration, typed as
+  // it always was. A call that resolves to another binding of the name (a
+  // local of the same name) is typed as usual.
+  const knot = expr.engine._recursionKnots.get(expr.operator);
+  if (knot !== undefined) {
+    const binding = expr.engine.lookupDefinition(expr.operator);
+    if (
+      binding === knot.binding &&
+      isValueDef(binding) &&
+      binding.value.inferredType &&
+      binding.value.type.type === 'function'
+    )
+      return 'unknown';
+  }
+
   // Is there a definition associated with the operator of the function?
   const def = expr.operatorDefinition;
   if (def) {

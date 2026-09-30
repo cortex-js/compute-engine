@@ -220,6 +220,23 @@ export class _BoxedValueDefinition
    * an inferred signature is revised by `_reviseInferredType` instead. */
   _signatureSkeleton: Type | undefined = undefined;
 
+  /** The bare symbol an untyped `let` of this block local was initialized
+   * from, when that symbol is itself an untyped, valueless, inferred binding
+   * (a bare parameter of the enclosing function: `let out = acc`). Recorded
+   * by the `Declare` canonical handler (`recordInitializerEvidence`,
+   * `library/core.ts`), cleared by every later assignment to the local
+   * (`joinAssignmentEvidence`, same file) and read by
+   * `BoxedSymbol._inferWithoutFacts` (`boxed-symbol.ts`): the first use that
+   * narrows this local narrows what it holds, which is the initializer's
+   * value while no assignment has replaced it, so the same requirement is
+   * written on the initializer as long as it is still untyped. Without it
+   * `let out = acc; out = [...out, c]` left
+   * `acc` untyped, and a call `f([1, 2])` broadcast over the list instead of
+   * passing it whole (row 339 of the Tycho ledger,
+   * `tycho/docs/COMPUTE_ENGINE.md`). Set once, at the declaration; a
+   * checkpoint restores it with the binding. */
+  _initializerAlias: Expression | undefined = undefined;
+
   /** Memo of the signature derived from `_signatureSkeleton`, keyed on the
    * identities of the skeleton and of the stored value's type object. It is
    * not state, so a checkpoint does not capture it: a restore that changes
@@ -756,6 +773,7 @@ export class _BoxedValueDefinition
       _blockLocal: this._blockLocal,
       _placeholderSkeleton: this._placeholderSkeleton,
       _signatureSkeleton: this._signatureSkeleton,
+      _initializerAlias: this._initializerAlias,
       // COPIED, not aliased: provenance is appended to in place, so a
       // snapshot sharing the array would grow with the writes it exists to
       // undo and restore the post-write history.
@@ -804,6 +822,7 @@ export class _BoxedValueDefinition
     this._blockLocal = s._blockLocal as boolean;
     this._placeholderSkeleton = s._placeholderSkeleton as Type | undefined;
     this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
+    this._initializerAlias = s._initializerAlias as Expression | undefined;
     this._typeProvenance = s._typeProvenance as
       TypeProvenanceEntry[] | undefined;
     this.effectsDeclared = s.effectsDeclared as boolean;

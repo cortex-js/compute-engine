@@ -1766,6 +1766,12 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * other declaration.
    * @internal */
   _signatureSkeleton: Type | undefined;
+  /** The bare untyped symbol an untyped `let` initialized this block local
+   * from (`let out = acc`), or `undefined`. A use that narrows the local
+   * before any assignment narrows this symbol too. See
+   * `_BoxedValueDefinition._initializerAlias`.
+   * @internal */
+  _initializerAlias?: Expression | undefined;
 
   /** Install an element refinement of the placeholder skeleton without
    * disturbing `_placeholderSkeleton` (the public `type` setter maintains

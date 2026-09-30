@@ -1169,6 +1169,11 @@ export class ComputeEngine implements IComputeEngine {
     );
   }
 
+  /** See `IComputeEngine._recursionKnots`.
+   * @internal */
+  readonly _recursionKnots: Map<string, { depth: number; binding: object }> =
+    new Map();
+
   /** See `IComputeEngine._cacheGeneration()`.
    * @internal */
   _cacheGeneration(): number {

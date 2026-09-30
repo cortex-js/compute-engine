@@ -242,6 +242,27 @@ so the hypothesis pass reads `unknown` from `G` and is refuted. A fix would
 treat the strongly connected component of the call graph as one unit, or
 retire a callee's memo when the function it was derived inside settles.
 
+### An annotated parameter makes a `function`'s derived signature a contract that refuses a `T | missing` argument (OPEN, decision — found 2026-09-29 by the fix for Tycho row 339)
+
+The natural recursive gasket program compiles once its parameters are left
+bare. The variant that annotates the accumulator
+(`fill(p, q, r, depth, acc: list<tuple<number, number, number, number>>)`)
+still declines: the annotation makes the whole derived signature a declared
+contract, so its OTHER parameters, inferred `indexed_collection<number>`
+from `p[1]`, are enforced at every call, and the call
+`fill(gap[1], gap[2], gap[3], 2, circles)` is refused with
+`incompatible-type` because `gap[3]` is typed `missing | tuple<number, number, number>`:
+the third component of each gap is `C = first(filter(cands, …))`, whose
+static type admits the absent case. The interpreter runs the program (the
+value is present). The ledger read this as the loop variable being typed
+`indexed_collection<number>`; it is the argument's `missing` arm against
+the inferred parameter. Decision needed: (a) a parameter slot INFERRED from
+uses admits a `T | missing` argument whose `T` fits, absence propagating at
+run time as it does for an unannotated function, or (b) the refusal stays
+and the author guards or annotates the local (`let C: tuple<…> = …`).
+Option (a) matches the rule that an inferred lambda signature is not
+enforced at application.
+
 ### A parameter that reaches a whole-collection operator indirectly is still applied element by element (OPEN — recorded 2026-09-29 with the decision on whole-collection parameters)
 
 The decision of 2026-09-29 binds a list whole only when the bare parameter is

@@ -744,6 +744,28 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           to: inferred,
           kind: 'inferred',
         });
+        // The FIRST narrowing of a valueless block local that an untyped
+        // `let` initialized from a bare untyped symbol (`let out = acc`) is
+        // a use of that symbol's value: no assignment has replaced it (an
+        // assignment clears the alias, `joinAssignmentEvidence` in
+        // `library/core.ts`), so the initializer takes the same requirement
+        // while it is itself still untyped and valueless
+        // (`_initializerAlias`, `boxed-value-definition.ts`).
+        if (inferenceMode === 'narrow' && previousType.isUnknown) {
+          const alias = def.value._initializerAlias;
+          const source = alias?.valueDefinition;
+          if (
+            alias !== undefined &&
+            source !== undefined &&
+            def.value.value === undefined &&
+            source.inferredType &&
+            !source.isConstant &&
+            source.value === undefined &&
+            source.type.isUnknown &&
+            this.engine._staticAssignmentEvidence?.get(source) === undefined
+          )
+            alias._infer(() => inferred.type, 'narrow');
+        }
         return true;
       }
       return false;

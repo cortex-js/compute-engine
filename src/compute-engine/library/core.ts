@@ -1980,6 +1980,12 @@ function joinAssignmentEvidence(
   )
     return;
   const target = def.value;
+  // Any assignment ends the aliasing of an initializer (`let out = acc`):
+  // after `out = g(x)` the local no longer holds `acc`'s value, whatever
+  // the type of `g(x)` (an `unknown`-typed value records no evidence, so the
+  // type alone cannot tell). The `let` that records the alias calls this
+  // first and sets the alias after it.
+  target._initializerAlias = undefined;
   const first = assignedType();
   if (first !== undefined) joinEvidenceOnBinding(ce, target, first);
   // The value's type is read NOW, but a read in the value of a local that a
@@ -4451,6 +4457,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               : loosenForClauseDefinition(ce, symbolName);
         }
         let canonFn: Expression;
+        // While the body canonicalizes, a self-call types `unknown`
+        // (`_recursionKnotNames`, read by the application typing in
+        // `boxed-function.ts`), unless the author declared the signature,
+        // which the self-call is then typed against (§4.3a).
+        const knotName =
+          symbolName !== undefined && declaredForParams === undefined
+            ? symbolName
+            : undefined;
+        if (knotName !== undefined) {
+          const knot = ce._recursionKnots.get(knotName);
+          if (knot !== undefined) knot.depth += 1;
+          else {
+            const binding = ce.lookupDefinition(knotName);
+            if (binding !== undefined)
+              ce._recursionKnots.set(knotName, { depth: 1, binding });
+          }
+        }
         try {
           // The parameter ascription canonicalizes the rebuilt literal itself,
           // so it must run INSIDE the loosened window like the plain
@@ -4468,158 +4491,170 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         } finally {
           restoreClause?.();
         }
-
-        // §4.5b D13 (nominal-types design) — constructor-function recognition
-        // must ALSO run at canonicalization time (mirrors `Assign`): the
-        // static pre-pass canonicalizes LATER statements before anything
-        // evaluates, and their calls must validate against the constructor's
-        // overload signature, not the auto-minted one. The evaluate route
-        // re-runs the same installation idempotently (via `ce.assign`).
-        if (
-          isCtorTarget &&
-          symbolName !== undefined &&
-          isFunction(canonFn, 'Function')
-        ) {
-          try {
-            checkTypeConstructorNamespace(
-              ctorScope,
-              symbolName,
-              'constructor-function'
-            );
-            installConstructorFunction(
-              ce,
-              ctorScope,
-              symbolName,
-              ctorType!,
-              canonFn
-            );
-          } catch {
-            // A conflict (D5 collision, D14a overlap) is diagnosed on the
-            // evaluate route, which runs the same recognition and throws
-            // with the full message; canonicalization stays silent.
-          }
-        }
-        // An alias's same-name function is an ordinary function (nominal
-        // §4.5); its FIRST definition replaces the minted identity
-        // constructor early so later statements' arities are honest.
-        // Later definitions accumulate as ordinary clauses (evaluate
-        // route) — the binding is no longer minted, so this is a no-op.
-        if (
-          isAliasTarget &&
-          symbolName !== undefined &&
-          isFunction(canonFn, 'Function')
-        ) {
-          const binding = ctorScope.bindings.get(symbolName);
-          if (binding !== undefined && isMintedConstructor(binding)) {
-            const fnDef = assignValueAsOperatorDef(ce, canonFn);
-            if (fnDef !== undefined) {
-              updateDef(ce, symbolName, binding, fnDef);
-              // A minted constructor is callable on both sides of the swap.
-              ce._noteStateEvent({
-                kind: 'redefine',
-                callableBefore: true,
-                callableAfter: true,
-              });
-            }
-          }
-        }
-        // Install the clause NOW, not only when the definition evaluates, so
-        // that a later statement's calls validate against the real signature.
-        // Without this the target keeps the loosened `function` type set
-        // above — the top type, which promises no arity — so `foo("hello")`
-        // against `function foo(x: string, n: integer)` type-checks
-        // vacuously. That is invisible when a program runs (the definition
-        // has evaluated by the time the call does), but the Epsil static
-        // pre-pass canonicalizes EVERY statement before anything runs, so
-        // there it is the difference between `epsil check` catching a wrong
-        // call to a user-defined function and passing it clean.
-        //
-        // Same reason — and the same canonicalization-time timing — as the
-        // constructor-function recognition above (§4.5b D13).
-        //
-        // Placement is load-bearing twice over: after `args[1].canonical`, so
-        // the recursion knot above still holds while the body canonicalizes;
-        // and after `restoreClause()`, so the install lands on the restored
-        // binding rather than the loosened one.
-        //
-        // The evaluate route runs `defineFunctionClause` again on this same
-        // clause. For an ordinary clause that is a no-op rather than a
-        // duplicate arm: a clause whose parameter domain matches an installed
-        // one replaces it in place.
-        //
-        // ANYTHING GENERIC is excluded, because that no-op does not hold for
-        // it. `defineFunctionClause` refuses ANY clause onto an
-        // already-generic definition (rule G2: generic functions are
-        // single-clause), and that gate runs before the replace logic — so an
-        // install here would make the evaluate route reject its own
-        // re-installation with `generic-clause-unsupported`. Both directions
-        // have to be excluded: a generic CLAUSE (`function f<T>(x: T) { … }`)
-        // would make the target generic, and a plain clause onto a target
-        // that is ALREADY generic (`ce.declare('k', '(T) -> T where T')` then
-        // `function k(x) { … }`) installs through the generic boundary and
-        // leaves it generic just the same. The cost is that calls to a
-        // generic function are still not argument-checked until it has
-        // evaluated; closing that needs the two routes to agree on which one
-        // owns the install, which is a larger change than this one.
-        if (
-          !isCtorTarget &&
-          !isAliasTarget &&
-          symbolName !== undefined &&
-          isFunction(canonFn, 'Function')
-        ) {
-          const target = ce.lookupDefinition(symbolName);
+        // The knot name stays registered until the clause is installed
+        // below: the clause's signature is assembled from the literal's type,
+        // and a self-call typed between the end of the canonicalization and
+        // the install would get the broadcast guess the marker exists to
+        // prevent.
+        try {
+          // §4.5b D13 (nominal-types design) — constructor-function recognition
+          // must ALSO run at canonicalization time (mirrors `Assign`): the
+          // static pre-pass canonicalizes LATER statements before anything
+          // evaluates, and their calls must validate against the constructor's
+          // overload signature, not the auto-minted one. The evaluate route
+          // re-runs the same installation idempotently (via `ce.assign`).
           if (
-            isGenericClauseLiteral(canonFn) ||
-            isGenericTarget(target) ||
-            canonInstallSkipped(target)
+            isCtorTarget &&
+            symbolName !== undefined &&
+            isFunction(canonFn, 'Function')
           ) {
-            // Skipping one clause of a name obliges us to skip the rest of
-            // them; `canonInstallSkipped` explains why.
-            noteCanonInstallSkipped(target);
-          } else {
             try {
-              // REDEFINITION DISCIPLINE — anchored on the RAW name operand,
-              // the same token the evaluate route below reads, so this
-              // statement's up-to-three installs (static pre-pass
-              // canonicalize, eval-loop canonicalize, evaluate) all carry ONE
-              // identity and cannot collide with themselves. The install runs
-              // INSIDE `withStatementRoute` so that anything the clause body
-              // declares re-entrantly through the box route stays unstamped.
-              withStatementRoute(ce, (route) =>
-                defineFunctionClause(
-                  ce,
-                  symbolName,
-                  canonFn,
-                  statementOrigin(ce, args[0], route),
-                  attributes
-                )
+              checkTypeConstructorNamespace(
+                ctorScope,
+                symbolName,
+                'constructor-function'
               );
-            } catch (e) {
-              // A malformed or conflicting clause is diagnosed on the
-              // evaluate route, which runs the same installation and turns
-              // the failure into an error VALUE with the full message;
-              // canonicalization stays silent, exactly as the constructor
-              // branch does. The target keeps whatever it had, so nothing
-              // downstream validates against a half-built signature.
-              //
-              // A REDEFINITION refusal is the exception, and must NOT mark the
-              // target. The marker is sticky for the life of the definition
-              // record — it exists to keep canonicalization from building a
-              // picture of a definition the program will not actually have —
-              // but a refused duplicate leaves the EARLIER clause installed and
-              // entirely valid, so there is no divergence to protect against.
-              // Marking here made the refusal poison every later compilation
-              // unit: once one cell wrote a duplicate clause, the static
-              // collector stopped recording that name's clauses for good, and a
-              // later clean cell silently lost the `function-redefinition`
-              // diagnostic it was promised (`src/epsil/static-diagnostics.ts`,
-              // `clauseRedefinitionDiagnostic`).
-              if (!(e instanceof RedefinitionError))
-                noteCanonInstallSkipped(target);
+              installConstructorFunction(
+                ce,
+                ctorScope,
+                symbolName,
+                ctorType!,
+                canonFn
+              );
+            } catch {
+              // A conflict (D5 collision, D14a overlap) is diagnosed on the
+              // evaluate route, which runs the same recognition and throws
+              // with the full message; canonicalization stays silent.
             }
           }
+          // An alias's same-name function is an ordinary function (nominal
+          // §4.5); its FIRST definition replaces the minted identity
+          // constructor early so later statements' arities are honest.
+          // Later definitions accumulate as ordinary clauses (evaluate
+          // route) — the binding is no longer minted, so this is a no-op.
+          if (
+            isAliasTarget &&
+            symbolName !== undefined &&
+            isFunction(canonFn, 'Function')
+          ) {
+            const binding = ctorScope.bindings.get(symbolName);
+            if (binding !== undefined && isMintedConstructor(binding)) {
+              const fnDef = assignValueAsOperatorDef(ce, canonFn);
+              if (fnDef !== undefined) {
+                updateDef(ce, symbolName, binding, fnDef);
+                // A minted constructor is callable on both sides of the swap.
+                ce._noteStateEvent({
+                  kind: 'redefine',
+                  callableBefore: true,
+                  callableAfter: true,
+                });
+              }
+            }
+          }
+          // Install the clause NOW, not only when the definition evaluates, so
+          // that a later statement's calls validate against the real signature.
+          // Without this the target keeps the loosened `function` type set
+          // above — the top type, which promises no arity — so `foo("hello")`
+          // against `function foo(x: string, n: integer)` type-checks
+          // vacuously. That is invisible when a program runs (the definition
+          // has evaluated by the time the call does), but the Epsil static
+          // pre-pass canonicalizes EVERY statement before anything runs, so
+          // there it is the difference between `epsil check` catching a wrong
+          // call to a user-defined function and passing it clean.
+          //
+          // Same reason — and the same canonicalization-time timing — as the
+          // constructor-function recognition above (§4.5b D13).
+          //
+          // Placement is load-bearing twice over: after `args[1].canonical`, so
+          // the recursion knot above still holds while the body canonicalizes;
+          // and after `restoreClause()`, so the install lands on the restored
+          // binding rather than the loosened one.
+          //
+          // The evaluate route runs `defineFunctionClause` again on this same
+          // clause. For an ordinary clause that is a no-op rather than a
+          // duplicate arm: a clause whose parameter domain matches an installed
+          // one replaces it in place.
+          //
+          // ANYTHING GENERIC is excluded, because that no-op does not hold for
+          // it. `defineFunctionClause` refuses ANY clause onto an
+          // already-generic definition (rule G2: generic functions are
+          // single-clause), and that gate runs before the replace logic — so an
+          // install here would make the evaluate route reject its own
+          // re-installation with `generic-clause-unsupported`. Both directions
+          // have to be excluded: a generic CLAUSE (`function f<T>(x: T) { … }`)
+          // would make the target generic, and a plain clause onto a target
+          // that is ALREADY generic (`ce.declare('k', '(T) -> T where T')` then
+          // `function k(x) { … }`) installs through the generic boundary and
+          // leaves it generic just the same. The cost is that calls to a
+          // generic function are still not argument-checked until it has
+          // evaluated; closing that needs the two routes to agree on which one
+          // owns the install, which is a larger change than this one.
+          if (
+            !isCtorTarget &&
+            !isAliasTarget &&
+            symbolName !== undefined &&
+            isFunction(canonFn, 'Function')
+          ) {
+            const target = ce.lookupDefinition(symbolName);
+            if (
+              isGenericClauseLiteral(canonFn) ||
+              isGenericTarget(target) ||
+              canonInstallSkipped(target)
+            ) {
+              // Skipping one clause of a name obliges us to skip the rest of
+              // them; `canonInstallSkipped` explains why.
+              noteCanonInstallSkipped(target);
+            } else {
+              try {
+                // REDEFINITION DISCIPLINE — anchored on the RAW name operand,
+                // the same token the evaluate route below reads, so this
+                // statement's up-to-three installs (static pre-pass
+                // canonicalize, eval-loop canonicalize, evaluate) all carry ONE
+                // identity and cannot collide with themselves. The install runs
+                // INSIDE `withStatementRoute` so that anything the clause body
+                // declares re-entrantly through the box route stays unstamped.
+                withStatementRoute(ce, (route) =>
+                  defineFunctionClause(
+                    ce,
+                    symbolName,
+                    canonFn,
+                    statementOrigin(ce, args[0], route),
+                    attributes
+                  )
+                );
+              } catch (e) {
+                // A malformed or conflicting clause is diagnosed on the
+                // evaluate route, which runs the same installation and turns
+                // the failure into an error VALUE with the full message;
+                // canonicalization stays silent, exactly as the constructor
+                // branch does. The target keeps whatever it had, so nothing
+                // downstream validates against a half-built signature.
+                //
+                // A REDEFINITION refusal is the exception, and must NOT mark the
+                // target. The marker is sticky for the life of the definition
+                // record — it exists to keep canonicalization from building a
+                // picture of a definition the program will not actually have —
+                // but a refused duplicate leaves the EARLIER clause installed and
+                // entirely valid, so there is no divergence to protect against.
+                // Marking here made the refusal poison every later compilation
+                // unit: once one cell wrote a duplicate clause, the static
+                // collector stopped recording that name's clauses for good, and a
+                // later clean cell silently lost the `function-redefinition`
+                // diagnostic it was promised (`src/epsil/static-diagnostics.ts`,
+                // `clauseRedefinitionDiagnostic`).
+                if (!(e instanceof RedefinitionError))
+                  noteCanonInstallSkipped(target);
+              }
+            }
+          }
+          return ce._fn('DefineFunction', [symbol, canonFn, ...attrs]);
+        } finally {
+          if (knotName !== undefined) {
+            const knot = ce._recursionKnots.get(knotName);
+            if (knot !== undefined && knot.depth > 1) knot.depth -= 1;
+            else ce._recursionKnots.delete(knotName);
+          }
         }
-        return ce._fn('DefineFunction', [symbol, canonFn, ...attrs]);
       },
       evaluate: ([op1, op2, op3], { engine: ce }) => {
         const name = sym(op1);
@@ -5438,6 +5473,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             () => (value.type.isUnknown ? undefined : value.type.type),
             { currentScopeOnly: true }
           );
+          // An initializer that is a bare untyped symbol (`let out = acc`
+          // with `acc` a bare parameter) records nothing above, since its
+          // type is `unknown`. The local remembers it instead, so that a use
+          // that narrows the local before any assignment to it narrows the
+          // initializer too (`_initializerAlias`, read by
+          // `BoxedSymbol._inferWithoutFacts` in `boxed-symbol.ts`; every
+          // later assignment to the local clears it, see
+          // `joinAssignmentEvidence`).
+          if (!isSymbol(value)) return;
+          const source = value.valueDefinition;
+          if (
+            source === undefined ||
+            !source.inferredType ||
+            source.isConstant ||
+            source.value !== undefined ||
+            !source.type.isUnknown
+          )
+            return;
+          const local = ce.context.lexicalScope.bindings.get(symbolExpr.symbol);
+          if (local !== undefined && isValueDef(local))
+            local.value._initializerAlias = value;
         };
 
         if (args.length === 2) {

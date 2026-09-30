@@ -1075,6 +1075,25 @@ export interface IComputeEngine {
    * @internal */
   _cacheGeneration(): number;
 
+  /** The functions whose clause body is being canonicalized under the
+   * recursion knot of `DefineFunction` (`library/core.ts`), by name: the
+   * placeholder binding the knot declared for the name, and the number of
+   * nested definitions of that name in flight (only the outermost exit
+   * removes the entry). A call to such a name that still resolves to the
+   * placeholder binding types `unknown` while the knot is open: the knot
+   * declares the target as a bare `function`, and a call to a bare
+   * `function` with a collection argument is otherwise typed as a
+   * broadcast (`list<unknown>`, `broadcastable<unknown>`), a guess that a
+   * list-building recursion (`out = f(n - 1, out)`) contradicts; joined into
+   * the local's assignment evidence, the guess widened the local past the
+   * list its spread gives and the compiled route declined the spread (row
+   * 339 of the Tycho ledger, `tycho/docs/COMPUTE_ENGINE.md`). An
+   * `unknown`-typed value records no evidence, so the local keeps the type
+   * of its other assignments, which is the function's own result once the
+   * clause is installed.
+   * @internal */
+  readonly _recursionKnots: Map<string, { depth: number; binding: object }>;
+
   /** Allocate the next assumption-record id. Each `assume()` insertion takes
    * one, so two assertions of the same normalized fact stay distinguishable.
    * @internal */

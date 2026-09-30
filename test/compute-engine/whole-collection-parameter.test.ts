@@ -602,8 +602,12 @@ describe('Limitations of the rule, as they behave today', () => {
         'function r(xs, n) { if n <= 0 { mean(xs) } else { r(xs, n - 1) } }\nr([1, 2, 3], 2)'
       )
     ).toBe('2');
+    // The self-call types `unknown` while the clause body canonicalizes
+    // (the recursion knot, `_recursionKnotNames`), so the result is the base
+    // clause's `number`; it was the broadcast guess `broadcastable<unknown>`
+    // that a bare `function` callee gives over a collection argument.
     expect(ce.symbol('r').type.toString()).toBe(
-      '(collection<any> | value, unknown) -> broadcastable<unknown>'
+      '(collection<any> | value, unknown) -> number'
     );
   });
 });
