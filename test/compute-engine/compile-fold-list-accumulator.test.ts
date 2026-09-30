@@ -204,15 +204,28 @@ describe('issue #369: the consumers of a list-building fold compile', () => {
     expect(r.run!({ p: [3, 1, 2] })).toBe(5);
   });
 
-  it('At of a block local declines when the index is not provably numeric', () => {
+  it('At of a block local typed as an inferred abstract collection reads it through the run-time check', () => {
+    // The fold above is now typed precisely and no longer needs this; the
+    // path remains for a block local the engine types `collection<any>`
+    // (here from a `Join` over a symbol inferred as one). A top-level symbol
+    // is narrowed by the `At` use itself and takes the "could be indexed"
+    // path instead.
+    const ce = engine();
+    ce.declare('r', { type: 'collection<any>', inferred: true });
+    const program = parseEpsil('let q = Join(r, [1])\nq[1]')[0];
+    const r = compile(ce.box(program), { fallback: false });
+    expect(r.code).toContain('_SYS.arr(q');
+    expect(r.run!({ r: [5, 6] })).toBe(5);
+  });
+
+  it('At of such a block local declines when the index is not provably numeric', () => {
     // A `collection<any>` base may hold a dictionary at run time, where the
     // interpreter answers a keyed lookup: the run-time array check is taken
     // only with a provably numeric index.
     const ce = engine();
+    ce.declare('r', { type: 'collection<any>', inferred: true });
     ce.declare('k', 'unknown');
-    const program = parseEpsil(
-      'let q = Fold((acc, i) => Join(acc, [2 * p[i]]), [], 1..Length(p))\nq[k]'
-    )[0];
+    const program = parseEpsil('let q = Join(r, [1])\nq[k]')[0];
     expect(() => compile(ce.box(program), { fallback: false })).toThrow(
       /Could not compile `At`/
     );

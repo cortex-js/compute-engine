@@ -2834,6 +2834,12 @@ export class ComputeEngine implements IComputeEngine {
   private _shadowedParameterStack: {
     names: Set<string>;
     types?: ReadonlyMap<string, Type>;
+    /** The types a caller INFERRED for bare parameters before the body is
+     * canonicalized (a fold's accumulator, typed to the fixpoint of its seed
+     * and its combiner's result): the auto-declaration binds such a
+     * parameter with the type as an INFERRED type, so a use may still widen
+     * it and nothing is enforced at apply time, unlike an annotation. */
+    inferredTypes?: ReadonlyMap<string, Type>;
     /** The binding auto-declared for an annotated parameter on its first
      * reference during this body's canonicalization, cached so later
      * references (including those in nested Block scopes) reuse the SAME
@@ -2851,14 +2857,26 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _pushShadowedParameters(
     names: ReadonlyArray<string>,
-    types?: ReadonlyMap<string, Type>
+    types?: ReadonlyMap<string, Type>,
+    inferredTypes?: ReadonlyMap<string, Type>
   ): void {
     this._shadowedParameterStack.push({
       names: new Set(names),
       types,
+      inferredTypes,
       defs: new Map(),
       boundary: this.context.lexicalScope,
     });
+  }
+
+  /** The INFERRED type a caller supplied for an active bare shadowed
+   * parameter (`_pushShadowedParameters`' third argument), if any.
+   * @internal */
+  _shadowedParameterInferredType(name: string): Type | undefined {
+    const stack = this._shadowedParameterStack;
+    for (let i = stack.length - 1; i >= 0; i--)
+      if (stack[i].names.has(name)) return stack[i].inferredTypes?.get(name);
+    return undefined;
   }
 
   /** @internal */

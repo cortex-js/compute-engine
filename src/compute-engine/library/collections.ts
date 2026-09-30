@@ -1278,6 +1278,132 @@ function callbackCompatibilityError(
 }
 
 /**
+ * The seed a fold's accumulator starts from, as a type: the initial value's
+ * type when the fold is seeded, the source's element type otherwise (the
+ * accumulator is then the first element). `undefined` when nothing is known.
+ */
+function foldSeedType(
+  initial: Expression | undefined,
+  collection: Expression
+): Type | undefined {
+  if (initial !== undefined) return initial.type.type;
+  return collectionElementType(collection.type.type);
+}
+
+/**
+ * Whether the type a fold's bare accumulator was inferred from its uses says
+ * too little for the fold's result to be typed: a top type (`unknown`,
+ * `any`, `value`), an abstract collection (`collection<T>`, what a use in
+ * `Join` infers, since `Join` also accepts a set), or a collection whose
+ * element type is `unknown` or `any`.
+ */
+function accumulatorTypeIsImprecise(t: Type): boolean {
+  if (isKindOpenOperandType(t)) return true;
+  if (isAbstractCollectionTypeOf(t)) return true;
+  const elt = collectionElementType(t);
+  return elt === 'unknown' || elt === 'any';
+}
+
+/**
+ * Type a fold's BARE accumulator to the fixpoint of its seed and its
+ * combiner's result (user decision 2026-09-29, option A of the design
+ * question recorded for issue #369).
+ *
+ * The accumulator receives the seed on the first step and the combiner's own
+ * result on every later step, so its type is the least `T` with
+ * `widen(seed, result of the body with acc: T) <: T`. The iteration starts
+ * from the seed's type, re-canonicalizes the RAW literal with the accumulator
+ * PRE-DECLARED at the current `T` as an INFERRED type (`inferredParamTypes`
+ * of `canonicalFunctionLiteral`), widens `T` by the body's result type, and
+ * stops when `T` no longer changes; it settles in two steps for the usual
+ * list-building fold (`list<never>`, then `list<integer | nan>`). An
+ * inferred type is not an annotation: nothing is enforced at apply time, a
+ * use may still widen it, and the printed literal is unchanged, which is
+ * what keeps this compatible with the Design D audit that leaves the
+ * accumulator's SLOT `unknown` in the operator's signature (a fold's
+ * accumulator may change type mid-fold; the fixpoint covers that).
+ *
+ * Runs only when the accumulator's inferred type says too little
+ * (`accumulatorTypeIsImprecise`): a numeric fold (`(a, x) => a + x`, inferred
+ * `number` from `Add`) is not re-canonicalized, so its cost is unchanged. A
+ * fixpoint that does not settle in three steps, a body whose result type is
+ * a top type, an annotated accumulator, a callback that is not a raw
+ * `Function` literal (a named function, an already canonical literal) all
+ * keep the literal as it was canonicalized.
+ *
+ * Before this the fold `Fold((acc, i) => Join(acc, [2 p[i]]), [], 1..n)` was
+ * typed `collection<any>`, so `Map(f, fold)` and `Filter(fold, …)`
+ * materialized as a `Set` on the interpreter (a view over an abstract
+ * collection follows the kind of the values its sources hold, and the fold
+ * node held none) while the compiled result was an ordered array, and every
+ * compiled consumer of the fold needed a run-time array check.
+ *
+ * `raw` is the callback operand as the canonical handler received it (the
+ * stamped raw literal on the box and parse routes); `fn` is its canonical
+ * form, returned unchanged whenever the refinement does not apply. The
+ * refined literal goes through the same admission (`arity`) as the original.
+ */
+function refineFoldAccumulator(
+  raw: Expression | undefined,
+  fn: Expression,
+  seedType: Type | undefined,
+  arity: {
+    operator: string;
+    supply: CallbackSupply | ReadonlyArray<CallbackSupply>;
+    source?: Expression;
+  }
+): Expression {
+  if (seedType === undefined || isKindOpenOperandType(seedType)) return fn;
+  if (
+    raw === undefined ||
+    raw.isCanonical ||
+    !isFunction(raw, 'Function') ||
+    raw.nops < 3 ||
+    !isSymbol(raw.ops[1]) ||
+    !isFunction(fn, 'Function')
+  )
+    return fn;
+  const accName = raw.ops[1].symbol;
+  // The gate reads the accumulator's BINDING (the canonical parameter
+  // operand), not the literal's printed signature, which keeps a scalar bare
+  // parameter as `unknown` whatever its binding infers: `(acc, i) => acc + i`
+  // infers `acc: number` and must not enter the loop.
+  const current = accumulatorBindingType(fn);
+  if (current !== undefined && !accumulatorTypeIsImprecise(current)) return fn;
+  let t: Type = seedType;
+  for (let step = 0; step < 3; step++) {
+    const literal = canonicalFunctionLiteral(raw, {
+      inferredParamTypes: new Map([[accName, t]]),
+    });
+    if (literal === undefined || !isFunction(literal, 'Function')) return fn;
+    const result = functionResult(literal.type.type);
+    if (result === undefined || isKindOpenOperandType(result)) return fn;
+    const next = widen(t, result);
+    if (isSubtype(next, t) && isSubtype(t, next)) {
+      // The pre-declared type is an inferred one, so a use in the body may
+      // have moved the binding: the literal is kept only when its
+      // accumulator still admits every value the fixpoint proved it
+      // receives, or its signature would claim a narrower type than the
+      // fold delivers.
+      const bound = accumulatorBindingType(literal);
+      if (bound === undefined || !isSubtype(t, bound)) return fn;
+      return canonicalCallbackOperand(literal, arity) ?? fn;
+    }
+    t = next;
+  }
+  return fn;
+}
+
+/** The type of the binding of a canonical literal's first parameter (its
+ * accumulator, for a combiner), or `undefined` when that operand is not a
+ * bare symbol. */
+function accumulatorBindingType(literal: Expression): Type | undefined {
+  if (!isFunction(literal, 'Function') || literal.nops < 2) return undefined;
+  const param = literal.ops[1];
+  return isSymbol(param) ? param.type.type : undefined;
+}
+
+/**
  * The canonical function literal for a higher-order operator's callback slot,
  * or `undefined` when the operand is a plain VALUE that only a PARAMETERLESS
  * lift could turn into a function (`Map(5, xs)`, `Any(xs, True)`).
@@ -7975,17 +8101,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1], {
+      const arity = {
         operator: 'Reduce',
         supply: ACCUMULATOR_SUPPLY,
         // The compatibility gate's supply source: the reducer's ELEMENT
         // parameter is judged against this collection's element type (its
         // accumulator parameter is declared `unknown` and never judged).
         source: collection,
-      });
-      if (!collection.isValid || !fn) return null;
+      };
+      const accepted = canonicalCallbackOperand(ops[1], arity);
+      if (!collection.isValid || !accepted) return null;
 
       const initial = ops[2]?.canonical;
+      // The bare accumulator is typed to the fixpoint of the seed and the
+      // body's result (`refineFoldAccumulator`), an inferred type only.
+      const fn = refineFoldAccumulator(
+        ops[1],
+        accepted,
+        foldSeedType(initial?.isValid ? initial : undefined, collection),
+        arity
+      );
       if (initial?.isValid)
         return engine._fn('Reduce', [collection, fn, initial]);
       return engine._fn('Reduce', [collection, fn]);
@@ -8046,13 +8181,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // The collection is checked FIRST so the callback's compatibility gate
       // can judge the reducer's element parameter against its element type.
       const collection = checkCollectionOperand(engine, ops[2]);
-      const fn = canonicalCallbackOperand(ops[0], {
+      const arity = {
         operator: 'Fold',
         supply: ACCUMULATOR_SUPPLY,
         source: collection,
-      });
+      };
+      const accepted = canonicalCallbackOperand(ops[0], arity);
       const initial = ops[1]?.canonical;
-      if (!fn || !initial?.isValid || !collection.isValid) return null;
+      if (!accepted || !initial?.isValid || !collection.isValid) return null;
+      // As `Reduce`: the bare accumulator is typed to its fixpoint.
+      const fn = refineFoldAccumulator(
+        ops[0],
+        accepted,
+        foldSeedType(initial, collection),
+        arity
+      );
       return engine._fn('Reduce', [collection, fn, initial]);
     },
   },
@@ -8088,19 +8231,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1], {
+      const arity = {
         operator: 'Scan',
         supply: ACCUMULATOR_SUPPLY,
         // Same supply-source wiring as `Reduce`.
         source: collection,
-      });
-      if (!collection.isValid || !fn) return null;
+      };
+      const accepted = canonicalCallbackOperand(ops[1], arity);
+      if (!collection.isValid || !accepted) return null;
       // An initial value is optional, but when one is PROVIDED it must not be
       // silently dropped if invalid — otherwise `Scan(xs, f, Divide(1))` would
       // fold unseeded and diverge. Keep the (canonicalized) operand so the
       // standard error machinery surfaces the error.
-      if (ops[2] !== undefined)
-        return engine._fn('Scan', [collection, fn, ops[2].canonical]);
+      const initial = ops[2]?.canonical;
+      // As `Reduce`: the bare accumulator is typed to its fixpoint.
+      const fn = refineFoldAccumulator(
+        ops[1],
+        accepted,
+        foldSeedType(initial?.isValid ? initial : undefined, collection),
+        arity
+      );
+      if (initial !== undefined)
+        return engine._fn('Scan', [collection, fn, initial]);
       return engine._fn('Scan', [collection, fn]);
     },
     collection: {

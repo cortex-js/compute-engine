@@ -214,7 +214,13 @@ export function order(
  */
 export function canonicalFunctionLiteral(
   expr: Expression | undefined,
-  options?: { params?: ReadonlyArray<Expression> }
+  options?: {
+    params?: ReadonlyArray<Expression>;
+    /** Types INFERRED for bare parameters, by name, bound as inferred types
+     * when the body is canonicalized (see `canonicalFunctionLiteralArguments`).
+     * Read only for a raw `["Function", …]` literal. */
+    inferredParamTypes?: ReadonlyMap<string, Type>;
+  }
 ): Expression | undefined {
   if (!expr) return undefined;
 
@@ -282,7 +288,9 @@ export function canonicalFunctionLiteral(
   // If this is a function literal, split the body and the parameters
   // For example, `["Function", ["Add", "x", 1], "x"]`
   if (isFunction(expr, 'Function'))
-    return canonicalFunctionLiteralOperands(expr.engine, expr.ops);
+    return canonicalFunctionLiteralOperands(expr.engine, expr.ops, {
+      inferredParamTypes: options?.inferredParamTypes,
+    });
 
   //
   // 5.5/ An expression that DENOTES a function without being a literal — a
@@ -445,14 +453,15 @@ export function annotateFunctionLiteralParams(
  */
 export function canonicalFunctionLiteralOperands(
   ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  options?: { inferredParamTypes?: ReadonlyMap<string, Type> }
 ): Expression | undefined {
   if (ops.length === 1) {
     const [body, params] = anonymousParameters(ops[0]);
     if (params.length > 0)
-      return canonicalFunctionLiteralArguments(ce, [body, ...params]);
+      return canonicalFunctionLiteralArguments(ce, [body, ...params], options);
   }
-  return canonicalFunctionLiteralArguments(ce, ops);
+  return canonicalFunctionLiteralArguments(ce, ops, options);
 }
 
 /**
@@ -494,7 +503,17 @@ function anonymousParameters(
  */
 export function canonicalFunctionLiteralArguments(
   ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  options?: {
+    /** Types INFERRED for bare parameters, by name. Such a parameter is
+     * declared in the body scope with that type as an INFERRED type (a use
+     * may still widen it, and, unlike an annotation, nothing is enforced at
+     * apply time); a parameter not in the map starts `unknown`. An annotated
+     * parameter is never affected. This is how a fold types its accumulator
+     * to the fixpoint of its seed and its combiner's result
+     * (`refineFoldAccumulator`, `library/collections.ts`). */
+    inferredParamTypes?: ReadonlyMap<string, Type>;
+  }
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
 
@@ -539,7 +558,7 @@ export function canonicalFunctionLiteralArguments(
     if (desugared?.error !== undefined)
       return ce._fn('Function', [ops[0], desugared.error]);
     if (desugared !== undefined)
-      return canonicalFunctionLiteralArguments(ce, desugared.ops!);
+      return canonicalFunctionLiteralArguments(ce, desugared.ops!, options);
   }
 
   // Parameters: a bare symbol (inferred type) or an annotated parameter
@@ -636,9 +655,22 @@ export function canonicalFunctionLiteralArguments(
   // auto-declared as an ordinary local in the body scope, so the closure-capture
   // machinery is unaffected. Annotated parameters additionally carry their
   // declared type so the auto-declaration uses that type (see §6.1).
+  // An inferred hint applies to a BARE parameter only: an annotation is the
+  // author's contract and is never replaced by an inference.
+  const inferredHints =
+    options?.inferredParamTypes !== undefined
+      ? new Map(
+          [...options.inferredParamTypes].filter(
+            ([name]) => shadowNames.includes(name) && !shadowTypes.has(name)
+          )
+        )
+      : undefined;
   ce._pushShadowedParameters(
     shadowNames,
-    shadowTypes.size > 0 ? shadowTypes : undefined
+    shadowTypes.size > 0 ? shadowTypes : undefined,
+    inferredHints !== undefined && inferredHints.size > 0
+      ? inferredHints
+      : undefined
   );
   // Collect the juxtapositions the body reads as multiplication only because
   // their leading symbol has no function definition yet — see
@@ -728,7 +760,11 @@ export function canonicalFunctionLiteralArguments(
       } else if (t !== undefined)
         ce.declare(name, { inferred: false, type: t }, block.localScope);
       else
-        ce.declare(name, { inferred: true, type: 'unknown' }, block.localScope);
+        ce.declare(
+          name,
+          { inferred: true, type: inferredHints?.get(name) ?? 'unknown' },
+          block.localScope
+        );
     }
   }
 

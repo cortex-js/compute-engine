@@ -1825,11 +1825,19 @@ export interface IComputeEngine {
    * local variables. Balanced with `_popShadowedParameters`. Optional `types`
    * carry declared types for annotated parameters so the auto-declaration
    * during body canonicalization uses the declared (non-inferred) type.
+   * Optional `inferredTypes` carry types a caller inferred for BARE
+   * parameters (a fold's accumulator): the auto-declaration binds such a
+   * parameter with that type as an inferred type, which a use may widen and
+   * which is not enforced at apply time.
    * @internal */
   _pushShadowedParameters(
     names: ReadonlyArray<string>,
-    types?: ReadonlyMap<string, Type>
+    types?: ReadonlyMap<string, Type>,
+    inferredTypes?: ReadonlyMap<string, Type>
   ): void;
+  /** The inferred type a caller supplied for an active bare shadowed
+   * parameter, if any. @internal */
+  _shadowedParameterInferredType(name: string): Type | undefined;
   /** @internal */
   _popShadowedParameters(): void;
   /** True while `_pushShadowedParameters` has registered `name`. @internal */
