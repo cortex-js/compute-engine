@@ -102,12 +102,13 @@ import { journalDefinitionRecord } from './boxed-expression/boxed-value-definiti
  * type resolver. Narrow on purpose so a `'types'`-shape `type` handler,
  * which holds only the read-only engine view, can resolve a protocol
  * member or property without the full engine. */
-export type ProtocolReadView = Pick<IComputeEngine, '_typeResolver'> & {
-  /** The engine's registry. Typed opaquely on the read-only engine view
-   * (`PureEngineView`, whose file cannot name `ProtocolRecord`); every
-   * value in it IS a `ProtocolRecord`, which `registryRecords` restores. */
-  readonly _protocolRegistry: Readonly<Record<string, object>>;
-};
+export type ProtocolReadView = Pick<IComputeEngine, '_typeResolver'> &
+  Partial<Pick<IComputeEngine, '_anyVersion'>> & {
+    /** The engine's registry. Typed opaquely on the read-only engine view
+     * (`PureEngineView`, whose file cannot name `ProtocolRecord`); every
+     * value in it IS a `ProtocolRecord`, which `registryRecords` restores. */
+    readonly _protocolRegistry: Readonly<Record<string, object>>;
+  };
 
 /** The registry's records with their real type. The registry is only ever
  * written by `declareProtocol` in this file, so the assertion is exact. */
@@ -3752,7 +3753,9 @@ function requirementShape(
   record: ProtocolRecord,
   member: string
 ): FunctionSignature | null {
-  return parseRequirement(record, member, selfAwareResolver(ce._typeResolver));
+  return cachedRequirement(ce, record, member, '', () =>
+    selfAwareResolver(ce._typeResolver)
+  );
 }
 
 /** The requirement of `record.member` at `Self = selfType` (P12: the
@@ -3764,11 +3767,59 @@ function requirementAt(
   member: string,
   selfType: Type
 ): FunctionSignature | null {
-  return parseRequirement(
-    record,
-    member,
-    selfSubstitutingResolver(ce._typeResolver, selfType, typeToString(selfType))
+  const self = typeToString(selfType);
+  return cachedRequirement(ce, record, member, self, () =>
+    selfSubstitutingResolver(ce._typeResolver, selfType, self)
   );
+}
+
+/**
+ * Parsed requirements, per record, member and `Self`. The signature text
+ * names `Self`, which the type parser's shared cache never admits, so without
+ * this every dispatched call re-parses it (twice). Keyed on the engine's `any`
+ * version, which every declaration and every scope pop that undoes one
+ * advances: what the text resolves to depends on the types in scope, and on
+ * nothing else. Not on `_cacheGeneration()`, whose low bit flips while the
+ * assumptions are hidden and would empty the entry on every toggle.
+ */
+const REQUIREMENT_CACHE = new WeakMap<
+  ProtocolRecord,
+  { version: number; parsed: Map<string, FunctionSignature | null> }
+>();
+
+/**
+ * The most `(member, Self)` pairs kept per record. A generic conformance
+ * (`list<T> is Sized`) meets a new `Self` for every element type and length it
+ * is called with (`list<integer^3>`, `list<integer^4>`, …), so without a bound
+ * the entry grows with the calls instead of with the declarations.
+ */
+const REQUIREMENT_CACHE_LIMIT = 256;
+
+function cachedRequirement(
+  ce: ProtocolReadView,
+  record: ProtocolRecord,
+  member: string,
+  self: string,
+  resolver: () => TypeResolver
+): FunctionSignature | null {
+  // A read-only view has no version to invalidate on: parse every time.
+  const version = ce._anyVersion;
+  if (version === undefined)
+    return parseRequirement(record, member, resolver());
+  let entry = REQUIREMENT_CACHE.get(record);
+  if (
+    entry === undefined ||
+    entry.version !== version ||
+    entry.parsed.size >= REQUIREMENT_CACHE_LIMIT
+  ) {
+    entry = { version, parsed: new Map() };
+    REQUIREMENT_CACHE.set(record, entry);
+  }
+  const key = `${member}\u0000${self}`;
+  if (entry.parsed.has(key)) return entry.parsed.get(key)!;
+  const parsed = parseRequirement(record, member, resolver());
+  entry.parsed.set(key, parsed);
+  return parsed;
 }
 
 function parseRequirement(
