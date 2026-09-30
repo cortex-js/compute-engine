@@ -474,7 +474,7 @@ export function functionLiteralBody(expr: Expression): Expression | undefined {
 
 /** The anonymous-slot symbols of a shorthand function body: the bare `_`
  * and the positional `_1`…`_9`. */
-const ANONYMOUS_SLOT_NAMES: ReadonlySet<string> = new Set([
+export const ANONYMOUS_SLOT_NAMES: ReadonlySet<string> = new Set([
   '_',
   '_1',
   '_2',
@@ -504,6 +504,10 @@ const ANONYMOUS_SLOT_NAMES: ReadonlySet<string> = new Set([
  *   that body is free and refers to the enclosing literal: in
  *   `["Function", ["Apply", ["Function", ["Multiply", "_1", "x"], "x"], 2]]`
  *   the `_1` is the parameter of the outer literal.
+ *
+ * A `Pipe(value, stage)` node also binds slots: its stage takes its slots
+ * from the piped value, so only `value` is walked. In
+ * `["Add", "y", ["Pipe", "ys", ["Multiply", "_", 2]]]` the `_` is not free.
  *
  * Every reader that decides "which slots are the parameters of this
  * shorthand body" must use this walk, so that the reading when boxing
@@ -541,6 +545,14 @@ export function freeAnonymousSlots(expr: Expression): Set<string> {
       continue;
     }
     if (ANONYMOUS_SLOT_NAMES.has(op) && !bound?.has(op)) result.add(op);
+    // The stage of a `Pipe` (its second operand) takes its slots from the
+    // pipe: the `_` in `Pipe(ys, Multiply(_, 2))` is the piped value `ys`,
+    // as in the Epsil parser, which makes such a stage a `Function` literal.
+    // So only the value operand is walked.
+    if (op === 'Pipe' && e.nops === 2) {
+      pending.push([e.ops[0], bound]);
+      continue;
+    }
     // A store-backed list holds only numbers, which are never a slot, so it
     // is not walked (walking it would box every element).
     if ((e as { _numericStore?: unknown })._numericStore !== undefined)

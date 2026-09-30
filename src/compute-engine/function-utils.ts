@@ -41,6 +41,7 @@ import {
   functionLiteralParameterName,
   functionLiteralParameterNames,
   functionLiteralParameterType,
+  ANONYMOUS_SLOT_NAMES,
   freeAnonymousSlots,
   isDestructuringParameter,
   isRestParameter,
@@ -344,7 +345,11 @@ export function canonicalFunctionLiteral(
     // We'll need the canonical form of the expression, so we'll create a block if necessary
     if (body.operator !== 'Block') body = ce.function('Block', [body]);
     else body = body.canonical;
-    const unknowns = body.unknowns;
+    // A slot name (`_`, `_1`…`_9`) is never a parameter here: the body has
+    // no free slot (`anonymousParameters` found none), so each slot it still
+    // mentions belongs to a nested literal or to the stage of a nested
+    // `Pipe`, as in `10 + Pipe(ys, _ * 2)`.
+    const unknowns = body.unknowns.filter((x) => !ANONYMOUS_SLOT_NAMES.has(x));
     if (unknowns.length > 0) {
       params = unknowns.map((x) => ce.symbol(x, { canonical: false }));
       // Note: we assume the order of parameters is the order in

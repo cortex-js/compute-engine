@@ -1004,10 +1004,22 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     expect(run('1..10 |> Filter(n => n % 2 == 1) |> Sum').value.re).toBe(25);
   });
 
-  test('a complete call stage keeps its existing meaning', () => {
-    // Max(3) is a valid call: the topic is applied to its value (Apply's
-    // constant-nullary shorthand), exactly as before the sugar.
-    expect(run('5 |> Max(3)').value.re).toBe(3);
+  test('a complete call stage whose value is not a function is an error', () => {
+    // Max(3) is a valid call, so the implicit topic does not apply. Its
+    // value, 3, is not a function: the stage would ignore the piped value,
+    // which is an error (user decision 2026-09-30).
+    expect(run('5 |> Max(3)').value.toString()).toContain('incompatible-type');
+    // The same for any stage that uses no slot and whose value is not a
+    // function. The second and third used to give 13 and [16,18].
+    const error = (value: string, type = value) =>
+      `Error(ErrorCode("incompatible-type", "function", "${type}"), "${value}")`;
+    expect(run('[1,2] |> 10 + 3').value.toString()).toBe(error('13'));
+    expect(run('[1,2] |> 10 + [3,4][1]').value.toString()).toBe(error('13'));
+    expect(run('[1,2] |> 10 + ([3,4] |> _ * 2)').value.toString()).toBe(
+      error('[16,18]', 'vector<integer^2>')
+    );
+    // A nullary function literal is the explicit constant function.
+    expect(run('[1,2] |> () => 7').value.re).toBe(7);
     // An operator-written stage with a free symbol still binds the topic to
     // the unknown (the shorthand-lambda path), not to Add's first argument.
     expect(run('5 |> y + 1').value.re).toBe(6);

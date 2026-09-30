@@ -692,11 +692,63 @@ describe('Pipe — stage sugar (box route)', () => {
     ).toBe('[2,4,6]');
   });
 
-  test('a complete call keeps its existing (apply) meaning', () => {
+  test('a complete call whose value is not a function is an error', () => {
     const ce = new ComputeEngine();
-    // Max(3) is a complete call; the topic is applied to its VALUE under
-    // Apply's constant-nullary shorthand, exactly as before the sugar.
-    expect(ce.box(['Pipe', 5, ['Max', 3]]).evaluate().toString()).toBe('3');
+    // Max(3) is a complete call, so the implicit topic does not apply. Its
+    // value, 3, is not a function: the pipe does not ignore the piped value
+    // (user decision 2026-09-30), it gives the error of a literal stage.
+    expect(ce.box(['Pipe', 5, ['Max', 3]]).evaluate().json).toEqual([
+      'Error',
+      ['ErrorCode', "'incompatible-type'", "'function'", "'3'"],
+      "'3'",
+    ]);
+  });
+
+  test('a stage with no slot whose value is not a function is an error', () => {
+    const ce = new ComputeEngine();
+    const pipe = (stage: Expression) =>
+      ce.box(['Pipe', ['List', 1, 2], stage]).evaluate().json;
+    const error = (type: string, value: string) => [
+      'Error',
+      ['ErrorCode', "'incompatible-type'", "'function'", `'${type}'`],
+      `'${value}'`,
+    ];
+    // Folded to a literal at canonicalization.
+    expect(pipe(['Add', 10, 3])).toEqual(error('13', '13'));
+    // A number only when evaluated: it used to give 13, the piped value
+    // ignored.
+    expect(pipe(['Add', 10, ['At', ['List', 3, 4], 1]])).toEqual(
+      error('13', '13')
+    );
+    // The `_` belongs to the inner pipe, so the outer stage has no slot: it
+    // used to give [16,18].
+    expect(
+      pipe(['Add', 10, ['Pipe', ['List', 3, 4], ['Multiply', '_', 2]]])
+    ).toEqual(error('vector<integer^2>', '[16,18]'));
+    // The LaTeX route parses to the same `Pipe`.
+    expect(
+      ce
+        .parse(
+          '[1,2] \\triangleright 10 + ([3,4] \\triangleright \\_ \\times 2)'
+        )
+        .evaluate().json
+    ).toEqual(error('vector<integer^2>', '[16,18]'));
+    // Stages that are functions are unchanged.
+    expect(pipe('Sum')).toBe(3);
+    expect(pipe(['Function', 7])).toBe(7);
+    expect(ce.box(['Pipe', 5, ['Add', 'y', 1]]).evaluate().json).toBe(6);
+    expect(pipe(['Multiply', '_', 2])).toEqual(['List', 2, 4]);
+    // A stage whose value is typed `unknown` can still be a function (here
+    // an undefined function `Compose`), so the pipe stays unevaluated, as it
+    // does for an undefined symbol.
+    expect(pipe(['Compose', 'Sqrt', 'Sqrt'])).toEqual([
+      'Pipe',
+      ['List', 1, 2],
+      ['Compose', 'Sqrt', 'Sqrt'],
+    ]);
+    // A held symbol is a value, not a function: the piped value would be
+    // ignored.
+    expect((pipe(['Hold', 'Sin']) as any)[0]).toBe('Error');
   });
 
   test('an explicit placeholder disables the implicit topic argument', () => {

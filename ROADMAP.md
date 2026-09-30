@@ -122,15 +122,6 @@ that is not an exact number, evaluate with guard digits, raise the precision
 while the value is within the error bound of the jump, and stay unevaluated
 after a fixed limit.
 
-### A `Pipe` stage that uses no slot either errors or ignores the piped value (OPEN, decision — found 2026-09-30 while reviewing issue #381)
-
-`[1,2] |> 10 + 3` gives an `incompatible-type` error, but
-`[1,2] |> 10 + [3,4][1]` gives `13` and silently drops the piped value. With a
-nested pipe (`[1,2] |> 10 + ([3,4] |> _ * 2)`), the outer stage also uses no
-slot of its own and gives `[16,18]`. The question: is a stage that uses no slot
-(and is not a function) always an error? Recommendation: yes, consistently —
-dropping the piped value is almost certainly a mistake in the program.
-
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
 `reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and

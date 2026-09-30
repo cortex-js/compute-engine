@@ -273,6 +273,20 @@
 
 ### Issues Resolved
 
+- **A `Pipe` stage that uses no topic slot and whose value is not a function is
+  an error.** The piped value would be ignored. `[1, 2] |> 10 + 3` was already
+  an `incompatible-type` error, but `[1, 2] |> 10 + [3, 4][1]` gave `13` and
+  `[1, 2] |> 10 + ([3, 4] |> _ * 2)` gave `[16, 18]`: the stage was evaluated,
+  was not a function, and was applied as a constant. Both are now the same
+  `incompatible-type` error, on the MathJSON, LaTeX and Epsil routes. So is
+  `5 |> Max(3)`, a complete call whose value `3` is not a function (it gave
+  `3`). A stage that is a function is unchanged: a function symbol
+  (`xs |> Sum`), a call missing its first argument (`xs |> Take(1)`), a
+  lambda, a stage with a topic slot (`xs |> _ * 2`), and a body whose unknowns
+  become its parameters (`5 |> y + 1` is `6`). A `_` inside a nested `Pipe`
+  stage belongs to that stage, not to the enclosing one. `Apply` keeps
+  treating a value that is not a function as a constant (`Apply(3, 5)` is
+  `3`).
 - **Compiled `Binomial` and `Choose` give the interpreter's values outside
   `0 ≤ k ≤ n`** ([#384](https://github.com/cortex-js/compute-engine/issues/384),
   reported by [enumeratio](https://github.com/enumeratio)). The JavaScript

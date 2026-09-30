@@ -4390,13 +4390,56 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (isRefutablePipeTarget(f))
           return ce.typeError('function', f.type, f.toString());
 
+        // A stage that `apply()` would lift to a CONSTANT function — one that
+        // is not a function literal, a symbol, or an expression that denotes
+        // a function, and that has neither a slot (`_`, `_1`…`_9`) nor a
+        // free unknown to become a parameter (`5 |> y + 1` is `y ↦ y + 1`) —
+        // ignores the piped value: `[1,2] |> 10 + [3,4][1]` gave `13`. Such
+        // a stage is evaluated instead, and its VALUE is the function to
+        // apply. A value that is provably not a function is the same
+        // `incompatible-type` error as a literal stage (`[1,2] |> 10 + 3`),
+        // because a stage that ignores the piped value is almost certainly a
+        // mistake (user decision 2026-09-30). The explicit spelling of a
+        // constant function, a nullary literal (`() => 7`), is a function
+        // literal and is not affected. A value whose type can still be a
+        // function (an unknown function such as `Compose(Sqrt, Sqrt)`, typed
+        // `unknown`) leaves the pipe unevaluated, as a stage that is an
+        // undefined symbol does: it can evaluate once the function is
+        // defined.
+        let callee = f;
+        if (!isSymbol(f) && !isFunction(f, 'Function')) {
+          const lifted = canonicalFunctionLiteral(f);
+          // A stage whose free unknowns became parameters is applied as
+          // lifted here, so that `apply()` does not lift it a second time.
+          if (isFunction(lifted, 'Function') && lifted.nops > 1) callee = lifted;
+          if (isFunction(lifted, 'Function') && lifted.nops === 1) {
+            callee = f.evaluate();
+            if (isRefutablePipeTarget(callee))
+              return ce.typeError('function', callee.type, callee.toString());
+            if (
+              !isSymbol(callee) &&
+              !isFunction(callee, 'Function') &&
+              !isFunction(callee, 'Error') &&
+              !callee.type.matches('function')
+            ) {
+              const t = callee.type.type;
+              if (
+                freeTypeVariables(t).size === 0 &&
+                provablyDisjoint(t, 'function')
+              )
+                return ce.typeError('function', callee.type, callee.toString());
+              return undefined;
+            }
+          }
+        }
+
         // `Nothing` is ERASED from the call argument list, uniformly on every
         // application route (error-propagation design §4): `Nothing |> f` is
         // `f()`, exactly like `f(Nothing)`. Erasure is a rule on the WRITTEN
         // argument (like `flattenOps` on the direct route and `Apply`'s
         // canonical handler): a topic that merely *evaluates* to `Nothing` is
         // bound, as it is by `f(g())`.
-        const result = apply(f, isSymbol(x, 'Nothing') ? [] : [x]);
+        const result = apply(callee, isSymbol(x, 'Nothing') ? [] : [x]);
 
         if (!numericApproximation) return result;
         // Mirror `Apply`: under N(), numericize the applied result unless it
