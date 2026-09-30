@@ -42,8 +42,9 @@ const ZERO_SUM: MathJsonExpression = ['Subtract', LN2_LN3, ['Ln', 6]];
 const SQRT2_PLUS: MathJsonExpression = ['Sqrt', ['Add', 2, ['Power', 10, -30]]];
 // cos(10⁻²⁰) − 1 = −5·10⁻⁴¹
 const COS_20: MathJsonExpression = ['Subtract', ['Cos', ['Power', 10, -20]], 1];
-// cos(10⁻³⁰) − 1 = −5·10⁻⁶¹: not decided at 50 digits.
-const COS_30: MathJsonExpression = ['Subtract', ['Cos', ['Power', 10, -30]], 1];
+// cos(10⁻⁷⁰) − 1 = −5·10⁻¹⁴¹: not decided at 50 digits, nor by the
+// enclosures of `cmp`, which stop at 121 digits at the default precision.
+const COS_70: MathJsonExpression = ['Subtract', ['Cos', ['Power', 10, -70]], 1];
 
 describe('STEP 2: EQUAL CONSTANTS ARE A PROVED TIE', () => {
   test('the order is 0', () => {
@@ -319,20 +320,20 @@ describe('STEP 1 DOES NOT RESET THE ENGINE', () => {
 });
 
 describe('STEP 3: A TIE WITHIN THE TOLERANCE, NEVER AN ORDER', () => {
-  test('cos(10⁻³⁰) − 1 and 0', () => {
-    expect(valueAt(90, COS_30)).toBe('-5e-61');
-    const x = evaluate(COS_30);
-    // Not decided at 50 digits, and not proved equal
+  test('cos(10⁻⁷⁰) − 1 and 0', () => {
+    expect(valueAt(160, COS_70)).toBe('-5e-141');
+    const x = evaluate(COS_70);
+    // Not decided at 121 digits, and not proved equal
     expect(exactOrder(x, ce.Zero)).toBeUndefined();
     expect(exactOrder(ce.Zero, x)).toBeUndefined();
     // A tie, not an order
     expect(exactOrder(x, ce.Zero, { tieWithinTolerance: true })).toBe(0);
     expect(exactOrder(ce.Zero, x, { tieWithinTolerance: true })).toBe(0);
     // `Max` and `Min` prefer the literal of a tie
-    expect(evaluate(['Max', COS_30, 0]).toString()).toBe('0');
-    expect(evaluate(['Min', 0, COS_30]).toString()).toBe('0');
+    expect(evaluate(['Max', COS_70, 0]).toString()).toBe('0');
+    expect(evaluate(['Min', 0, COS_70]).toString()).toBe('0');
     // `Abs` reads a sign, and does not accept a tie within the tolerance
-    expect(evaluate(['Abs', COS_30]).operator).toBe('Abs');
+    expect(evaluate(['Abs', COS_70]).operator).toBe('Abs');
   });
 
   test('two values farther apart than the tolerance are not a tie', () => {

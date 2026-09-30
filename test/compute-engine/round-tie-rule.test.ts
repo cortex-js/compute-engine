@@ -643,3 +643,308 @@ describe.each(['machine', 21] as const)(
     });
   }
 );
+
+/**
+ * An EXACT constant expression that is not an exact number (`π·10³⁰`,
+ * `e^10`, `ln 2`) is rounded from enclosures of its value at a precision
+ * that is raised until the result is decided, as in Mathematica (user
+ * decision 2026-09-30). The expected values are Mathematica 15.0 results.
+ * A value exactly at a jump is never decided: it stays unevaluated under
+ * `evaluate()`, and under `.N()` it is taken to be at the jump, as
+ * Mathematica's `N` does when it reaches `$MaxExtraPrecision`.
+ */
+describe.each(['machine', 21] as const)(
+  'Rounding an exact constant expression (precision %s)',
+  (p) => {
+    const PI_E30 = ['Multiply', 'Pi', ['Power', 10, 30]];
+
+    test('the rounding family returns the exact integer', () => {
+      const ce = engineAt(p);
+      const cases: [unknown, string][] = [
+        [['Floor', PI_E30], '3141592653589793238462643383279'],
+        [['Ceil', PI_E30], '3141592653589793238462643383280'],
+        [
+          ['Floor', ['Multiply', -1, 'Pi', ['Power', 10, 30]]],
+          '-3141592653589793238462643383280',
+        ],
+        [
+          ['Round', ['Multiply', 'Pi', ['Power', 10, 20]]],
+          '314159265358979323846',
+        ],
+        [
+          ['Truncate', ['Multiply', -1, 'ExponentialE', ['Power', 10, 25]]],
+          '-27182818284590452353602874',
+        ],
+        [
+          ['Floor', ['Multiply', ['Sin', 1], ['Power', 10, 30]]],
+          '841470984807896506652502321630',
+        ],
+        [
+          ['Floor', ['Multiply', ['Zeta', 3], ['Power', 10, 40]]],
+          '12020569031595942853997381615114499907649',
+        ],
+        [['Ceil', ['Power', 'ExponentialE', 10]], '22027'],
+        [['Round', ['Add', ['Sqrt', 2], ['Sqrt', 3]]], '3'],
+        [['Floor', ['Ln', 2]], '0'],
+      ];
+      for (const [x, want] of cases) {
+        const r = ce.box(x as any).evaluate();
+        expect([x, r.toString(), r.isExact]).toEqual([x, want, true]);
+      }
+    });
+
+    test('far from a jump', () => {
+      const ce = engineAt(p);
+      expect(
+        ce.box(['Floor', ['Multiply', ['Sin', 1], 10]]).evaluate().json
+      ).toBe(8);
+      expect(ce.box(['Floor', ['Multiply', ['Sin', 1], 10]]).N().re).toBe(8);
+    });
+
+    test('Round(x, n), Fract and Mod', () => {
+      const ce = engineAt(p);
+      // Mathematica: `Round[Pi, 1/10^25]`, `FractionalPart[Pi]`,
+      // `Mod[Pi 10^30, 1]`.
+      expect(
+        ce
+          .box(['Round', 'Pi', 25])
+          .evaluate()
+          .isSame(
+            ce.number([15707963267948966192313217n, 5000000000000000000000000n])
+          )
+      ).toBe(true);
+      expect(
+        ce.box(['Fract', 'Pi']).evaluate().isSame(ce.parse('\\pi-3'))
+      ).toBe(true);
+      const mod = ce.box(['Mod', PI_E30, 1]).evaluate();
+      expect(
+        mod.isSame(
+          ce
+            .box([
+              'Subtract',
+              PI_E30,
+              { num: '3141592653589793238462643383279' },
+            ])
+            .evaluate()
+        )
+      ).toBe(true);
+      // The value of the fractional digits after the 30th digit of π:
+      // 0.502884197169399375105820974944…
+      expect(ce.box(['Mod', PI_E30, 1]).N().re).toBeCloseTo(
+        0.5028841971693994,
+        14
+      );
+      expect(ce.box(['Fract', PI_E30]).N().re).toBeCloseTo(
+        0.5028841971693994,
+        14
+      );
+    });
+
+    test('a value exactly at a jump stays unevaluated', () => {
+      const ce = engineAt(p);
+      // `(√2 + √3)² − 2√6` is `5`. Mathematica leaves
+      // `Floor[(Sqrt[2] + Sqrt[3])^2 - 2 Sqrt[6]]` unevaluated too.
+      const x = [
+        'Subtract',
+        ['Power', ['Add', ['Sqrt', 2], ['Sqrt', 3]], 2],
+        ['Multiply', 2, ['Sqrt', 6]],
+      ];
+      expect(ce.box(['Floor', x]).evaluate().operator).toBe('Floor');
+      // Mathematica: `N[Floor[(Sqrt[2] + Sqrt[3])^2 - 2 Sqrt[6]]]` is `5`.
+      expect(ce.box(['Floor', x]).N().re).toBe(5);
+      expect(ce.box(['Ceil', x]).N().re).toBe(5);
+      expect(ce.box(['Fract', x]).N().re).toBe(0);
+      expect(ce.box(['Mod', x, 1]).N().re).toBe(0);
+      // `ln 6 − ln 2 − ln 3` is 0. Mathematica:
+      // `N[Sign[Log[6] - Log[2] - Log[3]]]` is `0`.
+      const zero = ['Subtract', ['Ln', 6], ['Add', ['Ln', 2], ['Ln', 3]]];
+      expect(ce.box(['Sign', zero]).evaluate().operator).toBe('Sign');
+      expect(ce.box(['Sign', zero]).N().re).toBe(0);
+      expect(ce.box(['Heaviside', zero]).N().re).toBe(0.5);
+      // At a half-integer, the tie rule rounds away from zero.
+      expect(
+        ce.box(['Round', ['Subtract', ['Rational', -5, 2], zero]]).N().re
+      ).toBe(-3);
+    });
+
+    test('a value whose terms cancel at the working precision', () => {
+      const ce = engineAt(p);
+      // `√(10⁶⁰ + 10⁴⁰) − 10³⁰` is `4999999999.9999999999875…`, and it is
+      // `10¹⁰` at 21 digits. Mathematica: `Floor[…]` is `4999999999`,
+      // `Ceiling[…]` is `5000000000`.
+      const s = [
+        'Subtract',
+        ['Sqrt', ['Add', ['Power', 10, 60], ['Power', 10, 40]]],
+        ['Power', 10, 30],
+      ];
+      expect(ce.box(['Floor', s]).evaluate().json).toBe(4999999999);
+      expect(ce.box(['Floor', s]).N().re).toBe(4999999999);
+      expect(ce.box(['Ceil', s]).evaluate().json).toBe(5000000000);
+      expect(ce.box(['Mod', s, 1]).N().re).toBeCloseTo(0.9999999999875, 12);
+    });
+
+    test('the .N() forms', () => {
+      const ce = engineAt(p);
+      const r = ce.box(['Floor', PI_E30]).N();
+      expect(r.isExact).toBe(false);
+      expect(r.re).toBe(3.141592653589793e30);
+      expect(ce.box(['Ceil', ['Power', 'ExponentialE', 10]]).N().re).toBe(
+        22027
+      );
+    });
+
+    test('a broadcast', () => {
+      const ce = engineAt(p);
+      expect(
+        ce
+          .box(['Floor', ['List', PI_E30, 'ExponentialE']])
+          .evaluate()
+          .toString()
+      ).toBe('[3141592653589793238462643383279,2]');
+    });
+
+    test('the parse route', () => {
+      const ce = engineAt(p);
+      expect(
+        ce.parse('\\lfloor \\pi\\cdot 10^{30}\\rfloor').evaluate().toString()
+      ).toBe('3141592653589793238462643383279');
+      expect(ce.parse('\\lceil e^{10}\\rceil').evaluate().json).toBe(22027);
+    });
+
+    test('Sign and Heaviside', () => {
+      const ce = engineAt(p);
+      const q8 = [
+        'Divide',
+        { num: '314159265358979323846264338327950288' },
+        ['Power', 10, 35],
+      ];
+      const q9 = [
+        'Divide',
+        { num: '314159265358979323846264338327950289' },
+        ['Power', 10, 35],
+      ];
+      // Mathematica: `Sign[Pi - q8]` is 1, `Sign[Pi - q9]` is -1.
+      for (const f of ['evaluate', 'N'] as const) {
+        expect(ce.box(['Sign', ['Subtract', 'Pi', q8]])[f]().json).toBe(1);
+        expect(ce.box(['Sign', ['Subtract', 'Pi', q9]])[f]().json).toBe(-1);
+        expect(ce.box(['Heaviside', ['Subtract', 'Pi', q8]])[f]().json).toBe(1);
+        expect(ce.box(['Heaviside', ['Subtract', 'Pi', q9]])[f]().json).toBe(0);
+      }
+    });
+  }
+);
+
+/**
+ * An enclosure that is still wide at the last precision does not count as
+ * "at a jump": the float decides. The error bound of `sin` grows with its
+ * argument, and the precision limit grows with the magnitude of the first
+ * enclosure, so `sin(10²⁰⁰)` is decided at about 290 digits. The values are
+ * Mathematica 15.0 results with `$MaxExtraPrecision = 2000`:
+ * `sin(10²⁰⁰) = 0.969171481070262959066135…`,
+ * `FractionalPart[Pi 10^200] = 0.442881097566593344612847…`,
+ * `Mod[Pi 10^200, 7] = 4.442881097566593344612847…`.
+ */
+describe('An exact constant with a large argument or magnitude', () => {
+  const SIN = ['Sin', ['Power', 10, 200]];
+  const PI_E200 = ['Multiply', 'Pi', ['Power', 10, 200]];
+
+  test('sin(10^200)', () => {
+    const ce = engineAt(21);
+    expect(ce.box(['Sign', SIN]).N().re).toBe(1);
+    expect(ce.box(['Heaviside', SIN]).N().re).toBe(1);
+    expect(ce.box(['Fract', SIN]).N().re).toBeCloseTo(0.969171481070263, 14);
+    expect(ce.box(['Mod', SIN, 1]).N().re).toBeCloseTo(0.969171481070263, 14);
+    expect(ce.box(['Round', SIN, 3]).N().re).toBe(0.969);
+  });
+
+  test('π·10^200', () => {
+    const ce = engineAt(21);
+    expect(ce.box(['Fract', PI_E200]).N().re).toBeCloseTo(
+      0.4428810975665933,
+      14
+    );
+    expect(ce.box(['Mod', PI_E200, 7]).N().re).toBeCloseTo(
+      4.442881097566593,
+      14
+    );
+  });
+
+  test('a magnitude beyond the limit uses the float, and is fast', () => {
+    const ce = engineAt(21);
+    const start = Date.now();
+    const r = ce.box(['Floor', ['Power', 'Pi', 1000000]]).N();
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(r.isExact).toBe(false);
+    expect(r.toString()).toBe('7.45923232449144786349e+497149');
+  }, 20000);
+
+  test('an exact base raised to a large integer keeps the working precision', () => {
+    const ce = engineAt(21);
+    // Mathematica: `N[Pi^1000000, 25]` is `7.459232324491447863494856…`,
+    // `N[Pi^-1000000, 25]` is `1.340620531038597921040399…`.
+    expect(ce.box(['Power', 'Pi', 1000000]).N().toString()).toBe(
+      '7.45923232449144786349e+497149'
+    );
+    expect(ce.box(['Power', 'Pi', -1000000]).N().toString()).toBe(
+      '1.34062053103859792104e-497150'
+    );
+  });
+});
+
+/**
+ * An exact constant is evaluated exactly before its enclosures are
+ * computed: `π + 10⁻¹⁵⁰ − π` evaluates to the exact number `10⁻¹⁵⁰`, and
+ * both routes see that number. A value that no evaluation simplifies, and
+ * that is smaller than about `10^−(working + 50)` times its largest term, is
+ * taken to be at the jump under `.N()` (a documented limit): it stays
+ * unevaluated under `evaluate()`.
+ */
+describe('An exact constant is evaluated before it is enclosed', () => {
+  const X = ['Subtract', ['Add', 'Pi', ['Power', 10, -150]], 'Pi'];
+  // `(√2 + √3)² − 5 − 2√6` is 0, and `evaluate()` does not expand the
+  // square, so this value is `10⁻¹⁵⁰` behind terms of size 10.
+  const R = [
+    'Add',
+    ['Power', ['Add', ['Sqrt', 2], ['Sqrt', 3]], 2],
+    -5,
+    ['Multiply', -2, ['Sqrt', 6]],
+    ['Power', 10, -150],
+  ];
+
+  test('a value that evaluation folds to an exact number', () => {
+    const ce = engineAt(21);
+    for (const f of ['evaluate', 'N'] as const) {
+      expect(ce.box(['Sign', X])[f]().re).toBe(1);
+      expect(ce.box(['Heaviside', X])[f]().re).toBe(1);
+      expect(ce.box(['Less', 0, X])[f]().symbol).toBe('True');
+    }
+    expect(ce.box(X).isEqual(0)).toBe(false);
+  });
+
+  test('the documented limit: a value no evaluation simplifies', () => {
+    const ce = engineAt(21);
+    expect(ce.box(['Sign', R]).evaluate().operator).toBe('Sign');
+    expect(ce.box(['Sign', R]).N().re).toBe(0);
+    expect(ce.box(R).isEqual(0)).toBe(true);
+    expect(ce.box(['Less', 0, R]).evaluate().symbol).toBe('False');
+    expect(ce.box(['Less', 0, R]).N().symbol).toBe('False');
+  });
+});
+
+describe('An exact base raised to an integer at machine precision', () => {
+  test('the result is the double nearest to the exact value', () => {
+    const ce = engineAt('machine');
+    // Mathematica: `N[Pi^10, 20]` is `93648.047476083020974`, and the
+    // nearest double is 93648.04747608303. `N[(7/3)^10, 20]` is
+    // `4783.7431455232095378`.
+    expect(ce.box(['Power', 'Pi', 10]).N().re).toBe(93648.04747608303);
+    expect(ce.box(['Power', ['Rational', 7, 3], 10]).N().re).toBe(
+      4783.74314552321
+    );
+    // An integer power of an integer is exact.
+    expect(ce.box(['Power', 2, 100]).evaluate().toString()).toBe(
+      '1267650600228229401496703205376'
+    );
+    expect(ce.box(['Power', 2, 100]).N().re).toBe(1.2676506002282294e30);
+  });
+});

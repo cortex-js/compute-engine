@@ -2,6 +2,20 @@
 
 ### Behavior Changes
 
+- **A rounding function, `Fract`, `Mod`, `Sign`, `Heaviside` or a comparison
+  of an exact constant expression is decided by raising the precision.**
+  `Floor(π·10³⁰)` stayed unevaluated and its `.N()` was the 21-digit float
+  `3.14159265358979323846e+30`; it is now the exact integer
+  `3141592653589793238462643383279`, as in Mathematica, and `Fract(π)` is
+  `π − 3`. A comparison of exact constants was decided on 21-digit values,
+  which cancellation can make wrong: `√(10⁶⁰ + 10⁴⁰) − 10³⁰ > 5·10⁹` was
+  `True` and is now `False` (the value is `4.99999…·10⁹`). The engine
+  computes the operand with an error bound at the working precision plus 10
+  digits, then with more digits, up to 100 more, until the result is certain.
+  When it is still not certain, the value is very probably at the jump:
+  `evaluate()` leaves a rounding function, `Sign` or `Heaviside` unevaluated,
+  a comparison is equal, and `.N()` uses the value at the jump
+  (`Floor((√2 + √3)² − 2√6).N()` was `4` and is now `5`).
 - **`.N()` of a rounding function, `Fract`, `Mod`, `Sign`, `Heaviside` or a
   comparison uses the exact value of an exact operand.** `.N()` approximated the
   operand first, and near a point where the result jumps, a tiny error changed
@@ -296,6 +310,11 @@
 
 ### Issues Resolved
 
+- **`.N()` of an exact constant raised to a large integer power is correct to
+  the working precision.** The error of the approximated base was multiplied
+  by the exponent: `(π^1000000).N()` was `7.45923232449144786258e+497149`,
+  wrong from the 18th digit; it is now `7.45923232449144786349e+497149`. The
+  base is computed with about `log₁₀|k|` more digits for an exponent `k`.
 - **`HurwitzZeta` and the two-operand `Zeta` are accurate at a complex order
   with a large imaginary part, stay unevaluated where the double-precision
   result would be wrong, and no longer hang on an extreme argument.**

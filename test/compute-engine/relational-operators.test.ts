@@ -1011,3 +1011,107 @@ describe('Element-wise comparison of exact operands under N', () => {
     ).toBe('["True","False","False"]');
   });
 });
+
+describe('Comparing exact constants that are not exact numbers', () => {
+  // A comparison of exact constants (`π`, `e`, `ln 2`) is decided from
+  // enclosures of their values at a precision that is raised until the
+  // enclosures are disjoint (user decision 2026-09-30). At 21 digits, `π`
+  // and these 36-digit rationals are equal. Mathematica:
+  // `N[Pi - Q8, 5]` is `4.1972·10⁻³⁶`, `Pi < Q9` is `True`.
+  const Q8 = [
+    'Divide',
+    { num: '314159265358979323846264338327950288' },
+    ['Power', 10, 35],
+  ];
+  const Q9 = [
+    'Divide',
+    { num: '314159265358979323846264338327950289' },
+    ['Power', 10, 35],
+  ];
+  const check = (op: string, a: unknown, b: unknown) => {
+    const e = ce.box([op, a, b] as any);
+    const r = e.evaluate().symbol;
+    expect(e.N().symbol).toBe(r);
+    return r;
+  };
+
+  test('a near tie beyond the working precision', () => {
+    expect(check('Less', 'Pi', Q9)).toBe('True');
+    expect(check('Less', 'Pi', Q8)).toBe('False');
+    expect(check('Greater', 'Pi', Q8)).toBe('True');
+    expect(check('LessEqual', 'Pi', Q8)).toBe('False');
+    expect(check('GreaterEqual', 'Pi', Q9)).toBe('False');
+    expect(check('Equal', 'Pi', Q9)).toBe('False');
+    expect(check('NotEqual', 'Pi', Q9)).toBe('True');
+    // `e − 271828182845904523536028747135266249/10³⁵` is `7.8·10⁻³⁶`.
+    const E9 = [
+      'Divide',
+      { num: '271828182845904523536028747135266249' },
+      ['Power', 10, 35],
+    ];
+    expect(check('Greater', 'ExponentialE', E9)).toBe('True');
+  });
+
+  test('far from a tie', () => {
+    expect(check('Less', 'Pi', ['Rational', 355, 113])).toBe('True');
+    expect(check('Equal', 'Pi', ['Rational', 355, 113])).toBe('False');
+  });
+
+  test('a value whose terms cancel at the working precision', () => {
+    // `√(10⁶⁰ + 10⁴⁰) − 10³⁰` is `4999999999.9999999999875…`, and it is
+    // `10¹⁰` at 21 digits. Mathematica: `… > 5·10⁹` is `False`, also
+    // under `N`.
+    const s = [
+      'Subtract',
+      ['Sqrt', ['Add', ['Power', 10, 60], ['Power', 10, 40]]],
+      ['Power', 10, 30],
+    ];
+    const five = ['Multiply', 5, ['Power', 10, 9]];
+    expect(check('Greater', s, five)).toBe('False');
+    expect(check('Less', s, five)).toBe('True');
+    expect(check('Equal', s, five)).toBe('False');
+  });
+
+  test('an enclosure that stays wide keeps the answer of the float', () => {
+    // The error bound of `sin` grows with its argument. Mathematica, with
+    // `$MaxExtraPrecision = 2000`: `sin(10²⁰⁰)` is `0.969171481070262959…`.
+    const sin = ['Sin', ['Power', 10, 200]];
+    expect(check('Less', sin, 2)).toBe('True');
+    expect(check('Equal', sin, ['Rational', 1, 2])).toBe('False');
+    expect(ce.box(sin).isEqual(ce.box(['Rational', 1, 2]))).toBe(false);
+  });
+
+  test('a JavaScript integer is an exact value', () => {
+    const s = ce.box([
+      'Subtract',
+      ['Sqrt', ['Add', ['Power', 10, 60], ['Power', 10, 40]]],
+      ['Power', 10, 30],
+    ]);
+    expect(s.isGreater(5000000000)).toBe(false);
+    expect(s.isLess(5000000000)).toBe(true);
+    expect(s.isGreater(ce.number(5000000000))).toBe(false);
+  });
+
+  test('two equal constants stay equal', () => {
+    // The enclosures of `ln 6` and `ln 2 + ln 3` never separate, and the
+    // two values are taken to be equal at the precision limit, as
+    // Mathematica's `Log[6] == Log[2] + Log[3]` is `True` (also under `N`).
+    const sum = ['Add', ['Ln', 2], ['Ln', 3]];
+    expect(check('Equal', ['Ln', 6], sum)).toBe('True');
+    expect(check('Less', ['Ln', 6], sum)).toBe('False');
+  });
+
+  test('the parse route', () => {
+    const q9 = '\\frac{314159265358979323846264338327950289}{10^{35}}';
+    expect(ce.parse(`\\pi < ${q9}`).evaluate().symbol).toBe('True');
+    expect(ce.parse(`\\pi < ${q9}`).N().symbol).toBe('True');
+    expect(ce.parse(`\\pi = ${q9}`).evaluate().symbol).toBe('False');
+  });
+
+  test('a float keeps the precision of the float', () => {
+    expect(
+      ce.box(['Equal', 'Pi', ce.parse('3.14159265358979323846')]).evaluate()
+        .symbol
+    ).toBe('True');
+  });
+});

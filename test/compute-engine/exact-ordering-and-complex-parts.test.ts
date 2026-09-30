@@ -958,10 +958,11 @@ describe('THE SQUARE ROOT OF THE SQUARE OF AN ABS', () => {
 // A value that could not be ordered against the extremum stayed in the
 // result, also when a later extremum is clearly larger than it.
 //
-// `L2 = ln(√2 − c2)` is 7.3247846210703885·10⁻⁶⁷ (checked at 120 digits):
-// neither 21 nor 50 digits decide its order against 0, and `Max`/`Min`
-// then make it a tie with 0 within the engine tolerance (`exactOrder`,
-// step 3). A tie prefers the literal: `Max(-1, L2, 0)` is `0`, although
+// `L2 = ln(√2 − c2)` is 4.1214970999358314·10⁻¹⁴¹ (Mathematica, with
+// `$MaxExtraPrecision = 500`): neither 21 nor 50 digits, nor the enclosures
+// of `cmp` (which stop at 121 digits), decide its order against 0, and
+// `Max`/`Min` then make it a tie with 0 within the engine tolerance
+// (`exactOrder`, step 3). A tie prefers the literal: `Max(-1, L2, 0)` is `0`, although
 // `L2` is larger. This is the documented last resort of the order.
 describe('AN UNDECIDED VALUE IS COMPARED WITH A LATER EXTREMUM', () => {
   const L2: MathJsonExpression = [
@@ -971,8 +972,8 @@ describe('AN UNDECIDED VALUE IS COMPARED WITH A LATER EXTREMUM', () => {
       ['Sqrt', 2],
       [
         'Divide',
-        '414213562373095048801688724209698078569671875376948073176679737990',
-        ['Power', 10, 66],
+        '41421356237309504880168872420969807856967187537694807317667973799073247846210703885038753432764157273501384623091229702492483605585073721264',
+        ['Power', 10, 140],
       ],
     ],
   ];

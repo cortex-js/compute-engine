@@ -18,7 +18,11 @@ import {
   isTextAtom,
 } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
-import { eq, eqIdentical } from '../boxed-expression/compare.js';
+import {
+  eq,
+  eqIdentical,
+  isExactConstantExpression,
+} from '../boxed-expression/compare.js';
 import { holdsDoubles } from '../boxed-expression/machine-broadcast.js';
 import {
   isNumber,
@@ -246,6 +250,10 @@ function evaluateChainOperands(
  * comparison, and no exact evaluation is made: it can cost much more than
  * the numeric one.
  *
+ * An exact constant expression that is not a number (`π`, `ln 2`) is an
+ * exception: it is used as it is at any distance from a tie, with an exact
+ * number that the other operand is (see the comment in the body).
+ *
  * A float operand (`0.5`) has no exact value, so a comparison with a float
  * stays decided at the precision of the float: `1/2 − 10⁻³⁰ < 0.5` is
  * `False`, and `1/10 = 0.1` is `True`, as in Mathematica.
@@ -256,6 +264,22 @@ function exactPairAtNearTie(
   rawB: Expression,
   b: Expression
 ): [Expression, Expression] | undefined {
+  // An exact constant expression that is not a number (`π`,
+  // `√(10⁶⁰ + 10⁴⁰) − 10³⁰`) is always compared by its exact form, also far
+  // from a tie: its float at the working precision can be wrong by much more
+  // than the tolerance when its terms cancel. The comparison of the exact
+  // forms uses enclosures at a raised precision (`cmp()` in
+  // `boxed-expression/compare.ts`), and the first one decides two values
+  // that are well apart. Using the operand as it is costs no evaluation.
+  // In a chain `a < b < c`, the middle operand can already be the exact
+  // constant expression that the first pair used.
+  const constantA = isExactConstantExpression(a) ? a : exactConstantOf(rawA);
+  const constantB = isExactConstantExpression(b) ? b : exactConstantOf(rawB);
+  if (constantA !== undefined || constantB !== undefined) {
+    const u = constantA ?? exactOperandOf(rawA, a);
+    const v = constantB ?? exactOperandOf(rawB, b);
+    if (u !== undefined && v !== undefined) return [u, v];
+  }
   if (!isNumber(a) || !isNumber(b)) return undefined;
   if (isExactRealLiteral(a) && isExactRealLiteral(b)) return undefined;
   if (a.isComplex || b.isComplex) return undefined;
@@ -267,11 +291,42 @@ function exactPairAtNearTie(
   // An operand that is already an exact real number is its own exact value:
   // in a chain `a < b < c`, the middle operand is replaced by its exact
   // value for the first pair, and it is not evaluated again for the second.
-  const exactA = isExactRealLiteral(a) ? a : exactRealValueOf(rawA);
+  const exactA = isExactRealLiteral(a) ? a : exactValueOrConstant(rawA);
   if (exactA === undefined) return undefined;
-  const exactB = isExactRealLiteral(b) ? b : exactRealValueOf(rawB);
+  const exactB = isExactRealLiteral(b) ? b : exactValueOrConstant(rawB);
   if (exactB === undefined) return undefined;
   return [exactA, exactB];
+}
+
+/** `raw`, canonical, when it is an exact constant expression that is not
+ *  a number (see `isExactConstantExpression()`), or `undefined`. */
+function exactConstantOf(raw: Expression): Expression | undefined {
+  const canonical = raw.isCanonical ? raw : raw.canonical;
+  return isExactConstantExpression(canonical) ? canonical : undefined;
+}
+
+/** The exact real number literal that `raw` is, or that its float `value`
+ *  is, or `undefined`. No evaluation is made. */
+function exactOperandOf(
+  raw: Expression,
+  value: Expression
+): Expression | undefined {
+  if (isExactRealLiteral(value)) return value;
+  const canonical = raw.isCanonical ? raw : raw.canonical;
+  return isExactRealLiteral(canonical) ? canonical : undefined;
+}
+
+/**
+ * The exact value of `raw` when it is an exact real number
+ * (`exactRealValueOf()`), else `raw` itself when it is an exact constant
+ * expression that is not a number (`π`, `ln 2`; see
+ * `isExactConstantExpression()`), else `undefined`. The comparison of an
+ * exact constant expression orders it by enclosures of its value at a
+ * raised precision (`exactValueOrder()` in `boxed-expression/compare.ts`),
+ * not by its float at the working precision.
+ */
+function exactValueOrConstant(raw: Expression): Expression | undefined {
+  return exactRealValueOf(raw) ?? exactConstantOf(raw);
 }
 
 /**

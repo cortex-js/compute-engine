@@ -825,10 +825,44 @@ Two limits of the rule:
   known only to its precision, so a comparison of an exact number with a float
   is decided at the float's precision: `1/2 − 10⁻³⁰ < 0.5` is `False`, and
   `1/10 = 0.1` is `True`. Mathematica gives the same answers.
-- **An operand that is exact but not an exact number** (`Floor(π·10³⁰)`) is not
-  covered: the engine does not raise the precision until the result is decided,
-  as Mathematica does, and `Floor(π·10³⁰)` stays unevaluated under
-  `evaluate()`.
+- **An operand that is exact but not an exact number** (an exact constant
+  expression: `π·10³⁰`, `√2 + √3`, `ln 2`, with no free variable, no float
+  and no side effect) is decided by raising the precision, as Mathematica
+  does (`isExactConstantExpression()`, `refineExactConstants()` in
+  `boxed-expression/compare.ts`). The operand is first evaluated exactly
+  (`exactFormOfConstant()`): a fold such as `π − π` may make it an exact
+  number, which is then decided exactly, so the `evaluate()` and `.N()` routes
+  agree on `π + 10⁻¹⁵⁰ − π`. Otherwise the engine computes an enclosure
+  `[v − E, v + E]` with the error model of `approximate()` at the working
+  precision plus 10 guard digits, then at double that, up to the working
+  precision plus 100 digits plus the number of integer digits of the value
+  (so `sin(10²⁰⁰)`, whose argument reduction needs 200 more digits, is still
+  decided), and decides when the enclosure does not contain the jump. A value
+  with more than 500 integer digits (`MAX_MAGNITUDE_DIGITS`) is not refined:
+  no jump can be separated at that size, and the float is used. `Floor(π·10³⁰)` is the exact `3141592653589793238462643383279`
+  under `evaluate()`, and `Fract(π)` is `π − 3`. The enclosure is used at any
+  distance from the jump, because cancellation can make a working-precision
+  value wrong by far more than the tolerance: at 21 digits,
+  `√(10⁶⁰ + 10⁴⁰) − 10³⁰` is `10¹⁰`, while its value is
+  `4.99999…·10⁹`. When the enclosure still contains the jump at the limit and
+  is NARROW (narrower than `10^−(working + 50)` of the distance between jumps,
+  or of the magnitude of the compared values: `NARROW_MARGIN_DIGITS`), the
+  value is probably AT the jump (`(√2 + √3)² − 2√6` is `5`), and `evaluate()`
+  leaves a rounding function, `Sign` and `Heaviside` unevaluated, a
+  comparison answers equal, and `.N()` takes the value to be at the jump
+  (`Floor((√2 + √3)² − 2√6).N()` is `5`), as Mathematica does after its
+  `$MaxExtraPrecision` warning. A consequence: two constants that differ by
+  less than about `10^−(working + 50)` of their size are taken as equal
+  (`Less(kπ, kπ + 10⁻¹⁵⁰)` is `False`). Near 0 the test is absolute, and the
+  width of an enclosure follows the size of the terms, not of the value, so a
+  value that no fold simplifies and that is smaller than about
+  `10^−(working + 50)` times its largest term is taken to be 0
+  (`(√2 + √3)² − 5 − 2√6 + 10⁻¹⁵⁰` has `Sign` `0` under `.N()`). An enclosure that is still WIDE at the
+  limit decides nothing, and the caller keeps its previous answer (the
+  tolerance comparison, or the float). An exact order (tolerance 0, used by `Max`,
+  sorting and `Abs`) never accepts "equal at the limit". The bound is sound
+  only for operators whose kernels `approximate()` covers; any other operator
+  gives no bound, and the result stays undecided.
 
 The form of the result does not depend on which of the two ways decided it:
 under `.N()`, the rounding family returns a float (`Floor(b/24!).N()` is the

@@ -142,6 +142,7 @@ import {
   realLcm,
   roundHalfAway,
   floorModDouble,
+  MACHINE_PRECISION,
 } from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
 import type { NumberLiteralInterface } from '../types-expression.js';
@@ -369,7 +370,14 @@ import {
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
-import { cmp, exactOrder } from '../boxed-expression/compare.js';
+import {
+  cmp,
+  exactConstantValue,
+  exactFormOfConstant,
+  exactOrder,
+  isExactConstantExpression,
+  refineExactConstants,
+} from '../boxed-expression/compare.js';
 import {
   isExactRealLiteral,
   exactRealValueOf,
@@ -545,6 +553,67 @@ function roundExactReal(x: Expression, mode: RoundingMode): bigint | undefined {
 }
 
 /**
+ * The rounded value of an EXACT constant expression that is not a number
+ * literal (`π·10³⁰`, `e^10`, `√2 + √3`; see `isExactConstantExpression()`),
+ * or `undefined` when it is not decided.
+ *
+ * The value is enclosed in an interval at a precision that is raised until
+ * both ends of the interval round to the same integer
+ * (`refineExactConstants()`). Each rounding mode is a non-decreasing
+ * function, so the exact value, which is in the interval, rounds to that
+ * integer too. A value that is exactly at a jump (`(√2 + √3)² − 2√6`, which
+ * is `5`) is never decided: its interval always contains the jump.
+ * Mathematica does the same (`Floor[Pi 10^30]` is
+ * `3141592653589793238462643383279`, and `Floor[(Sqrt[2] + Sqrt[3])^2 -
+ * 2 Sqrt[6]]` stays unevaluated).
+ *
+ * With `atJumpAtLimit` (under `.N()`), a value whose last enclosure still
+ * contains a jump, and is narrower than `10^−(working + 50)` there (the
+ * `narrowAtLimit` test of `refineExactConstants()`: the jumps are 1 apart),
+ * is taken to be AT the jump nearest to the middle of the enclosure, and it
+ * is rounded as that point: an integer for `floor`,
+ * `ceil` and `trunc`, and a half-integer for `round`, which rounds away
+ * from zero. Mathematica does the same under `N`
+ * (`N[Floor[(Sqrt[2] + Sqrt[3])^2 - 2 Sqrt[6]]]` is `5`). A wider
+ * enclosure (`sin(10⁶⁰⁰)`, whose error grows with its argument) is not
+ * decided: the caller uses the float.
+ *
+ * `x` is evaluated exactly first (`exactFormOfConstant()`): an exact number
+ * result is rounded exactly (`roundExactReal()`), and otherwise the
+ * enclosures are computed for the evaluated form. A value that no
+ * evaluation simplifies, and that is nearer to a jump than about
+ * `10^−(working + 50)` times its largest term, is taken to be at the jump
+ * under `.N()`.
+ */
+function roundExactConstant(
+  x: Expression,
+  mode: RoundingMode,
+  atJumpAtLimit = false
+): bigint | undefined {
+  if (!isExactConstantExpression(x)) return undefined;
+  const round = (v: BigDecimal): BigDecimal =>
+    mode === 'floor'
+      ? v.floor()
+      : mode === 'ceil'
+        ? v.ceil()
+        : mode === 'trunc'
+          ? v.trunc()
+          : v.round();
+  const exact = exactFormOfConstant(x);
+  if (exact === undefined) return undefined;
+  if (isExactRealLiteral(exact)) return roundExactReal(exact, mode);
+  return refineExactConstants([exact], ([[lo, hi]], narrowAtLimit) => {
+    const a = round(lo);
+    if (a.eq(round(hi))) return a.toBigInt();
+    if (!atJumpAtLimit || !narrowAtLimit(lo, hi)) return undefined;
+    const middle = lo.add(hi).div(2);
+    const jump =
+      mode === 'round' ? middle.floor().add(BigDecimal.HALF) : middle.round();
+    return round(jump).toBigInt();
+  });
+}
+
+/**
  * True when the float `x` is so near a point where the rounding `mode`
  * jumps (an integer for `floor`, `ceil` and `trunc`, a half-integer for
  * `round`) that its rounding error can put it on the wrong side of that
@@ -605,8 +674,19 @@ function exactZeroJumpOperand(
   numericApproximation: boolean | undefined,
   expression: Expression | undefined
 ): Expression {
-  if (!numericApproximation || isExactRealLiteral(x)) return x;
+  // An exact constant expression that is not a number
+  // (`π − 314159265358979323846264338327950289/10³⁵`) gets its sign from
+  // enclosures (`exactConstantSign()`). Under `.N()`, the original operand
+  // is used at any distance from 0, because its float can have the wrong
+  // sign when its terms cancel, and a value that is at 0 at the precision
+  // limit is taken to be 0.
+  if (!numericApproximation) return exactConstantSign(x) ?? x;
+  if (isExactRealLiteral(x)) return x;
   const original = originalOperand(expression, 0);
+  if (original !== undefined) {
+    const sign = exactConstantSign(original, true);
+    if (sign !== undefined) return sign;
+  }
   if (
     original !== undefined &&
     (isNumber(original) ||
@@ -617,6 +697,45 @@ function exactZeroJumpOperand(
   )
     return exactRealValueOf(original) ?? x;
   return x;
+}
+
+/**
+ * The sign of the exact constant expression `x` (see
+ * `isExactConstantExpression()`), as the number `1` or `-1`, from enclosures
+ * of its value (`refineExactConstants()`). `undefined` when `x` is not such
+ * an expression, or when its enclosures all contain 0 (a value that is
+ * exactly 0 is never decided), except with `zeroAtLimit` (under `.N()`):
+ * then a value whose last enclosure contains 0, and is narrower than
+ * `10^−(working + 50)` (the `narrowAtLimit` test of
+ * `refineExactConstants()`), is taken to be 0, as Mathematica does
+ * (`N[Sign[Log[6] - Log[2] - Log[3]]]` is `0`). The caller
+ * uses the number in place of `x` only for its sign.
+ *
+ * `x` is evaluated exactly first (`exactFormOfConstant()`): an exact number
+ * result gives its exact sign, and otherwise the enclosures are computed
+ * for the evaluated form. A value that no evaluation simplifies, and that
+ * is smaller than about `10^−(working + 50)` times its largest term, is
+ * taken to be 0 under `.N()`.
+ */
+function exactConstantSign(
+  x: Expression,
+  zeroAtLimit = false
+): Expression | undefined {
+  if (!isExactConstantExpression(x)) return undefined;
+  const exact = exactFormOfConstant(x);
+  if (exact === undefined) return undefined;
+  if (isExactRealLiteral(exact))
+    return x.engine.number(exact.isSame(0) ? 0 : exact.isPositive ? 1 : -1);
+  const sign = refineExactConstants([exact], ([[lo, hi]], narrowAtLimit) =>
+    lo.isPositive()
+      ? 1
+      : hi.isNegative()
+        ? -1
+        : zeroAtLimit && narrowAtLimit(lo, hi)
+          ? 0
+          : undefined
+  );
+  return sign === undefined ? undefined : x.engine.number(sign);
 }
 
 /**
@@ -660,6 +779,26 @@ function exactModUnderN(
     if (isNumber(original) || near) return exactRealValueOf(original);
     return undefined;
   };
+  // An exact constant expression that is not a number (`π·10³⁰`) has no
+  // exact number value: `Mod(a, m) = a − m·k` is built with `k` decided
+  // from enclosures (`exactConstantModulo()`), and its value is computed at
+  // a raised precision (`exactConstantValue()`), because at the working
+  // precision `a` and `m·k` cancel. This is done at any distance from a
+  // jump, since the floats of such operands can be wrong by more than that
+  // distance. A value of `a/m` that is at an integer at the precision limit
+  // (with a narrow enclosure) gives 0. When the value is not known, the
+  // steps below and the float decide.
+  const oa = originalOperand(expression, 0);
+  const om = originalOperand(expression, 1);
+  const modulo =
+    oa === undefined || om === undefined
+      ? undefined
+      : exactConstantModulo(oa, om, true);
+  if (modulo !== undefined) {
+    if (isNumber(modulo)) return modulo.N();
+    const value = exactConstantValue(modulo);
+    if (value !== undefined) return ce.number(ce._numericValue(value));
+  }
   const ea = exactOf(a, 0);
   if (ea === undefined) return undefined;
   const em = exactOf(m, 1);
@@ -682,6 +821,93 @@ function exactModUnderN(
   if (fromFloat && n !== undefined)
     return ce.number(ce._numericValue(new BigDecimal(n.toString())));
   return exact.N();
+}
+
+/**
+ * `Mod(a, m)` as the exact expression `a − m·k`, where `k = ⌊a/m⌋`, when
+ * `a` and `m` are exact (an exact real number or an exact constant
+ * expression, see `isExactConstantExpression()`) and at least one of them
+ * is an exact constant expression that is not a number. `undefined` when
+ * `k` is not decided (`a/m` is exactly an integer that the enclosures of
+ * `roundExactConstant()` do not separate from its neighbours), or when the
+ * operands are not of that kind.
+ *
+ * With `atJumpAtLimit` (under `.N()`), `k` is decided at the precision
+ * limit too: see `roundExactConstant()`.
+ *
+ * The result is canonical, not evaluated: the caller evaluates it, or
+ * computes its value.
+ */
+function exactConstantModulo(
+  a: Expression,
+  m: Expression,
+  atJumpAtLimit = false
+): Expression | undefined {
+  const isExact = (x: Expression) =>
+    isExactRealLiteral(x) || isExactConstantExpression(x);
+  if (!isExact(a) || !isExact(m)) return undefined;
+  if (isExactRealLiteral(a) && isExactRealLiteral(m)) return undefined;
+  if (m.isSame(0)) return undefined;
+  const ce = a.engine;
+  const q = ce.function('Divide', [a, m]);
+  const k = isExactRealLiteral(q)
+    ? roundExactReal(q, 'floor')
+    : roundExactConstant(q, 'floor', atJumpAtLimit);
+  if (k === undefined) return undefined;
+  return ce.function('Subtract', [
+    a,
+    ce.function('Multiply', [ce.number(k), m]),
+  ]);
+}
+
+/**
+ * Under `.N()`, the value of `Power(b, k)` for an exact base `b` (an exact
+ * real number or an exact constant expression, see
+ * `isExactConstantExpression()`) and an exact integer `k` with `|k| ≥ 10`,
+ * or `undefined` for other operands.
+ *
+ * A relative error `ε` of the base becomes about `|k|·ε` in `b^k`, so the
+ * base is approximated with `⌈log10 |k|⌉ + 2` more digits than the working
+ * precision, the power is computed at that precision, and the result is
+ * rounded to the working precision. Mathematica: `N[Pi^1000000, 25]` is
+ * `7.459232324491447863494856…·10^497149`; with the base at 21 digits, the
+ * digits after the 17th were wrong.
+ *
+ * `expression` is the `Power` expression before its operands were
+ * approximated (the operands that the handler receives are floats).
+ */
+function exactBaseIntegerPower(
+  expression: Expression | undefined
+): Expression | undefined {
+  if (expression === undefined || !isFunction(expression)) return undefined;
+  const [b, k] = expression.ops;
+  if (b === undefined || k === undefined) return undefined;
+  if (!isNumber(k) || !k.isExact || k.isInteger !== true) return undefined;
+  const n = Math.abs(k.re);
+  if (!(n >= 10) || !Number.isFinite(n)) return undefined;
+  // An integer base (`2^100`, `3^1000000`) is raised to the power exactly
+  // by `pow()` before the result is approximated: it is not handled here.
+  // A rational base is: its float has the error of the working precision
+  // (`(1/3)^1000000` had only 15 correct digits).
+  if (isNumber(b) && b.isInteger === true) return undefined;
+  if (!isExactRealLiteral(b) && !isExactConstantExpression(b))
+    return undefined;
+  const ce = expression.engine;
+  const working = ce.precision;
+  const digits = working + Math.ceil(Math.log10(n)) + 2;
+  const value = ce._withTransientPrecision(digits, () => {
+    // `pow()` directly, not a `Power` expression: its `.N()` would call
+    // this function again for an exact integer base (`10^-30`).
+    const r = pow(b.N(), k, { numericApproximation: true });
+    if (!isNumber(r) || r.isComplex || r.isFinite !== true) return undefined;
+    return r.bignumRe;
+  });
+  if (value === undefined) return undefined;
+  // At machine precision, the value is converted to a double directly:
+  // rounding it first to the 15 digits of `ce.precision` made the result
+  // less accurate than the double of the base raised to the power.
+  if (working <= MACHINE_PRECISION) return ce.number(value.toNumber());
+  return ce.number(ce._numericValue(value.toPrecision(working)));
 }
 
 /** The operand at `index` of the expression that an `evaluate` handler
@@ -771,6 +997,24 @@ function applyRounding(
     : x;
   if (exactOperand !== undefined) {
     const exact = roundExactReal(exactOperand, mode);
+    if (exact !== undefined) {
+      const ce = x.engine;
+      if (!numericApproximation) return ce.number(exact);
+      return ce.number(ce._numericValue(new BigDecimal(exact.toString())));
+    }
+  }
+  // An exact constant expression that is not a number (`π·10³⁰`) is rounded
+  // from enclosures of its value (`roundExactConstant()`). Without `.N()`,
+  // `x` is that expression. Under `.N()`, `x` is its float, which can be
+  // wrong by much more than the distance to a jump when its terms cancel
+  // (`√(10⁶⁰ + 10⁴⁰) − 10³⁰` is `10¹⁰` at 21 digits, and its floor is
+  // `4999999999`), so the original operand is always used. The first
+  // enclosure decides a value that is not near a jump. When the result is
+  // not decided at the precision limit, it stays unevaluated without
+  // `.N()`, and under `.N()` the value is taken to be at the jump.
+  const constant = numericApproximation ? original : x;
+  if (constant !== undefined) {
+    const exact = roundExactConstant(constant, mode, numericApproximation);
     if (exact !== undefined) {
       const ce = x.engine;
       if (!numericApproximation) return ce.number(exact);
@@ -4329,6 +4573,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (isNumber(fl) && fl.isExact)
             return ce.function('Subtract', [x, fl]).evaluate();
         }
+        // An exact constant expression that is not a number: `x − k`, where
+        // `k` is the floor of `x` decided from enclosures
+        // (`roundExactConstant()`). `Fract(π)` is `π − 3`, as Mathematica's
+        // `FractionalPart[Pi]`. Under `.N()`, the original operand is used,
+        // as in `applyRounding()`, and the value of `x − k` is computed at a
+        // raised precision (`exactConstantValue()`): at the working
+        // precision, the float of `π·10³⁰` has no fractional digits. A value
+        // that is at an integer at the precision limit (with a narrow
+        // enclosure) has the fractional part 0 under `.N()`. When the value
+        // is not known, the float decides (below).
+        const constant = numericApproximation
+          ? originalOperand(expression, 0)
+          : x;
+        if (constant !== undefined) {
+          const k = roundExactConstant(constant, 'floor', numericApproximation);
+          if (k !== undefined) {
+            const fract = ce.function('Subtract', [constant, ce.number(k)]);
+            if (!numericApproximation) return fract.evaluate();
+            const value = exactConstantValue(fract);
+            if (value !== undefined) return ce.number(ce._numericValue(value));
+          }
+        }
         // Under `.N()`, an operand whose exact value is known
         // (`exactRoundingOperand()`) has its fractional part computed
         // exactly, and the result is approximated. The float of
@@ -5672,6 +5938,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             }
           }
         }
+
+        // An exact constant expression that is not a number (`π·10³⁰`):
+        // `a − m·k`, where `k` is the floor of `a/m` decided from enclosures
+        // (`exactConstantModulo()`). `Mod(π·10³⁰, 1)` is
+        // `π·10³⁰ − 3141592653589793238462643383279`, as in Mathematica.
+        const constantModulo = exactConstantModulo(a, b);
+        if (constantModulo !== undefined) return constantModulo.evaluate();
 
         return floorModFloat(a, b);
       },
@@ -7053,6 +7326,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const r = measurementPower(engine!, evalBase, evalExp);
           return numericApproximation ? r?.N() : r;
         }
+        // Under `.N()`, an exact base raised to a large exact integer `k`: the
+        // relative error of the base is multiplied by `|k|`, so the float of
+        // `π` at 21 digits gives only 17 correct digits of `π^1000000`. The
+        // base is approximated again with `log10(|k|) + 2` more digits
+        // (`exactBaseIntegerPower()`).
+        if (numericApproximation) {
+          const r = exactBaseIntegerPower(expression);
+          if (r !== undefined) return r;
+        }
         // D2: an inexact (float) base or exponent numericizes even under
         // plain evaluate() — `Power(2, 5.1)` → 34.29…, matching `Cos(5.1)`.
         // `isExactNumber` (not plain `isExact`) additionally protects the
@@ -7542,10 +7824,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 (isNumber(original) || isNearRoundingJump(scaledFloat, 'round'))
               ? exactRealValueOf(original)
               : undefined;
-          const k =
+          let k =
             exactX === undefined
               ? undefined
               : roundExactReal(exactX.mul(factor), 'round');
+          // An exact constant expression that is not a number (`π`) is
+          // rounded from enclosures of its scaled value
+          // (`roundExactConstant()`), at any distance from a jump, as in
+          // `applyRounding()`.
+          if (k === undefined && exactX === undefined && original !== undefined)
+            k = roundExactConstant(
+              ce.function('Multiply', [original, factor]),
+              'round',
+              true
+            );
           if (k !== undefined) return ce.number(k).div(factor).N();
           const scaled = roundToInteger(scaledFloat);
           return scaled === undefined ? undefined : scaled.div(factor);

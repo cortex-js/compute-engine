@@ -532,6 +532,16 @@ function eqImpl(
   if (isObject(a) || isObject(b))
     return (a as Expression) === (b as Expression);
 
+  // Two exact values, one of them an exact constant expression that is not
+  // a number, are compared by enclosures at a raised precision, not by the
+  // difference of their values at the working precision, which can cancel
+  // (see `cmp`). Two values that the enclosures do not separate at the
+  // precision limit are equal (`ln 6` and `ln 2 + ln 3`).
+  if (isExactConstantPair(aExact, bExact)) {
+    const order = exactConstantOrder(aExact, bExact);
+    if (order !== undefined) return order === 0;
+  }
+
   //
   // Do we have at least one function expression?
   //
@@ -747,6 +757,29 @@ export function cmp(
   b: number | Expression,
   tolerance: number = a.engine.tolerance
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
+  // Two exact values, one of them an exact constant expression that is not
+  // a number (`π`, `√(10⁶⁰ + 10⁴⁰) − 10³⁰`), are ordered by enclosures at a
+  // raised precision (`exactConstantOrder()`), not by their values at the
+  // working precision: at 21 digits, `√(10⁶⁰ + 10⁴⁰) − 10³⁰` cancels to
+  // `10¹⁰`, but its value is `4999999999.99…`. The first enclosure is at the
+  // working precision plus a few digits, and it decides two values that are
+  // well apart. Two values whose enclosures still overlap at the precision
+  // limit, and are narrow there, are equal (`'='`; see
+  // `exactConstantOrder()`), except for an exact order (`tolerance` is 0),
+  // which must not take two different numbers for a tie: it goes on with
+  // the steps below. A JavaScript integer `b` is an exact value, and it is
+  // boxed for this test; any other JavaScript number is a float.
+  const exactB =
+    typeof b !== 'number'
+      ? b
+      : Number.isInteger(b)
+        ? a.engine.number(b)
+        : undefined;
+  if (exactB !== undefined && isExactConstantPair(a, exactB)) {
+    const order = exactConstantOrder(a, exactB);
+    if (order !== undefined && (order !== 0 || tolerance !== 0))
+      return order < 0 ? '<' : order > 0 ? '>' : '=';
+  }
   const c = cmpWithTolerance(a, b, tolerance);
   // Two exact numbers are compared exactly, with no tolerance: `1/3` is
   // greater than `3333333333333/10¹³`, as the operator `Greater` says. The
@@ -763,8 +796,15 @@ export function cmp(
  * The order of the exact values of `a` and `b`: `-1`, `0` or `1`, when both
  * are exact real numbers (integers, rationals, or rationals times the square
  * root of an integer) or pure expressions that evaluate to one
- * (`exactRealValueOf()`). Otherwise, `undefined`. A number `b` is an exact
- * value only when it is an integer: `0.1` is a float.
+ * (`exactRealValueOf()`). When one or both are exact constant expressions
+ * that are not numbers (`π`, `ln 2`; `isExactConstantExpression()`), the
+ * order comes from enclosures at a raised precision
+ * (`exactConstantOrder()`): the two values are equal (`0`) when, at the
+ * precision limit, the enclosures still overlap and each is narrower than
+ * `10^−(working + NARROW_MARGIN_DIGITS)` of their magnitude, and the order
+ * is `undefined` when the enclosures are still wide there. Otherwise,
+ * `undefined`. A number `b` is an exact value only when it is an integer:
+ * `0.1` is a float.
  *
  * `eq()` and `cmp()` call this function only when the two values are equal
  * within the engine tolerance, because an exact evaluation can cost much
@@ -789,11 +829,21 @@ function exactValueOrder(
   if (orderingExactValues.has(ce)) return undefined;
   orderingExactValues.add(ce);
   try {
-    const x = exactRealValueOf(a.isCanonical ? a : a.canonical);
-    if (x === undefined) return undefined;
-    const y = exactRealValueOf(bx.isCanonical ? bx : bx.canonical);
-    if (y === undefined) return undefined;
-    return exactCompareNumbers(x, y);
+    const u = a.isCanonical ? a : a.canonical;
+    const v = bx.isCanonical ? bx : bx.canonical;
+    const x = exactRealValueOf(u);
+    const y = exactRealValueOf(v);
+    if (x !== undefined && y !== undefined) return exactCompareNumbers(x, y);
+    // An exact constant expression that is not an exact number (`π`,
+    // `ln 2`) is ordered by enclosures at a raised precision
+    // (`exactConstantOrder()`). Two values whose enclosures still overlap
+    // at the precision limit, and are narrow there, are equal: they agree
+    // to about `working + NARROW_MARGIN_DIGITS` digits (`ln 6` and
+    // `ln 2 + ln 3`).
+    const p = x ?? (isExactConstantExpression(u) ? u : undefined);
+    const q = y ?? (isExactConstantExpression(v) ? v : undefined);
+    if (p === undefined || q === undefined) return undefined;
+    return exactConstantOrder(p, q);
   } finally {
     orderingExactValues.delete(ce);
   }
@@ -1196,7 +1246,9 @@ function cmpWithTolerance(
  *
  * Two real number literals compare by their values (`exactCompareNumbers`),
  * also when a float64 cannot hold them (`10^-400`). Other operands (`π`,
- * `√2 + 1`) compare by `cmp` with a zero tolerance, at working precision.
+ * `√2 + 1`) compare by `cmp` with a zero tolerance: two exact values of
+ * which one is an exact constant expression by enclosures at a raised
+ * precision (`exactConstantOrder`), the others at working precision.
  * A weak relation (`'<='` or `'>='`, from an assumption) does not order
  * the operands and gives `undefined`.
  *
@@ -1443,6 +1495,328 @@ function orderAtRaisedPrecision(
  * engine keeps at its working precision.
  */
 const atTransientPrecision = new WeakSet<Expression['engine']>();
+
+/**
+ * The number of digits added to the working precision for the first
+ * enclosure of `refineExactConstants`. With these digits, the first
+ * enclosure decides a value that is not within about `10⁻¹⁰` (relative) of
+ * the point where the result jumps, which is the common case.
+ */
+const ENCLOSURE_GUARD_DIGITS = 10;
+
+/**
+ * The largest number of digits that `refineExactConstants` adds to the
+ * working precision. At the default working precision (21 digits), the
+ * enclosures are computed at 31, 62 and 121 digits, and a value within about
+ * `10⁻¹¹⁵` (relative) of a jump is not decided. Mathematica stops at 50 extra
+ * digits (`$MaxExtraPrecision`). A value that is exactly at a jump (an
+ * identity such as `(√2 + √3)² − 2√6 = 5`) is never decided by an
+ * enclosure, and it pays for all the levels: this limit bounds that cost.
+ */
+const MAX_EXTRA_DIGITS = 100;
+
+/**
+ * True when `x` is an EXACT constant expression that is not a number
+ * literal: a pure function expression with no unknowns whose number
+ * literals are all exact and whose symbols are all constants (`π·10³⁰`,
+ * `e^10`, `√2 + √3`, `ln 2`, `sin 1`). Its value is known to any precision,
+ * so a function that jumps at a point (`Floor`, `Sign`, `Less`) can decide
+ * its result with `refineExactConstants`. A float literal anywhere makes the
+ * expression inexact: its value is known only to the precision of the float.
+ */
+export function isExactConstantExpression(x: Expression): boolean {
+  if (!isFunction(x) && !isSymbol(x)) return false;
+  if (x.isPure !== true || x.unknowns.length > 0) return false;
+  return hasOnlyExactLeaves(x);
+}
+
+function hasOnlyExactLeaves(x: Expression): boolean {
+  if (isNumber(x)) return x.isExact;
+  if (isSymbol(x)) return x.isConstant === true;
+  if (isFunction(x)) return x.ops.every((op) => hasOnlyExactLeaves(op));
+  return false;
+}
+
+/**
+ * The number of digits beyond the working precision to which two values
+ * must agree, at the last precision of `refineExactConstants`, before a
+ * caller may take them to be equal (or a value to be at a jump). At the
+ * default working precision (21 digits), the enclosures must be narrower
+ * than `10⁻⁷¹` (relative to the scale the caller gives). An enclosure that
+ * is still wide at the last precision (the value of `sin(10⁶⁰⁰)`, whose
+ * error grows with its argument) never counts as a tie: the caller keeps
+ * its previous answer.
+ */
+const NARROW_MARGIN_DIGITS = 50;
+
+/**
+ * The largest magnitude, as a number of decimal digits, of a value that
+ * `refineExactConstants` encloses. The precision limit grows with the
+ * magnitude of the values (a floor of `π·10²⁰⁰` needs more than 200
+ * digits), and above this magnitude the enclosures are not computed at all:
+ * `Floor(π^1000000)` would need about 500000 digits.
+ */
+const MAX_MAGNITUDE_DIGITS = 500;
+
+/**
+ * The test that `refineExactConstants` gives to `decide`: true only at the
+ * last precision, when the enclosure `[lo, hi]` is narrower than
+ * `10^−(working + NARROW_MARGIN_DIGITS)` times `scale` (1 when omitted).
+ */
+export type NarrowAtLimit = (
+  lo: BigDecimal,
+  hi: BigDecimal,
+  scale?: BigDecimal
+) => boolean;
+
+/**
+ * The result of `decide` for the enclosures of the real constants `xs`,
+ * computed at a precision that is raised until `decide` gives a result, or
+ * `undefined` when the precision limit is reached first, or when an
+ * operand has no enclosure.
+ *
+ * An enclosure is an interval `[lo, hi]` of big decimals that contains the
+ * exact value. It is the value computed by `approximate` with its error
+ * bound added and subtracted (the addition and the subtraction of big
+ * decimals are exact). The first precision is the working precision plus
+ * `ENCLOSURE_GUARD_DIGITS`, then the precision is doubled, up to the
+ * limit: the working precision plus `MAX_EXTRA_DIGITS`, plus the number of
+ * integer digits of the largest end of the first enclosures (a floor of
+ * `π·10²⁰⁰` needs all the integer digits, and the first enclosure of
+ * `sin(10²⁰⁰)` is wide because its error grows with its argument). When
+ * that number of digits is more than `MAX_MAGNITUDE_DIGITS`, the result is
+ * `undefined` after the first enclosures. This is how Mathematica decides
+ * `Floor[Pi 10^30]`.
+ *
+ * `decide` gets a test, `narrowAtLimit(lo, hi, scale)`, that is true only
+ * at the last precision and only when the width of `[lo, hi]` is at most
+ * `10^−(working + NARROW_MARGIN_DIGITS)·scale`. When enclosures still
+ * overlap (or still contain a jump) there and they are that narrow, a
+ * caller can take the values to be equal, or the value to be AT the jump,
+ * as Mathematica does when it reaches `$MaxExtraPrecision`
+ * (`N[Floor[(Sqrt[2] + Sqrt[3])^2 - 2 Sqrt[6]]]` is `5`): the values agree
+ * to about `working + NARROW_MARGIN_DIGITS` digits, and such values are
+ * usually equal (an identity). The accepted consequence: two different
+ * values that agree to that many digits are taken to be equal
+ * (`Less(kπ, kπ + 10⁻¹⁵⁰)` is `False`). A caller that must not guess does
+ * not use the test.
+ *
+ * The enclosure is sound under the error model of `approximate`: each
+ * operator computes its value to within 100 units in the last digit of the
+ * exact value of its rounded operands, at the precision that is in force.
+ * An operator for which no error bound is known gives no enclosure, and
+ * then the result is `undefined` at once (a higher precision does not give
+ * a bound).
+ *
+ * The precision is raised with `_withTransientPrecision` (see
+ * `orderAtRaisedPrecision`): the value of a constant is computed again at
+ * each precision, and no value is cached for the working precision. `decide`
+ * runs at the raised precision too.
+ *
+ * A call made while another one runs for the same engine (an operator in
+ * `xs` that calls this function when it is evaluated) gives `undefined`:
+ * this stops a recursion with no end.
+ */
+export function refineExactConstants<T>(
+  xs: ReadonlyArray<Expression>,
+  decide: (
+    enclosures: [BigDecimal, BigDecimal][],
+    narrowAtLimit: NarrowAtLimit
+  ) => T | undefined
+): T | undefined {
+  if (xs.length === 0) return undefined;
+  const ce = xs[0].engine;
+  if (refiningConstants.has(ce)) return undefined;
+  const working = Math.max(ce.precision, MACHINE_PRECISION);
+  let limit = working + MAX_EXTRA_DIGITS;
+  const narrowWidth = new BigDecimal(`1e${-(working + NARROW_MARGIN_DIGITS)}`);
+  refiningConstants.add(ce);
+  try {
+    let digits = working + ENCLOSURE_GUARD_DIGITS;
+    let first = true;
+    while (true) {
+      const step = ce._withTransientPrecision(digits, () => {
+        atTransientPrecision.add(ce);
+        try {
+          const unit = roundingUnit(ce);
+          const enclosures: [BigDecimal, BigDecimal][] = [];
+          for (const x of xs) {
+            const a = approximate(x, unit);
+            if (a === undefined) return { bounded: false, result: undefined };
+            const v = bigDecimalOf(a.value);
+            if (!v.isFinite()) return { bounded: false, result: undefined };
+            const e = errorBound(a.logError);
+            enclosures.push([v.sub(e), v.add(e)]);
+          }
+          if (first) {
+            // The number of integer digits of the largest end.
+            let magnitude = 0;
+            for (const [lo, hi] of enclosures)
+              for (const end of [lo, hi])
+                magnitude = Math.max(
+                  magnitude,
+                  Math.ceil(logAbs(end) / Math.LN10)
+                );
+            if (magnitude > MAX_MAGNITUDE_DIGITS)
+              return { bounded: false, result: undefined };
+            limit += magnitude;
+          }
+          const atLimit = digits >= limit;
+          const narrowAtLimit: NarrowAtLimit = (lo, hi, scale) =>
+            atLimit &&
+            hi.sub(lo).lte(scale === undefined ? narrowWidth : narrowWidth.mul(scale));
+          return { bounded: true, result: decide(enclosures, narrowAtLimit) };
+        } finally {
+          atTransientPrecision.delete(ce);
+        }
+      });
+      first = false;
+      if (step.result !== undefined) return step.result;
+      if (!step.bounded || digits >= limit) return undefined;
+      digits = Math.min(2 * digits, limit);
+    }
+  } finally {
+    refiningConstants.delete(ce);
+  }
+}
+
+/** The engines for which `refineExactConstants` is running. See
+ *  `refineExactConstants`. */
+const refiningConstants = new WeakSet<Expression['engine']>();
+
+/**
+ * A big decimal that is not less than `e^logError`: a power of 10, with a
+ * margin for the machine arithmetic of the logarithms (`LOG_SLACK`). `0`
+ * when the value is exact (`logError` is `-Infinity`).
+ */
+function errorBound(logError: number): BigDecimal {
+  if (logError === -Infinity) return BigDecimal.ZERO;
+  const k = Math.ceil((logError + LOG_SLACK) / Math.LN10);
+  return new BigDecimal(`1e${k}`);
+}
+
+/**
+ * The exact form of `x`, an exact real number literal or an exact constant
+ * expression (`isExactConstantExpression`): `x` evaluated exactly, when the
+ * result is an exact real number literal or an exact constant expression,
+ * and `undefined` otherwise.
+ *
+ * The functions that refine an exact constant (`exactConstantOrder`,
+ * `exactConstantValue`, and the rounding functions and `Sign` in
+ * `library/arithmetic.ts`) evaluate it exactly first. An evaluation that
+ * gives an exact number (`π + 10⁻¹⁵⁰ − π` is `10⁻¹⁵⁰`) is used exactly, with
+ * no enclosure. Otherwise the enclosure is computed for the evaluated form,
+ * which has fewer terms that cancel. Without this, the enclosure of
+ * `π + 10⁻¹⁵⁰ − π` had the width of its terms (about `10⁻¹¹⁷` at 121
+ * digits), and it was taken to be 0 under `.N()`, while `evaluate()` gave
+ * `10⁻¹⁵⁰`. The limit that stays: a value that no evaluation simplifies,
+ * and that is smaller than about `10^−(working + NARROW_MARGIN_DIGITS)`
+ * times its largest term (`(√2 + √3)² − 5 − 2√6 + 10⁻¹⁵⁰`), is taken to be
+ * at the jump (equal, 0) under `.N()`.
+ *
+ * The evaluation runs with the recursion guard of `refineExactConstants`:
+ * a comparison made during it does not refine exact constants again.
+ */
+export function exactFormOfConstant(x: Expression): Expression | undefined {
+  if (isExactRealLiteral(x)) return x;
+  const ce = x.engine;
+  if (refiningConstants.has(ce)) return undefined;
+  refiningConstants.add(ce);
+  try {
+    const value = x.evaluate();
+    if (isExactRealLiteral(value) || isExactConstantExpression(value))
+      return value;
+    return undefined;
+  } finally {
+    refiningConstants.delete(ce);
+  }
+}
+
+/**
+ * The order of the real constants `a` and `b` (each an exact constant
+ * expression or an exact number literal), from their exact forms
+ * (`exactFormOfConstant`): the exact order when both are exact numbers,
+ * else `-1` or `1` when their
+ * enclosures (`refineExactConstants`) are disjoint, and `0` when, at the
+ * last precision, they still overlap and each is narrower than
+ * `10^−(working + NARROW_MARGIN_DIGITS)` of the larger magnitude (at least
+ * 1): the two values agree to about that many digits, and they are taken to
+ * be equal, as Mathematica does (`Log[6] == Log[2] + Log[3]` is `True`).
+ * So `Less(kπ, kπ + 10⁻¹⁵⁰)` is `False`. `undefined` when an operand has no
+ * enclosure, or when the enclosures are still wide at the last precision
+ * (`sin(10⁶⁰⁰)`): the caller keeps its own answer.
+ */
+export function exactConstantOrder(
+  a: Expression,
+  b: Expression
+): -1 | 0 | 1 | undefined {
+  const u = exactFormOfConstant(a);
+  if (u === undefined) return undefined;
+  const v = exactFormOfConstant(b);
+  if (v === undefined) return undefined;
+  if (isExactRealLiteral(u) && isExactRealLiteral(v))
+    return exactCompareNumbers(u, v);
+  return refineExactConstants(
+    [u, v],
+    ([[aLo, aHi], [bLo, bHi]], narrowAtLimit) => {
+      if (aHi.lt(bLo)) return -1;
+      if (aLo.gt(bHi)) return 1;
+      let scale = BigDecimal.ONE;
+      for (const end of [aLo, aHi, bLo, bHi])
+        if (end.abs().gt(scale)) scale = end.abs();
+      return narrowAtLimit(aLo, aHi, scale) && narrowAtLimit(bLo, bHi, scale)
+        ? 0
+        : undefined;
+    }
+  );
+}
+
+/**
+ * True when `a` and `b` are both exact (an exact real number literal or an
+ * exact constant expression, see `isExactConstantExpression`) and at least
+ * one of them is an exact constant expression: the pairs that `cmp` and
+ * `eq` order by enclosures (`exactConstantOrder`) before any comparison at
+ * the working precision.
+ */
+function isExactConstantPair(a: Expression, b: Expression): boolean {
+  const aConstant = isExactConstantExpression(a);
+  const bConstant = isExactConstantExpression(b);
+  if (!aConstant && !bConstant) return false;
+  return (
+    (aConstant || isExactRealLiteral(a)) && (bConstant || isExactRealLiteral(b))
+  );
+}
+
+/**
+ * The value of the real constant `x` (an exact constant expression)
+ * correct to the working precision. When the exact form of `x`
+ * (`exactFormOfConstant`) is an exact number, its value. Otherwise, the
+ * middle of an enclosure
+ * (`refineExactConstants`) whose width is at most `10^−p` of its middle,
+ * where `p` is the working precision. The value is computed at a raised
+ * precision, so a value that cancels at the working precision
+ * (`π·10³⁰ − 3141592653589793238462643383279`) is correct.
+ *
+ * `0` when, at the last precision, the enclosure contains 0 and is
+ * narrower than `10^−(working + NARROW_MARGIN_DIGITS)` (see
+ * `refineExactConstants`): the value is taken to be 0. `undefined` when no
+ * enclosure is narrow enough: the caller keeps its own answer.
+ */
+export function exactConstantValue(x: Expression): BigDecimal | undefined {
+  const working = Math.max(x.engine.precision, MACHINE_PRECISION);
+  const relative = new BigDecimal(`1e${-working}`);
+  const u = exactFormOfConstant(x);
+  if (u === undefined) return undefined;
+  if (isExactRealLiteral(u)) return bigDecimalOf(u.N());
+  return refineExactConstants([u], ([[lo, hi]], narrowAtLimit) => {
+    const middle = lo.add(hi).div(2);
+    if (!middle.isZero() && hi.sub(lo).lte(middle.abs().mul(relative)))
+      return middle;
+    if (!lo.isPositive() && !hi.isNegative() && narrowAtLimit(lo, hi))
+      return BigDecimal.ZERO;
+    return undefined;
+  });
+}
 
 /** True when the value of `x` is a finite real number. */
 function isRealValue(x: Expression): boolean {

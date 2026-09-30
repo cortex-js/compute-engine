@@ -34,6 +34,22 @@ const EXACT_PAIRS: [string, MathJsonExpression, MathJsonExpression, number][] =
       -1,
     ],
     ['sqrt(2) vs its 24-digit decimal', ['Sqrt', 2], BIG_SQRT2, -1],
+    // An exact constant that is not an exact number is ordered at a raised
+    // precision. `π − 314159265358979323846264338327950288/10³⁵` is
+    // `4.2·10⁻³⁶` and `π − 314159265358979323846264338327950289/10³⁵` is
+    // `−5.8·10⁻³⁶` (Mathematica: `N[Pi - …/10^35, 5]`).
+    [
+      'pi vs a 36-digit rational below it',
+      'Pi',
+      ['Rational', '314159265358979323846264338327950288', '1e35'],
+      1,
+    ],
+    [
+      'pi vs a 36-digit rational above it',
+      'Pi',
+      ['Rational', '314159265358979323846264338327950289', '1e35'],
+      -1,
+    ],
   ];
 
 describe('EXACT COMPARISON METHODS', () => {
