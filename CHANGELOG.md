@@ -2,6 +2,13 @@
 
 ### Issues Resolved
 
+- **`PolyLog`, the hypergeometric functions, `AppellF1`, `JacobiTheta`,
+  `DedekindEta` and `EisensteinE` thread over a list operand,** as `Zeta`,
+  `LerchPhi` and the elliptic integrals already did. `PolyLog(2, [0.1, 0.2])`
+  was an `incompatible-type` error and is now
+  `[0.1026177910993911, 0.2110037754397048]`; a scalar call is unchanged (#374,
+  contributed by [enumeratio](https://github.com/enumeratio)).
+
 - **A self-recursive function that builds a list is typed `list<T>`.** With
   `F` declared `(unknown, unknown) -> unknown` and assigned
   `(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the
