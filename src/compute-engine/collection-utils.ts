@@ -3672,6 +3672,11 @@ export function addsPointToNumberCollection(
  */
 function isNumberCollectionType(type: Type): boolean {
   const s = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(type)));
+  // A type that is only `missing` leaves `never` once the `missing` arm is
+  // removed. `never` is a subtype of every type, `list<number>` included, so
+  // it must be excluded here: `Missing - (1, 2)` is an absent operand beside a
+  // point, typed `missing | tuple<…>`, not a list of numbers beside a point.
+  if (s === 'never') return false;
   // A bare spelling that names a list of numbers (`range`, a subtype of
   // `list<integer>`; not the bare `list`, whose elements are unknown).
   if (typeof s === 'string') return isSubtype(s, 'list<number>');
