@@ -79,22 +79,31 @@ function countIntegrandEvals(fn: () => void): {
 
 describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
   describe('accuracy vs closed form', () => {
-    // ∫_0^x 0.1·√(1+t²) dt = 0.05·(x·√(1+x²) + asinh(x))
-    test.each([0.5, 2, 5])('arc-length integrand at x=%p', (x) => {
-      const r = compileReal('\\int_0^x 0.1\\sqrt{1+t^2}\\,dt');
+    // ∫_0^x √(1+cos²t) dt is the arc length of sin(t): an elliptic integral
+    // with no elementary antiderivative, so it is computed by quadrature.
+    // Reference values: composite Simpson, 2e6 intervals.
+    test.each([
+      [0.5, 0.6928387236938071],
+      [2, 2.3516888074008837],
+      [5, 6.0217618318252795],
+    ])('arc-length integrand at x=%p', (x, ref) => {
+      const r = compileReal('\\int_0^x \\sqrt{1+\\cos(t)^2}\\,dt');
+      expect(r.code).toContain('_SYS.integrate(');
       const got = r.run({ x }) as number;
-      const closed = 0.05 * (x * Math.sqrt(1 + x * x) + Math.asinh(x));
-      expect(Math.abs(got - closed) / Math.abs(closed)).toBeLessThan(1e-8);
+      expect(Math.abs(got - ref) / Math.abs(ref)).toBeLessThan(1e-8);
     });
 
-    test('∫_0^π sin(t) dt = 2 (constant bounds)', () => {
-      const r = compileReal('\\int_0^{\\pi} \\sin(t)\\,dt');
-      expect(r.run({}) as number).toBeCloseTo(2, 8);
+    test('∫_0^π sin(t)/(1+t) dt ≈ 0.8438108128 (constant bounds)', () => {
+      const r = compileReal('\\int_0^{\\pi} \\frac{\\sin(t)}{1+t}\\,dt');
+      expect(r.code).toContain('_SYS.integrate(');
+      // Reference: composite Simpson, 2e6 intervals.
+      expect(r.run({}) as number).toBeCloseTo(0.8438108128004037, 8);
     });
   });
 
   test('determinism — successive calls are bit-identical (vs stochastic MC)', () => {
-    const r = compileReal('\\int_0^x 0.1\\sqrt{1+t^2}\\,dt');
+    const r = compileReal('\\int_0^x \\sqrt{1+\\cos(t)^2}\\,dt');
+    expect(r.code).toContain('_SYS.integrate(');
     const a = r.run({ x: 2 }) as number;
     const b = r.run({ x: 2 }) as number;
     expect(a).toBe(b); // ===, not just close
@@ -118,6 +127,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
 
     test('χ²-type tail ∫_x^∞ y^{3/2} e^{-y/2} dy at x=2', () => {
       const r = compileReal('\\int_x^{\\infty} y^{3/2} e^{-y/2}\\,dy');
+      expect(r.code).toContain('_SYS.integrate(');
       // Reference value verified independently by a fine composite Simpson
       // rule on [2, 200] (tail beyond negligible): 6.385472870122. The
       // engine's interpreter (`.N()`) uses Monte-Carlo here and returns a
@@ -131,6 +141,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     const r = compileReal(
       '\\int_{-\\pi}^{\\pi} e^{-t^2} \\cos(2\\pi \\cdot 3 \\cdot t)\\,dt'
     );
+    expect(r.code).toContain('_SYS.integrate(');
     const got = r.run({}) as number;
     expect(Number.isFinite(got)).toBe(true);
     expect(got).toBe(r.run({}) as number); // deterministic
@@ -150,6 +161,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     ]);
     const r = compile(expr);
     expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.integrate(');
     expect(r.run() as number).toBeCloseTo(3, 6);
   });
 
@@ -449,6 +461,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       ]);
       const r = compile(e);
       expect(r.success).toBe(true);
+      expect(r.code).toContain('_SYS.integrate(');
       expect(r.run({}) as number).toBeCloseTo(1.207021663355318, 10);
     });
 
@@ -463,6 +476,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       ]);
       const r = compile(e);
       expect(r.success).toBe(true);
+      expect(r.code).toContain('_SYS.integrate(');
       expect(r.run({}) as number).toBeCloseTo(0.60351083167765899, 10);
     });
 
@@ -1312,6 +1326,7 @@ describe('COMPILE Integrate — a `Function` integrand is paired to the limits b
       { vars: { a: '_.a' } }
     );
     expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.integrate(');
     expect(r.run!({ a: 1 })).toBeCloseTo(4 / 3, 8);
   });
 

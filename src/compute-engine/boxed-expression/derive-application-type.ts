@@ -11,6 +11,7 @@ import { isSubtype } from '../../common/type/subtype.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
   appliesToListCoordinateTuple,
+  addsPointToNumberCollection,
   isTupleShapedType,
   scalarOrListUnionCellType,
   typeCouldBeUnkeyedCollection,
@@ -145,6 +146,16 @@ export function deriveApplicationType(
     appliesToListCoordinateTuple(
       operator,
       broadcastLiftHooks.broadcastsOverTuples(operator, def),
+      operands.map((d) => d.type)
+    )
+  )
+    return 'error';
+  // A sum of a point (or a list of points) and a collection of numbers is
+  // typed `error`, as at the call site (`type()` in `boxed-function.ts`,
+  // `addsPointToNumberCollection`).
+  if (
+    addsPointToNumberCollection(
+      operator,
       operands.map((d) => d.type)
     )
   )

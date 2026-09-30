@@ -260,15 +260,23 @@ Rare in practice (a closure over a local declared after it); left as is by the
 fix would either refuse the read (an error like JavaScript's) or pre-create the
 iteration's bindings when the body starts.
 
-### A list of numbers plus a point is typed `indexed_collection<integer>` and evaluates to a list of errors (OPEN, small — found 2026-09-28 answering Tycho item 326)
+### Point arithmetic with a valued symbol: three type/value disagreements (OPEN, small — found 2026-09-29 by the fix that types a list of numbers plus a point `error`)
 
-With `L := [0..3]`, `L + (1, 1)` types `indexed_collection<integer>` and
-evaluates to four `incompatible-type` errors (`2 + (1, 1)` alone is one such
-error, typed `error`). The type and the value disagree: the type promises a
-collection of integers that no evaluation produces. Either the type should be
-`error` like the scalar case, or `list<error>`; the broadcast type derivation
-lifts the scalar operator's type over the list without seeing that the scalar
-case is an error.
+With `L := [0, 1, 2, 3]`, `P := (1, 1)`, `Q := [(1, 2), (3, 4)]` and `x := 5`:
+(1) `L · P` is typed `tuple<integer, integer>` but evaluates to
+`[(0, 0), (1, 1), (2, 2), (3, 3)]`; the list-times-point typing of `Multiply`
+applies to a list literal (`[0, 1, 2, 3] · P` is
+`list<tuple<integer, integer>^4>`) but not to a symbol that holds the list. (2)
+`P / L` and `(1, 1) / [1, 2]` are typed `tuple<number, number>` but never
+evaluate (they stay `(1, 1) / [0, 1, 2, 3]`); a point over a list of numbers
+should give a list of points, or an error, not an inert form. (3) `Q + x` is
+typed `list<tuple<integer, integer>^2>` but evaluates to a list of errors, and
+`x + (1, 1)` is typed `integer | tuple<integer, integer>` but evaluates to one
+error: a number-typed symbol beside a point. The check of 2026-09-29
+(`addsPointToNumberCollection`, `collection-utils.ts`) reads operand TYPES only,
+and a number symbol whose type was only inferred keeps such a sum symbolic under
+`evaluate()`, so typing it `error` from the type alone would be wrong; a fix
+needs the symbol's value.
 
 ### `PolyGamma`/`Digamma`/`Trigamma` have no GPU shader lowering (OPEN, capability gap — found 2026-09-28 widening `PolyGamma` to a complex `z` for #340)
 
@@ -2599,17 +2607,6 @@ shipped 2026-08-18 — see `CHANGELOG.md` and `logic-ac-equivalence.test.ts`. St
 written form or short-circuit evaluation — remains unbuilt by design: skip
 unless a concrete workflow needs it.
 
-### Quadrature-dependent compile tests can be silently vacated by a smarter fold
-
-The wall-clock-assertion sweep (2026-08-14) found that the antiderivative-first
-fold had turned both cost-guard integrands in `compile-integrate.test.ts` into
-closed forms, so `r.run()` performed no numeric integration at all and the tests
-pinned a path the runner never took. Those two now assert that `r.code` contains
-`_SYS.integrate(`, so a future smarter fold cannot silently re-vacate them. The
-same emitted-code guard has NOT been applied to the other quadrature-dependent
-tests in that file, and any of their repros could be intercepted by the same
-fold as it improves.
-
 ### The declare-WITH-value route bypasses the default-`!scope` ceiling
 
 `ce.declare('f', { type: '(...) -> ...', value: writerLiteral })` — the third
@@ -2623,41 +2620,21 @@ under pushed scopes, so context depth does not separate the two. The arrow it
 installs still carries the inferred `scope` label honestly, so the effect stays
 visible; what is missing is the refusal.
 
-### `.N()` declines convergent series whose tail is not an integer power of 1/N
+### `.N()` still declines a few convergent series with a slowly decaying or doubly logarithmic tail (OPEN, low — residue of the fitted-exponent acceleration of 2026-09-29)
 
-The Richardson/Neville acceleration behind infinite-series `.N()`
-(`acceleratedInfiniteSum`, `library/utils.ts`) extrapolates the partial sums
-with `power: 1` — an asymptotic expansion in **integer** powers of `1/N`. A
-convergent series whose tail does not have that shape never certifies, and since
-the 2026-08-14 divergence ruling — an infinite-domain big op under `.N()` whose
-convergence the acceleration cannot establish now stays unevaluated rather than
-returning a truncated partial sum — removed the truncation fallback, it now
-evaluates to itself instead of to a number.
-
-Measured 2026-08-14 — the gap is narrow and specific:
-
-| Series                        | `.N()`     | True value   |
-| :---------------------------- | :--------- | :----------- |
-| `Σ 1/n^1.5`                   | symbolic   | 2.6123753487 |
-| `Σ 1/n^2.5`                   | symbolic   | 1.3414872573 |
-| `Σ ln(n)/n²`                  | symbolic   | 0.9375482543 |
-| `Σ 1/n^2`, `1/n^3`, `1/n^4`   | ✓ computes | —            |
-| `Σ 1/2^n`, `Σ 1/n!`, `Σ e^-n` | ✓ computes | —            |
-| `Σ 1/(n(n+1))`, `Σ 1/(n²+1)`  | ✓ computes | —            |
-
-So: integer-power p-series, geometric, factorial and rational tails all work; a
-**non-integer** power (`n^-1.5`) or a logarithmic factor does not. For `Σ 1/n^p`
-the tail is `≈ N^(1-p)/(p-1)`, so the expansion runs in powers of `N^(1-p)` —
-the `power: 1` Neville tableau is fitting the wrong sequence.
-
-Two candidate fixes, both standard: extrapolate with a **fitted** power
-(estimate the tail exponent from successive partial-sum differences and pass it
-as `extrapolate`'s `power`), or apply an **Euler–Maclaurin** tail correction,
-which handles the logarithmic factors too. Whichever is chosen must keep the
-divergence guarantee: acceptance stays gated on a certified error estimate, so a
-divergent series still declines rather than acquiring a plausible-looking value.
-Regression-test against the table above, and add `Σ 1/n^1.5 = ζ(1.5)` as the
-headline case.
+Since 2026-09-29 the infinite-series `.N()` fits the tail exponent of the
+partial sums (`fittedExponentExtrapolation`, `library/utils.ts`) when the
+integer-power Richardson tableau does not certify, so `Σ 1/n^1.5`, `Σ 1/n^2.5`,
+`Σ ln(n)/n²`, `Σ (−1)ⁿ/√n` and `Π (1 + k^−1.5)` now evaluate. The fitted route
+accepts only an error estimate at or under `max(1e-12, 1e-11·|v|)`, agreement
+between the samples after `2^k` and `2^k + 1` terms, and a fitted exponent above
+0.05, so a divergent series still declines. What stays symbolic, all safely:
+`Σ 1/n^1.1` (a small exponent amplifies round-off, estimate 1.2e-10),
+`Σ ln(n)/n^1.5` (does not certify under the tight tolerance), `Σ ln²(n)/n²`
+(needs each exponent three times in the tableau), and a doubly-infinite sum with
+a non-integer-power tail (the absolute-series check that runs first declines
+it). An infinite product that does not converge now walks the full term budget
+before it declines, as a declining sum already did.
 
 ### `Divide` over a bare dimensioned list types one tier wider than the tuple and lift paths
 

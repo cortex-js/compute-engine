@@ -1306,6 +1306,205 @@ function infiniteSeriesWalk(limits: Expression):
 }
 
 /**
+ * The partial sums of a series after the step of index 2ᵏ (`main[k]`, a sum
+ * of 2ᵏ + 1 terms, since the steps are numbered from 0) and after the step
+ * of index 2ᵏ + 1 (`shifted[k]`), recorded while the partial sums are
+ * accumulated. `record(i, sum)` is called with the running sum after step
+ * `i`. The constant offset of one term does not change the exponents of the
+ * tail expansion, so the extrapolation reads the samples as taken at N = 2ᵏ.
+ */
+class DoublingSamples {
+  readonly main: number[] = [];
+  readonly shifted: number[] = [];
+  record(i: number, sum: number): void {
+    if (i >= 1 && (i & (i - 1)) === 0) this.main[31 - Math.clz32(i)] = sum;
+    const h = i - 1;
+    if (h >= 1 && (h & (h - 1)) === 0) this.shifted[31 - Math.clz32(h)] = sum;
+  }
+}
+
+/**
+ * Richardson extrapolation to h → 0 of the samples `x[k] = F(h₀·2^−k)`,
+ * where `F(h) = F(0) + Σⱼ cⱼ·h^eⱼ` with the KNOWN exponent sequence
+ * `exponents` (`e₁ ≤ e₂ ≤ …`). Level `j` of the tableau removes the
+ * `h^eⱼ` term. An exponent that appears twice also removes an
+ * `h^e·ln(h)` term: one elimination with the factor `2^e` turns that term
+ * into a plain `h^e` term, and the second elimination removes it.
+ *
+ * Returns the tableau entry with the smallest error estimate, and that
+ * estimate: the larger of its distance to the previous entry of the same
+ * level and to the entry of the previous level.
+ */
+function extrapolateWithExponents(
+  x: readonly number[],
+  exponents: readonly number[]
+): [value: number, error: number] {
+  let best: [number, number] = [NaN, Infinity];
+  let prev = x.slice();
+  for (let j = 1; j < x.length && j <= exponents.length; j++) {
+    const c = Math.pow(2, exponents[j - 1]);
+    const cur: number[] = [];
+    for (let i = 0; i + 1 < prev.length; i++)
+      cur.push(prev[i + 1] + (prev[i + 1] - prev[i]) / (c - 1));
+    if (cur.length >= 2) {
+      const v = cur[cur.length - 1];
+      const e = Math.max(
+        Math.abs(v - cur[cur.length - 2]),
+        Math.abs(v - prev[prev.length - 1])
+      );
+      if (Number.isFinite(v) && e < best[1]) best = [v, e];
+    }
+    prev = cur;
+  }
+  return best;
+}
+
+/**
+ * The limit of the partial sums `S(N)` of a series whose tail
+ * `S(∞) − S(N)` has an asymptotic expansion in the powers
+ * `N^−γ, N^−(γ+1), N^−(γ+2), …` for a real `γ > 0`, possibly each with a
+ * `ln(N)` factor. The `Σ 1/n^p` tail is `N^(1−p)/(p−1) + …`, so `γ = p − 1`
+ * is not an integer for a non-integer `p`, and the integer-power tableau of
+ * `extrapolate()` does not converge on it.
+ *
+ * Tail exponent: the differences `d_k = S(2^(k+1)) − S(2^k)` decrease as
+ * `2^(−kγ)`, so `γ_k = log2(d_k / d_(k+1))` tends to `γ`, with corrections in
+ * integer powers of `2^−k` for a pure power tail. Two kinds of candidates
+ * are tried:
+ *
+ * 1. `γ` from an extrapolation of the `γ_k`, when that extrapolation
+ *    converges (a pure power tail), with the exponents of
+ *    `powerTailExponents(γ)`;
+ * 2. otherwise (a tail with a `ln(N)` factor, where `γ_k` converges only as
+ *    `1/k`, from below), the multiples of 1/2 nearest to the last `γ_k` and
+ *    to the last `γ_k + 1/4`, with the same exponents, then with each
+ *    exponent repeated to remove the `ln(N)` factor.
+ *
+ * A candidate is accepted only when its tableau certifies the value to
+ * `fittedTolerance()`, and the samples of the other parity (after 2ᵏ + 1
+ * steps) certify the same value. A divergent series cannot pass:
+ * `γ ≤ 0` (`Σ 1/n`, `Σ 1/√n`, `Σ n`) is rejected before any extrapolation —
+ * with `γ = −1/2` the tableau converges to ζ(1/2), the analytic
+ * continuation, which is not a sum — and a slower divergence
+ * (`Σ 1/(n·ln n)`) has no power expansion, so no candidate certifies. A
+ * series whose terms alternate without tending to 0 has `d_k = 0` and no
+ * `γ_k`.
+ *
+ * Returns undefined when no candidate is accepted.
+ */
+function fittedExponentLimit(samples: DoublingSamples): number | undefined {
+  const main = fittedExponentExtrapolation(samples.main);
+  if (main === undefined) return undefined;
+  const shifted = fittedExponentExtrapolation(samples.shifted);
+  if (shifted === undefined) return undefined;
+  return Math.abs(main - shifted) <= 10 * fittedTolerance(main)
+    ? main
+    : undefined;
+}
+
+/**
+ * The error estimate a fitted-exponent extrapolation must reach. It is 100
+ * times tighter than the acceptance of the integer-power tableau: with a
+ * wrong exponent model (a missing exponent, or an inexact fitted `γ`) the
+ * tableau still settles, to an error of ~1e-9 that its estimate
+ * underestimates. With the right model the estimate is below ~1e-13.
+ */
+function fittedTolerance(value: number): number {
+  return Math.max(1e-12, 1e-11 * Math.abs(value));
+}
+
+/**
+ * The first `count` exponents of the tail of `Σ g(n^−p)` for a `g` analytic
+ * at 0 with `g(0) = 0` (`n^−p`, `1/(n^p + 1)`, `ln(1 + n^−p)`), where
+ * `γ = p − 1`: the power `n^−mp` of `g`'s Taylor series contributes the tail
+ * exponents `mp − 1 + j`, `j = 0, 1, 2, …` (Euler–Maclaurin). The sorted
+ * union over `m ≥ 1`, without duplicates. An exponent whose coefficient is 0
+ * costs one level of the tableau and nothing else.
+ */
+function powerTailExponents(gamma: number, count: number): number[] {
+  const p = gamma + 1;
+  const result: number[] = [];
+  for (let m = 1; m * p - 1 < gamma + count; m++)
+    for (let j = 0; j < count; j++) result.push(m * p - 1 + j);
+  result.sort((a, b) => a - b);
+  const unique = result.filter((e, i) => i === 0 || e - result[i - 1] > 1e-9);
+  return unique.slice(0, count);
+}
+
+function fittedExponentExtrapolation(x: readonly number[]): number | undefined {
+  // A pure power tail with a tiny γ amplifies the round-off by 1/(2^γ − 1),
+  // and `Σ 1/n` has γ = 0 up to round-off: keep a margin above 0.
+  const MIN_GAMMA = 0.05;
+  if (x.length < 8 || !x.every((v) => Number.isFinite(v))) return undefined;
+  const gammas: number[] = [];
+  for (let k = 0; k + 2 < x.length; k++) {
+    const r = (x[k + 1] - x[k]) / (x[k + 2] - x[k + 1]);
+    gammas.push(r > 0 && Number.isFinite(r) ? Math.log2(r) : NaN);
+  }
+  // The first samples are far from the asymptotic regime: skip them.
+  const tail = x.slice(2);
+  const accept = ([v, e]: [number, number]): number | undefined =>
+    Number.isFinite(v) && e <= fittedTolerance(v) ? v : undefined;
+
+  // 1. A pure power tail: γ_k = γ + O(2^−k).
+  const fitted = gammas.slice(3);
+  if (fitted.every((g) => Number.isFinite(g))) {
+    const [gamma, gammaErr] = extrapolateWithExponents(
+      fitted,
+      fitted.map((_, i) => i + 1)
+    );
+    if (Number.isFinite(gamma) && gammaErr <= 1e-6 && gamma > MIN_GAMMA) {
+      const v = accept(
+        extrapolateWithExponents(tail, powerTailExponents(gamma, tail.length))
+      );
+      if (v !== undefined) return v;
+    }
+  }
+
+  // 2. The fit of γ did not converge. γ_k converges more slowly than
+  //    `2^−k` when the tail has a ln(N) factor (γ_k = γ − O(1/k), from
+  //    below) or when the corrections to the leading power are not integer
+  //    powers of `2^−k` (`Σ 1/(n^1.5 + 1)`). Try the multiples of 1/2 nearest
+  //    to γ_k and to γ_k + 1/4, first with the exponents of a power tail,
+  //    then with each exponent repeated to remove a ln(N) factor.
+  //    Two structural guards keep a divergent series out of this branch,
+  //    where the acceptance would otherwise rest on the tableau's error
+  //    estimate alone (which underestimates the error of a wrong model):
+  //    the last three γ_k must have settled (a series whose decay rate still
+  //    drifts, `Σ ln(ln n)/n`, or oscillates, `Σ sin(n)/√n`, has not reached
+  //    an asymptotic regime the model describes), and a candidate must be
+  //    within 0.3 of the observed γ_k, the most a ln(N) or ln²(N) factor
+  //    lowers γ_k below γ at N = 2¹⁵ (about 1/ln N per power of the log).
+  const n = gammas.length;
+  const last = gammas[n - 1];
+  if (!(last > MIN_GAMMA)) return undefined;
+  if (
+    n < 3 ||
+    !(Math.abs(last - gammas[n - 2]) <= 0.05) ||
+    !(Math.abs(gammas[n - 2] - gammas[n - 3]) <= 0.05)
+  )
+    return undefined;
+  const candidates = new Set([
+    Math.round(2 * last) / 2,
+    Math.round(2 * (last + 0.25)) / 2,
+  ]);
+  for (const gamma of candidates) {
+    if (gamma < 0.5 || Math.abs(gamma - last) > 0.3) continue;
+    const exponents = powerTailExponents(gamma, tail.length);
+    const v =
+      accept(extrapolateWithExponents(tail, exponents)) ??
+      accept(
+        extrapolateWithExponents(
+          tail,
+          exponents.flatMap((e) => [e, e])
+        )
+      );
+    if (v !== undefined) return v;
+  }
+  return undefined;
+}
+
+/**
  * Accelerated `.N()` of a convergent infinite sum `Σ_{k=a}^∞ f(k)` — or the
  * reflected `Σ_{k=−∞}^{b}` and doubly-infinite `Σ_{k=−∞}^{∞}` forms, and the
  * `Element(k, ℕ₀ | ℤ⁺)` spelling (see `infiniteSeriesWalk`).
@@ -1322,8 +1521,10 @@ function infiniteSeriesWalk(limits: Expression):
  * truncated partial) — when the domain isn't one of the recognized infinite
  * spellings, the body isn't real-numeric, or the extrapolation does not
  * converge within the evaluation budget (divergent or slowly/non-smoothly
- * decaying series, e.g. a half-integer p-series whose expansion is not in
- * integer powers of `1/N`).
+ * decaying series). A tail in non-integer powers of `1/N` (`Σ 1/n^1.5`),
+ * possibly with a `ln(N)` factor (`Σ ln(n)/n²`), is extrapolated with a
+ * fitted exponent (`fittedExponentLimit`) when the integer-power tableau
+ * does not converge.
  */
 export function acceleratedInfiniteSum(
   body: Expression | undefined,
@@ -1376,6 +1577,9 @@ export function acceleratedInfiniteSum(
   let cachedJ = -1;
   let cachedSum = 0;
   let overflow = false;
+  // The partial sums after 2ᵏ and 2ᵏ + 1 steps, for the fitted-exponent
+  // extrapolation that runs when the two acceptances below fail.
+  const tailSamples = new DoublingSamples();
   const partialSum = (x: number): number => {
     let j = Math.round(x);
     if (j < 0) return 0;
@@ -1389,7 +1593,13 @@ export function acceleratedInfiniteSum(
       cachedSum = 0;
       absAccum = 0;
     }
-    for (let i = cachedJ + 1; i <= j; i++) cachedSum += termAt(i);
+    for (let i = cachedJ + 1; i <= j; i++) {
+      cachedSum += termAt(i);
+      tailSamples.record(i, cachedSum);
+      // The walk to `MAX_TERMS` honors the engine deadline (the extrapolation
+      // does through its `deadline` option, this loop must on its own).
+      if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    }
     cachedJ = j;
     return cachedSum;
   };
@@ -1488,7 +1698,12 @@ export function acceleratedInfiniteSum(
     Math.abs(s3 - s0) <= tol
   )
     return ce.number(s3);
-  return undefined;
+
+  // Third acceptance, for a smooth tail that is not an expansion in integer
+  // powers of 1/N: `Σ 1/n^1.5` (tail ~ N^−0.5) and `Σ ln(n)/n²` (tail
+  // ~ ln(N)/N). The walk above reached MAX_TERMS, so every sample is present.
+  const fitted = fittedExponentLimit(tailSamples);
+  return fitted === undefined ? undefined : ce.number(fitted);
 }
 
 /**
@@ -1529,6 +1744,7 @@ export function acceleratedInfiniteProduct(
   let cachedJ = -1;
   let cachedLogSum = 0;
   let overflow = false;
+  const tailSamples = new DoublingSamples();
   const partialLogSum = (x: number): number => {
     let j = Math.round(x);
     if (j < 0) return 0;
@@ -1540,8 +1756,12 @@ export function acceleratedInfiniteProduct(
       cachedJ = -1;
       cachedLogSum = 0;
     }
-    for (let i = cachedJ + 1; i <= j; i++)
+    for (let i = cachedJ + 1; i <= j; i++) {
       cachedLogSum += logTerm(termIndexAt(i));
+      tailSamples.record(i, cachedLogSum);
+      // The walk to `MAX_TERMS` honors the engine deadline, as the sum's does.
+      if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    }
     cachedJ = j;
     return cachedLogSum;
   };
@@ -1556,9 +1776,19 @@ export function acceleratedInfiniteProduct(
     deadline: ce._deadline,
   });
 
-  if (invalid || overflow || !Number.isFinite(logValue)) return undefined;
+  if (invalid) return undefined;
   const tol = Math.max(1e-10, 1e-9 * Math.abs(logValue));
-  if (!(error <= tol)) return undefined;
+  if (overflow || !Number.isFinite(logValue) || !(error <= tol)) {
+    // A log tail that is not an expansion in integer powers of 1/N
+    // (`Π (1 + 1/k^1.5)`): extrapolate with a fitted exponent, as
+    // `acceleratedInfiniteSum` does. That check includes the parity check.
+    partialLogSum(MAX_TERMS);
+    if (invalid) return undefined;
+    const fitted = fittedExponentLimit(tailSamples);
+    if (fitted === undefined) return undefined;
+    const value = Math.exp(fitted);
+    return Number.isFinite(value) ? ce.number(value) : undefined;
+  }
   // The same parity check as `acceleratedInfiniteSum`: the samples after 1,
   // 2, 4, … steps share one parity, so a product whose factors alternate
   // without tending to 1 looks converged (`Π 2^((−1)^k)` is 0.5 at every

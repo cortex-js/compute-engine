@@ -2,6 +2,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
 import { expectTypeBetween } from '../utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { typeHandlerContext } from '../../src/compute-engine/boxed-expression/derive-application-type';
+import { describeType } from '../../src/compute-engine/boxed-expression/operand-descriptor';
+import { parseType } from '../../src/common/type/parse';
+import { typeToString } from '../../src/common/type/serialize';
 
 /**
  * Vector-space semantics for numeric tuples (points/vectors in ℝⁿ).
@@ -96,7 +100,9 @@ describe('POINT/TUPLE ARITHMETIC — T1 literal component-wise', () => {
 
   test('exactness: (1,2)+(√2, 1) keeps radicals symbolic', () => {
     const ce = new ComputeEngine();
-    const r = ce.box(['Add', ['Tuple', 1, 2], ['Tuple', ['Sqrt', 2], 1]]).evaluate();
+    const r = ce
+      .box(['Add', ['Tuple', 1, 2], ['Tuple', ['Sqrt', 2], 1]])
+      .evaluate();
     expect(r.operator).toBe('Tuple');
     expect(r.op1.toString()).toBe('1 + sqrt(2)');
     expect(r.op2.toString()).toBe('3');
@@ -360,9 +366,7 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
     const ce = new ComputeEngine();
     expect(ce.parse('3(1,2)').latex).toBe('3(1,2)');
     expect(ce.box(['Multiply', 2, ['Tuple', 1, 2]]).latex).toBe('2(1,2)');
-    expect(ce.box(['Multiply', 2, ['Tuple', 1, 2]]).toString()).toBe(
-      '2(1, 2)'
-    );
+    expect(ce.box(['Multiply', 2, ['Tuple', 1, 2]]).toString()).toBe('2(1, 2)');
   });
 
   test('tuple-typed expression / ±1 strips the trivial divisor', () => {
@@ -468,7 +472,9 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
     {
       const ce = new ComputeEngine();
       ce.declare('f', 'function');
-      expect(ce.parse('f\\left(\\left[1,2,3\\right]\\right)').operator).toBe('f');
+      expect(ce.parse('f\\left(\\left[1,2,3\\right]\\right)').operator).toBe(
+        'f'
+      );
     }
   });
 
@@ -768,9 +774,12 @@ describe('POINT/TUPLE ARITHMETIC — dishonest collection-broadcast types', () =
   // Genuine collection access is unaffected by the custom canonical handler.
   test('At on a genuine List still evaluates', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['At', ['List', 10, 20, 30], 2]).evaluate().toString()).toBe(
-      '20'
-    );
+    expect(
+      ce
+        .box(['At', ['List', 10, 20, 30], 2])
+        .evaluate()
+        .toString()
+    ).toBe('20');
   });
 });
 
@@ -807,7 +816,9 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
   test('(a) finite Range · tuple → List of Tuples (broadcast, not transpose)', () => {
     const ce = new ComputeEngine();
     ce.assign('R', ce.box(['Range', -2, 2]).evaluate());
-    const r = ce.parse('R\\cdot\\left(2,3\\right)', { strict: false }).evaluate();
+    const r = ce
+      .parse('R\\cdot\\left(2,3\\right)', { strict: false })
+      .evaluate();
     expect(r.operator).toBe('List');
     expect(r.json).toEqual([
       'List',
@@ -832,7 +843,9 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
   test('(a) eager List · tuple still broadcasts (no regression)', () => {
     const ce = new ComputeEngine();
     ce.assign('L', ce.parse('[1,2,3]').evaluate());
-    const r = ce.parse('L\\cdot\\left(2,3\\right)', { strict: false }).evaluate();
+    const r = ce
+      .parse('L\\cdot\\left(2,3\\right)', { strict: false })
+      .evaluate();
     expect(r.json).toEqual([
       'List',
       ['Tuple', 2, 3],
@@ -989,8 +1002,12 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
       4,
     ]);
     // tuple · tuple stays an error (no implicit dot/cross product)
-    const tt = ce.box(['Multiply', ['Tuple', 1, 2], ['Tuple', 3, 4]]).evaluate();
-    expect(errorCode(tt.op1) ?? errorCode(tt)).toBe('no-product-between-points');
+    const tt = ce
+      .box(['Multiply', ['Tuple', 1, 2], ['Tuple', 3, 4]])
+      .evaluate();
+    expect(errorCode(tt.op1) ?? errorCode(tt)).toBe(
+      'no-product-between-points'
+    );
   });
 });
 
@@ -1059,9 +1076,7 @@ describe('ELEMENTWISE BROADCAST — hybrid laziness (huge collections)', () => {
 
   test('two huge collections broadcast to a lazy variadic Map', () => {
     const ce = new ComputeEngine();
-    const r = ce
-      .box(['Add', ['Range', 1, 1e8], ['Range', 1, 1e8]])
-      .evaluate();
+    const r = ce.box(['Add', ['Range', 1, 1e8], ['Range', 1, 1e8]]).evaluate();
     expect(r.operator).toBe('Map');
     expect(r.isLazyCollection).toBe(true);
     expect(r.at(3)?.json).toEqual(6);
@@ -1132,7 +1147,12 @@ describe('ELEMENTWISE BROADCAST — hybrid laziness (huge collections)', () => {
     expect(r.operator).toBe('Map');
     expect(ce.box(['First', ['Add', F, 1]]).evaluate().json).toEqual(4);
     expect(
-      [...ce.box(['Take', ['Add', F, 1], 3]).evaluate().each()].map((x) => x.json)
+      [
+        ...ce
+          .box(['Take', ['Add', F, 1], 3])
+          .evaluate()
+          .each(),
+      ].map((x) => x.json)
     ).toEqual([4, 5, 6]);
   });
 
@@ -1216,10 +1236,7 @@ describe('ELEMENTWISE BROADCAST — hybrid laziness (huge collections)', () => {
     const r = ce.box(['Sin', ['Cycle', ['List', 1, 2]]]).N();
     expect(r.operator).toBe('Map');
     // First element floats on access rather than staying symbolic `sin(1)`.
-    expect(ce.box(['First', r]).evaluate().re).toBeCloseTo(
-      Math.sin(1),
-      10
-    );
+    expect(ce.box(['First', r]).evaluate().re).toBeCloseTo(Math.sin(1), 10);
   });
 });
 
@@ -1471,14 +1488,16 @@ describe('POINT/TUPLE ARITHMETIC — PointList zips', () => {
   test('LaTeX round-trip identity (canonical and non-canonical parse)', () => {
     const ce = new ComputeEngine();
     const box = ce.box(['PointList', 1, ['List', 1, 2, 3]]);
-    expect(ce.parse(box.latex).json).toEqual(['PointList', 1, ['List', 1, 2, 3]]);
-    // The dedicated dictionary entry parses `PointList` at the non-canonical
-    // stage too (not just after canonicalization collapses InvisibleOperator).
-    expect(ce.parse('\\operatorname{PointList}(1, 2)', { canonical: false }).json).toEqual([
+    expect(ce.parse(box.latex).json).toEqual([
       'PointList',
       1,
-      2,
+      ['List', 1, 2, 3],
     ]);
+    // The dedicated dictionary entry parses `PointList` at the non-canonical
+    // stage too (not just after canonicalization collapses InvisibleOperator).
+    expect(
+      ce.parse('\\operatorname{PointList}(1, 2)', { canonical: false }).json
+    ).toEqual(['PointList', 1, 2]);
   });
 
   test('PointX / PointY over the PointList result', () => {
@@ -1528,11 +1547,7 @@ describe('POINT/TUPLE ARITHMETIC — Tuple is atomic for broadcast', () => {
       .box(['f', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]])
       .evaluate();
     expect(r.operator).toBe('List');
-    expect(r.json).toEqual([
-      'List',
-      ['Tuple', 2, 4],
-      ['Tuple', 6, 8],
-    ]);
+    expect(r.json).toEqual(['List', ['Tuple', 2, 4], ['Tuple', 6, 8]]);
   });
 
   test('a body using Add keeps the tuple atomic too', () => {
@@ -1622,7 +1637,10 @@ describe('POINT/TUPLE ARITHMETIC — gy1wdjvm2a ray-marching chain (expansion ro
     ce.parse('s(P) \\coloneq \\mathrm{PointY}(P) + 2').evaluate();
     // The Tycho registration recipe: declare the collection-accepting
     // signature, then register the body via `:=` (signature preserved).
-    ce.declare('m', '(tuple<number, number> | list<tuple<number, number>>) -> any');
+    ce.declare(
+      'm',
+      '(tuple<number, number> | list<tuple<number, number>>) -> any'
+    );
     ce.parse(
       'm(P) \\coloneq P + s(P)\\cdot\\operatorname{PointList}(1, 0.3n)'
     ).evaluate();
@@ -1842,7 +1860,11 @@ describe('POINT/TUPLE ARITHMETIC — point-valued `\\mapsto` body', () => {
       strict: false,
       canonical: false,
     });
-    expect(f.json).toEqual(['Function', ['Tuple', ['Cos', 't'], ['Sin', 't']], 't']);
+    expect(f.json).toEqual([
+      'Function',
+      ['Tuple', ['Cos', 't'], ['Sin', 't']],
+      't',
+    ]);
   });
 
   test('the point-valued lambda applies to both components', () => {
@@ -1898,16 +1920,12 @@ describe('POINT/TUPLE ARITHMETIC — point-valued `\\mapsto` body', () => {
 
   test('single-expression and undelimited bodies are unchanged', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('t \\mapsto (t+1)', { strict: false, canonical: false }).json).toEqual([
-      'Function',
-      ['Add', 't', 1],
-      't',
-    ]);
-    expect(ce.parse('x \\mapsto x^2', { strict: false, canonical: false }).json).toEqual([
-      'Function',
-      ['Power', 'x', 2],
-      'x',
-    ]);
+    expect(
+      ce.parse('t \\mapsto (t+1)', { strict: false, canonical: false }).json
+    ).toEqual(['Function', ['Add', 't', 1], 't']);
+    expect(
+      ce.parse('x \\mapsto x^2', { strict: false, canonical: false }).json
+    ).toEqual(['Function', ['Power', 'x', 2], 'x']);
   });
 
   test('a lambda in an argument list does not swallow the following argument', () => {
@@ -1982,8 +2000,9 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     'matrix<2x2>',
   ])('a %s denominator does NOT keep the tuple shape', (den) => {
     const ce = pointListEngine(den);
-    expect(ce.box(['Divide', 'p', 'q']).type.matches('list<tuple<number, number>>'))
-      .toBe(false);
+    expect(
+      ce.box(['Divide', 'p', 'q']).type.matches('list<tuple<number, number>>')
+    ).toBe(false);
   });
 
   test('dividing two point lists errors per element', () => {
@@ -2040,9 +2059,7 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     const ce = new ComputeEngine();
     ce.declare('p', 'list<number>');
     ce.declare('q', 'number');
-    expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe(
-      'list<number>'
-    );
+    expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe('list<number>');
     expect(ce.box(['Multiply', 'p', 'q']).type.toString()).toBe('list<number>');
   });
 
@@ -2051,12 +2068,8 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     ce.declare('v', 'vector<3>');
     ce.declare('m', 'matrix<2x2>');
     ce.declare('q', 'number');
-    expect(ce.box(['Divide', 'v', 'q']).type.toString()).toBe(
-      'vector<3>'
-    );
-    expect(ce.box(['Divide', 'm', 'q']).type.toString()).toBe(
-      'matrix<2x2>'
-    );
+    expect(ce.box(['Divide', 'v', 'q']).type.toString()).toBe('vector<3>');
+    expect(ce.box(['Divide', 'm', 'q']).type.toString()).toBe('matrix<2x2>');
   });
 
   test('the elementwise VALUE matches the repaired type', () => {
@@ -2183,12 +2196,18 @@ describe('POINT/TUPLE ARITHMETIC — zipped point-list quotient folds its elemen
   // both.
   test('a zero or NaN divisor answers as the single-tuple form does', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Divide', ['Tuple', 3, 4], 0]).evaluate().toString()).toBe(
-      '(~oo, ~oo)'
-    );
-    expect(ce.box(['Divide', ['Tuple', 3, 4], NaN]).evaluate().toString()).toBe(
-      'NaN'
-    );
+    expect(
+      ce
+        .box(['Divide', ['Tuple', 3, 4], 0])
+        .evaluate()
+        .toString()
+    ).toBe('(~oo, ~oo)');
+    expect(
+      ce
+        .box(['Divide', ['Tuple', 3, 4], NaN])
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
 
     const points = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
     expect(
@@ -2346,9 +2365,12 @@ describe('POINT/TUPLE ARITHMETIC — a MathJSON Tuple with list coordinates does
       expect(errorCode(r)).toBe('incompatible-type');
     }
     // A tuple of numbers still divides component-wise.
-    expect(ce.box(['Divide', ['Tuple', 1, 2], 0]).evaluate().toString()).toBe(
-      '(~oo, ~oo)'
-    );
+    expect(
+      ce
+        .box(['Divide', ['Tuple', 1, 2], 0])
+        .evaluate()
+        .toString()
+    ).toBe('(~oo, ~oo)');
     ce.assign('Q', ce.parse('([1,2], [3,4])'));
     expect(ce.parse('\\frac{Q}{2}').evaluate().toString()).toBe(
       '[(1/2, 3/2),(1, 2)]'
@@ -2461,24 +2483,26 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
 
   test('a list over zero broadcasts, on the canonical, N and value routes', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Divide', ['List', 1, 2], 0]).evaluate().toString()).toBe(
-      '[~oo,~oo]'
-    );
-    expect(ce.box(['Divide', ['List', 1, 2], 0]).N().toString()).toBe(
-      '[~oo,~oo]'
-    );
+    expect(
+      ce
+        .box(['Divide', ['List', 1, 2], 0])
+        .evaluate()
+        .toString()
+    ).toBe('[~oo,~oo]');
+    expect(
+      ce
+        .box(['Divide', ['List', 1, 2], 0])
+        .N()
+        .toString()
+    ).toBe('[~oo,~oo]');
     // The value route (`.div()`) reaches the same broadcast, for a JS-number
     // and for a boxed zero.
     expect(ce.box(['List', 1, 2]).div(0).evaluate().toString()).toBe(
       '[~oo,~oo]'
     );
-    expect(
-      ce
-        .box(['List', 1, 2])
-        .div(ce.number(0))
-        .evaluate()
-        .toString()
-    ).toBe('[~oo,~oo]');
+    expect(ce.box(['List', 1, 2]).div(ce.number(0)).evaluate().toString()).toBe(
+      '[~oo,~oo]'
+    );
     // It agrees with the product spelling of the same quotient.
     expect(
       ce
@@ -2490,15 +2514,20 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
 
   test('each element takes its own degenerate answer: 0/0 = Indeterminate per slot', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Divide', ['List', 0, 1], 0]).evaluate().toString()).toBe(
-      '[Indeterminate,~oo]'
-    );
+    expect(
+      ce
+        .box(['Divide', ['List', 0, 1], 0])
+        .evaluate()
+        .toString()
+    ).toBe('[Indeterminate,~oo]');
   });
 
   test('a vector and a matrix numerator broadcast recursively', () => {
     const ce = new ComputeEngine();
     expect(
-      ce.parse('\\frac{\\begin{pmatrix}1\\\\2\\end{pmatrix}}{0}').evaluate()
+      ce
+        .parse('\\frac{\\begin{pmatrix}1\\\\2\\end{pmatrix}}{0}')
+        .evaluate()
         .toString()
     ).toBe('[[~oo],[~oo]]');
     expect(
@@ -2537,9 +2566,12 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
 
   test('a NaN divisor stays a scalar NaN, as it does for tuples', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Divide', ['List', 1, 2], NaN]).evaluate().toString()).toBe(
-      'NaN'
-    );
+    expect(
+      ce
+        .box(['Divide', ['List', 1, 2], NaN])
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
   });
 
   test('an alias-of-list numerator broadcasts like the list it names', () => {
@@ -2646,7 +2678,10 @@ describe('A zero element times a non-finite factor has no value on every route',
         .toString()
     ).toBe('[Indeterminate,+oo]');
     expect(
-      ce.box(['Multiply', ['List', 0, 1], 'ComplexInfinity']).N().toString()
+      ce
+        .box(['Multiply', ['List', 0, 1], 'ComplexInfinity'])
+        .N()
+        .toString()
     ).toBe('[NaN,~oo]');
     // A zero-free list is unaffected.
     expect(
@@ -2741,5 +2776,139 @@ describe('a list times a point types as a list of points', () => {
     expect(expr.isValid).toBe(false);
     expect(expr.operator).toBe('Error');
     expect(JSON.stringify(expr.json)).toContain('no-product-between-points');
+  });
+});
+
+describe('a list of numbers plus a point is typed error', () => {
+  // A sum of a point and a list of numbers maps over the list, and each
+  // element is a `number + point` sum, which is an `incompatible-type` error.
+  // A list literal or a symbol DECLARED as a list of numbers is rejected when
+  // the expression is created. A symbol that only holds such a list is not
+  // rejected (a later assignment can make it a list of points), and the sum
+  // evaluates to a list of errors. Its type was
+  // `tuple<integer, integer> | vector<integer^4>`, which no evaluation gives;
+  // it is now `error`, the type of `[1, 2] + "a"`.
+  const INCOMPATIBLE =
+    'Error(ErrorCode("incompatible-type", "tuple", "number"))';
+  const engine = () => {
+    const ce = new ComputeEngine();
+    ce.assign('L', ce.parse('[0, 1, 2, 3]'));
+    ce.assign('P', ce.parse('(1, 1)'));
+    return ce;
+  };
+
+  test('parse route, both operand orders and a difference', () => {
+    const ce = engine();
+    for (const src of [
+      'L + (1, 1)',
+      '(1, 1) + L',
+      'L - (1, 1)',
+      '(1, 1) - L',
+      'L + P',
+      'P + L',
+    ]) {
+      const expr = ce.parse(src);
+      expect(expr.type.toString()).toBe('error');
+      // The value is unchanged: a list of four errors.
+      expect(expr.evaluate().toString()).toBe(
+        `[${Array(4).fill(INCOMPATIBLE).join(',')}]`
+      );
+    }
+  });
+
+  test('a bare collection spelling: a range plus a point', () => {
+    // `Range(1, 4)` is typed `range`, a subtype of `list<integer>`, so the
+    // sum is the same list of errors as with the list literal and its type
+    // is `error` too (it was `range | tuple<integer, integer>`).
+    const ce = engine();
+    const expr = ce.box(['Add', ['Tuple', 1, 1], ['Range', 1, 4]]);
+    expect(expr.type.toString()).toBe('error');
+    expect(expr.evaluate().toString()).toBe(
+      `[${Array(4).fill(INCOMPATIBLE).join(',')}]`
+    );
+  });
+
+  test('box route, Add and Subtract', () => {
+    const ce = engine();
+    for (const json of [
+      ['Add', 'L', ['Tuple', 1, 1]],
+      ['Add', ['Tuple', 1, 1], 'L'],
+      ['Subtract', 'L', ['Tuple', 1, 1]],
+      ['Subtract', ['Tuple', 1, 1], 'L'],
+      ['Add', 'L', 'P'],
+    ]) {
+      const expr = ce.box(json);
+      expect(expr.type.toString()).toBe('error');
+      expect(expr.evaluate().toString()).toBe(
+        `[${Array(4).fill(INCOMPATIBLE).join(',')}]`
+      );
+    }
+  });
+
+  test('a matrix literal plus a point is typed error', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Add',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['Tuple', 1, 1],
+    ]);
+    expect(expr.type.toString()).toBe('error');
+    expect(expr.evaluate().toString()).toBe(
+      `[[${INCOMPATIBLE},${INCOMPATIBLE}],[${INCOMPATIBLE},${INCOMPATIBLE}]]`
+    );
+  });
+
+  test('a list of points plus a list of numbers is typed error', () => {
+    const ce = new ComputeEngine();
+    ce.assign('L', ce.parse('[1, 2]'));
+    ce.assign('Q', ce.parse('[(1, 2), (3, 4)]'));
+    const expr = ce.parse('Q + L');
+    expect(expr.type.toString()).toBe('error');
+    expect(expr.evaluate().toString()).toBe(
+      `[${INCOMPATIBLE},${INCOMPATIBLE}]`
+    );
+  });
+
+  test('the derived type of the sum is error', () => {
+    // The descriptor route (`context.derive`, what a type handler calls to
+    // type a body over its operands) answers as the expression does.
+    const ce = new ComputeEngine();
+    const ctx = typeHandlerContext(ce as any);
+    const point = describeType(parseType('tuple<integer, integer>')!);
+    const numbers = describeType(parseType('vector<integer^4>')!);
+    const points = describeType(parseType('list<tuple<integer, integer>>')!);
+    const typeOf = (t: ReturnType<typeof ctx.derive>) =>
+      t === undefined ? 'undefined' : typeToString(t);
+    // A list of numbers plus a point, and a list of points plus a list of
+    // numbers, are errors.
+    expect(typeOf(ctx.derive('Add', [numbers, point]))).toBe('error');
+    expect(typeOf(ctx.derive('Add', [point, numbers]))).toBe('error');
+    expect(typeOf(ctx.derive('Add', [points, numbers]))).toBe('error');
+    // A list of points plus a point is still a list of points.
+    const genuine = ctx.derive('Add', [points, point]);
+    expect(genuine === undefined ? 'undefined' : typeToString(genuine)).toBe(
+      'list<tuple<integer, integer>>'
+    );
+  });
+
+  test('a genuine point broadcast keeps its type and value', () => {
+    const ce = engine();
+    ce.assign('Q', ce.parse('[(1, 2), (3, 4)]'));
+    for (const src of ['[(1,2), (3,4)] + (1,1)', 'Q + (1, 1)', 'Q + P']) {
+      const expr = ce.parse(src);
+      expect(expr.type.toString()).toBe('list<tuple<integer, integer>>');
+      expect(expr.evaluate().toString()).toBe('[(2, 3),(4, 5)]');
+    }
+    const sum = ce.parse('(1, 2) + (3, 4)');
+    expect(sum.type.toString()).toBe('tuple<integer, integer>');
+    expect(sum.evaluate().toString()).toBe('(4, 6)');
+    // A list of numbers TIMES a point scales the point at every element.
+    const product = ce.parse('[0, 1, 2, 3] \\cdot (1, 1)');
+    expect(product.type.toString()).toBe('list<tuple<integer, integer>^4>');
+    expect(product.evaluate().toString()).toBe('[(0, 0),(1, 1),(2, 2),(3, 3)]');
+    // A list of numbers plus a list of numbers is not affected.
+    expect(ce.parse('L + [1, 1, 1, 1]').type.toString()).toBe(
+      'vector<integer^4>'
+    );
   });
 });

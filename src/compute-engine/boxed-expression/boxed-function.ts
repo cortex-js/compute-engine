@@ -84,6 +84,7 @@ import {
   zipBroadcast,
   zipParticipates,
   appliesToListCoordinateTuple,
+  addsPointToNumberCollection,
   isAbsentScalarTerm,
   collectionSourceOperands,
 } from '../collection-utils.js';
@@ -7344,6 +7345,17 @@ function type(expr: BoxedFunction): Type | BoxedType {
       appliesToListCoordinateTuple(
         expr.operator,
         broadcastsOverTuples(expr.operator, def),
+        expr.ops.map((x) => x.type.type)
+      )
+    )
+      return 'error';
+    // A sum of a point (or a list of points) and a collection of numbers
+    // (`L + (1, 1)` with `L := [0, 1, 2, 3]`) evaluates to a collection of
+    // `incompatible-type` errors, one for each `number + point` element, so
+    // the static type is `error` (`addsPointToNumberCollection`).
+    if (
+      addsPointToNumberCollection(
+        expr.operator,
         expr.ops.map((x) => x.type.type)
       )
     )

@@ -5,26 +5,71 @@
 - **A `Range`, a `Linspace`, a comprehension and a `Tabulate` are typed
   `list<T>`; they were `indexed_collection<T>`.** A symbol declared `list` or
   `list<number>` refused every one of them: `ce.declare("L", "list")` followed
-  by `ce.assign("L", ce.box(["Range", 0, 5]))` threw a type error, and the
-  only declaration that accepted a document's ranges was `indexed_collection`,
-  which also admits a tuple and a string. `Range(0, 5)` and `Range(0, n)` with
-  `n` an integer are now `list<integer>`, `Range(0, 1, 0.1)` is `list<real>`,
+  by `ce.assign("L", ce.box(["Range", 0, 5]))` threw a type error, and the only
+  declaration that accepted a document's ranges was `indexed_collection`, which
+  also admits a tuple and a string. `Range(0, 5)` and `Range(0, n)` with `n` an
+  integer are now `list<integer>`, `Range(0, 1, 0.1)` is `list<real>`,
   `Linspace(0, 1, 5)` is `list<real>` (it was a bare `indexed_collection` with
-  no element type), a comprehension is a list of its body type and a
-  tabulation is a list of its generator's result. An index span (`Range(1, 5)`,
-  the `range` type) is now a subtype of `list<integer>`, so it is accepted by
-  the same declarations; it was a sibling of `list`. The `list` type makes no
-  claim about the length: `Range(1, +oo)` is a lazy `list<integer>`, exactly as
-  the lazy `Map` over it, `Repeat(x)`, `Cycle(xs)` and `Iterate(f, x)` already
-  were; whether a collection is finite is a property of the value
+  no element type), a comprehension is a list of its body type and a tabulation
+  is a list of its generator's result. An index span (`Range(1, 5)`, the `range`
+  type) is now a subtype of `list<integer>`, so it is accepted by the same
+  declarations; it was a sibling of `list`. The `list` type makes no claim about
+  the length: `Range(1, +oo)` is a lazy `list<integer>`, exactly as the lazy
+  `Map` over it, `Repeat(x)`, `Cycle(xs)` and `Iterate(f, x)` already were;
+  whether a collection is finite is a property of the value
   (`isFiniteCollection`), never of the type. What changes for a host: a check
   such as `type.matches("indexed_collection")` still holds for every one of
-  these values (`list <: indexed_collection`), while a check that a value is
-  NOT a list, or a pinned printed type such as `indexed_collection<integer>`,
-  reads differently. (Tycho row 337.)
+  these values (`list <: indexed_collection`), while a check that a value is NOT
+  a list, or a pinned printed type such as `indexed_collection<integer>`, reads
+  differently. (Tycho row 337.)
 
 ### Issues Resolved
 
+- **A predicate over a finite `Range` compiles to a counting loop on the
+  JavaScript target; the range is no longer built.** `Count(Filter(1..n, k ↦
+  k mod 3 = 0))` compiled to an `Array.from` of the whole range, a `.filter`
+  into a second array, and a `.length`: about 27 ms at n = 10⁶, where a loop
+  that counts runs in about 2 ms. The compiled code now walks the range with
+  a counted `for` loop and calls the predicate on each element, allocating
+  nothing. The same walk serves `Length(Filter(range, p))`, `Count(range,
+  p)`, `CountIf(range, p)`, `Any(range, p)` and `All(range, p)`, which stop at
+  the first decisive element, the collection form of `Sum`/`Product` over a
+  filtered range, and a bare `Filter(range, p)`, which pushes the selected
+  elements into one list. The values are unchanged: the element count is
+  `_SYS.rangeCount`, the interpreter's own, and element `i` is `start + i ×
+  step`, so an empty, reversed, zero-step or float-step range answers what
+  the array lowering answered. The loop is not used when the range or the
+  `Filter` is re-mapped by the caller, shared by common-subexpression
+  elimination, or has a non-finite or non-number bound; those keep the array
+  lowering. A `Range` consumed any other way (`Map`, `Sum(range)`, indexing)
+  still materializes. (Issue #373.)
+
+- **A list of numbers plus a point is typed `error`.** With `L := [0, 1, 2, 3]`,
+  `L + (1, 1)` was typed `tuple<integer, integer> | vector<integer^4>` (earlier
+  `indexed_collection<integer>`) while it evaluates to a list of four
+  `incompatible-type` errors, as `2 + (1, 1)` is one such error. The `Add` type
+  handler sent the pair to its tuple branch and widened the two operand types
+  together. A point, or a list of points, added to or subtracted from a
+  collection of numbers at any depth is now typed `error` on the expression and
+  the descriptor routes, as `[1, 2] + "a"` already was; a matrix literal plus a
+  point and a list of points plus a list of numbers are covered by the same
+  check. A genuine point broadcast (`[(1, 2), (3, 4)] + (1, 1)`,
+  `[0, 1, 2, 3] · (1, 1)`) is unchanged, and a symbol later assigned a list of
+  points types as one again. Values are unchanged.
+- **`.N()` of a convergent series whose tail is not an integer power of `1/N`
+  evaluates.** `\sum_{n=1}^\infty 1/n^{1.5}` (= ζ(1.5) = 2.6123753487),
+  `\sum 1/n^{2.5}` and `\sum \ln(n)/n^2` stayed unevaluated under `.N()`: the
+  Richardson tableau that accelerates the partial sums extrapolated in integer
+  powers of `1/N` only, so a tail in `N^{1-p}` for a non-integer `p`, or with a
+  logarithmic factor, never certified. When that tableau does not certify, the
+  tail exponent is now fitted from the partial sums (a repeated exponent absorbs
+  a `ln N` factor), and the values are accurate to about 1e-13. Acceptance stays
+  gated: the fitted route needs an error estimate at or under
+  `max(1e-12, 1e-11·|v|)`, agreement between two independent sample sequences
+  and a positive fitted exponent, so `\sum 1/n`, `\sum 1/\sqrt{n}`,
+  `\sum (-1)^n` and the like still stay unevaluated. The infinite product takes
+  the same route (`\prod (1 + k^{-1.5})` evaluates). Series that already
+  evaluated give the same values as before.
 - **A destructuring `let` inside a loop body compiles.**
   `let n = 0; while n < 4 { let (a, x) = (2, 3); n = n + a }; n` declined on the
   JavaScript target with "Could not compile a destructuring declaration in value
@@ -133,19 +178,19 @@
   since their last generation and by the `examples` fields).
 - **The `materialization` option no longer truncates the operands of an eager
   operator.** `Length(Range(1, 5000)).evaluate({ materialization: true })` was
-  `11`, and `IndexOf(Range(1, 5000), 4000)` and `Contains(Range(1, 5000),
-  4000)` under the same option were `0` and `False`: the option, which
-  describes the result ("if the result is a lazy collection, materialize it"),
-  was forwarded to the evaluation of each operand, and a lazy operand with no
-  `evaluate` handler was materialized to the display preview (the first five
-  and the last five elements with a placeholder between them) before the
-  operator's handler read it. Operands now reach the handler in their lazy
-  form on both the synchronous and the asynchronous route, and a lazy view a
-  handler answers (`Insert(Range(1, 200), 2, 99)`, `Partition(Range(1, 300),
-  3)`) is materialized after the handler instead, and the option still
-  descends into a container literal (`(Take(xs, 3), 1)` is a pair holding the
-  materialized list). A held conditional over a list (`[5, 10] {0 < t}`) is
-  left as the held form.
+  `11`, and `IndexOf(Range(1, 5000), 4000)` and `Contains(Range(1, 5000), 4000)`
+  under the same option were `0` and `False`: the option, which describes the
+  result ("if the result is a lazy collection, materialize it"), was forwarded
+  to the evaluation of each operand, and a lazy operand with no `evaluate`
+  handler was materialized to the display preview (the first five and the last
+  five elements with a placeholder between them) before the operator's handler
+  read it. Operands now reach the handler in their lazy form on both the
+  synchronous and the asynchronous route, and a lazy view a handler answers
+  (`Insert(Range(1, 200), 2, 99)`, `Partition(Range(1, 300), 3)`) is
+  materialized after the handler instead, and the option still descends into a
+  container literal (`(Take(xs, 3), 1)` is a pair holding the materialized
+  list). A held conditional over a list (`[5, 10] {0 < t}`) is left as the held
+  form.
 - **A `Fold` that builds a list compiles, and so do `Length` and `At` of its
   result** ([#369](https://github.com/cortex-js/compute-engine/issues/369),
   reported by [enumeratio](https://github.com/enumeratio)).
@@ -165,51 +210,50 @@
   when both provably satisfy the annotation. An annotation the body does not
   provably return is still declined, and the diagnostic now names the argument
   type (`list<integer | nan>`: `p[i]` may be out of range). A fold whose
-  combiner is a function defined in the same program (`function add(a, x) {
-  a + x }` then `Fold(add, 0, xs)`) declined as "the combiner has no compiled
-  function form": the combiner is now resolved through the compiled block's
-  own bindings, as a call of that function already was.
+  combiner is a function defined in the same program
+  (`function add(a, x) { a + x }` then `Fold(add, 0, xs)`) declined as "the
+  combiner has no compiled function form": the combiner is now resolved through
+  the compiled block's own bindings, as a call of that function already was.
 - **A fold's accumulator is typed from its seed and its combiner's result**
   (user decision 2026-09-29, from the investigation of
   [#369](https://github.com/cortex-js/compute-engine/issues/369)). A bare
   accumulator was typed from its uses only, so
-  `Fold((acc, i) => Join(acc, [2 p[i]]), [], 1..n)` was typed
-  `collection<any>` (a `Join` also accepts a set), and a view over it followed
-  the kind of a value the fold node did not hold: `Map(x => x + 1, fold)`
-  evaluated to `Set(7, 3, 5)` and `Filter(fold, x => x > 3)` to `Set(6, 4)`
-  where the fold's value is the list `[6, 2, 4]` and the compiled result was
-  the array `[7, 3, 5]`. The accumulator is now typed to the fixpoint of the
-  seed's type and the combiner's result type (`list<integer | nan>` here), as
-  an INFERRED type: the printed literal is unchanged, nothing is enforced at
-  apply time (a fold whose accumulator changes type mid-fold, `1 → 1/2 →
-  1/6`, still evaluates), and the same views now evaluate to the lists
-  `[7, 3, 5]` and `[6, 4]`. `Scan` and the seedless folds are typed the same
-  way. A fold whose accumulator already infers a precise type (a numeric
-  fold) is not re-canonicalized, so its cost is unchanged; a list-building
-  fold costs about one extra canonicalization of its combiner. What changes
-  for a caller: the type of such a fold, and a `Map`/`Filter`/`Take` over it
-  answers a list instead of a set.
-- **`IndexOf` and `IndexWhere` no longer answer `0` for a collection they
-  cannot search**
-  ([#368](https://github.com/cortex-js/compute-engine/issues/368), reported by
-  [enumeratio](https://github.com/enumeratio)). `IndexOf(xs, 0)` for a symbol
-  `xs` with no value, for an unknown function `f(1, 0)` or for `Range(1, n)`
-  answered `0`, a claim that the element is absent, while `Contains(xs, 0)`
-  and `IndexWhere` stayed unevaluated: the handler read the "cannot search"
-  answer of the element scan as "not found". Both operators now stay
-  unevaluated unless a finite source was walked to its end. A set is refused
-  as `incompatible-type`, as `First` and `At` refuse it, instead of answering
-  `0` for every value. An unbounded source still answers a match
+  `Fold((acc, i) => Join(acc, [2 p[i]]), [], 1..n)` was typed `collection<any>`
+  (a `Join` also accepts a set), and a view over it followed the kind of a value
+  the fold node did not hold: `Map(x => x + 1, fold)` evaluated to
+  `Set(7, 3, 5)` and `Filter(fold, x => x > 3)` to `Set(6, 4)` where the fold's
+  value is the list `[6, 2, 4]` and the compiled result was the array
+  `[7, 3, 5]`. The accumulator is now typed to the fixpoint of the seed's type
+  and the combiner's result type (`list<integer | nan>` here), as an INFERRED
+  type: the printed literal is unchanged, nothing is enforced at apply time (a
+  fold whose accumulator changes type mid-fold, `1 → 1/2 → 1/6`, still
+  evaluates), and the same views now evaluate to the lists `[7, 3, 5]` and
+  `[6, 4]`. `Scan` and the seedless folds are typed the same way. A fold whose
+  accumulator already infers a precise type (a numeric fold) is not
+  re-canonicalized, so its cost is unchanged; a list-building fold costs about
+  one extra canonicalization of its combiner. What changes for a caller: the
+  type of such a fold, and a `Map`/`Filter`/`Take` over it answers a list
+  instead of a set.
+- **`IndexOf` and `IndexWhere` no longer answer `0` for a collection they cannot
+  search** ([#368](https://github.com/cortex-js/compute-engine/issues/368),
+  reported by [enumeratio](https://github.com/enumeratio)). `IndexOf(xs, 0)` for
+  a symbol `xs` with no value, for an unknown function `f(1, 0)` or for
+  `Range(1, n)` answered `0`, a claim that the element is absent, while
+  `Contains(xs, 0)` and `IndexWhere` stayed unevaluated: the handler read the
+  "cannot search" answer of the element scan as "not found". Both operators now
+  stay unevaluated unless a finite source was walked to its end. A set is
+  refused as `incompatible-type`, as `First` and `At` refuse it, instead of
+  answering `0` for every value. An unbounded source still answers a match
   (`IndexOf(Repeat(5), 5)` is `1`) and a refutation (`IndexOf(Repeat(6), 5)` is
-  `0`); a search that finds nothing within the iteration limit stays
-  unevaluated instead of walking forever.
+  `0`); a search that finds nothing within the iteration limit stays unevaluated
+  instead of walking forever.
 - **A DMS angle may omit the minutes.** `9°30"` (9 degrees 30 seconds) was an
-  `expected-closing-delimiter` error, `9°30''` and `9°30\prime\prime` parsed
-  as the derivative of `9°30'`, and `9°30\doubleprime` as
+  `expected-closing-delimiter` error, `9°30''` and `9°30\prime\prime` parsed as
+  the derivative of `9°30'`, and `9°30\doubleprime` as
   `Degrees(9) · Prime(30, 2)`: the parser tested the minute marker first, and
   `'` and `\prime` are the first half of `''` and `\prime\prime`. The second
-  marker is now tested first, and every spelling parses to the exact
-  `1081/120` degrees; `x°30"` is `x deg + 30 arcsec`.
+  marker is now tested first, and every spelling parses to the exact `1081/120`
+  degrees; `x°30"` is `x deg + 30 arcsec`.
 - **A protocol member's `Self` binds to the conformance target dispatch selects,
   not the first argument's static type**
   ([#362](https://github.com/cortex-js/compute-engine/issues/362), contributed
@@ -273,24 +317,23 @@
   language the same spellings work on a `function` head, with a trailing `where`
   clause or the `<N>` binder. Not supported yet: arithmetic between lengths
   (`^(M+N)`). The parameter kind is a general value kind, so boolean and string
-  parameters can follow once those literals carry singleton types. One reading changed with it: a
-  dimensioned pattern now binds its element variable after peeling as many
-  axes as it states, so `(x: matrix<T>) -> T where T` on a 2×2 matrix binds
-  `T` to the scalar element (`integer`) rather than to a row; no built-in
-  signature was affected.
+  parameters can follow once those literals carry singleton types. One reading
+  changed with it: a dimensioned pattern now binds its element variable after
+  peeling as many axes as it states, so `(x: matrix<T>) -> T where T` on a 2×2
+  matrix binds `T` to the scalar element (`integer`) rather than to a row; no
+  built-in signature was affected.
 
 - **More spellings of the arc-minute and arc-second markers in DMS angles**
-  ([#338](https://github.com/cortex-js/compute-engine/pull/338), contributed
-  by [yelliver](https://github.com/yelliver)). After a degree marker (`°`,
+  ([#338](https://github.com/cortex-js/compute-engine/pull/338), contributed by
+  [yelliver](https://github.com/yelliver)). After a degree marker (`°`,
   `\degree`, `^{\circ}`, `^\circ`), the minutes now accept `'`, `\prime`,
   `^{\prime}` and `^\prime`, and the seconds accept `"`, `\prime\prime`,
-  `\doubleprime`, `^{\doubleprime}`, `^{\prime\prime}` and `^\doubleprime`
-  (and, added alongside, the ASCII `''`). The superscript spellings were
-  parsed as products of
-  primes (`9^{\circ}30^{\prime}` was `Degrees(9) · Prime(30)`); every
-  spelling of `9°30'15"` now parses to the exact `2281/240` degrees. The
-  `siunitx` commands `\minute` and `\second` are deliberately not accepted:
-  in that package they are the time units, not the angle units.
+  `\doubleprime`, `^{\doubleprime}`, `^{\prime\prime}` and `^\doubleprime` (and,
+  added alongside, the ASCII `''`). The superscript spellings were parsed as
+  products of primes (`9^{\circ}30^{\prime}` was `Degrees(9) · Prime(30)`);
+  every spelling of `9°30'15"` now parses to the exact `2281/240` degrees. The
+  `siunitx` commands `\minute` and `\second` are deliberately not accepted: in
+  that package they are the time units, not the angle units.
 - **`ce.conformsTo(type, protocol)`: a public conformance query**
   ([#362](https://github.com/cortex-js/compute-engine/issues/362), contributed
   by [enumeratio](https://github.com/enumeratio)). Answers whether `type`
@@ -19472,13 +19515,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-          a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-          $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-          $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-          symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-          it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-          returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-          complex eigenvalues are now returned as complex numbers.
+              a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+              $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+              $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+              symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+              it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+              returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+              complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

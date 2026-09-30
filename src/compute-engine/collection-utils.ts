@@ -3624,6 +3624,71 @@ export function appliesToListCoordinateTuple(
 }
 
 /**
+ * Whether a sum (`Add`, `Subtract`) of operands of the types `operandTypes`
+ * always evaluates to a collection of `incompatible-type` errors, so that its
+ * static type is `error`. This is true when one operand is a point (a type
+ * whose every non-absent arm is a tuple) or a list of points, and another
+ * operand is a collection of numbers ({@link isNumberCollectionType}).
+ *
+ * The sum maps over the collection of numbers, and each element of the map is
+ * the sum of a number and a point, which evaluates to an `incompatible-type`
+ * error. For example, with `L := [0, 1, 2, 3]`, `L + (1, 1)` evaluates to a
+ * list of four such errors. Without this rule, its type was the union
+ * `tuple<integer, integer> | vector<integer^4>`, which says that the value is
+ * a point or a list of integers, and no evaluation gives either.
+ *
+ * `canonicalAdd` (`boxed-expression/arithmetic-add.ts`) rejects the same sums
+ * when the list is a list literal or a symbol with a DECLARED list type. It
+ * does not reject a symbol whose type is only inferred or comes from its
+ * value, because a later assignment can make it a list of points. The type is
+ * read again after such an assignment, so this rule reads the operand types
+ * as they are now.
+ *
+ * The static type is `error`, not `list<error>`: it is the type that the sum
+ * of a list literal and a string (`[1, 2] + "a"`) has.
+ */
+export function addsPointToNumberCollection(
+  operator: string,
+  operandTypes: ReadonlyArray<Type>
+): boolean {
+  if (operator !== 'Add' && operator !== 'Subtract') return false;
+  let point = false;
+  let numbers = false;
+  for (const t of operandTypes) {
+    if (tupleCarrierType(t) || pointListElementType(t) !== undefined)
+      point = true;
+    else if (isNumberCollectionType(t)) numbers = true;
+  }
+  return point && numbers;
+}
+
+/**
+ * Whether `type`, with its `missing` arm removed, is a list or an indexed
+ * collection whose leaf elements are numbers: `list<integer>`,
+ * `vector<integer^4>`, `matrix<real^(2x2)>`, `list<list<number>>` or
+ * `indexed_collection<integer>`. A collection whose elements can be a tuple
+ * (`list<number | tuple<…>>`), are unknown, or are `never` (an empty list)
+ * does not qualify.
+ */
+function isNumberCollectionType(type: Type): boolean {
+  const s = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(type)));
+  // A bare spelling that names a list of numbers (`range`, a subtype of
+  // `list<integer>`; not the bare `list`, whose elements are unknown).
+  if (typeof s === 'string') return isSubtype(s, 'list<number>');
+  if (s.kind !== 'list' && s.kind !== 'indexed_collection') return false;
+  const el = resolveTypeAlias(
+    stripMissingFromType(resolveTypeAlias(s.elements))
+  );
+  if (el === 'never') return false;
+  if (
+    typeof el !== 'string' &&
+    (el.kind === 'list' || el.kind === 'indexed_collection')
+  )
+    return isNumberCollectionType(el);
+  return isSubtype(el, 'number');
+}
+
+/**
  * Whether `param`, the declared type of a user-function parameter, declares a
  * POINT: a plain tuple type such as `tuple<real, real>` or
  * `tuple<broadcastable<number>, broadcastable<number>>`. A union (`tuple<…> |
