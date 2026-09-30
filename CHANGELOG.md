@@ -171,8 +171,10 @@
   added alongside, the ASCII `''`). The superscript spellings were parsed as
   products of primes (`9^{\circ}30^{\prime}` was `Degrees(9) · Prime(30)`);
   every spelling of `9°30'15"` now parses to the exact `2281/240` degrees. The
-  `siunitx` commands `\minute` and `\second` are deliberately not accepted: in
-  that package they are the time units, not the angle units.
+  `siunitx` angle units `\arcminute` and `\arcsecond` are accepted as markers
+  too (`9^\circ 30\arcminute 15\arcsecond`); they gave an `unexpected-command`
+  error. The `siunitx` commands `\minute` and `\second` are deliberately not
+  accepted: in that package they are the time units, not the angle units.
 - **`ce.conformsTo(type, protocol)`: a public conformance query**
   ([#362](https://github.com/cortex-js/compute-engine/issues/362), contributed
   by [enumeratio](https://github.com/enumeratio)). Answers whether `type`

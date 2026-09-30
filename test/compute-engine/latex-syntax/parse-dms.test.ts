@@ -74,6 +74,32 @@ describe('DMS Parsing', () => {
     check("9°30'15''", ['Degrees', ['Rational', 2281, 240]]);
   });
 
+  test('parse DMS with the siunitx `\\arcminute` and `\\arcsecond`', () => {
+    check('9^\\circ 30\\arcminute 15\\arcsecond', [
+      'Degrees',
+      ['Rational', 2281, 240],
+    ]);
+    check('9\\degree 30\\arcminute', ['Degrees', ['Rational', 19, 2]]);
+    // A siunitx marker and a prime or quote marker can be used together.
+    check('9°30\\arcminute 15"', ['Degrees', ['Rational', 2281, 240]]);
+    check("9°30'15\\arcsecond", ['Degrees', ['Rational', 2281, 240]]);
+    // A symbolic component keeps the three quantities apart.
+    check('x°30\\arcminute 15\\arcsecond', [
+      'Add',
+      ['Quantity', 'x', 'deg'],
+      ['Quantity', 30, 'arcmin'],
+      ['Quantity', 15, 'arcsec'],
+    ]);
+  });
+
+  test('`\\arcminute` and `\\arcsecond` are markers only after a degree marker', () => {
+    const ce = new ComputeEngine();
+    for (const latex of ['30\\arcminute', '15\\arcsecond']) {
+      const json = JSON.stringify(ce.parse(latex, { form: 'raw' }).json);
+      expect(json).toContain('unexpected-command');
+    }
+  });
+
   test('`\\minute` and `\\second` are not arc markers (siunitx time units)', () => {
     // The angle stops at the degrees: the number that follows is not read
     // as minutes or seconds, whatever becomes of the command itself.
@@ -100,6 +126,7 @@ describe('DMS Parsing: seconds with the minutes omitted', () => {
     '9^{\\circ}30^{\\prime\\prime}',
     '9^{\\circ}30^{\\doubleprime}',
     '9\\degree 30\\doubleprime',
+    '9\\degree 30\\arcsecond',
   ];
   for (const latex of SPELLINGS) {
     test(`parse ${latex}`, () => {

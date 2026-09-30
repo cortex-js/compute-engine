@@ -1675,23 +1675,24 @@ function serializePower(
 
 /**
  * Consume an arc-minute marker at the parser's position: `'`, `\prime`,
- * `^{\prime}`, `^\prime`. Tried only AFTER {@link matchArcSecondMarker} has
- * declined, because the two-glyph second markers (`''`, `\prime\prime`) begin
- * with a minute marker.
+ * `^{\prime}`, `^\prime`, `\arcminute`. Tried only AFTER
+ * {@link matchArcSecondMarker} has declined, because the two-glyph second
+ * markers (`''`, `\prime\prime`) begin with a minute marker.
  */
 function matchArcMinuteMarker(parser: Parser): boolean {
   return (
     parser.match("'") ||
     parser.match('\\prime') ||
     parser.matchAll(['^', '<{>', '\\prime', '<}>']) ||
-    parser.matchAll(['^', '\\prime'])
+    parser.matchAll(['^', '\\prime']) ||
+    parser.match('\\arcminute')
   );
 }
 
 /**
  * Consume an arc-second marker at the parser's position: `"`, `''`,
  * `\prime\prime`, `\doubleprime`, `^{\doubleprime}`, `^{\prime\prime}`,
- * `^\doubleprime`.
+ * `^\doubleprime`, `\arcsecond`.
  */
 function matchArcSecondMarker(parser: Parser): boolean {
   return (
@@ -1701,7 +1702,8 @@ function matchArcSecondMarker(parser: Parser): boolean {
     parser.match('\\doubleprime') ||
     parser.matchAll(['^', '<{>', '\\doubleprime', '<}>']) ||
     parser.matchAll(['^', '<{>', '\\prime', '\\prime', '<}>']) ||
-    parser.matchAll(['^', '\\doubleprime'])
+    parser.matchAll(['^', '\\doubleprime']) ||
+    parser.match('\\arcsecond')
   );
 }
 
@@ -1709,13 +1711,14 @@ function matchArcSecondMarker(parser: Parser): boolean {
  * Parse degrees-minutes-seconds (DMS) angle notation.
  *
  * Degree markers: °, \degree, ^{\circ}, ^\circ
- * Minute markers: ', \prime, ^{\prime}, ^\prime
+ * Minute markers: ', \prime, ^{\prime}, ^\prime, \arcminute
  * Second markers: ", '', \prime\prime, \doubleprime,
- *                 ^{\doubleprime}, ^{\prime\prime}, ^\doubleprime
+ *                 ^{\doubleprime}, ^{\prime\prime}, ^\doubleprime, \arcsecond
  *
- * The `siunitx` commands `\minute` and `\second` are NOT markers: in that
- * package they are the TIME units (min, s); its angle units are `\arcminute`
- * and `\arcsecond`. Neither pair renders in MathLive or KaTeX.
+ * `\arcminute` and `\arcsecond` are the angle units of the `siunitx` package.
+ * They are accepted so that LaTeX source written for that package parses. The
+ * `siunitx` commands `\minute` and `\second` are NOT markers: in that package
+ * they are the TIME units (min, s).
  *
  * A minute or second marker is recognized only after a degree marker, and a
  * second marker also after a recognized minute component. This context avoids
