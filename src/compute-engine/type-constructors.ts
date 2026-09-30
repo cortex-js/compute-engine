@@ -333,7 +333,12 @@ function appliedNominalResult(ref: TypeReference): Type {
   if (typeParams === undefined) return ref;
   return applyTypeReference(
     ref,
-    typeParams.map((p) => ({ kind: 'variable', name: p.name }) as Type)
+    typeParams.map(
+      (p) =>
+        (p.kind === 'value'
+          ? { kind: 'variable', name: p.name, value: true }
+          : { kind: 'variable', name: p.name }) as Type
+    )
   );
 }
 

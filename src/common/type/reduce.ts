@@ -119,6 +119,16 @@ export function reduceType(type: Type): Type {
   }
 }
 
+/** The shape of a list as a comparison key: its lengths, with a dimension
+ * variable's name standing in for the `-1` it rides on, so two patterns that
+ * differ only in WHICH variable names an axis are not merged. */
+function shapeKey(t: ListType): string {
+  if (t.dimensions === undefined) return '';
+  return t.dimensions
+    .map((d, i) => t.dimensionVariables?.[i] ?? String(d))
+    .join();
+}
+
 function decorate(t: Type): Type {
   if (typeof t !== 'object') return t;
 
@@ -503,8 +513,7 @@ function meetCollections(a: Type, b: Type): Type | undefined {
   switch (a.kind) {
     case 'list': {
       const other = b as ListType;
-      if ((a.dimensions?.join() ?? '') !== (other.dimensions?.join() ?? ''))
-        return undefined;
+      if (shapeKey(a) !== shapeKey(other)) return undefined;
       return decorate({
         ...a,
         elements: meetElements(a.elements, other.elements),
@@ -879,9 +888,7 @@ function sameHeadArguments(a: Type, b: Type): [Type[], Type[]] | null {
     case 'list': {
       const other = b as ListType;
       // A differing shape is not an argument-wise question.
-      const da = a.dimensions?.join() ?? '';
-      const db = other.dimensions?.join() ?? '';
-      if (da !== db) return null;
+      if (shapeKey(a) !== shapeKey(other)) return null;
       return [[a.elements], [other.elements]];
     }
 
@@ -943,13 +950,23 @@ function reduceListType(type: ListType): Type {
     return decorate({ kind: 'list', elements: 'nothing' });
 
   let dimensions = type.dimensions;
+  let dimensionVariables = type.dimensionVariables;
   if (dimensions) {
     // `-1` means "any size" — a valid, non-degenerate dimension (e.g. a bare
     // `matrix` is `list<list<...>^-1>^-1`). Only a literal `0` makes the list
     // empty; dropping `-1` here turned `matrix` into `nothing`, annihilating
-    // any intersection it appeared in.
-    dimensions = dimensions.filter((dim) => dim >= 1 || dim === -1);
-    if (dimensions.length === 0) return 'nothing';
+    // any intersection it appeared in. A dimension VARIABLE rides on a `-1`
+    // axis, so the names are filtered in step with the lengths.
+    const kept = dimensions
+      .map((dim, i) => i)
+      .filter((i) => dimensions![i] >= 1 || dimensions![i] === -1);
+    if (kept.length === 0) return 'nothing';
+    if (kept.length !== dimensions.length) {
+      dimensions = kept.map((i) => dimensions![i]);
+      dimensionVariables = dimensionVariables?.map
+        ? kept.map((i) => dimensionVariables![i])
+        : dimensionVariables;
+    }
   }
 
   // Bare `list` is the canonical spelling of `list<unknown>` (user ruling
@@ -957,11 +974,14 @@ function reduceListType(type: ListType): Type {
   // bare form cannot express.
   if (reducedType === 'unknown' && dimensions === undefined) return 'list';
 
-  return decorate({
+  const reduced: ListType = {
     ...type,
     dimensions,
     elements: reducedType,
-  });
+  };
+  if (dimensionVariables === undefined) delete reduced.dimensionVariables;
+  else reduced.dimensionVariables = dimensionVariables;
+  return decorate(reduced);
 }
 
 function reduceSetType(type: SetType): Type {

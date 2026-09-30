@@ -54,10 +54,10 @@ export type PrimitiveType =
   // so span-consuming operators such as `Slice(xs, r)` can reject a
   // descending or stepped range at the type level instead of at runtime; see
   // `docs/STRING_ROADMAP.md` ("The `range` type"). Structurally it behaves as
-  // `indexed_collection<integer>` (`RANGE_STRUCTURAL_TYPE` in `primitive.ts`,
-  // which every site that destructures a parameterized collection expands it
-  // to); it has no EMPTY inhabitant, which is why operations that can empty a
-  // range report `list` instead.
+  // `list<integer>` (`RANGE_STRUCTURAL_TYPE` in `primitive.ts`, which every
+  // site that destructures a parameterized collection expands it to), so a
+  // symbol declared `list` accepts it; it has no EMPTY inhabitant, which is
+  // why operations that can empty a range report `list` instead.
   | 'range'
   | 'set'
   | 'dictionary'
@@ -299,7 +299,19 @@ export type EffectSet = 'any' | EffectLabel[];
  * **atomic and opaque**: it is never reduced, distributed or collapsed, and it
  * is substituted away by instantiation at a call site.
  */
-export type TypeVariable = { kind: 'variable'; name: string };
+export type TypeVariable = {
+  kind: 'variable';
+  name: string;
+  /**
+   * A VALUE variable at a TYPE position (`(n: N, x: vector<T^N>) -> N where
+   * T, N`): the singleton type of the value the call site binds `N` to.
+   * Substituting the binding writes the value-literal type (`3`); unsolved,
+   * it reads as the variable's bound (`integer<1..>` for a length). Set by the
+   * type builder once the clause's kind is known — from an occurrence in a
+   * length slot, or from a nominal type's value parameter.
+   */
+  value?: true;
+};
 
 /** How a parameterized NOMINAL type relates two of its applications
  * (`docs/TYPE-SYSTEM.md`).
@@ -320,6 +332,22 @@ export type TypeVariance = 'in' | 'out' | 'inout';
  */
 export type TypeParameter = {
   name: string;
+  /**
+   * `'value'` when the variable stands for a VALUE rather than a type — today
+   * a positive integer length: it occurs in a length slot (`list<T^N>`) or as
+   * the argument of a nominal type's value parameter. Decided by position when
+   * the declared type is built; absent means an ordinary type variable.
+   *
+   * A value variable is solved by EQUALITY across positions (a mismatch
+   * rejects the later operand), bound from a literal's type (a value-literal
+   * type such as `3`, or a singleton range `integer<3..3>`), and it admits no
+   * `is` protocol slot. Its bound says which values it admits; one that
+   * occurs in a length slot must have an integer bound and defaults to
+   * `integer<1..>`. The same kind will carry boolean and string parameters
+   * once those literals have singleton types; only the declaration spelling
+   * and the literal types are missing, not the representation.
+   */
+  kind?: 'value';
   bound?: Type;
   /** Declaration-level variance, on a parameterized NOMINAL type only.
    * Absent means the default (`out`, verified — §4.4). */
@@ -347,7 +375,16 @@ export type TypeParamsOption =
   | string
   | ReadonlyArray<
       | string
-      | { name: string; bound?: Type | TypeString; variance?: TypeVariance }
+      | {
+          name: string;
+          bound?: Type | TypeString;
+          variance?: TypeVariance;
+          /** `'value'` marks a length parameter whose kind was decided
+           * elsewhere (the engine sets it for a sum type's variants, whose
+           * clause is shared); a host normally leaves it absent and lets the
+           * body decide (see {@link TypeParameter.kind}). */
+          kind?: 'value';
+        }
     >;
 
 export type FunctionSignature = {
@@ -477,6 +514,18 @@ export type ListType = {
   kind: 'list';
   elements: Type;
   dimensions?: number[];
+  /**
+   * The DIMENSION VARIABLES of a list pattern, aligned with `dimensions`: a
+   * name at index `i` means that axis is quantified by the enclosing `where`
+   * clause (`list<T^N> where N`), and `dimensions[i]` then holds `-1`.
+   *
+   * A dimension variable is a length that is unknown until a call site binds
+   * it, so the `-1` wildcard IS its correct reading for every consumer that
+   * reads lengths as numbers; only the solver, substitution, serialization and
+   * declaration validation read the names. Absent on every ground type; an
+   * entry is `undefined` on an axis that carries a literal length.
+   */
+  dimensionVariables?: readonly (string | undefined)[];
 };
 
 export type SymbolType = {
@@ -747,12 +796,17 @@ export type Type =
  *   one of the `list`/`vector`/`matrix`/`tensor` heads. The authoritative
  *   grammar lives with the parser in `./parser.ts`.
  *
- * <dimensions> ::= "^" <fixed_size>
- *            | "^(" <multi_dimensional_size> ")"
+ * <dimensions> ::= "^" <dimension>
+ *            | "^(" <dimension> ("x" <dimension>)* ")"
  *
- * <fixed_size> ::= <positive-integer_literal>
- *
- * <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
+ * <dimension> ::= <positive-integer_literal> | <identifier>
+ *   An identifier in a length slot is a DIMENSION VARIABLE, declared by the
+ *   enclosing `where` clause (`(a: vector<real^N>, b: vector<real^N>) -> real
+ *   where N`) or by the type-parameter clause of the type being declared
+ *   (`type permutation<N> = list<integer^N>`). The leading-length spellings
+ *   `vector<3>` and `matrix<2x3>` take literals, or an `x`-joined group of
+ *   two or more dimensions (`matrix<MxN>`); a bare identifier there is an
+ *   element type (`vector<T>`).
  *
  * (The `callback<…>` constructor of Design D was RETIRED by Design E
  * (`docs/TYPE-SYSTEM.md`): callback
@@ -843,9 +897,12 @@ export type TypeResolver = {
  * - Add support for generic function literals and the `function f<T>(…)`
  *   definition form (today a generic declaration requires an `evaluate`
  *   handler; a function-literal body is rejected),
- * - Add support for dimension variables (e.g. `(matrix<T^(MxN)>,
- *   matrix<T^(NxP)>) -> matrix<T^(MxP)> where T, M, N, P`) -- dimensions are
- *   integers, not types, so they need their own variable kind and solver,
+ * - Dimension variables are SUPPORTED (`(matrix<T^(MxN)>, matrix<T^(NxP)>) ->
+ *   matrix<T^(MxP)> where T, M, N, P`, and `(n: N, x: vector<T^N>) -> T`):
+ *   a `where` variable in a length slot is a VALUE variable, solved by
+ *   equality (see {@link TypeParameter.kind}). Not yet supported: arithmetic
+ *   between lengths (`^(M+N)`), and boolean or string value parameters,
+ *   which wait on singleton literal types for those literals,
  * - Add support for type packs / variadic correlation (the `Map`-class
  *   contract: n independently-typed collections with an n-ary callback),
  * - Add support for F-bounded and variable-referencing bounds

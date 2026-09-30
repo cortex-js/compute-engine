@@ -179,6 +179,28 @@ export function typeToString(type: Type, precedence = 0): string {
     }
 
     case 'list':
+      if (type.dimensionVariables !== undefined && type.dimensions) {
+        // A list PATTERN with a dimension variable: always the explicit
+        // `^` spelling with the element type, so `list<T^N>`, `vector<T^N>`
+        // and `matrix<T^(MxN)>` round-trip through the same parser path. An
+        // open axis beside a variable is spelled `?`.
+        const dims = type.dimensions.map(
+          (d, i) => type.dimensionVariables![i] ?? (d < 0 ? '?' : String(d))
+        );
+        const elements = typeToString(type.elements);
+        const inner = underLength(type.elements, elements);
+        // The parts join with a bare `x` (`MxN`), the spelling the parser
+        // splits back — unless a part contains an `x` of its own (`idx`) or
+        // is `?`, which the fused form could not separate; those join with a
+        // spaced separator (`M x idx`, `N x ?`), the parser's standalone form.
+        const shape = dims.some((p) => p === '?' || p.includes('x'))
+          ? dims.join(' x ')
+          : dims.join('x');
+        if (dims.length === 1) result = `vector<${inner}^${dims[0]}>`;
+        else if (dims.length === 2) result = `matrix<${inner}^(${shape})>`;
+        else result = `list<${inner}^(${shape})>`;
+        break;
+      }
       if (
         type.dimensions &&
         typeof type.elements === 'string' &&

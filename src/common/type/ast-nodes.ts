@@ -87,7 +87,9 @@ export interface ListTypeNode extends ASTNode {
 export interface VectorTypeNode extends ASTNode {
   kind: 'vector';
   elementType: TypeNode;
-  size?: number;
+  /** The one dimension of a sized vector (`vector<3>`, `vector<T^N>`);
+   * absent for the open-length `vector<T>`. */
+  dimension?: DimensionNode;
 }
 
 export interface MatrixTypeNode extends ASTNode {
@@ -205,7 +207,11 @@ export interface ValueNode extends ASTNode {
 
 export interface DimensionNode extends ASTNode {
   kind: 'dimension';
-  size: number | null; // null for '?'
+  size: number | null; // null for '?' and for a dimension variable
+  /** The name of a DIMENSION VARIABLE in this slot (`list<T^N>`): an
+   * identifier the enclosing `where` clause or type-parameter clause
+   * declares. `size` is `null` when a name is present. */
+  name?: string;
 }
 
 export interface IdentifierNode extends ASTNode {

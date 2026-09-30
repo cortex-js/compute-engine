@@ -310,6 +310,9 @@ export function solveArmOverActuals(
         // absorbs, §4.3 table).
         return ops[i]?.inferable === true;
       },
+      // A VALUE variable (`n: N`) is pinned from the operand's public type —
+      // the literal cargo the projection above strips for type variables.
+      rawType: (i) => ops[i]?.type,
       lifted: (i) => {
         // D10 (re-ruled 2026-08-04): a lift-admitted operand at a
         // bare-variable pattern binds its ELEMENT type — the runtime maps

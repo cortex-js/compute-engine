@@ -42,6 +42,9 @@ import {
 import {
   TypeVariableError,
   freeTypeVariables,
+  LENGTH_BOUND,
+  markValueVariables,
+  valueVariableNamesOf,
   satisfiesTypeBound,
   substituteTypeVariables,
 } from './instantiate.js';
@@ -158,6 +161,14 @@ export class TypeBuilder implements ASTVisitor<Type> {
     } finally {
       this._typeVarScopes.pop();
     }
+    // The clause's VALUE variables are known only once the whole body is
+    // built (a length slot may come after a type-position use: `(n: N, x:
+    // list<T^N>)`). The clause entries are this builder's own fresh objects,
+    // so the kind is recorded on them here, and the body's type-position
+    // occurrences are marked in one pass over the finished body.
+    for (const p of typeParams)
+      if (this._valueNames.has(p.name)) p.kind = 'value';
+    body = markValueVariables(body, valueVariableNames(typeParams));
 
     // The clause LIVES on the signature it quantifies. A clause on anything
     // else (a bare intersection, a union, a primitive) has no arm to scope
@@ -184,7 +195,59 @@ export class TypeBuilder implements ASTVisitor<Type> {
   }
 
   visitTypeVariable(node: TypeVariableNode): Type {
+    // A variable whose kind is ALREADY known to be a value (a length slot
+    // seen earlier in the same body, or a pre-seeded clause entry that says
+    // so) is built marked; the others are marked by the post-pass over the
+    // finished body (`markValueVariables`).
+    if (
+      this._valueNames.has(node.name) ||
+      this.typeParameter(node.name)?.kind === 'value'
+    )
+      return { kind: 'variable', name: node.name, value: true };
     return { kind: 'variable', name: node.name };
+  }
+
+  /** The in-scope variable names this build has met in a length slot or as
+   * the argument of a value parameter. Kept on the builder, never written
+   * onto a pre-seeded clause entry: a declaration's clause objects may be
+   * shared with sibling declarations (the variants of a sum type), so the
+   * route that owns them decides the kind from the finished body
+   * (`valueVariableNamesOf`). */
+  private readonly _valueNames = new Set<string>();
+
+  /** The in-scope clause entry for `name` (innermost clause first), or
+   * `undefined` when no enclosing clause nor the pre-seed declares it. */
+  private typeParameter(name: string): TypeParameter | undefined {
+    for (let i = this._typeVarScopes.length - 1; i >= 0; i--) {
+      const p = this._typeVarScopes[i].find((x) => x.name === name);
+      if (p !== undefined) return p;
+    }
+    return undefined;
+  }
+
+  /**
+   * Record that the in-scope variable `name` occurred in a LENGTH slot (or
+   * filled a nominal type's value parameter): it is a value variable. The
+   * clause entry is the object the parser or the declaration handed in, so
+   * the kind is visible to everything that reads the clause afterwards — the
+   * declaration validation, the solver, the variance walker.
+   */
+  private markValueVariable(name: string): void {
+    if (this.typeParameter(name) !== undefined) this._valueNames.add(name);
+  }
+
+  /** `dimensions` and `dimensionVariables` for a list built from dimension
+   * nodes: a named node is the `-1` wildcard plus its name. */
+  private buildDimensions(nodes: readonly DimensionNode[]): {
+    dimensions: number[];
+    dimensionVariables?: (string | undefined)[];
+  } {
+    const dimensions = nodes.map((d) => this.buildDimension(d));
+    if (nodes.every((d) => d.name === undefined)) return { dimensions };
+    const dimensionVariables = nodes.map((d) => d.name);
+    for (const name of dimensionVariables)
+      if (name !== undefined) this.markValueVariable(name);
+    return { dimensions, dimensionVariables };
   }
 
   visitUnionType(node: UnionTypeNode): Type {
@@ -209,23 +272,29 @@ export class TypeBuilder implements ASTVisitor<Type> {
 
   visitListType(node: ListTypeNode): Type {
     const elements = this.buildType(node.elementType);
-    const dimensions = node.dimensions?.map((d) => this.buildDimension(d));
 
     // Bare `list` is a SYNONYM for `list<unknown>` (user ruling 2026-08-17),
     // so the explicit spelling normalizes to the bare canonical form — but
     // only when no dimensions constrain the rank, which the bare form cannot
     // express. An explicit `<any>` is a different, wider type (it admits
     // absence elements) and always survives.
-    if (dimensions === undefined && this.isUnknownType(elements)) return 'list';
+    if (node.dimensions === undefined) {
+      if (this.isUnknownType(elements)) return 'list';
+      return { kind: 'list', elements, dimensions: undefined };
+    }
 
-    return { kind: 'list', elements, dimensions };
+    return { kind: 'list', elements, ...this.buildDimensions(node.dimensions) };
   }
 
   visitVectorType(node: VectorTypeNode): Type {
     const elements = this.buildType(node.elementType);
 
-    if (node.size !== undefined) {
-      return { kind: 'list', elements, dimensions: [node.size] };
+    if (node.dimension !== undefined) {
+      return {
+        kind: 'list',
+        elements,
+        ...this.buildDimensions([node.dimension]),
+      };
     }
 
     // An UNSIZED vector is rank-1 with an open length, and `-1` is how this
@@ -241,8 +310,11 @@ export class TypeBuilder implements ASTVisitor<Type> {
     const elements = this.buildType(node.elementType);
 
     if (node.dimensions) {
-      const dimensions = node.dimensions.map((d) => this.buildDimension(d));
-      return { kind: 'list', elements, dimensions };
+      return {
+        kind: 'list',
+        elements,
+        ...this.buildDimensions(node.dimensions),
+      };
     }
 
     // Default matrix dimensions (unknown size)
@@ -512,10 +584,47 @@ export class TypeBuilder implements ASTVisitor<Type> {
     const bindings: Record<string, Type> = Object.create(null);
     const built: Type[] = [];
     for (let i = 0; i < params.length; i++) {
-      const arg = this.buildType(args[i]);
-      const bound = params[i].bound;
-      if (bound !== undefined) this.checkArgumentBound(name, arg, params[i]);
-      bindings[params[i].name] = arg;
+      let arg = this.buildType(args[i]);
+      const param = params[i];
+      if (param.kind === 'value') {
+        // A VALUE parameter (`type permutation<N> = list<integer^N>`) takes a
+        // value: a literal (`permutation<3>`), or an in-scope variable, which
+        // this use makes a value variable of ITS clause (`(p: permutation<N>)
+        // -> … where N`).
+        if (typeof arg === 'object' && arg.kind === 'variable') {
+          // A7 for a value parameter: the variable's own bound (`integer<1..>`
+          // when its clause declares none) must satisfy the parameter's, or a
+          // call could instantiate an application the builder itself refuses
+          // (`(n: N) -> big<N> where N` with `big<N: integer<2..>>`, called
+          // with `1`).
+          const argBound = this.typeParameter(arg.name)?.bound ?? LENGTH_BOUND;
+          const bound = param.bound ?? LENGTH_BOUND;
+          if (!satisfiesTypeBound(argBound, bound))
+            fail(
+              'generic-alias-bound',
+              `The variable \`${arg.name}\`, whose bound is \`${typeToString(argBound)}\`, does not satisfy the bound \`${typeToString(bound)}\` of the value parameter \`${param.name}\` of "${name}"`
+            );
+          this.markValueVariable(arg.name);
+          arg = { kind: 'variable', name: arg.name, value: true };
+        } else {
+          // A value (`permutation<3>`), or a FAMILY of values written as a
+          // type within the bound (`permutation<integer<1..>>`, which is how
+          // an application whose length was never solved prints): anything
+          // else is a type where a value belongs.
+          const bound = param.bound ?? LENGTH_BOUND;
+          if (!satisfiesTypeBound(arg, bound))
+            fail(
+              'type-argument-kind',
+              `The parameter \`${param.name}\` of "${name}" is a value parameter (a length): its argument must be a value such as \`3\`, a variable of the enclosing \`where\` clause, or a range within \`${typeToString(bound)}\`, not \`${typeToString(arg)}\``
+            );
+        }
+      }
+      // A value where a TYPE parameter expects a type (`tree<3>`) is a legal
+      // singleton type today, and is admitted by the ordinary bound check.
+      const bound = param.bound;
+      if (param.kind !== 'value' && bound !== undefined)
+        this.checkArgumentBound(name, arg, param);
+      bindings[param.name] = arg;
       built.push(arg);
     }
 
@@ -582,7 +691,9 @@ export class TypeBuilder implements ASTVisitor<Type> {
   }
 
   private buildDimension(node: DimensionNode): number {
-    return node.size ?? -1; // -1 represents unknown size (?)
+    // -1 represents an unknown size: `?`, and a dimension VARIABLE, whose name
+    // rides beside it in `dimensionVariables` (see `buildDimensions`).
+    return node.size ?? -1;
   }
 
   private buildValue(node: ValueNode): any {
@@ -640,5 +751,23 @@ export function buildTypeFromAST(
   typeVars?: readonly TypeParameter[]
 ): Type {
   const builder = new TypeBuilder(typeResolver, typeVars);
-  return builder.buildType(node);
+  const type = builder.buildType(node);
+  // A pre-seeded clause (a generic type declaration's own parameters) learns
+  // its value variables from the body just built — a length slot, or an
+  // application of another type's value parameter — so the body's
+  // type-position occurrences of them are marked once it is complete. The
+  // clause entries themselves are NOT written here: they belong to the
+  // declaring route, which sets their kind from the finished body
+  // (`valueVariableNamesOf`) — see the engine's `declareType`.
+  if (typeVars === undefined) return type;
+  const names = valueVariableNamesOf(type);
+  for (const p of typeVars) if (p.kind === 'value') names.add(p.name);
+  return markValueVariables(type, names);
+}
+
+/** The names of the `kind: 'value'` entries of a clause. */
+function valueVariableNames(params: readonly TypeParameter[]): Set<string> {
+  const names = new Set<string>();
+  for (const p of params) if (p.kind === 'value') names.add(p.name);
+  return names;
 }

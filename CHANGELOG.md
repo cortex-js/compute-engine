@@ -124,6 +124,32 @@
 
 ### New Features
 
+- **A type variable in a collection's length slot**
+  ([#364](https://github.com/cortex-js/compute-engine/issues/364), proposed by
+  [enumeratio](https://github.com/enumeratio)). A `where` variable may now name
+  a length: `(a: vector<real^N>, b: vector<real^N>) -> real where N` rejects a
+  call with mismatched lengths at the call site (`dot([1,2,3], [4,5])` reports
+  `expected vector<real^3>, got vector<integer^2>` on the second operand), and
+  `(matrix<T^(MxN)>, matrix<T^(NxP)>) -> matrix<T^(MxP)> where T, M, N, P`
+  states the shape of its result. The same variable at a parameter or result
+  position is the integer with that value, bound from a literal argument:
+  `(n: N, x: vector<T^N>) -> T where T, N` accepts `foo(3, [1,2,3])` and rejects
+  `foo(4, [1,2,3])`, and `(list<T^N>) -> N` types `len([1,2,3])` as `3`. A
+  length variable is solved by equality across positions, may carry an integer
+  bound (`where N: integer<2..>`), and an operand whose type states no length is
+  admitted as it is at a literal length. A nominal type may take a length
+  parameter: `type permutation<N> = list<integer^N>` makes
+  `permutation([2,1,3])` a `permutation<3>`, unrelated to `permutation<4>`; an
+  unsolved length prints as the family `permutation<integer<1..>>`. In the Epsil
+  language the same spellings work on a `function` head, with a trailing `where`
+  clause or the `<N>` binder. Not supported yet: arithmetic between lengths
+  (`^(M+N)`). The parameter kind is a general value kind, so boolean and string
+  parameters can follow once those literals carry singleton types. One reading changed with it: a
+  dimensioned pattern now binds its element variable after peeling as many
+  axes as it states, so `(x: matrix<T>) -> T where T` on a 2×2 matrix binds
+  `T` to the scalar element (`integer`) rather than to a row; no built-in
+  signature was affected.
+
 - **More spellings of the arc-minute and arc-second markers in DMS angles**
   ([#338](https://github.com/cortex-js/compute-engine/pull/338), contributed
   by [yelliver](https://github.com/yelliver)). After a degree marker (`°`,

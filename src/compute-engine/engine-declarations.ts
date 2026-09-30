@@ -43,6 +43,9 @@ import {
   substituteTypeVariables,
   TypeVariableError,
   isPolymorphicType,
+  markValueVariables,
+  validateValueParameters,
+  valueVariableNamesOf,
 } from '../common/type/instantiate.js';
 import { declarationOf, forwardArities } from '../common/type/reference.js';
 import { verifyVariance } from '../common/type/variance.js';
@@ -786,6 +789,10 @@ function normalizeDeclaredTypeParams(
     const param: TypeParameter = { name: entry.name };
     if (bound !== undefined) param.bound = bound;
     if (entry.variance !== undefined) param.variance = entry.variance;
+    // A kind already decided travels with the entry: the sum-type route
+    // settles the kind of every shared parameter from all the variant bodies
+    // before declaring any variant, and hands each variant its subset.
+    if (entry.kind !== undefined) param.kind = entry.kind;
     push(param);
   }
 
@@ -1174,6 +1181,28 @@ export function declareType(
   // the body parse returns (`parseType` prefixes "Failed to parse type" onto
   // anything thrown inside it) and BEFORE the definition feeds the mint block,
   // so a violating declaration never mints.
+  // The clause's VALUE variables are decided by the finished body (kind by
+  // position): a parameter used in a length slot, or given to another type's
+  // value parameter, is a length. The kind is recorded on the clause entries
+  // HERE, by the route that owns them — the type builder never writes a
+  // pre-seeded entry, because a sum type shares one clause across its
+  // variants — and a structural body (`Type`/`BoxedType`) gets the same
+  // treatment as a string. The value-variable checks (integer bound, no
+  // protocol slot) then run as they do for a signature's `where` clause.
+  if (params !== undefined) {
+    const valueNames = valueVariableNamesOf(def);
+    for (const p of params)
+      if (valueNames.has(p.name) && p.kind === undefined) p.kind = 'value';
+    for (const p of params) if (p.kind === 'value') valueNames.add(p.name);
+    def = markValueVariables(def, valueNames);
+    try {
+      validateValueParameters(params, valueNames);
+    } catch (e) {
+      rollbackTypeHalf();
+      throw e;
+    }
+  }
+
   if (params !== undefined && alias !== true) {
     const verdict = verifyVariance(name, params, def);
     if (verdict.status === 'violation') {
@@ -1579,15 +1608,30 @@ export function declareSumType(
       promise.typeParams = params;
 
     const subsets = new Map<string, TypeParameter[]>();
-    for (const v of variants) {
-      let subset: TypeParameter[] | undefined;
-      if (params !== undefined) {
+    // The variants SHARE the clause's parameter objects, and a parameter's
+    // KIND (type or value/length) is decided by where the bodies use it. So
+    // every payload is probed first and the kinds settled on the shared
+    // objects, and only then is any variant declared: otherwise a variant
+    // declared before a later payload marked `N` as a length would have been
+    // built, minted and variance-checked with `N` as a type, and the outcome
+    // would depend on the order of the variants.
+    const probed = new Map<string, Set<string>>();
+    if (params !== undefined) {
+      for (const v of variants) {
         // A4 — parse the payload with the WHOLE clause seeded, then keep the
         // parameters it actually mentions. (The payload is parsed a second
         // time by `declareType`; this one only answers "which variables?".)
-        const free = freeTypeVariables(
-          parseType(v.payload, ce._typeResolver, params)
-        );
+        const payload = parseType(v.payload, ce._typeResolver, params);
+        probed.set(v.name, freeTypeVariables(payload));
+        const valueNames = valueVariableNamesOf(payload);
+        for (const p of params)
+          if (valueNames.has(p.name) && p.kind === undefined) p.kind = 'value';
+      }
+    }
+    for (const v of variants) {
+      let subset: TypeParameter[] | undefined;
+      if (params !== undefined) {
+        const free = probed.get(v.name)!;
         subset = params.filter((p) => free.has(p.name));
         if (subset.length === 0) subset = undefined;
       }

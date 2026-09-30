@@ -777,6 +777,32 @@ error, not a bounded `<T: number>`.
 A full-type annotation has no binder slot, so it always uses the `where`
 clause — `let f: (T) -> T where T = x => x`.
 
+A clause variable can also stand for a **length**. Written in a collection's
+length slot (`vector<real^N>`, `list<T^N>`, `matrix<T^(MxN)>`), it is bound
+from the length of the argument and must agree wherever it appears: a dot
+product declared over two vectors of the same length rejects a call with
+mismatched lengths at the call, and a matrix product can state the shape of
+its result. The same variable used as a parameter or return type is the
+integer with that value, bound from a literal argument:
+
+```epsil
+function dot(a: vector<real^N>, b: vector<real^N>) -> real where N { 0 }
+function mm(a: matrix<T^(MxN)>, b: matrix<T^(NxP)>) -> matrix<T^(MxP)> where T, M, N, P { a }
+function len(x: list<T^N>) -> N where T, N { 3 }
+len([1, 2, 3])              // typed 3
+```
+
+With these declarations, `dot([1, 2, 3], [4, 5])` is an error at the call:
+expected `vector<real^3>`, got `vector<integer^2>`.
+
+An argument whose type states no length — a symbol declared `list<real>` —
+is accepted and checked when the value is known, as it is at a literal length
+such as `vector<real^3>`. A length variable may carry an integer bound (`where
+N: integer<2..>`); its default is `integer<1..>`. A named type may take a
+length parameter too: `type perm<N> = list<integer^N>` makes `perm([2, 1,
+3])` a `perm<3>`, and `perm<3>` and `perm<4>` are different types. Arithmetic
+between lengths (`^(M+N)`) is not supported.
+
 Note that a function is generic only when it is **declared** generic. Nothing
 is silently generalized: `x => x` is a function on some inferred type, not an
 implicit "for all `T`".

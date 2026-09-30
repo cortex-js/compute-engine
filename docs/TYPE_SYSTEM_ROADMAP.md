@@ -1053,7 +1053,10 @@ shape rule.
    signature at `library/collections.ts:5447` is literally
    `(collection<T>, (T) -> U) -> list<U>`); the handlers exist for
    the dirty half (string atomicity, indexedness preservation,
-   broadcast hedges).
+   broadcast hedges). The length half has a design note: a `where`
+   variable in a collection's length slot, solved by equality from a
+   literal length or a literal integer argument
+   (`docs/plans/2026-09-29-dimension-variables-design.md`, issue #364).
 4. **Value-indexed signatures with type-level bound arithmetic** —
    `(real<a..b>) -> real<-b..-a>`. ~15 handlers today (`Abs`,
    `Negate`, even powers, `Heaviside`/`Sign`, extremum joins) plus

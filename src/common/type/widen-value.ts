@@ -4,6 +4,7 @@ import { isSubtype } from './subtype.js';
 import { SIGNED_INFINITY_TYPE } from './primitive.js';
 import { reduceType } from './reduce.js';
 import { subtypingVarianceOf } from './variance.js';
+import { declarationOf, withTypeArguments } from './reference.js';
 
 /**
  * Widen every numeric VALUE type in a type-handler result to its ordinary
@@ -236,13 +237,22 @@ function widenNode(
       // there. Rebuild only when an argument actually changed, so an
       // untouched reference keeps its identity.
       if (!t.args) return t;
+      const params = declarationOf(t).typeParams;
       const args = t.args.map((x, i) => {
+        // A VALUE parameter's argument is the value itself (`permutation<3>`
+        // is a permutation of length exactly 3, and `3` is its only
+        // spelling): widening it to its tier would turn the application into
+        // a family (`permutation<integer<1..>>`) — a different, wider type.
+        if (params?.[i]?.kind === 'value') return x;
         const variance = subtypingVarianceOf(t, i);
         if (variance === 'inout') return x;
         return widen(x, variance === 'out' ? covariant : !covariant, memo);
       });
       if (args.every((x, i) => x === t.args![i])) return t;
-      return { ...t, args };
+      // `withTypeArguments` copies the property descriptors, so the rebuilt
+      // application keeps the non-enumerable `decl` back-pointer and the
+      // `def`/`alias` accessors a spread would drop.
+      return withTypeArguments(t, args);
     }
 
     case 'numeric': {

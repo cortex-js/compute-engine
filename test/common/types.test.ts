@@ -547,7 +547,10 @@ describe('Signature arity is checked in BOTH directions', () => {
 
   it('the matching and too-few cases are unchanged', () => {
     expect(
-      isSubtype(parseType('(number) -> number'), parseType('(number) -> number'))
+      isSubtype(
+        parseType('(number) -> number'),
+        parseType('(number) -> number')
+      )
     ).toBe(true);
     expect(
       isSubtype(
@@ -797,9 +800,10 @@ describe('Negative Type Parser Tests', () => {
       "Failed to parse type "list<integer^2x>": 
       Invalid type
       |   list<integer^2x>
-      |                 ^
+      |                  ^
       |
-      |   Expected a positive integer literal or \`?\` after x. For example: \`2x3\` or \`2x?\`
+      |   Expected a positive integer literal, \`?\` or a dimension variable after x
+      |   For example: \`2x3\`, \`2x?\`, or \`MxN\` with \`where M, N\`
       "
     `);
   });

@@ -109,6 +109,34 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
+
+`reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis
+and reads an all-zero shape as `nothing`. So `list<integer^(2x0)>`, two empty
+rows, reduces to `vector<integer^2>`, a list of two integers, and
+`list<integer^(0x2)>`, no rows, reduces the same way. Measured 2026-09-29:
+`2x0 → vector<integer^2>`, `0x2 → vector<integer^2>`, `0 → nothing`. The
+question is what a zero axis should mean: keep the axis (`matrix<integer^(2x0)>`
+stays as written, and a value of that shape is two empty lists), or read any
+zero axis as the empty type. Recommendation: keep the axis, since a 2x0 matrix
+is a value the engine can hold and its element count is 0 by multiplication;
+dropping the axis changes the rank of the type. Until decided, the behavior is
+unchanged from before the dimension-variables round, which only kept the
+dimension-variable names aligned with the surviving axes.
+
+### A nested list spelling is not a subtype of the flat shape it describes (OPEN, small — found 2026-09-29 by the review of the dimension-variables round)
+
+`isSubtype('list<vector<integer^3>^2>', 'matrix<integer>')` is false: the
+encoding bridge in `src/common/type/subtype.ts` reads a rank-2 list as a list of
+rows (`matrix<E^(2x3)> <: list<vector<E^3>>`) but not a list of rows as a rank-2
+list. A symbol declared `list<vector<integer^3>^2>` is therefore admitted at a
+`matrix<T^(MxN)>` parameter only provisionally, and its lengths pin nothing
+(`cols(nl)` is typed `integer<1..>`, where the flat `matrix<integer^(2x3)>` gives
+`3`). Literals never take the nested spelling (`staticCollectionDims` flattens
+them), so only declared types reach this. Fix: add the reverse bridge — a list
+whose element type is a dimensioned list reads as the concatenated shape — and
+then let the solver's dimension walk pin through it.
+
 ### A destructuring `let` inside a loop body does not compile (OPEN, small — found 2026-09-28 by the review fixes for Tycho item 332)
 
 `let n = 0` / `while n < 4 { let (a, x) = (2, 3); n = n + a }` / `n`

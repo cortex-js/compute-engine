@@ -65,7 +65,20 @@ export type TypeVariableErrorCode =
   | 'generic-alias-unused-parameter'
   /** A parameterized nominal type whose body contradicts the variance its
    * clause declares — or the `out` a missing marker declares (§4.4). */
-  | 'variance-violation';
+  | 'variance-violation'
+  /** A dimension variable (one that occurs in a length slot, `list<T^N>`)
+   * declared with a bound that is not an integer type: a length is a positive
+   * integer, so `where N: string` or `where N: real` can never be met. */
+  | 'dimension-bound-not-integer'
+  /** A value variable (a length, `list<T^N>`) with an `is` protocol slot: a
+   * value is not a type that could conform to a protocol. */
+  | 'value-variable-protocol'
+  /** A type argument of the wrong KIND for its parameter: a type where a
+   * nominal type's value parameter expects a value (`permutation<integer>`
+   * for `type permutation<N> = list<integer^N>`). The other direction — a
+   * value where a type parameter expects a type (`tree<3>`) — is a legal
+   * singleton type and is admitted by the ordinary bound check. */
+  | 'type-argument-kind';
 
 /** An `Error` carrying one of the {@link TypeVariableErrorCode}s.
  *
@@ -199,6 +212,14 @@ function collectFreeVariables(
       collectFreeVariables(t.type, bound, into);
       return;
     case 'list':
+      // A dimension variable occurs FREE in a length slot exactly as a type
+      // variable does in an element slot.
+      if (t.dimensionVariables !== undefined)
+        for (const name of t.dimensionVariables)
+          if (name !== undefined && (bound === undefined || !bound.has(name)))
+            into.add(name);
+      collectFreeVariables(t.elements, bound, into);
+      return;
     case 'set':
     case 'collection':
     case 'indexed_collection':
@@ -276,6 +297,11 @@ function hasFreeVariables(
     case 'negation':
       return hasFreeVariables(t.type, bound);
     case 'list':
+      if (t.dimensionVariables !== undefined)
+        for (const name of t.dimensionVariables)
+          if (name !== undefined && (bound === undefined || !bound.has(name)))
+            return true;
+      return hasFreeVariables(t.elements, bound);
     case 'set':
     case 'collection':
     case 'indexed_collection':
@@ -430,7 +456,19 @@ export function substituteTypeVariables(
       const type = substituteTypeVariables(t.type, bindings);
       return type === t.type ? t : { ...t, type };
     }
-    case 'list':
+    case 'list': {
+      const elements = substituteTypeVariables(t.elements, bindings);
+      const shape = substituteDimensions(t, bindings);
+      if (elements === t.elements && shape === undefined) return t;
+      const next: ListType = { ...t, elements };
+      if (shape !== undefined) {
+        next.dimensions = shape.dimensions;
+        if (shape.dimensionVariables === undefined)
+          delete next.dimensionVariables;
+        else next.dimensionVariables = shape.dimensionVariables;
+      }
+      return next;
+    }
     case 'set':
     case 'collection':
     case 'indexed_collection':
@@ -467,6 +505,123 @@ export function substituteTypeVariables(
     default:
       return t;
   }
+}
+
+/**
+ * The length slots of a list pattern after substitution, or `undefined` when
+ * no dimension variable of `t` is bound.
+ *
+ * A dimension variable bound to a value-literal type holding a positive
+ * integer becomes that length; one bound to another variable (a renaming, as
+ * `markDimensionVariables` does) keeps the slot open under the new name; any
+ * other binding — the S3 fallback `integer<1..>`, the display `unknown` — is
+ * "length not known", so the slot stays `-1` and the name is dropped.
+ */
+function substituteDimensions(
+  t: ListType,
+  bindings: Readonly<Record<string, Type>>
+):
+  | { dimensions: number[]; dimensionVariables?: (string | undefined)[] }
+  | undefined {
+  const names = t.dimensionVariables;
+  if (names === undefined || t.dimensions === undefined) return undefined;
+  let changed = false;
+  const dimensions = [...t.dimensions];
+  const dimensionVariables: (string | undefined)[] = [...names];
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    if (name === undefined || !hasOwn(bindings, name)) continue;
+    const binding = bindings[name];
+    if (binding === undefined) continue;
+    changed = true;
+    const length = dimensionOf(binding);
+    if (length !== undefined) {
+      dimensions[i] = length;
+      dimensionVariables[i] = undefined;
+    } else if (typeof binding === 'object' && binding.kind === 'variable') {
+      dimensionVariables[i] = binding.name;
+    } else {
+      dimensions[i] = -1;
+      dimensionVariables[i] = undefined;
+    }
+  }
+  if (!changed) return undefined;
+  return dimensionVariables.some((n) => n !== undefined)
+    ? { dimensions, dimensionVariables }
+    : { dimensions };
+}
+
+/**
+ * The bound a value variable carries when its clause declares none. Today
+ * every value variable is a LENGTH (it occurs in a length slot or fills a
+ * nominal type's length parameter), and a length is a positive integer; a
+ * future boolean or string parameter will declare its own bound.
+ */
+export const LENGTH_BOUND: Type = Object.freeze({
+  kind: 'numeric',
+  type: 'integer',
+  lower: 1,
+}) as Type;
+
+/**
+ * The VALUE a type pins, when it pins exactly one: a value-literal type
+ * (`3`, the type of the literal `3` and of `Length([1,2,3])`; a string or
+ * boolean value type once those literals carry one), or a singleton numeric
+ * range (`integer<3..3>`, the type of a symbol declared that way). `undefined`
+ * for every other type — including a plain `integer`, which admits a value
+ * without naming it.
+ */
+export function pinnedValueOf(t: Type): unknown {
+  if (typeof t !== 'object') return undefined;
+  if (t.kind === 'value') {
+    const v = t.value;
+    return typeof v === 'number' ||
+      typeof v === 'string' ||
+      typeof v === 'boolean'
+      ? v
+      : undefined;
+  }
+  if (
+    t.kind === 'numeric' &&
+    t.lower !== undefined &&
+    t.lower === t.upper &&
+    Number.isFinite(t.lower) &&
+    t.lowerOpen !== true &&
+    t.upperOpen !== true
+  )
+    return t.lower;
+  return undefined;
+}
+
+/**
+ * The LENGTH a type pins, when it pins one: {@link pinnedValueOf} restricted
+ * to a positive integer, which is what a length slot can hold.
+ */
+export function dimensionOf(t: Type): number | undefined {
+  const v = pinnedValueOf(t);
+  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+}
+
+/** The value-literal type that pins the value `v` (a length `n` is `{ kind:
+ * 'value', value: n }`, the same node `ce.box(n).type` is). */
+export function valueLiteralType(v: number | string | boolean): Type {
+  return { kind: 'value', value: v };
+}
+
+/**
+ * `t` with every occurrence of a variable in `names` marked as a VALUE
+ * variable (`{ kind: 'variable', name, value: true }`), so a consumer meeting
+ * the node at a type position (`n: N`) knows it denotes a value without
+ * consulting the clause. A pure rebuild through the substitution walk (a
+ * variable bound to a variable is a renaming, which keeps a length slot open
+ * under the same name).
+ */
+export function markValueVariables(t: Type, names: ReadonlySet<string>): Type {
+  if (names.size === 0) return t;
+  const bindings: Record<string, Type> = Object.create(null);
+  for (const name of names)
+    bindings[name] = { kind: 'variable', name, value: true };
+  return substituteTypeVariables(t, bindings);
 }
 
 function substituteAll(
@@ -573,6 +728,11 @@ function validatePolytypeArm(
       );
   }
 
+  // The value variables of the arm: the clause's `kind` entries, and — for a
+  // signature built structurally, whose clause carries no kinds — every
+  // variable that occurs in a length slot or fills a value parameter.
+  validateValueParameters(typeParams, valueVariableNamesOf(arm));
+
   // v1: a bound must be GROUND — no variables (no `T: list<U>`, no F-bounded
   // `T: comparable<T>`) — and cannot itself carry a clause.
   for (const p of typeParams) {
@@ -606,6 +766,115 @@ function validatePolytypeArm(
       `The type variable \`${p.name}\` is quantified but never used`
     );
   }
+}
+
+/**
+ * The checks a VALUE variable's clause entry must pass, shared by a signature
+ * arm (`validatePolytypeArm`) and a parameterized type declaration (the
+ * engine's `declareType`, after the body is built). `valueNames` is the set
+ * of clause names the body uses as values ({@link valueVariableNamesOf}); an
+ * entry is checked when its `kind` says value OR the body uses it as one.
+ *
+ * A value variable stands for a value, not a type: it cannot conform to a
+ * protocol. Every value variable today is a LENGTH, so its bound, when
+ * written, must be an integer type (`where N: integer<2..>`); the solver
+ * further requires every pin to be a positive integer, so `where N: integer`
+ * is accepted and admits `1, 2, …` but never `0`.
+ */
+export function validateValueParameters(
+  typeParams: readonly TypeParameter[],
+  valueNames: ReadonlySet<string>
+): void {
+  for (const p of typeParams) {
+    if (p.kind !== 'value' && !valueNames.has(p.name)) continue;
+    if (p.protocols !== undefined && p.protocols.length > 0)
+      fail(
+        'value-variable-protocol',
+        `The value variable \`${p.name}\` cannot be constrained by a protocol (\`is ${p.protocols.join(' & ')}\`): a value is not a type`
+      );
+    if (
+      p.bound !== undefined &&
+      !hasFreeTypeVariables(p.bound) &&
+      !algebra().isSubtype(p.bound, 'integer')
+    )
+      fail(
+        'dimension-bound-not-integer',
+        `The bound of the dimension variable \`${p.name}\` must be an integer type, but is \`${typeToString(p.bound)}\`: a length is a positive integer`
+      );
+  }
+}
+
+/**
+ * The names of the variables `t` uses as VALUES: one in a length slot of a
+ * list (`list<T^N>`), one flagged at a type position (`n: N`), and one given
+ * as the argument of a nominal type's value parameter (`permutation<N>`).
+ *
+ * This is the kind-by-position rule as a pure function of the body, for
+ * routes that hold no clause with kinds already decided — a structural `Type`
+ * body, a declaration whose clause objects are shared with sibling
+ * declarations (the sum-type variants), and the solver on any arm.
+ */
+export function valueVariableNamesOf(t: Type): Set<string> {
+  const names = new Set<string>();
+  const visit = (x: Type): void => {
+    if (typeof x !== 'object') return;
+    switch (x.kind) {
+      case 'variable':
+        if (x.value === true) names.add(x.name);
+        return;
+      case 'signature':
+        for (const el of signatureElements(x)) visit(el.type);
+        visit(x.result);
+        return;
+      case 'union':
+      case 'intersection':
+        for (const y of x.types) visit(y);
+        return;
+      case 'negation':
+        visit(x.type);
+        return;
+      case 'list':
+        if (x.dimensionVariables !== undefined)
+          for (const name of x.dimensionVariables)
+            if (name !== undefined) names.add(name);
+        visit(x.elements);
+        return;
+      case 'set':
+      case 'collection':
+      case 'indexed_collection':
+      case 'broadcastable':
+        visit(x.elements);
+        return;
+      case 'tuple':
+        for (const el of x.elements) visit(el.type);
+        return;
+      case 'dictionary':
+        visit(x.values);
+        return;
+      case 'record':
+      case 'object':
+        for (const y of Object.values(x.elements)) visit(y);
+        return;
+      case 'reference': {
+        if (x.args === undefined) return;
+        const params = declarationOf(x).typeParams;
+        x.args.forEach((a, i) => {
+          if (
+            params?.[i]?.kind === 'value' &&
+            typeof a === 'object' &&
+            a.kind === 'variable'
+          )
+            names.add(a.name);
+          visit(a);
+        });
+        return;
+      }
+      default:
+        return;
+    }
+  };
+  visit(t);
+  return names;
 }
 
 /**
@@ -691,6 +960,26 @@ function walk(
       walk(t.type, declared, 'negation', into);
       return;
     case 'list':
+      // A dimension variable in a length slot is an occurrence like any other:
+      // it must be declared, it counts toward solvability, and a forbidden
+      // position forbids it too.
+      if (t.dimensionVariables !== undefined)
+        for (const name of t.dimensionVariables) {
+          if (name === undefined) continue;
+          if (forbidden !== null)
+            fail(
+              'unsupported-variable-position',
+              `The dimension variable \`${name}\` ${FORBIDDEN_POSITION_MESSAGE[forbidden]}`
+            );
+          if (!declared.has(name))
+            fail(
+              'unresolved-type-variable',
+              `The dimension variable \`${name}\` is not quantified by a \`where\` clause`
+            );
+          into.add(name);
+        }
+      walk(t.elements, declared, forbidden, into);
+      return;
     case 'set':
     case 'collection':
     case 'indexed_collection':
@@ -800,6 +1089,13 @@ export interface InferenceOptions {
    * stays checked at the scalar base by the lift gate itself — so the declared
    * bound is NOT re-checked against the solution here. */
   lifted?: (index: number) => boolean;
+  /** The operand's PUBLIC type, unwidened. The actuals a type variable sees
+   * have every literal projected to its tier (`identity(5)` must bind
+   * `T = integer`, never `5`), but a VALUE variable at a bare position
+   * (`n: N`) binds from exactly that literal cargo — the `3` of the literal
+   * `3`, or of an application typed `3`. Read only for a value variable, only
+   * at depth 0. Omitted ⇒ the (widened) actual is read. */
+  rawType?: (index: number) => Type | undefined;
 }
 
 /** Why an instantiation is unsatisfiable (§8 blame). */
@@ -875,6 +1171,97 @@ interface SolverState {
   upper: Map<string, Bound[]>;
   lifted: Set<string>;
   matched: boolean;
+  /** The VALUE variables of the arm — the clause's `kind: 'value'` entries
+   * plus every clause name the arm uses as a value ({@link
+   * valueVariableNamesOf}) — solved by equality rather than by the bound join
+   * below. */
+  valueParams: Set<string>;
+  /** The value each value variable is pinned to, with the first position that
+   * pinned it. */
+  values: Map<string, { value: unknown; index?: number }>;
+  /** A later position that pinned a value variable to a DIFFERENT value. The
+   * failure blames that later position and carries the EARLIER value as
+   * `expected`; the consumer (`validate.ts`, which renders every `'bound'`
+   * failure) substitutes it into the blamed position's pattern, so the message
+   * reads "expected `vector<real^3>`, got `vector<integer^2>`". */
+  valueFailures: TypeInferenceFailure[];
+  rawType?: (index: number) => Type | undefined;
+}
+
+/**
+ * Pin a value variable to `value` at `index`. A second, equal pin is a no-op;
+ * a different one is a structural mismatch (`matched = false`) and a recorded
+ * failure blaming the later position — a length has no join.
+ */
+/**
+ * Pin the value variable `name` to `value` at `index`, or refuse.
+ *
+ * A pin must be a positive integer — every value variable today is a length,
+ * and `where N: integer` must not let `0` into a length slot; a value that is
+ * not one pins nothing, and the post-solve gate reports it against the
+ * pinned-elsewhere value or the bound (`foo(0, [1,2,3])` is rejected on `0`).
+ * A positive integer OUTSIDE the variable's declared bound pins nothing
+ * either, so a mismatch never propagates from an inadmissible pin and never
+ * blames the operand that was right; but it is a bound violation of its own
+ * position, recorded as a `'bound'` failure there — otherwise a lone
+ * out-of-bound operand (`big([1])` at `vector<number^N> where N:
+ * integer<2..>`) would leave `N` unsolved and be admitted at the open
+ * pattern. The positive-integer requirement is the one to relax when a
+ * boolean or string value parameter arrives.
+ */
+function pinValue(
+  s: SolverState,
+  name: string,
+  value: unknown,
+  index: number | undefined
+): void {
+  if (
+    typeof value !== 'number' &&
+    typeof value !== 'string' &&
+    typeof value !== 'boolean'
+  )
+    return;
+  const t = valueLiteralType(value);
+  if (!algebra().isSubtype(t, LENGTH_BOUND)) return;
+  const declared = s.declared.get(name);
+  if (declared !== undefined && !algebra().isSubtype(t, declared)) {
+    s.matched = false;
+    s.valueFailures.push({
+      kind: 'bound',
+      variable: name,
+      solution: t,
+      expected: declared,
+      index,
+      detail: `\`${name}\` is declared with bound \`${typeToString(declared)}\`, but this position requires \`${String(value)}\``,
+    });
+    return;
+  }
+  recordValue(s, name, value, index);
+}
+
+function recordValue(
+  s: SolverState,
+  name: string,
+  value: unknown,
+  index: number | undefined
+): void {
+  const prior = s.values.get(name);
+  if (prior === undefined) {
+    s.values.set(name, { value, index });
+    return;
+  }
+  if (prior.value === value) return;
+  s.matched = false;
+  const at = (i: number | undefined): string =>
+    i === undefined ? '' : ` (from argument ${i + 1})`;
+  s.valueFailures.push({
+    kind: 'bound',
+    variable: name,
+    solution: valueLiteralType(value as number | string | boolean),
+    expected: valueLiteralType(prior.value as number | string | boolean),
+    index,
+    detail: `\`${name}\` was solved to \`${String(prior.value)}\`${at(prior.index)}, but this position requires \`${String(value)}\``,
+  });
 }
 
 /**
@@ -908,6 +1295,15 @@ export function solveTypeArguments(
     upper: new Map(),
     lifted: new Set(),
     matched: true,
+    valueParams: new Set([
+      ...params.filter((p) => p.kind === 'value').map((p) => p.name),
+      ...[...valueVariableNamesOf(arm)].filter((n) =>
+        params.some((p) => p.name === n)
+      ),
+    ]),
+    values: new Map(),
+    valueFailures: [],
+    rawType: opts?.rawType,
   };
 
   const positions = parameterPositions(arm, actuals.length);
@@ -956,6 +1352,16 @@ export function solveTypeArguments(
   const absorbed = new Set<string>();
   const unbound = new Set<string>();
   for (const p of params) {
+    // A VALUE variable is pinned by equality: the literal it was read from, or
+    // its bound (`integer<1..>` for a length) when no position pinned it.
+    if (s.valueParams.has(p.name)) {
+      const pinned = s.values.get(p.name);
+      bindings[p.name] =
+        pinned === undefined
+          ? (p.bound ?? LENGTH_BOUND)
+          : valueLiteralType(pinned.value as number | string | boolean);
+      continue;
+    }
     const lowers = s.lower.get(p.name);
     const uppers = uppersOf(s, p.name);
     if (lowers && lowers.length > 0) {
@@ -973,8 +1379,27 @@ export function solveTypeArguments(
   //
   // Satisfiability (§4.3 pass 2b). The declared bound joins the upper set.
   //
-  const failures: TypeInferenceFailure[] = [];
+  const failures: TypeInferenceFailure[] = [...s.valueFailures];
   for (const p of params) {
+    // A pinned VALUE variable must satisfy its bound (`where N: integer<2..>`,
+    // or the length default `integer<1..>`); the blamed position is the one
+    // that pinned it.
+    if (s.valueParams.has(p.name)) {
+      const pinned = s.values.get(p.name);
+      if (pinned === undefined) continue;
+      const bound = p.bound ?? LENGTH_BOUND;
+      const solution = bindings[p.name];
+      if (algebra().isSubtype(solution, bound)) continue;
+      failures.push({
+        kind: 'bound',
+        variable: p.name,
+        solution,
+        expected: bound,
+        index: pinned.index,
+        detail: `\`${p.name}\` is declared with bound \`${typeToString(bound)}\`, but was solved to \`${typeToString(solution)}\`${describePositions([{ type: solution, index: pinned.index }])}`,
+      });
+      continue;
+    }
     // D8: a TOP-LEVEL absorbed top type (`unknown` or `any` — the whole
     // operand's own type) satisfies every upper bound PROVISIONALLY — the
     // runtime stays the honest party, and §4.5 parity is preserved. A NESTED
@@ -1226,7 +1651,9 @@ export function readTypeVariablesAsBounds(t: Type): Type {
   // would take a constructor result OUT of its own collection family (bare
   // `collection` is the values-only `collection<unknown>` synonym, user
   // ruling 2026-08-17, and `list<any> ⊄ collection`).
-  for (const p of t.typeParams ?? []) bindings[p.name] = p.bound ?? 'unknown';
+  for (const p of t.typeParams ?? [])
+    bindings[p.name] =
+      p.bound ?? (p.kind === 'value' ? LENGTH_BOUND : 'unknown');
   return substituteTypeVariables(t, bindings);
 }
 
@@ -1406,6 +1833,9 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
   if (!hasFreeTypeVariables(t)) return t;
   switch (t.kind) {
     case 'variable':
+      // A VALUE variable at a type position admits the values of its bound
+      // (a length: `integer<1..>`), not every type.
+      if (t.value === true) return covariant ? LENGTH_BOUND : 'never';
       return covariant ? 'any' : 'never';
     case 'signature': {
       const next: FunctionSignature = {
@@ -1430,7 +1860,16 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
       delete next.typeParams;
       return next;
     }
-    case 'list':
+    case 'list': {
+      // A length slot's variable reads as the `-1` wildcard its `dimensions`
+      // entry already holds; only the name goes.
+      const next: ListType = {
+        ...t,
+        elements: skeleton(t.elements, covariant, membership),
+      };
+      delete next.dimensionVariables;
+      return next;
+    }
     case 'set':
     case 'collection':
     case 'indexed_collection':
@@ -1716,6 +2155,31 @@ function walkPattern(
   topLevel: boolean
 ): boolean {
   if (isVariable(pattern)) {
+    // A VALUE variable (`n: N`) is pinned by equality from the value the
+    // operand's type carries — read off the operand's PUBLIC type at depth 0,
+    // because the actual handed to the solver has every literal projected to
+    // its tier. An operand that pins no value (a symbol typed `integer`)
+    // contributes nothing; the post-solve gate checks it against the
+    // instantiated parameter, as the ground path does.
+    if (pattern.value === true || s.valueParams.has(pattern.name)) {
+      if (phase === 'lower' && covariant) {
+        const source =
+          (topLevel && index !== undefined ? s.rawType?.(index) : undefined) ??
+          actual;
+        const v = pinnedValueOf(source);
+        if (v !== undefined) pinValue(s, pattern.name, v, index);
+      }
+      return true;
+    }
+    // A variable never binds to the `range` primitive itself but to its
+    // structural reading, `list<integer>`. An index span is a contiguous
+    // ascending run of positive integers, and no operator that types its
+    // result with an echoed variable (`(T) -> T where T: list`, the
+    // `Reverse`/`RotateLeft` echo arm) preserves that property, so binding
+    // `T = range` would claim a span for a descending or rotated result.
+    // Since `range <: list` (2026-09-29) such an arm accepts a span, and this
+    // is what keeps its result honest.
+    if (actual === 'range') actual = RANGE_STRUCTURAL_TYPE;
     if (phase === 'lower' && covariant)
       addBound(s.lower, pattern.name, actual, index, topLevel);
     else if (phase === 'upper' && !covariant)
@@ -1936,7 +2400,56 @@ function walkPattern(
         !algebra().isSubtype(actual, groundSkeleton(pattern, true))
       )
         return false;
-      const element = elementTypeOf(actual);
+      // A length slot's variable is pinned to the actual's length on that
+      // axis, when the actual states one. The axes pair from the outside in,
+      // so a rank-2 actual at a rank-1 pattern pins the OUTER length and
+      // leaves the peeled row to the element position below — the same
+      // reading `peeledRowMatches` (subtype.ts) gives the ground case.
+      // (A NESTED spelling of the same shape, `list<vector<integer^3>^2>` for
+      // `matrix<integer^(2x3)>`, pins nothing here: the skeleton check above
+      // already refuted it, because the subtype relation reads a rank-2 list
+      // as a list of rows but not a list of rows as a rank-2 list. Recorded in
+      // ROADMAP.md, "A nested list spelling is not a subtype of the flat
+      // shape it describes".)
+      if (
+        phase === 'lower' &&
+        covariant &&
+        pattern.kind === 'list' &&
+        pattern.dimensionVariables !== undefined &&
+        typeof actual === 'object' &&
+        actual.kind === 'list' &&
+        actual.dimensions !== undefined
+      ) {
+        const names = pattern.dimensionVariables;
+        const dims = actual.dimensions;
+        for (let i = 0; i < names.length && i < dims.length; i++) {
+          const name = names[i];
+          if (name === undefined) continue;
+          const d = dims[i];
+          if (Number.isInteger(d) && d > 0) pinValue(s, name, d, index);
+        }
+      }
+      // The element position of a DIMENSIONED pattern is what remains after
+      // peeling as many axes as the pattern states: `matrix<T^(MxN)>` — and
+      // the ground `matrix<T>`, whose axes are `[-1, -1]` — binds `T` to the
+      // scalar element of a rank-2 actual, `list<T^N>` to the row of one. A
+      // pattern with no dimensions keeps the one-index reading
+      // (`elementTypeOf`), which peels one axis.
+      let element: Type | undefined;
+      if (
+        pattern.kind === 'list' &&
+        pattern.dimensions !== undefined &&
+        typeof actual === 'object' &&
+        actual.kind === 'list' &&
+        actual.dimensions !== undefined &&
+        actual.dimensions.length >= pattern.dimensions.length
+      ) {
+        const rest = actual.dimensions.slice(pattern.dimensions.length);
+        element =
+          rest.length === 0
+            ? actual.elements
+            : { kind: 'list', elements: actual.elements, dimensions: rest };
+      } else element = elementTypeOf(actual);
       if (element === undefined) return true;
       return walkPattern(
         s,

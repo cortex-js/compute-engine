@@ -242,15 +242,22 @@ export function analyzeVariance(
   ): void => {
     if (typeof t !== 'object') return;
     switch (t.kind) {
-      case 'variable':
+      case 'variable': {
         if (!names.has(t.name)) return;
         if (shadowed?.has(t.name) === true) return;
+        // A VALUE variable's occurrence has the polarity of its position,
+        // like a type variable's: a solved value is a singleton type, so two
+        // solved applications relate only when equal (`permutation<3>` and
+        // `permutation<4>` are unrelated), while an UNSOLVED one reads as its
+        // bound and is the family of every length (`permutation<3> <:
+        // permutation<integer<1..>>`).
         occurrences.push(
           deferredVia === undefined
             ? { param: t.name, polarity, path }
             : { param: t.name, polarity, path, deferredVia }
         );
         return;
+      }
 
       case 'signature': {
         // A nested `where` clause SHADOWS a same-named declaration parameter.
@@ -300,6 +307,22 @@ export function analyzeVariance(
         return;
 
       case 'list':
+        // A dimension variable in a length slot is a value occurrence in a
+        // covariant position (a list of length 3 is a list of some length),
+        // and a use for the unused-parameter check.
+        if (t.dimensionVariables !== undefined)
+          t.dimensionVariables.forEach((name, i) => {
+            if (name === undefined || !names.has(name)) return;
+            if (shadowed?.has(name) === true) return;
+            const at = step(path, `^${i + 1}`);
+            occurrences.push(
+              deferredVia === undefined
+                ? { param: name, polarity, path: at }
+                : { param: name, polarity, path: at, deferredVia }
+            );
+          });
+        visit(t.elements, polarity, path, shadowed, deferredVia);
+        return;
       case 'set':
       case 'collection':
       case 'indexed_collection':

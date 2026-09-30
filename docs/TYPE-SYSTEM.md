@@ -107,6 +107,31 @@ variable. Generic function literals, generic aliases, and parameterized
 nominal types share the same variable representation and instantiation
 machinery.
 
+A clause variable has one of two KINDS, decided by where it occurs. A
+variable that occurs only at type positions is a type variable, solved by
+joining the types of the operands it meets. A variable that occurs in a
+collection's length slot (`list<T^N>`, `vector<T^N>`, `matrix<T^(MxN)>`), or
+that fills a nominal type's value parameter, is a VALUE variable: it stands
+for a positive integer length, it is solved by equality across every position
+it occurs in (two operands that pin it to different lengths reject the later
+one), and at a type position (`(n: N, x: vector<T^N>) -> N where T, N`) it
+denotes the singleton type of that value, bound from a literal's type (`3`,
+or a declared `integer<3..3>`). An operand whose type states no length binds
+nothing and is admitted, as at a literal length. A solved value variable
+substitutes as the value-literal type (`Length([1,2,3])` declared
+`(list<T^N>) -> N` is typed `3`); an unsolved one reads as its bound,
+`integer<1..>` unless the clause declares a narrower integer range. In a list
+type the variable is stored as the `-1` wildcard plus a name
+(`ListType.dimensionVariables`), so every reader of lengths sees "length not
+known" without change. A nominal type may take a value parameter (`type
+permutation<N> = list<integer^N>`): its constructor solves the length
+(`permutation([2,1,3])` is `permutation<3>`), two solved applications are
+unrelated unless equal, and an unsolved one prints as the family
+`permutation<integer<1..>>`. The kind is named `value`, not `dimension`,
+because booleans and strings are meant to join once their literals carry
+singleton types; arithmetic between lengths (`^(M+N)`) is not supported.
+Design record: `docs/plans/2026-09-29-dimension-variables-design.md`.
+
 Transparent aliases substitute their arguments into their body. Nominal types
 mint identity: structural equality with the body is not membership. A
 parameterized nominal reference retains its type arguments and variance;

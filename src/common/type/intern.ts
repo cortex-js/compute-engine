@@ -123,6 +123,7 @@ function freezeNode(t: Exclude<Type, string>): void {
     Object.freeze(t.elements);
   } else if (t.kind === 'list' && t.dimensions !== undefined) {
     Object.freeze(t.dimensions);
+    if (t.dimensionVariables !== undefined) Object.freeze(t.dimensionVariables);
   } else if (t.kind === 'record') {
     Object.freeze(t.elements);
   }

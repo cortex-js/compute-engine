@@ -1436,7 +1436,7 @@ export class Parser {
             elementType: this.createNode<PrimitiveTypeNode>('primitive', {
               name: 'number',
             }),
-            size: undefined,
+            dimension: undefined,
           });
         case 'matrix':
           if (isGeneric) {
@@ -1487,7 +1487,7 @@ export class Parser {
 
     if (this.match('<')) {
       // Try leading dimensions first (e.g. `list<2x3>`)
-      dimensions = this.parseDimensions();
+      dimensions = this.parseDimensions(true);
 
       if (!dimensions) {
         // Parse element type
@@ -1513,12 +1513,13 @@ export class Parser {
       'primitive',
       { name: 'number' }
     );
-    let size: number | undefined;
+    let dimension: DimensionNode | undefined;
 
     if (this.match('<')) {
       // Try to parse size first (for vector<3>)
       if (this.current.type === 'NUMBER_LITERAL') {
-        size = parseInt(this.advance().value);
+        const size = parseInt(this.advance().value);
+        dimension = this.createNode<DimensionNode>('dimension', { size });
       } else {
         // Try to parse a type
         const type = this.parseUnionType();
@@ -1526,12 +1527,20 @@ export class Parser {
           elementType = type;
 
           if (this.match('^')) {
-            // After match(), current token has advanced
-            if ((this.current as Token).type === 'NUMBER_LITERAL') {
-              size = parseInt(this.advance().value);
-            } else {
-              this.error('Expected number after ^');
-            }
+            // The one length of the vector: a positive integer or a dimension
+            // variable the enclosing `where` clause declares (`vector<T^N>`).
+            const dims = this.parseCaretDimensions();
+            if (!dims)
+              this.error(
+                'Expected a positive integer or a dimension variable after ^',
+                'For example `vector<integer^3>`, or `vector<T^N> where T, N`'
+              );
+            if (dims.length !== 1)
+              this.error(
+                'A vector has exactly one dimension',
+                'Write `matrix<…>` or `list<…>` for a multi-dimensional shape'
+              );
+            dimension = dims[0];
           }
         }
       }
@@ -1539,7 +1548,10 @@ export class Parser {
       this.expect('>');
     }
 
-    return this.createNode<VectorTypeNode>('vector', { elementType, size });
+    return this.createNode<VectorTypeNode>('vector', {
+      elementType,
+      dimension,
+    });
   }
 
   private parseMatrixType(): MatrixTypeNode {
@@ -1551,7 +1563,7 @@ export class Parser {
 
     if (this.match('<')) {
       // Try to parse leading dimensions first (e.g. `matrix<2x3>`)
-      dimensions = this.parseDimensions();
+      dimensions = this.parseDimensions(true);
 
       if (!dimensions) {
         // If no dimensions, try to parse a type
@@ -1598,35 +1610,67 @@ export class Parser {
     return this.createNode<TensorTypeNode>('tensor', { elementType });
   }
 
-  private parseDimensions(): DimensionNode[] | undefined {
-    const firstDim = this.parseDimension();
-    if (!firstDim) return undefined;
+  /**
+   * The dimensions of a `list`/`matrix` type: `2x3`, `2x?`, `MxN`, `2xN`.
+   *
+   * Each dimension is a positive integer literal, `?` (an unknown length), or
+   * a DIMENSION VARIABLE — an identifier the enclosing `where` clause (or the
+   * type-parameter clause of the type being declared) quantifies, which the
+   * call-site solver binds to a literal length. The lexer folds the `x`
+   * separator into identifiers, so `MxN` arrives as ONE identifier token and
+   * is split here; an identifier that is itself an in-scope variable name is
+   * taken whole first, so a variable legally named `MxN` is not split.
+   *
+   * `leading` is true for the position right after `<` (`matrix<2x3>`,
+   * `list<2x3>`), where a bare in-scope variable name is an ELEMENT type
+   * (`matrix<T>`), never a length: only a numeral, `?`, or an `x`-joined group
+   * of two or more dimensions is read as a shape there. After `^` every
+   * spelling is a dimension.
+   */
+  private parseDimensions(leading = false): DimensionNode[] | undefined {
+    const first = this.parseDimensionGroup(leading);
+    if (!first) return undefined;
 
-    const dimensions: DimensionNode[] = [firstDim];
+    const dimensions: DimensionNode[] = [...first];
 
-    // Subsequent dimensions are `x`-separated. The lexer folds `x` into
-    // identifiers, so the separator surfaces in two shapes:
-    //   - fused with the following sizes:  IDENTIFIER `x3`, `x3x4`
+    // Subsequent dimensions are `x`-separated. The separator surfaces in two
+    // shapes:
+    //   - fused with the following sizes:  IDENTIFIER `x3`, `x3x4`, `xN`, `xNx`
     //   - standalone:                      IDENTIFIER `x`  (e.g. `2x?`, `2 x 3`)
     for (;;) {
       const tok = this.current;
-      if (tok.type === 'IDENTIFIER' && /^(x\d+)+$/.test(tok.value)) {
+      if (
+        tok.type === 'IDENTIFIER' &&
+        tok.value.length > 1 &&
+        tok.value.startsWith('x')
+      ) {
         this.advance();
-        for (const m of tok.value.match(/x(\d+)/g)!)
+        const rest = tok.value.slice(1);
+        const segments = rest.split('x');
+        // A trailing `x` (`Nx?`, `2x 3`) announces one more group after it.
+        const trailing = segments[segments.length - 1] === '';
+        if (trailing) segments.pop();
+        // `xMax`, `xidx`: the name after the separator contains an `x` of its
+        // own, so the split leaves an empty segment. A rest that is itself an
+        // identifier is then one variable name (a numeric rest such as `3x`
+        // is not an identifier and keeps the fused reading).
+        if (
+          (trailing || segments.some((s) => s === '')) &&
+          /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(rest)
+        ) {
           dimensions.push(
             this.createNode<DimensionNode>('dimension', {
-              size: parseInt(m.slice(1)),
+              size: null,
+              name: rest,
             })
           );
+          continue;
+        }
+        dimensions.push(...this.dimensionsOfSegments(segments, tok));
+        if (trailing) dimensions.push(...this.parseDimensionGroupAfterX());
       } else if (tok.type === 'IDENTIFIER' && tok.value === 'x') {
-        // Standalone separator: a positive integer or `?` must follow.
-        const next = this.lexer.peekToken();
-        if (next.type !== 'NUMBER_LITERAL' && next.type !== '?')
-          this.error(
-            'Expected a positive integer literal or `?` after x. For example: `2x3` or `2x?`'
-          );
         this.advance(); // consume the `x` separator
-        dimensions.push(this.parseDimension()!);
+        dimensions.push(...this.parseDimensionGroupAfterX());
       } else {
         break;
       }
@@ -1635,17 +1679,129 @@ export class Parser {
     return dimensions;
   }
 
-  private parseDimension(): DimensionNode | undefined {
-    if (this.match('?')) {
-      return this.createNode<DimensionNode>('dimension', { size: null });
-    }
+  /** The dimension group that must follow an `x` separator. */
+  private parseDimensionGroupAfterX(): DimensionNode[] {
+    const group = this.parseDimensionGroup(false);
+    if (!group)
+      this.error(
+        'Expected a positive integer literal, `?` or a dimension variable after x',
+        'For example: `2x3`, `2x?`, or `MxN` with `where M, N`'
+      );
+    return group;
+  }
+
+  /**
+   * One token's worth of dimensions: `?`, a numeral, or an identifier that is
+   * a dimension variable or an `x`-joined run of numerals and variables
+   * (`MxN`, `Nx3`, `Nx` — the last announcing a following group).
+   *
+   * `undefined` when the token starts no dimension: never after `^`, where an
+   * identifier that is not a declared variable is an error, but in the
+   * `leading` position, where the caller falls back to parsing a type.
+   */
+  private parseDimensionGroup(leading: boolean): DimensionNode[] | undefined {
+    if (this.match('?'))
+      return [this.createNode<DimensionNode>('dimension', { size: null })];
 
     if (this.current.type === 'NUMBER_LITERAL') {
       const size = parseInt(this.advance().value);
-      return this.createNode<DimensionNode>('dimension', { size });
+      return [this.createNode<DimensionNode>('dimension', { size })];
     }
 
-    return undefined;
+    if (this.current.type !== 'IDENTIFIER') return undefined;
+    const tok = this.current;
+    const value = tok.value;
+
+    // A whole in-scope variable name wins over any split. In the leading
+    // position it is an element type (`matrix<T>`) unless an `x` separator
+    // follows (`matrix<M x N>`, `matrix<M xN>`), which makes it a shape.
+    if (this.isTypeVariable(value)) {
+      if (leading) {
+        const next = this.lexer.peekToken();
+        const separatorFollows =
+          next.type === 'IDENTIFIER' &&
+          (next.value === 'x' || /^x[A-Za-z0-9_?]/.test(next.value));
+        if (!separatorFollows) return undefined;
+      }
+      this.advance();
+      return [
+        this.createNode<DimensionNode>('dimension', {
+          size: null,
+          name: value,
+        }),
+      ];
+    }
+
+    const segments = value.split('x');
+    const trailing =
+      segments.length > 1 && segments[segments.length - 1] === '';
+    if (trailing) segments.pop();
+    // In the leading position a shape needs two or more parts (`MxN`, `2xN`)
+    // or a trailing separator (`Nx?`); anything else is a type name.
+    if (leading && segments.length < 2 && !trailing) return undefined;
+    if (leading && !segments.every((s) => this.isDimensionSegment(s)))
+      return undefined;
+    // After `^`, a split that leaves an EMPTY segment (`Max`, `idx`, `Nx`) is
+    // not a shape: the whole token is ONE variable name. This is the only
+    // reading an unseeded route has (the Epsil parser reads an annotation
+    // before its `where` clause is in scope), so a name containing an `x` is
+    // written with spaced separators inside a group — `M x idx` — which the
+    // serializer emits for such names.
+    if (!leading && (trailing || segments.some((s) => s === ''))) {
+      this.advance();
+      return [
+        this.createNode<DimensionNode>('dimension', {
+          size: null,
+          name: value,
+        }),
+      ];
+    }
+
+    this.advance();
+    const dimensions = this.dimensionsOfSegments(segments, tok);
+    if (trailing) dimensions.push(...this.parseDimensionGroupAfterX());
+    return dimensions;
+  }
+
+  private isDimensionSegment(segment: string): boolean {
+    return /^[0-9]+$/.test(segment) || this.isTypeVariable(segment);
+  }
+
+  /** The dimension nodes for the `x`-split segments of one identifier token,
+   * or an error naming the first segment that is neither a positive integer
+   * nor an identifier.
+   *
+   * After `^` an identifier is a dimension variable whether or not a clause
+   * is in scope: the Epsil parser reads each parameter annotation on its own,
+   * before the definition's trailing `where` clause is attached, so the name
+   * cannot be checked here. An undeclared name is rejected when the declared
+   * type is validated (`unresolved-type-variable`), exactly as an undeclared
+   * type variable is. */
+  private dimensionsOfSegments(
+    segments: string[],
+    token: Token
+  ): DimensionNode[] {
+    return segments.map((segment) => {
+      // `0` is admitted as before; what a zero-length axis means is decided
+      // by `reduceListType` (`reduce.ts`), which drops such an axis and reads
+      // an all-zero shape as `nothing`.
+      if (/^[0-9]+$/.test(segment))
+        return this.createNode<DimensionNode>('dimension', {
+          size: parseInt(segment),
+        });
+      if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(segment))
+        return this.createNode<DimensionNode>('dimension', {
+          size: null,
+          name: segment,
+        });
+      this.errorAtToken(
+        token,
+        segment === ''
+          ? 'Expected a positive integer literal, `?` or a dimension variable between the `x` separators'
+          : `Expected a positive integer literal, \`?\` or a dimension variable in a length slot, but got \`${segment}\``,
+        'A dimension variable must be declared in the `where` clause. For example: `(x: list<T^N>) -> T where T, N`'
+      );
+    });
   }
 
   private parseCaretDimensions(): DimensionNode[] | undefined {
