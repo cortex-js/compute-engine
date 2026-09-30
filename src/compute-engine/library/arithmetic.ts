@@ -345,7 +345,10 @@ import type {
   Sign,
 } from '../global-types.js';
 import type { NumericValue } from '../numeric-value/types.js';
-import { withDoubleDigits } from '../numeric-value/exact-numeric-value.js';
+import {
+  ExactNumericValue,
+  withDoubleDigits,
+} from '../numeric-value/exact-numeric-value.js';
 import {
   isNumber,
   isFunction,
@@ -449,6 +452,88 @@ function oppositeSgn(x: Sign | undefined): Sign | undefined {
   return x;
 }
 
+/** The rounding rule of `Floor`, `Ceil`, `Truncate` and `Round`. `round`
+ * rounds a half away from zero (user decision, 2026-09-21). */
+type RoundingMode = 'floor' | 'ceil' | 'trunc' | 'round';
+
+/** The integer square root of a non-negative `bigint`: the largest `s` with
+ * `s² ≤ n`. Newton's iteration from an upper estimate. */
+function bigintSqrtFloor(n: bigint): bigint {
+  if (n < 2n) return n;
+  let x = 1n << BigInt(Math.ceil(n.toString(2).length / 2));
+  for (;;) {
+    const y = (x + n / x) >> 1n;
+    if (y >= x) return x;
+    x = y;
+  }
+}
+
+/**
+ * The rounded value of an EXACT real number literal, computed with `bigint`
+ * arithmetic, or `undefined` when `x` is not an exact real literal.
+ *
+ * An exact real literal is `(p/q)·√r` (`ExactNumericValue`; `r` is 1 for a
+ * rational). The big-decimal lane of `apply()` rounds `bignumRe`, which is
+ * the quotient `p/q` rounded to the working precision (21 digits by
+ * default), and the machine lane rounds a double. So a value with more
+ * integer digits than that precision lost its low digits before the
+ * rounding: `Floor((25! − 1)/24!)` was `25`, not `24`, and `Floor(25! − 1)`
+ * was `25!`. A value closer to a half-integer or an integer than the
+ * precision can see was rounded to the wrong side:
+ * `Round(1/2 − 10⁻³⁰)` was `1`.
+ *
+ * Here `|x| = √N / q` with `N = p²·r`, and for an integer `q > 0`,
+ * `⌊√N / q⌋ = ⌊⌊√N⌋ / q⌋`. So `m = ⌊|x|⌋` needs only the integer square
+ * root of `N`. `|x|` is an integer exactly when `N` is a perfect square and
+ * `q` divides its root. `|x| ≥ m + ½` exactly when `4N ≥ (2m + 1)²·q²`,
+ * which is the tie-away-from-zero test for `round`.
+ *
+ * Reported in cortex-js/compute-engine#382.
+ */
+function roundExactReal(x: Expression, mode: RoundingMode): bigint | undefined {
+  if (!isNumber(x) || !x.isExact || x.isComplex) return undefined;
+  const nv = x.numericValue;
+  if (typeof nv === 'number')
+    return Number.isInteger(nv) ? BigInt(nv) : undefined;
+  if (!(nv instanceof ExactNumericValue)) return undefined;
+  let p = BigInt(nv.rational[0]);
+  let q = BigInt(nv.rational[1]);
+  const r = BigInt(nv.radical);
+  if (q === 0n || r <= 0n) return undefined;
+  if (q < 0n) {
+    p = -p;
+    q = -q;
+  }
+  const negative = p < 0n;
+  const a = negative ? -p : p;
+  // `|x| = √n / q`. For a rational (`r = 1`) this is `a / q`, and the tests
+  // below use `a` directly, which avoids squaring a large numerator.
+  const n = r === 1n ? 0n : a * a * r;
+  const root = r === 1n ? a : bigintSqrtFloor(n);
+  const m = root / q;
+  const isInteger =
+    r === 1n ? a % q === 0n : root * root === n && root % q === 0n;
+  // `k` is the rounded value of `|x|` in the direction the mode needs.
+  let k: bigint;
+  if (mode === 'trunc') k = m;
+  else if (mode === 'round') {
+    // Round up when `|x| ≥ m + 1/2`. For a rational this is
+    // `2·(a mod q) ≥ q`; otherwise it is `4n ≥ (2m + 1)²·q²`, squared so that
+    // no square root is needed.
+    if (r === 1n) k = 2n * (a % q) >= q ? m + 1n : m;
+    else {
+      const twice = 2n * m + 1n;
+      k = 4n * n >= twice * twice * q * q ? m + 1n : m;
+    }
+  } else {
+    // `floor` of a negative value and `ceil` of a positive value move away
+    // from zero unless the value is an integer.
+    const awayFromZero = (mode === 'floor') === negative;
+    k = awayFromZero && !isInteger ? m + 1n : m;
+  }
+  return negative ? -k : k;
+}
+
 /**
  * Rounds a real number to an integer with `fn` (machine lane) or `bigFn`
  * (big-decimal lane), and boxes a finite result as an EXACT integer, also
@@ -469,14 +554,24 @@ function oppositeSgn(x: Sign | undefined): Sign | undefined {
  * `NaN`) are returned unchanged. Under a numeric approximation (`.N()`)
  * the result stays a float: `Round(3.14159, 2).N()` is the float `3.14`.
  *
+ * An EXACT real argument (a rational, or a rational times a square root)
+ * does not go through `apply()`: `roundExactReal()` rounds it with `bigint`
+ * arithmetic, because `apply()` sees only a double or a big decimal rounded
+ * to the working precision (cortex-js/compute-engine#382).
+ *
  * Reported in cortex-js/compute-engine#351.
  */
 function applyRounding(
   x: Expression,
+  mode: RoundingMode,
   fn: (x: number) => number,
   bigFn: (x: BigDecimal) => BigDecimal,
   numericApproximation: boolean | undefined
 ): Expression | undefined {
+  if (!numericApproximation) {
+    const exact = roundExactReal(x, mode);
+    if (exact !== undefined) return x.engine.number(exact);
+  }
   const result = apply(x, fn, bigFn);
   if (numericApproximation) return result;
   if (result === undefined || !isNumber(result) || result.isExact)
@@ -2904,7 +2999,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation }) =>
-        applyRounding(x, Math.ceil, (x) => x.ceil(), numericApproximation),
+        applyRounding(
+          x,
+          'ceil',
+          Math.ceil,
+          (x) => x.ceil(),
+          numericApproximation
+        ),
     },
 
     Chop: {
@@ -3705,7 +3806,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation }) =>
-        applyRounding(x, Math.floor, (x) => x.floor(), numericApproximation),
+        applyRounding(
+          x,
+          'floor',
+          Math.floor,
+          (x) => x.floor(),
+          numericApproximation
+        ),
     },
 
     Fract: {
@@ -6901,7 +7008,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // The evaluate handler rounds a half AWAY FROM ZERO at every
         // precision (`Round(-1/2)` and `Round(-0.5)` are both `-1`; user
         // decision, 2026-09-21), so this sign uses the same rule.
-        if (isNumber(x)) return numberSgn(roundHalfAway(x.re));
+        if (isNumber(x)) {
+          // An exact literal is rounded exactly: the double `x.re` of
+          // `1/2 − 10⁻³⁰` is `0.5`, which rounds to `1`, not `0`.
+          const exact = roundExactReal(x, 'round');
+          if (exact !== undefined)
+            return exact > 0n ? 'positive' : exact < 0n ? 'negative' : 'zero';
+          return numberSgn(roundHalfAway(x.re));
+        }
         if (x.isGreaterEqual(0.5)) return 'positive';
         if (x.isLessEqual(-0.5)) return 'negative';
         if (x.isLess(0.5) && x.isGreater(-0.5)) return 'zero';
@@ -6923,6 +7037,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const roundToInteger = (v: Expression) =>
           applyRounding(
             v,
+            'round',
             roundHalfAway,
             (v) => v.round(),
             numericApproximation
@@ -7374,7 +7489,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation }) =>
-        applyRounding(x, Math.trunc, (x) => x.trunc(), numericApproximation),
+        applyRounding(
+          x,
+          'trunc',
+          Math.trunc,
+          (x) => x.trunc(),
+          numericApproximation
+        ),
     },
   },
   {

@@ -242,6 +242,16 @@
 
 ### Issues Resolved
 
+- **`Floor`, `Ceil`, `Round`, `Truncate` and `Fract` of an exact number are
+  exact** ([#382](https://github.com/cortex-js/compute-engine/issues/382),
+  reported by [enumeratio](https://github.com/enumeratio)). They rounded a
+  numeric approximation of the operand (21 digits by default, a double with
+  `precision: 'machine'`), so a large exact operand lost digits:
+  `Floor((25! − 1)/24!)` was `25` and is now `24`, `Floor(25! − 1)` was `25!`,
+  `Floor(√2·10^40)` was correct only to 21 digits, and `Fract((25! − 1)/3)` was
+  `−1/3` and is now `2/3`. A rational or a rational multiple of a square root is
+  now rounded with integer arithmetic; `Round` still rounds a tie away from
+  zero.
 - **A `Function` literal with no parameter list no longer takes the `_1`, `_2` …
   slots of a nested `Function` literal as its own parameters**
   ([#381](https://github.com/cortex-js/compute-engine/issues/381), reported by

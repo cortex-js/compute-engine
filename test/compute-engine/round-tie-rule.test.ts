@@ -187,3 +187,132 @@ describe('Rounding a float gives an exact result', () => {
     expect(ce.box(['Round', 2.5]).N().json).toEqual({ num: '3.0' });
   });
 });
+
+/**
+ * `Floor`, `Ceil`, `Truncate` and `Round` of an EXACT real literal are
+ * computed with `bigint` arithmetic, at every precision
+ * (cortex-js/compute-engine#382). Before, the value was first converted to
+ * a double or to a big decimal at the working precision, so a value with
+ * more integer digits than that precision lost its low digits:
+ * `Floor((25! − 1)/24!)` was `25`, not `24`.
+ *
+ * The expected values are computed here with `bigint` division, independently
+ * of the engine.
+ */
+describe.each(['machine', 21, 60] as const)(
+  'Rounding of an exact literal (precision %s)',
+  (p) => {
+    const F24 = 620448401733239439360000n; // 24!
+    const BIG = 15511210043330985983999999n; // 25! − 1
+
+    // Independent reference: floor, ceil, trunc and round-half-away-from-zero
+    // of `num/den`, with `den > 0`.
+    const floorDiv = (n: bigint, d: bigint) => {
+      const q = n / d;
+      return n % d !== 0n && n < 0n ? q - 1n : q;
+    };
+    const reference = (n: bigint, d: bigint) => {
+      const floor = floorDiv(n, d);
+      const exact = n % d === 0n;
+      const ceil = exact ? floor : floor + 1n;
+      const trunc = n < 0n ? ceil : floor;
+      // |n/d| rounded half away from zero, then the sign restored.
+      const a = n < 0n ? -n : n;
+      const r = (2n * a + d) / (2n * d);
+      return {
+        Floor: floor,
+        Ceil: ceil,
+        Truncate: trunc,
+        Round: n < 0n ? -r : r,
+      };
+    };
+    const big = (n: bigint) => ({ num: n.toString() });
+
+    const RATIONALS: [bigint, bigint][] = [
+      [BIG, F24], // 24.99…: the reported case
+      [BIG, 3n],
+      [-BIG, 3n],
+      [BIG, 2n], // a tie
+      [-BIG, 2n], // a negative tie
+      [BIG, 1n], // a big integer
+      [-BIG, 1n],
+      [10n ** 30n + 10n, 1n],
+      [123456789012345678901234567n, 10n],
+      [10n ** 30n / 2n - 1n, 10n ** 30n], // 1/2 − 10⁻³⁰
+      [-(10n ** 30n / 2n - 1n), 10n ** 30n],
+      [7n, 123456789012345678901234567n],
+      [-7n, 123456789012345678901234567n],
+      [5n, 2n],
+      [-5n, 2n],
+    ];
+
+    test.each(['Floor', 'Ceil', 'Truncate', 'Round'] as const)(
+      '%s of an exact rational is exact',
+      (op) => {
+        const ce = engineAt(p);
+        for (const [n, d] of RATIONALS) {
+          const r = ce.box([op, ['Rational', big(n), big(d)]]).evaluate();
+          const want = reference(n, d)[op];
+          expect([op, `${n}/${d}`, r.isExact, r.toString()]).toEqual([
+            op,
+            `${n}/${d}`,
+            true,
+            ce.number(want).toString(),
+          ]);
+        }
+      }
+    );
+
+    test('a rational times a radical is rounded exactly', () => {
+      const ce = engineAt(p);
+      // ⌊√2·10⁴⁰⌋ = isqrt(2·10⁸⁰), and √2·10⁴⁰ is not an integer.
+      const x = ['Multiply', ['Sqrt', 2], ['Power', 10, 40]];
+      const floor = 14142135623730950488016887242096980785696n;
+      expect(floor * floor <= 2n * 10n ** 80n).toBe(true);
+      expect((floor + 1n) ** 2n > 2n * 10n ** 80n).toBe(true);
+      expect(ce.box(['Floor', x]).evaluate().toString()).toBe(
+        ce.number(floor).toString()
+      );
+      expect(ce.box(['Ceil', x]).evaluate().toString()).toBe(
+        ce.number(floor + 1n).toString()
+      );
+      // −(3/7)·√5 ≈ −0.958
+      const y = ['Multiply', ['Rational', -3, 7], ['Sqrt', 5]];
+      expect(ce.box(['Floor', y]).evaluate().json).toBe(-1);
+      expect(ce.box(['Ceil', y]).evaluate().json).toBe(0);
+      expect(ce.box(['Round', y]).evaluate().json).toBe(-1);
+      expect(ce.box(['Truncate', y]).evaluate().json).toBe(0);
+    });
+
+    test('Fract and the precision form of Round use the exact floor', () => {
+      const ce = engineAt(p);
+      // BIG = 25! − 1 ≡ 2 (mod 3)
+      expect(
+        ce.box(['Fract', ['Rational', big(BIG), 3]]).evaluate().json
+      ).toEqual(['Rational', 2, 3]);
+      expect(ce.box(['Fract', big(BIG)]).evaluate().json).toBe(0);
+      // Round(BIG/3, 2) = round(100·BIG/3)/100
+      const scaled = reference(100n * BIG, 3n).Round;
+      expect(
+        ce
+          .box(['Round', ['Rational', big(BIG), 3], 2])
+          .evaluate()
+          .toString()
+      ).toBe(
+        ce
+          .box(['Rational', big(scaled), 100])
+          .evaluate()
+          .toString()
+      );
+    });
+
+    test('the sign of Round of an exact literal is exact', () => {
+      const ce = engineAt(p);
+      const r = ce.box([
+        'Round',
+        ['Rational', big(10n ** 30n / 2n - 1n), big(10n ** 30n)],
+      ]);
+      expect(r.sgn).toBe('zero');
+    });
+  }
+);
