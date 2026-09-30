@@ -43,9 +43,9 @@ Exit the enclosing loop immediately, optionally with a value (`Break(v)`) that b
 
 ### Comprehension
 
-`(body: expression, iterators: expression+) -> indexed_collection`
+`(body: expression, iterators: expression+) -> list`
 
-Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into an indexed collection (a `List`). Later clauses see earlier bindings; independent clauses produce a Cartesian product. A clause with a third operand, `Element(x, xs, cond)`, is a guard: only the elements for which `cond` evaluates to `True` are visited.
+Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into a list. Later clauses see earlier bindings; independent clauses produce a Cartesian product. A clause with a third operand, `Element(x, xs, cond)`, is a guard: only the elements for which `cond` evaluates to `True` are visited.
 
 ### Condition
 

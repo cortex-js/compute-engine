@@ -948,7 +948,7 @@ length("hello")
 
 ### linspace
 
-MathJSON `Linspace` · `(start: number, end: number?, count: number?) -> indexed_collection`
+MathJSON `Linspace` · `(start: number, end: number?, count: number?) -> list<number>`
 
 A sequence of evenly spaced numbers between a start and end value, both endpoints included.
 
@@ -1356,7 +1356,7 @@ randomShuffle([1, 2, 3, 4])
 
 ### Range
 
-`(number, number?, step: number?) -> indexed_collection<number>`
+`(number, number?, step: number?) -> list<number>`
 
 A sequence of numbers from a start to an end value with an optional step.
 
@@ -1672,7 +1672,7 @@ table(i^2, (i, 1, 5))
 
 ### tabulate
 
-MathJSON `Tabulate` · `(generator: function, integer, integer?) -> indexed_collection`
+MathJSON `Tabulate` · `(generator: function, integer, integer?) -> list`
 
 Create a collection by applying a function to each index in the specified dimensions.
 

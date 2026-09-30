@@ -5307,6 +5307,22 @@ across a signature mutation.
 
 <MemberCard>
 
+##### BoxedOperatorDefinition.enforcesParameterAnnotations {#enforcesparameterannotations}
+
+```ts
+readonly enforcesParameterAnnotations: boolean;
+```
+
+True for a function literal whose parameter annotations are enforced at
+a call (at least one annotated parameter). Such a function admits an
+argument typed `missing | T` at boxing, and answers an
+`incompatible-type` error when the value is absent at a parameter whose
+annotation has no `missing` member.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedOperatorDefinition.resolvedPartiality {#resolvedpartiality}
 
 ```ts
@@ -17837,6 +17853,7 @@ result stays `[]`).
 type TypeVariable = {
   kind: "variable";
   name: string;
+  value: true;
 };
 ```
 
@@ -17874,6 +17891,7 @@ carries one — a transparent alias has no declaration-level variance, and a
 ```ts
 type TypeParameter = {
   name: string;
+  kind: "value";
   bound: Type;
   variance: TypeVariance;
   protocols: string[];
@@ -17902,6 +17920,7 @@ type TypeParamsOption =
   name: string;
   bound: Type | TypeString;
   variance: TypeVariance;
+  kind: "value";
 }>;
 ```
 
@@ -18085,6 +18104,7 @@ type ListType = {
   kind: "list";
   elements: Type;
   dimensions: number[];
+  dimensionVariables: readonly (string | undefined)[];
 };
 ```
 
@@ -18378,12 +18398,17 @@ spelling that round-trips through serialization. See {@link EffectSet}.)
   one of the `list`/`vector`/`matrix`/`tensor` heads. The authoritative
   grammar lives with the parser in `./parser.ts`.
 
-<dimensions> ::= "^" <fixed_size>
-           | "^(" <multi_dimensional_size> ")"
+<dimensions> ::= "^" <dimension>
+           | "^(" <dimension> ("x" <dimension>)* ")"
 
-<fixed_size> ::= <positive-integer_literal>
-
-<multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
+<dimension> ::= <positive-integer_literal> | <identifier>
+  An identifier in a length slot is a DIMENSION VARIABLE, declared by the
+  enclosing `where` clause (`(a: vector<real^N>, b: vector<real^N>) -> real
+  where N`) or by the type-parameter clause of the type being declared
+  (`type permutation<N> = list<integer^N>`). The leading-length spellings
+  `vector<3>` and `matrix<2x3>` take literals, or an `x`-joined group of
+  two or more dimensions (`matrix<MxN>`); a bare identifier there is an
+  element type (`vector<T>`).
 
 (The `callback<…>` constructor of Design D was RETIRED by Design E
 (`docs/TYPE-SYSTEM.md`): callback
