@@ -3108,31 +3108,63 @@ function makeLambda(
     return changed ? { ...t, args: relaxed } : t;
   };
 
-  // The parameters whose annotation has `nan` as a member (`x: number`,
-  // `x: real | nan`). An absent value (`Missing`, `Undefined`) bound to one
-  // of them is read as `NaN`, the absence marker of a numeric domain
-  // (`docs/ERROR-MODEL.md` §3, "In a numeric slot, `Missing` is normalized to
-  // `NaN` at the boundary"): `f(x: number) = x + 1` answers `NaN` for
-  // `f(Missing)`, as `Missing + 1` does. At a parameter annotated with any
-  // other type the absent value stays as it is, and the validation below
-  // refuses it with `incompatible-type` unless the annotation has a
-  // `missing` member (user decision 2026-09-30). That includes a numeric
-  // type that excludes `nan` (`integer`, `real`): converting the value there
-  // gave an error that named `NaN`, a value the caller did not write, where
-  // the argument was `Missing`.
-  const nanParamIndexes = params.reduce<number[]>((acc, p, i) => {
+  // The parameters annotated with a NUMERIC type (`x: number`, `n: integer`,
+  // `t: real`). Two rules apply to them (user decisions 2026-09-30):
+  //
+  // - An absent value (`Missing`, `Undefined`) bound to one of them is read
+  //   as `NaN`, the absence marker of a numeric domain
+  //   (`docs/ERROR-MODEL.md` §3, "In a numeric slot, `Missing` is normalized
+  //   to `NaN` at the boundary"): `f(x: number) = x + 1` answers `NaN` for
+  //   `f(Missing)`, as `Missing + 1` does.
+  // - `NaN` is an acceptable value there, whatever the numeric type: it is
+  //   what a numeric computation answers when it has no value (a restricted
+  //   number whose condition fails, a read past the end of a list of
+  //   numbers), and `f(n: integer)` must not refuse it where `f(n: number)`
+  //   runs. `nan` is not a member of `integer` or `real` in the type
+  //   lattice, so the validation is told to skip such an argument
+  //   (`acceptNaNAtNumericParams`). A number that is not `NaN` is still
+  //   checked: `f(n: integer)` refuses `1.5`.
+  //
+  // At a parameter annotated with any other type (a point, a list, a
+  // string) the absent value stays as it is, and the validation refuses it
+  // with `incompatible-type` unless the annotation has a `missing` member.
+  //
+  // The indexes are positions in `params`, which pair one to one with the
+  // leading arguments and with the required arguments of the literal's
+  // signature. A rest parameter takes no annotation, so it is never in the
+  // list, and it is the last parameter, so it does not shift the others.
+  const numericParamIndexes = params.reduce<number[]>((acc, p, i) => {
     const t = functionLiteralParameterType(p);
-    if (t !== undefined && isSubtype('nan', t)) acc.push(i);
+    if (t !== undefined && isSubtype(t, 'number')) acc.push(i);
     return acc;
   }, []);
   const absorbAbsenceAtNumericParams = (
     values: Expression[]
   ): Expression[] =>
-    nanParamIndexes.length === 0
+    numericParamIndexes.length === 0
       ? values
       : values.map((v, i) =>
-          nanParamIndexes.includes(i) && isAbsentSymbol(v) ? ce.NaN : v
+          numericParamIndexes.includes(i) && isAbsentSymbol(v) ? ce.NaN : v
         );
+  /** `t` with the slot of each numeric parameter whose argument in `values`
+   * is `NaN` widened to `any`, so that the validation accepts that value. */
+  const acceptNaNAtNumericParams = (
+    t: Type,
+    values: ReadonlyArray<Expression>
+  ): Type => {
+    if (numericParamIndexes.length === 0) return t;
+    if (typeof t === 'string' || t.kind !== 'signature') return t;
+    const args = t.args;
+    if (args === undefined || args.length === 0) return t;
+    let changed = false;
+    const accepted = args.map((arg, i) => {
+      if (!numericParamIndexes.includes(i) || values[i]?.isNaN !== true)
+        return arg;
+      changed = true;
+      return { ...arg, type: 'any' as Type };
+    });
+    return changed ? { ...t, args: accepted } : t;
+  };
 
   // The return-type ascription operand (§4.2 marker: the last Block statement
   // wrapped in `["Typed", stmt, type]`), reused verbatim when re-attaching the
@@ -3367,7 +3399,10 @@ function makeLambda(
       // (§6.4/§6.5). On mismatch, return the inert application with the
       // error-marked arguments (§13 decision 6).
       if (ce.strict && hasAnnotatedParam && _validateArguments) {
-        const fullSig = relaxBareParams(fnExpr.type.type);
+        const fullSig = acceptNaNAtNumericParams(
+          relaxBareParams(fnExpr.type.type),
+          evaluatedKnownArgs
+        );
         if (typeof fullSig !== 'string' && fullSig.kind === 'signature') {
           const prefixSig: Type = {
             kind: 'signature',
@@ -3543,7 +3578,10 @@ function makeLambda(
       const validated = _validateArguments(
         ce,
         evaluatedArgs,
-        relaxBareParams(fnExpr.type.type)
+        acceptNaNAtNumericParams(
+          relaxBareParams(fnExpr.type.type),
+          evaluatedArgs
+        )
       );
       if (validated !== null) {
         // Any invalid operand: mismatch — return the inert application.

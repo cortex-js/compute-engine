@@ -2216,13 +2216,44 @@ export interface ValidateArgumentsInternals {
    * checks it there. Library operators leave this unset: a tuple parameter
    * of theirs takes one tuple. */
   mapsPointLists?: boolean;
+  /** The callee is a USER function (a function literal, a multi-clause
+   * definition, a function held as a value). A `NaN` argument is accepted
+   * at a parameter whose whole type is a subtype of `number` (`integer`,
+   * `real`, `number`) — see `acceptsNaNArgument`. A union with a member
+   * that is not numeric, and a collection of numbers, are checked as usual.
+   * `Indeterminate` is accepted too: it reports `isNaN`. Library operators
+   * leave this unset: their `NaN` policy is `nanPolicyAt`. */
+  userFunction?: boolean;
   /** The callee is a function literal whose parameter annotations are
    * enforced when it is applied (`enforcesParameterAnnotations`,
    * `boxed-operator-definition.ts`). An argument that is absent, or that
    * may be absent while an Epsil static pre-pass runs, is refused at a
-   * parameter whose annotation admits neither `missing` nor `nan` — see
-   * `refusesAbsentArgument`. */
+   * parameter whose annotation is not numeric and has no `missing` member —
+   * see `refusesAbsentArgument`. */
   enforcesParameterAnnotations?: boolean;
+}
+
+/**
+ * Whether the argument `op`, whose value is `NaN`, is accepted at the
+ * parameter `param` of a user function (user decision 2026-09-30: a `NaN`
+ * value is acceptable at a parameter typed `integer` or `real`).
+ *
+ * `NaN` is what a numeric computation answers when it has no value: a
+ * restricted number whose condition fails, a read past the end of a list of
+ * numbers, `0/0`. `nan` is a member of `number` and not of `integer` or
+ * `real`, so `f(n: integer)` refused an argument that `f(n: number)`
+ * accepts, and an Epsil `function` answered an error where the same body
+ * declared through `ce.declare` answered `NaN`. A user function accepts it
+ * at every numeric parameter; its body then computes with `NaN`. A number
+ * that is not `NaN` is checked as before (`1.5` at `integer` is refused).
+ */
+function acceptsNaNArgument(
+  op: Expression,
+  param: Type,
+  internals: ValidateArgumentsInternals | undefined
+): boolean {
+  if (internals?.userFunction !== true) return false;
+  return op.isNaN === true && isSubtype(param, 'number');
 }
 
 /**
@@ -2231,9 +2262,9 @@ export interface ValidateArgumentsInternals {
  *
  * At evaluation, a function literal answers an `incompatible-type` error for
  * an absent argument (`Missing`) at a parameter annotated with a type that
- * admits neither `missing` nor `nan` (`apply()`, `function-utils.ts`; a
- * parameter that admits `nan`, such as `number`, reads the absent value as
- * `NaN`). Two cases are refused here, at boxing:
+ * is not numeric and has no `missing` member (`apply()`,
+ * `function-utils.ts`; a numeric parameter reads the absent value as `NaN`,
+ * which it accepts). Two cases are refused here, at boxing:
  *
  * - The argument is typed `missing`: it is absent on every route, so the
  *   call is an error whenever it runs.
@@ -2261,7 +2292,7 @@ export function refusesAbsentArgument(
   if (
     param === 'unknown' ||
     isSubtype('missing', param) ||
-    isSubtype('nan', param)
+    isSubtype(param, 'number')
   )
     return false;
   const t = resolveTypeAlias(op.type.type);
@@ -2793,6 +2824,14 @@ export function validateArguments(
     }
 
     if (!op.type.matches(param)) {
+      // A `NaN` argument at a numeric parameter of a user function — see
+      // `acceptsNaNArgument`. Deferred like the other admissions: the final
+      // inference pass must not narrow a `nan`-typed symbol to the parameter.
+      if (acceptsNaNArgument(op, param, internals)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
       // An absent argument at an annotated parameter of a function literal
       // is refused before any provisional admission — see
       // `refusesAbsentArgument`.
@@ -3051,6 +3090,14 @@ export function validateArguments(
       continue;
     }
     if (!op.type.matches(param)) {
+      // A `NaN` argument at a numeric parameter of a user function — see
+      // the required-param gate.
+      if (acceptsNaNArgument(op, param, internals)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        i += 1;
+        continue;
+      }
       // An absent argument at an annotated parameter of a function literal —
       // see the required-param gate.
       if (refusesAbsentArgument(ce, op, param, internals)) {
@@ -3282,6 +3329,13 @@ export function validateArguments(
         continue;
       }
       if (!op.type.matches(varParam)) {
+        // A `NaN` argument at a numeric parameter of a user function — see
+        // the required-param gate.
+        if (acceptsNaNArgument(op, varParam, internals)) {
+          result.push(op);
+          deferredIdx.add(result.length - 1);
+          continue;
+        }
         // Design E §3 compatibility admission — see the required-param gate.
         const compat = arrowSlotAdmission(ce, op, varParam, displayVarParam);
         if (compat === 'admit') {

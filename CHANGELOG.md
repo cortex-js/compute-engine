@@ -45,28 +45,40 @@
   already did. The rule applies to a function literal with at least one
   annotated parameter (an Epsil `function`, a lambda `(p: T) ↦ …`). An absent
   value at a parameter annotated with a type that has no `missing` member is an
-  error. That includes `integer` and `real`, which exclude `nan`:
-  `f(x: real) = x + 1` answered `NaN` for `f(Missing)` and now answers the
-  error. A parameter whose annotation admits `nan` (`number`) reads the absent
-  value as `NaN`, the absence marker of a numeric domain, so
-  `f(x: number) = x + 1` still answers `NaN`. At a parameter with no
-  annotation the body runs with the absent value, as before. The type of such a call no longer
+  error. A parameter annotated with a numeric type (`number`, `integer`,
+  `real`) reads the absent value as `NaN`, the absence marker of a numeric
+  domain, so `f(x: real) = x + 1` still answers `NaN` for `f(Missing)`. At a
+  parameter with no annotation the body runs with the absent value, as before. The type of such a call no longer
   has a `missing` member (`list<…>`, not `list<…> | missing`), so `Count` and
   `Length` over its result compile. What is lost: a call that relied on the
-  quiet `NaN` or `Missing` for an absent point, list, string, `integer` or
-  `real` argument. To accept absence, annotate the parameter `T | missing` and
-  test `isMissing(p)`, or remove the absent case at the call
-  (`first(…) ?? fallback`). At boxing, an argument typed `missing | T` is still
-  admitted at a parameter annotated `T`; the literal `Missing` there is an
+  quiet `NaN` or `Missing` for an absent point, list or string argument. To
+  accept absence, annotate the parameter `T | missing` and test `isMissing(p)`,
+  or remove the absent case at the call (`first(…) ?? fallback`). At boxing, an
+  argument typed `missing | T` is still admitted at a parameter annotated `T`;
+  the literal `Missing` at a parameter that is not numeric is an
   `incompatible-type` error at boxing. Library operators are not affected
   (`Sin(Missing)` is `NaN`).
+- **A user function accepts `NaN` at a parameter typed `integer` or `real`.**
+  `function f(n: integer) { n + 1 }` called with a `NaN` value (a restricted
+  number whose condition fails, `first(filter(xs, p))` over numbers when the
+  filter finds nothing) answered
+  `Error(ErrorCode("incompatible-type", "integer", "NaN"), NaN)`, while
+  `f(n: number)` answered `NaN`, and so did the same body declared with
+  `ce.declare("f", { signature: "(integer) -> unknown" })`. The literal
+  `f(NaN)` was refused at boxing on both routes. A user function now accepts
+  `NaN` (and `Indeterminate`) at every parameter typed with a numeric type, and
+  its body computes with it: all of these answer `NaN`. A number that is not
+  `NaN` is checked as before (`f(1.5)` is an error for `n: integer`). Library
+  operators keep their own `NaN` policy. What is lost: a call that relied on
+  the error to detect a `NaN` argument at an `integer` or `real` parameter;
+  test `isNaN(n)` in the body.
 - **The Epsil static check reports an argument that may be absent at an
   annotated parameter.** With `f(p: tuple<number, number>)`, the call
   `f(first(filter(xs, p)))` is reported before the program runs: "expected
   `tuple<number, number>`, got `missing | tuple<…>`". The program still runs.
   Nothing is reported at a parameter with no annotation, at a parameter
-  annotated `T | missing` or `number`, or when the absent case is removed with
-  `??`. The engine (`ce.box`, `ce.parse`, compilation) admits the argument as
+  annotated `T | missing` or with a numeric type, or when the absent case is
+  removed with `??`. The engine (`ce.box`, `ce.parse`, compilation) admits the argument as
   before. A function literal bound with `let` or `const` is checked as a
   `function` definition is, and the inferred type of its bare parameters is no
   longer enforced by the static check: `let k = (p, n: number) => p[1] + n`

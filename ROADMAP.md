@@ -242,49 +242,58 @@ so the hypothesis pass reads `unknown` from `G` and is refuted. A fix would
 treat the strongly connected component of the call graph as one unit, or
 retire a callee's memo when the function it was derived inside settles.
 
-### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — two decisions, four defects)
+### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — one decision, four defects)
 
 The rule since 2026-09-30, for a function literal (an Epsil `function`, a
 lambda with an annotated parameter): at evaluation, an absent value
 (`Missing`) at a parameter annotated with a type that has no `missing`
-member is an `incompatible-type` error, a parameter whose annotation admits
-`nan` (`number`) reads it as `NaN` (the absence marker of a numeric
-domain), and at a bare parameter the body runs with the absent value; at
-boxing, the engine admits an argument typed `missing | T` at a parameter
-annotated `T` and refuses one typed `missing` alone; the Epsil static
-pre-pass reports the first too. Pinned by
+member is an `incompatible-type` error, a parameter annotated with a
+numeric type reads it as `NaN` (the absence marker of a numeric domain) and
+accepts `NaN`, and at a bare parameter the body runs with the absent value;
+at boxing, the engine admits an argument typed `missing | T` at a parameter
+annotated `T` and refuses one typed `missing` alone at a parameter that is
+not numeric; the Epsil static pre-pass reports the first too. Pinned by
 `test/compute-engine/absent-argument-annotated-parameter.test.ts`. What is
 not settled:
 
-1. **A `NaN` value at a parameter annotated `integer` or `real`
-   (decision).** With `function f(v: integer) { v + 1 }`, the call
-   `f(first(filter([1, 2], c => c > 9)))` has an argument typed
-   `integer | nan` whose value is `NaN`. The Epsil function answers an
-   `incompatible-type` error (`integer` against `NaN`); it did before
-   2026-09-30 too. The same body under
-   `ce.declare('f', { signature: '(integer) -> unknown' })` answers `NaN`.
-   A parameter annotated `number` answers `NaN` on both routes, because
-   `nan` is a member of `number`. A restricted number whose condition fails
-   (`x {a > 0}`) is such a `NaN`, so a function annotated `real` refuses it.
-   Either `NaN` at a parameter that excludes it is an error on both routes,
-   as `Missing` is, or it is `NaN` on both. If nothing is decided the two
-   routes keep disagreeing.
-2. **An absent value at a declared SCALAR parameter, on the
-   declare-then-assign route (decision, measure first).** With `f` declared
-   `(string) -> unknown` and assigned `s ↦ Length(s)`, an absent string
-   answers `NaN`; the Epsil `function f(s: string)` answers the error. A
-   tuple or a list parameter is an error on both routes. Cause:
-   `ascribeDeclaredParameterTypes` (`engine-declarations.ts`) writes only a
-   non-scalar declared type on the stored literal, and the application
-   checks only the parameters the literal annotates. Tycho declares `number`
-   for a document-function parameter whose every use is scalar, so a change
-   here reaches its documents.
-3. **Compiled code does not check an annotated parameter (defect).**
+1. **A declared SCALAR parameter is not checked against the evaluated
+   argument on the declare-then-assign route (decision, measure first).**
+   Measured 2026-09-30 with `f` declared through
+   `ce.declare('f', { signature })`, then assigned its body, and called with
+   an argument whose type is not known at boxing (a symbol typed `unknown`
+   that holds the value when the call is evaluated), against the Epsil
+   `function` with the same annotation:
+
+   | Declared parameter | Value | Declared, then body | Epsil `function` |
+   | --- | --- | --- | --- |
+   | `integer` | `1.5` | `2.5` | `incompatible-type` error |
+   | `string` | `Missing` | `NaN` (from `Length(Missing)`) | `incompatible-type` error |
+   | `string` | `5` | an error from `Length` that names `collection` | `incompatible-type` error that names `string` |
+   | `boolean` | `Missing` | an error from `If` ("the condition is absent") | `incompatible-type` error |
+   | `boolean` | `5` | `If(5, 1, 2)`, not evaluated | `incompatible-type` error |
+   | `tuple<number, number>` | `Missing`, `5` | `incompatible-type` error | `incompatible-type` error |
+
+   A numeric parameter with `Missing` or `NaN` answers `NaN` on both routes.
+   Cause: `ascribeDeclaredParameterTypes` (`engine-declarations.ts`) writes
+   only a NON-SCALAR declared type on the stored literal, and the
+   application checks only the parameters the literal annotates. It skips
+   scalar types on purpose: stamping one re-canonicalizes the body against
+   a narrower parameter, which changed how a tuple argument broadcasts
+   through `x ↦ 2x`. So a declared scalar type is checked at boxing, against
+   the static type of the argument, and never against the value. Options:
+   (a) check the evaluated argument against the declared scalar type when
+   the function is applied, without stamping the literal; (b) keep the
+   declared scalar type a promise the host makes, as a declared RESULT type
+   is (decision of 2026-09-24), and say so in the guide. Tycho declares
+   `number` for a document-function parameter whose every use is scalar and
+   relies on a list argument being broadcast at such a parameter, so (a)
+   must keep the broadcast and needs a run of the Tycho gates.
+2. **Compiled code does not check an annotated parameter (defect).**
    `function f(p: tuple<number, number>) { p[1] + 1 }` called with
    `first(filter([(1, 2)], c => c[1] > 9))` is an error in the interpreter
    and `NaN` from the JavaScript target. The target should emit the check or
    decline the call.
-4. **A false report of the pre-pass on the gasket program (defect, not
+3. **A false report of the pre-pass on the gasket program (defect, not
    reduced).** With every parameter of `fill` annotated and the absent case
    removed (`let C = first(filter(…)) ?? (0, 0, 0)`), the program
    `tycho/scripts/repros/2026-09-28-epsil-gasket-compile/e-natural-recursion.epsil`
@@ -295,7 +304,7 @@ not settled:
    whole, it is typed `tuple<number, number, number>`. The report predates
    2026-09-30. Twelve smaller programs built from the same helper functions
    did not reproduce it.
-5. **A list of points at a BARE parameter of a function declared in the
+4. **A list of points at a BARE parameter of a function declared in the
    compiled program declines to compile (defect).** With
    `function h(q: tuple<number, number>) { q[1] + 1 }` and
    `const g = (p) => h(p)`, the type of `p` is inferred as one point, the
@@ -305,7 +314,7 @@ not settled:
    `base-compiler.ts`); until 2026-09-30 it answered the string `"1,21"`.
    An ANNOTATED point parameter is mapped by the compiled code. Fix: compile
    the body of such a function for a parameter that may be a list.
-6. **`widenAssignedType('never')` answers `integer` (defect, no failing
+5. **`widenAssignedType('never')` answers `integer` (defect, no failing
    input known).** `never` matches every type, so the first test of the
    widening table (`boxed-value-definition.ts`) accepts it. The assignment
    evidence join skips a `never`-typed value since 2026-09-30
@@ -328,27 +337,43 @@ the marker: a chained read (`M[7][1]` over a matrix) chooses `NaN` or
 
 ### A variable assigned a lazy collection over a variable holds a live view of it, and over itself is never evaluated (OPEN, decision — found 2026-09-30)
 
-Measured with `executeEpsil` on `c1c8758a`:
+Measured with `executeEpsil` on `bdb3c968`, with `let xs = [1, 2, 3]`:
 
-| Program | Answer |
-| --- | --- |
-| `let xs = [1, 2, 3]`, `xs = filter(xs, c => c > 1)`, `xs` | `Filter("xs", (c) => 1 < c)`, not evaluated |
-| the same, then `length(xs)` | `Length(Filter("xs", …))`, not evaluated |
-| in a function body: `let out = a`, `out = filter(out, c => c > 1)`, `length(out)` | `Length(Filter("out", …))` |
-| `let ys = filter(xs, c => c > 1)`, `xs = [5]`, `listFrom(ys)` | `[5]` |
-| `xs = listFrom(filter(xs, c => c > 1))`, `xs` | `[2, 3]` |
-| `xs = reverse(xs)`, `xs = take(xs, 2)` | `[3, 2, 1]`, `[1, 2]` |
+| Statement | `xs` afterwards | `let ys = …`, then `xs = [7, 8]`: `listFrom(ys)` |
+| --- | --- | --- |
+| `xs = filter(xs, c => c > 1)` | `Filter("xs", …)`, not evaluated | `[7, 8]` |
+| `xs = map(c => c + 1, xs)` | `Map(…, "xs")`, not evaluated | `[8, 9]` |
+| `xs = scan(xs, (a, b) => a + b)` | `Scan("xs", …)`, not evaluated | `[7, 15]` |
+| `xs = takeWhile(xs, c => c < 3)` | `TakeWhile("xs", …)`, not evaluated | `[]` |
+| `xs = [c * 2 for c in xs]` | "Maximum call stack size exceeded" | `[14, 16]` |
+| `take`, `drop`, `rest`, `reverse`, `sort`, `zip`, `join`, `[...xs, 9]`, `xs[2..3]`, `unique`, `xs + 1` | a list | the list built from the first `xs` |
+| `xs = listFrom(filter(xs, c => c > 1))` | `[2, 3]` | `[2, 3]` |
 
-`Filter` is a lazy collection, and the value an assignment stores keeps the
-SYMBOL `xs` as its source. So `ys` follows every later assignment of `xs`,
-and `xs = filter(xs, p)` makes `xs` refer to itself: each read finds the
-same unevaluated `Filter`, with no diagnostic. `reverse` and `take` answer
-a list and are not affected. Decision needed on what an assignment stores:
-(a) the lazy collection with each symbol that has an assigned value
-replaced by that value (a snapshot, still lazy); (b) the materialized list
-when the collection is finite; (c) the live view, as today, with an error
-for a collection that reads its own target. If nothing is decided, the
-idiom `xs = filter(xs, p)` leaves a program without an answer.
+`Filter`, `Map`, `Scan`, `TakeWhile` and a comprehension are lazy
+collections, and the value an assignment stores keeps the SYMBOL `xs` as
+its source (`ce.assign('ys', Filter(xs, …).evaluate())` on the engine does
+the same: the JSON of the evaluated `Filter` still names `xs`). So `ys`
+follows every later assignment of `xs`, and `xs = filter(xs, p)` makes `xs`
+refer to itself: each read finds the same unevaluated expression, with no
+diagnostic, and the comprehension overflows the stack. The loop
+`for k in [1, 2, 3] { xs = filter(xs, c => c > k) }` also keeps `k` by
+name in the predicate, and `k` no longer exists after the loop. A lazy
+result RETURNED by a function is not affected: the parameter it reads is
+replaced by the argument when the function returns.
+
+Decision needed on what an Epsil assignment (`let`, `=`) stores when the
+value is a lazy collection that reads a variable: (a) the materialized
+list, when the collection is finite: the assignment evaluates the filter
+now, with the values the variables have now; an unbounded collection
+(`filter(1..oo, p)`) stays lazy; (b) the lazy collection with each variable
+it reads replaced by its current value (a snapshot that stays lazy); the
+predicate's variables must be replaced too, inside the function literal;
+(c) the live view, as today, with an error for a collection that reads the
+variable it is assigned to. A host that assigns an expression with
+`ce.assign` to define one name from another (a Tycho document definition)
+wants the live view, so the change is for the Epsil statements, not for
+`ce.assign`. If nothing is decided, the idiom `xs = filter(xs, p)` leaves
+a program without an answer, and `xs = [f(c) for c in xs]` crashes.
 
 ### A parameter that reaches a whole-collection operator indirectly is still applied element by element (OPEN — recorded 2026-09-29 with the decision on whole-collection parameters)
 

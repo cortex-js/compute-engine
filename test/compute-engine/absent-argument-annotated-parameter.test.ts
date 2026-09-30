@@ -4,9 +4,10 @@
  *
  * 1. At evaluation, an absent value (`Missing`) at a parameter ANNOTATED
  *    with a type that has no `missing` member is an `incompatible-type`
- *    error. An annotation that admits `nan` (`number`) reads the absent
- *    value as `NaN`, the absence marker of a numeric domain. At a bare
- *    parameter the body runs with the absent value. Before,
+ *    error. A numeric annotation (`number`, `integer`, `real`) reads the
+ *    absent value as `NaN`, the absence marker of a numeric domain, and
+ *    accepts `NaN`. At a bare parameter the body runs with the absent
+ *    value. Before,
  *    a function whose parameters were all numeric or collections answered
  *    the absence marker (`NaN`, `Missing`) without running, and the type of
  *    the call gained a `missing` member.
@@ -95,22 +96,63 @@ describe('an absent value at an annotated parameter', () => {
     expect(run('function f(v: number) { v + 1 }\nf(NaN)').value).toBe('NaN');
   });
 
-  // A numeric type that excludes `nan` refuses the absent value, and the
-  // error names the value the caller wrote (`missing`, not a converted `NaN`).
+  // `nan` is not a member of `integer` or `real`, but a user function accepts
+  // `NaN` at every numeric parameter (user decision 2026-09-30), and an
+  // absent value there is read as `NaN`.
   test.each(['integer', 'real'])(
-    'an absent value at a parameter annotated %s is an error',
+    'an absent value at a parameter annotated %s is read as NaN',
     (type) => {
       const src = `function f(v: ${type}) { v + 1 }\nf(Missing)`;
-      const { value, diagnostics } = run(src);
-      expect(value).toBe(
-        `Error(ErrorCode("incompatible-type", "${type}", "missing"), "Missing")`
-      );
-      expect(diagnostics).toHaveLength(1);
-      // The argument is absent for certain, so the engine refuses the call
-      // at boxing too, not only the Epsil pre-pass.
-      expect(box(src).call.isValid).toBe(false);
+      expect(run(src)).toEqual({ value: 'NaN', diagnostics: [] });
+      expect(box(src).call.isValid).toBe(true);
     }
   );
+
+  test.each([
+    ['a literal NaN', 'NaN'],
+    ['a read that finds no number', 'first(filter([1, 2], c => c > 9))'],
+    ['a restricted number whose condition fails', 'When(3.5, 1 > 2)'],
+  ])('%s is accepted at an integer and a real parameter', (_label, arg) => {
+    // The argument is a `NaN` value, not `Missing`: the case tests the
+    // acceptance of `NaN`, not the reading of an absent value as `NaN`.
+    expect(run(arg).value).toBe('NaN');
+    for (const type of ['integer', 'real']) {
+      const src = `function f(v: ${type}) { v + 1 }\nf(${arg})`;
+      expect(run(src)).toEqual({ value: 'NaN', diagnostics: [] });
+      expect(box(src).expr.evaluate().toString()).toBe('NaN');
+    }
+  });
+
+  test('an exact indeterminate form is accepted and keeps its name', () => {
+    const src = 'function f(v: integer) { v + 1 }\nf(0/0)';
+    expect(run(src)).toEqual({ value: 'Indeterminate', diagnostics: [] });
+  });
+
+  test('NaN is accepted at a numeric variadic parameter', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', { signature: '(integer, integer*) -> unknown' });
+    ce.assign(
+      'g',
+      ce.box(['Function', ['Add', 'a', 1], 'a', ['Spread', 'rest']])
+    );
+    expect(ce.box(['g', 1, 'NaN', 2]).isValid).toBe(true);
+    expect(ce.box(['g', 1, 1.5, 2]).isValid).toBe(false);
+  });
+
+  test('the same function declared on the engine accepts NaN too', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: '(integer) -> unknown' });
+    ce.assign('f', ce.box(['Function', ['Add', 'v', 1], 'v']));
+    const call = ce.box(['f', 'NaN']);
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().toString()).toBe('NaN');
+  });
+
+  test('a number that is not NaN is still checked', () => {
+    const src = 'function f(v: integer) { v + 1 }\nf(1.5)';
+    expect(box(src).call.isValid).toBe(false);
+    expect(run(src).value).toContain('incompatible-type');
+  });
 
   test('an argument typed `missing` alone is refused at boxing', () => {
     const { call } = box(

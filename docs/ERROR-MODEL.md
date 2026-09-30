@@ -799,11 +799,9 @@ answered an error. The rule, for the value bound to one parameter:
   `f(p: tuple<number, number>) = p[1] + 1` answers
   `Error(ErrorCode("incompatible-type", "tuple<number, number>", "missing"), "Missing")`
   for `f(Missing)`;
-- annotated with a type that has `nan` as a member (`number`): the absent
-  value is read as `NaN`, the marker of a numeric domain (§3).
-  `f(x: number) = x + 1` answers `NaN`. A numeric type that excludes `nan`
-  (`integer`, `real`) is in the first case: `f(x: real) = x + 1` answers
-  `Error(ErrorCode("incompatible-type", "real", "missing"), "Missing")`;
+- annotated with a numeric type (`number`, `integer`, `real`): the absent
+  value is read as `NaN`, the marker of a numeric domain (§3), and `NaN` is
+  accepted there (next ruling). `f(x: real) = x + 1` answers `NaN`;
 - annotated `T | missing`: the body receives the absent value;
 - not annotated: the body runs with the absent value, as it does for a
   function with no annotation at all.
@@ -818,9 +816,27 @@ argument typed `missing` alone (the literal `Missing`) is absent on every
 route and is refused at boxing. The Epsil static pre-pass is stricter and
 also reports the argument that may be absent (`refusesAbsentArgument`,
 `boxed-expression/validate.ts`), because an Epsil author can write
-`first(xs) ?? fallback`. What remains open (a `NaN` value at an `integer`
-or `real` parameter, a declared scalar parameter on the declare-then-assign
-route, compiled code) is in `ROADMAP.md`.
+`first(xs) ?? fallback`. What remains open (a declared scalar parameter on
+the declare-then-assign route, compiled code) is in `ROADMAP.md`.
+
+**A user function accepts `NaN` at a numeric parameter — RULED
+2026-09-30.** `NaN` is what a numeric computation answers when it has no
+value: a restricted number whose condition fails, a read past the end of a
+list of numbers, `0/0` with a float. In the lattice `nan` is a member of
+`number` and not of `integer` or `real`, so `f(n: integer)` refused an
+argument that `f(n: number)` accepts, an Epsil `function` answered an
+`incompatible-type` error where the same body declared through
+`ce.declare` answered `NaN`, and the literal `NaN` was refused at boxing on
+both routes. A user function (a function literal, a multi-clause
+definition, a function held as a value) now accepts a `NaN` argument at
+every parameter typed with a numeric type, at boxing
+(`acceptsNaNArgument`, `boxed-expression/validate.ts`) and when it is
+applied (`acceptNaNAtNumericParams`, `function-utils.ts`). The function is
+applied and its body computes with `NaN`: this is not a `propagate`
+policy, and the conservative floor of §4 (a user callable has unknown NaN
+behavior) is unchanged. `Indeterminate` is accepted in the same way. A
+number that is not `NaN` is checked as before (`1.5` at `integer` is
+refused), and library operators keep their own `NaN` policy.
 
 **An accessor states the absent case only when it can happen — RULED
 2026-09-30.** `First`, `Second`, `Third`, `Last` and `At` with a literal

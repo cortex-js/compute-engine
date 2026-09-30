@@ -342,8 +342,7 @@ describe('Contract B — the higher-order conservative floor (Phase E)', () => {
   test('an annotated lambda derives NO policy from its precise carrier', () => {
     // The floor (`docs/ERROR-MODEL.md` §4): a user-defined callable has
     // UNKNOWN NaN behavior, so its declared `(real) -> real` must not
-    // derive `propagate` — the boxing admission would otherwise carve a
-    // NaN into the lambda's carrier, bypassing its own validation.
+    // derive `propagate`: no policy answers `NaN` in place of the function.
     const e = new ComputeEngine();
     e.declare('flr', '(real) -> real');
     e.assign('flr', e.parse('x \\mapsto x + 1'));
@@ -355,8 +354,17 @@ describe('Contract B — the higher-order conservative floor (Phase E)', () => {
     // operator-definition-shaped lambda is pinned in the absolute-floor
     // test below).
     expect(def!.operator).toBeUndefined();
-    // Plain carrier semantics at boxing: nan is disjoint from real.
-    expect(e.box(['flr', 'NaN']).isValid).toBe(false);
+    // A user function accepts `NaN` at a numeric parameter, whatever the
+    // numeric type (user decision 2026-09-30; before, `nan` being disjoint
+    // from `real` refused the call at boxing). The function is applied: its
+    // body computes with `NaN`.
+    const call = e.box(['flr', 'NaN']);
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().isNaN).toBe(true);
+    // A number that is not `NaN` is still checked against the carrier.
+    e.declare('fli', '(integer) -> integer');
+    e.assign('fli', e.parse('x \\mapsto x + 1'));
+    expect(e.box(['fli', 1.5]).isValid).toBe(false);
   });
 
   test('the derived-type adjustment stands down for a user callable', () => {

@@ -2729,6 +2729,10 @@ function makeCanonicalFunctionCore(
           // A list of points at a parameter declared as a point is mapped
           // over at evaluation (`isPointListArgumentType`).
           mapsPointLists: true,
+          // A function held as a value is a user function: `NaN` is
+          // accepted at its numeric parameters (`acceptsNaNArgument`,
+          // `validate.ts`).
+          userFunction: true,
           // An absent argument at an annotated parameter of a pinned
           // literal is refused, as at the call of a `function` definition
           // (`refusesAbsentArgument`, `validate.ts`).
@@ -3463,6 +3467,9 @@ function applyOperatorDefinition(
           // A user function maps over a list of points at a parameter
           // declared as a point (`isPointListArgumentType`).
           mapsPointLists: opDef.isUserFunctionDefinition,
+          // A user function accepts `NaN` at its numeric parameters
+          // (`acceptsNaNArgument`, `validate.ts`).
+          userFunction: opDef.isUserFunctionDefinition,
         }
       );
 

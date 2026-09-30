@@ -247,7 +247,8 @@ check, because a filter can find nothing, and it is an `incompatible-type`
 error when the value is absent. Write `f(first(filter(…)) ?? (0, 0))` to give
 a fallback, or annotate the parameter `tuple<number, number> | missing` and
 test `isMissing(p)` in the body. A parameter with no annotation receives the
-absent value, and a parameter annotated `number` reads it as `NaN`.
+absent value, and a parameter annotated with a numeric type (`number`,
+`integer`, `real`) reads it as `NaN`, which such a parameter accepts.
 The first element of a list literal that has one (`first([(1, 2), (3, 4)])`)
 cannot be absent and needs no fallback.
 
