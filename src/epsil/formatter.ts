@@ -43,6 +43,38 @@ export type FormattingCosts = {
 // around operators/separators (four-per-em, thin, medium mathematical space).
 const TRAILING_PADDING = /[ \t\u2005\u2009\u205f]+$/;
 
+/**
+ * A cache of the result of a block query (`cost()`, `nextCol()`, the choice
+ * of a `ChoiceBlock`, the layout of a `WrapBlock`) for each starting column.
+ *
+ * A composite block asks its children for their cost and next column many
+ * times: a `ChoiceBlock` compares the cost of each alternative, then asks the
+ * chosen one again for its next column and its text, and a `WrapBlock`
+ * measures the width of each candidate line. The same child block can also
+ * appear in more than one alternative (`fencedList()` puts each element in
+ * both its one-line and its stacked or wrapped layout). Without a cache, each
+ * level of nesting multiplies this work, and the time to format a nested
+ * expression grows exponentially with its depth: a chain of 8 nested `Add`
+ * took more than 3 seconds.
+ *
+ * The starting column is a sufficient key because a block cannot change
+ * after it is built: its children and the options of its `Formatter` do not
+ * change, so a query gives the same result for the same column. A block
+ * belongs to the single `Formatter` given to its constructor, and each
+ * serialization makes a new formatter and new blocks, so a cached result is
+ * never used with different options.
+ */
+class OffsetCache<T extends NonNullable<unknown>> {
+  private readonly values = new Map<number, T>();
+  get(offset: number, compute: () => T): T {
+    const cached = this.values.get(offset);
+    if (cached !== undefined) return cached;
+    const result = compute();
+    this.values.set(offset, result);
+    return result;
+  }
+}
+
 export abstract class FormattingBlock {
   protected fmt: Formatter;
 
@@ -97,7 +129,7 @@ export class EmptyBlock extends FormattingBlock {
  *
  */
 export class TextBlock extends FormattingBlock {
-  s: string;
+  readonly s: string;
   constructor(fmt: Formatter, s: string) {
     super(fmt);
     this.s = s;
@@ -137,7 +169,7 @@ export class TextBlock extends FormattingBlock {
  * |
  */
 export class LineBlock extends FormattingBlock {
-  private blocks: FormattingBlock[];
+  private readonly blocks: readonly FormattingBlock[];
   constructor(fmt: Formatter, ...blocks: FormattingBlock[]) {
     super(fmt);
     this.blocks = blocks;
@@ -145,6 +177,8 @@ export class LineBlock extends FormattingBlock {
   debug(): string {
     return 'Line(' + this.blocks.map((x) => x.debug()).join(', ') + ')';
   }
+  private readonly nextColCache = new OffsetCache<number>();
+  private readonly costCache = new OffsetCache<number>();
   serialize(offset: number): string {
     const fragments: string[] = [];
     for (const block of this.blocks) {
@@ -154,15 +188,20 @@ export class LineBlock extends FormattingBlock {
     return fragments.join('');
   }
   nextCol(offset: number): number {
-    return this.blocks.reduce((acc, val) => val.nextCol(acc), offset);
+    return this.nextColCache.get(offset, () =>
+      this.blocks.reduce((acc, val) => val.nextCol(acc), offset)
+    );
   }
   cost(offset: number): number {
-    let result = 0;
-    for (const block of this.blocks) {
-      result += block.cost(offset);
-      offset = block.nextCol(offset);
-    }
-    return result;
+    return this.costCache.get(offset, () => {
+      let result = 0;
+      let col = offset;
+      for (const block of this.blocks) {
+        result += block.cost(col);
+        col = block.nextCol(col);
+      }
+      return result;
+    });
   }
 }
 
@@ -180,7 +219,7 @@ export class LineBlock extends FormattingBlock {
  */
 
 export class StackBlock extends FormattingBlock {
-  private blocks: FormattingBlock[];
+  private readonly blocks: readonly FormattingBlock[];
   constructor(fmt: Formatter, ...blocks: FormattingBlock[]) {
     super(fmt);
     this.blocks = blocks;
@@ -214,10 +253,13 @@ export class StackBlock extends FormattingBlock {
   nextCol(offset: number): number {
     return offset;
   }
+  private readonly costCache = new OffsetCache<number>();
   cost(offset: number): number {
-    return this.blocks.reduce(
-      (acc, val) => this.fmt.cost.linebreak + acc + val.cost(offset),
-      0
+    return this.costCache.get(offset, () =>
+      this.blocks.reduce(
+        (acc, val) => this.fmt.cost.linebreak + acc + val.cost(offset),
+        0
+      )
     );
   }
 }
@@ -234,7 +276,7 @@ export class StackBlock extends FormattingBlock {
  *
  */
 export class WrapBlock extends FormattingBlock {
-  private blocks: FormattingBlock[];
+  private readonly blocks: readonly FormattingBlock[];
   constructor(fmt: Formatter, ...blocks: FormattingBlock[]) {
     super(fmt);
     this.blocks = blocks;
@@ -243,24 +285,36 @@ export class WrapBlock extends FormattingBlock {
     return 'Wrap(' + this.blocks.map((x) => x.debug()).join(', ') + ')';
   }
 
+  private readonly solutionCache = new OffsetCache<FormattingBlock>();
   solution(offset: number): FormattingBlock {
+    return this.solutionCache.get(offset, () => this.layout(offset));
+  }
+
+  private layout(offset: number): FormattingBlock {
     const lines: FormattingBlock[][] = [];
     let line: FormattingBlock[] = [];
+    // The column after the last block of the current line. This is the value
+    // `LineBlock.nextCol(offset)` gives for the blocks of `line`, kept as a
+    // running value so that each block is measured once.
+    let col = offset;
 
     for (const block of this.blocks) {
       if (line.length === 0) {
         // If nothing on the line yet, add this block
         line.push(block);
+        col = block.nextCol(offset);
       } else {
         // At least one item on the line. Does this new item fit?
-        const lineBlock = new LineBlock(this.fmt, ...line, block);
-        if (lineBlock.nextCol(offset) <= this.fmt.margin) {
+        const next = block.nextCol(col);
+        if (next <= this.fmt.margin) {
           // It fits!
           line.push(block);
+          col = next;
         } else {
           // Does not fit
           lines.push(line);
           line = [block];
+          col = block.nextCol(offset);
         }
       }
     }
@@ -286,7 +340,7 @@ export class WrapBlock extends FormattingBlock {
 }
 
 export class ChoiceBlock extends FormattingBlock {
-  private blocks: FormattingBlock[];
+  private readonly blocks: readonly FormattingBlock[];
   constructor(fmt: Formatter, ...blocks: FormattingBlock[]) {
     super(fmt);
     this.blocks = blocks;
@@ -297,17 +351,20 @@ export class ChoiceBlock extends FormattingBlock {
     );
   }
   // Which block would be chosen if starting at column `offset`
+  private readonly choiceCache = new OffsetCache<FormattingBlock>();
   choice(offset: number): FormattingBlock {
-    let block: FormattingBlock | undefined;
-    let minCost = Infinity;
-    this.blocks.forEach((x) => {
-      const cost = x.cost(offset);
-      if (cost < minCost) {
-        minCost = cost;
-        block = x;
-      }
+    return this.choiceCache.get(offset, () => {
+      let block: FormattingBlock | undefined;
+      let minCost = Infinity;
+      this.blocks.forEach((x) => {
+        const cost = x.cost(offset);
+        if (cost < minCost) {
+          minCost = cost;
+          block = x;
+        }
+      });
+      return block!;
     });
-    return block!;
   }
   serialize(offset: number): string {
     return this.choice(offset).serialize(offset);
@@ -316,7 +373,7 @@ export class ChoiceBlock extends FormattingBlock {
     return this.choice(offset).nextCol(offset);
   }
   cost(offset: number): number {
-    return Math.min(...this.blocks.map((x) => x.cost(offset)));
+    return this.choice(offset).cost(offset);
   }
 }
 
@@ -476,6 +533,9 @@ export class Formatter {
 
   choice(...inBlocks: (string | FormattingBlock)[]): FormattingBlock {
     const blocks = this.normalizedBlocks(inBlocks);
+    // A `ChoiceBlock` must have at least one alternative: with none, it has
+    // no block to serialize.
+    if (blocks.length === 0) return new EmptyBlock(this);
     if (blocks.length === 1) return blocks[0];
     return new ChoiceBlock(this, ...blocks);
   }

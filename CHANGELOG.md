@@ -227,6 +227,13 @@
 
 ### Issues Resolved
 
+- **`serializeEpsil` takes linear time in the nesting depth**
+  ([#379](https://github.com/cortex-js/compute-engine/issues/379), reported by
+  [enumeratio](https://github.com/enumeratio)). The formatter computed the cost
+  and the layout of each nested block again every time its parent asked, so the
+  time grew by a constant factor at each nesting level: a 10-deep `Add` chain
+  took 42 s. Each block now keeps these values per starting column. A 200-deep
+  chain serializes in less than a millisecond, and the output is unchanged.
 - **`PolyLog`, the hypergeometric functions, `AppellF1`, `JacobiTheta`,
   `DedekindEta` and `EisensteinE` thread over a list operand,** as `Zeta`,
   `LerchPhi` and the elliptic integrals already did. `PolyLog(2, [0.1, 0.2])`

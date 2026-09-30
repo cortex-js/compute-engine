@@ -344,3 +344,50 @@ describe('EPSIL FORMATTER — string literals keep interior spaces', () => {
     expect((reparsed as { str: string }).str).toBe('hello   \nworld');
   });
 });
+
+describe('EPSIL FORMATTER — time is not exponential in nesting depth', () => {
+  // Regression test for issue #379. A `ChoiceBlock` asks each alternative
+  // for its cost, then asks the chosen one again for its next column and its
+  // text, and the same child block appears in more than one alternative.
+  // Before the formatter cached these queries for each starting column, each
+  // level of nesting multiplied the work by about 3.6: a chain of 8 nested
+  // `Add` took more than 3 seconds, and a chain of 10 took about 40 seconds.
+  // With the cache, a chain of 10 takes about a millisecond.
+  //
+  // The depth is 10 and not larger on purpose. Serialization is synchronous,
+  // so jest cannot stop it at a timeout: if the exponential time came back, a
+  // deeper chain would block the test run for hours instead of failing. At
+  // depth 10 a regression makes each test run for about a minute and then
+  // fail on the 5-second limit. The test timeout is larger than that minute,
+  // so that the limit, and not the timeout, reports the failure.
+  function chain(op: string, depth: number): MathJsonExpression {
+    let node: MathJsonExpression = 'x';
+    for (let i = 0; i < depth; i++) node = [op, node, 'y'];
+    return node;
+  }
+
+  test.each(['Add', 'Multiply', 'List', 'f'])(
+    'a 10-deep %s chain serializes quickly and round-trips',
+    (op) => {
+      const expr = chain(op, 10);
+      const start = Date.now();
+      const wide = serializeEpsil(expr);
+      const narrow = serializeEpsil(expr, { margin: 20, softMargin: 12 });
+      expect(Date.now() - start).toBeLessThan(5000);
+      for (const out of [wide, narrow]) {
+        const [reparsed] = parseEpsil(out);
+        expect(serializeEpsil(reparsed)).toBe(wide);
+      }
+    },
+    300_000
+  );
+
+  test('a 10-deep Add chain wraps at a narrow margin', () => {
+    expect(serializeEpsil(chain('Add', 10))).toBe(
+      'x + y + y + y + y + y + y + y + y + y + y'
+    );
+    expect(
+      serializeEpsil(chain('Add', 10), { margin: 20, softMargin: 12 })
+    ).toBe('x + y + y + y + y +\ny + y + y + y + y + y');
+  }, 300_000);
+});
