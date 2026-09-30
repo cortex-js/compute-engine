@@ -504,6 +504,13 @@ export function absorbScalarsIntoCells(
       return { ...collectionType, elements: cell };
     return collectionType as Type;
   }
+  // A bare `list` and an index span (`range`, a `list<integer>` whose
+  // elements were sharpened away from `integer`) stay lists; a bare
+  // `indexed_collection` or `collection` keeps its own kind.
+  if (collectionType === 'list' || collectionType === 'range')
+    return { kind: 'list', elements: cell };
+  if (collectionType === 'collection')
+    return { kind: 'collection', elements: cell };
   return { kind: 'indexed_collection', elements: cell };
 }
 

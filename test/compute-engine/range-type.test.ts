@@ -11,10 +11,10 @@ describe('Range dynamic type narrowing', () => {
     // information. See `docs/STRING_ROADMAP.md`, "The `range` type".
     const r = ce.expr(['Range', 1, 9]);
     expect(String(r.type)).toBe('range');
-    expect(r.type.matches('indexed_collection<integer>')).toBe(true);
+    expect(r.type.matches('list<integer>')).toBe(true);
   });
 
-  test('Range with integer step types as indexed_collection<integer>', () => {
+  test('Range with integer step types as list<integer>', () => {
     // A STEPPED range is a gather, not a contiguous span, so it keeps the
     // wider type.
     const r = ce.expr(['Range', 1, 9, 2]);
@@ -25,7 +25,7 @@ describe('Range dynamic type narrowing', () => {
   // element type is `real`, not the ∞-and-NaN-admitting `number`. Bare
   // numeric names are finite since the lattice flip; before it, `number` was
   // the natural "not integer" answer here.
-  test('Range with float step types as indexed_collection<real>', () => {
+  test('Range with float step types as list<real>', () => {
     const r = ce.expr(['Range', 0, 1, 0.1]);
     expect(String(r.type)).toContain('real');
     expect(String(r.type)).not.toMatch(/integer/);
@@ -55,7 +55,7 @@ describe('Range dynamic type narrowing', () => {
   test('a fractional upper bound leaves the elements integer', () => {
     expect(ce.expr(['Range', 1, 4.5]).evaluate().toString()).toBe('[1,2,3,4]');
     const t = String(ce.expr(['Range', 1, 4.5]).type);
-    expect(t).toBe('indexed_collection<integer>');
+    expect(t).toBe('list<integer>');
   });
 
   // Ruling L10: an infinite endpoint marks unbounded EXTENT, it does not name
@@ -63,13 +63,13 @@ describe('Range dynamic type narrowing', () => {
   // `Range(1, +oo)` is a finite integer.
   test('an infinite endpoint does not leak into the element type', () => {
     expect(String(ce.expr(['Range', 1, 'PositiveInfinity']).type)).toBe(
-      'indexed_collection<integer>'
+      'list<integer>'
     );
     expect(String(ce.expr(['Range', 'NegativeInfinity', 1]).type)).toBe(
-      'indexed_collection<integer>'
+      'list<integer>'
     );
     expect(String(ce.expr(['Range', 0.5, 'PositiveInfinity']).type)).toBe(
-      'indexed_collection<real>'
+      'list<real>'
     );
   });
 });
@@ -108,17 +108,19 @@ describe('the `range` index-span type', () => {
 
     test('a range is an indexed collection of integers', () => {
       expect(t('range').matches('indexed_collection')).toBe(true);
-      expect(t('range').matches('indexed_collection<integer>')).toBe(true);
+      expect(t('range').matches('list<integer>')).toBe(true);
       expect(t('range').matches('collection<number>')).toBe(true);
       expect(t('range').matches('value')).toBe(true);
     });
 
-    test('a range is a SIBLING of list, not a subtype of it', () => {
-      // Neither direction holds: a `Range` value is not a `List`, and an
-      // arbitrary indexed collection is not an index span.
-      expect(t('range').matches('list')).toBe(false);
-      expect(t('range').matches('list<integer>')).toBe(false);
-      expect(t('indexed_collection<integer>').matches('range')).toBe(false);
+    test('a range is a SUBTYPE of list<integer>, and not the other way round', () => {
+      // An index span is a list of integers (since 2026-09-29; it was a
+      // sibling of `list`, and a symbol declared `list` refused `1..10`).
+      // An arbitrary list or indexed collection is not an index span.
+      expect(t('range').matches('list')).toBe(true);
+      expect(t('range').matches('list<integer>')).toBe(true);
+      expect(t('range').matches('list<string>')).toBe(false);
+      expect(t('list<integer>').matches('range')).toBe(false);
       expect(t('list<integer>').matches('range')).toBe(false);
     });
 
@@ -286,7 +288,7 @@ describe('Range collection handlers', () => {
     // elements are still integers — the narrowing loses no element
     // information, so membership in `indexed_collection<integer>` is the
     // assertion that matters here.
-    expect(ce.expr(['Range', 1, 9]).type.matches('indexed_collection<integer>'))
+    expect(ce.expr(['Range', 1, 9]).type.matches('list<integer>'))
       .toBe(true);
     // A stepped range is not a span, so it still spells its element type.
     expect(String(ce.expr(['Range', 1, 9, 2]).type)).toContain('integer');

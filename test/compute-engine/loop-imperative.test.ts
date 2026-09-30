@@ -292,7 +292,7 @@ describe('Comprehension (interpreter)', () => {
     // `.count` is the clause count — O(1), never enumerated (a materialized
     // 1e6-element list would blow the iteration limit).
     expect(comp.count).toBe(N);
-    expect(comp.type.toString()).toContain('indexed_collection');
+    expect(comp.type.toString()).toBe('list<integer<0..>>');
     // Consumption materializes a single element on demand.
     expect(comp.at(3)?.json).toEqual(9);
   });

@@ -6233,15 +6233,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'A sequence of numbers from a start to an end value with an optional step.',
     complexity: 8200,
-    signature: '(number, number?, step: number?) -> indexed_collection<number>',
+    signature: '(number, number?, step: number?) -> list<number>',
 
+    // The result is a `list<T>`, whatever the bounds (since 2026-09-29; it was
+    // `indexed_collection<T>`). The `list` type says that the value is an
+    // ordered, index-addressable sequence of values of `T`; it says nothing
+    // about the length. An unbounded range (`Range(1, +oo)`) is a lazy
+    // `list<integer>`, exactly as the lazy `Map` over it, `Repeat(x)`,
+    // `Cycle(xs)` and `Iterate(f, x)` are lists; whether a collection is
+    // finite is a fact about the VALUE (`isFiniteCollection`, `count`), not a
+    // fact the type carries. The `indexed_collection<T>` reading refused a
+    // range to a symbol declared `list` (row 337 of the Tycho ledger,
+    // `tycho/docs/COMPUTE_ENGINE.md`).
     type: (ops, context) => {
       // ops: [lower, upper?, step?]
       // An INDEX SPAN — the `range` type — when the operands prove the value
       // is a contiguous ascending run of valid 1-based indices; see
       // `isIndexSpan` and `docs/STRING_ROADMAP.md` ("The `range` type").
       // This is a NARROWING of the two results below, never a widening:
-      // `range <: indexed_collection<integer>`.
+      // `range <: list<integer>`.
       if (isIndexSpanD(ops))
         return BoxedType.forResult('range', context.engine._typeResolver);
       // Only the LOWER bound and the STEP decide the element type: an element
@@ -6250,7 +6260,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // the lower bound and the step already cover. So `Range(1, 2.5)`
       // iterates 1 and 2 — `integer`, not `real` — and `Range(1, m)` over a
       // slider `m` declared `real` iterates 1, 2, 3, … and is
-      // `indexed_collection<integer>` whatever `m` holds. A one-operand
+      // `list<integer>` whatever `m` holds. A one-operand
       // `Range(n)` is `Range(1, n)`, so it has no operand of its own to read:
       // its implicit lower bound and step are both the integer 1.
       const boundOps =
@@ -6279,16 +6289,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // keeps the wide `number`.
       if (elementOps.every((op) => isSubtype(op.type, 'integer')))
         return BoxedType.forResult(
-          parseType('indexed_collection<integer>'),
+          parseType('list<integer>'),
           context.engine._typeResolver
         );
       if (elementOps.every((op) => isSubtype(op.type, 'real')))
         return BoxedType.forResult(
-          parseType('indexed_collection<real>'),
+          parseType('list<real>'),
           context.engine._typeResolver
         );
       return BoxedType.forResult(
-        parseType('indexed_collection<number>'),
+        parseType('list<number>'),
         context.engine._typeResolver
       );
     },
@@ -6911,8 +6921,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'A sequence of evenly spaced numbers between a start and end value, both endpoints included.',
     complexity: 8200,
-    signature:
-      '(start: number, end: number?, count: number?) -> indexed_collection',
+    signature: '(start: number, end: number?, count: number?) -> list<number>',
+    // A `list<T>` (since 2026-09-29; it was a bare `indexed_collection`, with
+    // no element type, which a symbol declared `list` or `list<number>`
+    // refused). The samples lie between the endpoints, so they are real when
+    // both endpoints are real (an omitted endpoint defaults to a real), and
+    // `number` when an endpoint could be complex. The count only sets the
+    // length and never reaches an element.
+    type: (ops, context) => {
+      const endpoints = ops.slice(0, 2).filter((op) => op.type !== 'nothing');
+      const elt = endpoints.every((op) => isSubtype(op.type, 'real'))
+        ? 'real'
+        : 'number';
+      return BoxedType.forResult(
+        { kind: 'list', elements: elt },
+        context.engine._typeResolver
+      );
+    },
     // @todo: the canonical form should consider if this can be simplified to a range (if the elements are integers)
 
     // @todo: need eq handler
@@ -12353,29 +12378,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
 
     lazy: true,
-    signature: '(generator: function, integer, integer?) -> indexed_collection',
-    // Tabulate is an INDEXED collection (ordered, `at`-addressable). Report the
-    // element type so it serializes as a list `[…]`, not a set `{…}`: for a 1-D
-    // tabulation the element is the function's result; for higher rank each
-    // element is itself a (nested) list.
+    signature: '(generator: function, integer, integer?) -> list',
+    // Tabulate is a LIST (ordered, `at`-addressable; `list<T>` since
+    // 2026-09-29, it was `indexed_collection<T>`, which a symbol declared
+    // `list` refused). Report the element type so it serializes as a list
+    // `[…]`, not a set `{…}`: for a 1-D tabulation the element is the
+    // function's result; for higher rank each element is itself a (nested)
+    // list.
     type: (ops, context) => {
       if (ops.length <= 1)
         return BoxedType.forResult(
-          parseType('indexed_collection'),
+          parseType('list'),
           context.engine._typeResolver
         );
       if (ops.length === 2) {
         const elt = functionResult(ops[0].type) ?? 'any';
         return BoxedType.forResult(
-          {
-            kind: 'indexed_collection',
-            elements: elt,
-          },
+          { kind: 'list', elements: elt },
           context.engine._typeResolver
         );
       }
       return BoxedType.forResult(
-        parseType('indexed_collection<list>'),
+        parseType('list<list>'),
         context.engine._typeResolver
       );
     },

@@ -20,9 +20,13 @@ export const INDEXED_COLLECTION_TYPES: PrimitiveType[] = [
   'indexed_collection',
   'list',
   'tuple',
-  // An index span (see the `range` entry in `types.ts`). A sibling of `list`,
-  // not a subtype of it: a `Range` value is not a `List`, and neither kind is
-  // a subtype of the other.
+  // An index span (see the `range` entry in `types.ts`). Since 2026-09-29 a
+  // SUBTYPE of `list`: `range <: list<integer>` (the `list` entry of
+  // `PRIMITIVE_SUBTYPES` in `subtype.ts` lists it, and its structural
+  // reading `RANGE_STRUCTURAL_TYPE` below is `list<integer>`). It was a
+  // sibling of `list` before; that placement refused `1..10` to a symbol
+  // declared `list`, while every other lazy ordered producer (`Map`,
+  // `Filter`, `Repeat`, `Cycle`, `Iterate`) already typed `list`.
   'range',
   // A string is an indexed collection of its grapheme clusters (see the
   // `string` entry in `types.ts`). A sibling of `list`, not a subtype: joining
@@ -39,10 +43,10 @@ export const INDEXED_COLLECTION_TYPES: PrimitiveType[] = [
  * site that destructures a parameterized collection (subtype checks against
  * `indexed_collection<T>`, type-variable binding, element-type readers) has
  * to expand it — hence ONE shared constant rather than a literal repeated at
- * each site. The element type is `integer`, matching exactly what a
- * qualifying `Range` reported before `range` existed
- * (`indexed_collection<integer>`), so the new type NARROWS the collection
- * kind without perturbing element-type inference downstream.
+ * each site. The element type is `integer`. The kind is `list`: an index
+ * span is a list of integers, so `range <: list<integer>` and a `Range`
+ * value can be assigned to a symbol declared `list` (changed 2026-09-29; the
+ * reading was `indexed_collection<integer>`, which refused that assignment).
  */
 // Frozen because it is shared BY REFERENCE across every `range` subtype and
 // pattern-match call in the process (`isSubtype`, `walkPattern`): in-place
@@ -51,7 +55,7 @@ export const INDEXED_COLLECTION_TYPES: PrimitiveType[] = [
 // mutation site. Same rule as the cached types in `parse.ts`, which are
 // deep-frozen for exactly this reason.
 export const RANGE_STRUCTURAL_TYPE: Type = Object.freeze({
-  kind: 'indexed_collection',
+  kind: 'list',
   elements: 'integer',
 }) as Type;
 

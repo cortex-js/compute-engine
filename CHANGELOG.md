@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **A `Range`, a `Linspace`, a comprehension and a `Tabulate` are typed
+  `list<T>`; they were `indexed_collection<T>`.** A symbol declared `list` or
+  `list<number>` refused every one of them: `ce.declare("L", "list")` followed
+  by `ce.assign("L", ce.box(["Range", 0, 5]))` threw a type error, and the
+  only declaration that accepted a document's ranges was `indexed_collection`,
+  which also admits a tuple and a string. `Range(0, 5)` and `Range(0, n)` with
+  `n` an integer are now `list<integer>`, `Range(0, 1, 0.1)` is `list<real>`,
+  `Linspace(0, 1, 5)` is `list<real>` (it was a bare `indexed_collection` with
+  no element type), a comprehension is a list of its body type and a
+  tabulation is a list of its generator's result. An index span (`Range(1, 5)`,
+  the `range` type) is now a subtype of `list<integer>`, so it is accepted by
+  the same declarations; it was a sibling of `list`. The `list` type makes no
+  claim about the length: `Range(1, +oo)` is a lazy `list<integer>`, exactly as
+  the lazy `Map` over it, `Repeat(x)`, `Cycle(xs)` and `Iterate(f, x)` already
+  were; whether a collection is finite is a property of the value
+  (`isFiniteCollection`), never of the type. What changes for a host: a check
+  such as `type.matches("indexed_collection")` still holds for every one of
+  these values (`list <: indexed_collection`), while a check that a value is
+  NOT a list, or a pinned printed type such as `indexed_collection<integer>`,
+  reads differently. (Tycho row 337.)
+
 ### Issues Resolved
 
 - **A destructuring `let` inside a loop body compiles.**

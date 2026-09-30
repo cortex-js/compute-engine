@@ -110,13 +110,17 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   scalar: SCALAR_TYPES,
   collection: COLLECTION_TYPES,
   indexed_collection: INDEXED_COLLECTION_TYPES,
-  list: [],
-  // An index span has no primitive subtypes. It is a subtype of
-  // `indexed_collection` (and thence `collection`) through the
-  // `indexed_collection` entry above, which lists it. Against a
-  // PARAMETERIZED rhs (`indexed_collection<integer>`, `collection<number>`)
-  // it is expanded structurally to `RANGE_STRUCTURAL_TYPE`
-  // (`indexed_collection<integer>`, defined in `primitive.ts`) in `isSubtype`.
+  // An index span is a list of integers (since 2026-09-29): `range <: list`
+  // here, and `range <: list<integer>` through the structural expansion in
+  // `isSubtype`. Before, `range` was a sibling of `list`, and a symbol
+  // declared `list` refused `Range(1, 10)`.
+  list: ['range'],
+  // An index span has no primitive subtypes. It is a subtype of `list`
+  // (and thence `indexed_collection` and `collection`) through the `list`
+  // entry above, which lists it. Against a PARAMETERIZED rhs
+  // (`list<integer>`, `indexed_collection<integer>`, `collection<number>`)
+  // it is expanded structurally to `RANGE_STRUCTURAL_TYPE` (`list<integer>`,
+  // defined in `primitive.ts`) in `isSubtype`.
   range: [],
   set: [],
   tuple: [],
@@ -1451,17 +1455,16 @@ export function isSubtype(
     return rhs.types.every((rhsType) => isSubtype(lhs, rhsType));
 
   // `range` is the only primitive with a structural reading: an index span is
-  // an indexed collection of finite positive integers, so it must satisfy a
-  // PARAMETERIZED collection rhs (`range <: indexed_collection<integer>`,
-  // `range <: collection<number>`) that the primitive-vs-primitive table
-  // above cannot express. Expanding here, just before the fall-through,
-  // keeps every other primitive on the fast path. The element type is
-  // `integer` (see `RANGE_STRUCTURAL_TYPE`), matching what a qualifying
-  // `Range` reported before this type existed, so the narrowing perturbs no
-  // downstream element-type inference.
-  // Note this does NOT make a range a `list` — `indexed_collection<T>` is not
-  // a subtype of `list<T>`, so `range <: list<integer>` stays false, which is
-  // the intent (they are sibling kinds).
+  // a list of finite positive integers, so it must satisfy a PARAMETERIZED
+  // collection rhs (`range <: list<integer>`,
+  // `range <: indexed_collection<integer>`, `range <: collection<number>`)
+  // that the primitive-vs-primitive table above cannot express. Expanding
+  // here, just before the fall-through, keeps every other primitive on the
+  // fast path. The element type is `integer` (see `RANGE_STRUCTURAL_TYPE`),
+  // matching what a qualifying `Range` reported before this type existed, so
+  // the narrowing perturbs no downstream element-type inference. The kind is
+  // `list` since 2026-09-29: a `Range` value can be assigned to a symbol
+  // declared `list<integer>`.
   if (lhs === 'range') return isSubtype(RANGE_STRUCTURAL_TYPE, rhs);
 
   // `string` is the other primitive with a structural reading: a string is an

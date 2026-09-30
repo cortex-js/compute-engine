@@ -1520,7 +1520,7 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
     // (`lazyConstantMatrix`), so the lambda-body widening has no `unknown`
     // parameter slot to widen the cell's finite claim against.
     expect(result.type.toString()).toBe(
-      'indexed_collection<indexed_collection<integer>>'
+      'list<list<integer>>'
     );
   });
 

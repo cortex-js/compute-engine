@@ -446,8 +446,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     Comprehension: {
       description:
         'Value-producing comprehension: evaluate `body` in nested iteration ' +
-        'over one or more `Element` clauses and collect the results into an ' +
-        'indexed collection (a `List`). Later clauses see earlier bindings; ' +
+        'over one or more `Element` clauses and collect the results into a ' +
+        'list. Later clauses see earlier bindings; ' +
         'independent clauses produce a Cartesian product. A clause with a ' +
         'third operand, `Element(x, xs, cond)`, is a guard: only the ' +
         'elements for which `cond` evaluates to `True` are visited.',
@@ -455,20 +455,19 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // See `Loop`: each `Element` clause's index is a bound variable of this
       // node.
       scoped: indexingSetSites(1),
-      signature:
-        '(body:expression, iterators:expression+) -> indexed_collection',
+      signature: '(body:expression, iterators:expression+) -> list',
       // The handler reads the body operand's type and nothing else.
       type: ([body], context) => {
         if (!body)
           return BoxedType.forResult('nothing', context.engine._typeResolver);
-        // Result is an indexed collection of body.type values. The body's
-        // type may itself be parametric (e.g. a tuple) — wrap in
-        // indexed_collection<...>.
+        // Result is a list of body.type values (`list<T>` since 2026-09-29;
+        // it was `indexed_collection<T>`, which a symbol declared `list`
+        // refused). The body's type may itself be parametric (e.g. a tuple):
+        // wrap it in list<...>. The type says nothing about the length: a
+        // comprehension over an unbounded source is a lazy list, as a `Map`
+        // over it is.
         return BoxedType.forResult(
-          {
-            kind: 'indexed_collection',
-            elements: body.type,
-          },
+          { kind: 'list', elements: body.type },
           context.engine._typeResolver
         );
       },

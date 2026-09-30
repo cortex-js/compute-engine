@@ -431,19 +431,28 @@ A value has type `range` iff it is a `Range` whose bounds are provably:
   type error and the positional form `Slice(xs, 1, oo)` is used instead.
   Revisit if the infinite tail proves common.
 
-Anything else stays `indexed_collection<integer>` /
-`indexed_collection<number>`, exactly as today — so this is a NARROWING
-of `Range`'s result type in the qualifying cases, never a widening
-elsewhere.
+Anything else stays `list<integer>` / `list<real>` / `list<number>`
+(`indexed_collection<…>` until 2026-09-29) — so this is a NARROWING of
+`Range`'s result type in the qualifying cases, never a widening elsewhere.
 
 ### Lattice placement
 
-`range <: indexed_collection<integer>`, added to `INDEXED_COLLECTION_TYPES`
-(`src/common/type/primitive.ts`) and to the `indexed_collection` entry of
-the subtype map (`src/common/type/subtype.ts`). It is NOT parameterized:
+`range <: list<integer>` (since 2026-09-29; `range <: indexed_collection<integer>`
+as a sibling of `list` from 2026-08-14 to then). It is listed in
+`INDEXED_COLLECTION_TYPES` (`src/common/type/primitive.ts`) and in the `list`
+entry of the subtype map (`src/common/type/subtype.ts`), and its structural
+reading (`RANGE_STRUCTURAL_TYPE`) is `list<integer>`. It is NOT parameterized:
 the elements of an index span are always positive integers, so `range`
 carries no element-type argument. Every existing signature that accepts
-`indexed_collection` therefore accepts a `range` unchanged.
+`list`, `list<integer>` or `indexed_collection` accepts a `range`.
+
+The 2026-09-29 move: a symbol declared `list` refused `Range(1, 10)` while
+every other lazy ordered producer (`Map`, `Filter`, `Repeat`, `Cycle`,
+`Iterate`) already typed `list`; at the same time `Range` outside the span
+cases, `Linspace`, `Comprehension` and `Tabulate` moved from
+`indexed_collection<T>` to `list<T>` (Tycho row 337). The `list` type makes
+no claim about the length; finiteness is a property of the value
+(`isFiniteCollection`).
 
 ### Typing rule for `Range`
 

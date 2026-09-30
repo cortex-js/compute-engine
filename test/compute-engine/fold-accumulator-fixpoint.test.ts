@@ -74,7 +74,7 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
       ce
         .box(['Scan', RANGE, ['Function', BODY, 'acc', 'i'], ['List']] as any)
         .type.toString()
-    ).toBe('indexed_collection<list<integer | nan>>');
+    ).toBe('list<list<integer | nan>>');
     expect(
       ce
         .box([

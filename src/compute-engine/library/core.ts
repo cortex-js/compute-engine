@@ -1248,20 +1248,18 @@ function heldComponentType(
  * A mapped collection's type: the source's shape carrying the mapping's
  * result as its element type. Mirrors the shaping `Map`'s own type handler
  * performs (`mapResultType`, `library/collections.ts`): a dimensioned list
- * keeps its dimensions, an index span widens (a `range` is unparameterized
- * and its elements are indices by definition), a string yields a `list` even
- * for a character-valued mapping, and anything else yields a plain
- * `collection`.
+ * keeps its dimensions, an index span yields a `list` (a `range` is
+ * unparameterized, its elements are indices by definition, and a mapped
+ * span is no longer a span), a string yields a `list` even for a
+ * character-valued mapping, and anything else yields a plain `collection`.
  */
 function pipeMapResultType(source: Readonly<Type>, elementType: Type): Type {
   if (typeof source === 'string') {
-    if (source === 'list' || source === 'string')
+    if (source === 'list' || source === 'string' || source === 'range')
       return { kind: 'list', elements: elementType };
     if (source === 'set') return { kind: 'set', elements: elementType };
     if (source === 'indexed_collection' || source === 'collection')
       return { kind: source, elements: elementType };
-    if (source === 'range')
-      return { kind: 'indexed_collection', elements: elementType };
     return { kind: 'collection', elements: elementType };
   }
   if (source.kind === 'list')

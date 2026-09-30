@@ -5708,7 +5708,7 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
   test('the element type does not leak the endpoint', () => {
     // Every member of `Range(1, +oo)` is a finite integer.
     expect(String(ce2.expr(['Range', 1, OO]).type)).toBe(
-      'indexed_collection<integer>'
+      'list<integer>'
     );
     // An `Interval` reports the same elements however far it reaches.
     expect(String(ce2.expr(['Interval', 0, OO]).type)).toBe('set<real>');
@@ -5829,7 +5829,7 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
     // both contradicts the declared finite element type and loops a consumer
     // forever on the same value. Every element-producing route declines.
     const r = ce2.expr(['Range', NOO, -1]);
-    expect(String(r.type)).toBe('indexed_collection<integer>');
+    expect(String(r.type)).toBe('list<integer>');
     expect(r.isEnumerableCollection).toBe(false);
     expect([...r.each()]).toEqual([]);
     expect(r.at(1)).toBeUndefined();

@@ -1232,6 +1232,71 @@ export function extremumType(
 }
 
 /**
+ * Whether the operand is, by its structure, a collection with no last
+ * element: a `Range` with an infinite endpoint (`Range(1, +oo)`), a
+ * `Repeat(x)` with no count, a `Cycle`, or an `Iterate` with no count.
+ *
+ * The `list<T>` type carries no length claim (a lazy `Range`, `Map`,
+ * `Repeat` and `Cycle` are all lists), so an aggregate that folds every
+ * element — `Sum`, `Product`, `Mean`, `Max`, `Min` — cannot read finiteness
+ * off the type. It reads it off the structure instead, for the producers
+ * that state it: the sum of `Range(1, +oo)` is not an integer and its
+ * maximum is not one of its (finite) elements. A view that keeps every
+ * element of such a producer (`Map`, `Filter`, `Scan`, `Join`, `Append`,
+ * `Rest`, `Drop`, `Reverse`, a rotation) has no last element either, and a
+ * `Zip` has none when every source has none. A producer this does not
+ * recognize is read as finite, which is what the type alone says; a symbol
+ * that HOLDS an unbounded producer is such a case, since a symbol has no
+ * application structure.
+ */
+function isUnboundedProducer(d: OperandDescriptor): boolean {
+  const s = d.structureOf?.();
+  if (s === undefined || s.kind !== 'application') return false;
+  // A bound is an infinite extent when it is a signed infinity, and it may
+  // be one when its type admits an infinity (`number`, `extended_real`, a
+  // symbol declared so) and no fact proves it finite. The bare numeric
+  // names below `complex` are finite, so `matches('complex')` is the
+  // finiteness test.
+  const mayBeInfinite = (c: OperandDescriptor): boolean =>
+    isSubtype(c.type, SIGNED_INFINITY_TYPE) ||
+    (c.facts.finite === false &&
+      (c.facts.sgn === 'positive' || c.facts.sgn === 'negative')) ||
+    (!isSubtype(c.type, 'complex') && c.facts.finite !== true);
+  switch (s.head) {
+    case 'Range':
+      // `Range(n)` is `Range(1, n)`; the bounds are the first two operands
+      // of the longer forms. A step is never an extent.
+      return s.children.slice(0, 2).some(mayBeInfinite);
+    case 'Repeat':
+      return s.children.length === 1;
+    case 'Cycle':
+      return true;
+    case 'Iterate':
+      return s.children.length < 3;
+    case 'Map':
+    case 'Filter':
+    case 'Scan':
+    case 'Join':
+    case 'ListJoin':
+    case 'Append':
+    case 'Prepend':
+    case 'Rest':
+    case 'Drop':
+    case 'Reverse':
+    case 'RotateLeft':
+    case 'RotateRight':
+      // `Map(f, xs)` takes the function first; the others take the
+      // collection first. Any unbounded child decides.
+      return s.children.some(isUnboundedProducer);
+    case 'Zip':
+      // A zip stops at its shortest source.
+      return s.children.every(isUnboundedProducer);
+    default:
+      return false;
+  }
+}
+
+/**
  * `Max`/`Min` over operands whose values (the elements, for a `list`
  * operand) are all on the extended real line, with or
  * without NaN, or `undefined` for any other operand. The result is one of
@@ -1251,13 +1316,19 @@ function extendedExtremumType(
   for (const d of ops) {
     const t = resolveTypeAlias(d.type);
     let v: Type = t;
-    // Only a `list` has a finite length. An `indexed_collection` may be
-    // infinite (`Range(1, ∞)`), and its maximum is then `+∞` although
-    // every element is finite.
+    // A `list` operand contributes its elements. A list with no last
+    // element (`Range(1, ∞)`, read off the structure: the type carries no
+    // length claim) has a maximum of `+∞` although every element is finite,
+    // so it is left to the top type. An `indexed_collection` operand may be
+    // infinite too and is left to the top type as well.
     if (typeof t === 'object' && t.kind === 'list') {
+      if (isUnboundedProducer(d)) return undefined;
       v = t.elements;
       hasNaN = true;
     }
+    // An index span is a finite, non-empty run of positive integers, so its
+    // extremum is one of them.
+    if (t === 'range') v = 'integer';
     if (!isSubtype(v, EXTENDED_REAL_OR_NAN_TYPE)) return undefined;
     values.push(v);
   }
@@ -1501,11 +1572,16 @@ export function extendedReductionType(
       // A matrix (`list<real^2x2>`) sums column by column, to a list, not
       // to a scalar.
       if ((t.dimensions?.length ?? 1) > 1) return undefined;
+      // A list with no last element (`Range(1, ∞)`, read off the structure:
+      // the type carries no length claim) has no finite sum; it is left to
+      // the top type, as an `indexed_collection` operand is.
+      if (isUnboundedProducer(d)) return undefined;
       v = t.elements;
       mayBeEmpty = true;
     }
-    // Only a `list` has a finite length: an `indexed_collection` may be
-    // infinite (`Range(1, ∞)`), and its sum is then not a finite value.
+    // An index span is a finite, non-empty run of positive integers: its
+    // sum and product are integers and its mean is rational.
+    if (t === 'range') v = 'integer';
     if (!isSubtype(v, EXTENDED_REAL_OR_NAN_TYPE)) return undefined;
     values.push(v);
   }

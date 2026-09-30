@@ -31,21 +31,21 @@ describe('Range element type reads the lower bound and the step, not the upper',
     // The elements are 1 and 2; the upper bound is never one of them.
     expect(ce.box(['Range', 1, 2.5]).evaluate().toString()).toBe('[1,2]');
     expect(ce.box(['Range', 1, 2.5]).type.toString()).toBe(
-      'indexed_collection<integer>'
+      'list<integer>'
     );
     expect(ce.box(['Range', 1, 5.7, 2]).evaluate().toString()).toBe('[1,3,5]');
     expect(ce.box(['Range', 1, 5.7, 2]).type.toString()).toBe(
-      'indexed_collection<integer>'
+      'list<integer>'
     );
   });
 
   test('a fractional LOWER bound or step still widens to real', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Range', 0.5, 2.5]).type.toString()).toBe(
-      'indexed_collection<real>'
+      'list<real>'
     );
     expect(ce.box(['Range', 1, 3, 0.5]).type.toString()).toBe(
-      'indexed_collection<real>'
+      'list<real>'
     );
   });
 
@@ -54,7 +54,7 @@ describe('Range element type reads the lower bound and the step, not the upper',
     ce.declare('N', 'real');
     ce.assign('N', 150);
     expect(ce.box(['Range', 1, ['Square', 'N']]).type.toString()).toBe(
-      'indexed_collection<integer>'
+      'list<integer>'
     );
   });
 });

@@ -60,7 +60,7 @@ describe('LAZY COLLECTION AT A LIST PARAMETER', () => {
     ce.assign('L', ce.box(['List', ...L]));
     const arg = ce.parse('u(L)').evaluate();
     expect(arg.isLazyCollection).toBe(true);
-    expect(arg.type.toString()).toBe('indexed_collection<integer | nan>');
+    expect(arg.type.toString()).toBe('list<integer | nan>');
   });
 
   test('parse route: s(u(L)) evaluates to the compiled values', () => {
