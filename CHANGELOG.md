@@ -2,6 +2,20 @@
 
 ### Issues Resolved
 
+- **`LerchPhi` and `PolyLog` answer to the engine's precision for real
+  operands inside the series' disk of convergence, instead of doubles at
+  every precision.** With `ce.precision = 30`, `PolyLog(2, 1/3).N()` was
+  `0.3662132299770634` (correct: `0.366213229977063487616746297664`) and
+  `LerchPhi(1/2, 2, 1).N()` was `1.164481052930025` (correct:
+  `1.16448105293002501180531264032`). For real z, s, a with `|z| < 1`,
+  `bigLerchPhi` now sums Φ(z,s,a) = Σ zᵏ(k+a)^(−s) on the engine's bignum
+  directly, with a proven tail bound on the series' remainder, and `PolyLog`
+  rides on it at a = 1 (Liₛ(z) = z·Φ(z,s,1)); a complex operand or a `z`
+  outside the disk keeps the existing double kernels. At the engine's default
+  precision (above machine), this also answers several cases the double
+  kernel used to decline as unreliable, `PolyLog(-1.5, -0.99)` among them.
+  (#374, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **A self-recursive function that builds a list is typed `list<T>`.** With
   `F` declared `(unknown, unknown) -> unknown` and assigned
   `(n, K) ↦ { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }`, the

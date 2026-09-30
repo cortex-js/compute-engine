@@ -270,13 +270,19 @@ describe('PolyLog at z = 1 and z = −1 for the elementary orders', () => {
 });
 
 describe('PolyLog declines rather than certify an unreliable widened value', () => {
-  test('a large negative order near, but not at, z = −1 (van Wijngaarden Euler transform) declines', () => {
+  test('a large negative order near, but not at, z = −1 now answers, via the arbitrary-precision series', () => {
     // z = −1 exactly goes through the exact Dirichlet eta reduction below,
-    // not this numeric kernel — z = −0.99 does not. mpmath:
-    // polylog(-1.5,-0.99) = -0.119558829589013870122988613502, but the
-    // Euler transform's own accuracy there (see `seriesUnreliable`) is
-    // conservatively assumed unreliable past its linear bound.
-    expect(li(-1.5, -0.99).N().numericValue).toBeUndefined();
+    // not this numeric kernel — z = −0.99 does not. This used to decline:
+    // the double kernel's Euler transform (`seriesUnreliable`) conservatively
+    // assumes itself unreliable past its linear bound here. At the default
+    // engine precision (above machine, cortex-js/compute-engine#374),
+    // `bigPolyLog`'s series answers directly and with a proven tail bound
+    // instead, ahead of that double kernel.
+    // mpmath: polylog(-1.5,-0.99) = -0.119558829589013870122988613502
+    expect(li(-1.5, -0.99).N().re).toBeCloseTo(
+      -0.119558829589013870122988613502,
+      14
+    );
   });
 
   test('a milder negative order at z = −1 answers exactly, via the Dirichlet eta reduction', () => {
