@@ -1664,7 +1664,9 @@ export function refineExactConstants<T>(
           const atLimit = digits >= limit;
           const narrowAtLimit: NarrowAtLimit = (lo, hi, scale) =>
             atLimit &&
-            hi.sub(lo).lte(scale === undefined ? narrowWidth : narrowWidth.mul(scale));
+            hi
+              .sub(lo)
+              .lte(scale === undefined ? narrowWidth : narrowWidth.mul(scale));
           return { bounded: true, result: decide(enclosures, narrowAtLimit) };
         } finally {
           atTransientPrecision.delete(ce);

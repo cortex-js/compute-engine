@@ -3157,7 +3157,11 @@ export function validateArguments(
       // see the required-param gate.
       if (refusesAbsentArgument(ce, op, param, internals)) {
         result.push(
-          ce.typeError(displayOptParams[i - params.length] ?? param, op.type, op)
+          ce.typeError(
+            displayOptParams[i - params.length] ?? param,
+            op.type,
+            op
+          )
         );
         isValid = false;
         i += 1;

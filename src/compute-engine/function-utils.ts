@@ -3205,9 +3205,7 @@ function makeLambda(
     if (t !== undefined && isSubtype(t, 'number')) acc.push(i);
     return acc;
   }, []);
-  const absorbAbsenceAtNumericParams = (
-    values: Expression[]
-  ): Expression[] =>
+  const absorbAbsenceAtNumericParams = (values: Expression[]): Expression[] =>
     numericParamIndexes.length === 0
       ? values
       : values.map((v, i) =>
@@ -3451,9 +3449,7 @@ function makeLambda(
       }
 
       // Evaluate body with known args in a fresh scope
-      let evaluatedKnownArgs = absorbAbsenceAtNumericParams(
-        args.map(argValue)
-      );
+      let evaluatedKnownArgs = absorbAbsenceAtNumericParams(args.map(argValue));
 
       // An argument that only became an error when EVALUATED (`f(g(1))` with
       // `g(1)` failing) bubbles like a literal one — see step 2.

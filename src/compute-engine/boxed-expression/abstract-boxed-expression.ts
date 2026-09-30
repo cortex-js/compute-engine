@@ -166,8 +166,9 @@ function _couldBenefitFromExpand(
  * option is NOT this preview: it asks for every element of a finite
  * collection.
  */
-export const DISPLAY_MATERIALIZATION: readonly [number, number] =
-  Object.freeze([5, 5] as const);
+export const DISPLAY_MATERIALIZATION: readonly [number, number] = Object.freeze(
+  [5, 5] as const
+);
 
 /**
  * _BoxedExpression

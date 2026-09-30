@@ -2685,11 +2685,7 @@ function makeCanonicalFunctionCore(
         : (ce._staticPinnedCallees?.get(def.value) ??
           (isFunction(heldLiteral, 'Function') ? heldLiteral : undefined));
       const checkedType = def.value.inferredType
-        ? pinnedValidationSignature(
-            valueType,
-            boxedOps.length,
-            pinnedLiteral
-          )
+        ? pinnedValidationSignature(valueType, boxedOps.length, pinnedLiteral)
         : placeholderSlotsAs(valueType, def.value._signatureSkeleton, 'any');
       const enforcesAnnotations =
         pinnedLiteral !== undefined &&

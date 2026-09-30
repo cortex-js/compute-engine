@@ -4411,7 +4411,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const lifted = canonicalFunctionLiteral(f);
           // A stage whose free unknowns became parameters is applied as
           // lifted here, so that `apply()` does not lift it a second time.
-          if (isFunction(lifted, 'Function') && lifted.nops > 1) callee = lifted;
+          if (isFunction(lifted, 'Function') && lifted.nops > 1)
+            callee = lifted;
           if (isFunction(lifted, 'Function') && lifted.nops === 1) {
             callee = f.evaluate();
             if (isRefutablePipeTarget(callee))

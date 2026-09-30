@@ -1404,7 +1404,7 @@ function lerchFunctionalWithError(
     c.abs() + order.abs() + 2 + (order.sub(one).abs() + 1) / logV;
   // e^{iπ(s−1)/2} and (2π)^(s−1) are exponentials of rounded arguments.
   const factorError = eps * (sm1.abs() * (Math.PI / 2 + 1.84) + 8);
-  let error =
+  const error =
     eps *
       (sm1.abs() * (Math.abs(Math.log(negLogZ.abs())) + Math.PI) + 8) *
       n0.abs() +

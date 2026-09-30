@@ -1100,9 +1100,7 @@ const UNDERFLOW_BOUND = 1e-280;
 function gammaErrorUlps(x: number): number {
   const base = 256 + 8 * Math.abs(x);
   if (x >= 0.5) return base;
-  return (
-    base + (16 * Math.PI * Math.abs(x)) / Math.abs(Math.sin(Math.PI * x))
-  );
+  return base + (16 * Math.PI * Math.abs(x)) / Math.abs(Math.sin(Math.PI * x));
 }
 
 /** `[v − r·|v|, v + r·|v|]` with `r = ulps·ε`, rounded outward. A
@@ -1582,8 +1580,7 @@ function binomialRaw(
           binomialPointEnclosure(nMin, kHi).lo
         );
       };
-      if (kVal.hi >= 0)
-        part(nVal.hi, nVal.lo, Math.max(kVal.lo, 0), kVal.hi);
+      if (kVal.hi >= 0) part(nVal.hi, nVal.lo, Math.max(kVal.lo, 0), kVal.hi);
       if (kVal.lo < 0) part(nVal.lo, nVal.hi, kVal.lo, Math.min(kVal.hi, 0));
       // An overflow is a finite value above the largest double.
       return ok({ lo: lo === Infinity ? Number.MAX_VALUE : lo, hi });

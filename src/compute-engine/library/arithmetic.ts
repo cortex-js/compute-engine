@@ -803,20 +803,13 @@ function exactModUnderN(
   if (ea === undefined) return undefined;
   const em = exactOf(m, 1);
   if (em === undefined || em.isSame(0)) return undefined;
-  const k = roundExactReal(
-    ce.function('Divide', [ea, em]).evaluate(),
-    'floor'
-  );
+  const k = roundExactReal(ce.function('Divide', [ea, em]).evaluate(), 'floor');
   if (k === undefined) return undefined;
   const exact = ce
-    .function('Add', [
-      ea,
-      ce.function('Multiply', [ce.number(-k), em]),
-    ])
+    .function('Add', [ea, ce.function('Multiply', [ce.number(-k), em])])
     .evaluate();
   if (!isExactRealLiteral(exact)) return undefined;
-  const fromFloat =
-    (isNumber(a) && !a.isExact) || (isNumber(m) && !m.isExact);
+  const fromFloat = (isNumber(a) && !a.isExact) || (isNumber(m) && !m.isExact);
   const n = exact.isInteger ? roundExactReal(exact, 'floor') : undefined;
   if (fromFloat && n !== undefined)
     return ce.number(ce._numericValue(new BigDecimal(n.toString())));
@@ -890,8 +883,7 @@ function exactBaseIntegerPower(
   // A rational base is: its float has the error of the working precision
   // (`(1/3)^1000000` had only 15 correct digits).
   if (isNumber(b) && b.isInteger === true) return undefined;
-  if (!isExactRealLiteral(b) && !isExactConstantExpression(b))
-    return undefined;
+  if (!isExactRealLiteral(b) && !isExactConstantExpression(b)) return undefined;
   const ce = expression.engine;
   const working = ce.precision;
   const digits = working + Math.ceil(Math.log10(n)) + 2;

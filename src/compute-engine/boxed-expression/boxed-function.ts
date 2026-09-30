@@ -6739,10 +6739,7 @@ function exactJumpBroadcastOperands(
   let divisor: number | undefined;
   if (jump === 'quotient') {
     const real = (x: Expression | undefined): number | undefined =>
-      x !== undefined &&
-      isNumber(x) &&
-      !x.isComplex &&
-      x.isFinite === true
+      x !== undefined && isNumber(x) && !x.isComplex && x.isFinite === true
         ? x.re
         : undefined;
     divisor = real(tail[1]);
