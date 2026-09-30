@@ -83,6 +83,13 @@ export function bernoulliRational(n: number): [bigint, bigint] {
  * Bernoulli polynomial Bₙ(x) = Σ_{k=0}^n C(n,k)·Bₖ·x^{n−k}, for a rational
  * point x = xNum/xDen. Used for the exact closed form
  * ζ(−n,a) = −Bₙ₊₁(a)/(n+1) at a rational base point a (`library/arithmetic.ts`).
+ *
+ * With D·Bₙ(x) = Σ eⱼ xʲ (`bernoulliPolynomialInteger`), the value is
+ * Σ eⱼ xNumʲ xDen^(n−j) / (D·xDenⁿ): the sum is an integer, computed by
+ * Horner's rule in xNum with no gcd reduction, and the fraction is reduced
+ * once at the end. A gcd reduction after every term instead costs 0.5 s at
+ * n = 101, x = 10⁻³⁰ and 10 s at x = 10⁻¹⁰⁰, because the numbers grow with
+ * n and with the digits of x.
  */
 export function bernoulliPolynomialRational(
   n: number,
@@ -90,29 +97,42 @@ export function bernoulliPolynomialRational(
 ): [bigint, bigint] {
   if (!Number.isInteger(n) || n < 0)
     throw new RangeError(`bernoulliPolynomialRational: invalid degree ${n}`);
-  const [xNum, xDen] = x;
-  let sumNum = 0n;
-  let sumDen = 1n;
-  let powNum = 1n; // xNum^{n-k}, grows as k counts down from n to 0
-  let powDen = 1n;
-  let binom = 1n; // C(n, k), starts at k = n → C(n, n) = 1
-  for (let k = n; k >= 0; k--) {
-    const [bNum, bDen] = bernoulliRational(k);
-    if (bNum !== 0n) {
-      const termNum = binom * bNum * powNum;
-      const termDen = bDen * powDen;
-      sumNum = sumNum * termDen + termNum * sumDen;
-      sumDen = sumDen * termDen;
-      [sumNum, sumDen] = reduce(sumNum, sumDen);
-    }
-    if (k > 0) {
-      // C(n, k-1) = C(n, k) · k / (n-k+1)
-      binom = (binom * BigInt(k)) / BigInt(n - k + 1);
-      powNum *= xNum;
-      powDen *= xDen;
-    }
+  const [xNum, xDen] = x[1] < 0n ? [-x[0], -x[1]] : x;
+  const { e, d } = bernoulliPolynomialInteger(n);
+  let acc = e[n];
+  let denPower = 1n; // xDen^(n−j)
+  for (let j = n - 1; j >= 0; j--) {
+    denPower *= xDen;
+    acc = acc * xNum + e[j] * denPower;
   }
-  return reduce(sumNum, sumDen);
+  return reduce(acc, d * denPower);
+}
+
+/**
+ * Coefficients of the Bernoulli polynomial Bₙ(x) = Σ_{k=0}^n C(n,k)·Bₖ·x^{n−k},
+ * as exact reduced rationals ordered from the x^n term to the x^0 term
+ * (Horner order, index k holds the coefficient of x^{n−k}).
+ *
+ * `bernoulliPolynomialRational` evaluates Bₙ(x) directly at a rational point
+ * x; this returns the coefficients themselves, for building Bₙ(a) as a
+ * compute-engine expression in `a` when `a` is not a rational point — a
+ * symbolic, float, or complex base point
+ * (`library/arithmetic.ts`'s `hurwitzZetaNegativeIntegerExpression`).
+ */
+export function bernoulliPolynomialCoefficients(n: number): [bigint, bigint][] {
+  if (!Number.isInteger(n) || n < 0)
+    throw new RangeError(
+      `bernoulliPolynomialCoefficients: invalid degree ${n}`
+    );
+  const coefficients: [bigint, bigint][] = [];
+  let binom = 1n; // C(n, k), starts at k = 0 → C(n, 0) = 1
+  for (let k = 0; k <= n; k++) {
+    const [bNum, bDen] = bernoulliRational(k);
+    coefficients.push(reduce(binom * bNum, bDen));
+    // C(n, k+1) = C(n, k) · (n−k)/(k+1)
+    if (k < n) binom = (binom * BigInt(n - k)) / BigInt(k + 1);
+  }
+  return coefficients;
 }
 
 /**
@@ -207,15 +227,12 @@ function rationalToDouble(num: bigint, den: bigint): number {
 const BERNOULLI_POLY_INTEGER: Map<number, { e: bigint[]; d: bigint }> =
   new Map();
 
-/**
- * ζ(−n, a) = −Bₙ₊₁(a)/(n+1) for integer n ≥ 0 at a double a, within 1 ulp:
- * a double is the exact rational p/2^q, so the Bernoulli polynomial is
- * evaluated exactly (Horner's rule over one common denominator, with no gcd
- * reductions) and rounded once. At n = 0 it is 1/2 − a. The cost is about
- * 50 µs at n = 210 and a few µs for n up to 30.
- */
-export function hurwitzZetaNegativeIntegerAt(n: number, a: number): number {
-  const N = n + 1;
+/** The integer coefficients eⱼ and the common denominator D of B_N(x), with
+ * D·B_N(x) = Σ eⱼ xʲ (memoized in `BERNOULLI_POLY_INTEGER`). */
+export function bernoulliPolynomialInteger(N: number): {
+  e: bigint[];
+  d: bigint;
+} {
   let c = BERNOULLI_POLY_INTEGER.get(N);
   if (c === undefined) {
     let d = 1n;
@@ -233,6 +250,19 @@ export function hurwitzZetaNegativeIntegerAt(n: number, a: number): number {
     c = { e, d };
     BERNOULLI_POLY_INTEGER.set(N, c);
   }
+  return c;
+}
+
+/**
+ * ζ(−n, a) = −Bₙ₊₁(a)/(n+1) for integer n ≥ 0 at a double a, within 1 ulp:
+ * a double is the exact rational p/2^q, so the Bernoulli polynomial is
+ * evaluated exactly (Horner's rule over one common denominator, with no gcd
+ * reductions) and rounded once. At n = 0 it is 1/2 − a. The cost is about
+ * 50 µs at n = 210 and a few µs for n up to 30.
+ */
+export function hurwitzZetaNegativeIntegerAt(n: number, a: number): number {
+  const N = n + 1;
+  const c = bernoulliPolynomialInteger(N);
   const [p, den] = doubleToRational(a);
   const q = BigInt(den.toString(2).length - 1); // den = 2^q
   // Σ eⱼ (p/2^q)ʲ · 2^{qN} = Σ eⱼ pʲ 2^{q(N−j)}, by Horner in p.
@@ -240,6 +270,80 @@ export function hurwitzZetaNegativeIntegerAt(n: number, a: number): number {
   for (let j = N - 1; j >= 0; j--)
     acc = acc * p + (c.e[j] << (q * BigInt(N - j)));
   return rationalToDouble(-acc, c.d * (1n << (q * BigInt(N))) * BigInt(N));
+
+/** A complex value with exact bigint-rational real and imaginary parts. */
+export interface GaussianRational {
+  re: [bigint, bigint];
+  im: [bigint, bigint];
+}
+
+/**
+ * ζ(−n,a) for integer n ≥ 0 and a Gaussian rational base point
+ * a = p/q + i·r/s, as an exact reduced Gaussian rational: ζ(−n,a) =
+ * −Bₙ₊₁(a)/(n+1), the Bernoulli polynomial (DLMF 25.11.14). Generalizes
+ * `hurwitzZetaNegativeInteger` (real a) to a complex base point.
+ *
+ * Evaluating the same polynomial in floating point instead loses several
+ * digits at these orders: Horner's intermediate terms grow like aⁿ⁺¹, which
+ * for |a| > 1 is far past the polynomial's own magnitude — at n = 40,
+ * a = 2.7, a BigDecimal Horner evaluation at the engine's working precision
+ * is off from the 11th significant digit on (#374). Exact integer
+ * arithmetic has no working precision to lose it from.
+ *
+ * With N = n + 1, a = (P + i·R)/Q over the common denominator Q = lcm(q, s)
+ * (the variables `p`, `r`, `q` below) and D·B_N(x) = Σ eⱼ xʲ
+ * (`bernoulliPolynomialInteger`), the value is
+ * −Σ eⱼ (P + i·R)ʲ Q^(N−j) / (D·Q^N·N). The sum is an integer, computed by
+ * Horner's rule in P + i·R with no gcd reduction, and the fraction is
+ * reduced once at the end. A gcd reduction at every step instead costs more
+ * than a minute at n = 100, a = 1e−300, because the numbers grow with n and
+ * with the digits of a.
+ *
+ * The size of the result grows like N times the digit count of Q, P and R:
+ * the caller bounds that product before it calls this function.
+ */
+export function hurwitzZetaNegativeIntegerGaussian(
+  n: number,
+  a: GaussianRational
+): GaussianRational {
+  const { re, im, den } = hurwitzZetaNegativeIntegerGaussianParts(n, a);
+  return { re: reduce(re, den), im: reduce(im, den) };
+}
+
+/**
+ * The value of `hurwitzZetaNegativeIntegerGaussian(n, a)` as
+ * (re + i·im)/den, NOT reduced: den > 0 and the three integers can share a
+ * common factor. The gcd of the final reduction costs about as much as the
+ * whole evaluation when the numbers are large, so a caller that only
+ * rounds the value to a decimal (one division of re and im by den) uses
+ * this form directly.
+ */
+export function hurwitzZetaNegativeIntegerGaussianParts(
+  n: number,
+  a: GaussianRational
+): { re: bigint; im: bigint; den: bigint } {
+  if (!Number.isInteger(n) || n < 0)
+    throw new RangeError(
+      `hurwitzZetaNegativeIntegerGaussian: invalid index ${n}`
+    );
+  const N = n + 1;
+  const { e, d } = bernoulliPolynomialInteger(N);
+  const [reNum, reDen] = a.re[1] < 0n ? [-a.re[0], -a.re[1]] : a.re;
+  const [imNum, imDen] = a.im[1] < 0n ? [-a.im[0], -a.im[1]] : a.im;
+  const q = (reDen / gcd(reDen, imDen)) * imDen;
+  const p = reNum * (q / reDen);
+  const r = imNum * (q / imDen);
+  // Horner's rule: acc ← acc·(p + i·r) + eⱼ·q^(N−j), for j = N−1 … 0.
+  let accRe = e[N];
+  let accIm = 0n;
+  let qPower = 1n;
+  for (let j = N - 1; j >= 0; j--) {
+    qPower *= q;
+    const nextRe = accRe * p - accIm * r + e[j] * qPower;
+    accIm = accRe * r + accIm * p;
+    accRe = nextRe;
+  }
+  return { re: -accRe, im: -accIm, den: d * qPower * BigInt(N) };
 }
 
 /**

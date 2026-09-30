@@ -95,6 +95,9 @@ import {
   zetaNegativeInteger,
   hurwitzZetaNegativeInteger,
   generalizedZetaNegativeInteger,
+  bernoulliPolynomialCoefficients,
+  hurwitzZetaNegativeIntegerGaussian,
+  type GaussianRational,
 } from '../numerics/bernoulli.js';
 import {
   gamma,
@@ -2319,6 +2322,92 @@ function zetaAtInfiniteOperand(
 const HURWITZ_PEEL_LIMIT = 20;
 
 /**
+ * The largest order n for which ζ(−n, a) is rewritten as the Bernoulli
+ * polynomial −Bₙ₊₁(a)/(n+1) (DLMF 25.11.14), in `evaluateHurwitzZeta` and
+ * `evaluateGeneralizedZeta`. Bₙ₊₁'s bigint numerator and denominator grow
+ * with n (denominator via von Staudt–Clausen, numerator faster than n!), so
+ * past this order the closed form is expensive to build for little benefit;
+ * the general kernel below stays available for a numeric `a` past the cap.
+ */
+const HURWITZ_NEGATIVE_ORDER_LIMIT = 100;
+
+/**
+ * ζ(−n, a) = −Bₙ₊₁(a)/(n+1) (DLMF 25.11.14), as a compute-engine expression
+ * in `a`, built by Horner's method from `bernoulliPolynomialCoefficients`
+ * using CE's own (exact, symbolic) arithmetic.
+ *
+ * Used only for a symbolic `a` (a free variable somewhere in it, or an
+ * irrational value with no exact rational form, such as `Sqrt(2)`): there is
+ * no numeric value to extract a rational from, so this is the only route to
+ * a closed form. A numeric `a` uses `hurwitzZetaNegativeInteger` (rational)
+ * or `hurwitzZetaNegativeIntegerGaussian` (float or complex) instead — exact
+ * bigint arithmetic throughout, never this expression's own `.mul`/`.add`,
+ * which under `.N()` would repeat the cancellation documented on
+ * `hurwitzZetaNegativeIntegerGaussian`.
+ */
+function hurwitzZetaNegativeIntegerExpression(
+  engine: ComputeEngine,
+  n: number,
+  a: Expression
+): Expression {
+  const coefficients = bernoulliPolynomialCoefficients(n + 1);
+  let polynomial: Expression = engine.number(coefficients[0]);
+  for (let i = 1; i < coefficients.length; i++) {
+    polynomial = polynomial.mul(a);
+    const c = coefficients[i];
+    if (c[0] !== 0n) polynomial = polynomial.add(engine.number(c));
+  }
+  return polynomial.mul(engine.number([-1n, BigInt(n + 1)]));
+}
+
+/**
+ * The exact bigint rational for a finite `BigDecimal`'s decimal digits
+ * (`value = significand · 10^exponent`). A literal such as `2.7` is stored
+ * with `significand = 27n, exponent = -1` — its exact decimal value, not a
+ * binary (double) rounding of it — so this is exact for any number literal
+ * written in decimal, and for a computed value it is exact to the working
+ * precision that value was rounded to.
+ */
+function rationalFromBigDecimal(
+  bd: BigDecimal | undefined
+): [bigint, bigint] | undefined {
+  if (bd === undefined || !bd.isFinite()) return undefined;
+  const { significand, exponent } = bd;
+  return exponent >= 0
+    ? [significand * 10n ** BigInt(exponent), 1n]
+    : [significand, 10n ** BigInt(-exponent)];
+}
+
+/**
+ * The exact Gaussian rational for a finite numeric literal `a` (float or
+ * complex, real and imaginary parts each read from their `BigDecimal` via
+ * `rationalFromBigDecimal`), or `undefined` when `a` carries no such exact
+ * decimal value (a `NaN`/infinite component, or an exact irrational such as
+ * a radical, which has no `bignumRe` decimal expansion to read as exact).
+ */
+function gaussianRationalFromNumber(
+  a: Expression
+): GaussianRational | undefined {
+  const re = rationalFromBigDecimal(a.bignumRe);
+  if (re === undefined) return undefined;
+  if (!a.isComplex) return { re, im: [0n, 1n] };
+  const im = rationalFromBigDecimal(a.bignumIm);
+  if (im === undefined) return undefined;
+  return { re, im };
+}
+
+/** `value` as a compute-engine expression: a plain exact number when its
+ * imaginary part is exactly 0, otherwise an exact `Complex`. */
+function gaussianRationalToExpression(
+  engine: ComputeEngine,
+  value: GaussianRational
+): Expression {
+  const re = engine.number(value.re);
+  if (value.im[0] === 0n) return re;
+  return engine.function('Complex', [re, engine.number(value.im)]);
+}
+
+/**
  * Evaluate HurwitzZeta(s,a) = Σ (k+a)^-s, a pole at every non-positive
  * integer a when Re(s) > 0 (ported from enumeratio's `evaluateHurwitz`).
  * Shared by `HurwitzZeta` and by `Zeta`'s two-argument form for Re(a) > 0
@@ -2333,16 +2422,52 @@ function evaluateHurwitzZeta(
   const atInfinity = zetaAtInfiniteOperand(engine, s, a);
   if (atInfinity !== undefined) return atInfinity ?? undefined;
 
-  // ζ(-n,a) = -B_{n+1}(a)/(n+1), n ≥ 0: exact for a rational a, checked
-  // before any numeric path so N() reaches it too.
+  // ζ(-n,a) = -B_{n+1}(a)/(n+1), n ≥ 0 (DLMF 25.11.14). Checked before any
+  // numeric path so N() reaches it too. Three routes, all exact bigint
+  // arithmetic except the last:
   const sInt = asSmallInteger(s);
-  if (sInt !== null && sInt <= 0 && -sInt <= 100) {
+  if (sInt !== null && sInt <= 0 && -sInt <= HURWITZ_NEGATIVE_ORDER_LIMIT) {
+    // 1. `a` is already tagged an exact rational or integer.
     const ra = asRational(a);
     if (ra !== undefined) {
       const exact = engine.number(
         hurwitzZetaNegativeInteger(-sInt, [BigInt(ra[0]), BigInt(ra[1])])
       );
       return numericApproximation ? exact.N() : exact;
+    }
+
+    // 2. `a` is a finite float or complex literal: its real/imaginary parts
+    // are exact decimals (`rationalFromBigDecimal`), so the polynomial is
+    // computed as an exact Gaussian rational and only rounded once, at the
+    // end, converting to a float — never inside Horner's method, where
+    // `.mul`/`.add` at the engine's working precision would lose digits to
+    // the same cancellation `hurwitzZetaNegativeIntegerGaussian` avoids.
+    // Float contagion (`shouldNumericize`): the result is numeric even
+    // under plain `evaluate()` once `a` itself is inexact.
+    if (isNumber(a) && !a.isExact) {
+      const gaussian = gaussianRationalFromNumber(a);
+      if (gaussian !== undefined) {
+        const value = hurwitzZetaNegativeIntegerGaussian(-sInt, gaussian);
+        const exact = gaussianRationalToExpression(engine, value);
+        return shouldNumericize(numericApproximation, a) ? exact.N() : exact;
+      }
+    }
+
+    // 3. `a` is symbolic — a free variable, or a concrete irrational with
+    // no exact rational form (`Sqrt(2)`, reached because route 2 above
+    // requires a decimal `bignumRe`, which a radical does not have): build
+    // the polynomial as an expression in `a`. `evaluate()` (and `.N()` with
+    // `a` still a free variable, so nothing to cancel) return it directly.
+    // `.N()` on a concrete irrational `a` has no exact route above to fall
+    // back on and would repeat the cancellation route 2 exists to avoid, so
+    // it declines here instead of guessing a guard-digit count; the general
+    // kernel below is the fallback, at whatever accuracy it measures for a
+    // numeric literal.
+    if (!isNumber(a)) {
+      const polynomial = hurwitzZetaNegativeIntegerExpression(engine, -sInt, a);
+      if (!shouldNumericize(numericApproximation, a))
+        return polynomial.evaluate();
+      if (a.symbols.length > 0) return polynomial.N();
     }
   }
 
@@ -2488,7 +2613,7 @@ function evaluateGeneralizedZeta(
 
   // Integer s = −n ≤ 0 and rational a < 0: every term |k + a|^n is rational
   // and the rest is the Bernoulli closed form of `evaluateHurwitzZeta`.
-  if (sInt !== null && sInt <= 0 && -sInt <= 100) {
+  if (sInt !== null && sInt <= 0 && -sInt <= HURWITZ_NEGATIVE_ORDER_LIMIT) {
     const ra = asRational(a);
     if (ra !== undefined) {
       const value = generalizedZetaNegativeInteger(-sInt, [

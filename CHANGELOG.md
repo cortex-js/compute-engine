@@ -242,6 +242,21 @@
 
 ### Issues Resolved
 
+- **`HurwitzZeta(-n, a)` at a non-positive integer order is the Bernoulli
+  polynomial −Bₙ₊₁(a)/(n+1) for a symbolic or a complex `a`**, not only for a
+  rational `a`. `HurwitzZeta(-1, a)` stayed unevaluated and now evaluates to
+  `-1/2 * a^2 + 1/2 * a - 1/12`, for orders up to 12. The two-operand
+  `Zeta(-1, a)` gets the same polynomial only when `a` is known to be positive:
+  for a negative `a` its terms with `k + a < 0` are `|k + a|^n`, so
+  `Zeta(-1, -5/2)` is `109/24` where the polynomial gives `-107/24`. At a
+  complex `a`, `HurwitzZeta(-60, 2+3i).N()` had a real part of `-9.1894…e+29`,
+  wrong from the third digit, and now gives `-9.19246731053263160872e+29`. A
+  float `a` with many digits is also fast: `HurwitzZeta(-100, 1e-300).N()` took
+  about a minute and now takes a few milliseconds, and
+  `HurwitzZeta(-50, 1e-200000).N()` did not finish and now takes about 10 ms. A
+  tiny `a` is no longer taken for a pole: `HurwitzZeta(2.5, 1e-2000).N()` was
+  `~oo` and is now `1e+5000`. (#374, contributed by
+  [enumeratio](https://github.com/enumeratio))
 - **`Floor`, `Ceil`, `Round`, `Truncate` and `Fract` of an exact number are
   exact** ([#382](https://github.com/cortex-js/compute-engine/issues/382),
   reported by [enumeratio](https://github.com/enumeratio)). They rounded a
