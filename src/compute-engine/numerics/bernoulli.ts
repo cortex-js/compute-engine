@@ -272,6 +272,31 @@ export function hurwitzZetaNegativeIntegerAt(n: number, a: number): number {
   return rationalToDouble(-acc, c.d * (1n << (q * BigInt(N))) * BigInt(N));
 }
 
+/**
+ * ζ(−n, a) for an integer n >= 0 and a complex a given by two doubles, as
+ * the real and imaginary parts of the exact value −Bₙ₊₁(a)/(n + 1), each
+ * rounded once to a double. The doubles are read exactly
+ * (`doubleToRational`), and the polynomial is evaluated in exact integer
+ * arithmetic (`hurwitzZetaNegativeIntegerGaussianParts`): in doubles, the
+ * complex powers of a negative base gave a real a an imaginary part, and
+ * Horner's rule loses digits for |a| > 1. The cost grows with n times the
+ * number of binary digits of a.
+ */
+export function hurwitzZetaNegativeIntegerAtComplex(
+  n: number,
+  re: number,
+  im: number
+): [number, number] {
+  const parts = hurwitzZetaNegativeIntegerGaussianParts(n, {
+    re: doubleToRational(re),
+    im: doubleToRational(im),
+  });
+  return [
+    rationalToDouble(parts.re, parts.den),
+    rationalToDouble(parts.im, parts.den),
+  ];
+}
+
 /** A complex value with exact bigint-rational real and imaginary parts. */
 export interface GaussianRational {
   re: [bigint, bigint];

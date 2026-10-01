@@ -448,16 +448,24 @@ rest of the expression and evaluates this part off the GPU. Fix: port
 (recurrence + asymptotic series, the same shape already used for `_gpu_gamma`)
 to GLSL/WGSL helpers and wire them into `GPU_FUNCTIONS`.
 
-### `HurwitzZeta(s, a)` at a complex `a` far left of the imaginary axis does not finish (OPEN — found 2026-09-28 reviewing #340)
+### `HurwitzZeta(s, a)` of an order that is not an integer stays symbolic far left of the imaginary axis (OPEN, capability gap — found 2026-09-28 reviewing #340, narrowed 2026-09-30)
 
-`HurwitzZeta(2, -10^7+i).N()` takes 0.9 s and `HurwitzZeta(2, -10^12+i).N()`
-does not finish. `hurwitzEMComplex` (`numerics/numeric-complex.ts`) sums one
-direct term for each unit of −Re(a) before its Euler-Maclaurin tail. The same
-loop made `PolyGamma(m, z)` hang at a large negative Re(z); `polygammaComplex`
-now avoids it with the reflection formula, which applies to an integer `s` only.
-Fix: for an integer `s >= 2`, use the same reflection (ζ(s, a) =
-(−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s−1)!); for another `s`, a representation whose cost does not
-grow with −Re(a), or a cost limit that leaves the application symbolic.
+`hurwitzEMComplex` (`numerics/numeric-complex.ts`) sums one direct term for
+each unit of −Re(a) before its Euler-Maclaurin tail, so the kernel declines
+when more than `HURWITZ_MAX_PASSED_TERMS` (2²⁰) terms lie between a and the
+right half-plane: `HurwitzZeta(2.5, −10^7 + i).N()` stays unevaluated (at
+once; before the limit, `HurwitzZeta(2, −10^12 + i).N()` did not finish).
+Since 2026-09-30 an integer order has a route whose cost does not depend on
+Re(a) (`hurwitzZetaFarLeft`): the polygamma reflection for 2 ≤ s ≤ 10 001,
+and the Bernoulli polynomial for s = −n ≤ 0 (n ≤ 60). What still declines:
+an order that is not an integer, which needs a representation whose cost
+does not grow with −Re(a) (for example the Hurwitz functional equation for a
+real a); an order above about 3 000 at a small Im(a), where the error of the
+reflection grows past 1e−12 of the value; and a real a that is a
+non-positive integer, at every order (there `HurwitzZeta` drops the
+(a + k) = 0 term, while ψ has a pole). The generalized `Zeta(s, a)` follows
+for an even order only: for an odd order its terms left of the axis are
+((k + a)²)^(−s/2), which is not (k + a)^(−s).
 
 ### `PolyGamma(m, z)` of an order above 100 stays symbolic close to a half-integer on the real axis (OPEN — found 2026-09-28 reviewing #340)
 

@@ -13,6 +13,15 @@
 
 ### Issues Resolved
 
+- `HurwitzZeta(s, a).N()` of an integer order at an `a` more than about 10⁶
+  left of the imaginary axis stayed unevaluated: `HurwitzZeta(2, −10¹² + i)` is
+  now `−0.0739998067554724…`, computed with the polygamma reflection
+  ζ(s, a) = (−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s − 1)! for an order from 2 to about 10⁴, and
+  with the Bernoulli polynomial ζ(−n, a) = −Bₙ₊₁(a)/(n + 1) for an order
+  −n ≤ 0. The cost of both does not depend on `a`. `Zeta(s, a)` of an even
+  order follows. An order that is not an integer still stays unevaluated
+  there. `PolyGamma(1, −5 + 10²⁰i).N()` ran for minutes, and now answers at
+  once.
 - **#385** The JavaScript compilation of `Max` and `Min` over an operand typed
   as an abstract collection (`collection`, `collection<integer>`, a set, or
   `collection<any> | number`) gave `Math.max(w)`, which is `NaN` for a list,

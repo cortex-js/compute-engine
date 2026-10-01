@@ -3,6 +3,7 @@ import './complex-esm-augment.js'; // adds the 1-arg `Complex.equals` overload
 import {
   bernoulliRational,
   hurwitzZetaNegativeIntegerAt,
+  hurwitzZetaNegativeIntegerAtComplex,
 } from './bernoulli.js';
 import {
   type DD,
@@ -29,6 +30,17 @@ const LANCZOS_P = [
  * exact while the result stays in the normal range of a double.
  */
 function scaleByPowerOfTwo(x: number, k: number): number {
+  // A shift past the whole range of a double has a known result, and the
+  // loops below would take one step per 1022 units of `k`: a scaled value
+  // with an exponent near −9e20 (the cot-derivative term of a polygamma at
+  // Im(z) = 1e20) made `PolyGamma(1, −5 + 10²⁰i)` run for minutes, and an
+  // infinite `k` never ended. The smallest subnormal is 2^−1074 and the
+  // largest double is below 2^1024, so a mantissa below 2^1024 times 2^k is
+  // 0 for k < −2200 and ±∞ for k > 2100 (the sign of x is kept).
+  if (x === 0 || Number.isNaN(x)) return x;
+  if (Number.isNaN(k)) return NaN;
+  if (k < -2200) return x * 0;
+  if (k > 2100) return x * Infinity;
   while (k > 1023) {
     x *= 2 ** 1023;
     k -= 1023;
@@ -2215,9 +2227,12 @@ export function hurwitzZetaComplexWithError(
     }
     return undefined;
   };
-  // Every route adds the terms from a to the right half-plane one at a
-  // time (at a = −1e12 + i, s = 2, one call would add 1e12 of them).
-  if (-a.re > HURWITZ_MAX_PASSED_TERMS) return undefined;
+  // Every route below adds the terms from a to the right half-plane one at
+  // a time (at a = −1e12 + i, s = 2, one call would add 1e12 of them). An
+  // integer order has a route whose cost does not depend on Re(a)
+  // (`hurwitzZetaFarLeft`); another order declines.
+  if (-a.re > HURWITZ_MAX_PASSED_TERMS)
+    return hurwitzZetaFarLeft(s, a, sMinusOne);
   const emTerms = Math.max(8, Math.ceil(emEdge(s) - a.re));
   const em = () =>
     tallied((tally) => hurwitzEMComplex(s, a, sMinusOne ?? s.sub(1), tally));
@@ -2500,7 +2515,21 @@ export function zetaGeneralizedComplexWithError(
   a: Complex
 ): { value: Complex; error: number } | undefined {
   if (s.isNaN() || a.isNaN()) return { value: C_NAN, error: 0 };
-  if (-a.re > HURWITZ_MAX_PASSED_TERMS) return undefined;
+  if (-a.re > HURWITZ_MAX_PASSED_TERMS) {
+    // For an even integer s, ((k + a)²)^(−s/2) is (k + a)^(−s), so the sum
+    // is ζ(s, a), which the Hurwitz kernel computes far left of the axis
+    // for an integer order (`hurwitzZetaFarLeft`). A real a that is a
+    // non-positive integer is left out: the (k + a) = 0 term is dropped
+    // here without a pole, and the Hurwitz kernel declines it.
+    if (
+      s.im === 0 &&
+      Number.isInteger(s.re) &&
+      s.re % 2 === 0 &&
+      !(a.im === 0 && Number.isInteger(a.re))
+    )
+      return hurwitzZetaComplexWithError(s, a);
+    return undefined;
+  }
   const negHalfS = s.mul(-0.5);
   let count = 0;
   while (a.re + count < 0) count++;
@@ -3007,7 +3036,24 @@ export function polygammaComplex(m: number, z: Complex | number): Complex {
   if (c.im === 0 && c.re <= 0 && Number.isInteger(c.re)) return C_NAN; // pole
   if (c.im < 0) return polygammaComplex(m, c.conjugate()).conjugate();
   if (m === 0) return digammaComplex(c);
+  return scaledToComplex(polygammaScaled(m, c));
+}
 
+/**
+ * ψ⁽ᵐ⁾(z) in scaled form, for an integer order m >= 1 and Im(z) >= 0, z not
+ * a pole, by the method described at `polygammaComplex`. `undefined` when
+ * the terms cancel by more than `POLYGAMMA_CANCELLATION_LIMIT`. `factorial`
+ * is m! in scaled form, for a caller that divides by it
+ * (`hurwitzZetaIntegerOrderReflected`), and `largestLog2` is log₂ of the
+ * largest magnitude added to form the value, for a caller that estimates
+ * the error from the cancellation.
+ */
+function polygammaScaled(
+  m: number,
+  c: Complex
+):
+  | { value: ScaledComplex; factorial: ScaledComplex; largestLog2: number }
+  | undefined {
   const s = m + 1;
   const sign = m % 2 === 0 ? -1 : 1; // (−1)^(m+1), which is also (−1)^s
   let factorial: ScaledComplex = { m: C_ONE, e: 0 };
@@ -3036,17 +3082,142 @@ export function polygammaComplex(m: number, z: Complex | number): Complex {
     largestLog2 - scaledLog2Abs(result) >
     Math.log2(POLYGAMMA_CANCELLATION_LIMIT)
   )
-    return C_NAN;
+    return undefined;
+  return { value: result, factorial, largestLog2 };
+}
 
+/**
+ * A scaled value as a double, or NaN when it is not representable to full
+ * precision: not finite, or below the smallest normal double (the caller
+ * keeps the expression symbolic rather than answering ±∞ or 0).
+ */
+function scaledToComplex(
+  x: { value: ScaledComplex } | undefined
+): Complex {
+  if (x === undefined) return C_NAN;
   const value = new Complex(
-    scaleByPowerOfTwo(result.m.re, result.e),
-    scaleByPowerOfTwo(result.m.im, result.e)
+    scaleByPowerOfTwo(x.value.m.re, x.value.e),
+    scaleByPowerOfTwo(x.value.m.im, x.value.e)
   );
   // `Math.hypot`, not `Complex.abs()`: the latter squares the parts, and
   // that underflows to 0 for a result near 1e−200.
   const size = Math.hypot(value.re, value.im);
   if (!Number.isFinite(size) || size < MIN_NORMAL_DOUBLE) return C_NAN;
   return value;
+}
+
+/**
+ * The highest n for which ζ(−n, a) is formed as −Bₙ₊₁(a)/(n + 1) past
+ * `HURWITZ_MAX_PASSED_TERMS`. At |a| > 2²⁰ the value passes the range of a
+ * double from about n = 50 on, and such a value is declined, so a higher n
+ * would only cost an exact evaluation whose result is not used.
+ */
+const FAR_LEFT_MAX_BERNOULLI_ORDER = 60;
+
+/**
+ * ζ(s, a) when more than `HURWITZ_MAX_PASSED_TERMS` terms lie between a and
+ * the right half-plane, where the routes of `hurwitzZetaComplexWithError`
+ * would add one term per unit of −Re(a). `undefined` (a decline) for an
+ * order that has no route here, an operand that is not finite, a value that
+ * is not representable, or an estimate above `HURWITZ_MAX_ERROR` of the
+ * value.
+ *
+ * - An integer order s >= 2: the polygamma reflection
+ *   (`hurwitzZetaIntegerOrderReflected`). Its error grows with the order
+ *   (each term's phase is −s·arg(a + k), so the rounding of the argument is
+ *   multiplied by s; measured at a = −1e7 + i: 4e−15 of the value at
+ *   s = 1001, 9e−14 at s = 3001, 1e−12 at s = 10 001) and with the
+ *   cancellation of the reflection, so the estimate is
+ *   ε·|ζ|·(`HURWITZ_NOMINAL_ERROR` + s)·cancellation.
+ * - A real a at a half-integer and an odd s: there the derivative of
+ *   cot(πa) of even order is 0, the reflection is only its small second
+ *   part and the cancellation check declines it, but the terms pair up:
+ *   ζ(s, a) = ζ(s, 1 − a), a sum in the right half-plane.
+ * - A non-positive integer order −n: ζ(−n, a) = −Bₙ₊₁(a)/(n + 1), a
+ *   polynomial (DLMF 25.11.14), evaluated exactly at the double value of a
+ *   (`hurwitzZetaNegativeIntegerAtComplex`), so each part is rounded once.
+ *
+ * A real a that is a non-positive integer is declined at every order:
+ * `HurwitzZeta` drops the (a + k) = 0 term there, which the reflection (a
+ * pole of ψ) and the polynomial do not.
+ */
+function hurwitzZetaFarLeft(
+  s: Complex,
+  a: Complex,
+  sMinusOne?: Complex
+): { value: Complex; error: number } | undefined {
+  if (!Number.isFinite(a.re) || !Number.isFinite(a.im)) return undefined;
+  if (s.im !== 0 || !Number.isInteger(s.re)) return undefined;
+  if (a.im === 0 && Number.isInteger(a.re)) return undefined;
+  const order = s.re;
+  const accept = (value: Complex, units: number) => {
+    const error = units * EPSILON * value.abs();
+    if (!value.isFinite() || error > HURWITZ_MAX_ERROR * value.abs())
+      return undefined;
+    return { value, error };
+  };
+  if (order <= 0) {
+    const n = -order;
+    if (n > FAR_LEFT_MAX_BERNOULLI_ORDER) return undefined;
+    const [re, im] = hurwitzZetaNegativeIntegerAtComplex(n, a.re, a.im);
+    return accept(new Complex(re, im), 1);
+  }
+  if (order === 1 || order - 1 > POLYGAMMA_MAX_ORDER) return undefined;
+  if (a.im === 0 && order % 2 === 1 && a.re - Math.floor(a.re) === 0.5)
+    return hurwitzZetaComplexWithError(s, new Complex(1 - a.re, 0), sMinusOne);
+  const r = hurwitzZetaIntegerOrderReflected(order, a);
+  if (r === undefined) return undefined;
+  return accept(r.value, (HURWITZ_NOMINAL_ERROR + order) * r.cancellation);
+}
+
+/**
+ * ζ(s, a) for an integer order s >= 2 and Re(a) < 0, a not a non-positive
+ * integer, by the polygamma reflection: ζ(s, a) = (−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s − 1)!
+ * (DLMF 25.11.12), with ψ⁽ᵐ⁾ from `polygammaScaled`, whose cost does not
+ * depend on Re(a). The Euler-Maclaurin routes of
+ * `hurwitzZetaComplexWithError` add one term per unit of −Re(a), and decline
+ * past `HURWITZ_MAX_PASSED_TERMS` of them: without this route,
+ * `HurwitzZeta(2, −10¹² + i)` stayed symbolic. The quotient is formed in
+ * scaled form, since ψ⁽ᵐ⁾ grows like m! while ζ(s, a) can be of the order
+ * of 1. `undefined` when ψ⁽ᵐ⁾ declines or the value is not representable;
+ * otherwise the value with the cancellation of the reflection (the largest
+ * magnitude added over the magnitude of ψ⁽ᵐ⁾), from which the caller
+ * estimates the error.
+ *
+ * At a non-positive integer a, `HurwitzZeta` drops the (a + k) = 0 term,
+ * while ψ⁽ᵐ⁾ has a pole there, so that case is left to the other routes.
+ */
+function hurwitzZetaIntegerOrderReflected(
+  s: number,
+  a: Complex
+): { value: Complex; cancellation: number } | undefined {
+  if (a.im < 0) {
+    const r = hurwitzZetaIntegerOrderReflected(s, a.conjugate());
+    return r && { value: r.value.conjugate(), cancellation: r.cancellation };
+  }
+  const m = s - 1;
+  const psi = polygammaScaled(m, a);
+  if (psi === undefined) return undefined;
+  // 1/m! in scaled form, from the scaled m!: the mantissa of m! is in
+  // [1, 2) or (−2, −1] after normalization, so its inverse cannot overflow.
+  const inverse = scaledNormalize({
+    m: complexInverse(psi.factorial.m),
+    e: -psi.factorial.e,
+  });
+  const sign = s % 2 === 0 ? 1 : -1; // (−1)^s
+  const value = scaledToComplex({
+    value: scaledMul(scaledTimes(psi.value, inverse), sign),
+  });
+  if (value.isNaN()) return undefined;
+  return {
+    value,
+    // The largest magnitude added, over the magnitude of the sum (at least
+    // 1, at most `POLYGAMMA_CANCELLATION_LIMIT`).
+    cancellation: Math.max(
+      1,
+      2 ** (psi.largestLog2 - scaledLog2Abs(psi.value))
+    ),
+  };
 }
 
 const SQRT_PI = Math.sqrt(Math.PI);

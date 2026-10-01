@@ -16,6 +16,7 @@ import { Complex } from 'complex-esm';
 import {
   hurwitzZetaComplex,
   hurwitzZetaComplexWithError,
+  polygammaComplex,
   zetaGeneralizedComplexWithError,
 } from '../../src/compute-engine/numerics/numeric-complex';
 import {
@@ -1198,8 +1199,9 @@ describe('HurwitzZeta declines rather than returning wrong digits', () => {
     // base point of Hermite's integral within reach is far enough right.
     [['Complex', 0.7, 1e7], 0.3],
     [['Complex', 0.3, 1e5], 0.3],
-    // 1e12 terms from a to the right half-plane.
-    [2, ['Complex', -1e12, 1]],
+    // 1e12 terms from a to the right half-plane, at an order that is not an
+    // integer (an integer order s >= 2 has the polygamma reflection).
+    [2.5, ['Complex', -1e12, 1]],
   ])('HurwitzZeta(%j, %j) stays symbolic, quickly', (s, a) => {
     const start = Date.now();
     const z = ce.box(['HurwitzZeta', s, a] as any).N();
@@ -1223,9 +1225,158 @@ describe('HurwitzZeta declines rather than returning wrong digits', () => {
     ce.declare('hd_s', 'real');
     ce.declare('hd_a', 'real');
     const run = compile(ce.box(['HurwitzZeta', 'hd_s', 'hd_a']))?.run;
-    // A real a below −2^20: every route declines.
-    expect(run?.({ hd_s: 2, hd_a: -1e7 - 0.5 })).toBeNaN();
+    // A real a below −2^20 at an order that is not an integer: every route
+    // declines.
+    expect(run?.({ hd_s: 2.5, hd_a: -1e7 - 0.5 })).toBeNaN();
     // mpmath: zeta(3, 0.25) = 64.663869968768460167
     expect(run?.({ hd_s: 3, hd_a: 0.25 })).toBeCloseTo(64.66386996876846, 9);
+  });
+});
+
+// An integer order s >= 2 at an a far left of the imaginary axis: the
+// polygamma reflection ζ(s, a) = (−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s − 1)!, whose cost does
+// not depend on Re(a). Before 2026-09-30 these points stayed symbolic (and
+// before the limit on the passed terms, `HurwitzZeta(2, −1e12 + i).N()` did
+// not finish). The references are Mathematica 15, computed as
+// `N[(-1)^s PolyGamma[s - 1, a]/(s - 1)!, 25]` at the exact binary value
+// of the double operands (`SetPrecision[x, Infinity]`; `Rationalize[x, 0]`
+// gives the short decimal fraction instead, and at |a| ≈ 1e7 that changes
+// the value in the ninth digit). `HurwitzZeta` itself agrees with that form
+// at a = −10^4 + 3/10 + i, and is slow at these points.
+describe('HurwitzZeta of an integer order far left of the imaginary axis', () => {
+  // The error is measured against the modulus of the value: a part that is
+  // much smaller than the value (an imaginary part of 1e−24) is not resolved.
+  const normErr = (z: Complex, re: number, im: number) =>
+    Math.hypot(z.re - re, z.im - im) / Math.hypot(re, im);
+  test.each([
+    [2, -1e7, 1, -0.073999906754467427403, -9.999999e-15],
+    [2, -1e12, 1, -0.073999806755472427403, -1e-24],
+    [3, -1e7, 1, 4.9999995e-15, 0.2333471496549337876],
+    [5, -1e12 + 0.25, 0.5, 15.003440748193649447, 11.830604547915035699],
+    [2, -3e6 - 0.5, 0.001, 9.8695066593060249387, -1.11111037e-16],
+    [2, -9999999.7, 2, 0.000042444617337373786127, -0.00013093591100363812438],
+    [7, -1999999.3, -3, 3.3256356929075904879e-6, 1.0805659976352723948e-6],
+    [50, -1999999.9, 1, -0.20877314007791948322, 0.75130034122675305096],
+    // Mathematica needs `$MaxExtraPrecision = 3000` for this one.
+    [300, -1999999.6, 0.2, 4.5489250607216150177e104, -5.3289981170249605142e104],
+  ])('HurwitzZeta(%d, %d + %di)', (s, aRe, aIm, re, im) => {
+    const start = Date.now();
+    const r = hurwitzZetaComplexWithError(
+      new Complex(s, 0),
+      new Complex(aRe, aIm)
+    );
+    if (PERF) expect(Date.now() - start).toBeLessThan(50);
+    expect(r).toBeDefined();
+    expect(normErr(r!.value, re, im)).toBeLessThan(1e-13);
+  });
+
+  test('through the boxed expression', () => {
+    const z = ce.box(['HurwitzZeta', 2, ['Complex', -1e12, 1]]).N();
+    expect(z.operator).not.toBe('HurwitzZeta');
+    expect(z.re).toBeCloseTo(-0.0739998067554724, 13);
+  });
+
+  test('a real a that is not an integer', () => {
+    // Σ over the integers of (n + 1/2)^(−2) is π², less the terms below
+    // a, which add up to about 1/(1e9).
+    const r = hurwitzZetaComplexWithError(
+      new Complex(2, 0),
+      new Complex(-999999999.5, 0)
+    );
+    expect(r?.value.re).toBeCloseTo(Math.PI ** 2 - 1e-9, 12);
+    expect(r?.value.im).toBe(0);
+  });
+
+  test('a large or infinite imaginary part ends at once', () => {
+    // The cot-derivative term has a binary exponent near −9e20 at
+    // Im(a) = 1e20, and the scaling stepped through it 1022 units at a time.
+    const start = Date.now();
+    const r = hurwitzZetaComplexWithError(
+      new Complex(2, 0),
+      new Complex(-1e7, 1e20)
+    );
+    // ζ(2, a) is about 1/a for |a| this large.
+    expect(r?.value.im).toBeCloseTo(-1e-20, 30);
+    expect(
+      hurwitzZetaComplexWithError(
+        new Complex(2, 0),
+        new Complex(-1e7, Infinity)
+      )
+    ).toBeUndefined();
+    const psi = polygammaComplex(1, new Complex(-5, 1e20));
+    expect(psi.im).toBeCloseTo(-1e-20, 30);
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+
+  test('the error estimate grows with the order', () => {
+    // At a = −1e7 + i the term at k = 1e7 is i^(−s) and every other term
+    // is at most 2^(−s/2) in modulus, so ζ(s, a) is ±i to the precision of
+    // a double. The phase error of the terms grows with s.
+    for (const order of [1001, 3001]) {
+      const r = hurwitzZetaComplexWithError(
+        new Complex(order, 0),
+        new Complex(-1e7, 1)
+      )!;
+      const exact = order % 4 === 1 ? -1 : 1;
+      expect(Math.hypot(r.value.re, r.value.im - exact)).toBeLessThan(r.error);
+    }
+    // At s = 10001 the estimate is above 1e−12 of the value: declined.
+    expect(
+      hurwitzZetaComplexWithError(new Complex(10001, 0), new Complex(-1e7, 1))
+    ).toBeUndefined();
+  });
+
+  test('a real half-integer a with an odd order', () => {
+    // The terms pair up across 0: ζ(s, −N − 1/2) = ζ(s, N + 3/2).
+    for (const order of [3, 5]) {
+      const r = hurwitzZetaComplexWithError(
+        new Complex(order, 0),
+        new Complex(-2e6 - 0.5, 0)
+      );
+      const reference = hurwitzZetaComplex(
+        new Complex(order, 0),
+        new Complex(2e6 + 1.5, 0)
+      );
+      expect(r?.value.re).toBe(reference.re);
+    }
+  });
+
+  test('a non-positive integer order', () => {
+    // −Bₙ₊₁(a)/(n + 1), exact at the double value of a and rounded once
+    // (checked with Python fractions).
+    const h = (n: number, re: number, im: number) =>
+      hurwitzZetaComplexWithError(new Complex(-n, 0), new Complex(re, im))
+        ?.value;
+    expect(h(0, -9999999.75, 1)).toEqual(new Complex(10000000.25, -1));
+    expect(h(1, -9999999.75, 1)).toEqual(
+      new Complex(-50000002499999.49, 10000000.25)
+    );
+    expect(h(3, -2999999.5, 0)).toEqual(
+      new Complex(-2.0249999999998875e25, 0)
+    );
+    expect(h(3, -2999999.7, 0.7)).toEqual(
+      new Complex(-2.0250005399992807e25, 1.89000037799987e19)
+    );
+    // Past the range of a double: declined.
+    expect(h(50, -1999999.5, 1)).toBeUndefined();
+  });
+
+  test('the generalized Zeta of an even order', () => {
+    // ((k + a)²)^(−s/2) is (k + a)^(−s) for an even s: the same value.
+    const r = zetaGeneralizedComplexWithError(
+      new Complex(2, 0),
+      new Complex(-1e12, 1)
+    );
+    expect(r?.value.re).toBeCloseTo(-0.0739998067554724, 13);
+    expect(
+      zetaGeneralizedComplexWithError(new Complex(3, 0), new Complex(-1e12, 1))
+    ).toBeUndefined();
+  });
+
+  test('a non-positive integer a still declines', () => {
+    // `HurwitzZeta` drops the (a + k) = 0 term there, and ψ has a pole.
+    expect(
+      hurwitzZetaComplexWithError(new Complex(2, 0), new Complex(-1e7, 0))
+    ).toBeUndefined();
   });
 });
