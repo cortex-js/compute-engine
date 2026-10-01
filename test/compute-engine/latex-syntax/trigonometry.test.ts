@@ -1,4 +1,5 @@
 import { check } from '../../utils';
+import { ComputeEngine } from '../../../src/compute-engine';
 
 describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
   test(`\\cos x + 1`, () =>
@@ -133,4 +134,17 @@ describe('TRIGONOMETRIC DEGREES', () => {
       N-auto    = 0.866025403784438646764
       N-mach    = 0.8660254037844387
     `));
+});
+
+describe('TRIGONOMETRIC FUNCTIONS spellings of arccot', () => {
+  const ce = new ComputeEngine();
+  test('\\operatorname{arccot} and \\operatorname{arcctg} are Arccot', () => {
+    for (const latex of [
+      '\\operatorname{arccot}(x)',
+      '\\operatorname{arccot} x',
+      '\\mathrm{arccot}(x)',
+      '\\operatorname{arcctg}(x)',
+    ])
+      expect(ce.parse(latex).json).toEqual(['Arccot', 'x']);
+  });
 });
