@@ -5133,16 +5133,17 @@
     {
       "name": "MultiplicativeOrder",
       "category": "Number Theory",
-      "arity": "2",
-      "signature": "(integer, integer) -> integer",
+      "arity": "optional",
+      "signature": "(integer, integer, list<integer>?) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime.",
+      "description": "The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime. With a list of residues, `MultiplicativeOrder(a, n, [r1, r2, …])` is the smallest `k > 0` such that `a^k ≡ r_i (mod n)` for some `i` (a discrete logarithm), and is undefined when no `r_i` is a power of `a`.",
       "examples": [
-        "MultiplicativeOrder(2, 7)  // 3"
+        "MultiplicativeOrder(2, 7)  // 3",
+        "MultiplicativeOrder(5, 7, [3, 11])  // 2"
       ]
     },
     {
@@ -6270,15 +6271,32 @@
       "name": "PowerMod",
       "category": "Number Theory",
       "arity": "3",
-      "signature": "(integer, integer, integer) -> integer",
+      "signature": "(integer, rational, integer) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false,
-      "description": "Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m).",
+      "description": "Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`, and is undefined when there is none.",
       "examples": [
-        "PowerMod(2, 10, 1000)  // 24"
+        "PowerMod(2, 10, 1000)  // 24",
+        "PowerMod(4, 1/2, 7)  // 2"
+      ]
+    },
+    {
+      "name": "PowerModList",
+      "category": "Number Theory",
+      "arity": "3",
+      "signature": "(integer, rational, integer) -> list<integer>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.",
+      "examples": [
+        "PowerModList(3, 1/2, 11)  // [5, 6]",
+        "PowerModList(1, 1/3, 7)  // [1, 2, 4]"
       ]
     },
     {
@@ -6472,6 +6490,22 @@
       "description": "The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p).",
       "examples": [
         "PrimitiveRoot(7)  // 3"
+      ]
+    },
+    {
+      "name": "PrimitiveRootList",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> list<integer>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n` of 0 or 1. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.",
+      "examples": [
+        "PrimitiveRootList(7)  // [3, 5]",
+        "PrimitiveRootList(8)  // []"
       ]
     },
     {
@@ -6838,6 +6872,21 @@
       "examples": [
         "Rationalize(1.75)  // 7/4",
         "Rationalize(Sqrt(3), 1/500)  // 26/15"
+      ]
+    },
+    {
+      "name": "RationalReconstruction",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> rational",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The rational `p/q` with `p ≡ a·q (mod m)` and `|p|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). Undefined for `m < 1` or when there is none.",
+      "examples": [
+        "RationalReconstruction(6, 11)  // 1/2"
       ]
     },
     {

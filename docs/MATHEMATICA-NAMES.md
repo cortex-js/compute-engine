@@ -34,7 +34,8 @@ capability gap.
 ## Same name, verified
 
 `Abs`, `Sqrt`, `GCD`, `Mod`, `PowerMod` (incl. negative exponents, i.e.
-modular inverse), `NextPrime`, `PrimitiveRoot`, `ContinuedFraction`,
+modular inverse, and rational exponents, i.e. the least root), `PowerModList`,
+`NextPrime`, `PrimitiveRoot`, `PrimitiveRootList`, `ContinuedFraction`,
 `Binomial`, `Pochhammer`, `Union`, `Intersection`, `Norm` (matrix ∞-norm:
 `["Norm", m, "PositiveInfinity"]`), `Transpose`, `ConjugateTranspose`,
 `Inverse`, `Dot`, `Eigenvalues`, `Eigenvectors`, `CharacteristicPolynomial`,

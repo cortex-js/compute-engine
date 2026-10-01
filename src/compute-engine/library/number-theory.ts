@@ -1,7 +1,8 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type { Expression, SymbolDefinitions } from '../global-types.js';
-import { toBigint } from '../boxed-expression/numerics.js';
+import { asRational, toBigint } from '../boxed-expression/numerics.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { checkTypes } from '../boxed-expression/validate.js';
 import { rationalize } from '../numerics/rationals.js';
 import {
   canEnumerateOperand,
@@ -15,6 +16,12 @@ import {
   modularInverse,
 } from '../numerics/numeric-bigint.js';
 import { bigPrimeFactors, isPrimeBigint, modPow } from '../numerics/primes.js';
+import {
+  generalizedMultiplicativeOrder,
+  powerModList,
+  primitiveRootList,
+  rationalReconstruction,
+} from '../numerics/modular.js';
 import {
   CancellationError,
   checkDeadline,
@@ -616,10 +623,46 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     PowerMod: {
       description:
-        'Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m).',
-      signature: '(integer, integer, integer) -> integer',
-      examples: ['PowerMod(2, 10, 1000)  // 24'],
-      evaluate: ([aOp, bOp, mOp], { engine: ce }) => {
+        'Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`, and is undefined when there is none.',
+      signature: '(integer, rational, integer) -> integer',
+      examples: ['PowerMod(2, 10, 1000)  // 24', 'PowerMod(4, 1/2, 7)  // 2'],
+      // Lazy so that `.N()` leaves an exact rational exponent exact: the
+      // operands are evaluated here, without the numeric approximation that
+      // would turn `1/2` into `0.5`. A lazy head canonicalizes and checks its
+      // own operands.
+      lazy: true,
+      canonical: (ops, { engine: ce }) =>
+        ce._fn(
+          'PowerMod',
+          checkTypes(
+            ce,
+            ops.map((x) => x.canonical),
+            ['integer', 'rational', 'integer']
+          )
+        ),
+      evaluate: (ops, { engine: ce }) => {
+        const [aOp, bOp, mOp] = ops.map((x) => x.evaluate());
+        if (bOp.isInteger !== true) {
+          // The signature admits a rational exponent; `toBigint` would round it.
+          const exponent = asRational(bOp);
+          const a = aOp.isInteger === true ? toBigint(aOp) : null;
+          const m = mOp.isInteger === true ? toBigint(mOp) : null;
+          if (exponent === undefined || a === null || m === null)
+            return undefined;
+          const roots = powerModList(
+            a,
+            BigInt(exponent[0]),
+            BigInt(exponent[1]),
+            m,
+            ce._deadlineFrame
+          );
+          return roots === undefined || roots.length === 0
+            ? undefined
+            : ce.number(roots[0]);
+        }
+        // `toBigint` rounds a non-integer, so integrality is checked first.
+        if (aOp.isInteger === false || mOp.isInteger === false)
+          return undefined;
         const a = toBigint(aOp);
         const b = toBigint(bOp);
         const m = toBigint(mOp);
@@ -633,6 +676,47 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (g !== 1n) return undefined; // inverse does not exist
         const inv = ((s % m) + m) % m;
         return ce.number(modPow(inv, -b, m));
+      },
+    },
+
+    PowerModList: {
+      description:
+        'Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.',
+      signature: '(integer, rational, integer) -> list<integer>',
+      examples: [
+        'PowerModList(3, 1/2, 11)  // [5, 6]',
+        'PowerModList(1, 1/3, 7)  // [1, 2, 4]',
+      ],
+      // Lazy for the same reason as `PowerMod`: `.N()` keeps `s/r` exact.
+      lazy: true,
+      canonical: (ops, { engine: ce }) =>
+        ce._fn(
+          'PowerModList',
+          checkTypes(
+            ce,
+            ops.map((x) => x.canonical),
+            ['integer', 'rational', 'integer']
+          )
+        ),
+      evaluate: (ops, { engine: ce }) => {
+        const [aOp, sOp, mOp] = ops.map((x) => x.evaluate());
+        const exponent = asRational(sOp);
+        const a = aOp.isInteger === true ? toBigint(aOp) : null;
+        const m = mOp.isInteger === true ? toBigint(mOp) : null;
+        if (exponent === undefined || a === null || m === null)
+          return undefined;
+        const roots = powerModList(
+          a,
+          BigInt(exponent[0]),
+          BigInt(exponent[1]),
+          m,
+          ce._deadlineFrame
+        );
+        if (roots === undefined) return undefined;
+        return ce.function(
+          'List',
+          roots.map((x) => ce.number(x))
+        );
       },
     },
 
@@ -1202,13 +1286,29 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     MultiplicativeOrder: {
       description:
-        'The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime.',
-      signature: '(integer, integer) -> integer',
-      examples: ['MultiplicativeOrder(2, 7)  // 3'],
-      evaluate: ([aOp, nOp], { engine: ce }) => {
+        'The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime. With a list of residues, `MultiplicativeOrder(a, n, [r1, r2, …])` is the smallest `k > 0` such that `a^k ≡ r_i (mod n)` for some `i` (a discrete logarithm), and is undefined when no `r_i` is a power of `a`.',
+      signature: '(integer, integer, list<integer>?) -> integer',
+      examples: [
+        'MultiplicativeOrder(2, 7)  // 3',
+        'MultiplicativeOrder(5, 7, [3, 11])  // 2',
+      ],
+      evaluate: ([aOp, nOp, rOp], { engine: ce }) => {
         const a0 = toBigint(aOp);
         const n = toBigint(nOp);
         if (a0 === null || n === null || n < 1n) return undefined;
+        if (rOp !== undefined) {
+          const targets = Array.from(rOp.each() ?? []).map((r) =>
+            r.isInteger === true ? toBigint(r) : null
+          );
+          if (targets.length === 0 || targets.includes(null)) return undefined;
+          const log = generalizedMultiplicativeOrder(
+            a0,
+            n,
+            targets as bigint[],
+            ce._deadlineFrame
+          );
+          return log === undefined ? undefined : ce.number(log);
+        }
         if (n === 1n) return ce.number(1);
         const a = ((a0 % n) + n) % n;
         if (gcd(a, n) !== 1n) return undefined;
@@ -1262,6 +1362,41 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
             return ce.number(a);
         }
         return undefined;
+      },
+    },
+
+    PrimitiveRootList: {
+      description:
+        'The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n` of 0 or 1. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.',
+      signature: '(integer) -> list<integer>',
+      examples: [
+        'PrimitiveRootList(7)  // [3, 5]',
+        'PrimitiveRootList(8)  // []',
+      ],
+      evaluate: ([nOp], { engine: ce }) => {
+        const n = nOp.isInteger === true ? toBigint(nOp) : null;
+        if (n === null) return undefined;
+        const roots = primitiveRootList(n, ce._deadlineFrame);
+        if (roots === undefined) return undefined;
+        return ce.function(
+          'List',
+          roots.map((x) => ce.number(x))
+        );
+      },
+    },
+
+    RationalReconstruction: {
+      description:
+        "The rational `p/q` with `p ≡ a·q (mod m)` and `|p|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). Undefined for `m < 1` or when there is none.",
+      signature: '(integer, integer) -> rational',
+      examples: ['RationalReconstruction(6, 11)  // 1/2'],
+      evaluate: ([aOp, mOp], { engine: ce }) => {
+        const a = aOp.isInteger === true ? toBigint(aOp) : null;
+        const m = mOp.isInteger === true ? toBigint(mOp) : null;
+        if (a === null || m === null) return undefined;
+        const fraction = rationalReconstruction(a, m);
+        if (fraction === undefined) return undefined;
+        return ce.number([fraction[0], fraction[1]]);
       },
     },
 

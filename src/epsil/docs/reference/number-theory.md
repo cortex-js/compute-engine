@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Number theory
 
-The 52 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 55 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -335,13 +335,18 @@ moebiusMu(30)
 
 ### multiplicativeOrder
 
-MathJSON `MultiplicativeOrder` · `(integer, integer) -> integer`
+MathJSON `MultiplicativeOrder` · `(integer, integer, list<integer>?) -> integer`
 
-The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime.
+The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime. With a list of residues, `MultiplicativeOrder(a, n, [r1, r2, …])` is the smallest `k > 0` such that `a^k ≡ r_i (mod n)` for some `i` (a discrete logarithm), and is undefined when no `r_i` is a power of `a`.
 
 ```epsil
 multiplicativeOrder(2, 7)
 // ➔ 3
+```
+
+```epsil
+multiplicativeOrder(5, 7, [3, 11])
+// ➔ 2
 ```
 
 ### nPartition
@@ -385,13 +390,34 @@ nthPrime(10)
 
 ### powerMod
 
-MathJSON `PowerMod` · `(integer, integer, integer) -> integer`
+MathJSON `PowerMod` · `(integer, rational, integer) -> integer`
 
-Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m).
+Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`, and is undefined when there is none.
 
 ```epsil
 powerMod(2, 10, 1000)
 // ➔ 24
+```
+
+```epsil
+powerMod(4, 1/2, 7)
+// ➔ 2
+```
+
+### powerModList
+
+MathJSON `PowerModList` · `(integer, rational, integer) -> list<integer>`
+
+Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.
+
+```epsil
+powerModList(3, 1/2, 11)
+// ➔ [5,6]
+```
+
+```epsil
+powerModList(1, 1/3, 7)
+// ➔ [1,2,4]
 ```
 
 ### primeFactors
@@ -455,6 +481,22 @@ primitiveRoot(7)
 // ➔ 3
 ```
 
+### primitiveRootList
+
+MathJSON `PrimitiveRootList` · `(integer) -> list<integer>`
+
+The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n` of 0 or 1. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.
+
+```epsil
+primitiveRootList(7)
+// ➔ [3,5]
+```
+
+```epsil
+primitiveRootList(8)
+// ➔ []
+```
+
 ### radical
 
 MathJSON `Radical` · `(integer) -> integer`
@@ -474,6 +516,17 @@ Return a random prime. `RandomPrime(n)` draws a prime in [2, n]; `RandomPrime(m,
 
 ```epsil
 randomPrime(100)
+```
+
+### rationalReconstruction
+
+MathJSON `RationalReconstruction` · `(integer, integer) -> rational`
+
+The rational `p/q` with `p ≡ a·q (mod m)` and `|p|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). Undefined for `m < 1` or when there is none.
+
+```epsil
+rationalReconstruction(6, 11)
+// ➔ 1/2
 ```
 
 ### sigma0
