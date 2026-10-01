@@ -47,6 +47,7 @@ Modular arithmetic & GCD:
 - ChineseRemainder: solve simultaneous congruences
 - MultiplicativeOrder, PrimitiveRoot
 - JacobiSymbol, LegendreSymbol
+- DirichletCharacter, DirichletL: Dirichlet characters mod k and their L-functions
 
 Other primitives:
 

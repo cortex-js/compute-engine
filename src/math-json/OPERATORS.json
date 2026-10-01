@@ -2225,6 +2225,39 @@
       ]
     },
     {
+      "name": "DirichletCharacter",
+      "category": "Number Theory",
+      "arity": "3",
+      "signature": "(integer, integer, integer) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). Zero where gcd(n, k) > 1; otherwise a root of unity.",
+      "examples": [
+        "DirichletCharacter(5, 2, 2)  // i",
+        "DirichletCharacter(7, 3, 3)  // e^(2πi/3)"
+      ]
+    },
+    {
+      "name": "DirichletL",
+      "category": "Number Theory",
+      "arity": "3",
+      "signature": "(integer, integer, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. Entire for a non-principal character; the principal one is `ζ(s) Π_{p|k} (1 − p^(−s))`.",
+      "examples": [
+        "DirichletL(1, 1, 2)  // π²/6",
+        "DirichletL(3, 2, -2)  // −2/9",
+        "DirichletL(5, 2, 0)  // 3/5 + i/5"
+      ]
+    },
+    {
       "name": "Discriminant",
       "category": "Polynomials",
       "arity": "optional",

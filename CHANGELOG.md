@@ -232,6 +232,25 @@ These changes apply to non-strict parsing only
   compiled JavaScript lane agrees with `.N()`
   (#395, contributed by [enumeratio](https://github.com/enumeratio)).
 
+### New Features
+
+- **`DirichletCharacter(k, j, n)` and `DirichletL(k, j, s)` give the Dirichlet
+  characters modulo `k` and their L-functions,** in Wolfram's indexing
+  (`j = 1` the principal character, `j` up to φ(k)). `DirichletCharacter(5, 2, 2)`
+  is `i`, `DirichletCharacter(7, 3, 3)` is `e^(2πi/3)` and a character is `0`
+  where `gcd(n, k) > 1`. `DirichletL` sums `k^(−s) Σ χ(r) ζ(s, r/k)` through
+  `HurwitzZeta`, so a real `s` follows `ce.precision` (`DirichletL(3, 2, 1.5)`
+  is `0.703968244868733261667…` at 21 digits) and a complex `s` is at double
+  precision; the principal character is `ζ(s) Π (1 − p^(−s))` over the primes
+  dividing `k`, so `DirichletL(5, 1, 1)` is `~oo`; at a nonpositive integer
+  the value is exact from the Bernoulli polynomials (`DirichletL(5, 2, 0)` is
+  `3/5 + i/5`, `DirichletL(8, 2, -3)` is `11`); within 1/4 of `s = 1` a
+  non-principal character is summed from its Laurent series in the Stieltjes
+  constants at double precision, since the Hurwitz terms there have poles that
+  cancel (`DirichletL(3, 2, 1)` is `π/(3√3)`). A modulus above 1000 stays
+  symbolic for `DirichletL` (it sums `k` Hurwitz values). Both heads are
+  listable. (#395, contributed by [enumeratio](https://github.com/enumeratio))
+
 ### Issues Resolved
 
 - `Solve` found no root of a linear equation whose coefficient of the unknown is

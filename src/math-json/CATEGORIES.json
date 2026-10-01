@@ -540,6 +540,8 @@
       "ContinuedFraction",
       "DigitCount",
       "DigitSum",
+      "DirichletCharacter",
+      "DirichletL",
       "Divides",
       "Divisors",
       "DivisorSigma",
