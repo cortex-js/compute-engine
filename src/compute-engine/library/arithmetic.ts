@@ -10133,9 +10133,29 @@ function parityPredicate(
  * of `1 + √2`, so such a term goes to `terms`, where the canonical `Add`
  * keeps it exact (`Sum(√k, 1..5)` is `3 + √2 + √3 + √5`).
  *
- * The first text term (a string or a character) is kept as the type error
- * the sum answers.
+ * The first term that `Add` refuses (a string or a character, a boolean, a
+ * dictionary, or a tuple or list that holds one of these: see
+ * `isRefusedSumTerm`) is kept as the type error the sum answers.
  */
+/**
+ * Whether `term` is a value that `Add` refuses as an operand: a dictionary, a
+ * boolean, a string or character inside a tuple or a list, or a tuple or
+ * list literal that holds one of these at any depth. A tuple or list of
+ * numbers is a term (`Sum([(1, 2)])` is `(1, 2)`: points add coordinate by
+ * coordinate). Only literal `Tuple` and `List` operands are read, so a lazy
+ * collection is not walked here. `never` is a subtype of every type, so a
+ * term typed `never` is not taken for a boolean.
+ */
+function isRefusedSumTerm(term: Expression): boolean {
+  if (term.operator === 'Dictionary') return true;
+  if (term.type.matches('boolean') && !term.type.matches('never')) return true;
+  if (isFunction(term, 'Tuple') || isFunction(term, 'List'))
+    return term.ops.some(
+      (x) => isString(x) || isCharacter(x) || isRefusedSumTerm(x)
+    );
+  return false;
+}
+
 class SumTerms {
   readonly terms: Expression[] = [];
   literal: Expression | undefined = undefined;
@@ -10150,6 +10170,18 @@ function addSumTerm(
   if (acc.error !== undefined) return acc;
   if (isString(term) || isCharacter(term)) {
     acc.error = term.engine.typeError('number', term.type);
+    return acc;
+  }
+  // A term that `Add` refuses: a dictionary, a boolean, or a tuple or list
+  // literal that holds a text, boolean or dictionary value at any depth (a
+  // dictionary entry such as `("a", 3)`). With two or more terms the `Add`
+  // built by `finishSum` refuses such a term, but a sum of one term is that
+  // term: `Sum([{"a" -> 3}])` was `{"a" -> 3}`, `Sum([True])` was `True`, and
+  // `Sum({"a" -> 3})` was `("a", 3)`. The error has the code, the type and the
+  // operand of the error `Add` gives for two terms (`Sum([True, 1])`), without
+  // the trace frame of the internal `Add`.
+  if (isRefusedSumTerm(term)) {
+    acc.error = term.engine.typeError('number', term.type, term);
     return acc;
   }
   // An absent term (`Missing`, `Undefined`) is `NaN` in a sum, as in any
@@ -10805,6 +10837,18 @@ function processMinMaxItem(
       ];
   }
 
+  // A DICTIONARY is a collection of key-value entries, and an entry is not a
+  // number. Walking it as a collection compared its keys with its values:
+  // `Max({"a" -> 3, "b" -> 5})` was `max(5, "a", "b")`. The answer is the
+  // `incompatible-type` error that `Sum` and `Mean` give for the same
+  // operand, which names the first entry. An empty dictionary has no entry
+  // and contributes no value, as an empty list does.
+  if (item.operator === 'Dictionary') {
+    for (const entry of item.each())
+      return [ce.typeError('number', entry.type, entry), []];
+    return [undefined, []];
+  }
+
   if (item.isCollection) {
     // Only a finite, enumerable collection can be folded for an extremum.
     // An infinite one (an Interval's dyadic sampler, a Map over it) would
@@ -10822,9 +10866,16 @@ function processMinMaxItem(
     const rest: Expression[] = [];
     let walked = 0;
     let sawIndeterminate = false;
+    let sawNaN = false;
     for (const op of item.each()) {
       walked += 1;
+      // A dictionary ELEMENT is not a number. The error names the whole
+      // dictionary, as the error of `Sum([1, {"a" -> 3}])` does.
+      if (op.operator === 'Dictionary')
+        return [ce.typeError('number', op.type, op), []];
       const [val, others] = processMinMaxItem(op, mode, walk);
+      // An error is the answer of the whole extremum.
+      if (isFunction(val, 'Error')) return [val, []];
       if (val) {
         // NaN absorbs, mirroring the top-level convention: an indeterminate
         // element makes the whole extremum indeterminate (Max([1, NaN, 3]) →
@@ -10836,9 +10887,13 @@ function processMinMaxItem(
         // element is `NaN` or inexact (`Max([1, Indeterminate])` is
         // `Indeterminate`, `Max([Indeterminate, NaN])` and
         // `Max([1.5, Indeterminate])` are `NaN`).
+        // The walk continues after a `NaN` too, so that an error found
+        // later (a dictionary element) is the answer whatever the order of
+        // the elements: `Max([NaN, d])` and `Max([d, NaN])` are both the
+        // error, as for `Sum`.
         if (val.isNaN) {
-          if (!val.isIndeterminate) return [ce.NaN, []];
-          sawIndeterminate = true;
+          if (!val.isIndeterminate) sawNaN = true;
+          else sawIndeterminate = true;
           continue;
         }
         if (isInexactOperand(val)) walk.inexact = true;
@@ -10846,6 +10901,7 @@ function processMinMaxItem(
       }
       rest.push(...others);
     }
+    if (sawNaN) return [ce.NaN, []];
     if (enumerationDeclinedAfterWalk(item, walked)) return [undefined, [item]];
     if (sawIndeterminate) return [ce.Indeterminate, []];
     return [result, rest];
@@ -11148,10 +11204,14 @@ function evaluateMinMax(
   let result: Expression | undefined = undefined;
   const rest: Expression[] = [];
   let sawIndeterminate = false;
+  let sawNaN = false;
   const walk: ExtremumWalk = { inexact: false, machineLists: [] };
 
   for (const op of ops) {
     const [val, others] = processMinMaxItem(op, mode, walk);
+    // An error (a dictionary operand or element) is the answer of the whole
+    // extremum, as it is for `Sum`.
+    if (isFunction(val, 'Error')) return val;
     if (val) {
       // NaN absorbs: Min/Max of an indeterminate value is indeterminate.
       // (Comparisons with NaN are themselves indeterminate, so without this
@@ -11163,9 +11223,13 @@ function evaluateMinMax(
       // inexact operand or element (`Max(1.5, Indeterminate)`), as a float
       // operand makes a numeric result a float
       // (`docs/plans/2026-09-28-indeterminate-value.md` §4).
+      // The walk continues after a `NaN`, so that an error found in a later
+      // operand (a dictionary) is the answer whatever the order of the
+      // operands: `Max(NaN, d)` and `Max(d, NaN)` are both the error, as for
+      // `Sum`.
       if (val.isNaN) {
-        if (!val.isIndeterminate) return ce.NaN;
-        sawIndeterminate = true;
+        if (!val.isIndeterminate) sawNaN = true;
+        else sawIndeterminate = true;
         continue;
       }
       if (isInexactOperand(val)) walk.inexact = true;
@@ -11173,6 +11237,7 @@ function evaluateMinMax(
     }
     rest.push(...others);
   }
+  if (sawNaN) return ce.NaN;
   if (sawIndeterminate)
     return walk.inexact ||
       walk.machineLists.some(

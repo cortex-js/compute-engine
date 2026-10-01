@@ -93,15 +93,16 @@ describe('a user-function result is a scalar by construction', () => {
     ).toBe('14');
   });
 
-  test('a reducing body (Sum over a bare parameter) has no compiled form', () => {
+  test('a reducing body (Sum over a bare parameter) compiles', () => {
     const ce = engineWithF();
     ce.assign('k', ce.box(['Function', ['Sum', 'L'], 'L']));
     const r = build(ce, ['f', ['k', 'u']]);
-    // `Sum` over a bare parameter names no indexing set, so the DEFINITION
-    // declines and the whole artifact falls back to interpretation. The
-    // result-shape question is never reached — the body's static type says
-    // `number`, but there is no emitted call to spell either way.
-    expect(r.success).toBe(false);
+    // `Sum` over a bare parameter infers `L: collection`. Adding the elements
+    // needs no positions or order, so the definition compiles with a run-time
+    // read of the operand (`_SYS.elts`, issue #385). That read takes a
+    // single number as a collection of one element, as the interpreter's
+    // `Sum(4) = 4` does.
+    expect(r.success).toBe(true);
     expect(r.run({ u: 4 })).toBe(5);
     expect(
       ce

@@ -194,17 +194,33 @@ dictionary and a value that is not an entry gives the same error. The open
 question is whether a dictionary joined with a list should instead give a list
 of the entries followed by the elements. Until decided, the error stays.
 
-### A function declared `(collection<any> | number) -> number` whose body is `Max(xs)` compiles to `Math.max(xs)` (OPEN — found 2026-09-29 by the whole-collection parameter work)
+### `Max` and `Min` of a dictionary compare its keys with its values (OPEN, decision — found 2026-09-30 by the fix for issue #385)
 
-The compiled function returns `NaN` for a list argument, where the interpreter
-returns the maximum. `couldBeIndexedCollectionOperand`
-(`compilation/javascript-target.ts`) accepts only indexed-collection arms, so a
-parameter whose declared type has a `collection<any>` arm is compiled as a
-scalar. A tested fix accepts a collection arm that can hold a list and excludes
-strings. The same gap is why `Max`, `Min`, `GCD`, `LCM` and `ListFrom` were left
-element-wise by the decision of 2026-09-29 on whole-collection parameters:
-covering them needs the compiled definition to type an undeclared parameter from
-its lifted signature slot.
+`Max({"a" -> 3, "b" -> 5})` evaluates to `max(5, "a", "b")`, and `Min` of the
+same dictionary to `min(3, "a", "b")`: `evaluateMinMax`
+(`library/arithmetic.ts`) flattens each entry into its key and its value. `Sum`
+and `Mean` of a dictionary give an `incompatible-type` error that names the
+first entry, and `Length`/`Count` give the number of entries. The decision to
+make: `Max`/`Min` of a dictionary give the same error as `Sum` (an entry is not
+a number), or the extremum of the values (`5`). Until it is made, the compiled
+`Max`/`Min` refuse a dictionary operand.
+
+### The JavaScript run-time tensor arithmetic adds complex coordinates with `+` (OPEN — found 2026-09-30 by the fix for issue #385)
+
+`Sum(P)` with `P` declared `list<tuple<complex, complex>>` compiles with
+`success: true`, and over `[(1+i, 2), (3+i, 4)]` returns
+`["0[object Object][object Object]", …]`, where `evaluate()` gives
+`(4 + 2i, 6)`. The element-wise helpers of `compilation/javascript-target.ts`
+(`bcast` behind `_SYS.add`, `mulTensor` behind `_SYS.mul`, `matmul`) apply the
+raw `+` and `*` to the entries of an array, and a complex entry is an object
+`{re, im}`. The top level of a `Sum`/`Product` fold is correct since the fix
+for issue #385 (`elementwiseFoldCombiner` uses `_SYS.sadd`/`_SYS.smul` for two
+values that are not arrays). Two fixes are possible: refuse at compile time a
+fold or an element-wise operation whose element type has a complex part inside
+a collection, or make the scalar function of `bcast` complex-aware (one
+`typeof` test per entry on the real path). A function result typed `unknown`
+that holds such points is visible only at run time, so the second fix is the
+only complete one.
 
 ### `Append` over an operand typed `any` is typed `list` (OPEN, small — found 2026-09-29, measured again 2026-09-30)
 
@@ -364,7 +380,9 @@ substitution gives `14/3`), a use through a local (`let ys = xs; mean(ys)`), and
 held back by the compiled route: the compiled definition types an undeclared
 parameter from its uses, so `xs^2` compiles to scalar code and an array argument
 gives `NaN`. They can follow once the compiled definition types a lifted
-parameter from its signature slot (see the `Max` entry above). `norm(v)` over a
+parameter from its signature slot. (A parameter DECLARED `collection<any>` or
+`collection<any> | number` already compiles under `Max`, `Min`, `Sum` and
+`Product` since the fix for issue #385; the gap is the undeclared parameter.) `norm(v)` over a
 list of numbers gives the list itself (the norm of each number), on both routes;
 whether `Norm` of an untyped parameter should read a list of numbers as one
 vector is part of the same question.

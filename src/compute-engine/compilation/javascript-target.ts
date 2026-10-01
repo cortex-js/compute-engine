@@ -1858,7 +1858,9 @@ export function isIndexedCollectionOperand(
  * A top type (`unknown`, `any`, `value`) is not admitted: it says nothing is
  * known, not that a collection is expected. A DECLARED collection type is not
  * admitted either: only a type inferred from the uses is wider than the
- * author meant. A type with a text arm is not
+ * author meant. (An operator that only visits the elements, in any order,
+ * uses `iterableCollectionCode` instead, which admits a declared type.)
+ * A type with a text arm is not
  * admitted either (see `couldBeStringOperand`). The set, dictionary and
  * tuple tests below remove only the cases the static type shows. For every
  * other value the run-time check is the one guard: a value that is not an
@@ -1892,6 +1894,82 @@ function admitsRuntimeCheckedArray(e: Expression): boolean {
   )
     return false;
   return true;
+}
+
+/**
+ * The compiled code of a SYMBOL typed as an abstract collection, for an
+ * operator that only visits each element once, in any order: `Max`, `Min`,
+ * `Length`, `Count`, and the collection form of `Sum` and `Product`. The
+ * result is `undefined` when `e` is not such an operand.
+ *
+ * Such an operator needs no index and no order, so a parameter typed
+ * `collection` or `collection<integer>` compiles, whether the type was
+ * declared or inferred from the uses (issue #385: `Max(w)` with `w` declared
+ * `collection` compiled to `Math.max(w)`, which is `NaN` for an array).
+ * `_SYS.elts` reads an array as it is and a JavaScript `Set` as the array of
+ * its elements, and throws a `RangeError` for any other value, so a value
+ * that is neither stops the run instead of giving a wrong answer. When the
+ * type was inferred, it also reads a single value as a collection of one
+ * element, because the interpreter accepts one there (`k(4)` is `4` for
+ * `k(L) := Sum(L)`): a number or a complex value for `Sum` and `Product`, a
+ * number for `Max` and `Min` (complex values have no order). `Length` and
+ * `Count` refuse a single value, and so does a parameter DECLARED
+ * `collection`, which the interpreter checks. For the same four operators, a
+ * type with a number arm (`collection<any> | number`) is admitted too, and
+ * reads a single value the same way.
+ *
+ * An operator that reads positions or order (`At`, `Reverse`, `Take`, …)
+ * does not use this: a set has neither, so a declared abstract collection
+ * stays refused there (`runtimeCheckedArrayCode`).
+ *
+ * Not admitted: a top type (`unknown`, `any`, `value`), which says nothing
+ * is known; a type with a text arm (see `couldBeStringOperand`); a
+ * dictionary, whose elements are its entries and not values to compare or
+ * add; and a tuple.
+ */
+function iterableCollectionCode(
+  kind: string,
+  e: Expression | undefined,
+  compile: (expr: Expression) => string
+): string | undefined {
+  if (e === undefined || !isSymbol(e)) return undefined;
+  const t = jsType(e);
+  if (t === 'unknown' || t === 'any' || t === 'value') return undefined;
+  const reducer =
+    kind === 'Sum' || kind === 'Product' || kind === 'Max' || kind === 'Min';
+  // A type such as `collection<any> | number` admits a single number, which
+  // these four operators read as one element, as the interpreter does. A
+  // type whose collection arms are all indexed (`list<number> | number`)
+  // keeps the run-time `Array.isArray` projection of its callers.
+  const numberArm =
+    reducer &&
+    !e.type.matches('collection<any>') &&
+    // A number type (`nan | real`) also matches the union: require an arm
+    // that is a collection.
+    !e.type.matches('number') &&
+    e.type.matches('collection<any> | number') &&
+    !couldBeIndexedCollectionOperand(e);
+  if (!numberArm && !e.type.matches('collection<any>')) return undefined;
+  if (couldBeStringOperand(e)) return undefined;
+  if (e.type.matches('dictionary<any>') || isPointOperandType(e))
+    return undefined;
+  // A single value is read as one element when the type has a number arm,
+  // or when the type was inferred from the uses. The interpreter refuses a
+  // number at a parameter DECLARED `collection` (`incompatible-type`).
+  const inferred = e.valueDefinition?.inferredType === true;
+  const scalar =
+    !reducer || (!inferred && !numberArm)
+      ? undefined
+      : kind === 'Sum' || kind === 'Product'
+        ? 'complex'
+        : 'real';
+  const real = kind === 'Max' || kind === 'Min';
+  const extra = real
+    ? `, ${scalar ? JSON.stringify(scalar) : 'undefined'}, true`
+    : scalar
+      ? `, ${JSON.stringify(scalar)}`
+      : '';
+  return `_SYS.elts(${compile(e)}, ${JSON.stringify(kind)}${extra})`;
 }
 
 /**
@@ -3959,7 +4037,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (isProvablyStringOperand(arg))
       return `_SYS.chars(${compile(arg)}).length`;
     if (!isIndexedCollectionOperand(arg, target)) {
-      const checked = runtimeCheckedArrayCode('Length', arg, compile);
+      // Counting needs no positions or order, so an abstract collection
+      // (declared or inferred) is read through `_SYS.elts`, which accepts an
+      // array or a JavaScript `Set` (`iterableCollectionCode`).
+      const checked = iterableCollectionCode('Length', arg, compile);
       if (checked !== undefined) return `(${checked}).length`;
       throw new Error(
         `Could not compile \`Length\`: operand is not an indexed collection ` +
@@ -5252,7 +5333,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           target,
           countingWalkPlan(target)
         );
-      return `(${elementsArg('Count', args[0], compile)}).length`;
+      return `(${countSourceCode(args[0], compile, target)}).length`;
     }
     // The predicate form uses the same lowering as `CountIf` and `Filter`:
     // an element is counted when the compiled predicate returns a truthy
@@ -5281,7 +5362,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           target,
           countingWalkPlan(target)
         );
-      const coll = elementsArg('Count', args[0], compile);
+      const coll = countSourceCode(args[0], compile, target);
       return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('Count', args[1], args[0], compile, [], target)})`;
     }
     throw new Error(
@@ -11751,6 +11832,49 @@ const SYS_HELPERS = {
     if (Array.isArray(x)) return x;
     throw new RangeError(`${kind}: the operand is not a list at run time`);
   },
+  // The operand of an operator that only visits each element once, in any
+  // order (`iterableCollectionCode`): an array as it is, the elements of a
+  // JavaScript `Set` as an array, or a `RangeError` for any other value.
+  // `scalar` reads a single value as a collection of one element: a number
+  // when it is `'real'`, a number or a complex value `{re, im}` when it is
+  // `'complex'` (see `iterableCollectionCode` for when each applies).
+  // A numeric typed array is copied into a plain array, as the binding
+  // boundary copies one for a parameter typed `list<real>`. When `real` is
+  // true (`Max`, `Min`), every element must be a number: a complex value
+  // `{re, im}` has no order, and `Math.max` would read it as `NaN`. A
+  // parameter typed `list` gets this check at the binding boundary; a
+  // parameter typed `collection` does not, so it is made here.
+  elts: (
+    x: unknown,
+    kind: string,
+    scalar?: 'real' | 'complex',
+    real?: boolean
+  ): unknown[] => {
+    let xs: unknown[] | undefined;
+    if (Array.isArray(x)) xs = x;
+    else if (x instanceof Set) xs = [...x];
+    else if (isNumericTypedArray(x)) xs = copyToPlainArray(x);
+    else if (
+      (scalar !== undefined && typeof x === 'number') ||
+      (scalar === 'complex' &&
+        typeof x === 'object' &&
+        x !== null &&
+        're' in x &&
+        'im' in x)
+    )
+      xs = [x];
+    if (xs === undefined)
+      throw new RangeError(
+        `${kind}: the operand is not a list or a set at run time`
+      );
+    if (real === true)
+      for (const v of xs)
+        if (typeof v !== 'number')
+          throw new TypeError(
+            `${kind}: an element of the operand is not a real number at run time`
+          );
+    return xs;
+  },
   at: (arr: unknown, i: number | unknown[]): number | unknown[] => {
     if (!Array.isArray(arr)) return NaN;
     const n = arr.length;
@@ -14619,6 +14743,17 @@ function compileSumProduct(
     }
     if (isPossiblyCollectionTypedJS(args[0]))
       return emitCollectionReduce(kind, args[0], target, true);
+    // A symbol typed as an abstract collection (declared or inferred): adding
+    // or multiplying the elements needs no positions or order, so it is read
+    // through `_SYS.elts`, which accepts an array or a JavaScript `Set` at run
+    // time (`iterableCollectionCode`). The element type is not known to be
+    // scalar, so the elements combine with `elementwiseFoldCombiner`, as in
+    // the guarded fold of `emitCollectionReduce`.
+    const elements = iterableCollectionCode(kind, args[0], (e) =>
+      BaseCompiler.compile(e, target)
+    );
+    if (elements !== undefined)
+      return `(${elements}).reduce(${elementwiseFoldCombiner(kind)}, ${kind === 'Sum' ? '0' : '1'})`;
     throw new Error(`Could not compile \`${kind}\`: no indexing set`);
   }
   return emitSumProduct(kind, args[0], args.slice(1), target);
@@ -14981,6 +15116,28 @@ export function refuseKleeneQuantifier(
         `combines by Kleene logic and the compiled \`some\`/\`every\` cannot. ` +
         `The interpreter evaluates it instead.`
     );
+}
+
+/**
+ * The source of `Count`: as `elementsArg`, except that a symbol typed as an
+ * abstract collection (declared or inferred) is read through `_SYS.elts`,
+ * which accepts an array or a JavaScript `Set` at run time
+ * (`iterableCollectionCode`). Counting needs no positions or order.
+ */
+function countSourceCode(
+  arg: Expression | undefined,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (
+    arg !== undefined &&
+    !isProvablyStringOperand(arg) &&
+    !isIndexedCollectionOperand(arg, target)
+  ) {
+    const checked = iterableCollectionCode('Count', arg, compile);
+    if (checked !== undefined) return checked;
+  }
+  return elementsArg('Count', arg, compile);
 }
 
 function elementsArg(
@@ -15962,6 +16119,33 @@ function compileExtremum(
     );
     return loop ?? guardedReduce(compile(args[0]));
   }
+  // An operand typed as an abstract collection (`collection`,
+  // `collection<integer>`, a set) is not an indexed collection, and none of
+  // the arms below reads it as one: the scalar arm compiled `Max(w)` to
+  // `Math.max(w)`, which is `NaN` for an array behind `success: true` (issue
+  // #385). `Max` and `Min` need neither positions nor order, so a symbol of
+  // such a type is read through `_SYS.elts`, which accepts an array or a
+  // JavaScript `Set` at run time and throws for any other value
+  // (`iterableCollectionCode`). Any other operand that is a collection but
+  // not an indexed one (a dictionary, an expression typed as a set) fails
+  // closed, as in `GCD`.
+  const checkedArray = args.map((a) =>
+    iterableCollectionCode(kind, a, compile)
+  );
+  for (const [i, a] of args.entries()) {
+    if (
+      checkedArray[i] === undefined &&
+      !isIndexedCollectionOperand(a) &&
+      !couldBeIndexedCollectionOperand(a) &&
+      (a.isCollection || a.type.matches('collection<any>'))
+    )
+      throw new Error(
+        `Could not compile \`${kind}\`: operand is a collection but not an ` +
+          `indexed collection (list/vector/range).`
+      );
+  }
+  if (args.length === 1 && checkedArray[0] !== undefined)
+    return guardedReduce(checkedArray[0]);
   // A single operand that is not PROVABLY scalar but not provably a collection
   // either — its type admits an indexed-collection arm (`number |
   // list<number>`, e.g. `Distance(S, p)` over a base declared with the bare
@@ -15991,13 +16175,16 @@ function compileExtremum(
   // code appears once, so an impure operand is still evaluated exactly once.
   if (
     args.some(
-      (a) =>
+      (a, i) =>
         a &&
-        (isIndexedCollectionOperand(a) || couldBeIndexedCollectionOperand(a))
+        (isIndexedCollectionOperand(a) ||
+          couldBeIndexedCollectionOperand(a) ||
+          checkedArray[i] !== undefined)
     )
   ) {
-    const parts = args.map((a) => {
+    const parts = args.map((a, i) => {
       if (isIndexedCollectionOperand(a)) return `...(${compile(a)})`;
+      if (checkedArray[i] !== undefined) return `...(${checkedArray[i]})`;
       if (couldBeIndexedCollectionOperand(a))
         return `...((_v) => Array.isArray(_v) ? _v : [_v])(${compile(a)})`;
       return compile(a);
@@ -16774,9 +16961,23 @@ function emitCollectionReduce(
   // product for matrices) rather than string-concatenating arrays under a bare
   // `+`. Guard the scalar case so a runtime scalar returns itself (interpreter's
   // `Sum(scalar) = scalar`).
-  const combiner = kind === 'Sum' ? '_SYS.add' : '_SYS.mul';
   const identity = kind === 'Sum' ? '0' : '1';
-  return `((_c) => Array.isArray(_c) ? _c.reduce((_a, _b) => ${combiner}(_a, _b), ${identity}) : _c)(${code})`;
+  return `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(kind)}, ${identity}) : _c)(${code})`;
+}
+
+/**
+ * The combiner of a `Sum`/`Product` fold whose elements may be numbers,
+ * complex values `{re, im}`, or arrays (points, rows). Arrays combine
+ * element-wise (`_SYS.add`, `_SYS.mul`, which use the raw `+`/`*` on their
+ * entries). Two values that are not arrays combine with `_SYS.sadd`/`_SYS.smul`,
+ * which add and multiply complex values: `_SYS.add` alone read a complex
+ * element with `+` and the sum of `[1+2i, 3+4i]` became the string
+ * `"0[object Object][object Object]"`.
+ */
+function elementwiseFoldCombiner(kind: 'Sum' | 'Product'): string {
+  const [tensor, scalar] =
+    kind === 'Sum' ? ['_SYS.add', '_SYS.sadd'] : ['_SYS.mul', '_SYS.smul'];
+  return `(_a, _b) => Array.isArray(_a) || Array.isArray(_b) ? ${tensor}(_a, _b) : ${scalar}(_a, _b)`;
 }
 
 /**

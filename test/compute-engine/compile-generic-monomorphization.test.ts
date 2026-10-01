@@ -367,13 +367,20 @@ describe('G3 lift — the bound reading agrees with the ground declaration', () 
     expect(g?.run?.({})).toEqual([2, 1]);
   });
 
-  test('a `collection<number>` bound refuses a `Length` body too', () => {
+  test('a `collection<number>` bound compiles a `Length` body, as the ground declaration does', () => {
+    // Counting needs no indexed access, so `Length` over an abstract
+    // collection compiles with a run-time read of the operand (`_SYS.elts`,
+    // issue #385). Both declarations emit the same definition.
     const { concrete, generic } = bothWays('collection<number>', 'number', [
       'Length',
       'xs',
     ]);
-    expect(concrete).toThrow(/Could not compile `Length`: /);
-    expect(generic).toThrow(/Could not compile `Length`: /);
+    const c = concrete();
+    const g = generic();
+    expect(g?.preamble).toBe(c?.preamble);
+    expect(g?.code).toBe(c?.code);
+    expect(c?.run?.({})).toBe(3);
+    expect(g?.run?.({})).toBe(3);
   });
 
   test('a SCALAR bound stamps nothing — the emission is what it was', () => {

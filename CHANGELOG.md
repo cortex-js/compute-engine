@@ -13,6 +13,27 @@
 
 ### Issues Resolved
 
+- **#385** The JavaScript compilation of `Max` and `Min` over an operand typed
+  as an abstract collection (`collection`, `collection<integer>`, a set, or
+  `collection<any> | number`) gave `Math.max(w)`, which is `NaN` for a list,
+  with `success: true`. `evaluate()` gives the maximum. `Max`, `Min`, `Length`,
+  `Count`, and the collection form of `Sum` and `Product` need neither the
+  positions nor the order of the elements, so such an operand now compiles. At
+  run time it accepts a list, a JavaScript `Set` or a numeric typed array, and
+  a value that is none of these stops the run with a `RangeError`. `Max` and
+  `Min` also stop with a `TypeError` on an element that is not a real number
+  (a complex value has no order). A single number is read as a collection
+  of one element where the interpreter accepts one: at a parameter typed
+  `collection<any> | number`, or whose type `collection` was inferred from its
+  uses (`k(L) := Sum(L)`, `k(4)` is `4`). `Length` and `Count` of such an
+  operand were refused before; they now compile. `At`, `Reverse` and the other
+  operators that read positions or order still refuse an abstract collection,
+  and all of them refuse a dictionary.
+- The compiled `Sum` and `Product` of a list of complex values whose type is
+  not known at compile time (the result of a function typed `unknown`)
+  combined the elements with `+`, and the sum of `[1+2i, 3+4i]` was the
+  string `"0[object Object][object Object]"`. They now add and multiply
+  complex values.
 - `w.mul(ce.Zero)` and `ce.Zero.mul(w)` folded to `0` for a variable `w` with
   an assigned value, while `w.mul(0)` and `ce.box(['Multiply', 0, 'w'])` keep
   the product `0w`. With `w := NaN`, the folded `0` hid the `NaN`. All the

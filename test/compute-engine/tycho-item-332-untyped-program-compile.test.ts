@@ -229,13 +229,15 @@ describe('list operators over a parameter of a user function', () => {
     expect(runCompiled('function f(xs) { length(xs) }\nf([1, 2, 3])')).toBe(3);
   });
 
-  test('a value that is not a list at run time stops the run', () => {
+  test('a value that is not a list or a set at run time stops the run', () => {
     const r = compileProgram('function f(xs) { length(xs) }\nlet g = f\ng') as {
       run: () => (xs: unknown) => unknown;
     };
     const g = r.run();
     expect(g([1, 2, 3])).toBe(3);
-    expect(() => g(new Set([1, 2]))).toThrow(RangeError);
+    // Counting needs no order, so a JavaScript `Set` is counted (issue #385).
+    expect(g(new Set([1, 2]))).toBe(2);
+    expect(() => g(4)).toThrow(RangeError);
     expect(() => g('abc')).toThrow(/Length: the operand is not a list/);
   });
 
