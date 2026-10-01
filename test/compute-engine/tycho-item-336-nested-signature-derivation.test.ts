@@ -3,6 +3,7 @@ import { _BoxedValueDefinition } from '../../src/compute-engine/boxed-expression
 import { _BoxedOperatorDefinition } from '../../src/compute-engine/boxed-expression/boxed-operator-definition';
 import { _provisionalDependentCount } from '../../src/compute-engine/boxed-expression/provisional-application';
 import { withScratchScope } from '../../src/compute-engine/scratch-scopes';
+import { inferFunctionLiteralEffects } from '../../src/compute-engine/boxed-expression/effects-inference';
 import {
   axisMaskOf,
   EngineConfigurationLifecycle,
@@ -37,7 +38,10 @@ const LIMIT = 500;
 /** Count the calls to `_deriveSignature` of both definition classes. Past
  * `LIMIT` the spy throws, so that without the fix the test fails at once
  * instead of running for minutes. */
-function withDerivationCount<T>(f: () => T): { result: T; count: number } {
+function withDerivationCount<T>(
+  f: () => T,
+  limit = LIMIT
+): { result: T; count: number } {
   const protos = [
     _BoxedValueDefinition.prototype as any,
     _BoxedOperatorDefinition.prototype as any,
@@ -47,7 +51,7 @@ function withDerivationCount<T>(f: () => T): { result: T; count: number } {
   protos.forEach((p, i) => {
     p._deriveSignature = function (...args: unknown[]) {
       count += 1;
-      if (count > LIMIT) throw new Error('too many signature derivations');
+      if (count > limit) throw new Error('too many signature derivations');
       return originals[i].apply(this, args);
     };
   });
@@ -408,3 +412,73 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     expect(result(derived)).toBe('list<number> | missing | number');
   });
 });
+
+// A chain of functions declared `-> unknown` whose bodies each call the next
+// one TWICE. The effects inference walked a stored callee literal once per
+// call, so the last function was walked 2^depth times: 89 794 reads of the
+// declared signatures at depth 12 (measured 2026-10-01). A stored literal
+// already walked into the same accumulator at the same depth or a smaller one
+// is now skipped (`expandedLiterals`, `effects-inference.ts`), and the reads
+// grow polynomially.
+describe('A CHAIN OF FUNCTIONS THAT EACH CALL THE NEXT TWICE', () => {
+  function chain(depth: number, last: unknown[]): ComputeEngine {
+    const ce = new ComputeEngine();
+    for (let k = 1; k <= depth; k++)
+      ce.declare(`W_${k}`, { signature: '(unknown) -> unknown' });
+    for (let k = depth; k >= 1; k--) {
+      const body =
+        k === depth
+          ? last
+          : ['Add', [`W_${k + 1}`, 'x'], [`W_${k + 1}`, ['Add', 'x', 1]]];
+      ce.assign(`W_${k}`, ce.box(['Function', ['Block', body], 'x'] as any));
+    }
+    return ce;
+  }
+
+  test('the reads do not double with each level', () => {
+    // The limit stops a regression at once instead of running for seconds.
+    const counts = [6, 12].map(
+      (depth) =>
+        withDerivationCount(() => chain(depth, ['b', 'x']), 20_000).count
+    );
+    // Measured 2026-10-01: 850 at depth 6 and 5 666 at depth 12 (89 794 at
+    // depth 12 before). A doubling per level would multiply by 64.
+    expect(counts[1]).toBeLessThan(counts[0] * 16);
+  });
+
+  test.each([
+    [['Add', ['Random'], 'x'], '(unknown) random -> number', false],
+    [['b', 'x'], '(unknown) any -> broadcastable<number>', false],
+    [['Add', 'x', 1], '(unknown) -> number', true],
+  ])('the effects of %j still reach the first function', (last, type, pure) => {
+    const ce = chain(5, last);
+    const f = ce.box(['Function', ['Add', ['W_1', 'y'], ['W_2', 'y']], 'y']);
+    expect(f.type.toString()).toBe(type);
+    expect(ce.box(['W_1', 2]).isPure).toBe(pure);
+  });
+
+  test('a callee first reached past the depth guard still contributes', () => {
+    // `H_1` … `H_8` each call the next, and `H_8` calls `G`: through the
+    // chain, `G` is reached past the depth guard, which records `any` and
+    // stops. The direct call `G(y)` that follows must still walk `G` and
+    // record that it draws.
+    const ce = new ComputeEngine();
+    const names = ['H_1', 'H_2', 'H_3', 'H_4', 'H_5', 'H_6', 'H_7', 'H_8', 'G'];
+    for (const n of names) ce.declare(n, { signature: '(unknown) -> unknown' });
+    ce.assign('G', ce.box(['Function', ['Add', ['Random'], 'x'], 'x'] as any));
+    for (let k = 8; k >= 1; k--)
+      ce.assign(
+        `H_${k}`,
+        ce.box(['Function', [k === 8 ? 'G' : `H_${k + 1}`, 'x'], 'x'] as any)
+      );
+    for (const body of [
+      ['Block', ['H_1', 'y'], ['G', 'y']],
+      ['Block', ['G', 'y'], ['H_1', 'y']],
+    ]) {
+      const f = ce.box(['Function', body, 'y'] as any);
+      const inferred = inferFunctionLiteralEffects(ce as any, f);
+      expect(inferred.draws).toBe(true);
+    }
+  });
+});
+

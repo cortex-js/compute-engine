@@ -196,18 +196,20 @@ still rows (`list<vector<vector<integer^2>^3>^4>` at
 `list<vector<integer^2>^(4x3)>`), because every level is merged at once; a
 fix would merge only as many levels as the target has dimensions.
 
-### Registering a chain of `-> unknown` functions that each call the next twice re-enters the signature memo a number of times that doubles per level (OPEN, small — measured 2026-09-29 after the fix for Tycho item 336)
+### Registering a chain of `-> unknown` functions reads the declared signatures a number of times that grows faster than the depth (OPEN, low — narrowed 2026-10-01)
 
-With `W_k` declared `-> unknown` and each body calling `W_{k+1}` TWICE, one
-registration makes 14 077 calls to `_deriveSignature` at depth 8 (80 ms) and 163
-493 at depth 12 (277 ms). They are memo HITS, not derivations (each body is
-boxed once, 12 boxings at depth 12): the type of a call is read again through
-`v.type` each time the `any` version moves, and every read walks the two
-callees. The definition version is not the cause (a fresh declaration no longer
-advances it, and the counts are the same with and without that exemption). A
-per-generation cache of the derived signature on the definition, read before the
-memo key is built, would make the count linear. Single-call chains are linear
-already (287 derivations at depth 10).
+With `W_k` declared `(unknown) -> unknown` and each body calling `W_{k+1}`
+twice, registering the chain reads the declared signatures (`_deriveSignature`)
+850 times at depth 6, 5 666 at depth 12 and 20 962 at depth 20, about 70 ms at
+depth 20 (measured 2026-10-01). The doubling per level is gone (89 794 reads at
+depth 12 before): the effects inference walked a callee once per call, and now
+skips a callee already walked into the same accumulator (`expandedLiterals`,
+`effects-inference.ts`). What remains is polynomial: each assignment types its
+body again, and each read of a signature whose cache generation has moved
+reads the type of the function value before its memo key is built. A cache of
+the derived signature stamped with the cache generation, checked before the
+key is built, was tried and gave no measurable gain at these depths, so it was
+not kept. Single-call chains are linear.
 
 ### A signature derivation that runs inside a cached type read does not see a widening made in its own temporary scope until the read finishes (OPEN, small — found 2026-09-29 by the review of the fix for Tycho item 336)
 

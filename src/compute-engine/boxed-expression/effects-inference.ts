@@ -1297,6 +1297,39 @@ export function inferFunctionLiteralEffects(
   return state;
 }
 
+/**
+ * The stored function literals already walked into each accumulator by the
+ * value-bound expansion of {@link Walker.applyNamed}, with the smallest depth
+ * (the `depth` argument of {@link walkLiteral}) each was walked at.
+ *
+ * The `seen` map of a {@link Walker} skips a node reached again along another
+ * path, but each expansion of a stored literal builds a new `Walker`, so a
+ * body that calls the same stored function twice walked it twice, and a
+ * chain of functions whose bodies each call the next one twice walked the
+ * last one 2^depth times (89 794 reads of the declared signatures for a chain
+ * of 12 functions declared `(unknown) -> unknown`, measured 2026-10-01; see
+ * `tycho-item-336-nested-signature-derivation.test.ts`).
+ *
+ * Every contribution of a walk is a monotone union into the accumulator
+ * (`WalkState`), and a walk of a literal at a smaller depth reaches every
+ * literal a walk at a larger depth reaches, at smaller depths. So a repeat at
+ * the same depth or a larger one adds nothing, and is skipped. A repeat at a
+ * SMALLER depth is walked again: the earlier walk may have stopped at the
+ * depth guard (`MAX_LITERAL_DEPTH`), which records `any` and sets none of the
+ * other bits (`draws`, `unresolvedHead`, `consultsRegistry`,
+ * `escapingWrite`), and the repeat sets them. A literal that is on the
+ * expansion stack when it is reached again is walked to completion by the
+ * walk that put it there, into the same accumulator.
+ *
+ * The one difference from walking every repeat: a skipped repeat that would
+ * have reached the depth guard no longer collapses the effect set to `any`.
+ * The result can then depend on the order of the calls (a direct call
+ * before a deep chain to the same function keeps the precise set, the
+ * reverse order still collapses), and is never less precise than before.
+ * Keyed weakly on the accumulator, which a walk creates and drops.
+ */
+const expandedLiterals = new WeakMap<WalkState, Map<Expression, number>>();
+
 /** Depth guard: a pathological self-referential literal must not recurse
  * forever through the applied-callback resolution. */
 const MAX_LITERAL_DEPTH = 8;
@@ -2079,6 +2112,16 @@ class Walker {
       if (t === undefined && !this.expanding.has(name)) {
         const stored = storedFunctionLiteral(this.ce, name);
         if (stored !== undefined) {
+          // A stored literal already walked into this accumulator at this
+          // depth or a smaller one adds nothing (see `expandedLiterals`).
+          let walked = expandedLiterals.get(this.state);
+          if (walked === undefined) {
+            walked = new Map();
+            expandedLiterals.set(this.state, walked);
+          }
+          const prior = walked.get(stored);
+          if (prior !== undefined && prior <= this.depth + 1) return;
+          walked.set(stored, this.depth + 1);
           this.expanding.add(name);
           try {
             walkLiteral(

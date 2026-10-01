@@ -42,6 +42,12 @@
 
 ### Issues Resolved
 
+- Registering a chain of functions that each call the next one twice took a
+  time that doubled with each level: the effects inference walked the body of
+  a called function once per call, so the last function of a chain of 12 was
+  walked 2¹² times. A function already walked for the same definition is now
+  skipped, and the work grows polynomially with the depth: 5 666 reads of the
+  declared signatures at depth 12 (from 89 794) and 20 962 at depth 20.
 - **#386** `ReplaceAt`, `DeleteAt` and `Insert` did not compile to
   JavaScript: `compile(ReplaceAt(s, 2, 9))` failed with "target 'javascript'
   has no lowering for it", so a `Fold` whose step replaced one element of a
