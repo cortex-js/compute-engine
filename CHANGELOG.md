@@ -242,6 +242,9 @@ These changes apply to non-strict parsing only
   `y=\frac{1}{1+x^2}`: the `\frac` arguments and the superscript braces
   already group their content, so `x^(1/2)` is written `x^{\frac{1}{2}}`, not
   `x^{(\frac{1}{2})}`. Parentheses elsewhere are kept.
+- **`\operatorname{arccot}(x)` is the inverse cotangent.** It was a call of an
+  undefined function `arccot`; only the spelling `arcctg` was read as
+  `Arccot`. Both spellings are now `Arccot`, also as `\mathrm{arccot}`.
 - **Scientific notation with the base written `{10}`.** `2\times{10}^{-1}` is
   the number `0.2`, the same as `2\times10^{-1}`, and `4.35\times{10}^2`,
   `2\cdot{10}^{3}` and `a/2\times{10}^3` read the same as the spellings without
