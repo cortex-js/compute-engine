@@ -451,6 +451,15 @@ export function absorbSubscripts(
           parser.nextToken();
         }
         suffix = digits;
+        // A letter directly after the digits ends the subscript: `x_1y` is
+        // read as `x_1·y`, and a person can mean `x_{1y}`.
+        if (/^\p{L}$/u.test(parser.peek))
+          parser._emitAmbiguity?.(
+            'ambiguous-implicit-subscript',
+            underscoreIndex,
+            parser.index + 1,
+            { base: id, subscript: Number(digits) }
+          );
       } else if (
         parser.options.strict === false &&
         /^[a-zA-Z]$/.test(subToken)

@@ -26,6 +26,7 @@ import {
   tryInferRangeFromElements,
 } from './definitions-core.js';
 import { OPEN_DELIMITER_PREFIX } from '../parse.js';
+import { matchingBracket, operandEnd } from '../lenient-ambiguity.js';
 
 /**
  * Parse the body of an interval expression and create an Interval MathJSON expression.
@@ -145,6 +146,18 @@ const AMBIGUOUS_OPEN_DELIMITERS = ['[', '\\lbrack', '(', '\\lparen'];
  * Does not consume anything: the parser index is restored before returning.
  */
 function atAmbiguousOpenDelimiter(parser: Parser, at?: number): boolean {
+  return ambiguousOpenDelimiterIndex(parser, at) >= 0;
+}
+
+/**
+ * The token index of the opening bracket or paren of the operand at token
+ * index `at` (the one about to be parsed, by default), or `-1` if the operand
+ * is not spelled with a bracket or paren pair. See
+ * `atAmbiguousOpenDelimiter()`.
+ *
+ * Does not consume anything: the parser index is restored before returning.
+ */
+function ambiguousOpenDelimiterIndex(parser: Parser, at?: number): number {
   const start = parser.index;
   if (at !== undefined) parser.index = at;
   parser.skipVisualSpace();
@@ -152,9 +165,66 @@ function atAmbiguousOpenDelimiter(parser: Parser, at?: number): boolean {
     parser.nextToken();
     parser.skipVisualSpace();
   }
-  const result = AMBIGUOUS_OPEN_DELIMITERS.includes(parser.peek);
+  const result = AMBIGUOUS_OPEN_DELIMITERS.includes(parser.peek)
+    ? parser.index
+    : -1;
   parser.index = start;
   return result;
+}
+
+/**
+ * In non-strict mode, record an `ambiguous-interval` diagnostic when the
+ * right operand of `Element` or `NotElement` starts with a bracket pair that
+ * is not read as an interval because an operator follows it: `M in [0,1]^2`
+ * is `Element(M, Power(List(0, 1), 2))`, and a person can mean the square of
+ * the interval `[0, 1]`. The bracket pair is a pair of two values (`[0,1]`,
+ * `(0,1)`) or a range (`[0..1]`). An operand that is only the bracket pair
+ * (`M in [0,1]`) is read as an interval and is not reported.
+ *
+ * `open` is the token index of the opening bracket and `rhs` the right
+ * operand that the parser read. The span starts at the opening bracket and
+ * ends after the operand that follows the closing bracket (`[0,1]^2`). The
+ * reading does not change.
+ */
+function emitIntervalAmbiguity(
+  parser: Parser,
+  open: number,
+  rhs: MathJsonExpression | null
+): void {
+  if (!parser._emitAmbiguity || rhs === null) return;
+  // Find the leftmost operand of `rhs`: the expression the bracket pair was
+  // read as.
+  let first: MathJsonExpression | null = rhs;
+  while (true) {
+    const op = operator(first);
+    if (
+      op === '' ||
+      op === 'List' ||
+      op === 'Delimiter' ||
+      op === 'Range' ||
+      op === 'Interval'
+    )
+      break;
+    const next = operand(first, 1);
+    if (next === null) return;
+    first = next;
+  }
+  if (first === rhs) return;
+  if (parsedIntervalOperand(first) === first && operator(first) !== 'Range')
+    return;
+  // Find the closing bracket that matches the opening bracket at `open`.
+  const token = (i: number) => parser.latex(i, i + 1);
+  const at = (i: number) => token(i) || undefined;
+  let close = matchingBracket(at, open, parser.index);
+  if (close < 0) close = parser.index;
+  let after = close + 1;
+  while (after < parser.index && token(after).trim() === '') after += 1;
+  if (after >= parser.index) return;
+  parser._emitAmbiguity(
+    'ambiguous-interval',
+    open,
+    Math.min(parser.index, operandEnd(at, after))
+  );
 }
 
 /**
@@ -378,7 +448,8 @@ function parseSetOperator(
       sides === 'rhs' || operator(lhs) === name
         ? lhs
         : parsedIntervalLhs(parser, lhs);
-    const ambiguousRhs = atAmbiguousOpenDelimiter(parser);
+    const openIndex = ambiguousOpenDelimiterIndex(parser);
+    const ambiguousRhs = openIndex >= 0;
     const rawRhs = missingIfEmpty(
       parser.parseExpression({
         ...until,
@@ -386,6 +457,8 @@ function parseSetOperator(
       })
     );
     const rhs = ambiguousRhs ? parsedIntervalOperand(rawRhs)! : rawRhs!;
+    if (ambiguousRhs && (name === 'Element' || name === 'NotElement'))
+      emitIntervalAmbiguity(parser, openIndex, rawRhs);
     if (sides === 'chain')
       return parser._appendAssociativeOperand(name, newLhs, rhs);
     return [name, newLhs, rhs];

@@ -729,16 +729,13 @@ describe('undeclared-symbol is per-engine order-dependent (E4, documented)', () 
   });
 });
 
-describe('implicit-product-in-denominator (non-strict)', () => {
+describe('ambiguous-denominator (non-strict)', () => {
   const lenient = { strict: false };
 
   test.each(['1/2 x', '1/2x', 'pi/2x', 'x/2 y'])(
     '%s reports the implicit product in the denominator',
     (latex) => {
-      const ds = byCode(
-        diags(latex, lenient),
-        'implicit-product-in-denominator'
-      );
+      const ds = byCode(diags(latex, lenient), 'ambiguous-denominator');
       expect(ds).toHaveLength(1);
       // The span starts at the denominator, after the `/`
       expect(ds[0].start).toBe(latex.indexOf('/') + 1);
@@ -768,19 +765,17 @@ describe('implicit-product-in-denominator (non-strict)', () => {
     '1/f(x)',
     '1/g(x+1)',
   ])('%s reports nothing', (latex) => {
-    expect(
-      byCode(diags(latex, lenient), 'implicit-product-in-denominator')
-    ).toHaveLength(0);
+    expect(byCode(diags(latex, lenient), 'ambiguous-denominator')).toHaveLength(
+      0
+    );
   });
 
   test('strict mode reports nothing', () => {
-    expect(
-      byCode(diags('1/2x'), 'implicit-product-in-denominator')
-    ).toHaveLength(0);
+    expect(byCode(diags('1/2x'), 'ambiguous-denominator')).toHaveLength(0);
   });
 });
 
-describe('spaced-digit-groups (non-strict)', () => {
+describe('ambiguous-digit-groups (non-strict)', () => {
   const lenient = { strict: false };
 
   test.each([
@@ -788,7 +783,7 @@ describe('spaced-digit-groups (non-strict)', () => {
     ['1 000', '1000'],
     ['0.1 2', '12'],
   ])('%s reports digits joined by white space', (latex, digits) => {
-    const ds = byCode(diags(latex, lenient), 'spaced-digit-groups');
+    const ds = byCode(diags(latex, lenient), 'ambiguous-digit-groups');
     expect(ds).toHaveLength(1);
     expect(ds[0].detail).toMatchObject({ digits });
   });
@@ -803,24 +798,24 @@ describe('spaced-digit-groups (non-strict)', () => {
   test.each(['1\\,000', '1{,}000', '1000', '2.5', '2+3'])(
     '%s reports nothing',
     (latex) => {
-      expect(byCode(diags(latex, lenient), 'spaced-digit-groups')).toHaveLength(
-        0
-      );
+      expect(
+        byCode(diags(latex, lenient), 'ambiguous-digit-groups')
+      ).toHaveLength(0);
     }
   );
 
   test('strict mode reports nothing', () => {
-    expect(byCode(diags('2 3'), 'spaced-digit-groups')).toHaveLength(0);
+    expect(byCode(diags('2 3'), 'ambiguous-digit-groups')).toHaveLength(0);
   });
 });
 
-describe('letter-before-decimal (non-strict)', () => {
+describe('ambiguous-letter-decimal (non-strict)', () => {
   const lenient = { strict: false };
 
   test.each(['x.5', 'x.25', '\\pi.5'])(
     '%s reports a symbol followed by .digits',
     (latex) => {
-      const ds = byCode(diags(latex, lenient), 'letter-before-decimal');
+      const ds = byCode(diags(latex, lenient), 'ambiguous-letter-decimal');
       expect(ds).toHaveLength(1);
       expect(ds[0].start).toBe(latex.indexOf('.'));
     }
@@ -840,31 +835,31 @@ describe('letter-before-decimal (non-strict)', () => {
     '%s reports nothing',
     (latex) => {
       expect(
-        byCode(diags(latex, lenient), 'letter-before-decimal')
+        byCode(diags(latex, lenient), 'ambiguous-letter-decimal')
       ).toHaveLength(0);
     }
   );
 
   test('strict mode reports nothing', () => {
-    expect(byCode(diags('x.5'), 'letter-before-decimal')).toHaveLength(0);
+    expect(byCode(diags('x.5'), 'ambiguous-letter-decimal')).toHaveLength(0);
   });
 });
 
-describe('letter-run-split (non-strict mode)', () => {
+describe('ambiguous-letter-run (non-strict mode)', () => {
   const lenient = { strict: false };
 
   test('a run with no definition read as single letters', () => {
-    expect(byCode(diags('eps', lenient), 'letter-run-split')).toEqual([
+    expect(byCode(diags('eps', lenient), 'ambiguous-letter-run')).toEqual([
       {
-        code: 'letter-run-split',
+        code: 'ambiguous-letter-run',
         start: 0,
         end: 3,
         detail: { run: 'eps', parts: ['e', 'p', 's'] },
       },
     ]);
-    expect(byCode(diags('sinx', lenient), 'letter-run-split')).toEqual([
+    expect(byCode(diags('sinx', lenient), 'ambiguous-letter-run')).toEqual([
       {
-        code: 'letter-run-split',
+        code: 'ambiguous-letter-run',
         start: 0,
         end: 4,
         detail: { run: 'sinx', parts: ['s', 'i', 'n', 'x'] },
@@ -873,7 +868,10 @@ describe('letter-run-split (non-strict mode)', () => {
   });
 
   test('one diagnostic per run, with the span of the run', () => {
-    const split = byCode(diags('x+ab+the cat', lenient), 'letter-run-split');
+    const split = byCode(
+      diags('x+ab+the cat', lenient),
+      'ambiguous-letter-run'
+    );
     expect(split.map((d) => [d.detail?.run, d.start, d.end])).toEqual([
       ['ab', 2, 4],
       ['the', 5, 8],
@@ -882,9 +880,9 @@ describe('letter-run-split (non-strict mode)', () => {
   });
 
   test('a run split around a spelled-out Greek letter', () => {
-    expect(byCode(diags('xpi', lenient), 'letter-run-split')).toEqual([
+    expect(byCode(diags('xpi', lenient), 'ambiguous-letter-run')).toEqual([
       {
-        code: 'letter-run-split',
+        code: 'ambiguous-letter-run',
         start: 0,
         end: 3,
         detail: { run: 'xpi', parts: ['x', 'Pi'] },
@@ -903,7 +901,7 @@ describe('letter-run-split (non-strict mode)', () => {
       '\\mathrm{abc}',
       '\\int x dx',
     ])
-      expect(byCode(diags(latex, lenient), 'letter-run-split')).toEqual([]);
+      expect(byCode(diags(latex, lenient), 'ambiguous-letter-run')).toEqual([]);
   });
 
   test('additive: the parse output is unchanged', () => {
@@ -916,29 +914,29 @@ describe('letter-run-split (non-strict mode)', () => {
   });
 
   test('not emitted in strict mode', () => {
-    expect(byCode(diags('eps'), 'letter-run-split')).toEqual([]);
-    expect(byCode(diags('sinx'), 'letter-run-split')).toEqual([]);
-    expect(byCode(diags('e^xy'), 'letter-run-split')).toEqual([]);
+    expect(byCode(diags('eps'), 'ambiguous-letter-run')).toEqual([]);
+    expect(byCode(diags('sinx'), 'ambiguous-letter-run')).toEqual([]);
+    expect(byCode(diags('e^xy'), 'ambiguous-letter-run')).toEqual([]);
   });
 
   test('an unbraced exponent that takes the first letter of a run', () => {
-    expect(byCode(diags('e^xy', lenient), 'letter-run-split')).toEqual([
+    expect(byCode(diags('e^xy', lenient), 'ambiguous-letter-run')).toEqual([
       {
-        code: 'letter-run-split',
+        code: 'ambiguous-letter-run',
         start: 2,
         end: 4,
         detail: { run: 'xy', parts: ['x', 'y'] },
       },
     ]);
     expect(
-      byCode(diags('x^ab', lenient), 'letter-run-split').map((d) => [
+      byCode(diags('x^ab', lenient), 'ambiguous-letter-run').map((d) => [
         d.detail?.run,
         d.start,
         d.end,
       ])
     ).toEqual([['ab', 2, 4]]);
     expect(
-      byCode(diags('e^-xy', lenient), 'letter-run-split').map((d) => [
+      byCode(diags('e^-xy', lenient), 'ambiguous-letter-run').map((d) => [
         d.detail?.run,
         d.start,
         d.end,
@@ -948,14 +946,14 @@ describe('letter-run-split (non-strict mode)', () => {
 
   test('an unbraced subscript on a parenthesized base that takes the first letter of a run', () => {
     expect(
-      byCode(diags('(x)_ab', lenient), 'letter-run-split').map((d) => [
+      byCode(diags('(x)_ab', lenient), 'ambiguous-letter-run').map((d) => [
         d.detail?.run,
         d.start,
         d.end,
       ])
     ).toEqual([['ab', 4, 6]]);
-    expect(byCode(diags('(x)_a', lenient), 'letter-run-split')).toEqual([]);
-    expect(byCode(diags('(x)_ab'), 'letter-run-split')).toEqual([]);
+    expect(byCode(diags('(x)_a', lenient), 'ambiguous-letter-run')).toEqual([]);
+    expect(byCode(diags('(x)_ab'), 'ambiguous-letter-run')).toEqual([]);
     expect(
       new ComputeEngine().parse('(x)_ab', {
         strict: false,
@@ -983,7 +981,7 @@ describe('letter-run-split (non-strict mode)', () => {
 
   test('not emitted for one-letter or spaced exponents', () => {
     for (const latex of ['e^x', 'x^a b', 'e^-x', 'x^2y'])
-      expect(byCode(diags(latex, lenient), 'letter-run-split')).toEqual([]);
+      expect(byCode(diags(latex, lenient), 'ambiguous-letter-run')).toEqual([]);
   });
 
   test('not emitted for the differentials of a differential quotient', () => {
@@ -994,15 +992,15 @@ describe('letter-run-split (non-strict mode)', () => {
       '\\frac{dy}{dx}',
       '\\frac{d}{dx}f',
     ])
-      expect(byCode(diags(latex, lenient), 'letter-run-split')).toEqual([]);
+      expect(byCode(diags(latex, lenient), 'ambiguous-letter-run')).toEqual([]);
     // A `d` run that is not part of a differential quotient is reported
     expect(
-      byCode(diags('dy+dx', lenient), 'letter-run-split').map(
+      byCode(diags('dy+dx', lenient), 'ambiguous-letter-run').map(
         (d) => d.detail?.run
       )
     ).toEqual(['dy', 'dx']);
     expect(
-      byCode(diags('ab/dx', lenient), 'letter-run-split').map(
+      byCode(diags('ab/dx', lenient), 'ambiguous-letter-run').map(
         (d) => d.detail?.run
       )
     ).toEqual(['ab', 'dx']);
