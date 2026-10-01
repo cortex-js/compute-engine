@@ -1092,14 +1092,19 @@ describe('D8: RandomShuffle / RandomSample over a string source', () => {
     expect(compiled).toContain(ZWJ_FAMILY);
   });
 
-  test('`DeleteAt` over a string still fails closed', () => {
-    // `DeleteAt` has no list lowering on this target at all, so the string arm
-    // has nothing to build on and the default decline applies (D8 item 8).
-    const r = compile(ce.box(['DeleteAt', { str: 'abc' }, 2]), {
-      constantFold: false,
-    });
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/no lowering for it/);
+  test('`DeleteAt` over a string removes one character and answers a string', () => {
+    // The string is segmented into grapheme clusters before the delete, so
+    // the multi-code-point family emoji counts as ONE position, as in the
+    // interpreter, and the result is joined back into a string (the string
+    // preservation rule).
+    for (const index of [2, -1]) {
+      const json = ['DeleteAt', { str: `a${ZWJ_FAMILY}b` }, index];
+      const r = compile(ce.box(json as never), {
+        fallback: false,
+        constantFold: false,
+      });
+      expect(r.run!()).toBe(ce.box(json as never).evaluate().string);
+    }
   });
 });
 

@@ -2368,6 +2368,94 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(runJs(e, ['Slice', 'd', 3, 2])).toEqual([]);
   });
 
+  // `ReplaceAt` / `DeleteAt` / `Insert` (issue #386). The compiled result is
+  // a copy and the operand is not changed. The index is 1-based, a negative
+  // index counts from the end, and `Insert` takes the n + 1 gaps. Where the
+  // interpreter leaves the expression unevaluated (a zero or out-of-range
+  // index) the compiled code throws a `RangeError`. Every value was verified
+  // against the interpreter.
+  it('ReplaceAt / DeleteAt / Insert compile to copying array updates', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['ReplaceAt', 'd', 2, 9])).toEqual([10, 9, 30]);
+    expect(runJs(e, ['ReplaceAt', 'd', -1, 9])).toEqual([10, 20, 9]);
+    expect(runJs(e, ['DeleteAt', 'd', 1])).toEqual([20, 30]);
+    expect(runJs(e, ['DeleteAt', 'd', -3])).toEqual([20, 30]);
+    expect(runJs(e, ['Insert', 'd', 4, 9])).toEqual([10, 20, 30, 9]);
+    expect(runJs(e, ['Insert', 'd', -1, 9])).toEqual([10, 20, 30, 9]);
+    expect(runJs(e, ['Insert', 'd', -4, 9])).toEqual([9, 10, 20, 30]);
+    // A string source is walked as its characters: `ReplaceAt` and `Insert`
+    // answer a list of characters, `DeleteAt` a string.
+    expect(runJs(e, ['ReplaceAt', { str: 'abc' }, 2, { str: 'z' }])).toEqual([
+      'a',
+      'z',
+      'c',
+    ]);
+    expect(runJs(e, ['DeleteAt', { str: 'abc' }, 2])).toBe('ac');
+    expect(runJs(e, ['Insert', { str: 'ab' }, 2, { str: 'z' }])).toEqual([
+      'a',
+      'z',
+      'b',
+    ]);
+    // An infinite source cannot be copied, so the compilation fails closed.
+    expect(() =>
+      compile(e.box(['ReplaceAt', ['Range', 1, 'PositiveInfinity'], 2, 9]), {
+        fallback: false,
+      })
+    ).toThrow(/infinite collection/);
+
+    e.declare('s', 'list<integer>');
+    e.declare('k', 'integer');
+    const run = (head: string, ...rest: number[]) => {
+      const r = compile(e.box([head, 's', 'k', ...rest]), {
+        fallback: false,
+        constantFold: false,
+      })!;
+      expect(r.success).toBe(true);
+      return r.run!;
+    };
+    const replaceAt = run('ReplaceAt', 9);
+    const s = [1, 2, 3];
+    expect(replaceAt({ s, k: 3 })).toEqual([1, 2, 9]);
+    expect(s).toEqual([1, 2, 3]); // the operand is not changed
+    const deleteAt = run('DeleteAt');
+    const insert = run('Insert', 9);
+    for (const k of [0, 4, -4])
+      for (const f of [replaceAt, deleteAt])
+        expect(() => f({ s, k })).toThrow(RangeError);
+    for (const k of [0, 5, -5])
+      expect(() => insert({ s, k })).toThrow(RangeError);
+    // A non-integer index, which the interpreter rejects, also throws.
+    for (const k of [1.5, NaN])
+      for (const f of [replaceAt, deleteAt, insert])
+        expect(() => f({ s, k })).toThrow(RangeError);
+    // A complex index is refused before the body runs, by the entry check
+    // of the `integer` argument.
+    expect(() => replaceAt({ s, k: { re: 2, im: 3 } })).toThrow(TypeError);
+    // An empty list has no element to replace or delete, and one gap.
+    expect(() => deleteAt({ s: [], k: 1 })).toThrow(RangeError);
+    expect(insert({ s: [], k: 1 })).toEqual([9]);
+    expect(insert({ s: [], k: -1 })).toEqual([9]);
+  });
+
+  // A fold whose step replaces one slot of a list accumulator compiles
+  // (issue #386).
+  it('Fold with a ReplaceAt step compiles', () => {
+    const e = mkEngine();
+    expect(
+      runJs(e, [
+        'Fold',
+        [
+          'Function',
+          ['ReplaceAt', 'acc', 'i', ['Multiply', 'i', 'i']],
+          'acc',
+          'i',
+        ],
+        ['List', 0, 0, 0, 0],
+        ['Range', 1, 4],
+      ])
+    ).toEqual([1, 4, 9, 16]);
+  });
+
   // The `(indexed_collection<T>, range)` arm (docs/STRING_ROADMAP.md, Phase
   // 0c): `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`, and the `range`
   // type guarantees an ascending step-1 span with first ≥ 1, so the lowering

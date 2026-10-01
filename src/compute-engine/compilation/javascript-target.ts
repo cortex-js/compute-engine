@@ -5255,6 +5255,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const values = args.slice(1).map((a) => compile(a));
     return `[...(${coll})${values.map((v) => `, ${v}`).join('')}]`;
   },
+  // A copy with one element replaced, removed or inserted, through the
+  // `_SYS` helpers, which apply the interpreter's index rules and throw a
+  // `RangeError` for an index the interpreter does not accept. A string
+  // source is walked as its characters (`elementsArg`). The interpreter
+  // answers a list of characters for `ReplaceAt` and `Insert` on a string,
+  // and a string for `DeleteAt` (the string preservation rule), so only
+  // `DeleteAt` joins the characters again.
+  ReplaceAt: (args, compile) => {
+    if (args[1] == null || args[2] == null)
+      throw new Error('Could not compile `ReplaceAt`: missing argument');
+    const coll = elementsArg('ReplaceAt', args[0], compile);
+    return `_SYS.replaceAt(${coll}, ${compile(args[1])}, ${compile(args[2])})`;
+  },
+  DeleteAt: (args, compile) => {
+    if (args[1] == null)
+      throw new Error('Could not compile `DeleteAt`: missing index');
+    const coll = elementsArg('DeleteAt', args[0], compile);
+    return joinIfString(args[0], `_SYS.deleteAt(${coll}, ${compile(args[1])})`);
+  },
+  Insert: (args, compile) => {
+    if (args[1] == null || args[2] == null)
+      throw new Error('Could not compile `Insert`: missing argument');
+    const coll = elementsArg('Insert', args[0], compile);
+    return `_SYS.insert(${coll}, ${compile(args[1])}, ${compile(args[2])})`;
+  },
   // All but the last element; an empty or singleton collection yields [].
   Most: (args, compile) =>
     joinIfString(
@@ -9231,6 +9256,32 @@ function indexValue(v: unknown): number {
 }
 
 /**
+ * The 0-based position that the 1-based index `i` names in a list of `n`
+ * positions, for the compiled `ReplaceAt`, `DeleteAt` and `Insert`. A
+ * positive index counts from the start (1..n) and a negative index from the
+ * end (-n..-1). Any other index throws a `RangeError` that names the
+ * operator: a zero or out-of-range index, for which the interpreter leaves
+ * the expression unevaluated, and a non-integer index, which the interpreter
+ * rejects as an `incompatible-type` error.
+ */
+function listPosition(operator: string, n: number, i: unknown): number {
+  // A complex index with a non-zero imaginary part is not an integer, so it
+  // is rejected like 1.5. `indexValue` alone would read it by its real part,
+  // which is what `At` does but not what these operators do.
+  const im =
+    typeof i === 'object' && i !== null && 'im' in i
+      ? (i as { im: unknown }).im
+      : 0;
+  const iv = im === 0 ? indexValue(i) : NaN;
+  if (Number.isInteger(iv) && iv !== 0 && iv <= n && iv >= -n)
+    return iv > 0 ? iv - 1 : n + iv;
+  throw new RangeError(
+    `${operator}: the index ${String(iv)} is not a position of the list ` +
+      `(1..${n} or -${n}..-1) at run time`
+  );
+}
+
+/**
  * Adapt a statistics reducer so a SINGLE DATUM is accepted, not just a
  * collection of them.
  *
@@ -11921,6 +11972,32 @@ const SYS_HELPERS = {
     const idx = iv > 0 ? iv - 1 : n + iv;
     if (i === 0 || idx < 0 || idx >= n) return NaN;
     return arr[idx] as number;
+  },
+  // `ReplaceAt`, `DeleteAt` and `Insert` return a COPY of the array, as the
+  // interpreter returns a new list and leaves its operand unchanged. The
+  // index follows the interpreter's rules: 1-based, a negative index counts
+  // from the end, and for `Insert` the positions are the n + 1 gaps (n + 1 or
+  // -1 appends). The interpreter leaves the expression unevaluated for a zero
+  // or out-of-range index and rejects a non-integer one. Compiled code has no
+  // unevaluated value to return, so these helpers throw a `RangeError`, as
+  // the compiled `Slice` does for an invalid span. The index is checked by
+  // `listPosition`.
+  replaceAt: (arr: unknown[], i: unknown, v: unknown): unknown[] => {
+    const out = arr.slice();
+    out[listPosition('ReplaceAt', arr.length, i)] = v;
+    return out;
+  },
+  deleteAt: (arr: unknown[], i: unknown): unknown[] => {
+    const out = arr.slice();
+    out.splice(listPosition('DeleteAt', arr.length, i), 1);
+    return out;
+  },
+  insert: (arr: unknown[], i: unknown, v: unknown): unknown[] => {
+    const out = arr.slice();
+    // The n + 1 gaps of the array are the positions of an array one longer.
+    const gap = listPosition('Insert', arr.length + 1, i);
+    out.splice(gap, 0, v);
+    return out;
   },
   // `at` for a base whose STATIC element type is numeric and whose value
   // comes from outside the kernel (a `run()` argument, a function

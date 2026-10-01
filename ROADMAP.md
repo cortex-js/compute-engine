@@ -109,6 +109,49 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A compiled `Fold` that replaces one element of a list accumulator per step copies the whole list each step (OPEN, decision — issue #386, 2026-10-01)
+
+`Fold((acc, i) => ReplaceAt(acc, i, v), init, 1..n)` compiles to a
+`reduce` whose step calls `_SYS.replaceAt`, which copies the array. The fold
+costs O(n) per step and O(n²) in total. Measured on 2026-10-01: at n = 40,000
+the compiled fold takes 730 ms, the same loop updating one array in place
+under 1 ms. The reporter of #386 unranks involutions and derangements with
+such folds and measures them 10 to 15 times slower than hand-written loops.
+
+The request is to update the array in place when nothing else can see it
+(Lean's "functional but in place", Clojure's transients). Expressions stay
+immutable; only the emitted JavaScript changes. A design that is correct must
+handle these cases:
+
+- **Order of reads and writes.** A step that swaps two slots,
+  `ReplaceAt(ReplaceAt(acc, i, At(acc, j)), j, At(acc, i))`, reads the OLD
+  `acc` in the outer value. JavaScript evaluates the inner call (the write)
+  before the outer value (the read), so a naive in-place inner call gives the
+  wrong answer. Every index and value of a chain of updates must be computed
+  before the first write.
+- **A step that keeps the old accumulator.** The step can return it inside
+  another value (`[acc, ReplaceAt(acc, i, v)]`), pass it to a user function,
+  or store it. `Scan` keeps every accumulator. These must keep the copying
+  form. A static test on the function literal can accept only the safe
+  shapes: every use of `acc` is either the list operand of the update chain
+  in the tail position of the step (through `If`/`Which`/the last statement
+  of a `Block`), or a read that keeps no reference (`At`, `Length`, an
+  element read inside an index or value).
+- **A value the step does not own.** The seed can be the caller's array (a
+  `run()` argument), and a branch can return a captured list
+  (`If(c, ReplaceAt(acc, i, v), other)`). A run-time owner check handles both:
+  the fold keeps a reference to the one array it created, and an update
+  writes in place only when its operand is that array, otherwise it copies
+  once and the copy becomes the owned array.
+- **Nested lists.** Only the outer array is owned. A row read with
+  `At(acc, i)` is shared with earlier steps and must be copied before it is
+  changed.
+
+The same idea applies to a compiled loop that assigns `xs = ReplaceAt(xs, i,
+v)` to a local variable. Decision needed: implement the in-place form for
+`Fold`/`Reduce` with a function-literal step (recommended), also for
+assignments in loops, or not at all (the fold stays O(n²)).
+
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
 `reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and

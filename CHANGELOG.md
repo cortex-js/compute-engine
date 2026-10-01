@@ -32,6 +32,16 @@
 
 ### Issues Resolved
 
+- **#386** `ReplaceAt`, `DeleteAt` and `Insert` did not compile to
+  JavaScript: `compile(ReplaceAt(s, 2, 9))` failed with "target 'javascript'
+  has no lowering for it", so a `Fold` whose step replaced one element of a
+  list did not compile. Each now compiles to a copy of the array with the
+  interpreter's index rules (1-based, a negative index counts from the end,
+  `Insert` takes positions 1 to n + 1). An index for which the interpreter
+  leaves the expression unevaluated (zero or out of range) throws a
+  `RangeError` at run time. A string operand is walked as its characters, as
+  in the interpreter: `DeleteAt` answers a string, `ReplaceAt` and `Insert` a
+  list of characters.
 - `HurwitzZeta(s, a).N()` of an integer order at an `a` more than about 10⁶
   left of the imaginary axis stayed unevaluated: `HurwitzZeta(2, −10¹² + i)` is
   now `−0.0739998067554724…`, computed with the polygamma reflection
