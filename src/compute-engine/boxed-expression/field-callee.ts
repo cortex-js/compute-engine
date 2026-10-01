@@ -169,7 +169,12 @@ function recordFieldSignature(t: Type, member: string): Type | undefined {
   // unannotated function, `(unknown, unknown) -> number`) gives no names to
   // match: the call reports `argument-names-unavailable`, as it did before,
   // rather than `argument-name-unknown` for every name written.
-  const arms = fieldType.kind === 'signature' ? [fieldType] : fieldType.types;
+  // An arm of an overload set can itself be a type alias: resolve it, so
+  // that the names of its body are seen, here and by the caller.
+  const arms =
+    fieldType.kind === 'signature'
+      ? [fieldType]
+      : fieldType.types.map((arm) => resolveTypeReference(arm) ?? arm);
   const named = arms.some(
     (arm) =>
       typeof arm === 'object' &&
@@ -178,5 +183,8 @@ function recordFieldSignature(t: Type, member: string): Type | undefined {
         (a) => a.name !== undefined
       )
   );
-  return named ? fieldType : undefined;
+  if (!named) return undefined;
+  return fieldType.kind === 'intersection'
+    ? { ...fieldType, types: arms }
+    : fieldType;
 }

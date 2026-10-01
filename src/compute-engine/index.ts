@@ -53,6 +53,8 @@ import type {
   ILatexSyntax,
   BoxedDefinition,
   SymbolDefinitionInput,
+  DeclareOptions,
+  OperatorDefinitionPatch,
   SequenceDefinition,
   SequenceStatus,
   SequenceInfo,
@@ -259,6 +261,7 @@ import { EngineNumericConfiguration } from './engine-numeric-configuration.js';
 import { EngineRuntimeState } from './engine-runtime-state.js';
 import { EngineBoxingState } from './engine-boxing-state.js';
 import { EngineStartupCoordinator } from './engine-startup-coordinator.js';
+import { loadLibraryLate } from './engine-library-bootstrap.js';
 import { createTypeResolver } from './engine-type-resolver.js';
 import {
   createErrorExpression,
@@ -497,8 +500,18 @@ export class ComputeEngine implements IComputeEngine {
   _fuAlgorithm = _fu;
 
   /** @internal Names installed by a CALLER-supplied library (see
-   * `engine-library-bootstrap.ts`). Fixed once the constructor returns. */
+   * `engine-library-bootstrap.ts`). Fixed once the constructor returns:
+   * `loadLibrary()` installs into the global scope and does not add to it. */
   readonly _customLibraryOperators = new Set<string>();
+
+  /** @internal See `IComputeEngine._libraryProvenance`. */
+  readonly _libraryProvenance = new Map<
+    string,
+    { library: string; binding: BoxedDefinition }
+  >();
+
+  /** @internal See `IComputeEngine._loadedLibraries`. */
+  readonly _loadedLibraries = new Map<string, LibraryDefinition>();
 
   /** @internal */
   private _commonSymbols: CommonSymbolTable = {
@@ -1230,6 +1243,10 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _evaluationEffects: EffectHandlers | undefined = undefined;
 
+  /** See `IComputeEngine._requestedPrecision`.
+   * @internal */
+  _requestedPrecision: number | undefined = undefined;
+
   /** The registry assigned to `ce.effects`, before any `withEffects` change.
    * @internal */
   private _baseEffects: EffectHandlers = DEFAULT_EFFECT_HANDLERS;
@@ -1458,6 +1475,10 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * Return symbol tables suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
+   *
+   * Each requested library comes with the libraries it requires, directly or
+   * indirectly, in load order: `getStandardLibrary('physics')` gives `core`,
+   * `arithmetic`, `units` and `physics`.
    *
    * A symbol table defines how to evaluate and manipulate symbols.
    *
@@ -2980,16 +3001,58 @@ export class ComputeEngine implements IComputeEngine {
    * Set the type to `unknown` if the type is not known yet: it will be
    * inferred based on usage. Use `any` for a very generic type.
    *
+   * The third argument is the scope to declare in, or an options object
+   * `{ scope?, extend? }` (see {@link DeclareOptions}).
    *
+   * **Extend mode.** With `{ extend: true }`, the definition is a PATCH
+   * applied to the operator definition that is currently visible for `id`
+   * (see {@link OperatorDefinitionPatch}):
+   *
+   * - The engine builds a new definition from the visible one and the patch,
+   *   and installs it in the target scope. A field that the patch does not
+   *   name keeps its value (handlers, flags, collection handlers,
+   *   description...). A field that the patch names replaces the old value:
+   *   when two extensions give the same handler, the later one wins.
+   * - `signature` replaces the signature. `addSignature` adds an overload: the
+   *   new signature is `old & addSignature`. The new signature must be a
+   *   subtype of the old one, so that every call that was valid stays valid.
+   *   Otherwise the call throws and nothing is installed.
+   * - Extending a name that is already declared in the target scope replaces
+   *   that binding. Without `extend`, this throws as before.
+   * - It is an error to extend a name that has no visible operator
+   *   definition, a name declared as a value, or a function defined by
+   *   clauses.
+   * - The visible definition is not changed. An expression boxed before the
+   *   extension keeps using the old definition.
+   *
+   * ```ts
+   * // Accept any value as the first operand of `SetMinus`, and keep its
+   * // `evaluate` and collection handlers
+   * ce.declare(
+   *   'SetMinus',
+   *   { signature: '(value, value*) -> set' },
+   *   { extend: true }
+   * );
+   * ce.box(['SetMinus', 5, 2]).isValid; // ➔ true
+   * ```
    */
   // Two `(id, …)` overloads: a `Type`/type string in the same union as the
   // definition shapes would stop TypeScript from typing the parameters of an
   // inline `type: (ops) => …` handler (see `IComputeEngine.declare`).
-  declare(id: string, type: Type | TypeString, scope?: Scope): IComputeEngine;
+  declare(
+    id: string,
+    type: Type | TypeString,
+    scope?: Scope | (DeclareOptions & { extend?: false })
+  ): IComputeEngine;
+  declare(
+    id: string,
+    patch: OperatorDefinitionPatch,
+    options: DeclareOptions & { extend: true }
+  ): IComputeEngine;
   declare(
     id: string,
     def: SymbolDefinitionInput,
-    scope?: Scope
+    scope?: Scope | (DeclareOptions & { extend?: false })
   ): IComputeEngine;
   declare(symbols: {
     [id: string]: Type | TypeString | SymbolDefinitionInput;
@@ -3000,10 +3063,86 @@ export class ComputeEngine implements IComputeEngine {
       | {
           [id: string]: Type | TypeString | SymbolDefinitionInput;
         },
-    arg2?: Type | TypeString | SymbolDefinitionInput,
-    scope?: Scope
+    arg2?: Type | TypeString | SymbolDefinitionInput | OperatorDefinitionPatch,
+    scope?: Scope | DeclareOptions
   ): IComputeEngine {
     return declareFnImpl(this, arg1, arg2, scope);
+  }
+
+  /**
+   * Load a library on an engine that is already constructed.
+   *
+   * The library has the same shape as a custom entry of the `libraries`
+   * constructor option: a `name`, an optional `requires` list and the
+   * `definitions`. Its definitions are declared in the GLOBAL scope, as with
+   * `ce.declare()`: an expression boxed before the call with a head that the
+   * library defines uses the new definition. With
+   * `ce.box(['Sq', 3]).evaluate()` giving `Sq(3)`, loading a library that
+   * defines `Sq` as `x ↦ x²` makes the same expression evaluate to `9`.
+   *
+   * The library name is recorded: `ce.libraryOf('Sq')` returns it.
+   *
+   * A checkpoint taken before the call (`ce.checkpoint()`) undoes it,
+   * definitions and recorded name included.
+   *
+   * The library carries no LaTeX notation. To parse and serialize a notation
+   * for its operators, add the entries with `ce.latexSyntax.addEntries()`.
+   * These entries are not recorded by checkpoints: `ce.restore()` does not
+   * remove them, because the `LatexSyntax` instance can be shared by several
+   * engines.
+   *
+   * @throws if the library is malformed; if it is one of the standard
+   * libraries (select those with the `libraries` constructor option); if a
+   * library with the same name is already loaded; if a library in its
+   * `requires` list is not loaded yet; if a definition name is invalid,
+   * repeated, defined by a library loaded earlier, or already explicitly
+   * declared in the global scope. A standard name such as `Sin` can be
+   * defined: as with `ce.declare()`, the new definition shadows it. In these
+   * cases nothing is declared. Also throws if `ce.declare()` rejects a
+   * definition (for example for an unknown key): the definitions declared
+   * before it are removed, so nothing is declared and the library is not
+   * recorded as loaded. The exception is a call made while an evaluation or
+   * a declaration batch is in progress: then the definitions before the rejected one stay declared.
+   * If a library in `requires` is a standard library, select it with the
+   * `libraries` constructor option: a standard library cannot be loaded
+   * after construction.
+   *
+   * ```ts
+   * const ce = new ComputeEngine();
+   * ce.loadLibrary({
+   *   name: 'residues',
+   *   requires: ['arithmetic'],
+   *   definitions: {
+   *     Sq: { evaluate: ['Function', ['Multiply', 'x', 'x'], 'x'] },
+   *   },
+   * });
+   * ce.box(['Sq', 3]).evaluate();  // 9
+   * ce.libraryOf('Sq');            // 'residues'
+   * ```
+   */
+  loadLibrary(library: LibraryDefinition): IComputeEngine {
+    loadLibraryLate(this, library);
+    return this;
+  }
+
+  /**
+   * The name of the library that defines `name`, or `undefined`.
+   *
+   * The answer is the library whose definition `name` resolves to in the
+   * current scope: a standard library name for a standard operator or
+   * constant (`ce.libraryOf('Sin')` is `'trigonometry'`), the `name` of a
+   * caller library given to the constructor or to `ce.loadLibrary()`, and
+   * `undefined` for a name declared with `ce.declare()`, a name that is not
+   * defined, or a library name that a declaration in the current scope
+   * shadows.
+   */
+  libraryOf(name: string): string | undefined {
+    const key = name.normalize();
+    const entry = this._libraryProvenance.get(key);
+    if (entry === undefined) return undefined;
+    return this.lookupDefinition(key) === entry.binding
+      ? entry.library
+      : undefined;
   }
 
   /**
@@ -3307,7 +3446,14 @@ export class ComputeEngine implements IComputeEngine {
   private _latexSyntax?: ILatexSyntax;
 
   /** The LatexSyntax instance, lazily created if a factory is registered.
-   *  `undefined` only when no LatexSyntax was provided and no factory exists. */
+   *  `undefined` only when no LatexSyntax was provided and no factory exists
+   *  (the core-only entry point).
+   *
+   *  A lazily created instance belongs to this engine only, so
+   *  `ce.latexSyntax.addEntries([...])` changes the notation of this engine
+   *  and of no other. An instance passed with the `latexSyntax` constructor
+   *  option is the caller's: if it was passed to several engines, entries
+   *  added to it apply to all of them. */
   get latexSyntax(): ILatexSyntax | undefined {
     if (!this._latexSyntax && ComputeEngine._latexSyntaxFactory)
       this._latexSyntax = ComputeEngine._latexSyntaxFactory();

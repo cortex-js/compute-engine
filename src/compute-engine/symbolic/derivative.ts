@@ -12,15 +12,22 @@ import {
   isSymbol,
   isFunction,
   isString,
+  isExpression,
   sym,
 } from '../boxed-expression/type-guards.js';
 import {
   functionLiteralParameterName,
   isDestructuringParameter,
 } from '../boxed-expression/function-literal.js';
-import { isOperatorDef } from '../boxed-expression/utils.js';
+import {
+  collectBinderNames,
+  isOperatorDef,
+} from '../boxed-expression/utils.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
-import { valueDefinitionInContext } from '../boxed-expression/binders.js';
+import {
+  rewriteWithBinders,
+  valueDefinitionInContext,
+} from '../boxed-expression/binders.js';
 import {
   angularChainFactor,
   DIRECT_TRIG_OPERATORS,
@@ -400,7 +407,9 @@ function isUserFunction(sym: Expression): boolean {
     // installed in the system scope too, so the scope test cannot tell its
     // operators from the builtins. The engine records their names in
     // `_customLibraryOperators`: such an operator is a user function, as it
-    // is when it is declared with `ce.declare()`.
+    // is when it is declared with `ce.declare()`. A library loaded later with
+    // `ce.loadLibrary()` is installed in the global scope, so the scope test
+    // below already classifies its operators as user functions.
     if (!isSymbol(sym)) return true;
     if (sym.engine._customLibraryOperators.has(sym.symbol)) return true;
     const systemScope = sym.engine.contextStack[0]?.lexicalScope;
@@ -584,6 +593,11 @@ const derivativeChains = new WeakMap<Expression, DerivativeChainCache>();
 function derivativeChainKey(fn: Expression): Expression | undefined {
   if (isFunction(fn, 'Function')) return fn;
   if (isSymbol(fn)) {
+    // An operator whose definition has a `derivative` key is differentiated
+    // through the key, not through its function literal (see
+    // `derivative()`). A chain keyed on that literal would be the derivative
+    // of the literal's body, so there is no key to cache on.
+    if (fn.operatorDefinition?.derivative !== undefined) return undefined;
     const literal = fn.operatorDefinition?._lambdaLiteral;
     if (isFunction(literal, 'Function')) return literal;
   }
@@ -740,7 +754,14 @@ export function derivative(
   // Whether the chain starts from an APPLICATION of the function to the hole
   // rather than from a body. See the sub-key below.
   let appliedForm = false;
-  if (isSymbol(fn) && fn.operatorDefinition) {
+  if (isSymbol(fn) && fn.operatorDefinition?.derivative !== undefined) {
+    // The `derivative` key of the definition has precedence over the body of
+    // a function-literal `evaluate` handler. Differentiate the unevaluated
+    // application `f(_)`: `differentiate()` then uses the key. Evaluating
+    // `f(_)`, as the branch below does, would give the body of the literal.
+    fn = ce.function(fn.symbol, [ce.symbol('_')]);
+    appliedForm = true;
+  } else if (isSymbol(fn) && fn.operatorDefinition) {
     // Look up a finished result BEFORE the normalization below. The
     // normalization evaluates `f(_)`, and that call declares the parameter of
     // `f` in a new activation scope. The declaration advances the engine's
@@ -1727,10 +1748,17 @@ function differentiateUnknownApplication(
   trace: DerivativeTrace | undefined
 ): Expression | undefined {
   const ce = expr.engine;
+  const opSym = ce.symbol(expr.operator);
+
+  // The `derivative` key of the definition, when there is one, comes first:
+  // it is what the author of the operator stated, and it has precedence over
+  // differentiating the body of a function-literal `evaluate` handler.
+  const keyed = differentiateWithDerivativeKey(expr, opSym, v, depth, trace);
+  if (keyed !== undefined) return keyed;
+
   // Try resolving user-defined function calls before falling back to
   // symbolic chain rule. Apply the function to wildcards, evaluate to
   // get the body, substitute actual arguments, and differentiate.
-  const opSym = ce.symbol(expr.operator);
   if (isUserFunction(opSym)) {
     const args = expr.ops;
     const wildcards =
@@ -1775,4 +1803,163 @@ function differentiateUnknownApplication(
     trace,
     expr
   );
+}
+
+/**
+ * The derivative of `expr`, an application `F(g₁, …, gₙ)`, from the
+ * `derivative` key of the definition of `F` (see `OperatorDerivative` in
+ * `types-definitions.ts`), by the chain rule:
+ *
+ *   d/dv F(g₁, …, gₙ) = Σᵢ ∂ᵢF(g₁, …, gₙ) · gᵢ′
+ *
+ * A partial derivative is requested only for an argument that depends on
+ * `v`. A partial derivative that the key does not give (the handler returns
+ * `undefined`, or an array entry is not a usable function literal) stays
+ * symbolic, as `Apply(Derivative(F, 0, …, 1, …, 0), g₁, …, gₙ)`.
+ *
+ * Returns `undefined` when the key does not apply: the definition has no
+ * `derivative` key, or the key is an array with a number of entries other
+ * than the number of arguments. The caller then continues with its other
+ * rules.
+ */
+function differentiateWithDerivativeKey(
+  expr: Expression & FunctionInterface,
+  opSym: Expression,
+  v: string,
+  depth: number,
+  trace: DerivativeTrace | undefined
+): Expression | undefined {
+  const key = opSym.operatorDefinition?.derivative;
+  if (key === undefined) return undefined;
+  const args = expr.ops;
+  if (args.length === 0) return undefined;
+  if (typeof key !== 'function' && key.length !== args.length) return undefined;
+
+  const ce = expr.engine;
+
+  // The partial derivative with respect to argument `i`, at `args`.
+  const partial = (i: number): Expression => {
+    const value =
+      typeof key === 'function'
+        ? key(args, { engine: ce, argument: i })
+        : partialFromFunctionLiteral(ce, key[i], args);
+    // A handler may build its result in a non-canonical form, which the
+    // product below cannot take.
+    if (value !== undefined) return value.canonical;
+    const orders = args.map((_, j) => ce.number(j === i ? 1 : 0));
+    return ce._fn('Apply', [ce._fn('Derivative', [opSym, ...orders]), ...args]);
+  };
+
+  const partials: (Expression | undefined)[] = args.map((arg, i) =>
+    arg.has(v) ? partial(i) : undefined
+  );
+
+  recordD(trace, expr, v, 'derivative.chain-rule', () => {
+    const templateTerms: Expression[] = [];
+    args.forEach((arg, i) => {
+      const p = partials[i];
+      if (p === undefined) return;
+      templateTerms.push(ce.function('Multiply', [p, dPlaceholder(arg, v)]));
+    });
+    if (templateTerms.length === 0) return ce.Zero;
+    if (templateTerms.length === 1) return templateTerms[0];
+    return ce.function('Add', templateTerms);
+  });
+
+  const terms: Expression[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const p = partials[i];
+    if (p === undefined) continue;
+    const arg = args[i];
+    const argPrime =
+      differentiate(arg, v, depth + 1, trace) ??
+      ce._fn('D', [arg, ce.symbol(v)]);
+    if (!argPrime.isValid) return undefined;
+    if (argPrime.isSame(0)) continue;
+    terms.push(p.mul(argPrime));
+  }
+  if (terms.length === 0) return ce.Zero;
+  return simplifyDerivative(add(...terms));
+}
+
+/**
+ * The value at `args` of a partial derivative given as a function literal
+ * in the array form of the `derivative` key: each parameter of the literal
+ * is replaced by the matching argument in its body. The body is not
+ * evaluated, so an exact form such as `ln(10)` stays exact.
+ *
+ * Returns `undefined` when `entry` is not a function literal with one named
+ * parameter for each argument, or when its body is a block of several
+ * statements (such a block has no single value to substitute into).
+ */
+function partialFromFunctionLiteral(
+  ce: Expression['engine'],
+  entry: ExpressionInput | Expression,
+  args: ReadonlyArray<Expression>
+): Expression | undefined {
+  const literal = isExpression(entry) ? entry.canonical : ce.expr(entry);
+  if (!isFunction(literal, 'Function')) return undefined;
+  const params = literal.ops.slice(1);
+  if (params.length !== args.length) return undefined;
+  const names = params.map((p) =>
+    isDestructuringParameter(p) ? '' : functionLiteralParameterName(p)
+  );
+  if (names.some((n) => !n)) return undefined;
+  let body = literal.ops[0];
+  // The canonical form of a function literal wraps its body in a scoped
+  // `Block`. A block with a single statement has the value of that
+  // statement.
+  if (isFunction(body, 'Block')) {
+    if (body.nops !== 1) return undefined;
+    body = body.op1;
+  }
+  // `subs()` is not capture-avoiding: an argument with a free symbol that
+  // has the name of a variable bound inside the body (the index `k` of a
+  // `Sum` in the body, with the argument `2k`) would be captured by that
+  // binder. Rename each such bound variable to a fresh name first.
+  body = renameCapturingBinders(ce, body, args);
+  const map: Record<string, Expression> = {};
+  names.forEach((n, i) => {
+    map[n] = args[i];
+  });
+  return body.subs(map);
+}
+
+/**
+ * `body` with every variable bound inside it whose name occurs as a symbol
+ * in one of `args` renamed to a fresh name, so that substituting `args` into
+ * `body` does not capture a symbol of an argument.
+ *
+ * Only the BOUND occurrences are renamed (the binding site and the uses that
+ * the binder shadows): a free occurrence of the same name keeps its meaning.
+ * The renamed expression is boxed again from its MathJSON form, so that each
+ * binder gets a scope that binds the new name.
+ */
+function renameCapturingBinders(
+  ce: Expression['engine'],
+  body: Expression,
+  args: ReadonlyArray<Expression>
+): Expression {
+  const binders = collectBinderNames(body);
+  if (binders.size === 0) return body;
+  const argSymbols = new Set<string>();
+  for (const arg of args) for (const s of arg.symbols) argSymbols.add(s);
+  const captured = [...binders].filter((n) => argSymbols.has(n));
+  if (captured.length === 0) return body;
+
+  const used = new Set<string>([...binders, ...argSymbols, ...body.symbols]);
+  const fresh: Record<string, string> = {};
+  for (const name of captured) {
+    let i = 1;
+    while (used.has(`${name}_${i}`)) i += 1;
+    fresh[name] = `${name}_${i}`;
+    used.add(fresh[name]);
+  }
+  const renamed = rewriteWithBinders(body, (s, shadowed) =>
+    fresh[s.symbol] !== undefined && shadowed?.has(s.symbol)
+      ? ce.symbol(fresh[s.symbol])
+      : s
+  );
+  if (renamed === body) return body;
+  return ce.box(renamed.json);
 }

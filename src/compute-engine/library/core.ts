@@ -122,6 +122,7 @@ import {
   evaluateSolve,
 } from '../boxed-expression/solve-domain.js';
 import { findRoot } from '../nonlinear-fit.js';
+import { BLOCK_DEFINITION } from './control-structures.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
   IComputeEngine as ComputeEngine,
@@ -3084,6 +3085,12 @@ function boundExpression(x: Expression): Expression {
 
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
+    // `Block` is in `core` because a function literal (`Function`, below)
+    // is canonicalized with a `Block` body: without it, an engine whose
+    // library list has `core` but not `control-structures` could not build
+    // any function literal. Its handlers live in `control-structures.ts`.
+    Block: BLOCK_DEFINITION,
+
     // The sole member of the unit type, `nothing`
     Nothing: {
       description: 'The absence of a value; the sole member of the unit type.',
@@ -7342,20 +7349,30 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (!Number.isFinite(p) || p < 1) return x.canonical.N();
         p = Math.min(Math.trunc(p), 1000); // cap to avoid runaway precision
 
-        const global = ce.precision;
-        if (p > global) {
-          // Display precision is global, so to *show* more than `global`
-          // digits the engine's working precision must be raised — and left
-          // raised. Recompute the (still raw) operand at the new precision so
-          // constants like `Pi` materialize to `p` digits.
-          ce.precision = p;
-          return x.canonical.N();
-        }
+        // The requested digits reach every `evaluate` handler run inside this
+        // call as `options.precision` (see `IComputeEngine._requestedPrecision`).
+        // Restored after the call, so a nested `N(y, q)` applies to `y` only.
+        const enclosingRequest = ce._requestedPrecision;
+        ce._requestedPrecision = p;
+        try {
+          const global = ce.precision;
+          if (p > global) {
+            // Display precision is global, so to *show* more than `global`
+            // digits the engine's working precision must be raised — and left
+            // raised. Recompute the (still raw) operand at the new precision
+            // so constants like `Pi` materialize to `p` digits.
+            ce.precision = p;
+            return x.canonical.N();
+          }
 
-        // `p <= global`: leave the global precision untouched and round the
-        // result down to `p` significant digits (precision has a machine-digit
-        // floor, so lowering the global precision can't reach small `p`).
-        return roundToSignificantDigits(x.canonical.N(), p);
+          // `p <= global`: leave the global precision untouched and round the
+          // result down to `p` significant digits (precision has a
+          // machine-digit floor, so lowering the global precision can't reach
+          // small `p`).
+          return roundToSignificantDigits(x.canonical.N(), p);
+        } finally {
+          ce._requestedPrecision = enclosingRequest;
+        }
       },
     },
 

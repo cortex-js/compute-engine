@@ -11,6 +11,135 @@
   it is evaluated, as for `bob_S(3)` written directly. A call through a field
   that holds a function literal is unchanged without named arguments; with
   named arguments its callee is the literal.
+- **A named call through a variable whose declared type gives no parameter
+  names is an error.** The names of a call such as `alias(3, factor: 5)`, where
+  `alias` is a variable that holds a function, are now matched only against the
+  DECLARED type of `alias`, never against the function it holds now. When the
+  declared type gives no parameter names (the bare `function` type, or a
+  signature with no names such as `(number, number) -> number`), the call is the
+  error `argument-names-unavailable`, with a message that suggests positional
+  arguments or a declared signature with parameter names. Example: with `bob_S`
+  declared `(x: number, factor: number) -> number` and `let alias: function =
+  bob_S`, `alias(3, factor: 5)` was `15` and is now the error; the call was
+  stored as `alias(3, 5)`, so after `alias = other`, with `other` declared
+  `(factor, x)` and computing `factor - x`, a stored call gave `-2` while the
+  names ask for `2`. With `alias: (number, number) -> number`, the error code
+  was `argument-name-unknown` and is now `argument-names-unavailable`. A
+  variable declared with a signature that names its parameters, a variable with
+  no declaration (whose inferred type is used), and a function defined with
+  `f(x) := …` or `function f(x) {…}` are unchanged. A program that used names
+  through a variable declared `function` must call it positionally or declare
+  the variable with a signature that names the parameters.
+
+### New Features
+
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) **LaTeX
+  notation on a running engine.** `LatexSyntax.addEntries(entries)` adds LaTeX
+  dictionary entries after construction; the next parse or serialization uses
+  them. With `IntegerModRing` declared, `ce.box(['IntegerModRing', 5]).latex`
+  was `\mathrm{IntegerModRing}(5)`; after
+  `ce.latexSyntax.addEntries([entry])` it is `\mathbb{Z}/5\mathbb{Z}`, and
+  parsing `\mathbb{Z}/5\mathbb{Z}` gives `["IntegerModRing", 5]`. The
+  default dictionary and the array given as the `dictionary` option are not
+  modified. An engine created without the `latexSyntax` option has its own
+  `LatexSyntax`, so the entries apply to that engine only; an instance given to
+  several engines is shared, and the entries apply to all of them. LaTeX
+  notation stays separate from library definitions: a `LibraryDefinition`
+  still has no LaTeX entries.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) **Load a
+  library on a running engine.** `ce.loadLibrary(library)` takes the same
+  `LibraryDefinition` as the `libraries` constructor option and declares its
+  definitions in the global scope, as `ce.declare()` does. An expression boxed
+  before the call uses the new definitions: `ce.box(['Sq', 3]).evaluate()`
+  gave `Sq(3)`, and after loading a library that defines `Sq` as `x ↦ x²` it
+  gives `9`. Each library in `requires` must already be loaded. The call throws,
+  and declares nothing, for a library name that is already loaded, a missing
+  required library, a standard library (select those with the `libraries`
+  option), or a definition name that is invalid, repeated, defined by another
+  library, or already declared in the global scope. A definition that
+  `ce.declare()` rejects (for example for an unknown key) also makes the call
+  throw, and the definitions declared before it are removed: for any failure,
+  the call declares nothing. (The exception is a call made while an evaluation
+  or a declaration batch is in progress, where the definitions before the
+  rejected one stay declared.) When a library in `requires` is a standard
+  library, the error says to select it with the `libraries` option. A
+  checkpoint taken before the call (`ce.checkpoint()`) undoes it.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393)
+  `ce.libraryOf(name)` returns the name of the library that defines `name`:
+  `'trigonometry'` for `Sin`, the `name` of a caller library given to the
+  constructor or to `ce.loadLibrary()`, and `undefined` for a name declared
+  with `ce.declare()`, a name nothing defines, or a library name that a
+  declaration in the current scope shadows.
+- [#394](https://github.com/cortex-js/compute-engine/issues/394)
+  `ce.declare(name, patch, { extend: true })` extends the operator definition
+  that is visible for `name` instead of replacing it. Before, a redeclaration
+  replaced the whole definition: `ce.declare("SetMinus", { signature:
+  "(value, value*) -> set" })` made `SetMinus(5, 2)` valid, but removed the
+  `evaluate` and `collection` handlers and the description, so
+  `SetMinus(Set(1, 2, 3), Set(2))` no longer evaluated. In extend mode:
+  - The engine builds a new definition from the visible one and the fields of
+    the patch. A field the patch does not name keeps its value. A field the
+    patch names replaces the old value: when two extensions give the same
+    handler, the later one wins. With the patch above, `SetMinus(5, 2)` is
+    valid and `SetMinus(Set(1, 2, 3), Set(2))` still evaluates to `Set(1, 3)`.
+  - `signature` replaces the signature. The new field `addSignature` adds an
+    overload: the signature becomes `old & new`. The new signature must be a
+    subtype of the old one, so that every call that was valid stays valid:
+    `(any*) -> any` cannot replace `(value+) -> value`, and the call throws.
+    This does not apply when the old signature was only inferred (an operator
+    declared without a signature, or a function whose signature is inferred
+    from its body).
+  - An extension of a standard-library operator that keeps its `evaluate`,
+    `canonical`, `compile` and `derivative` handlers is still the library
+    operator: after `ce.declare("Sin", { description: "…" }, { extend: true })`,
+    `D(Sin(x), x)` is `cos(x)` and `Sin(x)` compiles. An extension that
+    replaces one of these handlers is a user definition with the library
+    name, as with a plain `ce.declare()`.
+  - A name that is already declared in the same scope can be extended: two
+    libraries that extend `Basis` both succeed, and the second one sees the
+    fields of the first. A plain `ce.declare` of that name still throws.
+  - It is an error to extend a name with no operator definition, a name
+    declared as a value, or a function defined by clauses.
+  - The old definition is not changed: an expression boxed before the extension
+    keeps it. A checkpoint restore undoes an extension like any declaration.
+  - The third argument of `ce.declare()` can now be an options object
+    `{ scope?, extend? }`. A scope as the third argument works as before.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) An operator
+  definition can give its own derivative with the new `derivative` key. Before,
+  the key was refused (`unexpected key "derivative"`), and the derivative of an
+  operator whose `evaluate` handler answers only for numbers stayed symbolic:
+  `D(Sq(x), x)` gave `Apply(Derivative(Sq, 1), x)`. The key gives the partial
+  derivative with respect to each argument, and `D` applies the chain rule:
+
+  ```js
+  ce.declare('Sq', {
+    signature: '(number) -> number',
+    evaluate: ([x]) => (isNumber(x) ? x.mul(x) : undefined),
+    derivative: [['Function', ['Multiply', 2, 'x'], 'x']],
+  });
+  ce.box(['D', ['Sq', 'x'], 'x']).evaluate(); // 2x
+  ce.box(['D', ['Sq', ['Power', 'x', 2]], 'x']).evaluate(); // 4x^3
+  ce.box(['Sq', 'y']).evaluate(); // Sq(y), not unfolded
+  ```
+
+  The value is either an array with one function literal for each argument
+  (each literal takes all the arguments as parameters), or a handler
+  `(ops, { engine, argument }) => Expression | undefined` that returns the
+  partial derivative with respect to argument number `argument` at `ops`. A
+  partial that the key does not give stays symbolic. `Derivative(Sq)`,
+  `Sq'(3)`, `Apply(Derivative(F, 1, 0), 2, 3)` and the compiled form of
+  `D(Sq(x^2), x)` use the key too. The key has precedence over the body of a
+  function-literal `evaluate` handler; an operator of the standard library
+  keeps its own derivative rule.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) The options
+  passed to an `evaluate` handler have a new `precision` field: the number of
+  significant digits requested. Inside `N(x, p)` it is `p`, for the evaluation
+  of `x` and of everything evaluated inside it, also when `p` is lower than
+  `ce.precision`. Under any other numeric approximation (`x.N()`, `N(x)`) it is
+  `ce.precision`. In an exact evaluation it is `undefined`. A handler can then
+  compute to the requested digits without reading `ce.precision`. `N(x, p)`
+  with `p` above `ce.precision` still raises `ce.precision` and leaves it
+  raised, as before.
 
 ### Issues Resolved
 
@@ -55,6 +184,61 @@
   A variable typed `dictionary<function>` gives no parameter names, so a named
   call through it is still `argument-names-unavailable`, and its value is not
   read: `lazy` is honored only through a constant receiver.
+- **A library list with `core` but without `control-structures` can build
+  function literals.** With `new ComputeEngine({ libraries: ['core',
+  'arithmetic'] })`, every function literal, and every caller library with an
+  `evaluate` formula, printed "Cannot read properties of undefined (reading
+  'bindings')": a function literal is made canonical with a `Block` body, and
+  `Block` was in the `control-structures` library. `Block` is now in the `core`
+  library, and the library reference lists it under `core`.
+- `ComputeEngine.getStandardLibrary()` with a list of categories threw for
+  every category except `core`: `getStandardLibrary('physics')` gave "Library
+  "physics" requires "arithmetic", which is not available", because the list
+  held only the requested libraries. Each requested library now comes with the
+  libraries it requires, directly or indirectly: `getStandardLibrary('physics')`
+  gives `core`, `arithmetic`, `units` and `physics`, in load order.
+- A `ce.declare()` of an operator that threw (for example a `canonical`
+  handler together with the `commutative` flag) left the name bound to a
+  placeholder value of type `function`. The name is now restored to the
+  binding it had before the call, or is not declared at all.
+- **The numeric value of a definite integral whose integrand does not compile
+  now uses adaptive quadrature.** Before, such an integrand (for example an
+  operator declared with only a JavaScript `evaluate` handler) went directly to
+  a Monte-Carlo estimate with 1e4 samples. With `Sq` declared so that `Sq(x)` is
+  `x²` for a number `x`, `Integrate(Sq(x), x, 0, 1).N()` was `0.3356 ± 0.0030`;
+  it is now `0.3333333333333333 ± 6e-21`, with 240 evaluations of `Sq` instead
+  of 10 000. The integrand is now integrated with the adaptive Gauss–Kronrod
+  quadrature that a compiled integrand uses, with a smaller panel budget (at
+  most 9 660 evaluations), and Monte Carlo is used only when the quadrature does
+  not converge and its error bound is not better than the estimate of Monte
+  Carlo. A divergent integral is now `NaN`, as for a compiled integrand: with
+  `Inv(x)` = `1/x`, `Integrate(Inv(x), x, 0, 1).N()` was `10.9 ± 1.4` and is now
+  `NaN`.
+- [#394](https://github.com/cortex-js/compute-engine/issues/394) Redeclaring an
+  arithmetic operator with a copy of its definition changed its canonical forms
+  and types, even when no field of the copy changed. This is the idiom the
+  guide documents to extend a standard operator:
+  `ce.declare('Sqrt', { ...ce.lookupDefinition('Sqrt').operator, evaluate })`.
+  It affected `Add`, `Multiply`, `Negate`, `Square`, `Sqrt`, `Exp`, `Ln`,
+  `Log`, `Power`, `Root` and `Divide`. After `ce.declare('Add', { ...oldAdd })`:
+  `Add(2, x, 5)` gave `2 + x + 5` and now gives `x + 7`; `Add(1, "s")` was
+  valid and is now invalid; `Add(1, ImaginaryUnit)` was typed `integer` and is
+  now typed `complex`; in `1 + w`, `w` stayed `unknown` and is now inferred
+  `number`. After the same copy of `Sqrt`: `Sqrt(8)` stayed `sqrt(8)` and now
+  gives `2√2`, and `√2·√2` now gives `2`. The definitions of these operators
+  now have a `canonical` handler, and a copy takes it along. The standard
+  canonical form applies only to a copy declared under the SAME name whose
+  signature, `lazy` flag and `associative`/`commutative`/`idempotent`/
+  `involution` flags are unchanged; a copy that changes only `evaluate` or
+  metadata (`description`, `wikidata`, `examples`) is such a copy. A copy with
+  another signature or another flag, or a copy declared under another name,
+  does not use the standard canonical form: the copy keeps its own head and
+  its own `evaluate`. With `MyPower` declared as a copy of `Power` with
+  `evaluate: () => 5`, `MyPower(x, 3)` gave `x^3` (the head was replaced by
+  `Power`, which had a `canonical` handler before this change) and now stays
+  `MyPower(x, 3)` and evaluates to `5`. A definition that is not a copy
+  (`function Add(a, b) { … }`, or a declaration with its own `canonical`
+  handler) still replaces the standard operator, as before.
 
 ## 0.144.0 _2026-10-01_
 
