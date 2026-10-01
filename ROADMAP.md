@@ -133,10 +133,12 @@ Monte Carlo (1e7 samples compiled, 1e4 interpreted). So
 `NIntegrate(x ↦ x², 0, 1)` is a sampled value close to 1/3 with sampling
 noise, while `Integrate(x², x, 0, 1).N()` is `0.3333333333333333`.
 `test/compute-engine/derived-substreams.test.ts` states "`NIntegrate` always
-samples", and its random-stream effect declaration (`readsRandomFrame`) depends
-on that. The decision: keep `NIntegrate` as a sampling operator, or give it
-the quadrature first (more accurate and faster; its effect declaration and
-that test change).
+samples". The decision: keep `NIntegrate` as a sampling operator, or give it
+the quadrature first (more accurate and faster). With the quadrature first,
+`NIntegrate` still falls back to Monte Carlo when the quadrature does not
+converge, so it keeps `readsRandomFrame: true`, as `Integrate` does; only its
+results (where the quadrature succeeds) and that test's comment and integrand
+change.
 
 ### Two leftovers of the extend mode of `ce.declare()` (OPEN, small — found 2026-10-01 by the work on issue #394)
 
@@ -272,18 +274,6 @@ The same kind of callee also loses `lazy`: with `y := 10`, a lazy `bob_H` and
 `aliasH: function` holding `bob_H`, `aliasH(y·z)` gives `Hold(10·z)`, while
 `bob_H(y·z)` gives `Hold(y·z)`.
 
-### A pure imaginary factor is serialized in parentheses (OPEN — found 2026-10-01 while reviewing PR #389)
-
-`ce.box(['Multiply', 'ImaginaryUnit', 'x']).latex` is `(\imaginaryI)x`, and
-`e^{i\pi}` is `\exp((\imaginaryI)\pi)`. The output reads back correctly, but
-the parentheses are not necessary. The cause: `ImaginaryUnit` canonicalizes to
-`Complex(0, 1)`, and the `Complex` entry in
-`latex-syntax/dictionary/definitions-arithmetic.ts` has a precedence one below
-`Add`, so `Multiply` wraps it. That precedence is correct for `1+2\imaginaryI`,
-but not when the real part is 0 and the output is only the imaginary part. A
-fix: give the wrap decision the precedence of the text that is actually
-written (no real part → multiplication precedence).
-
 ### A compiled loop that assigns `xs = ReplaceAt(xs, i, v)` copies the whole list at each assignment (OPEN, small — issue #386, 2026-10-01)
 
 A compiled `Fold` whose step only updates its accumulator now updates a copy
@@ -327,6 +317,19 @@ canonical form (strict too), `±1` is `Measurement(0, 1)`, `+-` is two
 signs, `mod`/`pow`/`trunc`/`Re`/`Im` are not lenient function names.
 The full reply is in Tycho's `docs/COMPUTE_ENGINE.md`, "CE reply 2026-10-01
 to answer 4".
+
+### The lenient line-level ambiguity checks read the raw tree before ranges are regrouped (OPEN, small — found 2026-10-01 by the `ambiguous-range` rule for Tycho row 357)
+
+`reportLineAmbiguities` (`latex-syntax/lenient-ambiguity.ts`) runs in
+`parse()` on the raw result before `ambiguityErrors()` and before a later step
+regroups an operation next to a range: for `2*1..5` the check sees
+`Multiply(2, Range(1, 5))`, and the caller gets `Range(Multiply(2, 1), 5)`.
+`reportRange` accepts both shapes, so it is correct; the other line checks
+match on `NotEqual`, `Less`, `Equal`, `Element`, `Range` and `Delimiter`
+nodes and were not checked against a regrouped tree. Fix: find the step that
+regroups (probably the range-precedence repair of `resolveApplications`), and
+either run the line checks on the final raw tree with the `onAmbiguity` span
+map kept valid, or prove that no other checked shape is regrouped.
 
 ### A `Delimiter` with square brackets reads back as a `List` (OPEN, decision — found 2026-10-01 by the fix of the parentheses written twice in a fraction)
 

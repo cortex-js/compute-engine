@@ -52,6 +52,57 @@
   A free symbol with one of these names compiled to invalid GLSL; it now
   declines like `in` or `sample`.
 
+- **Four parse diagnostic codes of 0.144.0 are renamed into the `ambiguous-*` group**, so that
+  a host refuses every reading with a second common reading on one prefix:
+  `letter-run-split` is now `ambiguous-letter-run`,
+  `implicit-product-in-denominator` is now `ambiguous-denominator`,
+  `spaced-digit-groups` is now `ambiguous-digit-groups`, and
+  `letter-before-decimal` is now `ambiguous-letter-decimal`. A host that
+  matched one of the first names must use the new one.
+
+- **A name in parentheses is a factor, never the head of a function
+  application**, in the strict and the lenient grammar. `(k)(x - 1)` is now
+  `k·(x - 1)` (`["Multiply", "k", ["Add", "x", -1]]`), was the application
+  `["k", ["Add", "x", -1]]`. `(a)(b)` is now `a·b`, was `["a", "b"]`.
+  `y = (m)(x) + b` is now `y = m·x + b`. `(k)(x, y)` is now `k·(x, y)`, was
+  `["k", "x", "y"]`. `(g)(3)^2` with `g` undeclared is now `9g`, was
+  `g(3)^2`. A name that the library or the host declared a function keeps the
+  application reading (`(\sin)(x)` is `sin(x)`, and `(f)(3)^2` is `f(3)^2` when
+  `f` is declared a function); a function type that the engine only inferred
+  from an earlier `f(x)` does not count. `k(x - 1)`, with no parentheses
+  around `k`, keeps the rules it had.
+
+- **In the lenient grammar, `+-` is `±` and `-+` is `∓`** when there is no
+  white space between the two signs. `x = 2 +- 0.1` is now
+  `["Equal", "x", ["Measurement", 2, 0.1]]` (as `2 ± 0.1` and `2 \pm 0.1`),
+  was `2 + (-0.1)`. `a+-b` is now `Measurement(a, b)`, was `a + (-b)`.
+  `y = +-sqrt(x)` is now `Measurement(0, √x)`, was `-√x`. `a -+ b` is now
+  `["MinusPlus", "a", "b"]` (as `a \mp b`), was `a - b`. The strict grammar
+  keeps `+` then `-`.
+
+- **A prefix `∓` has a reading.** `\mp 1` and `∓1` are `MinusPlus(0, 1)`,
+  as a prefix `\pm 1` is `Measurement(0, 1)`. Strict `x = \mp 1` was an
+  `unexpected-command` error. In the lenient grammar a prefix `-+` is read
+  the same way: `-+x` is `MinusPlus(0, x)`, was `Negate(x)`.
+
+- **The lenient grammar reads five more function names before a
+  parenthesis**: `mod` (`Mod`), `pow` (`Power`), `trunc` (`Truncate`), `Re`
+  (`Real`) and `Im` (`Imaginary`). These inputs change:
+  - `mod(x, 2)` was an application of an unknown function `mod`, and
+    `mod(7, 3)` evaluated to itself. It is now `Mod(x, 2)`, and `mod(7, 3)`
+    evaluates to `1`.
+  - `pow(x, 2)` was an application of an unknown function `pow`; it is now
+    `x^2`.
+  - `trunc(x)` was an application of an unknown function `trunc`; it is now
+    `Truncate(x)`, and `trunc(2.5)` evaluates to `2`.
+  - `Re(z)` and `Im(z)` already had the canonical form `Real(z)` and
+    `Imaginary(z)`; only the raw form (`form: 'raw'`) changes, from
+    `["InvisibleOperator", "Re", ["Delimiter", "z"]]` to `["Real", "z"]` (and
+    the same for `Im`).
+
+  Without a parenthesis these words keep their reading as letters
+  (`7 mod 3` is a product). The strict grammar is not changed.
+
 - **A call through a field of a constant that names an operator is the
   direct call, also without named arguments.** With `bob` declared with
   `isConstant: true` and the value `{S -> bob_S}`, `bob.S(3)`
@@ -61,6 +112,7 @@
   it is evaluated, as for `bob_S(3)` written directly. A call through a field
   that holds a function literal is unchanged without named arguments; with
   named arguments its callee is the literal.
+
 - **A named call through a variable whose declared type gives no parameter
   names is an error.** The names of a call such as `alias(3, factor: 5)`, where
   `alias` is a variable that holds a function, are now matched only against the
@@ -82,6 +134,126 @@
   the variable with a signature that names the parameters.
 
 ### New Features
+
+- **The lenient grammar reports each reading choice that has a second
+  common reading.** The list of reading choices, their codes, and the
+  choices that have one common reading is
+  `docs/plans/2026-10-01-lenient-ambiguity-codes.md`; a reading choice with a
+  second common reading and no code is a defect. The codes added in this
+  release.
+
+- **The lenient grammar reports more reading choices that have a second
+  common reading.** With `ce.parse(text, { strict: false, diagnostics: true })`,
+  each of these choices now reports a parse diagnostic. The reading does not
+  change, and the strict grammar reports none of them:
+  - `ambiguous-exponent-end`: where an unbraced exponent ends. `e^2pi` is
+    `e^2·π` and `x^2y` is `x^2·y` (an operand directly after the exponent);
+    `e^i pi`, `e^-x y` and `e^2 pi i` (an operand after white space when the
+    exponent is a name or is signed, or the base is `e`); `e^x/2`, `e^-x/2`,
+    `x^pi/2` and `x^1/2` (a `/` after an exponent that is a name, is signed or
+    is 1). `x^2 y` and `x^3/2` are not reported. `detail: { exponent }`.
+  - `ambiguous-implicit-subscript`: `x2`, `θ2`, `α1` are read as `x_2`,
+    `θ_2`, `α_1`, and `x_1y` is read as `x_1·y`. `atan2`, `log2` and `log10`
+    are not reported.
+  - `ambiguous-name-digits`: letters and digits that are not a library
+    function, before a parenthesis: `atan3(y)` is read as `arctan(3·y)`.
+  - `ambiguous-function-argument`: a function name without parentheses and an
+    argument of more than one factor: `sin x y` is `sin(x·y)`, also
+    `sqrt 2 x`, `ln 2 x`, `exp 2 x`, `abs 2 x`; and `log 2 x`, read as
+    `log_2(x)`. `sin 2x` is not reported.
+  - `ambiguous-function-without-parentheses`: a symbol declared as a function,
+    followed by an operand: `f x` and `2 f x` are products.
+  - `ambiguous-name-then-number`: a name, white space, then a number: `x 2`
+    and `θ 2` are products.
+  - `ambiguous-delta`: `Δ` or `Delta` followed by a letter: `Δx`,
+    `Delta x` and `Q = m c ΔT` read `Δ` as a factor.
+  - `ambiguous-constant-name`: a library constant alone on the left of `=`:
+    `e = 1.6e-19`, `i = V/R`, `pi = 3.14`, `inf = 2`.
+  - `ambiguous-lookalike-letter`: a Greek letter that looks like a Latin
+    letter (the capitals Α Β Ε Ζ Η Ι Κ Μ Ν Ο Ρ Τ Υ Χ, and ο).
+  - `ambiguous-unknown-character`: a character that is not math, read as a
+    string: `y = ж`.
+  - `ambiguous-radical`: the extent of `√` without braces or parentheses:
+    `√2π`, `√2x`, `√xy` (`√2·π`), `√x²` and `√x²+y²` (`(√x)²`), and `3√8`
+    (`3·√8`).
+  - `ambiguous-absolute-value`: bars that pair two ways: `|x|y|z|` is read as
+    `|x|·y·|z|`.
+
+- **More reading choices of the lenient grammar report an `ambiguous-*`
+  parse diagnostic.** With `ce.parse(text, { strict: false, diagnostics: true })`,
+  these inputs keep their reading and now also report a code, so that a host
+  can refuse a line that a person could have meant another way:
+
+  | Code | Example | Reading | Second common reading |
+  | --- | --- | --- | --- |
+  | `ambiguous-equation-number` | `y = x^2 (2)`, `x = 4 (m)` | a product | an equation label or a unit |
+  | `ambiguous-group-product` | `(x)(1,2)` | a scalar times a point | a call |
+  | `ambiguous-factorial` | `5!=120` | `5 ≠ 120` | `5! = 120` |
+  | `ambiguous-arrow` | `x <- 2` | `x < -2` | an assignment arrow |
+  | `ambiguous-equal-chain` | `x = y = 0` | nested equations | an assignment to several names |
+  | `ambiguous-element` | `y = x in [0,1]` | `(y = x) ∈ [0,1]` | `y = x` for `x ∈ [0,1]` |
+  | `ambiguous-range` | `1..10..2` | first, second, last | first, last, step |
+  | `ambiguous-percent` | `y = 50%` | `y = 50` (`%` starts a comment) | a percentage |
+  | `ambiguous-comma` | `1,5` | a sequence | the decimal number 1.5 |
+  | `ambiguous-list-label` | `1. y = x`, `(1)`, `(iv)`, `a) y = x` | math | the label of a list item |
+  | `ambiguous-number-notation` | `1_000`, `0x10` | a subscript and a product | a number |
+  | `ambiguous-date` | `2026-10-15`, `555-1234`, `7-11` | a difference or a quotient | a date, a phone number or a range |
+
+  Ordinary math is not reported: `3/4`, `24/7`, `2-1`, `x = 2`, `1..10`,
+  `[0,1]`, `f(x, y)`, `(1, 2)`, `0 < x < 1`, `x != y`, `5! = 120`,
+  `x in [0,1]`. The strict grammar reports none of these codes.
+
+- **Three more `ambiguous-*` parse diagnostics in the lenient grammar, and a
+  wider `ambiguous-constant-name`.** With
+  `ce.parse(text, { strict: false, diagnostics: true })`, these readings now
+  report a diagnostic. The reading does not change, and the strict grammar
+  reports none of them.
+  - `ambiguous-log-base`: `log` with two arguments in parentheses. `log(x, 2)`
+    is `Log(x, 2)`, the base second as in Python and in spreadsheets, and
+    other tools put the base first. Also the name `lg` (`lg(x)` is base 10 by
+    ISO 80000-2, and base 2 in computer science). `detail: { name }`.
+  - `ambiguous-engine-operator`: a one-letter library operator written as a
+    plain letter before a parenthesis, read as a call of the operator:
+    `N(x)` (numeric evaluation), `D(x)` (derivative). A person writing plain
+    text usually means a function of their own. `\operatorname{N}(x)` is not
+    reported. `detail: { name }`.
+  - `ambiguous-interval`: after `in`, `\in`, `∈` or `\notin`, a bracket pair
+    followed by an operator, which is then read as a list or a tuple, not as
+    an interval: `M in [0,1]^2` is `Element(M, Power(List(0, 1), 2))`. Also
+    `M in (0,1)^2`, `M in [0,1] + 1` and a range, `M in [0..1]^2`.
+    `M in [0,1]` and `x in [0,1)` are read as intervals and are not
+    reported.
+  - `ambiguous-constant-name` also reports a library constant followed by a
+    parenthesized group on the left of `=`: `pi(x) = x` is read as
+    `π·x = x`, and a person can mean the definition of a function `pi`.
+    `f(pi) = 3` is not reported.
+
+- **Two more `ambiguous-*` codes.** `ambiguous-inverse-function`: in plain
+  text, `sin^-1(x)` is read as the inverse function, and a person also means
+  `1/sin(x)` (`\sin^{-1}(x)` is not reported). `ambiguous-range` also
+  reports a range with one `..` next to an operation: `1..5/2` is the range
+  from 1 to 5/2, and a person can mean `(1..5)/2`; `-1..5` is not reported.
+
+- **The `onAmbiguity` parse option.** `ce.parse(text, { strict: false,
+  onAmbiguity: 'error' })` puts an `Error` node in place of the smallest
+  expression that holds the source span of each parse diagnostic whose code
+  starts with `ambiguous-`. The error code is the diagnostic code, and the
+  error holds the source text of the span:
+  `ce.parse('y = 2 3', { strict: false, onAmbiguity: 'error' })` is
+  `["Equal", "y", ["Error", "'ambiguous-digit-groups'", ["LatexString", "'2 3'"]]]`.
+  The option works without `diagnostics: true`, and for every `ambiguous-*`
+  code. When the parser cannot find an expression with that span, the `Error`
+  node replaces the whole result. The default, `'report'`, keeps the reading
+  and reports the diagnostic when `diagnostics: true`. In strict mode the
+  option has no effect.
+
+- **The `ambiguous-sign` parse diagnostic** (lenient grammar only). It reports
+  a prefix `±` (also spelled `\pm`, `\plusmn` or `+-`) with no left operand:
+  `x = ±1` is read as `Measurement(0, 1)`, and a person often means the two
+  values `1` and `-1`. It also reports two signs in a row: `--x`, `x - -y`,
+  `a<--b`, `a + -b`, `-+x`, and `a -+ b` (read as `MinusPlus(a, b)`).
+  `detail: { signs }`. `a +- b` with no white space is read as
+  `Measurement(a, b)` and is not reported. The reading does not change.
 
 - [#393](https://github.com/cortex-js/compute-engine/issues/393) **LaTeX
   notation on a running engine.** `LatexSyntax.addEntries(entries)` adds LaTeX
@@ -181,6 +353,7 @@
   `D(Sq(x^2), x)` use the key too. The key has precedence over the body of a
   function-literal `evaluate` handler; an operator of the standard library
   keeps its own derivative rule.
+
 - [#393](https://github.com/cortex-js/compute-engine/issues/393) The options
   passed to an `evaluate` handler have a new `precision` field: the number of
   significant digits requested. Inside `N(x, p)` it is `p`, for the evaluation
