@@ -37,6 +37,11 @@ import {
   unfaithfulComparisonAggregate,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import {
+  assertAccumulatorFitsStep,
+  inPlaceUpdateChains,
+  isDefinitelyCollectionType,
+} from './in-place-update.js';
 import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
 import { tryGetConstant } from './constant-folding.js';
 import {
@@ -1772,6 +1777,71 @@ const PYTHON_ORD_HELPER = `def _ce_ord(_f, _a, _b):
     return _f(_a, _b)
 `;
 
+/**
+ * Run-time helpers for the compiled `ReplaceAt`, `DeleteAt` and `Insert`.
+ * Each returns a NEW list and leaves its operand unchanged, as the
+ * interpreter does. `_ce_listpos` applies the interpreter's index rules: the
+ * index is 1-based, a negative index counts from the end, and `Insert` uses
+ * the n + 1 gaps of the list. The interpreter leaves the expression
+ * unevaluated for a zero or out-of-range index and rejects a non-integer
+ * index, so these helpers raise an `IndexError` in both cases. A boolean is
+ * not an index, although Python counts it as an `int`. A string operand is
+ * refused at compile time when it is provably a string (`pyCollArg`); one that
+ * is a string only at run time raises a `TypeError` (`_ce_listcopy`), because
+ * Python has no standard grapheme segmentation and the interpreter walks a
+ * string by characters. The JavaScript target
+ * has the same helpers (`_SYS.replaceAt`, `listPosition` in
+ * `javascript-target.ts`).
+ *
+ * `_ce_replaceat_inplace` and `_ce_owned_copy` serve a fold that updates its
+ * accumulator in place (`inPlaceUpdateChains`, `in-place-update.ts`). The
+ * first writes a chain of updates, innermost first, into the list it is
+ * given: every index and value was computed before the call, from the list as
+ * it was at the start of the step. The second copies the seed once into a new
+ * list (a tuple, a range or a NumPy array becomes a list, as the first
+ * `ReplaceAt` would make it), so the caller's value is never changed.
+ */
+const PYTHON_LIST_UPDATE_HELPER = `def _ce_listpos(_op, _n, _i):
+    if isinstance(_i, (bool, np.bool_)) or not isinstance(_i, (int, float, np.integer, np.floating)) or not float(_i).is_integer():
+        raise IndexError(_op + ': the index is not an integer at run time')
+    _k = int(_i)
+    if _k == 0 or _k > _n or _k < -_n:
+        raise IndexError(_op + ': the index ' + str(_k) + ' is not a position of the list at run time')
+    return _k - 1 if _k > 0 else _n + _k
+def _ce_listcopy(_op, _l):
+    if isinstance(_l, str):
+        raise TypeError(_op + ': the operand is a string at run time, and this target cannot split a string into characters')
+    return list(_l)
+def _ce_replaceat(_l, _i, _v):
+    _o = _ce_listcopy('ReplaceAt', _l)
+    _o[_ce_listpos('ReplaceAt', len(_o), _i)] = _v
+    return _o
+def _ce_deleteat(_l, _i):
+    _o = _ce_listcopy('DeleteAt', _l)
+    del _o[_ce_listpos('DeleteAt', len(_o), _i)]
+    return _o
+def _ce_insert(_l, _i, _v):
+    _o = _ce_listcopy('Insert', _l)
+    _o.insert(_ce_listpos('Insert', len(_o) + 1, _i), _v)
+    return _o
+def _ce_replaceat_inplace(_l, *_u):
+    for _k in range(0, len(_u), 2):
+        _l[_ce_listpos('ReplaceAt', len(_l), _u[_k])] = _u[_k + 1]
+    return _l
+def _ce_owned_copy(_x):
+    return _ce_listcopy('Fold', _x)
+`;
+
+/**
+ * The operand arrays (`Expression.ops`) of the `ReplaceAt` nodes that compile
+ * to an in-place update, for the time the `Reduce` lowering compiles a step
+ * that `inPlaceUpdateChains` accepts. The key is the node's own array, so a
+ * `ReplaceAt` in another function whose parameter has the same name keeps
+ * the copying form. The JavaScript target has the same set
+ * (`IN_PLACE_UPDATE_OPS`).
+ */
+const PY_IN_PLACE_UPDATE_OPS = new WeakSet<ReadonlyArray<Expression>>();
+
 /** Prepend any referenced runtime helper definitions to the compiled `code`.
  * Idempotent per emission unit; a redefinition (if two units are concatenated)
  * is harmless in Python. */
@@ -1789,6 +1859,10 @@ function withPythonHelpers(code: string): string {
   if (out.includes('_ce_eqcoll(')) out = `${PYTHON_EQCOLL_HELPER}\n${out}`;
   if (out.includes('_ce_indexof(')) out = `${PYTHON_INDEXOF_HELPER}\n${out}`;
   if (out.includes('_ce_ord(')) out = `${PYTHON_ORD_HELPER}\n${out}`;
+  if (
+    /_ce_(replaceat|replaceat_inplace|owned_copy|deleteat|insert)\(/.test(out)
+  )
+    out = `${PYTHON_LIST_UPDATE_HELPER}\n${out}`;
   return out;
 }
 
@@ -2017,6 +2091,36 @@ function compilePythonTranspose(
  * `axis` and `dtype` — a runtime TypeError, or a silently different reduction.
  * More than one operand is therefore spliced into one list.
  */
+/**
+ * Fail closed for a built-in `Add`/`Multiply`/`Min`/`Max` fold (`Reduce`,
+ * `Scan`) whose elements are collections. Python's `+` joins two lists
+ * (`Scan([[1, 2], [3, 5]], Add)` gave `[[1, 2], [1, 2, 3, 5]]`) and `sum`
+ * raises, while the interpreter adds rows element by element. This target
+ * has no element-wise fold, so the interpreter answers.
+ */
+function pyRefuseBuiltinFoldOverCollections(
+  operator: string,
+  coll: Expression | undefined
+): void {
+  if (
+    coll !== undefined &&
+    isDefinitelyCollectionType(BaseCompiler.collectionElementTypeOf(coll))
+  )
+    throw new Error(
+      `Could not compile \`${operator}\`: a built-in fold over elements that are collections. ` +
+        `The interpreter evaluates it instead.`
+    );
+}
+
+/** The operator each NumPy statistic of `compilePythonSample` compiles, for
+ * its error messages. */
+const PY_SAMPLE_OPERATOR: Record<string, string> = {
+  'np.mean': 'Mean',
+  'np.median': 'Median',
+  'np.var': 'Variance',
+  'np.std': 'StandardDeviation',
+};
+
 function compilePythonSample(
   fn: string,
   args: ReadonlyArray<Expression>,
@@ -2025,6 +2129,22 @@ function compilePythonSample(
 ): string {
   if (args.length === 0 || args[0] == null)
     throw new Error(`Could not compile \`${fn}\`: no argument`);
+  // A list operand whose elements are collections (a list of lists): NumPy
+  // computes over every number in it, while the interpreter answers an
+  // `incompatible-type` error (`Mean([[1, 2], [3, 5]])`). Refusing lets the
+  // interpreter answer. Several list operands are flattened one level below,
+  // as the interpreter does.
+  if (
+    args.some((a) =>
+      isDefinitelyCollectionType(
+        collectionElementType(resolveTypeForCompilation(a.type.type))
+      )
+    )
+  )
+    throw new Error(
+      `Could not compile \`${PY_SAMPLE_OPERATOR[fn] ?? fn}\`: an element of the data is a collection ` +
+        `(a list, a string, a set or a dictionary). The interpreter evaluates it instead.`
+    );
   if (args.length === 1) return `${fn}(${compile(args[0])}${kwargs})`;
   const parts = args.map((a) =>
     isPyCollectionOperand(a) ? `*${compile(a)}` : compile(a)
@@ -3944,6 +4064,39 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const values = args.slice(1).map((a) => compile(a));
     return `[*${coll}${values.map((v) => `, ${v}`).join('')}]`;
   },
+  // A copy with one element replaced, removed or inserted
+  // (`PYTHON_LIST_UPDATE_HELPER`). A string source fails closed in
+  // `pyCollArg`: this target cannot segment a string into characters.
+  ReplaceAt: (args, compile) => {
+    if (args[1] == null || args[2] == null)
+      throw new Error('Could not compile `ReplaceAt`: missing argument');
+    if (PY_IN_PLACE_UPDATE_OPS.has(args)) {
+      // A chain accepted by `inPlaceUpdateChains`: one call, with the index
+      // and the value of each level listed innermost first.
+      const updates: string[] = [];
+      let node: ReadonlyArray<Expression> = args;
+      for (;;) {
+        updates.unshift(compile(node[1]), compile(node[2]));
+        if (!isFunction(node[0], 'ReplaceAt')) break;
+        node = node[0].ops;
+      }
+      return `_ce_replaceat_inplace(${compile(node[0])}, ${updates.join(', ')})`;
+    }
+    const coll = pyCollArg('ReplaceAt', args[0], compile);
+    return `_ce_replaceat(${coll}, ${compile(args[1])}, ${compile(args[2])})`;
+  },
+  DeleteAt: (args, compile) => {
+    if (args[1] == null)
+      throw new Error('Could not compile `DeleteAt`: missing index');
+    const coll = pyCollArg('DeleteAt', args[0], compile);
+    return `_ce_deleteat(${coll}, ${compile(args[1])})`;
+  },
+  Insert: (args, compile) => {
+    if (args[1] == null || args[2] == null)
+      throw new Error('Could not compile `Insert`: missing argument');
+    const coll = pyCollArg('Insert', args[0], compile);
+    return `_ce_insert(${coll}, ${compile(args[1])}, ${compile(args[2])})`;
+  },
   // DELIBERATE DIVERGENCE from the JavaScript target, which fails closed on a
   // string (or tuple) needle because its element test is the numeric tolerance
   // test. This lowering is not numeric: the `_ce_indexof` adapter is Python's
@@ -4168,6 +4321,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         }[op.symbol]
       : undefined;
     if (builtin !== undefined) {
+      pyRefuseBuiltinFoldOverCollections('Reduce', args[0]);
       if (init !== undefined && init !== null) {
         const seeded = {
           'sum(_l)': `sum(_l, ${compile(init)})`,
@@ -4189,11 +4343,26 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       // the seed, then the combiner's own result
       // (`BaseCompiler.foldAccumulatorArgType`), the element the source's
       // element type.
-      const fn = pyFnArg('Reduce', op, compile, [
-        BaseCompiler.foldAccumulatorArgType(args[0]!, op, init),
-        BaseCompiler.collectionElementTypeOf(args[0]),
-      ]);
-      return `__import__('functools').reduce(${fn}, ${coll}, ${compile(init)})`;
+      assertAccumulatorFitsStep('Reduce', op, init);
+      // An accumulator that only the fold can see is updated in place when
+      // the step allows it (`inPlaceUpdateChains`); the seed is then copied
+      // once. See `PY_IN_PLACE_UPDATE_OPS`.
+      const chains = inPlaceUpdateChains(op);
+      for (const ops of chains ?? []) PY_IN_PLACE_UPDATE_OPS.add(ops);
+      let fn: string;
+      try {
+        fn = pyFnArg('Reduce', op, compile, [
+          BaseCompiler.foldAccumulatorArgType(args[0]!, op, init),
+          BaseCompiler.collectionElementTypeOf(args[0]),
+        ]);
+      } finally {
+        for (const ops of chains ?? []) PY_IN_PLACE_UPDATE_OPS.delete(ops);
+      }
+      const seed =
+        chains !== undefined
+          ? `_ce_owned_copy(${compile(init)})`
+          : compile(init);
+      return `__import__('functools').reduce(${fn}, ${coll}, ${seed})`;
     }
     throw new Error(
       `Could not compile \`Reduce\`: the combiner has no compiled function form on the Python ` +
@@ -4217,6 +4386,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           Max: '(lambda _a, _b: max(_a, _b))',
         }[op.symbol]
       : undefined;
+    if (builtin !== undefined)
+      pyRefuseBuiltinFoldOverCollections('Scan', args[0]);
+    else assertAccumulatorFitsStep('Scan', op, init);
     const fn =
       builtin ??
       ((isFunction(op, 'Function') && op.nops - 1 === 2) || isSymbol(op)
@@ -4906,6 +5078,12 @@ export class PythonTarget implements LanguageTarget<Expression> {
     if (body.includes('_ce_eqcoll(')) code += `${PYTHON_EQCOLL_HELPER}\n`;
     if (body.includes('_ce_indexof(')) code += `${PYTHON_INDEXOF_HELPER}\n`;
     if (body.includes('_ce_ord(')) code += `${PYTHON_ORD_HELPER}\n`;
+    if (
+      /_ce_(replaceat|replaceat_inplace|owned_copy|deleteat|insert)\(/.test(
+        body
+      )
+    )
+      code += `${PYTHON_LIST_UPDATE_HELPER}\n`;
 
     code += `def ${functionName}(${params}):\n`;
 

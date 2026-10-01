@@ -58,6 +58,46 @@
   `RangeError` at run time. A string operand is walked as its characters, as
   in the interpreter: `DeleteAt` answers a string, `ReplaceAt` and `Insert` a
   list of characters.
+- **#386** `ReplaceAt`, `DeleteAt` and `Insert` also compile to Python, with
+  the same index rules. An index for which the interpreter leaves the
+  expression unevaluated raises an `IndexError`. A string operand does not
+  compile to Python, as for the other list operators.
+- Compiled statistics of a list of lists gave wrong values. On the
+  JavaScript target `Max`, `Min`, `Mean`, `Median`, `Variance`, `Mode`,
+  `Quartiles` and the other statistics of `[[1, 2], [3, 5]]` answered `null`
+  or a wrong list, and `Mean([2, 3], [5, 7])` answered `NaN`; on the Python
+  target `Mean` and `Median` of a list of lists answered a number. The
+  interpreter answers 5 for `Max`, 17/4 for the two-list `Mean`, and an
+  `incompatible-type` error for `Mean([[1, 2], [3, 5]])`. These no longer
+  compile, so the interpreter answers. A JavaScript `Reduce` or `Scan` with
+  `Add` or `Multiply` over a list of lists now adds or multiplies the rows
+  element by element, as `Sum` does (`Reduce(s, Add)` joined two rows as the
+  string `"1,23,5"`); a built-in fold over points, strings, sets or
+  dictionaries, and every built-in fold over rows on the Python target (where
+  `+` joins two lists: `Scan(s, Add)` gave `[[1, 2], [1, 2, 3, 5]]`), no longer
+  compiles. A fold whose step was typed for a list of numbers by its uses
+  (`Sum(acc)`) but whose seed is a list of lists no longer compiles, because
+  the step's arithmetic would join rows as strings. A row type given through
+  a type name (`list<Row>`) is recognized by all these checks. A fold step
+  whose element parameter is named `i` was compiled as if `i` were the
+  imaginary unit: `Reduce(L, (acc, i) => acc + i, [0, 0])` over rows answered
+  `[{re: null}, {re: null}]`; it now answers `[4, 7]`.
+- `.N()` of a `Reduce` with no initial value over a list of lists was `NaN`:
+  `Reduce([[1, 2], [3, 4]], Add).N()` is now `[4, 6]`, as `evaluate()` gives.
+  The compiled code of the same expression, which used that value, was the
+  constant `NaN`.
+- **#386** A compiled `Fold` whose step replaced elements of a list
+  accumulator copied the whole list at each step, so a fold that visits each
+  element once took time proportional to the square of the length (730 ms for
+  40,000 elements). When the step can only return the accumulator or a chain
+  of `ReplaceAt` on it, and reads it nowhere else except through an element
+  read or an aggregate (`At`, `Length`, `Sum`, …), the compiled fold now copies
+  the seed once and updates that copy in place (1.7 ms for 40,000 elements).
+  A step that swaps two slots,
+  `ReplaceAt(ReplaceAt(acc, i, acc[j]), j, acc[i])`, reads both old values
+  before it writes. Any other step keeps the copying form. The result is the
+  same, and the caller's list is not changed. This applies to the JavaScript
+  and Python targets.
 - The compiled call of a function with an annotated parameter did not check an
   absent argument. `function f(p: tuple<number, number>) { p[1] + 1 }` called
   with `first(filter([(1, 2)], c => c[1] > 9))` (no element passes, so the

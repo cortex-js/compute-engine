@@ -22,6 +22,11 @@ import {
   recordScalarParams,
 } from './javascript-value-facts.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
+import {
+  assertAccumulatorFitsStep,
+  inPlaceUpdateChains,
+  isDefinitelyCollectionType,
+} from './in-place-update.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
   isSymbol,
@@ -4302,10 +4307,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
       if (mapped !== undefined) return mapped;
     }
-    let combiner = builtinCombiner(
-      op,
-      BaseCompiler.foldLaneIsComplex(coll, init)
-    );
+    let combiner =
+      nestedElementCombiner('Reduce', coll, op) ??
+      builtinCombiner(op, BaseCompiler.foldLaneIsComplex(coll, init));
     // The seed's code when the accumulator lane is complex and the seed is
     // real (`combinerPlan.coerceSeed`); `undefined` = compile `init` as-is.
     let seed: string | undefined;
@@ -4346,6 +4350,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
         BaseCompiler.collectionElementTypeOf(coll),
       ]);
+      assertAccumulatorFitsStep('Reduce', op, init);
       // ACCUMULATOR and ELEMENT lanes (`combinerPlan`): the combiner is
       // compiled with its two parameters bound to the lanes the fold actually
       // runs — the element's from the source, the accumulator's from the seed
@@ -4356,8 +4361,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // `{re: "[object Object]0", im: 2}` behind `success: true` where the
       // interpreter gives `2+6i`; a complex seed, a seedless `Scan`, and a
       // bare user-function combiner were wrong the same way.
-      combiner = customCombinerWithLanes(op, plan, compile, target);
-      seed = plan?.coerceSeed ? `_SYS.cplx(${compile(init)})` : undefined;
+      // An accumulator that only the fold can see is updated in place when
+      // the step allows it (`inPlaceUpdateChains`). The seed is then copied
+      // once, so the fold owns the one array that every step updates.
+      const chains = plan?.coerceSeed ? undefined : inPlaceUpdateChains(op);
+      for (const ops of chains ?? []) IN_PLACE_UPDATE_OPS.add(ops);
+      try {
+        combiner = customCombinerWithLanes(op, plan, compile, target);
+      } finally {
+        for (const ops of chains ?? []) IN_PLACE_UPDATE_OPS.delete(ops);
+      }
+      seed = plan?.coerceSeed
+        ? `_SYS.cplx(${compile(init)})`
+        : chains !== undefined
+          ? `_SYS.ownedCopy(${compile(init)})`
+          : undefined;
     }
     if (combiner === undefined)
       throw new Error(
@@ -5265,6 +5283,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ReplaceAt: (args, compile) => {
     if (args[1] == null || args[2] == null)
       throw new Error('Could not compile `ReplaceAt`: missing argument');
+    if (IN_PLACE_UPDATE_OPS.has(args))
+      return compileInPlaceUpdateChain(args, compile);
     const coll = elementsArg('ReplaceAt', args[0], compile);
     return `_SYS.replaceAt(${coll}, ${compile(args[1])}, ${compile(args[2])})`;
   },
@@ -5680,10 +5700,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`Scan\`: first operand is not an indexed collection ` +
           `(list/vector/range).`
       );
-    const builtin = builtinCombiner(
-      op,
-      BaseCompiler.foldLaneIsComplex(coll, init)
-    );
+    const builtin =
+      nestedElementCombiner('Scan', coll, op) ??
+      builtinCombiner(op, BaseCompiler.foldLaneIsComplex(coll, init));
     // As `Reduce`: the accumulator's annotation is judged against the lane
     // `combinerPlan` chose, or else against the join of the seed's type (the
     // first element's, for a seedless scan) and the combiner's result type.
@@ -5698,6 +5717,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
         BaseCompiler.collectionElementTypeOf(coll),
       ]);
+    assertAccumulatorFitsStep('Scan', op, init);
     // Accumulator and element lanes as for `Reduce` above (`combinerPlan`).
     // `Scan` was wrong the same way from the SECOND element on — over
     // `[1+2i, i]` it answered `[{re:2,im:4}, {re:"[object Object]0",im:2}]`
@@ -6296,6 +6316,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Max: (args, compile, target) => compileExtremum('Max', args, compile, target),
   Mean: (args, compile, target) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('Mean', args);
     if (args.length === 1) {
       // `_SYS.mean` is `sum / count` over the materialized elements; over a
       // positional gather (a range, a literal list of indices, or a `Join` of
@@ -6314,16 +6335,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Median: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('Median', args);
     if (args.length === 1) return `_SYS.median(${compile(args[0])})`;
     return `_SYS.median([${args.map(compile).join(', ')}])`;
   },
   Variance: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('Variance', args);
     if (args.length === 1) return `_SYS.variance(${compile(args[0])})`;
     return `_SYS.variance([${args.map(compile).join(', ')}])`;
   },
   PopulationVariance: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('PopulationVariance', args);
     if (args.length === 1)
       return `_SYS.populationVariance(${compile(args[0])})`;
     return `_SYS.populationVariance([${args
@@ -6332,6 +6356,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   StandardDeviation: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('StandardDeviation', args);
     if (args.length === 1) return `_SYS.standardDeviation(${compile(args[0])})`;
     return `_SYS.standardDeviation([${args
       .map((x) => compile(x))
@@ -6339,6 +6364,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   PopulationStandardDeviation: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('PopulationStandardDeviation', args);
     if (args.length === 1)
       return `_SYS.populationStandardDeviation(${compile(args[0])})`;
     return `_SYS.populationStandardDeviation([${args
@@ -6347,26 +6373,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Kurtosis: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('Kurtosis', args);
     if (args.length === 1) return `_SYS.kurtosis(${compile(args[0])})`;
     return `_SYS.kurtosis([${args.map(compile).join(', ')}])`;
   },
   Skewness: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('Skewness', args);
     if (args.length === 1) return `_SYS.skewness(${compile(args[0])})`;
     return `_SYS.skewness([${args.map(compile).join(', ')}])`;
   },
   Mode: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('Mode', args);
     if (args.length === 1) return `_SYS.mode(${compile(args[0])})`;
     return `_SYS.mode([${args.map(compile).join(', ')}])`;
   },
   Quartiles: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('Quartiles', args);
     if (args.length === 1) return `_SYS.quartiles(${compile(args[0])})`;
     return `_SYS.quartiles([${args.map(compile).join(', ')}])`;
   },
   InterquartileRange: (args, compile) => {
     if (args.length === 0) return 'NaN';
+    refuseNestedData('InterquartileRange', args);
     if (args.length === 1)
       return `_SYS.interquartileRange(${compile(args[0])})`;
     return `_SYS.interquartileRange([${args
@@ -9267,6 +9298,49 @@ function indexValue(v: unknown): number {
 }
 
 /**
+ * The operand arrays (`Expression.ops`) of the `ReplaceAt` nodes that compile
+ * to an in-place update. The `Reduce` lowering adds the outermost node of each
+ * chain that `inPlaceUpdateChains` accepts, for the time it compiles the
+ * step, and the `ReplaceAt` lowering, which receives that array as `args`,
+ * tests it. The key is the node's own array, not the name of the
+ * accumulator, so a `ReplaceAt` in another function whose parameter has the
+ * same name keeps the copying form. If the compiler passes a different array,
+ * the update keeps the copying form, which is slower but correct.
+ */
+const IN_PLACE_UPDATE_OPS = new WeakSet<ReadonlyArray<Expression>>();
+
+/**
+ * Compile a chain of `ReplaceAt` accepted by `inPlaceUpdateChains`, given the
+ * operands of its outermost node, to one `_SYS.replaceAtInPlace` call. The
+ * indexes and values are listed innermost first, which is the order the
+ * interpreter applies them in.
+ */
+function compileInPlaceUpdateChain(
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+): string {
+  const updates: string[] = [];
+  let node: ReadonlyArray<Expression> = args;
+  for (;;) {
+    updates.unshift(compile(node[1]), compile(node[2]));
+    const inner = node[0];
+    if (!isFunction(inner, 'ReplaceAt')) break;
+    node = inner.ops;
+  }
+  return `_SYS.replaceAtInPlace(${compile(node[0])}, ${updates.join(', ')})`;
+}
+
+/**
+ * A new array with the elements of `x`: a copy of an array, or the characters
+ * (grapheme clusters) of a string, as `_SYS.chars` segments it.
+ */
+function listCopy(x: unknown): unknown[] {
+  return typeof x === 'string'
+    ? SYS_HELPERS.chars(x)
+    : (x as unknown[]).slice();
+}
+
+/**
  * The 0-based position that the 1-based index `i` names in a list of `n`
  * positions, for the compiled `ReplaceAt`, `DeleteAt` and `Insert`. A
  * positive index counts from the start (1..n) and a negative index from the
@@ -12070,23 +12144,49 @@ const SYS_HELPERS = {
   // unevaluated value to return, so these helpers throw a `RangeError`, as
   // the compiled `Slice` does for an invalid span. The index is checked by
   // `listPosition`.
-  replaceAt: (arr: unknown[], i: unknown, v: unknown): unknown[] => {
-    const out = arr.slice();
-    out[listPosition('ReplaceAt', arr.length, i)] = v;
+  // An operand that is a string only at run time (a fold accumulator seeded
+  // with a string) is split into its characters by `listCopy`, as the
+  // lowering does for an operand that is provably a string. `DeleteAt` then
+  // joins the characters back into a string, as the interpreter does.
+  replaceAt: (arr: unknown, i: unknown, v: unknown): unknown[] => {
+    const out = listCopy(arr);
+    out[listPosition('ReplaceAt', out.length, i)] = v;
     return out;
   },
-  deleteAt: (arr: unknown[], i: unknown): unknown[] => {
-    const out = arr.slice();
-    out.splice(listPosition('DeleteAt', arr.length, i), 1);
-    return out;
+  deleteAt: (arr: unknown, i: unknown): unknown => {
+    const out = listCopy(arr);
+    out.splice(listPosition('DeleteAt', out.length, i), 1);
+    return typeof arr === 'string' ? out.join('').normalize() : out;
   },
-  insert: (arr: unknown[], i: unknown, v: unknown): unknown[] => {
-    const out = arr.slice();
+  insert: (arr: unknown, i: unknown, v: unknown): unknown[] => {
+    const out = listCopy(arr);
     // The n + 1 gaps of the array are the positions of an array one longer.
-    const gap = listPosition('Insert', arr.length + 1, i);
+    const gap = listPosition('Insert', out.length + 1, i);
     out.splice(gap, 0, v);
     return out;
   },
+  // The in-place form of a chain of `ReplaceAt` in the step of a fold that
+  // owns its accumulator (`inPlaceUpdateChains` in `in-place-update.ts`):
+  // `updates` holds the index and the value of each level, innermost first.
+  // All of them were computed before this call, from the accumulator as it
+  // was at the start of the step, so a step that swaps two slots reads both
+  // old values, as in the interpreter. The indexes are checked as `replaceAt`
+  // checks them. The array is the copy that `ownedCopy` made of the seed.
+  replaceAtInPlace: (arr: unknown[], ...updates: unknown[]): unknown[] => {
+    for (let k = 0; k < updates.length; k += 2)
+      arr[listPosition('ReplaceAt', arr.length, updates[k])] = updates[k + 1];
+    return arr;
+  },
+  // The seed of a fold that updates its accumulator in place: a copy, so
+  // that the caller's array (a `run()` argument, a variable, a constant
+  // list) is never changed. A string seed becomes the array of its
+  // characters, which is what the first `ReplaceAt` would answer.
+  ownedCopy: (x: unknown): unknown =>
+    Array.isArray(x) || typeof x === 'string'
+      ? listCopy(x)
+      : ArrayBuffer.isView(x)
+        ? Array.from(x as unknown as ArrayLike<unknown>)
+        : x,
   // `at` for a base whose STATIC element type is numeric and whose value
   // comes from outside the kernel (a `run()` argument, a function
   // parameter). Every consumer of the read was compiled for a number, so a
@@ -16107,6 +16207,44 @@ function randomDomain(
 }
 
 /**
+ * The combiner of a `Reduce`/`Scan` with a built-in `Add`/`Multiply` over
+ * elements that are collections (the rows of a list of lists): the
+ * element-wise one (`elementwiseFoldCombiner`), as for a `Sum`. The scalar
+ * `(_a, _b) => _a + _b` that `builtinCombiner` gives joins two arrays as a
+ * string: `Sum(acc)` in the step of a fold over a list of lists, which is
+ * `Reduce(acc, Add, 0)`, answered `"01,23,4"` where the interpreter answers
+ * `[4, 6]`. Only list rows are combined this way; `Min`/`Max` over rows, and
+ * every built-in fold over points, strings, sets or dictionaries, fail
+ * closed, as `Max` of a list of lists does (`refuseNestedData`). `undefined`
+ * for every other combiner and element type, so `builtinCombiner` decides.
+ */
+function nestedElementCombiner(
+  operator: string,
+  coll: Expression,
+  op: Expression
+): string | undefined {
+  if (!isSymbol(op)) return undefined;
+  const elt = BaseCompiler.collectionElementTypeOf(coll);
+  if (elt === undefined || !isDefinitelyCollectionType(elt)) return undefined;
+  if (!['Add', 'Multiply', 'Min', 'Max'].includes(op.symbol)) return undefined;
+  // Only list rows are combined element-wise. A point (a tuple) is not:
+  // the compiled array would be read as a list by an enclosing operator, so
+  // `Reduce(pts, Add) + 1` broadcast the 1 where the interpreter answers an
+  // `incompatible-type` error. A string, a set or a dictionary has no
+  // element-wise sum either; the interpreter answers an error.
+  if (isSubtype(resolveTypeForCompilation(elt), 'list<any>')) {
+    if (op.symbol === 'Add')
+      return elementwiseFoldCombiner('Sum', foldLane(coll));
+    if (op.symbol === 'Multiply')
+      return elementwiseFoldCombiner('Product', foldLane(coll));
+  }
+  throw new Error(
+    `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
+      `\`${typeToString(elt)}\` has no compiled form. The interpreter evaluates it instead.`
+  );
+}
+
+/**
  * The built-in `Reduce`/`Scan` combiners: the four associative folds that
  * compile without an initial value (their seedless native fold agrees with
  * the interpreter).
@@ -16274,6 +16412,45 @@ export function requirePrimitiveElements(kind: string, arg: Expression): void {
 }
 
 /**
+ * Fail closed when the data of a statistics operator (`Mean`, `Median`,
+ * `Variance`, `Max`, `Min`, …) is a list of lists: one operand whose
+ * elements are collections, or several operands of which one is a
+ * collection. The compiled helpers read each datum as a number and answered
+ * `null`, `NaN` or a wrong list, while the interpreter answers an
+ * `incompatible-type` error (`Mean([[1, 2], [3, 5]])`), the statistic of all
+ * the elements of several list operands (`Mean([2, 3], [5, 7])` is 17/4), or,
+ * for `Max` and `Min`, the extremum of all the elements
+ * (`Max([[1, 2], [3, 5]])` is 5).
+ * Refusing lets the interpreter answer. Only a type that is definitely a
+ * collection is refused, so a wide or unknown element type compiles as
+ * before.
+ */
+function refuseNestedData(
+  operator: string,
+  args: ReadonlyArray<Expression | undefined>,
+  spreadsListOperands = false
+): void {
+  const isCollection = isDefinitelyCollectionType;
+  const hasCollectionElements = (a: Expression | undefined): boolean =>
+    a !== undefined && isCollection(collectionElementType(a.type.type));
+  // With one operand, the data is its elements. With several, a lowering
+  // that spreads each list operand into the data (`compileExtremum`, so
+  // `Max(w, 5)` over a list `w` compiles) is refused only for an operand
+  // whose elements are collections; the other statistics pass the operands
+  // as one array, so any list operand would be read as a number.
+  const nested =
+    args.length === 1 || spreadsListOperands
+      ? args.some(hasCollectionElements)
+      : args.some((a) => isCollection(a?.type.type));
+  if (nested)
+    throw new Error(
+      `Could not compile \`${operator}\`: an element of the data is a collection (a list, ` +
+        `a string, a set or a dictionary), which the compiled code would read as a number. ` +
+        `The interpreter evaluates it instead.`
+    );
+}
+
+/**
  * Compile `Max`/`Min`. Two shapes:
  *   - a single indexed-collection operand (`[3,4,5].max`, `Max(range)`) reduces
  *     over the elements. A reduce (not `Math.max(...spread)`) is used so a large
@@ -16291,6 +16468,7 @@ function compileExtremum(
   compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
+  refuseNestedData(kind, args, true);
   const fn = kind === 'Max' ? 'Math.max' : 'Math.min';
   const identity = kind === 'Max' ? '-Infinity' : 'Infinity';
   // Reduce with the identity seed, but map an empty input to `NaN` (interpreter

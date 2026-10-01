@@ -13508,6 +13508,20 @@ export class BaseCompiler {
     // mode — shape follows the static type.
     const elt = BaseCompiler.collectionElementTypeOf(coll);
     if (elt !== undefined && isNonRealNumber(elt)) return false;
+    // Elements that are themselves collections (the rows of a list of lists)
+    // are added element by element, never with the scalar `+`: a raw fold
+    // over two JavaScript arrays concatenates them as strings
+    // (`[1, 2] + [3, 4]` is `"1,23,4"`). Only an element type that is
+    // definitely a collection is refused here; a wide or unknown element type
+    // keeps the rules below.
+    // `never`, the element type of an empty list, has no value and is not a
+    // row.
+    if (
+      elt !== undefined &&
+      elt !== 'never' &&
+      isSubtype(elt, 'collection<any>')
+    )
+      return false;
     // COMPLEX discipline: a wide element (`list<number>`) may hold a
     // `{re, im}` at run time; only a real-only element type folds raw.
     if (BaseCompiler.complexDiscipline)
@@ -25758,7 +25772,13 @@ export class BaseCompiler {
       const vector = new Map<string, number>();
       if (eltName) vector.set(eltName, BaseCompiler.LOCAL_SCALAR);
       if (accName) vector.set(accName, BaseCompiler.LOCAL_SCALAR);
-      if (eltComplex && eltName) complex.set(eltName, true);
+      // Both lanes are entered explicitly, real ones too. A name left out is
+      // answered by an enclosing rule, and for a parameter named `i` that
+      // rule is the imaginary unit: `Reduce(L, (acc, i) => acc + i, [0, 0])`
+      // over a list of rows was put in the complex lane and answered
+      // `[{re: null}, {re: null}]` where `(acc, x)` answered `[4, 7]`.
+      if (eltName) complex.set(eltName, eltComplex);
+      if (accName) complex.set(accName, false);
       accComplex = BaseCompiler.withLocalShapeFrame(
         complex,
         vector,

@@ -902,6 +902,164 @@ describeMaybe('PYTHON EXECUTION PARITY — collections (venv)', () => {
 });
 
 /**
+ * `ReplaceAt`, `DeleteAt` and `Insert` (issue #386), with the index as a
+ * parameter so the lowering runs instead of a compile-time fold. Each value is
+ * compared with the interpreter's. Where the interpreter leaves the
+ * expression unevaluated (a zero or out-of-range index), the emitted Python
+ * raises an `IndexError`.
+ */
+describeMaybe('PYTHON EXECUTION PARITY — ReplaceAt / DeleteAt / Insert (venv)', () => {
+  const python = new PythonTarget();
+
+  it('emitted Python matches the interpreter, and raises where it stays unevaluated', () => {
+    const L = ['List', 10, 20, 30];
+    const heads: Array<[string, any[]]> = [
+      ['ReplaceAt', [9]],
+      ['DeleteAt', []],
+      ['Insert', [9]],
+    ];
+    const ks = [1, 2, 3, 4, -1, -3, -4, -5, 0];
+    let src = 'import numpy as np\nimport json\n\n';
+    for (const [head, rest] of heads)
+      src += `${python.compileFunction(ce.box([head, L, 'k', ...rest]), `fn_${head}`, ['k'], undefined, { constantFold: false })}\n`;
+    src += [
+      'def _run(f, k):',
+      '    try:',
+      '        return [float(v) for v in f(k)]',
+      '    except IndexError:',
+      "        return 'IndexError'",
+      'results = {}',
+      ...heads.map(
+        ([head]) =>
+          `results[${JSON.stringify(head)}] = [_run(fn_${head}, k) for k in ${JSON.stringify(ks)}]`
+      ),
+      "results['bad'] = [_run(f, k) for f in (fn_ReplaceAt, fn_DeleteAt, fn_Insert) for k in (1.5, True)]",
+      'print(json.dumps(results))',
+      '',
+    ].join('\n');
+    const file = path.join(os.tmpdir(), `ce-py-listupdate-${process.pid}.py`);
+    fs.writeFileSync(file, src);
+    let out = '';
+    try {
+      out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    const actual = JSON.parse(out) as Record<string, any>;
+    for (const [head, rest] of heads) {
+      const expected = ks.map((k) => {
+        const v = ce.box([head, L, k, ...rest] as any).evaluate();
+        return v.operator === 'List' ? v.ops!.map((x) => x.re) : 'IndexError';
+      });
+      expect(actual[head]).toEqual(expected);
+    }
+    expect(actual.bad).toEqual(Array(6).fill('IndexError'));
+  });
+
+  it('a Fold with a ReplaceAt step compiles and runs', () => {
+    const fold = [
+      'Fold',
+      ['Function', ['ReplaceAt', 'acc', 'i', ['Multiply', 'i', 'i']], 'acc', 'i'],
+      ['List', 0, 0, 0, 0],
+      ['Range', 1, 'n'],
+    ];
+    const src =
+      'import numpy as np\nimport json\n\n' +
+      `${python.compileFunction(ce.box(fold), 'fn_fold', ['n'], undefined, { constantFold: false })}\n` +
+      'print(json.dumps([float(v) for v in fn_fold(4)]))\n';
+    const file = path.join(os.tmpdir(), `ce-py-listfold-${process.pid}.py`);
+    fs.writeFileSync(file, src);
+    let out = '';
+    try {
+      out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    expect(JSON.parse(out)).toEqual([1, 4, 9, 16]);
+  });
+
+  // Python has no standard grapheme segmentation, so a string that reaches
+  // these helpers at run time raises a `TypeError` rather than being walked
+  // by code points. A list of lists given to a statistic does not compile, and
+  // the interpreter answers.
+  it('a string seed raises, and a statistic of a list of lists does not compile', () => {
+    const e = new ComputeEngine();
+    e.declare('t', 'string');
+    const fold = ['Fold', ['Function', ['ReplaceAt', 'acc', 'i', { str: 'x' }], 'acc', 'i'], 't', ['Range', 1, 2]];
+    const src =
+      'import numpy as np\nimport json\n\n' +
+      `${python.compileFunction(e.box(fold), 'fn_str', ['t'], undefined, { constantFold: false })}\n` +
+      'try:\n    fn_str("abc")\n    print("no error")\nexcept TypeError:\n    print("TypeError")\n';
+    const file = path.join(os.tmpdir(), `ce-py-liststr-${process.pid}.py`);
+    fs.writeFileSync(file, src);
+    let out = '';
+    try {
+      out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    expect(out.trim()).toBe('TypeError');
+    e.declare('m', 'list<list<integer>>');
+    for (const head of ['Mean', 'Median', 'Variance'])
+      expect(() => python.compileFunction(e.box([head, 'm']), 'fn_stat', ['m'])).toThrow(
+        new RegExp(`Could not compile \`${head}\``)
+      );
+    // Python's `+` joins two lists, so a built-in fold over rows does not
+    // compile; nor does a step typed for numbers (`Mean(acc)`) over rows.
+    expect(() => python.compileFunction(e.box(['Scan', 'm', 'Add']), 'fn_scan', ['m'])).toThrow(
+      /elements that are collections/
+    );
+    expect(() =>
+      python.compileFunction(
+        e.box(['Fold', ['Function', ['ReplaceAt', 'acc', 'i', ['Mean', 'acc']], 'acc', 'i'], 'm', ['Range', 1, 2]]),
+        'fn_fold',
+        ['m']
+      )
+    ).toThrow(/typed for/);
+  });
+
+  // The step only updates its accumulator, so the fold updates a copy of the
+  // seed in place (`inPlaceUpdateChains`). The swap must read both old values
+  // before either write, and the caller's list must not change.
+  it('a Fold that swaps two slots updates a copy of the seed in place', () => {
+    const next = ['Add', ['Mod', 'i', 4], 1];
+    const fold = [
+      'Fold',
+      [
+        'Function',
+        ['ReplaceAt', ['ReplaceAt', 'acc', 'i', ['At', 'acc', next]], next, ['At', 'acc', 'i']],
+        'acc',
+        'i',
+      ],
+      's',
+      ['Range', 1, 4],
+    ];
+    ce.declare('s', 'list<integer>');
+    const fn = python.compileFunction(ce.box(fold), 'fn_swap', ['s'], undefined, { constantFold: false });
+    expect(fn).toContain('_ce_replaceat_inplace(');
+    const src =
+      'import numpy as np\nimport json\n\n' +
+      `${fn}\n` +
+      's = [1, 2, 3, 4]\n' +
+      'r = fn_swap(s)\n' +
+      'print(json.dumps([[float(v) for v in r], [float(v) for v in s]]))\n';
+    const file = path.join(os.tmpdir(), `ce-py-listswap-${process.pid}.py`);
+    fs.writeFileSync(file, src);
+    let out = '';
+    try {
+      out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    const e = new ComputeEngine();
+    e.declare('s', 'list<integer>');
+    e.assign('s', e.box(['List', 1, 2, 3, 4]));
+    const want = e.box(fold as any).evaluate().ops!.map((x) => x.re);
+    expect(JSON.parse(out)).toEqual([want, [1, 2, 3, 4]]);
+  });
+});
+
+/**
  * Arithmetic over a LIST-TYPED parameter.
  *
  * The Python target used to refuse every arithmetic head that had a

@@ -2456,6 +2456,250 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toEqual([1, 4, 9, 16]);
   });
 
+  // Over a list of lists, a statistic reads each row as a number, so it does
+  // not compile and the interpreter answers: an `incompatible-type` error for
+  // `Mean`, the extremum of every element for `Max`. A built-in `Add` fold adds
+  // the rows element-wise, as `Sum` does. A fold step whose `acc` was typed
+  // for numbers from its uses (`Sum(acc)`) does not compile over rows either.
+  // Every compiled value was checked against the interpreter.
+  it('statistics and folds over a list of lists', () => {
+    const e = new ComputeEngine();
+    e.declare('s', 'list<list<integer>>');
+    for (const head of [
+      'Max',
+      'Min',
+      'Mean',
+      'Median',
+      'Variance',
+      'Mode',
+      'Quartiles',
+    ])
+      expect(() => compile(e.box([head, 's']), { fallback: false })).toThrow(
+        /collection|no compiled form/
+      );
+    e.declare('a', 'list<integer>');
+    expect(() =>
+      compile(e.box(['Mean', 'a', 's']), { fallback: false })
+    ).toThrow(/collection/);
+    const run = (json: any) =>
+      compile(e.box(json), { fallback: false })!.run!({
+        s: [
+          [1, 2],
+          [3, 5],
+        ],
+      });
+    expect(run(['Reduce', 's', 'Add'])).toEqual([4, 7]);
+    expect(run(['Scan', 's', 'Add'])).toEqual([
+      [1, 2],
+      [4, 7],
+    ]);
+    expect(() =>
+      compile(e.box(['Reduce', 's', 'Max']), { fallback: false })
+    ).toThrow(/no compiled form/);
+    expect(() =>
+      compile(
+        e.box([
+          'Fold',
+          ['Function', ['ReplaceAt', 'acc', 'i', ['Sum', 'acc']], 'acc', 'i'],
+          's',
+          ['Range', 1, 2],
+        ]),
+        { fallback: false }
+      )
+    ).toThrow(/typed for/);
+  });
+
+  // The same checks see a row type given through a type name, and refuse a
+  // built-in fold over elements that are points, strings or sets, which have
+  // no element-wise sum. Checked against the interpreter.
+  it('statistics and folds over named rows, points and strings', () => {
+    const e = new ComputeEngine();
+    e.declareType('Row', 'list<real>');
+    e.declare('R', 'list<Row>');
+    for (const json of [
+      ['Mean', 'R'],
+      ['Max', 'R'],
+    ])
+      expect(() => compile(e.box(json), { fallback: false })).toThrow(
+        /collection/
+      );
+    expect(
+      compile(e.box(['Reduce', 'R', 'Add']), { fallback: false })!.run!({
+        R: [
+          [1, 2],
+          [3, 5],
+        ],
+      })
+    ).toEqual([4, 7]);
+    e.declare('pts', 'list<tuple<real, real>>');
+    e.declare('S', 'list<string>');
+    for (const json of [
+      ['Reduce', 'pts', 'Add'],
+      ['Reduce', 'S', 'Add'],
+      ['Scan', 'S', 'Add'],
+    ])
+      expect(() => compile(e.box(json), { fallback: false })).toThrow(
+        /no compiled form/
+      );
+  });
+
+  // A step parameter named `i` is the parameter, not the imaginary unit,
+  // when the fold decides its lanes.
+  it('a fold step with a parameter named i over a list of rows', () => {
+    const e = new ComputeEngine();
+    e.declare('L', 'list<list<real>>');
+    const r = compile(
+      e.box([
+        'Reduce',
+        'L',
+        ['Function', ['Add', 'acc', 'i'], 'acc', 'i'],
+        ['List', 0, 0],
+      ]),
+      { fallback: false }
+    )!;
+    expect(
+      r.run!({
+        L: [
+          [1, 2],
+          [3, 5],
+        ],
+      })
+    ).toEqual([4, 7]);
+  });
+
+  // `.N()` of a fold over rows with no seed walked the rows as numbers and
+  // answered NaN, and the compiler folded that NaN into the code.
+  it('Reduce over a literal list of rows', () => {
+    const e = new ComputeEngine();
+    const json = ['Reduce', ['List', ['List', 1, 2], ['List', 3, 4]], 'Add'];
+    expect(e.box(json).N().toString()).toBe('[4,6]');
+    expect(compile(e.box(json), { fallback: false })!.run!()).toEqual([4, 6]);
+  });
+
+  // A fold whose step only updates its accumulator updates it in place: the
+  // seed is copied once and each step writes into that copy (issue #386).
+  // Every result is compared with the interpreter's, and the caller's array
+  // must not change. A step that could keep a reference to the old
+  // accumulator keeps the copying form.
+  describe('Fold with an accumulator updated in place', () => {
+    const F = (body: any) => ['Function', body, 'acc', 'i'];
+    const RA = (l: any, i: any, v: any) => ['ReplaceAt', l, i, v];
+    const At = (l: any, i: any) => ['At', l, i];
+    const next = ['Add', ['Mod', 'i', 4], 1];
+    it.each([
+      ['one update', F(RA('acc', 'i', ['Add', At('acc', 'i'), 'i'])), true],
+      // The swap reads both old values before either write.
+      [
+        'a swap',
+        F(RA(RA('acc', 'i', At('acc', next)), next, At('acc', 'i'))),
+        true,
+      ],
+      [
+        'a branch that returns the accumulator',
+        F(['If', ['Greater', 'i', 2], RA('acc', 'i', 0), 'acc']),
+        true,
+      ],
+      [
+        'a block with a local read',
+        F([
+          'Block',
+          ['Declare', 't', "'integer'"],
+          ['Assign', 't', At('acc', 1)],
+          RA(RA('acc', 1, At('acc', 'i')), 'i', 't'),
+        ]),
+        true,
+      ],
+      [
+        'a branch that returns a new list',
+        F(['If', ['Greater', 'i', 2], RA('acc', 'i', 0), ['List', 7, 7, 7, 7]]),
+        false,
+      ],
+      [
+        'a value that reads the accumulator through Join',
+        F(RA('acc', 'i', ['Length', ['Join', 'acc', 'acc']])),
+        false,
+      ],
+      // A `Return` is a return value of the step wherever it is. Returning
+      // another list there must keep the copying form, or the next step
+      // would write into the caller's array.
+      [
+        'a Return of another list',
+        F([
+          'Block',
+          ['If', ['Equal', 'i', 2], ['Return', 's']],
+          RA('acc', 'i', 0),
+        ]),
+        false,
+      ],
+      [
+        'a Return of the accumulator',
+        F([
+          'Block',
+          ['If', ['Equal', 'i', 2], ['Return', 'acc']],
+          RA('acc', 'i', 0),
+        ]),
+        true,
+      ],
+    ])('%s', (_name, step, inPlace) => {
+      const e = new ComputeEngine();
+      e.declare('s', 'list<integer>');
+      const fold = e.box(['Fold', step, 's', ['Range', 1, 4]] as any);
+      const r = compile(fold, { fallback: false })!;
+      expect(r.code.includes('replaceAtInPlace')).toBe(inPlace);
+      const s = [1, 2, 3, 4];
+      const got = r.run!({ s });
+      expect(r.run!({ s })).toEqual(got); // a second run gives the same result
+      expect(s).toEqual([1, 2, 3, 4]);
+      e.assign('s', e.box(['List', 1, 2, 3, 4]));
+      expect(got).toEqual(fold.evaluate().ops!.map((x) => x.re));
+    });
+
+    // A string seed is walked as its characters, as in the interpreter, on
+    // the in-place form and on the copying form (where the accumulator is a
+    // string only at run time).
+    it.each([
+      ['in place', F(RA('acc', 'i', { str: 'x' }))],
+      [
+        'copying',
+        F([
+          'If',
+          ['Greater', ['Length', ['Join', 'acc', 'acc']], 0],
+          RA('acc', 'i', { str: 'x' }),
+          RA('acc', 'i', { str: 'y' }),
+        ]),
+      ],
+    ])('a string seed, %s', (_name, step) => {
+      const e = new ComputeEngine();
+      e.declare('t', 'string');
+      const fold = e.box(['Fold', step, 't', ['Range', 1, 2]] as any);
+      const r = compile(fold, { fallback: false })!;
+      const got = r.run!({ t: 'abc' });
+      e.assign('t', e.string('abc'));
+      expect(got).toEqual(fold.evaluate().ops!.map((x) => x.string));
+    });
+
+    // A user function whose parameter is also named `acc` is compiled while
+    // the step is compiled. Its `ReplaceAt` is not part of the step, so it
+    // keeps the copying form and does not change its argument.
+    it('a user function with a parameter of the same name keeps the copying form', () => {
+      const e = new ComputeEngine();
+      e.declare('s', 'list<integer>');
+      e.declare('g', 'function');
+      e.assign('g', e.box(['Function', RA('acc', 1, 0), 'acc']));
+      const fold = e.box([
+        'Fold',
+        F(RA('acc', 'i', At(['g', 's'], 'i'))),
+        's',
+        ['Range', 1, 4],
+      ] as any);
+      const r = compile(fold, { fallback: false })!;
+      expect(r.code).toContain('replaceAtInPlace');
+      const s = [1, 2, 3, 4];
+      expect(r.run!({ s })).toEqual([0, 2, 3, 4]);
+      expect(s).toEqual([1, 2, 3, 4]);
+    });
+  });
+
   // The `(indexed_collection<T>, range)` arm (docs/STRING_ROADMAP.md, Phase
   // 0c): `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`, and the `range`
   // type guarantees an ascending step-1 span with first ≥ 1, so the lowering

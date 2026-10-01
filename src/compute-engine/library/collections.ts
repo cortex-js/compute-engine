@@ -4862,6 +4862,19 @@ function pointComponentAt(
  * The evaluation of `Reduce(collection, fn, initial)`, before the machine
  * overflow check in the `Reduce` definition.
  */
+/**
+ * True when every element of `collection` is itself a collection, read from
+ * its element type (`matrix<integer^(2x2)>` has `vector<integer^2>`
+ * elements). An empty list (`list<never>`) has no element, so it is not
+ * counted. An element type that is not known answers `false`.
+ */
+function elementsAreCollections(collection: Expression): boolean {
+  const elt = collectionElementType(collection.type.type);
+  return (
+    elt !== undefined && elt !== 'never' && isSubtype(elt, 'collection<any>')
+  );
+}
+
 const reduceEvaluate = (
   [source, fn, initial]: ReadonlyArray<Expression>,
   { engine: ce, numericApproximation }: EvaluateHandlerOptions
@@ -4905,7 +4918,12 @@ const reduceEvaluate = (
     // against `real` used to make this whole branch unreachable without an
     // initial value.)
     (!hasInitial || seed.type.matches('real')) &&
-    collection.type.matches(ce.type('collection<real>'))
+    collection.type.matches(ce.type('collection<real>')) &&
+    // A matrix (a list of rows) also matches `collection<real>`, since a
+    // nested list is read as its flat shape, but it enumerates its ROWS, and
+    // `item.re` of a row is NaN: `Reduce([[1, 2], [3, 4]], Add).N()` was NaN
+    // where `evaluate()` gives `[4, 6]`. Rows take the interpreted path.
+    !elementsAreCollections(collection)
   ) {
     // If we're dealing with real numbers, we can compile.
     const compiled = implicitCompile(ce, fn);
