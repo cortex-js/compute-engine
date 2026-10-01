@@ -60,7 +60,7 @@ exports[`simplify: logarithms and exponentials (e^x)^2 1`] = `["Exp", ["Multiply
 
 exports[`simplify: logarithms and exponentials \\exp(x)\\exp(-x) 1`] = `1`;
 
-exports[`simplify: logarithms and exponentials \\ln(\\frac{1}{x}) 1`] = `["Negate", ["Ln", "x"]]`;
+exports[`simplify: logarithms and exponentials \\ln(\\frac{1}{x}) 1`] = `["Ln", ["Divide", 1, "x"]]`;
 
 exports[`simplify: logarithms and exponentials \\ln(\\sqrt{x}) 1`] = `["Multiply", ["Rational", 1, 2], ["Ln", "x"]]`;
 
@@ -72,7 +72,7 @@ exports[`simplify: logarithms and exponentials \\ln(e^2) 1`] = `2`;
 
 exports[`simplify: logarithms and exponentials \\ln(e^x) 1`] = `x`;
 
-exports[`simplify: logarithms and exponentials \\ln(x)+\\ln(y) 1`] = `["Ln", ["Multiply", "x", "y"]]`;
+exports[`simplify: logarithms and exponentials \\ln(x)+\\ln(y) 1`] = `["Add", ["Ln", "x"], ["Ln", "y"]]`;
 
 exports[`simplify: logarithms and exponentials \\log_{10}(1) 1`] = `0`;
 

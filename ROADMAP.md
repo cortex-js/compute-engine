@@ -436,15 +436,6 @@ list of numbers gives the list itself (the norm of each number), on both routes;
 whether `Norm` of an untyped parameter should read a list of numbers as one
 vector is part of the same question.
 
-### `Solve` over a `List` of conditions with a domain returns no solution (OPEN — found 2026-09-29 by the review fixes for the broadcast type)
-
-`Solve(List(n^2 = 4, n > 0), n ∈ Range(-20, 20))` returns `[]`. The same
-conditions written `And(n^2 = 4, n > 0)` or `Set(n^2 = 4, n > 0)` return `[2]`.
-It behaves the same with and without the 2026-09-29 changes. Either a list of
-conditions with a domain is meant to be read as a system, as the set is, and the
-list route misses the side condition, or a list is not an accepted spelling and
-the call must say so with an error instead of answering "no solution".
-
 ### The static type of a block local narrowed by a use depends on statement order (OPEN, small — found 2026-09-28 by the fixpoint re-read of assignment evidence)
 
 The re-read of `let`/`Assign` value types (`library/assignment-evidence.ts`)
@@ -4498,7 +4489,8 @@ The analytic-property store (`ce.functionProperties`, pole-aware `N()`), the
 the store are only partially built:
 
 - **(a) Branch-cut-safe simplification — largely complete.** The logarithm
-  family is guarded: `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`) and the
+  family is guarded: `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`) requires
+  every argument to be provably non-negative (decision of 2026-10-01), and the
   `.ln()` expansions `ln(bⁿ) → n·ln(b)` / `ln(a/b)` / `ln(root)`
   (`boxed-function.ts`) consult `onBranchCut` and stay symbolic when an operand
   is provably on the negative-real cut. Power/root _products_ (`√a·√b → √(ab)`,

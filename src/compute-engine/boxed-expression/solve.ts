@@ -2262,6 +2262,152 @@ function solveInverseTrigEquation(
 }
 
 /**
+ * The candidate roots of `expr = 0` when exactly one term of `expr` contains
+ * the unknown `x` and that term is a logarithm, possibly negated:
+ * `ln(u) + c = 0` gives `u = e^(-c)`, `-ln(u) + c = 0` gives `u = e^c`, and
+ * `log_b(u) + c = 0` gives `u = b^(-c)`. The equation for `u` is solved by
+ * `findUnivariateRoots()`. `null` when `expr` does not have this form, or
+ * when the recursion is too deep. The roots are candidates: the caller checks
+ * them against the original equation.
+ */
+function solveSingleLogarithm(
+  expr: Expression,
+  x: string,
+  depth: number
+): ReadonlyArray<Expression> | null {
+  if (depth > 2) return null;
+  const ce = expr.engine;
+  const terms = isFunction(expr, 'Add') ? expr.ops : [expr];
+  const withX = terms.filter((t) => t.has(x));
+  if (withX.length !== 1) return null;
+  const term = withX[0];
+  const negated = isFunction(term, 'Negate');
+  const log = isFunction(term, 'Negate') ? term.op1 : term;
+  if (!isFunction(log)) return null;
+  let base: Expression | undefined;
+  if (log.operator === 'Ln') base = ce.E;
+  else if (log.operator === 'Log') {
+    const b = log.op2;
+    base = b === undefined || isSymbol(b, 'Nothing') ? ce.number(10) : b;
+    if (base.has(x)) return null;
+  } else return null;
+  const argument = log.op1;
+  // The argument is a symbol or a linear form: the root templates solve it.
+  if (polynomialDegree(argument, x) === 1) return null;
+  const rest = terms.filter((t) => !t.has(x));
+  const c =
+    rest.length === 0
+      ? ce.Zero
+      : rest.length === 1
+        ? rest[0]
+        : ce.function('Add', rest);
+  // `ln(u) = 0` is the harmonization rule `ln(f(x)) → f(x) - 1`
+  // (`HARMONIZATION_RULES`), which a host can replace: leave it to that rule.
+  if (c.isSame(0)) return null;
+  // ln(u) = -c, or ln(u) = c when the logarithm term is negated.
+  const value = ce.function('Power', [base, negated ? c : c.neg()]);
+  const roots = findUnivariateRoots(
+    ce.function('Equal', [argument, value]),
+    x,
+    depth + 1
+  );
+  return roots.length > 0 ? roots : null;
+}
+
+/**
+ * Combine the logarithms of a sum when one of them contains the unknown `x`:
+ * `ln(u) + ln(v) - ln(w) + c` becomes `ln(u·v/w) + c`. A constant logarithm
+ * is combined too: `ln(x) + ln(x + 2) - ln(3)` becomes `ln(x(x + 2)/3)`.
+ * Logarithms `log_b` with the same base `b` are combined the same way
+ * (`log_e` counts as `ln`).
+ *
+ * `simplify()` combines logarithms only when every argument is provably
+ * non-negative, because elsewhere the two forms can differ by a multiple of
+ * 2πi. The solver combines them for any argument. For a real root of a real
+ * equation, the combination can only add roots (a point where `u·v/w` is
+ * valid but `u` or `v` is not), and `findUnivariateRoots()` checks every
+ * root against the original equation, which rejects such a root. So
+ * `ln(x + 1) + ln(x - 1) = 0` is solved as `ln(x² - 1) = 0`, and the root
+ * `-√2` is rejected. (A complex root can be lost: there `ln(u) + ln(v)` and
+ * `ln(uv)` can differ by 2πi.)
+ */
+function combineLogarithmsOfUnknown(expr: Expression, x: string): Expression {
+  if (!isFunction(expr, 'Add')) return expr;
+  const ce = expr.engine;
+
+  // The logarithm of a term, as its base key (`''` for the natural
+  // logarithm), its base and its argument.
+  const logOf = (
+    term: Expression
+  ): { key: string; base?: Expression; arg: Expression } | undefined => {
+    if (isFunction(term, 'Ln')) return { key: '', arg: term.op1 };
+    if (isFunction(term, 'Log')) {
+      const base = term.op2;
+      if (base === undefined || isSymbol(base, 'Nothing'))
+        return { key: '10', base: ce.number(10), arg: term.op1 };
+      if (isSymbol(base, 'ExponentialE')) return { key: '', arg: term.op1 };
+      return { key: JSON.stringify(base.json), base, arg: term.op1 };
+    }
+    return undefined;
+  };
+
+  const groups = new Map<
+    string,
+    { base?: Expression; numerator: Expression[]; denominator: Expression[] }
+  >();
+  const rest: Expression[] = [];
+  for (const term of expr.ops) {
+    const negated = isFunction(term, 'Negate');
+    const log = logOf(negated ? term.op1 : term);
+    if (log === undefined) {
+      rest.push(term);
+      continue;
+    }
+    let group = groups.get(log.key);
+    if (group === undefined) {
+      group = { base: log.base, numerator: [], denominator: [] };
+      groups.set(log.key, group);
+    }
+    (negated ? group.denominator : group.numerator).push(log.arg);
+  }
+
+  let changed = false;
+  const terms: Expression[] = [];
+  const product = (xs: Expression[]): Expression =>
+    xs.length === 0
+      ? ce.One
+      : xs.length === 1
+        ? xs[0]
+        : ce.function('Multiply', xs);
+  for (const group of groups.values()) {
+    const args = [...group.numerator, ...group.denominator];
+    const makeLog = (arg: Expression): Expression =>
+      group.base === undefined
+        ? ce.function('Ln', [arg])
+        : ce.function('Log', [arg, group.base]);
+    if (args.length < 2 || !args.some((arg) => arg.has(x))) {
+      for (const arg of group.numerator) terms.push(makeLog(arg));
+      for (const arg of group.denominator)
+        terms.push(ce.function('Negate', [makeLog(arg)]));
+      continue;
+    }
+    changed = true;
+    terms.push(
+      makeLog(
+        group.denominator.length === 0
+          ? product(group.numerator)
+          : ce.function('Divide', [
+              product(group.numerator),
+              product(group.denominator),
+            ])
+      )
+    );
+  }
+  if (!changed) return expr;
+  return ce.function('Add', [...terms, ...rest]);
+}
+
+/**
  * MathJsonExpression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
@@ -2393,17 +2539,20 @@ export function findUnivariateRoots(
       }
     }
 
-    expr = expand(lhs).sub(expand(rhs)).simplify();
+    expr = combineLogarithmsOfUnknown(
+      expand(lhs).sub(expand(rhs)).simplify(),
+      x
+    );
 
     // Validate against the ORIGINAL (unpeeled, unsimplified) equation:
-    // simplification rules may assume principal domains (e.g.
+    // transformations may assume principal domains (e.g.
     // `ln(a) + ln(b) → ln(ab)`), which would make extraneous roots
     // introduced by the transformations below appear valid.
     originalExpr = lhs0.sub(rhs0);
     traceStep(trace, 'solve.move-terms', asEquation(expr, x));
   } else {
     originalExpr = expr;
-    expr = expand(expr).simplify();
+    expr = combineLogarithmsOfUnknown(expand(expr).simplify(), x);
     if (trace && !expr.isSame(originalExpr))
       traceStep(trace, 'solve.simplify', asEquation(expr, x));
   }
@@ -2587,6 +2736,23 @@ export function findUnivariateRoots(
       });
     }
 
+    // A linear equation whose coefficient of the unknown is a sum
+    // (`x - a·x + a = 0`, `π·x + x = 1`): the linear template matches only
+    // `a·x + b`, so solve it from its coefficients, `x = -c₀/c₁`. A single
+    // coefficient (`5x - 10`) is left to the linear template, which a host
+    // can replace (`ce.solveRules`).
+    if (result.length === 0 && polyExpr !== null) {
+      const coeffs =
+        polynomialDegree(polyExpr, x) === 1
+          ? getPolynomialCoefficients(polyExpr, x)
+          : null;
+      if (coeffs !== null && isFunction(coeffs[1], 'Add')) {
+        const root = coeffs[0].neg().div(coeffs[1]);
+        traceStep(trace, 'solve.linear', rootsAsEquations(ce, x, [root]));
+        result = [root];
+      }
+    }
+
     // (The polynomial coefficient solve that used to live here as a
     // post-matcher fallback now runs as a fast path *before* the matcher — see
     // `solvePolynomialByCoefficients` above.)
@@ -2644,6 +2810,15 @@ export function findUnivariateRoots(
         trace?.push(...subTrace!);
         result = [...genRoots];
       }
+    }
+
+    // A single logarithm of the unknown: `ln(u(x)) + c = 0` → `u(x) = e^(-c)`
+    // (and `log_b(u(x)) + c = 0` → `u(x) = b^(-c)`), for an argument `u` that
+    // the root templates do not invert (`ln(x² + 2x) = 3`, or the combined
+    // form of `log_2(x) + log_2(x + 2) = 3`).
+    if (result.length === 0) {
+      const logRoots = solveSingleLogarithm(expr, x, depth);
+      if (logRoots) result = [...logRoots];
     }
 
     // A root may reference the `_x` wildcard symbol (e.g. when produced by a

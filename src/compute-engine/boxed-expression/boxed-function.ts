@@ -2403,21 +2403,17 @@ export class BoxedFunction
     // principal branch, so ln(√a) and ½ln(a) agree even for a < 0).
     if (this.operator === 'Sqrt') return this.op1.ln(base).div(2);
 
-    // ln_c(a/b) = ln_c(a) - ln_c(b) — both operands real-eligible and not
-    // provably on the cut (D3/D4 generic-real convention). (Unconstrained
-    // operands round-trip through the ln-combine rule, so this leaves `ln(x/y)`
-    // unchanged; it drives `ln(1/x) → -ln(x)`.)
+    // ln_c(a/b) = ln_c(a) - ln_c(b) — only when both operands are provably
+    // non-negative. Elsewhere the principal values can differ by a multiple
+    // of 2πi: at a = 1, b = -1, ln(a/b) is iπ but ln(a) - ln(b) is -iπ. This
+    // is the reverse of the combination ln(a) - ln(b) → ln(a/b) in
+    // `simplify-log.ts`, which has the same requirement
+    // (cortex-js/compute-engine#397; `docs/SIMPLIFY.md`, "Generic-real
+    // simplification policy").
     if (this.operator === 'Divide') {
       const num = this.op1;
       const den = this.op2;
-      if (
-        (num.isNonNegative === true ||
-          (isEligibleRealRewrite(num) &&
-            onBranchCut(this.engine, 'Ln', num) !== true)) &&
-        (den.isNonNegative === true ||
-          (isEligibleRealRewrite(den) &&
-            onBranchCut(this.engine, 'Ln', den) !== true))
-      )
+      if (num.isNonNegative === true && den.isNonNegative === true)
         return num.ln(base).sub(den.ln(base));
     }
 

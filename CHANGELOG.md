@@ -11,8 +11,68 @@
   which had no `attributes` entry, gives `["lazy"]`. A program that read the
   entry as a string must read it as a list.
 
+- **[#397](https://github.com/cortex-js/compute-engine/issues/397) `Solve` answers an identity with a free parameter, and stays
+  unevaluated when it finds no candidate root.** `Solve(x = x, x)`,
+  `Solve(0 = 0, x)` and `Solve(2(x + 1) = 2x + 2, x)` were `[]` ("no
+  solution"); they are now `[t]`, one solution for every value of the fresh
+  parameter `t`, the same form as the parametric answers of the integer and
+  congruence solvers. An equation for which no strategy of the solver gives a
+  candidate root (`a·x⁵ + x + 1 = 0`, `sin(x) = x³ + eˣ`, which has a real
+  root) and an equation whose answer depends on another unknown
+  (`Solve(a = 0, x)`) were also `[]`; they now stay unevaluated. A
+  contradiction (`x + 1 = x + 2`) and an equation whose candidate roots are
+  all rejected (`√x = -1`, `sin x = 2`, `eˣ = 0`) are still `[]`. The
+  `.solve()` method is unchanged. A program that read `[]` as "no solution"
+  for these equations gets the unevaluated `Solve` or `[t]` instead.
+- **[#397](https://github.com/cortex-js/compute-engine/issues/397) `Range` with an exact rational bound or step enumerates exact
+  values.** `Range(0, 1, 1/3)` was `[0, 0.333…, 0.666…, 1]`; it is now
+  `[0, 1/3, 2/3, 1]`, as in Mathematica, and the two-sample form
+  `[1 + 4/d, 1 + 8/d...5]` with `d = 500` starts at `126/125`, not `1.008`. A
+  float bound or step, and a step that is a constant expression (`π/4`), still
+  give floats, and `.N()` of the range gives floats.
+  `Sum(Range(0, 1, 1/3))` is now `2`, not `1.9999999999999999`.
+- **[#397](https://github.com/cortex-js/compute-engine/issues/397)
+  `simplify()` combines or splits logarithms only when their arguments are
+  provably non-negative.** `ln(x) + ln(y)` was `ln(xy)` and `ln(x/y)` was
+  `ln(x) − ln(y)` for any unconstrained `x` and `y`, which is wrong for
+  negative values: at `x = y = -1`, `ln(x) + ln(y)` is `2πi` but `ln(xy)` is
+  `0`. They now stay as they are, as does `ln(1/x)`, which was `−ln(x)`. An
+  argument is used when it is non-negative by its value (`ln(2) + ln(3)` is
+  still `ln(6)`), by its type, by an assumption (with `assume(x > 0)` and
+  `assume(y > 0)`, `ln(x) + ln(y)` is `ln(xy)`), or because it is an absolute
+  value. The same applies to `log_c`. `Solve` still combines the logarithms of
+  an equation, and checks each root against the original equation:
+  `Solve(ln(x + 1) + ln(x − 1) = 0, x)` is `[√2]`. The policy is in
+  `docs/SIMPLIFY.md`.
+
 ### Issues Resolved
 
+- `Solve` found no root of a linear equation whose coefficient of the unknown
+  is a sum: `x − ax + a = 0`, `πx + x = 1` and `x = e(x − 1)` gave `[]`. Only
+  the shape `ax + b` was recognized. They are now solved from their
+  coefficients (`1/(π + 1)`, `e/(e − 1)`).
+- `Solve` found no root of an equation with one logarithm of a non-linear
+  argument, or with several logarithms of one base: `ln(x² + 2x) = 3`,
+  `log_2(x) + log_2(x + 2) = 3` and `ln(x) − ln(x − 1) = 1` gave `[]`. They
+  now give `−1 ± √(1 + e³)`, `[2]` and `[e/(e − 1)]`. The roots are checked
+  against the original equation, so a root where a logarithm is not defined
+  is rejected (`log_2(x) + log_2(x + 2) = 3` has no root `−4`).
+- [#397](https://github.com/cortex-js/compute-engine/issues/397) Thirty-seven Wikidata ids, in the library and in
+  `OPERATORS.json`, named an unrelated item: `PlanckConstant` was `Q524`
+  (Mount Vesuvius), `Nor` was `Q189561` (narcolepsy). They now name the
+  concept of the head, and a test checks that `OPERATORS.json` agrees with
+  the library.
+- [#397](https://github.com/cortex-js/compute-engine/issues/397) `LerchPhi` at a negative integer order and exact operands stayed
+  unevaluated where its value is 0: `LerchPhi(-1, -1, 1/2)` is now `0`, also
+  under `.N()`, as in Wolfram. For `s = -n` (`n ≤ 12`) and exact `z ≠ 1` and
+  `a`, `LerchPhi(z, s, a)` is now the exact rational value of its closed form
+  `aⁿ/(1 − z) + Σⱼ C(n, j)·aⁿ⁻ʲ·Li₋ⱼ(z)`: `LerchPhi(3, -4, -5/2)` is
+  `-5725/32`.
+- `Solve(eˣ = 3, x)` gave the float `1.0986…` instead of `ln(3)`, and
+  `Solve(e^(2x) = 5, x)` gave `[]`. The `Solve` operator replaced the constant
+  `ExponentialE` by its float value before solving. A constant that keeps its
+  value until `.N()` (`ExponentialE`, `Pi`) now stays symbolic, and the
+  answers are `[ln(3)]` and `[ln(5)/2]`.
 - [#398](https://github.com/cortex-js/compute-engine/issues/398) `About` now
   reports the `examples` and `keywords` of a definition, each as a list of
   strings: `About(Sin)` includes

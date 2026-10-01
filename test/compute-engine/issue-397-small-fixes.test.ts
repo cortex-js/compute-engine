@@ -6,13 +6,16 @@
  * 2. `Solve` answered `[]` ("no solution") for an identity and for an
  *    equation it could not solve. An identity now answers one free
  *    parameter, an equation with no candidate root stays unevaluated.
- * 3. (Not changed: the `ln(a) + ln(b) → ln(ab)` rewrite follows the
- *    generic-real policy of `docs/SIMPLIFY.md`.)
+ * 3. `simplify()` combined `ln(a) + ln(b)` into `ln(ab)` for any
+ *    unconstrained arguments, which is wrong when they are negative. The
+ *    combination now uses only the arguments that are provably non-negative
+ *    (or an absolute value).
  * 4. `Range` with an exact non-integer step enumerated floats.
  * 5. `LerchPhi` stayed unevaluated at an exact zero, `Φ(−1, −1, 1/2) = 0`.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import OPERATORS from '../../src/math-json/OPERATORS.json';
 
 const ce = new ComputeEngine();
@@ -171,6 +174,35 @@ describe('Solve: the cases where an empty or identity answer is not proved', () 
       ).toBe('Solve');
   });
 
+  test('a list of conditions with a domain filters the roots', () => {
+    // The `List` spelling was read as a system and answered `[]`; the `And`
+    // and `Set` spellings answered `[2]`.
+    expect(
+      ce
+        .box([
+          'Solve',
+          ['List', ['Equal', ['Power', 'n', 2], 4], ['Greater', 'n', 0]],
+          ['Element', 'n', ['Range', -20, 20]],
+        ])
+        .evaluate().json
+    ).toEqual(['List', 2]);
+  });
+
+  test('a sum of logarithms is solved although simplify() keeps it', () => {
+    // simplify() no longer combines ln(x + 1) + ln(x - 1); the solver does,
+    // and rejects the root -√2, where ln(x + 1) is not real.
+    expect(
+      solve([
+        'Equal',
+        ['Add', ['Ln', ['Add', 'x', 1]], ['Ln', ['Subtract', 'x', 1]]],
+        0,
+      ])
+    ).toEqual(['List', ['Sqrt', 2]]);
+    expect(
+      solve(['Equal', ['Add', ['Ln', 'x'], ['Ln', ['Add', 'x', 2]]], ['Ln', 3]])
+    ).toEqual(['List', 1]);
+  });
+
   test('a list of one equation is that equation', () => {
     expect(solve(['List', ['Equal', ['Power', 'x', 2], 4]])).toEqual([
       'List',
@@ -180,6 +212,90 @@ describe('Solve: the cases where an empty or identity answer is not proved', () 
     expect(
       solve(['List', ['Equal', ['Power', 'x', 2], 4], ['Greater', 'x', 0]])
     ).toEqual(['List', 2]);
+  });
+});
+
+describe('simplify() combines logarithms of non-negative arguments only', () => {
+  test('unconstrained arguments are not combined', () => {
+    // At a = b = -1, ln(a) + ln(b) is 2πi but ln(ab) is 0.
+    expect(ce.box(['Add', ['Ln', 'a'], ['Ln', 'b']]).simplify().json).toEqual([
+      'Add',
+      ['Ln', 'a'],
+      ['Ln', 'b'],
+    ]);
+    // At x = 3 the combined form had the wrong sign of its imaginary part.
+    const f = ce.box([
+      'Add',
+      ['Negate', ['Ln', ['Subtract', 2, 'x']]],
+      ['Ln', ['Add', 2, 'x']],
+    ]);
+    const atThree = f.simplify().subs({ x: 3 }).N();
+    expect(atThree.re).toBeCloseTo(Math.log(5), 12);
+    expect(atThree.im).toBeCloseTo(-Math.PI, 12);
+  });
+
+  test('positive arguments are combined', () => {
+    expect(ce.parse('\\ln 2 + \\ln 3').simplify().toString()).toBe('ln(6)');
+    const engine = new ComputeEngine();
+    engine.assume(engine.parse('p > 0'));
+    engine.assume(engine.parse('q > 0'));
+    expect(engine.parse('\\ln p + \\ln q').simplify().toString()).toBe(
+      'ln(p * q)'
+    );
+    expect(engine.parse('\\ln p - \\ln q').simplify().toString()).toBe(
+      'ln(p / q)'
+    );
+  });
+});
+
+describe('logarithm rules that hold for every argument', () => {
+  test.each([
+    // e^(ln u) = u for every u, so the exponent needs no combination.
+    ['e^{\\ln x+\\ln y}', 'x * y'],
+    ['e^{\\ln x+\\ln y+z}', 'x * y * exp(z)'],
+    ['2^{\\log_2 x+\\log_2 y}', 'x * y'],
+    // Only the non-negative arguments are combined.
+    ['\\ln 2 + \\ln 3 + \\ln x', 'ln(x) + ln(6)'],
+    // ln(c·u) = ln(c) + ln(u) for a positive constant c and any u.
+    ['\\ln(2x) - \\ln(x)', 'ln(2)'],
+    ['\\log_2(x)-\\log_2(2x)', '-1'],
+    ['\\ln(2x)+\\ln(y)', 'ln(2x) + ln(y)'],
+  ])('%s → %s', (src, expected) => {
+    expect(ce.parse(src).simplify().toString()).toBe(expected);
+  });
+});
+
+describe('Solve: logarithm and linear equations', () => {
+  test.each([
+    ['\\log_2(x)+\\log_2(x+2)=3', [2]],
+    ['\\log(x)+\\log(x-21)=2', [25]],
+    ['\\log_2(x^2+2x)=3', [2, -4]],
+  ])('%s', (src, expected) => {
+    const engine = new ComputeEngine();
+    const roots = engine.parse(src).solve('x') as Expression[];
+    expect(roots.map((r) => r.json)).toEqual(expected);
+  });
+
+  test('a logarithm of a quotient', () => {
+    // ln(x) - ln(x - 1) = 1 has the root e/(e - 1).
+    const engine = new ComputeEngine();
+    const roots = engine
+      .parse('\\ln(x) - \\ln(x-1) = 1')
+      .solve('x') as Expression[];
+    expect(roots).toHaveLength(1);
+    expect(roots[0].N().re).toBeCloseTo(Math.E / (Math.E - 1), 12);
+  });
+
+  test('a linear equation whose coefficient is a sum', () => {
+    for (const [src, value] of [
+      ['\\pi x + x = 1', 1 / (Math.PI + 1)],
+      ['x - ex + e = 0', Math.E / (Math.E - 1)],
+    ] as const) {
+      const engine = new ComputeEngine();
+      const roots = engine.parse(src).solve('x') as Expression[];
+      expect(roots).toHaveLength(1);
+      expect(roots[0].N().re).toBeCloseTo(value, 12);
+    }
   });
 });
 
