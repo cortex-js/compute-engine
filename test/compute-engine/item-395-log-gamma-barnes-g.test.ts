@@ -98,51 +98,71 @@ describe('LogGamma(z), the continuation of ln Γ', () => {
   test('exact arguments evaluate exactly, floats and N() numerically', () => {
     expect(ce.expr(['LogGamma', 3]).evaluate().toString()).toBe('ln(2)');
     expect(ce.expr(['LogGamma', 1]).evaluate().toString()).toBe('0');
-    expect(ce.expr(['LogGamma', ['Rational', 1, 2]]).evaluate().toString()).toBe(
-      '1/2 * ln(pi)'
-    );
+    expect(
+      ce
+        .expr(['LogGamma', ['Rational', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('1/2 * ln(pi)');
     expect(ce.expr(['LogGamma', ['Rational', 1, 3]]).evaluate().operator).toBe(
       'LogGamma'
     );
     expect(value(['LogGamma', 5]).re).toBeCloseTo(Math.log(24), 14);
-    expect(value(['LogGamma', 2.5], false).re).toBeCloseTo(0.2846828704729192, 14);
+    expect(value(['LogGamma', 2.5], false).re).toBeCloseTo(
+      0.2846828704729192,
+      14
+    );
   });
 
   test('real arguments follow ce.precision', () => {
     withPrecision(40, () => {
       expect(
-        ce.expr(['LogGamma', ['Rational', 5, 2]]).N().toString().slice(0, 42)
+        ce
+          .expr(['LogGamma', ['Rational', 5, 2]])
+          .N()
+          .toString()
+          .slice(0, 42)
       ).toBe('0.2846828704729191596324946696827019243201'.slice(0, 42));
     });
     withPrecision(30, () => {
       expect(
-        ce.expr(['LogGamma', ['Rational', 1, 3]]).N().toString().slice(0, 30)
+        ce
+          .expr(['LogGamma', ['Rational', 1, 3]])
+          .N()
+          .toString()
+          .slice(0, 30)
       ).toBe('0.985420646927767069187174036978'.slice(0, 30));
     });
   });
 
   test('infinities: +Infinity at +Infinity, Indeterminate at -Infinity (no limit)', () => {
-    expect(ce.expr(['LogGamma', 'PositiveInfinity']).evaluate().toString()).toBe(
-      '+oo'
-    );
-    expect(ce.expr(['LogGamma', 'NegativeInfinity']).evaluate().toString()).toBe(
-      'Indeterminate'
-    );
+    expect(
+      ce.expr(['LogGamma', 'PositiveInfinity']).evaluate().toString()
+    ).toBe('+oo');
+    expect(
+      ce.expr(['LogGamma', 'NegativeInfinity']).evaluate().toString()
+    ).toBe('Indeterminate');
   });
 
   test('a symbol stays symbolic; a list threads', () => {
-    expect(ce.expr(['LogGamma', 'z']).evaluate().json).toEqual(['LogGamma', 'z']);
+    expect(ce.expr(['LogGamma', 'z']).evaluate().json).toEqual([
+      'LogGamma',
+      'z',
+    ]);
     expect(
-      ce.expr(['LogGamma', ['List', 1, 2, 0]]).evaluate().toString()
+      ce
+        .expr(['LogGamma', ['List', 1, 2, 0]])
+        .evaluate()
+        .toString()
     ).toBe('[0,0,+oo]');
   });
 
   test('a compound argument that reduces to a literal, and simplify()', () => {
     const arg = ['Subtract', ['Add', 'x', 3], 'x'];
     expect(ce.expr(['LogGamma', arg]).evaluate().toString()).toBe('ln(2)');
-    expect(
-      ce.expr(['LogGamma', 3]).simplify().evaluate().toString()
-    ).toBe('ln(2)');
+    expect(ce.expr(['LogGamma', 3]).simplify().evaluate().toString()).toBe(
+      'ln(2)'
+    );
   });
 });
 
@@ -233,38 +253,59 @@ describe('BarnesG(z)', () => {
   test('real arguments follow ce.precision', () => {
     withPrecision(30, () => {
       expect(
-        ce.expr(['BarnesG', ['Rational', 1, 2]]).N().toString().slice(0, 30)
+        ce
+          .expr(['BarnesG', ['Rational', 1, 2]])
+          .N()
+          .toString()
+          .slice(0, 30)
       ).toBe('0.603244281209446206191429224535'.slice(0, 30));
     });
     withPrecision(25, () => {
       // mpmath.barnesg(mpf(-5)/2) = 0.0761729796568611111946819385757...
-      const v = ce.expr(['BarnesG', ['Rational', -5, 2]]).N().toString();
-      expect(v.slice(0, 26)).toBe('0.0761729796568611111946819385757'.slice(0, 26));
+      const v = ce
+        .expr(['BarnesG', ['Rational', -5, 2]])
+        .N()
+        .toString();
+      expect(v.slice(0, 26)).toBe(
+        '0.0761729796568611111946819385757'.slice(0, 26)
+      );
     });
   });
 
   test('the bignum kernel matches mpmath near a zero, to 50 digits', () => {
     withPrecision(50, () => {
       // mpmath.barnesg(mpf('-0.999')) at 60 digits
-      const v = ce.expr(['BarnesG', { num: '-0.999' }]).N().toString();
+      const v = ce
+        .expr(['BarnesG', { num: '-0.999' }])
+        .N()
+        .toString();
       expect(v.slice(0, 46)).toBe(
         '-0.00000100057060006668485785397781844802368604'.slice(0, 46)
       );
     });
   });
 
-  test('+Infinity; a symbol stays symbolic; past a double the value is left unevaluated', () => {
+  test('+Infinity; a symbol stays symbolic; past the recurrence cap the value is left unevaluated', () => {
     expect(ce.expr(['BarnesG', 'PositiveInfinity']).evaluate().toString()).toBe(
       '+oo'
     );
     expect(ce.expr(['BarnesG', 'z']).evaluate().json).toEqual(['BarnesG', 'z']);
-    expect(ce.expr(['BarnesG', 100.5]).N().operator).toBe('BarnesG');
+    // Past a double the bignum kernel still answers; past its cap there is no
+    // double fallback at ce.precision, so the head stays unevaluated.
+    expect(ce.expr(['BarnesG', 100.5]).N().toString()).toMatch(
+      /^1\.68709971029012541584e\+6704$/
+    );
+    expect(ce.expr(['BarnesG', 5000.5]).N().operator).toBe('BarnesG');
+    expect(ce.expr(['LogBarnesG', 5000.5]).N().operator).toBe('LogBarnesG');
   });
 
   test('a list threads; the hyperfactorial identity H(5) = Γ(6)^5 / G(6)', () => {
-    expect(ce.expr(['BarnesG', ['List', 1, 4, 5]]).evaluate().toString()).toBe(
-      '[1,2,12]'
-    );
+    expect(
+      ce
+        .expr(['BarnesG', ['List', 1, 4, 5]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,12]');
     expect(
       value(['Divide', ['Power', ['Gamma', 6], 5], ['BarnesG', 6]]).re
     ).toBeCloseTo(86400000, 3);
@@ -325,7 +366,10 @@ describe('LogBarnesG(z)', () => {
   test('real arguments follow ce.precision', () => {
     withPrecision(30, () => {
       // ln of mpmath.barnesg(1/2) at 30 digits
-      const v = ce.expr(['LogBarnesG', ['Rational', 1, 2]]).N().toString();
+      const v = ce
+        .expr(['LogBarnesG', ['Rational', 1, 2]])
+        .N()
+        .toString();
       expect(v.slice(0, 20)).toBe('-0.505433054489695382'.slice(0, 20));
     });
   });

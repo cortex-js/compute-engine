@@ -706,7 +706,7 @@ describe('DirichletL (#395)', () => {
 
   test('a float s gives a float under evaluate()', () => {
     expect(ce.box(['DirichletL', 3, 2, 1.5]).evaluate().toString()).toBe(
-      '0.703968244868733261667'
+      '0.703968244868733261668'
     );
   });
 

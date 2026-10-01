@@ -2439,37 +2439,57 @@ export function bigDirichletEta(
 }
 
 /**
- * Bignum β(s) for real s ≠ 1, with `ce.precision` significant digits. Returns
- * `undefined` when the Hurwitz kernel cannot reach the digits (also within about
- * 10⁻¹⁵ of s = 1).
+ * Bignum L(s, χ) = k^{−s} Σ_{r=1}^{k} χ(r) ζ(s, r/k) (DLMF 25.15.1) for real
+ * s ≠ 1 and a real character χ mod k, given as its values `chi[r − 1]` ∈
+ * {−1, 0, 1}, with `ce.precision` significant digits. Returns `undefined` when
+ * the Hurwitz kernel cannot reach the digits (also within about 10⁻¹⁵ of
+ * s = 1, where the ζ(s, r/k) cancel their poles).
  */
-export function bigDirichletBeta(
+export function bigDirichletL(
   ce: ComputeEngine,
-  s: BigNum
+  s: BigNum,
+  k: number,
+  chi: readonly number[]
 ): BigNum | undefined {
   if (!s.isFinite()) return undefined;
-  const guard = dirichletGuard(s); // undefined at s = 1, where β(1) = π/4 is the caller's
+  const guard = dirichletGuard(s); // undefined at s = 1, where the caller has the closed form
   if (guard === undefined) return undefined;
   const saved = BigDecimal.precision;
   BigDecimal.precision = saved + guard;
   try {
     // Closer to the pole than about 10⁻¹⁵ the Hurwitz kernel's own working-digit
-    // plan fails (it throws); the caller then falls back to the double kernel.
-    let quarter: BigNum | undefined;
-    let threeQuarters: BigNum | undefined;
-    try {
-      quarter = bigHurwitzZeta(ce, s, [1n, 4n]);
-      threeQuarters = bigHurwitzZeta(ce, s, [3n, 4n]);
-    } catch {
-      return undefined;
+    // plan fails (it throws).
+    // Not seeded with 0: adding a value of exponent 10⁶ to ZERO is slow.
+    let sum: BigNum | undefined;
+    for (let r = 1; r <= k; r++) {
+      const c = chi[r - 1];
+      if (c === 0) continue;
+      let zeta: BigNum | undefined;
+      try {
+        zeta = bigHurwitzZeta(ce, s, [BigInt(r), BigInt(k)]);
+      } catch {
+        return undefined;
+      }
+      if (zeta === undefined) return undefined;
+      const term = c > 0 ? zeta : zeta.neg();
+      sum = sum === undefined ? term : sum.add(term);
     }
-    if (quarter === undefined || threeQuarters === undefined) return undefined;
-    const scale = BigDecimal.TWO.pow(s.mul(-2)); // 4^{−s}
-    return scale.mul(quarter.sub(threeQuarters)).toPrecision(saved);
+    if (sum === undefined) return undefined;
+    const scale = new BigDecimal(k).pow(s.neg()); // k^{−s}
+    return scale.mul(sum).toPrecision(saved);
   } finally {
     BigDecimal.precision = saved;
   }
 }
+
+/**
+ * Bignum β(s) for real s ≠ 1: the L-function of the odd character mod 4,
+ * 4^{−s} (ζ(s, ¼) − ζ(s, ¾)).
+ */
+export const bigDirichletBeta = (
+  ce: ComputeEngine,
+  s: BigNum
+): BigNum | undefined => bigDirichletL(ce, s, 4, [1, 0, -1, 0]);
 
 // --- LerchPhi / PolyLog, arbitrary precision -------------------------------
 // cortex-js/compute-engine#374: `LerchPhi` and `PolyLog` answer in doubles

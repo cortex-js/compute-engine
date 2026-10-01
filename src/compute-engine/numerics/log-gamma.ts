@@ -2,6 +2,9 @@ import { Complex } from 'complex-esm';
 import { bernoulliRational } from './bernoulli.js';
 import { cosSinPi, gammaln, logSinPi } from './numeric-complex.js';
 
+/** ½ ln 2π. */
+export const HALF_LN_2PI = 0.5 * Math.log(2 * Math.PI);
+
 /**
  * ln Γ(z) for complex z as the analytic continuation Wolfram's `LogGamma`
  * and mpmath's `loggamma` use: holomorphic off (−∞, 0], continuous from
@@ -18,8 +21,6 @@ import { cosSinPi, gammaln, logSinPi } from './numeric-complex.js';
  * - Re z < ½: the reflection formula (DLMF 5.5.3) with the branch
  *   correction of `reflect`.
  */
-
-const HALF_LN_2PI = 0.5 * Math.log(2 * Math.PI);
 
 /** Re z from which Stirling's 14 terms are good to a double. */
 const STIRLING_FROM = 18;
@@ -58,7 +59,8 @@ function stirling(z: Complex): Complex {
 function shiftedStirling(z: Complex): Complex {
   const n = Math.max(0, Math.ceil(STIRLING_FROM - z.re));
   let shift = new Complex(0, 0);
-  for (let k = 0; k < n; k++) shift = shift.add(new Complex(z.re + k, z.im).log());
+  for (let k = 0; k < n; k++)
+    shift = shift.add(new Complex(z.re + k, z.im).log());
   return stirling(new Complex(z.re + n, z.im)).sub(shift);
 }
 

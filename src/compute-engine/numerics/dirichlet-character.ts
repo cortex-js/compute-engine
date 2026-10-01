@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { bernoulliRational } from './bernoulli.js';
+import { stieltjesGammaComplex } from './stieltjes.js';
 
 // Dirichlet characters mod k and the Laurent expansion of their L-functions at
 // s = 1, in Wolfram's indexing: DirichletCharacter(k, j, n), j = 1 … φ(k),
@@ -183,88 +183,6 @@ export function dirichletCharacterExponent(
 
 // --- L(s, χ) near s = 1 -------------------------------------------------------
 
-/**
- * Generalized Stieltjes constants γₙ(a), the Laurent coefficients of the
- * Hurwitz zeta at its pole: ζ(s, a) = 1/(s−1) + Σₙ (−1)ⁿ γₙ(a) (s−1)ⁿ / n!, so
- * γ₀(a) = −ψ(a). Euler–Maclaurin on f(x) = lnⁿ(x)/x:
- *   γₙ(a) = Σ_{j<N} f(j+a) + ½ f(N+a) − ln^{n+1}(N+a)/(n+1)
- *           − Σᵢ B₂ᵢ/(2i)! f^{(2i−1)}(N+a),
- * the subtracted power of the log being the integral that the defining limit
- * removes. The derivatives come from f(x) = n! [tⁿ] x^{t−1}:
- * f^{(m)}(x) = x^{−1−m} Σᵢ pᵢ n!/(n−i)! lnⁿ⁻ⁱ x with Π_{j=1}^m (t − j) = Σ pᵢ tⁱ.
- */
-const EM_PAIRS = 16;
-const EM_COEFF: number[] = (() => {
-  const c: number[] = [0];
-  let fact = 1;
-  for (let i = 1; i <= EM_PAIRS; i++) {
-    fact *= (2 * i - 1) * (2 * i);
-    const [num, den] = bernoulliRational(2 * i);
-    c[i] = Number(num) / Number(den) / fact;
-  }
-  return c;
-})();
-
-/** Coefficients of Π_{j=1}^m (t − j), lowest degree first. */
-function fallingPolynomial(m: number): number[] {
-  let p = [1];
-  for (let j = 1; j <= m; j++) {
-    const q = Array.from({ length: p.length + 1 }, () => 0);
-    for (let i = 0; i < p.length; i++) {
-      q[i] += -j * p[i];
-      q[i + 1] += p[i];
-    }
-    p = q;
-  }
-  return p;
-}
-
-/** lⁿ for an integer n ≥ 0 by repeated multiplication (1 at l = 0 for n = 0). */
-function ipow(l: number, n: number): number {
-  let r = 1;
-  for (let i = 0; i < n; i++) r *= l;
-  return r;
-}
-
-/** f^{(m)}(x) for f(x) = lnⁿ(x)/x, with l = ln x supplied. */
-function logPowerDerivative(
-  n: number,
-  m: number,
-  x: number,
-  l: number
-): number {
-  const p = fallingPolynomial(m);
-  let acc = 0;
-  let ff = 1; // n!/(n−i)!
-  for (let i = 0; i <= Math.min(m, n); i++) {
-    if (i > 0) ff *= n - i + 1;
-    acc += p[i] * ff * ipow(l, n - i);
-  }
-  return acc * x ** (-1 - m);
-}
-
-/**
- * The tail point of the Euler–Maclaurin sum sits at about this real part: far
- * enough out for the Bernoulli tail to converge, near enough to keep the
- * cancellation between the partial sum and lnⁿ⁺¹ small. Measured against
- * mpmath, γₙ(a) for 0 < a ≤ 1 is good to about 1e−12 through n = 15 and 1e−10
- * at n = 20; a larger tail point is worse for large n.
- */
-const EM_TAIL_POINT = 6;
-
-/** γₙ(a) for an integer n ≥ 0 and a real a > 0. */
-function stieltjesGamma(n: number, a: number): number {
-  const N = Math.max(1, Math.ceil(EM_TAIL_POINT - a));
-  let sum = 0;
-  for (let j = 0; j < N; j++) sum += ipow(Math.log(a + j), n) / (a + j);
-  const x = a + N;
-  const l = Math.log(x);
-  sum += (0.5 * ipow(l, n)) / x - ipow(l, n + 1) / (n + 1);
-  for (let i = 1; i <= EM_PAIRS; i++)
-    sum -= EM_COEFF[i] * logPowerDerivative(n, 2 * i - 1, x, l);
-  return sum;
-}
-
 /** The number of Laurent terms summed at most; past it the series is declined. */
 const LAURENT_TERMS = 24;
 /** The Laurent sum stops once a term is this small next to the running value. */
@@ -302,7 +220,8 @@ export function dirichletLNearOne(
     let acc = new Complex(0, 0);
     let converged = false;
     for (let n = 0; n < LAURENT_TERMS; n++) {
-      const g = stieltjesGamma(n, r / k);
+      const g = stieltjesGammaComplex(n, new Complex(r / k, 0))?.re;
+      if (g === undefined) return undefined;
       acc = acc.add(term.mul(g));
       term = term.mul(d).mul(-1 / (n + 1));
       if (term.abs() * Math.abs(g) < LAURENT_TOLERANCE) {

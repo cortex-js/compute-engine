@@ -2,7 +2,7 @@ import { Complex } from 'complex-esm';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { IComputeEngine as ComputeEngine } from '../global-types.js';
 import { bernoulliRational } from './bernoulli.js';
-import { logGammaComplex } from './log-gamma.js';
+import { logGammaComplex, HALF_LN_2PI } from './log-gamma.js';
 import { bigZeta } from './special-functions.js';
 
 /**
@@ -38,7 +38,6 @@ const COEFF: number[] = (() => {
 
 /** ζ′(−1) = 1/12 − ln A, A Glaisher's constant. */
 const ZETA_PRIME_MINUS_1 = -0.16542114370045094;
-const HALF_LN_2PI = 0.5 * Math.log(2 * Math.PI);
 
 /** Re z from which the 12-term asymptotic series is good to a double. */
 const ASYMPTOTIC_FROM = 20;
@@ -60,7 +59,10 @@ const MAX_SHIFT = 100;
 function asymptotic(z: Complex): Complex {
   const lz = z.log();
   const z2 = z.mul(z);
-  let r = z2.mul(0.5).sub(1 / 12).mul(lz);
+  let r = z2
+    .mul(0.5)
+    .sub(1 / 12)
+    .mul(lz);
   r = r.sub(z2.mul(0.75)).add(z.mul(HALF_LN_2PI)).add(ZETA_PRIME_MINUS_1);
   const inv2 = new Complex(1, 0).div(z2);
   let p = inv2;
@@ -125,8 +127,8 @@ export function barnesGComplex(z: Complex): Complex {
 /** Digits carried past the ones asked for, against rounding in the series and the recurrence. */
 const GUARD_DIGITS = 10;
 
-/** Steps of the recurrence allowed; farther from 1 the double kernel is the better trade. */
-const MAX_BIG_SHIFT = 60;
+/** Steps of the recurrence allowed, one multiplication each; farther from 1 the value stays unevaluated. */
+const MAX_BIG_SHIFT = 1000;
 
 /** Terms allowed per digit asked for; the terms shrink by at least 4 each, 1.7 per digit. */
 const TERMS_PER_DIGIT = 2;
@@ -162,7 +164,8 @@ export function bigBarnesG(
   if (Math.abs(m) > MAX_BIG_SHIFT) return undefined;
   const digits = BigDecimal.precision;
   const saved = digits;
-  BigDecimal.precision = digits + GUARD_DIGITS + Math.ceil(Math.log10(Math.abs(m) + 1));
+  BigDecimal.precision =
+    digits + GUARD_DIGITS + Math.ceil(Math.log10(Math.abs(m) + 1));
   try {
     return series(ce, x.sub(m + 1), m, digits)?.toPrecision(digits);
   } finally {

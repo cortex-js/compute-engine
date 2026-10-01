@@ -1279,7 +1279,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ for odd n. Double precision.",
+      "description": "Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ for odd n. A real θ follows the engine precision.",
       "examples": [
         "[ClausenCl(2, 1), ClausenCl(3, 0), N(ClausenCl(2, 1))]"
       ]
@@ -2225,6 +2225,21 @@
       ]
     },
     {
+      "name": "DirichletBeta",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Dirichlet beta function β(s) = Σ_{n≥0} (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1.",
+      "examples": [
+        "[DirichletBeta(1), DirichletBeta(3), N(DirichletBeta(1/2))]"
+      ]
+    },
+    {
       "name": "DirichletCharacter",
       "category": "Number Theory",
       "arity": "3",
@@ -2238,6 +2253,21 @@
       "examples": [
         "DirichletCharacter(5, 2, 2)  // i",
         "DirichletCharacter(7, 3, 3)  // e^(2πi/3)"
+      ]
+    },
+    {
+      "name": "DirichletEta",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Dirichlet eta function η(s) = Σ_{n≥1} (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1.",
+      "examples": [
+        "[DirichletEta(2), DirichletEta(1), N(DirichletEta(1/2))]"
       ]
     },
     {

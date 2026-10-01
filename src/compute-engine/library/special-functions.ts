@@ -26,6 +26,7 @@ import { bignumPreferred } from '../boxed-expression/utils.js';
 import {
   hurwitzOperand,
   boxBignumApprox,
+  bigRealOperand,
   boxComplexResult,
   infiniteGammaFamilyValue,
 } from './arithmetic.js';
@@ -41,7 +42,7 @@ import {
   iv,
   type RealDomain,
 } from './type-handlers.js';
-import { clausen } from '../numerics/clausen.js';
+import { bigClausen, clausen } from '../numerics/clausen.js';
 import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -87,7 +88,6 @@ import {
   stieltjesGammaComplex,
   bigStieltjesGamma,
 } from '../numerics/stieltjes.js';
-import { Complex } from 'complex-esm';
 import {
   ellipticKComplex,
   ellipticEComplex,
@@ -238,12 +238,22 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const infinite = infiniteGammaFamilyValue(z, engine);
         if (infinite !== undefined) return infinite;
         const n = asSmallInteger(z);
-        if (n !== null && n >= 1 && n <= MAX_EXACT_LOG_ARGUMENT && isExactNumber(z)) {
+        if (
+          n !== null &&
+          n >= 1 &&
+          n <= MAX_EXACT_LOG_ARGUMENT &&
+          isExactNumber(z)
+        ) {
           // lnΓ(n) = ln((n−1)!)
           const exact = engine.expr(['Ln', ['Factorial', n - 1]]);
           return numericApproximation ? exact.N() : exact.evaluate();
         }
-        if (!numericApproximation && isNumber(z) && z.isSame(0.5) && isExactNumber(z))
+        if (
+          !numericApproximation &&
+          isNumber(z) &&
+          z.isSame(0.5) &&
+          isExactNumber(z)
+        )
           // Γ(1/2) = √π
           return engine.expr(['Divide', ['Ln', 'Pi'], 2]).evaluate();
         return shouldNumericize(numericApproximation, z)
@@ -280,16 +290,25 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const infinite = infiniteGammaFamilyValue(z, engine);
         if (infinite !== undefined) return infinite;
         const n = asSmallInteger(z);
-        if (n !== null && n >= 1 && n <= MAX_EXACT_SUPERFACTORIAL && isExactNumber(z))
+        if (
+          n !== null &&
+          n >= 1 &&
+          n <= MAX_EXACT_SUPERFACTORIAL &&
+          isExactNumber(z)
+        )
           return engine.number(superfactorial(n));
-        return shouldNumericize(numericApproximation, z)
-          ? applyN(
-              [z],
-              (x) => barnesGComplex(new Complex(x, 0)).re,
-              (x) => bigBarnesG(engine, x) ?? BigDecimal.NAN,
-              barnesGComplex
-            )
-          : undefined;
+        if (!shouldNumericize(numericApproximation, z)) return undefined;
+        // A real value carries `ce.precision` digits or the head stays unevaluated.
+        if (isNumber(z) && !z.isComplex && bignumPreferred(engine)) {
+          const big = bigBarnesG(engine, bigRealOperand(engine, z));
+          return big === undefined ? undefined : boxBignumApprox(engine, big);
+        }
+        return applyN(
+          [z],
+          (x) => barnesGComplex(new Complex(x, 0)).re,
+          undefined,
+          barnesGComplex
+        );
       },
     },
 
@@ -312,26 +331,39 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const infinite = infiniteGammaFamilyValue(z, engine);
         if (infinite !== undefined) return infinite;
         const n = asSmallInteger(z);
-        if (n !== null && n >= 1 && n <= MAX_EXACT_SUPERFACTORIAL && isExactNumber(z)) {
+        if (
+          n !== null &&
+          n >= 1 &&
+          n <= MAX_EXACT_SUPERFACTORIAL &&
+          isExactNumber(z)
+        ) {
           // ln G(n) = ln of the superfactorial
-          const exact = engine.function('Ln', [engine.number(superfactorial(n))]);
+          const exact = engine.function('Ln', [
+            engine.number(superfactorial(n)),
+          ]);
           return numericApproximation ? exact.N() : exact.evaluate();
         }
-        return shouldNumericize(numericApproximation, z)
-          ? applyN(
-              [z],
-              // The real logarithm only where G > 0; elsewhere the continuation is complex.
-              (x) => {
-                const v = logBarnesGComplex(new Complex(x, 0));
-                return v.im === 0 ? v.re : NaN;
-              },
-              (x) =>
-                x.isPositive()
-                  ? (bigBarnesG(engine, x)?.ln() ?? BigDecimal.NAN)
-                  : BigDecimal.NAN,
-              logBarnesGComplex
-            )
-          : undefined;
+        if (!shouldNumericize(numericApproximation, z)) return undefined;
+        // x > 0 has a real logarithm, with `ce.precision` digits or
+        // unevaluated; for x ≤ 0 the continuation is complex (machine).
+        if (isNumber(z) && !z.isComplex && bignumPreferred(engine)) {
+          const x = bigRealOperand(engine, z);
+          if (x.isPositive()) {
+            const big = bigBarnesG(engine, x);
+            return big === undefined
+              ? undefined
+              : boxBignumApprox(engine, big.ln());
+          }
+        }
+        return applyN(
+          [z],
+          (x) => {
+            const v = logBarnesGComplex(new Complex(x, 0));
+            return v.im === 0 ? v.re : NaN;
+          },
+          undefined,
+          logBarnesGComplex
+        );
       },
     },
 
@@ -802,7 +834,9 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
 
         // γₙ(1) = γₙ: the two-operand form reduces to the one-operand one.
         if (a !== undefined && isNumber(a) && a.isExact && a.isSame(1))
-          return engine.function('StieltjesGamma', [n]);
+          return engine
+            .function('StieltjesGamma', [n])
+            .evaluate({ numericApproximation });
 
         if (!shouldNumericize(numericApproximation, ...ops)) return undefined;
         if (order > STIELTJES_MAX_ORDER) return undefined;
@@ -825,9 +859,12 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const z = stieltjesGammaComplex(order, new Complex(re, im));
         if (z === undefined) return undefined;
         return boxComplexResult(engine, z, im === 0 && re > 0);
+      },
+    },
+
     ClausenCl: {
       description:
-        'Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ for odd n. Double precision.',
+        'Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ for odd n. A real θ follows the engine precision.',
       complexity: 8700,
       broadcastable: true,
       // Cl₁(θ) = −ln|2 sin(θ/2)| is +∞ at θ ≡ 0, so the result is `real`
@@ -863,7 +900,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         }
 
         // Cl_n(π) = 0 (even) or −η(n) (odd); Cl_n(π/2) = −2⁻ⁿ·η(n) (odd) and
-        // Cl₂(π/2) = G; η(n) = (1 − 2¹⁻ⁿ)ζ(n), with η(1) = ln 2.
+        // β(n) (even, since sin(kπ/2) = (−1)ʲ at k = 2j+1; β(2) = G);
+        // η(n) = (1 − 2¹⁻ⁿ)ζ(n), with η(1) = ln 2.
         const eta = (): Expression =>
           order === 1
             ? engine.function('Ln', [engine.number(2)])
@@ -878,19 +916,25 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             value.evaluate({ numericApproximation })
           );
         }
-        if (theta.isSame(engine.Pi.div(2)) && (!even || order === 2)) {
+        if (theta.isSame(engine.Pi.div(2))) {
           const value = even
-            ? engine.symbol('CatalanConstant')
-            : eta().mul(engine.number(2).pow(engine.number(-order))).neg();
+            ? engine.function('DirichletBeta', [n])
+            : eta()
+                .mul(engine.number(2).pow(engine.number(-order)))
+                .neg();
           return floatIfFloatOperand(
             ops,
             value.evaluate({ numericApproximation })
           );
         }
 
-        return shouldNumericize(numericApproximation, n, theta)
-          ? applyN([n, theta], clausen)
-          : undefined;
+        if (!shouldNumericize(numericApproximation, n, theta)) return undefined;
+        // A real value carries `ce.precision` digits or the head stays unevaluated.
+        if (isNumber(theta) && !theta.isComplex && bignumPreferred(engine)) {
+          const big = bigClausen(engine, order, bigRealOperand(engine, theta));
+          return big === undefined ? undefined : boxBignumApprox(engine, big);
+        }
+        return applyN([n, theta], clausen);
       },
     },
 

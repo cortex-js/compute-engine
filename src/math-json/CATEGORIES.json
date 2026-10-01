@@ -24,6 +24,8 @@
       "Conjugate",
       "Denominator",
       "Digamma",
+      "DirichletBeta",
+      "DirichletEta",
       "Distance",
       "Divide",
       "ElementMax",

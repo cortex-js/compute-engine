@@ -27,6 +27,13 @@ import {
 } from '../numerics/dirichlet-character.js';
 import { bernoulliPolynomialRational } from '../numerics/bernoulli.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
+import { bignumPreferred } from '../boxed-expression/utils.js';
+import { bigDirichletL } from '../numerics/special-functions.js';
+import {
+  boxBignumApprox,
+  boxComplexResult,
+  bigRealOperand,
+} from './arithmetic.js';
 import {
   CancellationError,
   checkDeadline,
@@ -1947,6 +1954,9 @@ const DIRICHLET_L_MAX_MODULUS = 1000;
  */
 const DIRICHLET_L_NEGATIVE_ORDER_LIMIT = 100;
 
+/** Largest |Re s| at which a complex character is summed through `HurwitzZeta`. */
+const DIRICHLET_L_HURWITZ_MAX_ORDER = 1e5;
+
 /**
  * Within this distance of s = 1, a non-principal L is summed from its Laurent
  * series in the Stieltjes constants (`dirichletLNearOne`), whose terms shrink
@@ -2005,10 +2015,12 @@ function dirichletLResult(
  *   of ζ at s = 1;
  * - at a nonpositive integer s = −n, L(−n, χ) = −kⁿ Σ_r χ(r) Bₙ₊₁(r/k)/(n+1)
  *   (DLMF 25.15.3), exact;
- * - elsewhere a numeric s sums k^(−s) Σ_r χ(r) ζ(s, r/k) through `HurwitzZeta`
- *   (DLMF 25.15.1), so a real s follows the engine precision and a complex s
- *   is at double precision; near s = 1 a non-principal L, whose Hurwitz terms
- *   have cancelling poles, comes from `dirichletLNearOne`.
+ * - the odd character mod 4 is `DirichletBeta`;
+ * - elsewhere a numeric s sums k^(−s) Σ_r χ(r) ζ(s, r/k) (DLMF 25.15.1). A
+ *   real character at a real s is a real value, summed in bignums with guard
+ *   digits for the cancelling poles near s = 1 (`bigDirichletL`), at
+ *   `ce.precision` or unevaluated; any other value is complex and a machine
+ *   number, near s = 1 from `dirichletLNearOne`.
  */
 function evaluateDirichletL(
   ce: ComputeEngine,
@@ -2020,6 +2032,9 @@ function evaluateDirichletL(
   if (k > DIRICHLET_L_MAX_MODULUS) return undefined;
   const numeric = shouldNumericize(numericApproximation, s);
   const finish = (e: Expression) => (numeric ? e.N() : e.evaluate());
+
+  // The odd character mod 4 is the Dirichlet beta function: L(1, χ₄) = π/4.
+  if (k === 4 && j === 2) return finish(ce.function('DirichletBeta', [s]));
 
   if (j === 1) {
     const factors = [...bigPrimeFactors(BigInt(k)).keys()]
@@ -2068,10 +2083,23 @@ function evaluateDirichletL(
   )
     return undefined;
 
+  // A real character at a real s gives a real value, which carries
+  // `ce.precision` digits or the head stays unevaluated.
+  const chi = realCharacterValues(k, j);
+  if (chi !== undefined && !s.isComplex && bignumPreferred(ce)) {
+    if (s.isSame(1)) return dirichletLAtOne(ce, k, chi);
+    const big = bigDirichletL(ce, bigRealOperand(ce, s), k, chi);
+    return big === undefined ? undefined : boxBignumApprox(ce, big);
+  }
+
   if (Math.hypot(s.re - 1, s.im) < DIRICHLET_L_NEAR_POLE) {
     const value = dirichletLNearOne(k, j, ce.complex(s.re, s.im));
     if (value !== undefined) return dirichletLResult(ce, value);
   }
+
+  // The Hurwitz terms are of size (k/r)^s; past this |Re s| their exponents
+  // make the sum take minutes (a complex character at s = 10⁶), so it declines.
+  if (Math.abs(s.re) > DIRICHLET_L_HURWITZ_MAX_ORDER) return undefined;
 
   const terms: Expression[] = [];
   for (let r = 1; r <= k; r++) {
@@ -2093,11 +2121,50 @@ function evaluateDirichletL(
       ce.function('Add', terms),
     ])
     .N();
+  // A complex value is a machine number, as for the other special functions.
   return isNumber(total) &&
     Number.isFinite(total.re) &&
     Number.isFinite(total.im)
-    ? total
+    ? boxComplexResult(ce, total, !total.isComplex)
     : undefined;
+}
+
+/** The values χ(1), …, χ(k) when the character takes only 0 and ±1, else `undefined`. */
+function realCharacterValues(k: number, j: number): number[] | undefined {
+  const values: number[] = [];
+  for (let r = 1; r <= k; r++) {
+    const q = dirichletCharacterExponent(k, j, r);
+    if (q === undefined) values.push(0);
+    else if (q[0] === 0) values.push(1);
+    else if (2 * q[0] === q[1]) values.push(-1);
+    else return undefined;
+  }
+  return values;
+}
+
+/**
+ * L(1, χ) = −(1/k) Σ_r χ(r) ψ(r/k) for a non-principal real χ: the poles of
+ * the ζ(s, r/k) cancel (Σ χ(r) = 0) and the constant terms −ψ(r/k) remain.
+ */
+function dirichletLAtOne(
+  ce: ComputeEngine,
+  k: number,
+  chi: readonly number[]
+): Expression | undefined {
+  const terms = chi.flatMap((c, i) =>
+    c === 0
+      ? []
+      : [
+          ce.function('Multiply', [
+            ce.number(c),
+            ce.function('Digamma', [ce.number([i + 1, k])]),
+          ]),
+        ]
+  );
+  const total = ce
+    .function('Multiply', [ce.number([-1, k]), ce.function('Add', terms)])
+    .N();
+  return isNumber(total) ? total : undefined;
 }
 
 /**

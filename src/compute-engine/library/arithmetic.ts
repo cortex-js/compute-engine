@@ -2677,6 +2677,12 @@ function threadOperandsThatBecameConditional(
 }
 
 /**
+ * Precision of the Gamma-family and L-function heads (LogGamma, BarnesG,
+ * DirichletEta/Beta/L, StieltjesGamma, ClausenCl): a real result carries
+ * `ce.precision` digits or the head stays unevaluated, never a double
+ * printed at a higher precision; a complex result is a machine number, as
+ * for the native complex special functions, boxed here.
+ *
  * Box a machine complex result, dropping a near-zero imaginary part to real.
  * With `real` set, the caller has proven the value is real (real operands
  * on a real branch), so the imaginary part is rounding residue of any size
@@ -3449,7 +3455,7 @@ function dirichletInteger(s: Expression): number | null {
  * rational is divided exactly: its double projection is wrong for
  * 1 + 10^−30, and `bignumRe` is absent for a rational.
  */
-function dirichletBigOperand(engine: ComputeEngine, s: Expression): BigNum {
+export function bigRealOperand(engine: ComputeEngine, s: Expression): BigNum {
   const operand = hurwitzOperand(engine, s);
   return operand instanceof BigDecimal
     ? operand
@@ -3459,6 +3465,16 @@ function dirichletBigOperand(engine: ComputeEngine, s: Expression): BigNum {
 /** The value of `expr` when it is a finite number literal. */
 function finiteNumberOrUndefined(expr: Expression): Expression | undefined {
   return isFiniteNumberLiteral(expr) ? expr : undefined;
+}
+
+/** A double-kernel value as a machine number, as `boxComplexResult` boxes it. */
+function machineNumberOrUndefined(expr: Expression): Expression | undefined {
+  if (!isFiniteNumberLiteral(expr)) return undefined;
+  return boxComplexResult(
+    expr.engine,
+    { re: expr.re, im: expr.im },
+    !expr.isComplex
+  );
 }
 
 /**
@@ -3477,6 +3493,10 @@ function evaluateDirichletEta(
   s: Expression,
   numericApproximation: boolean | undefined
 ): Expression | undefined {
+  const point = isNumber(s) ? infinitePoint(s) : undefined;
+  if (point === '+oo') return engine.One;
+  // No limit at −∞ or ~oo, as for ζ: the indeterminate form.
+  if (point !== undefined) return indeterminateFormAnswer(engine, [s]);
   if (!isFiniteNumberLiteral(s)) return undefined;
   const numeric = shouldNumericize(numericApproximation, s);
   const finish = (e: Expression) => (numeric ? e.N() : e.evaluate());
@@ -3499,18 +3519,19 @@ function evaluateDirichletEta(
   }
   if (!numeric) return undefined;
 
+  // A real result carries `ce.precision` digits or the head stays unevaluated.
   if (!s.isComplex && bignumPreferred(engine)) {
-    const big = bigDirichletEta(engine, dirichletBigOperand(engine, s));
-    if (big !== undefined) return boxBignumApprox(engine, big);
+    const big = bigDirichletEta(engine, bigRealOperand(engine, s));
+    return big === undefined ? undefined : boxBignumApprox(engine, big);
   }
 
   if (Math.hypot(s.re - 1, s.im) < DIRICHLET_NEAR_POLE)
-    return finiteNumberOrUndefined(
+    return machineNumberOrUndefined(
       engine
         .function('LerchPhi', [engine.number(-1), s, engine.One])
         .evaluate({ numericApproximation: true })
     );
-  return finiteNumberOrUndefined(
+  return machineNumberOrUndefined(
     engine
       .function('Multiply', [
         engine.function('Subtract', [
@@ -3567,6 +3588,10 @@ function evaluateDirichletBeta(
   s: Expression,
   numericApproximation: boolean | undefined
 ): Expression | undefined {
+  const point = isNumber(s) ? infinitePoint(s) : undefined;
+  if (point === '+oo') return engine.One;
+  // No limit at −∞ or ~oo, as for ζ: the indeterminate form.
+  if (point !== undefined) return indeterminateFormAnswer(engine, [s]);
   if (!isFiniteNumberLiteral(s)) return undefined;
   const numeric = shouldNumericize(numericApproximation, s);
 
@@ -3577,14 +3602,15 @@ function evaluateDirichletBeta(
   }
   if (!numeric) return undefined;
 
+  // A real result carries `ce.precision` digits or the head stays unevaluated.
   if (!s.isComplex && bignumPreferred(engine)) {
-    const big = bigDirichletBeta(engine, dirichletBigOperand(engine, s));
-    if (big !== undefined) return boxBignumApprox(engine, big);
+    const big = bigDirichletBeta(engine, bigRealOperand(engine, s));
+    return big === undefined ? undefined : boxBignumApprox(engine, big);
   }
 
   const two = engine.number(2);
   if (Math.hypot(s.re - 1, s.im) < DIRICHLET_NEAR_POLE)
-    return finiteNumberOrUndefined(
+    return machineNumberOrUndefined(
       engine
         .function('Multiply', [
           engine.function('Power', [two, engine.function('Negate', [s])]),
@@ -3596,7 +3622,7 @@ function evaluateDirichletBeta(
         ])
         .evaluate({ numericApproximation: true })
     );
-  return finiteNumberOrUndefined(
+  return machineNumberOrUndefined(
     engine
       .function('Multiply', [
         engine.function('Power', [
@@ -5329,10 +5355,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // `DirichletEta`.
     DirichletEta: {
       description:
-        'Dirichlet eta function η(s) = Σ_{n≥1} (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2.',
+        'Dirichlet eta function η(s) = Σ_{n≥1} (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1.',
       complexity: 8500,
       broadcastable: true,
-      signature: '(complex) -> number',
+      signature: '(complex | infinity) -> number',
       examples: ['[DirichletEta(2), DirichletEta(1), N(DirichletEta(1/2))]'],
       nanBehavior: 'propagate',
       evaluate: (ops, { numericApproximation, engine }) =>
@@ -5345,10 +5371,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // `DirichletBeta` (mpmath `dirichlet(s, [0, 1, 0, -1])`).
     DirichletBeta: {
       description:
-        'Dirichlet beta function β(s) = Σ_{n≥0} (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G.',
+        'Dirichlet beta function β(s) = Σ_{n≥0} (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1.',
       complexity: 8500,
       broadcastable: true,
-      signature: '(complex) -> number',
+      signature: '(complex | infinity) -> number',
       examples: ['[DirichletBeta(1), DirichletBeta(3), N(DirichletBeta(1/2))]'],
       nanBehavior: 'propagate',
       evaluate: (ops, { numericApproximation, engine }) =>

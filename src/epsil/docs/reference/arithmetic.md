@@ -572,9 +572,9 @@ Digamma function, the logarithmic derivative of the gamma function
 
 ### dirichletBeta
 
-MathJSON `DirichletBeta` · `(complex) -> number`
+MathJSON `DirichletBeta` · `(complex | infinity) -> number`
 
-Dirichlet beta function β(s) = Σ_&#123;n≥0&#125; (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G.
+Dirichlet beta function β(s) = Σ_&#123;n≥0&#125; (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1.
 
 ```epsil
 [dirichletBeta(1), dirichletBeta(3), N(dirichletBeta(1/2))]
@@ -583,9 +583,9 @@ Dirichlet beta function β(s) = Σ_&#123;n≥0&#125; (−1)^n/(2n+1)^s = 4^(−s
 
 ### dirichletEta
 
-MathJSON `DirichletEta` · `(complex) -> number`
+MathJSON `DirichletEta` · `(complex | infinity) -> number`
 
-Dirichlet eta function η(s) = Σ_&#123;n≥1&#125; (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2.
+Dirichlet eta function η(s) = Σ_&#123;n≥1&#125; (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1.
 
 ```epsil
 [dirichletEta(2), dirichletEta(1), N(dirichletEta(1/2))]

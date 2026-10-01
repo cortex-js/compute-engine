@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Special functions
 
-The 15 definitions of the special functions library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 19 definitions of the special functions library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -33,15 +33,31 @@ MathJSON `AppellF1` · `(complex | infinity, complex | infinity, complex | infin
 
 Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for |x|, |y| &lt; 1.
 
+### barnesG
+
+MathJSON `BarnesG` · `(complex | infinity) -> number`
+
+The Barnes G-function, the double gamma function G(z+1) = Γ(z)·G(z), G(1) = 1. G(n) is the superfactorial 1!·2!⋯(n−2)! at a positive integer n; G is entire, with zeros at the non-positive integers.
+
+```epsil
+barnesG(5)
+// ➔ 12
+```
+
+```epsil
+N(barnesG(1/2))
+// ➔ 0.603244281209446206191
+```
+
 ### clausenCl
 
 MathJSON `ClausenCl` · `(integer, real) -> number`
 
-Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^&#123;iθ&#125;) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^&#123;iθ&#125;) = Σ cos(kθ)/kⁿ for odd n. Double precision.
+Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^&#123;iθ&#125;) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^&#123;iθ&#125;) = Σ cos(kθ)/kⁿ for odd n. A real θ follows the engine precision.
 
 ```epsil
 [clausenCl(2, 1), clausenCl(3, 0), N(clausenCl(2, 1))]
-// ➔ [ClausenCl(2, 1),Zeta(3),1.0139591323607684]
+// ➔ [ClausenCl(2, 1),Zeta(3),1.01395913236076850429]
 ```
 
 ### dedekindEta
@@ -103,6 +119,38 @@ Gauss hypergeometric function ₂F₁(a, b; c; z).
 MathJSON `JacobiTheta` · `(number, complex | infinity, complex | infinity, number?) -> number`
 
 Jacobi theta function θⱼ(z, τ), j ∈ &#123;1,2,3,4&#125;, nome q = e^&#123;iπτ&#125; (Fungrim convention).
+
+### logBarnesG
+
+MathJSON `LogBarnesG` · `(complex | infinity) -> number`
+
+The logarithm of the Barnes G-function, continued analytically with `LogGamma`: its imaginary part is not principal on the negative axis. −∞ at the zeros of G, the non-positive integers.
+
+```epsil
+logBarnesG(5)
+// ➔ 2ln(2) + ln(3)
+```
+
+```epsil
+N(logBarnesG(-1/2))
+// ➔ (-1.7709451779743404 + 3.141592653589793i)
+```
+
+### logGamma
+
+MathJSON `LogGamma` · `(complex | infinity) -> number`
+
+The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; not `GammaLn`, the principal logarithm of Γ(z), which jumps by 2πi across the zeros of Im Γ.
+
+```epsil
+logGamma(5)
+// ➔ 3ln(2) + ln(3)
+```
+
+```epsil
+N(logGamma(-2.5 + 1.5i))
+// ➔ (-3.7175134511917927 - 7.713065525834192i)
+```
 
 ### logIntegral
 
