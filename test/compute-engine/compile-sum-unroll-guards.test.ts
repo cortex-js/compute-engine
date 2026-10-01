@@ -72,10 +72,10 @@ describe('unrolled Sum/Product: a constant collection is emitted once', () => {
     const r = compile(ce.parse(FIXTURE), { to: 'javascript', fallback: true });
     expect(r.success).toBe(true);
     const js = source(r);
-    expect(occurrences(js, /Array\.from/g)).toBe(1);
+    expect(occurrences(js, /_SYS\.range\(/g)).toBe(1);
     // The single construction is a `const` — the assigned value `R` bound
     // once in the preamble — not a term operand.
-    expect(js).toMatch(/const _val_R = _SYS\.bcast\(.*Array\.from/);
+    expect(js).toMatch(/const _val_R = _SYS\.bcast\(.*_SYS\.range\(/);
   });
 
   it('returns the same values as the flat-chain emission did', () => {
@@ -100,7 +100,7 @@ describe('unrolled Sum/Product: a constant collection is emitted once', () => {
     const expr = ce.parse('\\prod_{n=1}^{5} (x + \\mathrm{At}(K, n))');
     const r = compile(expr, { to: 'javascript', fallback: true });
     expect(r.success).toBe(true);
-    expect(occurrences(source(r), /Array\.from/g)).toBe(1);
+    expect(occurrences(source(r), /_SYS\.range\(/g)).toBe(1);
     // `At(K, 1…5)` is `0, 2, 4, 6, 8`, so at `x = 1` the product is
     // `1·3·5·7·9`. The interpreter agrees.
     expect(r.run!({ x: 1 })).toBe(945);
@@ -112,7 +112,7 @@ describe('unrolled Sum/Product: a constant collection is emitted once', () => {
     ce.assign('K', ce.box(['Multiply', 2, ['Range', 0, 100]]));
     const expr = ce.parse('\\sum_{n=1}^{5} (x + \\mathrm{At}(K, n))');
     const r = compile(expr, { to: 'javascript', fallback: true });
-    expect(occurrences(source(r), /Array\.from/g)).toBe(1);
+    expect(occurrences(source(r), /_SYS\.range\(/g)).toBe(1);
     expect(r.run!({ x: 1 })).toBe(25);
     expect(expr.subs({ x: 1 }).evaluate().N().re).toBe(25);
   });
@@ -126,7 +126,7 @@ describe('unrolled Sum/Product: a constant collection is emitted once', () => {
     });
     // The assigned value `K` is bound once in the preamble (`_val_K`); the
     // three terms read it by name.
-    expect(occurrences(source(r), /Array\.from/g)).toBe(1);
+    expect(occurrences(source(r), /_SYS\.range\(/g)).toBe(1);
     expect(r.run!({ x: 1 })).toBe(9);
   });
 });
@@ -257,7 +257,7 @@ describe('unrolled Sum/Product: caller-supplied source is never optimized around
     // caller's `pick` receives the array itself and may keep or mutate it, and
     // is free to evaluate its operand more or fewer times than once. Each
     // term therefore builds its own array, exactly as the flat chain did.
-    expect(occurrences(source(r), /Array\.from/g)).toBe(5);
+    expect(occurrences(source(r), /_SYS\.range\(/g)).toBe(5);
     expect(r.run!({})).toBe(20);
   });
 });
@@ -287,7 +287,7 @@ describe('unrolled Sum/Product: a multi-index unroll binds each invariant once',
       to: 'javascript',
       fallback: true,
       // Keep the collection an expression: folded to a literal array it would
-      // have no `Array.from` to count.
+      // have no `_SYS.range` call to count.
       constantFold: false,
     });
   }
@@ -309,7 +309,7 @@ describe('unrolled Sum/Product: a multi-index unroll binds each invariant once',
 
   it('constructs the invariant collection exactly once', () => {
     const js = source(fixture());
-    expect(occurrences(js, /Array\.from/g)).toBe(1);
+    expect(occurrences(js, /_SYS\.range\(/g)).toBe(1);
   });
 
   it('keeps the interpreter value', () => {

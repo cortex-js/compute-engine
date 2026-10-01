@@ -182,7 +182,7 @@ describe('a reduction over a Range-indexed gather is a counted loop', () => {
     ce.declare('P', 'list<number^5>');
     ce.declare('a', 'real');
     ce.declare('b', 'real');
-    expect(code(ce, '\\operatorname{total}(P[a...b])')).toContain('Array.from');
+    expect(code(ce, '\\operatorname{total}(P[a...b])')).toContain('_SYS.range(');
   });
 });
 

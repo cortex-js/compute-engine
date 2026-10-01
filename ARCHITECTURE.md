@@ -269,7 +269,7 @@ a provably-zero constant denominator surfaces the true indeterminate:
 
 Larger cancellations (`x²/(5x²) → 1/5`) and the wider policy that governs which
 `.simplify()` rewrites treat an unknown as a generic **real** (why
-`ln(x) + ln(y) → ln(xy)` fires for an unconstrained `x` but not for a
+`ln(x³) → 3·ln(x)` fires for an unconstrained `x` but not for a
 declared-`complex` one) are **simplify-level**, documented in
 [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).
 

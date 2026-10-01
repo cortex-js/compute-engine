@@ -728,3 +728,283 @@ describe('undeclared-symbol is per-engine order-dependent (E4, documented)', () 
     ).toBe(false);
   });
 });
+
+describe('implicit-product-in-denominator (non-strict)', () => {
+  const lenient = { strict: false };
+
+  test.each(['1/2 x', '1/2x', 'pi/2x', 'x/2 y'])(
+    '%s reports the implicit product in the denominator',
+    (latex) => {
+      const ds = byCode(
+        diags(latex, lenient),
+        'implicit-product-in-denominator'
+      );
+      expect(ds).toHaveLength(1);
+      // The span starts at the denominator, after the `/`
+      expect(ds[0].start).toBe(latex.indexOf('/') + 1);
+      expect(ds[0].end).toBeGreaterThan(ds[0].start);
+    }
+  );
+
+  test('the reading is unchanged', () => {
+    const ce = new ComputeEngine();
+    const opts = { strict: false, form: 'raw' as const };
+    expect(ce.parse('1/2x', { ...opts, diagnostics: true }).json).toEqual(
+      ce.parse('1/2x', opts).json
+    );
+    expect(ce.parse('1/2x', opts).json).toEqual([
+      'Divide',
+      1,
+      ['InvisibleOperator', 2, 'x'],
+    ]);
+  });
+
+  test.each([
+    '1/2 * x',
+    '1/(2x)',
+    '1/2',
+    'dy/dx',
+    '1/2^x',
+    '1/f(x)',
+    '1/g(x+1)',
+  ])('%s reports nothing', (latex) => {
+    expect(
+      byCode(diags(latex, lenient), 'implicit-product-in-denominator')
+    ).toHaveLength(0);
+  });
+
+  test('strict mode reports nothing', () => {
+    expect(
+      byCode(diags('1/2x'), 'implicit-product-in-denominator')
+    ).toHaveLength(0);
+  });
+});
+
+describe('spaced-digit-groups (non-strict)', () => {
+  const lenient = { strict: false };
+
+  test.each([
+    ['2 3', '23'],
+    ['1 000', '1000'],
+    ['0.1 2', '12'],
+  ])('%s reports digits joined by white space', (latex, digits) => {
+    const ds = byCode(diags(latex, lenient), 'spaced-digit-groups');
+    expect(ds).toHaveLength(1);
+    expect(ds[0].detail).toMatchObject({ digits });
+  });
+
+  test('the reading is unchanged', () => {
+    const ce = new ComputeEngine();
+    const opts = { strict: false, form: 'raw' as const };
+    expect(ce.parse('2 3', { ...opts, diagnostics: true }).json).toEqual(23);
+    expect(ce.parse('1 000', opts).json).toEqual(1000);
+  });
+
+  test.each(['1\\,000', '1{,}000', '1000', '2.5', '2+3'])(
+    '%s reports nothing',
+    (latex) => {
+      expect(byCode(diags(latex, lenient), 'spaced-digit-groups')).toHaveLength(
+        0
+      );
+    }
+  );
+
+  test('strict mode reports nothing', () => {
+    expect(byCode(diags('2 3'), 'spaced-digit-groups')).toHaveLength(0);
+  });
+});
+
+describe('letter-before-decimal (non-strict)', () => {
+  const lenient = { strict: false };
+
+  test.each(['x.5', 'x.25', '\\pi.5'])(
+    '%s reports a symbol followed by .digits',
+    (latex) => {
+      const ds = byCode(diags(latex, lenient), 'letter-before-decimal');
+      expect(ds).toHaveLength(1);
+      expect(ds[0].start).toBe(latex.indexOf('.'));
+    }
+  );
+
+  test('the reading is unchanged', () => {
+    const ce = new ComputeEngine();
+    const opts = { strict: false, form: 'raw' as const };
+    expect(ce.parse('x.5', { ...opts, diagnostics: true }).json).toEqual([
+      'InvisibleOperator',
+      'x',
+      0.5,
+    ]);
+  });
+
+  test.each(['x.y', '0.5x', '2.5', 't^{i}.4'])(
+    '%s reports nothing',
+    (latex) => {
+      expect(
+        byCode(diags(latex, lenient), 'letter-before-decimal')
+      ).toHaveLength(0);
+    }
+  );
+
+  test('strict mode reports nothing', () => {
+    expect(byCode(diags('x.5'), 'letter-before-decimal')).toHaveLength(0);
+  });
+});
+
+describe('letter-run-split (non-strict mode)', () => {
+  const lenient = { strict: false };
+
+  test('a run with no definition read as single letters', () => {
+    expect(byCode(diags('eps', lenient), 'letter-run-split')).toEqual([
+      {
+        code: 'letter-run-split',
+        start: 0,
+        end: 3,
+        detail: { run: 'eps', parts: ['e', 'p', 's'] },
+      },
+    ]);
+    expect(byCode(diags('sinx', lenient), 'letter-run-split')).toEqual([
+      {
+        code: 'letter-run-split',
+        start: 0,
+        end: 4,
+        detail: { run: 'sinx', parts: ['s', 'i', 'n', 'x'] },
+      },
+    ]);
+  });
+
+  test('one diagnostic per run, with the span of the run', () => {
+    const split = byCode(diags('x+ab+the cat', lenient), 'letter-run-split');
+    expect(split.map((d) => [d.detail?.run, d.start, d.end])).toEqual([
+      ['ab', 2, 4],
+      ['the', 5, 8],
+      ['cat', 9, 12],
+    ]);
+  });
+
+  test('a run split around a spelled-out Greek letter', () => {
+    expect(byCode(diags('xpi', lenient), 'letter-run-split')).toEqual([
+      {
+        code: 'letter-run-split',
+        start: 0,
+        end: 3,
+        detail: { run: 'xpi', parts: ['x', 'Pi'] },
+      },
+    ]);
+  });
+
+  test('not emitted for explicit products or runs read as one name', () => {
+    for (const latex of [
+      'a*b*c',
+      'sin(x)',
+      'alpha',
+      'foo(x)',
+      'x_max',
+      'x in A',
+      '\\mathrm{abc}',
+      '\\int x dx',
+    ])
+      expect(byCode(diags(latex, lenient), 'letter-run-split')).toEqual([]);
+  });
+
+  test('additive: the parse output is unchanged', () => {
+    for (const latex of ['eps', 'sinx', 'x+ab', 'xpi']) {
+      const ce = new ComputeEngine();
+      expect(
+        ce.parse(latex, { strict: false, diagnostics: true }).json
+      ).toEqual(new ComputeEngine().parse(latex, { strict: false }).json);
+    }
+  });
+
+  test('not emitted in strict mode', () => {
+    expect(byCode(diags('eps'), 'letter-run-split')).toEqual([]);
+    expect(byCode(diags('sinx'), 'letter-run-split')).toEqual([]);
+    expect(byCode(diags('e^xy'), 'letter-run-split')).toEqual([]);
+  });
+
+  test('an unbraced exponent that takes the first letter of a run', () => {
+    expect(byCode(diags('e^xy', lenient), 'letter-run-split')).toEqual([
+      {
+        code: 'letter-run-split',
+        start: 2,
+        end: 4,
+        detail: { run: 'xy', parts: ['x', 'y'] },
+      },
+    ]);
+    expect(
+      byCode(diags('x^ab', lenient), 'letter-run-split').map((d) => [
+        d.detail?.run,
+        d.start,
+        d.end,
+      ])
+    ).toEqual([['ab', 2, 4]]);
+    expect(
+      byCode(diags('e^-xy', lenient), 'letter-run-split').map((d) => [
+        d.detail?.run,
+        d.start,
+        d.end,
+      ])
+    ).toEqual([['xy', 3, 5]]);
+  });
+
+  test('an unbraced subscript on a parenthesized base that takes the first letter of a run', () => {
+    expect(
+      byCode(diags('(x)_ab', lenient), 'letter-run-split').map((d) => [
+        d.detail?.run,
+        d.start,
+        d.end,
+      ])
+    ).toEqual([['ab', 4, 6]]);
+    expect(byCode(diags('(x)_a', lenient), 'letter-run-split')).toEqual([]);
+    expect(byCode(diags('(x)_ab'), 'letter-run-split')).toEqual([]);
+    expect(
+      new ComputeEngine().parse('(x)_ab', {
+        strict: false,
+        form: 'raw',
+        diagnostics: true,
+      }).json
+    ).toEqual([
+      'InvisibleOperator',
+      ['Subscript', ['Delimiter', 'x'], 'a'],
+      'b',
+    ]);
+  });
+
+  test('an unbraced exponent split keeps the reading', () => {
+    for (const latex of ['e^xy', 'x^ab', 'e^-xy']) {
+      const opts = { strict: false, form: 'raw' as const };
+      expect(
+        new ComputeEngine().parse(latex, { ...opts, diagnostics: true }).json
+      ).toEqual(new ComputeEngine().parse(latex, opts).json);
+    }
+    expect(
+      new ComputeEngine().parse('e^xy', { strict: false, form: 'raw' }).json
+    ).toEqual(['InvisibleOperator', ['Power', 'e', 'x'], 'y']);
+  });
+
+  test('not emitted for one-letter or spaced exponents', () => {
+    for (const latex of ['e^x', 'x^a b', 'e^-x', 'x^2y'])
+      expect(byCode(diags(latex, lenient), 'letter-run-split')).toEqual([]);
+  });
+
+  test('not emitted for the differentials of a differential quotient', () => {
+    for (const latex of [
+      'dy/dx',
+      'dy / dx',
+      'd/dx',
+      '\\frac{dy}{dx}',
+      '\\frac{d}{dx}f',
+    ])
+      expect(byCode(diags(latex, lenient), 'letter-run-split')).toEqual([]);
+    // A `d` run that is not part of a differential quotient is reported
+    expect(
+      byCode(diags('dy+dx', lenient), 'letter-run-split').map(
+        (d) => d.detail?.run
+      )
+    ).toEqual(['dy', 'dx']);
+    expect(
+      byCode(diags('ab/dx', lenient), 'letter-run-split').map(
+        (d) => d.detail?.run
+      )
+    ).toEqual(['ab', 'dx']);
+  });
+});

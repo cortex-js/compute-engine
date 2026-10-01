@@ -244,7 +244,11 @@ describe('Tycho 324: a compiled Range with a compound step', () => {
   ])('%s: the compiled list is the interpreted one', (_label, json) => {
     const { compiled, interpreted } = compare(json);
     expect(compiled).toHaveLength(interpreted.length);
-    expect(compiled).toEqual(interpreted);
+    // An exact rational bound and step (`3/500` once `d` is 500) give exact
+    // interpreted elements, whose float is correctly rounded (`283/250` is
+    // 1.132), while the compiled code adds floats (`1 + 22·0.006` is
+    // 1.1320000000000001). The elements agree to the last few bits.
+    compiled.forEach((c, i) => expect(c).toBeCloseTo(interpreted[i], 12));
   });
 
   test('a compound step is bound whole, as an argument', () => {
@@ -253,7 +257,7 @@ describe('Tycho 324: a compiled Range with a compound step', () => {
     const src = code(ce.box(['Range', 0, 10, ['Subtract', 'd', 498]] as any));
     // The step is passed to the range function, not spliced into the
     // element expression, so no parentheses are needed around it.
-    expect(src).toContain('_a + _i * _s))(0, 10, _.d + -498)');
+    expect(src).toContain('_SYS.range(0, 10, _.d + -498)');
   });
 
   test('a Range inside a seeded shuffle keeps the interpreted count', () => {

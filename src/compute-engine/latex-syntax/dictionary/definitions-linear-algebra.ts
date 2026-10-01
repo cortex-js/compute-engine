@@ -302,9 +302,13 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     // matrix-typed) bases. Sets without a dedicated positive set fall through to
     // the general `Superplus` postfix (a signed-set modifier).
     parse: (
-      _parser: Parser,
+      parser: Parser,
       lhs: MathJsonExpression
     ): MathJsonExpression | null => {
+      // In non-strict mode, `e^+x` is `e^{+x}`: the `+` starts the exponent
+      // when an operand follows it directly.
+      const power = parser._parseLenientSignedExponent?.(lhs, '+') ?? null;
+      if (power !== null) return power;
       if (typeof lhs === 'string') {
         if (lhs in POSITIVE_SET_MODIFIER)
           return POSITIVE_SET_MODIFIER[lhs] as MathJsonExpression;

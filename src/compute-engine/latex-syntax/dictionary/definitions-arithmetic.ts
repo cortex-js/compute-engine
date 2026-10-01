@@ -210,6 +210,27 @@ function parseRoot(parser: Parser): MathJsonExpression | null {
   return ['Sqrt', base];
 }
 
+/**
+ * Parse the square root glyph `√` (U+221A). In non-strict mode, a
+ * parenthesized radicand is the argument of the root, as in plain-text input:
+ * `√(x+1)` is `Sqrt(x+1)`, the same as `sqrt(x+1)`. In strict mode, and for
+ * any other radicand, this is the same as `\sqrt`.
+ */
+function parseRootGlyph(parser: Parser): MathJsonExpression | null {
+  if (parser.options.strict === false) {
+    const start = parser.index;
+    parser.skipSpace();
+    if (parser.peek === '(' || parser.matchAll(['\\left', '('])) {
+      parser.index = start;
+      parser.skipSpace();
+      const args = parser.parseArguments('enclosure');
+      if (args !== null && args.length === 1) return ['Sqrt', args[0]];
+    }
+    parser.index = start;
+  }
+  return parseRoot(parser);
+}
+
 function negateNumberLiteral(
   expr: number | string | { num: string }
 ): MathJsonExpression {
@@ -1420,6 +1441,8 @@ function parseSlashDivide(
   lhs: MathJsonExpression,
   terminator: Readonly<Terminator>
 ): MathJsonExpression | null {
+  parser.skipSpace();
+  const denomStart = parser.index;
   const rhs = parser.parseExpression({
     ...terminator,
     minPrec: DIVISION_PRECEDENCE + 1,
@@ -1429,7 +1452,41 @@ function parseSlashDivide(
   const derivative = parseCompactDerivative(lhs, rhs);
   if (derivative) return derivative;
 
+  // An implicit product binds tighter than `/`, so `1/2x` is `1/(2x)`, not
+  // `(1/2)x`. Readers disagree on this convention, so in non-strict mode,
+  // report it when diagnostics are enabled. A differential denominator
+  // (`dy/dx`) is not reported: that reading is the intended one. A symbol
+  // followed by one parenthesized group (`1/f(x)`) is not reported either:
+  // it is a function application, not a product.
+  if (
+    parser.options.strict === false &&
+    operator(rhs) === 'InvisibleOperator' &&
+    !isDifferentialSymbol(operand(rhs, 1)) &&
+    !isSymbolApplication(rhs)
+  )
+    parser.emitDiagnostic(
+      'implicit-product-in-denominator',
+      denomStart,
+      parser.index
+    );
+
   return ['Divide', lhs, rhs];
+}
+
+/** True when `expr` is the raw juxtaposition of a symbol and exactly one
+ * parenthesized group (`f(x)`, `g(x+1)`), which canonicalization reads as a
+ * function application. */
+function isSymbolApplication(expr: MathJsonExpression): boolean {
+  return (
+    nops(expr) === 2 &&
+    symbol(operand(expr, 1)) !== null &&
+    operator(operand(expr, 2)) === 'Delimiter'
+  );
+}
+
+function isDifferentialSymbol(expr: MathJsonExpression | null): boolean {
+  const s = symbol(expr);
+  return s === 'd' || s === 'd_upright' || s === 'differentialD';
 }
 
 function parseCompactDerivative(
@@ -1498,6 +1555,42 @@ function normalizeCompactDerivativeBody(
   return expr;
 }
 
+/**
+ * If `expr` is a `Delimiter` with plain parentheses around a single
+ * expression, as in raw `1/(1+x^2)`, return that expression. Otherwise return
+ * `expr` unchanged.
+ *
+ * Use it where the LaTeX output already groups the operand (a `\frac`
+ * argument, a braced superscript), so the parentheses would be written twice
+ * (`((1+x^2))^{-1}`) or would be redundant (`\frac{1}{(1+x^2)}`).
+ *
+ * A `Delimiter` around a `Sequence` (`(a, b)`) or around a collection that
+ * has its own fences (`([1, 2])`) is kept: there the parentheses change the
+ * meaning.
+ */
+function stripGroupingParentheses(
+  expr: MathJsonExpression
+): MathJsonExpression {
+  if (operator(expr) !== 'Delimiter') return expr;
+  const n = nops(expr);
+  if (n !== 1 && n !== 2) return expr;
+  if (n === 2 && stringValue(operand(expr, 2)) !== '(,)') return expr;
+  const body = operand(expr, 1);
+  if (body === null) return expr;
+  const bodyOp = operator(body);
+  if (
+    bodyOp === 'Sequence' ||
+    bodyOp === 'List' ||
+    bodyOp === 'Set' ||
+    bodyOp === 'Tuple' ||
+    bodyOp === 'Pair' ||
+    bodyOp === 'Triple' ||
+    bodyOp === 'Single'
+  )
+    return expr;
+  return body;
+}
+
 function serializeFraction(
   serializer: Serializer,
   expr: MathJsonExpression | null
@@ -1505,8 +1598,10 @@ function serializeFraction(
   // console.assert(getFunctionName(expr) === 'Divide');
   if (expr === null) return '';
 
-  let numer = missingIfEmpty(operand(expr, 1));
-  let denom = missingIfEmpty(operand(expr, 2));
+  // `\frac{}{}` groups its numerator and denominator: parentheses around
+  // either one are redundant (`\frac{1}{1+x^2}`, not `\frac{1}{(1+x^2)}`).
+  let numer = stripGroupingParentheses(missingIfEmpty(operand(expr, 1)));
+  let denom = stripGroupingParentheses(missingIfEmpty(operand(expr, 2)));
 
   // The sign of a numeric fraction goes in front of it, not inside the
   // numerator or the denominator: `-\frac{1}{2}`, `-\frac{x}{2}`, not
@@ -1666,10 +1761,12 @@ function serializePower(
   // only braces a base that still contains a bare '^' after that (e.g. a
   // transposed matrix, `A^T`), which the fence already ruled out here.
 
+  // The superscript braces group the exponent: parentheses around it are
+  // redundant (`x^{\frac{1}{2}}`, not `x^{(\frac{1}{2})}`).
   return supsub(
     '^',
     wrapNegativeBase(serializer.wrapPowerBase(base)),
-    serializer.serialize(exp)
+    serializer.serialize(stripGroupingParentheses(exp))
   );
 }
 
@@ -2258,6 +2355,22 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'left',
     precedence: DIVISION_PRECEDENCE, // ??? according to MathML
     parse: 'Divide',
+  },
+  {
+    // Non-strict mode: the division sign glyph `÷` (U+00F7), from paste or
+    // keyboard input, parses the same as `\div`.
+    latexTrigger: ['÷'],
+    kind: 'infix',
+    associativity: 'left',
+    precedence: DIVISION_PRECEDENCE,
+    parse: (parser, lhs, until) => {
+      if (parser.options.strict !== false) return null;
+      const rhs = parser.parseExpression({
+        ...until,
+        minPrec: DIVISION_PRECEDENCE + 1,
+      });
+      return ['Divide', lhs, missingIfEmpty(rhs)];
+    },
   },
   {
     name: 'Exp',
@@ -3318,7 +3431,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     latexTrigger: ['√'], // √ U+221A SQUARE ROOT (`√4`, `√{x+1}`)
-    parse: parseRoot,
+    parse: parseRootGlyph,
   },
   {
     latexTrigger: ['½'], // ½ U+00BD VULGAR FRACTION ONE HALF

@@ -287,6 +287,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   name: string;
   description?: string | string[];
   keywords?: string[];
+  /** The usage examples, each one line of Epsil source. A definition may
+   * give a single string; it is stored as a one-element list. */
+  examples?: string[];
   url?: string;
   wikidata?: string;
 
@@ -962,6 +965,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     if (this.wikidata) result.wikidata = this.wikidata;
     if (this.description) result.description = this.description;
     if (this.keywords) result.keywords = this.keywords;
+    if (this.examples) result.examples = this.examples;
     if (this.url) result.url = this.url;
     result.broadcastable = this.broadcastable;
     result.broadcastExemptions = this.broadcastExemptions;
@@ -1555,6 +1559,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     return {
       description: this.description,
       keywords: this.keywords,
+      examples: this.examples,
       url: this.url,
       wikidata: this.wikidata,
       broadcastable: this.broadcastable,
@@ -1625,6 +1630,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     const s = snapshot as Record<string, any>;
     this.description = s.description;
     this.keywords = s.keywords;
+    this.examples = s.examples;
     this.url = s.url;
     this.wikidata = s.wikidata;
     this.broadcastable = s.broadcastable;
@@ -1747,6 +1753,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
     this.description = def.description ?? this.description;
     this.keywords = def.keywords ?? this.keywords;
+    if (def.examples !== undefined)
+      this.examples =
+        typeof def.examples === 'string' ? [def.examples] : [...def.examples];
     this.collection = def.collection ?? this.collection;
     this.url = def.url ?? this.url;
     this.wikidata = def.wikidata ?? this.wikidata;

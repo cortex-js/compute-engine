@@ -128,7 +128,23 @@ describe('generic-real convention still fires for unconstrained symbols', () => 
     ['|x^2|', 'x^2'],
     ['|x|^2', 'x^2'],
     ['|x^3|', '|x|^3'], // odd: keeps Abs (sound for complex too)
-    ['\\ln(x)+\\ln(y)', 'ln(x * y)'],
+  ];
+  for (const [src, expected] of cases) {
+    test(`${src} → ${expected}`, () => {
+      const ce = new ComputeEngine();
+      expect(ce.parse(src).simplify().toString()).toBe(expected);
+    });
+  }
+});
+
+// Combining or splitting logarithms needs non-negative arguments: at
+// a = b = -1, ln(a) + ln(b) is 2πi but ln(ab) is 0 (decision of 2026-10-01,
+// cortex-js/compute-engine#397).
+describe('logarithms of unconstrained symbols are not combined or split', () => {
+  const cases: Array<[string, string]> = [
+    ['\\ln(x)+\\ln(y)', 'ln(x) + ln(y)'],
+    ['\\ln(x/y)', 'ln(x / y)'],
+    ['\\ln(1/x)', 'ln(1 / x)'],
   ];
   for (const [src, expected] of cases) {
     test(`${src} → ${expected}`, () => {

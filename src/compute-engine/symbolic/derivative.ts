@@ -1,7 +1,11 @@
 import { apply } from '../function-utils.js';
 import { checkDeadlineEvery } from '../../common/interruptible.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
-import type { Expression, ExpressionInput } from '../global-types.js';
+import type {
+  Expression,
+  ExpressionInput,
+  FunctionInterface,
+} from '../global-types.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import {
   isNumber,
@@ -15,6 +19,7 @@ import {
   isDestructuringParameter,
 } from '../boxed-expression/function-literal.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
 import { valueDefinitionInContext } from '../boxed-expression/binders.js';
 import {
   angularChainFactor,
@@ -390,10 +395,16 @@ function isUserFunction(sym: Expression): boolean {
     // and evaluating is at best a no-op, and for control structures it runs
     // an evaluate handler on nonsense operands (`Which(_1, …)` throws on a
     // non-boolean condition; `Loop(_1)` would spin until the deadline).
+    //
+    // A caller-supplied library (the constructor's `libraries` option) is
+    // installed in the system scope too, so the scope test cannot tell its
+    // operators from the builtins. The engine records their names in
+    // `_customLibraryOperators`: such an operator is a user function, as it
+    // is when it is declared with `ce.declare()`.
+    if (!isSymbol(sym)) return true;
+    if (sym.engine._customLibraryOperators.has(sym.symbol)) return true;
     const systemScope = sym.engine.contextStack[0]?.lexicalScope;
-    const systemDef = isSymbol(sym)
-      ? systemScope?.bindings.get(sym.symbol)
-      : undefined;
+    const systemDef = systemScope?.bindings.get(sym.symbol);
     if (isOperatorDef(systemDef) && systemDef.operator === opDef) return false;
     return true;
   }
@@ -1046,6 +1057,14 @@ function differentiateNode(
   if (!expr.operator || !isFunction(expr)) return undefined;
 
   // From here on, expr is narrowed to Expression & FunctionInterface
+
+  // The rules below select an operator by its NAME. A user definition that
+  // shadows a library operator (`Sinh(x) := 3x`), or a caller library that
+  // defines a standard name, has another meaning: differentiate it as a user
+  // function, as `evaluate()` does, never with the library operator's rule.
+  if (shadowsLibraryName(ce, expr.operator))
+    return differentiateUnknownApplication(expr, v, depth, trace);
+
   if (expr.operator === 'Negate') {
     recordD(trace, expr, v, 'derivative.constant-multiple', () =>
       dPlaceholder(expr.op1, v).neg()
@@ -1661,56 +1680,8 @@ function differentiateNode(
   const h = DERIVATIVES_TABLE[
     expr.operator as keyof typeof DERIVATIVES_TABLE
   ] as ExpressionInput | undefined;
-  if (h === undefined) {
-    // Try resolving user-defined function calls before falling back to
-    // symbolic chain rule. Apply the function to wildcards, evaluate to
-    // get the body, substitute actual arguments, and differentiate.
-    const opSym = ce.symbol(expr.operator);
-    if (isUserFunction(opSym)) {
-      const args = expr.ops;
-      const wildcards =
-        args.length === 1
-          ? [ce.symbol('_')]
-          : args.map((_, i) => ce.symbol(`_${i + 1}`));
-      const body = ce.function(expr.operator, wildcards).evaluate();
-      if (body.operator !== expr.operator) {
-        const subsMap: Record<string, Expression> = {};
-        wildcards.forEach((w, i) => {
-          subsMap[sym(w)!] = args[i];
-        });
-        const bodyWithArgs = body.subs(subsMap);
-        recordD(trace, expr, v, 'derivative.expand-definition', () =>
-          dPlaceholder(bodyWithArgs, v)
-        );
-        return differentiate(bodyWithArgs, v, depth + 1, trace);
-      }
-    }
-
-    // A LAZY operator (`Which`, `Sum`, `Integrate`, `Loop`, …) holds its
-    // operands unevaluated: its slots are binders, conditions or statements,
-    // not scalar function arguments, so the slot-wise chain rule below is
-    // meaningless for it (it would differentiate with respect to a boolean
-    // condition or a bound index). Decline instead — the enclosing `D`
-    // stays inert and symbolic.
-    if (opSym.operatorDefinition?.lazy) return undefined;
-
-    // Unknown function of one or more arguments: keep the outer derivative
-    // symbolic and apply the (multivariate) chain rule. The partial with
-    // respect to each argument slot is carried as a multi-index Derivative:
-    //   d/dv f(g₁,…,g_k) = Σᵢ Apply(Derivative(f, eᵢ), g₁,…,g_k) · gᵢ'
-    // For a univariate f this is the usual Apply(Derivative(f, 1), g) · g'.
-    const fSym = ce.symbol(expr.operator);
-    const baseOrders = expr.ops.map(() => 0);
-    return differentiateApplied(
-      fSym,
-      baseOrders,
-      expr.ops.slice(),
-      v,
-      depth,
-      trace,
-      expr
-    );
-  }
+  if (h === undefined)
+    return differentiateUnknownApplication(expr, v, depth, trace);
 
   // Apply the chain rule:
   // d/dx f(g(x)) = f'(g(x)) * g'(x)
@@ -1739,4 +1710,69 @@ function differentiateNode(
   const gPrime =
     differentiate(g, v, depth + 1, trace) ?? ce._fn('D', [g, ce.symbol(v)]);
   return simplifyDerivative(derivFormula.mul(gPrime));
+}
+
+/**
+ * The derivative of an application of an operator with no entry in the
+ * derivative table: an operator the user defined, or an unknown function.
+ *
+ * A user function is resolved by applying it to wildcards and evaluating; when
+ * that gives its body, the body is differentiated. Otherwise the derivative
+ * stays symbolic and the multivariate chain rule is applied.
+ */
+function differentiateUnknownApplication(
+  expr: Expression & FunctionInterface,
+  v: string,
+  depth: number,
+  trace: DerivativeTrace | undefined
+): Expression | undefined {
+  const ce = expr.engine;
+  // Try resolving user-defined function calls before falling back to
+  // symbolic chain rule. Apply the function to wildcards, evaluate to
+  // get the body, substitute actual arguments, and differentiate.
+  const opSym = ce.symbol(expr.operator);
+  if (isUserFunction(opSym)) {
+    const args = expr.ops;
+    const wildcards =
+      args.length === 1
+        ? [ce.symbol('_')]
+        : args.map((_, i) => ce.symbol(`_${i + 1}`));
+    const body = ce.function(expr.operator, wildcards).evaluate();
+    if (body.operator !== expr.operator) {
+      const subsMap: Record<string, Expression> = {};
+      wildcards.forEach((w, i) => {
+        subsMap[sym(w)!] = args[i];
+      });
+      const bodyWithArgs = body.subs(subsMap);
+      recordD(trace, expr, v, 'derivative.expand-definition', () =>
+        dPlaceholder(bodyWithArgs, v)
+      );
+      return differentiate(bodyWithArgs, v, depth + 1, trace);
+    }
+  }
+
+  // A LAZY operator (`Which`, `Sum`, `Integrate`, `Loop`, …) holds its
+  // operands unevaluated: its slots are binders, conditions or statements,
+  // not scalar function arguments, so the slot-wise chain rule below is
+  // meaningless for it (it would differentiate with respect to a boolean
+  // condition or a bound index). Decline instead — the enclosing `D`
+  // stays inert and symbolic.
+  if (opSym.operatorDefinition?.lazy) return undefined;
+
+  // Unknown function of one or more arguments: keep the outer derivative
+  // symbolic and apply the (multivariate) chain rule. The partial with
+  // respect to each argument slot is carried as a multi-index Derivative:
+  //   d/dv f(g₁,…,g_k) = Σᵢ Apply(Derivative(f, eᵢ), g₁,…,g_k) · gᵢ'
+  // For a univariate f this is the usual Apply(Derivative(f, 1), g) · g'.
+  const fSym = ce.symbol(expr.operator);
+  const baseOrders = expr.ops.map(() => 0);
+  return differentiateApplied(
+    fSym,
+    baseOrders,
+    expr.ops.slice(),
+    v,
+    depth,
+    trace,
+    expr
+  );
 }

@@ -29,7 +29,7 @@ import {
   subjectKey,
   subjectOf,
 } from '../boxed-expression/constraint-subject.js';
-import { domainToType } from '../boxed-expression/utils.js';
+import { declaredOperator, domainToType } from '../boxed-expression/utils.js';
 // The shared type-handler helpers take one `OperandDescriptor` per operand,
 // never the operand expression.
 import {
@@ -1262,6 +1262,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           args.map((arg) => arg.canonical),
           'Intersection'
         ),
+        // Deliberately NOT the declared signature `(any+) -> set`. The
+        // declaration is `any` so that the check of a `canonical`-handler
+        // result against its declaration does not refuse a label operand
+        // (`AC ∩ BD`); this handler validates collections and keeps labels.
         '(collection<any>+) -> set',
         () => true
       );
@@ -1305,6 +1309,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           args.map((arg) => arg.canonical),
           'Union'
         ),
+        // Deliberately NOT the declared signature `(any+) -> set`. The
+        // declaration is `any` so that the check of a `canonical`-handler
+        // result against its declaration does not refuse a label operand
+        // (`AC ∪ BD`); this handler validates collections and keeps labels.
         '(collection<any>+) -> set',
         () => true
       );
@@ -1365,13 +1373,15 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       // Label tolerance (`G \setminus H`, `G \setminus \{e\}`): without
       // this handler, generic signature validation rejects a label first
       // operand (e.g. `G`, the gravitational constant, types real).
+      // Validate against the signature of the live definition, not a copy
+      // of its text: a host that redeclares `SetMinus` with a wider
+      // signature and this handler must get the wider validation.
+      const op = declaredOperator(ce, 'SetMinus');
+      if (op === undefined) return ce._fn('SetMinus', args);
       return ce._fn(
         'SetMinus',
-        validateSetArguments(
-          ce,
-          args,
-          '(set<any>, value*) -> set',
-          (i) => i === 0
+        validateSetArguments(ce, args, op.signature.type, (i) =>
+          op.stripsMissingAt(i)
         )
       );
     },
@@ -1625,7 +1635,7 @@ function isLabelOperand(expr: Expression): boolean {
 function validateSetArguments(
   ce: ComputeEngine,
   args: ReadonlyArray<Expression>,
-  signature: string,
+  signature: string | Type,
   /** The positions where an absent operand (`Missing`) is admitted: the
    * operator propagates absence there, and the evaluation answers
    * `Missing`. */
@@ -1634,7 +1644,7 @@ function validateSetArguments(
   const validated = validateArguments(
     ce,
     args,
-    parseType(signature),
+    typeof signature === 'string' ? parseType(signature) : signature,
     false,
     false,
     undefined,

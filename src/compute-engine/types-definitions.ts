@@ -1298,8 +1298,10 @@ export type SymbolDefinitions = Readonly<{
 }>;
 
 /**
- * A library bundles symbol/operator definitions with their LaTeX dictionary
- * entries and declares dependencies on other libraries.
+ * A library bundles symbol/operator definitions and declares dependencies on
+ * other libraries. It carries no LaTeX dictionary entries: to parse or
+ * serialize a new notation, pass a dictionary to the `LatexSyntax` given with
+ * the `latexSyntax` constructor option.
  *
  * Use with the `libraries` constructor option to load standard or custom
  * libraries:
@@ -1664,6 +1666,10 @@ export type TypeProvenanceEntry = {
  *
  */
 export interface BoxedBaseDefinition extends Partial<BaseDefinition> {
+  /** The usage examples of the definition. A definition may give a single
+   * string; the boxed definition always stores a list. */
+  examples?: string[];
+
   /** If this is the definition of a collection, the set of primitive operations
    * that can be performed on this collection (counting the number of elements,
    * enumerating it, etc...).

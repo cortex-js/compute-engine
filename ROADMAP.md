@@ -109,6 +109,56 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A library list with `core` but without `control-structures` breaks every function literal (OPEN, decision — found 2026-10-01 by the fix of the library load order for issue #393)
+
+`Function` is defined in `core`, but building a function literal needs
+`Block`, which `control-structures` defines. With
+`libraries: ['core', 'arithmetic']`, every `Function` literal, and every
+caller library with an `evaluate` formula, prints "Cannot read properties of
+undefined (reading 'bindings')". `control-structures` already requires
+`core`, so `core` cannot require it back without a cycle. The options: move
+`Block` into `core`; load `control-structures` with `core` automatically; or
+throw a clear error at construction when `control-structures` is missing.
+
+### Redeclaring an arithmetic operator with an unchanged copy of its definition changes canonical forms and types (OPEN, decision — found 2026-10-01 by the analysis of issue #394)
+
+`doc/06-guide-augmenting.md` ("Overloading Functions") documents how to
+extend a library operator: redeclare it with a copy of its definition and
+change one field. For eleven operators (`Add`, `Multiply`, `Negate`,
+`Square`, `Sqrt`, `Exp`, `Ln`, `Log`, `Power`, `Root`, `Divide`) this
+changes the result even when no field changes. The reason:
+`makeNumericFunction` (`boxed-expression/box.ts`) canonicalizes these
+operators by NAME, not through a `canonical` handler of their definition, and
+since the decision of 2026-09-27 (`library-shadowing.ts`) any user
+definition of one of these names sends the call to the generic boxing code.
+`Add` is `lazy` with no `canonical` handler, so there its operands arrive
+unbound. Measured after `ce.declare('Add', { ...oldAdd })`: `Add(2, x, 5)`
+gives `2 + x + 5` (stock: `x + 7`); `Add(1, "s")` is valid (stock: invalid);
+`Add(1, ImaginaryUnit)` is typed `integer` (stock: `complex`). After the
+same copy of `Sqrt`, `Sqrt(8)` stays `sqrt(8)` (stock: `2√2`). One fix:
+move the per-name canonicalization into a `canonical` handler of each
+definition, so a copy takes it along; `_update` then must accept `canonical`
+together with the `associative`/`commutative` flags that `Add` and
+`Multiply` set. The decision to make: whether a redeclared arithmetic
+operator keeps the built-in canonical form (this fix), or the documentation
+says that redeclaring these eleven names gives up that form.
+
+### A named call through a `function`-typed variable keeps the parameter order of the value it held when the call was made canonical (OPEN, decision — found 2026-10-01 by the analysis of issue #390)
+
+When the callee of a named call is a variable declared `function`, the names
+are matched against the signature of the variable's CURRENT value when the
+call is made canonical (`calleeSignatureType`,
+`boxed-expression/box.ts`), and the call is stored with positional
+arguments. A later assignment of a function with a different parameter order
+gives a wrong result with no error. Example: `alias: function = bob_S`, then
+`e = alias(3, factor: 5)` is stored as `alias(3, 5)`; after `alias` is
+assigned `other(factor, x)` (which computes `factor - x`), `e` evaluates to
+`-2`, while the names ask for `2`. The same callee also loses `lazy`: with
+`y := 10` and a lazy `bob_H`, `aliasH(y·z)` gives `Hold(10·z)`, while
+`bob_H(y·z)` gives `Hold(y·z)`. The decision to make: match the names again
+when the call is evaluated, or reject names for a callee whose declared type
+is only `function`.
+
 ### A compiled loop that assigns `xs = ReplaceAt(xs, i, v)` copies the whole list at each assignment (OPEN, small — issue #386, 2026-10-01)
 
 A compiled `Fold` whose step only updates its accumulator now updates a copy
@@ -385,15 +435,6 @@ parameter from its signature slot. (A parameter DECLARED `collection<any>` or
 list of numbers gives the list itself (the norm of each number), on both routes;
 whether `Norm` of an untyped parameter should read a list of numbers as one
 vector is part of the same question.
-
-### `Solve` over a `List` of conditions with a domain returns no solution (OPEN — found 2026-09-29 by the review fixes for the broadcast type)
-
-`Solve(List(n^2 = 4, n > 0), n ∈ Range(-20, 20))` returns `[]`. The same
-conditions written `And(n^2 = 4, n > 0)` or `Set(n^2 = 4, n > 0)` return `[2]`.
-It behaves the same with and without the 2026-09-29 changes. Either a list of
-conditions with a domain is meant to be read as a system, as the set is, and the
-list route misses the side condition, or a list is not an accepted spelling and
-the call must say so with an error instead of answering "no solution".
 
 ### The static type of a block local narrowed by a use depends on statement order (OPEN, small — found 2026-09-28 by the fixpoint re-read of assignment evidence)
 
@@ -677,6 +718,13 @@ current scope, and name resolution cannot tell that construction from a
 user-written call. The fix direction: engine-built nodes resolve their head
 against the system scope (a construction route that does not consult the current
 scope), leaving scope-based resolution to user-written code.
+
+The same happens at the top level, through the formulas of the derivative
+table (measured 2026-10-01): after `Sinh(x) := 3x`, `D(Cosh(t), t)` gives
+`3t`, because the rule for `Cosh` is the formula `Sinh(x)`, and that formula
+picks up the user's `Sinh`. (`D(Sinh(t), t)` itself is `3` since 2026-10-01:
+`D` now checks whether a user definition shadows the name before it uses the
+rule for that name.)
 
 ### A function-typed factor is a product under juxtaposition and a type error under an explicit operator (OPEN, ruling — found 2026-09-22 while fixing the MathNet round-trip check)
 
@@ -4441,7 +4489,8 @@ The analytic-property store (`ce.functionProperties`, pole-aware `N()`), the
 the store are only partially built:
 
 - **(a) Branch-cut-safe simplification — largely complete.** The logarithm
-  family is guarded: `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`) and the
+  family is guarded: `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`) requires
+  every argument to be provably non-negative (decision of 2026-10-01), and the
   `.ln()` expansions `ln(bⁿ) → n·ln(b)` / `ln(a/b)` / `ln(root)`
   (`boxed-function.ts`) consult `onBranchCut` and stay symbolic when an operand
   is provably on the negative-real cut. Power/root _products_ (`√a·√b → √(ab)`,

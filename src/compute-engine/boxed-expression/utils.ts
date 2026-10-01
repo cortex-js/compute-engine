@@ -519,6 +519,11 @@ export function resolveBoundSymbols(
     if (protect.has(name) || seen.has(name)) return expr;
     const def = expr.engine.lookupDefinition(name);
     if (!isValueDef(def)) return expr;
+    // A constant held until a numeric approximation (`Pi`, `ExponentialE`)
+    // stays symbolic, as `evaluate()` keeps it: its value is a float, and
+    // replacing it turns an exact root such as `ln(3)` into a float and
+    // hides the shape `e^(bx)` from the solver.
+    if (def.value.holdUntil === 'N') return expr;
     const value = def.value.value;
     if (value === undefined || value === null) return expr;
     seen.add(name);
@@ -1067,6 +1072,22 @@ export function isValidValueDef(def: unknown): def is Partial<ValueDefinition> {
 // `isValueDef` lives in `definition-guards.ts` (a leaf module — see there);
 // re-exported here so every existing import site is unchanged.
 export { isValueDef, isOperatorDef } from './definition-guards.js';
+
+/**
+ * The operator definition that `name` resolves to in the current scope, or
+ * `undefined` if `name` is not an operator.
+ *
+ * A custom `canonical` handler that validates its own operands must read the
+ * signature (`.signature.type`) and the positions where an absent operand is
+ * stripped (`.stripsMissingAt(i)`) from this definition, not from a copy in
+ * the handler. A host can redeclare the operator with a wider signature and
+ * keep the handler (`ce.declare(name, { ...def, signature: '...' })`); a copy
+ * would then still refuse the operands the new signature admits.
+ */
+export function declaredOperator(ce: ComputeEngine, name: string) {
+  const def = ce.lookupDefinition(name);
+  return def !== undefined && 'operator' in def ? def.operator : undefined;
+}
 
 /**
  * Whether `expr` contains a free symbol that carries a USER-ASSIGNED value: a

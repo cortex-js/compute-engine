@@ -724,15 +724,11 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   });
 
   test('JS: a pure Range uses the same argument-passing shape (pins)', () => {
-    // The operands are evaluated in the argument list, outside the
-    // `Array.from` callback, so an impure operand is drawn once and no
-    // callback name can capture a user variable (issue #367).
-    expect(jsCode(['Range', 'a', 'b', 'c'])).toBe(
-      '((_a, _b, _s) => Array.from({length: _SYS.rangeCount(_a, _b, _s)}, (_e, _i) => _a + _i * _s))(_.a, _.b, _.c)'
-    );
-    expect(jsCode(['Range', 1, 10, 2])).toBe(
-      '((_a, _b, _s) => Array.from({length: _SYS.rangeCount(_a, _b, _s)}, (_e, _i) => _a + _i * _s))(1, 10, 2)'
-    );
+    // The operands are the arguments of the run-time helper `_SYS.range`,
+    // so an impure operand is drawn once and no callback name can capture a
+    // user variable (issue #367).
+    expect(jsCode(['Range', 'a', 'b', 'c'])).toBe('_SYS.range(_.a, _.b, _.c)');
+    expect(jsCode(['Range', 1, 10, 2])).toBe('_SYS.range(1, 10, 2)');
   });
 
   // --- GPU: Round, Root, Variance, Argument, Conjugate --------------------

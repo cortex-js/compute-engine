@@ -187,7 +187,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
     EllipticK: {
       description:
         'Complete elliptic integral of the first kind K(m), parameter convention m = k².',
-      wikidata: 'Q1080993',
+      wikidata: 'Q109752514',
       complexity: 8600,
       broadcastable: true,
       // The carrier is every number except NaN: K has a value at every
@@ -234,7 +234,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         'Elliptic integral of the second kind: complete E(m) with one ' +
         'argument, incomplete E(φ|m) with two (amplitude first, parameter ' +
         'convention m = k², as in Mathematica).',
-      wikidata: 'Q1375529',
+      wikidata: 'Q109753012',
       complexity: 8600,
       broadcastable: true,
       // Both slots take the carrier `complex | infinity`; `NaN` propagates
@@ -305,7 +305,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         'Incomplete elliptic integral of the first kind F(φ|m) (amplitude ' +
         'first, parameter convention m = k², as in Mathematica). ' +
         'F(π/2|m) = K(m).',
-      wikidata: 'Q1062952',
+      wikidata: 'Q109752309',
       complexity: 8600,
       broadcastable: true,
       // Both slots take the carrier `complex | infinity`; an infinite
@@ -342,7 +342,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         'Elliptic integral of the third kind: complete Π(n|m) with two ' +
         'arguments, incomplete Π(n; φ|m) with three (characteristic first, ' +
         'amplitude second, parameter convention m = k², as in Mathematica).',
-      wikidata: 'Q1123360',
+      wikidata: 'Q109753363',
       complexity: 8600,
       broadcastable: true,
       // Every slot takes the carrier `complex | infinity`; an infinite
@@ -428,7 +428,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
 
     Hypergeometric2F1: {
       description: 'Gauss hypergeometric function ₂F₁(a, b; c; z).',
-      wikidata: 'Q672619',
+      wikidata: 'Q21028472',
       complexity: 8700,
       broadcastable: true,
       // Every slot takes the carrier `complex | infinity`; an infinite
@@ -465,7 +465,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
     AppellF1: {
       description:
         'Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for |x|, |y| < 1.',
-      wikidata: 'Q2701540',
+      wikidata: 'Q4780998',
       complexity: 8800,
       broadcastable: true,
       // Every slot takes the carrier `complex | infinity`; an infinite
@@ -504,7 +504,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
     PolyLog: {
       description:
         'Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ, at any real or complex order s.',
-      wikidata: 'Q320067',
+      wikidata: 'Q1238449',
       complexity: 8700,
       broadcastable: true,
       // Both slots take the carrier `complex | infinity`; an infinite
@@ -615,7 +615,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
     Hypergeometric1F1: {
       description:
         'Kummer confluent hypergeometric function ₁F₁(a; b; z) = M(a, b, z).',
-      wikidata: 'Q1331447',
+      wikidata: 'Q783948',
       complexity: 8700,
       broadcastable: true,
       // Every slot takes the carrier `complex | infinity`; an infinite
@@ -652,7 +652,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
     JacobiTheta: {
       description:
         'Jacobi theta function θⱼ(z, τ), j ∈ {1,2,3,4}, nome q = e^{iπτ} (Fungrim convention).',
-      wikidata: 'Q1154532',
+      wikidata: 'Q17098064',
       complexity: 8800,
       broadcastable: true,
       // `j` is validated in the evaluate handler ('number' rather than
@@ -698,7 +698,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
 
     DedekindEta: {
       description: 'Dedekind eta function η(τ), Im(τ) > 0.',
-      wikidata: 'Q1187208',
+      wikidata: 'Q1182161',
       complexity: 8800,
       broadcastable: true,
       // The carrier is `complex | infinity`. η is defined on the upper
@@ -777,7 +777,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
 
     ExpIntegralEi: {
       description: 'Exponential integral Ei(x) = PV ∫_{−∞}^x eᵗ/t dt.',
-      wikidata: 'Q1361401',
+      wikidata: 'Q1419948',
       complexity: 7500,
       broadcastable: true,
       // The carrier is every number except NaN: Ei has a value at every
@@ -838,7 +838,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
 
     LogIntegral: {
       description: 'Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x).',
-      wikidata: 'Q853513',
+      wikidata: 'Q1350206',
       complexity: 7500,
       broadcastable: true,
       // The carrier is every number except NaN. On the non-negative real

@@ -138,8 +138,8 @@ const BRANCH_CUT_OPERATORS: ReadonlySet<string> = new Set(
  * Three-valued branch-cut test (policy D3). Reports whether `arg` lies on a
  * branch cut of `operator`, per the store's `BranchCuts` record (ROADMAP
  * item 7a). Used to block simplification rewrites that would cross a branch
- * cut — e.g. `ln(a) + ln(b) → ln(ab)` is unsound when an operand is on the
- * negative real axis (`ln(-2) + ln(-3) ≠ ln(6)`, they differ by `2πi`).
+ * cut — e.g. `ln(bⁿ) → n·ln(b)` is unsound when `b` is on the negative real
+ * axis (`ln((-2)³) ≠ 3·ln(-2)`, they differ by `2πi`).
  *
  * A `BranchCuts` value is a `Set` of cut regions (e.g. `Ln` ⇒
  * `Set(Interval(Open(-oo), 0))`); `arg` is on a cut when it is a member of any
@@ -214,7 +214,7 @@ export function onBranchCut(
  * `ln(x)` both type `number`, which is not below the extended real line.
  * Gating on it would therefore need a decision about the
  * `undefined` case, and treating `undefined` as "bail" would drop the
- * generic-real convention on `ln(x)+ln(y) → ln(xy)` and friends. A type that
+ * generic-real convention on `ln(x³) → 3·ln(x)` and friends. A type that
  * matches `complex` but not `real` is a two-valued test that reliably
  * identifies declared/inferred complex operands, which is what D4 targets.
  *

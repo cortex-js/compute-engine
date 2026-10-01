@@ -517,4 +517,89 @@ describe('application policy preserves infix range precedence', () => {
       expect(expr.op2.canonical.json).toEqual(['Range', 1, 'n']);
     }
   });
+
+  test('non-strict mode submits multi-letter and spelled-out Greek heads', () => {
+    for (const [source, head, args] of [
+      ['foo(x)', 'foo', ['x']],
+      ['foo (x)', 'foo', ['x']],
+      [String.raw`foo\left(x\right)`, 'foo', ['x']],
+      ['gamma(x)', 'gamma', ['x']],
+      ['alpha(x+1)', 'alpha', [['Add', 'x', 1]]],
+      ['theta(x)', 'theta', ['x']],
+    ] as const) {
+      for (const decision of ['apply', 'multiply'] as const) {
+        const ce = new ComputeEngine();
+        const calls: string[] = [];
+        const expr = ce.parse(source, {
+          strict: false,
+          resolveApplication: (context) => {
+            calls.push(context.head);
+            return decision;
+          },
+        });
+        expect(calls).toEqual([head]);
+        expect(expr.json).toEqual(
+          ce.box(
+            decision === 'apply' ? [head, ...args] : ['Multiply', head, ...args]
+          ).json
+        );
+      }
+    }
+  });
+
+  test('non-strict heads keep their reading when the hook declines', () => {
+    for (const source of ['foo(x)', 'gamma(x)', '2theta(x)^2', 'alpha(x+1)']) {
+      const result = new ComputeEngine().parse(source, {
+        strict: false,
+        form: 'raw',
+        resolveApplication: () => undefined,
+      });
+      expect(result.json).toEqual(
+        new ComputeEngine().parse(source, { strict: false, form: 'raw' }).json
+      );
+    }
+  });
+
+  test('non-strict heads with an authoritative definition are not submitted', () => {
+    // Library definitions: `Gamma` is the gamma function, `pi` is the
+    // constant `Pi` (as `\Gamma(x)` and `\pi(x)` in strict mode).
+    for (const source of ['Gamma(x)', 'pi(x)', 'sin(x)']) {
+      const calls: string[] = [];
+      new ComputeEngine().parse(source, {
+        strict: false,
+        resolveApplication: ({ head }) => {
+          calls.push(head);
+          return 'multiply';
+        },
+      });
+      expect(calls).toEqual([]);
+    }
+    // Explicit declarations
+    const ce = new ComputeEngine();
+    ce.declare('foo', 'function');
+    ce.declare('gamma', 'real');
+    const calls: string[] = [];
+    const parse = (source: string) =>
+      ce.parse(source, {
+        strict: false,
+        resolveApplication: ({ head }) => {
+          calls.push(head);
+          return 'multiply';
+        },
+      }).json;
+    expect(parse('foo(x)')).toEqual(['foo', 'x']);
+    expect(parse('gamma(x)')).toEqual(['Multiply', 'gamma', 'x']);
+    expect(calls).toEqual([]);
+  });
+
+  test('strict mode still reads a letter run before a parenthesis by letter', () => {
+    const calls: string[] = [];
+    new ComputeEngine().parse('foo(x)', {
+      resolveApplication: ({ head }) => {
+        calls.push(head);
+        return 'apply';
+      },
+    });
+    expect(calls).toEqual(['o']);
+  });
 });

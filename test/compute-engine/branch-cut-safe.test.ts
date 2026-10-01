@@ -82,12 +82,14 @@ describe('log-combination is blocked across a branch cut', () => {
 });
 
 describe('sound and symbolic combinations are unaffected (no churn)', () => {
-  // Each of these must keep its pre-guard simplified form.
+  // Positive arguments are combined. Unconstrained symbols are not: the
+  // combination needs non-negative arguments (decision of 2026-10-01,
+  // cortex-js/compute-engine#397).
   const cases: [string, string][] = [
     ['\\ln(2)+\\ln(3)', 'ln(6)'],
-    ['\\ln(x)+\\ln(y)', 'ln(x * y)'],
-    ['\\ln(a)-\\ln(b)', 'ln(a / b)'],
-    ['\\log(x)+\\log(y)', 'log(x * y)'],
+    ['\\ln(x)+\\ln(y)', 'ln(x) + ln(y)'],
+    ['\\ln(a)-\\ln(b)', 'ln(a) - ln(b)'],
+    ['\\log(x)+\\log(y)', 'log(x) + log(y)'],
   ];
   for (const [src, expected] of cases) {
     it(`${src} → ${expected}`, () => {

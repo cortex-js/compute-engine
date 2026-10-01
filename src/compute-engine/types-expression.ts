@@ -124,6 +124,7 @@ type CollectionHandlers = BaseCollectionHandlers &
   Partial<IndexedCollectionHandlers>;
 
 interface BoxedBaseDefinition extends Partial<BaseDefinition> {
+  examples?: string[];
   collection?: CollectionHandlers;
 }
 

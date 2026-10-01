@@ -600,7 +600,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     description:
       'Logical NAND: the negation of AND (n-ary). Short-circuits: operands ' +
       'are evaluated left to right and evaluation stops at the first `False`.',
-    wikidata: 'Q189550',
+    wikidata: 'Q3874243',
     broadcastable: true,
     // Not `commutative` — the flag sorts the operands, and a short-circuit
     // form is defined over the WRITTEN order (see `canonicalShortCircuit`).
@@ -623,7 +623,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     description:
       'Logical NOR: the negation of OR (n-ary). Short-circuits: operands are ' +
       'evaluated left to right and evaluation stops at the first `True`.',
-    wikidata: 'Q189561',
+    wikidata: 'Q574946',
     broadcastable: true,
     // Kleene over absence, as for `And`/`Or`: a possibly-absent operand
     // (`boolean | missing`) validates through the strip-before-validate gate,

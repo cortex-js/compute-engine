@@ -1,5 +1,5 @@
 import type { Expression, RuleStep } from '../global-types.js';
-import { isFunction, sym } from '../boxed-expression/type-guards.js';
+import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
 import {
   isEligibleRealRewrite,
   onBranchCut,
@@ -56,6 +56,146 @@ const EXP_OF_LOG_SUM_LABELS = new Set([
   'e^(ln(x) + y) -> x * e^y',
   'e^(log_c(x) + y) -> x^{1/ln(c)} * e^y',
 ]);
+
+/**
+ * For the terms of an exponent `Add`, the product of the arguments of the
+ * logarithm terms that `isLog` accepts (a negated term divides) and the sum
+ * of the other terms (`undefined` when there is none). `undefined` when no
+ * term is a logarithm. Used for `e^(ln(a) + ln(b) - ln(c) + y) =
+ * (a·b/c)·e^y`.
+ */
+function takeOutLogTerms(
+  ce: Expression['engine'],
+  terms: ReadonlyArray<Expression>,
+  isLog: (term: Expression) => boolean
+): [Expression, Expression | undefined] | undefined {
+  const numerator: Expression[] = [];
+  const denominator: Expression[] = [];
+  const rest: Expression[] = [];
+  for (const term of terms) {
+    if (isLog(term) && isFunction(term)) numerator.push(term.op1);
+    else if (
+      isFunction(term, 'Negate') &&
+      isLog(term.op1) &&
+      isFunction(term.op1)
+    )
+      denominator.push(term.op1.op1);
+    else rest.push(term);
+  }
+  if (numerator.length + denominator.length === 0) return undefined;
+  let factor = numerator.reduce((acc, x) => acc.mul(x), ce.One);
+  for (const x of denominator) factor = factor.div(x);
+  const sum =
+    rest.length === 0
+      ? undefined
+      : rest.length === 1
+        ? rest[0]
+        : ce._fn('Add', rest);
+  return [factor, sum];
+}
+
+/**
+ * Combine the logarithm terms `group` of the sum `terms` (each entry gives the
+ * index of the term in `terms`, the argument of its logarithm, and whether
+ * the term is negated: `positive: false`). `makeLog` builds a logarithm of
+ * the same kind and base.
+ *
+ * - A product argument with a positive numeric factor is split first:
+ *   `ln(c·u) = ln(c) + ln(u)` for `c > 0` and any `u`, since multiplying by
+ *   `c` does not change the argument (the angle) of `u`.
+ * - The arguments that are provably non-negative are combined into one
+ *   logarithm of their product and quotient (`isNonNegativeLogArgument()`).
+ * - The other arguments are kept, except that two terms with the same
+ *   argument and opposite signs cancel.
+ *
+ * Returns the new sum, or `undefined` when nothing combines (fewer than two
+ * non-negative arguments and no cancelled pair): splitting a factor alone
+ * would only make the sum longer.
+ */
+function combineLogGroup(
+  ce: Expression['engine'],
+  terms: ReadonlyArray<Expression>,
+  group: ReadonlyArray<{ index: number; arg: Expression; positive: boolean }>,
+  makeLog: (arg: Expression) => Expression
+): Expression | undefined {
+  if (group.length < 2) return undefined;
+
+  // Split a positive numeric factor out of a product argument.
+  const entries: Array<{ arg: Expression; positive: boolean }> = [];
+  for (const t of group) {
+    const arg = t.arg;
+    if (isFunction(arg, 'Multiply') && arg.nops >= 2) {
+      const constants = arg.ops.filter(
+        (f) => isNumber(f) && !f.isComplex && f.isPositive === true
+      );
+      if (constants.length > 0 && constants.length < arg.nops) {
+        const others = arg.ops.filter((f) => !constants.includes(f));
+        for (const c of constants)
+          entries.push({ arg: c, positive: t.positive });
+        entries.push({
+          arg: others.length === 1 ? others[0] : ce._fn('Multiply', others),
+          positive: t.positive,
+        });
+        continue;
+      }
+    }
+    entries.push({ arg, positive: t.positive });
+  }
+
+  const combinable = entries.filter((e) => isNonNegativeLogArgument(e.arg));
+  const kept = entries.filter((e) => !isNonNegativeLogArgument(e.arg));
+
+  // Cancel kept terms with the same argument and opposite signs.
+  let cancelled = 0;
+  for (let i = 0; i < kept.length; i++) {
+    const j = kept.findIndex(
+      (e, k) =>
+        k > i && e.positive !== kept[i].positive && e.arg.isSame(kept[i].arg)
+    );
+    if (j < 0) continue;
+    kept.splice(j, 1);
+    kept.splice(i, 1);
+    cancelled += 1;
+    i -= 1;
+  }
+
+  if (combinable.length < 2 && cancelled === 0) return undefined;
+
+  const newTerms: Expression[] = [];
+  if (combinable.length > 0) {
+    let numerator = ce.One;
+    let denominator = ce.One;
+    for (const e of combinable) {
+      if (e.positive) numerator = numerator.mul(e.arg);
+      else denominator = denominator.mul(e.arg);
+    }
+    newTerms.push(makeLog(numerator.div(denominator)));
+  }
+  for (const e of kept)
+    newTerms.push(
+      e.positive ? makeLog(e.arg) : ce._fn('Negate', [makeLog(e.arg)])
+    );
+
+  const groupIndices = new Set(group.map((t) => t.index));
+  newTerms.push(...terms.filter((_, i) => !groupIndices.has(i)));
+  if (newTerms.length === 0) return ce.Zero;
+  if (newTerms.length === 1) return newTerms[0];
+  return ce._fn('Add', newTerms);
+}
+
+/**
+ * Whether `ln(a) + ln(b) → ln(ab)` may use `a`: `a` is provably non-negative
+ * (by its value, its type or an assumption), or `a` is an absolute value.
+ * For real arguments at or above 0 the principal values of both sides are
+ * equal, also at 0, where both sides are `-∞`. An absolute value is
+ * non-negative or `NaN`, and a `NaN` argument makes both sides `NaN`; its
+ * `isNonNegative` is `undefined` when the operand type admits `NaN`, so it is
+ * accepted here by its operator (`ln|x + 1| - ln|x + 2|` is the result of an
+ * integration).
+ */
+function isNonNegativeLogArgument(a: Expression): boolean {
+  return a.isNonNegative === true || isFunction(a, 'Abs');
+}
 
 export function simplifyLog(x: Expression): RuleStep | undefined {
   const r = simplifyLogCore(x);
@@ -487,26 +627,24 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     }
 
     // e^(ln(x) + y) -> x * e^y
+    //
+    // Every logarithm term is taken out at once: e^(ln(a) + ln(b) - ln(c) + y)
+    // is (a·b/c)·e^y. This holds for any a, b, c, since e^(ln(u)) = u on the
+    // whole plane, so it does not need the combination ln(a) + ln(b) ->
+    // ln(ab), which requires non-negative arguments.
     if (
       sym(base) === 'ExponentialE' &&
       exp.operator === 'Add' &&
       isFunction(exp)
     ) {
-      for (let i = 0; i < exp.ops.length; i++) {
-        const term = exp.ops[i];
-        if (isFunction(term, 'Ln')) {
-          const otherTerms = exp.ops.filter((_, idx) => idx !== i);
-          const remaining =
-            otherTerms.length === 0
-              ? ce.Zero
-              : otherTerms.length === 1
-                ? otherTerms[0]
-                : ce._fn('Add', [...otherTerms]);
-          return {
-            value: term.op1.mul(ce._fn('Exp', [remaining])),
-            because: 'e^(ln(x) + y) -> x * e^y',
-          };
-        }
+      const taken = takeOutLogTerms(ce, exp.ops, (t) => isFunction(t, 'Ln'));
+      if (taken !== undefined) {
+        const [factor, rest] = taken;
+        return {
+          value:
+            rest === undefined ? factor : factor.mul(ce._fn('Exp', [rest])),
+          because: 'e^(ln(x) + y) -> x * e^y',
+        };
       }
 
       // e^(log_c(x) + y) -> x^{1/ln(c)} * e^y
@@ -580,23 +718,20 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       return { value: exp.op1, because: 'c^log_c(x) -> x' };
     }
 
-    // c^(log_c(x) + y) -> x * c^y
+    // c^(log_c(x) + y) -> x * c^y, every log_c term at once (see the
+    // e^(ln(x) + y) rule above: c^(log_c(u)) = u for any u).
     if (isFunction(exp, 'Add')) {
-      for (let i = 0; i < exp.ops.length; i++) {
-        const term = exp.ops[i];
-        if (isFunction(term, 'Log') && term.op2?.isSame(base)) {
-          const otherTerms = exp.ops.filter((_, idx) => idx !== i);
-          const remaining =
-            otherTerms.length === 0
-              ? ce.Zero
-              : otherTerms.length === 1
-                ? otherTerms[0]
-                : ce._fn('Add', [...otherTerms]);
-          return {
-            value: term.op1.mul(base.pow(remaining)),
-            because: 'c^(log_c(x) + y) -> x * c^y',
-          };
-        }
+      const taken = takeOutLogTerms(
+        ce,
+        exp.ops,
+        (t) => isFunction(t, 'Log') && t.op2?.isSame(base) === true
+      );
+      if (taken !== undefined) {
+        const [factor, rest] = taken;
+        return {
+          value: rest === undefined ? factor : factor.mul(base.pow(rest)),
+          because: 'c^(log_c(x) + y) -> x * c^y',
+        };
       }
     }
 
@@ -707,95 +842,36 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
 
     // Combine Ln terms: ln(a) + ln(b) -> ln(ab), ln(a) - ln(b) -> ln(a/b)
     //
-    // Branch-cut guard (ROADMAP item 7a): the combine is unsound when an
-    // operand lies on Ln's branch cut (the negative real axis): the principal
-    // values differ by a multiple of 2πi (e.g. ln(-2) + ln(-3) = ln(6) + 2πi,
-    // not ln(6)). Skip the combine when any participating argument is provably
-    // on the cut; positive and unconstrained-symbolic arguments are unaffected.
-    if (
-      lnTerms.length >= 2 &&
-      !lnTerms.some(
-        (t) =>
-          onBranchCut(ce, 'Ln', t.arg) === true || !isEligibleRealRewrite(t.arg)
-      )
-    ) {
-      // Combine all Ln terms: multiply positives, divide negatives
-      // Result is ln(product of positives / product of negatives)
-      let numerator = ce.One;
-      let denominator = ce.One;
-      for (const t of lnTerms) {
-        if (t.positive) {
-          numerator = numerator.mul(t.arg);
-        } else {
-          denominator = denominator.mul(t.arg);
-        }
-      }
+    // The combine is valid only for non-negative arguments. Elsewhere the
+    // principal values can differ by a multiple of 2πi: at a = b = -1,
+    // ln(a) + ln(b) is 2πi but ln(ab) is ln(1) = 0, and at x = 3,
+    // ln(2 + x) - ln(2 - x) is ln(5) - πi but ln((2 + x)/(2 - x)) is
+    // ln(5) + πi. So only the arguments that are provably non-negative are
+    // combined (`isNonNegativeLogArgument()`: by their value, their type, an
+    // assumption such as `assume(a > 0)`, or an absolute value); the others
+    // stay as they are (cortex-js/compute-engine#397; the policy is in
+    // `docs/SIMPLIFY.md`, "Generic-real simplification policy").
+    // `combineLogGroup()` also splits a positive constant factor out of an
+    // argument, which is valid everywhere, so `ln(2x) - ln(x)` is `ln(2)`.
+    const lnResult = combineLogGroup(ce, x.ops, lnTerms, (arg) =>
+      ce._fn('Ln', [arg])
+    );
+    if (lnResult !== undefined)
+      return { value: lnResult, because: 'combine ln terms' };
 
-      const combinedArg = numerator.div(denominator);
-      const combinedIndices = new Set(lnTerms.map((t) => t.index));
-      const remainingTerms = [...x.ops].filter(
-        (_, i) => !combinedIndices.has(i)
-      );
-
-      if (remainingTerms.length === 0) {
-        return {
-          value: ce._fn('Ln', [combinedArg]),
-          because: 'combine ln terms',
-        };
-      }
-      return {
-        value: ce._fn('Add', [ce._fn('Ln', [combinedArg]), ...remainingTerms]),
-        because: 'combine ln terms',
-      };
-    }
-
-    // Combine Log terms with same base: log_c(a) + log_c(b) -> log_c(ab)
-    // Same branch-cut guard as the Ln combine above: the logarithm's
-    // principal-branch cut on its argument is the negative real axis for any
-    // real base, so the argument is checked against Ln's cut record.
+    // Combine Log terms with same base: log_c(a) + log_c(b) -> log_c(ab),
+    // with the same requirement as the Ln combine above (log_c(x) is
+    // ln(x)/ln(c)).
     for (const [, terms] of logTerms) {
-      if (
-        terms.length >= 2 &&
-        !terms.some(
-          (t) =>
-            onBranchCut(ce, 'Ln', t.arg) === true ||
-            !isEligibleRealRewrite(t.arg)
-        )
-      ) {
-        let numerator = ce.One;
-        let denominator = ce.One;
-        for (const t of terms) {
-          if (t.positive) {
-            numerator = numerator.mul(t.arg);
-          } else {
-            denominator = denominator.mul(t.arg);
-          }
-        }
-
-        const combinedArg = numerator.div(denominator);
-        const combinedIndices = new Set(terms.map((t) => t.index));
-        const remainingTerms = [...x.ops].filter(
-          (_, i) => !combinedIndices.has(i)
-        );
-
-        // Don't include 'Nothing' as explicit base - use single-argument form for default base 10
-        const base = terms[0].base;
-        const isDefaultBase = sym(base) === 'Nothing';
-        const combinedLog = isDefaultBase
-          ? ce._fn('Log', [combinedArg])
-          : ce._fn('Log', [combinedArg, base]);
-
-        if (remainingTerms.length === 0) {
-          return {
-            value: combinedLog,
-            because: 'combine log terms',
-          };
-        }
-        return {
-          value: ce._fn('Add', [combinedLog, ...remainingTerms]),
-          because: 'combine log terms',
-        };
-      }
+      // Don't include 'Nothing' as explicit base - use single-argument form
+      // for default base 10
+      const base = terms[0].base;
+      const isDefaultBase = sym(base) === 'Nothing';
+      const logResult = combineLogGroup(ce, x.ops, terms, (arg) =>
+        isDefaultBase ? ce._fn('Log', [arg]) : ce._fn('Log', [arg, base])
+      );
+      if (logResult !== undefined)
+        return { value: logResult, because: 'combine log terms' };
     }
   }
 

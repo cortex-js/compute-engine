@@ -115,7 +115,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Airy function of the first kind",
-      "wikidata": "Q403629",
+      "wikidata": "Q109729241",
       "examples": [
         "N(AiryAi(1))"
       ]
@@ -131,7 +131,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Derivative of the Airy function of the first kind",
-      "wikidata": "Q403629",
+      "wikidata": "Q409415",
       "examples": [
         "N(AiryAiPrime(0))"
       ]
@@ -147,7 +147,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Airy function of the second kind",
-      "wikidata": "Q403629",
+      "wikidata": "Q109729257",
       "examples": [
         "N(AiryBi(0))"
       ]
@@ -163,7 +163,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Derivative of the Airy function of the second kind",
-      "wikidata": "Q403629",
+      "wikidata": "Q409415",
       "examples": [
         "N(AiryBiPrime(0))"
       ]
@@ -276,7 +276,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for |x|, |y| < 1.",
-      "wikidata": "Q2701540"
+      "wikidata": "Q4780998"
     },
     {
       "name": "Append",
@@ -796,7 +796,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Modified Bessel function of the first kind",
-      "wikidata": "Q627488",
+      "wikidata": "Q2607225",
       "examples": [
         "N(BesselI(0, 1))"
       ]
@@ -812,7 +812,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Bessel function of the first kind",
-      "wikidata": "Q627488",
+      "wikidata": "Q219637",
       "examples": [
         "N(BesselJ(0, 1))"
       ]
@@ -828,7 +828,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Modified Bessel function of the second kind (Macdonald function)",
-      "wikidata": "Q627488",
+      "wikidata": "Q109559130",
       "examples": [
         "N(BesselK(0, 1))"
       ]
@@ -844,7 +844,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Bessel function of the second kind (Neumann function)",
-      "wikidata": "Q627488",
+      "wikidata": "Q109545924",
       "examples": [
         "N(BesselY(0, 1))"
       ]
@@ -860,7 +860,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Euler beta function",
-      "wikidata": "Q189062",
+      "wikidata": "Q468881",
       "examples": [
         "[Beta(2, 3), N(Beta(1/2, 1/2))]"
       ]
@@ -1413,7 +1413,7 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return all k-element combinations of a collection.",
-      "wikidata": "Q193606"
+      "wikidata": "Q202805"
     },
     {
       "name": "Complement",
@@ -1919,7 +1919,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Dedekind eta function η(τ), Im(τ) > 0.",
-      "wikidata": "Q1187208"
+      "wikidata": "Q1182161"
     },
     {
       "name": "Dedup",
@@ -2126,7 +2126,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Digamma function, the logarithmic derivative of the gamma function",
-      "wikidata": "Q1142755",
+      "wikidata": "Q905326",
       "examples": [
         "[Digamma(1), N(Digamma(1))]"
       ]
@@ -2478,7 +2478,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Elliptic integral of the second kind: complete E(m) with one argument, incomplete E(φ|m) with two (amplitude first, parameter convention m = k², as in Mathematica).",
-      "wikidata": "Q1375529"
+      "wikidata": "Q109753012"
     },
     {
       "name": "EllipticF",
@@ -2491,7 +2491,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Incomplete elliptic integral of the first kind F(φ|m) (amplitude first, parameter convention m = k², as in Mathematica). F(π/2|m) = K(m).",
-      "wikidata": "Q1062952"
+      "wikidata": "Q109752309"
     },
     {
       "name": "EllipticK",
@@ -2504,7 +2504,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Complete elliptic integral of the first kind K(m), parameter convention m = k².",
-      "wikidata": "Q1080993"
+      "wikidata": "Q109752514"
     },
     {
       "name": "EllipticPi",
@@ -2517,7 +2517,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Elliptic integral of the third kind: complete Π(n|m) with two arguments, incomplete Π(n; φ|m) with three (characteristic first, amplitude second, parameter convention m = k², as in Mathematica).",
-      "wikidata": "Q1123360"
+      "wikidata": "Q109753363"
     },
     {
       "name": "EndsWith",
@@ -2769,7 +2769,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Exponential integral Ei(x) = PV ∫_{−∞}^x eᵗ/t dt.",
-      "wikidata": "Q1361401"
+      "wikidata": "Q1419948"
     },
     {
       "name": "ExponentialDistribution",
@@ -3473,7 +3473,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Kummer confluent hypergeometric function ₁F₁(a; b; z) = M(a, b, z).",
-      "wikidata": "Q1331447"
+      "wikidata": "Q783948"
     },
     {
       "name": "Hypergeometric2F1",
@@ -3486,7 +3486,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Gauss hypergeometric function ₂F₁(a, b; c; z).",
-      "wikidata": "Q672619"
+      "wikidata": "Q21028472"
     },
     {
       "name": "Hypot",
@@ -4260,7 +4260,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Jacobi theta function θⱼ(z, τ), j ∈ {1,2,3,4}, nome q = e^{iπτ} (Fungrim convention).",
-      "wikidata": "Q1154532"
+      "wikidata": "Q17098064"
     },
     {
       "name": "Join",
@@ -4370,7 +4370,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Lambert W function (product logarithm)",
-      "wikidata": "Q429963",
+      "wikidata": "Q429331",
       "examples": [
         "[LambertW(1), N(LambertW(1))]"
       ]
@@ -4719,7 +4719,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x).",
-      "wikidata": "Q853513"
+      "wikidata": "Q1350206"
     },
     {
       "name": "Loop",
@@ -5203,7 +5203,7 @@
       "lazy": true,
       "broadcastable": true,
       "description": "Logical NAND: the negation of AND (n-ary). Short-circuits: operands are evaluated left to right and evaluation stops at the first `False`.",
-      "wikidata": "Q189550"
+      "wikidata": "Q3874243"
     },
     {
       "name": "ND",
@@ -5308,7 +5308,7 @@
       "lazy": true,
       "broadcastable": true,
       "description": "Logical NOR: the negation of OR (n-ary). Short-circuits: operands are evaluated left to right and evaluation stops at the first `True`.",
-      "wikidata": "Q189561"
+      "wikidata": "Q574946"
     },
     {
       "name": "Norm",
@@ -5980,7 +5980,7 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Plus or Minus",
-      "wikidata": "Q120812",
+      "wikidata": "Q260387",
       "examples": [
         "PlusMinus(1, 0.1)"
       ]
@@ -5996,7 +5996,7 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1).",
-      "wikidata": "Q2367490"
+      "wikidata": "Q2339261"
     },
     {
       "name": "PointList",
@@ -6082,7 +6082,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Polygamma function, the n-th derivative of the digamma function",
-      "wikidata": "Q1817679",
+      "wikidata": "Q857956",
       "examples": [
         "N(PolyGamma(2, 1))"
       ]
@@ -6113,7 +6113,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ, at any real or complex order s.",
-      "wikidata": "Q320067"
+      "wikidata": "Q1238449"
     },
     {
       "name": "Polynomial",
@@ -8425,7 +8425,7 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Trigamma function, the derivative of the digamma function",
-      "wikidata": "Q2371722",
+      "wikidata": "Q1244426",
       "examples": [
         "N(Trigamma(1))"
       ]
@@ -8969,14 +8969,14 @@
       "category": "Physics",
       "type": "value",
       "description": "Avogadro constant",
-      "wikidata": "Q47574"
+      "wikidata": "Q6203"
     },
     {
       "name": "BoltzmannConstant",
       "category": "Physics",
       "type": "value",
       "description": "Boltzmann constant",
-      "wikidata": "Q131536"
+      "wikidata": "Q5962"
     },
     {
       "name": "CatalanConstant",
@@ -9075,7 +9075,7 @@
       "category": "Physics",
       "type": "value",
       "description": "Molar gas constant",
-      "wikidata": "Q39600"
+      "wikidata": "Q182333"
     },
     {
       "name": "GoldenRatio",
@@ -9090,7 +9090,7 @@
       "category": "Physics",
       "type": "value",
       "description": "Newtonian constant of gravitation",
-      "wikidata": "Q30022"
+      "wikidata": "Q18373"
     },
     {
       "name": "Half",
@@ -9211,7 +9211,7 @@
       "category": "Physics",
       "type": "value",
       "description": "Planck constant",
-      "wikidata": "Q524"
+      "wikidata": "Q122894"
     },
     {
       "name": "PositiveInfinity",
@@ -9269,7 +9269,7 @@
       "category": "Physics",
       "type": "value",
       "description": "Stefan-Boltzmann constant",
-      "wikidata": "Q196898"
+      "wikidata": "Q51374"
     },
     {
       "name": "True",
@@ -9283,7 +9283,7 @@
       "category": "Physics",
       "type": "value",
       "description": "Vacuum permittivity (electric constant)",
-      "wikidata": "Q176908"
+      "wikidata": "Q6158"
     }
   ]
 }

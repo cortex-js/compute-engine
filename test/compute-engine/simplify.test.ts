@@ -264,7 +264,10 @@ describe('Canonicalization: Ln', () => {
     checkSimplify('\\ln(e^x/y)-x', '-\\ln(y)'));
   test('ln(y/e^x) = ln(y)-x', () => checkSimplify('\\ln(y/e^x)', '\\ln(y)-x'));
   test('ln(0) = -infinity', () => checkSimplify('\\ln(0)', '-\\infty'));
-  test('ln(1/x) = -ln(x)', () => checkSimplify('\\ln(1/x)', '-\\ln(x)'));
+  // A logarithm is split or combined only when its arguments are provably
+  // non-negative (decision of 2026-10-01, cortex-js/compute-engine#397).
+  test('ln(1/x) stays: x is not known non-negative', () =>
+    checkSimplify('\\ln(1/x)', '\\ln(1/x)'));
   test('ln(1) = 0', () => checkSimplify('\\ln(1)', 0));
   test('ln(e) = 1', () => checkSimplify('\\ln(e)', 1));
   test('ln(e^x) = x', () => checkSimplify('\\ln(e^x)', 'x'));
@@ -283,8 +286,8 @@ describe('Canonicalization: Ln', () => {
 
 describe('Canonicalization: Log', () => {
   test('log_c(1) = 0', () => checkSimplify('\\log_c(1)', 0));
-  test('log_2(1/x) = -log_2(x)', () =>
-    checkSimplify('\\log_2(1/x)', '-\\log_2(x)'));
+  test('log_2(1/x) stays: x is not known non-negative', () =>
+    checkSimplify('\\log_2(1/x)', '\\log_2(1/x)'));
   test('log_2(0) = -infinity', () => checkSimplify('\\log_2(0)', '-\\infty'));
 });
 
@@ -532,10 +535,12 @@ describe('Rules: Ln', () => {
     checkSimplify('\\ln(\\sqrt{x})-\\ln(x)/2', 0));
   test('ln(3)+ln(1/3) = 0', () =>
     checkSimplify('\\ln(3)+\\ln(\\frac{1}{3})', 0));
-  test('ln(xy)-ln(x) = ln(y)', () =>
-    checkSimplify('\\ln(xy)-\\ln(x)', '\\ln(y)'));
-  test('ln(y/x)+ln(x) = ln(y)', () =>
-    checkSimplify('\\ln(y/x)+\\ln(x)', '\\ln(y)'));
+  // Not combined: x and y are not known non-negative (decision of
+  // 2026-10-01, cortex-js/compute-engine#397).
+  test('ln(xy)-ln(x) stays', () =>
+    checkSimplify('\\ln(xy)-\\ln(x)', '\\ln(xy)-\\ln(x)'));
+  test('ln(y/x)+ln(x) stays', () =>
+    checkSimplify('\\ln(y/x)+\\ln(x)', '\\ln(x)+\\ln(y/x)'));
   test('e^{ln(x)+x} = x*e^x', () => checkSimplify('e^{\\ln(x)+x}', 'x*e^x'));
   test('e^{ln(x)-2x} = x*e^{-2x}', () =>
     checkSimplify('e^{\\ln(x)-2x}', 'x*e^{-2x}'));
@@ -573,10 +578,12 @@ describe('Rules: Log', () => {
     checkSimplify('\\log_4(x^{\\frac{7}{4}})', '\\frac{7}{4}\\log_4(x)'));
   test('log_{1/2}(0) = infinity', () =>
     checkSimplify('\\log_{1/2}(0)', '\\infty'));
-  test('log_c(xy)-log_c(x) = log_c(y)', () =>
-    checkSimplify('\\log_c(xy)-\\log_c(x)', '\\log_c(y)'));
-  test('log_c(y/x)+log_c(x) = log(y,c)', () =>
-    checkSimplify('\\log_c(y/x)+\\log_c(x)', '\\log(y, c)'));
+  // Not combined: x and y are not known non-negative (decision of
+  // 2026-10-01, cortex-js/compute-engine#397).
+  test('log_c(xy)-log_c(x) stays', () =>
+    checkSimplify('\\log_c(xy)-\\log_c(x)', '\\log_c(xy)-\\log_c(x)'));
+  test('log_c(y/x)+log_c(x) stays', () =>
+    checkSimplify('\\log_c(y/x)+\\log_c(x)', '\\log_c(x)+\\log_c(y/x)'));
   test('c^{log_c(x)+x} = x*c^x', () =>
     checkSimplify('c^{\\log_c(x)+x}', 'x c^x'));
   test('c^{log_c(x)-2*x} = x*c^{-2x}', () =>
@@ -602,8 +609,8 @@ describe('Rules: Log', () => {
     checkSimplify('\\log_c(0)', '\\log_{c}(0)'));
   test('log_1(3) = ~oo', () =>
     checkSimplify('\\log_1(3)', '\\tilde\\infty'));
-  test('log_2(x)-log_2(xy) = -log_2(y)', () =>
-    checkSimplify('\\log_2(x)-\\log_2(xy)', '-\\log_2(y)'));
+  test('log_2(x)-log_2(xy) stays: x, y not known non-negative', () =>
+    checkSimplify('\\log_2(x)-\\log_2(xy)', '\\log_2(x)-\\log_2(xy)'));
   test('3^{log_3(x)+2} = 9x', () => checkSimplify('3^{\\log_3(x)+2}', '9x'));
 });
 
@@ -1474,55 +1481,59 @@ describe('SQRT AND ROOT POWER SIMPLIFICATION', () => {
     expect(simplify('(\\sqrt{x})^4')).toMatchInlineSnapshot(`["Square", "x"]`));
 });
 
+// Logarithms of symbols that are not known non-negative are not combined:
+// at x = y = -1, ln(x) + ln(y) is 2πi but ln(xy) is 0 (decision of
+// 2026-10-01, cortex-js/compute-engine#397). Combining logarithms of
+// positive arguments is tested in `issue-397-small-fixes.test.ts`.
 describe('LOGARITHM COMBINATION RULES', () => {
-  test('ln(x) + ln(y) = ln(xy)', () =>
+  test('ln(x) + ln(y) stays', () =>
     expect(simplify('\\ln(x) + \\ln(y)')).toMatchInlineSnapshot(
-      `["Ln", ["Multiply", "x", "y"]]`
+      `["Add", ["Ln", "x"], ["Ln", "y"]]`
     ));
 
-  test('ln(a) + ln(b) + ln(c) = ln(abc)', () =>
+  test('ln(a) + ln(b) + ln(c) stays', () =>
     expect(simplify('\\ln(a) + \\ln(b) + \\ln(c)')).toMatchInlineSnapshot(
-      `["Ln", ["Multiply", "a", "b", "c"]]`
+      `["Add", ["Ln", "a"], ["Ln", "b"], ["Ln", "c"]]`
     ));
 
-  test('ln(x) - ln(y) = ln(x/y)', () =>
+  test('ln(x) - ln(y) stays', () =>
     expect(simplify('\\ln(x) - \\ln(y)')).toMatchInlineSnapshot(
-      `["Ln", ["Divide", "x", "y"]]`
+      `["Subtract", ["Ln", "x"], ["Ln", "y"]]`
     ));
 
-  test('ln(xy) - ln(x) = ln(y)', () =>
+  test('ln(xy) - ln(x) stays', () =>
     expect(simplify('\\ln(xy) - \\ln(x)')).toMatchInlineSnapshot(
-      `["Ln", "y"]`
+      `["Subtract", ["Ln", ["Multiply", "x", "y"]], ["Ln", "x"]]`
     ));
 
-  test('ln(y/x) + ln(x) = ln(y)', () =>
+  test('ln(y/x) + ln(x) stays', () =>
     expect(simplify('\\ln(y/x) + \\ln(x)')).toMatchInlineSnapshot(
-      `["Ln", "y"]`
+      `["Add", ["Ln", "x"], ["Ln", ["Divide", "y", "x"]]]`
     ));
 
-  test('ln(a) + ln(b) - ln(c) = ln(ab/c)', () =>
+  test('ln(a) + ln(b) - ln(c) stays', () =>
     expect(simplify('\\ln(a) + \\ln(b) - \\ln(c)')).toMatchInlineSnapshot(
-      `["Ln", ["Divide", ["Multiply", "a", "b"], "c"]]`
+      `["Add", ["Ln", "a"], ["Ln", "b"], ["Negate", ["Ln", "c"]]]`
     ));
 
-  test('log_2(x) + log_2(y) = log_2(xy)', () =>
+  test('log_2(x) + log_2(y) stays', () =>
     expect(simplify('\\log_2(x) + \\log_2(y)')).toMatchInlineSnapshot(
-      `["Log", ["Multiply", "x", "y"], 2]`
+      `["Add", ["Log", "x", 2], ["Log", "y", 2]]`
     ));
 
-  test('log_2(x) - log_2(y) = log_2(x/y)', () =>
+  test('log_2(x) - log_2(y) stays', () =>
     expect(simplify('\\log_2(x) - \\log_2(y)')).toMatchInlineSnapshot(
-      `["Log", ["Divide", "x", "y"], 2]`
+      `["Subtract", ["Log", "x", 2], ["Log", "y", 2]]`
     ));
 
-  test('log_c(xy) - log_c(x) = log_c(y)', () =>
+  test('log_c(xy) - log_c(x) stays', () =>
     expect(simplify('\\log_c(xy) - \\log_c(x)')).toMatchInlineSnapshot(
-      `["Log", "y", "c"]`
+      `["Subtract", ["Log", ["Multiply", "x", "y"], "c"], ["Log", "x", "c"]]`
     ));
 
-  test('ln(x) + ln(y) + z = z + ln(xy)', () =>
+  test('ln(x) + ln(y) + z stays', () =>
     expect(simplify('\\ln(x) + \\ln(y) + z')).toMatchInlineSnapshot(
-      `["Add", "z", ["Ln", ["Multiply", "x", "y"]]]`
+      `["Add", "z", ["Ln", "x"], ["Ln", "y"]]`
     ));
 
   test('log_e(x) -> ln(x)', () =>
@@ -1533,14 +1544,14 @@ describe('LOGARITHM COMBINATION RULES', () => {
       `["Multiply", 2, ["Ln", "x"]]`
     ));
 
-  test('log_e(x) + log_e(y) = ln(xy)', () =>
+  test('log_e(x) + log_e(y) = ln(x) + ln(y)', () =>
     expect(simplify('\\log_e(x) + \\log_e(y)')).toMatchInlineSnapshot(
-      `["Ln", ["Multiply", "x", "y"]]`
+      `["Add", ["Ln", "x"], ["Ln", "y"]]`
     ));
 
-  test('ln(x) + log_e(y) = ln(xy)', () =>
+  test('ln(x) + log_e(y) = ln(x) + ln(y)', () =>
     expect(simplify('\\ln(x) + \\log_e(y)')).toMatchInlineSnapshot(
-      `["Ln", ["Multiply", "x", "y"]]`
+      `["Add", ["Ln", "x"], ["Ln", "y"]]`
     ));
 });
 

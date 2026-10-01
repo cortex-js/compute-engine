@@ -124,7 +124,7 @@ describe('COMPILE constant folding - constant collections', () => {
     // 80 elements exceeds CONSTANT_FOLD_MAX_INLINE_ELEMENTS: inlining it
     // would trade a compact emission for a wall of literals.
     const r = compile(ce.box(['At', MAP_SQUARES(80), 'k'] as any));
-    expect(r.code).toContain('Array.from');
+    expect(r.code).toContain('_SYS.rangeCount(');
     expect(r.run?.({ k: 3 })).toBe(9);
   });
 
@@ -140,7 +140,7 @@ describe('COMPILE constant folding - constant collections', () => {
     const many = (n: number) =>
       ce.box(['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, n]] as any);
 
-    expect(compile(many(60)).code).toContain('Array.from'); // JS: structural
+    expect(compile(many(60)).code).toContain('_SYS.rangeCount('); // JS: structural
     expect(compile(many(60), { to: 'glsl' }).code).toContain('float[60](');
     expect(compile(many(200), { to: 'glsl' }).code).toContain('float[200](');
     // The cap is an INCLUSIVE maximum, so each target folds exactly up to its
@@ -163,7 +163,7 @@ describe('COMPILE constant folding - constant collections', () => {
     );
     expect(
       compile(ce.box(['At', MAP_SQUARES(50), 'k'] as any)).code
-    ).toContain('Array.from');
+    ).toContain('_SYS.rangeCount(');
   });
 
   it('a non-indexed collection (a Set) never folds — no defined order', () => {
@@ -177,7 +177,7 @@ describe('COMPILE constant folding - constant collections', () => {
     const r = compile(ce.box(['At', MAP_SQUARES(6), 'k'] as any), {
       constantFold: false,
     });
-    expect(r.code).toContain('.map(');
+    expect(r.code).toContain('_SYS.rangeCount(');
     expect(r.run?.({ k: 3 })).toBe(9);
   });
 
@@ -449,7 +449,7 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
     // 1.07s, close enough to the anti-hang deadline that load could decide
     // the outcome again. The multiplying construct is the collection.
     expect(compile(ce.box(['Sum', ['Range', 1, 1000000]] as any)).code).toContain(
-      'Array.from'
+      '_SYS.range(1, 1000000, 1)'
     );
     // A small one still folds — the form is priced, not refused.
     expect(compile(ce.box(['Sum', ['Range', 1, 50]] as any)).code).toBe('1275');
@@ -487,7 +487,7 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
       'Sum',
       ['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, 100000]],
     ] as any);
-    expect(compile(big).code).toContain('Array.from');
+    expect(compile(big).code).toContain('_SYS.rangeCount(');
 
     // A bound that lives in a CONSUMER rather than the source still folds:
     // the source is infinite, the `Take` is what makes it finite.
@@ -611,7 +611,7 @@ describe('COMPILE constant folding - declines', () => {
     // compiles structurally instead.
     const deps = new Set<string>();
     const r = compile(ce.box(SUM_SQUARES_1_TO_5 as any), { symbolDeps: deps });
-    expect(r.code).toContain('.reduce(');
+    expect(r.code).toContain('_SYS.rangeCount(');
   });
 });
 

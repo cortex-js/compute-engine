@@ -81,13 +81,36 @@ For an unconstrained `x`:
 
 | Simplification | Result | Rule class |
 | --- | --- | --- |
-| `ln(x) + ln(y)` | `ln(xy)` | Generic-real |
+| `ln(x) + ln(y)` | unchanged | Requires non-negative arguments |
 | `ln(x^3)` | `3 ln(x)` | Generic-real; differs at negative reals |
 | `ln(x^2)` | `2 ln(abs(x))` | Always sound over the reals |
 | `sqrt(x^2)` | `abs(x)` | Always sound over the reals |
 
 Even powers use the absolute-value form. Odd and irrational exponents use the
 optimistic generic-real convention.
+
+### Combining or splitting logarithms requires non-negative arguments
+
+`ln(a) + ln(b) → ln(ab)` and `ln(a) − ln(b) → ln(a/b)` (and the same for
+`log_c` with one base), and the reverse `ln(a/b) → ln(a) − ln(b)`, apply only
+when every argument is provably non-negative: by its value (`ln(2) + ln(3)` is
+`ln(6)`), by its type, by an assumption (`assume(x > 0)`), or because it is an
+absolute value (`ln|x + 1| − ln|x + 2|` is `ln(|x + 1|/|x + 2|)`). For an
+unconstrained symbol the expression stays as it is: `ln(x) + ln(y)`,
+`ln(x/y)` and `ln(1/x)` are unchanged.
+
+For real non-negative arguments the principal values of both sides are
+equal, also at 0, where both are `-∞`. For negative arguments both sides are
+defined and different: at `a = b = -1`, `ln(a) + ln(b)` is `2πi` and `ln(ab)`
+is `0`. When this policy was first written, assumptions were not reliable
+enough to ask a user to state `x > 0`, so these rewrites applied to every
+unconstrained symbol. They are now (decision of 2026-10-01,
+cortex-js/compute-engine#397).
+
+The solver still combines the logarithms of an equation for any argument
+(`combineLogarithmsOfUnknown()` in `boxed-expression/solve.ts`): it checks
+each root against the original equation, which rejects a root that the
+combination adds.
 
 ### When a real-only rewrite must decline
 

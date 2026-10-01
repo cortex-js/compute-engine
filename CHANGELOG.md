@@ -22,6 +22,147 @@
   `exponentialE` option does the same for `ExponentialE` and `Exp`; both default
   to `\imaginaryI` and `\exponentialE`.
 
+- **The `attributes` entry of `About` is a list, and it says when an operator
+  is lazy.** It was one string with the flags separated by spaces:
+  `About(Add)` gave `"commutative associative idempotent"`. It is now a list
+  of strings, the algebraic flags and then `lazy` when the arguments of the
+  operator are passed to it unevaluated: `About(Add)` gives
+  `["commutative", "associative", "idempotent", "lazy"]`, and `About(Hold)`,
+  which had no `attributes` entry, gives `["lazy"]`. A program that read the
+  entry as a string must read it as a list.
+
+- **[#397](https://github.com/cortex-js/compute-engine/issues/397) `Solve` answers an identity with a free parameter, and stays
+  unevaluated when it finds no candidate root.** `Solve(x = x, x)`,
+  `Solve(0 = 0, x)` and `Solve(2(x + 1) = 2x + 2, x)` were `[]` ("no
+  solution"); they are now `[t]`, one solution for every value of the fresh
+  parameter `t`, the same form as the parametric answers of the integer and
+  congruence solvers. An equation for which no strategy of the solver gives a
+  candidate root (`a·x⁵ + x + 1 = 0`, `sin(x) = x³ + eˣ`, which has a real
+  root) and an equation whose answer depends on another unknown
+  (`Solve(a = 0, x)`) were also `[]`; they now stay unevaluated. A
+  contradiction (`x + 1 = x + 2`) and an equation whose candidate roots are
+  all rejected (`√x = -1`, `sin x = 2`, `eˣ = 0`) are still `[]`. The
+  `.solve()` method is unchanged. A program that read `[]` as "no solution"
+  for these equations gets the unevaluated `Solve` or `[t]` instead.
+- **[#397](https://github.com/cortex-js/compute-engine/issues/397) `Range` with an exact rational bound or step enumerates exact
+  values.** `Range(0, 1, 1/3)` was `[0, 0.333…, 0.666…, 1]`; it is now
+  `[0, 1/3, 2/3, 1]`, as in Mathematica, and the two-sample form
+  `[1 + 4/d, 1 + 8/d...5]` with `d = 500` starts at `126/125`, not `1.008`. A
+  float bound or step, and a step that is a constant expression (`π/4`), still
+  give floats, and `.N()` of the range gives floats.
+  `Sum(Range(0, 1, 1/3))` is now `2`, not `1.9999999999999999`.
+- **[#397](https://github.com/cortex-js/compute-engine/issues/397)
+  `simplify()` combines or splits logarithms only when their arguments are
+  provably non-negative.** `ln(x) + ln(y)` was `ln(xy)` and `ln(x/y)` was
+  `ln(x) − ln(y)` for any unconstrained `x` and `y`, which is wrong for
+  negative values: at `x = y = -1`, `ln(x) + ln(y)` is `2πi` but `ln(xy)` is
+  `0`. They now stay as they are, as does `ln(1/x)`, which was `−ln(x)`. An
+  argument is used when it is non-negative by its value (`ln(2) + ln(3)` is
+  still `ln(6)`), by its type, by an assumption (with `assume(x > 0)` and
+  `assume(y > 0)`, `ln(x) + ln(y)` is `ln(xy)`), or because it is an absolute
+  value. The same applies to `log_c`. `Solve` still combines the logarithms of
+  an equation, and checks each root against the original equation:
+  `Solve(ln(x + 1) + ln(x − 1) = 0, x)` is `[√2]`. The policy is in
+  `docs/SIMPLIFY.md`.
+
+### Issues Resolved
+
+- `Solve` found no root of a linear equation whose coefficient of the unknown
+  is a sum: `x − ax + a = 0`, `πx + x = 1` and `x = e(x − 1)` gave `[]`. Only
+  the shape `ax + b` was recognized. They are now solved from their
+  coefficients (`1/(π + 1)`, `e/(e − 1)`).
+- `Solve` found no root of an equation with one logarithm of a non-linear
+  argument, or with several logarithms of one base: `ln(x² + 2x) = 3`,
+  `log_2(x) + log_2(x + 2) = 3` and `ln(x) − ln(x − 1) = 1` gave `[]`. They
+  now give `−1 ± √(1 + e³)`, `[2]` and `[e/(e − 1)]`. The roots are checked
+  against the original equation, so a root where a logarithm is not defined
+  is rejected (`log_2(x) + log_2(x + 2) = 3` has no root `−4`).
+- [#397](https://github.com/cortex-js/compute-engine/issues/397) Thirty-seven Wikidata ids, in the library and in
+  `OPERATORS.json`, named an unrelated item: `PlanckConstant` was `Q524`
+  (Mount Vesuvius), `Nor` was `Q189561` (narcolepsy). They now name the
+  concept of the head, and a test checks that `OPERATORS.json` agrees with
+  the library.
+- [#397](https://github.com/cortex-js/compute-engine/issues/397) `LerchPhi` at a negative integer order and exact operands stayed
+  unevaluated where its value is 0: `LerchPhi(-1, -1, 1/2)` is now `0`, also
+  under `.N()`, as in Wolfram. For `s = -n` (`n ≤ 12`) and exact `z ≠ 1` and
+  `a`, `LerchPhi(z, s, a)` is now the exact rational value of its closed form
+  `aⁿ/(1 − z) + Σⱼ C(n, j)·aⁿ⁻ʲ·Li₋ⱼ(z)`: `LerchPhi(3, -4, -5/2)` is
+  `-5725/32`.
+- `Solve(eˣ = 3, x)` gave the float `1.0986…` instead of `ln(3)`, and
+  `Solve(e^(2x) = 5, x)` gave `[]`. The `Solve` operator replaced the constant
+  `ExponentialE` by its float value before solving. A constant that keeps its
+  value until `.N()` (`ExponentialE`, `Pi`) now stays symbolic, and the
+  answers are `[ln(3)]` and `[ln(5)/2]`.
+- [#398](https://github.com/cortex-js/compute-engine/issues/398) `About` now
+  reports the `examples` and `keywords` of a definition, each as a list of
+  strings: `About(Sin)` includes
+  `"examples" -> ["Sin(Pi / 6)", "Sin(1)", "N(Sin(1))"]` and
+  `"keywords" -> ["sine"]`. The boxed operator and value definitions did not
+  keep the `examples` of the definition they were made from. They now keep
+  them as a list of strings; a definition that gives one string is stored as
+  a list of one string.
+- [#388](https://github.com/cortex-js/compute-engine/issues/388) A function
+  literal in compiled JavaScript was wrapped in a broadcast dispatch even
+  where no argument could be a list. Two cases now compile to the bare arrow
+  function. A callback fed the elements of a `Range` whose start and step are
+  literal numbers (`Map(q ↦ …, Range(1, Length(s)))`) receives a finite
+  number at every call, so the wrapper and the `NaN` and absence tests on its
+  parameter (`q === q`, `typeof q === 'number'`) are gone. An `Apply` of a
+  literal to arguments that are scalars by construction (a number, a declared
+  scalar input, a loop index) no longer builds the wrapper and its closure at
+  each evaluation. A list argument still broadcasts, as in the interpreter.
+- [#387](https://github.com/cortex-js/compute-engine/issues/387) On the
+  JavaScript target, a compiled `Range` is built in a loop, and a `Map`, a
+  `Fold`/`Reduce` or a `Sum(Map(…))` over a finite `Range` builds no range
+  at all. A `Range` compiled to
+  `Array.from({length: n}, (_e, i) => a + i * s)`, which is about 18 times
+  slower on V8 than a preallocated array filled by a counted loop. The
+  compiled code now calls a run-time helper, `_SYS.range(a, b, s)`, that
+  fills the array in a loop. A `Map` over a finite range, a `Reduce` over one
+  (`Fold` is its canonical form) and the `Sum` or `Product` of a `Map` over
+  one now walk the range with the counted loop that predicates over a range
+  already use (issue #373). `Fold((acc, k) ↦ acc + k, 0, 1..n)` at n = 1000
+  went from about 38 µs to under 1 µs. The values are unchanged: the element
+  count is the interpreter's own, element `i` is `a + i × s`, the elements
+  are folded in range order, a seedless fold over an empty range is `NaN`,
+  and an infinite bound at run time still throws a `RangeError`. A range that
+  is shared by common-subexpression elimination, or has a non-finite bound,
+  keeps the array lowering.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) A library
+  given in the `libraries` constructor option with no `requires` list loaded
+  before the standard libraries listed before it. The libraries were sorted
+  so that every library with no dependencies came first, whatever its place
+  in the list. A caller library whose definitions use a function literal
+  (`evaluate: ["Function", …]`) then made `Block` a plain symbol before
+  `control-structures` could define it: the engine printed "Duplicate
+  operator definition: Block" and stayed broken (`x := 2; x + 1` gave
+  `{2; 3}`). The libraries now load in the order of the list, and each
+  library loads after the libraries in its `requires` list. The order of the
+  standard libraries does not change.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) `D` did not
+  differentiate an operator defined by a library given in the `libraries`
+  constructor option: with `Sq` defined as `x ↦ x²`, `D(Sq(x), x)` gave
+  `Apply(Derivative("Sq", 1), x)`. Such a library is installed in the same
+  scope as the standard library, so `D` took its operators for built-in
+  ones. `D(Sq(x), x)` now gives `2x`, as it does when `Sq` is declared with
+  `ce.declare()`.
+- `D` used the library rule for a user function with the name of a library
+  function: after `\operatorname{Sinh}(x) := 3x`, `Sinh(2)` is `6` but
+  `D(Sinh(t), t)` gave `cosh(t)`. It now gives `3`.
+- [#394](https://github.com/cortex-js/compute-engine/issues/394) `SetMinus`,
+  `Length`, `Count`, `IsEmpty`, `Contains`, `Append` and `Slice` validated
+  their operands against a copy of their signature text, not against the
+  signature of their definition. A host that redeclared one of them with a
+  wider signature and kept its handlers
+  (`ce.declare('SetMinus', { ...ce.lookupDefinition('SetMinus').operator, signature: '(value, value*) -> set' })`)
+  still had the old validation: `SetMinus(5, 2)` stayed an
+  `incompatible-type` error. These operators now read the signature of the
+  definition in effect. A stock engine gives the same results as before.
+
+## 0.143.0 _2026-10-01_
+
+### Behavior Changes
+
 - **A symbol declared with a nested list type is the matrix it describes.**
   `list<vector<integer^3>^2>` (two rows of three integers) was not a subtype of
   `matrix<integer^(2x3)>`, so a function declared

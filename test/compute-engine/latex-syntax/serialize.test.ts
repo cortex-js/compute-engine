@@ -506,3 +506,55 @@ describe('PREFIX/POSTFIX OPERATOR SERIALIZATION', () => {
     }
   });
 });
+
+// A `Delimiter` (parentheses kept from the source) that is the whole
+// numerator, denominator or exponent: `\frac{}{}` and the superscript braces
+// already group it, so its parentheses are not written again.
+describe('DELIMITER IN A FRACTION OR AN EXPONENT', () => {
+  const cases: [unknown, string][] = [
+    [
+      [
+        'Equal',
+        'y',
+        ['Divide', 1, ['Delimiter', ['Add', 1, ['Power', 'x', 2]]]],
+      ],
+      'y=\\frac{1}{1+x^2}',
+    ],
+    [
+      [
+        'Divide',
+        ['Delimiter', ['Add', 'a', 'b']],
+        ['Delimiter', ['Add', 1, 'x']],
+      ],
+      '\\frac{a+b}{1+x}',
+    ],
+    [['Power', 'x', ['Delimiter', ['Divide', 1, 2]]], 'x^{\\frac{1}{2}}'],
+    [['Power', 'x', ['Delimiter', ['Add', 1, 'n']]], 'x^{1+n}'],
+    [['Divide', 1, ['Delimiter', ['Add', 1, 'x'], "'(,)'"]], '\\frac{1}{1+x}'],
+  ];
+
+  for (const form of ['raw', 'structural'] as const) {
+    test(`${form} form writes no redundant parentheses and round-trips`, () => {
+      for (const [json, expected] of cases) {
+        const expr = ce.box(json as any, { form });
+        expect(expr.latex).toBe(expected);
+        expect(ce.parse(expr.latex).isSame(ce.box(json as any))).toBe(true);
+      }
+    });
+  }
+
+  test('a Delimiter elsewhere keeps its parentheses', () => {
+    const latexOf = (json: unknown) =>
+      ce.box(json as any, { form: 'raw' }).latex;
+    expect(latexOf(['Power', ['Delimiter', ['Add', 1, 'x']], 2])).toBe(
+      '(1+x)^2'
+    );
+    expect(latexOf(['Multiply', 2, ['Delimiter', ['Add', 1, 'x']]])).toBe(
+      '2(1+x)'
+    );
+    // A delimited sequence is a tuple-like group: its parentheses stay
+    expect(latexOf(['Divide', 1, ['Delimiter', ['Sequence', 'a', 'b']]])).toBe(
+      '\\frac{1}{(a,b)}'
+    );
+  });
+});

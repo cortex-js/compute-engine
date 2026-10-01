@@ -9141,6 +9141,33 @@ export class BaseCompiler {
         return pt !== undefined && isNonRealNumber(pt);
       });
 
+      // A consumer that knows every value this literal will receive is a
+      // run-time scalar has said so (`withScalarFedLiteral`). The literal then
+      // needs no broadcast wrapper (see below), and its body may read each
+      // parameter as a scalar: a nested call of a scalar-parameter function
+      // takes the direct call form. When the values are also finite numbers
+      // by construction (the elements of a range with a finite literal start
+      // and step), a comparison against a parameter needs no NaN or
+      // `undefined` test either, exactly as for an emitted loop index. A
+      // literal with a complex parameter is left as it was, because its
+      // parameters hold `{ re, im }` objects in the body.
+      const fed =
+        target.language === 'javascript' &&
+        node !== undefined &&
+        literal !== undefined &&
+        params.length > 0 &&
+        !complexParam.some((c) => c) &&
+        paramsAreScalar(literal.type.type) &&
+        BaseCompiler.signatureParamsLowerToScalars(literal.type.type)
+          ? BaseCompiler.scalarFedLiterals.get(node)
+          : undefined;
+      if (fed !== undefined) {
+        const names = new Set(params.filter((name) => name !== '_'));
+        recordScalarParams(lambdaTarget, names);
+        if (fed === 'finite')
+          for (const name of names) recordDecidedLoopIndex(lambdaTarget, name);
+      }
+
       // A parameter whose complexness comes from the BOUND rather than from its
       // own annotation carries it nowhere the body can read — the parameter
       // symbol's type is the erased one — so the body would compile in the real
@@ -9316,8 +9343,11 @@ export class BaseCompiler {
       // A literal with a collection-typed parameter binds its argument whole
       // (the same `paramsAreScalar` reading `applyFunctionLiteral` makes) and
       // keeps the bare arrow, as does a parameterless one, which has no
-      // argument that could be a collection.
+      // argument that could be a collection. So does a literal whose consumer
+      // proved that every argument it passes is a scalar (`fed`): the
+      // wrapper's `Array.isArray` test can never be true there.
       if (
+        fed === undefined &&
         target.language === 'javascript' &&
         params.length > 0 &&
         literal !== undefined &&
@@ -15931,6 +15961,15 @@ export class BaseCompiler {
         : RANGE_COUNT_JS_SOURCE;
     const lo = BaseCompiler.compileRangeOperand(loExpr, target);
     const hi = BaseCompiler.compileRangeOperand(hiExpr, target);
+    // On the JavaScript target the run-time helper `_SYS.range` builds the
+    // array in a counted loop, with the same count and the same elements as
+    // the `Array.from` forms below, which are much slower on V8 (issue #387).
+    if (target.language === 'javascript') {
+      if (stepExpr === undefined)
+        return `((_lo,_hi)=>_SYS.range(_lo,_hi,_hi>=_lo?1:-1))(${lo},${hi})`;
+      const step = BaseCompiler.compileRangeOperand(stepExpr, target);
+      return `_SYS.range(${lo},${hi},${step})`;
+    }
     if (stepExpr === undefined) {
       // Auto-direction step at runtime: +1 if _hi >= _lo, else -1.
       return `((_lo,_hi)=>{const _st=_hi>=_lo?1:-1;return Array.from({length:${countFn}(_lo,_hi,_st)},(_,k)=>_lo+_st*k);})(${lo},${hi})`;
@@ -26112,6 +26151,43 @@ export class BaseCompiler {
         )};`
       );
     return wrapperName;
+  }
+
+  /**
+   * The `Function` literals that are being compiled for a consumer which
+   * passes them run-time scalars only, and what the consumer proved about
+   * those scalars. `'scalar'`: no argument is an array. `'finite'`: every
+   * argument is also a finite number, never NaN and never `undefined`.
+   * An entry exists only while `withScalarFedLiteral` runs, so the same
+   * node compiled in another position is not affected.
+   */
+  private static readonly scalarFedLiterals = new Map<
+    Expression,
+    'scalar' | 'finite'
+  >();
+
+  /**
+   * Run `compile` with `literal` (a `Function` expression) marked as fed
+   * run-time scalars only — see `scalarFedLiterals`. The `Function` lowering
+   * then emits the bare arrow without the broadcast wrapper, and records its
+   * parameters as scalars (and, for `'finite'`, as decided values) for the
+   * body. The caller is responsible for the claim: it must pass the
+   * resulting function only arguments of the stated kind.
+   */
+  static withScalarFedLiteral<T>(
+    literal: Expression,
+    kind: 'scalar' | 'finite',
+    compile: () => T
+  ): T {
+    const map = BaseCompiler.scalarFedLiterals;
+    const previous = map.get(literal);
+    map.set(literal, kind);
+    try {
+      return compile();
+    } finally {
+      if (previous === undefined) map.delete(literal);
+      else map.set(literal, previous);
+    }
   }
 
   /**

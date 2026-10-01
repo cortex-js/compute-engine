@@ -919,7 +919,12 @@ export type ParseLatexOptions = NumberFormat & {
    * If true, collect opt-in parse-time diagnostics (see {@link ParseDiagnostic})
    * flagging charitable parse decisions — undeclared symbols, application-like
    * juxtaposition read as multiply, discarded `%` comments, and trailing noise
-   * dropped by recovery.
+   * dropped by recovery. In non-strict mode, also: letter runs read as a
+   * product (`letter-run-split`), an implicit product read as the whole
+   * denominator of a `/` (`implicit-product-in-denominator`), digits
+   * separated by white space read as one number (`spaced-digit-groups`), and a
+   * symbol directly followed by `.digits` read as a product
+   * (`letter-before-decimal`).
    *
    * This flag only takes effect through
    * {@link IComputeEngine.parse | ComputeEngine.parse}, which
@@ -1025,6 +1030,24 @@ export interface Parser {
   /** @internal A retained application-shaped juxtaposition, before policy resolution. */
   _isApplicationCandidate?(expr: MathJsonExpression): boolean;
 
+  /** @internal In non-strict mode, read the signed exponent after `^-` or
+   * `^+` (`e^-x` is `Power(e, Negate(x))`). Called by the postfix entries
+   * triggered by these tokens, with the index after the sign. Returns `null`
+   * when no operand follows the sign directly, or in strict mode. */
+  _parseLenientSignedExponent?(
+    lhs: MathJsonExpression,
+    sign: '-' | '+'
+  ): MathJsonExpression | null;
+
+  /** @internal In non-strict mode, with diagnostics on, report a
+   * `letter-run-split` when the unbraced script that starts at token
+   * `scriptStart` and was just read took only the first letter of a run of
+   * letters (`(x)_ab` is `(x)_a·b`). Called by the postfix `_` entry. */
+  _emitScriptLetterRunSplit?(
+    scriptStart: number,
+    script: MathJsonExpression
+  ): void;
+
   /**
    * The single symbol oracle: everything the parser knows about `id`.
    *
@@ -1098,6 +1121,18 @@ export interface Parser {
    * product) so the head no longer reports a spurious multiplication.
    */
   _pruneJuxtaposition(name: string, checkpoint: number): void;
+
+  /**
+   * @internal
+   * Diagnostics: record a diagnostic with `code` spanning the tokens
+   * `[startToken, endToken)`. No-op unless diagnostics are enabled.
+   */
+  emitDiagnostic(
+    code: string,
+    startToken: number,
+    endToken: number,
+    detail?: Record<string, unknown>
+  ): void;
 
   /**
    * @internal

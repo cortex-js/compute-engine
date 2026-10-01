@@ -533,7 +533,8 @@ describe('Parser: list range ellipsis', () => {
         expect(operatorOf(e.json)).toBe('Range');
         const v = e.evaluate();
         expect(v.count).toBe(500);
-        expect(v.at(1)!.toString()).toBe('1.008');
+        // An exact bound and step give exact elements: 1 + 4/500 = 126/125.
+        expect(v.at(1)!.toString()).toBe('126/125');
         expect(v.at(500)!.toString()).toBe('5');
       });
 
@@ -552,7 +553,7 @@ describe('Parser: list range ellipsis', () => {
         expect(e.evaluate().count).toBe(500);
         eng.assign('d_iskdensity', 250);
         expect(e.evaluate().count).toBe(250);
-        expect(e.evaluate().at(1)!.toString()).toBe('1.016');
+        expect(e.evaluate().at(1)!.toString()).toBe('127/125');
         eng.assign('d_iskdensity', 100);
         expect(e.evaluate().count).toBe(100);
       });
