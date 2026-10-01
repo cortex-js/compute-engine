@@ -8159,6 +8159,14 @@ export class BaseCompiler {
               // two restricted points — emitted `[…] * […]`, which runs to
               // NaN behind `success: true`.
               isGatedIndexedCollection(a) ||
+              // An operand that MAY be a point at run time (a union with a
+              // tuple arm, `integer | tuple<real, real>`: the type of the
+              // sum of a list of points, which may be empty) is an array
+              // when it holds a point. `tryCompileBroadcast` has a plan for
+              // it under `Add` only; under any other head the scalar code
+              // ran to NaN: `2·Sum(P)` gave `NaN` where the interpreter
+              // answers the scaled point.
+              isRuntimePointShaped(a) ||
               // Read WITH the target, as `tryCompileBroadcast` reads it:
               // this guard is reached after that lowering declined, and an
               // operand it proved a constructed scalar (a call of a user
@@ -11775,9 +11783,17 @@ export class BaseCompiler {
           atomicTuple === undefined &&
           collection.some((a) => isBoundPossiblyCollectionTyped(a, target))
         ) {
+          // `linearAlgebraLane` also reads an operand whose type is a union
+          // with an absent arm (`At(P, 1)` with `P: list<matrix<complex^2x2>>`
+          // is typed `matrix<complex^2x2> | missing`), which the two other
+          // tests miss: the product of two complex matrices was compiled with
+          // the real matrix product, and its complex entries became `NaN`.
           if (
             args.some(
-              (a) => BaseCompiler.isComplexValued(a) || hasComplexElement(a)
+              (a) =>
+                BaseCompiler.isComplexValued(a) ||
+                hasComplexElement(a) ||
+                BaseCompiler.linearAlgebraLane([a]) === 'complex'
             )
           )
             return null;
@@ -13710,6 +13726,27 @@ export class BaseCompiler {
           `untyped parameters that the emitted code treats as real numbers. The interpreter evaluates it instead.`
       );
     });
+  }
+
+  /**
+   * Whether the collection form of `Sum`/`Product` over `coll` combines
+   * ELEMENTS THAT ARE COLLECTIONS (points, rows, matrices): its element type
+   * is an indexed collection that is not text. The JavaScript emitter then
+   * folds with the element-wise helpers (`_SYS.add`/`_SYS.mul`, or their
+   * complex forms), and the value is an array, complex-shaped exactly when
+   * the lane of `coll` is complex. `isComplexValued` and the emitter
+   * (`compileSumProduct`, `javascript-target.ts`) both read this test, so
+   * they agree on the shape of the value.
+   */
+  static foldsCollectionElements(coll: Expression): boolean {
+    const elt = BaseCompiler.collectionElementTypeOf(coll);
+    if (elt === undefined) return false;
+    const element = resolveTypeForCompilation(elt);
+    return (
+      element !== 'never' &&
+      !isSubtype(element, 'string') &&
+      isSubtype(element, INDEXED_COLLECTION_SHAPE_TYPE)
+    );
   }
 
   static collectionElementTypeOf(
@@ -17478,12 +17515,20 @@ export class BaseCompiler {
     // the raw real operator or with the shape-agnostic combiner wrapped in
     // the complex lift (`collectionFoldsReal`); its value is complex-shaped
     // exactly when the latter is emitted.
+    // When the elements are themselves collections (points, rows,
+    // matrices), the fold is element-wise and its value is an array whose
+    // entries are `{re, im}` exactly when the lane is complex
+    // (`foldsCollectionElements`). Reading such a fold with the scalar test
+    // put a sum of REAL points in the complex lane, and a parent read each
+    // coordinate as `{re, im}`: `Sum(P) + (1, 1)` gave `NaN` coordinates.
     if (
       (expr.operator === 'Sum' || expr.operator === 'Product') &&
       expr.ops.length === 1 &&
       (expr.ops[0].isCollection || expr.ops[0].type.matches('collection<any>'))
     )
-      return !BaseCompiler.collectionFoldsReal(expr.ops[0]);
+      return BaseCompiler.foldsCollectionElements(expr.ops[0])
+        ? BaseCompiler.linearAlgebraLane([expr.ops[0]]) === 'complex'
+        : !BaseCompiler.collectionFoldsReal(expr.ops[0]);
     // A SELECTION answers from its value ARMS, never from the node's type:
     // the emitters coerce every arm to `{re, im}` as soon as one arm is
     // complex-valued (`branchComplexCoercion`, Tycho item 60), so the value

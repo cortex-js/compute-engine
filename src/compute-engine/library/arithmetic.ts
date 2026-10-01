@@ -9284,8 +9284,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
 
-      canonical: ([body, ...bounds], { scope }) =>
-        canonicalBigop('Product', body, bounds, scope),
+      canonical: ([body, ...bounds], { scope, engine: ce }) =>
+        // With no operand, `canonicalBigop` read the engine of an undefined
+        // body and threw; the operand is reported missing, as for `Mean()`.
+        body === undefined
+          ? ce._fn('Product', [ce.error('missing')])
+          : canonicalBigop('Product', body, bounds, scope),
 
       evaluate: (ops, options) => {
         const ce = options.engine;
@@ -9543,9 +9547,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Arity-1 collection-reducer form: bypass canonicalBigop, which would
         // rewrite Sum(L) as Reduce(L, 'Add', 0). Keeping the `Sum` head lets
         // dot-notation serialization (`L.total`) round-trip.
+        // With no operand, `canonicalBigop` read the engine of an undefined
+        // body and threw; the operand is reported missing, as for `Mean()`.
+        if (body === undefined) return ce._fn('Sum', [ce.error('missing')]);
         if (bounds.length === 0) {
-          const canon = body?.canonical;
-          if (canon?.isCollection) return ce._fn('Sum', [canon]);
+          const canon = body.canonical;
+          if (canon.isCollection) return ce._fn('Sum', [canon]);
         }
         return canonicalBigop('Sum', body, bounds, scope);
       },

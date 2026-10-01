@@ -1713,10 +1713,36 @@ function bigOpOverDomainType(
  */
 const NUMBER_OR_NAN_TYPE = parseType('number | nan');
 
-function shapedSumType(d: OperandDescriptor): Type | undefined {
+/**
+ * The collection type of the operand of `Sum`/`Product`, when it is a list
+ * or an abstract collection (`collection`, `indexed_collection`, `set`) of
+ * a known element type. An abstract collection has no length, so its sum
+ * or product may be that of an empty collection. A `Sum`/`Product` whose
+ * element type is a row or a matrix was typed `number` for such an
+ * operand, and a compiled parent then read the row as one number.
+ */
+type ShapedOperand = {
+  kind: 'list' | 'collection' | 'indexed_collection' | 'set';
+  elements: Type;
+  dimensions?: number[];
+};
+function shapedOperandType(d: OperandDescriptor): ShapedOperand | undefined {
   const t = resolveTypeAlias(d.type);
-  if (typeof t !== 'object' || t.kind !== 'list') return undefined;
+  if (typeof t !== 'object') return undefined;
+  if (
+    t.kind !== 'list' &&
+    t.kind !== 'collection' &&
+    t.kind !== 'indexed_collection' &&
+    t.kind !== 'set'
+  )
+    return undefined;
   if (isUnboundedProducer(d)) return undefined;
+  return t as ShapedOperand;
+}
+
+function shapedSumType(d: OperandDescriptor): Type | undefined {
+  const t = shapedOperandType(d);
+  if (t === undefined) return undefined;
 
   // The type of a sum of many values of type `c`, or `undefined` when `c`
   // is not a number type.
@@ -1728,17 +1754,31 @@ function shapedSumType(d: OperandDescriptor): Type | undefined {
     return extendedReductionType('Sum', [describeType(c)]) ?? 'number';
   };
 
-  const dims = t.dimensions;
+  const dims = t.kind === 'list' ? t.dimensions : undefined;
   if (dims !== undefined && dims.length > 1) {
-    // A matrix (or a higher-rank list) sums along its first axis.
-    if (!dims.every((n) => n > 0)) return undefined;
+    // A matrix (or a higher-rank list) sums along its first axis. A
+    // dimension of unknown size (`-1`, as in `matrix<real>`) stays unknown;
+    // when it is the first one, the matrix may have no rows, and the sum of
+    // no rows is the number `0`.
+    if (dims.some((n) => n === 0)) return undefined;
     const elements = componentSum(t.elements);
     if (elements === undefined) return undefined;
-    return { kind: 'list', elements, dimensions: dims.slice(1) };
+    const row: Type = { kind: 'list', elements, dimensions: dims.slice(1) };
+    return dims[0] > 0
+      ? row
+      : reduceType({ kind: 'union', types: [row, 'integer'] });
   }
 
   let el = resolveTypeAlias(t.elements);
   if (typeof el !== 'object') return undefined;
+  // An element that is a number or a list at run time (`broadcastable<T>`):
+  // the sum is a number or a list too.
+  if (el.kind === 'broadcastable') {
+    const elements = componentSum(el.elements);
+    return elements === undefined
+      ? undefined
+      : { kind: 'broadcastable', elements };
+  }
   // A list literal of points whose components differ in type has a union
   // of tuple types as its element type (`[(1, NaN), (2, 3)]` has the
   // elements `tuple<integer, integer> | tuple<integer, nan>`). When every
@@ -1783,11 +1823,13 @@ function shapedSumType(d: OperandDescriptor): Type | undefined {
       elements: el.elements.map((c, i) => ({ ...c, type: components[i] })),
     };
   } else if (el.kind === 'list') {
-    // A row with no length keeps none. Rows of different lengths do not
-    // add, and the sum is then an `incompatible-dimensions` error value,
-    // which this type does not describe: the type describes the sum of rows
-    // that add, as the type of `Add` of two lists with no length does.
-    if (el.dimensions !== undefined && !el.dimensions.every((n) => n > 0))
+    // A row with no length keeps none, and a dimension of unknown size
+    // (`-1`, as in `matrix<real>`) stays unknown. Rows of different lengths
+    // do not add, and the sum is then an `incompatible-dimensions` error
+    // value, which this type does not describe: the type describes the sum
+    // of rows that add, as the type of `Add` of two lists with no length
+    // does. A dimension of size 0 (an empty row) is not read.
+    if (el.dimensions !== undefined && el.dimensions.some((n) => n === 0))
       return undefined;
     const elements = componentSum(el.elements);
     if (elements === undefined) return undefined;
@@ -1822,10 +1864,9 @@ export function bigOpResultType(
   if (ops.length === 1 && operator !== undefined) {
     const reduced = extendedReductionType(operator, ops);
     if (reduced !== undefined) return reduced;
-    if (operator === 'Sum') {
-      const shaped = shapedSumType(ops[0]);
-      if (shaped !== undefined) return shaped;
-    }
+    const shaped =
+      operator === 'Sum' ? shapedSumType(ops[0]) : shapedProductType(ops[0]);
+    if (shaped !== undefined) return shaped;
   }
   const body = ops[0];
   if (ops.length > 1 && operator !== undefined && body !== undefined) {
@@ -1854,6 +1895,88 @@ export function bigOpResultType(
   )
     return bodyType;
   return 'number';
+}
+
+/**
+ * The type of `Product(xs)` when the elements of `xs` are rows or square
+ * matrices of numbers, not numbers.
+ *
+ * `Product` multiplies the elements of its collection operand with
+ * `Multiply`, which takes the element-wise product of two rows and the
+ * matrix product of two matrices. So a list of rows multiplies to a row, a
+ * matrix to the row of the products of its columns, and a list of square
+ * matrices to a matrix of the same size: `Product([[1, 2], [3, 4]])` is
+ * `[3, 8]`. Each entry is typed by the rule of a scalar product
+ * (`extendedReductionType`). This is the counterpart of `shapedSumType`;
+ * the type was `number`, so a compiled parent read the row or the matrix as
+ * one number.
+ *
+ * A list with no length may be empty, and the product of an empty list is
+ * the number `1`, so the type is then a union with `integer`.
+ *
+ * Returns `undefined` for elements that are points (the product of two
+ * points is an error), for matrices that are known not to be square (the
+ * product of two such matrices is not defined, and stays unevaluated), and
+ * when an entry is not a number: the caller then answers `number`, as
+ * before.
+ */
+function shapedProductType(d: OperandDescriptor): Type | undefined {
+  const t = shapedOperandType(d);
+  if (t === undefined) return undefined;
+
+  const entryProduct = (c: Type): Type | undefined => {
+    if (!isSubtype(c, NUMBER_OR_NAN_TYPE)) return undefined;
+    return extendedReductionType('Product', [describeType(c)]) ?? 'number';
+  };
+
+  const dims = t.kind === 'list' ? t.dimensions : undefined;
+  let shaped: Type | undefined;
+  if (dims !== undefined && dims.length > 1) {
+    // A matrix operand is a list of rows, which multiply element-wise. A
+    // dimension of unknown size (`-1`) stays unknown; when it is the first
+    // one, the matrix may have no rows, and the product of no rows is the
+    // number `1`.
+    if (dims.length !== 2 || dims.some((n) => n === 0)) return undefined;
+    const elements = entryProduct(t.elements);
+    if (elements === undefined) return undefined;
+    const row: Type = { kind: 'list', elements, dimensions: dims.slice(1) };
+    return dims[0] > 0
+      ? row
+      : reduceType({ kind: 'union', types: [row, 'integer'] });
+  }
+  const el = resolveTypeAlias(t.elements);
+  if (typeof el !== 'object') return undefined;
+  // An element that is a number or a list at run time (`broadcastable<T>`):
+  // the product is a number or a list too.
+  if (el.kind === 'broadcastable') {
+    const elements = entryProduct(el.elements);
+    return elements === undefined
+      ? undefined
+      : { kind: 'broadcastable', elements };
+  }
+  if (el.kind !== 'list') return undefined;
+  const elDims = el.dimensions;
+  if (elDims !== undefined) {
+    // A dimension of unknown size (`-1`, as in `matrix<real>`) stays
+    // unknown; a matrix is refused only when it is KNOWN not to be square.
+    if (elDims.some((n) => n === 0)) return undefined;
+    if (elDims.length > 2) return undefined;
+    if (
+      elDims.length === 2 &&
+      elDims[0] > 0 &&
+      elDims[1] > 0 &&
+      elDims[0] !== elDims[1]
+    )
+      return undefined;
+  }
+  const elements = entryProduct(el.elements);
+  if (elements === undefined) return undefined;
+  shaped = { ...el, elements };
+
+  const mayBeEmpty = dims === undefined || dims[0] <= 0;
+  return mayBeEmpty
+    ? reduceType({ kind: 'union', types: [shaped, 'integer'] })
+    : shaped;
 }
 
 /**

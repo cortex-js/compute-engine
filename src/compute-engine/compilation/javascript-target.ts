@@ -10013,6 +10013,31 @@ function complexMatmul(a: any, b: any): any {
 }
 
 /**
+ * Shape-agnostic SCALAR add and multiply: two numbers combine as numbers, and
+ * a complex value `{re, im}` in either position combines as complex (a number
+ * operand is read as `{re: x, im: 0}`). The entries of a compiled array can be
+ * complex values, and the raw `+`/`*` reads such an object as a string or as
+ * `NaN`: the sum of the points `[(1+i, 2), (3+i, 4)]` was
+ * `["0[object Object][object Object]", 6]`.
+ */
+function scalarAdd(a: unknown, b: unknown): number | ComplexResult {
+  if (typeof a === 'number' && typeof b === 'number') return a + b;
+  const p = typeof a === 'number' ? { re: a, im: 0 } : (a as ComplexResult);
+  const q = typeof b === 'number' ? { re: b, im: 0 } : (b as ComplexResult);
+  return { re: p.re + q.re, im: p.im + q.im };
+}
+
+function scalarMul(a: unknown, b: unknown): number | ComplexResult {
+  if (typeof a === 'number' && typeof b === 'number') return a * b;
+  const p = typeof a === 'number' ? { re: a, im: 0 } : (a as ComplexResult);
+  const q = typeof b === 'number' ? { re: b, im: 0 } : (b as ComplexResult);
+  return {
+    re: p.re * q.re - p.im * q.im,
+    im: p.re * q.im + p.im * q.re,
+  };
+}
+
+/**
  * Product dispatch on dimensionality, mirroring the interpreter's
  * `Dot`/`MatrixMultiply`: vector·vector → scalar, matrix·vector → vector,
  * vector·matrix → vector, matrix·matrix → matrix. Real, nested-array
@@ -10136,17 +10161,49 @@ function complexPointdot(a: any, b: any, aList: boolean, bList: boolean): any {
  * element-wise (Hadamard) product — inert (NaN) on a length mismatch — while any
  * rank-≥2 operand contracts via the matrix product (`matmul`), so no runtime
  * shape (vector·vector, matrix·vector, matrix·matrix) silently diverges from the
- * interpreter. Real-only, matching the scalar Multiply codegen it replaces;
- * complex operands are deferred to the fail-closed path at compile time.
+ * interpreter. This form is real-only (the raw `*` and `matmul`), as the
+ * other plain linear-algebra helpers are. `complexMulTensor` is the complex
+ * form (every entry `{re, im}`, `complexMatmul`), and `mulTensorAny` tests
+ * each entry and multiplies a complex one as complex (`scalarMul`). The
+ * compiler chooses the form from the lane of the operands (`foldLane`);
+ * no form scans its operands to choose.
  */
 function mulTensor(...args: BcastValue[]): BcastValue {
+  return mulTensorWith(matmul, (a, b) => (a as number) * (b as number), args);
+}
+
+/** The complex form of `mulTensor`: the matrix product is `complexMatmul`,
+ * and every entry of the result is `{re, im}`, as in the result of the other
+ * complex linear-algebra helpers. Chosen by the compiler when the operands
+ * are complex (`elementwiseFoldCombiner`). */
+function complexMulTensor(...args: BcastValue[]): BcastValue {
+  return mulTensorWith(
+    complexMatmul,
+    (a, b) => cxMul(complexEntry(a), complexEntry(b)),
+    args
+  );
+}
+
+/** `mulTensor` for operands whose lane is not known when the code is
+ * compiled: the scalar factors and the element-wise product use
+ * `scalarMul` (one type test per entry), and the matrix product is the
+ * real `matmul`, as for a `list<number>` operand of `Dot`. */
+function mulTensorAny(...args: BcastValue[]): BcastValue {
+  return mulTensorWith(matmul, scalarMul, args);
+}
+
+function mulTensorWith(
+  product2: (a: any, b: any) => any,
+  times: (a: unknown, b: unknown) => number | ComplexResult,
+  args: BcastValue[]
+): BcastValue {
   const tensors: BcastValue[][] = [];
-  let scalar = 1;
+  let scalar: BcastValue | undefined = undefined;
   for (const x of args) {
     if (Array.isArray(x)) tensors.push(x);
-    else scalar *= x as number;
+    else scalar = scalar === undefined ? x : (times(scalar, x) as BcastValue);
   }
-  if (tensors.length === 0) return scalar;
+  if (tensors.length === 0) return scalar === undefined ? 1 : scalar;
   let product: BcastValue[] = tensors[0];
   for (let i = 1; i < tensors.length; i++) {
     const next = tensors[i];
@@ -10158,18 +10215,30 @@ function mulTensor(...args: BcastValue[]): BcastValue {
       if (product.length !== next.length) return NaN;
       const out: BcastValue[] = new Array(product.length);
       for (let k = 0; k < product.length; k++)
-        out[k] = (product[k] as number) * (next[k] as number);
+        out[k] = times(product[k], next[k]) as BcastValue;
       product = out;
     } else {
-      // A rank-≥2 operand contracts via the matrix product. `matmul` returns a
-      // bare number only on a dimension mismatch (NaN) here — stay inert.
-      const r = matmul(product, next);
+      // A rank-≥2 operand contracts via the matrix product. The matrix
+      // product returns a bare number only on a dimension mismatch (NaN)
+      // here — stay inert.
+      const r = product2(product, next);
       if (typeof r === 'number') return r;
       product = r as BcastValue[];
     }
   }
-  if (scalar !== 1)
-    product = bcast((v) => (v as number) * scalar, product) as BcastValue[];
+  // A single tensor operand is returned as it is unless a scalar factor
+  // scales it; a scalar factor of exactly 1 changes nothing and is skipped.
+  if (scalar !== undefined && scalar !== 1)
+    product = bcast(
+      (v) => times(v, scalar) as BcastValue,
+      product
+    ) as BcastValue[];
+  else if (tensors.length === 1 && product2 === complexMatmul)
+    // The complex form lifts every entry, also when no product was taken.
+    product = bcast(
+      (v) => complexEntry(v) as BcastValue,
+      product
+    ) as BcastValue[];
   return product;
 }
 
@@ -11086,21 +11155,8 @@ const SYS_HELPERS = {
   // lifted). The fold combiner of a collection `Sum`/`Product` whose elements
   // are not provably real (`emitCollectionReduce`), so a promoted or complex
   // element never reaches the raw `+`.
-  sadd: (a: unknown, b: unknown): number | { re: number; im: number } => {
-    if (typeof a === 'number' && typeof b === 'number') return a + b;
-    const p = typeof a === 'number' ? { re: a, im: 0 } : (a as ComplexResult);
-    const q = typeof b === 'number' ? { re: b, im: 0 } : (b as ComplexResult);
-    return { re: p.re + q.re, im: p.im + q.im };
-  },
-  smul: (a: unknown, b: unknown): number | { re: number; im: number } => {
-    if (typeof a === 'number' && typeof b === 'number') return a * b;
-    const p = typeof a === 'number' ? { re: a, im: 0 } : (a as ComplexResult);
-    const q = typeof b === 'number' ? { re: b, im: 0 } : (b as ComplexResult);
-    return {
-      re: p.re * q.re - p.im * q.im,
-      im: p.re * q.im + p.im * q.re,
-    };
-  },
+  sadd: scalarAdd,
+  smul: scalarMul,
   // The exactly-real complex object `{re, im: 0}` AS the real number `re`;
   // any other value passes through. Used by the emitted DISPATCHERS
   // (multi-clause guard chains, protocol receiver guards) to test their
@@ -11140,6 +11196,16 @@ const SYS_HELPERS = {
   // the elements may themselves be vectors/matrices at run time.
   add: (a: BcastValue, b: BcastValue): BcastValue =>
     bcast((x, y) => (x as number) + (y as number), a, b),
+  // The complex form of `add`: every entry of the result is `{re, im}`, as
+  // in the result of the other complex linear-algebra helpers. Chosen by
+  // the compiler when the operands are complex (`elementwiseFoldCombiner`).
+  cadd: (a: BcastValue, b: BcastValue): BcastValue =>
+    bcast((x, y) => cxAdd(complexEntry(x), complexEntry(y)), a, b),
+  // `add` for operands whose lane is not known when the code is compiled (a
+  // function typed `unknown`, a `list<number>`): two numbers add as numbers
+  // and a complex entry adds as complex, with one type test per entry.
+  addAny: (a: BcastValue, b: BcastValue): BcastValue =>
+    bcast((x, y) => scalarAdd(x, y) as BcastValue, a, b),
   chop,
   // `x! = Γ(x+1)`, matching the interpreter's `Factorial` evaluate handler.
   // The shared `factorial()` helper is integer-only (it returns NaN for a
@@ -11512,6 +11578,8 @@ const SYS_HELPERS = {
   // nested) real arrays whose collection-ness was not statically provable —
   // see `tryCompileBroadcast`'s ≥2-possibly-collection branch.
   mul: mulTensor,
+  cmul: complexMulTensor,
+  mulAny: mulTensorAny,
   // Interpreter-faithful `Equal`/`NotEqual` over operands whose
   // collection-ness was not statically provable — see `compileJSEquality`'s
   // possibly-collection lowering (Tycho item 41).
@@ -14816,11 +14884,10 @@ function compileSumProduct(
       );
       const element =
         elt === undefined ? undefined : resolveTypeForCompilation(elt);
+      // The same test `isComplexValued` reads for the shape of the value.
       if (
         element !== undefined &&
-        element !== 'never' &&
-        !isSubtype(element, 'string') &&
-        isSubtype(element, INDEXED_COLLECTION_SHAPE_TYPE)
+        BaseCompiler.foldsCollectionElements(args[0])
       ) {
         // The interpreter has no product between two points (its answer is
         // the error `no-product-between-points`), and `_SYS.mul` would
@@ -14834,8 +14901,35 @@ function compileSumProduct(
             'Could not compile `Product`: the elements are points, and there is no product between two points. ' +
               'The interpreter reports the error instead.'
           );
+        requireShapedFold(kind, args[0]);
         return emitCollectionReduce(kind, args[0], target, true);
       }
+      // An element typed as an abstract collection (`collection<real>`,
+      // `set<integer>`) can be a list at run time, but no fold here reads
+      // it as one: the scalar fold gave `NaN` for `[[1, 2], [3, 4]]`, where
+      // the interpreter adds the rows element-wise.
+      if (
+        element !== undefined &&
+        element !== 'never' &&
+        !isSubtype(element, 'string') &&
+        isSubtype(element, COLLECTION_SHAPE_TYPE)
+      )
+        throw new Error(
+          `Could not compile \`${kind}\`: the elements are collections whose ` +
+            `shape is not known (an abstract collection).`
+        );
+      // An element typed `broadcastable<T>` is a number or a list at run
+      // time. The scalar fold read two list elements as numbers and gave
+      // `NaN`, where the interpreter adds them element-wise: the guarded fold
+      // dispatches on each element (`foldLane` is `wide` here). The type of
+      // the fold is `broadcastable<T>` (`shapedSumType`), so a parent
+      // dispatches on the run-time shape too.
+      if (
+        element !== undefined &&
+        typeof element !== 'string' &&
+        element.kind === 'broadcastable'
+      )
+        return emitCollectionReduce(kind, args[0], target, true);
       return emitCollectionReduce(kind, args[0], target, false);
     }
     if (isPossiblyCollectionTypedJS(args[0]))
@@ -14849,8 +14943,10 @@ function compileSumProduct(
     const elements = iterableCollectionCode(kind, args[0], (e) =>
       BaseCompiler.compile(e, target)
     );
-    if (elements !== undefined)
-      return `(${elements}).reduce(${elementwiseFoldCombiner(kind)}, ${kind === 'Sum' ? '0' : '1'})`;
+    if (elements !== undefined) {
+      requireShapedFold(kind, args[0]);
+      return `(${elements}).reduce(${elementwiseFoldCombiner(kind, foldLane(args[0]))}, ${kind === 'Sum' ? '0' : '1'})`;
+    }
     throw new Error(`Could not compile \`${kind}\`: no indexing set`);
   }
   return emitSumProduct(kind, args[0], args.slice(1), target);
@@ -17059,21 +17155,74 @@ function emitCollectionReduce(
   // `+`. Guard the scalar case so a runtime scalar returns itself (interpreter's
   // `Sum(scalar) = scalar`).
   const identity = kind === 'Sum' ? '0' : '1';
-  return `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(kind)}, ${identity}) : _c)(${code})`;
+  return `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(kind, foldLane(coll))}, ${identity}) : _c)(${code})`;
+}
+
+/**
+ * Refuse a `Sum`/`Product` fold whose elements are collections
+ * (`BaseCompiler.foldsCollectionElements`) when its static type is still a
+ * number. The value of such a fold is a point, a row or a matrix, and a
+ * parent compiled from the type `number` reads it as one number (a raw `+`
+ * over an array gives a string). The type gives a shape for lists and
+ * abstract collections of points, rows and matrices (`shapedSumType`,
+ * `shapedProductType` in `library/type-handlers.ts`); it stays `number`
+ * for `Product` of matrices known not to be square, which the interpreter
+ * leaves unevaluated.
+ */
+function requireShapedFold(kind: 'Sum' | 'Product', coll: Expression): void {
+  if (!BaseCompiler.foldsCollectionElements(coll)) return;
+  const type = coll.engine.function(kind, [coll]).type;
+  if (type.matches('number'))
+    throw new Error(
+      `Could not compile \`${kind}\`: the elements are collections, but the ` +
+        `shape of the result is not known.`
+    );
+}
+
+/**
+ * The lane of the element-wise `Sum`/`Product` fold over `coll`. When its
+ * elements are collections (`BaseCompiler.foldsCollectionElements`), the
+ * lane is complex exactly when `BaseCompiler.linearAlgebraLane` says so, and
+ * real otherwise: a `number` entry (the `wide` lane) is read as real, as it
+ * is by `Dot` and by every other wide binding, and `isComplexValued` reads
+ * the fold the same way, so the parent reads the value with the shape the
+ * fold gives it. When the elements are not known to be collections (an
+ * operand whose shape is known only at run time, or an abstract
+ * collection), the fold is the dispatching form `wide`, whose entries are
+ * numbers or `{re, im}` as the run-time values are.
+ */
+function foldLane(coll: Expression): 'real' | 'complex' | 'wide' {
+  if (!BaseCompiler.foldsCollectionElements(coll)) return 'wide';
+  return BaseCompiler.linearAlgebraLane([coll]) === 'complex'
+    ? 'complex'
+    : 'real';
 }
 
 /**
  * The combiner of a `Sum`/`Product` fold whose elements may be numbers,
- * complex values `{re, im}`, or arrays (points, rows). Arrays combine
- * element-wise (`_SYS.add`, `_SYS.mul`, which use the raw `+`/`*` on their
- * entries). Two values that are not arrays combine with `_SYS.sadd`/`_SYS.smul`,
- * which add and multiply complex values: `_SYS.add` alone read a complex
- * element with `+` and the sum of `[1+2i, 3+4i]` became the string
+ * complex values `{re, im}`, or arrays (points, rows, matrices). Two arrays
+ * combine element-wise (`Sum`) or by the tensor product (`Product`), with
+ * the form of the helper chosen by the lane (`foldLane`): the real-only
+ * `_SYS.add`/`_SYS.mul` for a real lane, the complex `_SYS.cadd`/`_SYS.cmul`
+ * (every entry `{re, im}`) for a complex lane, and the dispatching
+ * `_SYS.addAny`/`_SYS.mulAny` otherwise. The choice is made when the code
+ * is compiled, as for the other linear-algebra helpers. Two values that are
+ * not arrays combine with `_SYS.sadd`/`_SYS.smul`, which add and multiply a
+ * complex value as complex: the sum of `[1+2i, 3+4i]` was the string
  * `"0[object Object][object Object]"`.
  */
-function elementwiseFoldCombiner(kind: 'Sum' | 'Product'): string {
-  const [tensor, scalar] =
-    kind === 'Sum' ? ['_SYS.add', '_SYS.sadd'] : ['_SYS.mul', '_SYS.smul'];
+function elementwiseFoldCombiner(
+  kind: 'Sum' | 'Product',
+  // The dispatching form is the default: it is correct for any entries, and
+  // a caller that knows the operand passes `foldLane(coll)` for the faster
+  // real-only form.
+  lane: 'real' | 'complex' | 'wide' = 'wide'
+): string {
+  const tensor =
+    kind === 'Sum'
+      ? { real: '_SYS.add', complex: '_SYS.cadd', wide: '_SYS.addAny' }[lane]
+      : { real: '_SYS.mul', complex: '_SYS.cmul', wide: '_SYS.mulAny' }[lane];
+  const scalar = kind === 'Sum' ? '_SYS.sadd' : '_SYS.smul';
   return `(_a, _b) => Array.isArray(_a) || Array.isArray(_b) ? ${tensor}(_a, _b) : ${scalar}(_a, _b)`;
 }
 
