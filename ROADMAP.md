@@ -173,6 +173,35 @@ before the loop) and no other value can hold a reference to it (every other
 use of `xs` is a read in `NON_RETAINING_READS`). Not requested yet; the
 reporter of #386 mentions a cycle walk that may be written as a loop.
 
+### The lenient grammar makes reading choices that a host cannot detect (OPEN, decision — Tycho paste converter, 2026-10-01)
+
+Goal (Arno, 2026-10-01): a host that converts pasted plain text, such as
+Tycho's `plainTextToLatex`, should not need its own parser; the lenient
+grammar (`ce.parse(text, { strict: false })`) should give it what it needs.
+Tycho's converter keeps a first stage (a closed list of tokens and an
+adjacency table) because the lenient grammar reads almost any text and gives
+no signal when it picks one of two common readings. Tycho will remove that
+stage if CE publishes the list of reading choices the lenient grammar makes,
+with a diagnostic code (one `ambiguous-*` group) for each choice that has
+another common reading, and counts a choice with no code as a CE defect.
+That commitment is the decision. Of 300 inputs that the converter refuses
+(`tycho/scripts/repros/2026-10-01-paste-refused-inputs.json`), the lenient
+grammar on CE main reads about 210 with no signal. The classes, with
+examples: the end of an unbraced exponent (`e^2pi`, `x^2y`); an implicit
+subscript (`x2`); a comma outside brackets (`1,5`); `5!=120`; a name, a
+space and a number (`x 2`); a function name with no parentheses before
+several factors (`sin x y`, `log 2 x` = `log_2 x`); a document function
+with no parentheses (`f x`); list labels (`1. y = x`); equation numbers
+(`y = x^2 (2)`); juxtaposed groups (`(a)(b)`); the extent of a radical
+(`3√8`, `√2π`); `+-` and `±`; `<-`; `a..b..c`; `in` after an equation;
+`Δx`; chains of `=`; bars that pair two ways; dates and phone numbers;
+`atan3(y)`; Greek capitals that look like Latin letters. Readings that
+may be defects rather than ambiguities: `(a)(b)` is the call `a(b)` in the
+canonical form (strict too), `±1` is `Measurement(0, 1)`, `+-` is two
+signs, `mod`/`pow`/`trunc`/`Re`/`Im` are not lenient function names.
+The full reply is in Tycho's `docs/COMPUTE_ENGINE.md`, "CE reply 2026-10-01
+to answer 4".
+
 ### A `Delimiter` with square brackets reads back as a `List` (OPEN, decision — found 2026-10-01 by the fix of the parentheses written twice in a fraction)
 
 `["Delimiter", "x", "'[,]'"]` (a group written with square brackets, for
