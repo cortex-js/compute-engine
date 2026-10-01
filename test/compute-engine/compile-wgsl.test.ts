@@ -740,6 +740,16 @@ describe('WGSL COMPILATION', () => {
         );
       });
     }
+    // A `vars` mapping to a bare identifier gets the free symbol's check
+    // (Tycho row 356).
+    it('rejects a vars mapping to a reserved bare identifier', () => {
+      expect(() =>
+        wgsl.compile(ce.box(['Add', 'x', 'q']), { vars: { q: 'loop' } })
+      ).toThrow(/"loop" is a reserved word in wgsl/);
+      expect(
+        wgsl.compile(ce.box(['Add', 'x', 'q']), { vars: { q: 'u_loop' } }).code
+      ).toBe('u_loop + x');
+    });
   });
 
   describe('Loop as the final block statement fails closed', () => {

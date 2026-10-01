@@ -2,6 +2,56 @@
 
 ### Behavior Changes
 
+- **A `vars`-mapped symbol with a declared type compiles as if it had no
+  value.** The compiled code reads the input, but the compiler used to analyze
+  the expression with the symbol's stored value. With `a` declared `real` and
+  `a := 4`, `compile(\sqrt{a}, { vars: { a: '_.a' } })` gave the real-only
+  `Math.sqrt(_.a)`, which returns `NaN` for a negative input. It now gives
+  `_SYS.csqrt(({ re: _.a, im: 0 }))`, the code for an `a` with no value. This
+  applies on every target (`javascript`, `python`, `glsl`, `wgsl`,
+  `interval-js`); on a direct custom target (`compile(expr, { target })`) the
+  value is no longer folded into the code. The value is hidden for the duration
+  of the compilation and restored afterwards, also when the compilation throws.
+  A value put in force by an assumption is hidden the same way: with
+  `assume(a = 4)`, `\lfloor a\rfloor + x` compiled to `_.x + _.a` (the
+  assumption typed `a` as an integer) and now compiles to
+  `_.x + Math.floor(_.a)`. A symbol whose type was inferred from its value
+  (`ce.assign('u', 4)` with no declaration) keeps its value during the
+  compilation, but it is no longer folded on a direct custom target, where
+  `\sqrt{u}` with `vars: { u: '_.u' }` compiled to `2`.
+
+- **An integral over a `vars`-mapped input keeps its closed form.**
+  `\int_0^x a t\,dt` with `a` mapped by `vars: { a: '_.a' }` compiled to the
+  quadrature `_SYS.integrate((t) => (_.a * t), 0, _.x)`; it now compiles to the
+  closed form `(0.5 * _.a * (_.x * _.x))`, as it does for an unmapped `a` with
+  no value. The input stays live: the closed form reads `_.a` at run time. The
+  closed form is still skipped when the integral reaches a mapped symbol that
+  has a visible value (one whose type was inferred from its value), when the
+  mapping is not a plain read (an identifier such as `u_a` or a member read such
+  as `_.a`), or when it reaches a function overridden with the `functions`
+  option. A host that used a `vars` mapping to force quadrature must now map the
+  symbol to source that is not a plain read, for example `{ a: '(_.a)' }`.
+
+- **The shader and Python targets check a `vars` mapping to a bare identifier
+  for reserved words.** On GLSL, `{ in: 'in' }` compiled `x + \sin(\mathrm{in})`
+  to `x + sin(in)`, which no driver accepts, while the free symbol `in`
+  declined. The mapping now declines with the same error, and so does a mapping
+  to a WGSL reserved word (`loop`) on WGSL. A mapping to another name
+  (`{ in: 'u_in' }`) or to source that is not a bare identifier (`u.in`) is
+  unchanged.
+
+- **The Python target declines a free symbol named after a Python keyword.**
+  `x + \sin(\lambda)` compiled to `x + np.sin(lambda)`, which is a Python syntax
+  error; it now declines with `"lambda" is a reserved word in python`. The same
+  applies to the other keywords (`in`, `if`, `class`, `yield`, …), to a `vars`
+  mapping to one, and to a keyword used as a `Sum`/`Product` index, a
+  comprehension variable or a function-literal parameter. Map the symbol to
+  another name with `vars` (`{ lambda: 'lam' }`) to compile it.
+
+- **GLSL: `struct`, `class`, `lowp`, `mediump` and `highp` are reserved words.**
+  A free symbol with one of these names compiled to invalid GLSL; it now
+  declines like `in` or `sample`.
+
 - **A call through a field of a constant that names an operator is the
   direct call, also without named arguments.** With `bob` declared with
   `isConstant: true` and the value `{S -> bob_S}`, `bob.S(3)`
@@ -184,6 +234,20 @@
   A variable typed `dictionary<function>` gives no parameter names, so a named
   call through it is still `argument-names-unavailable`, and its value is not
   read: `lazy` is honored only through a constant receiver.
+- **Inside the call of a user function, a free symbol of the caller with the
+  name of a parameter is an unknown.** With `f = (x, y) ↦ x = y`, `f(y, x)`
+  answered `False` instead of staying `y = x`, `x ≠ y` answered `True`, and
+  `If(x = y, 1, 0)` answered `0`. The cause was `.unknowns`: it looked up each
+  symbol by name, and during the call the name `x` also denotes the parameter,
+  which has a value. `.unknowns` now resolves a symbol the way evaluation reads
+  its value, so the `x` of the argument is an unknown and the parameter `x`
+  used in the body is not. The same defect caused a performance regression
+  since 0.142.0: the `evaluate()` of a call whose arguments contain a `Floor`
+  (also `Ceil`, `Round`, `Truncate`) was 300 to 6,000 times slower than in
+  0.141.0. With `f = (x, y) ↦ \{\sqrt{x^2+y^2} \le 1: 1, 0\}`, the call
+  `f(⌊31x⌋/31, ⌊31y⌋/31)` took about 60 s, and now takes about 10 ms: each
+  sign of `⌊31x⌋` tried to order the free `31x` and `1` as two constants, with
+  a higher precision and a symbolic proof.
 - **A library list with `core` but without `control-structures` can build
   function literals.** With `new ComputeEngine({ libraries: ['core',
   'arithmetic'] })`, every function literal, and every caller library with an

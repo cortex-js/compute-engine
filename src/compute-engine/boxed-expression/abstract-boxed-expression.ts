@@ -54,6 +54,7 @@ import {
   isFunction,
 } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
+import { bindingInContext } from './binders.js';
 import {
   binderBoundAt,
   declaredBinders,
@@ -1605,7 +1606,31 @@ function collectReferences(
     // A single scope-chain lookup serves both remaining cases (so the common
     // free-variable path pays one walk, not two — this avoided a separate
     // `_getSymbolValue` scope traversal).
-    const def = expr.engine.lookupDefinition(s);
+    //
+    // The walk is the one the evaluator uses to read the value of this
+    // occurrence (`bindingInContext`), not a plain lookup by name. Inside
+    // the call of a user function, the scope chain holds the parameters of
+    // the function. An argument of the call can hold a symbol of the caller
+    // with the name of a parameter: in `f(y, x)` for `f = (x, y) ↦ x = y`,
+    // the `x` of the second argument is the free `x` of the caller. A
+    // lookup by name finds the parameter `x`, which has a value, and
+    // reported no unknowns, so `Equal` compared two "constants" and
+    // answered `False`. `bindingInContext` skips a parameter of a call
+    // frame that is not the binding this occurrence denotes, as the
+    // evaluator does. An occurrence of the parameter itself in the body
+    // still resolves to the parameter's value in the call frame.
+    //
+    // An UNBOUND occurrence (a raw operand held by a lazy operator) keeps the
+    // lookup by name. It denotes no binding in particular, and evaluating it
+    // binds it in the current scope first, so inside a call it reads the
+    // parameter of the same name. `bindingInContext` would skip that
+    // parameter whenever an outer binding of the name exists, and report as
+    // free a symbol that evaluates to the parameter's value.
+    const own = expr.valueDefinition;
+    const def =
+      own === undefined
+        ? expr.engine.lookupDefinition(s)
+        : bindingInContext(expr.engine, s, own);
 
     // An unbound symbol operand that names an operator — e.g. the `Add` of
     // `Reduce(L, Add)`, held raw by a lazy operator so it carries no bound
