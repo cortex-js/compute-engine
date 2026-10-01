@@ -85,7 +85,7 @@ import {
   polygammaComplex,
   complexDivide,
 } from '../numerics/numeric-complex.js';
-import { lerchPhiComplex } from '../numerics/lerch-phi.js';
+import { lerchPhiComplex, DIRICHLET_NEAR_POLE } from '../numerics/lerch-phi.js';
 import { EULERIAN_MAX_ORDER } from '../numerics/polylog.js';
 import {
   factorial2 as bigFactorial2,
@@ -95,6 +95,7 @@ import {
 import { factorial as bigFactorial } from '../numerics/numeric-bigint.js';
 import {
   zetaEvenCoefficient,
+  eulerEvenNumber,
   zetaNegativeInteger,
   hurwitzZetaNegativeInteger,
   generalizedZetaNegativeInteger,
@@ -120,6 +121,8 @@ import {
   bigPolygamma,
   bigBeta,
   bigZeta,
+  bigDirichletEta,
+  bigDirichletBeta,
   bigHurwitzZeta,
   bigDecimalQuotient,
   bigZetaGeneralized,
@@ -3427,6 +3430,189 @@ function evaluateLerchPhi(
 }
 
 /**
+ * Largest |n| for which `DirichletEta(n)` and `DirichletBeta(n)` build their
+ * exact closed form (a rational times a power of π, a Bernoulli or Euler
+ * number): the numbers grow like n!, and past the limit the exact answer is
+ * unreadable. Beyond it `.N()` still evaluates; the exact form stays symbolic.
+ */
+const DIRICHLET_EXACT_ORDER_LIMIT = 100;
+
+/** The integer value of a real number literal, or `null`. */
+function dirichletInteger(s: Expression): number | null {
+  // `asSmallInteger` reads the exact value: 1 + 10^−30 projects to the double 1.
+  const n = asSmallInteger(s);
+  return n !== null && Math.abs(n) <= DIRICHLET_EXACT_ORDER_LIMIT ? n : null;
+}
+
+/**
+ * The real operand as a big decimal, at `ce.precision` digits. An exact
+ * rational is divided exactly: its double projection is wrong for
+ * 1 + 10^−30, and `bignumRe` is absent for a rational.
+ */
+function dirichletBigOperand(engine: ComputeEngine, s: Expression): BigNum {
+  const operand = hurwitzOperand(engine, s);
+  return operand instanceof BigDecimal
+    ? operand
+    : new BigDecimal(operand[0]).div(new BigDecimal(operand[1]));
+}
+
+/** The value of `expr` when it is a finite number literal. */
+function finiteNumberOrUndefined(expr: Expression): Expression | undefined {
+  return isFiniteNumberLiteral(expr) ? expr : undefined;
+}
+
+/**
+ * Evaluate DirichletEta(s) = Σ_{n≥1} (−1)^{n−1} n^{−s} = (1 − 2^{1−s}) ζ(s),
+ * an entire function: η(1) = ln 2 (the pole of ζ cancels), η(0) = 1/2, and
+ * at the even integers a rational multiple of a power of π.
+ *
+ * Real s runs on the arbitrary-precision kernel `bigDirichletEta`, which
+ * adds the digits that the cancellation near s = 1 costs. A complex s, or a
+ * precision at most the machine's, uses the double kernels; within
+ * `DIRICHLET_NEAR_POLE` of s = 1 there the alternating series is summed as
+ * Φ(−1, s, 1), which has no pole to cancel.
+ */
+function evaluateDirichletEta(
+  engine: ComputeEngine,
+  s: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!isFiniteNumberLiteral(s)) return undefined;
+  const numeric = shouldNumericize(numericApproximation, s);
+  const finish = (e: Expression) => (numeric ? e.N() : e.evaluate());
+
+  const n = dirichletInteger(s);
+  if (n === 1) return finish(engine.function('Ln', [engine.number(2)]));
+  // (1 − 2^{1−n}) ζ(n): ζ's closed forms at the even and nonpositive integers,
+  // and the odd ones stay (1 − 2^{1−n}) ζ(n) with ζ(n) symbolic.
+  if (n !== null) {
+    const value = engine
+      .function('Multiply', [
+        engine.function('Subtract', [
+          engine.One,
+          engine.function('Power', [engine.number(2), engine.number(1 - n)]),
+        ]),
+        engine.function('Zeta', [engine.number(n)]),
+      ])
+      .evaluate();
+    return numeric ? value.N() : value;
+  }
+  if (!numeric) return undefined;
+
+  if (!s.isComplex && bignumPreferred(engine)) {
+    const big = bigDirichletEta(engine, dirichletBigOperand(engine, s));
+    if (big !== undefined) return boxBignumApprox(engine, big);
+  }
+
+  if (Math.hypot(s.re - 1, s.im) < DIRICHLET_NEAR_POLE)
+    return finiteNumberOrUndefined(
+      engine
+        .function('LerchPhi', [engine.number(-1), s, engine.One])
+        .evaluate({ numericApproximation: true })
+    );
+  return finiteNumberOrUndefined(
+    engine
+      .function('Multiply', [
+        engine.function('Subtract', [
+          engine.One,
+          engine.function('Power', [
+            engine.number(2),
+            engine.function('Subtract', [engine.One, s]),
+          ]),
+        ]),
+        engine.function('Zeta', [s]),
+      ])
+      .evaluate({ numericApproximation: true })
+  );
+}
+
+/**
+ * The exact β(n) at an integer n (Euler numbers E₂ₖ):
+ *   β(1) = π/4, β(2) = G (Catalan), β(0) = 1/2,
+ *   β(2k+1) = (−1)ᵏ E₂ₖ π^{2k+1} / (4^{k+1} (2k)!),
+ *   β(−2k) = E₂ₖ / 2, β(−(2k+1)) = 0.
+ * β at the even integers above 2 has no closed form. `undefined` there.
+ */
+function dirichletBetaInteger(
+  engine: ComputeEngine,
+  n: number
+): Expression | undefined {
+  if (n === 1) return engine.Pi.div(engine.number(4));
+  if (n === 2) return engine.symbol('CatalanConstant');
+  if (n > 2 && n % 2 === 1) {
+    const k = (n - 1) / 2;
+    let factorial = 1n;
+    for (let i = 2n; i <= BigInt(2 * k); i++) factorial *= i;
+    const euler = eulerEvenNumber(k) * (k % 2 === 0 ? 1n : -1n);
+    return engine
+      .number([euler, 4n ** BigInt(k + 1) * factorial])
+      .mul(engine.Pi.pow(n));
+  }
+  if (n <= 0 && n % 2 === 0)
+    return engine.number([eulerEvenNumber(-n / 2), 2n]);
+  if (n < 0) return engine.Zero;
+  return undefined;
+}
+
+/**
+ * Evaluate DirichletBeta(s) = Σ_{n≥0} (−1)ⁿ (2n+1)^{−s}
+ * = 4^{−s} (ζ(s, ¼) − ζ(s, ¾)), an entire function (the Dirichlet L-function
+ * of the odd character mod 4). Computed as `evaluateDirichletEta` is: real s
+ * on the arbitrary-precision Hurwitz kernel, complex s on the double one,
+ * and within `DIRICHLET_NEAR_POLE` of s = 1 the double route sums
+ * β(s) = 2^{−s} Φ(−1, s, ½).
+ */
+function evaluateDirichletBeta(
+  engine: ComputeEngine,
+  s: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!isFiniteNumberLiteral(s)) return undefined;
+  const numeric = shouldNumericize(numericApproximation, s);
+
+  const n = dirichletInteger(s);
+  if (n !== null) {
+    const exact = dirichletBetaInteger(engine, n);
+    if (exact !== undefined) return numeric ? exact.N() : exact;
+  }
+  if (!numeric) return undefined;
+
+  if (!s.isComplex && bignumPreferred(engine)) {
+    const big = bigDirichletBeta(engine, dirichletBigOperand(engine, s));
+    if (big !== undefined) return boxBignumApprox(engine, big);
+  }
+
+  const two = engine.number(2);
+  if (Math.hypot(s.re - 1, s.im) < DIRICHLET_NEAR_POLE)
+    return finiteNumberOrUndefined(
+      engine
+        .function('Multiply', [
+          engine.function('Power', [two, engine.function('Negate', [s])]),
+          engine.function('LerchPhi', [
+            engine.number(-1),
+            s,
+            engine.number([1, 2]),
+          ]),
+        ])
+        .evaluate({ numericApproximation: true })
+    );
+  return finiteNumberOrUndefined(
+    engine
+      .function('Multiply', [
+        engine.function('Power', [
+          engine.number(4),
+          engine.function('Negate', [s]),
+        ]),
+        engine.function('Subtract', [
+          engine.function('HurwitzZeta', [s, engine.number([1, 4])]),
+          engine.function('HurwitzZeta', [s, engine.number([3, 4])]),
+        ]),
+      ])
+      .evaluate({ numericApproximation: true })
+  );
+}
+
+/**
  * The operands of a one-operand `Sum`/`Product` (`Sum(xs)`, no indexing set)
  * with an operand that can be ABSENT AS A WHOLE replaced by its value; the
  * operands unchanged when the rule does not apply; and `undefined` when the
@@ -5130,6 +5316,38 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           numericApproximation
         );
       },
+    },
+
+    // Dirichlet eta η(s) = Σ_{n≥1} (−1)^(n−1) n^(−s), entire. Wolfram's
+    // `DirichletEta`.
+    DirichletEta: {
+      description:
+        'Dirichlet eta function η(s) = Σ_{n≥1} (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2.',
+      complexity: 8500,
+      broadcastable: true,
+      signature: '(complex) -> number',
+      examples: ['[DirichletEta(2), DirichletEta(1), N(DirichletEta(1/2))]'],
+      nanBehavior: 'propagate',
+      evaluate: (ops, { numericApproximation, engine }) =>
+        ops.length === 1
+          ? evaluateDirichletEta(engine, ops[0], numericApproximation)
+          : undefined,
+    },
+
+    // Dirichlet beta β(s) = Σ_{n≥0} (−1)^n (2n+1)^(−s), entire. Wolfram's
+    // `DirichletBeta` (mpmath `dirichlet(s, [0, 1, 0, -1])`).
+    DirichletBeta: {
+      description:
+        'Dirichlet beta function β(s) = Σ_{n≥0} (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G.',
+      complexity: 8500,
+      broadcastable: true,
+      signature: '(complex) -> number',
+      examples: ['[DirichletBeta(1), DirichletBeta(3), N(DirichletBeta(1/2))]'],
+      nanBehavior: 'propagate',
+      evaluate: (ops, { numericApproximation, engine }) =>
+        ops.length === 1
+          ? evaluateDirichletBeta(engine, ops[0], numericApproximation)
+          : undefined,
     },
 
     // Lerch transcendent Φ(z,s,a) = Σ_{k=0}^∞ zᵏ(k+a)^{-s} (Wolfram's

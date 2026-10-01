@@ -152,6 +152,23 @@ These changes apply to non-strict parsing only
 
   The readings do not change, and strict mode reports none of these.
 
+### New Features
+
+- **`DirichletEta` and `DirichletBeta`, the two alternating cousins of ζ,
+  both entire** (#395, contributed by
+  [enumeratio](https://github.com/enumeratio)). `DirichletEta(s)` is
+  η(s) = Σ (−1)ⁿ⁻¹/nˢ = (1 − 2¹⁻ˢ) ζ(s) and `DirichletBeta(s)` is
+  β(s) = Σ (−1)ⁿ/(2n+1)ˢ = 4⁻ˢ (ζ(s, ¼) − ζ(s, ¾)). Exact values at the
+  integers: `DirichletEta(1)` is `ln 2`, `DirichletEta(2)` is `π²/12`,
+  `DirichletEta(0)` is `1/2`, `DirichletEta(-3)` is `-1/8`;
+  `DirichletBeta(1)` is `π/4`, `DirichletBeta(2)` is `CatalanConstant`,
+  `DirichletBeta(5)` is `5π⁵/1536`, `DirichletBeta(-4)` is `5/2` (Euler
+  numbers). A real `s` is answered at `ce.precision` digits, also next to the
+  pole of ζ: `N(DirichletEta(1/2))` is `0.604898643421630370247`, and
+  `η(1 + 10⁻³⁰)` keeps every digit instead of cancelling the pole. A complex
+  `s` is answered in doubles: `DirichletBeta(0.5 + 14i)` is
+  `1.5371154384 + 1.3434514269i`. Both compile to JavaScript.
+
 ### Issues Resolved
 
 - `Solve` found no root of a linear equation whose coefficient of the unknown is

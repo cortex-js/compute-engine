@@ -530,7 +530,11 @@ import {
   gammaQ,
   betaRegularized,
 } from '../numerics/special-functions.js';
-import { lerchPhiReal } from '../numerics/lerch-phi.js';
+import {
+  lerchPhiReal,
+  dirichletEtaReal,
+  dirichletBetaReal,
+} from '../numerics/lerch-phi.js';
 import { polylogOrderReal } from '../numerics/polylog.js';
 import {
   correlation,
@@ -3342,6 +3346,8 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'PolyGamma',
   'LerchPhi',
   'PolyLog',
+  'DirichletEta',
+  'DirichletBeta',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of this target. */
@@ -7584,6 +7590,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.polyLog(${compile(args[0])}, ${compile(args[1])})`;
   },
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): η and β on the machine kernels,
+  // which sum the alternating series next to s = 1 as the interpreter does.
+  DirichletEta: '_SYS.dirichletEta',
+  DirichletBeta: '_SYS.dirichletBeta',
   LambertW: '_SYS.lambertW',
 
   // Bessel functions
@@ -12527,6 +12537,8 @@ const SYS_HELPERS = {
   hurwitzZeta,
   zetaGeneralized,
   lerchPhi: lerchPhiReal,
+  dirichletEta: dirichletEtaReal,
+  dirichletBeta: dirichletBetaReal,
   polyLog: polylogOrderReal,
   lambertW,
   besselJ,
