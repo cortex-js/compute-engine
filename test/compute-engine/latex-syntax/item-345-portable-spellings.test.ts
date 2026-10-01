@@ -19,8 +19,9 @@ const cases: [string, MathJsonExpression, string][] = [
   ['LCM(a, b)', ['LCM', 'a', 'b'], '\\operatorname{lcm}(a, b)'],
   ['Log2(x)', ['Log2', 'x'], '\\log_{2}(x)'],
   ['Log10(x)', ['Log10', 'x'], '\\log_{10}(x)'],
-  ['EulerGamma', 'EulerGamma', '\\gamma'],
   ['Degrees(30)', ['Degrees', 30], '30^{\\circ}'],
+  ['Degrees(x^2)', ['Degrees', ['Power', 'x', 2]], '(x^2)^{\\circ}'],
+  ['Degrees(x+1)', ['Degrees', ['Add', 'x', 1]], '(x+1)^{\\circ}'],
   ['Integers', 'Integers', '\\mathbb{Z}'],
   ['RationalNumbers', 'RationalNumbers', '\\mathbb{Q}'],
   ['RealNumbers', 'RealNumbers', '\\mathbb{R}'],
@@ -110,9 +111,12 @@ describe('345 the glyphs of i and e are serialization options', () => {
   test('exponentialE is honoured', () => {
     const opt = { exponentialE: '\\mathrm{e}' };
     expect(ce.box('ExponentialE').toLatex(opt)).toBe('\\mathrm{e}');
+    expect(ce.box(['Power', 'ExponentialE', 'x']).toLatex(opt)).toBe(
+      '\\mathrm{e}^{x}'
+    );
     expect(
-      ce.box(['Power', 'ExponentialE', 'x'], { form: 'raw' }).toLatex(opt)
-    ).toContain('\\mathrm{e}');
+      ce.box(['Power', 'ExponentialE', 'x']).toLatex({ exponentialE: 'e' })
+    ).toBe('e^{x}');
     expect(ce.parse('\\mathrm{e}').isSame(ce.box('ExponentialE'))).toBe(true);
   });
 });

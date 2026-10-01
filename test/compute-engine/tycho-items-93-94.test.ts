@@ -349,7 +349,8 @@ describe('a two-element `List` domain survives a LaTeX round-trip', () => {
     test('a tuple of any other length keeps paren notation', () => {
       const ce = new ComputeEngine();
       expect(
-        ce.box(['Element', 'n', ['Tuple', 1, 2, 3]], { canonical: false }).latex
+        ce.box(['Element', 'n', ['Tuple', 1, 2, 3]], { canonical: false })
+          .latex
       ).toBe('n\\in(1,2,3)');
     });
   });

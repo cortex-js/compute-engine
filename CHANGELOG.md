@@ -3,12 +3,12 @@
 ### Behavior Changes
 
 - **LaTeX serialization uses standard spellings for `LCM`, `Log2`, `Log10`,
-  `EulerGamma`, the number sets and `Degrees`** (#345, contributed by
+  the number sets and `Degrees`** (#345, contributed by
   [enumeratio](https://github.com/enumeratio)). `LCM(a, b)` was `\lcm(a, b)`
   and is now `\operatorname{lcm}(a, b)`; `Log2(x)` and `Log10(x)` were
   `\mathrm{Log2}(x)` and `\mathrm{Log10}(x)` and are now `\log_{2}(x)` and
-  `\log_{10}(x)`; `EulerGamma` was `\operatorname{EulerGamma}` and is now
-  `\gamma`; `Degrees(30)` was `30\degree` and is now `30^{\circ}`; `Integers`,
+  `\log_{10}(x)`; `Degrees(30)` was `30\degree` and is now `30^{\circ}` (a
+  compound operand is parenthesized, `(x+1)^{\circ}`); `Integers`,
   `RationalNumbers`, `RealNumbers`, `ComplexNumbers`, `NonNegativeIntegers` and
   the sign-restricted sets were `\Z`, `\Q`, `\R`, `\C`, `\N`, `\R_{>0}`, … and
   are now `\mathbb{Z}`, `\mathbb{Q}`, …, `\mathbb{R}_{>0}`. `\lcm`, `\degree`
@@ -19,8 +19,8 @@
   was `""` and `Interval(List(0, 1))` ended in a stray comma. The
   `imaginaryUnit` serialization option, which only the parser honoured, now
   also sets how `ImaginaryUnit` and complex numbers are written, and the new
-  `exponentialE` option does the same for `ExponentialE`; both default to
-  `\imaginaryI` and `\exponentialE`.
+  `exponentialE` option does the same for `ExponentialE` and `Exp`; both default
+  to `\imaginaryI` and `\exponentialE`.
 
 - **A symbol declared with a nested list type is the matrix it describes.**
   `list<vector<integer^3>^2>` (two rows of three integers) was not a subtype of

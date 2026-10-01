@@ -1807,16 +1807,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // of that spelling, and `\phi` remains available as a plain variable.
   { name: 'GoldenRatio', standaloneSymbol: true, latexTrigger: '\\varphi' },
   // `\gamma` is also very often a variable (Lorentz factor, damping ratio,
-  // adiabatic index), so when parsing the bare spelling yields to a
-  // declaration the way Euler `D_x` does. It cannot get the upright-markup
-  // treatment `G` gets — `\operatorname{\gamma}` already means the plain
-  // symbol `gamma` (the Greek `\operatorname{}` convention) — so the constant
-  // serializes as `\gamma`, and reads back as `EulerGamma` unless `gamma` is
-  // declared.
+  // adiabatic index), so the bare spelling yields to a declaration the way
+  // Euler `D_x` does. It cannot get the upright-markup treatment `G` gets —
+  // `\operatorname{\gamma}` already means the plain symbol `gamma` (the Greek
+  // `\operatorname{}` convention) — so the constant SERIALIZES to its MathJSON
+  // name instead. That spelling reaches `EulerGamma` through the generic
+  // symbol path, independent of any declaration, so an expression carrying the
+  // constant still round-trips in an engine where `gamma` is a variable.
   {
     name: 'EulerGamma',
     standaloneSymbol: true,
     latexTrigger: '\\gamma',
+    serialize: '\\operatorname{EulerGamma}',
     // Decline (`null`) rather than returning the symbol when `gamma` is
     // declared: this parselet runs ahead of `parseFunction()`, so returning
     // `'gamma'` here would strand a declared FUNCTION `\gamma(2, 1)` as an
@@ -1861,7 +1863,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       }
 
       // Fall back to default serialization
-      return joinLatex([serializer.serialize(arg), '^{\\circ}']);
+      // A compound operand needs parens: `x^2^{\circ}` does not parse and
+      // `x+1^{\circ}` reads back as `x+(1^{\circ})`.
+      const base =
+        symbol(arg) || machineValue(arg) !== null
+          ? serializer.serialize(arg)
+          : `(${serializer.serialize(arg)})`;
+      return joinLatex([base, '^{\\circ}']);
     },
   },
   // No `precedence` on the superscript entries: the dictionary validator
@@ -2256,7 +2264,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const op1 = operand(expr, 1);
       if (symbol(op1) || machineValue(op1) !== null)
-        return joinLatex(['\\exponentialE^{', serializer.serialize(op1), '}']);
+        return joinLatex([
+          serializer.options.exponentialE,
+          '^{',
+          serializer.serialize(op1),
+          '}',
+        ]);
 
       return joinLatex(['\\exp', serializer.wrap(missingIfEmpty(op1))]);
     },
