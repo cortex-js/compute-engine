@@ -318,11 +318,11 @@ category.
 
 MathJSON `About` · `(any) -> dictionary<any>`
 
-Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, algebraic attributes, description, wikidata and url.
+Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, attributes (the algebraic flags and `lazy`), description, examples, keywords, wikidata and url.
 
 ```epsil
 about(pi)
-// ➔ {"name" -> "Pi", "kind" -> "constant", "type" -> "real<3.141592653589793..3.141592653589794>", "description" -> "The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter.", "wikidata" -> "Q167"}
+// ➔ {"name" -> "Pi", "kind" -> "constant", "type" -> "real<3.141592653589793..3.141592653589794>", "description" -> "The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter.", "examples" -> ["N(Pi)","Cos(Pi)"], "wikidata" -> "Q167"}
 ```
 
 ### angle

@@ -1074,6 +1074,22 @@ export function isValidValueDef(def: unknown): def is Partial<ValueDefinition> {
 export { isValueDef, isOperatorDef } from './definition-guards.js';
 
 /**
+ * The operator definition that `name` resolves to in the current scope, or
+ * `undefined` if `name` is not an operator.
+ *
+ * A custom `canonical` handler that validates its own operands must read the
+ * signature (`.signature.type`) and the positions where an absent operand is
+ * stripped (`.stripsMissingAt(i)`) from this definition, not from a copy in
+ * the handler. A host can redeclare the operator with a wider signature and
+ * keep the handler (`ce.declare(name, { ...def, signature: '...' })`); a copy
+ * would then still refuse the operands the new signature admits.
+ */
+export function declaredOperator(ce: ComputeEngine, name: string) {
+  const def = ce.lookupDefinition(name);
+  return def !== undefined && 'operator' in def ? def.operator : undefined;
+}
+
+/**
  * Whether `expr` contains a free symbol that carries a USER-ASSIGNED value: a
  * NON-constant symbol with a value (`x` after `assign('x', 5)`), as opposed to
  * a built-in constant (`Pi`, `ExponentialE`).

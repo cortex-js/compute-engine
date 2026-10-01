@@ -3815,8 +3815,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Return information about an expression as a dictionary: its kind ' +
         '(symbol, constant, function, number, string, expression), its ' +
         'static type and, when applicable, its name, value, signature, ' +
-        'clause listing, algebraic attributes, description, wikidata and ' +
-        'url.',
+        'clause listing, attributes (the algebraic flags and `lazy`), ' +
+        'description, examples, keywords, wikidata and url.',
       lazy: true,
       // `dictionary<any>`, not bare `dictionary` (≡ `dictionary<unknown>`,
       // values only): a `value` entry may legitimately be an absence marker
@@ -3834,6 +3834,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             key,
             typeof value === 'string' ? ce.string(value) : value,
           ]);
+        };
+        // A list of strings, for the multi-valued entries.
+        const addList = (key: string, values: readonly string[]): void => {
+          if (values.length > 0)
+            add(
+              key,
+              ce.function(
+                'List',
+                values.map((v) => ce.string(v))
+              )
+            );
+        };
+        // The `attributes` entry of an operator: its algebraic flags, then
+        // `lazy` when its arguments are passed to it unevaluated (a `hold`
+        // function, `Hold`, but also `Add` and `Multiply`, which
+        // canonicalize their own arguments).
+        const addAttributes = (op: BoxedOperatorDefinition): void => {
+          const flags: string[] = (
+            ['commutative', 'associative', 'idempotent', 'involution'] as const
+          ).filter((f) => op[f] === true);
+          if (op.lazy === true) flags.push('lazy');
+          addList('attributes', flags);
         };
 
         if (isString(x)) {
@@ -3873,15 +3895,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             );
             if (fnDef !== undefined && isOperatorDef(fnDef)) {
               const op = fnDef.operator;
-              const flags = (
-                [
-                  'commutative',
-                  'associative',
-                  'idempotent',
-                  'involution',
-                ] as const
-              ).filter((f) => op[f] === true);
-              if (flags.length > 0) add('attributes', flags.join(' '));
+              addAttributes(op);
               // The doc-comment description; the auto-generated clause-storage
               // description ("Multi-clause function (…)", "Hold function (…)")
               // is already conveyed by the `kind` entry above.
@@ -3922,6 +3936,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 add('description', def.description);
               else if (Array.isArray(def.description))
                 add('description', def.description.join('\n'));
+              addList('examples', def.examples ?? []);
+              addList('keywords', def.keywords ?? []);
               if (def.wikidata) add('wikidata', def.wikidata);
               if (def.url) add('url', def.url);
             } else if (symDef !== undefined && isOperatorDef(symDef)) {
@@ -3932,19 +3948,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               const op = symDef.operator;
               add('kind', 'function');
               add('signature', op.signature.toString());
-              const flags = (
-                [
-                  'commutative',
-                  'associative',
-                  'idempotent',
-                  'involution',
-                ] as const
-              ).filter((f) => op[f] === true);
-              if (flags.length > 0) add('attributes', flags.join(' '));
+              addAttributes(op);
               if (typeof op.description === 'string')
                 add('description', op.description);
               else if (Array.isArray(op.description))
                 add('description', op.description.join('\n'));
+              addList('examples', op.examples ?? []);
+              addList('keywords', op.keywords ?? []);
               if (op.wikidata) add('wikidata', op.wikidata);
               if (op.url) add('url', op.url);
             } else {

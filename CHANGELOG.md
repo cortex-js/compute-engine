@@ -1,3 +1,84 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **The `attributes` entry of `About` is a list, and it says when an operator
+  is lazy.** It was one string with the flags separated by spaces:
+  `About(Add)` gave `"commutative associative idempotent"`. It is now a list
+  of strings, the algebraic flags and then `lazy` when the arguments of the
+  operator are passed to it unevaluated: `About(Add)` gives
+  `["commutative", "associative", "idempotent", "lazy"]`, and `About(Hold)`,
+  which had no `attributes` entry, gives `["lazy"]`. A program that read the
+  entry as a string must read it as a list.
+
+### Issues Resolved
+
+- [#398](https://github.com/cortex-js/compute-engine/issues/398) `About` now
+  reports the `examples` and `keywords` of a definition, each as a list of
+  strings: `About(Sin)` includes
+  `"examples" -> ["Sin(Pi / 6)", "Sin(1)", "N(Sin(1))"]` and
+  `"keywords" -> ["sine"]`. The boxed operator and value definitions did not
+  keep the `examples` of the definition they were made from. They now keep
+  them as a list of strings; a definition that gives one string is stored as
+  a list of one string.
+- [#388](https://github.com/cortex-js/compute-engine/issues/388) A function
+  literal in compiled JavaScript was wrapped in a broadcast dispatch even
+  where no argument could be a list. Two cases now compile to the bare arrow
+  function. A callback fed the elements of a `Range` whose start and step are
+  literal numbers (`Map(q ↦ …, Range(1, Length(s)))`) receives a finite
+  number at every call, so the wrapper and the `NaN` and absence tests on its
+  parameter (`q === q`, `typeof q === 'number'`) are gone. An `Apply` of a
+  literal to arguments that are scalars by construction (a number, a declared
+  scalar input, a loop index) no longer builds the wrapper and its closure at
+  each evaluation. A list argument still broadcasts, as in the interpreter.
+- [#387](https://github.com/cortex-js/compute-engine/issues/387) On the
+  JavaScript target, a compiled `Range` is built in a loop, and a `Map`, a
+  `Fold`/`Reduce` or a `Sum(Map(…))` over a finite `Range` builds no range
+  at all. A `Range` compiled to
+  `Array.from({length: n}, (_e, i) => a + i * s)`, which is about 18 times
+  slower on V8 than a preallocated array filled by a counted loop. The
+  compiled code now calls a run-time helper, `_SYS.range(a, b, s)`, that
+  fills the array in a loop. A `Map` over a finite range, a `Reduce` over one
+  (`Fold` is its canonical form) and the `Sum` or `Product` of a `Map` over
+  one now walk the range with the counted loop that predicates over a range
+  already use (issue #373). `Fold((acc, k) ↦ acc + k, 0, 1..n)` at n = 1000
+  went from about 38 µs to under 1 µs. The values are unchanged: the element
+  count is the interpreter's own, element `i` is `a + i × s`, the elements
+  are folded in range order, a seedless fold over an empty range is `NaN`,
+  and an infinite bound at run time still throws a `RangeError`. A range that
+  is shared by common-subexpression elimination, or has a non-finite bound,
+  keeps the array lowering.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) A library
+  given in the `libraries` constructor option with no `requires` list loaded
+  before the standard libraries listed before it. The libraries were sorted
+  so that every library with no dependencies came first, whatever its place
+  in the list. A caller library whose definitions use a function literal
+  (`evaluate: ["Function", …]`) then made `Block` a plain symbol before
+  `control-structures` could define it: the engine printed "Duplicate
+  operator definition: Block" and stayed broken (`x := 2; x + 1` gave
+  `{2; 3}`). The libraries now load in the order of the list, and each
+  library loads after the libraries in its `requires` list. The order of the
+  standard libraries does not change.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) `D` did not
+  differentiate an operator defined by a library given in the `libraries`
+  constructor option: with `Sq` defined as `x ↦ x²`, `D(Sq(x), x)` gave
+  `Apply(Derivative("Sq", 1), x)`. Such a library is installed in the same
+  scope as the standard library, so `D` took its operators for built-in
+  ones. `D(Sq(x), x)` now gives `2x`, as it does when `Sq` is declared with
+  `ce.declare()`.
+- `D` used the library rule for a user function with the name of a library
+  function: after `\operatorname{Sinh}(x) := 3x`, `Sinh(2)` is `6` but
+  `D(Sinh(t), t)` gave `cosh(t)`. It now gives `3`.
+- [#394](https://github.com/cortex-js/compute-engine/issues/394) `SetMinus`,
+  `Length`, `Count`, `IsEmpty`, `Contains`, `Append` and `Slice` validated
+  their operands against a copy of their signature text, not against the
+  signature of their definition. A host that redeclared one of them with a
+  wider signature and kept its handlers
+  (`ce.declare('SetMinus', { ...ce.lookupDefinition('SetMinus').operator, signature: '(value, value*) -> set' })`)
+  still had the old validation: `SetMinus(5, 2)` stayed an
+  `incompatible-type` error. These operators now read the signature of the
+  definition in effect. A stock engine gives the same results as before.
+
 ## 0.143.0 _2026-10-01_
 
 ### Behavior Changes

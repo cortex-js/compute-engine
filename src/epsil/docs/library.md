@@ -48,7 +48,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `about` | `About` | `(any) -> dictionary<any>` | Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, algebraic attributes, description,… |
+| `about` | `About` | `(any) -> dictionary<any>` | Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, attributes (the algebraic flags… |
 | `angle` | `Angle` | `(any+) -> number` | Angle mark / measure (`\angle ABC`, `\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated. |
 | — | `Annotated` | `(expression, dictionary<any>) -> expression` | Attach metadata or style annotations to an expression. |
 | `apply` | `Apply` | `(name: any, arguments: any*) -> unknown` | Apply a function to a list of arguments |

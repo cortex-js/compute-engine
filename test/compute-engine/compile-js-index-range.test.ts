@@ -257,7 +257,7 @@ describe('Tycho 324: a compiled Range with a compound step', () => {
     const src = code(ce.box(['Range', 0, 10, ['Subtract', 'd', 498]] as any));
     // The step is passed to the range function, not spliced into the
     // element expression, so no parentheses are needed around it.
-    expect(src).toContain('_a + _i * _s))(0, 10, _.d + -498)');
+    expect(src).toContain('_SYS.range(0, 10, _.d + -498)');
   });
 
   test('a Range inside a seeded shuffle keeps the interpreted count', () => {

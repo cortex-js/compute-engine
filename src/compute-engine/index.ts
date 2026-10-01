@@ -1483,8 +1483,10 @@ export class ComputeEngine implements IComputeEngine {
    * `chop()` as well.
    *
    * @param options.libraries Optional standard/custom library list.
-   * Custom library entries are validated during startup (name, dependencies,
-   * definitions, and LaTeX dictionary shape).
+   * Custom library entries are validated during startup (name, dependencies
+   * and definitions). The libraries load in dependency order: each library
+   * loads after the libraries in its `requires` list and, where that order
+   * allows it, in the order of this list.
    */
   constructor(options?: {
     libraries?: readonly (string | LibraryDefinition)[];

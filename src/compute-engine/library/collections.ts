@@ -145,6 +145,7 @@ import type {
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import {
+  declaredOperator,
   isOperatorDef,
   isValueDef,
   numericFromExactValue,
@@ -707,15 +708,39 @@ function nonCollectionSizeOperandError(
   return ce.typeError('collection', xs.type, xs);
 }
 
-const LENGTH_SIGNATURE = parseType('(any) -> integer | infinity');
-const COUNT_SIGNATURE = parseType(
-  '(collection<any>, any?) -> integer | infinity'
-);
-const ISEMPTY_SIGNATURE = parseType('(collection<any>) -> boolean');
-const CONTAINS_SIGNATURE = parseType(
-  '(collection<any>, element: any) -> boolean'
-);
-// Only the GENERIC arm of `Join`'s overload set, and deliberately so: this
+/**
+ * Validate the operands of a call to `name` in its custom `canonical`
+ * handler, against the signature of the definition `name` resolves to now.
+ *
+ * The signature is read from the live definition, not from a copy of its
+ * text, so a host that redeclares the operator with a wider signature and
+ * the same handler (`ce.declare(name, { ...def, signature: '...' })`) gets
+ * the wider validation. With `stripMissing`, an absent operand is stripped
+ * at the positions the same definition strips (`stripsMissingAt`). Return
+ * `null` when there is nothing to adjust, as `validateArguments` does.
+ */
+function validateAgainstDeclaration(
+  ce: ComputeEngine,
+  name: string,
+  args: ReadonlyArray<Expression>,
+  stripMissing = false
+): ReadonlyArray<Expression> | null {
+  const op = declaredOperator(ce, name);
+  if (op === undefined) return null;
+  return validateArguments(
+    ce,
+    args,
+    op.signature.type,
+    false,
+    false,
+    undefined,
+    stripMissing ? (i) => op.stripsMissingAt(i) : undefined
+  );
+}
+
+// Only the GENERIC arm of `Join`'s overload set, and deliberately so (unlike
+// the other collection operators, which validate against their live
+// declaration with `validateAgainstDeclaration`): this
 // type is used by the custom `canonical` handler to validate the operands,
 // and the string-preserving arm (`(T+) -> T where T: string`) admits a strict
 // SUBSET of what this arm admits — every string is a collection — so
@@ -723,24 +748,15 @@ const CONTAINS_SIGNATURE = parseType(
 // set accepts. The RESULT type is not read here; the `type:` handler
 // (`joinResultType`) owns it.
 const JOIN_SIGNATURE = parseType('(collection<any>*) -> collection');
-// The full overload set of `Slice`, written ONCE. Two places need it and they
-// must not drift apart: the definition's `signature:` field (what the engine
-// registers, and what result typing resolves an arm from) and the parsed
-// `SLICE_SIGNATURE` below, which the custom `canonical` handler validates its
-// operands against. The handler intercepts an absent (`Nothing`) span before
-// the default `flatten` step can drop it, and must then do the argument
-// validation the default path would have done — against the SAME contract the
-// engine registered, or a call the definition accepts could be rejected at
-// canonicalization (or the reverse). A single constant is what enforces that;
-// nothing else checks the two for equality.
+// The full overload set of `Slice`. The custom `canonical` handler intercepts
+// an absent (`Nothing`) span before the default `flatten` step can drop it,
+// and must then do the argument validation the default path would have done
+// — against the SAME contract the engine registered, or a call the definition
+// accepts could be rejected at canonicalization (or the reverse). So the
+// handler reads the signature of the live definition
+// (`validateAgainstDeclaration`), which also follows a host redeclaration.
 const SLICE_SIGNATURE_TEXT =
   '((value: T, span: range) -> T where T: string) & ((value: T, span: range | nothing) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, span: range | nothing) -> list<T> | nothing where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)';
-// Parsed once, so the `canonical` handler does not re-parse the signature on
-// every canonicalization.
-const SLICE_SIGNATURE = parseType(SLICE_SIGNATURE_TEXT);
-const APPEND_SIGNATURE = parseType(
-  '(collection<any>, (value | missing)+) -> collection'
-);
 
 /**
  * SEARCHED_VALUE_POLICY: how `Contains`, `IndexOf`, `Count(xs, v)`, `Element`
@@ -5714,13 +5730,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         )
           target._infer(() => 'collection', 'narrow');
       });
-      const adjusted = validateArguments(
-        ce,
-        stripped,
-        LENGTH_SIGNATURE,
-        false,
-        false
-      );
+      const adjusted = validateAgainstDeclaration(ce, 'Length', stripped);
       return ce._fn('Length', adjusted ?? stripped);
     },
     evaluate: ([xs], { engine }) => {
@@ -7225,14 +7235,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // evaluation driver answers `Missing` (user decision 2026-09-25).
       // Without the policy this handler's own validation refused
       // `Contains(Missing, …)`.
-      const adjusted = validateArguments(
+      const adjusted = validateAgainstDeclaration(
         ce,
+        'Contains',
         stripped,
-        CONTAINS_SIGNATURE,
-        false,
-        false,
-        undefined,
-        (i) => i === 0
+        true
       );
       return ce._fn('Contains', adjusted ?? stripped);
     },
@@ -7385,15 +7392,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // propagates absence and answers `NaN` for `Count(Missing)` (user
       // decision 2026-09-25). Without the policy this handler's own
       // validation refused it with an `incompatible-type` error.
-      const adjusted = validateArguments(
-        ce,
-        stripped,
-        COUNT_SIGNATURE,
-        false,
-        false,
-        undefined,
-        (i) => i === 0
-      );
+      const adjusted = validateAgainstDeclaration(ce, 'Count', stripped, true);
       return ce._fn('Count', adjusted ?? stripped);
     },
     evaluate: ([xs, what], { engine }) => {
@@ -7489,14 +7488,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // evaluation driver answers `Missing` (user decision 2026-09-25).
       // Without the policy this handler's own validation refused
       // `IsEmpty(Missing, …)`.
-      const adjusted = validateArguments(
+      const adjusted = validateAgainstDeclaration(
         ce,
+        'IsEmpty',
         stripped,
-        ISEMPTY_SIGNATURE,
-        false,
-        false,
-        undefined,
-        () => true
+        true
       );
       return ce._fn('IsEmpty', adjusted ?? stripped);
     },
@@ -9149,16 +9145,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // admits it (strip-before-validate): `Append(Missing, 1)` answers
       // `Missing` at evaluation. Without this, the validation here refused it
       // with an `incompatible-type` error.
-      const args =
-        validateArguments(
-          ce,
-          ops,
-          APPEND_SIGNATURE,
-          false,
-          false,
-          undefined,
-          (i) => i === 0
-        ) ?? ops;
+      const args = validateAgainstDeclaration(ce, 'Append', ops, true) ?? ops;
       if (args.length < 2 || args.some((x) => !x.isValid))
         return ce._fn('Append', args);
 
@@ -11052,7 +11039,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const args = flatten(ops);
       return ce._fn(
         'Slice',
-        validateArguments(ce, args, SLICE_SIGNATURE, false, false) ?? args
+        validateAgainstDeclaration(ce, 'Slice', args) ?? args
       );
     },
     collection: {

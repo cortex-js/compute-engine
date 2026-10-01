@@ -152,6 +152,9 @@ export class _BoxedValueDefinition
   wikidata?: string;
   description?: string | string[];
   keywords?: string[];
+  /** The usage examples, each one line of Epsil source. A definition may
+   * give a single string; it is stored as a one-element list. */
+  examples?: string[];
   url?: string;
 
   private _engine: ComputeEngine;
@@ -380,6 +383,9 @@ export class _BoxedValueDefinition
     if (def.wikidata) this.wikidata = def.wikidata;
     if (def.description) this.description = def.description;
     if (def.keywords) this.keywords = def.keywords;
+    if (def.examples !== undefined)
+      this.examples =
+        typeof def.examples === 'string' ? [def.examples] : [...def.examples];
     if (def.url) this.url = def.url;
 
     if (def.holdUntil) this.holdUntil = def.holdUntil;
@@ -524,6 +530,7 @@ export class _BoxedValueDefinition
     if (this.wikidata) result.wikidata = this.wikidata;
     if (this.description) result.description = this.description;
     if (this.keywords) result.keywords = this.keywords;
+    if (this.examples) result.examples = this.examples;
     if (this.url) result.url = this.url;
     if (this._type) result.type = this._type.toString();
     result.inferredType = this.inferredType;
@@ -764,6 +771,7 @@ export class _BoxedValueDefinition
       wikidata: this.wikidata,
       description: this.description,
       keywords: this.keywords,
+      examples: this.examples,
       url: this.url,
       _defValue: this._defValue,
       _value: this._value,
@@ -813,6 +821,7 @@ export class _BoxedValueDefinition
     this.wikidata = s.wikidata as string | undefined;
     this.description = s.description as string | string[] | undefined;
     this.keywords = s.keywords as string[] | undefined;
+    this.examples = s.examples as string[] | undefined;
     this.url = s.url as string | undefined;
     this._defValue = s._defValue as typeof this._defValue;
     this._value = s._value as typeof this._value;

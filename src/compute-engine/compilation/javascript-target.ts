@@ -29,6 +29,7 @@ import {
 } from './in-place-update.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
+  isExpression,
   isSymbol,
   isNumber,
   isFunction,
@@ -4383,6 +4384,45 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Add/Multiply/Min/Max folds, function literals, and user-defined ` +
           `functions compile on the JavaScript target.`
       );
+    // Over a finite range, fold each element as the range is walked, without
+    // building the range (`emitPredicateRangeWalk`, issue #387). The
+    // combiner is called with `(accumulator, element)`, in range order, as
+    // the native `reduce` below calls it; without a seed the first element
+    // is the seed, and an empty range answers NaN, as below.
+    if (isWalkableRange(coll, target)) {
+      const acc = BaseCompiler.tempVar(target);
+      if (init !== undefined && init !== null) {
+        const seedCode = seed ?? compile(init);
+        return emitPredicateRangeWalk(
+          'Reduce',
+          coll,
+          { code: combiner },
+          compile,
+          target,
+          {
+            init: `let ${acc} = ${seedCode};`,
+            body: (element, _selected, _exit, f) =>
+              `${acc} = ${f}(${acc}, ${element});`,
+            result: acc,
+          }
+        );
+      }
+      const started = BaseCompiler.tempVar(target);
+      return emitPredicateRangeWalk(
+        'Reduce',
+        coll,
+        { code: combiner },
+        compile,
+        target,
+        {
+          init: `let ${acc} = NaN; let ${started} = false;`,
+          body: (element, _selected, _exit, f) =>
+            `if (${started}) ${acc} = ${f}(${acc}, ${element}); ` +
+            `else { ${acc} = ${element}; ${started} = true; }`,
+          result: acc,
+        }
+      );
+    }
     const collCode = elementsArg('Reduce', coll, compile);
     // With an initial value, seed the reduce; without one, the native reduce
     // uses the first element as the seed (matching the interpreter, which
@@ -5084,6 +5124,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
       const fn = zipFnArg('Map', args[0], sources, compile, target);
       return `((_f, ..._ls) => Array.from({ length: Math.min(..._ls.map((_l) => _l.length)) }, (_, _i) => _f(..._ls.map((_l) => _l[_i]))))(${fn}, ${colls.join(', ')})`;
+    }
+    // Over a finite range, push each mapped element into the result as the
+    // range is walked, instead of building the range and mapping it into a
+    // second array (`emitPredicateRangeWalk`, issue #387). The callback is
+    // compiled by `fnArg` either way, and called with the element alone.
+    if (isWalkableRange(args[1], target)) {
+      const out = BaseCompiler.tempVar(target);
+      return emitPredicateRangeWalk('Map', args[1], args[0], compile, target, {
+        init: `const ${out} = [];`,
+        body: (_element, mapped) => `${out}.push(${mapped});`,
+        result: out,
+      });
     }
     const coll = elementsArg('Map', args[1], compile);
     return `((_f) => (${coll}).map((_x) => _f(_x)))(${fnArg('Map', args[0], args[1], compile, [], target)})`;
@@ -5843,7 +5895,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           target
         )
       : [];
-    return `(${compile(args[0])})(${args
+    // When every argument is a run-time scalar by construction — the same
+    // proof that lets a call of a named function skip its broadcast dispatch
+    // (`isConstructedScalar`) — the literal is applied as a bare arrow,
+    // without the broadcast wrapper and the closure that binds it, which were
+    // otherwise built again at every evaluation of the application.
+    const literal = args[0];
+    const callee =
+      isFunction(literal, 'Function') &&
+      literal.nops === args.length &&
+      args.slice(1).every((a) => isConstructedScalar(a, target))
+        ? BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
+            compile(literal)
+          )
+        : compile(args[0]);
+    return `(${callee})(${args
       .slice(1)
       .map((a, i) => BaseCompiler.presentCheckedCode(compile(a), checks[i]))
       .join(', ')})`;
@@ -6639,8 +6705,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`compileRealOperand`), as the interpreter reads it: `Range(1, 5, 2+i)`
     // is `[1, 3, 5]`.
     const operand = (a: Expression): string => compileRealOperand(a, compile);
-    if (args.length === 1)
-      return `Array.from({length: ${operand(args[0])}}, (_e, i) => i + 1)`;
+    if (args.length === 1) return `_SYS.range(1, ${operand(args[0])}, 1)`;
 
     let start = operand(args[0]);
     let stop = operand(args[1]);
@@ -6680,20 +6745,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         if (len < 50) {
           return `[${Array.from({ length: len }, (_, i) => fStart + dir * i).join(', ')}]`;
         }
-        return `Array.from({length: ${len}}, (_e, i) => ${start} ${dir === 1 ? '+' : '-'} i)`;
+        return `_SYS.range(${start}, ${stop}, ${dir})`;
       }
 
-      // Symbolic bounds — the direction is resolved at runtime. The map
-      // callback's throwaway element parameter must not be named `_`: the
+      // Symbolic bounds — the direction is resolved at runtime. The bounds
+      // are the arguments of a small arrow function, so each is evaluated
+      // once, and the arrow's parameters are `_a` and `_b`, never `_`: the
       // compiled function binds its argument object to `_`, and a symbolic
-      // bound compiles to a member access like `_.a`. A `_` callback param
-      // would shadow the argument object, so `_.a` in the body would read
-      // from the (undefined) array element. Use `_e` for the unused element.
-      return `((_a, _b) => Array.from({length: _SYS.rangeCount(_a, _b, _b >= _a ? 1 : -1)}, (_e, _i) => _b >= _a ? _a + _i : _a - _i))(${start}, ${stop})`;
+      // bound compiles to a member access like `_.a`.
+      return `((_a, _b) => _SYS.range(_a, _b, _b >= _a ? 1 : -1))(${start}, ${stop})`;
     }
-    // Every operand is passed as an ARGUMENT of a small arrow function, and
-    // the `Array.from` callback reads only that function's own parameters.
-    // The shape carries two guarantees:
+    // Every operand is passed as an ARGUMENT of the run-time helper
+    // `_SYS.range` (`materializeRange`), which builds the elements in a
+    // counted loop. The shape carries two guarantees:
     //
     // - No callback name can capture a user variable. The direct emission
     //   `Array.from({length: …}, (_e, i) => start + i * step)` spliced the
@@ -6703,7 +6767,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     //   ARRAY INDEX instead of `i`, so every inner range started at
     //   index + 1 and `Count(Filter(...))` answered 0 where the interpreter
     //   answered 1 (issue #367). Here `start` and `step` are evaluated in
-    //   the argument list, outside the callback, whatever they are named.
+    //   the argument list, whatever they are named.
     // - An IMPURE operand (the Random family) is evaluated exactly once. In
     //   the direct emission `start` and `step` were each spliced twice, the
     //   second time inside the callback, so a spliced draw was re-drawn once
@@ -6712,15 +6776,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     //   and one more per element).
     //
     // The same shape also makes parentheses unnecessary: a step compiled as
-    // the sum `_.d + -498` is bound whole to `_s` (Tycho item 324 was the
-    // direct emission reading it as `0 + i * _.d + -498`).
+    // the sum `_.d + -498` is passed whole (Tycho item 324 was the direct
+    // emission reading it as `0 + i * _.d + -498`).
     //
-    // The length is `_SYS.rangeCount`, the interpreter's own count
+    // The length is `rangeCount`, the interpreter's own count
     // (`numerics/range-count.ts`): 0 for a zero step or a step that points
     // away from the stop, and an end point on the step grid in exact
     // arithmetic is counted even when the float quotient falls one rounding
     // error short of it (`Range(0, 0.3, 0.1)` has 4 elements).
-    return `((_a, _b, _s) => Array.from({length: _SYS.rangeCount(_a, _b, _s)}, (_e, _i) => _a + _i * _s))(${start}, ${stop}, ${step})`;
+    return `_SYS.range(${start}, ${stop}, ${step})`;
   },
   Root: ([arg, exp], compile, target) => {
     if (arg === null) throw new Error('Could not compile `Root`: no argument');
@@ -11127,6 +11191,41 @@ function enterIntegral(): boolean {
 }
 
 /**
+ * The elements of the arithmetic range `lower, lower + step, …`, as an array:
+ * the run-time helper `_SYS.range` that a compiled `Range` calls.
+ *
+ * The element count is `rangeCount`, the interpreter's own count
+ * (`numerics/range-count.ts`), and element `i` is `lower + i × step`, so the
+ * values are those of the interpreter's `Range` (element 0 is `lower`, also
+ * when the step is infinite). A NaN count (a bound that is
+ * not a number at run time) gives an empty array. A count above the array
+ * limit, 2³² − 1 (an infinite bound at run time gives an infinite count),
+ * throws the `RangeError` that `Array.from` and `new Array` throw.
+ *
+ * The array is preallocated and filled in a counted loop. The earlier
+ * emission, `Array.from({length: n}, (_e, i) => lower + i * step)`, gave the
+ * same values but was about 18 times slower on V8: 720 ns for 17 elements,
+ * where the loop takes about 20 ns (issue #387).
+ */
+function materializeRange(
+  lower: number,
+  upper: number,
+  step: number
+): number[] {
+  const count = rangeCount(lower, upper, step);
+  if (count > 4294967295) throw new RangeError('Invalid array length');
+  // `count > 0` is false for NaN, so a NaN count gives an empty array.
+  const n = count > 0 ? Math.floor(count) : 0;
+  const result = new Array<number>(n);
+  // Element 0 is `lower` itself, not `lower + 0 × step`: with an infinite
+  // step, `0 × step` is NaN, and the interpreter's `Range` answers `lower`
+  // for its first element (`rangeElement`, `library/collections.ts`).
+  if (n > 0) result[0] = lower;
+  for (let i = 1; i < n; i++) result[i] = lower + i * step;
+  return result;
+}
+
+/**
  * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
@@ -11136,6 +11235,8 @@ const SYS_HELPERS = {
   // (`numerics/range-count.ts`), so the compiled length agrees with the
   // interpreter's `count`.
   rangeCount,
+  // The elements of an arithmetic `Range`, as an array.
+  range: materializeRange,
   bcast,
   bcastAbsent,
   bcastFn,
@@ -16042,7 +16143,47 @@ function fnArg(
     const eta = BaseCompiler.complexElementCallbackEta(callback, source);
     if (eta !== undefined) return compile(eta);
   }
+  // A one-parameter literal fed the elements of a range whose start and step
+  // are finite literals receives a finite number at every call. It needs no
+  // broadcast wrapper, and its body needs no NaN test on its parameter.
+  if (
+    extraArgTypes.length === 0 &&
+    target !== undefined &&
+    isFunction(callback, 'Function') &&
+    callback.nops === 2 &&
+    isFiniteLiteralRange(source, target)
+  )
+    return BaseCompiler.withScalarFedLiteral(callback, 'finite', () =>
+      hoistedCallbackLambda(callback, compile, target)
+    );
   return hoistedCallbackLambda(callback!, compile, target);
+}
+
+/**
+ * True when `source` is a `Range` whose every element is a finite number by
+ * construction: its start and its step are finite real literals (a
+ * one-operand range starts at 1, and a two-operand range steps by 1 or −1).
+ * The upper bound does not matter: element `i` is `start + i × step` for
+ * every count the bound gives, and a `NaN` bound gives no elements. The
+ * same rule makes an emitted loop index a decided value
+ * (`recordDecidedLoopIndex`). A source the caller maps to its own code
+ * (`isCallerMapped`) is excluded, because the elements are then the caller's.
+ */
+function isFiniteLiteralRange(
+  source: Expression | undefined,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!isFunction(source, 'Range')) return false;
+  if (
+    target.cse?.harvestOptions === undefined ||
+    isCallerMapped(source, target.cse.harvestOptions)
+  )
+    return false;
+  const finite = (x: Expression | undefined): boolean =>
+    isNumber(x) && !x.isComplex && Number.isFinite(x.re);
+  if (source.nops === 1) return true;
+  if (!finite(source.ops[0])) return false;
+  return source.nops === 2 || finite(source.ops[2]);
 }
 
 /**
@@ -17017,10 +17158,33 @@ function emitMappedReduction(
   if (element === undefined || !isSubtype(element, 'number')) return undefined;
   const compile = (expr: Expression): string =>
     BaseCompiler.compile(expr, target);
-  const source = elementsArg('Map', coll.ops[1], compile);
-  const callback = fnArg('Map', coll.ops[0], coll.ops[1], compile, [], target);
   const identity = kind === 'Sum' ? '0' : '1';
   const real = BaseCompiler.collectionFoldsReal(coll);
+  // Over a finite range, fold each mapped element as the range is walked:
+  // neither the range nor the mapped list is built (issue #387). The terms
+  // are folded in the same order, with the same operation, as the `reduce`
+  // below.
+  if (isWalkableRange(coll.ops[1], target)) {
+    const acc = BaseCompiler.tempVar(target);
+    const walk = emitPredicateRangeWalk(
+      'Map',
+      coll.ops[1],
+      coll.ops[0],
+      compile,
+      target,
+      {
+        init: `let ${acc} = ${identity};`,
+        body: (_element, mapped) =>
+          real
+            ? `${acc} ${kind === 'Sum' ? '+' : '*'}= ${mapped};`
+            : `${acc} = _SYS.${kind === 'Sum' ? 'sadd' : 'smul'}(${acc}, ${mapped});`,
+        result: acc,
+      }
+    );
+    return real ? walk : `_SYS.cplx(${walk})`;
+  }
+  const source = elementsArg('Map', coll.ops[1], compile);
+  const callback = fnArg('Map', coll.ops[0], coll.ops[1], compile, [], target);
   const step = real
     ? `_a ${kind === 'Sum' ? '+' : '*'} _f(_x)`
     : `_SYS.${kind === 'Sum' ? 'sadd' : 'smul'}(_a, _f(_x))`;
@@ -17099,12 +17263,14 @@ type RangeWalkPlan = {
   /**
    * The statements run for one element. `element` names the element,
    * `selected` is the compiled predicate applied to it, as a JavaScript
-   * expression.
+   * expression. `callback` names the compiled predicate (or the callback
+   * given as code), for a plan that calls it with other arguments.
    */
   body: (
     element: string,
     selected: string,
-    exit: (value: string) => string
+    exit: (value: string) => string,
+    callback: string
   ) => string;
   /** The answer once the loop has walked every element. */
   result: string;
@@ -17129,7 +17295,9 @@ type RangeWalkPlan = {
  * - the element count is `_SYS.rangeCount`, the interpreter's own count
  *   (`numerics/range-count.ts`), so an empty, reversed, zero-step or `NaN`
  *   bound answers exactly what the materialized range answered;
- * - element `i` is `start + i × step`, the `Range` handler's formula; a
+ * - element `i` is `start + i × step`, the `Range` handler's formula, and
+ *   element 0 is `start` itself, so an infinite step gives `start` there
+ *   and not `0 × ∞ = NaN`, as in the interpreter; a
  *   two-operand range resolves its direction at run time (`stop >= start ?
  *   1 : -1`), as the handler does, and `start + i × (−1)` is exactly
  *   `start − i` in floating point;
@@ -17152,7 +17320,12 @@ type RangeWalkPlan = {
 function emitPredicateRangeWalk(
   kind: string,
   range: Expression,
-  predicate: Expression,
+  /**
+   * The callback to call on each element: an expression that `fnArg`
+   * compiles, or `{ code }`, a callback the caller has already compiled (the
+   * combiner of a `Reduce`, which `fnArg` does not compile).
+   */
+  predicate: Expression | { code: string },
   compile: (expr: Expression) => string,
   target: CompileTarget<Expression>,
   plan: RangeWalkPlan
@@ -17161,7 +17334,9 @@ function emitPredicateRangeWalk(
   // type, since the answer of that test cannot be carried in a boolean.
   if (!isFunction(range, 'Range'))
     throw new Error(`Could not compile \`${kind}\`: expected a \`Range\`.`);
-  const fn = fnArg(kind, predicate, range, compile, [], target);
+  const fn = isExpression(predicate)
+    ? fnArg(kind, predicate, range, compile, [], target)
+    : predicate.code;
   const operand = (a: Expression): string => compileRealOperand(a, compile);
   const bounds: string[] =
     range.nops === 1
@@ -17200,7 +17375,7 @@ function emitPredicateRangeWalk(
     `if (${n} > 4294967295) throw new RangeError('Range: the element count exceeds the array limit'); ` +
     (plan.init === '' ? '' : `${plan.init} `) +
     `for (let ${i} = 0; ${i} < ${n}; ${i}++) { ` +
-    `const ${x} = ${a} + ${i} * ${s}; ${plan.body(x, `${f}(${x})`, exit)} } ` +
+    `const ${x} = ${i} === 0 ? ${a} : ${a} + ${i} * ${s}; ${plan.body(x, `${f}(${x})`, exit, f)} } ` +
     exit(plan.result);
 
   return (

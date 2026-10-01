@@ -74,11 +74,6 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     definitions: REGEXP_LIBRARY,
   },
   {
-    name: 'fractals',
-    requires: ['arithmetic'],
-    definitions: FRACTALS_LIBRARY,
-  },
-  {
     name: 'relop',
     requires: ['core'],
     definitions: RELOP_LIBRARY,
@@ -87,6 +82,11 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     name: 'arithmetic',
     requires: ['core'],
     definitions: [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY],
+  },
+  {
+    name: 'fractals',
+    requires: ['arithmetic'],
+    definitions: FRACTALS_LIBRARY,
   },
   {
     name: 'trigonometry',
@@ -281,8 +281,19 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
 ];
 
 /**
- * Topological sort of libraries using Kahn's algorithm.
- * Throws on cycle or missing dependency.
+ * Topological sort of libraries that keeps the input order wherever the
+ * dependencies allow it.
+ *
+ * The libraries are visited in input order. Before a library is added, each
+ * library in its `requires` list is visited (and added) first, also in order.
+ * As a result, a library comes after every library listed before it in the
+ * input, unless an earlier library requires it: then it moves ahead of the
+ * first library that requires it. A caller library listed after
+ * the standard libraries, which no standard library requires, thus loads after
+ * them, even when it has no `requires` list: its definitions can use operators
+ * such as `Block` (from `control-structures`) without declaring them.
+ *
+ * Throws on a duplicate name, a cycle or a missing dependency.
  */
 export function sortLibraries(libs: LibraryDefinition[]): LibraryDefinition[] {
   const byName = new Map<string, LibraryDefinition>();
@@ -292,49 +303,38 @@ export function sortLibraries(libs: LibraryDefinition[]): LibraryDefinition[] {
     byName.set(lib.name, lib);
   }
 
-  // Build in-degree map (only count dependencies within the provided set)
-  const inDegree = new Map<string, number>();
-  const dependents = new Map<string, string[]>(); // dep → libs that need it
-
   for (const lib of libs) {
-    if (!inDegree.has(lib.name)) inDegree.set(lib.name, 0);
     for (const req of lib.requires ?? []) {
       if (!byName.has(req))
         throw new Error(
           `Library "${lib.name}" requires "${req}", which is not available`
         );
-      inDegree.set(lib.name, (inDegree.get(lib.name) ?? 0) + 1);
-      const deps = dependents.get(req);
-      if (deps) deps.push(lib.name);
-      else dependents.set(req, [lib.name]);
     }
-  }
-
-  // Seed queue with libraries that have no dependencies
-  const queue: string[] = [];
-  for (const [name, deg] of inDegree) {
-    if (deg === 0) queue.push(name);
   }
 
   const sorted: LibraryDefinition[] = [];
-  while (queue.length > 0) {
-    const name = queue.shift()!;
-    sorted.push(byName.get(name)!);
-    for (const dep of dependents.get(name) ?? []) {
-      const newDeg = inDegree.get(dep)! - 1;
-      inDegree.set(dep, newDeg);
-      if (newDeg === 0) queue.push(dep);
-    }
-  }
+  const done = new Set<string>();
+  // The libraries being visited, from the outermost to the innermost
+  const visiting: string[] = [];
 
-  if (sorted.length !== libs.length) {
-    const remaining = libs
-      .filter((l) => !sorted.some((s) => s.name === l.name))
-      .map((l) => l.name);
-    throw new Error(
-      `Circular dependency detected among libraries: ${remaining.join(', ')}`
-    );
-  }
+  const visit = (lib: LibraryDefinition): void => {
+    if (done.has(lib.name)) return;
+    const index = visiting.indexOf(lib.name);
+    if (index >= 0) {
+      throw new Error(
+        `Circular dependency detected among libraries: ${visiting
+          .slice(index)
+          .join(', ')}`
+      );
+    }
+    visiting.push(lib.name);
+    for (const req of lib.requires ?? []) visit(byName.get(req)!);
+    visiting.pop();
+    done.add(lib.name);
+    sorted.push(lib);
+  };
+
+  for (const lib of libs) visit(lib);
 
   return sorted;
 }

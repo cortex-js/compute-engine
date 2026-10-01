@@ -415,8 +415,9 @@ describe('algebraic attributes: commutative / associative / idempotent / involut
     const s = run(
       'function op(a, b) commutative associative -> number { a + b }; About(op)'
     ).value.toString();
-    // `About` returns a dictionary; the `attributes` entry carries the flags.
-    expect(s).toContain('commutative associative');
+    // `About` returns a dictionary; the `attributes` entry is a list of the
+    // flags.
+    expect(s).toContain('"attributes" -> ["commutative","associative"]');
   });
 
   test('refusals: with hold, on a protocol member, wrong arity, disagreeing clauses', () => {
