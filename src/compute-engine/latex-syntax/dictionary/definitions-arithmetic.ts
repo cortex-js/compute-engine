@@ -2009,7 +2009,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       }
 
       // Fall back to default serialization
-      return joinLatex([serializer.serialize(arg), '\\degree']);
+      // A compound operand needs parens: `x^2^{\circ}` does not parse and
+      // `x+1^{\circ}` reads back as `x+(1^{\circ})`.
+      const base =
+        symbol(arg) || machineValue(arg) !== null
+          ? serializer.serialize(arg)
+          : `(${serializer.serialize(arg)})`;
+      return joinLatex([base, '^{\\circ}']);
     },
   },
   // No `precedence` on the superscript entries: the dictionary validator
@@ -2124,7 +2130,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     standaloneSymbol: true,
     latexTrigger: ['\\exponentialE'],
     parse: 'ExponentialE',
-    serialize: '\\exponentialE',
+    serialize: (serializer) => serializer.options.exponentialE,
   },
   {
     latexTrigger: '\\operatorname{e}',
@@ -2146,6 +2152,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'ImaginaryUnit',
     latexTrigger: ['\\imaginaryI'],
+    serialize: (serializer) => serializer.options.imaginaryUnit,
   },
   {
     latexTrigger: '\\operatorname{i}',
@@ -2295,6 +2302,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Complex',
     precedence: ADDITION_PRECEDENCE - 1, // One less than precedence of `Add`: used for correct wrapping
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const IU = serializer.options.imaginaryUnit;
       const rePart = serializer.serialize(operand(expr, 1));
 
       const im = complexPartShape(operand(expr, 2));
@@ -2326,20 +2334,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
           ? joinLatex([
               '-',
               machineValue(negImMagnitude) === 1
-                ? '\\imaginaryI'
-                : joinLatex([
-                    serializer.serialize(negImMagnitude),
-                    '\\imaginaryI',
-                  ]),
+                ? IU
+                : joinLatex([serializer.serialize(negImMagnitude), IU]),
             ])
           : im?.isOne && unitCoefficient
-            ? '\\imaginaryI'
+            ? IU
             : im?.isNegativeOne && unitCoefficient
-              ? '-\\imaginaryI'
-              : joinLatex([
-                  serializer.serialize(operand(expr, 2)),
-                  '\\imaginaryI',
-                ]);
+              ? `-${IU}`
+              : joinLatex([serializer.serialize(operand(expr, 2)), IU]);
 
       if (reIsZero) return imPart;
 
@@ -2449,7 +2451,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const op1 = operand(expr, 1);
       if (symbol(op1) || machineValue(op1) !== null)
-        return joinLatex(['\\exponentialE^{', serializer.serialize(op1), '}']);
+        return joinLatex([
+          serializer.options.exponentialE,
+          '^{',
+          serializer.serialize(op1),
+          '}',
+        ]);
 
       return joinLatex(['\\exp', serializer.wrap(missingIfEmpty(op1))]);
     },
@@ -2781,6 +2788,24 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     symbolTrigger: 'lb',
     parse: (parser: Parser) => parseLb(parser),
   },
+  // `Log2` and `Log10` are not standard LaTeX either; both are written as a
+  // subscripted `\log` and read back as `Log(x, 2)` and `Log(x)`.
+  {
+    name: 'Log2',
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      nops(expr) === 1
+        ? joinLatex(['\\log_{2}', serializer.wrap(operand(expr, 1))])
+        : serializer.serializeFunction(expr),
+  },
+  {
+    name: 'Log10',
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      nops(expr) === 1
+        ? joinLatex(['\\log_{10}', serializer.wrap(operand(expr, 1))])
+        : serializer.serializeFunction(expr),
+  },
   {
     name: 'Ln',
     standaloneSymbol: true,
@@ -2828,9 +2853,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
 
   {
     name: 'LCM',
-    latexTrigger: ['\\lcm'],
     kind: 'function',
+    // `\lcm` is not a standard LaTeX command (unlike amsmath's `\gcd`): it is
+    // still read, but `LCM` is written with `\operatorname`.
+    serialize: (serializer, expr) =>
+      '\\operatorname{lcm}' + serializer.wrapArguments(expr),
   },
+  { latexTrigger: ['\\lcm'], kind: 'function', parse: 'LCM' },
   {
     symbolTrigger: 'lcm',
     kind: 'function',
@@ -3134,7 +3163,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     precedence: DIVISION_PRECEDENCE,
     serialize: (serializer, expr) => {
-      if (nops(expr) !== 2) return '';
+      if (nops(expr) !== 2) return serializer.serializeFunction(expr);
       // Infix `\bmod` binds tighter than `+`/`-` on re-parse, so a compound
       // operand at addition precedence (e.g. `x+5`) must be parenthesized or
       // the round trip changes the expression (`(x+5)\bmod2` would otherwise

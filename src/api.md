@@ -7550,6 +7550,7 @@ expression and of its nesting level.
 type SerializeLatexOptions = NumberSerializationFormat & {
   prettify: boolean;
   materialization: boolean | number | [number, number];
+  exponentialE: LatexString;
   invisibleMultiply: LatexString;
   invisiblePlus: LatexString;
   multiply: LatexString;
@@ -7597,6 +7598,23 @@ Controls the materialization of the lazy collections.
   that will be materialized.
 - If a pair of numbers is provided, it is the number of elements
   of the head and the tail that will be materialized, respectively.
+
+#### SerializeLatexOptions.exponentialE?
+
+```ts
+optional exponentialE?: LatexString;
+```
+
+LaTeX used to render the constant `ExponentialE`, the counterpart of
+`imaginaryUnit`. Use `e` or `\mathrm{e}` to match the glyph used for
+the imaginary unit.
+
+Serialization only: `\exponentialE`, `\mathrm{e}` and `\operatorname{e}`
+are always read as the constant.
+
+##### Default
+
+`\exponentialE`
 
 #### SerializeLatexOptions.invisibleMultiply
 
