@@ -44,11 +44,7 @@ describe('QuotientRing — parsing', () => {
 
   test('numeric modulus', () => {
     expect(parse('\\mathbb{Z}_2')).toEqual(['QuotientRing', 'Integers', 2]);
-    expect(parse('\\mathbb{Z}_{12}')).toEqual([
-      'QuotientRing',
-      'Integers',
-      12,
-    ]);
+    expect(parse('\\mathbb{Z}_{12}')).toEqual(['QuotientRing', 'Integers', 12]);
   });
 
   test('symbolic modulus', () => {
@@ -80,7 +76,11 @@ describe('QuotientRing — parsing', () => {
   test('the slash form requires the SAME ring on both sides', () => {
     // No trailing ring: plain division (unchanged from before the operator
     // existed).
-    expect(parse('\\Z/2')).toEqual(['Multiply', ['Rational', 1, 2], 'Integers']);
+    expect(parse('\\Z/2')).toEqual([
+      'Multiply',
+      ['Rational', 1, 2],
+      'Integers',
+    ]);
   });
 
   test('fraction form `\\frac{\\Z}{n\\Z}`', () => {
@@ -129,7 +129,11 @@ describe('QuotientRing — parsing', () => {
     );
     // The contrast that gives the pin its teeth: the SAME ring on both sides
     // does fire, and is not an error.
-    expect(parse('\\frac{\\Z}{n\\Z}')).toEqual(['QuotientRing', 'Integers', 'n']);
+    expect(parse('\\frac{\\Z}{n\\Z}')).toEqual([
+      'QuotientRing',
+      'Integers',
+      'n',
+    ]);
   });
 });
 
@@ -183,17 +187,21 @@ describe('Adjoin — parsing', () => {
 
 describe('Serialization round-trips', () => {
   test('QuotientRing serializes to the subscript form', () => {
-    expect(ce.box(['QuotientRing', 'Integers', 'n']).latex).toBe('\\Z_{n}');
-    expect(ce.box(['QuotientRing', 'Integers', 12]).latex).toBe('\\Z_{12}');
+    expect(ce.box(['QuotientRing', 'Integers', 'n']).latex).toBe(
+      '\\mathbb{Z}_{n}'
+    );
+    expect(ce.box(['QuotientRing', 'Integers', 12]).latex).toBe(
+      '\\mathbb{Z}_{12}'
+    );
   });
 
   test('Adjoin serializes to the bracket form', () => {
     expect(ce.box(['Adjoin', 'Integers', ['Sqrt', 2]]).latex).toBe(
-      '\\Z[\\sqrt{2}]'
+      '\\mathbb{Z}[\\sqrt{2}]'
     );
-    expect(
-      ce.box(['Adjoin', 'Integers', ['Sqrt', 2], ['Sqrt', 3]]).latex
-    ).toBe('\\Z[\\sqrt{2}, \\sqrt{3}]');
+    expect(ce.box(['Adjoin', 'Integers', ['Sqrt', 2], ['Sqrt', 3]]).latex).toBe(
+      '\\mathbb{Z}[\\sqrt{2}, \\sqrt{3}]'
+    );
   });
 
   test('box route: parse(serialize(x)).isSame(x)', () => {
@@ -215,9 +223,9 @@ describe('Serialization round-trips', () => {
     // `\mathrm{QuotientRing}(...)` instead (which does round-trip).
     expect(
       ce.box(['QuotientRing', ['Adjoin', 'Integers', ['Sqrt', 2]], 'p']).latex
-    ).toBe('\\mathrm{QuotientRing}(\\Z[\\sqrt{2}], p)');
+    ).toBe('\\mathrm{QuotientRing}(\\mathbb{Z}[\\sqrt{2}], p)');
     expect(ce.box(['Adjoin', ['Adjoin', 'Integers', 'x'], 'y']).latex).toBe(
-      '\\mathrm{Adjoin}(\\Z[x], y)'
+      '\\mathrm{Adjoin}(\\mathbb{Z}[x], y)'
     );
   });
 
@@ -226,15 +234,17 @@ describe('Serialization round-trips', () => {
       roundTrips(['QuotientRing', ['Adjoin', 'Integers', ['Sqrt', 2]], 'p'])
     ).toBe(true);
     expect(roundTrips(['Adjoin', ['Adjoin', 'Integers', 'x'], 'y'])).toBe(true);
-    expect(
-      roundTrips(['Adjoin', ['QuotientRing', 'Integers', 'p'], 'x'])
-    ).toBe(true);
+    expect(roundTrips(['Adjoin', ['QuotientRing', 'Integers', 'p'], 'x'])).toBe(
+      true
+    );
     expect(
       roundTrips(['QuotientRing', ['QuotientRing', 'Integers', 'n'], 'm'])
     ).toBe(true);
     // A ring-constant base keeps the subscript notation.
     expect(roundTrips(['QuotientRing', 'RealNumbers', 'n'])).toBe(true);
-    expect(ce.box(['QuotientRing', 'RealNumbers', 'n']).latex).toBe('\\R_{n}');
+    expect(ce.box(['QuotientRing', 'RealNumbers', 'n']).latex).toBe(
+      '\\mathbb{R}_{n}'
+    );
   });
 
   test('parse route: parse(serialize(parse(latex))) is stable', () => {
@@ -257,8 +267,8 @@ describe('Serialization round-trips', () => {
   test('the fraction form serializes back as the SUBSCRIPT form', () => {
     // `\frac{\Z}{n\Z}` is parse-only: like the `\Z/n\Z` slash form it
     // reserializes to the canonical subscript spelling.
-    expect(ce.parse('\\frac{\\Z}{n\\Z}').latex).toBe('\\Z_{n}');
-    expect(ce.parse('\\frac{\\R}{n\\R}').latex).toBe('\\R_{n}');
+    expect(ce.parse('\\frac{\\Z}{n\\Z}').latex).toBe('\\mathbb{Z}_{n}');
+    expect(ce.parse('\\frac{\\R}{n\\R}').latex).toBe('\\mathbb{R}_{n}');
   });
 
   test('the `at-over-declared-set-base` ledger row round-trips', () => {
@@ -280,9 +290,7 @@ describe('Types', () => {
     expect(ce.parse('\\mathbb{Z}[\\sqrt{2}]').type.toString()).toBe(
       'set<real>'
     );
-    expect(ce.parse('\\mathbb{Z}[i]').type.toString()).toBe(
-      'set<complex>'
-    );
+    expect(ce.parse('\\mathbb{Z}[i]').type.toString()).toBe('set<complex>');
     // An indeterminate carries no type information: the honest claim is
     // `unknown`, NOT the base's `integer` (the elements are
     // polynomials, not integers).
@@ -290,12 +298,8 @@ describe('Types', () => {
   });
 
   test('QuotientRing keeps the base element type', () => {
-    expect(ce.parse('\\mathbb{Z}_n').type.toString()).toBe(
-      'set<integer>'
-    );
-    expect(ce.parse('\\mathbb{Q}_p').type.toString()).toBe(
-      'set<rational>'
-    );
+    expect(ce.parse('\\mathbb{Z}_n').type.toString()).toBe('set<integer>');
+    expect(ce.parse('\\mathbb{Q}_p').type.toString()).toBe('set<rational>');
   });
 });
 
@@ -331,9 +335,13 @@ describe('Route parity: raw MathJSON reaches the same dispatch', () => {
     // handler has to know about ring constants on its own: without it, this
     // claimed `integer` (the element type of ℤ) instead of the type of
     // the quotient RING.
-    const e = ce.function('Subscript', [ce.symbol('Integers'), ce.symbol('n')], {
-      structural: true,
-    });
+    const e = ce.function(
+      'Subscript',
+      [ce.symbol('Integers'), ce.symbol('n')],
+      {
+        structural: true,
+      }
+    );
     expect(e.json).toEqual(['Subscript', 'Integers', 'n']);
     expect(e.type.toString()).toBe('set<integer>');
     expect(e.type.toString()).toBe(
@@ -345,9 +353,13 @@ describe('Route parity: raw MathJSON reaches the same dispatch', () => {
     // Mirror of the `Subscript` pin above: without the ring-constant case in
     // `At`'s `type` handler, this fell through to the indexing analysis and
     // claimed `number` instead of the adjunction's set type.
-    const e = ce.function('At', [ce.symbol('Integers'), ce.parse('\\sqrt{2}')], {
-      structural: true,
-    });
+    const e = ce.function(
+      'At',
+      [ce.symbol('Integers'), ce.parse('\\sqrt{2}')],
+      {
+        structural: true,
+      }
+    );
     expect(e.json).toEqual(['At', 'Integers', ['Sqrt', 2]]);
     expect(e.type.toString()).toBe('set<real>');
     expect(e.type.toString()).toBe(
@@ -534,9 +546,9 @@ describe('Pins: notations that are NOT ring constructions', () => {
   });
 
   test('`NegativeIntegers` serializes symbolically and round-trips', () => {
-    expect(ce.box('NegativeIntegers').latex).toBe('\\Z_{<0}');
+    expect(ce.box('NegativeIntegers').latex).toBe('\\mathbb{Z}_{<0}');
     expect(roundTrips('NegativeIntegers')).toBe(true);
-    expect(ce.box('NonPositiveIntegers').latex).toBe('\\Z_{\\le0}');
+    expect(ce.box('NonPositiveIntegers').latex).toBe('\\mathbb{Z}_{\\le0}');
     expect(roundTrips('NonPositiveIntegers')).toBe(true);
   });
 

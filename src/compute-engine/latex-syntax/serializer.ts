@@ -186,6 +186,7 @@ export class Serializer {
       dmsFormat: false,
       angleNormalization: 'none',
       readsAsPointList: undefined,
+      exponentialE: '\\exponentialE',
       ...normalizeStyleOptions(options),
     } as Required<ResolvedSerializeLatexOptions>;
   }

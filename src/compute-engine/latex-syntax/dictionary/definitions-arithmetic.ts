@@ -1807,18 +1807,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // of that spelling, and `\phi` remains available as a plain variable.
   { name: 'GoldenRatio', standaloneSymbol: true, latexTrigger: '\\varphi' },
   // `\gamma` is also very often a variable (Lorentz factor, damping ratio,
-  // adiabatic index), so the bare spelling yields to a declaration the way
-  // Euler `D_x` does. It cannot get the upright-markup treatment `G` gets —
-  // `\operatorname{\gamma}` already means the plain symbol `gamma` (the Greek
-  // `\operatorname{}` convention) — so the constant SERIALIZES to its MathJSON
-  // name instead. That spelling reaches `EulerGamma` through the generic
-  // symbol path, independent of any declaration, so an expression carrying the
-  // constant still round-trips in an engine where `gamma` is a variable.
+  // adiabatic index), so when parsing the bare spelling yields to a
+  // declaration the way Euler `D_x` does. It cannot get the upright-markup
+  // treatment `G` gets — `\operatorname{\gamma}` already means the plain
+  // symbol `gamma` (the Greek `\operatorname{}` convention) — so the constant
+  // serializes as `\gamma`, and reads back as `EulerGamma` unless `gamma` is
+  // declared.
   {
     name: 'EulerGamma',
     standaloneSymbol: true,
     latexTrigger: '\\gamma',
-    serialize: '\\operatorname{EulerGamma}',
     // Decline (`null`) rather than returning the symbol when `gamma` is
     // declared: this parselet runs ahead of `parseFunction()`, so returning
     // `'gamma'` here would strand a declared FUNCTION `\gamma(2, 1)` as an
@@ -1863,7 +1861,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       }
 
       // Fall back to default serialization
-      return joinLatex([serializer.serialize(arg), '\\degree']);
+      return joinLatex([serializer.serialize(arg), '^{\\circ}']);
     },
   },
   // No `precedence` on the superscript entries: the dictionary validator
@@ -1978,7 +1976,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     standaloneSymbol: true,
     latexTrigger: ['\\exponentialE'],
     parse: 'ExponentialE',
-    serialize: '\\exponentialE',
+    serialize: (serializer) => serializer.options.exponentialE,
   },
   {
     latexTrigger: '\\operatorname{e}',
@@ -2000,6 +1998,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'ImaginaryUnit',
     latexTrigger: ['\\imaginaryI'],
+    serialize: (serializer) => serializer.options.imaginaryUnit,
   },
   {
     latexTrigger: '\\operatorname{i}',
@@ -2124,6 +2123,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Complex',
     precedence: ADDITION_PRECEDENCE - 1, // One less than precedence of `Add`: used for correct wrapping
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const IU = serializer.options.imaginaryUnit;
       const rePart = serializer.serialize(operand(expr, 1));
 
       const im = complexPartShape(operand(expr, 2));
@@ -2155,20 +2155,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
           ? joinLatex([
               '-',
               machineValue(negImMagnitude) === 1
-                ? '\\imaginaryI'
-                : joinLatex([
-                    serializer.serialize(negImMagnitude),
-                    '\\imaginaryI',
-                  ]),
+                ? IU
+                : joinLatex([serializer.serialize(negImMagnitude), IU]),
             ])
           : im?.isOne && unitCoefficient
-            ? '\\imaginaryI'
+            ? IU
             : im?.isNegativeOne && unitCoefficient
-              ? '-\\imaginaryI'
-              : joinLatex([
-                  serializer.serialize(operand(expr, 2)),
-                  '\\imaginaryI',
-                ]);
+              ? `-${IU}`
+              : joinLatex([serializer.serialize(operand(expr, 2)), IU]);
 
       if (reIsZero) return imPart;
 
@@ -2594,6 +2588,24 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     symbolTrigger: 'lb',
     parse: (parser: Parser) => parseLb(parser),
   },
+  // `Log2` and `Log10` are not standard LaTeX either; both are written as a
+  // subscripted `\log` and read back as `Log(x, 2)` and `Log(x)`.
+  {
+    name: 'Log2',
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      nops(expr) === 1
+        ? joinLatex(['\\log_{2}', serializer.wrap(operand(expr, 1))])
+        : serializer.serializeFunction(expr),
+  },
+  {
+    name: 'Log10',
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      nops(expr) === 1
+        ? joinLatex(['\\log_{10}', serializer.wrap(operand(expr, 1))])
+        : serializer.serializeFunction(expr),
+  },
   {
     name: 'Ln',
     standaloneSymbol: true,
@@ -2641,9 +2653,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
 
   {
     name: 'LCM',
-    latexTrigger: ['\\lcm'],
     kind: 'function',
+    // `\lcm` is not a standard LaTeX command (unlike amsmath's `\gcd`): it is
+    // still read, but `LCM` is written with `\operatorname`.
+    serialize: (serializer, expr) =>
+      '\\operatorname{lcm}' + serializer.wrapArguments(expr),
   },
+  { latexTrigger: ['\\lcm'], kind: 'function', parse: 'LCM' },
   {
     symbolTrigger: 'lcm',
     kind: 'function',
@@ -2932,7 +2948,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     precedence: DIVISION_PRECEDENCE,
     serialize: (serializer, expr) => {
-      if (nops(expr) !== 2) return '';
+      if (nops(expr) !== 2) return serializer.serializeFunction(expr);
       // Infix `\bmod` binds tighter than `+`/`-` on re-parse, so a compound
       // operand at addition precedence (e.g. `x+5`) must be parenthesized or
       // the round trip changes the expression (`(x+5)\bmod2` would otherwise
