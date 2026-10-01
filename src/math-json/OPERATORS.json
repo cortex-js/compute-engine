@@ -7732,6 +7732,21 @@
       ]
     },
     {
+      "name": "StirlingS2",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Stirling number of the second kind S(n, k), under Wolfram's name: ways to partition n elements into k non-empty subsets.",
+      "examples": [
+        "StirlingS2(6, 3)  // 90"
+      ]
+    },
+    {
       "name": "String",
       "category": "Core",
       "arity": "variadic",

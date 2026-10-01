@@ -1,5 +1,9 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
-import type { Expression, SymbolDefinitions } from '../global-types.js';
+import type {
+  IComputeEngine,
+  Expression,
+  SymbolDefinitions,
+} from '../global-types.js';
 import { toBigint } from '../boxed-expression/numerics.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { rationalize } from '../numerics/rationals.js';
@@ -267,6 +271,57 @@ function bigintDigitSum(
     x /= base;
   }
   return sum;
+}
+
+/**
+ * Stirling number of the second kind, shared by `Stirling` and its Wolfram
+ * spelling `StirlingS2`. Operands outside the triangle stay unevaluated.
+ */
+function stirlingSecondKind(
+  [n, m]: ReadonlyArray<Expression>,
+  { engine: ce }: { engine: IComputeEngine }
+): Expression | undefined {
+  const nn = toBigint(n);
+  const mm = toBigint(m);
+  if (nn === null || mm === null || nn < 0n || mm < 0n || mm > nn)
+    return undefined;
+  // Bottom-up over the rows of the triangle, keeping only the last
+  // row: S(r, j) = j·S(r−1, j) + S(r−1, j−1), with S(0, 0) = 1 and
+  // S(r, 0) = S(0, j) = 0 otherwise. The bare recurrence revisits each
+  // (r, j) exponentially many times and recurses `n` deep; this walk is
+  // O(n·m) steps on integers of at most n·log₁₀(m) digits
+  // (S(n, m) ≤ mⁿ), and the work estimate keeps a call too large to
+  // materialize symbolic.
+  // The constant columns, answered before the work estimate so that a
+  // large `n` does not hide them: S(0, 0) = 1, S(n, 0) = 0 for n ≥ 1,
+  // and S(n, 1) = S(n, n) = 1.
+  if (nn === 0n) return ce.number(1);
+  if (mm === 0n) return ce.number(0);
+  if (mm === 1n || mm === nn) return ce.number(1);
+  const N = Number(nn);
+  const M = Number(mm);
+  if (
+    exactRecurrenceTooLarge(
+      triangleWalkStates(N, M),
+      N * Math.log10(Math.max(M, 2))
+    )
+  )
+    return undefined;
+  let prev: bigint[] = [1n]; // row 0
+  let steps = 0;
+  for (let r = 1; r <= N; r++) {
+    const width = Math.min(r, M);
+    const cur: bigint[] = new Array(width + 1);
+    cur[0] = 0n;
+    for (let j = 1; j <= width; j++) {
+      valueScaledStep('Stirling', ++steps, ce._deadlineFrame);
+      const above = prev[j] ?? 0n;
+      const left = prev[j - 1] ?? 0n;
+      cur[j] = BigInt(j) * above + left;
+    }
+    prev = cur;
+  }
+  return ce.number(prev[M] ?? 0n);
 }
 
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
@@ -1397,49 +1452,16 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets.',
       signature: '(integer, integer) -> integer',
-      evaluate: ([n, m], { engine: ce }) => {
-        const nn = toBigint(n);
-        const mm = toBigint(m);
-        if (nn === null || mm === null || nn < 0n || mm < 0n || mm > nn)
-          return undefined;
-        // Bottom-up over the rows of the triangle, keeping only the last
-        // row: S(r, j) = j·S(r−1, j) + S(r−1, j−1), with S(0, 0) = 1 and
-        // S(r, 0) = S(0, j) = 0 otherwise. The bare recurrence revisits each
-        // (r, j) exponentially many times and recurses `n` deep; this walk is
-        // O(n·m) steps on integers of at most n·log₁₀(m) digits
-        // (S(n, m) ≤ mⁿ), and the work estimate keeps a call too large to
-        // materialize symbolic.
-        // The constant columns, answered before the work estimate so that a
-        // large `n` does not hide them: S(0, 0) = 1, S(n, 0) = 0 for n ≥ 1,
-        // and S(n, 1) = S(n, n) = 1.
-        if (nn === 0n) return ce.number(1);
-        if (mm === 0n) return ce.number(0);
-        if (mm === 1n || mm === nn) return ce.number(1);
-        const N = Number(nn);
-        const M = Number(mm);
-        if (
-          exactRecurrenceTooLarge(
-            triangleWalkStates(N, M),
-            N * Math.log10(Math.max(M, 2))
-          )
-        )
-          return undefined;
-        let prev: bigint[] = [1n]; // row 0
-        let steps = 0;
-        for (let r = 1; r <= N; r++) {
-          const width = Math.min(r, M);
-          const cur: bigint[] = new Array(width + 1);
-          cur[0] = 0n;
-          for (let j = 1; j <= width; j++) {
-            valueScaledStep('Stirling', ++steps, ce._deadlineFrame);
-            const above = prev[j] ?? 0n;
-            const left = prev[j - 1] ?? 0n;
-            cur[j] = BigInt(j) * above + left;
-          }
-          prev = cur;
-        }
-        return ce.number(prev[M] ?? 0n);
-      },
+      evaluate: stirlingSecondKind,
+    },
+
+    // Wolfram's spelling of `Stirling`; same signature and evaluation.
+    StirlingS2: {
+      description:
+        "Stirling number of the second kind S(n, k), under Wolfram's name: ways to partition n elements into k non-empty subsets.",
+      signature: '(integer, integer) -> integer',
+      examples: ['StirlingS2(6, 3)  // 90'],
+      evaluate: stirlingSecondKind,
     },
 
     StirlingS1: {
