@@ -4483,8 +4483,10 @@ ce.declare('Sqrt', {
 
 ### LibraryDefinition {#librarydefinition}
 
-A library bundles symbol/operator definitions with their LaTeX dictionary
-entries and declares dependencies on other libraries.
+A library bundles symbol/operator definitions and declares dependencies on
+other libraries. It carries no LaTeX dictionary entries: to parse or
+serialize a new notation, pass a dictionary to the `LatexSyntax` given with
+the `latexSyntax` constructor option.
 
 Use with the `libraries` constructor option to load standard or custom
 libraries:
@@ -4900,6 +4902,19 @@ Design: `docs/TYPE-SYSTEM.md`, phase 1.
 
 - [`BoxedValueDefinition`](#boxedvaluedefinition)
 - [`BoxedOperatorDefinition`](#boxedoperatordefinition)
+
+<MemberCard>
+
+##### BoxedBaseDefinition.examples? {#examples-1}
+
+```ts
+optional examples?: string[];
+```
+
+The usage examples of the definition. A definition may give a single
+string; the boxed definition always stores a list.
+
+</MemberCard>
 
 <MemberCard>
 
@@ -6653,7 +6668,12 @@ optional diagnostics?: boolean;
 If true, collect opt-in parse-time diagnostics (see [ParseDiagnostic](#parsediagnostic))
 flagging charitable parse decisions — undeclared symbols, application-like
 juxtaposition read as multiply, discarded `%` comments, and trailing noise
-dropped by recovery.
+dropped by recovery. In non-strict mode, also: letter runs read as a
+product (`letter-run-split`), an implicit product read as the whole
+denominator of a `/` (`implicit-product-in-denominator`), digits
+separated by white space read as one number (`spaced-digit-groups`), and a
+symbol directly followed by `.digits` read as a product
+(`letter-before-decimal`).
 
 This flag only takes effect through
 [ComputeEngine.parse](#parse-1), which
@@ -8138,17 +8158,44 @@ them never changes the parse output.
   segmented into a letter run (`divisors(60)` → `"divisors"`). When the
   symbol was read as a unit, `detail` additionally carries
   `lexedAs: "unit"`.
+- `"letter-run-split"` — non-strict mode only: a run of two or more
+  letters that is not a known word was read as a product of its parts
+  (`eps` → `e·p·s`, `sinx` → `s·i·n·x`, `xpi` → `x·π`). `detail: { run,
+  parts }` with `run` the letters as written and `parts` the MathJSON
+  symbols it was read as. The diagnostic span is the run. Not emitted for
+  explicit products such as `a*b*c`, nor for a run read as one name (a
+  bare function name, a spelled-out Greek letter, a letter run before a
+  parenthesis), nor for a differential `d` and one letter that is the
+  numerator or denominator of a differential quotient (`dy/dx`,
+  `\frac{dy}{dx}`). Also emitted when an unbraced superscript or
+  subscript takes only the first letter of a run (`e^xy` → `e^x·y`,
+  `x^ab` → `x^a·b`): the span is then the whole run, and `parts` is the
+  script and the rest of the run as written.
 - `"comment-discarded"` — an unescaped `%` discarded the rest of a line.
   `detail: { discardedLength }`.
 - `"recovered"` — trailing tokens skipped/coerced by non-strict error
   recovery that do not otherwise surface as an `Error` node. `detail` may
   include the skipped fragment as `{ skipped }`.
+- `"implicit-product-in-denominator"` — non-strict mode only: the
+  denominator of a `/` is an implicit product, which binds tighter than
+  `/`. `1/2x` is read as `1/(2x)`, not `(1/2)x`. The span covers the
+  denominator. A differential denominator (`dy/dx`) is not reported.
+- `"spaced-digit-groups"` — non-strict mode only: white space between
+  digits was read as part of one number (`2 3` → 23, `1 000` → 1000).
+  `detail: { digits }`. Visual space commands (`1\,000`) and the `{,}`
+  separator are not reported.
+- `"letter-before-decimal"` — non-strict mode only: a symbol is directly
+  followed by `.digits` (`x.5`), read as the product `x \cdot 0.5`.
+  `detail: { name }`. The span starts at the `.`.
 
 ### Span convention (`start`/`end`)
 
-Spans for `undeclared-symbol` and `juxtaposition-as-multiply` are offsets
-into CE's **normalized** LaTeX (the re-serialized token stream), which
-matches the original input only when the input round-trips unchanged.
+Spans for `undeclared-symbol`, `juxtaposition-as-multiply`,
+`letter-run-split`, `implicit-product-in-denominator`,
+`spaced-digit-groups` and `letter-before-decimal` are offsets into CE's
+**normalized** LaTeX (the
+re-serialized token stream), which matches the original input only when
+the input round-trips unchanged.
 `comment-discarded` is the exception: because the comment is precisely what
 was stripped before tokenization, its span is in **original-input**
 coordinates. `recovered` spans are a best-effort original-input range (equal

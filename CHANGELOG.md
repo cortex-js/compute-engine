@@ -1,250 +1,249 @@
+## [Unreleased]
+
 ## 0.144.0 _2026-10-01_
 
 ### Behavior Changes
 
-- **The `attributes` entry of `About` is a list, and it says when an operator
-  is lazy.** It was one string with the flags separated by spaces:
-  `About(Add)` gave `"commutative associative idempotent"`. It is now a list
-  of strings, the algebraic flags and then `lazy` when the arguments of the
-  operator are passed to it unevaluated: `About(Add)` gives
+- **The `attributes` entry of `About` is a list, and it says when an operator is
+  lazy.** It was one string with the flags separated by spaces: `About(Add)`
+  gave `"commutative associative idempotent"`. It is now a list of strings, the
+  algebraic flags and then `lazy` when the arguments of the operator are passed
+  to it unevaluated: `About(Add)` gives
   `["commutative", "associative", "idempotent", "lazy"]`, and `About(Hold)`,
   which had no `attributes` entry, gives `["lazy"]`. A program that read the
   entry as a string must read it as a list.
 
-- **[#397](https://github.com/cortex-js/compute-engine/issues/397) `Solve` answers an identity with a free parameter, and stays
-  unevaluated when it finds no candidate root.** `Solve(x = x, x)`,
-  `Solve(0 = 0, x)` and `Solve(2(x + 1) = 2x + 2, x)` were `[]` ("no
-  solution"); they are now `[t]`, one solution for every value of the fresh
-  parameter `t`, the same form as the parametric answers of the integer and
-  congruence solvers. An equation for which no strategy of the solver gives a
-  candidate root (`a·x⁵ + x + 1 = 0`, `sin(x) = x³ + eˣ`, which has a real
-  root) and an equation whose answer depends on another unknown
-  (`Solve(a = 0, x)`) were also `[]`; they now stay unevaluated. A
-  contradiction (`x + 1 = x + 2`) and an equation whose candidate roots are
-  all rejected (`√x = -1`, `sin x = 2`, `eˣ = 0`) are still `[]`. The
-  `.solve()` method is unchanged. A program that read `[]` as "no solution"
-  for these equations gets the unevaluated `Solve` or `[t]` instead.
-- **[#397](https://github.com/cortex-js/compute-engine/issues/397) `Range` with an exact rational bound or step enumerates exact
-  values.** `Range(0, 1, 1/3)` was `[0, 0.333…, 0.666…, 1]`; it is now
-  `[0, 1/3, 2/3, 1]`, as in Mathematica, and the two-sample form
-  `[1 + 4/d, 1 + 8/d...5]` with `d = 500` starts at `126/125`, not `1.008`. A
-  float bound or step, and a step that is a constant expression (`π/4`), still
-  give floats, and `.N()` of the range gives floats.
+- **[#397](https://github.com/cortex-js/compute-engine/issues/397) `Solve`
+  answers an identity with a free parameter, and stays unevaluated when it finds
+  no candidate root.** `Solve(x = x, x)`, `Solve(0 = 0, x)` and
+  `Solve(2(x + 1) = 2x + 2, x)` were `[]` ("no solution"); they are now `[t]`,
+  one solution for every value of the fresh parameter `t`, the same form as the
+  parametric answers of the integer and congruence solvers. An equation for
+  which no strategy of the solver gives a candidate root (`a·x⁵ + x + 1 = 0`,
+  `sin(x) = x³ + eˣ`, which has a real root) and an equation whose answer
+  depends on another unknown (`Solve(a = 0, x)`) were also `[]`; they now stay
+  unevaluated. A contradiction (`x + 1 = x + 2`) and an equation whose candidate
+  roots are all rejected (`√x = -1`, `sin x = 2`, `eˣ = 0`) are still `[]`. The
+  `.solve()` method is unchanged. A program that read `[]` as "no solution" for
+  these equations gets the unevaluated `Solve` or `[t]` instead.
+- **[#397](https://github.com/cortex-js/compute-engine/issues/397) `Range` with
+  an exact rational bound or step enumerates exact values.** `Range(0, 1, 1/3)`
+  was `[0, 0.333…, 0.666…, 1]`; it is now `[0, 1/3, 2/3, 1]`, as in Mathematica,
+  and the two-sample form `[1 + 4/d, 1 + 8/d...5]` with `d = 500` starts at
+  `126/125`, not `1.008`. A float bound or step, and a step that is a constant
+  expression (`π/4`), still give floats, and `.N()` of the range gives floats.
   `Sum(Range(0, 1, 1/3))` is now `2`, not `1.9999999999999999`.
-- **[#397](https://github.com/cortex-js/compute-engine/issues/397)
-  `simplify()` combines or splits logarithms only when their arguments are
-  provably non-negative.** `ln(x) + ln(y)` was `ln(xy)` and `ln(x/y)` was
-  `ln(x) − ln(y)` for any unconstrained `x` and `y`, which is wrong for
-  negative values: at `x = y = -1`, `ln(x) + ln(y)` is `2πi` but `ln(xy)` is
-  `0`. They now stay as they are, as does `ln(1/x)`, which was `−ln(x)`. An
-  argument is used when it is non-negative by its value (`ln(2) + ln(3)` is
-  still `ln(6)`), by its type, by an assumption (with `assume(x > 0)` and
-  `assume(y > 0)`, `ln(x) + ln(y)` is `ln(xy)`), or because it is an absolute
-  value. The same applies to `log_c`. `Solve` still combines the logarithms of
-  an equation, and checks each root against the original equation:
-  `Solve(ln(x + 1) + ln(x − 1) = 0, x)` is `[√2]`. The policy is in
-  `docs/SIMPLIFY.md`.
+- **[#397](https://github.com/cortex-js/compute-engine/issues/397) `simplify()`
+  combines or splits logarithms only when their arguments are provably
+  non-negative.** `ln(x) + ln(y)` was `ln(xy)` and `ln(x/y)` was `ln(x) − ln(y)`
+  for any unconstrained `x` and `y`, which is wrong for negative values: at
+  `x = y = -1`, `ln(x) + ln(y)` is `2πi` but `ln(xy)` is `0`. They now stay as
+  they are, as does `ln(1/x)`, which was `−ln(x)`. An argument is used when it
+  is non-negative by its value (`ln(2) + ln(3)` is still `ln(6)`), by its type,
+  by an assumption (with `assume(x > 0)` and `assume(y > 0)`, `ln(x) + ln(y)` is
+  `ln(xy)`), or because it is an absolute value. The same applies to `log_c`.
+  `Solve` still combines the logarithms of an equation, and checks each root
+  against the original equation: `Solve(ln(x + 1) + ln(x − 1) = 0, x)` is
+  `[√2]`. The policy is in `docs/SIMPLIFY.md`.
 
 These changes apply to non-strict parsing only
 (`ce.parse(latex, { strict: false })`). Strict parsing is unchanged.
 
 - **An unbraced run of letters after `_` is the whole subscript.** `x_max` was
   `x_m·a·x` and is now the symbol `x_max`, the same as `x_{max}`; `T_max` is
-  `T_max`, and `y = x_1 + x_max` is `y = x_1 + x_max`. The run ends at the
-  first token that is not a letter. A run of two letters followed by `_`, `^`
-  or a digit keeps the previous reading, so that adjacent indexed symbols stay
-  apart: `a_nb_n` is still `a_n·b_n` and `a_kx^k` is still `a_k·x^k`. Input
-  that changes: `x_ij` was `x_i·j` and is now the symbol `x_ij`, and `a_nx`
-  was `a_n·x` and is now the symbol `a_nx` (write `a_n x` for the product).
-- **An unbraced exponent is one whole operand.** As a run of digits already
-  was (`x^12`), the exponent is now a number with its decimal part
-  (`x^2.5` is `x^{2.5}`, was `x^2·0.5`), a word read as one symbol (`x^pi` is
-  `x^π`, was `x^p·i`; `x^theta` is `x^θ`), or a bare function call (`e^sin(x)`
-  is `e^{sin(x)}`, was `e^s·i·n·(x)`). The result is the same as the braced
-  spelling. White space ends the exponent (`x^2 y` is still `x^2·y`), and
-  where the extent is not clear the reading is unchanged: `x^2y` is `x^2·y`,
-  `e^2pi` is `e^2·π`, `x^ab` is `x^a·b`.
+  `T_max`, and `y = x_1 + x_max` is `y = x_1 + x_max`. The run ends at the first
+  token that is not a letter. A run of two letters followed by `_`, `^` or a
+  digit keeps the previous reading, so that adjacent indexed symbols stay apart:
+  `a_nb_n` is still `a_n·b_n` and `a_kx^k` is still `a_k·x^k`. Input that
+  changes: `x_ij` was `x_i·j` and is now the symbol `x_ij`, and `a_nx` was
+  `a_n·x` and is now the symbol `a_nx` (write `a_n x` for the product).
+- **An unbraced exponent is one whole operand.** As a run of digits already was
+  (`x^12`), the exponent is now a number with its decimal part (`x^2.5` is
+  `x^{2.5}`, was `x^2·0.5`), a word read as one symbol (`x^pi` is `x^π`, was
+  `x^p·i`; `x^theta` is `x^θ`), or a bare function call (`e^sin(x)` is
+  `e^{sin(x)}`, was `e^s·i·n·(x)`). The result is the same as the braced
+  spelling. White space ends the exponent (`x^2 y` is still `x^2·y`), and where
+  the extent is not clear the reading is unchanged: `x^2y` is `x^2·y`, `e^2pi`
+  is `e^2·π`, `x^ab` is `x^a·b`.
 - **A sign directly after `^` starts the exponent.** The exponent is the sign
   and one operand: `e^-x` is `e^{-x}` (was `Superminus(e)·x`), `2^-x` is
   `2^{-x}`, `e^-sin(x)` is `e^{-sin(x)}`, `e^-(x)` is `e^{-(x)}`, and `e^+x` is
   `e^{+x}` (was `PseudoInverse(e)·x`). A second superscript is the same
   double-superscript error as in `e^{-x}^2`. When no operand follows the sign
   directly, the reading is unchanged: `\Z^+` is still the positive integers,
-  `A^+` is still the pseudo-inverse, and `x \to 0^+` is still a one-sided
-  limit point. `x^-2` is still `x^{-2}`.
+  `A^+` is still the pseudo-inverse, and `x \to 0^+` is still a one-sided limit
+  point. `x^-2` is still `x^{-2}`.
 - **The words `in` and `infinity` are read as math.** `M in [0,1]` is
-  `M \in [0,1]` (`Element(M, Interval(0, 1))`, was `M·i·n[0,1]`), and
-  `infinity` is `PositiveInfinity` like `inf` (was the product of its
-  letters). `in` is read this way only as a separate word between two
-  operands: `index`, `ink`, `int` and `xin` keep their previous reading.
+  `M \in [0,1]` (`Element(M, Interval(0, 1))`, was `M·i·n[0,1]`), and `infinity`
+  is `PositiveInfinity` like `inf` (was the product of its letters). `in` is
+  read this way only as a separate word between two operands: `index`, `ink`,
+  `int` and `xin` keep their previous reading.
 
 ### New Features
 
-- **A parse diagnostic for a letter run read as a product.** In non-strict
-  mode, with `diagnostics: true`, a run of two or more letters that is not a
-  known word and is read as a product of its parts now gives one
-  `letter-run-split` diagnostic: `eps` (`e·p·s`), `sinx`, a word of prose, or
-  `xpi` (`x·π`). Its span is the run, and `detail` is `{ run, parts }`, for
-  example `{ run: "eps", parts: ["e", "p", "s"] }`. An explicit product
-  (`a*b*c`) and a run read as one name (`sin(x)`, `alpha`, `foo(x)`) give no
-  such diagnostic, and neither do the differentials of `dy/dx`. An unbraced
-  exponent or subscript that takes only the first letter of a run is reported
-  too: `e^xy` is `e^x·y` and `(x)_ab` is `(x)_a·b`. The diagnostic does not
-  change the parse result.
+- **A parse diagnostic for a letter run read as a product.** In non-strict mode,
+  with `diagnostics: true`, a run of two or more letters that is not a known
+  word and is read as a product of its parts now gives one `letter-run-split`
+  diagnostic: `eps` (`e·p·s`), `sinx`, a word of prose, or `xpi` (`x·π`). Its
+  span is the run, and `detail` is `{ run, parts }`, for example
+  `{ run: "eps", parts: ["e", "p", "s"] }`. An explicit product (`a*b*c`) and a
+  run read as one name (`sin(x)`, `alpha`, `foo(x)`) give no such diagnostic,
+  and neither do the differentials of `dy/dx`. An unbraced exponent or subscript
+  that takes only the first letter of a run is reported too: `e^xy` is `e^x·y`
+  and `(x)_ab` is `(x)_a·b`. The diagnostic does not change the parse result.
 
 - **Three new opt-in parse diagnostics for non-strict input.** With
   `ce.parse(latex, { strict: false, diagnostics: true })`, the result's
   `parseDiagnostics` now also reports:
   - `implicit-product-in-denominator`: the denominator of a `/` is an implicit
-    product, which binds tighter than `/`. `1/2x`, `1/2 x`, `pi/2x` and
-    `x/2 y` are read as `1/(2x)`, `π/(2x)` and `x/(2y)`, which is not what
-    every reader intends. `1/2 * x`, `1/(2x)`, `dy/dx` and a call such as
-    `1/f(x)` are not reported.
+    product, which binds tighter than `/`. `1/2x`, `1/2 x`, `pi/2x` and `x/2 y`
+    are read as `1/(2x)`, `π/(2x)` and `x/(2y)`, which is not what every reader
+    intends. `1/2 * x`, `1/(2x)`, `dy/dx` and a call such as `1/f(x)` are not
+    reported.
   - `spaced-digit-groups`: white space between digits was read as one number
     (`2 3` is 23, `1 000` is 1000). The digit group separators `\,` and `{,}`
     are not reported.
-  - `letter-before-decimal`: a symbol directly followed by `.digits` (`x.5`)
-    is read as the product `x \cdot 0.5`.
+  - `letter-before-decimal`: a symbol directly followed by `.digits` (`x.5`) is
+    read as the product `x \cdot 0.5`.
 
   The readings do not change, and strict mode reports none of these.
 
 ### Issues Resolved
 
-- `Solve` found no root of a linear equation whose coefficient of the unknown
-  is a sum: `x − ax + a = 0`, `πx + x = 1` and `x = e(x − 1)` gave `[]`. Only
-  the shape `ax + b` was recognized. They are now solved from their
-  coefficients (`1/(π + 1)`, `e/(e − 1)`).
+- `Solve` found no root of a linear equation whose coefficient of the unknown is
+  a sum: `x − ax + a = 0`, `πx + x = 1` and `x = e(x − 1)` gave `[]`. Only the
+  shape `ax + b` was recognized. They are now solved from their coefficients
+  (`1/(π + 1)`, `e/(e − 1)`).
 - `Solve` found no root of an equation with one logarithm of a non-linear
   argument, or with several logarithms of one base: `ln(x² + 2x) = 3`,
-  `log_2(x) + log_2(x + 2) = 3` and `ln(x) − ln(x − 1) = 1` gave `[]`. They
-  now give `−1 ± √(1 + e³)`, `[2]` and `[e/(e − 1)]`. The roots are checked
-  against the original equation, so a root where a logarithm is not defined
-  is rejected (`log_2(x) + log_2(x + 2) = 3` has no root `−4`).
-- [#397](https://github.com/cortex-js/compute-engine/issues/397) Thirty-seven Wikidata ids, in the library and in
-  `OPERATORS.json`, named an unrelated item: `PlanckConstant` was `Q524`
-  (Mount Vesuvius), `Nor` was `Q189561` (narcolepsy). They now name the
-  concept of the head, and a test checks that `OPERATORS.json` agrees with
-  the library.
-- [#397](https://github.com/cortex-js/compute-engine/issues/397) `LerchPhi` at a negative integer order and exact operands stayed
-  unevaluated where its value is 0: `LerchPhi(-1, -1, 1/2)` is now `0`, also
-  under `.N()`, as in Wolfram. For `s = -n` (`n ≤ 12`) and exact `z ≠ 1` and
-  `a`, `LerchPhi(z, s, a)` is now the exact rational value of its closed form
-  `aⁿ/(1 − z) + Σⱼ C(n, j)·aⁿ⁻ʲ·Li₋ⱼ(z)`: `LerchPhi(3, -4, -5/2)` is
-  `-5725/32`.
+  `log_2(x) + log_2(x + 2) = 3` and `ln(x) − ln(x − 1) = 1` gave `[]`. They now
+  give `−1 ± √(1 + e³)`, `[2]` and `[e/(e − 1)]`. The roots are checked against
+  the original equation, so a root where a logarithm is not defined is rejected
+  (`log_2(x) + log_2(x + 2) = 3` has no root `−4`).
+- [#397](https://github.com/cortex-js/compute-engine/issues/397) Thirty-seven
+  Wikidata ids, in the library and in `OPERATORS.json`, named an unrelated item:
+  `PlanckConstant` was `Q524` (Mount Vesuvius), `Nor` was `Q189561`
+  (narcolepsy). They now name the concept of the head, and a test checks that
+  `OPERATORS.json` agrees with the library.
+- [#397](https://github.com/cortex-js/compute-engine/issues/397) `LerchPhi` at a
+  negative integer order and exact operands stayed unevaluated where its value
+  is 0: `LerchPhi(-1, -1, 1/2)` is now `0`, also under `.N()`, as in Wolfram.
+  For `s = -n` (`n ≤ 12`) and exact `z ≠ 1` and `a`, `LerchPhi(z, s, a)` is now
+  the exact rational value of its closed form
+  `aⁿ/(1 − z) + Σⱼ C(n, j)·aⁿ⁻ʲ·Li₋ⱼ(z)`: `LerchPhi(3, -4, -5/2)` is `-5725/32`.
 - `Solve(eˣ = 3, x)` gave the float `1.0986…` instead of `ln(3)`, and
   `Solve(e^(2x) = 5, x)` gave `[]`. The `Solve` operator replaced the constant
   `ExponentialE` by its float value before solving. A constant that keeps its
-  value until `.N()` (`ExponentialE`, `Pi`) now stays symbolic, and the
-  answers are `[ln(3)]` and `[ln(5)/2]`.
+  value until `.N()` (`ExponentialE`, `Pi`) now stays symbolic, and the answers
+  are `[ln(3)]` and `[ln(5)/2]`.
 - [#398](https://github.com/cortex-js/compute-engine/issues/398) `About` now
   reports the `examples` and `keywords` of a definition, each as a list of
   strings: `About(Sin)` includes
   `"examples" -> ["Sin(Pi / 6)", "Sin(1)", "N(Sin(1))"]` and
   `"keywords" -> ["sine"]`. The boxed operator and value definitions did not
-  keep the `examples` of the definition they were made from. They now keep
-  them as a list of strings; a definition that gives one string is stored as
-  a list of one string.
+  keep the `examples` of the definition they were made from. They now keep them
+  as a list of strings; a definition that gives one string is stored as a list
+  of one string.
 - [#388](https://github.com/cortex-js/compute-engine/issues/388) A function
-  literal in compiled JavaScript was wrapped in a broadcast dispatch even
-  where no argument could be a list. Two cases now compile to the bare arrow
-  function. A callback fed the elements of a `Range` whose start and step are
-  literal numbers (`Map(q ↦ …, Range(1, Length(s)))`) receives a finite
-  number at every call, so the wrapper and the `NaN` and absence tests on its
-  parameter (`q === q`, `typeof q === 'number'`) are gone. An `Apply` of a
-  literal to arguments that are scalars by construction (a number, a declared
-  scalar input, a loop index) no longer builds the wrapper and its closure at
-  each evaluation. A list argument still broadcasts, as in the interpreter.
+  literal in compiled JavaScript was wrapped in a broadcast dispatch even where
+  no argument could be a list. Two cases now compile to the bare arrow function.
+  A callback fed the elements of a `Range` whose start and step are literal
+  numbers (`Map(q ↦ …, Range(1, Length(s)))`) receives a finite number at every
+  call, so the wrapper and the `NaN` and absence tests on its parameter
+  (`q === q`, `typeof q === 'number'`) are gone. An `Apply` of a literal to
+  arguments that are scalars by construction (a number, a declared scalar input,
+  a loop index) no longer builds the wrapper and its closure at each evaluation.
+  A list argument still broadcasts, as in the interpreter.
 - [#387](https://github.com/cortex-js/compute-engine/issues/387) On the
   JavaScript target, a compiled `Range` is built in a loop, and a `Map`, a
-  `Fold`/`Reduce` or a `Sum(Map(…))` over a finite `Range` builds no range
-  at all. A `Range` compiled to
-  `Array.from({length: n}, (_e, i) => a + i * s)`, which is about 18 times
-  slower on V8 than a preallocated array filled by a counted loop. The
-  compiled code now calls a run-time helper, `_SYS.range(a, b, s)`, that
-  fills the array in a loop. A `Map` over a finite range, a `Reduce` over one
-  (`Fold` is its canonical form) and the `Sum` or `Product` of a `Map` over
-  one now walk the range with the counted loop that predicates over a range
-  already use (issue #373). `Fold((acc, k) ↦ acc + k, 0, 1..n)` at n = 1000
-  went from about 38 µs to under 1 µs. The values are unchanged: the element
-  count is the interpreter's own, element `i` is `a + i × s`, the elements
-  are folded in range order, a seedless fold over an empty range is `NaN`,
-  and an infinite bound at run time still throws a `RangeError`. A range that
-  is shared by common-subexpression elimination, or has a non-finite bound,
-  keeps the array lowering.
-- [#393](https://github.com/cortex-js/compute-engine/issues/393) A library
-  given in the `libraries` constructor option with no `requires` list loaded
-  before the standard libraries listed before it. The libraries were sorted
-  so that every library with no dependencies came first, whatever its place
-  in the list. A caller library whose definitions use a function literal
+  `Fold`/`Reduce` or a `Sum(Map(…))` over a finite `Range` builds no range at
+  all. A `Range` compiled to `Array.from({length: n}, (_e, i) => a + i * s)`,
+  which is about 18 times slower on V8 than a preallocated array filled by a
+  counted loop. The compiled code now calls a run-time helper,
+  `_SYS.range(a, b, s)`, that fills the array in a loop. A `Map` over a finite
+  range, a `Reduce` over one (`Fold` is its canonical form) and the `Sum` or
+  `Product` of a `Map` over one now walk the range with the counted loop that
+  predicates over a range already use (issue #373).
+  `Fold((acc, k) ↦ acc + k, 0, 1..n)` at n = 1000 went from about 38 µs to under
+  1 µs. The values are unchanged: the element count is the interpreter's own,
+  element `i` is `a + i × s`, the elements are folded in range order, a seedless
+  fold over an empty range is `NaN`, and an infinite bound at run time still
+  throws a `RangeError`. A range that is shared by common-subexpression
+  elimination, or has a non-finite bound, keeps the array lowering.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) A library given
+  in the `libraries` constructor option with no `requires` list loaded before
+  the standard libraries listed before it. The libraries were sorted so that
+  every library with no dependencies came first, whatever its place in the list.
+  A caller library whose definitions use a function literal
   (`evaluate: ["Function", …]`) then made `Block` a plain symbol before
-  `control-structures` could define it: the engine printed "Duplicate
-  operator definition: Block" and stayed broken (`x := 2; x + 1` gave
-  `{2; 3}`). The libraries now load in the order of the list, and each
-  library loads after the libraries in its `requires` list. The order of the
-  standard libraries does not change.
+  `control-structures` could define it: the engine printed "Duplicate operator
+  definition: Block" and stayed broken (`x := 2; x + 1` gave `{2; 3}`). The
+  libraries now load in the order of the list, and each library loads after the
+  libraries in its `requires` list. The order of the standard libraries does not
+  change.
 - [#393](https://github.com/cortex-js/compute-engine/issues/393) `D` did not
   differentiate an operator defined by a library given in the `libraries`
   constructor option: with `Sq` defined as `x ↦ x²`, `D(Sq(x), x)` gave
-  `Apply(Derivative("Sq", 1), x)`. Such a library is installed in the same
-  scope as the standard library, so `D` took its operators for built-in
-  ones. `D(Sq(x), x)` now gives `2x`, as it does when `Sq` is declared with
+  `Apply(Derivative("Sq", 1), x)`. Such a library is installed in the same scope
+  as the standard library, so `D` took its operators for built-in ones.
+  `D(Sq(x), x)` now gives `2x`, as it does when `Sq` is declared with
   `ce.declare()`.
 - `D` used the library rule for a user function with the name of a library
   function: after `\operatorname{Sinh}(x) := 3x`, `Sinh(2)` is `6` but
   `D(Sinh(t), t)` gave `cosh(t)`. It now gives `3`.
 - [#394](https://github.com/cortex-js/compute-engine/issues/394) `SetMinus`,
-  `Length`, `Count`, `IsEmpty`, `Contains`, `Append` and `Slice` validated
-  their operands against a copy of their signature text, not against the
-  signature of their definition. A host that redeclared one of them with a
-  wider signature and kept its handlers
+  `Length`, `Count`, `IsEmpty`, `Contains`, `Append` and `Slice` validated their
+  operands against a copy of their signature text, not against the signature of
+  their definition. A host that redeclared one of them with a wider signature
+  and kept its handlers
   (`ce.declare('SetMinus', { ...ce.lookupDefinition('SetMinus').operator, signature: '(value, value*) -> set' })`)
-  still had the old validation: `SetMinus(5, 2)` stayed an
-  `incompatible-type` error. These operators now read the signature of the
-  definition in effect. A stock engine gives the same results as before.
+  still had the old validation: `SetMinus(5, 2)` stayed an `incompatible-type`
+  error. These operators now read the signature of the definition in effect. A
+  stock engine gives the same results as before.
 
 - **The `resolveApplication` hook sees every name before a parenthesis in
   non-strict mode.** A multi-letter name (`foo(x)`) or a spelled-out Greek
   letter (`gamma(x)`, `alpha(x+1)`, `theta(x)`) was read as a name before the
   hook could see it, so a host could not choose the reading. The hook is now
-  called for these names with the same precedence rules as for `f(x)`:
-  explicit declarations, function parameters and `resolveSymbol` facts take
-  precedence, and a name with a library definition (`Gamma(x)`, `pi(x)`,
-  `sin(x)`) is not submitted. When the hook returns `undefined`, the reading
-  is unchanged. Reported by a host.
-- **Parsing a deeply nested exponent in non-strict mode is fast.** Each
-  `e^{…}` was read twice, so the time doubled with each level of nesting in
+  called for these names with the same precedence rules as for `f(x)`: explicit
+  declarations, function parameters and `resolveSymbol` facts take precedence,
+  and a name with a library definition (`Gamma(x)`, `pi(x)`, `sin(x)`) is not
+  submitted. When the hook returns `undefined`, the reading is unchanged.
+  Reported by a host.
+- **Parsing a deeply nested exponent in non-strict mode is fast.** Each `e^{…}`
+  was read twice, so the time doubled with each level of nesting in
   `e^{-(e^{-(…)})}`. Each exponent is now read once.
-- **The bare names `sign` and `sgn` are the sign function.** In non-strict
-  mode, `sign(x)` and `sgn(x)` were read as an undefined function `Sgn`. They
-  are now `Sign`: `sign(-2)` evaluates to `-1`.
+- **The bare names `sign` and `sgn` are the sign function.** In non-strict mode,
+  `sign(x)` and `sgn(x)` were read as an undefined function `Sgn`. They are now
+  `Sign`: `sign(-2)` evaluates to `-1`.
 - **A chain of `<=`, `>=` or `!=` parses as a chain.** `0.1 <= M <= 5` gave
   `LessEqual(0.1, Equal(Less(M, Error(missing)), 5))`: the right operand of the
   first `<=` read the `<` of the second `<=` as `Less`, because `<` binds
   tighter than `<=`. The parser now considers only the longest operator that
-  matches the input, and stops the operand when that operator binds too
-  loosely. `0.1 <= M <= 5` is `LessEqual(0.1, M, 5)`, the same as
-  `0.1 ≤ M ≤ 5` and `0.1 \le M \le 5`, and `5 >= M >= 0.1` is
-  `GreaterEqual(5, M, 0.1)`, the same as `5 ≥ M ≥ 0.1`. This applies in strict
-  and non-strict mode. A chain of `\ge`, `\geq`, `\geqslant`, `>` or `\gt`
-  is also one flat expression in the raw form now (`5\ge M\ge 0.1` is
-  `GreaterEqual(5, M, 0.1)`, it was `GreaterEqual(5, GreaterEqual(M, 0.1))`),
-  as a chain of `\le` or `<` already was. The canonical form is unchanged.
+  matches the input, and stops the operand when that operator binds too loosely.
+  `0.1 <= M <= 5` is `LessEqual(0.1, M, 5)`, the same as `0.1 ≤ M ≤ 5` and
+  `0.1 \le M \le 5`, and `5 >= M >= 0.1` is `GreaterEqual(5, M, 0.1)`, the same
+  as `5 ≥ M ≥ 0.1`. This applies in strict and non-strict mode. A chain of
+  `\ge`, `\geq`, `\geqslant`, `>` or `\gt` is also one flat expression in the
+  raw form now (`5\ge M\ge 0.1` is `GreaterEqual(5, M, 0.1)`, it was
+  `GreaterEqual(5, GreaterEqual(M, 0.1))`), as a chain of `\le` or `<` already
+  was. The canonical form is unchanged.
 - **More plain-text operator spellings in non-strict mode.** `x ÷ 2` is
-  `Divide(x, 2)`, as `x / 2` and `x \div 2` are. `a =< b` is
-  `LessEqual(a, b)` and `a <> b` is `NotEqual(a, b)`. In strict mode these
-  spellings are not operators, as before.
-- **`√(x+1)` is `Sqrt(x+1)` in non-strict mode**, as `sqrt(x+1)` is. It was
-  the juxtaposition of the `Sqrt` function and the parenthesized group. Strict
-  mode is unchanged.
+  `Divide(x, 2)`, as `x / 2` and `x \div 2` are. `a =< b` is `LessEqual(a, b)`
+  and `a <> b` is `NotEqual(a, b)`. In strict mode these spellings are not
+  operators, as before.
+- **`√(x+1)` is `Sqrt(x+1)` in non-strict mode**, as `sqrt(x+1)` is. It was the
+  juxtaposition of the `Sqrt` function and the parenthesized group. Strict mode
+  is unchanged.
 - **Parentheses in a fraction or an exponent are not written twice.** A
   structural or raw expression that kept the parentheses of its source, such as
   `y = 1/(1+x^2)`, was written `y=((1+x^2))^{-1}`. It is now written
-  `y=\frac{1}{1+x^2}`: the `\frac` arguments and the superscript braces
-  already group their content, so `x^(1/2)` is written `x^{\frac{1}{2}}`, not
+  `y=\frac{1}{1+x^2}`: the `\frac` arguments and the superscript braces already
+  group their content, so `x^(1/2)` is written `x^{\frac{1}{2}}`, not
   `x^{(\frac{1}{2})}`. Parentheses elsewhere are kept.
 - **`\operatorname{arccot}(x)` is the inverse cotangent.** It was a call of an
-  undefined function `arccot`; only the spelling `arcctg` was read as
-  `Arccot`. Both spellings are now `Arccot`, also as `\mathrm{arccot}`.
+  undefined function `arccot`; only the spelling `arcctg` was read as `Arccot`.
+  Both spellings are now `Arccot`, also as `\mathrm{arccot}`.
 - **Scientific notation with the base written `{10}`.** `2\times{10}^{-1}` is
   the number `0.2`, the same as `2\times10^{-1}`, and `4.35\times{10}^2`,
   `2\cdot{10}^{3}` and `a/2\times{10}^3` read the same as the spellings without
@@ -267,116 +266,111 @@ These changes apply to non-strict parsing only
   literal, where it was the square of each element.
 - **`Sum` of a list of points or rows has the type of a point or a row.**
   `Sum(pts)` with `pts` declared `list<tuple<real, real>>` was typed `number`,
-  but its value is a point: `Sum([(1, 2), (3, 4)])` is `(4, 6)`. It is now
-  typed `integer | tuple<real, real>` (a list with no length may be empty, and
-  the sum of an empty list is `0`). A list of rows sums to a row and a matrix
-  to the row of its column sums: `Sum([[1, 2], [3, 4]])` is typed
-  `vector<integer^2>`. A consumer that used the `number` type to read the
-  compiled value as a scalar was wrong for such a sum.
+  but its value is a point: `Sum([(1, 2), (3, 4)])` is `(4, 6)`. It is now typed
+  `integer | tuple<real, real>` (a list with no length may be empty, and the sum
+  of an empty list is `0`). A list of rows sums to a row and a matrix to the row
+  of its column sums: `Sum([[1, 2], [3, 4]])` is typed `vector<integer^2>`. A
+  consumer that used the `number` type to read the compiled value as a scalar
+  was wrong for such a sum.
 
 - **`Max` and `Min` of a dictionary are an `incompatible-type` error.** They
   walked the dictionary as a collection and compared its keys with its values:
-  `Max({"a" -> 3, "b" -> 5})` was `max(5, "a", "b")`. An entry is not a
-  number, so `Max`, `Min`, `Supremum` and `Infimum` of a dictionary that has
-  an entry now give the error that `Sum` and `Mean` give, which names the
-  first entry: `Error(incompatible-type, number, tuple<string, integer>)`. A
-  program that read the unevaluated `max(…)` result gets the error instead.
-  An empty dictionary contributes no value, as an empty list does. A
-  dictionary that is an ELEMENT of a list gives the error that names the whole
-  dictionary, as `Sum([1, d])` does. The error is the answer whatever the
-  order of the operands: `Max(NaN, d)` was `NaN` while `Max(d, NaN)` was the
-  error.
+  `Max({"a" -> 3, "b" -> 5})` was `max(5, "a", "b")`. An entry is not a number,
+  so `Max`, `Min`, `Supremum` and `Infimum` of a dictionary that has an entry
+  now give the error that `Sum` and `Mean` give, which names the first entry:
+  `Error(incompatible-type, number, tuple<string, integer>)`. A program that
+  read the unevaluated `max(…)` result gets the error instead. An empty
+  dictionary contributes no value, as an empty list does. A dictionary that is
+  an ELEMENT of a list gives the error that names the whole dictionary, as
+  `Sum([1, d])` does. The error is the answer whatever the order of the
+  operands: `Max(NaN, d)` was `NaN` while `Max(d, NaN)` was the error.
 - **`Sum` of one element that is not a number is an error.** A sum of one
   element answered the element itself: `Sum([{"a" -> 3}])` was `{"a" -> 3}`,
   `Sum([True])` was `True`, and `Sum({"a" -> 3})` (a dictionary of one entry)
-  was the entry `("a", 3)`, while two such elements gave an
-  `incompatible-type` error. One element now gives the same error as two. A
-  point or a row is still summed: `Sum([(1, 2)])` is `(1, 2)`.
+  was the entry `("a", 3)`, while two such elements gave an `incompatible-type`
+  error. One element now gives the same error as two. A point or a row is still
+  summed: `Sum([(1, 2)])` is `(1, 2)`.
 
 ### Issues Resolved
 
-- Registering a chain of functions that each call the next one twice took a
-  time that doubled with each level: the effects inference walked the body of
-  a called function once per call, so the last function of a chain of 12 was
+- Registering a chain of functions that each call the next one twice took a time
+  that doubled with each level: the effects inference walked the body of a
+  called function once per call, so the last function of a chain of 12 was
   walked 2¹² times. A function already walked for the same definition is now
   skipped, and the work grows polynomially with the depth: 5 666 reads of the
   declared signatures at depth 12 (from 89 794) and 20 962 at depth 20.
 - The compiled `Sum` and `Product` of a list of points, rows or matrices with
   complex entries gave wrong values behind `success: true`: the sum of the
-  points `[(1+i, 2), (3+i, 4)]` was `["0[object Object][object Object]", 6]`
-  and a product of complex rows or matrices had `NaN` entries. They now match
+  points `[(1+i, 2), (3+i, 4)]` was `["0[object Object][object Object]", 6]` and
+  a product of complex rows or matrices had `NaN` entries. They now match
   `evaluate()`. The compiler chooses a real-only, a complex, or (for a shape
-  known only at run time) a dispatching form of the element-wise helper from
-  the type of the operand, as for the other linear-algebra helpers.
+  known only at run time) a dispatching form of the element-wise helper from the
+  type of the operand, as for the other linear-algebra helpers.
 - A compiled expression over the `Sum` of a list of REAL points read each
-  coordinate as a complex number: `Sum(P) + (1, 1)` gave `NaN` coordinates
-  where `evaluate()` gives `(5, 7)`. It is now correct.
+  coordinate as a complex number: `Sum(P) + (1, 1)` gave `NaN` coordinates where
+  `evaluate()` gives `(5, 7)`. It is now correct.
 - `Product` of a list of rows or square matrices was typed `number`; it is now
   typed as a row or a matrix (`Product([[1, 2], [3, 4]])` is `[3, 8]`), and a
   compiled `Product(Q) + 1` no longer adds `1` to the matrix as if it were one
   number. `Sum` and `Product` of an abstract collection or a set of rows or
-  matrices, and of a matrix whose size is not known, are typed by shape too,
-  and so is the sum or product of elements typed `broadcastable<T>`.
-- Shapes the JavaScript target cannot compute now refuse to compile instead
-  of giving `NaN` or a string: a scalar times the `Sum` of points
-  (`2·Sum(P)`), a complex parent over a fold of complex rows or matrices,
-  `Multiply` of two complex rows or matrices read with `At`, `Product` of
-  matrices known not to be square, and `Sum` over elements that are abstract
-  collections. With the default fallback, `evaluate()` answers them.
-- `Sum()` and `Product()` with no operand logged an internal exception
-  during canonicalization. The operand is now reported missing, as for
-  `Mean()`.
+  matrices, and of a matrix whose size is not known, are typed by shape too, and
+  so is the sum or product of elements typed `broadcastable<T>`.
+- Shapes the JavaScript target cannot compute now refuse to compile instead of
+  giving `NaN` or a string: a scalar times the `Sum` of points (`2·Sum(P)`), a
+  complex parent over a fold of complex rows or matrices, `Multiply` of two
+  complex rows or matrices read with `At`, `Product` of matrices known not to be
+  square, and `Sum` over elements that are abstract collections. With the
+  default fallback, `evaluate()` answers them.
+- `Sum()` and `Product()` with no operand logged an internal exception during
+  canonicalization. The operand is now reported missing, as for `Mean()`.
 
-- **#386** `ReplaceAt`, `DeleteAt` and `Insert` did not compile to
-  JavaScript: `compile(ReplaceAt(s, 2, 9))` failed with "target 'javascript'
-  has no lowering for it", so a `Fold` whose step replaced one element of a
-  list did not compile. Each now compiles to a copy of the array with the
-  interpreter's index rules (1-based, a negative index counts from the end,
-  `Insert` takes positions 1 to n + 1). An index for which the interpreter
-  leaves the expression unevaluated (zero or out of range) throws a
-  `RangeError` at run time. A string operand is walked as its characters, as
-  in the interpreter: `DeleteAt` answers a string, `ReplaceAt` and `Insert` a
-  list of characters.
-- **#386** `ReplaceAt`, `DeleteAt` and `Insert` also compile to Python, with
-  the same index rules. An index for which the interpreter leaves the
-  expression unevaluated raises an `IndexError`. A string operand does not
-  compile to Python, as for the other list operators.
-- Compiled statistics of a list of lists gave wrong values. On the
-  JavaScript target `Max`, `Min`, `Mean`, `Median`, `Variance`, `Mode`,
-  `Quartiles` and the other statistics of `[[1, 2], [3, 5]]` answered `null`
-  or a wrong list, and `Mean([2, 3], [5, 7])` answered `NaN`; on the Python
-  target `Mean` and `Median` of a list of lists answered a number. The
-  interpreter answers 5 for `Max`, 17/4 for the two-list `Mean`, and an
-  `incompatible-type` error for `Mean([[1, 2], [3, 5]])`. These no longer
-  compile, so the interpreter answers. A JavaScript `Reduce` or `Scan` with
-  `Add` or `Multiply` over a list of lists now adds or multiplies the rows
-  element by element, as `Sum` does (`Reduce(s, Add)` joined two rows as the
-  string `"1,23,5"`); a built-in fold over points, strings, sets or
-  dictionaries, and every built-in fold over rows on the Python target (where
-  `+` joins two lists: `Scan(s, Add)` gave `[[1, 2], [1, 2, 3, 5]]`), no longer
-  compiles. A fold whose step was typed for a list of numbers by its uses
-  (`Sum(acc)`) but whose seed is a list of lists no longer compiles, because
-  the step's arithmetic would join rows as strings. A row type given through
-  a type name (`list<Row>`) is recognized by all these checks. A fold step
-  whose element parameter is named `i` was compiled as if `i` were the
-  imaginary unit: `Reduce(L, (acc, i) => acc + i, [0, 0])` over rows answered
-  `[{re: null}, {re: null}]`; it now answers `[4, 7]`.
+- **#386** `ReplaceAt`, `DeleteAt` and `Insert` did not compile to JavaScript:
+  `compile(ReplaceAt(s, 2, 9))` failed with "target 'javascript' has no lowering
+  for it", so a `Fold` whose step replaced one element of a list did not
+  compile. Each now compiles to a copy of the array with the interpreter's index
+  rules (1-based, a negative index counts from the end, `Insert` takes positions
+  1 to n + 1). An index for which the interpreter leaves the expression
+  unevaluated (zero or out of range) throws a `RangeError` at run time. A string
+  operand is walked as its characters, as in the interpreter: `DeleteAt` answers
+  a string, `ReplaceAt` and `Insert` a list of characters.
+- **#386** `ReplaceAt`, `DeleteAt` and `Insert` also compile to Python, with the
+  same index rules. An index for which the interpreter leaves the expression
+  unevaluated raises an `IndexError`. A string operand does not compile to
+  Python, as for the other list operators.
+- Compiled statistics of a list of lists gave wrong values. On the JavaScript
+  target `Max`, `Min`, `Mean`, `Median`, `Variance`, `Mode`, `Quartiles` and the
+  other statistics of `[[1, 2], [3, 5]]` answered `null` or a wrong list, and
+  `Mean([2, 3], [5, 7])` answered `NaN`; on the Python target `Mean` and
+  `Median` of a list of lists answered a number. The interpreter answers 5 for
+  `Max`, 17/4 for the two-list `Mean`, and an `incompatible-type` error for
+  `Mean([[1, 2], [3, 5]])`. These no longer compile, so the interpreter answers.
+  A JavaScript `Reduce` or `Scan` with `Add` or `Multiply` over a list of lists
+  now adds or multiplies the rows element by element, as `Sum` does
+  (`Reduce(s, Add)` joined two rows as the string `"1,23,5"`); a built-in fold
+  over points, strings, sets or dictionaries, and every built-in fold over rows
+  on the Python target (where `+` joins two lists: `Scan(s, Add)` gave
+  `[[1, 2], [1, 2, 3, 5]]`), no longer compiles. A fold whose step was typed for
+  a list of numbers by its uses (`Sum(acc)`) but whose seed is a list of lists
+  no longer compiles, because the step's arithmetic would join rows as strings.
+  A row type given through a type name (`list<Row>`) is recognized by all these
+  checks. A fold step whose element parameter is named `i` was compiled as if
+  `i` were the imaginary unit: `Reduce(L, (acc, i) => acc + i, [0, 0])` over
+  rows answered `[{re: null}, {re: null}]`; it now answers `[4, 7]`.
 - `.N()` of a `Reduce` with no initial value over a list of lists was `NaN`:
   `Reduce([[1, 2], [3, 4]], Add).N()` is now `[4, 6]`, as `evaluate()` gives.
   The compiled code of the same expression, which used that value, was the
   constant `NaN`.
-- **#386** A compiled `Fold` whose step replaced elements of a list
-  accumulator copied the whole list at each step, so a fold that visits each
-  element once took time proportional to the square of the length (730 ms for
-  40,000 elements). When the step can only return the accumulator or a chain
-  of `ReplaceAt` on it, and reads it nowhere else except through an element
-  read or an aggregate (`At`, `Length`, `Sum`, …), the compiled fold now copies
-  the seed once and updates that copy in place (1.7 ms for 40,000 elements).
-  A step that swaps two slots,
-  `ReplaceAt(ReplaceAt(acc, i, acc[j]), j, acc[i])`, reads both old values
-  before it writes. Any other step keeps the copying form. The result is the
-  same, and the caller's list is not changed. This applies to the JavaScript
-  and Python targets.
+- **#386** A compiled `Fold` whose step replaced elements of a list accumulator
+  copied the whole list at each step, so a fold that visits each element once
+  took time proportional to the square of the length (730 ms for 40,000
+  elements). When the step can only return the accumulator or a chain of
+  `ReplaceAt` on it, and reads it nowhere else except through an element read or
+  an aggregate (`At`, `Length`, `Sum`, …), the compiled fold now copies the seed
+  once and updates that copy in place (1.7 ms for 40,000 elements). A step that
+  swaps two slots, `ReplaceAt(ReplaceAt(acc, i, acc[j]), j, acc[i])`, reads both
+  old values before it writes. Any other step keeps the copying form. The result
+  is the same, and the caller's list is not changed. This applies to the
+  JavaScript and Python targets.
 - The compiled call of a function with an annotated parameter did not check an
   absent argument. `function f(p: tuple<number, number>) { p[1] + 1 }` called
   with `first(filter([(1, 2)], c => c[1] > 9))` (no element passes, so the
@@ -386,74 +380,72 @@ These changes apply to non-strict parsing only
   `TypeError` that names the parameter and its type, for a parameter annotated
   with a type that is not numeric and has no `missing` member. A numeric
   parameter still reads an absent value as `NaN`, as the interpreter does.
-- `HurwitzZeta(s, a).N()` of an integer order at an `a` more than about 10⁶
-  left of the imaginary axis stayed unevaluated: `HurwitzZeta(2, −10¹² + i)` is
-  now `−0.0739998067554724…`, computed with the polygamma reflection
-  ζ(s, a) = (−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s − 1)! for an order from 2 to about 10⁴, and
-  with the Bernoulli polynomial ζ(−n, a) = −Bₙ₊₁(a)/(n + 1) for an order
-  −n ≤ 0. The cost of both does not depend on `a`. `Zeta(s, a)` of an even
-  order follows. An order that is not an integer still stays unevaluated
-  there. `PolyGamma(1, −5 + 10²⁰i).N()` ran for minutes, and now answers at
-  once.
+- `HurwitzZeta(s, a).N()` of an integer order at an `a` more than about 10⁶ left
+  of the imaginary axis stayed unevaluated: `HurwitzZeta(2, −10¹² + i)` is now
+  `−0.0739998067554724…`, computed with the polygamma reflection ζ(s, a) =
+  (−1)^s·ψ⁽ˢ⁻¹⁾(a)/(s − 1)! for an order from 2 to about 10⁴, and with the
+  Bernoulli polynomial ζ(−n, a) = −Bₙ₊₁(a)/(n + 1) for an order −n ≤ 0. The cost
+  of both does not depend on `a`. `Zeta(s, a)` of an even order follows. An
+  order that is not an integer still stays unevaluated there.
+  `PolyGamma(1, −5 + 10²⁰i).N()` ran for minutes, and now answers at once.
 - **#385** The JavaScript compilation of `Max` and `Min` over an operand typed
   as an abstract collection (`collection`, `collection<integer>`, a set, or
   `collection<any> | number`) gave `Math.max(w)`, which is `NaN` for a list,
   with `success: true`. `evaluate()` gives the maximum. `Max`, `Min`, `Length`,
   `Count`, and the collection form of `Sum` and `Product` need neither the
   positions nor the order of the elements, so such an operand now compiles. At
-  run time it accepts a list, a JavaScript `Set` or a numeric typed array, and
-  a value that is none of these stops the run with a `RangeError`. `Max` and
-  `Min` also stop with a `TypeError` on an element that is not a real number
-  (a complex value has no order). A single number is read as a collection
-  of one element where the interpreter accepts one: at a parameter typed
+  run time it accepts a list, a JavaScript `Set` or a numeric typed array, and a
+  value that is none of these stops the run with a `RangeError`. `Max` and `Min`
+  also stop with a `TypeError` on an element that is not a real number (a
+  complex value has no order). A single number is read as a collection of one
+  element where the interpreter accepts one: at a parameter typed
   `collection<any> | number`, or whose type `collection` was inferred from its
   uses (`k(L) := Sum(L)`, `k(4)` is `4`). `Length` and `Count` of such an
   operand were refused before; they now compile. `At`, `Reverse` and the other
   operators that read positions or order still refuse an abstract collection,
   and all of them refuse a dictionary.
-- The compiled `Sum` and `Product` of a list of complex values whose type is
-  not known at compile time (the result of a function typed `unknown`)
-  combined the elements with `+`, and the sum of `[1+2i, 3+4i]` was the
-  string `"0[object Object][object Object]"`. They now add and multiply
-  complex values.
-- `w.mul(ce.Zero)` and `ce.Zero.mul(w)` folded to `0` for a variable `w` with
-  an assigned value, while `w.mul(0)` and `ce.box(['Multiply', 0, 'w'])` keep
-  the product `0w`. With `w := NaN`, the folded `0` hid the `NaN`. All the
-  spellings now keep `0w`, which evaluates with the value `w` holds then: `NaN`
-  for `w := NaN`, `0` after `w := 4`. A free symbol still folds: `0x` is `0`.
-- `Join` (or `Append`) of a dictionary and a value that is not a key-value
-  entry reported an error that named the internal symbol
-  `ContinuationPlaceholder`: `Join(Dictionary(x: 1), [2, 3])` gave
-  `Error(incompatible-type, tuple<string, unknown>, "symbol
-  ContinuationPlaceholder")`. The error now names the element:
+- The compiled `Sum` and `Product` of a list of complex values whose type is not
+  known at compile time (the result of a function typed `unknown`) combined the
+  elements with `+`, and the sum of `[1+2i, 3+4i]` was the string
+  `"0[object Object][object Object]"`. They now add and multiply complex values.
+- `w.mul(ce.Zero)` and `ce.Zero.mul(w)` folded to `0` for a variable `w` with an
+  assigned value, while `w.mul(0)` and `ce.box(['Multiply', 0, 'w'])` keep the
+  product `0w`. With `w := NaN`, the folded `0` hid the `NaN`. All the spellings
+  now keep `0w`, which evaluates with the value `w` holds then: `NaN` for
+  `w := NaN`, `0` after `w := 4`. A free symbol still folds: `0x` is `0`.
+- `Join` (or `Append`) of a dictionary and a value that is not a key-value entry
+  reported an error that named the internal symbol `ContinuationPlaceholder`:
+  `Join(Dictionary(x: 1), [2, 3])` gave
+  `Error(incompatible-type, tuple<string, unknown>, "symbol ContinuationPlaceholder")`.
+  The error now names the element:
   `Error(incompatible-type, tuple<string, any>, 2)`.
 - `simplify()` left `Max(x, NaN)` and `Min(x, NaN)` unchanged, while
   `evaluate()` gives `NaN`. `simplify()` now gives `NaN` too.
 - A function declared with a parameter that admits an absent value could not be
   assigned a function literal with a bare parameter:
   `ce.declare('f', { signature: '(string | missing) -> unknown' })` followed by
-  `ce.assign('f', ce.box(['Function', ['IsMissing', 's'], 's']))` threw
-  "not compatible". A bare parameter accepts an absent value, so the
-  assignment is now accepted, and `f(Missing)` is `True`.
+  `ce.assign('f', ce.box(['Function', ['IsMissing', 's'], 's']))` threw "not
+  compatible". A bare parameter accepts an absent value, so the assignment is
+  now accepted, and `f(Missing)` is `True`.
 
 ## 0.142.0 _2026-09-30_
 
 ### Behavior Changes
 
-- **A rounding function, `Fract`, `Mod`, `Sign`, `Heaviside` or a comparison
-  of an exact constant expression is decided by raising the precision.**
+- **A rounding function, `Fract`, `Mod`, `Sign`, `Heaviside` or a comparison of
+  an exact constant expression is decided by raising the precision.**
   `Floor(π·10³⁰)` stayed unevaluated and its `.N()` was the 21-digit float
   `3.14159265358979323846e+30`; it is now the exact integer
   `3141592653589793238462643383279`, as in Mathematica, and `Fract(π)` is
-  `π − 3`. A comparison of exact constants was decided on 21-digit values,
-  which cancellation can make wrong: `√(10⁶⁰ + 10⁴⁰) − 10³⁰ > 5·10⁹` was
-  `True` and is now `False` (the value is `4.99999…·10⁹`). The engine
-  computes the operand with an error bound at the working precision plus 10
-  digits, then with more digits, up to 100 more, until the result is certain.
-  When it is still not certain, the value is very probably at the jump:
-  `evaluate()` leaves a rounding function, `Sign` or `Heaviside` unevaluated,
-  a comparison is equal, and `.N()` uses the value at the jump
-  (`Floor((√2 + √3)² − 2√6).N()` was `4` and is now `5`).
+  `π − 3`. A comparison of exact constants was decided on 21-digit values, which
+  cancellation can make wrong: `√(10⁶⁰ + 10⁴⁰) − 10³⁰ > 5·10⁹` was `True` and is
+  now `False` (the value is `4.99999…·10⁹`). The engine computes the operand
+  with an error bound at the working precision plus 10 digits, then with more
+  digits, up to 100 more, until the result is certain. When it is still not
+  certain, the value is very probably at the jump: `evaluate()` leaves a
+  rounding function, `Sign` or `Heaviside` unevaluated, a comparison is equal,
+  and `.N()` uses the value at the jump (`Floor((√2 + √3)² − 2√6).N()` was `4`
+  and is now `5`).
 - **`.N()` of a rounding function, `Fract`, `Mod`, `Sign`, `Heaviside` or a
   comparison uses the exact value of an exact operand.** `.N()` approximated the
   operand first, and near a point where the result jumps, a tiny error changed
@@ -749,10 +741,10 @@ These changes apply to non-strict parsing only
 ### Issues Resolved
 
 - **`.N()` of an exact constant raised to a large integer power is correct to
-  the working precision.** The error of the approximated base was multiplied
-  by the exponent: `(π^1000000).N()` was `7.45923232449144786258e+497149`,
-  wrong from the 18th digit; it is now `7.45923232449144786349e+497149`. The
-  base is computed with about `log₁₀|k|` more digits for an exponent `k`.
+  the working precision.** The error of the approximated base was multiplied by
+  the exponent: `(π^1000000).N()` was `7.45923232449144786258e+497149`, wrong
+  from the 18th digit; it is now `7.45923232449144786349e+497149`. The base is
+  computed with about `log₁₀|k|` more digits for an exponent `k`.
 - **`HurwitzZeta` and the two-operand `Zeta` are accurate at a complex order
   with a large imaginary part, stay unevaluated where the double-precision
   result would be wrong, and no longer hang on an extreme argument.**
@@ -20477,13 +20469,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-                    a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-                    $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-                    $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-                    symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-                    it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-                    returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-                    complex eigenvalues are now returned as complex numbers.
+                      a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+                      $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+                      $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+                      symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+                      it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+                      returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+                      complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 
