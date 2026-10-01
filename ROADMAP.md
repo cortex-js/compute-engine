@@ -167,18 +167,34 @@ dropping the axis changes the rank of the type. Until decided, the behavior is
 unchanged from before the dimension-variables round, which only kept the
 dimension-variable names aligned with the surviving axes.
 
-### A nested list spelling is not a subtype of the flat shape it describes (OPEN, small — found 2026-09-29 by the review of the dimension-variables round)
+### `MatrixPower` is typed `matrix`, with no element type or shape (OPEN, small — found 2026-10-01 by the fix that reads a nested spelling as its flat shape)
 
-`isSubtype('list<vector<integer^3>^2>', 'matrix<integer>')` is false: the
-encoding bridge in `src/common/type/subtype.ts` reads a rank-2 list as a list of
-rows (`matrix<E^(2x3)> <: list<vector<E^3>>`) but not a list of rows as a rank-2
-list. A symbol declared `list<vector<integer^3>^2>` is therefore admitted at a
-`matrix<T^(MxN)>` parameter only provisionally, and its lengths pin nothing
-(`cols(nl)` is typed `integer<1..>`, where the flat `matrix<integer^(2x3)>`
-gives `3`). Literals never take the nested spelling (`staticCollectionDims`
-flattens them), so only declared types reach this. Fix: add the reverse bridge —
-a list whose element type is a dimensioned list reads as the concatenated shape
-— and then let the solver's dimension walk pin through it.
+With `m` declared `matrix<integer^(2x2)>`, `Power(m, 2)` canonicalizes to
+`MatrixPower(m, 2)`, typed `matrix` (`matrix<number>` of any shape), although
+its value is a 2×2 matrix of integers (`[[7,10],[15,22]]` for
+`[[1,2],[3,4]]`). The descriptor route of `Power`'s type handler, which does
+not see the canonical rewrite, answers `matrix<2x2>`, so the two routes
+disagree on a matrix base (`derive-broadcast-lift.test.ts` compares them on a
+nested list that is not a matrix for that reason). A fix gives `MatrixPower`
+a type handler that keeps the shape and the element type of a square
+operand.
+
+### A nested list spelling is not a subtype of a list type with no dimensions (OPEN, small — found 2026-10-01 by the fix that reads a nested spelling as its flat shape)
+
+Since 2026-10-01 a list of dimensioned lists is read as the flat shape it
+spells at a target with two or more dimensions: `list<vector<integer^3>^2>` is
+a subtype of `matrix<integer^(2x3)>` and of `matrix<integer>`, and the
+dimension solver pins `cols(nl)` to `3` (`flattenNestedListType`,
+`common/type/instantiate.ts`). A target with no dimensions is left out:
+`matrix<integer^(2x3)>` is a subtype of `list<integer>` (a list type with no
+dimensions accepts any shape) and of `tensor<integer>`, which parses to the
+same type, but `list<vector<integer^3>^2>` is not. Code that reads the element
+type of a `list<integer>` operand expects scalars, and a nested type would give
+it rows, so extending the conversion needs a check of those readers first.
+Also not accepted: a nesting of three levels at a target whose elements are
+still rows (`list<vector<vector<integer^2>^3>^4>` at
+`list<vector<integer^2>^(4x3)>`), because every level is merged at once; a
+fix would merge only as many levels as the target has dimensions.
 
 ### Registering a chain of `-> unknown` functions that each call the next twice re-enters the signature memo a number of times that doubles per level (OPEN, small — measured 2026-09-29 after the fix for Tycho item 336)
 

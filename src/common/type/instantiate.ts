@@ -1030,6 +1030,36 @@ export interface TypeAlgebra {
 
 let _algebra: TypeAlgebra | undefined;
 
+/**
+ * The flat shape of a list type spelled as nested dimensioned lists, or
+ * `undefined` when `t` is not such a type.
+ *
+ * `list<vector<integer^3>^2>` (a list of two rows of three integers) and
+ * `matrix<integer^(2x3)>` describe the same values; the flat spelling is the
+ * one the subtype relation and the dimension solver read lengths from. Each
+ * level whose elements are a list with DIMENSIONS is merged into its parent:
+ * the parent's dimensions (the length `-1`, any length, when it states
+ * none) followed by the element's. A level whose elements are a list with
+ * no dimensions stops the merge: its rows can differ in length. Used by
+ * `isSubtype` (`subtype.ts`) and by the dimension pinning of `walkPattern`.
+ */
+export function flattenNestedListType(t: Type): Type | undefined {
+  if (typeof t !== 'object' || t.kind !== 'list') return undefined;
+  let elements = t.elements;
+  let dimensions = t.dimensions ?? [-1];
+  let merged = false;
+  while (
+    typeof elements === 'object' &&
+    elements.kind === 'list' &&
+    elements.dimensions !== undefined
+  ) {
+    dimensions = [...dimensions, ...elements.dimensions];
+    elements = elements.elements;
+    merged = true;
+  }
+  return merged ? { kind: 'list', elements, dimensions } : undefined;
+}
+
 /** @internal — called by `subtype.ts` at module load. */
 export function _setTypeAlgebra(algebra: TypeAlgebra): void {
   _algebra = algebra;
@@ -2441,12 +2471,19 @@ function walkPattern(
       // so a rank-2 actual at a rank-1 pattern pins the OUTER length and
       // leaves the peeled row to the element position below — the same
       // reading `peeledRowMatches` (subtype.ts) gives the ground case.
-      // (A NESTED spelling of the same shape, `list<vector<integer^3>^2>` for
-      // `matrix<integer^(2x3)>`, pins nothing here: the skeleton check above
-      // already refuted it, because the subtype relation reads a rank-2 list
-      // as a list of rows but not a list of rows as a rank-2 list. Recorded in
-      // ROADMAP.md, "A nested list spelling is not a subtype of the flat
-      // shape it describes".)
+      // A NESTED spelling of a shape (`list<vector<integer^3>^2>` for
+      // `matrix<integer^(2x3)>`) is read as the flat shape when the pattern
+      // states more axes than the actual (`flattenNestedListType`), so that
+      // `cols(nl)` with `nl: list<vector<integer^3>^2>` pins `N` to 3, as
+      // the flat spelling does.
+      if (
+        pattern.kind === 'list' &&
+        pattern.dimensions !== undefined &&
+        typeof actual === 'object' &&
+        actual.kind === 'list' &&
+        (actual.dimensions?.length ?? 1) < pattern.dimensions.length
+      )
+        actual = flattenNestedListType(actual) ?? actual;
       if (
         phase === 'lower' &&
         covariant &&

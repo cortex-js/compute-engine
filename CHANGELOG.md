@@ -2,6 +2,16 @@
 
 ### Behavior Changes
 
+- **A symbol declared with a nested list type is the matrix it describes.**
+  `list<vector<integer^3>^2>` (two rows of three integers) was not a subtype of
+  `matrix<integer^(2x3)>`, so a function declared
+  `(x: matrix<T^(MxN)>) -> N where T, M, N` admitted it without reading its
+  lengths (the call was typed `integer<1..>` instead of `3`), and a square
+  constraint `matrix<T^(NxN)>` admitted a 2×3 list. The nested spelling is now
+  read as its flat shape at a target with two or more dimensions. A value
+  changes with it: with `x` declared `list<list<integer^2>^2>`, `x^2` is now the
+  matrix power (`[[7,10],[15,22]]` for `[[1,2],[3,4]]`), as it is for a matrix
+  literal, where it was the square of each element.
 - **`Sum` of a list of points or rows has the type of a point or a row.**
   `Sum(pts)` with `pts` declared `list<tuple<real, real>>` was typed `number`,
   but its value is a point: `Sum([(1, 2), (3, 4)])` is `(4, 6)`. It is now

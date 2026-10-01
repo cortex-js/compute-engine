@@ -40,6 +40,7 @@ import { isEffectSubset } from './effects.js';
 import {
   _setTypeAlgebra,
   aliasDefinitionAt,
+  flattenNestedListType,
   instantiatesTo,
   substituteTypeVariables,
 } from './instantiate.js';
@@ -1808,6 +1809,38 @@ export function isSubtype(
         )
           return true;
       }
+    }
+
+    // The reverse of the bridge above: a list of dimensioned lists IS a
+    // dimensioned list of the concatenated shape — `list<vector<E^3>^2>` ⊆
+    // `matrix<E^(2x3)>` and ⊆ `matrix<E>`. A declared type can take the
+    // nested spelling (a literal never does: `staticCollectionDims` flattens
+    // it), and without this a symbol declared that way was admitted at a
+    // `matrix` parameter only provisionally. An outer list with no length
+    // reads as the length `-1` (any length), which only an rhs dimension of
+    // `-1` accepts. Rows with no dimensions are not read this way: they can
+    // differ in length, and a matrix cannot. `flattenNestedListType` merges
+    // every dimensioned level at once, so the elements of the flat type are
+    // never a dimensioned list, and the recursive call cannot enter this
+    // bridge again. Only an rhs with two or more dimensions is a target: an
+    // rhs with no dimensions (`list<integer>`) admits a flat list of any
+    // shape, but code that reads the element type of such a list expects
+    // scalars, and a nested type would give it rows.
+    if (
+      rhs.dimensions !== undefined &&
+      rhs.dimensions.length >= 2 &&
+      // Also when the elements match: at an rhs whose element type is a top
+      // type (`list<any^(-1x-1)>`, the admission skeleton of a generic
+      // `matrix<T^(MxN)>`) a row matches the element, and the shape check
+      // below then compares one axis with two.
+      (!elementsMatch ||
+        (lhs.dimensions?.length ?? 1) < rhs.dimensions.length) &&
+      typeof lhs.elements !== 'string' &&
+      lhs.elements.kind === 'list' &&
+      lhs.elements.dimensions !== undefined
+    ) {
+      const flat = flattenNestedListType(lhs);
+      if (flat !== undefined && isSubtype(flat, rhs)) return true;
     }
 
     // Check that the element types match

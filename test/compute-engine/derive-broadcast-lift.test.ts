@@ -24,7 +24,11 @@ describe('the descriptor route lifts like the expression route', () => {
     ['Sin', ['list<integer^3>']],
     ['Add', ['list<integer^3>', 'integer']],
     ['Power', ['tuple<integer, integer>', 'integer']],
-    ['Power', ['list<list<integer^2>^2>', 'integer']],
+    // A nested list that is not a matrix (its rows have no length). A
+    // nested list with row lengths, `list<list<integer^2>^2>`, IS a 2×2
+    // matrix (since 2026-10-01), and canonicalization rewrites its power to
+    // `MatrixPower`, which the descriptor route of `Power` cannot see.
+    ['Power', ['list<list<integer>^2>', 'integer']],
     ['Power', ['number | list<number>', 'integer']],
     ['Power', ['indexed_collection<integer>', 'integer']],
     ['Length', ['list<integer^3>']],

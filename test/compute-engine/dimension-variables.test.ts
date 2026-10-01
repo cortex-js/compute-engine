@@ -538,3 +538,61 @@ describe('DIMENSION VARIABLES — review follow-ups (2026-09-29)', () => {
     }
   });
 });
+
+// A list of dimensioned lists is the same value as the flat shape it
+// spells: `list<vector<integer^3>^2>` is `matrix<integer^(2x3)>`. A literal
+// never takes the nested spelling (`staticCollectionDims` flattens it), but a
+// declared type can. Before 2026-10-01 the subtype relation read a rank-2
+// list as a list of rows but not the reverse, so a symbol declared with the
+// nested spelling was admitted at a `matrix<T^(MxN)>` parameter only
+// provisionally, and its lengths pinned nothing.
+describe('DIMENSION VARIABLES — a nested list spelling reads as its flat shape', () => {
+  const ce = fresh();
+  declare(ce, 'rows', '(x: matrix<T^(MxN)>) -> M where T, M, N');
+  declare(ce, 'cols', '(x: matrix<T^(MxN)>) -> N where T, M, N');
+  declare(ce, 'sq', '(x: matrix<T^(NxN)>) -> N where T, N');
+  declare(
+    ce,
+    'mm',
+    '(a: matrix<T^(MxN)>, b: matrix<T^(NxP)>) -> matrix<T^(MxP)> where T, M, N, P'
+  );
+  ce.declare('nl', 'list<vector<integer^3>^2>');
+  ce.declare('nq', 'list<vector<integer^3>^3>');
+  ce.declare('nu', 'list<vector<integer^3>>');
+  ce.declare('nb', 'list<vector<integer^4>^3>');
+
+  test('the lengths are pinned', () => {
+    expect(ce.box(['rows', 'nl']).type.toString()).toBe('2');
+    expect(ce.box(['cols', 'nl']).type.toString()).toBe('3');
+    // An outer list with no length pins only the row length.
+    expect(ce.box(['rows', 'nu']).type.toString()).toBe('integer<1..>');
+    expect(ce.box(['cols', 'nu']).type.toString()).toBe('3');
+  });
+
+  test('a square constraint and a matrix product', () => {
+    expect(ce.box(['sq', 'nq']).type.toString()).toBe('3');
+    expect(ce.box(['sq', 'nl']).isValid).toBe(false);
+    expect(ce.box(['mm', 'nl', 'nb']).type.toString()).toBe(
+      'matrix<integer^(2x4)>'
+    );
+    expect(ce.box(['mm', 'nl', 'nl']).isValid).toBe(false);
+  });
+
+  test.each([
+    ['list<vector<integer^3>^2>', 'matrix<integer>', true],
+    ['list<vector<integer^3>^2>', 'matrix<integer^(2x3)>', true],
+    ['list<vector<integer^3>^2>', 'matrix<integer^(3x2)>', false],
+    ['list<vector<integer^3>^2>', 'matrix<real>', true],
+    ['list<vector<integer^3>>', 'matrix<integer>', true],
+    ['list<vector<integer^3>>', 'matrix<integer^(2x3)>', false],
+    ['list<list<vector<integer^2>^3>^4>', 'list<integer^(4x3x2)>', true],
+    ['list<matrix<integer^(2x2)>^3>', 'list<integer^(3x2x2)>', true],
+    // Rows with no length can differ in length: not a matrix.
+    ['list<list<integer>^2>', 'matrix<integer>', false],
+    ['list<vector<string^3>^2>', 'matrix<integer>', false],
+    // The bridge in the other direction, unchanged.
+    ['matrix<integer^(2x3)>', 'list<vector<integer^3>^2>', true],
+  ])('%s <: %s is %s', (a, b, expected) => {
+    expect(ce.type(a).matches(ce.type(b))).toBe(expected);
+  });
+});
