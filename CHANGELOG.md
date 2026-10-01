@@ -215,6 +215,23 @@ These changes apply to non-strict parsing only
   the other negative orders stay unevaluated (#395, contributed by
   [enumeratio](https://github.com/enumeratio)).
 
+### New Features
+
+- **`ClausenCl(n, θ)` is the Clausen function Clₙ(θ).** For an integer order
+  n ≥ 1 and real θ it is Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ when n is even and
+  Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ when n is odd (mpmath's `clsin` and `clcos`;
+  Mathematica writes them as `Im`/`Re` of `PolyLog`). `N(ClausenCl(2, 1))` is
+  `1.0139591323607684`, `N(ClausenCl(3, 2.5))` is `-0.7606561109685137` and
+  `N(ClausenCl(2, 3.14159))` is `1.8393282835451e-6`, accurate to a double
+  (the expansion of Liₙ at the unit circle, DLMF 25.12.12, with θ reduced
+  mod 2π and moved off π by the duplication formula so the even orders keep
+  their relative accuracy there). The exact points are closed:
+  `ClausenCl(2, π/2)` is Catalan's constant, `ClausenCl(3, 0)` is `ζ(3)`,
+  `ClausenCl(2, 0)` and `ClausenCl(2, π)` are `0`, `ClausenCl(1, 0)` is `+∞`.
+  A non-integer or non-positive order and a symbolic θ stay unevaluated. The
+  compiled JavaScript lane agrees with `.N()`
+  (#395, contributed by [enumeratio](https://github.com/enumeratio)).
+
 ### Issues Resolved
 
 - `Solve` found no root of a linear equation whose coefficient of the unknown is

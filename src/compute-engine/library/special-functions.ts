@@ -41,6 +41,7 @@ import {
   iv,
   type RealDomain,
 } from './type-handlers.js';
+import { clausen } from '../numerics/clausen.js';
 import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -824,6 +825,72 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const z = stieltjesGammaComplex(order, new Complex(re, im));
         if (z === undefined) return undefined;
         return boxComplexResult(engine, z, im === 0 && re > 0);
+    ClausenCl: {
+      description:
+        'Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ for odd n. Double precision.',
+      complexity: 8700,
+      broadcastable: true,
+      // Cl₁(θ) = −ln|2 sin(θ/2)| is +∞ at θ ≡ 0, so the result is `real`
+      // only for a literal order ≥ 2. A non-real θ stays symbolic.
+      signature: '(integer, real) -> number',
+      examples: ['[ClausenCl(2, 1), ClausenCl(3, 0), N(ClausenCl(2, 1))]'],
+      nanBehavior: 'propagate',
+      type: ([n, theta], context) => {
+        const order = n === undefined ? undefined : operandLiteralValue(n);
+        const t = numericTypeHandlerOnTypes([n, theta]);
+        const real =
+          order !== undefined && Number.isInteger(order) && order >= 2;
+        return BoxedType.forResult(
+          real && isSubtype(t, 'real') ? 'real' : 'number',
+          context.engine._typeResolver
+        );
+      },
+      evaluate: (ops, { numericApproximation, engine }) => {
+        const [n, theta] = ops;
+        if (!isNumber(n) || n.isComplex) return undefined;
+        const order = asSmallInteger(n);
+        if (order === null || order < 1) return undefined;
+        const even = order % 2 === 0;
+
+        // θ = 0: Cl₁ is +∞, even orders vanish, odd orders are ζ(n).
+        if (isNumber(theta) && !theta.isComplex && theta.isSame(0)) {
+          if (order === 1) return engine.PositiveInfinity;
+          const value = even ? engine.Zero : engine.function('Zeta', [n]);
+          return floatIfFloatOperand(
+            ops,
+            value.evaluate({ numericApproximation })
+          );
+        }
+
+        // Cl_n(π) = 0 (even) or −η(n) (odd); Cl_n(π/2) = −2⁻ⁿ·η(n) (odd) and
+        // Cl₂(π/2) = G; η(n) = (1 − 2¹⁻ⁿ)ζ(n), with η(1) = ln 2.
+        const eta = (): Expression =>
+          order === 1
+            ? engine.function('Ln', [engine.number(2)])
+            : engine
+                .number(1)
+                .sub(engine.number(2).pow(engine.number(1 - order)))
+                .mul(engine.function('Zeta', [n]));
+        if (theta.isSame(engine.Pi)) {
+          const value = even ? engine.Zero : eta().neg();
+          return floatIfFloatOperand(
+            ops,
+            value.evaluate({ numericApproximation })
+          );
+        }
+        if (theta.isSame(engine.Pi.div(2)) && (!even || order === 2)) {
+          const value = even
+            ? engine.symbol('CatalanConstant')
+            : eta().mul(engine.number(2).pow(engine.number(-order))).neg();
+          return floatIfFloatOperand(
+            ops,
+            value.evaluate({ numericApproximation })
+          );
+        }
+
+        return shouldNumericize(numericApproximation, n, theta)
+          ? applyN([n, theta], clausen)
+          : undefined;
       },
     },
 

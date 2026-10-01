@@ -1270,6 +1270,21 @@
       ]
     },
     {
+      "name": "ClausenCl",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(integer, real) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ for odd n. Double precision.",
+      "examples": [
+        "[ClausenCl(2, 1), ClausenCl(3, 0), N(ClausenCl(2, 1))]"
+      ]
+    },
+    {
       "name": "Closed",
       "category": "Collections",
       "arity": "1",

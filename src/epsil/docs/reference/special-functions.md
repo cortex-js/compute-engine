@@ -33,6 +33,17 @@ MathJSON `AppellF1` · `(complex | infinity, complex | infinity, complex | infin
 
 Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for |x|, |y| &lt; 1.
 
+### clausenCl
+
+MathJSON `ClausenCl` · `(integer, real) -> number`
+
+Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^&#123;iθ&#125;) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^&#123;iθ&#125;) = Σ cos(kθ)/kⁿ for odd n. Double precision.
+
+```epsil
+[clausenCl(2, 1), clausenCl(3, 0), N(clausenCl(2, 1))]
+// ➔ [ClausenCl(2, 1),Zeta(3),1.0139591323607684]
+```
+
 ### dedekindEta
 
 MathJSON `DedekindEta` · `(complex | infinity) -> number`
