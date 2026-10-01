@@ -330,7 +330,7 @@ types `Sin(x)` as `number` for an `x` that may be absent. A fix would add
 `nan` to the handler's arms, and changes the types of many expressions:
 measure the snapshot changes before landing it.
 
-### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — three defects)
+### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — two defects)
 
 The rule since 2026-09-30, for a function literal (an Epsil `function`, a lambda
 with an annotated parameter): at evaluation, an absent value (`Missing`) at a
@@ -344,12 +344,7 @@ reports the first too. Pinned by
 `test/compute-engine/absent-argument-annotated-parameter.test.ts`. What is not
 settled:
 
-1. **Compiled code does not check an annotated parameter (defect).**
-   `function f(p: tuple<number, number>) { p[1] + 1 }` called with
-   `first(filter([(1, 2)], c => c[1] > 9))` is an error in the interpreter and
-   `NaN` from the JavaScript target. The target should emit the check or decline
-   the call.
-2. **A false report of the pre-pass on the gasket program (defect, not
+1. **A false report of the pre-pass on the gasket program (defect, not
    reduced).** With every parameter of `fill` annotated and the absent case
    removed (`let C = first(filter(…)) ?? (0, 0, 0)`), the program
    `tycho/scripts/repros/2026-09-28-epsil-gasket-compile/e-natural-recursion.epsil`
@@ -359,7 +354,7 @@ settled:
    is typed from its uses (`C[1]`), not from its initializer; boxed whole, it is
    typed `tuple<number, number, number>`. The report predates 2026-09-30. Twelve
    smaller programs built from the same helper functions did not reproduce it.
-3. **A list of points at a BARE parameter of a function declared in the compiled
+2. **A list of points at a BARE parameter of a function declared in the compiled
    program declines to compile (defect).** With
    `function h(q: tuple<number, number>) { q[1] + 1 }` and
    `const g = (p) => h(p)`, the type of `p` is inferred as one point, the

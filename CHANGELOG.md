@@ -42,6 +42,15 @@
   `RangeError` at run time. A string operand is walked as its characters, as
   in the interpreter: `DeleteAt` answers a string, `ReplaceAt` and `Insert` a
   list of characters.
+- The compiled call of a function with an annotated parameter did not check an
+  absent argument. `function f(p: tuple<number, number>) { p[1] + 1 }` called
+  with `first(filter([(1, 2)], c => c[1] > 9))` (no element passes, so the
+  argument is absent) is an `incompatible-type` error in the interpreter, but
+  the compiled JavaScript answered `NaN`; a `list<number>` parameter threw a
+  `TypeError` from inside the body. The compiled call now stops the run with a
+  `TypeError` that names the parameter and its type, for a parameter annotated
+  with a type that is not numeric and has no `missing` member. A numeric
+  parameter still reads an absent value as `NaN`, as the interpreter does.
 - `HurwitzZeta(s, a).N()` of an integer order at an `a` more than about 10⁶
   left of the imaginary axis stayed unevaluated: `HurwitzZeta(2, −10¹² + i)` is
   now `−0.0739998067554724…`, computed with the polygamma reflection

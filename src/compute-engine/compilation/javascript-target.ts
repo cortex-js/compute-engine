@@ -5812,9 +5812,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         return `(${callee})(${compile(args[1])})`;
       }
     }
+    // A function literal with an annotated parameter checks an argument that
+    // may be absent, as a call of a named function does
+    // (`BaseCompiler.absentArgumentChecks`).
+    const checks = isFunction(args[0], 'Function')
+      ? BaseCompiler.absentArgumentChecks(
+          '(function)',
+          args[0],
+          args.slice(1),
+          target
+        )
+      : [];
     return `(${compile(args[0])})(${args
       .slice(1)
-      .map((a) => compile(a))
+      .map((a, i) => BaseCompiler.presentCheckedCode(compile(a), checks[i]))
       .join(', ')})`;
   },
   // --- Linear algebra ------------------------------------------------------
@@ -11882,6 +11893,15 @@ const SYS_HELPERS = {
   arr: (x: unknown, kind: string): unknown[] => {
     if (Array.isArray(x)) return x;
     throw new RangeError(`${kind}: the operand is not a list at run time`);
+  },
+  // An argument of a user function at a parameter annotated with a type that
+  // is not numeric and has no `missing` member, whose static type admits an
+  // absent value (`absentArgumentChecks`, `base-compiler.ts`): the value as
+  // it is, or a `TypeError` for an absent value (`undefined`), where the
+  // interpreter answers an `incompatible-type` error.
+  present: <T>(x: T, message: string): T => {
+    if (x === undefined) throw new TypeError(message);
+    return x;
   },
   // The operand of an operator that only visits each element once, in any
   // order (`iterableCollectionCode`): an array as it is, the elements of a

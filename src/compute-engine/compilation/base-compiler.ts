@@ -22447,7 +22447,8 @@ export class BaseCompiler {
           coerceToComplex,
           paramsAreScalar,
           generic,
-          prefixed.values.map((v) => BaseCompiler.compile(v, target))
+          prefixed.values.map((v) => BaseCompiler.compile(v, target)),
+          BaseCompiler.absentArgumentChecks(h, literal, args, target)
         );
     }
 
@@ -22490,7 +22491,9 @@ export class BaseCompiler {
       target,
       coerceToComplex,
       paramsAreScalar,
-      generic
+      generic,
+      [],
+      BaseCompiler.absentArgumentChecks(h, literal, args, target)
     );
   }
 
@@ -22623,7 +22626,20 @@ export class BaseCompiler {
       name = emitted.name;
     }
     if (name === undefined) return undefined;
-    const codes = args.map((a) => BaseCompiler.compileValueOperand(a, target));
+    // The mapped list is exempt from the absent-argument check (an absent
+    // point is an absent cell); every other argument is checked.
+    const checks = BaseCompiler.absentArgumentChecks(
+      h,
+      BaseCompiler.userFunctionLiteral(engine, h),
+      args,
+      target
+    );
+    const codes = args.map((a, i) =>
+      BaseCompiler.presentCheckedCode(
+        BaseCompiler.compileValueOperand(a, target),
+        i === at ? undefined : checks[i]
+      )
+    );
     const temps = args.map(() => BaseCompiler.tempVar(target));
     const point = BaseCompiler.tempVar(target);
     const callArgs = temps.map((t, i) => (i === at ? point : t));
@@ -22911,8 +22927,19 @@ export class BaseCompiler {
             `which the compiled map does not convert.`
         );
       const callee = target.var(h) ?? h;
-      const codes = args.map((a) =>
-        BaseCompiler.compileValueOperand(a, target)
+      // The mapped list is exempt from the absent-argument check (an absent
+      // point is an absent cell); every other argument is checked.
+      const checks = BaseCompiler.absentArgumentChecks(
+        h,
+        literal,
+        args,
+        target
+      );
+      const codes = args.map((a, i) =>
+        BaseCompiler.presentCheckedCode(
+          BaseCompiler.compileValueOperand(a, target),
+          i === at ? undefined : checks[i]
+        )
       );
       const temps = args.map(() => BaseCompiler.tempVar(target));
       const point = BaseCompiler.tempVar(target);
@@ -23025,7 +23052,9 @@ export class BaseCompiler {
       // BOUND rather than declared by the caller, so "provably not a
       // collection" is no proof there. Same reasoning as the engine route —
       // see the call in `tryCompileUserFunction`.
-      generic
+      generic,
+      [],
+      BaseCompiler.absentArgumentChecks(h, literal, args, target)
     );
   }
 
@@ -23070,6 +23099,70 @@ export class BaseCompiler {
   }
 
   /**
+   * Per argument of a call of the function literal `literal`, the message of
+   * a run-time check that the argument is present, or `undefined` for no
+   * check.
+   *
+   * At evaluation, an absent value (`Missing`) at a parameter annotated with
+   * a type that has no `missing` member and is not numeric is an
+   * `incompatible-type` error (user decision of 2026-09-30, pinned by
+   * `test/compute-engine/absent-argument-annotated-parameter.test.ts`); a
+   * numeric annotation reads it as `NaN`. Boxing admits an argument typed
+   * `missing | T` at such a parameter, because its value is usually present,
+   * so the compiled call ran the body with `undefined` (the compiled form of
+   * an absent value) and answered `NaN`, threw a `TypeError` from inside the
+   * body, or answered a wrong value. Compiled code has no error value, so
+   * the call stops the run instead, with a `TypeError` that names the
+   * parameter and its type (`_SYS.present`), as an operand of the wrong kind
+   * stops it with a `RangeError` (`_SYS.arr`).
+   *
+   * A check is emitted only where it can fire: on the JavaScript target (the
+   * only one whose run-time library has the check), for an argument whose
+   * static type admits `missing`, at a parameter so annotated. When a call
+   * maps over a list of points (`tryCompilePointListCall`, the point-list
+   * branch of `tryCompileLocalFunctionCall`), the mapped argument is exempt:
+   * the map answers `undefined` for an absent point without calling the
+   * function, as the interpreter answers `Missing` for that cell; the other
+   * arguments are checked. The JavaScript `Apply` of a function literal
+   * (`javascript-target.ts`) uses this too.
+   */
+  static absentArgumentChecks(
+    calleeName: string,
+    literal: Expression | undefined,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): Array<string | undefined> {
+    if (target.language !== 'javascript') return [];
+    if (literal === undefined || !isFunction(literal, 'Function')) return [];
+    const params = literal.ops.slice(1);
+    return args.map((a, i) => {
+      const param = params[i];
+      if (param === undefined) return undefined;
+      const declared = functionLiteralParameterType(param);
+      if (declared === undefined) return undefined;
+      if (isSubtype('missing', declared) || isSubtype(declared, 'number'))
+        return undefined;
+      if (!isSubtype('missing', a.type.type)) return undefined;
+      const name = functionLiteralParameterName(param) || `#${i + 1}`;
+      return (
+        `${calleeName}: the argument of the parameter '${name}' is absent, ` +
+        `and the parameter is annotated '${typeToString(declared)}'`
+      );
+    });
+  }
+
+  /**
+   * `code` wrapped in the run-time absent-argument check whose message is
+   * `check` (`_SYS.present`, see `absentArgumentChecks`), or `code` as it is
+   * when `check` is `undefined`.
+   */
+  static presentCheckedCode(code: string, check: string | undefined): string {
+    return check === undefined
+      ? code
+      : `_SYS.present(${code}, ${JSON.stringify(check)})`;
+  }
+
+  /**
    * The call site of an already-emitted user function `name`: a direct scalar
    * call, the unconditional broadcast dispatch, or a runtime `Array.isArray`
    * guard that chooses between the two, per the rules below.
@@ -23103,7 +23196,12 @@ export class BaseCompiler {
      * is, whatever its run-time shape, while the ordinary arguments keep
      * their dispatch.
      */
-    held: ReadonlyArray<string> = []
+    held: ReadonlyArray<string> = [],
+    /**
+     * Per argument, the message of the run-time check that the argument is
+     * present, or `undefined` for no check (`absentArgumentChecks`).
+     */
+    absentChecks: ReadonlyArray<string | undefined> = []
   ): TargetSource {
     const provablyScalarArg = BaseCompiler.provablyScalarArg;
 
@@ -23119,9 +23217,11 @@ export class BaseCompiler {
       if (paramsAreScalar && !isProvablyNumericListOperand(a)) return undefined;
       return target.compileCollectionValue(a, target);
     };
-    const compiledArgs = args.map(
-      (a) => spellCollection(a) ?? BaseCompiler.compileValueOperand(a, target)
-    );
+    const compiledArgs = args.map((a, i) => {
+      const code =
+        spellCollection(a) ?? BaseCompiler.compileValueOperand(a, target);
+      return BaseCompiler.presentCheckedCode(code, absentChecks[i]);
+    });
     // The interval target's call-boundary broadcast. The interpreter maps a
     // scalar-parameter callee over a list argument (`f(x) := x²` applied to
     // `[1, 2]` answers `[1, 4]`), and the emitted callee is scalar interval
@@ -24960,18 +25060,34 @@ export class BaseCompiler {
     // specialized helper once per element. The helper's mapped parameters
     // are scalars, which is what `paramsAreScalar` states there. A list the
     // interpreter binds whole takes the direct call below.
+    const absentChecks = BaseCompiler.absentArgumentChecks(
+      h,
+      literal,
+      args,
+      target
+    );
     if (listArgument && !bindsListsWhole)
       return BaseCompiler.emitUserFunctionCall(
         name,
         args,
         target,
         args.map(() => false),
-        true
+        true,
+        false,
+        [],
+        absentChecks
       );
     const registry = target.userFunctions;
     if (registry?.lowering)
       return registry.lowering.call({ id: h, name, args, target });
-    return `${name}(${args.map((a) => BaseCompiler.compileValueOperand(a, target)).join(', ')})`;
+    return `${name}(${args
+      .map((a, i) => {
+        return BaseCompiler.presentCheckedCode(
+          BaseCompiler.compileValueOperand(a, target),
+          absentChecks[i]
+        );
+      })
+      .join(', ')})`;
   }
 
   /**

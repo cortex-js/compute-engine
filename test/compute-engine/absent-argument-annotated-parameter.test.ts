@@ -408,3 +408,99 @@ describe('A BARE PARAMETER UNDER A DECLARED `T | missing` PARAMETER', () => {
     ).toThrow();
   });
 });
+
+// The compiled call checks the argument where the interpreter answers an
+// `incompatible-type` error: an annotated parameter whose type is not
+// numeric and has no `missing` member, given an argument whose static type
+// admits an absent value. Compiled code has no error value, so the run stops
+// with a `TypeError` that names the parameter (`_SYS.present`). Before
+// 2026-10-01 the point parameter answered `NaN`, the list parameter threw
+// from inside the body, and the string parameter failed to compile at run
+// time.
+describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', () => {
+  const compileRun = (src: string) => {
+    const { expr } = box(src);
+    const result = compile(expr, { to: 'javascript' });
+    expect(result.success).toBe(true);
+    return () => result.run({});
+  };
+
+  test.each([
+    ['p', 'tuple<number, number>', 'function f(p: tuple<number, number>) { p[1] + 1 }', `f(${ABSENT})`],
+    ['xs', 'list<number>', 'function f(xs: list<number>) { length(xs) }', 'f(first(filter([[1, 2]], c => c[1] > 9)))'],
+    ['s', 'string', 'function f(s: string) { length(s) }', 'f(first(filter(["a"], c => c == "z")))'],
+  ])('a parameter annotated %s %s stops the run', (name, type, fn, call) => {
+    expect(compileRun(`${fn}\n${call}`)).toThrow(
+      new TypeError(
+        `f: the argument of the parameter '${name}' is absent, and the parameter is annotated '${type}'`
+      )
+    );
+  });
+
+  test('a present value is computed', () => {
+    const run = compileRun(
+      `function f(p: tuple<number, number>) { p[1] + 1 }\nf(${PRESENT})`
+    );
+    expect(run()).toBe(2);
+  });
+
+  test('a numeric parameter reads the absent value as NaN', () => {
+    const run = compileRun(
+      'function f(x: number) { x + 1 }\nf(first(filter([1], c => c > 9)))'
+    );
+    expect(run()).toBeNaN();
+  });
+
+  test('a parameter that admits missing, and a bare parameter, receive it', () => {
+    expect(
+      compileRun(
+        `function f(p: tuple<number, number> | missing) { isMissing(p) }\nf(${ABSENT})`
+      )()
+    ).toBe(true);
+    expect(compileRun(`function f(p) { p }\nf(${ABSENT})`)()).toBeUndefined();
+  });
+
+  test('a function literal applied directly checks its argument', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Apply',
+      [
+        'Function',
+        ['Add', ['At', 'p', 1], 1],
+        ['Typed', 'p', "'tuple<number, number>'"],
+      ],
+      [
+        'First',
+        [
+          'Filter',
+          ['List', ['Tuple', 1, 2]],
+          ['Function', ['Less', 'v', ['At', 'c', 1]], 'c'],
+        ],
+      ],
+    ]);
+    const result = compile(expr, { to: 'javascript' });
+    expect(result.success).toBe(true);
+    expect(() => result.run({ v: 9 })).toThrow(TypeError);
+    expect(result.run({ v: 0 })).toBe(2);
+  });
+
+  test('a call mapped over a list of points checks the other arguments', () => {
+    const fn =
+      'function f(p: tuple<number, number>, s: string) { p[1] + length(s) }';
+    expect(
+      compileRun(
+        `${fn}\nf([(1, 2), (3, 4)], first(filter(["a"], c => c == "z")))`
+      )
+    ).toThrow(
+      new TypeError(
+        "f: the argument of the parameter 's' is absent, and the parameter is annotated 'string'"
+      )
+    );
+    expect(
+      compileRun(
+        `${fn}\nf([(1, 2), (3, 4)], first(filter(["ab"], c => c == "ab")))`
+      )()
+    ).toEqual([3, 5]);
+  });
+});
+
