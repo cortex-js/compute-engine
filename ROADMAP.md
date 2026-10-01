@@ -1004,17 +1004,20 @@ and `0·(∞ + 0.5)` evaluate to `Indeterminate`, because `∞ + 0.5` is the exa
 it came from a float, which the infinity literal cannot carry today. Both
 answers are pinned in `test/compute-engine/indeterminate.test.ts`.
 
-### `w.mul(ce.Zero)` folds a variable with an assigned value where `w.mul(0)` keeps the product (OPEN, small — found 2026-09-29 by the fix of the zero-factor shortcut)
+### The `.mul()` method stores the current value of a variable in a point or a list (OPEN, small — found 2026-09-30 by the review of the zero-factor fix)
 
-`BoxedSymbol.mul(0)` on a variable that holds a value now stays the product
-`Multiply(0, w)`, so that `evaluate()` reads the value the variable holds at
-that time (`w := NaN` gives `NaN`, `w := 4` gives `0`). `w.mul(ce.Zero)` takes
-the other route, the `mul()` function of `arithmetic-mul-div.ts`, which still
-folds to the exact `0` while `w` holds `NaN` or an infinity. The two spellings
-of the same product should agree. `mul()` was left as is because several
-normalization steps depend on its folding (see "Common API Traps" in
-`CLAUDE.md`); making it keep `0·w` for a variable with a value needs a check
-that those steps still reach a fixpoint.
+With `w := 4`, `ce.number(2).mul(ce.box(['Tuple', 'w', 2]))` is the point
+`(8, 4)`, and `ce.number(2).mul(ce.box(['List', 'w', 2]))` is `[8, 4]`: the
+point product (`mulTuples`, `arithmetic-mul-div.ts`) evaluates each component
+before it multiplies, and the list product does the same, so the result keeps
+the value `w` holds now. A later `w := 5` does not change it. The canonical
+`Multiply(2, (w, 2))` keeps the product and reads the value at evaluation. For
+a zero factor this also hides a `NaN`: with `w := NaN`,
+`ce.Zero.mul((w, 2))` is `(NaN, 0)` now and stays so after `w := 4`. A scalar
+factor no longer has this defect (`0·w` is kept since 2026-09-30). A fix would
+multiply the components without evaluating them, as `mul()` does for a
+scalar; the evaluation of a component is there so that a component such as
+`0.3n` with `n` a list is broadcast, and that case must keep working.
 
 ### Residues of the absent-value round (OPEN, small — found 2026-09-25)
 

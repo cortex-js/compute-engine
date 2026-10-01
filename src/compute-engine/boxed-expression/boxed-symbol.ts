@@ -456,10 +456,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // reassignment (`w := NaN`, then `w := 4`), so it stays the product
     // `0·w` and `evaluate()` reads the value the variable holds then. This
     // guard covers the number-zero spelling of the call (`w.mul(0)`, a
-    // machine `0` or a zero `NumericValue`) only: `w.mul(ce.Zero)` takes the
-    // `mul()` function of `arithmetic-mul-div.ts`, which still folds the
-    // product (ROADMAP.md, "`w.mul(ce.Zero)` folds a variable with an
-    // assigned value where `w.mul(0)` keeps the product").
+    // machine `0` or a zero `NumericValue`); `w.mul(ce.Zero)` takes the
+    // `mul()` function of `arithmetic-mul-div.ts`, which applies the same
+    // rule.
     const isZeroRhs = rhs === 0 || (rhs instanceof NumericValue && rhs.isZero);
     if (isZeroRhs) {
       if (hasAssignedVariable(this))

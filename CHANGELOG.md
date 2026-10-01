@@ -13,6 +13,11 @@
 
 ### Issues Resolved
 
+- `w.mul(ce.Zero)` and `ce.Zero.mul(w)` folded to `0` for a variable `w` with
+  an assigned value, while `w.mul(0)` and `ce.box(['Multiply', 0, 'w'])` keep
+  the product `0w`. With `w := NaN`, the folded `0` hid the `NaN`. All the
+  spellings now keep `0w`, which evaluates with the value `w` holds then: `NaN`
+  for `w := NaN`, `0` after `w := 4`. A free symbol still folds: `0x` is `0`.
 - `Join` (or `Append`) of a dictionary and a value that is not a key-value
   entry reported an error that named the internal symbol
   `ContinuationPlaceholder`: `Join(Dictionary(x: 1), [2, 3])` gave

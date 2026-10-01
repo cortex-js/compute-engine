@@ -8,7 +8,7 @@ import type {
 import { isTensorValue, packTensor } from './tensor-view.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { isStoredAsDouble } from './machine-broadcast.js';
-import { bignumPreferred } from './utils.js';
+import { bignumPreferred, hasAssignedVariable } from './utils.js';
 import {
   isNumber,
   isFunction,
@@ -2353,6 +2353,34 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
     !xs.some((x) => !isAbsentSymbol(x) && isUnresolvedCollectionOperand(x))
   )
     return ce.NaN;
+
+  // A zero factor beside a factor that reads a variable with an assigned
+  // value is not folded to `0`: the product must keep the value the variable
+  // holds when it is evaluated, not the value it holds now. With `w := NaN`,
+  // `0·w` evaluates to `NaN`, and after `w := 4` it evaluates to `0`. This is
+  // the rule of `BoxedSymbol.mul(0)` (`boxed-symbol.ts`) and of a canonical
+  // `Multiply(0, w)`, so `w.mul(0)`, `w.mul(ce.Zero)` and `ce.Zero.mul(w)`
+  // give the same product. The other factors are dropped, as the fold drops
+  // them: a free symbol or a finite number times `0` is `0`. The fold below
+  // handles three cases instead: a `NaN` or an infinite literal factor (the
+  // indeterminate form), and a factor that cannot be a number (an `Error`, a
+  // string, a boolean), which the fold keeps or reports as an error rather
+  // than absorbing it in the zero. This rule is for scalar factors: a point
+  // or a list factor was handled above, where the product is computed per
+  // component from the values the components hold now.
+  const zero = xs.find((x) => isNumber(x) && x.isSame(0));
+  if (
+    zero !== undefined &&
+    !xs.some((x) => isNumber(x) && (x.isNaN || x.isInfinity === true)) &&
+    !xs.some(
+      (x) =>
+        x.operator === 'Error' ||
+        x.type.isDisjointFrom('broadcastable<number> | missing | nothing')
+    )
+  ) {
+    const held = xs.filter((x) => !isNumber(x) && hasAssignedVariable(x));
+    if (held.length > 0) return ce.function('Multiply', [zero, ...held]);
+  }
 
   // `expandProducts` does two things: it distributes over sums, and — as a
   // side effect of walking the operands pairwise — it folds the product two at
