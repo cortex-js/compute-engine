@@ -286,7 +286,7 @@ export function complexInverse(z: Complex): Complex {
  *  Here x is reduced to x = t + q/2 with |t| ≤ 1/4 (both steps are exact in
  *  floating point), so the values are exact at multiples of 1/2 and
  *  accurate to a few ulps elsewhere. */
-function cosSinPi(x: number): [number, number] {
+export function cosSinPi(x: number): [number, number] {
   const r = x - 2 * Math.round(x / 2); // r ∈ [−1, 1], same angle
   const q = Math.round(2 * r); // −2 … 2
   const t = r - q / 2; // |t| ≤ 1/4
@@ -326,7 +326,7 @@ function sinPiComplex(z: Complex): Complex {
  *  where the last factor is within e^{−14} of 1. The imaginary part of that
  *  form is not reduced to (−π, π]: it is a logarithm, not necessarily the
  *  principal one. */
-function logSinPi(z: Complex): Complex {
+export function logSinPi(z: Complex): Complex {
   if (!(Math.abs(z.im) > 7)) return sinPiComplex(z).log();
   const x = z.re - 2 * Math.round(z.re / 2); // same e^{iπx}, exact
   const [c2, s2] = cosSinPi(2 * x);

@@ -1,3 +1,5 @@
+import { Complex } from 'complex-esm';
+import { BigDecimal } from '../../big-decimal/index.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   SIGNED_INFINITY_TYPE,
@@ -8,7 +10,11 @@ import type {
   Expression,
   IComputeEngine,
 } from '../global-types.js';
-import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
+import {
+  applyN,
+  isExactNumber,
+  shouldNumericize,
+} from '../boxed-expression/apply.js';
 import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
 import {
@@ -21,6 +27,7 @@ import {
   hurwitzOperand,
   boxBignumApprox,
   boxComplexResult,
+  infiniteGammaFamilyValue,
 } from './arithmetic.js';
 // Every `type` handler in this file is on the `'types'` (operand-descriptor)
 // shape, so the helpers all come from the descriptor-shape module. The
@@ -60,6 +67,14 @@ import {
   polylog,
   bigPolyLog,
 } from '../numerics/special-functions.js';
+import { gammaln, bigGammaln } from '../numerics/special-functions.js';
+import { logGammaComplex } from '../numerics/log-gamma.js';
+import {
+  barnesGComplex,
+  bigBarnesG,
+  logBarnesGComplex,
+  superfactorial,
+} from '../numerics/barnes-g.js';
 import {
   EULERIAN_MAX_ORDER,
   eulerianRow,
@@ -105,6 +120,12 @@ import {
  *   only evaluated for r = 0.
  * - `DedekindEta(tau)` = e^{iπτ/12}·∏(1 − e^{2πikτ}) (Fungrim 1dc520).
  */
+
+/** Largest n for which `LogGamma(n)` is formed exactly as ln((n−1)!). */
+const MAX_EXACT_LOG_ARGUMENT = 1000;
+
+/** Largest n for which `BarnesG(n)` is formed exactly as a superfactorial (about 4·10⁴ digits). */
+const MAX_EXACT_SUPERFACTORIAL = 200;
 
 /** `EllipticK`: real for m < 1, `+∞` pole at m = 1, finite complex for m > 1. */
 const ELLIPTIC_K_DOMAIN: RealDomain = {
@@ -194,6 +215,125 @@ function agmValueAtInfinity(
 
 export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
   {
+    LogGamma: {
+      description:
+        'The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; ' +
+        'not `GammaLn`, the principal logarithm of Γ(z), which jumps by 2πi ' +
+        'across the zeros of Im Γ.',
+      complexity: 8000,
+      broadcastable: true,
+      // Carrier, NaN policy and the values at the infinite points as for
+      // `GammaLn`: `+∞` at the poles (the non-positive integers), `+∞` at
+      // `+∞`, `Indeterminate` at `−∞` and `~oo`. The value is complex on the
+      // whole negative axis (Im = π⌊x⌋), so the claim is the top numeric type.
+      signature: '(complex | infinity) -> number',
+      examples: ['LogGamma(5)', 'N(LogGamma(-2.5 + 1.5i))'],
+      nanBehavior: 'propagate',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
+      evaluate: ([z], { numericApproximation, engine }) => {
+        if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
+          return engine.PositiveInfinity;
+        const infinite = infiniteGammaFamilyValue(z, engine);
+        if (infinite !== undefined) return infinite;
+        const n = asSmallInteger(z);
+        if (n !== null && n >= 1 && n <= MAX_EXACT_LOG_ARGUMENT && isExactNumber(z)) {
+          // lnΓ(n) = ln((n−1)!)
+          const exact = engine.expr(['Ln', ['Factorial', n - 1]]);
+          return numericApproximation ? exact.N() : exact.evaluate();
+        }
+        if (!numericApproximation && isNumber(z) && z.isSame(0.5) && isExactNumber(z))
+          // Γ(1/2) = √π
+          return engine.expr(['Divide', ['Ln', 'Pi'], 2]).evaluate();
+        return shouldNumericize(numericApproximation, z)
+          ? applyN(
+              [z],
+              (x) => (x > 0 ? gammaln(x) : NaN),
+              (x) => (x.isPositive() ? bigGammaln(engine, x) : BigDecimal.NAN),
+              logGammaComplex
+            )
+          : undefined;
+      },
+    },
+
+    BarnesG: {
+      description:
+        'The Barnes G-function, the double gamma function G(z+1) = Γ(z)·G(z), G(1) = 1. ' +
+        'G(n) is the superfactorial 1!·2!⋯(n−2)! at a positive integer n; G is entire, ' +
+        'with zeros at the non-positive integers.',
+      wikidata: 'Q808463',
+      complexity: 8600,
+      broadcastable: true,
+      // Carrier and infinite points as for `LogGamma`; G grows without bound
+      // at `+∞` and has no limit at the other infinities (zeros on the
+      // negative axis). The value is real on the real axis, but its sign
+      // alternates and a pole-free `real` claim is not made: top numeric type.
+      signature: '(complex | infinity) -> number',
+      examples: ['BarnesG(5)', 'N(BarnesG(1/2))'],
+      nanBehavior: 'propagate',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
+      evaluate: ([z], { numericApproximation, engine }) => {
+        if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
+          return engine.Zero;
+        const infinite = infiniteGammaFamilyValue(z, engine);
+        if (infinite !== undefined) return infinite;
+        const n = asSmallInteger(z);
+        if (n !== null && n >= 1 && n <= MAX_EXACT_SUPERFACTORIAL && isExactNumber(z))
+          return engine.number(superfactorial(n));
+        return shouldNumericize(numericApproximation, z)
+          ? applyN(
+              [z],
+              (x) => barnesGComplex(new Complex(x, 0)).re,
+              (x) => bigBarnesG(engine, x) ?? BigDecimal.NAN,
+              barnesGComplex
+            )
+          : undefined;
+      },
+    },
+
+    LogBarnesG: {
+      description:
+        'The logarithm of the Barnes G-function, continued analytically with ' +
+        '`LogGamma`: its imaginary part is not principal on the negative axis. ' +
+        '−∞ at the zeros of G, the non-positive integers.',
+      complexity: 8600,
+      broadcastable: true,
+      // As `BarnesG`; `−∞` at the zeros, so the carrier of the answer is every number.
+      signature: '(complex | infinity) -> number',
+      examples: ['LogBarnesG(5)', 'N(LogBarnesG(-1/2))'],
+      nanBehavior: 'propagate',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
+      evaluate: ([z], { numericApproximation, engine }) => {
+        if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
+          return engine.NegativeInfinity;
+        const infinite = infiniteGammaFamilyValue(z, engine);
+        if (infinite !== undefined) return infinite;
+        const n = asSmallInteger(z);
+        if (n !== null && n >= 1 && n <= MAX_EXACT_SUPERFACTORIAL && isExactNumber(z)) {
+          // ln G(n) = ln of the superfactorial
+          const exact = engine.function('Ln', [engine.number(superfactorial(n))]);
+          return numericApproximation ? exact.N() : exact.evaluate();
+        }
+        return shouldNumericize(numericApproximation, z)
+          ? applyN(
+              [z],
+              // The real logarithm only where G > 0; elsewhere the continuation is complex.
+              (x) => {
+                const v = logBarnesGComplex(new Complex(x, 0));
+                return v.im === 0 ? v.re : NaN;
+              },
+              (x) =>
+                x.isPositive()
+                  ? (bigBarnesG(engine, x)?.ln() ?? BigDecimal.NAN)
+                  : BigDecimal.NAN,
+              logBarnesGComplex
+            )
+          : undefined;
+      },
+    },
+
     EllipticK: {
       description:
         'Complete elliptic integral of the first kind K(m), parameter convention m = k².',

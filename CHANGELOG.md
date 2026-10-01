@@ -189,6 +189,32 @@ These changes apply to non-strict parsing only
   unevaluated. The head threads over lists and compiles to JavaScript for a
   real value (#395, contributed by [enumeratio](https://github.com/enumeratio))
 
+### New Features
+
+- **`LogGamma`, `BarnesG` and `LogBarnesG` are new, and
+  `PolyGamma(-1, z)` is `LogGamma(z)`.** `LogGamma(z)` is the analytic
+  continuation of ln Γ with its branch cut on (−∞, 0], as in Mathematica and
+  mpmath's `loggamma`. It is not `GammaLn`, which is the principal logarithm
+  of Γ(z) and jumps by 2πi across the zeros of Im Γ:
+  `GammaLn(-2.5 + 1.5i)` is `-3.7175 - 1.4299i`, `LogGamma(-2.5 + 1.5i)` is
+  `-3.7175 - 7.7131i`, and `LogGamma(-1.5)` is `0.86005 - 6.28319i`.
+  `GammaLn` is unchanged. `LogGamma(5)` is `ln(24)` exactly, `LogGamma(1/2)`
+  is `ln(π)/2`, and the poles at the non-positive integers are `+∞`; a real
+  argument follows `ce.precision`, a complex one is a double.
+  `BarnesG(z)` and `LogBarnesG(z)` are the Barnes G-function, with
+  G(z+1) = Γ(z)·G(z), and its logarithm continued with `LogGamma` as in
+  Mathematica. `BarnesG(5)` is `12`, `BarnesG(10)` is `5056584744960000`
+  (the superfactorial, an exact integer), `BarnesG(0)` is `0` and
+  `LogBarnesG(0)` is `−∞`. A real `z` is computed to `ce.precision` from the
+  Taylor series of ln Γ and ln G about 1 (coefficients ζ(k)), with a bounded
+  tail, `N(BarnesG(1/2))` being `0.603244281209446206191…`; a complex `z`,
+  and a real `z` more than 60 from 1, use an asymptotic series at double
+  precision (about 3e-12 relative for G, measured against mpmath).
+  `LogBarnesG(-2.5)` is `-2.5747 + 18.8496i`. `PolyGamma(-1, z)` follows
+  Mathematica's convention, `PolyGamma(-1, -5/2 + 3i/2)` is `LogGamma` there;
+  the other negative orders stay unevaluated (#395, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 ### Issues Resolved
 
 - `Solve` found no root of a linear equation whose coefficient of the unknown is

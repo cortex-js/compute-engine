@@ -684,6 +684,7 @@
     "operators": [
       "AGM",
       "AppellF1",
+      "BarnesG",
       "DedekindEta",
       "EisensteinE",
       "EllipticE",
@@ -694,6 +695,8 @@
       "Hypergeometric1F1",
       "Hypergeometric2F1",
       "JacobiTheta",
+      "LogBarnesG",
+      "LogGamma",
       "LogIntegral",
       "PolyLog",
       "StieltjesGamma"

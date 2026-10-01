@@ -746,6 +746,23 @@
       ]
     },
     {
+      "name": "BarnesG",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The Barnes G-function, the double gamma function G(z+1) = Γ(z)·G(z), G(1) = 1. G(n) is the superfactorial 1!·2!⋯(n−2)! at a positive integer n; G is entire, with zeros at the non-positive integers.",
+      "wikidata": "Q808463",
+      "examples": [
+        "BarnesG(5)",
+        "N(BarnesG(1/2))"
+      ]
+    },
+    {
       "name": "BaseForm",
       "category": "Core",
       "arity": "optional",
@@ -4706,6 +4723,38 @@
       "description": "Base-2 Logarithm",
       "examples": [
         "[Log2(32), N(Log2(3))]"
+      ]
+    },
+    {
+      "name": "LogBarnesG",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The logarithm of the Barnes G-function, continued analytically with `LogGamma`: its imaginary part is not principal on the negative axis. −∞ at the zeros of G, the non-positive integers.",
+      "examples": [
+        "LogBarnesG(5)",
+        "N(LogBarnesG(-1/2))"
+      ]
+    },
+    {
+      "name": "LogGamma",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; not `GammaLn`, the principal logarithm of Γ(z), which jumps by 2πi across the zeros of Im Γ.",
+      "examples": [
+        "LogGamma(5)",
+        "N(LogGamma(-2.5 + 1.5i))"
       ]
     },
     {

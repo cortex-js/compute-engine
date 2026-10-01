@@ -2302,7 +2302,7 @@ function literalPredicateType(
  * it, the direction without one gets `Indeterminate`; ruling recorded in
  * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F batch 8).
  */
-function infiniteGammaFamilyValue(
+export function infiniteGammaFamilyValue(
   x: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
@@ -5139,9 +5139,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const order = asSmallInteger(n);
         const special = polygammaValueAtExceptionalPoint(order, x, engine, n);
         if (special !== undefined) return special;
-        // The kernels implement the derivative orders only (n ≥ 0): a
-        // negative literal order is a capability gap, so the application
-        // stays symbolic instead of reporting the kernel's `NaN`.
+        // ψ⁽⁻¹⁾(z) = ln Γ(z), Wolfram's and mpmath's convention for the
+        // antiderivative of the digamma: the continuation `LogGamma`
+        // computes, not the principal `GammaLn`.
+        if (order === -1) {
+          const logGamma = engine.function('LogGamma', [x]);
+          return numericApproximation ? logGamma.N() : logGamma.evaluate();
+        }
+        // The kernels implement the derivative orders only (n ≥ 0): any
+        // other negative literal order is a capability gap, so the
+        // application stays symbolic instead of reporting the kernel's `NaN`.
         if (order !== null && order < 0) return undefined;
         if (!shouldNumericize(numericApproximation, n, x)) return undefined;
         const result = apply2(
