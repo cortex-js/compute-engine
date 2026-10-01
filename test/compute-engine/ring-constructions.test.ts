@@ -183,17 +183,17 @@ describe('Adjoin — parsing', () => {
 
 describe('Serialization round-trips', () => {
   test('QuotientRing serializes to the subscript form', () => {
-    expect(ce.box(['QuotientRing', 'Integers', 'n']).latex).toBe('\\Z_{n}');
-    expect(ce.box(['QuotientRing', 'Integers', 12]).latex).toBe('\\Z_{12}');
+    expect(ce.box(['QuotientRing', 'Integers', 'n']).latex).toBe('\\mathbb{Z}_{n}');
+    expect(ce.box(['QuotientRing', 'Integers', 12]).latex).toBe('\\mathbb{Z}_{12}');
   });
 
   test('Adjoin serializes to the bracket form', () => {
     expect(ce.box(['Adjoin', 'Integers', ['Sqrt', 2]]).latex).toBe(
-      '\\Z[\\sqrt{2}]'
+      '\\mathbb{Z}[\\sqrt{2}]'
     );
     expect(
       ce.box(['Adjoin', 'Integers', ['Sqrt', 2], ['Sqrt', 3]]).latex
-    ).toBe('\\Z[\\sqrt{2}, \\sqrt{3}]');
+    ).toBe('\\mathbb{Z}[\\sqrt{2}, \\sqrt{3}]');
   });
 
   test('box route: parse(serialize(x)).isSame(x)', () => {
@@ -215,9 +215,9 @@ describe('Serialization round-trips', () => {
     // `\mathrm{QuotientRing}(...)` instead (which does round-trip).
     expect(
       ce.box(['QuotientRing', ['Adjoin', 'Integers', ['Sqrt', 2]], 'p']).latex
-    ).toBe('\\mathrm{QuotientRing}(\\Z[\\sqrt{2}], p)');
+    ).toBe('\\mathrm{QuotientRing}(\\mathbb{Z}[\\sqrt{2}], p)');
     expect(ce.box(['Adjoin', ['Adjoin', 'Integers', 'x'], 'y']).latex).toBe(
-      '\\mathrm{Adjoin}(\\Z[x], y)'
+      '\\mathrm{Adjoin}(\\mathbb{Z}[x], y)'
     );
   });
 
@@ -234,7 +234,7 @@ describe('Serialization round-trips', () => {
     ).toBe(true);
     // A ring-constant base keeps the subscript notation.
     expect(roundTrips(['QuotientRing', 'RealNumbers', 'n'])).toBe(true);
-    expect(ce.box(['QuotientRing', 'RealNumbers', 'n']).latex).toBe('\\R_{n}');
+    expect(ce.box(['QuotientRing', 'RealNumbers', 'n']).latex).toBe('\\mathbb{R}_{n}');
   });
 
   test('parse route: parse(serialize(parse(latex))) is stable', () => {
@@ -257,8 +257,8 @@ describe('Serialization round-trips', () => {
   test('the fraction form serializes back as the SUBSCRIPT form', () => {
     // `\frac{\Z}{n\Z}` is parse-only: like the `\Z/n\Z` slash form it
     // reserializes to the canonical subscript spelling.
-    expect(ce.parse('\\frac{\\Z}{n\\Z}').latex).toBe('\\Z_{n}');
-    expect(ce.parse('\\frac{\\R}{n\\R}').latex).toBe('\\R_{n}');
+    expect(ce.parse('\\frac{\\Z}{n\\Z}').latex).toBe('\\mathbb{Z}_{n}');
+    expect(ce.parse('\\frac{\\R}{n\\R}').latex).toBe('\\mathbb{R}_{n}');
   });
 
   test('the `at-over-declared-set-base` ledger row round-trips', () => {
@@ -534,9 +534,9 @@ describe('Pins: notations that are NOT ring constructions', () => {
   });
 
   test('`NegativeIntegers` serializes symbolically and round-trips', () => {
-    expect(ce.box('NegativeIntegers').latex).toBe('\\Z_{<0}');
+    expect(ce.box('NegativeIntegers').latex).toBe('\\mathbb{Z}_{<0}');
     expect(roundTrips('NegativeIntegers')).toBe(true);
-    expect(ce.box('NonPositiveIntegers').latex).toBe('\\Z_{\\le0}');
+    expect(ce.box('NonPositiveIntegers').latex).toBe('\\mathbb{Z}_{\\le0}');
     expect(roundTrips('NonPositiveIntegers')).toBe(true);
   });
 

@@ -1519,6 +1519,18 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   materialization: boolean | number | [number, number];
 
   /**
+   * LaTeX used to render the constant `ExponentialE`, the counterpart of
+   * `imaginaryUnit`. Use `e` or `\mathrm{e}` to match the glyph used for
+   * the imaginary unit.
+   *
+   * Serialization only: `\exponentialE`, `\mathrm{e}` and `\operatorname{e}`
+   * are always read as the constant.
+   *
+   * @default `\exponentialE`
+   */
+  exponentialE?: LatexString;
+
+  /**
    * LaTeX string used to render an invisible multiply, e.g. in '2x'.
    *
    * If empty, both operands are concatenated, i.e. `2x`.

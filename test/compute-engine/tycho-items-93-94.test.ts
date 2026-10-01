@@ -185,11 +185,11 @@ describe('Tycho item 93 — `Interval` survives a LaTeX round-trip', () => {
 
   describe('the set-aware serializer leaves non-interval operands alone', () => {
     test.each([
-      ['Element', ['Element', 'x', 'RealNumbers'], 'x\\in\\R'],
+      ['Element', ['Element', 'x', 'RealNumbers'], 'x\\in\\mathbb{R}'],
       [
         'Element of a sum',
         ['Element', ['Add', 'x', 1], 'Integers'],
-        'x+1\\in\\Z',
+        'x+1\\in\\mathbb{Z}',
       ],
       [
         'Union of sets',
@@ -384,7 +384,7 @@ describe('a two-element `List` domain survives a LaTeX round-trip', () => {
       ],
       ['a range', ['Element', 'n', ['Range', 1, 2]], 'n\\in1..2'],
       ['a set', ['Element', 'n', ['Set', 1, 2]], 'n\\in\\lbrace1, 2\\rbrace'],
-      ['a symbol', ['Element', 'n', 'Integers'], 'n\\in\\Z'],
+      ['a symbol', ['Element', 'n', 'Integers'], 'n\\in\\mathbb{Z}'],
       // The residue of the same collision, fixed 2026-08-12: EVERY set
       // position — not just a membership domain — spells a two-element list
       // operand `\operatorname{List}(a, b)`. (This row previously pinned the
