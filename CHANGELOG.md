@@ -1,5 +1,37 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- [#390](https://github.com/cortex-js/compute-engine/issues/390) A call through
+  a field of a record or a dictionary ignored the declaration of the function in
+  the field. With `bob_S` declared `(x: number, factor: number?) -> number`, the
+  call `bob.S(3, factor: 5)` (`MemberCall(bob, "S", …)`, or
+  `Apply(Field(bob, "S"), …)`) gave the error `argument-names-unavailable`,
+  while `bob_S(3, factor: 5)` gave 15. Two kinds of receiver now take named
+  arguments:
+  - A **constant** receiver: `bob` declared with `isConstant: true` and the
+    value `["Dictionary", ["Tuple", "'S'", "bob_S"]]`, or
+    `const bob = {S -> bob_S}` in Epsil. Its field cannot change, so the call is
+    made the direct call: `bob.S(3, factor: 5)` was
+    `argument-names-unavailable`, and is now `bob_S(3, 5)`, which evaluates
+    to 15. The operator's `lazy` flag applies too: with `y := 10` and a lazy
+    `bob_H` that returns `Hold` of its argument, `bob.H(y * z)` gave `Hold(10z)`
+    and now gives `Hold(y * z)`, as `bob_H(y * z)` does. A field that holds a
+    function literal is applied with the names matched against the literal's
+    parameters. The canonical form of such a call is the direct call, so it
+    prints as `bob_S(3, 5)`.
+  - A receiver whose **type is a record** that gives the field a signature with
+    named parameters (`record{S: (x: number, factor: number?) -> number}`). The
+    names are matched against that signature: `bob.S(factor: 5, x: 3)` was
+    `argument-names-unavailable`, and is now `Apply(Field(bob, "S"), 3, 5)`,
+    which evaluates to 15. The receiver can be a variable, because the match
+    reads its type, not its value. `lazy` is not honored on this route, since a
+    signature type has no `lazy` flag: `bob.H(x: y * z)` gives `Hold(10z)`.
+
+  A variable typed `dictionary<function>` gives no parameter names, so a named
+  call through it is still `argument-names-unavailable`, and its value is not
+  read: `lazy` is honored only through a constant receiver.
+
 ## 0.144.0 _2026-10-01_
 
 ### Behavior Changes

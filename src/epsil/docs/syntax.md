@@ -384,6 +384,27 @@ names from the expression itself — `((x: number) => x + 1)(x: 5)` is
 `6`, and unannotated parameters work there too,
 `((x, y) => x - y)(y: 2, x: 10)` is `8`.
 
+A function stored in a field of a record or a dictionary takes names in
+two cases. When the record is a `const`, its field cannot change, so the
+call is the same as a call of the function in the field: its names, and
+its `lazy` flag for a host operator, apply. When the record's declared
+type gives the field a signature with named parameters, the names come
+from that type, and the variable can later hold another record of the
+same type:
+
+```epsil
+function scale(x: number, factor: number) -> number { x * factor }
+
+const ns = {S -> scale}
+ns.S(factor: 5, x: 3)              // ➔ 15 — the same as scale(factor: 5, x: 3)
+
+let r: record{S: (x: number, factor: number) -> number} = {S -> scale}
+r.S(factor: 5, x: 3)               // ➔ 15 — names from the type of r
+```
+
+Through a variable typed only `dictionary<function>`, the field's
+parameter names are not known, and a named call is an error.
+
 A parameter without a declared name is positional-only, and a callee
 whose parameter names the engine cannot read cannot take named
 arguments at all: a forward reference (a call *before* the statement

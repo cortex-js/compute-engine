@@ -3516,8 +3516,36 @@ this appendix originally anticipated (both deliberate, v1):
   named protocol's requirement (see "Protocol dispatch" below; also
   fixed 2026-08-13). What still declines through `Apply` is a callee
   whose names are genuinely unknowable there: a symbol callee
-  (`Apply(f, x: 1)` — write `f(x: 1)`), and a literal with a
-  parameter that is not a bare symbol or a `Typed` annotation.
+  (`Apply(f, x: 1)` — write `f(x: 1)`), a literal with a
+  parameter that is not a bare symbol or a `Typed` annotation, and a
+  field callee that neither case of the next item covers.
+- **A field callee takes names in two cases** (decided 2026-10-01,
+  GitHub issue #390). `bob.S(3, factor: 5)` canonicalizes to
+  `Apply(Field(bob, "S"), …)`; the rules are in `resolveFieldCallee`
+  (`boxed-expression/field-callee.ts`).
+  1. **The receiver is a constant** (`isConstant: true`, or `const` in
+     Epsil) whose value is a dictionary or a record. Its fields cannot
+     change, so the field is read while the call is made canonical. A
+     field that holds a symbol naming an operator replaces the call with
+     the direct call `bob_S(3, factor: 5)` before any argument is made
+     canonical: the operator's names, its `lazy` flag, its argument
+     checks, its result type and its compilation all apply as for the
+     direct call. A field that holds a `Function` literal replaces the
+     callee with the literal, and the names are matched as for an inline
+     literal. The canonical form, and so its serialization, is the
+     direct call (`bob_S(3, 5)`), not the field call.
+  2. **The receiver's type is a record whose field has a signature with
+     named parameters** (`record{S: (x: number, factor: number?) ->
+     number}`). The names are matched against that signature and the
+     call stays `Apply(Field(bob, "S"), 3, 5)`. The receiver can be a
+     variable: every value assigned to it satisfies its type, so the
+     match never depends on the value it holds now. A signature type
+     has no `lazy` flag, so on this route the arguments are always
+     evaluated.
+
+  A receiver that is not a constant is never read by value: with the
+  type `dictionary<function>` (no field signatures), a named call
+  through it is still `argument-names-unavailable`.
 
 ### Overloaded callees
 
@@ -3622,9 +3650,14 @@ ratified 2026-08-13. The implemented language contract is consolidated in
 - **R4** — `Apply`-routed callees decline in v1 ("Rules"); narrowed
   twice on 2026-08-13 — first when the qualified protocol spelling
   gained name support ("Protocol dispatch"), then when inline-literal
-  callees did ("Two consequences" above). The residual decline covers
-  only callees whose names are unknowable at the `Apply` seam: symbol
-  callees and literals with unnameable parameter shapes.
+  callees did ("Two consequences" above). Narrowed a third time on
+  2026-10-01 (GitHub issue #390): a field of a constant record or
+  dictionary that names an operator or holds a function literal, and a
+  field of a record-typed receiver whose type gives the field a named
+  signature ("A field callee takes names in two cases" above). The
+  residual decline covers only callees whose names are unknowable at
+  the `Apply` seam: symbol callees, literals with unnameable parameter
+  shapes, and field callees outside those two cases.
 - **R5** — names eliminate branches, persistently ("Overloaded
   callees").
 

@@ -51,6 +51,7 @@ import {
   splitNamedArguments,
 } from './named-arguments.js';
 import { qualifiedMemberRequirementShape } from '../engine-protocols.js';
+import { resolveFieldCallee } from './field-callee.js';
 import { multiClauseState } from '../multi-clause.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
@@ -2439,18 +2440,19 @@ function makeCanonicalFunctionCore(
   // untouched and each reports `argument-names-unavailable` when it
   // canonicalizes (design doc §6).
   //
-  // `Apply` is EXCLUDED (sub-ruling R4), with two carve-outs below. Its own
+  // `Apply` is EXCLUDED (sub-ruling R4), with three carve-outs below. Its own
   // parameters are `(name, arguments*)` — the first one IS the callee — so a
   // name written in an `Apply` argument list is meant for that callee, not
   // for `Apply`, and matching it against `Apply`'s signature would answer a
   // question nobody asked. `(⟨literal⟩)(x: 1)` canonicalizes to `Apply` too,
   // so this one exclusion covers the whole non-symbol-callee spelling.
   // Declining leaves the carriers to report `argument-names-unavailable`.
-  // The carve-outs are the two `Apply` shapes whose callee's parameter names
-  // ARE knowable here: a qualified protocol member (next comment) and an
-  // inline function literal (below it).
+  // The carve-outs are the three `Apply` shapes whose callee's parameter names
+  // ARE knowable here: a qualified protocol member (next comment), a field of
+  // a constant or record-typed receiver (the comment after it) and an inline
+  // function literal (below them).
   //
-  // The carve-out is the QUALIFIED protocol-member call, which reaches this
+  // The first carve-out is the QUALIFIED protocol-member call, which reaches this
   // seam as `Apply(Field(Protocol, "member"), …)` — the shape its
   // `MemberCall` parse canonicalizes to — (and can be written directly as
   // `ProtocolMember(Protocol, "member", …)` on the box route). Unlike an
@@ -2463,6 +2465,36 @@ function makeCanonicalFunctionCore(
   // the dispatcher's synthesized signature carries the requirement's names
   // (`sharedParameterName`, engine-protocols.ts) and the ordinary seam
   // below permutes it.
+  //
+  // The second carve-out is a callee that is a FIELD of a record or a
+  // dictionary, `Apply(Field(bob, "S"), …)` — the shape `bob.S(…)`
+  // canonicalizes to (GitHub issue #390, decided 2026-10-01). It is checked
+  // first, and for a call with or without names, because its first form
+  // replaces the whole call: when `bob`
+  // is a constant whose field `S` holds a symbol that names an operator, the
+  // call becomes the direct call `bob_S(…)` before any argument is made
+  // canonical, so the operator's named parameters, its `lazy` flag and its
+  // argument checks apply exactly as when the author writes `bob_S(…)`. A
+  // field that holds a `Function` literal replaces the callee with the
+  // literal, and the inline-literal carve-out below then matches the names.
+  // When neither applies and the receiver's type is a record that gives the
+  // field a signature, the names are matched against that signature, below
+  // with the protocol requirement. `resolveFieldCallee` (field-callee.ts)
+  // states the rules in full.
+  let fieldSignature: Type | undefined = undefined;
+  if (name === 'Apply') {
+    const field = resolveFieldCallee(
+      ce,
+      ops[0],
+      scope ?? ce.context.lexicalScope,
+      named
+    );
+    if (field?.kind === 'operator')
+      return ce.function(field.name, ops.slice(1), { metadata, scope });
+    if (field?.kind === 'literal') ops = [field.literal, ...ops.slice(1)];
+    else if (field?.kind === 'signature') fieldSignature = field.signature;
+  }
+
   const qualified = !named
     ? undefined
     : name === 'Apply'
@@ -2471,22 +2503,27 @@ function makeCanonicalFunctionCore(
         ? protocolMemberParts(ops)
         : undefined;
   if (qualified !== undefined) {
-    const requirement = qualifiedMemberRequirementShape(
-      ce,
-      qualified.base,
-      qualified.member,
-      // Only the `Field` route has a SYMBOL base a value binding could
-      // shadow; the `ProtocolMember` operands name the protocol as data.
-      name === 'Apply' ? (scope ?? ce.context.lexicalScope) : undefined
-    );
+    // A protocol requirement first; else, for a `Field` callee whose
+    // receiver's record type gives the field a signature, that signature.
+    const requirement: Type | null =
+      qualifiedMemberRequirementShape(
+        ce,
+        qualified.base,
+        qualified.member,
+        // Only the `Field` route has a SYMBOL base a value binding could
+        // shadow; the `ProtocolMember` operands name the protocol as data.
+        name === 'Apply' ? (scope ?? ce.context.lexicalScope) : undefined
+      ) ??
+      fieldSignature ??
+      null;
     if (requirement !== null) {
       // The operands before the argument list: the callee for `Apply`, the
       // protocol and member names for `ProtocolMember`.
       const prefix = name === 'Apply' ? 1 : 2;
       const split = splitNamedArguments(ops.slice(prefix));
       const normalized = normalizeNamedArguments(ce, split, requirement);
-      // `kind: 'apply'` cannot occur: a requirement is one signature, never
-      // an overload set, and no clauses are passed.
+      // `kind: 'apply'` cannot occur: no clauses are passed, and only a
+      // clause list can pin a call to one arm of an overload set.
       if (normalized.kind === 'error')
         return new BoxedFunction(
           ce,
@@ -2501,7 +2538,7 @@ function makeCanonicalFunctionCore(
       // `unavailable` leaves `ops` alone: the carriers decline as before.
     }
   } else if (named && name === 'Apply') {
-    // Second carve-out: an INLINE function-literal callee,
+    // Third carve-out: an INLINE function-literal callee,
     // `((x: number) => x + 1)(x: 5)`. Its parameter names sit in the very
     // expression being applied — read syntactically by
     // `inlineLiteralSignature`, so an UNANNOTATED literal's names work too,

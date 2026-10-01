@@ -109,6 +109,18 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A pure imaginary factor is serialized in parentheses (OPEN — found 2026-10-01 while reviewing PR #389)
+
+`ce.box(['Multiply', 'ImaginaryUnit', 'x']).latex` is `(\imaginaryI)x`, and
+`e^{i\pi}` is `\exp((\imaginaryI)\pi)`. The output reads back correctly, but
+the parentheses are not necessary. The cause: `ImaginaryUnit` canonicalizes to
+`Complex(0, 1)`, and the `Complex` entry in
+`latex-syntax/dictionary/definitions-arithmetic.ts` has a precedence one below
+`Add`, so `Multiply` wraps it. That precedence is correct for `1+2\imaginaryI`,
+but not when the real part is 0 and the output is only the imaginary part. A
+fix: give the wrap decision the precedence of the text that is actually
+written (no real part → multiplication precedence).
+
 ### A library list with `core` but without `control-structures` breaks every function literal (OPEN, decision — found 2026-10-01 by the fix of the library load order for issue #393)
 
 `Function` is defined in `core`, but building a function literal needs
@@ -173,7 +185,7 @@ before the loop) and no other value can hold a reference to it (every other
 use of `xs` is a read in `NON_RETAINING_READS`). Not requested yet; the
 reporter of #386 mentions a cycle walk that may be written as a loop.
 
-### The lenient grammar makes reading choices that a host cannot detect (OPEN, decision — Tycho paste converter, 2026-10-01)
+### The lenient grammar makes reading choices that a host cannot detect (IN PROGRESS — decided 2026-10-01, design `docs/plans/2026-10-01-lenient-ambiguity-codes.md`)
 
 Goal (Arno, 2026-10-01): a host that converts pasted plain text, such as
 Tycho's `plainTextToLatex`, should not need its own parser; the lenient
@@ -184,7 +196,8 @@ no signal when it picks one of two common readings. Tycho will remove that
 stage if CE publishes the list of reading choices the lenient grammar makes,
 with a diagnostic code (one `ambiguous-*` group) for each choice that has
 another common reading, and counts a choice with no code as a CE defect.
-That commitment is the decision. Of 300 inputs that the converter refuses
+Arno made that commitment on 2026-10-01, and decided that a parenthesized
+name is never a function head and that lenient `+-` is `±`. Of 300 inputs that the converter refuses
 (`tycho/scripts/repros/2026-10-01-paste-refused-inputs.json`), the lenient
 grammar on CE main reads about 210 with no signal. The classes, with
 examples: the end of an unbraced exponent (`e^2pi`, `x^2y`); an implicit
@@ -3124,8 +3137,12 @@ Named-argument calls shipped 2026-08-12; the durable lowering contract is in
 is more specific is RULED correct behavior, 2026-08-13: the engine asks the
 author to be explicit rather than guessing, design doc §4. What still declines
 through `Apply` is a callee whose names are genuinely not knowable there: a
-symbol callee (`Apply(f, x: 1)` — write `f(x: 1)`), and a literal with a
-parameter that is not a bare symbol or `Typed` annotation.)
+symbol callee (`Apply(f, x: 1)` — write `f(x: 1)`), a literal with a parameter
+that is not a bare symbol or `Typed` annotation, and a field callee
+(`bob.S(x: 1)`, which is `Apply(Field(bob, "S"), …)`) whose receiver is neither
+a constant record or dictionary nor typed as a record that gives the field a
+named signature — those two receivers take names since 2026-10-01, GitHub issue
+#390, `docs/TYPE_SYSTEM_ROADMAP.md` Appendix C.)
 
 - **Unannotated function literals are not addressable by name through a
   BINDING** — type inference drops parameter names (`effects-inference.ts` types
@@ -3135,7 +3152,13 @@ parameter that is not a bare symbol or `Typed` annotation.)
   tests across 11 suites + 1 snapshot, including semantic suites
   (`effects-contracts`, `application-validation-regressions`, callback-contract
   and lambda-inference batteries) — a dedicated follow-up round, not a snapshot
-  refresh.
+  refresh. The same loss reaches a field call in Epsil: in
+  `const ns = {D -> ((x, k) => x - k)}` then `ns.D(k: 1, x: 10)`, the run
+  gives 9, but the static check reports `argument-names-unavailable`. The static
+  check makes the program canonical before `ns` has its value, so it can only
+  read the type of `ns`, `record{D: (unknown, unknown) -> number}`, which has no
+  names. An annotated literal (`(x: number, k: number) => x - k`) has no such
+  problem.
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 
