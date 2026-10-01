@@ -17,7 +17,11 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
-import { hurwitzOperand, boxBignumApprox } from './arithmetic.js';
+import {
+  hurwitzOperand,
+  boxBignumApprox,
+  boxComplexResult,
+} from './arithmetic.js';
 // Every `type` handler in this file is on the `'types'` (operand-descriptor)
 // shape, so the helpers all come from the descriptor-shape module. The
 // `OnTypes` suffixes are kept while the expression-shape module still
@@ -62,6 +66,12 @@ import {
   polylogOrderReal,
   polylogOrderComplex,
 } from '../numerics/polylog.js';
+import {
+  STIELTJES_MAX_ORDER,
+  stieltjesGammaComplex,
+  bigStieltjesGamma,
+} from '../numerics/stieltjes.js';
+import { Complex } from 'complex-esm';
 import {
   ellipticKComplex,
   ellipticEComplex,
@@ -609,6 +619,71 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         return shouldNumericize(numericApproximation, s, z)
           ? applyN([s, z], polylogOrderReal, undefined, polylogOrderComplex)
           : undefined;
+      },
+    },
+
+    StieltjesGamma: {
+      description:
+        "Generalized Stieltjes constants γₙ(a), the Laurent coefficients of ζ(s, a) at s = 1: ζ(s, a) = 1/(s−1) + Σₙ (−1)ⁿ γₙ(a)(s−1)ⁿ/n!. StieltjesGamma(n) is γₙ = γₙ(1), and γ₀ is Euler's constant.",
+      examples: [
+        'StieltjesGamma(0)',
+        'N(StieltjesGamma(1))',
+        'N(StieltjesGamma(2, 1/2))',
+      ],
+      complexity: 8700,
+      broadcastable: true,
+      signature: '(integer, number?) -> number',
+      nanBehavior: 'propagate',
+      evaluate: (ops, { numericApproximation, engine }) => {
+        const [n, a] = ops;
+        const order = asSmallInteger(n);
+        if (order === null || order < 0) return undefined;
+
+        // γₙ(a) has a pole at every nonpositive integer a, as ζ(s, a) does.
+        if (a !== undefined && isNumber(a) && !a.isComplex) {
+          const integer = a.bignumRe?.isInteger() ?? Number.isInteger(a.re);
+          if (integer && a.re <= 0) return engine.ComplexInfinity;
+        }
+
+        // γ₀(a) = −ψ(a), so γ₀(1) = Euler's constant.
+        if (order === 0) {
+          if (a === undefined || (isNumber(a) && a.isSame(1)))
+            return shouldNumericize(numericApproximation, ...ops)
+              ? engine.symbol('EulerGamma').N()
+              : engine.symbol('EulerGamma');
+          const reduced = engine
+            .function('Negate', [
+              engine.function('PolyGamma', [engine.Zero, a]),
+            ])
+            .evaluate({ numericApproximation });
+          if (!numericApproximation || isNumber(reduced)) return reduced;
+        }
+
+        // γₙ(1) = γₙ: the two-operand form reduces to the one-operand one.
+        if (a !== undefined && isNumber(a) && a.isExact && a.isSame(1))
+          return engine.function('StieltjesGamma', [n]);
+
+        if (!shouldNumericize(numericApproximation, ...ops)) return undefined;
+        if (order > STIELTJES_MAX_ORDER) return undefined;
+        if (a !== undefined && !isNumber(a)) return undefined;
+        const re = a === undefined ? 1 : a.re;
+        const im = a === undefined ? 0 : a.im;
+        if (!Number.isFinite(re) || !Number.isFinite(im)) return undefined;
+
+        // Real a > 0: the arbitrary-precision kernel follows `ce.precision`,
+        // its Euler–Maclaurin remainder bounded. Complex a, and a < 0 where
+        // the value is complex, use the double kernel at every precision.
+        if (im === 0 && re > 0 && bignumPreferred(engine)) {
+          const big = bigStieltjesGamma(
+            order,
+            a === undefined ? [1n, 1n] : hurwitzOperand(engine, a),
+            engine.precision
+          );
+          return big === undefined ? undefined : boxBignumApprox(engine, big);
+        }
+        const z = stieltjesGammaComplex(order, new Complex(re, im));
+        if (z === undefined) return undefined;
+        return boxComplexResult(engine, z, im === 0 && re > 0);
       },
     },
 

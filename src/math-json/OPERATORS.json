@@ -7705,6 +7705,23 @@
       ]
     },
     {
+      "name": "StieltjesGamma",
+      "category": "special-functions",
+      "arity": "optional",
+      "signature": "(integer, number?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Generalized Stieltjes constants γₙ(a), the Laurent coefficients of ζ(s, a) at s = 1: ζ(s, a) = 1/(s−1) + Σₙ (−1)ⁿ γₙ(a)(s−1)ⁿ/n!. StieltjesGamma(n) is γₙ = γₙ(1), and γ₀ is Euler's constant.",
+      "examples": [
+        "StieltjesGamma(0)",
+        "N(StieltjesGamma(1))",
+        "N(StieltjesGamma(2, 1/2))"
+      ]
+    },
+    {
       "name": "Stirling",
       "category": "Number Theory",
       "arity": "2",

@@ -2684,7 +2684,7 @@ function threadOperandsThatBecameConditional(
  * number, and far left of 0 that leaves an imaginary part of relative size
  * about 5e-14, above the relative-noise threshold below.
  */
-function boxComplexResult(
+export function boxComplexResult(
   engine: ComputeEngine,
   z: { re: number; im: number },
   real = false

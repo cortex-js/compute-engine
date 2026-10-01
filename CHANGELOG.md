@@ -169,6 +169,26 @@ These changes apply to non-strict parsing only
   `s` is answered in doubles: `DirichletBeta(0.5 + 14i)` is
   `1.5371154384 + 1.3434514269i`. Both compile to JavaScript.
 
+### New Features
+
+- **`StieltjesGamma(n, a)` is the generalized Stieltjes constant γₙ(a),** the
+  Laurent coefficient of the Hurwitz zeta function at its pole,
+  ζ(s, a) = 1/(s − 1) + Σₙ (−1)ⁿ γₙ(a)(s − 1)ⁿ/n!, as in Mathematica and
+  mpmath; `StieltjesGamma(n)` is γₙ = γₙ(1). `StieltjesGamma(0)` is
+  `EulerGamma`, `StieltjesGamma(0, a)` is `−PolyGamma(0, a)`,
+  `StieltjesGamma(2, 1)` is `StieltjesGamma(2)`, and a nonpositive integer
+  `a` is a pole (`StieltjesGamma(2, -1)` is `ComplexInfinity`).
+  `StieltjesGamma(1).N()` is `-0.0728158454836767248606`,
+  `StieltjesGamma(2, 1/2).N()` is `0.968864475220290711422`, and
+  `N(StieltjesGamma(2, 3/4), 40)` is `0.1193766260185842196972365071220126165487`:
+  a real `a > 0` follows `ce.precision` by Euler–Maclaurin on lnⁿ(x)/x with
+  exact integer derivatives, the remainder bounded in ball arithmetic so that
+  the digits returned are certified. A complex `a` or a negative non-integer
+  `a` is computed in doubles (`StieltjesGamma(2, 1 + i).N()` is
+  `0.1703042014685874 + 0.3731771957574952i`). Orders past 30 stay
+  unevaluated. The head threads over lists and compiles to JavaScript for a
+  real value (#395, contributed by [enumeratio](https://github.com/enumeratio))
+
 ### Issues Resolved
 
 - `Solve` found no root of a linear equation whose coefficient of the unknown is

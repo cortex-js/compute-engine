@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 682 functions and constants of the standard library, by category.
+The 683 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -36,7 +36,7 @@ To search the library by concept rather than by name, use
 - [Polynomials](#polynomials) — 17 definitions · [full reference](/epsil/reference/polynomials/)
 - [Combinatorics](#combinatorics) — 11 definitions · [full reference](/epsil/reference/combinatorics/)
 - [Number theory](#number-theory) — 52 definitions · [full reference](/epsil/reference/number-theory/)
-- [Special functions](#special-functions) — 14 definitions · [full reference](/epsil/reference/special-functions/)
+- [Special functions](#special-functions) — 15 definitions · [full reference](/epsil/reference/special-functions/)
 - [Linear algebra](#linear-algebra) — 42 definitions · [full reference](/epsil/reference/linear-algebra/)
 - [Statistics](#statistics) — 35 definitions · [full reference](/epsil/reference/statistics/)
 - [Units](#units) — 7 definitions · [full reference](/epsil/reference/units/)
@@ -733,6 +733,7 @@ The [Special functions reference](/epsil/reference/special-functions/) has the f
 | `jacobiTheta` | `JacobiTheta` | `(number, complex \| infinity, complex \| infinity, number?) -> number` | Jacobi theta function θⱼ(z, τ), j ∈ &#123;1,2,3,4&#125;, nome q = e^&#123;iπτ&#125; (Fungrim convention). |
 | `logIntegral` | `LogIntegral` | `(complex \| infinity) -> number` | Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x). |
 | `polyLog` | `PolyLog` | `(complex \| infinity, complex \| infinity) -> number` | Polylogarithm Liₛ(z) = Σ_&#123;k≥1&#125; zᵏ/kˢ, at any real or complex order s. |
+| `stieltjesGamma` | `StieltjesGamma` | `(integer, number?) -> number` | Generalized Stieltjes constants γₙ(a), the Laurent coefficients of ζ(s, a) at s = 1: ζ(s, a) = 1/(s−1) + Σₙ (−1)ⁿ γₙ(a)(s−1)ⁿ/n!. |
 
 ## Linear algebra
 

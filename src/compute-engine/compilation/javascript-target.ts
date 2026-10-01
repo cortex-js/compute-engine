@@ -535,6 +535,7 @@ import {
   dirichletEtaReal,
   dirichletBetaReal,
 } from '../numerics/lerch-phi.js';
+import { stieltjesGammaReal } from '../numerics/stieltjes.js';
 import { polylogOrderReal } from '../numerics/polylog.js';
 import {
   correlation,
@@ -3348,6 +3349,7 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'PolyLog',
   'DirichletEta',
   'DirichletBeta',
+  'StieltjesGamma',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of this target. */
@@ -7594,6 +7596,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // which sum the alternating series next to s = 1 as the interpreter does.
   DirichletEta: '_SYS.dirichletEta',
   DirichletBeta: '_SYS.dirichletBeta',
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.stieltjesGamma` is the
+  // interpreter's double kernel; NaN where the value is complex (a < 0, not
+  // an integer) or the order is past `STIELTJES_MAX_ORDER`.
+  StieltjesGamma: (args, compile) =>
+    args.length === 1
+      ? `_SYS.stieltjesGamma(${compile(args[0])})`
+      : `_SYS.stieltjesGamma(${compile(args[0])}, ${compile(args[1])})`,
   LambertW: '_SYS.lambertW',
 
   // Bessel functions
@@ -12540,6 +12549,7 @@ const SYS_HELPERS = {
   dirichletEta: dirichletEtaReal,
   dirichletBeta: dirichletBetaReal,
   polyLog: polylogOrderReal,
+  stieltjesGamma: stieltjesGammaReal,
   lambertW,
   besselJ,
   besselY,

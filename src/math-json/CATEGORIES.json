@@ -695,7 +695,8 @@
       "Hypergeometric2F1",
       "JacobiTheta",
       "LogIntegral",
-      "PolyLog"
+      "PolyLog",
+      "StieltjesGamma"
     ],
     "constants": []
   },

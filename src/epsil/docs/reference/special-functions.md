@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Special functions
 
-The 14 definitions of the special functions library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 15 definitions of the special functions library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -104,3 +104,24 @@ Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x).
 MathJSON `PolyLog` · `(complex | infinity, complex | infinity) -> number`
 
 Polylogarithm Liₛ(z) = Σ_&#123;k≥1&#125; zᵏ/kˢ, at any real or complex order s.
+
+### stieltjesGamma
+
+MathJSON `StieltjesGamma` · `(integer, number?) -> number`
+
+Generalized Stieltjes constants γₙ(a), the Laurent coefficients of ζ(s, a) at s = 1: ζ(s, a) = 1/(s−1) + Σₙ (−1)ⁿ γₙ(a)(s−1)ⁿ/n!. StieltjesGamma(n) is γₙ = γₙ(1), and γ₀ is Euler's constant.
+
+```epsil
+stieltjesGamma(0)
+// ➔ "EulerGamma"
+```
+
+```epsil
+N(stieltjesGamma(1))
+// ➔ -0.0728158454836767248606
+```
+
+```epsil
+N(stieltjesGamma(2, 1/2))
+// ➔ 0.968864475220290711422
+```
