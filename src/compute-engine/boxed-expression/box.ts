@@ -2476,7 +2476,9 @@ function makeCanonicalFunctionCore(
   // canonical, so the operator's named parameters, its `lazy` flag and its
   // argument checks apply exactly as when the author writes `bob_S(…)`. A
   // field that holds a `Function` literal replaces the callee with the
-  // literal, and the inline-literal carve-out below then matches the names.
+  // literal in a call with a named argument, and the inline-literal
+  // carve-out below then matches the names (a call without names keeps its
+  // `Field` callee).
   // When neither applies and the receiver's type is a record that gives the
   // field a signature, the names are matched against that signature, below
   // with the protocol requirement. `resolveFieldCallee` (field-callee.ts)

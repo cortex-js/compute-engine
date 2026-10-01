@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **A call through a field of a constant that names an operator is the
+  direct call, also without named arguments.** With `bob` declared with
+  `isConstant: true` and the value `{S -> bob_S}`, `bob.S(3)`
+  (`Apply(Field(bob, "S"), 3)`) was kept as `Apply(Field(bob, "S"), 3)`; it
+  is now `bob_S(3)`, and prints and serializes as `bob_S(3)` (in Epsil too).
+  The operator's argument checks now apply when the call is built, not when
+  it is evaluated, as for `bob_S(3)` written directly. A call through a field
+  that holds a function literal is unchanged without named arguments; with
+  named arguments its callee is the literal.
+
 ### Issues Resolved
 
 - [#390](https://github.com/cortex-js/compute-engine/issues/390) A call through

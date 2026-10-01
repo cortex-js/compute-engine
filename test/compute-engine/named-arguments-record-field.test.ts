@@ -212,6 +212,67 @@ describe('constant receiver: the call becomes the direct call', () => {
     expect(errorCodes(e)).toEqual(['argument-names-unavailable']);
   });
 
+  test('a positional call through a literal field keeps its Field callee', () => {
+    // The literal replaces the callee only to match names; a call without
+    // names gains nothing from it.
+    const ce = engine();
+    ce.declare('lib', {
+      isConstant: true,
+      value: [
+        'Dictionary',
+        ['Tuple', "'D'", ['Function', ['Subtract', 'x', 'k'], 'x', 'k']],
+      ],
+    } as any);
+    const e = ce.box(['MemberCall', 'lib', "'D'", 10, 1] as any);
+    expect(e.toString()).toContain('Field("lib", "D")');
+    expect(e.evaluate().toString()).toBe('9');
+  });
+
+  test('a parameter named like the operator is not rewritten', () => {
+    // In `(bob_S) => bob.S(3)` the name `bob_S` is the parameter: the direct
+    // call `bob_S(3)` would apply the parameter, not the operator.
+    const ce = engine();
+    const e = ce.box([
+      'Function',
+      ['MemberCall', 'bob', "'S'", 3],
+      'bob_S',
+    ] as any);
+    expect(e.toString()).toContain('Field("bob", "S")');
+  });
+
+  test('a field symbol bound to a value is not rewritten to an inner operator', () => {
+    // `g` holds a function value; an operator `g` declared in an inner scope
+    // has the same name. The call keeps its `Field` callee: the rewrite is
+    // made only when the stored symbol and the name in scope denote the same
+    // operator. (Evaluation applies a stored symbol by NAME, in the scope
+    // where the call is evaluated, as `apply()` does for every symbol callee,
+    // so the call then reaches the inner `g`, exactly as `g(3)` there does.)
+    const ce = engine();
+    ce.declare('g', {
+      type: 'function',
+      value: ['Function', ['Multiply', 7, 'x'], 'x'],
+    } as any);
+    ce.declare('ns', {
+      isConstant: true,
+      value: ['Dictionary', ['Tuple', "'S'", 'g']],
+    } as any);
+    expect(ce.box(['MemberCall', 'ns', "'S'", 3] as any).evaluate().re).toBe(
+      21
+    );
+    ce.pushScope();
+    try {
+      ce.declare('g', {
+        signature: '(number) -> number',
+        evaluate: (_ops, { engine }) => engine.number(-1),
+      });
+      const e = ce.box(['Apply', ['Field', 'ns', "'S'"], 3] as any);
+      expect(e.toString()).toContain('Field("ns", "S")');
+      expect(e.evaluate().re).toBe(ce.box(['g', 3]).evaluate().re);
+    } finally {
+      ce.popScope();
+    }
+  });
+
   test('a random operator in a field keeps its effects', () => {
     const ce = engine();
     ce.declare('lib', {
@@ -237,6 +298,32 @@ describe('record-typed receiver: names from the declared type', () => {
     expect(e.toString()).toBe('Apply(Field("rec", "S"), 3, 5)');
     expect(e.evaluate().toString()).toBe('15');
     expect(e.type.toString()).toBe('number');
+  });
+
+  test('a field typed as an overload set matches the names of an arm', () => {
+    const ce = engine();
+    ce.declare('ovl_S', {
+      signature:
+        '((x: number, factor: number) -> number) & ((s: string) -> string)',
+      evaluate: (ops, { engine }) =>
+        ops[0].string !== undefined
+          ? engine.string(ops[0].string.toUpperCase())
+          : engine.number(ops[0].re * ops[1].re),
+    });
+    ce.declare('ovl', {
+      type: 'record{S: ((x: number, factor: number) -> number) & ((s: string) -> string)}',
+      value: ['Dictionary', ['Tuple', "'S'", 'ovl_S']],
+    } as any);
+    const e = ce.box([
+      'MemberCall',
+      'ovl',
+      "'S'",
+      N('factor', 5),
+      N('x', 3),
+    ] as any);
+    expect(errorCodes(e)).toEqual([]);
+    expect(e.toString()).toBe('Apply(Field("ovl", "S"), 3, 5)');
+    expect(e.evaluate().toString()).toBe('15');
   });
 
   test('an optional parameter left out is not supplied', () => {

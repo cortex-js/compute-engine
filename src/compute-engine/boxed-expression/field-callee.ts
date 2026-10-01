@@ -36,9 +36,11 @@ import { qualifiedFieldParts } from './named-arguments.js';
  *      then gets everything a direct call gets: named arguments, `lazy`
  *      (held arguments), the static argument checks, its result type and
  *      compilation.
- *    - a `Function` literal: the result is `kind: 'literal'`, and the caller
- *      replaces the callee with the literal. The names are then matched by
- *      the inline-literal rule, as for `((x) => x + 1)(x: 5)`.
+ *    - a `Function` literal, in a call with a named argument: the result is
+ *      `kind: 'literal'`, and the caller replaces the callee with the
+ *      literal. The names are then matched by the inline-literal rule, as for
+ *      `((x) => x + 1)(x: 5)`. A call without names keeps its `Field`
+ *      callee: a literal cannot be `lazy`, so the replacement gives nothing.
  * 2. **The receiver's type is a record whose field has a signature.** When
  *    the call has a named argument and the receiver symbol's type is
  *    `record{S: (x: number, factor: number?) -> number}`, the names are
@@ -76,17 +78,24 @@ export function resolveFieldCallee(
 
   const stored = constantFieldValue(receiver, parts.member);
   if (stored !== undefined) {
-    if (isFunction(stored, 'Function'))
+    // A literal is put in place of the callee only so that the names can be
+    // matched against its parameters. A literal cannot be `lazy`, so a call
+    // without names gains nothing, and keeps its `Field` callee.
+    if (named && isFunction(stored, 'Function'))
       return { kind: 'literal', literal: stored };
     if (isSymbol(stored)) {
       // The direct call is boxed by NAME, so the name must denote, here, the
-      // operator the stored symbol denotes. A local binding of the same name
-      // (a function parameter called `bob_S`, say) would make the direct call
-      // reach something else: the rewrite is then not made.
+      // operator the stored symbol denotes. Two bindings would make the
+      // direct call reach something else, and the rewrite is then not made:
+      // a local binding of the same name (a function parameter called
+      // `bob_S`, or an operator `g` declared in an inner scope), when the
+      // stored symbol is bound to a VALUE (a global `g` that holds a
+      // function), or to another operator.
       const def = lookupApplicable(stored.symbol, scope, ce);
       if (
         def !== undefined &&
         isOperatorDef(def) &&
+        stored.valueDefinition === undefined &&
         (stored.operatorDefinition === undefined ||
           stored.operatorDefinition === def.operator)
       )
