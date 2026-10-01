@@ -47,6 +47,28 @@
 
 ### Issues Resolved
 
+- **A complex multiple of an infinity keeps its direction, and the heads that
+  rejected an infinity at boxing answer it.** `Multiply(i, +∞)` was `~∞`; it
+  is now `DirectedInfinity(i)`, and `(1 + i)·∞` is
+  `DirectedInfinity((1 + i)/√2)`. `Real(DirectedInfinity(i))` was unevaluated
+  and is `0`, `Imaginary` of it is `+∞`, `Real(DirectedInfinity(-1))` is `-∞`,
+  and `Abs` of any directed infinity is `+∞`, so `Real(i·∞)` is `0` (it was
+  `Indeterminate`). `Sqrt(-∞)` was `~∞` and is `DirectedInfinity(i)`;
+  `Gamma(DirectedInfinity(±i))` was unevaluated and is `0` (DLMF 5.11.9).
+  `Ceil`, `Floor` and `Round` of `~∞` were boxing errors and are `~∞`;
+  `Sign(~∞)` is `Indeterminate`. `Arcsin(+∞)` was a boxing error and is
+  `DirectedInfinity(-i)` (`DirectedInfinity(i)` at `-∞`), `Arccos` the
+  opposite, and both are `~∞` at `~∞`; `Arctan`, `Artanh` and `Arsech` of `~∞`
+  were boxing errors and are `Indeterminate`; `Arsinh(~∞)` is `~∞`;
+  `Arcosh(-∞)` was unevaluated (`∞ + iπ` under `.N()`) and is `+∞`, as is
+  `Arcosh(~∞)`; `Ln(-∞)` is `+∞` under `evaluate()` and `.N()`; `Exp(~∞)` and
+  `Power(e, ~∞)` were boxing errors and are `Indeterminate`. `Sin`, `Cos`,
+  `Tan`, `Cot`, `Sec` and `Csc` of `±∞` and of `~∞` were boxing errors, and
+  are `Indeterminate`. `Arccot(~∞)` is `Indeterminate`, not Mathematica's `0`,
+  because `Arccot(+∞) = 0` and `Arccot(-∞) = π` on this branch. The types
+  claimed for finite arguments are unchanged, and no head claims `real` where
+  the value is complex or directed (#396, contributed by
+  [enumeratio](https://github.com/enumeratio)).
 - `Solve` found no root of a linear equation whose coefficient of the unknown
   is a sum: `x − ax + a = 0`, `πx + x = 1` and `x = e(x − 1)` gave `[]`. Only
   the shape `ax + b` was recognized. They are now solved from their

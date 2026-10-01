@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 682 functions and constants of the standard library, by category.
+The 683 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -30,7 +30,7 @@ To search the library by concept rather than by name, use
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
 - [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
-- [Arithmetic](#arithmetic) — 99 definitions · [full reference](/epsil/reference/arithmetic/)
+- [Arithmetic](#arithmetic) — 100 definitions · [full reference](/epsil/reference/arithmetic/)
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
 - [Calculus](#calculus) — 19 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 17 definitions · [full reference](/epsil/reference/polynomials/)
@@ -452,7 +452,8 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `besselY` | `BesselY` | `(order: complex, complex \| infinity) -> number` | Bessel function of the second kind (Neumann function) |
 | `beta` | `Beta` | `(complex \| infinity, complex \| infinity) -> number` | Euler beta function |
 | `catalanConstant` | `CatalanConstant` | constant `real<0.915965594177219..0.9159655941772191>` = `0.915965594177219015055` | Catalan's constant G ≈ 0.9160. |
-| `ceil` | `Ceil` | `(real \| signed_infinity) -> integer \| signed_infinity` | Rounds a number up to the next largest integer |
+| `ceil` | `Ceil` | `(real \| signed_infinity \| ~oo) -> integer \| signed_infinity \| ~oo` | Rounds a number up to the next largest integer |
+| `directedInfinity` | `DirectedInfinity` | `(number) -> number` | The infinite point reached along the direction d: DirectedInfinity(i) is i·∞. |
 | `chop` | `Chop` | `(T) -> T where T: number` | Replace tiny numeric values with zero. |
 | `clamp` | `Clamp` | `(real \| signed_infinity, real \| signed_infinity, real \| signed_infinity) -> real \| signed_infinity` | Clamp a value to the range [lo, hi] = min(max(x, lo), hi). |
 | `complex` | `Complex` | `(real: number, imaginary: number) -> complex` | Construct a complex number from real and imaginary parts. |
@@ -472,7 +473,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `exponentialE` | `ExponentialE` | constant `real<2.718281828459045..2.718281828459046>` = `2.71828182845904523536` | Euler's number e ≈ 2.71828, the base of the natural logarithm. |
 | — | `Factorial` | `(complex \| infinity) -> number` | Factorial function: the product of all positive integers less than or equal to n |
 | `factorial2` | `Factorial2` | `(complex \| infinity) -> number` | Double Factorial Function |
-| `floor` | `Floor` | `(real \| signed_infinity) -> integer \| signed_infinity` | Rounds a number down to the nearest integer. |
+| `floor` | `Floor` | `(real \| signed_infinity \| ~oo) -> integer \| signed_infinity \| ~oo` | Rounds a number down to the nearest integer. |
 | `fract` | `Fract` | `(real \| signed_infinity) -> real<0..1>` | Fractional part of a number: x - floor(x) |
 | `gcd` | `GCD` | `(any*) -> number` | Greatest Common Divisor |
 | `gamma` | `Gamma` | `(complex \| infinity, (complex \| infinity)?) -> number` | Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt. |
@@ -514,7 +515,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | — | `PlusMinus` | `(T, U) -> tuple<T, U> where T: value, U: value` | Plus or Minus |
 | `polyGamma` | `PolyGamma` | `(order: integer, complex \| infinity) -> number` | Polygamma function, the n-th derivative of the digamma function |
 | `positiveInfinity` | `PositiveInfinity` | constant `+oo` = `+oo` | Positive infinity (+∞). |
-| — | `Power` | `(complex \| infinity, complex \| signed_infinity) -> number` | Exponentiation: raise a base to a power. |
+| — | `Power` | `(complex \| infinity, complex \| signed_infinity \| ~oo) -> number` | Exponentiation: raise a base to a power. |
 | — | `PreDecrement` | `(number) -> number` | Decrement a number by one. |
 | — | `PreIncrement` | `(number) -> number` | Increment a number by one. |
 | `product` | `Product` | `(any, tuple*) -> number` | `Product(f, a, b)` computes the product of `f` from `a` to `b` |
@@ -524,8 +525,8 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `real` | `Real` | `(complex \| infinity) -> number` | Real part of a complex number. |
 | `remainder` | `Remainder` | `(T, T) -> T where T: number` | IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`) |
 | `root` | `Root` | `(complex \| infinity, complex \| infinity) -> number` | n-th root of a value. |
-| `round` | `Round` | `(real \| signed_infinity, integer?) -> real \| signed_infinity` | Rounds a number to the nearest integer, or (with a precision argument) to `n` decimal places. |
-| `sign` | `Sign` | `(complex \| signed_infinity) -> complex` | Sign of a number: -1, 0, or 1 for a real; `z/\|z\|`, the point of the unit circle in its direction, for a complex `z`. |
+| `round` | `Round` | `(real \| signed_infinity \| ~oo, integer?) -> real \| signed_infinity \| ~oo` | Rounds a number to the nearest integer, or (with a precision argument) to `n` decimal places. |
+| `sign` | `Sign` | `(complex \| signed_infinity \| ~oo) -> complex` | Sign of a number: -1, 0, or 1 for a real; `z/\|z\|`, the point of the unit circle in its direction, for a complex `z`. |
 | `sqrt` | `Sqrt` | `(complex \| infinity) -> complex \| infinity` | Square Root |
 | — | `Square` | `(number) -> number` | Square of a number: x^2. |
 | — | `Subtract` | `(number+) -> number` | Difference between two or more values. |
@@ -543,26 +544,26 @@ The [Trigonometry reference](/epsil/reference/trigonometry/) has the full descri
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `arccos` | `Arccos` | `(complex) -> number` | Arccosine, the inverse cosine function. |
-| `arccot` | `Arccot` | `(complex \| signed_infinity) -> number` | Arccotangent, the inverse cotangent function. |
+| `arccos` | `Arccos` | `(complex \| signed_infinity \| ~oo) -> number` | Arccosine, the inverse cosine function. |
+| `arccot` | `Arccot` | `(complex \| signed_infinity \| ~oo) -> number` | Arccotangent, the inverse cotangent function. |
 | `arccsc` | `Arccsc` | `(complex \| infinity) -> number` | Arccosecant, the inverse cosecant function. |
-| `arcosh` | `Arcosh` | `(complex \| signed_infinity) -> number` | Inverse hyperbolic cosine (area hyperbolic cosine). |
+| `arcosh` | `Arcosh` | `(complex \| signed_infinity \| ~oo) -> number` | Inverse hyperbolic cosine (area hyperbolic cosine). |
 | `arcoth` | `Arcoth` | `(complex \| infinity) -> number` | Inverse hyperbolic cotangent (area hyperbolic cotangent). |
 | `arcsch` | `Arcsch` | `(complex \| infinity) -> number` | Inverse hyperbolic cosecant (area hyperbolic cosecant). |
 | `arcsec` | `Arcsec` | `(complex \| infinity) -> number` | Arcsecant, the inverse secant function. |
-| `arcsin` | `Arcsin` | `(complex) -> number` | Arcsine, the inverse sine function. |
-| `arctan` | `Arctan` | `(complex \| signed_infinity) -> number` | Inverse tangent. |
+| `arcsin` | `Arcsin` | `(complex \| signed_infinity \| ~oo) -> number` | Arcsine, the inverse sine function. |
+| `arctan` | `Arctan` | `(complex \| signed_infinity \| ~oo) -> number` | Inverse tangent. |
 | `arctan2` | `Arctan2` | `(y: real \| signed_infinity, x: real \| signed_infinity) -> real` | Two-argument arctangent giving the angle of a vector. |
-| `arsech` | `Arsech` | `(complex \| signed_infinity) -> number` | Inverse hyperbolic secant (area hyperbolic secant). |
-| `arsinh` | `Arsinh` | `(complex \| signed_infinity) -> number` | Inverse hyperbolic sine (area hyperbolic sine). |
-| `artanh` | `Artanh` | `(complex \| signed_infinity) -> number` | Inverse hyperbolic tangent (area hyperbolic tangent). |
-| `cos` | `Cos` | `(complex) -> number` | Cosine of an angle. |
+| `arsech` | `Arsech` | `(complex \| signed_infinity \| ~oo) -> number` | Inverse hyperbolic secant (area hyperbolic secant). |
+| `arsinh` | `Arsinh` | `(complex \| signed_infinity \| ~oo) -> number` | Inverse hyperbolic sine (area hyperbolic sine). |
+| `artanh` | `Artanh` | `(complex \| signed_infinity \| ~oo) -> number` | Inverse hyperbolic tangent (area hyperbolic tangent). |
+| `cos` | `Cos` | `(complex \| signed_infinity \| ~oo) -> number` | Cosine of an angle. |
 | `cosIntegral` | `CosIntegral` | `(complex \| infinity) -> number` | Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt. |
 | `cosh` | `Cosh` | `(complex \| signed_infinity) -> number` | Hyperbolic cosine. |
 | `coshIntegral` | `CoshIntegral` | `(complex \| infinity) -> number` | Hyperbolic cosine integral: γ + ln\|x\| + ∫₀ˣ (cosh(t)−1)/t dt. |
-| `cot` | `Cot` | `(complex) -> number` | Cotangent, the reciprocal of tangent. |
+| `cot` | `Cot` | `(complex \| signed_infinity \| ~oo) -> number` | Cotangent, the reciprocal of tangent. |
 | `coth` | `Coth` | `(complex \| signed_infinity) -> number` | Hyperbolic cotangent, the reciprocal of hyperbolic tangent. |
-| `csc` | `Csc` | `(complex) -> number` | Cosecant, the reciprocal of sine. |
+| `csc` | `Csc` | `(complex \| signed_infinity \| ~oo) -> number` | Cosecant, the reciprocal of sine. |
 | `csch` | `Csch` | `(complex \| signed_infinity) -> number` | Hyperbolic cosecant, the reciprocal of hyperbolic sine. |
 | `dms` | `DMS` | `(number, number?, number?) -> number` | Construct an angle from degrees, minutes, and seconds. |
 | `degrees` | `Degrees` | `(real) -> real` | Convert an angle in degrees. |
@@ -573,14 +574,14 @@ The [Trigonometry reference](/epsil/reference/trigonometry/) has the full descri
 | `inverseFunction` | `InverseFunction` | `(function) -> function` | Inverse of a function. |
 | `inverseHaversine` | `InverseHaversine` | `(real) -> number` | Inverse haversine function. |
 | `pi` | `Pi` | constant `real<3.141592653589793..3.141592653589794>` = `3.14159265358979323846` | The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter. |
-| `sec` | `Sec` | `(complex) -> number` | Secant, the reciprocal of cosine. |
+| `sec` | `Sec` | `(complex \| signed_infinity \| ~oo) -> number` | Secant, the reciprocal of cosine. |
 | `sech` | `Sech` | `(complex \| signed_infinity) -> number` | Hyperbolic secant, the reciprocal of hyperbolic cosine. |
-| `sin` | `Sin` | `(complex) -> number` | Sine of an angle. |
+| `sin` | `Sin` | `(complex \| signed_infinity \| ~oo) -> number` | Sine of an angle. |
 | `sinIntegral` | `SinIntegral` | `(complex \| infinity) -> number` | Sine integral: ∫₀ˣ sin(t)/t dt. |
 | `sinc` | `Sinc` | `(complex \| signed_infinity) -> complex` | Unnormalized sinc function: sin(x)/x with sinc(0)=1. |
 | `sinh` | `Sinh` | `(complex \| signed_infinity) -> number` | Hyperbolic sine. |
 | `sinhIntegral` | `SinhIntegral` | `(complex \| infinity) -> number` | Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt. |
-| `tan` | `Tan` | `(complex) -> number` | Tangent of an angle. |
+| `tan` | `Tan` | `(complex \| signed_infinity \| ~oo) -> number` | Tangent of an angle. |
 | `tanh` | `Tanh` | `(complex \| signed_infinity) -> number` | Hyperbolic tangent. |
 | `trigExpand` | `TrigExpand` | `(value) -> value` | Expand trigonometric and hyperbolic functions of sums and integer multiples of angles. |
 | `trigReduce` | `TrigReduce` | `(value) -> value` | Rewrite products and integer powers of trigonometric and hyperbolic functions as a linear combination of functions of multiple angles (the inverse of TrigExpand). |

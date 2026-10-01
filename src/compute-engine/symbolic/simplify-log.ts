@@ -227,7 +227,8 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     // currently shadowed by the unconditional "Ln, Log (basic evaluation)"
     // rule in simplify-rules.ts, which calls `.ln()` and reduces these
     // before this one runs — but keep it in sync with `evaluate()` in case
-    // that ordering changes. `ln(−∞)` has no exact spelling and declines.
+    // that ordering changes. An anonymous infinity has no exact spelling and
+    // declines.
     {
       const special = logarithmAtExceptionalPoint(ce, arg, undefined, false);
       if (special !== undefined)

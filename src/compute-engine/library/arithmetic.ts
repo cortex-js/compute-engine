@@ -297,10 +297,11 @@ import { parseType } from '../../common/type/parse.js';
 const INTEGER_PREDICATE_CARRIER_TYPE = parseType('complex | nan');
 
 /** The carrier of `Power`'s EXPONENT slot: the finite complex numbers and
- * the signed infinities, excluding `~oo` (no base has a value there). The
- * `Power` evaluate handler enforces it — see the comment on the `Power`
- * signature. */
-const POWER_EXPONENT_CARRIER_TYPE = parseType('complex | signed_infinity');
+ * the three named infinities. The `Power` evaluate handler enforces it —
+ * see the comment on the `Power` signature. */
+const POWER_EXPONENT_CARRIER_TYPE = parseType(
+  'complex | signed_infinity | ~oo'
+);
 
 /**
  * Above this many decimal digits an exact factorial is impractical to
@@ -396,6 +397,12 @@ import {
   unionHasGenuineScalarBranch,
 } from '../collection-utils.js';
 import { signFromAssumedPart } from './complex.js';
+import {
+  DIRECTED_INFINITY,
+  directedInfinity,
+  infiniteDirection,
+  multiplyInfinity,
+} from '../boxed-expression/directed-infinity.js';
 import { complexParts } from './complex-parts.js';
 
 // When processing an arithmetic expression, the following are the core
@@ -2623,6 +2630,7 @@ function specialFunctionType(
 /** `Sign`'s result on the extended real line: exactly {−1, 0, 1}. Off that
  * line the result is the complex sign `z/|z|`. The `| nan` forms are the
  * same claims for an operand that may be NaN. */
+const COMPLEX_INFINITY_TYPE = parseType('~oo');
 const SIGN_RANGE_TYPE = parseType('integer<-1..1>');
 const SIGN_RANGE_NAN_TYPE = parseType('integer<-1..1> | nan');
 const COMPLEX_NAN_TYPE = parseType('complex | nan');
@@ -3735,19 +3743,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       keywords: ['round up', 'ceiling'],
       complexity: 1250,
       broadcastable: true,
-      // The carrier is the extended real line: rounding depends on the
-      // order of the real line, which the complex numbers lack, and
-      // `Ceil(±∞) = ±∞` puts the signed infinities on both sides. A
-      // proven off-carrier operand — a complex value, `~oo` — is a boxing
-      // error; there is no component-wise ceiling of a complex number
-      // (the compiled lanes agree — they are real-only for this
-      // operator). The slim `'types'` handler only NARROWS: a proven
-      // finite real sharpens the claim to `integer`, a proven ±∞ to the
-      // signed pair, and everything else falls to the declared result
-      // plus the derived `nan` arm exactly where the argument can carry
-      // one. (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4
-      // "Choosing carriers".)
-      signature: '(real | signed_infinity) -> integer | signed_infinity',
+      // The carrier is the extended real line and the undirected `~oo`:
+      // rounding depends on the order of the real line, which the complex
+      // numbers lack, and `Ceil(±∞) = ±∞` puts the signed infinities on
+      // both sides. Rounding an infinite magnitude with no direction leaves
+      // it as it is, `Ceil(~oo) = ~oo`. A proven off-carrier operand — a
+      // finite complex value — is a boxing error; there is no
+      // component-wise ceiling of a complex number (the compiled lanes
+      // agree — they are real-only for this operator). The slim `'types'`
+      // handler only NARROWS: a proven finite real sharpens the claim to
+      // `integer`, a proven ±∞ to the signed pair, and everything else
+      // falls to the declared result plus the derived `nan` arm exactly
+      // where the argument can carry one. (Domain-signature doctrine:
+      // `docs/ERROR-MODEL.md` §4 "Choosing carriers".)
+      signature:
+        '(real | signed_infinity | ~oo) -> integer | signed_infinity | ~oo',
       examples: ['[Ceil(2.3), Ceil(-2.7)]'],
       // Explicit: the DERIVED default answers `reject` for an
       // extended-real carrier, and `Ceil(NaN)` must be `NaN`.
@@ -3771,14 +3781,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation, expression }) =>
-        applyRounding(
-          x,
-          'ceil',
-          Math.ceil,
-          (x) => x.ceil(),
-          numericApproximation,
-          originalOperand(expression, 0)
-        ),
+        infinitePoint(x) === '~oo'
+          ? x
+          : applyRounding(
+              x,
+              'ceil',
+              Math.ceil,
+              (x) => x.ceil(),
+              numericApproximation,
+              originalOperand(expression, 0)
+            ),
     },
 
     Chop: {
@@ -4189,9 +4201,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `Exp(x)` canonicalizes to `Power(e, x)` below, so no `Exp`
       // application survives to be validated or evaluated — its behavior
       // at every exceptional point is `Power`'s, and a precise carrier
-      // declared here would be a claim nothing enforces. `Power`'s own
-      // flip landed 2026-09-01, and governs: `Exp(~oo)` is an
-      // incompatible-type error (the exponent slot excludes `~oo`),
+      // declared here would be a claim nothing enforces. `Power` governs:
+      // `Exp(~oo)` is `Indeterminate` (no limit in any direction),
       // `Exp(NaN)` propagates, `Exp(±∞)` keeps its values (+∞ and 0).
       signature: '(number) -> number',
       examples: ['[Exp(1), Exp(Ln(x)), N(Exp(2))]'],
@@ -4558,11 +4569,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       // Same domain-signature shape and rationale as `Ceil` above: the
-      // extended-real carrier (`Floor(±∞) = ±∞`), `NaN` propagated by the
-      // generic gate, a proven off-carrier operand a boxing error, and
-      // the slim handler narrowing to `integer` / the signed pair where
-      // the operand proves it.
-      signature: '(real | signed_infinity) -> integer | signed_infinity',
+      // extended-real carrier with `~oo` (`Floor(±∞) = ±∞`, `Floor(~oo) =
+      // ~oo`), `NaN` propagated by the generic gate, a proven off-carrier
+      // operand a boxing error, and the slim handler narrowing to `integer`
+      // / the signed pair where the operand proves it.
+      signature:
+        '(real | signed_infinity | ~oo) -> integer | signed_infinity | ~oo',
       examples: ['[Floor(2.7), Floor(-2.3)]'],
       nanBehavior: 'propagate',
       partiality: 'total',
@@ -4580,14 +4592,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation, expression }) =>
-        applyRounding(
-          x,
-          'floor',
-          Math.floor,
-          (x) => x.floor(),
-          numericApproximation,
-          originalOperand(expression, 0)
-        ),
+        infinitePoint(x) === '~oo'
+          ? x
+          : applyRounding(
+              x,
+              'floor',
+              Math.floor,
+              (x) => x.floor(),
+              numericApproximation,
+              originalOperand(expression, 0)
+            ),
     },
 
     Fract: {
@@ -4779,6 +4793,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // This is exact, so return it regardless of numericApproximation.
         if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
           return engine.ComplexInfinity;
+        // Γ decays along the imaginary axis, |Γ(iy)| ~ √(2π|y|)·e^(−π|y|/2)
+        // (DLMF 5.11.9), so Γ(±i·∞) = 0.
+        const direction = infiniteDirection(x);
+        if (direction !== undefined && direction.re === 0) return engine.Zero;
         // Γ at an infinite argument. Also exact, so it does not wait for
         // `numericApproximation` either.
         const infinite = infiniteGammaFamilyValue(x, engine);
@@ -5272,8 +5290,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // decided here (ruling recorded in
       // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
       // batch 8; each limit verified numerically):
-      // `W₀(+∞) = +∞` (W₀(10⁶) = 11.4, growing like ln x); `W₀(−∞)`
-      // follows the `Ln(−∞)` treatment — `W₀(−x) ≈ ln x + iπ` (W₀(−10¹²) =
+      // `W₀(+∞) = +∞` (W₀(10⁶) = 11.4, growing like ln x); `W₀(−∞)`:
+      // `W₀(−x) ≈ ln x + iπ` (W₀(−10¹²) =
       // 24.4 + 3.02i, the imaginary part tending to π), an infinite real
       // part with a finite imaginary offset that no exact number spells,
       // so `evaluate()` stays symbolic and `.N()` answers the machine
@@ -5536,9 +5554,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The carrier is every point where the logarithm has a value — all
       // of `number` except NaN: the finite complex numbers (`Ln(0) = −∞`
       // is an in-carrier pole VALUE; `Ln(−1) = iπ` is the complex
-      // extension), the signed infinities (`Ln(+∞) = +∞`;
-      // `Ln(−∞) = ∞ + iπ`, which is why the result carries the wide
-      // `infinity` arm), and `~oo`: `Ln(~oo) = ~oo`, because the real
+      // extension), the signed infinities (`Ln(±∞) = +∞`: at −∞ the
+      // imaginary part π stays bounded and drops out of the infinity), and
+      // `~oo`: `Ln(~oo) = ~oo`, which is why the result carries the wide
+      // `infinity` arm, because the real
       // part grows without bound in every direction of approach while the
       // imaginary part stays bounded, so the modulus is infinite — the
       // point at infinity (ruled 2026-09-01, reversing the 2026-08-31
@@ -5589,8 +5608,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
 
         // The exceptional points answer the same exact values on the
-        // numeric route (`Ln(+∞) = +∞`, `Ln(~oo) = ~oo`), and `Ln(−∞)` its
-        // machine complex `∞ + iπ`.
+        // numeric route (`Ln(±∞) = +∞`, `Ln(~oo) = ~oo`).
         const special = logarithmAtExceptionalPoint(engine, z, undefined, true);
         if (special !== undefined) return special;
 
@@ -6711,6 +6729,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const r = measurementMultiply(engine!, evaluated);
           return numericApproximation ? r?.N() : r;
         }
+        // A complex multiple of an infinity keeps its direction
+        // (`i·∞ = DirectedInfinity(i)`), where the product rules below
+        // would answer the undirected `~∞`.
+        const directed = multiplyInfinity(engine!, evaluated);
+        if (directed !== undefined) return directed;
         // Only a pure number literal or a pure symbol passes raw; every other
         // operand passes its numeric value, so it is evaluated once and its
         // side effects run once — see the matching comment in `Add`.
@@ -6864,6 +6887,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const r = measurementNegate(engine, evalX);
           return numericApproximation ? r?.N() : r;
         }
+        // A directed infinity turns half a revolution: `−(i·∞) = −i·∞`.
+        const turned = multiplyInfinity(engine, [engine.NegativeOne, evalX]);
+        if (turned !== undefined) return turned;
         const neg = evalX.neg();
         // If the operand only became a collection (vector/matrix) *after*
         // evaluation — e.g. `Negate(Multiply(A, B))` — the broadcast path was
@@ -6978,12 +7004,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //   `~oo` is `~oo` and a negative power is 0 in every direction of
       //   approach, so those values are genuine (`(~oo)^-1 = 0`, agreeing
       //   with the `Divide` route's `1/~oo`).
-      // - The EXPONENT excludes `~oo`: `b^z` has no value at `z = ~oo`
-      //   for ANY base — the result depends on the direction of approach
-      //   in every case — so `2^~oo`, `0^~oo`, `(~oo)^~oo`, and
-      //   `Exp(~oo)`/`Exp2(~oo)` (which canonicalize to `Power`) are
-      //   incompatible-type errors. Indeterminate FORMS between admitted
-      //   operands keep their NaN value (`0^0`, `1^∞`, `(±∞)^0`).
+      // - The EXPONENT admits `~oo`, where `b^z` has no value for ANY base —
+      //   the result depends on the direction of approach in every case —
+      //   so `2^~oo`, `0^~oo`, `(~oo)^~oo`, and `Exp(~oo)`/`Exp2(~oo)` (which
+      //   canonicalize to `Power`) are `Indeterminate`. Indeterminate FORMS
+      //   between admitted operands keep their NaN value (`0^0`, `1^∞`,
+      //   `(±∞)^0`).
       // A PROVABLE violation errors at boxing, through the validation
       // seam that checks a `canonical`-handler head against its
       // declaration; a violation only a VALUE reveals surfaces at
@@ -6999,7 +7025,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // discipline relies on it (`resultIsComplexValued`,
       // javascript-target.ts), and the per-call sharpness lives in the
       // type handler below.
-      signature: '(complex | infinity, complex | signed_infinity) -> number',
+      signature:
+        '(complex | infinity, complex | signed_infinity | ~oo) -> number',
       examples: ['[2^10, 2^(1/2), x^2 * x^3]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -7366,25 +7393,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const listTuple = listCoordinateTupleOperandError(engine!, [x, n]);
         if (listTuple !== undefined) return listTuple;
         // The exponent carrier, enforced at the evaluate seam (see the
-        // comment on the signature above): a `~oo` exponent — infinite
-        // with no signed direction — is off-carrier, and gets the same
-        // incompatible-type error value that boxing validation would have
-        // produced. `NaN` is not an error (it propagates), and the signed
-        // infinities are admitted values. The BASE slot needs no twin
-        // check: its carrier admits every non-finite number. When BOTH
-        // conditions hold — `Power(NaN, ~oo)` — the NaN wins: the
-        // dispatch-time NaN-propagation gate runs before this handler, so
-        // a NaN operand short-circuits the whole application (matching
-        // IEEE `pow(NaN, x) = NaN`); this check only ever sees NaN-free
-        // operands.
+        // comment on the signature above): a `~oo` exponent has no limit
+        // for any base, so it is `Indeterminate`; an anonymous infinity
+        // (`∞ + i`) is off-carrier, and gets the same incompatible-type
+        // error value that boxing validation would have produced. `NaN` is
+        // not an error (it propagates), and the signed infinities are
+        // admitted values. The BASE slot needs no twin check: its carrier
+        // admits every non-finite number. When BOTH conditions hold —
+        // `Power(NaN, ~oo)` — the NaN wins: the dispatch-time
+        // NaN-propagation gate runs before this handler, so a NaN operand
+        // short-circuits the whole application (matching IEEE `pow(NaN, x)
+        // = NaN`); this check only ever sees NaN-free operands.
         if (
           isNumber(n) &&
           n.isFinite === false &&
           n.isNaN !== true &&
           n.isPositive !== true &&
           n.isNegative !== true
-        )
+        ) {
+          if (infinitePoint(n) === '~oo')
+            return indeterminateFormAnswer(engine!, [x, n]);
           return engine!.typeError(POWER_EXPONENT_CARRIER_TYPE, n.type, n);
+        }
         const evalBase = x;
         if (evalBase.operator === 'Quantity') {
           const r = quantityPower(engine!, evalBase, n);
@@ -7811,7 +7841,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (may-marker) default is the honest declaration.
       // (`docs/ERROR-MODEL.md` §4; the Phase F record in
       // `docs/plans/2026-08-30-error-model-implementation.md`.)
-      signature: '(real | signed_infinity, integer?) -> real | signed_infinity',
+      signature:
+        '(real | signed_infinity | ~oo, integer?) -> real | signed_infinity | ~oo',
       examples: ['[Round(2.5), Round(-2.5), Round(3.14159, 2)]'],
       nanBehavior: ['propagate'],
       type: ([x, n], context) => {
@@ -7867,6 +7898,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x, n], { engine: ce, numericApproximation, expression }) => {
+        // Rounding an infinite magnitude with no direction leaves it as it
+        // is, whatever the precision: `Round(~oo) = ~oo`.
+        if (infinitePoint(x) === '~oo') return x;
         // A half rounds AWAY FROM ZERO at every precision (`Round(-0.5)` is
         // `-1`, `Round(2.5)` is `3`; user decision, 2026-09-21). The
         // big-number lane `BigDecimal.round()` already does that; the machine
@@ -7989,13 +8023,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // the bounds without consulting the sgn handler; off the real line
       // it is the usual convention `z/|z|` — `Sign(i)` is `i`,
       // `Sign(3 + 4i)` is `3/5 + 4i/5` — the reading Fungrim (entry
-      // 09c107), SymPy and Mathematica share. `~oo` has no direction and
-      // stays off the carrier, so `Sign(~oo)` is a boxing error. The type
+      // 09c107), SymPy and Mathematica share. `~oo` has no direction, so
+      // `Sign(~oo)` is `Indeterminate`, as Mathematica answers. The type
       // handler keeps the sharp ranged tier for a proven extended-real
       // argument and answers `complex` otherwise; the generic policy gate
       // adds the `nan` arm exactly where the argument can carry one.
       // (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4.)
-      signature: '(complex | signed_infinity) -> complex',
+      signature: '(complex | signed_infinity | ~oo) -> complex',
       examples: ['[Sign(-3), Sign(0), Sign(3 + 4i)]'],
       type: ([x], context) => {
         if (x === undefined)
@@ -8011,7 +8045,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // NaN-free part: the NaN member alone must not turn a real operand
         // into a complex one.
         if (t !== 'never' && factsOf(t).nan) return undefined;
-        const maybeNaN = couldMatch(t, 'nan');
+        // `Sign(~oo)` is `Indeterminate`, which is `nan`-typed.
+        const maybeNaN =
+          couldMatch(t, 'nan') || couldMatch(t, COMPLEX_INFINITY_TYPE);
         const real = factsOf(maybeNaN ? withoutNaN(t) : t).extendedReal;
         if (!maybeNaN)
           return BoxedType.forResult(
@@ -8052,6 +8088,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Under `.N()`, the sign jumps at 0, and the float of an exact
         // operand near 0 can have the wrong sign: the exact value of the
         // operand is used then (`exactZeroJumpOperand()`).
+        // z/|z| needs a direction, which `~oo` lacks: there is no limit.
+        if (infinitePoint(x) === '~oo')
+          return indeterminateFormAnswer(engine, [x]);
         x = exactZeroJumpOperand(x, numericApproximation, expression);
         if (x.isSame(0)) return engine.Zero;
         if (x.isPositive) return engine.One;
@@ -8461,6 +8500,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       isConstant: true,
       holdUntil: 'never',
       value: (engine) => engine.ComplexInfinity,
+    },
+
+    DirectedInfinity: {
+      description:
+        'The infinite point reached along the direction d: DirectedInfinity(i) is i·∞. A real direction is a signed infinity and the direction 0 is the undirected ComplexInfinity.',
+      examples: [
+        '[DirectedInfinity(i), DirectedInfinity(-2), i * PositiveInfinity]',
+      ],
+      complexity: 1200,
+      // The top numeric type, like `ComplexInfinity`: the non-finite typing
+      // convention admits an infinite value at `number` only, and the
+      // direction normalizes to a signed infinity or `~oo` for a real or zero
+      // `d`.
+      signature: '(number) -> number',
+      evaluate: ([d], { engine, numericApproximation }) => {
+        const r = directedInfinity(engine, d);
+        if (r === undefined) return undefined;
+        const same = isFunction(r, DIRECTED_INFINITY) && r.op1.isSame(d);
+        return same && !numericApproximation ? undefined : r;
+      },
     },
 
     PositiveInfinity: {
@@ -10695,6 +10754,8 @@ function evaluateAbs(
   // `measurementLipschitzUnary`).
   const m = measurementLipschitzUnary(ce, 'Abs', arg);
   if (m !== undefined) return numericApproximation ? m.N() : m;
+  // The modulus of any directed infinity is +∞, whatever the direction.
+  if (infiniteDirection(arg) !== undefined) return ce.PositiveInfinity;
   if (isNumber(arg)) {
     const num = arg.numericValue;
     if (typeof num === 'number') return ce.number(Math.abs(num));

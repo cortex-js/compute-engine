@@ -20,6 +20,7 @@ import {
 import { shouldNumericize } from '../boxed-expression/apply.js';
 import { exactOrder } from '../boxed-expression/compare.js';
 import { complexParts } from './complex-parts.js';
+import { infinityPart } from '../boxed-expression/directed-infinity.js';
 import {
   infinitePoint,
   type InfinitePoint,
@@ -503,6 +504,10 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // Measurement, and its parts must stay extractable.
         const m = measurementLipschitzUnary(ce, 'Real', ops[0]);
         if (m !== undefined) return m;
+        // The infinity of the sign of Re(d) for `DirectedInfinity(d)`, or 0:
+        // `Re(i·∞) = 0`.
+        const infinite = infinityPart(ce, ops[0], 're');
+        if (infinite !== undefined) return infinite;
         if (!isNumber(ops[0]))
           return complexParts(ops[0])?.[0].evaluate({
             numericApproximation,
@@ -557,6 +562,8 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         const m = measurementLipschitzUnary(ce, 'Imaginary', ops[0]);
         if (m !== undefined) return m;
         // See `Real`: the imaginary part of a constant sum (`1 + √2·i`).
+        const infinite = infinityPart(ce, ops[0], 'im');
+        if (infinite !== undefined) return infinite;
         if (!isNumber(ops[0]))
           return complexParts(ops[0])?.[1].evaluate({
             numericApproximation,

@@ -79,6 +79,7 @@ import { asRational, asSmallInteger } from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
 import { negateProduct } from './negate.js';
 import { add } from './arithmetic-add.js';
+import { multiplyInfinity } from './directed-infinity.js';
 
 // Maximum number of decimal digits allowed in a *materialized* exact power
 // folded into a product's coefficient. Beyond this the factor is kept symbolic
@@ -2176,7 +2177,10 @@ function expandProduct(
     return add(...terms);
   }
 
-  return new Product(ce, [lhs, rhs]).asExpression();
+  return (
+    multiplyInfinity(ce, [lhs, rhs]) ??
+    new Product(ce, [lhs, rhs]).asExpression()
+  );
 }
 
 /**
@@ -2353,6 +2357,11 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
     !xs.some((x) => !isAbsentSymbol(x) && isUnresolvedCollectionOperand(x))
   )
     return ce.NaN;
+
+  // A complex multiple of an infinity keeps its direction (`i·∞ =
+  // DirectedInfinity(i)`), where `Product` folds it to the undirected `~oo`.
+  const directed = multiplyInfinity(ce, xs);
+  if (directed !== undefined) return directed;
 
   // A zero factor beside a factor that reads a variable with an assigned
   // value is not folded to `0`: the product must keep the value the variable

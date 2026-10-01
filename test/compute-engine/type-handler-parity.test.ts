@@ -246,7 +246,7 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     expect(ce.box(['Sign', -2] as any).type.toString()).toBe('integer<-1..1>');
     expect(ce.box(['Sign', 's'] as any).type.toString()).toBe('integer<-1..1>');
     expect(ce.box(['Sign', NAN] as any).type.toString()).toBe('nan');
-    expect(ce.box(['Sign', 'ComplexInfinity'] as any).isValid).toBe(false);
+    expect(ce.box(['Sign', 'ComplexInfinity'] as any).isValid).toBe(true);
     expect(ce.box(['Sign', ['Complex', 1, 2]] as any).type.toString()).toBe(
       'complex'
     );

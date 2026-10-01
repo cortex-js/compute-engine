@@ -549,10 +549,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       if (b.isPositive) return ce.Zero; // 0^∞ = 0
       // 0^-∞ = ~∞
       if (b.isNegative) return ce.ComplexInfinity;
-      // A `~oo` exponent is off-carrier for `Power` (ruled 2026-09-01: no
-      // base has a value there). Leave the node unfolded so the `Power`
-      // evaluate handler answers the incompatible-type error — folding
-      // here (the old `0^~∞ = NaN`) would bypass that seam.
+      // A `~oo` exponent has no limit for any base. Leave the node
+      // unfolded so the `Power` evaluate handler answers `Indeterminate`
+      // through its single seam for it.
       return unchanged();
     }
     //(note: these should be applicable only to the reals)
@@ -598,10 +597,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // One as base
   // (note: 1^∞ = NaN - Because there are various cases where lim(x(t),t)=1, lim(y(t),t)=∞ (or -∞),
   // but lim( x(t)^y(t), t) != 1.)
-  // A `~oo` exponent stays unfolded: it is off-carrier for `Power` (ruled
-  // 2026-09-01), and the `Power` evaluate handler owns the
-  // incompatible-type error. `1^±∞` keeps the indeterminate-form NaN and
-  // `1^NaN` the propagated NaN.
+  // A `~oo` exponent stays unfolded: the `Power` evaluate handler owns its
+  // `Indeterminate`. `1^±∞` keeps the indeterminate-form NaN and `1^NaN`
+  // the propagated NaN.
   if (aIsNum && isExactLiteral(a, 1)) {
     if (b.isFinite) return ce.One;
     if (isComplexInfinityLiteral(b)) return unchanged();
@@ -721,11 +719,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       return unchanged();
     }
 
-    // Must be 'x^~oo'. A `~oo` exponent is off-carrier for `Power` (ruled
-    // 2026-09-01): `b^z` has no value at `z = ~oo` for ANY base — the
+    // Must be 'x^~oo'. `b^z` has no value at `z = ~oo` for ANY base — the
     // result depends on the direction of approach. Leave the node unfolded
-    // so the `Power` evaluate handler answers the incompatible-type error
-    // (the old fold to NaN bypassed that seam).
+    // so the `Power` evaluate handler answers `Indeterminate`.
     return unchanged();
   }
 

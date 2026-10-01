@@ -91,14 +91,12 @@ describe('TYPE AUDIT: pole reciprocals (Tan/Sec/Csc/Cot/Coth/Csch)', () => {
   it('coth/csch are finite at real ±∞; a circular function refuses ∞', () => {
     expect(typeOf(['Coth', 'PositiveInfinity'])).toBe('real');
     expect(typeOf(['Csch', 'NegativeInfinity'])).toBe('real');
-    // `Tan`'s carrier is the finite complex numbers (no value and no limit
-    // at any infinity), and the boxing validation seam enforces it at
-    // boxing: the operand is an `incompatible-type` error, so the
-    // application types `error`. It used to type `number` and error only
-    // at evaluation, because a `canonical` handler skipped boxing
-    // validation.
-    expect(typeOf(['Tan', 'PositiveInfinity'])).toBe('error');
-    expect(ce.box(['Tan', 'PositiveInfinity']).isValid).toBe(false);
+    // `Coth`'s carrier is the finite complex numbers and the signed
+    // infinities (no value at `~oo`), and the boxing validation seam
+    // enforces it at boxing: the operand is an `incompatible-type` error,
+    // so the application types `error`.
+    expect(typeOf(['Coth', 'ComplexInfinity'])).toBe('error');
+    expect(ce.box(['Coth', 'ComplexInfinity']).isValid).toBe(false);
     expect(ce.box(['Coth', 'PositiveInfinity']).N().re).toBe(1);
   });
 });

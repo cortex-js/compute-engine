@@ -2912,11 +2912,9 @@ describe('an infinite base at an infinite exponent', () => {
     // n⁻ⁿ = 10⁻¹⁰, 10⁻²⁰⁰, then 0 at n = 1000, and (−n)⁻ⁿ tracks it.
     expect(value(['Power', 'PositiveInfinity', 'NegativeInfinity'])).toBe('0');
     expect(value(['Power', 'NegativeInfinity', 'NegativeInfinity'])).toBe('0');
-    // An UNDIRECTED exponent has no limit for ANY base, so it is outside
-    // the exponent slot's declared domain — an incompatible-type error,
-    // not the old NaN (`Power` signature flip, ruled 2026-09-01).
+    // An UNDIRECTED exponent has no limit for ANY base: `Indeterminate`.
     expect(value(['Power', 'PositiveInfinity', 'ComplexInfinity'])).toBe(
-      'Error(ErrorCode("incompatible-type", "complex | signed_infinity", "~oo"), ~oo)'
+      'Indeterminate'
     );
     // A finite base greater than 1 was already +∞.
     expect(value(['Power', 2, 'PositiveInfinity'])).toBe('+oo');

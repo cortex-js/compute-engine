@@ -72,13 +72,13 @@ describe('boxing validation seam for canonical-handler heads', () => {
   });
 
   test('a non-finite operand of a finite-carrier head is refused at boxing', () => {
-    // The trig family's carrier is the finite complex numbers; the error
-    // used to surface only at evaluation, because the factory's `canonical`
-    // handler skipped boxing validation.
+    // The hyperbolics' carrier is the finite complex numbers and the signed
+    // infinities; the error used to surface only at evaluation, because the
+    // factory's `canonical` handler skipped boxing validation.
     const ce = new ComputeEngine();
-    expect(ce.box(['Sin', 'PositiveInfinity']).isValid).toBe(false);
-    expect(ce.box(['Sin', 'ComplexInfinity']).isValid).toBe(false);
-    expect(ce.box(['Sin', 'x']).isValid).toBe(true);
+    expect(ce.box(['Sinh', 'ComplexInfinity']).isValid).toBe(false);
+    expect(ce.box(['Sinh', 'PositiveInfinity']).isValid).toBe(true);
+    expect(ce.box(['Sinh', 'x']).isValid).toBe(true);
     // `~oo` types the wide `number`, which the exponent carrier of `Power`
     // does not refute, so the boxing gate admits it and the evaluate
     // handler stays the seam for that point.

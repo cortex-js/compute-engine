@@ -974,7 +974,8 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
         true
       );
       expect(ce2.box([op, ['Complex', 1, 2]]).isValid).toBe(false);
-      expect(ce2.box([op, 'ComplexInfinity']).isValid).toBe(false);
+      // `~oo` rounds to itself, except for `Truncate`, which keeps its carrier.
+      expect(ce2.box([op, 'ComplexInfinity']).isValid).toBe(op !== 'Truncate');
     }
     // The IEEE arm of the comparisons is a declared `handle` now — the
     // handler answers `False` for an unordered `NaN`, a success value.
@@ -1000,16 +1001,21 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).N())).toBe(true);
     }
-    // ~oo where the head has NO value (`Erf` oscillates; `Sin`/`Arcsin`
-    // have no limit): boxing error where validation runs, evaluate-time
-    // error elsewhere — an Error either way, on both routes.
+    // ~oo where `Erf` oscillates: a boxing error. `Sin` has no limit there
+    // (`Indeterminate`) and `Arcsin` grows like ln|2z| in every direction
+    // (`~oo`).
     expect(ce2.box(['Erf', 'ComplexInfinity']).isValid).toBe(false);
-    for (const op of ['Sin', 'Arcsin']) {
-      expect(isTypeError(ce2.box([op, 'ComplexInfinity']).evaluate())).toBe(
-        true
-      );
-      expect(isTypeError(ce2.box([op, 'ComplexInfinity']).N())).toBe(true);
-    }
+    expect(ce2.box(['Sin', 'ComplexInfinity']).evaluate().isIndeterminate).toBe(
+      true
+    );
+    expect(isNaNValue(ce2, ce2.box(['Sin', 'ComplexInfinity']).N())).toBe(true);
+    for (const how of ['evaluate', 'N'] as const)
+      expect(
+        ce2
+          .box(['Arcsin', 'ComplexInfinity'])
+          [how]()
+          .isSame(ce2.ComplexInfinity)
+      ).toBe(true);
     // ~oo where the head HAS a value: `√(~oo) = ~oo` and `Ln(~oo) = ~oo`
     // — the modulus grows without bound in every direction of approach
     // (ruled 2026-09-01, reversing the 2026-08-31 uniformity choice that
@@ -1024,14 +1030,17 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
         ce2.box([op, 'ComplexInfinity']).N().isSame(ce2.ComplexInfinity)
       ).toBe(true);
     }
-    // Sin/Arcsin at ±∞: no value, no limit → error (was
-    // symbolic-then-NaN).
-    for (const op of ['Sin', 'Arcsin']) {
-      expect(isTypeError(ce2.box([op, 'PositiveInfinity']).evaluate())).toBe(
-        true
-      );
-      expect(isTypeError(ce2.box([op, 'NegativeInfinity']).N())).toBe(true);
-    }
+    // Sin at ±∞ has no limit (`Indeterminate`); Arcsin at ±∞ is a directed
+    // infinity, `∓i·∞`.
+    expect(
+      ce2.box(['Sin', 'PositiveInfinity']).evaluate().isIndeterminate
+    ).toBe(true);
+    expect(isNaNValue(ce2, ce2.box(['Sin', 'NegativeInfinity']).N())).toBe(
+      true
+    );
+    expect(ce2.box(['Arcsin', 'PositiveInfinity']).evaluate().operator).toBe(
+      'DirectedInfinity'
+    );
     // The genuine extended values are unchanged.
     expect(
       ce2
@@ -1077,12 +1086,20 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
 
     // Group 1 — no value at any infinity: error on both routes at the
     // evaluate seam (was symbolic-then-NaN).
-    for (const op of ['Cos', 'Tan', 'Cot', 'Csc', 'Sec', 'Arccos']) {
-      expect(isTypeError(ce2.box([op, POS]).evaluate())).toBe(true);
-      expect(isTypeError(ce2.box([op, NEG]).N())).toBe(true);
-      expect(isTypeError(ce2.box([op, COO]).evaluate())).toBe(true);
+    for (const op of ['Cos', 'Tan', 'Cot', 'Csc', 'Sec']) {
+      expect(ce2.box([op, POS]).evaluate().isIndeterminate).toBe(true);
+      expect(isNaNValue(ce2, ce2.box([op, NEG]).N())).toBe(true);
+      expect(ce2.box([op, COO]).evaluate().isIndeterminate).toBe(true);
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
     }
+    // `Arccos` is a directed infinity at ±∞ and `~oo` at `~oo`.
+    expect(ce2.box(['Arccos', POS]).evaluate().operator).toBe(
+      'DirectedInfinity'
+    );
+    expect(
+      ce2.box(['Arccos', COO]).evaluate().isSame(ce2.ComplexInfinity)
+    ).toBe(true);
+    expect(isNaNValue(ce2, ce2.box(['Arccos', 'NaN']).evaluate())).toBe(true);
     // The circular poles are in-carrier finite points valued `~oo` still.
     expect(
       ce2.parse('\\tan(\\pi/2)').evaluate().isSame(ce2.ComplexInfinity)
@@ -1113,21 +1130,14 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(
       ce2.box(['Arsech', NEG]).evaluate().isSame(ce2.I.mul(ce2.Pi).div(2))
     ).toBe(true);
-    // `Arcosh(−∞) = ∞ + iπ` follows the `Ln(−∞)` treatment: symbolic
-    // under evaluate(), machine complex under .N().
-    expect(ce2.box(['Arcosh', NEG]).evaluate().operator).toBe('Arcosh');
-    const acosh = ce2.box(['Arcosh', NEG]).N();
-    expect(acosh.re).toBe(Infinity);
-    expect(acosh.im).toBeCloseTo(Math.PI, 12);
-    for (const op of [
-      'Sinh',
-      'Tanh',
-      'Arsinh',
-      'Arcosh',
-      'Artanh',
-      'Arsech',
-      'Arccot',
-    ]) {
+    // `Arcosh(−∞) = +∞`: the bounded imaginary part π drops out.
+    expect(
+      ce2.box(['Arcosh', NEG]).evaluate().isSame(ce2.PositiveInfinity)
+    ).toBe(true);
+    expect(ce2.box(['Arcosh', NEG]).N().isSame(ce2.PositiveInfinity)).toBe(
+      true
+    );
+    for (const op of ['Sinh', 'Tanh']) {
       expect(isTypeError(ce2.box([op, COO]).evaluate())).toBe(true);
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
     }
@@ -1232,12 +1242,15 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // The EXPONENT slot excludes `~oo`: `b^z` has no value at `z = ~oo`
     // for ANY base — the result depends on the direction of approach in
     // every case. These all answered NaN before the flip.
+    // Indeterminate.
     for (const base of [2, 0.5, 0, -2, 'ImaginaryUnit', POS, COO]) {
-      expect(isTypeError(ce2.box(['Power', base, COO]).evaluate())).toBe(true);
-      expect(isTypeError(ce2.box(['Power', base, COO]).N())).toBe(true);
+      const value = ce2.box(['Power', base, COO]).evaluate();
+      // A float base gives NaN, as every indeterminate form does.
+      expect(value.isIndeterminate || isNaNValue(ce2, value)).toBe(true);
+      expect(isNaNValue(ce2, ce2.box(['Power', base, COO]).N())).toBe(true);
     }
-    expect(isTypeError(ce2.box(['Exp', COO]).evaluate())).toBe(true);
-    expect(isTypeError(ce2.box(['Exp2', COO]).evaluate())).toBe(true);
+    expect(ce2.box(['Exp', COO]).evaluate().isIndeterminate).toBe(true);
+    expect(ce2.box(['Exp2', COO]).evaluate().isIndeterminate).toBe(true);
 
     // The BASE slot admits `~oo`: a positive power is `~oo` and a
     // negative power is 0 in every direction of approach. `(~oo)^-1`
@@ -1439,20 +1452,22 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const negBase = ce2.box(['Log', 8, -2]).N();
     expect(negBase.re).toBeCloseTo(0.13926097, 6);
     expect(negBase.im).toBeCloseTo(-0.63118087, 6);
-    // `Log(−∞, b)` follows `Ln(−∞)`: symbolic under evaluate(), the machine
-    // complex `∞ + i·π/ln b` under N() (it used to answer `~oo`).
-    expect(ce2.box(['Log', NEG, 10]).evaluate().operator).toBe('Log');
-    const negArg = ce2.box(['Log', NEG, 10]).N();
-    expect(negArg.re).toBe(Infinity);
-    expect(negArg.im).toBeCloseTo(Math.PI / Math.LN10, 10);
+    // `Log(−∞, b)` follows `Ln(−∞) = +∞`: the bounded imaginary part drops
+    // out of the infinity.
+    expect(
+      ce2.box(['Log', NEG, 10]).evaluate().isSame(ce2.PositiveInfinity)
+    ).toBe(true);
+    expect(ce2.box(['Log', NEG, 10]).N().isSame(ce2.PositiveInfinity)).toBe(
+      true
+    );
     // The Log aliases canonicalize to Log and inherit the values.
     both(['Log2', COO], isCoo);
     both(['Lg', POS], is(ce2.PositiveInfinity));
 
-    // Arctan: `~oo` has no value (the branch ends ±π/2 disagree) and is
-    // rejected at BOXING (no canonical handler); `arctan(±i) = ~oo` folds
-    // under evaluate() (it used to stay symbolic while N() answered ~oo).
-    expect(ce2.box(['Arctan', COO]).isValid).toBe(false);
+    // Arctan: `~oo` has no value (the branch ends ±π/2 disagree):
+    // `Indeterminate`; `arctan(±i) = ~oo` folds under evaluate() (it used to
+    // stay symbolic while N() answered ~oo).
+    both(['Arctan', COO], isIndet);
     both(['Arctan', 'ImaginaryUnit'], isCoo);
     both(['Arctan', ['Negate', 'ImaginaryUnit']], isCoo);
     both(['Arctan', 'NaN'], isNaNv);
@@ -1514,9 +1529,8 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Sqrt', ['Complex', NEG, 1]], isCoo);
     both(['Log', anon, POS], isNaNv); // ∞/∞
     const huge = ['Power', 10, 1000];
-    expect(ce2.box(['Log', NEG, huge]).N().im).toBeCloseTo(
-      Math.PI / (1000 * Math.LN10),
-      12
+    expect(ce2.box(['Log', NEG, huge]).N().isSame(ce2.PositiveInfinity)).toBe(
+      true
     );
     expect(
       ce2
@@ -2941,7 +2955,11 @@ describe('ERROR-MODEL §5 — the absence marker of a numeric slot types `nan`',
     );
     // An access that may find nothing: the length of a filter's result is
     // not known before evaluation.
-    const kept = ['Filter', ['List', 1, 2, 3], ['Function', ['Less', 'x', 9], 'x']];
+    const kept = [
+      'Filter',
+      ['List', 1, 2, 3],
+      ['Function', ['Less', 'x', 9], 'x'],
+    ];
     expect(ce.box(['First', kept]).type.toString()).toBe('integer | nan');
     expect(ce.box(['Last', kept]).type.toString()).toBe('integer | nan');
   });
@@ -2953,9 +2971,7 @@ describe('ERROR-MODEL §5 — the absence marker of a numeric slot types `nan`',
     expect(ce.box(['First', ['List', 1, 2, 3]]).type.toString()).toBe(
       'integer'
     );
-    expect(ce.box(['Last', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'integer'
-    );
+    expect(ce.box(['Last', ['List', 1, 2, 3]]).type.toString()).toBe('integer');
   });
 
   test('the VALUE of an out-of-band numeric access is still NaN', () => {
@@ -3877,9 +3893,7 @@ describe('the arithmetic core declares its domains', () => {
     // `Divide`: these heads have no `canonical` handler, so the signature
     // validation — which is what infers — actually runs. The clamp itself
     // lies between its bounds whatever the operand is (2026-09-26).
-    expect(ce.box(['Clamp', 'cB11', 0, 1]).type.toString()).toBe(
-      'real<0..1>'
-    );
+    expect(ce.box(['Clamp', 'cB11', 0, 1]).type.toString()).toBe('real<0..1>');
     expect(ce.box('cB11').type.toString()).toBe('real | signed_infinity');
   });
 });

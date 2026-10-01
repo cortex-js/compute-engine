@@ -1,4 +1,5 @@
 import { Complex } from 'complex-esm';
+import { multiplyInfinity } from './directed-infinity.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { roundSignificantToward } from '../numerics/interval-arithmetic.js';
 
@@ -651,6 +652,17 @@ export class BoxedNumber
 
     const ce = this.engine;
 
+    // A complex multiple of a real infinity keeps its direction
+    // (`i·∞ = DirectedInfinity(i)`), where the numeric product is `~oo`.
+    if (
+      typeof rhs !== 'number' &&
+      !(rhs instanceof NumericValue) &&
+      (this.isInfinity === true || rhs.isInfinity === true)
+    ) {
+      const directed = multiplyInfinity(ce, [this, rhs]);
+      if (directed !== undefined) return directed;
+    }
+
     // @fastpath
     if (typeof rhs === 'number') {
       if (rhs === 1) return this;
@@ -780,7 +792,8 @@ export class BoxedNumber
     const ce = this.engine;
     if (this._indeterminate) return this;
     // Non-finite radicands, decided by the modulus (ruled 2026-09-01):
-    // `√(+∞) = +∞`; `√(−∞) = i·∞`, the direction-less `~oo`; and
+    // `√(+∞) = +∞`; `√(−∞) = i·∞`, `DirectedInfinity(i)` (the principal
+    // branch has √(−x) = i√x for x > 0, DLMF 4.2.2); and
     // `√(~oo) = ~oo` — the modulus grows without bound in every direction
     // of approach, so the square root has a genuine value at the point at
     // infinity (the value `Power(~oo, 1/2)` already answers). `NaN`
@@ -788,7 +801,11 @@ export class BoxedNumber
     // `~oo`.
     if (this.isNaN) return this;
     if (this.isInfinity === true)
-      return this.isPositive === true ? this : ce.ComplexInfinity;
+      return this.isPositive === true
+        ? this
+        : this.isNegative === true
+          ? ce._fn('DirectedInfinity', [ce.I])
+          : ce.ComplexInfinity;
     // An "anonymous" infinity — a complex literal with an infinite
     // component (`∞ + i`), a member of the `infinity` type whose
     // `isInfinity` is false: its square root has infinite modulus and half
@@ -869,8 +886,8 @@ export class BoxedNumber
     // The exceptional points — 0, 1, the infinities and NaN, in the
     // argument or the base — follow the quotient `Ln(x) / Ln(base)` under
     // extended arithmetic (`logarithmAtExceptionalPoint`): `ln 0 = −∞`,
-    // `ln 1 = 0`, `Log(8, 1) = ~oo`, `Log(0, 1/2) = +∞`, and so on. The one
-    // value with no exact spelling, `Ln(−∞) = ∞ + iπ`, is left to the
+    // `ln 1 = 0`, `Log(8, 1) = ~oo`, `Log(0, 1/2) = +∞`, and so on. An
+    // anonymous infinity (`∞ + i`) has no exact spelling and is left to the
     // symbolic form below (`.N()` numericizes it).
     const special = logarithmAtExceptionalPoint(ce, this, base, false);
     if (special !== undefined) return special;

@@ -23,12 +23,12 @@ export function hasInfiniteComponent(nv: NumericValue | number): boolean {
  * Where a logarithm operand sits among the exceptional points:
  *
  * - `nan`, `zero` (`ln 0 = −∞`), `one` (`ln 1 = 0`), `pos-inf`
- *   (`ln(+∞) = +∞`), `complex-inf` (`ln(~oo) = ~oo`);
- * - `directed-inf`: an infinite value with a direction other than +∞ —
- *   `−∞` (`ln(−∞) = ∞ + iπ`) or a complex value with an infinite
- *   component (`∞ + i`, an "anonymous" member of the `infinity` type
- *   whose `isInfinity` is false) — whose logarithm is `∞ + iθ`, infinite
- *   and not real;
+ *   (`ln(+∞) = +∞`), `neg-inf` (`ln(−∞) = ln(∞) + iπ`, whose bounded
+ *   imaginary part drops out of the infinity: `+∞`), `complex-inf`
+ *   (`ln(~oo) = ~oo`);
+ * - `directed-inf`: a complex value with an infinite component (`∞ + i`,
+ *   an "anonymous" member of the `infinity` type whose `isInfinity` is
+ *   false), whose logarithm is `∞ + iθ`, infinite and not real;
  * - `finite`: every other finite number literal;
  * - `undefined`: an operand with no known value (a symbol that holds
  *   none), which has no exceptional-point answer.
@@ -45,6 +45,7 @@ type LogPoint =
   | 'zero'
   | 'one'
   | 'pos-inf'
+  | 'neg-inf'
   | 'directed-inf'
   | 'complex-inf'
   | 'finite';
@@ -53,7 +54,7 @@ function classify(x: Expression): LogPoint | undefined {
   if (x.isNaN === true) return 'nan';
   if (x.isInfinity === true) {
     if (x.isPositive === true) return 'pos-inf';
-    if (x.isNegative === true) return 'directed-inf';
+    if (x.isNegative === true) return 'neg-inf';
     // No sign: the literal `~oo`. A symbol merely DECLARED with the
     // `infinity` type answers `isInfinity` true with no sign as well, but
     // holds no value to fold.
@@ -71,13 +72,13 @@ function classify(x: Expression): LogPoint | undefined {
 const isInfinitePoint = (p: LogPoint): boolean =>
   p === 'zero' ||
   p === 'pos-inf' ||
+  p === 'neg-inf' ||
   p === 'directed-inf' ||
   p === 'complex-inf';
 
-/** The argument θ of an infinite value's logarithm `∞ + iθ`: π for `−∞`,
- * the direction of the infinite components otherwise. */
+/** The argument θ of an anonymous infinity's logarithm `∞ + iθ`: the
+ * direction of the infinite components. */
 function directionOfInfinity(x: Expression): number {
-  if (x.isNegative === true) return Math.PI;
   return isNumber(x) ? Math.atan2(x.im, x.re) : Math.PI;
 }
 
@@ -110,7 +111,7 @@ function machineLnOfBase(base: Expression): number {
  * `Log(x, base)` — `Ln(x)` when `base` is absent or `e` — at the EXCEPTIONAL
  * points, defined as the quotient `Ln(x) / Ln(base)` under the engine's
  * extended arithmetic (ruled 2026-09-01). The building blocks are
- * `ln 0 = −∞`, `ln 1 = 0`, `ln(+∞) = +∞`, `ln(−∞) = ∞ + iπ`,
+ * `ln 0 = −∞`, `ln 1 = 0`, `ln(+∞) = ln(−∞) = +∞`,
  * `ln(~oo) = ~oo` (the modulus grows without bound in every direction), and
  * the quotient rules `finite/0 = ~oo`, `finite/∞ = 0`, and the
  * indeterminate forms `∞/∞` and `0/0` (`Indeterminate`, or `NaN` with a
@@ -125,11 +126,9 @@ function machineLnOfBase(base: Expression): number {
  *
  * Returns `undefined` when the ordinary logarithm applies (both operands
  * finite and away from 0 and 1), or when the value has no exact spelling
- * under `evaluate()` — `Ln(−∞)` and the other directed infinities, and
- * their quotients by a finite base — which `numericApproximation` answers
- * as a machine complex (`∞ + iπ` for the natural logarithm of `−∞`;
- * `∞ + i·π/ln b` for a real base `b > 1`, the mirror `−∞ − i·π/|ln b|`
- * for `0 < b < 1`).
+ * under `evaluate()` — an anonymous infinity such as `∞ + i`, and its
+ * quotients by a finite base — which `numericApproximation` answers as a
+ * machine complex (`∞ + iθ`).
  */
 export function logarithmAtExceptionalPoint(
   ce: Expression['engine'],
@@ -154,7 +153,7 @@ export function logarithmAtExceptionalPoint(
   if (natural) {
     if (n === 'zero') return ce.NegativeInfinity;
     if (n === 'one') return zero;
-    if (n === 'pos-inf') return ce.PositiveInfinity;
+    if (n === 'pos-inf' || n === 'neg-inf') return ce.PositiveInfinity;
     if (n === 'complex-inf') return ce.ComplexInfinity;
     if (n === 'directed-inf')
       return numericApproximation
@@ -183,11 +182,11 @@ export function logarithmAtExceptionalPoint(
   if (n === 'one') return zero;
   if (n === 'complex-inf') return ce.ComplexInfinity;
   const sign = lnBaseSign(base!);
-  if (n === 'zero' || n === 'pos-inf') {
+  if (n === 'zero' || n === 'pos-inf' || n === 'neg-inf') {
     // `−∞` or `+∞` over a real `ln base`: the sign follows the quotient; a
     // complex `ln base` leaves the modulus infinite with no real direction.
     if (sign === 'complex') return ce.ComplexInfinity;
-    const positive = (n === 'pos-inf') === (sign === 'positive');
+    const positive = (n !== 'zero') === (sign === 'positive');
     return positive ? ce.PositiveInfinity : ce.NegativeInfinity;
   }
   // `n === 'directed-inf'`: `(∞ + iθ) / ln base`.

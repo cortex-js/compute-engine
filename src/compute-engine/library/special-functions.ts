@@ -15,6 +15,7 @@ import {
   isNumber,
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
+import { infiniteDirection } from '../boxed-expression/directed-infinity.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
 import { hurwitzOperand, boxBignumApprox } from './arithmetic.js';
@@ -180,6 +181,12 @@ function agmValueAtInfinity(
   if (point === '+oo' && !partner.isComplex && partner.isPositive === true)
     return ce.PositiveInfinity;
   return ce.ComplexInfinity;
+}
+
+/** Whether `τ` is the cusp `i·∞` of the upper half-plane. */
+function isUpperCusp(tau: Expression): boolean {
+  const d = infiniteDirection(tau);
+  return d !== undefined && d.re === 0 && d.im > 0;
 }
 
 export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
@@ -703,9 +710,9 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // The carrier is `complex | infinity`. η is defined on the upper
       // half-plane, whose only point at infinity is the cusp `i·∞`, which
-      // the engine spells `~oo` (`i·∞` boxes to `~oo`): `η(~oo) = 0`, the
-      // Fungrim identity 6b9935. A real infinity lies
-      // outside the domain, like every real τ, and stays symbolic as they
+      // the engine spells `DirectedInfinity(i)` (and `~oo` also reads as
+      // the cusp): `η(i·∞) = 0`, the Fungrim identity 6b9935. A real
+      // infinity lies outside the domain, like every real τ, and stays symbolic as they
       // do; an anonymous infinity is `NaN`. `NaN` propagates (explicit:
       // the carrier is not a subtype of `complex`); no `canonical`
       // handler, so a proven off-carrier operand is rejected at boxing.
@@ -720,7 +727,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([tau], { numericApproximation, engine }) => {
         const point = infinitePoint(tau);
         if (point === 'anonymous') return engine.NaN;
-        if (point === '~oo') return engine.Zero;
+        if (point === '~oo' || isUpperCusp(tau)) return engine.Zero;
         if (point !== undefined) return undefined;
         return shouldNumericize(numericApproximation, tau)
           ? applyN(
@@ -742,8 +749,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // 'integer' so that rule-pattern wildcards — typed 'complex' — box; see
       // JacobiTheta). The `τ` slot takes the carrier `complex | infinity`,
       // with the same reading as `DedekindEta`'s: the cusp `i·∞` is spelled
-      // `~oo` and `E_s(~oo) = 1` for a valid weight (the Fungrim identity
-      // ad9ba2; the kernel already answered 1 there, by computing with the
+      // `DirectedInfinity(i)` (or `~oo`) and `E_s(i·∞) = 1` for a valid
+      // weight (the Fungrim identity ad9ba2; the kernel already answered 1 there, by computing with the
       // nome q = 0), a real infinity stays symbolic like every real τ, and
       // an anonymous infinity is `NaN`. `NaN` propagates (explicit); no
       // `canonical` handler, so a proven off-carrier operand is rejected
@@ -763,7 +770,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (s === null || s < 2 || s % 2 !== 0) return undefined;
         const point = infinitePoint(ops[1]);
         if (point === 'anonymous') return engine.NaN;
-        if (point === '~oo') return engine.One;
+        if (point === '~oo' || isUpperCusp(ops[1])) return engine.One;
         if (point !== undefined) return undefined;
         if (!shouldNumericize(numericApproximation, ops[1])) return undefined;
         return applyN(

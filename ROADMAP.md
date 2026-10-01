@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-30.
+**Last updated:** 2026-10-01.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -108,6 +108,21 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ---
 
 ## Remaining work
+
+### Directed infinities stop at a numeric-literal direction (OPEN, small — issue #396, 2026-10-01)
+
+`DirectedInfinity(d)` normalizes a finite nonzero number literal `d` to the unit
+direction `d/|d|`; a symbolic `d` stays as written, and `Divide`, `Power` and
+the other heads read only the literal forms (`Multiply`, `Negate`, `Real`,
+`Imaginary`, `Abs`, `Gamma` and `DedekindEta`/`EisensteinE` do). `simplify()`
+leaves `Sin(∞)`, `Arcsin(∞)`, `Ceil(~∞)` and `Gamma(DirectedInfinity(i))`
+unevaluated, as it leaves `Gamma(∞)`. The compiled lane has no directed
+infinity: `Arcsin` and `Arccos` at `±∞` give `NaN`, and `Ln(-∞)` gives
+`∞ + iπ`. `Erfc`, `Erfi` and `LogGamma` at `~∞` and the other hyperbolics at
+`~∞` (`Sinh(~∞)` is `Indeterminate` in Mathematica) are not covered.
+
+Fix: give `DirectedInfinity` the remaining arithmetic (`Divide`, `Power`, `Abs`
+of a symbolic direction), and fold the infinite points in `simplify()`.
 
 ### A library list with `core` but without `control-structures` breaks every function literal (OPEN, decision — found 2026-10-01 by the fix of the library load order for issue #393)
 

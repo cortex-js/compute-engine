@@ -12726,7 +12726,13 @@ const SYS_HELPERS = {
       ? { re: Infinity, im: 0 }
       : toRI(new Complex(z.re, z.im).asech()),
   cacsch: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acsch()),
-  cacosh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acosh()),
+  // Re arccosh(z) diverges to +∞ in every direction (DLMF 4.37.19), and the
+  // bounded imaginary part drops out of the infinity: `+∞` at any infinity, as
+  // the interpreter answers. The complex library answers `NaN`.
+  cacosh: (z: ComplexResult) =>
+    Math.abs(z.re) === Infinity || Math.abs(z.im) === Infinity
+      ? { re: Infinity, im: 0 }
+      : toRI(new Complex(z.re, z.im).acosh()),
   catanh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).atanh()),
   // A value with an infinite part has an infinite absolute value: the
   // unsigned pole `{ re: ∞, im: ∞ }` (see `complexPole`) and a signed infinity

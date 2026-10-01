@@ -457,7 +457,7 @@ N(catalanConstant)
 
 ### ceil
 
-MathJSON `Ceil` · `(real | signed_infinity) -> integer | signed_infinity`
+MathJSON `Ceil` · `(real | signed_infinity | ~oo) -> integer | signed_infinity | ~oo`
 
 Rounds a number up to the next largest integer
 
@@ -568,6 +568,17 @@ Digamma function, the logarithmic derivative of the gamma function
 ```epsil
 [digamma(1), N(digamma(1))]
 // ➔ [Digamma(1),-0.577215664901532860607]
+```
+
+### directedInfinity
+
+MathJSON `DirectedInfinity` · `(number) -> number`
+
+The infinite point reached along the direction d: DirectedInfinity(i) is i·∞. A real direction is a signed infinity and the direction 0 is the undirected ComplexInfinity.
+
+```epsil
+[directedInfinity(i), directedInfinity(-2), i * positiveInfinity]
+// ➔ [DirectedInfinity(i),-oo,DirectedInfinity(i)]
 ```
 
 ### distance
@@ -682,7 +693,7 @@ Double Factorial Function
 
 ### floor
 
-MathJSON `Floor` · `(real | signed_infinity) -> integer | signed_infinity`
+MathJSON `Floor` · `(real | signed_infinity | ~oo) -> integer | signed_infinity | ~oo`
 
 Rounds a number down to the nearest integer.
 
@@ -1154,7 +1165,7 @@ Positive infinity (+∞).
 
 ### Power
 
-`(complex | infinity, complex | signed_infinity) -> number`
+`(complex | infinity, complex | signed_infinity | ~oo) -> number`
 
 Exponentiation: raise a base to a power.
 
@@ -1274,7 +1285,7 @@ n-th root of a value.
 
 ### round
 
-MathJSON `Round` · `(real | signed_infinity, integer?) -> real | signed_infinity`
+MathJSON `Round` · `(real | signed_infinity | ~oo, integer?) -> real | signed_infinity | ~oo`
 
 Rounds a number to the nearest integer, or (with a precision argument) to `n` decimal places.
 
@@ -1285,7 +1296,7 @@ Rounds a number to the nearest integer, or (with a precision argument) to `n` de
 
 ### sign
 
-MathJSON `Sign` · `(complex | signed_infinity) -> complex`
+MathJSON `Sign` · `(complex | signed_infinity | ~oo) -> complex`
 
 Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle in its direction, for a complex `z`.
 
