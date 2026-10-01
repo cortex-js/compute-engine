@@ -45,6 +45,69 @@
   `Solve(ln(x + 1) + ln(x − 1) = 0, x)` is `[√2]`. The policy is in
   `docs/SIMPLIFY.md`.
 
+These changes apply to non-strict parsing only
+(`ce.parse(latex, { strict: false })`). Strict parsing is unchanged.
+
+- **An unbraced run of letters after `_` is the whole subscript.** `x_max` was
+  `x_m·a·x` and is now the symbol `x_max`, the same as `x_{max}`; `T_max` is
+  `T_max`, and `y = x_1 + x_max` is `y = x_1 + x_max`. The run ends at the
+  first token that is not a letter. A run of two letters followed by `_`, `^`
+  or a digit keeps the previous reading, so that adjacent indexed symbols stay
+  apart: `a_nb_n` is still `a_n·b_n` and `a_kx^k` is still `a_k·x^k`. Input
+  that changes: `x_ij` was `x_i·j` and is now the symbol `x_ij`, and `a_nx`
+  was `a_n·x` and is now the symbol `a_nx` (write `a_n x` for the product).
+- **An unbraced exponent is one whole operand.** As a run of digits already
+  was (`x^12`), the exponent is now a number with its decimal part
+  (`x^2.5` is `x^{2.5}`, was `x^2·0.5`), a word read as one symbol (`x^pi` is
+  `x^π`, was `x^p·i`; `x^theta` is `x^θ`), or a bare function call (`e^sin(x)`
+  is `e^{sin(x)}`, was `e^s·i·n·(x)`). The result is the same as the braced
+  spelling. White space ends the exponent (`x^2 y` is still `x^2·y`), and
+  where the extent is not clear the reading is unchanged: `x^2y` is `x^2·y`,
+  `e^2pi` is `e^2·π`, `x^ab` is `x^a·b`.
+- **A sign directly after `^` starts the exponent.** The exponent is the sign
+  and one operand: `e^-x` is `e^{-x}` (was `Superminus(e)·x`), `2^-x` is
+  `2^{-x}`, `e^-sin(x)` is `e^{-sin(x)}`, `e^-(x)` is `e^{-(x)}`, and `e^+x` is
+  `e^{+x}` (was `PseudoInverse(e)·x`). A second superscript is the same
+  double-superscript error as in `e^{-x}^2`. When no operand follows the sign
+  directly, the reading is unchanged: `\Z^+` is still the positive integers,
+  `A^+` is still the pseudo-inverse, and `x \to 0^+` is still a one-sided
+  limit point. `x^-2` is still `x^{-2}`.
+- **The words `in` and `infinity` are read as math.** `M in [0,1]` is
+  `M \in [0,1]` (`Element(M, Interval(0, 1))`, was `M·i·n[0,1]`), and
+  `infinity` is `PositiveInfinity` like `inf` (was the product of its
+  letters). `in` is read this way only as a separate word between two
+  operands: `index`, `ink`, `int` and `xin` keep their previous reading.
+
+### New Features
+
+- **A parse diagnostic for a letter run read as a product.** In non-strict
+  mode, with `diagnostics: true`, a run of two or more letters that is not a
+  known word and is read as a product of its parts now gives one
+  `letter-run-split` diagnostic: `eps` (`e·p·s`), `sinx`, a word of prose, or
+  `xpi` (`x·π`). Its span is the run, and `detail` is `{ run, parts }`, for
+  example `{ run: "eps", parts: ["e", "p", "s"] }`. An explicit product
+  (`a*b*c`) and a run read as one name (`sin(x)`, `alpha`, `foo(x)`) give no
+  such diagnostic, and neither do the differentials of `dy/dx`. An unbraced
+  exponent or subscript that takes only the first letter of a run is reported
+  too: `e^xy` is `e^x·y` and `(x)_ab` is `(x)_a·b`. The diagnostic does not
+  change the parse result.
+
+- **Three new opt-in parse diagnostics for non-strict input.** With
+  `ce.parse(latex, { strict: false, diagnostics: true })`, the result's
+  `parseDiagnostics` now also reports:
+  - `implicit-product-in-denominator`: the denominator of a `/` is an implicit
+    product, which binds tighter than `/`. `1/2x`, `1/2 x`, `pi/2x` and
+    `x/2 y` are read as `1/(2x)`, `π/(2x)` and `x/(2y)`, which is not what
+    every reader intends. `1/2 * x`, `1/(2x)`, `dy/dx` and a call such as
+    `1/f(x)` are not reported.
+  - `spaced-digit-groups`: white space between digits was read as one number
+    (`2 3` is 23, `1 000` is 1000). The digit group separators `\,` and `{,}`
+    are not reported.
+  - `letter-before-decimal`: a symbol directly followed by `.digits` (`x.5`)
+    is read as the product `x \cdot 0.5`.
+
+  The readings do not change, and strict mode reports none of these.
+
 ### Issues Resolved
 
 - `Solve` found no root of a linear equation whose coefficient of the unknown
@@ -138,6 +201,52 @@
   still had the old validation: `SetMinus(5, 2)` stayed an
   `incompatible-type` error. These operators now read the signature of the
   definition in effect. A stock engine gives the same results as before.
+
+- **The `resolveApplication` hook sees every name before a parenthesis in
+  non-strict mode.** A multi-letter name (`foo(x)`) or a spelled-out Greek
+  letter (`gamma(x)`, `alpha(x+1)`, `theta(x)`) was read as a name before the
+  hook could see it, so a host could not choose the reading. The hook is now
+  called for these names with the same precedence rules as for `f(x)`:
+  explicit declarations, function parameters and `resolveSymbol` facts take
+  precedence, and a name with a library definition (`Gamma(x)`, `pi(x)`,
+  `sin(x)`) is not submitted. When the hook returns `undefined`, the reading
+  is unchanged. Reported by a host.
+- **Parsing a deeply nested exponent in non-strict mode is fast.** Each
+  `e^{…}` was read twice, so the time doubled with each level of nesting in
+  `e^{-(e^{-(…)})}`. Each exponent is now read once.
+- **The bare names `sign` and `sgn` are the sign function.** In non-strict
+  mode, `sign(x)` and `sgn(x)` were read as an undefined function `Sgn`. They
+  are now `Sign`: `sign(-2)` evaluates to `-1`.
+- **A chain of `<=`, `>=` or `!=` parses as a chain.** `0.1 <= M <= 5` gave
+  `LessEqual(0.1, Equal(Less(M, Error(missing)), 5))`: the right operand of the
+  first `<=` read the `<` of the second `<=` as `Less`, because `<` binds
+  tighter than `<=`. The parser now considers only the longest operator that
+  matches the input, and stops the operand when that operator binds too
+  loosely. `0.1 <= M <= 5` is `LessEqual(0.1, M, 5)`, the same as
+  `0.1 ≤ M ≤ 5` and `0.1 \le M \le 5`, and `5 >= M >= 0.1` is
+  `GreaterEqual(5, M, 0.1)`, the same as `5 ≥ M ≥ 0.1`. This applies in strict
+  and non-strict mode. A chain of `\ge`, `\geq`, `\geqslant`, `>` or `\gt`
+  is also one flat expression in the raw form now (`5\ge M\ge 0.1` is
+  `GreaterEqual(5, M, 0.1)`, it was `GreaterEqual(5, GreaterEqual(M, 0.1))`),
+  as a chain of `\le` or `<` already was. The canonical form is unchanged.
+- **More plain-text operator spellings in non-strict mode.** `x ÷ 2` is
+  `Divide(x, 2)`, as `x / 2` and `x \div 2` are. `a =< b` is
+  `LessEqual(a, b)` and `a <> b` is `NotEqual(a, b)`. In strict mode these
+  spellings are not operators, as before.
+- **`√(x+1)` is `Sqrt(x+1)` in non-strict mode**, as `sqrt(x+1)` is. It was
+  the juxtaposition of the `Sqrt` function and the parenthesized group. Strict
+  mode is unchanged.
+- **Parentheses in a fraction or an exponent are not written twice.** A
+  structural or raw expression that kept the parentheses of its source, such as
+  `y = 1/(1+x^2)`, was written `y=((1+x^2))^{-1}`. It is now written
+  `y=\frac{1}{1+x^2}`: the `\frac` arguments and the superscript braces
+  already group their content, so `x^(1/2)` is written `x^{\frac{1}{2}}`, not
+  `x^{(\frac{1}{2})}`. Parentheses elsewhere are kept.
+- **Scientific notation with the base written `{10}`.** `2\times{10}^{-1}` is
+  the number `0.2`, the same as `2\times10^{-1}`, and `4.35\times{10}^2`,
+  `2\cdot{10}^{3}` and `a/2\times{10}^3` read the same as the spellings without
+  braces. `{10}^{3}` with no mantissa, a symbolic exponent (`2\times{10}^{n}`)
+  and another braced base (`2\times{11}^{3}`) are unchanged.
 
 ## 0.143.0 _2026-10-01_
 

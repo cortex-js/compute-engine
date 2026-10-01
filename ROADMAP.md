@@ -173,6 +173,21 @@ before the loop) and no other value can hold a reference to it (every other
 use of `xs` is a read in `NON_RETAINING_READS`). Not requested yet; the
 reporter of #386 mentions a cycle walk that may be written as a loop.
 
+### A `Delimiter` with square brackets reads back as a `List` (OPEN, decision — found 2026-10-01 by the fix of the parentheses written twice in a fraction)
+
+`["Delimiter", "x", "'[,]'"]` (a group written with square brackets, for
+example `[a+b]c` in a physics formula built by a host) stays a `Delimiter` in
+the canonical form, and the LaTeX writer writes it `\lbrack x\rbrack`. That
+LaTeX parses as `["List", "x"]`, so a round trip through LaTeX changes the
+value from `x` to a list of one element; `["Delimiter", ["Sequence", "a",
+"b"], "'[,]'"]` comes back as `["List", "a", "b"]`. The parser has no reading
+of square brackets as a group, so no LaTeX spelling round-trips today. The
+decision: (a) the writer writes such a group with parentheses (the value
+round-trips, the brackets are lost), or (b) the parser reads one spelling as a
+bracket group (for example `\left[ … \right]` with one operand), which
+changes what that spelling gives today. Writer: the `Delimiter` serializer in
+`latex-syntax/dictionary/definitions-core.ts`.
+
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
 `reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and
