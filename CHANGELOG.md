@@ -11,6 +11,25 @@
   `vector<integer^2>`. A consumer that used the `number` type to read the
   compiled value as a scalar was wrong for such a sum.
 
+- **`Max` and `Min` of a dictionary are an `incompatible-type` error.** They
+  walked the dictionary as a collection and compared its keys with its values:
+  `Max({"a" -> 3, "b" -> 5})` was `max(5, "a", "b")`. An entry is not a
+  number, so `Max`, `Min`, `Supremum` and `Infimum` of a dictionary that has
+  an entry now give the error that `Sum` and `Mean` give, which names the
+  first entry: `Error(incompatible-type, number, tuple<string, integer>)`. A
+  program that read the unevaluated `max(…)` result gets the error instead.
+  An empty dictionary contributes no value, as an empty list does. A
+  dictionary that is an ELEMENT of a list gives the error that names the whole
+  dictionary, as `Sum([1, d])` does. The error is the answer whatever the
+  order of the operands: `Max(NaN, d)` was `NaN` while `Max(d, NaN)` was the
+  error.
+- **`Sum` of one element that is not a number is an error.** A sum of one
+  element answered the element itself: `Sum([{"a" -> 3}])` was `{"a" -> 3}`,
+  `Sum([True])` was `True`, and `Sum({"a" -> 3})` (a dictionary of one entry)
+  was the entry `("a", 3)`, while two such elements gave an
+  `incompatible-type` error. One element now gives the same error as two. A
+  point or a row is still summed: `Sum([(1, 2)])` is `(1, 2)`.
+
 ### Issues Resolved
 
 - `HurwitzZeta(s, a).N()` of an integer order at an `a` more than about 10⁶

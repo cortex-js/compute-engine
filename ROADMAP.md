@@ -194,17 +194,6 @@ dictionary and a value that is not an entry gives the same error. The open
 question is whether a dictionary joined with a list should instead give a list
 of the entries followed by the elements. Until decided, the error stays.
 
-### `Max` and `Min` of a dictionary compare its keys with its values (OPEN, decision — found 2026-09-30 by the fix for issue #385)
-
-`Max({"a" -> 3, "b" -> 5})` evaluates to `max(5, "a", "b")`, and `Min` of the
-same dictionary to `min(3, "a", "b")`: `evaluateMinMax`
-(`library/arithmetic.ts`) flattens each entry into its key and its value. `Sum`
-and `Mean` of a dictionary give an `incompatible-type` error that names the
-first entry, and `Length`/`Count` give the number of entries. The decision to
-make: `Max`/`Min` of a dictionary give the same error as `Sum` (an entry is not
-a number), or the extremum of the values (`5`). Until it is made, the compiled
-`Max`/`Min` refuse a dictionary operand.
-
 ### The JavaScript run-time tensor arithmetic adds complex coordinates with `+` (OPEN — found 2026-09-30 by the fix for issue #385)
 
 `Sum(P)` with `P` declared `list<tuple<complex, complex>>` compiles with
