@@ -14,6 +14,18 @@
 
 ### Issues Resolved
 
+- A pure imaginary factor in a product was serialized in parentheses that are
+  not necessary: `i·x` was `(\imaginaryI)x` and `e^{iπ}` was
+  `\exp((\imaginaryI)\pi)`. They are now `\imaginaryI x` and
+  `\exp(\imaginaryI\pi)`, and `2i·x` is `2\imaginaryI x`. A factor with a
+  leading sign (`(-2\imaginaryI)x`) or with a real part
+  (`(1+2\imaginaryI)x`) keeps its parentheses. The old and the new output
+  read back as the same expression. Two related power-base spellings were
+  wrong or misleading: `Power(Complex(0, 1.0), x)` was `1.0\imaginaryI^{x}`,
+  which reads back as `1.0·i^x`, and is now `(1.0\imaginaryI)^{x}`; and
+  `Power(Complex(1/2, 0), x)` was `\frac{1}{2}^{x}` and is now
+  `(\frac{1}{2})^{x}`, as for a plain `1/2`.
+
 - [#390](https://github.com/cortex-js/compute-engine/issues/390) A call through
   a field of a record or a dictionary ignored the declaration of the function in
   the field. With `bob_S` declared `(x: number, factor: number?) -> number`, the

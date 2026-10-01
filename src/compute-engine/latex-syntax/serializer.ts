@@ -35,7 +35,7 @@ import {
   joinLatex,
   supsub,
 } from './tokenizer.js';
-import { serializeNumber } from './serialize-number.js';
+import { complexPartShape, serializeNumber } from './serialize-number.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
 import {
   DELIMITERS_SHORTHAND,
@@ -232,6 +232,32 @@ export class Serializer {
         );
       return this.serialize(expr);
     }
+    // The dictionary gives `Complex` a precedence just below `Add`, because
+    // in general it writes as a sum (`1+2\imaginaryI`). With a real part of
+    // 0 it writes as the imaginary part alone, which binds tighter: the bare
+    // unit `\imaginaryI` is a single token, and `2\imaginaryI` is a product.
+    // Use the precedence of the text that is actually written, so that
+    // `Multiply(ImaginaryUnit, x)` is `\imaginaryI x`, not `(\imaginaryI)x`.
+    // The zero tests are the ones the `Complex` serializer makes
+    // (`complexPartShape()`), which read a number string from its digits:
+    // `1e-800` rounds to the double 0 but is written, so it is not zero here.
+    if (name === 'Complex') {
+      if (complexPartShape(operand(expr, 2))?.isZero)
+        return this.wrap(operand(expr, 1), prec);
+      if (complexPartShape(operand(expr, 1))?.isZero) {
+        const latex = this.serialize(expr);
+        // A leading sign is wrapped as a negative number is
+        if (latex.startsWith('-'))
+          return prec > ADDITION_PRECEDENCE ? this.wrap(expr) : latex;
+        if (latex === this.serialize('ImaginaryUnit')) return latex;
+        if (MULTIPLICATION_PRECEDENCE < prec)
+          return this.wrapString(
+            latex,
+            this.options.applyFunctionStyle(expr, this.level)
+          );
+        return latex;
+      }
+    }
     if (name && name !== 'Delimiter' && name !== 'Subscript') {
       const def = this.dictionary.ids.get(name);
       // `..` parses its END operand at minPrec 270 (below Add, 275) even
@@ -290,13 +316,17 @@ export class Serializer {
     // literal — e.g. under `{ canonical: false }`) usually serializes to a
     // sum (`1+i`) or a scaled unit (`2i`). The precedence rule below wraps
     // those (the dictionary gives `Complex` a precedence looser than `^`).
-    // Two shapes serialize to a single token and need no wrapping: an
-    // imaginary part of 0 (the node writes as a plain real, `1.5`), and the
-    // bare unit `i`/`-i` (`re` is 0, `|im|` is 1).
+    // Two shapes need a different decision. With an imaginary part of 0 the
+    // node writes as its real part alone, so the real part decides
+    // (`(\frac{1}{2})^{x}`, `1.5^{x}`). The bare unit `\imaginaryI` is a
+    // single token and is not wrapped. The unit test compares the written
+    // text: a float coefficient `1.0` is written (`1.0\imaginaryI`), and that
+    // product must be wrapped, or `1.0\imaginaryI^{x}` reads as `1.0·i^x`.
+    // A leading sign (`-\imaginaryI`) is wrapped by the rule below.
     if (h === 'Complex') {
-      const re = machineValue(operand(expr, 1));
-      const im = machineValue(operand(expr, 2));
-      if (im === 0 || (re === 0 && Math.abs(im ?? 0) === 1)) return exprStr;
+      if (complexPartShape(operand(expr, 2))?.isZero)
+        return this.wrapShort(operand(expr, 1));
+      if (exprStr === this.serialize('ImaginaryUnit')) return exprStr;
     }
 
     // `Mod` serializes as open infix (`a\bmod b`): in a tight context
