@@ -6616,12 +6616,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           next: () => {
             if (index === maxCount + 1) return { value: undefined, done: true };
             index += 1;
-            // The first element is `lower` itself: for an infinite step,
-            // `step · 0` is NaN (`Range(0, 1, +oo)` is [0]).
             return {
-              value: expr.engine.number(
-                index === 2 ? lower : lower + step * (index - 1 - 1)
-              ),
+              value: rangeElement(expr, lower, step, index - 2),
               done: false,
             };
           },
@@ -6650,11 +6646,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (step === 0) return undefined;
         const maxCount = rangeCount(lower, upper, step);
         if (index < 1 || index > maxCount) return undefined;
-        // The first element is `lower` itself: for an infinite step,
-        // `step · 0` is NaN (`Range(0, 1, +oo)` is [0]).
-        return expr.engine.number(
-          index === 1 ? lower : lower + step * (index - 1)
-        );
+        return rangeElement(expr, lower, step, index - 1);
       },
 
       indexWhere: undefined,
@@ -14513,6 +14505,55 @@ export function range(
   if (expr.nops === 2) return [op1, op2, op2 >= op1 ? 1 : -1];
 
   return [op1, op2, operandNumericValue(expr.op3)];
+}
+
+/**
+ * Element `k` (counted from 0) of a `Range` with a finite lower bound:
+ * `lower + k·step`.
+ *
+ * When the lower bound and the step are both exact number literals (`1/3`,
+ * `1/2`) and one of them is not an integer, the element is the exact
+ * rational: `Range(0, 1, 1/3)` is `[0, 1/3, 2/3, 1]`, as in Mathematica, not
+ * `[0, 0.333…, 0.666…, 1]`. Otherwise the element is computed in machine
+ * arithmetic from the numeric values `lower` and `step` of `range()`. Integer
+ * bounds and steps are exact in machine arithmetic, and a float bound or step
+ * makes every element inexact. A step that is an exact constant expression
+ * (`π/4`) also gives floats: the consumers of a range read each element as a
+ * number literal (`.re`), and `π/2` is not one.
+ *
+ * The first element is `lower` itself: for an infinite step, `step · 0` is
+ * NaN (`Range(0, 1, +oo)` is [0]).
+ */
+function rangeElement(
+  expr: Expression,
+  lower: number,
+  step: number,
+  k: number
+): Expression {
+  const ce = expr.engine;
+  // `Range(lower, upper)` has the implicit step ±1 (from `range()`), and
+  // `Range(upper)` has the integer bounds and step 1.
+  if (isFunction(expr) && expr.nops >= 2 && Number.isFinite(step)) {
+    const lowerOp = expr.op1;
+    const stepOp = expr.nops === 3 ? expr.op3 : ce.number(step);
+    if (
+      !(Number.isInteger(lower) && Number.isInteger(step)) &&
+      isExactRangeOperand(lowerOp) &&
+      isExactRangeOperand(stepOp)
+    )
+      return ce
+        .function('Add', [
+          lowerOp,
+          ce.function('Multiply', [ce.number(k), stepOp]),
+        ])
+        .evaluate();
+  }
+  return ce.number(k === 0 ? lower : lower + step * k);
+}
+
+/** An exact number literal: an integer or a rational (`1/3`). */
+function isExactRangeOperand(op: Expression): boolean {
+  return isNumber(op) && op.isExact && !op.isComplex;
 }
 
 /** Return the last value in the range

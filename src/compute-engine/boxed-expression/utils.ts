@@ -519,6 +519,11 @@ export function resolveBoundSymbols(
     if (protect.has(name) || seen.has(name)) return expr;
     const def = expr.engine.lookupDefinition(name);
     if (!isValueDef(def)) return expr;
+    // A constant held until a numeric approximation (`Pi`, `ExponentialE`)
+    // stays symbolic, as `evaluate()` keeps it: its value is a float, and
+    // replacing it turns an exact root such as `ln(3)` into a float and
+    // hides the shape `e^(bx)` from the solver.
+    if (def.value.holdUntil === 'N') return expr;
     const value = def.value.value;
     if (value === undefined || value === null) return expr;
     seen.add(name);

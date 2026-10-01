@@ -151,7 +151,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
       PlanckConstant: {
         description: 'Planck constant',
         isConstant: true,
-        wikidata: 'Q524',
+        wikidata: 'Q122894',
         type: 'value',
         value: (ce) =>
           ce._fn('Quantity', [
@@ -198,7 +198,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
       BoltzmannConstant: {
         description: 'Boltzmann constant',
         isConstant: true,
-        wikidata: 'Q131536',
+        wikidata: 'Q5962',
         type: 'value',
         value: (ce) =>
           ce._fn('Quantity', [
@@ -209,7 +209,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
       AvogadroConstant: {
         description: 'Avogadro constant',
         isConstant: true,
-        wikidata: 'Q47574',
+        wikidata: 'Q6203',
         type: 'value',
         value: (ce) =>
           ce._fn('Quantity', [
@@ -220,7 +220,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
       VacuumPermittivity: {
         description: 'Vacuum permittivity (electric constant)',
         isConstant: true,
-        wikidata: 'Q176908',
+        wikidata: 'Q6158',
         type: 'value',
         value: (ce) =>
           ce._fn('Quantity', [
@@ -231,7 +231,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
       GravitationalConstant: {
         description: 'Newtonian constant of gravitation',
         isConstant: true,
-        wikidata: 'Q30022',
+        wikidata: 'Q18373',
         type: 'value',
         value: (ce) =>
           ce._fn('Quantity', [
@@ -248,7 +248,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
       StefanBoltzmannConstant: {
         description: 'Stefan-Boltzmann constant',
         isConstant: true,
-        wikidata: 'Q196898',
+        wikidata: 'Q51374',
         type: 'value',
         value: (ce) =>
           ce._fn('Quantity', [
@@ -265,7 +265,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
       GasConstant: {
         description: 'Molar gas constant',
         isConstant: true,
-        wikidata: 'Q39600',
+        wikidata: 'Q182333',
         type: 'value',
         value: (ce) =>
           ce._fn('Quantity', [

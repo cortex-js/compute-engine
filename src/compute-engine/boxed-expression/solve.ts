@@ -64,25 +64,6 @@ function filter(sub: BoxedSubstitution): boolean {
 }
 
 /**
- * The real machine value of `−b/a` (or `−b` when `a` is omitted) for a
- * rule-condition domain check, or `undefined` when the ratio is symbolic or
- * non-real. Rule conditions bind exact operands as `NumericValue` instances
- * (e.g. `ExactNumericValue` for `−2`), which a bare `typeof === 'number'`
- * check misses — that hole let out-of-domain ratios (`sin x = 2`) through,
- * silently relying on the roots later failing to numericize. Inverse
- * trig/hyperbolic functions now evaluate to complex values off their real
- * domain, so the emission-site guard must do the real work.
- */
-function negatedRealRatio(b: Expression, a?: Expression): number | undefined {
-  const ratio = a ? b.canonical.div(a.canonical).neg() : b.canonical.neg();
-  const val = numericValue(ratio);
-  if (val === undefined) return undefined;
-  if (typeof val === 'number') return val;
-  if (val.isComplex) return undefined;
-  return val.re;
-}
-
-/**
  * Producer-side chokepoint for a validity-guarded root (conditional-values
  * design, decision 7). Resolves a *decidable* guard against evaluation + the
  * assumption store:
@@ -92,9 +73,8 @@ function negatedRealRatio(b: Expression, a?: Expression): number | undefined {
  *   - otherwise (undecidable)    → `When(root, guard)`, retained until the
  *     guard becomes decidable.
  *
- * Numeric ratios therefore keep today's behavior exactly: the trig rules'
- * conditions already refuse to fire on a decidable-False ratio, so a numeric
- * ratio reaching here has a `True` guard and collapses to the bare root.
+ * A numeric ratio always gives a decidable guard: an in-range ratio collapses
+ * to the bare root, an out-of-range ratio drops the root.
  *
  * Thin alias over the shared `conditionalValue` chokepoint
  * (`boxed-expression/conditional-value.ts`), which Sum/Integrate now also use.
@@ -296,19 +276,24 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: filter,
   },
 
+  // An exponential with a positive base takes only positive values: each rule
+  // below emits its root as `When(root, guard)`, where the guard requires the
+  // value of the exponential to be positive. The rule fires when the sign of
+  // that value is known either way. When it is negative or zero (`eˣ = -1`,
+  // `eˣ = 0`), the guard drops the root, and the solver knows that the
+  // equation has no real root. When the sign is unknown (`eˣ = c`), the rule
+  // does not fire.
+
   // a^x + b = 0
   {
     match: ['Add', ['Power', '_a', '_x'], '__b'],
-    replace: ['Ln', ['Negate', '__b'], '_a'],
+    replace: ['When', ['Ln', ['Negate', '__b'], '_a'], ['Less', '__b', 0]],
     id: 'solve.exponential',
     useVariations: true,
-    onBeforeMatch: () => {
-      // debugger;
-    },
     condition: (sub) =>
       filter(sub) &&
       (sub._a.isPositive ?? false) &&
-      (sub.__b.isNegative ?? false),
+      sub.__b.isNegative !== undefined,
   },
 
   // a * e^(bx) + c = 0
@@ -318,29 +303,35 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ['Multiply', '__a', ['Exp', ['Multiply', '__b', '_x']]],
       '__c',
     ],
-    replace: ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
+    replace: [
+      'When',
+      ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
+      ['Less', ['Divide', '__c', '__a'], 0],
+    ],
     id: 'solve.exponential-natural',
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
+      !sub.__a.isSame(0) &&
       // Captures of multiple operands are raw (unbound): canonicalize
       // before arithmetic, which asserts on non-canonical expressions
-      ((!sub.__a.isSame(0) &&
-        sub.__c.canonical.div(sub.__a.canonical).isNegative) ??
-        false),
+      sub.__c.canonical.div(sub.__a.canonical).isNegative !== undefined,
   },
 
   // a * e^(x) + c = 0
   {
     match: ['Add', ['Multiply', '__a', ['Exp', '_x']], '__c'],
-    replace: ['Ln', ['Negate', ['Divide', '__c', '__a']]],
+    replace: [
+      'When',
+      ['Ln', ['Negate', ['Divide', '__c', '__a']]],
+      ['Less', ['Divide', '__c', '__a'], 0],
+    ],
     id: 'solve.exponential-natural-unit-exponent',
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
-      ((!sub.__a.isSame(0) &&
-        sub.__c.canonical.div(sub.__a.canonical).isNegative) ??
-        false) &&
+      !sub.__a.isSame(0) &&
+      sub.__c.canonical.div(sub.__a.canonical).isNegative !== undefined &&
       !sub.__a.has('_x') &&
       !sub.__c.has('_x'),
   },
@@ -348,19 +339,23 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // e^(x) + c = 0
   {
     match: ['Add', ['Exp', '_x'], '__c'],
-    replace: ['Ln', ['Negate', '__c']],
+    replace: ['When', ['Ln', ['Negate', '__c']], ['Less', '__c', 0]],
     id: 'solve.exponential-natural-simple',
     useVariations: true,
-    condition: (sub) => filter(sub) && (sub.__c.isNegative ?? false),
+    condition: (sub) => filter(sub) && sub.__c.isNegative !== undefined,
   },
 
   // e^(bx) + c = 0
   {
     match: ['Add', ['Exp', ['Multiply', '__b', '_x']], '__c'],
-    replace: ['Divide', ['Ln', ['Negate', '__c']], '__b'],
+    replace: [
+      'When',
+      ['Divide', ['Ln', ['Negate', '__c']], '__b'],
+      ['Less', '__c', 0],
+    ],
     id: 'solve.exponential-natural-unit-coefficient',
     useVariations: true,
-    condition: (sub) => filter(sub) && (sub.__c.isNegative ?? false),
+    condition: (sub) => filter(sub) && sub.__c.isNegative !== undefined,
   },
 
   // a * log_b(x) + c = 0
@@ -562,6 +557,14 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Note: These return principal values only. For general solutions,
   // add 2πn for sin/cos or πn for tan (where n ∈ ℤ).
   //
+  // A rule whose inverse function has a restricted real domain (arcsin and
+  // arccos on [-1, 1], arcosh on [1, ∞), artanh on (-1, 1)) emits its root as
+  // `When(root, guard)`. The rule condition does not test the range: a root
+  // whose guard is false is dropped later (`conditionalRoot()`), and the solver
+  // then knows that a candidate root existed and was rejected. An empty
+  // solution list is then a decision (`sin x = 2` has no real root), not a
+  // failure to find a root.
+  //
 
   // a·sin(x) + b = 0  =>  x = arcsin(-b/a)
   // Valid when -1 ≤ -b/a ≤ 1
@@ -574,16 +577,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.sine',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      // Check that -b/a is in [-1, 1] for real solutions
-      const a = sub.__a;
-      const b = sub.__b;
-      if (!a || a.isSame(0)) return false;
-      const v = negatedRealRatio(b, a);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) <= 1;
-    },
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },
 
   // Second solution for sin: x = π - arcsin(-b/a)
@@ -596,15 +590,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.sine-second-branch',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const a = sub.__a;
-      const b = sub.__b;
-      if (!a || a.isSame(0)) return false;
-      const v = negatedRealRatio(b, a);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) <= 1;
-    },
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },
 
   // sin(x) + b = 0  =>  x = arcsin(-b)  (when a = 1)
@@ -617,13 +603,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.sine-unit',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const b = sub.__b;
-      const v = negatedRealRatio(b);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) <= 1;
-    },
+    condition: filter,
   },
 
   // Second solution for sin(x) + b = 0: x = π - arcsin(-b)
@@ -636,13 +616,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.sine-unit-second-branch',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const b = sub.__b;
-      const v = negatedRealRatio(b);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) <= 1;
-    },
+    condition: filter,
   },
 
   // a·cos(x) + b = 0  =>  x = arccos(-b/a)
@@ -656,15 +630,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.cosine',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const a = sub.__a;
-      const b = sub.__b;
-      if (!a || a.isSame(0)) return false;
-      const v = negatedRealRatio(b, a);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) <= 1;
-    },
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },
 
   // Second solution for cos: x = -arccos(-b/a)  (since cos(-x) = cos(x))
@@ -677,15 +643,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.cosine-negative-branch',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const a = sub.__a;
-      const b = sub.__b;
-      if (!a || a.isSame(0)) return false;
-      const v = negatedRealRatio(b, a);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) <= 1;
-    },
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },
 
   // cos(x) + b = 0  =>  x = arccos(-b)  (when a = 1)
@@ -698,13 +656,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.cosine-unit',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const b = sub.__b;
-      const v = negatedRealRatio(b);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) <= 1;
-    },
+    condition: filter,
   },
 
   // Second solution for cos(x) + b = 0: x = -arccos(-b)
@@ -717,13 +669,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.cosine-unit-negative-branch',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const b = sub.__b;
-      const v = negatedRealRatio(b);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) <= 1;
-    },
+    condition: filter,
   },
 
   // a·tan(x) + b = 0  =>  x = arctan(-b/a)
@@ -870,12 +816,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-cosine',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub) || sub.__a.isSame(0)) return false;
-      const v = negatedRealRatio(sub.__b, sub.__a);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return v >= 1;
-    },
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },
 
   // Second solution for cosh: x = -arcosh(-b/a)  (since cosh(-x) = cosh(x))
@@ -888,12 +829,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-cosine-negative-branch',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub) || sub.__a.isSame(0)) return false;
-      const v = negatedRealRatio(sub.__b, sub.__a);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return v >= 1;
-    },
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },
 
   // cosh(x) + b = 0  =>  x = arcosh(-b)  (positive branch)
@@ -907,12 +843,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-cosine-unit',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const v = negatedRealRatio(sub.__b);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return v >= 1;
-    },
+    condition: filter,
   },
 
   // Second solution for cosh(x) + b = 0: x = -arcosh(-b)
@@ -925,12 +856,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-cosine-unit-negative-branch',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const v = negatedRealRatio(sub.__b);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return v >= 1;
-    },
+    condition: filter,
   },
 
   // a·tanh(x) + b = 0  =>  x = artanh(-b/a)
@@ -945,12 +871,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-tangent',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub) || sub.__a.isSame(0)) return false;
-      const v = negatedRealRatio(sub.__b, sub.__a);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) < 1;
-    },
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },
 
   // tanh(x) + b = 0  =>  x = artanh(-b)
@@ -963,12 +884,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-tangent-unit',
     useVariations: true,
-    condition: (sub) => {
-      if (!filter(sub)) return false;
-      const v = negatedRealRatio(sub.__b);
-      if (v === undefined) return true; // Allow symbolic ratios
-      return Math.abs(v) < 1;
-    },
+    condition: filter,
   },
 
   // a·sin(x) + b·cos(x) = 0  =>  tan(x) = -b/a  =>  x = arctan(-b/a)
@@ -2350,14 +2266,30 @@ function solveInverseTrigEquation(
  *
  * Return the roots of that variable
  *
+ * An empty result has two meanings: a strategy found candidate roots and all
+ * of them were rejected (by validation against the original equation, by a
+ * validity guard, or by the declared type of the unknown), or no strategy
+ * applied at all. Only the first one can be a proof that there is no root,
+ * and only when every rejection was decided. When `stats` is given,
+ * `stats.candidates` is set to `true` when a strategy found candidate roots,
+ * and `stats.undecided` to `true` when a candidate was dropped although the
+ * check against the original equation did not decide that it is wrong (a
+ * residual with a free parameter that cannot be proved zero, such as the
+ * root of `√(x + a) = -x`).
+ *
  */
 export function findUnivariateRoots(
   expr: Expression,
   x: string,
   depth = 0,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: { candidates: boolean; undecided: boolean }
 ): ReadonlyArray<Expression> {
   const ce = expr.engine;
+  if (stats) {
+    stats.candidates = false;
+    stats.undecided = false;
+  }
 
   // `BaseForm` is an inert display wrapper (`BaseForm(value, base)`); its value
   // slot may be a polynomial in the unknown (symbolic-base numerals such as
@@ -2456,6 +2388,7 @@ export function findUnivariateRoots(
       );
       if (validated.length > 0) {
         trace?.push(...invTrigTrace!);
+        if (stats) stats.candidates = true;
         return validated;
       }
     }
@@ -2500,8 +2433,11 @@ export function findUnivariateRoots(
   const twoSqrtTrace: RuleSteps | undefined = trace ? [] : undefined;
   const twoSqrtSolutions = solveTwoSqrtEquation(expr, x, twoSqrtTrace);
   if (twoSqrtSolutions !== null) {
-    // Solutions are already validated inside the function
+    // Solutions are already validated inside the function. That validation
+    // does not report whether a rejection was decided, so an empty list from
+    // it is not counted as a decision.
     trace?.push(...twoSqrtTrace!);
+    if (stats && twoSqrtSolutions.length > 0) stats.candidates = true;
     return twoSqrtSolutions;
   }
 
@@ -2512,7 +2448,8 @@ export function findUnivariateRoots(
   if (nestedSqrtSolutions !== null) {
     // Validate and return the solutions
     trace?.push(...nestedTrace!);
-    return validateRoots(originalExpr, x, nestedSqrtSolutions, trace);
+    if (stats) stats.candidates = true;
+    return validateRoots(originalExpr, x, nestedSqrtSolutions, trace, stats);
   }
 
   // Transform sqrt-linear equations: √(f(x)) = g(x) → f(x) - g(x)² = 0
@@ -2720,6 +2657,8 @@ export function findUnivariateRoots(
     ce.popScope();
   }
 
+  if (stats && result.length > 0) stats.candidates = true;
+
   // Evaluate/simplify each candidate root, resolving any validity guard a
   // trig rule attached (`When(root, guard)`) through the single chokepoint:
   // a decidable-True guard collapses to the bare root (numeric ratios keep
@@ -2749,7 +2688,7 @@ export function findUnivariateRoots(
   // Validate the roots against the ORIGINAL expression (before clearing
   // denominators and harmonization). This filters out extraneous roots that
   // may have been introduced by algebraic transformations.
-  const validatedRoots = validateRoots(originalExpr, x, resolved, trace);
+  const validatedRoots = validateRoots(originalExpr, x, resolved, trace, stats);
 
   // Filter solutions by the declared type of the variable
   return filterRootsByType(ce, x, validatedRoots, trace);
@@ -3040,11 +2979,18 @@ function harmonize(expr: Expression): Expression[] {
   return results;
 }
 
+/**
+ * The roots that satisfy `expr` (or `expr = 0`), deduplicated. When `stats`
+ * is given, `stats.undecided` is set to `true` when a root is dropped without
+ * a decided check: its residual still has the unknown, or it has a free
+ * parameter and cannot be proved zero.
+ */
 function validateRoots(
   expr: Expression,
   x: string,
   roots: ReadonlyArray<Expression>,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: { undecided: boolean }
 ): Expression[] {
   const validRoots = roots.filter((root) => {
     // A validity-guarded root `When(v, guard)` is verified by its *value* `v`
@@ -3058,7 +3004,10 @@ function validateRoots(
     if (value === null) return false;
     if (!value.isValid) return false;
     if (value.isNaN) return false;
-    if (value.has(x)) return false;
+    if (value.has(x)) {
+      if (stats) stats.undecided = true;
+      return false;
+    }
 
     // Important: we want the prover tier (`isIdenticallyEqual()`), not
     // `is(0)`: the former accounts for tolerance (the latter does not), and a
@@ -3088,6 +3037,7 @@ function validateRoots(
     // vanishing is unknown for free `a` — and the guard (`0 ≤ a`) already carves
     // out the domain, so keep it. A bare root keeps today's strict behavior
     // (undecidable ⇒ dropped), avoiding domain-collapsing false positives.
+    if (!isWhen && zero === undefined && stats) stats.undecided = true;
     return isWhen ? zero !== false : zero === true;
   });
 

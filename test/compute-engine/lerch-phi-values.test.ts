@@ -447,7 +447,13 @@ describe('LerchPhi: exactness', () => {
   });
 
   test('an exact operand set stays symbolic under evaluate()', () => {
-    expect(phi(['Rational', 1, 2], -3, 1).evaluate().operator).toBe('LerchPhi');
+    expect(phi(['Rational', 1, 2], 3, 1).evaluate().operator).toBe('LerchPhi');
+  });
+
+  test('a negative integer order and exact operands give the exact value', () => {
+    // Φ(z, −n, a) = Σₖ (k + a)ⁿ zᵏ is a rational function of z: Φ(1/2, −3, 1)
+    // is 52, as mpmath gives 52.0 (cortex-js/compute-engine#397).
+    expect(phi(['Rational', 1, 2], -3, 1).evaluate().json).toBe(52);
   });
 });
 

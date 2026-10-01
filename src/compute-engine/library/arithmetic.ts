@@ -86,6 +86,7 @@ import {
   complexDivide,
 } from '../numerics/numeric-complex.js';
 import { lerchPhiComplex } from '../numerics/lerch-phi.js';
+import { EULERIAN_MAX_ORDER } from '../numerics/polylog.js';
 import {
   factorial2 as bigFactorial2,
   gcd as bigGcd,
@@ -3230,7 +3231,8 @@ function evaluateLerchPhi(
   z: Expression,
   s: Expression,
   a: Expression,
-  numericApproximation: boolean | undefined
+  numericApproximation: boolean | undefined,
+  expression?: Expression
 ): Expression | undefined {
   const finite = isFiniteNumberLiteral;
   // A float operand makes every result a float, the shortcuts below
@@ -3266,6 +3268,90 @@ function evaluateLerchPhi(
         engine.function('Subtract', [engine.number(1), z]),
       ])
       .evaluate({ numericApproximation: numeric });
+
+  // A negative integer order s = −n (n ≤ EULERIAN_MAX_ORDER), and an exact
+  // rational z (z ≠ 1, taken above) and a: expand (k + a)ⁿ by the binomial
+  // theorem,
+  //   Φ(z, −n, a) = Σₖ (k + a)ⁿ zᵏ = aⁿ/(1 − z) + Σⱼ₌₁ⁿ C(n, j)·aⁿ⁻ʲ·Li₋ⱼ(z).
+  // The j = 0 sum is the geometric series (its k = 0 term included); for
+  // j ≥ 1 the k = 0 term is 0, and the sum is the polylogarithm Li₋ⱼ(z), a
+  // rational function of z (`polylogReduce`). The value is exact, also at a
+  // zero, where the numeric kernel declines because a zero has no relative
+  // error it can vouch for: Φ(−1, −1, 1/2) = 0, as in Wolfram. The j = n
+  // term has no power of a, so a = 0 does not make 0⁰.
+  //
+  // Under `.N()` the operands arrive approximated (1/2 as 0.5). An operand
+  // that was an exact rational literal is read again from the expression
+  // before evaluation, which costs nothing, as the rounding functions do
+  // (`originalOperand()`). An exact radical (`√2`) is not used: the closed
+  // form would be a large expression with radicals in its denominators.
+  const isExactRational = (x: Expression | undefined): x is Expression =>
+    x !== undefined &&
+    isNumber(x) &&
+    x.isExact &&
+    !x.isComplex &&
+    asRational(x) !== undefined;
+  const exactOperand = (
+    x: Expression,
+    index: number
+  ): Expression | undefined => {
+    if (isExactRational(x)) return x;
+    if (!numericApproximation) return undefined;
+    const original = originalOperand(expression, index);
+    return isExactRational(original) ? original : undefined;
+  };
+  const exactZ = exactOperand(z, 0);
+  const exactA = exactOperand(a, 2);
+  if (
+    sInt !== null &&
+    sInt < 0 &&
+    -sInt <= EULERIAN_MAX_ORDER &&
+    exactZ !== undefined &&
+    !exactZ.isSame(1) &&
+    exactA !== undefined
+  ) {
+    z = exactZ;
+    a = exactA;
+    const n = -sInt;
+    const terms: Expression[] = [
+      engine.function('Divide', [
+        engine.function('Power', [a, engine.number(n)]),
+        engine.function('Subtract', [engine.One, z]),
+      ]),
+    ];
+    let binomial = 1;
+    for (let j = 1; j <= n; j++) {
+      binomial = (binomial * (n - j + 1)) / j;
+      const polylog = engine.function('PolyLog', [engine.number(-j), z]);
+      terms.push(
+        engine.function(
+          'Multiply',
+          j === n
+            ? [engine.number(binomial), polylog]
+            : [
+                engine.number(binomial),
+                engine.function('Power', [a, engine.number(n - j)]),
+                polylog,
+              ]
+        )
+      );
+    }
+    const exact = engine.function('Add', terms).evaluate();
+    // A float order (`s = -3.0`) makes the result a float, as any float
+    // operand does.
+    if (!numeric) return exact;
+    // `.N()` of an exact integer is the exact integer: box it as a float,
+    // since `.N()` promises a numeric approximation (Φ(1/2, −3, 1) is 52.0).
+    const approx = exact.N();
+    if (!isNumber(approx) || !approx.isExact) return approx;
+    return engine.number(
+      engine._inexactNumericValue(
+        approx.isComplex
+          ? { re: approx.re, im: approx.im }
+          : (approx.bignumRe ?? approx.re)
+      )
+    );
+  }
 
   // a a non-positive integer, Re(s) > 0, z ≠ 0: the (k+a) = 0 term
   // diverges — the same pole `evaluateHurwitzZeta` gives `HurwitzZeta` at a
@@ -4752,7 +4838,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     Digamma: {
       description:
         'Digamma function, the logarithmic derivative of the gamma function',
-      wikidata: 'Q1142755',
+      wikidata: 'Q905326',
       complexity: 8200,
       broadcastable: true,
       // Carrier, NaN policy, result and seam as for `Gamma` (see there).
@@ -4791,7 +4877,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // The derivative of the digamma function
     Trigamma: {
       description: 'Trigamma function, the derivative of the digamma function',
-      wikidata: 'Q2371722',
+      wikidata: 'Q1244426',
       complexity: 8400,
       broadcastable: true,
       // As `Digamma` above: the exceptional points are
@@ -4828,7 +4914,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     PolyGamma: {
       description:
         'Polygamma function, the n-th derivative of the digamma function',
-      wikidata: 'Q1817679',
+      wikidata: 'Q857956',
       complexity: 8500,
       broadcastable: true,
       // The order stays `integer` (the kernels are defined for integer
@@ -5084,14 +5170,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: (ops, { numericApproximation, engine, expression }) => {
         if (ops.length !== 3) return undefined;
         return evaluateLerchPhi(
           engine,
           ops[0],
           ops[1],
           ops[2],
-          numericApproximation
+          numericApproximation,
+          expression
         );
       },
     },
@@ -5099,7 +5186,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b) = ∫₀¹ t^(a-1)(1-t)^(b-1) dt
     Beta: {
       description: 'Euler beta function',
-      wikidata: 'Q189062',
+      wikidata: 'Q468881',
       complexity: 8200,
       broadcastable: true,
       // Both slots take the Γ-family carrier (`Gamma` says why): every
@@ -5172,7 +5259,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     LambertW: {
       description: 'Lambert W function (product logarithm)',
       keywords: ['product log', 'omega function'],
-      wikidata: 'Q429963',
+      wikidata: 'Q429331',
       complexity: 8300,
       broadcastable: true,
       // Optional second argument: the (integer) branch index. The branch is
@@ -5268,7 +5355,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // `canonical` handler, so the order slot is enforced at BOXING.
     BesselJ: {
       description: 'Bessel function of the first kind',
-      wikidata: 'Q627488',
+      wikidata: 'Q219637',
       complexity: 8500,
       broadcastable: true,
       signature: '(order: complex, complex | infinity) -> number',
@@ -5287,7 +5374,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Also known as Neumann function or Weber function
     BesselY: {
       description: 'Bessel function of the second kind (Neumann function)',
-      wikidata: 'Q627488',
+      wikidata: 'Q109545924',
       complexity: 8500,
       broadcastable: true,
       // Signature shape and seams: see `BesselJ` above.
@@ -5306,7 +5393,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Modified Bessel function of the first kind I_n(x)
     BesselI: {
       description: 'Modified Bessel function of the first kind',
-      wikidata: 'Q627488',
+      wikidata: 'Q2607225',
       complexity: 8500,
       broadcastable: true,
       // Signature shape and seams: see `BesselJ` above.
@@ -5327,7 +5414,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     BesselK: {
       description:
         'Modified Bessel function of the second kind (Macdonald function)',
-      wikidata: 'Q627488',
+      wikidata: 'Q109559130',
       complexity: 8500,
       broadcastable: true,
       // Signature shape and seams: see `BesselJ` above.
@@ -5347,7 +5434,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Solution to Airy differential equation y'' - xy = 0
     AiryAi: {
       description: 'Airy function of the first kind',
-      wikidata: 'Q403629',
+      wikidata: 'Q109729241',
       complexity: 8400,
       broadcastable: true,
       // The four Airy heads share one signature: the carrier
@@ -5376,7 +5463,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Airy function of the second kind Bi(x)
     AiryBi: {
       description: 'Airy function of the second kind',
-      wikidata: 'Q403629',
+      wikidata: 'Q109729257',
       complexity: 8400,
       broadcastable: true,
       // Signature and seams: see `AiryAi` above.
@@ -5398,7 +5485,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Derivative of the Airy function of the first kind Ai'(x)
     AiryAiPrime: {
       description: 'Derivative of the Airy function of the first kind',
-      wikidata: 'Q403629',
+      wikidata: 'Q409415',
       complexity: 8400,
       broadcastable: true,
       // Signature and seams: see `AiryAi` above.
@@ -5420,7 +5507,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Derivative of the Airy function of the second kind Bi'(x)
     AiryBiPrime: {
       description: 'Derivative of the Airy function of the second kind',
-      wikidata: 'Q403629',
+      wikidata: 'Q409415',
       complexity: 8400,
       broadcastable: true,
       // Signature and seams: see `AiryAi` above.
@@ -6861,7 +6948,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     PlusMinus: {
       description: 'Plus or Minus',
-      wikidata: 'Q120812',
+      wikidata: 'Q260387',
       complexity: 1200,
       signature: '(T, U) -> tuple<T, U> where T: value, U: value',
       examples: ['PlusMinus(1, 0.1)'],

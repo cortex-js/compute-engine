@@ -698,7 +698,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Pochhammer: {
       description:
         'Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1).',
-      wikidata: 'Q2367490',
+      wikidata: 'Q2339261',
       // Both slots take the Γ-family carrier, as `Binomial` does: every
       // finite complex point has a value (the poles of `Γ(a)` and `Γ(a+k)`
       // included) and every infinity is in the carrier with the values
@@ -855,7 +855,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
 
     Combinations: {
       description: 'Return all k-element combinations of a collection.',
-      wikidata: 'Q193606',
+      wikidata: 'Q202805',
       // The LEADING arm is the string rule: a combination of a string's own
       // characters is itself a string, so `Combinations("abc", 2)` is
       // `["ab","ac","bc"]` (ruling D9(b), 2026-08-16; see `innerRun` in

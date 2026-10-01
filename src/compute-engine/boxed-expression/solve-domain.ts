@@ -19,9 +19,14 @@ import {
   withValueShield,
 } from './utils.js';
 import { findUnivariateRoots } from './solve.js';
-import { getPolynomialCoefficients } from './polynomials.js';
+import { getPolynomialCoefficients, polynomialDegree } from './polynomials.js';
+import { expand } from './expand.js';
 import { interval } from '../numerics/interval.js';
-import { tryDiophantineSolve, isIntegerDomain } from './diophantine.js';
+import {
+  tryDiophantineSolve,
+  isIntegerDomain,
+  freshParameters,
+} from './diophantine.js';
 import { contextAssumptions, isFactTrue } from './constraint-subject.js';
 
 /**
@@ -255,6 +260,83 @@ function canonicalSolveSpec(ce: ComputeEngine, spec: Expression): Expression {
  * - exactly one domain spec → the univariate domain pipeline below;
  * - several domain specs → the multi-variable enumeration pipeline (Phase 2).
  */
+/**
+ * The answer of `Solve(equation, x)` when the root finder returned no root.
+ *
+ * - When the equation does not depend on `x` once it is expanded, it is an
+ *   identity (`x = x`, `2(x + 1) = 2x + 2`, `0 = 0`) or a contradiction
+ *   (`x + 1 = x + 2`, `1 = 0`). An identity is true for every value of `x`:
+ *   the answer is a list with one fresh free parameter, `[t]`, the same form
+ *   as the parametric answers of the congruence and diophantine solvers. A
+ *   contradiction has no solution: `[]`. When the remaining constant has
+ *   other unknowns (`a = 0`), the answer depends on them, and `Solve` stays
+ *   unevaluated.
+ * - When the root finder produced candidate roots and rejected all of them
+ *   by a decided check, the empty list is a decision: `[]` (`√x = -1`). When
+ *   a rejection was not decided (the residual of the root of
+ *   `√(x + a) = -x` cannot be proved zero for a free `a`), `Solve` stays
+ *   unevaluated.
+ * - When no strategy of the root finder applied, the empty list is not a
+ *   proof: the equation can have roots that the solver cannot find
+ *   (`a·x⁵ + x + 1 = 0`, `sin(x) = x³ + eˣ`). `Solve` stays unevaluated.
+ *
+ * The identity test is limited to equations whose two sides are both
+ * polynomial in `x`: there `expand()` only distributes and collects terms,
+ * so a residual free of `x` is free of `x` for every value of `x`. The sides
+ * are tested, not their difference, because the difference already cancels
+ * equal terms: `1/x = 1/x` has the residual `0`, but it is not defined at
+ * `x = 0`. Such an equation, and a cancellation such as
+ * `(x² − 1)/(x − 1) = x + 1` (not defined at `x = 1`), stay unevaluated.
+ *
+ * The single free parameter of an identity cannot express a restriction of
+ * the unknown, so `Solve` also stays unevaluated when one applies: a side
+ * condition (`conditioned`), an assumption about the unknown
+ * (`assume(x > 0)`), or a declared type narrower than `number`
+ * (`x: integer`).
+ */
+/**
+ * Whether the values of the unknown `x` are restricted: by an assumption
+ * about `x` alone (`assume(x > 0)`), or by a declared type narrower than
+ * `number` (`x: integer`), the same types that `filterRootsByType()` in
+ * `solve.ts` checks.
+ */
+function isRestrictedUnknown(ce: ComputeEngine, x: string): boolean {
+  const type = ce.symbol(x).type.type;
+  if (typeof type !== 'string' || (type !== 'number' && type !== 'unknown'))
+    return true;
+  for (const [fact, records] of contextAssumptions(ce).entries()) {
+    if (!isFactTrue(records)) continue;
+    if (fact.unknowns.includes(x)) return true;
+  }
+  return false;
+}
+
+function emptyRootsAnswer(
+  ce: ComputeEngine,
+  equation: Expression,
+  x: string,
+  stats: { candidates: boolean; undecided: boolean },
+  conditioned: boolean
+): Expression | undefined {
+  const sides = isFunction(equation, 'Equal')
+    ? [equation.op1, equation.op2]
+    : [equation];
+  if (sides.every((side) => polynomialDegree(side, x) >= 0)) {
+    const residual = sides.length === 2 ? sides[0].sub(sides[1]) : sides[0];
+    const constant = expand(residual);
+    if (!constant.has(x)) {
+      if (constant.isSame(0)) {
+        if (conditioned || isRestrictedUnknown(ce, x)) return undefined;
+        return ce.function('List', freshParameters(ce, equation, 1));
+      }
+      if (constant.isEqual(0) === false) return ce.function('List', []);
+      return undefined;
+    }
+  }
+  if (stats.candidates && !stats.undecided) return ce.function('List', []);
+  return undefined;
+}
+
 export function evaluateSolve(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
@@ -313,9 +395,15 @@ export function evaluateSolve(
     isFunction(ceq, 'Tuple') ||
     isFunction(ceq, 'And')
   ) {
-    // Only a `List` that actually bundles domain constraints is rewritten; an
-    // ordinary `List` equation system (no `Element` items) must reach the
-    // existing `.solve(names)` path unchanged.
+    // A `List` is rewritten only when it bundles domain constraints or, for a
+    // single unknown, holds a single item or a side-condition predicate; an
+    // ordinary `List` equation system (and `[x + y = 5]` in two unknowns,
+    // whose answer is a parametric tuple) must reach the existing
+    // `.solve(names)` path unchanged.
+    // A list of one equation is that equation (`Solve([x^2 = 4], x)` is
+    // `[-2, 2]`), and `[x^2 = 4, x > 0]` filters the roots as the `Set` and
+    // `And` spellings do: the system solver found no root for either and
+    // answered `[]`.
     const wasList = isFunction(ceq, 'List');
     const hadArgSpecs = specs.length > 0;
 
@@ -341,7 +429,13 @@ export function evaluateSolve(
       remaining.push(item);
     }
 
-    if (lifted.length > 0 || !wasList) {
+    if (
+      lifted.length > 0 ||
+      !wasList ||
+      (specs.length === 1 &&
+        (remaining.length === 1 ||
+          remaining.some((item) => isSideConditionPredicate(item))))
+    ) {
       if (lifted.length > 0) {
         if (!hadArgSpecs) {
           // No variable list: the lifted `Element`s ARE the specs, in
@@ -491,18 +585,37 @@ export function evaluateSolve(
       // instead so the caller sees the unevaluated `Solve(...)`. (Linear
       // inequality *systems* are handled by the multi-variable path.)
       if (INEQUALITY_OPERATORS.includes(ceq.operator ?? '')) return undefined;
-      const roots = ceq.solve(names[0]) as ReadonlyArray<Expression> | null;
-      if (roots === null) return ce.function('List', []);
+      const conditioned =
+        specs[0].condition !== undefined || sideConditions.length > 0;
+      let roots: ReadonlyArray<Expression> | null;
+      if (isFunction(ceq, 'Equal') || ceq.type.matches('number')) {
+        // An equation (or a bare expression read as `= 0`): the same two
+        // steps as `ceq.solve()`, with the candidate statistics kept. An
+        // empty root list is a decision only in some cases, see
+        // `emptyRootsAnswer()`.
+        const stats = { candidates: false, undecided: false };
+        roots = filterRootsByAssumptions(
+          ce,
+          findUnivariateRoots(ceq, names[0], 0, undefined, stats),
+          names[0]
+        );
+        if (roots.length === 0)
+          return emptyRootsAnswer(ce, ceq, names[0], stats, conditioned);
+      } else {
+        roots = ceq.solve(names[0]) as ReadonlyArray<Expression> | null;
+      }
+      // `null`: the solver does not handle this input, which does not prove
+      // that there is no solution.
+      if (roots === null) return undefined;
       // Apply any spec condition (a single-unknown side condition merged onto
       // the spec) and shared side conditions: drop a root only on a definite
       // `False` (keep `True`/undecidable). An empty result AFTER filtering is a
       // decision — roots were found and all excluded — not an inert solve.
-      const kept =
-        specs[0].condition !== undefined || sideConditions.length > 0
-          ? [...roots].filter((r) =>
-              keepUnderConditions([specs[0]], sideConditions, [r.evaluate()])
-            )
-          : [...roots];
+      const kept = conditioned
+        ? [...roots].filter((r) =>
+            keepUnderConditions([specs[0]], sideConditions, [r.evaluate()])
+          )
+        : [...roots];
       return ce.function('List', kept);
     }
     // Phase 3: a single integer equation in several unknowns that are ALL
