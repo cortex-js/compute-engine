@@ -1,6 +1,7 @@
 import type { Parser, Terminator } from '../types.js';
 import { LatexDictionaryEntry, COMPARISON_PRECEDENCE } from '../types.js';
 import type { MathJsonExpression } from '../../../math-json.js';
+import { missingIfEmpty } from '../../../math-json/utils.js';
 
 /**
  * Parse handler for a `\not`-prefixed relation that has no dedicated negated
@@ -68,6 +69,23 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     associativity: 'any',
     precedence: 241,
     parse: 'LessEqual',
+  },
+  {
+    // Non-strict mode: `=<` is a loose spelling of `<=`. It chains the same
+    // way: `a =< b =< c` is `LessEqual(a, b, c)`.
+    latexTrigger: ['=', '<'],
+    kind: 'infix',
+    associativity: 'any',
+    precedence: 241,
+    parse: (parser, lhs, until) => {
+      if (parser.options.strict !== false) return null;
+      const rhs = parser.parseExpression({ ...until, minPrec: 242 });
+      return parser._appendAssociativeOperand(
+        'LessEqual',
+        lhs,
+        missingIfEmpty(rhs)
+      );
+    },
   },
   {
     latexTrigger: ['\\leqslant'],
@@ -287,6 +305,19 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     parse: 'NotEqual',
   },
   {
+    // Non-strict mode: `<>` is a loose spelling of `\ne` (≠), as in BASIC,
+    // SQL and spreadsheet formulas. Same precedence and grouping as `\ne`.
+    latexTrigger: ['<', '>'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 255,
+    parse: (parser, lhs, until) => {
+      if (parser.options.strict !== false) return null;
+      const rhs = parser.parseExpression({ ...until, minPrec: 255 });
+      return ['NotEqual', lhs, missingIfEmpty(rhs)];
+    },
+  },
+  {
     // `\not\le` / `\not\leq`: no dedicated negated head, so wrap `LessEqual`.
     latexTrigger: ['\\not', '\\le'],
     kind: 'infix',
@@ -335,27 +366,27 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     name: 'GreaterEqual',
     latexTrigger: ['\\ge'],
     kind: 'infix',
-    associativity: 'right',
+    associativity: 'any',
     precedence: 242, // Note: different precedence than `>=` as per MathML
   },
   {
     latexTrigger: ['\\geq'],
     kind: 'infix',
-    associativity: 'right',
+    associativity: 'any',
     precedence: 242, // Note: different precedence than `>=` as per MathML
     parse: 'GreaterEqual',
   },
   {
     latexTrigger: ['>', '='],
     kind: 'infix',
-    associativity: 'right',
+    associativity: 'any',
     precedence: 243,
     parse: 'GreaterEqual',
   },
   {
     latexTrigger: ['\\geqslant'],
     kind: 'infix',
-    associativity: 'right',
+    associativity: 'any',
     precedence: COMPARISON_PRECEDENCE + 5, // Note: different precedence than `>=` as per MathML
     parse: 'GreaterEqual',
   },
@@ -376,7 +407,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
   {
     latexTrigger: ['>'],
     kind: 'infix',
-    associativity: 'right',
+    associativity: 'any',
     precedence: 245,
     parse: 'Greater',
   },
@@ -384,7 +415,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     name: 'Greater',
     latexTrigger: ['\\gt'],
     kind: 'infix',
-    associativity: 'right',
+    associativity: 'any',
     precedence: 245,
   },
   {

@@ -56,8 +56,16 @@ export function getFractionStyle(
     if (d <= 2 && n > 5) return 'factor';
     const denomOp = operator(op2);
     // Prefer quotient over reciprocal when denominator is Sqrt/Root
-    // so that 1/sqrt(x) displays as \frac{1}{\sqrt{x}} not \sqrt{x}^{-1}
-    if (n <= 2 && d > 5 && denomOp !== 'Sqrt' && denomOp !== 'Root')
+    // so that 1/sqrt(x) displays as \frac{1}{\sqrt{x}} not \sqrt{x}^{-1}.
+    // Same for a parenthesized denominator (raw `1/(1+x^2)`): it displays as
+    // \frac{1}{1+x^2}, not (1+x^2)^{-1}.
+    if (
+      n <= 2 &&
+      d > 5 &&
+      denomOp !== 'Sqrt' &&
+      denomOp !== 'Root' &&
+      denomOp !== 'Delimiter'
+    )
       return 'reciprocal';
   }
   return 'quotient';

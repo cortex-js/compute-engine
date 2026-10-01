@@ -351,6 +351,8 @@ function parseComponentAccess(
   parser: Parser,
   lhs: MathJsonExpression
 ): MathJsonExpression | null {
+  // The '.' trigger is the token just before the current index.
+  const dotIndex = parser.index - 1;
   parser.skipVisualSpace();
 
   // Dot-number juxtaposition: `\left(1-t\right).9`, `t^{i}.4`. A digit can
@@ -365,6 +367,13 @@ function parseComponentAccess(
     let digits = '';
     while (typeof parser.peek === 'string' && /^\d$/.test(parser.peek))
       digits += parser.nextToken();
+    // In non-strict mode, report a symbol followed by `.digits` (`x.5`) when
+    // diagnostics are enabled: the source may be a mistyped decimal number or
+    // a member access, and it is read as the product `x \cdot 0.5`.
+    if (parser.options.strict === false && symbol(lhs) !== null)
+      parser.emitDiagnostic('letter-before-decimal', dotIndex, parser.index, {
+        name: symbol(lhs),
+      });
     return [
       'InvisibleOperator',
       lhs,
@@ -2516,7 +2525,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       _until?: Readonly<Terminator>
     ) => {
       // Parse either a group or a single symbol
-      let rhs = parser.parseGroup() ?? parser.parseToken();
+      const scriptStart = parser.index;
+      let rhs = parser.parseGroup();
+      if (rhs === null) {
+        rhs = parser.parseToken();
+        // An unbraced subscript is one token: in non-strict mode, report a
+        // run of letters that it splits (`(x)_ab` is `(x)_a·b`).
+        if (rhs !== null) parser._emitScriptLetterRunSplit?.(scriptStart, rhs);
+      }
       // In non-strict mode, also accept parenthesized expressions
       if (
         rhs === null &&
@@ -3146,7 +3162,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return `${base}^{${serializer.serialize(upper)}}`;
     },
   },
-  { name: 'Superplus', latexTrigger: ['^', '+'], kind: 'postfix' },
+  {
+    name: 'Superplus',
+    latexTrigger: ['^', '+'],
+    kind: 'postfix',
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      // In non-strict mode, `e^+x` is `e^{+x}`, not `Superplus(e)·x`
+      parser._parseLenientSignedExponent?.(lhs, '+') ??
+      (['Superplus', lhs] as MathJsonExpression),
+  },
   { name: 'Subplus', latexTrigger: ['_', '+'], kind: 'postfix' },
   {
     name: 'Superminus',
@@ -3156,7 +3180,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // In non-strict mode, ^-digits should be Power(x, -n), not Superminus
       if (parser.options.strict === false && /^[0-9]$/.test(parser.peek))
         return null;
-      return ['Superminus', lhs] as MathJsonExpression;
+      // In non-strict mode, `e^-x` is `e^{-x}`, not `Superminus(e)·x`
+      return (
+        parser._parseLenientSignedExponent?.(lhs, '-') ??
+        (['Superminus', lhs] as MathJsonExpression)
+      );
     },
   },
   { name: 'Subminus', latexTrigger: ['_', '-'], kind: 'postfix' },

@@ -42,11 +42,25 @@ function parseDecimalDigits(
   part: 'none' | 'whole' | 'fraction' = 'whole'
 ): string {
   const result: string[] = [];
+  const start = parser.index;
+  // True when plain white space (not a visual space command such as `\,`)
+  // separates two digits that are read as one number, e.g. `2 3` → 23.
+  let joinedBySpace = false;
+  let end = start;
   let done = false;
   while (!done) {
     while (/^[0-9]$/.test(parser.peek)) {
       result.push(parser.nextToken());
+      const gapStart = parser.index;
+      end = gapStart;
       parser.skipVisualSpace();
+      if (
+        !joinedBySpace &&
+        parser.index > gapStart &&
+        /^[0-9]$/.test(parser.peek) &&
+        isPlainWhiteSpace(parser, gapStart)
+      )
+        joinedBySpace = true;
     }
 
     done = true;
@@ -80,7 +94,19 @@ function parseDecimalDigits(
       }
     }
   }
+  // In non-strict mode, report digits joined by white space when diagnostics
+  // are enabled: `2 3` may be the product `2 \cdot 3` or a list, not 23.
+  if (joinedBySpace && parser.options.strict === false)
+    parser.emitDiagnostic('spaced-digit-groups', start, end, {
+      digits: result.join(''),
+    });
   return result.join('');
+}
+
+/** True if the tokens from `start` to the current index are only white
+ * space (no visual space command such as `\,` and no `{}`). */
+function isPlainWhiteSpace(parser: Parser, start: number): boolean {
+  return parser.latex(start, parser.index).trim() === '';
 }
 
 /**
@@ -102,6 +128,32 @@ function parseSignedInteger(
   return '';
 }
 
+/**
+ * Match the base `10` of a scientific notation exponent, written either as
+ * the two digit tokens `10` or as the braced group `{10}` (`2\times{10}^3`,
+ * a common spelling in generated LaTeX).
+ */
+function matchBaseTen(parser: Parser): boolean {
+  return (
+    parser.matchAll(['1', '0']) || parser.matchAll(['<{>', '1', '0', '<}>'])
+  );
+}
+
+/**
+ * Match the configured begin exponent marker (by default `10^{`). When the
+ * marker starts with the digits `10`, the braced spelling `{10}` of the base
+ * is accepted too, so `2\cdot{10}^{3}` reads the same as `2\cdot10^{3}`.
+ */
+function matchBeginExponentMarker(
+  parser: Parser,
+  fmt: NumberFormatTokens
+): boolean {
+  const marker = fmt.beginExponentMarkerTokens;
+  if (parser.matchAll(marker)) return true;
+  if (marker.length < 2 || marker[0] !== '1' || marker[1] !== '0') return false;
+  return parser.matchAll(['<{>', '1', '0', '<}>', ...marker.slice(2)]);
+}
+
 /** Parse an exponent part (e.g. `e5`, `\times 10^{-3}`, `\%`). */
 function parseExponent(parser: Parser, fmt: NumberFormatTokens): string {
   const start = parser.index;
@@ -118,7 +170,7 @@ function parseExponent(parser: Parser, fmt: NumberFormatTokens): string {
   parser.index = start;
   if (parser.match('\\times')) {
     parser.skipVisualSpace();
-    if (parser.matchAll(['1', '0'])) {
+    if (matchBaseTen(parser)) {
       parser.skipVisualSpace();
       if (parser.match('^')) {
         parser.skipVisualSpace();
@@ -146,7 +198,7 @@ function parseExponent(parser: Parser, fmt: NumberFormatTokens): string {
   parser.index = start;
   if (parser.matchAll(fmt.exponentProductTokens)) {
     parser.skipVisualSpace();
-    if (parser.matchAll(fmt.beginExponentMarkerTokens)) {
+    if (matchBeginExponentMarker(parser, fmt)) {
       parser.skipVisualSpace();
       const exponent = parseSignedInteger(parser, fmt, 'none');
       parser.skipVisualSpace();

@@ -452,6 +452,33 @@ export function absorbSubscripts(
         }
         suffix = digits;
       } else if (
+        parser.options.strict === false &&
+        /^[a-zA-Z]$/.test(subToken)
+      ) {
+        // In non-strict mode, an unbraced run of ASCII letters is the whole
+        // subscript, as if it were braced: `x_max` is `x_{max}`. The run ends
+        // at the first token that is not a letter. One exception keeps the
+        // usual reading of adjacent indexed symbols: when the run has exactly
+        // two letters and is followed by `_`, `^` or a digit, the second
+        // letter is a new symbol that takes that script (`a_nb_n` is
+        // `a_n·b_n`, `a_kx^k` is `a_k·x^k`, `a_nx2` is `a_n·x_2`).
+        const runStart = parser.index;
+        let letters = '';
+        while (!parser.atEnd && /^[a-zA-Z]$/.test(parser.peek)) {
+          letters += parser.peek;
+          parser.nextToken();
+        }
+        if (
+          letters.length === 2 &&
+          (parser.peek === '_' ||
+            parser.peek === '^' ||
+            /^[0-9]$/.test(parser.peek))
+        ) {
+          letters = letters[0];
+          parser.index = runStart + 1;
+        }
+        suffix = letters;
+      } else if (
         /^[a-zA-Z0-9]$/.test(subToken) ||
         /^\p{XIDS}$/u.test(subToken)
       ) {

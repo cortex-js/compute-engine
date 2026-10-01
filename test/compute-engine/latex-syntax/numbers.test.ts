@@ -371,6 +371,41 @@ describe('PARSING OF NUMBER', () => {
     expect(parseVal('\\operatorname{NaN}')).toEqual(NaN);
   });
 
+  test('Scientific notation with a braced base {10}', () => {
+    // `{10}` reads the same as `10`, in both grammars
+    const raw = (s: string, strict: boolean) =>
+      ce.parse(s, { strict, form: 'raw' }).json;
+    const pairs: [string, string][] = [
+      ['2\\times{10}^{-1}', '2\\times10^{-1}'],
+      ['4.35\\times{10}^2', '4.35\\times10^2'],
+      ['2\\times{10}^3', '2\\times10^{3}'],
+      ['a/2\\times{10}^3', 'a/2\\times10^{3}'],
+      ['2\\cdot{10}^{2}', '2\\cdot10^{2}'],
+      ['-2\\times{10}^{3}', '-2\\times10^{3}'],
+      ['2\\times{10}^{+3}', '2\\times10^{+3}'],
+      ['2 \\times {10}^{-3}', '2 \\times 10^{-3}'],
+      // Not a number with either spelling
+      ['2\\cdot{10}^2', '2\\cdot10^2'],
+    ];
+    for (const strict of [true, false])
+      for (const [braced, plain] of pairs)
+        expect(raw(braced, strict)).toEqual(raw(plain, strict));
+
+    expect(raw('2\\times{10}^{-1}', true)).toEqual(0.2);
+    expect(raw('a/2\\times{10}^3', true)).toEqual(['Divide', 'a', 2000]);
+  });
+
+  test('Not scientific notation with a braced base', () => {
+    const raw = (s: string) => ce.parse(s, { form: 'raw' }).json;
+    expect(raw('{10}^{3}')).toEqual(['Power', 10, 3]);
+    expect(raw('2\\times{10}^{n}')).toEqual([
+      'Multiply',
+      2,
+      ['Power', 10, 'n'],
+    ]);
+    expect(raw('2\\times{11}^{3}')).toEqual(['Multiply', 2, ['Power', 11, 3]]);
+  });
+
   test('Bigints', () => {
     expect(parse('9007199254741033')).toMatchInlineSnapshot(
       `{num: "9007199254741033"}`

@@ -474,6 +474,106 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
         `["Add", "a", ["Divide", "b", "c"], "d"]`
       );
     });
+
+    test('÷ is the same as /', () => {
+      const raw = (s: string) =>
+        ce.parse(s, { strict: false, form: 'raw' }).json;
+      expect(raw('x ÷ 2')).toEqual(['Divide', 'x', 2]);
+      expect(raw('x ÷ 2')).toEqual(raw('x / 2'));
+      expect(raw('a ÷ b ÷ c')).toEqual(raw('a / b / c'));
+      expect(raw('1 + x ÷ 2')).toEqual(raw('1 + x / 2'));
+    });
+
+    test('Strict mode: ÷ is not an operator', () => {
+      const json = JSON.stringify(ce.parse('x ÷ 2', { form: 'raw' }).json);
+      expect(json).toContain('Error');
+      expect(json).not.toContain('Divide');
+    });
+
+    test('Strict mode: ÷ is an unexpected token', () => {
+      expect(ce.parse('a ÷ b', { form: 'raw' }).json).toEqual([
+        'Sequence',
+        'a',
+        [
+          'Error',
+          ['ErrorCode', "'unexpected-token'", "'÷'"],
+          ['LatexString', "'÷'"],
+        ],
+      ]);
+    });
+  });
+
+  describe('Loose relational operator spellings', () => {
+    const raw = (s: string, strict = false) =>
+      ce.parse(s, { strict, form: 'raw' }).json;
+
+    test('=< is LessEqual', () => {
+      expect(raw('a =< b')).toEqual(['LessEqual', 'a', 'b']);
+      expect(raw('a =< b =< c')).toEqual(raw('a <= b <= c'));
+    });
+
+    test('<> is NotEqual', () => {
+      expect(raw('a <> b')).toEqual(['NotEqual', 'a', 'b']);
+      expect(raw('a <> b <> c')).toEqual(raw('a \\ne b \\ne c'));
+    });
+
+    test('Strict mode: =< and <> are not relational operators', () => {
+      expect(raw('a =< b', true)).not.toEqual(['LessEqual', 'a', 'b']);
+      expect(raw('a <> b', true)).not.toEqual(['NotEqual', 'a', 'b']);
+    });
+
+    test('<= and >= chains are flat, in both modes', () => {
+      for (const strict of [false, true]) {
+        expect(raw('0.1 <= M <= 5', strict)).toEqual([
+          'LessEqual',
+          0.1,
+          'M',
+          5,
+        ]);
+        expect(raw('0.1 <= M <= 5', strict)).toEqual(
+          raw('0.1 ≤ M ≤ 5', strict)
+        );
+        expect(raw('5 >= M >= 0.1', strict)).toEqual([
+          'GreaterEqual',
+          5,
+          'M',
+          0.1,
+        ]);
+        expect(raw('5 >= M >= 0.1', strict)).toEqual(
+          raw('5 ≥ M ≥ 0.1', strict)
+        );
+        expect(raw('a != b != c', strict)).toEqual(raw('a ≠ b ≠ c', strict));
+      }
+    });
+
+    test('mixed chains and LaTeX chains are unchanged', () => {
+      expect(raw('0.1 \\le M \\le 5')).toEqual(['LessEqual', 0.1, 'M', 5]);
+      expect(raw('a < b <= c')).toEqual(['LessEqual', ['Less', 'a', 'b'], 'c']);
+      expect(raw('a <= b < c')).toEqual(['LessEqual', 'a', ['Less', 'b', 'c']]);
+      expect(raw('a < b < c')).toEqual(['Less', 'a', 'b', 'c']);
+    });
+  });
+
+  describe('Square root glyph with parentheses', () => {
+    test('√(x+1) is Sqrt(x+1), as sqrt(x+1)', () => {
+      const raw = (s: string) =>
+        ce.parse(s, { strict: false, form: 'raw' }).json;
+      expect(raw('√(x+1)')).toEqual(['Sqrt', ['Add', 'x', 1]]);
+      expect(raw('√(x+1)')).toEqual(raw('sqrt(x+1)'));
+      expect(raw('√\\left(x+1\\right)')).toEqual(['Sqrt', ['Add', 'x', 1]]);
+      // Other radicands are unchanged
+      expect(raw('√4')).toEqual(['Sqrt', 4]);
+      expect(raw('√{x+1}')).toEqual(['Sqrt', ['Add', 'x', 1]]);
+      expect(raw('√x+1')).toEqual(['Add', ['Sqrt', 'x'], 1]);
+    });
+
+    test('Strict mode: √( is unchanged', () => {
+      expect(ce.parse('√(x+1)', { form: 'raw' }).json).toEqual([
+        'InvisibleOperator',
+        'Sqrt',
+        ['Delimiter', ['Add', 'x', 1]],
+      ]);
+    });
   });
 
   describe('Double star exponentiation', () => {
@@ -920,6 +1020,282 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       expect(ce.parse('log₁₀(x)', { strict: false })).toMatchInlineSnapshot(
         `["Log", "x"]`
       );
+    });
+  });
+
+  // The raw (non-canonical) parse, so the comparisons below are between the
+  // trees the parser builds, before any canonical rewriting.
+  const lenient = (s: string) =>
+    ce.parse(s, { strict: false, form: 'raw' }).json;
+  const strict = (s: string) => ce.parse(s, { form: 'raw' }).json;
+
+  describe('Deeply nested exponents', () => {
+    // A bare-function check used to read the exponent group of every `e^…`
+    // before finding that `e` is not a function name, then discard it: the
+    // work doubled at each level of nesting.
+    test('a 40-level nest parses quickly and as in strict mode', () => {
+      const n = 40;
+      const src = 'e^{-('.repeat(n) + 'x' + ')}'.repeat(n);
+      const t0 = Date.now();
+      const result = lenient(src);
+      expect(Date.now() - t0).toBeLessThan(2000);
+      expect(result).toEqual(strict(src));
+    });
+
+    test('a 40-level nest of signed unbraced exponents', () => {
+      const n = 40;
+      const t0 = Date.now();
+      const result = lenient('e^-('.repeat(n) + 'x' + ')'.repeat(n));
+      expect(Date.now() - t0).toBeLessThan(2000);
+      expect(result).toEqual(lenient('e^{-('.repeat(n) + 'x' + ')}'.repeat(n)));
+    });
+  });
+
+  describe('Bare sign and sgn', () => {
+    test('map to Sign', () => {
+      expect(lenient('sign(-2)')).toEqual(['Sign', ['Negate', 2]]);
+      expect(lenient('sgn(x)')).toEqual(['Sign', 'x']);
+      expect(ce.parse('sign(-2)', { strict: false }).evaluate().json).toEqual(
+        -1
+      );
+      expect(ce.parse('sgn(3)', { strict: false }).evaluate().json).toEqual(1);
+    });
+
+    test('strict mode is unchanged', () => {
+      expect(strict('sign(-2)')).not.toEqual(['Sign', ['Negate', 2]]);
+    });
+  });
+
+  describe('Unbraced letter subscripts', () => {
+    test('a run of letters is the whole subscript', () => {
+      expect(lenient('x_max')).toEqual('x_max');
+      expect(lenient('x_max')).toEqual(lenient('x_{max}'));
+      expect(lenient('T_max')).toEqual('T_max');
+      expect(lenient('y = x_1 + x_max')).toEqual([
+        'Equal',
+        'y',
+        ['Add', 'x_1', 'x_max'],
+      ]);
+      expect(lenient('x_max^2')).toEqual(['Power', 'x_max', 2]);
+      expect(lenient('\\alpha_max')).toEqual('alpha_max');
+    });
+
+    test('a two-letter run before a script keeps the adjacent symbols', () => {
+      expect(lenient('a_nb_n')).toEqual(['InvisibleOperator', 'a_n', 'b_n']);
+      expect(lenient('a_kx^k')).toEqual([
+        'InvisibleOperator',
+        'a_k',
+        ['Power', 'x', 'k'],
+      ]);
+    });
+
+    test('strict mode is unchanged', () => {
+      expect(strict('x_max')).toEqual(['InvisibleOperator', 'x_m', 'a', 'x']);
+    });
+  });
+
+  describe('Unbraced exponent operand', () => {
+    test('reads one whole operand, as the braced spelling does', () => {
+      for (const [bare, braced] of [
+        ['x^2.5', 'x^{2.5}'],
+        ['x^1.23456789012345678901', 'x^{1.23456789012345678901}'],
+        ['x^pi', 'x^{pi}'],
+        ['x^theta', 'x^{theta}'],
+        ['x^inf', 'x^{inf}'],
+        ['e^sin(x)', 'e^{sin(x)}'],
+        ['x^12', 'x^{12}'],
+      ])
+        expect(lenient(bare)).toEqual(lenient(braced));
+      expect(lenient('x^2.5')).toEqual(['Power', 'x', 2.5]);
+      expect(lenient('x^pi')).toEqual(['Power', 'x', 'Pi']);
+      expect(lenient('e^sin(x)')).toEqual(['Power', 'e', ['Sin', 'x']]);
+    });
+
+    test('white space and an ambiguous extent keep the previous reading', () => {
+      expect(lenient('x^2 y')).toEqual([
+        'InvisibleOperator',
+        ['Power', 'x', 2],
+        'y',
+      ]);
+      expect(lenient('x^2y')).toEqual([
+        'InvisibleOperator',
+        ['Power', 'x', 2],
+        'y',
+      ]);
+      expect(lenient('e^2pi')).toEqual([
+        'InvisibleOperator',
+        ['Power', 'e', 2],
+        'Pi',
+      ]);
+      expect(lenient('e^i pi')).toEqual([
+        'InvisibleOperator',
+        ['Power', 'e', 'i'],
+        'Pi',
+      ]);
+      expect(lenient('x^ab')).toEqual([
+        'InvisibleOperator',
+        ['Power', 'x', 'a'],
+        'b',
+      ]);
+    });
+
+    test('strict mode is unchanged', () => {
+      expect(strict('x^pi')).toEqual([
+        'InvisibleOperator',
+        ['Power', 'x', 'p'],
+        'i',
+      ]);
+      expect(strict('x^2.5')).toEqual([
+        'InvisibleOperator',
+        ['Power', 'x', 2],
+        0.5,
+      ]);
+    });
+  });
+
+  describe('Signed unbraced exponent', () => {
+    test('the sign and one operand are the exponent', () => {
+      for (const [bare, braced] of [
+        ['e^-x', 'e^{-x}'],
+        ['2^-x', '2^{-x}'],
+        ['e^-sin(x)', 'e^{-sin(x)}'],
+        ['e^-(x)', 'e^{-(x)}'],
+        ['e^-\\left(x\\right)', 'e^{-\\left(x\\right)}'],
+        ['e^-\\pi', 'e^{-\\pi}'],
+        ['e^+x', 'e^{+x}'],
+        ['x^-2.5', 'x^{-2.5}'],
+      ])
+        expect(lenient(bare)).toEqual(lenient(braced));
+      expect(lenient('e^-x')).toEqual(['Power', 'e', ['Negate', 'x']]);
+      expect(lenient('e^+x')).toEqual(['Power', 'e', 'x']);
+      expect(lenient('x^-2')).toEqual(['Power', 'x', -2]);
+      // A second superscript is the same error as for `e^{-x}^2`
+      expect(lenient('e^-x^2')).toEqual([
+        'Error',
+        "'unexpected-superscript'",
+        ['LatexString', "'^-x^2'"],
+      ]);
+    });
+
+    test('a sign with no operand directly after it keeps its reading', () => {
+      expect(lenient('\\Z^+')).toEqual('PositiveIntegers');
+      expect(lenient('A^+')).toEqual(['PseudoInverse', 'A']);
+      expect(lenient('e^- x')).toEqual([
+        'InvisibleOperator',
+        ['Superminus', 'e'],
+        'x',
+      ]);
+      expect(lenient('\\lim_{x\\to0^+}f(x)')).toEqual(
+        strict('\\lim_{x\\to0^+}f(x)')
+      );
+      expect(lenient('\\lim_{x\\to0^-}f(x)')).toEqual(
+        strict('\\lim_{x\\to0^-}f(x)')
+      );
+    });
+
+    test('a script, a visual space or a closing delimiter is not an operand', () => {
+      expect(lenient('x^-_k')).toEqual(['Subscript', ['Superminus', 'x'], 'k']);
+      expect(lenient('n^+_k')).toEqual([
+        'Subscript',
+        ['PseudoInverse', 'n'],
+        'k',
+      ]);
+      expect(lenient('x^-\\,y')).toEqual([
+        'InvisibleOperator',
+        ['Superminus', 'x'],
+        ['HorizontalSpacing', 3],
+        'y',
+      ]);
+      for (const src of ['x^-_k', 'n^+_k', 'x^-\\,y', 'x^-\\quad y', '(x^-)'])
+        expect(lenient(src)).toEqual(strict(src));
+    });
+
+    test('a second superscript is an error, as in the other spellings', () => {
+      for (const src of ['e^-x^2', 'e^{-x}^2', 'x^y^z'])
+        expect((lenient(src) as unknown[]).slice(0, 2)).toEqual([
+          'Error',
+          "'unexpected-superscript'",
+        ]);
+    });
+
+    test('strict mode is unchanged', () => {
+      expect(strict('e^-x')).toEqual([
+        'InvisibleOperator',
+        ['Superminus', 'e'],
+        'x',
+      ]);
+      expect(strict('e^+x')).toEqual([
+        'InvisibleOperator',
+        ['PseudoInverse', 'e'],
+        'x',
+      ]);
+    });
+  });
+
+  describe('Bare words in and infinity', () => {
+    test('in between two operands is Element', () => {
+      expect(lenient('M in [0,1]')).toEqual([
+        'Element',
+        'M',
+        ['Interval', 0, 1],
+      ]);
+      expect(lenient('M in [0,1]')).toEqual(lenient('M \\in [0,1]'));
+      expect(lenient('x in A')).toEqual(['Element', 'x', 'A']);
+      expect(lenient('x+1 in A')).toEqual(lenient('x+1 \\in A'));
+      expect(lenient('\\{x in \\R : x>0\\}')).toEqual(
+        lenient('\\{x \\in \\R : x>0\\}')
+      );
+    });
+
+    test('infinity is PositiveInfinity', () => {
+      expect(lenient('infinity')).toEqual('PositiveInfinity');
+      expect(lenient('x < infinity')).toEqual([
+        'Less',
+        'x',
+        'PositiveInfinity',
+      ]);
+    });
+
+    test('other words that start with in keep their reading', () => {
+      expect(lenient('index')).toEqual([
+        'InvisibleOperator',
+        'i',
+        'n',
+        'd',
+        'e',
+        'x',
+      ]);
+      expect(lenient('ink')).toEqual(['InvisibleOperator', 'i', 'n', 'k']);
+      expect(lenient('x inf')).toEqual([
+        'InvisibleOperator',
+        'x',
+        'PositiveInfinity',
+      ]);
+      expect(lenient('x in')).toEqual(['InvisibleOperator', 'x', 'i', 'n']);
+      expect(lenient('x index')).toEqual(strict('x index'));
+      expect(lenient('x int y')).toEqual(strict('x int y'));
+    });
+
+    test('a subscript or a letter run next to in keeps its reading', () => {
+      expect(lenient('x_in S')).toEqual(['InvisibleOperator', 'x_in', 'S']);
+      expect(lenient('x_i in S')).toEqual(['Element', 'x_i', 'S']);
+      expect(lenient('a_nx')).toEqual('a_nx');
+      expect(lenient('a_nx^n')).toEqual([
+        'InvisibleOperator',
+        'a_n',
+        ['Power', 'x', 'n'],
+      ]);
+    });
+
+    test('strict mode is unchanged', () => {
+      expect(strict('x in A')).toEqual([
+        'InvisibleOperator',
+        'x',
+        'i',
+        'n',
+        'A',
+      ]);
+      expect(strict('infinity')).not.toEqual('PositiveInfinity');
     });
   });
 });

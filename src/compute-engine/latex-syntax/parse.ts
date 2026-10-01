@@ -352,8 +352,8 @@ const BARE_FUNCTION_MAP: Record<string, string> = {
   // Other common functions
   sqrt: 'Sqrt',
   abs: 'Abs',
-  sgn: 'Sgn',
-  sign: 'Sgn',
+  sgn: 'Sign',
+  sign: 'Sign',
   floor: 'Floor',
   ceil: 'Ceil',
   round: 'Round',
@@ -588,6 +588,11 @@ export class _Parser implements Parser {
   // at depth 1 without rejecting any valid interval. See parseEnclosure.
   private _reversedIntervalDepth = 0;
 
+  // A run of two or more letters that `tryParseBareRun()` left to the
+  // per-letter path, so that `parsePrimary()` can report it as a
+  // `letter-run-split` diagnostic. Only set when diagnostics are enabled.
+  private _splitLetterRun: { name: string; start: number } | null = null;
+
   // Track whether we're inside a quantifier body (ForAll, Exists, etc.)
   // When true, single uppercase letters followed by () are parsed as predicates
   private _quantifierScopeDepth = 0;
@@ -726,8 +731,8 @@ export class _Parser implements Parser {
   private _symCandidateCount = 0;
 
   // Opt-in parse diagnostics (codes `undeclared-symbol`,
-  // `juxtaposition-as-multiply`). Non-null only when `options.diagnostics` is
-  // enabled; `emitDiagnostic` is a no-op otherwise.
+  // `juxtaposition-as-multiply`, `letter-run-split`, …). Non-null only when
+  // `options.diagnostics` is enabled; `emitDiagnostic` is a no-op otherwise.
   //
   // Each collected entry carries an internal monotonic `_seq` id (assigned in
   // emission order and never reused). Checkpoints are seq *values*, not array
@@ -2148,12 +2153,21 @@ export class _Parser implements Parser {
     if (until.minPrec === undefined) until = { ...until, minPrec: 0 };
 
     const start = this.index;
+    // The longest operator token sequence ahead is the operator. When it
+    // binds too loosely for the current context (its precedence is below
+    // `minPrec`), the operator ends this operand: a shorter operator that is a
+    // prefix of it must not be tried instead. Otherwise in `a <= b <= c` the
+    // right operand of the first `<=` would read the `<` of the second `<=`
+    // as `Less` (precedence 245 is higher than 241 for `<=`) and leave `=`
+    // behind.
+    let blockedLength = 0;
     for (const [def, n] of this.peekDefinitions('infix')) {
+      if (n > 0 && n < blockedLength) continue;
       if (def.precedence >= until.minPrec) {
         this.index = start + n;
         const rhs = def.parse(this, lhs, until);
         if (rhs !== null) return rhs;
-      }
+      } else if (n > blockedLength) blockedLength = n;
     }
     this.index = start;
 
@@ -2632,33 +2646,8 @@ export class _Parser implements Parser {
           typeof policyHead === 'string' &&
           (info === undefined || info.inferred === true)
         ) {
-          const headEnd = this.index;
-          const fallback = this.isFunctionOperator(policyHead)
-            ? 'apply'
-            : this.looksLikePredicate(policyHead)
-              ? this.inQuantifierScope
-                ? 'predicate'
-                : 'apply'
-              : 'juxtapose';
-          this.skipVisualSpace();
-          let opening = this.index;
-          if (OPEN_DELIMITER_PREFIX[this._tokens[opening]]) opening++;
-          if (this._tokens[opening] === '<{>') opening++;
-          if (DELIMITER_SHORTHAND['('].includes(this._tokens[opening])) {
-            const group = this.parseEnclosure();
-            if (group !== null) {
-              this._applicationPolicy ??= new ApplicationPolicy(
-                this.options.resolveApplication
-              );
-              return this._applicationPolicy.add({
-                head: policyHead,
-                group,
-                fallback,
-                sourceOffsets: this.sourceOffsets(start, this.index),
-                headSourceOffsets: this.sourceOffsets(start, headEnd),
-              });
-            }
-          }
+          const candidate = this.parseApplicationCandidate(policyHead, start);
+          if (candidate !== null) return candidate;
         }
         this.index = scannerEnd;
       }
@@ -2721,6 +2710,74 @@ export class _Parser implements Parser {
     }
 
     return typeof fn === 'string' ? [fn, ...args] : ['Apply', fn!, ...args];
+  }
+
+  /**
+   * With a `resolveApplication` hook, read `head` (whose source spans from
+   * `start` to the current index) followed by a parenthesized group as an
+   * application candidate: the hook decides later, once the enclosing
+   * structure is known, whether it is a call or a product (see
+   * `ApplicationPolicy`). Return `null` if no parenthesized group follows;
+   * the index is then left after any skipped visual space, and the caller
+   * restores it.
+   *
+   * The caller checks that `head` has no authoritative definition: the hook
+   * is only consulted for a name that is undeclared or whose type was only
+   * inferred.
+   */
+  private parseApplicationCandidate(
+    head: MathJsonSymbol,
+    start: number
+  ): MathJsonExpression | null {
+    const headEnd = this.index;
+    const fallback = this.isFunctionOperator(head)
+      ? 'apply'
+      : this.looksLikePredicate(head)
+        ? this.inQuantifierScope
+          ? 'predicate'
+          : 'apply'
+        : 'juxtapose';
+    this.skipVisualSpace();
+    let opening = this.index;
+    if (OPEN_DELIMITER_PREFIX[this._tokens[opening]]) opening++;
+    if (this._tokens[opening] === '<{>') opening++;
+    if (!DELIMITER_SHORTHAND['('].includes(this._tokens[opening])) return null;
+    const group = this.parseEnclosure();
+    if (group === null) return null;
+    this._applicationPolicy ??= new ApplicationPolicy(
+      this.options.resolveApplication
+    );
+    return this._applicationPolicy.add({
+      head,
+      group,
+      fallback,
+      sourceOffsets: this.sourceOffsets(start, this.index),
+      headSourceOffsets: this.sourceOffsets(start, headEnd),
+    });
+  }
+
+  /**
+   * In non-strict mode, the bare-word parselets (`tryParseBareSymbol()`,
+   * `tryParseBareRun()`) read a name such as `gamma` or `foo` before
+   * `parseFunction()` can see it. When that name is followed by a
+   * parenthesized group, give the `resolveApplication` hook the same chance
+   * to decide the reading as it has for `f(x)`, under the same precedence
+   * rules: a name with an authoritative definition (an explicit
+   * declaration, a parser-local parameter, a `resolveSymbol` fact, a library
+   * definition) is not submitted. Return `null`, with the index at `end`,
+   * when the hook is absent or does not apply.
+   */
+  private parseBareApplicationCandidate(
+    head: MathJsonSymbol,
+    start: number
+  ): MathJsonExpression | null {
+    if (!this.options.resolveApplication) return null;
+    const info = this.resolveSymbol(head);
+    if (info !== undefined && info.inferred !== true) return null;
+    const end = this.index;
+    const candidate = this.parseApplicationCandidate(head, start);
+    if (candidate === null) this.index = end;
+    return candidate;
   }
 
   parseSymbol(until?: Readonly<Terminator>): MathJsonExpression | null {
@@ -2871,6 +2928,17 @@ export class _Parser implements Parser {
       }
     }
 
+    // Check the name before reading any script: a run that is not a known
+    // function name is left to the other parselets. Reading the `^`/`_` group
+    // first and discarding it made a nested exponent (`e^{-(e^{-(…)})}`) be
+    // read twice per level, once here and once by `parseSupsub()`, which is
+    // exponential in the nesting depth.
+    const fnName = BARE_FUNCTION_MAP[name];
+    if (!fnName) {
+      this.index = start;
+      return null;
+    }
+
     this.skipSpace();
 
     // Check for optional subscript: log_2(x) or log_{10}(x)
@@ -2946,13 +3014,6 @@ export class _Parser implements Parser {
         }
       }
       this.skipSpace();
-    }
-
-    const fnName = BARE_FUNCTION_MAP[name];
-    if (!fnName) {
-      // Not a recognized function name, backtrack
-      this.index = start;
-      return null;
     }
 
     // Parse the argument(s). With parentheses this is an ordinary call
@@ -3067,6 +3128,7 @@ export class _Parser implements Parser {
     // Special constants
     oo: 'PositiveInfinity',
     inf: 'PositiveInfinity',
+    infinity: 'PositiveInfinity',
     ii: 'ImaginaryUnit',
   };
 
@@ -3107,19 +3169,19 @@ export class _Parser implements Parser {
     // constants (`oo`→`PositiveInfinity`, `pi`→`Pi`, …) are declared → no-op.
     this.emitSymbolReference(symbolName, start, this.index);
 
-    return symbolName;
+    return this.parseBareApplicationCandidate(symbolName, start) ?? symbolName;
   }
 
   /** Named constants that may be recognized *inside* a longer letter run by
    * `tryParseBareRun` (greedy longest-match). Only the spelled-out Greek
    * letters qualify: `2pix` → `2·π·x`, `xpi` → `x·π`. The ASCII shorthands
-   * `oo`/`inf`/`ii` are deliberately excluded — they require word boundaries
-   * (so `foo` stays `f·o·o`, not `f·∞`) and are matched only as whole runs by
-   * `tryParseBareSymbol`. */
+   * `oo`/`inf`/`infinity`/`ii` are deliberately excluded — they require word
+   * boundaries (so `foo` stays `f·o·o`, not `f·∞`) and are matched only as
+   * whole runs by `tryParseBareSymbol`. */
   private static readonly SEGMENTABLE_SYMBOLS: Record<string, string> =
     Object.fromEntries(
       Object.entries(_Parser.BARE_SYMBOL_MAP).filter(
-        ([k]) => !['oo', 'inf', 'ii'].includes(k)
+        ([k]) => !['oo', 'inf', 'infinity', 'ii'].includes(k)
       )
     );
 
@@ -3246,11 +3308,16 @@ export class _Parser implements Parser {
         if (!claimed) {
           this.index = start + name.length;
           this.emitSymbolReference(name, start, this.index);
-          return name;
+          return this.parseBareApplicationCandidate(name, start) ?? name;
         }
       }
       // Otherwise leave the run to the unchanged per-letter path.
+      // `parsePrimary()` reports the split once that path has read the first
+      // letter: reporting it here would be undone by the backtracking of the
+      // dictionary dispatch that runs next (see `set index`).
       this.index = start;
+      if (this.diagnostics !== null && !this.isDifferentialRun(start))
+        this._splitLetterRun = { name, start };
       return null;
     }
 
@@ -3258,7 +3325,156 @@ export class _Parser implements Parser {
     // `[start+i, start+i+1)`.
     for (const k of leftoverLetters)
       this.emitSymbolReference(name[k], start + k, start + k + 1);
+    if (segments.length > 1) this.emitLetterRunSplit(name, start, segments);
     return segments.length === 1 ? segments[0] : ['Multiply', ...segments];
+  }
+
+  /**
+   * Whether the letter run at token `start` is a differential (`d` and one
+   * more letter) that is the numerator or the denominator of a differential
+   * quotient: `dy/dx`, `d/dx`, `\frac{dy}{dx}`, `\frac{d}{dx}`. Such a run
+   * is read as the intended product `d·y`, so it is not reported as a
+   * `letter-run-split`. White space around the `/` is allowed.
+   */
+  private isDifferentialRun(start: number): boolean {
+    const t = this._tokens;
+    const isLetter = (i: number) =>
+      t[i] !== undefined && /^[a-zA-Z]$/.test(t[i]);
+    // `d` and one letter at `i`, with no letter on either side
+    const isDiffRun = (i: number) =>
+      t[i] === 'd' && isLetter(i + 1) && !isLetter(i + 2) && !isLetter(i - 1);
+    // A lone `d` that ends at `i`
+    const isLoneD = (i: number) =>
+      t[i] === 'd' && !isLetter(i - 1) && !isLetter(i + 1);
+    if (!isDiffRun(start)) return false;
+
+    // `dy/dx`: the run is the numerator
+    let j = start + 2;
+    while (t[j] === '<space>') j++;
+    if (t[j] === '/') {
+      j++;
+      while (t[j] === '<space>') j++;
+      return isDiffRun(j);
+    }
+    // `dy/dx` or `d/dx`: the run is the denominator
+    let i = start - 1;
+    while (t[i] === '<space>') i--;
+    if (t[i] === '/') {
+      i--;
+      while (t[i] === '<space>') i--;
+      return isDiffRun(i - 1) || isLoneD(i);
+    }
+    // `\frac{dy}{dx}` or `\frac{d}{dx}`
+    if (t[start - 1] !== '<{>' || t[start + 2] !== '<}>') return false;
+    if (t[start - 2] === '\\frac')
+      return (
+        t[start + 3] === '<{>' && t[start + 6] === '<}>' && isDiffRun(start + 4)
+      );
+    if (t[start - 2] !== '<}>') return false;
+    if (t[start - 6] === '\\frac' && t[start - 5] === '<{>')
+      return isDiffRun(start - 4);
+    return (
+      t[start - 5] === '\\frac' && t[start - 4] === '<{>' && isLoneD(start - 3)
+    );
+  }
+
+  /**
+   * Record a `letter-run-split` diagnostic: the run of letters `run`, which
+   * starts at token `start`, has no definition as a whole and is read as a
+   * product of `parts` (`eps` is `e·p·s`, `xpi` is `x·π`). The diagnostic
+   * span is the run. No-op unless diagnostics are enabled.
+   */
+  private emitLetterRunSplit(
+    run: string,
+    start: number,
+    parts: MathJsonExpression[]
+  ): void {
+    if (this.diagnostics === null) return;
+    this.emitDiagnostic('letter-run-split', start, start + run.length, {
+      run,
+      parts,
+    });
+  }
+
+  /**
+   * In non-strict mode, record a `letter-run-split` diagnostic when an
+   * unbraced superscript or subscript that starts at token `scriptStart`
+   * took only the first letter of a run of letters: `e^xy` is read as
+   * `e^x·y` and `x^ab` as `x^a·b`. The letter may follow a sign (`e^-xy`).
+   * The span is the whole run. `parts` is the script and the rest of the
+   * run as written; the rest is then read on its own and can be reported
+   * again if it is split. The reading does not change.
+   */
+  _emitScriptLetterRunSplit(
+    scriptStart: number,
+    script: MathJsonExpression
+  ): void {
+    if (this.diagnostics === null || this.options.strict !== false) return;
+    const t = this._tokens;
+    const isLetter = (i: number) =>
+      t[i] !== undefined && /^[a-zA-Z]$/.test(t[i]);
+    let first = scriptStart;
+    if (t[first] === '-' || t[first] === '+') first++;
+    if (this.index !== first + 1 || !isLetter(first) || !isLetter(first + 1))
+      return;
+    let end = first + 1;
+    while (isLetter(end)) end++;
+    const run = t.slice(first, end).join('');
+    this.emitDiagnostic('letter-run-split', first, end, {
+      run,
+      parts: [script, run.slice(1)],
+    });
+  }
+
+  /**
+   * In non-strict mode, whether the next tokens are the word `in` used as an
+   * operator: the letters `i`, `n`, not preceded by a letter or a digit (so
+   * `xin` and `2in` are not matched) and followed by a token that is not a
+   * letter, a digit or `_` (so `int`, `inf`, `index`, `ink` and `in2` are not
+   * matched). The end of the input does not count as a following token: the
+   * operator needs a right operand.
+   */
+  private atBareInWord(): boolean {
+    if (this.options.strict !== false) return false;
+    const i = this.index;
+    if (this._tokens[i] !== 'i' || this._tokens[i + 1] !== 'n') return false;
+    if (i > 0 && /^[a-zA-Z0-9]$/.test(this._tokens[i - 1])) return false;
+    const next = this._tokens[i + 2];
+    if (next === undefined) return false;
+    return !/^[a-zA-Z0-9_]$/.test(next);
+  }
+
+  /**
+   * The precedence of the word `in` read as `\in` (see `atBareInWord()`):
+   * the precedence of the first infix dictionary entry for `\in`. If there
+   * is no such entry, return `Infinity`: no level stops at the word, and
+   * `parseBareInOperator()` then reads nothing, so the word stays letters.
+   */
+  private bareInPrecedence(): number {
+    const defs = this._dictionary.infixByTrigger.get('\\in') ?? [];
+    for (const def of defs) if (def.kind === 'infix') return def.precedence;
+    return Infinity;
+  }
+
+  /**
+   * Read the word `in` (see `atBareInWord()`) with the dictionary definition
+   * of `\in`, so `M in [0,1]` is the same as `M \in [0,1]`. Return `null`,
+   * with the index unchanged, if the definition does not read the operands.
+   */
+  private parseBareInOperator(
+    lhs: MathJsonExpression,
+    until: Readonly<Terminator>
+  ): MathJsonExpression | null {
+    const start = this.index;
+    const defs = this._dictionary.infixByTrigger.get('\\in') ?? [];
+    for (const def of defs) {
+      if (def.kind !== 'infix') continue;
+      this.index = start + 2;
+      const result = def.parse(this, lhs, until);
+      if (result !== null) return result;
+    }
+    this.index = start;
+    return null;
   }
 
   /**
@@ -3274,11 +3490,18 @@ export class _Parser implements Parser {
    *   gathering the scripts into a broadcasting `List` (see below).
    *
    */
-  private parseSupsub(lhs: MathJsonExpression): MathJsonExpression | null {
-    if (this.atEnd) return lhs;
+  private parseSupsub(
+    lhs: MathJsonExpression,
+    pending?: { superscript: MathJsonExpression; start: number }
+  ): MathJsonExpression | null {
+    // `pending` is a superscript already read by the caller, starting at the
+    // `^` token at `pending.start` (see `_parseLenientSignedExponent()`). The
+    // scripts that follow it are gathered with it, as if this method had
+    // read it.
+    if (this.atEnd && !pending) return lhs;
     console.assert(lhs !== null);
 
-    const index = this.index;
+    const index = pending?.start ?? this.index;
 
     // In non-strict mode, a single letter immediately followed by one or more
     // digits is treated as an implicit *subscript*: `x2 → x_2`, `x1 → x_1`,
@@ -3292,6 +3515,7 @@ export class _Parser implements Parser {
     // so this stays conservative.
     // Check before skipSpace() to require true adjacency.
     if (
+      !pending &&
       this.options.strict === false &&
       typeof lhs === 'string' &&
       ((lhs.length === 1 && /^[a-zA-Z]$/.test(lhs)) ||
@@ -3311,7 +3535,9 @@ export class _Parser implements Parser {
     //
     // 1/ Gather possible superscript/subscripts
     //
-    const superscripts: MathJsonExpression[] = [];
+    const superscripts: MathJsonExpression[] = pending
+      ? [pending.superscript]
+      : [];
     const subscripts: MathJsonExpression[] = [];
     let subIndex = index;
     while (this.peek === '_' || this.peek === '^') {
@@ -3342,6 +3568,7 @@ export class _Parser implements Parser {
             sub = this.parseEnclosure();
           sub ??= this.parseStringGroup();
           if (sub === null) return this.error('missing', index);
+          this._emitScriptLetterRunSplit(subIndex, sub);
 
           subscripts.push(sub);
         }
@@ -3351,27 +3578,11 @@ export class _Parser implements Parser {
           superscripts.push(this.error('syntax-error', subIndex));
         else {
           let sup = this.parseGroup();
-          // In non-strict mode, consume optional '-' and consecutive digits
-          // before parseToken(), which would only consume a single digit
-          if (sup === null && this.options.strict === false) {
-            const digitStart = this.index;
-            let neg = false;
-            if ((this.peek as string) === '-') {
-              neg = true;
-              this.index++;
-            }
-            let digits = '';
-            while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
-              digits += this.peek;
-              this.index++;
-            }
-            if (digits) {
-              const num = parseInt(digits);
-              sup = neg ? -num : num;
-            } else {
-              this.index = digitStart;
-            }
-          }
+          // In non-strict mode, an unbraced exponent is one whole operand
+          // (`x^12`, `x^2.5`, `x^pi`, `e^sin(x)`, `e^-x`), not the single
+          // token parseToken() would read.
+          if (sup === null && this.options.strict === false)
+            sup = this.parseLenientExponent();
           sup ??= this.parseToken();
           // In non-strict mode, also accept parenthesized expressions
           // Note: After match('^'), peek has changed but TypeScript doesn't know
@@ -3382,6 +3593,7 @@ export class _Parser implements Parser {
           )
             sup = this.parseEnclosure();
           if (sup === null) return this.error('missing', index);
+          this._emitScriptLetterRunSplit(subIndex, sup);
           superscripts.push(sup);
         }
       }
@@ -3454,17 +3666,7 @@ export class _Parser implements Parser {
         if (nonEmptySuperscripts.length !== 0) {
           const superscriptExpression: MathJsonExpression =
             nonEmptySuperscripts[0];
-          const arg: MathJsonExpression = [
-            'Superscript',
-            result!,
-            superscriptExpression,
-          ];
-          for (const def of defs) {
-            if (typeof def.parse === 'function')
-              result = def.parse(this, arg, { minPrec: 0 });
-            else result = arg;
-            if (result !== null) break;
-          }
+          result = this.applySuperscript(result!, superscriptExpression);
         }
       }
     }
@@ -3472,6 +3674,196 @@ export class _Parser implements Parser {
     // Restore the index if we did not find a match
     if (result === null) this.index = index;
 
+    return result;
+  }
+
+  /**
+   * Read `base` with the superscript `sup` using the dictionary entries
+   * triggered by `^` (the last step of `parseSupsub()`).
+   */
+  private applySuperscript(
+    base: MathJsonExpression,
+    sup: MathJsonExpression
+  ): MathJsonExpression | null {
+    const arg: MathJsonExpression = ['Superscript', base, sup];
+    const defs = this._dictionary.infixByTrigger.get('^') ?? [];
+    if (defs.length === 0) return base;
+    let result: MathJsonExpression | null = null;
+    for (const def of defs) {
+      if (typeof def.parse === 'function')
+        result = def.parse(this, arg, { minPrec: 0 });
+      else result = arg;
+      if (result !== null) break;
+    }
+    return result;
+  }
+
+  /**
+   * In non-strict mode, read an unbraced exponent after `^`: an optional
+   * sign followed by one operand (see `parseLenientExponentOperand()`).
+   *
+   * - A `-` followed by a run of digits is a negative integer literal
+   *   (`x^-2` is `Power(x, -2)`).
+   * - Any other `-` operand is negated (`e^-x` is `Power(e, Negate(x))`,
+   *   the same as `e^{-x}`); a `+` is dropped (`e^+x` is `e^{+x}`).
+   * - After a sign, a parenthesized group (`e^-(x)`), a braced group
+   *   (`e^-{x}`) and any single token `parseToken()` reads (`e^-x`,
+   *   `e^-\pi`) are also an operand. Without a sign the caller reads those.
+   *   White space after the sign is not skipped: `\R^+ x` keeps its reading.
+   *   A `_`, a `^`, a visual-spacing command or a closing delimiter after
+   *   the sign is not an operand either (see `atSignedExponentOperand()`).
+   *
+   * Return `null`, with the index unchanged, if there is no such exponent.
+   */
+  private parseLenientExponent(): MathJsonExpression | null {
+    const start = this.index;
+    const sign = this.peek === '-' || this.peek === '+' ? this.peek : null;
+    if (sign === null) return this.parseLenientExponentOperand()?.[0] ?? null;
+
+    this.index++;
+    let operand = this.parseLenientExponentOperand();
+    if (operand === null && this.atSignedExponentOperand()) {
+      const expr =
+        this.peek === '(' || this.peek === '\\left'
+          ? this.parseEnclosure()
+          : this.peek === '<{>'
+            ? this.parseGroup()
+            : this.parseToken();
+      if (expr !== null) operand = [expr, false];
+    }
+    if (operand === null) {
+      this.index = start;
+      return null;
+    }
+    const [expr, isDigitRun] = operand;
+    if (sign === '+') return expr;
+    if (isDigitRun && typeof expr === 'number') return -expr;
+    return ['Negate', expr];
+  }
+
+  /**
+   * Whether the token after the sign of an unbraced exponent (`^-`, `^+`)
+   * can start the exponent operand. It cannot when it is the end of the
+   * input, white space, a `_` or `^`, a visual-spacing command (`\,`,
+   * `\quad`, `\hspace`, ...) or a closing delimiter. In that case the sign
+   * is not followed by an operand, and the postfix reading of `^-`/`^+` is
+   * kept: `n^+_k` is `Subscript(PseudoInverse(n), k)` and `x^-\,y` is
+   * `Superminus(x)·y`.
+   */
+  private atSignedExponentOperand(): boolean {
+    if (this.atEnd) return false;
+    const tok = this.peek;
+    return !(
+      tok === '<space>' ||
+      tok === '_' ||
+      tok === '^' ||
+      tok === '<}>' ||
+      VISUAL_SPACE_COMMANDS.has(tok) ||
+      tok === '\\hspace' ||
+      tok === '\\hskip' ||
+      tok === '\\kern' ||
+      CLOSE_DELIMITER_PREFIX.has(tok) ||
+      Object.values(CLOSE_DELIMITER).includes(tok)
+    );
+  }
+
+  /**
+   * In non-strict mode, read one operand of an unbraced exponent, the same
+   * way the braced exponent would read it:
+   *
+   * - a run of digits, with its decimal part if the decimal separator is
+   *   followed by a digit (`x^12`, `x^2.5`). Letters after the digits are
+   *   not part of the operand (`x^2y` is `x^2·y`, `e^2pi` is `e^2·π`);
+   * - a whole word that names a constant in non-strict mode (`x^pi`,
+   *   `x^theta`, `x^inf`), when no digit or `_` follows it;
+   * - a bare function name directly followed by a parenthesis (`e^sin(x)`).
+   *
+   * Any other token is left to the caller: a single letter (`e^x`), a letter
+   * run that is not a whole known word (`x^ab` is `x^a·b`). White space ends
+   * the operand.
+   *
+   * Return the operand and whether it is a plain run of digits, or `null`
+   * with the index unchanged.
+   */
+  private parseLenientExponentOperand():
+    [expr: MathJsonExpression, isDigitRun: boolean] | null {
+    const start = this.index;
+    const isDigit = (t: string | undefined) =>
+      t !== undefined && /^[0-9]$/.test(t);
+
+    if (isDigit(this.peek)) {
+      let i = start;
+      let digits = '';
+      while (isDigit(this._tokens[i])) digits += this._tokens[i++];
+      const sep = this._decimalSeparatorTokens;
+      if (
+        sep.length > 0 &&
+        sep.every((t, k) => this._tokens[i + k] === t) &&
+        isDigit(this._tokens[i + sep.length])
+      ) {
+        let end = i + sep.length;
+        while (isDigit(this._tokens[end])) end++;
+        // Read the decimal number with the number reader, so the result is
+        // the same as in the braced spelling. Accept it only if the reader
+        // stopped where the digits stop.
+        const num = this.parseNumber();
+        if (num !== null && this.index === end) return [num, false];
+        this.index = start;
+      }
+      this.index = i;
+      return [parseInt(digits), true];
+    }
+
+    if (!/^[a-zA-Z]$/.test(this.peek)) return null;
+    let end = start;
+    let word = '';
+    while (end < this._tokens.length && /^[a-zA-Z]$/.test(this._tokens[end]))
+      word += this._tokens[end++];
+    if (word.length < 2) return null;
+    const next = this._tokens[end];
+    let expr: MathJsonExpression | null = null;
+    if (
+      _Parser.BARE_SYMBOL_MAP[word] !== undefined &&
+      next !== '_' &&
+      !isDigit(next)
+    )
+      expr = this.tryParseBareSymbol();
+    else if (BARE_FUNCTION_MAP[word] !== undefined && next === '(')
+      expr = this.tryParseBareFunction();
+    if (expr === null) {
+      this.index = start;
+      return null;
+    }
+    return [expr, false];
+  }
+
+  /**
+   * In non-strict mode, read a signed exponent for the postfix entries
+   * triggered by `^-` and `^+` (`Superminus`, `Superplus`, `PseudoInverse`),
+   * which run before `parseSupsub()`: `e^-x` is `Power(e, Negate(x))`, not
+   * `Superminus(e)·x`. The index is after the sign. Return `null`, with the
+   * index unchanged, when no operand follows the sign directly (`\Z^+`,
+   * `x \to 0^+`), so the postfix entry keeps its reading.
+   */
+  _parseLenientSignedExponent(
+    lhs: MathJsonExpression,
+    sign: '-' | '+'
+  ): MathJsonExpression | null {
+    if (this.options.strict !== false) return null;
+    const start = this.index;
+    if (this._tokens[start - 1] !== sign || this._tokens[start - 2] !== '^')
+      return null;
+    this.index = start - 1;
+    const superscript = this.parseLenientExponent();
+    if (superscript === null) {
+      this.index = start;
+      return null;
+    }
+    this._emitScriptLetterRunSplit(start - 1, superscript);
+    // Gather the scripts that follow as `parseSupsub()` does for `e^{-x}`, so
+    // `e^-x^2` is the same double-superscript error as `e^{-x}^2`.
+    const result = this.parseSupsub(lhs, { superscript, start: start - 2 });
+    if (result === null) this.index = start;
     return result;
   }
 
@@ -3623,6 +4015,16 @@ export class _Parser implements Parser {
           minPrec: 0,
         });
         if (result !== null) return result;
+        // A one-token trigger that is not a command, whose entry declines
+        // here, has no reading at this position (for example `÷`, which only
+        // non-strict mode reads). Report it as an unexpected token, the same
+        // error as for a token with no dictionary entry.
+        const token = this._tokens[start];
+        if (n === 1 && token[0] !== '\\')
+          return this.error(
+            ['unexpected-token', { str: tokensToString(token) }],
+            start
+          );
         // if (def.name)
         //   return [
         //     def.name,
@@ -3783,7 +4185,14 @@ export class _Parser implements Parser {
 
     // In non-strict mode, segment a multi-letter run that isn't a whole known
     // word (e.g. `2pix` → `2·π·x`), avoiding stray imaginary-unit injection.
+    this._splitLetterRun = null;
     result ??= this.tryParseBareRun();
+    // (The cast undoes the narrowing to `null` from the assignment above:
+    // `tryParseBareRun()` sets the field.)
+    const splitRun =
+      result === null
+        ? (this._splitLetterRun as { name: string; start: number } | null)
+        : null;
 
     // ParseGenericExpression() has priority. Some generic expressions
     // may include symbols which have not been explicitly defined
@@ -3793,6 +4202,19 @@ export class _Parser implements Parser {
       this.parseFunction(until) ??
       this.parseSymbol(until) ??
       parseInvalidSymbol(this);
+
+    // A run of letters that is not a known word (`eps`, `sinx`) is read one
+    // letter at a time: report it, unless a dictionary entry with a
+    // multi-letter trigger read the whole run.
+    if (
+      splitRun !== null &&
+      result !== null &&
+      splitRun.start === start &&
+      this.index < splitRun.start + splitRun.name.length
+    )
+      this.emitLetterRunSplit(splitRun.name, splitRun.start, [
+        ...splitRun.name,
+      ]);
 
     // We're parsing invalid symbols explicitly so we can get a
     // better error message, otherwise we would end up with "unexpected
@@ -4116,6 +4538,18 @@ export class _Parser implements Parser {
         // already-parsed left operand).
         this._operandDiagnosticCheckpoint = operandDiagCheckpoint;
         this._operandStartIndex = start;
+        // In non-strict mode, the word `in` between two operands is the
+        // membership operator `\in`. When `\in` binds less tightly than the
+        // current context allows, stop here so that an outer level reads it,
+        // instead of reading the word as the letters `i·n`.
+        if (this.atBareInWord()) {
+          if (until.minPrec > this.bareInPrecedence()) break;
+          const element = this.parseBareInOperator(lhs, until);
+          if (element !== null) {
+            lhs = element;
+            continue;
+          }
+        }
         let result = this.parseInfixOperator(lhs, until);
         if (result === null && until.minPrec <= INVISIBLE_OP_PRECEDENCE)
           result = this.parseNumberTimesList(lhs, until);
