@@ -226,23 +226,6 @@ dictionary and a value that is not an entry gives the same error. The open
 question is whether a dictionary joined with a list should instead give a list
 of the entries followed by the elements. Until decided, the error stays.
 
-### The JavaScript run-time tensor arithmetic adds complex coordinates with `+` (OPEN — found 2026-09-30 by the fix for issue #385)
-
-`Sum(P)` with `P` declared `list<tuple<complex, complex>>` compiles with
-`success: true`, and over `[(1+i, 2), (3+i, 4)]` returns
-`["0[object Object][object Object]", …]`, where `evaluate()` gives
-`(4 + 2i, 6)`. The element-wise helpers of `compilation/javascript-target.ts`
-(`bcast` behind `_SYS.add`, `mulTensor` behind `_SYS.mul`, `matmul`) apply the
-raw `+` and `*` to the entries of an array, and a complex entry is an object
-`{re, im}`. The top level of a `Sum`/`Product` fold is correct since the fix
-for issue #385 (`elementwiseFoldCombiner` uses `_SYS.sadd`/`_SYS.smul` for two
-values that are not arrays). Two fixes are possible: refuse at compile time a
-fold or an element-wise operation whose element type has a complex part inside
-a collection, or make the scalar function of `bcast` complex-aware (one
-`typeof` test per entry on the real path). A function result typed `unknown`
-that holds such points is visible only at run time, so the second fix is the
-only complete one.
-
 ### `Append` over an operand typed `any` is typed `list` (OPEN, small — found 2026-09-29, measured again 2026-09-30)
 
 `Join` over an operand typed `unknown` or `any` is typed `collection`, because

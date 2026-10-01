@@ -48,6 +48,32 @@
   walked 2¹² times. A function already walked for the same definition is now
   skipped, and the work grows polynomially with the depth: 5 666 reads of the
   declared signatures at depth 12 (from 89 794) and 20 962 at depth 20.
+- The compiled `Sum` and `Product` of a list of points, rows or matrices with
+  complex entries gave wrong values behind `success: true`: the sum of the
+  points `[(1+i, 2), (3+i, 4)]` was `["0[object Object][object Object]", 6]`
+  and a product of complex rows or matrices had `NaN` entries. They now match
+  `evaluate()`. The compiler chooses a real-only, a complex, or (for a shape
+  known only at run time) a dispatching form of the element-wise helper from
+  the type of the operand, as for the other linear-algebra helpers.
+- A compiled expression over the `Sum` of a list of REAL points read each
+  coordinate as a complex number: `Sum(P) + (1, 1)` gave `NaN` coordinates
+  where `evaluate()` gives `(5, 7)`. It is now correct.
+- `Product` of a list of rows or square matrices was typed `number`; it is now
+  typed as a row or a matrix (`Product([[1, 2], [3, 4]])` is `[3, 8]`), and a
+  compiled `Product(Q) + 1` no longer adds `1` to the matrix as if it were one
+  number. `Sum` and `Product` of an abstract collection or a set of rows or
+  matrices, and of a matrix whose size is not known, are typed by shape too,
+  and so is the sum or product of elements typed `broadcastable<T>`.
+- Shapes the JavaScript target cannot compute now refuse to compile instead
+  of giving `NaN` or a string: a scalar times the `Sum` of points
+  (`2·Sum(P)`), a complex parent over a fold of complex rows or matrices,
+  `Multiply` of two complex rows or matrices read with `At`, `Product` of
+  matrices known not to be square, and `Sum` over elements that are abstract
+  collections. With the default fallback, `evaluate()` answers them.
+- `Sum()` and `Product()` with no operand logged an internal exception
+  during canonicalization. The operand is now reported missing, as for
+  `Mean()`.
+
 - **#386** `ReplaceAt`, `DeleteAt` and `Insert` did not compile to
   JavaScript: `compile(ReplaceAt(s, 2, 9))` failed with "target 'javascript'
   has no lowering for it", so a `Fold` whose step replaced one element of a

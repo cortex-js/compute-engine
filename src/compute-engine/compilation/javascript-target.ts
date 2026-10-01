@@ -10261,7 +10261,12 @@ function complexMulTensor(...args: BcastValue[]): BcastValue {
 /** `mulTensor` for operands whose lane is not known when the code is
  * compiled: the scalar factors and the element-wise product use
  * `scalarMul` (one type test per entry), and the matrix product is the
- * real `matmul`, as for a `list<number>` operand of `Dot`. */
+ * real `matmul`, as for a `list<number>` operand of `Dot`. So a product of
+ * complex MATRICES whose type is known only at run time (`Product(h(t))`
+ * with `h` typed `-> unknown`) has `NaN` entries. This is the convention
+ * the user kept on 2026-10-01: a lane not proved complex is real. Using
+ * `complexMatmul` here would make every entry `{re, im}` and slow down a
+ * real `list<number>` product. */
 function mulTensorAny(...args: BcastValue[]): BcastValue {
   return mulTensorWith(matmul, scalarMul, args);
 }
