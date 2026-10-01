@@ -15940,14 +15940,16 @@ function entryKeyOf(entry: Expression): string | undefined {
  * Unlike deduplication, last-wins CANNOT be streamed: the winning value for
  * the FIRST key may come from the LAST entry, so the whole enumeration has to
  * be read before any entry can be emitted. That is why this returns an array
- * rather than wrapping the iterator, and why it declines (`undefined`) when
- * the walk is unavailable — a source longer than `ce.maxCollectionSize`, or
- * an entry that is not a key-value pair at all. An infinite keyed source is
- * refused by the callers' `rawTotal` gate before reaching here. */
+ * rather than wrapping the iterator. It declines when the walk is
+ * unavailable: a source longer than `ce.maxCollectionSize` gives `undefined`,
+ * and an element that is not a key-value pair gives `{ notEntry }`, the
+ * element itself, so that the caller can name it in an error. An infinite
+ * keyed source is refused by the callers' `rawTotal` gate before reaching
+ * here. */
 function mergeKeyedEntries(
   source: Iterator<Expression>,
   limit: number
-): Expression[] | undefined {
+): Expression[] | { notEntry: Expression } | undefined {
   const order: string[] = [];
   const byKey = new Map<string, Expression>();
   let n = 0;
@@ -15956,7 +15958,7 @@ function mergeKeyedEntries(
     if (done || value === undefined) break;
     if (++n > limit) return undefined;
     const key = entryKeyOf(value);
-    if (key === undefined) return undefined;
+    if (key === undefined) return { notEntry: value };
     if (!byKey.has(key)) order.push(key);
     byKey.set(key, value); // LAST wins
   }
@@ -15993,6 +15995,19 @@ function arrayIterator(xs: ReadonlyArray<Expression>): Iterator<Expression> {
  * `distinctAt`, and the keyed `contains` handlers) catch exactly that cause
  * and answer `undefined` — "unknown" — instead.
  *
+ * When the decline is caused by an element that is not a key-value entry
+ * (`Join(Dictionary(x: 1), [2, 3])` meets `2`), the error carries that
+ * element as its `value`. `materialize()` (in
+ * `boxed-expression/boxed-function.ts`) reads it and answers a type error
+ * that names the element. Without it, the preview of such a join ended with
+ * the internal `ContinuationPlaceholder` symbol, and the `Dictionary` built
+ * from the preview reported an error that named that symbol. The cause stays
+ * `iteration-limit-exceeded` because every consumer of a keyed walk
+ * (`distinctCount`, `distinctAt`, the keyed `contains` handlers) catches
+ * exactly that cause and answers "unknown". A side effect: the error is
+ * counted as an iteration-limit cancellation, so a memo around it is not
+ * cached, although the decline does not depend on the limit.
+ *
  * The merge is deferred to the first `next()` call for the same reason
  * `deduplicatingIterator` signals mid-iteration rather than at handler-call
  * time: the handler's contract is to return an iterator, so the decline has
@@ -16010,7 +16025,13 @@ function keyedMergeIterator(
         if (entries === undefined)
           throw new CancellationError({
             cause: 'iteration-limit-exceeded',
-            message: `Cannot merge the keyed entries of ${operator}(): the source exceeds the maximum collection size of ${limit}, or holds an element that is not a key-value entry`,
+            message: `Cannot merge the keyed entries of ${operator}(): the source exceeds the maximum collection size of ${limit}`,
+          });
+        if (!Array.isArray(entries))
+          throw new CancellationError({
+            cause: 'iteration-limit-exceeded',
+            value: entries.notEntry,
+            message: `Cannot merge the keyed entries of ${operator}(): the element ${entries.notEntry.toString()} is not a key-value entry`,
           });
         merged = arrayIterator(entries);
       }

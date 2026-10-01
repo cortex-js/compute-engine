@@ -737,7 +737,11 @@ function applyAssignmentTypeEffect(
     ) {
       target.ops.forEach((leaf, idx) => {
         const leafType = t.elements[idx].type;
-        if (leafType === 'unknown' || !isSymbol(leaf)) return;
+        // A component typed `never` claims no value, so it is no evidence
+        // for the leaf's type (the same rule as `joinEvidenceOnBinding` in
+        // `library/core.ts`).
+        if (leafType === 'unknown' || leafType === 'never' || !isSymbol(leaf))
+          return;
         const leafSym = ce.box(leaf.symbol);
         const leafDef = leafSym.valueDefinition;
         if (leafDef === undefined) return;

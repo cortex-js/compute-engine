@@ -1375,6 +1375,10 @@ export function refineConstructorPlaceholder(
  * which keeps a later `x := -oo` legal, and `x := NaN` takes `nan` rather than
  * the wider `number`, which would hide the marker. */
 export function widenAssignedType(ce: ComputeEngine, t: Type): Type {
+  // `never` is the bottom type, so it matches every row of the table below,
+  // and the first row read it as `integer`. A value typed `never` has no
+  // value to widen: keep it, and let the caller decide what it means.
+  if (t === 'never') return 'never';
   const bt = ce.type(t);
   if (bt.matches('integer')) return 'integer';
   if (bt.matches('rational')) return 'real';

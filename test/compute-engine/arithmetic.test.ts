@@ -889,9 +889,9 @@ describe('Min/Max', () => {
       eval-auto = -1.1
     `);
   expect(checkJson(['Min', 2.5, -1.1, 'NaN', 18.4])).toMatchInlineSnapshot(`
-      box       = ["Min", 2.5, -1.1, "NaN", 18.4]
-      eval-auto = NaN
-    `);
+    box       = ["Min", 2.5, -1.1, "NaN", 18.4]
+    simplify  = NaN
+  `);
   expect(checkJson(['Min', 2.5, -1.1, 'foo', 18.4])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5, -1.1, "foo", 18.4]
       eval-auto = min(-1.1, "foo")

@@ -379,6 +379,18 @@ export function hasSignaturePlaceholder(t: Type): boolean {
  * a CONCRETE expected slot (`(number) -> number`) would silently ascribe a
  * result type nothing proved — a `(unknown) -> unknown` value was refused at
  * such a parameter before the repair, and still is.
+ *
+ * One more case is accepted, for a PARAMETER slot only: an expected slot that
+ * admits the absence marker (`string | missing`). A bare parameter of a
+ * function literal accepts an absent argument (the body runs with
+ * `Missing`, user decision of 2026-09-30, pinned by
+ * `test/compute-engine/absent-argument-annotated-parameter.test.ts`), but its
+ * placeholder type `unknown` excludes `missing`, so the contravariant check
+ * `string | missing <: unknown` refused `s ↦ IsMissing(s)` under the
+ * declaration `(string | missing) -> unknown`, which is the declaration a
+ * host writes to accept an absent argument. The slot is read as
+ * `unknown | missing`, which states what the bare parameter accepts and
+ * ascribes nothing to the body.
  */
 export function adoptTopPlaceholderSlots(value: Type, expected: Type): Type {
   if (typeof value !== 'object' || value.kind !== 'signature') return value;
@@ -394,9 +406,22 @@ export function adoptTopPlaceholderSlots(value: Type, expected: Type): Type {
   let argsChanged = false;
   const args = vArgs.map((a, i) => {
     if (a.type !== 'unknown') return a;
-    if (eArgs[i]?.type !== 'any') return a;
-    argsChanged = true;
-    return { ...a, type: 'any' as Type };
+    const e = eArgs[i]?.type;
+    if (e === 'any') {
+      argsChanged = true;
+      return { ...a, type: 'any' as Type };
+    }
+    // A TOP-LEVEL `missing` arm only: `list<integer | missing>` is already a
+    // subtype of `unknown`, and its absent cells say nothing about an absent
+    // argument.
+    if (e !== undefined && isSubtype('missing', e)) {
+      argsChanged = true;
+      return {
+        ...a,
+        type: reduceType({ kind: 'union', types: ['unknown', 'missing'] }),
+      };
+    }
+    return a;
   });
   let resultChanged = false;
   let result = value.result;

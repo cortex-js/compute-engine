@@ -1,4 +1,4 @@
-import { checkDeadline } from '../../common/interruptible.js';
+import { CancellationError, checkDeadline } from '../../common/interruptible.js';
 import { replace } from './rules.js';
 import { isPatternRule } from './rule-index.js';
 import { sameSyntactic } from './compare.js';
@@ -1009,7 +1009,7 @@ function simplifyExpression(
   // `propagate` decides the value, as it does for `evaluate()`:
   // `sin(NaN)` simplifies to `NaN` and `sin(Indeterminate)` to
   // `Indeterminate`.
-  const nanAnswer = propagatedNanOperand(expr);
+  const nanAnswer = propagatedNanOperand(expr) ?? handledNanOperand(expr);
   if (nanAnswer !== undefined)
     return [...steps, { value: nanAnswer, because: 'NaN operand' }];
 
@@ -1110,6 +1110,79 @@ function propagatedNanOperand(expr: Expression): Expression | undefined {
     if (policy === 'propagate') sawPropagate = true;
   }
   return sawPropagate ? nanOperandAnswer(expr.engine, ops) : undefined;
+}
+
+/**
+ * The value of a function expression that has a `NaN` or `Indeterminate`
+ * number-literal operand at a position whose NaN policy is `inert` or
+ * `handle`, when the operator's own `evaluate` handler answers `NaN` or
+ * `Indeterminate` for it. Otherwise `undefined`.
+ *
+ * Under such a policy the framework does not decide the value: the handler
+ * reads the `NaN` operand itself. `Max` and `Min` are of this kind:
+ * `Max(x, NaN)` evaluates to `NaN`, whatever `x` holds. Without this step,
+ * `simplify()` left `Max(x, NaN)` unchanged while `evaluate()` answered
+ * `NaN`.
+ *
+ * The handler is called on the operands as they are (canonical, not
+ * evaluated), without substituting the value of a symbol, because
+ * `simplify()` does not substitute assigned values. Only a `NaN` answer is
+ * kept, and any other answer is left to `evaluate()`. This assumes that a
+ * handler which answers `NaN` while an operand is still a symbol does so
+ * because of the `NaN` operand, not because it read the symbol as a number:
+ * the library handlers that own a `NaN` operand (`Max`, `Min`, the
+ * statistics aggregates) answer `NaN` for any absent datum, whatever the
+ * other operands are. The exclusions are those of
+ * `propagatedNanOperand()`, including a `NaN` at a `reject` position (left
+ * to `evaluate()`, which reports the error), plus an operator that is not
+ * pure, whose handler must not run outside an evaluation. A cancellation
+ * (a deadline, an abort) is passed on; any other failure of the handler
+ * leaves the expression as it is.
+ */
+function handledNanOperand(expr: Expression): Expression | undefined {
+  if (!isFunction(expr)) return undefined;
+  const ops = expr.ops;
+  if (!ops.some((x) => isNumber(x) && x.isNaN === true)) return undefined;
+  const def = expr.operatorDefinition;
+  if (
+    !def ||
+    def.lazy === true ||
+    def.isUserFunctionDefinition ||
+    !def.pure ||
+    typeof def.evaluate !== 'function'
+  )
+    return undefined;
+  if (
+    def.broadcastable === true &&
+    ops.some((x) => x.isCollection || x.type.matches('collection<any>'))
+  )
+    return undefined;
+  let handledAt = false;
+  for (let i = 0; i < ops.length; i++) {
+    const x = ops[i];
+    if (!isNumber(x) || x.isNaN !== true) continue;
+    const policy = def.resolvedNanBehaviorAt(i);
+    if (policy === 'reject') return undefined;
+    if (policy === 'inert' || policy === 'handle') handledAt = true;
+  }
+  if (!handledAt) return undefined;
+  const ce = expr.engine;
+  let result: Expression | undefined;
+  try {
+    result = def.evaluate(ops, {
+      numericApproximation: false,
+      engine: ce,
+      materialization: false,
+      expression: expr,
+      effects: ce.effects,
+    });
+  } catch (e) {
+    if (e instanceof CancellationError) throw e;
+    return undefined;
+  }
+  if (result === undefined || !isNumber(result) || result.isNaN !== true)
+    return undefined;
+  return result;
 }
 
 function simplifyNonCommutativeFunction(

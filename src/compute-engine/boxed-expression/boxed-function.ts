@@ -103,6 +103,7 @@ import {
 } from './collection-element-memo.js';
 import type { MemoDeps } from './collection-element-memo.js';
 import {
+  isExpression,
   isNumber,
   isFunction,
   isString,
@@ -10189,6 +10190,20 @@ function materialize(
           e.cause !== 'iteration-limit-exceeded'
         )
           throw e;
+        // A keyed merge (a `Join` or `Append` that adopts the dictionary kind
+        // of an operand) gives up on an element that is not a key-value
+        // entry, and attaches that element as the error's `value`
+        // (`keyedMergeIterator`, `library/collections.ts`). That is not a
+        // continuation: the collection cannot be formed at all. Answer a
+        // type error that names the element. A placeholder here made the
+        // `Dictionary` built below report the internal
+        // `ContinuationPlaceholder` symbol as the offending entry.
+        if (isExpression(e.value))
+          return expr.engine.typeError(
+            parseType('tuple<string, any>'),
+            e.value.type,
+            e.value
+          );
         xs.push(expr.engine.symbol('ContinuationPlaceholder'));
       }
     } else {

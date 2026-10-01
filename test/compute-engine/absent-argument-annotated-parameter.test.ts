@@ -363,3 +363,48 @@ describe('a block-local function called with a list of points', () => {
     expect(result.error).toContain('at a parameter with no annotation');
   });
 });
+
+// A declaration whose parameter admits `missing` is how a host accepts an
+// absent argument. A function literal with a BARE parameter accepts an absent
+// value (the body runs with it), so it implements that declaration. Before
+// 2026-09-30 the bare parameter's placeholder type `unknown`, which excludes
+// `missing`, made the assignment throw "not compatible".
+describe('A BARE PARAMETER UNDER A DECLARED `T | missing` PARAMETER', () => {
+  test('the assignment is accepted and the body sees the absent value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: '(string | missing) -> unknown' } as any);
+    expect(() =>
+      ce.assign('f', ce.box(['Function', ['IsMissing', 's'], 's']))
+    ).not.toThrow();
+    expect(ce.box(['f', 'Missing']).evaluate().symbol).toBe('True');
+    expect(ce.box(['f', "'a'"]).evaluate().symbol).toBe('False');
+  });
+
+  test('a numeric slot with a missing member', () => {
+    const ce = new ComputeEngine();
+    ce.declare('k', { signature: '(integer | missing) -> unknown' } as any);
+    expect(() =>
+      ce.assign('k', ce.box(['Function', ['Add', 's', 1], 's']))
+    ).not.toThrow();
+    expect(ce.box(['k', 2]).evaluate().toString()).toBe('3');
+  });
+
+  test('a declared slot without missing is unchanged', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', { signature: '(string) -> boolean' } as any);
+    expect(() =>
+      ce.assign('h', ce.box(['Function', ['IsMissing', 's'], 's']))
+    ).not.toThrow();
+  });
+
+  test('a concrete slot of the literal is still checked', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', { signature: '(string | missing) -> unknown' } as any);
+    expect(() =>
+      ce.assign(
+        'g',
+        ce.box(['Function', ['IsMissing', 's'], ['Element', 's', 'integer']])
+      )
+    ).toThrow();
+  });
+});

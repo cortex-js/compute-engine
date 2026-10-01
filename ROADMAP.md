@@ -184,15 +184,15 @@ probable cause is the pre-evaluation broadcast in
 `boxed-expression/boxed-function.ts`, whose test for a valueless operand does
 not see the union declaration.
 
-### `Join` of a dictionary and a list is an error that names an internal marker (OPEN, decision — found 2026-09-29 by the review fixes for the spread literal)
+### What `Join` of a dictionary and a list gives (OPEN, decision — found 2026-09-29 by the review fixes for the spread literal)
 
-`Join(Dictionary(x: 1), [2, 3])` evaluates to
-`Error(incompatible-type, tuple<string, unknown>, "symbol ContinuationPlaceholder")`.
-The keyed merge refuses an element that is not an entry, the materialization
-turns the refusal into the internal `ContinuationPlaceholder`, and `Dictionary`
-rejects that. What a dictionary joined with a list gives is a semantic decision
-(an error that names the offending element, or a list of the entries followed by
-the elements); the internal marker in the message is a defect either way.
+`Join(Dictionary(x: 1), [2, 3])` is a type error that names the first
+element that is not a key-value entry:
+`Error(incompatible-type, tuple<string, any>, 2)` (since 2026-09-30; before,
+the error named the internal `ContinuationPlaceholder` symbol). `Append` of a
+dictionary and a value that is not an entry gives the same error. The open
+question is whether a dictionary joined with a list should instead give a list
+of the entries followed by the elements. Until decided, the error stays.
 
 ### A function declared `(collection<any> | number) -> number` whose body is `Max(xs)` compiles to `Math.max(xs)` (OPEN — found 2026-09-29 by the whole-collection parameter work)
 
@@ -206,12 +206,18 @@ element-wise by the decision of 2026-09-29 on whole-collection parameters:
 covering them needs the compiled definition to type an undeclared parameter from
 its lifted signature slot.
 
-### `Append` over an operand typed `unknown` or `any` is typed `list` (OPEN, small — found 2026-09-29)
+### `Append` over an operand typed `any` is typed `list` (OPEN, small — found 2026-09-29, measured again 2026-09-30)
 
-`Join` over such an operand is typed `collection` since 2026-09-29, because the
-operand may hold a set. The same change on `Append` made the nested structural
-form and the flattened form of a variadic `Append` report different types
-(`append-variadic.test.ts`), so it was not applied.
+`Join` over an operand typed `unknown` or `any` is typed `collection`, because
+the operand may hold a set. For `Append`, measured 2026-09-30: with `u`
+declared `unknown`, `Append(u, 1)` is typed `collection<any>` (canonicalization
+infers `u` as `collection<any>` from the signature), but with `a` declared
+`any`, `Append(a, 1)` is typed `list`, and the structural nested form
+`Append(Append(u, 1), 2)` is typed `list<integer>`, where the flattened
+canonical form is `collection<any>`. `appendResultTypeD`
+(`library/collections.ts`) types a source whose type says nothing as a list on
+purpose, so that the nested and flattened forms in `append-variadic.test.ts`
+agree; a fix must type both forms `collection` together.
 
 ### A list-building self-recursion assigned WITHOUT a declaration is still typed `collection` (OPEN, small — found 2026-09-29 by the fix for Tycho row 338)
 
@@ -263,19 +269,20 @@ the operators above do not. A general fix would evaluate an eager source once
 when the lazy node is evaluated, which is a change to the laziness contract
 (`docs/COLLECTIONS-MODEL.md`) and needs a decision.
 
-### `Sum` of a list of points is typed `number` (OPEN, small — found 2026-09-30 by the fix for issue #383)
+### An operator result that may be absent is typed `number` when it is numeric (OPEN, small — found 2026-09-30)
 
-`bigOpResultType` (`library/type-handlers.ts`) types the one-operand `Sum(pts)`
-as `number` for every collection operand; with `pts: list<tuple<real, real>>`
-the value is the point `(4, 6)`, and with `m: list<list<real>>` it is the row
-`[4, 6]`. The compiled `Sum(pts)` now answers the array, so a consumer that
-reads the compiled value as a scalar (an arithmetic parent emitted from the
-`number` type) is wrong. The element type of the collection should decide: a
-collection of collections sums to its element type. `Length(At(x, i))` has the
-same shape of defect at a smaller scale: typed `number` where `integer | nan` is
-the value.
+With `xs` declared `list<list<real>>`, `Length(At(xs, 1))` is typed `number`,
+where its values are the integers, `+oo` and `NaN`. `At(xs, 1)` is typed
+`list<real> | missing`, and `Length` propagates the absent operand. The type
+of an absent operand in a numeric result is removed by
+`absorbNumericAbsence` (`common/type/utils.ts`), which replaces every numeric
+arm by `number` instead of adding `nan` to the arms the type handler
+answered (`integer | +oo`). The type is wide but not wrong. The same rule
+types `Sin(x)` as `number` for an `x` that may be absent. A fix would add
+`nan` to the handler's arms, and changes the types of many expressions:
+measure the snapshot changes before landing it.
 
-### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — five defects)
+### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — three defects)
 
 The rule since 2026-09-30, for a function literal (an Epsil `function`, a lambda
 with an annotated parameter): at evaluation, an absent value (`Missing`) at a
@@ -289,21 +296,12 @@ reports the first too. Pinned by
 `test/compute-engine/absent-argument-annotated-parameter.test.ts`. What is not
 settled:
 
-1. **A function declared with a parameter typed `T | missing` refuses a body
-   with a bare parameter (defect).**
-   `ce.declare('f', { signature: '(string | missing) -> unknown' })` followed by
-   `ce.assign('f', s ↦ IsMissing(s))` throws: "the value of type
-   `(unknown) -> boolean` is not compatible with the type
-   `(missing | string) -> boolean`". `unknown` excludes the absence markers, so
-   the literal's bare parameter is read as narrower than the declaration. This
-   is the declaration a host writes to accept an absent argument, now that an
-   absent value is refused at a declared scalar parameter that is not numeric.
-2. **Compiled code does not check an annotated parameter (defect).**
+1. **Compiled code does not check an annotated parameter (defect).**
    `function f(p: tuple<number, number>) { p[1] + 1 }` called with
    `first(filter([(1, 2)], c => c[1] > 9))` is an error in the interpreter and
    `NaN` from the JavaScript target. The target should emit the check or decline
    the call.
-3. **A false report of the pre-pass on the gasket program (defect, not
+2. **A false report of the pre-pass on the gasket program (defect, not
    reduced).** With every parameter of `fill` annotated and the absent case
    removed (`let C = first(filter(…)) ?? (0, 0, 0)`), the program
    `tycho/scripts/repros/2026-09-28-epsil-gasket-compile/e-natural-recursion.epsil`
@@ -313,7 +311,7 @@ settled:
    is typed from its uses (`C[1]`), not from its initializer; boxed whole, it is
    typed `tuple<number, number, number>`. The report predates 2026-09-30. Twelve
    smaller programs built from the same helper functions did not reproduce it.
-4. **A list of points at a BARE parameter of a function declared in the compiled
+3. **A list of points at a BARE parameter of a function declared in the compiled
    program declines to compile (defect).** With
    `function h(q: tuple<number, number>) { q[1] + 1 }` and
    `const g = (p) => h(p)`, the type of `p` is inferred as one point, the
@@ -323,14 +321,6 @@ settled:
    `base-compiler.ts`); until 2026-09-30 it answered the string `"1,21"`. An
    ANNOTATED point parameter is mapped by the compiled code. Fix: compile the
    body of such a function for a parameter that may be a list.
-5. **`widenAssignedType('never')` answers `integer` (defect, no failing input
-   known).** `never` matches every type, so the first test of the widening table
-   (`boxed-value-definition.ts`) accepts it. The assignment evidence join skips
-   a `never`-typed value since 2026-09-30 (`joinEvidenceOnBinding`,
-   `library/core.ts`); the two other callers (the loop-variable type in
-   `control-structures.ts`, a destructured leaf in
-   `epsil/static-diagnostics.ts`) do not. `for x in [] { s = s + x }` runs and
-   answers `0`.
 
 The accessor side of the same decision (`First`, `Second`, `Third`, `Last`, `At`
 with a literal index lose their absent member when the operand is proved to hold
@@ -1025,17 +1015,6 @@ of the same product should agree. `mul()` was left as is because several
 normalization steps depend on its folding (see "Common API Traps" in
 `CLAUDE.md`); making it keep `0·w` for a variable with a value needs a check
 that those steps still reach a fixpoint.
-
-### `simplify()` leaves `Max(x, NaN)` inert (OPEN, small — found 2026-09-29 by the fix of `simplify()` over a `NaN` operand)
-
-`simplify()` now applies the `propagate` NaN policy of an operand position, as
-`evaluate()` does (`sin(NaN)` simplifies to `NaN`). `Max` and `Min` declare the
-policy `inert` and handle a `NaN` operand in their own evaluate handler, so
-`ce.box(["Max", "x", "NaN"]).simplify()` stays `max(x, NaN)` where `evaluate()`
-answers `NaN`. The same applies to every operator whose evaluate handler reads
-`NaN` itself under an `inert` policy. Either `simplify()` calls the evaluate
-handler for a `NaN` operand under that policy, or the handlers are reached
-through a shared step.
 
 ### Residues of the absent-value round (OPEN, small — found 2026-09-25)
 

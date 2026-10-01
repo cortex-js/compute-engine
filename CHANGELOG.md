@@ -1,3 +1,33 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **`Sum` of a list of points or rows has the type of a point or a row.**
+  `Sum(pts)` with `pts` declared `list<tuple<real, real>>` was typed `number`,
+  but its value is a point: `Sum([(1, 2), (3, 4)])` is `(4, 6)`. It is now
+  typed `integer | tuple<real, real>` (a list with no length may be empty, and
+  the sum of an empty list is `0`). A list of rows sums to a row and a matrix
+  to the row of its column sums: `Sum([[1, 2], [3, 4]])` is typed
+  `vector<integer^2>`. A consumer that used the `number` type to read the
+  compiled value as a scalar was wrong for such a sum.
+
+### Issues Resolved
+
+- `Join` (or `Append`) of a dictionary and a value that is not a key-value
+  entry reported an error that named the internal symbol
+  `ContinuationPlaceholder`: `Join(Dictionary(x: 1), [2, 3])` gave
+  `Error(incompatible-type, tuple<string, unknown>, "symbol
+  ContinuationPlaceholder")`. The error now names the element:
+  `Error(incompatible-type, tuple<string, any>, 2)`.
+- `simplify()` left `Max(x, NaN)` and `Min(x, NaN)` unchanged, while
+  `evaluate()` gives `NaN`. `simplify()` now gives `NaN` too.
+- A function declared with a parameter that admits an absent value could not be
+  assigned a function literal with a bare parameter:
+  `ce.declare('f', { signature: '(string | missing) -> unknown' })` followed by
+  `ce.assign('f', ce.box(['Function', ['IsMissing', 's'], 's']))` threw
+  "not compatible". A bare parameter accepts an absent value, so the
+  assignment is now accepted, and `f(Missing)` is `True`.
+
 ## 0.142.0 _2026-09-30_
 
 ### Behavior Changes

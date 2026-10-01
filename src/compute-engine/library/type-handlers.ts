@@ -1693,6 +1693,115 @@ function bigOpOverDomainType(
 }
 
 /**
+ * The type of `Sum(xs)` when the elements of `xs` are points or rows of
+ * numbers, not numbers.
+ *
+ * `Sum` adds the elements of its collection operand with `Add`, and `Add`
+ * of two points (or two lists) of numbers is the point (or list) of the
+ * sums of their components. So a list of points sums to a point, a list of
+ * rows sums to a row, and a matrix sums to the row of its column sums:
+ * `Sum([(1, 2), (3, 4)])` is `(4, 6)` and `Sum([[1, 2, 3], [4, 5, 6]])` is
+ * `[5, 7, 9]`. Each component is typed by the rule of a scalar sum
+ * (`extendedReductionType`): a sum of integers is an integer, a sum of
+ * reals is a real.
+ *
+ * A list with no length may be empty, and the sum of an empty list is the
+ * number `0`, so the type is then a union with `integer`.
+ *
+ * Returns `undefined` when the operand is not a list of such elements, or a
+ * component is not a number: the caller then answers `number`, as before.
+ */
+const NUMBER_OR_NAN_TYPE = parseType('number | nan');
+
+function shapedSumType(d: OperandDescriptor): Type | undefined {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t !== 'object' || t.kind !== 'list') return undefined;
+  if (isUnboundedProducer(d)) return undefined;
+
+  // The type of a sum of many values of type `c`, or `undefined` when `c`
+  // is not a number type.
+  const componentSum = (c: Type): Type | undefined => {
+    // `nan` is not a subtype of `number`, but a component may be `NaN`
+    // (`Sum([(1, NaN), (2, 3)])` is `(3, NaN)`), and the scalar rule
+    // handles it.
+    if (!isSubtype(c, NUMBER_OR_NAN_TYPE)) return undefined;
+    return extendedReductionType('Sum', [describeType(c)]) ?? 'number';
+  };
+
+  const dims = t.dimensions;
+  if (dims !== undefined && dims.length > 1) {
+    // A matrix (or a higher-rank list) sums along its first axis.
+    if (!dims.every((n) => n > 0)) return undefined;
+    const elements = componentSum(t.elements);
+    if (elements === undefined) return undefined;
+    return { kind: 'list', elements, dimensions: dims.slice(1) };
+  }
+
+  let el = resolveTypeAlias(t.elements);
+  if (typeof el !== 'object') return undefined;
+  // A list literal of points whose components differ in type has a union
+  // of tuple types as its element type (`[(1, NaN), (2, 3)]` has the
+  // elements `tuple<integer, integer> | tuple<integer, nan>`). When every
+  // member is a tuple of the same length, read it as one tuple whose
+  // components are the unions of the members' components.
+  if (el.kind === 'union') {
+    const members = el.types.map((m) => resolveTypeAlias(m));
+    const first = members[0];
+    if (
+      typeof first !== 'object' ||
+      first.kind !== 'tuple' ||
+      !members.every(
+        (m) =>
+          typeof m === 'object' &&
+          m.kind === 'tuple' &&
+          m.elements.length === first.elements.length
+      )
+    )
+      return undefined;
+    const tuples = members as ReadonlyArray<typeof first>;
+    el = {
+      kind: 'tuple',
+      elements: first.elements.map((c, i) => ({
+        type: reduceType({
+          kind: 'union',
+          types: tuples.map((m) => m.elements[i].type),
+        }),
+      })),
+    };
+  }
+  let shaped: Type | undefined;
+  if (el.kind === 'tuple') {
+    if (el.elements.length === 0) return undefined;
+    const components: Type[] = [];
+    for (const c of el.elements) {
+      const sum = componentSum(c.type);
+      if (sum === undefined) return undefined;
+      components.push(sum);
+    }
+    shaped = {
+      kind: 'tuple',
+      elements: el.elements.map((c, i) => ({ ...c, type: components[i] })),
+    };
+  } else if (el.kind === 'list') {
+    // A row with no length keeps none. Rows of different lengths do not
+    // add, and the sum is then an `incompatible-dimensions` error value,
+    // which this type does not describe: the type describes the sum of rows
+    // that add, as the type of `Add` of two lists with no length does.
+    if (el.dimensions !== undefined && !el.dimensions.every((n) => n > 0))
+      return undefined;
+    const elements = componentSum(el.elements);
+    if (elements === undefined) return undefined;
+    shaped = { ...el, elements };
+  }
+  if (shaped === undefined) return undefined;
+
+  const mayBeEmpty = dims === undefined || dims[0] <= 0;
+  return mayBeEmpty
+    ? reduceType({ kind: 'union', types: [shaped, 'integer'] })
+    : shaped;
+}
+
+/**
  * Result type of a big-op (`Sum`/`Product`) in its `(body, limits…)` form.
  * Elementwise accumulation over a collection-valued body yields the same
  * indexed-collection type: summing (or multiplying) a `vector<2>`-, `list<T>`-
@@ -1713,6 +1822,10 @@ export function bigOpResultType(
   if (ops.length === 1 && operator !== undefined) {
     const reduced = extendedReductionType(operator, ops);
     if (reduced !== undefined) return reduced;
+    if (operator === 'Sum') {
+      const shaped = shapedSumType(ops[0]);
+      if (shaped !== undefined) return shaped;
+    }
   }
   const body = ops[0];
   if (ops.length > 1 && operator !== undefined && body !== undefined) {

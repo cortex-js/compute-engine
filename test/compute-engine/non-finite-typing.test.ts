@@ -1082,7 +1082,7 @@ describe('EXTENDED-REAL NARROWING: POLES, INFINITE RANGES, MATRICES', () => {
     [['Max', ['Range', 1, 'PositiveInfinity']], 'number'],
     [['Sum', ['Range', 1, 'PositiveInfinity']], 'number'],
     // A matrix sums column by column, to a list.
-    [['Sum', 'M'], 'number'],
+    [['Sum', 'M'], 'vector<real^2>'],
     [['Max', 'M'], 'nan | real'],
   ])('%j types %s', (json, expected) => {
     expect(ce.box(json as never).type.toString()).toBe(expected);
