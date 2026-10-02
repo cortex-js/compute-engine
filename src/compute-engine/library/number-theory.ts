@@ -18,6 +18,7 @@ import {
 import { bigPrimeFactors, isPrimeBigint, modPow } from '../numerics/primes.js';
 import {
   generalizedMultiplicativeOrder,
+  leastPowerModRoot,
   powerModList,
   primitiveRootList,
   rationalReconstruction,
@@ -135,6 +136,28 @@ const LOG10_4 = Math.log10(4);
  * that into a 30s+ hang.
  */
 const MAX_DIGIT_ITERATION_DIGITS = 1_000_000;
+
+/** The most elements `finiteElements()` reads from a collection operand. */
+const MAX_ENUMERATED_ELEMENTS = 1_000_000;
+
+/**
+ * The elements of a collection operand, or `undefined` when the operand is
+ * missing, is not known to be a finite collection (`Range(1, ∞)`), or has
+ * more than `MAX_ENUMERATED_ELEMENTS` elements. Reading every element of
+ * an infinite or very long collection would exhaust memory, so the caller
+ * stays unevaluated instead.
+ */
+function finiteElements(
+  op: Expression | undefined
+): Expression[] | undefined {
+  if (op === undefined || op.isFiniteCollection !== true) return undefined;
+  const elements: Expression[] = [];
+  for (const x of op.each()) {
+    if (elements.length >= MAX_ENUMERATED_ELEMENTS) return undefined;
+    elements.push(x);
+  }
+  return elements;
+}
 
 /** `canEnumerate` acceptance for `Divisors`/`PrimeFactors`: a nonzero
  * integer (0 declines — infinitely many divisors / no factorization). The
@@ -623,7 +646,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     PowerMod: {
       description:
-        'Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`, and is undefined when there is none.',
+        'Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000.',
       signature: '(integer, rational, integer) -> integer',
       examples: ['PowerMod(2, 10, 1000)  // 24', 'PowerMod(4, 1/2, 7)  // 2'],
       // Lazy so that `.N()` leaves an exact rational exponent exact: the
@@ -649,16 +672,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           const m = mOp.isInteger === true ? toBigint(mOp) : null;
           if (exponent === undefined || a === null || m === null)
             return undefined;
-          const roots = powerModList(
+          const root = leastPowerModRoot(
             a,
             BigInt(exponent[0]),
             BigInt(exponent[1]),
             m,
             ce._deadlineFrame
           );
-          return roots === undefined || roots.length === 0
-            ? undefined
-            : ce.number(roots[0]);
+          return root === undefined ? undefined : ce.number(root);
         }
         // `toBigint` rounds a non-integer, so integrality is checked first.
         if (aOp.isInteger === false || mOp.isInteger === false)
@@ -781,8 +802,16 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(collection<any>, collection<any>) -> integer',
       examples: ['ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23'],
       evaluate: ([residuesOp, moduliOp], { engine: ce }) => {
-        const residues = Array.from(residuesOp?.each() ?? []).map(toBigint);
-        const moduli = Array.from(moduliOp?.each() ?? []).map(toBigint);
+        const residueOps = finiteElements(residuesOp);
+        const moduliOps = finiteElements(moduliOp);
+        if (residueOps === undefined || moduliOps === undefined)
+          return undefined;
+        // `toBigint` ROUNDS a non-integer (2.5 → 3), so a non-integer
+        // element declines instead of solving for the rounded value.
+        const exact = (t: Expression) =>
+          t.isInteger === true ? toBigint(t) : null;
+        const residues = residueOps.map(exact);
+        const moduli = moduliOps.map(exact);
         if (residues.length === 0 || residues.length !== moduli.length)
           return undefined;
         if (residues.includes(null) || moduli.includes(null)) return undefined;
@@ -998,7 +1027,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // `toBigint` ROUNDS a non-integer (2.5 → 3), so gate each term on
         // exact integrality: a non-integer term declines instead of silently
         // reconstructing from the rounded value.
-        const terms = Array.from(listOp?.each() ?? []).map((t) =>
+        const termOps = finiteElements(listOp);
+        if (termOps === undefined) return undefined;
+        const terms = termOps.map((t) =>
           t.isInteger === true ? toBigint(t) : null
         );
         if (terms.length === 0 || terms.includes(null)) return undefined;
@@ -1206,7 +1237,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(collection<any>, integer?) -> integer',
       examples: ['FromDigits([1, 2, 3, 4])  // 1234'],
       evaluate: ([digitsOp, baseOp], { engine: ce }) => {
-        const digits = Array.from(digitsOp?.each() ?? []).map(toBigint);
+        const digitOps = finiteElements(digitsOp);
+        if (digitOps === undefined) return undefined;
+        // `toBigint` ROUNDS a non-integer (1.5 → 2), so a non-integer digit
+        // declines instead of combining the rounded value.
+        const digits = digitOps.map((t) =>
+          t.isInteger === true ? toBigint(t) : null
+        );
         if (digits.length === 0 || digits.includes(null)) return undefined;
         const base = baseOp === undefined ? 10n : toBigint(baseOp);
         if (base === null || base < 2n) return undefined;
@@ -1289,7 +1326,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     MultiplicativeOrder: {
       description:
-        'The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime. With a list of residues, `MultiplicativeOrder(a, n, [r1, r2, …])` is the smallest `k > 0` such that `a^k ≡ r_i (mod n)` for some `i` (a discrete logarithm), and is undefined when no `r_i` is a power of `a`.',
+        'The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime. With a list of residues, `MultiplicativeOrder(a, n, [r1, r2, …])` is the smallest `k > 0` such that `a^k ≡ r_i (mod n)` for some `i` (a discrete logarithm), and is undefined when no `r_i` is a power of `a`. The sign of `n` is ignored. Undefined for `n = 0`.',
       signature: '(integer, integer, list<integer>?) -> integer',
       examples: [
         'MultiplicativeOrder(2, 7)  // 3',
@@ -1297,17 +1334,24 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       ],
       evaluate: ([aOp, nOp, rOp], { engine: ce }) => {
         const a0 = toBigint(aOp);
-        const n = toBigint(nOp);
-        if (a0 === null || n === null || n < 1n) return undefined;
+        const n0 = toBigint(nOp);
+        if (a0 === null || n0 === null || n0 === 0n) return undefined;
+        // The unit group mod −n is the unit group mod n.
+        const n = n0 < 0n ? -n0 : n0;
         if (rOp !== undefined) {
-          const targets = Array.from(rOp.each() ?? []).map((r) =>
-            r.isInteger === true ? toBigint(r) : null
-          );
-          if (targets.length === 0 || targets.includes(null)) return undefined;
+          const residueOps = finiteElements(rOp);
+          if (residueOps === undefined || residueOps.length === 0)
+            return undefined;
+          const targets: bigint[] = [];
+          for (const r of residueOps) {
+            const t = r.isInteger === true ? toBigint(r) : null;
+            if (t === null) return undefined;
+            targets.push(t);
+          }
           const log = generalizedMultiplicativeOrder(
             a0,
             n,
-            targets as bigint[],
+            targets,
             ce._deadlineFrame
           );
           return log === undefined ? undefined : ce.number(log);
@@ -1334,12 +1378,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     PrimitiveRoot: {
       description:
-        'The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p).',
+        'The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p). The sign of `n` is ignored, and `PrimitiveRoot(1)` is 0. Undefined for `n = 0`.',
       signature: '(integer) -> integer',
       examples: ['PrimitiveRoot(7)  // 3'],
       evaluate: ([nOp], { engine: ce }) => {
-        const n = toBigint(nOp);
-        if (n === null || n < 1n) return undefined;
+        const n0 = toBigint(nOp);
+        if (n0 === null || n0 === 0n) return undefined;
+        // The unit group mod −n is the unit group mod n.
+        const n = n0 < 0n ? -n0 : n0;
         if (n === 1n) return ce.number(0);
         if (n === 2n) return ce.number(1);
         if (n === 4n) return ce.number(3);
@@ -1370,7 +1416,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     PrimitiveRootList: {
       description:
-        'The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n` of 0 or 1. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.',
+        'The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n = 0`. `PrimitiveRootList(1)` is `[0]`, as `PrimitiveRoot(1)` is 0. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.',
       signature: '(integer) -> list<integer>',
       examples: [
         'PrimitiveRootList(7)  // [3, 5]',

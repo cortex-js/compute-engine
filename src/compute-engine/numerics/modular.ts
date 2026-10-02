@@ -3,9 +3,10 @@
  * over bigints.
  *
  * Every function answers `undefined` when it cannot vouch for the answer: the
- * modulus does not factor within the Pollard-rho budget, a prime needing a
- * discrete log is beyond `BSGS_LIMIT`, or the answer would list more than
- * `MAX_LISTED` values. The caller leaves the expression unevaluated.
+ * modulus does not factor within the Pollard-rho budget, a prime of a
+ * multiplicative order needing a discrete log is beyond `BSGS_LIMIT`, or the
+ * answer would list more than `MAX_LISTED` values. The caller leaves the
+ * expression unevaluated.
  */
 
 import {
@@ -93,28 +94,50 @@ function carmichael(factors: Map<bigint, number>): bigint {
 }
 
 /**
+ * The baby-step table of `γ` of prime order `q` mod m: `γʲ ↦ j` for j below
+ * `step` = ⌊√(q − 1)⌋ + 1, and `giant` = γ^(−step).
+ */
+type BabySteps = { step: bigint; baby: Map<bigint, bigint>; giant: bigint };
+
+/**
+ * Baby-step tables keyed by `γ`, for one modulus m. Within one modulus `γ`
+ * sets its order q, so `γ` alone identifies a table. A table holds up to
+ * about 2²⁰ entries, so a caller that takes several logs to the same base
+ * shares one of these maps between the calls and builds each table once.
+ */
+type BabyStepTables = Map<bigint, BabySteps>;
+
+/**
  * The `x` in [0, q) with `γˣ ≡ h (mod m)` for `γ` of prime order `q`, by
  * baby-step giant-step; `undefined` when `h` is not a power of `γ` or `q` is
- * beyond `BSGS_LIMIT`.
+ * beyond `BSGS_LIMIT`. The table of `γ` is taken from `tables`, or built and
+ * added to it.
  */
 function discreteLogPrimeOrder(
   gamma: bigint,
   h: bigint,
   q: bigint,
   m: bigint,
+  tables: BabyStepTables,
   deadline: Deadline
 ): bigint | undefined {
   if (h === 1n % m) return 0n;
   if (q > BSGS_LIMIT) return undefined;
-  const step = isqrt(q - 1n) + 1n;
-  const baby = new Map<bigint, bigint>();
-  let power = 1n % m;
-  for (let j = 0n; j < step; j++) {
-    if (!baby.has(power)) baby.set(power, j);
-    power = (power * gamma) % m;
-    if ((j & 0x3ffn) === 0n) checkDeadline(deadline);
+  let table = tables.get(gamma);
+  if (table === undefined) {
+    const step = isqrt(q - 1n) + 1n;
+    const baby = new Map<bigint, bigint>();
+    let power = 1n % m;
+    for (let j = 0n; j < step; j++) {
+      if (!baby.has(power)) baby.set(power, j);
+      power = (power * gamma) % m;
+      if ((j & 0x3ffn) === 0n) checkDeadline(deadline);
+    }
+    const giant = modularInverse(modPow(gamma, step, m), m)!;
+    table = { step, baby, giant };
+    tables.set(gamma, table);
   }
-  const giant = modularInverse(modPow(gamma, step, m), m)!;
+  const { step, baby, giant } = table;
   let target = h;
   for (let i = 0n; i < step; i++) {
     const j = baby.get(target);
@@ -127,7 +150,10 @@ function discreteLogPrimeOrder(
 
 /**
  * The `x` with `aˣ ≡ h (mod m)` for `a` of order `qˢ`, one base-`q` digit at a
- * time (Pohlig–Hellman); `undefined` when `h` is not a power of `a`.
+ * time (Pohlig–Hellman); `undefined` when `h` is not a power of `a`. Every
+ * digit is a log to the same base, so its baby-step table is built once, and
+ * a caller that passes the same `tables` for several `h` builds it once for
+ * all of them.
  */
 function discreteLogPrimePower(
   a: bigint,
@@ -135,7 +161,8 @@ function discreteLogPrimePower(
   q: bigint,
   s: number,
   m: bigint,
-  deadline: Deadline
+  deadline: Deadline,
+  tables: BabyStepTables = new Map()
 ): bigint | undefined {
   const gamma = modPow(a, q ** BigInt(s - 1), m);
   const aInverse = modularInverse(a, m)!;
@@ -147,6 +174,7 @@ function discreteLogPrimePower(
       modPow(residual, q ** BigInt(s - 1 - i), m),
       q,
       m,
+      tables,
       deadline
     );
     if (digit === undefined) return undefined;
@@ -170,8 +198,8 @@ function smallPrimeFactors(n: bigint): bigint[] {
 
 /**
  * Every `x` in [1, p) with `xʳ ≡ b (mod p)`, for a prime `p > 2` and `b ≢ 0`;
- * `[]` when `b` is not an r-th power, `undefined` past `MAX_LISTED` roots or a
- * prime of `r` past `BSGS_LIMIT`.
+ * `[]` when `b` is not an r-th power, `undefined` when there are more than
+ * `MAX_LISTED` roots (d = gcd(r, p − 1) is the number of roots).
  *
  * (ℤ/p)ˣ is cyclic of order n = p − 1, so `xʳ = b` is solvable iff
  * `b^(n/d) = 1` for d = gcd(r, n), and then there are exactly d roots: one
@@ -192,13 +220,15 @@ function rootsModPrimeUnit(
   if (d > BigInt(MAX_LISTED)) return undefined;
 
   // n = (∏ over q | r of q^s_q) · rest, with rest coprime to r.
+  // A prime divides both r and n exactly when it divides d, so the primes
+  // are taken from d (at most `MAX_LISTED`, so trial division is cheap)
+  // and never from r, which can be too large to factor.
   let rest = n;
   const sylow: { q: bigint; s: number }[] = [];
-  for (const q of smallPrimeFactors(r)) {
+  for (const q of smallPrimeFactors(d)) {
     const [s, left] = valuation(rest, q);
     rest = left;
     if (s === 0) continue;
-    if (q > BSGS_LIMIT) return undefined;
     sylow.push({ q, s });
   }
 
@@ -320,22 +350,45 @@ export function powerModRoots(
   m: bigint,
   deadline?: Deadline
 ): bigint[] | undefined {
+  const roots = powerModRootsOrTooMany(b, r, m, deadline);
+  return roots === 'too-many' ? undefined : roots;
+}
+
+/**
+ * `powerModRoots`, but `'too-many'` when m factors and the roots cannot be
+ * listed within `MAX_LISTED` entries, which tells that case apart from a
+ * modulus that does not factor. Once m factors, every `undefined` from a
+ * prime-power channel is an overflow.
+ */
+function powerModRootsOrTooMany(
+  b: bigint,
+  r: bigint,
+  m: bigint,
+  deadline: Deadline
+): bigint[] | 'too-many' | undefined {
   if (r < 1n || m < 1n) return undefined;
   if (m === 1n) return [0n];
   if (r === 1n) return [mod(b, m)];
   const factors = factorBudgeted(m, deadline);
   if (factors === undefined) return undefined;
 
+  // After an overflow the other channels are still solved: one with no root
+  // makes the answer `[]`.
   const channels: { modulus: bigint; roots: bigint[] }[] = [];
   let count = 1;
+  let tooMany = false;
   for (const [p, e] of factors) {
     const roots = rootsModPrimePower(b, r, p, e, deadline);
-    if (roots === undefined) return undefined;
+    if (roots === undefined) {
+      tooMany = true;
+      continue;
+    }
     if (roots.length === 0) return [];
     count *= roots.length;
-    if (count > MAX_LISTED) return undefined;
-    channels.push({ modulus: p ** BigInt(e), roots });
+    if (count > MAX_LISTED) tooMany = true;
+    if (!tooMany) channels.push({ modulus: p ** BigInt(e), roots });
   }
+  if (tooMany) return 'too-many';
 
   // Glue channel by channel: a root mod M·q from x mod M and c mod q is
   // x + M·((c − x)·M⁻¹ mod q), one inverse per channel rather than a full
@@ -365,13 +418,55 @@ export function powerModList(
   deadline?: Deadline
 ): bigint[] | undefined {
   if (r < 1n || m < 1n) return undefined;
+  const target = powerTarget(a, s, m);
+  if (target === undefined) return undefined;
+  return powerModRoots(target, r, m, deadline);
+}
+
+/**
+ * The least `x` in [0, m) with `xʳ ≡ aˢ (mod m)` (Mathematica's
+ * `PowerMod[a, s/r, m]`), for `r ≥ 1` and `m ≥ 1`; `undefined` when there is
+ * none, when `a` is not a unit mod `m` and `s < 0`, or when m does not factor
+ * within budget.
+ *
+ * When there are more than `MAX_LISTED` roots, the list is not built: the
+ * candidates 0, 1, 2, … below `MAX_LISTED` are tested in order instead, so
+ * the least root is found when it is below `MAX_LISTED` (as for
+ * x² ≡ 0 (mod 2²⁰⁰), whose least root is 0), and the result is `undefined`
+ * otherwise. This test costs at most `MAX_LISTED` exponentiations.
+ */
+export function leastPowerModRoot(
+  a: bigint,
+  s: bigint,
+  r: bigint,
+  m: bigint,
+  deadline?: Deadline
+): bigint | undefined {
+  if (r < 1n || m < 1n) return undefined;
+  const target = powerTarget(a, s, m);
+  if (target === undefined) return undefined;
+  const roots = powerModRootsOrTooMany(target, r, m, deadline);
+  if (roots !== 'too-many') return roots?.[0];
+  const limit = BigInt(MAX_LISTED) < m ? BigInt(MAX_LISTED) : m;
+  for (let x = 0n; x < limit; x++) {
+    if (modPow(x, r, m) === target) return x;
+    if ((x & 0x3ffn) === 0n) checkDeadline(deadline);
+  }
+  return undefined;
+}
+
+/**
+ * `aˢ mod m` in [0, m) for `m ≥ 1`, through the inverse of `a` when `s < 0`;
+ * `undefined` when that inverse does not exist.
+ */
+function powerTarget(a: bigint, s: bigint, m: bigint): bigint | undefined {
   let base = mod(a, m);
   if (s < 0n) {
     const inverse = modularInverse(base, m);
     if (inverse === null) return undefined;
     base = inverse;
   }
-  return powerModRoots(modPow(base, s < 0n ? -s : s, m), r, m, deadline);
+  return modPow(base, s < 0n ? -s : s, m);
 }
 
 /** The factorization of `n ≥ 1` and the order of the unit `k` in (ℤ/n)ˣ with its factorization. */
@@ -423,6 +518,9 @@ export function generalizedMultiplicativeOrder(
   if (found === undefined) return undefined;
   const { order, factors } = found;
   const base = mod(k, n);
+  // One set of baby-step tables for every target: the bases depend only on
+  // `k` and the prime factors of its order.
+  const tables: BabyStepTables = new Map();
   let best: bigint | undefined;
   for (const target of targets) {
     const h = mod(target, n);
@@ -439,7 +537,8 @@ export function generalizedMultiplicativeOrder(
         q,
         e,
         n,
-        deadline
+        deadline,
+        tables
       );
       if (x === undefined) {
         ok = false;
@@ -460,9 +559,10 @@ export function generalizedMultiplicativeOrder(
 /**
  * The primitive roots of `n` ascending (Mathematica's `PrimitiveRootList[n]`):
  * the generators of (ℤ/n)ˣ, which is cyclic exactly for n = 2, 4, pᵏ and 2pᵏ
- * with p an odd prime. The sign of `n` is ignored; `n = 0` and `n = 1` have
- * none. `[]` when the group is not cyclic, `undefined` when n does not factor
- * within budget or there are more than `MAX_LISTED` roots.
+ * with p an odd prime. The sign of `n` is ignored. `n = 1` gives `[0]`: the
+ * unit group mod 1 is {0}. `n = 0` gives `[]`. `[]` when the group is not
+ * cyclic, `undefined` when n does not factor within budget or there are more
+ * than `MAX_LISTED` roots.
  *
  * With one generator g found, the others are gᵏ for k coprime to φ(n), and
  * there are φ(φ(n)) of them.
@@ -472,7 +572,9 @@ export function primitiveRootList(
   deadline?: Deadline
 ): bigint[] | undefined {
   const n = n0 < 0n ? -n0 : n0;
-  if (n < 2n) return [];
+  if (n === 0n) return [];
+  // The unit group mod 1 is the trivial group {0}, generated by 0.
+  if (n === 1n) return [0n];
   if (n === 2n) return [1n];
   if (n === 4n) return [3n];
   const factors = factorBudgeted(n, deadline);
@@ -510,7 +612,9 @@ export function primitiveRootList(
 /**
  * The fraction `p/q` with `p ≡ a·q (mod m)`, `|p| ≤ N`, `0 < q ≤ N` and
  * N = ⌊√((m − 1)/2)⌋, as `[p, q]` in lowest terms; `undefined` when there is
- * none (Wang's algorithm, as in Sage's `rational_reconstruction`).
+ * none (Wang's algorithm). Sage's `rational_reconstruction` uses the bound
+ * ⌊√⌊|m|/2⌋⌋ instead, which is one larger when m = 2k² (Sage gives 2 for
+ * a = 2, m = 8; this function gives `undefined`), and it accepts m < 0.
  *
  * Under 2·N² < m there is at most one such fraction. It is found by running
  * the extended Euclidean algorithm on (m, a mod m) and stopping at the first
