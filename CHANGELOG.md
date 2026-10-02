@@ -158,7 +158,6 @@
   application of distinct symbols (`f(x, x)`, `f(1)`, `f(_)`) is still an
   `Assign`. `Assign` itself is unchanged.
 
-
 - **`sin\prime(x)` in the lenient grammar is the derivative of `sin`**, as
   `sin'(x)` and `\sin\prime(x)` are. The `\prime` was read as the start of
   the argument of `sin`, and gave an `unexpected-command` error.
