@@ -708,8 +708,9 @@ const SCALAR_LIFT_DESCENT = 4;
 /**
  * Is `expr` an application of a `SCALAR_LIFT_HEADS` head resolved to the
  * engine's OWN definition of it? A definition declared by the user under
- * the same name — in any scope, or through the constructor's `libraries`
- * option, which installs into the system scope and is recorded in
+ * the same name — in any scope (`ce.loadLibrary()` included, which installs
+ * into the global scope), or through the constructor's `libraries` option,
+ * which installs into the system scope and is recorded in
  * `_customLibraryOperators` — is a different object from the system-scope
  * binding and answers `false`, so its application is typed by derivation.
  * The same identity test gates the compiler's built-in callbacks

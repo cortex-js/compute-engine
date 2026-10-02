@@ -97,7 +97,7 @@ function parseDecimalDigits(
   // In non-strict mode, report digits joined by white space when diagnostics
   // are enabled: `2 3` may be the product `2 \cdot 3` or a list, not 23.
   if (joinedBySpace && parser.options.strict === false)
-    parser.emitDiagnostic('spaced-digit-groups', start, end, {
+    parser._emitAmbiguity?.('ambiguous-digit-groups', start, end, {
       digits: result.join(''),
     });
   return result.join('');

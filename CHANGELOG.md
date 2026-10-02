@@ -2,6 +2,107 @@
 
 ### Behavior Changes
 
+- **A `vars`-mapped symbol with a declared type compiles as if it had no
+  value.** The compiled code reads the input, but the compiler used to analyze
+  the expression with the symbol's stored value. With `a` declared `real` and
+  `a := 4`, `compile(\sqrt{a}, { vars: { a: '_.a' } })` gave the real-only
+  `Math.sqrt(_.a)`, which returns `NaN` for a negative input. It now gives
+  `_SYS.csqrt(({ re: _.a, im: 0 }))`, the code for an `a` with no value. This
+  applies on every target (`javascript`, `python`, `glsl`, `wgsl`,
+  `interval-js`); on a direct custom target (`compile(expr, { target })`) the
+  value is no longer folded into the code. The value is hidden for the duration
+  of the compilation and restored afterwards, also when the compilation throws.
+  A value put in force by an assumption is hidden the same way: with
+  `assume(a = 4)`, `\lfloor a\rfloor + x` compiled to `_.x + _.a` (the
+  assumption typed `a` as an integer) and now compiles to
+  `_.x + Math.floor(_.a)`. A symbol whose type was inferred from its value
+  (`ce.assign('u', 4)` with no declaration) keeps its value during the
+  compilation, but it is no longer folded on a direct custom target, where
+  `\sqrt{u}` with `vars: { u: '_.u' }` compiled to `2`.
+
+- **An integral over a `vars`-mapped input keeps its closed form.**
+  `\int_0^x a t\,dt` with `a` mapped by `vars: { a: '_.a' }` compiled to the
+  quadrature `_SYS.integrate((t) => (_.a * t), 0, _.x)`; it now compiles to the
+  closed form `(0.5 * _.a * (_.x * _.x))`, as it does for an unmapped `a` with
+  no value. The input stays live: the closed form reads `_.a` at run time. The
+  closed form is still skipped when the integral reaches a mapped symbol that
+  has a visible value (one whose type was inferred from its value), when the
+  mapping is not a plain read (an identifier such as `u_a` or a member read such
+  as `_.a`), or when it reaches a function overridden with the `functions`
+  option. A host that used a `vars` mapping to force quadrature must now map the
+  symbol to source that is not a plain read, for example `{ a: '(_.a)' }`.
+
+- **The shader and Python targets check a `vars` mapping to a bare identifier
+  for reserved words.** On GLSL, `{ in: 'in' }` compiled `x + \sin(\mathrm{in})`
+  to `x + sin(in)`, which no driver accepts, while the free symbol `in`
+  declined. The mapping now declines with the same error, and so does a mapping
+  to a WGSL reserved word (`loop`) on WGSL. A mapping to another name
+  (`{ in: 'u_in' }`) or to source that is not a bare identifier (`u.in`) is
+  unchanged.
+
+- **The Python target declines a free symbol named after a Python keyword.**
+  `x + \sin(\lambda)` compiled to `x + np.sin(lambda)`, which is a Python syntax
+  error; it now declines with `"lambda" is a reserved word in python`. The same
+  applies to the other keywords (`in`, `if`, `class`, `yield`, …), to a `vars`
+  mapping to one, and to a keyword used as a `Sum`/`Product` index, a
+  comprehension variable or a function-literal parameter. Map the symbol to
+  another name with `vars` (`{ lambda: 'lam' }`) to compile it.
+
+- **GLSL: `struct`, `class`, `lowp`, `mediump` and `highp` are reserved words.**
+  A free symbol with one of these names compiled to invalid GLSL; it now
+  declines like `in` or `sample`.
+
+- **Four parse diagnostic codes of 0.144.0 are renamed into the `ambiguous-*` group**, so that
+  a host refuses every reading with a second common reading on one prefix:
+  `letter-run-split` is now `ambiguous-letter-run`,
+  `implicit-product-in-denominator` is now `ambiguous-denominator`,
+  `spaced-digit-groups` is now `ambiguous-digit-groups`, and
+  `letter-before-decimal` is now `ambiguous-letter-decimal`. A host that
+  matched one of the first names must use the new one.
+
+- **A name in parentheses is a factor, never the head of a function
+  application**, in the strict and the lenient grammar. `(k)(x - 1)` is now
+  `k·(x - 1)` (`["Multiply", "k", ["Add", "x", -1]]`), was the application
+  `["k", ["Add", "x", -1]]`. `(a)(b)` is now `a·b`, was `["a", "b"]`.
+  `y = (m)(x) + b` is now `y = m·x + b`. `(k)(x, y)` is now `k·(x, y)`, was
+  `["k", "x", "y"]`. `(g)(3)^2` with `g` undeclared is now `9g`, was
+  `g(3)^2`. A name that the library or the host declared a function keeps the
+  application reading (`(\sin)(x)` is `sin(x)`, and `(f)(3)^2` is `f(3)^2` when
+  `f` is declared a function); a function type that the engine only inferred
+  from an earlier `f(x)` does not count. `k(x - 1)`, with no parentheses
+  around `k`, keeps the rules it had.
+
+- **In the lenient grammar, `+-` is `±` and `-+` is `∓`** when there is no
+  white space between the two signs. `x = 2 +- 0.1` is now
+  `["Equal", "x", ["Measurement", 2, 0.1]]` (as `2 ± 0.1` and `2 \pm 0.1`),
+  was `2 + (-0.1)`. `a+-b` is now `Measurement(a, b)`, was `a + (-b)`.
+  `y = +-sqrt(x)` is now `Measurement(0, √x)`, was `-√x`. `a -+ b` is now
+  `["MinusPlus", "a", "b"]` (as `a \mp b`), was `a - b`. The strict grammar
+  keeps `+` then `-`.
+
+- **A prefix `∓` has a reading.** `\mp 1` and `∓1` are `MinusPlus(0, 1)`,
+  as a prefix `\pm 1` is `Measurement(0, 1)`. Strict `x = \mp 1` was an
+  `unexpected-command` error. In the lenient grammar a prefix `-+` is read
+  the same way: `-+x` is `MinusPlus(0, x)`, was `Negate(x)`.
+
+- **The lenient grammar reads five more function names before a
+  parenthesis**: `mod` (`Mod`), `pow` (`Power`), `trunc` (`Truncate`), `Re`
+  (`Real`) and `Im` (`Imaginary`). These inputs change:
+  - `mod(x, 2)` was an application of an unknown function `mod`, and
+    `mod(7, 3)` evaluated to itself. It is now `Mod(x, 2)`, and `mod(7, 3)`
+    evaluates to `1`.
+  - `pow(x, 2)` was an application of an unknown function `pow`; it is now
+    `x^2`.
+  - `trunc(x)` was an application of an unknown function `trunc`; it is now
+    `Truncate(x)`, and `trunc(2.5)` evaluates to `2`.
+  - `Re(z)` and `Im(z)` already had the canonical form `Real(z)` and
+    `Imaginary(z)`; only the raw form (`form: 'raw'`) changes, from
+    `["InvisibleOperator", "Re", ["Delimiter", "z"]]` to `["Real", "z"]` (and
+    the same for `Im`).
+
+  Without a parenthesis these words keep their reading as letters
+  (`7 mod 3` is a product). The strict grammar is not changed.
+
 - **A call through a field of a constant that names an operator is the
   direct call, also without named arguments.** With `bob` declared with
   `isConstant: true` and the value `{S -> bob_S}`, `bob.S(3)`
@@ -12,7 +113,276 @@
   that holds a function literal is unchanged without named arguments; with
   named arguments its callee is the literal.
 
+- **A named call through a variable whose declared type gives no parameter
+  names is an error.** The names of a call such as `alias(3, factor: 5)`, where
+  `alias` is a variable that holds a function, are now matched only against the
+  DECLARED type of `alias`, never against the function it holds now. When the
+  declared type gives no parameter names (the bare `function` type, or a
+  signature with no names such as `(number, number) -> number`), the call is the
+  error `argument-names-unavailable`, with a message that suggests positional
+  arguments or a declared signature with parameter names. Example: with `bob_S`
+  declared `(x: number, factor: number) -> number` and `let alias: function =
+  bob_S`, `alias(3, factor: 5)` was `15` and is now the error; the call was
+  stored as `alias(3, 5)`, so after `alias = other`, with `other` declared
+  `(factor, x)` and computing `factor - x`, a stored call gave `-2` while the
+  names ask for `2`. With `alias: (number, number) -> number`, the error code
+  was `argument-name-unknown` and is now `argument-names-unavailable`. A
+  variable declared with a signature that names its parameters, a variable with
+  no declaration (whose inferred type is used), and a function defined with
+  `f(x) := …` or `function f(x) {…}` are unchanged. A program that used names
+  through a variable declared `function` must call it positionally or declare
+  the variable with a signature that names the parameters.
+
+- **LaTeX serialization uses standard spellings for `LCM`, `Log2`, `Log10`,
+  the number sets and `Degrees`** (#345, contributed by
+  [enumeratio](https://github.com/enumeratio)). `LCM(a, b)` was `\lcm(a, b)`
+  and is now `\operatorname{lcm}(a, b)`; `Log2(x)` and `Log10(x)` were
+  `\mathrm{Log2}(x)` and `\mathrm{Log10}(x)` and are now `\log_{2}(x)` and
+  `\log_{10}(x)`; `Degrees(30)` was `30\degree` and is now `30^{\circ}` (a
+  compound operand is parenthesized, `(x+1)^{\circ}`); `Integers`,
+  `RationalNumbers`, `RealNumbers`, `ComplexNumbers`, `NonNegativeIntegers` and
+  the sign-restricted sets were `\Z`, `\Q`, `\R`, `\C`, `\N`, `\R_{>0}`, … and
+  are now `\mathbb{Z}`, `\mathbb{Q}`, …, `\mathbb{R}_{>0}`. `\lcm`, `\degree`
+  and the short set commands (which only MathLive defines) are still read, and
+  each new spelling parses back to the same expression. A call with the wrong
+  number of arguments is written as a function call, `\mathrm{Mod}(a, n, 1)`
+  and `\mathrm{Interval}(\bigl\lbrack0, 1\bigr\rbrack)`, where `Mod(a, n, 1)`
+  was `""` and `Interval(List(0, 1))` ended in a stray comma. The
+  `imaginaryUnit` serialization option, which only the parser honoured, now
+  also sets how `ImaginaryUnit` and complex numbers are written, and the new
+  `exponentialE` option does the same for `ExponentialE` and `Exp`; both default
+  to `\imaginaryI` and `\exponentialE`.
+
 ### New Features
+
+- **The lenient grammar reports each reading choice that has a second
+  common reading.** The list of reading choices, their codes, and the
+  choices that have one common reading is
+  `docs/plans/2026-10-01-lenient-ambiguity-codes.md`; a reading choice with a
+  second common reading and no code is a defect. The codes added in this
+  release.
+
+- **The lenient grammar reports more reading choices that have a second
+  common reading.** With `ce.parse(text, { strict: false, diagnostics: true })`,
+  each of these choices now reports a parse diagnostic. The reading does not
+  change, and the strict grammar reports none of them:
+  - `ambiguous-exponent-end`: where an unbraced exponent ends. `e^2pi` is
+    `e^2·π` and `x^2y` is `x^2·y` (an operand directly after the exponent);
+    `e^i pi`, `e^-x y` and `e^2 pi i` (an operand after white space when the
+    exponent is a name or is signed, or the base is `e`); `e^x/2`, `e^-x/2`,
+    `x^pi/2` and `x^1/2` (a `/` after an exponent that is a name, is signed or
+    is 1). `x^2 y` and `x^3/2` are not reported. `detail: { exponent }`.
+  - `ambiguous-implicit-subscript`: `x2`, `θ2`, `α1` are read as `x_2`,
+    `θ_2`, `α_1`, and `x_1y` is read as `x_1·y`. `atan2`, `log2` and `log10`
+    are not reported.
+  - `ambiguous-name-digits`: letters and digits that are not a library
+    function, before a parenthesis: `atan3(y)` is read as `arctan(3·y)`.
+  - `ambiguous-function-argument`: a function name without parentheses and an
+    argument of more than one factor: `sin x y` is `sin(x·y)`, also
+    `sqrt 2 x`, `ln 2 x`, `exp 2 x`, `abs 2 x`; and `log 2 x`, read as
+    `log_2(x)`. `sin 2x` is not reported.
+  - `ambiguous-function-without-parentheses`: a symbol declared as a function,
+    followed by an operand: `f x` and `2 f x` are products.
+  - `ambiguous-name-then-number`: a name, white space, then a number: `x 2`
+    and `θ 2` are products.
+  - `ambiguous-delta`: `Δ` or `Delta` followed by a letter: `Δx`,
+    `Delta x` and `Q = m c ΔT` read `Δ` as a factor.
+  - `ambiguous-constant-name`: a library constant alone on the left of `=`:
+    `e = 1.6e-19`, `i = V/R`, `pi = 3.14`, `inf = 2`.
+  - `ambiguous-lookalike-letter`: a Greek letter that looks like a Latin
+    letter (the capitals Α Β Ε Ζ Η Ι Κ Μ Ν Ο Ρ Τ Υ Χ, and ο).
+  - `ambiguous-unknown-character`: a character that is not math, read as a
+    string: `y = ж`.
+  - `ambiguous-radical`: the extent of `√` without braces or parentheses:
+    `√2π`, `√2x`, `√xy` (`√2·π`), `√x²` and `√x²+y²` (`(√x)²`), and `3√8`
+    (`3·√8`).
+  - `ambiguous-absolute-value`: bars that pair two ways: `|x|y|z|` is read as
+    `|x|·y·|z|`.
+
+- **More reading choices of the lenient grammar report an `ambiguous-*`
+  parse diagnostic.** With `ce.parse(text, { strict: false, diagnostics: true })`,
+  these inputs keep their reading and now also report a code, so that a host
+  can refuse a line that a person could have meant another way:
+
+  | Code | Example | Reading | Second common reading |
+  | --- | --- | --- | --- |
+  | `ambiguous-equation-number` | `y = x^2 (2)`, `x = 4 (m)` | a product | an equation label or a unit |
+  | `ambiguous-group-product` | `(x)(1,2)` | a scalar times a point | a call |
+  | `ambiguous-factorial` | `5!=120` | `5 ≠ 120` | `5! = 120` |
+  | `ambiguous-arrow` | `x <- 2` | `x < -2` | an assignment arrow |
+  | `ambiguous-equal-chain` | `x = y = 0` | nested equations | an assignment to several names |
+  | `ambiguous-element` | `y = x in [0,1]` | `(y = x) ∈ [0,1]` | `y = x` for `x ∈ [0,1]` |
+  | `ambiguous-range` | `1..10..2` | first, second, last | first, last, step |
+  | `ambiguous-percent` | `y = 50%` | `y = 50` (`%` starts a comment) | a percentage |
+  | `ambiguous-comma` | `1,5` | a sequence | the decimal number 1.5 |
+  | `ambiguous-list-label` | `1. y = x`, `(1)`, `(iv)`, `a) y = x` | math | the label of a list item |
+  | `ambiguous-number-notation` | `1_000`, `0x10` | a subscript and a product | a number |
+  | `ambiguous-date` | `2026-10-15`, `555-1234`, `7-11` | a difference or a quotient | a date, a phone number or a range |
+
+  Ordinary math is not reported: `3/4`, `24/7`, `2-1`, `x = 2`, `1..10`,
+  `[0,1]`, `f(x, y)`, `(1, 2)`, `0 < x < 1`, `x != y`, `5! = 120`,
+  `x in [0,1]`. The strict grammar reports none of these codes.
+
+- **Three more `ambiguous-*` parse diagnostics in the lenient grammar, and a
+  wider `ambiguous-constant-name`.** With
+  `ce.parse(text, { strict: false, diagnostics: true })`, these readings now
+  report a diagnostic. The reading does not change, and the strict grammar
+  reports none of them.
+  - `ambiguous-log-base`: `log` with two arguments in parentheses. `log(x, 2)`
+    is `Log(x, 2)`, the base second as in Python and in spreadsheets, and
+    other tools put the base first. Also the name `lg` (`lg(x)` is base 10 by
+    ISO 80000-2, and base 2 in computer science). `detail: { name }`.
+  - `ambiguous-engine-operator`: a one-letter library operator written as a
+    plain letter before a parenthesis, read as a call of the operator:
+    `N(x)` (numeric evaluation), `D(x)` (derivative). A person writing plain
+    text usually means a function of their own. `\operatorname{N}(x)` is not
+    reported. `detail: { name }`.
+  - `ambiguous-interval`: after `in`, `\in`, `∈` or `\notin`, a bracket pair
+    followed by an operator, which is then read as a list or a tuple, not as
+    an interval: `M in [0,1]^2` is `Element(M, Power(List(0, 1), 2))`. Also
+    `M in (0,1)^2`, `M in [0,1] + 1` and a range, `M in [0..1]^2`.
+    `M in [0,1]` and `x in [0,1)` are read as intervals and are not
+    reported.
+  - `ambiguous-constant-name` also reports a library constant followed by a
+    parenthesized group on the left of `=`: `pi(x) = x` is read as
+    `π·x = x`, and a person can mean the definition of a function `pi`.
+    `f(pi) = 3` is not reported.
+
+- **Two more `ambiguous-*` codes.** `ambiguous-inverse-function`: in plain
+  text, `sin^-1(x)` is read as the inverse function, and a person also means
+  `1/sin(x)` (`\sin^{-1}(x)` is not reported). `ambiguous-range` also
+  reports a range with one `..` next to an operation: `1..5/2` is the range
+  from 1 to 5/2, and a person can mean `(1..5)/2`; `-1..5` is not reported.
+
+- **The `onAmbiguity` parse option.** `ce.parse(text, { strict: false,
+  onAmbiguity: 'error' })` puts an `Error` node in place of the smallest
+  expression that holds the source span of each parse diagnostic whose code
+  starts with `ambiguous-`. The error code is the diagnostic code, and the
+  error holds the source text of the span:
+  `ce.parse('y = 2 3', { strict: false, onAmbiguity: 'error' })` is
+  `["Equal", "y", ["Error", "'ambiguous-digit-groups'", ["LatexString", "'2 3'"]]]`.
+  The option works without `diagnostics: true`, and for every `ambiguous-*`
+  code. When the parser cannot find an expression with that span, the `Error`
+  node replaces the whole result. The default, `'report'`, keeps the reading
+  and reports the diagnostic when `diagnostics: true`. In strict mode the
+  option has no effect.
+
+- **The `ambiguous-sign` parse diagnostic** (lenient grammar only). It reports
+  a prefix `±` (also spelled `\pm`, `\plusmn` or `+-`) with no left operand:
+  `x = ±1` is read as `Measurement(0, 1)`, and a person often means the two
+  values `1` and `-1`. It also reports two signs in a row: `--x`, `x - -y`,
+  `a<--b`, `a + -b`, `-+x`, and `a -+ b` (read as `MinusPlus(a, b)`).
+  `detail: { signs }`. `a +- b` with no white space is read as
+  `Measurement(a, b)` and is not reported. The reading does not change.
+
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) **LaTeX
+  notation on a running engine.** `LatexSyntax.addEntries(entries)` adds LaTeX
+  dictionary entries after construction; the next parse or serialization uses
+  them. With `IntegerModRing` declared, `ce.box(['IntegerModRing', 5]).latex`
+  was `\mathrm{IntegerModRing}(5)`; after
+  `ce.latexSyntax.addEntries([entry])` it is `\mathbb{Z}/5\mathbb{Z}`, and
+  parsing `\mathbb{Z}/5\mathbb{Z}` gives `["IntegerModRing", 5]`. The
+  default dictionary and the array given as the `dictionary` option are not
+  modified. An engine created without the `latexSyntax` option has its own
+  `LatexSyntax`, so the entries apply to that engine only; an instance given to
+  several engines is shared, and the entries apply to all of them. LaTeX
+  notation stays separate from library definitions: a `LibraryDefinition`
+  still has no LaTeX entries.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) **Load a
+  library on a running engine.** `ce.loadLibrary(library)` takes the same
+  `LibraryDefinition` as the `libraries` constructor option and declares its
+  definitions in the global scope, as `ce.declare()` does. An expression boxed
+  before the call uses the new definitions: `ce.box(['Sq', 3]).evaluate()`
+  gave `Sq(3)`, and after loading a library that defines `Sq` as `x ↦ x²` it
+  gives `9`. Each library in `requires` must already be loaded. The call throws,
+  and declares nothing, for a library name that is already loaded, a missing
+  required library, a standard library (select those with the `libraries`
+  option), or a definition name that is invalid, repeated, defined by another
+  library, or already declared in the global scope. A definition that
+  `ce.declare()` rejects (for example for an unknown key) also makes the call
+  throw, and the definitions declared before it are removed: for any failure,
+  the call declares nothing. (The exception is a call made while an evaluation
+  or a declaration batch is in progress, where the definitions before the
+  rejected one stay declared.) When a library in `requires` is a standard
+  library, the error says to select it with the `libraries` option. A
+  checkpoint taken before the call (`ce.checkpoint()`) undoes it.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393)
+  `ce.libraryOf(name)` returns the name of the library that defines `name`:
+  `'trigonometry'` for `Sin`, the `name` of a caller library given to the
+  constructor or to `ce.loadLibrary()`, and `undefined` for a name declared
+  with `ce.declare()`, a name nothing defines, or a library name that a
+  declaration in the current scope shadows.
+- [#394](https://github.com/cortex-js/compute-engine/issues/394)
+  `ce.declare(name, patch, { extend: true })` extends the operator definition
+  that is visible for `name` instead of replacing it. Before, a redeclaration
+  replaced the whole definition: `ce.declare("SetMinus", { signature:
+  "(value, value*) -> set" })` made `SetMinus(5, 2)` valid, but removed the
+  `evaluate` and `collection` handlers and the description, so
+  `SetMinus(Set(1, 2, 3), Set(2))` no longer evaluated. In extend mode:
+  - The engine builds a new definition from the visible one and the fields of
+    the patch. A field the patch does not name keeps its value. A field the
+    patch names replaces the old value: when two extensions give the same
+    handler, the later one wins. With the patch above, `SetMinus(5, 2)` is
+    valid and `SetMinus(Set(1, 2, 3), Set(2))` still evaluates to `Set(1, 3)`.
+  - `signature` replaces the signature. The new field `addSignature` adds an
+    overload: the signature becomes `old & new`. The new signature must be a
+    subtype of the old one, so that every call that was valid stays valid:
+    `(any*) -> any` cannot replace `(value+) -> value`, and the call throws.
+    This does not apply when the old signature was only inferred (an operator
+    declared without a signature, or a function whose signature is inferred
+    from its body).
+  - An extension of a standard-library operator that keeps its `evaluate`,
+    `canonical`, `compile` and `derivative` handlers is still the library
+    operator: after `ce.declare("Sin", { description: "…" }, { extend: true })`,
+    `D(Sin(x), x)` is `cos(x)` and `Sin(x)` compiles. An extension that
+    replaces one of these handlers is a user definition with the library
+    name, as with a plain `ce.declare()`.
+  - A name that is already declared in the same scope can be extended: two
+    libraries that extend `Basis` both succeed, and the second one sees the
+    fields of the first. A plain `ce.declare` of that name still throws.
+  - It is an error to extend a name with no operator definition, a name
+    declared as a value, or a function defined by clauses.
+  - The old definition is not changed: an expression boxed before the extension
+    keeps it. A checkpoint restore undoes an extension like any declaration.
+  - The third argument of `ce.declare()` can now be an options object
+    `{ scope?, extend? }`. A scope as the third argument works as before.
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) An operator
+  definition can give its own derivative with the new `derivative` key. Before,
+  the key was refused (`unexpected key "derivative"`), and the derivative of an
+  operator whose `evaluate` handler answers only for numbers stayed symbolic:
+  `D(Sq(x), x)` gave `Apply(Derivative(Sq, 1), x)`. The key gives the partial
+  derivative with respect to each argument, and `D` applies the chain rule:
+
+  ```js
+  ce.declare('Sq', {
+    signature: '(number) -> number',
+    evaluate: ([x]) => (isNumber(x) ? x.mul(x) : undefined),
+    derivative: [['Function', ['Multiply', 2, 'x'], 'x']],
+  });
+  ce.box(['D', ['Sq', 'x'], 'x']).evaluate(); // 2x
+  ce.box(['D', ['Sq', ['Power', 'x', 2]], 'x']).evaluate(); // 4x^3
+  ce.box(['Sq', 'y']).evaluate(); // Sq(y), not unfolded
+  ```
+
+  The value is either an array with one function literal for each argument
+  (each literal takes all the arguments as parameters), or a handler
+  `(ops, { engine, argument }) => Expression | undefined` that returns the
+  partial derivative with respect to argument number `argument` at `ops`. A
+  partial that the key does not give stays symbolic. `Derivative(Sq)`,
+  `Sq'(3)`, `Apply(Derivative(F, 1, 0), 2, 3)` and the compiled form of
+  `D(Sq(x^2), x)` use the key too. The key has precedence over the body of a
+  function-literal `evaluate` handler; an operator of the standard library
+  keeps its own derivative rule.
+
+- [#393](https://github.com/cortex-js/compute-engine/issues/393) The options
+  passed to an `evaluate` handler have a new `precision` field: the number of
+  significant digits requested. Inside `N(x, p)` it is `p`, for the evaluation
+  of `x` and of everything evaluated inside it, also when `p` is lower than
+  `ce.precision`. Under any other numeric approximation (`x.N()`, `N(x)`) it is
+  `ce.precision`. In an exact evaluation it is `undefined`. A handler can then
+  compute to the requested digits without reading `ce.precision`. `N(x, p)`
+  with `p` above `ce.precision` still raises `ce.precision` and leaves it
+  raised, as before.
 
 - **`DirichletEta` and `DirichletBeta`, the two alternating cousins of ζ,
   both entire** (#395, contributed by
@@ -116,6 +486,18 @@
 
 ### Issues Resolved
 
+- A pure imaginary factor in a product was serialized in parentheses that are
+  not necessary: `i·x` was `(\imaginaryI)x` and `e^{iπ}` was
+  `\exp((\imaginaryI)\pi)`. They are now `\imaginaryI x` and
+  `\exp(\imaginaryI\pi)`, and `2i·x` is `2\imaginaryI x`. A factor with a
+  leading sign (`(-2\imaginaryI)x`) or with a real part
+  (`(1+2\imaginaryI)x`) keeps its parentheses. The old and the new output
+  read back as the same expression. Two related power-base spellings were
+  wrong or misleading: `Power(Complex(0, 1.0), x)` was `1.0\imaginaryI^{x}`,
+  which reads back as `1.0·i^x`, and is now `(1.0\imaginaryI)^{x}`; and
+  `Power(Complex(1/2, 0), x)` was `\frac{1}{2}^{x}` and is now
+  `(\frac{1}{2})^{x}`, as for a plain `1/2`.
+
 - [#390](https://github.com/cortex-js/compute-engine/issues/390) A call through
   a field of a record or a dictionary ignored the declaration of the function in
   the field. With `bob_S` declared `(x: number, factor: number?) -> number`, the
@@ -145,6 +527,75 @@
   A variable typed `dictionary<function>` gives no parameter names, so a named
   call through it is still `argument-names-unavailable`, and its value is not
   read: `lazy` is honored only through a constant receiver.
+- **Inside the call of a user function, a free symbol of the caller with the
+  name of a parameter is an unknown.** With `f = (x, y) ↦ x = y`, `f(y, x)`
+  answered `False` instead of staying `y = x`, `x ≠ y` answered `True`, and
+  `If(x = y, 1, 0)` answered `0`. The cause was `.unknowns`: it looked up each
+  symbol by name, and during the call the name `x` also denotes the parameter,
+  which has a value. `.unknowns` now resolves a symbol the way evaluation reads
+  its value, so the `x` of the argument is an unknown and the parameter `x`
+  used in the body is not. The same defect caused a performance regression
+  since 0.142.0: the `evaluate()` of a call whose arguments contain a `Floor`
+  (also `Ceil`, `Round`, `Truncate`) was 300 to 6,000 times slower than in
+  0.141.0. With `f = (x, y) ↦ \{\sqrt{x^2+y^2} \le 1: 1, 0\}`, the call
+  `f(⌊31x⌋/31, ⌊31y⌋/31)` took about 60 s, and now takes about 10 ms: each
+  sign of `⌊31x⌋` tried to order the free `31x` and `1` as two constants, with
+  a higher precision and a symbolic proof.
+- **A library list with `core` but without `control-structures` can build
+  function literals.** With `new ComputeEngine({ libraries: ['core',
+  'arithmetic'] })`, every function literal, and every caller library with an
+  `evaluate` formula, printed "Cannot read properties of undefined (reading
+  'bindings')": a function literal is made canonical with a `Block` body, and
+  `Block` was in the `control-structures` library. `Block` is now in the `core`
+  library, and the library reference lists it under `core`.
+- `ComputeEngine.getStandardLibrary()` with a list of categories threw for
+  every category except `core`: `getStandardLibrary('physics')` gave "Library
+  "physics" requires "arithmetic", which is not available", because the list
+  held only the requested libraries. Each requested library now comes with the
+  libraries it requires, directly or indirectly: `getStandardLibrary('physics')`
+  gives `core`, `arithmetic`, `units` and `physics`, in load order.
+- A `ce.declare()` of an operator that threw (for example a `canonical`
+  handler together with the `commutative` flag) left the name bound to a
+  placeholder value of type `function`. The name is now restored to the
+  binding it had before the call, or is not declared at all.
+- **The numeric value of a definite integral whose integrand does not compile
+  now uses adaptive quadrature.** Before, such an integrand (for example an
+  operator declared with only a JavaScript `evaluate` handler) went directly to
+  a Monte-Carlo estimate with 1e4 samples. With `Sq` declared so that `Sq(x)` is
+  `x²` for a number `x`, `Integrate(Sq(x), x, 0, 1).N()` was `0.3356 ± 0.0030`;
+  it is now `0.3333333333333333 ± 6e-21`, with 240 evaluations of `Sq` instead
+  of 10 000. The integrand is now integrated with the adaptive Gauss–Kronrod
+  quadrature that a compiled integrand uses, with a smaller panel budget (at
+  most 9 660 evaluations), and Monte Carlo is used only when the quadrature does
+  not converge and its error bound is not better than the estimate of Monte
+  Carlo. A divergent integral is now `NaN`, as for a compiled integrand: with
+  `Inv(x)` = `1/x`, `Integrate(Inv(x), x, 0, 1).N()` was `10.9 ± 1.4` and is now
+  `NaN`.
+- [#394](https://github.com/cortex-js/compute-engine/issues/394) Redeclaring an
+  arithmetic operator with a copy of its definition changed its canonical forms
+  and types, even when no field of the copy changed. This is the idiom the
+  guide documents to extend a standard operator:
+  `ce.declare('Sqrt', { ...ce.lookupDefinition('Sqrt').operator, evaluate })`.
+  It affected `Add`, `Multiply`, `Negate`, `Square`, `Sqrt`, `Exp`, `Ln`,
+  `Log`, `Power`, `Root` and `Divide`. After `ce.declare('Add', { ...oldAdd })`:
+  `Add(2, x, 5)` gave `2 + x + 5` and now gives `x + 7`; `Add(1, "s")` was
+  valid and is now invalid; `Add(1, ImaginaryUnit)` was typed `integer` and is
+  now typed `complex`; in `1 + w`, `w` stayed `unknown` and is now inferred
+  `number`. After the same copy of `Sqrt`: `Sqrt(8)` stayed `sqrt(8)` and now
+  gives `2√2`, and `√2·√2` now gives `2`. The definitions of these operators
+  now have a `canonical` handler, and a copy takes it along. The standard
+  canonical form applies only to a copy declared under the SAME name whose
+  signature, `lazy` flag and `associative`/`commutative`/`idempotent`/
+  `involution` flags are unchanged; a copy that changes only `evaluate` or
+  metadata (`description`, `wikidata`, `examples`) is such a copy. A copy with
+  another signature or another flag, or a copy declared under another name,
+  does not use the standard canonical form: the copy keeps its own head and
+  its own `evaluate`. With `MyPower` declared as a copy of `Power` with
+  `evaluate: () => 5`, `MyPower(x, 3)` gave `x^3` (the head was replaced by
+  `Power`, which had a `canonical` handler before this change) and now stays
+  `MyPower(x, 3)` and evaluates to `5`. A definition that is not a copy
+  (`function Add(a, b) { … }`, or a declaration with its own `canonical`
+  handler) still replaces the standard operator, as before.
 
 ## 0.144.0 _2026-10-01_
 

@@ -5,6 +5,7 @@ import {
 } from '../../common/type/primitive.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
+import { withVarsValuesHidden } from './vars-inputs.js';
 import { resolveStorageHints } from './storage-hints.js';
 
 import type {
@@ -108,6 +109,65 @@ const PYTHON_BOOLEANS: Record<string, string> = {
   True: 'True',
   False: 'False',
 };
+
+/**
+ * The Python keywords (`keyword.kwlist`, Python 3.12). A name in this set
+ * cannot be a Python identifier: `x + np.sin(in)` is a syntax error. The soft
+ * keywords (`match`, `case`, `_`) are valid identifiers and are not listed.
+ * Neither are the value keywords `True` and `False`: the engine's `True` and
+ * `False` reach the bare-identifier emission and are the Python literals of
+ * the same name. The value keyword `None` is listed: the engine has no
+ * symbol that is emitted as a bare `None`, so a symbol named `None` is a
+ * user symbol, and emitting its name would read the Python null value.
+ */
+const PYTHON_KEYWORDS: ReadonlySet<string> = new Set([
+  'and',
+  'as',
+  'assert',
+  'async',
+  'await',
+  'break',
+  'class',
+  'continue',
+  'def',
+  'del',
+  'elif',
+  'else',
+  'except',
+  'finally',
+  'for',
+  'from',
+  'global',
+  'if',
+  'import',
+  'in',
+  'is',
+  'lambda',
+  'None',
+  'nonlocal',
+  'not',
+  'or',
+  'pass',
+  'raise',
+  'return',
+  'try',
+  'while',
+  'with',
+  'yield',
+]);
+
+/**
+ * Fail closed when `id`, emitted as a bare Python identifier, is a Python
+ * keyword. Returns `id` unchanged otherwise. Applied to a free symbol's name
+ * (`mangleId`) and to a `vars` mapping whose source is a bare identifier.
+ */
+function pythonCheckIdentifier(id: string): string {
+  if (PYTHON_KEYWORDS.has(id))
+    throw new Error(
+      `"${id}" is a reserved word in python and cannot be used as a variable name. Rename it, or map it to another name with \`vars\`, before compiling to Python (fail closed, D6).`
+    );
+  return id;
+}
 
 /**
  * Python mathematical constants, keyed by MathJSON symbol.
@@ -696,7 +756,8 @@ function compilePythonSumProduct(
     const indexExpr = ops[0];
     if (!isSymbol(indexExpr))
       throw new Error(`Could not compile \`${kind}\`: index must be a symbol`);
-    const index = indexExpr.symbol;
+    // The index is emitted as a bare Python identifier.
+    const index = pythonCheckIdentifier(indexExpr.symbol);
 
     const lowerExpr = ops[1];
     const upperExpr = ops[2];
@@ -949,6 +1010,8 @@ function pythonElementHeaders(
   let scope = target;
   for (const b of binders) {
     const source = pythonElementSource(b.clause.ops[1], scope);
+    // The clause's names are emitted as bare Python identifiers.
+    for (const name of b.names) pythonCheckIdentifier(name);
     const prev = scope;
     const bound = new Set(b.names);
     scope = {
@@ -3947,9 +4010,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     BaseCompiler.assertNoDestructuringParams(args.slice(1));
     BaseCompiler.assertNoRestParams(args.slice(1));
+    // The parameters are emitted as bare Python identifiers.
     const params = args
       .slice(1)
-      .map((x) => functionLiteralParameterName(x) || '_');
+      .map((x) =>
+        pythonCheckIdentifier(functionLiteralParameterName(x) || '_')
+      );
     const bodyCode = BaseCompiler.compile(body.canonical, {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
@@ -4722,6 +4788,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // bare identifier — a Python parameter name — only for a genuinely free
       // symbol.
       var: (id) => PYTHON_CONSTANTS[id],
+      // A free symbol is emitted as a bare identifier, which must not be a
+      // Python keyword.
+      mangleId: pythonCheckIdentifier,
       constant: (id) => PYTHON_CONSTANTS[id] ?? PYTHON_BOOLEANS[id],
       complex: (re, im) => `complex(${re}, ${im})`,
       string: (str) => JSON.stringify(str),
@@ -4822,7 +4891,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // `in` finds `Object.prototype` members on a caller-supplied map.
       if (vars && Object.hasOwn(vars, id)) {
         const v = vars[id];
-        return typeof v === 'string' ? v : JSON.stringify(v);
+        if (typeof v !== 'string') return JSON.stringify(v);
+        // A mapping to a bare identifier is checked like a free symbol's own
+        // name (`mangleId`); other source (`p["a"]`) is spliced in unchanged.
+        if (/^[A-Za-z_]\w*$/.test(v)) pythonCheckIdentifier(v);
+        return v;
       }
       return PYTHON_CONSTANTS[id];
     };
@@ -4863,14 +4936,15 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // of it (`auto-escalation.ts`); `compileOrThrow` throws on a decline, so
       // the mismatch reaches the retry instead of the fallback built below,
       // and each attempt builds its own target.
-      return compileWithAutoEscalation(
-        requestedMode,
-        PYTHON_SUPPORTED_MODES,
-        (m) =>
+      // A `vars`-mapped symbol is compiled as the valueless input of its
+      // declared type (`withVarsValuesHidden`).
+      return withVarsValuesHidden(expr, options.vars, () =>
+        compileWithAutoEscalation(requestedMode, PYTHON_SUPPORTED_MODES, (m) =>
           this.compileOrThrow(
             expr,
             m === requestedMode ? options : { ...options, mode: m }
           )
+        )
       );
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented
@@ -4999,14 +5073,19 @@ export class PythonTarget implements LanguageTarget<Expression> {
         ...(vars ? Object.values(vars) : []),
       ]),
     });
-    BaseCompiler.openCseSession(expr, target, {
-      enabled: options.cse,
-      isStringVar: (name) =>
-        vars !== undefined && typeof vars[name] === 'string',
-      isVarsKey: (name) =>
-        vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
+    // A `vars`-mapped symbol is compiled as the valueless input of its
+    // declared type (`withVarsValuesHidden`).
+    const body = withVarsValuesHidden(expr, vars, () => {
+      BaseCompiler.openCseSession(expr, target, {
+        enabled: options.cse,
+        isStringVar: (name) =>
+          vars !== undefined && typeof vars[name] === 'string',
+        isVarsKey: (name) =>
+          vars !== undefined &&
+          Object.prototype.hasOwnProperty.call(vars, name),
+      });
+      return BaseCompiler.compileCseRoot(expr, target);
     });
-    const body = BaseCompiler.compileCseRoot(expr, target);
     // The contract of this route is an EXPRESSION. A body that lowers to
     // statements has no emission here (D6). Checked on the BODY, before the
     // helper/import preamble — those lines are the route's own, not the
@@ -5037,6 +5116,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // block hook having done so. A body whose value statement is an assignment
     // or a declaration has neither emission (D6).
     pythonAssertReturnableBody('compileFunction()', expr);
+    // The function name and the declared parameters are emitted as bare
+    // Python identifiers, so a Python keyword fails closed, as it does for a
+    // free symbol (`def f(lambda):` is a syntax error).
+    pythonCheckIdentifier(functionName);
+    for (const p of parameters) pythonCheckIdentifier(p);
     // Shadow the declared parameters so they stay bare identifiers (never
     // folded to an assigned engine value).
     // Root compilation boundary (see `compile`). The declared parameters are
@@ -5156,6 +5240,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // statement shapes `compileToSource()` declines have no emission here
     // either — the `\n` check below is blind to both (D6).
     pythonAssertExpressionBody('compileLambda()', expr);
+    // The declared parameters are emitted as bare Python identifiers, so a
+    // Python keyword fails closed, as it does for a free symbol.
+    for (const p of parameters) pythonCheckIdentifier(p);
     // Root compilation boundary (see `compile` and `compileFunction`).
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),

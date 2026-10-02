@@ -17,6 +17,7 @@ import {
   foldAssociativeOperator,
   getSequence,
   missingIfEmpty,
+  nops,
   operator,
   operands,
   operand,
@@ -66,13 +67,22 @@ import {
 } from './parse-number.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { TypeString } from '../types.js';
-import { SYMBOLS } from './dictionary/definitions-symbols.js';
 import {
   isNumberLiteralFactor,
   normalizeContinuationRanges,
 } from './dictionary/definitions-core.js';
 import { ApplicationPolicy } from './application-policy.js';
 import { continuationRanges } from './range-provenance.js';
+import {
+  getSymbolToUnicode,
+  isGroupProductShape,
+  isOperandStartToken,
+  layoutOf,
+  numberBeforePercent,
+  openingParenthesisBefore,
+  operandEnd,
+  reportLineAmbiguities,
+} from './lenient-ambiguity.js';
 
 /**
  * A collected parse diagnostic with its internal monotonic sequence id. The
@@ -80,7 +90,16 @@ import { continuationRanges } from './range-provenance.js';
  * and is stripped before the diagnostic is forwarded to the sink, so the
  * public {@link ParseDiagnostic} shape is preserved.
  */
-type CollectedDiagnostic = ParseDiagnostic & { _seq: number };
+type CollectedDiagnostic = ParseDiagnostic & {
+  _seq: number;
+  /** The normalized-LaTeX offset that decides whether a rewind of the
+   * parser removes the diagnostic (see `set index`), when it is not the
+   * `start` of the span. A diagnostic whose span starts before the tokens
+   * that the parser read for it (the span of `ambiguous-exponent-end` starts
+   * at the base, the exponent is read later) sets it to the start of those
+   * tokens, so that a rewind to before them still removes it. */
+  _anchor?: number;
+};
 
 /** Does the index symbol `index` occur anywhere in `expr`? A fused compound
  * symbol (`a_n`) counts as mentioning its subscript token. */
@@ -370,6 +389,60 @@ const BARE_FUNCTION_MAP: Record<string, string> = {
   // `nPr(n, k)` → the k-permutation count P(n, k) = C(n, k)·k!
 };
 
+/** Bare function names that are read as a function only when a parenthesis
+ * follows them, in non-strict mode: `mod(x, 2)` is `Mod(x, 2)` and `Re(z)`
+ * is `Real(z)`. Without a parenthesis these words keep their reading as
+ * letters (`7 mod 3` is a product), because they are also common words or
+ * symbol names. See `tryParseBareFunction()`. */
+const PARENTHESIZED_BARE_FUNCTION_MAP: Record<string, string> = {
+  mod: 'Mod',
+  pow: 'Power',
+  trunc: 'Truncate',
+  Re: 'Real',
+  Im: 'Imaginary',
+};
+
+/** The Greek letters that look the same as a Latin letter: the capitals
+ * Alpha, Beta, Epsilon, Zeta, Eta, Iota, Kappa, Mu, Nu, Omicron, Rho, Tau,
+ * Upsilon and Chi, and the small omicron. Text pasted from a document can
+ * hold one of these where the writer meant the Latin letter. */
+const LOOKALIKE_GREEK_LETTERS: ReadonlySet<string> = new Set([
+  'Α',
+  'Β',
+  'Ε',
+  'Ζ',
+  'Η',
+  'Ι',
+  'Κ',
+  'Μ',
+  'Ν',
+  'Ο',
+  'Ρ',
+  'Τ',
+  'Υ',
+  'Χ',
+  'ο',
+]);
+
+/** The raw MathJSON names of the library constants that a person often uses
+ * as a variable name on the left of `=`: `e`, `i`, `π` and infinity. */
+const CONSTANT_NAMES_ON_LEFT_OF_EQUAL: ReadonlySet<string> = new Set([
+  'e',
+  'ExponentialE',
+  'i',
+  'ImaginaryUnit',
+  'Pi',
+  'PositiveInfinity',
+]);
+
+/** The library operators whose name is one letter: `D` (the derivative) and
+ * `N` (the numeric evaluation). The parser does not read them as function
+ * names (see `isFunctionOperator()`). Before a parenthesis they are still
+ * read as a call, by the rule for a single capital letter (see
+ * `looksLikePredicate()`), and the lenient grammar then reports an
+ * `ambiguous-engine-operator` diagnostic. */
+const ONE_LETTER_LIBRARY_OPERATORS: ReadonlySet<string> = new Set(['D', 'N']);
+
 /** Mapping of special tokens to their LaTeX string, as used by
  * `tokensToString()`. Used by `lookAhead()` to build lookahead strings
  * incrementally. */
@@ -380,19 +453,6 @@ const LOOKAHEAD_TOKEN_TO_STRING: Record<string, string> = {
   '<{>': '{',
   '<}>': '}',
 };
-
-/** Lazy map from LaTeX command (e.g. '\\alpha') to its Unicode character.
- * Built once from the SYMBOLS table on first access. */
-let _symbolToUnicode: Map<string, string> | null = null;
-function getSymbolToUnicode(): Map<string, string> {
-  if (!_symbolToUnicode) {
-    _symbolToUnicode = new Map();
-    for (const [, latex, codepoint] of SYMBOLS) {
-      _symbolToUnicode.set(latex, String.fromCodePoint(codepoint));
-    }
-  }
-  return _symbolToUnicode;
-}
 
 /** Commands that can be used with a middle delimiter */
 // const MIDDLE_DELIMITER_PREFIX = [
@@ -590,7 +650,7 @@ export class _Parser implements Parser {
 
   // A run of two or more letters that `tryParseBareRun()` left to the
   // per-letter path, so that `parsePrimary()` can report it as a
-  // `letter-run-split` diagnostic. Only set when diagnostics are enabled.
+  // `ambiguous-letter-run` diagnostic. Only set when diagnostics are enabled.
   private _splitLetterRun: { name: string; start: number } | null = null;
 
   // Track whether we're inside a quantifier body (ForAll, Exists, etc.)
@@ -639,7 +699,8 @@ export class _Parser implements Parser {
       const d = this.diagnostics;
       let w = 0;
       for (let r = 0; r < d.length; r++) {
-        if (d[r].start >= cutoff) continue; // drop abandoned-branch entry
+        // drop abandoned-branch entry
+        if ((d[r]._anchor ?? d[r].start) >= cutoff) continue;
         d[w++] = d[r];
       }
       d.length = w;
@@ -731,7 +792,7 @@ export class _Parser implements Parser {
   private _symCandidateCount = 0;
 
   // Opt-in parse diagnostics (codes `undeclared-symbol`,
-  // `juxtaposition-as-multiply`, `letter-run-split`, …). Non-null only when
+  // `juxtaposition-as-multiply`, `ambiguous-letter-run`, …). Non-null only when
   // `options.diagnostics` is enabled; `emitDiagnostic` is a no-op otherwise.
   //
   // Each collected entry carries an internal monotonic `_seq` id (assigned in
@@ -743,6 +804,23 @@ export class _Parser implements Parser {
   // `ParseDiagnostic` shape is unchanged.
   readonly diagnostics: CollectedDiagnostic[] | null;
   private _diagnosticSeq = 0;
+
+  // True when the diagnostics are collected only to apply
+  // `onAmbiguity: 'error'` (the lenient grammar with `diagnostics` off). Then
+  // only the `ambiguous-*` codes are kept, and the symbol lookups of the
+  // `undeclared-symbol` code are skipped.
+  private readonly _ambiguityOnly: boolean;
+
+  // With `onAmbiguity: 'error'` in the lenient grammar, the source span
+  // (normalized-LaTeX character offsets) of each expression that `decorate()`
+  // receives. `ambiguityErrors()` uses these spans to find the smallest
+  // expression that holds the span of an `ambiguous-*` diagnostic. Arrays and
+  // objects are keyed by identity. A number or a string has no identity, so
+  // it is recorded with its value in `_primitiveSpans`. Both are `null` when
+  // the option is not active.
+  readonly _exprSpans: WeakMap<object, [number, number]> | null;
+  readonly _primitiveSpans:
+    { value: number | string; start: number; end: number }[] | null;
 
   /**
    * Record a parse diagnostic spanning `[startToken, endToken)` (token
@@ -756,6 +834,7 @@ export class _Parser implements Parser {
     detail?: Record<string, unknown>
   ): void {
     if (this.diagnostics === null) return;
+    if (this._ambiguityOnly && !code.startsWith('ambiguous-')) return;
     const [start, end] = this.sourceOffsets(startToken, endToken);
     const _seq = this._diagnosticSeq++;
     this.diagnostics.push(
@@ -763,6 +842,43 @@ export class _Parser implements Parser {
         ? { code, start, end, detail, _seq }
         : { code, start, end, _seq }
     );
+  }
+
+  /**
+   * In non-strict mode, record a diagnostic whose code starts with
+   * `ambiguous-`: the text in the tokens `[startToken, endToken)` has a
+   * second common reading, and the parser kept the first one. The reading
+   * does not change. In strict mode, and when diagnostics are off, this does
+   * nothing. A diagnostic with the same code and the same span as one that
+   * is already recorded is not recorded again, because a parselet can read
+   * the same text more than once before the parse settles.
+   *
+   * A diagnostic recorded by a branch that the parser then abandons is
+   * removed when the parser rewinds to before its span (see `set index`).
+   * When the span starts before the tokens that the branch read, pass the
+   * first of those tokens as `anchorToken`: a rewind to before
+   * `anchorToken` then removes the diagnostic.
+   */
+  _emitAmbiguity(
+    code: string,
+    startToken: number,
+    endToken: number,
+    detail?: Record<string, unknown>,
+    anchorToken?: number
+  ): void {
+    if (this.diagnostics === null || this.options.strict !== false) return;
+    const [start, end] = this.sourceOffsets(startToken, endToken);
+    if (
+      this.diagnostics.some(
+        (d) => d.code === code && d.start === start && d.end === end
+      )
+    )
+      return;
+    const count = this.diagnostics.length;
+    this.emitDiagnostic(code, startToken, endToken, detail);
+    if (anchorToken !== undefined && this.diagnostics.length > count)
+      this.diagnostics[this.diagnostics.length - 1]._anchor =
+        this.sourceOffsets(anchorToken, anchorToken)[0];
   }
 
   /**
@@ -788,6 +904,28 @@ export class _Parser implements Parser {
     for (let r = 0; r < d.length; r++)
       if (d[r]._seq < checkpoint) d[w++] = d[r];
     d.length = w;
+  }
+
+  /**
+   * In non-strict mode, record the `ambiguous-*` diagnostics that a check of
+   * the whole line finds (see `reportLineAmbiguities()` in
+   * `lenient-ambiguity.ts`). Call it once, on the parser whose result is
+   * adopted, with that raw result. `skippedTail` is the text that the
+   * trailing-noise recovery removed, if any. No-op unless diagnostics are
+   * enabled.
+   */
+  _reportLineAmbiguities(
+    expr: MathJsonExpression | null,
+    skippedTail?: string
+  ): void {
+    if (this.diagnostics === null || this.options.strict !== false) return;
+    reportLineAmbiguities(
+      this._tokens,
+      expr,
+      (code, start, end, detail) =>
+        this._emitAmbiguity(code, start, end, detail),
+      skippedTail
+    );
   }
 
   /**
@@ -910,6 +1048,26 @@ export class _Parser implements Parser {
   }
   private _operandStartIndex = 0;
 
+  // The token index at which the primary whose postfix operators and
+  // scripts are being read started (`e` in `e^2pi`), or -1 outside of that
+  // step of `parsePrimary()`. The span of the `ambiguous-exponent-end`
+  // diagnostic starts there.
+  private _scriptBaseStart = -1;
+
+  // The bracket nesting level of each token (see `layoutOf()` in
+  // `lenient-ambiguity.ts`), computed on first use. The token stream does
+  // not change, so it is computed once.
+  private _tokenDepths: number[] | null = null;
+
+  /**
+   * The number of brackets and braces that are open at token `i`: 0 at the
+   * top level of the line, 1 inside `(…)`, `[…]` or `{…}`, and so on.
+   */
+  private tokenDepth(i: number): number {
+    this._tokenDepths ??= layoutOf(this._tokens).depth;
+    return this._tokenDepths[i] ?? 0;
+  }
+
   get ownedChain(): MathJsonExpression | null {
     return this._ownedChain;
   }
@@ -1029,7 +1187,7 @@ export class _Parser implements Parser {
     startToken: number,
     endToken: number
   ): void {
-    if (this.diagnostics === null) return;
+    if (this.diagnostics === null || this._ambiguityOnly) return;
     // An unresolved symbol has, by definition, no known type: `resolveSymbol`
     // reports a record (with a type) for every declared symbol.
     if (this.resolveSymbol(id) === undefined)
@@ -1047,7 +1205,14 @@ export class _Parser implements Parser {
     this._tokens = tokens;
     this.options = options;
     this._dictionary = dictionary;
-    this.diagnostics = options.diagnostics ? [] : null;
+    // `onAmbiguity: 'error'` needs the `ambiguous-*` diagnostics of the
+    // lenient grammar even when `diagnostics` is off.
+    const ambiguityErrors =
+      options.strict === false && options.onAmbiguity === 'error';
+    this._ambiguityOnly = ambiguityErrors && !options.diagnostics;
+    this.diagnostics = options.diagnostics || ambiguityErrors ? [] : null;
+    this._exprSpans = ambiguityErrors ? new WeakMap() : null;
+    this._primitiveSpans = ambiguityErrors ? [] : null;
 
     this._positiveInfinityTokens = tokenize(this.options.positiveInfinity);
     this._negativeInfinityTokens = tokenize(this.options.negativeInfinity);
@@ -2548,12 +2713,44 @@ export class _Parser implements Parser {
         }
       }
       const result = def.parse(this, body ?? 'Nothing');
-      if (result !== null) return result;
+      if (result !== null) {
+        this.emitAbsoluteValueAmbiguity(start);
+        return result;
+      }
     }
     // No def matched: the `this.index = start` rewind auto-prunes any
     // diagnostics the speculative bodies emitted (see `set index`).
     this.index = start;
     return null;
+  }
+
+  /**
+   * In non-strict mode, record an `ambiguous-absolute-value` diagnostic when
+   * the bars of the enclosure that starts at token `start`, just read, pair
+   * two ways. `|x|y|z|` is read as `|x|·y·|z|`, and a person can mean
+   * `|x·|y|·z|`. The second pairing needs a closing bar directly followed by
+   * an operand, then a bar between two operands, then one more bar. `|a|+|b|`
+   * and `|x|y` have one pairing and are not reported. The span is the bars
+   * and what they hold.
+   */
+  private emitAbsoluteValueAmbiguity(start: number): void {
+    if (this.diagnostics === null || this.options.strict !== false) return;
+    const t = this._tokens;
+    if (t[start] !== '|' || t[this.index - 1] !== '|') return;
+    if (!isOperandStartToken(t[this.index])) return;
+    let middle = this.index;
+    while (middle < t.length && t[middle] !== '|') middle++;
+    if (middle >= t.length) return;
+    const before = t[middle - 1];
+    if (
+      !(isOperandStartToken(before) || before === ')') ||
+      !(isOperandStartToken(t[middle + 1]) || t[middle + 1] === '(')
+    )
+      return;
+    let last = middle + 1;
+    while (last < t.length && t[last] !== '|') last++;
+    if (last >= t.length) return;
+    this._emitAmbiguity('ambiguous-absolute-value', start, last + 1);
   }
 
   /**
@@ -2709,6 +2906,22 @@ export class _Parser implements Parser {
       if (this.inQuantifierScope) return ['Predicate', fn, ...args];
     }
 
+    // In non-strict mode, a library operator whose name is one letter (`N`,
+    // the numeric evaluation, and `D`, the derivative), written as a plain
+    // letter before a parenthesis, is read as a call of that operator. A
+    // person writing plain text usually means a function of their own with
+    // that name. A LaTeX command (`\operatorname{N}(x)`) is a deliberate
+    // spelling of the operator and is not reported.
+    if (
+      isPredicate &&
+      typeof fn === 'string' &&
+      ONE_LETTER_LIBRARY_OPERATORS.has(fn) &&
+      this._tokens[start] === fn
+    )
+      this._emitAmbiguity('ambiguous-engine-operator', start, this.index, {
+        name: fn,
+      });
+
     return typeof fn === 'string' ? [fn, ...args] : ['Apply', fn!, ...args];
   }
 
@@ -2850,6 +3063,13 @@ export class _Parser implements Parser {
       // Emitted at every reference site (spans differ); bound-variable
       // references are pruned retroactively by the binder parselets.
       this.emitSymbolReference(id, start, this.index);
+      // A name that is not a valid MathJSON symbol spelling (`ж`, `é`) is
+      // read as a string, not as a variable: it is not math, and a person
+      // can mean a variable or a typing error.
+      if (!matchesSymbol(id))
+        this._emitAmbiguity('ambiguous-unknown-character', start, this.index, {
+          text: id,
+        });
       return id;
     }
 
@@ -2873,6 +3093,18 @@ export class _Parser implements Parser {
       i++;
     }
     return w;
+  }
+
+  /**
+   * Whether a parenthesis (`(` or `\left(`) starts at token `i`, after
+   * optional white space.
+   */
+  private parenthesisFollows(i: number): boolean {
+    while (this._tokens[i] === '<space>') i++;
+    return (
+      this._tokens[i] === '(' ||
+      (this._tokens[i] === '\\left' && this._tokens[i + 1] === '(')
+    );
   }
 
   /**
@@ -2933,12 +3165,17 @@ export class _Parser implements Parser {
     // first and discarding it made a nested exponent (`e^{-(e^{-(…)})}`) be
     // read twice per level, once here and once by `parseSupsub()`, which is
     // exponential in the nesting depth.
-    const fnName = BARE_FUNCTION_MAP[name];
+    const fnName =
+      BARE_FUNCTION_MAP[name] ??
+      (this.parenthesisFollows(this.index)
+        ? PARENTHESIZED_BARE_FUNCTION_MAP[name]
+        : undefined);
     if (!fnName) {
       this.index = start;
       return null;
     }
 
+    const nameEnd = this.index;
     this.skipSpace();
 
     // Check for optional subscript: log_2(x) or log_{10}(x)
@@ -2971,18 +3208,25 @@ export class _Parser implements Parser {
     // `log2(8)` → `log_2(8)`. (Only `log` takes a variable base; other bare
     // functions treat a following digit as an implicit argument, e.g.
     // `sqrt4` → `sqrt(4)`.)
+    let logBaseSpan: [number, number] | null = null;
     if (
       subscript === null &&
       name === 'log' &&
       !this.atEnd &&
       /^[0-9]$/.test(this.peek)
     ) {
+      const digitsStart = this.index;
       let digits = '';
       while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
         digits += this.peek;
         this.index++;
       }
       subscript = parseInt(digits);
+      // `log 2 x` is read as the base-2 logarithm of `x`, and a person can
+      // mean the logarithm of `2x`. Report it once the call is read (see
+      // below). `log2 x` and `log2(x)`, with no white space, are the base-2
+      // logarithm by convention and are not reported.
+      if (digitsStart !== nameEnd) logBaseSpan = [start, this.index];
       this.skipSpace();
     }
 
@@ -3022,9 +3266,12 @@ export class _Parser implements Parser {
     // `cos 2x` → `Cos(2x)`, `sqrt4` → `Sqrt(4)`), stopping before another bare
     // function so `sin x cos y` groups as `(sin x)(cos y)`.
     let args: ReadonlyArray<MathJsonExpression> | null;
+    const argStart = this.index;
+    let implicitArgument = false;
     if (this.peek === '(') {
       args = this.parseArguments('enclosure', until);
     } else {
+      implicitArgument = true;
       args = this.parseArguments('implicit', {
         ...until,
         minPrec: MULTIPLICATION_PRECEDENCE,
@@ -3042,6 +3289,56 @@ export class _Parser implements Parser {
       // No valid arguments found, backtrack
       this.index = start;
       return null;
+    }
+
+    if (logBaseSpan !== null)
+      this._emitAmbiguity('ambiguous-function-argument', ...logBaseSpan, {
+        function: name,
+      });
+
+    // `log(x, 2)` is read as the logarithm of `x` in base 2, with the base
+    // second as in Python and in spreadsheets, and other tools put the base
+    // first (`log(2, x)`). Every `log` with two arguments in parentheses and
+    // no other base is reported. The name `lg` is the base-10 logarithm (ISO
+    // 80000-2), and in computer science it is the base-2 logarithm, so it is
+    // always reported.
+    if (
+      (name === 'log' &&
+        subscript === null &&
+        !implicitArgument &&
+        args.length === 2) ||
+      name === 'lg'
+    )
+      this._emitAmbiguity('ambiguous-log-base', start, this.index, { name });
+
+    // An argument without parentheses that holds white space has more than
+    // one factor: `sin x y` is read as `sin(x·y)`, and a person can mean
+    // `sin(x)·y`. `sin 2x`, with no white space in the argument, is not
+    // reported. White space after the argument, and white space inside a
+    // group of the argument (`sin 2(x + 1)`), does not count.
+    if (implicitArgument && this.diagnostics !== null) {
+      let argEnd = this.index;
+      while (argEnd > argStart && this._tokens[argEnd - 1] === '<space>')
+        argEnd--;
+      let depth = 0;
+      for (let k = argStart; k < argEnd; k++) {
+        const tok = this._tokens[k];
+        if (tok === '(' || tok === '[' || tok === '<{>' || tok === '\\left')
+          depth += 1;
+        else if (
+          tok === ')' ||
+          tok === ']' ||
+          tok === '<}>' ||
+          tok === '\\right'
+        )
+          depth -= 1;
+        else if (tok === '<space>' && depth === 0) {
+          this._emitAmbiguity('ambiguous-function-argument', start, argEnd, {
+            function: name,
+          });
+          break;
+        }
+      }
     }
 
     // Special case: cbrt(x) -> ['Root', x, 3]
@@ -3078,6 +3375,12 @@ export class _Parser implements Parser {
     // `sin^-1 1` → `Arcsin(1)` (not `1/sin(1)`). Other exponents (e.g. `-2`)
     // stay a reciprocal power, matching strict `\sin^{-2}`.
     if (exponent === -1 && Array.isArray(result)) {
+      // In plain text a person also writes `sin^-1(x)` for the reciprocal
+      // `1/sin(x)`, so the inverse reading is reported as a choice with a
+      // second common reading. The span is the whole call.
+      this._emitAmbiguity('ambiguous-inverse-function', start, this.index, {
+        name,
+      });
       const [head, ...callArgs] = result;
       return ['Apply', ['InverseFunction', head], ...callArgs];
     }
@@ -3326,6 +3629,21 @@ export class _Parser implements Parser {
     for (const k of leftoverLetters)
       this.emitSymbolReference(name[k], start + k, start + k + 1);
     if (segments.length > 1) this.emitLetterRunSplit(name, start, segments);
+    // `Deltax` is `Δ·x`, and a person can mean the one symbol "change in x"
+    // (see `emitJuxtapositionAmbiguity()` for `Δx`).
+    let offset = 0;
+    for (let k = 0; k < segments.length; k++) {
+      const segment = segments[k] as string;
+      if (segment === 'Delta' && k + 1 < segments.length)
+        this._emitAmbiguity(
+          'ambiguous-delta',
+          start + offset,
+          start + offset + 'Delta'.length + 1
+        );
+      // A segment is one letter or a spelled-out Greek name, and each name
+      // has as many letters as its spelling (`pi` is `Pi`).
+      offset += segment.length;
+    }
     return segments.length === 1 ? segments[0] : ['Multiply', ...segments];
   }
 
@@ -3334,7 +3652,7 @@ export class _Parser implements Parser {
    * more letter) that is the numerator or the denominator of a differential
    * quotient: `dy/dx`, `d/dx`, `\frac{dy}{dx}`, `\frac{d}{dx}`. Such a run
    * is read as the intended product `d·y`, so it is not reported as a
-   * `letter-run-split`. White space around the `/` is allowed.
+   * `ambiguous-letter-run`. White space around the `/` is allowed.
    */
   private isDifferentialRun(start: number): boolean {
     const t = this._tokens;
@@ -3379,7 +3697,7 @@ export class _Parser implements Parser {
   }
 
   /**
-   * Record a `letter-run-split` diagnostic: the run of letters `run`, which
+   * Record a `ambiguous-letter-run` diagnostic: the run of letters `run`, which
    * starts at token `start`, has no definition as a whole and is read as a
    * product of `parts` (`eps` is `e·p·s`, `xpi` is `x·π`). The diagnostic
    * span is the run. No-op unless diagnostics are enabled.
@@ -3390,14 +3708,14 @@ export class _Parser implements Parser {
     parts: MathJsonExpression[]
   ): void {
     if (this.diagnostics === null) return;
-    this.emitDiagnostic('letter-run-split', start, start + run.length, {
+    this._emitAmbiguity('ambiguous-letter-run', start, start + run.length, {
       run,
       parts,
     });
   }
 
   /**
-   * In non-strict mode, record a `letter-run-split` diagnostic when an
+   * In non-strict mode, record a `ambiguous-letter-run` diagnostic when an
    * unbraced superscript or subscript that starts at token `scriptStart`
    * took only the first letter of a run of letters: `e^xy` is read as
    * `e^x·y` and `x^ab` as `x^a·b`. The letter may follow a sign (`e^-xy`).
@@ -3420,10 +3738,102 @@ export class _Parser implements Parser {
     let end = first + 1;
     while (isLetter(end)) end++;
     const run = t.slice(first, end).join('');
-    this.emitDiagnostic('letter-run-split', first, end, {
+    this._emitAmbiguity('ambiguous-letter-run', first, end, {
       run,
       parts: [script, run.slice(1)],
     });
+  }
+
+  /**
+   * In non-strict mode, record an `ambiguous-exponent-end` diagnostic when
+   * the end of the unbraced exponent `sup`, which starts at token `supStart`
+   * (after the `^`) and was just read, has a second common reading. The
+   * index is at the end of the exponent. Three cases are reported:
+   *
+   * - an operand directly after the exponent: `e^2pi` is `e^2·π`, and a
+   *   person can mean `e^{2π}`. When the exponent is one letter and a letter
+   *   follows (`e^xy`), the `ambiguous-letter-run` diagnostic of
+   *   `_emitScriptLetterRunSplit()` reports it instead;
+   * - an operand after white space, when the exponent is a name, is signed,
+   *   or the base is `e`: `e^i pi`, `e^-x y`, `e^2 pi i`. A number exponent
+   *   on another base is not reported: `x^2 y` is `x^2·y`. A bare function
+   *   name (`e^x sin x`), the word `in` and a differential (`e^x dx`) after
+   *   the white space are not reported;
+   * - a `/` directly after an exponent that is a name, is signed or is the
+   *   number 1: `e^x/2`, `x^1/2`. A `/` after another number is not
+   *   reported: `x^3/2` is `x^3/2` by convention, `^` binds tighter than
+   *   `/`.
+   *
+   * A braced or parenthesized exponent (`e^{2}pi`, `e^(2)pi`) has a clear
+   * end and is not reported. The span starts at the base, at token
+   * `baseStart` (at the `^` when `baseStart` is -1 or after it), and ends
+   * after the operand that has the second reading: `e^2pi` gives `e^2pi`.
+   * The diagnostic is anchored at the `^`: a rewind of the parser to before
+   * the `^` removes it.
+   */
+  private emitExponentEndAmbiguity(
+    base: MathJsonExpression | null,
+    baseStart: number,
+    supStart: number,
+    sup: MathJsonExpression
+  ): void {
+    if (this.diagnostics === null || this.options.strict !== false) return;
+    const t = this._tokens;
+    const signed = t[supStart] === '-' || t[supStart] === '+';
+    const first = signed ? supStart + 1 : supStart;
+    if (
+      t[first] === '<{>' ||
+      t[first] === '(' ||
+      t[first] === '\\left' ||
+      this.index <= first
+    )
+      return;
+    const end = this.index;
+    const exponent = this.latex(supStart, end);
+    const isLetter = (i: number) =>
+      t[i] !== undefined && /^[a-zA-Z]$/.test(t[i]);
+    const exponentIsName =
+      typeof sup === 'string' && !sup.startsWith("'") && !signed;
+    const caret = supStart - 1;
+    const spanStart = baseStart >= 0 && baseStart < caret ? baseStart : caret;
+    // The span ends after the operand that starts at token `operandStart`.
+    const report = (operandStart: number) =>
+      this._emitAmbiguity(
+        'ambiguous-exponent-end',
+        spanStart,
+        operandEnd((k) => t[k], operandStart),
+        { exponent },
+        caret
+      );
+
+    // An operand directly after the exponent
+    const next = t[end];
+    if (isOperandStartToken(next)) {
+      // `e^xy`: reported as a letter run (see above)
+      if (end === first + 1 && isLetter(first) && isLetter(end)) return;
+      report(end);
+      return;
+    }
+
+    // A `/` directly after the exponent
+    if (next === '/') {
+      if (exponentIsName || signed || sup === 1) report(end);
+      return;
+    }
+
+    // An operand after white space
+    if (next !== '<space>') return;
+    const baseIsE = base === 'e' || base === 'ExponentialE';
+    if (!exponentIsName && !signed && !baseIsE) return;
+    let j = end;
+    while (t[j] === '<space>') j++;
+    if (!isOperandStartToken(t[j])) return;
+    let word = '';
+    for (let k = j; isLetter(k); k++) word += t[k];
+    if (BARE_FUNCTION_MAP[word] !== undefined) return;
+    if (word === 'in') return;
+    if (word.length === 2 && word[0] === 'd') return;
+    report(j);
   }
 
   /**
@@ -3502,6 +3912,9 @@ export class _Parser implements Parser {
     console.assert(lhs !== null);
 
     const index = pending?.start ?? this.index;
+    // The start of the base, read before the scripts: the parse of a script
+    // can change `_scriptBaseStart` while it runs.
+    const baseStart = this._scriptBaseStart;
 
     // In non-strict mode, a single letter immediately followed by one or more
     // digits is treated as an implicit *subscript*: `x2 → x_2`, `x1 → x_1`,
@@ -3527,6 +3940,23 @@ export class _Parser implements Parser {
         digits += this.peek;
         this.index++;
       }
+      // `x2` is read as `x_2`, and a person can mean `x·2`. The span starts
+      // at the base: a spelled-out name (`alpha2`) is a run of letters, any
+      // other base is one token (`x`, `θ`, `\pi`).
+      let baseStart = index - 1;
+      if (lhs.length > 1 && /^[a-zA-Z]$/.test(this._tokens[baseStart]))
+        while (
+          baseStart > 0 &&
+          /^[a-zA-Z]$/.test(this._tokens[baseStart - 1]) &&
+          index - baseStart < lhs.length
+        )
+          baseStart--;
+      this._emitAmbiguity(
+        'ambiguous-implicit-subscript',
+        baseStart,
+        this.index,
+        { base: lhs, subscript: parseInt(digits) }
+      );
       return this.parseSupsub(['Subscript', lhs, parseInt(digits)]);
     }
 
@@ -3556,6 +3986,14 @@ export class _Parser implements Parser {
               this.index++;
             }
             if (digits) sub = parseInt(digits);
+            // `x_1y` is read as `x_1·y`, and a person can mean `x_{1y}`.
+            if (digits && /^\p{L}$/u.test(this.peek))
+              this._emitAmbiguity(
+                'ambiguous-implicit-subscript',
+                subIndex - 1,
+                this.index + 1,
+                { subscript: parseInt(digits) }
+              );
           }
           sub ??= this.parseToken();
           // In non-strict mode, also accept parenthesized expressions
@@ -3594,6 +4032,9 @@ export class _Parser implements Parser {
             sup = this.parseEnclosure();
           if (sup === null) return this.error('missing', index);
           this._emitScriptLetterRunSplit(subIndex, sup);
+          // A second superscript is an error (see below): not reported
+          if (superscripts.length === 0)
+            this.emitExponentEndAmbiguity(lhs, baseStart, subIndex, sup);
           superscripts.push(sup);
         }
       }
@@ -3853,6 +4294,7 @@ export class _Parser implements Parser {
     const start = this.index;
     if (this._tokens[start - 1] !== sign || this._tokens[start - 2] !== '^')
       return null;
+    const baseStart = this._scriptBaseStart;
     this.index = start - 1;
     const superscript = this.parseLenientExponent();
     if (superscript === null) {
@@ -3860,10 +4302,17 @@ export class _Parser implements Parser {
       return null;
     }
     this._emitScriptLetterRunSplit(start - 1, superscript);
+    const checkpoint = this._diagnosticsCheckpoint();
+    this.emitExponentEndAmbiguity(lhs, baseStart, start - 1, superscript);
     // Gather the scripts that follow as `parseSupsub()` does for `e^{-x}`, so
     // `e^-x^2` is the same double-superscript error as `e^{-x}^2`.
     const result = this.parseSupsub(lhs, { superscript, start: start - 2 });
-    if (result === null) this.index = start;
+    if (result === null) {
+      // The exponent diagnostic is anchored at the `^`, before `start`, so
+      // the rewind below does not remove it.
+      this._rollbackDiagnostics(checkpoint);
+      this.index = start;
+    }
     return result;
   }
 
@@ -4216,6 +4665,8 @@ export class _Parser implements Parser {
         ...splitRun.name,
       ]);
 
+    if (result !== null) this.emitPrimaryAmbiguity(start);
+
     // We're parsing invalid symbols explicitly so we can get a
     // better error message, otherwise we would end up with "unexpected
     // token")
@@ -4230,6 +4681,8 @@ export class _Parser implements Parser {
     //
     // 6. Are there postfix operators ?
     //
+    const outerScriptBaseStart = this._scriptBaseStart;
+    this._scriptBaseStart = start;
     if (result !== null) {
       result = this.decorate(result, start);
       let postfix: MathJsonExpression | null = null;
@@ -4257,6 +4710,7 @@ export class _Parser implements Parser {
       if (scripted !== null) this._applicationPolicy?.suffix(result, scripted);
       result = scripted;
     }
+    this._scriptBaseStart = outerScriptBaseStart;
 
     //
     // 7b. Scripted-brace sequence notation: `\{a_n\}_{n=1}^{\infty}`.
@@ -4326,6 +4780,47 @@ export class _Parser implements Parser {
     }
 
     return this.decorate(result, start);
+  }
+
+  /**
+   * In non-strict mode, record the `ambiguous-*` diagnostics of the primary
+   * that starts at token `start` and was just read:
+   *
+   * - `ambiguous-lookalike-letter`: the primary is a Greek letter that looks
+   *   the same as a Latin letter (`Α`, `Ρ`, `ο`, see
+   *   `LOOKALIKE_GREEK_LETTERS`);
+   * - `ambiguous-name-digits`: the primary starts a run of two or more
+   *   letters followed by digits and a parenthesis, and the letters and
+   *   digits are not a library function name. `atan3(y)` is read as
+   *   `arctan(3·y)`, and a person can mean a function named `atan3`. The
+   *   base of `log` is written this way (`log2(x)`, `log10(x)`), so a run
+   *   that is `log` is not reported.
+   */
+  private emitPrimaryAmbiguity(start: number): void {
+    if (this.diagnostics === null || this.options.strict !== false) return;
+    const t = this._tokens;
+    if (LOOKALIKE_GREEK_LETTERS.has(t[start])) {
+      this._emitAmbiguity('ambiguous-lookalike-letter', start, start + 1, {
+        letter: t[start],
+      });
+      return;
+    }
+
+    const isLetter = (i: number) =>
+      t[i] !== undefined && /^[a-zA-Z]$/.test(t[i]);
+    if (isLetter(start - 1)) return;
+    let i = start;
+    let name = '';
+    while (isLetter(i)) name += t[i++];
+    if (name.length < 2 || name === 'log') return;
+    let digits = '';
+    while (t[i] !== undefined && /^[0-9]$/.test(t[i])) digits += t[i++];
+    if (digits === '' || !this.parenthesisFollows(i)) return;
+    for (let k = digits.length; k >= 1; k--)
+      if (BARE_FUNCTION_MAP[name + digits.slice(0, k)] !== undefined) return;
+    this._emitAmbiguity('ambiguous-name-digits', start, i, {
+      name: name + digits,
+    });
   }
 
   /**
@@ -4531,6 +5026,11 @@ export class _Parser implements Parser {
     if (lhs !== null) {
       let done = false;
       while (!done && !this.atTerminator(until)) {
+        const lhsEnd = this.index;
+        // Record the span of the left operand built so far: the infix
+        // operator ahead can make it an operand of a larger expression, and
+        // only that larger expression reaches `decorate()`.
+        if (this._exprSpans !== null) this.recordSpan(lhs, start);
         this.skipSpace();
 
         // Expose this expression's operand checkpoint and start position to
@@ -4550,7 +5050,48 @@ export class _Parser implements Parser {
             continue;
           }
         }
+        const infixStart = this.index;
         let result = this.parseInfixOperator(lhs, until);
+        // A library constant alone on the left of `=` (`e = 1.6e-19`,
+        // `pi = 3.14`) is read as the constant, and a person usually means a
+        // variable with that name. `f(pi) = 3` is not reported.
+        // The same constant directly followed by a parenthesized group on the
+        // left of `=` (`pi(x) = x`, `e(t) = t^2`) is read as a product of
+        // the constant and the group, and a person can mean the definition
+        // of a function with that name.
+        // Only an `=` at the top level of the line is reported: the `=` of
+        // an index or a limit (`\sum_{i=1}^n`, `sum_(i=1)^n`) or of any
+        // other group is not.
+        const constantName =
+          this.diagnostics === null ||
+          this.options.strict !== false ||
+          result === null
+            ? null
+            : typeof lhs === 'string'
+              ? lhs
+              : operator(lhs) === 'InvisibleOperator' &&
+                  nops(lhs) === 2 &&
+                  operator(operand(lhs, 2)) === 'Delimiter'
+                ? symbol(operand(lhs, 1))
+                : null;
+        if (
+          result !== null &&
+          constantName !== null &&
+          CONSTANT_NAMES_ON_LEFT_OF_EQUAL.has(constantName) &&
+          this._tokens[infixStart] === '=' &&
+          this.tokenDepth(infixStart) === 0 &&
+          operator(result) === 'Equal' &&
+          operand(result, 1) === lhs
+        ) {
+          // The span ends at the end of the left operand: white space read
+          // after the group is not part of it.
+          let spanEnd = lhsEnd;
+          while (spanEnd > start && this._tokens[spanEnd - 1] === '<space>')
+            spanEnd -= 1;
+          this._emitAmbiguity('ambiguous-constant-name', start, spanEnd, {
+            name: constantName,
+          });
+        }
         if (result === null && until.minPrec <= INVISIBLE_OP_PRECEDENCE)
           result = this.parseNumberTimesList(lhs, until);
         if (result === null && until.minPrec <= INVISIBLE_OP_PRECEDENCE) {
@@ -4596,6 +5137,27 @@ export class _Parser implements Parser {
                   start,
                   rhsStartToken
                 );
+                this.emitJuxtapositionAmbiguity(lhs, rhs, rhsStartToken);
+                // Diagnostic (non-strict mode): a parenthesized single name
+                // followed by a parenthesized group with a comma, as in
+                // `(x)(1,2)`, is read as a product, and a person can mean a
+                // call. The span is from the `(` of the name to the end of
+                // the group.
+                if (
+                  this.diagnostics !== null &&
+                  this.options.strict === false &&
+                  isGroupProductShape(lhs, rhs)
+                ) {
+                  const open = openingParenthesisBefore(
+                    this._tokens,
+                    rhsStartToken
+                  );
+                  this._emitAmbiguity(
+                    'ambiguous-group-product',
+                    open >= 0 ? open : start,
+                    this.index
+                  );
+                }
                 if (
                   operator(lhs) === 'InvisibleOperator' &&
                   !this._applicationPolicy?.has(lhs)
@@ -4647,6 +5209,7 @@ export class _Parser implements Parser {
     start: number
   ): MathJsonExpression | null {
     if (expr === null) return null;
+    if (this._exprSpans !== null) this.recordSpan(expr, start);
     if (!this.options.preserveLatex) return expr;
 
     const latex = this.latex(start, this.index);
@@ -4671,6 +5234,21 @@ export class _Parser implements Parser {
       (expr as ExpressionObject).latex = latex;
     }
     return expr;
+  }
+
+  /**
+   * Record the source span of `expr`, the tokens from `start` to the current
+   * position (see `_exprSpans`). The first span recorded for an expression is
+   * kept: a later, larger span for the same expression can include white
+   * space or tokens that do not belong to it.
+   */
+  private recordSpan(expr: MathJsonExpression, start: number): void {
+    const [s, e] = this.sourceOffsets(start, this.index);
+    if (typeof expr === 'object' && expr !== null) {
+      if (!this._exprSpans!.has(expr)) this._exprSpans!.set(expr, [s, e]);
+    } else if (typeof expr === 'number' || typeof expr === 'string') {
+      this._primitiveSpans!.push({ value: expr, start: s, end: e });
+    }
   }
 
   error(
@@ -4781,6 +5359,90 @@ export class _Parser implements Parser {
   }
 
   /**
+   * In non-strict mode, record the `ambiguous-*` diagnostics of a
+   * juxtaposition read as a product: the operand `rhs`, which starts at
+   * token `rhsStartToken`, follows `lhs`. The factor directly before `rhs`
+   * is `lhs`, or the last operand of `lhs` when `lhs` is itself a product.
+   * When that factor is a symbol:
+   *
+   * - `ambiguous-function-without-parentheses`: the symbol is declared as a
+   *   function and `rhs` is not a parenthesized group. `f x` is `f·x`, and a
+   *   person can mean `f(x)`;
+   * - `ambiguous-name-then-number`: the symbol is not a function, white
+   *   space separates it from `rhs`, and `rhs` starts with a digit. `x 2` is
+   *   `x·2`, and a person can mean `x_2`. The symbol must be a whole word;
+   * - `ambiguous-delta`: the symbol is `Δ` (also `\Delta` or the word
+   *   `Delta`) followed by a letter. `Δx` and `Delta x` are `Δ·x`, and a
+   *   person can mean the one symbol "change in x".
+   */
+  private emitJuxtapositionAmbiguity(
+    lhs: MathJsonExpression,
+    rhs: MathJsonExpression,
+    rhsStartToken: number
+  ): void {
+    if (this.diagnostics === null || this.options.strict !== false) return;
+    const factor =
+      operator(lhs) === 'InvisibleOperator' &&
+      !this._applicationPolicy?.has(lhs)
+        ? operands(lhs).at(-1)!
+        : lhs;
+    const name = symbol(factor);
+    if (name === null) return;
+    const t = this._tokens;
+    // The factor ends at `factorEnd`, before any white space
+    let factorEnd = rhsStartToken;
+    while (factorEnd > 0 && t[factorEnd - 1] === '<space>') factorEnd--;
+    const spaced = factorEnd !== rhsStartToken;
+    // A name spelled with letters (`foo`, `Delta`) is a run of letters; any
+    // other name is one token (`f`, `θ`, `\Delta`).
+    let factorStart = factorEnd - 1;
+    if (name.length > 1 && /^[a-zA-Z]$/.test(t[factorStart] ?? ''))
+      while (factorStart > 0 && /^[a-zA-Z]$/.test(t[factorStart - 1]))
+        factorStart--;
+
+    const info = this.resolveSymbol(name);
+    if (info?.type.matches('function')) {
+      const rhsOp = operator(rhs);
+      if (rhsOp !== 'Delimiter' && rhsOp !== 'Matrix')
+        this._emitAmbiguity(
+          'ambiguous-function-without-parentheses',
+          factorStart,
+          this.index,
+          { name }
+        );
+      return;
+    }
+
+    // The last letter of a run read one letter at a time (`7 mod 3`) is not
+    // a name: the run is reported as a letter run.
+    // A symbol that is not spelled with letters (`…`) is not a name either.
+    if (
+      spaced &&
+      /^[0-9]$/.test(t[rhsStartToken] ?? '') &&
+      !/^[a-zA-Z]$/.test(t[factorStart - 1] ?? '') &&
+      isOperandStartToken(t[factorStart]) &&
+      !/^[0-9]$/.test(t[factorStart])
+    ) {
+      this._emitAmbiguity(
+        'ambiguous-name-then-number',
+        factorStart,
+        this.index,
+        { name }
+      );
+      return;
+    }
+
+    // After white space, only a one-letter name is reported (`Delta x`,
+    // `Δ x`): `Delta then` is a word after the symbol.
+    if (
+      name === 'Delta' &&
+      /^\p{L}$/u.test(t[rhsStartToken] ?? '') &&
+      (!spaced || !/^\p{L}$/u.test(t[rhsStartToken + 1] ?? ''))
+    )
+      this._emitAmbiguity('ambiguous-delta', factorStart, rhsStartToken + 1);
+  }
+
+  /**
    * Walk backward from `beforeToken` over a maximal contiguous run of
    * single-letter symbol tokens (skipping any immediately-preceding spaces),
    * returning the joined run name and the token where it starts, or `null` if
@@ -4817,7 +5479,7 @@ export class _Parser implements Parser {
     // so it can be used as a regular variable (e.g., "for all N in Naturals").
     // Users can call .N() method for numeric evaluation, or use \operatorname{N}
     // if they need the function in LaTeX.
-    if (id === 'D' || id === 'N') return false;
+    if (ONE_LETTER_LIBRARY_OPERATORS.has(id)) return false;
 
     // Is this a valid function symbol?
     if (this.resolveSymbol(id)?.type.matches('function')) return true;
@@ -4954,6 +5616,153 @@ function parseCore(
   return { expr, parser };
 }
 
+/** The elements of `expr` when it is a function expression, as an array or
+ * in the object form `{ fn: [...] }`: the operator, then the operands.
+ * `null` for a number, a symbol or a string. */
+function functionElements(
+  expr: MathJsonExpression
+): MathJsonExpression[] | null {
+  if (Array.isArray(expr)) return expr as MathJsonExpression[];
+  if (typeof expr === 'object' && expr !== null && 'fn' in expr)
+    return (expr as { fn: MathJsonExpression[] }).fn;
+  return null;
+}
+
+/**
+ * Replace, in the parse result `expr`, the smallest expression that holds the
+ * span of each `ambiguous-*` diagnostic of `parser` with an `Error` node:
+ * `["Error", "'ambiguous-sign'", ["LatexString", "'--'"]]`. The error code is
+ * the diagnostic code, and the `LatexString` is the normalized LaTeX of the
+ * span.
+ *
+ * An expression qualifies when the parser recorded its span (see
+ * `_exprSpans` in `_Parser`) and that span holds the diagnostic span. A
+ * number or a symbol has no identity, and the spans of a value are recorded
+ * by value only, so a span recorded for the value can belong to another
+ * occurrence of it. A number or a symbol qualifies only when:
+ * - its parent has a recorded span;
+ * - the value occurs once in the parent, at any depth: in
+ *   `Sum(i, Tuple(i, 1, n))` neither `i` qualifies;
+ * - a span recorded for the value is inside the parent span, holds the
+ *   diagnostic span, and is outside the recorded spans of the other
+ *   operands of the parent.
+ * Otherwise the parent is replaced. When no expression qualifies, the
+ * `Error` node replaces the whole result. When two diagnostics select
+ * nested expressions, the outer replacement is kept.
+ *
+ * `extra` holds diagnostics that the parser did not record, in the same
+ * normalized-LaTeX coordinates (`ambiguous-percent`).
+ *
+ * `expr` is not modified: the expressions along each replaced path are
+ * copied.
+ */
+function ambiguityErrors(
+  expr: MathJsonExpression,
+  parser: _Parser,
+  extra: readonly ParseDiagnostic[] = []
+): MathJsonExpression {
+  const diagnostics = [...(parser.diagnostics ?? []), ...extra].filter((d) =>
+    d.code.startsWith('ambiguous-')
+  );
+  if (diagnostics.length === 0) return expr;
+  const spans = parser._exprSpans!;
+  const primitiveSpans = parser._primitiveSpans!;
+  const source = parser.latex(0);
+
+  const holds = (start: number, end: number, d: ParseDiagnostic): boolean =>
+    start <= d.start && d.end <= end;
+
+  // The number of occurrences of the number or symbol `value` in `node`, at
+  // any depth.
+  const occurrences = (node: MathJsonExpression, value: unknown): number => {
+    if (node === value) return 1;
+    const elements = functionElements(node);
+    if (elements === null) return 0;
+    let count = 0;
+    for (let k = 1; k < elements.length; k++)
+      count += occurrences(elements[k], value);
+    return count;
+  };
+
+  // The path (element indexes) from `node` to the deepest qualifying
+  // expression inside it, or `null` when there is none. `nodeSpan` is the
+  // recorded span of `node`, if any.
+  const locate = (
+    node: MathJsonExpression,
+    d: ParseDiagnostic,
+    nodeSpan: [number, number] | undefined
+  ): number[] | null => {
+    const elements = functionElements(node);
+    if (elements !== null) {
+      for (let k = 1; k < elements.length; k++) {
+        const child = elements[k];
+        if (typeof child === 'object' && child !== null) {
+          const found = locate(child, d, spans.get(child));
+          if (found !== null) return [k, ...found];
+        } else if (
+          nodeSpan !== undefined &&
+          (typeof child === 'number' || typeof child === 'string') &&
+          occurrences(node, child) === 1 &&
+          primitiveSpans.some(
+            (p) =>
+              p.value === child &&
+              nodeSpan[0] <= p.start &&
+              p.end <= nodeSpan[1] &&
+              holds(p.start, p.end, d) &&
+              elements.every((x, i) => {
+                if (i === 0 || typeof x !== 'object' || x === null) return true;
+                const span = spans.get(x);
+                return (
+                  span === undefined || p.end <= span[0] || span[1] <= p.start
+                );
+              })
+          )
+        )
+          return [k];
+      }
+    }
+    if (nodeSpan !== undefined && holds(nodeSpan[0], nodeSpan[1], d)) return [];
+    return null;
+  };
+
+  const rootSpan =
+    typeof expr === 'object' && expr !== null ? spans.get(expr) : undefined;
+  const targets = diagnostics.map((d) => ({
+    d,
+    path: locate(expr, d, rootSpan) ?? [],
+  }));
+  // Outer replacements first, so that a replacement inside one is skipped.
+  // The sort is stable: of two diagnostics that select the same expression,
+  // the one reported first is kept.
+  targets.sort((a, b) => a.path.length - b.path.length);
+
+  const replace = (
+    node: MathJsonExpression,
+    path: number[],
+    by: MathJsonExpression
+  ): MathJsonExpression => {
+    if (path.length === 0) return by;
+    const elements = [...functionElements(node)!];
+    elements[path[0]] = replace(elements[path[0]], path.slice(1), by);
+    if (Array.isArray(node)) return elements as unknown as MathJsonExpression;
+    return { ...(node as object), fn: elements } as MathJsonExpression;
+  };
+
+  const replaced: number[][] = [];
+  let result = expr;
+  for (const { d, path } of targets) {
+    if (replaced.some((p) => p.every((k, i) => path[i] === k))) continue;
+    replaced.push(path);
+    const error: MathJsonExpression = [
+      'Error',
+      { str: d.code },
+      ['LatexString', { str: source.slice(d.start, d.end) }],
+    ];
+    result = replace(result, path, error);
+  }
+  return result;
+}
+
 export function parse(
   latex: string,
   dictionary: IndexedLatexDictionary,
@@ -4962,9 +5771,14 @@ export function parse(
   // Opt-in diagnostics collection. Comments (code `comment-discarded`) are
   // captured from the primary tokenization in original-input coordinates.
   const wantDiagnostics = !!options.diagnostics && !!options.onDiagnostic;
-  const comments: DiscardedComment[] | undefined = wantDiagnostics
-    ? []
-    : undefined;
+  // In the lenient grammar, the `ambiguous-*` checks of the whole line run
+  // when the diagnostics are wanted, and also for `onAmbiguity: 'error'`,
+  // which replaces the expression that holds each of them with an `Error`.
+  const ambiguityChecks =
+    options.strict === false &&
+    (wantDiagnostics || options.onAmbiguity === 'error');
+  const comments: DiscardedComment[] | undefined =
+    wantDiagnostics || ambiguityChecks ? [] : undefined;
   const recovered: ParseDiagnostic[] = [];
 
   const primary = parseCore(latex, dictionary, options, comments);
@@ -4972,6 +5786,9 @@ export function parse(
   // The parser whose collected diagnostics (codes 1 & 2) describe the adopted
   // parse. Updated if a trailing-noise retry is adopted below.
   let adoptedParser = primary.parser;
+  // The text that the trailing-noise recovery below removed, if it adopted a
+  // retry.
+  let skippedTail: string | undefined;
 
   // Trailing-noise recovery (sentence punctuation and equation labels).
   //
@@ -5031,6 +5848,7 @@ export function parse(
       if (retry.expr !== null && !containsError(retry.expr)) {
         expr = retry.expr;
         adoptedParser = retry.parser;
+        skippedTail = latex.slice(candidate.length);
         // Diagnostic: trailing tokens silently dropped by recovery. The
         // adopted candidate is a prefix of the (trimmed) input, so the skipped
         // fragment is the original tail. It no longer surfaces as an `Error`
@@ -5049,6 +5867,50 @@ export function parse(
       }
     }
   }
+
+  // Non-strict mode: the `ambiguous-*` diagnostics that a check of the whole
+  // line finds. They run once, on the raw result of the adopted parse, and do
+  // not change `expr`. They run before `ambiguityErrors()` below, so that
+  // `onAmbiguity: 'error'` applies to them too.
+  const percents: ParseDiagnostic[] = [];
+  // The same diagnostics, in normalized-LaTeX coordinates (see
+  // `_Parser.sourceOffsets()`), for `ambiguityErrors()`.
+  const normalizedPercents: ParseDiagnostic[] = [];
+  if (ambiguityChecks) {
+    adoptedParser._reportLineAmbiguities(expr, skippedTail);
+    // A `%` directly after a number (`y = 50%`) starts a comment that
+    // discards the rest of the line, and a person means a percentage. The
+    // span is the number and the `%`, in original-input coordinates, as for
+    // `comment-discarded`.
+    for (const c of comments!) {
+      const number = numberBeforePercent(latex.slice(0, c.start));
+      if (number === null) continue;
+      percents.push({
+        code: 'ambiguous-percent',
+        start: number[0],
+        end: c.start + 1,
+      });
+      // The tokens of the number end where the tokens of the text before
+      // the end of the number end. When they are not the number (the
+      // tokenizer changed the text), the span is the whole line.
+      const tokenEnd = tokenize(latex.slice(0, number[1])).length;
+      const tokenStart = tokenEnd - (number[1] - number[0]);
+      const [start, end] =
+        tokenStart >= 0 &&
+        adoptedParser.latex(tokenStart, tokenEnd) ===
+          latex.slice(number[0], number[1])
+          ? adoptedParser.sourceOffsets(tokenStart, tokenEnd)
+          : [0, adoptedParser.latex(0).length];
+      normalizedPercents.push({ code: 'ambiguous-percent', start, end });
+    }
+  }
+
+  // `onAmbiguity: 'error'` in the lenient grammar: an `Error` node replaces
+  // the expression that holds the span of each `ambiguous-*` diagnostic. This
+  // runs before the passes below, which can rebuild parts of the result and
+  // so lose the spans that the parser recorded.
+  if (expr !== null && adoptedParser._exprSpans !== null)
+    expr = ambiguityErrors(expr, adoptedParser, normalizedPercents);
 
   expr ??= 'Nothing';
   expr = adoptedParser.resolveApplications(expr);
@@ -5075,13 +5937,14 @@ export function parse(
             ? { code, start, end, detail }
             : { code, start, end }
         );
-    for (const c of comments!)
+    for (const c of comments ?? [])
       sink({
         code: 'comment-discarded',
         start: c.start,
         end: c.end,
         detail: { discardedLength: c.discardedLength },
       });
+    for (const d of percents) sink(d);
     for (const d of recovered) sink(d);
   }
 

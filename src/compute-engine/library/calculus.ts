@@ -527,6 +527,21 @@ type IntegrandParts = {
   ) => (...args: number[]) => number;
 };
 
+/** The panel budget of the adaptive Gauss–Kronrod quadrature of a ONE-limit
+ * integral whose integrand did not compile. One interpreted evaluation costs
+ * microseconds, not nanoseconds, so the default budget (1500 panels, up to
+ * about 45 000 evaluations) is too large. The 16 starting panels cost 240
+ * evaluations and each bisection costs 30 more, so 330 panels cost at most
+ * 240 + 314 × 30 = 9 660 evaluations: no more than the 1e4 samples of the
+ * Monte-Carlo fallback for an interpreted integrand. A smooth integrand
+ * converges far inside this budget. When the quadrature neither converges nor
+ * beats Monte Carlo, the 1e4 samples are drawn AFTER it, so the worst case is
+ * about 2 × 1e4 evaluations for each part (real, imaginary) of the
+ * integrand, against 1e4 when the quadrature was skipped. The budget still leaves room for the
+ * endpoint-divergence test, which needs two blocks of 20 bisections toward
+ * one endpoint. */
+const INTERPRETED_QUADRATURE_PANELS = 330;
+
 function numericIntegrandParts(
   raw: (...args: number[]) => unknown
 ): IntegrandParts {
@@ -2108,8 +2123,12 @@ volumes
         // the literal is what carries the named parameters the multi-index
         // refers to. Without this, `Derivative(g, 1, 0)` stayed inert for an
         // assigned bivariate `g` while `Derivative(g, 1)` evaluated.
+        // An operator whose definition has a `derivative` key is handled by
+        // the next block: the key has precedence over its function literal.
+        const keyed =
+          isSymbol(op) && op.operatorDefinition?.derivative !== undefined;
         const literal = isSymbol(op) ? functionLiteralOf(ce, op.symbol) : op;
-        if (isFunction(literal, 'Function')) {
+        if (!keyed && isFunction(literal, 'Function')) {
           const params = literal.ops
             .slice(1)
             .map((p) => functionLiteralParameterName(p));
@@ -2123,6 +2142,37 @@ volumes
             // `_fn` literal throws on application.
             if (body)
               return ce.function('Function', [body, ...literal.ops.slice(1)]);
+          }
+        }
+
+        // An operator whose definition has a `derivative` key (see
+        // `OperatorDerivative`, types-definitions.ts): differentiate an
+        // application of the operator to placeholder arguments, which uses
+        // the key, then make the result a function literal of fresh
+        // parameters. A result that still holds a `Derivative` (a partial
+        // that the key does not give) or an unresolved `D` stays inert, as
+        // in the univariate branch above.
+        if (keyed && isSymbol(op)) {
+          const holes = orders.map((_, i) => ce.symbol(`_${i + 1}`));
+          let body: Expression | undefined = ce.function(op.symbol, holes);
+          for (let i = 0; i < orders.length && body; i++)
+            for (let d = 0; d < orders[i] && body; d++)
+              body = differentiate(body, `_${i + 1}`);
+          if (body && !holdsUnresolvedD(body) && !body.has('Derivative')) {
+            const binders = collectBinderNames(body);
+            const used = (name: string) => body!.has(name) || binders.has(name);
+            const params: Expression[] = [];
+            let k = 1;
+            for (let i = 0; i < holes.length; i++) {
+              while (used(`x_${k}`)) k += 1;
+              params.push(ce.symbol(`x_${k}`));
+              k += 1;
+            }
+            const subs: Record<string, Expression> = {};
+            holes.forEach((_, i) => {
+              subs[`_${i + 1}`] = params[i];
+            });
+            return ce.function('Function', [body.subs(subs), ...params]);
           }
         }
 
@@ -2969,31 +3019,40 @@ volumes
             // routinely carries a tighter bound than 1e7 samples can reach, and
             // for an expensive integrand (an inner quadrature, a compiled model)
             // those samples cost minutes.
-            if (compiled?.success) {
-              // `deadline`: bounds the adaptive loop (a per-panel check that
-              // throws the timeout) AND is re-published as the ambient deadline so an
-              // integrand that is itself an integral — interpreted, or compiled
-              // to `_SYS.integrate`, which has no engine access — inherits it
-              // (Tycho item 183).
-              const gk = adaptiveQuadrature(jsf, lower, upper, {
-                deadline: ce._deadlineFrame,
-              });
-              // A diagnosed divergence has no finite value. Monte Carlo would
-              // still return one — a mean of samples that never saw the
-              // singularity — so the fallback is skipped, not just the report.
-              if (gk.divergent) return { estimate: NaN, error: NaN };
-              if (
-                (gk.converged || quadratureBeatsMonteCarlo(gk, 1e7)) &&
-                Number.isFinite(gk.estimate)
-              )
-                return { estimate: gk.estimate, error: gk.error };
-            }
+            //
+            // An integrand that did not compile (an operator with only a
+            // JavaScript `evaluate` handler, for example) runs the quadrature
+            // too, with a smaller panel budget (`INTERPRETED_QUADRATURE_PANELS`)
+            // because each evaluation is slower. Its Monte-Carlo fallback
+            // draws only 1e4 samples, about 1e-2 relative error, so skipping
+            // the quadrature gave `∫₀¹ x² dx` as `0.33 ± 0.003`.
+            const mcSamples = compiled?.success ? 1e7 : 1e4;
+            // `deadline`: bounds the adaptive loop (a per-panel check that
+            // throws the timeout) AND is re-published as the ambient deadline so an
+            // integrand that is itself an integral — interpreted, or compiled
+            // to `_SYS.integrate`, which has no engine access — inherits it
+            // (Tycho item 183).
+            const gk = adaptiveQuadrature(jsf, lower, upper, {
+              deadline: ce._deadlineFrame,
+              ...(compiled?.success
+                ? {}
+                : { maxIntervals: INTERPRETED_QUADRATURE_PANELS }),
+            });
+            // A diagnosed divergence has no finite value. Monte Carlo would
+            // still return one — a mean of samples that never saw the
+            // singularity — so the fallback is skipped, not just the report.
+            if (gk.divergent) return { estimate: NaN, error: NaN };
+            if (
+              (gk.converged || quadratureBeatsMonteCarlo(gk, mcSamples)) &&
+              Number.isFinite(gk.estimate)
+            )
+              return { estimate: gk.estimate, error: gk.error };
 
             const mce = monteCarloEstimate(
               integrand.uncached(jsf),
               lower,
               upper,
-              compiled?.success ? 1e7 : 1e4,
+              mcSamples,
               ce._deadlineFrame,
               draw
             );

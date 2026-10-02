@@ -30,6 +30,8 @@ export type {
   TypeHandlerContext,
   OperatorTypeHandlerOnTypes,
   EvaluateHandlerOptions,
+  OperatorDerivative,
+  OperatorDerivativeHandler,
   BaseDefinition,
   SimplifyOptions,
   ExplainOptions,

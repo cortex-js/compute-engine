@@ -326,6 +326,36 @@ describe('record-typed receiver: names from the declared type', () => {
     expect(e.evaluate().toString()).toBe('15');
   });
 
+  test('a field typed as an overload set of type aliases matches an arm', () => {
+    const ce = engine();
+    ce.declare('ovl_S', {
+      signature:
+        '((x: number, factor: number) -> number) & ((s: string) -> string)',
+      evaluate: (ops, { engine }) =>
+        ops[0].string !== undefined
+          ? engine.string(ops[0].string.toUpperCase())
+          : engine.number(ops[0].re * ops[1].re),
+    });
+    ce.declareType('Sc', '(x: number, factor: number) -> number', {
+      alias: true,
+    });
+    ce.declareType('Sd', '(s: string) -> string', { alias: true });
+    ce.declare('ovl', {
+      type: 'record{S: Sc & Sd}',
+      value: ['Dictionary', ['Tuple', "'S'", 'ovl_S']],
+    } as any);
+    const e = ce.box([
+      'MemberCall',
+      'ovl',
+      "'S'",
+      N('factor', 5),
+      N('x', 3),
+    ] as any);
+    expect(errorCodes(e)).toEqual([]);
+    expect(e.toString()).toBe('Apply(Field("ovl", "S"), 3, 5)');
+    expect(e.evaluate().toString()).toBe('15');
+  });
+
   test('an optional parameter left out is not supplied', () => {
     const ce = engine();
     const e = ce.box(['Apply', ['Field', 'rec', "'S'"], N('x', 3)] as any);

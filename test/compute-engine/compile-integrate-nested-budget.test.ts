@@ -161,11 +161,12 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
   });
 
   test('a single integral is untouched by the budget', () => {
-    // The `vars` mapping forbids folding a live runtime input into a baked
-    // closed form, which is what keeps this on the quadrature emitter — the
-    // path the budget wraps. Only the OUTERMOST level runs here, and an
-    // outermost level never consumes budget.
-    const r = compileReal('\\int_0^k \\sin t\\,dt', { vars: { k: '_.k' } });
+    // A `vars` mapping that is not a plain read (`(_.k)`) keeps this on the
+    // quadrature emitter — the path the budget wraps. (A valueless symbol
+    // mapped to the plain read `_.k` gets the closed form, since it stays a
+    // live read in it.) Only the OUTERMOST level runs here, and an outermost
+    // level never consumes budget.
+    const r = compileReal('\\int_0^k \\sin t\\,dt', { vars: { k: '(_.k)' } });
     expect(r.code).toContain('_SYS.integrate(');
 
     // ∫₀¹ sin t dt = 1 − cos 1.

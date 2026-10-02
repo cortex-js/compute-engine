@@ -373,22 +373,23 @@ describe('callees without a usable declaration (§6)', () => {
   });
 
   test('a wildcard `function`-typed value with NO assigned value reports `argument-names-unavailable`', () => {
+    // One error, on the first named argument; the other carrier is replaced
+    // by the value it carries.
     const ce = new ComputeEngine();
     ce.declare('w', 'function');
     expect(errorCodes(ce.box(['w', N('a', 1), N('b', 2)] as any))).toEqual([
       'argument-names-unavailable',
-      'argument-names-unavailable',
     ]);
   });
 
-  test('a wildcard declaration reads the ASSIGNED value’s signature', () => {
-    // The bare `function` declaration carries no parameter types and stays
-    // that way through assignment, so `calleeSignatureType` reads the assigned
-    // value's own signature — the same source the wildcard narrowing sink
-    // uses. An ANNOTATED literal therefore supplies names and the named call
-    // works; an UNANNOTATED one supplies none — a bare parameter contributes
-    // `{ type: 'unknown' }` with no `name` to the literal's derived signature
-    // — so the call is diagnosed as an unknown name.
+  test('a wildcard declaration never reads the ASSIGNED value’s signature', () => {
+    // Decision of 2026-10-01: the names of a call through a variable are
+    // matched only against the variable's DECLARED type. A bare `function`
+    // declaration gives no parameter names, so the names are rejected even
+    // when the value held now has a signature with names
+    // (`valueCalleeSignature`, named-arguments.ts). Before, the names were
+    // matched against the current value, and the call was stored in that
+    // value's parameter order.
     const ce = new ComputeEngine();
     ce.declare('w', 'function');
     ce.assign(
@@ -401,14 +402,18 @@ describe('callees without a usable declaration (§6)', () => {
       ] as any)
     );
     const call = ce.box(['w', N('years', 3), N('rate', 6)] as any);
-    expect(errorCodes(call)).toEqual([]);
-    expect(call.evaluate().toString()).toBe('2');
+    expect(errorCodes(call)).toEqual(['argument-names-unavailable']);
+    expect(JSON.stringify(call.json)).toContain(
+      'the declared type of this variable gives no parameter names'
+    );
+    // The positional call is unchanged.
+    expect(ce.box(['w', 6, 3]).evaluate().toString()).toBe('2');
 
     const ce2 = new ComputeEngine();
     ce2.declare('u', 'function');
     ce2.assign('u', ce2.box(['Function', ['Add', 'a', 'b'], 'a', 'b'] as any));
     expect(errorCodes(ce2.box(['u', N('a', 1), N('b', 2)] as any))).toEqual([
-      'argument-name-unknown',
+      'argument-names-unavailable',
     ]);
   });
 

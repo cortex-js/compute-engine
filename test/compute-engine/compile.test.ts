@@ -4102,7 +4102,8 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     //
     // `vars` is what routes the node to the quadrature emitter at all: the
     // antiderivative-first attempt is skipped when the integrand references a
-    // `vars`-mapped symbol (a caller's external input must not be folded away).
+    // `vars`-mapped symbol whose mapping is not a plain read (`(P)`; a plain
+    // read such as `P` with no value would get the closed form `p + q`).
     const e = new ComputeEngine();
     const integral = e.box([
       'Integrate',
@@ -4110,7 +4111,7 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
       ['Limits', 'x', 0, 1],
     ]);
     expect(() =>
-      compile(integral, { fallback: false, vars: { p: 'P' } })
+      compile(integral, { fallback: false, vars: { p: '(P)' } })
     ).toThrow(/destructuring parameter/);
   });
 });

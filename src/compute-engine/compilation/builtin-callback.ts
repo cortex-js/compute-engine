@@ -37,7 +37,10 @@ import { isOperatorDef } from '../boxed-expression/utils.js';
  * `pushScope('system')` and `pushScope('global')`), so scope identity alone
  * would misclassify a caller-authored definition as engine-authored. The
  * provenance recorded at bootstrap (`engine._customLibraryOperators`)
- * overrides the scope test. The set is fixed once the engine is constructed.
+ * overrides the scope test. The set is fixed once the engine is constructed:
+ * a library loaded later with `ce.loadLibrary()` is installed in the GLOBAL
+ * scope, so its definitions are not the system-scope binding and the scope
+ * test alone classifies them as caller definitions.
  */
 export function systemScopeBinding(
   engine: ComputeEngine,

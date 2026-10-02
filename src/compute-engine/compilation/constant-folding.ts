@@ -1322,7 +1322,17 @@ export function callerSpliceSources(
   if (keys === undefined || resolve === undefined) return [];
   const sources: string[] = [];
   for (const key of keys) {
-    const source = resolve(key);
+    // A `var` hook throws for a mapping it refuses (a GPU or Python reserved
+    // word). Such a key is skipped here: it gives no splice to protect, and
+    // a key the expression does not read must not make the compilation
+    // fail. If the expression reads the symbol, the same error is raised
+    // when the symbol itself is compiled.
+    let source: string | undefined;
+    try {
+      source = resolve(key);
+    } catch {
+      continue;
+    }
     if (typeof source !== 'string' || source.length === 0) continue;
     if (Number.isFinite(Number(source))) continue;
     sources.push(source);

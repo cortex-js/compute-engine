@@ -10,7 +10,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, algebraic attributes, description, wikidata and url.",
+      "description": "Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, attributes (the algebraic flags and `lazy`), description, examples, keywords, wikidata and url.",
       "examples": [
         "About(Pi)"
       ]
@@ -948,7 +948,7 @@
     },
     {
       "name": "Block",
-      "category": "Control Structures",
+      "category": "Core",
       "arity": "variadic",
       "signature": "(unknown*) -> unknown",
       "associative": false,

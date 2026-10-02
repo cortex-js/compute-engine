@@ -37,6 +37,7 @@ import type {
 } from '../global-types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entrySource } from './function-purity.js';
+import { withVarsValuesHidden } from './vars-inputs.js';
 import {
   isSymbol,
   isNumber,
@@ -4919,7 +4920,11 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       });
     let result: CompilationResult<'interval-js', IntervalValue>;
     try {
-      result = this.compileOrThrow(expr, options);
+      // A `vars`-mapped symbol is compiled as the valueless input of its
+      // declared type (`withVarsValuesHidden`).
+      result = withVarsValuesHidden(expr, options.vars, () =>
+        this.compileOrThrow(expr, options)
+      );
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented
       // `success: false` shape with an interpreter-backed `run`.

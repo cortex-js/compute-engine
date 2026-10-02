@@ -411,6 +411,42 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('still accepts a non-reserved variable', () => {
       expect(glsl.compile(ce.box(['Add', 'inp', 1])).code).toContain('inp');
     });
+    // A `vars` mapping whose source is a bare identifier is emitted like a
+    // free symbol's name, so it gets the same check: `{ in: 'in' }` emitted
+    // `x + sin(in)`, which no driver accepts, where the free symbol `in`
+    // declines (Tycho row 356).
+    it('rejects a vars mapping to a reserved bare identifier', () => {
+      expect(() =>
+        glsl.compile(ce.box(['Add', 'x', ['Sin', 'in']]), {
+          vars: { in: 'in' },
+        })
+      ).toThrow(/"in" is a reserved word in glsl/);
+      expect(() =>
+        glsl.compile(ce.box(['Add', 'x', 'q']), { vars: { q: 'struct' } })
+      ).toThrow(/"struct" is a reserved word in glsl/);
+    });
+    // The check is made when the mapped symbol is compiled. A key that the
+    // expression does not read must not make the compilation fail: the
+    // emitted-code folder used to resolve every `vars` key when the target
+    // was created, and the check threw there.
+    it('accepts a vars key mapped to a reserved word that the expression does not read', () => {
+      expect(
+        glsl.compile(ce.box(['Add', 'x', 1]), { vars: { k: 'in' } }).code
+      ).toBe('x + 1.0');
+      expect(() =>
+        glsl.compile(ce.box(['Add', 'x', 'k']), { vars: { k: 'in' } })
+      ).toThrow(/"in" is a reserved word in glsl/);
+    });
+    it('accepts a vars mapping that renames a reserved symbol, or is not a bare identifier', () => {
+      expect(
+        glsl.compile(ce.box(['Add', 'x', ['Sin', 'in']]), {
+          vars: { in: 'u_in' },
+        }).code
+      ).toBe('x + sin(u_in)');
+      expect(
+        glsl.compile(ce.box(['Add', 'x', 'q']), { vars: { q: 'u.in' } }).code
+      ).toBe('u.in + x');
+    });
   });
 
   describe('Loop as the final block statement fails closed', () => {

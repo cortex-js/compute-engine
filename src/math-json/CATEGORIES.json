@@ -311,7 +311,6 @@
     "description": "Conditionals and structural evaluation forms.",
     "operators": [
       "Alternatives",
-      "Block",
       "Break",
       "Comprehension",
       "Condition",
@@ -339,6 +338,7 @@
       "Assign",
       "Assume",
       "BaseForm",
+      "Block",
       "BuiltinFunction",
       "CanonicalForm",
       "CaseFold",

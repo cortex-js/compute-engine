@@ -7512,7 +7512,14 @@ export class BaseCompiler {
       // an assigned value / declared constant, matching `evaluate()`. This also
       // covers the direct-target `compile(expr, { target })` path, where the
       // raw target has no engine context of its own.
-      const folded = BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target);
+      // A `vars`-mapped symbol is a live input and its value is never folded.
+      // It reaches this point only on a direct custom target, whose own `var`
+      // hook knows nothing of `vars`: it is emitted by name below, like a free
+      // symbol.
+      const folded =
+        target.varsKeys?.has(s) === true
+          ? undefined
+          : BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target);
       if (folded !== undefined) {
         // A folded value is BAKED — there is no run-time binding, so the
         // "coerced at every entry" exemption that leaves a declared-complex
@@ -18685,14 +18692,48 @@ export class BaseCompiler {
   /**
    * Whether any operand of the integral reaches a `vars`-mapped symbol — one
    * the caller pinned to a runtime input — directly or through an assigned
-   * value or a user-function body (`reachesExcludedName`). Such a symbol must
-   * not be folded, so the antiderivative-first path, which resolves the
-   * integral through `evaluate()`, is skipped when the integral touches one.
+   * value or a user-function body (`reachesExcludedName`), when that symbol
+   * still has an engine value. Such a value must not be baked into the
+   * code, so the antiderivative-first path, which resolves the integral
+   * through `evaluate()`, is skipped when the integral touches one.
+   *
+   * A `vars`-mapped symbol with NO value whose mapping is a plain read of
+   * an input (an identifier `u_a`, or a member read `_.a`) does not block the
+   * closed form: `evaluate()` keeps it as a symbol, and the closed form
+   * compiles it as that read, as it does for a free symbol. This is the usual
+   * case for a declared input, whose value the target's `compile()` hides for
+   * the compilation (`withVarsValuesHidden`): `∫₀ˣ a·t dt` with `a` mapped to
+   * `_.a` compiles to `0.5·a·x²`, as it does for an `a` with no value. A
+   * mapping to other source still blocks it (the source may not be a pure
+   * read), and so does a caller-overridden operator: `evaluate()` would not
+   * run the caller's implementation.
    */
   private static referencesVarsSymbol(
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): boolean {
+    const vars = target.varsKeys;
+    if (vars !== undefined && vars.size > 0) {
+      const engine = args[0].engine;
+      let valued: Set<string> | undefined;
+      for (const s of vars) {
+        const source = target.var?.(s);
+        const plainRead =
+          typeof source === 'string' &&
+          /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)?$/.test(source);
+        if (!plainRead || engine._getSymbolValue(s) !== undefined)
+          (valued ??= new Set()).add(s);
+      }
+      if ((valued?.size ?? 0) < vars.size) {
+        // A reduced exclusion set: the memo on `target` belongs to the full
+        // set, so the walk gets a target record of its own.
+        const reduced = {
+          varsKeys: valued,
+          foldExcludedOps: target.foldExcludedOps,
+        } as CompileTarget<Expression>;
+        return args.some((a) => BaseCompiler.reachesExcludedName(a, reduced));
+      }
+    }
     return args.some((a) => BaseCompiler.reachesExcludedName(a, target));
   }
 
@@ -18770,9 +18811,22 @@ export class BaseCompiler {
    * full numeric integration. The symbolic attempt runs under its own
    * {@link ANTIDERIVATIVE_ATTEMPT_STEPS} span (tightened further by an
    * enclosing span, never extended), so a non-elementary integrand degrades to
-   * the caller's numeric emitter rather than hanging. Skipped when the integral
-   * references a `vars`-mapped symbol, which must survive to run time as a live
-   * input (the vars contract) rather than be folded into a baked closed form.
+   * the caller's numeric emitter rather than hanging.
+   *
+   * **`vars` inputs.** A `vars`-mapped symbol must survive to run time as a
+   * live input (the vars contract): its value must never be baked into the
+   * code. The attempt is skipped when the integral reaches, directly or
+   * through an assigned value or a user-function body, a `vars`-mapped symbol
+   * that still has a visible engine value, or whose mapping is not a plain
+   * read of an input (an identifier `u_a` or a member read `_.a`: other
+   * source may not be a pure read), or a caller-overridden operator (which
+   * `evaluate()` would not run). A `vars`-mapped symbol with no visible value
+   * and a plain-read mapping does NOT skip it: `evaluate()` keeps the symbol,
+   * and the closed form compiles it as the mapped read, so the input stays
+   * live — `∫₀ˣ a·t dt` with `a` mapped to `_.a` compiles to `0.5·a·x²`. A
+   * declared input that holds a value is in that case too, since the
+   * target's `compile()` hides its value for the compilation
+   * (`withVarsValuesHidden`). See `referencesVarsSymbol`.
    *
    * The returned expression is accepted only when it is valid, free of any
    * residual `Integrate`, and not NaN — but it can still contain a head the

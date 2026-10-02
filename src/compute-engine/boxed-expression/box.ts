@@ -35,13 +35,18 @@ import { isOne } from '../numerics/rationals.js';
 import { asBigint } from './numerics.js';
 
 import { canonicalAdd } from './arithmetic-add.js';
-import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
+import { canonicalMultiply } from './arithmetic-mul-div.js';
 
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
-import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
+import {
+  NUMERIC_CANONICAL_NAMES,
+  canonicalNumericOperator,
+} from './canonical-numeric.js';
+import { numericCanonicalHandlerName } from './numeric-canonical-registry.js';
 
 import {
+  declaredNamesUnavailable,
   hasNamedArguments,
   inlineLiteralSignature,
   namesRequiredOperands,
@@ -49,6 +54,7 @@ import {
   protocolMemberParts,
   qualifiedFieldParts,
   splitNamedArguments,
+  valueCalleeSignature,
 } from './named-arguments.js';
 import { qualifiedMemberRequirementShape } from '../engine-protocols.js';
 import { resolveFieldCallee } from './field-callee.js';
@@ -73,7 +79,6 @@ import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
 import {
   validateArguments,
-  checkNumericArgs,
   inferCollectionSourceArgs,
   isCollectionSourceOperator,
   inferGenericBoundArgs,
@@ -106,12 +111,11 @@ import {
 } from '../../common/type/instantiate.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
-import { isValueDef } from './utils.js';
+import { isOperatorDef, isValueDef } from './utils.js';
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
 } from '../function-utils.js';
-import { canonicalNegate } from './negate.js';
 import {
   canonical,
   imaginaryNumber,
@@ -2575,14 +2579,21 @@ function makeCanonicalFunctionCore(
     // back through this seam under the head that does carry the names.
     const split = splitNamedArguments(ops);
     if (split) {
-      const normalized = normalizeNamedArguments(
-        ce,
-        split,
-        isValueDef(def)
-          ? calleeSignatureType(def.value)
-          : def.operator.signature.type,
-        multiClauseState(def)?.clauses
-      );
+      // A variable callee: the names are matched against its DECLARED type
+      // only, never against the value it holds now, and are rejected when
+      // that type gives no parameter names (`valueCalleeSignature`).
+      const signature = isValueDef(def)
+        ? valueCalleeSignature(def.value)
+        : def.operator.signature.type;
+      const normalized =
+        signature === null
+          ? declaredNamesUnavailable(ce, split)
+          : normalizeNamedArguments(
+              ce,
+              split,
+              signature,
+              multiClauseState(def)?.clauses
+            );
       // Sub-ruling R5 enforcement: the names determined ONE clause of a
       // multi-clause callee and the ordinary call would dispatch elsewhere, so
       // the emitted expression applies that clause's literal directly instead
@@ -3806,22 +3817,6 @@ function bindBindingSites(
   return ce._fn(name, next, { metadata, scope });
 }
 
-/** The heads `makeNumericFunction` canonicalizes by name, without looking
- * up their definition. */
-const NUMERIC_SHORT_PATH_NAMES: ReadonlySet<string> = new Set([
-  'Add',
-  'Multiply',
-  'Negate',
-  'Square',
-  'Sqrt',
-  'Exp',
-  'Ln',
-  'Log',
-  'Power',
-  'Root',
-  'Divide',
-]);
-
 function makeNumericFunction(
   ce: ComputeEngine,
   name: MathJsonSymbol,
@@ -3829,119 +3824,50 @@ function makeNumericFunction(
   metadata?: Metadata,
   scope?: Scope
 ): Expression | null {
+  // The canonical form of these operators is computed by name, without a
+  // lookup of their definition (`canonicalNumericOperator`).
+  if (!NUMERIC_CANONICAL_NAMES.has(name)) return null;
   // A user definition of one of these names shadows the library operator,
   // so the call must reach the generic route, which looks the definition up.
-  // The short path below folds by name (`Square(3)` → `9`), and it silently
-  // ignored `function Square(x) { x + 100 }` (user decision 2026-09-27: a
+  // The by-name route folds (`Square(3)` → `9`), and it silently ignored
+  // `function Square(x) { x + 100 }` (user decision 2026-09-27: a
   // capitalized library name is shadowed like any other). A consequence:
   // shadowing `Add` also changes `+`, which builds an `Add`.
-  if (NUMERIC_SHORT_PATH_NAMES.has(name) && shadowsLibraryName(ce, name))
+  //
+  // Exception: a definition that holds the library `canonical` handler of
+  // this operator is the library definition or a copy of it (`ce.declare(
+  // 'Sqrt', { ...ce.lookupDefinition('Sqrt').operator, evaluate })`). Its
+  // canonical form is the library one, so the by-name route applies. This
+  // gives a copy that changes no field the same results as the library
+  // operator (user decision 2026-10-01).
+  if (shadowsLibraryName(ce, name) && !keepsNumericCanonicalForm(ce, name))
     return null;
-  let ops: ReadonlyArray<Expression> = [];
-  if (name === 'Add' || name === 'Multiply')
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), {
-      flatten: name,
-    });
-  else if (
-    name === 'Negate' ||
-    name === 'Square' ||
-    name === 'Sqrt' ||
-    name === 'Exp'
-  )
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), 1);
-  else if (name === 'Ln' || name === 'Log') {
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope));
-    if (ops.length === 0) ops = [ce.error('missing')];
-  } else if (name === 'Power' || name === 'Root')
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), 2);
-  else if (name === 'Divide') {
-    // Note: Divide can have more than one argument, i.e.
-    // Divide(a, b, c) = a / b / c
-    // But it needs at least two arguments
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope));
-    if (ops.length === 0) ops = [ce.error('missing'), ce.error('missing')];
-    if (ops.length === 1) ops = [ops[0], ce.error('missing')];
-  } else return null;
+  const result = canonicalNumericOperator(
+    ce,
+    name,
+    semiCanonical(ce, semiOps, scope),
+    metadata
+  );
+  return result === null ? null : withSourceOffsets(result, metadata);
+}
 
-  // A `Spread` operand (`Add(...t)`) defers the whole numeric fast path to
-  // the generic operator route: the canonical constructors below (the
-  // single-operand `Add`/`Multiply` unwrap, eager folding) and the arity
-  // padding above assume the FINAL positional operands, which only exist
-  // once the spread splices at evaluation (step 0 of the evaluate path).
-  if (ops.some((x) => x.operator === 'Spread')) return null;
-
-  // If some of the arguments are not valid, we're done
-  // (note: the result is canonical, but not valid)
-  if (!ops.every((x) => x.isValid))
-    return new BoxedFunction(ce, name, ops, { metadata, canonical: true });
-
-  //
-  // Short path for some functions
-  // (avoid looking up a definition)
-  //
-  if (name === 'Add') return withSourceOffsets(canonicalAdd(ce, ops), metadata);
-  if (name === 'Negate')
-    return withSourceOffsets(canonicalNegate(ops[0]), metadata);
-  if (name === 'Multiply')
-    return withSourceOffsets(canonicalMultiply(ce, ops), metadata);
-  if (name === 'Divide') {
-    if (ops.length === 2)
-      return withSourceOffsets(
-        canonicalDivide(...(ops as [Expression, Expression])),
-        metadata
-      );
-    return withSourceOffsets(
-      ops.slice(1).reduce((a, b) => canonicalDivide(a, b), ops[0]),
-      metadata
-    );
-  }
-  if (name === 'Exp')
-    return withSourceOffsets(canonicalPower(ce.E, ops[0]), metadata);
-  if (name === 'Square')
-    return withSourceOffsets(canonicalPower(ops[0], ce.number(2)), metadata);
-  if (name === 'Power')
-    return withSourceOffsets(canonicalPower(ops[0], ops[1]), metadata);
-  if (name === 'Root')
-    return withSourceOffsets(canonicalRoot(ops[0], ops[1]), metadata);
-  if (name === 'Sqrt')
-    return withSourceOffsets(canonicalRoot(ops[0], 2), metadata);
-
-  if (name === 'Ln' || name === 'Log') {
-    if (ops.length > 0) {
-      // Ln(1) -> 0, Log(1) -> 0 — literal only: `.isSame(1)` follows symbol
-      // value bindings, and a mutable symbol's transient value must not fold
-      // into canonical structure (`Ln(x)` while `x` holds 1 stays `Ln(x)`).
-      // Not for a literal base of 1 or NaN: `Log(1, 1)` is the quotient
-      // `0/0 = NaN` and `Log(1, NaN)` propagates the NaN — both are the
-      // evaluate route's answers (`logarithmAtExceptionalPoint`). A
-      // SYMBOLIC base does fold: `Log(1, b) = 0` is the generic-point
-      // convention, the same one that folds `1^x` to 1 without assuming
-      // the exceptional exponent — the value `b` may later take is not
-      // assumed to be 1.
-      const base = ops[1];
-      const baseIsOneOrNaN =
-        base !== undefined && isNumber(base) && (base.isSame(1) || base.isNaN);
-      // Only an EXACT `1` with an exact or symbolic base folds: `Ln(1.0)`
-      // and `Log(1, 2.0)` stay, and evaluate to the float `0`, as a float
-      // operand gives a float result.
-      const baseIsFloat = base !== undefined && isNumber(base) && !base.isExact;
-      if (
-        isNumber(ops[0]) &&
-        ops[0].isExact &&
-        ops[0].isSame(1) &&
-        !baseIsOneOrNaN &&
-        !baseIsFloat
-      )
-        return ce.Zero;
-      // Ln(a) -> Ln(a), Log(a) -> Log(a)
-      if (ops.length === 1)
-        return new BoxedFunction(ce, name, ops, { metadata, canonical: true });
-    }
-    // Ln(a,b) -> Log(a, b)
-    return new BoxedFunction(ce, 'Log', ops, { metadata, canonical: true });
-  }
-
-  return null;
+/**
+ * True when the definition `name` resolves to holds the library `canonical`
+ * handler of `name` (`numeric-canonical-registry.ts`), that is, when it is a
+ * copy of the library definition of an arithmetic operator.
+ *
+ * A function parameter named like the operator is not such a copy, even
+ * though the lookup can still find the library definition while the body is
+ * boxed (see `shadowsLibraryName`).
+ */
+function keepsNumericCanonicalForm(ce: ComputeEngine, name: string): boolean {
+  if (ce._isShadowedParameter(name)) return false;
+  const def = ce.lookupDefinition(name);
+  return (
+    def !== undefined &&
+    isOperatorDef(def) &&
+    numericCanonicalHandlerName(def.operator.canonical) === name
+  );
 }
 
 function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {

@@ -371,9 +371,14 @@ function parseComponentAccess(
     // diagnostics are enabled: the source may be a mistyped decimal number or
     // a member access, and it is read as the product `x \cdot 0.5`.
     if (parser.options.strict === false && symbol(lhs) !== null)
-      parser.emitDiagnostic('letter-before-decimal', dotIndex, parser.index, {
-        name: symbol(lhs),
-      });
+      parser._emitAmbiguity?.(
+        'ambiguous-letter-decimal',
+        dotIndex,
+        parser.index,
+        {
+          name: symbol(lhs),
+        }
+      );
     return [
       'InvisibleOperator',
       lhs,
