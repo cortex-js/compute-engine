@@ -7741,7 +7741,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Stirling number of the second kind S(n, k), under Wolfram's name: ways to partition n elements into k non-empty subsets.",
+      "description": "`StirlingS2` is an alias for `Stirling`, which is the preferred name. Returns the Stirling number of the second kind S(n, k).",
       "examples": [
         "StirlingS2(6, 3)  // 90"
       ]

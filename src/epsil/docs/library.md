@@ -711,7 +711,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `sigmaMinus1` | `SigmaMinus1` | `(integer) -> rational` | Sum of reciprocals of positive divisors of n. |
 | `stirling` | `Stirling` | `(integer, integer) -> integer` | Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets. |
 | `stirlingS1` | `StirlingS1` | `(integer, integer) -> integer` | Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). |
-| `stirlingS2` | `StirlingS2` | `(integer, integer) -> integer` | Stirling number of the second kind S(n, k), under Wolfram's name: ways to partition n elements into k non-empty subsets. |
+| `stirlingS2` | `StirlingS2` | `(integer, integer) -> integer` | `StirlingS2` is an alias for `Stirling`, which is the preferred name. |
 | `totient` | `Totient` | `(integer) -> integer` | Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n. |
 
 ## Special functions

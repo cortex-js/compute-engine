@@ -515,7 +515,7 @@ stirlingS1(5, 2)
 
 MathJSON `StirlingS2` · `(integer, integer) -> integer`
 
-Stirling number of the second kind S(n, k), under Wolfram's name: ways to partition n elements into k non-empty subsets.
+`StirlingS2` is an alias for `Stirling`, which is the preferred name. Returns the Stirling number of the second kind S(n, k).
 
 ```epsil
 stirlingS2(6, 3)

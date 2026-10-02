@@ -1,11 +1,6 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
-import type {
-  IComputeEngine,
-  Expression,
-  SymbolDefinitions,
-} from '../global-types.js';
+import type { Expression, SymbolDefinitions } from '../global-types.js';
 import { toBigint } from '../boxed-expression/numerics.js';
-import { checkArity } from '../boxed-expression/validate.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { rationalize } from '../numerics/rationals.js';
 import {
@@ -272,57 +267,6 @@ function bigintDigitSum(
     x /= base;
   }
   return sum;
-}
-
-/**
- * Stirling number of the second kind, shared by `Stirling` and its Wolfram
- * spelling `StirlingS2`. Operands outside the triangle stay unevaluated.
- */
-function stirlingSecondKind(
-  [n, m]: ReadonlyArray<Expression>,
-  { engine: ce }: { engine: IComputeEngine }
-): Expression | undefined {
-  const nn = toBigint(n);
-  const mm = toBigint(m);
-  if (nn === null || mm === null || nn < 0n || mm < 0n || mm > nn)
-    return undefined;
-  // Bottom-up over the rows of the triangle, keeping only the last
-  // row: S(r, j) = j·S(r−1, j) + S(r−1, j−1), with S(0, 0) = 1 and
-  // S(r, 0) = S(0, j) = 0 otherwise. The bare recurrence revisits each
-  // (r, j) exponentially many times and recurses `n` deep; this walk is
-  // O(n·m) steps on integers of at most n·log₁₀(m) digits
-  // (S(n, m) ≤ mⁿ), and the work estimate keeps a call too large to
-  // materialize symbolic.
-  // The constant columns, answered before the work estimate so that a
-  // large `n` does not hide them: S(0, 0) = 1, S(n, 0) = 0 for n ≥ 1,
-  // and S(n, 1) = S(n, n) = 1.
-  if (nn === 0n) return ce.number(1);
-  if (mm === 0n) return ce.number(0);
-  if (mm === 1n || mm === nn) return ce.number(1);
-  const N = Number(nn);
-  const M = Number(mm);
-  if (
-    exactRecurrenceTooLarge(
-      triangleWalkStates(N, M),
-      N * Math.log10(Math.max(M, 2))
-    )
-  )
-    return undefined;
-  let prev: bigint[] = [1n]; // row 0
-  let steps = 0;
-  for (let r = 1; r <= N; r++) {
-    const width = Math.min(r, M);
-    const cur: bigint[] = new Array(width + 1);
-    cur[0] = 0n;
-    for (let j = 1; j <= width; j++) {
-      valueScaledStep('Stirling', ++steps, ce._deadlineFrame);
-      const above = prev[j] ?? 0n;
-      const left = prev[j - 1] ?? 0n;
-      cur[j] = BigInt(j) * above + left;
-    }
-    prev = cur;
-  }
-  return ce.number(prev[M] ?? 0n);
 }
 
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
@@ -808,8 +752,10 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         '`Lucas` is an alias for `LucasL`, which is the preferred name. Returns the nth Lucas number.',
       signature: '(integer) -> integer',
-      canonical: (ops, { engine }) =>
-        engine._fn('LucasL', [...checkArity(engine, ops, 1)]),
+      // `ce.function()` validates the operands against the `LucasL`
+      // signature, so the alias fails where `LucasL` fails. `_fn()` skipped
+      // that check and accepted a string operand.
+      canonical: (ops, { engine: ce }) => ce.function('LucasL', ops),
     },
 
     CatalanNumber: {
@@ -1326,8 +1272,10 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'The nth prime number. `PrimeNumber` is an alias for `NthPrime`, which is the preferred name.',
       signature: '(integer) -> integer',
-      canonical: (ops, { engine }) =>
-        engine._fn('NthPrime', [...checkArity(engine, ops, 1)]),
+      // `ce.function()` validates the operands against the `NthPrime`
+      // signature, so the alias fails where `NthPrime` fails. `_fn()` skipped
+      // that check and accepted a string operand.
+      canonical: (ops, { engine: ce }) => ce.function('NthPrime', ops),
     },
 
     Totient: {
@@ -1412,8 +1360,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n, m], { engine: ce }) => {
         const nn = toBigint(n);
         const mm = toBigint(m);
-        if (nn === null || mm === null || nn < 0n || mm < 0n || mm >= nn)
-          return undefined;
+        if (nn === null || mm === null || nn < 0n || mm < 0n) return undefined;
+        // Outside the triangle the value is 0, as for `Binomial`: no
+        // permutation of n ≥ 1 elements has n or more ascents. The one
+        // permutation of 0 elements has 0 ascents, so A(0, 0) = 1.
+        if (nn === 0n) return ce.number(mm === 0n ? 1 : 0);
+        if (mm >= nn) return ce.number(0);
         // Bottom-up over the rows of the Euler triangle, keeping only the
         // last row: A(r, j) = (j+1)·A(r−1, j) + (r−j)·A(r−1, j−1), with
         // A(r, 0) = 1 and A(r, j) = 0 for j ≥ r. The bare recurrence
@@ -1455,16 +1407,64 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets.',
       signature: '(integer, integer) -> integer',
-      evaluate: stirlingSecondKind,
+      evaluate: ([n, m], { engine: ce }) => {
+        const nn = toBigint(n);
+        const mm = toBigint(m);
+        if (nn === null || mm === null || nn < 0n || mm < 0n) return undefined;
+        // Outside the triangle the value is 0, as for `Binomial`: n elements
+        // cannot be split into more than n non-empty subsets.
+        if (mm > nn) return ce.number(0);
+        // Bottom-up over the rows of the triangle, keeping only the last
+        // row: S(r, j) = j·S(r−1, j) + S(r−1, j−1), with S(0, 0) = 1 and
+        // S(r, 0) = S(0, j) = 0 otherwise. The bare recurrence revisits each
+        // (r, j) exponentially many times and recurses `n` deep; this walk is
+        // O(n·m) steps on integers of at most n·log₁₀(m) digits
+        // (S(n, m) ≤ mⁿ), and the work estimate keeps a call too large to
+        // materialize symbolic.
+        // The constant columns, answered before the work estimate so that a
+        // large `n` does not hide them: S(0, 0) = 1, S(n, 0) = 0 for n ≥ 1,
+        // and S(n, 1) = S(n, n) = 1.
+        if (nn === 0n) return ce.number(1);
+        if (mm === 0n) return ce.number(0);
+        if (mm === 1n || mm === nn) return ce.number(1);
+        const N = Number(nn);
+        const M = Number(mm);
+        if (
+          exactRecurrenceTooLarge(
+            triangleWalkStates(N, M),
+            N * Math.log10(Math.max(M, 2))
+          )
+        )
+          return undefined;
+        let prev: bigint[] = [1n]; // row 0
+        let steps = 0;
+        for (let r = 1; r <= N; r++) {
+          const width = Math.min(r, M);
+          const cur: bigint[] = new Array(width + 1);
+          cur[0] = 0n;
+          for (let j = 1; j <= width; j++) {
+            valueScaledStep('Stirling', ++steps, ce._deadlineFrame);
+            const above = prev[j] ?? 0n;
+            const left = prev[j - 1] ?? 0n;
+            cur[j] = BigInt(j) * above + left;
+          }
+          prev = cur;
+        }
+        return ce.number(prev[M] ?? 0n);
+      },
     },
 
-    // Wolfram's spelling of `Stirling`; same signature and evaluation.
+    // Wolfram's name for `Stirling`. The canonical form rewrites it to
+    // `Stirling`, so the two spellings are the same expression for `isSame`,
+    // the simplification rules and serialization. The target is built with
+    // `ce.function()`, which validates the operands against the `Stirling`
+    // signature, so the alias fails where `Stirling` fails.
     StirlingS2: {
       description:
-        "Stirling number of the second kind S(n, k), under Wolfram's name: ways to partition n elements into k non-empty subsets.",
+        '`StirlingS2` is an alias for `Stirling`, which is the preferred name. Returns the Stirling number of the second kind S(n, k).',
       signature: '(integer, integer) -> integer',
       examples: ['StirlingS2(6, 3)  // 90'],
-      evaluate: stirlingSecondKind,
+      canonical: (ops, { engine: ce }) => ce.function('Stirling', ops),
     },
 
     StirlingS1: {
@@ -1475,8 +1475,10 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n, m], { engine: ce }) => {
         const nn = toBigint(n);
         const mm = toBigint(m);
-        if (nn === null || mm === null || nn < 0n || mm < 0n || mm > nn)
-          return undefined;
+        if (nn === null || mm === null || nn < 0n || mm < 0n) return undefined;
+        // Outside the triangle the value is 0, as for `Binomial`: the
+        // falling factorial x(x−1)…(x−n+1) has degree n.
+        if (mm > nn) return ce.number(0);
         // Bottom-up over the rows of the triangle, keeping only the last
         // row: s(r, j) = s(r−1, j−1) − (r−1)·s(r−1, j), with s(0, 0) = 1 and
         // s(r, 0) = s(0, j) = 0 otherwise. The memoized recursion recursed

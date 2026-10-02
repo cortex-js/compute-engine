@@ -25,7 +25,21 @@
   sample is drawn. The result is still a plain number (real or complex), not a
   `Measurement`.
 
+### New Features
+
+- **`StirlingS2(n, k)` is an alias for `Stirling(n, k)`,** the Stirling number
+  of the second kind, under its Mathematica name. Its canonical form is
+  `Stirling`, the preferred name: `StirlingS2(6, 3)` evaluates to `90`, and
+  `StirlingS2(n, k)` is `Stirling(n, k)`. `Stirling` is unchanged. (#395,
+  contributed by [enumeratio](https://github.com/enumeratio))
+
 ### Issues Resolved
+
+- **`Stirling`, `StirlingS1` and `Eulerian` outside their triangle are `0`.**
+  `Stirling(3, 5)`, `StirlingS1(3, 5)` and `Eulerian(3, 5)` stayed
+  unevaluated (and their compiled form gave `NaN`); they are now `0`, as
+  `Binomial(3, 5)` already was. `Eulerian(0, 0)` is now `1`. A negative or
+  symbolic operand still leaves the expression unevaluated.
 
 - **A redeclared `If`, `Sum`, `Block`, … compiles as the user definition.**
   With `ce.declare('If', { ...ce.lookupDefinition('If').operator, evaluate:
@@ -603,12 +617,6 @@
   compute to the requested digits without reading `ce.precision`. `N(x, p)`
   with `p` above `ce.precision` still raises `ce.precision` and leaves it
   raised, as before.
-
-- **`StirlingS2(n, k)` is Mathematica's spelling of `Stirling(n, k)`,** the
-  Stirling number of the second kind, and gives the same values:
-  `StirlingS2(6, 3)` is `90`, `StirlingS2(0, 0)` is `1` and `StirlingS2(3, 5)`
-  stays unevaluated, as do negative and symbolic operands. `Stirling` is
-  unchanged. (#395, contributed by [enumeratio](https://github.com/enumeratio))
 
 ### Issues Resolved
 
