@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 683 functions and constants of the standard library, by category.
+The 686 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -35,7 +35,7 @@ To search the library by concept rather than by name, use
 - [Calculus](#calculus) — 19 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 17 definitions · [full reference](/epsil/reference/polynomials/)
 - [Combinatorics](#combinatorics) — 11 definitions · [full reference](/epsil/reference/combinatorics/)
-- [Number theory](#number-theory) — 53 definitions · [full reference](/epsil/reference/number-theory/)
+- [Number theory](#number-theory) — 56 definitions · [full reference](/epsil/reference/number-theory/)
 - [Special functions](#special-functions) — 14 definitions · [full reference](/epsil/reference/special-functions/)
 - [Linear algebra](#linear-algebra) — 42 definitions · [full reference](/epsil/reference/linear-algebra/)
 - [Statistics](#statistics) — 35 definitions · [full reference](/epsil/reference/statistics/)
@@ -692,20 +692,23 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `lucasL` | `LucasL` | `(integer) -> integer` | Return the nth Lucas number: `LucasL(0)` is 2, `LucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. |
 | `modularInverse` | `ModularInverse` | `(integer, integer) -> integer` | Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. |
 | `moebiusMu` | `MoebiusMu` | `(integer) -> integer` | Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square &gt; 1, otherwise (-1) raised to the number of distinct prime factors. |
-| `multiplicativeOrder` | `MultiplicativeOrder` | `(integer, integer) -> integer` | The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. |
+| `multiplicativeOrder` | `MultiplicativeOrder` | `(integer, integer, list<integer>?) -> integer` | The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. |
 | `nPartition` | `NPartition` | `(integer) -> integer` | Number of integer partitions of n. |
 | `nextPrime` | `NextPrime` | `(integer, integer?) -> integer` | Return the smallest prime greater than `n`. |
 | `notDivides` | `NotDivides` | `(integer, integer) -> boolean` | `NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`. |
 | `nthPrime` | `NthPrime` | `(integer) -> integer` | Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, … |
-| `powerMod` | `PowerMod` | `(integer, integer, integer) -> integer` | Return `a^b mod m` (modular exponentiation). |
+| `powerMod` | `PowerMod` | `(integer, rational, integer) -> integer` | Return `a^b mod m` (modular exponentiation). |
+| `powerModList` | `PowerModList` | `(integer, rational, integer) -> list<integer>` | Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. |
 | `primeFactors` | `PrimeFactors` | `(integer) -> list<integer>` | Return the sorted list of distinct prime factors of an integer `n`. |
 | `primeNu` | `PrimeNu` | `(integer) -> integer` | Return ω(n), the number of distinct prime factors of `n`. |
 | `primeNumber` | `PrimeNumber` | `(integer) -> integer` | The nth prime number. |
 | `primeOmega` | `PrimeOmega` | `(integer) -> integer` | Return Ω(n), the number of prime factors of `n` counted with multiplicity. |
 | `primePi` | `PrimePi` | `(real) -> integer` | Return π(n), the prime-counting function: the number of primes less than or equal to `n`. |
 | `primitiveRoot` | `PrimitiveRoot` | `(integer) -> integer` | The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p). |
+| `primitiveRootList` | `PrimitiveRootList` | `(integer) -> list<integer>` | The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. |
 | `radical` | `Radical` | `(integer) -> integer` | Return the radical of `n` (its square-free kernel): the product of its distinct prime factors. |
 | `randomPrime` | `RandomPrime` | `(integer, integer?) random -> integer` | Return a random prime. |
+| `rationalReconstruction` | `RationalReconstruction` | `(integer, integer) -> rational` | The rational `p/q` with `p ≡ a·q (mod m)` and `\|p\|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). |
 | `sigma0` | `Sigma0` | `(integer) -> integer` | Number of positive divisors of n. |
 | `sigma1` | `Sigma1` | `(integer) -> integer` | Sum of positive divisors of n. |
 | `sigmaMinus1` | `SigmaMinus1` | `(integer) -> rational` | Sum of reciprocals of positive divisors of n. |
