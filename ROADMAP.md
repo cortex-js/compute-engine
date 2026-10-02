@@ -498,24 +498,6 @@ bracket group (for example `\left[ … \right]` with one operand), which
 changes what that spelling gives today. Writer: the `Delimiter` serializer in
 `latex-syntax/dictionary/definitions-core.ts`.
 
-### Wolfram Language aliases for the existing operators that qualify (OPEN, small — decided 2026-10-01 with the `StirlingS2` alias)
-
-The naming policy in `docs/MATHEMATICA-NAMES.md` allows a Wolfram name as an
-alias of an existing operator when the meaning, the argument order and the
-number of arguments are all the same; the alias is rewritten to the CE
-operator when the expression is made canonical. Only `StirlingS2` is done.
-Today `["EulerPhi", 12]` stays `EulerPhi(12)`, unevaluated, with no error.
-Candidates from the table in that file, each to be checked against the
-conditions before it is added: `EulerPhi` → `Totient`, `PartitionsP` →
-`NPartition`, `Det` → `Determinant`, `Tr` → `Trace`. `Log` gets no alias:
-its one-operand meaning and its argument order differ. `Prime` gets no alias:
-it is already a CE operator, the prime mark of a derivative (`f'`), which is
-how `Prime[n]` → `NthPrime` would otherwise be read.
-Model each alias on `StirlingS2` in `library/number-theory.ts`
-(`ce.function(<head>, ops)` in the `canonical` handler, so the signature of
-the operator is checked), with a test that the alias and the operator give
-the same result, also for an invalid operand.
-
 ### `arctan` is not odd on its branch cut (OPEN, decision — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
 
 The cut of `arctan` is the imaginary axis outside `[−i, i]`. The engine puts

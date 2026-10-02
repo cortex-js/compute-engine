@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Number theory
 
-The 58 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 60 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -166,6 +166,17 @@ Return the sorted list of positive divisors of an integer `n`. The sign of `n` i
 ```epsil
 divisors(12)
 // ➔ [1,2,3,4,6,12]
+```
+
+### eulerPhi
+
+MathJSON `EulerPhi` · `(integer) -> integer`
+
+`EulerPhi` is an alias for `Totient`, which is the preferred name. Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).
+
+```epsil
+eulerPhi(12)
+// ➔ 4
 ```
 
 ### eulerian
@@ -390,7 +401,7 @@ multiplicativeOrder(5, 7, [3, 11])
 
 MathJSON `NPartition` · `(integer) -> integer`
 
-Number of integer partitions of n.
+Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0.
 
 ### nextPrime
 
@@ -423,6 +434,17 @@ Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, �
 ```epsil
 nthPrime(10)
 // ➔ 29
+```
+
+### partitionsP
+
+MathJSON `PartitionsP` · `(integer) -> integer`
+
+`PartitionsP` is an alias for `NPartition`, which is the preferred name. Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0.
+
+```epsil
+partitionsP(5)
+// ➔ 7
 ```
 
 ### powerMod
@@ -616,4 +638,4 @@ stirlingS2(6, 3)
 
 MathJSON `Totient` · `(integer) -> integer`
 
-Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n.
+Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).

@@ -1,3 +1,27 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **`Totient` and `NPartition` evaluate for zero and negative integers.**
+  `Totient(0)` is `0` and `Totient(-n)` is `Totient(n)` (`Totient(-12)` is
+  `4`); `NPartition(n)` is `0` for a negative integer `n`. These are the
+  values of Mathematica's `EulerPhi` and `PartitionsP`, and of the Fungrim
+  identities the engine already loads (`Totient(-n) = Totient(n)`,
+  `NPartition(-n) = 0`). Before, these inputs stayed unevaluated
+  (`Totient(0)`, `NPartition(-3)`).
+
+### New Features
+
+- **Wolfram Language aliases `EulerPhi`, `PartitionsP` and `Det`.** They are
+  aliases for `Totient`, `NPartition` and `Determinant`: the canonical form
+  uses the CE name (`["EulerPhi", 12]` becomes `["Totient", 12]`, which
+  evaluates to `4`), and an invalid operand gives the same error as the CE
+  operator. Before, `EulerPhi(12)` stayed unevaluated with no error. `Det` has
+  only the one-operand form: `Det[m, Modulus -> n]` has no CE equivalent and
+  its second operand is an `unexpected-argument` error. `Tr` gets no alias,
+  because Mathematica's `Tr` of a vector or of a rank-3 tensor has a different
+  meaning than `Trace`. See `docs/MATHEMATICA-NAMES.md`.
+
 ## 0.146.0 _2026-10-02_
 
 ### Behavior Changes

@@ -1540,7 +1540,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Totient: {
       wikidata: 'Q190026',
       description:
-        "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n.",
+        "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).",
       // The `integer` carrier, like the other number-theory heads: φ counts
       // integers coprime to an integer, so a provably non-integer argument is
       // rejected at the signature with `incompatible-type` (ruling L9(a)).
@@ -1558,9 +1558,26 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // gate before it.
         if (n.isInteger !== true) return undefined;
         const k = toBigint(n);
-        if (k === null || k < 1) return undefined;
-        return ce.number(eulerPhi(k, ce._deadlineFrame));
+        if (k === null) return undefined;
+        // φ(0) = 0 and φ(−n) = φ(n), as in Mathematica's `EulerPhi` and in
+        // the Fungrim identities the engine loads (`Totient(−n) = Totient(n)`;
+        // `Totient(2n) = 2·Totient(n)` for even n ≥ 0 requires φ(0) = 0).
+        if (k === 0n) return ce.number(0);
+        return ce.number(eulerPhi(k < 0n ? -k : k, ce._deadlineFrame));
       },
+    },
+
+    // `EulerPhi` is the Wolfram Language name of `Totient`. It has the same
+    // meaning and the same single integer operand, so the canonical form is
+    // `Totient`: the output uses one spelling, and `isSame` and the rules see
+    // one operator. `ce.function()` validates the operand against the
+    // `Totient` signature, so the alias fails where `Totient` fails.
+    EulerPhi: {
+      description:
+        "`EulerPhi` is an alias for `Totient`, which is the preferred name. Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).",
+      signature: '(integer) -> integer',
+      examples: ['EulerPhi(12)  // 4'],
+      canonical: (ops, { engine: ce }) => ce.function('Totient', ops),
     },
 
     Sigma0: {
@@ -1775,11 +1792,21 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     },
 
     NPartition: {
-      description: 'Number of integer partitions of n.',
+      description:
+        'Number of integer partitions of n, for n ≥ 0; it is 0 for n < 0.',
       signature: '(integer) -> integer',
       evaluate: ([n], { engine: ce }) => {
+        // `toBigint` rounds a non-integer, so the integrality test comes
+        // first: without it a non-integer that reaches the handler would get
+        // the value of the nearest integer (−0.5 would give p(0) = 1).
+        if (n.isInteger !== true) return undefined;
         const nn = toBigint(n);
-        if (nn === null || nn < 0n) return undefined;
+        if (nn === null) return undefined;
+        // p(n) = 0 for n < 0: no partition sums to a negative integer. This
+        // is the convention of the pentagonal recurrence below, of the Fungrim
+        // identity `NPartition(−n) = 0` the engine loads, and of
+        // Mathematica's `PartitionsP`.
+        if (nn < 0n) return ce.number(0);
         // Euler's pentagonal recurrence, bottom-up:
         // p(m) = Σ_{k≥1} (−1)^{k+1} (p(m − k(3k−1)/2) + p(m − k(3k+1)/2)),
         // with p(0) = 1 and p(j) = 0 for j < 0. The memoized recursion
@@ -1808,6 +1835,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         }
         return ce.number(P[N]);
       },
+    },
+
+    // `PartitionsP` is the Wolfram Language name of `NPartition`. It has the
+    // same meaning and the same single integer operand, so the canonical form
+    // is `NPartition`. `ce.function()` validates the operand against the
+    // `NPartition` signature, so the alias fails where `NPartition` fails.
+    PartitionsP: {
+      description:
+        '`PartitionsP` is an alias for `NPartition`, which is the preferred name. Number of integer partitions of n, for n ≥ 0; it is 0 for n < 0.',
+      signature: '(integer) -> integer',
+      examples: ['PartitionsP(5)  // 7'],
+      canonical: (ops, { engine: ce }) => ce.function('NPartition', ops),
     },
 
     IsTriangular: {
