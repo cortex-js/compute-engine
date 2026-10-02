@@ -24,6 +24,8 @@
       "Conjugate",
       "Denominator",
       "Digamma",
+      "DirichletBeta",
+      "DirichletEta",
       "Distance",
       "Divide",
       "ElementMax",
@@ -540,6 +542,8 @@
       "ContinuedFraction",
       "DigitCount",
       "DigitSum",
+      "DirichletCharacter",
+      "DirichletL",
       "Divides",
       "Divisors",
       "DivisorSigma",
@@ -688,6 +692,8 @@
     "operators": [
       "AGM",
       "AppellF1",
+      "BarnesG",
+      "ClausenCl",
       "DedekindEta",
       "EisensteinE",
       "EllipticE",
@@ -698,8 +704,11 @@
       "Hypergeometric1F1",
       "Hypergeometric2F1",
       "JacobiTheta",
+      "LogBarnesG",
+      "LogGamma",
       "LogIntegral",
-      "PolyLog"
+      "PolyLog",
+      "StieltjesGamma"
     ],
     "constants": []
   },

@@ -746,6 +746,23 @@
       ]
     },
     {
+      "name": "BarnesG",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The Barnes G-function, the double gamma function G(z+1) = Γ(z)·G(z), G(1) = 1. G(n) is the superfactorial 1!·2!⋯(n−2)! at a positive integer n; G is entire, with zeros at the non-positive integers.",
+      "wikidata": "Q808463",
+      "examples": [
+        "BarnesG(5)",
+        "N(BarnesG(1/2))"
+      ]
+    },
+    {
       "name": "BaseForm",
       "category": "Core",
       "arity": "optional",
@@ -1250,6 +1267,21 @@
       "description": "Clamp a value to the range [lo, hi] = min(max(x, lo), hi). Broadcasts over collection arguments.",
       "examples": [
         "[Clamp(12, 0, 10), Clamp(-3, 0, 10), Clamp(5, 0, 10)]"
+      ]
+    },
+    {
+      "name": "ClausenCl",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(integer, real) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ for odd n. A real θ follows the engine precision.",
+      "examples": [
+        "[ClausenCl(2, 1), ClausenCl(3, 0), N(ClausenCl(2, 1))]"
       ]
     },
     {
@@ -2190,6 +2222,69 @@
       "description": "Dimension of an object",
       "examples": [
         "Dimension([[1, 2, 3], [4, 5, 6]])"
+      ]
+    },
+    {
+      "name": "DirichletBeta",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Dirichlet beta function β(s) = Σ_{n≥0} (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1.",
+      "examples": [
+        "[DirichletBeta(1), DirichletBeta(3), N(DirichletBeta(1/2))]"
+      ]
+    },
+    {
+      "name": "DirichletCharacter",
+      "category": "Number Theory",
+      "arity": "3",
+      "signature": "(integer, integer, integer) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). Zero where gcd(n, k) > 1; otherwise a root of unity.",
+      "examples": [
+        "DirichletCharacter(5, 2, 2)  // i",
+        "DirichletCharacter(7, 3, 3)  // e^(2πi/3)"
+      ]
+    },
+    {
+      "name": "DirichletEta",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Dirichlet eta function η(s) = Σ_{n≥1} (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1.",
+      "examples": [
+        "[DirichletEta(2), DirichletEta(1), N(DirichletEta(1/2))]"
+      ]
+    },
+    {
+      "name": "DirichletL",
+      "category": "Number Theory",
+      "arity": "3",
+      "signature": "(integer, integer, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. Entire for a non-principal character; the principal one is `ζ(s) Π_{p|k} (1 − p^(−s))`.",
+      "examples": [
+        "DirichletL(1, 1, 2)  // π²/6",
+        "DirichletL(3, 2, -2)  // −2/9",
+        "DirichletL(5, 2, 0)  // 3/5 + i/5"
       ]
     },
     {
@@ -4706,6 +4801,38 @@
       "description": "Base-2 Logarithm",
       "examples": [
         "[Log2(32), N(Log2(3))]"
+      ]
+    },
+    {
+      "name": "LogBarnesG",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The logarithm of the Barnes G-function, continued analytically with `LogGamma`: its imaginary part is not principal on the negative axis. −∞ at the zeros of G, the non-positive integers.",
+      "examples": [
+        "LogBarnesG(5)",
+        "N(LogBarnesG(-1/2))"
+      ]
+    },
+    {
+      "name": "LogGamma",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(complex | infinity) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; not `GammaLn`, the principal logarithm of Γ(z), which jumps by 2πi across the zeros of Im Γ.",
+      "examples": [
+        "LogGamma(5)",
+        "N(LogGamma(-2.5 + 1.5i))"
       ]
     },
     {
@@ -7751,6 +7878,23 @@
       "description": "Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence.\n\nOn a string the prefix is matched character by character, so a prefix that would end inside a grapheme cluster does not match. An empty prefix matches everything.",
       "examples": [
         "StartsWith([1, 2, 3], [1, 2])"
+      ]
+    },
+    {
+      "name": "StieltjesGamma",
+      "category": "special-functions",
+      "arity": "optional",
+      "signature": "(integer, number?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Generalized Stieltjes constants γₙ(a), the Laurent coefficients of ζ(s, a) at s = 1: ζ(s, a) = 1/(s−1) + Σₙ (−1)ⁿ γₙ(a)(s−1)ⁿ/n!. StieltjesGamma(n) is γₙ = γₙ(1), and γ₀ is Euler's constant.",
+      "examples": [
+        "StieltjesGamma(0)",
+        "N(StieltjesGamma(1))",
+        "N(StieltjesGamma(2, 1/2))"
       ]
     },
     {

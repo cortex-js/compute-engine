@@ -1,3 +1,5 @@
+import { Complex } from 'complex-esm';
+import { BigDecimal } from '../../big-decimal/index.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   SIGNED_INFINITY_TYPE,
@@ -8,7 +10,11 @@ import type {
   Expression,
   IComputeEngine,
 } from '../global-types.js';
-import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
+import {
+  applyN,
+  isExactNumber,
+  shouldNumericize,
+} from '../boxed-expression/apply.js';
 import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
 import {
@@ -17,7 +23,13 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
-import { hurwitzOperand, boxBignumApprox } from './arithmetic.js';
+import {
+  hurwitzOperand,
+  boxBignumApprox,
+  bigRealOperand,
+  boxComplexResult,
+  infiniteGammaFamilyValue,
+} from './arithmetic.js';
 // Every `type` handler in this file is on the `'types'` (operand-descriptor)
 // shape, so the helpers all come from the descriptor-shape module. The
 // `OnTypes` suffixes are kept while the expression-shape module still
@@ -30,6 +42,7 @@ import {
   iv,
   type RealDomain,
 } from './type-handlers.js';
+import { bigClausen, clausen } from '../numerics/clausen.js';
 import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -56,12 +69,25 @@ import {
   polylog,
   bigPolyLog,
 } from '../numerics/special-functions.js';
+import { gammaln, bigGammaln } from '../numerics/special-functions.js';
+import { logGammaComplex } from '../numerics/log-gamma.js';
+import {
+  barnesGComplex,
+  bigBarnesG,
+  logBarnesGComplex,
+  superfactorial,
+} from '../numerics/barnes-g.js';
 import {
   EULERIAN_MAX_ORDER,
   eulerianRow,
   polylogOrderReal,
   polylogOrderComplex,
 } from '../numerics/polylog.js';
+import {
+  STIELTJES_MAX_ORDER,
+  stieltjesGammaComplex,
+  bigStieltjesGamma,
+} from '../numerics/stieltjes.js';
 import {
   ellipticKComplex,
   ellipticEComplex,
@@ -95,6 +121,12 @@ import {
  *   only evaluated for r = 0.
  * - `DedekindEta(tau)` = e^{iπτ/12}·∏(1 − e^{2πikτ}) (Fungrim 1dc520).
  */
+
+/** Largest n for which `LogGamma(n)` is formed exactly as ln((n−1)!). */
+const MAX_EXACT_LOG_ARGUMENT = 1000;
+
+/** Largest n for which `BarnesG(n)` is formed exactly as a superfactorial (about 4·10⁴ digits). */
+const MAX_EXACT_SUPERFACTORIAL = 200;
 
 /** `EllipticK`: real for m < 1, `+∞` pole at m = 1, finite complex for m > 1. */
 const ELLIPTIC_K_DOMAIN: RealDomain = {
@@ -184,6 +216,157 @@ function agmValueAtInfinity(
 
 export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
   {
+    LogGamma: {
+      description:
+        'The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; ' +
+        'not `GammaLn`, the principal logarithm of Γ(z), which jumps by 2πi ' +
+        'across the zeros of Im Γ.',
+      complexity: 8000,
+      broadcastable: true,
+      // Carrier, NaN policy and the values at the infinite points as for
+      // `GammaLn`: `+∞` at the poles (the non-positive integers), `+∞` at
+      // `+∞`, `Indeterminate` at `−∞` and `~oo`. The value is complex on the
+      // whole negative axis (Im = π⌊x⌋), so the claim is the top numeric type.
+      signature: '(complex | infinity) -> number',
+      examples: ['LogGamma(5)', 'N(LogGamma(-2.5 + 1.5i))'],
+      nanBehavior: 'propagate',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
+      evaluate: ([z], { numericApproximation, engine }) => {
+        if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
+          return engine.PositiveInfinity;
+        const infinite = infiniteGammaFamilyValue(z, engine);
+        if (infinite !== undefined) return infinite;
+        const n = asSmallInteger(z);
+        if (
+          n !== null &&
+          n >= 1 &&
+          n <= MAX_EXACT_LOG_ARGUMENT &&
+          isExactNumber(z)
+        ) {
+          // lnΓ(n) = ln((n−1)!)
+          const exact = engine.expr(['Ln', ['Factorial', n - 1]]);
+          return numericApproximation ? exact.N() : exact.evaluate();
+        }
+        if (
+          !numericApproximation &&
+          isNumber(z) &&
+          z.isSame(0.5) &&
+          isExactNumber(z)
+        )
+          // Γ(1/2) = √π
+          return engine.expr(['Divide', ['Ln', 'Pi'], 2]).evaluate();
+        return shouldNumericize(numericApproximation, z)
+          ? applyN(
+              [z],
+              (x) => (x > 0 ? gammaln(x) : NaN),
+              (x) => (x.isPositive() ? bigGammaln(engine, x) : BigDecimal.NAN),
+              logGammaComplex
+            )
+          : undefined;
+      },
+    },
+
+    BarnesG: {
+      description:
+        'The Barnes G-function, the double gamma function G(z+1) = Γ(z)·G(z), G(1) = 1. ' +
+        'G(n) is the superfactorial 1!·2!⋯(n−2)! at a positive integer n; G is entire, ' +
+        'with zeros at the non-positive integers.',
+      wikidata: 'Q808463',
+      complexity: 8600,
+      broadcastable: true,
+      // Carrier and infinite points as for `LogGamma`; G grows without bound
+      // at `+∞` and has no limit at the other infinities (zeros on the
+      // negative axis). The value is real on the real axis, but its sign
+      // alternates and a pole-free `real` claim is not made: top numeric type.
+      signature: '(complex | infinity) -> number',
+      examples: ['BarnesG(5)', 'N(BarnesG(1/2))'],
+      nanBehavior: 'propagate',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
+      evaluate: ([z], { numericApproximation, engine }) => {
+        if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
+          return engine.Zero;
+        const infinite = infiniteGammaFamilyValue(z, engine);
+        if (infinite !== undefined) return infinite;
+        const n = asSmallInteger(z);
+        if (
+          n !== null &&
+          n >= 1 &&
+          n <= MAX_EXACT_SUPERFACTORIAL &&
+          isExactNumber(z)
+        )
+          return engine.number(superfactorial(n));
+        if (!shouldNumericize(numericApproximation, z)) return undefined;
+        // A real value carries `ce.precision` digits or the head stays unevaluated.
+        if (isNumber(z) && !z.isComplex && bignumPreferred(engine)) {
+          const big = bigBarnesG(engine, bigRealOperand(engine, z));
+          return big === undefined ? undefined : boxBignumApprox(engine, big);
+        }
+        return applyN(
+          [z],
+          (x) => barnesGComplex(new Complex(x, 0)).re,
+          undefined,
+          barnesGComplex
+        );
+      },
+    },
+
+    LogBarnesG: {
+      description:
+        'The logarithm of the Barnes G-function, continued analytically with ' +
+        '`LogGamma`: its imaginary part is not principal on the negative axis. ' +
+        '−∞ at the zeros of G, the non-positive integers.',
+      complexity: 8600,
+      broadcastable: true,
+      // As `BarnesG`; `−∞` at the zeros, so the carrier of the answer is every number.
+      signature: '(complex | infinity) -> number',
+      examples: ['LogBarnesG(5)', 'N(LogBarnesG(-1/2))'],
+      nanBehavior: 'propagate',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
+      evaluate: ([z], { numericApproximation, engine }) => {
+        if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
+          return engine.NegativeInfinity;
+        const infinite = infiniteGammaFamilyValue(z, engine);
+        if (infinite !== undefined) return infinite;
+        const n = asSmallInteger(z);
+        if (
+          n !== null &&
+          n >= 1 &&
+          n <= MAX_EXACT_SUPERFACTORIAL &&
+          isExactNumber(z)
+        ) {
+          // ln G(n) = ln of the superfactorial
+          const exact = engine.function('Ln', [
+            engine.number(superfactorial(n)),
+          ]);
+          return numericApproximation ? exact.N() : exact.evaluate();
+        }
+        if (!shouldNumericize(numericApproximation, z)) return undefined;
+        // x > 0 has a real logarithm, with `ce.precision` digits or
+        // unevaluated; for x ≤ 0 the continuation is complex (machine).
+        if (isNumber(z) && !z.isComplex && bignumPreferred(engine)) {
+          const x = bigRealOperand(engine, z);
+          if (x.isPositive()) {
+            const big = bigBarnesG(engine, x);
+            return big === undefined
+              ? undefined
+              : boxBignumApprox(engine, big.ln());
+          }
+        }
+        return applyN(
+          [z],
+          (x) => {
+            const v = logBarnesGComplex(new Complex(x, 0));
+            return v.im === 0 ? v.re : NaN;
+          },
+          undefined,
+          logBarnesGComplex
+        );
+      },
+    },
+
     EllipticK: {
       description:
         'Complete elliptic integral of the first kind K(m), parameter convention m = k².',
@@ -609,6 +792,149 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         return shouldNumericize(numericApproximation, s, z)
           ? applyN([s, z], polylogOrderReal, undefined, polylogOrderComplex)
           : undefined;
+      },
+    },
+
+    StieltjesGamma: {
+      description:
+        "Generalized Stieltjes constants γₙ(a), the Laurent coefficients of ζ(s, a) at s = 1: ζ(s, a) = 1/(s−1) + Σₙ (−1)ⁿ γₙ(a)(s−1)ⁿ/n!. StieltjesGamma(n) is γₙ = γₙ(1), and γ₀ is Euler's constant.",
+      examples: [
+        'StieltjesGamma(0)',
+        'N(StieltjesGamma(1))',
+        'N(StieltjesGamma(2, 1/2))',
+      ],
+      complexity: 8700,
+      broadcastable: true,
+      signature: '(integer, number?) -> number',
+      nanBehavior: 'propagate',
+      evaluate: (ops, { numericApproximation, engine }) => {
+        const [n, a] = ops;
+        const order = asSmallInteger(n);
+        if (order === null || order < 0) return undefined;
+
+        // γₙ(a) has a pole at every nonpositive integer a, as ζ(s, a) does.
+        if (a !== undefined && isNumber(a) && !a.isComplex) {
+          const integer = a.bignumRe?.isInteger() ?? Number.isInteger(a.re);
+          if (integer && a.re <= 0) return engine.ComplexInfinity;
+        }
+
+        // γ₀(a) = −ψ(a), so γ₀(1) = Euler's constant.
+        if (order === 0) {
+          if (a === undefined || (isNumber(a) && a.isSame(1)))
+            return shouldNumericize(numericApproximation, ...ops)
+              ? engine.symbol('EulerGamma').N()
+              : engine.symbol('EulerGamma');
+          const reduced = engine
+            .function('Negate', [
+              engine.function('PolyGamma', [engine.Zero, a]),
+            ])
+            .evaluate({ numericApproximation });
+          if (!numericApproximation || isNumber(reduced)) return reduced;
+        }
+
+        // γₙ(1) = γₙ: the two-operand form reduces to the one-operand one.
+        if (a !== undefined && isNumber(a) && a.isExact && a.isSame(1))
+          return engine
+            .function('StieltjesGamma', [n])
+            .evaluate({ numericApproximation });
+
+        if (!shouldNumericize(numericApproximation, ...ops)) return undefined;
+        if (order > STIELTJES_MAX_ORDER) return undefined;
+        if (a !== undefined && !isNumber(a)) return undefined;
+        const re = a === undefined ? 1 : a.re;
+        const im = a === undefined ? 0 : a.im;
+        if (!Number.isFinite(re) || !Number.isFinite(im)) return undefined;
+
+        // Real a > 0: the arbitrary-precision kernel follows `ce.precision`,
+        // its Euler–Maclaurin remainder bounded. Complex a, and a < 0 where
+        // the value is complex, use the double kernel at every precision.
+        if (im === 0 && re > 0 && bignumPreferred(engine)) {
+          const big = bigStieltjesGamma(
+            order,
+            a === undefined ? [1n, 1n] : hurwitzOperand(engine, a),
+            engine.precision
+          );
+          return big === undefined ? undefined : boxBignumApprox(engine, big);
+        }
+        const z = stieltjesGammaComplex(order, new Complex(re, im));
+        if (z === undefined) return undefined;
+        return boxComplexResult(engine, z, im === 0 && re > 0);
+      },
+    },
+
+    ClausenCl: {
+      description:
+        'Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ for odd n. A real θ follows the engine precision.',
+      complexity: 8700,
+      broadcastable: true,
+      // Cl₁(θ) = −ln|2 sin(θ/2)| is +∞ at θ ≡ 0, so the result is `real`
+      // only for a literal order ≥ 2. A non-real θ stays symbolic.
+      signature: '(integer, real) -> number',
+      examples: ['[ClausenCl(2, 1), ClausenCl(3, 0), N(ClausenCl(2, 1))]'],
+      nanBehavior: 'propagate',
+      type: ([n, theta], context) => {
+        const order = n === undefined ? undefined : operandLiteralValue(n);
+        const t = numericTypeHandlerOnTypes([n, theta]);
+        const real =
+          order !== undefined && Number.isInteger(order) && order >= 2;
+        return BoxedType.forResult(
+          real && isSubtype(t, 'real') ? 'real' : 'number',
+          context.engine._typeResolver
+        );
+      },
+      evaluate: (ops, { numericApproximation, engine }) => {
+        const [n, theta] = ops;
+        if (!isNumber(n) || n.isComplex) return undefined;
+        const order = asSmallInteger(n);
+        if (order === null || order < 1) return undefined;
+        const even = order % 2 === 0;
+
+        // θ = 0: Cl₁ is +∞, even orders vanish, odd orders are ζ(n).
+        if (isNumber(theta) && !theta.isComplex && theta.isSame(0)) {
+          if (order === 1) return engine.PositiveInfinity;
+          const value = even ? engine.Zero : engine.function('Zeta', [n]);
+          return floatIfFloatOperand(
+            ops,
+            value.evaluate({ numericApproximation })
+          );
+        }
+
+        // Cl_n(π) = 0 (even) or −η(n) (odd); Cl_n(π/2) = −2⁻ⁿ·η(n) (odd) and
+        // β(n) (even, since sin(kπ/2) = (−1)ʲ at k = 2j+1; β(2) = G);
+        // η(n) = (1 − 2¹⁻ⁿ)ζ(n), with η(1) = ln 2.
+        const eta = (): Expression =>
+          order === 1
+            ? engine.function('Ln', [engine.number(2)])
+            : engine
+                .number(1)
+                .sub(engine.number(2).pow(engine.number(1 - order)))
+                .mul(engine.function('Zeta', [n]));
+        if (theta.isSame(engine.Pi)) {
+          const value = even ? engine.Zero : eta().neg();
+          return floatIfFloatOperand(
+            ops,
+            value.evaluate({ numericApproximation })
+          );
+        }
+        if (theta.isSame(engine.Pi.div(2))) {
+          const value = even
+            ? engine.function('DirichletBeta', [n])
+            : eta()
+                .mul(engine.number(2).pow(engine.number(-order)))
+                .neg();
+          return floatIfFloatOperand(
+            ops,
+            value.evaluate({ numericApproximation })
+          );
+        }
+
+        if (!shouldNumericize(numericApproximation, n, theta)) return undefined;
+        // A real value carries `ce.precision` digits or the head stays unevaluated.
+        if (isNumber(theta) && !theta.isComplex && bignumPreferred(engine)) {
+          const big = bigClausen(engine, order, bigRealOperand(engine, theta));
+          return big === undefined ? undefined : boxBignumApprox(engine, big);
+        }
+        return applyN([n, theta], clausen);
       },
     },
 

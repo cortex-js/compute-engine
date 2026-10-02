@@ -716,6 +716,106 @@
   with `p` above `ce.precision` still raises `ce.precision` and leaves it
   raised, as before.
 
+- **`DirichletEta` and `DirichletBeta`, the two alternating cousins of ζ,
+  both entire** (#395, contributed by
+  [enumeratio](https://github.com/enumeratio)). `DirichletEta(s)` is
+  η(s) = Σ (−1)ⁿ⁻¹/nˢ = (1 − 2¹⁻ˢ) ζ(s) and `DirichletBeta(s)` is
+  β(s) = Σ (−1)ⁿ/(2n+1)ˢ = 4⁻ˢ (ζ(s, ¼) − ζ(s, ¾)). Exact values at the
+  integers: `DirichletEta(1)` is `ln 2`, `DirichletEta(2)` is `π²/12`,
+  `DirichletEta(0)` is `1/2`, `DirichletEta(-3)` is `-1/8`;
+  `DirichletBeta(1)` is `π/4`, `DirichletBeta(2)` is `CatalanConstant`,
+  `DirichletBeta(5)` is `5π⁵/1536`, `DirichletBeta(-4)` is `5/2` (Euler
+  numbers). A real `s` is answered at `ce.precision` digits, also next to the
+  pole of ζ: `N(DirichletEta(1/2))` is `0.604898643421630370247`, and
+  `η(1 + 10⁻³⁰)` keeps every digit instead of cancelling the pole. A complex
+  `s` is answered in doubles: `DirichletBeta(0.5 + 14i)` is
+  `1.5371154384 + 1.3434514269i`. Both are `1` at `+∞` and `Indeterminate` at
+  `-∞`. A real `s` too close to 1 for the digits to be reached stays
+  unevaluated. Both compile to JavaScript.
+
+- **`StieltjesGamma(n, a)` is the generalized Stieltjes constant γₙ(a),** the
+  Laurent coefficient of the Hurwitz zeta function at its pole,
+  ζ(s, a) = 1/(s − 1) + Σₙ (−1)ⁿ γₙ(a)(s − 1)ⁿ/n!, as in Mathematica and
+  mpmath; `StieltjesGamma(n)` is γₙ = γₙ(1). `StieltjesGamma(0)` is
+  `EulerGamma`, `StieltjesGamma(0, a)` is `−PolyGamma(0, a)`,
+  `StieltjesGamma(2, 1)` is `StieltjesGamma(2)`, and a nonpositive integer
+  `a` is a pole (`StieltjesGamma(2, -1)` is `ComplexInfinity`).
+  `StieltjesGamma(1).N()` is `-0.0728158454836767248606`,
+  `StieltjesGamma(2, 1/2).N()` is `0.968864475220290711422`, and
+  `N(StieltjesGamma(2, 3/4), 40)` is `0.1193766260185842196972365071220126165487`:
+  a real `a > 0` follows `ce.precision` by Euler–Maclaurin on lnⁿ(x)/x with
+  exact integer derivatives, the remainder bounded in ball arithmetic so that
+  the digits returned are certified. A complex `a` or a negative non-integer
+  `a` is computed in doubles (`StieltjesGamma(2, 1 + i).N()` is
+  `0.1703042014685874 + 0.3731771957574952i`). Orders past 30 stay
+  unevaluated. The head threads over lists and compiles to JavaScript for a
+  real value (#395, contributed by [enumeratio](https://github.com/enumeratio))
+
+- **`LogGamma`, `BarnesG` and `LogBarnesG` are new, and
+  `PolyGamma(-1, z)` is `LogGamma(z)`.** `LogGamma(z)` is the analytic
+  continuation of ln Γ with its branch cut on (−∞, 0], as in Mathematica and
+  mpmath's `loggamma`. It is not `GammaLn`, which is the principal logarithm
+  of Γ(z) and jumps by 2πi across the zeros of Im Γ:
+  `GammaLn(-2.5 + 1.5i)` is `-3.7175 - 1.4299i`, `LogGamma(-2.5 + 1.5i)` is
+  `-3.7175 - 7.7131i`, and `LogGamma(-1.5)` is `0.86005 - 6.28319i`.
+  `GammaLn` is unchanged. `LogGamma(5)` is `ln(24)` exactly, `LogGamma(1/2)`
+  is `ln(π)/2`, and the poles at the non-positive integers are `+∞`; a real
+  argument follows `ce.precision`, a complex one is a double.
+  `BarnesG(z)` and `LogBarnesG(z)` are the Barnes G-function, with
+  G(z+1) = Γ(z)·G(z), and its logarithm continued with `LogGamma` as in
+  Mathematica. `BarnesG(5)` is `12`, `BarnesG(10)` is `5056584744960000`
+  (the superfactorial, an exact integer), `BarnesG(0)` is `0` and
+  `LogBarnesG(0)` is `−∞`. A real `z` is computed to `ce.precision` from the
+  Taylor series of ln Γ and ln G about 1 (coefficients ζ(k)), with a bounded
+  tail, `N(BarnesG(1/2))` being `0.603244281209446206191…`, up to 1000 steps
+  from 1 (`N(LogBarnesG(120.5))` is `23552.5384297242683359`); farther, a real
+  `z` stays unevaluated at `ce.precision` above 15 digits. A complex `z`, and
+  a real `z` more than 60 from 1 at machine precision, use an asymptotic
+  series in doubles (about 3e-12 relative for G, measured against mpmath).
+  `LogBarnesG(-2.5)` is `-2.5747 + 18.8496i`. `PolyGamma(-1, z)` follows
+  Mathematica's convention, `PolyGamma(-1, -5/2 + 3i/2)` is `LogGamma` there;
+  the other negative orders stay unevaluated (#395, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **`ClausenCl(n, θ)` is the Clausen function Clₙ(θ).** For an integer order
+  n ≥ 1 and real θ it is Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ when n is even and
+  Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ when n is odd (mpmath's `clsin` and `clcos`;
+  Mathematica writes them as `Im`/`Re` of `PolyLog`). `N(ClausenCl(2, 1))` is
+  `1.0139591323607684`, `N(ClausenCl(3, 2.5))` is `-0.7606561109685137` and
+  `N(ClausenCl(2, 3.14159))` is `1.8393282835451e-6` (the expansion of Liₙ at
+  the unit circle, DLMF 25.12.12, with θ reduced mod 2π and moved off π by
+  the duplication formula so the even orders keep their relative accuracy
+  there). A real θ is computed to `ce.precision` digits for orders up to 40
+  and |θ| up to 10¹², the ζ(n − k) being bignum zeta values and exact
+  Bernoulli rationals; outside that, or where the value cancels against its
+  own terms, the head stays unevaluated. The exact points are closed:
+  `ClausenCl(2, π/2)` is Catalan's constant and `ClausenCl(2m, π/2)` is
+  `DirichletBeta(2m)`, `ClausenCl(3, 0)` is `ζ(3)`,
+  `ClausenCl(2, 0)` and `ClausenCl(2, π)` are `0`, `ClausenCl(1, 0)` is `+∞`.
+  A non-integer or non-positive order and a symbolic θ stay unevaluated. The
+  compiled JavaScript lane agrees with `.N()`
+  (#395, contributed by [enumeratio](https://github.com/enumeratio)).
+
+- **`DirichletCharacter(k, j, n)` and `DirichletL(k, j, s)` give the Dirichlet
+  characters modulo `k` and their L-functions,** in Wolfram's indexing
+  (`j = 1` the principal character, `j` up to φ(k)). `DirichletCharacter(5, 2, 2)`
+  is `i`, `DirichletCharacter(7, 3, 3)` is `e^(2πi/3)` and a character is `0`
+  where `gcd(n, k) > 1`. `DirichletL` sums `k^(−s) Σ χ(r) ζ(s, r/k)` through
+  `HurwitzZeta`, so a real value follows `ce.precision` (`DirichletL(3, 2, 1.5)`
+  is `0.703968244868733261668` at 21 digits, `DirichletL(5, 3, 1.01)` keeps
+  every digit next to the pole) and a complex value is at double precision;
+  the odd character mod 4 is `DirichletBeta` (`DirichletL(4, 2, 1)` is `π/4`); the principal character is `ζ(s) Π (1 − p^(−s))` over the primes
+  dividing `k`, so `DirichletL(5, 1, 1)` is `~oo`; at a nonpositive integer
+  the value is exact from the Bernoulli polynomials (`DirichletL(5, 2, 0)` is
+  `3/5 + i/5`, `DirichletL(8, 2, -3)` is `11`); within 1/4 of `s = 1` a
+  non-principal character with a complex value is summed from its Laurent
+  series in the Stieltjes constants at double precision, since the Hurwitz
+  terms there have poles that cancel (`DirichletL(5, 2, 1.01)`); a real
+  character at a real `s` takes guard digits for the cancellation instead, and
+  `L(1, χ)` is closed in digamma values (`DirichletL(3, 2, 1)` is `π/(3√3)`). A modulus above 1000 stays
+  symbolic for `DirichletL` (it sums `k` Hurwitz values). Both heads are
+  listable. (#395, contributed by [enumeratio](https://github.com/enumeratio))
+
 ### Issues Resolved
 
 - A pure imaginary factor in a product was serialized in parentheses that are

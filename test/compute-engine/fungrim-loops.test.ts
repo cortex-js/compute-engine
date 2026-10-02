@@ -238,7 +238,11 @@ describe('artifact inverse-pair invariant', () => {
     // it — which is what the artifact records. 09c107 (`Sign(i) → i`, the
     // complex sign convention) is carried again since `Sign` extends to the
     // complex plane.
-    expect(FUNGRIM_CORE.rules.length).toBe(1444);
+    // Eight fewer since DirichletL and DirichletCharacter are native heads
+    // (#395): the Fungrim shell rules over `DirichletL(s, χ)` and the
+    // two-operand `DirichletCharacter(q, l)` no longer box against Wolfram's
+    // `DirichletL(k, j, s)`, and the compiler's self-test skips them.
+    expect(FUNGRIM_CORE.rules.length).toBe(1436);
     expect(FUNGRIM_CORE.rules.filter((r) => r.target === 'solve').length).toBe(
       10
     );
@@ -525,7 +529,8 @@ describe('whole-set soak', () => {
     // (`z^0 → 1` guarded `_z: complex`) is no longer emitted, because a
     // `complex`-typed base is now finite and native canonicalization folds
     // the match side to `1` on its own. See the rule-count test above.
-    expect(identityRules.length).toBe(1089);
+    // Five of the eight DirichletL/DirichletCharacter rules were identities.
+    expect(identityRules.length).toBe(1084);
 
     const overBudget: [string, number][] = [];
     const unstable: string[] = [];

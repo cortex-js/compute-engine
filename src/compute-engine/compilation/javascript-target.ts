@@ -530,7 +530,13 @@ import {
   gammaQ,
   betaRegularized,
 } from '../numerics/special-functions.js';
-import { lerchPhiReal } from '../numerics/lerch-phi.js';
+import {
+  lerchPhiReal,
+  dirichletEtaReal,
+  dirichletBetaReal,
+} from '../numerics/lerch-phi.js';
+import { stieltjesGammaReal } from '../numerics/stieltjes.js';
+import { clausen } from '../numerics/clausen.js';
 import { polylogOrderReal } from '../numerics/polylog.js';
 import {
   correlation,
@@ -3357,6 +3363,10 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'PolyGamma',
   'LerchPhi',
   'PolyLog',
+  'DirichletEta',
+  'DirichletBeta',
+  'StieltjesGamma',
+  'ClausenCl',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of this target. */
@@ -7602,6 +7612,26 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         'Could not compile `PolyLog`: it takes exactly two operands'
       );
     return `_SYS.polyLog(${compile(args[0])}, ${compile(args[1])})`;
+  },
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): η and β on the machine kernels,
+  // which sum the alternating series next to s = 1 as the interpreter does.
+  DirichletEta: '_SYS.dirichletEta',
+  DirichletBeta: '_SYS.dirichletBeta',
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.stieltjesGamma` is the
+  // interpreter's double kernel; NaN where the value is complex (a < 0, not
+  // an integer) or the order is past `STIELTJES_MAX_ORDER`.
+  StieltjesGamma: (args, compile) =>
+    args.length === 1
+      ? `_SYS.stieltjesGamma(${compile(args[0])})`
+      : `_SYS.stieltjesGamma(${compile(args[0])}, ${compile(args[1])})`,
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.clausen` is the interpreter's
+  // double-precision kernel, NaN where it declines.
+  ClausenCl: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        'Could not compile `ClausenCl`: it takes exactly two operands'
+      );
+    return `_SYS.clausen(${compile(args[0])}, ${compile(args[1])})`;
   },
   LambertW: '_SYS.lambertW',
 
@@ -12544,7 +12574,11 @@ const SYS_HELPERS = {
   hurwitzZeta,
   zetaGeneralized,
   lerchPhi: lerchPhiReal,
+  dirichletEta: dirichletEtaReal,
+  dirichletBeta: dirichletBetaReal,
   polyLog: polylogOrderReal,
+  stieltjesGamma: stieltjesGammaReal,
+  clausen,
   lambertW,
   besselJ,
   besselY,

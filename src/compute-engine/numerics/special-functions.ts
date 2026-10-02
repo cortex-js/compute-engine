@@ -2394,6 +2394,103 @@ export function bigZetaGeneralized(
   return bigZetaFront(ce, s, a, 1);
 }
 
+// --- Dirichlet eta and beta, arbitrary precision ---------------------------
+//   η(s) = (1 − 2^{1−s}) ζ(s)                  (DLMF 25.2.3)
+//   β(s) = 4^{−s} (ζ(s, ¼) − ζ(s, ¾))          (DLMF 25.15.1, χ the odd character mod 4)
+// Both are entire. Near s = 1 each factor carries ζ's pole and the product
+// cancels it, losing log10(1/|s − 1|) digits; the kernels add that many guard
+// digits instead of switching series.
+
+/**
+ * Most digits the kernels will add to cancel the pole at s = 1: η(1 + 10⁻⁵⁰⁰)
+ * stays unevaluated rather than computing at 500 extra digits.
+ */
+const DIRICHLET_POLE_GUARD_LIMIT = 400;
+
+/** Extra working digits for the cancellation at the pole s = 1, or undefined past the limit. */
+function dirichletGuard(s: BigNum): number | undefined {
+  const d = s.sub(BigDecimal.ONE).abs();
+  if (d.isZero()) return undefined;
+  const lost = d.lt(BigDecimal.ONE) ? Math.ceil(-Math.log10(d.toNumber())) : 0;
+  if (!Number.isFinite(lost) || lost > DIRICHLET_POLE_GUARD_LIMIT)
+    return undefined;
+  return SPECIAL_FN_GUARD + lost;
+}
+
+/**
+ * Bignum η(s) for real s ≠ 1, with `ce.precision` significant digits.
+ * Returns `undefined` when s is within 10⁻⁴⁰⁰ of the pole of ζ (η(1) = ln 2
+ * is the caller's closed form).
+ */
+export function bigDirichletEta(
+  ce: ComputeEngine,
+  s: BigNum
+): BigNum | undefined {
+  if (!s.isFinite()) return undefined;
+  const guard = dirichletGuard(s);
+  if (guard === undefined) return undefined;
+  return withGuardDigits(guard, () => {
+    // 1 − 2^{1−s}
+    const factor = BigDecimal.ONE.sub(
+      BigDecimal.TWO.pow(BigDecimal.ONE.sub(s))
+    );
+    return factor.mul(bigZeta(ce, s));
+  });
+}
+
+/**
+ * Bignum L(s, χ) = k^{−s} Σ_{r=1}^{k} χ(r) ζ(s, r/k) (DLMF 25.15.1) for real
+ * s ≠ 1 and a real character χ mod k, given as its values `chi[r − 1]` ∈
+ * {−1, 0, 1}, with `ce.precision` significant digits. Returns `undefined` when
+ * the Hurwitz kernel cannot reach the digits (also within about 10⁻¹⁵ of
+ * s = 1, where the ζ(s, r/k) cancel their poles).
+ */
+export function bigDirichletL(
+  ce: ComputeEngine,
+  s: BigNum,
+  k: number,
+  chi: readonly number[]
+): BigNum | undefined {
+  if (!s.isFinite()) return undefined;
+  const guard = dirichletGuard(s); // undefined at s = 1, where the caller has the closed form
+  if (guard === undefined) return undefined;
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = saved + guard;
+  try {
+    // Closer to the pole than about 10⁻¹⁵ the Hurwitz kernel's own working-digit
+    // plan fails (it throws).
+    // Not seeded with 0: adding a value of exponent 10⁶ to ZERO is slow.
+    let sum: BigNum | undefined;
+    for (let r = 1; r <= k; r++) {
+      const c = chi[r - 1];
+      if (c === 0) continue;
+      let zeta: BigNum | undefined;
+      try {
+        zeta = bigHurwitzZeta(ce, s, [BigInt(r), BigInt(k)]);
+      } catch {
+        return undefined;
+      }
+      if (zeta === undefined) return undefined;
+      const term = c > 0 ? zeta : zeta.neg();
+      sum = sum === undefined ? term : sum.add(term);
+    }
+    if (sum === undefined) return undefined;
+    const scale = new BigDecimal(k).pow(s.neg()); // k^{−s}
+    return scale.mul(sum).toPrecision(saved);
+  } finally {
+    BigDecimal.precision = saved;
+  }
+}
+
+/**
+ * Bignum β(s) for real s ≠ 1: the L-function of the odd character mod 4,
+ * 4^{−s} (ζ(s, ¼) − ζ(s, ¾)).
+ */
+export const bigDirichletBeta = (
+  ce: ComputeEngine,
+  s: BigNum
+): BigNum | undefined => bigDirichletL(ce, s, 4, [1, 0, -1, 0]);
+
 // --- LerchPhi / PolyLog, arbitrary precision -------------------------------
 // cortex-js/compute-engine#374: `LerchPhi` and `PolyLog` answer in doubles
 // at any engine precision, unlike `HurwitzZeta` above. For real z, s, a

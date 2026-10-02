@@ -51,6 +51,7 @@ Modular arithmetic & GCD:
   PrimitiveRoot, PrimitiveRootList
 - RationalReconstruction: the small fraction `p/q` with `p ≡ a·q (mod m)`
 - JacobiSymbol, LegendreSymbol
+- DirichletCharacter, DirichletL: Dirichlet characters mod k and their L-functions
 
 Other primitives:
 

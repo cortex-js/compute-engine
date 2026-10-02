@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Number theory
 
-The 56 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 58 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -96,6 +96,43 @@ Return the sum of the digits of `n` in the given `base` (default 10). The sign o
 ```epsil
 digitSum(1234)
 // ➔ 10
+```
+
+### dirichletCharacter
+
+MathJSON `DirichletCharacter` · `(integer, integer, integer) -> number`
+
+The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). Zero where gcd(n, k) &gt; 1; otherwise a root of unity.
+
+```epsil
+dirichletCharacter(5, 2, 2)
+// ➔ i
+```
+
+```epsil
+dirichletCharacter(7, 3, 3)
+// ➔ e^(2/3i * pi)
+```
+
+### dirichletL
+
+MathJSON `DirichletL` · `(integer, integer, number) -> number`
+
+The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. Entire for a non-principal character; the principal one is `ζ(s) Π_{p|k} (1 − p^(−s))`.
+
+```epsil
+dirichletL(1, 1, 2)
+// ➔ 1/6 * pi^2
+```
+
+```epsil
+dirichletL(3, 2, -2)
+// ➔ -2/9
+```
+
+```epsil
+dirichletL(5, 2, 0)
+// ➔ (3/5 + 1/5i)
 ```
 
 ### divides

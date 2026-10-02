@@ -86,7 +86,11 @@ describe('loadIdentities (full artifact)', () => {
     // canonicalization. 09c107 (`Sign(i) -> i`, the complex sign convention
     // `z/|z|`) is carried again now that `Sign` extends to the complex plane;
     // it was dropped while `Sign` declined off the real line.
-    expect(report.loaded).toBe(1434);
+    // Eight fewer since DirichletL and DirichletCharacter are native heads
+    // (#395): the Fungrim shell rules over `DirichletL(s, χ)` and the
+    // two-operand `DirichletCharacter(q, l)` no longer box against Wolfram's
+    // `DirichletL(k, j, s)`, and the compiler's self-test skips them.
+    expect(report.loaded).toBe(1426);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -104,7 +108,7 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1434,
+      simplify: 1426,
       solve: 0,
       harmonization: 0,
     });
@@ -119,9 +123,11 @@ describe('loadIdentities (full artifact)', () => {
       // 46 rules moved expand → simplify on 2026-09-24: a rule inside the
       // 10% cost margin is now tagged 'simplify' when its result is strictly
       // cheaper (`tieBandPurpose()` in scripts/fungrim/compile-rules.ts).
-      simplify: 1349,
+      // The eight DirichletL/DirichletCharacter rules left: 1349 → 1342,
+      // 77 → 76 (one was an 'expand').
+      simplify: 1342,
       transform: 8,
-      expand: 77,
+      expand: 76,
     });
     expect(
       report.byPurpose.simplify +

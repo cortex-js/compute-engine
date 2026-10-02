@@ -1,5 +1,9 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
-import type { Expression, SymbolDefinitions } from '../global-types.js';
+import type {
+  Expression,
+  IComputeEngine as ComputeEngine,
+  SymbolDefinitions,
+} from '../global-types.js';
 import { asRational, toBigint } from '../boxed-expression/numerics.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { checkTypes } from '../boxed-expression/validate.js';
@@ -23,6 +27,21 @@ import {
   primitiveRootList,
   rationalReconstruction,
 } from '../numerics/modular.js';
+import {
+  DIRICHLET_MAX_MODULUS,
+  dirichletCharacterCount,
+  dirichletCharacterExponent,
+  dirichletLNearOne,
+} from '../numerics/dirichlet-character.js';
+import { bernoulliPolynomialRational } from '../numerics/bernoulli.js';
+import { shouldNumericize } from '../boxed-expression/apply.js';
+import { bignumPreferred } from '../boxed-expression/utils.js';
+import { bigDirichletL } from '../numerics/special-functions.js';
+import {
+  boxBignumApprox,
+  boxComplexResult,
+  bigRealOperand,
+} from './arithmetic.js';
 import {
   CancellationError,
   checkDeadline,
@@ -1449,6 +1468,56 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    DirichletCharacter: {
+      description:
+        "The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). Zero where gcd(n, k) > 1; otherwise a root of unity.",
+      signature: '(integer, integer, integer) -> number',
+      broadcastable: true,
+      examples: [
+        'DirichletCharacter(5, 2, 2)  // i',
+        'DirichletCharacter(7, 3, 3)  // e^(2πi/3)',
+      ],
+      evaluate: ([kOp, jOp, nOp], { engine: ce, numericApproximation }) => {
+        const index = dirichletCharacterIndex(kOp, jOp);
+        const n = toBigint(nOp);
+        if (index === undefined || n === null || nOp.isInteger !== true)
+          return undefined;
+        const [k, j] = index;
+        const value = dirichletCharacterValue(
+          ce,
+          dirichletCharacterExponent(
+            k,
+            j,
+            Number(((n % BigInt(k)) + BigInt(k)) % BigInt(k))
+          )
+        );
+        return numericApproximation ? value.N() : value;
+      },
+    },
+
+    DirichletL: {
+      description:
+        'The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. Entire for a non-principal character; the principal one is `ζ(s) Π_{p|k} (1 − p^(−s))`.',
+      signature: '(integer, integer, number) -> number',
+      broadcastable: true,
+      examples: [
+        'DirichletL(1, 1, 2)  // π²/6',
+        'DirichletL(3, 2, -2)  // −2/9',
+        'DirichletL(5, 2, 0)  // 3/5 + i/5',
+      ],
+      evaluate: ([kOp, jOp, sOp], { engine: ce, numericApproximation }) => {
+        const index = dirichletCharacterIndex(kOp, jOp);
+        if (index === undefined) return undefined;
+        return evaluateDirichletL(
+          ce,
+          index[0],
+          index[1],
+          sOp,
+          numericApproximation
+        );
+      },
+    },
+
     PrimeNumber: {
       description:
         'The nth prime number. `PrimeNumber` is an alias for `NthPrime`, which is the preferred name.',
@@ -2077,6 +2146,233 @@ function reduceRat(num: bigint, den: bigint): [bigint, bigint] {
   }
   const g = gcd(num < 0n ? -num : num, den);
   return g > 1n ? [num / g, den / g] : [num, den];
+}
+
+/**
+ * `DirichletL` sums `k` Hurwitz values, so a larger modulus stays symbolic.
+ * The character kernel itself (`DirichletCharacter`) goes to
+ * `DIRICHLET_MAX_MODULUS`.
+ */
+const DIRICHLET_L_MAX_MODULUS = 1000;
+
+/**
+ * At a nonpositive integer s = −n the ζ(−n, r/k) are Bernoulli polynomial
+ * values of size ~kⁿ, so past this order the exact sum is too long to be
+ * useful and the value stays symbolic.
+ */
+const DIRICHLET_L_NEGATIVE_ORDER_LIMIT = 100;
+
+/** Largest |Re s| at which a complex character is summed through `HurwitzZeta`. */
+const DIRICHLET_L_HURWITZ_MAX_ORDER = 1e5;
+
+/**
+ * Within this distance of s = 1, a non-principal L is summed from its Laurent
+ * series in the Stieltjes constants (`dirichletLNearOne`), whose terms shrink
+ * like 0.25ⁿ/n!; the Hurwitz form cancels the poles of its terms there.
+ */
+const DIRICHLET_L_NEAR_POLE = 0.25;
+
+/** The modulus and index of a character, both concrete integers with 1 ≤ j ≤ φ(k). */
+function dirichletCharacterIndex(
+  kOp: Expression,
+  jOp: Expression
+): [number, number] | undefined {
+  if (kOp.isInteger !== true || jOp.isInteger !== true) return undefined;
+  const k = toBigint(kOp);
+  const j = toBigint(jOp);
+  if (k === null || j === null) return undefined;
+  if (k < 1n || k > BigInt(DIRICHLET_MAX_MODULUS) || j < 1n) return undefined;
+  if (j > BigInt(dirichletCharacterCount(Number(k)))) return undefined;
+  return [Number(k), Number(j)];
+}
+
+/** χ(n) from its exponent [num, den] (the value is e^{2πi·num/den}): 0, ±1 and ±i exactly. */
+function dirichletCharacterValue(
+  ce: ComputeEngine,
+  q: [number, number] | undefined
+): Expression {
+  if (q === undefined) return ce.Zero;
+  const [num, den] = q;
+  if (num === 0) return ce.One;
+  if (2 * num === den) return ce.NegativeOne;
+  if (4 * num === den) return ce.I;
+  if (4 * num === 3 * den) return ce.I.neg();
+  return ce.function('Exp', [
+    ce.function('Multiply', [
+      ce.number(2),
+      ce.Pi,
+      ce.I,
+      ce.function('Rational', [ce.number(num), ce.number(den)]),
+    ]),
+  ]);
+}
+
+/** A double-precision L value as a number: real when its imaginary part is 0. */
+function dirichletLResult(
+  ce: ComputeEngine,
+  value: { re: number; im: number } | undefined
+): Expression | undefined {
+  if (value === undefined || !Number.isFinite(value.re + value.im))
+    return undefined;
+  return ce.number(value.im === 0 ? value.re : ce.complex(value.re, value.im));
+}
+
+/**
+ * L(s, χ_j mod k) for the character `DirichletCharacter(k, j, ·)`:
+ * - the principal character is ζ(s) Π_{p|k} (1 − p^(−s)), which carries the pole
+ *   of ζ at s = 1;
+ * - at a nonpositive integer s = −n, L(−n, χ) = −kⁿ Σ_r χ(r) Bₙ₊₁(r/k)/(n+1)
+ *   (DLMF 25.15.3), exact;
+ * - the odd character mod 4 is `DirichletBeta`;
+ * - elsewhere a numeric s sums k^(−s) Σ_r χ(r) ζ(s, r/k) (DLMF 25.15.1). A
+ *   real character at a real s is a real value, summed in bignums with guard
+ *   digits for the cancelling poles near s = 1 (`bigDirichletL`), at
+ *   `ce.precision` or unevaluated; any other value is complex and a machine
+ *   number, near s = 1 from `dirichletLNearOne`.
+ */
+function evaluateDirichletL(
+  ce: ComputeEngine,
+  k: number,
+  j: number,
+  s: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (k > DIRICHLET_L_MAX_MODULUS) return undefined;
+  const numeric = shouldNumericize(numericApproximation, s);
+  const finish = (e: Expression) => (numeric ? e.N() : e.evaluate());
+
+  // The odd character mod 4 is the Dirichlet beta function: L(1, χ₄) = π/4.
+  if (k === 4 && j === 2) return finish(ce.function('DirichletBeta', [s]));
+
+  if (j === 1) {
+    const factors = [...bigPrimeFactors(BigInt(k)).keys()]
+      .filter((p) => p > 1n)
+      .map((p) => ce.One.sub(ce.number(p).pow(s.neg())));
+    return finish(
+      ce.function('Multiply', [ce.function('Zeta', [s]), ...factors])
+    );
+  }
+
+  const sInt = s.isInteger === true ? toBigint(s) : null;
+  if (sInt !== null && sInt <= 0n) {
+    const n = Number(-sInt);
+    if (n > DIRICHLET_L_NEGATIVE_ORDER_LIMIT) return undefined;
+    const terms: Expression[] = [];
+    for (let r = 1; r <= k; r++) {
+      const q = dirichletCharacterExponent(k, j, r);
+      if (q === undefined) continue;
+      const [num, den] = bernoulliPolynomialRational(n + 1, [
+        BigInt(r),
+        BigInt(k),
+      ]);
+      terms.push(
+        ce.function('Multiply', [
+          dirichletCharacterValue(ce, q),
+          ce.function('Rational', [ce.number(num), ce.number(den)]),
+        ])
+      );
+    }
+    return finish(
+      ce.function('Divide', [
+        ce.function('Multiply', [
+          ce.number(-(BigInt(k) ** BigInt(n))),
+          ce.function('Add', terms),
+        ]),
+        ce.number(n + 1),
+      ])
+    );
+  }
+
+  if (
+    !numeric ||
+    !isNumber(s) ||
+    !Number.isFinite(s.re) ||
+    !Number.isFinite(s.im)
+  )
+    return undefined;
+
+  // A real character at a real s gives a real value, which carries
+  // `ce.precision` digits or the head stays unevaluated.
+  const chi = realCharacterValues(k, j);
+  if (chi !== undefined && !s.isComplex && bignumPreferred(ce)) {
+    if (s.isSame(1)) return dirichletLAtOne(ce, k, chi);
+    const big = bigDirichletL(ce, bigRealOperand(ce, s), k, chi);
+    return big === undefined ? undefined : boxBignumApprox(ce, big);
+  }
+
+  if (Math.hypot(s.re - 1, s.im) < DIRICHLET_L_NEAR_POLE) {
+    const value = dirichletLNearOne(k, j, ce.complex(s.re, s.im));
+    if (value !== undefined) return dirichletLResult(ce, value);
+  }
+
+  // The Hurwitz terms are of size (k/r)^s; past this |Re s| their exponents
+  // make the sum take minutes (a complex character at s = 10⁶), so it declines.
+  if (Math.abs(s.re) > DIRICHLET_L_HURWITZ_MAX_ORDER) return undefined;
+
+  const terms: Expression[] = [];
+  for (let r = 1; r <= k; r++) {
+    const q = dirichletCharacterExponent(k, j, r);
+    if (q === undefined) continue;
+    terms.push(
+      ce.function('Multiply', [
+        dirichletCharacterValue(ce, q),
+        ce.function('HurwitzZeta', [
+          s,
+          ce.function('Rational', [ce.number(r), ce.number(k)]),
+        ]),
+      ])
+    );
+  }
+  const total = ce
+    .function('Multiply', [
+      ce.number(k).pow(s.neg()),
+      ce.function('Add', terms),
+    ])
+    .N();
+  // A complex value is a machine number, as for the other special functions.
+  return isNumber(total) &&
+    Number.isFinite(total.re) &&
+    Number.isFinite(total.im)
+    ? boxComplexResult(ce, total, !total.isComplex)
+    : undefined;
+}
+
+/** The values χ(1), …, χ(k) when the character takes only 0 and ±1, else `undefined`. */
+function realCharacterValues(k: number, j: number): number[] | undefined {
+  const values: number[] = [];
+  for (let r = 1; r <= k; r++) {
+    const q = dirichletCharacterExponent(k, j, r);
+    if (q === undefined) values.push(0);
+    else if (q[0] === 0) values.push(1);
+    else if (2 * q[0] === q[1]) values.push(-1);
+    else return undefined;
+  }
+  return values;
+}
+
+/**
+ * L(1, χ) = −(1/k) Σ_r χ(r) ψ(r/k) for a non-principal real χ: the poles of
+ * the ζ(s, r/k) cancel (Σ χ(r) = 0) and the constant terms −ψ(r/k) remain.
+ */
+function dirichletLAtOne(
+  ce: ComputeEngine,
+  k: number,
+  chi: readonly number[]
+): Expression | undefined {
+  const terms = chi.flatMap((c, i) =>
+    c === 0
+      ? []
+      : [
+          ce.function('Multiply', [
+            ce.number(c),
+            ce.function('Digamma', [ce.number([i + 1, k])]),
+          ]),
+        ]
+  );
+  const total = ce
+    .function('Multiply', [ce.number([-1, k]), ce.function('Add', terms)])
+    .N();
+  return isNumber(total) ? total : undefined;
 }
 
 /**
