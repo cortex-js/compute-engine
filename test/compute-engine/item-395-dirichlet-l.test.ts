@@ -779,3 +779,44 @@ describe('DirichletL (#395)', () => {
     expect(got.im).toBeCloseTo(-0.3843763502147996, 12);
   });
 });
+
+describe('DirichletL of a real character next to s = 1', () => {
+  // mpmath (140 digits): k^−s Σ χ(r) ζ(s, r/k) with χ the Legendre symbol mod 5.
+  test('L(1 + 10⁻²⁰, χ₃ mod 5) at 30 digits', () => {
+    const precision = ce.precision;
+    ce.precision = 30;
+    try {
+      const v = ce
+        .box(['DirichletL', 5, 3, ['Add', 1, ['Power', 10, -20]]])
+        .N();
+      expect(String(v.bignumRe)).toBe('0.430408940964004038892995639421');
+    } finally {
+      ce.precision = precision;
+    }
+  });
+});
+
+describe('DirichletL of a complex character at a high precision', () => {
+  // mpmath: 997^(−s) Σ χ(r) ζ(s, r/997), the value is a machine number.
+  test('DirichletL(997, 500, 1.5) at precision 300 is fast and a double', () => {
+    const precision = ce.precision;
+    ce.precision = 300;
+    try {
+      const start = Date.now();
+      const v = ce.box(['DirichletL', 997, 500, 1.5]).N();
+      expect(Date.now() - start).toBeLessThan(5000);
+      expect(v.re).toBeCloseTo(1.04649962645262583, 15);
+      expect(v.im).toBeCloseTo(-0.313517916008437163, 15);
+    } finally {
+      ce.precision = precision;
+    }
+  });
+
+  test('a float s at a zero gives the float 0', () => {
+    const v = ce
+      .function('DirichletL', [ce.box(3), ce.box(2), ce.parse('-1.0')])
+      .evaluate();
+    expect(v.re).toBe(0);
+    expect(v.isExact).toBe(false);
+  });
+});

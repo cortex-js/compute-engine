@@ -3462,11 +3462,6 @@ export function bigRealOperand(engine: ComputeEngine, s: Expression): BigNum {
     : new BigDecimal(operand[0]).div(new BigDecimal(operand[1]));
 }
 
-/** The value of `expr` when it is a finite number literal. */
-function finiteNumberOrUndefined(expr: Expression): Expression | undefined {
-  return isFiniteNumberLiteral(expr) ? expr : undefined;
-}
-
 /** A double-kernel value as a machine number, as `boxComplexResult` boxes it. */
 function machineNumberOrUndefined(expr: Expression): Expression | undefined {
   if (!isFiniteNumberLiteral(expr)) return undefined;
@@ -3515,7 +3510,9 @@ function evaluateDirichletEta(
         engine.function('Zeta', [engine.number(n)]),
       ])
       .evaluate();
-    return numeric ? value.N() : value;
+    // A float operand gives a float, also where the value is an integer
+    // (η(−2.0) is the float 0).
+    return floatIfFloatOperand([s], numeric ? value.N() : value);
   }
   if (!numeric) return undefined;
 
@@ -3598,7 +3595,8 @@ function evaluateDirichletBeta(
   const n = dirichletInteger(s);
   if (n !== null) {
     const exact = dirichletBetaInteger(engine, n);
-    if (exact !== undefined) return numeric ? exact.N() : exact;
+    if (exact !== undefined)
+      return floatIfFloatOperand([s], numeric ? exact.N() : exact);
   }
   if (!numeric) return undefined;
 

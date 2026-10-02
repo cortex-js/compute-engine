@@ -374,6 +374,22 @@ describe('LogBarnesG(z)', () => {
     });
   });
 
+  // mpmath log(barnesg(x)) at 80 digits. ln G is 0 at x = 1 and x = 2, so the
+  // value must be formed in the log domain: the logarithm of a G rounded to
+  // 30 digits has only about 18 correct digits here.
+  test.each([
+    ['1.0000000001', '4.18938533125811958540736206931e-11'],
+    ['0.9999999999', '-4.18938533283533525030889492992e-11'],
+    ['2.0000000001', '-1.58277131693474198727371417671e-11'],
+    ['3.0000000001', '2.64507203437239644007854291059e-11'],
+  ])('LogBarnesG(%s) next to a zero of ln G, at 30 digits', (x, expected) => {
+    withPrecision(30, () => {
+      expect(ce.parse(x).evaluate().isExact).toBe(false);
+      const v = ce.function('LogBarnesG', [ce.parse(x)]).N();
+      expect(v.toString()).toBe(expected);
+    });
+  });
+
   test('ln G(z+1) = lnΓ(z) + ln G(z), with the LogGamma continuation', () => {
     for (const z of [cx(-2.5, 1.5), cx(-4.5, -2), -3.5, 0.5]) {
       const lhs = value(['LogBarnesG', ['Add', z, 1]]);
@@ -391,5 +407,65 @@ describe('LogBarnesG(z)', () => {
       'LogBarnesG',
       'z',
     ]);
+  });
+});
+
+describe('BarnesG at high precision, and float operands', () => {
+  // mpmath (150 digits): barnesg(999.5), log(barnesg(1/3)), barnesg(-20.3).
+  test.each([
+    [
+      999.5,
+      'BarnesG',
+      '1.3321807301319757668573393898293890882275019991132579e+1170832',
+    ],
+    [
+      ['Rational', 1, 3],
+      'LogBarnesG',
+      '-0.91609444341307506948956991736128110462324466486453037',
+    ],
+    [
+      -20.3,
+      'BarnesG',
+      '-2.4126673083887645806276529473860405235431149285645886e+149',
+    ],
+  ])('%j: %s at 54 digits', (x, head, expected) => {
+    const ce54 = new ComputeEngine();
+    ce54.precision = 54;
+    const v = ce54.box([head, x as never]).N();
+    const got = String(v.bignumRe);
+    const [m1, e1 = '0'] = got.split('e');
+    const [m2, e2 = '0'] = expected.split('e');
+    expect(e1).toBe(e2);
+    // Agreement to 52 significant digits.
+    expect(m1.replace(/[-.]/g, '').slice(0, 52)).toBe(
+      m2.replace(/[-.]/g, '').slice(0, 52)
+    );
+  });
+
+  test('a float operand at a zero of G gives the float 0', () => {
+    const ce = new ComputeEngine();
+    for (const x of ['-2.0', '0.0']) {
+      const v = ce.function('BarnesG', [ce.parse(x)]).evaluate();
+      expect(v.isExact).toBe(false); // not the exact 0
+      expect(v.re).toBe(0);
+    }
+    expect(ce.box(['BarnesG', -2]).evaluate().isSame(0)).toBe(true);
+  });
+});
+
+describe('the double ln Γ kernel next to 0, 1 and 2', () => {
+  // mpmath loggamma at the double values of the arguments.
+  test.each([
+    [1e-10, 23.025850929882735237],
+    [1 + 2 ** -33, -6.719674738191360331e-11],
+    [2 - 2 ** -33, -4.9218574429504461111e-11],
+    [0.3, 1.0957979948180755217],
+  ])('GammaLn(%p) at machine precision', (x, expected) => {
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    const v = ce.box(['GammaLn', x]).N().re;
+    expect(Math.abs(v - expected)).toBeLessThan(4e-16 * Math.abs(expected));
+    const w = ce.box(['LogGamma', x]).N().re;
+    expect(Math.abs(w - expected)).toBeLessThan(4e-16 * Math.abs(expected));
   });
 });

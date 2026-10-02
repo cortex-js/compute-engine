@@ -35,8 +35,16 @@ import {
 } from '../numerics/dirichlet-character.js';
 import { bernoulliPolynomialRational } from '../numerics/bernoulli.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
+import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
-import { bigDirichletL } from '../numerics/special-functions.js';
+import { Complex } from 'complex-esm';
+import { BigDecimal } from '../../big-decimal/index.js';
+import type { BigNum } from '../numerics/types.js';
+import {
+  bigDirichletL,
+  bigHurwitzZeta,
+} from '../numerics/special-functions.js';
+import { hurwitzZetaComplexWithError } from '../numerics/numeric-complex.js';
 import {
   boxBignumApprox,
   boxComplexResult,
@@ -2239,7 +2247,10 @@ function evaluateDirichletL(
 ): Expression | undefined {
   if (k > DIRICHLET_L_MAX_MODULUS) return undefined;
   const numeric = shouldNumericize(numericApproximation, s);
-  const finish = (e: Expression) => (numeric ? e.N() : e.evaluate());
+  // A float s gives a float, also where the value is an integer
+  // (`DirichletL(3, 2, -1.0)` is the float 0).
+  const finish = (e: Expression) =>
+    floatIfFloatOperand([s], numeric ? e.N() : e.evaluate());
 
   // The odd character mod 4 is the Dirichlet beta function: L(1, χ₄) = π/4.
   if (k === 4 && j === 2) return finish(ce.function('DirichletBeta', [s]));
@@ -2309,32 +2320,99 @@ function evaluateDirichletL(
   // make the sum take minutes (a complex character at s = 10⁶), so it declines.
   if (Math.abs(s.re) > DIRICHLET_L_HURWITZ_MAX_ORDER) return undefined;
 
-  const terms: Expression[] = [];
+  // The value is complex and boxed as a machine number, so the terms are
+  // computed for a double, not at `ce.precision`: a real s sums bignum
+  // Hurwitz values at a fixed working precision (the terms are of size up to
+  // k^s and cancel to the result, so the digits of k are added), a complex s
+  // the double Hurwitz kernel, as `HurwitzZeta` does at a complex point.
+  const total = s.isComplex
+    ? dirichletLComplexS(k, j, ce.complex(s.re, s.im))
+    : dirichletLRealS(ce, k, j, bigRealOperand(ce, s));
+  return total !== undefined &&
+    Number.isFinite(total.re) &&
+    Number.isFinite(total.im)
+    ? boxComplexResult(ce, total, chi !== undefined && !s.isComplex)
+    : undefined;
+}
+
+/**
+ * Digits carried by `dirichletLRealS`: a double's 17 and a guard; the digits
+ * the cancelling terms cost are added per call.
+ */
+const DIRICHLET_L_MACHINE_DIGITS = 17 + 10;
+
+/**
+ * Most working digits `dirichletLRealS` takes on. Past it (|s| above about
+ * 2000/log₁₀ k) the value stays unevaluated rather than costing seconds.
+ */
+const DIRICHLET_L_MACHINE_MAX_DIGITS = 2000;
+
+/**
+ * k^(−s) Σ_r χ(r) ζ(s, r/k) for a real s and a complex character, to a
+ * double's precision: the ζ(s, r/k) are bignum Hurwitz values and the
+ * character values bignum cosines and sines, all at a working precision
+ * fixed by k and s, not by `ce.precision`. `undefined` when a Hurwitz value
+ * cannot be reached.
+ */
+function dirichletLRealS(
+  ce: ComputeEngine,
+  k: number,
+  j: number,
+  s: BigNum
+): { re: number; im: number } | undefined {
+  // The terms are of size up to k^s (s > 0) and the scale k^(−s) is as large
+  // as k^|s| (s < 0): either way the sum cancels by about |s|·log₁₀ k digits.
+  const working =
+    DIRICHLET_L_MACHINE_DIGITS +
+    Math.ceil((Math.abs(s.toNumber()) + 1) * Math.log10(k));
+  if (!(working <= DIRICHLET_L_MACHINE_MAX_DIGITS)) return undefined;
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = working;
+  try {
+    const twoPi = BigDecimal.PI.mul(2);
+    let re = BigDecimal.ZERO;
+    let im = BigDecimal.ZERO;
+    for (let r = 1; r <= k; r++) {
+      if ((r & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+      const q = dirichletCharacterExponent(k, j, r);
+      if (q === undefined) continue;
+      let zeta: BigNum | undefined;
+      try {
+        zeta = bigHurwitzZeta(ce, s, [BigInt(r), BigInt(k)]);
+      } catch {
+        zeta = undefined;
+      }
+      if (zeta === undefined) return undefined;
+      const angle = twoPi.mul(q[0]).div(q[1]);
+      re = re.add(zeta.mul(angle.cos()));
+      im = im.add(zeta.mul(angle.sin()));
+    }
+    const scale = new BigDecimal(k).pow(s.neg()); // k^(−s)
+    return { re: scale.mul(re).toNumber(), im: scale.mul(im).toNumber() };
+  } finally {
+    BigDecimal.precision = saved;
+  }
+}
+
+/**
+ * k^(−s) Σ_r χ(r) ζ(s, r/k) for a complex s, on the double Hurwitz kernel;
+ * `undefined` when a Hurwitz value declines.
+ */
+function dirichletLComplexS(
+  k: number,
+  j: number,
+  s: Complex
+): { re: number; im: number } | undefined {
+  let total = new Complex(0, 0);
   for (let r = 1; r <= k; r++) {
     const q = dirichletCharacterExponent(k, j, r);
     if (q === undefined) continue;
-    terms.push(
-      ce.function('Multiply', [
-        dirichletCharacterValue(ce, q),
-        ce.function('HurwitzZeta', [
-          s,
-          ce.function('Rational', [ce.number(r), ce.number(k)]),
-        ]),
-      ])
-    );
+    const zeta = hurwitzZetaComplexWithError(s, new Complex(r / k, 0))?.value;
+    if (zeta === undefined) return undefined;
+    const angle = (2 * Math.PI * q[0]) / q[1];
+    total = total.add(zeta.mul(new Complex(Math.cos(angle), Math.sin(angle))));
   }
-  const total = ce
-    .function('Multiply', [
-      ce.number(k).pow(s.neg()),
-      ce.function('Add', terms),
-    ])
-    .N();
-  // A complex value is a machine number, as for the other special functions.
-  return isNumber(total) &&
-    Number.isFinite(total.re) &&
-    Number.isFinite(total.im)
-    ? boxComplexResult(ce, total, !total.isComplex)
-    : undefined;
+  return total.mul(new Complex(k, 0).pow(s.neg()));
 }
 
 /** The values χ(1), …, χ(k) when the character takes only 0 and ±1, else `undefined`. */

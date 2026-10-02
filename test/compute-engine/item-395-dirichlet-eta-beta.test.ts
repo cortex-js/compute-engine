@@ -202,3 +202,45 @@ test('Threads over a list', () => {
       .toString()
   ).toBe(`[${quarterPi},0]`);
 });
+
+describe('η and β next to s = 1, past the reach of the Hurwitz kernel', () => {
+  // mpmath (140 digits): dirichlet(1 ± ε, [0, 1, 0, -1]).
+  test('β(1 + 10⁻²⁰) and β(1 − 10⁻⁴⁰) at 30 digits', () => {
+    const precision = ce.precision;
+    ce.precision = 30;
+    try {
+      expect(
+        digits(ce.box(['DirichletBeta', ['Add', 1, ['Power', 10, -20]]]).N())
+      ).toBe('0.785398163397448309617589858988');
+      expect(
+        digits(
+          ce.box(['DirichletBeta', ['Subtract', 1, ['Power', 10, -40]]]).N()
+        )
+      ).toBe('0.78539816339744830961566084582');
+    } finally {
+      ce.precision = precision;
+    }
+  });
+  test('η(1 + 10⁻⁵⁰⁰) is ln 2 to every digit', () => {
+    const precision = ce.precision;
+    ce.precision = 30;
+    try {
+      expect(
+        digits(ce.box(['DirichletEta', ['Add', 1, ['Power', 10, -500]]]).N())
+      ).toBe('0.693147180559945309417232121458');
+    } finally {
+      ce.precision = precision;
+    }
+  });
+});
+
+test('a float s at a trivial zero gives the float 0', () => {
+  for (const [head, s] of [
+    ['DirichletEta', '-2.0'],
+    ['DirichletBeta', '-3.0'],
+  ]) {
+    const v = ce.function(head, [ce.parse(s)]).evaluate();
+    expect(v.re).toBe(0);
+    expect(v.isExact).toBe(false);
+  }
+});

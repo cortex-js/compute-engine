@@ -193,3 +193,29 @@ describe('StieltjesGamma, compiled', () => {
     expect(stieltjesGammaReal(STIELTJES_MAX_ORDER + 1, 1)).toBeNaN();
   });
 });
+
+describe('StieltjesGamma digits', () => {
+  // mpmath: stieltjes(30) = 0.0035577288555731609479135377489084026108…
+  test('γ₃₀ at machine precision is good to a double', () => {
+    const saved = ce.precision;
+    ce.precision = 'machine';
+    try {
+      expect(numeric([S, 30]).re).toBeCloseTo(0.0035577288555731609, 17);
+    } finally {
+      ce.precision = saved;
+    }
+  });
+  test('the certified kernel returns only the digits asked for', () => {
+    const v = bigStieltjesGamma(30, [1n, 1n], 30)!;
+    expect(v.toString()).toBe('0.00355772885557316094791353774891');
+  });
+});
+
+test('a float a at a pole is ComplexInfinity', () => {
+  expect(
+    ce
+      .function(S, [ce.box(1), ce.parse('-2.0')])
+      .evaluate()
+      .toString()
+  ).toBe('~oo');
+});

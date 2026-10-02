@@ -15,10 +15,15 @@ import {
   isExactNumber,
   shouldNumericize,
 } from '../boxed-expression/apply.js';
-import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
-import { asSmallInteger } from '../boxed-expression/numerics.js';
 import {
+  floatIfFloatOperand,
+  hasFloatOperand,
+} from '../boxed-expression/float-result.js';
+import { asRational, asSmallInteger } from '../boxed-expression/numerics.js';
+import {
+  isFunction,
   isNumber,
+  isSymbol,
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
@@ -68,12 +73,14 @@ import {
   logIntegral,
   polylog,
   bigPolyLog,
+  gammaln,
+  bigGammaln,
 } from '../numerics/special-functions.js';
-import { gammaln, bigGammaln } from '../numerics/special-functions.js';
 import { logGammaComplex } from '../numerics/log-gamma.js';
 import {
   barnesGComplex,
   bigBarnesG,
+  bigLogBarnesG,
   logBarnesGComplex,
   superfactorial,
 } from '../numerics/barnes-g.js';
@@ -127,6 +134,36 @@ const MAX_EXACT_LOG_ARGUMENT = 1000;
 
 /** Largest n for which `BarnesG(n)` is formed exactly as a superfactorial (about 4·10⁴ digits). */
 const MAX_EXACT_SUPERFACTORIAL = 200;
+
+/**
+ * The rational q, reduced into (−1, 1], when θ is the exact multiple qπ
+ * (`Pi`, `Multiply(q, Pi)` with an exact rational q, or the `Negate` of
+ * either: −π is canonically `Negate(Pi)`); otherwise `undefined`. The Clausen functions have period 2π, so q is only known
+ * modulo 2.
+ */
+function exactPiMultiple(theta: Expression): [bigint, bigint] | undefined {
+  let q: [bigint, bigint] | undefined;
+  if (isSymbol(theta) && theta.symbol === 'Pi') q = [1n, 1n];
+  else if (
+    isFunction(theta) &&
+    theta.operator === 'Multiply' &&
+    theta.nops === 2 &&
+    isSymbol(theta.op2) &&
+    theta.op2.symbol === 'Pi' &&
+    isExactNumber(theta.op1)
+  ) {
+    const r = asRational(theta.op1);
+    if (r !== undefined) q = [BigInt(r[0]), BigInt(r[1])];
+  } else if (isFunction(theta) && theta.operator === 'Negate') {
+    const r = exactPiMultiple(theta.op1);
+    if (r !== undefined) q = [-r[0], r[1]];
+  }
+  if (q === undefined) return undefined;
+  const [p, d] = q[1] < 0n ? [-q[0], -q[1]] : q;
+  let m = ((p % (2n * d)) + 2n * d) % (2n * d); // in [0, 2d)
+  if (m > d) m -= 2n * d; // in (−d, d]
+  return [m, d];
+}
 
 /** `EllipticK`: real for m < 1, `+∞` pole at m = 1, finite complex for m > 1. */
 const ELLIPTIC_K_DOMAIN: RealDomain = {
@@ -286,7 +323,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult('number', context.engine._typeResolver),
       evaluate: ([z], { numericApproximation, engine }) => {
         if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
-          return engine.Zero;
+          return floatIfFloatOperand([z], engine.Zero);
         const infinite = infiniteGammaFamilyValue(z, engine);
         if (infinite !== undefined) return infinite;
         const n = asSmallInteger(z);
@@ -349,10 +386,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (isNumber(z) && !z.isComplex && bignumPreferred(engine)) {
           const x = bigRealOperand(engine, z);
           if (x.isPositive()) {
-            const big = bigBarnesG(engine, x);
-            return big === undefined
-              ? undefined
-              : boxBignumApprox(engine, big.ln());
+            const big = bigLogBarnesG(engine, x);
+            return big === undefined ? undefined : boxBignumApprox(engine, big);
           }
         }
         return applyN(
@@ -846,15 +881,24 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (!Number.isFinite(re) || !Number.isFinite(im)) return undefined;
 
         // Real a > 0: the arbitrary-precision kernel follows `ce.precision`,
-        // its Euler–Maclaurin remainder bounded. Complex a, and a < 0 where
-        // the value is complex, use the double kernel at every precision.
-        if (im === 0 && re > 0 && bignumPreferred(engine)) {
+        // its Euler–Maclaurin remainder bounded. At machine precision it is
+        // also used, at 17 digits, and rounded to a double: the double kernel
+        // loses digits to cancellation as the order grows (about 7 digits are
+        // left at n = 30). Complex a, and a < 0 where the value is complex,
+        // use the double kernel at every precision.
+        if (im === 0 && re > 0) {
+          const machine = !bignumPreferred(engine);
           const big = bigStieltjesGamma(
             order,
             a === undefined ? [1n, 1n] : hurwitzOperand(engine, a),
-            engine.precision
+            machine ? 17 : engine.precision,
+            engine._deadlineFrame
           );
-          return big === undefined ? undefined : boxBignumApprox(engine, big);
+          if (big !== undefined)
+            return machine
+              ? engine.number(big.toNumber())
+              : boxBignumApprox(engine, big);
+          if (!machine) return undefined;
         }
         const z = stieltjesGammaComplex(order, new Complex(re, im));
         if (z === undefined) return undefined;
@@ -882,20 +926,50 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: (ops, { numericApproximation, engine, expression }) => {
         const [n, theta] = ops;
         if (!isNumber(n) || n.isComplex) return undefined;
         const order = asSmallInteger(n);
         if (order === null || order < 1) return undefined;
         const even = order % 2 === 0;
+        // A float operand makes the special values below floats (Cl₃(0.0) is
+        // the float ζ(3), not `Zeta(3)`).
+        const numericPoint = numericApproximation || hasFloatOperand(ops);
 
-        // θ = 0: Cl₁ is +∞, even orders vanish, odd orders are ζ(n).
-        if (isNumber(theta) && !theta.isComplex && theta.isSame(0)) {
+        // θ ≡ qπ (mod 2π) for an exact rational q ∈ (−1, 1]. Even orders
+        // are odd in θ and odd orders are even in θ, so a negative q is
+        // folded onto −q with `sign`.
+        // Under `.N()` the operands arrive evaluated, so an exact 2π is
+        // already the float 6.28…; the operand before evaluation (as `Sin`
+        // reads it) keeps the multiple of π, so `.N()` agrees with
+        // `evaluate()` at these points.
+        const q =
+          exactPiMultiple(theta) ??
+          (isFunction(expression) && expression.nops === 2
+            ? exactPiMultiple(expression.op2)
+            : undefined);
+        const sign = q !== undefined && q[0] < 0n && even ? -1 : 1;
+        const point =
+          q === undefined
+            ? undefined
+            : q[0] === 0n
+              ? 'zero'
+              : q[0] === q[1]
+                ? 'pi'
+                : q[1] === 2n * (q[0] < 0n ? -q[0] : q[0])
+                  ? 'half-pi'
+                  : undefined;
+
+        // θ ≡ 0: Cl₁ is +∞, even orders vanish, odd orders are ζ(n).
+        if (
+          point === 'zero' ||
+          (isNumber(theta) && !theta.isComplex && theta.isSame(0))
+        ) {
           if (order === 1) return engine.PositiveInfinity;
           const value = even ? engine.Zero : engine.function('Zeta', [n]);
           return floatIfFloatOperand(
             ops,
-            value.evaluate({ numericApproximation })
+            value.evaluate({ numericApproximation: numericPoint })
           );
         }
 
@@ -909,22 +983,22 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
                 .number(1)
                 .sub(engine.number(2).pow(engine.number(1 - order)))
                 .mul(engine.function('Zeta', [n]));
-        if (theta.isSame(engine.Pi)) {
+        if (point === 'pi') {
           const value = even ? engine.Zero : eta().neg();
           return floatIfFloatOperand(
             ops,
-            value.evaluate({ numericApproximation })
+            value.evaluate({ numericApproximation: numericPoint })
           );
         }
-        if (theta.isSame(engine.Pi.div(2))) {
+        if (point === 'half-pi') {
           const value = even
-            ? engine.function('DirichletBeta', [n])
+            ? engine.function('DirichletBeta', [n]).mul(sign)
             : eta()
                 .mul(engine.number(2).pow(engine.number(-order)))
                 .neg();
           return floatIfFloatOperand(
             ops,
-            value.evaluate({ numericApproximation })
+            value.evaluate({ numericApproximation: numericPoint })
           );
         }
 

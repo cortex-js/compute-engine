@@ -1,5 +1,9 @@
 import { Complex } from 'complex-esm';
 import { BigDecimal } from '../../big-decimal/index.js';
+import {
+  checkDeadline,
+  type DeadlineFrame,
+} from '../../common/interruptible.js';
 import { bernoulliRational } from './bernoulli.js';
 import {
   type Ball,
@@ -170,12 +174,14 @@ const RESULT_SLACK_DIGITS = 1;
 /**
  * γₙ(a) to `digits` significant digits for an integer 0 ≤ n ≤
  * `STIELTJES_MAX_ORDER` and a real a > 0, with the remainder bounded; or
- * `undefined` where that cannot be certified.
+ * `undefined` where that cannot be certified. With a `frame`, the loops check
+ * its deadline: at a high precision one call takes seconds.
  */
 export function bigStieltjesGamma(
   n: number,
   a: StieltjesOperand,
-  digits: number
+  digits: number,
+  frame?: DeadlineFrame
 ): BigDecimal | undefined {
   if (!Number.isInteger(n) || n < 0 || n > STIELTJES_MAX_ORDER)
     return undefined;
@@ -204,10 +210,13 @@ export function bigStieltjesGamma(
           ? rational(a[0], a[1])
           : exact(a as BigDecimal);
         if (!lower(ball).isPositive()) return undefined;
-        return eulerMaclaurin(n, ball, terms, tolerance);
+        return eulerMaclaurin(n, ball, terms, tolerance, frame);
       })
     );
-    if (r !== undefined && wideEnough(r, digits)) return r.mid;
+    // The ball's midpoint carries the working digits; past `digits` they are
+    // not certified, so they are rounded off.
+    if (r !== undefined && wideEnough(r, digits))
+      return r.mid.toPrecision(digits);
     if (r !== undefined && !r.mid.isZero()) {
       const size = log10Abs(r.mid);
       tolerance = size - target;
@@ -233,11 +242,13 @@ function eulerMaclaurin(
   n: number,
   a: Ball,
   terms: number,
-  tolerance?: number
+  tolerance?: number,
+  frame?: DeadlineFrame
 ): Ball | undefined {
   const working = BigDecimal.precision;
   let sum = exact(0);
   for (let k = 0; k < terms; k++) {
+    if ((k & 0x3f) === 0) checkDeadline(frame);
     const x = add(a, exact(k));
     sum = add(sum, div(powInt(ln(x), n), x));
   }
@@ -260,6 +271,7 @@ function eulerMaclaurin(
     tolerance ?? Infinity
   );
   for (let j = 1; ; j++) {
+    if ((j & 0x3f) === 0) checkDeadline(frame);
     factorial *= BigInt((2 * j - 1) * 2 * j);
     let derivative = exact(0);
     for (let i = 0; i <= Math.min(2 * j - 1, n); i++) {

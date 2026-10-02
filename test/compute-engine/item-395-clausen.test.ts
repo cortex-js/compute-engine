@@ -200,3 +200,103 @@ describe('ClausenCl routes agree', () => {
     expect(run({ x: 0.1 })).toBeCloseTo(1.1830436304608267, 13);
   });
 });
+
+describe('ClausenCl at exact multiples of π and at a large θ', () => {
+  // Cl_n has period 2π; even orders are odd in θ, odd orders even in θ.
+  test.each([
+    [2, ['Multiply', 2, 'Pi'], '0'],
+    [2, ['Multiply', 4, 'Pi'], '0'],
+    [1, ['Multiply', 4, 'Pi'], '+oo'],
+    [3, ['Multiply', 2, 'Pi'], 'Zeta(3)'],
+    [2, ['Multiply', ['Rational', -1, 2], 'Pi'], '-"CatalanConstant"'],
+    [2, ['Multiply', ['Rational', 3, 2], 'Pi'], '-"CatalanConstant"'],
+    [2, ['Multiply', ['Rational', 5, 2], 'Pi'], '"CatalanConstant"'],
+    [3, ['Multiply', ['Rational', -1, 2], 'Pi'], '-3/32 * Zeta(3)'],
+    [3, ['Multiply', -3, 'Pi'], '-3/4 * Zeta(3)'],
+  ])('ClausenCl(%p, %j) = %s', (n, theta, expected) => {
+    expect(
+      ce
+        .box(['ClausenCl', n, theta as never])
+        .evaluate()
+        .toString()
+    ).toBe(expected);
+  });
+
+  // The double kernel reduces θ mod 2π without losing log10|θ| digits.
+  // mpmath: clsin(2, 1e10), clsin(2, 1e13), clcos(3, 1e15).
+  test.each([
+    [2, 1e10, -0.85472382816823548],
+    [2, 1e13, -0.65310790551286937],
+    [3, 1e15, -0.54453746617787503],
+  ])('clausen(%p, %p) in doubles', (n, theta, expected) => {
+    expect(clausen(n, theta)).toBeCloseTo(expected, 14);
+  });
+});
+
+describe('ClausenCl at an exact multiple of π on every route', () => {
+  const routes = (n: number, theta: unknown, latex: string) => [
+    ce.box(['ClausenCl', n, theta as never]),
+    ce.function('ClausenCl', [ce.box(n), ce.box(theta as never)]),
+    ce.parse(`\\operatorname{ClausenCl}(${n}, ${latex})`),
+  ];
+  test.each([
+    [2, ['Multiply', 2, 'Pi'], '2\\pi', '0', 0],
+    [
+      2,
+      ['Divide', 'Pi', 2],
+      '\\frac{\\pi}{2}',
+      '"CatalanConstant"',
+      0.915965594177219,
+    ],
+    [
+      3,
+      ['Divide', 'Pi', 2],
+      '\\frac{\\pi}{2}',
+      '-3/32 * Zeta(3)',
+      -0.112692834671212,
+    ],
+    [1, ['Multiply', 4, 'Pi'], '4\\pi', '+oo', Infinity],
+    [3, 'Pi', '\\pi', '-3/4 * Zeta(3)', -0.901542677369696],
+    // −π is canonically `Negate(Pi)`, the other negative multiples
+    // `Multiply(q, Pi)` with q < 0.
+    [2, ['Negate', 'Pi'], '-\\pi', '0', 0],
+    [3, ['Negate', 'Pi'], '-\\pi', '-3/4 * Zeta(3)', -0.901542677369696],
+    [1, ['Negate', 'Pi'], '-\\pi', '-ln(2)', -0.693147180559945],
+    [
+      2,
+      ['Negate', ['Divide', 'Pi', 2]],
+      '-\\frac{\\pi}{2}',
+      '-"CatalanConstant"',
+      -0.915965594177219,
+    ],
+    [2, ['Multiply', -3, 'Pi'], '-3\\pi', '0', 0],
+  ])('ClausenCl(%p, %j)', (n, theta, latex, exact, value) => {
+    for (const e of routes(n, theta, latex)) {
+      expect(e.evaluate().toString()).toBe(exact);
+      const v = e.N().re;
+      if (value === Infinity) expect(v).toBe(Infinity);
+      // The exact 0, not a residue such as −2.66e−25 that a float θ gives.
+      else if (value === 0) expect(v).toBe(0);
+      else expect(v).toBeCloseTo(value, 14);
+    }
+  });
+  test('a symbolic θ stays', () => {
+    expect(ce.box(['ClausenCl', 2, 'x']).N().toString()).toBe(
+      'ClausenCl(2, x)'
+    );
+  });
+  test('a float operand gives a float', () => {
+    const v = ce.function('ClausenCl', [ce.box(3), ce.parse('0.0')]).evaluate();
+    expect(v.re).toBeCloseTo(1.2020569031595943, 15);
+  });
+  // mpmath clsin(2, θ) at the 24-digit θ that `2.0·π` rounds to.
+  test('a θ next to 2π is certified, not declined', () => {
+    const v = ce
+      .function('ClausenCl', [
+        ce.box(2),
+        ce.function('Multiply', [ce.parse('2.0'), ce.Pi]),
+      ])
+      .N();
+    expect(v.re).toBeCloseTo(-4.3331959963644253671e-23, 36);
+  });
+});

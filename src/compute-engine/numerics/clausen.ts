@@ -37,9 +37,17 @@ function zetaInteger(m: number): number {
   return Number(num) / Number(den);
 }
 
-/** θ reduced into (−π, π]. */
+/**
+ * θ reduced into (−π, π]. Past 2π the subtraction θ − 2πk loses about
+ * log₁₀|θ| digits (2πk is rounded to a double), so a larger θ is reduced
+ * with `Math.sin` and `Math.cos`, which reduce their argument exactly, and
+ * `Math.atan2`: the error is then about 1e-16 at any |θ|.
+ */
 function reduce(theta: number): number {
-  const t = theta - TWO_PI * Math.round(theta / TWO_PI);
+  const t =
+    Math.abs(theta) > TWO_PI
+      ? Math.atan2(Math.sin(theta), Math.cos(theta))
+      : theta - TWO_PI * Math.round(theta / TWO_PI);
   return t <= -Math.PI ? t + TWO_PI : t;
 }
 
@@ -212,7 +220,9 @@ function bigClausenExpansion(
       const cIm = BigDecimal.PI.div(2).mul(t.isNegative() ? -1 : 1);
       addQuadrant(acc, n - 1, power.mul(cRe));
       addQuadrant(acc, n, power.mul(cIm)); // i·iⁿ⁻¹
-      const big = power.abs().mul(cRe.abs().add(cIm.abs()));
+      // Only the part in iⁿ⁻¹ lands in the component returned (Im for an
+      // even n, Re for an odd one); the part in iⁿ lands in the other one.
+      const big = power.mul(cRe).abs();
       if (big.gt(scale)) scale = big;
       continue;
     }
@@ -221,7 +231,10 @@ function bigClausenExpansion(
     const c = power.mul(bigZetaInteger(ce, m));
     addQuadrant(acc, k, c);
     const mag = c.abs();
-    if (mag.gt(scale)) scale = mag;
+    // The scale measures cancellation in the returned component only: the
+    // terms with k + n odd. The others (ζ(n) at k = 0 for an even n, of
+    // size 1 next to a value of size θ) do not cancel against it.
+    if ((k + n) % 2 === 1 && mag.gt(scale)) scale = mag;
     if (k > n + 2 && mag.lt(tolerance.mul(scale))) {
       if (++small >= CLAUSEN_BIG_CONSECUTIVE)
         return { value: n % 2 === 0 ? acc.im : acc.re, scale };
