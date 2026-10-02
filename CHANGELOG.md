@@ -147,6 +147,24 @@
 
 ### Issues Resolved
 
+- **`QuotientRing(Integers, n)` is a finite collection of `n` residue classes,
+  not a set of integers** (#399, contributed by
+  [enumeratio](https://github.com/enumeratio)). `\mathbb{Z}/5\mathbb{Z}` and
+  `\mathbb{Z}_5` had no count (`count` was `undefined`, `Count(…)` stayed
+  unevaluated) and were typed `set<integer>`, though 7 and 2 are the same
+  element of ℤ/5ℤ. For a positive integer literal `n` the collection now has
+  count `n`, is finite and non-empty, and `Count` evaluates
+  (`Count(\mathbb{Z}/5\mathbb{Z})` is `5`); a symbolic, zero or negative
+  modulus, or a base other than `Integers`, stays inert. The type is
+  `set<unknown>`, as for an `Adjoin` adjunct the engine cannot type. Enumerating
+  the classes and testing membership need a value for a class, which the engine
+  has none for: a host library supplies it with the new
+  `setResidueClasses(ce, { element, modulusOf, type })`, after which iteration
+  yields the `n` classes, `contains` decides by modulus (a class of 2 mod 5 is
+  in ℤ/5ℤ) and the element type is the registered `type`. Without it, iteration
+  and membership decline.
+
+
 - **`sin\prime(x)` in the lenient grammar is the derivative of `sin`**, as
   `sin'(x)` and `\sin\prime(x)` are. The `\prime` was read as the start of
   the argument of `sin`, and gave an `unexpected-command` error.
@@ -1440,23 +1458,6 @@
   raised, as before.
 
 ### Issues Resolved
-
-- **`QuotientRing(Integers, n)` is a finite collection of `n` residue classes,
-  not a set of integers** (#399, contributed by
-  [enumeratio](https://github.com/enumeratio)). `\mathbb{Z}/5\mathbb{Z}` and
-  `\mathbb{Z}_5` had no count (`count` was `undefined`, `Count(…)` stayed
-  unevaluated) and were typed `set<integer>`, though 7 and 2 are the same
-  element of ℤ/5ℤ. For a positive integer literal `n` the collection now has
-  count `n`, is finite and non-empty, and `Count` evaluates
-  (`Count(\mathbb{Z}/5\mathbb{Z})` is `5`); a symbolic, zero or negative
-  modulus, or a base other than `Integers`, stays inert. The type is
-  `set<unknown>`, as for an `Adjoin` adjunct the engine cannot type. Enumerating
-  the classes and testing membership need a value for a class, which the engine
-  has none for: a host library supplies it with the new
-  `setResidueClasses(ce, { element, modulusOf, type })`, after which iteration
-  yields the `n` classes, `contains` decides by modulus (a class of 2 mod 5 is
-  in ℤ/5ℤ) and the element type is the registered `type`. Without it, iteration
-  and membership decline.
 
 - A pure imaginary factor in a product was serialized in parentheses that are
   not necessary: `i·x` was `(\imaginaryI)x` and `e^{iπ}` was
