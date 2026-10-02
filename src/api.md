@@ -66,7 +66,15 @@ readonly latexSyntax: ILatexSyntax | undefined;
 ```
 
 The LatexSyntax instance used for LaTeX parsing/serialization.
- `undefined` when no LatexSyntax was provided to the constructor.
+ `undefined` when no LatexSyntax was provided to the constructor and
+ the entry point has no LaTeX support (the core-only bundle).
+
+ To add a notation to a running engine, call
+ `ce.latexSyntax.addEntries([...])`: later parses and serializations use
+ the new entries. An engine created without the `latexSyntax` option
+ has its own instance, so the change applies to that engine only. An
+ instance given to several engines with the `latexSyntax` option is
+ shared: the change applies to all of them.
 
 </MemberCard>
 
@@ -1643,7 +1651,30 @@ declare(id, type, scope?): IComputeEngine
 
 ####### scope?
 
-`Scope`
+  \| `Scope`
+  \| [`DeclareOptions`](#declareoptions) & \{
+  `extend`: `false`;
+ \}
+
+###### declare(id, patch, options)
+
+```ts
+declare(id, patch, options): IComputeEngine
+```
+
+####### id
+
+`string`
+
+####### patch
+
+[`OperatorDefinitionPatch`](#operatordefinitionpatch)
+
+####### options
+
+[`DeclareOptions`](#declareoptions) & \{
+  `extend`: `true`;
+ \}
 
 ###### declare(id, def, scope)
 
@@ -1661,7 +1692,10 @@ declare(id, def, scope?): IComputeEngine
 
 ####### scope?
 
-`Scope`
+  \| `Scope`
+  \| [`DeclareOptions`](#declareoptions) & \{
+  `extend`: `false`;
+ \}
 
 ###### declare(arg1, arg2, arg3)
 
@@ -1757,6 +1791,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
+  `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
@@ -1831,6 +1866,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
+  `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
@@ -1842,10 +1878,48 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| `undefined`;
  \}\>\>
   \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
+  \| [`OperatorDefinitionPatch`](#operatordefinitionpatch)
 
 ####### arg3?
 
-`Scope`
+`Scope` \| [`DeclareOptions`](#declareoptions)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~loadLibrary()~~ {#loadlibrary-1}
+
+```ts
+loadLibrary(library): IComputeEngine
+```
+
+Load a library on an engine that is already constructed. Its
+definitions are declared in the global scope, as with `ce.declare()`,
+and its name is recorded (see `libraryOf()`). Each library in its
+`requires` list must already be loaded.
+
+####### library
+
+[`LibraryDefinition`](#librarydefinition)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~libraryOf()~~ {#libraryof-1}
+
+```ts
+libraryOf(name): string | undefined
+```
+
+The name of the library whose definition `name` resolves to in the
+current scope (`'trigonometry'` for `Sin`), or `undefined` for a name
+that no library defines or that a declaration shadows.
+
+####### name
+
+`string`
 
 </MemberCard>
 
@@ -3383,6 +3457,7 @@ ce.declare('MyGcd', {
 type EvaluateHandlerOptions = Partial<EvaluateOptions> & {
   engine: ComputeEngine;
   expression: Expression;
+  precision: number;
   effects: EffectHandlers;
 };
 ```
@@ -3427,6 +3502,28 @@ each held operand it consumes).
 
 Read-only: do not mutate it, and do not assume it is present (a handler
 invoked outside the evaluation driver may not receive one).
+
+#### EvaluateHandlerOptions.precision?
+
+```ts
+optional precision?: number;
+```
+
+The number of significant digits the caller asked for, when
+`numericApproximation` is `true`. `undefined` when
+`numericApproximation` is `false`: an exact evaluation has no precision.
+
+- Inside `N(x, p)`, it is `p` for the evaluation of `x` and of every
+  expression evaluated inside it, also when `p` is lower than the
+  precision of the engine (then `N` computes at the precision of the
+  engine and rounds the result to `p` digits).
+- Otherwise (`x.N()`, `N(x)`, `evaluate({ numericApproximation: true })`)
+  it is `ce.precision`, the precision of the engine.
+
+A handler can use it to compute to the requested number of digits
+without reading `ce.precision`. Note that `N(x, p)` with a `p` greater
+than the precision of the engine also sets `ce.precision` to `p`, and
+leaves it there after the call.
 
 #### EvaluateHandlerOptions.effects
 
@@ -4328,6 +4425,75 @@ remain intact. Built-ins use `BoxedType.forResult()` to share that work.
 
 </MemberCard>
 
+<MemberCard>
+
+### OperatorDerivativeHandler {#operatorderivativehandler}
+
+```ts
+type OperatorDerivativeHandler = (ops, options) => Expression | undefined;
+```
+
+A handler that gives one partial derivative of an operator.
+
+- `ops` are the arguments of the application being differentiated, for
+  example `[x^2, y]` for `F(x^2, y)`. They are canonical, not evaluated.
+- `options.argument` is the 0-based index of the argument with respect
+  to which the partial derivative is requested.
+
+Return the partial derivative `∂F/∂(argument number options.argument)`
+evaluated AT `ops`, for example `2·x^2` for the first partial of
+`F(u, v) = u^2 + v` applied to `[x^2, y]`. Do not multiply by the
+derivative of the argument: the chain rule is applied by the caller.
+
+Return `undefined` when the partial derivative is not known. That
+partial then stays symbolic, as `Apply(Derivative(F, 1, 0), x^2, y)`.
+
+Do not call `.simplify()` on the result: the derivative is computed
+inside the simplification of other expressions, and calling `.simplify()`
+there can recurse without end.
+
+</MemberCard>
+
+<MemberCard>
+
+### OperatorDerivative {#operatorderivative}
+
+```ts
+type OperatorDerivative = 
+  | ReadonlyArray<ExpressionInput | Expression>
+  | OperatorDerivativeHandler;
+```
+
+The value of the `derivative` key of an operator definition. It has one
+of two forms:
+
+1. **An array with one entry for each argument**. Entry `i` is a function
+   literal (`["Function", body, ...parameters]`, as MathJSON or as an
+   expression) with one parameter for each argument of the operator. It
+   gives the partial derivative with respect to argument `i`, as a
+   function of all the arguments. For `F(x, y) = x^2·y`:
+
+   ```ts
+   derivative: [
+     ['Function', ['Multiply', 2, 'x', 'y'], 'x', 'y'],  // ∂F/∂x
+     ['Function', ['Power', 'x', 2], 'x', 'y'],           // ∂F/∂y
+   ]
+   ```
+
+   The array is used only for an application with as many arguments as
+   the array has entries, and an entry is used only if its literal has
+   one parameter for each argument. In any other case the partial
+   derivatives stay symbolic.
+
+2. **A handler**, see [OperatorDerivativeHandler](#operatorderivativehandler). Use it when the
+   number of arguments varies, or when a partial derivative needs code.
+
+In both forms the derivative of `F(g₁, …, gₙ)` with respect to `v` is
+given by the chain rule: `Σᵢ ∂ᵢF(g₁, …, gₙ) · ∂gᵢ/∂v`. A partial
+derivative is requested only for an argument that depends on `v`.
+
+</MemberCard>
+
 ### BaseDefinition {#basedefinition}
 
 Metadata common to both symbols and functions.
@@ -4486,7 +4652,10 @@ ce.declare('Sqrt', {
 A library bundles symbol/operator definitions and declares dependencies on
 other libraries. It carries no LaTeX dictionary entries: to parse or
 serialize a new notation, pass a dictionary to the `LatexSyntax` given with
-the `latexSyntax` constructor option.
+the `latexSyntax` constructor option, or add entries to a running engine
+with `ce.latexSyntax.addEntries()`.
+
+To load a custom library on a running engine, use `ce.loadLibrary()`.
 
 Use with the `libraries` constructor option to load standard or custom
 libraries:
@@ -5548,6 +5717,19 @@ optional evalDimension?: (ops, options) => Expression;
 
 <MemberCard>
 
+##### BoxedOperatorDefinition.derivative? {#derivative}
+
+```ts
+optional derivative?: OperatorDerivative;
+```
+
+The partial derivatives of the operator, as given by the `derivative`
+key of its definition. See [OperatorDerivative](#operatorderivative).
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedOperatorDefinition.compile? {#compile}
 
 ```ts
@@ -5689,6 +5871,70 @@ through this accessor (or [invokesNone](#invokesnone)), never the raw field.
 ####### i
 
 `number`
+
+</MemberCard>
+
+<MemberCard>
+
+### DeclareOptions {#declareoptions}
+
+```ts
+type DeclareOptions = {
+  scope: Scope;
+  extend: boolean;
+};
+```
+
+The options of `ce.declare(id, def, options)`.
+
+- `scope`: the scope the declaration is installed in. The default is the
+  current lexical scope.
+- `extend`: when `true`, `def` is a PATCH applied to the operator definition
+  currently visible for `id`, not a new definition. See
+  [OperatorDefinitionPatch](#operatordefinitionpatch).
+
+</MemberCard>
+
+<MemberCard>
+
+### OperatorDefinitionPatch {#operatordefinitionpatch}
+
+```ts
+type OperatorDefinitionPatch = OperatorDefinition & {
+  addSignature:   | Type
+     | TypeString;
+};
+```
+
+The patch `ce.declare(id, patch, { extend: true })` applies to the operator
+definition currently visible for `id`.
+
+The engine builds a NEW definition from the fields of the visible one and
+the fields of the patch, and installs it in the target scope. A field the
+patch does not name keeps its value. A field the patch names replaces the
+old value: when two extensions give the same handler (two `evaluate`
+handlers, for example), the later one wins. The visible definition is not
+changed, so an expression boxed before the extension keeps using it.
+
+- `signature` replaces the signature.
+- `addSignature` adds an overload: the new signature is the intersection
+  `old & addSignature`. A call that matches both arms resolves to the old
+  arm first.
+
+In both cases the new signature must be a subtype of the old one, so that
+every call that was valid stays valid. For example `(value, value*) -> set`
+can replace `(set<any>, value*) -> set`, but `(any*) -> any` cannot replace
+`(value+) -> value`. This does not apply when the old signature was only
+inferred (`inferredSignature` is `true`: an operator declared without a
+signature, or a function whose signature is inferred from its body),
+since such a signature is not a contract.
+
+Extending a standard-library operator without replacing its `evaluate`,
+`canonical`, `compile` or `derivative` handler (for example, to add a
+description or a wider signature) keeps it a library operator: `D`,
+compilation and the numeric evaluation of the library still apply to it.
+An extension that replaces one of these handlers is treated as a user
+definition with the same name, as a plain `ce.declare()` is.
 
 </MemberCard>
 
@@ -6525,6 +6771,7 @@ type ParseLatexOptions = NumberFormat & {
   parseUnexpectedToken: (lhs, parser) => MathJsonExpression | null;
   preserveLatex: boolean;
   diagnostics: boolean;
+  onAmbiguity: "report" | "error";
   quantifierScope: "tight" | "loose";
   timeDerivativeVariable: string;
   tolerance: number;
@@ -6669,11 +6916,12 @@ If true, collect opt-in parse-time diagnostics (see [ParseDiagnostic](#parsediag
 flagging charitable parse decisions — undeclared symbols, application-like
 juxtaposition read as multiply, discarded `%` comments, and trailing noise
 dropped by recovery. In non-strict mode, also: letter runs read as a
-product (`letter-run-split`), an implicit product read as the whole
-denominator of a `/` (`implicit-product-in-denominator`), digits
-separated by white space read as one number (`spaced-digit-groups`), and a
+product (`ambiguous-letter-run`), an implicit product read as the whole
+denominator of a `/` (`ambiguous-denominator`), digits
+separated by white space read as one number (`ambiguous-digit-groups`), a
 symbol directly followed by `.digits` read as a product
-(`letter-before-decimal`).
+(`ambiguous-letter-decimal`), and a prefix `±` or two signs in a row
+(`ambiguous-sign`).
 
 This flag only takes effect through
 [ComputeEngine.parse](#parse-1), which
@@ -6685,6 +6933,36 @@ returns plain MathJSON with nowhere to attach diagnostics).
 This is purely additive: enabling it never changes the parse output.
 
 **Default:** `false`
+
+#### ParseLatexOptions.onAmbiguity?
+
+```ts
+optional onAmbiguity?: "report" | "error";
+```
+
+What the lenient grammar (`strict: false`) does with a reading that has
+a second common reading, that is, with each diagnostic whose code starts
+with `ambiguous-` (see [ParseDiagnostic](#parsediagnostic)):
+
+- `"report"`: keep the reading. The diagnostic is reported when
+  `diagnostics` is `true`.
+- `"error"`: put an `Error` node in place of the smallest expression that
+  holds the source span of the diagnostic. The error code is the
+  diagnostic code, and the error holds the source text of the span:
+  `["Error", "'ambiguous-sign'", ["LatexString", "'--'"]]`. This works
+  without `diagnostics: true`, and for every code that starts with
+  `ambiguous-`.
+
+The parser records the source span of the expressions it builds. When
+no recorded expression holds the span of a diagnostic, for example
+because a later step rebuilt that part of the result, the `Error` node
+replaces the whole result. When two diagnostics select nested
+expressions, the `Error` node of the outer expression is kept.
+
+In strict mode (`strict: true`) this option has no effect: the strict
+grammar reports no `ambiguous-*` diagnostic.
+
+**Default:** `"report"`
 
 #### ParseLatexOptions.quantifierScope
 
@@ -8176,7 +8454,7 @@ them never changes the parse output.
   segmented into a letter run (`divisors(60)` → `"divisors"`). When the
   symbol was read as a unit, `detail` additionally carries
   `lexedAs: "unit"`.
-- `"letter-run-split"` — non-strict mode only: a run of two or more
+- `"ambiguous-letter-run"` — non-strict mode only: a run of two or more
   letters that is not a known word was read as a product of its parts
   (`eps` → `e·p·s`, `sinx` → `s·i·n·x`, `xpi` → `x·π`). `detail: { run,
   parts }` with `run` the letters as written and `parts` the MathJSON
@@ -8194,23 +8472,115 @@ them never changes the parse output.
 - `"recovered"` — trailing tokens skipped/coerced by non-strict error
   recovery that do not otherwise surface as an `Error` node. `detail` may
   include the skipped fragment as `{ skipped }`.
-- `"implicit-product-in-denominator"` — non-strict mode only: the
+- `"ambiguous-denominator"` — non-strict mode only: the
   denominator of a `/` is an implicit product, which binds tighter than
   `/`. `1/2x` is read as `1/(2x)`, not `(1/2)x`. The span covers the
   denominator. A differential denominator (`dy/dx`) is not reported.
-- `"spaced-digit-groups"` — non-strict mode only: white space between
+- `"ambiguous-digit-groups"` — non-strict mode only: white space between
   digits was read as part of one number (`2 3` → 23, `1 000` → 1000).
   `detail: { digits }`. Visual space commands (`1\,000`) and the `{,}`
   separator are not reported.
-- `"letter-before-decimal"` — non-strict mode only: a symbol is directly
+- `"ambiguous-letter-decimal"` — non-strict mode only: a symbol is directly
   followed by `.digits` (`x.5`), read as the product `x \cdot 0.5`.
   `detail: { name }`. The span starts at the `.`.
+- `"ambiguous-sign"` — non-strict mode only: a prefix `±` (also spelled
+  `\pm`, `\plusmn` or `+-`) with no left operand, read as a measurement
+  with a nominal value of 0 where a person often means two values
+  (`x = ±1` is read as `Measurement(0, 1)`, and `y = +-\sqrt{x}` as
+  `Measurement(0, √x)`), a prefix `∓` (also spelled `\mp` or `-+`) with
+  no left operand, read as `MinusPlus(0, …)` (`x = ∓1` and `-+x` are
+  read as `MinusPlus(0, 1)` and `MinusPlus(0, x)`), or two signs in a row
+  (`--x`, `x - -y`, `a + -b`, and `a -+ b`, which is read as
+  `MinusPlus(a, b)`).
+  `detail: { signs }`, the signs as written with no white space. The span
+  covers the signs. `a +- b` with no white space is read as
+  `Measurement(a, b)` and is not reported.
+- Non-strict mode only, codes for a reading that has a second common
+  reading (the reading does not change):
+  - `"ambiguous-exponent-end"` — where an unbraced exponent ends:
+    `e^2pi` (`e^2·π`), `e^i pi`, `e^x/2`, `x^1/2`. `detail: { exponent }`.
+    The span is from the base to the end of the operand after the
+    exponent: `e^2pi`.
+  - `"ambiguous-implicit-subscript"` — a letter followed by digits is a
+    subscript (`x2` → `x_2`), and a digit subscript ends before a letter
+    (`x_1y` → `x_1·y`). `detail: { base?, subscript }`.
+  - `"ambiguous-name-digits"` — letters and digits that are not a library
+    function, before a parenthesis: `atan3(y)` → `arctan(3y)`.
+    `detail: { name }`.
+  - `"ambiguous-function-argument"` — a bare function name with an
+    argument of more than one factor and no parentheses (`sin x y` →
+    `sin(xy)`), or `log` and a number after white space (`log 2 x` →
+    `log_2(x)`). `detail: { function }`.
+  - `"ambiguous-function-without-parentheses"` — a symbol declared as a
+    function followed by an operand: `f x` → `f·x`. `detail: { name }`.
+  - `"ambiguous-name-then-number"` — a name, white space, a number:
+    `x 2` → `x·2`. `detail: { name }`.
+  - `"ambiguous-delta"` — `Δ` or `Delta` followed by a letter: `Δx` →
+    `Δ·x`.
+  - `"ambiguous-constant-name"` — a library constant alone on the left of
+    `=` (`e = 1.6e-19`, `pi = 3.14`), or followed by a parenthesized group
+    on the left of `=` (`pi(x) = x` → `π·x = x`, where a person can mean
+    the definition of a function `pi`). `detail: { name }`. Only an `=`
+    at the top level of the line is reported: the index of
+    `\sum_{i=1}^n` is not.
+  - `"ambiguous-log-base"` — `log` with two arguments in parentheses:
+    `log(x, 2)` is `Log(x, 2)`, the base second, and other tools put the
+    base first. Also the name `lg`, which is the base-10 logarithm and,
+    in computer science, the base-2 logarithm. `detail: { name }`.
+  - `"ambiguous-engine-operator"` — a one-letter library operator written
+    as a plain letter before a parenthesis, read as a call of the
+    operator: `N(x)` (numeric evaluation), `D(x)` (derivative). A person
+    usually means a function of their own. `\operatorname{N}(x)` is not
+    reported. `detail: { name }`.
+  - `"ambiguous-lookalike-letter"` — a Greek letter that looks like a
+    Latin letter (`Α`, `Ρ`, `ο`). `detail: { letter }`.
+  - `"ambiguous-unknown-character"` — a character that is not math, read
+    as a string: `y = ж`. `detail: { text }`.
+  - `"ambiguous-radical"` — the extent of `√` without braces or
+    parentheses: `√2π` → `√2·π`, `√x²` → `(√x)²`, `3√8` → `3·√8`. The
+    span ends after the operand that follows the radicand.
+  - `"ambiguous-absolute-value"` — bars that pair two ways: `|x|y|z|`.
+  - `"ambiguous-equation-number"` — a parenthesized number or letter at
+    the end of the line, after white space, read as a factor
+    (`y = x^2 (2)`, `x = 4 (m)`). The span is the group.
+  - `"ambiguous-group-product"` — a parenthesized name followed by a
+    parenthesized group with a comma, read as a product (`(x)(1,2)`).
+  - `"ambiguous-factorial"` — `!=` directly after an operand, read as
+    `≠` (`5!=120`). The span is the `!=`.
+  - `"ambiguous-arrow"` — `<-`, read as `< -` (`x <- 2`).
+  - `"ambiguous-equal-chain"` — more than one `=` in a chain
+    (`x = x = x`). The span is from the first to the last `=`.
+  - `"ambiguous-element"` — `in`, `\in` or `∈` whose left operand is an
+    equation (`y = x in [0,1]`). The span is the operator.
+  - `"ambiguous-interval"` — after `in`, `\in`, `∈` or `\notin`, a
+    bracket pair `[a, b]` or `(a, b)`, or a range `[a..b]`, followed by
+    an operator, so the pair is not read as an interval:
+    `M in [0,1]^2` → `Element(M, Power(List(0, 1), 2))`. The span is the
+    bracket pair and the operator after it, with the operand of a `^` or
+    a `/` (`[0,1]^2`). `M in [0,1]` is not reported.
+  - `"ambiguous-range"` — a range with two `..` (`1..10..2`).
+  - `"ambiguous-percent"` — a `%` after a number (`y = 50%`), which
+    starts a comment. The span is the number and the `%`, in
+    original-input coordinates.
+  - `"ambiguous-comma"` — a comma outside every bracket (`1,5`).
+  - `"ambiguous-list-label"` — a list label read as math: `1. y = x`,
+    `x = 1. 5`, `(1) y = x`, `a) y = x`, or a line that is only `1.`,
+    `(1)`, `(i)` or `[1]`. A letter label is one of `a` to `h`, and only
+    when more follows it: a line that is only `(x)` is not reported.
+  - `"ambiguous-number-notation"` — `1_000` or `0x10`.
+    `detail: { notation }`, `"digit-grouping"` or `"hexadecimal"`.
+  - `"ambiguous-date"` — digit groups joined by `-` or `/` that can be a
+    date, a phone number or a range (`2026-10-15`, `9/30/2026`,
+    `555-1234`, `7-11`). `3/4`, `2-1` and two groups in parentheses
+    (`x = (1-10)`) are not reported.
+
+  Their spans use the normalized-LaTeX convention below, except
+  `ambiguous-percent`.
 
 ### Span convention (`start`/`end`)
 
-Spans for `undeclared-symbol`, `juxtaposition-as-multiply`,
-`letter-run-split`, `implicit-product-in-denominator`,
-`spaced-digit-groups` and `letter-before-decimal` are offsets into CE's
+Spans for `undeclared-symbol`, `juxtaposition-as-multiply` and every
+`ambiguous-*` code except `ambiguous-percent` are offsets into CE's
 **normalized** LaTeX (the
 re-serialized token stream), which matches the original input only when
 the input round-trips unchanged.
@@ -9352,6 +9722,7 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
      | Expression;
   evaluateAsync: (ops, options) => Promise<Expression | undefined>;
   evalDimension: (args, options) => Expression;
+  derivative: OperatorDerivative;
   compile: OperatorCompileHandler;
   eq: (a, b, prover?) => boolean | undefined;
   neq: (a, b) => boolean | undefined;
@@ -9592,6 +9963,40 @@ optional evalDimension?: (args, options) => Expression;
 **`Experimental`**
 
 Dimensional analysis
+
+#### OperatorDefinition.derivative?
+
+```ts
+optional derivative?: OperatorDerivative;
+```
+
+The partial derivatives of this operator, used by `D`, `Derivative`
+and the prime notation (`f'(x)`). See [OperatorDerivative](#operatorderivative) for
+the two accepted forms.
+
+Without this key, the derivative of an application of an operator
+whose `evaluate` handler does not give a formula stays symbolic:
+`D(Sq(x), x)` is `Apply(Derivative(Sq, 1), x)`. With it, the
+derivative is computed with the chain rule:
+
+```ts
+ce.declare('Sq', {
+  signature: '(number) -> number',
+  evaluate: ([x]) => (isNumber(x) ? x.mul(x) : undefined),
+  derivative: [['Function', ['Multiply', 2, 'x'], 'x']],
+});
+ce.parse('\\frac{d}{dx} \\operatorname{Sq}(x^2)').evaluate();
+// ➔ 4x^3   (that is, Sq'(x^2) · 2x = 2x^2 · 2x)
+```
+
+When the definition also has an `evaluate` handler that is a function
+literal, this key has precedence: the derivative is computed from
+this key, not by differentiating the body of the literal.
+
+An operator of the standard library keeps its own derivative rule. A
+definition that shadows a standard library name (a user definition
+of `Sinh`, for example) is a different operator, and its `derivative`
+key is used.
 
 #### OperatorDefinition.compile?
 
@@ -9868,6 +10273,43 @@ optional getNamedTriggers(): readonly {
 Named dictionary entries with their LaTeX trigger strings, for reverse
  library search (`ce.searchDefinitions()`). Optional: MathJSON-only
  builds and minimal injected syntaxes may not implement it.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ILatexSyntax.addEntries()? {#addentries}
+
+```ts
+optional addEntries(entries): void
+```
+
+Add LaTeX dictionary entries. The next parse or serialization uses
+ them. Optional: `LatexSyntax` implements it, a minimal injected syntax
+ may not. If the same instance is used by several engines, the entries
+ apply to all of them. See `LatexSyntax.addEntries()`.
+
+####### entries
+
+readonly `Partial`\<`OnlyFirst`\<
+  \| [`ExpressionEntry`](#expressionentry)
+  \| [`MatchfixEntry`](#matchfixentry)
+  \| [`InfixEntry`](#infixentry)
+  \| [`PostfixEntry`](#postfixentry)
+  \| [`PrefixEntry`](#prefixentry)
+  \| [`SymbolEntry`](#symbolentry)
+  \| [`FunctionEntry`](#functionentry)
+  \| [`EnvironmentEntry`](#environmententry)
+  \| [`DefaultEntry`](#defaultentry), \{\} & 
+  \| [`ExpressionEntry`](#expressionentry)
+  \| [`MatchfixEntry`](#matchfixentry)
+  \| [`InfixEntry`](#infixentry)
+  \| [`PostfixEntry`](#postfixentry)
+  \| [`PrefixEntry`](#prefixentry)
+  \| [`SymbolEntry`](#symbolentry)
+  \| [`FunctionEntry`](#functionentry)
+  \| [`EnvironmentEntry`](#environmententry)
+  \| [`DefaultEntry`](#defaultentry)\>\>[]
 
 </MemberCard>
 
@@ -10190,7 +10632,15 @@ readonly latexSyntax: ILatexSyntax | undefined;
 ```
 
 The LatexSyntax instance used for LaTeX parsing/serialization.
- `undefined` when no LatexSyntax was provided to the constructor.
+ `undefined` when no LatexSyntax was provided to the constructor and
+ the entry point has no LaTeX support (the core-only bundle).
+
+ To add a notation to a running engine, call
+ `ce.latexSyntax.addEntries([...])`: later parses and serializations use
+ the new entries. An engine created without the `latexSyntax` option
+ has its own instance, so the change applies to that engine only. An
+ instance given to several engines with the `latexSyntax` option is
+ shared: the change applies to all of them.
 
 </MemberCard>
 
@@ -11767,7 +12217,30 @@ declare(id, type, scope?): IComputeEngine
 
 ####### scope?
 
-`Scope`
+  \| `Scope`
+  \| [`DeclareOptions`](#declareoptions) & \{
+  `extend`: `false`;
+ \}
+
+###### declare(id, patch, options)
+
+```ts
+declare(id, patch, options): IComputeEngine
+```
+
+####### id
+
+`string`
+
+####### patch
+
+[`OperatorDefinitionPatch`](#operatordefinitionpatch)
+
+####### options
+
+[`DeclareOptions`](#declareoptions) & \{
+  `extend`: `true`;
+ \}
 
 ###### declare(id, def, scope)
 
@@ -11785,7 +12258,10 @@ declare(id, def, scope?): IComputeEngine
 
 ####### scope?
 
-`Scope`
+  \| `Scope`
+  \| [`DeclareOptions`](#declareoptions) & \{
+  `extend`: `false`;
+ \}
 
 ###### declare(arg1, arg2, arg3)
 
@@ -11881,6 +12357,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
+  `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
@@ -11955,6 +12432,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
+  `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
@@ -11966,10 +12444,48 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| `undefined`;
  \}\>\>
   \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
+  \| [`OperatorDefinitionPatch`](#operatordefinitionpatch)
 
 ####### arg3?
 
-`Scope`
+`Scope` \| [`DeclareOptions`](#declareoptions)
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.loadLibrary() {#loadlibrary}
+
+```ts
+loadLibrary(library): IComputeEngine
+```
+
+Load a library on an engine that is already constructed. Its
+definitions are declared in the global scope, as with `ce.declare()`,
+and its name is recorded (see `libraryOf()`). Each library in its
+`requires` list must already be loaded.
+
+####### library
+
+[`LibraryDefinition`](#librarydefinition)
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.libraryOf() {#libraryof}
+
+```ts
+libraryOf(name): string | undefined
+```
+
+The name of the library whose definition `name` resolves to in the
+current scope (`'trigonometry'` for `Sin`), or `undefined` for a name
+that no library defines or that a declaration shadows.
+
+####### name
+
+`string`
 
 </MemberCard>
 
@@ -12579,7 +13095,7 @@ Collection of boxed rules.
 
 <MemberCard>
 
-### Scope {#scope}
+### Scope {#scope-1}
 
 ```ts
 type Scope = KernelScope<BoxedDefinition>;

@@ -41,12 +41,17 @@ Factorization & divisors:
 
 Modular arithmetic & GCD:
 
-- PowerMod: modular exponentiation (negative exponent → modular inverse)
+- PowerMod: modular exponentiation (negative exponent → modular inverse; a
+  rational exponent `s/r` → the least `r`-th root)
+- PowerModList: every `x` with `x^r ≡ a^s (mod m)`
 - ModularInverse: modular multiplicative inverse a⁻¹ mod m
 - ExtendedGCD: GCD with Bézout coefficients
 - ChineseRemainder: solve simultaneous congruences
-- MultiplicativeOrder, PrimitiveRoot
+- MultiplicativeOrder (with a list of residues: a discrete logarithm),
+  PrimitiveRoot, PrimitiveRootList
+- RationalReconstruction: the small fraction `p/q` with `p ≡ a·q (mod m)`
 - JacobiSymbol, LegendreSymbol
+- DirichletCharacter, DirichletL: Dirichlet characters mod k and their L-functions
 
 Other primitives:
 
@@ -58,4 +63,4 @@ Other primitives:
 
 - Binomial
 - Fibonacci
-- Stirling (second kind), StirlingS1 (signed first kind)
+- Stirling (second kind) and its alias StirlingS2, StirlingS1 (signed first kind)

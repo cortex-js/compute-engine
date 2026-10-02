@@ -466,8 +466,8 @@ describe('StirlingS1 — signed Stirling numbers of the first kind', () => {
     expect(evalStr(['StirlingS1', 5, 1])).toEqual('24');
     expect(evalStr(['StirlingS1', 6, 1])).toEqual('-120');
   });
-  test('out-of-range and non-integer arguments stay symbolic', () => {
-    expect(evalStr(['StirlingS1', 3, 5])).toEqual('StirlingS1(3, 5)'); // k > n
+  test('k > n is 0; negative and symbolic arguments stay symbolic', () => {
+    expect(evalStr(['StirlingS1', 3, 5])).toEqual('0'); // k > n: outside the triangle
     expect(evalStr(['StirlingS1', -1, 2])).toEqual('StirlingS1(-1, 2)');
     expect(evalStr(['StirlingS1', 'n', 2])).toEqual('StirlingS1(n, 2)');
   });
@@ -1049,5 +1049,20 @@ describe('SigmaMinus1 is exact under evaluate', () => {
   });
   it('numericizes under N()', () => {
     expect(ce.box(['SigmaMinus1', 2]).N().re).toBeCloseTo(1.5, 12);
+  });
+});
+
+describe('Stirling and Eulerian outside the triangle are 0', () => {
+  test.each([
+    [['Stirling', 3, 5], '0'],
+    [['Stirling', 0, 1], '0'],
+    [['Eulerian', 3, 3], '0'],
+    [['Eulerian', 3, 5], '0'],
+    [['Eulerian', 0, 0], '1'],
+    [['Eulerian', 0, 2], '0'],
+    [['Eulerian', 4, 1], '11'],
+    [['Eulerian', -1, 0], 'Eulerian(-1, 0)'],
+  ])('%j', (json, expected) => {
+    expect(evalStr(json)).toEqual(expected);
   });
 });

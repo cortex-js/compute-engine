@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Number theory
 
-The 52 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 60 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -98,6 +98,43 @@ digitSum(1234)
 // ➔ 10
 ```
 
+### dirichletCharacter
+
+MathJSON `DirichletCharacter` · `(integer, integer, integer) -> number`
+
+The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). Zero where gcd(n, k) &gt; 1; otherwise a root of unity.
+
+```epsil
+dirichletCharacter(5, 2, 2)
+// ➔ i
+```
+
+```epsil
+dirichletCharacter(7, 3, 3)
+// ➔ e^(2/3i * pi)
+```
+
+### dirichletL
+
+MathJSON `DirichletL` · `(integer, integer, number) -> number`
+
+The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. Entire for a non-principal character; the principal one is `ζ(s) Π_{p|k} (1 − p^(−s))`.
+
+```epsil
+dirichletL(1, 1, 2)
+// ➔ 1/6 * pi^2
+```
+
+```epsil
+dirichletL(3, 2, -2)
+// ➔ -2/9
+```
+
+```epsil
+dirichletL(5, 2, 0)
+// ➔ (3/5 + 1/5i)
+```
+
 ### divides
 
 MathJSON `Divides` · `(integer, integer) -> boolean`
@@ -129,6 +166,17 @@ Return the sorted list of positive divisors of an integer `n`. The sign of `n` i
 ```epsil
 divisors(12)
 // ➔ [1,2,3,4,6,12]
+```
+
+### eulerPhi
+
+MathJSON `EulerPhi` · `(integer) -> integer`
+
+`EulerPhi` is an alias for `Totient`, which is the preferred name. Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).
+
+```epsil
+eulerPhi(12)
+// ➔ 4
 ```
 
 ### eulerian
@@ -335,20 +383,25 @@ moebiusMu(30)
 
 ### multiplicativeOrder
 
-MathJSON `MultiplicativeOrder` · `(integer, integer) -> integer`
+MathJSON `MultiplicativeOrder` · `(integer, integer, list<integer>?) -> integer`
 
-The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime.
+The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime. With a list of residues, `MultiplicativeOrder(a, n, [r1, r2, …])` is the smallest `k > 0` such that `a^k ≡ r_i (mod n)` for some `i` (a discrete logarithm), and is undefined when no `r_i` is a power of `a`. The sign of `n` is ignored. Undefined for `n = 0`.
 
 ```epsil
 multiplicativeOrder(2, 7)
 // ➔ 3
 ```
 
+```epsil
+multiplicativeOrder(5, 7, [3, 11])
+// ➔ 2
+```
+
 ### nPartition
 
 MathJSON `NPartition` · `(integer) -> integer`
 
-Number of integer partitions of n.
+Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0.
 
 ### nextPrime
 
@@ -383,15 +436,47 @@ nthPrime(10)
 // ➔ 29
 ```
 
+### partitionsP
+
+MathJSON `PartitionsP` · `(integer) -> integer`
+
+`PartitionsP` is an alias for `NPartition`, which is the preferred name. Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0.
+
+```epsil
+partitionsP(5)
+// ➔ 7
+```
+
 ### powerMod
 
-MathJSON `PowerMod` · `(integer, integer, integer) -> integer`
+MathJSON `PowerMod` · `(integer, rational, integer) -> integer`
 
-Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m).
+Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000.
 
 ```epsil
 powerMod(2, 10, 1000)
 // ➔ 24
+```
+
+```epsil
+powerMod(4, 1/2, 7)
+// ➔ 2
+```
+
+### powerModList
+
+MathJSON `PowerModList` · `(integer, rational, integer) -> list<integer>`
+
+Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.
+
+```epsil
+powerModList(3, 1/2, 11)
+// ➔ [5,6]
+```
+
+```epsil
+powerModList(1, 1/3, 7)
+// ➔ [1,2,4]
 ```
 
 ### primeFactors
@@ -448,11 +533,27 @@ primePi(10)
 
 MathJSON `PrimitiveRoot` · `(integer) -> integer`
 
-The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p).
+The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p). The sign of `n` is ignored, and `PrimitiveRoot(1)` is 0. Undefined for `n = 0`.
 
 ```epsil
 primitiveRoot(7)
 // ➔ 3
+```
+
+### primitiveRootList
+
+MathJSON `PrimitiveRootList` · `(integer) -> list<integer>`
+
+The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n = 0`. `PrimitiveRootList(1)` is `[0]`, as `PrimitiveRoot(1)` is 0. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.
+
+```epsil
+primitiveRootList(7)
+// ➔ [3,5]
+```
+
+```epsil
+primitiveRootList(8)
+// ➔ []
 ```
 
 ### radical
@@ -474,6 +575,17 @@ Return a random prime. `RandomPrime(n)` draws a prime in [2, n]; `RandomPrime(m,
 
 ```epsil
 randomPrime(100)
+```
+
+### rationalReconstruction
+
+MathJSON `RationalReconstruction` · `(integer, integer) -> rational`
+
+The rational `p/q` with `p ≡ a·q (mod m)` and `|p|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). Undefined for `m < 1` or when there is none.
+
+```epsil
+rationalReconstruction(6, 11)
+// ➔ 1/2
 ```
 
 ### sigma0
@@ -511,8 +623,19 @@ stirlingS1(5, 2)
 // ➔ -50
 ```
 
+### stirlingS2
+
+MathJSON `StirlingS2` · `(integer, integer) -> integer`
+
+`StirlingS2` is an alias for `Stirling`, which is the preferred name. Returns the Stirling number of the second kind S(n, k).
+
+```epsil
+stirlingS2(6, 3)
+// ➔ 90
+```
+
 ### totient
 
 MathJSON `Totient` · `(integer) -> integer`
 
-Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n.
+Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).

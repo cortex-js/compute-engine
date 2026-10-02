@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { TEST_PYTHON } from './test-python';
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
@@ -406,11 +407,7 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
 // ---------------------------------------------------------------------------
 
 const VENV_PYTHON =
-  [
-    path.join(__dirname, '..', '..', 'venv', 'bin', 'python3'),
-    path.join(process.cwd(), 'venv', 'bin', 'python3'),
-  ].find((p) => fs.existsSync(p)) ??
-  path.join(process.cwd(), 'venv', 'bin', 'python3');
+  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
 
 // None of the cases below lowers through numpy, so the block needs only the
 // venv's Python itself.

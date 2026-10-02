@@ -21,6 +21,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { TEST_PYTHON } from './test-python';
 
 /**
  * PYTHON TARGET — OPERAND-ARITY AUDIT.
@@ -249,11 +250,7 @@ describe('PYTHON ARITY — Norm / Covariance operand guards', () => {
 // ---------------------------------------------------------------------------
 
 const VENV_PYTHON =
-  [
-    path.join(__dirname, '..', '..', 'venv', 'bin', 'python3'),
-    path.join(process.cwd(), 'venv', 'bin', 'python3'),
-  ].find((p) => fs.existsSync(p)) ??
-  path.join(process.cwd(), 'venv', 'bin', 'python3');
+  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
 
 function venvHas(mod: string): boolean {
   try {

@@ -619,15 +619,33 @@ describe('entropy', () => {
       true
     );
     expect(denied(ce.box(['RandomExpression']).evaluate())).toBe(true);
-    // A stochastic estimator outside a frame draws from the handler too.
+    // The Monte-Carlo fallback of a stochastic estimator outside a frame
+    // draws from the handler too. The quadrature of `sin(1/x)/√x` on [0, 1]
+    // does not converge, so `NIntegrate` falls back to sampling.
     expect(
       denied(
         ce
-          .box(['NIntegrate', ['Function', ['Square', 'x'], 'x'], 0, 1])
+          .box([
+            'NIntegrate',
+            [
+              'Function',
+              ['Divide', ['Sin', ['Divide', 1, 'x']], ['Sqrt', 'x']],
+              'x',
+            ],
+            0,
+            1,
+          ])
           .evaluate(),
         'NIntegrate'
       )
     ).toBe(true);
+    // A quadrature that converges draws nothing, so the denial does not
+    // apply to it.
+    expect(
+      ce
+        .box(['NIntegrate', ['Function', ['Square', 'x'], 'x'], 0, 1])
+        .evaluate().re
+    ).toBeCloseTo(1 / 3, 14);
   });
 
   test('the denial is an error value inside a program, not a throw', () => {

@@ -18,6 +18,7 @@ read the repository [`README.md`](../README.md).
 | Understand the overall architecture | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
 | Review internal architecture history | [`STATUS_REPORT.md`](./STATUS_REPORT.md) |
 | Understand simplification invariants | [`SIMPLIFY.md`](./SIMPLIFY.md) |
+| Review a change (the checklist the code reviewers use) | [`REVIEW-CHECKLIST.md`](./REVIEW-CHECKLIST.md) |
 | Understand seeding, `Random` draws, and cross-target parity | [`RANDOMNESS-MODEL.md`](./RANDOMNESS-MODEL.md) |
 | Understand time budgets and cancellation | [`TIMEOUT-MODEL.md`](./TIMEOUT-MODEL.md) |
 | Understand checkpoint/restore and notebook replay | [`CHECKPOINT-MODEL.md`](./CHECKPOINT-MODEL.md) |

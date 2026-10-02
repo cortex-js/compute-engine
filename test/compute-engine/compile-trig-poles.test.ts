@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { TEST_PYTHON } from './test-python';
 import { execFileSync } from 'child_process';
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -260,10 +261,7 @@ describe('compiled Python answers the pole', () => {
     );
   });
 
-  const venvPython = [
-    path.join(__dirname, '..', '..', 'venv', 'bin', 'python3'),
-    path.join(process.cwd(), 'venv', 'bin', 'python3'),
-  ].find((p) => fs.existsSync(p));
+  const venvPython = TEST_PYTHON;
   const hasNumpy = (() => {
     if (!venvPython) return false;
     try {

@@ -152,6 +152,23 @@ export function zetaEvenCoefficient(k: number): [bigint, bigint] {
   return reduce(num * 2n ** BigInt(2 * k - 1), den * factorial(2 * k));
 }
 
+/** Euler numbers E₀, E₂, E₄, … (E₂ₖ at index k), exact: Σⱼ C(2k, 2j) E₂ⱼ = 0. */
+const EULER_EVEN_CACHE: bigint[] = [1n];
+export function eulerEvenNumber(k: number): bigint {
+  for (let m = EULER_EVEN_CACHE.length; m <= k; m++) {
+    let sum = 0n;
+    let binomial = 1n; // C(2m, 2j), stepped j → j + 1
+    for (let j = 0; j < m; j++) {
+      sum += binomial * EULER_EVEN_CACHE[j];
+      binomial =
+        (binomial * BigInt((2 * m - 2 * j) * (2 * m - 2 * j - 1))) /
+        BigInt((2 * j + 1) * (2 * j + 2));
+    }
+    EULER_EVEN_CACHE[m] = -sum;
+  }
+  return EULER_EVEN_CACHE[k];
+}
+
 /**
  * ζ(−n) for integer n ≥ 1 as an exact reduced rational: ζ(−n) = −Bₙ₊₁/(n+1).
  *

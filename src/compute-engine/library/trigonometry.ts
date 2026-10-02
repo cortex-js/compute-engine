@@ -12,13 +12,16 @@ import { flatten } from '../boxed-expression/flatten.js';
 import {
   checkArity,
   nonNumericOperandError,
+  validateArguments,
 } from '../boxed-expression/validate.js';
+import { isOperatorDef } from '../boxed-expression/definition-guards.js';
 import {
   arctan2AtInfinity,
   constructibleValues,
   evalTrig,
   halfTurnAngle,
   hyperbolicExactValue,
+  inverseTrigBigDecimalValue,
   processInverseFunction,
   radiansToAngle,
   trigSign,
@@ -201,6 +204,9 @@ function boundedEntireRealType(
   if (scalar?.facts.finite === true || isSubtype(t, 'complex')) return 'number';
   return 'number';
 }
+
+/** The carrier of `Arctan`, for the error its evaluate handler gives `~oo`. */
+const ARCTAN_CARRIER = parseType('complex | signed_infinity');
 
 export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   {
@@ -577,15 +583,49 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // infinities (`arctan(±∞) = ±π/2`). `~oo` is outside it: the two
       // real approaches disagree (`+π/2` against `−π/2`), so there is no
       // value at the single point at infinity — the same analysis as
-      // `Arccot` (2026-09-01). This operator has no `canonical` handler,
-      // so boxing validation enforces the carrier: `Arctan(~oo)` is an
-      // invalid expression at creation. The logarithmic singularities
+      // `Arccot` (2026-09-01). Boxing validation enforces the carrier:
+      // `Arctan(~oo)` is an invalid expression at creation. A `~oo` that only
+      // evaluation reveals is rejected by the evaluate handler below, after
+      // it has read the exact operand: `.N()` at machine precision makes the
+      // finite `10^{400}·(1 + i)` the double `~oo`. The `canonical` handler
+      // is there for that order: the generic runtime check of the operands
+      // against the signature, which would reject the double first, does not
+      // run for an operator with a `canonical` handler (as for the other
+      // inverse functions, `trigFunction`). The logarithmic singularities
       // `arctan(±i)` are in-carrier finite points valued `~oo`. `NaN`
       // propagates (explicit: the carrier is not a subtype of `complex`).
       // The result stays the wide `number` (a complex argument gives a
       // complex value; the type handler carries the per-call sharpness).
       signature: '(complex | signed_infinity) -> number',
       nanBehavior: 'propagate',
+      canonical: (ops, { engine: ce }) => {
+        ops = ce.strict ? flatten(ops) : checkArity(ce, ops, 1);
+        // The validation of a head with no `canonical` handler, which also
+        // types a valueless symbol operand from the signature (`y` in
+        // `Arctan(y)` is `complex | signed_infinity`), with the policies of
+        // the definition. The validation seam of a canonical-handler head
+        // runs after this one but types nothing.
+        const def = ce.lookupDefinition('Arctan');
+        if (ce.strict && isOperatorDef(def)) {
+          const opDef = def.operator;
+          const validated = validateArguments(
+            ce,
+            ops,
+            opDef.signature.type,
+            false,
+            true,
+            undefined,
+            (i) => opDef.stripsMissingAt(i),
+            {
+              operatorName: 'Arctan',
+              nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
+              checkNumericCollections: true,
+            }
+          );
+          if (validated !== null) ops = validated;
+        }
+        return ce._fn('Arctan', ops);
+      },
       type: (ops, context) =>
         BoxedType.forResult(
           extendedElementaryFunctionType('Arctan', true, ops) ??
@@ -598,7 +638,26 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // `trigSign` is quadrant-based — meaningless for an inverse function —
       // and returned undefined for every input.)
       sgn: ([x]) => x.sgn,
-      evaluate: ([x], { numericApproximation, engine }) => {
+      evaluate: ([x], { numericApproximation, engine, expression }) => {
+        const nonNumeric = nonNumericOperandError(engine, [x]);
+        if (nonNumeric !== undefined) return nonNumeric;
+        // An argument outside the range of a double, read from the operand
+        // before its numeric evaluation (`.N()` at machine precision makes
+        // `10^{400}·(1 + i)` the double `~oo`).
+        if (numericApproximation || (isNumber(x) && x.isExact === false)) {
+          const outside = inverseTrigBigDecimalValue(
+            'Arctan',
+            x,
+            isFunction(expression) && expression.nops === 1
+              ? expression.op1
+              : undefined
+          );
+          if (outside !== undefined) return outside;
+        }
+        // `~oo` is outside the carrier: the incompatible-type error that
+        // boxing validation gives a literal `~oo`.
+        if (isNumber(x) && x.isInfinity && !x.isPositive && !x.isNegative)
+          return engine.typeError(ARCTAN_CARRIER, x.type, x);
         // arctan(±i) = ~oo: the logarithmic singularities of
         // `(i/2)·ln((i+z)/(i−z))`, where the modulus grows without bound.
         // Exact on both routes (`.N()` already answered `~oo`; `evaluate()`
@@ -1783,6 +1842,22 @@ function trigFunction(
       // `Sin(At(["a", 2], 1))` — which no boxing-time check can settle.
       const nonNumeric = nonNumericOperandError(engine, [x]);
       if (nonNumeric !== undefined) return nonNumeric;
+      // An inverse function at an argument outside the range of a double:
+      // at machine precision `.N()` made `10^{400}` the double `+∞`, which
+      // the branch below would read as an infinite argument. The operand
+      // before its numeric evaluation keeps the exact value. A float operand
+      // (`1.5·10^{400}` above machine precision) numericizes under
+      // `evaluate()` too.
+      if (numericApproximation || (isNumber(x) && x.isExact === false)) {
+        const outside = inverseTrigBigDecimalValue(
+          operator,
+          x,
+          isFunction(expression) && expression.nops === 1
+            ? expression.op1
+            : undefined
+        );
+        if (outside !== undefined) return outside;
+      }
       // The carrier, enforced at the evaluate seam (see the factory
       // parameter's comment). A non-finite non-NaN number operand is
       // either off-carrier (an incompatible-type error, the value boxing
@@ -1838,10 +1913,14 @@ function trigFunction(
       // not a special angle. The operand before its evaluation keeps the
       // float coefficient of π, which `constructibleValues` reads as the
       // special angle `π/4` when it is within one unit in its last place of
-      // `1/4` (user decision, 2026-09-27).
+      // `1/4` (user decision, 2026-09-27). That operand is evaluated again
+      // (`constructibleValues` reads its numeric value), so it is read only
+      // when it is pure: `Arcsin(1 + Random())` drew twice.
       const a =
         constructibleValues(operator, x) ??
-        (isFunction(expression) && expression.nops === 1
+        (isFunction(expression) &&
+        expression.nops === 1 &&
+        expression.op1.isPure
           ? constructibleValues(operator, expression.op1)
           : undefined);
       if (a) return a;

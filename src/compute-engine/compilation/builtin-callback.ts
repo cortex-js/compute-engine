@@ -27,6 +27,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
 
 /**
  * The SYSTEM-scope binding offered for `name`, or `undefined` when the engine
@@ -57,7 +58,10 @@ export function systemScopeBinding(
  * A user definition SHADOWING a built-in name (`ce.assign('Sin', …)` in any
  * non-system scope) resolves to the user record, is not identity-equal to the
  * system binding, and answers `undefined` here — it takes the user-function
- * route instead.
+ * route instead. Exception: a copy or an extension of the built-in
+ * definition that keeps its `evaluate`, `canonical`, `compile` and
+ * `derivative` handlers, its `lazy` and `broadcastable` flags and its
+ * `evaluateAsync` handler is not a shadow, and answers that definition.
  */
 export function builtinOperatorDefinition(
   engine: ComputeEngine,
@@ -65,7 +69,13 @@ export function builtinOperatorDefinition(
 ): BoxedOperatorDefinition | undefined {
   const def = engine.lookupDefinition(name);
   if (def === undefined || !isOperatorDef(def)) return undefined;
-  if (def !== systemScopeBinding(engine, name)) return undefined;
+  const system = systemScopeBinding(engine, name);
+  if (system === undefined) return undefined;
+  // A copy or an extension of the built-in definition that keeps its
+  // `evaluate`, `canonical`, `compile` and `derivative` handlers, its `lazy`
+  // and `broadcastable` flags and its `evaluateAsync` handler is the built-in
+  // too (`shadowsLibraryName()`).
+  if (def !== system && shadowsLibraryName(engine, name)) return undefined;
   return def.operator;
 }
 
@@ -89,6 +99,17 @@ export function builtinCallbackArity(
 ): number | undefined {
   const opDef = builtinOperatorDefinition(engine, name);
   if (opDef === undefined) return undefined;
+  return operatorCallbackArity(opDef);
+}
+
+/**
+ * The arity to eta-expand the operator definition `opDef` at, with the rules
+ * of `builtinCallbackArity()`: its `n ≥ 1` required parameters, or
+ * `undefined` for a variadic tail or a zero-required signature.
+ */
+export function operatorCallbackArity(
+  opDef: BoxedOperatorDefinition
+): number | undefined {
   const t = opDef.signature?.type;
   if (t === undefined || typeof t === 'string' || t.kind !== 'signature')
     return undefined;
@@ -124,6 +145,31 @@ export function isRefusableBuiltinCallback(
 ): boolean {
   if (/^[A-Z]$/.test(name)) return false;
   return builtinOperatorDefinition(engine, name) !== undefined;
+}
+
+/**
+ * Is `name` an operator that the HOST declared (`ce.declare('MySqrt', {
+ * evaluate: ([x]) => … })`), or a definition that shadows a built-in name,
+ * rather than the engine-authored built-in?
+ *
+ * Used in VALUE position, after the compiler tried the routes that emit a
+ * function value: a user function backed by a function literal
+ * (`ensureUserFunctionValueRef`) and the eta-expansion of a built-in
+ * (`ensureBuiltinCallbackEmitted`). Such an operator has neither: its
+ * `evaluate` handler is a JavaScript function of the host, which the
+ * compiled code cannot call, and the target's built-in lowering of a
+ * shadowed name would not compute what the shadow computes. Without a
+ * refusal, the name fell through to the free-symbol read `_.MySqrt`, and the
+ * artifact reported `success: true` and then threw `TypeError: _f is not a
+ * function` at run time.
+ */
+export function isHostOperatorCallback(
+  engine: ComputeEngine,
+  name: string
+): boolean {
+  const def = engine.lookupDefinition(name);
+  if (def === undefined || !isOperatorDef(def)) return false;
+  return builtinOperatorDefinition(engine, name) === undefined;
 }
 
 /**

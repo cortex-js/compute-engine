@@ -3083,6 +3083,19 @@ function boundExpression(x: Expression): Expression {
   }
 }
 
+/** The names of the partial canonical forms that `canonicalForm()` applies
+ * (the `CanonicalForm` type). */
+const CANONICAL_FORM_NAMES: ReadonlySet<string> = new Set([
+  'InvisibleOperator',
+  'Number',
+  'Multiply',
+  'Add',
+  'Power',
+  'Divide',
+  'Flatten',
+  'Order',
+]);
+
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
     // `Block` is in `core` because a function literal (`Function`, below)
@@ -3683,7 +3696,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult(x.type, context.engine._typeResolver),
       complexity: 9000,
       lazy: true,
-      canonical: ([x, style], { engine: ce }) => {
+      canonical: (ops, { engine: ce }) => {
+        // A missing operand is an `Error("missing")` operand, as for the
+        // other operators (`checkArity()`).
+        if (ops.length < 2)
+          return ce._fn(
+            'Annotated',
+            checkArity(
+              ce,
+              ops.map((x) => x.canonical),
+              2
+            )
+          );
+        let [x, style] = ops;
         x = x.canonical;
         style = style.canonical;
 
@@ -4187,6 +4212,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         );
       },
       canonical: (args, { engine: ce }) => {
+        // A missing callee is an `Error("missing")` operand (`checkArity()`).
+        if (args.length === 0) return ce._fn('Apply', checkArity(ce, args, 1));
         const s = sym(args[0]);
         if (s) return ce.function(s, args.slice(1));
         // `Nothing` is ERASED from the call argument list, uniformly on every
@@ -7284,13 +7311,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       examples: ['CanonicalForm(Hold(1 + x), "Order")'],
       // Do not canonicalize the arguments, we want to preserve
       // the original form before modifying it
-      canonical: (ops) => {
+      canonical: (ops, { engine: ce }) => {
+        // A missing operand is an `Error("missing")` operand (`checkArity()`).
+        if (ops.length === 0)
+          return ce._fn('CanonicalForm', checkArity(ce, ops, 1));
         if (ops.length === 1) return ops[0].canonical;
 
         const forms = ops
           .slice(1)
           .map((x) => sym(x) ?? (isString(x) ? x.string : undefined))
           .filter((x) => x !== undefined) as CanonicalForm[];
+        // A name that is not a canonical form is an error operand: given to
+        // `canonicalForm()`, it throws.
+        if (forms.some((form) => !CANONICAL_FORM_NAMES.has(form)))
+          return ce._fn('CanonicalForm', [
+            ops[0],
+            ...ops.slice(1).map((x) => {
+              const form = sym(x) ?? (isString(x) ? x.string : undefined);
+              return form !== undefined && CANONICAL_FORM_NAMES.has(form)
+                ? x
+                : ce.error('unexpected-argument', x.toString());
+            }),
+          ]);
         return canonicalForm(ops[0], forms);
       },
     },
@@ -7700,7 +7742,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return BoxedType.forResult('expression', ce._typeResolver);
       },
 
-      canonical: ([op1, op2], { engine: ce }) => {
+      canonical: (ops, { engine: ce }) => {
+        // A missing operand is an `Error("missing")` operand, as for the
+        // other operators (`checkArity()`).
+        if (ops.length < 2)
+          return ce._fn(
+            'Subscript',
+            checkArity(
+              ce,
+              ops.map((x) => x.canonical),
+              2
+            )
+          );
+        let [op1, op2] = ops;
         // Save the raw symbol name BEFORE canonicalization, so that
         // `i` stays `i` (not `ImaginaryUnit`) and `e` stays `e`
         // (not `ExponentialE`) when creating compound symbols.

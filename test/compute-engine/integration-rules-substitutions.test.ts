@@ -881,16 +881,26 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
 
   // Regression: a rational integrand with fully symbolic coefficients used to
   // hang (~109 s under a 3 s deadline) in the polynomial-GCD Euclidean loop.
-  // It now closes to an ArcTanh/Ln form. The test completing at all proves the
-  // hang is gone; the assertion pins the closure.
+  // The antiderivative now closes to an ArcTanh/Ln form. The test completing
+  // at all proves the hang is gone; the assertions pin the closure.
   describe('symbolic-coefficient rational integrand (was a hang)', () => {
     const ce = rubiEngine();
 
-    test('∫₀ˣ (u−a)/(b₂u²+b₁u+b₀) du closes', () => {
+    test('∫ (u−a)/(b₂u²+b₁u+b₀) du closes', () => {
+      const F = ce
+        .parse('\\int \\frac{u-a}{b_2 u^2 + b_1 u + b_0}\\,du')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+    });
+
+    test('∫₀ˣ (u−a)/(b₂u²+b₁u+b₀) du stays unevaluated', () => {
+      // The roots of the denominator depend on `b₀`, `b₁` and `b₂`, which
+      // have no value, so a pole may be between the bounds: the definite
+      // integral is not the antiderivative difference.
       const F = ce
         .parse('\\int_0^x \\frac{u-a}{b_2 u^2 + b_1 u + b_0}\\,du')
         .evaluate();
-      expect(F.has('Integrate')).toBe(false);
+      expect(F.operator).toBe('Integrate');
     });
   });
 

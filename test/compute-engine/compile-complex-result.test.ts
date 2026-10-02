@@ -315,16 +315,13 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
             constantFold: false,
           }).code
         ).toBe(`${v2}(1.0, 0.0) + _gpu_catanh(${v2}(2.0, 0.0))`);
-        // No direct `_gpu_casec`: the complex lift of the head's own real
-        // lowering, `acos(1/x)`.
+        // The complex helper `_gpu_casec`, on the real argument lifted to a
+        // `vec2`.
         expect(
           target.compile(ce.parse('1 + \\operatorname{arcsec}(0.5)'), {
             constantFold: false,
           }).code
-        ).toBe(
-          `${v2}(1.0, 0.0) + ` +
-            `_gpu_cacos(_gpu_cdiv(${v2}(1.0, 0.0), ${v2}(0.5, 0.0)))`
-        );
+        ).toBe(`${v2}(1.0, 0.0) + _gpu_casec(${v2}(0.5, 0.0))`);
         // Never a scalar under a `vec2` parent (shader scalar-broadcast makes
         // that valid source and a silent `vec2(NaN, NaN)`).
         for (const latex of [

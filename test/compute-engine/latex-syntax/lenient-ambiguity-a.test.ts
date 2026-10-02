@@ -92,8 +92,6 @@ describe('ambiguous-exponent-end', () => {
     'e^x dx',
     'e^x sin x',
     'x^2 + y',
-    // A one-letter exponent before a letter is a letter run
-    'e^xy',
   ]);
 
   test('the reading and the detail', () => {
@@ -202,7 +200,7 @@ describe('ambiguous-name-then-number', () => {
   expectNotReported('ambiguous-name-then-number', [
     'x2',
     '2 x',
-    // The last letter of a letter run is not a name
+    // A function name of the lenient grammar is a word, not a name
     '7 mod 3',
   ]);
 

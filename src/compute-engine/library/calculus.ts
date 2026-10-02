@@ -27,6 +27,7 @@ import {
 import {
   isFunction,
   isNumber,
+  indeterminateFormAnswer,
   isSymbol,
   nanOperandAnswer,
   sym,
@@ -82,7 +83,10 @@ import {
   polynomialDegree,
 } from '../boxed-expression/polynomials.js';
 import {
+  endpointPoleVerdict,
+  isRealOnInterval,
   interiorPoleVerdict,
+  symbolicPoleMayBeInside,
   type PoleVerdict,
 } from '../symbolic/interior-pole.js';
 import { dSolve } from '../symbolic/differential-equations.js';
@@ -539,7 +543,9 @@ type IntegrandParts = {
  * about 2 × 1e4 evaluations for each part (real, imaginary) of the
  * integrand, against 1e4 when the quadrature was skipped. The budget still leaves room for the
  * endpoint-divergence test, which needs two blocks of 20 bisections toward
- * one endpoint. */
+ * one endpoint. Next to a singular endpoint, the tanh-sinh rule of
+ * `resolveSingularEndpoints` (`numerics/endpoint-quadrature.ts`) can add up to
+ * 2 × 330 = 660 evaluations. */
 const INTERPRETED_QUADRATURE_PANELS = 330;
 
 function numericIntegrandParts(
@@ -627,6 +633,553 @@ function measurementFromParts(
     ce.number(ce.complex(re.estimate, im.estimate)),
     ce.number(Math.hypot(re.error, im.error)),
   ]);
+}
+
+/** The value of a definite integral with a proven pole strictly inside its
+ * bounds: `+∞`/`−∞` when the integrand keeps one sign across every pole,
+ * `NaN` when it changes sign (no value, not even an infinite one). */
+function poleVerdictValue(
+  ce: ComputeEngine,
+  pole: { sign: string }
+): Expression {
+  return pole.sign === 'positive'
+    ? ce.PositiveInfinity
+    : pole.sign === 'negative'
+      ? ce.NegativeInfinity
+      : ce.NaN;
+}
+
+/**
+ * The exact-route value of a definite integral that has no value, not even
+ * an infinite one: the integrand changes sign across a pole inside the
+ * bounds (`∫₋₁¹ dt/t`), or has poles at both bounds that diverge with
+ * different signs (`∫₀¹ (1/t − 1/(1 − t)) dt`). It is `Indeterminate` when
+ * the bounds and every number literal of the integrand are exact, and `NaN`
+ * when one of them is a float (`∫₋₁¹ 1.5/t dt`), as for any exact form with
+ * no value (see `indeterminateFormAnswer`).
+ *
+ * `integrand` must be the integrand with the values of the assigned symbols
+ * substituted (`withAssignedValues`), so that a float held by a symbol
+ * counts as a float operand.
+ */
+function noValueIntegral(
+  ce: ComputeEngine,
+  integrand: Expression,
+  lower: Expression,
+  upper: Expression
+): Expression {
+  const operands: Expression[] = [lower, upper];
+  const collect = (e: Expression): void => {
+    if (isNumber(e)) operands.push(e);
+    else if (isFunction(e)) for (const op of e.ops) collect(op);
+  };
+  collect(integrand);
+  return indeterminateFormAnswer(ce, operands);
+}
+
+/**
+ * The integration variables and bounds of the `Limits` of `limits` that have
+ * both bounds: the enclosing integrals of an inner integral of an iterated
+ * integral, for `symbolicPoleMayBeInside`.
+ */
+function outerRanges(
+  limits: ReadonlyArray<Expression>
+): { name: string; lower: Expression; upper: Expression }[] {
+  const ranges: { name: string; lower: Expression; upper: Expression }[] = [];
+  for (const l of limits) {
+    if (!isFunction(l, 'Limits')) continue;
+    const name = sym(l.op1);
+    if (!name || name === 'Nothing') continue;
+    if (sym(l.op2) === 'Nothing' || sym(l.op3) === 'Nothing') continue;
+    ranges.push({ name, lower: l.op2, upper: l.op3 });
+  }
+  return ranges;
+}
+
+/** An integration variable and its bounds. */
+type IntegrationRange = { name: string; lower: Expression; upper: Expression };
+
+/**
+ * The ranges of the integrals whose evaluation is running and encloses the
+ * one being evaluated. An iterated integral written as nested integrals
+ * (`\int_5^{10}\int_3^4 (y-x)^{-2}\,dx\,dy` on the parse route) is an
+ * `Integrate` whose integrand holds another `Integrate`. The outer integral
+ * evaluates the inner one first (see `evaluateInnerIntegrals`), and the
+ * inner one must know the range of `y` to prove that its pole `x = y` is
+ * outside `[3, 4]` (see `symbolicPoleMayBeInside`). Set by
+ * `withEnclosingRanges` for the duration of the inner evaluation.
+ *
+ * The ranges belong to the evaluation of one engine: they are kept per
+ * engine, so that an integral evaluated by another engine while an integral
+ * runs (a host callback, for example) does not read them.
+ */
+const enclosingRangesOf = new WeakMap<
+  ComputeEngine,
+  ReadonlyArray<IntegrationRange>
+>();
+
+/** The ranges of the integrals that enclose the one that `ce` evaluates
+ * (see `enclosingRangesOf`). */
+function enclosingRanges(ce: ComputeEngine): ReadonlyArray<IntegrationRange> {
+  return enclosingRangesOf.get(ce) ?? [];
+}
+
+/** `fn()`, with the enclosing ranges of `ce` set to `ranges` while it runs. */
+function withEnclosingRanges<T>(
+  ce: ComputeEngine,
+  ranges: ReadonlyArray<IntegrationRange>,
+  fn: () => T
+): T {
+  const saved = enclosingRangesOf.get(ce);
+  enclosingRangesOf.set(ce, ranges);
+  try {
+    return fn();
+  } finally {
+    if (saved === undefined) enclosingRangesOf.delete(ce);
+    else enclosingRangesOf.set(ce, saved);
+  }
+}
+
+/**
+ * The value of `∫ body d(variable)` over a numeric interval with orientation
+ * `orientation` (the sign of `upper − lower`) when `body` does not depend on
+ * `variable` and its numeric value is an infinity: that infinity for `+1`,
+ * its negation for `−1`. `undefined` in every other case — a body that
+ * depends on the variable, a finite or non-numeric value, an impure body
+ * (evaluating it here would run its effects once more than the quadrature
+ * does), or a zero-length interval (decided by the caller).
+ */
+function infiniteConstantIntegral(
+  ce: ComputeEngine,
+  body: Expression,
+  variable: string,
+  orientation: number
+): Expression | undefined {
+  if (orientation !== 1 && orientation !== -1) return undefined;
+  if (body.has(variable) || !body.isPure) return undefined;
+  const value = body.N();
+  if (!isNumber(value) || value.isInfinity !== true) return undefined;
+  return orientation === 1 ? value : value.neg();
+}
+
+/**
+ * `body` with each symbol that has an assigned value replaced by that value,
+ * except the symbols named in `variables` (the integration variables).
+ *
+ * The interior-pole check (`interiorPoleVerdict`) only locates the poles of a
+ * denominator whose single free symbol is the integration variable, so with
+ * `q := 1` it could not see the pole of `(y − q)⁻²` at `y = 1`. The compiled
+ * integrand reads the value of `q`, so the quadrature integrates the function
+ * with the pole: the check must examine the same function. This is a numeric
+ * evaluation, so reading the assigned values is correct here. A symbol with
+ * no value, and a constant (`Pi`, `ExponentialE`), are left as they are.
+ */
+function withAssignedValues(
+  ce: ComputeEngine,
+  body: Expression,
+  variables: readonly string[]
+): Expression {
+  const values: Record<string, Expression> = {};
+  let found = false;
+  for (const name of body.symbols) {
+    if (variables.includes(name)) continue;
+    const def = ce.lookupDefinition(name);
+    if (!isValueDef(def) || def.value.isConstant === true) continue;
+    const value = def.value.value;
+    if (value === undefined || value === null) continue;
+    values[name] = value;
+    found = true;
+  }
+  return found ? body.subs(values) : body;
+}
+
+/**
+ * `e` written as `factor · rest`, where `factor` does not depend on
+ * `variable` and `rest` has no free symbol other than `variable`:
+ * `1/(a·t)` is `(1/a) · (1/t)`. `undefined` when `e` cannot be written so
+ * by splitting products, quotients, negations and integer powers
+ * (`1/(t + a)` cannot).
+ */
+function splitConstantFactor(
+  ce: ComputeEngine,
+  e: Expression,
+  variable: string
+): { factor: Expression; rest: Expression } | undefined {
+  if (!e.has(variable)) return { factor: e, rest: ce.One };
+  if (e.unknowns.every((name) => name === variable))
+    return { factor: ce.One, rest: e };
+  if (!isFunction(e)) return undefined;
+  if (e.operator === 'Multiply') {
+    const factors: Expression[] = [];
+    const rests: Expression[] = [];
+    for (const op of e.ops) {
+      const s = splitConstantFactor(ce, op, variable);
+      if (s === undefined) return undefined;
+      factors.push(s.factor);
+      rests.push(s.rest);
+    }
+    return {
+      factor: ce.function('Multiply', factors),
+      rest: ce.function('Multiply', rests),
+    };
+  }
+  if (e.operator === 'Divide') {
+    const n = splitConstantFactor(ce, e.op1, variable);
+    const d = splitConstantFactor(ce, e.op2, variable);
+    if (n === undefined || d === undefined) return undefined;
+    return {
+      factor: ce.function('Divide', [n.factor, d.factor]),
+      rest: ce.function('Divide', [n.rest, d.rest]),
+    };
+  }
+  if (e.operator === 'Negate') {
+    const s = splitConstantFactor(ce, e.op1, variable);
+    if (s === undefined) return undefined;
+    return { factor: ce.function('Negate', [s.factor]), rest: s.rest };
+  }
+  if (e.operator === 'Power') {
+    // Only an integer exponent distributes over a product for every value
+    // of the factors: `(a·t)^(1/2)` is not `a^(1/2)·t^(1/2)` for `a, t < 0`.
+    const k = e.op2;
+    if (!isNumber(k) || !k.isNumberLiteral || !Number.isInteger(k.re))
+      return undefined;
+    const s = splitConstantFactor(ce, e.op1, variable);
+    if (s === undefined) return undefined;
+    return {
+      factor: ce.function('Power', [s.factor, k]),
+      rest: ce.function('Power', [s.rest, k]),
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Whether `factor` is not zero for any value of its free symbols at which it
+ * is defined: a nonzero number, a quotient whose numerator is never zero, a
+ * product of such factors, a negative power (`1/a` is never zero), or a
+ * value whose sign is decided.
+ */
+function neverZero(factor: Expression): boolean {
+  if (isNumber(factor)) return factor.isNaN !== true && !factor.isSame(0);
+  if (isFunction(factor)) {
+    if (factor.operator === 'Divide' || factor.operator === 'Negate')
+      return neverZero(factor.op1);
+    if (factor.operator === 'Multiply') return factor.ops.every(neverZero);
+    // `eᶻ` is never zero for a finite `z`. An exponent that is not proven
+    // infinite (a symbol with no value) counts as finite.
+    if (factor.operator === 'Exp')
+      return factor.op1.isFinite !== false && factor.op1.isNaN !== true;
+    if (factor.operator === 'Power') {
+      const k = factor.op2;
+      if (isSymbol(factor.op1, 'ExponentialE'))
+        return k.isFinite !== false && k.isNaN !== true;
+      if (isNumber(k) && k.isNumberLiteral && k.re < 0) return true;
+      if (isNumber(k) && k.isNumberLiteral && k.re > 0)
+        return neverZero(factor.op1);
+    }
+  }
+  const s = decidedSign(factor);
+  return s === 1 || s === -1;
+}
+
+/**
+ * The interior-pole verdict (see `interiorPoleVerdict`) of an integrand that
+ * has a free symbol other than `variable` only in a constant factor:
+ * `1/(a·t)` over `[−1, 1]`. `interiorPoleVerdict` locates the pole of such
+ * an integrand at `t = 0`, but cannot confirm it, because its samples of the
+ * integrand are not numbers while `a` is free. Here the integrand is split
+ * into `factor · rest` (`(1/a) · (1/t)`) and the check runs on `rest`.
+ *
+ * - When `rest` changes sign across a pole (`mixed`), the integral has no
+ *   value for every value of the free symbols at which `factor` is not zero.
+ *   Where `factor` is undefined (`1/a` at `a = 0`), the integrand is
+ *   undefined everywhere and the integral has no value either. So the
+ *   verdict is `mixed` when `factor` is never zero (see `neverZero`), and
+ *   `unknown` otherwise: `∫₋₁¹ a/t dt` is `0` for `a = 0`.
+ * - When `rest` keeps one sign (`1/(a·t²)`), the sign of the integral is
+ *   that sign times the sign of `factor`: the verdict is `positive` or
+ *   `negative` when the sign of `factor` is decided (`a` declared positive),
+ *   and `unknown` otherwise.
+ *
+ * An `unknown` verdict keeps the integral unevaluated. `undefined` when the
+ * integrand cannot be split, has no free symbol other than `variable`, or
+ * `rest` has no proven pole.
+ */
+function constantFactorPoleVerdict(
+  ce: ComputeEngine,
+  integrand: Expression,
+  variable: string,
+  lower: Expression,
+  upper: Expression
+): PoleVerdict | undefined {
+  if (integrand.unknowns.every((name) => name === variable)) return undefined;
+  const split = splitConstantFactor(ce, integrand, variable);
+  if (split === undefined) return undefined;
+  const verdict = interiorPoleVerdict(split.rest, variable, lower, upper, ce);
+  if (verdict === undefined) return undefined;
+  if (verdict.sign === 'mixed')
+    return neverZero(split.factor) ? verdict : { sign: 'unknown' };
+  if (verdict.sign === 'positive' || verdict.sign === 'negative') {
+    const s = decidedSign(split.factor);
+    if (s === 1) return verdict;
+    if (s === -1)
+      return { sign: verdict.sign === 'positive' ? 'negative' : 'positive' };
+  }
+  return { sign: 'unknown' };
+}
+
+/**
+ * The name of the variable of the integrand `f(t)` that `NIntegrate` builds
+ * for a function given by its name (`NIntegrate(Tan, 0, 3)`). The name is
+ * unlikely to occur in the body of a user function: the interior-pole check
+ * finds the integration variable by its name, so a body symbol with the same
+ * name would be taken for it.
+ */
+const NINTEGRATE_VARIABLE = 'NIntegrateVariable';
+
+/**
+ * The interior-pole verdict of `NIntegrate(f, lower, upper)` (see
+ * `interiorPoleVerdict`), or `undefined` when no pole was proven. With
+ * `check` set to `endpointPoleVerdict`, the verdict for a pole AT a bound.
+ *
+ * - For a one-parameter `Function` literal, the check examines its body. The
+ *   parameter is shielded, so that a global value of a symbol with the same
+ *   name is not read.
+ * - For a function given by its name (`Tan`, or a user function `g`), the
+ *   check examines the call `f(t)`, where `t` is a real variable declared in a
+ *   scope of its own. The variable is made with `_bindingSymbol()`, never
+ *   `ce.symbol()`, which can return a library constant. When the call itself
+ *   gives no verdict, its evaluated form is examined: evaluating the call of
+ *   a user function `g := x ↦ 1/x²` gives `t⁻²`, whose denominator the check
+ *   can read.
+ *
+ * In both cases the values of the other assigned symbols are substituted
+ * first (see `withAssignedValues`).
+ */
+function nIntegratePoleVerdict(
+  ce: ComputeEngine,
+  f: Expression,
+  lower: number,
+  upper: number,
+  check: typeof interiorPoleVerdict = interiorPoleVerdict
+): PoleVerdict | undefined {
+  if (isFunction(f, 'Function')) {
+    if (f.nops !== 2) return undefined;
+    const variable = sym(f.op2);
+    if (!variable) return undefined;
+    return withValueShield(ce, [variable], () =>
+      check(
+        withAssignedValues(ce, f.op1, [variable]),
+        variable,
+        lower,
+        upper,
+        ce
+      )
+    );
+  }
+
+  const name = sym(f);
+  if (!name) return undefined;
+  const variable = NINTEGRATE_VARIABLE;
+  ce.pushScope();
+  try {
+    ce.declare(variable, 'real');
+    const t = ce._bindingSymbol(variable, ce.context.lexicalScope);
+    if (!t) return undefined;
+    const call = ce.function(name, [t]);
+    const verdict = check(
+      withAssignedValues(ce, call, [variable]),
+      variable,
+      lower,
+      upper,
+      ce
+    );
+    if (verdict !== undefined) return verdict;
+    let evaluated: Expression;
+    try {
+      evaluated = call.evaluate();
+    } catch {
+      return undefined;
+    }
+    if (evaluated.isSame(call)) return undefined;
+    return check(
+      withAssignedValues(ce, evaluated, [variable]),
+      variable,
+      lower,
+      upper,
+      ce
+    );
+  } finally {
+    ce.popScope();
+  }
+}
+
+/**
+ * Integrate ONE real-valued part (`re` or `im`) of a one-limit integrand over
+ * `[lower, upper]`. `Integrate(…).N()` and `NIntegrate` both call this
+ * function, so the two operators use the same methods in the same order:
+ *
+ * 1. on a semi-infinite interval, the oscillatory quadrature;
+ * 2. the adaptive Gauss–Kronrod quadrature, corrected next to a singular
+ *    endpoint by the extrapolation of the shells of the corner panel and
+ *    checked against the tanh-sinh rule (`singularEndpoints`,
+ *    `numerics/endpoint-quadrature.ts`);
+ * 3. `NaN` when the quadrature finds that the integral diverges;
+ * 4. Monte Carlo, only when the quadrature does not converge, did not find
+ *    a singular corner it could not resolve (`singularCorner`), and sampling
+ *    could give a better result. A quadrature result that did not converge
+ *    and is kept reports an error of at least `|estimate|/√mcSamples`.
+ *
+ * `options.compiled` tells whether the integrand compiled: it selects the
+ * quadrature panel budget and the Monte-Carlo sample count. `options.uncached`
+ * maps `jsf` to the same function without the sample cache of
+ * `numericIntegrandParts()`. `options.draw` is the random stream of the
+ * Monte-Carlo fallback.
+ *
+ * `divergent` is `true` when the estimate is `NaN` because the quadrature
+ * found that the integral diverges (step 3). The caller can then look for a
+ * pole at a bound to give the sign of the divergence (see
+ * `endpointPoleVerdict`).
+ */
+function integrateRealPart(
+  ce: ComputeEngine,
+  jsf: (x: number) => number,
+  lower: number,
+  upper: number,
+  options: {
+    compiled: boolean;
+    uncached: (part: (x: number) => number) => (x: number) => number;
+    draw: () => number;
+    /** The integrand holds an integral: each evaluation runs a quadrature. */
+    nested?: boolean;
+  }
+): { estimate: number; error: number; divergent?: true } {
+  // Semi-infinite interval: a conditionally-convergent oscillatory
+  // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
+  // importance sampling. Try the dedicated lobe-integration +
+  // ε-acceleration quadrature first; it returns null (→ Monte Carlo)
+  // for non-oscillatory or divergent integrands.
+  const aInf = !isFinite(lower);
+  const bInf = !isFinite(upper);
+  if (aInf !== bInf) {
+    // Reversed bounds (`∫_{+∞}^0`) integrate over the ordered interval and
+    // negate. Without this, `∫_{+∞}^0 sin x/x dx` gave `+π/2`: the infinite
+    // LOWER bound was read as `−∞`.
+    const sign = lower > upper ? -1 : 1;
+    const lo = Math.min(lower, upper);
+    const hi = Math.max(lower, upper);
+    const osc = !isFinite(hi)
+      ? integrateSemiInfiniteOscillatory(jsf, lo, ce._deadlineFrame)
+      : integrateSemiInfiniteOscillatory(
+          (t) => jsf(-t),
+          -hi,
+          ce._deadlineFrame
+        );
+    if (osc) return { estimate: sign * osc.estimate, error: osc.error };
+  }
+
+  // (2) Deterministic adaptive Gauss–Kronrod (GK15) for finite or
+  // transformable (semi-infinite / doubly-infinite) bounds — near
+  // machine precision on smooth integrands, and matches the compiled
+  // integration path. Falls through to Monte Carlo only when it fails
+  // to converge (endpoint singularities, oscillatory tails) AND the
+  // sampler could actually do better — a stalled panel budget still
+  // routinely carries a tighter bound than 1e7 samples can reach, and
+  // for an expensive integrand (an inner quadrature, a compiled model)
+  // those samples cost minutes.
+  //
+  // An integrand that did not compile (an operator with only a
+  // JavaScript `evaluate` handler, for example) runs the quadrature
+  // too, with a smaller panel budget (`INTERPRETED_QUADRATURE_PANELS`)
+  // because each evaluation is slower. Its Monte-Carlo fallback
+  // draws only 1e4 samples, about 1e-2 relative error, so skipping
+  // the quadrature gave `∫₀¹ x² dx` as `0.33 ± 0.003`.
+  const mcSamples = options.compiled ? 1e7 : 1e4;
+  // `deadline`: bounds the adaptive loop (a per-panel check that
+  // throws the timeout) AND is re-published as the ambient deadline so an
+  // integrand that is itself an integral — interpreted, or compiled
+  // to `_SYS.integrate`, which has no engine access — inherits it
+  // (Tycho item 183).
+  const gk = adaptiveQuadrature(jsf, lower, upper, {
+    deadline: ce._deadlineFrame,
+    singularEndpoints: true,
+    ...(options.compiled
+      ? {}
+      : { maxIntervals: INTERPRETED_QUADRATURE_PANELS }),
+  });
+  // A diagnosed divergence has no finite value. Monte Carlo would
+  // still return one — a mean of samples that never saw the
+  // singularity — so the fallback is skipped, not just the report. An
+  // integrand that oscillates without a value at a bound
+  // (`∫₀¹ sin(ln(1 − x))/(1 − x) dx`) is `NaN` with no sign: it is not
+  // reported as `divergent`, so the caller does not look for the sign of a
+  // pole at the bound (which gave `−∞` for that integral).
+  if (gk.divergent)
+    return gk.oscillates === true
+      ? { estimate: NaN, error: NaN }
+      : { estimate: NaN, error: NaN, divergent: true };
+  if (
+    (gk.converged || gk.extrapolated === true) &&
+    Number.isFinite(gk.estimate)
+  )
+    return { estimate: gk.estimate, error: gk.error };
+  // A result that did not converge: its error estimate can be far too small
+  // (the adaptive quadrature gave `508.24896298688 ± 0.00000000053` for
+  // `∫₀¹ x^(−0.999) dx = 1000` before the extrapolation of the endpoint
+  // shells). The error that is reported is at least the standard error of
+  // the Monte-Carlo estimate it replaces, `|estimate|/√mcSamples`. The
+  // result is kept when its own error is not larger than that.
+  //
+  // A result next to a singular corner that the quadrature could not resolve
+  // (`singularCorner`) is kept too, whatever its error: Monte Carlo
+  // under-weights the neighborhood of the singularity and gave
+  // `0.3220 ± 0.0063` for `∫₀^0.01 dx/(x·(−ln x)·ln²(−ln x)) = 0.6548…`,
+  // where the quadrature gave `0.5028 ± 0.0176`.
+  if (
+    (gk.singularCorner === true || quadratureBeatsMonteCarlo(gk, mcSamples)) &&
+    Number.isFinite(gk.estimate)
+  )
+    return {
+      estimate: gk.estimate,
+      error: Math.max(gk.error, Math.abs(gk.estimate) / Math.sqrt(mcSamples)),
+    };
+
+  // An integrand that holds an integral has no Monte-Carlo fallback: each
+  // of the `mcSamples` samples would run an inner quadrature, and the inner
+  // integral can itself have no value at some points (`∫₀^10 ∫₃^4 (y − x)⁻²
+  // dx dy`, for `y` in `[3, 4]`). A result with a finite error is kept, with
+  // the same floor as above; otherwise the integral has no value.
+  if (options.nested === true)
+    return Number.isFinite(gk.estimate) && Number.isFinite(gk.error)
+      ? {
+          estimate: gk.estimate,
+          error: Math.max(
+            gk.error,
+            Math.abs(gk.estimate) / Math.sqrt(mcSamples)
+          ),
+        }
+      : { estimate: NaN, error: NaN };
+
+  const mce = monteCarloEstimate(
+    options.uncached(jsf),
+    lower,
+    upper,
+    mcSamples,
+    ce._deadlineFrame,
+    options.draw
+  );
+  // KNOWN LIMITATION (CORRECTNESS_FINDINGS #29 / C15): the reported
+  // error bar is the Monte-Carlo standard error, which is *optimistic*
+  // (~1.3–1.6× too small) for endpoint-singular integrands such as
+  // ∫₋₁¹ √(1−x²)/(1+x²) dx or ∫₀¹ x^(−1/2) dx. Uniform sampling
+  // under-weights the neighborhood of the singularity, so the sample
+  // variance underestimates the true quadrature error and the ± bound
+  // can be tighter than the actual deviation from the exact value. A
+  // faithful bound needs singularity-aware quadrature (e.g. tanh-sinh
+  // with endpoint clustering); until then the estimate is sound but the
+  // uncertainty on singular integrands should be treated as a lower
+  // bound, not a guarantee.
+  return { estimate: mce.estimate, error: mce.error };
 }
 
 /**
@@ -833,6 +1386,47 @@ function integrateTupleIntegrand(
  * `Random()` must use the same draw that the caller saw, and must not
  * consume a second one.
  */
+/**
+ * The point at fraction `s` (in `(0, 1)`) of the range between `lo` and
+ * `hi`, for the grid of `dependentPoleScan`. A finite range is divided
+ * linearly. An infinite bound uses the transform of the quadrature
+ * (`adaptiveQuadrature`): `lo + s/(1 − s)` for `[lo, +∞)`,
+ * `hi − s/(1 − s)` for `(−∞, hi]`, and `u/(1 − u²)` with `u = 2s − 1` for
+ * `(−∞, +∞)`. The bounds may be in either order.
+ */
+function scanPoint(lo: number, hi: number, s: number): number {
+  const loInf = !Number.isFinite(lo);
+  const hiInf = !Number.isFinite(hi);
+  if (!loInf && !hiInf) return lo + s * (hi - lo);
+  if (loInf && hiInf) {
+    const u = 2 * s - 1;
+    return u / (1 - u * u);
+  }
+  const finite = loInf ? hi : lo;
+  const infinite = loInf ? lo : hi;
+  return finite + Math.sign(infinite) * (s / (1 - s));
+}
+
+/**
+ * A finite range inside the range between `lo` and `hi`, with the same
+ * orientation, for the interior-pole check of `dependentPoleScan`, which
+ * requires finite bounds. A finite bound is kept. An infinite bound is
+ * replaced by a point `1024·max(1, |b|)` past the other bound `b`, or by
+ * `±1024` when both bounds are infinite: the points of the grid of a
+ * dimension with an infinite range (`scanPoint`) are within `±63` of its
+ * finite bound, so a pole that moves with them stays inside the cut range.
+ */
+function finiteScanRange(lo: number, hi: number): [number, number] {
+  const loInf = !Number.isFinite(lo);
+  const hiInf = !Number.isFinite(hi);
+  if (!loInf && !hiInf) return [lo, hi];
+  if (loInf && hiInf) return [Math.sign(lo) * 1024, Math.sign(hi) * 1024];
+  const finite = loInf ? hi : lo;
+  const cut =
+    finite + Math.sign(loInf ? lo : hi) * 1024 * Math.max(1, Math.abs(finite));
+  return loInf ? [cut, hi] : [lo, cut];
+}
+
 function nIntegrateMultiple(
   ce: ComputeEngine,
   f: Expression,
@@ -912,23 +1506,164 @@ function nIntegrateMultiple(
   // and it answers `undefined` (no claim): only a divergence the integrand
   // exhibits in that variable alone is reported. Two dimensions that each
   // diverge in different directions leave the integral without a value.
-  const body = isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr;
-  let verdict: PoleVerdict | undefined;
-  for (let d = 0; d < vars.length; d++) {
-    const l = limits[d];
-    if (!isFunction(l)) continue;
-    const dependsOnVars = (e: Expression) =>
-      e.symbols.some((name) => vars.includes(name));
-    if (dependsOnVars(l.op2) || dependsOnVars(l.op3)) continue;
-    const v = interiorPoleVerdict(body, vars[d], l.op2, l.op3, ce);
-    if (v === undefined) continue;
-    verdict =
-      verdict === undefined || verdict.sign === v.sign ? v : { sign: 'mixed' };
-  }
-  if (verdict !== undefined)
+  // The values of assigned symbols other than the integration variables are
+  // substituted, since the compiled integrand reads them (see
+  // `withAssignedValues`).
+  const body = withAssignedValues(
+    ce,
+    isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr,
+    vars
+  );
+  //
+  // The verdict of one dimension has the orientation of that dimension's
+  // bounds only. Each other dimension with reversed bounds negates the
+  // integral again: `∫₂⁰ ∫₀² (y − 1)⁻² dy dx` is `−∞`. A dimension whose
+  // bounds depend on another integration variable has no single
+  // orientation, so the direction of the divergence is then unknown.
+  const dependsOnVars = (e: Expression) =>
+    e.symbols.some((name) => vars.includes(name));
+  const orientations = limits.map((l, d): number | undefined => {
+    if (!isFunction(l) || dependsOnVars(l.op2) || dependsOnVars(l.op3))
+      return undefined;
+    return Math.sign(boundFns[d][1]([]) - boundFns[d][0]([]));
+  });
+  // The value of the integral from the verdicts of `check` for each
+  // dimension, or `undefined` when no dimension has a verdict.
+  // `interiorPoleVerdict` is checked before the quadrature;
+  // `endpointPoleVerdict` (a pole AT a bound) only after the quadrature found
+  // a divergence, since it cannot tell an integrable singularity of order
+  // close to 1 from a pole.
+  const poleValue = (
+    check: typeof interiorPoleVerdict
+  ): Expression | undefined => {
+    let verdict: PoleVerdict | undefined;
+    for (let d = 0; d < vars.length; d++) {
+      const l = limits[d];
+      if (!isFunction(l)) continue;
+      if (orientations[d] === undefined) continue;
+      let v = check(body, vars[d], l.op2, l.op3, ce);
+      if (v === undefined) continue;
+      if (v.sign === 'positive' || v.sign === 'negative') {
+        let flip = 1;
+        for (let e = 0; e < vars.length; e++) {
+          if (e === d) continue;
+          const o = orientations[e];
+          // A dimension of zero length: the integral is over a set of zero
+          // measure, as for structurally equal bounds, which give 0.
+          if (o === 0) return ce.Zero;
+          if (o === undefined || Number.isNaN(o)) flip = 0;
+          else flip *= o;
+        }
+        if (flip === 0) v = { sign: 'unknown' };
+        else if (flip === -1)
+          v = { sign: v.sign === 'positive' ? 'negative' : 'positive' };
+      }
+      verdict =
+        verdict === undefined || verdict.sign === v.sign
+          ? v
+          : { sign: 'mixed' };
+    }
+    if (verdict === undefined) return undefined;
     return verdict.sign === 'positive'
       ? ce.PositiveInfinity
       : verdict.sign === 'negative'
+        ? ce.NegativeInfinity
+        : ce.NaN;
+  };
+  const interior = poleValue(interiorPoleVerdict);
+  if (interior !== undefined) return interior;
+
+  // A pole whose location depends on another integration variable:
+  // `∫₀¹⁰ ∫₃⁴ (y − x)⁻² dx dy` has, for each `y` in `(3, 4)`, a pole at
+  // `x = y`. `poleValue` cannot see it, because the samples of the integrand
+  // in one variable are not numbers while the other variables are free. Here
+  // the other variables are given the values of a grid of points of their
+  // ranges (the centers of 32 equal cells for two dimensions, of 8 × 8 for
+  // three), and the interior-pole check runs on the remaining variable at
+  // each point. The scan runs only when every bound is constant and there are
+  // at most three dimensions, which keeps its cost bounded; it is cheap when
+  // the integrand has no denominator, since there is then no candidate site
+  // to sample.
+  //
+  // The result is the number of points with a proven pole, and their sign,
+  // with the orientation of the other dimensions: `mixed` when two points
+  // disagree, or when the integrand changes sign across the pole at one
+  // point (the inner integral then has no value).
+  //
+  // A dimension with an infinite bound is handled in two ways. As one of the
+  // other variables, its grid is placed on `[0, 1)` and mapped onto the
+  // range by the transform of the quadrature, `lo + s/(1 − s)` (see
+  // `scanPoint`): for `Limits(y, 0, +∞)` the points go from `y = 0.016` to
+  // `y = 63`. As the variable checked for a pole, its range is cut to a
+  // finite one (see `finiteScanRange`): a pole proven inside the cut range
+  // is inside the whole range, with the same orientation.
+  const dependentPoleScan = ():
+    { proven: number; sign: 'positive' | 'negative' | 'mixed' } | undefined => {
+    if (vars.length < 2 || vars.length > 3) return undefined;
+    if (orientations.some((o) => o === undefined || o === 0 || Number.isNaN(o)))
+      return undefined;
+    const perDimension = vars.length === 2 ? 32 : 8;
+    let sign: 'positive' | 'negative' | 'mixed' | undefined;
+    let proven = 0;
+    for (let d = 0; d < vars.length; d++) {
+      const l = limits[d];
+      if (!isFunction(l)) continue;
+      const others = vars.map((_, e) => e).filter((e) => e !== d);
+      if (!others.some((e) => body.has(vars[e]))) continue;
+      const flip = others.reduce((product, e) => product * orientations[e]!, 1);
+      const count = perDimension ** others.length;
+      const [lower, upper] = finiteScanRange(
+        boundFns[d][0]([]),
+        boundFns[d][1]([])
+      );
+      for (let k = 0; k < count; k++) {
+        const values: Record<string, Expression> = {};
+        let rest = k;
+        for (const e of others) {
+          const i = rest % perDimension;
+          rest = Math.floor(rest / perDimension);
+          values[vars[e]] = ce.number(
+            scanPoint(
+              boundFns[e][0]([]),
+              boundFns[e][1]([]),
+              (i + 0.5) / perDimension
+            )
+          );
+        }
+        const v = interiorPoleVerdict(
+          body.subs(values),
+          vars[d],
+          lower,
+          upper,
+          ce
+        );
+        if (v === undefined) continue;
+        proven += 1;
+        const oriented =
+          v.sign !== 'positive' && v.sign !== 'negative'
+            ? 'mixed'
+            : flip > 0
+              ? v.sign
+              : v.sign === 'positive'
+                ? 'negative'
+                : 'positive';
+        sign = sign === undefined || sign === oriented ? oriented : 'mixed';
+      }
+    }
+    if (sign === undefined) return undefined;
+    return { proven, sign };
+  };
+  const dependentPoles = dependentPoleScan();
+  // Two or more points with a proven pole are taken as a set of positive
+  // measure of the other variables on which the inner integral diverges, so
+  // the integral diverges with their common sign, or has no value when the
+  // signs differ. A single point may be a coincidence of the grid (a pole
+  // only on a line of zero measure): it is used only when the quadrature does
+  // not converge (see below).
+  if (dependentPoles !== undefined && dependentPoles.proven >= 2)
+    return dependentPoles.sign === 'positive'
+      ? ce.PositiveInfinity
+      : dependentPoles.sign === 'negative'
         ? ce.NegativeInfinity
         : ce.NaN;
 
@@ -969,20 +1704,33 @@ function nIntegrateMultiple(
   // nodes of the first pass are no longer kept for the second pass. Read the
   // integrand without the cache while this count is not zero.
   let sampling = 0;
+  // Whether a level found that its integral diverges (see `integrateDim`).
+  let divergent = false;
+  // Whether a level did not converge and kept its quadrature result or fell
+  // back to Monte Carlo (see `integrateDim`).
+  let unconverged = false;
   const integrateDim = (dim: number): { estimate: number; error: number } => {
     // Inner-level error accumulated over this level-invocation's quadrature
     // nodes (the recursion is strictly sequential, so plain locals suffice).
     let innerErrSum = 0;
     let innerErrN = 0;
+    // The sum of the magnitudes of the inner estimates at the same nodes, and
+    // whether they took both signs (see `inflate`).
+    let innerAbsSum = 0;
+    let innerPositive = false;
+    let innerNegative = false;
     const g = (t: number): number => {
       argv[slots[dim]] = t;
       outerVals[dim] = t;
       if (dim === last)
         return sampling > 0 ? integrand.uncached(jsf)(...argv) : jsf(...argv);
       const r = integrateDim(dim + 1);
-      if (Number.isFinite(r.error)) {
+      if (Number.isFinite(r.error) && Number.isFinite(r.estimate)) {
         innerErrSum += r.error;
         innerErrN++;
+        innerAbsSum += Math.abs(r.estimate);
+        if (r.estimate > 0) innerPositive = true;
+        if (r.estimate < 0) innerNegative = true;
       }
       return r.estimate;
     };
@@ -996,21 +1744,36 @@ function nIntegrateMultiple(
     // and the reported error collapses to ~0 while the true error is the inner
     // bound times this level's range. Add that systematic component explicitly.
     // Each level inflates before returning to its caller, so it compounds.
-    // The range factor is only meaningful on a finite interval: over an
-    // infinite one it is vacuous (∞ · any inner bound), and would report ±∞ on
-    // an otherwise good answer, so such a level propagates nothing extra.
+    //
+    // The added term estimates the integral of the inner error over this
+    // level's range. When the inner estimates keep one sign, it is the ratio
+    // of the summed inner errors to the summed inner magnitudes, times the
+    // magnitude of this level's estimate (which is then the integral of the
+    // magnitudes). The ratio does not depend on where the nodes are: the
+    // nodes of a level with a singularity at a bound (`∫₀¹ ∫₀² y^(−0.999) dx
+    // dy`) are packed next to it, where the inner values and errors are
+    // huge, and a plain mean of the errors over the nodes then multiplied by
+    // the range gave an error of 10²⁸⁹ for an integral of 2000. When the
+    // inner estimates take both signs, their magnitudes are not the
+    // integral, and the term is the mean inner error times the range. That
+    // range factor is only meaningful on a finite interval: over an infinite
+    // one it is vacuous (∞ · any inner bound), and would report ±∞ on an
+    // otherwise good answer, so such a level propagates nothing extra.
     const span = Math.abs(upper - lower);
     const inflate = (r: {
       estimate: number;
       error: number;
-    }): { estimate: number; error: number } => ({
-      estimate: r.estimate,
-      error:
-        r.error +
-        (innerErrN && Number.isFinite(span)
-          ? (innerErrSum / innerErrN) * span
-          : 0),
-    });
+    }): { estimate: number; error: number } => {
+      let extra = 0;
+      if (innerErrN > 0) {
+        if (!(innerPositive && innerNegative) && innerAbsSum > 0) {
+          if (Number.isFinite(r.estimate))
+            extra = (innerErrSum / innerAbsSum) * Math.abs(r.estimate);
+        } else if (Number.isFinite(span))
+          extra = (innerErrSum / innerErrN) * span;
+      }
+      return { estimate: r.estimate, error: r.error + extra };
+    };
     // The starting-panel floor multiplies across levels — one full quadrature
     // runs per outer node — so a per-level 16 would cost 16^dimensions. Reduce
     // it so the floor applies to the whole iterated integral, not each level.
@@ -1021,16 +1784,43 @@ function nIntegrateMultiple(
       // quadrature runs per outer node, so an unchecked level made the whole
       // nest unboundable by any JS-side budget.
       deadline: ce._deadlineFrame,
+      // A level with a slowly integrable singularity at a bound is resolved
+      // by extrapolating its endpoint shells, as for a one-limit integral
+      // (`integrateRealPart`): an accepted extrapolation is a result.
+      singularEndpoints: true,
     });
-    if (gk.converged && Number.isFinite(gk.estimate)) return inflate(gk);
+    if (
+      (gk.converged || gk.extrapolated === true) &&
+      Number.isFinite(gk.estimate)
+    )
+      return inflate(gk);
     // A level diagnosed as divergent has no finite value: propagate NaN rather
     // than sample it, which would only launder the divergence into a
     // plausible-looking number (and make every outer node pay for it).
-    if (gk.divergent) return { estimate: NaN, error: NaN };
+    // A level that oscillates without a value has no sign (see
+    // `integrateRealPart`): it is not marked `divergent`, so no pole sign is
+    // looked for.
+    if (gk.divergent) {
+      if (gk.oscillates !== true) divergent = true;
+      return { estimate: NaN, error: NaN };
+    }
     // A stalled level whose error bound already beats the sampler keeps its
     // quadrature result: sampling it would be both less accurate and, since
     // every inner level re-runs per outer node, far more expensive.
-    if (quadratureBeatsMonteCarlo(gk, 1e4)) return inflate(gk);
+    unconverged = true;
+    // Its error estimate can be far too small (see `integrateRealPart`), so
+    // the error is at least the standard error of the Monte-Carlo estimate it
+    // replaces, `|estimate|/√1e4`.
+    // So does a level next to a singular corner that the quadrature could
+    // not resolve (`singularCorner`, see `integrateRealPart`).
+    if (
+      (gk.singularCorner === true && Number.isFinite(gk.estimate)) ||
+      quadratureBeatsMonteCarlo(gk, 1e4)
+    )
+      return inflate({
+        estimate: gk.estimate,
+        error: Math.max(gk.error, Math.abs(gk.estimate) / Math.sqrt(1e4)),
+      });
     sampling++;
     try {
       return inflate(
@@ -1044,6 +1834,16 @@ function nIntegrateMultiple(
   // The reported uncertainty is the outermost level's error estimate, inflated
   // by the propagated inner-level error (see `inflate` above).
   const r = integrateDim(0);
+  // A level found a divergence: a pole AT a bound of a dimension gives its
+  // sign (`∫₀² ∫₀¹ t⁻² dt dx` is `+∞`).
+  if (divergent && Number.isNaN(r.estimate)) {
+    const endpoint = poleValue(endpointPoleVerdict);
+    if (endpoint !== undefined) return endpoint;
+  }
+  // A level did not converge or diverged, and one point of the grid of
+  // `dependentPoleScan` has a proven pole: the integral may diverge, and the
+  // quadrature result is not a value for it.
+  if ((divergent || unconverged) && dependentPoles !== undefined) return ce.NaN;
   if (Number.isNaN(r.estimate) && !integrand.sawNumeric()) return undefined;
   if (!integrand.sawImaginary()) return measurementFromParts(ce, r);
   jsf = integrand.im;
@@ -2004,6 +2804,10 @@ volumes
         );
       },
       canonical: (ops, { engine }) => {
+        // The function operand is required: a missing one is the standard
+        // `Error("missing")` operand, as `checkArity` pads it, not a crash.
+        if (ops.length === 0)
+          return engine._fn('Derivative', [engine.error('missing')]);
         const fn = canonicalFunctionLiteral(ops[0].canonical);
         if (!fn) return null;
         // A bare symbol here is being used as a function (e.g. `y` in
@@ -2752,6 +3556,18 @@ volumes
       },
 
       evaluate: (ops, { engine: ce, numericApproximation }) => {
+        // A limit with only one bound (`\int^2 f\,dy`, `\int_0 f\,dy`,
+        // `Limits(y, Nothing, 2)`): the integral is neither indefinite nor
+        // definite, and no default is chosen for the missing bound. The
+        // integral stays unevaluated, under `evaluate()` and `N()` alike.
+        // Without this, the symbolic route read the antiderivative at the
+        // missing bound as 1 (`\int^2 y^2\,dy` was 7/3).
+        for (const l of ops.slice(1)) {
+          if (!isFunction(l, 'Limits')) continue;
+          if ((sym(l.op2) === 'Nothing') !== (sym(l.op3) === 'Nothing'))
+            return undefined;
+        }
+
         // An integrand that is the `NaN` or `Indeterminate` literal: the
         // integral has no value, on the exact and the numeric route alike,
         // with or without bounds. `Integrate` is lazy, so the NaN-policy
@@ -2949,22 +3765,38 @@ volumes
           // so the body examined binds nothing but the integration variable
           // (a spare formal parameter could otherwise read a same-named
           // global). The iterated form runs the same check per dimension in
-          // `nIntegrateMultiple`.
+          // `nIntegrateMultiple`. The values of the other assigned symbols are
+          // substituted first: the compiled integrand reads them, so the check
+          // must examine the same function (see `withAssignedValues`).
           const pole = withValueShield(ce, intVarNames, () =>
             interiorPoleVerdict(
-              isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr,
+              withAssignedValues(
+                ce,
+                isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr,
+                [variable]
+              ),
               variable,
               lower,
               upper,
               ce
             )
           );
-          if (pole !== undefined)
-            return pole.sign === 'positive'
-              ? ce.PositiveInfinity
-              : pole.sign === 'negative'
-                ? ce.NegativeInfinity
-                : ce.NaN;
+          if (pole !== undefined) return poleVerdictValue(ce, pole);
+
+          // An integrand that does not depend on the variable and whose value
+          // is infinite — typically the inner integral of a nested integral
+          // that diverges (`∫₀² ∫₀² (y − 1)⁻² dy dx`, whose inner integral
+          // is `+∞`) — gives that infinity, negated for reversed bounds.
+          // Quadrature cannot answer it: every sample is infinite and the
+          // weighted sum is `NaN`. The integrand is evaluated here only when
+          // it is pure, so that an effect (`Random()`) is not run once more.
+          const infinite = infiniteConstantIntegral(
+            ce,
+            isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr,
+            variable,
+            Math.sign(upper - lower)
+          );
+          if (infinite !== undefined) return infinite;
 
           const compiled = withValueShield(ce, intVarNames, () =>
             implicitCompile(ce, fnExpr)
@@ -2985,92 +3817,35 @@ volumes
           const draw = ce._substream(mixTags(f.hash, firstLimit.hash));
 
           // Integrate ONE real-valued part of the integrand over the interval.
-          const integrateReal = (
-            jsf: (x: number) => number
-          ): { estimate: number; error: number } => {
-            // Semi-infinite interval: a conditionally-convergent oscillatory
-            // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
-            // importance sampling. Try the dedicated lobe-integration +
-            // ε-acceleration quadrature first; it returns null (→ Monte Carlo)
-            // for non-oscillatory or divergent integrands.
-            const aInf = !isFinite(lower);
-            const bInf = !isFinite(upper);
-            if (aInf !== bInf) {
-              const osc = bInf
-                ? integrateSemiInfiniteOscillatory(
-                    jsf,
-                    lower,
-                    ce._deadlineFrame
-                  )
-                : integrateSemiInfiniteOscillatory(
-                    (t) => jsf(-t),
-                    -upper,
-                    ce._deadlineFrame
-                  );
-              if (osc) return { estimate: osc.estimate, error: osc.error };
-            }
-
-            // (2) Deterministic adaptive Gauss–Kronrod (GK15) for finite or
-            // transformable (semi-infinite / doubly-infinite) bounds — near
-            // machine precision on smooth integrands, and matches the compiled
-            // integration path. Falls through to Monte Carlo only when it fails
-            // to converge (endpoint singularities, oscillatory tails) AND the
-            // sampler could actually do better — a stalled panel budget still
-            // routinely carries a tighter bound than 1e7 samples can reach, and
-            // for an expensive integrand (an inner quadrature, a compiled model)
-            // those samples cost minutes.
-            //
-            // An integrand that did not compile (an operator with only a
-            // JavaScript `evaluate` handler, for example) runs the quadrature
-            // too, with a smaller panel budget (`INTERPRETED_QUADRATURE_PANELS`)
-            // because each evaluation is slower. Its Monte-Carlo fallback
-            // draws only 1e4 samples, about 1e-2 relative error, so skipping
-            // the quadrature gave `∫₀¹ x² dx` as `0.33 ± 0.003`.
-            const mcSamples = compiled?.success ? 1e7 : 1e4;
-            // `deadline`: bounds the adaptive loop (a per-panel check that
-            // throws the timeout) AND is re-published as the ambient deadline so an
-            // integrand that is itself an integral — interpreted, or compiled
-            // to `_SYS.integrate`, which has no engine access — inherits it
-            // (Tycho item 183).
-            const gk = adaptiveQuadrature(jsf, lower, upper, {
-              deadline: ce._deadlineFrame,
-              ...(compiled?.success
-                ? {}
-                : { maxIntervals: INTERPRETED_QUADRATURE_PANELS }),
+          const integrateReal = (jsf: (x: number) => number) =>
+            integrateRealPart(ce, jsf, lower, upper, {
+              compiled: compiled?.success === true,
+              uncached: integrand.uncached,
+              draw,
+              nested: fnExpr.has(['Integrate', 'NIntegrate']),
             });
-            // A diagnosed divergence has no finite value. Monte Carlo would
-            // still return one — a mean of samples that never saw the
-            // singularity — so the fallback is skipped, not just the report.
-            if (gk.divergent) return { estimate: NaN, error: NaN };
-            if (
-              (gk.converged || quadratureBeatsMonteCarlo(gk, mcSamples)) &&
-              Number.isFinite(gk.estimate)
-            )
-              return { estimate: gk.estimate, error: gk.error };
-
-            const mce = monteCarloEstimate(
-              integrand.uncached(jsf),
-              lower,
-              upper,
-              mcSamples,
-              ce._deadlineFrame,
-              draw
-            );
-            // KNOWN LIMITATION (CORRECTNESS_FINDINGS #29 / C15): the reported
-            // error bar is the Monte-Carlo standard error, which is *optimistic*
-            // (~1.3–1.6× too small) for endpoint-singular integrands such as
-            // ∫₋₁¹ √(1−x²)/(1+x²) dx or ∫₀¹ x^(−1/2) dx. Uniform sampling
-            // under-weights the neighborhood of the singularity, so the sample
-            // variance underestimates the true quadrature error and the ± bound
-            // can be tighter than the actual deviation from the exact value. A
-            // faithful bound needs singularity-aware quadrature (e.g. tanh-sinh
-            // with endpoint clustering); until then the estimate is sound but the
-            // uncertainty on singular integrands should be treated as a lower
-            // bound, not a guarantee.
-            return { estimate: mce.estimate, error: mce.error };
-          };
 
           const re = integrateReal(integrand.re);
+          // The quadrature found a divergence, which has no sign. A pole AT
+          // a bound (`∫₀¹ t⁻² dt`) gives the sign: the integral diverges with
+          // the sign of the integrand next to that bound, inside the
+          // interval, as on the exact route (see `endpointPoleVerdict`).
+          if (re.divergent) {
+            const endpoint = withValueShield(ce, intVarNames, () =>
+              endpointPoleVerdict(
+                withAssignedValues(
+                  ce,
+                  isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr,
+                  [variable]
+                ),
+                variable,
+                lower,
+                upper,
+                ce
+              )
+            );
+            if (endpoint !== undefined) return poleVerdictValue(ce, endpoint);
+          }
           // No sample was a number: nothing was integrated. Stay symbolic
           // (the closed form, when there is one, is then still reachable).
           if (Number.isNaN(re.estimate) && !integrand.sawNumeric())
@@ -3132,9 +3907,21 @@ volumes
             // (`∫_0^1 x ∫_{−1}^{1} |x| dx dx`). Evaluate each inner integral
             // first, so that the split at the kinks and the antiderivative
             // below see its closed form (see `evaluateInnerIntegrals`).
-            const integrand = evaluateInnerIntegrals(liftIntegrand(expr));
+            // The inner integrals are evaluated knowing the range of this
+            // integral and of the enclosing ones (see `enclosingRangesOf`).
             const isDefinite =
               sym(lower) !== 'Nothing' && sym(upper) !== 'Nothing';
+            const ranges = [
+              ...outerRanges(limitsSequence.slice(0, i)),
+              ...enclosingRanges(ce),
+            ];
+            const integrand = withEnclosingRanges(
+              ce,
+              isDefinite
+                ? [{ name: variable, lower, upper }, ...ranges]
+                : ranges,
+              () => evaluateInnerIntegrals(liftIntegrand(expr))
+            );
             // A definite integral whose integrand has `Abs(u)` or `Sign(u)`
             // with `u` linear in the variable is integrated piece by piece
             // between the points where `u` changes sign. The whole-interval
@@ -3152,6 +3939,34 @@ volumes
             ) {
               isIndefinite = false;
               expr = ce.Zero;
+              continue;
+            }
+            // An infinite constant integrand — typically the value of a
+            // divergent inner integral (`∫₀² ∫₀² (y − 1)⁻² dy dx`) — over an
+            // interval of nonzero length is that infinity, negated for
+            // reversed bounds. The antiderivative `+∞·x` cannot be
+            // differenced at the bounds (`+∞·2 − +∞·0` has no value), so
+            // this is decided before it. A held integrand can be the raw
+            // symbol `PositiveInfinity`: `.canonical` makes it the number.
+            const infinite = isDefinite ? integrand.canonical : undefined;
+            if (isNumber(infinite) && infinite.isInfinity === true) {
+              const orientation = decidedSign(
+                ce.function('Subtract', [upper, lower])
+              );
+              isIndefinite = false;
+              expr =
+                orientation === 1
+                  ? infinite
+                  : orientation === -1
+                    ? infinite.neg()
+                    : ce.function('Integrate', [
+                        expr,
+                        ce.function('Limits', [
+                          ce.symbol(variable),
+                          lower,
+                          upper,
+                        ]),
+                      ]);
               continue;
             }
             if (isDefinite) {
@@ -3230,13 +4045,27 @@ volumes
                 ce.function('Limits', [ce.symbol(variable), lower, upper]),
               ]);
             } else if (
-              (pole = interiorPoleVerdict(
-                integrand,
-                variable,
-                lower,
-                upper,
-                ce
-              ))
+              (pole =
+                interiorPoleVerdict(
+                  // The bounds are differenced with the values of the
+                  // assigned symbols, so the check must see those values
+                  // too: with `q := 1`, `∫₀² (y − q)⁻² dy` has its pole at
+                  // `y = 1`.
+                  withAssignedValues(ce, integrand, [variable]),
+                  variable,
+                  lower,
+                  upper,
+                  ce
+                ) ??
+                // A free symbol in a constant factor (`1/(a·t)`): see
+                // `constantFactorPoleVerdict`.
+                constantFactorPoleVerdict(
+                  ce,
+                  withAssignedValues(ce, integrand, [variable]),
+                  variable,
+                  lower,
+                  upper
+                ))
             ) {
               // The integrand is unbounded at a point STRICTLY INSIDE the
               // bounds, so the fundamental theorem of calculus does not apply
@@ -3244,26 +4073,62 @@ volumes
               // anyway would report a finite value for a divergent integral
               // (∫₋₁¹ dt/t → 0, ∫₋₁¹ dt/t² → −2). When the integrand keeps one
               // sign on both sides of every pole the integral diverges to that
-              // infinity (∫₋₁¹ dt/t² → +∞, as ∫₀¹ dt/t → +∞ already does);
-              // when it changes sign the integral has no value, not even an
-              // infinite one, and stays inert, as the "antiderivative not
-              // fully found" arm above does. `interiorPoleVerdict` only
-              // answers for a proven pole, so a correct closed form is never
-              // lost this way.
+              // infinity (∫₋₁¹ dt/t² → +∞, as ∫₀¹ dt/t → +∞ already does).
+              // When it changes sign (`mixed`) the integral has no value, not
+              // even an infinite one: `Indeterminate`, or `NaN` with a float
+              // operand (see `noValueIntegral`). When the direction of the
+              // divergence is not established (`unknown`) the integral stays
+              // inert, as the "antiderivative not fully found" arm above
+              // does. `interiorPoleVerdict` only answers for a proven pole,
+              // so a correct closed form is never lost this way.
               isIndefinite = false;
               expr =
                 pole.sign === 'positive'
                   ? ce.PositiveInfinity
                   : pole.sign === 'negative'
                     ? ce.NegativeInfinity
-                    : ce.function('Integrate', [
-                        expr,
-                        ce.function('Limits', [
-                          ce.symbol(variable),
+                    : pole.sign === 'mixed'
+                      ? noValueIntegral(
+                          ce,
+                          withAssignedValues(ce, integrand, [variable]),
                           lower,
-                          upper,
-                        ]),
-                      ]);
+                          upper
+                        )
+                      : ce.function('Integrate', [
+                          expr,
+                          ce.function('Limits', [
+                            ce.symbol(variable),
+                            lower,
+                            upper,
+                          ]),
+                        ]);
+            } else if (
+              symbolicPoleMayBeInside(
+                withAssignedValues(ce, integrand, [variable]),
+                variable,
+                lower,
+                upper,
+                ce,
+                ranges
+              )
+            ) {
+              // The integrand may have a pole between the bounds, at a point
+              // whose position depends on a symbol with no value: `(y − a)⁻²`
+              // over `[0, 4]` has its pole inside for `0 ≤ a ≤ 4`, where the
+              // integral is `+∞`, but the antiderivative difference
+              // `−1/a − 1/(4 − a)` is finite. The integral stays
+              // unevaluated, unless the declared type of the symbol or an
+              // assumption proves the pole outside the bounds (`a > 4`). The
+              // integration variable of an enclosing integral is examined
+              // over its range: the inner integral of
+              // `∫₀¹⁰ ∫₃⁴ (y − x)⁻² dx dy` stays unevaluated (the pole `x = y`
+              // is in `[3, 4]` for some `y`), so the outer one does too, while
+              // `∫₅¹⁰ ∫₃⁴ (y − x)⁻² dx dy` is evaluated.
+              isIndefinite = false;
+              expr = ce.function('Integrate', [
+                expr,
+                ce.function('Limits', [ce.symbol(variable), lower, upper]),
+              ]);
             } else {
               // The antiderivative was found in closed form. Apply the bounds
               // via `EvaluateAt`, which also supports symbolic bounds
@@ -3294,11 +4159,52 @@ volumes
                 );
                 if (viaLimit !== undefined) raw = viaLimit;
               }
+              // A pole AT a finite bound: the antiderivative is not finite
+              // there (`−1/t` at `0` gives `~∞`), so the difference has no
+              // sign. The integral is the one-sided limit from inside the
+              // interval, which diverges with the sign of the integrand next
+              // to the bound (`∫₀¹ t⁻² dt` is `+∞`). Poles at both bounds with
+              // different signs give an integral with no value:
+              // `Indeterminate`, or `NaN` with a float operand, as for an
+              // interior pole that changes sign (see `noValueIntegral`). The
+              // check
+              // runs only when the antiderivative difference is not finite:
+              // it alone cannot tell an integrable singularity of order
+              // close to 1 (`t^(−0.95)`) from a pole (see
+              // `endpointPoleVerdict`).
+              let noValue: Expression | undefined;
+              if (raw.isNaN === true || raw.isInfinity === true) {
+                const integrandValue = withAssignedValues(ce, integrand, [
+                  variable,
+                ]);
+                const endpoint = endpointPoleVerdict(
+                  integrandValue,
+                  variable,
+                  lower,
+                  upper,
+                  ce
+                );
+                if (endpoint?.sign === 'mixed')
+                  noValue = noValueIntegral(ce, integrandValue, lower, upper);
+                else if (endpoint !== undefined)
+                  raw = poleVerdictValue(ce, endpoint);
+                // A complex infinity (`~∞`) is not the value of the integral
+                // of a real integrand over a real interval: that integral is
+                // a real number, `+∞`, `−∞`, or has no value. Without a
+                // verdict, the integral stays unevaluated (`NaN` makes it
+                // inert below).
+                else if (
+                  raw.isSame(ce.ComplexInfinity) &&
+                  isRealOnInterval(integrandValue, variable, lower, upper, ce)
+                )
+                  raw = ce.NaN;
+              }
               // A NaN result is an unresolved indeterminate, not a leak-free
               // value — fail closed (inert) rather than leak the NaN.
               const resolved =
                 raw.isNaN === true ? null : resolveEndpointLeaks(raw, ce);
-              if (resolved !== null && isSymbol(resolved.guard, 'True')) {
+              if (noValue !== undefined) expr = noValue;
+              else if (resolved !== null && isSymbol(resolved.guard, 'True')) {
                 // Leak-free: keep the original evaluation path's RESULT. `raw`
                 // IS `at.evaluate({numericApproximation})`, so returning it is
                 // value-identical to re-evaluating `at` — but skips a second
@@ -3357,20 +4263,46 @@ volumes
       // to a live one. See `docs/RANDOMNESS-MODEL.md` §6.
       readsRandomFrame: true,
       lazy: true,
-      signature: '(function, limits:(tuple|symbol)?) -> number',
+      signature: '(function, lower:number, upper:number) -> number',
       canonical: (ops, { engine }) => {
         const [body, lower, upper] = ops;
         const fn = canonicalFunctionLiteral(body);
-        // @todo: normalizeIndexingSet() ?
         if (!fn) return null;
-        if (!lower || !upper) return null;
-        return engine._fn('NIntegrate', [fn, lower.canonical, upper.canonical]);
+        // The two bounds are numbers. A `Tuple` of bounds
+        // (`NIntegrate(f, (0, 2))`) or a missing bound is an error operand,
+        // not an expression that stays unevaluated. A multiple integral is
+        // written `Integrate(f, Limits(x, …), Limits(y, …)).N()`.
+        return engine._fn('NIntegrate', [
+          fn,
+          checkType(engine, lower, 'number'),
+          checkType(engine, upper, 'number'),
+        ]);
       },
       evaluate: ([f, a, b], { engine }) => {
         // Uses compiled JS functions (machine arithmetic)
         const [lower, upper] = [a.N().re, b.N().re];
         if (isNaN(lower) || isNaN(upper)) return undefined;
-        const compiled = implicitCompile(engine, f);
+
+        // A pole strictly inside the bounds: the integral diverges, and the
+        // error estimate of the quadrature below cannot see a singularity
+        // that falls between its sample points, so the quadrature would
+        // report a finite value. `Integrate(…).N()` makes the same check,
+        // also before it compiles the integrand.
+        const pole = nIntegratePoleVerdict(engine, f, lower, upper);
+        if (pole !== undefined) return poleVerdictValue(engine, pole);
+
+        // A function given by its name (`Sin`) is wrapped in a one-parameter
+        // `Function` literal: compiled alone, the symbol compiles to a
+        // function that RETURNS the function, so every sample read `NaN`.
+        const name = isFunction(f, 'Function') ? undefined : sym(f);
+        const fn = name
+          ? engine.expr([
+              'Function',
+              [name, NINTEGRATE_VARIABLE],
+              NINTEGRATE_VARIABLE,
+            ])
+          : f;
+        const compiled = implicitCompile(engine, fn);
         // The integrand may be complex-valued: integrate its real part, and
         // its imaginary part too when a sample carried one (see
         // `numericIntegrandParts` and the `Integrate` numeric path).
@@ -3379,43 +4311,43 @@ volumes
           : (
               (app) => (x: number) =>
                 app([engine.number(x)])
-            )(applicable(f));
+            )(applicable(fn));
         const integrand = numericIntegrandParts(raw);
         // One stream for both passes (see the `Integrate` numeric path).
         const draw = engine._substream(mixTags(f.hash, a.hash, b.hash));
 
-        const estimate = (jsf: (x: number) => number): number => {
-          // Dedicated oscillatory quadrature for semi-infinite intervals (see
-          // the `Integrate` numeric path); null → fall back to Monte Carlo.
-          const aInf = !isFinite(lower);
-          const bInf = !isFinite(upper);
-          if (aInf !== bInf) {
-            const osc = bInf
-              ? integrateSemiInfiniteOscillatory(
-                  jsf,
-                  lower,
-                  engine._deadlineFrame
-                )
-              : integrateSemiInfiniteOscillatory(
-                  (t) => jsf(-t),
-                  -upper,
-                  engine._deadlineFrame
-                );
-            if (osc) return osc.estimate;
-          }
-          return monteCarloEstimate(
-            integrand.uncached(jsf),
+        // The same methods, in the same order, as `Integrate(…).N()`: the
+        // oscillatory quadrature on a semi-infinite interval, then adaptive
+        // Gauss–Kronrod, `NaN` for a divergent integral, and Monte Carlo only
+        // when the quadrature does not converge. The result is a plain number:
+        // the error estimate is dropped.
+        const integrate = (jsf: (x: number) => number) =>
+          integrateRealPart(engine, jsf, lower, upper, {
+            compiled: compiled?.success === true,
+            uncached: integrand.uncached,
+            draw,
+            nested: fn.has(['Integrate', 'NIntegrate']),
+          });
+
+        const re = integrate(integrand.re);
+        // A divergence found by the quadrature, with a pole AT a bound: the
+        // sign of the integrand next to that bound gives the sign of the
+        // divergence (see the `Integrate` numeric path).
+        if (re.divergent) {
+          const endpoint = nIntegratePoleVerdict(
+            engine,
+            f,
             lower,
             upper,
-            compiled?.success ? 1e7 : 1e4,
-            engine._deadlineFrame,
-            draw
-          ).estimate;
-        };
-
-        const re = estimate(integrand.re);
-        if (!integrand.sawImaginary()) return new BoxedNumber(engine, re);
-        return engine.number(engine.complex(re, estimate(integrand.im)));
+            endpointPoleVerdict
+          );
+          if (endpoint !== undefined) return poleVerdictValue(engine, endpoint);
+        }
+        if (!integrand.sawImaginary())
+          return new BoxedNumber(engine, re.estimate);
+        return engine.number(
+          engine.complex(re.estimate, integrate(integrand.im).estimate)
+        );
       },
     },
 

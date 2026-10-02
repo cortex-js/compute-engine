@@ -1213,20 +1213,33 @@ function whenCollectionHandlers(): CollectionHandlers {
         restrict: (elem) => ce._fn('When', [elem, cond]),
       };
     }
-    // A mask: zip it with the value, to the shorter length. The mask cells
-    // are read once per call of `parts`, not once per element.
+    // A mask: zip it with the value, to the shorter length. The mask (and
+    // the value) can be an infinite collection, such as `Range(1, ∞)`, which
+    // cannot be read in full. An in-order walk (the iterator) reads each
+    // cell once, from one iterator of the mask, and keeps it. A request
+    // that skips ahead of the cells read so far (a single `at(i)`) looks up
+    // that one cell with `at()` instead of reading and keeping `i` cells.
     const vn = v.count;
     const cn = cond.count;
     if (vn === undefined || cn === undefined) return undefined;
     const n = Math.min(vn, cn);
-    let mask: Expression[] | undefined;
+    const mask: Expression[] = [];
+    let cells: Iterator<Expression> | undefined;
     return {
       value: v,
       count: n,
       restrict: (elem, i) => {
         if (i < 1 || i > n) return undefined;
-        mask ??= Array.from(cond.each()) as Expression[];
-        const ci = mask[i - 1];
+        let ci: Expression | undefined;
+        if (i <= mask.length) ci = mask[i - 1];
+        else if (i === mask.length + 1) {
+          cells ??= cond.each()[Symbol.iterator]();
+          const next = cells.next();
+          if (!next.done) {
+            mask.push(next.value);
+            ci = next.value;
+          }
+        } else ci = cond.at(i);
         return ci === undefined ? undefined : ce._fn('When', [elem, ci]);
       },
     };

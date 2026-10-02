@@ -570,6 +570,28 @@ Digamma function, the logarithmic derivative of the gamma function
 // ➔ [Digamma(1),-0.577215664901532860607]
 ```
 
+### dirichletBeta
+
+MathJSON `DirichletBeta` · `(complex | infinity) -> number`
+
+Dirichlet beta function β(s) = Σ_&#123;n≥0&#125; (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1.
+
+```epsil
+[dirichletBeta(1), dirichletBeta(3), N(dirichletBeta(1/2))]
+// ➔ [1/4 * pi,1/32 * pi^3,0.667691457189609176659]
+```
+
+### dirichletEta
+
+MathJSON `DirichletEta` · `(complex | infinity) -> number`
+
+Dirichlet eta function η(s) = Σ_&#123;n≥1&#125; (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1.
+
+```epsil
+[dirichletEta(2), dirichletEta(1), N(dirichletEta(1/2))]
+// ➔ [1/12 * pi^2,ln(2),0.604898643421630370247]
+```
+
 ### distance
 
 MathJSON `Distance` · `(list<list<number>> | list<number> | list<tuple> | tuple, list<list<number>> | list<number> | list<tuple> | tuple) -> number`

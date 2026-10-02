@@ -1,6 +1,5 @@
 import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
+import { TEST_PYTHON } from './test-python';
 
 import { ComputeEngine, compile } from '../../src/compute-engine';
 
@@ -290,12 +289,9 @@ describe('THE GPU COMPLEX POWER AT ZERO', () => {
     });
 });
 
-// The repo's Python virtual environment, when present. The value checks are
-// skipped without it.
-const PYTHON = [
-  path.join(__dirname, '..', '..', 'venv', 'bin', 'python3'),
-  path.join(process.cwd(), 'venv', 'bin', 'python3'),
-].find((p) => fs.existsSync(p));
+// The Python of `CE_PYTHON` or of the repo's virtual environment, when
+// present (`test-python.ts`). The value checks are skipped without it.
+const PYTHON = TEST_PYTHON;
 
 /** Run the Python compilation `r` with the variable bindings `setup`, and
  * return its value as `[re, im]`. */
@@ -370,10 +366,11 @@ describe('PYTHON: THE OPERANDS OF A COMPLEX PRODUCT AND POWER', () => {
 });
 
 describe('PYTHON: SPECIAL FUNCTIONS OF A COMPLEX ARGUMENT', () => {
-  // `scipy.special.loggamma`, `np.arctanh` and `np.arcsinh` take a different
-  // branch than the interpreter, so a complex operand of `GammaLn`, `Artanh`
-  // and `Arsinh` takes the run-time realness rule: the real lowering on the
-  // real part when the imaginary part is exactly zero, NaN otherwise.
+  // `scipy.special.loggamma` takes a different branch than the interpreter,
+  // so a complex operand of `GammaLn` takes the run-time realness rule: the
+  // real lowering on the real part when the imaginary part is exactly zero,
+  // and an error otherwise. `Artanh` and `Arsinh` take `cmath`, with the
+  // interpreter's side of each branch cut (`pyInverseTrig`).
   function engine(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
@@ -381,7 +378,7 @@ describe('PYTHON: SPECIAL FUNCTIONS OF A COMPLEX ARGUMENT', () => {
     return ce;
   }
   const Z = ['Add', 'x', ['Multiply', 'y', 'ImaginaryUnit']];
-  for (const head of ['GammaLn', 'Artanh', 'Arsinh'])
+  for (const head of ['GammaLn'])
     it(`${head}(x + iy) takes the run-time realness rule`, () => {
       const r = compile(engine().box([head, Z]), {
         to: 'python',
@@ -397,7 +394,16 @@ describe('PYTHON: SPECIAL FUNCTIONS OF A COMPLEX ARGUMENT', () => {
     for (const y of [0, 1e-9, -1e-9, 1, -1]) POINTS.push([x, y]);
   for (const y of [2, -2, 0.5, -0.5])
     for (const x of [0, 1e-9, -1e-9]) POINTS.push([x, y]);
-  for (const head of ['Erf', 'Erfc', 'Arcosh', 'Lb', 'Log2', 'Log10'])
+  for (const head of [
+    'Erf',
+    'Erfc',
+    'Arcosh',
+    'Artanh',
+    'Arsinh',
+    'Lb',
+    'Log2',
+    'Log10',
+  ])
     (PYTHON === undefined ? it.skip : it)(`${head}(x + iy) agrees with the interpreter`, () => {
       const ce = engine();
       const expr = ce.box([head, Z]);

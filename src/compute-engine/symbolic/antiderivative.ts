@@ -970,13 +970,21 @@ const INTEGRATION_RULES: Rule[] = [
     condition: (sub) => filter(sub) && isSymbol(sub._x),
   },
 
-  // \ln(ax + b) -> (ax + b) \ln(ax + b) - ax - b
+  // \ln(ax + b) -> \frac{(ax + b) \ln(ax + b)}{a} - x
   {
     match: ['Ln', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Subtract',
-      ['Multiply', ['Add', ['Multiply', '_a', '_x'], '__b'], ['Ln', '_x']],
-      ['Subtract', ['Multiply', '_a', '_x'], '__b'],
+      [
+        'Divide',
+        [
+          'Multiply',
+          ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Ln', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ],
+        '_a',
+      ],
+      '_x',
     ],
     condition: filter,
   },

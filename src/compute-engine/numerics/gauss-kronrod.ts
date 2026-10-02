@@ -20,6 +20,10 @@ import {
   withAmbientDeadline,
   type DeadlineFrame,
 } from '../../common/interruptible.js';
+import {
+  resolveSingularEndpoints,
+  type GaussKronrodOutcome,
+} from './endpoint-quadrature.js';
 
 // GK15 abscissae on [-1, 1], positive half only (symmetric about 0).
 // XGK[1], XGK[3], XGK[5] are the non-central abscissae of the 7-point Gauss
@@ -256,8 +260,55 @@ const SHELL_BLOCK = 20;
  * BOTH read as non-divergent — their block ratios are `1 − B/n` and `1 − 2B/n`
  * at refinement depth `n`, i.e. both approach 1 from below and neither reaches
  * 0.99 inside the panel budget.
+ *
+ * A slowly varying factor can push the ratio of a CONVERGENT integral above
+ * this threshold for a while: `x^(−0.95)·ln x` sheds blocks in the ratio
+ * `2^(−1)·(m + 20)/m` at depth `m`, which is `1.28` at the first comparison and
+ * falls toward `0.5` only as the depth grows. So a ratio above the threshold
+ * is not enough: the ratio must also have stopped falling, or must stay above
+ * the threshold when its fall is extrapolated (see `shellsDiverge`).
  */
 const SHELL_DECAY = 0.99;
+
+/**
+ * The largest relative fall of the block ratio from one shell to the next
+ * that is still read as "the ratio has stopped falling".
+ *
+ * For a pole of order 1 or more the ratio is constant (`1/x`, `1/x²`) or
+ * approaches its limit geometrically (`tan x` at `π/2`, where the shells are
+ * `ln 2 + O(4^(−k))`), so it is flat to much better than this. With a
+ * logarithmic factor `lnᵠx` the ratio falls by about `20·q/m²` per shell at
+ * depth `m`: more than this bound until `m ≈ 300·√q`, by which point the
+ * ratio of an integrand `x^(−p)·lnᵠx` with `p < 0.995` is below
+ * `SHELL_DECAY`.
+ */
+const SHELL_TREND_FLAT = 2e-4;
+
+/**
+ * The largest quotient of two successive falls of the logarithm of the block
+ * ratio that is read as a GEOMETRIC fall.
+ *
+ * A pole with a large regular part (`1/(1 − x) − 100` at `x = 1`) has shells
+ * `ln 2 − 100·w` for a shell of width `w`, so its block ratio approaches 1
+ * from above, and the fall halves from one shell to the next. A logarithmic
+ * factor gives falls in the quotient `(m/(m + 1))²` at depth `m`, about 0.93
+ * at the first comparison and closer to 1 after. A geometric fall has the
+ * limit `ln r − d·γ/(1 − γ)` for the last fall `d` and the quotient `γ`.
+ */
+const SHELL_GEOMETRIC_FALL = 0.6;
+
+/**
+ * The margin, in halvings, added to the depth that `shellsDiverge` assumes
+ * when it extrapolates a falling ratio.
+ *
+ * The extrapolation assumes the fall comes from a factor `ln(1/x)ᵠ`, whose
+ * contribution to the logarithm of the ratio is `c/m` at depth `m`, where `m`
+ * counts halvings from a distance of 1 to the endpoint. A logarithm with a
+ * different scale (`ln(x/1000)`) shifts `m`. Assuming a DEEPER `m` than the
+ * true one makes the extrapolated limit LOWER than the true one, so the
+ * margin only delays a diagnosis of divergence; it never makes one.
+ */
+const SHELL_DEPTH_MARGIN = 2 * SHELL_BLOCK;
 
 /**
  * The smallest `|Σ shells| / Σ|shells|` a block must have for its sum to mean
@@ -268,6 +319,128 @@ const SHELL_DECAY = 0.99;
  * scores ~1 here.
  */
 const SHELL_COHERENCE = 0.5;
+
+/**
+ * The smallest number of shells in each half of a short corner series that
+ * `tailUnresolved` compares. With fewer, the corner was bisected only a few
+ * times, which a bounded integrand can also need.
+ */
+const SHORT_TAIL_BLOCK = 8;
+
+/** The smallest width of a shell, in spacings of the doubles at the
+ * endpoint, that `tailUnresolved` compares in a short corner series. */
+const SHORT_TAIL_SPACINGS = 2 ** 8;
+
+/** Signed sum and total magnitude of the block of shells from `from`. */
+function blockSum(
+  shells: number[],
+  from: number
+): [sum: number, magnitude: number] {
+  let sum = 0;
+  let magnitude = 0;
+  for (let i = from; i < from + SHELL_BLOCK; i++) {
+    sum += shells[i];
+    magnitude += Math.abs(shells[i]);
+  }
+  return [sum, magnitude];
+}
+
+/**
+ * The ratio of the block of shells that ends at shell `end` (excluded) to the
+ * block before it, or `undefined` when the comparison is not available.
+ */
+function blockRatio(shells: number[], end: number): number | undefined {
+  if (end - 2 * SHELL_BLOCK < 0) return undefined;
+  const [recent, recentMag] = blockSum(shells, end - SHELL_BLOCK);
+  const [prior, priorMag] = blockSum(shells, end - 2 * SHELL_BLOCK);
+
+  // A non-finite block is not evidence either way: a deep enough shell makes
+  // ANY integrand with an unbounded endpoint overflow, convergent or not
+  // (`x^(−0.99)` reaches `1e320` at denormal `x`), so the comparison is
+  // simply unavailable.
+  if (!Number.isFinite(recent) || !Number.isFinite(prior) || prior === 0)
+    return undefined;
+
+  // Both block sums must be sums, not cancellation residues.
+  if (
+    Math.abs(recent) < SHELL_COHERENCE * recentMag ||
+    Math.abs(prior) < SHELL_COHERENCE * priorMag
+  )
+    return undefined;
+  return recent / prior;
+}
+
+/**
+ * Whether the refinement toward an endpoint stopped before it could tell a
+ * convergent tail from a divergent one: at some point the block ratio of the
+ * shells was at least `SHELL_DECAY` (with a block that carries more than the
+ * tolerance), and `shellsDiverge` deferred the decision because the ratio was
+ * still falling.
+ *
+ * This happens next to a NONZERO endpoint, where the corner panel reaches the
+ * spacing of the floating-point numbers after about 48 bisections, and the
+ * loop stops on `roundoffStop`: the falling ratio can belong to `(1 − x)^(−0.95)·ln(1 − x)` (convergent, but
+ * the part of the tail closer to 1 than the spacing holds almost half of the
+ * integral) or to `1/(1 − x) − 10⁴` (divergent).
+ */
+function tailUnresolved(
+  shells: number[],
+  tolerance: number,
+  width: number,
+  endpoint: number
+): boolean {
+  // A corner that was bisected more than `3·SHELL_BLOCK` times had room for
+  // `shellsDiverge` to follow the fall of the ratio (an endpoint at 0 allows
+  // about 1000 bisections), so its decision stands.
+  if (shells.length > 3 * SHELL_BLOCK) return false;
+  // Next to a bound of large magnitude, the corner panel reaches the spacing
+  // of the doubles before `2·SHELL_BLOCK` bisections (about 29 next to
+  // `10⁶`), so no block ratio is available. The two halves of the shells
+  // are compared instead: `1/(x − 10⁶)` on `[10⁶, 10⁶ + 1]` (divergent) has
+  // shells of `ln 2` each, and the quadrature gave `22.7 ± 0.58` for it.
+  // The shells narrower than `SHORT_TAIL_SPACINGS` spacings of the doubles
+  // at the endpoint are left out: their nodes are rounded to the doubles
+  // (the last two of the 29 shells next to `10⁶` are `0.708` and `0.5`).
+  if (shells.length < 2 * SHELL_BLOCK) {
+    const spacing = Math.max(
+      Math.abs(endpoint) * Number.EPSILON,
+      Number.MIN_VALUE
+    );
+    let n = shells.length;
+    while (n > 0 && width / 2 ** n < SHORT_TAIL_SPACINGS * spacing) n--;
+    const half = Math.floor(n / 2);
+    if (half < SHORT_TAIL_BLOCK) return false;
+    let recent = 0;
+    let recentMagnitude = 0;
+    let prior = 0;
+    let priorMagnitude = 0;
+    for (let i = 0; i < half; i++) {
+      const p = shells[n - 2 * half + i];
+      const r = shells[n - half + i];
+      prior += p;
+      priorMagnitude += Math.abs(p);
+      recent += r;
+      recentMagnitude += Math.abs(r);
+    }
+    if (!Number.isFinite(recent) || !Number.isFinite(prior) || prior === 0)
+      return false;
+    // The sums of shells that change sign are cancellation residues (see
+    // `SHELL_COHERENCE`).
+    if (
+      Math.abs(recent) < SHELL_COHERENCE * recentMagnitude ||
+      Math.abs(prior) < SHELL_COHERENCE * priorMagnitude
+    )
+      return false;
+    return Math.abs(recent) > tolerance && recent / prior >= SHELL_DECAY;
+  }
+  for (let end = 2 * SHELL_BLOCK; end <= shells.length; end++) {
+    if (!(Math.abs(blockSum(shells, end - SHELL_BLOCK)[0]) > tolerance))
+      continue;
+    const ratio = blockRatio(shells, end);
+    if (ratio !== undefined && ratio >= SHELL_DECAY) return true;
+  }
+  return false;
+}
 
 /**
  * Whether a corner-shell sequence is the signature of a DIVERGENT endpoint.
@@ -294,44 +467,62 @@ const SHELL_COHERENCE = 0.5;
  * The sums are SIGNED, so a conditionally convergent oscillatory tail (whose
  * shells do not shrink but do cancel) is not misread as divergent, and a
  * negatively divergent integral (`−1/x`) still shows a ratio of 1.
+ *
+ * A ratio of at least `SHELL_DECAY` is not enough when the ratio is still
+ * falling: `x^(−0.95)·ln x` (convergent, `∫₀¹ = −400`) shows `1.28` at the
+ * first comparison. So the ratio is also computed one and two shells
+ * earlier. A ratio that has stopped falling means divergence; a falling one
+ * means divergence only when its extrapolated limit is at least
+ * `SHELL_DECAY` (see `SHELL_GEOMETRIC_FALL` and `SHELL_DEPTH_MARGIN`). `depth` is the number of halvings from a distance of 1 to the
+ * endpoint at the first shell, plus `SHELL_DEPTH_MARGIN`; the extrapolation
+ * reads the depth of a shell as its index plus `depth`.
  */
-function shellsDiverge(shells: number[], tolerance: number): boolean {
+function shellsDiverge(
+  shells: number[],
+  tolerance: number,
+  depth: number
+): boolean {
   const n = shells.length;
-  if (n < 2 * SHELL_BLOCK) return false;
-
-  // Signed sum and total magnitude of one block of shells.
-  const block = (from: number): [sum: number, magnitude: number] => {
-    let sum = 0;
-    let magnitude = 0;
-    for (let i = from; i < from + SHELL_BLOCK; i++) {
-      sum += shells[i];
-      magnitude += Math.abs(shells[i]);
-    }
-    return [sum, magnitude];
-  };
-
-  const [recent, recentMag] = block(n - SHELL_BLOCK);
-  const [prior, priorMag] = block(n - 2 * SHELL_BLOCK);
-
-  // A non-finite block is not evidence either way: a deep enough shell makes
-  // ANY integrand with an unbounded endpoint overflow, convergent or not
-  // (`x^(−0.99)` reaches `1e320` at denormal `x`), so the comparison is simply
-  // unavailable.
-  if (!Number.isFinite(recent) || !Number.isFinite(prior) || prior === 0)
-    return false;
+  if (n < 2 * SHELL_BLOCK + 2) return false;
+  const ratioAt = (end: number) => blockRatio(shells, end);
 
   // A non-shrinking tail below the requested tolerance cannot change the
   // answer; only a tail that actually carries mass is a divergence.
-  if (!(Math.abs(recent) > tolerance)) return false;
-
-  // Both block sums must be sums, not cancellation residues.
-  if (
-    Math.abs(recent) < SHELL_COHERENCE * recentMag ||
-    Math.abs(prior) < SHELL_COHERENCE * priorMag
-  )
+  if (!(Math.abs(blockSum(shells, n - SHELL_BLOCK)[0]) > tolerance))
     return false;
 
-  return recent / prior >= SHELL_DECAY;
+  // The ratio at the last three shells. Successive ratios share all but one
+  // shell of each block, so the comparisons need only `2·SHELL_BLOCK + 2`
+  // shells: next to a NONZERO endpoint `x₀` the corner panel can be bisected
+  // only about 48 times before its width reaches the spacing of the
+  // floating-point numbers near `x₀` (the loop then stops on `roundoffStop`).
+  const last = ratioAt(n);
+  const before = ratioAt(n - 1);
+  const first = ratioAt(n - 2);
+  if (last === undefined || before === undefined || first === undefined)
+    return false;
+  if (!(last >= SHELL_DECAY) || !(before > 0) || !(first > 0)) return false;
+
+  // The ratio has stopped falling: a pole of order 1 or more.
+  if (last >= before * (1 - SHELL_TREND_FLAT)) return true;
+
+  // The ratio is still falling: extrapolate its limit. The integral diverges
+  // only when the limit ratio is still at least `SHELL_DECAY`.
+  const fall = Math.log(before) - Math.log(last);
+  const previousFall = Math.log(first) - Math.log(before);
+  let limit: number;
+  if (previousFall > 0 && fall / previousFall <= SHELL_GEOMETRIC_FALL) {
+    // A geometric fall (see `SHELL_GEOMETRIC_FALL`).
+    const q = fall / previousFall;
+    limit = Math.log(last) - (fall * q) / (1 - q);
+  } else {
+    // A logarithmic factor: model the logarithm of the ratio as `L + c/m` at
+    // depth `m` (see `SHELL_DEPTH_MARGIN`), and solve for `L` from the last
+    // two ratios.
+    const m = n - SHELL_BLOCK + depth;
+    limit = m * Math.log(last) - (m - 1) * Math.log(before);
+  }
+  return limit >= Math.log(SHELL_DECAY);
 }
 
 /**
@@ -346,12 +537,7 @@ function adaptiveFinite(
   maxIntervals: number,
   initialPanels: number,
   deadline: number | DeadlineFrame | undefined
-): {
-  estimate: number;
-  error: number;
-  converged: boolean;
-  divergent: boolean;
-} {
+): GaussKronrodOutcome {
   const panels: Panel[] = [];
 
   // Incremental accumulators. A non-finite panel contribution must NOT enter
@@ -362,18 +548,27 @@ function adaptiveFinite(
   // gates convergence until every one has been subdivided away.
   let totalValue = 0;
   let totalError = 0;
+  // The sum of the magnitudes of the panel values, for the absolute
+  // tolerance (see `tolerance` below).
+  let totalMagnitude = 0;
   let badPanels = 0;
   let roundoffStop = false;
   let divergent = false;
 
   // Fold a panel into the running totals, skipping non-finite contributions.
   const addPanel = (p: Panel) => {
-    if (Number.isFinite(p.value)) totalValue += p.value;
+    if (Number.isFinite(p.value)) {
+      totalValue += p.value;
+      totalMagnitude += Math.abs(p.value);
+    }
     if (Number.isFinite(p.error)) totalError += p.error;
     if (panelIsBad(p)) badPanels += 1;
   };
   const removePanel = (p: Panel) => {
-    if (Number.isFinite(p.value)) totalValue -= p.value;
+    if (Number.isFinite(p.value)) {
+      totalValue -= p.value;
+      totalMagnitude -= Math.abs(p.value);
+    }
     if (Number.isFinite(p.error)) totalError -= p.error;
     if (panelIsBad(p)) badPanels -= 1;
   };
@@ -419,8 +614,32 @@ function adaptiveFinite(
   let cornerHi = panels[panels.length - 1];
   const shellsLo: number[] = [];
   const shellsHi: number[] = [];
+  const shellErrorsLo: number[] = [];
+  const shellErrorsHi: number[] = [];
+  // The depth of the first shell of each corner, for `shellsDiverge`: the
+  // number of halvings from a distance of 1 to the endpoint (0 for a corner
+  // panel wider than 1), plus a margin.
+  const depthOf = (p: Panel) =>
+    Math.max(0, Math.log2(1 / (p.b - p.a))) + SHELL_DEPTH_MARGIN;
+  const depthLo = depthOf(cornerLo);
+  const depthHi = depthOf(cornerHi);
+  const widthLo = cornerLo.b - cornerLo.a;
+  const widthHi = cornerHi.b - cornerHi.a;
+  const regionLo = cornerLo.b;
+  const regionHi = cornerHi.a;
 
-  const tolerance = () => Math.max(atol, rtol * Math.abs(totalValue));
+  // The absolute tolerance `atol` is scaled down for an integrand whose
+  // values are small: `rtol` times the sum of the magnitudes of the panel
+  // values when that is smaller. With a fixed `atol = 1e-12`, the integral
+  // of `x^(−0.999)·10⁻³⁰⁰` on `[0, 1]` (`10⁻²⁹⁷`) was "converged" at
+  // `9.76e-300 ± 8.1e-300`. The scale is the sum of the magnitudes, not the
+  // magnitude of the sum: an integral of `0` (`sin x` over a period) keeps
+  // the absolute tolerance.
+  const tolerance = () =>
+    Math.max(
+      Math.min(atol, rtol * Math.max(totalMagnitude, 0)),
+      rtol * Math.abs(totalValue)
+    );
 
   // True when no panel is finite.
   const allPanelsBad = () => badPanels === panels.length;
@@ -499,10 +718,12 @@ function adaptiveFinite(
     if (iv === cornerLo) {
       cornerLo = left;
       shellsLo.push(right.value);
+      shellErrorsLo.push(right.error);
     }
     if (iv === cornerHi) {
       cornerHi = right;
       shellsHi.push(left.value);
+      shellErrorsHi.push(left.error);
     }
     // Stop as soon as the corner series is diagnosed: continuing only spends
     // the rest of the panel budget bisecting toward a singularity, which is
@@ -510,11 +731,61 @@ function adaptiveFinite(
     // denormal arguments — the point where the shed values overflow and the
     // diagnosis is no longer available.
     const tol = tolerance();
-    if (shellsDiverge(shellsLo, tol) || shellsDiverge(shellsHi, tol)) {
+    if (
+      shellsDiverge(shellsLo, tol, depthLo) ||
+      shellsDiverge(shellsHi, tol, depthHi)
+    ) {
       divergent = true;
       break;
     }
   }
+
+  // The refinement stopped on the floating-point spacing while the tail at an
+  // endpoint was not shown to shrink (see `tailUnresolved`). The estimate is
+  // then the sum of a truncated tail that may be far from the value, or the
+  // integral may diverge. `adaptiveQuadrature` reports it as divergent, so
+  // that no finite value is given for it, unless the extrapolation of the
+  // shells finds the value of the tail (`resolveSingularEndpoints`).
+  const unresolved =
+    roundoffStop &&
+    !divergent &&
+    (tailUnresolved(shellsLo, tolerance(), widthLo, a) ||
+      tailUnresolved(shellsHi, tolerance(), widthHi, b));
+  // The value and the error of the panels inside each starting corner
+  // panel, which the extrapolation of its shells replaces. Non-finite panels
+  // are left out, as in the totals.
+  let insideValueLo = 0;
+  let insideErrorLo = 0;
+  let insideValueHi = 0;
+  let insideErrorHi = 0;
+  for (const p of panels) {
+    if (panelIsBad(p)) continue;
+    if (p.b <= regionLo) {
+      insideValueLo += p.value;
+      insideErrorLo += p.error;
+    } else if (p.a >= regionHi) {
+      insideValueHi += p.value;
+      insideErrorHi += p.error;
+    }
+  }
+  const corners = {
+    lo: {
+      shells: shellsLo,
+      shellErrors: shellErrorsLo,
+      value: insideValueLo,
+      error: insideErrorLo,
+      width: widthLo,
+      endpoint: a,
+    },
+    hi: {
+      shells: shellsHi,
+      shellErrors: shellErrorsHi,
+      value: insideValueHi,
+      error: insideErrorHi,
+      width: widthHi,
+      endpoint: b,
+    },
+  };
 
   // No panel has a finite value, so the totals (which skip bad panels) hold
   // 0, and 0 is not the value of the integral. Report NaN, the same result
@@ -525,17 +796,69 @@ function adaptiveFinite(
   // singularities at the node of each starting panel also gives NaN,
   // because no finite value is known.
   if (allPanelsBad())
-    return { estimate: NaN, error: NaN, converged: false, divergent: false };
+    return {
+      estimate: NaN,
+      error: NaN,
+      converged: false,
+      divergent: false,
+      unresolved: false,
+      magnitude: 0,
+      ...corners,
+    };
 
   const converged =
     !divergent &&
+    !unresolved &&
     !roundoffStop &&
     badPanels === 0 &&
     Number.isFinite(totalValue) &&
     Number.isFinite(totalError) &&
     totalError <= tolerance();
 
-  return { estimate: totalValue, error: totalError, converged, divergent };
+  // A bad panel has a non-finite value, which the totals skip. When a bad
+  // panel that does not touch an endpoint is left, `totalError` is not a
+  // bound of the error, and the error is `+∞`: a caller must not keep the
+  // estimate as accurate (`quadratureBeatsMonteCarlo`). The outer integral
+  // of `∫₀^10 ∫₃^4 (y − x)⁻² dx dy`, whose inner integral has no value for
+  // `y` in `[3, 4]`, gave `2.703 ± 2.2e-9` from the panels outside
+  // `[3, 4]`. A bad panel next to an endpoint (at a distance of at most
+  // `2⁻³⁰·(b − a)`) is not counted: there, an integrable singularity can
+  // overflow at the nodes of the narrowest shells (`1/(x·ln x·ln²(−ln x))`
+  // is `±∞` at a denormal `x`), and the tail is examined by the endpoint
+  // tests (`shellsDiverge`, `tailUnresolved`) and by the extrapolation of
+  // the shells (`resolveSingularEndpoints`).
+  const corner = (b - a) * 2 ** -30;
+  const valueMissing =
+    badPanels > 0 &&
+    panels.some((p) => panelIsBad(p) && p.a - a > corner && b - p.b > corner);
+  return {
+    estimate: totalValue,
+    error: valueMissing ? Number.POSITIVE_INFINITY : totalError,
+    converged,
+    divergent,
+    unresolved,
+    magnitude: Math.max(totalMagnitude, 0),
+    ...corners,
+  };
+}
+
+/**
+ * The number of `adaptiveQuadrature` calls on the call stack. The quadrature
+ * is synchronous, so module state is safe here, as for `activeIntegrals` in
+ * `compilation/javascript-target.ts`.
+ */
+let activeQuadratures = 0;
+
+/**
+ * Whether an `adaptiveQuadrature` call is running: an integral computed now
+ * is the integrand of an enclosing integral, and is computed once at each
+ * node of the enclosing quadrature. The compiled `_SYS.integrate` uses it to
+ * skip its Monte-Carlo fallback (1e7 samples at each node) when the
+ * enclosing integral is computed by the interpreter, which its own count of
+ * activations does not see.
+ */
+export function insideQuadrature(): boolean {
+  return activeQuadratures > 0;
 }
 
 /**
@@ -552,7 +875,9 @@ function adaptiveFinite(
  * Returns the `estimate`, an error `error` bound, whether the requested
  * tolerance was met (`converged`), and whether the integral was found to
  * DIVERGE (`divergent` — the shells shed by refinement toward an endpoint stop
- * shrinking, see `shellsDiverge`). A `divergent` result has no finite value:
+ * shrinking, see `shellsDiverge`, or the refinement reached the floating-point
+ * spacing at an endpoint before the shells were shown to shrink, see
+ * `tailUnresolved`). A `divergent` result has no finite value:
  * `estimate` is whatever the panel budget happened to accumulate before it ran
  * out, and callers must not report it (nor hand the integrand to a sampler,
  * which would launder the divergence into a plausible-looking number).
@@ -594,12 +919,28 @@ export function adaptiveQuadrature(
      * (`_SYS.integrate` has no engine access) stays bounded by the outer
      * `withTimeLimit` span. */
     deadline?: number | DeadlineFrame;
+    /** When `true`, a result next to a singular endpoint is corrected by
+     * the extrapolation of the shells of the corner panel and checked
+     * against the tanh-sinh rule (`resolveSingularEndpoints`,
+     * `endpoint-quadrature.ts`). The tanh-sinh rule uses at most
+     * `2·maxIntervals` evaluations. The default, `false`, keeps the
+     * Gauss–Kronrod result. */
+    singularEndpoints?: boolean;
   }
 ): {
   estimate: number;
   error: number;
   converged: boolean;
   divergent: boolean;
+  /** Set only with `singularEndpoints`: see `QuadratureResult` in
+   * `endpoint-quadrature.ts`. */
+  extrapolated?: boolean;
+  /** Set only with `singularEndpoints`: see `QuadratureResult` in
+   * `endpoint-quadrature.ts`. */
+  oscillates?: true;
+  /** Set only with `singularEndpoints`: see `QuadratureResult` in
+   * `endpoint-quadrature.ts`. */
+  singularCorner?: true;
 } {
   const rtol = options?.rtol ?? 1e-10;
   const atol = options?.atol ?? 1e-12;
@@ -620,12 +961,7 @@ export function adaptiveQuadrature(
 
   if (a > b) {
     const r = adaptiveQuadrature(f, b, a, { ...options, deadline });
-    return {
-      estimate: -r.estimate,
-      error: r.error,
-      converged: r.converged,
-      divergent: r.divergent,
-    };
+    return { ...r, estimate: -r.estimate };
   }
 
   // Here a < b. A non-finite bound is -∞ (for `a`) or +∞ (for `b`).
@@ -650,6 +986,7 @@ export function adaptiveQuadrature(
       maxIntervals: Math.ceil(maxIntervals / 2),
       initialPanels,
       deadline,
+      singularEndpoints: options?.singularEndpoints,
     };
     const left = adaptiveQuadrature(f, a, 0, halfOptions);
     const right = adaptiveQuadrature(f, 0, b, halfOptions);
@@ -674,6 +1011,26 @@ export function adaptiveQuadrature(
     // are integrals of the same sign structure over disjoint ranges, so a
     // divergent one cannot be cancelled by the other (∞ − ∞ is not a value).
     const divergent = left.divergent || right.divergent;
+    // A half that oscillates without a value makes the whole integral have no
+    // value, with no sign.
+    if (left.oscillates === true || right.oscillates === true)
+      return { estimate, error, converged, divergent, oscillates: true };
+    // The whole integral is extrapolated when each half converged or was
+    // extrapolated, and it did not converge.
+    const extrapolated =
+      !converged &&
+      (left.converged || left.extrapolated === true) &&
+      (right.converged || right.extrapolated === true);
+    if (extrapolated)
+      return { estimate, error, converged, divergent, extrapolated };
+    // A half with a singular corner that was not resolved makes the whole
+    // result one (see `QuadratureResult`, `endpoint-quadrature.ts`).
+    if (
+      !converged &&
+      !divergent &&
+      (left.singularCorner === true || right.singularCorner === true)
+    )
+      return { estimate, error, converged, divergent, singularCorner: true };
     return { estimate, error, converged, divergent };
   } else if (bInf) {
     // [a, ∞): x = a + t/(1 - t), t ∈ [0, 1). dx = 1/(1 - t)² dt.
@@ -701,7 +1058,36 @@ export function adaptiveQuadrature(
   // may itself be (or reach, through compiled code) another quadrature or
   // sampler, and the nested call inherits this deadline instead of running
   // unbounded (the item-183 nested-integral hang).
-  return withAmbientDeadline(deadline, () =>
-    adaptiveFinite(g, lo, hi, rtol, atol, maxIntervals, initialPanels, deadline)
-  );
+  // The count of running quadratures tells a nested one that it is nested
+  // (`insideQuadrature`).
+  activeQuadratures++;
+  try {
+    return withAmbientDeadline(deadline, () => {
+      const r = adaptiveFinite(
+        g,
+        lo,
+        hi,
+        rtol,
+        atol,
+        maxIntervals,
+        initialPanels,
+        deadline
+      );
+      if (options?.singularEndpoints === true)
+        return resolveSingularEndpoints(g, lo, hi, r, {
+          rtol,
+          atol,
+          maxEvaluations: 2 * maxIntervals,
+          deadline,
+        });
+      return {
+        estimate: r.estimate,
+        error: r.error,
+        converged: r.converged,
+        divergent: r.divergent || r.unresolved,
+      };
+    });
+  } finally {
+    activeQuadratures--;
+  }
 }

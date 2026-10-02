@@ -16,6 +16,7 @@ import {
   checkNumericArgs,
   absentableCollectionOperandValue,
   absentScalarMarker,
+  checkArity,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
   listCoordinateTupleOperandError,
@@ -87,7 +88,8 @@ import {
   polygammaComplex,
   complexDivide,
 } from '../numerics/numeric-complex.js';
-import { lerchPhiComplex } from '../numerics/lerch-phi.js';
+import { lerchPhiComplex, DIRICHLET_NEAR_POLE } from '../numerics/lerch-phi.js';
+import { logGammaComplex } from '../numerics/log-gamma.js';
 import { EULERIAN_MAX_ORDER } from '../numerics/polylog.js';
 import {
   factorial2 as bigFactorial2,
@@ -97,6 +99,7 @@ import {
 import { factorial as bigFactorial } from '../numerics/numeric-bigint.js';
 import {
   zetaEvenCoefficient,
+  eulerEvenNumber,
   zetaNegativeInteger,
   hurwitzZetaNegativeInteger,
   generalizedZetaNegativeInteger,
@@ -122,6 +125,8 @@ import {
   bigPolygamma,
   bigBeta,
   bigZeta,
+  bigDirichletEta,
+  bigDirichletBeta,
   bigHurwitzZeta,
   bigDecimalQuotient,
   bigZetaGeneralized,
@@ -167,11 +172,13 @@ import {
   evaluateBigOpTerm,
   evaluateBigOpTermAsync,
   canonicalBigop,
+  canonicalFlatIndexingSets,
   reduceBigOp,
   NON_ENUMERABLE_DOMAIN,
   NON_ENUMERABLE_BOUNDS,
   bigOpBoundsError,
   classifyBigopDomain,
+  hasOneSidedLimits,
   DEGENERATE_CAPTURE_UNSAFE,
   degenerateBigOpTerm,
   symbolicSumClosedForm,
@@ -2298,7 +2305,7 @@ function literalPredicateType(
  * it, the direction without one gets `Indeterminate`; ruling recorded in
  * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F batch 8).
  */
-function infiniteGammaFamilyValue(
+export function infiniteGammaFamilyValue(
   x: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
@@ -2673,6 +2680,12 @@ function threadOperandsThatBecameConditional(
 }
 
 /**
+ * Precision of the Gamma-family and L-function heads (LogGamma, BarnesG,
+ * DirichletEta/Beta/L, StieltjesGamma, ClausenCl): a real result carries
+ * `ce.precision` digits or the head stays unevaluated, never a double
+ * printed at a higher precision; a complex result is a machine number, as
+ * for the native complex special functions, boxed here.
+ *
  * Box a machine complex result, dropping a near-zero imaginary part to real.
  * With `real` set, the caller has proven the value is real (real operands
  * on a real branch), so the imaginary part is rounding residue of any size
@@ -2680,7 +2693,7 @@ function threadOperandsThatBecameConditional(
  * number, and far left of 0 that leaves an imaginary part of relative size
  * about 5e-14, above the relative-noise threshold below.
  */
-function boxComplexResult(
+export function boxComplexResult(
   engine: ComputeEngine,
   z: { re: number; im: number },
   real = false
@@ -2694,6 +2707,149 @@ function boxComplexResult(
   const re = Math.abs(z.re) <= noise ? 0 : z.re;
   const im = Math.abs(z.im) <= noise ? 0 : z.im;
   return engine.number(engine._inexactNumericValue(im === 0 ? re : { re, im }));
+}
+
+/** ln of the largest double and of the smallest normal double (2⁻¹⁰²²). */
+const LN_MAX_DOUBLE = Math.log(Number.MAX_VALUE);
+const LN_MIN_NORMAL_DOUBLE = -1022 * Math.LN2;
+
+/**
+ * The value exp(w) of a function whose logarithm w was computed in doubles
+ * (ln Γ, ln G), when exp(w) is not a normal double: in doubles it would
+ * underflow to an exact-looking `0` (G(0.5 + 30i) ≈ 1.5·10⁻³⁶² + 2.5·10⁻³⁶²i)
+ * or overflow to a value that reads as a pole (Γ(200.5 + 0.5i) ≈ 5.6·10³⁷³).
+ * It is boxed as exp(Re w)·(cos Im w + i sin Im w), with the modulus a big
+ * decimal. Undefined when exp(w) is in the double range (the caller boxes the
+ * double), when w is not finite, and at machine precision, where the engine
+ * has no number that holds the value. `null` when exp(Re w) is past the
+ * exponent range of a big decimal too (a decimal exponent beyond about
+ * ±9·10¹⁵, where its `exp` saturates to infinity or 0): the caller leaves
+ * the expression unevaluated. An underflow cannot be `0` (it would read as
+ * an exact zero), and an overflow cannot be `+oo`, since a complex value
+ * that is too large has a direction that no infinity of the engine holds.
+ *
+ * The digits kept are the ones the double w gives: an absolute error in w is
+ * a relative error in exp(w), and that error grows with the size of the
+ * terms that sum to w, so about ε·(1 + |w|) (measured against mpmath for
+ * ln G: 1·10⁻¹³ at 0.5 + 30i, 5·10⁻¹² at 150 + i). That many digits, at
+ * most 15, are correct relative to the MODULUS, so each part is rounded at
+ * the same decimal position: a part 10⁻ᵏ times the modulus keeps k fewer
+ * significant digits, and a part below 10^−digits of the modulus is
+ * rounding noise and is dropped.
+ */
+export function boxExpOfComplexLog(
+  engine: ComputeEngine,
+  w: Complex
+): Expression | null | undefined {
+  if (!bignumPreferred(engine)) return undefined;
+  const { re: a, im: b } = w;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return undefined;
+  if (a > LN_MIN_NORMAL_DOUBLE && a < LN_MAX_DOUBLE) return undefined;
+  const error = Number.EPSILON * (1 + Math.hypot(a, b));
+  const digits = Math.max(1, Math.min(15, Math.floor(-Math.log10(error))));
+  const modulus = new BigDecimal(a).exp();
+  if (modulus.isZero() || !modulus.isFinite()) return null;
+  // The error is relative to the modulus, so each part is rounded at the
+  // decimal position of the last correct digit of the modulus: a part
+  // 10⁻⁵ times the modulus keeps `digits` − 5 significant digits, and a
+  // part with none (below 10^−digits of the modulus) is noise.
+  const leadingExponent = (d: BigDecimal) =>
+    d.exponent +
+    (d.significand < 0n ? -d.significand : d.significand).toString().length -
+    1;
+  const modulusExponent = leadingExponent(modulus);
+  const part = (x: number) => {
+    if (x === 0) return 0;
+    const value = modulus.mul(new BigDecimal(x));
+    const partDigits = digits + leadingExponent(value) - modulusExponent;
+    return partDigits < 1 ? 0 : value.toPrecision(partDigits);
+  };
+  return engine.number(
+    engine._inexactNumericValue({
+      re: part(Math.cos(b)),
+      im: part(Math.sin(b)),
+    })
+  );
+}
+
+/**
+ * Γ(x + 1) for a real number literal x, the float value of `x!` (a
+ * non-integer, or an integer past the exact digit cap): with `bigGamma` to
+ * `ce.precision` digits when the engine works above machine precision, as
+ * `Gamma` does (so `200.5!` ≈ 1.1174·10³⁷⁶ is not a double overflow to
+ * `+oo`, and `(-200.5)!` ≈ 5.64·10⁻³⁷⁴ is not a double underflow to `0`),
+ * and in doubles otherwise.
+ */
+function gammaOfRealShifted(x: Expression): Expression | undefined {
+  const ce = x.engine;
+  return gammaInRange(
+    ce,
+    apply(
+      x,
+      (v) => gamma(1 + v),
+      (v) => bigGamma(ce, v.add(1))
+    ) ?? ce.number(gamma(1 + x.re))
+  );
+}
+
+/**
+ * A value of Γ computed above machine precision, or undefined when it is 0.
+ * Γ has no zeros, so a 0 means the value underflowed past the exponent
+ * range of a big decimal (a decimal exponent below about −9·10¹⁵, where its
+ * `exp` saturates to 0): `Γ(-10^15 - 0.5)` would print as an exact-looking
+ * `0`, so the expression stays unevaluated. An overflow past that range is
+ * kept as `+oo`, as a double overflow is: it reads as "too large", which is
+ * true (`Gamma(1e300).N()`, `Gamma(10^15 + 0.5).N()`). At machine precision
+ * the double's `0` is kept, as for every machine number.
+ */
+function gammaInRange(
+  ce: ComputeEngine,
+  value: Expression | undefined
+): Expression | undefined {
+  if (
+    value !== undefined &&
+    bignumPreferred(ce) &&
+    isNumber(value) &&
+    value.isSame(0)
+  )
+    return undefined;
+  return value;
+}
+
+/**
+ * n!! for an integer n ≥ 0 from Γ, to the working precision
+ * (`BigDecimal.precision`): n!! = 2^(n/2)·Γ(n/2 + 1) for an even n, and
+ * 2^((n+1)/2)·Γ(n/2 + 1)/√π for an odd n (both give 1!! = 1, 3!! = 3,
+ * 4!! = 8). For an n too large for the exact product. Ten guard digits
+ * cover the rounding of the power of 2 and of the products.
+ */
+function bigFactorial2FromGamma(ce: ComputeEngine, n: number): BigDecimal {
+  const digits = BigDecimal.precision;
+  BigDecimal.precision = digits + 10;
+  try {
+    const g = bigGamma(ce, new BigDecimal(n).div(2).add(1));
+    const value =
+      n % 2 === 0
+        ? g.mul(BigDecimal.TWO.pow(n / 2))
+        : g.mul(BigDecimal.TWO.pow((n + 1) / 2)).div(BigDecimal.PI.sqrt());
+    return value.toPrecision(digits);
+  } finally {
+    BigDecimal.precision = digits;
+  }
+}
+
+/**
+ * Γ(z) for a complex z: the double from `gammaComplex`, or, where that
+ * double underflows or overflows, exp(ln Γ(z)) with a big-decimal modulus
+ * (`boxExpOfComplexLog`).
+ */
+function gammaOfComplex(
+  engine: ComputeEngine,
+  z: Complex
+): Expression | undefined {
+  const big = boxExpOfComplexLog(engine, logGammaComplex(z));
+  if (big === null) return undefined;
+  return big ?? engine.number(gammaComplex(z));
 }
 
 /**
@@ -3423,6 +3579,207 @@ function evaluateLerchPhi(
     z.re < 1 &&
     (a.re >= 0 || Number.isInteger(s.re));
   return boxComplexResult(engine, result, real);
+}
+
+/**
+ * Largest |n| for which `DirichletEta(n)` and `DirichletBeta(n)` build their
+ * exact closed form (a rational times a power of π, a Bernoulli or Euler
+ * number): the numbers grow like n!, and past the limit the exact answer is
+ * unreadable. Beyond it `.N()` still evaluates; the exact form stays symbolic.
+ */
+const DIRICHLET_EXACT_ORDER_LIMIT = 100;
+
+/** The integer value of a real number literal, or `null`. */
+function dirichletInteger(s: Expression): number | null {
+  // `asSmallInteger` reads the exact value: 1 + 10^−30 projects to the double 1.
+  const n = asSmallInteger(s);
+  return n !== null && Math.abs(n) <= DIRICHLET_EXACT_ORDER_LIMIT ? n : null;
+}
+
+/**
+ * The real operand as a big decimal, at `ce.precision` digits. An exact
+ * rational is divided exactly: its double projection is wrong for
+ * 1 + 10^−30, and `bignumRe` is absent for a rational.
+ */
+export function bigRealOperand(engine: ComputeEngine, s: Expression): BigNum {
+  const operand = hurwitzOperand(engine, s);
+  return operand instanceof BigDecimal
+    ? operand
+    : new BigDecimal(operand[0]).div(new BigDecimal(operand[1]));
+}
+
+/** A double-kernel value as a machine number, as `boxComplexResult` boxes it. */
+function machineNumberOrUndefined(expr: Expression): Expression | undefined {
+  if (!isFiniteNumberLiteral(expr)) return undefined;
+  return boxComplexResult(
+    expr.engine,
+    { re: expr.re, im: expr.im },
+    !expr.isComplex
+  );
+}
+
+/**
+ * Evaluate DirichletEta(s) = Σ_{n≥1} (−1)^{n−1} n^{−s} = (1 − 2^{1−s}) ζ(s),
+ * an entire function: η(1) = ln 2 (the pole of ζ cancels), η(0) = 1/2, and
+ * at the even integers a rational multiple of a power of π.
+ *
+ * Real s runs on the arbitrary-precision kernel `bigDirichletEta`, which
+ * adds the digits that the cancellation near s = 1 costs. A complex s, or a
+ * precision at most the machine's, uses the double kernels; within
+ * `DIRICHLET_NEAR_POLE` of s = 1 there the alternating series is summed as
+ * Φ(−1, s, 1), which has no pole to cancel.
+ */
+function evaluateDirichletEta(
+  engine: ComputeEngine,
+  s: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const point = isNumber(s) ? infinitePoint(s) : undefined;
+  if (point === '+oo') return engine.One;
+  // No limit at −∞ or ~oo, as for ζ: the indeterminate form.
+  if (point !== undefined) return indeterminateFormAnswer(engine, [s]);
+  if (!isFiniteNumberLiteral(s)) return undefined;
+  const numeric = shouldNumericize(numericApproximation, s);
+  const finish = (e: Expression) => (numeric ? e.N() : e.evaluate());
+
+  const n = dirichletInteger(s);
+  if (n === 1) return finish(engine.function('Ln', [engine.number(2)]));
+  // (1 − 2^{1−n}) ζ(n): ζ's closed forms at the even and nonpositive integers,
+  // and the odd ones stay (1 − 2^{1−n}) ζ(n) with ζ(n) symbolic.
+  if (n !== null) {
+    const value = engine
+      .function('Multiply', [
+        engine.function('Subtract', [
+          engine.One,
+          engine.function('Power', [engine.number(2), engine.number(1 - n)]),
+        ]),
+        engine.function('Zeta', [engine.number(n)]),
+      ])
+      .evaluate();
+    // A float operand gives a float, also where the value is an integer
+    // (η(−2.0) is the float 0).
+    return floatIfFloatOperand([s], numeric ? value.N() : value);
+  }
+  if (!numeric) return undefined;
+
+  // A real result carries `ce.precision` digits or the head stays unevaluated.
+  if (!s.isComplex && bignumPreferred(engine)) {
+    const big = bigDirichletEta(engine, bigRealOperand(engine, s));
+    return big === undefined ? undefined : boxBignumApprox(engine, big);
+  }
+
+  if (Math.hypot(s.re - 1, s.im) < DIRICHLET_NEAR_POLE)
+    return machineNumberOrUndefined(
+      engine
+        .function('LerchPhi', [engine.number(-1), s, engine.One])
+        .evaluate({ numericApproximation: true })
+    );
+  return machineNumberOrUndefined(
+    engine
+      .function('Multiply', [
+        engine.function('Subtract', [
+          engine.One,
+          engine.function('Power', [
+            engine.number(2),
+            engine.function('Subtract', [engine.One, s]),
+          ]),
+        ]),
+        engine.function('Zeta', [s]),
+      ])
+      .evaluate({ numericApproximation: true })
+  );
+}
+
+/**
+ * The exact β(n) at an integer n (Euler numbers E₂ₖ):
+ *   β(1) = π/4, β(2) = G (Catalan), β(0) = 1/2,
+ *   β(2k+1) = (−1)ᵏ E₂ₖ π^{2k+1} / (4^{k+1} (2k)!),
+ *   β(−2k) = E₂ₖ / 2, β(−(2k+1)) = 0.
+ * β at the even integers above 2 has no closed form. `undefined` there.
+ */
+function dirichletBetaInteger(
+  engine: ComputeEngine,
+  n: number
+): Expression | undefined {
+  if (n === 1) return engine.Pi.div(engine.number(4));
+  if (n === 2) return engine.symbol('CatalanConstant');
+  if (n > 2 && n % 2 === 1) {
+    const k = (n - 1) / 2;
+    let factorial = 1n;
+    for (let i = 2n; i <= BigInt(2 * k); i++) factorial *= i;
+    const euler = eulerEvenNumber(k) * (k % 2 === 0 ? 1n : -1n);
+    return engine
+      .number([euler, 4n ** BigInt(k + 1) * factorial])
+      .mul(engine.Pi.pow(n));
+  }
+  if (n <= 0 && n % 2 === 0)
+    return engine.number([eulerEvenNumber(-n / 2), 2n]);
+  if (n < 0) return engine.Zero;
+  return undefined;
+}
+
+/**
+ * Evaluate DirichletBeta(s) = Σ_{n≥0} (−1)ⁿ (2n+1)^{−s}
+ * = 4^{−s} (ζ(s, ¼) − ζ(s, ¾)), an entire function (the Dirichlet L-function
+ * of the odd character mod 4). Computed as `evaluateDirichletEta` is: real s
+ * on the arbitrary-precision Hurwitz kernel, complex s on the double one,
+ * and within `DIRICHLET_NEAR_POLE` of s = 1 the double route sums
+ * β(s) = 2^{−s} Φ(−1, s, ½).
+ */
+function evaluateDirichletBeta(
+  engine: ComputeEngine,
+  s: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const point = isNumber(s) ? infinitePoint(s) : undefined;
+  if (point === '+oo') return engine.One;
+  // No limit at −∞ or ~oo, as for ζ: the indeterminate form.
+  if (point !== undefined) return indeterminateFormAnswer(engine, [s]);
+  if (!isFiniteNumberLiteral(s)) return undefined;
+  const numeric = shouldNumericize(numericApproximation, s);
+
+  const n = dirichletInteger(s);
+  if (n !== null) {
+    const exact = dirichletBetaInteger(engine, n);
+    if (exact !== undefined)
+      return floatIfFloatOperand([s], numeric ? exact.N() : exact);
+  }
+  if (!numeric) return undefined;
+
+  // A real result carries `ce.precision` digits or the head stays unevaluated.
+  if (!s.isComplex && bignumPreferred(engine)) {
+    const big = bigDirichletBeta(engine, bigRealOperand(engine, s));
+    return big === undefined ? undefined : boxBignumApprox(engine, big);
+  }
+
+  const two = engine.number(2);
+  if (Math.hypot(s.re - 1, s.im) < DIRICHLET_NEAR_POLE)
+    return machineNumberOrUndefined(
+      engine
+        .function('Multiply', [
+          engine.function('Power', [two, engine.function('Negate', [s])]),
+          engine.function('LerchPhi', [
+            engine.number(-1),
+            s,
+            engine.number([1, 2]),
+          ]),
+        ])
+        .evaluate({ numericApproximation: true })
+    );
+  return machineNumberOrUndefined(
+    engine
+      .function('Multiply', [
+        engine.function('Power', [
+          engine.number(4),
+          engine.function('Negate', [s]),
+        ]),
+        engine.function('Subtract', [
+          engine.function('HurwitzZeta', [s, engine.number([1, 4])]),
+          engine.function('HurwitzZeta', [s, engine.number([3, 4])]),
+        ]),
+      ])
+      .evaluate({ numericApproximation: true })
+  );
 }
 
 /**
@@ -4299,7 +4656,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           : (x.isNegative && x.isInteger) || x.isExtendedReal === false
             ? 'unsigned'
             : undefined,
-      canonical: (args, { engine }) => engine._fn('Factorial', [args[0]]),
+      canonical: (args, { engine }) =>
+        engine._fn('Factorial', [...checkArity(engine, args, 1)]),
       evaluate: ([x], { numericApproximation }) => {
         const ce = x.engine;
 
@@ -4325,8 +4683,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Is the argument a complex number? `isComplex` decides, but the
         // kernel reads the double `im`: the complex-esm kernels are doubles by
         // nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
+        // An exact complex argument stays symbolic under `evaluate()`, as
+        // for `Gamma`: the value is a float.
         if (x.isComplex && x.im !== undefined)
-          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
+          return shouldNumericize(numericApproximation, x)
+            ? gammaOfComplex(ce, ce.complex(x.re, x.im).add(1))
+            : undefined;
 
         // The argument is real...
         if (!x.isFinite) return undefined;
@@ -4335,21 +4697,32 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // factorial of a negative integer is the (unsigned) complex infinity.
         if (x.isNegative) {
           if (x.isInteger) return ce.ComplexInfinity;
-          return ce.number(gamma(1 + x.re));
+          return shouldNumericize(numericApproximation, x)
+            ? gammaOfRealShifted(x)
+            : undefined;
         }
         // A positive *non-integer* real is `Γ(x+1)`, not the rounded-integer
-        // factorial — `Factorial(2.5)` is Γ(3.5) ≈ 3.323, not `2`.
-        if (!x.isInteger) return ce.number(gamma(1 + x.re));
+        // factorial — `Factorial(2.5)` is Γ(3.5) ≈ 3.323, not `2`. An EXACT
+        // non-integer (`5/2`, `√2`) stays symbolic under `evaluate()`, as
+        // `Gamma` does for the same argument (`Gamma(7/2)` has no closed
+        // form here); the float is the answer of `.N()` or of a float
+        // operand only.
+        if (!x.isInteger)
+          return shouldNumericize(numericApproximation, x)
+            ? gammaOfRealShifted(x)
+            : undefined;
         // An integer whose factorial has more digits than the exact cap
         // stays symbolic on the exact route (the value is a perfectly good
-        // integer the machine cannot hold) and overflows to `+oo` under
-        // `numericApproximation`, the float reading of Γ(x+1) there.
+        // integer the machine cannot hold). Under `numericApproximation` it
+        // is the float Γ(x+1): a big decimal to `ce.precision` digits above
+        // machine precision (`Factorial(10^6).N()` ≈ 8.2639·10⁵⁵⁶⁵⁷⁰⁸), and
+        // `+oo` at machine precision, where a double cannot hold it.
         // A float argument with an integer value gives a float: `2.0!` is
         // the float `2`, and above the exact cap the float reading of Γ(x+1).
         const float = !x.isExact;
         if (estimatedFactorialDigits(x.re) > MAX_EXACT_FACTORIAL_DIGITS)
           return numericApproximation || float
-            ? ce.number(gamma(1 + x.re))
+            ? gammaOfRealShifted(x)
             : undefined;
         try {
           const result = ce.number(
@@ -4383,8 +4756,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Is the argument a complex number? `isComplex` decides, but the
         // kernel reads the double `im`: the complex-esm kernels are doubles by
         // nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
+        // An exact complex argument stays symbolic under `evaluate()`, as
+        // for `Gamma`: the value is a float.
         if (x.isComplex && x.im !== undefined)
-          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
+          return shouldNumericize(numericApproximation, x)
+            ? gammaOfComplex(ce, ce.complex(x.re, x.im).add(1))
+            : undefined;
 
         // The argument is real...
         if (!x.isFinite) return undefined;
@@ -4393,16 +4770,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // factorial of a negative integer is the (unsigned) complex infinity.
         if (x.isNegative) {
           if (x.isInteger) return ce.ComplexInfinity;
-          return ce.number(gamma(1 + x.re));
+          return shouldNumericize(numericApproximation, x)
+            ? gammaOfRealShifted(x)
+            : undefined;
         }
-        // A positive non-integer real is `Γ(x+1)`, not the rounded factorial.
-        if (!x.isInteger) return ce.number(gamma(1 + x.re));
+        // A positive non-integer real is `Γ(x+1)`, not the rounded factorial;
+        // an exact one stays symbolic under `evaluate()` (see above).
+        if (!x.isInteger)
+          return shouldNumericize(numericApproximation, x)
+            ? gammaOfRealShifted(x)
+            : undefined;
         // Above the exact digit cap, and a float argument — see the
         // synchronous handler above.
         const float = !x.isExact;
         if (estimatedFactorialDigits(x.re) > MAX_EXACT_FACTORIAL_DIGITS)
           return numericApproximation || float
-            ? ce.number(gamma(1 + x.re))
+            ? gammaOfRealShifted(x)
             : undefined;
 
         try {
@@ -4503,17 +4886,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `n!!` has about half the digits of `n!`. Above the exact digit
         // cap the bignum loop below (one step per two integers up to `n`,
         // the operand growing at every step) is impractical, so the value
-        // stays symbolic on the exact route and overflows to `+oo` under
-        // `numericApproximation` — the `Factorial` convention. The cap
-        // asks only for a non-negative `n`: the digit estimate is
+        // stays symbolic on the exact route. Under `numericApproximation`
+        // it is a float, as for `Factorial`: from Γ to `ce.precision`
+        // digits above machine precision (`bigFactorial2FromGamma`), and
+        // `+oo` at machine precision, where a double cannot hold it. The
+        // cap asks only for a non-negative `n`: the digit estimate is
         // `Infinity` for a negative one, whose kernels answer NaN below.
         if (
           n >= 0 &&
           estimatedFactorialDigits(n) / 2 > MAX_EXACT_FACTORIAL_DIGITS
-        )
-          return numericApproximation || hasFloatOperand([x])
-            ? ce.number(factorial2(n))
-            : undefined;
+        ) {
+          if (!numericApproximation && !hasFloatOperand([x])) return undefined;
+          if (!bignumPreferred(ce)) return ce.number(factorial2(n));
+          return ce.number(ce._numericValue(bigFactorial2FromGamma(ce, n)));
+        }
         // The big-decimal product of integers is exact, so the result is an
         // exact integer at any magnitude (`ce.number()` of an integer-valued
         // big decimal), not a numeric result. A float argument with an
@@ -4767,12 +5153,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `numericApproximation` either.
         const infinite = infiniteGammaFamilyValue(x, engine);
         if (infinite !== undefined) return infinite;
+        // A complex value outside the double range is formed from ln Γ.
+        if (
+          isNumber(x) &&
+          x.isComplex &&
+          shouldNumericize(numericApproximation, x)
+        ) {
+          const big = boxExpOfComplexLog(
+            engine,
+            logGammaComplex(engine.complex(x.re, x.im))
+          );
+          if (big === null) return undefined;
+          if (big !== undefined) return big;
+        }
         return shouldNumericize(numericApproximation, x)
-          ? apply(
-              x,
-              (x) => gamma(x),
-              (x) => bigGamma(engine, x),
-              (x) => gammaComplex(x)
+          ? gammaInRange(
+              engine,
+              apply(
+                x,
+                (x) => gamma(x),
+                (x) => bigGamma(engine, x),
+                (x) => gammaComplex(x)
+              )
             )
           : undefined;
       },
@@ -4937,9 +5339,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const order = asSmallInteger(n);
         const special = polygammaValueAtExceptionalPoint(order, x, engine, n);
         if (special !== undefined) return special;
-        // The kernels implement the derivative orders only (n ≥ 0): a
-        // negative literal order is a capability gap, so the application
-        // stays symbolic instead of reporting the kernel's `NaN`.
+        // ψ⁽⁻¹⁾(z) = ln Γ(z), Wolfram's and mpmath's convention for the
+        // antiderivative of the digamma: the continuation `LogGamma`
+        // computes, not the principal `GammaLn`.
+        if (order === -1) {
+          const logGamma = engine.function('LogGamma', [x]);
+          return numericApproximation ? logGamma.N() : logGamma.evaluate();
+        }
+        // The kernels implement the derivative orders only (n ≥ 0): any
+        // other negative literal order is a capability gap, so the
+        // application stays symbolic instead of reporting the kernel's `NaN`.
         if (order !== null && order < 0) return undefined;
         if (!shouldNumericize(numericApproximation, n, x)) return undefined;
         const result = apply2(
@@ -5114,6 +5523,38 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           numericApproximation
         );
       },
+    },
+
+    // Dirichlet eta η(s) = Σ_{n≥1} (−1)^(n−1) n^(−s), entire. Wolfram's
+    // `DirichletEta`.
+    DirichletEta: {
+      description:
+        'Dirichlet eta function η(s) = Σ_{n≥1} (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1.',
+      complexity: 8500,
+      broadcastable: true,
+      signature: '(complex | infinity) -> number',
+      examples: ['[DirichletEta(2), DirichletEta(1), N(DirichletEta(1/2))]'],
+      nanBehavior: 'propagate',
+      evaluate: (ops, { numericApproximation, engine }) =>
+        ops.length === 1
+          ? evaluateDirichletEta(engine, ops[0], numericApproximation)
+          : undefined,
+    },
+
+    // Dirichlet beta β(s) = Σ_{n≥0} (−1)^n (2n+1)^(−s), entire. Wolfram's
+    // `DirichletBeta` (mpmath `dirichlet(s, [0, 1, 0, -1])`).
+    DirichletBeta: {
+      description:
+        'Dirichlet beta function β(s) = Σ_{n≥0} (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1.',
+      complexity: 8500,
+      broadcastable: true,
+      signature: '(complex | infinity) -> number',
+      examples: ['[DirichletBeta(1), DirichletBeta(3), N(DirichletBeta(1/2))]'],
+      nanBehavior: 'propagate',
+      evaluate: (ops, { numericApproximation, engine }) =>
+        ops.length === 1
+          ? evaluateDirichletBeta(engine, ops[0], numericApproximation)
+          : undefined,
     },
 
     // Lerch transcendent Φ(z,s,a) = Σ_{k=0}^∞ zᵏ(k+a)^{-s} (Wolfram's
@@ -5788,7 +6229,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Lb(8), N(Lb(3))]'],
       sgn: ([x]) => lnSign(x),
-      canonical: ([x], { engine }) => engine._fn('Log', [x, engine.number(2)]),
+      canonical: (ops, { engine }) => {
+        const [x, ...rest] = checkArity(engine, ops, 1);
+        return engine._fn('Log', [x, engine.number(2), ...rest]);
+      },
     },
 
     Lg: {
@@ -5799,7 +6243,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Lg(100), N(Lg(2))]'],
       sgn: ([x]) => lnSign(x),
-      canonical: ([x], { engine }) => engine._fn('Log', [x]),
+      canonical: (ops, { engine }) => {
+        // An extra operand stays after the base 10, so that it is not read
+        // as the base.
+        const [x, ...rest] = checkArity(engine, ops, 1);
+        return engine._fn(
+          'Log',
+          rest.length === 0 ? [x] : [x, engine.number(10), ...rest]
+        );
+      },
     },
 
     Log10: {
@@ -5809,7 +6261,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Log10(1000), N(Log10(2))]'],
       sgn: ([x]) => lnSign(x),
-      canonical: ([x], { engine }) => engine._fn('Log', [x]),
+      canonical: (ops, { engine }) => {
+        // An extra operand stays after the base 10, so that it is not read
+        // as the base.
+        const [x, ...rest] = checkArity(engine, ops, 1);
+        return engine._fn(
+          'Log',
+          rest.length === 0 ? [x] : [x, engine.number(10), ...rest]
+        );
+      },
     },
 
     Log2: {
@@ -5819,7 +6279,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Log2(32), N(Log2(3))]'],
       sgn: ([x]) => lnSign(x),
-      canonical: ([x], { engine }) => engine._fn('Log', [x, engine.number(2)]),
+      canonical: (ops, { engine }) => {
+        const [x, ...rest] = checkArity(engine, ops, 1);
+        return engine._fn('Log', [x, engine.number(2), ...rest]);
+      },
     },
 
     Mod: {
@@ -9359,7 +9822,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // body and threw; the operand is reported missing, as for `Mean()`.
         body === undefined
           ? ce._fn('Product', [ce.error('missing')])
-          : canonicalBigop('Product', body, bounds, scope),
+          : canonicalBigop(
+              'Product',
+              body,
+              canonicalFlatIndexingSets(ce, bounds),
+              scope
+            ),
 
       evaluate: (ops, options) => {
         const ce = options.engine;
@@ -9375,6 +9843,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // the truncated numeric path); free bounds/body are never enumerable.
         const numeric = options.numericApproximation;
         const bounds = ops.slice(1);
+        // A limit with only one bound has no value: see `hasOneSidedLimits`.
+        if (hasOneSidedLimits(bounds)) return undefined;
         const mode = classifyBigopDomain(ops[0], bounds, ce);
         if (mode === 'absent') return ce.NaN;
         if (mode === 'symbolic') {
@@ -9476,6 +9946,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // closed forms and the accelerated infinite product evaluate terms
         // synchronously, so for such a body they are declined.
         const asyncTerms = hasAsyncOnlyApplication(ops[0]);
+        // A limit with only one bound has no value: see `hasOneSidedLimits`.
+        if (hasOneSidedLimits(bounds)) return undefined;
         {
           const mode = classifyBigopDomain(ops[0], bounds, ce);
           if (mode === 'absent') return ce.NaN;
@@ -9624,7 +10096,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const canon = body.canonical;
           if (canon.isCollection) return ce._fn('Sum', [canon]);
         }
-        return canonicalBigop('Sum', body, bounds, scope);
+        return canonicalBigop(
+          'Sum',
+          body,
+          canonicalFlatIndexingSets(ce, bounds),
+          scope
+        );
       },
 
       evaluate: (
@@ -9690,6 +10167,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // or a body with free variables beyond the index are never
         // enumerable, under either mode.
         const numeric = numericApproximation;
+        // A limit with only one bound has no value: see `hasOneSidedLimits`.
+        if (hasOneSidedLimits(rest)) return undefined;
         const mode = classifyBigopDomain(first, rest, engine);
         if (mode === 'absent') return engine.NaN;
         if (mode === 'symbolic') {
@@ -9837,6 +10316,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Per-term asynchronous evaluation for a body holding an
         // asynchronous-only application — see the `Product` handler.
         const asyncTerms = hasAsyncOnlyApplication(first);
+        // A limit with only one bound has no value: see `hasOneSidedLimits`.
+        if (hasOneSidedLimits(rest)) return undefined;
         {
           const mode = classifyBigopDomain(first, rest, engine);
           if (mode === 'absent') return engine.NaN;

@@ -1,42 +1,42 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
   "sliceEntries": 1648,
-  "emitted": 1434,
+  "emitted": 1426,
   "ledger": {
-    "box-error": 1,
+    "box-error": 10,
     "compat-signature": 3,
     "curated-exclude": 4,
     "duplicate-undirected": 15,
     "guard-uncompilable": 69,
     "lhs-not-value-form": 85,
-    "no-fire": 27,
+    "no-fire": 20,
     "not-equation": 8,
-    "unorientable": 1,
+    "unorientable": 7,
     "wildcard-loss": 1
   },
   "byPurpose": {
-    "expand": 77,
-    "simplify": 1349,
+    "expand": 76,
+    "simplify": 1342,
     "transform": 8
   },
   "byClass": {
-    "identity": 1089,
-    "specific-value": 345
+    "identity": 1084,
+    "specific-value": 342
   },
   "byTarget": {
-    "simplify": 1434
+    "simplify": 1426
   },
   "sampleKinds": {
     "numeric": 111,
-    "symbolic": 1323
+    "symbolic": 1315
   },
   "headBuckets": {
     "Multiply": 298,
     "Add": 239,
     "Divide": 99,
-    "Apply": 64,
+    "Apply": 63,
     "JacobiTheta": 52,
-    "Which": 46,
+    "Which": 45,
     "CarlsonRJ": 35,
     "CarlsonRF": 24,
     "GCD": 24,
@@ -59,9 +59,9 @@
     "DedekindEta": 12,
     "Sqrt": 12,
     "ChebyshevT": 11,
-    "Map": 11,
     "ModularLambda": 11,
     "LambertW": 10,
+    "Map": 10,
     "Conjugate": 9,
     "Argument": 8,
     "ChebyshevU": 8,
@@ -81,7 +81,6 @@
     "Tuple": 6,
     "BarnesG": 5,
     "Binomial": 5,
-    "DirichletL": 5,
     "Ln": 5,
     "MultiZetaValue": 5,
     "FallingFactorial": 4,
@@ -130,7 +129,7 @@
     "WeierstrassSigma": 1,
     "WeierstrassZeta": 1
   },
-  "declaredShells": 91,
+  "declaredShells": 86,
   "injected": [
     "zeta-trivial-zeros"
   ],
@@ -185,8 +184,8 @@
     },
     {
       "id": "07731b",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "reason": "unorientable",
+      "detail": "canonical match collapses to 0"
     },
     {
       "id": "07a654",
@@ -295,8 +294,8 @@
     },
     {
       "id": "27ca8d",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "reason": "unorientable",
+      "detail": "canonical match collapses to 1"
     },
     {
       "id": "2806fd",
@@ -320,8 +319,8 @@
     },
     {
       "id": "2a48bd",
-      "reason": "no-fire",
-      "detail": "no seed satisfying the guards"
+      "reason": "box-error",
+      "detail": "invalid lhs: DirichletCharacter(\"q_1\" * \"q_2\", \"ell\", Error(\"missing\"))"
     },
     {
       "id": "2ac5eb",
@@ -369,8 +368,13 @@
     },
     {
       "id": "31b0df",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "reason": "unorientable",
+      "detail": "canonical match collapses to -1"
+    },
+    {
+      "id": "3b8c97",
+      "reason": "box-error",
+      "detail": "invalid lhs: DirichletL(1, DirichletCharacter(4, 3, Error(\"missing\")), Error(\"missing\"))"
     },
     {
       "id": "3d276b",
@@ -411,6 +415,11 @@
       "id": "47cf5d",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "47d430",
+      "reason": "box-error",
+      "detail": "invalid rhs: Map((\"ell\") => DirichletCharacter(q, \"ell\", Error(\"missing\")), Filter(Range(1, max(q, 2) - 1), (\"ell\") => gcd(\"ell\", q) == 1))"
     },
     {
       "id": "487e35",
@@ -784,8 +793,8 @@
     },
     {
       "id": "9a944c",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "reason": "unorientable",
+      "detail": "canonical match collapses to \"ExponentialE\""
     },
     {
       "id": "9d66de",
@@ -808,9 +817,14 @@
       "detail": "unsupported conjunct \"Not\""
     },
     {
+      "id": "a07d28",
+      "reason": "box-error",
+      "detail": "invalid lhs: DirichletL(0, DirichletCharacter(q, 1, Error(\"missing\")), Error(\"missing\"))"
+    },
+    {
       "id": "a249f6",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "reason": "unorientable",
+      "detail": "canonical match collapses to \"_z\""
     },
     {
       "id": "a2af66",
@@ -841,6 +855,11 @@
       "id": "a8657e",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "a9337b",
+      "reason": "box-error",
+      "detail": "invalid lhs: DirichletL(s, DirichletCharacter(1, 1, Error(\"missing\")), Error(\"missing\"))"
     },
     {
       "id": "aa15f0",
@@ -958,6 +977,11 @@
       "detail": "Apply"
     },
     {
+      "id": "c9d117",
+      "reason": "box-error",
+      "detail": "invalid lhs: DirichletL(1, DirichletCharacter(5, 4, Error(\"missing\")), Error(\"missing\"))"
+    },
+    {
       "id": "cbf396",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -1023,6 +1047,11 @@
       "detail": "symbol"
     },
     {
+      "id": "d83109",
+      "reason": "box-error",
+      "detail": "invalid lhs: DirichletL(1, DirichletCharacter(3, 2, Error(\"missing\")), Error(\"missing\"))"
+    },
+    {
       "id": "d87f6e",
       "reason": "duplicate-undirected",
       "detail": "same equality as 296627"
@@ -1031,6 +1060,11 @@
       "id": "d967af",
       "reason": "duplicate-undirected",
       "detail": "same equality as b3c440"
+    },
+    {
+      "id": "d9a187",
+      "reason": "box-error",
+      "detail": "invalid lhs: Apply(DirichletCharacter(q, \"ell\", Error(\"missing\")), n)"
     },
     {
       "id": "dabb47",
@@ -1059,8 +1093,8 @@
     },
     {
       "id": "e0425a",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "reason": "unorientable",
+      "detail": "canonical match collapses to 1"
     },
     {
       "id": "e103e7",
@@ -1211,6 +1245,11 @@
       "id": "ff613a",
       "reason": "no-fire",
       "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "ff8254",
+      "reason": "box-error",
+      "detail": "invalid lhs: DirichletL(s, DirichletCharacter(2^n, 1, Error(\"missing\")), Error(\"missing\"))"
     }
   ]
 }

@@ -442,7 +442,6 @@ function broadcastPointNorm(
 
 import {
   chop,
-  ROUNDOFF_TOLERANCE,
   factorial,
   factorial2,
   realGcd as gcd,
@@ -531,7 +530,13 @@ import {
   gammaQ,
   betaRegularized,
 } from '../numerics/special-functions.js';
-import { lerchPhiReal } from '../numerics/lerch-phi.js';
+import {
+  lerchPhiReal,
+  dirichletEtaReal,
+  dirichletBetaReal,
+} from '../numerics/lerch-phi.js';
+import { stieltjesGammaReal } from '../numerics/stieltjes.js';
+import { clausen } from '../numerics/clausen.js';
 import { polylogOrderReal } from '../numerics/polylog.js';
 import {
   correlation,
@@ -551,12 +556,29 @@ import {
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { rangeCount } from '../numerics/range-count.js';
-import { scaledComplexDivide } from '../numerics/numeric-complex.js';
+import { chopKernelDust } from '../numeric-value/roundoff.js';
+import {
+  complexAcos,
+  complexAcosh,
+  complexAcot,
+  complexAcoth,
+  complexAcsc,
+  complexAcsch,
+  complexAsec,
+  complexAsech,
+  complexAsin,
+  complexAsinh,
+  complexAtan,
+  complexAtanh,
+  scaledComplexDivide,
+} from '../numerics/numeric-complex.js';
 import {
   adaptiveQuadrature,
   initialPanelsForDimensions,
   quadratureBeatsMonteCarlo,
+  insideQuadrature,
 } from '../numerics/gauss-kronrod.js';
+import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import {
   MAX_CHUNK_COUNT,
@@ -3343,6 +3365,10 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'PolyGamma',
   'LerchPhi',
   'PolyLog',
+  'DirichletEta',
+  'DirichletBeta',
+  'StieltjesGamma',
+  'ClausenCl',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of this target. */
@@ -3828,7 +3854,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `Math.asin(${compile(args[0])})`;
   },
-  Arsinh: 'Math.asinh',
+  Arsinh: (args, compile, target) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return complexUnary(target, '_SYS.casinh', compile(args[0]));
+    return `Math.asinh(${compile(args[0])})`;
+  },
   Arctan: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.catan', compile(args[0]));
@@ -7585,6 +7615,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.polyLog(${compile(args[0])}, ${compile(args[1])})`;
   },
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): η and β on the machine kernels,
+  // which sum the alternating series next to s = 1 as the interpreter does.
+  DirichletEta: '_SYS.dirichletEta',
+  DirichletBeta: '_SYS.dirichletBeta',
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.stieltjesGamma` is
+  // `stieltjesGammaReal`, which sums in double-double arithmetic for a > 0
+  // (the double sum cancels at a high order); NaN where the value is
+  // complex (a < 0, not an integer) or the order is past
+  // `STIELTJES_MAX_ORDER`.
+  StieltjesGamma: (args, compile) =>
+    args.length === 1
+      ? `_SYS.stieltjesGamma(${compile(args[0])})`
+      : `_SYS.stieltjesGamma(${compile(args[0])}, ${compile(args[1])})`,
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.clausen` is the interpreter's
+  // double-precision kernel, NaN where it declines.
+  ClausenCl: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        'Could not compile `ClausenCl`: it takes exactly two operands'
+      );
+    return `_SYS.clausen(${compile(args[0])}, ${compile(args[1])})`;
+  },
   LambertW: '_SYS.lambertW',
 
   // Bessel functions
@@ -8014,10 +8066,11 @@ JAVASCRIPT_FUNCTIONS.ApplyWhole = JAVASCRIPT_FUNCTIONS.Apply;
 
 /**
  * Convert a Complex instance produced by a TRANSCENDENTAL kernel (`csqrt`,
- * `cexp`, `casin`, …) to a plain `{re, im}` object, chopping each component
- * at the kernel-roundoff scale (`ROUNDOFF_TOLERANCE`, 1e-14) — exactly the
- * chop `apply.ts` applies to the interpreter's complex results, and for the
- * same reason: `Complex(0.5, 0).asin()` returns `im: 5.55e-17`, dust from
+ * `cexp`, `casin`, …) to a plain `{re, im}` object, setting to 0 a part that
+ * is not larger than `ROUNDOFF_TOLERANCE` (1e-14) and not larger than
+ * `ROUNDOFF_TOLERANCE` times the modulus of the result (`chopKernelDust()`,
+ * which says why each test alone removes a correct part). The chop is there
+ * for this reason: `Complex(0.5, 0).asin()` returns `im: 5.55e-17`, dust from
  * the complex log/sqrt formulation, and `Exp(Ln(-2))` leaves `im =
  * 2.449e-16`. The dust is removed WHERE IT IS CREATED so that the runner's
  * result convention can test `im !== 0` EXACTLY (a value whose imaginary
@@ -8028,10 +8081,7 @@ JAVASCRIPT_FUNCTIONS.ApplyWhole = JAVASCRIPT_FUNCTIONS.Apply;
  * `cconj`) do not go through this function.
  */
 function toRI(c: Complex): { re: number; im: number } {
-  return {
-    re: chop(c.re, ROUNDOFF_TOLERANCE),
-    im: chop(c.im, ROUNDOFF_TOLERANCE),
-  };
+  return chopKernelDust(c.re, c.im);
 }
 
 /**
@@ -12431,7 +12481,34 @@ const SYS_HELPERS = {
     if (!enterIntegral()) return NaN;
     try {
       const f = budgetedIntegrand(realFn(fn));
-      const r = adaptiveQuadrature(f, a, b, { initialPanels });
+      // A semi-infinite interval: a conditionally convergent oscillatory
+      // integrand (`∫₀^∞ sin x/√x`) is integrated lobe by lobe, as in the
+      // interpreter (`integrateRealPart`, library/calculus.ts). The adaptive
+      // quadrature gave `NaN` for `∫₀^∞ sin x/√x dx` and `2.5237` for
+      // `∫₀^∞ sin x/x^1.5 dx = √(2π) = 2.5066`. The routine returns `null` for
+      // an integrand that is not oscillatory or does not converge.
+      // Reversed bounds integrate over the ordered interval and negate.
+      if (Number.isFinite(a) !== Number.isFinite(b)) {
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        const osc = Number.isFinite(lo)
+          ? integrateSemiInfiniteOscillatory(f, lo)
+          : integrateSemiInfiniteOscillatory((t) => f(-t), -hi);
+        // An exhausted nested budget: see the same test below.
+        if (osc !== null)
+          return nestedEvalsLeft < 0
+            ? NaN
+            : a > b
+              ? -osc.estimate
+              : osc.estimate;
+      }
+      // `singularEndpoints`: a slowly integrable singularity at a bound is
+      // resolved by extrapolating the endpoint shells, as in the interpreter
+      // (`integrateRealPart`, library/calculus.ts).
+      const r = adaptiveQuadrature(f, a, b, {
+        initialPanels,
+        singularEndpoints: true,
+      });
       // A diagnosed divergence has no finite value, and sampling it would only
       // launder the divergence into a plausible-looking number.
       if (r.divergent) return NaN;
@@ -12441,7 +12518,25 @@ const SYS_HELPERS = {
       // through — the Monte-Carlo fallback would spend 1e7 samples on the same
       // exhausted integrand.
       if (nestedEvalsLeft < 0) return NaN;
-      if (r.converged || quadratureBeatsMonteCarlo(r, 10e6)) return r.estimate;
+      // Next to a singular corner that the quadrature could not resolve
+      // (`singularCorner`), the unconverged estimate is returned, as the
+      // interpreter does (`integrateRealPart`, library/calculus.ts): Monte
+      // Carlo is less accurate there (see `QuadratureResult`,
+      // numerics/endpoint-quadrature.ts).
+      if (
+        r.converged ||
+        r.extrapolated === true ||
+        r.singularCorner === true ||
+        quadratureBeatsMonteCarlo(r, 10e6)
+      )
+        return r.estimate;
+      // A nested integral (inside a compiled integral, `activeIntegrals > 1`,
+      // or inside a quadrature of the interpreter, `insideQuadrature()`) has
+      // no Monte-Carlo fallback: it would draw 1e7 samples at EACH node of
+      // the enclosing quadrature (minutes for `∫₀^10 ∫₃^4 (y − x)⁻² dx dy`,
+      // whose inner integral has no value for `y` in `[3, 4]`). The result
+      // did not converge and is not better than sampling: it has no value.
+      if (activeIntegrals > 1 || insideQuadrature()) return NaN;
       return monteCarloEstimate(f, a, b, 10e6, undefined, draw).estimate;
     } finally {
       activeIntegrals--;
@@ -12528,7 +12623,11 @@ const SYS_HELPERS = {
   hurwitzZeta,
   zetaGeneralized,
   lerchPhi: lerchPhiReal,
+  dirichletEta: dirichletEtaReal,
+  dirichletBeta: dirichletBetaReal,
   polyLog: polylogOrderReal,
+  stieltjesGamma: stieltjesGammaReal,
+  clausen,
   lambertW,
   besselJ,
   besselY,
@@ -12605,16 +12704,16 @@ const SYS_HELPERS = {
   csin: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sin()),
   ccos: (z: ComplexResult) => toRI(new Complex(z.re, z.im).cos()),
   ctan: (z: ComplexResult) => toRI(new Complex(z.re, z.im).tan()),
-  casin: (z: ComplexResult) => toRI(new Complex(z.re, z.im).asin()),
-  cacos: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acos()),
-  catan: (z: ComplexResult) => toRI(new Complex(z.re, z.im).atan()),
+  casin: (z: ComplexResult) => toRI(complexAsin(new Complex(z.re, z.im))),
+  cacos: (z: ComplexResult) => toRI(complexAcos(new Complex(z.re, z.im))),
+  catan: (z: ComplexResult) => toRI(complexAtan(new Complex(z.re, z.im))),
   csinh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sinh()),
   ccosh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).cosh()),
   ctanh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).tanh()),
   csqrt: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sqrt()),
   // hav⁻¹(z) = 2·arcsin(√z), continued to the complex plane
   cinvhav: (z: ComplexResult) =>
-    toRI(new Complex(z.re, z.im).sqrt().asin().mul(2)),
+    toRI(complexAsin(new Complex(z.re, z.im).sqrt()).mul(2)),
   cexp: (z: ComplexResult) => toRI(new Complex(z.re, z.im).exp()),
   cln: (z: ComplexResult) => toRI(new Complex(z.re, z.im).log()),
   // The complex sign `z/|z|`: the point of the unit circle in the direction
@@ -12709,26 +12808,27 @@ const SYS_HELPERS = {
   csech: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sech()),
   ccsch: (z: ComplexResult) =>
     isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).csch()),
-  cacot: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acot()),
+  cacot: (z: ComplexResult) => toRI(complexAcot(new Complex(z.re, z.im))),
   // `arcsec 0` and `arccsc 0` are `NaN` in the interpreter, and `arsech 0` is
   // `+∞`. The complex library answers a value with an infinite imaginary
   // part for each, which reads as the unsigned pole.
   casec: (z: ComplexResult) =>
     isComplexZero(z)
       ? { re: NaN, im: NaN }
-      : toRI(new Complex(z.re, z.im).asec()),
+      : toRI(complexAsec(new Complex(z.re, z.im))),
   cacsc: (z: ComplexResult) =>
     isComplexZero(z)
       ? { re: NaN, im: NaN }
-      : toRI(new Complex(z.re, z.im).acsc()),
-  cacoth: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acoth()),
+      : toRI(complexAcsc(new Complex(z.re, z.im))),
+  cacoth: (z: ComplexResult) => toRI(complexAcoth(new Complex(z.re, z.im))),
   casech: (z: ComplexResult) =>
     isComplexZero(z)
       ? { re: Infinity, im: 0 }
-      : toRI(new Complex(z.re, z.im).asech()),
-  cacsch: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acsch()),
-  cacosh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acosh()),
-  catanh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).atanh()),
+      : toRI(complexAsech(new Complex(z.re, z.im))),
+  cacsch: (z: ComplexResult) => toRI(complexAcsch(new Complex(z.re, z.im))),
+  cacosh: (z: ComplexResult) => toRI(complexAcosh(new Complex(z.re, z.im))),
+  catanh: (z: ComplexResult) => toRI(complexAtanh(new Complex(z.re, z.im))),
+  casinh: (z: ComplexResult) => toRI(complexAsinh(new Complex(z.re, z.im))),
   // A value with an infinite part has an infinite absolute value: the
   // unsigned pole `{ re: ∞, im: ∞ }` (see `complexPole`) and a signed infinity
   // alike, as the interpreter answers (`|~oo|` is `+∞`). The complex library
