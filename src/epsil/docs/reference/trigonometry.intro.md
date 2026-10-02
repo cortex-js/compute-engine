@@ -119,7 +119,7 @@ symbolic. `N` then gives the complex principal value:
 
 ```epsil
 [arcsin(2), N(arcsin(2))]
-// ➔ [arcsin(2), (1.5707963267948966 - 1.3169578969248166i)]
+// ➔ [arcsin(2), (1.57079632679489661923 - 1.31695789692481670863i)]
 ```
 
 `inverseFunction` returns the inverse of a function:
