@@ -2394,10 +2394,12 @@ describe('INTEGRATE: interior pole — hyperbolic, reciprocal and near-bound fam
     );
   });
 
-  test('a double root AT the bound is an endpoint singularity, left as it was', () => {
+  test('a double root AT the bound is an endpoint pole: the integral diverges to +oo', () => {
+    // Not an interior pole: the one-sided limit at the bound decides, with
+    // the sign of the integrand inside the interval.
     expect(
       ce.parse('\\int_0^1 \\frac{1}{(t-1)^2} dt').evaluate().toString()
-    ).toBe('~oo');
+    ).toBe('+oo');
   });
 });
 
@@ -2803,5 +2805,126 @@ describe('INTEGRATE: sine and cosine of a linear argument under integration by p
     expect(ce.parse('\\int x\\sin(-x)\\,dx').evaluate().toString()).toBe(
       'x * cos(x) - sin(x)'
     );
+  });
+});
+
+describe('INTEGRATE: a pole at a constant such as π', () => {
+  const ce = new ComputeEngine();
+  const integral = (body: unknown, lo: unknown, hi: unknown) =>
+    ce.box(['Integrate', body, ['Limits', 'y', lo, hi]] as any);
+  const inverseSquare = (c: string) => ['Power', ['Subtract', 'y', c], -2];
+
+  test('a pole at π inside the bounds diverges, on both routes', () => {
+    // Before: `-1/π - 1/(4 - π)`, a NEGATIVE value for a positive integrand.
+    const e = integral(inverseSquare('Pi'), 0, 4);
+    expect(e.evaluate().toString()).toBe('+oo');
+    expect(e.N().toString()).toBe('+oo');
+    expect(integral(inverseSquare('Pi'), 4, 0).evaluate().toString()).toBe(
+      '-oo'
+    );
+    expect(integral(inverseSquare('Pi'), 4, 0).N().toString()).toBe('-oo');
+    expect(
+      integral(inverseSquare('ExponentialE'), 0, 4).evaluate().toString()
+    ).toBe('+oo');
+    expect(
+      ce.parse('\\int_0^4 (y-\\pi)^{-2}\\,dy').evaluate().toString()
+    ).toBe('+oo');
+  });
+
+  test('a sign change across a pole at π leaves no value', () => {
+    const e = integral(['Divide', 1, ['Subtract', 'y', 'Pi']], 0, 4);
+    expect(e.evaluate().operator).toBe('Integrate');
+    expect(e.N().isNaN).toBe(true);
+  });
+
+  test('a pole at π outside the bounds keeps the closed form', () => {
+    // ∫₀³ (y − π)⁻² dy = 1/(π − 3) − 1/π ≈ 6.744203419747
+    const expected = 1 / (Math.PI - 3) - 1 / Math.PI;
+    const e = integral(inverseSquare('Pi'), 0, 3);
+    const exact = e.evaluate();
+    expect(exact.toString()).toBe('-1 / pi - 1 / (3 - pi)');
+    expect(exact.N().re).toBeCloseTo(expected, 12);
+    const n = e.N();
+    expect(
+      (n.operator === 'Measurement' ? n.op1 : n).re
+    ).toBeCloseTo(expected, 10);
+  });
+
+  test('a pole at π exactly AT a bound is not a finite value', () => {
+    // An endpoint singularity, not an interior pole: the check gives no
+    // verdict, and the result must not be a finite number.
+    const e = integral(inverseSquare('Pi'), 0, 'Pi');
+    expect(e.evaluate().isFinite).not.toBe(true);
+    expect(e.N().isFinite).not.toBe(true);
+  });
+
+  test('the multi-limit form and NIntegrate find the pole at π', () => {
+    const multi = ce.box([
+      'Integrate',
+      inverseSquare('Pi'),
+      ['Limits', 'y', 0, 4],
+      ['Limits', 'x', 0, 2],
+    ] as any);
+    expect(multi.evaluate().toString()).toBe('+oo');
+    expect(multi.N().toString()).toBe('+oo');
+    const nint = ce.box([
+      'NIntegrate',
+      ['Function', inverseSquare('Pi'), 'y'],
+      0,
+      4,
+    ] as any);
+    expect(nint.evaluate().toString()).toBe('+oo');
+    const finite = ce
+      .box(['NIntegrate', ['Function', inverseSquare('Pi'), 'y'], 0, 3] as any)
+      .evaluate();
+    expect(finite.re).toBeCloseTo(1 / (Math.PI - 3) - 1 / Math.PI, 10);
+  });
+});
+
+describe('INTEGRATE: a nested integral agrees with the multi-limit form', () => {
+  const ce = new ComputeEngine();
+
+  test('a divergent inner integral gives an infinite outer integral', () => {
+    const nested = ce.parse('\\int_0^2\\int_0^2 (y-1)^{-2}\\,dy\\,dx');
+    expect(nested.evaluate().toString()).toBe('+oo');
+    expect(nested.N().toString()).toBe('+oo');
+    const reversed = ce.parse('\\int_2^0\\int_0^2 (y-1)^{-2}\\,dy\\,dx');
+    expect(reversed.evaluate().toString()).toBe('-oo');
+    expect(reversed.N().toString()).toBe('-oo');
+  });
+
+  test('the multi-limit form negates for reversed outer bounds on both routes', () => {
+    // Before: `.N()` gave `+oo` here, while `.evaluate()` gave `-oo`.
+    const e = ce.box([
+      'Integrate',
+      ['Power', ['Subtract', 'y', 1], -2],
+      ['Limits', 'y', 0, 2],
+      ['Limits', 'x', 2, 0],
+    ] as any);
+    expect(e.evaluate().toString()).toBe('-oo');
+    expect(e.N().toString()).toBe('-oo');
+  });
+
+  test('the integral of an infinite constant', () => {
+    const integral = (c: string, lo: unknown, hi: unknown) =>
+      ce.box(['Integrate', c, ['Limits', 'x', lo, hi]] as any);
+    for (const route of ['evaluate', 'N'] as const) {
+      expect(integral('PositiveInfinity', 0, 2)[route]().toString()).toBe(
+        '+oo'
+      );
+      expect(integral('PositiveInfinity', 2, 0)[route]().toString()).toBe(
+        '-oo'
+      );
+      expect(integral('NegativeInfinity', 0, 2)[route]().toString()).toBe(
+        '-oo'
+      );
+      expect(
+        integral('PositiveInfinity', 0, 'PositiveInfinity')[route]().toString()
+      ).toBe('+oo');
+    }
+    // An interval of unknown length: no value can be given.
+    expect(
+      integral('PositiveInfinity', 0, 'a').evaluate().operator
+    ).toBe('Integrate');
   });
 });

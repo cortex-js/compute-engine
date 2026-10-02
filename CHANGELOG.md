@@ -1,3 +1,223 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **A constant `NIntegrate` inside a compiled expression is folded to its
+  value.** `compile(y + NIntegrate(x ↦ x, 0, 1))` gave `success: false`, since
+  `NIntegrate` has no compiled form and the compiler declined to evaluate it
+  ahead of time; it now compiles to `_.y + 0.5`. The compiler evaluates a
+  constant `NIntegrate` like a one-dimensional `Integrate`, within the same cost
+  limit, so a nested integral (a user function whose body is another
+  `NIntegrate`) still declines.
+- **`NIntegrate` uses quadrature first.** `NIntegrate(f, a, b)` now uses the
+  same methods, in the same order, as `Integrate(f, x, a, b).N()`: on a
+  semi-infinite interval the oscillatory quadrature, then adaptive
+  Gauss–Kronrod quadrature (for a compiled integrand and, with a smaller panel
+  budget, for an interpreted one). It used to go straight to Monte Carlo
+  sampling. `NIntegrate(x ↦ x², 0, 1)` was `0.333422` and is now
+  `0.3333333333333333`. A divergent integral is now `+∞`, `−∞` or `NaN`
+  (`NIntegrate(x ↦ 1/x, 0, 1)` is `+∞`, and a proven pole strictly inside the
+  bounds gives `+∞`, `−∞` or `NaN`), as for `Integrate(…).N()`; before, both
+  gave a sampled finite number.
+  Monte Carlo is still the fallback when the quadrature does not converge, so
+  `NIntegrate` still reads the `WithRandomSeed` frame. A seeded `NIntegrate`
+  gives different digits than before when the quadrature succeeds, because no
+  sample is drawn. The result is still a plain number (real or complex), not a
+  `Measurement`.
+
+### Issues Resolved
+
+- **A redeclared `If`, `Sum`, `Block`, … compiles as the user definition.**
+  With `ce.declare('If', { ...ce.lookupDefinition('If').operator, evaluate:
+  () => ce.number(100) })`, `If(x > 0, sin(x), cos(x))` gives `100` in the
+  interpreter, but `compile()` gave `success: true` and the code of the
+  library `If` (`0.644…` at `x = 0.7`). The compilation now fails closed
+  (`success: false`, the result falls back to the interpreter, which gives
+  `100`), on every target. The check for a user definition that shadows a
+  library operator ran only for the heads that a target lowers through its
+  function or operator table. It now also runs for the heads that the
+  compiler lowers by name (`If`, `Which`, `When`, `Match`, `Loop`, `Sum`,
+  `Product`, `Block`, `Function`, …), for a node that a loop body or a block
+  lowers as a statement, and for the bodies of the user functions that the
+  expression calls. A user definition of `Which` with its own `compile`
+  handler uses that handler. An unchanged copy of the library definition
+  still compiles as the library operator.
+- **A chain of a copy under another name keeps its name.** With a copy
+  `MyNotEqual` of `NotEqual` (`const { name, ...def } =
+  ce.lookupDefinition('NotEqual').operator; ce.declare('MyNotEqual', def)`),
+  `MyNotEqual(x, y, z)` boxed to `x != y && y != z`, with library `NotEqual`
+  nodes, so an `evaluate` handler of the copy did not run. It now boxes to
+  `MyNotEqual(x, y) && MyNotEqual(y, z)`: each node that the library handler
+  builds with the library name gets the name of the copy. An operand that is
+  a library `NotEqual` keeps its name, also when the handler returns it
+  (`MyAnd(And(A, B))`, with a copy `MyAnd` of `And`, gives `And(A, B)`). When
+  the handler flattens a library operand (`And(And(A, B), C)` is
+  `And(A, B, C)`), the call is kept unflattened under the name of the copy:
+  `Nand2(And(A, B), C)` stays `Nand2(And(A, B), C)`, so the library `And` is
+  not evaluated by the handlers of `Nand2`.
+- **A missing operand gives an `Error("missing")` operand.**
+  `ce.box(['Annotated', 'x'])` logged
+  ``error canonicalizing `Annotated`: Cannot read properties of undefined``
+  and gave `Annotated(x)`; it now gives `Annotated(x, Error("missing"))`.
+  `ce.box(['Subscript', 'x'])` gave `Subscript(x, [undefined])` or threw
+  `Cannot read properties of undefined`, and now gives `Subscript(x,
+  Error("missing"))`. The same fix applies to
+  `Complex()` (threw `Expected one or two arguments`; an extra operand is now
+  an `unexpected-argument` error operand), `Apply()`, `CanonicalForm()`,
+  `Factorial()`, `Lb()`, `Lg()`, `Log2()`, `Log10()`, `Lucas()` and
+  `PrimeNumber()`, which threw or built a node with an `undefined` operand.
+  An extra operand of `Factorial`, `Lb`, `Lg`, `Log2`, `Log10`, `Lucas` and
+  `PrimeNumber` was dropped, also in strict mode: `Lb(8, 3)` gave
+  `Log(8, 2)`, which is `3`. In strict mode, it is now an
+  `unexpected-argument` error operand (`Log(8, 2, Error("unexpected-argument",
+  "3"))`); otherwise it is kept, as for `Sin(1, 2)`, after the base of `Lb`,
+  `Lg`, `Log2` and `Log10` (`Lg(8, 3)` gives `Log(8, 10, 3)`).
+  `CanonicalForm(x, y)`, with a name that is not a canonical form, logged
+  `Invalid canonical form` and now gives `CanonicalForm(x,
+  Error("unexpected-argument", "y"))`.
+- **A pole whose position comes from an assigned symbol is found.** With
+  `q := 1`, `NIntegrate(y ↦ (y − q)⁻², 0, 2)` gave a sampled finite number
+  that changed at each call (`13931349`, then `36076471`), and
+  `Integrate((y − q)⁻², y, 0, 2).N()` gave `1010000000 ± 910000000`. Both now
+  give `+∞`, as they do when the integrand is written with `1`.
+  `Integrate((y − q)⁻², y, 0, 2).evaluate()` gave `-2` (the antiderivative
+  differenced across the pole) and now gives `+∞`. The pole check now
+  substitutes the values of the assigned symbols of the integrand, which the
+  quadrature and the antiderivative already read; a symbol with no value is
+  not substituted, so its integral is unchanged.
+- **A pole at a constant such as `π` is found.** `∫₀⁴ (y − π)⁻² dy` is `+∞`.
+  `Integrate((y − π)⁻², Limits(y, 0, 4)).evaluate()` gave `-1/π - 1/(4 - π)`
+  (the antiderivative differenced across the pole: a negative value for a
+  positive integrand), `.N()` gave a sampled value that changed at each call
+  (`7000000 ± 3500000`), and `NIntegrate(y ↦ (y − π)⁻², 0, 4)` gave
+  `13898520`. All three now give `+∞`, and so do the multi-limit form and
+  `(y − e)⁻²`. A sign change across such a pole (`1/(y − π)` on `[0, 4]`)
+  gives no value, as for a pole at a number. The pole check now reads a
+  coefficient with a known real value (`π`, `e`, a constant declared with a
+  value) as that number. A pole outside the bounds is unchanged:
+  `∫₀³ (y − π)⁻² dy` is `1/(π − 3) − 1/π`.
+- **A pole at a bound of an integral gives `+∞` or `−∞`.** `∫₀¹ t⁻² dt` is
+  `+∞`, but `.evaluate()` gave `~∞` (`ComplexInfinity`, the antiderivative
+  `−1/t` evaluated at `0`) and `.N()` and `NIntegrate(t ↦ t⁻², 0, 1)` gave
+  `NaN` (the quadrature found a divergence, with no sign). All now give
+  `+∞`. The same applies to `∫₀^π (y − π)⁻² dy` (`~∞` → `+∞`), `∫₀¹ −t⁻² dt`
+  (`~∞` → `−∞`), `∫₋₁⁰ t⁻³ dt` (`~∞` → `−∞`) and the multi-limit form.
+  `∫₀¹ dt/t` gave `+∞` under `.evaluate()` and `NaN` under `.N()`; `.N()` now
+  gives `+∞` too. The integral is the one-sided limit from inside the
+  interval, so the sign is the sign of the integrand next to the bound,
+  inside the interval (negated for reversed bounds): `∫₋₁⁰ dt/t` is `−∞`.
+  Poles at both bounds with different signs (`∫₀¹ (1/t − 1/(1 − t)) dt`)
+  give no value: unevaluated under `.evaluate()`, `NaN` under `.N()`. An
+  integrable singularity at a bound keeps its value: `∫₀¹ t^(−1/2) dt` is
+  `2`, `∫₀¹ t^(−0.95) dt` is `20`, `∫₋₁¹ dt/√(1 − t²)` is `π`. The sign is
+  given only when samples of the integrand very close to the bound confirm a
+  pole of order 1 or more; otherwise the result stays as before (unevaluated
+  under `.evaluate()`, `NaN` under `.N()` and `NIntegrate`).
+- **The quadrature no longer takes a logarithmic factor for a divergence.**
+  `∫₀¹ t^(−0.95)·ln t dt` is `−400` and `∫₀¹ t^(−0.9)·ln²t dt` is `2000`, but
+  `.N()` and `NIntegrate` gave `NaN`: the adaptive Gauss–Kronrod quadrature
+  took the slow growth of the logarithm for a divergence at `0`. They now
+  give `−399.999999912 ± 0.000000039` and `1999.99999980 ± 0.00000020`. The
+  divergence test now also requires the growth of the integrand toward the
+  bound to stop slowing down. A pole is still found: `∫₀¹ dt/t`, `∫₀¹ t⁻² dt`
+  and `∫₀^{π/2} tan t dt` are `+∞`, `∫₋₁⁰ t⁻³ dt` is `−∞`.
+- **A logarithm in a denominator is a pole site.** `∫₀¹ dt/(t·ln²t)` gave
+  `~∞` (`ComplexInfinity`) under `.evaluate()` and `NaN` under `.N()`; the
+  integrand is positive and behaves as `1/(t − 1)²` at `t = 1`, so all routes
+  now give `+∞` (`∫₀^½ dt/(t·ln²t)` keeps its value `1/ln 2`). The pole check
+  now reads the zero of a logarithm of a linear argument in a denominator,
+  and the zeros of each factor of a denominator that is a product. So
+  `∫ from ½ to 2 of dt/ln t`, whose integrand changes sign at the pole
+  `t = 1`, now stays unevaluated (it was `LogIntegral(2) − LogIntegral(1/2)`,
+  about `1.4238`, the principal value) and is `NaN` under `.N()`. A `~∞`
+  difference of an antiderivative for a real integrand over a real interval
+  now leaves the integral unevaluated instead.
+- **An iterated integral with a pole that moves with another variable.**
+  `Integrate((y − x)⁻², Limits(y, 0, 10), Limits(x, 3, 4)).N()` gave a large
+  finite number such as `2710000000000000 ± 170000000000000`; for each `y` in
+  `(3, 4)` the inner integral has a pole at `x = y`, and the value is `+∞`. It
+  is now `+∞` (`−∞` for reversed bounds of `y`, and `NaN` for `(y − x)⁻³`,
+  which changes sign across the pole). The check runs before the quadrature,
+  so the long quadrature run of such an integral is also gone.
+- **A nested integral with a divergent inner integral.**
+  `\int_0^2\int_0^2 (y-1)^{-2}\,dy\,dx` stayed unevaluated under `.evaluate()`
+  and gave `NaN` under `.N()`, while the multi-limit form gave `+∞`. Both
+  routes now give `+∞` (`−∞` for reversed outer bounds). The integral of an
+  infinite constant over an interval of nonzero length is now that infinity,
+  negated for reversed bounds: `Integrate(+∞, Limits(x, 0, 2))` stayed
+  unevaluated under `.evaluate()` and gave `NaN` under `.N()`, and now gives
+  `+∞`. An interval of unknown length (`[0, a]`) keeps the integral
+  unevaluated.
+- **The multi-limit form with reversed outer bounds and a divergent inner
+  dimension.** `Integrate((y − 1)⁻², Limits(y, 0, 2), Limits(x, 2, 0)).N()`
+  gave `+∞`, while `.evaluate()` gave `−∞`. `.N()` now gives `−∞`: each
+  dimension with reversed bounds negates the integral.
+- **`NIntegrate` of a function given by its name.** `NIntegrate(Sin, 0, 2)`
+  was `NaN`, because each sample read the function itself instead of its
+  value. It is now `1.4161468365471424` (`1 − cos 2`). The interior-pole check
+  also applies to such a function: `NIntegrate(Tan, 0, 3)` and
+  `NIntegrate(Sec, 0, 2)` are `NaN` (the integrand changes sign at `π/2`), and
+  with `g := x ↦ 1/x²`, `NIntegrate(g, -1, 2)` is `+∞`.
+- **A copy of a library operator definition is differentiated and compiled
+  as the library operator.** After
+  `ce.declare('Sqrt', { ...ce.lookupDefinition('Sqrt').operator })`, the
+  overloading idiom of the guide, `D(sqrt(sin(x)), x)` gave
+  `cos(x) * Apply(Derivative(sqrt, 1), sin(x))` and now gives
+  `cos(x) / (2sqrt(sin(x)))`; `compile()` of `\sqrt{\sin x}` failed
+  (`success: false`, with a fall back to the interpreter) and now succeeds,
+  with the same code as without the copy. The same applies to every library operator
+  (`Sin`, `Add`, `Power`, `Abs`, `Floor`, …), and to a copy used as a compiled
+  callback (`Map(Sqrt, xs)`). The rule: a definition of a library name is the
+  library operator when its `evaluate`, `canonical`, `compile`, `derivative`
+  and `evaluateAsync` handlers are the same function objects as those of the
+  library definition of that name (or are absent in both), and its `lazy` and
+  `broadcastable` flags have the same values, so a copy that changes only
+  `description` counts too. A copy that changes one of these, such as a copy
+  of `Sin` with `broadcastable: false`, changes how the operator is evaluated
+  or compiled, and is not the library operator. A copy that replaces one of
+  the handlers, a user function (`function Sin(x) { … }`, `Sin(x) := …`), a parameter named
+  like a library operator, and a copy declared under another name are not the
+  library operator, as before. A copy made from the definitions of another
+  engine bundle has other function objects, so it is a user definition.
+
+- **A copy of a library operator definition under another name keeps its
+  name.** After `const { name, ...sin } = ce.lookupDefinition('Sin').operator;
+  ce.declare('MySin', sin)`, `ce.box(['MySin', 'x'])` gave `sin(x)` and now
+  gives `MySin(x)`; `MySin(x).evaluate()` gave `sin(x)` and now gives
+  `MySin(x)`. The `canonical` and `evaluate` handlers of most library
+  operators (the trigonometric and hyperbolic functions, `Integrate`,
+  `Matrix`, the distributions: about 180 of the 241 library operators that
+  have a `canonical` handler) build their result with
+  the name of their own operator, so the copy turned into the library
+  operator, and a copy with its own `evaluate` handler
+  (`ce.declare('MySin', { ...sin, evaluate })`) never ran it. Now, when such
+  a handler returns an expression with the name of the library operator that
+  holds it, the result gets the name of the copy. A rewrite to another
+  operator (`Rational` to `Divide`) and a value (`MySin(π)` is `0`) are kept.
+  As a result, `D` differentiates `MySqrt(sin(x))` as a user function,
+  `cos(x) * Apply(Derivative("MySqrt", 1), sin(x))`; before, it saw the
+  `Sqrt` that the handler returned and used the rule of `Sqrt`.
+
+- **A compiled callback that names a host-declared operator falls back to the
+  interpreter.** With
+  `ce.declare('MySqrt', { signature: '(real) -> real', evaluate: ([x]) => ce.number(100) })`
+  and `ce.declare('rs', 'list<real>')`, `compile(ce.box(['Map', 'MySqrt', 'rs']))`
+  gave `success: true`, and `run({ rs: [1, 4] })` threw
+  `TypeError: _f is not a function`. It now gives `success: false`, and
+  `run()` gives `[100, 100]`, the value of the interpreter. The same applies
+  to a definition of a library name with its own `evaluate`
+  (`ce.declare('Sin', { ...sinDef, evaluate })`), and to the other callback
+  positions (`Filter`, `Reduce`, …). An operator whose `evaluate` is a
+  function literal, and a library operator, still compile. An operator that
+  the compiled code can apply, because its definition has a `compile` handler
+  or the `functions` option of `compile()` maps it, compiles as
+  `(p) ↦ MySqrt(p)`, as `Map(Function(MySqrt(t), t), rs)` does: with
+  `functions: { MyOp: (x) => 10 * x }`, `Map(MyOp, rs)` compiles and
+  `run({ rs: [2, 3] })` gives `[20, 30]`.
+- `Derivative()` with no operand logged "error canonicalizing `Derivative`" and
+  stayed `Derivative()`; it is now `Derivative(Error("missing"))`, the
+  standard form of a missing required operand.
+
 ## 0.145.0 _2026-10-01_
 
 ### Behavior Changes

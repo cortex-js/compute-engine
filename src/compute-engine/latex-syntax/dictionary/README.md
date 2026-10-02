@@ -85,8 +85,8 @@ Two invariants make nested and parametric integrals work:
    with (1), `∫_1^2∫_3^4 x·y dx dy → 21/4`.
 
 `evaluate()` vs `.N()` honors the exactness contract: an exact integrand stays
-exact/symbolic; only `numericApproximation` routes to `NIntegrate` (Monte-Carlo
-/ quadrature). See the project `CLAUDE.md` "Evaluate vs N" section.
+exact/symbolic; only `numericApproximation` routes to `NIntegrate` (adaptive
+quadrature, with a Monte-Carlo fallback). See the project `CLAUDE.md` "Evaluate vs N" section.
 
 ## Serialization (`serializeIntegral`)
 

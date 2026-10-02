@@ -758,9 +758,9 @@ describe('Measurement — complex-valued numeric integrals', () => {
     const r = ce
       .box(['NIntegrate', ['Function', ['Exp', ['Multiply', 'ImaginaryUnit', 'x']], 'x'], 0, 'Pi'])
       .evaluate();
-    // Monte-Carlo estimate: loose tolerance.
-    expect(r.re).toBeCloseTo(0, 1);
-    expect(r.im).toBeCloseTo(2, 1);
+    // Adaptive Gauss–Kronrod quadrature of each part: ∫₀^π e^(ix) dx = 2i.
+    expect(r.re).toBeCloseTo(0, 12);
+    expect(r.im).toBeCloseTo(2, 12);
   });
   test('iterated integral of a complex integrand', () => {
     const m = ce

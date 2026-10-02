@@ -12,8 +12,10 @@
 // Three families of pole are located: a real root of a polynomial denominator
 // (`1/t`, `1/(t² − 1)`, `t⁻³`), a pole of a circular function of a linear
 // argument (`tan`, `cot`, `sec`, `csc`, and a `sin`/`cos`/`tan`/`cot`
-// divisor), and a pole of a hyperbolic function of a linear argument (`csch`,
-// `coth`, and a `sinh`/`tanh` divisor).
+// divisor), a pole of a hyperbolic function of a linear argument (`csch`,
+// `coth`, and a `sinh`/`tanh` divisor), and the zero of a logarithmic divisor
+// of a linear argument (`1/ln t` at `t = 1`). A divisor that is a product is
+// examined factor by factor (`1/(t·ln²t)`).
 // Every located point is then CONFIRMED by sampling the integrand on both
 // sides of it, so a denominator that cancels (`(t² − 1)/(t − 1)`) and an
 // integrable singularity (`1/√(t − r)`) are rejected.
@@ -99,11 +101,39 @@ function numericCoefficients(
 
   const numeric: number[] = [];
   for (const c of coeffs) {
-    if (!isNumber(c) || !c.isNumberLiteral || c.isComplex) return null;
-    if (!Number.isFinite(c.re)) return null;
-    numeric.push(c.re);
+    const value = constantRealValue(c);
+    if (value === null) return null;
+    numeric.push(value);
   }
   return numeric;
+}
+
+/**
+ * The value of the polynomial coefficient `c` as a finite real number, or
+ * `null` when it has no such value.
+ *
+ * A number literal gives its value. A coefficient that is not a literal but
+ * has a known real value — a constant such as `Pi` or `ExponentialE`, a
+ * symbol declared constant with a value, or an expression of those (`-Pi`,
+ * `Pi²`, `2e`, `ln 2`) — gives its numeric approximation, so that the pole of
+ * `(t − π)⁻²` is found at `t = π`. The approximation is a double: the site
+ * and the bounds are then compared in doubles, and a site within rounding
+ * distance of a bound counts as AT the bound (see `PoleSite`), which gives no
+ * interior verdict (a pole at a bound is examined by `endpointPoleVerdict`).
+ * A free symbol with no value (`a` in `t − a`) has no numeric value,
+ * so its coefficient gives `null` and the pole location stays unknown.
+ */
+function constantRealValue(c: Expression): number | null {
+  if (isNumber(c) && c.isNumberLiteral) {
+    if (c.isComplex || !Number.isFinite(c.re)) return null;
+    return c.re;
+  }
+  // An impure coefficient (`Random()`) has no fixed value, and evaluating it
+  // here would run its effect once more than the integration does.
+  if (!c.isPure) return null;
+  const n = c.N();
+  if (!isNumber(n) || !n.isNumberLiteral || n.isComplex) return null;
+  return Number.isFinite(n.re) ? n.re : null;
 }
 /**
  * A candidate pole site: the point itself, and a test telling whether a given
@@ -264,8 +294,11 @@ const POLE_LATTICE_PHASE: Record<string, number> = {
  * numeric exponent (`1/t²` canonicalizes to `Power(t, -2)`, not to a
  * `Divide`); the zeros of a circular or hyperbolic divisor of a linear
  * argument (`1/sin t`, `1/tan t`, `1/sinh t` — a reciprocal is NOT
- * canonicalized to `csc`/`cot`/`csch`, so these spellings do reach here); and
- * the poles of `tan`/`cot`/`sec`/`csc`/`coth`/`csch` of a linear argument
+ * canonicalized to `csc`/`cot`/`csch`, so these spellings do reach here); the
+ * zero of a logarithmic divisor of a linear argument (`1/ln t` at `t = 1`);
+ * the zeros of each factor of a divisor that is a product, or a positive
+ * power, and not a polynomial (`1/(t·ln²t)` at `t = 0` and `t = 1`); and the
+ * poles of `tan`/`cot`/`sec`/`csc`/`coth`/`csch` of a linear argument
  * wherever they appear.
  *
  * Returns `null` when the walk exceeds {@link SCAN_NODE_BUDGET}, or when a
@@ -286,22 +319,49 @@ function poleSites(
   let converged = true;
   let truncated = false;
 
-  const addPolynomialRoots = (poly: Expression): void => {
-    if (!poly.has(variable)) return;
+  // Add the real roots of `poly`, and return whether it is a polynomial in
+  // the variable with numeric coefficients.
+  const addPolynomialRoots = (poly: Expression): boolean => {
+    if (!poly.has(variable)) return true;
     const coeffs = numericCoefficients(poly, variable);
-    if (coeffs === null || coeffs.length < 2) return;
+    if (coeffs === null) return false;
+    if (coeffs.length < 2) return true;
     const roots = realPolynomialRoots(coeffs, ce._deadline);
     if (roots === null) {
       converged = false;
-      return;
+      return true;
     }
     for (const r of roots) sites.push(rootSite(r, coeffs));
+    return true;
   };
 
-  // A divisor contributes its ZEROS.
+  // A divisor contributes its ZEROS. A divisor that is not a polynomial
+  // contributes the zeros of each factor of a product, and of the base of a
+  // positive power: `t·ln²t` is zero at `t = 0` and at `t = 1`.
   const addDenominatorSites = (d: Expression): void => {
-    addPolynomialRoots(d);
+    if (budget-- <= 0) return;
+    if (addPolynomialRoots(d)) return;
     if (!isFunction(d)) return;
+    if (d.operator === 'Multiply') {
+      for (const factor of d.ops) addDenominatorSites(factor);
+      return;
+    }
+    if (d.operator === 'Power') {
+      const exponent = d.op2;
+      if (isNumber(exponent) && exponent.isNumberLiteral && exponent.re > 0)
+        addDenominatorSites(d.op1);
+      return;
+    }
+    // A logarithm of a linear argument `c₁·t + c₀` is zero where the argument
+    // is 1, whatever the base.
+    if (d.operator === 'Ln' || d.operator === 'Log') {
+      const linear = linearArgument(d.op1, variable);
+      if (linear !== null) {
+        const [c0, c1] = linear;
+        sites.push(exactSite((1 - c0) / c1));
+      }
+      return;
+    }
     const phase = ZERO_LATTICE_PHASE[d.operator];
     if (phase !== undefined)
       truncated =
@@ -409,6 +469,160 @@ function divergesOnSide(
 }
 
 /**
+ * The smallest pole order, measured at the closest samples, that
+ * {@link endpointDivergesOnSide} accepts. See {@link ENDPOINT_LIMIT_ORDER}.
+ */
+const ENDPOINT_MIN_ORDER = 0.99;
+
+/**
+ * The smallest EXTRAPOLATED pole order that {@link endpointDivergesOnSide}
+ * accepts.
+ *
+ * A slowly varying factor raises the measured order of an integrable
+ * singularity: `|f| = δ^(−p)·|ln δ|ᵏ` at a distance `δ` from the bound has
+ * the local order `p + k/L`, with `L = ln(1/δ)`. Even 30 decades from the
+ * bound, `t^(−0.995)·ln t` (convergent, `∫₀¹ = −40000`) shows the order
+ * `1.003`. So the order is measured over three ranges of distance, and its
+ * trend is extrapolated to the bound: a pole (`1/t`, `tan t` at `π/2`) has a
+ * constant order, or an order that approaches 1 geometrically (a regular part
+ * such as the `−100` in `1/t − 100`), while a logarithmic factor makes the
+ * order approach `p` as `k/L`. The extrapolated order must be 1 within this
+ * margin, which is far below the change the model `p + k/L` attributes to a
+ * logarithmic factor at the sampled distances.
+ */
+const ENDPOINT_LIMIT_ORDER = 1 - 1e-4;
+
+/**
+ * The largest quotient of two successive changes of the measured order that
+ * {@link endpointDivergesOnSide} reads as a geometric approach to the limit.
+ * A regular part `c·δ^s` changes the order by a quotient `10^(−s·D/4)` from one
+ * range to the next (at most about `0.06` for `√δ` next to a nonzero bound);
+ * a logarithmic factor by a quotient between `0.4` and `0.6`.
+ */
+const ENDPOINT_GEOMETRIC_QUOTIENT = 0.1;
+
+/**
+ * The relative distance from a NONZERO bound below which the samples of
+ * {@link endpointDivergesOnSide} stop: closer than this, the double nearest
+ * the sample point and the double nearest the bound (which is itself a
+ * rounded value of `π/2` or of a root) leave too few significant digits in
+ * the distance between them.
+ */
+const ENDPOINT_RELATIVE_SPACING = 1e-12;
+
+/**
+ * How many decades of distance from the bound the samples of
+ * {@link endpointDivergesOnSide} span at most (next to a bound at 0, where the
+ * floating-point numbers allow it).
+ */
+const ENDPOINT_MAX_DECADES = 60;
+
+/**
+ * The strict version of {@link divergesOnSide} for a pole AT a bound: whether
+ * `|f|` grows at least as fast as `1/δ` at a distance `δ` from `bound` on the
+ * given side, inside the interval, and with what sign. `undefined` when the
+ * divergence is not certain.
+ *
+ * The integrand is sampled at the distances `reach·10^(−D·j/4)` from the
+ * bound, `j = 0…4`, where `D` is at most `ENDPOINT_MAX_DECADES` (a bound at
+ * 0) and is limited by `ENDPOINT_RELATIVE_SPACING` next to a nonzero bound.
+ * The pole order is measured over the three ranges between the four closest
+ * samples; the farthest sample is skipped, so that a large regular part
+ * (`1/t − 100`, which is 0 at `t = 0.01`) does not distort the measure. The
+ * integral diverges when the closest order is at least `ENDPOINT_MIN_ORDER`
+ * and the order extrapolated to the bound is at least `ENDPOINT_LIMIT_ORDER`
+ * (see `ENDPOINT_GEOMETRIC_QUOTIENT`). The sign is the sign of the two
+ * closest samples, which must agree.
+ *
+ * A sample that overflows is the sign of a steep pole: it is accepted when
+ * the samples closer to the bound overflow too, and either the first
+ * overflow is at one of the two shallowest samples or the order measured
+ * just before it is at least 1.5.
+ */
+function endpointDivergesOnSide(
+  integrand: Expression,
+  variable: string,
+  bound: number,
+  side: 1 | -1,
+  reach: number,
+  ce: ComputeEngine
+): DivergenceSign | undefined {
+  const closest = Math.max(
+    reach * 10 ** -ENDPOINT_MAX_DECADES,
+    Math.abs(bound) * ENDPOINT_RELATIVE_SPACING
+  );
+  const decades = Math.log10(reach / closest);
+  if (!(decades >= 6)) return undefined;
+
+  // Five distances, `reach·10^(−D·j/4)` for `j = 0…4`. Only the last four
+  // measure the order; the first one only tells where an overflow starts.
+  const points: { delta: number; value: number }[] = [];
+  for (let j = 0; j <= 4; j++) {
+    const x = bound + side * reach * 10 ** ((-decades * j) / 4);
+    // The distance actually sampled: `x − bound` is exact for a nearby `x`.
+    const delta = Math.abs(x - bound);
+    if (!(delta > 0)) return undefined;
+    const value = valueAt(integrand, variable, x, ce);
+    if (Number.isNaN(value)) return undefined;
+    points.push({ delta, value });
+  }
+
+  // The order measured between the samples `i` and `i + 1`.
+  const order = (i: number) =>
+    Math.log(Math.abs(points[i + 1].value) / Math.abs(points[i].value)) /
+    Math.log(points[i].delta / points[i + 1].delta);
+
+  const firstOverflow = points.findIndex((p) => !Number.isFinite(p.value));
+  if (firstOverflow >= 0) {
+    // Once a sample overflows, every closer one must overflow too.
+    if (points.slice(firstOverflow).some((p) => Number.isFinite(p.value)))
+      return undefined;
+    if (firstOverflow >= 2 && !(order(firstOverflow - 2) >= 1.5))
+      return undefined;
+    const value = points[firstOverflow].value;
+    return value > 0 ? 'positive' : 'negative';
+  }
+
+  if (points.slice(1).some((p) => p.value === 0)) return undefined;
+  // The order over three ranges of distance, from the farthest to the
+  // closest.
+  const far = order(1);
+  const near = order(2);
+  const nearer = order(3);
+  if (!(nearer >= ENDPOINT_MIN_ORDER)) return undefined;
+
+  // The order at the bound, extrapolated from its trend.
+  const change = near - nearer;
+  const previousChange = far - near;
+  let limit: number;
+  if (Math.abs(change) <= 1e-9) limit = nearer;
+  else if (
+    Number.isFinite(previousChange) &&
+    previousChange !== 0 &&
+    Math.abs(change / previousChange) <= ENDPOINT_GEOMETRIC_QUOTIENT
+  ) {
+    // A geometric approach: the changes still to come sum to `change·q/(1−q)`.
+    const q = change / previousChange;
+    limit = nearer - (change * q) / (1 - q);
+  } else {
+    // Solve `order = p + k/L` for `p`, where each measured order is read at
+    // the logarithmic mean of `L = ln(1/δ)` over its range. The model needs
+    // `L > 0` (a distance below 1); a wider range gives no verdict.
+    const L = points.map((p) => -Math.log(p.delta));
+    if (!(L[2] > 0)) return undefined;
+    const mean = (a: number, b: number) => (b - a) / Math.log(b / a);
+    const mNear = mean(L[2], L[3]);
+    const mNearer = mean(L[3], L[4]);
+    limit = (nearer * mNearer - near * mNear) / (mNearer - mNear);
+  }
+  if (!(limit >= ENDPOINT_LIMIT_ORDER)) return undefined;
+
+  const [a, b] = [points[3].value, points[4].value];
+  if (Math.sign(a) !== Math.sign(b)) return undefined;
+  return b > 0 ? 'positive' : 'negative';
+}
+
+/**
  * What a definite integral with a proven interior pole diverges TO.
  *
  * - `positive`: the integrand is positive on both sides of every proven pole
@@ -447,9 +661,10 @@ export type PoleVerdict = {
  *
  * `undefined` means "not proven", never "no pole": bounds that are not finite
  * real numbers, a denominator that is neither polynomial nor one of the
- * circular/hyperbolic functions above (`ln t`, `eᵗ − 1`), a denominator with
- * another free symbol, or a root finder that did not converge all report
- * `undefined` so the caller keeps its existing behavior. Every candidate is
+ * circular, hyperbolic or logarithmic functions above (`ln(t²)`, `eᵗ − 1`),
+ * a denominator with another free symbol, or a root finder that did not
+ * converge all report `undefined` so the caller keeps its existing
+ * behavior. Every candidate is
  * examined (no early exit) so that the verdict's sign accounts for every
  * pole in the range.
  *
@@ -520,6 +735,102 @@ export function interiorPoleVerdict(
 }
 
 /**
+ * Whether — and toward what — `integrand` diverges at a pole AT a bound of a
+ * definite integral in `variable` (`∫₀¹ t⁻² dt`, `∫₀^π (y − π)⁻² dy`): a
+ * {@link PoleVerdict} when a pole at a bound was confirmed, `undefined`
+ * otherwise. Poles strictly inside the bounds are not examined here (see
+ * {@link interiorPoleVerdict}).
+ *
+ * The improper integral at a bound is a one-sided limit from inside the
+ * interval, so only that side is sampled. The sign of the divergence is the
+ * sign of the integrand on that side, next to the bound: `1/t` on `(0, 1]` is
+ * positive, so `∫₀¹ dt/t` is `+∞`, and `1/t` on `[−1, 0)` is negative, so
+ * `∫₋₁⁰ dt/t` is `−∞`. The order of the pole does not decide the sign. Poles
+ * at both bounds with different signs give `mixed` (`∫₀¹ (1/t − 1/(1 − t))
+ * dt` has no value). A reversed range swaps `positive` and `negative`, as in
+ * {@link interiorPoleVerdict}.
+ *
+ * A site is located as in {@link interiorPoleVerdict}, and confirmed by
+ * {@link endpointDivergesOnSide}, a stricter test than the interior one: it
+ * samples much closer to the bound and extrapolates the pole order, so that
+ * an integrable singularity with a logarithmic factor (`t^(−0.95)·ln t`,
+ * whose order measured next to the bound is above 1) is rejected. A test
+ * from samples cannot be certain for an order very close to 1, so the
+ * callers use this verdict only when another method already found that the
+ * integral has no finite value: the antiderivative is not finite at the
+ * bounds, or the quadrature reports a divergence. This verdict then gives
+ * the sign. When the test is not certain, the verdict is `undefined`, and
+ * the caller keeps its result without a sign (`NaN`, or the integral
+ * unevaluated).
+ */
+export function endpointPoleVerdict(
+  integrand: Expression,
+  variable: string,
+  lower: Expression | number | undefined,
+  upper: Expression | number | undefined,
+  ce: ComputeEngine
+): PoleVerdict | undefined {
+  const a = typeof lower === 'number' ? lower : finiteRealValue(lower);
+  const b = typeof upper === 'number' ? upper : finiteRealValue(upper);
+  if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b))
+    return undefined;
+
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  if (!(lo < hi)) return undefined;
+
+  // The range is widened by the rounding slack, so that a lattice site at a
+  // bound (`tan t` at `π/2`) is not dropped by the rounding of `k`.
+  const slack = (x: number) => ROUNDING_SLACK * Math.max(1, Math.abs(x));
+  const scan = poleSites(
+    integrand,
+    variable,
+    lo - slack(lo),
+    hi + slack(hi),
+    ce
+  );
+  if (scan === null || scan.sites.length === 0) return undefined;
+  const sites = scan.sites;
+
+  let verdict: PoleVerdict | undefined;
+  for (const [bound, side] of [
+    [lo, 1],
+    [hi, -1],
+  ] as const) {
+    const atThisBound = sites.filter((site) => site.atBound(bound));
+    if (atThisBound.length === 0) continue;
+
+    // Sample from the bound toward the inside of the interval, close enough
+    // to stay clear of every candidate site that is not at this bound.
+    let reach = (hi - lo) / 100;
+    for (const other of sites)
+      if (!atThisBound.includes(other))
+        reach = Math.min(reach, Math.abs(other.t - bound) / 100);
+    if (!(reach > 0)) continue;
+
+    const sign = endpointDivergesOnSide(
+      integrand,
+      variable,
+      bound,
+      side,
+      reach,
+      ce
+    );
+    if (sign === undefined) continue;
+    if (verdict === undefined) verdict = { sign };
+    else if (verdict.sign !== sign) verdict = { sign: 'mixed' };
+  }
+  if (verdict === undefined) return undefined;
+
+  // Orientation: a reversed range negates the integral.
+  if (a > b) {
+    if (verdict.sign === 'positive') verdict = { sign: 'negative' };
+    else if (verdict.sign === 'negative') verdict = { sign: 'positive' };
+  }
+  return verdict;
+}
+
+/**
  * Whether `integrand` has a proven pole strictly between the bounds — see
  * {@link interiorPoleVerdict}, of which this is the yes/no reading.
  */
@@ -533,4 +844,28 @@ export function integrandHasInteriorPole(
   return (
     interiorPoleVerdict(integrand, variable, lower, upper, ce) !== undefined
   );
+}
+
+/**
+ * Whether `integrand` takes real values on the interval between the bounds
+ * `lower` and `upper`, as far as three samples tell: at a quarter, half and
+ * three quarters of the interval, the integrand must evaluate to a real
+ * number. A bound that is not a finite real number gives `false`.
+ */
+export function isRealOnInterval(
+  integrand: Expression,
+  variable: string,
+  lower: Expression | number | undefined,
+  upper: Expression | number | undefined,
+  ce: ComputeEngine
+): boolean {
+  const a = typeof lower === 'number' ? lower : finiteRealValue(lower);
+  const b = typeof upper === 'number' ? upper : finiteRealValue(upper);
+  if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b))
+    return false;
+  if (!integrand.isPure) return false;
+  for (const w of [0.25, 0.5, 0.75])
+    if (!Number.isFinite(valueAt(integrand, variable, a + w * (b - a), ce)))
+      return false;
+  return true;
 }

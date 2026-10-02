@@ -740,9 +740,9 @@ describe('Map auto-compile', () => {
       .box(['NIntegrate', ['Function', ['Power', 'x', 2], 'x'], 0, 1])
       .evaluate();
     // With jit off the interpreter-backed integrand goes through the
-    // 10⁴-sample Monte-Carlo estimator (~0.3% standard error, stochastic):
-    // assert the estimate is sane, not tight.
-    expect(v.re).toBeCloseTo(1 / 3, 1);
+    // adaptive Gauss–Kronrod quadrature with the smaller panel budget of an
+    // interpreted integrand, which integrates x² to machine precision.
+    expect(v.re).toBeCloseTo(1 / 3, 14);
   });
 
   // ── Consumer reachability ──────────────────────────────────────────────

@@ -136,3 +136,140 @@ describe('UNEMITTABLE USER FUNCTION IN VALUE POSITION — fail closed', () => {
     expect(r?.run?.({ ys: [[1, 2], [3]] })).toEqual([[4, 7], [10]]);
   });
 });
+
+//
+// An operator the HOST declared with a JavaScript `evaluate` handler has no
+// function value the compiled code can call, and neither has a definition
+// that shadows a built-in name. Used as a callback, it fell through to the
+// free-symbol read `_.MySqrt`: `Map(MySqrt, rs)` compiled with
+// `success: true` and threw `TypeError: _f is not a function` at run time.
+// It now fails closed at compile time, and the interpreted fallback answers.
+//
+describe('HOST-DECLARED OPERATOR IN VALUE POSITION — fail closed', () => {
+  const TARGETS = ['javascript', 'python', 'glsl', 'wgsl', 'interval-js'];
+
+  function silent<T>(f: () => T): T {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      return f();
+    } finally {
+      warn.mockRestore();
+    }
+  }
+
+  function declareMySqrt(withCompile = false): void {
+    ce.declare('MySqrt', {
+      signature: '(real) -> real',
+      evaluate: () => ce.number(100),
+      ...(withCompile
+        ? {
+            compile: (args: any[], compileFn: any) =>
+              `(100 + 0 * ${compileFn(args[0])})`,
+          }
+        : {}),
+    });
+    ce.declare('rs', 'list<real>');
+  }
+
+  it('refuses `Map(MySqrt, rs)`, naming the operator', () => {
+    declareMySqrt();
+    const expr = ce.box(['Map', 'MySqrt', 'rs']);
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /^Could not compile `MySqrt` as a first-class function/
+    );
+  });
+
+  it.each(TARGETS)('%s: `Map(MySqrt, rs)` falls back', (to) => {
+    declareMySqrt();
+    const r = silent(() => compile(ce.box(['Map', 'MySqrt', 'rs']), { to }));
+    expect(r?.success).toBe(false);
+    const v = r?.run?.({ rs: [2, 3] });
+    if (to === 'interval-js')
+      expect(v).toEqual([
+        { lo: 100, hi: 100 },
+        { lo: 100, hi: 100 },
+      ]);
+    else expect(v).toEqual([100, 100]);
+  });
+
+  // The `compile` handler lowers an APPLICATION (`MySqrt(x)`): the operator
+  // is eta-expanded into `(p) ↦ MySqrt(p)`, whose body compiles through the
+  // handler. Before, `Map(MySqrt, rs)` was refused.
+  it('eta-expands an operator that has a `compile` handler', () => {
+    declareMySqrt(true);
+    const r = compile(ce.box(['Map', 'MySqrt', 'rs']), { fallback: false });
+    expect(r?.success).toBe(true);
+    expect(r?.run?.({ rs: [2, 3] })).toEqual([100, 100]);
+  });
+
+  // The `functions` option of `compile()` lowers `MyOp(y)`; the operator in
+  // callback position compiles through the same lowering. Before, `Map(MyOp,
+  // rs)` was refused with a message about the `evaluate` handler.
+  it('eta-expands an operator that the `functions` option maps', () => {
+    ce.declare('MyOp', {
+      signature: '(real) -> real',
+      evaluate: () => ce.number(100),
+    });
+    ce.declare('rs', 'list<real>');
+    const functions = { MyOp: (x: number) => 10 * x };
+    const r = compile(ce.box(['Map', 'MyOp', 'rs']), {
+      fallback: false,
+      functions,
+    } as any);
+    expect(r?.success).toBe(true);
+    expect(r?.run?.({ rs: [2, 3] })).toEqual([20, 30]);
+    // Without the mapping, the refusal does not name a cause that is not
+    // there.
+    expect(() =>
+      compile(ce.box(['Map', 'MyOp', 'rs']), { fallback: false })
+    ).toThrow(
+      /^Could not compile `MyOp` as a first-class function: the operator has no function value that the compiled code can call/
+    );
+  });
+
+  it('refuses a library name redeclared with its own `evaluate`', () => {
+    ce.declare('Sin', {
+      ...(ce.lookupDefinition('Sin') as any).operator,
+      evaluate: () => ce.number(100),
+    });
+    ce.declare('rs', 'list<real>');
+    for (const to of ['javascript', 'python']) {
+      const r = silent(() => compile(ce.box(['Map', 'Sin', 'rs']), { to }));
+      expect(r?.success).toBe(false);
+      expect(r?.run?.({ rs: [2, 3] })).toEqual([100, 100]);
+    }
+  });
+
+  it('refuses a host-declared `Reduce` combiner', () => {
+    ce.declare('Comb', {
+      signature: '(real, real) -> real',
+      evaluate: () => ce.number(7),
+    });
+    ce.declare('rs', 'list<real>');
+    for (const to of ['javascript', 'python']) {
+      const r = silent(() =>
+        compile(ce.box(['Reduce', 'rs', 'Comb', 0]), { to })
+      );
+      expect(r?.success).toBe(false);
+      expect(r?.run?.({ rs: [2, 3] })).toBe(7);
+    }
+  });
+
+  it('still compiles an operator whose `evaluate` is a function literal', () => {
+    ce.declare('MySqrt', {
+      signature: '(real) -> real',
+      evaluate: ['Function', ['Add', 'x', 100], 'x'],
+    });
+    ce.declare('rs', 'list<real>');
+    const r = compile(ce.box(['Map', 'MySqrt', 'rs']), { fallback: false });
+    expect(r?.success).toBe(true);
+    expect(r?.run?.({ rs: [2, 3] })).toEqual([102, 103]);
+  });
+
+  it('still compiles a built-in callback', () => {
+    ce.declare('rs', 'list<real>');
+    const r = compile(ce.box(['Map', 'Sqrt', 'rs']), { fallback: false });
+    expect(r?.success).toBe(true);
+    expect(r?.run?.({ rs: [4, 9] })).toEqual([2, 3]);
+  });
+});

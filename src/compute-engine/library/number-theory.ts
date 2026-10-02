@@ -1,6 +1,7 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type { Expression, SymbolDefinitions } from '../global-types.js';
 import { toBigint } from '../boxed-expression/numerics.js';
+import { checkArity } from '../boxed-expression/validate.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { rationalize } from '../numerics/rationals.js';
 import {
@@ -752,7 +753,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         '`Lucas` is an alias for `LucasL`, which is the preferred name. Returns the nth Lucas number.',
       signature: '(integer) -> integer',
-      canonical: ([n], { engine }) => engine._fn('LucasL', [n]),
+      canonical: (ops, { engine }) =>
+        engine._fn('LucasL', [...checkArity(engine, ops, 1)]),
     },
 
     CatalanNumber: {
@@ -1269,7 +1271,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'The nth prime number. `PrimeNumber` is an alias for `NthPrime`, which is the preferred name.',
       signature: '(integer) -> integer',
-      canonical: ([n], { engine }) => engine._fn('NthPrime', [n]),
+      canonical: (ops, { engine }) =>
+        engine._fn('NthPrime', [...checkArity(engine, ops, 1)]),
     },
 
     Totient: {

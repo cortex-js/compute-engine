@@ -415,6 +415,12 @@ function isUserFunction(sym: Expression): boolean {
     const systemScope = sym.engine.contextStack[0]?.lexicalScope;
     const systemDef = systemScope?.bindings.get(sym.symbol);
     if (isOperatorDef(systemDef) && systemDef.operator === opDef) return false;
+    // A copy or an extension of the builtin definition that keeps its
+    // `evaluate`, `canonical`, `compile` and `derivative` handlers, its
+    // `lazy` and `broadcastable` flags and its `evaluateAsync` handler is the
+    // builtin too (`shadowsLibraryName()`, `library-shadowing.ts`).
+    if (isOperatorDef(systemDef) && !shadowsLibraryName(sym.engine, sym.symbol))
+      return false;
     return true;
   }
   const value = sym.valueDefinition?.value;

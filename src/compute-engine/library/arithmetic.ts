@@ -16,6 +16,7 @@ import {
   checkNumericArgs,
   absentableCollectionOperandValue,
   absentScalarMarker,
+  checkArity,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
   listCoordinateTupleOperandError,
@@ -4299,7 +4300,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           : (x.isNegative && x.isInteger) || x.isExtendedReal === false
             ? 'unsigned'
             : undefined,
-      canonical: (args, { engine }) => engine._fn('Factorial', [args[0]]),
+      canonical: (args, { engine }) =>
+        engine._fn('Factorial', [...checkArity(engine, args, 1)]),
       evaluate: ([x], { numericApproximation }) => {
         const ce = x.engine;
 
@@ -5788,7 +5790,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Lb(8), N(Lb(3))]'],
       sgn: ([x]) => lnSign(x),
-      canonical: ([x], { engine }) => engine._fn('Log', [x, engine.number(2)]),
+      canonical: (ops, { engine }) => {
+        const [x, ...rest] = checkArity(engine, ops, 1);
+        return engine._fn('Log', [x, engine.number(2), ...rest]);
+      },
     },
 
     Lg: {
@@ -5799,7 +5804,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Lg(100), N(Lg(2))]'],
       sgn: ([x]) => lnSign(x),
-      canonical: ([x], { engine }) => engine._fn('Log', [x]),
+      canonical: (ops, { engine }) => {
+        // An extra operand stays after the base 10, so that it is not read
+        // as the base.
+        const [x, ...rest] = checkArity(engine, ops, 1);
+        return engine._fn(
+          'Log',
+          rest.length === 0 ? [x] : [x, engine.number(10), ...rest]
+        );
+      },
     },
 
     Log10: {
@@ -5809,7 +5822,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Log10(1000), N(Log10(2))]'],
       sgn: ([x]) => lnSign(x),
-      canonical: ([x], { engine }) => engine._fn('Log', [x]),
+      canonical: (ops, { engine }) => {
+        // An extra operand stays after the base 10, so that it is not read
+        // as the base.
+        const [x, ...rest] = checkArity(engine, ops, 1);
+        return engine._fn(
+          'Log',
+          rest.length === 0 ? [x] : [x, engine.number(10), ...rest]
+        );
+      },
     },
 
     Log2: {
@@ -5819,7 +5840,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Log2(32), N(Log2(3))]'],
       sgn: ([x]) => lnSign(x),
-      canonical: ([x], { engine }) => engine._fn('Log', [x, engine.number(2)]),
+      canonical: (ops, { engine }) => {
+        const [x, ...rest] = checkArity(engine, ops, 1);
+        return engine._fn('Log', [x, engine.number(2), ...rest]);
+      },
     },
 
     Mod: {

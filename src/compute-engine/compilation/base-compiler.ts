@@ -211,7 +211,9 @@ import type {
 import {
   builtinCallbackArity,
   builtinOperatorDefinition,
+  isHostOperatorCallback,
   isRefusableBuiltinCallback,
+  operatorCallbackArity,
 } from './builtin-callback.js';
 import {
   exactDoubleValue,
@@ -272,13 +274,13 @@ export function installUnrolledBigOpLane(
  * what the evaluation can do.
  *
  * NOT covered by this figure, deliberately: the Monte-Carlo fallback a
- * non-converged `Integrate` can take after the quadrature (1e7 samples of a
- * COMPILED integrand, `library/calculus.ts`). Its sample count is a
- * deterministic constant, so it is a bounded tail — comparable to the 2 s
- * the retired wall-clock budget tolerated — not a hang, and pricing it
- * would decline every constant integral from folding. `NIntegrate`, which
- * goes to that sample budget by design rather than as a fallback, is
- * declined outright in the pricing arm instead.
+ * non-converged `Integrate` or `NIntegrate` can take after the quadrature
+ * (1e7 samples of a COMPILED integrand, `integrateRealPart()` in
+ * `library/calculus.ts`). Its sample count is a deterministic constant, so
+ * it is a bounded tail — comparable to the 2 s the retired wall-clock budget
+ * tolerated — not a hang, and pricing it would decline every constant
+ * integral from folding. `NIntegrate` runs the same quadrature first and the
+ * same fallback after it, so it takes the same price.
  */
 const FOLD_QUADRATURE_EVALS = 45_000;
 
@@ -2023,6 +2025,51 @@ export class BaseCompiler {
     new Set(['Which']);
 
   /**
+   * The heads that the compiler lowers BY NAME in its own code, in addition
+   * to the heads a target lowers through its `functions` or `operators`
+   * table: the control-flow heads (`CONTROL_FLOW_HEADS`) and the heads that
+   * `compileExpr` and its helpers test by name before the user-function
+   * route. Each of these lowerings computes the LIBRARY operator, so a user
+   * definition that shadows one of these names must not reach it
+   * (`shadowedLibraryLoweringError()`).
+   */
+  private static readonly NAMED_LOWERING_HEADS: ReadonlySet<string> = new Set([
+    ...BaseCompiler.CONTROL_FLOW_HEADS,
+    'Abs',
+    'Norm',
+    'Equal',
+    'NotEqual',
+    'Less',
+    'LessEqual',
+    'Greater',
+    'GreaterEqual',
+    'And',
+    'Or',
+    'Not',
+    'Xor',
+    'Nand',
+    'Nor',
+    'Implies',
+    'Equivalent',
+    'Add',
+    'Subtract',
+    'Multiply',
+    'Divide',
+    'Negate',
+    'Power',
+    'Sqrt',
+    'Root',
+    'Ln',
+    'Log',
+    'Sign',
+    'IsMissing',
+    'Coalesce',
+    'Typed',
+    'Apply',
+    'Spread',
+  ]);
+
+  /**
    * Operator symbols that lower to a valid *binary infix* lambda
    * (`(a, b) => a ∘ b`) when a bare operator symbol is used in value position —
    * a first-class function such as a `Reduce` combiner. Only the binary
@@ -2554,6 +2601,15 @@ export class BaseCompiler {
     // (`ev(n: node)`) needs it, and its only callers are in the same unit.
     // Representation-DISJOINT sums are ordinary erased values and flow as
     // today.
+    // A head that a user definition shadows and that the compiler would
+    // lower as the library operator fails closed. `_compileInner` checks each
+    // node it compiles, but some lowerings handle a node without compiling it
+    // as a node (an `If` statement in a loop body), so the whole unit is
+    // checked here once, with the bodies of the user functions it calls.
+    if (BaseCompiler._compileDepth === 0) {
+      const error = BaseCompiler.findShadowedLibraryLowering(expr, target);
+      if (error !== undefined) throw new Error(error);
+    }
     if (BaseCompiler._compileDepth === 0) {
       const tagged = taggedSumInType(expr.engine, expr.type.type);
       if (tagged !== undefined)
@@ -5973,8 +6029,7 @@ export class BaseCompiler {
    *   (`foldCostEstimate` against `CONSTANT_FOLD_MAX_COST`), which prices one
    *   numeric quadrature at its worst case (`FOLD_QUADRATURE_EVALS`) and
    *   declines outright the heads whose work no syntax walk can price
-   *   (`NIntegrate`, `Limit`, `NLimit`, `Residue`, and a flat multi-limit
-   *   `Integrate`).
+   *   (`Limit`, `NLimit`, `Residue`, and a flat multi-limit `Integrate`).
    *
    * The evaluation itself runs under NO per-fold wall-clock deadline, and this
    * function arms none. The work estimate above is the only anti-hang gate, and
@@ -6777,9 +6832,13 @@ export class BaseCompiler {
     // (`Integrate(body, Limits(x, …), Limits(y, …))`) is the same iterated
     // work in one node — `nIntegrateMultiple` runs a complete inner
     // quadrature per outer sample — and two worst-case levels always
-    // exceed the ceiling, so it declines directly. `NIntegrate` declines
-    // too: it goes to the 1e7-sample Monte-Carlo path BY DESIGN
-    // (`library/calculus.ts`), a price that no fold survives.
+    // exceed the ceiling, so it declines directly. `NIntegrate(f, a, b)` is
+    // always one-dimensional and runs the same methods in the same order as
+    // a single-limit `Integrate(…).N()` (`integrateRealPart()`,
+    // `library/calculus.ts`: quadrature first, Monte Carlo only as the
+    // fallback), so it takes the same price. Its integrand can be the NAME
+    // of a user function (`NIntegrate(g, 0, 1)`): the name alone is one
+    // syntax node, so the body of `g` is added, once per evaluation.
     // An INDEFINITE integral takes the quadrature price although its
     // `.N()` stays symbolic: over-pricing it merely declines a fold that
     // could not have produced a number anyway.
@@ -6796,9 +6855,15 @@ export class BaseCompiler {
     if (op === 'Limit' || op === 'NLimit' || op === 'Residue') return Infinity;
 
     if (op === 'Integrate' || op === 'NIntegrate') {
-      if (op === 'NIntegrate') return Infinity;
-      if (ops.length > 2) return Infinity;
-      const body = BaseCompiler.foldCostEstimate(ops[0], depth + 1, c);
+      if (op === 'Integrate' && ops.length > 2) return Infinity;
+      let body = BaseCompiler.foldCostEstimate(ops[0], depth + 1, c);
+      if (op === 'NIntegrate' && isSymbol(ops[0]))
+        body += BaseCompiler.calleeBodyCost(
+          expr.engine,
+          ops[0].symbol,
+          depth,
+          c
+        );
       if (!Number.isFinite(body)) return Infinity;
       let boundsCost = 0;
       for (const operand of ops.slice(1)) {
@@ -6894,39 +6959,8 @@ export class BaseCompiler {
     // function applied ten times is analyzed once, so the estimator stays
     // linear in the program rather than in the call graph. A name already on
     // the path is recursive and has no static bound.
-    const literal = BaseCompiler.userFunctionLiteral(expr.engine, op);
-    let calleeCost = 0;
-    if (
-      literal !== undefined &&
-      isFunction(literal) &&
-      literal.ops.length > 0
-    ) {
-      const cached = c.cache.get(op);
-      if (cached !== undefined) {
-        // A genuine CACHE, not merely a cycle guard. Without it the name was
-        // added to a set for the duration of one expansion and removed on the
-        // way out, so a function called from N sibling positions was re-walked
-        // N times, independently, at every level — the estimator was
-        // exponential in the call graph while its own docstring claimed it was
-        // linear.
-        calleeCost = cached;
-      } else {
-        if (c.inProgress.has(op)) return Infinity; // recursive: no static bound
-        c.inProgress.add(op);
-        calleeCost = BaseCompiler.foldCostEstimate(
-          literal.ops[0],
-          depth + 1,
-          c
-        );
-        c.inProgress.delete(op);
-        // Only a settled answer is cached. An `Infinity` reached because the
-        // VISIT BUDGET ran out is a property of this walk, not of the
-        // function, so caching it would make the estimate depend on where the
-        // walk started — the very order-dependence this design removes.
-        if (Number.isFinite(calleeCost)) c.cache.set(op, calleeCost);
-      }
-      if (!Number.isFinite(calleeCost)) return Infinity;
-    }
+    const calleeCost = BaseCompiler.calleeBodyCost(expr.engine, op, depth, c);
+    if (!Number.isFinite(calleeCost)) return Infinity;
 
     let total = 1 + calleeCost;
     for (const operand of ops) {
@@ -6934,6 +6968,45 @@ export class BaseCompiler {
       if (total >= Infinity) return Infinity;
     }
     return total;
+  }
+
+  /**
+   * The cost of the BODY of the user function `name` for one call, for
+   * `foldCostEstimate`: `0` when `name` is not a user function (a library
+   * operator, a free symbol), `Infinity` when the function is recursive (it
+   * has no static bound).
+   */
+  private static calleeBodyCost(
+    engine: ComputeEngine,
+    name: string,
+    depth: number,
+    c: FoldCostContext
+  ): number {
+    const literal = BaseCompiler.userFunctionLiteral(engine, name);
+    if (
+      literal === undefined ||
+      !isFunction(literal) ||
+      literal.ops.length === 0
+    )
+      return 0;
+    const cached = c.cache.get(name);
+    // A genuine CACHE, not merely a cycle guard. Without it the name was
+    // added to a set for the duration of one expansion and removed on the
+    // way out, so a function called from N sibling positions was re-walked
+    // N times, independently, at every level — the estimator was
+    // exponential in the call graph while its own docstring claimed it was
+    // linear.
+    if (cached !== undefined) return cached;
+    if (c.inProgress.has(name)) return Infinity; // recursive: no static bound
+    c.inProgress.add(name);
+    const cost = BaseCompiler.foldCostEstimate(literal.ops[0], depth + 1, c);
+    c.inProgress.delete(name);
+    // Only a settled answer is cached. An `Infinity` reached because the
+    // VISIT BUDGET ran out is a property of this walk, not of the
+    // function, so caching it would make the estimate depend on where the
+    // walk started — the very order-dependence this design removes.
+    if (Number.isFinite(cost)) c.cache.set(name, cost);
+    return cost;
   }
 
   /**
@@ -7251,6 +7324,111 @@ export class BaseCompiler {
     return ce.function(expr.operator, ops);
   }
 
+  /**
+   * The error message when `head` names a library operator that a user
+   * definition shadows (`shadowsLibraryName()`) and the compiler would lower
+   * it as the library operator: the target maps it (`target.functions`,
+   * `target.operators`), or the compiler lowers it by name in its own code
+   * (`NAMED_LOWERING_HEADS`, such as `If`, `Loop`, `Sum` and `Block`).
+   * `undefined` when the head can be compiled.
+   *
+   * A shadowing definition with its own `compile` handler is exempt when the
+   * compiler consults that handler (`compileExpr`): for every head except
+   * the control-flow heads, which only `OVERRIDABLE_CONTROL_FLOW_HEADS`
+   * makes overridable. An unchanged copy of the library definition
+   * (`keepsLibraryOperator()`) is not a shadow, so it compiles as the
+   * library operator.
+   */
+  private static shadowedLibraryLoweringError(
+    engine: ComputeEngine,
+    head: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    if (
+      !BaseCompiler.NAMED_LOWERING_HEADS.has(head) &&
+      target.functions?.(head) === undefined &&
+      target.operators?.(head) === undefined
+    )
+      return undefined;
+    if (!shadowsLibraryName(engine, head, { customLibrary: false }))
+      return undefined;
+    const shadow = engine.lookupDefinition(head);
+    const handlerConsulted =
+      !BaseCompiler.CONTROL_FLOW_HEADS.has(head) ||
+      BaseCompiler.OVERRIDABLE_CONTROL_FLOW_HEADS.has(head);
+    if (
+      handlerConsulted &&
+      isOperatorDef(shadow) &&
+      shadow.operator.compile !== undefined
+    )
+      return undefined;
+    return (
+      `Could not compile \`${head}\`: a user definition shadows the library ` +
+      `operator \`${head}\`, and the compiler lowers \`${head}\` as the ` +
+      `library operator. The interpreter evaluates it instead.`
+    );
+  }
+
+  /**
+   * The first `shadowedLibraryLoweringError()` of a head in `expr`, or
+   * `undefined`. The walk also reads the user functions that the compiled
+   * code reaches by name: the body of a function literal (the value of a
+   * symbol, or the definition of an operator) and each clause of a
+   * multi-clause function. Each name is read once. Other symbol values are
+   * not read: the compiler compiles such a value as an expression, through
+   * `_compileInner`, which checks each node.
+   */
+  private static findShadowedLibraryLowering(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const engine = expr.engine;
+    const heads = new Map<string, string | undefined>();
+    const names = new Set<string>();
+    const seen = new Set<Expression>();
+    const viaName = (s: string): string | undefined => {
+      if (names.has(s)) return undefined;
+      names.add(s);
+      const literal = BaseCompiler.userFunctionLiteral(engine, s);
+      if (literal !== undefined) {
+        const found = visit(literal);
+        if (found !== undefined) return found;
+      }
+      const clauses = multiClauseState(engine.lookupDefinition(s))?.clauses;
+      for (const clause of clauses ?? []) {
+        const found = visit(clause.literal);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    const visit = (e: Expression): string | undefined => {
+      if (isSymbol(e)) return viaName(e.symbol);
+      if (isDictionary(e)) {
+        for (const v of e.values) {
+          const found = visit(v);
+          if (found !== undefined) return found;
+        }
+        return undefined;
+      }
+      if (!isFunction(e) || seen.has(e)) return undefined;
+      seen.add(e);
+      const h = e.operator;
+      if (!heads.has(h))
+        heads.set(
+          h,
+          BaseCompiler.shadowedLibraryLoweringError(engine, h, target)
+        );
+      const error = heads.get(h);
+      if (error !== undefined) return error;
+      for (const op of e.ops) {
+        const found = visit(op);
+        if (found !== undefined) return found;
+      }
+      return viaName(h);
+    };
+    return visit(expr);
+  }
+
   private static _compileInner(
     expr: Expression,
     target: CompileTarget<Expression>,
@@ -7270,25 +7448,16 @@ export class BaseCompiler {
     // A user definition that shadows a library operator (`function
     // Square(x) { x + 100 }`) is what the interpreter calls, but the target's
     // built-in lowering of the head (`Square(y)` → `y * y`, `Sin` →
-    // `Math.sin`) is the library's. Fail closed rather than emit the library
-    // operator: the interpreter evaluates the call instead. A shadowing
-    // definition that brings its own `compile` handler is exempt: the
-    // compiler consults that handler ahead of the built-in mapping.
+    // `Math.sin`, the compiler's own lowering of `If`) is the library's. Fail
+    // closed rather than emit the library operator: the interpreter evaluates
+    // the call instead. See `shadowedLibraryLoweringError()`.
     if (isFunction(expr)) {
-      const head = expr.operator;
-      if (
-        (target.functions?.(head) !== undefined ||
-          target.operators?.(head) !== undefined) &&
-        shadowsLibraryName(expr.engine, head, { customLibrary: false })
-      ) {
-        const shadow = expr.engine.lookupDefinition(head);
-        if (!(isOperatorDef(shadow) && shadow.operator.compile !== undefined))
-          throw new Error(
-            `Could not compile \`${head}\`: a user definition shadows the library ` +
-              `operator \`${head}\`, and the target lowers \`${head}\` as the ` +
-              `library operator. The interpreter evaluates it instead.`
-          );
-      }
+      const error = BaseCompiler.shadowedLibraryLoweringError(
+        expr.engine,
+        expr.operator,
+        target
+      );
+      if (error !== undefined) throw new Error(error);
     }
 
     // Is it a symbol?
@@ -7503,6 +7672,36 @@ export class BaseCompiler {
         // definition, a `vars` key, or a bound name is not affected.
         if (isRefusableBuiltinCallback(expr.engine, s))
           throw new Error(BaseCompiler.builtinCallbackRefusal(s));
+        // An operator the HOST declared with a JavaScript `evaluate` handler
+        // (or a definition that shadows a built-in name) is neither a
+        // function literal (the user-function route above) nor the built-in
+        // (the eta-expansion above). When the compiled code can apply it
+        // (a `compile` handler on its definition, or a lowering of the
+        // target, such as the `functions` option of `compile()`), it is
+        // eta-expanded into `(p) ↦ s(p)`, and the body compiles through that
+        // lowering, as `Map(Function(MyOp(t), t), xs)` does. Otherwise it has
+        // no function value the compiled code can call: fail closed, as for
+        // a built-in that does not expand. `Map(MySqrt, xs)` fell through to
+        // the free-symbol read `_.MySqrt`, and the artifact threw
+        // `_f is not a function` at run time.
+        if (isHostOperatorCallback(expr.engine, s)) {
+          const hostFn = BaseCompiler.ensureHostOperatorCallbackEmitted(
+            expr.engine,
+            s,
+            target
+          );
+          if (hostFn !== undefined && !hadVarsRef)
+            target.varsObjectRefs?.delete(s);
+          if (hostFn !== undefined && registry.lowering)
+            return registry.lowering.value({ id: s, name: hostFn, target });
+          if (hostFn !== undefined) return hostFn;
+          throw new Error(
+            `Could not compile \`${s}\` as a first-class function: the operator ` +
+              `has no function value that the compiled code can call. A ` +
+              `caller using the default \`fallback: true\` falls back to ` +
+              `interpreted evaluation.`
+          );
+        }
       }
       if (resolved !== undefined)
         return BaseCompiler.liftWideReference(expr, resolved, target);
@@ -26799,11 +26998,16 @@ export class BaseCompiler {
    * What the caller receives is the BROADCAST-AWARE name where the built-in
    * is element-wise (`builtinCallbackValueRef`), because the synthesized body
    * is written for scalars only.
+   *
+   * `hostArity` is the arity of an operator that the host declared, for
+   * `ensureHostOperatorCallbackEmitted()`: it replaces the eligibility check
+   * of a built-in.
    */
   static ensureBuiltinCallbackEmitted(
     engine: ComputeEngine,
     s: string,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    hostArity?: number
   ): string | undefined {
     const registry = target.userFunctions;
     if (!registry) return undefined;
@@ -26814,7 +27018,7 @@ export class BaseCompiler {
     if (registry.defs.has(name))
       return BaseCompiler.builtinCallbackValueRef(engine, s, name, target);
 
-    const arity = builtinCallbackArity(engine, s);
+    const arity = hostArity ?? builtinCallbackArity(engine, s);
     if (arity === undefined) return undefined;
 
     const params: Expression[] = [];
@@ -26836,6 +27040,39 @@ export class BaseCompiler {
     );
     if (emitted === undefined) return undefined;
     return BaseCompiler.builtinCallbackValueRef(engine, s, emitted, target);
+  }
+
+  /**
+   * If `s` names an operator that the host declared (`isHostOperatorCallback`)
+   * and that the compiled code can apply — its definition has a `compile`
+   * handler, or the target has a lowering for `s` (the `functions` option of
+   * `compile()`) — synthesize the wrapper `(p₁ … pₙ) ↦ s(p₁ … pₙ)` as
+   * `ensureBuiltinCallbackEmitted()` does, and return its shared local name.
+   * The body is an application of `s`, so it compiles through that lowering.
+   *
+   * `undefined` when there is no such lowering, when the signature has no
+   * fixed arity (`operatorCallbackArity()`), or when `s` shadows a library
+   * name that the compiler would lower as the library operator
+   * (`shadowedLibraryLoweringError()`): the lowering of the target is then
+   * the library one, which does not compute what the shadow computes.
+   */
+  private static ensureHostOperatorCallbackEmitted(
+    engine: ComputeEngine,
+    s: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const def = engine.lookupDefinition(s);
+    if (!isOperatorDef(def)) return undefined;
+    if (
+      def.operator.compile === undefined &&
+      target.functions?.(s) === undefined
+    )
+      return undefined;
+    if (BaseCompiler.shadowedLibraryLoweringError(engine, s, target))
+      return undefined;
+    const arity = operatorCallbackArity(def.operator);
+    if (arity === undefined) return undefined;
+    return BaseCompiler.ensureBuiltinCallbackEmitted(engine, s, target, arity);
   }
 
   /**

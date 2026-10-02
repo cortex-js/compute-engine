@@ -109,6 +109,17 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### `Log` and `Ln` accept extra operands in strict mode (OPEN, small — found 2026-10-01 by the review of the missing-operand fixes)
+
+With `ce.strict = true`, `Log(8, 2, 3)` stays `Log(8, 2, 3)`, is valid and
+evaluates to `3`, although the signature of `Log` allows at most two operands;
+`Ln(3, 4)` becomes `Log(3, 4)` (the logarithm in base 4), although `Ln` takes
+one operand. `Sqrt(4, 5)` and `Exp(1, 2)` correctly give an
+`unexpected-argument` operand. The canonical form of `Ln` and `Log`
+(`canonicalNumericOperator`, `boxed-expression/canonical-numeric.ts`, the
+`Ln`/`Log` fold) does not check the operand count. Fix: check the arity there
+(`checkArity`) as for the other operators, before the fold.
+
 ### The error bound of a quadrature that did not converge can be too small (OPEN, small — found 2026-10-01 by the review of quadrature for an integrand that does not compile)
 
 The numeric value of `Integrate(f, x, a, b)` keeps the adaptive Gauss–Kronrod
@@ -123,22 +134,98 @@ uncertainty is not a guarantee. One fix: widen the error of a result that did
 not converge to at least `|estimate| / √samples`; a faithful bound needs a
 singularity-aware rule (for example tanh-sinh).
 
-### `NIntegrate` never uses quadrature (OPEN, decision — found 2026-10-01 by the fix that gives `Integrate(…).N()` quadrature for an integrand that does not compile)
+A near-divergent power is worse, because the VALUE is wrong too, with a
+compiled integrand: ∫₀¹ x^(−0.999) dx = 1000 gives
+`508.24896298688 ± 0.00000000053`, and ∫₀¹ x^(−0.99) dx = 100 gives
+`99.922310890258 ± 0.000000000098`. Since 2026-10-01 `NIntegrate` uses the
+same quadrature (`integrateRealPart`, `library/calculus.ts`), so it gives the
+same values (`NIntegrate(x ↦ x^(−0.999), 0, 1)` is `508.2489629868758`).
 
-`Integrate(f, x, a, b).N()` uses adaptive Gauss–Kronrod quadrature, for a
-compiled and (since 2026-10-01) an interpreted integrand, and falls back to
-Monte Carlo only when the quadrature does not converge. `NIntegrate` always
-samples: it tries the oscillatory method on a semi-infinite interval, then
-Monte Carlo (1e7 samples compiled, 1e4 interpreted). So
-`NIntegrate(x ↦ x², 0, 1)` is a sampled value close to 1/3 with sampling
-noise, while `Integrate(x², x, 0, 1).N()` is `0.3333333333333333`.
-`test/compute-engine/derived-substreams.test.ts` states "`NIntegrate` always
-samples". The decision: keep `NIntegrate` as a sampling operator, or give it
-the quadrature first (more accurate and faster). With the quadrature first,
-`NIntegrate` still falls back to Monte Carlo when the quadrature does not
-converge, so it keeps `readsRandomFrame: true`, as `Integrate` does; only its
-results (where the quadrature succeeds) and that test's comment and integrand
-change.
+The divergence test of the quadrature (`shellsDiverge`,
+`numerics/gauss-kronrod.ts`) and the pole check at a bound
+(`endpointDivergesOnSide`, `symbolic/interior-pole.ts`) still leave these
+cases (measured 2026-10-01):
+
+- A logarithmic factor with a power very close to 1: ∫₀¹ t^(−0.995)·ln t dt =
+  −1/0.005² = −40000 gives `NaN` under `.N()` and `NIntegrate` (the
+  quadrature reads it as divergent; the pole check correctly gives no sign).
+  The quadrature separates `t^(−p)·ln t` from a divergence only for
+  `p < 0.995`.
+- A slowly convergent singularity at a NONZERO bound: the corner panel
+  reaches the spacing of the floating-point numbers after about 48
+  bisections, and the part of the tail closer to the bound is lost.
+  ∫₀¹ (1 − t)^(−0.95)·ln(1 − t) dt = −400 gives `NaN` (the tail was not shown
+  to shrink, `tailUnresolved`), and ∫₀¹ (1 − t)^(−0.95)·ln(10⁻⁶·(1 − t)) dt =
+  20·ln(10⁻⁶) − 400 = −676.31 gives `-235 ± 11`. A fix needs the distance to
+  the bound as the integration variable (for example `u = b − t`).
+- A pole with a large regular part at a NONZERO bound is not found by the
+  quadrature, for the same reason: ∫₀¹ (1/(1 − t) − 10⁵) dt (`+∞`) gives
+  `-99963.44 ± 0.58` under `.N()`, and ∫₀^{π/2} (tan t − 10⁴) dt (`+∞`) gives
+  `-15676.399 ± 0.077`. `.evaluate()` gives `+∞` for both.
+- ∫₀^½ dt/(t·ln t) diverges to `−∞` (`.evaluate()` gives `−∞`), but `.N()`
+  gives `-6.9392539460415 ± 0.0000000000048`: its shells shrink like `1/n`,
+  which the quadrature reads as convergent.
+- ∫₀¹ t⁻³⁰⁰ dt gives `+oo ± NaN` under `.N()` (a `Measurement` with no
+  error) instead of `+∞`: the integrand overflows at every node close to 0, so
+  the quadrature never sees a divergence.
+
+### `NIntegrate` does not evaluate the `Tuple`-limit forms its reference shows (OPEN, small — found 2026-10-01 by the work that gives `NIntegrate` quadrature first)
+
+The `NIntegrate` reference (`doc/81-reference-calculus.md`) shows
+`["NIntegrate", ["Power", "x", 2], ["Tuple", 0, 2]]` → `2.6666666666666665` and
+a double integral with two `Tuple` limits → `20.666666666666668`. Both stay
+unevaluated: `NIntegrate((x, y) => x^2 + y^2, (0, 2), (1, 3))`. The `canonical`
+and `evaluate` handlers (`library/calculus.ts`) read only the form
+`NIntegrate(f, a, b)` (`["NIntegrate", ["Power", "x", 2], 0, 2]` gives
+`2.6666666666666665`), although the signature declares
+`limits:(tuple|symbol)?`. Either read `Tuple` limits (one per parameter of
+`f`, iterated as `nIntegrateMultiple` does for `Integrate`) or correct the
+reference and the signature.
+
+### `∫₀¹ ln t dt` stays unevaluated under `.evaluate()` (OPEN, small — found 2026-10-01 by the fix for a pole at a bound)
+
+`Integrate(Ln(t), Limits(t, 0, 1)).evaluate()` stays unevaluated, although
+the integral is `−1` (`.N()` gives `-1.000000000000 ± 0.000000000086`). The
+antiderivative `t·ln t − t` evaluated at `0` is `0·(−∞)`, which is `NaN`, and
+a `NaN` difference keeps the integral unevaluated. The value at a finite
+bound must be the one-sided limit from inside the interval, as
+`improperEndpointValue` (`library/calculus.ts`) does for an infinite bound.
+`symbolicLimit(t·ln t − t, t, 0, +1)` gives `undefined` today, so that limit
+must be found first (`t·ln t → 0` as `t → 0⁺`).
+
+### The flat MathJSON form `["Integrate", f, "y", 0, "Pi"]` reads `Pi` as a second variable (OPEN, small — found 2026-10-01 by the fix for a pole at a bound)
+
+`canonicalLimitsSequence` (`library/utils.ts`) reads the flat spelling
+`["Integrate", f, "y", lo, hi]` as `Limits(y, lo, hi)` only when both bounds
+are number LITERALS. With a symbolic bound it reads something else:
+`["Integrate", ["Power", "y", 2], "y", 0, "Pi"]` canonicalizes to
+`Integrate(Function(y², y, Pi), Limits(y, Nothing, 0), Limits(Pi, Nothing,
+Nothing))` and evaluates to `-1/3 * pi` (the integral `∫₀^π y² dy` is
+`π³/3`). The flat form is not in the `Integrate` reference
+(`doc/81-reference-calculus.md` shows `..._var_:symbol` for indefinite
+integrals and `..._limits_:tuple` for definite ones), so the options are:
+read the flat form for any bound expressions, or stop reading it for number
+bounds too (the operands are then indefinite-integration variables, as the
+reference says).
+
+### The integral over a pole whose position is a free symbol is a finite closed form (OPEN, decision — found 2026-10-01 by the fix for a pole at `π`)
+
+`Integrate((y − a)⁻², Limits(y, 0, 4)).evaluate()` gives `-1/a - 1/(4 - a)`,
+with no condition, for a symbol `a` with no value. For `0 < a < 4` the
+integral is `+∞`, so the result is wrong there. The interior-pole check gives
+no verdict when the pole position is not a number. Options: keep the
+integral unevaluated when a pole of the denominator can be between the
+bounds, or give a conditional result (`When`), as is done for a parameter at
+an infinite bound.
+
+The same happens to the inner integral of an iterated integral when the pole
+position is the outer integration variable:
+`Integrate((y − x)⁻², Limits(y, 0, 10), Limits(x, 3, 4)).evaluate()` gives
+`int_(0)^(10)(-1 / (y - 3) + 1 / (y - 4) dy)`, where the inner value
+`1/(y − 4) − 1/(y − 3)` is negative for `3 < y < 4` while the inner integral
+is `+∞` there. The outer integral stays unevaluated, so no wrong number comes
+out, but the partial result is wrong. `.N()` gives `+∞` since 2026-10-01
+(`dependentPoleScan`, `library/calculus.ts`).
 
 ### Two leftovers of the extend mode of `ce.declare()` (OPEN, small — found 2026-10-01 by the work on issue #394)
 
@@ -223,27 +310,25 @@ The options:
 
 If nothing is decided, option 3 applies.
 
-### A copy of an arithmetic operator definition is differentiated and compiled as a user function (OPEN, decision — found 2026-10-01 by the fix of issue #394)
+### A copy under another name loses its name when its handler rewrites it to ANOTHER library operator (OPEN, decision — found 2026-10-01 by the fix for the chain of `MyNotEqual`)
 
-After `ce.declare('Sqrt', { ...ce.lookupDefinition('Sqrt').operator })`, the
-canonical form and the type of `Sqrt(…)` are the standard ones (the copy keeps
-the `canonical` handler of the library definition, `canonical-numeric.ts`).
-But `D` and `compile()` still treat the name as shadowed
-(`shadowsLibraryName`, `library-shadowing.ts`): `D(sqrt(sin(x)), x)` gives
-`cos(x) * Apply(Derivative(sqrt, 1), sin(x))` instead of
-`cos(x) / (2sqrt(sin(x)))`, and `compile()` fails closed and falls back to the
-interpreter (`success: false`, same value). The same holds for `Add`,
-`Multiply`, `Negate`, `Ln`, `Log`, `Power`, `Root` and `Divide` (`Square` and
-`Exp` canonicalize to `Power`, so they are not affected), and for any other
-library operator. The behavior is the same before and after the #394 fix. The
-decision to make: when a copy should count as the library operator for the
-derivative rules and for the compiled lowering. Options: (a) never, as now:
-the copy may override `evaluate`, and the library rule or `Math.sqrt` would
-then not compute what the interpreter computes; (b) when the copy keeps both
-the library `canonical` and `evaluate` handlers (an unchanged copy, or one
-that changes only metadata such as `description`); (c) whenever it keeps the
-`canonical` handler, since the canonical form already applies the library
-identities.
+A copy of a library definition under another name keeps its name when its
+`canonical` or `evaluate` handler builds nodes with the name of the library
+operator (`withOwnHead()`, `boxed-expression/utils.ts`). A handler that
+rewrites the call to a DIFFERENT library operator is not covered: with a copy
+`MyGreater` of `Greater`, `MyGreater(x, y)` boxes to `y < x`, a library
+`Less`, so a copy with its own `evaluate` handler never runs it. The rule
+cannot tell this rewrite from one that is the value of the call
+(`Rational(1, 2)` → `Divide(1, 2)`, a fold to a number). Options:
+
+1. Keep the rule: a rewrite to another head is the handler's decision. A
+   copy that needs its own `evaluate` must also have its own `canonical`.
+2. Do not run the library `canonical` handler for a copy under another name
+   that replaces `evaluate`: `MyGreater(x, y)` stays as written. The library
+   `evaluate` handlers then see the forms that their `canonical` handler
+   would have rewritten.
+
+If nothing is decided, option 1 applies.
 
 ### A named call through a variable with an INFERRED function type keeps the parameter order of the value it held when the call was made canonical (OPEN, decision — found 2026-10-01 by the fix for a variable declared `function`)
 

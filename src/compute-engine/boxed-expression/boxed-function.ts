@@ -208,6 +208,7 @@ import {
   isOperatorDef,
   isValueDef,
   normalizedUnknownsForSolve,
+  withOwnHead,
 } from './utils.js';
 import {
   broadcastContextMessage,
@@ -5537,6 +5538,18 @@ export class BoxedFunction
           // that reaches this step without going through it.
           effects: this.engine._evaluationEffects ?? this.engine.effects,
         });
+        // A copy of a library definition under another name keeps its head
+        // (`withOwnHead()`): the library handler of `Sin` returns `Sin(x)`
+        // for `MySin(x)`, and the nodes that the handler builds with the
+        // name `Sin` get the name `MySin`.
+        evalResult = withOwnHead(
+          this.engine,
+          this._operator,
+          'evaluate',
+          def.evaluate,
+          evalResult,
+          () => tail
+        );
       } catch (e) {
         evalResult = handlerThrowToErrorValue(
           this.engine,

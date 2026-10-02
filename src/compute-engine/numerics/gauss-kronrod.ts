@@ -256,8 +256,55 @@ const SHELL_BLOCK = 20;
  * BOTH read as non-divergent — their block ratios are `1 − B/n` and `1 − 2B/n`
  * at refinement depth `n`, i.e. both approach 1 from below and neither reaches
  * 0.99 inside the panel budget.
+ *
+ * A slowly varying factor can push the ratio of a CONVERGENT integral above
+ * this threshold for a while: `x^(−0.95)·ln x` sheds blocks in the ratio
+ * `2^(−1)·(m + 20)/m` at depth `m`, which is `1.28` at the first comparison and
+ * falls toward `0.5` only as the depth grows. So a ratio above the threshold
+ * is not enough: the ratio must also have stopped falling, or must stay above
+ * the threshold when its fall is extrapolated (see `shellsDiverge`).
  */
 const SHELL_DECAY = 0.99;
+
+/**
+ * The largest relative fall of the block ratio from one shell to the next
+ * that is still read as "the ratio has stopped falling".
+ *
+ * For a pole of order 1 or more the ratio is constant (`1/x`, `1/x²`) or
+ * approaches its limit geometrically (`tan x` at `π/2`, where the shells are
+ * `ln 2 + O(4^(−k))`), so it is flat to much better than this. With a
+ * logarithmic factor `lnᵠx` the ratio falls by about `20·q/m²` per shell at
+ * depth `m`: more than this bound until `m ≈ 300·√q`, by which point the
+ * ratio of an integrand `x^(−p)·lnᵠx` with `p < 0.995` is below
+ * `SHELL_DECAY`.
+ */
+const SHELL_TREND_FLAT = 2e-4;
+
+/**
+ * The largest quotient of two successive falls of the logarithm of the block
+ * ratio that is read as a GEOMETRIC fall.
+ *
+ * A pole with a large regular part (`1/(1 − x) − 100` at `x = 1`) has shells
+ * `ln 2 − 100·w` for a shell of width `w`, so its block ratio approaches 1
+ * from above, and the fall halves from one shell to the next. A logarithmic
+ * factor gives falls in the quotient `(m/(m + 1))²` at depth `m`, about 0.93
+ * at the first comparison and closer to 1 after. A geometric fall has the
+ * limit `ln r − d·γ/(1 − γ)` for the last fall `d` and the quotient `γ`.
+ */
+const SHELL_GEOMETRIC_FALL = 0.6;
+
+/**
+ * The margin, in halvings, added to the depth that `shellsDiverge` assumes
+ * when it extrapolates a falling ratio.
+ *
+ * The extrapolation assumes the fall comes from a factor `ln(1/x)ᵠ`, whose
+ * contribution to the logarithm of the ratio is `c/m` at depth `m`, where `m`
+ * counts halvings from a distance of 1 to the endpoint. A logarithm with a
+ * different scale (`ln(x/1000)`) shifts `m`. Assuming a DEEPER `m` than the
+ * true one makes the extrapolated limit LOWER than the true one, so the
+ * margin only delays a diagnosis of divergence; it never makes one.
+ */
+const SHELL_DEPTH_MARGIN = 2 * SHELL_BLOCK;
 
 /**
  * The smallest `|Σ shells| / Σ|shells|` a block must have for its sum to mean
@@ -268,6 +315,72 @@ const SHELL_DECAY = 0.99;
  * scores ~1 here.
  */
 const SHELL_COHERENCE = 0.5;
+
+/** Signed sum and total magnitude of the block of shells from `from`. */
+function blockSum(
+  shells: number[],
+  from: number
+): [sum: number, magnitude: number] {
+  let sum = 0;
+  let magnitude = 0;
+  for (let i = from; i < from + SHELL_BLOCK; i++) {
+    sum += shells[i];
+    magnitude += Math.abs(shells[i]);
+  }
+  return [sum, magnitude];
+}
+
+/**
+ * The ratio of the block of shells that ends at shell `end` (excluded) to the
+ * block before it, or `undefined` when the comparison is not available.
+ */
+function blockRatio(shells: number[], end: number): number | undefined {
+  if (end - 2 * SHELL_BLOCK < 0) return undefined;
+  const [recent, recentMag] = blockSum(shells, end - SHELL_BLOCK);
+  const [prior, priorMag] = blockSum(shells, end - 2 * SHELL_BLOCK);
+
+  // A non-finite block is not evidence either way: a deep enough shell makes
+  // ANY integrand with an unbounded endpoint overflow, convergent or not
+  // (`x^(−0.99)` reaches `1e320` at denormal `x`), so the comparison is
+  // simply unavailable.
+  if (!Number.isFinite(recent) || !Number.isFinite(prior) || prior === 0)
+    return undefined;
+
+  // Both block sums must be sums, not cancellation residues.
+  if (
+    Math.abs(recent) < SHELL_COHERENCE * recentMag ||
+    Math.abs(prior) < SHELL_COHERENCE * priorMag
+  )
+    return undefined;
+  return recent / prior;
+}
+
+/**
+ * Whether the refinement toward an endpoint stopped before it could tell a
+ * convergent tail from a divergent one: at some point the block ratio of the
+ * shells was at least `SHELL_DECAY` (with a block that carries more than the
+ * tolerance), and `shellsDiverge` deferred the decision because the ratio was
+ * still falling.
+ *
+ * This happens next to a NONZERO endpoint, where the corner panel reaches the
+ * spacing of the floating-point numbers after about 48 bisections, and the
+ * loop stops on `roundoffStop`: the falling ratio can belong to `(1 − x)^(−0.95)·ln(1 − x)` (convergent, but
+ * the part of the tail closer to 1 than the spacing holds almost half of the
+ * integral) or to `1/(1 − x) − 10⁴` (divergent).
+ */
+function tailUnresolved(shells: number[], tolerance: number): boolean {
+  // A corner that was bisected more than `3·SHELL_BLOCK` times had room for
+  // `shellsDiverge` to follow the fall of the ratio (an endpoint at 0 allows
+  // about 1000 bisections), so its decision stands.
+  if (shells.length > 3 * SHELL_BLOCK) return false;
+  for (let end = 2 * SHELL_BLOCK; end <= shells.length; end++) {
+    if (!(Math.abs(blockSum(shells, end - SHELL_BLOCK)[0]) > tolerance))
+      continue;
+    const ratio = blockRatio(shells, end);
+    if (ratio !== undefined && ratio >= SHELL_DECAY) return true;
+  }
+  return false;
+}
 
 /**
  * Whether a corner-shell sequence is the signature of a DIVERGENT endpoint.
@@ -294,44 +407,62 @@ const SHELL_COHERENCE = 0.5;
  * The sums are SIGNED, so a conditionally convergent oscillatory tail (whose
  * shells do not shrink but do cancel) is not misread as divergent, and a
  * negatively divergent integral (`−1/x`) still shows a ratio of 1.
+ *
+ * A ratio of at least `SHELL_DECAY` is not enough when the ratio is still
+ * falling: `x^(−0.95)·ln x` (convergent, `∫₀¹ = −400`) shows `1.28` at the
+ * first comparison. So the ratio is also computed one and two shells
+ * earlier. A ratio that has stopped falling means divergence; a falling one
+ * means divergence only when its extrapolated limit is at least
+ * `SHELL_DECAY` (see `SHELL_GEOMETRIC_FALL` and `SHELL_DEPTH_MARGIN`). `depth` is the number of halvings from a distance of 1 to the
+ * endpoint at the first shell, plus `SHELL_DEPTH_MARGIN`; the extrapolation
+ * reads the depth of a shell as its index plus `depth`.
  */
-function shellsDiverge(shells: number[], tolerance: number): boolean {
+function shellsDiverge(
+  shells: number[],
+  tolerance: number,
+  depth: number
+): boolean {
   const n = shells.length;
-  if (n < 2 * SHELL_BLOCK) return false;
-
-  // Signed sum and total magnitude of one block of shells.
-  const block = (from: number): [sum: number, magnitude: number] => {
-    let sum = 0;
-    let magnitude = 0;
-    for (let i = from; i < from + SHELL_BLOCK; i++) {
-      sum += shells[i];
-      magnitude += Math.abs(shells[i]);
-    }
-    return [sum, magnitude];
-  };
-
-  const [recent, recentMag] = block(n - SHELL_BLOCK);
-  const [prior, priorMag] = block(n - 2 * SHELL_BLOCK);
-
-  // A non-finite block is not evidence either way: a deep enough shell makes
-  // ANY integrand with an unbounded endpoint overflow, convergent or not
-  // (`x^(−0.99)` reaches `1e320` at denormal `x`), so the comparison is simply
-  // unavailable.
-  if (!Number.isFinite(recent) || !Number.isFinite(prior) || prior === 0)
-    return false;
+  if (n < 2 * SHELL_BLOCK + 2) return false;
+  const ratioAt = (end: number) => blockRatio(shells, end);
 
   // A non-shrinking tail below the requested tolerance cannot change the
   // answer; only a tail that actually carries mass is a divergence.
-  if (!(Math.abs(recent) > tolerance)) return false;
-
-  // Both block sums must be sums, not cancellation residues.
-  if (
-    Math.abs(recent) < SHELL_COHERENCE * recentMag ||
-    Math.abs(prior) < SHELL_COHERENCE * priorMag
-  )
+  if (!(Math.abs(blockSum(shells, n - SHELL_BLOCK)[0]) > tolerance))
     return false;
 
-  return recent / prior >= SHELL_DECAY;
+  // The ratio at the last three shells. Successive ratios share all but one
+  // shell of each block, so the comparisons need only `2·SHELL_BLOCK + 2`
+  // shells: next to a NONZERO endpoint `x₀` the corner panel can be bisected
+  // only about 48 times before its width reaches the spacing of the
+  // floating-point numbers near `x₀` (the loop then stops on `roundoffStop`).
+  const last = ratioAt(n);
+  const before = ratioAt(n - 1);
+  const first = ratioAt(n - 2);
+  if (last === undefined || before === undefined || first === undefined)
+    return false;
+  if (!(last >= SHELL_DECAY) || !(before > 0) || !(first > 0)) return false;
+
+  // The ratio has stopped falling: a pole of order 1 or more.
+  if (last >= before * (1 - SHELL_TREND_FLAT)) return true;
+
+  // The ratio is still falling: extrapolate its limit. The integral diverges
+  // only when the limit ratio is still at least `SHELL_DECAY`.
+  const fall = Math.log(before) - Math.log(last);
+  const previousFall = Math.log(first) - Math.log(before);
+  let limit: number;
+  if (previousFall > 0 && fall / previousFall <= SHELL_GEOMETRIC_FALL) {
+    // A geometric fall (see `SHELL_GEOMETRIC_FALL`).
+    const q = fall / previousFall;
+    limit = Math.log(last) - (fall * q) / (1 - q);
+  } else {
+    // A logarithmic factor: model the logarithm of the ratio as `L + c/m` at
+    // depth `m` (see `SHELL_DEPTH_MARGIN`), and solve for `L` from the last
+    // two ratios.
+    const m = n - SHELL_BLOCK + depth;
+    limit = m * Math.log(last) - (m - 1) * Math.log(before);
+  }
+  return limit >= Math.log(SHELL_DECAY);
 }
 
 /**
@@ -419,6 +550,13 @@ function adaptiveFinite(
   let cornerHi = panels[panels.length - 1];
   const shellsLo: number[] = [];
   const shellsHi: number[] = [];
+  // The depth of the first shell of each corner, for `shellsDiverge`: the
+  // number of halvings from a distance of 1 to the endpoint (0 for a corner
+  // panel wider than 1), plus a margin.
+  const depthOf = (p: Panel) =>
+    Math.max(0, Math.log2(1 / (p.b - p.a))) + SHELL_DEPTH_MARGIN;
+  const depthLo = depthOf(cornerLo);
+  const depthHi = depthOf(cornerHi);
 
   const tolerance = () => Math.max(atol, rtol * Math.abs(totalValue));
 
@@ -510,11 +648,27 @@ function adaptiveFinite(
     // denormal arguments — the point where the shed values overflow and the
     // diagnosis is no longer available.
     const tol = tolerance();
-    if (shellsDiverge(shellsLo, tol) || shellsDiverge(shellsHi, tol)) {
+    if (
+      shellsDiverge(shellsLo, tol, depthLo) ||
+      shellsDiverge(shellsHi, tol, depthHi)
+    ) {
       divergent = true;
       break;
     }
   }
+
+  // The refinement stopped on the floating-point spacing while the tail at an
+  // endpoint was not shown to shrink (see `tailUnresolved`). The estimate is
+  // then the sum of a truncated tail that may be far from the value, or the
+  // integral may diverge: it is reported as divergent, so that no finite value
+  // is given for it.
+  if (
+    roundoffStop &&
+    !divergent &&
+    (tailUnresolved(shellsLo, tolerance()) ||
+      tailUnresolved(shellsHi, tolerance()))
+  )
+    divergent = true;
 
   // No panel has a finite value, so the totals (which skip bad panels) hold
   // 0, and 0 is not the value of the integral. Report NaN, the same result
@@ -552,7 +706,9 @@ function adaptiveFinite(
  * Returns the `estimate`, an error `error` bound, whether the requested
  * tolerance was met (`converged`), and whether the integral was found to
  * DIVERGE (`divergent` — the shells shed by refinement toward an endpoint stop
- * shrinking, see `shellsDiverge`). A `divergent` result has no finite value:
+ * shrinking, see `shellsDiverge`, or the refinement reached the floating-point
+ * spacing at an endpoint before the shells were shown to shrink, see
+ * `tailUnresolved`). A `divergent` result has no finite value:
  * `estimate` is whatever the panel budget happened to accumulate before it ran
  * out, and callers must not report it (nor hand the integrand to a sampler,
  * which would launder the divergence into a plausible-looking number).

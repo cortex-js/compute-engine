@@ -1,4 +1,4 @@
-import { isValueDef } from './definition-guards.js';
+import { isOperatorDef, isValueDef } from './definition-guards.js';
 import type {
   Expression,
   OperatorDefinition,
@@ -48,6 +48,7 @@ import {
   rewriteWithBinders,
 } from './binders.js';
 import { declaredBinders } from './binding-sites.js';
+import { sameSyntactic } from './compare.js';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants
@@ -1812,4 +1813,151 @@ export async function numericFromExactValueAsync(
   });
   if (!isNumber(exact) || exact.isNaN === true) return undefined;
   return exact.N();
+}
+
+/**
+ * The `canonical` and `evaluate` handlers of the operator definitions in the
+ * system scope, whose bindings are `bindings`. `withOwnHead()` reads it to
+ * return early for a handler that no library definition holds (the handler
+ * of a user operator), which is the common case. Computed once per system
+ * scope, and again when the number of its bindings changes.
+ */
+function libraryHandlers(bindings: {
+  readonly size: number;
+  values(): Iterable<unknown>;
+}): ReadonlySet<unknown> {
+  const cached = LIBRARY_HANDLERS.get(bindings);
+  if (cached !== undefined && cached.size === bindings.size)
+    return cached.handlers;
+  const handlers = new Set<unknown>();
+  for (const binding of bindings.values()) {
+    const def = binding as Parameters<typeof isOperatorDef>[0];
+    if (!isOperatorDef(def)) continue;
+    if (def.operator.canonical) handlers.add(def.operator.canonical);
+    if (def.operator.evaluate) handlers.add(def.operator.evaluate);
+  }
+  LIBRARY_HANDLERS.set(bindings, { size: bindings.size, handlers });
+  return handlers;
+}
+
+const LIBRARY_HANDLERS = new WeakMap<
+  object,
+  { size: number; handlers: ReadonlySet<unknown> }
+>();
+
+/**
+ * The result of the `canonical` or `evaluate` handler `handler` of an
+ * operator definition, called for an operator named `name`, with the head
+ * `name` when the handler built its result with the name of the library
+ * operator it belongs to.
+ *
+ * Most library handlers build their result with their own operator name:
+ * the `canonical` handler of `Sin` returns `ce._fn('Sin', ops)`, and its
+ * `evaluate` handler returns `Sin(x)` for an argument with no exact value. A
+ * copy of the definition under another name (`const { name, ...sin } =
+ * ce.lookupDefinition('Sin').operator; ce.declare('MySin', sin)`) calls the
+ * same handlers, which would turn `MySin(x)` into `Sin(x)`: the copy would
+ * lose its head, and with it its own handlers. So when the head of the
+ * result is the name of the system-scope (library) definition that holds
+ * this same handler under `key`, and that name is not `name`, the result is
+ * built again with the head `name` and the same operands.
+ *
+ * A handler can also rewrite the call into OTHER nodes that contain the
+ * library operator: the `canonical` handler of `NotEqual` turns the chain
+ * `NotEqual(x, y, z)` into `And(NotEqual(x, y), NotEqual(y, z))`. Each node
+ * that the handler built with the name of a system-scope definition that
+ * holds this same handler is built again with the head `name`, so
+ * `MyNotEqual(x, y, z)` gives `And(MyNotEqual(x, y), MyNotEqual(y, z))`, and
+ * the handlers of the copy run on these nodes. `ops()` gives the operands
+ * of the call: a part of the result that is the same as an operand
+ * (`sameSyntactic()`, which compares the structure and the names, not the
+ * bindings, so that a raw operand compares with its canonical form) was not
+ * built by the handler, and is
+ * kept, also when it is the whole result (the `canonical` handler of `And`
+ * returns its single operand: `MyAnd(And(a, b))` gives `And(a, b)`). `ops()`
+ * is called only when the result holds a node to rename, and its operands
+ * are not canonicalized here: on the lazy route they are the raw operands,
+ * and canonicalizing them would declare their free symbols. Without `ops`,
+ * only the head of the result is checked.
+ *
+ * A handler can flatten an operand into the node it builds: the `canonical`
+ * handler of `And` turns `And(And(a, b), c)` into `And(a, b, c)`. A node
+ * whose operands hold all the operands of a call operand with the head of
+ * the library operator is not renamed, since the library node of the user
+ * would then be evaluated by the handlers of the copy. When this node is the
+ * result, the call is kept unflattened under the name of the copy:
+ * `Nand2(And(a, b), c)` gives `Nand2(And(a, b), c)`, with canonical operands
+ * (the handler canonicalized them to flatten them). A node below the result
+ * keeps the name of the library operator.
+ *
+ * Keeping the call as written (`MyNotEqual(x, y, z)`) would change its
+ * value: the library handlers read a chain of more than two operands of
+ * `NotEqual` only in the canonical form, so the evaluation of
+ * `NotEqual(1, 2, 1)` as written gives `False`, where the chain
+ * `1 ≠ 2 ∧ 2 ≠ 1` is `True`.
+ *
+ * A result with another head that holds no such node is a rewrite that the
+ * handler chose (the `canonical` handler of `Rational` gives a `Divide`, a
+ * fold gives a number), and is kept. When the system-scope definition of
+ * `name` holds the same handler, the handler is shared by two library
+ * operators, and the result is kept as well: its head could be a rewrite
+ * from one of them to the other.
+ */
+export function withOwnHead<T extends Expression | undefined | null>(
+  ce: ComputeEngine,
+  name: string,
+  key: 'canonical' | 'evaluate',
+  handler: unknown,
+  result: T,
+  ops?: () => ReadonlyArray<Expression>
+): T {
+  if (!result || !isFunction(result) || result.operator === name) return result;
+  const bindings = ce.contextStack[0]?.lexicalScope.bindings;
+  if (bindings === undefined || !libraryHandlers(bindings).has(handler))
+    return result;
+  const own = bindings.get(name);
+  if (isOperatorDef(own) && own.operator[key] === handler) return result;
+  const holdsHandler = (head: string): boolean => {
+    const library = bindings.get(head);
+    return isOperatorDef(library) && library.operator[key] === handler;
+  };
+  if (ops === undefined)
+    return holdsHandler(result.operator)
+      ? (ce._fn(name, result.ops) as T)
+      : result;
+  // True when `e` or a node below it has the library name of the handler.
+  const hasLibraryNode = (e: Expression): boolean =>
+    isFunction(e) &&
+    ((e.operator !== name && holdsHandler(e.operator)) ||
+      e.ops.some(hasLibraryNode));
+  if (!hasLibraryNode(result)) return result;
+  const operands = ops();
+  // True when the operands of `e` hold all the operands of a call operand
+  // with the library name: the handler flattened this operand into `e`.
+  const flattensOperand = (e: Expression): boolean =>
+    isFunction(e) &&
+    operands.some(
+      (op) =>
+        isFunction(op) &&
+        op.nops > 0 &&
+        holdsHandler(op.operator) &&
+        op.ops.every((x) => e.ops.some((y) => sameSyntactic(y, x)))
+    );
+  if (holdsHandler(result.operator) && flattensOperand(result)) {
+    if (operands.some((op) => sameSyntactic(op, result))) return result;
+    return ce._fn(
+      name,
+      operands.map((x) => x.canonical)
+    ) as T;
+  }
+  // The result with the head `name` on each node that the handler built with
+  // the library name. The same node object when nothing changed below it.
+  const rename = (e: Expression): Expression => {
+    if (!isFunction(e) || operands.some((op) => sameSyntactic(op, e))) return e;
+    const xs = e.ops.map(rename);
+    if (e.operator !== name && holdsHandler(e.operator) && !flattensOperand(e))
+      return ce._fn(name, xs);
+    return xs.every((x, i) => x === e.ops[i]) ? e : ce._fn(e.operator, xs);
+  };
+  return rename(result) as T;
 }

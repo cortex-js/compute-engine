@@ -33,8 +33,10 @@ import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/u
  *    sub-stream BEFORE the quadrature runs, so the sub-stream wiring is
  *    exercised and no sample is drawn.
  *
- *    `NIntegrate` always samples, so its test uses an integrand whose samples
- *    are complex and never finite (see that test): each of the two passes
+ *    `NIntegrate` runs the same quadrature first and samples only when the
+ *    quadrature fails. Its test uses an integrand whose samples are complex
+ *    and never finite (see that test): the quadrature gives no finite
+ *    estimate, so the Monte-Carlo fallback runs, and each of the two passes
  *    stops at the 32-sample viability probe. A finite complex integrand, such
  *    as `√(−1−x)`, draws 1e7 samples for each part, about 25s under jest,
  *    because one sample of the compiled complex integrand costs about 1µs in
@@ -284,37 +286,60 @@ describe('Integrate / NIntegrate derive a sub-stream', () => {
   });
 
   it('NIntegrate derives one too', () => {
-    // `NIntegrate` always samples, and does not take a sample count. To keep
-    // this test cheap, the integrand is `√(−1−x)·e^(e^(e^(10+x)))`: the triple
-    // exponential overflows to +∞, so each compiled sample is complex with a
-    // NaN real part and an infinite imaginary part. Because the samples are
-    // complex, both passes run (the real part, then the imaginary part), and
-    // the test still shows that the two passes use one sub-stream. Because no
-    // sample is finite, each pass stops at the 32-sample viability probe.
+    // `NIntegrate` samples only when its quadrature fails, and does not
+    // take a sample count. The integrand is `√(−1−x)·e^(e^(e^(10+x)))`: the
+    // triple exponential overflows to +∞, so each compiled sample is complex
+    // with a NaN real part and an infinite imaginary part. The quadrature
+    // then has no finite estimate, so the Monte-Carlo fallback runs. Because
+    // the samples are complex, both passes run (the real part, then the
+    // imaginary part), and the test shows that the two passes use one
+    // sub-stream. Because no sample is finite, each pass stops at the
+    // 32-sample viability probe, which keeps the test cheap.
     // With `√(−1−x)` alone, each pass drew 1e7 samples (about 25 s in jest).
-    const tags = tagsUsed((e) =>
-      e
-        .box([
-          'WithRandomSeed',
-          1,
-          [
-            'NIntegrate',
-            [
-              'Function',
-              [
-                'Multiply',
-                ['Sqrt', ['Subtract', -1, 'x']],
-                ['Exp', ['Exp', ['Exp', ['Add', 10, 'x']]]],
-              ],
-              'x',
-            ],
-            0,
+    // Count the draws too, to show that the fallback ran: the sub-stream is
+    // derived before the quadrature, so the tag alone does not show it.
+    let draws = 0;
+    const proto = Object.getPrototypeOf(ce) as {
+      _substream: (tag: number) => () => number;
+    };
+    const original = proto._substream;
+    proto._substream = function (this: ComputeEngine, tag: number) {
+      const stream = original.call(this, tag);
+      return () => {
+        draws += 1;
+        return stream();
+      };
+    };
+    let tags: number[];
+    try {
+      tags = tagsUsed((e) =>
+        e
+          .box([
+            'WithRandomSeed',
             1,
-          ],
-        ])
-        .N()
-    );
+            [
+              'NIntegrate',
+              [
+                'Function',
+                [
+                  'Multiply',
+                  ['Sqrt', ['Subtract', -1, 'x']],
+                  ['Exp', ['Exp', ['Exp', ['Add', 10, 'x']]]],
+                ],
+                'x',
+              ],
+              0,
+              1,
+            ],
+          ])
+          .N()
+      );
+    } finally {
+      proto._substream = original;
+    }
     expect(tags).toHaveLength(1);
+    // Two passes, each stopped by the 32-sample viability probe.
+    expect(draws).toBe(64);
   });
 });
 
