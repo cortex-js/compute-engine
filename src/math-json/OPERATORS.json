@@ -2072,6 +2072,21 @@
       "description": "Derivative operator that returns a derivative function."
     },
     {
+      "name": "Det",
+      "category": "Linear Algebra",
+      "arity": "1",
+      "signature": "(matrix) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "`Det` is an alias for `Determinant`, which is the preferred name. Determinant of a square matrix.",
+      "examples": [
+        "Det([[1, 2], [3, 4]])  // -2"
+      ]
+    },
+    {
       "name": "Determinant",
       "category": "Linear Algebra",
       "arity": "1",
@@ -2743,6 +2758,21 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Eulerian number A(n, m): number of permutations of {1..n} with exactly m ascents."
+    },
+    {
+      "name": "EulerPhi",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "`EulerPhi` is an alias for `Totient`, which is the preferred name. Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).",
+      "examples": [
+        "EulerPhi(12)  // 4"
+      ]
     },
     {
       "name": "Evaluate",
@@ -5404,8 +5434,8 @@
     {
       "name": "NIntegrate",
       "category": "Calculus",
-      "arity": "optional",
-      "signature": "(function, limits:(tuple|symbol)?) -> number",
+      "arity": "3",
+      "signature": "(function, lower:number, upper:number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5754,7 +5784,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Number of integer partitions of n."
+      "description": "Number of integer partitions of n, for n ≥ 0; it is 0 for n < 0."
     },
     {
       "name": "NthPrime",
@@ -6028,6 +6058,21 @@
       "examples": [
         "Partition([1, 2, 3, 4, 5], 2)",
         "Partition([1, 2, 3, 4, 5], x => x % 2 == 0)"
+      ]
+    },
+    {
+      "name": "PartitionsP",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "`PartitionsP` is an alias for `NPartition`, which is the preferred name. Number of integer partitions of n, for n ≥ 0; it is 0 for n < 0.",
+      "examples": [
+        "PartitionsP(5)  // 7"
       ]
     },
     {
@@ -8559,7 +8604,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n.",
+      "description": "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).",
       "wikidata": "Q190026"
     },
     {

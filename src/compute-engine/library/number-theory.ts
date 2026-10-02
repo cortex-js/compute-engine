@@ -35,8 +35,17 @@ import {
 } from '../numerics/dirichlet-character.js';
 import { bernoulliPolynomialRational } from '../numerics/bernoulli.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
+import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
-import { bigDirichletL } from '../numerics/special-functions.js';
+import { Complex } from 'complex-esm';
+import { BigDecimal } from '../../big-decimal/index.js';
+import type { BigNum } from '../numerics/types.js';
+import {
+  bigDirichletL,
+  bigHurwitzZeta,
+  digamma,
+} from '../numerics/special-functions.js';
+import { hurwitzZetaComplexWithError } from '../numerics/numeric-complex.js';
 import {
   boxBignumApprox,
   boxComplexResult,
@@ -1531,7 +1540,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Totient: {
       wikidata: 'Q190026',
       description:
-        "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n.",
+        "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).",
       // The `integer` carrier, like the other number-theory heads: φ counts
       // integers coprime to an integer, so a provably non-integer argument is
       // rejected at the signature with `incompatible-type` (ruling L9(a)).
@@ -1549,9 +1558,26 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // gate before it.
         if (n.isInteger !== true) return undefined;
         const k = toBigint(n);
-        if (k === null || k < 1) return undefined;
-        return ce.number(eulerPhi(k, ce._deadlineFrame));
+        if (k === null) return undefined;
+        // φ(0) = 0 and φ(−n) = φ(n), as in Mathematica's `EulerPhi` and in
+        // the Fungrim identities the engine loads (`Totient(−n) = Totient(n)`;
+        // `Totient(2n) = 2·Totient(n)` for even n ≥ 0 requires φ(0) = 0).
+        if (k === 0n) return ce.number(0);
+        return ce.number(eulerPhi(k < 0n ? -k : k, ce._deadlineFrame));
       },
+    },
+
+    // `EulerPhi` is the Wolfram Language name of `Totient`. It has the same
+    // meaning and the same single integer operand, so the canonical form is
+    // `Totient`: the output uses one spelling, and `isSame` and the rules see
+    // one operator. `ce.function()` validates the operand against the
+    // `Totient` signature, so the alias fails where `Totient` fails.
+    EulerPhi: {
+      description:
+        "`EulerPhi` is an alias for `Totient`, which is the preferred name. Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n).",
+      signature: '(integer) -> integer',
+      examples: ['EulerPhi(12)  // 4'],
+      canonical: (ops, { engine: ce }) => ce.function('Totient', ops),
     },
 
     Sigma0: {
@@ -1766,11 +1792,21 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     },
 
     NPartition: {
-      description: 'Number of integer partitions of n.',
+      description:
+        'Number of integer partitions of n, for n ≥ 0; it is 0 for n < 0.',
       signature: '(integer) -> integer',
       evaluate: ([n], { engine: ce }) => {
+        // `toBigint` rounds a non-integer, so the integrality test comes
+        // first: without it a non-integer that reaches the handler would get
+        // the value of the nearest integer (−0.5 would give p(0) = 1).
+        if (n.isInteger !== true) return undefined;
         const nn = toBigint(n);
-        if (nn === null || nn < 0n) return undefined;
+        if (nn === null) return undefined;
+        // p(n) = 0 for n < 0: no partition sums to a negative integer. This
+        // is the convention of the pentagonal recurrence below, of the Fungrim
+        // identity `NPartition(−n) = 0` the engine loads, and of
+        // Mathematica's `PartitionsP`.
+        if (nn < 0n) return ce.number(0);
         // Euler's pentagonal recurrence, bottom-up:
         // p(m) = Σ_{k≥1} (−1)^{k+1} (p(m − k(3k−1)/2) + p(m − k(3k+1)/2)),
         // with p(0) = 1 and p(j) = 0 for j < 0. The memoized recursion
@@ -1799,6 +1835,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         }
         return ce.number(P[N]);
       },
+    },
+
+    // `PartitionsP` is the Wolfram Language name of `NPartition`. It has the
+    // same meaning and the same single integer operand, so the canonical form
+    // is `NPartition`. `ce.function()` validates the operand against the
+    // `NPartition` signature, so the alias fails where `NPartition` fails.
+    PartitionsP: {
+      description:
+        '`PartitionsP` is an alias for `NPartition`, which is the preferred name. Number of integer partitions of n, for n ≥ 0; it is 0 for n < 0.',
+      signature: '(integer) -> integer',
+      examples: ['PartitionsP(5)  // 7'],
+      canonical: (ops, { engine: ce }) => ce.function('NPartition', ops),
     },
 
     IsTriangular: {
@@ -2239,7 +2287,10 @@ function evaluateDirichletL(
 ): Expression | undefined {
   if (k > DIRICHLET_L_MAX_MODULUS) return undefined;
   const numeric = shouldNumericize(numericApproximation, s);
-  const finish = (e: Expression) => (numeric ? e.N() : e.evaluate());
+  // A float s gives a float, also where the value is an integer
+  // (`DirichletL(3, 2, -1.0)` is the float 0).
+  const finish = (e: Expression) =>
+    floatIfFloatOperand([s], numeric ? e.N() : e.evaluate());
 
   // The odd character mod 4 is the Dirichlet beta function: L(1, χ₄) = π/4.
   if (k === 4 && j === 2) return finish(ce.function('DirichletBeta', [s]));
@@ -2251,6 +2302,12 @@ function evaluateDirichletL(
     return finish(
       ce.function('Multiply', [ce.function('Zeta', [s]), ...factors])
     );
+  }
+
+  // L(1, χ) of a real character in closed form (the class number formula).
+  if (isNumber(s) && s.isExact && s.isSame(1)) {
+    const exact = dirichletLAtOneExact(ce, k, j);
+    if (exact !== undefined) return finish(exact);
   }
 
   const sInt = s.isInteger === true ? toBigint(s) : null;
@@ -2309,32 +2366,298 @@ function evaluateDirichletL(
   // make the sum take minutes (a complex character at s = 10⁶), so it declines.
   if (Math.abs(s.re) > DIRICHLET_L_HURWITZ_MAX_ORDER) return undefined;
 
-  const terms: Expression[] = [];
+  // The value is complex and boxed as a machine number, so the terms are
+  // computed for a double, not at `ce.precision`: a real s sums bignum
+  // Hurwitz values at a fixed working precision (the terms are of size up to
+  // k^s and cancel to the result, so the digits of k are added), a complex s
+  // the double Hurwitz kernel, as `HurwitzZeta` does at a complex point.
+  const total = s.isComplex
+    ? dirichletLComplexS(k, j, ce.complex(s.re, s.im))
+    : dirichletLRealS(ce, k, j, bigRealOperand(ce, s));
+  return total !== undefined &&
+    Number.isFinite(total.re) &&
+    Number.isFinite(total.im)
+    ? boxComplexResult(ce, total, chi !== undefined && !s.isComplex)
+    : undefined;
+}
+
+/**
+ * Digits carried by `dirichletLRealS`: a double's 17 and a guard; the digits
+ * the cancelling terms cost are added per call.
+ */
+const DIRICHLET_L_MACHINE_DIGITS = 17 + 10;
+
+/**
+ * Most working digits `dirichletLRealS` takes on. Past it (|s| above about
+ * 2000/log₁₀ k) the value stays unevaluated rather than costing seconds.
+ */
+const DIRICHLET_L_MACHINE_MAX_DIGITS = 2000;
+
+/**
+ * k^(−s) Σ_r χ(r) ζ(s, r/k) for a real s and a complex character, to a
+ * double's precision: the ζ(s, r/k) are bignum Hurwitz values and the
+ * character values bignum cosines and sines, all at a working precision
+ * fixed by k and s, not by `ce.precision`. `undefined` when a Hurwitz value
+ * cannot be reached.
+ */
+function dirichletLRealS(
+  ce: ComputeEngine,
+  k: number,
+  j: number,
+  s: BigNum
+): { re: number; im: number } | undefined {
+  // The terms are of size up to k^s (s > 0) and the scale k^(−s) is as large
+  // as k^|s| (s < 0): either way the sum cancels by about |s|·log₁₀ k digits.
+  const working =
+    DIRICHLET_L_MACHINE_DIGITS +
+    Math.ceil((Math.abs(s.toNumber()) + 1) * Math.log10(k));
+  if (!(working <= DIRICHLET_L_MACHINE_MAX_DIGITS)) return undefined;
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = working;
+  try {
+    const twoPi = BigDecimal.PI.mul(2);
+    let re = BigDecimal.ZERO;
+    let im = BigDecimal.ZERO;
+    for (let r = 1; r <= k; r++) {
+      if ((r & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+      const q = dirichletCharacterExponent(k, j, r);
+      if (q === undefined) continue;
+      let zeta: BigNum | undefined;
+      try {
+        zeta = bigHurwitzZeta(ce, s, [BigInt(r), BigInt(k)]);
+      } catch {
+        zeta = undefined;
+      }
+      if (zeta === undefined) return undefined;
+      const angle = twoPi.mul(q[0]).div(q[1]);
+      re = re.add(zeta.mul(angle.cos()));
+      im = im.add(zeta.mul(angle.sin()));
+    }
+    const scale = new BigDecimal(k).pow(s.neg()); // k^(−s)
+    return { re: scale.mul(re).toNumber(), im: scale.mul(im).toNumber() };
+  } finally {
+    BigDecimal.precision = saved;
+  }
+}
+
+/**
+ * k^(−s) Σ_r χ(r) ζ(s, r/k) for a complex s, on the double Hurwitz kernel;
+ * `undefined` when a Hurwitz value declines.
+ */
+function dirichletLComplexS(
+  k: number,
+  j: number,
+  s: Complex
+): { re: number; im: number } | undefined {
+  let total = new Complex(0, 0);
   for (let r = 1; r <= k; r++) {
     const q = dirichletCharacterExponent(k, j, r);
     if (q === undefined) continue;
-    terms.push(
-      ce.function('Multiply', [
-        dirichletCharacterValue(ce, q),
-        ce.function('HurwitzZeta', [
-          s,
-          ce.function('Rational', [ce.number(r), ce.number(k)]),
-        ]),
-      ])
-    );
+    const zeta = hurwitzZetaComplexWithError(s, new Complex(r / k, 0))?.value;
+    if (zeta === undefined) return undefined;
+    const angle = (2 * Math.PI * q[0]) / q[1];
+    total = total.add(zeta.mul(new Complex(Math.cos(angle), Math.sin(angle))));
   }
-  const total = ce
+  return total.mul(new Complex(k, 0).pow(s.neg()));
+}
+
+/**
+ * L(1, χ) in closed form for a non-principal REAL character χ mod k, from the
+ * class number formula. χ is induced by the primitive character of a
+ * fundamental discriminant D, the Kronecker symbol (D/·), with |D| the
+ * conductor of χ and the sign of D the parity χ(−1). Then (DLMF 27.9,
+ * Davenport, "Multiplicative Number Theory", ch. 6)
+ *   L(1, (D/·)) = 2πh / (w·√|D|)  for D < 0 (w = 6, 4, 2 roots of unity for
+ *                                  D = −3, −4 and below),
+ *   L(1, (D/·)) = 2h·ln ε / √D    for D > 0 (ε > 1 the fundamental unit),
+ * with h the class number of Q(√D), and the primes p | k that do not divide
+ * D add their Euler factors 1 − (D/p)/p. `DirichletL(3, 2, 1)` is
+ * π/(3√3) and the quadratic character mod 5 gives 2·ln φ/√5.
+ *
+ * `undefined` (the value stays symbolic) for a complex or principal
+ * character, or a modulus above `DIRICHLET_L_EXACT_MAX_MODULUS`.
+ */
+function dirichletLAtOneExact(
+  ce: ComputeEngine,
+  k: number,
+  j: number
+): Expression | undefined {
+  if (j === 1 || k > DIRICHLET_L_EXACT_MAX_MODULUS) return undefined;
+  const chi = realCharacterValues(k, j);
+  if (chi === undefined) return undefined;
+  const f = realCharacterConductor(k, chi);
+  const D = chi[k - 2] * f; // χ(−1)·f; k ≥ 3 for a non-principal character
+  // The Euler factors Π (1 − (D/p)/p) of the primes of k that are not in D.
+  let num = 1n;
+  let den = 1n;
+  for (const p of bigPrimeFactors(BigInt(k)).keys()) {
+    if (p < 2n || BigInt(f) % p === 0n) continue;
+    const symbol = BigInt(kronecker(D, Number(p)));
+    num *= p - symbol;
+    den *= p;
+  }
+  if (D < 0) {
+    const h = classNumberNegative(D);
+    const w = D === -3 ? 6n : D === -4 ? 4n : 2n;
+    return ce
+      .function('Multiply', [
+        ce.number([2n * BigInt(h) * num, w * den]),
+        ce.Pi,
+        ce.function('Power', [ce.number(-D), ce.number([-1, 2])]),
+      ])
+      .evaluate();
+  }
+  const unit = fundamentalUnit(D);
+  if (unit === undefined) return undefined;
+  const [t, u, norm] = unit;
+  // h = L(1, (D/·))·√D / (2 ln ε), a positive integer; the value of L comes
+  // from the digamma sum in doubles. Each |ψ(r/k)| is below k/r + 1, so the
+  // sum is off by a few units in the last place of Σ (k/r + 1) ≤ k(ln k + 2),
+  // and after the division by k (and by the Euler factors, at least 1/5 for
+  // k ≤ 1000) L is off by less than 10⁻¹³. Then hReal is off by less than
+  // 10⁻¹³·√D/(2 ln ε) ≤ 10⁻¹¹ (ln ε ≥ ln φ, D ≤ 1000): the tolerance of
+  // 10⁻⁶ is far wider than the error and far narrower than the distance
+  // 1 between two integers. The unit must be the fundamental one: with ε^j
+  // in its place hReal would be h/j, an integer whenever j divides h.
+  let lValue = 0;
+  for (let r = 1; r <= k; r++)
+    if (chi[r - 1] !== 0) lValue += chi[r - 1] * digamma(r / k);
+  lValue = -lValue / k / (Number(num) / Number(den));
+  // ln ε = ln t + ln(1 + u√D/t) − ln 2, with (u√D/t)² = 1 − 4·norm/t²: t and
+  // u can pass the range of a double, ln t and 4/t² cannot.
+  const tDigits = t.toString().length;
+  const tShift = Math.max(0, tDigits - 15);
+  const lnT = Math.log(Number(t / 10n ** BigInt(tShift))) + tShift * Math.LN10;
+  const tSquared = Number(t) ** 2;
+  const lnUnit =
+    lnT + Math.log(1 + Math.sqrt(1 - (4 * norm) / tSquared)) - Math.LN2;
+  const hReal = (lValue * Math.sqrt(D)) / (2 * lnUnit);
+  const h = Math.round(hReal);
+  if (!(h >= 1 && Math.abs(hReal - h) < 1e-6)) return undefined;
+  const epsilon =
+    D === 5 && t === 1n && u === 1n
+      ? ce.symbol('GoldenRatio')
+      : ce.function('Divide', [
+          ce.function('Add', [
+            ce.number(t),
+            ce.function('Multiply', [
+              ce.number(u),
+              ce.function('Sqrt', [ce.number(D)]),
+            ]),
+          ]),
+          ce.number(2),
+        ]);
+  return ce
     .function('Multiply', [
-      ce.number(k).pow(s.neg()),
-      ce.function('Add', terms),
+      ce.number([2n * BigInt(h) * num, den]),
+      ce.function('Ln', [epsilon]),
+      ce.function('Power', [ce.number(D), ce.number([-1, 2])]),
     ])
-    .N();
-  // A complex value is a machine number, as for the other special functions.
-  return isNumber(total) &&
-    Number.isFinite(total.re) &&
-    Number.isFinite(total.im)
-    ? boxComplexResult(ce, total, !total.isComplex)
-    : undefined;
+    .evaluate();
+}
+
+/** Largest modulus for which `DirichletL(k, j, 1)` is given in closed form. */
+const DIRICHLET_L_EXACT_MAX_MODULUS = 1000;
+
+/**
+ * Most continued-fraction steps `fundamentalUnit` takes. The period of the
+ * expansion is below 2√D·(ln D + 2) steps (about 500 at D = 1000), so the
+ * cap only guards against a D that is not a fundamental discriminant.
+ */
+const FUNDAMENTAL_UNIT_MAX_STEPS = 100_000;
+
+/** The conductor of a real character mod k given by its values χ(1), …, χ(k): the least f | k with χ periodic mod f on the residues prime to k. */
+function realCharacterConductor(k: number, chi: readonly number[]): number {
+  for (let f = 1; f <= k; f++) {
+    if (k % f !== 0) continue;
+    const seen = new Map<number, number>();
+    let periodic = true;
+    for (let r = 1; r <= k && periodic; r++) {
+      const c = chi[r - 1];
+      if (c === 0) continue;
+      const previous = seen.get(r % f);
+      if (previous === undefined) seen.set(r % f, c);
+      else if (previous !== c) periodic = false;
+    }
+    if (periodic) return f;
+  }
+  return k;
+}
+
+/** The Kronecker symbol (D/p) for a prime p. */
+function kronecker(D: number, p: number): number {
+  if (p === 2) {
+    if (D % 2 === 0) return 0;
+    const r = ((D % 8) + 8) % 8;
+    return r === 1 || r === 7 ? 1 : -1;
+  }
+  const a = ((D % p) + p) % p;
+  if (a === 0) return 0;
+  // Euler's criterion: a^((p−1)/2) mod p is 1 or p − 1.
+  return modPow(BigInt(a), BigInt((p - 1) / 2), BigInt(p)) === 1n ? 1 : -1;
+}
+
+/**
+ * The class number h(D) of a negative discriminant D: the number of reduced
+ * forms ax² + bxy + cy² with b² − 4ac = D, |b| ≤ a ≤ c, and b ≥ 0 when
+ * |b| = a or a = c.
+ */
+function classNumberNegative(D: number): number {
+  let h = 0;
+  for (let a = 1; 3 * a * a <= -D; a++) {
+    for (let b = -a + 1; b <= a; b++) {
+      const n = b * b - D;
+      if (n % (4 * a) !== 0) continue;
+      const c = n / (4 * a);
+      if (c < a) continue;
+      if (a === c && b < 0) continue;
+      h += 1;
+    }
+  }
+  return h;
+}
+
+/**
+ * The fundamental unit ε = (t + u√D)/2 > 1 of Q(√D) for a positive
+ * fundamental discriminant D > 4, as [t, u, norm] with t² − D·u² = 4·norm,
+ * norm = ±1. For D = 376 = 4·94 it is t = 4286590, u = 221064.
+ *
+ * The integers of Q(√D) are x + y·ω, ω = (σ + √D)/2, σ = D mod 2. The
+ * conjugate of ε is ε′ = p − q·ω with q = u and p = (t + σu)/2, and
+ * |ε′| = 1/ε, so |ω − p/q| = 1/(εq). That is below 1/(2q²) when ε > 2q,
+ * which holds for every D > 5 (t ≥ √(Du² − 4) and u√D add to more than 4u),
+ * and then p/q is a convergent of the continued fraction of ω by Legendre's
+ * theorem; at D = 5, ε = (1 + √5)/2 comes from the first convergent 1/1. The expansion is
+ * walked in exact integers, θ = (P + √D)/Q from P = σ, Q = 2, and the first
+ * convergent p/q with (2p − σq)² − D·q² = ±4 has the least q = u, so it gives
+ * the fundamental unit (its powers have larger u). `undefined` past
+ * `FUNDAMENTAL_UNIT_MAX_STEPS`.
+ */
+function fundamentalUnit(D: number): [bigint, bigint, number] | undefined {
+  let root = Math.floor(Math.sqrt(D));
+  while (root * root > D) root -= 1;
+  while ((root + 1) * (root + 1) <= D) root += 1;
+  const d = BigInt(D);
+  const s = BigInt(root); // ⌊√D⌋
+  const sigma = d % 2n;
+  let P = sigma;
+  let Q = 2n;
+  // Convergents p/q, from p₋₁/q₋₁ = 1/0 and p₋₂/q₋₂ = 0/1.
+  let [p, pPrevious] = [1n, 0n];
+  let [q, qPrevious] = [0n, 1n];
+  for (let step = 0; step < FUNDAMENTAL_UNIT_MAX_STEPS; step++) {
+    if (Q <= 0n) return undefined; // not a reduced expansion: D is not valid
+    const a = (P + s) / Q; // ⌊(P + √D)/Q⌋, as √D is irrational
+    [p, pPrevious] = [a * p + pPrevious, p];
+    [q, qPrevious] = [a * q + qPrevious, q];
+    const t = 2n * p - sigma * q;
+    const norm = t * t - d * q * q;
+    if (t > 0n && (norm === 4n || norm === -4n))
+      return [t, q, norm > 0n ? 1 : -1];
+    P = a * Q - P;
+    Q = (d - P * P) / Q;
+  }
+  return undefined;
 }
 
 /** The values χ(1), …, χ(k) when the character takes only 0 and ±1, else `undefined`. */

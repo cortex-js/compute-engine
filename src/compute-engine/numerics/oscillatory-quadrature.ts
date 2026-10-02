@@ -3,6 +3,7 @@ import {
   getAmbientDeadline,
   type DeadlineFrame,
 } from '../../common/interruptible.js';
+import { adaptiveQuadrature } from './gauss-kronrod.js';
 
 /**
  * Quadrature for **conditionally-convergent oscillatory** semi-infinite
@@ -28,14 +29,29 @@ export function integrateSemiInfiniteOscillatory(
   const MAX_LOBES = 2000;
   const TOL = 1e-12;
 
-  // Start just inside the interval if f is singular at the endpoint (sin x/x at
-  // 0 evaluates to 0/0 = NaN); the skipped sliver is negligible.
+  // When f is not finite at the endpoint (sin x/x at 0 evaluates to 0/0 =
+  // NaN), the scan for the first zero starts just inside the interval, and
+  // the first lobe, from `a` to that zero, is integrated by the adaptive
+  // Gauss–Kronrod quadrature, which does not evaluate f at `a` and resolves
+  // a singularity there (`sin x/x^1.5` is about `x^(−½)` next to 0). Its
+  // error is added to the error of the result. The first lobe was integrated
+  // by adaptive Simpson from `a + 10⁻⁸`, and the sliver `[a, a + 10⁻⁸]` was
+  // left out: `∫₀^∞ sin x/x dx` was `π/2 − 1e-8`, 40 times the reported
+  // error, and `∫₀^∞ sin x/x^1.5 dx = √(2π)` was off by `4.0e-5`, with a
+  // reported error of `1.3e-10` (Simpson's smallest panel, `π/2²⁴`, is
+  // wider than the distance to the singularity). A first lobe whose integral
+  // diverges or does not converge gives `null`.
   let start = a;
-  if (!Number.isFinite(f(start))) {
-    const eps = Math.max(1e-8, Math.abs(a) * 1e-8);
-    start = a + eps;
+  const singularStart = !Number.isFinite(f(start));
+  if (singularStart) {
+    start = a + Math.max(1e-8, Math.abs(a) * 1e-8);
     if (!Number.isFinite(f(start))) return null;
   }
+  let firstLobeError = 0;
+  const withFirstLobe = (r: { estimate: number; error: number }) => ({
+    estimate: r.estimate,
+    error: r.error + firstLobeError,
+  });
 
   const lobes: number[] = [];
   let cur = start;
@@ -48,7 +64,21 @@ export function integrateSemiInfiniteOscillatory(
       if (lobes.length < 3) return null; // not (reliably) oscillatory
       break;
     }
-    lobes.push(adaptiveSimpson(f, cur, z, TOL, deadline));
+    if (k === 0 && singularStart) {
+      const r = adaptiveQuadrature(f, a, z, {
+        singularEndpoints: true,
+        deadline,
+      });
+      if (
+        r.divergent ||
+        !(r.converged || r.extrapolated === true) ||
+        !Number.isFinite(r.estimate) ||
+        !Number.isFinite(r.error)
+      )
+        return null;
+      lobes.push(r.estimate);
+      firstLobeError = r.error;
+    } else lobes.push(adaptiveSimpson(f, cur, z, TOL, deadline));
     prevWidth = z - cur;
     cur = z;
 
@@ -59,7 +89,7 @@ export function integrateSemiInfiniteOscillatory(
     if (lobes.length >= 6 && lobes.length % 2 === 0 && lobesDecaying(lobes)) {
       const conv = acceleratedEstimate(lobes);
       if (conv && conv.error < 1e-9 * (1 + Math.abs(conv.estimate)))
-        return conv;
+        return withFirstLobe(conv);
     }
   }
 
@@ -70,7 +100,7 @@ export function integrateSemiInfiniteOscillatory(
   const final = acceleratedEstimate(lobes);
   if (!final || !Number.isFinite(final.estimate)) return null;
   if (final.error > 1e-4 * (1 + Math.abs(final.estimate))) return null;
-  return final;
+  return withFirstLobe(final);
 }
 
 /**

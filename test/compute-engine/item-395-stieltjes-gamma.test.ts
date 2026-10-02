@@ -6,6 +6,7 @@ import {
   bigStieltjesGamma,
   stieltjesGammaReal,
 } from '../../src/compute-engine/numerics/stieltjes';
+import { ddLn } from '../../src/compute-engine/numerics/double-double';
 
 const ce = new ComputeEngine();
 
@@ -191,5 +192,111 @@ describe('StieltjesGamma, compiled', () => {
     expect(run({ sg_a: 0.5 })).toBeCloseTo(0.9688644752202907, 13);
     expect(run({ sg_a: -0.5 })).toBeNaN(); // complex value
     expect(stieltjesGammaReal(STIELTJES_MAX_ORDER + 1, 1)).toBeNaN();
+  });
+
+  // mpmath stieltjes(n, a) at 30 digits. The double sum cancels at a high
+  // order and a small a: before the fix the compiled γ₃₀ was
+  // 0.003557728327971422 (7 correct digits) and γ₃₀(0.5) was
+  // −0.0035240594494571897 (6 correct digits).
+  const MPMATH: [n: number, a: number, value: number][] = [
+    [10, 1, 0.0002053328149090647946837],
+    [20, 1, 0.0004663435615115594494006],
+    [25, 1, -0.001074591952738488824724],
+    [30, 1, 0.003557728855573160947914],
+    [10, 0.5, 0.05099765764051385709056],
+    [20, 0.5, 0.0008443870718123552938947],
+    [30, 0.5, -0.003524062652271524663168],
+    [19, 2.5, -0.0005037639807889105729928],
+    [30, 2.5, -0.003557620480133505267414],
+    [20, 10, -1158771.696781033806946],
+    [30, 10, -2510579572.177699686535],
+    [10, 0.001, 247382762074.8453587553],
+    [19, 0.001, -8859351337761498072.609],
+  ];
+  test.each(MPMATH)(
+    'compiled γ_%p(%p) is good to a double',
+    (n, a, expected) => {
+      const run = compile(ce.box([S, 'sg_n', 'sg_a']))?.run as (
+        scope: Record<string, number>
+      ) => number;
+      const run1 = compile(ce.box([S, 'sg_n']))?.run as (
+        scope: Record<string, number>
+      ) => number;
+      const actual = run({ sg_n: n, sg_a: a });
+      expect(Math.abs(actual - expected)).toBeLessThan(
+        2e-15 * Math.abs(expected)
+      );
+      if (a === 1) expect(run1({ sg_n: n })).toBe(actual);
+    }
+  );
+});
+
+describe('StieltjesGamma digits', () => {
+  // mpmath: stieltjes(30) = 0.0035577288555731609479135377489084026108…
+  test('γ₃₀ at machine precision is good to a double', () => {
+    const saved = ce.precision;
+    ce.precision = 'machine';
+    try {
+      expect(numeric([S, 30]).re).toBeCloseTo(0.0035577288555731609, 17);
+    } finally {
+      ce.precision = saved;
+    }
+  });
+  test('the certified kernel returns only the digits asked for', () => {
+    const v = bigStieltjesGamma(30, [1n, 1n], 30)!;
+    expect(v.toString()).toBe('0.00355772885557316094791353774891');
+  });
+});
+
+test('a float a at a pole is ComplexInfinity', () => {
+  expect(
+    ce
+      .function(S, [ce.box(1), ce.parse('-2.0')])
+      .evaluate()
+      .toString()
+  ).toBe('~oo');
+});
+
+describe('ddLn, the double-double logarithm of the compiled kernel', () => {
+  // mpmath log(x) at 50 digits, as the double nearest it and the double
+  // nearest the rest. Below 2⁻¹⁰²³ the scaling factor overflowed (NaN), and
+  // near the largest double it was subnormal (the low part was lost).
+  const CASES: [number, number, number][] = [
+    [2, 0.6931471805599453, 2.3190468138462996e-17],
+    [6.001, 1.7919261220073759, -3.6549017351110937e-17],
+    [1e-310, -713.8013788281542, -8.592254740270771e-15],
+    [1e-320, -736.8272408909739, 3.356216196017685e-14],
+    [1.7e308, 709.7268368932282, 3.0936421257994655e-14],
+  ];
+  test.each(CASES)('ln(%p)', (x, hi, lo) => {
+    const [h, l] = ddLn([x, 0]);
+    expect(h).toBe(hi);
+    expect(Math.abs(l - lo)).toBeLessThan(1e-30 * Math.abs(hi));
+  });
+});
+
+describe('StieltjesGamma, compiled, at an extreme a', () => {
+  // The double-double kernel overflows for an a near 10¹⁵⁴ (a·a in its
+  // products) and for a term near 10³⁰⁰; there the double kernel, which does
+  // not cancel, gives the value. For a large a, γₙ(a) is
+  // −lnⁿ⁺¹(a)/(n+1) + lnⁿ(a)/(2a) to far below a double (mpmath).
+  const LARGE: [number, number, number][] = [
+    [0, 1e154, -354.59810432108304],
+    [1, 1e154, -62869.907794052844],
+    [5, 1e154, -331334918046288.21],
+    [0, 1e200, -460.51701859880914],
+    [1, 1e200, -106037.96220956796],
+    [5, 1e200, -1589728117991947.0],
+    [0, 1e308, -709.19620864216607],
+    [1, 1e308, -251479.63117621137],
+    [5, 1e308, -21205434754962446.0],
+    // γ₁(a) = ln(a)/a + γ₁(1 + a): ln(10⁻³⁰⁰)/10⁻³⁰⁰ dominates.
+    [1, 1e-300, -6.907755278982137e302],
+  ];
+  test.each(LARGE)('γ_%p(%p)', (n, a, expected) => {
+    const actual = stieltjesGammaReal(n, a);
+    expect(Math.abs(actual - expected)).toBeLessThan(
+      2e-15 * Math.abs(expected)
+    );
   });
 });

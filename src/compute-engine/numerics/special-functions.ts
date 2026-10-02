@@ -3,6 +3,7 @@ import type { IComputeEngine as ComputeEngine } from '../global-types.js';
 import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { bigStieltjesGamma, STIELTJES_MAX_ORDER } from './stieltjes.js';
 import {
   type DD,
   ddAdd,
@@ -53,6 +54,23 @@ export function gammaln(z: number): number {
   // Exact zeros of ln Γ: Γ(1) = Γ(2) = 1.
   if (z === 1 || z === 2) return 0;
 
+  // Near 0, 1 and 2 the Lanczos form loses digits: it forms z − 1 + i, so a
+  // small z loses its low digits (ln Γ(1e−10) had 8 correct digits), and
+  // near the zeros at 1 and 2 its absolute error of about 1e−16 is a large
+  // relative one. There the Taylor series about 1 is used, with z − 1 and
+  // z − 2 exact (Sterbenz):
+  //   ln Γ(z) = ln Γ(1 + z) − ln z            (0 < z ≤ ½)
+  //   ln Γ(z) = ln Γ(1 + (z − 1))              (½ < z ≤ 3/2)
+  //   ln Γ(z) = ln Γ(1 + (z − 2)) + ln(z − 1)  (3/2 < z ≤ 5/2)
+  //   ln Γ(z) = ln Γ(1 + (z − 3)) + ln((z − 1)(z − 2))  (5/2 < z ≤ 7/2)
+  if (z <= 0.5) return lnGamma1p(z) - Math.log(z);
+  if (z <= 1.5) return lnGamma1p(z - 1);
+  if (z <= 2.5) return lnGamma1p(z - 2) + Math.log1p(z - 2);
+  if (z <= 3.5) {
+    const e = z - 3;
+    return lnGamma1p(e) + Math.log1p(e) + Math.log(2 + e);
+  }
+
   const zz = z - 1;
   let x = lanczos_7_c[0];
   for (let i = 1; i < gammaG + 2; i++) x += lanczos_7_c[i] / (zz + i);
@@ -60,6 +78,56 @@ export function gammaln(z: number): number {
   return (
     0.5 * Math.log(2 * Math.PI) + (zz + 0.5) * Math.log(t) - t + Math.log(x)
   );
+}
+
+/** ζ(k) − 1 for k = 2 … `LN_GAMMA_1P_TERMS`, built on first use. */
+let zetaMinusOneTable: number[] | undefined;
+
+/** Terms of `lnGamma1p`: (½)ᵏ/k is below 1e−17 past k = 50. */
+const LN_GAMMA_1P_TERMS = 56;
+
+/**
+ * ln Γ(1 + e) for |e| ≤ ½, from the Taylor series about 1 (DLMF 5.7.3),
+ *   ln Γ(1 + e) = −γe + Σ_{k≥2} (−1)ᵏ ζ(k) eᵏ / k,
+ * with ζ(k) = 1 + (ζ(k) − 1) and the 1s summed in closed form,
+ * Σ_{k≥2} (−1)ᵏ eᵏ / k = e − ln(1 + e), so the remaining terms shrink like
+ * (|e|/2)ᵏ. Accurate to a few ulps relative, also as e → 0.
+ */
+function lnGamma1p(e: number): number {
+  if (zetaMinusOneTable === undefined) {
+    zetaMinusOneTable = [0, 0];
+    for (let k = 2; k <= LN_GAMMA_1P_TERMS; k++)
+      // The direct sum Σ_{n≥2} n^{−k} keeps the relative accuracy that
+      // forming ζ(k) − 1 from ζ(k) loses as k grows.
+      zetaMinusOneTable.push(zetaMinusOneDirect(k));
+  }
+  let sum = 0;
+  let power = -e; // (−e)ᵏ, from k = 2 after the first step
+  for (let k = 2; k <= LN_GAMMA_1P_TERMS; k++) {
+    power *= -e;
+    const term = (zetaMinusOneTable[k] * power) / k;
+    sum += term;
+    if (Math.abs(term) < 1e-18 * Math.abs(sum)) break;
+  }
+  return (1 - EULER_MASCHERONI) * e - Math.log1p(e) + sum;
+}
+
+/** ζ(k) − 1 = Σ_{n≥2} n^{−k} in doubles for an integer k ≥ 2, with the tail by Euler–Maclaurin. */
+function zetaMinusOneDirect(k: number): number {
+  // Σ_{n=2}^{N−1} n^{−k} + N^{1−k}/(k−1) + N^{−k}/2 + k·N^{−k−1}/12
+  //   − k(k+1)(k+2)·N^{−k−3}/720 + …; at N = 50 the first term left out,
+  // B₈/8!·k(k+1)⋯(k+6)·N^{−k−7}, is below 1e−17 relative for every k ≥ 2.
+  const N = 50;
+  let sum = 0;
+  for (let n = N - 1; n >= 2; n--) sum += Math.pow(n, -k);
+  const t = Math.pow(N, -k);
+  sum +=
+    (N * t) / (k - 1) +
+    t / 2 +
+    (k * t) / (12 * N) -
+    (k * (k + 1) * (k + 2) * t) / (720 * N ** 3) +
+    (k * (k + 1) * (k + 2) * (k + 3) * (k + 4) * t) / (30240 * N ** 5);
+  return sum;
 }
 
 /**
@@ -823,6 +891,7 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
   let shiftProduct = BigDecimal.ONE;
   let w = z;
   for (let i = 0; i < m; i++) {
+    if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     shiftProduct = shiftProduct._mulToPrecision(w, p);
     w = w.add(BigDecimal.ONE);
   }
@@ -852,6 +921,9 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
   const tol = new BigDecimal(10).pow(-(p + guard));
   const nTerms = Math.min(maxTerms, bernoulliRationals.length);
   for (let k = 0; k < nTerms; k++) {
+    // Each term divides by a Bernoulli rational of thousands of digits at a
+    // high precision, so the time limit is checked at every term.
+    checkDeadline(ce._deadlineFrame);
     const twoK = 2 * (k + 1);
     const [bNum, bDen] = bernoulliRationals[k];
     const denom = BigInt(twoK) * BigInt(twoK - 1);
@@ -1035,7 +1107,10 @@ export function computeBernoulliEven(
   ];
 
   for (let m = 2; m <= 2 * n; m++) {
-    if ((m & 0xff) === 0) checkDeadline(deadline);
+    // Each step sums m products of rationals that grow with m (about 15 ms
+    // a step near m = 3700, for `ce.precision = 3000`), so the time limit is
+    // checked at every step: once every 256 steps let it run seconds late.
+    checkDeadline(deadline);
     // Odd m > 1: B_m = 0
     if (m % 2 === 1) {
       all.push([0n, 1n]);
@@ -1109,7 +1184,7 @@ export function computeBernoulliEven(
  */
 const bernoulliCache = new WeakMap<ComputeEngine, [bigint, bigint][]>();
 
-function getBernoulliRationals(
+export function getBernoulliRationals(
   ce: ComputeEngine,
   minTerms: number
 ): [bigint, bigint][] {
@@ -2428,7 +2503,15 @@ export function bigDirichletEta(
 ): BigNum | undefined {
   if (!s.isFinite()) return undefined;
   const guard = dirichletGuard(s);
-  if (guard === undefined) return undefined;
+  if (guard === undefined) {
+    // Closer to s = 1 than the guard digits reach. η is entire with
+    // |η′(1)| = |γ ln 2 − ln²2 / 2| < 0.2, so when |s − 1| is below
+    // 10^−(precision + 2) the value is ln 2 to every digit asked for.
+    const d = s.sub(BigDecimal.ONE).abs();
+    if (d.isZero() || d.gte(new BigDecimal(`1e-${BigDecimal.precision + 2}`)))
+      return undefined;
+    return withGuardDigits(SPECIAL_FN_GUARD, () => BigDecimal.TWO.ln());
+  }
   return withGuardDigits(guard, () => {
     // 1 − 2^{1−s}
     const factor = BigDecimal.ONE.sub(
@@ -2441,9 +2524,12 @@ export function bigDirichletEta(
 /**
  * Bignum L(s, χ) = k^{−s} Σ_{r=1}^{k} χ(r) ζ(s, r/k) (DLMF 25.15.1) for real
  * s ≠ 1 and a real character χ mod k, given as its values `chi[r − 1]` ∈
- * {−1, 0, 1}, with `ce.precision` significant digits. Returns `undefined` when
- * the Hurwitz kernel cannot reach the digits (also within about 10⁻¹⁵ of
- * s = 1, where the ζ(s, r/k) cancel their poles).
+ * {−1, 0, 1}, with `ce.precision` significant digits. Within about 10⁻¹⁵ of
+ * s = 1, where the ζ(s, r/k) cancel their poles, and wherever the Hurwitz
+ * kernel cannot reach the digits, the Laurent series at s = 1 takes over
+ * (`bigDirichletLNearOne`). Returns `undefined` when neither reaches the
+ * digits, or when the Laurent series would cost more than
+ * `DIRICHLET_LAURENT_MAX_COST`.
  */
 export function bigDirichletL(
   ce: ComputeEngine,
@@ -2453,7 +2539,11 @@ export function bigDirichletL(
 ): BigNum | undefined {
   if (!s.isFinite()) return undefined;
   const guard = dirichletGuard(s); // undefined at s = 1, where the caller has the closed form
-  if (guard === undefined) return undefined;
+  // The Hurwitz kernel plans its working digits from s as a double. When that
+  // double is 1 (|s − 1| below about 10⁻¹⁶), the plan sees the pole and the
+  // kernel throws, so the Laurent series is the only option.
+  if (guard === undefined || s.toNumber() === 1)
+    return bigDirichletLNearOne(ce, s, k, chi);
   const saved = BigDecimal.precision;
   BigDecimal.precision = saved + guard;
   try {
@@ -2462,21 +2552,168 @@ export function bigDirichletL(
     // Not seeded with 0: adding a value of exponent 10⁶ to ZERO is slow.
     let sum: BigNum | undefined;
     for (let r = 1; r <= k; r++) {
+      if ((r & 0x3f) === 0) checkDeadline(ce._deadlineFrame);
       const c = chi[r - 1];
       if (c === 0) continue;
       let zeta: BigNum | undefined;
       try {
         zeta = bigHurwitzZeta(ce, s, [BigInt(r), BigInt(k)]);
       } catch {
-        return undefined;
+        zeta = undefined;
       }
-      if (zeta === undefined) return undefined;
+      if (zeta === undefined) {
+        BigDecimal.precision = saved;
+        return bigDirichletLNearOne(ce, s, k, chi);
+      }
       const term = c > 0 ? zeta : zeta.neg();
       sum = sum === undefined ? term : sum.add(term);
     }
     if (sum === undefined) return undefined;
     const scale = new BigDecimal(k).pow(s.neg()); // k^{−s}
     return scale.mul(sum).toPrecision(saved);
+  } finally {
+    BigDecimal.precision = saved;
+  }
+}
+
+/**
+ * Below this |s − 1| a real character's L(s, χ) can be summed from its
+ * Laurent series at s = 1 (`bigDirichletLNearOne`).
+ */
+const DIRICHLET_LAURENT_RADIUS = new BigDecimal('1e-6');
+
+/**
+ * Digits added past `ce.precision` to each order of the Laurent series in
+ * `bigDirichletLNearOne`. They absorb the sum of the errors of up to
+ * `STIELTJES_MAX_ORDER` orders, each kept below 10^−(precision + guard) of
+ * the sum, and the factor of 2 of the tail bound.
+ */
+const DIRICHLET_LAURENT_GUARD = 5;
+
+/**
+ * Most work `bigDirichletLNearOne` takes on, in the units of
+ * `stieltjesCallCost` (0.17 to 0.26 µs each when measured): about one
+ * second. Past it L(s, χ) stays unevaluated. For the quadratic character
+ * mod k at s = 1 + 10⁻²⁰ the plan costs 3.7·10⁵ units at k = 101 and
+ * 3.7·10⁶ at k = 997 at precision 30; 5.3·10⁶ at k = 101 and 5.3·10⁷ at
+ * k = 997 at precision 100.
+ */
+const DIRICHLET_LAURENT_MAX_COST = 6e6;
+
+/**
+ * The cost of one `bigStieltjesGamma` call at `digits` digits, in the units of
+ * `DIRICHLET_LAURENT_MAX_COST`: a fit of the measured time at orders 1 to 5
+ * and 10 to 320 digits.
+ */
+const stieltjesCallCost = (digits: number): number =>
+  (digits + 30) ** 2 * (1 + digits / 160);
+
+/**
+ * Bignum L(s, χ) for real s within `DIRICHLET_LAURENT_RADIUS` of 1, s ≠ 1,
+ * and a non-principal real character χ mod k (values `chi[r − 1]`), from
+ *   L(s, χ) = k^{−s} Σₙ (−1)ⁿ (s − 1)ⁿ / n! · Gₙ,  Gₙ = Σ_r χ(r) γₙ(r/k),
+ * the Laurent series of ζ(s, r/k) at s = 1 with its pole cancelled by
+ * Σ_r χ(r) = 0 (DLMF 25.11.4). Used where the Hurwitz form cannot reach the
+ * digits: there the ζ(s, r/k) cancel their poles, and they lose
+ * log₁₀(1/|s − 1|) digits.
+ *
+ * G₀ = −Σ_r χ(r) ψ(r/k), since γ₀(a) = −ψ(a), from the bignum digamma. The
+ * other Gₙ come from `bigStieltjesGamma`, which certifies its digits, each at
+ * only the digits its term needs. From ζ(s, a) = a^{−s} + ζ(s, 1 + a),
+ *   γₙ(a) = lnⁿ(a)/a + γₙ(1 + a),
+ * and |γₙ(b)| < 0.6 for 1 ≤ b ≤ 2 and n ≤ 30 (mpmath, on a grid of 65
+ * points). So |Gₙ| ≤ Sₙ = Σ_{χ(r) ≠ 0} (|ln(r/k)|ⁿ k/r + 1), and the term of
+ * order n is at most Bₙ = |s − 1|ⁿ/n! · Sₙ. A term computed to D digits is
+ * off by at most Bₙ·10^−D, so it takes the D that puts this below
+ * 10^−(precision + guard) of the sum. Since |ln(r/k)| ≤ ln k, each Bₙ is at
+ * most |s − 1|·max(1, ln k) ≤ 1/2 times the one before it, so the series
+ * stops at the first Bₙ below that tolerance: the terms after it add at most
+ * the same again.
+ *
+ * The work is planned before any bignum is computed, and when the plan costs
+ * more than `DIRICHLET_LAURENT_MAX_COST` the result is `undefined` (the head
+ * stays unevaluated). `undefined` also when a Stieltjes constant cannot be
+ * certified or the order passes `STIELTJES_MAX_ORDER`. The loops check the
+ * engine's deadline.
+ */
+function bigDirichletLNearOne(
+  ce: ComputeEngine,
+  s: BigNum,
+  k: number,
+  chi: readonly number[]
+): BigNum | undefined {
+  const d = s.sub(BigDecimal.ONE);
+  if (d.isZero() || d.abs().gt(DIRICHLET_LAURENT_RADIUS)) return undefined;
+  const saved = BigDecimal.precision;
+  // G₀ cancels by up to log₁₀ k digits (|ψ(r/k)| < k/r + 1).
+  const working = saved + SPECIAL_FN_GUARD + Math.ceil(Math.log10(k + 1));
+
+  // The plan, in doubles: the size of G₀ from the double digamma, then the
+  // digits of each order n ≥ 1 from its bound Bₙ.
+  const logs: number[] = []; // |ln(r/k)|, for χ(r) ≠ 0
+  const weights: number[] = []; // k/r, for χ(r) ≠ 0
+  let g0Estimate = 0;
+  for (let r = 1; r <= k; r++) {
+    if (chi[r - 1] === 0) continue;
+    logs.push(Math.log(k / r));
+    weights.push(k / r);
+    g0Estimate -= chi[r - 1] * digamma(r / k);
+  }
+  const calls = logs.length;
+  if (calls === 0 || !(Math.abs(g0Estimate) > 0)) return undefined;
+  const logD = bigLog10Abs(d);
+  // log₁₀ of the tolerance on each term: 10^−(precision + guard)·|G₀|
+  const logTolerance =
+    Math.log10(Math.abs(g0Estimate)) - saved - DIRICHLET_LAURENT_GUARD;
+  const digits: number[] = []; // digits of Gₙ, from n = 1
+  let logFactorial = 0;
+  let cost = (calls * stieltjesCallCost(working)) / 8; // the digamma is ~8× cheaper
+  for (let n = 1; ; n++) {
+    if (n > STIELTJES_MAX_ORDER) return undefined;
+    logFactorial += Math.log10(n);
+    let bound = 0; // Sₙ
+    for (let i = 0; i < calls; i++) bound += logs[i] ** n * weights[i] + 1;
+    const need = Math.ceil(
+      n * logD - logFactorial + Math.log10(bound) - logTolerance
+    );
+    if (need <= 0) break;
+    // At least 10 digits: below that a Stieltjes call costs no less.
+    digits.push(Math.max(10, need));
+    cost += calls * stieltjesCallCost(digits[n - 1]);
+  }
+  if (cost > DIRICHLET_LAURENT_MAX_COST) return undefined;
+
+  const frame = ce._deadlineFrame;
+  BigDecimal.precision = working;
+  try {
+    // G₀ = −Σ χ(r) ψ(r/k)
+    let sum = BigDecimal.ZERO;
+    for (let r = 1; r <= k; r++) {
+      if ((r & 0x3f) === 0) checkDeadline(frame);
+      const c = chi[r - 1];
+      if (c === 0) continue;
+      const psi = bigDigamma(ce, new BigDecimal(r).div(k));
+      sum = c > 0 ? sum.sub(psi) : sum.add(psi);
+    }
+    let factor = BigDecimal.ONE; // (−1)ⁿ (s − 1)ⁿ / n!
+    for (let n = 1; n <= digits.length; n++) {
+      factor = factor.mul(d.neg()).div(n);
+      let g = BigDecimal.ZERO;
+      for (let r = 1; r <= k; r++) {
+        const c = chi[r - 1];
+        if (c === 0) continue;
+        const gamma = bigStieltjesGamma(
+          n,
+          [BigInt(r), BigInt(k)],
+          digits[n - 1],
+          frame
+        );
+        if (gamma === undefined) return undefined;
+        g = c > 0 ? g.add(gamma) : g.sub(gamma);
+      }
+      sum = sum.add(factor.mul(g));
+    }
+    return new BigDecimal(k).pow(s.neg()).mul(sum).toPrecision(saved);
   } finally {
     BigDecimal.precision = saved;
   }

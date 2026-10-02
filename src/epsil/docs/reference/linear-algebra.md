@@ -331,6 +331,17 @@ degree(x^3 + 2 * x + 1)
 // ➔ 3
 ```
 
+### det
+
+MathJSON `Det` · `(matrix) -> number`
+
+`Det` is an alias for `Determinant`, which is the preferred name. Determinant of a square matrix.
+
+```epsil
+det([[1, 2], [3, 4]])
+// ➔ -2
+```
+
 ### determinant
 
 MathJSON `Determinant` · `(matrix) -> number`

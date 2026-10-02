@@ -2209,6 +2209,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    // `Det` is the Wolfram Language name of `Determinant`. The one-operand
+    // form `Det[m]` has the same meaning, so the canonical form is
+    // `Determinant`: the output uses one spelling, and `isSame` and the rules
+    // see one operator. `ce.function()` validates the operands against the
+    // `Determinant` signature, so the alias fails where `Determinant` fails.
+    // In particular the option form `Det[m, Modulus -> n]` has no CE
+    // equivalent: its second operand is an `unexpected-argument` error, not a
+    // determinant computed without the modulus.
+    Det: {
+      examples: ['Det([[1, 2], [3, 4]])  // -2'],
+      description:
+        '`Det` is an alias for `Determinant`, which is the preferred name. Determinant of a square matrix.',
+      signature: '(matrix) -> number',
+      canonical: (ops, { engine: ce }) => ce.function('Determinant', ops),
+    },
+
     Inverse: {
       examples: ['Inverse([[1, 2], [3, 4]])'],
       description: 'Multiplicative inverse of a square matrix.',

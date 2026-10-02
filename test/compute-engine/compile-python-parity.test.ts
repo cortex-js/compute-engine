@@ -9,6 +9,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { TEST_PYTHON } from './test-python';
 
 /**
  * CO-P1-1 / CO-P1-4 execution parity.
@@ -26,10 +27,8 @@ import * as path from 'path';
  */
 
 // Repo root is two levels up from test/compute-engine; fall back to cwd.
-const VENV_PYTHON = [
-  path.join(__dirname, '..', '..', 'venv', 'bin', 'python3'),
-  path.join(process.cwd(), 'venv', 'bin', 'python3'),
-].find((p) => fs.existsSync(p)) ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
+const VENV_PYTHON =
+  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
 
 function venvHasNumpy(): boolean {
   try {

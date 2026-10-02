@@ -79,10 +79,15 @@ or a library constant.
 
 - **`ambiguous-exponent-end`** — where an unbraced exponent ends.
   - An operand directly after the exponent: `e^2pi` (`e²·π` / `e^{2π}`),
-    `x^2y` (`x²·y` / `x^{2y}`).
+    `x^2y` (`x²·y` / `x^{2y}`). Also a one-letter exponent directly
+    followed by a letter: `x^xy` (`x^x·y` / `x^{xy}`). This input also
+    reports `ambiguous-letter-run`.
   - An operand after white space when the exponent is a name or is signed,
     or the base is `e`: `e^i pi`, `e^-x y`, `e^2 pi i`. A number exponent
-    then white space is not reported: `x^2 y` is `x²·y`.
+    then white space is not reported: `x^2 y` is `x²·y`. A function name
+    after the white space is reported only when the exponent is signed:
+    `e^-x sin x` (`e^{-x}·sin x` / `e^{-x sin x}`). `e^x sin x` is not
+    reported.
   - A `/` after an exponent that is a name, is signed, or is the number 1:
     `e^x/2`, `e^-x/2`, `x^pi/2`, `x^1/2` (`(x^1)/2` / `x^{1/2}`). `x^3/2` is
     not reported: the decision of 2026-09-30 is that `^` binds tighter than
@@ -90,11 +95,37 @@ or a library constant.
   - The span starts at the base and ends at the end of the operand that has
     the second reading (`e^2pi` is the span `e^2pi`).
   - `detail`: `{ exponent }` (the source text of the exponent read).
+  - `**` is read as `^` in the lenient grammar, so `x**2y` and `e**2pi` are
+    reported as `x^2y` and `e^2pi` are.
+- **Readings with no code (added 2026-10-02 for a host report).** These
+  give one reading, the one of the equal LaTeX-like spelling:
+  - `**` is read as `^` (decision 2026-10-02): `-e**θ` is `-(e^θ)`, as
+    `-e^θ` is. A `^` after a `**` exponent, or a `**` after a `^` exponent,
+    is a second superscript and gives an `unexpected-superscript` error, as
+    `1^x^M` does: `1**x^M`, `x^2**3`. A chain of `**` alone is read from the
+    right, as in all programming languages that have `**`: `2**3**2` is
+    `2^(3^2)`.
+  - White space after `^` does not change the reading: `x ^ pi` is `x^π`.
+    White space after the `-` of an exponent on a letter is also skipped:
+    `e^- x` is `e^{-x}`. After a `+` (`A^+ x`, the pseudo-inverse of `A`
+    times `x`), and after a base that is a command, a digit or a group
+    (`\R^- x`, `0^- x`), the postfix reading is kept.
+  - Two superscript markers in a row are an error, in both grammars:
+    `x^^2`, `x^²` (`^` then the superscript digit). A TeX character code
+    such as `^^41` is still read.
 - **`ambiguous-implicit-subscript`** — a letter directly followed by a digit
   is read as a subscript: `x2`, `θ2`, `π2`, `α1`, `y = x2` (`x_2` / `x·2`).
   Also a digit subscript directly followed by a letter: `x_1y` (`x_1·y` /
   `x_{1y}`). A library function name with a digit (`atan2`, `log2`, `log10`)
-  is not reported.
+  is not reported. Two more cases where an unbraced subscript of letters
+  ends:
+  - a digit directly after the letters: `M_max0.5` (`M_max·0.5` / a
+    subscript that holds the number), `x_a2`;
+  - the letters end with a function name and have more letters before it:
+    `A_maxsin t` (`A_maxsin·t` / `A_max·sin t`).
+  A braced subscript (`M_{max}0.5`, `A_{maxsin} t`) and `A_max sin t` are
+  not reported. The span starts at the `_`. `detail`: `{ base, subscript }`,
+  and `function` for the second case.
 - **`ambiguous-name-digits`** — a run of letters and digits that is not a
   library function, before a parenthesis: `atan3(y)` is `arctan(3·y)`.
 
@@ -106,14 +137,32 @@ or a library constant.
   parentheses, followed by more than one factor: `sin x y` (`sin(x·y)` /
   `sin(x)·y`), `sqrt 2 x`, `ln 2 x`, `exp 2 x`, `abs 2 x`. Also `log` with
   no parentheses before a number: `log 2 x` is read as `log₂(x)`. `sin 2x`
-  (no white space inside the argument) is not reported.
+  (no white space inside the argument) is not reported. Three more cases:
+  - a power of `e` after the first factor of the argument: `sin2e^a`
+    (`sin(2e^a)` / `sin(2)·e^a`). The power of `e` is the exponential
+    function, a second function next to the first. `sin2x` and `sin e^x`
+    are not reported;
+  - a function name with no argument, read as a symbol: `y = min`, `sin*x`
+    (`sin·x` / a call with an argument that is missing). `min(a, b)` is not
+    reported;
+  - an argument with no parentheses that starts with `+`: `ln+1`, `ln +1`,
+    `sin+x` are read as `ln(1)` and `sin(x)`, and the `+` is dropped; a
+    person can mean a sum with a missing argument, or the letters `l·n`
+    plus 1. A `-` is not reported: `sin -x` is `sin(-x)` (section 6).
 - **`ambiguous-function-without-parentheses`** — a symbol declared as a
   function in the engine, followed by an operand with no parenthesis: `f x`,
   `2 f x` (`f·x` / `f(x)`).
 - **`ambiguous-name-then-number`** — a name that is not a function, white
-  space, then a number: `x 2`, `θ 2` (`x·2` / `x_2`).
+  space, then a number: `x 2`, `θ 2` (`x·2` / `x_2`). Also a run of letters
+  read one letter at a time, white space, then a number: `xy 0.5`
+  (`x·y·0.5`); the span is the whole run, and `detail.name` is the run. A
+  function name of the lenient grammar is a word, not a name: `7 mod 3`
+  reports only `ambiguous-letter-run`. Also the glyph `∞` directly
+  followed by a digit: `∞2` (`∞·2` / an index, as `π2` is read `π_2`). The
+  LaTeX command `\infty2` is not reported.
 - **`ambiguous-delta`** — `Δ` or `Delta` directly followed by a letter:
   `Δx`, `ΔxΔy`, `Q = m c ΔT` (`Δ·x` / the one symbol "change in x").
+  A sign before `Δ` does not change this: `-Δα` is reported.
 - **`ambiguous-constant-name`** — a library constant (`e`, `i`, `pi`, `π`,
   `inf`) alone on the left of `=`: `e = 1.6e-19`, `i = V/R`, `pi = 3.14`. A
   person usually means a variable with that name. Also the constant directly
@@ -121,7 +170,14 @@ or a library constant.
   as `π·x = x`, `e(t) = t^2` as `e·t = t²`, and a person can mean the
   definition of a function with that name. `f(pi) = 3`, `2pi(x) = 3` and
   `pi(x)` with no `=` are not reported. The span is the left side of `=`.
-  `detail`: `{ name }` (the MathJSON name: `Pi`, `e`, `i`).
+  Also the name `ii`, read as the imaginary unit, where a person can mean
+  the product `i·i`. `detail`: `{ name }` (the MathJSON name: `Pi`, `e`,
+  `i`, `ImaginaryUnit`).
+- **`ambiguous-missing-base`** — a `_` with no base before it (at the start
+  of the line, after white space, an operator or an opening bracket) is read
+  as the symbol `_`: `-_1` is `(-_)·1`. A person can mean a subscript of a
+  base that is missing, or the text has a typing error. The span is the `_`
+  and the script after it.
 - **`ambiguous-log-base`** — `log` with two arguments in parentheses:
   `log(x, 2)` is `Log(x, 2)`, the logarithm of `x` in base 2 (the base
   second, as in Python and in spreadsheets), and other tools put the base
@@ -156,8 +212,9 @@ or a library constant.
 
 ### 5.3 Products and groups
 
-- `ambiguous-denominator` (renamed): an implicit product after `/`
-  (`1/2 x`).
+- `ambiguous-denominator` (renamed): an implicit product after `/` or `÷`
+  (`1/2 x`, `13÷2x`: `13/(2x)` / `(13/2)·x`). The `÷` spelling was added
+  2026-10-02 for a host report.
 - **`ambiguous-equation-number`** — a parenthesized number or single letter
   at the end of a line, after white space: `y = x^2 (2)`, `y = 2x + 1 (4)`,
   `x = 4 (m)`, `g(t) = 3 (1)` (a product / an equation label or a unit).
@@ -169,6 +226,13 @@ or a library constant.
 - **`ambiguous-radical`** — the extent of `√` with no parentheses: `√2π`,
   `√2x`, `√xy` (`√2·π` / `√(2π)`); `√x²` and `√x²+y²` (`(√x)²` / `√(x²)`);
   and a number directly before `√`: `3√8` (`3·√8` / the cube root of 8).
+  Also a Latin letter directly before `√`: `t√y` (`t·√y` / the root of
+  index `t`); a Greek letter or a constant (`π√2`) is not reported. Also a
+  radicand that is one letter, then white space and an operand: `√a b`
+  (`√a·b` / `√(ab)`). A number radicand (`√2 x`), a braced or
+  parenthesized radicand (`\sqrt{a} b`, `√(a) b`) and a word of two or
+  more letters after the white space (`√x sin x`, `√x dx`) are not
+  reported.
 - **`ambiguous-absolute-value`** — bars that pair two ways: `|x|y|z|`.
 
 ### 5.4 Signs and operators
@@ -181,7 +245,15 @@ or a library constant.
   (also `\mp`, and `-+` in the lenient grammar) is read as `MinusPlus(0, x)`,
   as a prefix `±` is read as `Measurement(0, x)`, and is reported.
 - **`ambiguous-factorial`** — `!=` directly after an operand with no space:
-  `5!=120` (`5 ≠ 120` / `5! = 120`), `n!=n(n-1)!`, `k!=1`.
+  `5!=120` (`5 ≠ 120` / `5! = 120`), `n!=n(n-1)!`, `k!=1`. Also what a `!`
+  applies to, next to an unbraced exponent or radicand:
+  - a `!` directly after an exponent or a radicand: `M³!` (`(M³)!` /
+    `M^{3!}`), `2^-k!`, `x^2!`, `√i!` (`(√i)!` / `√(i!)`). Because the
+    tokenizer reads `M³` as `M^{3}`, a braced exponent that holds only
+    digits is reported too (`M^{3}!`); `M^{n}!`, `(M^3)!`, `√(i)!` and
+    `\sqrt{i}!` are not;
+  - a superscript directly after a `!`: `n!²` (`(n!)²` / `(n²)!`).
+    `(n!)²`, `n!` and `n!!` are not reported.
 - **`ambiguous-arrow`** — `<-`: `x <- 2` (`x < -2` / an assignment arrow).
 - **`ambiguous-equal-chain`** — more than one `=` in a chain:
   `x = x = x = x`.
@@ -205,14 +277,21 @@ or a library constant.
   `1..5/2`, `1..n+1`, `2*1..5` (the operation on one bound / on the whole
   range, `(1..5)/2`, the way Desmos scales a list). A sign is not an
   operation here: `-1..5` and `1..-5` are not reported. (The second rule was
-  added 2026-10-01 for a host report.)
+  added 2026-10-01 for a host report.) Also `...` directly followed by a
+  digit, when the left operand is a decimal number: `.5...5` is the range
+  from 0.5 to 5 (the ellipsis `...` and `5`), and a person who writes `.5`
+  for 0.5 can mean `.5..` and `.5`, the range from 0.5 to 0.5. `1...5` and
+  `[-9...9]` are not reported: after an integer, the ellipsis is the common
+  reading. (Added 2026-10-02 for a host report.)
 - **`ambiguous-percent`** — `%` after a number (`y = 50%`): LaTeX reads `%`
   as the start of a comment; a person means a percentage.
 
 ### 5.5 Numbers and layout
 
 - `ambiguous-digit-groups` (renamed): white space joins digit groups
-  (`2 3`, `1 000`).
+  (`2 3`, `1 000`). Also white space between the whole part and the decimal
+  separator: `3 .5` is read as 3.5 (`3.5` / `3·0.5`). (Added 2026-10-02 for
+  a host report.)
 - `ambiguous-letter-decimal` (renamed): `x.5`.
 - **`ambiguous-comma`** — a comma outside every bracket: `1,5` (a pair / the
   decimal number 1.5 in many locales).

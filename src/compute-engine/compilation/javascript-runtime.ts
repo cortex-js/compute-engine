@@ -132,8 +132,10 @@ import {
 } from '../numerics/numeric-complex.js';
 import {
   adaptiveQuadrature,
+  insideQuadrature,
   quadratureBeatsMonteCarlo,
 } from '../numerics/gauss-kronrod.js';
+import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
 import {
   MAX_RANDOM_ELEMENT_COUNT,
   nextFrameDraw,
@@ -4305,7 +4307,34 @@ export const SYS_HELPERS = {
     if (!enterIntegral()) return NaN;
     try {
       const f = budgetedIntegrand(realFn(fn));
-      const r = adaptiveQuadrature(f, a, b, { initialPanels });
+      // A semi-infinite interval: a conditionally convergent oscillatory
+      // integrand (`∫₀^∞ sin x/√x`) is integrated lobe by lobe, as in the
+      // interpreter (`integrateRealPart`, library/calculus.ts). The adaptive
+      // quadrature gave `NaN` for `∫₀^∞ sin x/√x dx` and `2.5237` for
+      // `∫₀^∞ sin x/x^1.5 dx = √(2π) = 2.5066`. The routine returns `null` for
+      // an integrand that is not oscillatory or does not converge.
+      // Reversed bounds integrate over the ordered interval and negate.
+      if (Number.isFinite(a) !== Number.isFinite(b)) {
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        const osc = Number.isFinite(lo)
+          ? integrateSemiInfiniteOscillatory(f, lo)
+          : integrateSemiInfiniteOscillatory((t) => f(-t), -hi);
+        // An exhausted nested budget: see the same test below.
+        if (osc !== null)
+          return nestedEvalsLeft < 0
+            ? NaN
+            : a > b
+              ? -osc.estimate
+              : osc.estimate;
+      }
+      // `singularEndpoints`: a slowly integrable singularity at a bound is
+      // resolved by extrapolating the endpoint shells, as in the interpreter
+      // (`integrateRealPart`, library/calculus.ts).
+      const r = adaptiveQuadrature(f, a, b, {
+        initialPanels,
+        singularEndpoints: true,
+      });
       // A diagnosed divergence has no finite value, and sampling it would only
       // launder the divergence into a plausible-looking number.
       if (r.divergent) return NaN;
@@ -4315,7 +4344,25 @@ export const SYS_HELPERS = {
       // through — the Monte-Carlo fallback would spend 1e7 samples on the same
       // exhausted integrand.
       if (nestedEvalsLeft < 0) return NaN;
-      if (r.converged || quadratureBeatsMonteCarlo(r, 10e6)) return r.estimate;
+      // Next to a singular corner that the quadrature could not resolve
+      // (`singularCorner`), the unconverged estimate is returned, as the
+      // interpreter does (`integrateRealPart`, library/calculus.ts): Monte
+      // Carlo is less accurate there (see `QuadratureResult`,
+      // numerics/endpoint-quadrature.ts).
+      if (
+        r.converged ||
+        r.extrapolated === true ||
+        r.singularCorner === true ||
+        quadratureBeatsMonteCarlo(r, 10e6)
+      )
+        return r.estimate;
+      // A nested integral (inside a compiled integral, `activeIntegrals > 1`,
+      // or inside a quadrature of the interpreter, `insideQuadrature()`) has
+      // no Monte-Carlo fallback: it would draw 1e7 samples at EACH node of
+      // the enclosing quadrature (minutes for `∫₀^10 ∫₃^4 (y − x)⁻² dx dy`,
+      // whose inner integral has no value for `y` in `[3, 4]`). The result
+      // did not converge and is not better than sampling: it has no value.
+      if (activeIntegrals > 1 || insideQuadrature()) return NaN;
       return monteCarloEstimate(f, a, b, 10e6, undefined, draw).estimate;
     } finally {
       activeIntegrals--;

@@ -303,6 +303,8 @@ export function reportLineAmbiguities(
   const outside = (i: number) => !layout.inBraces[i];
 
   reportFactorial(tokens, expr, emit, outside);
+  reportFactorialOperand(tokens, expr, emit, outside);
+  reportMissingBase(tokens, expr, emit, outside);
   reportArrow(tokens, expr, emit, outside);
   reportEqualChain(tokens, expr, emit, layout);
   reportElement(tokens, expr, emit, layout);
@@ -337,6 +339,123 @@ function reportFactorial(
     const spaceAfter = tokens[i + 2] === SPACE;
     if (spaceBefore && spaceAfter) continue;
     emit('ambiguous-factorial', i, i + 2);
+  }
+}
+
+/**
+ * `ambiguous-factorial`: a `!` next to an unbraced exponent or radicand,
+ * where the operand of the `!` has a second common reading.
+ *
+ * - A `!` directly after an exponent or a radicand: `M³!` is `(M³)!`,
+ *   `2^-k!` is `(2^-k)!` and `√i!` is `(√i)!`, and a person can mean
+ *   `M^(3!)`, `2^(-k!)` or `√(i!)`. The exponent is a run of letters or of
+ *   digits, with a sign or not. A braced exponent that holds only digits is
+ *   also reported, because the tokenizer reads `M³` as `M^{3}`. A
+ *   parenthesized operand (`(M^3)!`, `√(i)!`) has a clear end.
+ * - A superscript directly after a `!`: `n!²` is `(n!)²`, and a person can
+ *   mean `(n²)!`.
+ *
+ * The raw result must hold the reading: a `Factorial` of a `Power`, a
+ * `Sqrt` or a `Root`, or a `Power` of a `Factorial`.
+ */
+function reportFactorialOperand(
+  tokens: readonly string[],
+  expr: MathJsonExpression | null,
+  emit: EmitAmbiguity,
+  outside: (i: number) => boolean
+): void {
+  const ofScript = someNode(
+    expr,
+    (x) =>
+      operator(x) === 'Factorial' &&
+      ['Power', 'Sqrt', 'Root'].includes(operator(operand(x, 1)) ?? '')
+  );
+  const scripted = someNode(
+    expr,
+    (x) => operator(x) === 'Power' && operator(operand(x, 1)) === 'Factorial'
+  );
+  if (!ofScript && !scripted) return;
+  const at = (k: number) => tokens[k];
+  for (let i = 1; i < tokens.length; i++) {
+    if (tokens[i] !== '!' || !outside(i)) continue;
+    // `!=` is reported by `reportFactorial()`, `!!` is a double factorial
+    if (tokens[i + 1] === '=' || tokens[i + 1] === '!' || tokens[i - 1] === '!')
+      continue;
+
+    // A superscript directly after the `!`: `n!²`
+    if (scripted && tokens[i + 1] === '^') {
+      // The span starts at the operand of the `!`: the opening bracket that
+      // matches a closing bracket (`(n+1)!²`), or the start of a run of
+      // letters (`n!²`) or of digits (`10!²`).
+      let start = i - 1;
+      if (MATCH_CLOSE.has(tokens[start])) {
+        const open = matchingBracket(at, start);
+        if (open >= 0) start = open;
+      } else {
+        const sameKind = isDigit(tokens[start]) ? isDigit : isLetter;
+        while (
+          start > 0 &&
+          sameKind(tokens[start - 1]) &&
+          sameKind(tokens[start])
+        )
+          start -= 1;
+      }
+      emit('ambiguous-factorial', start, operandEnd(at, i + 1));
+      continue;
+    }
+    if (!ofScript) continue;
+
+    // The `^` or `√` before the operand of the `!`
+    let k = i - 1;
+    let script = -1;
+    if (tokens[k] === '<}>') {
+      const open = matchingBracket(at, k);
+      const content = tokens.slice(open + 1, k).join('');
+      if (open > 0 && tokens[open - 1] === '^' && /^-?[0-9]+$/.test(content))
+        script = open - 1;
+    } else if (isLetter(tokens[k]) || isDigit(tokens[k])) {
+      const sameKind = isDigit(tokens[k]) ? isDigit : isLetter;
+      while (k > 0 && sameKind(tokens[k - 1])) k -= 1;
+      if (tokens[k - 1] === '√') script = k - 1;
+      else if (tokens[k - 1] === '^') script = k - 1;
+      else if (
+        (tokens[k - 1] === '-' || tokens[k - 1] === '+') &&
+        tokens[k - 2] === '^'
+      )
+        script = k - 2;
+    }
+    if (script < 0) continue;
+    // The span starts at the base of the `^` when it is one letter or digit
+    const start =
+      tokens[script] === '^' &&
+      (isLetter(tokens[script - 1]) || isDigit(tokens[script - 1]))
+        ? script - 1
+        : script;
+    emit('ambiguous-factorial', start, i + 1);
+  }
+}
+
+/**
+ * `ambiguous-missing-base`: a `_` with no base before it is read as the
+ * symbol `_`: `-_1` is `(-_)·1`. A person can mean a subscript of a base
+ * that is missing, or the text has a typing error. The `_` follows the
+ * start of the line, white space, an operator or an opening bracket. The
+ * span is the `_` and the script after it.
+ */
+function reportMissingBase(
+  tokens: readonly string[],
+  expr: MathJsonExpression | null,
+  emit: EmitAmbiguity,
+  outside: (i: number) => boolean
+): void {
+  if (!someNode(expr, (x) => symbol(x) === '_')) return;
+  const at = (k: number) => tokens[k];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] !== '_' || !outside(i)) continue;
+    if (isOperandEnd(tokens[i - 1])) continue;
+    const next = tokens[i + 1];
+    const scripted = next === '<{>' || isDigit(next) || isLetter(next);
+    emit('ambiguous-missing-base', i, scripted ? operandEnd(at, i) : i + 1);
   }
 }
 

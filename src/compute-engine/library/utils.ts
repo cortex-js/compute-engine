@@ -21,6 +21,7 @@ import {
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
+import { flatLimitsSpan } from '../boxed-expression/binding-sites.js';
 import {
   binderBindingOf,
   rewriteWithBinders,
@@ -201,6 +202,25 @@ export function convertInfiniteSetToLimits(
       // converted to a simple forward iteration
       return undefined;
   }
+}
+
+/**
+ * Whether an indexing set of a `Sum` or `Product` is a `Limits` clause with
+ * exactly one bound: a lower bound and no upper bound (`\sum_{k=1} f`,
+ * `Limits(k, 1, Nothing)`) or an upper bound and no lower bound
+ * (`\sum_{k}^{10} f`, `Limits(k, Nothing, 10)`). Such a sum or product has no
+ * value, and no default is chosen for the missing bound, so the operator
+ * stays unevaluated, under `evaluate()` and `N()` alike, as an integral with
+ * only one bound does. A clause with no bounds at all
+ * (`Limits(k, Nothing, Nothing)`, the iteration over the default domain) and
+ * an `Element` clause are not one-sided.
+ */
+export function hasOneSidedLimits(indexes: ReadonlyArray<Expression>): boolean {
+  return indexes.some(
+    (idx) =>
+      isFunction(idx, 'Limits') &&
+      isSymbol(idx.op2, 'Nothing') !== isSymbol(idx.op3, 'Nothing')
+  );
 }
 
 /**
@@ -1997,6 +2017,10 @@ export function* indexingSetCartesianProductIterator(
  * - ["Range", 1, 10] -> ["Limits", "Unknown", 1, 10]
  * - 1, 10 -> ["Limits", "Nothing", 1, 10]
  * - [Tuple, "x", 1, 10] -> ["Limits", "x", 1, 10]
+ * - "x", 0, "Pi" -> ["Limits", "x", 0, "Pi"]
+ * - "x", 10 -> ["Limits", "x", "Nothing", 10]
+ * - "x", "y" -> ["Limits", "x", "Nothing", "Nothing"],
+ *   ["Limits", "y", "Nothing", "Nothing"]
  *
  */
 export function canonicalLimitsSequence(
@@ -2048,22 +2072,25 @@ export function canonicalLimitsSequence(
         result.push(canonicalLimits(setOps, options) ?? ce.error('missing'));
       }
     } else if (isSymbol(op)) {
-      // "x" or "1, 10"
-      if (isNumber(ops[i + 1])) {
-        if (isNumber(ops[i + 2])) {
-          // "n", 1, 10
-          result.push(
-            canonicalLimits([op, ops[i + 1], ops[i + 2]], options) ??
-              ce.error('missing')
-          );
-          i += 2;
-        } else {
-          // "n", 10
-          result.push(
-            canonicalLimits([op, ops[i + 1]], options) ?? ce.error('missing')
-          );
-          i += 1;
-        }
+      // The flat spelling: a variable, optionally followed by its bounds.
+      // `"x", "y", "z"` is the triple indefinite integral in `x`, `y` and
+      // `z`; `"x", 0, "b"` is `x` from 0 to `b`; `"x", 10` is `x` up to 10.
+      // `flatLimitsSpan()` (`boxed-expression/binding-sites.ts`) has the
+      // complete rules.
+      const span = flatLimitsSpan(ops, i);
+      if (span === 3) {
+        // "n", 1, 10
+        result.push(
+          canonicalLimits([op, ops[i + 1], ops[i + 2]], options) ??
+            ce.error('missing')
+        );
+        i += 2;
+      } else if (span === 2) {
+        // "n", 10
+        result.push(
+          canonicalLimits([op, ops[i + 1]], options) ?? ce.error('missing')
+        );
+        i += 1;
       } else {
         // "x"
         result.push(canonicalLimits([op], options) ?? ce.error('missing'));
@@ -2209,6 +2236,35 @@ export function bindIndexAuthoritatively(
     if (frame !== undefined) frame.record({ undo: () => void fresh.add(def) });
     fresh.delete(def);
   }
+}
+
+/**
+ * Rewrite the flat spelling of the indexing sets of `Sum` and `Product` as
+ * `Limits` clauses: `Sum(body, k, 1, 10)` is `Sum(body, Limits(k, 1, 10))`,
+ * `Sum(body, k, 10)` is `Sum(body, Limits(k, Nothing, 10))`. The flat
+ * spelling is read with the same rules as the one of `Integrate`
+ * (`flatLimitsSpan()`, `boxed-expression/binding-sites.ts`). An index with no
+ * bounds after it, and every other operand (`Limits`, `Element`, a `Tuple`),
+ * is left as it is. The `Limits` clauses are not canonical:
+ * `canonicalIndexingSet()` canonicalizes them.
+ */
+export function canonicalFlatIndexingSets(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression[] {
+  const result: Expression[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    const span = isSymbol(op) ? flatLimitsSpan(ops, i) : 1;
+    if (span === 1) result.push(op);
+    else {
+      const [lower, upper] =
+        span === 3 ? [ops[i + 1], ops[i + 2]] : [ce.Nothing, ops[i + 1]];
+      result.push(ce._fn('Limits', [op, lower, upper], { canonical: false }));
+      i += span - 1;
+    }
+  }
+  return result;
 }
 
 export function canonicalIndexingSet(expr: Expression): Expression | undefined {
@@ -2385,6 +2441,12 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   } else index = expr;
 
   if (isFunction(index, 'Hold')) index = index.op1;
+
+  // A clause with no index (`\sum_1^9 f`, `\sum^{10} f`) holds the `Nothing`
+  // of the engine. The held operand is an unbound `Nothing`, which
+  // `isSame()` does not match with the engine's `Nothing`, so a sum rebuilt
+  // by `evaluate()` was not the same as the original.
+  if (isSymbol(index, 'Nothing')) index = ce.Nothing;
 
   if (!isSymbol(index)) return undefined;
 

@@ -1,6 +1,5 @@
 import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
+import { TEST_PYTHON } from './test-python';
 
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
@@ -168,12 +167,9 @@ describe('Real-only lowerings over a statically non-real operand', () => {
   });
 });
 
-// The repo's Python virtual environment, when present. The value checks are
-// skipped without it.
-const PYTHON = [
-  path.join(__dirname, '..', '..', 'venv', 'bin', 'python3'),
-  path.join(process.cwd(), 'venv', 'bin', 'python3'),
-].find((p) => fs.existsSync(p));
+// The Python of `CE_PYTHON` or of the repo's virtual environment, when
+// present (`test-python.ts`). The value checks are skipped without it.
+const PYTHON = TEST_PYTHON;
 
 (PYTHON === undefined ? describe.skip : describe)(
   'Python values of a special function over a complex argument',

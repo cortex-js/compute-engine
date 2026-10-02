@@ -2,6 +2,379 @@
 
 ### Behavior Changes
 
+- **`Totient` and `NPartition` evaluate for zero and negative integers.**
+  `Totient(0)` is `0` and `Totient(-n)` is `Totient(n)` (`Totient(-12)` is
+  `4`); `NPartition(n)` is `0` for a negative integer `n`. These are the
+  values of Mathematica's `EulerPhi` and `PartitionsP`, and of the Fungrim
+  identities the engine already loads (`Totient(-n) = Totient(n)`,
+  `NPartition(-n) = 0`). Before, these inputs stayed unevaluated
+  (`Totient(0)`, `NPartition(-3)`).
+
+- **`arctan` and `arccot` are odd on their branch cuts.** The cut of `arctan`
+  is the imaginary axis outside `[−i, i]`, the cut of `arccot` the imaginary
+  axis inside it. Both halves of each cut took the side right of the axis, so
+  `arctan(−z)` was not `−arctan(z)` there. Each half now takes the side it is
+  continuous with, as in mpmath and Mathematica, and as `arsinh` already did
+  on the same axis. The values that change, in the interpreter (`N()`, and
+  `evaluate()` of a float argument), compiled JavaScript and Python, and for
+  `arctan` only in GLSL and WGSL (the shader targets compile `arccot` of a
+  real argument only):
+  - `arctan(iy)` for `y < −1`: the real part changes from `π/2` to `−π/2`
+    (`arctan(−2i)` was `π/2 − 0.549i`, it is now `−π/2 − 0.549i`;
+    `arctan(−1.5i)` was `π/2 − 0.805i`, it is now `−π/2 − 0.805i`).
+  - `arccot(iy)` for `0 < y < 1`: the real part changes from `π/2` to `−π/2`
+    (`arccot(0.5i)` was `π/2 − 0.549i`, it is now `−π/2 − 0.549i`).
+  - `arctan(iy)` for `y > 1`, `arccot(iy)` for `−1 < y < 0`, and `artanh`
+    and `arcoth` on their cuts on the real axis do not change.
+
+- **The lenient grammar reads `**` as `^`.** `**` was an infix operator that
+  bound looser than a prefix minus and than a `^` in its exponent. It now has
+  the same reading as `^` (`ce.parse(text, { strict: false })`):
+  - `-e**θ` is `-(e^θ)`, was `(-e)^θ`; `-x**2` is `-(x²)`, was `(-x)²`.
+  - `1**x^M`, `a**b^c` and `x^2**3` are an `unexpected-superscript` error,
+    as `1^x^M` is. Before, they were `1^(x^M)`, `a^(b^c)` and `(x²)³`.
+  - `x**y!` is `(x^y)!`, as `x^y!` is, was `x^(y!)`.
+  - `x**2y` is `x²·y` and reports `ambiguous-exponent-end`, as `x^2y` does.
+  - A chain of `**` alone is read from the right, as in programming
+    languages, and does not change: `2**3**2` is `2^(3^2)`.
+- **White space after `^` does not change the reading of the lenient
+  grammar.** `x ^ pi` is `x^π`, was `x^p·i`; `x^ -y` is `x^(-y)`, was an
+  error. White space after the `-` of an exponent on a letter is also
+  skipped: `e^- x` is `e^(-x)`, was `Superminus(e)·x`. `A^+ x` (the
+  pseudo-inverse of `A` times `x`) and `\R^- x` do not change, and the strict
+  grammar does not change.
+- **`x^^2` and `x^²` are a double-superscript error**, in both grammars. The
+  tokenizer dropped the second `^` of a `^^` that was not followed by two
+  hexadecimal digits, so these inputs were read as `x²`. A TeX `^^` character
+  code such as `^^41` is still read.
+
+- **The factorial of a real non-integer follows `ce.precision`.** `x!` for a
+  real non-integer `x` is Γ(x + 1). It was computed in doubles at every
+  precision, so `Factorial(2.5).N()` was `3.3233509704478448`, a double,
+  `Factorial(200.5).N()` overflowed to `+oo` and `Factorial(-200.5).N()`
+  underflowed to `0`. It is now computed as `Gamma` computes it, to
+  `ce.precision` digits: `Factorial(2.5).N()` is `3.32335097044784255118`,
+  `Factorial(200.5).N()` is `1.1174203734326765163e+376` and
+  `Factorial(-200.5).N()` is `5.63699519017856675668e-374` at the default
+  precision of 21 digits. At `precision: "machine"` the result is the double,
+  as before. A compiled `(1/2 - 1)!`, whose constant is folded from `.N()`, is
+  now `1.772453850905516`, the double nearest √π, not `1.7724538509055159`.
+
+- **The factorial of an exact non-integer stays symbolic under `evaluate()`.**
+  `Factorial(5/2).evaluate()`, `Factorial(-1/2).evaluate()` and
+  `Factorial(1 + i).evaluate()` gave a float, against the rule that
+  `evaluate()` keeps an exact argument exact. They now stay `(5/2)!`,
+  `(-1/2)!` and `(1 + i)!`, as `Gamma(7/2)`, `Gamma(1/2)` and `Gamma(2 + i)`
+  do; `.N()` and a float operand (`2.5!`) give the float. Integer factorials
+  are unchanged.
+
+- **A factorial too large for the exact product is a big decimal under
+  `.N()`.** Past the exact digit cap (10⁶ digits), `Factorial(n).N()` and
+  `Factorial2(n).N()` overflowed to `+oo`. Above machine precision they are
+  now computed from Γ to `ce.precision` digits: `Factorial(10^6).N()` is
+  `8.26393168833124006238e+5565708`, `Factorial(10^7).N()` is
+  `1.20242340051590345614e+65657059` and `Factorial2(10^15).N()` is
+  `6.83517080822812242208e+7282852759048381`. Under `evaluate()` they stay
+  symbolic, as before. At `precision: "machine"` they are `+oo`, since a
+  double cannot hold them. A value whose decimal exponent is past
+  ±2⁵³ ≈ ±9·10¹⁵, the largest exponent a big decimal holds exactly, has no
+  big-decimal value either (the big-decimal `exp` saturates to infinity or
+  0 there). A real value that overflows past that range is `+oo`, as
+  before and as a double overflow is (`Factorial(10^15).N()`,
+  `Gamma(10^15 + 0.5).N()`). A real value that underflows past it now stays
+  unevaluated, since a `0` reads as an exact zero and Γ has no zeros:
+  `Gamma(-10^15 - 0.5).N()` and `Factorial(-10^15 - 0.5).N()` (decimal
+  exponent about −1.5·10¹⁶) were `0`. A complex `Gamma`, `Factorial` or
+  `BarnesG` value past that range, in either direction, stays unevaluated:
+  a complex value that is too large has a direction that no infinity of the
+  engine holds.
+  The big-decimal Γ at a high precision now stops at the time limit
+  (`ce.withTimeLimit`): the Bernoulli table it builds (about 30 s at
+  `ce.precision = 3000`) checks the deadline at every step instead of every
+  256 steps, and the Stirling series checks it at every term.
+
+### New Features
+
+- **Compiled JavaScript runs without the engine.** The new entry point
+  `@cortex-js/compute-engine/runtime` exports `createJavaScriptRuntime(options)`,
+  the `_SYS` helper bundle that `compile()` builds for `run()`, with no engine
+  behind it: store the `code` of a `JavaScriptTarget` result, and run it on a
+  page, in a worker or on a server with `runtime.load(result)` (or as
+  `new Function('_SYS', '_', …)(runtime, vars)`). The helpers that read engine
+  state take it as options: `random` is the source of draws outside any
+  `WithRandomSeed` frame and of the integrals' Monte-Carlo samples (`null`
+  denies draws, and a draw then throws, as with a denied `entropy`
+  capability); `frame` is the frame of an interpreted `WithRandomSeed` the code
+  is called from (`{ seedLo, seedHi, next }` or `{ seed, next }`), and
+  `runtime.frame.next` is the advanced counter after the call; `iterationLimit`
+  caps the lazy-stream walks (default 1024) and `deadline` is an optional time
+  after which the shuffle and choice loops throw. A seeded program gives the
+  same values interpreted, with `run()` and as stored code:
+  `WithRandomSeed(7, RandomShuffle(Range(1, 6)))` is the same list in all
+  three. `CompilationResult.runtimeVersion` and `runtime.runtimeVersion` are
+  the version of the helper set; `load()` throws when they differ. Functions
+  passed in the `functions` or `imports` compile options are copied into the
+  code as source (`toString()`), so a closure loses its enclosing scope and a
+  function given by name must exist where the code runs. The engine's own
+  `_SYS` (`run.SYS`) is built from the same factory. (#372, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
+- **More reading choices of the lenient grammar report an `ambiguous-*`
+  code** (the reading does not change):
+  - `ambiguous-denominator` for `÷`: `13÷2x` is `13/(2x)`, as `13/2x` is.
+  - `ambiguous-digit-groups` for white space before a decimal separator:
+    `3 .5` is read as 3.5.
+  - `ambiguous-range` for `...` directly followed by a digit after a
+    decimal number: `.5...5` is the range from 0.5 to 5, and can be `.5..`
+    and `.5`. `1...5` is not reported.
+  - `ambiguous-function-argument` for an argument with no parentheses that
+    starts with `+`: `ln+1` is `ln(1)`. `sin -x` is not reported.
+
+- **Wolfram Language aliases `EulerPhi`, `PartitionsP` and `Det`.** They are
+  aliases for `Totient`, `NPartition` and `Determinant`: the canonical form
+  uses the CE name (`["EulerPhi", 12]` becomes `["Totient", 12]`, which
+  evaluates to `4`), and an invalid operand gives the same error as the CE
+  operator. Before, `EulerPhi(12)` stayed unevaluated with no error. `Det` has
+  only the one-operand form: `Det[m, Modulus -> n]` has no CE equivalent and
+  its second operand is an `unexpected-argument` error. `Tr` gets no alias,
+  because Mathematica's `Tr` of a vector or of a rank-3 tensor has a different
+  meaning than `Trace`. See `docs/MATHEMATICA-NAMES.md`.
+
+- **More `ambiguous-*` parse diagnostics in the lenient grammar.** These
+  inputs were read with no diagnostic, although a person can mean a second
+  reading. The reading does not change, and the strict grammar reports none
+  of these codes. One code is new and eight codes report more inputs:
+  - `ambiguous-missing-base` (new): a `_` with no base is read as the symbol
+    `_` (`-_1`).
+  - `ambiguous-name-then-number`: a run of letters, white space, then a
+    number (`xy 0.5`, was reported only as a letter run), and `∞` directly
+    followed by a digit (`∞2`).
+  - `ambiguous-implicit-subscript`: an unbraced subscript of letters
+    directly followed by a digit (`M_max0.5`, `x_a2`), or that ends with a
+    function name (`A_maxsin t`).
+  - `ambiguous-delta`: `Δ` after a sign (`-Δα`, `-Δx`).
+  - `ambiguous-exponent-end`: a one-letter exponent directly followed by a
+    letter (`x^xy`, `e^xy`; these also report `ambiguous-letter-run`, as
+    before), and a function name after a signed exponent and white space
+    (`e^-x sin x`).
+  - `ambiguous-factorial`: a `!` directly after an exponent or a radicand
+    (`M³!`, `2^-k!`, `√i!`), and a superscript directly after a `!`
+    (`n!²`).
+  - `ambiguous-radical`: a Latin letter directly before `√` (`t√y`), and a
+    one-letter radicand followed by white space and an operand (`√a b`).
+  - `ambiguous-function-argument`: a power of `e` after the first factor of
+    an argument without parentheses (`sin2e^a`), and a function name with no
+    argument (`y = min`, `sin*x`).
+  - `ambiguous-constant-name`: `ii`, read as the imaginary unit.
+
+  See `docs/plans/2026-10-01-lenient-ambiguity-codes.md`, section 5.
+
+### Issues Resolved
+
+- **`sin\prime(x)` in the lenient grammar is the derivative of `sin`**, as
+  `sin'(x)` and `\sin\prime(x)` are. The `\prime` was read as the start of
+  the argument of `sin`, and gave an `unexpected-command` error.
+
+- **`toString()` wraps the operand of a factorial when needed.** The
+  factorial of `5/2` printed as `5/2!`, which reads as 5/(2!), and the
+  factorial of `x/2` as `1/2 * x!`. An operand that is not a name, an
+  unsigned decimal number or one function call is now in parentheses:
+  `(5/2)!`, `(1/2 * x)!`, `(n + 1)!`, `(-3)!`; `5!`, `n!`, `2.5!` and
+  `sin(x)!` are unchanged. A factorial used as the base of a power prints
+  as `(n!)^2`: `n!^2` did not parse back, since `!^` is read as one
+  operator.
+
+- **A complex `BarnesG` value outside the double range is no longer `0` or
+  left unevaluated.** `BarnesG(0.5 + 30i).N()` was `0`, which reads as an
+  exact zero of G (G has none off the non-positive integers), and
+  `BarnesG(30 + 0.5i).N()` stayed unevaluated: a complex argument is computed
+  in doubles, and exp(ln G) underflowed or overflowed. When it leaves the
+  range of a double, G is now formed from ln G as
+  exp(Re ln G)·(cos Im ln G + i sin Im ln G) with a big-decimal modulus:
+  `BarnesG(0.5 + 30i).N()` is `1.48501924951e-362 + 2.52832839715e-362i`
+  (mpmath: `1.48501924950746e-362 + 2.52832839715190e-362i`) and
+  `BarnesG(60 + 10i).N()` is `1.1631308292e+1883 - 2.10110905e+1881i`. The
+  value keeps only the digits that ln G in doubles gives: its error is about
+  2⁻⁵² times |ln G| relative to the modulus, so 12 digits at 0.5 + 30i and
+  10 at 0.5 + 300i, and a part smaller than the modulus keeps fewer (each
+  part is rounded at the last correct digit of the modulus),
+  at any `ce.precision`, as for the other complex results of the special
+  functions. At `precision: "machine"` the engine has no number that holds
+  such a value, and the result is unchanged (`0` on underflow, unevaluated on
+  overflow), as for `e^{-1000+i}`, which is `0` there.
+
+- **A complex `Gamma` or `Factorial` value outside the double range is no
+  longer `0` or `~oo`.** `Gamma(0.5 + 1000i).N()` and
+  `Gamma(-200.5 + 0.5i).N()` were `0`, and `Gamma(200.5 + 0.5i).N()` was
+  `~oo`, which reads as a pole, while Γ has no zeros and its only poles are
+  the non-positive integers. As for `BarnesG` above, the value is now formed
+  from ln Γ with a big-decimal modulus, keeping the digits that ln Γ in
+  doubles gives: `Gamma(200.5 + 0.5i).N()` is
+  `-4.90792586263e+373 + 2.63318721817e+373i` (mpmath:
+  `-4.907925862634e+373 + 2.633187218170e+373i`) and
+  `Gamma(0.5 + 1000i).N()` is `1.57066061e-684 + 1.6251473018e-682i`. A
+  complex `Factorial` takes the same route: `Factorial(300 + 2i).N()` is
+  `1.22674475486e+614 - 2.78179033693e+614i`. At `precision: "machine"` the
+  result is unchanged (`0` on underflow, `~oo` on overflow), as for
+  `e^{-1000+i}`.
+
+- **The compiled `StieltjesGamma` is accurate to a double up to order 30.**
+  The JavaScript kernel summed the Euler–Maclaurin form in doubles, where the
+  partial sum and the subtracted power of the logarithm are up to 10⁹ times
+  larger than the result and cancel: the compiled `StieltjesGamma(30)` was
+  `0.003557728327971422` (7 correct digits), and `StieltjesGamma(30, 0.5)`
+  was `-0.0035240594494571897` (6 correct digits). For a real `a` between
+  `10⁻¹⁵⁰` and `10¹⁵⁰` the sum is now taken in double-double arithmetic
+  (about 32 digits):
+  `0.003557728855573161` and `-0.0035240626522715247`, as mpmath gives.
+  Measured against mpmath for every order up to 30 at `a = 1, 0.5, 2.5, 10`
+  (and up to 20 at `a = 0.001`), the largest relative error is `2.2e-16`.
+  1000 values of `StieltjesGamma(30, a)` take about 35 ms.
+
+- **The inverse trigonometric and inverse hyperbolic functions of an argument
+  beyond the double range have a value.** `\arcsin(10^{400})` was `NaN` at
+  every precision, and is now `π/2 − 921.72718437817821891…i`.
+  `\operatorname{arcsec}(10^{-320})` was computed from the subnormal double
+  nearest `10⁻³²⁰`, which keeps 5 digits (`737.5203880715337i`), and is now
+  `737.52037693865456…i`. At machine precision, `\operatorname{arsinh}(10^{400})`
+  was `+∞` and `\operatorname{arcsch}(10^{-400})` was `~oo`; both are
+  `921.7271843781782`. A real argument, exact or a big decimal, outside the
+  range of a normal double now gives a value at the working precision for
+  the twelve heads (`Arcsin`, `Arccos`, `Arctan`, `Arccot`, `Arcsec`,
+  `Arccsc`, `Arsinh`, `Arcosh`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`),
+  with the side of each branch cut that the engine takes at `±10³⁰⁰` and
+  `±10⁻³⁰⁰`. A complex argument with a part beyond the double range gives a
+  value with the digits of a double, as the complex kernels do at every
+  precision, and keeps a part of the value too small for a double
+  (above machine precision, `\arctan(10^{400}(1+i))` is
+  `π/2 + 5·10⁻⁴⁰¹i`). A complex argument with a part too small for a
+  double next to the other (`\arcsin(2+10^{-400}i)`) takes the side of the
+  branch cut that the sign of that part selects: it was `π/2 − 1.317i`,
+  below the cut, and is now `π/2 + 1.317i`. `\arcsin(10^{400}+i)` was
+  `NaN` and is `π/2 + 921.727i`. At a logarithmic branch point the part
+  that grows as ln(1/δ) keeps its value: `\operatorname{artanh}(1+10^{-400}i)`
+  is `460.8635921890891 + 0.785i`. An exact real argument next to ±1 is no
+  longer read as ±1: `\arcsin(1+10^{-400})` was the real `π/2`, and is
+  `π/2 − 1.414·10⁻²⁰⁰i`; at machine precision
+  `\operatorname{artanh}(1-10^{-400})` was `+∞` and is
+  `460.86359218908911`. At machine precision, `Arctan` of a complex
+  argument whose double is `~oo` (`\arctan(10^{400}(1+i))`) was an
+  `incompatible-type` error and is `π/2`; an argument that is `~oo` stays
+  an error. A float argument whose double is subnormal is unchanged at
+  machine precision: the kernels read that double.
+
+- **A trigonometric function of an operand with a random draw draws once
+  under `evaluate()`.** `\arcsin(1+\operatorname{Random}())` evaluated the
+  operand a second time, to look for a special angle, and used up two draws
+  of a `WithRandomSeed` frame. An operand that is not pure is no longer read
+  again.
+
+- **Above machine precision, the inverse trigonometric and inverse
+  hyperbolic functions of a real argument with a complex value have the
+  working precision.** `\operatorname{arcosh}(1/2)`, `\arcsin(2)`,
+  `\operatorname{artanh}(2)`, `\operatorname{arsech}(-1/2)`,
+  `\operatorname{arcoth}(1/2)` and the others on a branch cut of the real
+  axis had a complex value computed in doubles (16 digits) at every
+  precision. At 50 digits, `\operatorname{arcosh}(1/2)` was
+  `1.0471975511965979i` and is now
+  `1.047197551196597746154214461093167628065723133125i`. A float argument
+  is read as its shortest decimal, as for a real value:
+  `\operatorname{arcoth}(0.999999)` at 21 digits is
+  `7.25432861926204720674 − 1.57079632679489661923i` (from the double
+  nearest `0.999999` it was `7.2543286192476694`). The sides of the cuts
+  are those of the double kernels.
+
+- **A complex value with a `NaN` part from a kernel is `NaN`.** At machine
+  precision `\sin(10^{400}+i)` reached the double kernel with an infinite
+  real part, and the `NaN` imaginary part of its value failed an internal
+  assertion. The value is now `NaN`.
+
+## 0.146.0 _2026-10-02_
+
+### Behavior Changes
+
+- **A definite integral with only one bound stays unevaluated.** A limit that
+  has an upper bound and no lower bound, or a lower bound and no upper bound
+  (`\int^2 y^2\,dy`, `\int_0 y^2\,dy`, `Limits(y, Nothing, 2)`, the flat
+  `["Integrate", f, "x", 10]`), is neither an indefinite nor a definite
+  integral, and no default is chosen for the missing bound. `\int^2 y^2\,dy`
+  evaluated to `7/3`, as if the lower bound were 1, and `\int_0 y^2\,dy` to
+  `1/3`; with a second limit the result could contain `1 - Nothing^2`. They now
+  stay unevaluated, under `evaluate()` and `N()` alike, and `compile()` falls
+  back to the interpreter. The indefinite integral (no bounds) and the definite
+  integral (two bounds) are unchanged.
+- **A sum or product with only one bound stays unevaluated**, as an integral
+  with only one bound does. No default is chosen for the missing bound, under
+  `evaluate()` and `N()` alike, and `compile()` falls back to the interpreter.
+  - `\sum_{k=1} k` evaluated to `1`: the subscript `k=1` was read as the
+    UPPER bound, `Limits(k, Nothing, 1)`. The subscript is now the lower
+    bound, `Limits(k, 1, Nothing)`, and the sum stays unevaluated. The same
+    applies to each index of `\sum_{k=1, j=2}`, and to `\prod`.
+  - `\sum_{k}^{10} k` evaluated to `55`, as if the lower bound were 1. It now
+    parses to `Limits(k, Nothing, 10)` and stays unevaluated. So
+    `Sum(k, Limits(k, Nothing, 10))`, which evaluated to `55` and serialized
+    as `\sum_{k}^{10}k`, now stays unevaluated and round-trips through LaTeX
+    unchanged. The flat `["Sum", "k", "k", 10]` is the same sum.
+  - `\sum^{10} k` and `\prod^{5} k` parsed to `["Sum", "k"]` and
+    `["Product", "k"]`: the bound was lost. The bound is now kept with no
+    index, as for `\sum_1^9 k`: `Sum(k, Limits(Nothing, Nothing, 10))`, which
+    stays unevaluated and serializes back to `\sum^{10}k`.
+  - A lower bound with no upper bound was read as a sum to infinity under
+    `N()`: `Sum(1/k^2, Limits(k, 1, Nothing)).N()` gave `1.6449…`. It now
+    stays unevaluated: write the upper bound `+∞` (`\sum_{k=1}^{\infty}`)
+    for an infinite sum.
+
+  A sum or product with two bounds, over an indexing set (`k \in S`), or with
+  no bounds at all (`\sum_k f`) is unchanged, and so is `\sum_{i \le 10} i`,
+  which keeps an implied lower bound of 1.
+- **A definite integral over a pole whose position is a free symbol stays
+  unevaluated.** `Integrate((y − a)⁻², Limits(y, 0, 4)).evaluate()` gave
+  `-1/a - 1/(4 - a)`, which is wrong for `0 ≤ a ≤ 4` (the integral is `+∞`
+  there); it now stays unevaluated. When the declared type of the symbol or
+  an assumption proves the pole outside the bounds, the integral is
+  evaluated as before: with `ce.assume(a > 4)`, or `a` declared
+  `real<..<0>`, the result is `-1/a - 1/(4 - a)`. The poles examined are the
+  roots of a denominator of degree 1 or 2 (factor by factor for a product),
+  the zero of a logarithm of a linear argument in a denominator, and the
+  poles of `tan`, `cot`, `sec`, `csc`, `coth` and `csch` and the zeros of a
+  circular or hyperbolic denominator, of a linear argument. A quadratic
+  denominator whose discriminant is not proven negative may have a real
+  root, so `∫₋₁¹ dt/(t² + m)` now stays unevaluated (its roots `±√(−m)` are
+  inside for `−1 ≤ m ≤ 0`), and so does `∫₀¹ dt/(t² + m²)` (a pole at `0`
+  for `m = 0`) unless the sign of `m` is known (with `ce.assume(m > 0)` it
+  is `arctan(1/m)/m`). In an iterated integral, the
+  integration variable of an enclosing integral is examined over its range:
+  `Integrate((y − x)⁻², Limits(y, 0, 10), Limits(x, 3, 4)).evaluate()` gave
+  the wrong partial result `int_(0)^(10)(-1/(y - 3) + 1/(y - 4) dy)` and now
+  stays unevaluated (the pole `x = y` is in `[3, 4]` for `3 ≤ y ≤ 4`), while
+  `Integrate((y − x)⁻², Limits(y, 5, 10), Limits(x, 3, 4))` gives
+  `ln(2) + ln(6) − ln(7)` (`ln(12/7)`). The same is true when the iterated
+  integral is written as nested integrals: `\int_5^{10}\int_3^4
+  (y-x)^{-2}\,dx\,dy` gives `ln(2) + ln(6) − ln(7)`. `.N()` is unchanged.
+
+  A symbol with no declared type is taken to be real when the position of a
+  pole is proven, as the antiderivatives already assume (`∫ dt/(t − a)` is
+  `ln|t − a|`). So `∫₀¹ dt/(t + a² + 1)` is `ln|a² + 2| − ln|a² + 1|`,
+  `∫₁² dt/(t(t² + a² + 1))` and `∫₀¹ dt/(t² + a² + 1)` have their closed
+  forms, and `∫₀¹ eᵗ/(eᵗ + a² + 1) dt` is `ln|a² + 1 + e| − ln|a² + 2|`. A
+  symbol whose type was only inferred from its uses is taken to be real too,
+  so the result does not depend on what the engine computed before. A
+  symbol declared by the user (`complex`, `number`) is not taken to be
+  real. A free symbol beside a
+  pole at a number keeps the closed form when the pole is removable for
+  every value of the symbol: `∫₀² a(t² − 1)/(t − 1) dt` is `4a`,
+  `∫₋₁¹ a·sin(t)/t dt` is `a·Si(1) − a·Si(−1)`, and
+  `∫₋₁¹ (sin(t)/t + a) dt` is `2a + 2Si(1)`.
+- **A definite integral with no value is `Indeterminate`.** When the
+  integrand changes sign across a pole inside the bounds (`∫₋₁¹ dt/t`,
+  `∫₀² tan t dt`, `∫ from ½ to 2 of dt/ln t`), or has poles at both bounds
+  that diverge with different signs (`∫₀¹ (1/t − 1/(1 − t)) dt`), the
+  integral has no value, not even an infinite one. `.evaluate()` kept these
+  integrals unevaluated; it now gives `Indeterminate`, or `NaN` when a bound
+  or a number in the integrand is a float (`∫₋₁¹ 1.5/t dt`). `.N()` and
+  `NIntegrate` give `NaN`, as before. A pole with one sign is still `+∞` or
+  `−∞`, and a divergence whose sign is not established still stays
+  unevaluated.
 - **A constant `NIntegrate` inside a compiled expression is folded to its
   value.** `compile(y + NIntegrate(x ↦ x, 0, 1))` gave `success: false`, since
   `NIntegrate` has no compiled form and the compiler declined to evaluate it
@@ -39,30 +412,6 @@
 
 ### New Features
 
-- **Compiled JavaScript runs without the engine.** The new entry point
-  `@cortex-js/compute-engine/runtime` exports `createJavaScriptRuntime(options)`,
-  the `_SYS` helper bundle that `compile()` builds for `run()`, with no engine
-  behind it: store the `code` of a `JavaScriptTarget` result, and run it on a
-  page, in a worker or on a server with `runtime.load(result)` (or as
-  `new Function('_SYS', '_', …)(runtime, vars)`). The helpers that read engine
-  state take it as options: `random` is the source of draws outside any
-  `WithRandomSeed` frame and of the integrals' Monte-Carlo samples (`null`
-  denies draws, and a draw then throws, as with a denied `entropy`
-  capability); `frame` is the frame of an interpreted `WithRandomSeed` the code
-  is called from (`{ seedLo, seedHi, next }` or `{ seed, next }`), and
-  `runtime.frame.next` is the advanced counter after the call; `iterationLimit`
-  caps the lazy-stream walks (default 1024) and `deadline` is an optional time
-  after which the shuffle and choice loops throw. A seeded program gives the
-  same values interpreted, with `run()` and as stored code:
-  `WithRandomSeed(7, RandomShuffle(Range(1, 6)))` is the same list in all
-  three. `CompilationResult.runtimeVersion` and `runtime.runtimeVersion` are
-  the version of the helper set; `load()` throws when they differ. Functions
-  passed in the `functions` or `imports` compile options are copied into the
-  code as source (`toString()`), so a closure loses its enclosing scope and a
-  function given by name must exist where the code runs. The engine's own
-  `_SYS` (`run.SYS`) is built from the same factory. (#372, contributed by
-  [enumeratio](https://github.com/enumeratio))
-
 - **`StirlingS2(n, k)` is an alias for `Stirling(n, k)`,** the Stirling number
   of the second kind, under its Mathematica name. Its canonical form is
   `Stirling`, the preferred name: `StirlingS2(6, 3)` evaluates to `90`, and
@@ -91,7 +440,215 @@
   the least root if it is below 100000: `PowerMod(0, 1/2, 2^200)` is `0`
   (#395, contributed by [enumeratio](https://github.com/enumeratio)).
 
+- **`DirichletEta` and `DirichletBeta`, the two alternating cousins of ζ,
+  both entire** (#395, contributed by
+  [enumeratio](https://github.com/enumeratio)). `DirichletEta(s)` is
+  η(s) = Σ (−1)ⁿ⁻¹/nˢ = (1 − 2¹⁻ˢ) ζ(s) and `DirichletBeta(s)` is
+  β(s) = Σ (−1)ⁿ/(2n+1)ˢ = 4⁻ˢ (ζ(s, ¼) − ζ(s, ¾)). Exact values at the
+  integers: `DirichletEta(1)` is `ln 2`, `DirichletEta(2)` is `π²/12`,
+  `DirichletEta(0)` is `1/2`, `DirichletEta(-3)` is `-1/8`;
+  `DirichletBeta(1)` is `π/4`, `DirichletBeta(2)` is `CatalanConstant`,
+  `DirichletBeta(5)` is `5π⁵/1536`, `DirichletBeta(-4)` is `5/2` (Euler
+  numbers). A real `s` is answered at `ce.precision` digits, also next to the
+  pole of ζ: `N(DirichletEta(1/2))` is `0.604898643421630370247`, and
+  `η(1 + 10⁻³⁰)` keeps every digit instead of cancelling the pole. A complex
+  `s` is answered in doubles: `DirichletBeta(0.5 + 14i)` is
+  `1.5371154384 + 1.3434514269i`. Both are `1` at `+∞` and `Indeterminate` at
+  `-∞`. A real `s` too close to 1 for the digits to be reached stays
+  unevaluated. Both compile to JavaScript.
+
+- **`StieltjesGamma(n, a)` is the generalized Stieltjes constant γₙ(a),** the
+  Laurent coefficient of the Hurwitz zeta function at its pole,
+  ζ(s, a) = 1/(s − 1) + Σₙ (−1)ⁿ γₙ(a)(s − 1)ⁿ/n!, as in Mathematica and
+  mpmath; `StieltjesGamma(n)` is γₙ = γₙ(1). `StieltjesGamma(0)` is
+  `EulerGamma`, `StieltjesGamma(0, a)` is `−PolyGamma(0, a)`,
+  `StieltjesGamma(2, 1)` is `StieltjesGamma(2)`, and a nonpositive integer
+  `a` is a pole (`StieltjesGamma(2, -1)` is `ComplexInfinity`).
+  `StieltjesGamma(1).N()` is `-0.0728158454836767248606`,
+  `StieltjesGamma(2, 1/2).N()` is `0.968864475220290711422`, and
+  `N(StieltjesGamma(2, 3/4), 40)` is `0.1193766260185842196972365071220126165487`:
+  a real `a > 0` follows `ce.precision` by Euler–Maclaurin on lnⁿ(x)/x with
+  exact integer derivatives, the remainder bounded in ball arithmetic so that
+  the digits returned are certified. A complex `a` or a negative non-integer
+  `a` is computed in doubles (`StieltjesGamma(2, 1 + i).N()` is
+  `0.1703042014685874 + 0.3731771957574952i`). Orders past 30 stay
+  unevaluated. The head threads over lists and compiles to JavaScript for a
+  real value (#395, contributed by [enumeratio](https://github.com/enumeratio))
+
+- **`LogGamma`, `BarnesG` and `LogBarnesG` are new, and
+  `PolyGamma(-1, z)` is `LogGamma(z)`.** `LogGamma(z)` is the analytic
+  continuation of ln Γ with its branch cut on (−∞, 0], as in Mathematica and
+  mpmath's `loggamma`. It is not `GammaLn`, which is the principal logarithm
+  of Γ(z) and jumps by 2πi across the zeros of Im Γ:
+  `GammaLn(-2.5 + 1.5i)` is `-3.7175 - 1.4299i`, `LogGamma(-2.5 + 1.5i)` is
+  `-3.7175 - 7.7131i`, and `LogGamma(-1.5)` is `0.86005 - 6.28319i`.
+  `GammaLn` is unchanged. `LogGamma(5)` is `ln(24)` exactly, `LogGamma(1/2)`
+  is `ln(π)/2`, and the poles at the non-positive integers are `+∞`; a real
+  argument follows `ce.precision`, a complex one is a double.
+  `BarnesG(z)` and `LogBarnesG(z)` are the Barnes G-function, with
+  G(z+1) = Γ(z)·G(z), and its logarithm continued with `LogGamma` as in
+  Mathematica. `BarnesG(5)` is `12`, `BarnesG(10)` is `5056584744960000`
+  (the superfactorial, an exact integer), `BarnesG(0)` is `0` and
+  `LogBarnesG(0)` is `−∞`. A real `z` is computed to `ce.precision` from the
+  asymptotic series of ln G at an argument of about twice the digits asked
+  for (the difference of two of its values, so the constant ζ′(−1) is not
+  needed), walked to `z` by G(u+1) = Γ(u)·G(u), with every product rounded
+  to the working precision: `N(BarnesG(1/2))` is
+  `0.603244281209446206191…`, and 1000 digits take under a second. Up to 1000 steps
+  from 1 (`N(LogBarnesG(120.5))` is `23552.5384297242683359`); farther, a real
+  `z` stays unevaluated at `ce.precision` above 15 digits. A complex `z`, and
+  a real `z` more than 60 from 1 at machine precision, use an asymptotic
+  series in doubles (about 3e-12 relative for G, measured against mpmath).
+  `LogBarnesG(-2.5)` is `-2.5747 + 18.8496i`. `PolyGamma(-1, z)` follows
+  Mathematica's convention, `PolyGamma(-1, -5/2 + 3i/2)` is `LogGamma` there;
+  the other negative orders stay unevaluated (#395, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **`ClausenCl(n, θ)` is the Clausen function Clₙ(θ).** For an integer order
+  n ≥ 1 and real θ it is Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ when n is even and
+  Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ when n is odd (mpmath's `clsin` and `clcos`;
+  Mathematica writes them as `Im`/`Re` of `PolyLog`). `N(ClausenCl(2, 1))` is
+  `1.0139591323607684`, `N(ClausenCl(3, 2.5))` is `-0.7606561109685137` and
+  `N(ClausenCl(2, 3.14159))` is `1.8393282835451e-6` (the expansion of Liₙ at
+  the unit circle, DLMF 25.12.12, with θ reduced mod 2π and moved off π by
+  the duplication formula so the even orders keep their relative accuracy
+  there). A real θ is computed to `ce.precision` digits for orders up to 40
+  and |θ| up to 10¹², the ζ(n − k) being bignum zeta values and exact
+  Bernoulli rationals; outside that, or where the value cancels against its
+  own terms, the head stays unevaluated. The exact points are closed:
+  `ClausenCl(2, π/2)` is Catalan's constant and `ClausenCl(2m, π/2)` is
+  `DirichletBeta(2m)`, `ClausenCl(3, 0)` is `ζ(3)`,
+  `ClausenCl(2, 0)` and `ClausenCl(2, π)` are `0`, `ClausenCl(1, 0)` is `+∞`.
+  A non-integer or non-positive order and a symbolic θ stay unevaluated. The
+  compiled JavaScript lane agrees with `.N()`
+  (#395, contributed by [enumeratio](https://github.com/enumeratio)).
+
+- **`DirichletCharacter(k, j, n)` and `DirichletL(k, j, s)` give the Dirichlet
+  characters modulo `k` and their L-functions,** in Wolfram's indexing
+  (`j = 1` the principal character, `j` up to φ(k)). `DirichletCharacter(5, 2, 2)`
+  is `i`, `DirichletCharacter(7, 3, 3)` is `e^(2πi/3)` and a character is `0`
+  where `gcd(n, k) > 1`. `DirichletL` sums `k^(−s) Σ χ(r) ζ(s, r/k)` through
+  `HurwitzZeta`, so a real value follows `ce.precision` (`DirichletL(3, 2, 1.5)`
+  is `0.703968244868733261668` at 21 digits, `DirichletL(5, 3, 1.01)` keeps
+  every digit next to the pole) and a complex value is at double precision;
+  the odd character mod 4 is `DirichletBeta` (`DirichletL(4, 2, 1)` is `π/4`); the principal character is `ζ(s) Π (1 − p^(−s))` over the primes
+  dividing `k`, so `DirichletL(5, 1, 1)` is `~oo`; at a nonpositive integer
+  the value is exact from the Bernoulli polynomials (`DirichletL(5, 2, 0)` is
+  `3/5 + i/5`, `DirichletL(8, 2, -3)` is `11`); within 1/4 of `s = 1` a
+  non-principal character with a complex value is summed from its Laurent
+  series in the Stieltjes constants at double precision, since the Hurwitz
+  terms there have poles that cancel (`DirichletL(5, 2, 1.01)`); a real
+  character at a real `s` takes guard digits for the cancellation instead
+  (and, closer to 1 than they reach, its Laurent series in certified Stieltjes
+  constants). `L(1, χ)` of a real character is exact, from the class number
+  formula: `DirichletL(3, 2, 1)` is `sqrt(3)/9 * pi` (π/(3√3)), the quadratic
+  character mod 5 gives `2/5sqrt(5) * ln("GoldenRatio")` (2·ln φ/√5),
+  `DirichletL(8, 2, 1)` is `sqrt(2)/2 * ln(1 + sqrt(2))`; it stays symbolic
+  for a modulus above 1000. A
+  character with complex values at a real `s` is answered in doubles, its
+  terms computed for a double at any `ce.precision`. A modulus above 1000 stays
+  symbolic for `DirichletL` (it sums `k` Hurwitz values). Both heads are
+  listable. (#395, contributed by [enumeratio](https://github.com/enumeratio))
+
 ### Issues Resolved
+
+- **The GLSL and WGSL inverse trigonometric functions of a complex argument
+  are accurate.** The shader helpers of `Arcsin`, `Arccos`, `Arctan`,
+  `Arsinh`, `Arcosh` and `Artanh` (also used by `Arccsc`, `Arcsec`, `Arsech`
+  and `Arcoth`) used the logarithm formulas in 32-bit floats, and gave
+  `\arcsin(1000)` a real part of `1.660` instead of `π/2`, `\arcsin(10^4)` a
+  real part of `π`, `\operatorname{arsinh}(-10^4)` the value `-∞`,
+  `\operatorname{arcosh}(-1.5)` a negative real part, and
+  `\operatorname{artanh}(10^{20})` a `NaN` real part. On the real axis
+  outside the domain, `\arcsin`, `\arccos` and `\operatorname{artanh}` took
+  the other side of the branch cut (`\arcsin(1.5)` was `π/2 + 0.962i`, the
+  interpreter gives `π/2 - 0.962i`). The helpers now use the same formulas as
+  the interpreter, written for 32-bit floats, and the side of each cut is the
+  interpreter's. With correctly rounded built-in functions, each part has a
+  relative error below `3·10^{-7}` (a few units in the last place) for a
+  modulus from `10^{-40}` to `10^{30}`. A GPU can be less accurate: GLSL and
+  WGSL allow `log` an absolute error of `2^{-21}` on `[0.5, 2]` and 3 units
+  in the last place elsewhere, and `atan` an error of 4096 units in the last
+  place. The helpers do not call `log` on an argument near 1 (`ln(1 + x)` for
+  a small `x` is a series). `Arccsc`, `Arcsec`, `Arsech` and `Arcoth` have
+  their own helpers, which do not compute `w = 1/z` and then the function of
+  `w`: near `z = ±1` the rounding of `1/z` was amplified
+  (`\operatorname{arcoth}(-1 + 10^{-4}i)` had a relative error of
+  `6·10^{-5}`), `1/z` overflowed for a modulus above `10^{19}`, and a
+  subnormal `z` gave `NaN` (`\operatorname{arsech}(10^{-40})` is `92.80`).
+  `\operatorname{arsech}(0)` is `+∞`, as in the interpreter; it was `NaN`.
+
+- **Compiled Python takes the interpreter's side of each branch cut.** For a
+  complex argument, `Arcsin`, `Arccos`, `Arctan`, `Arsinh`, `Arcosh`,
+  `Artanh` and their reciprocals `Arccsc`, `Arcsec`, `Arccot`, `Arcsch`,
+  `Arsech` and `Arcoth` compiled to `cmath` or NumPy routines, which pick the
+  side of a cut from the sign of a zero part: `\arcsin(2)` of a complex
+  variable gave `π/2 + 1.317i`, the interpreter gives `π/2 - 1.317i`. The
+  compiled code now gives a zero part the sign that selects the interpreter's
+  side, on every cut of the twelve functions. Also fixed: `Arccot` of a
+  complex argument with a negative real part was off by `π` (it compiled to
+  `π/2 - \arctan(z)`, not `\arctan(1/z)`); `Artanh` of a complex variable with
+  a real value outside `[-1, 1]` and `Arsinh` on its cut gave `nan`;
+  `\arctan(\pm i)` and `\operatorname{artanh}(\pm 1)` raised a `ValueError`
+  (they are now infinite, as in compiled JavaScript); the reciprocal
+  functions raised a `ZeroDivisionError` at `0`; and a list of complex values
+  takes the same code on each element. A complex-typed argument now always
+  gives a Python `complex` for these twelve functions, also when the value is
+  real: `Artanh`, `Arsinh` and `Arcosh` returned a `float` before
+  (`Arcsin`, `Arccos` and `Arctan` already returned a `complex`).
+
+- **A definite integral over a zero of `eᵗ − a`, `sin t − a` or
+  `(t − a)^(−n)` stays unevaluated.** `∫₀¹ eᵗ/(eᵗ − a) dt` gave
+  `ln|e − a| − ln|1 − a|`, wrong for `1 ≤ a ≤ e`, where the integrand has a
+  pole. `∫₀¹ cos t/(sin t − a) dt` gave `ln|sin 1 − a| − ln|−a|`, wrong for
+  `0 ≤ a ≤ sin 1`, `∫₀¹ cos t/(sin t − a)² dt` gave a finite value where the
+  integral is `+∞`, and `∫₀¹ (t − a)^(−n) dt` gave a closed form for every
+  `n`. These integrals now stay unevaluated, unless the declared type of `a`
+  or an assumption puts the zero outside the interval: with
+  `ce.assume(a > 3)`, `∫₀¹ eᵗ/(eᵗ − a) dt` is `ln(a − e) − ln(a − 1)`. The
+  zero of a divisor `g(t) − c`, where `g` is monotone on the interval, is
+  located by comparing `c` with `g` at the bounds. Any other divisor with a
+  free symbol whose zeros cannot be located keeps the integral unevaluated.
+- **A definite integral with a free symbol in a bound and a pole at a number
+  stays unevaluated.** `∫ₐ¹ dt/t` gave `−ln|a|`, `∫₋₁ᵇ dt/t` gave `ln|b|` and
+  `∫₀ᵇ dt/(t + 1)` gave `ln|b + 1|`: each is wrong when the pole is between
+  the bounds (`a < 0`, `b > 0`, `b < −1`). `∫₀ᵃ dt/t` gave `+∞`, wrong for
+  `a < 0`. They now stay unevaluated unless an assumption puts the pole
+  outside the interval: with `ce.assume(a > 0)`, `∫ₐ¹ dt/t` is `−ln(a)`. A
+  removable or integrable singularity is not a pole: `∫₀ˣ sin(t)/t dt` is
+  still `Si(x)` and `∫₀ᵇ dt/√t` is still `2√b`. A pole of `tan`, `cot`,
+  `sec` or `csc` (or a zero of a `sin` or `cos` divisor) with a free symbol
+  in a bound keeps the integral unevaluated: `∫₀ˣ tan t dt` was
+  `ln|sec x|`, wrong for `x ≥ π/2`.
+- **`∫ ln(ax + b) dx` is correct.** `∫ ln(x + 1) dx` gave
+  `(x + 1)·ln(x) − x + 1`, and `∫₀¹ ln(x + 1) dx` gave `+∞`. They are now
+  `(x + 1)·ln(x + 1) − x` and `2ln(2) − 1`. `∫ ln(2x + 3) dx` is
+  `(2x + 3)·ln(2x + 3)/2 − x`.
+- **`.N()` of an integral over a pole agrees with `evaluate()` when the
+  integrand has a constant such as `π`.** `.N()` of `\int_{-1}^1
+  \frac{\pi}{t}\,dt` gave a random Monte Carlo estimate (`0.0 ± 3.4`); it
+  now gives `NaN` (`evaluate()` gives `Indeterminate`). `.N()` of
+  `\int_{-1}^1 \frac{\pi}{t^2}\,dt` gave `2.1e154 ± 8.8e143`; it now gives
+  `+∞`, as `evaluate()` does.
+- **`∫₋₁¹ dt/(eᵃ·t)` is `Indeterminate`**, since `eᵃ` is never zero and the
+  integrand changes sign across the pole at `0`. It was `0`.
+- **The flat spelling of several integration variables or indexes reads a
+  repeated name as a bound.** `["Integrate", ["Multiply", "x", "y"], "x", 0,
+  "y", "y", 0, 1]` read as `Limits(x, Nothing, 0)`, `Limits(y, Nothing,
+  Nothing)`, `Limits(y, 0, 1)`, with `y` an index twice. A name that would
+  be an index twice is now the upper bound of the index before it:
+  `Limits(x, 0, y), Limits(y, 0, 1)`. The same applies to `Sum` and
+  `Product`: `["Sum", "k", "k", 1, "n", "n", 1, 10]`, which had three
+  `missing` error operands, is `Sum(k, Limits(k, 1, n), Limits(n, 1, 10))`.
+- **`GammaLn` at machine precision is accurate next to 0, 1 and 2.**
+  `GammaLn(1e-10)` had 8 correct digits (`23.02585084714237`, against
+  `23.025850929882735`), and `GammaLn(1 + 10⁻¹⁰)` had about 10: the double
+  kernel formed z − 1 + i, which loses the low digits of a small z, and its
+  absolute error of about 10⁻¹⁶ is a large relative error next to the zeros of
+  ln Γ at 1 and 2. For 0 < z ≤ 7/2 the kernel now uses the Taylor series of
+  ln Γ(1 + e) about 1 with ζ(k) − 1 as its coefficients, and is within a few
+  units in the last place of mpmath there. The new `LogGamma` uses the same
+  kernel for a positive real argument.
 
 - **Inverse trigonometric functions are accurate at large and small
   arguments.** `\arcsin(-1000000)` gave `-1.5707963267948966 +
@@ -157,12 +714,53 @@
   heads now stay unevaluated when a list operand is not known to be finite or
   has more than 1,000,000 elements.
 
+- **An iterated integral with a slowly integrable singularity has the right
+  value and error.** `Integrate(y^(−0.999), Limits(y, 0, 1), Limits(x, 0,
+  2)).N()` gave `0 ± 1.3e+289`; it is now `2000.000000002 ± 0.000000024`
+  (exact: 2000). With `y^(−1/2)` it gave `0 ± 9.4e+136`; it is now
+  `4.000000000000 ± 0.000000000015` (exact: 4). The error of the inner
+  levels was averaged over the nodes of the outer level and multiplied by
+  its range, but the nodes are packed next to the singularity, where the
+  inner values and their errors are largest. When the inner values keep one
+  sign, the error added is now their relative error times the magnitude of
+  the result.
+
+- **`∫₋₁¹ dt/(a·t)` with a free `a` is `Indeterminate`.** It was `0`. The pole
+  at `t = 0` could not be confirmed by sampling while `a` is free. The
+  integrand is now split into a constant factor and a part with only the
+  integration variable (`(1/a)·(1/t)`), and the pole of that part is
+  confirmed. For every `a ≠ 0` the integrand changes sign across the pole,
+  and for `a = 0` it is undefined everywhere, so the integral has no value.
+  `∫₋₁¹ dt/(a·t²)` was `−2/a`; it now stays unevaluated, and is `+∞` when
+  `a > 0` is assumed and `−∞` when `a < 0`. `∫₋₁¹ a/t dt` was `0`; it now
+  stays unevaluated (it is `0` for `a = 0`). `∫₁² dt/(a·t)` is still
+  `ln(2)/a`. An integrand with a pole at a number and a free symbol that is
+  not a constant factor (`1/(t·(t² + a² + 1))` over `[−1, 1]`) also stays
+  unevaluated.
+
+- **`.N()` of an iterated integral with a moving pole and an infinite bound
+  is `+∞`.** `Integrate((y − x)⁻², Limits(y, 0, +∞), Limits(x, 3, 4)).N()`
+  gave `5140000000000000 ± 440000000000000`; it is now `+∞`: for every `x`
+  in `(3, 4)` the inner integral has a pole at `y = x`. The scan for such
+  poles now places its points on an infinite range with the transform of
+  the quadrature, and cuts an infinite range to a finite one for the pole
+  check.
+
 - **`Stirling`, `StirlingS1` and `Eulerian` outside their triangle are `0`.**
   `Stirling(3, 5)`, `StirlingS1(3, 5)` and `Eulerian(3, 5)` stayed
   unevaluated (and their compiled form gave `NaN`); they are now `0`, as
   `Binomial(3, 5)` already was. `Eulerian(0, 0)` is now `1`. A negative or
   symbolic operand still leaves the expression unevaluated.
 
+- **`Log` and `Ln` check their operand count in strict mode.** `Log` and
+  `Ln` take one or two operands (the second is the base; `Ln(3, 4)` is
+  `Log(3, 4)`). With `ce.strict = true`, `Log(8, 2, 3)` was valid and
+  evaluated to `3`, and `Ln(3, 4, 5)` became `Log(3, 4, 5)`. Now the extra
+  operand is an error, as for `Sqrt(4, 5)`: `Log(8, 2, 3)` is
+  `Log(8, 2, Error("unexpected-argument", "3"))`, and `Ln(3, 4, 5)` is
+  `Ln(3, 4, Error("unexpected-argument", "5"))`. This applies to `ce.box()`,
+  `ce.function()` and `ce.parse()` (`\log(8, 2, 3)`). In non-strict mode
+  the extra operand is kept, as before.
 - **A redeclared `If`, `Sum`, `Block`, … compiles as the user definition.**
   With `ce.declare('If', { ...ce.lookupDefinition('If').operator, evaluate:
   () => ce.number(100) })`, `If(x > 0, sin(x), cos(x))` gives `100` in the
@@ -353,6 +951,131 @@
 - `Derivative()` with no operand logged "error canonicalizing `Derivative`" and
   stayed `Derivative()`; it is now `Derivative(Error("missing"))`, the
   standard form of a missing required operand.
+- **The flat MathJSON form of a definite integral reads its bounds for any
+  bound expression.** `["Integrate", ["Power", "y", 2], "y", 0, "Pi"]` read
+  `Pi` as a second integration variable and evaluated to `-1/3 * pi`; it is
+  now `Integrate(y², Limits(y, 0, Pi))`, which evaluates to `1/3 * pi^3`. The
+  Epsil call form `∫(y^2, y, 0, π)` gives this MathJSON. After the variable,
+  an operand that is not a variable name (a number, a constant such as `Pi`,
+  or an expression) starts the bounds, and the next operand is the upper
+  bound, whatever expression it is. A variable name after the variable is
+  still the next integration variable: `["Integrate", f, "x", "y", "z"]` is
+  the triple indefinite integral, as before.
+- **`NIntegrate` declares the bounds it reads.** The signature of
+  `NIntegrate` was `(function, limits:(tuple|symbol)?) -> number`, but only
+  the form `NIntegrate(f, lower, upper)` was evaluated: `NIntegrate(x ↦ x²,
+  (0, 2))` stayed unevaluated. The signature is now `(function,
+  lower:number, upper:number) -> number`, and a `Tuple` of bounds or a
+  missing bound is an error operand (`incompatible-type`, `missing`). For a
+  multiple integral, use `Integrate(f, Limits(x, …), Limits(y, …)).N()`.
+- **A numeric integral with a slowly integrable singularity at a bound is
+  correct, with an error that covers the true error.** A large part of such an
+  integral is closer to the bound than a floating-point number can be
+  (`∫₀^δ x^(−0.999) dx` is about 500 for `δ = 1e-300`), so the quadrature gave
+  a wrong value with a tight error. The value of that part is now found by
+  extrapolation of the integrals over the shells that the quadrature cuts next
+  to the bound (Wynn's ε-algorithm and the Levin u-transform). The
+  extrapolation is used only when the shells decrease as the terms of a
+  convergent series do, two extrapolations agree, and the error is at most
+  1e-3 of the value. A converged result next to a singular bound is checked
+  against the tanh-sinh (double-exponential) rule, and is kept when tanh-sinh
+  does not converge (a smooth integrand with a narrow peak at a bound, such
+  as `∫₀¹ dx/(10⁻¹² + x²) = 1570795.3267948966`, keeps its value). The
+  compiled `Integrate` and the levels of a multiple integral use the same
+  correction.
+  `Integrate(…).N()` and `NIntegrate` (compiled integrand / integrand that
+  does not compile):
+  - `∫₀¹ x^(−0.999) dx = 1000`: `508.24896298688 ± 0.00000000053` /
+    `18.9 ± 4.4` → `1000.0000000014 ± 0.0000000061` /
+    `1000.0000000009 ± 0.0000000045`.
+  - `∫₀¹ x^(−0.99) dx = 100`: `99.922310890258 ± 0.000000000098` /
+    `89.72 ± 0.86` → `100.00000000000 ± 0.00000000011` /
+    `100.000000000005 ± 0.000000000093`.
+  - `∫₀^½ dx/(x·ln²x) = 1/ln 2 = 1.4426950408889634`:
+    `1.44131049670385 ± 0.00000000000014` / `1.43831 ± 0.00016` →
+    `1.44269504088899 ± 0.00000000000021` (both).
+  - `∫₀¹ (1 − t)^(−0.95)·ln(1 − t) dt = −400`: `NaN` (both) →
+    `-399.9999998 ± 0.0000021`.
+  - `∫₀¹ (1 − t)^(−0.95)·ln(10⁻⁶·(1 − t)) dt = −676.3102111592855`:
+    `-380 ± 110` (1.3 s) / `-236 ± 84` → `-676.3102109 ± 0.0000043` (2 ms).
+  - `∫₀¹ t^(−0.995)·ln t dt = −40000`: the integrand that does not compile
+    gave `-41.1 ± 6.9` and now gives `-39999.99995 ± 0.00025`. The compiled
+    one still gives `NaN`.
+  - `∫₀¹ dx/√(1 − x²) = π/2`: `1.5707963111 ± 0.0000000073` →
+    `1.57079632679493 ± 0.00000000000047`.
+  - `∫₁^∞ x^(−1.01) dx = 100`: the integrand that does not compile gave
+    `2.71 ± 0.44` and now gives `100.000000003 ± 0.000000036`, as the compiled
+    one does.
+
+  A quadrature result that did not converge and is kept instead of the
+  Monte-Carlo estimate now reports an error of at least the Monte-Carlo
+  standard error, `|estimate|/√samples`: `∫₀¹ sin(1/x) dx` gives
+  `0.50407 ± 0.00016` (was `± 0.000051`); the same floor applies to a level
+  of a multiple integral. Smooth integrands converge before any of this runs,
+  and take the same time as before.
+
+  Next to a singular bound that the extrapolation could not resolve, where
+  the integrand keeps one sign, the quadrature result is kept with its widened error, and is never replaced by
+  a Monte-Carlo estimate, which under-weights the neighborhood of the
+  singularity: ∫₀^0.01 dx/(x·(−ln x)·ln²(−ln x)) = 1/ln(ln 100) = 0.6548…
+  gave `0.3220 ± 0.0063` and now gives `0.503 ± 0.018`. When the shells
+  decrease as a power of their index (`1/(x·(−ln x)^q)`), only the Levin
+  u-transform is used: ∫₀^½ dx/(x·(−ln x)³) = 1/(2·ln²2) = 1.0406844905…
+  gave `1.040684324 ± 0.000000012` and now gives
+  `1.040684485 ± 0.000000050`. A part of the interval where the integrand
+  has no value makes the error of the quadrature infinite, so the estimate
+  of the other parts is not kept as a value. A compiled integral that runs
+  inside another quadrature has no Monte-Carlo fallback (it would draw 1e7
+  samples at each node of the enclosing quadrature): `.N()` of
+  `\int_0^{10}\int_3^4 (y-x)^{-2}\,dx\,dy`, whose inner integral has no
+  value for `y` in `[3, 4]`, ran for more than 200 s and now gives `NaN` in
+  about 2 s.
+
+  An integral whose integrand oscillates without a limit next to a bound has
+  no value, and `.N()`, `NIntegrate` and the compiled `Integrate` now give
+  `NaN` for it: `∫₀¹ sin(ln x)/x dx` gave `-0.11112857219 ± 0.0000000014`
+  with a compiled integrand, and a Monte-Carlo value otherwise. The same
+  applies to `∫₁^∞ sin(ln x)/x dx`, `∫₀¹ sin(ln(1 − x))/(1 − x) dx` and
+  `sin(ln x)/x^p` on `[0, 1]` for `p ≥ 1`.
+- **`∫₀^∞ sin x/x dx` is `π/2` to 1e-11.** The oscillatory quadrature skipped
+  `[0, 1e-8]`, where `sin x/x` is `0/0`, and gave
+  `1.57079631675 ± 0.00000000025`, wrong by 1e-8; it now integrates the first
+  lobe from 0 with the adaptive quadrature, which resolves a singularity at
+  0, and gives `1.57079632675 ± 0.00000000025`.
+  `∫₀^∞ sin x/x^1.5 dx = √(2π) = 2.5066282746310` was
+  `2.50658840820 ± 0.00000000013` (true error 4.0e-5) and is now
+  `2.50662827461 ± 0.00000000014`.
+- **A compiled semi-infinite oscillatory integral uses the oscillatory
+  quadrature.** The compiled `Integrate` (`_SYS.integrate`) used only the
+  adaptive quadrature, which does not converge on such an integral: with a
+  parameter `p`, `∫₀^∞ sin x/x^p dx` gave `NaN` for `p = ½` and `2.5237` for
+  `p = 1.5`. It now gives `1.2533141372613` (`√(π/2)`) and `2.5066282746098`
+  (`√(2π)`), as `.N()` does.
+- **A semi-infinite oscillatory integral with reversed bounds has the right
+  sign.** `∫_∞^0 sin x/x dx` gave `+π/2` under `.N()` and `NIntegrate` (the
+  infinite lower bound was read as `−∞`), and `NaN` when compiled. All three
+  now give `−π/2`.
+- **The numeric integral of a small integrand has a relative error.** The
+  adaptive quadrature stopped when its error was below an absolute tolerance
+  of `1e-12`, so an integral of a small integrand was "converged" with any
+  relative error: `∫₀¹ 10⁻³⁰⁰·x^(−0.999) dx = 10⁻²⁹⁷` gave
+  `9.76e-300 ± 8.1e-300`. The absolute tolerance is now at most `1e-10` times
+  the sum of the magnitudes of the panel values, and `NIntegrate` gives
+  `9.9999999997e-298`.
+- **A pole at a bound of large magnitude is found.** Next to a bound such as
+  `10⁶`, the quadrature reaches the spacing of the doubles after about 29
+  bisections, too few for its divergence test: `∫ dx/(x − 10⁶)` on
+  `[10⁶, 10⁶ + 1]` gave `22.7 ± 0.58`. It now gives `NaN`, and a convergent
+  integral there (`∫ (x − 10⁶)^(−½) dx = 2`) keeps its value.
+- **The flat form of `Sum` and `Product` is read like the flat form of
+  `Integrate`.** `["Sum", "k", "k", 1, 10]` gave `Error("missing")`, as did
+  the Epsil call `∑(k, k, 1, 10)`, which produces it. It is now
+  `Sum(k, Limits(k, 1, 10))`, which is `55`; `["Product", "k", "k", 1, 5]` is
+  `120`, and `["Sum", "k", "k", 1, "n"]` is `Sum(k, Limits(k, 1, n))`, with
+  `n` free (its simplification is `(n² + n)/2`). An index followed by one
+  bound (`["Sum", "k", "k", 10]`) has that bound as its upper bound, and
+  several indexes can follow each other (`["Sum", f, "i", 1, 3, "j", 1, 2]`).
+  The `Limits`, `Element` and `Tuple` forms are unchanged.
 
 ## 0.145.0 _2026-10-01_
 
@@ -739,106 +1462,6 @@
   compute to the requested digits without reading `ce.precision`. `N(x, p)`
   with `p` above `ce.precision` still raises `ce.precision` and leaves it
   raised, as before.
-
-- **`DirichletEta` and `DirichletBeta`, the two alternating cousins of ζ,
-  both entire** (#395, contributed by
-  [enumeratio](https://github.com/enumeratio)). `DirichletEta(s)` is
-  η(s) = Σ (−1)ⁿ⁻¹/nˢ = (1 − 2¹⁻ˢ) ζ(s) and `DirichletBeta(s)` is
-  β(s) = Σ (−1)ⁿ/(2n+1)ˢ = 4⁻ˢ (ζ(s, ¼) − ζ(s, ¾)). Exact values at the
-  integers: `DirichletEta(1)` is `ln 2`, `DirichletEta(2)` is `π²/12`,
-  `DirichletEta(0)` is `1/2`, `DirichletEta(-3)` is `-1/8`;
-  `DirichletBeta(1)` is `π/4`, `DirichletBeta(2)` is `CatalanConstant`,
-  `DirichletBeta(5)` is `5π⁵/1536`, `DirichletBeta(-4)` is `5/2` (Euler
-  numbers). A real `s` is answered at `ce.precision` digits, also next to the
-  pole of ζ: `N(DirichletEta(1/2))` is `0.604898643421630370247`, and
-  `η(1 + 10⁻³⁰)` keeps every digit instead of cancelling the pole. A complex
-  `s` is answered in doubles: `DirichletBeta(0.5 + 14i)` is
-  `1.5371154384 + 1.3434514269i`. Both are `1` at `+∞` and `Indeterminate` at
-  `-∞`. A real `s` too close to 1 for the digits to be reached stays
-  unevaluated. Both compile to JavaScript.
-
-- **`StieltjesGamma(n, a)` is the generalized Stieltjes constant γₙ(a),** the
-  Laurent coefficient of the Hurwitz zeta function at its pole,
-  ζ(s, a) = 1/(s − 1) + Σₙ (−1)ⁿ γₙ(a)(s − 1)ⁿ/n!, as in Mathematica and
-  mpmath; `StieltjesGamma(n)` is γₙ = γₙ(1). `StieltjesGamma(0)` is
-  `EulerGamma`, `StieltjesGamma(0, a)` is `−PolyGamma(0, a)`,
-  `StieltjesGamma(2, 1)` is `StieltjesGamma(2)`, and a nonpositive integer
-  `a` is a pole (`StieltjesGamma(2, -1)` is `ComplexInfinity`).
-  `StieltjesGamma(1).N()` is `-0.0728158454836767248606`,
-  `StieltjesGamma(2, 1/2).N()` is `0.968864475220290711422`, and
-  `N(StieltjesGamma(2, 3/4), 40)` is `0.1193766260185842196972365071220126165487`:
-  a real `a > 0` follows `ce.precision` by Euler–Maclaurin on lnⁿ(x)/x with
-  exact integer derivatives, the remainder bounded in ball arithmetic so that
-  the digits returned are certified. A complex `a` or a negative non-integer
-  `a` is computed in doubles (`StieltjesGamma(2, 1 + i).N()` is
-  `0.1703042014685874 + 0.3731771957574952i`). Orders past 30 stay
-  unevaluated. The head threads over lists and compiles to JavaScript for a
-  real value (#395, contributed by [enumeratio](https://github.com/enumeratio))
-
-- **`LogGamma`, `BarnesG` and `LogBarnesG` are new, and
-  `PolyGamma(-1, z)` is `LogGamma(z)`.** `LogGamma(z)` is the analytic
-  continuation of ln Γ with its branch cut on (−∞, 0], as in Mathematica and
-  mpmath's `loggamma`. It is not `GammaLn`, which is the principal logarithm
-  of Γ(z) and jumps by 2πi across the zeros of Im Γ:
-  `GammaLn(-2.5 + 1.5i)` is `-3.7175 - 1.4299i`, `LogGamma(-2.5 + 1.5i)` is
-  `-3.7175 - 7.7131i`, and `LogGamma(-1.5)` is `0.86005 - 6.28319i`.
-  `GammaLn` is unchanged. `LogGamma(5)` is `ln(24)` exactly, `LogGamma(1/2)`
-  is `ln(π)/2`, and the poles at the non-positive integers are `+∞`; a real
-  argument follows `ce.precision`, a complex one is a double.
-  `BarnesG(z)` and `LogBarnesG(z)` are the Barnes G-function, with
-  G(z+1) = Γ(z)·G(z), and its logarithm continued with `LogGamma` as in
-  Mathematica. `BarnesG(5)` is `12`, `BarnesG(10)` is `5056584744960000`
-  (the superfactorial, an exact integer), `BarnesG(0)` is `0` and
-  `LogBarnesG(0)` is `−∞`. A real `z` is computed to `ce.precision` from the
-  Taylor series of ln Γ and ln G about 1 (coefficients ζ(k)), with a bounded
-  tail, `N(BarnesG(1/2))` being `0.603244281209446206191…`, up to 1000 steps
-  from 1 (`N(LogBarnesG(120.5))` is `23552.5384297242683359`); farther, a real
-  `z` stays unevaluated at `ce.precision` above 15 digits. A complex `z`, and
-  a real `z` more than 60 from 1 at machine precision, use an asymptotic
-  series in doubles (about 3e-12 relative for G, measured against mpmath).
-  `LogBarnesG(-2.5)` is `-2.5747 + 18.8496i`. `PolyGamma(-1, z)` follows
-  Mathematica's convention, `PolyGamma(-1, -5/2 + 3i/2)` is `LogGamma` there;
-  the other negative orders stay unevaluated (#395, contributed by
-  [enumeratio](https://github.com/enumeratio)).
-
-- **`ClausenCl(n, θ)` is the Clausen function Clₙ(θ).** For an integer order
-  n ≥ 1 and real θ it is Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ when n is even and
-  Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ when n is odd (mpmath's `clsin` and `clcos`;
-  Mathematica writes them as `Im`/`Re` of `PolyLog`). `N(ClausenCl(2, 1))` is
-  `1.0139591323607684`, `N(ClausenCl(3, 2.5))` is `-0.7606561109685137` and
-  `N(ClausenCl(2, 3.14159))` is `1.8393282835451e-6` (the expansion of Liₙ at
-  the unit circle, DLMF 25.12.12, with θ reduced mod 2π and moved off π by
-  the duplication formula so the even orders keep their relative accuracy
-  there). A real θ is computed to `ce.precision` digits for orders up to 40
-  and |θ| up to 10¹², the ζ(n − k) being bignum zeta values and exact
-  Bernoulli rationals; outside that, or where the value cancels against its
-  own terms, the head stays unevaluated. The exact points are closed:
-  `ClausenCl(2, π/2)` is Catalan's constant and `ClausenCl(2m, π/2)` is
-  `DirichletBeta(2m)`, `ClausenCl(3, 0)` is `ζ(3)`,
-  `ClausenCl(2, 0)` and `ClausenCl(2, π)` are `0`, `ClausenCl(1, 0)` is `+∞`.
-  A non-integer or non-positive order and a symbolic θ stay unevaluated. The
-  compiled JavaScript lane agrees with `.N()`
-  (#395, contributed by [enumeratio](https://github.com/enumeratio)).
-
-- **`DirichletCharacter(k, j, n)` and `DirichletL(k, j, s)` give the Dirichlet
-  characters modulo `k` and their L-functions,** in Wolfram's indexing
-  (`j = 1` the principal character, `j` up to φ(k)). `DirichletCharacter(5, 2, 2)`
-  is `i`, `DirichletCharacter(7, 3, 3)` is `e^(2πi/3)` and a character is `0`
-  where `gcd(n, k) > 1`. `DirichletL` sums `k^(−s) Σ χ(r) ζ(s, r/k)` through
-  `HurwitzZeta`, so a real value follows `ce.precision` (`DirichletL(3, 2, 1.5)`
-  is `0.703968244868733261668` at 21 digits, `DirichletL(5, 3, 1.01)` keeps
-  every digit next to the pole) and a complex value is at double precision;
-  the odd character mod 4 is `DirichletBeta` (`DirichletL(4, 2, 1)` is `π/4`); the principal character is `ζ(s) Π (1 − p^(−s))` over the primes
-  dividing `k`, so `DirichletL(5, 1, 1)` is `~oo`; at a nonpositive integer
-  the value is exact from the Bernoulli polynomials (`DirichletL(5, 2, 0)` is
-  `3/5 + i/5`, `DirichletL(8, 2, -3)` is `11`); within 1/4 of `s = 1` a
-  non-principal character with a complex value is summed from its Laurent
-  series in the Stieltjes constants at double precision, since the Hurwitz
-  terms there have poles that cancel (`DirichletL(5, 2, 1.01)`); a real
-  character at a real `s` takes guard digits for the cancellation instead, and
-  `L(1, χ)` is closed in digamma values (`DirichletL(3, 2, 1)` is `π/(3√3)`). A modulus above 1000 stays
-  symbolic for `DirichletL` (it sums `k` Hurwitz values). Both heads are
-  listable. (#395, contributed by [enumeratio](https://github.com/enumeratio))
 
 ### Issues Resolved
 

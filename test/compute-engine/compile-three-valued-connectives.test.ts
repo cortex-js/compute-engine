@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { TEST_PYTHON } from './test-python';
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
@@ -544,7 +545,8 @@ describe('COMPILE three-valued connectives — Python target', () => {
  * when that venv (with numpy) is not present, so a checkout without the
  * benchmark environment is never blocked.
  */
-const VENV_PYTHON = path.join(process.cwd(), 'venv', 'bin', 'python3');
+const VENV_PYTHON =
+  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
 function venvHasNumpy(): boolean {
   try {
     if (!fs.existsSync(VENV_PYTHON)) return false;

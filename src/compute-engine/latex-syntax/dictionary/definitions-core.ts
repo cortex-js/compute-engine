@@ -2745,8 +2745,25 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['.', '.', '.'],
     kind: 'infix',
     precedence: DIVISION_PRECEDENCE,
-    parse: (parser: Parser, lhs: MathJsonExpression) =>
-      parseRange(parser, lhs, true),
+    parse: (parser: Parser, lhs: MathJsonExpression) => {
+      // In non-strict mode, `.5...5` is read as the range from 0.5 to 5 (the
+      // ellipsis `...`), and a person who writes decimal numbers can mean
+      // `.5..` and `.5`: the range from 0.5 to 0.5. It is reported when the
+      // left operand is a number with a fractional part and a digit directly
+      // follows the three dots. `1...5` is not reported: an integer before
+      // the dots makes the ellipsis the common reading.
+      const dots = parser.index - 3;
+      const digitAfter = /^[0-9]$/.test(parser.peek);
+      const result = parseRange(parser, lhs, true);
+      if (
+        result !== null &&
+        digitAfter &&
+        parser.options.strict === false &&
+        isFractionalNumber(lhs)
+      )
+        parser._emitAmbiguity?.('ambiguous-range', dots, parser.index);
+      return result;
+    },
   },
   {
     latexTrigger: ['\\ldots'],
@@ -4301,6 +4318,13 @@ function signedMachineValue(expr: MathJsonExpression): number | null {
     if (inner !== null) return -inner;
   }
   return null;
+}
+
+/** True when `expr` is a number literal, or the `Negate` of one, that is not
+ * an integer, such as `0.5` or `["Negate", 1.5]`. */
+function isFractionalNumber(expr: MathJsonExpression): boolean {
+  const value = signedMachineValue(expr);
+  return value !== null && Number.isFinite(value) && !Number.isInteger(value);
 }
 
 /**

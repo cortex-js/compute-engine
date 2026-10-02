@@ -262,7 +262,11 @@ export function installUnrolledBigOpLane(
  * the `maxIntervals` budget (1500, the `adaptiveQuadrature` default in
  * `numerics/gauss-kronrod.ts`) evaluates BOTH child panels of every split,
  * so the panel count is ~2× the live-interval budget — ~3000 panels of 15
- * GK15 nodes each. A definite integral's syntax is a handful of nodes while
+ * GK15 nodes each (45,000 evaluations). A result next to a singular
+ * endpoint is then checked against the tanh-sinh rule, which evaluates the
+ * integrand at most `2·maxIntervals` = 3,000 more times
+ * (`resolveSingularEndpoints`, `numerics/endpoint-quadrature.ts`): 48,000 in
+ * all. A definite integral's syntax is a handful of nodes while
  * its evaluation may run that whole budget, so without this arm a constant
  * integral was the canonical "estimate miss" — the class the retired
  * per-fold wall-clock deadline existed to catch. That wall-clock made the
@@ -282,7 +286,7 @@ export function installUnrolledBigOpLane(
  * integral from folding. `NIntegrate` runs the same quadrature first and the
  * same fallback after it, so it takes the same price.
  */
-const FOLD_QUADRATURE_EVALS = 45_000;
+const FOLD_QUADRATURE_EVALS = 48_000;
 
 /**
  * The maximum estimated work a subtree may cost before the fold declines

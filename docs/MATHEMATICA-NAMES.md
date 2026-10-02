@@ -42,13 +42,13 @@ capability gap.
 |---|---|---|
 | `Log[x]` | `Ln` | **Trap:** Mathematica's 1-arg `Log` is the natural log; CE's 1-arg `Log` is base 10. |
 | `Log[b, x]` | `["Log", x, b]` | **Trap:** argument order is swapped (CE takes the base second). |
-| `Prime[n]` | `NthPrime` | Alias `PrimeNumber` also exists. |
-| `PartitionsP[n]` | `NPartition` | |
+| `Prime[n]` | `NthPrime` | Alias `PrimeNumber` also exists. **No alias `Prime`:** `Prime` is already a CE operator, the prime mark of a derivative (`f'`). |
+| `PartitionsP[n]` | `NPartition` | Alias `PartitionsP` also exists. `PartitionsP(n)` is 0 for a negative integer `n`, as in Mathematica. |
 | `StirlingS2[n, m]` | `Stirling` | Second kind. Alias `StirlingS2` also exists. First kind is `StirlingS1`. |
-| `EulerPhi[n]` | `Totient` | |
+| `EulerPhi[n]` | `Totient` | Alias `EulerPhi` also exists. `Totient(0)` is 0 and `Totient(-n)` is `Totient(n)`, as in Mathematica. |
 | `FactorInteger[n]` | `FactorInteger` | Same name; distinct-primes-only variant is `PrimeFactors`. |
-| `Det[m]` | `Determinant` | |
-| `Tr[m]` | `Trace` | |
+| `Det[m]` | `Determinant` | Alias `Det` also exists, for the one-operand form only: the option form `Det[m, Modulus -> n]` has no CE equivalent, and its second operand is an `unexpected-argument` error. |
+| `Tr[m]` | `Trace` | Same value for a square matrix only. **No alias:** Mathematica's `Tr` of a rectangular matrix is the sum of its diagonal elements, while CE's `Trace` gives an `expected-square-matrix` error; Mathematica's `Tr` of a vector is the sum of its elements and `Tr` of a rank-3 tensor `t` is the sum of `t[[i,i,i]]`, while CE's `Trace` rejects a vector and gives the trace over the last two axes (a vector) for a rank-3 tensor. The second and third operands also differ: `Tr[list, f, n]` takes a function and a level, `Trace(m, axis1, axis2)` takes two axes. |
 | `Factorial2[n]` / `n!!` | `Factorial2` | |
 | `SingularValueDecomposition` | `SVD` | Float-only; no symbolic `SingularValues` (ROADMAP B14). |
 

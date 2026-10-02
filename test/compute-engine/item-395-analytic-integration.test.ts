@@ -173,6 +173,18 @@ describe('real results carry ce.precision digits or stay unevaluated', () => {
       ['DirichletEta', 1.5],
       '0.765147024625407945367268758603',
     ],
+    // Closer to s = 1 than the Hurwitz terms reach: the Laurent series in
+    // the Stieltjes constants (mpmath at 140 digits).
+    [
+      'DirichletL(5, 3, 1 + 1e-20)',
+      ['DirichletL', 5, 3, { num: '1.00000000000000000001' }],
+      '0.430408940964004038892995639421',
+    ],
+    [
+      'DirichletBeta(1 + 1e-20)',
+      ['DirichletBeta', { num: '1.00000000000000000001' }],
+      '0.785398163397448309617589858988',
+    ],
   ];
   for (const [name, input, expected] of real) {
     test(`${name} = ${expected} at 30 digits`, () => {
@@ -192,14 +204,6 @@ describe('real results carry ce.precision digits or stay unevaluated', () => {
     ['LogBarnesG(1e6)', ['LogBarnesG', 1e6]],
     ['ClausenCl(2, 1e300)', ['ClausenCl', 2, 1e300]],
     ['ClausenCl(50, 1)', ['ClausenCl', 50, 1]],
-    [
-      'DirichletL(5, 3, 1 + 1e-20)',
-      ['DirichletL', 5, 3, { num: '1.00000000000000000001' }],
-    ],
-    [
-      'DirichletBeta(1 + 1e-20)',
-      ['DirichletBeta', { num: '1.00000000000000000001' }],
-    ],
   ];
   for (const [name, input] of declined)
     test(`${name} stays unevaluated at 30 digits, not a double`, () => {
