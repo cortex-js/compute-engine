@@ -1,9 +1,11 @@
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { isWildcardFunctionType } from '../../common/type/utils.js';
+import { resolveTypeReference } from '../../common/type/subtype.js';
 import { osaDistance } from '../../common/fuzzy-string-match.js';
 import { stringValue, symbol } from '../../math-json/utils.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import type {
+  BoxedValueDefinition,
   Expression,
   ExpressionInput,
   IComputeEngine as ComputeEngine,
@@ -420,9 +422,8 @@ function slotNames(sig: FunctionSignature): (string | undefined)[] {
  * arguments as written. `locateError` (`src/epsil/error-location.ts`) uses
  * these names to find which written argument fills the faulted slot, so the
  * underline lands on the argument the author has to fix. A value-typed
- * callee mirrors `calleeSignatureType` (box.ts): a bare-`function` wildcard
- * declaration carries no parameters, so the assigned value's own signature
- * is the only one there is.
+ * callee reads the signature that {@link valueCalleeSignature} gives, the
+ * one its named calls are matched against.
  */
 export function calleeSlotNames(
   ce: ComputeEngine,
@@ -431,15 +432,82 @@ export function calleeSlotNames(
   const def = ce.lookupDefinition(operatorName);
   if (def === undefined) return undefined;
   let type: Type | undefined;
-  if (isValueDef(def))
-    type = isWildcardFunctionType(def.value.type.type)
-      ? def.value.value?.type.type
-      : def.value.type.type;
+  if (isValueDef(def)) type = valueCalleeSignature(def.value) ?? undefined;
   else if (isOperatorDef(def)) type = def.operator.signature.type;
   if (type === undefined || typeof type === 'string') return undefined;
   if (type.kind !== 'signature') return undefined;
   return slotNames(type);
 }
+
+/**
+ * The signature that the names of a named call are matched against when the
+ * callee is a VALUE definition (a variable that holds a function), or `null`
+ * when the names must be rejected because the variable's DECLARED type gives
+ * no parameter names.
+ *
+ * - A DECLARED type is a contract that every value assigned to the variable
+ *   satisfies, so it is the only thing the names are matched against. The
+ *   call is stored in declaration order when it is made canonical, and a
+ *   later assignment must not change what the names mean. Thus a type that
+ *   is a signature (or an overload set of signatures) with at least one
+ *   parameter name gives the signature, and any other declared type gives
+ *   `null`: the bare `function` wildcard, a signature with no parameter
+ *   names (`(number, number) -> number`), `unknown`, a union. The value the
+ *   variable holds now is never read. Before the decision of 2026-10-01 a
+ *   bare `function` declaration read the signature of the current value:
+ *   with `alias: function` holding `(x, factor) -> number`, the call
+ *   `alias(3, factor: 5)` was stored as `alias(3, 5)`, and after `alias` was
+ *   assigned a function declared `(factor, x)` the call gave the wrong
+ *   result with no error.
+ * - An INFERRED type (no declaration: `alias := bob_S`, a function
+ *   parameter with no annotation) is unchanged: the type itself, or the
+ *   current value's signature for an inferred `function` wildcard.
+ *
+ * A type alias is followed to its body. The same rule applies to a call
+ * through a record field (`resolveFieldCallee`, `field-callee.ts`): a name is
+ * matched only against a declared signature.
+ */
+export function valueCalleeSignature(
+  def: BoxedValueDefinition
+): Type | undefined | null {
+  const type = def.type.type;
+  if (def.inferredType)
+    return isWildcardFunctionType(type) ? def.value?.type.type : type;
+  const resolved = resolveTypeReference(type);
+  if (resolved === undefined || typeof resolved === 'string') return null;
+  // An arm of an overload set can itself be a type alias: resolve it, so
+  // that the names of its body are seen, here and by the caller.
+  const arms =
+    resolved.kind === 'signature'
+      ? [resolved]
+      : resolved.kind === 'intersection'
+        ? resolved.types.map((arm) => resolveTypeReference(arm) ?? arm)
+        : [];
+  const named = arms.some(
+    (arm) =>
+      typeof arm === 'object' &&
+      arm.kind === 'signature' &&
+      slotNames(arm).some((name) => name !== undefined)
+  );
+  if (!named) return null;
+  return resolved.kind === 'intersection'
+    ? { ...resolved, types: arms }
+    : resolved;
+}
+
+/** The `argument-names-unavailable` error for a named call through a
+ * variable whose declared type gives no parameter names
+ * ({@link valueCalleeSignature} returned `null`). */
+export function declaredNamesUnavailable(
+  ce: ComputeEngine,
+  split: NamedArgumentSplit
+): NamedArgumentNormalization {
+  if (split.malformed) return { kind: 'unavailable' };
+  return orderUndetermined(ce, split, declaredNamesUnavailableDetail);
+}
+
+const declaredNamesUnavailableDetail =
+  'the declared type of this variable gives no parameter names; call it with positional arguments, or declare its type as a signature with parameter names, such as `(x: number, y: number) -> number`';
 
 /** The closest declared name to `spelled`, for a did-you-mean. Conservative,
  * with the same thresholds as the protocol-member suggestion
@@ -532,8 +600,10 @@ const WRITTEN_ORDER_ARGUMENT_CODES: ReadonlySet<string> = new Set([
  * Permute a written argument list into the positional order the callee
  * declares, per §3–§4 of the design doc.
  *
- * `signature` is the callee's declared type: `calleeSignatureType(def.value)`
- * for a value definition, `opDef.signature.type` for an operator definition.
+ * `signature` is the callee's declared type: `valueCalleeSignature(def.value)`
+ * for a value definition (a `null` result never reaches this function: see
+ * `declaredNamesUnavailable`), `opDef.signature.type` for an operator
+ * definition.
  * Two shapes are understood — a single signature (§3) and an OVERLOAD SET, an
  * intersection of signatures (§4, {@link normalizeAgainstArms}). Anything else
  * yields `unavailable`: a bare `function` wildcard, an unresolved forward

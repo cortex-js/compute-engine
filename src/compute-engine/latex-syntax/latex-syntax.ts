@@ -230,6 +230,73 @@ export class LatexSyntax {
   }
 
   /**
+   * Add LaTeX dictionary entries to this instance. The next parse or
+   * serialization uses them.
+   *
+   * The entries go after the current dictionary (the `dictionary` option
+   * given to the constructor, or the default dictionary), so an entry added
+   * here wins over an earlier entry with the same name or trigger. The
+   * dictionary index and the trigger list are built again on next use, and
+   * the entries are checked then, by the same code that checks the
+   * constructor's dictionary: a malformed entry is reported on the console
+   * and skipped.
+   *
+   * This changes THIS instance only. The default dictionary
+   * (`LATEX_DICTIONARY`) and the array given as the `dictionary` option are
+   * not modified. If the same `LatexSyntax` instance was given to several
+   * `ComputeEngine` instances, the entries apply to all of them.
+   *
+   * The entries are not recorded by engine checkpoints: `ce.restore()` does
+   * not remove them, because the instance can be shared by several engines.
+   *
+   * ```ts
+   * // `operand` is exported by `@cortex-js/compute-engine/math-json`
+   * const ce = new ComputeEngine();
+   * ce.declare('IntegerModRing', { signature: '(integer) -> any' });
+   * ce.latexSyntax?.addEntries?.([
+   *   {
+   *     name: 'IntegerModRing',
+   *     latexTrigger: '\\mathbb{Z}/',
+   *     parse: (parser) => {
+   *       const n = parser.parseNumber();
+   *       if (n === null) return null;
+   *       if (!parser.matchAll(['\\mathbb', '<{>', 'Z', '<}>'])) return null;
+   *       return ['IntegerModRing', n];
+   *     },
+   *     serialize: (s, expr) =>
+   *       `\\mathbb{Z}/${s.serialize(operand(expr, 1))}\\mathbb{Z}`,
+   *   },
+   * ]);
+   * ce.box(['IntegerModRing', 5]).latex;      // \mathbb{Z}/5\mathbb{Z}
+   * ce.parse('\\mathbb{Z}/5\\mathbb{Z}').json; // ["IntegerModRing", 5]
+   * ```
+   *
+   * @throws If `entries` is not an array of objects.
+   */
+  addEntries(entries: ReadonlyArray<Partial<LatexDictionaryEntry>>): void {
+    if (!Array.isArray(entries))
+      throw new TypeError(
+        'LatexSyntax.addEntries(): expected an array of LaTeX dictionary entries'
+      );
+    for (const entry of entries)
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry))
+        throw new TypeError(
+          'LatexSyntax.addEntries(): each LaTeX dictionary entry must be an object'
+        );
+    if (entries.length === 0) return;
+
+    // Build a new array: the current one can be `LATEX_DICTIONARY` or an
+    // array the caller owns, and neither may change.
+    const current = this._options.dictionary ?? LATEX_DICTIONARY;
+    this._options = {
+      ...this._options,
+      dictionary: [...current, ...entries],
+    };
+    this._indexed = undefined;
+    this._namedTriggers = undefined;
+  }
+
+  /**
    * Parse a LaTeX string into a MathJSON expression.
    *
    * @param latex  The LaTeX source string
@@ -265,8 +332,8 @@ export class LatexSyntax {
    * library search (`ce.searchDefinitions()`).
    *
    * Multiple dictionary entries can share a name; their triggers are merged.
-   * The flattened array is cached, since the indexed dictionary is immutable
-   * once built.
+   * The flattened array is cached until `addEntries()` changes the
+   * dictionary.
    */
   getNamedTriggers(): ReadonlyArray<{ name: string; triggers: string[] }> {
     if (this._namedTriggers) return this._namedTriggers;

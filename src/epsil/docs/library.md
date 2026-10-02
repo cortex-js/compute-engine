@@ -22,15 +22,15 @@ To search the library by concept rather than by name, use
 `epsil doc <keywords>` (see the [CLI](/epsil/cli/)); the
 [guide for agents](/epsil/for-agents/) lists the names most often needed.
 
-- [Core](#core) — 111 definitions · [full reference](/epsil/reference/core/)
-- [Control structures](#control-structures) — 14 definitions · [full reference](/epsil/reference/control-structures/)
+- [Core](#core) — 112 definitions · [full reference](/epsil/reference/core/)
+- [Control structures](#control-structures) — 13 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
 - [Collections](#collections) — 125 definitions · [full reference](/epsil/reference/collections/)
 - [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
-- [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
 - [Arithmetic](#arithmetic) — 99 definitions · [full reference](/epsil/reference/arithmetic/)
+- [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
 - [Calculus](#calculus) — 19 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 17 definitions · [full reference](/epsil/reference/polynomials/)
@@ -57,6 +57,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `Assign` | `(expression \| symbol, any) scope -> any` | Assign a value to a symbol or define a sequence. |
 | `assume` | `Assume` | `(any) scope -> string` | Record an assumption about a symbol. |
 | `baseForm` | `BaseForm` | `(T, (number \| string)?) -> T where T: number` | `BaseForm(expr, base=10)` |
+| — | `Block` | `(unknown*) -> unknown` | Evaluate a sequence of expressions in a local scope, **sequentially**. |
 | — | `BuiltinFunction` | `(string \| symbol) -> symbol` | Return a built-in function symbol by name. |
 | `canonicalForm` | `CanonicalForm` | `(any, symbol*) -> any` | Return the canonical form of an expression |
 | `caseFold` | `CaseFold` | `(string) -> string` | CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. |
@@ -167,7 +168,6 @@ The [Control structures reference](/epsil/reference/control-structures/) has the
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | — | `Alternatives` | `(expression+) -> nothing` | Inside a `Match` pattern, `Alternatives(p1, p2, …)` matches if any alternative matches. |
-| — | `Block` | `(unknown*) -> unknown` | Evaluate a sequence of expressions in a local scope, **sequentially**. |
 | — | `Break` | `(value: any?) -> nothing` | Exit the enclosing loop immediately, optionally with a value (`Break(v)`) that becomes the loop value. |
 | — | `Comprehension` | `(body: expression, iterators: expression+) -> list` | Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into a list. |
 | — | `Condition` | `(expression, symbol?) -> boolean` | Test whether a value satisfies one or more conditions. |
@@ -385,15 +385,6 @@ The [Regular expressions reference](/epsil/reference/regexp/) has the full descr
 | `stringMatch` | `StringMatch` | `(subject: string, pattern: regexp) -> nothing \| record` | The first match of a regular expression in a string, as a record. |
 | `stringMatchAll` | `StringMatchAll` | `(subject: string, pattern: regexp) -> list<record>` | Every non-overlapping match of a regular expression in a string, as a list of records. |
 
-## Fractals
-
-The [Fractals reference](/epsil/reference/fractals/) has the full description and the examples of each definition.
-
-| Epsil | MathJSON | Signature | Summary |
-|:------|:---------|:----------|:--------|
-| `julia` | `Julia` | `(complex, complex, integer) -> real` | Smooth escape-time value for a Julia set with parameter c. |
-| `mandelbrot` | `Mandelbrot` | `(complex, integer) -> real` | Smooth escape-time value for the Mandelbrot set. |
-
 ## Relations
 
 The [Relations reference](/epsil/reference/relop/) has the full description and the examples of each definition.
@@ -536,6 +527,15 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `zeta` | `Zeta` | `(complex \| infinity, (complex \| infinity)?) -> number` | Riemann zeta function; with two arguments, the Hurwitz zeta function ζ(s,a) = Σ_&#123;n=0&#125;^∞ (n+a)^&#123;-s&#125;. |
 | — | `e` | constant `real<2.718281828459045..2.718281828459046>` = `e` | Euler's number e ≈ 2.71828, the base of the natural logarithm. |
 | — | `i` | constant `imaginary` = `i` | The imaginary unit, whose square is −1. |
+
+## Fractals
+
+The [Fractals reference](/epsil/reference/fractals/) has the full description and the examples of each definition.
+
+| Epsil | MathJSON | Signature | Summary |
+|:------|:---------|:----------|:--------|
+| `julia` | `Julia` | `(complex, complex, integer) -> real` | Smooth escape-time value for a Julia set with parameter c. |
+| `mandelbrot` | `Mandelbrot` | `(complex, integer) -> real` | Smooth escape-time value for the Mandelbrot set. |
 
 ## Trigonometry
 

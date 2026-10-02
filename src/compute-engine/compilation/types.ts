@@ -905,11 +905,14 @@ export interface CompileTarget<Expr = unknown> {
    * runtime inputs / uniforms). A `vars`-mapped symbol must never be folded to
    * a constant — it stays a live input. Consulted by the `Integrate` handler:
    * the antiderivative-first optimization resolves a definite integral to a
-   * closed form via `evaluate()`, which *would* fold such a symbol, so it is
-   * skipped when the integral references any `vars`-mapped symbol — and by
-   * the compile-time constant folder (`BaseCompiler.tryConstantFold`), which
-   * declines any subtree mentioning a `vars`-mapped symbol for the same
-   * reason.
+   * closed form via `evaluate()`, which *would* fold the value of such a
+   * symbol, so it is skipped when the integral reaches a `vars`-mapped symbol
+   * that has a visible value or whose mapping is not a plain read
+   * (`BaseCompiler.closedFormIntegral`) — by the compile-time constant folder
+   * (`BaseCompiler.tryConstantFold`), which declines any subtree mentioning a
+   * `vars`-mapped symbol for the same reason, and by the symbol read, which
+   * does not fold the value of a `vars`-mapped symbol that the target's `var`
+   * hook leaves unresolved (a direct custom target) and emits its name.
    */
   varsKeys?: ReadonlySet<string>;
 

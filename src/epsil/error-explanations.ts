@@ -81,9 +81,9 @@ Only parameters that carry a name in the function's declaration can be addressed
 
 In \`f(1000, principal: 2000)\` the first positional argument already occupies \`principal\`, so naming it again is this error, not an override.`,
 
-  'argument-names-unavailable': `A call passed arguments by name, but the called function has no declaration the engine can read parameter names from — it is undefined, defined later in the program, or held in a value typed only as \`function\`.
+  'argument-names-unavailable': `A call passed arguments by name, but the called function has no declaration the engine can read parameter names from — it is undefined, defined later in the program, or held in a variable whose declared type gives no parameter names (\`function\`, or a signature such as \`(number, number) -> number\`).
 
-Named arguments are checked against the declaration the call resolves through; with no declaration visible there is nothing to check the names against. Call it positionally, or move the definition before the call.
+Named arguments are checked against the declaration the call resolves through; with no declaration visible there is nothing to check the names against. For a variable, only its declared type counts, never the function it holds now: that function can change after the call is written. Call it positionally, move the definition before the call, or declare the variable with a signature that names its parameters (\`let g: (x: number, y: number) -> number = …\`).
 
 The same error covers an OVERLOADED function whose overloads accept the call but disagree about which argument fills which parameter — the names then pick an argument order rather than just an implementation, and the engine will not guess. Call it positionally, or give the overloads distinct parameter types.`,
 

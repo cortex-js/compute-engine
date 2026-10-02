@@ -38,6 +38,7 @@ import {
   contextAssumedValues,
   contextAssumptions,
   getFactIndex,
+  isDeclaredTypeOnly,
   isValueShielded,
   typeFor,
 } from './constraint-subject.js';
@@ -1016,6 +1017,15 @@ export class _BoxedValueDefinition
    * its type from the value alone: an assumption about such a symbol is
    * CHECKED against the value when it is made and never retypes it.
    *
+   * A definition marked by `withDeclaredTypeOnly` also takes the declared
+   * type: the facts are not merged. A compilation marks a `vars`-mapped input
+   * (`withVarsValuesHidden` in `compilation/vars-inputs.ts`) so that it reads
+   * as the input of its declared type; without this, `assume(a = 4)` would
+   * narrow `a` to an integer and a compiled `⌊a⌋` would drop the floor. The
+   * value shield of `assume()` (`withShieldedValues`) does not have this
+   * effect: it also hides a value put in force by an assumption, and the
+   * facts about that symbol must still apply while it records a new fact.
+   *
    * The operands are intersected as one type NODE and reduced once — the meet
    * (`narrow()`) would answer `never` for `real & !2`, which is exactly the
    * shape a disequality fact contributes.
@@ -1031,6 +1041,7 @@ export class _BoxedValueDefinition
     // evaluation this getter has no need of.
     if (this._isConstant) return declared;
     if (this.storedValue !== undefined) return declared;
+    if (isDeclaredTypeOnly(this)) return declared;
 
     const index = getFactIndex(ce);
     const contributions = typeFor(index, this);

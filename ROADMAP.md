@@ -109,55 +109,170 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### A library list with `core` but without `control-structures` breaks every function literal (OPEN, decision — found 2026-10-01 by the fix of the library load order for issue #393)
+### The error bound of a quadrature that did not converge can be too small (OPEN, small — found 2026-10-01 by the review of quadrature for an integrand that does not compile)
 
-`Function` is defined in `core`, but building a function literal needs
-`Block`, which `control-structures` defines. With
-`libraries: ['core', 'arithmetic']`, every `Function` literal, and every
-caller library with an `evaluate` formula, prints "Cannot read properties of
-undefined (reading 'bindings')". `control-structures` already requires
-`core`, so `core` cannot require it back without a cycle. The options: move
-`Block` into `core`; load `control-structures` with `core` automatically; or
-throw a clear error at construction when `control-structures` is missing.
+The numeric value of `Integrate(f, x, a, b)` keeps the adaptive Gauss–Kronrod
+result when it did not converge but its error estimate beats Monte Carlo
+(`quadratureBeatsMonteCarlo`, `library/calculus.ts`). On a slowly convergent
+endpoint singularity that estimate is optimistic:
+∫₀^½ 1/(x·ln²x) dx = 1/ln 2 = 1.442695…; an interpreted integrand gives
+`1.43831 ± 0.00016` (true error 0.0044, 27 times the bound), and the compiled
+integrand reports `1.441310 ± 1.4e-13` as converged. The value is better than
+the Monte-Carlo estimate it replaces (`1.364 ± 0.023`), but the reported
+uncertainty is not a guarantee. One fix: widen the error of a result that did
+not converge to at least `|estimate| / √samples`; a faithful bound needs a
+singularity-aware rule (for example tanh-sinh).
 
-### Redeclaring an arithmetic operator with an unchanged copy of its definition changes canonical forms and types (OPEN, decision — found 2026-10-01 by the analysis of issue #394)
+### `NIntegrate` never uses quadrature (OPEN, decision — found 2026-10-01 by the fix that gives `Integrate(…).N()` quadrature for an integrand that does not compile)
 
-`doc/06-guide-augmenting.md` ("Overloading Functions") documents how to
-extend a library operator: redeclare it with a copy of its definition and
-change one field. For eleven operators (`Add`, `Multiply`, `Negate`,
-`Square`, `Sqrt`, `Exp`, `Ln`, `Log`, `Power`, `Root`, `Divide`) this
-changes the result even when no field changes. The reason:
-`makeNumericFunction` (`boxed-expression/box.ts`) canonicalizes these
-operators by NAME, not through a `canonical` handler of their definition, and
-since the decision of 2026-09-27 (`library-shadowing.ts`) any user
-definition of one of these names sends the call to the generic boxing code.
-`Add` is `lazy` with no `canonical` handler, so there its operands arrive
-unbound. Measured after `ce.declare('Add', { ...oldAdd })`: `Add(2, x, 5)`
-gives `2 + x + 5` (stock: `x + 7`); `Add(1, "s")` is valid (stock: invalid);
-`Add(1, ImaginaryUnit)` is typed `integer` (stock: `complex`). After the
-same copy of `Sqrt`, `Sqrt(8)` stays `sqrt(8)` (stock: `2√2`). One fix:
-move the per-name canonicalization into a `canonical` handler of each
-definition, so a copy takes it along; `_update` then must accept `canonical`
-together with the `associative`/`commutative` flags that `Add` and
-`Multiply` set. The decision to make: whether a redeclared arithmetic
-operator keeps the built-in canonical form (this fix), or the documentation
-says that redeclaring these eleven names gives up that form.
+`Integrate(f, x, a, b).N()` uses adaptive Gauss–Kronrod quadrature, for a
+compiled and (since 2026-10-01) an interpreted integrand, and falls back to
+Monte Carlo only when the quadrature does not converge. `NIntegrate` always
+samples: it tries the oscillatory method on a semi-infinite interval, then
+Monte Carlo (1e7 samples compiled, 1e4 interpreted). So
+`NIntegrate(x ↦ x², 0, 1)` is a sampled value close to 1/3 with sampling
+noise, while `Integrate(x², x, 0, 1).N()` is `0.3333333333333333`.
+`test/compute-engine/derived-substreams.test.ts` states "`NIntegrate` always
+samples". The decision: keep `NIntegrate` as a sampling operator, or give it
+the quadrature first (more accurate and faster). With the quadrature first,
+`NIntegrate` still falls back to Monte Carlo when the quadrature does not
+converge, so it keeps `readsRandomFrame: true`, as `Integrate` does; only its
+results (where the quadrature succeeds) and that test's comment and integrand
+change.
 
-### A named call through a `function`-typed variable keeps the parameter order of the value it held when the call was made canonical (OPEN, decision — found 2026-10-01 by the analysis of issue #390)
+### Two leftovers of the extend mode of `ce.declare()` (OPEN, small — found 2026-10-01 by the work on issue #394)
 
-When the callee of a named call is a variable declared `function`, the names
-are matched against the signature of the variable's CURRENT value when the
-call is made canonical (`calleeSignatureType`,
-`boxed-expression/box.ts`), and the call is stored with positional
-arguments. A later assignment of a function with a different parameter order
-gives a wrong result with no error. Example: `alias: function = bob_S`, then
-`e = alias(3, factor: 5)` is stored as `alias(3, 5)`; after `alias` is
-assigned `other(factor, x)` (which computes `factor - x`), `e` evaluates to
-`-2`, while the names ask for `2`. The same callee also loses `lazy`: with
-`y := 10` and a lazy `bob_H`, `aliasH(y·z)` gives `Hold(10·z)`, while
-`bob_H(y·z)` gives `Hold(y·z)`. The decision to make: match the names again
-when the call is evaluated, or reject names for a callee whose declared type
-is only `function`.
+- A `ce.declare()` of a VALUE that throws leaves the name bound to a
+  placeholder value. The same leak on the operator route was fixed with the
+  extend mode (`declareSymbolOperator`, `engine-declarations.ts`, restores the
+  previous binding while the placeholder is still in place); the value route
+  was left unchanged because callers on the assignment route may depend on the
+  placeholder. Check those callers, then restore the previous binding there
+  too.
+
+### A second `ce.declare()` of an operator declared without a signature silently replaces it (OPEN, small — found 2026-10-01 by the work on `ce.loadLibrary()` for issue #393)
+
+`ce.declare()` refuses to declare a name already declared in the same scope,
+except when the existing binding was only inferred from use
+(`engine-declarations.ts`, the check before "Declaring a symbol or function
+with a definition or type"). For an operator, the check reads
+`inferredSignature`, which is also true for an operator declared EXPLICITLY
+without a `signature`. So `ce.declare('Sq', { evaluate: … })` followed by a
+second `ce.declare('Sq', { evaluate: () => -1 })` is accepted and `Sq(3)`
+gives `-1`, while the same pair with a `signature` throws "The symbol "Sq" is
+already declared in this scope". The check must tell an operator declared
+from use (by `ce.parse('f(x)')`) from one declared by the author.
+`ce.loadLibrary()` already guards against this between libraries. Fix after
+the extend mode for `ce.declare()` (issue #394) lands: it changes the same
+check.
+
+### Rule strings are parsed without the engine's own LaTeX notation (OPEN, decision — found 2026-10-01 by the work on `LatexSyntax.addEntries()` for issue #393)
+
+A rule given as a LaTeX string is parsed with the default dictionary plus the
+rule entries (`boxed-expression/rules.ts`, the parse of rule strings), not with
+the engine's `latexSyntax`. So notation added with
+`ce.latexSyntax.addEntries()`, or given as the `dictionary` of a `LatexSyntax`
+at construction, does not apply in rule strings: with `\mathbb{Z}/n\mathbb{Z}`
+mapped to `IntegerModRing`, a rule `\mathbb{Z}/n\mathbb{Z} -> …` reads it as
+`QuotientRing(Integers, n)`. This was already true before `addEntries()`. The
+decision: parse rule strings with the engine's notation (rules then depend on
+the engine), or keep the default dictionary and document it.
+
+### Epsil has no lowercase spelling for an operator of a caller library (OPEN, design — issue #393, evaluated 2026-10-01)
+
+Epsil writes a standard operator with an initial lowercase letter (`sin` for
+`Sin`). The table of spellings is built once from the standard libraries
+(`epsilLibraryNames()`, `src/epsil/library-names.ts`), and a decision of
+2026-09-05 makes it the same for every engine
+(`docs/plans/2026-09-05-epsil-standard-library-lowercase-aliases.md`, §9
+decision 2, §11 and §12). An operator of a caller library has no spelling.
+With `IntegerModRing` loaded from a library (constructor `libraries` option
+or `ce.loadLibrary()`):
+
+- `executeEpsil(ce, "integerModRing(5)")` gives `integerModRing(5)`, an
+  unknown head. Wanted: `IntegerModRing(5)`.
+- `serializeEpsil(["IntegerModRing", 5])` gives `IntegerModRing(5)`. Wanted,
+  for symmetry with the standard names: `integerModRing(5)`.
+
+Why it was not done with the library work: the parse side has the engine
+(`resolveLibraryNames(ast, source, ce)`), but `serializeEpsil()` is a free
+function over MathJSON with no engine, and its callers (`epsil format`, the
+MCP `serialize` tool, the static diagnostics snippets) do not have the engine
+that loaded the library. A per-engine table that only the parse side reads
+would make `integerModRing(5)` read as `IntegerModRing(5)` but print as
+`IntegerModRing(5)`, which breaks the symmetry of §12. The other readers of
+the table (`binderSitesOf()`, the did-you-mean of `executeEpsil`, `epsil doc`)
+would also need the engine.
+
+The options:
+
+1. A per-engine extension of the table, filled from the provenance that
+   `ce.loadLibrary()` and the constructor record (`ce.libraryOf()`): each
+   caller-library name gets the spelling `epsilNameOf()` gives, with the same
+   exclusions, and is refused when the spelling is already a standard
+   spelling or is bound by the engine. The serializer gets a new option (for
+   example `libraryNames: { extra: ReadonlyMap<string, string> }`, or an
+   engine), and every caller that has an engine passes it. Larger than the
+   other options: all the readers above change.
+2. An optional `epsilName` on a library (a map from the MathJSON name to the
+   spelling, for example `{ IntegerModRing: 'integerModRing' }`), checked with
+   the same rules as option 1. Gives the library author control of the
+   spelling; the same plumbing as option 1.
+3. Leave the table as is: an author writes the MathJSON name
+   (`IntegerModRing(5)`), which already works on both sides. Nothing to do.
+
+If nothing is decided, option 3 applies.
+
+### A copy of an arithmetic operator definition is differentiated and compiled as a user function (OPEN, decision — found 2026-10-01 by the fix of issue #394)
+
+After `ce.declare('Sqrt', { ...ce.lookupDefinition('Sqrt').operator })`, the
+canonical form and the type of `Sqrt(…)` are the standard ones (the copy keeps
+the `canonical` handler of the library definition, `canonical-numeric.ts`).
+But `D` and `compile()` still treat the name as shadowed
+(`shadowsLibraryName`, `library-shadowing.ts`): `D(sqrt(sin(x)), x)` gives
+`cos(x) * Apply(Derivative(sqrt, 1), sin(x))` instead of
+`cos(x) / (2sqrt(sin(x)))`, and `compile()` fails closed and falls back to the
+interpreter (`success: false`, same value). The same holds for `Add`,
+`Multiply`, `Negate`, `Ln`, `Log`, `Power`, `Root` and `Divide` (`Square` and
+`Exp` canonicalize to `Power`, so they are not affected), and for any other
+library operator. The behavior is the same before and after the #394 fix. The
+decision to make: when a copy should count as the library operator for the
+derivative rules and for the compiled lowering. Options: (a) never, as now:
+the copy may override `evaluate`, and the library rule or `Math.sqrt` would
+then not compute what the interpreter computes; (b) when the copy keeps both
+the library `canonical` and `evaluate` handlers (an unchanged copy, or one
+that changes only metadata such as `description`); (c) whenever it keeps the
+`canonical` handler, since the canonical form already applies the library
+identities.
+
+### A named call through a variable with an INFERRED function type keeps the parameter order of the value it held when the call was made canonical (OPEN, decision — found 2026-10-01 by the fix for a variable declared `function`)
+
+The decision of 2026-10-01 rejects the names of a call through a variable
+whose DECLARED type gives no parameter names (`valueCalleeSignature`,
+`boxed-expression/named-arguments.ts`). A variable with no declaration
+(`let alias = bob_S` in Epsil, `ce.assign('alias', …)` with no
+`ce.declare`) still matches the names against its INFERRED type, and that
+type follows each assignment of a function symbol. So the old defect remains
+for it. Example in Epsil, with `bob_S(x, factor)` computing `x * factor` and
+`other(factor, x)` computing `factor - x`:
+
+```
+let alias = bob_S
+function g() { alias(3, factor: 5) }
+alias = other
+g()
+```
+
+gives `-2`, while the names ask for `2`: the body of `g` was made canonical
+as `alias(3, 5)`. Rejecting the names for an inferred type would also reject
+`f := (x: number, y: string) => …` followed by `f(y: "a", x: 1)`, a
+documented and tested use. The options: keep the parameter names of the first
+assigned value in the inferred type (a later assignment with other names is
+then an error), match the names again when the call is evaluated, or leave it.
+
+The same kind of callee also loses `lazy`: with `y := 10`, a lazy `bob_H` and
+`aliasH: function` holding `bob_H`, `aliasH(y·z)` gives `Hold(10·z)`, while
+`bob_H(y·z)` gives `Hold(y·z)`.
 
 ### A compiled loop that assigns `xs = ReplaceAt(xs, i, v)` copies the whole list at each assignment (OPEN, small — issue #386, 2026-10-01)
 
@@ -172,6 +287,64 @@ in place when the variable holds an array the loop created (copy it once
 before the loop) and no other value can hold a reference to it (every other
 use of `xs` is a read in `NON_RETAINING_READS`). Not requested yet; the
 reporter of #386 mentions a cycle walk that may be written as a loop.
+
+### The lenient grammar makes reading choices that a host cannot detect (IN PROGRESS — decided 2026-10-01, design `docs/plans/2026-10-01-lenient-ambiguity-codes.md`)
+
+Goal (Arno, 2026-10-01): a host that converts pasted plain text, such as
+Tycho's `plainTextToLatex`, should not need its own parser; the lenient
+grammar (`ce.parse(text, { strict: false })`) should give it what it needs.
+Tycho's converter keeps a first stage (a closed list of tokens and an
+adjacency table) because the lenient grammar reads almost any text and gives
+no signal when it picks one of two common readings. Tycho will remove that
+stage if CE publishes the list of reading choices the lenient grammar makes,
+with a diagnostic code (one `ambiguous-*` group) for each choice that has
+another common reading, and counts a choice with no code as a CE defect.
+Arno made that commitment on 2026-10-01, and decided that a parenthesized
+name is never a function head and that lenient `+-` is `±`. Of 300 inputs that the converter refuses
+(`tycho/scripts/repros/2026-10-01-paste-refused-inputs.json`), the lenient
+grammar on CE main reads about 210 with no signal. The classes, with
+examples: the end of an unbraced exponent (`e^2pi`, `x^2y`); an implicit
+subscript (`x2`); a comma outside brackets (`1,5`); `5!=120`; a name, a
+space and a number (`x 2`); a function name with no parentheses before
+several factors (`sin x y`, `log 2 x` = `log_2 x`); a document function
+with no parentheses (`f x`); list labels (`1. y = x`); equation numbers
+(`y = x^2 (2)`); juxtaposed groups (`(a)(b)`); the extent of a radical
+(`3√8`, `√2π`); `+-` and `±`; `<-`; `a..b..c`; `in` after an equation;
+`Δx`; chains of `=`; bars that pair two ways; dates and phone numbers;
+`atan3(y)`; Greek capitals that look like Latin letters. Readings that
+may be defects rather than ambiguities: `(a)(b)` is the call `a(b)` in the
+canonical form (strict too), `±1` is `Measurement(0, 1)`, `+-` is two
+signs, `mod`/`pow`/`trunc`/`Re`/`Im` are not lenient function names.
+The full reply is in Tycho's `docs/COMPUTE_ENGINE.md`, "CE reply 2026-10-01
+to answer 4".
+
+### The lenient line-level ambiguity checks read the raw tree before ranges are regrouped (OPEN, small — found 2026-10-01 by the `ambiguous-range` rule for Tycho row 357)
+
+`reportLineAmbiguities` (`latex-syntax/lenient-ambiguity.ts`) runs in
+`parse()` on the raw result before `ambiguityErrors()` and before a later step
+regroups an operation next to a range: for `2*1..5` the check sees
+`Multiply(2, Range(1, 5))`, and the caller gets `Range(Multiply(2, 1), 5)`.
+`reportRange` accepts both shapes, so it is correct; the other line checks
+match on `NotEqual`, `Less`, `Equal`, `Element`, `Range` and `Delimiter`
+nodes and were not checked against a regrouped tree. Fix: find the step that
+regroups (probably the range-precedence repair of `resolveApplications`), and
+either run the line checks on the final raw tree with the `onAmbiguity` span
+map kept valid, or prove that no other checked shape is regrouped.
+
+### A `Delimiter` with square brackets reads back as a `List` (OPEN, decision — found 2026-10-01 by the fix of the parentheses written twice in a fraction)
+
+`["Delimiter", "x", "'[,]'"]` (a group written with square brackets, for
+example `[a+b]c` in a physics formula built by a host) stays a `Delimiter` in
+the canonical form, and the LaTeX writer writes it `\lbrack x\rbrack`. That
+LaTeX parses as `["List", "x"]`, so a round trip through LaTeX changes the
+value from `x` to a list of one element; `["Delimiter", ["Sequence", "a",
+"b"], "'[,]'"]` comes back as `["List", "a", "b"]`. The parser has no reading
+of square brackets as a group, so no LaTeX spelling round-trips today. The
+decision: (a) the writer writes such a group with parentheses (the value
+round-trips, the brackets are lost), or (b) the parser reads one spelling as a
+bracket group (for example `\left[ … \right]` with one operand), which
+changes what that spelling gives today. Writer: the `Delimiter` serializer in
+`latex-syntax/dictionary/definitions-core.ts`.
 
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
@@ -3080,8 +3253,12 @@ Named-argument calls shipped 2026-08-12; the durable lowering contract is in
 is more specific is RULED correct behavior, 2026-08-13: the engine asks the
 author to be explicit rather than guessing, design doc §4. What still declines
 through `Apply` is a callee whose names are genuinely not knowable there: a
-symbol callee (`Apply(f, x: 1)` — write `f(x: 1)`), and a literal with a
-parameter that is not a bare symbol or `Typed` annotation.)
+symbol callee (`Apply(f, x: 1)` — write `f(x: 1)`), a literal with a parameter
+that is not a bare symbol or `Typed` annotation, and a field callee
+(`bob.S(x: 1)`, which is `Apply(Field(bob, "S"), …)`) whose receiver is neither
+a constant record or dictionary nor typed as a record that gives the field a
+named signature — those two receivers take names since 2026-10-01, GitHub issue
+#390, `docs/TYPE_SYSTEM_ROADMAP.md` Appendix C.)
 
 - **Unannotated function literals are not addressable by name through a
   BINDING** — type inference drops parameter names (`effects-inference.ts` types
@@ -3091,7 +3268,13 @@ parameter that is not a bare symbol or `Typed` annotation.)
   tests across 11 suites + 1 snapshot, including semantic suites
   (`effects-contracts`, `application-validation-regressions`, callback-contract
   and lambda-inference batteries) — a dedicated follow-up round, not a snapshot
-  refresh.
+  refresh. The same loss reaches a field call in Epsil: in
+  `const ns = {D -> ((x, k) => x - k)}` then `ns.D(k: 1, x: 10)`, the run
+  gives 9, but the static check reports `argument-names-unavailable`. The static
+  check makes the program canonical before `ns` has its value, so it can only
+  read the type of `ns`, `record{D: (unknown, unknown) -> number}`, which has no
+  names. An annotated literal (`(x: number, k: number) => x - k`) has no such
+  problem.
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 

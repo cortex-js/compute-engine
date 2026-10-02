@@ -44,6 +44,7 @@ import type {
   LambdaDefinition,
   CollectionHandlers,
   OperatorCompileHandler,
+  OperatorDerivative,
   EvaluateOptions,
   EvaluateHandlerOptions,
   IComputeEngine as ComputeEngine,
@@ -57,7 +58,7 @@ import type {
 import { applicable } from '../function-utils.js';
 
 import { DEFAULT_COMPLEXITY } from './constants.js';
-import { isFunction } from './type-guards.js';
+import { isExpression, isFunction } from './type-guards.js';
 import {
   functionLiteralBody,
   functionLiteralParameters,
@@ -81,6 +82,10 @@ import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
 import { latestDeclaredEffectsSite } from './effects-provenance.js';
 import { journalDefinitionRecord } from './boxed-value-definition.js';
+import {
+  numericCanonicalHandlerName,
+  numericCanonicalProfile,
+} from './numeric-canonical-registry.js';
 
 const OPERATOR_DEF_KEYS = new Set([
   // Base
@@ -136,6 +141,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'evaluateAsync',
   'evalDimension',
   'compile',
+  'derivative',
 
   'eq',
   'neq',
@@ -665,6 +671,13 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   ) => Expression;
 
   compile?: OperatorCompileHandler;
+
+  /** The partial derivatives of the operator, as given by the `derivative`
+   * key of its definition: an array of function literals, one for each
+   * argument, or a handler. Read by `differentiate()`
+   * (`symbolic/derivative.ts`). See `OperatorDerivative`
+   * (`types-definitions.ts`). */
+  derivative?: OperatorDerivative;
 
   collection?: CollectionHandlers;
 
@@ -1616,6 +1629,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       evaluateAsync: this.evaluateAsync,
       evalDimension: this.evalDimension,
       compile: this.compile,
+      derivative: this.derivative,
       collection: this.collection,
     };
   }
@@ -1691,7 +1705,51 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.evaluateAsync = s.evaluateAsync;
     this.evalDimension = s.evalDimension;
     this.compile = s.compile;
+    this.derivative = s.derivative;
     this.collection = s.collection;
+  }
+
+  /**
+   * False when `handler` is the library `canonical` handler of an arithmetic
+   * operator (`numeric-canonical-registry.ts`) and this definition, once
+   * `def` is applied, is not a copy of that operator's library definition:
+   * its name, signature, `lazy` flag or one of the `associative`/
+   * `commutative`/`idempotent`/`involution` flags differs. True otherwise.
+   *
+   * Reads `lazy` and the four flags from this definition, so `_update` must
+   * have applied them from `def` first. The signature is the one of `def`
+   * when it has one, else the current one. Signatures are compared by their
+   * canonical type string, so a copy whose signature is the library
+   * `BoxedType` (a spread of the boxed definition) and the library string
+   * compare equal.
+   */
+  private _keepsNumericCanonical(
+    handler: unknown,
+    def: OperatorDefinition
+  ): boolean {
+    const profile = numericCanonicalProfile(handler);
+    if (profile === undefined) return true;
+    if (profile.name !== this.name) return false;
+    if (
+      !!this.lazy !== profile.lazy ||
+      !!this.associative !== profile.associative ||
+      !!this.commutative !== profile.commutative ||
+      !!this.idempotent !== profile.idempotent ||
+      !!this.involution !== profile.involution
+    )
+      return false;
+    if (profile.signature === undefined) return false;
+    const resolver = this.engine._typeResolver;
+    const typeString = (sig: BoxedType | Type | TypeString): string =>
+      new BoxedType(normalizeSignatureField(sig), resolver).toString();
+    const signature =
+      def.signature !== undefined
+        ? typeString(def.signature)
+        : this._signature.toString();
+    return (
+      signature ===
+      typeString(profile.signature as BoxedType | Type | TypeString)
+    );
   }
 
   _update(def: OperatorDefinition): void {
@@ -1816,8 +1874,34 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     //     `Operator Definition "${name}": the 'lazy' flag is incompatible with the 'associative', 'commutative', 'idempotent', and 'involution' flags`
     //   );
 
+    // The library `canonical` handler of an arithmetic operator
+    // (`numeric-canonical-registry.ts`) computes the canonical form of that
+    // operator, under that name, for the library signature, `lazy` flag and
+    // `associative`/`commutative`/`idempotent`/`involution` flags. A
+    // definition that holds it but differs in one of these (a copy declared
+    // under another name, `ce.declare('MyLn', { ...lnDef, evaluate })`, or a
+    // copy with another signature) is not a copy of the library operator:
+    // the handler is removed, and the definition uses its own flags and the
+    // generic boxing route, as a definition the user wrote does. Without
+    // this, `MyLn(x)` would box to `Ln(x)`.
+    const dropsNumericCanonical = !this._keepsNumericCanonical(
+      def.canonical ?? this.canonical,
+      def
+    );
+
+    // A `canonical` handler replaces the flattening, sorting and
+    // idempotent/involution steps that boxing applies for these flags, so a
+    // handler together with a flag would silently ignore the flag at
+    // canonicalization. Exception: the library handler of an arithmetic
+    // operator, when it is kept (see above), does the flattening and the
+    // ordering itself, and its flags are the library ones. `Add` and
+    // `Multiply` set both, and a copy of their definition
+    // (`ce.declare('Add', { ...ce.lookupDefinition('Add').operator })`) must
+    // be accepted. A library handler that is not kept is removed, so there
+    // is no handler left for the flags to conflict with.
     if (
       def.canonical &&
+      numericCanonicalHandlerName(def.canonical) === undefined &&
       (def.associative || def.commutative || def.idempotent || def.involution)
     )
       throw new Error(
@@ -1928,11 +2012,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
     if (def.type !== undefined) this.type = def.type;
     this.evaluateAsync = def.evaluateAsync ?? this.evaluateAsync;
-    this.canonical = def.canonical ?? this.canonical;
+    this.canonical = dropsNumericCanonical
+      ? undefined
+      : (def.canonical ?? this.canonical);
     this.evalDimension = def.evalDimension ?? this.evalDimension;
     this.sgn = def.sgn ?? this.sgn;
     this.even = def.even ?? this.even;
     this.compile = def.compile ?? this.compile;
+    if (def.derivative !== undefined)
+      assertValidDerivativeKey(this.name, def.derivative);
+    this.derivative = def.derivative ?? this.derivative;
     this.eq = def.eq ?? this.eq;
     this.neq = def.neq ?? this.neq;
     this.canEnumerate = def.canEnumerate ?? this.canEnumerate;
@@ -2419,4 +2508,37 @@ function normalizeDischarges(
     count += 1;
   }
   return count === 0 ? undefined : result;
+}
+
+/**
+ * Throw when `value`, the `derivative` key of the definition of the operator
+ * `name`, has neither of the two forms of `OperatorDerivative`: a handler
+ * function, or an array with one function literal per argument. Each entry
+ * of the array is a `["Function", …]` MathJSON array or a boxed `Function`
+ * expression.
+ */
+function assertValidDerivativeKey(name: string, value: unknown): void {
+  if (typeof value === 'function') return;
+  const isLiteral = (x: unknown): boolean =>
+    (Array.isArray(x) && x[0] === 'Function') ||
+    (isExpression(x) && x.operator === 'Function');
+  if (Array.isArray(value)) {
+    // A single function literal, not in an array: the most likely mistake.
+    if (value[0] === 'Function')
+      throw new Error(
+        `Operator Definition "${name}": the "derivative" key is a single function literal: wrap it in an array: one literal per argument`
+      );
+    const i = value.findIndex((entry) => !isLiteral(entry));
+    if (i < 0) return;
+    throw new Error(
+      `Operator Definition "${name}": entry ${i} of the "derivative" key is not a function literal (a ["Function", body, ...parameters] expression)`
+    );
+  }
+  if (isExpression(value) && value.operator === 'Function')
+    throw new Error(
+      `Operator Definition "${name}": the "derivative" key is a single function literal: wrap it in an array: one literal per argument`
+    );
+  throw new Error(
+    `Operator Definition "${name}": the "derivative" key must be a function, or an array with one function literal per argument`
+  );
 }

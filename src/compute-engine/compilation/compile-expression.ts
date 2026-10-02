@@ -20,6 +20,7 @@ import {
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
+import { withVarsValuesHidden } from './vars-inputs.js';
 
 export type CompileExpressionOptions<T extends string = string> = {
   to?: T;
@@ -250,46 +251,74 @@ export function compile<
           ? undefined
           : options.mode
       );
-      let code: string;
-      let escalation: CompileDiagnostic | undefined;
+      // A `vars`-mapped symbol is compiled as the valueless input of its
+      // declared type (`withVarsValuesHidden`), as on a registered target.
+      // The `vars` keys also ride on the target (`varsKeys`), so neither the
+      // constant folder nor the symbol read folds the value of a mapped
+      // symbol the hiding does not cover (one whose type was inferred from
+      // its value): it stays a live input. The keys are stamped on the
+      // caller's target object for this call only, and the previous value is
+      // restored when the call ends, because the caller can reuse the target
+      // for a compilation with other `vars`. The target is not copied: a copy
+      // made with object spread loses the methods of a class-instance target,
+      // and a hook that writes to `this` (such as `reset()`) writes to the
+      // copy.
+      const vars = options.vars;
+      const target = options.target;
+      const previousVarsKeys = target.varsKeys;
+      if (vars !== undefined && Object.keys(vars).length > 0)
+        target.varsKeys = new Set([
+          ...(previousVarsKeys ?? []),
+          ...Object.keys(vars),
+        ]);
+      let direct: CompilationResult<T, R>;
       try {
-        code = BaseCompiler.compileRoot(rewritten, options.target);
-      } catch (e) {
-        // The `auto` escalation (design §4) for a CALLER-OWNED target: a
-        // `LaneMismatch` in the strict attempt redoes the compilation under
-        // the complex discipline, on FRESH target state — a direct target
-        // offers `auto` only when it provides `reset()`
-        // (`resolveDirectTargetMode`), which drops whatever the failed attempt
-        // wrote (helpers, definitions, temporaries). A REGISTERED target
-        // escalates inside its own `compile()` instead
-        // (`compileWithAutoEscalation`, `auto-escalation.ts`), which is what
-        // makes the target-level route behave like this entry; this branch
-        // cannot use that helper, because a caller's target is reused across
-        // calls and its state has to be reset between the two attempts.
-        if (!isLaneMismatchError(e) || options.target.mode !== 'auto') throw e;
-        options.target.reset?.();
-        options.target.mode = 'complex';
-        // The SAME collision seed as the first attempt (the caller's spliced
-        // `vars`/`functions` source included), or the retry could number a
-        // temporary into a name the caller's own source uses.
-        options.target.naming = BaseCompiler.newNamingContext(
-          rewritten,
-          namingSources
-        );
-        code = BaseCompiler.compileRoot(rewritten, options.target);
-        escalation = e.diagnostic;
+        direct = withVarsValuesHidden(expr, vars, () => {
+          let code: string;
+          let escalation: CompileDiagnostic | undefined;
+          try {
+            code = BaseCompiler.compileRoot(rewritten, target);
+          } catch (e) {
+            // The `auto` escalation (design §4) for a CALLER-OWNED target: a
+            // `LaneMismatch` in the strict attempt redoes the compilation under
+            // the complex discipline, on FRESH target state — a direct target
+            // offers `auto` only when it provides `reset()`
+            // (`resolveDirectTargetMode`), which drops whatever the failed attempt
+            // wrote (helpers, definitions, temporaries). A REGISTERED target
+            // escalates inside its own `compile()` instead
+            // (`compileWithAutoEscalation`, `auto-escalation.ts`), which is what
+            // makes the target-level route behave like this entry; this branch
+            // cannot use that helper, because a caller's target is reused across
+            // calls and its state has to be reset between the two attempts.
+            if (!isLaneMismatchError(e) || target.mode !== 'auto') throw e;
+            target.reset?.();
+            target.mode = 'complex';
+            // The SAME collision seed as the first attempt (the caller's spliced
+            // `vars`/`functions` source included), or the retry could number a
+            // temporary into a name the caller's own source uses.
+            target.naming = BaseCompiler.newNamingContext(
+              rewritten,
+              namingSources
+            );
+            code = BaseCompiler.compileRoot(rewritten, target);
+            escalation = e.diagnostic;
+          }
+          const result = BaseCompiler.withReferences(
+            {
+              target: (target.language ?? 'custom') as T,
+              success: true,
+              code,
+            } as CompilationResult<T, R>,
+            expr,
+            target,
+            vars ? new Set(Object.keys(vars)) : undefined
+          );
+          if (escalation !== undefined) result.escalation = escalation;
+          return result;
+        });
+      } finally {
+        target.varsKeys = previousVarsKeys;
       }
-      const direct = BaseCompiler.withReferences(
-        {
-          target: (options.target.language ?? 'custom') as T,
-          success: true,
-          code,
-        } as CompilationResult<T, R>,
-        expr,
-        options.target,
-        options.vars ? new Set(Object.keys(options.vars)) : undefined
-      );
-      if (escalation !== undefined) direct.escalation = escalation;
       return strictTypesChecked(expr, direct, options, undefined);
     }
 

@@ -89,10 +89,13 @@ import type {
   Expression,
   BoxedDefinition,
   BoxedValueDefinition,
+  BoxedOperatorDefinition,
   DefinitionSearchResult,
   SymbolDefinitionInput,
   IComputeEngine,
   Scope,
+  DeclareOptions,
+  OperatorDefinitionPatch,
 } from './global-types.js';
 
 import {
@@ -114,6 +117,10 @@ import {
   defIsCallableShaped,
 } from './boxed-expression/utils.js';
 import { canonicalFunctionLiteral, lookup } from './function-utils.js';
+import {
+  extendedLibraryOperator,
+  markLibraryExtension,
+} from './library-shadowing.js';
 import { isInferredTypedParameter } from './boxed-expression/inferred-annotations.js';
 import {
   provisionalLiteral,
@@ -131,6 +138,7 @@ import {
 } from './type-constructors.js';
 import {
   adoptsForeignEngineObject,
+  isExpression,
   isFunction,
   isNumber,
   isString,
@@ -628,6 +636,7 @@ export function declareSymbolOperator(
   // A FRESH declaration: the target scope held no binding of `name` before
   // this one. Read before the placeholder below is installed. See `updateDef`.
   const fresh = !scope.bindings.has(name);
+  const replaced = scope.bindings.get(name);
 
   // Insert a placeholder in the bindings to handle recursive calls
   // (the function is not yet defined)
@@ -648,7 +657,25 @@ export function declareSymbolOperator(
   // The placeholder half is constructed here — see `declareSymbolValue`.
   if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
   noteScratchDeclaration(ce, scope, boxedDef);
-  updateDef(ce, name, boxedDef, def, scope, fresh);
+  // When the operator definition constructor refuses the definition (for
+  // example a `canonical` handler with the `commutative` flag), put back the
+  // binding that the placeholder replaced, or remove the name if there was
+  // none. Otherwise the name stays bound to the placeholder, a value of type
+  // `function` with no handler, and a definition that the failed declaration
+  // was meant to replace or extend is lost.
+  // `updateDef` can also throw AFTER it installed the operator half (when
+  // the rebuild of a definition that waited on this name fails). The new
+  // definition is then committed and stays: the binding is restored only
+  // while it still holds the placeholder value half.
+  try {
+    updateDef(ce, name, boxedDef, def, scope, fresh);
+  } catch (e) {
+    if (!isOperatorDef(boxedDef) && scope.bindings.get(name) === boxedDef) {
+      if (fresh) scope.bindings.delete(name);
+      else scope.bindings.set(name, replaced!);
+    }
+    throw e;
+  }
 
   noteScopeDeclaration(scope);
   ce._noteStateEvent({
@@ -1996,6 +2023,257 @@ function settleVarianceGroup(
   return flipped;
 }
 
+/**
+ * `t` as a boxed type, or `undefined` when it is not one. This does not use
+ * `instanceof BoxedType`: a plugin bundle re-bundles the engine classes, so
+ * a boxed type made by the host is not an instance of the plugin's
+ * `BoxedType` class, and the other way around. A boxed type is recognized by
+ * its `type` field and its `matches()` method, as in
+ * `normalizeSignatureField()` (`boxed-expression/boxed-operator-definition.ts`).
+ */
+function asBoxedType(t: unknown): BoxedType | undefined {
+  if (
+    typeof t === 'object' &&
+    t !== null &&
+    'type' in t &&
+    typeof (t as { matches?: unknown }).matches === 'function'
+  )
+    return t as BoxedType;
+  return undefined;
+}
+
+/**
+ * Build the definition that `ce.declare(id, patch, { extend: true })`
+ * installs: the fields of the operator definition visible for `id` from
+ * `scope`, overridden by the fields of `patch`.
+ *
+ * The visible definition is copied, never mutated. A cache or an expression
+ * that holds the old definition object keeps a consistent view of it, as
+ * with any other redeclaration.
+ *
+ * Copying a boxed definition copies its own enumerable properties, which
+ * include engine-internal ones (their names start with `_`). The definition
+ * constructor reads only these of them:
+ *
+ * - `_validationSignature` and `_derivedSignature`, when the definition has a
+ *   `signature`. Both describe the signature that a function literal derived.
+ *   When the patch changes the signature, the new one is a declared contract:
+ *   `_derivedSignature` is set to `false` and `_validationSignature` is
+ *   cleared, so that calls are validated against the NEW signature.
+ *
+ * The constructor ignores the other internal fields. Some of them are
+ * computed again, and the function returned with the definition (`carry`)
+ * copies the others onto the installed definition:
+ *
+ * - The function literal of a user function (`_lambdaLiteral`) is passed as
+ *   the `evaluate` handler, so that the new definition is a user function
+ *   again: it re-derives the effects of the body and keeps broadcasting over
+ *   collections like the old one.
+ * - The effect set is not an own property (`pure` and `effects` are getters).
+ *   It survives the copy in the effect specifier of the copied `signature`.
+ *   When the effects of the old definition were not declared but derived
+ *   (from the body of a user function, or by the effect deriver of a
+ *   protocol dispatcher), the specifier is removed from the copied
+ *   signature: otherwise the new definition reads it as declared effects
+ *   (`effectsDeclared`) and never derives them again.
+ * - When the patch replaces the signature and states no effects, the old
+ *   effect set is carried over as the `effects` field, so that an extension
+ *   cannot make an impure operator pure.
+ * - An explicit `commutativeMatch` is carried over for the same reason.
+ * - `carry` copies the effect deriver of a protocol dispatcher
+ *   (`_deriveEffects`), the skeleton of the `unknown` slots of a user
+ *   function (`_signatureSkeleton`), and the history of signature changes
+ *   (`_typeProvenance`), so that the new definition updates its signature
+ *   and effects as the old one does.
+ * - `carry` also records that the new definition extends a standard-library
+ *   definition when the patch, and every earlier extension, kept its
+ *   `evaluate`, `canonical`, `compile` and `derivative`. Such a definition
+ *   does not shadow the library name (`shadowsLibraryName()`,
+ *   `library-shadowing.ts`): `D`, compilation and the canonical folds keep
+ *   treating the operator as the library one.
+ *
+ * Throws, and installs nothing, when there is no visible operator definition,
+ * when the name is a value, when the function is defined by clauses (the
+ * clause list belongs to the old definition object), or when the new
+ * signature is not a subtype of the old one. The subtype requirement does
+ * not apply when the old signature was only inferred (`inferredSignature`):
+ * such a signature is not a contract, and a plain `ce.declare()` may replace
+ * it too.
+ */
+function extendedOperatorDefinition(
+  ce: IComputeEngine,
+  id: string,
+  patch: unknown,
+  scope: Scope
+): {
+  def: OperatorDefinition;
+  carry: (installed: BoxedOperatorDefinition) => void;
+} {
+  if (
+    patch === null ||
+    typeof patch !== 'object' ||
+    Array.isArray(patch) ||
+    isExpression(patch) ||
+    asBoxedType(patch) !== undefined
+  )
+    throw new Error(
+      `Cannot extend "${id}": with \`{ extend: true }\`, the definition must be an object with the fields to change`
+    );
+
+  const visible = lookup(id, scope);
+  if (visible === undefined)
+    throw new Error(
+      `Cannot extend "${id}": it has no definition to extend. Declare it first, without \`extend\``
+    );
+  if (!isOperatorDef(visible))
+    throw new Error(
+      `Cannot extend "${id}": it is declared as a value, and only an operator definition can be extended`
+    );
+  const old = visible.operator;
+  if ((old as { _isMultiClause?: boolean })._isMultiClause)
+    throw new Error(
+      `Cannot extend "${id}": it is a function defined by clauses. Add a clause instead`
+    );
+
+  const { addSignature, ...fields } = patch as OperatorDefinitionPatch;
+  if (addSignature !== undefined && fields.signature !== undefined)
+    throw new Error(
+      `Cannot extend "${id}": give either \`signature\` or \`addSignature\`, not both`
+    );
+
+  const def: OperatorDefinition = { ...old, ...fields };
+
+  // An explicit `commutativeMatch` is stored in a private field and read
+  // through a getter, so the copy above does not carry it.
+  const explicitMatch = (old as unknown as { _commutativeMatch?: boolean })
+    ._commutativeMatch;
+  if (!('commutativeMatch' in fields) && explicitMatch !== undefined)
+    def.commutativeMatch = explicitMatch;
+
+  // A user function: pass its literal as the `evaluate` handler, so that the
+  // new definition is built from the literal as the old one was.
+  if (!('evaluate' in fields) && old._lambdaLiteral !== undefined)
+    def.evaluate = old._lambdaLiteral;
+  const keepsLambda =
+    old._lambdaLiteral !== undefined && def.evaluate === old._lambdaLiteral;
+
+  //
+  // The signature
+  //
+  const toType = (t: Type | TypeString | BoxedType): Type =>
+    asBoxedType(t)?.type ?? parseType(t as Type | TypeString, ce._typeResolver);
+  // An overload set is an intersection of signatures: its arms.
+  const armsOf = (t: Type): Type[] =>
+    typeof t === 'object' && t.kind === 'intersection' ? t.types : [t];
+  const oldSignature = old.signature.type;
+  let signature: Type | undefined = undefined;
+  if (fields.signature !== undefined) signature = toType(fields.signature);
+  else if (addSignature !== undefined) {
+    // The old arms come first: a call that matches an old arm resolves as it
+    // did before.
+    signature = {
+      kind: 'intersection',
+      types: [...armsOf(oldSignature), ...armsOf(toType(addSignature))],
+    };
+  }
+
+  const statesEffects =
+    fields.effects !== undefined ||
+    fields.pure !== undefined ||
+    fields.drawsRandom !== undefined;
+
+  // The effect deriver of a protocol dispatcher does not depend on the
+  // definition object, so the new definition can use it. The deriver of a
+  // user function walks the old literal and writes to the old definition:
+  // the new definition builds its own from the literal.
+  const copiesDeriver =
+    signature === undefined &&
+    !statesEffects &&
+    old._lambdaLiteral === undefined &&
+    old._deriveEffects !== undefined;
+  const copiesSkeleton =
+    signature === undefined &&
+    keepsLambda &&
+    old._signatureSkeleton !== undefined;
+
+  if (signature === undefined && (keepsLambda || copiesDeriver)) {
+    // With a skeleton, the signature the old definition reports is derived
+    // from the skeleton on each read. The stored one is the base of that
+    // derivation, so it is the one to copy.
+    const base = copiesSkeleton
+      ? (old as unknown as { _signature: BoxedType })._signature
+      : old.signature;
+    // Effects that were derived, not declared, are derived again: keep them
+    // out of the signature, which would otherwise declare them.
+    def.signature = old.effectsDeclared
+      ? base
+      : ce.type(stripArrowEffects(base.type));
+  }
+
+  if (signature !== undefined) {
+    // Every call that was valid must stay valid: the new signature must be a
+    // subtype of the old one (wider or equal parameters, narrower or equal
+    // result). A signature that was only inferred (the `(any*) -> unknown`
+    // of an operator declared without one, or the signature inferred from
+    // the body of a user function) is not a contract, and is not checked.
+    const newType = ce.type(signature);
+    if (
+      old.inferredSignature !== true &&
+      !newType.matches(ce.type(oldSignature))
+    )
+      throw new Error(
+        `Cannot extend "${id}": the signature "${newType}" is not a subtype of the current signature "${typeToString(oldSignature)}", so some calls that are valid now would become invalid`
+      );
+    def.signature = newType;
+    def.inferredSignature = false;
+    def._derivedSignature = false;
+    def._validationSignature = undefined;
+
+    // Carry the old effect set when nothing in the patch states one. A user
+    // function whose effects were inferred from its body is excluded: its
+    // body is inferred again.
+    const reinfers = keepsLambda && !old.effectsDeclared;
+    if (
+      !statesEffects &&
+      signatureEffects(newType.type) === undefined &&
+      !reinfers &&
+      (old.effectsDeclared || old.effects !== undefined)
+    )
+      def.effects = old.effects ?? [];
+  }
+
+  // The library definition that the new definition extends: the old one if
+  // it is the definition of the system scope, where the standard library is
+  // installed, or the one that the old definition extends. An extension that
+  // replaces a part that code reads from the library by name is a shadow.
+  const replacesLibraryPart =
+    'evaluate' in fields ||
+    'canonical' in fields ||
+    'compile' in fields ||
+    'derivative' in fields;
+  const systemBinding = ce.contextStack[0]?.lexicalScope.bindings.get(id);
+  const library = replacesLibraryPart
+    ? undefined
+    : systemBinding !== undefined &&
+        isOperatorDef(systemBinding) &&
+        systemBinding.operator === old
+      ? old
+      : extendedLibraryOperator(old);
+
+  const carry = (installed: BoxedOperatorDefinition): void => {
+    if (copiesDeriver) installed._deriveEffects = old._deriveEffects;
+    if (copiesSkeleton) installed._signatureSkeleton = old._signatureSkeleton;
+    if (old._typeProvenance !== undefined)
+      installed._typeProvenance = [
+        ...old._typeProvenance,
+        ...(installed._typeProvenance ?? []),
+      ];
+    if (library !== undefined) markLibraryExtension(installed, library);
+  };
+
+  return { def, carry };
+}
+
 export function declareFn(
   ce: IComputeEngine,
   arg1:
@@ -2003,9 +2281,21 @@ export function declareFn(
     | {
         [id: string]: Type | TypeString | SymbolDefinitionInput;
       },
-  arg2?: Type | TypeString | SymbolDefinitionInput,
-  scope?: Scope
+  arg2?: Type | TypeString | SymbolDefinitionInput | OperatorDefinitionPatch,
+  arg3?: Scope | DeclareOptions
 ): IComputeEngine {
+  // The third argument is a scope, or an options object. A scope always has
+  // a `bindings` map, and an options object never has one.
+  let scope: Scope | undefined;
+  let extend = false;
+  if (arg3 !== undefined && arg3 !== null) {
+    if ('bindings' in arg3) scope = arg3;
+    else {
+      scope = arg3.scope;
+      extend = arg3.extend === true;
+    }
+  }
+
   //
   // If the argument is an object literal, call `declare` for each entry
   //
@@ -2032,6 +2322,17 @@ export function declareFn(
   }
 
   scope ??= ce.context.lexicalScope;
+
+  // Extend mode replaces a binding of the same scope on purpose, so it skips
+  // the "already declared" check below.
+  if (extend) {
+    // If the definition constructor refuses the result, the declaration
+    // puts the previous binding back (`declareSymbolOperator`).
+    const { def, carry } = extendedOperatorDefinition(ce, id, arg2, scope);
+    const installed = ce._declareSymbolOperator(id, def, scope);
+    if (isOperatorDef(installed)) carry(installed.operator);
+    return ce;
+  }
 
   //
   // Check the id is not already declared in the current scope.

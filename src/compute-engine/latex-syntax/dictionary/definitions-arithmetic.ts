@@ -11,7 +11,6 @@ import {
   isEmptySequence,
   missingIfEmpty,
   isNumberExpression,
-  isNumberObject,
   MISSING,
   getSequence,
 } from '../../../math-json/utils.js';
@@ -31,6 +30,7 @@ import {
   EXPONENTIATION_PRECEDENCE,
 } from '../types.js';
 import { latexTemplate } from '../serializer-style.js';
+import { complexPartShape } from '../serialize-number.js';
 import {
   ALWAYS_DECLARED_CONSTANTS,
   PIPE_TOPIC_MARKER,
@@ -41,6 +41,7 @@ import {
 } from './definitions-sets.js';
 import { endsWithSuperscript, joinLatex, supsub } from '../tokenizer.js';
 import { OPENING_PARENTHESIS } from '../delimiter-tables.js';
+import { isOperandStartToken, operandEnd } from '../lenient-ambiguity.js';
 
 import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
@@ -217,6 +218,8 @@ function parseRoot(parser: Parser): MathJsonExpression | null {
  * any other radicand, this is the same as `\sqrt`.
  */
 function parseRootGlyph(parser: Parser): MathJsonExpression | null {
+  // The trigger is the one token `√`, already read
+  const glyph = parser.index - 1;
   if (parser.options.strict === false) {
     const start = parser.index;
     parser.skipSpace();
@@ -228,7 +231,48 @@ function parseRootGlyph(parser: Parser): MathJsonExpression | null {
     }
     parser.index = start;
   }
-  return parseRoot(parser);
+  const result = parseRoot(parser);
+  if (parser.options.strict === false && result !== null)
+    emitRadicalAmbiguity(parser, glyph);
+  return result;
+}
+
+/**
+ * In non-strict mode, report an `ambiguous-radical` diagnostic when the
+ * extent of the square root glyph `√` at token `glyph`, just read, has a
+ * second common reading:
+ *
+ * - an unbraced radicand directly followed by an operand: `√2π` is `√2·π`,
+ *   and a person can mean `√(2π)` (also `√2x`, `√xy`);
+ * - an unbraced radicand directly followed by `^`: `√x²` is `(√x)²`, and a
+ *   person can mean `√(x²)`;
+ * - a digit directly before the glyph: `3√8` is `3·√8`, and a person can
+ *   mean the cube root of 8.
+ *
+ * The span starts at the glyph and ends after the operand that has the
+ * second reading (`√2π`, `√x²`, `√xy`). The reading does not change.
+ */
+function emitRadicalAmbiguity(parser: Parser, glyph: number): void {
+  if (!parser._emitAmbiguity) return;
+  const token = (i: number) => (i < 0 ? '' : parser.latex(i, i + 1));
+  // The token at index `i`, or `undefined` after the end of the input
+  const at = (i: number) => token(i) || undefined;
+  // The span of `3√8` starts at the glyph, not at the digit: the parser
+  // removes a diagnostic of a branch it abandons only when the span starts
+  // inside that branch, and the branch that reads the root starts at the
+  // glyph.
+  if (/^[0-9]$/.test(token(glyph - 1)))
+    parser._emitAmbiguity('ambiguous-radical', glyph, parser.index);
+  // A braced radicand (`√{2π}`) has a clear end
+  const radicand = token(glyph + 1);
+  if (radicand === '{' || radicand === '(' || radicand === '\\left') return;
+  const next = token(parser.index);
+  if (next === '^' || isOperandStartToken(next))
+    parser._emitAmbiguity(
+      'ambiguous-radical',
+      glyph,
+      operandEnd(at, parser.index)
+    );
 }
 
 function negateNumberLiteral(
@@ -720,54 +764,6 @@ function serializeAdd(
   serializer.level += 1;
 
   return result;
-}
-
-/**
- * The facts about a part of a `Complex` expression that its serializer
- * needs: is it zero, `1` or `-1`, is it negative. `null` when the part is
- * not a number literal (an exact part such as `['Sqrt', 2]`).
- *
- * A number literal written as a string of digits is read from its digits,
- * not only from its double: `2.5e-800` rounds to the double `0` and
- * `1.00000000000000000001` rounds to `1`, but the first is not zero and the
- * second is not one. A literal with at most 15 significant digits is equal
- * to `1` exactly when its double is.
- */
-function complexPartShape(x: MathJsonExpression | null | undefined): {
-  isZero: boolean;
-  isOne: boolean;
-  isNegativeOne: boolean;
-  isNegative: boolean;
-} | null {
-  const value = machineValue(x);
-  if (value === null) return null;
-  const fromDouble = {
-    isZero: value === 0,
-    isOne: value === 1,
-    isNegativeOne: value === -1,
-    isNegative: value < 0,
-  };
-  const literal = x ?? null;
-  const digits =
-    typeof literal === 'string'
-      ? literal
-      : isNumberObject(literal) && typeof literal.num === 'string'
-        ? literal.num
-        : undefined;
-  if (digits === undefined || !Number.isFinite(value)) return fromDouble;
-  const match = /^([+-]?)(\d*)\.?(\d*)(?:[eE][+-]?\d+)?$/.exec(digits.trim());
-  if (match === null) return fromDouble;
-  const significant = (match[2] + match[3])
-    .replace(/^0+/, '')
-    .replace(/0+$/, '');
-  const isZero = significant.length === 0;
-  const exact = significant.length <= 15;
-  return {
-    isZero,
-    isOne: exact && value === 1,
-    isNegativeOne: exact && value === -1,
-    isNegative: !isZero && match[1] === '-',
-  };
 }
 
 /**
@@ -1464,11 +1460,7 @@ function parseSlashDivide(
     !isDifferentialSymbol(operand(rhs, 1)) &&
     !isSymbolApplication(rhs)
   )
-    parser.emitDiagnostic(
-      'implicit-product-in-denominator',
-      denomStart,
-      parser.index
-    );
+    parser._emitAmbiguity?.('ambiguous-denominator', denomStart, parser.index);
 
   return ['Divide', lhs, rhs];
 }
@@ -1887,6 +1879,63 @@ function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
   return ['Add', ...parts];
 }
 
+/**
+ * In the lenient grammar, report an `ambiguous-sign` diagnostic when the sign
+ * that ends at the current position (a `+` or a `-` read as an infix or a
+ * prefix operator, which starts at token `signStart`) is followed, after
+ * optional white space, by a second `+` or `-`. Two signs in a row (`--x`,
+ * `x - -y`, `a + -b`) are often a typing error: a person can mean one sign.
+ * The parse is not changed. The span covers the two signs.
+ *
+ * Two signs with no white space between them are not reported here when they
+ * are read as one operator: `+-` is read as `±`, and `-+` as `∓` (see the
+ * entries for `+` and `-`).
+ */
+function reportSignAfterSign(parser: Parser, signStart: number): void {
+  if (parser.options.strict !== false) return;
+  const start = parser.index;
+  parser.skipSpace();
+  const next = parser.atEnd ? '' : parser.peek;
+  const end = parser.index + 1;
+  parser.index = start;
+  if (next === '+' || next === '-')
+    parser._emitAmbiguity?.('ambiguous-sign', signStart, end, {
+      signs: `${parser.latex(signStart, signStart + 1)}${next}`,
+    });
+}
+
+/**
+ * In the lenient grammar, report an `ambiguous-sign` diagnostic for a prefix
+ * `±` (spelled `±`, `\pm`, `\plusmn` or `+-`) or a prefix `∓` (spelled `∓`,
+ * `\mp` or `-+`), which has no left operand: `x = ±1` is read as
+ * `Measurement(0, 1)` and `x = ∓1` as `MinusPlus(0, 1)`, and a person often
+ * means the two values `1` and `-1`. The span is from token `signStart` to
+ * the current position.
+ */
+function reportPrefixPlusMinus(parser: Parser, signStart: number): void {
+  if (parser.options.strict !== false) return;
+  parser._emitAmbiguity?.('ambiguous-sign', signStart, parser.index, {
+    signs: parser.latex(signStart, parser.index),
+  });
+}
+
+/**
+ * Read the operand of a prefix `∓` (spelled `∓`, `\mp`, or `-+` in the
+ * lenient grammar), whose sign ends at the current position and starts at
+ * token `signStart` (the token before the current position by default):
+ * `∓1` is `MinusPlus(0, 1)`. The operand binds as the operand of a prefix
+ * `±` does. In the lenient grammar, report an `ambiguous-sign` diagnostic.
+ */
+function parsePrefixMinusPlus(
+  parser: Parser,
+  terminator: Readonly<Terminator> | undefined,
+  signStart = parser.index - 1
+): MathJsonExpression {
+  reportPrefixPlusMinus(parser, signStart);
+  const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
+  return ['MinusPlus', 0, missingIfEmpty(rhs)] as MathJsonExpression;
+}
+
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // Constants
   // Catalan's constant is conventionally written `G`, but a bare `G` is far
@@ -1960,7 +2009,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       }
 
       // Fall back to default serialization
-      return joinLatex([serializer.serialize(arg), '\\degree']);
+      // A compound operand needs parens: `x^2^{\circ}` does not parse and
+      // `x+1^{\circ}` reads back as `x+(1^{\circ})`.
+      const base =
+        symbol(arg) || machineValue(arg) !== null
+          ? serializer.serialize(arg)
+          : `(${serializer.serialize(arg)})`;
+      return joinLatex([base, '^{\\circ}']);
     },
   },
   // No `precedence` on the superscript entries: the dictionary validator
@@ -2075,7 +2130,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     standaloneSymbol: true,
     latexTrigger: ['\\exponentialE'],
     parse: 'ExponentialE',
-    serialize: '\\exponentialE',
+    serialize: (serializer) => serializer.options.exponentialE,
   },
   {
     latexTrigger: '\\operatorname{e}',
@@ -2097,6 +2152,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'ImaginaryUnit',
     latexTrigger: ['\\imaginaryI'],
+    serialize: (serializer) => serializer.options.imaginaryUnit,
   },
   {
     latexTrigger: '\\operatorname{i}',
@@ -2147,6 +2203,19 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'any',
     precedence: ADDITION_PRECEDENCE,
     parse: (parser, lhs, until) => {
+      // In the lenient grammar, `+-` with no white space between the two
+      // signs is the plus-minus sign: `2 +- 0.1` is `Measurement(2, 0.1)`, as
+      // `2 ± 0.1` and `2 \pm 0.1` are. It binds as `±` does
+      // (`ARROW_PRECEDENCE`), so where `±` cannot bind, `+-` ends the
+      // operand and an outer level reads it.
+      if (parser.options.strict === false && parser.peek === '-') {
+        if (until.minPrec > ARROW_PRECEDENCE) return null;
+        parser.nextToken();
+        const rhs = parser.parseExpression({ ...until, minPrec: 400 });
+        return ['Measurement', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
+      }
+      reportSignAfterSign(parser, parser.index - 1);
+
       // Parse the right operand at `ADDITION_PRECEDENCE + 1` so a following
       // `+` continuation is left for the caller's infix loop instead of being
       // consumed by a nested `parseExpression`. This makes a flat `a+b+c+…`
@@ -2193,6 +2262,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['+'],
     precedence: ADDITION_PRECEDENCE,
     parse: (parser, until) => {
+      // In the lenient grammar, a prefix `+-` with no white space between the
+      // two signs is a prefix `±`: `+-\sqrt{x}` is `Measurement(0, √x)`, as
+      // `±\sqrt{x}` is. It is reported as `ambiguous-sign`, as a prefix `±`
+      // is.
+      if (parser.options.strict === false && parser.peek === '-') {
+        const signStart = parser.index - 1;
+        parser.nextToken();
+        reportPrefixPlusMinus(parser, signStart);
+        const rhs = parser.parseExpression({ ...until, minPrec: 400 });
+        return ['Measurement', 0, missingIfEmpty(rhs)] as MathJsonExpression;
+      }
+      reportSignAfterSign(parser, parser.index - 1);
       return parser.parseExpression({ ...until, minPrec: 400 });
     },
   },
@@ -2221,6 +2302,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Complex',
     precedence: ADDITION_PRECEDENCE - 1, // One less than precedence of `Add`: used for correct wrapping
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const IU = serializer.options.imaginaryUnit;
       const rePart = serializer.serialize(operand(expr, 1));
 
       const im = complexPartShape(operand(expr, 2));
@@ -2252,20 +2334,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
           ? joinLatex([
               '-',
               machineValue(negImMagnitude) === 1
-                ? '\\imaginaryI'
-                : joinLatex([
-                    serializer.serialize(negImMagnitude),
-                    '\\imaginaryI',
-                  ]),
+                ? IU
+                : joinLatex([serializer.serialize(negImMagnitude), IU]),
             ])
           : im?.isOne && unitCoefficient
-            ? '\\imaginaryI'
+            ? IU
             : im?.isNegativeOne && unitCoefficient
-              ? '-\\imaginaryI'
-              : joinLatex([
-                  serializer.serialize(operand(expr, 2)),
-                  '\\imaginaryI',
-                ]);
+              ? `-${IU}`
+              : joinLatex([serializer.serialize(operand(expr, 2)), IU]);
 
       if (reIsZero) return imPart;
 
@@ -2375,7 +2451,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const op1 = operand(expr, 1);
       if (symbol(op1) || machineValue(op1) !== null)
-        return joinLatex(['\\exponentialE^{', serializer.serialize(op1), '}']);
+        return joinLatex([
+          serializer.options.exponentialE,
+          '^{',
+          serializer.serialize(op1),
+          '}',
+        ]);
 
       return joinLatex(['\\exp', serializer.wrap(missingIfEmpty(op1))]);
     },
@@ -2707,6 +2788,24 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     symbolTrigger: 'lb',
     parse: (parser: Parser) => parseLb(parser),
   },
+  // `Log2` and `Log10` are not standard LaTeX either; both are written as a
+  // subscripted `\log` and read back as `Log(x, 2)` and `Log(x)`.
+  {
+    name: 'Log2',
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      nops(expr) === 1
+        ? joinLatex(['\\log_{2}', serializer.wrap(operand(expr, 1))])
+        : serializer.serializeFunction(expr),
+  },
+  {
+    name: 'Log10',
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      nops(expr) === 1
+        ? joinLatex(['\\log_{10}', serializer.wrap(operand(expr, 1))])
+        : serializer.serializeFunction(expr),
+  },
   {
     name: 'Ln',
     standaloneSymbol: true,
@@ -2754,9 +2853,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
 
   {
     name: 'LCM',
-    latexTrigger: ['\\lcm'],
     kind: 'function',
+    // `\lcm` is not a standard LaTeX command (unlike amsmath's `\gcd`): it is
+    // still read, but `LCM` is written with `\operatorname`.
+    serialize: (serializer, expr) =>
+      '\\operatorname{lcm}' + serializer.wrapArguments(expr),
   },
+  { latexTrigger: ['\\lcm'], kind: 'function', parse: 'LCM' },
   {
     symbolTrigger: 'lcm',
     kind: 'function',
@@ -2885,6 +2988,21 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'any',
     precedence: ARROW_PRECEDENCE,
     parse: 'MinusPlus',
+  },
+  // A prefix `∓` has no left operand: `∓1` is `MinusPlus(0, 1)`, as a prefix
+  // `±` is `Measurement(0, 1)`. In the lenient grammar it is reported as
+  // `ambiguous-sign`: a person often means the two values `-1` and `1`.
+  {
+    latexTrigger: ['\\mp'],
+    kind: 'prefix',
+    precedence: ARROW_PRECEDENCE,
+    parse: (parser, terminator) => parsePrefixMinusPlus(parser, terminator),
+  },
+  {
+    latexTrigger: ['∓'],
+    kind: 'prefix',
+    precedence: ARROW_PRECEDENCE,
+    parse: (parser, terminator) => parsePrefixMinusPlus(parser, terminator),
   },
   {
     name: 'Multiply',
@@ -3045,7 +3163,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     precedence: DIVISION_PRECEDENCE,
     serialize: (serializer, expr) => {
-      if (nops(expr) !== 2) return '';
+      if (nops(expr) !== 2) return serializer.serializeFunction(expr);
       // Infix `\bmod` binds tighter than `+`/`-` on re-parse, so a compound
       // operand at addition precedence (e.g. `x+5`) must be parenthesized or
       // the round trip changes the expression (`(x+5)\bmod2` would otherwise
@@ -3134,6 +3252,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'prefix',
     precedence: EXPONENTIATION_PRECEDENCE + 1,
     parse: (parser, terminator): MathJsonExpression | null => {
+      // In the lenient grammar, a prefix `-+` with no white space between
+      // the two signs is a prefix `∓`: `-+x` is `MinusPlus(0, x)`, as `∓x`
+      // is. It is reported as `ambiguous-sign`, as a prefix `∓` is.
+      if (parser.options.strict === false && parser.peek === '+') {
+        const signStart = parser.index - 1;
+        parser.nextToken();
+        return parsePrefixMinusPlus(parser, terminator, signStart);
+      }
+      reportSignAfterSign(parser, parser.index - 1);
       parser.skipSpace();
       const rhs = parser.parseExpression({
         ...terminator,
@@ -3232,6 +3359,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'prefix',
     precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
+      reportPrefixPlusMinus(parser, parser.index - 1);
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['Measurement', 0, missingIfEmpty(rhs)] as MathJsonExpression;
     },
@@ -3251,6 +3379,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'prefix',
     precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
+      reportPrefixPlusMinus(parser, parser.index - 1);
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['Measurement', 0, missingIfEmpty(rhs)] as MathJsonExpression;
     },
@@ -3272,6 +3401,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'prefix',
     precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
+      reportPrefixPlusMinus(parser, parser.index - 1);
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['Measurement', 0, missingIfEmpty(rhs)] as MathJsonExpression;
     },
@@ -3431,6 +3561,26 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'left',
     precedence: ADDITION_PRECEDENCE + 2,
     parse: (parser, lhs, terminator) => {
+      // In the lenient grammar, `-+` with no white space between the two
+      // signs is the minus-plus sign: `a -+ b` is `MinusPlus(a, b)`, as
+      // `a \mp b` is. It binds as `\mp` does (`ARROW_PRECEDENCE`). It is
+      // also reported as `ambiguous-sign`: the two signs are often a typing
+      // error.
+      if (parser.options.strict === false && parser.peek === '+') {
+        if (terminator.minPrec > ARROW_PRECEDENCE) return null;
+        const signStart = parser.index - 1;
+        parser.nextToken();
+        parser._emitAmbiguity?.('ambiguous-sign', signStart, parser.index, {
+          signs: '-+',
+        });
+        const rhs = parser.parseExpression({
+          ...terminator,
+          minPrec: ARROW_PRECEDENCE + 1,
+        });
+        if (rhs === null) return null;
+        return ['MinusPlus', lhs, rhs] as MathJsonExpression;
+      }
+      reportSignAfterSign(parser, parser.index - 1);
       const rhs = parser.parseExpression({
         ...terminator,
         minPrec: ADDITION_PRECEDENCE + 3,

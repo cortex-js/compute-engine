@@ -81,6 +81,25 @@ export type EvaluateHandlerOptions = Partial<EvaluateOptions> & {
   expression?: Expression;
 
   /**
+   * The number of significant digits the caller asked for, when
+   * `numericApproximation` is `true`. `undefined` when
+   * `numericApproximation` is `false`: an exact evaluation has no precision.
+   *
+   * - Inside `N(x, p)`, it is `p` for the evaluation of `x` and of every
+   *   expression evaluated inside it, also when `p` is lower than the
+   *   precision of the engine (then `N` computes at the precision of the
+   *   engine and rounds the result to `p` digits).
+   * - Otherwise (`x.N()`, `N(x)`, `evaluate({ numericApproximation: true })`)
+   *   it is `ce.precision`, the precision of the engine.
+   *
+   * A handler can use it to compute to the requested number of digits
+   * without reading `ce.precision`. Note that `N(x, p)` with a `p` greater
+   * than the precision of the engine also sets `ce.precision` to `p`, and
+   * leaves it there after the call.
+   */
+  precision?: number;
+
+  /**
    * The host capabilities of THIS evaluation: the `ce.effects` registry as it
    * was when the evaluation started. A handler that reaches a host capability
    * reads it from here, never from `ce.effects`, so that a change of registry
@@ -692,6 +711,67 @@ export type OperatorTypeHandlerOnTypes = (
   context: TypeHandlerContext
 ) => BoxedType | undefined;
 
+/**
+ * A handler that gives one partial derivative of an operator.
+ *
+ * - `ops` are the arguments of the application being differentiated, for
+ *   example `[x^2, y]` for `F(x^2, y)`. They are canonical, not evaluated.
+ * - `options.argument` is the 0-based index of the argument with respect
+ *   to which the partial derivative is requested.
+ *
+ * Return the partial derivative `∂F/∂(argument number options.argument)`
+ * evaluated AT `ops`, for example `2·x^2` for the first partial of
+ * `F(u, v) = u^2 + v` applied to `[x^2, y]`. Do not multiply by the
+ * derivative of the argument: the chain rule is applied by the caller.
+ *
+ * Return `undefined` when the partial derivative is not known. That
+ * partial then stays symbolic, as `Apply(Derivative(F, 1, 0), x^2, y)`.
+ *
+ * Do not call `.simplify()` on the result: the derivative is computed
+ * inside the simplification of other expressions, and calling `.simplify()`
+ * there can recurse without end.
+ *
+ * @category Definitions
+ */
+export type OperatorDerivativeHandler = (
+  ops: ReadonlyArray<Expression>,
+  options: { engine: ComputeEngine; argument: number }
+) => Expression | undefined;
+
+/**
+ * The value of the `derivative` key of an operator definition. It has one
+ * of two forms:
+ *
+ * 1. **An array with one entry for each argument**. Entry `i` is a function
+ *    literal (`["Function", body, ...parameters]`, as MathJSON or as an
+ *    expression) with one parameter for each argument of the operator. It
+ *    gives the partial derivative with respect to argument `i`, as a
+ *    function of all the arguments. For `F(x, y) = x^2·y`:
+ *
+ *    ```ts
+ *    derivative: [
+ *      ['Function', ['Multiply', 2, 'x', 'y'], 'x', 'y'],  // ∂F/∂x
+ *      ['Function', ['Power', 'x', 2], 'x', 'y'],           // ∂F/∂y
+ *    ]
+ *    ```
+ *
+ *    The array is used only for an application with as many arguments as
+ *    the array has entries, and an entry is used only if its literal has
+ *    one parameter for each argument. In any other case the partial
+ *    derivatives stay symbolic.
+ *
+ * 2. **A handler**, see {@link OperatorDerivativeHandler}. Use it when the
+ *    number of arguments varies, or when a partial derivative needs code.
+ *
+ * In both forms the derivative of `F(g₁, …, gₙ)` with respect to `v` is
+ * given by the chain rule: `Σᵢ ∂ᵢF(g₁, …, gₙ) · ∂gᵢ/∂v`. A partial
+ * derivative is requested only for an argument that depends on `v`.
+ *
+ * @category Definitions
+ */
+export type OperatorDerivative =
+  ReadonlyArray<ExpressionInput | Expression> | OperatorDerivativeHandler;
+
 export type OperatorDefinition = Partial<BaseDefinition> &
   Partial<OperatorDefinitionFlags> & {
     /**
@@ -932,6 +1012,37 @@ export type OperatorDefinition = Partial<BaseDefinition> &
       args: ReadonlyArray<Expression>,
       options: Partial<EvaluateOptions> & { engine: ComputeEngine }
     ) => Expression;
+
+    /**
+     * The partial derivatives of this operator, used by `D`, `Derivative`
+     * and the prime notation (`f'(x)`). See {@link OperatorDerivative} for
+     * the two accepted forms.
+     *
+     * Without this key, the derivative of an application of an operator
+     * whose `evaluate` handler does not give a formula stays symbolic:
+     * `D(Sq(x), x)` is `Apply(Derivative(Sq, 1), x)`. With it, the
+     * derivative is computed with the chain rule:
+     *
+     * ```ts
+     * ce.declare('Sq', {
+     *   signature: '(number) -> number',
+     *   evaluate: ([x]) => (isNumber(x) ? x.mul(x) : undefined),
+     *   derivative: [['Function', ['Multiply', 2, 'x'], 'x']],
+     * });
+     * ce.parse('\\frac{d}{dx} \\operatorname{Sq}(x^2)').evaluate();
+     * // ➔ 4x^3   (that is, Sq'(x^2) · 2x = 2x^2 · 2x)
+     * ```
+     *
+     * When the definition also has an `evaluate` handler that is a function
+     * literal, this key has precedence: the derivative is computed from
+     * this key, not by differentiating the body of the literal.
+     *
+     * An operator of the standard library keeps its own derivative rule. A
+     * definition that shadows a standard library name (a user definition
+     * of `Sinh`, for example) is a different operator, and its `derivative`
+     * key is used.
+     */
+    derivative?: OperatorDerivative;
 
     /**
      * A custom compilation handler for this operator: emit target-language
@@ -1301,7 +1412,10 @@ export type SymbolDefinitions = Readonly<{
  * A library bundles symbol/operator definitions and declares dependencies on
  * other libraries. It carries no LaTeX dictionary entries: to parse or
  * serialize a new notation, pass a dictionary to the `LatexSyntax` given with
- * the `latexSyntax` constructor option.
+ * the `latexSyntax` constructor option, or add entries to a running engine
+ * with `ce.latexSyntax.addEntries()`.
+ *
+ * To load a custom library on a running engine, use `ce.loadLibrary()`.
  *
  * Use with the `libraries` constructor option to load standard or custom
  * libraries:
@@ -2797,6 +2911,10 @@ export interface BoxedOperatorDefinition
     ops: ReadonlyArray<Expression>,
     options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => Expression;
+
+  /** The partial derivatives of the operator, as given by the `derivative`
+   * key of its definition. See {@link OperatorDerivative}. */
+  derivative?: OperatorDerivative;
 
   compile?: OperatorCompileHandler;
 

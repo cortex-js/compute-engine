@@ -23,6 +23,11 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { isValueDef } from '../../src/compute-engine/boxed-expression/definition-guards';
+import {
+  withDeclaredTypeOnly,
+  withShieldedValues,
+} from '../../src/compute-engine/boxed-expression/constraint-subject';
 
 describe('COMPILE: assigned-symbol folding', () => {
   describe('JavaScript target', () => {
@@ -165,9 +170,8 @@ describe('COMPILE: assigned-symbol folding', () => {
     expect(js.code).toBe('Math.sin(_val_a * _.x)');
     expect(js.preamble).toContain('const _val_a = 0.5 * Math.PI;');
     expect(
-      ce
-        ._getCompilationTarget('python')!
-        .compile(expr, { constantFold: false }).code
+      ce._getCompilationTarget('python')!.compile(expr, { constantFold: false })
+        .code
     ).toBe('np.sin((0.5 * np.pi) * x)');
   });
 
@@ -187,7 +191,9 @@ describe('COMPILE: assigned-symbol folding', () => {
 
     it('parenthesizes the compound value in a product', () => {
       const ce = freshEngine();
-      const r = ce._getCompilationTarget('javascript')!.compile(ce.parse('b x'));
+      const r = ce
+        ._getCompilationTarget('javascript')!
+        .compile(ce.parse('b x'));
       // Bound once on JavaScript; spliced inline (parenthesized) on Python.
       expect(r.code).toBe('_val_b * _.x');
       expect(r.preamble).toContain('const _val_b = _.c + 1;');
@@ -206,7 +212,9 @@ describe('COMPILE: assigned-symbol folding', () => {
 
     it('routes the inner free symbol through the vars object (not a bare global)', () => {
       const ce = freshEngine();
-      const r = ce._getCompilationTarget('javascript')!.compile(ce.parse('b x'));
+      const r = ce
+        ._getCompilationTarget('javascript')!
+        .compile(ce.parse('b x'));
       const artifact = (r.preamble ?? '') + r.code;
       expect(artifact).toContain('_.c');
       expect(artifact).not.toMatch(/(^|[^.\w])c([^\w]|$)/); // no bare `c`
@@ -294,7 +302,9 @@ describe('COMPILE: non-finite numbers on GPU targets', () => {
 
   it('GLSL declares the `_gpu_inf()` helper in the preamble (host-overridable)', () => {
     const ce = new ComputeEngine();
-    const r = ce._getCompilationTarget('glsl')!.compile(ce.parse('x + \\infty'));
+    const r = ce
+      ._getCompilationTarget('glsl')!
+      .compile(ce.parse('x + \\infty'));
     expect(r.preamble ?? '').toContain('float _gpu_inf()');
     expect(r.preamble ?? '').toContain('intBitsToFloat(0x7F800000)');
   });
@@ -380,15 +390,33 @@ describe('COMPILE: a mapped input reached through an assigned value (item 328)',
     expect(r.run!({ y_0: 1 })).toBeCloseTo(2 * Math.sin(1) + 1, 12);
   });
 
-  it('JavaScript: a definite integral over such a value stays a run-time integral', () => {
+  it('JavaScript: a definite integral over such a value reads the input at run time', () => {
+    // `y_0` is declared, so the compilation hides its value: `a`'s value
+    // `sin(y_0)` is symbolic there, and the closed form `sin(y_0)/2` reads the
+    // input instead of baking 0.5.
     const ce = engine();
     const r = ce
       ._getCompilationTarget('javascript')!
       .compile(ce.parse('\\int_0^1 a x\\,dx'), { vars });
-    expect(r.code).toContain('_SYS.integrate(');
-    expect(r.preamble).toContain('Math.sin(_.y_0)');
+    expect(r.code).not.toContain('_SYS.integrate');
+    expect((r.preamble ?? '') + r.code).toContain('Math.sin(_.y_0)');
     expect(r.run!({ y_0: 0.5 })).toBeCloseTo(Math.sin(0.5) / 2, 8);
     expect(r.run!({ y_0: 1 })).toBeCloseTo(Math.sin(1) / 2, 8);
+  });
+
+  it('JavaScript: a run-time integral over such a value reads the input too', () => {
+    // `e^{sin x}` has no closed form, so this stays a quadrature.
+    const ce = engine();
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('\\int_0^1 a e^{\\sin x}\\,dx'), { vars });
+    expect(r.code).toContain('_SYS.integrate(');
+    expect(r.preamble).toContain('Math.sin(_.y_0)');
+    const integral = new ComputeEngine()
+      .parse('\\int_0^1 e^{\\sin x}\\,dx')
+      .N().re;
+    expect(r.run!({ y_0: 0.5 })).toBeCloseTo(Math.sin(0.5) * integral, 8);
+    expect(r.run!({ y_0: 1 })).toBeCloseTo(Math.sin(1) * integral, 8);
   });
 
   it('GLSL: the value is emitted inline as code reading the uniform', () => {
@@ -475,5 +503,224 @@ describe('COMPILE: a mapped input reached through a multi-clause function body',
     expect(r.freeSymbols).toEqual(['y_0']);
     expect(r.run!({ y_0: 0.5 })).toBeCloseTo(1 - Math.sin(0.5), 12);
     expect(r.run!({ y_0: 1 })).toBeCloseTo(1 - Math.sin(1), 12);
+  });
+});
+
+/**
+ * A `vars`-mapped symbol with a DECLARED type compiles as the valueless input
+ * of that type, even when it holds a value (Tycho row 354, 2026-10-01).
+ *
+ * The compiled code reads the input, never the engine value, but every
+ * analysis the compiler ran on the expression used to see the value: with
+ * `a: real` and `a := 4`, `√a` saw a non-negative operand and compiled to the
+ * real-only `Math.sqrt(_.a)`, which gives `NaN` when the input goes negative.
+ * The target's `compile()` now hides the value for the compilation
+ * (`withVarsValuesHidden`, `compilation/vars-inputs.ts`), so the output is the
+ * same as for the symbol declared with no value. The value is restored
+ * afterwards, also when the compilation throws.
+ */
+describe('COMPILE: a declared vars-mapped input compiles as if it had no value (row 354)', () => {
+  function engine(withValue: boolean) {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('a', 'real');
+    ce.declare('n', 'real');
+    ce.declare('x', 'real');
+    if (withValue) {
+      ce.assign('a', 4);
+      ce.assign('n', 2);
+    }
+    return ce;
+  }
+  const vars = { a: '_.a', n: '_.n' };
+
+  it('JavaScript: √a keeps the complex lane of a real input', () => {
+    const ce = engine(true);
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('\\sqrt{a}'), { vars });
+    expect(r.code).toBe('_SYS.csqrt(({ re: _.a, im: 0 }))');
+    expect(r.run!({ a: -4 })).toEqual({ re: 0, im: 2 });
+    expect(r.run!({ a: 4 })).toBe(2);
+    // The value is back, with the facts it implies.
+    expect(ce.symbol('a').value?.re).toBe(4);
+    expect(ce.symbol('a').isPositive).toBe(true);
+  });
+
+  const sources = [
+    '\\sqrt{a}',
+    '\\lfloor n\\rfloor + x',
+    '\\ln(a) + x',
+    '\\int_0^x a t\\,dt',
+    'a^{1/2} + n x',
+  ];
+  for (const to of ['javascript', 'python', 'glsl', 'wgsl', 'interval-js']) {
+    it(`${to}: the output is the same with and without the held value`, () => {
+      for (const src of sources) {
+        const emit = (withValue: boolean) => {
+          const ce = engine(withValue);
+          const target = ce._getCompilationTarget(to)!;
+          try {
+            return target.compile(ce.parse(src), { vars }).code;
+          } catch (e) {
+            return `DECLINED ${(e as Error).message}`;
+          }
+        };
+        expect([src, emit(true)]).toEqual([src, emit(false)]);
+      }
+    });
+  }
+
+  it('the standalone compile() and a direct custom target see no value', () => {
+    const ce = engine(true);
+    const expr = ce.parse('\\sqrt{a}');
+    expect(compile(expr, { vars }).code).toBe(
+      '_SYS.csqrt(({ re: _.a, im: 0 }))'
+    );
+    // A direct target resolves symbols with its own `var` hook, which knows
+    // nothing of `vars`: the symbol is emitted by name. The held value used to
+    // be folded into the code (`2`).
+    const target = ce._getCompilationTarget('javascript')!.createTarget();
+    const direct = compile(expr, { target, vars, fallback: false } as never);
+    expect(direct.code).toBe('Math.sqrt(a)');
+    expect(ce.symbol('a').value?.re).toBe(4);
+  });
+
+  it('an undeclared mapped symbol is not folded on a direct custom target', () => {
+    // `u := 4` with no declaration keeps its value during the compilation,
+    // but a `vars` key is a live input: the symbol read must not fold it.
+    // The keys are stamped on the caller's target for this call only: the
+    // previous value (here, none) is restored when the call ends.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.assign('u', 4);
+    const target = ce._getCompilationTarget('javascript')!.createTarget();
+    const expr = ce.parse('\\sqrt{u} + 1');
+    const direct = compile(expr, {
+      target,
+      vars: { u: '_.u' },
+      fallback: false,
+    } as never);
+    expect(direct.code).toBe('Math.sqrt(u) + 1');
+    expect(target.varsKeys).toBeUndefined();
+    // Without `vars`, the value is folded, as before.
+    expect(compile(expr, { target, fallback: false } as never).code).toBe('3');
+  });
+
+  it('a class-instance direct target keeps its prototype methods with `vars`', () => {
+    // The `var` hook is a method on the class prototype and writes to `this`.
+    // The target is not copied for the call: a copy made with object spread
+    // would lose the method, and the symbol would be emitted by name.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.assign('u', 4);
+    const inner = ce._getCompilationTarget('javascript')!.createTarget();
+    const previousKeys = new Set<string>();
+    class ClassTarget {
+      reads: string[] = [];
+      constructor() {
+        for (const [k, v] of Object.entries(inner))
+          if (k !== 'var') (this as Record<string, unknown>)[k] = v;
+      }
+      var(id: string): string | undefined {
+        this.reads.push(id);
+        return id === 'u' ? 'input.u' : inner.var?.(id);
+      }
+    }
+    const target = new ClassTarget() as ClassTarget & {
+      varsKeys?: ReadonlySet<string>;
+    };
+    target.varsKeys = previousKeys;
+    const direct = compile(ce.parse('\\sqrt{u} + 1'), {
+      target,
+      vars: { u: '_.u' },
+      fallback: false,
+    } as never);
+    expect(direct.code).toBe('Math.sqrt(input.u) + 1');
+    expect(target.reads).toContain('u');
+    // The caller's previous `varsKeys` is restored after the call.
+    expect(target.varsKeys).toBe(previousKeys);
+  });
+
+  it('JavaScript: an integral over a mapped input keeps its closed form (row 355)', () => {
+    const ce = engine(true);
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('\\int_0^x a t\\,dt'), { vars });
+    expect(r.code).toBe('(0.5 * _.a * (_.x * _.x))');
+    expect(r.run!({ a: -2, x: 3 })).toBeCloseTo(-9, 12);
+  });
+
+  it('a value put in force by an assumption is hidden too', () => {
+    // `assume(a = 4)` puts the value in force without storing it, and its
+    // fact types `a` as an integer: `⌊a⌋ + x` compiled to `_.x + _.a`.
+    const emit = (to: string, assumed: boolean) => {
+      const ce = new ComputeEngine();
+      ce.pushScope();
+      ce.declare('a', 'real');
+      ce.declare('x', 'real');
+      if (assumed) ce.assume(ce.parse('a = 4'));
+      const code = ce
+        ._getCompilationTarget(to)!
+        .compile(ce.parse('\\lfloor a\\rfloor + \\sqrt{a} + x'), {
+          vars: { a: to === 'glsl' ? 'u_a' : '_.a' },
+        }).code;
+      if (assumed) expect(ce.symbol('a').value?.re).toBe(4);
+      return code;
+    };
+    expect(emit('javascript', true)).toBe(emit('javascript', false));
+    expect(emit('javascript', true)).toContain('Math.floor(_.a)');
+    expect(emit('glsl', true)).toBe(emit('glsl', false));
+    expect(emit('glsl', true)).toContain('floor(u_a)');
+  });
+
+  it('only the compile marker drops the facts from the type, not the assume() shield', () => {
+    // `assume()` hides the values of the names it records a fact about
+    // (`withShieldedValues`), including a value an assumption put in force.
+    // While it does so, the facts must still type the symbol. Only the marker
+    // a compilation sets on a `vars`-mapped input (`withDeclaredTypeOnly`)
+    // gives the declared type.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('a', 'real');
+    ce.assume(ce.parse('a = 4'));
+    const def = ce.lookupDefinition('a')!;
+    if (!isValueDef(def)) throw new Error('expected a value definition');
+    const defs = new Set([def.value]);
+    expect(ce.symbol('a').type.toString()).toBe('integer');
+    expect(withShieldedValues(defs, () => def.value.type.toString())).toBe(
+      'integer'
+    );
+    expect(withDeclaredTypeOnly(defs, () => def.value.type.toString())).toBe(
+      'real'
+    );
+    expect(ce.symbol('a').type.toString()).toBe('integer');
+  });
+
+  it('the value is restored when the compilation throws', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('in', 'real');
+    ce.assign('in', 0.5);
+    expect(() =>
+      ce
+        ._getCompilationTarget('glsl')!
+        .compile(ce.parse('x + \\sin(\\mathrm{in})'), { vars: { in: 'in' } })
+    ).toThrow(/reserved word/);
+    expect(ce.symbol('in').value?.re).toBe(0.5);
+  });
+
+  it('a symbol whose type was inferred from its value keeps the value (current behavior)', () => {
+    // `ce.assign('u', 4)` with no declaration types `u` from the value
+    // (`integer`). Such a symbol is not hidden: a valueless inferred binding
+    // could be narrowed by a use inside the compilation, and that write would
+    // outlive it.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.assign('u', 4);
+    const r = ce
+      ._getCompilationTarget('javascript')!
+      .compile(ce.parse('\\sqrt{u}'), { vars: { u: '_.u' } });
+    expect(r.code).toBe('Math.sqrt(_.u)');
   });
 });

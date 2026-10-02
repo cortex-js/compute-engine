@@ -619,6 +619,77 @@ describe('PYTHON TARGET', () => {
     });
   });
 
+  // A free symbol is emitted as a bare Python identifier, so a symbol named
+  // after a Python keyword emitted invalid source (`x + np.sin(lambda)` for
+  // `\lambda`). It now fails closed, like a reserved word on the shader
+  // targets, and so does a `vars` mapping to a bare keyword.
+  describe('reserved-word variables fail closed', () => {
+    for (const kw of ['in', 'lambda', 'class', 'if', 'yield']) {
+      it(`rejects "${kw}" as a variable`, () => {
+        expect(() => python.compile(ce.box(['Add', 'x', ['Sin', kw]]))).toThrow(
+          new RegExp(`"${kw}" is a reserved word in python`)
+        );
+      });
+    }
+    it('rejects a keyword as a Sum index or a function parameter', () => {
+      // Was `sum(lambda * x for lambda in range(1, n + 1))`.
+      expect(() =>
+        python.compile(
+          ce.box([
+            'Sum',
+            ['Multiply', 'lambda', 'x'],
+            ['Limits', 'lambda', 1, 'n'],
+          ])
+        )
+      ).toThrow(/"lambda" is a reserved word in python/);
+      expect(() =>
+        python.compile(ce.box(['Function', ['Add', 'lambda', 1], 'lambda']))
+      ).toThrow(/"lambda" is a reserved word in python/);
+      expect(
+        python.compile(ce.box(['Function', ['Add', 'lam', 1], 'lam'])).code
+      ).toBe('(lambda lam: lam + 1)');
+    });
+    it('rejects a keyword as a declared parameter or function name', () => {
+      const body = ce.box(['Add', 'x', 1]);
+      expect(() => python.compileLambda(body, ['x', 'lambda'])).toThrow(
+        /"lambda" is a reserved word in python/
+      );
+      expect(() => python.compileFunction(body, 'f', ['lambda'])).toThrow(
+        /"lambda" is a reserved word in python/
+      );
+      expect(() => python.compileFunction(body, 'class', ['x'])).toThrow(
+        /"class" is a reserved word in python/
+      );
+      expect(python.compileLambda(body, ['x'])).toBe('lambda x: x + 1');
+    });
+    it('rejects a symbol named None', () => {
+      // A bare `None` would read the Python null value, not an input.
+      expect(() => python.compile(ce.box(['Add', 'x', 'None']))).toThrow(
+        /"None" is a reserved word in python/
+      );
+    });
+    it('rejects a vars mapping to a bare keyword', () => {
+      expect(() =>
+        python.compile(ce.box(['Add', 'x', 'q']), { vars: { q: 'lambda' } })
+      ).toThrow(/"lambda" is a reserved word in python/);
+    });
+    it('accepts a vars mapping that renames a keyword symbol, a soft keyword, and the literals', () => {
+      expect(
+        python.compile(ce.box(['Add', 'x', ['Sin', 'lambda']]), {
+          vars: { lambda: 'lam' },
+        }).code
+      ).toBe('x + np.sin(lam)');
+      expect(python.compile(ce.box(['Add', 'x', 'match'])).code).toBe(
+        'match + x'
+      );
+      expect(
+        python.compile(ce.box(['Tuple', 'True', 'False']), {
+          constantFold: false,
+        }).code
+      ).toBe('(True, False)');
+    });
+  });
+
   describe('Tuple emission', () => {
     // A 1-tuple NEEDS the trailing comma: `(True)` is a parenthesized SCALAR,
     // not a tuple, so `len(...)` raises and every consumer that treats the value
@@ -1876,8 +1947,14 @@ describe('PYTHON TARGET — the absence marker of an element read', () => {
   });
 
   test.each([
-    ['At of a restricted matrix (a row)', ['At', W(['List', ['List', 1, 2], ['List', 3, 4]]), 2]],
-    ['First of a restricted list of points', ['First', W(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]])]],
+    [
+      'At of a restricted matrix (a row)',
+      ['At', W(['List', ['List', 1, 2], ['List', 3, 4]]), 2],
+    ],
+    [
+      'First of a restricted list of points',
+      ['First', W(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]])],
+    ],
     ['At of a list of points', ['At', ['List', ['Tuple', 1, 2]], 5]],
     ['Third of a list of points', ['Third', ['List', ['Tuple', 1, 2]]]],
   ])('%s uses None', (_label, json) => {
