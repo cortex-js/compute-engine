@@ -39,8 +39,8 @@ import {
   complexAtan,
   complexAtanh,
   complexDivide,
+  complexSqrt,
 } from '../numerics/numeric-complex.js';
-import { chopKernelDust } from '../numeric-value/roundoff.js';
 
 /**
  * The shader spelling of a NON-FINITE value (`NaN`, `±∞`).
@@ -1006,19 +1006,29 @@ function variadicFold(
 
 /**
  * The `_SYS` complex routines whose body is one kernel followed by the
- * kernel-roundoff chop (`toRI` in `javascript-target.ts`), listed as
- * `<runtime name>: <kernel>`. The kernel is a `complex-esm` method, or for
- * the inverse functions the function of `numerics/numeric-complex.ts` that
- * the routine calls (`complexAsin()` and the others).
+ * conversion to a `{re, im}` object (`kernelResult` in
+ * `javascript-target.ts`, which removes nothing and makes a `-0` part `+0`),
+ * listed as `<runtime name>: <kernel>`. The kernel is a `complex-esm` method,
+ * or for the square root and the inverse functions the function of
+ * `numerics/numeric-complex.ts` that the routine calls (`complexSqrt()`,
+ * `complexAsin()` and the others).
  *
  * Every entry here is evaluated by calling that same kernel and applying that
- * same chop (`chopKernelDust()`), so a folded literal is what the run-time
- * call returns, digit for digit. The routines with a hand-written body —
- * `csign`, `clog10`, `clog2`, `cinvhav`, the ring operations `cneg` and
- * `cconj` — are deliberately absent: each would need its own transcription,
- * and a transcription that drifts from the runtime is a compiled value that
- * contradicts the interpreter.
+ * same conversion, so a folded literal is what the run-time call returns,
+ * digit for digit. `cpow` is not listed: it takes two operands. The routines
+ * with a hand-written body — `csign`, `clog10`, `clog2`, `cinvhav`, the ring
+ * operations `cneg` and `cconj` — are deliberately absent: each would need
+ * its own transcription, and a transcription that drifts from the runtime is
+ * a compiled value that contradicts the interpreter.
  */
+/** Is `z` exactly `i` or `−i`? */
+function atImaginaryUnit(z: Complex): boolean {
+  return z.re === 0 && Math.abs(z.im) === 1;
+}
+
+/** The complex lane's spelling of the unsigned pole `~oo`. */
+const COMPLEX_POLE = new Complex(Infinity, Infinity);
+
 const JAVASCRIPT_COMPLEX_KERNELS: Readonly<
   Record<string, (z: Complex) => Complex>
 > = {
@@ -1027,11 +1037,12 @@ const JAVASCRIPT_COMPLEX_KERNELS: Readonly<
   '_SYS.ctan': (z) => z.tan(),
   '_SYS.casin': complexAsin,
   '_SYS.cacos': complexAcos,
-  '_SYS.catan': complexAtan,
+  // `catan` and `cacot` answer the complex pole at ±i as the runtime routines do.
+  '_SYS.catan': (z) => (atImaginaryUnit(z) ? COMPLEX_POLE : complexAtan(z)),
   '_SYS.csinh': (z) => z.sinh(),
   '_SYS.ccosh': (z) => z.cosh(),
   '_SYS.ctanh': (z) => z.tanh(),
-  '_SYS.csqrt': (z) => z.sqrt(),
+  '_SYS.csqrt': complexSqrt,
   '_SYS.cexp': (z) => z.exp(),
   '_SYS.cln': (z) => z.log(),
   '_SYS.ccot': (z) => z.cot(),
@@ -1040,7 +1051,7 @@ const JAVASCRIPT_COMPLEX_KERNELS: Readonly<
   '_SYS.ccoth': (z) => z.coth(),
   '_SYS.csech': (z) => z.sech(),
   '_SYS.ccsch': (z) => z.csch(),
-  '_SYS.cacot': complexAcot,
+  '_SYS.cacot': (z) => (atImaginaryUnit(z) ? COMPLEX_POLE : complexAcot(z)),
   // `casec`, `cacsc` and `casech` answer at 0 as the runtime routines do.
   '_SYS.casec': (z) => (z.isZero() ? new Complex(NaN, NaN) : complexAsec(z)),
   '_SYS.cacsc': (z) => (z.isZero() ? new Complex(NaN, NaN) : complexAcsc(z)),
@@ -1060,7 +1071,7 @@ const JAVASCRIPT_COMPLEX_CALLS: Readonly<
     name,
     (re: number, im: number) => {
       const r = kernel(new Complex(re, im));
-      return chopKernelDust(r.re, r.im);
+      return { re: r.re === 0 ? 0 : r.re, im: r.im === 0 ? 0 : r.im };
     },
   ])
 );

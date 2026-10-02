@@ -556,7 +556,6 @@ import {
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { rangeCount } from '../numerics/range-count.js';
-import { chopKernelDust } from '../numeric-value/roundoff.js';
 import {
   complexAcos,
   complexAcosh,
@@ -570,6 +569,9 @@ import {
   complexAsinh,
   complexAtan,
   complexAtanh,
+  complexPow,
+  complexSqrt,
+  cosSinPi,
   scaledComplexDivide,
 } from '../numerics/numeric-complex.js';
 import {
@@ -3889,6 +3891,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Cos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.ccos', compile(args[0]));
+    const u = BaseCompiler.piMultiple(args[0]);
+    if (u !== undefined) return `_SYS.cospi(${compile(u)})`;
     return `Math.cos(${compile(args[0])})`;
   },
   Cosh: (args, compile, target) => {
@@ -6581,6 +6585,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         const result = pow(eInt);
         return boundJSResult(target, stmts.join(' '), result);
       }
+      // `e^z` (`Exp(z)` canonicalizes to this power) is the exponential
+      // kernel, as in the interpreter, which computes it with the value of
+      // `e`, not with the double `Math.E`: `Math.E^40` has a relative error
+      // of 2·10⁻¹⁵, 40 times the error of `Math.E`.
+      if (isSymbol(base, 'ExponentialE') && exp !== null) {
+        // `e^{a + iπu}` with real `a` and `u`: the angle in half-turns,
+        // reduced exactly (`_SYS.cexppi`), so `e^{iπx}` at `x = 1` is `−1`
+        // and `e^{x + iπ}` is `−e^x`.
+        const split = BaseCompiler.eulerPiSplit(exp);
+        if (split !== undefined)
+          return split.a === undefined
+            ? `_SYS.cexppi(${compile(split.u)})`
+            : `_SYS.cexppi(${compile(split.u)}, ${compile(split.a)})`;
+        return complexUnary(target, '_SYS.cexp', compile(exp));
+      }
       return spliceJSValues(
         target,
         [compile(base), compile(exp)],
@@ -7049,6 +7068,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Sin: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.csin', compile(args[0]));
+    const u = BaseCompiler.piMultiple(args[0]);
+    if (u !== undefined) return `_SYS.sinpi(${compile(u)})`;
     return `Math.sin(${compile(args[0])})`;
   },
   Sinh: (args, compile, target) => {
@@ -7093,6 +7114,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Tan: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.ctan', compile(args[0]));
+    const u = BaseCompiler.piMultiple(args[0]);
+    if (u !== undefined) return `_SYS.tanpi(${compile(u)})`;
     return `_SYS.tan(${compile(args[0])})`;
   },
   Tanh: (args, compile, target) => {
@@ -8066,22 +8089,22 @@ JAVASCRIPT_FUNCTIONS.ApplyWhole = JAVASCRIPT_FUNCTIONS.Apply;
 
 /**
  * Convert a Complex instance produced by a TRANSCENDENTAL kernel (`csqrt`,
- * `cexp`, `casin`, …) to a plain `{re, im}` object, setting to 0 a part that
- * is not larger than `ROUNDOFF_TOLERANCE` (1e-14) and not larger than
- * `ROUNDOFF_TOLERANCE` times the modulus of the result (`chopKernelDust()`,
- * which says why each test alone removes a correct part). The chop is there
- * for this reason: `Complex(0.5, 0).asin()` returns `im: 5.55e-17`, dust from
- * the complex log/sqrt formulation, and `Exp(Ln(-2))` leaves `im =
- * 2.449e-16`. The dust is removed WHERE IT IS CREATED so that the runner's
- * result convention can test `im !== 0` EXACTLY (a value whose imaginary
- * part is exactly zero comes back as a plain `number`) without chopping at
- * the boundary — ARCHITECTURE.md's rule is never to chop in ring arithmetic
- * or constructors (`1 + 1e-12i` is a legitimate value and stays one), and
- * the ring helpers (`cplx`, the emitted `cadd`/`cmul` closures, `cneg`,
- * `cconj`) do not go through this function.
+ * `cexp`, `casin`, `cpow`, …) to a plain `{re, im}` object. Nothing is
+ * removed: these kernels give an exact `0` for a part whose value is `0` (a
+ * real argument in the real domain, `sin` of an imaginary argument, `√−4`,
+ * `ln(−1)`, `(1 + i)²`, `(−1)^0.5`, …), so the runner's result convention
+ * can test `im !== 0` EXACTLY (a value whose imaginary part is exactly zero
+ * comes back as a plain `number`) without chopping at the boundary —
+ * ARCHITECTURE.md's rule is never to chop in ring arithmetic or constructors
+ * (`1 + 1e-12i` is a legitimate value and stays one). A small part that is
+ * the value is kept, as the interpreter keeps it (`arcoth(10⁻¹⁰⁰)` is
+ * `10⁻¹⁰⁰ − (π/2)i`, `sin(π + i)` at the double `π` is
+ * `1.9·10⁻¹⁶ − 1.175i`, `2^(10⁻¹⁰⁰·i)` is `1 + 6.93·10⁻¹⁰¹i`). A negative
+ * zero part is made `+0`, since the interpreter does not keep the sign of a
+ * zero.
  */
-function toRI(c: Complex): { re: number; im: number } {
-  return chopKernelDust(c.re, c.im);
+function kernelResult(c: Complex): { re: number; im: number } {
+  return { re: c.re === 0 ? 0 : c.re, im: c.im === 0 ? 0 : c.im };
 }
 
 /**
@@ -8099,6 +8122,10 @@ const complexPole = (): { re: number; im: number } => ({
  *  exactly in floating point? */
 const isComplexZero = (z: { re: number; im: number }): boolean =>
   z.re === 0 && z.im === 0;
+
+/** Is `z` exactly `i` or `−i`, the poles of `arctan` and `arccot`? */
+const isImaginaryUnitPole = (z: { re: number; im: number }): boolean =>
+  z.re === 0 && Math.abs(z.im) === 1;
 
 /**
  * `|z|`. A purely real `z` reads `Math.abs` rather than `Math.hypot(x, 0)`,
@@ -11373,8 +11400,8 @@ const SYS_HELPERS = {
   // The exact runtime realness test of a value that may be a plain number or
   // a `{re, im}` object: true when the imaginary part is exactly zero. The
   // `complexIsReal` hook of this target (`CompileTarget.complexIsReal`); the
-  // test is exact because the transcendental kernels chop their own roundoff
-  // dust (`toRI`).
+  // test is exact because the transcendental kernels give an exact zero part
+  // where the value has one (`kernelResult`).
   cisreal: (x: unknown): boolean =>
     typeof x === 'number' || (x as { im: number }).im === 0,
   // The real part of a value that may be a plain number or a `{re, im}`
@@ -11498,6 +11525,24 @@ const SYS_HELPERS = {
   // `Tan`, `Cot`, `Sec` and `Csc` of a real argument answer the pole
   // (`Infinity`) where the interpreter answers `~oo`: see `tanWithPole`.
   tan: tanWithPole,
+  // `sin(πu)`, `cos(πu)`, `tan(πu)` and `e^{iπu}` with the angle `u` in
+  // half-turns, reduced exactly (`cosSinPi()`): the value at an integer or a
+  // half-integer `u` has an exact zero part (`sinpi(2)` is `0`, where
+  // `Math.sin(Math.PI * 2)` is `−2.4e-16`). See `BaseCompiler.piMultiple`.
+  // `tan` at a half-integer is the pole, `Infinity` on the real lane, as
+  // `_SYS.tan` answers it.
+  sinpi: (u: number): number => cosSinPi(u)[1],
+  cospi: (u: number): number => cosSinPi(u)[0],
+  tanpi: (u: number): number => {
+    const [c, s] = cosSinPi(u);
+    return c === 0 ? Infinity : s === 0 ? 0 : s / c;
+  },
+  // `e^{a + iπu}`: `e^a·(cos πu + i·sin πu)`, a zero part `+0`.
+  cexppi: (u: number, a?: number): ComplexResult => {
+    const [c, s] = cosSinPi(u);
+    const m = a === undefined ? 1 : Math.exp(a);
+    return { re: c === 0 ? 0 : m * c, im: s === 0 ? 0 : m * s };
+  },
   cot: cotWithPole,
   sec: secWithPole,
   csc: cscWithPole,
@@ -11524,9 +11569,20 @@ const SYS_HELPERS = {
   // but the interpreter treats a genuine 0^0 as indeterminate (NaN). Used only
   // on the variable-exponent path — where the exponent could be 0 at run time
   // (a constant nonzero exponent stays on the plain `Math.pow` fast path). See
-  // finding CO-P2-24.
-  pow: (base: number, exp: number): number =>
-    base === 0 && exp === 0 ? NaN : Math.pow(base, exp),
+  // finding CO-P2-24. A negative base with an exponent that is not an
+  // integer has the real root the interpreter answers when the exponent is
+  // a rational `p/q` with an odd `q`, recovered from the double as the
+  // interpreter recovers it (`negativeBaseRealPow()`): `(−8)^w` at
+  // `w = 0.3333333333333333` is `−2`, as in the interpreter at machine
+  // precision. Otherwise the value is not real, and `Math.pow` gives `NaN`.
+  pow: (base: number, exp: number): number => {
+    if (base === 0 && exp === 0) return NaN;
+    if (base < 0) {
+      const r = negativeBaseRealPow(base, null, exp);
+      if (r !== undefined) return r;
+    }
+    return Math.pow(base, exp);
+  },
   // Fail-closed Which/When condition guard. The interpreter requires a
   // condition to evaluate to True/False and throws otherwise; a compiled
   // ternary would silently treat a non-boolean (notably NaN) as falsy and take
@@ -12701,21 +12757,30 @@ const SYS_HELPERS = {
   binomial,
   fibonacci,
   // Complex helpers
-  csin: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sin()),
-  ccos: (z: ComplexResult) => toRI(new Complex(z.re, z.im).cos()),
-  ctan: (z: ComplexResult) => toRI(new Complex(z.re, z.im).tan()),
-  casin: (z: ComplexResult) => toRI(complexAsin(new Complex(z.re, z.im))),
-  cacos: (z: ComplexResult) => toRI(complexAcos(new Complex(z.re, z.im))),
-  catan: (z: ComplexResult) => toRI(complexAtan(new Complex(z.re, z.im))),
-  csinh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sinh()),
-  ccosh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).cosh()),
-  ctanh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).tanh()),
-  csqrt: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sqrt()),
+  csin: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).sin()),
+  ccos: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).cos()),
+  ctan: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).tan()),
+  casin: (z: ComplexResult) =>
+    kernelResult(complexAsin(new Complex(z.re, z.im))),
+  cacos: (z: ComplexResult) =>
+    kernelResult(complexAcos(new Complex(z.re, z.im))),
+  // `arctan` and `arccot` have a logarithmic pole at `±i`, where the
+  // interpreter answers the unsigned pole `~oo`; the kernels answer
+  // `0 ± ∞i`, so the pole is answered here (`isImaginaryUnitPole`).
+  catan: (z: ComplexResult) =>
+    isImaginaryUnitPole(z)
+      ? complexPole()
+      : kernelResult(complexAtan(new Complex(z.re, z.im))),
+  csinh: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).sinh()),
+  ccosh: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).cosh()),
+  ctanh: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).tanh()),
+  csqrt: (z: ComplexResult) =>
+    kernelResult(complexSqrt(new Complex(z.re, z.im))),
   // hav⁻¹(z) = 2·arcsin(√z), continued to the complex plane
   cinvhav: (z: ComplexResult) =>
-    toRI(complexAsin(new Complex(z.re, z.im).sqrt()).mul(2)),
-  cexp: (z: ComplexResult) => toRI(new Complex(z.re, z.im).exp()),
-  cln: (z: ComplexResult) => toRI(new Complex(z.re, z.im).log()),
+    kernelResult(complexAsin(complexSqrt(new Complex(z.re, z.im))).mul(2)),
+  cexp: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).exp()),
+  cln: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).log()),
   // The complex sign `z/|z|`: the point of the unit circle in the direction
   // of `z`, and `0` for `0` — the interpreter's `Sign` off the real line. A
   // real value in `{re, im: 0}` form reads its modulus as `Math.abs`
@@ -12755,6 +12820,14 @@ const SYS_HELPERS = {
   // negative real exponent (`0⁻²`), and `NaN` otherwise (`0⁰`, `0ⁱ`,
   // `0⁻¹⁺ⁱ`). The complex library answers `−∞` for `0⁻²`, `−∞·i` for `0⁻¹`,
   // `NaN` for `0^(−1/2)` and `1` for `0⁰`.
+  //
+  // A NEGATIVE real base with a real exponent that is not an integer has
+  // the real root the interpreter answers when the exponent is a rational
+  // `p/q` with an odd `q`, recovered from the double as the interpreter
+  // recovers it (`negativeBaseRealPow()`): `(−8)^0.3333333333333333` is
+  // `−2`, as in the interpreter at machine precision, and `(−8)^0.4` is
+  // `2.297`. Any other pair takes the principal value (`complexPow()`), which has an exact zero part where the
+  // value has one and keeps a small part that is the value.
   cpow: (z: number | ComplexResult, w: number | ComplexResult) => {
     const zz =
       typeof z === 'number' ? new Complex(z, 0) : new Complex(z.re, z.im);
@@ -12765,7 +12838,11 @@ const SYS_HELPERS = {
       if (ww.re < 0 && ww.im === 0) return complexPole();
       return { re: NaN, im: NaN };
     }
-    return toRI(zz.pow(ww));
+    if (zz.im === 0 && ww.im === 0) {
+      const r = negativeBaseRealPow(zz.re, null, ww.re);
+      if (r !== undefined) return { re: r, im: 0 };
+    }
+    return kernelResult(complexPow(zz, ww));
   },
   // `Root(z, n)` over a complex-lane radicand or degree. A radicand whose
   // imaginary part is exactly zero, under an odd integer degree, has the REAL
@@ -12799,36 +12876,52 @@ const SYS_HELPERS = {
   // `cot 0`, `csc 0`, `coth 0` and `csch 0` (`hyperbolicExactValue`,
   // `boxed-expression/trigonometry.ts`), so the compiled lane does too.
   ccot: (z: ComplexResult) =>
-    isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).cot()),
-  csec: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sec()),
+    isComplexZero(z)
+      ? complexPole()
+      : kernelResult(new Complex(z.re, z.im).cot()),
+  csec: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).sec()),
   ccsc: (z: ComplexResult) =>
-    isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).csc()),
+    isComplexZero(z)
+      ? complexPole()
+      : kernelResult(new Complex(z.re, z.im).csc()),
   ccoth: (z: ComplexResult) =>
-    isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).coth()),
-  csech: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sech()),
+    isComplexZero(z)
+      ? complexPole()
+      : kernelResult(new Complex(z.re, z.im).coth()),
+  csech: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).sech()),
   ccsch: (z: ComplexResult) =>
-    isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).csch()),
-  cacot: (z: ComplexResult) => toRI(complexAcot(new Complex(z.re, z.im))),
+    isComplexZero(z)
+      ? complexPole()
+      : kernelResult(new Complex(z.re, z.im).csch()),
+  cacot: (z: ComplexResult) =>
+    isImaginaryUnitPole(z)
+      ? complexPole()
+      : kernelResult(complexAcot(new Complex(z.re, z.im))),
   // `arcsec 0` and `arccsc 0` are `NaN` in the interpreter, and `arsech 0` is
   // `+∞`. The complex library answers a value with an infinite imaginary
   // part for each, which reads as the unsigned pole.
   casec: (z: ComplexResult) =>
     isComplexZero(z)
       ? { re: NaN, im: NaN }
-      : toRI(complexAsec(new Complex(z.re, z.im))),
+      : kernelResult(complexAsec(new Complex(z.re, z.im))),
   cacsc: (z: ComplexResult) =>
     isComplexZero(z)
       ? { re: NaN, im: NaN }
-      : toRI(complexAcsc(new Complex(z.re, z.im))),
-  cacoth: (z: ComplexResult) => toRI(complexAcoth(new Complex(z.re, z.im))),
+      : kernelResult(complexAcsc(new Complex(z.re, z.im))),
+  cacoth: (z: ComplexResult) =>
+    kernelResult(complexAcoth(new Complex(z.re, z.im))),
   casech: (z: ComplexResult) =>
     isComplexZero(z)
       ? { re: Infinity, im: 0 }
-      : toRI(complexAsech(new Complex(z.re, z.im))),
-  cacsch: (z: ComplexResult) => toRI(complexAcsch(new Complex(z.re, z.im))),
-  cacosh: (z: ComplexResult) => toRI(complexAcosh(new Complex(z.re, z.im))),
-  catanh: (z: ComplexResult) => toRI(complexAtanh(new Complex(z.re, z.im))),
-  casinh: (z: ComplexResult) => toRI(complexAsinh(new Complex(z.re, z.im))),
+      : kernelResult(complexAsech(new Complex(z.re, z.im))),
+  cacsch: (z: ComplexResult) =>
+    kernelResult(complexAcsch(new Complex(z.re, z.im))),
+  cacosh: (z: ComplexResult) =>
+    kernelResult(complexAcosh(new Complex(z.re, z.im))),
+  catanh: (z: ComplexResult) =>
+    kernelResult(complexAtanh(new Complex(z.re, z.im))),
+  casinh: (z: ComplexResult) =>
+    kernelResult(complexAsinh(new Complex(z.re, z.im))),
   // A value with an infinite part has an infinite absolute value: the
   // unsigned pole `{ re: ∞, im: ∞ }` (see `complexPole`) and a signed infinity
   // alike, as the interpreter answers (`|~oo|` is `+∞`). The complex library
@@ -12841,7 +12934,7 @@ const SYS_HELPERS = {
   // interpreter, where `atan2(∞, ∞)` would answer `π/4`.
   carg: (z: ComplexResult) =>
     isUnsignedPole(z) ? NaN : new Complex(z.re, z.im).arg(),
-  // Ring operation, not a kernel: no roundoff chop (see `toRI`).
+  // Ring operation, not a kernel: no roundoff chop (see `kernelResult`).
   cconj: (z: ComplexResult) => ({ re: z.re, im: -z.im }),
   cneg: (z: ComplexResult) => ({ re: -z.re, im: -z.im }),
   // Color helpers
@@ -13650,9 +13743,10 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
  * collection is normalized element by element (a fresh array — the compiled
  * value may alias caller data).
  *
- * The test is EXACT, not a chop: the transcendental kernels remove their own
- * roundoff dust (`toRI`), and chopping here would violate the "never chop in
- * ring arithmetic" rule (`1 + 1e-12i` is `{re: 1, im: 1e-12}`).
+ * The test is EXACT, not a chop: the transcendental kernels give an exact
+ * zero part where the value has one (`kernelResult`), and chopping here would
+ * violate the "never chop in ring arithmetic" rule (`1 + 1e-12i` is
+ * `{re: 1, im: 1e-12}`).
  */
 function normalizeRunResult(r: unknown): unknown {
   if (typeof r === 'number' || typeof r === 'boolean') return r;

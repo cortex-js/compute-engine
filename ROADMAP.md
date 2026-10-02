@@ -498,19 +498,38 @@ bracket group (for example `\left[ … \right]` with one operand), which
 changes what that spelling gives today. Writer: the `Delimiter` serializer in
 `latex-syntax/dictionary/definitions-core.ts`.
 
-### Compiled JavaScript removes a small part of a complex result that the interpreter keeps (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
+### A shader `x^y` with a variable exponent has no value for a negative base (OPEN, decision — found 2026-10-02 by the parity of the real root of a negative base)
 
-The compiled complex helpers (`toRI()`, `compilation/javascript-target.ts`)
-set to 0 a part not larger than `10⁻¹⁴` and not larger than `10⁻¹⁴` times the
-modulus of the result (`chopKernelDust()`, `numeric-value/roundoff.ts`).
-The interpreter's one-argument kernels (`apply()`,
-`boxed-expression/apply.ts`) do not remove anything, so `arcoth(10⁻¹⁰⁰)` is
-`10⁻¹⁰⁰ − (π/2)i` in the interpreter and `−(π/2)i` compiled. The removal is
-there because some `complex-esm` kernels leave a residual part of about
-`10⁻¹⁶` (`Complex(0.5, 0).asin()` had `im = 5.55e-17`), and the compiled
-result convention tests `im === 0` exactly. Options: remove the dust in the
-kernels that produce it and stop removing it in `toRI()`, or remove it in the
-interpreter's one-argument `apply()` too.
+For a negative base under a float exponent, the interpreter recovers the
+rational `p/q` that the double came from (`realPowerBranchTerms()`,
+`boxed-expression/arithmetic-power.ts`) and gives the real root when `q` is
+odd: `(−8)^{0.4}` is `2.297`. Compiled JavaScript (`_SYS.pow`, `_SYS.cpow`)
+and Python `compileFunction` (the helper `_ce_pow`) do the same, and GLSL and
+WGSL do it for a CONSTANT exponent (`BaseCompiler.negativeBaseFloatPower`).
+For a VARIABLE exponent, GLSL and WGSL keep `pow(x, y)`, which the shading
+languages leave undefined for a negative base, and Python `compileLambda`
+keeps `x ** y` (the principal value; a bare lambda has no place for the
+module helper). Options for the shaders: (a) a run-time helper that recovers
+`p/q` from the exponent — it reads an f32 (about 7 digits), so it cannot
+decide the same `p/q` as the interpreter for every exponent, and it adds a
+continued-fraction loop to every power; (b) fail closed when the base may be
+negative and the exponent may be a float — this breaks the pinned emissions
+`pow(x, y)` and `pow(x, p)` of `tycho-item-231-gpu-vectorized-power.test.ts`
+and `tycho-item-286-unrolled-literal-call-fold.test.ts` and every shader
+`x^y` of an undeclared base. Kept as is (2026-10-02): `pow`.
+
+### `erf(i).N()` has a real part of `2.2·10⁻¹⁶`, which is `0` (OPEN, small — found 2026-10-02 by the review of the removal of small parts)
+
+Measured 2026-10-02 at machine precision: `erf(i).N()` is
+`2.22e-16 + 1.6504i` and `erf(2i).N()` is `3.3e-16 + 18.565i`, where the
+real part is exactly `0` (`erf` is odd and real on the real axis, so `erf(iy)`
+is pure imaginary); `erfc(i).N()` is `0.9999999999999998 − 1.6504i`, where the
+real part is `1`. The complex kernel (`erfComplex()`,
+`numerics/numeric-complex.ts`) leaves roundoff in that part, and since
+2026-10-02 no part of a machine kernel result is removed afterwards. A fix
+answers a pure imaginary argument with `i·erfi(y)` (real kernel), and
+`erfc(iy)` as `1 − i·erfi(y)`. The other special functions of a complex
+argument have not been surveyed for the same residue at an exact argument.
 
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 

@@ -675,30 +675,35 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
       expectComplex(v, re, im);
     });
 
-    test('dust is removed when it is small compared with the modulus', () => {
+    test('a part whose value is 0 is exactly 0', () => {
       expect(e.parse('i^2').N().toString()).toBe('-1');
       expect(e.parse('\\sqrt{-4}').N().toString()).toBe('2i');
       expect(e.parse('(2i)^2').N().toString()).toBe('-4');
       expectComplex(e._numericValue({ re: 0, im: 1.5 }).pow(3), 0, -3.375);
-      // π at the working precision of the engine: `e^{iπ}` is `-1`, and the
-      // imaginary part (about 10^{-precision}) is rounding noise.
+      // π at the working precision of the engine, a float. At the default
+      // precision the big-decimal kernel removes a part below
+      // 10^(2−precision) times the modulus, and `e^{iπ}` is `-1`. At machine
+      // precision no part is removed: the value is `-1 + sin(Math.PI)·i`,
+      // the value at that double (an exact `e^{iπ}` is reduced exactly
+      // before it becomes a float, and is `-1`).
       const pi = e.symbol('Pi').N();
       expectComplex(
         e._numericValue({ re: 0, im: pi.bignumRe ?? pi.re }).exp(),
         -1,
-        0
+        engineName === 'machine precision' ? Math.sin(Math.PI) : 0
       );
     });
 
     // `Math.PI` is the decimal 3.141592653589793, which is π − 2.38·10^{-16}.
-    // At machine precision, sin of it is rounding noise and is removed. At
-    // the default precision (21 digits) the big-decimal kernel computes
-    // sin(3.141592653589793) = 2.38462643383279502884·10^{-16} (Python
-    // `mpmath`), which is not noise at 21 digits, so it is kept: the noise
-    // ratio is 10^(2−precision), not the 10^{-14} of a double.
+    // At machine precision, `e^{i·Math.PI}` is computed with the double
+    // `Math.PI`, whose sine is `1.2246467991473532e-16`, and the part is
+    // kept. At the default precision (21 digits) the big-decimal kernel
+    // reads the decimal and computes sin(3.141592653589793) =
+    // 2.38462643383279502884·10^{-16} (Python `mpmath`).
     test('e^{i·3.141592653589793}', () => {
       const r = e._numericValue({ re: 0, im: Math.PI }).exp();
-      if (engineName === 'machine precision') expectComplex(r, -1, 0);
+      if (engineName === 'machine precision')
+        expectComplex(r, -1, Math.sin(Math.PI));
       else expectComplex(r, -1, 2.384626433832795e-16);
     });
 

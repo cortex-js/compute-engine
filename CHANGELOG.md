@@ -93,6 +93,58 @@
   `ce.precision = 3000`) checks the deadline at every step instead of every
   256 steps, and the Stirling series checks it at every term.
 
+- **A small part of a complex result of a float input is kept.** The machine
+  kernels of the interpreter (`.N()` at machine precision; and at every
+  precision the kernels of the special functions and a complex power, root
+  or exponential with a machine operand) set to 0 a part below 10⁻¹⁴ times
+  the modulus of the result, and the compiled complex helpers set to 0 a
+  part below 10⁻¹⁴ and below 10⁻¹⁴ times the modulus. That part is the
+  value at the float input, and is now kept: at machine precision
+  `e^{3.141592653589793i}.N()` is `−1 + 1.22·10⁻¹⁶i` (was `−1`) and
+  `2^{10^{-100}i}.N()` is `1 + 6.93·10⁻¹⁰¹i` (was `1`); compiled with
+  folding off, `e^{\ln(−2)}` is `−2 + 2.45·10⁻¹⁶i` (was `−2`). The `Chop`
+  operator removes such a part. An exact input has no such part (next
+  entry): `e^{iπ}` and `e^{\ln(−2)}` evaluate to `−1` and `−2`.
+
+- **An exact multiple of π is reduced exactly under `.N()` and in compiled
+  code.** The multiple of π is reduced in half-turns with bigints, so no
+  rounding of π reaches a part whose value is `0` or `±1/2`. At machine
+  precision, `sin(π).N()` is `0` (was `1.22·10⁻¹⁶`), `cos(π/2).N()` is `0`
+  (was `6.1·10⁻¹⁷`), `cos(2π/3).N()` is `−0.5` (was `−0.4999999999999998`)
+  and `sin(π/6).N()` is `0.5` (was `0.49999999999999994`). At every
+  precision and in every angular unit, `e^{2iπ/3}.N()` is `−0.5 + 0.866i`
+  with a real part of exactly `−0.5` (was `−0.4999999999999998` at machine
+  precision and `−0.500000000000000000001` at 21 digits),
+  `e^{i·10^{20}π}.N()` is `1` (was `0.919 − 0.394i` at machine precision),
+  `sinh(iπ).N()` and `cosh(iπ/2).N()` are `0` (were `1.22·10⁻¹⁶i` and
+  `6.1·10⁻¹⁷`), and `tanh(iπ/2).N()`, `coth(iπ).N()`, `csch(iπ).N()` and
+  `sech(iπ/2).N()` are `~oo` (were `NaN`, `±8.2·10¹⁵i` and `1.6·10¹⁶`).
+  Compiled JavaScript, Python, GLSL and WGSL lower `sin(πu)`, `cos(πu)`,
+  `tan(πu)` and `e^{a + iπu}` with the angle `u` in half-turns (JavaScript
+  also over a list, `sin(πL)`), so the value at an integer or a
+  half-integer `u` has an exact zero part, `+0`: compiled `sin(πx)` at
+  `x = 2` is `0` (was `−2.45·10⁻¹⁶`), `e^{iπx}` at `x = 1` is the plain real
+  `−1`, and `e^{x + iπ}` is `−e^x`. A compiled `sin(πx)` costs about 25% more
+  per call in JavaScript than `Math.sin(Math.PI * x)`.
+
+- **A negative real base with a float exponent has the interpreter's real
+  root in compiled code.** The interpreter reads the rational `p/q` that the
+  double came from, and a `q` that is odd gives the real root: `(−8)^{0.4}`
+  is `2.297` and `(−8)^{0.3333333333333333}` is `−2` at machine precision
+  (`−1.99999999999999986137` at 21 digits). The compiled complex power gave
+  the principal value (`0.710 + 2.185i` and `1 + 1.732i`), the compiled
+  JavaScript real power `x^y` of two real variables gave `NaN`, and Python
+  gave the principal value or `nan`. Now JavaScript and Python give the real
+  root (`−2` for the example) for a constant or a variable exponent (Python
+  `compileFunction` through a helper `_ce_pow`; a bare lambda of
+  `compileLambda` has no place for it and keeps `x ** y`, the principal
+  value, for a variable exponent); GLSL and WGSL give it for a constant
+  exponent, and keep `pow` for a variable one, which a shader holds as an
+  f32 and cannot read to 17 digits. An even `q`, or no rational
+  (`(−3)^{√2}`), keeps the principal value (in Python with an exact angle:
+  `(−1)^{0.5}` is `i`, was `6.1·10⁻¹⁷ + i`), and `NaN` on the JavaScript and
+  shader real lanes.
+
 ### New Features
 
 - **More reading choices of the lenient grammar report an `ambiguous-*`
@@ -264,6 +316,40 @@
   precision `\sin(10^{400}+i)` reached the double kernel with an infinite
   real part, and the `NaN` imaginary part of its value failed an internal
   assertion. The value is now `NaN`.
+
+- **Compiled JavaScript keeps a small part of a complex result, as the
+  interpreter does.** The compiled complex functions set to 0 a part below
+  10⁻¹⁴ and below 10⁻¹⁴ times the modulus of the result, so
+  `arcoth(10⁻¹⁰⁰)` was `−(π/2)i` compiled and `10⁻¹⁰⁰ − (π/2)i` in the
+  interpreter, `2^{10⁻¹⁰⁰i}` was `1` compiled and `1 + 6.93·10⁻¹⁰¹i` in the
+  interpreter, and `sin(π + i)` at the double `π` lost its real part
+  `1.9·10⁻¹⁶`. Every compiled complex function now keeps every part: the
+  kernels give an exact 0 for a part whose value is 0, so a real argument in
+  the real domain still gives a plain real number. The complex power is
+  computed by repeated squaring for a small integer exponent, and with the
+  angle `cos(πt) + i·sin(πt)` exact at the multiples of `π/2` for a base on
+  an axis or a diagonal, so it has an exact 0 part without a removal
+  (`(−2.0)^3` is `−8`, was `−7.999999999999998`). `e^z` compiles to the
+  exponential, as the interpreter computes it: `Math.E^z` lost digits
+  (`e^{40}` had a relative error of 2·10⁻¹⁵). The compiled complex square
+  root no longer loses a small argument: `√(10⁻³⁰⁰·i)` was `0` and is
+  `7.07·10⁻¹⁵¹·(1 + i)`.
+
+- **In degrees, an inverse trigonometric value keeps a small imaginary
+  part.** The conversion of the angle to the angular unit set to 0 an
+  imaginary part below 10⁻¹⁴: `arcsin(10^{-200}i).N()` in degrees was `0`,
+  and is `5.73·10⁻¹⁹⁹i`; `arctan(10^{-50}i)` was `0`, and is `5.73·10⁻⁴⁹i`.
+
+- **The compiled `~oo` is `∞ + ∞i` on the complex lane, at run time and in a
+  folded constant.** `arctan(±i)` and `arccot(±i)`, which are `~oo` in the
+  interpreter, gave `0 ± ∞i` at run time (JavaScript, Python and GLSL/WGSL)
+  and the real `Infinity` when the argument was a constant. A constant that
+  evaluates to `~oo` on a node whose value is complex folded to `Infinity`
+  too. Both now give `∞ + ∞i`, the value `cot 0` and `csc 0` already gave
+  on the complex lane. The outputs that change: `arctan(±i)`, `arccot(±i)`,
+  `arctan(i)^2` and `(1 + i) + ~oo` compiled with a constant argument (were
+  `Infinity`). A `~oo` on a node whose value is real still compiles to
+  `Infinity` (`1/0`, `Γ(−2)`).
 
 ## 0.146.0 _2026-10-02_
 

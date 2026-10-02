@@ -13,7 +13,12 @@ import type { Rational } from '../numerics/types.js';
 
 import { asRational } from './numerics.js';
 import { bignumPreferred, getImaginaryFactor } from './utils.js';
-import { halfTurnAngle, halfTurns, radiansToAngle } from './trigonometry.js';
+import {
+  exactUnitCircle,
+  halfTurnAngle,
+  halfTurns,
+  radiansToAngle,
+} from './trigonometry.js';
 import {
   apply,
   apply2,
@@ -31,7 +36,7 @@ import {
 import { realExponentValue, isGaussianIntegerValue } from './imaginary-part.js';
 import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
-import { chopComplexDust } from '../numeric-value/roundoff.js';
+import { complexPow } from '../numerics/numeric-complex.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
 
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
@@ -202,7 +207,7 @@ function maximalPerfectPower(
  * reconstruction is a coincidence rather than the rational the double was
  * rounded from. See `realPowerBranchTerms`.
  */
-const COINCIDENCE_BUDGET = 1e-4;
+export const COINCIDENCE_BUDGET = 1e-4;
 
 /** A `Rational` term as an exact integer, or `undefined` if it is not one. */
 function asBigInteger(n: number | bigint): bigint | undefined {
@@ -344,10 +349,7 @@ export function realPowerBranchTerms(
   // bypassing the MACHINE_PRECISION floor that `setPrecision` applies, and a
   // 1%-wide window snaps essentially any float to a small rational. Clamp to
   // [15, 17] regardless.
-  const precision = BigDecimal.precision;
-  const digits = Number.isFinite(precision)
-    ? Math.max(15, Math.min(17, Math.trunc(precision)))
-    : 17;
+  const digits = realPowerReconstructionDigits();
   const tol = Math.max(
     Number.MIN_VALUE,
     Math.abs(value) * 4 * Number.EPSILON,
@@ -1175,6 +1177,50 @@ function eulerSplit(
   return numericApproximation ? result.N() : result;
 }
 
+/**
+ * The numeric value of `e^{iθ}` or `e^{a + iθ}` when the imaginary term `θ`
+ * is an EXACT rational multiple of π (`π`, `2π/3`, `10^{20}π`), by Euler's
+ * formula `e^a·(cos θ + i·sin θ)`, with `cos θ` and `sin θ` computed from
+ * the exact angle in half-turns (`exactUnitCircle`,
+ * `boxed-expression/trigonometry.ts`): `e^{iπ}` is `−1`, `e^{2iπ/3}` is
+ * `−0.5 + 0.866i` and `e^{i·10^{20}π}` is `1`, at every precision and in
+ * every angular unit (the exponent of `e` is in radians). With the double
+ * nearest to `θ`, the polar form leaves roundoff in a part whose value is
+ * `0` or an exact rational (`e^{iπ}` was `−1 + 1.2·10⁻¹⁶i`). `raw` is the
+ * exponent before its numeric evaluation. Returns `undefined` for any other
+ * exponent: a float angle (`e^{3.14159i}`) is the value at that float.
+ */
+function exactEulerN(raw: Expression): Expression | undefined {
+  if (!(raw.isCanonical || raw.isStructural)) return undefined;
+  const ce = raw.engine;
+  const real: Expression[] = [];
+  const imaginary: Expression[] = [];
+  for (const term of isFunction(raw, 'Add') ? raw.ops : [raw]) {
+    const factor = getImaginaryFactor(term);
+    if (factor !== undefined) imaginary.push(factor);
+    else if (term.unknowns.length === 0 && term.type.matches('real'))
+      real.push(term);
+    else return undefined;
+  }
+  if (imaginary.length === 0) return undefined;
+  const theta =
+    imaginary.length === 1 ? imaginary[0] : ce.function('Add', imaginary);
+  const euler = exactUnitCircle(theta);
+  if (euler === undefined || !isNumber(euler)) return undefined;
+  if (real.length === 0) return euler;
+  const magnitude = ce
+    .function('Exp', [real.length === 1 ? real[0] : ce.function('Add', real)])
+    .N();
+  if (!isNumber(magnitude)) return undefined;
+  const m = magnitude.numericValue;
+  const e = euler.numericValue;
+  return ce.number(
+    (typeof m === 'number' ? ce._inexactNumericValue(m) : m).mul(
+      typeof e === 'number' ? ce._inexactNumericValue(e) : e
+    )
+  );
+}
+
 /** Whether `x` holds a float (an inexact number literal) at any depth. */
 function hasInexactLiteral(x: Expression): boolean {
   if (isNumber(x)) return !x.isExact;
@@ -1186,9 +1232,12 @@ function hasInexactLiteral(x: Expression): boolean {
  * The numeric value of `x^exp` for a complex base or a complex exponent,
  * computed with the complex kernel.
  *
- * The roundoff dust of the kernel is removed with a test that is relative to
- * the modulus of the result (`chopComplexDust()`), so that a small result is
- * kept: `(10^{-10}i)^2` is `-10^{-20}`, and `(10^{-6}i)^3` is `-10^{-18}i`.
+ * The kernel (`complexPow()`) gives an exact `0` for a part whose value is
+ * `0` (`(1 + i)^{2.0}` is `2i`, `i^{2.0}` is `-1`), so no part is removed,
+ * and a small part of a float input is kept: `2^{10^{-100}i}` is
+ * `1 + 6.93·10^{-101}i`, and `e^{3.141592653589793i}` is
+ * `-1 + 1.22·10^{-16}i`, the value at that double. An exact multiple of π
+ * in an exponent of `e` is reduced exactly before this (`exactEulerN`).
  */
 function complexPowN(
   x: Expression & NumberLiteralInterface,
@@ -1215,9 +1264,10 @@ function complexPowN(
     (base, exponent) => base.pow(exponent)
   );
   if (viaNumericValue !== undefined) return viaNumericValue;
-  let z: { re: number; im: number } = ce
-    .complex(x.re, x.im)
-    .pow(ce.complex(expRe, expIm));
+  let z: { re: number; im: number } = complexPow(
+    ce.complex(x.re, x.im),
+    ce.complex(expRe, expIm)
+  );
   // The complex kernel can give a NaN part for finite operands when an
   // intermediate value overflows or underflows: `(10^{-200} + 10^{-200}i)^{-0.5}`
   // and `(10^{300} + 10^{300}i)^{0.3}` give `NaN + NaN·i`. Then compute the
@@ -1258,7 +1308,7 @@ function complexPowN(
   // A float operand makes the result a float (`i^{2.0}` is the float `-1`).
   return boxComplexKernelResult(
     ce,
-    chopComplexDust(z.re, z.im),
+    z,
     typeof exp === 'number' ? [x] : [x, exp]
   );
 }
@@ -1359,6 +1409,18 @@ export function pow(
       // doubles, where reading `E.N()` resolves a symbol: every numeric power
       // passes here, and nearly none has the base `e`.
       const ce = x.engine;
+      // `e^{iθ}` and `e^{a + iθ}` with `θ` an EXACT rational multiple of π
+      // (`exactEulerN`). The raw exponent is read, since `exp` has been
+      // numericized by now and holds the double nearest to `θ`.
+      if (
+        x.re > 2.718 &&
+        x.re < 2.719 &&
+        x === ce.E.N() &&
+        rawExponent !== undefined
+      ) {
+        const euler = exactEulerN(rawExponent);
+        if (euler !== undefined) return euler;
+      }
       if (x.re > 2.718 && x.re < 2.719 && x === ce.E.N()) {
         if (typeof exp === 'number')
           return ce.number(ce._numericValue(exp).exp());
@@ -2052,4 +2114,19 @@ export function root(
   }
 
   return a.engine._fn('Root', [a, b]);
+}
+
+/**
+ * The number of significant digits that `realPowerBranchTerms` reads a float
+ * exponent to: the global working precision (`BigDecimal.precision`), which
+ * is what rounded the exponent, clamped to [15, 17] (a double never carries
+ * more than 17 significant digits, and a precision configured below machine
+ * precision must not widen the window). The compiled Python helper `_ce_pow`
+ * is given this value when the code is generated.
+ */
+export function realPowerReconstructionDigits(): number {
+  const precision = BigDecimal.precision;
+  return Number.isFinite(precision)
+    ? Math.max(15, Math.min(17, Math.trunc(precision)))
+    : 17;
 }

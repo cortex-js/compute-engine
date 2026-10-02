@@ -377,15 +377,13 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
  * function's domain: `y = arcsin(x)` compiled to a curve that was `NaN`
  * everywhere.
  *
- * The fix that holds today is at the KERNEL boundary: the complex kernels chop
- * their own dust at the roundoff scale (`ROUNDOFF_TOLERANCE`, matching
- * `apply.ts`'s complex-result chop) before the value leaves them, so an
- * exactly-real result reaches the runner with `im === 0` and is handed back as
- * a plain `number`. The scale is deliberately NOT `ce.tolerance`: whether the
- * dust is noise is a property of the arithmetic, so it must not change when
- * the user tunes their comparison tolerance (see ARCHITECTURE.md § "Chopping
- * and the `im === 0` convention"). A genuinely complex value is nowhere near
- * the roundoff scale and still comes back as `{re, im}` — pinned below.
+ * The fix that holds today is at the KERNEL boundary: the inverse kernels
+ * use the formulas of W. Kahan (`complexAsin()` and the others in
+ * `numerics/numeric-complex.ts`), which give an exact zero imaginary part on
+ * the real domain, so an exactly-real result reaches the runner with
+ * `im === 0` and is handed back as a plain `number`. No part is removed, and
+ * `ce.tolerance` plays no part: a genuinely complex value still comes back
+ * as `{re, im}` — pinned below.
  *
  * Both shapes are pinned: the BARE head, and the head under a parent that
  * emits `{re, im}` arithmetic around it (`1 + …`) — the compound form is what a
@@ -477,10 +475,9 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
     }
   );
 
-  it('chopping has not swallowed a genuinely complex value', () => {
-    // The kernel chop is a ROUNDOFF-DUST test, not a "close enough to real"
-    // test: an imaginary part above the roundoff scale (1e-14) keeps the value
-    // complex — including one well below `ce.tolerance` (1e-10), which a
+  it('a genuinely complex value stays complex', () => {
+    // No part is removed: a small imaginary part keeps the value complex —
+    // including one well below `ce.tolerance` (1e-10), which a
     // `ce.tolerance`-based chop would silently realize.
     const ce = new ComputeEngine();
     expect(ce.tolerance).toBe(1e-10);
@@ -495,25 +492,25 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
     }
   });
 
-  it('kernel dust is chopped independently of ce.tolerance', () => {
-    // `realDomainComplexFn` gives the eight bounded heads an exact real
-    // branch; the chop is the systemic net beneath it, for every head that has
-    // no such branch. `Exp(Ln(-2))` is exactly `-2` interpreted, but the
-    // compiled complex `exp`/`log` pair leaves `im = 2.449e-16`.
+  it('no part is removed, independently of ce.tolerance', () => {
+    // The compiled complex kernels remove no part of their result: on the
+    // real domain they give an exact zero part (pinned above), and a small
+    // part elsewhere is the value. `Exp(Ln(-2))` is exactly `-2`
+    // interpreted (it simplifies symbolically), but the emitted `exp`/`log`
+    // pair computes it at the double nearest to π: `−2 + 2.45e-16i`, the
+    // value the interpreter gives at machine precision for the same float.
     const ce = new ComputeEngine();
     const expr = ce.box(['Exp', ['Ln', -2]]);
     expect(interpreted(expr)).toEqual({ re: -2, im: 0 });
-    // `constantFold: false`: the dust is produced by the EMITTED complex
-    // `exp`/`log` pair. Folding this variable-free expression at compile time
-    // computes it through the engine instead and emits the exact real `-2`,
-    // leaving nothing for the chop to act on.
+    // `constantFold: false`: the value is produced by the EMITTED complex
+    // `exp`/`log` pair. Folding this variable-free expression at compile
+    // time computes it through the engine instead and emits the exact `-2`.
     const r = compile(expr, { fallback: false, constantFold: false });
-    expect(r.code).toContain('_SYS.cpow(Math.E, _SYS.cln(');
-    expect(r.run!()).toBe(-2);
+    expect(r.code).toContain('_SYS.cexp(_SYS.cln(');
+    expect(r.run!()).toEqual({ re: -2, im: 2 * Math.sin(Math.PI) });
 
-    // A list/tuple result follows the convention COMPONENTWISE: a dusty
-    // component comes back as a plain number, a genuinely complex one as
-    // `{re, im}`.
+    // A list/tuple result follows the convention COMPONENTWISE: a real
+    // component comes back as a plain number, a complex one as `{re, im}`.
     expect(
       compile(ce.box(['List', ['Exp', ['Ln', -2]], 3]), {
         fallback: false,
@@ -525,12 +522,28 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
     ).run!() as unknown[];
     expect(tuple[0]).toBe(-2);
     expect(tuple[1]).toEqual({ re: 0, im: Math.SQRT2 });
+    // The same with the components computed at run time by the complex
+    // kernels, not folded by the engine.
+    ce.declare('u', 'real');
+    const runtimeTuple = compile(
+      ce.box([
+        'Tuple',
+        ['Sqrt', 'u'],
+        ['Sqrt', ['Negate', 'u']],
+        ['Arcsin', 'u'],
+      ]),
+      { fallback: false, constantFold: false }
+    );
+    expect(runtimeTuple.code).toContain('_SYS.csqrt(');
+    expect(runtimeTuple.run!({ u: 0.25 })).toEqual([
+      0.5,
+      { re: 0, im: 0.5 },
+      Math.asin(0.25),
+    ]);
 
-    // The chop scale is the FIXED kernel-roundoff scale, decoupled from
-    // `ce.tolerance`: tightening the user tolerance to 0 must NOT re-break the
-    // dust chop (under a `ce.tolerance`-based chop it degenerates to the exact
-    // `im === 0` test and this returns a `{re, im}`), and loosening it must
-    // not swallow a genuinely complex value.
+    // `ce.tolerance` has no effect on the compiled value: a tolerance of 0
+    // gives the same value, and a loose one does not make a complex value
+    // real.
     const strict = new ComputeEngine();
     strict.tolerance = 0;
     expect(
@@ -538,7 +551,7 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
         fallback: false,
         constantFold: false,
       }).run!()
-    ).toBe(-2);
+    ).toEqual({ re: -2, im: 2 * Math.sin(Math.PI) });
     const loose = new ComputeEngine();
     loose.tolerance = 1e-3;
     expect(
@@ -549,7 +562,7 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
   it('Sqrt/Ln/Log promote an unknown-sign operand to the complex kernel', () => {
     // The default mode `auto` promotes an unknown-sign operand to the complex
     // kernel (compile-mode step 4, 2026-08-16). An in-domain argument still
-    // comes back as a plain number — the kernel chops its own dust — while an
+    // comes back as a plain number — the kernel gives an exact zero part — while an
     // out-of-domain one returns the complex value the interpreter agrees with.
     const ce = new ComputeEngine();
     ce.declare('u', 'real');

@@ -39,22 +39,20 @@ describe('at machine precision a rational is the correctly rounded double', () =
     expect(m.parse(tex).N().re).toBe(expected);
   });
 
-  test('trigonometric values of rational multiples of π', () => {
-    expect(m.parse('\\sin(\\frac{7\\pi}{6})').N().re).toBe(
-      Math.sin((Math.PI * 7) / 6)
-    );
-    expect(m.parse('\\sin(\\frac{\\pi}{6})').N().re).toBe(
-      Math.sin(Math.PI / 6)
-    );
-    expect(m.parse('\\cos(\\frac{\\pi}{3})').N().re).toBe(
-      Math.cos(Math.PI / 3)
-    );
+  // A trigonometric function of an exact rational multiple of π does not
+  // read the double of the angle: the angle is reduced exactly and the value
+  // computed with a big-decimal kernel at 20 digits (user decision,
+  // 2026-10-02), so `sin(7π/6)` is `−0.5`, where `Math.sin(Math.PI * 7 / 6)`
+  // is `−0.4999999999999997`. The double of the angle itself is the
+  // correctly rounded one (the test above).
+  test('trigonometric values of rational multiples of π are computed from the exact angle', () => {
+    expect(m.parse('\\sin(\\frac{7\\pi}{6})').N().re).toBe(-0.5);
+    expect(m.parse('\\sin(\\frac{\\pi}{6})').N().re).toBe(0.5);
+    expect(m.parse('\\cos(\\frac{\\pi}{3})').N().re).toBe(0.5);
   });
 
   test('a negative multiple of π', () => {
-    expect(m.parse('\\sin(-\\frac{7\\pi}{6})').N().re).toBe(
-      Math.sin(-(Math.PI * 7) / 6)
-    );
+    expect(m.parse('\\sin(-\\frac{7\\pi}{6})').N().re).toBe(0.5);
   });
 
   test('a product whose numerator form overflows stays finite', () => {

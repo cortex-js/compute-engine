@@ -20,11 +20,11 @@
  * assignments, `if`, `return`, the operators `?:` (GLSL only), `||`, `&&`,
  * `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, unary `-`, the members
  * `.x` and `.y`, and calls of the helpers and of `abs`, `max`, `min`,
- * `sqrt`, `log`, `exp`, `sin`, `cos`, `length`, GLSL `atan` (one or two
- * arguments) and `vec2`, and WGSL `atan` (one argument), `atan2`, `select`
- * and `vec2f`. The NaN and infinity helpers `_gpu_nan` and `_gpu_inf`, which
- * build their value from a bit pattern, are read as `0.0 / 0.0` and
- * `1.0 / 0.0`.
+ * `sqrt`, `log`, `exp`, `pow`, `floor`, `sin`, `cos`, `length`, GLSL
+ * `atan` (one or two arguments) and `vec2`, and WGSL `atan` (one
+ * argument), `atan2`, `select` and `vec2f`. The NaN and infinity helpers
+ * `_gpu_nan` and `_gpu_inf`, which build their value from a bit pattern,
+ * are read as `0.0 / 0.0` and `1.0 / 0.0`.
  *
  * The text is also checked against some rules of its language, which a
  * shader compiler enforces and this interpreter would otherwise not see:
@@ -92,6 +92,8 @@ const COMMON_BUILTINS = new Set([
   'sqrt',
   'log',
   'exp',
+  'pow',
+  'floor',
   'sin',
   'cos',
   'atan',
@@ -311,6 +313,8 @@ const BUILTINS: Record<string, (...a: Value[]) => Value> = {
   sqrt: (x) => fr(Math.sqrt(num(x))),
   log: (x) => fr(Math.log(num(x))),
   exp: (x) => fr(Math.exp(num(x))),
+  pow: (x, y) => fr(Math.pow(num(x), num(y))),
+  floor: (x) => Math.floor(num(x)),
   sin: (x) => fr(Math.sin(num(x))),
   cos: (x) => fr(Math.cos(num(x))),
   atan: (y, x) =>

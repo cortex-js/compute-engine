@@ -324,9 +324,9 @@ describe('COMPILE: complex inverse trig at large arguments', () => {
       -1e6,
       [-1.0000000000003333e-6, 1.5707963267948966],
     ],
-    // A small result is kept: the compiled kernels remove only a part below
-    // 1e-14 times the modulus of the result (`toRI()` in
-    // `javascript-target.ts`). An absolute test of 1e-14 gave 0 here.
+    // A small result is kept: the compiled inverse kernels remove no part
+    // (`kernelResult()` in `javascript-target.ts`). An absolute test of
+    // 1e-14 gave 0 here.
     ['Arcoth', '\\operatorname{arcoth}(u)', 1e20, [1e-20, 0]],
     ['Arcsch', '\\operatorname{arcsch}(u)', -1e20, [-1e-20, 0]],
   ];
@@ -364,8 +364,8 @@ describe('COMPILE: a complex argument', () => {
 
   test('exp(40 + 10⁻¹⁸i) keeps its imaginary part, as the interpreter does', () => {
     // The imaginary part 0.235 is small next to the real part 2.35·10¹⁷, but
-    // much larger than its own rounding error: the compiled kernels remove a
-    // part only when it is also below 1e-14 (`chopKernelDust()`).
+    // much larger than its own rounding error: `Exp` compiles to the
+    // exponential `_SYS.cexp`, which removes no part.
     const engine = new ComputeEngine();
     engine.declare('z', 'complex');
     const result = compile(engine.box(['Exp', 'z']), { fallback: false });
@@ -380,6 +380,159 @@ describe('COMPILE: a complex argument', () => {
     expectClose(out, [interpreted.re, interpreted.im]);
     expectClose(out, [2.3538526683701999e17, 0.23538526683702]);
   });
+});
+
+describe('COMPILE: a small part is kept, as the interpreter keeps it', () => {
+  // The compiled complex kernels remove no part of their result. They used
+  // to set to 0 a part below 1e-14 and below 1e-14 times the modulus, so
+  // `arcoth(10⁻¹⁰⁰)` was `−(π/2)i` compiled and `10⁻¹⁰⁰ − (π/2)i` in the
+  // interpreter.
+  const ce2 = new ComputeEngine();
+  ce2.declare('z', 'complex');
+
+  function compiled(name: string, re: number, im: number) {
+    const result = compile(ce2.box([name, 'z']), { fallback: false });
+    expect(result.success).toBe(true);
+    return result.run!({ z: { re, im } }) as
+      number | { re: number; im: number };
+  }
+
+  function interpreted(name: string, re: number, im: number) {
+    const arg = im === 0 ? ce2.number(re) : ce2.number(ce2.complex(re, im));
+    const result = ce2.function(name, [arg]).N();
+    return { re: result.re, im: result.im };
+  }
+
+  /** Same value, and a part is 0 in one exactly when it is 0 in the other. */
+  function expectParity(name: string, re: number, im: number) {
+    const out = compiled(name, re, im);
+    const c = typeof out === 'number' ? { re: out, im: 0 } : out;
+    const i = interpreted(name, re, im);
+    expect([c.re === 0, c.im === 0]).toEqual([i.re === 0, i.im === 0]);
+    expectClose(c, [i.re, i.im]);
+    return out;
+  }
+
+  // [operator, re, im, expected re, expected im]
+  const CASES: [string, number, number, number, number][] = [
+    ['Arcoth', 1e-100, 0, 1e-100, -1.5707963267948966],
+    ['Artanh', 1e-300, 0, 1e-300, 0],
+    ['Arcsin', 0, 1e-200, 0, 1e-200],
+    ['Arccsc', 1e300, 0, 1e-300, 0],
+    ['Arccos', 0, 1e-100, 1.5707963267948966, -1e-100],
+    ['Arcosh', 0, 1e-100, 1e-100, 1.5707963267948966],
+    // `sin` at the double nearest to π: sin(π + i) is −i·sinh(1), and the
+    // real part 1.9·10⁻¹⁶ is the value at that double, not roundoff.
+    ['Sin', Math.PI, 1, 1.889728760252754e-16, -1.1752011936438014],
+    ['Tan', Math.PI, 1, -5.1432023318163406e-17, 0.761594155955765],
+  ];
+
+  test.each(CASES)('%s(%p + %pi)', (name, re, im, expRe, expIm) => {
+    const out = expectParity(name, re, im);
+    expectClose(typeof out === 'number' ? { re: out, im: 0 } : out, [
+      expRe,
+      expIm,
+    ]);
+  });
+
+  test('arctan and arccot at ±i: a constant argument gives the run-time value', () => {
+    // The interpreter's value is `~oo`, which the complex lane spells
+    // `{re: ∞, im: ∞}`. The run-time helpers answered `0 ± ∞i`, and a
+    // constant argument folded to the real `Infinity`.
+    for (const [name, im] of [
+      ['Arctan', 1],
+      ['Arctan', -1],
+      ['Arccot', 1],
+      ['Arccot', -1],
+    ] as const) {
+      const folded = compile(ce2.box([name, ['Complex', 0, im]]), {
+        fallback: false,
+      });
+      expect(folded.success).toBe(true);
+      const runtime = compiled(name, 0, im);
+      expect(runtime).toEqual({ re: Infinity, im: Infinity });
+      expect(folded.run!({})).toEqual(runtime);
+      expect(ce2.box([name, ['Complex', 0, im]]).N().json).toEqual(
+        'ComplexInfinity'
+      );
+    }
+  });
+
+  test('a constant argument folds to the same value', () => {
+    const result = compile(ce2.box(['Arcoth', ['Complex', 1e-100, 0]]), {
+      fallback: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.run!({})).toEqual({ re: 1e-100, im: -1.5707963267948966 });
+  });
+
+  test('the square root of a small complex value', () => {
+    // The `complex-esm` square root gave 0 for √(10⁻³⁰⁰·i), and
+    // 7.07·10⁻¹⁵¹·(1 + i) for √(10⁻³⁰⁰ + 10⁻³⁰⁰·i).
+    expectClose(
+      compiled('Sqrt', 0, 1e-300) as { re: number; im: number },
+      [7.0710678118654752e-151, 7.0710678118654752e-151]
+    );
+    expectClose(
+      compiled('Sqrt', 1e-300, 1e-300) as { re: number; im: number },
+      [1.09868411346781e-150, 4.5508986056222734e-151]
+    );
+    expectParity('Sqrt', -1e-300, 1e-305);
+  });
+
+  // Each inverse function on its real domain: the value is a plain real
+  // number, as in the interpreter (the result convention tests `im === 0`
+  // exactly, so a residual imaginary part would make it complex).
+  const REAL_DOMAIN: [string, number[]][] = [
+    ['Arcsin', [-1, -0.5, -1e-300, 0, 1e-100, 0.3, 0.5, 1]],
+    ['Arccos', [-1, -0.5, 0, 1e-100, 0.5, 0.9, 1]],
+    ['Arctan', [-1e300, -2, -1, 0, 1e-300, 0.5, 1, 1e10]],
+    ['Arccot', [-1e300, -2, -1, 0.5, 1, 1e10, 1e300]],
+    ['Arcsec', [-1e300, -2, -1, 1, 1.5, 2, 1e300]],
+    ['Arccsc', [-1e300, -2, -1, 1, 1.5, 2, 1e300]],
+    ['Arsinh', [-1e300, -2, -1e-300, 0, 0.5, 1, 1e10]],
+    ['Arcosh', [1, 1.5, 2, 10, 1e10, 1e300]],
+    ['Artanh', [-0.9, -0.5, -1e-300, 0, 1e-100, 0.5, 0.99]],
+    ['Arcoth', [-1e300, -2, -1.5, 1.5, 2, 10, 1e300]],
+    ['Arsech', [1e-300, 0.1, 0.5, 0.9, 1]],
+    ['Arcsch', [-1e300, -2, -1e-300, 1e-300, 0.5, 2, 1e300]],
+  ];
+
+  test.each(REAL_DOMAIN)('%s on its real domain is real', (name, xs) => {
+    for (const x of xs) {
+      const out = compiled(name, x, 0);
+      if (typeof out !== 'number')
+        throw new Error(`${name}(${x}) is ${out.re} + ${out.im}i`);
+      expectParity(name, x, 0);
+    }
+  });
+
+  // Each inverse function on the imaginary axis, and outside its real
+  // domain on the real axis: a part that is 0 in the interpreter is 0
+  // compiled, and a small part is kept in both. The branch points `±i`,
+  // where the value is `~oo`, are tested separately (`arctan and arccot at
+  // ±i`).
+  const AXES: [number, number][] = [
+    [0, 1e-300],
+    [0, -1e-100],
+    [0, 0.5],
+    [0, -0.5],
+    [0, 0.999],
+    [0, -2],
+    [0, 1e300],
+    [-2, 0],
+    [2, 0],
+    [-0.5, 0],
+    [0.5, 0],
+    [1e-100, 0],
+    [-1e300, 0],
+  ];
+  test.each(REAL_DOMAIN.map(([name]) => [name]))(
+    '%s on the axes agrees with the interpreter',
+    (name) => {
+      for (const [re, im] of AXES) expectParity(name, re, im);
+    }
+  );
 });
 
 describe('INVERSE TRIG: arguments beyond the double range', () => {

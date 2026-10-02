@@ -278,16 +278,16 @@ describe('PYTHON: inverse trigonometric functions of a complex argument', () => 
   POINTS.push([0, 0]);
 
   // The points where the compiled value differs from the interpreter's on
-  // purpose. The poles of `atan` (±i) and of `arccot` (±i): the interpreter
-  // gives the unsigned infinity `~oo` (read as `∞ + ∞i`), the compiled code
-  // the value of compiled JavaScript, `±∞·i`. `z = 0`: the interpreter gives
-  // `NaN` (with a zero imaginary part) for `Arccsc` and `Arcsec`, and `~oo`
-  // for `Arcsch`; the compiled code answers `nan + nan·i`.
+  // purpose. The poles of `arccot` (±i): the interpreter gives the unsigned
+  // infinity `~oo`, held with the parts `0 ∓ ∞i`; the compiled code spells
+  // `~oo` as `∞ + ∞i`, which is also the parts of the interpreter's `~oo` at
+  // the poles of `atan`.
+  // `z = 0`: the interpreter gives `NaN` (with a zero imaginary part) for
+  // `Arccsc` and `Arcsec`, and `~oo` for `Arcsch`; the compiled code answers
+  // `nan + nan·i`.
   const OVERRIDES: Record<string, [number, number]> = {
-    'Arctan(0, 1)': [0, Infinity],
-    'Arctan(0, -1)': [0, -Infinity],
-    'Arccot(0, 1)': [0, -Infinity],
-    'Arccot(0, -1)': [0, Infinity],
+    'Arccot(0, 1)': [Infinity, Infinity],
+    'Arccot(0, -1)': [Infinity, Infinity],
     'Arccsc(0, 0)': [NaN, NaN],
     'Arcsec(0, 0)': [NaN, NaN],
     'Arcsch(0, 0)': [NaN, NaN],

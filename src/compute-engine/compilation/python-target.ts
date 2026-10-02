@@ -46,6 +46,10 @@ import {
 import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
 import { tryGetConstant } from './constant-folding.js';
 import {
+  COINCIDENCE_BUDGET,
+  realPowerReconstructionDigits,
+} from '../boxed-expression/arithmetic-power.js';
+import {
   TRIG_POLE_ARGUMENT_CAP,
   TRIG_POLE_EPSILON,
 } from '../numerics/numeric.js';
@@ -1826,6 +1830,143 @@ function pythonPole(arg: string, value: string): string {
   );
 }
 
+/**
+ * `cos(πu)`, `sin(πu)`, `tan(πu)` or `e^{iπu}` of the Python code `u`, with
+ * the angle `u` in half-turns reduced exactly before the multiplication by
+ * π, as `cosSinPi()` (`numerics/numeric-complex.ts`) does: `u` is written
+ * `t + q/2` with `|t| ≤ 1/4`, both steps exact in floating point, so the
+ * value at an integer or a half-integer `u` has an exact zero part
+ * (`sin(πx)` at `x = 2` is `0`, where `np.sin(np.pi * 2)` is `−2.4e-16`).
+ * An inline expression of NumPy calls, for a scalar or an array `u`, so a
+ * bare lambda can carry it. `tan` at a half-integer is `np.inf`, the value of
+ * the pole rule of `Tan` (`pythonPole`). A zero part is `+0.0` (adding
+ * `0.0` turns `-0.0` into `0.0`), as in compiled JavaScript: `1/sin(πx)` at
+ * `x = 1` is `inf`, not `-inf`. See `BaseCompiler.piMultiple`.
+ */
+function pythonPiTrig(u: string, head: 'sin' | 'cos' | 'tan' | 'exp'): string {
+  const value =
+    head === 'cos'
+      ? '_pc'
+      : head === 'sin'
+        ? '_ps'
+        : head === 'tan'
+          ? '(np.where(_pc == 0, np.inf, _ps / np.where(_pc == 0, 1.0, _pc)) + 0.0)[()]'
+          : '(_pc + 1j * _ps)';
+  return (
+    `(lambda _pu: (lambda _pr: (lambda _pq: (lambda _pt, _pk: ` +
+    `(lambda _c0, _s0: (lambda _pc, _ps: ${value})(` +
+    `(np.select([_pk == 0, _pk == 1, _pk == 2], [_c0, -_s0, -_c0], _s0) + 0.0)[()], ` +
+    `(np.select([_pk == 0, _pk == 1, _pk == 2], [_s0, _c0, -_s0], -_c0) + 0.0)[()]))(` +
+    `np.cos(np.pi * _pt), np.sin(np.pi * _pt)))(` +
+    `_pr - _pq / 2, (_pq + 4) % 4))(np.floor(2 * _pr + 0.5)))(` +
+    `_pu - 2 * np.floor(_pu / 2 + 0.5)))(${u})`
+  );
+}
+
+/** A Python float literal, with `float('inf')`, `-float('inf')` and
+ * `float('nan')` for a value that is not finite. */
+function pythonFloatLiteral(x: number): string {
+  if (x === Infinity) return "float('inf')";
+  if (x === -Infinity) return "-float('inf')";
+  if (Number.isNaN(x)) return "float('nan')";
+  return String(x);
+}
+
+/**
+ * `_ce_pow(x, y, f)`: the power `x^y` with the real root of a NEGATIVE base
+ * that the interpreter gives for a float exponent (see
+ * `BaseCompiler.negativeBaseFloatPower`). `_ce_pow_branch` is a transcription
+ * of `realPowerBranchTerms()` (`boxed-expression/arithmetic-power.ts`) and of
+ * `rationalize()` (`numerics/rationals.ts`), in floats as in JavaScript, so
+ * the two decide the same `p/q` for a double. `digits` is the number of
+ * significant digits the interpreter reads the exponent to when the code is
+ * generated (`realPowerReconstructionDigits()`). Where the rule does not give
+ * a real root, a negative real scalar base takes the principal value
+ * `|x|^y·(cos πy + i·sin πy)` with the angle reduced exactly
+ * (`_ce_cos_sin_pi`, a transcription of `cosSinPi()`,
+ * `numerics/numeric-complex.ts`), so `(−1)^{0.5}` is exactly `i`, as in the
+ * interpreter; Python's own power leaves `6.1e-17` in the real part. Any
+ * other pair takes `f(x, y)`, or `x ** y` when `f` is `None`: the power the
+ * lowering used before. A complex part that is zero is read as a real value,
+ * as the interpreter does. For an array operand, only the elements that have
+ * a real root are replaced, one by one. The helper imports `math`.
+ */
+/**
+ * True while `compileLambda` compiles its body: a bare lambda has no place
+ * for a module helper, so the `Power` lowering does not use `_ce_pow` then.
+ */
+let pythonLambdaBody = false;
+
+function pythonPowHelper(): string {
+  const digits = realPowerReconstructionDigits();
+  return `import math
+def _ce_pow_branch(_e):
+    if not math.isfinite(_e) or _e == math.floor(_e):
+        return None
+    _tol = max(5e-324, abs(_e) * 4 * 2.220446049250313e-16, abs(_e) * 10.0 ** (1 - ${digits}))
+    _x = _e
+    _a = float(math.floor(_x))
+    _h1, _k1, _h, _k = 1.0, 0.0, _a, 1.0
+    if not abs(_h / _k - _e) <= _tol:
+        while _x - _a > 1e-15 * _k * _k:
+            _x = 1 / (_x - _a)
+            _a = float(math.floor(_x))
+            _h, _h1 = _h1 + _a * _h, _h
+            _k, _k1 = _k1 + _a * _k, _k
+            if abs(_h / _k - _e) <= _tol:
+                break
+    if not (math.isfinite(_h) and math.isfinite(_k)) or _k == 0:
+        return None
+    if abs(_h / _k - _e) > _tol:
+        return None
+    if (12 / math.pi ** 2) * _k * _k * _tol > ${COINCIDENCE_BUDGET}:
+        return None
+    return (_h, _k)
+def _ce_pow_real(_x, _y):
+    if not (math.isfinite(_x) and _x < 0 and math.isfinite(_y)):
+        return None
+    _t = _ce_pow_branch(_y)
+    if _t is None or _t[1] % 2 == 0:
+        return None
+    _m = float(np.power(-_x, _y))
+    if not math.isfinite(_m):
+        return None
+    return -_m if _t[0] % 2 != 0 else _m
+def _ce_cos_sin_pi(_v):
+    _r = _v - 2 * math.floor(_v / 2 + 0.5)
+    _q = math.floor(2 * _r + 0.5)
+    _t = _r - _q / 2
+    _c = math.cos(math.pi * _t)
+    _s = 0.0 if _t == 0 else math.sin(math.pi * _t)
+    return [(_c, _s), (-_s, _c), (-_c, -_s), (_s, -_c)][(_q + 4) % 4]
+def _ce_pow_real_part(_v):
+    if isinstance(_v, complex):
+        return _v.real if _v.imag == 0 else None
+    return float(_v)
+def _ce_pow(_x, _y, _f=None):
+    if np.ndim(_x) == 0 and np.ndim(_y) == 0:
+        _xr = _ce_pow_real_part(_x)
+        _yr = _ce_pow_real_part(_y)
+        if _xr is not None and _yr is not None:
+            _r = _ce_pow_real(_xr, _yr)
+            if _r is not None:
+                return _r
+            if _xr < 0 and math.isfinite(_xr) and math.isfinite(_yr) and _yr != math.floor(_yr):
+                _m = float(np.power(-_xr, _yr))
+                _c, _s = _ce_cos_sin_pi(_yr)
+                return complex(0.0 if _c == 0 else _m * _c, 0.0 if _s == 0 else _m * _s)
+        return _x ** _y if _f is None else _f(_x, _y)
+    _xa, _ya = np.broadcast_arrays(np.asarray(_x), np.asarray(_y))
+    _r = np.array(_xa ** _ya if _f is None else _f(_xa, _ya), copy=True)
+    _m = (np.real(_xa) < 0) & (np.imag(_xa) == 0) & (np.imag(_ya) == 0)
+    for _i in zip(*np.nonzero(_m)):
+        _v = _ce_pow_real(float(np.real(_xa[_i])), float(np.real(_ya[_i])))
+        if _v is not None:
+            _r[_i] = _v
+    return _r
+`;
+}
+
 const PYTHON_ORD_HELPER = `def _ce_ord(_f, _a, _b):
     def _ce_ord_len(_x):
         if isinstance(_x, np.ndarray):
@@ -1922,6 +2063,7 @@ function withPythonHelpers(code: string): string {
   if (out.includes('_ce_eqcoll(')) out = `${PYTHON_EQCOLL_HELPER}\n${out}`;
   if (out.includes('_ce_indexof(')) out = `${PYTHON_INDEXOF_HELPER}\n${out}`;
   if (out.includes('_ce_ord(')) out = `${PYTHON_ORD_HELPER}\n${out}`;
+  if (out.includes('_ce_pow(')) out = `${pythonPowHelper()}\n${out}`;
   if (
     /_ce_(replaceat|replaceat_inplace|owned_copy|deleteat|insert)\(/.test(out)
   )
@@ -2967,10 +3109,9 @@ function pyComplexScalarLowering(
  *
  * `cmath.atan` and `cmath.atanh` raise `ValueError` at their poles
  * (`atan(±i)`, `atanh(±1)`), so these points answer the infinite values of
- * the compiled JavaScript: `atanh(±1)` is `±∞`, `atan(±i)` is `±∞·i`.
- * The interpreter gives the unsigned infinity `~oo` at `atan(±i)`; a
- * compiled complex value cannot hold `~oo`, so `0 ± ∞i` is its form of a
- * complex infinity.
+ * the compiled JavaScript: `atanh(±1)` is `±∞`, and `atan(±i)` is the
+ * unsigned infinity `~oo` of the interpreter, which a compiled complex value
+ * holds as `∞ + ∞i` (`complexPole()` in `javascript-target.ts`).
  */
 const PY_INVERSE_TRIG: Record<
   string,
@@ -3052,7 +3193,7 @@ function pyInverseTrig(
       if (fn === 'atanh')
         return `(complex(${w}.real * float('inf'), 0.0) if ${w}.imag == 0 and abs(${w}.real) == 1 else ${value})`;
       if (fn === 'atan')
-        return `(complex(0.0, ${w}.imag * float('inf')) if ${w}.real == 0 and abs(${w}.imag) == 1 else ${value})`;
+        return `(complex(float('inf'), float('inf')) if ${w}.real == 0 and abs(${w}.imag) == 1 else ${value})`;
       return value;
     };
     const v = BaseCompiler.tempVar(target);
@@ -3121,16 +3262,22 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Sin: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `cmath.sin(${compile(args[0])})`;
+    const u = BaseCompiler.piMultiple(args[0]);
+    if (u !== undefined) return pythonPiTrig(compile(u), 'sin');
     return `np.sin(${compile(args[0])})`;
   },
   Cos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `cmath.cos(${compile(args[0])})`;
+    const u = BaseCompiler.piMultiple(args[0]);
+    if (u !== undefined) return pythonPiTrig(compile(u), 'cos');
     return `np.cos(${compile(args[0])})`;
   },
   Tan: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `cmath.tan(${compile(args[0])})`;
+    const u = BaseCompiler.piMultiple(args[0]);
+    if (u !== undefined) return pythonPiTrig(compile(u), 'tan');
     return pythonPole(compile(args[0]), 'np.tan(_x)');
   },
   // A complex operand: `pyInverseTrig` (`cmath`, with the interpreter's side
@@ -3305,12 +3452,38 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Power and roots
   Power: (args, compile, target) => {
     if (args.length !== 2) return 'np.power';
+    // A base that may be negative under an exponent that may be a float
+    // takes the real root that the interpreter gives (`_ce_pow`, see
+    // `BaseCompiler.negativeBaseFloatPower`). A bare lambda
+    // (`compileLambda`) has no place for the module helper `_ce_pow`, so
+    // there the lowerings that need it keep the power of Python (`x ** y`),
+    // which gives the principal value, or NaN for an array, for a negative
+    // base under a variable float exponent: `compileFunction` follows the
+    // interpreter, `compileLambda` does not.
+    const negativeBase = BaseCompiler.negativeBaseFloatPower(args);
+    const withHelper = !pythonLambdaBody;
+    // `e^{a + iπu}` with real `a` and `u`: the angle in half-turns, reduced
+    // exactly (`pythonPiTrig`), so `e^{iπx}` at `x = 1` is `−1` and
+    // `e^{x + iπ}` is `−e^x`.
+    if (isSymbol(args[0], 'ExponentialE')) {
+      const split = BaseCompiler.eulerPiSplit(args[1]);
+      if (split !== undefined) {
+        const unit = pythonPiTrig(compile(split.u), 'exp');
+        return split.a === undefined
+          ? unit
+          : `(np.exp(${compile(split.a)}) * ${unit})`;
+      }
+    }
     if (
       BaseCompiler.isComplexValued(args[0]) ||
       BaseCompiler.isComplexValued(args[1])
     )
-      return `(${pyOperand(compile(args[0]))} ** ${pyOperand(compile(args[1]))})`;
-    const realPower = BaseCompiler.realPowerExponent(args);
+      return negativeBase !== undefined && withHelper
+        ? `_ce_pow(${compile(args[0])}, ${compile(args[1])})`
+        : `(${pyOperand(compile(args[0]))} ** ${pyOperand(compile(args[1]))})`;
+    const realPower =
+      BaseCompiler.realPowerExponent(args) ??
+      (typeof negativeBase === 'object' ? negativeBase : undefined);
     if (realPower !== undefined) {
       const value = BaseCompiler.tempVar(target);
       const magnitude = `np.power(np.abs(${value}), ${realPower.value})`;
@@ -3325,7 +3498,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // promoted `Sqrt`/`Ln`/`Log` use), agreeing with `isComplexValued`'s
     // report to the parent (`promotesRadicalToComplex`).
     if (BaseCompiler.promotesRadicalToComplex('Power', args))
-      return `np.emath.power(${compile(args[0])}, ${compile(args[1])})`;
+      return negativeBase === 'runtime' && withHelper
+        ? `_ce_pow(${compile(args[0])}, ${compile(args[1])}, np.emath.power)`
+        : `np.emath.power(${compile(args[0])}, ${compile(args[1])})`;
+    if (negativeBase === 'runtime')
+      return withHelper
+        ? `_ce_pow(${compile(args[0])}, ${compile(args[1])})`
+        : `(${pyOperand(compile(args[0]))} ** ${pyOperand(compile(args[1]))})`;
     return `np.power(${compile(args[0])}, ${compile(args[1])})`;
   },
   Sqrt: (args, compile) => {
@@ -4903,7 +5082,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // Python keyword.
       mangleId: pythonCheckIdentifier,
       constant: (id) => PYTHON_CONSTANTS[id] ?? PYTHON_BOOLEANS[id],
-      complex: (re, im) => `complex(${re}, ${im})`,
+      // A non-finite part is spelled `float('inf')` or `float('nan')`: the
+      // JavaScript spelling `Infinity` is not a Python name (the complex pole
+      // `{re: ∞, im: ∞}` is a folded constant, see `tryConstantFold`).
+      complex: (re, im) =>
+        `complex(${pythonFloatLiteral(re)}, ${pythonFloatLiteral(im)})`,
       string: (str) => JSON.stringify(str),
       number: (n) => {
         // Python number literals
@@ -5273,6 +5456,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     if (body.includes('_ce_eqcoll(')) code += `${PYTHON_EQCOLL_HELPER}\n`;
     if (body.includes('_ce_indexof(')) code += `${PYTHON_INDEXOF_HELPER}\n`;
     if (body.includes('_ce_ord(')) code += `${PYTHON_ORD_HELPER}\n`;
+    if (body.includes('_ce_pow(')) code += `${pythonPowHelper()}\n`;
     if (
       /_ce_(replaceat|replaceat_inplace|owned_copy|deleteat|insert)\(/.test(
         body
@@ -5362,7 +5546,14 @@ export class PythonTarget implements LanguageTarget<Expression> {
     });
     // Default-enabled, like `compileFunction`; `options.cse` is the opt-out.
     BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
-    const body = BaseCompiler.compileCseRoot(expr, target);
+    let body: string;
+    const savedLambdaBody = pythonLambdaBody;
+    pythonLambdaBody = true;
+    try {
+      body = BaseCompiler.compileCseRoot(expr, target);
+    } finally {
+      pythonLambdaBody = savedLambdaBody;
+    }
     // A multi-statement construct (loop-form Sum/Product, Loop, Block) can
     // never be a Python lambda body. This path bypasses the D6 value-operand
     // guard, so check explicitly.
@@ -5379,13 +5570,16 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // is IndexOf's element test; `_ce_eqcoll` is collection/tuple equality;
     // `_ce_ord` is the ordering shape guard; `_ce_rref` is RowReduce's
     // elimination; `_ce_cplx`, `_ce_cisreal`, `_ce_creal` and
-    // `_ce_creal_elems` are the complex-value helpers of the complex modes.)
+    // `_ce_creal_elems` are the complex-value helpers of the complex modes;
+    // `_ce_pow` is the power with the real root of a negative base, which the
+    // `Power` lowering does not use in a lambda body: listed as a guard.)
     for (const [helper, what] of [
       ['_ce_bcast(', 'ElementMax/ElementMin/Clamp over a collection operand'],
       ['_ce_rref(', 'RowReduce'],
       ['_ce_indexof(', 'IndexOf'],
       ['_ce_eqcoll(', 'equality over a collection or tuple operand'],
       ['_ce_ord(', 'an ordering over a collection operand'],
+      ['_ce_pow(', 'a power whose base may be negative'],
       ['_ce_cplx(', 'the complex lift of the complex modes'],
       ['_ce_cisreal(', 'the realness test of the complex modes'],
       ['_ce_creal(', 'the real projection of the complex modes'],
