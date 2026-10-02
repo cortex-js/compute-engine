@@ -2953,7 +2953,9 @@ function pyComplexScalarLowering(
  *    `-0.0` when the imaginary part is negative and `0.0` otherwise
  *    (`asinh(−2i)` is `−1.317 − (π/2)i`);
  *  - `atan` (cut: the imaginary axis beyond ±i): a zero real part becomes
- *    `0.0` (the side right of the axis, `atan(−2i)` is `π/2 − 0.549i`).
+ *    `-0.0` when the imaginary part is negative and `0.0` otherwise, as for
+ *    `asinh` (`atan(−2i)` is `−π/2 − 0.549i`, `atan(2i)` is
+ *    `π/2 + 0.549i`).
  *
  * A reciprocal function is the function at `w = 1/z`, with the same rule
  * applied to `w` (`arccsc 0.5` is `asin 2`), as in the interpreter. Two
@@ -2966,6 +2968,9 @@ function pyComplexScalarLowering(
  * `cmath.atan` and `cmath.atanh` raise `ValueError` at their poles
  * (`atan(±i)`, `atanh(±1)`), so these points answer the infinite values of
  * the compiled JavaScript: `atanh(±1)` is `±∞`, `atan(±i)` is `±∞·i`.
+ * The interpreter gives the unsigned infinity `~oo` at `atan(±i)`; a
+ * compiled complex value cannot hold `~oo`, so `0 ± ∞i` is its form of a
+ * complex infinity.
  */
 const PY_INVERSE_TRIG: Record<
   string,
@@ -3042,9 +3047,7 @@ function pyInverseTrig(
           ? `(complex(${w}.real, -0.0 if ${w}.real > 0 else 0.0) if ${z}.imag == 0 else ${w})`
           : cut === 'above'
             ? `(complex(${w}.real, 0.0) if ${z}.imag == 0 else ${w})`
-            : cut === 'asinh'
-              ? `(complex(-0.0 if ${w}.imag < 0 else 0.0, ${w}.imag) if ${z}.real == 0 else ${w})`
-              : `(complex(0.0, ${w}.imag) if ${z}.real == 0 else ${w})`;
+            : `(complex(-0.0 if ${w}.imag < 0 else 0.0, ${w}.imag) if ${z}.real == 0 else ${w})`;
       const value = `cmath.${fn}(${adjusted})`;
       if (fn === 'atanh')
         return `(complex(${w}.real * float('inf'), 0.0) if ${w}.imag == 0 and abs(${w}.real) == 1 else ${value})`;

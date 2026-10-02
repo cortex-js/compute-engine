@@ -164,6 +164,47 @@ describe('GPU: inverse trigonometric functions of a complex argument', () => {
   });
 });
 
+// `arctan` and `arccot` are odd on their cuts (the imaginary axis outside
+// and inside [−i, i]): each half of a cut takes the side it is continuous
+// with, as in mpmath. Before, both halves took the side right of the axis,
+// and `arctan(−2i)` was `π/2 − 0.549i`. `[head, y, re, im]`: the value of
+// `head(iy)` from `mpmath.atan` and `mpmath.acot`.
+const ODD_ON_CUT: [string, number, number, number][] = [
+  ['Arctan', 2, 1.5707963267948966, 0.54930614433405485],
+  ['Arctan', -2, -1.5707963267948966, -0.54930614433405485],
+  ['Arctan', -10, -1.5707963267948966, -0.10033534773107558],
+  ['Arctan', -1e20, -1.5707963267948966, -1e-20],
+  ['Arccot', 0.5, -1.5707963267948966, -0.54930614433405485],
+  ['Arccot', -0.5, 1.5707963267948966, 0.54930614433405485],
+];
+
+describe('GPU: arctan is odd on its branch cut', () => {
+  // The shader targets have no complex `Arccot` (it is in
+  // `GPU_REAL_ONLY_LOWERINGS`, `compilation/gpu-target.ts`).
+  for (const [language, Target, fn] of [
+    [
+      'glsl',
+      GLSLTarget,
+      (code: string) => `vec2 _main(vec2 z) { return ${code}; }`,
+    ],
+    [
+      'wgsl',
+      WGSLTarget,
+      (code: string) => `fn _main(z: vec2f) -> vec2f { return ${code}; }`,
+    ],
+  ] as const)
+    it(`${language}: the value of mpmath on each half of the cut`, () => {
+      const r = new Target().compile(ce.function('Arctan', ['z']));
+      const run = shaderFunctions(`${r.preamble}\n${fn(r.code)}`, language);
+      for (const [head, y, re, im] of ODD_ON_CUT) {
+        if (head !== 'Arctan') continue;
+        const v = run('_main', { x: 0, y }) as { x: number; y: number };
+        expect(v.x).toBeCloseTo(re, 6);
+        expect(v.y).toBeCloseTo(im, 6);
+      }
+    });
+});
+
 describe('GPU: the language checks of the f32 shader interpreter', () => {
   const REJECTED: [string, 'glsl' | 'wgsl', string][] = [
     ['fn f(x: f32) -> f32 { return x > 0.0 ? x : -x; }', 'wgsl', '?:'],
@@ -302,6 +343,27 @@ describe('PYTHON: inverse trigonometric functions of a complex argument', () => 
             );
         }
       expect(failures).toEqual([]);
+    }
+  );
+
+  (VENV_PYTHON === undefined ? it.skip : it)(
+    'arctan and arccot have the value of mpmath on each half of their cut',
+    () => {
+      const py = new PythonTarget({ includeImports: true });
+      let program = '';
+      for (const h of ['Arctan', 'Arccot'])
+        program +=
+          py.compileFunction(ce.function(h, ['z']), `f_${h}`, ['z']) + '\n';
+      program += 'import json\nout = []\n';
+      program += `for (h, y) in ${JSON.stringify(ODD_ON_CUT.map(([h, y]) => [h, y]))}:\n`;
+      program += `  r = complex(globals()['f_' + h](complex(0, y)))\n`;
+      program += `  out.append([r.real, r.imag])\n`;
+      program += 'print(json.dumps(out))\n';
+      const values = run(program);
+      ODD_ON_CUT.forEach(([, , re, im], k) => {
+        expect(same(values[k][0], re)).toBe(true);
+        expect(same(values[k][1], im)).toBe(true);
+      });
     }
   );
 

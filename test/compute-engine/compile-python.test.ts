@@ -577,7 +577,7 @@ describe('PYTHON TARGET', () => {
     it('should use cmath.atan for complex arctan', () => {
       const expr = ce.expr(['Arctan', ['Complex', 1, 1]]);
       expect(src(expr)).toBe(
-        "(lambda _tv1: (complex(0.0, _tv1.imag * float('inf')) if _tv1.real == 0 and abs(_tv1.imag) == 1 else cmath.atan((complex(0.0, _tv1.imag) if _tv1.real == 0 else _tv1))))(complex(1, 1))"
+        "(lambda _tv1: (complex(0.0, _tv1.imag * float('inf')) if _tv1.real == 0 and abs(_tv1.imag) == 1 else cmath.atan((complex(-0.0 if _tv1.imag < 0 else 0.0, _tv1.imag) if _tv1.real == 0 else _tv1))))(complex(1, 1))"
       );
     });
 

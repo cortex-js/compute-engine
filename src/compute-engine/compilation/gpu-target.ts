@@ -13261,9 +13261,9 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   //   (`acosh(−2)` is `1.317 + πi`).
   // - `asinh` on the imaginary axis: the side right of the axis for
   //   `y > 1`, left of it for `y < −1` (`asinh 2i` is `1.317 + (π/2)i`).
-  // - `atan` on the imaginary axis: the side right of the axis for both
-  //   `y > 1` and `y < −1` (`atan 2i` is `π/2 + 0.549i`, `atan(−2i)` is
-  //   `π/2 − 0.549i`).
+  // - `atan` on the imaginary axis: the side right of the axis for
+  //   `y > 1`, left of it for `y < −1` (`atan 2i` is `π/2 + 0.549i`,
+  //   `atan(−2i)` is `−π/2 − 0.549i`).
   //
   // `_gpu_chypot` is `√(x² + y²)` without an overflow of `x²`;
   // `_gpu_clog1p` is `ln(1 + x)` for `x ≥ 0`, accurate for a small `x`
@@ -13488,16 +13488,19 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   return _gpu_catanh_core(z.x, z.y, select(1.0, -1.0, z.x > 0.0));
 }`,
   },
-  // atan z = −i·atanh(iz), with iz = −y + ix. A zero x takes the sign +1:
-  // the side right of the imaginary axis.
+  // atan z = −i·atanh(iz), with iz = −y + ix. A zero x takes the sign of y:
+  // the side right of the imaginary axis for y > 1, left of it for y < −1
+  // (`atan(−2i)` is `−π/2 − 0.549i`, so atan is odd on the cut). At the
+  // poles ±i the interpreter gives the unsigned infinity `~oo`; a `vec2`
+  // cannot hold `~oo`, so `0 ± ∞i` is its form of a complex infinity.
   _gpu_catan: {
     deps: ['_gpu_catanh_core'],
     glsl: `vec2 _gpu_catan(vec2 z) {
-  vec2 r = _gpu_catanh_core(-z.y, z.x, 1.0);
+  vec2 r = _gpu_catanh_core(-z.y, z.x, z.y < 0.0 ? -1.0 : 1.0);
   return vec2(r.y, -r.x);
 }`,
     wgsl: `fn _gpu_catan(z: vec2f) -> vec2f {
-  let r = _gpu_catanh_core(-z.y, z.x, 1.0);
+  let r = _gpu_catanh_core(-z.y, z.x, select(1.0, -1.0, z.y < 0.0));
   return vec2f(r.y, -r.x);
 }`,
   },

@@ -10,6 +10,23 @@
   `NPartition(-n) = 0`). Before, these inputs stayed unevaluated
   (`Totient(0)`, `NPartition(-3)`).
 
+- **`arctan` and `arccot` are odd on their branch cuts.** The cut of `arctan`
+  is the imaginary axis outside `[−i, i]`, the cut of `arccot` the imaginary
+  axis inside it. Both halves of each cut took the side right of the axis, so
+  `arctan(−z)` was not `−arctan(z)` there. Each half now takes the side it is
+  continuous with, as in mpmath and Mathematica, and as `arsinh` already did
+  on the same axis. The values that change, in the interpreter (`N()`, and
+  `evaluate()` of a float argument), compiled JavaScript and Python, and for
+  `arctan` only in GLSL and WGSL (the shader targets compile `arccot` of a
+  real argument only):
+  - `arctan(iy)` for `y < −1`: the real part changes from `π/2` to `−π/2`
+    (`arctan(−2i)` was `π/2 − 0.549i`, it is now `−π/2 − 0.549i`;
+    `arctan(−1.5i)` was `π/2 − 0.805i`, it is now `−π/2 − 0.805i`).
+  - `arccot(iy)` for `0 < y < 1`: the real part changes from `π/2` to `−π/2`
+    (`arccot(0.5i)` was `π/2 − 0.549i`, it is now `−π/2 − 0.549i`).
+  - `arctan(iy)` for `y > 1`, `arccot(iy)` for `−1 < y < 0`, and `artanh`
+    and `arcoth` on their cuts on the real axis do not change.
+
 ### New Features
 
 - **Wolfram Language aliases `EulerPhi`, `PartitionsP` and `Det`.** They are

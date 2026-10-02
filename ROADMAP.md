@@ -498,24 +498,6 @@ bracket group (for example `\left[ … \right]` with one operand), which
 changes what that spelling gives today. Writer: the `Delimiter` serializer in
 `latex-syntax/dictionary/definitions-core.ts`.
 
-### `arctan` is not odd on its branch cut (OPEN, decision — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
-
-The cut of `arctan` is the imaginary axis outside `[−i, i]`. The engine puts
-both halves of the cut on the side right of the axis: `arctan(2i)` is
-`π/2 + 0.549i` and `arctan(−2i)` is `π/2 − 0.549i`. So `arctan(−z)` is not
-`−arctan(z)` there (`−arctan(2i)` is `−π/2 − 0.549i`). mpmath and Mathematica
-give `π/2 + 0.549i` and `−π/2 − 0.549i` (each half on the side it is
-continuous with, "counter-clockwise continuity"), and `arctan` is odd. The
-engine uses that rule for `arsinh` on the same axis (`arsinh(−2i)` is
-`−1.317 − (π/2)i`), and `arctan z = −i·artanh(iz)` would agree with it.
-Options: (a) keep the present values; (b) use the mpmath side for `y < −1`,
-which changes `arctan(iy)` for `y < −1` and `arccot(iy)` for `0 < y < 1`
-(`arccot(0.5i)` is `π/2 − 0.549i` today, mpmath gives `−π/2 − 0.549i`) in
-the interpreter and in compiled JavaScript. If nothing is
-decided, (a) stays. The side is set in one place, `complexAtan()` in
-`numerics/numeric-complex.ts` (the zero real part it passes to the kernel),
-and is pinned by `test/compute-engine/inverse-trig-large-arguments.test.ts`.
-
 ### Complex inverse trigonometric functions of an argument beyond the double range give `NaN` (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
 
 `\arcsin(10^{400}).N()` is `NaN` at every precision. The correct value is

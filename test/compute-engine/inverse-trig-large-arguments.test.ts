@@ -207,14 +207,101 @@ describe('INVERSE TRIG: the side of each branch cut does not change', () => {
     ['Arsinh', 0, 2, 1.3169578969248166, 1.5707963267948966],
     ['Arsinh', 0, -2, -1.3169578969248166, -1.5707963267948966],
     ['Arctan', 0, 2, 1.5707963267948966, 0.5493061443340549],
-    // The engine puts both halves of the cut of `arctan` on the right side
-    // of the imaginary axis (mpmath answers −π/2 − 0.549i here).
-    ['Arctan', 0, -2, 1.5707963267948966, -0.5493061443340549],
   ];
 
   test.each(CASES)('%s(%p + %pi)', (name, re, im, expRe, expIm) =>
     expectClose(value(ce, name, re, im), [expRe, expIm])
   );
+});
+
+describe('INVERSE TRIG: arctan and arccot are odd on their branch cuts', () => {
+  // The cut of `arctan` is the imaginary axis outside [−i, i], the cut of
+  // `arccot` the imaginary axis inside it. Each half of a cut takes the side
+  // it is continuous with (the values of mpmath and Mathematica), so
+  // `arctan(−z) = −arctan(z)` and `arccot(−z) = −arccot(z)` there. Before,
+  // both halves took the side right of the axis: `arctan(−2i)` was
+  // `π/2 − 0.549i` and `arccot(0.5i)` was `π/2 − 0.549i`.
+  // Values of `mpmath.atan(mpc(0, y))` and `mpmath.acot(mpc(0, y))`.
+  const CASES: [string, number, number, number][] = [
+    ['Arctan', 1.5, 1.5707963267948966, 0.80471895621705019],
+    ['Arctan', -1.5, -1.5707963267948966, -0.80471895621705019],
+    ['Arctan', 2, 1.5707963267948966, 0.54930614433405485],
+    ['Arctan', -2, -1.5707963267948966, -0.54930614433405485],
+    ['Arctan', 10, 1.5707963267948966, 0.10033534773107558],
+    ['Arctan', -10, -1.5707963267948966, -0.10033534773107558],
+    ['Arctan', 1e10, 1.5707963267948966, 1e-10],
+    ['Arctan', -1e10, -1.5707963267948966, -1e-10],
+    // Next to the branch points ±i.
+    ['Arctan', 1.0000001, 1.5707963267948966, 8.4056214404671984],
+    ['Arctan', -1.0000001, -1.5707963267948966, -8.4056214404671984],
+    ['Arccot', 0.5, -1.5707963267948966, -0.54930614433405485],
+    ['Arccot', -0.5, 1.5707963267948966, 0.54930614433405485],
+    ['Arccot', 0.2, -1.5707963267948966, -0.2027325540540822],
+    ['Arccot', -0.2, 1.5707963267948966, 0.2027325540540822],
+  ];
+
+  test.each(CASES)('%s(%pi)', (name, y, expRe, expIm) =>
+    expectClose(value(ce, name, 0, y), [expRe, expIm])
+  );
+
+  test.each(CASES)('compiled JavaScript: %s(%pi)', (name, y, expRe, expIm) => {
+    const engine = new ComputeEngine();
+    engine.declare('z', 'complex');
+    const result = compile(engine.function(name, ['z']), { fallback: false });
+    expect(result.success).toBe(true);
+    const out = result.run!({ z: { re: 0, im: y } }) as {
+      re: number;
+      im: number;
+    };
+    expectClose(out, [expRe, expIm]);
+  });
+
+  test('compiled JavaScript: a constant argument (constant folding)', () => {
+    // `_SYS.catan` and `_SYS.cacot` of a constant are folded at compile time.
+    for (const [name, im, expected] of [
+      ['Arctan', -2, [-1.5707963267948966, -0.54930614433405485]],
+      ['Arccot', 0.5, [-1.5707963267948966, -0.54930614433405485]],
+    ] as const) {
+      const result = compile(ce.box([name, ['Complex', 0, im]]), {
+        fallback: false,
+      });
+      expect(result.success).toBe(true);
+      expectClose(
+        result.run!({}) as { re: number; im: number },
+        expected as unknown as [number, number]
+      );
+    }
+  });
+
+  test('the value on the cut is the limit from its own side', () => {
+    // `arctan(−2i)` is the limit from the left of the imaginary axis, and
+    // `arccot(0.5i)` too. Values of mpmath at ±10⁻⁹ + iy.
+    expectClose(
+      value(ce, 'Arctan', -1e-9, -2),
+      [-1.5707963264615633, -0.54930614433405485]
+    );
+    expectClose(
+      value(ce, 'Arctan', 1e-9, -2),
+      [1.5707963264615633, -0.54930614433405485]
+    );
+    expectClose(
+      value(ce, 'Arccot', -1e-9, 0.5),
+      [-1.5707963254615633, -0.54930614433405484]
+    );
+    expectClose(
+      value(ce, 'Arccot', 1e-9, 0.5),
+      [1.5707963254615633, -0.54930614433405484]
+    );
+    const onCut = (name: string, y: number) => value(ce, name, 0, y);
+    expect(onCut('Arctan', -2).re).toBeCloseTo(
+      value(ce, 'Arctan', -1e-9, -2).re,
+      8
+    );
+    expect(onCut('Arccot', 0.5).re).toBeCloseTo(
+      value(ce, 'Arccot', -1e-9, 0.5).re,
+      8
+    );
+  });
 });
 
 describe('COMPILE: complex inverse trig at large arguments', () => {

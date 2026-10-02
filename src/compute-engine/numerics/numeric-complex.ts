@@ -309,11 +309,11 @@ export function complexInverse(z: Complex): Complex {
 // - `arsinh` on the imaginary axis: for `y > 1` the side right of the axis,
 //   for `y < −1` the side left of it (`arsinh 2i` is `1.317 + (π/2)i`,
 //   `arsinh(−2i)` is `−1.317 − (π/2)i`).
-// - `arctan` on the imaginary axis: the side right of the axis for both
-//   `y > 1` and `y < −1` (`arctan 2i` is `π/2 + 0.549i`, `arctan(−2i)` is
-//   `π/2 − 0.549i`). This is the side the engine used before these
-//   functions were added; mpmath and Mathematica give `−π/2 − 0.549i` for
-//   `arctan(−2i)`.
+// - `arctan` on the imaginary axis: for `y > 1` the side right of the axis,
+//   for `y < −1` the side left of it (`arctan 2i` is `π/2 + 0.549i`,
+//   `arctan(−2i)` is `−π/2 − 0.549i`), so `arctan(−z) = −arctan(z)` on the
+//   cut. This is the side that `arctan z = −i·artanh(iz)` gives with the
+//   side of `artanh` above.
 // A value with an infinite or NaN part uses the `complex-esm` method.
 //
 
@@ -488,8 +488,10 @@ export function complexAsinh(z: Complex): Complex {
 /** The principal value of `arctan z`. Accurate for a large or a small `|z|`. */
 export function complexAtan(z: Complex): Complex {
   if (!isFiniteComplex(z.re, z.im)) return z.atan();
-  const x = z.re === 0 ? 0 : z.re;
-  // arctan z = −i·artanh(iz), and iz = −y + ix
+  // arctan z = −i·artanh(iz), and iz = −y + ix. A zero x is the zero that
+  // `complexAtanh()` gives the real value −y: the side of the cut right of
+  // the imaginary axis for y > 1, left of it for y < −1.
+  const x = z.re === 0 ? realAxisZero(-z.im) : z.re;
   const [a, b] = atanhCore(-z.im, x);
   return new Complex(b, -a);
 }
@@ -655,11 +657,13 @@ export function complexAcoth(z: Complex): Complex {
 //
 // arccsc z = arcsin(1/z), arcsec z = arccos(1/z) and arccot z = arctan(1/z),
 // written in terms of z for the same reasons as the inverse reciprocal
-// hyperbolic functions above. The side of each branch cut is the one the
-// engine used before these functions were added: the side of `arcsin`,
-// `arccos` and `arctan` at `1/z` (`arccsc 0.5` is `π/2 − 1.317i`,
-// `arcsec(−0.5)` is `π − 1.317i`, `arccot(0.5i)` is `π/2 − 0.549i` and
-// `arccot(−0.5i)` is `π/2 + 0.549i`).
+// hyperbolic functions above. The side of each branch cut is the side of
+// `arcsin`, `arccos` and `arctan` at `1/z`. For `arccsc` and `arcsec` it is
+// the side the engine used before these functions were added (`arccsc 0.5`
+// is `π/2 − 1.317i`, `arcsec(−0.5)` is `π − 1.317i`). For `arccot` it is the
+// side of mpmath, which makes `arccot` odd on its cut, the imaginary axis
+// between −i and i (`arccot(0.5i)` is `−π/2 − 0.549i` and `arccot(−0.5i)` is
+// `π/2 + 0.549i`).
 //
 
 /** The principal value of `arccsc z = arcsin(1/z)`. */
@@ -721,9 +725,10 @@ export function complexAcot(z: Complex): Complex {
   // (`Arccot` in `boxed-expression/trigonometry.ts`, `atan2(1, x)`), not
   // the value of arctan(1/z) in (−π/2, π/2) (they differ by π for x < 0).
   if (y === 0) return new Complex(Math.atan2(1, x), 0);
-  // On the cut (the imaginary axis between −i and i): the side right of the
-  // axis, as `complexAtan()` at 1/z.
-  const xs = x === 0 ? 0 : x;
+  // On the cut (the imaginary axis between −i and i): the side of
+  // `complexAtan()` at 1/z = −i/y, that is the side left of the axis for
+  // y > 0 and right of it for y < 0.
+  const xs = x === 0 ? (y > 0 ? -0 : 0) : x;
   const h = Math.hypot(x, y);
   if (h > 1e150) {
     // arccot z = 1/z + O(1/z³), with |z|/4 against an overflow of |z|.
