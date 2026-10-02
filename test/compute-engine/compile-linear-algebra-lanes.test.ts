@@ -1,6 +1,5 @@
 import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
+import { TEST_PYTHON } from './test-python';
 
 import { ComputeEngine, compile } from '../../src/compute-engine';
 
@@ -290,12 +289,9 @@ describe('THE GPU COMPLEX POWER AT ZERO', () => {
     });
 });
 
-// The repo's Python virtual environment, when present. The value checks are
-// skipped without it.
-const PYTHON = [
-  path.join(__dirname, '..', '..', 'venv', 'bin', 'python3'),
-  path.join(process.cwd(), 'venv', 'bin', 'python3'),
-].find((p) => fs.existsSync(p));
+// The Python of `CE_PYTHON` or of the repo's virtual environment, when
+// present (`test-python.ts`). The value checks are skipped without it.
+const PYTHON = TEST_PYTHON;
 
 /** Run the Python compilation `r` with the variable bindings `setup`, and
  * return its value as `[re, im]`. */
