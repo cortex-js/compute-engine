@@ -4,7 +4,13 @@ import {
   INDEXED_COLLECTION_SHAPE_TYPE,
   NUMERIC_TYPES_SET,
 } from '../../common/type/primitive.js';
-import type { OperandDescriptor, Sign } from '../global-types.js';
+import type {
+  Expression,
+  IComputeEngine,
+  OperandDescriptor,
+  PureEngineView,
+  Sign,
+} from '../global-types.js';
 import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
@@ -2095,19 +2101,69 @@ export function adjoinType(ops: ReadonlyArray<OperandDescriptor>): Type {
 }
 
 /**
+ * How a host library writes the residue classes of ℤ/nℤ.
+ *
+ * The engine has no value for a residue class (7 and 2 are the same element
+ * of ℤ/5ℤ, which no integer can express), so `QuotientRing(Integers, n)`
+ * counts its classes but enumerates them and decides membership only when a
+ * host registers a representation with `setResidueClasses()`.
+ *
+ * @category Definitions
+ */
+export interface ResidueClasses {
+  /** The class of `k` mod `n`, for `0 <= k < n`. */
+  element: (ce: IComputeEngine, k: number, n: number) => Expression;
+  /** The modulus of a residue class, or `undefined` when `x` is not one. */
+  modulusOf: (x: Expression) => number | undefined;
+  /** The type of a residue class, e.g. `'expression'`. */
+  type: Type;
+}
+
+// Keyed by the engine; a `type` handler sees it as a `PureEngineView`.
+const residueClassRepresentations = new WeakMap<
+  PureEngineView,
+  ResidueClasses
+>();
+
+/**
+ * Register how `ce` represents the elements of `QuotientRing(Integers, n)`.
+ * Pass `undefined` to remove a registration.
+ *
+ * @category Definitions
+ */
+export function setResidueClasses(
+  ce: IComputeEngine,
+  classes: ResidueClasses | undefined
+): void {
+  if (classes === undefined) residueClassRepresentations.delete(ce);
+  else residueClassRepresentations.set(ce, classes);
+}
+
+/** The residue-class representation registered on `ce`, if any. */
+export function getResidueClasses(
+  ce: PureEngineView
+): ResidueClasses | undefined {
+  return residueClassRepresentations.get(ce);
+}
+
+/**
  * `QuotientRing(R, m)` — the quotient of the ring `R` by the ideal generated
  * by `m` (`ℤ_n` = `ℤ/nℤ`).
  *
- * The residues are represented by elements of the base ring, so the element
- * type is the base's: `QuotientRing(Integers, n)` is a `set<integer>`.
- * The quotient is never larger than the base, so this is an upper bound in
- * both directions and introduces no non-finite value.
+ * An element is a residue class, which no element of the base represents
+ * (7 and 2 are one element of ℤ/5ℤ, so `set<integer>` would be wrong). The
+ * element type is `unknown`, as for an `Adjoin` adjunct the engine cannot
+ * type, unless a host registered a class representation for an integer
+ * base (`setResidueClasses()`), whose type is then used.
  */
-export function quotientRingType(ops: ReadonlyArray<OperandDescriptor>): Type {
-  const base = ops[0];
-  const elements =
-    (base ? collectionElementType(base.type) : undefined) ?? 'unknown';
-  return { kind: 'set', elements };
+export function quotientRingType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  ce?: PureEngineView
+): Type {
+  const overIntegers =
+    ops[0] !== undefined && isSubtype(ops[0].type, 'set<integer>');
+  const classes = overIntegers && ce ? getResidueClasses(ce) : undefined;
+  return { kind: 'set', elements: classes?.type ?? 'unknown' };
 }
 
 /**

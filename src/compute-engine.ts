@@ -69,6 +69,10 @@ export {
   PHYSICS_DICTIONARY,
 } from './compute-engine/latex-syntax/dictionary/default-dictionary.js';
 
+// ── Residue classes of ℤ/nℤ ─────────────────────────────────────────
+export { setResidueClasses } from './compute-engine/library/type-handlers.js';
+export type { ResidueClasses } from './compute-engine/library/type-handlers.js';
+
 // ── Arbitrary-precision arithmetic ──────────────────────────────────
 export { BigDecimal } from './big-decimal/index.js';
 

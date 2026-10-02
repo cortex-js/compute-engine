@@ -7654,7 +7654,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // the element type of ℤ, not the type of the quotient RING.
         if (isRingConstantOperand(op1))
           return BoxedType.forResult(
-            quotientRingType([op1, op2]),
+            quotientRingType([op1, op2], ce),
             ce._typeResolver
           );
 
