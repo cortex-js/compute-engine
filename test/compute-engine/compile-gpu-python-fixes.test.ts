@@ -245,17 +245,19 @@ describe('interval-js: a complex symbol fails closed', () => {
 });
 
 describe('Python: Artanh, Arsinh and Sign of a complex value', () => {
-  test('Artanh: the complex routine for a non-real value', () => {
+  // A complex value takes `cmath`, after a zero part of the argument is
+  // given the sign that selects the interpreter's side of the branch cut.
+  test('Artanh: cmath with the side of the cut of the interpreter', () => {
     const ce = engine();
     expect(value(run(ce, 'python', ['Artanh', 'z']))).toBe(
-      '(lambda _tv1: (np.arctanh(_ce_creal(_tv1)) if _ce_cisreal(_tv1) else np.arctanh(_tv1)))(z)'
+      "(lambda _tv1: (complex(_tv1.real * float('inf'), 0.0) if _tv1.imag == 0 and abs(_tv1.real) == 1 else cmath.atanh((complex(_tv1.real, -0.0 if _tv1.real > 0 else 0.0) if _tv1.imag == 0 else _tv1))))(z)"
     );
   });
 
-  test('Arsinh: `nan` on the branch cut only', () => {
+  test('Arsinh: cmath with the side of the cut of the interpreter', () => {
     const ce = engine();
     expect(value(run(ce, 'python', ['Arsinh', 'z']))).toBe(
-      "(lambda _tv1: (np.arcsinh(_ce_creal(_tv1)) if _ce_cisreal(_tv1) else (float('nan') if _tv1.real == 0 and abs(_tv1.imag) > 1 else np.arcsinh(_tv1))))(z)"
+      '(lambda _tv1: cmath.asinh((complex(-0.0 if _tv1.imag < 0 else 0.0, _tv1.imag) if _tv1.real == 0 else _tv1)))(z)'
     );
   });
 
@@ -264,7 +266,7 @@ describe('Python: Artanh, Arsinh and Sign of a complex value', () => {
     const r = run(ce, 'python', ['Artanh', ['Add', 'x', 'ImaginaryUnit']]);
     expect(r.success).toBe(true);
     expect(value(r)).toBe(
-      '(lambda _tv1: (np.arctanh(_ce_creal(_tv1)) if _ce_cisreal(_tv1) else np.arctanh(_tv1)))(x + complex(0, 1))'
+      "(lambda _tv1: (complex(_tv1.real * float('inf'), 0.0) if _tv1.imag == 0 and abs(_tv1.real) == 1 else cmath.atanh((complex(_tv1.real, -0.0 if _tv1.real > 0 else 0.0) if _tv1.imag == 0 else _tv1))))(x + complex(0, 1))"
     );
     // The interpreter evaluates it.
     expect(

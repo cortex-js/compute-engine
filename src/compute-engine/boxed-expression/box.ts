@@ -111,7 +111,7 @@ import {
 } from '../../common/type/instantiate.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
-import { isOperatorDef, isValueDef } from './utils.js';
+import { isOperatorDef, isValueDef, withOwnHead } from './utils.js';
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
@@ -657,7 +657,9 @@ function boxFunctionInternal(
           ce.function('Multiply', [imOp, ce.I]),
         ]);
       }
-      throw new Error('Expected one or two arguments with Complex expression');
+      // Another number of operands: the generic route below reports the
+      // missing or unexpected operands against the signature, as for the
+      // other operators.
     }
 
     //
@@ -3183,6 +3185,14 @@ function applyOperatorDefinition(
       try {
         result = opDef.canonical(xs, { engine: ce, scope });
         if (result) {
+          result = withOwnHead(
+            ce,
+            name,
+            'canonical',
+            opDef.canonical,
+            result,
+            () => xs
+          );
           // The handler canonicalized the operands it consumes, but no
           // signature validation ran on them, so a valueless symbol passed as
           // a collection operand (`Filter(xs, p)`) got no type from its use.
@@ -3308,8 +3318,16 @@ function applyOperatorDefinition(
   //
   if (opDef.canonical) {
     try {
-      const result = opDef.canonical(xs, { engine: ce, scope });
-      if (result) {
+      const handlerResult = opDef.canonical(xs, { engine: ce, scope });
+      if (handlerResult) {
+        const result = withOwnHead(
+          ce,
+          name,
+          'canonical',
+          opDef.canonical,
+          handlerResult,
+          () => xs
+        );
         // In strict mode, validate the operands against the operator's
         // declared signature *after* the canonical handler runs — the
         // boxing validation seam of a canonical-handler head. A custom

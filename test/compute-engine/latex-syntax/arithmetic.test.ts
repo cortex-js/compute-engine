@@ -39,8 +39,8 @@ describe('SUM parsing', () => {
       [
         "Sum",
         ["Add", "j", "k"],
-        ["Limits", "k", "Nothing", 1],
-        ["Limits", "j", "Nothing", 2]
+        ["Limits", "k", 1, "Nothing"],
+        ["Limits", "j", 2, "Nothing"]
       ]
     `);
   });
@@ -75,7 +75,7 @@ describe('SUM parsing', () => {
         "Sum",
         ["Add", "j", "k"],
         ["Limits", "k", 1, 3],
-        ["Limits", "j", "Nothing", 2]
+        ["Limits", "j", 2, "Nothing"]
       ]
     `);
   });
@@ -133,7 +133,7 @@ describe('SUM parsing', () => {
         "Sum",
         ["Add", "m", "n"],
         ["Limits", "n", 0, 10],
-        ["Limits", "m", "Nothing", 1]
+        ["Limits", "m", 1, "Nothing"]
       ]
     `);
   });
@@ -182,7 +182,7 @@ describe('SUM parsing', () => {
     // Mixed syntax now parses the Element expression
     // D is treated as a symbol (possibly a set)
     expect(ce.parse(`\\sum_{n = 6; d \\in D} K`)).toMatchInlineSnapshot(
-      `["Sum", "K", ["Limits", "n", "Nothing", 6], ["Element", "d", "D"]]`
+      `["Sum", "K", ["Limits", "n", 6, "Nothing"], ["Element", "d", "D"]]`
     );
   });
 

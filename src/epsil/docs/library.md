@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 682 functions and constants of the standard library, by category.
+The 698 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -29,15 +29,15 @@ To search the library by concept rather than by name, use
 - [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
 - [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
-- [Arithmetic](#arithmetic) — 99 definitions · [full reference](/epsil/reference/arithmetic/)
+- [Arithmetic](#arithmetic) — 101 definitions · [full reference](/epsil/reference/arithmetic/)
 - [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
 - [Calculus](#calculus) — 19 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 17 definitions · [full reference](/epsil/reference/polynomials/)
 - [Combinatorics](#combinatorics) — 11 definitions · [full reference](/epsil/reference/combinatorics/)
-- [Number theory](#number-theory) — 52 definitions · [full reference](/epsil/reference/number-theory/)
-- [Special functions](#special-functions) — 14 definitions · [full reference](/epsil/reference/special-functions/)
-- [Linear algebra](#linear-algebra) — 42 definitions · [full reference](/epsil/reference/linear-algebra/)
+- [Number theory](#number-theory) — 60 definitions · [full reference](/epsil/reference/number-theory/)
+- [Special functions](#special-functions) — 19 definitions · [full reference](/epsil/reference/special-functions/)
+- [Linear algebra](#linear-algebra) — 43 definitions · [full reference](/epsil/reference/linear-algebra/)
 - [Statistics](#statistics) — 35 definitions · [full reference](/epsil/reference/statistics/)
 - [Units](#units) — 7 definitions · [full reference](/epsil/reference/units/)
 - [Physics](#physics) — 11 definitions · [full reference](/epsil/reference/physics/)
@@ -453,6 +453,8 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | — | `ContinuationPlaceholder` | constant `unknown` | This symbol indicates that some elements in a collection have been omitted, for example in a long list of numbers, or in an infinite set |
 | `denominator` | `Denominator` | `(number) -> nothing \| number` | Denominator of an expression |
 | `digamma` | `Digamma` | `(complex \| infinity) -> number` | Digamma function, the logarithmic derivative of the gamma function |
+| `dirichletBeta` | `DirichletBeta` | `(complex \| infinity) -> number` | Dirichlet beta function β(s) = Σ_&#123;n≥0&#125; (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1. |
+| `dirichletEta` | `DirichletEta` | `(complex \| infinity) -> number` | Dirichlet eta function η(s) = Σ_&#123;n≥1&#125; (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1. |
 | `distance` | `Distance` | `(list<list<number>> \| list<number> \| list<tuple> \| tuple, list<list<number>> \| list<number> \| list<tuple> \| tuple) -> number` | Euclidean distance between two points, broadcasting over a list of points. |
 | — | `Divide` | `(complex \| infinity, (complex \| infinity)+) -> number` | Quotient of a numerator and one or more denominators. |
 | `elementMax` | `ElementMax` | `(real \| signed_infinity, (real \| signed_infinity)+) -> real \| signed_infinity` | Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
@@ -605,7 +607,7 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description an
 | `nd` | `ND` | `(function, at: number) -> list<number> \| number \| tuple` | Numerical derivative evaluated at a point. |
 | `ndSolve` | `NDSolve` | `(expression, symbol, limits: symbol \| tuple, number, number?) -> list` | Numerical differential equation solver. |
 | `ndSolveFunction` | `NDSolveFunction` | `(expression, symbol, limits: symbol \| tuple, number) -> function` | Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `InterpolatingFunction`), usable at any point of the integration interval. |
-| `nIntegrate` | `NIntegrate` | `(function, limits: (symbol \| tuple)?) -> number` | Numerical approximation of a definite integral. |
+| `nIntegrate` | `NIntegrate` | `(function, lower: number, upper: number) -> number` | Numerical approximation of a definite integral. |
 | `nLimit` | `NLimit` | `(function, point: number, direction: number?) -> number` | Numerical approximation of the limit of a function |
 | `normal` | `Normal` | `(value) -> value` | Strip Big-O remainder terms from a series, yielding the truncated polynomial. |
 | `rSolve` | `RSolve` | `(expression, symbol, symbol) -> expression` | Symbolic recurrence equation solver. |
@@ -667,9 +669,12 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `continuedFraction` | `ContinuedFraction` | `(real, integer?) -> list<integer>` | Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. |
 | `digitCount` | `DigitCount` | `(integer, integer?, integer?) -> integer \| list<integer>` | Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. |
 | `digitSum` | `DigitSum` | `(integer, integer?) -> integer` | Return the sum of the digits of `n` in the given `base` (default 10). |
+| `dirichletCharacter` | `DirichletCharacter` | `(integer, integer, integer) -> number` | The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). |
+| `dirichletL` | `DirichletL` | `(integer, integer, number) -> number` | The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. |
 | `divides` | `Divides` | `(integer, integer) -> boolean` | `Divides(a, b)` returns `True` if `a` divides `b` (i.e. |
 | `divisorSigma` | `DivisorSigma` | `(integer, integer) -> integer` | The divisor function σ_k(n) = Σ_&#123;d \| n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. |
 | `divisors` | `Divisors` | `(integer) -> list<integer>` | Return the sorted list of positive divisors of an integer `n`. |
+| `eulerPhi` | `EulerPhi` | `(integer) -> integer` | `EulerPhi` is an alias for `Totient`, which is the preferred name. |
 | `eulerian` | `Eulerian` | `(integer, integer) -> integer` | Eulerian number A(n, m): number of permutations of &#123;1..n&#125; with exactly m ascents. |
 | `extendedGCD` | `ExtendedGCD` | `(integer, integer) -> tuple<integer, integer, integer>` | Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). |
 | `factorInteger` | `FactorInteger` | `(integer) -> list<tuple<integer, integer>>` | Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. |
@@ -692,26 +697,31 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `lucasL` | `LucasL` | `(integer) -> integer` | Return the nth Lucas number: `LucasL(0)` is 2, `LucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. |
 | `modularInverse` | `ModularInverse` | `(integer, integer) -> integer` | Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. |
 | `moebiusMu` | `MoebiusMu` | `(integer) -> integer` | Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square &gt; 1, otherwise (-1) raised to the number of distinct prime factors. |
-| `multiplicativeOrder` | `MultiplicativeOrder` | `(integer, integer) -> integer` | The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. |
-| `nPartition` | `NPartition` | `(integer) -> integer` | Number of integer partitions of n. |
+| `multiplicativeOrder` | `MultiplicativeOrder` | `(integer, integer, list<integer>?) -> integer` | The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. |
+| `nPartition` | `NPartition` | `(integer) -> integer` | Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0. |
 | `nextPrime` | `NextPrime` | `(integer, integer?) -> integer` | Return the smallest prime greater than `n`. |
 | `notDivides` | `NotDivides` | `(integer, integer) -> boolean` | `NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`. |
 | `nthPrime` | `NthPrime` | `(integer) -> integer` | Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, … |
-| `powerMod` | `PowerMod` | `(integer, integer, integer) -> integer` | Return `a^b mod m` (modular exponentiation). |
+| `partitionsP` | `PartitionsP` | `(integer) -> integer` | `PartitionsP` is an alias for `NPartition`, which is the preferred name. |
+| `powerMod` | `PowerMod` | `(integer, rational, integer) -> integer` | Return `a^b mod m` (modular exponentiation). |
+| `powerModList` | `PowerModList` | `(integer, rational, integer) -> list<integer>` | Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. |
 | `primeFactors` | `PrimeFactors` | `(integer) -> list<integer>` | Return the sorted list of distinct prime factors of an integer `n`. |
 | `primeNu` | `PrimeNu` | `(integer) -> integer` | Return ω(n), the number of distinct prime factors of `n`. |
 | `primeNumber` | `PrimeNumber` | `(integer) -> integer` | The nth prime number. |
 | `primeOmega` | `PrimeOmega` | `(integer) -> integer` | Return Ω(n), the number of prime factors of `n` counted with multiplicity. |
 | `primePi` | `PrimePi` | `(real) -> integer` | Return π(n), the prime-counting function: the number of primes less than or equal to `n`. |
 | `primitiveRoot` | `PrimitiveRoot` | `(integer) -> integer` | The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p). |
+| `primitiveRootList` | `PrimitiveRootList` | `(integer) -> list<integer>` | The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. |
 | `radical` | `Radical` | `(integer) -> integer` | Return the radical of `n` (its square-free kernel): the product of its distinct prime factors. |
 | `randomPrime` | `RandomPrime` | `(integer, integer?) random -> integer` | Return a random prime. |
+| `rationalReconstruction` | `RationalReconstruction` | `(integer, integer) -> rational` | The rational `p/q` with `p ≡ a·q (mod m)` and `\|p\|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). |
 | `sigma0` | `Sigma0` | `(integer) -> integer` | Number of positive divisors of n. |
 | `sigma1` | `Sigma1` | `(integer) -> integer` | Sum of positive divisors of n. |
 | `sigmaMinus1` | `SigmaMinus1` | `(integer) -> rational` | Sum of reciprocals of positive divisors of n. |
 | `stirling` | `Stirling` | `(integer, integer) -> integer` | Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets. |
 | `stirlingS1` | `StirlingS1` | `(integer, integer) -> integer` | Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). |
-| `totient` | `Totient` | `(integer) -> integer` | Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n. |
+| `stirlingS2` | `StirlingS2` | `(integer, integer) -> integer` | `StirlingS2` is an alias for `Stirling`, which is the preferred name. |
+| `totient` | `Totient` | `(integer) -> integer` | Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n, for n ≥ 1; φ(0) = 0 and φ(−n) = φ(n). |
 
 ## Special functions
 
@@ -721,6 +731,8 @@ The [Special functions reference](/epsil/reference/special-functions/) has the f
 |:------|:---------|:----------|:--------|
 | `agm` | `AGM` | `(complex \| infinity, (complex \| infinity)?) -> number` | Arithmetic-geometric mean. |
 | `appellF1` | `AppellF1` | `(complex \| infinity, complex \| infinity, complex \| infinity, complex \| infinity, complex \| infinity, complex \| infinity) -> number` | Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for \|x\|, \|y\| &lt; 1. |
+| `barnesG` | `BarnesG` | `(complex \| infinity) -> number` | The Barnes G-function, the double gamma function G(z+1) = Γ(z)·G(z), G(1) = 1. |
+| `clausenCl` | `ClausenCl` | `(integer, real) -> number` | Clausen function Clₙ(θ) of integer order n ≥ 1 and real θ: Im Liₙ(e^&#123;iθ&#125;) = Σ sin(kθ)/kⁿ for even n, Re Liₙ(e^&#123;iθ&#125;) = Σ cos(kθ)/kⁿ for odd n. |
 | `dedekindEta` | `DedekindEta` | `(complex \| infinity) -> number` | Dedekind eta function η(τ), Im(τ) &gt; 0. |
 | `eisensteinE` | `EisensteinE` | `(number, complex \| infinity) -> number` | Normalized Eisenstein series Eₛ(τ) of even weight s ≥ 2, Im(τ) &gt; 0. |
 | `ellipticE` | `EllipticE` | `(complex \| infinity, (complex \| infinity)?) -> number` | Elliptic integral of the second kind: complete E(m) with one argument, incomplete E(φ\|m) with two (amplitude first, parameter convention m = k², as in Mathematica). |
@@ -731,8 +743,11 @@ The [Special functions reference](/epsil/reference/special-functions/) has the f
 | `hypergeometric1F1` | `Hypergeometric1F1` | `(complex \| infinity, complex \| infinity, complex \| infinity) -> number` | Kummer confluent hypergeometric function ₁F₁(a; b; z) = M(a, b, z). |
 | `hypergeometric2F1` | `Hypergeometric2F1` | `(complex \| infinity, complex \| infinity, complex \| infinity, complex \| infinity) -> number` | Gauss hypergeometric function ₂F₁(a, b; c; z). |
 | `jacobiTheta` | `JacobiTheta` | `(number, complex \| infinity, complex \| infinity, number?) -> number` | Jacobi theta function θⱼ(z, τ), j ∈ &#123;1,2,3,4&#125;, nome q = e^&#123;iπτ&#125; (Fungrim convention). |
+| `logBarnesG` | `LogBarnesG` | `(complex \| infinity) -> number` | The logarithm of the Barnes G-function, continued analytically with `LogGamma`: its imaginary part is not principal on the negative axis. −∞ at the zeros of G, the non-positive integers. |
+| `logGamma` | `LogGamma` | `(complex \| infinity) -> number` | The analytic continuation of ln Γ(z), with its branch cut on (−∞, 0]; not `GammaLn`, the principal logarithm of Γ(z), which jumps by 2πi across the zeros of Im Γ. |
 | `logIntegral` | `LogIntegral` | `(complex \| infinity) -> number` | Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x). |
 | `polyLog` | `PolyLog` | `(complex \| infinity, complex \| infinity) -> number` | Polylogarithm Liₛ(z) = Σ_&#123;k≥1&#125; zᵏ/kˢ, at any real or complex order s. |
+| `stieltjesGamma` | `StieltjesGamma` | `(integer, number?) -> number` | Generalized Stieltjes constants γₙ(a), the Laurent coefficients of ζ(s, a) at s = 1: ζ(s, a) = 1/(s−1) + Σₙ (−1)ⁿ γₙ(a)(s−1)ⁿ/n!. |
 
 ## Linear algebra
 
@@ -746,6 +761,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `conjugateTranspose` | `ConjugateTranspose` | `(value, axis1: integer?, axis2: integer?) -> value` | Conjugate transpose (Hermitian adjoint) of a matrix or tensor. |
 | `cross` | `Cross` | `(tuple \| vector, tuple \| vector) -> tuple \| vector` | Cross product of two 3-vectors. |
 | `degree` | `Degree` | `(value) -> integer` | Degree of an object |
+| `det` | `Det` | `(matrix) -> number` | `Det` is an alias for `Determinant`, which is the preferred name. |
 | `determinant` | `Determinant` | `(matrix) -> number` | Determinant of a square matrix. |
 | `diagonal` | `Diagonal` | `(value) -> value` | Extract a matrix diagonal or build a diagonal matrix. |
 | `dimension` | `Dimension` | `(value) -> integer` | Dimension of an object |

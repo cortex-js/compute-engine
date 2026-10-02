@@ -109,36 +109,210 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### The error bound of a quadrature that did not converge can be too small (OPEN, small — found 2026-10-01 by the review of quadrature for an integrand that does not compile)
+### Quadrature loops run 25 to 70 times slower under jest than under `tsx` (OPEN, small — found 2026-10-01 by the closing fixes of the integration round)
 
-The numeric value of `Integrate(f, x, a, b)` keeps the adaptive Gauss–Kronrod
-result when it did not converge but its error estimate beats Monte Carlo
-(`quadratureBeatsMonteCarlo`, `library/calculus.ts`). On a slowly convergent
-endpoint singularity that estimate is optimistic:
-∫₀^½ 1/(x·ln²x) dx = 1/ln 2 = 1.442695…; an interpreted integrand gives
-`1.43831 ± 0.00016` (true error 0.0044, 27 times the bound), and the compiled
-integrand reports `1.441310 ± 1.4e-13` as converged. The value is better than
-the Monte-Carlo estimate it replaces (`1.364 ± 0.023`), but the reported
-uncertainty is not a guarantee. One fix: widen the error of a result that did
-not converge to at least `|estimate| / √samples`; a faithful bound needs a
-singularity-aware rule (for example tanh-sinh).
+The same numeric integral takes 7 ms under `tsx` and 185 ms under jest (one
+inner `_SYS.integrate` call); the nested integral
+`\int_0^{10}\int_3^4 (y-x)^{-2} dx dy` takes 1.6 s under `tsx` and about
+117 s under jest, so it has no end-to-end test. The test group "an iterated
+integral with a singular endpoint"
+(`test/compute-engine/quadrature-endpoint-singularity.test.ts`) takes about
+60 s. The transpile target is modern, so the cause is elsewhere in the jest
+environment (the `vm` context, the coverage or transform settings in
+`config/jest.config.cjs`). Find it: it inflates the full-suite time and
+makes timing tests of numeric code unreliable.
 
-### `NIntegrate` never uses quadrature (OPEN, decision — found 2026-10-01 by the fix that gives `Integrate(…).N()` quadrature for an integrand that does not compile)
+### A numeric integral next to a singular bound: remaining cases (OPEN, small — found 2026-10-01 by the review of quadrature for an integrand that does not compile)
 
-`Integrate(f, x, a, b).N()` uses adaptive Gauss–Kronrod quadrature, for a
-compiled and (since 2026-10-01) an interpreted integrand, and falls back to
-Monte Carlo only when the quadrature does not converge. `NIntegrate` always
-samples: it tries the oscillatory method on a semi-infinite interval, then
-Monte Carlo (1e7 samples compiled, 1e4 interpreted). So
-`NIntegrate(x ↦ x², 0, 1)` is a sampled value close to 1/3 with sampling
-noise, while `Integrate(x², x, 0, 1).N()` is `0.3333333333333333`.
-`test/compute-engine/derived-substreams.test.ts` states "`NIntegrate` always
-samples". The decision: keep `NIntegrate` as a sampling operator, or give it
-the quadrature first (more accurate and faster). With the quadrature first,
-`NIntegrate` still falls back to Monte Carlo when the quadrature does not
-converge, so it keeps `readsRandomFrame: true`, as `Integrate` does; only its
-results (where the quadrature succeeds) and that test's comment and integrand
-change.
+`Integrate(f, x, a, b).N()` and `NIntegrate` (`integrateRealPart`,
+`library/calculus.ts`) find the part of an integral next to a singular bound
+by extrapolation of the shells of the corner panel, and check a converged
+result against the tanh-sinh rule (`resolveSingularEndpoints`,
+`numerics/endpoint-quadrature.ts`). The compiled `_SYS.integrate` and the
+levels of an iterated integral (`nIntegrateMultiple`) do the same. These
+cases remain (measured 2026-10-01):
+
+- ∫₀¹ t^(−0.995)·ln t dt = −1/0.005² = −40000 gives `NaN` under `.N()` and
+  `NIntegrate` with a COMPILED integrand: with 1500 panels the divergence
+  test of the shells (`shellsDiverge`, `numerics/gauss-kronrod.ts`) reads it
+  as divergent before the extrapolation runs. An integrand that does not
+  compile (330 panels) gives `-39999.99995 ± 0.00025`.
+- A pole with a large regular part at a NONZERO bound is not found by the
+  quadrature: ∫₀¹ (1/(1 − t) − 10⁵) dt (`+∞`) gives a Monte-Carlo value such
+  as `-99963 ± 32` under `.N()`, and ∫₀^{π/2} (tan t − 10⁴) dt (`+∞`)
+  gives `-15676.4 ± 9.0`. `.evaluate()` gives `+∞` for both.
+- ∫₀^½ dt/(t·ln t) diverges to `−∞` (`.evaluate()` gives `−∞`). The shells
+  shrink like `1/n`, which the divergence test reads as convergent. The
+  Gauss–Kronrod value (`-6.9392539460415 ± 0.0000000000048` before) differs
+  from the tanh-sinh value and no extrapolation agrees, so its error is
+  widened, and `.N()` gives `-6.9 ± 1.6` (the Gauss–Kronrod value, kept
+  next to a singular corner that is not resolved, `singularCorner`). The
+  model fitted to the shells (`shellTrend`, `numerics/endpoint-quadrature.ts`)
+  gives the power `q = −1.0` for this integral and `q = −2.0` for the
+  convergent `1/(t·ln²t)`: it declines the extrapolation, but does not report
+  the divergence. A power `q ≥ −1` with no geometric decrease (`ρ ≈ 0`) could
+  be reported as divergent.
+- ∫₀¹ t⁻³⁰⁰ dt gives `+oo ± NaN` under `.N()` (a `Measurement` with no
+  error) instead of `+∞`: the integrand overflows at every node close to 0, so
+  the quadrature never sees a divergence.
+- A converged error can be smaller than the rounding of the value:
+  ∫₀¹ sin x dx under `.N()` gives
+  `0.4596976941318603460118 ± 0.0000000000000000000085`, an error below the
+  spacing of the doubles near the value (`5.6e-17`), and digits that a double
+  does not have. QUADPACK keeps the error of a panel at least
+  `50·ε·∫|f|` over the panel; `gk15` (`numerics/gauss-kronrod.ts`) has no such
+  floor.
+- An oscillation in `ln(1 − t)` whose period is longer than the shells next
+  to 1 is not found: ∫₀¹ sin(0.05·ln(1 − t))/(1 − t) dt has no value, but its
+  28 shells next to 1 have one sign and fit the model of a convergent series
+  (`x^(−p)·lnᵠx`) to `7e-4` in logarithm (`SHELL_MODEL_RESIDUAL` is `1e-3`;
+  convergent integrands measured fit to `3.2e-4`), and `.N()` gives
+  `-19.99999999 ± 0.00000020`. With `0.1·ln` the fit is `8.7e-3`, and `.N()`
+  gives `-18.7 ± 8.5`.
+- A convergent integral whose oscillation shrinks slowly is reported as
+  having no value when the shells are few: ∫₀¹ cos(ln t)/t^0.999 dt
+  (`0.000999999`) gives `NaN` on a level of an iterated integral (100
+  panels: the largest shell in the last quarter is 0.96 times the largest in
+  the first quarter, above `SHELL_OSCILLATION_STEADY`). With 330 or 1500
+  panels it is not reported, but the Gauss–Kronrod value is wrong (`1.15` or
+  `-0.105`) and the error does not converge.
+- Next to a bound of large magnitude, the corner panel reaches the spacing of
+  the doubles after few bisections, and fewer than 12 shells are accurate,
+  so no extrapolation is possible: ∫ (t − 10⁶)^(−0.99) dt = 100 on
+  `[10⁶, 10⁶ + 1]` gives `20.31 ± 0.59` under `.N()`. For
+  ∫ (t − 10⁶)^(−½) dt = 2 the adaptive quadrature gives
+  `1.9999772 ± 0.0000106` (true error 2.3e-5); the error reported by `.N()`
+  (`± 0.00063`, the Monte-Carlo floor) covers it.
+- The display of a `Measurement` with an error below `1e-100` fails:
+  `ce.box(['Measurement', 1e-297, 1e-306]).toString()` returns the text of
+  the exception `toFixed() digits argument must be between 0 and 100`
+  (`roundMeasurementForDisplay`, `numerics/strings.ts`, calls `toFixed` with
+  more than 100 digits). So `.N()` of ∫₀¹ 10⁻³⁰⁰·t^(−0.999) dt prints that
+  text, although its value is `1.0000000000095e-297`.
+- The compile-time fold price of a numeric integral
+  (`FOLD_QUADRATURE_EVALS`, `compilation/base-compiler.ts`) covers the
+  Gauss–Kronrod quadrature and the tanh-sinh check, but not the oscillatory
+  quadrature of a semi-infinite interval (`integrateSemiInfiniteOscillatory`,
+  `numerics/oscillatory-quadrature.ts`), which `integrateRealPart` and
+  `_SYS.integrate` run first. It integrates up to 2000 lobes, each by
+  adaptive Simpson to a depth of 24, after a scan of up to 200 000 steps for
+  each zero, so its worst case is far above the price. A typical run takes
+  about 1e4 evaluations (∫₀^∞ sin x/√x dx: 14 000).
+
+### A pole at a number is missed when the integrand is not real on one side of it (OPEN, small — found 2026-10-01 by the review of the pole proofs; present before)
+
+`.evaluate()` of an integral over `[−1, 1]` of a power of `x` whose exponent
+is not an integer, or depends on a symbol, gives the antiderivative
+difference, although the pole at `x = 0` is inside the bounds:
+
+- `\int_{-1}^{1} x^{-a^2-1} dx` → `-a^(-2) + (-1)^(-(a^2)) / a^2`, which is
+  `−2` at `a = 1`. Expected: unevaluated (for `a = 1` the integral is `+∞`).
+- `\int_{-1}^{1} x^{-2-a^2} dx` → `1 / (-1 - a^2) - ((-1)^(-1 - a^2)) /
+  (-1 - a^2)`, which is `0` at `a = 1`. Expected: unevaluated (`+∞` for
+  `a = 1`).
+- `\int_{-1}^{1} x^{-1.5} dx` → `-2 - 2i`. Expected: no value (the integral
+  diverges at 0).
+
+For `x < 0`, `x^p` with a non-integer `p` is not real, so the pole check
+(`interiorPoleVerdict`, `symbolic/interior-pole.ts`) does not find a pole
+with a sign on that side. A pole at `x = 0` with `|x^p| → ∞` on the real side
+is enough to make the integral diverge.
+
+### `∫₀¹ x^(−p) dx` for `p` very close to 1 is `+∞` or `NaN` (OPEN, small — found 2026-10-01 by the review of the endpoint quadrature; present before)
+
+`.N()` of `\int_0^1 x^{-0.9999}\,dx` (`= 10000`) gives `+∞`;
+`\int_0^1 x^{-0.9999}\ln(x)\,dx` (`= −10⁸`) gives `−∞`; for `p` from
+`0.9993` to `0.9998` both give `NaN` (`p = 0.9992` gives
+`1250.0000000060 ± 0.0000000070`). Expected: the value, or `NaN` with no
+sign. The divergence test of the shells (`shellsDiverge`,
+`numerics/gauss-kronrod.ts`) reads the ratio of consecutive shells,
+`2^(p−1) ≈ 0.99993`, as a divergence, and then the sign of a pole at the
+bound (`endpointPoleVerdict`, `library/calculus.ts`) turns the divergence
+into `+∞` or `−∞`.
+
+### A nested iterated integral on the parse route loses the error of the inner integral (OPEN, small — found 2026-10-01 by the review of the endpoint quadrature; present before)
+
+`.N()` of `\int_0^1\int_0^1 e^{-xy}/x^{0.99} dx dy` gives
+`99.575857194449625 ± 0.000000000000000011`; the integral is
+`99.5758571944484`, so the true error is `1.2e-12`, 1e5 times the reported
+error. The outer integral compiles its integrand, which holds the inner
+integral, to `_SYS.integrate` (`compilation/javascript-target.ts`). That
+call returns a plain number, so the error of the inner quadrature is not
+added to the error of the outer one, as `nIntegrateMultiple`
+(`library/calculus.ts`) does for `Integrate(f, Limits(x, …), Limits(y, …))`.
+
+### `∫₀¹ ln t dt` stays unevaluated under `.evaluate()` (OPEN, small — found 2026-10-01 by the fix for a pole at a bound)
+
+`Integrate(Ln(t), Limits(t, 0, 1)).evaluate()` stays unevaluated, although
+the integral is `−1` (`.N()` gives `-1.000000000000 ± 0.000000000086`). The
+antiderivative `t·ln t − t` evaluated at `0` is `0·(−∞)`, which is `NaN`, and
+a `NaN` difference keeps the integral unevaluated. The value at a finite
+bound must be the one-sided limit from inside the interval, as
+`improperEndpointValue` (`library/calculus.ts`) does for an infinite bound.
+`symbolicLimit(t·ln t − t, t, 0, +1)` gives `undefined` today, so that limit
+must be found first (`t·ln t → 0` as `t → 0⁺`).
+
+### The order of several `Limits` of `Integrate`: the parser and the documentation disagree with the evaluation (OPEN, decided 2026-10-01 — found by the review of the pole proofs. Decision: keep "first = outer", as Mathematica does; change the parser so that `\iint f\,dx\,dy` gives `Limits(y), Limits(x)`, and correct the reference)
+
+`Integrate(f, Limits(x, …), Limits(y, …))` is evaluated with the FIRST
+`Limits` as the OUTERMOST integral (the Mathematica convention): the
+`evaluate()` loop integrates the last `Limits` first, `nIntegrateMultiple`
+(`library/calculus.ts`) lets the bounds of limit `i` depend on the variables
+of limits `0…i−1`, and two tests in `test/compute-engine/calculus.test.ts`
+("dependent inner bound: triangle", "a bound referencing an INNER
+integration variable declines") lock this in. `Sum` and `Product` document
+the same order (`doc/82-reference-collections.md`: "the first spec being the
+outermost"). But the parser reads `\iint f\,dx\,dy` as `Limits(x),
+Limits(y)`, with the innermost variable (`dx`) first, and the double-integral
+example of `doc/81-reference-calculus.md` lists `Tuple(x, 0, 2)` (the inner
+integral of `\int_1^3\int_0^2 … dx dy`) first. With constant bounds the
+order does not change the value. With a dependent bound it does:
+`Integrate(x·y, Limits(x, 0, 2y), Limits(y, 0, 1))` evaluates to `y²` (the
+`y` in the bound of `x` is a free `y`), while the reviewer read it as
+`∫₀¹ ∫₀^{2y} x·y dx dy = 1/2`. A bounded iterated integral on the parse route
+is a nested `Integrate`, which is not affected. Decision needed: keep the
+first-outermost convention (then change the `\iint` parse order and the
+documentation example), or change to innermost-first (then change the
+evaluation, `nIntegrateMultiple` and the two tests).
+
+### `.N()` of a `Block` does not make its body numeric (OPEN, small — found 2026-10-01 by the parity fix for `∫₋₁¹ π/t dt`)
+
+`ce.box(["Block", ["Sin", 1]]).N()` gives `sin(1)`, and
+`Block(π/0.001).N()` gives `1000π`, where `["Sin", 1]` alone gives
+`0.841…`. The body of a function literal parsed from LaTeX is a `Block` of
+one expression, so every sample of such an integrand with a constant was not
+a number, and the interior-pole check of `.N()` saw no pole (it now unwraps
+the `Block` in `valueAt`, `symbolic/interior-pole.ts`). The `Block` evaluate
+handler (`library/control-structures.ts`) should pass the numeric request
+to the expressions it evaluates.
+
+### `∫₋₁¹ t^(−n) dt` gives a closed form that is wrong for `n ≥ 1` (OPEN, small — found 2026-10-01 by the review of the pole proofs)
+
+`\int_{-1}^1 t^{-n}\,dt` evaluates to `1/(1 − n) − (−1)^(1 − n)/(1 − n)`,
+but the integral diverges for every `n ≥ 1` (the pole at `0` is inside).
+`symbolicPoleMayBeInside` (`symbolic/interior-pole.ts`) handles a base whose
+zero moves with a free symbol (`(t − a)^(−n)`), and it samples the free
+symbols to confirm a pole at a number, but `n = 2.236`, its only sample with
+a pole, makes `t^(−n)` complex for `t < 0`, so the pole is not confirmed. A
+power whose exponent is not a number and not proven positive, with a base
+that has a zero at a number strictly inside the interval, should keep the
+integral unevaluated. A zero AT a bound must not: `∫₀¹ tⁿ dt` is the
+correct guarded `1/(n + 1)` for `n + 1 > 0`.
+
+### The antiderivative of `t^(−n)` has no case for `n = 1` (OPEN, small — found 2026-10-01 by the review of the pole proofs)
+
+`\int t^{-n}\,dt` is `t^(1 − n)/(1 − n)` and `\int (t-a)^{-n}\,dt` is
+`(t − a)^(1 − n)/(1 − n)`, with no case for `n = 1`. So
+`\int_1^2 t^{-n}\,dt` is `(2^(1 − n) − 1)/(1 − n)`, which gives `~∞` at
+`n = 1`, where the integral is `ln 2`. The result should be a conditional
+value (`ln|t|` when `n = 1`), or carry the condition `n ≠ 1`.
+
+### A sum or product with a bound that depends on another index stays unevaluated (OPEN, small — found 2026-10-01 by the review of the flat spelling of indexes)
+
+`Sum(k, Limits(n, 1, 10), Limits(k, 1, n))` (`∑ₙ₌₁¹⁰ ∑ₖ₌₁ⁿ k = 220`) stays
+unevaluated under `evaluate()` and `N()`, and so does the order
+`Sum(k, Limits(k, 1, n), Limits(n, 1, 10))`. `Integrate` evaluates the same
+shape (`Integrate(1, Limits(x, 0, 1), Limits(y, 0, x))` is `1/2`).
 
 ### Two leftovers of the extend mode of `ce.declare()` (OPEN, small — found 2026-10-01 by the work on issue #394)
 
@@ -222,28 +396,6 @@ The options:
    (`IntegerModRing(5)`), which already works on both sides. Nothing to do.
 
 If nothing is decided, option 3 applies.
-
-### A copy of an arithmetic operator definition is differentiated and compiled as a user function (OPEN, decision — found 2026-10-01 by the fix of issue #394)
-
-After `ce.declare('Sqrt', { ...ce.lookupDefinition('Sqrt').operator })`, the
-canonical form and the type of `Sqrt(…)` are the standard ones (the copy keeps
-the `canonical` handler of the library definition, `canonical-numeric.ts`).
-But `D` and `compile()` still treat the name as shadowed
-(`shadowsLibraryName`, `library-shadowing.ts`): `D(sqrt(sin(x)), x)` gives
-`cos(x) * Apply(Derivative(sqrt, 1), sin(x))` instead of
-`cos(x) / (2sqrt(sin(x)))`, and `compile()` fails closed and falls back to the
-interpreter (`success: false`, same value). The same holds for `Add`,
-`Multiply`, `Negate`, `Ln`, `Log`, `Power`, `Root` and `Divide` (`Square` and
-`Exp` canonicalize to `Power`, so they are not affected), and for any other
-library operator. The behavior is the same before and after the #394 fix. The
-decision to make: when a copy should count as the library operator for the
-derivative rules and for the compiled lowering. Options: (a) never, as now:
-the copy may override `evaluate`, and the library rule or `Math.sqrt` would
-then not compute what the interpreter computes; (b) when the copy keeps both
-the library `canonical` and `evaluate` handlers (an unchanged copy, or one
-that changes only metadata such as `description`); (c) whenever it keeps the
-`canonical` handler, since the canonical form already applies the library
-identities.
 
 ### A named call through a variable with an INFERRED function type keeps the parameter order of the value it held when the call was made canonical (OPEN, decision — found 2026-10-01 by the fix for a variable declared `function`)
 
@@ -345,6 +497,20 @@ round-trips, the brackets are lost), or (b) the parser reads one spelling as a
 bracket group (for example `\left[ … \right]` with one operand), which
 changes what that spelling gives today. Writer: the `Delimiter` serializer in
 `latex-syntax/dictionary/definitions-core.ts`.
+
+### Compiled JavaScript removes a small part of a complex result that the interpreter keeps (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
+
+The compiled complex helpers (`toRI()`, `compilation/javascript-target.ts`)
+set to 0 a part not larger than `10⁻¹⁴` and not larger than `10⁻¹⁴` times the
+modulus of the result (`chopKernelDust()`, `numeric-value/roundoff.ts`).
+The interpreter's one-argument kernels (`apply()`,
+`boxed-expression/apply.ts`) do not remove anything, so `arcoth(10⁻¹⁰⁰)` is
+`10⁻¹⁰⁰ − (π/2)i` in the interpreter and `−(π/2)i` compiled. The removal is
+there because some `complex-esm` kernels leave a residual part of about
+`10⁻¹⁶` (`Complex(0.5, 0).asin()` had `im = 5.55e-17`), and the compiled
+result convention tests `im === 0` exactly. Options: remove the dust in the
+kernels that produce it and stop removing it in `toRI()`, or remove it in the
+interpreter's one-argument `apply()` too.
 
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 

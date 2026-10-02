@@ -268,7 +268,7 @@ Inverse hyperbolic cotangent (area hyperbolic cotangent).
 
 ```epsil
 N(arcoth(2))
-// ➔ 0.5493061443340548457
+// ➔ 0.549306144334054845698
 ```
 
 ### arcsch

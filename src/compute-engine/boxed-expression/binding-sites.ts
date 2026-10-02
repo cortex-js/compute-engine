@@ -7,6 +7,7 @@ import type {
 } from '../global-types.js';
 
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import { isValueDef } from './definition-guards.js';
 import {
   functionLiteralParameterName,
   functionLiteralParameterNames,
@@ -115,25 +116,49 @@ const INDEXING_SET_OPERATORS = new Set([
 function rangeIndexType(
   op: Expression,
   type: TypeString | undefined,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  flatIndexes: ReadonlySet<number>
 ): TypeString | undefined {
   if (type !== 'integer' || !isFunction(op, 'Limits')) return type;
-  const index = op.ops[0];
+  return rangeIndexTypeOf(
+    op.ops[0],
+    op.ops[1],
+    op.ops[2],
+    type,
+    ops,
+    flatIndexes
+  );
+}
+
+/**
+ * The ranged type of the index `index` with bounds `loOp` and `hiOp`, as
+ * {@link rangeIndexType} describes. It applies to a `Limits` clause and to
+ * the flat spelling of the same clause (`Sum(body, k, 1, 10)`).
+ */
+function rangeIndexTypeOf(
+  index: Expression | undefined,
+  loOp: Expression | undefined,
+  hiOp: Expression | undefined,
+  type: TypeString | undefined,
+  ops: ReadonlyArray<Expression>,
+  flatIndexes: ReadonlySet<number>
+): TypeString | undefined {
+  if (type !== 'integer') return type;
   if (!isSymbol(index)) return type;
   if (ops.some((x) => assignsSymbol(x, index.symbol))) return type;
   // Two clauses that bind the same name (`Sum(k, Limits(k, 1, 3),
-  // Limits(k, 5, 7))`) assign the values of both ranges to one symbol, so
-  // neither range is its type.
-  const bindsIndex = (x: Expression): boolean =>
-    isFunction(x) &&
-    INDEXING_SET_OPERATORS.has(x.operator) &&
-    isSymbol(x.ops[0]) &&
-    x.ops[0].symbol === index.symbol;
+  // Limits(k, 5, 7))`, or the flat `Sum(k, k, 1, 3, k, 5, 7)`) assign the
+  // values of both ranges to one symbol, so neither range is its type.
+  const bindsIndex = (x: Expression, i: number): boolean =>
+    isFunction(x)
+      ? INDEXING_SET_OPERATORS.has(x.operator) &&
+        isSymbol(x.ops[0]) &&
+        x.ops[0].symbol === index.symbol
+      : flatIndexes.has(i) && isSymbol(x) && x.symbol === index.symbol;
   if (ops.filter(bindsIndex).length > 1) return type;
   // Only number LITERALS: a symbol bound (`Limits(k, 1, n)` with `n := 10`)
   // can be reassigned after this binding, which would leave the index type
   // wrong.
-  const [, loOp, hiOp] = op.ops;
   if (!isNumber(loOp) || !isNumber(hiOp)) return type;
   // Safe integers only: the machine value of a larger literal is rounded,
   // and the range would then miss index values.
@@ -174,7 +199,8 @@ function indexingSetSite(
   op: Expression | undefined,
   i: number,
   type: TypeString | undefined,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  flatIndexes: ReadonlySet<number> = NO_FLAT_INDEXES
 ): BindingSite[] {
   // A DESTRUCTURING loop variable — `for (p, q) in pairs { … }`, lowered to
   // `Element(Tuple(p, q), pairs)` — binds one name per pattern leaf, so the
@@ -215,11 +241,17 @@ function indexingSetSite(
     const site = siteFor(op.ops[0], [i, 0], undefined);
     return site === undefined ? [] : [{ ...site, clauseLocal: true }];
   }
+  // A bare symbol that is followed by its bounds (`Sum(body, n, 1, 10)`)
+  // takes the ranged type its `Limits` spelling would take.
+  const flatType =
+    isSymbol(op) && flatLimitsSpan(ops, i) === 3
+      ? rangeIndexTypeOf(op, ops[i + 1], ops[i + 2], type, ops, flatIndexes)
+      : type;
   const site =
     isFunction(op) && INDEXING_SET_OPERATORS.has(op.operator)
-      ? siteFor(op.ops[0], [i, 0], rangeIndexType(op, type, ops))
+      ? siteFor(op.ops[0], [i, 0], rangeIndexType(op, type, ops, flatIndexes))
       : // A bare symbol (`Sum(body, n, 1, 10)`) or `Hold(n)`.
-        siteFor(op, [i], type);
+        siteFor(op, [i], flatType);
   return site === undefined ? [] : [{ ...site, clauseLocal: true }];
 }
 
@@ -238,11 +270,128 @@ export function indexingSetSites(
   type?: TypeString
 ): BindingSiteSelector {
   return (ops) => {
+    // In the flat spelling (`Sum(body, n, 1, 10)`, `Integrate(f, x, 0, b)`)
+    // the operands after an index are its bounds, not indexes: they are
+    // skipped, so a symbol bound (`b`) stays free.
+    const flatIndexes = new Set<number>();
+    for (let i = first; i < ops.length; i++) {
+      if (!isSymbol(ops[i])) continue;
+      flatIndexes.add(i);
+      i += flatLimitsSpan(ops, i) - 1;
+    }
     const sites: BindingSite[] = [];
-    for (let i = first; i < ops.length; i++)
-      sites.push(...indexingSetSite(ops[i], i, type, ops));
+    for (let i = first; i < ops.length; i++) {
+      sites.push(...indexingSetSite(ops[i], i, type, ops, flatIndexes));
+      if (isSymbol(ops[i])) i += flatLimitsSpan(ops, i) - 1;
+    }
     return sites.length === 0 ? NO_SITES : sites;
   };
+}
+
+const NO_FLAT_INDEXES: ReadonlySet<number> = new Set();
+
+/**
+ * Whether `op` is a symbol that can name an index or an integration variable
+ * in the flat spelling of an indexing set (`["Integrate", f, "x", "y"]`,
+ * `["Sum", body, "k", 1, "n"]`): a symbol that is not a constant (`Pi`,
+ * `ExponentialE`) and not the placeholder `Nothing`.
+ */
+function isVariableName(op: Expression | undefined): boolean {
+  if (!isSymbol(op) || op.symbol === 'Nothing') return false;
+  const def = op.engine.lookupDefinition(op.symbol);
+  return !(isValueDef(def) && def.value.isConstant === true);
+}
+
+/**
+ * The number of operands, from 1 to 3, of the flat indexing-set clause that
+ * starts with the symbol `ops[i]`: the index alone (1), the index and its
+ * upper bound (2), or the index and its lower and upper bounds (3).
+ *
+ * An operand after the index that is not a variable name (a number, a
+ * constant such as `Pi`, or an expression) starts the bounds: with one more
+ * operand, they are the lower and upper bounds, whatever expression the upper
+ * bound is (`"x", 0, "Pi"`, `"x", 0, "b"`); alone, it is the upper bound
+ * (`"x", 10`). A variable name after the index is the next index: `"x", "y",
+ * "z"` are three indexes with no bounds, and `"x", "y", 0, 1` is `x` with no
+ * bounds, then `y` from 0 to 1. A variable name in the upper-bound position
+ * that is followed by more operands is the next index too: `"x", 1, "y", 0,
+ * 2` is `x` up to 1, then `y` from 0 to 2.
+ *
+ * A variable name is NOT read as the next index when that reading would make
+ * it an index twice: in `"x", 0, "y", "y", 0, 1` the first `y` is the upper
+ * bound of `x` (`x` from 0 to `y`, then `y` from 0 to 1), not an index with
+ * no bounds followed by a second index `y`. The same applies to the operand
+ * just after the index: in `"x", "y", "y", 0, 1`, `y` is the upper bound of
+ * `x`.
+ *
+ * `Integrate` (`canonicalLimitsSequence`), `Sum` and `Product`
+ * (`canonicalFlatIndexingSets`), both in `library/utils.ts`, and the binder
+ * hook above all read the flat spelling with this function, so that the
+ * symbols they bind are the same.
+ */
+export function flatLimitsSpan(
+  ops: ReadonlyArray<Expression>,
+  i: number
+): 1 | 2 | 3 {
+  const next = ops[i + 1];
+  const after = ops[i + 2];
+  if (next === undefined || isNextIndex(ops, i + 1)) return 1;
+  if (after !== undefined && !(isNextIndex(ops, i + 2) && i + 3 < ops.length))
+    return 3;
+  return 2;
+}
+
+/**
+ * Whether the operand `ops[k]` of a flat indexing-set spelling starts the
+ * next clause: it is a variable name, and reading it as an index does not
+ * make the same name an index twice in the clauses from `k` on (see
+ * {@link flatLimitsSpan}).
+ */
+function isNextIndex(ops: ReadonlyArray<Expression>, k: number): boolean {
+  // `isNextIndex` and `flatLimitsSpan` call each other on later operands, so
+  // without a cache the cost grows exponentially with the number of
+  // operands. The result for `k` depends only on the operands from `k` on,
+  // and on whether each of these symbols is a constant (`isVariableName`
+  // reads its definition). The cache assumes that this does not change while
+  // the array `ops` is alive: a symbol declared a constant (or no longer a
+  // constant) after a first call still gets the cached result for the same
+  // array.
+  let cache = NEXT_INDEX_CACHE.get(ops);
+  if (cache === undefined) {
+    cache = new Map();
+    NEXT_INDEX_CACHE.set(ops, cache);
+  }
+  let result = cache.get(k);
+  if (result === undefined) {
+    result = computeIsNextIndex(ops, k);
+    cache.set(k, result);
+  }
+  return result;
+}
+
+const NEXT_INDEX_CACHE = new WeakMap<
+  ReadonlyArray<Expression>,
+  Map<number, boolean>
+>();
+
+function computeIsNextIndex(
+  ops: ReadonlyArray<Expression>,
+  k: number
+): boolean {
+  const op = ops[k];
+  if (!isVariableName(op) || !isSymbol(op)) return false;
+  let count = 0;
+  let j = k;
+  while (j < ops.length) {
+    const x = ops[j];
+    if (!isVariableName(x)) {
+      j += 1;
+      continue;
+    }
+    if (isSymbol(x) && x.symbol === op.symbol) count += 1;
+    j += flatLimitsSpan(ops, j);
+  }
+  return count < 2;
 }
 
 /**

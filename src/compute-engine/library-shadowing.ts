@@ -37,6 +37,19 @@
  * exactly these parts, so it still gives the right answer
  * (`markLibraryExtension()`).
  *
+ * For the same reason, a copy of the library definition is not a shadow
+ * when it holds the library's own `evaluate`, `canonical`, `compile` and
+ * `derivative` handlers, and the library's `lazy`, `broadcastable` and
+ * `evaluateAsync` (`keepsLibraryOperator()`). A copy that replaces one of
+ * the handlers is a shadow: the interpreter would compute something other
+ * than the library rule. A copy that changes `lazy` or `broadcastable`
+ * changes how the arguments are evaluated or compiled, and a copy with
+ * another `evaluateAsync` computes another value under
+ * `evaluateAsync()`, so these are shadows too. The same flags are required
+ * of an extension. Only the definition of the same name in the system scope
+ * is compared, so a copy declared under another name is never the library
+ * operator.
+ *
  * This module is a leaf: it takes the engine through the few members it
  * reads, so the boxing code and the compiler can both import it.
  */
@@ -63,10 +76,71 @@ export function shadowsLibraryName(
   if (current === undefined || current === library) return false;
   const operator = (current as { operator?: object }).operator;
   const libraryOperator = (library as { operator?: object }).operator;
+  if (operator === undefined || libraryOperator === undefined) return true;
+  if (LIBRARY_EXTENSIONS.get(operator) === libraryOperator)
+    return !keepsLibraryFlags(operator, libraryOperator);
+  return !keepsLibraryOperator(operator, libraryOperator);
+}
+
+/**
+ * The handlers of an operator definition that the code which reads the
+ * library operator by name depends on: the canonical folds, the derivative
+ * rules and the compiled lowering give the library result, so they are
+ * correct for a definition only when it computes what the library computes.
+ */
+const LIBRARY_HANDLERS = [
+  'evaluate',
+  'canonical',
+  'compile',
+  'derivative',
+] as const;
+
+/**
+ * True when the operator definition `operator` holds the same `evaluate`,
+ * `canonical`, `compile` and `derivative` handlers as the library operator
+ * definition `libraryOperator` (the same function objects, or both absent),
+ * and the same `lazy`, `broadcastable` and `evaluateAsync`
+ * (`keepsLibraryFlags()`). This is the case of a copy of the library
+ * definition, `ce.declare('Sqrt', { ...ce.lookupDefinition('Sqrt').operator
+ * })`, and of a copy that changes only other fields, such as `description`
+ * (user decision 2026-10-01). Such a copy is not a shadow.
+ *
+ * The handlers are compared by object identity. A copy built from the
+ * definitions of another engine bundle (a plugin bundle re-bundles the
+ * engine code, so its library handlers are other function objects) is a
+ * user definition.
+ */
+export function keepsLibraryOperator(
+  operator: object,
+  libraryOperator: object
+): boolean {
+  const current = operator as Record<string, unknown>;
+  const library = libraryOperator as Record<string, unknown>;
   return (
-    operator === undefined ||
-    libraryOperator === undefined ||
-    LIBRARY_EXTENSIONS.get(operator) !== libraryOperator
+    LIBRARY_HANDLERS.every((key) => current[key] === library[key]) &&
+    keepsLibraryFlags(operator, libraryOperator)
+  );
+}
+
+/**
+ * True when `operator` has the same `lazy` and `broadcastable` flags as the
+ * library operator definition `libraryOperator`, and the same
+ * `evaluateAsync` handler (the same function object, or both absent).
+ * `lazy` decides whether the arguments are evaluated before the handler
+ * sees them, `broadcastable` whether the operator is applied element by
+ * element to a collection argument (by the interpreter and by the compiled
+ * code), and `evaluateAsync` computes the value under `evaluateAsync()`. A
+ * definition that changes one of these does not compute what the library
+ * operator computes. The flags are compared as booleans, the values the
+ * boxed definition reports (an absent flag is `false`).
+ */
+function keepsLibraryFlags(operator: object, libraryOperator: object): boolean {
+  const current = operator as Record<string, unknown>;
+  const library = libraryOperator as Record<string, unknown>;
+  return (
+    !!current.lazy === !!library.lazy &&
+    !!current.broadcastable === !!library.broadcastable &&
+    current.evaluateAsync === library.evaluateAsync
   );
 }
 

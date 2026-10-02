@@ -6,7 +6,7 @@ import {
   hurwitzZetaComplexWithError,
   incompleteGammaUpperComplexWithError,
 } from './numeric-complex.js';
-import { hurwitzZeta } from './special-functions.js';
+import { hurwitzZeta, zeta } from './special-functions.js';
 
 // Lerch transcendent Φ(z,s,a) = Σ_{k≥0} zᵏ(k+a)^(−s), in machine floats.
 // Measured over random points against mpmath, the values returned are
@@ -1564,4 +1564,30 @@ export function lerchPhiReal(z: number, s: number, a: number): number {
     new Complex(a, 0)
   );
   return result === undefined ? NaN : result.re;
+}
+
+/** Within this distance of s = 1 the Dirichlet η and β sum their alternating series, with no pole to cancel. */
+export const DIRICHLET_NEAR_POLE = 0.25;
+
+/**
+ * Dirichlet η(s) = (1 − 2^{1−s}) ζ(s) for real s in machine floats; η(1) = ln 2.
+ * Near s = 1, where the product cancels ζ's pole, it is Φ(−1, s, 1).
+ */
+export function dirichletEtaReal(s: number): number {
+  if (Number.isNaN(s)) return NaN;
+  if (s === 1) return Math.LN2;
+  if (Math.abs(s - 1) < DIRICHLET_NEAR_POLE) return lerchPhiReal(-1, s, 1);
+  return (1 - Math.pow(2, 1 - s)) * zeta(s);
+}
+
+/**
+ * Dirichlet β(s) = 4^{−s} (ζ(s, ¼) − ζ(s, ¾)) for real s in machine floats;
+ * β(1) = π/4. Near s = 1 it is 2^{−s} Φ(−1, s, ½).
+ */
+export function dirichletBetaReal(s: number): number {
+  if (Number.isNaN(s)) return NaN;
+  if (s === 1) return Math.PI / 4;
+  if (Math.abs(s - 1) < DIRICHLET_NEAR_POLE)
+    return Math.pow(2, -s) * lerchPhiReal(-1, s, 0.5);
+  return Math.pow(4, -s) * (hurwitzZeta(s, 0.25) - hurwitzZeta(s, 0.75));
 }

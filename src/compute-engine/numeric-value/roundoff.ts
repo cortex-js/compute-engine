@@ -37,6 +37,41 @@ export function chopComplexDust(
 }
 
 /**
+ * Remove the roundoff dust from the parts of a complex result computed by a
+ * double kernel of compiled JavaScript (`toRI()` in
+ * `compilation/javascript-target.ts`, and the constant folding of these
+ * kernels in `compilation/constant-folding.ts`).
+ *
+ * A part is dust only when it is not larger than `ROUNDOFF_TOLERANCE` (1e-14)
+ * AND not larger than `ROUNDOFF_TOLERANCE · |z|`. Each test alone removes a
+ * correct part:
+ * - The absolute test alone removes the whole of a small result:
+ *   `arcoth(10²⁰)` is `10⁻²⁰`.
+ * - The relative test alone removes a part that is small next to a large
+ *   other part but much larger than the rounding error of that part:
+ *   `exp(40 + 10⁻¹⁸i)` is `2.35·10¹⁷ + 0.235i`, and the imaginary part is
+ *   computed as `|z|·sin(10⁻¹⁸)`, with a relative error of about 10⁻¹⁶ of
+ *   its own size.
+ * With both tests, a part is removed only when the absolute test, used
+ * before, also removed it.
+ *
+ * When `|z|` is not finite, only the absolute test is used.
+ */
+export function chopKernelDust(
+  re: number,
+  im: number
+): { re: number; im: number } {
+  const magnitude = Math.hypot(re, im);
+  const scale = Number.isFinite(magnitude)
+    ? Math.min(ROUNDOFF_TOLERANCE, ROUNDOFF_TOLERANCE * magnitude)
+    : ROUNDOFF_TOLERANCE;
+  return {
+    re: Math.abs(re) <= scale ? 0 : re,
+    im: Math.abs(im) <= scale ? 0 : im,
+  };
+}
+
+/**
  * The relative size of the rounding noise of a big-decimal complex kernel:
  * `10^(2−precision)`, where `precision` is the working precision
  * (`BigDecimal.precision`). A kernel that computes at the working precision

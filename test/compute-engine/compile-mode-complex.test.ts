@@ -381,8 +381,8 @@ describe('complex mode — D2/D6 runtime rules', () => {
   });
 
   it('D6: a real-only string helper is REAL-shaped to its parent, whatever its result type', () => {
-    // `Erf`, `Gamma`, `Zeta`, `Digamma`, `Factorial`, `LambertW`, `Arsinh`,
-    // `ErfInv` all lower to a real-only helper (`_SYS.erf`, …) yet type wide
+    // `Erf`, `Gamma`, `Zeta`, `Digamma`, `Factorial`, `LambertW`, `ErfInv`
+    // all lower to a real-only helper (`_SYS.erf`, …) yet type wide
     // (`number`), so the type-based analysis used to fall through to the
     // operand recursion and report them complex when an operand was — here a
     // promoted unknown-sign radical. The parent `Multiply` then read
@@ -390,7 +390,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
     // `{re: NaN, im: NaN}` at every point (measured 2026-08-16, `auto` and
     // `complex` modes alike). The value must be the plain real product.
     for (const mode of ['auto', 'complex'] as const) {
-      for (const h of ['Erf', 'Gamma', 'Arsinh'] as const) {
+      for (const h of ['Erf', 'Gamma'] as const) {
         const e = ce.box(['Multiply', 2, [h, ['Sqrt', 'y']]]);
         const r = compile(e, { mode, fallback: false });
         // Reference: the interpreter's own value at y = 2.
@@ -400,6 +400,16 @@ describe('complex mode — D2/D6 runtime rules', () => {
         // promotes to a non-real value, so the helper answers NaN.
         expect(r.run!({ y: -2 })).toBeNaN();
       }
+      // `Arsinh` of a complex operand compiles to a complex helper
+      // (`_SYS.casinh`) since 2026-10-01, so it gives the interpreter's
+      // value at a negative radicand instead of NaN.
+      const e = ce.box(['Multiply', 2, ['Arsinh', ['Sqrt', 'y']]]);
+      const r = compile(e, { mode, fallback: false });
+      expect(r.run!({ y: 2 })).toBeCloseTo(e.subs({ y: 2 }).N().re, 6);
+      const ref = e.subs({ y: -2 }).N();
+      const out = r.run!({ y: -2 }) as { re: number; im: number };
+      expect(out.re).toBeCloseTo(ref.re, 12);
+      expect(out.im).toBeCloseTo(ref.im, 12);
     }
   });
 

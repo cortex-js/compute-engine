@@ -153,6 +153,10 @@ export function boxComplexKernelResult(
   value: { re: number; im: number },
   args: ReadonlyArray<Expression>
 ): Expression {
+  // A kernel with no value gives a NaN part (a double kernel at an infinite
+  // argument): the value is `NaN`, as for a real kernel. A numeric value
+  // cannot hold a NaN imaginary part.
+  if (Number.isNaN(value.re) || Number.isNaN(value.im)) return ce.NaN;
   if (args.some((x) => isNumber(x) && !x.isExact))
     return ce.number(
       ce._inexactNumericValue({

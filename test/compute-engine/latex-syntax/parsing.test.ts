@@ -1180,11 +1180,14 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     test('a sign with no operand directly after it keeps its reading', () => {
       expect(lenient('\\Z^+')).toEqual('PositiveIntegers');
       expect(lenient('A^+')).toEqual(['PseudoInverse', 'A']);
-      expect(lenient('e^- x')).toEqual([
+      expect(lenient('A^+ x')).toEqual([
         'InvisibleOperator',
-        ['Superminus', 'e'],
+        ['PseudoInverse', 'A'],
         'x',
       ]);
+      // White space after a `-` on a letter base is skipped: `e^- x` is
+      // `e^-x` (see lenient-ambiguity-f.test.ts)
+      expect(lenient('e^- x')).toEqual(['Power', 'e', ['Negate', 'x']]);
       expect(lenient('\\lim_{x\\to0^+}f(x)')).toEqual(
         strict('\\lim_{x\\to0^+}f(x)')
       );

@@ -113,7 +113,7 @@ Numerically solve an ordinary differential equation and return the solution as a
 
 ### nIntegrate
 
-MathJSON `NIntegrate` · `(function, limits: (symbol | tuple)?) -> number`
+MathJSON `NIntegrate` · `(function, lower: number, upper: number) -> number`
 
 Numerical approximation of a definite integral.
 
