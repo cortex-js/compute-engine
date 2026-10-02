@@ -5404,8 +5404,8 @@
     {
       "name": "NIntegrate",
       "category": "Calculus",
-      "arity": "optional",
-      "signature": "(function, limits:(tuple|symbol)?) -> number",
+      "arity": "3",
+      "signature": "(function, lower:number, upper:number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,

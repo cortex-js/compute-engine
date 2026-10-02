@@ -171,11 +171,13 @@ import {
   evaluateBigOpTerm,
   evaluateBigOpTermAsync,
   canonicalBigop,
+  canonicalFlatIndexingSets,
   reduceBigOp,
   NON_ENUMERABLE_DOMAIN,
   NON_ENUMERABLE_BOUNDS,
   bigOpBoundsError,
   classifyBigopDomain,
+  hasOneSidedLimits,
   DEGENERATE_CAPTURE_UNSAFE,
   degenerateBigOpTerm,
   symbolicSumClosedForm,
@@ -9632,7 +9634,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // body and threw; the operand is reported missing, as for `Mean()`.
         body === undefined
           ? ce._fn('Product', [ce.error('missing')])
-          : canonicalBigop('Product', body, bounds, scope),
+          : canonicalBigop(
+              'Product',
+              body,
+              canonicalFlatIndexingSets(ce, bounds),
+              scope
+            ),
 
       evaluate: (ops, options) => {
         const ce = options.engine;
@@ -9648,6 +9655,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // the truncated numeric path); free bounds/body are never enumerable.
         const numeric = options.numericApproximation;
         const bounds = ops.slice(1);
+        // A limit with only one bound has no value: see `hasOneSidedLimits`.
+        if (hasOneSidedLimits(bounds)) return undefined;
         const mode = classifyBigopDomain(ops[0], bounds, ce);
         if (mode === 'absent') return ce.NaN;
         if (mode === 'symbolic') {
@@ -9749,6 +9758,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // closed forms and the accelerated infinite product evaluate terms
         // synchronously, so for such a body they are declined.
         const asyncTerms = hasAsyncOnlyApplication(ops[0]);
+        // A limit with only one bound has no value: see `hasOneSidedLimits`.
+        if (hasOneSidedLimits(bounds)) return undefined;
         {
           const mode = classifyBigopDomain(ops[0], bounds, ce);
           if (mode === 'absent') return ce.NaN;
@@ -9897,7 +9908,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const canon = body.canonical;
           if (canon.isCollection) return ce._fn('Sum', [canon]);
         }
-        return canonicalBigop('Sum', body, bounds, scope);
+        return canonicalBigop(
+          'Sum',
+          body,
+          canonicalFlatIndexingSets(ce, bounds),
+          scope
+        );
       },
 
       evaluate: (
@@ -9963,6 +9979,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // or a body with free variables beyond the index are never
         // enumerable, under either mode.
         const numeric = numericApproximation;
+        // A limit with only one bound has no value: see `hasOneSidedLimits`.
+        if (hasOneSidedLimits(rest)) return undefined;
         const mode = classifyBigopDomain(first, rest, engine);
         if (mode === 'absent') return engine.NaN;
         if (mode === 'symbolic') {
@@ -10110,6 +10128,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Per-term asynchronous evaluation for a body holding an
         // asynchronous-only application — see the `Product` handler.
         const asyncTerms = hasAsyncOnlyApplication(first);
+        // A limit with only one bound has no value: see `hasOneSidedLimits`.
+        if (hasOneSidedLimits(rest)) return undefined;
         {
           const mode = classifyBigopDomain(first, rest, engine);
           if (mode === 'absent') return engine.NaN;

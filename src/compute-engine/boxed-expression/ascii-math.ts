@@ -809,7 +809,9 @@ function bigOp(
       if (start) {
         if (op === 'int' || !index) result += `_${wrap(serialize(start))}`;
         else result += '_' + wrap(`${index}=${serialize(start)}`);
-      } else if (op !== 'int') {
+      } else if (op !== 'int' && index) {
+        // No lower bound: the subscript is the index alone. With no index
+        // either (`\sum^{10} f`), there is no subscript.
         result += `_${wrap(serialize(limit.op1))}`;
       }
       if (end) result += `^${wrap(serialize(end))}`;

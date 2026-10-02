@@ -36,6 +36,88 @@
   `MultiplicativeOrder(3, -7)` is `6`; it stayed unevaluated before. This
   applies to the form with a list of residues too. `n = 0` still stays
   unevaluated.
+- **A definite integral with only one bound stays unevaluated.** A limit that
+  has an upper bound and no lower bound, or a lower bound and no upper bound
+  (`\int^2 y^2\,dy`, `\int_0 y^2\,dy`, `Limits(y, Nothing, 2)`, the flat
+  `["Integrate", f, "x", 10]`), is neither an indefinite nor a definite
+  integral, and no default is chosen for the missing bound. `\int^2 y^2\,dy`
+  evaluated to `7/3`, as if the lower bound were 1, and `\int_0 y^2\,dy` to
+  `1/3`; with a second limit the result could contain `1 - Nothing^2`. They now
+  stay unevaluated, under `evaluate()` and `N()` alike, and `compile()` falls
+  back to the interpreter. The indefinite integral (no bounds) and the definite
+  integral (two bounds) are unchanged.
+- **A sum or product with only one bound stays unevaluated**, as an integral
+  with only one bound does. No default is chosen for the missing bound, under
+  `evaluate()` and `N()` alike, and `compile()` falls back to the interpreter.
+  - `\sum_{k=1} k` evaluated to `1`: the subscript `k=1` was read as the
+    UPPER bound, `Limits(k, Nothing, 1)`. The subscript is now the lower
+    bound, `Limits(k, 1, Nothing)`, and the sum stays unevaluated. The same
+    applies to each index of `\sum_{k=1, j=2}`, and to `\prod`.
+  - `\sum_{k}^{10} k` evaluated to `55`, as if the lower bound were 1. It now
+    parses to `Limits(k, Nothing, 10)` and stays unevaluated. So
+    `Sum(k, Limits(k, Nothing, 10))`, which evaluated to `55` and serialized
+    as `\sum_{k}^{10}k`, now stays unevaluated and round-trips through LaTeX
+    unchanged. The flat `["Sum", "k", "k", 10]` is the same sum.
+  - `\sum^{10} k` and `\prod^{5} k` parsed to `["Sum", "k"]` and
+    `["Product", "k"]`: the bound was lost. The bound is now kept with no
+    index, as for `\sum_1^9 k`: `Sum(k, Limits(Nothing, Nothing, 10))`, which
+    stays unevaluated and serializes back to `\sum^{10}k`.
+  - A lower bound with no upper bound was read as a sum to infinity under
+    `N()`: `Sum(1/k^2, Limits(k, 1, Nothing)).N()` gave `1.6449…`. It now
+    stays unevaluated: write the upper bound `+∞` (`\sum_{k=1}^{\infty}`)
+    for an infinite sum.
+
+  A sum or product with two bounds, over an indexing set (`k \in S`), or with
+  no bounds at all (`\sum_k f`) is unchanged, and so is `\sum_{i \le 10} i`,
+  which keeps an implied lower bound of 1.
+- **A definite integral over a pole whose position is a free symbol stays
+  unevaluated.** `Integrate((y − a)⁻², Limits(y, 0, 4)).evaluate()` gave
+  `-1/a - 1/(4 - a)`, which is wrong for `0 ≤ a ≤ 4` (the integral is `+∞`
+  there); it now stays unevaluated. When the declared type of the symbol or
+  an assumption proves the pole outside the bounds, the integral is
+  evaluated as before: with `ce.assume(a > 4)`, or `a` declared
+  `real<..<0>`, the result is `-1/a - 1/(4 - a)`. The poles examined are the
+  roots of a denominator of degree 1 or 2 (factor by factor for a product),
+  the zero of a logarithm of a linear argument in a denominator, and the
+  poles of `tan`, `cot`, `sec`, `csc`, `coth` and `csch` and the zeros of a
+  circular or hyperbolic denominator, of a linear argument. A quadratic
+  denominator whose discriminant is not proven negative may have a real
+  root, so `∫₋₁¹ dt/(t² + m)` now stays unevaluated (its roots `±√(−m)` are
+  inside for `−1 ≤ m ≤ 0`), and so does `∫₀¹ dt/(t² + m²)` (a pole at `0`
+  for `m = 0`) unless the sign of `m` is known (with `ce.assume(m > 0)` it
+  is `arctan(1/m)/m`). In an iterated integral, the
+  integration variable of an enclosing integral is examined over its range:
+  `Integrate((y − x)⁻², Limits(y, 0, 10), Limits(x, 3, 4)).evaluate()` gave
+  the wrong partial result `int_(0)^(10)(-1/(y - 3) + 1/(y - 4) dy)` and now
+  stays unevaluated (the pole `x = y` is in `[3, 4]` for `3 ≤ y ≤ 4`), while
+  `Integrate((y − x)⁻², Limits(y, 5, 10), Limits(x, 3, 4))` gives
+  `ln(2) + ln(6) − ln(7)` (`ln(12/7)`). The same is true when the iterated
+  integral is written as nested integrals: `\int_5^{10}\int_3^4
+  (y-x)^{-2}\,dx\,dy` gives `ln(2) + ln(6) − ln(7)`. `.N()` is unchanged.
+
+  A symbol with no declared type is taken to be real when the position of a
+  pole is proven, as the antiderivatives already assume (`∫ dt/(t − a)` is
+  `ln|t − a|`). So `∫₀¹ dt/(t + a² + 1)` is `ln|a² + 2| − ln|a² + 1|`,
+  `∫₁² dt/(t(t² + a² + 1))` and `∫₀¹ dt/(t² + a² + 1)` have their closed
+  forms, and `∫₀¹ eᵗ/(eᵗ + a² + 1) dt` is `ln|a² + 1 + e| − ln|a² + 2|`. A
+  symbol whose type was only inferred from its uses is taken to be real too,
+  so the result does not depend on what the engine computed before. A
+  symbol declared by the user (`complex`, `number`) is not taken to be
+  real. A free symbol beside a
+  pole at a number keeps the closed form when the pole is removable for
+  every value of the symbol: `∫₀² a(t² − 1)/(t − 1) dt` is `4a`,
+  `∫₋₁¹ a·sin(t)/t dt` is `a·Si(1) − a·Si(−1)`, and
+  `∫₋₁¹ (sin(t)/t + a) dt` is `2a + 2Si(1)`.
+- **A definite integral with no value is `Indeterminate`.** When the
+  integrand changes sign across a pole inside the bounds (`∫₋₁¹ dt/t`,
+  `∫₀² tan t dt`, `∫ from ½ to 2 of dt/ln t`), or has poles at both bounds
+  that diverge with different signs (`∫₀¹ (1/t − 1/(1 − t)) dt`), the
+  integral has no value, not even an infinite one. `.evaluate()` kept these
+  integrals unevaluated; it now gives `Indeterminate`, or `NaN` when a bound
+  or a number in the integrand is a float (`∫₋₁¹ 1.5/t dt`). `.N()` and
+  `NIntegrate` give `NaN`, as before. A pole with one sign is still `+∞` or
+  `−∞`, and a divergence whose sign is not established still stays
+  unevaluated.
 
 ### New Features
 
@@ -494,6 +576,212 @@
 - `Derivative()` with no operand logged "error canonicalizing `Derivative`" and
   stayed `Derivative()`; it is now `Derivative(Error("missing"))`, the
   standard form of a missing required operand.
+- **A definite integral over a zero of `eᵗ − a`, `sin t − a` or
+  `(t − a)^(−n)` stays unevaluated.** `∫₀¹ eᵗ/(eᵗ − a) dt` gave
+  `ln|e − a| − ln|1 − a|`, wrong for `1 ≤ a ≤ e`, where the integrand has a
+  pole. `∫₀¹ cos t/(sin t − a) dt` gave `ln|sin 1 − a| − ln|−a|`, wrong for
+  `0 ≤ a ≤ sin 1`, `∫₀¹ cos t/(sin t − a)² dt` gave a finite value where the
+  integral is `+∞`, and `∫₀¹ (t − a)^(−n) dt` gave a closed form for every
+  `n`. These integrals now stay unevaluated, unless the declared type of `a`
+  or an assumption puts the zero outside the interval: with
+  `ce.assume(a > 3)`, `∫₀¹ eᵗ/(eᵗ − a) dt` is `ln(a − e) − ln(a − 1)`. The
+  zero of a divisor `g(t) − c`, where `g` is monotone on the interval, is
+  located by comparing `c` with `g` at the bounds. Any other divisor with a
+  free symbol whose zeros cannot be located keeps the integral unevaluated.
+- **A definite integral with a free symbol in a bound and a pole at a number
+  stays unevaluated.** `∫ₐ¹ dt/t` gave `−ln|a|`, `∫₋₁ᵇ dt/t` gave `ln|b|` and
+  `∫₀ᵇ dt/(t + 1)` gave `ln|b + 1|`: each is wrong when the pole is between
+  the bounds (`a < 0`, `b > 0`, `b < −1`). `∫₀ᵃ dt/t` gave `+∞`, wrong for
+  `a < 0`. They now stay unevaluated unless an assumption puts the pole
+  outside the interval: with `ce.assume(a > 0)`, `∫ₐ¹ dt/t` is `−ln(a)`. A
+  removable or integrable singularity is not a pole: `∫₀ˣ sin(t)/t dt` is
+  still `Si(x)` and `∫₀ᵇ dt/√t` is still `2√b`. A pole of `tan`, `cot`,
+  `sec` or `csc` (or a zero of a `sin` or `cos` divisor) with a free symbol
+  in a bound keeps the integral unevaluated: `∫₀ˣ tan t dt` was
+  `ln|sec x|`, wrong for `x ≥ π/2`.
+- **`∫ ln(ax + b) dx` is correct.** `∫ ln(x + 1) dx` gave
+  `(x + 1)·ln(x) − x + 1`, and `∫₀¹ ln(x + 1) dx` gave `+∞`. They are now
+  `(x + 1)·ln(x + 1) − x` and `2ln(2) − 1`. `∫ ln(2x + 3) dx` is
+  `(2x + 3)·ln(2x + 3)/2 − x`.
+- **`.N()` of an integral over a pole agrees with `evaluate()` when the
+  integrand has a constant such as `π`.** `.N()` of `\int_{-1}^1
+  \frac{\pi}{t}\,dt` gave a random Monte Carlo estimate (`0.0 ± 3.4`); it
+  now gives `NaN` (`evaluate()` gives `Indeterminate`). `.N()` of
+  `\int_{-1}^1 \frac{\pi}{t^2}\,dt` gave `2.1e154 ± 8.8e143`; it now gives
+  `+∞`, as `evaluate()` does.
+- **`∫₋₁¹ dt/(eᵃ·t)` is `Indeterminate`**, since `eᵃ` is never zero and the
+  integrand changes sign across the pole at `0`. It was `0`.
+- **The flat spelling of several integration variables or indexes reads a
+  repeated name as a bound.** `["Integrate", ["Multiply", "x", "y"], "x", 0,
+  "y", "y", 0, 1]` read as `Limits(x, Nothing, 0)`, `Limits(y, Nothing,
+  Nothing)`, `Limits(y, 0, 1)`, with `y` an index twice. A name that would
+  be an index twice is now the upper bound of the index before it:
+  `Limits(x, 0, y), Limits(y, 0, 1)`. The same applies to `Sum` and
+  `Product`: `["Sum", "k", "k", 1, "n", "n", 1, 10]`, which had three
+  `missing` error operands, is `Sum(k, Limits(k, 1, n), Limits(n, 1, 10))`.
+- **An iterated integral with a slowly integrable singularity has the right
+  value and error.** `Integrate(y^(−0.999), Limits(y, 0, 1), Limits(x, 0,
+  2)).N()` gave `0 ± 1.3e+289`; it is now `2000.000000002 ± 0.000000024`
+  (exact: 2000). With `y^(−1/2)` it gave `0 ± 9.4e+136`; it is now
+  `4.000000000000 ± 0.000000000015` (exact: 4). The error of the inner
+  levels was averaged over the nodes of the outer level and multiplied by
+  its range, but the nodes are packed next to the singularity, where the
+  inner values and their errors are largest. When the inner values keep one
+  sign, the error added is now their relative error times the magnitude of
+  the result.
+- **`∫₋₁¹ dt/(a·t)` with a free `a` is `Indeterminate`.** It was `0`. The pole
+  at `t = 0` could not be confirmed by sampling while `a` is free. The
+  integrand is now split into a constant factor and a part with only the
+  integration variable (`(1/a)·(1/t)`), and the pole of that part is
+  confirmed. For every `a ≠ 0` the integrand changes sign across the pole,
+  and for `a = 0` it is undefined everywhere, so the integral has no value.
+  `∫₋₁¹ dt/(a·t²)` was `−2/a`; it now stays unevaluated, and is `+∞` when
+  `a > 0` is assumed and `−∞` when `a < 0`. `∫₋₁¹ a/t dt` was `0`; it now
+  stays unevaluated (it is `0` for `a = 0`). `∫₁² dt/(a·t)` is still
+  `ln(2)/a`. An integrand with a pole at a number and a free symbol that is
+  not a constant factor (`1/(t·(t² + a² + 1))` over `[−1, 1]`) also stays
+  unevaluated.
+- **`.N()` of an iterated integral with a moving pole and an infinite bound
+  is `+∞`.** `Integrate((y − x)⁻², Limits(y, 0, +∞), Limits(x, 3, 4)).N()`
+  gave `5140000000000000 ± 440000000000000`; it is now `+∞`: for every `x`
+  in `(3, 4)` the inner integral has a pole at `y = x`. The scan for such
+  poles now places its points on an infinite range with the transform of
+  the quadrature, and cuts an infinite range to a finite one for the pole
+  check.
+- **`Log` and `Ln` check their operand count in strict mode.** `Log` and
+  `Ln` take one or two operands (the second is the base; `Ln(3, 4)` is
+  `Log(3, 4)`). With `ce.strict = true`, `Log(8, 2, 3)` was valid and
+  evaluated to `3`, and `Ln(3, 4, 5)` became `Log(3, 4, 5)`. Now the extra
+  operand is an error, as for `Sqrt(4, 5)`: `Log(8, 2, 3)` is
+  `Log(8, 2, Error("unexpected-argument", "3"))`, and `Ln(3, 4, 5)` is
+  `Ln(3, 4, Error("unexpected-argument", "5"))`. This applies to `ce.box()`,
+  `ce.function()` and `ce.parse()` (`\log(8, 2, 3)`). In non-strict mode
+  the extra operand is kept, as before.
+- **The flat MathJSON form of a definite integral reads its bounds for any
+  bound expression.** `["Integrate", ["Power", "y", 2], "y", 0, "Pi"]` read
+  `Pi` as a second integration variable and evaluated to `-1/3 * pi`; it is
+  now `Integrate(y², Limits(y, 0, Pi))`, which evaluates to `1/3 * pi^3`. The
+  Epsil call form `∫(y^2, y, 0, π)` gives this MathJSON. After the variable,
+  an operand that is not a variable name (a number, a constant such as `Pi`,
+  or an expression) starts the bounds, and the next operand is the upper
+  bound, whatever expression it is. A variable name after the variable is
+  still the next integration variable: `["Integrate", f, "x", "y", "z"]` is
+  the triple indefinite integral, as before.
+- **`NIntegrate` declares the bounds it reads.** The signature of
+  `NIntegrate` was `(function, limits:(tuple|symbol)?) -> number`, but only
+  the form `NIntegrate(f, lower, upper)` was evaluated: `NIntegrate(x ↦ x²,
+  (0, 2))` stayed unevaluated. The signature is now `(function,
+  lower:number, upper:number) -> number`, and a `Tuple` of bounds or a
+  missing bound is an error operand (`incompatible-type`, `missing`). For a
+  multiple integral, use `Integrate(f, Limits(x, …), Limits(y, …)).N()`.
+- **A numeric integral with a slowly integrable singularity at a bound is
+  correct, with an error that covers the true error.** A large part of such an
+  integral is closer to the bound than a floating-point number can be
+  (`∫₀^δ x^(−0.999) dx` is about 500 for `δ = 1e-300`), so the quadrature gave
+  a wrong value with a tight error. The value of that part is now found by
+  extrapolation of the integrals over the shells that the quadrature cuts next
+  to the bound (Wynn's ε-algorithm and the Levin u-transform). The
+  extrapolation is used only when the shells decrease as the terms of a
+  convergent series do, two extrapolations agree, and the error is at most
+  1e-3 of the value. A converged result next to a singular bound is checked
+  against the tanh-sinh (double-exponential) rule, and is kept when tanh-sinh
+  does not converge (a smooth integrand with a narrow peak at a bound, such
+  as `∫₀¹ dx/(10⁻¹² + x²) = 1570795.3267948966`, keeps its value). The
+  compiled `Integrate` and the levels of a multiple integral use the same
+  correction.
+  `Integrate(…).N()` and `NIntegrate` (compiled integrand / integrand that
+  does not compile):
+  - `∫₀¹ x^(−0.999) dx = 1000`: `508.24896298688 ± 0.00000000053` /
+    `18.9 ± 4.4` → `1000.0000000014 ± 0.0000000061` /
+    `1000.0000000009 ± 0.0000000045`.
+  - `∫₀¹ x^(−0.99) dx = 100`: `99.922310890258 ± 0.000000000098` /
+    `89.72 ± 0.86` → `100.00000000000 ± 0.00000000011` /
+    `100.000000000005 ± 0.000000000093`.
+  - `∫₀^½ dx/(x·ln²x) = 1/ln 2 = 1.4426950408889634`:
+    `1.44131049670385 ± 0.00000000000014` / `1.43831 ± 0.00016` →
+    `1.44269504088899 ± 0.00000000000021` (both).
+  - `∫₀¹ (1 − t)^(−0.95)·ln(1 − t) dt = −400`: `NaN` (both) →
+    `-399.9999998 ± 0.0000021`.
+  - `∫₀¹ (1 − t)^(−0.95)·ln(10⁻⁶·(1 − t)) dt = −676.3102111592855`:
+    `-380 ± 110` (1.3 s) / `-236 ± 84` → `-676.3102109 ± 0.0000043` (2 ms).
+  - `∫₀¹ t^(−0.995)·ln t dt = −40000`: the integrand that does not compile
+    gave `-41.1 ± 6.9` and now gives `-39999.99995 ± 0.00025`. The compiled
+    one still gives `NaN`.
+  - `∫₀¹ dx/√(1 − x²) = π/2`: `1.5707963111 ± 0.0000000073` →
+    `1.57079632679493 ± 0.00000000000047`.
+  - `∫₁^∞ x^(−1.01) dx = 100`: the integrand that does not compile gave
+    `2.71 ± 0.44` and now gives `100.000000003 ± 0.000000036`, as the compiled
+    one does.
+
+  A quadrature result that did not converge and is kept instead of the
+  Monte-Carlo estimate now reports an error of at least the Monte-Carlo
+  standard error, `|estimate|/√samples`: `∫₀¹ sin(1/x) dx` gives
+  `0.50407 ± 0.00016` (was `± 0.000051`); the same floor applies to a level
+  of a multiple integral. Smooth integrands converge before any of this runs,
+  and take the same time as before.
+
+  Next to a singular bound that the extrapolation could not resolve, where
+  the integrand keeps one sign, the quadrature result is kept with its widened error, and is never replaced by
+  a Monte-Carlo estimate, which under-weights the neighborhood of the
+  singularity: ∫₀^0.01 dx/(x·(−ln x)·ln²(−ln x)) = 1/ln(ln 100) = 0.6548…
+  gave `0.3220 ± 0.0063` and now gives `0.503 ± 0.018`. When the shells
+  decrease as a power of their index (`1/(x·(−ln x)^q)`), only the Levin
+  u-transform is used: ∫₀^½ dx/(x·(−ln x)³) = 1/(2·ln²2) = 1.0406844905…
+  gave `1.040684324 ± 0.000000012` and now gives
+  `1.040684485 ± 0.000000050`. A part of the interval where the integrand
+  has no value makes the error of the quadrature infinite, so the estimate
+  of the other parts is not kept as a value. A compiled integral that runs
+  inside another quadrature has no Monte-Carlo fallback (it would draw 1e7
+  samples at each node of the enclosing quadrature): `.N()` of
+  `\int_0^{10}\int_3^4 (y-x)^{-2}\,dx\,dy`, whose inner integral has no
+  value for `y` in `[3, 4]`, ran for more than 200 s and now gives `NaN` in
+  about 2 s.
+
+  An integral whose integrand oscillates without a limit next to a bound has
+  no value, and `.N()`, `NIntegrate` and the compiled `Integrate` now give
+  `NaN` for it: `∫₀¹ sin(ln x)/x dx` gave `-0.11112857219 ± 0.0000000014`
+  with a compiled integrand, and a Monte-Carlo value otherwise. The same
+  applies to `∫₁^∞ sin(ln x)/x dx`, `∫₀¹ sin(ln(1 − x))/(1 − x) dx` and
+  `sin(ln x)/x^p` on `[0, 1]` for `p ≥ 1`.
+- **`∫₀^∞ sin x/x dx` is `π/2` to 1e-11.** The oscillatory quadrature skipped
+  `[0, 1e-8]`, where `sin x/x` is `0/0`, and gave
+  `1.57079631675 ± 0.00000000025`, wrong by 1e-8; it now integrates the first
+  lobe from 0 with the adaptive quadrature, which resolves a singularity at
+  0, and gives `1.57079632675 ± 0.00000000025`.
+  `∫₀^∞ sin x/x^1.5 dx = √(2π) = 2.5066282746310` was
+  `2.50658840820 ± 0.00000000013` (true error 4.0e-5) and is now
+  `2.50662827461 ± 0.00000000014`.
+- **A compiled semi-infinite oscillatory integral uses the oscillatory
+  quadrature.** The compiled `Integrate` (`_SYS.integrate`) used only the
+  adaptive quadrature, which does not converge on such an integral: with a
+  parameter `p`, `∫₀^∞ sin x/x^p dx` gave `NaN` for `p = ½` and `2.5237` for
+  `p = 1.5`. It now gives `1.2533141372613` (`√(π/2)`) and `2.5066282746098`
+  (`√(2π)`), as `.N()` does.
+- **A semi-infinite oscillatory integral with reversed bounds has the right
+  sign.** `∫_∞^0 sin x/x dx` gave `+π/2` under `.N()` and `NIntegrate` (the
+  infinite lower bound was read as `−∞`), and `NaN` when compiled. All three
+  now give `−π/2`.
+- **The numeric integral of a small integrand has a relative error.** The
+  adaptive quadrature stopped when its error was below an absolute tolerance
+  of `1e-12`, so an integral of a small integrand was "converged" with any
+  relative error: `∫₀¹ 10⁻³⁰⁰·x^(−0.999) dx = 10⁻²⁹⁷` gave
+  `9.76e-300 ± 8.1e-300`. The absolute tolerance is now at most `1e-10` times
+  the sum of the magnitudes of the panel values, and `NIntegrate` gives
+  `9.9999999997e-298`.
+- **A pole at a bound of large magnitude is found.** Next to a bound such as
+  `10⁶`, the quadrature reaches the spacing of the doubles after about 29
+  bisections, too few for its divergence test: `∫ dx/(x − 10⁶)` on
+  `[10⁶, 10⁶ + 1]` gave `22.7 ± 0.58`. It now gives `NaN`, and a convergent
+  integral there (`∫ (x − 10⁶)^(−½) dx = 2`) keeps its value.
+- **The flat form of `Sum` and `Product` is read like the flat form of
+  `Integrate`.** `["Sum", "k", "k", 1, 10]` gave `Error("missing")`, as did
+  the Epsil call `∑(k, k, 1, 10)`, which produces it. It is now
+  `Sum(k, Limits(k, 1, 10))`, which is `55`; `["Product", "k", "k", 1, 5]` is
+  `120`, and `["Sum", "k", "k", 1, "n"]` is `Sum(k, Limits(k, 1, n))`, with
+  `n` free (its simplification is `(n² + n)/2`). An index followed by one
+  bound (`["Sum", "k", "k", 10]`) has that bound as its upper bound, and
+  several indexes can follow each other (`["Sum", f, "i", 1, 3, "j", 1, 2]`).
+  The `Limits`, `Element` and `Tuple` forms are unchanged.
 
 ## 0.145.0 _2026-10-01_
 

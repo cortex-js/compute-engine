@@ -127,6 +127,95 @@ describe('an extra operand', () => {
   });
 });
 
+//
+// `Ln` and `Log` take one or two operands: the second is the base, and
+// `Ln(a, b)` is `Log(a, b)`. Before, a third operand was accepted also in
+// strict mode: `Log(8, 2, 3)` was valid and evaluated to 3. In strict mode it
+// is an `unexpected-argument` error, as for `Sqrt(4, 5)`; in non-strict mode
+// it is kept, as for the aliases `Lb` and `Lg` above.
+//
+describe('an extra operand of Ln and Log', () => {
+  const CASES: [any, string, string][] = [
+    [
+      ['Log', 8, 2, 3],
+      '["Log",8,2,3]',
+      '["Log",8,2,["Error","\'unexpected-argument\'","\'3\'"]]',
+    ],
+    [
+      ['Ln', 3, 4, 5],
+      '["Log",3,4,5]',
+      '["Ln",3,4,["Error","\'unexpected-argument\'","\'5\'"]]',
+    ],
+    [
+      // The fold `Log(1, b) = 0` does not hide the extra operand
+      ['Log', 1, 2, 3],
+      '0',
+      '["Log",1,2,["Error","\'unexpected-argument\'","\'3\'"]]',
+    ],
+    [
+      ['Log', ['Sequence', 8, 2, 3]],
+      '["Log",8,2,3]',
+      '["Log",8,2,["Error","\'unexpected-argument\'","\'3\'"]]',
+    ],
+  ];
+
+  test.each(CASES)('%j, not strict', (expr, json) => {
+    const ce = new ComputeEngine();
+    ce.strict = false;
+    expect(JSON.stringify(ce.box(expr).json)).toBe(json);
+  });
+
+  test.each(CASES)('%j, strict', (expr, _json, strictJson) => {
+    const ce = new ComputeEngine();
+    ce.strict = true;
+    const result = ce.box(expr);
+    expect(JSON.stringify(result.json)).toBe(strictJson);
+    expect(result.isValid).toBe(false);
+    // `ce.function()` with boxed operands takes the same route
+    const [name, ...ops] = expr;
+    const fn = ce.function(
+      name,
+      ops.map((x: any) => ce.box(x))
+    );
+    expect(JSON.stringify(fn.json)).toBe(strictJson);
+  });
+
+  test('strict, evaluate gives the error', () => {
+    const ce = new ComputeEngine();
+    ce.strict = true;
+    expect(ce.box(['Log', 8, 2, 3]).evaluate().toString()).toBe(
+      'Error("unexpected-argument", "3")'
+    );
+  });
+
+  test.each([
+    [
+      '\\log(8, 2, 3)',
+      '["Log",8,2,["Error","\'unexpected-argument\'","\'3\'"]]',
+    ],
+    ['\\ln(3, 4, 5)', '["Ln",3,4,["Error","\'unexpected-argument\'","\'5\'"]]'],
+  ])('strict, parse %s', (latex, json) => {
+    const ce = new ComputeEngine();
+    ce.strict = true;
+    const result = ce.parse(latex);
+    expect(JSON.stringify(result.json)).toBe(json);
+    expect(result.isValid).toBe(false);
+  });
+
+  test.each([
+    [['Ln', 3, 4], '["Log",3,4]'],
+    [['Log', 8, 2], '["Log",8,2]'],
+    [['Log', 8], '["Log",8]'],
+    [['Ln', 3], '["Ln",3]'],
+  ])('strict, %j is valid', (expr, json) => {
+    const ce = new ComputeEngine();
+    ce.strict = true;
+    const result = ce.box(expr);
+    expect(JSON.stringify(result.json)).toBe(json);
+    expect(result.isValid).toBe(true);
+  });
+});
+
 describe('the complete forms are unchanged', () => {
   test.each([
     [['Subscript', 'x', 1], '"x_1"'],

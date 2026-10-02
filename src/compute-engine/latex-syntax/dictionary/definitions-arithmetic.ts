@@ -3664,7 +3664,9 @@ function getIndexAssignment(
     }
     if (ops.length === 2) {
       // `index \le upper` (symbol on the left) or `lower \le index`
-      if (symbol(ops[0])) return { index: symbol(ops[0])!, upper: ops[1] };
+      // `i \le upper` implies a lower bound of 1.
+      if (symbol(ops[0]))
+        return { index: symbol(ops[0])!, lower: 1, upper: ops[1] };
       if (symbol(ops[1]))
         return { index: symbol(ops[1])!, lower: ops[0], upper };
     }
@@ -3921,12 +3923,24 @@ function parseBigOp(name: string, minPrec: number) {
       const lower = indexingSet.lower;
       const upper = indexingSet.upper;
       const index = indexingSet.index ?? 'Nothing';
+      // A missing bound is written `Nothing`, never given a default: a sum
+      // or product with only one bound stays unevaluated. `\sum_{k}^{10}`
+      // is `Limits(k, Nothing, 10)` (not 1 to 10), and `\sum_{k=1}` is
+      // `Limits(k, 1, Nothing)`. A two-operand `Tuple(k, 1)` would read as
+      // an UPPER bound at canonicalization, as `Limits(k, 1)` does.
       if (upper !== null && upper !== undefined)
-        indexingSetArguments.push(['Tuple', index, lower ?? 1, upper]);
+        indexingSetArguments.push(['Tuple', index, lower ?? 'Nothing', upper]);
       else if (lower !== null && lower !== undefined)
-        indexingSetArguments.push(['Tuple', index, lower]);
+        indexingSetArguments.push(['Tuple', index, lower, 'Nothing']);
       else indexingSetArguments.push(['Tuple', index]);
     }
+    // A superscript with no subscript (`\sum^{10} k`): an upper bound with
+    // no index and no lower bound. The bound is kept, with no index, as for
+    // a subscript with no index (`\sum_1^9 k` is `Limits(Nothing, 1, 9)`),
+    // so that it serializes back to `\sum^{10}k`.
+    if (indexes.length === 0 && sub === null && sup !== null)
+      for (const bound of getSequenceOrTuple(sup))
+        indexingSetArguments.push(['Tuple', 'Nothing', 'Nothing', bound]);
     return [name, fn, ...indexingSetArguments];
   };
 }

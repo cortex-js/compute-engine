@@ -8,7 +8,7 @@ import { canonicalAdd } from './arithmetic-add.js';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
 import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 import { canonicalNegate } from './negate.js';
-import { checkNumericArgs } from './validate.js';
+import { checkArity, checkNumericArgs } from './validate.js';
 import { isNumber } from './type-guards.js';
 import { registerNumericCanonicalHandler } from './numeric-canonical-registry.js';
 
@@ -63,6 +63,13 @@ export function canonicalNumericOperator(
   else if (name === 'Ln' || name === 'Log') {
     ops = checkNumericArgs(ce, canonicalOps);
     if (ops.length === 0) ops = [ce.error('missing')];
+    // The base is optional, so `Ln` and `Log` take one or two operands
+    // (`Ln(a, b)` is `Log(a, b)`). An operand after the base is an
+    // `unexpected-argument` error in strict mode. In non-strict mode it is
+    // kept: the non-strict `checkNumericArgs` does not check for extra
+    // operands, and the aliases `Lb` and `Lg` keep theirs too (`Lb(8, 3)`
+    // is `Log(8, 2, 3)`). Evaluation reads only the first two operands.
+    else if (ops.length > 2 && ce.strict) ops = checkArity(ce, ops, 2);
   } else if (name === 'Power' || name === 'Root')
     ops = checkNumericArgs(ce, canonicalOps, 2);
   else if (name === 'Divide') {
