@@ -2262,7 +2262,13 @@ function dirichletLResult(
 ): Expression | undefined {
   if (value === undefined || !Number.isFinite(value.re + value.im))
     return undefined;
-  return ce.number(value.im === 0 ? value.re : ce.complex(value.re, value.im));
+  // A complex value computed in doubles is a float, even when both its parts
+  // are integers
+  return ce.number(
+    value.im === 0
+      ? value.re
+      : ce._inexactNumericValue({ re: value.re + 0, im: value.im + 0 })
+  );
 }
 
 /**

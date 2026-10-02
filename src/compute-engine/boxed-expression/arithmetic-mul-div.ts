@@ -5,7 +5,11 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isTensorValue, packTensor } from './tensor-view.js';
+import {
+  isTensorValue,
+  packTensor,
+  tensorCellExpression,
+} from './tensor-view.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { isStoredAsDouble } from './machine-broadcast.js';
 import { bignumPreferred, hasAssignedVariable } from './utils.js';
@@ -3009,8 +3013,8 @@ function mulTensors(
       const n = product.shape[0];
       const elements: Expression[] = [];
       for (let k = 1; k <= n; k++) {
-        const a = ce.expr(productTensor.at(k) ?? ce.Zero);
-        const b = ce.expr(nextTensorPacked.at(k) ?? ce.Zero);
+        const a = tensorCellExpression(ce, productTensor.at(k) ?? ce.Zero);
+        const b = tensorCellExpression(ce, nextTensorPacked.at(k) ?? ce.Zero);
         // Use the module-level `mul`/`mulN` helpers (not `.mul()`) so exact
         // elements stay exact under `evaluate()`; finished as a cell product
         // so an inexact element floats an exact-constant one (`[0.5,1]·[π,1]`
@@ -3145,7 +3149,7 @@ function scaleTensor(
   if (shape.length === 1) {
     const result: Expression[] = [];
     for (let i = 0; i < shape[0]; i++) {
-      const val = ce.expr(packed.at(i + 1) ?? ce.Zero);
+      const val = tensorCellExpression(ce, packed.at(i + 1) ?? ce.Zero);
       result.push(multiply(scalar, val));
     }
     return ce.function('List', result);
@@ -3158,7 +3162,10 @@ function scaleTensor(
     for (let i = 0; i < m; i++) {
       const row: Expression[] = [];
       for (let j = 0; j < n; j++) {
-        const val = ce.expr(packed.at(i + 1, j + 1) ?? ce.Zero);
+        const val = tensorCellExpression(
+          ce,
+          packed.at(i + 1, j + 1) ?? ce.Zero
+        );
         row.push(multiply(scalar, val));
       }
       rows.push(ce.function('List', row));

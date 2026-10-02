@@ -531,6 +531,37 @@ answers a pure imaginary argument with `i·erfi(y)` (real kernel), and
 `erfc(iy)` as `1 − i·erfi(y)`. The other special functions of a complex
 argument have not been surveyed for the same residue at an exact argument.
 
+### A float matrix gives exact results when a value is an integer (OPEN, decision — found 2026-10-02 by the change that makes a complex number from the host with integer parts exact)
+
+A matrix whose entries are numbers is packed into cells of doubles
+(`float64` for real entries, `complex128` for complex entries) before
+`Determinant`, `Trace`, `Transpose` and the other matrix operators compute.
+A cell does not record whether its entry was exact. When a cell is read back
+as an expression, a real value that is an integer is boxed exact
+(`TensorFieldNumber.expression()` and `complexCellExpression()`,
+`tensor/tensor-fields.ts`), so a float result or entry becomes exact when its
+value is an integer. Measured 2026-10-02:
+`\det([[1.5,0],[0,2]])` is the exact `3` (it must be `3.0`),
+`\operatorname{Trace}([[1.5,0],[0,2.5]])` is the exact `4`,
+`\operatorname{Transpose}([[2.0,1.5],[3,4]])` changes the entry `2.0` to the
+exact `2`, and `\det([[1.0+1.0i,0],[0,1.0-1.0i]])` is the exact `2`. A
+complex cell with a nonzero imaginary part is already read back as a float.
+The exactness contract (a float operand makes a numeric result a float) is
+broken for these inputs. Options: (a) keep exact integers out of the cells of
+doubles when the matrix also holds a float — such a matrix uses the
+`expression` dtype, so its exact entries stay exact and its results follow
+the arithmetic of expressions (float contagion), but every matrix that mixes
+floats and integers (`[[1.5, 0], [0, 2]]`) is computed with expressions,
+which is slower, and its `0` entries stay exact; then a cell of doubles holds
+only floats and is always read back as a float. (b) record the exactness of
+each cell (for example a parallel array of flags) and read an integer cell
+back exact only when its entry was exact — the fast numeric computation is
+kept, but every operator that computes a new cell must set its flag (a cell
+computed from a float is a float), and the packing code and the tensor
+kernels change. With either option, results of real float matrices that are
+integers become floats (`3.0` instead of `3`), which changes printed results
+and can change test expectations.
+
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
 `reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and

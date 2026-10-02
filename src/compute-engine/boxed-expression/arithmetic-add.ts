@@ -18,7 +18,11 @@ import type {
   TensorDataType,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isTensorValue, packTensor } from './tensor-view.js';
+import {
+  isTensorValue,
+  packTensor,
+  tensorCellExpression,
+} from './tensor-view.js';
 import {
   isNumber,
   isFunction,
@@ -916,7 +920,7 @@ function addTensors(
       for (const tensor of tensors) {
         // tensor.at() uses 1-based indexing for vectors
         const val = tensor.at(i + 1) ?? ce.Zero;
-        sum = sum.add(ce.expr(val));
+        sum = sum.add(tensorCellExpression(ce, val));
       }
       result.push(sum.evaluate());
     }
@@ -934,7 +938,7 @@ function addTensors(
         for (const tensor of tensors) {
           // tensor.at(row, col) uses 1-based indexing
           const val = tensor.at(i + 1, j + 1) ?? ce.Zero;
-          sum = sum.add(ce.expr(val));
+          sum = sum.add(tensorCellExpression(ce, val));
         }
         row.push(sum.evaluate());
       }

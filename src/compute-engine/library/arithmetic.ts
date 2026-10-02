@@ -2788,7 +2788,9 @@ function gammaOfRealShifted(x: Expression): Expression | undefined {
       x,
       (v) => gamma(1 + v),
       (v) => bigGamma(ce, v.add(1))
-    ) ?? ce.number(gamma(1 + x.re))
+    ) ??
+      // The double kernel gives a float, even when its value is an integer
+      ce.number(ce._inexactNumericValue(gamma(1 + x.re)))
   );
 }
 
@@ -2849,7 +2851,11 @@ function gammaOfComplex(
 ): Expression | undefined {
   const big = boxExpOfComplexLog(engine, logGammaComplex(z));
   if (big === null) return undefined;
-  return big ?? engine.number(gammaComplex(z));
+  if (big !== undefined) return big;
+  // The double from `gammaComplex` is a float, even when both its parts are
+  // integers
+  const g = gammaComplex(z);
+  return engine.number(engine._inexactNumericValue({ re: g.re, im: g.im }));
 }
 
 /**
@@ -8693,7 +8699,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (big !== undefined) {
             const r = withDoubleDigits(() => big.abs().sqrt());
             if (!big.isNegative()) return boxBignumResult(engine, r);
-            return engine.number(engine.complex(0, r.toNumber()));
+            // The root is a float, even when it is an integer
+            return engine.number(
+              engine._inexactNumericValue({ re: 0, im: r.toNumber() })
+            );
           }
         }
 

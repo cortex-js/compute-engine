@@ -41,7 +41,6 @@ import {
 } from '../boxed-expression/binding-sites.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { boundVariableNamesInOperand } from '../boxed-expression/binders.js';
-import { BoxedNumber } from '../boxed-expression/boxed-number.js';
 
 import {
   applicable,
@@ -622,15 +621,17 @@ function measurementFromParts(
 ): Expression {
   if (Number.isNaN(re.estimate)) return ce.NaN;
   if (im === undefined)
+    // A numeric estimate is a float, even when its value is an integer
     return ce.expr([
       'Measurement',
-      ce.number(re.estimate),
+      ce.number(ce._inexactNumericValue(re.estimate + 0)),
       ce.number(re.error),
     ]);
   if (Number.isNaN(im.estimate)) return ce.NaN;
   return ce.expr([
     'Measurement',
-    ce.number(ce.complex(re.estimate, im.estimate)),
+    // A numeric estimate is a float, even when both its parts are integers
+    ce.number(ce._inexactNumericValue({ re: re.estimate, im: im.estimate })),
     ce.number(Math.hypot(re.error, im.error)),
   ]);
 }
@@ -2527,7 +2528,9 @@ function stencilDerivativeAt(
       order
     );
     if (Number.isNaN(v)) return undefined;
-    return new BoxedNumber(ce, v);
+    // A numeric derivative is a float, even when its value is an integer
+    // (`ND(x^2, 1)` is `2.0`). `+ 0` turns a -0 into 0.
+    return ce.number(ce._inexactNumericValue(v + 0));
   }
   const components = centeredDiffHigherOrderVector(
     (t) => {
@@ -2538,7 +2541,9 @@ function stencilDerivativeAt(
     order
   );
   if (components === undefined) return undefined;
-  const boxed = components.map((c) => new BoxedNumber(ce, c));
+  const boxed = components.map((c) =>
+    ce.number(ce._inexactNumericValue(c + 0))
+  );
   return ce.function(isPointElementType(result) ? 'Tuple' : 'List', boxed);
 }
 
@@ -4343,10 +4348,15 @@ volumes
           );
           if (endpoint !== undefined) return poleVerdictValue(engine, endpoint);
         }
+        // A numeric estimate is a float, even when its value is an integer
+        // (`NIntegrate(1, 0, 2)` is `2.0`). `+ 0` turns a -0 into 0.
         if (!integrand.sawImaginary())
-          return new BoxedNumber(engine, re.estimate);
+          return engine.number(engine._inexactNumericValue(re.estimate + 0));
         return engine.number(
-          engine.complex(re.estimate, integrate(integrand.im).estimate)
+          engine._inexactNumericValue({
+            re: re.estimate + 0,
+            im: integrate(integrand.im).estimate + 0,
+          })
         );
       },
     },
@@ -4512,7 +4522,10 @@ volumes
         const rows = interpolatingFunctionRows(data);
         if (!rows) return undefined;
         const value = evalDenseRows(rows, xv);
-        return Number.isFinite(value) ? engine.number(value) : undefined;
+        // An interpolated value is a float, even when it is an integer
+        return Number.isFinite(value)
+          ? engine.number(engine._inexactNumericValue(value + 0))
+          : undefined;
       },
       compile: (args, compile, { language }) => {
         if (language !== 'javascript') return undefined;
@@ -4660,9 +4673,11 @@ volumes
           });
           const fn =
             (compiled?.run as (x: number) => number) ?? applicableN1(f);
-          return new BoxedNumber(
-            engine,
-            limit(fn, target, dir ? dir.re : 1, engine._deadline)
+          // A numeric limit is a float, even when its value is an integer
+          return engine.number(
+            engine._inexactNumericValue(
+              limit(fn, target, dir ? dir.re : 1, engine._deadline) + 0
+            )
           );
         }
         return undefined;
@@ -4710,9 +4725,11 @@ volumes
           iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
         });
         const fn = (compiled?.run as (x: number) => number) ?? applicableN1(f);
-        return new BoxedNumber(
-          engine,
-          limit(fn, target, dir ? dir.re : 1, engine._deadline)
+        // A numeric limit is a float, even when its value is an integer
+        return engine.number(
+          engine._inexactNumericValue(
+            limit(fn, target, dir ? dir.re : 1, engine._deadline) + 0
+          )
         );
       },
     },

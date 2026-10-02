@@ -9324,8 +9324,12 @@ function roundToSignificantDigits(value: Expression, p: number): Expression {
   // `toPrecision` caps at 100 significant digits).
   if (im !== 0) {
     const clamp = Math.min(p, 100);
+    // The rounded value is a float, even when both its parts are integers
     return ce.number(
-      ce.complex(Number(re.toPrecision(clamp)), Number(im.toPrecision(clamp)))
+      ce._inexactNumericValue({
+        re: Number(re.toPrecision(clamp)),
+        im: Number(im.toPrecision(clamp)),
+      })
     );
   }
 

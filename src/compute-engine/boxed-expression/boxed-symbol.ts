@@ -994,7 +994,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // (an array of numbers is the List convenience above): boxed by
         // `ce.expr()` below.
       } else if ('re' in value && 'im' in value)
-        value = ce.number(ce.complex(value.re ?? 0, value.im));
+        // `ce.number()` keeps a `BigDecimal` part (`ce.complex()` would
+        // round it to a double) and makes integer parts exact
+        value = ce.number({ re: value.re ?? 0, im: value.im ?? 0 });
       else if ('num' in value && 'denom' in value)
         value = ce.number([value.num!, value.denom!]);
       // Any other object is a MathJSON object form (`{fn: …}`, `{num: …}`,

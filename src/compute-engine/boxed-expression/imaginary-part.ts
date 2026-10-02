@@ -87,26 +87,26 @@ export function isImaginaryPartSafeInteger(x: ImaginaryPartReceiver): boolean {
 
 /** True if `nv` is exactly the imaginary unit `i`.
  *
- * For an exact value this is read from the exact fields: the real part is
- * zero and the imaginary part is `1` with no radical. The doubles `re` and
- * `im` are not enough: the exact `10^{-800} + i` has `re === 0` and
- * `im === 1`, but it is not `i`. A big-decimal value reads its big-decimal
- * imaginary part (`1 + 10^{-30}` projects to the double `1`); a machine value
- * is its doubles. */
+ * Only an exact value can be `i`. A float whose value is `i` (the literal
+ * `1.0i`, or a numeric result) is a float: a product with it is a float, as
+ * a product with `1.0` is. A complex value from the host with integer parts
+ * is stored exact when it is created (`_numericValue()`), so it is read
+ * here as an exact value.
+ *
+ * The exact value is read from its exact fields: the real part is zero and
+ * the imaginary part is `1` with no radical. The doubles `re` and `im` are
+ * not enough: the exact `10^{-800} + i` has `re === 0` and `im === 1`, but
+ * it is not `i`. */
 export function isImaginaryUnitValue(
   nv: number | NumericValue | undefined
 ): boolean {
-  if (nv === undefined || typeof nv === 'number') return false;
-  if (nv instanceof ExactNumericValue)
-    return (
-      isZero(nv.rational) &&
-      nv.radical === 1 &&
-      isOne(nv.imRational) &&
-      nv.imRadical === 1
-    );
-  if (!isRealPartZero(nv)) return false;
-  const bigIm = nv.bignumIm;
-  return bigIm !== undefined ? bigIm.eq(1) : nv.im === 1;
+  if (!(nv instanceof ExactNumericValue)) return false;
+  return (
+    isZero(nv.rational) &&
+    nv.radical === 1 &&
+    isOne(nv.imRational) &&
+    nv.imRadical === 1
+  );
 }
 
 /** True if the real part of `nv` is zero.
@@ -155,35 +155,4 @@ export function realExponentValue(x: {
   )
     return undefined;
   return re;
-}
-
-/** True if `nv` is a Gaussian integer: both its real and its imaginary part
- * are integers.
- *
- * Neither double decides this alone: the real part of a big-decimal value
- * `10^{-800} + 2i` projects to the double `0`, and the exact
- * `(10^{400}+1)/10^{400}` projects to `1`. So an exact value is read from
- * its exact fields, a part held as a big decimal is read from that big
- * decimal, and a double is read only when it is the part itself. A
- * JavaScript number is a Gaussian integer when it is an integer.
- *
- * This does not require the doubles to be SAFE integers. A caller that
- * rebuilds the value as an exact Gaussian integer from its doubles needs
- * that too, and uses `isGaussianInteger()`
- * (`numeric-value/gaussian-integer.ts`) instead. */
-export function isGaussianIntegerValue(nv: number | NumericValue): boolean {
-  if (typeof nv === 'number') return Number.isInteger(nv);
-  if (nv instanceof ExactNumericValue)
-    return (
-      nv.radical === 1 &&
-      isInteger(nv.rational) &&
-      nv.imRadical === 1 &&
-      isInteger(nv.imRational)
-    );
-  const bigRe = nv.bignumRe;
-  const bigIm = nv.bignumIm;
-  return (
-    (bigRe !== undefined ? bigRe.isInteger() : Number.isInteger(nv.re)) &&
-    (bigIm !== undefined ? bigIm.isInteger() : Number.isInteger(nv.im))
-  );
 }

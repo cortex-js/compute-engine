@@ -644,7 +644,10 @@ export function radiansToAngle(
   // part on their real domain, and a small one is the value
   // (`arcsin(10^{-200}i)` in degrees is `5.7·10^{-199}i`; it was `0`).
   if (!Number.isNaN(n.im) && n.im !== 0)
-    return ce.number(ce.complex(theta * scale, n.im * scale));
+    // A converted angle is a float, even when both its parts are integers
+    return ce.number(
+      ce._inexactNumericValue({ re: theta * scale, im: n.im * scale })
+    );
   return ce.number(theta * scale);
 }
 

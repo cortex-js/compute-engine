@@ -1733,12 +1733,26 @@ export interface IComputeEngine {
    * When the imaginary part is zero (a `number` or a `BigDecimal`), the
    * result is a real number.
    *
+   * When both parts are integers, the result is the EXACT Gaussian integer,
+   * as `ce.number(2)` is the exact `2`: a part is an integer when it is a
+   * `number` that is a safe integer, or an integer-valued `BigDecimal` whose
+   * exponent is at most `10^6` (also at machine precision, and also outside
+   * the double range). When a part has a fraction, is a `number` past the
+   * safe integers, or is a `BigDecimal` with a larger exponent (`1e2000000`),
+   * the result is a float. The same rule applies to a `Complex` given to
+   * `ce.number()` or `ce.box()`: `ce.number(new Complex(2, 3))` is the exact
+   * `2+3i`, `ce.number(new Complex(2.5, 3))` is a float.
+   *
    * ```js
    * ce.precision = 30;
    * ce.number({ re: ce.bignum('1e-800'), im: ce.bignum(2) });
    * // ➔ a complex number with the real part 1e-800 and the imaginary part 2
    * ce.number({ re: 1, im: 0 });
    * // ➔ 1
+   * ce.number({ re: 2, im: 3 }).isExact;
+   * // ➔ true
+   * ce.number({ re: 2.5, im: 3 }).isExact;
+   * // ➔ false
    * ```
    */
   number(

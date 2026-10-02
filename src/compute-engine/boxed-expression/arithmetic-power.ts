@@ -35,8 +35,7 @@ import {
   indeterminateFormAnswer,
   numericValue,
 } from './type-guards.js';
-import { realExponentValue, isGaussianIntegerValue } from './imaginary-part.js';
-import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
+import { realExponentValue } from './imaginary-part.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { complexPow } from '../numerics/numeric-complex.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
@@ -987,8 +986,8 @@ function exactLog10Modulus(v: ExactNumericValue): number {
 /**
  * `x^e` for an integer exponent `e` and an EXACT base `x`, computed exactly:
  *  - integer / rational base → exact bigint rational power;
- *  - complex base (an exact Gaussian rational / pure-imaginary radical, or a
- *    Gaussian-integer literal from the inexact lane) → `ExactNumericValue.pow`
+ *  - complex base (an exact Gaussian rational / pure-imaginary radical)
+ *    → `ExactNumericValue.pow`
  *    (exact binary powering of the components — no `exp`/`ln` round-trip, so
  *    no float residue: `(1+i)^2 = 2i`, `(2+i)^3 = 2+11i`; a negative exponent
  *    yields an exact Gaussian rational, e.g. `(1+i)^-2 = -i/2`);
@@ -1003,21 +1002,16 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
   if (!isNumber(x) || !Number.isSafeInteger(e)) return undefined;
 
   //
-  // Complex base: an exact complex value, or a machine/big Gaussian integer
+  // Complex base: an exact complex value
   //
   if (x.isComplex) {
     const nv = x.numericValue;
     if (typeof nv === 'number') return undefined; // a JS number is never complex
-    let exact: ExactNumericValue | undefined;
-    if (nv instanceof ExactNumericValue) exact = nv;
-    else if (isGaussianInteger(nv))
-      // A Gaussian-integer literal from the inexact lane is exactly
-      // representable: lift it so the powering is exact (WP-2.16)
-      exact = ce._numericValue({
-        rational: [nv.re, 1],
-        imRational: [nv.im, 1],
-      }) as ExactNumericValue;
-    if (exact === undefined) return undefined;
+    // Only an exact value is powered exactly. A complex float is not
+    // lifted to an exact value even when both its parts are integers: a
+    // float operand makes the result a float.
+    if (!(nv instanceof ExactNumericValue)) return undefined;
+    const exact = nv;
 
     // Magnitude guard: |z^e| = |z|^e — keep pathological powers symbolic
     // rather than materializing huge exact components. The modulus is read
@@ -1832,12 +1826,11 @@ export function pow(
   if (isNumber(x) && Number.isInteger(e)) {
     // x^e with an integer exponent.
     //
-    // An EXACT base (integer/rational/radical, or a Gaussian integer) must
+    // An EXACT base (integer/rational/radical, or an exact complex) must
     // yield an EXACT result — never a rounded bignum (`Power(2,127)`), a float
     // (`Power(2,-2)`), or a float residue (`(1+i)^2`). That's the exactness
     // contract: numericizing an exact argument is the `.N()` path's job.
-    const isGaussianInt = x.isComplex && isGaussianIntegerValue(x.numericValue);
-    if (x.isExact || isGaussianInt) {
+    if (x.isExact) {
       const exact = exactIntegerPow(x, e!);
       if (exact !== undefined) return exact;
       // The exact result is too large to materialize (magnitude guard) or is
@@ -1846,7 +1839,7 @@ export function pow(
       return ce._fn('Power', [x, ce.expr(exp)]);
     }
 
-    // An inexact base (a float, or a non-Gaussian complex) numericizes — an
+    // An inexact base (a real or a complex float) numericizes — an
     // inexact argument is allowed to produce a float under `evaluate()`.
     const n = x.numericValue;
     if (typeof n === 'number') {
@@ -1995,8 +1988,13 @@ export function root(
         const n = b.re;
         const mod = Math.pow(-a.re, 1 / n);
         const angle = Math.PI / n;
+        // The root is computed in doubles: it is a float, even when both
+        // its parts are integers
         return a.engine.number(
-          a.engine.complex(mod * Math.cos(angle), mod * Math.sin(angle))
+          a.engine._inexactNumericValue({
+            re: mod * Math.cos(angle),
+            im: mod * Math.sin(angle),
+          })
         );
       }
       if (isNegative) a = a.neg();

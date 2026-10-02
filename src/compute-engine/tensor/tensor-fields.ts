@@ -350,6 +350,31 @@ export class TensorFieldExpression implements TensorField<Expression> {
 }
 
 /** @category Tensors */
+/**
+ * The value of a `complex128` cell as an expression.
+ *
+ * A complex value in such a cell was computed in doubles or came from a
+ * complex float entry (an exact complex entry uses the `expression` dtype),
+ * so it is a float, even when both its parts are integers (`1.0 + 2.0i`).
+ * `ce.number()` of a `Complex` would make such a value exact, as it does
+ * for a value from the host.
+ *
+ * A cell with a zero imaginary part is boxed by `ce.number()` of its real
+ * part, as a `float64` cell is (`TensorFieldNumber.expression()`): an exact
+ * integer entry of a complex matrix (the `0` and `2` of
+ * `[[1.5+i, 0], [0, 2]]`) is held in such a cell and reads back exact. A
+ * NaN or infinite part is boxed by `ce.number()` too, which maps it to
+ * `NaN`, `ComplexInfinity` or a signed infinity.
+ */
+export function complexCellExpression(
+  ce: ComputeEngine,
+  z: Complex
+): Expression {
+  if (z.im === 0 || !Number.isFinite(z.re) || !Number.isFinite(z.im))
+    return ce.number(z);
+  return ce.number(ce._inexactNumericValue({ re: z.re + 0, im: z.im }));
+}
+
 export class TensorFieldComplex implements TensorField<Complex> {
   one: Complex;
   zero: Complex;
@@ -437,13 +462,13 @@ export class TensorFieldComplex implements TensorField<Complex> {
       // case 'string':
       //   return x.toString();
       case 'expression':
-        return this.ce.number(x);
+        return this.expression(x);
     }
     throw new Error(`Cannot cast ${x} to ${dtype}`);
   }
 
   expression(z: Complex): Expression {
-    return this.ce.number(z);
+    return complexCellExpression(this.ce, z);
   }
 
   isZero(z: Complex): boolean {
@@ -549,7 +574,7 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
     if (expr.symbol === 'NegativeInfinity') return 'float64';
     if (expr.symbol === 'ComplexInfinity') return 'complex128';
     // The imaginary unit is an exact value. A `complex128` cell would read
-    // back as a machine complex, which boxes as an inexact number, so it
+    // back as a float (`TensorFieldComplex.expression()`), so it
     // uses the `expression` dtype (see the `complex` tier below).
     if (expr.symbol === 'ImaginaryUnit') return 'expression';
   }
@@ -634,8 +659,8 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
       case 'complex':
       case 'imaginary':
         // Preserve exactness, as for the real tiers above: a `complex128`
-        // cell reads back as a machine complex, which boxes as an INEXACT
-        // number, so an exact entry such as `i` or `1 + 2i` would lose its
+        // cell reads back as a float (`TensorFieldComplex.expression()`),
+        // even when both its parts are integers, so an exact entry such as `i` or `1 + 2i` would lose its
         // exactness through the tensor (`Norm([[1, 1+2i], [0, 1]], 1)` would
         // answer `3.236…` instead of `1 + √5`). An exact complex value
         // uses the `expression` dtype; an inexact one uses `complex128`.

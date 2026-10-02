@@ -176,6 +176,51 @@
   `\coth(\frac{i\pi}{2})` do. A symbolic divisor (`\frac{i}{x}`) keeps the
   division.
 
+- **A complex number from the host with integer parts is exact; a complex
+  float is never read as exact.** `ce.number(new Complex(2, 3))`,
+  `ce.number({ re: 2, im: 3 })` and `ce.box(new Complex(2, 3))` are now the
+  exact `2+3i` (`isExact` is `true`, the MathJSON is `["Complex", 2, 3]`;
+  it was `["Complex", {num: "2.0"}, {num: "3.0"}]`), as `ce.number(2)` is the
+  exact `2`. Integer-valued `BigDecimal` parts are exact too. A part with a
+  fraction (`new Complex(2.5, 3)`) gives a float, as before. In return, a
+  float whose parts are integers is no longer taken for an exact value in a
+  computation, so a float operand makes the result a float:
+  - `\frac{1}{3}\cdot 1.0i` and `\sqrt2\cdot 1.0i` evaluate to floats (they
+    were the exact `(1/3)i` and `√2·i`).
+  - `(1.0+1.0i)^2` is the float `2.0i` (it was the exact `2i`); `(1+i)^2`
+    stays the exact `2i`.
+  - `\Gamma(1.0i)` and `\cos(1.0i\pi)` evaluate to floats under `evaluate()`
+    (they stayed symbolic, as `\Gamma(i)` does).
+  - A float multiple of π that is a special angle stays exact:
+    `e^{1.0i\pi}` is `-1`, as before.
+
+  The complex results of the numeric routines stay floats: the conjugate of
+  a float, an even root of a negative number under `.N()`, the complex
+  kernels (`\Gamma(1.0+1.0i)`), and the complex entries of a matrix that
+  holds a complex float (`Trace`, `Transpose`, `MatrixMultiply`,
+  `Determinant` of `[[1.0+1.0i, 0], [0, 1.0+1.0i]]`).
+
+  The results of the numeric routines are now floats also when they are
+  real integers (they were exact): `NIntegrate(1, 0, 2)` is `2.0` (it was
+  `2`), as are the values of `NLimit`, `ND`, `NDSolve` (the inner grid
+  points too; an end point that is an exact limit stays exact), the
+  fitted parameters of `FindFit` and `FindRoot`, and the roots that
+  `ComplexRoots` computes for a float (`ComplexRoots(1.0, 4)` starts with
+  `1.0`). For a matrix with a float entry, the results of `Eigenvalues`,
+  `Eigenvectors`, `SingularValues`, `SVD`, `QRDecomposition` and the
+  spectral norm are floats (`SingularValues([[3.0, 0], [0, 4.0]])` is
+  `[4.0, 3.0]`, it was `[4, 3]`); a matrix of exact entries keeps the
+  results it had.
+
+  The eigenvalues of an exact matrix larger than 3×3 (computed by the QR
+  algorithm) are checked with exact arithmetic: an eigenvalue close to a
+  rational number that makes `A − λI` singular is returned exact, and
+  `Eigenvectors` then gives exact vectors. A double eigenvalue of a
+  defective matrix, which the QR algorithm gives with an error of about
+  `10^{-8}`, is now exact: the eigenvalues of
+  `[[5,4,2,1],[0,1,-1,-1],[-1,-1,3,0],[1,1,-1,2]]` are `[4, 4, 2, 1]` (they
+  were `[4.0000000258, 3.9999999742, 2, 1]`), with exact eigenvectors.
+
 ### New Features
 
 - **More reading choices of the lenient grammar report an `ambiguous-*`

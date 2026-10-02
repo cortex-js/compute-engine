@@ -349,6 +349,19 @@ function isZeroLike(x: number | BigDecimal | undefined): boolean {
   return x.isZero();
 }
 
+/** The value of `x`, a part of a complex value from the host, as an exact
+ * integer, or `undefined` when it is not one. A double is an exact integer
+ * when it is a safe integer (a larger double is a rounded value). A big
+ * decimal is an exact integer when it is integer-valued and its exponent is
+ * small enough to write out as digits: `canonicalNumber()` reads a big
+ * decimal given alone the same way. */
+function exactIntegerPart(x: number | BigDecimal): bigint | undefined {
+  if (typeof x === 'number')
+    return Number.isSafeInteger(x) ? BigInt(x) : undefined;
+  if (x.isInteger() && x.exponent <= 1_000_000) return x.toBigInt();
+  return undefined;
+}
+
 /**
  *
  * To use the Compute Engine, create a `ComputeEngine` instance:
@@ -2286,6 +2299,11 @@ export class ComputeEngine implements IComputeEngine {
    *   `ce.box(["Complex", {num: "1e-800"}, {num: "2"}])`;
    * - LaTeX, for example `ce.parse("10^{-800} + 2i")`.
    *
+   * `ce.number()` and `ce.box()` read a `Complex` as a value from the host:
+   * when both its parts are safe integers, the boxed number is the EXACT
+   * Gaussian integer (`ce.number(ce.complex(2, 3))` is the exact `2+3i`, as
+   * `ce.number(2)` is the exact `2`); otherwise it is a float.
+   *
    * The return value is an object with methods to perform arithmetic
    * operations:
    * - `re` (real part, as a JavaScript `number`)
@@ -2403,8 +2421,22 @@ export class ComputeEngine implements IComputeEngine {
 
     if (value instanceof BigDecimal) return makeNumericValue(value);
 
+    // A complex value from the host follows the rule of a real double: when
+    // both parts are safe integers it is the exact Gaussian integer, as
+    // `ce.number(2)` is the exact `2`. Otherwise it is a float. A numeric
+    // computation that produces a complex double must not come through here,
+    // because its result is inexact even when both parts are integers: it
+    // uses `_inexactNumericValue()` (see `boxComplexKernelResult()`).
     if (value instanceof Complex) {
       if (value.im === 0) return this._numericValue(value.re);
+      if (Number.isSafeInteger(value.re) && Number.isSafeInteger(value.im))
+        return new ExactNumericValue(
+          {
+            rational: [value.re === 0 ? 0 : value.re, 1],
+            imRational: [value.im, 1],
+          },
+          makeNumericValue
+        );
       return makeNumericValue({ re: value.re, im: value.im });
     }
 
@@ -4153,13 +4185,32 @@ export class ComputeEngine implements IComputeEngine {
       !(value instanceof BigDecimal) &&
       're' in value &&
       'im' in value
-    )
+    ) {
+      // A complex value from the host whose two parts are integers is the
+      // exact Gaussian integer, as an integer `number` or an integer-valued
+      // `BigDecimal` given alone is an exact integer (`canonicalNumber()`).
+      // A part with a fraction makes the value a float.
+      const re = exactIntegerPart(value.re);
+      const im = exactIntegerPart(value.im);
+      if (re !== undefined && im !== undefined)
+        return createNumberExpression(
+          this,
+          this._commonNumbers,
+          im === 0n
+            ? re
+            : new ExactNumericValue(
+                { rational: [re, 1n], imRational: [im, 1n] },
+                this._inexactNumericValue
+              ),
+          options
+        );
       return createNumberExpression(
         this,
         this._commonNumbers,
         this._numericValue({ re: value.re, im: value.im }),
         options
       );
+    }
     return createNumberExpression(
       this,
       this._commonNumbers,

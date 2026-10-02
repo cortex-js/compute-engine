@@ -7,10 +7,7 @@ import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 import type { NumericValue } from '../numeric-value/types.js';
 import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
-import {
-  isGaussianIntegerValue,
-  isImaginaryPartNaN,
-} from './imaginary-part.js';
+import { isImaginaryPartNaN } from './imaginary-part.js';
 
 /**
  * Box a kernel result that is a plain JS double.
@@ -53,22 +50,15 @@ function boxMachineNumber(
 
 /**
  * True if a number literal has no exactness to lose under D2's "inexact
- * argument numericizes" rule — the counterpart of `NumberLiteralInterface`'s
- * `isExact`, patched for one architectural wrinkle.
+ * argument numericizes" rule — the `isExact` property of a number literal.
  *
- * A number's `isExact` getter is authoritative, and since D12-A
- * `ExactNumericValue` represents exact complex values directly (Gaussian
- * rationals like `1+i`, `1/2+i`; pure-imaginary radicals like `√2·i`), so
- * those literals report `isExact === true` on their own. However a complex
- * literal can still arrive through the inexact `Big`/`MachineNumericValue`
- * lane with exactly-representable components — a float-lane computation whose
- * result happens to land on a Gaussian integer, e.g. `(0.5+0.5i)·2` or
- * `ce.number(new Complex(2, 3))`, both of which box inexact. Treat such a
- * value with an *integer* real part and an *integer* imaginary part (a
- * Gaussian integer) as exact too, so exact Gaussian arithmetic (`(1+i)^2 = 2i`, WP-2.16) and
- * symbolic-stay identities keyed on an exact complex argument (e.g. an
- * Eisenstein series at τ = i) are preserved. A non-Gaussian complex float
- * (`1.5+2i`) still numericizes — it never was representable exactly.
+ * A number's `isExact` getter is authoritative. `ExactNumericValue`
+ * represents exact complex values directly (Gaussian rationals like `1+i`,
+ * `1/2+i`; pure-imaginary radicals like `√2·i`), and a complex value from
+ * the host with integer parts (`ce.number(new Complex(2, 3))`) is stored
+ * exact when it is created. A complex float is inexact even when both its
+ * parts are integers (`1.0+1.0i`, or the result `(0.5+0.5i)·2`): it is not
+ * read as exact from the values of its parts.
  *
  * Non-number-literal expressions (symbols like `Pi`, unevaluated functions)
  * are treated as exact here: they have no float to lose, and any exact
@@ -76,8 +66,7 @@ function boxMachineNumber(
  */
 export function isExactNumber(x: Expression): boolean {
   if (!isNumber(x)) return true;
-  if (x.isExact) return true;
-  return x.isComplex && isGaussianIntegerValue(x.numericValue);
+  return x.isExact;
 }
 
 /**
@@ -144,8 +133,14 @@ function boxKernelResult(
  * `-1`, as `boxMachineNumber()` makes a real result a float.
  * `_numericValue()` makes a safe-integer `{re, im: 0}` exact, which is what
  * a caller that builds exact data wants, so the float is made here with the
- * inexact factory of the engine. Otherwise the value is boxed as
- * `_numericValue()` boxes it: exact when it is a Gaussian integer.
+ * inexact factory of the engine.
+ *
+ * Otherwise (every argument is exact) a real result (`im === 0`) that is a
+ * safe integer is exact, as `boxMachineNumber()` makes a real result exact.
+ * A result with a nonzero imaginary part is a float, even when both its
+ * parts are integers: it is boxed from the plain data `{re, im}`, never from
+ * a `Complex`, which `_numericValue()` reads as a value from the host and
+ * makes exact when its parts are integers.
  */
 export function boxComplexKernelResult(
   ce: IComputeEngine,
@@ -163,7 +158,7 @@ export function boxComplexKernelResult(
         im: value.im === 0 ? 0 : value.im,
       })
     );
-  return ce.number(ce._numericValue(value));
+  return ce.number(ce._numericValue({ re: value.re, im: value.im }));
 }
 
 /**
