@@ -2492,6 +2492,15 @@ export type CompilationResult<
   code: string;
 
   /**
+   * The version of the helper set the JavaScript `code` calls (`_SYS`). Run
+   * stored code with `createJavaScriptRuntime()` from
+   * `@cortex-js/compute-engine/runtime`, and compare this with the runtime's
+   * `runtimeVersion`: a mismatch means the code was compiled by another
+   * release. Set by the JavaScript target only.
+   */
+  runtimeVersion?: string;
+
+  /**
    * Identifiers the generated `code` references that the caller must supply at
    * run time (JS vars-object keys / GLSL uniforms) for the result to be
    * self-contained.

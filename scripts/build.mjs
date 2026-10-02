@@ -94,6 +94,18 @@ const COMPILE_UMD_OPTIONS = {
   },
 };
 
+const RUNTIME_UMD_OPTIONS = {
+  banner: {
+    js: `/** Runtime ${SDK_VERSION} ${
+      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
+    }*/
+    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ComputeEngineRuntime = {}));})(this, (function (exports) { 'use strict';`,
+  },
+  footer: {
+    js: `Object.assign(exports, ComputeEngineRuntime); Object.defineProperty(exports, '__esModule', { value: true });}));`,
+  },
+};
+
 const IDENTITIES_UMD_OPTIONS = {
   banner: {
     js: `/** Identities ${SDK_VERSION} ${
@@ -180,6 +192,11 @@ const ENTRIES = [
   { name: 'numerics', umd: NUMERICS_UMD_OPTIONS, globalName: 'Numerics' },
   { name: 'core', umd: CORE_UMD_OPTIONS, globalName: 'ComputeEngineCore' },
   { name: 'compile', umd: COMPILE_UMD_OPTIONS, globalName: 'Compile' },
+  {
+    name: 'runtime',
+    umd: RUNTIME_UMD_OPTIONS,
+    globalName: 'ComputeEngineRuntime',
+  },
   { name: 'identities', umd: IDENTITIES_UMD_OPTIONS, globalName: 'Identities' },
   {
     name: 'integration-rules',

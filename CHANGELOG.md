@@ -39,6 +39,30 @@
 
 ### New Features
 
+- **Compiled JavaScript runs without the engine.** The new entry point
+  `@cortex-js/compute-engine/runtime` exports `createJavaScriptRuntime(options)`,
+  the `_SYS` helper bundle that `compile()` builds for `run()`, with no engine
+  behind it: store the `code` of a `JavaScriptTarget` result, and run it on a
+  page, in a worker or on a server with `runtime.load(result)` (or as
+  `new Function('_SYS', '_', …)(runtime, vars)`). The helpers that read engine
+  state take it as options: `random` is the source of draws outside any
+  `WithRandomSeed` frame and of the integrals' Monte-Carlo samples (`null`
+  denies draws, and a draw then throws, as with a denied `entropy`
+  capability); `frame` is the frame of an interpreted `WithRandomSeed` the code
+  is called from (`{ seedLo, seedHi, next }` or `{ seed, next }`), and
+  `runtime.frame.next` is the advanced counter after the call; `iterationLimit`
+  caps the lazy-stream walks (default 1024) and `deadline` is an optional time
+  after which the shuffle and choice loops throw. A seeded program gives the
+  same values interpreted, with `run()` and as stored code:
+  `WithRandomSeed(7, RandomShuffle(Range(1, 6)))` is the same list in all
+  three. `CompilationResult.runtimeVersion` and `runtime.runtimeVersion` are
+  the version of the helper set; `load()` throws when they differ. Functions
+  passed in the `functions` or `imports` compile options are copied into the
+  code as source (`toString()`), so a closure loses its enclosing scope and a
+  function given by name must exist where the code runs. The engine's own
+  `_SYS` (`run.SYS`) is built from the same factory. (#372, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 - **`StirlingS2(n, k)` is an alias for `Stirling(n, k)`,** the Stirling number
   of the second kind, under its Mathematica name. Its canonical form is
   `Stirling`, the preferred name: `StirlingS2(6, 3)` evaluates to `90`, and

@@ -106,6 +106,29 @@ divergences are recorded in `ROADMAP.md`.
 A consumer that needs tolerant equality evaluates through the interpreter, or
 asks for a compile option; none exists today.
 
+## Running stored JavaScript
+
+The code of a JavaScript compilation result reads only `_SYS` and `_`.
+`@cortex-js/compute-engine/runtime` exports `createJavaScriptRuntime(options)`,
+the `_SYS` that `run()` uses, with no engine behind it, so code compiled in one
+place (a worker, a build) runs in another with only the numerics it calls. The
+engine-bound helpers take their state as options: `random` (draws outside a
+`WithRandomSeed` frame and the integrals' Monte-Carlo samples; `null` denies),
+`frame` (the enclosing frame, read back from `runtime.frame.next`),
+`iterationLimit` and `deadline`. Tolerance and angular unit are fixed into the
+code at compile time, and compiled code always uses machine floats.
+
+The result and the runtime both carry `runtimeVersion`; a mismatch means the
+code was compiled by another release, and `runtime.load()` refuses it.
+
+Functions passed in the `functions` or `imports` compile options are copied into
+the code as source (`toString()`): a closure loses its enclosing scope, and a
+function given by name must exist where the code runs.
+
+`compilation/javascript-runtime.ts` holds the helpers and imports no engine code
+(`test/compute-engine/js-runtime.test.ts` bundles the entry point and checks
+it). `run.SYS` is built from the same factory.
+
 ## Target boundaries
 
 The JavaScript target supports the broadest dynamic representation. Python,
