@@ -39,6 +39,17 @@
   because Mathematica's `Tr` of a vector or of a rank-3 tensor has a different
   meaning than `Trace`. See `docs/MATHEMATICA-NAMES.md`.
 
+### Issues Resolved
+
+- **`toString()` wraps the operand of a factorial when needed.** The
+  factorial of `5/2` printed as `5/2!`, which reads as 5/(2!), and the
+  factorial of `x/2` as `1/2 * x!`. An operand that is not a name, an
+  unsigned decimal number or one function call is now in parentheses:
+  `(5/2)!`, `(1/2 * x)!`, `(n + 1)!`, `(-3)!`; `5!`, `n!`, `2.5!` and
+  `sin(x)!` are unchanged. A factorial used as the base of a power prints
+  as `(n!)^2`: `n!^2` did not parse back, since `!^` is read as one
+  operator.
+
 ## 0.146.0 _2026-10-02_
 
 ### Behavior Changes

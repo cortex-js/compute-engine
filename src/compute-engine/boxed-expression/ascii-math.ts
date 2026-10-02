@@ -372,6 +372,8 @@ const OPERATORS: Record<
       // Always wrap the base in parentheses if negative to avoid ambiguity,
       // i.e. -3^2 -> (-3)^2
       if (base.startsWith('-')) base = `(${base})`;
+      // Wrap a factorial base: `n!^2` would lex `!^` as one operator.
+      else if (base.endsWith('!')) base = `(${base})`;
       // Wrap the exponent in parentheses if longer than 1 character
       if (exponent.length === 1) return `${base}^${exponent}`;
       return `${base}^${wrap(exponent)}`;
@@ -480,7 +482,19 @@ const FUNCTIONS: Record<
 
   Ceil: 'ceil', // also: (expr, serialize) => `|~${serialize(expr.op1)}~|`,
   Exp: 'exp',
-  Factorial: (expr, serialize) => `${serialize((expr as FnExpr).op1, 12)}!`,
+  // The postfix `!` binds tighter than every infix operator, so an operand
+  // that is not printed as a single unit is wrapped: `(5/2)!`, `(x/2)!` and
+  // `(-3)!`, not `5/2!` (read as 5/(2!)) or `1/2 * x!`. A single unit is a
+  // name (`n`, `i`), an unsigned decimal number (`5`, `2.5`; `1e+30` is
+  // wrapped, since its `+` reads as an addition) or one call (`sin(x)`).
+  Factorial: (expr, serialize) => {
+    const s = serialize((expr as FnExpr).op1, 12);
+    const atomic =
+      /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) ||
+      /^\d+(\.\d+)?$/.test(s) ||
+      isSingleCall(s);
+    return atomic ? `${s}!` : `${wrap(s)}!`;
+  },
   Floor: 'floor', // also: (expr, serialize) => `|__${serialize(expr.op1)}__|`,
   Log: 'log',
   Ln: 'ln',
@@ -877,6 +891,15 @@ function isParenthesizedGroup(s: string): boolean {
     }
   }
   return depth === 0;
+}
+
+/**
+ * Whether `s` is one function call, `name(...)`, whose opening parenthesis is
+ * closed by its trailing `)`: `sin(x)` is, `f(a) + g(b)` is not.
+ */
+function isSingleCall(s: string): boolean {
+  const m = /^[A-Za-z_][A-Za-z0-9_]*\(/.exec(s);
+  return m !== null && isParenthesizedGroup(s.slice(m[0].length - 1));
 }
 
 function wrap(s: string, precedence = 0, target = -1): string {

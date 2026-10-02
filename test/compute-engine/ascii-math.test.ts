@@ -394,3 +394,34 @@ describe('grouping: operand that is two parenthesized groups', () => {
     ).toBe('1 / (a * b)');
   });
 });
+
+describe('FACTORIAL', () => {
+  // The postfix `!` binds tighter than every infix operator: an operand that
+  // is not a symbol or a non-negative integer is wrapped in parentheses.
+  it('wraps an operand that would otherwise be misread', () => {
+    expect(check(['Factorial', ['Rational', 5, 2]])).toBe('(5/2)!');
+    expect(check(['Factorial', ['Rational', -1, 2]])).toBe('(-1/2)!');
+    expect(check(['Factorial', ['Divide', 'x', 2]])).toBe('(1/2 * x)!'); // canonical: Multiply(1/2, x)
+    expect(check(['Factorial', ['Add', 'n', 1]])).toBe('(n + 1)!');
+    expect(check(['Factorial', -3])).toBe('(-3)!');
+    expect(check(['Factorial', ['Factorial', 'n']])).toBe('(n!)!');
+  });
+  it('keeps a name, an unsigned decimal number or one call bare', () => {
+    expect(check(['Factorial', 5])).toBe('5!');
+    expect(check(['Factorial', 'n'])).toBe('n!');
+    expect(check(['Factorial', 2.5])).toBe('2.5!');
+    expect(check(['Factorial', ['Sin', 'x']])).toBe('sin(x)!');
+  });
+  it('wraps an exponent notation and a power', () => {
+    expect(check(['Factorial', 1e30])).toBe('(1e+30)!');
+    expect(check(['Factorial', ['Power', 'x', 2]])).toBe('(x^2)!');
+  });
+  it('distinguishes the factorial of a negation from a negated factorial', () => {
+    expect(check(['Negate', ['Factorial', 'n']])).toBe('-n!');
+    expect(check(['Factorial', ['Negate', 'n']])).toBe('(-n)!');
+  });
+  it('wraps a factorial used as the base of a power', () => {
+    // `n!^2` would lex `!^` as one operator.
+    expect(check(['Power', ['Factorial', 'n'], 2])).toBe('(n!)^2');
+  });
+});
