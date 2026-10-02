@@ -449,6 +449,95 @@ Model each alias on `StirlingS2` in `library/number-theory.ts`
 the operator is checked), with a test that the alias and the operator give
 the same result, also for an invalid operand.
 
+### `arctan` is not odd on its branch cut (OPEN, decision — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
+
+The cut of `arctan` is the imaginary axis outside `[−i, i]`. The engine puts
+both halves of the cut on the side right of the axis: `arctan(2i)` is
+`π/2 + 0.549i` and `arctan(−2i)` is `π/2 − 0.549i`. So `arctan(−z)` is not
+`−arctan(z)` there (`−arctan(2i)` is `−π/2 − 0.549i`). mpmath and Mathematica
+give `π/2 + 0.549i` and `−π/2 − 0.549i` (each half on the side it is
+continuous with, "counter-clockwise continuity"), and `arctan` is odd. The
+engine uses that rule for `arsinh` on the same axis (`arsinh(−2i)` is
+`−1.317 − (π/2)i`), and `arctan z = −i·artanh(iz)` would agree with it.
+Options: (a) keep the present values; (b) use the mpmath side for `y < −1`,
+which changes `arctan(iy)` for `y < −1` and `arccot(iy)` for `0 < y < 1`
+(`arccot(0.5i)` is `π/2 − 0.549i` today, mpmath gives `−π/2 − 0.549i`) in
+the interpreter and in compiled JavaScript. If nothing is
+decided, (a) stays. The side is set in one place, `complexAtan()` in
+`numerics/numeric-complex.ts` (the zero real part it passes to the kernel),
+and is pinned by `test/compute-engine/inverse-trig-large-arguments.test.ts`.
+
+### Complex inverse trigonometric functions of an argument beyond the double range give `NaN` (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
+
+`\arcsin(10^{400}).N()` is `NaN` at every precision. The correct value is
+`π/2 − 921.72718437817822i` (`π/2 − ln(2·10⁴⁰⁰)·i`). The result is complex, and the
+complex kernels (`complexAsin()` and the others in
+`numerics/numeric-complex.ts`) compute with doubles, so the argument becomes
+`Infinity`. The same holds for `Arccos`, `Arcosh`, `Artanh` of a real
+argument beyond `10³⁰⁸` and for any complex argument with such a part. An
+argument below the normal range of a double loses digits the same way:
+`\operatorname{arcsec}(10^{-320}).N()` is `737.5203880715337i`, computed
+from the subnormal double nearest `10⁻³²⁰` (which keeps 5 digits), while the
+value at `10⁻³²⁰` is `737.52037693865456i`. A fix
+needs big-decimal complex kernels (for a real argument outside the real
+domain, for example `arcsin x = sign(x)·π/2 ∓ i·arcosh|x|` with
+`BigDecimal.acosh()`), which would also give these values at the working
+precision instead of 16 digits.
+
+### The GPU complex inverse trigonometric kernels are wrong for moderate arguments (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
+
+The GLSL and WGSL helpers `_gpu_casin`, `_gpu_cacos`, `_gpu_catan`,
+`_gpu_casinh`, `_gpu_cacosh` and `_gpu_catanh` (`compilation/gpu-target.ts`)
+use the logarithm formulas (`asin z = −i·ln(iz + √(1 − z²))` and similar)
+and a polar square root. A script that runs these formulas with each
+operation rounded to float32 (`Math.fround`) gives, compared with mpmath:
+- `asin(1000)` real part `1.660` instead of `π/2`; `asin(±10⁴)` and
+  `asin(±10⁶)` real part `π`; `asin(10¹⁹)` imaginary part `−∞`.
+- `acos(1000)` real part `−0.089` instead of `0`; `acos(10⁴)` real part
+  `−π/2`.
+- `asinh(−10⁴)` is `−∞`, `asinh(10¹⁹)` is `NaN`; `acosh(−1.5)` real part
+  `−0.962` (the real part of `acosh` is never negative); `acosh(−10⁴)` is
+  `−∞`.
+- `atanh(10⁶)` real part with a relative error of `0.046`; `atanh(10²⁰)`
+  real part `NaN`.
+- `asin(10⁻⁶·i)`, `acosh(0.5 + 10⁻⁶·i)`: relative error of `0.01` to `0.05`
+  in the small part.
+- On the real axis outside the domain, the imaginary part of `asin`,
+  `acos` and `atanh` has the opposite sign from the interpreter
+  (`asin(1.5)` is `π/2 + 0.962i`, the interpreter gives `π/2 − 0.962i`).
+
+The interpreter and compiled JavaScript use the formulas of W. Kahan
+(`complexAsin()` and the others in `numerics/numeric-complex.ts`), which have
+none of these errors; the same formulas in float32 would fix the GPU kernels.
+
+### Compiled Python takes the other side of some branch cuts for a complex argument with a zero imaginary part (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
+
+For a complex-valued argument, the Python target uses `cmath.asin`,
+`cmath.acos`, `cmath.atan` (`compilation/python-target.ts`). `cmath` is
+accurate at large and small arguments, but it picks the side of a cut from
+the sign of a zero part (IEEE 754): `cmath.asin(complex(2, 0))` is
+`π/2 + 1.317i`, `cmath.acos(complex(2, 0))` is `−1.317i`, and
+`cmath.atanh(complex(2, 0))` is `0.549 + (π/2)i`. The interpreter and
+compiled JavaScript give `π/2 − 1.317i`, `1.317i` and `0.549 − (π/2)i`. A
+real argument of a real-typed variable compiles to `np.arcsin` and does not
+see this. A fix gives the zero imaginary part the sign the engine uses
+before the call (for `asin`, `acos`, `atanh`: `−0.0` when the real part is
+positive).
+
+### Compiled JavaScript removes a small part of a complex result that the interpreter keeps (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
+
+The compiled complex helpers (`toRI()`, `compilation/javascript-target.ts`)
+set to 0 a part not larger than `10⁻¹⁴` and not larger than `10⁻¹⁴` times the
+modulus of the result (`chopKernelDust()`, `numeric-value/roundoff.ts`).
+The interpreter's one-argument kernels (`apply()`,
+`boxed-expression/apply.ts`) do not remove anything, so `arcoth(10⁻¹⁰⁰)` is
+`10⁻¹⁰⁰ − (π/2)i` in the interpreter and `−(π/2)i` compiled. The removal is
+there because some `complex-esm` kernels leave a residual part of about
+`10⁻¹⁶` (`Complex(0.5, 0).asin()` had `im = 5.55e-17`), and the compiled
+result convention tests `im === 0` exactly. Options: remove the dust in the
+kernels that produce it and stop removing it in `toRI()`, or remove it in the
+interpreter's one-argument `apply()` too.
+
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
 `reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and

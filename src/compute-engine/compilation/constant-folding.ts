@@ -16,9 +16,7 @@ import { BaseCompiler } from './base-compiler.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { realPowerBranchTerms } from '../boxed-expression/arithmetic-power.js';
 import {
-  chop,
   factorial,
-  ROUNDOFF_TOLERANCE,
   tanWithPole,
   cotWithPole,
   secWithPole,
@@ -27,7 +25,22 @@ import {
 } from '../numerics/numeric.js';
 import { gamma } from '../numerics/special-functions.js';
 import { Complex } from 'complex-esm';
-import { complexDivide } from '../numerics/numeric-complex.js';
+import {
+  complexAcos,
+  complexAcosh,
+  complexAcot,
+  complexAcoth,
+  complexAcsc,
+  complexAcsch,
+  complexAsec,
+  complexAsech,
+  complexAsin,
+  complexAsinh,
+  complexAtan,
+  complexAtanh,
+  complexDivide,
+} from '../numerics/numeric-complex.js';
+import { chopKernelDust } from '../numeric-value/roundoff.js';
 
 /**
  * The shader spelling of a NON-FINITE value (`NaN`, `±∞`).
@@ -992,63 +1005,62 @@ function variadicFold(
 }
 
 /**
- * The `_SYS` complex routines whose body is one `complex-esm` method followed
- * by the kernel-roundoff chop (`toRI` in `javascript-target.ts`), listed as
- * `<runtime name>: <method>`.
+ * The `_SYS` complex routines whose body is one kernel followed by the
+ * kernel-roundoff chop (`toRI` in `javascript-target.ts`), listed as
+ * `<runtime name>: <kernel>`. The kernel is a `complex-esm` method, or for
+ * the inverse functions the function of `numerics/numeric-complex.ts` that
+ * the routine calls (`complexAsin()` and the others).
  *
- * Every entry here is evaluated by calling that same method and applying that
- * same chop, so a folded literal is what the run-time call returns, digit for
- * digit. The routines with a hand-written body — `csign`, `clog10`, `clog2`,
- * `cinvhav`, the ring operations `cneg` and `cconj` — are deliberately absent:
- * each would need its own transcription, and a transcription that drifts from
- * the runtime is a compiled value that contradicts the interpreter.
+ * Every entry here is evaluated by calling that same kernel and applying that
+ * same chop (`chopKernelDust()`), so a folded literal is what the run-time
+ * call returns, digit for digit. The routines with a hand-written body —
+ * `csign`, `clog10`, `clog2`, `cinvhav`, the ring operations `cneg` and
+ * `cconj` — are deliberately absent: each would need its own transcription,
+ * and a transcription that drifts from the runtime is a compiled value that
+ * contradicts the interpreter.
  */
-const JAVASCRIPT_COMPLEX_METHODS: Readonly<Record<string, ComplexUnaryMethod>> =
-  {
-    '_SYS.csin': 'sin',
-    '_SYS.ccos': 'cos',
-    '_SYS.ctan': 'tan',
-    '_SYS.casin': 'asin',
-    '_SYS.cacos': 'acos',
-    '_SYS.catan': 'atan',
-    '_SYS.csinh': 'sinh',
-    '_SYS.ccosh': 'cosh',
-    '_SYS.ctanh': 'tanh',
-    '_SYS.csqrt': 'sqrt',
-    '_SYS.cexp': 'exp',
-    '_SYS.cln': 'log',
-    '_SYS.ccot': 'cot',
-    '_SYS.csec': 'sec',
-    '_SYS.ccsc': 'csc',
-    '_SYS.ccoth': 'coth',
-    '_SYS.csech': 'sech',
-    '_SYS.ccsch': 'csch',
-    '_SYS.cacot': 'acot',
-    '_SYS.casec': 'asec',
-    '_SYS.cacsc': 'acsc',
-    '_SYS.cacoth': 'acoth',
-    '_SYS.casech': 'asech',
-    '_SYS.cacsch': 'acsch',
-    '_SYS.cacosh': 'acosh',
-    '_SYS.catanh': 'atanh',
-  };
-
-/** A `complex-esm` method that takes no argument and answers a `Complex`. */
-type ComplexUnaryMethod = {
-  [K in keyof Complex]: Complex[K] extends () => Complex ? K : never;
-}[keyof Complex];
+const JAVASCRIPT_COMPLEX_KERNELS: Readonly<
+  Record<string, (z: Complex) => Complex>
+> = {
+  '_SYS.csin': (z) => z.sin(),
+  '_SYS.ccos': (z) => z.cos(),
+  '_SYS.ctan': (z) => z.tan(),
+  '_SYS.casin': complexAsin,
+  '_SYS.cacos': complexAcos,
+  '_SYS.catan': complexAtan,
+  '_SYS.csinh': (z) => z.sinh(),
+  '_SYS.ccosh': (z) => z.cosh(),
+  '_SYS.ctanh': (z) => z.tanh(),
+  '_SYS.csqrt': (z) => z.sqrt(),
+  '_SYS.cexp': (z) => z.exp(),
+  '_SYS.cln': (z) => z.log(),
+  '_SYS.ccot': (z) => z.cot(),
+  '_SYS.csec': (z) => z.sec(),
+  '_SYS.ccsc': (z) => z.csc(),
+  '_SYS.ccoth': (z) => z.coth(),
+  '_SYS.csech': (z) => z.sech(),
+  '_SYS.ccsch': (z) => z.csch(),
+  '_SYS.cacot': complexAcot,
+  // `casec`, `cacsc` and `casech` answer at 0 as the runtime routines do.
+  '_SYS.casec': (z) => (z.isZero() ? new Complex(NaN, NaN) : complexAsec(z)),
+  '_SYS.cacsc': (z) => (z.isZero() ? new Complex(NaN, NaN) : complexAcsc(z)),
+  '_SYS.cacoth': complexAcoth,
+  '_SYS.casech': (z) =>
+    z.isZero() ? new Complex(Infinity, 0) : complexAsech(z),
+  '_SYS.cacsch': complexAcsch,
+  '_SYS.casinh': complexAsinh,
+  '_SYS.cacosh': complexAcosh,
+  '_SYS.catanh': complexAtanh,
+};
 
 const JAVASCRIPT_COMPLEX_CALLS: Readonly<
   Record<string, (re: number, im: number) => { re: number; im: number }>
 > = Object.fromEntries(
-  Object.entries(JAVASCRIPT_COMPLEX_METHODS).map(([name, method]) => [
+  Object.entries(JAVASCRIPT_COMPLEX_KERNELS).map(([name, kernel]) => [
     name,
     (re: number, im: number) => {
-      const r = new Complex(re, im)[method]();
-      return {
-        re: chop(r.re, ROUNDOFF_TOLERANCE),
-        im: chop(r.im, ROUNDOFF_TOLERANCE),
-      };
+      const r = kernel(new Complex(re, im));
+      return chopKernelDust(r.re, r.im);
     },
   ])
 );

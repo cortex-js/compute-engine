@@ -69,6 +69,52 @@
 
 ### Issues Resolved
 
+- **Inverse trigonometric functions are accurate at large and small
+  arguments.** `\arcsin(-1000000)` gave `-1.5707963267948966 +
+  14.50865012405984i`: the imaginary part was correct to six digits only (the
+  correct value is `14.508657738523969`). `\operatorname{arccosh}(-1000000)`
+  had the same error. `\arcsin(10^{300})` gave `~oo` instead of
+  `1.5707963267948966 - 691.46867507877365i`, and `\arcsin(10^{-300}i)` gave
+  `0` instead of `10^{-300}i`. The complex values of `Arcsin`, `Arccos`,
+  `Arctan`, `Arsinh`, `Arcosh` and `Artanh`, and of `Arccsc`, `Arcsec` and
+  `Arccot`, now come from formulas that do not cancel and do not overflow, in
+  the interpreter and in compiled JavaScript (`\operatorname{arcsec}(10^{-320})`
+  was `NaN` and is `737.52i`, and an argument near the largest double, such
+  as `1.7·10^{308}(1 + i)`, no longer gives an infinite part). Each part of
+  the result has a relative error below `5·10^{-16}` over the whole finite
+  plane. The side of each branch cut is unchanged. At moderate arguments
+  only the last digit of some values changes, and a residual real part such
+  as the `-5.55e-17` of `\operatorname{arsinh}(0.5i)` is gone.
+
+- **`Arcsch`, `Arsech` and `Arcoth` are accurate at large and small
+  arguments.** For a real argument, `\operatorname{arcoth}(10^{100})` gave
+  `0` instead of `10^{-100}`, `\operatorname{arcsch}(-10^{-100})` gave
+  `-\infty` instead of `-230.95165647996451`,
+  `\operatorname{arcsch}(-10^{6})` had 15 correct digits of 21, and `\operatorname{arsech}(-10^{-8})` gave `\infty +
+  \frac{\pi}{2}i` instead of `19.113827924512311 + \pi i`. For a complex
+  argument, the values lost digits near `±1` and `±i` and for a large or small
+  modulus (`\operatorname{arsech}(3 - 10^{-10}i)` had a relative error of
+  `10^{-6}` in its real part), and `\operatorname{arcsch}(10^{-300}i)` was
+  `NaN`. The three functions now use the same formulas as `Arsinh`, `Arcosh`
+  and `Artanh`, written with `(1 ± z)/z` in place of `1/z ± 1`, in the
+  interpreter, with big decimals at a precision above machine precision, and
+  in compiled JavaScript. The side of each branch cut is unchanged.
+
+- **Compiled JavaScript keeps a small complex result.** The complex helpers
+  of compiled code set to `0` any part smaller than `10^{-14}` in magnitude,
+  so `\operatorname{arcoth}(x)` compiled to `0` at `x = 10^{20}` instead of
+  `10^{-20}`. A part is now removed only when it is also not larger than
+  `10^{-14}` times the modulus of the result. The constant folding of these
+  helpers uses the same rule and the same kernels as the run-time helpers.
+
+- **More inverse trigonometric functions compile for a complex argument.**
+  `Arsinh` of a complex argument compiled to `Math.asinh`, which gives `NaN`
+  (`\operatorname{arsinh}(2i)`). It now compiles to a complex helper, as
+  `Arcosh` and `Artanh` do. The compiled `Arccsc`, `Arcsec` and `Arccot` of a
+  complex argument now use the same kernels as the interpreter:
+  `\operatorname{arcsec}(-10^{-6})` had an imaginary part correct to 5 digits
+  and `\operatorname{arccsc}(10^{-300})` was `NaN`.
+
 - **A restriction by an infinite list of conditions no longer runs out of
   memory.** Reading the elements of `When([1, 2, 3], Range(1, ∞))` read the
   whole condition list on the first element, and the process ran out of

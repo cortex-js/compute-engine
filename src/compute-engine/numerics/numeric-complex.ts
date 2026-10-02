@@ -279,6 +279,475 @@ export function complexInverse(z: Complex): Complex {
   return new Complex(q.re, q.im);
 }
 
+//
+// Inverse trigonometric and inverse hyperbolic functions of a complex value
+//
+// The `complex-esm` methods (`asin`, `acos`, `atan`, `asinh`, `acosh`,
+// `atanh`) use the textbook logarithm formulas, such as
+// `asin z = −i·ln(iz + √(1 − z²))`. For a large `|z|` the two terms in the
+// logarithm nearly cancel on one side of the plane (`arcsin(−10⁶)` lost six
+// digits of its imaginary part), and `z²` overflows above `|z| ≈ 10¹⁵⁴`
+// (`arcsin(10³⁰⁰)` was `~oo`). They also lose a tiny argument
+// (`arcsin(10⁻³⁰⁰·i)` was `0`).
+//
+// The functions below use the formulas of W. Kahan, "Branch Cuts for Complex
+// Elementary Functions, or Much Ado About Nothing's Sign Bit" (1987). They
+// take products of two square roots in place of `√(1 − z²)`, so there is no
+// cancellation and no overflow below `|z| ≈ 10³⁰⁷`, and they keep the
+// relative accuracy of both parts.
+//
+// The "core" functions follow the sign of a zero part to pick the side of a
+// branch cut (IEEE 754 and C99 conventions). The engine does not keep the
+// sign of a zero, so the exported functions first give a zero part the sign
+// that selects the side the engine uses on each cut. That side is the one of
+// mpmath and of Mathematica ("counter-clockwise continuity"):
+// - `arcsin`, `arccos`, `artanh` on the real axis: for `x > 1` the side
+//   below the axis, for `x < −1` the side above it (`arcsin 2` is
+//   `π/2 − 1.317i`, `artanh 2` is `0.549 − (π/2)i`).
+// - `arcosh` on the real axis (`x < 1`): the side above the axis
+//   (`arcosh(−2)` is `1.317 + πi`).
+// - `arsinh` on the imaginary axis: for `y > 1` the side right of the axis,
+//   for `y < −1` the side left of it (`arsinh 2i` is `1.317 + (π/2)i`,
+//   `arsinh(−2i)` is `−1.317 − (π/2)i`).
+// - `arctan` on the imaginary axis: the side right of the axis for both
+//   `y > 1` and `y < −1` (`arctan 2i` is `π/2 + 0.549i`, `arctan(−2i)` is
+//   `π/2 − 0.549i`). This is the side the engine used before these
+//   functions were added; mpmath and Mathematica give `−π/2 − 0.549i` for
+//   `arctan(−2i)`.
+// A value with an infinite or NaN part uses the `complex-esm` method.
+//
+
+/** True if `x` is `−0` or negative. */
+function signBit(x: number): boolean {
+  return x < 0 || Object.is(x, -0);
+}
+
+/**
+ * The principal square root of `x + iy`, with the sign of a zero imaginary
+ * part kept (`√(−4 − 0i)` is `−2i`). The operands are scaled when they are
+ * near the ends of the double range, so `x + |z|` does not overflow and a
+ * subnormal operand keeps its digits.
+ */
+function sqrtParts(x: number, y: number): [number, number] {
+  if (x === 0 && y === 0) return [0, y];
+  let scale = 1;
+  const m = Math.max(Math.abs(x), Math.abs(y));
+  if (m > 1e300) {
+    x *= 0.25;
+    y *= 0.25;
+    scale = 2;
+  } else if (m < 1e-300) {
+    // 2^1000 and 2^-500: powers of two, so the scaling is exact.
+    x *= 2 ** 1000;
+    y *= 2 ** 1000;
+    scale = 2 ** -500;
+  }
+  const h = Math.hypot(x, y);
+  if (!signBit(x) || x === 0) {
+    const t = Math.sqrt((x + h) / 2);
+    return [t * scale, (y / (2 * t)) * scale];
+  }
+  const t = Math.sqrt((h - x) / 2);
+  return [(Math.abs(y) / (2 * t)) * scale, (signBit(y) ? -t : t) * scale];
+}
+
+function isFiniteComplex(x: number, y: number): boolean {
+  return Number.isFinite(x) && Number.isFinite(y);
+}
+
+/**
+ * True when `x + iy` is so large that the product of two square roots in the
+ * formulas below can overflow (`|z|` above the largest double, about
+ * 1.8·10³⁰⁸). The functions then use their value at `z/16`: for a large
+ * `|z|`, `f(z)` and `f(z/16)` have the same angle part, and their
+ * logarithmic part differs by `ln 16 = 4·ln 2`, to a relative error of about
+ * `1/|z|²`. The threshold, 6·10³⁰⁷ for the larger part, keeps `|z|` below
+ * 8.5·10³⁰⁷, and `z/16` below it.
+ */
+function isHuge(x: number, y: number): boolean {
+  return Math.max(Math.abs(x), Math.abs(y)) > 6e307;
+}
+
+/** `ln 16`, exact from `Math.LN2` (a product by a power of two). */
+const LN16 = 4 * Math.LN2;
+
+/** `asin(x + iy)`, the side of a cut picked by the sign of a zero part. */
+function asinCore(x: number, y: number): [number, number] {
+  if (isHuge(x, y)) {
+    const [a, b] = asinCore(x / 16, y / 16);
+    return [a, b < 0 ? b - LN16 : b + LN16];
+  }
+  const [ar, ai] = sqrtParts(1 - x, -y); // √(1 − z)
+  const [br, bi] = sqrtParts(1 + x, y); // √(1 + z)
+  // Re: atan2(x, Re(√(1 − z)·√(1 + z)))
+  // Im: arsinh(Im(conj(√(1 − z))·√(1 + z)))
+  return [Math.atan2(x, ar * br - ai * bi), Math.asinh(ar * bi - ai * br)];
+}
+
+/** `acos(x + iy)`, the side of a cut picked by the sign of a zero part. */
+function acosCore(x: number, y: number): [number, number] {
+  if (isHuge(x, y)) {
+    const [a, b] = acosCore(x / 16, y / 16);
+    return [a, b < 0 ? b - LN16 : b + LN16];
+  }
+  const [ar, ai] = sqrtParts(1 - x, -y); // √(1 − z)
+  const [br, bi] = sqrtParts(1 + x, y); // √(1 + z)
+  // Re: 2·atan2(Re √(1 − z), Re √(1 + z))
+  // Im: arsinh(Im(conj(√(1 + z))·√(1 − z)))
+  return [2 * Math.atan2(ar, br), Math.asinh(br * ai - bi * ar)];
+}
+
+/** `acosh(x + iy)`, the side of a cut picked by the sign of a zero part. */
+function acoshCore(x: number, y: number): [number, number] {
+  if (isHuge(x, y)) {
+    const [a, b] = acoshCore(x / 16, y / 16);
+    return [a + LN16, b];
+  }
+  const [ar, ai] = sqrtParts(x - 1, y); // √(z − 1)
+  const [br, bi] = sqrtParts(x + 1, y); // √(z + 1)
+  // Re: arsinh(Re(conj(√(z − 1))·√(z + 1)))
+  // Im: 2·atan2(Im √(z − 1), Re √(z + 1))
+  return [Math.asinh(ar * br + ai * bi), 2 * Math.atan2(ai, br)];
+}
+
+/** `atanh(x + iy)`, the side of a cut picked by the sign of a zero part. */
+function atanhCore(x: number, y: number): [number, number] {
+  const h = Math.hypot(x, y);
+  if (h > 1e150) {
+    // atanh z = ½·ln((1 + z)/(1 − z)). For a large |z|, the real part is
+    // Re(1/z) = x/|z|² to a relative error of about 1/|z|², and the
+    // imaginary part is ½·atan2(2y, 1 − |z|²) = ½·atan2(2y/|z|², −1) to
+    // the same error. Dividing by |z| twice avoids the overflow of |z|²,
+    // and |z|/4 (`h4`) is used because |z| itself can overflow.
+    const h4 = Math.hypot(x / 4, y / 4);
+    return [x / 16 / h4 / h4, 0.5 * Math.atan2(y / 8 / h4 / h4, -1)];
+  }
+  // The real part is odd in x, so it is computed for |x| and given the sign
+  // of x: for x < 0, 1 + 4x/|1 − z|² would cancel near z = −1.
+  const ax = Math.abs(x);
+  const u = 1 - ax;
+  const d = u * u + y * y; // |1 − |x| − iy|²
+  // Re: ¼·ln(|1 + z|²/|1 − z|²) = ¼·ln(1 + 4x/|1 − z|²). When |1 − z|² is
+  // below the normal range (z very close to ±1), the ratio of the two
+  // moduli is used instead: there is no cancellation in that case.
+  const re =
+    d < 1e-290
+      ? 0.5 * (Math.log(Math.hypot(1 + ax, y)) - Math.log(Math.hypot(u, y)))
+      : 0.25 * Math.log1p((4 * ax) / d);
+  // Im: ½·arg((1 + z)(1 − conj z)) = ½·atan2(2y, (1 − x)(1 + x) − y²)
+  return [signBit(x) ? -re : re, 0.5 * Math.atan2(2 * y, u * (1 + ax) - y * y)];
+}
+
+/** The real-axis zero for `arcsin`, `arccos` and `artanh` (see above). */
+function realAxisZero(x: number): number {
+  return x > 0 ? -0 : 0;
+}
+
+/** The imaginary-axis zero for `arsinh` (see above). */
+function imaginaryAxisZero(y: number): number {
+  return y < 0 ? -0 : 0;
+}
+
+/** The principal value of `arcsin z`. Accurate for a large or a small `|z|`. */
+export function complexAsin(z: Complex): Complex {
+  if (!isFiniteComplex(z.re, z.im)) return z.asin();
+  const [re, im] = asinCore(z.re, z.im === 0 ? realAxisZero(z.re) : z.im);
+  return new Complex(re, im);
+}
+
+/** The principal value of `arccos z`. Accurate for a large or a small `|z|`. */
+export function complexAcos(z: Complex): Complex {
+  if (!isFiniteComplex(z.re, z.im)) return z.acos();
+  const [re, im] = acosCore(z.re, z.im === 0 ? realAxisZero(z.re) : z.im);
+  return new Complex(re, im);
+}
+
+/** The principal value of `arcosh z`. Accurate for a large or a small `|z|`. */
+export function complexAcosh(z: Complex): Complex {
+  if (!isFiniteComplex(z.re, z.im)) return z.acosh();
+  const [re, im] = acoshCore(z.re, z.im === 0 ? 0 : z.im);
+  return new Complex(re, im);
+}
+
+/** The principal value of `artanh z`. Accurate for a large or a small `|z|`. */
+export function complexAtanh(z: Complex): Complex {
+  if (!isFiniteComplex(z.re, z.im)) return z.atanh();
+  const [re, im] = atanhCore(z.re, z.im === 0 ? realAxisZero(z.re) : z.im);
+  return new Complex(re, im);
+}
+
+/** The principal value of `arsinh z`. Accurate for a large or a small `|z|`. */
+export function complexAsinh(z: Complex): Complex {
+  if (!isFiniteComplex(z.re, z.im)) return z.asinh();
+  const x = z.re === 0 ? imaginaryAxisZero(z.im) : z.re;
+  // arsinh z = −i·arcsin(iz), and iz = −y + ix
+  const [a, b] = asinCore(-z.im, x);
+  return new Complex(b, -a);
+}
+
+/** The principal value of `arctan z`. Accurate for a large or a small `|z|`. */
+export function complexAtan(z: Complex): Complex {
+  if (!isFiniteComplex(z.re, z.im)) return z.atan();
+  const x = z.re === 0 ? 0 : z.re;
+  // arctan z = −i·artanh(iz), and iz = −y + ix
+  const [a, b] = atanhCore(-z.im, x);
+  return new Complex(b, -a);
+}
+
+//
+// Inverse reciprocal hyperbolic functions of a complex value
+//
+// arcsch z = arsinh(1/z), arsech z = arcosh(1/z) and arcoth z = artanh(1/z).
+// The functions below do not compute `w = 1/z` and then the function of `w`:
+// near a branch point (`z = ±1`, `z = ±i`) the rounding of `1/z` is
+// amplified (by about 10⁵ at `z = 0.999999`). They use the same formulas as
+// above with `w ± 1` written as `(1 ± z)/z` (or `w` near `±i` as
+// `(z ∓ i)/z`), so the only rounding before the square roots is one
+// division. For a `|z|` below 10⁻³⁰⁰, where `1/z` can overflow, they use the
+// first term of the expansion at `w = ∞`, `ln(2w)`, whose error is about
+// `|z|²`.
+//
+// The side of each branch cut is the one the engine used before these
+// functions were added (the side of mpmath):
+// - `arsech` for a real `z` (the cut is `z ≤ 0` and `z > 1`): the side of
+//   `arcosh(1/z)` above the real axis (`arsech(−0.5)` is `1.317 + πi`,
+//   `arsech 2` is `1.047i`).
+// - `arcoth` for a real `z` in `[−1, 1]`: for `z > 0` the side above the
+//   axis, for `z ≤ 0` the side below it (`arcoth 0.5` is `0.549 − (π/2)i`,
+//   `arcoth 0` is `(π/2)i`).
+// - `arcsch` for an imaginary `z = iy`, `|y| < 1`: the side of
+//   `arsinh(1/z)` that `complexAsinh()` uses (`arcsch(0.5i)` is
+//   `−1.317 − (π/2)i`).
+//
+
+/** `ln|x + iy|` for a small `|z|`. A subnormal `|z|` (below about
+ * 2.2·10⁻³⁰⁸) keeps only a few digits, so the parts are first scaled by
+ * 2⁶⁰⁰ (exactly). */
+function logHypot(x: number, y: number): number {
+  if (Math.max(Math.abs(x), Math.abs(y)) > 1e-290)
+    return Math.log(Math.hypot(x, y));
+  return Math.log(Math.hypot(x * 2 ** 600, y * 2 ** 600)) - 600 * Math.LN2;
+}
+
+/** `ln(2/z)` for a tiny `z`: the value at `w = 1/z` of the expansion
+ * `arsinh w ≈ arcosh w ≈ ln(2w)`. The imaginary part is `−arg z`, and `π`
+ * on the negative real axis (`arg(1/z)` is `π` there, not `−π`). */
+function logTwoOverZ(x: number, y: number): [number, number] {
+  return [
+    Math.LN2 - logHypot(x, y),
+    y === 0 && x < 0 ? Math.PI : -Math.atan2(y, x),
+  ];
+}
+
+/** The principal value of `arcsch z = arsinh(1/z)`. */
+export function complexAcsch(z: Complex): Complex {
+  const x = z.re;
+  const y = z.im;
+  if (!isFiniteComplex(x, y) || (x === 0 && y === 0)) return z.acsch();
+  if (Math.hypot(x, y) < 1e-300) {
+    // arsinh w ≈ ln(2w) on the side Re w > 0, and arsinh w = −arsinh(−w).
+    // Re w > 0 when Re z > 0. For Re z = 0, the side of `complexAsinh()`
+    // is the one of Im w > 0, that is of Im z < 0.
+    const right = x > 0 || (x === 0 && y < 0);
+    if (right) {
+      const [re, im] = logTwoOverZ(x, y);
+      return new Complex(re, im);
+    }
+    const [re, im] = logTwoOverZ(-x, -y);
+    return new Complex(-re, -im);
+  }
+  // arsinh w = −i·arcsin(v) with v = iw = i/z. Then 1 − v = (z − i)/z and
+  // 1 + v = (z + i)/z.
+  let vr: number;
+  let p: { re: number; im: number };
+  let q: { re: number; im: number };
+  if (x === 0) {
+    // z = iy: v = 1/y is real. Its imaginary part is the zero Re w, with
+    // the sign that `complexAsinh()` gives it: −0 when Im w = −1/y < 0.
+    vr = 1 / y;
+    const vi = y > 0 ? -0 : 0;
+    p = { re: (y - 1) / y, im: -vi };
+    q = { re: (y + 1) / y, im: vi };
+  } else if (Math.hypot(x, y) > 2) {
+    // |v| < 1/2: 1 ± v has no cancellation, while z ∓ i would lose the i
+    // for a large |z| (and with it the small real part of the result).
+    const w = complexQuotient(1, 0, x, y);
+    vr = -w.im;
+    p = { re: 1 + w.im, im: -w.re };
+    q = { re: 1 - w.im, im: w.re };
+  } else {
+    vr = complexQuotient(0, 1, x, y).re;
+    p = complexQuotient(x, y - 1, x, y);
+    q = complexQuotient(x, y + 1, x, y);
+  }
+  const [ar, ai] = sqrtParts(p.re, p.im); // √(1 − v)
+  const [br, bi] = sqrtParts(q.re, q.im); // √(1 + v)
+  const a = Math.atan2(vr, ar * br - ai * bi); // Re arcsin v
+  const b = Math.asinh(ar * bi - ai * br); // Im arcsin v
+  return new Complex(b, -a);
+}
+
+/** The principal value of `arsech z = arcosh(1/z)`. */
+export function complexAsech(z: Complex): Complex {
+  const x = z.re;
+  const y = z.im;
+  if (!isFiniteComplex(x, y) || (x === 0 && y === 0)) return z.asech();
+  if (Math.hypot(x, y) < 1e-300) {
+    const [re, im] = logTwoOverZ(x, y);
+    return new Complex(re, im);
+  }
+  // w − 1 = (1 − z)/z and w + 1 = (1 + z)/z. For a real z, both are real
+  // with the imaginary part +0: the side above the cut. For |z| > 2,
+  // |w| < 1/2 and w ± 1 has no cancellation, while 1 ± z would lose the 1
+  // for a large |z| (and with it the small real part of the result).
+  let p: { re: number; im: number };
+  let q: { re: number; im: number };
+  if (y === 0) {
+    p = { re: (1 - x) / x, im: 0 };
+    q = { re: (1 + x) / x, im: 0 };
+  } else if (Math.hypot(x, y) > 2) {
+    const w = complexQuotient(1, 0, x, y);
+    // Im w = −y/|z|² can underflow to 0. Its sign still picks the side of
+    // the cut w < 1, so the zero gets the sign of −y.
+    const wi = w.im === 0 ? (y > 0 ? -0 : 0) : w.im;
+    p = { re: w.re - 1, im: wi };
+    q = { re: w.re + 1, im: wi };
+  } else {
+    p = complexQuotient(1 - x, -y, x, y);
+    q = complexQuotient(1 + x, y, x, y);
+  }
+  const [ar, ai] = sqrtParts(p.re, p.im); // √(w − 1)
+  const [br, bi] = sqrtParts(q.re, q.im); // √(w + 1)
+  return new Complex(Math.asinh(ar * br + ai * bi), 2 * Math.atan2(ai, br));
+}
+
+/** The principal value of `arcoth z = artanh(1/z)`. */
+export function complexAcoth(z: Complex): Complex {
+  const x = z.re;
+  if (!isFiniteComplex(x, z.im)) return z.acoth();
+  // On the cut [−1, 1]: the side above the axis for z > 0, below otherwise.
+  const y = z.im === 0 ? (x > 0 ? 0 : -0) : z.im;
+  const h = Math.hypot(x, y);
+  if (h > 1e150) {
+    // arcoth z = 1/z + O(1/z³): Re(1/z) = x/|z|², Im(1/z) = −y/|z|². As in
+    // `atanhCore()`, |z|/4 is used because |z| can overflow.
+    const h4 = Math.hypot(x / 4, y / 4);
+    return new Complex(x / 16 / h4 / h4, -y / 16 / h4 / h4);
+  }
+  // arcoth z = ½·ln((z + 1)/(z − 1)). The real part is the one of artanh z,
+  // ¼·ln(|z + 1|²/|z − 1|²), computed for |x| as in `atanhCore()`.
+  const ax = Math.abs(x);
+  const u = 1 - ax;
+  const d = u * u + y * y;
+  const re =
+    d < 1e-290
+      ? 0.5 * (Math.log(Math.hypot(1 + ax, y)) - Math.log(Math.hypot(u, y)))
+      : 0.25 * Math.log1p((4 * ax) / d);
+  // Im: ½·arg((z + 1)(conj z − 1)) = ½·atan2(−2y, x² + y² − 1)
+  return new Complex(
+    signBit(x) ? -re : re,
+    0.5 * Math.atan2(-2 * y, (ax - 1) * (ax + 1) + y * y)
+  );
+}
+
+//
+// Inverse reciprocal circular functions of a complex value
+//
+// arccsc z = arcsin(1/z), arcsec z = arccos(1/z) and arccot z = arctan(1/z),
+// written in terms of z for the same reasons as the inverse reciprocal
+// hyperbolic functions above. The side of each branch cut is the one the
+// engine used before these functions were added: the side of `arcsin`,
+// `arccos` and `arctan` at `1/z` (`arccsc 0.5` is `π/2 − 1.317i`,
+// `arcsec(−0.5)` is `π − 1.317i`, `arccot(0.5i)` is `π/2 − 0.549i` and
+// `arccot(−0.5i)` is `π/2 + 0.549i`).
+//
+
+/** The principal value of `arccsc z = arcsin(1/z)`. */
+export function complexAcsc(z: Complex): Complex {
+  if (!isFiniteComplex(z.re, z.im) || (z.re === 0 && z.im === 0))
+    return complexAsin(complexInverse(z));
+  // arcsin(1/z) = −i·arsinh(i/z) = −i·arcsch(−iz). The products by ±i are
+  // exact, and `complexAcsch()` picks for an imaginary `−iz` the side that
+  // `complexAsin()` picks for a real `1/z`.
+  const r = complexAcsch(new Complex(z.im, -z.re));
+  return new Complex(r.im, -r.re);
+}
+
+/** The principal value of `arcsec z = arccos(1/z)`. */
+export function complexAsec(z: Complex): Complex {
+  const x = z.re;
+  const y = z.im;
+  if (!isFiniteComplex(x, y) || (x === 0 && y === 0))
+    return complexAcos(complexInverse(z));
+  const h = Math.hypot(x, y);
+  if (h < 1e-300) {
+    // arccos w for a large w = 1/z with argument φ = −arg z: it is
+    // φ − i·ln(2|w|) when w is above the real axis (or on the negative
+    // real axis, the side above the cut), and −φ + i·ln(2|w|) otherwise.
+    const l = Math.LN2 - logHypot(x, y);
+    const phi = y === 0 && x < 0 ? Math.PI : -Math.atan2(y, x);
+    return y < 0 || (y === 0 && x < 0)
+      ? new Complex(phi, -l)
+      : new Complex(-phi, l);
+  }
+  // 1 − w = (z − 1)/z and 1 + w = (z + 1)/z, with w = 1/z.
+  let p: { re: number; im: number };
+  let q: { re: number; im: number };
+  if (y === 0) {
+    // A real w: the imaginary part is the zero of `complexAcos()`.
+    const wi = x > 0 ? -0 : 0;
+    p = { re: (x - 1) / x, im: -wi };
+    q = { re: (x + 1) / x, im: wi };
+  } else if (h > 2) {
+    // |w| < 1/2: 1 ± w has no cancellation, while z ± 1 would lose the 1.
+    const w = complexQuotient(1, 0, x, y);
+    p = { re: 1 - w.re, im: -w.im };
+    q = { re: 1 + w.re, im: w.im };
+  } else {
+    p = complexQuotient(x - 1, y, x, y);
+    q = complexQuotient(x + 1, y, x, y);
+  }
+  const [ar, ai] = sqrtParts(p.re, p.im); // √(1 − w)
+  const [br, bi] = sqrtParts(q.re, q.im); // √(1 + w)
+  return new Complex(2 * Math.atan2(ar, br), Math.asinh(br * ai - bi * ar));
+}
+
+/** The principal value of `arccot z = arctan(1/z)`. */
+export function complexAcot(z: Complex): Complex {
+  const x = z.re;
+  const y = z.im;
+  if (!isFiniteComplex(x, y)) return complexAtan(complexInverse(z));
+  // A real z: the value in (0, π) that the engine gives a real argument
+  // (`Arccot` in `boxed-expression/trigonometry.ts`, `atan2(1, x)`), not
+  // the value of arctan(1/z) in (−π/2, π/2) (they differ by π for x < 0).
+  if (y === 0) return new Complex(Math.atan2(1, x), 0);
+  // On the cut (the imaginary axis between −i and i): the side right of the
+  // axis, as `complexAtan()` at 1/z.
+  const xs = x === 0 ? 0 : x;
+  const h = Math.hypot(x, y);
+  if (h > 1e150) {
+    // arccot z = 1/z + O(1/z³), with |z|/4 against an overflow of |z|.
+    const h4 = Math.hypot(x / 4, y / 4);
+    return new Complex(x / 16 / h4 / h4, -y / 16 / h4 / h4);
+  }
+  // arccot z = (i/2)·ln((z − i)/(z + i)).
+  // Im: ¼·ln(|z − i|²/|z + i|²) = −¼·ln(1 + 4y/|z − i|²), computed for |y|
+  // (as the real part in `atanhCore()`).
+  const ay = Math.abs(y);
+  const u = 1 - ay;
+  const d = x * x + u * u;
+  const im =
+    d < 1e-290
+      ? 0.5 * (Math.log(Math.hypot(x, 1 + ay)) - Math.log(Math.hypot(x, u)))
+      : 0.25 * Math.log1p((4 * ay) / d);
+  // Re: −½·arg((z − i)·conj(z + i)) = ½·atan2(2x, |z|² − 1). |z|² − 1 is
+  // computed from the larger part, whose difference with 1 is exact.
+  const ax = Math.abs(x);
+  const m =
+    ay >= ax ? x * x + (ay - 1) * (ay + 1) : (ax - 1) * (ax + 1) + y * y;
+  return new Complex(0.5 * Math.atan2(2 * xs, m), signBit(y) ? im : -im);
+}
+
 /** cos(πx) and sin(πx) with the argument reduced exactly before the
  *  multiplication by π. `Math.sin(Math.PI * x)` loses relative accuracy
  *  near every integer x (Math.PI·x is rounded, and sin is steep there

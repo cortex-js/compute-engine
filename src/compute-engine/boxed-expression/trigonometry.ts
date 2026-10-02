@@ -23,7 +23,21 @@ import {
   ROUNDOFF_TOLERANCE,
 } from '../numerics/numeric.js';
 import { gcd as bigGcd } from '../numerics/numeric-bigint.js';
-import { complexInverse } from '../numerics/numeric-complex.js';
+import {
+  complexAcos,
+  complexAcosh,
+  complexAcot,
+  complexAcoth,
+  complexAcsc,
+  complexAcsch,
+  complexAsec,
+  complexAsech,
+  complexAsin,
+  complexAsinh,
+  complexAtan,
+  complexAtanh,
+  complexInverse,
+} from '../numerics/numeric-complex.js';
 import { asRational } from './numerics.js';
 
 type ConstructibleTrigValues = [
@@ -809,25 +823,20 @@ export function evalTrig(
 
   switch (name) {
     case 'Arccos':
-      return inverseAngle(
-        op,
-        Math.acos,
-        (x) => x.acos(),
-        (x) => x.acos()
-      );
+      return inverseAngle(op, Math.acos, (x) => x.acos(), complexAcos);
     case 'Arccot':
       return inverseAngle(
         op,
         (x) => Math.atan2(1, x),
         (x) => BigDecimal.atan2(BigDecimal.ONE, x),
-        (x) => complexInverse(x).atan()
+        complexAcot
       );
     case 'Arccsc':
       return inverseAngle(
         op,
         (x) => Math.asin(1 / x),
         (x) => BigDecimal.ONE.div(x).asin(),
-        (x) => complexInverse(x).asin()
+        complexAcsc
       );
     // Inverse HYPERBOLIC functions return an area (a dimensionless real),
     // NOT an angle: they are unit-independent and must not be scaled by
@@ -847,38 +856,51 @@ export function evalTrig(
           x.gte(-1) && x.lt(1)
             ? new Complex(0, Number(x.acos().toString()))
             : x.acosh(),
-        (x) => x.acosh()
+        complexAcosh
       );
     case 'Arcoth':
-      // ln[(1 + x) /(x − 1)] /2
+      // arcoth x = ½·ln((x + 1)/(x − 1)), real for |x| > 1. A ratio near 1
+      // (a large |x|) loses digits in the logarithm (`arcoth 10¹⁰⁰` was
+      // `0`), so the machine kernel uses ½·log1p(2/(|x| − 1)) with the sign
+      // of x, and the big-decimal kernel uses artanh(1/x) for |x| ≥ 2. Both
+      // give NaN for |x| < 1, where `apply` then uses the complex kernel.
       return apply(
         op,
-        (x) => Math.log((1 + x) / (x - 1)) / 2,
+        (x) => {
+          const r = 0.5 * Math.log1p(2 / (Math.abs(x) - 1));
+          return x < 0 ? -r : r;
+        },
         (x) =>
-          BigDecimal.ONE.add(x)
-            .div(x.sub(BigDecimal.ONE))
-            .ln()
-            .div(BigDecimal.TWO),
-        // Use the native principal-branch `acoth`: the hand-rolled
-        // `ln((1+x)/(x−1))/2` picks the wrong side of the cut for negative
-        // real arguments in `(−1, 0)` (imaginary part sign flips), whereas
-        // `acoth` matches mpmath across the plane.
-        (x) => x.acoth()
+          x.abs().gte(BigDecimal.TWO)
+            ? BigDecimal.ONE.div(x).atanh()
+            : BigDecimal.ONE.add(x)
+                .div(x.sub(BigDecimal.ONE))
+                .ln()
+                .div(BigDecimal.TWO),
+        // `complexAcoth()`, not `ln((1+x)/(x−1))/2`: the hand-rolled formula
+        // picks the wrong side of the cut for negative real arguments in
+        // `(−1, 0)` (imaginary part sign flips).
+        complexAcoth
       );
 
     case 'Arcsch':
-      // ln[1/x + √(1/x2 + 1)],
+      // arcsch x = arsinh(1/x). The formula ln(1/x + √(1/x² + 1)) cancels
+      // for a negative x (`arcsch(−10⁻¹⁰⁰)` was `−∞`) and loses digits for a
+      // large |x| (`arcsch 10¹⁰⁰` was `0`). Below 10⁻³⁰⁰ in magnitude, `1/x`
+      // can overflow: there arsinh(1/x) is ln(2/|x|) with the sign of x, to
+      // a relative error of about x².
       return apply(
         op,
-        (x) => Math.log(1 / x + Math.sqrt(1 / (x * x) + 1)),
-        (x) =>
-          BigDecimal.ONE.div(x.mul(x))
-            .add(BigDecimal.ONE)
-            .sqrt()
-            .add(BigDecimal.ONE.div(x))
-            .ln(),
-        (x) =>
-          complexInverse(x.mul(x)).add(1).sqrt().add(complexInverse(x)).log()
+        (x) => {
+          if (x === 0) return Infinity;
+          if (Math.abs(x) < 1e-300) {
+            const r = Math.LN2 - Math.log(Math.abs(x));
+            return x < 0 ? -r : r;
+          }
+          return Math.asinh(1 / x);
+        },
+        (x) => BigDecimal.ONE.div(x).asinh(),
+        complexAcsch
       );
 
     case 'Arcsec':
@@ -886,28 +908,33 @@ export function evalTrig(
         op,
         (x) => Math.acos(1 / x),
         (x) => BigDecimal.ONE.div(x).acos(),
-        (x) => complexInverse(x).acos()
+        complexAsec
       );
 
     case 'Arcsin':
-      return inverseAngle(
-        op,
-        Math.asin,
-        (x) => x.asin(),
-        (x) => x.asin()
-      );
+      return inverseAngle(op, Math.asin, (x) => x.asin(), complexAsin);
 
     case 'Arsech':
       return apply(
         op,
-        (x) => Math.log((1 + Math.sqrt(1 - x * x)) / x),
-        // arsech(x) = ln((1 + sqrt(1 - x^2)) / x)
+        // arsech x = ln((1 + t)/x) with t = √(1 − x²), real for 0 < x ≤ 1.
+        // Near x = 1, ln(1 + t) loses digits, so the machine kernel uses
+        // log1p(t) − ln x (two positive terms) and the big-decimal kernel
+        // uses arsech x = artanh(t) for x ≥ 1/2. Outside (0, 1] both give
+        // NaN, and `apply` then uses the complex kernel.
+        (x) => Math.log1p(Math.sqrt((1 - x) * (1 + x))) - Math.log(x),
         (x) =>
-          BigDecimal.ONE.sub(x.mul(x)).sqrt().add(BigDecimal.ONE).div(x).ln(),
-        // Native principal-branch `asech`: the previous inline expression
-        // dropped the `sqrt` (computed `ln((2 − x²)/x)`), giving a wrong value
-        // even for in-domain reals; `asech` matches mpmath across the plane.
-        (x) => x.asech()
+          x.gte(BigDecimal.HALF) && x.lte(BigDecimal.ONE)
+            ? BigDecimal.ONE.sub(x).mul(BigDecimal.ONE.add(x)).sqrt().atanh()
+            : BigDecimal.ONE.sub(x.mul(x))
+                .sqrt()
+                .add(BigDecimal.ONE)
+                .div(x)
+                .ln(),
+        // `complexAsech()`: the previous inline expression dropped the `sqrt`
+        // (computed `ln((2 − x²)/x)`), and `complex-esm`'s `asech` lost
+        // digits near ±1 and overflowed for a small |x|.
+        complexAsech
       );
 
     case 'Arsinh':
@@ -918,16 +945,11 @@ export function evalTrig(
         // cancels near 0 (a relative error of 5e-11 at x = 10⁻¹⁰), which
         // breaks the error bound that exact ordering relies on.
         (x) => x.asinh(),
-        (x) => x.asinh()
+        complexAsinh
       );
 
     case 'Arctan':
-      return inverseAngle(
-        op,
-        Math.atan,
-        (x) => x.atan(),
-        (x) => x.atan()
-      );
+      return inverseAngle(op, Math.atan, (x) => x.atan(), complexAtan);
 
     case 'Artanh':
       return apply(
@@ -941,7 +963,7 @@ export function evalTrig(
         // exact ordering relies on a relative error of a few units in the
         // last digit.
         (x) => x.atanh(),
-        (x) => x.atanh()
+        complexAtanh
       );
 
     case 'Cos':
