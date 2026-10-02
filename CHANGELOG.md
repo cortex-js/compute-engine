@@ -386,6 +386,17 @@
 
 ### Issues Resolved
 
+- **In Epsil, `f(x) := body` defines `f` as `f(x) = body` does** (#400,
+  contributed by [enumeratio](https://github.com/enumeratio)). As a statement,
+  `f(x) := x^2 + a` parsed to `Assign(f(x), x^2 + a)`, which evaluates to
+  itself with no diagnostic and leaves `f` undefined, so `f(3)` was `f(3)`. It
+  now parses to `DefineFunction(f, Function(x^2 + a, x))`, and `f(3)` is
+  `a + 9`. This holds at the top level, inside a block, with several
+  parameters, with typed parameters and with a return type
+  (`f(x, y) := …`, `f(x: integer) -> integer := …`). A left side that is not an
+  application of distinct symbols (`f(x, x)`, `f(1)`, `f(_)`) is still an
+  `Assign`. `Assign` itself is unchanged.
+
 - A pure imaginary factor in a product was serialized in parentheses that are
   not necessary: `i·x` was `(\imaginaryI)x` and `e^{iπ}` was
   `\exp((\imaginaryI)\pi)`. They are now `\imaginaryI x` and

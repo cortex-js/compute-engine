@@ -5305,6 +5305,34 @@ export class Parser {
         if (depth === 0) break;
       } else if (t === 'EOF') return false;
     }
+    // `:=` claims the statement only for a parameter list of distinct symbols
+    // (each optionally typed): `f(x, y) := …` defines `f`, while `f(x, x) := …`
+    // and a literal-pattern head `f(1) := …` stay the assignments they were.
+    const distinctSymbolParams = (): boolean => {
+      const names = new Set<string>();
+      let segment = 0; // tokens seen in the current parameter
+      let depth = 0;
+      for (let j = this.pos + 2; j < i; j++) {
+        const t = this.tokens[j];
+        if (depth === 0 && t.type === 'COMMA') {
+          if (segment === 0) return false;
+          segment = 0;
+          continue;
+        }
+        if (t.type === 'OPEN_PAREN' || t.type === 'OPEN_BRACKET') depth += 1;
+        else if (t.type === 'CLOSE_PAREN' || t.type === 'CLOSE_BRACKET')
+          depth -= 1;
+        if (segment === 0) {
+          if (t.type !== 'SYMBOL' || t.text === '_' || names.has(t.text))
+            return false;
+          names.add(t.text);
+        } else if (segment === 1 && depth === 0) {
+          if (!(t.type === 'OPERATOR' && t.text === ':')) return false;
+        }
+        segment += 1;
+      }
+      return true;
+    };
     // Skip an optional effect specifier: a run of bare effect words.
     let k = i + 1;
     while (
@@ -5317,8 +5345,10 @@ export class Parser {
     if (after === undefined) return false;
     // The bare `=` form is claimed only WITHOUT a specifier: `f(x) random = 5`
     // is an expression (an invisible multiply), not a definition.
-    if (k === i + 1 && after.type === 'OPERATOR' && after.text === '=')
-      return true;
+    const claims = (t: Token): boolean =>
+      t.type === 'OPERATOR' &&
+      (t.text === '=' || (t.text === ':=' && distinctSymbolParams()));
+    if (k === i + 1 && claims(after)) return true;
     // Optional return type `-> Type =`: past `->`, scan for the `=` that ends
     // the (type) prefix. Type spellings never contain a top-level `=`, so the
     // first `=` at bracket depth 0 closes the definition head.
@@ -5365,7 +5395,7 @@ export class Parser {
             break;
           case 'OPERATOR':
             angleDepth = this.angleDepthAfter(j, angleDepth);
-            if (depth === 0 && angleDepth === 0 && t.text === '=') return true;
+            if (depth === 0 && angleDepth === 0 && claims(t)) return true;
             break;
         }
       }
@@ -5373,7 +5403,7 @@ export class Parser {
     return false;
   }
 
-  /** Math-style `f(x) = expr` →
+  /** Math-style `f(x) = expr` (or `f(x) := expr`) →
    * `["DefineFunction", "f", ["Function", expr, …params]]` (definition
    * statements accumulate clauses — see {@link parseFunctionDefinition}).
    * Typed params
@@ -5491,7 +5521,7 @@ export class Parser {
           )
         : params;
 
-    if (!(this.check('OPERATOR') && this.current.text === '=')) {
+    if (!isDefinitionEquals(this.current)) {
       this.error(
         ['unexpected-symbol', this.current.text],
         this.current.start,
@@ -5499,7 +5529,7 @@ export class Parser {
       );
       return null;
     }
-    this.advance(); // '='
+    this.advance(); // '=' or ':='
     // The right-hand side is a function body: a `break`/`continue` BOUNDARY.
     const rhs = this.inLoopContext(0, () => this.parseExpression(0));
     if (rhs === null) {
@@ -9146,6 +9176,12 @@ function symbolNameOf(expr: MathJsonExpression): string | null {
   )
     return (expr as { sym: string }).sym;
   return null;
+}
+
+/** Whether a token ends a math-style definition head: `f(x) = body` and
+ * `f(x) := body` define `f` identically. */
+function isDefinitionEquals(t: Token): boolean {
+  return t.type === 'OPERATOR' && (t.text === '=' || t.text === ':=');
 }
 
 /**
