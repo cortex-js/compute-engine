@@ -17,7 +17,9 @@ import {
   exactUnitCircle,
   halfTurnAngle,
   halfTurns,
+  imaginaryHalfTurns,
   radiansToAngle,
+  unitCircleOfHalfTurns,
 } from './trigonometry.js';
 import {
   apply,
@@ -1193,6 +1195,14 @@ function eulerSplit(
 function exactEulerN(raw: Expression): Expression | undefined {
   if (!(raw.isCanonical || raw.isStructural)) return undefined;
   const ce = raw.engine;
+  // An exponent with a single term is read first from its structure, with
+  // no expression built (`imaginaryHalfTurns`); `null` means it could not
+  // decide.
+  if (!isFunction(raw, 'Add')) {
+    const turns = imaginaryHalfTurns(raw);
+    if (turns === undefined) return undefined;
+    if (turns !== null) return unitCircleOfHalfTurns(ce, turns);
+  }
   const real: Expression[] = [];
   const imaginary: Expression[] = [];
   for (const term of isFunction(raw, 'Add') ? raw.ops : [raw]) {
