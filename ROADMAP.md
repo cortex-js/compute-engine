@@ -498,23 +498,6 @@ bracket group (for example `\left[ … \right]` with one operand), which
 changes what that spelling gives today. Writer: the `Delimiter` serializer in
 `latex-syntax/dictionary/definitions-core.ts`.
 
-### Complex inverse trigonometric functions of an argument beyond the double range give `NaN` (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
-
-`\arcsin(10^{400}).N()` is `NaN` at every precision. The correct value is
-`π/2 − 921.72718437817822i` (`π/2 − ln(2·10⁴⁰⁰)·i`). The result is complex, and the
-complex kernels (`complexAsin()` and the others in
-`numerics/numeric-complex.ts`) compute with doubles, so the argument becomes
-`Infinity`. The same holds for `Arccos`, `Arcosh`, `Artanh` of a real
-argument beyond `10³⁰⁸` and for any complex argument with such a part. An
-argument below the normal range of a double loses digits the same way:
-`\operatorname{arcsec}(10^{-320}).N()` is `737.5203880715337i`, computed
-from the subnormal double nearest `10⁻³²⁰` (which keeps 5 digits), while the
-value at `10⁻³²⁰` is `737.52037693865456i`. A fix
-needs big-decimal complex kernels (for a real argument outside the real
-domain, for example `arcsin x = sign(x)·π/2 ∓ i·arcosh|x|` with
-`BigDecimal.acosh()`), which would also give these values at the working
-precision instead of 16 digits.
-
 ### Compiled JavaScript removes a small part of a complex result that the interpreter keeps (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
 
 The compiled complex helpers (`toRI()`, `compilation/javascript-target.ts`)
@@ -528,20 +511,6 @@ there because some `complex-esm` kernels leave a residual part of about
 result convention tests `im === 0` exactly. Options: remove the dust in the
 kernels that produce it and stop removing it in `toRI()`, or remove it in the
 interpreter's one-argument `apply()` too.
-
-### The compiled `StieltjesGamma` has about 7 correct digits at order 30 (OPEN, small — found 2026-10-01 by the review of PR #404)
-
-The JavaScript lowering of `StieltjesGamma(n, a)` calls the double kernel
-`stieltjesGammaReal` (`numerics/stieltjes.ts`). That kernel sums the
-Euler–Maclaurin form with its tail point near 6, where the partial sum and
-the subtracted power ln^(n+1)(x)/(n+1) are each about 10⁶ times larger than
-γ₃₀ and cancel: the compiled `StieltjesGamma(30)` is `0.003557728327971`,
-against `0.003557728855573161` (mpmath). The interpreter no longer has this
-problem: at machine precision it runs the certified bignum kernel at 17
-digits. Fix for the compiled lane: precompute γₙ(1) for n ≤ 30 as a table of
-doubles (the one-operand form), and for γₙ(a) either move the tail point with
-n so that the cancellation stays below 10⁴, or sum the series in double-double
-arithmetic (two doubles per value), which gives back the 16 digits.
 
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 

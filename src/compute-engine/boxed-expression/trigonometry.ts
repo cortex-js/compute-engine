@@ -39,6 +39,12 @@ import {
   complexInverse,
 } from '../numerics/numeric-complex.js';
 import { asRational } from './numerics.js';
+import {
+  type InverseTrigHead,
+  complexInverseTrig,
+  isOutsideDoubleRange,
+  realInverseTrig,
+} from '../numerics/inverse-trig-big.js';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
@@ -809,6 +815,328 @@ function underflowingAngleSign(
   const absQ = tq < 0n ? -tq : tq;
   if (absP << 1075n > absQ) return undefined;
   return tp < 0n !== tq < 0n ? -1 : 1;
+}
+
+/** The inverse functions computed by `inverseTrigBigDecimalValue`, and
+ * whether each gives an angle (converted to `angularUnit`). */
+const INVERSE_TRIG_ANGLE: ReadonlyMap<string, boolean> = new Map([
+  ['Arcsin', true],
+  ['Arccos', true],
+  ['Arctan', true],
+  ['Arccot', true],
+  ['Arcsec', true],
+  ['Arccsc', true],
+  ['Arsinh', false],
+  ['Arcosh', false],
+  ['Artanh', false],
+  ['Arcoth', false],
+  ['Arsech', false],
+  ['Arcsch', false],
+]);
+
+/** Digits past the result's that the big-decimal computation carries. */
+const OUTSIDE_RANGE_GUARD_DIGITS = 10;
+
+/** A double that is neither zero nor subnormal nor infinite. */
+const isNormalDouble = (x: number): boolean =>
+  Number.isFinite(x) && Math.abs(x) >= 2.2250738585072014e-308;
+
+/** A double that may be the projection of a part outside the range of a
+ * double: zero (underflow), subnormal, or not finite (overflow). */
+const mayBeOutside = (x: number): boolean => !isNormalDouble(x);
+
+/** For a real x, whether `name` has a branch cut on the real axis at x, where
+ * its value is not real. `|x| = 1` is included in the cut of the heads whose
+ * cut ends there, so that a value a hair past 1 that the double rounds to 1
+ * is not left out; the caller decides with the big decimal. */
+function onRealCut(name: string, x: number): boolean {
+  const a = Math.abs(x);
+  switch (name) {
+    case 'Arcsin':
+    case 'Arccos':
+    case 'Artanh':
+      return a >= 1;
+    case 'Arcosh':
+      return x <= 1;
+    case 'Arccsc':
+    case 'Arcsec':
+    case 'Arcoth':
+      return a <= 1;
+    case 'Arsech':
+      return x <= 0 || x >= 1;
+  }
+  return false;
+}
+
+/** For a real x, whether the value of `name` at x is not real (and finite). */
+function complexOnRealAxis(name: string, x: BigDecimal): boolean {
+  const a = x.abs();
+  switch (name) {
+    case 'Arcsin':
+    case 'Arccos':
+    case 'Artanh':
+      return a.gt(BigDecimal.ONE);
+    case 'Arcosh':
+      return x.lt(BigDecimal.ONE);
+    case 'Arccsc':
+    case 'Arcsec':
+    case 'Arcoth':
+      return a.lt(BigDecimal.ONE) && !x.isZero();
+    case 'Arsech':
+      return x.isNegative() || x.gt(BigDecimal.ONE);
+  }
+  return false;
+}
+
+/** The arithmetic operators whose exact evaluation on number literals is
+ * cheap and has no side effect (no random draw, no assignment). */
+const LITERAL_ARITHMETIC = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Rational',
+  'Power',
+]);
+
+/** The most digits that the exact value of an operand evaluated again by
+ * `inverseTrigBigDecimalValue` may have (numerator and denominator). */
+const LITERAL_DIGITS_LIMIT = 100_000;
+
+/**
+ * `x` is built from number literals with `LITERAL_ARITHMETIC` operators, in
+ * at most 64 nodes, and its exact value has at most `LITERAL_DIGITS_LIMIT`
+ * digits: its exact evaluation is cheap and deterministic. The digits are
+ * bounded from above during the walk: a literal has the digits it prints, a
+ * sum or a product at most the sum of the digits of its operands, and a
+ * power `b^n` (`n` an integer literal) at most |n| times the digits of `b`.
+ * `(10^{1000}+1)^{10000}` has 10⁷ digits, and is not evaluated again.
+ */
+function isLiteralArithmetic(x: Expression): boolean {
+  let nodes = 0;
+  // An upper bound of the digits of the exact value of `e`, or `undefined`
+  // when `e` is not admitted.
+  const digits = (e: Expression): number | undefined => {
+    if (++nodes > 64) return undefined;
+    if (isNumber(e)) return e.toString().length;
+    if (!isFunction(e) || !LITERAL_ARITHMETIC.has(e.operator)) return undefined;
+    if (e.operator === 'Power') {
+      const n = e.op2;
+      if (!isNumber(n) || !Number.isInteger(n.re) || n.im !== 0)
+        return undefined;
+      const base = digits(e.op1);
+      if (base === undefined) return undefined;
+      const d = base * Math.max(1, Math.abs(n.re));
+      return d > LITERAL_DIGITS_LIMIT ? undefined : d;
+    }
+    let total = 0;
+    for (const op of e.ops) {
+      const d = digits(op);
+      if (d === undefined) return undefined;
+      total += d;
+      if (total > LITERAL_DIGITS_LIMIT) return undefined;
+    }
+    return total;
+  };
+  return digits(x) !== undefined;
+}
+
+/** `x` is not zero, and its double is `0` or `±∞`. */
+const beyondDouble = (x: BigDecimal): boolean => {
+  if (x.isZero()) return false;
+  const d = x.toNumber();
+  return d === 0 || !Number.isFinite(d);
+};
+
+/** The heads with a branch point at ±1. */
+const BRANCH_POINT_AT_ONE = new Set([
+  'Arcsin',
+  'Arccos',
+  'Arcosh',
+  'Artanh',
+  'Arccsc',
+  'Arcsec',
+  'Arcoth',
+  'Arsech',
+]);
+
+/** The most digits added to read an exact real argument next to ±1. */
+const BRANCH_POINT_DIGITS_LIMIT = 2000;
+
+/**
+ * For a real argument x with |x| ≠ 1, the digits that a big decimal needs,
+ * past the working ones, to tell x from ±1 and to keep the digits of the
+ * value next to the branch point (`arcosh(1 + d) ≈ √(2d)` is computed from
+ * `x − 1`): about −log₁₀(||x| − 1|). `0` when x is not next to ±1. An exact
+ * x is read as its rational, an inexact one as its big decimal.
+ */
+function digitsPastOne(source: Expression): number {
+  if (!isNumber(source)) return 0;
+  if (source.isExact) {
+    const r = asRational(source);
+    if (r === undefined) return 0;
+    const p = BigInt(r[0]);
+    const q = BigInt(r[1]);
+    const absP = p < 0n ? -p : p;
+    const absQ = q < 0n ? -q : q;
+    const d = absP > absQ ? absP - absQ : absQ - absP;
+    if (d === 0n) return 0;
+    return Math.max(0, absQ.toString().length - d.toString().length);
+  }
+  const x = source.bignumRe;
+  if (x === undefined || !x.isFinite()) return 0;
+  const d = x.abs().sub(BigDecimal.ONE);
+  if (d.isZero()) return 0;
+  const s = d.significand < 0n ? -d.significand : d.significand;
+  // |d| = s·10^exponent, so log₁₀|d| is about exponent + digits(s) − 1.
+  return Math.max(0, -(d.exponent + s.toString().length - 1));
+}
+
+/**
+ * The value of an inverse trigonometric or inverse hyperbolic function,
+ * computed with big decimals, at:
+ * - a number with a part outside the range of a normal double (`10^{400}`,
+ *   `10^{-320}`, `2 + 10^{-400}i`). The double kernels read such a part as
+ *   `±∞`, `0` or a subnormal double, and give `NaN`, lose digits, or take
+ *   the wrong side of a branch cut.
+ * - above machine precision, a real number at which the value is not real
+ *   (`arcosh(1/2)`, `arcsin(2)`). The complex kernels compute in doubles.
+ * - an exact real number next to ±1, a branch point (`1 + 10^{-400}`), which
+ *   a big decimal at the working precision, and a double, read as ±1.
+ *
+ * `undefined` for any other argument and head, after a few tests on the
+ * doubles of the operand in the usual case.
+ *
+ * The operand before its numeric evaluation (`raw`) is read when it is an
+ * exact number literal, or, when the numeric operand may have lost a part
+ * (at machine precision, `.N()` makes `10^{400}` the double `+∞` and
+ * `10^{-400}` the double `0`) or is ±1, when it is built from number
+ * literals with arithmetic only (`isLiteralArithmetic`): its exact
+ * evaluation is then cheap and draws no random number.
+ *
+ * A real argument gives a value at the working precision (17 digits, rounded
+ * to a double, at machine precision). A complex argument gives a value with
+ * the digits of a double, as the complex kernels do at every precision. See
+ * `numerics/inverse-trig-big.ts`.
+ */
+export function inverseTrigBigDecimalValue(
+  name: string,
+  op: Expression,
+  raw: Expression | undefined
+): Expression | undefined {
+  const isAngle = INVERSE_TRIG_ANGLE.get(name);
+  if (isAngle === undefined || !isNumber(op) || op.isNaN) return undefined;
+  const ce = op.engine;
+  const machine = !bignumPreferred(ce);
+
+  let source: Expression = op;
+  if (raw !== undefined && isNumber(raw) && raw.isExact) source = raw;
+  else if (raw !== undefined && !isNumber(raw)) {
+    const real = !op.isComplex;
+    const lost =
+      (real && Math.abs(op.re) === 1) ||
+      (machine &&
+        (mayBeOutside(op.re) ||
+          (real ? onRealCut(name, op.re) : mayBeOutside(op.im))));
+    if (lost && isLiteralArithmetic(raw)) {
+      const exact = raw.evaluate();
+      if (isNumber(exact) && exact.isExact) source = exact;
+    }
+  }
+  if (!isNumber(source)) return undefined;
+
+  // The usual case, and a fast exit: parts that are normal doubles are the
+  // projections of parts inside the range. A zero imaginary part is a true
+  // zero unless the number is complex. Above machine precision a real number
+  // on a cut of the real axis continues, and an exact ±1 is read again.
+  const sre = source.re;
+  const sim = source.im;
+  const real = !source.isComplex;
+  if (
+    isNormalDouble(sre) &&
+    (isNormalDouble(sim) || (sim === 0 && real)) &&
+    !(real && !machine && onRealCut(name, sre)) &&
+    !(
+      real &&
+      BRANCH_POINT_AT_ONE.has(name) &&
+      Math.abs(Math.abs(sre) - 1) < 0.01 &&
+      (source.isExact || !machine)
+    )
+  )
+    return undefined;
+  // A purely imaginary number inside the range.
+  if (
+    sre === 0 &&
+    isNormalDouble(sim) &&
+    (source.bignumRe === undefined || source.bignumRe.isZero())
+  )
+    return undefined;
+
+  const digits = machine ? 17 : ce.precision;
+  const pastOne =
+    real && BRANCH_POINT_AT_ONE.has(name) ? digitsPastOne(source) : 0;
+  if (pastOne > BRANCH_POINT_DIGITS_LIMIT) return undefined;
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = digits + pastOne + OUTSIDE_RANGE_GUARD_DIGITS;
+  let result: { re: number | BigDecimal; im: number | BigDecimal };
+  try {
+    // Next to ±1 the exact rational is read again with the added digits
+    // (a big decimal read earlier at the working precision is ±1).
+    const rational =
+      pastOne > 0 && source.isExact ? asRational(source) : undefined;
+    const re = rational
+      ? new BigDecimal(String(rational[0])).div(
+          new BigDecimal(String(rational[1]))
+        )
+      : (source.bignumRe ?? new BigDecimal(sre));
+    const im = source.bignumIm ?? new BigDecimal(sim);
+    if (!re.isFinite() || !im.isFinite()) return undefined;
+    // An exact part is outside the range below the smallest normal double.
+    // An inexact part only when a double cannot hold it at all: a subnormal
+    // float is the double the kernels were given (`ce.number(1e-320)`), and
+    // stays on them. Inside the range, a real argument at which the value is
+    // complex is computed here above machine precision, and a real argument
+    // next to ±1 at every precision.
+    const outside = source.isExact ? isOutsideDoubleRange : beyondDouble;
+    if (
+      !outside(re) &&
+      !outside(im) &&
+      !(real && !machine && complexOnRealAxis(name, re)) &&
+      !(real && pastOne > 0)
+    )
+      return undefined;
+    const head = name as InverseTrigHead;
+    const value = real
+      ? realInverseTrig(head, re)
+      : complexInverseTrig(head, re, im);
+    if (value === undefined) return undefined;
+    // An angle in another unit than radians is converted with the guard
+    // digits, before the rounding.
+    const unit = ce.angularUnit;
+    if (isAngle && unit !== 'rad') {
+      const pi = BigDecimal.PI;
+      const scale =
+        unit === 'deg'
+          ? new BigDecimal(180).div(pi)
+          : unit === 'grad'
+            ? new BigDecimal(200).div(pi)
+            : BigDecimal.ONE.div(pi.mul(2));
+      value.re = value.re.mul(scale);
+      value.im = value.im.mul(scale);
+    }
+    // A complex argument has the digits of a double: a part that a double
+    // holds is a double, and a part outside its range keeps 17 digits.
+    const part = (x: BigDecimal): number | BigDecimal => {
+      if (machine) return x.toNumber();
+      if (real) return x.toPrecision(digits);
+      return isOutsideDoubleRange(x) ? x.toPrecision(17) : x.toNumber();
+    };
+    result = { re: part(value.re), im: part(value.im) };
+  } finally {
+    BigDecimal.precision = saved;
+  }
+  return ce.number(ce._inexactNumericValue(result));
 }
 
 export function evalTrig(

@@ -7619,9 +7619,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // which sum the alternating series next to s = 1 as the interpreter does.
   DirichletEta: '_SYS.dirichletEta',
   DirichletBeta: '_SYS.dirichletBeta',
-  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.stieltjesGamma` is the
-  // interpreter's double kernel; NaN where the value is complex (a < 0, not
-  // an integer) or the order is past `STIELTJES_MAX_ORDER`.
+  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.stieltjesGamma` is
+  // `stieltjesGammaReal`, which sums in double-double arithmetic for a > 0
+  // (the double sum cancels at a high order); NaN where the value is
+  // complex (a < 0, not an integer) or the order is past
+  // `STIELTJES_MAX_ORDER`.
   StieltjesGamma: (args, compile) =>
     args.length === 1
       ? `_SYS.stieltjesGamma(${compile(args[0])})`

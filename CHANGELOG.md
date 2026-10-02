@@ -129,6 +129,77 @@
   result is unchanged (`0` on underflow, `~oo` on overflow), as for
   `e^{-1000+i}`.
 
+- **The compiled `StieltjesGamma` is accurate to a double up to order 30.**
+  The JavaScript kernel summed the Euler–Maclaurin form in doubles, where the
+  partial sum and the subtracted power of the logarithm are up to 10⁹ times
+  larger than the result and cancel: the compiled `StieltjesGamma(30)` was
+  `0.003557728327971422` (7 correct digits), and `StieltjesGamma(30, 0.5)`
+  was `-0.0035240594494571897` (6 correct digits). For a real `a` between
+  `10⁻¹⁵⁰` and `10¹⁵⁰` the sum is now taken in double-double arithmetic
+  (about 32 digits):
+  `0.003557728855573161` and `-0.0035240626522715247`, as mpmath gives.
+  Measured against mpmath for every order up to 30 at `a = 1, 0.5, 2.5, 10`
+  (and up to 20 at `a = 0.001`), the largest relative error is `2.2e-16`.
+  1000 values of `StieltjesGamma(30, a)` take about 35 ms.
+
+- **The inverse trigonometric and inverse hyperbolic functions of an argument
+  beyond the double range have a value.** `\arcsin(10^{400})` was `NaN` at
+  every precision, and is now `π/2 − 921.72718437817821891…i`.
+  `\operatorname{arcsec}(10^{-320})` was computed from the subnormal double
+  nearest `10⁻³²⁰`, which keeps 5 digits (`737.5203880715337i`), and is now
+  `737.52037693865456…i`. At machine precision, `\operatorname{arsinh}(10^{400})`
+  was `+∞` and `\operatorname{arcsch}(10^{-400})` was `~oo`; both are
+  `921.7271843781782`. A real argument, exact or a big decimal, outside the
+  range of a normal double now gives a value at the working precision for
+  the twelve heads (`Arcsin`, `Arccos`, `Arctan`, `Arccot`, `Arcsec`,
+  `Arccsc`, `Arsinh`, `Arcosh`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`),
+  with the side of each branch cut that the engine takes at `±10³⁰⁰` and
+  `±10⁻³⁰⁰`. A complex argument with a part beyond the double range gives a
+  value with the digits of a double, as the complex kernels do at every
+  precision, and keeps a part of the value too small for a double
+  (above machine precision, `\arctan(10^{400}(1+i))` is
+  `π/2 + 5·10⁻⁴⁰¹i`). A complex argument with a part too small for a
+  double next to the other (`\arcsin(2+10^{-400}i)`) takes the side of the
+  branch cut that the sign of that part selects: it was `π/2 − 1.317i`,
+  below the cut, and is now `π/2 + 1.317i`. `\arcsin(10^{400}+i)` was
+  `NaN` and is `π/2 + 921.727i`. At a logarithmic branch point the part
+  that grows as ln(1/δ) keeps its value: `\operatorname{artanh}(1+10^{-400}i)`
+  is `460.8635921890891 + 0.785i`. An exact real argument next to ±1 is no
+  longer read as ±1: `\arcsin(1+10^{-400})` was the real `π/2`, and is
+  `π/2 − 1.414·10⁻²⁰⁰i`; at machine precision
+  `\operatorname{artanh}(1-10^{-400})` was `+∞` and is
+  `460.86359218908911`. At machine precision, `Arctan` of a complex
+  argument whose double is `~oo` (`\arctan(10^{400}(1+i))`) was an
+  `incompatible-type` error and is `π/2`; an argument that is `~oo` stays
+  an error. A float argument whose double is subnormal is unchanged at
+  machine precision: the kernels read that double.
+
+- **A trigonometric function of an operand with a random draw draws once
+  under `evaluate()`.** `\arcsin(1+\operatorname{Random}())` evaluated the
+  operand a second time, to look for a special angle, and used up two draws
+  of a `WithRandomSeed` frame. An operand that is not pure is no longer read
+  again.
+
+- **Above machine precision, the inverse trigonometric and inverse
+  hyperbolic functions of a real argument with a complex value have the
+  working precision.** `\operatorname{arcosh}(1/2)`, `\arcsin(2)`,
+  `\operatorname{artanh}(2)`, `\operatorname{arsech}(-1/2)`,
+  `\operatorname{arcoth}(1/2)` and the others on a branch cut of the real
+  axis had a complex value computed in doubles (16 digits) at every
+  precision. At 50 digits, `\operatorname{arcosh}(1/2)` was
+  `1.0471975511965979i` and is now
+  `1.047197551196597746154214461093167628065723133125i`. A float argument
+  is read as its shortest decimal, as for a real value:
+  `\operatorname{arcoth}(0.999999)` at 21 digits is
+  `7.25432861926204720674 − 1.57079632679489661923i` (from the double
+  nearest `0.999999` it was `7.2543286192476694`). The sides of the cuts
+  are those of the double kernels.
+
+- **A complex value with a `NaN` part from a kernel is `NaN`.** At machine
+  precision `\sin(10^{400}+i)` reached the double kernel with an infinite
+  real part, and the `NaN` imaginary part of its value failed an internal
+  assertion. The value is now `NaN`.
+
 ## 0.146.0 _2026-10-02_
 
 ### Behavior Changes

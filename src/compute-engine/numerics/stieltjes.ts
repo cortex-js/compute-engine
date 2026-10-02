@@ -6,6 +6,17 @@ import {
 } from '../../common/interruptible.js';
 import { bernoulliRational } from './bernoulli.js';
 import {
+  type DD,
+  ddAdd,
+  ddDiv,
+  ddDivD,
+  ddLn,
+  ddMul,
+  ddMulD,
+  quickTwoSum,
+  twoSum,
+} from './double-double.js';
+import {
   type Ball,
   add,
   atDigits,
@@ -77,6 +88,12 @@ const EM_COEFFICIENTS: number[] = (() => {
   return c;
 })();
 
+/** The terms the double kernel sums before its tail point, for Re(a) = re.
+ * The tail point sits near Re ≈ 6: far enough out for the Bernoulli tail to
+ * converge, near enough to keep the lnⁿ⁺¹ cancellation down (~1e-12 through
+ * n = 15, ~1e-8 at n = 30; a farther tail point is worse for large n). */
+const tailTerms = (re: number): number => Math.max(1, Math.ceil(6 - re));
+
 /** zⁿ for an integer n ≥ 0 by repeated multiplication (exact at z = 0, unlike exp(n ln z)). */
 function ipow(z: Complex, n: number): Complex {
   let r = new Complex(1, 0);
@@ -108,10 +125,7 @@ export function stieltjesGammaComplex(
     return undefined;
   if (!Number.isFinite(a.re) || !Number.isFinite(a.im)) return undefined;
   if (a.im === 0 && a.re <= 0 && Number.isInteger(a.re)) return undefined;
-  // The tail point sits near Re ≈ 6: far enough out for the Bernoulli tail to
-  // converge, near enough to keep the lnⁿ⁺¹ cancellation down (~1e-12 through
-  // n = 15, ~1e-8 at n = 30; a farther tail point is worse for large n).
-  const N = Math.max(1, Math.ceil(6 - a.re));
+  const N = tailTerms(a.re);
   if (N > STIELTJES_MAX_SHIFT) return undefined;
   let sum = new Complex(0, 0);
   for (let k = 0; k < N; k++) {
@@ -127,10 +141,136 @@ export function stieltjesGammaComplex(
   return Number.isFinite(sum.re) && Number.isFinite(sum.im) ? sum : undefined;
 }
 
+/** The point past which the double-double kernel uses the Euler–Maclaurin
+ * tail: the partial sum and the subtracted log power are about 10¹⁴ times
+ * γ₃₀ there, well inside the 32 digits of a double-double, and the Bernoulli
+ * terms fall by a factor of 5 a pair at j = 16 (about (2j)²/(2πx)² a pair). */
+const DD_TAIL_POINT = 12;
+
+/** The most Bernoulli pairs the double-double kernel adds. */
+const DD_PAIRS = 40;
+
+/** The exact rational num/den as a double-double. */
+function ratioToDD(num: bigint, den: bigint): DD {
+  if (num === 0n) return [0, 0];
+  const negative = num < 0n !== den < 0n;
+  const p = num < 0n ? -num : num;
+  const q = den < 0n ? -den : den;
+  // The integer quotient p·2ˢ/q has about 120 bits, so its double and the
+  // double of its remainder hold more than 106 of them.
+  const s = 120 - (p.toString(2).length - q.toString(2).length);
+  const quotient = s >= 0 ? (p << BigInt(s)) / q : p / (q << BigInt(-s));
+  const hi = Number(quotient);
+  const lo = Number(quotient - BigInt(hi));
+  const scale = Math.pow(2, -s); // a power of 2: the products are exact
+  const r = quickTwoSum(hi * scale, lo * scale);
+  return negative ? [-r[0], -r[1]] : r;
+}
+
+/** For each order n, the coefficients of the Bernoulli terms: entry j − 1,
+ * index i, is B₂ⱼ/(2j)! · pᵢ · n!/(n−i)!, the coefficient of lnⁿ⁻ⁱ(x)·x^{−2j}
+ * in B₂ⱼ/(2j)! · f^{(2j−1)}(x). */
+const DD_COEFFICIENTS = new Map<number, DD[][]>();
+
+function ddCoefficients(n: number): DD[][] {
+  let result = DD_COEFFICIENTS.get(n);
+  if (result !== undefined) return result;
+  result = [];
+  let factorial = 1n; // (2j)!
+  for (let j = 1; j <= DD_PAIRS; j++) {
+    factorial *= BigInt((2 * j - 1) * 2 * j);
+    const [bn, bd] = bernoulliRational(2 * j);
+    const p = fallingPolynomial(2 * j - 1);
+    const row: DD[] = [];
+    let falling = 1n; // n!/(n−i)!
+    for (let i = 0; i <= Math.min(2 * j - 1, n); i++) {
+      if (i > 0) falling *= BigInt(n - i + 1);
+      row.push(ratioToDD(bn * p[i]! * falling, bd * factorial));
+    }
+    result.push(row);
+  }
+  DD_COEFFICIENTS.set(n, result);
+  return result;
+}
+
+/** Lⁿ in double-double, n ≥ 0. */
+function ddPow(x: DD, n: number): DD {
+  let r: DD = [1, 0];
+  for (let i = 0; i < n; i++) r = ddMul(r, x);
+  return r;
+}
+
+/**
+ * γₙ(a) for a real a > 0, summed in double-double arithmetic (about 32
+ * digits) and rounded to a double. The Euler–Maclaurin sum cancels: at
+ * n = 30 the partial sum and the subtracted log power are up to 10¹⁴ times
+ * the result, which a double sum (16 digits) does not survive (the double
+ * kernel keeps about 7 digits of γ₃₀) and a double-double sum does.
+ */
+function stieltjesGammaDD(n: number, a: number): number {
+  const terms = Math.max(1, Math.ceil(DD_TAIL_POINT - a));
+  let sum: DD = [0, 0];
+  for (let k = 0; k < terms; k++) {
+    const x = twoSum(a, k); // a + k, exactly
+    sum = ddAdd(sum, ddDiv(ddPow(ddLn(x), n), x));
+  }
+  const x = twoSum(a, terms);
+  const L = ddLn(x);
+  const powers: DD[] = [[1, 0]]; // Lⁱ, i = 0 … n + 1
+  for (let i = 1; i <= n + 1; i++) powers.push(ddMul(powers[i - 1]!, L));
+  sum = ddAdd(sum, ddMulD(ddDiv(powers[n]!, x), 0.5));
+  const tail = ddDivD(powers[n + 1]!, n + 1);
+  sum = ddAdd(sum, [-tail[0], -tail[1]]);
+  // The Bernoulli terms, until one is below the last digit of the
+  // cancelled size, or the series turns. A term can be small where the
+  // polynomial in L changes sign (at n = 30, a = 0.5 the 13th term is 4·10⁻³
+  // times the 12th and the 14th), so the series turns only when a term is
+  // larger than both terms before it.
+  const limit = 1e-33 * Math.max(Math.abs(tail[0]), Math.abs(sum[0]));
+  const xInv2 = ddDiv([1, 0], ddMul(x, x));
+  let xPower = xInv2; // x^{−2j}
+  let previous = Infinity;
+  let beforePrevious = Infinity;
+  for (const row of ddCoefficients(n)) {
+    let term: DD = [0, 0];
+    for (let i = 0; i < row.length; i++)
+      term = ddAdd(term, ddMul(row[i]!, powers[n - i]!));
+    term = ddMul(term, xPower);
+    const size = Math.abs(term[0]);
+    if (size > Math.max(previous, beforePrevious)) break;
+    sum = ddAdd(sum, [-term[0], -term[1]]);
+    if (size < limit) break;
+    beforePrevious = previous;
+    previous = size;
+    xPower = ddMul(xPower, xInv2);
+  }
+  return sum[0] + sum[1];
+}
+
+/** The range of a in which `stieltjesGammaReal` uses the double-double
+ * kernel. Outside it the products of that kernel can overflow (a·a, or a
+ * term lnⁿ(a)/a times the splitting factor 2²⁷ + 1), and the double kernel
+ * does not cancel there. */
+const DD_SMALLEST_A = 1e-150;
+const DD_LARGEST_A = 1e150;
+
 /** γₙ(a) for the compiled lane: a real result for a real a (n ≥ 0, a > 0 or
  * a not an integer ≤ 0 with a real value), NaN where the value is complex or
- * the kernel declines. */
+ * the kernel declines. For 10⁻¹⁵⁰ < a < 10¹⁵⁰ the double-double kernel gives
+ * the value: the double kernel loses digits to cancellation as the order
+ * grows (about 7 are left at n = 30, a = 1). Outside that range, or when the
+ * double-double value is not finite, the double kernel's value stands. */
 export function stieltjesGammaReal(n: number, a = 1): number {
+  if (
+    Number.isInteger(n) &&
+    n >= 0 &&
+    n <= STIELTJES_MAX_ORDER &&
+    a > DD_SMALLEST_A &&
+    a < DD_LARGEST_A
+  ) {
+    const dd = stieltjesGammaDD(n, a);
+    if (Number.isFinite(dd)) return dd;
+  }
   const z = stieltjesGammaComplex(n, new Complex(a, 0));
   return z !== undefined && Math.abs(z.im) <= 1e-14 * Math.abs(z.re)
     ? z.re
