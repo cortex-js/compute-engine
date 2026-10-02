@@ -58,4 +58,4 @@ Other primitives:
 
 - Binomial
 - Fibonacci
-- Stirling (second kind), StirlingS1 (signed first kind)
+- Stirling (second kind) and its alias StirlingS2, StirlingS1 (signed first kind)

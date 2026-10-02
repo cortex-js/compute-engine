@@ -23,7 +23,7 @@ capability gap.
 | `Log[b, x]` | `["Log", x, b]` | **Trap:** argument order is swapped (CE takes the base second). |
 | `Prime[n]` | `NthPrime` | Alias `PrimeNumber` also exists. |
 | `PartitionsP[n]` | `NPartition` | |
-| `StirlingS2[n, m]` | `Stirling` | Second kind. First kind (`StirlingS1`) is not implemented (ROADMAP B14). |
+| `StirlingS2[n, m]` | `StirlingS2` | Alias of `Stirling` (second kind). First kind is `StirlingS1`. |
 | `EulerPhi[n]` | `Totient` | |
 | `FactorInteger[n]` | `FactorInteger` | Same name; distinct-primes-only variant is `PrimeFactors`. |
 | `Det[m]` | `Determinant` | |

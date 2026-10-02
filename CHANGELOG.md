@@ -604,6 +604,12 @@
   with `p` above `ce.precision` still raises `ce.precision` and leaves it
   raised, as before.
 
+- **`StirlingS2(n, k)` is Mathematica's spelling of `Stirling(n, k)`,** the
+  Stirling number of the second kind, and gives the same values:
+  `StirlingS2(6, 3)` is `90`, `StirlingS2(0, 0)` is `1` and `StirlingS2(3, 5)`
+  stays unevaluated, as do negative and symbolic operands. `Stirling` is
+  unchanged. (#395, contributed by [enumeratio](https://github.com/enumeratio))
+
 ### Issues Resolved
 
 - A pure imaginary factor in a product was serialized in parentheses that are

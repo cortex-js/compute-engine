@@ -584,6 +584,7 @@
       "SigmaMinus1",
       "Stirling",
       "StirlingS1",
+      "StirlingS2",
       "Totient"
     ],
     "constants": []

@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Number theory
 
-The 52 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 53 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -509,6 +509,17 @@ Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the 
 ```epsil
 stirlingS1(5, 2)
 // ➔ -50
+```
+
+### stirlingS2
+
+MathJSON `StirlingS2` · `(integer, integer) -> integer`
+
+Stirling number of the second kind S(n, k), under Wolfram's name: ways to partition n elements into k non-empty subsets.
+
+```epsil
+stirlingS2(6, 3)
+// ➔ 90
 ```
 
 ### totient
