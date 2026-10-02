@@ -164,7 +164,6 @@
   in ℤ/5ℤ) and the element type is the registered `type`. Without it, iteration
   and membership decline.
 
-
 - **`sin\prime(x)` in the lenient grammar is the derivative of `sin`**, as
   `sin'(x)` and `\sin\prime(x)` are. The `\prime` was read as the start of
   the argument of `sin`, and gave an `unexpected-command` error.
