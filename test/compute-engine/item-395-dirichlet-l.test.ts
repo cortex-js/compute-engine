@@ -820,3 +820,84 @@ describe('DirichletL of a complex character at a high precision', () => {
     expect(v.isExact).toBe(false);
   });
 });
+
+describe('L(1, χ) of a real character in closed form', () => {
+  // The class number formula; each value checked against mpmath
+  // −(1/k) Σ χ(r) ψ(r/k) at 60 digits.
+  test.each([
+    [3, 2, 'sqrt(3)/9 * pi'],
+    [5, 3, '2/5sqrt(5) * ln("GoldenRatio")'],
+    [8, 2, 'sqrt(2)/2 * ln(1 + sqrt(2))'],
+    [8, 4, 'sqrt(2)/4 * pi'],
+    [12, 3, '1/3 * pi'],
+    [12, 4, 'sqrt(3)/3 * ln(2 + sqrt(3))'],
+    [24, 3, '2/3sqrt(2) * ln(1 + sqrt(2))'],
+  ])('DirichletL(%p, %p, 1) = %s', (k, j, expected) => {
+    expect(ce.box(['DirichletL', k, j, 1]).evaluate().toString()).toBe(
+      expected
+    );
+  });
+
+  // Class numbers above 1: h(−20) = 2, h(−56) = 4, h(40) = 2, so
+  // L(1, (−20/·)) = π/√5, L(1, (−56/·)) = 2π/√14 and
+  // L(1, (40/·)) = 2·ln(3 + √10)/√10. Compared with the digamma sum.
+  test.each([
+    [20, 7, 'sqrt(5)/5 * pi'],
+    [56, 10, 'sqrt(14)/7 * pi'],
+    [40, 7, 'sqrt(10)/5 * ln(3 + sqrt(10))'],
+  ])('DirichletL(%p, %p, 1) = %s, class number above 1', (k, j, expected) => {
+    const precision = ce.precision;
+    ce.precision = 30;
+    try {
+      const exact = ce.box(['DirichletL', k, j, 1]).evaluate();
+      expect(exact.toString()).toBe(expected);
+      const viaDigamma = ce
+        .function('DirichletL', [ce.box(k), ce.box(j), ce.parse('1.0')])
+        .N();
+      expect(exact.N().re).toBeCloseTo(viaDigamma.re, 15);
+    } finally {
+      ce.precision = precision;
+    }
+  });
+
+  // Fundamental units with a large u, from the continued fraction of
+  // (D mod 2 + √D)/2: a search over u up to 2·10⁶ missed 44 of the 302
+  // positive fundamental discriminants up to 1000, D = 241 among them. The
+  // unit of Q(√94) (D = 376) is 2143295 + 221064√94. Values: mpmath
+  // −(1/k) Σ χ(r) ψ(r/k) at 60 digits, rounded to 40.
+  test.each([
+    [
+      241,
+      121,
+      '2/241sqrt(241) * ln(71011068 + 4574225sqrt(241))',
+      '2.418356383900087132232215333662222480556',
+    ],
+    [
+      376,
+      162,
+      'sqrt(94)/94 * ln(2143295 + 221064sqrt(94))',
+      '1.575083602072907768614314524372187516725',
+    ],
+    [
+      977,
+      489,
+      '2/977sqrt(977) * ln(7376748868 + 236003105sqrt(977))',
+      '1.498208184626190788409915064062805189349',
+    ],
+  ])(
+    'DirichletL(%p, %p, 1) = %s, a large fundamental unit',
+    (k, j, expected, value) => {
+      const precision = ce.precision;
+      ce.precision = 40;
+      try {
+        const exact = ce.box(['DirichletL', k, j, 1]).evaluate();
+        expect(exact.toString()).toBe(expected);
+        // 39 of the 40 digits: the last digit of the `.N()` of a product
+        // is not always the correctly rounded one.
+        expect(exact.N().toString().slice(0, 40)).toBe(value.slice(0, 40));
+      } finally {
+        ce.precision = precision;
+      }
+    }
+  );
+});

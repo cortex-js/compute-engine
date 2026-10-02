@@ -167,9 +167,11 @@
   terms there have poles that cancel (`DirichletL(5, 2, 1.01)`); a real
   character at a real `s` takes guard digits for the cancellation instead
   (and, closer to 1 than they reach, its Laurent series in certified Stieltjes
-  constants), and `L(1, χ)` is a sum of digamma values under `.N()`:
-  `N(DirichletL(3, 2, 1))` is `0.604599788078072616867`, the value of
-  π/(3√3), while `DirichletL(3, 2, 1).evaluate()` stays unevaluated. A
+  constants). `L(1, χ)` of a real character is exact, from the class number
+  formula: `DirichletL(3, 2, 1)` is `sqrt(3)/9 * pi` (π/(3√3)), the quadratic
+  character mod 5 gives `2/5sqrt(5) * ln("GoldenRatio")` (2·ln φ/√5),
+  `DirichletL(8, 2, 1)` is `sqrt(2)/2 * ln(1 + sqrt(2))`; it stays symbolic
+  for a modulus above 1000. A
   character with complex values at a real `s` is answered in doubles, its
   terms computed for a double at any `ce.precision`. A modulus above 1000 stays
   symbolic for `DirichletL` (it sums `k` Hurwitz values). Both heads are
