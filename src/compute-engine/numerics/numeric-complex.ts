@@ -3091,9 +3091,7 @@ function polygammaScaled(
  * precision: not finite, or below the smallest normal double (the caller
  * keeps the expression symbolic rather than answering ±∞ or 0).
  */
-function scaledToComplex(
-  x: { value: ScaledComplex } | undefined
-): Complex {
+function scaledToComplex(x: { value: ScaledComplex } | undefined): Complex {
   if (x === undefined) return C_NAN;
   const value = new Complex(
     scaleByPowerOfTwo(x.value.m.re, x.value.e),

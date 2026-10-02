@@ -143,13 +143,29 @@ export function canonicalInvisibleOperator(
     const lhsCanon = lhs.canonical;
     yieldInferredFunctionToOracle(ce, lhsCanon);
 
+    // A name in parentheses is a factor, never the head of an application:
+    // `(k)(x - 1)` is `k·(x - 1)`. The application branches below are
+    // skipped for it, and the general product route handles the pair.
+    const factorHead = isParenthesizedFactorName(ce, lhs);
+
     // A DECLARED function symbol applied to an argument list that carries a
     // power or a factorial: `(f)(3)^2`, `(\sin)(x)^2`. The postfix binds to
     // the argument list before the juxtaposition is read, so it is rebuilt
     // around the application — `Power(f(3), 2)`, as `f(3)^2` reads. Only a
     // symbol known to be a function qualifies: for a number or an
     // undeclared symbol, `(x)(3)^2` is the product `9x`.
-    if (isSymbol(lhsCanon) && isDeclaredFunction(ce, lhsCanon.symbol)) {
+    if (factorHead) {
+      // No application reading: see `isParenthesizedFactorName`. A name with
+      // no definition yet can still be declared a function later, and a
+      // declared function in parentheses is a head. Record the product so
+      // the expression is re-derived when the name gains a definition
+      // (`provisional-application.ts`).
+      if (
+        isSymbol(lhsCanon) &&
+        couldBecomeFunction(ce.lookupDefinition(lhsCanon.symbol))
+      )
+        noteProvisionalApplication(lhsCanon.symbol);
+    } else if (isSymbol(lhsCanon) && isDeclaredFunction(ce, lhsCanon.symbol)) {
       const applied = applySymbolThroughPostfix(ce, lhsCanon.symbol, rhs);
       if (applied !== undefined) return applied;
     } else if (
@@ -179,7 +195,7 @@ export function canonicalInvisibleOperator(
       }
     }
 
-    if (isSymbol(lhsCanon) && isFunction(rhs, 'Delimiter')) {
+    if (!factorHead && isSymbol(lhsCanon) && isFunction(rhs, 'Delimiter')) {
       // We have encountered something like `f(a+b)`, where `f` is not
       // defined. But it also could be `x(x+1)` where `x` is a number.
       // So, start with boxing the arguments and see if it makes sense.
@@ -713,15 +729,43 @@ function applySymbolThroughPostfix(
 }
 
 /** The name of a function symbol written bare (`f`) or parenthesized
- * (`(f)`), or `undefined`. */
+ * (`(f)`), or `undefined`. A parenthesized name that is a factor
+ * (`isParenthesizedFactorName`) is not a function symbol here. */
 function functionSymbolOf(
   ce: ComputeEngine,
   op: Expression
 ): string | undefined {
+  if (isParenthesizedFactorName(ce, op)) return undefined;
   const sym =
     isFunction(op, 'Delimiter') && op.nops === 1 ? op.op1.canonical : op;
   if (!isSymbol(sym) || !isDeclaredFunction(ce, sym.symbol)) return undefined;
   return sym.symbol;
+}
+
+/**
+ * Whether `op` is a name in parentheses, such as `(k)`, that a juxtaposition
+ * reads as a factor and never as the head of a function application. With
+ * this rule `(k)(x - 1)` is the product `k·(x - 1)`, `(a)(b)` is `a·b` and
+ * `(m)(x) + b` is `m·x + b`, in the strict and the lenient grammar. The same
+ * name without parentheses keeps the application rules: `k(x - 1)` can still
+ * be an application.
+ *
+ * A name with a function declaration that the library or the host made keeps
+ * the application reading: an operator such as `\sin`, or a value whose
+ * declared type is a function type. So `(f)(3)^2` is `f(3)^2` when `f` is
+ * declared a function. A function type that the engine only inferred from an
+ * earlier use of the name (`f(x)`) does not count, because that inference is
+ * itself a guess from a juxtaposition.
+ */
+function isParenthesizedFactorName(ce: ComputeEngine, op: Expression): boolean {
+  if (!isFunction(op, 'Delimiter') || op.nops !== 1) return false;
+  const sym = op.op1.canonical;
+  if (!isSymbol(sym)) return false;
+  const def = ce.lookupDefinition(sym.symbol);
+  if (def === undefined) return true;
+  if (isOperatorDef(def)) return false;
+  if (def.value?.type?.matches('function') !== true) return true;
+  return isInferredDefinition(def);
 }
 
 /** A function literal, bare or parenthesized at any depth

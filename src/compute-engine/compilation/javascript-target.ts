@@ -22,6 +22,7 @@ import {
   recordScalarParams,
 } from './javascript-value-facts.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
+import { withVarsValuesHidden } from './vars-inputs.js';
 import {
   assertAccumulatorFitsStep,
   inPlaceUpdateChains,
@@ -14244,10 +14245,15 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // wrapped into the `success: false` fallback built below. Each attempt
       // builds its own target in `compileOrThrow`, so the retry starts from
       // clean per-compilation state.
-      return compileWithAutoEscalation(requestedMode, JS_SUPPORTED_MODES, (m) =>
-        this.compileOrThrow(
-          expr,
-          m === requestedMode ? options : { ...options, mode: m }
+      // A `vars`-mapped symbol is compiled as the valueless input of its
+      // declared type: its engine value is hidden for both attempts
+      // (`withVarsValuesHidden`).
+      return withVarsValuesHidden(expr, options.vars, () =>
+        compileWithAutoEscalation(requestedMode, JS_SUPPORTED_MODES, (m) =>
+          this.compileOrThrow(
+            expr,
+            m === requestedMode ? options : { ...options, mode: m }
+          )
         )
       );
     } catch (e) {

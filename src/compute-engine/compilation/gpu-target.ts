@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types.js';
 import { entrySource } from './function-purity.js';
 import { isCallerMapped } from './cse.js';
+import { withVarsValuesHidden } from './vars-inputs.js';
 import {
   clearGPUCounters,
   gpuIntegerFact,
@@ -157,6 +158,11 @@ const GLSL_RESERVED: ReadonlySet<string> = new Set([
   'invariant',
   'precise',
   'subroutine',
+  // precision qualifiers and the aggregate keyword
+  'lowp',
+  'mediump',
+  'highp',
+  'struct',
   // control flow
   'break',
   'continue',
@@ -225,6 +231,7 @@ const GLSL_RESERVED: ReadonlySet<string> = new Set([
   'filter',
   'texture',
   'asm',
+  'class',
   'union',
   'enum',
   'typedef',
@@ -15190,7 +15197,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             functions: options.functions,
           });
     try {
-      return this.compileOrThrow(expr, options, storage);
+      // A `vars`-mapped symbol is compiled as the valueless input of its
+      // declared type (`withVarsValuesHidden`).
+      return withVarsValuesHidden(expr, options.vars, () =>
+        this.compileOrThrow(expr, options, storage)
+      );
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented
       // `success: false` shape with an interpreter-backed `run`.
@@ -15287,7 +15298,16 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       var: (id) => {
         // Own-property test — see the `vars` lookup in `javascript-target.ts`:
         // `in` finds `Object.prototype` members on a caller-supplied map.
-        if (vars && Object.hasOwn(vars, id)) return vars[id] as string;
+        // A mapping to a bare identifier is checked like a free symbol's own
+        // name (`mangleId`): `{ in: 'in' }` would emit the reserved word `in`,
+        // which no driver accepts. Other mappings (`u.a`, `v[0]`) are
+        // caller source and are spliced in unchanged.
+        if (vars && Object.hasOwn(vars, id)) {
+          const source = vars[id] as string;
+          if (typeof source === 'string' && /^[A-Za-z_]\w*$/.test(source))
+            gpuCheckIdentifier(source, this.languageId);
+          return source;
+        }
         if (id === 'ImaginaryUnit') return `${v2}(0.0, 1.0)`;
         if (id in constants) return constants[id];
         // Returning `undefined` lets BaseCompiler fold an assigned value /

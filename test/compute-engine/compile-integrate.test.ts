@@ -230,20 +230,36 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       expect(r.run() as number).toBeCloseTo(4.236531, 3);
     });
 
-    // A `vars`-mapped symbol must not be folded into a baked closed form, so
-    // antiderivative-first is skipped when the integral references one — the
-    // quadrature emitter (which honors the vars mapping) is used instead.
-    // Contrast: the same integral WITHOUT the vars mapping resolves to a closed
-    // form (k²/2), proving the gate is what forces quadrature.
-    test('vars-mapped symbol skips antiderivative-first (keeps quadrature)', () => {
-      const withVars = compile(ce.parse('\\int_0^k t\\,dt'), {
+    // A `vars`-mapped symbol must not have its VALUE baked into a closed
+    // form. A mapped symbol with no visible value and a plain-read mapping
+    // (`_.k`) keeps the closed form — the symbol stays in it as the live read.
+    // A mapped symbol whose value the compilation does not hide (its type was
+    // inferred from the value), or a mapping that is not a plain read, skips
+    // antiderivative-first and keeps quadrature, which honors the mapping.
+    test('vars-mapped symbol: closed form only for a valueless plain read', () => {
+      const plain = compile(ce.parse('\\int_0^k t\\,dt'), {
         vars: { k: '_.k' },
       });
-      expect(withVars.code).toContain('_SYS.integrate(');
+      expect(plain.code).not.toContain('_SYS.integrate');
+      expect(plain.run({ k: 4 }) as number).toBeCloseTo(8, 10); // k²/2
+      expect(plain.run({ k: 6 }) as number).toBeCloseTo(18, 10);
 
-      const noVars = compile(ce.parse('\\int_0^k t\\,dt'));
-      expect(noVars.code).not.toContain('_SYS.integrate');
-      expect(noVars.run({ k: 4 }) as number).toBeCloseTo(8, 10); // k²/2
+      // Not a plain read: quadrature, still reading the input at run time.
+      const scaled = compile(ce.parse('\\int_0^k t\\,dt'), {
+        vars: { k: '(2 * _.h)' },
+      });
+      expect(scaled.code).toContain('_SYS.integrate(');
+      expect(scaled.run({ h: 2 }) as number).toBeCloseTo(8, 8);
+
+      // A held value the compilation cannot hide: quadrature, never the
+      // value (k := 3 would bake 4.5).
+      const ce2 = new ComputeEngine();
+      ce2.assign('k', 3);
+      const valued = compile(ce2.parse('\\int_0^k t\\,dt'), {
+        vars: { k: '_.k' },
+      });
+      expect(valued.code).toContain('_SYS.integrate(');
+      expect(valued.run({ k: 4 }) as number).toBeCloseTo(8, 8);
     });
 
     // A high-power integrand's symbolic-antiderivative attempt expands
@@ -1323,7 +1339,9 @@ describe('COMPILE Integrate — a `Function` integrand is paired to the limits b
         ['Limits', 'x', 0, 1],
         ['Limits', 'y', 0, 2],
       ]),
-      { vars: { a: '_.a' } }
+      // A mapping that is not a plain read keeps the quadrature emitter, whose
+      // pairing is what this test checks (a plain `_.a` gets the closed form).
+      { vars: { a: '(_.a)' } }
     );
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.integrate(');
@@ -1337,7 +1355,10 @@ describe('COMPILE Integrate — a `Function` integrand is paired to the limits b
         ['Function', ['Add', 'x', 'q'], 'x', 'q'],
         ['Limits', 'x', 0, 1],
       ]),
-      { vars: { q: '_.q' } }
+      // Not a plain read, so the quadrature emitter, where the check lives,
+      // is reached (a plain `_.q` gets the closed form `q + 1/2`, as
+      // `evaluate()` does).
+      { vars: { q: '(_.q)' } }
     );
     expect(r.success).toBe(false);
     expect(String(r.error)).toContain('one to one');

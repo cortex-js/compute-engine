@@ -1930,7 +1930,6 @@ function shapedProductType(d: OperandDescriptor): Type | undefined {
   };
 
   const dims = t.kind === 'list' ? t.dimensions : undefined;
-  let shaped: Type | undefined;
   if (dims !== undefined && dims.length > 1) {
     // A matrix operand is a list of rows, which multiply element-wise. A
     // dimension of unknown size (`-1`) stays unknown; when it is the first
@@ -1971,7 +1970,7 @@ function shapedProductType(d: OperandDescriptor): Type | undefined {
   }
   const elements = entryProduct(el.elements);
   if (elements === undefined) return undefined;
-  shaped = { ...el, elements };
+  const shaped: Type = { ...el, elements };
 
   const mayBeEmpty = dims === undefined || dims[0] <= 0;
   return mayBeEmpty

@@ -99,8 +99,8 @@ describe('Tier 4 #2 — subscript/superscript-qualified blackboard sets', () => 
 
   test('named-set forms round-trip', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('\\mathbb{R}_{>0}').toLatex()).toEqual('\\R_{>0}');
-    expect(ce.parse('\\mathbb{Z}_{>0}').toLatex()).toEqual('\\N^*');
+    expect(ce.parse('\\mathbb{R}_{>0}').toLatex()).toEqual('\\mathbb{R}_{>0}');
+    expect(ce.parse('\\mathbb{Z}_{>0}').toLatex()).toEqual('\\mathbb{N}^*');
   });
 
   test('`\\mathbb{N}_{>1}` — no named set → inert set-builder fallback', () => {

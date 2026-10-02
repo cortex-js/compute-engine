@@ -11,9 +11,10 @@
  * - the enclosure emitter, `_IA.integrate(f, lo, hi)`, which brackets the
  *   integral by a uniform partition (`src/compute-engine/interval/integrate.ts`).
  *
- * Forcing the second one takes a `vars`-mapped symbol in the integrand
- * (the vars contract forbids folding a live runtime input into a baked closed
- * form) or an integrand with no elementary antiderivative.
+ * Forcing the second one takes a `vars`-mapped symbol in the integrand whose
+ * mapping is not a plain read (`(_.a)`: the closed form is attempted only when
+ * every mapped symbol it reaches is a valueless plain read such as `_.a`) or
+ * an integrand with no elementary antiderivative.
  *
  * Expected values are not recalled: each numeric case compares the enclosure
  * against the INTERPRETER's `.N()` of the very same expression.
@@ -136,21 +137,22 @@ describe('COMPILE interval-js Integrate — antiderivative-first', () => {
     expect(containsWithin(out, atHi)).toBe(true);
   });
 
-  test('a `vars`-mapped symbol skips the fold and keeps the enclosure emitter', () => {
-    // Mirrors the JavaScript target's `vars`-gate test: the same integral
-    // WITHOUT the mapping folds to k²/2, proving the gate is what forces the
+  test('a `vars`-mapped symbol keeps the fold only for a valueless plain read', () => {
+    // Mirrors the JavaScript target's `vars`-gate test. A valueless symbol
+    // mapped to the plain read `_.k` stays a live read in the closed form, so
+    // the fold is kept; a mapping that is not a plain read forces the
     // enclosure path.
-    const withVars = compileInterval('\\int_0^k t\\,dt', { k: '_.k' });
+    const plain = compileInterval('\\int_0^k t\\,dt', { k: '_.k' });
+    expect(plain.code).toContain('_IA.integrateClosed(');
+    expect(plain.code).not.toContain('_IA.integrate(');
+    const folded = plain.run({ k: { lo: 4, hi: 4 } });
+    expect(contains(folded, 8)).toBe(true); // k²/2
+    expect(widthOf(folded)).toBe(0);
+
+    const withVars = compileInterval('\\int_0^k t\\,dt', { k: '(_.k)' });
     expect(withVars.code).toContain('_IA.integrate(');
     const out = withVars.run({ k: { lo: 4, hi: 4 } });
-    expect(contains(out, 8)).toBe(true); // k²/2
-
-    const noVars = compileInterval('\\int_0^k t\\,dt');
-    expect(noVars.code).toContain('_IA.integrateClosed(');
-    expect(noVars.code).not.toContain('_IA.integrate(');
-    const folded = noVars.run({ k: { lo: 4, hi: 4 } });
-    expect(contains(folded, 8)).toBe(true);
-    expect(widthOf(folded)).toBe(0);
+    expect(contains(out, 8)).toBe(true);
   });
 });
 
@@ -170,8 +172,8 @@ describe('COMPILE interval-js Integrate — enclosure emitter', () => {
   });
 
   test('reversed bounds give the negated enclosure', () => {
-    const forward = compileInterval('\\int_0^1 a e^{-t^2}\\,dt', { a: '_.a' });
-    const reversed = compileInterval('\\int_1^0 a e^{-t^2}\\,dt', { a: '_.a' });
+    const forward = compileInterval('\\int_0^1 a e^{-t^2}\\,dt', { a: '(_.a)' });
+    const reversed = compileInterval('\\int_1^0 a e^{-t^2}\\,dt', { a: '(_.a)' });
     expect(reversed.code).toContain('_IA.integrate(');
 
     const f = enclosureOf(forward.run({ a: 1 }));
@@ -186,7 +188,7 @@ describe('COMPILE interval-js Integrate — enclosure emitter', () => {
   test('a WIDE lower bound encloses every integral in the bound range', () => {
     // ∫_c^1 e^{−t²} dt with c ∈ [0, 0.5]: the true value sweeps the whole
     // range between ∫₀¹ and ∫_{0.5}^1 as c sweeps its interval.
-    const r = compileInterval('\\int_c^1 a e^{-t^2}\\,dt', { a: '_.a' });
+    const r = compileInterval('\\int_c^1 a e^{-t^2}\\,dt', { a: '(_.a)' });
     expect(r.code).toContain('_IA.integrate(');
 
     const atZero = reference('\\int_0^1 e^{-t^2}\\,dt');
@@ -225,7 +227,7 @@ describe('COMPILE interval-js Integrate — non-interval outcomes', () => {
     // and over a FINITE range that can only mean an unbounded integrand — so
     // the answer is `singular` regardless of where the partition falls.
     const r = compileInterval('\\int_{-1}^{1} \\frac{a}{t}\\,dt', {
-      a: '_.a',
+      a: '(_.a)',
     });
     expect(r.code).toContain('_IA.integrate(');
     expect(kindOf(r.run({ a: 1 }))).toBe('singular');
@@ -235,21 +237,21 @@ describe('COMPILE interval-js Integrate — non-interval outcomes', () => {
     // Same integrand, a range whose partition does NOT put an endpoint on the
     // pole — the `_IA.div` `singular` path rather than the infinite-bound one.
     const r = compileInterval('\\int_{-1}^{2} \\frac{a}{t}\\,dt', {
-      a: '_.a',
+      a: '(_.a)',
     });
     expect(kindOf(r.run({ a: 1 }))).toBe('singular');
   });
 
   test('an integrand undefined on the range reports `empty`', () => {
     // ln t is undefined for t < 0, so no part of [−2, −1] is in its domain.
-    const r = compileInterval('\\int_{-2}^{-1} a\\ln(t)\\,dt', { a: '_.a' });
+    const r = compileInterval('\\int_{-2}^{-1} a\\ln(t)\\,dt', { a: '(_.a)' });
     expect(r.code).toContain('_IA.integrate(');
     expect(kindOf(r.run({ a: 1 }))).toBe('empty');
   });
 
   test('an infinite bound reports `entire` — no finite partition exists', () => {
     const r = compileInterval('\\int_0^\\infty a e^{-t^2}\\,dt', {
-      a: '_.a',
+      a: '(_.a)',
     });
     expect(r.code).toContain('_IA.integrate(');
     expect(kindOf(r.run({ a: 1 }))).toBe('entire');

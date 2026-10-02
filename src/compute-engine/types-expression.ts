@@ -509,6 +509,7 @@ interface BoxedOperatorDefinition
     options: Partial<EvaluateOptions> & {
       engine: ExpressionComputeEngine;
       expression?: Expression;
+      precision?: number;
       effects: EffectHandlers;
     }
   ) => Expression | undefined;
@@ -517,6 +518,7 @@ interface BoxedOperatorDefinition
     options: Partial<EvaluateOptions> & {
       engine: ExpressionComputeEngine;
       expression?: Expression;
+      precision?: number;
       effects: EffectHandlers;
     }
   ) => Promise<Expression | undefined>;
@@ -524,6 +526,15 @@ interface BoxedOperatorDefinition
     ops: ReadonlyArray<Expression>,
     options: Partial<EvaluateOptions> & { engine: ExpressionComputeEngine }
   ) => Expression;
+  /** The partial derivatives of the operator. Mirror of
+   * `OperatorDerivative` (types-definitions.ts, which imports this file, so
+   * the alias cannot be named here); that type documents the two forms. */
+  derivative?:
+    | ReadonlyArray<ExpressionInput | Expression>
+    | ((
+        ops: ReadonlyArray<Expression>,
+        options: { engine: ExpressionComputeEngine; argument: number }
+      ) => Expression | undefined);
   compile?: OperatorCompileHandler;
   _update(def: unknown): void;
   /** Re-attach the definition's effect set to its signature after the

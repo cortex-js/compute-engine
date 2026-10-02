@@ -73,6 +73,8 @@ import {
   hasFloatOperand,
 } from '../boxed-expression/float-result.js';
 import { flatten } from '../boxed-expression/flatten.js';
+import { numericCanonicalHandler } from '../boxed-expression/canonical-numeric.js';
+import { recordNumericCanonicalDefinitions } from '../boxed-expression/numeric-canonical-registry.js';
 import { rangeCount } from '../numerics/range-count.js';
 
 import {
@@ -159,7 +161,6 @@ import {
   mulFactored,
   mulNEvaluated,
   isOutOfDoubleRangeLiteral,
-  canonicalDivide,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
 import {
@@ -186,8 +187,6 @@ import {
 } from './utils.js';
 import { inferContinuationPattern } from '../symbolic/interpret.js';
 import {
-  canonicalPower,
-  canonicalRoot,
   pow,
   realPowerBranchTerms,
   root,
@@ -3536,6 +3535,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1300,
 
       lazy: true,
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Add'),
 
       // Accept numbers, vectors, and matrices for element-wise addition
       signature: '(value+) -> value',
@@ -4118,19 +4120,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
 
-      canonical: (args, { engine }) => {
-        const ce = engine;
-        // @fastpath: this code path is never taken, canonicalDivide is called directly
-        args = checkNumericArgs(ce, args);
-        let result = args[0];
-        if (result === undefined) return ce.error('missing');
-        if (args.length < 2) return result;
-
-        const rest = args.slice(1);
-        for (const x of rest) result = canonicalDivide(result, x);
-
-        return result;
-      },
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Divide'),
       evaluate: ([num, den], { numericApproximation, engine, expression }) => {
         // Non-lazy operator: operands arrive already evaluated by the
         // driver (`_computeValue` step 4) — do not re-evaluate them.
@@ -4225,17 +4217,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //     return 'positive';
       //   return undefined;
       // },
-      // Exp(x) -> e^x
-      canonical: (args, { engine }) => {
-        // The canonical handler is responsible for arg validation
-        args = checkNumericArgs(engine, args, 1);
-        // An arity/type error stays on the inert head: splicing the flagged
-        // args into `Power` would produce a malformed 3-operand `Power` with
-        // a double-wrapped error (cf. the `Rational` guard).
-        if (args.length !== 1 || !args.every((x) => x.isValid))
-          return engine._fn('Exp', args);
-        return engine.function('Power', [engine.E, ...args]);
-      },
+      // Exp(x) -> e^x. The canonical form is the one `makeNumericFunction`
+      // (`box.ts`) also computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Exp'),
     },
 
     Exp2: {
@@ -5550,6 +5534,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q204037',
       complexity: 4000,
       broadcastable: true,
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Ln'),
 
       // The carrier is every point where the logarithm has a value — all
       // of `number` except NaN: the finite complex numbers (`Ln(0) = −∞`
@@ -5653,6 +5640,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q11197',
       complexity: 4100,
       broadcastable: true,
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Log'),
 
       // `Log(x, b)` is DEFINED as `Ln(x) / Ln(b)` at every point (ruled
       // 2026-09-01), so both carriers are `Ln`'s — all of `number` except
@@ -6069,6 +6059,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       ],
 
       lazy: true,
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Multiply'),
       signature: '(number*) -> number',
       examples: ['2 * x * 3 * x'],
       type: (ops, { engine, derive }) => {
@@ -6856,12 +6849,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       sgn: ([x]) => oppositeSgn(x.sgn),
-      canonical: (args, { engine }) => {
-        args = checkNumericArgs(engine, args);
-        if (args.length === 0) return engine.error('missing');
-
-        return args[0].neg();
-      },
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Negate'),
       evaluate: ([x], { numericApproximation, engine }) => {
         // Non-lazy: `x` is already evaluated by the driver.
         const nonNumeric = nonNumericOperandError(engine!, [x]);
@@ -7294,13 +7284,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return BoxedType.forResult('number', context.engine._typeResolver);
           })()
         ),
-      canonical: (args, { engine }) => {
-        // @fastpath: See also shortcut in makeNumericFunction()
-        args = checkNumericArgs(engine, args, 2);
-        if (args.length !== 2) return engine._fn('Power', args);
-        const [base, exp] = args;
-        return canonicalPower(base, exp);
-      },
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Power'),
       sgn: ([a, b]) => {
         //Missing some cases like (-1)^{1/3}
         // A finite, provably non-real base is necessarily nonzero (0 is
@@ -7682,12 +7668,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNegative && n.isOdd === false) return 'unsigned';
         return undefined;
       },
-      canonical: (args, { engine }) => {
-        args = checkNumericArgs(engine, args, 2);
-        const [base, exp] = args;
-        //note: args. are canonicalized prior.
-        return canonicalRoot(base, exp);
-      },
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Root'),
       evaluate: ([x, n], { numericApproximation, engine, expression }) => {
         // Non-lazy: operands are already evaluated by the driver.
         const nonNumeric = nonNumericOperandError(engine, [x, n]);
@@ -8125,6 +8108,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q134237',
       complexity: 3000,
       broadcastable: true,
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Sqrt'),
 
       // The carrier is every point where the square root has a value —
       // all of `number` except NaN: the finite complex numbers, the
@@ -8348,12 +8334,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNaN) return 'unsigned';
         return undefined;
       },
-      canonical: (args, { engine }) => {
-        const ce = engine;
-        args = flatten(args);
-        if (args.length !== 1) return ce._fn('Square', args);
-        return ce._fn('Power', [args[0], ce.number(2)]).canonical;
-      },
+      // The canonical form is the one `makeNumericFunction` (`box.ts`) also
+      // computes by name. See `numericCanonicalHandler`.
+      canonical: numericCanonicalHandler('Square'),
     },
 
     Subtract: {
@@ -10057,6 +10040,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+// Record, for each arithmetic operator with a `numericCanonicalHandler`, the
+// fields of its library definition that its canonical form depends on
+// (signature, `lazy` and the `associative`/`commutative`/`idempotent`/
+// `involution` flags). A redeclaration keeps the handler only when it has the
+// same name and the same values for these fields
+// (`numeric-canonical-registry.ts`).
+for (const table of ARITHMETIC_LIBRARY)
+  recordNumericCanonicalDefinitions(table);
 
 /**
  * `json` with its LEFT-nested chain of the same `Add` or `Multiply` head

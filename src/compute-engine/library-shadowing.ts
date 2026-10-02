@@ -15,7 +15,9 @@
  * library name is shadowed when:
  *
  * - the definition the current scope resolves it to is not the one in the
- *   system scope, where the standard library is installed;
+ *   system scope, where the standard library is installed. This includes a
+ *   definition of a library loaded with `ce.loadLibrary()`, which goes in
+ *   the global scope;
  * - it is a parameter of a function body being canonicalized
  *   (`_isShadowedParameter`): the parameter is declared lazily, on its first
  *   reference, so the lookup can still find the library definition while the
@@ -27,6 +29,13 @@
  *   `customLibrary: false` to leave these out: a compilation target reads
  *   the custom definition's own lowering, so for the compiler a custom
  *   library is not a shadow.
+ *
+ * A definition installed by `ce.declare(name, patch, { extend: true })` from
+ * the library definition is not a shadow when the patch, and every earlier
+ * extension in its chain, kept the library's `evaluate`, `canonical`,
+ * `compile` and `derivative`: the code that reads the library by name reads
+ * exactly these parts, so it still gives the right answer
+ * (`markLibraryExtension()`).
  *
  * This module is a leaf: it takes the engine through the few members it
  * reads, so the boxing code and the compiler can both import it.
@@ -51,5 +60,38 @@ export function shadowsLibraryName(
     return true;
   if (ce._isShadowedParameter(name)) return true;
   const current = ce.lookupDefinition(name);
-  return current !== undefined && current !== library;
+  if (current === undefined || current === library) return false;
+  const operator = (current as { operator?: object }).operator;
+  const libraryOperator = (library as { operator?: object }).operator;
+  return (
+    operator === undefined ||
+    libraryOperator === undefined ||
+    LIBRARY_EXTENSIONS.get(operator) !== libraryOperator
+  );
+}
+
+/**
+ * For an operator definition built by `ce.declare(name, patch,
+ * { extend: true })`, the system-scope (library) operator definition that it
+ * extends, directly or through earlier extensions. Only an extension that
+ * kept the library's `evaluate`, `canonical`, `compile` and `derivative` is
+ * recorded. A weak map, so that a definition that is no longer bound can be
+ * collected, and so that no field is added to the definition object (a spread
+ * of the definition does not copy the mark).
+ */
+const LIBRARY_EXTENSIONS = new WeakMap<object, object>();
+
+/** Record that `extension` extends the library operator definition
+ * `libraryOperator` (see {@link shadowsLibraryName}). */
+export function markLibraryExtension(
+  extension: object,
+  libraryOperator: object
+): void {
+  LIBRARY_EXTENSIONS.set(extension, libraryOperator);
+}
+
+/** The library operator definition that `operator` extends, if it is an
+ * extension recorded by {@link markLibraryExtension}. */
+export function extendedLibraryOperator(operator: object): object | undefined {
+  return LIBRARY_EXTENSIONS.get(operator);
 }

@@ -948,3 +948,34 @@ describe('An exact base raised to an integer at machine precision', () => {
     expect(ce.box(['Power', 2, 100]).N().re).toBe(1.2676506002282294e30);
   });
 });
+
+describe('The sign of a Floor in the arguments of a function call', () => {
+  // In `f(⌊31x⌋/31, ⌊31y⌋/31)` with `f = (x, y) ↦ √(x² + y²)`, the body
+  // computes the sign of `⌊31x⌋` many times, and each one compares `31x`
+  // with `1`. That `x` is the free `x` of the caller, but during the call
+  // the name `x` is also the parameter of `f`, which has a value, so
+  // `.unknowns` of `31x` was empty. The exact order of two constants
+  // (`exactOrder()` in `boxed-expression/compare.ts`) then tried a higher
+  // precision and a symbolic proof for each comparison: about 8 s for this
+  // call (0.142.0 to 0.144.0), against about 15 ms for the same call with
+  // the arguments `x/31` and `y/31`. The bound is loose for a loaded
+  // machine.
+  test('does not order the free symbol as a constant', () => {
+    const ce = engineAt(21);
+    ce.assign(
+      'f',
+      ce.parse('(x,y) \\mapsto \\sqrt{x^2+y^2}', { strict: false })
+    );
+    const call = ce.parse(
+      'f(\\frac{\\lfloor 31x\\rfloor}{31},\\frac{\\lfloor 31y\\rfloor}{31})',
+      { strict: false }
+    );
+    const start = performance.now();
+    const result = call.evaluate();
+    const elapsed = performance.now() - start;
+    expect(result.toString()).toBe(
+      'sqrt(1/961 * floor(31x)^2 + 1/961 * floor(31y)^2)'
+    );
+    expect(elapsed).toBeLessThan(2000);
+  });
+});

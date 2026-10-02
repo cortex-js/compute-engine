@@ -238,3 +238,82 @@ describe('Symbolic argument mentioning the parameter’s own name (Tycho item 46
     expect(r.op2.re).toBeCloseTo(Math.sin(1.5), 12);
   });
 });
+
+/**
+ * `.unknowns` inside a call. The argument `x` of `f(y, x)` for
+ * `f = (x, y) ↦ x = y` is the free `x` of the caller. During the call, the
+ * scope chain also holds the parameter `x` of `f`, which has a value. The
+ * walk behind `.unknowns` looked up each symbol by name, found the
+ * parameter, and reported no unknowns, so `Equal` compared two "constants"
+ * and answered `False`. The walk now resolves a bound occurrence the way the
+ * evaluator reads its value (`bindingInContext`,
+ * `boxed-expression/binders.ts`), which skips a parameter that the
+ * occurrence does not denote.
+ */
+describe('Unknowns of an argument that mentions a parameter name', () => {
+  // An operator that reports the unknowns of its (evaluated) argument.
+  const engine = () => {
+    const ce = new ComputeEngine();
+    ce.declare('ReportUnknowns', {
+      signature: '(any) -> string',
+      evaluate: (ops, { engine }) => engine.string(ops[0].unknowns.join(',')),
+    });
+    return ce;
+  };
+
+  it('a comparison of free symbols stays undecided (parse route)', () => {
+    const ce = engine();
+    ce.assign('f', ce.parse('(x,y) \\mapsto x = y'));
+    expect(ce.parse('f(y, x)').evaluate().json).toEqual(['Equal', 'y', 'x']);
+    ce.assign('g', ce.parse('(x,y) \\mapsto x \\ne y'));
+    expect(ce.parse('g(y, x)').evaluate().json).toEqual([
+      'NotEqual',
+      'y',
+      'x',
+    ]);
+  });
+
+  it('a comparison of free symbols stays undecided (box route)', () => {
+    const ce = engine();
+    ce.assign('f', ce.box(['Function', ['Equal', 'x', 'y'], 'x', 'y']));
+    expect(ce.box(['f', 'y', 'x']).evaluate().json).toEqual([
+      'Equal',
+      'y',
+      'x',
+    ]);
+    ce.assign(
+      'h',
+      ce.box(['Function', ['If', ['Equal', 'x', 'y'], 1, 0], 'x', 'y'])
+    );
+    expect(ce.box(['h', 'y', 'x']).evaluate().json).toEqual([
+      'If',
+      ['Equal', 'y', 'x'],
+      1,
+      0,
+    ]);
+  });
+
+  it('the unknowns of the argument name the free symbol of the caller', () => {
+    const ce = engine();
+    ce.assign('f', ce.parse('x \\mapsto \\operatorname{ReportUnknowns}(x)'));
+    expect(ce.parse('f(31x)').evaluate().json).toEqual("'x'");
+    ce.assign('g', ce.box(['Function', ['ReportUnknowns', 'x'], 'x']));
+    expect(ce.box(['g', ['Multiply', 31, 'x']]).evaluate().json).toEqual(
+      "'x'"
+    );
+  });
+
+  it('a parameter used in the body is not an unknown', () => {
+    const ce = engine();
+    // `x + y` built in the body: `x` is the parameter (value 1), `y` is free.
+    ce.assign('k', ce.parse('x \\mapsto \\operatorname{ReportUnknowns}(x + y)'));
+    expect(ce.parse('k(1)').evaluate().json).toEqual("'y'");
+    // With the free `x` of the caller as the argument, both are unknowns.
+    expect(ce.parse('k(x)').evaluate().json).toEqual("'x,y'");
+    ce.assign(
+      'kb',
+      ce.box(['Function', ['ReportUnknowns', ['Add', 'x', 'y']], 'x'])
+    );
+    expect(ce.box(['kb', 1]).evaluate().json).toEqual("'y'");
+  });
+});

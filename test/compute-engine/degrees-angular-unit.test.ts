@@ -72,7 +72,7 @@ describe('DEGREE LITERALS IN EVERY ANGULAR UNIT', () => {
       const ce = engine(unit);
       const expr = ce.parse('x^\\circ');
       expect(expr.json).toEqual(['Degrees', 'x']);
-      expect(expr.latex).toBe('x\\degree');
+      expect(expr.latex).toBe('x^{\\circ}');
       expect(ce.parse(expr.latex).json).toEqual(['Degrees', 'x']);
     }
   );

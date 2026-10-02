@@ -108,11 +108,13 @@ describe('a parenthesized function symbol with a postfix on its argument list', 
     ]);
   });
 
-  test('a number keeps the product; an undeclared symbol is applied', () => {
+  test('a number and an undeclared symbol keep the product', () => {
+    // A name in parentheses is never the head of an application unless it is
+    // declared a function: `(g)(3)^2` with `g` undeclared is `9g`.
     const local = new ComputeEngine();
     local.assign('x', 5);
     expect(local.parse('(x)(3)^2').evaluate().toString()).toBe('45');
-    expect(local.parse('(g)(3)^2').json).toEqual(['Power', ['g', 3], 2]);
+    expect(local.parse('(g)(3)^2').json).toEqual(['Multiply', 9, 'g']);
   });
 });
 
