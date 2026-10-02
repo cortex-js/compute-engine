@@ -384,6 +384,27 @@
   with `p` above `ce.precision` still raises `ce.precision` and leaves it
   raised, as before.
 
+- **Modular roots, primitive roots and discrete logarithms.**
+  `PowerModList(a, s/r, m)` lists every `x` in `[0, m)` with `x^r ≡ a^s (mod m)`
+  in order: `PowerModList(3, 1/2, 11)` is `[5, 6]`, `PowerModList(1, 1/3, 7)` is
+  `[1, 2, 4]`, `PowerModList(-1, 1/2, 625)` is `[182, 443]`, and an `a^s` that
+  is not an `r`-th power gives `[]`. `PowerMod` accepts the same rational
+  exponent and returns the least root, as Mathematica does: `PowerMod(4, 1/2, 7)`
+  is `2`, where it was an `incompatible-type` error, and it stays unevaluated
+  when there is none (`PowerMod(3, 1/2, 7)`). `PrimitiveRootList(n)`
+  lists every primitive root: `PrimitiveRootList(25)` is
+  `[2, 3, 8, 12, 13, 17, 22, 23]`, and `[]` when `n` has none. `MultiplicativeOrder(k, n, [r1, r2, …])`
+  is the least `m ≥ 1` with `k^m ≡ r_i (mod n)` for some `i`:
+  `MultiplicativeOrder(5, 7, [3, 11])` is `2`; it stays unevaluated when no `r_i`
+  is a power of `k`. `RationalReconstruction(a, m)` recovers the fraction `p/q`
+  with `p ≡ a·q (mod m)` and `|p|, q ≤ ⌊√((m − 1)/2)⌋` (Wang's algorithm, as in
+  Sage): `RationalReconstruction(6, 11)` is `1/2`. All five work over bigints
+  (`PowerModList(2, 1/3, 2^89 − 1)` lists its three roots) and stay unevaluated
+  rather than answer wrongly when the modulus cannot be factored, a discrete
+  logarithm is out of reach, or a list would pass 100000 entries. The integer
+  exponent forms of `PowerMod` and the two-argument `MultiplicativeOrder` are
+  unchanged (#395, contributed by [enumeratio](https://github.com/enumeratio)).
+
 ### Issues Resolved
 
 - A pure imaginary factor in a product was serialized in parentheses that are
@@ -604,29 +625,6 @@ These changes apply to non-strict parsing only
     read as the product `x \cdot 0.5`.
 
   The readings do not change, and strict mode reports none of these.
-
-### New Features
-
-- **Modular roots, primitive roots and discrete logarithms.**
-  `PowerModList(a, s/r, m)` lists every `x` in `[0, m)` with `x^r ≡ a^s (mod m)`
-  in order: `PowerModList(3, 1/2, 11)` is `[5, 6]`, `PowerModList(1, 1/3, 7)` is
-  `[1, 2, 4]`, `PowerModList(-1, 1/2, 625)` is `[182, 443]`, and an `a^s` that
-  is not an `r`-th power gives `[]`. `PowerMod` accepts the same rational
-  exponent and returns the least root, as Mathematica does: `PowerMod(4, 1/2, 7)`
-  is `2`, where it was an `incompatible-type` error, and it stays unevaluated
-  when there is none (`PowerMod(3, 1/2, 7)`). `PrimitiveRootList(n)`
-  lists every primitive root: `PrimitiveRootList(25)` is
-  `[2, 3, 8, 12, 13, 17, 22, 23]`, and `[]` when `n` has none. `MultiplicativeOrder(k, n, [r1, r2, …])`
-  is the least `m ≥ 1` with `k^m ≡ r_i (mod n)` for some `i`:
-  `MultiplicativeOrder(5, 7, [3, 11])` is `2`; it stays unevaluated when no `r_i`
-  is a power of `k`. `RationalReconstruction(a, m)` recovers the fraction `p/q`
-  with `p ≡ a·q (mod m)` and `|p|, q ≤ ⌊√((m − 1)/2)⌋` (Wang's algorithm, as in
-  Sage): `RationalReconstruction(6, 11)` is `1/2`. All five work over bigints
-  (`PowerModList(2, 1/3, 2^89 − 1)` lists its three roots) and stay unevaluated
-  rather than answer wrongly when the modulus cannot be factored, a discrete
-  logarithm is out of reach, or a list would pass 100000 entries. The integer
-  exponent forms of `PowerMod` and the two-argument `MultiplicativeOrder` are
-  unchanged (#395, contributed by [enumeratio](https://github.com/enumeratio)).
 
 ### Issues Resolved
 
