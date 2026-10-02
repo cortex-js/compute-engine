@@ -27,7 +27,12 @@ import {
   trigSign,
 } from '../boxed-expression/trigonometry.js';
 
-import { apply, apply2, shouldNumericize } from '../boxed-expression/apply.js';
+import {
+  apply,
+  apply2,
+  applyOnImaginaryAxis,
+  shouldNumericize,
+} from '../boxed-expression/apply.js';
 
 import {
   reducedRational,
@@ -1313,6 +1318,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (!x.isComplex && x.isSame(0))
           return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis Si(iy) = i·Shi(y): the real part is exactly
+        // 0, and the real kernel of Shi computes the other part. A value
+        // past the number range (`Si(1000i)`) stays unevaluated.
+        const onAxis = applyOnImaginaryAxis(x, (y) => [0, sinhIntegral(y)]);
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine kernel; complex args the E₁-based kernel.
         return apply(x, (x) => sinIntegral(x), undefined, sinIntegralComplex);
       },
@@ -1380,6 +1390,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis Ci(iy) = Chi(|y|) + sign(y)·iπ/2, from the
+        // real kernel of Chi. A value past the number range (`Ci(1000i)`,
+        // where Chi(1000) overflows) stays unevaluated.
+        const onAxis = applyOnImaginaryAxis(x, (y) => [
+          coshIntegral(y),
+          Math.sign(y) * (Math.PI / 2),
+        ]);
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // A non-negative real argument uses the machine kernel; a negative
         // real one is the principal value `Ci(−x) = Ci(x) + iπ`, built from
         // the real kernel (the complex kernel hands an exactly-real
@@ -1442,6 +1460,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (!x.isComplex && x.isSame(0))
           return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis Shi(iy) = i·Si(y): the real part is exactly
+        // 0, and the real kernel of Si computes the other part.
+        const onAxis = applyOnImaginaryAxis(x, (y) => [0, sinIntegral(y)]);
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine kernel; complex args the Si-based kernel.
         return apply(x, (x) => sinhIntegral(x), undefined, sinhIntegralComplex);
       },
@@ -1509,6 +1531,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis Chi(iy) = Ci(|y|) + sign(y)·iπ/2, from the
+        // real kernel of Ci.
+        const onAxis = applyOnImaginaryAxis(x, (y) => [
+          cosIntegral(y),
+          Math.sign(y) * (Math.PI / 2),
+        ]);
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // A non-negative real argument uses the machine kernel; a negative
         // real one is the principal value `Chi(−x) = Chi(x) + iπ`, built
         // from the real kernel (see `CosIntegral` above).

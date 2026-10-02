@@ -4,6 +4,11 @@ import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { bigStieltjesGamma, STIELTJES_MAX_ORDER } from './stieltjes.js';
+import { erf, erfc } from './error-functions.js';
+
+// The machine kernels of the error functions live in their own module; they
+// are re-exported here, where the other special-function kernels are.
+export { erf, erfc, erfi, dawson } from './error-functions.js';
 import {
   type DD,
   ddAdd,
@@ -654,8 +659,9 @@ export function erfInv(x: number): number {
   // catastrophically (only ~5 correct digits at ax = 1 − 1e-12). Rewrite it via
   // the complementary function, which has no cancellation for large y:
   //   erf(y) − ax = (1 − erfc(y)) − ax = (1 − ax) − erfc(y),
-  // computing 1 − ax once (exact) and erfc(y) directly (its own continued
-  // fraction). (NU-P1-9)
+  // computing 1 − ax once (exact) and erfc(y) directly (Cody's rational
+  // approximation in `error-functions.ts`, with no cancellation for large y).
+  // (NU-P1-9)
   const q = 1 - ax; // complementary input, exact
   const useComplement = ax > 0.9;
   for (let i = 0; i < 5; i++) {
@@ -664,81 +670,6 @@ export function erfInv(x: number): number {
   }
 
   return sign * y;
-}
-
-/**
- * Complementary error function, erfc(x) = 1 - erf(x), accurate to full
- * machine (double) precision.
- *
- * For |x| < 2 the value is computed as `1 - erf(x)` (no significant
- * cancellation). For larger |x|, `1 - erf(x)` would lose all precision
- * (erf(x) ≈ 1), so erfc is computed directly from a continued fraction
- * (DLMF 7.9.3) evaluated with the modified Lentz algorithm.
- *
- * References:
- * - NIST DLMF: https://dlmf.nist.gov/7.9
- */
-export function erfc(x: number): number {
-  if (Number.isNaN(x)) return NaN;
-  if (!Number.isFinite(x)) return x > 0 ? 0 : 2;
-  if (x < 0) return 2 - erfc(-x);
-  if (x < 2) return 1 - erf(x);
-
-  // erfc(x) = e^{-x²} / (√π · g),  where
-  //   g = x + (1/2)/(x + (2/2)/(x + (3/2)/(x + ...)))   (continued fraction)
-  // evaluated with the modified Lentz algorithm.
-  const tiny = 1e-300;
-  let f = x === 0 ? tiny : x;
-  let c = f;
-  let d = 0;
-  for (let k = 1; k <= 500; k++) {
-    const a = k / 2;
-    d = x + a * d;
-    if (d === 0) d = tiny;
-    d = 1 / d;
-    c = x + a / c;
-    if (c === 0) c = tiny;
-    const delta = c * d;
-    f *= delta;
-    if (Math.abs(delta - 1) < 1e-17) break;
-  }
-  return Math.exp(-x * x) / (Math.sqrt(Math.PI) * f);
-}
-
-/**
- * The Gauss error function, erf(x), accurate to full machine (double)
- * precision.
- *
- * Computed from the well-conditioned Maclaurin series (DLMF 7.6.2):
- *   erf(x) = (2/√π) e^{-x²} Σ_{n≥0} 2^n x^{2n+1} / (1·3·5···(2n+1))
- * All terms are positive, so there is no subtractive cancellation. For
- * |x| ≥ 6 the result rounds to ±1 (erfc(6) ≈ 2.15e-17, below machine eps).
- *
- * (Previously used the 5-term Abramowitz & Stegun rational approximation,
- * which was only ~7-digit accurate.)
- *
- * References:
- * - NIST DLMF: https://dlmf.nist.gov/7.6
- */
-export function erf(x: number): number {
-  if (Number.isNaN(x)) return NaN;
-  if (x === 0) return 0;
-  if (!Number.isFinite(x)) return x > 0 ? 1 : -1;
-
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x);
-  if (ax >= 6) return sign;
-
-  const x2 = ax * ax;
-  let term = ax; // n = 0 term: x
-  let sum = ax;
-  for (let n = 1; n < 200; n++) {
-    // term_{n} = term_{n-1} · 2x² / (2n+1)
-    term *= (2 * x2) / (2 * n + 1);
-    sum += term;
-    if (term < sum * 1e-18) break;
-  }
-  return sign * (2 / Math.sqrt(Math.PI)) * Math.exp(-x2) * sum;
 }
 
 /**
@@ -4639,35 +4570,10 @@ export function bigErf(ce: ComputeEngine, x: BigNum): BigNum {
 }
 
 /**
- * Imaginary error function erfi(x) = −i·erf(i·x) = (2/√π)∫₀ˣ e^{t²} dt.
- *
- * Maclaurin series (all-positive, no subtractive cancellation):
- *    erfi(x) = (2/√π) Σ_{n≥0} x^{2n+1} / (n!·(2n+1))
- * with the term recurrence tₙ = tₙ₋₁ · x²·(2n−1) / (n·(2n+1)).
- * Odd function. Grows like e^{x²}, so it overflows to ±∞ for large |x|.
- */
-export function erfi(x: number): number {
-  if (Number.isNaN(x)) return NaN;
-  if (x === 0) return 0;
-  if (!Number.isFinite(x)) return x > 0 ? Infinity : -Infinity;
-
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x);
-  const x2 = ax * ax;
-  let term = ax; // n = 0 term: x
-  let sum = ax;
-  for (let n = 1; n < 1000; n++) {
-    term *= (x2 * (2 * n - 1)) / (n * (2 * n + 1));
-    sum += term;
-    if (term < sum * 1e-18) break;
-  }
-  return sign * (2 / Math.sqrt(Math.PI)) * sum;
-}
-
-/**
- * Bignum imaginary error function. The Maclaurin series above has only
+ * Bignum imaginary error function, Maclaurin series. The series has only
  * positive terms (no cancellation), so the relative error tracks the working
- * precision. Precision scales with `BigDecimal.precision`.
+ * precision. Precision scales with `BigDecimal.precision`. It needs about
+ * e·x² terms, so `bigErfi()` uses it only for a moderate x.
  */
 function bigErfiSeries(x: BigNum, tolDigits: number): BigNum {
   const x2 = x.mul(x);
@@ -4698,9 +4604,47 @@ export function bigErfi(ce: ComputeEngine, x: BigNum): BigNum {
 
   const p = BigDecimal.precision;
   const guard = 10;
+  // The asymptotic series is accurate to about e^{−x²} relative, enough once
+  // x²·log₁₀(e) ≥ p + guard. The Maclaurin series needs about e·x² terms,
+  // too many for a large x (a million for x = 1000).
+  const xN = x.toNumber();
+  if (xN * xN * LOG10E >= p + guard)
+    return withExtraPrecision(guard, () =>
+      bigErfiAsymptotic(x, p + guard)
+    ).toPrecision(p);
   return withExtraPrecision(guard, () =>
     bigErfiSeries(x, p + guard)
   ).toPrecision(p);
+}
+
+/**
+ * Asymptotic series of erfi for a large positive x (from DLMF 7.12.1 with
+ * erfi(x) = −i·erf(ix)):
+ *    erfi(x) ~ e^{x²}/(x√π) · Σ_{m≥0} (1·3·5···(2m−1)) / (2x²)^m
+ * The terms are positive and decrease while 2m − 1 < 2x², then grow: the sum
+ * stops at the smallest term, about e^{−x²} relative to the sum, or when a
+ * term is below 10^−tolDigits of it.
+ *
+ * Past the exponent range of a big decimal (x² larger than about 2·10¹⁶),
+ * e^{x²} is infinite and so is the result.
+ */
+function bigErfiAsymptotic(x: BigNum, tolDigits: number): BigNum {
+  const x2 = x.mul(x);
+  // Checked first: for a very large x the terms are so small that adding
+  // one to the sum would build a number with billions of digits.
+  const scale = x2.exp();
+  if (!scale.isFinite()) return scale;
+  const twoX2 = x2.mul(2);
+  let term: BigNum = BigDecimal.ONE;
+  let sum: BigNum = BigDecimal.ONE;
+  const tol = new BigDecimal(10).pow(-tolDigits);
+  for (let m = 1; m <= 100000; m++) {
+    const next = term.mul(2 * m - 1).div(twoX2);
+    if (next.gt(term) || next.lt(tol)) break;
+    term = next;
+    sum = sum.add(term);
+  }
+  return scale.div(x.mul(BigDecimal.PI.sqrt())).mul(sum);
 }
 
 const EULER_GAMMA = 0.5772156649015328606; // Euler–Mascheroni constant γ
@@ -4820,23 +4764,61 @@ export function cosIntegral(x: number): number {
 
 /**
  * Hyperbolic sine integral Shi(x) = ∫₀ˣ sinh(t)/t dt. Odd and entire, so it is
- * real for every real x. Built on Ei: Shi(x) = (Ei(x) − Ei(−x))/2.
+ * real for every real x.
+ *
+ * For |x| ≤ 2, the Maclaurin series Σ_{n≥0} x^{2n+1}/((2n+1)·(2n+1)!)
+ * (DLMF 6.6.6), whose terms are all of the sign of x. Past 2, built on Ei:
+ * Shi(x) = (Ei(x) − Ei(−x))/2. Near 0 that difference cancels: Ei(x) and
+ * Ei(−x) are both close to γ + ln|x| (the difference gives `Shi(10⁻¹⁰)` with
+ * a relative error of 10⁻⁵).
  */
 export function sinhIntegral(x: number): number {
   if (Number.isNaN(x)) return NaN;
-  if (x === 0) return 0;
+  if (x === 0) return x;
+  if (Math.abs(x) <= 2) {
+    const x2 = x * x;
+    // power = x^{2n+1}/(2n+1)!
+    let power = x;
+    let sum = x;
+    for (let n = 1; n < 30; n++) {
+      power *= x2 / (2 * n * (2 * n + 1));
+      const term = power / (2 * n + 1);
+      sum += term;
+      if (Math.abs(term) <= 1e-17 * Math.abs(sum)) break;
+    }
+    return sum;
+  }
   return (expIntegralEi(x) - expIntegralEi(-x)) / 2;
 }
 
 /**
  * Hyperbolic cosine integral Chi(x) = γ + ln|x| + ∫₀ˣ (cosh t − 1)/t dt.
  * For real x < 0 the function is complex (Chi(−|x|) = Chi(|x|) + iπ); like the
- * cosine-integral kernel, this returns the real part Chi(|x|). Built on Ei:
- * Chi(|x|) = (Ei(|x|) + Ei(−|x|))/2.
+ * cosine-integral kernel, this returns the real part Chi(|x|).
+ *
+ * For |x| ≤ 2, the Maclaurin series γ + ln|x| + Σ_{n≥1} x^{2n}/(2n·(2n)!)
+ * (DLMF 6.6.7); past 2, built on Ei: Chi(|x|) = (Ei(|x|) + Ei(−|x|))/2,
+ * which is a few units in the last place less accurate below 2 (2 at x = 1).
+ * Next to the zero of Chi at x = 0.5238 both lose relative accuracy (the
+ * sum cancels γ + ln x); the absolute error stays about 10⁻¹⁶.
  */
 export function coshIntegral(x: number): number {
   if (Number.isNaN(x)) return NaN;
   const a = Math.abs(x);
+  if (a <= 2) {
+    if (a === 0) return -Infinity;
+    const x2 = a * a;
+    // power = x^{2n}/(2n)!
+    let power = 1;
+    let sum = 0;
+    for (let n = 1; n < 30; n++) {
+      power *= x2 / ((2 * n - 1) * (2 * n));
+      const term = power / (2 * n);
+      sum += term;
+      if (term <= 1e-17 * sum) break;
+    }
+    return EULER_GAMMA + Math.log(a) + sum;
+  }
   return (expIntegralEi(a) + expIntegralEi(-a)) / 2;
 }
 

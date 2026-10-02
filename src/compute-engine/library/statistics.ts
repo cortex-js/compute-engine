@@ -28,7 +28,11 @@ import {
   erfInv,
 } from '../numerics/special-functions.js';
 import { erfComplex, erfiComplex } from '../numerics/numeric-complex.js';
-import { apply, shouldNumericize } from '../boxed-expression/apply.js';
+import {
+  apply,
+  applyOnImaginaryAxis,
+  shouldNumericize,
+} from '../boxed-expression/apply.js';
 import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import {
@@ -410,6 +414,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           if (x.isInfinity) return x.isPositive ? ce.One : ce.NegativeOne;
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis erf(iy) = i·erfi(y): the real part is
+        // exactly 0, and the real kernels of erfi compute the other part.
+        const onAxis = applyOnImaginaryAxis(
+          x,
+          (y) => [0, erfi(y)],
+          (y) => [0, bigErfi(ce, y)]
+        );
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; complex args the
         // Γ(1/2, ·)-based kernel.
         return apply(
@@ -458,6 +470,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           if (x.isInfinity) return x.isPositive ? ce.Zero : ce.number(2);
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis erfc(iy) = 1 − i·erfi(y): the real part is
+        // exactly 1, and the real kernels of erfi compute the other part.
+        const onAxis = applyOnImaginaryAxis(
+          x,
+          (y) => [1, -erfi(y)],
+          (y) => [1, bigErfi(ce, y).neg()]
+        );
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; a complex argument uses
         // `erfc(z) = 1 − erf(z)` with the complex `Erf` kernel, as the
         // compiled Python target does.
@@ -598,6 +618,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return x.isPositive ? ce.PositiveInfinity : ce.NegativeInfinity;
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis erfi(ix) = i·erf(x): the real part is
+        // exactly 0, and the real kernels of erf compute the other part.
+        const onAxis = applyOnImaginaryAxis(
+          x,
+          (y) => [0, erf(y)],
+          (y) => [0, bigErf(ce, y)]
+        );
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; complex args the
         // Γ(1/2, ·)-based kernel.
         return apply(

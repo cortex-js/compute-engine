@@ -1834,6 +1834,10 @@ export function expIntegralEiComplex(z: Complex): Complex {
  */
 export function sinIntegralComplex(z: Complex): Complex {
   if (z.isNaN()) return C_NAN;
+  // Near 0 the E₁ formula below is π/2 plus a value close to −π/2, and the
+  // difference loses digits (a relative error of 2·10⁻⁵ at 10⁻¹¹·(1 + i)).
+  // The Maclaurin series has no such cancellation for |z| ≤ 1.
+  if (z.abs() <= 1) return sinIntegralSeries(z);
   // Reflect into the right half-plane (Si(−z) = −Si(z)).
   if (z.re < 0 || (z.re === 0 && z.im < 0))
     return sinIntegralComplex(z.neg()).neg();
@@ -1842,6 +1846,26 @@ export function sinIntegralComplex(z: Complex): Complex {
     .sub(e1ViaGamma(iz.neg()))
     .div(new Complex(0, 2)) // /(2i)
     .add(new Complex(Math.PI / 2, 0));
+}
+
+/**
+ * Si(z) = Σ_{n≥0} (−1)ⁿ z^{2n+1} / ((2n+1)·(2n+1)!) (DLMF 6.6.5), for
+ * |z| ≤ 1, where the terms decrease at least 18 times at each step.
+ * Measured against mpmath on circles of radius 10⁻¹² to 1: a relative error
+ * of at most 1.1·ε (ε = 2⁻⁵²).
+ */
+function sinIntegralSeries(z: Complex): Complex {
+  const z2 = z.mul(z);
+  // power = (−1)ⁿ z^{2n+1}/(2n+1)!
+  let power = z;
+  let sum = z;
+  for (let n = 1; n < 30; n++) {
+    power = power.mul(z2).div(-(2 * n) * (2 * n + 1));
+    const term = power.div(2 * n + 1);
+    sum = sum.add(term);
+    if (term.abs() <= 1e-17 * sum.abs()) break;
+  }
+  return sum;
 }
 
 /**
@@ -3919,6 +3943,10 @@ const SQRT_PI = Math.sqrt(Math.PI);
 /** Gauss error function erf(z) for complex z. */
 export function erfComplex(z: Complex): Complex {
   if (z.isNaN()) return C_NAN;
+  // Near 0, 1 − Γ(1/2, z²)/√π below subtracts two values close to 1 (a
+  // relative error of 10⁻⁸ at 10⁻⁸·(1 + i)). The Maclaurin series has no
+  // such cancellation for |z| ≤ 1.
+  if (z.abs() <= 1) return erfSeries(z);
   // Reflect into the right half-plane (erf is odd and entire).
   if (z.re < 0 || (z.re === 0 && z.im < 0)) return erfComplex(z.neg()).neg();
   let zsq = z.mul(z);
@@ -3926,6 +3954,26 @@ export function erfComplex(z: Complex): Complex {
   if (zsq.im === 0) zsq = new Complex(zsq.re, 0);
   const g = incompleteGammaUpperComplex(new Complex(0.5, 0), zsq);
   return C_ONE.sub(g.div(new Complex(SQRT_PI, 0)));
+}
+
+/**
+ * erf(z) = (2/√π) Σ_{n≥0} (−1)ⁿ z^{2n+1} / (n!·(2n+1)) (DLMF 7.6.1), for
+ * |z| ≤ 1, where the terms decrease at least 3 times at each step.
+ * Measured against mpmath on circles of radius 10⁻¹² to 1: a relative error
+ * of at most 1.9·ε (ε = 2⁻⁵²).
+ */
+function erfSeries(z: Complex): Complex {
+  const z2 = z.mul(z);
+  // power = (−1)ⁿ z^{2n+1}/n!
+  let power = z;
+  let sum = z;
+  for (let n = 1; n < 40; n++) {
+    power = power.mul(z2).div(-n);
+    const term = power.div(2 * n + 1);
+    sum = sum.add(term);
+    if (term.abs() <= 1e-17 * sum.abs()) break;
+  }
+  return sum.mul(2 / SQRT_PI);
 }
 
 /** Imaginary error function erfi(z) = −i·erf(i·z) for complex z. */

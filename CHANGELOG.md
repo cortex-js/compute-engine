@@ -1,3 +1,50 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **Error functions and trigonometric integrals on the imaginary axis.**
+  `Erf`, `Erfc`, `Erfi`, `SinIntegral`, `SinhIntegral`, `CosIntegral` and
+  `CoshIntegral` of an argument exactly on the imaginary axis (an exact
+  imaginary number such as `2i`, or a float complex number with a real part
+  of `0`) are computed with the identities `erf(iy) = i·erfi(y)`,
+  `erfc(iy) = 1 − i·erfi(y)`, `erfi(iy) = i·erf(y)`, `Si(iy) = i·Shi(y)`,
+  `Shi(iy) = i·Si(y)`, `Ci(iy) = Chi(|y|) ± iπ/2` and
+  `Chi(iy) = Ci(|y|) ± iπ/2`, from the real kernels:
+  - The part that is a constant is exact. `Erf(i).N()` was
+    `2.22e-16 + 1.6504i`, it is now `1.6504i`; `Erfc(i).N()` was
+    `0.9999999999999998 − 1.6504i`, it is now `1 − 1.6504i`.
+  - Above machine precision, the other part of `Erf`, `Erfc` and `Erfi` has
+    the working precision: at 50 digits `Erf(i).N()` is
+    `1.650425758797542876025337729561362443895679874874i`, was a double.
+  - A value past the number range stays unevaluated instead of `NaN`: a
+    complex value that is too large has a direction that no infinity of the
+    engine holds, the rule `Gamma` already follows. This applies to
+    `Erf(27i)` and `Si(1000i)` at machine precision, `Ci(1000i)`, and
+    `Erf(10^{10}i)` at every precision. A real overflow is still `+∞`
+    (`Erfi(27)`).
+
+### Improvements
+
+- **More accurate `erf`, `erfc` and `erfi` in doubles.** The machine kernels
+  of the error functions, which compiled JavaScript also uses, are now
+  W. J. Cody's rational approximations (`erfi` through the Dawson integral),
+  evaluated with compensated arithmetic. Measured against mpmath on 7,100
+  points in [0, 30], the largest error went from 15 to 1 unit in the last
+  place for `erf`, from 889 to 2 for `erfc`, and from 502 to 2 for `erfi`
+  (3 next to its overflow at 26.71). They take about the same time per call
+  as before.
+- **`Erfi` of a large argument above machine precision finishes.**
+  `Erfi(1000).N()` at 50 digits did not finish; the big-decimal kernel now
+  uses the asymptotic series once it is accurate to the working precision.
+- **Complex `Erf` and `SinIntegral` near 0.** The relative error of
+  `Erf(10^{-8}(1 + i)).N()` was `10⁻⁸`, and of `SinIntegral` at
+  `10⁻⁶(1 + i)` `10⁻¹⁰`: the kernels subtracted two values close to each
+  other. Both now use their Maclaurin series for `|z| ≤ 1`, with a relative
+  error below `2·2⁻⁵²`.
+- **`SinhIntegral` and `CoshIntegral` near 0.** `SinhIntegral(10^{-10}).N()`
+  was `9.99982e-11`, it is now `1e-10`. The real kernels of `Shi` and `Chi`
+  use their Maclaurin series for `|x| ≤ 2`.
+
 ## 0.147.0 _2026-10-02_
 
 ### Behavior Changes

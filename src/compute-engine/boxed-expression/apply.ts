@@ -273,6 +273,52 @@ export function apply(
 }
 
 /**
+ * The value of a function at a point iy of the imaginary axis, computed from
+ * REAL kernels: `fn(y)` (and `bigFn(y)` above machine precision) give the
+ * real and imaginary parts `[re, im]` of the value.
+ *
+ * Several functions are, on the imaginary axis, a real function of y times
+ * `i`, plus a constant: erf(iy) = i·erfi(y), erfc(iy) = 1 − i·erfi(y),
+ * Si(iy) = i·Shi(y), Ci(iy) = Chi(|y|) ± iπ/2. The complex kernel of such a
+ * function leaves a roundoff residue in the part that is a constant (it
+ * gives `erf(i)` as `2.2·10⁻¹⁶ + 1.65i`), and computes the other part in
+ * doubles at every precision. The real kernels give the constant part exactly and,
+ * when there is a big-decimal kernel, the other part at the working
+ * precision.
+ *
+ * Returns `undefined` when `expr` is not a number on the imaginary axis (a
+ * complex number with a real part of exactly 0, exact or float): the caller
+ * then uses its general route. Returns `null` when a part of the value is
+ * not finite: the value is past the number range, and the caller leaves the
+ * expression unevaluated. A complex value that is too large has a direction
+ * that no infinity of the engine holds (the rule of `Gamma`, see
+ * `boxExpOfComplexLog()`): `erf(27i)` at machine precision, `Si(1000i)`.
+ */
+export function applyOnImaginaryAxis(
+  expr: Expression,
+  fn: (y: number) => [re: number, im: number],
+  bigFn?: (y: BigDecimal) => [re: BigDecimal | number, im: BigDecimal | number]
+): Expression | null | undefined {
+  if (!isNumber(expr) || !expr.isComplex) return undefined;
+  if (expr.re !== 0 || (expr.bignumRe !== undefined && !expr.bignumRe.isZero()))
+    return undefined;
+  const ce = expr.engine;
+  if (Number.isNaN(expr.im) || isImaginaryPartNaN(expr)) return undefined;
+
+  if (bigFn && bignumPreferred(ce)) {
+    const [re, im] = bigFn(expr.bignumIm ?? ce.bignum(expr.im));
+    const isFinite = (x: BigDecimal | number) =>
+      typeof x === 'number' ? Number.isFinite(x) : x.isFinite();
+    if (!isFinite(re) || !isFinite(im)) return null;
+    return ce.number(ce._inexactNumericValue({ re, im }));
+  }
+
+  const [re, im] = fn(expr.im);
+  if (!Number.isFinite(re) || !Number.isFinite(im)) return null;
+  return boxComplexKernelResult(ce, { re, im }, [expr]);
+}
+
+/**
  * N-ary kernel dispatcher for special functions.
  *
  * Routing:

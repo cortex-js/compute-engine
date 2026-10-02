@@ -518,62 +518,49 @@ negative and the exponent may be a float — this breaks the pinned emissions
 and `tycho-item-286-unrolled-literal-call-fold.test.ts` and every shader
 `x^y` of an undeclared base. Kept as is (2026-10-02): `pow`.
 
-### `erf(i).N()` has a real part of `2.2·10⁻¹⁶`, which is `0` (IN PROGRESS, decided — found 2026-10-02 by the review of the removal of small parts; work paused 2026-10-02)
+### The real kernels of `Si`, `Ci`, `Shi` and `Chi` are a few units in the last place off past `|x| = 2` (OPEN, small — found 2026-10-02 by the work on the error functions on the imaginary axis)
 
-Measured 2026-10-02 at machine precision: `erf(i).N()` is
-`2.22e-16 + 1.6504i` and `erf(2i).N()` is `3.3e-16 + 18.565i`, where the
-real part is exactly `0` (`erf` is odd and real on the real axis, so `erf(iy)`
-is pure imaginary); `erfc(i).N()` is `0.9999999999999998 − 1.6504i`, where the
-real part is `1`. The complex kernel (`erfComplex()`,
-`numerics/numeric-complex.ts`) leaves roundoff in that part, and since
-2026-10-02 no part of a machine kernel result is removed afterwards.
+Measured 2026-10-02 against mpmath at 40 digits, on 400 points in
+[0.12, 49.5]: the real `Shi` and `Chi` kernels (`sinhIntegral()`,
+`coshIntegral()` in `numerics/special-functions.ts`) are built on the `Ei`
+kernel past `|x| = 2` and are up to 4 units in the last place off in [2, 10]
+and 14 in [10, 50] (5 at 27). The real `Si` kernel (`cisi()`, a continued
+fraction past 2) is up to 10 units off in [2, 10]. Below 2 the four kernels
+are within 2 units (`Shi` and `Chi` use their Maclaurin series there). These
+kernels also give the values of the four functions on the imaginary axis
+(`Si(iy) = i·Shi(y)`, `Ci(iy) = Chi(|y|) ± iπ/2`, …), so the same errors show
+there. A fix computes each function past 2 without the sum or difference of
+two larger values: an asymptotic expansion with auxiliary functions f and g
+for a large argument (DLMF 6.12), or rational approximations.
 
-**Work done, not committed.** The change is in the worktree
-`/Users/arno/dev/ce-wt-erf` (detached at 4e6d9729), and a copy of its diff is
-in `/Users/arno/dev/ce-wt-erf.patch` (it includes the new test file
-`test/compute-engine/imaginary-axis-special-functions.test.ts`, 55 tests). It
-passed its targeted tests (39 files) and the nightly suites, but it has had no
-review yet. It does this:
+`Ci` and `Chi` lose relative accuracy next to their zeros (`Chi` at 0.5238,
+`Ci` at 0.6165, 3.3842, …), where γ + ln x and the sum cancel; the absolute
+error stays about 10⁻¹⁶. That is the normal behaviour of a kernel at a zero
+of its function, not part of this entry.
 
-- `Erf`, `Erfc` and `Erfi` of an argument exactly on the imaginary axis (an
-  exact imaginary number, or a float complex number with a real part of 0) use
-  the real kernel of the partner function: `erf(iy) = i·erfi(y)`,
-  `erfc(iy) = 1 − i·erfi(y)`, `erfi(ix) = i·erf(x)`; `SinIntegral` and
-  `SinhIntegral` likewise (`Si(iy) = i·Shi(y)`, `Shi(iy) = i·Si(y)`), through
-  a new helper `applyOnImaginaryAxis` in `boxed-expression/apply.ts`. The zero
-  part is exactly `0` (`1` for `Erfc`), and above machine precision the other
-  part has the full working precision.
-- A value on the axis beyond the number range stays unevaluated instead of
-  `NaN` (`erf(27i)` at machine precision; `erf(10^{10}i)` at any precision;
-  `Si(1000i)`, `Ci(1000i)`), following the rule used for `Gamma`: a complex
-  value past the range has a direction that no engine infinity holds. A real
-  overflow still gives `+∞`.
-- The big-decimal `erfi` switches to its asymptotic series for a large
-  argument (`Erfi(1000).N()` at 50 digits did not finish).
-- The complex `erf` and `Si` kernels use their Maclaurin series for
-  `|z| ≤ 1` (relative errors of `3·10⁻⁷` and `2·10⁻⁵` near 0 before), and the
-  real `Shi` kernel uses its series for `|x| ≤ 2` (`Shi(10⁻¹⁰)` had a relative
-  error of `10⁻⁵`).
-- The real machine kernels of `erf`, `erfc` and `erfi` were rewritten in
-  double-double arithmetic: worst error over [0, 6] went from 16, 1012 and 31
-  units in the last place to 0.5, 1.3 and 0.5 — but they became 30 to 200
-  times slower (0.3–2 µs per call instead of 10–100 ns), and compiled code
-  uses the same kernels (a 1000×1000 plot of `erf` would take about 0.5 s
-  instead of 10 ms).
+### `.N()` of an exact large integer times `i` takes a time that grows with the number of digits (OPEN, small — found 2026-10-02 by the review of the error functions on the imaginary axis)
 
-**Decision (user, 2026-10-02): replace the double-double kernels with W. J.
-Cody's rational approximations** (as used by most numeric libraries) for the
-real `erf` and `erfc`, and for `erfi` through the Dawson function
-(`erfi(x) = 2/√π · e^{x²} · D(x)`, Cody's rational approximation of `D`). The
-target is the speed of the old kernels with an error of about 1 unit in the
-last place; check against mpmath over a wide range, measure the speed per
-call, and keep everything else of the worktree change. Then review, stage and
-commit it as one change. Still open after that: `Shi` and `Chi` above
-`|x| = 2` are a few units in the last place off (5.3 at 27), because they are
-built on the `Ei` kernel; and the identities on the imaginary axis of `Sinc`,
-`FresnelS`/`FresnelC`, `BesselJ/Y/I/K`, `AiryAi/Bi` and `LambertW` (checked
-against mpmath at 30 digits) are for when those functions get a complex
-kernel — today they stay symbolic for a complex argument.
+Measured 2026-10-02 at a precision of 50 digits: `Power(10, 10⁹).N()` takes
+3 ms (the result is `1e+1000000000`), but
+`Multiply(Power(10, 100000), ImaginaryUnit).N()` takes 2.1 s, and with
+`10⁷` or `10⁹` as the exponent it does not finish in 20 s. The canonical
+product is fast (2 ms): the time is in `.N()` of the exact imaginary value
+(not traced further). So `Erf(10^{10^9}·i).N()` does not finish, while
+`Erfi(10^{10^9}).N()` answers `+oo` at once. The time grows with the number
+of digits of the integer, where the real power does not: a fix rounds the
+exact imaginary part to the working precision as the real part is rounded.
+
+### `Sinc`, `FresnelS`/`FresnelC`, `BesselJ/Y/I/K`, `AiryAi/Bi` and `LambertW` stay symbolic for a complex argument (OPEN, small — found 2026-10-02 by the work on the error functions on the imaginary axis)
+
+These functions have no complex kernel: `.N()` of a complex argument leaves
+them unevaluated. When they get one, an argument exactly on the imaginary
+axis should use the identity that gives the constant part exactly, as
+`Erf`, `Erfc`, `Erfi`, `SinIntegral`, `SinhIntegral`, `CosIntegral` and
+`CoshIntegral` do through `applyOnImaginaryAxis()`
+(`boxed-expression/apply.ts`): for example `Sinc(iy) = sinh(y)/y`,
+`FresnelS(iy) = −i·FresnelS(y)`, `FresnelC(iy) = i·FresnelC(y)`,
+`BesselJ(n, iy) = iⁿ·BesselI(n, y)`. The identities were checked against
+mpmath at 30 digits on 2026-10-02.
 
 ### A float matrix gives exact results when a value is an integer (OPEN, decision — found 2026-10-02 by the change that makes a complex number from the host with integer parts exact)
 
