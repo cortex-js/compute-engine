@@ -2896,7 +2896,7 @@ function compilePythonIfStatement(
 
 /**
  * The lowering of a head whose NumPy routine is real-only on this target for
- * some complex values: `np.arctanh`, `np.arcsinh` and `np.sign`.
+ * some complex values: `np.sign`.
  *
  * An operand that is real lowers to the routine itself. An operand that may be
  * complex is bound once, and:
@@ -2929,6 +2929,145 @@ function pyComplexScalarLowering(
   if (isArray)
     return `(lambda ${v}: ${routine}(_ce_creal_elems(${v})))(${compile(arg)})`;
   return `(lambda ${v}: (${routine}(_ce_creal(${v})) if _ce_cisreal(${v}) else ${nonReal(v)}))(${compile(arg)})`;
+}
+
+/**
+ * The inverse trigonometric and inverse hyperbolic functions of a complex
+ * scalar, through `cmath`.
+ *
+ * `cmath` is accurate for a large and a small argument, but it picks the
+ * side of a branch cut from the sign of a zero part (IEEE 754):
+ * `cmath.asin(complex(2, 0.0))` is `π/2 + 1.317i` and
+ * `cmath.asin(complex(2, -0.0))` is `π/2 − 1.317i`. The engine has no signed
+ * zero, and the interpreter always takes the same side of each cut
+ * (`complexAsin()` and the others, `numerics/numeric-complex.ts`). So the
+ * compiled code first replaces a zero part of the argument with the zero
+ * whose sign selects the interpreter's side:
+ *
+ *  - `asin`, `acos`, `atanh` (cut: the real axis beyond ±1): a zero
+ *    imaginary part becomes `-0.0` when the real part is positive (the side
+ *    below the axis) and `0.0` otherwise (`asin 2` is `π/2 − 1.317i`);
+ *  - `acosh` (cut: the real axis below 1): a zero imaginary part becomes
+ *    `0.0` (the side above the axis, `acosh(−2)` is `1.317 + πi`);
+ *  - `asinh` (cut: the imaginary axis beyond ±i): a zero real part becomes
+ *    `-0.0` when the imaginary part is negative and `0.0` otherwise
+ *    (`asinh(−2i)` is `−1.317 − (π/2)i`);
+ *  - `atan` (cut: the imaginary axis beyond ±i): a zero real part becomes
+ *    `0.0` (the side right of the axis, `atan(−2i)` is `π/2 − 0.549i`).
+ *
+ * A reciprocal function is the function at `w = 1/z`, with the same rule
+ * applied to `w` (`arccsc 0.5` is `asin 2`), as in the interpreter. Two
+ * exceptions: `arccot` of a real value is `atan2(1, x)`, in `(0, π)`, as
+ * the interpreter gives it, and `z = 0`, where Python raises
+ * `ZeroDivisionError` for `1/z`, takes the interpreter's value there (`nan`
+ * for `arccsc`, `arcsec` and `arcsch`, `+∞` for `arsech`, `(π/2)i` for
+ * `arcoth`).
+ *
+ * `cmath.atan` and `cmath.atanh` raise `ValueError` at their poles
+ * (`atan(±i)`, `atanh(±1)`), so these points answer the infinite values of
+ * the compiled JavaScript: `atanh(±1)` is `±∞`, `atan(±i)` is `±∞·i`.
+ */
+const PY_INVERSE_TRIG: Record<
+  string,
+  { fn: string; cut: 'real' | 'above' | 'asinh' | 'atan'; at0?: string }
+> = {
+  __proto__: null as never,
+  Arcsin: { fn: 'asin', cut: 'real' },
+  Arccos: { fn: 'acos', cut: 'real' },
+  Arctan: { fn: 'atan', cut: 'atan' },
+  Arsinh: { fn: 'asinh', cut: 'asinh' },
+  Arcosh: { fn: 'acosh', cut: 'above' },
+  Artanh: { fn: 'atanh', cut: 'real' },
+  Arccsc: {
+    fn: 'asin',
+    cut: 'real',
+    at0: "complex(float('nan'), float('nan'))",
+  },
+  Arcsec: {
+    fn: 'acos',
+    cut: 'real',
+    at0: "complex(float('nan'), float('nan'))",
+  },
+  Arccot: { fn: 'atan', cut: 'atan' },
+  Arcsch: {
+    fn: 'asinh',
+    cut: 'asinh',
+    at0: "complex(float('nan'), float('nan'))",
+  },
+  Arsech: { fn: 'acosh', cut: 'above', at0: "complex(float('inf'), 0.0)" },
+  Arcoth: { fn: 'atanh', cut: 'real', at0: 'complex(0.0, np.pi / 2)' },
+};
+
+/**
+ * The lowering of the inverse trigonometric or inverse hyperbolic `head`
+ * (see `PY_INVERSE_TRIG`). A complex scalar operand takes `cmath` with the
+ * interpreter's side of each branch cut. An array operand whose elements may
+ * be complex takes the same scalar code on each element (`np.vectorize`,
+ * which keeps the shape of a nested list): the NumPy routines pick the side
+ * of a cut from the sign of a zero part, as `cmath` does, and `Arccot`'s
+ * real lowering `π/2 − atan(z)` is not `atan(1/z)` off the real axis when
+ * the real part is negative. Every other operand (a real one, or an array
+ * of real elements) takes `realLowering`, the real lowering of the head.
+ */
+function pyInverseTrig(
+  head: string,
+  realLowering: CompiledFunction<Expression>
+): CompiledFunction<Expression> {
+  return (args, compile, target) => {
+    const arg = args[0];
+    if (arg === null || arg === undefined)
+      throw new Error(`Could not compile \`${head}\`: no argument`);
+    const isArray =
+      arg.isCollection === true || arg.type.matches('collection<any>');
+    if (
+      isArray
+        ? arg.type.matches('collection<real>')
+        : !BaseCompiler.isComplexValued(arg)
+    ) {
+      if (typeof realLowering === 'string')
+        return `${realLowering}(${compile(arg)})`;
+      return realLowering(args, compile, target);
+    }
+    const { fn, cut, at0 } = PY_INVERSE_TRIG[head];
+    const reciprocal = at0 !== undefined || head === 'Arccot';
+    // `w` is the argument of the `cmath` function. `z` is the value whose
+    // zero parts are the zero parts of `w`: `w` itself, or the operand `v`
+    // when `w = 1/v`. For a reciprocal, a part of `1/v` can underflow to a
+    // zero whose sign Python keeps (`1/complex(1e200, 1e-12)` is
+    // `1e-200 - 0j`), and that sign picks the side of the cut, as in the
+    // interpreter; only a part that is zero in `v` takes the rule above.
+    const call = (w: string, z: string): string => {
+      const adjusted =
+        cut === 'real'
+          ? `(complex(${w}.real, -0.0 if ${w}.real > 0 else 0.0) if ${z}.imag == 0 else ${w})`
+          : cut === 'above'
+            ? `(complex(${w}.real, 0.0) if ${z}.imag == 0 else ${w})`
+            : cut === 'asinh'
+              ? `(complex(-0.0 if ${w}.imag < 0 else 0.0, ${w}.imag) if ${z}.real == 0 else ${w})`
+              : `(complex(0.0, ${w}.imag) if ${z}.real == 0 else ${w})`;
+      const value = `cmath.${fn}(${adjusted})`;
+      if (fn === 'atanh')
+        return `(complex(${w}.real * float('inf'), 0.0) if ${w}.imag == 0 and abs(${w}.real) == 1 else ${value})`;
+      if (fn === 'atan')
+        return `(complex(0.0, ${w}.imag * float('inf')) if ${w}.real == 0 and abs(${w}.imag) == 1 else ${value})`;
+      return value;
+    };
+    const v = BaseCompiler.tempVar(target);
+    let fnCode: string;
+    if (!reciprocal) fnCode = `lambda ${v}: ${call(v, v)}`;
+    else {
+      const w = BaseCompiler.tempVar(target);
+      const inverse = `(lambda ${w}: ${call(w, v)})(1 / ${v})`;
+      const special =
+        head === 'Arccot'
+          ? `complex(cmath.phase(complex(${v}.real, 1.0)), 0.0) if ${v}.imag == 0`
+          : `${at0} if ${v} == 0`;
+      fnCode = `lambda ${v}: ${special} else ${inverse}`;
+    }
+    if (isArray)
+      return `np.vectorize(${fnCode}, otypes=[complex])(${compile(arg)})`;
+    return `(${fnCode})(${compile(arg)})`;
+  };
 }
 
 const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
@@ -2991,21 +3130,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       return `cmath.tan(${compile(args[0])})`;
     return pythonPole(compile(args[0]), 'np.tan(_x)');
   },
-  Arcsin: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
-      return `cmath.asin(${compile(args[0])})`;
-    return `np.arcsin(${compile(args[0])})`;
-  },
-  Arccos: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
-      return `cmath.acos(${compile(args[0])})`;
-    return `np.arccos(${compile(args[0])})`;
-  },
-  Arctan: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
-      return `cmath.atan(${compile(args[0])})`;
-    return `np.arctan(${compile(args[0])})`;
-  },
+  // A complex operand: `pyInverseTrig` (`cmath`, with the interpreter's side
+  // of each branch cut).
+  Arcsin: pyInverseTrig('Arcsin', 'np.arcsin'),
+  // A complex operand: `pyInverseTrig` (`cmath`, with the interpreter's side
+  // of each branch cut).
+  Arccos: pyInverseTrig('Arccos', 'np.arccos'),
+  // A complex operand: `pyInverseTrig` (`cmath`, with the interpreter's side
+  // of each branch cut).
+  Arctan: pyInverseTrig('Arctan', 'np.arctan'),
   Arctan2: 'np.arctan2',
   Sinh: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
@@ -3022,37 +3155,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       return `cmath.tanh(${compile(args[0])})`;
     return `np.tanh(${compile(args[0])})`;
   },
-  // `np.arcsinh` and `np.arctanh` take a complex argument, and they agree
-  // with the interpreter at every non-real value except on the BRANCH CUT,
-  // where NumPy takes the value of the other side of the cut. They were
-  // compared with the interpreter at `x + yi` for `x` in {−3, −2.5, −1, −0.5,
-  // 0, 0.5, 1, 2, 3} and `y` in {0, ±1e−9, ±1}, and at `x` in {0, ±1e−9} for
-  // `y` in {±0.5, ±2}. The cut of `arsinh` is the imaginary axis beyond ±i:
-  // at `0 − 2i`, `np.arcsinh` answers `1.3170 − 1.5708i` and the interpreter
-  // `−1.3170 − 1.5708i`, so a value on it is `nan`.
-  Arsinh: (args, compile, target) =>
-    pyComplexScalarLowering(
-      'np.arcsinh',
-      args[0],
-      (v) =>
-        `(float('nan') if ${v}.real == 0 and abs(${v}.imag) > 1 else np.arcsinh(${v}))`,
-      compile,
-      target
-    ),
-  Arcosh: 'np.arccosh',
-  // The cut of `artanh` is the real axis beyond ±1: at `2 + 0i`,
-  // `np.arctanh` answers `0.5493 + 1.5708i` and the interpreter
-  // `0.5493 − 1.5708i`. A value there is exactly real, so it takes the real
-  // routine, which answers `nan` outside [−1, 1]; every non-real value takes
-  // the complex routine.
-  Artanh: (args, compile, target) =>
-    pyComplexScalarLowering(
-      'np.arctanh',
-      args[0],
-      (v) => `np.arctanh(${v})`,
-      compile,
-      target
-    ),
+  // NumPy's `np.arcsinh`, `np.arccosh` and `np.arctanh` take a complex
+  // argument, but they pick the side of a branch cut from the sign of a zero
+  // part (`np.arctanh(complex(2, 0))` is `0.5493 + 1.5708i`, the interpreter
+  // gives `0.5493 − 1.5708i`), so a complex operand takes `pyInverseTrig`.
+  Arsinh: pyInverseTrig('Arsinh', 'np.arcsinh'),
+  Arcosh: pyInverseTrig('Arcosh', 'np.arccosh'),
+  Artanh: pyInverseTrig('Artanh', 'np.arctanh'),
 
   // Reciprocal trigonometric functions. A real argument gets the pole rule of
   // `pythonPole`; a complex argument does not, as in the interpreter, whose
@@ -3082,20 +3191,20 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Inverse trigonometric (reciprocal)
-  Arccot: ([x], compile) => {
+  Arccot: pyInverseTrig('Arccot', ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arccot`: no argument');
     // `np.arctan(1/x)` returns the wrong branch for x < 0. `π/2 - arctan(x)` is
     // branch-free and matches the interpreter's (0, π) range for all real x.
     return `(np.pi / 2 - np.arctan(${compile(x)}))`;
-  },
-  Arccsc: ([x], compile) => {
+  }),
+  Arccsc: pyInverseTrig('Arccsc', ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arccsc`: no argument');
     return `np.arcsin(1 / (${compile(x)}))`;
-  },
-  Arcsec: ([x], compile) => {
+  }),
+  Arcsec: pyInverseTrig('Arcsec', ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arcsec`: no argument');
     return `np.arccos(1 / (${compile(x)}))`;
-  },
+  }),
 
   // Reciprocal hyperbolic functions
   Coth: ([x], compile) => {
@@ -3112,18 +3221,18 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Inverse hyperbolic (reciprocal)
-  Arcoth: ([x], compile) => {
+  Arcoth: pyInverseTrig('Arcoth', ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arcoth`: no argument');
     return `np.arctanh(1 / (${compile(x)}))`;
-  },
-  Arcsch: ([x], compile) => {
+  }),
+  Arcsch: pyInverseTrig('Arcsch', ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arcsch`: no argument');
     return `np.arcsinh(1 / (${compile(x)}))`;
-  },
-  Arsech: ([x], compile) => {
+  }),
+  Arsech: pyInverseTrig('Arsech', ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arsech`: no argument');
     return `np.arccosh(1 / (${compile(x)}))`;
-  },
+  }),
 
   // Elementary
   Lb: 'np.log2',
@@ -4638,8 +4747,7 @@ const PYTHON_SUPPORTED_MODES: readonly CompileMode[] = [
  * instead of taking the run-time realness rule (which answered NaN):
  *
  *  - `scipy.special.erf` and `erfc`;
- *  - `np.arccosh`, `np.emath.log2` (`Lb`, `Log2`), `np.emath.log10` and
- *    `np.exp2`;
+ *  - `np.emath.log2` (`Lb`, `Log2`), `np.emath.log10` and `np.exp2`;
  *  - `np.linalg.det`, `np.linalg.inv`, `np.matmul`,
  *    `np.linalg.matrix_power`, `np.cross` and `np.diag`, which compute with
  *    complex entries without conjugation, as the interpreter does.
@@ -4654,10 +4762,11 @@ const PYTHON_SUPPORTED_MODES: readonly CompileMode[] = [
  * At `−2.5 + 0i` it answers `−0.0562 − 9.4248i`, the interpreter `−0.0562`,
  * and off the axis the imaginary parts differ by a multiple of 2π.
  *
- * `Artanh`, `Arsinh` and `Sign` are function lowerings
- * (`pyComplexScalarLowering`): `np.arctanh` and `np.arcsinh` differ from the
- * interpreter only on their branch cuts, and `np.sign` of a complex value
- * depends on the NumPy version. `np.arctan2` and `scipy.special.gammaincc`
+ * The inverse trigonometric and inverse hyperbolic functions are function
+ * lowerings (`pyInverseTrig`): `cmath` and NumPy pick the side of a branch
+ * cut from the sign of a zero part, which the interpreter does not have.
+ * `Sign` is a function lowering (`pyComplexScalarLowering`): `np.sign` of a
+ * complex value depends on the NumPy version. `np.arctan2` and `scipy.special.gammaincc`
  * take real arguments only.
  *
  * `Gamma` and `Factorial` are function lowerings through
@@ -4667,7 +4776,6 @@ const PYTHON_SUPPORTED_MODES: readonly CompileMode[] = [
 const PYTHON_COMPLEX_CAPABLE_HELPERS: ReadonlySet<string> = new Set([
   'Erf',
   'Erfc',
-  'Arcosh',
   'Lb',
   'Log2',
   'Log10',

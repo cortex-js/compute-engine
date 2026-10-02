@@ -69,6 +69,51 @@
 
 ### Issues Resolved
 
+- **The GLSL and WGSL inverse trigonometric functions of a complex argument
+  are accurate.** The shader helpers of `Arcsin`, `Arccos`, `Arctan`,
+  `Arsinh`, `Arcosh` and `Artanh` (also used by `Arccsc`, `Arcsec`, `Arsech`
+  and `Arcoth`) used the logarithm formulas in 32-bit floats, and gave
+  `\arcsin(1000)` a real part of `1.660` instead of `π/2`, `\arcsin(10^4)` a
+  real part of `π`, `\operatorname{arsinh}(-10^4)` the value `-∞`,
+  `\operatorname{arcosh}(-1.5)` a negative real part, and
+  `\operatorname{artanh}(10^{20})` a `NaN` real part. On the real axis
+  outside the domain, `\arcsin`, `\arccos` and `\operatorname{artanh}` took
+  the other side of the branch cut (`\arcsin(1.5)` was `π/2 + 0.962i`, the
+  interpreter gives `π/2 - 0.962i`). The helpers now use the same formulas as
+  the interpreter, written for 32-bit floats, and the side of each cut is the
+  interpreter's. With correctly rounded built-in functions, each part has a
+  relative error below `3·10^{-7}` (a few units in the last place) for a
+  modulus from `10^{-40}` to `10^{30}`. A GPU can be less accurate: GLSL and
+  WGSL allow `log` an absolute error of `2^{-21}` on `[0.5, 2]` and 3 units
+  in the last place elsewhere, and `atan` an error of 4096 units in the last
+  place. The helpers do not call `log` on an argument near 1 (`ln(1 + x)` for
+  a small `x` is a series). `Arccsc`, `Arcsec`, `Arsech` and `Arcoth` have
+  their own helpers, which do not compute `w = 1/z` and then the function of
+  `w`: near `z = ±1` the rounding of `1/z` was amplified
+  (`\operatorname{arcoth}(-1 + 10^{-4}i)` had a relative error of
+  `6·10^{-5}`), `1/z` overflowed for a modulus above `10^{19}`, and a
+  subnormal `z` gave `NaN` (`\operatorname{arsech}(10^{-40})` is `92.80`).
+  `\operatorname{arsech}(0)` is `+∞`, as in the interpreter; it was `NaN`.
+
+- **Compiled Python takes the interpreter's side of each branch cut.** For a
+  complex argument, `Arcsin`, `Arccos`, `Arctan`, `Arsinh`, `Arcosh`,
+  `Artanh` and their reciprocals `Arccsc`, `Arcsec`, `Arccot`, `Arcsch`,
+  `Arsech` and `Arcoth` compiled to `cmath` or NumPy routines, which pick the
+  side of a cut from the sign of a zero part: `\arcsin(2)` of a complex
+  variable gave `π/2 + 1.317i`, the interpreter gives `π/2 - 1.317i`. The
+  compiled code now gives a zero part the sign that selects the interpreter's
+  side, on every cut of the twelve functions. Also fixed: `Arccot` of a
+  complex argument with a negative real part was off by `π` (it compiled to
+  `π/2 - \arctan(z)`, not `\arctan(1/z)`); `Artanh` of a complex variable with
+  a real value outside `[-1, 1]` and `Arsinh` on its cut gave `nan`;
+  `\arctan(\pm i)` and `\operatorname{artanh}(\pm 1)` raised a `ValueError`
+  (they are now infinite, as in compiled JavaScript); the reciprocal
+  functions raised a `ZeroDivisionError` at `0`; and a list of complex values
+  takes the same code on each element. A complex-typed argument now always
+  gives a Python `complex` for these twelve functions, also when the value is
+  real: `Artanh`, `Arsinh` and `Arcosh` returned a `float` before
+  (`Arcsin`, `Arccos` and `Arctan` already returned a `complex`).
+
 - **Inverse trigonometric functions are accurate at large and small
   arguments.** `\arcsin(-1000000)` gave `-1.5707963267948966 +
   14.50865012405984i`: the imaginary part was correct to six digits only (the

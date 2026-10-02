@@ -268,12 +268,8 @@ describe('a POLE JOIN drives the GPU complex lane by its FINITE part', () => {
   it('lowers them through the COMPLEX helpers on both shader targets', () => {
     expect(g(['Artanh', 'xr'])).toBe('_gpu_catanh(vec2(xr, 0.0))');
     expect(w(['Artanh', 'xr'])).toBe('_gpu_catanh(vec2f(xr, 0.0))');
-    expect(g(['Arcoth', 'xr'])).toBe(
-      '_gpu_catanh(_gpu_cdiv(vec2(1.0, 0.0), vec2(xr, 0.0)))'
-    );
-    expect(g(['Arsech', 'xr'])).toBe(
-      '_gpu_cacosh(_gpu_cdiv(vec2(1.0, 0.0), vec2(xr, 0.0)))'
-    );
+    expect(g(['Arcoth', 'xr'])).toBe('_gpu_cacoth(vec2(xr, 0.0))');
+    expect(g(['Arsech', 'xr'])).toBe('_gpu_casech(vec2(xr, 0.0))');
   });
 
   it('agrees with the vec2 convention its own PARENT emits', () => {

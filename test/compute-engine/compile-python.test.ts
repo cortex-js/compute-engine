@@ -557,19 +557,28 @@ describe('PYTHON TARGET', () => {
       expect(code).toContain('complex(3, 4.5)');
     });
 
+    // A zero part of the argument is first given the sign that selects the
+    // interpreter's side of the branch cut (`cmath` reads the side from the
+    // sign of a zero part).
     it('should use cmath.asin for complex arcsin', () => {
       const expr = ce.expr(['Arcsin', ['Complex', 1, 1]]);
-      expect(src(expr)).toBe('cmath.asin(complex(1, 1))');
+      expect(src(expr)).toBe(
+        '(lambda _tv1: cmath.asin((complex(_tv1.real, -0.0 if _tv1.real > 0 else 0.0) if _tv1.imag == 0 else _tv1)))(complex(1, 1))'
+      );
     });
 
     it('should use cmath.acos for complex arccos', () => {
       const expr = ce.expr(['Arccos', ['Complex', 1, 1]]);
-      expect(src(expr)).toBe('cmath.acos(complex(1, 1))');
+      expect(src(expr)).toBe(
+        '(lambda _tv1: cmath.acos((complex(_tv1.real, -0.0 if _tv1.real > 0 else 0.0) if _tv1.imag == 0 else _tv1)))(complex(1, 1))'
+      );
     });
 
     it('should use cmath.atan for complex arctan', () => {
       const expr = ce.expr(['Arctan', ['Complex', 1, 1]]);
-      expect(src(expr)).toBe('cmath.atan(complex(1, 1))');
+      expect(src(expr)).toBe(
+        "(lambda _tv1: (complex(0.0, _tv1.imag * float('inf')) if _tv1.real == 0 and abs(_tv1.imag) == 1 else cmath.atan((complex(0.0, _tv1.imag) if _tv1.real == 0 else _tv1))))(complex(1, 1))"
+      );
     });
 
     it('should use cmath.sinh for complex sinh', () => {

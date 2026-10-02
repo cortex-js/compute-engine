@@ -484,46 +484,6 @@ domain, for example `arcsin x = sign(x)·π/2 ∓ i·arcosh|x|` with
 `BigDecimal.acosh()`), which would also give these values at the working
 precision instead of 16 digits.
 
-### The GPU complex inverse trigonometric kernels are wrong for moderate arguments (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
-
-The GLSL and WGSL helpers `_gpu_casin`, `_gpu_cacos`, `_gpu_catan`,
-`_gpu_casinh`, `_gpu_cacosh` and `_gpu_catanh` (`compilation/gpu-target.ts`)
-use the logarithm formulas (`asin z = −i·ln(iz + √(1 − z²))` and similar)
-and a polar square root. A script that runs these formulas with each
-operation rounded to float32 (`Math.fround`) gives, compared with mpmath:
-- `asin(1000)` real part `1.660` instead of `π/2`; `asin(±10⁴)` and
-  `asin(±10⁶)` real part `π`; `asin(10¹⁹)` imaginary part `−∞`.
-- `acos(1000)` real part `−0.089` instead of `0`; `acos(10⁴)` real part
-  `−π/2`.
-- `asinh(−10⁴)` is `−∞`, `asinh(10¹⁹)` is `NaN`; `acosh(−1.5)` real part
-  `−0.962` (the real part of `acosh` is never negative); `acosh(−10⁴)` is
-  `−∞`.
-- `atanh(10⁶)` real part with a relative error of `0.046`; `atanh(10²⁰)`
-  real part `NaN`.
-- `asin(10⁻⁶·i)`, `acosh(0.5 + 10⁻⁶·i)`: relative error of `0.01` to `0.05`
-  in the small part.
-- On the real axis outside the domain, the imaginary part of `asin`,
-  `acos` and `atanh` has the opposite sign from the interpreter
-  (`asin(1.5)` is `π/2 + 0.962i`, the interpreter gives `π/2 − 0.962i`).
-
-The interpreter and compiled JavaScript use the formulas of W. Kahan
-(`complexAsin()` and the others in `numerics/numeric-complex.ts`), which have
-none of these errors; the same formulas in float32 would fix the GPU kernels.
-
-### Compiled Python takes the other side of some branch cuts for a complex argument with a zero imaginary part (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
-
-For a complex-valued argument, the Python target uses `cmath.asin`,
-`cmath.acos`, `cmath.atan` (`compilation/python-target.ts`). `cmath` is
-accurate at large and small arguments, but it picks the side of a cut from
-the sign of a zero part (IEEE 754): `cmath.asin(complex(2, 0))` is
-`π/2 + 1.317i`, `cmath.acos(complex(2, 0))` is `−1.317i`, and
-`cmath.atanh(complex(2, 0))` is `0.549 + (π/2)i`. The interpreter and
-compiled JavaScript give `π/2 − 1.317i`, `1.317i` and `0.549 − (π/2)i`. A
-real argument of a real-typed variable compiles to `np.arcsin` and does not
-see this. A fix gives the zero imaginary part the sign the engine uses
-before the call (for `asin`, `acos`, `atanh`: `−0.0` when the real part is
-positive).
-
 ### Compiled JavaScript removes a small part of a complex result that the interpreter keeps (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
 
 The compiled complex helpers (`toRI()`, `compilation/javascript-target.ts`)
