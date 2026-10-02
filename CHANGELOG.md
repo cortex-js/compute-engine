@@ -69,6 +69,13 @@
 
 ### Issues Resolved
 
+- **A restriction by an infinite list of conditions no longer runs out of
+  memory.** Reading the elements of `When([1, 2, 3], Range(1, ∞))` read the
+  whole condition list on the first element, and the process ran out of
+  memory. The conditions are now read only up to the element requested:
+  the result is the three restricted elements, and an element of
+  `When(Range(1, ∞), Range(1, ∞))` can be read by its index.
+
 - **`FromDigits` and `ChineseRemainder` no longer round a non-integer
   element.** `FromDigits([1.5, 2])` gave `22` and `ChineseRemainder([5/2, 3],
   [3, 5])` gave `3`; both now stay unevaluated. A float with an integer value

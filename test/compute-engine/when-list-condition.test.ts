@@ -186,3 +186,48 @@ describe('a restriction with a list of conditions', () => {
     );
   });
 });
+
+describe('an infinite mask is read only as far as needed', () => {
+  // The element-wise restriction read the whole condition list on its first
+  // element, so an infinite condition list ran out of memory.
+  test('a finite value with an infinite mask', () => {
+    const expr = ce.box([
+      'When',
+      ['List', 1, 2, 3],
+      ['Range', 1, 'PositiveInfinity'],
+    ]);
+    expect(expr.count).toBe(3);
+    expect([...expr.each()].map((x) => x.toString())).toEqual([
+      '1 {1}',
+      '2 {2}',
+      '3 {3}',
+    ]);
+  });
+
+  test('an infinite value with an infinite mask', () => {
+    const expr = ce.box([
+      'When',
+      ['Range', 1, 'PositiveInfinity'],
+      ['Range', 1, 'PositiveInfinity'],
+    ]);
+    expect(expr.count).toBe(Infinity);
+    expect(expr.at(4)?.toString()).toBe('4 {4}');
+    // One element far out is looked up directly, not by reading every
+    // condition before it.
+    expect(expr.at(50_000_000)?.toString()).toBe('50000000 {50000000}');
+  });
+
+  test('an infinite value with a finite mask stops at the mask', () => {
+    const expr = ce.box([
+      'When',
+      ['Range', 1, 'PositiveInfinity'],
+      ['List', 'True', 'False'],
+    ]);
+    expect(expr.count).toBe(2);
+    expect([...expr.each()].map((x) => x.toString())).toEqual([
+      '1 {"True"}',
+      '2 {"False"}',
+    ]);
+    expect(expr.at(3)).toBeUndefined();
+  });
+});
