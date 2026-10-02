@@ -63,14 +63,15 @@ describe('a big decimal is never exact', () => {
     ).toBe('Sqrt');
   });
 
-  test('a safe-integer machine result of an exact operation is exact', () => {
-    // `.N()` of `1 + i` is a float; the product with the exact `1 - i` is
-    // computed in machine numbers, and the safe integer `2` is exact.
+  test('a float operand makes the product a float', () => {
+    // `.N()` of `1 + i` is a float, so its product with the exact `1 - i` is
+    // the float `2`, as `(1/2).N() · 4` is. It was the exact `2`: the float
+    // `1 + i` was read as an exact value because its parts are integers.
     const p = ce
       .box(['Multiply', ce.parse('1+i').N(), ce.parse('1-i')])
       .evaluate();
     expect(p.toString()).toBe('2');
-    expect(p.isExact).toBe(true);
+    expect(p.isExact).toBe(false);
   });
 });
 

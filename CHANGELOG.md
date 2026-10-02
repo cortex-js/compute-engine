@@ -145,6 +145,37 @@
   `(−1)^{0.5}` is `i`, was `6.1·10⁻¹⁷ + i`), and `NaN` on the JavaScript and
   shader real lanes.
 
+- **An exact complex number divided by an exact number is an exact number
+  literal, and a float complex literal stays inexact.** The canonical form
+  and its MathJSON and LaTeX change:
+  - `\frac{i}{3}` was `["Divide", ["Complex", 0, 1], 3]`; it is now the
+    literal `(1/3)i`, `["Complex", 0, ["Rational", 1, 3]]`, as
+    `\frac{1}{3}i` already was. Its LaTeX is now `\frac{1}{3}\imaginaryI`.
+  - `\frac{3+i}{2}` is `3/2 + (1/2)i`, `\frac{i}{\sqrt2}` is `(√2/2)i`, and
+    `\frac{i}{3}\cdot 3` is `i`.
+  - A complex divisor folds too: `\frac{2}{i}` is `-2i` and
+    `\frac{3+i}{1-i}` is `1+2i`.
+  - A float complex literal is no longer read as an exact value when its
+    parts are integers. `\frac{1.0i}{3}` and `\frac{3}{1.0i}` keep the
+    `Divide`, `1.0i\cdot 3` and `(2.0+1.0i)\cdot 3` keep the `Multiply`, and
+    `1.0i+3` is the inexact `3.0+1.0i`. Before, the products and the sum
+    folded to the exact `3i`, `6+3i` and `3+i`. This is the rule for a real
+    float, where `\frac{1.0}{3}` keeps the `Divide`.
+  - The same rule applies to arithmetic on number values: a sum, product or
+    quotient of an exact value and a float complex value is a float, also
+    when the parts of the float are integers. `\frac{1}{3}+1.0i`,
+    `\frac{1}{3}\cdot(2.0+1.0i)`, `\frac{3}{1.0i}` and
+    `\sum_{k=1}^{3}\frac{k}{2}\cdot 1.0i` evaluate to floats (they were
+    exact), as do `ce.number([1,3]).add(ce.parse('1.0i'))` and the product
+    of `(1+i).N()` with the exact `1-i`.
+
+  An imaginary factor inside a `Divide` was not seen by the exact reduction
+  of an imaginary multiple of π, so `\tanh(\frac{i}{3}\cdot\frac{3}{2}\pi)`
+  and `\coth(\frac{i}{3}\cdot\frac{3}{2}\pi)` gave `NaN` under `.N()`.
+  They now give `~oo` and `0`, as `\tanh(\frac{i\pi}{2})` and
+  `\coth(\frac{i\pi}{2})` do. A symbolic divisor (`\frac{i}{x}`) keeps the
+  division.
+
 ### New Features
 
 - **More reading choices of the lenient grammar report an `ambiguous-*`

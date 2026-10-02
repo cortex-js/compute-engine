@@ -27,7 +27,6 @@ import {
   isImaginaryPartFinite,
   isImaginaryUnitValue,
 } from './imaginary-part.js';
-import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
 import {
   isTuple,
   isTupleCarrier,
@@ -1441,7 +1440,25 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       (typeof v1 !== 'number' && v1.isComplex) ||
       (typeof v2 !== 'number' && v2.isComplex)
     ) {
-      // If we have an imaginary part, keep the division
+      // An exact complex quotient folds to an exact number literal, as an
+      // exact real quotient does below and as `canonicalMultiply` folds an
+      // exact complex product: `i/3` is the literal `(1/3)i`, `(3+i)/2` is
+      // `3/2 + (1/2)i`, `2/i` is `-2i`. Without this fold,
+      // `Multiply(3/2, Pi, Divide(i, 3))` kept its imaginary factor inside a
+      // `Divide`, and the readers of an imaginary multiple of π
+      // (`getImaginaryFactor()`) did not see it.
+      // A float operand keeps the division, also when its value is an
+      // integer: `1.0i / 3` is a float quotient, computed when it is
+      // evaluated, as `1.0 / 3` is. A quotient that is not exact keeps the
+      // division too.
+      const exact = (v: number | NumericValue): NumericValue | undefined =>
+        typeof v === 'number' ? ce._numericValue(v) : v.isExact ? v : undefined;
+      const nv1 = exact(v1);
+      const nv2 = exact(v2);
+      if (nv1 !== undefined && nv2 !== undefined && !nv2.isZero) {
+        const q = nv1.div(nv2);
+        if (q.isExact) return ce.number(q);
+      }
       return ce._fn('Divide', [op1, op2]);
     }
 
@@ -1893,17 +1910,6 @@ export function canonicalMultiply(
         if (typeof nv === 'number' || nv.isExact) {
           exactNumerics.push(
             typeof nv === 'number' ? ce._numericValue(nv) : nv
-          );
-          continue;
-        }
-        // A machine/big Gaussian integer (e.g. the literal `3i`) is exactly
-        // representable: fold it as an exact value.
-        if (nv.isComplex && isGaussianInteger(nv)) {
-          exactNumerics.push(
-            ce._numericValue({
-              rational: [nv.re, 1],
-              imRational: [nv.im, 1],
-            })
           );
           continue;
         }

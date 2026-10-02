@@ -922,21 +922,20 @@ describe('EXACT IMAGINARY PART OUTSIDE THE FLOAT64 RANGE', () => {
     } else throw new Error('expected a numeric value');
   });
 
-  // §2.2, `_liftComplex`: an inexact complex value with integer parts is
-  // lifted to an exact value when it meets an exact value. A double cannot
-  // hold `10^{-800}i`, so the inexact imaginary part is tested with `0.5i`
-  // (not an integer: no lift) and `2i` (an integer: lift). The real part,
-  // which can be a big decimal, is tested with `10^{-800}`, whose double
-  // projection is the integer `0`: it must not be lifted to an exact zero.
-  test('only a Gaussian integer is lifted to an exact value', () => {
+  // §2.2: an inexact complex value makes a product or a sum with an exact
+  // value inexact, also when its parts are integers (`2i` held as a float).
+  // It was lifted to an exact value when its parts were integers. The real
+  // part, which can be a big decimal, is tested with `10^{-800}`, whose
+  // double projection is the integer `0`: it must not become an exact zero.
+  test('an inexact complex value is never lifted to an exact value', () => {
     const third = ce._numericValue({ rational: [1, 3] });
     const half = third.mul(ce._numericValue({ re: 0, im: 0.5 }));
     expect(half.isExact).toBe(false);
     expect(half.im).toBeCloseTo(1 / 6, 15);
 
     const two = third.mul(ce._numericValue({ re: 0, im: 2 }));
-    expect(two.isExact).toBe(true);
-    expect(two.toString()).toBe('2/3i');
+    expect(two.isExact).toBe(false);
+    expect(two.im).toBeCloseTo(2 / 3, 15);
 
     const tinyRe = ce._numericValue({ re: new BigDecimal('1e-800'), im: 2 });
     expect(tinyRe.re).toBe(0);
@@ -1025,18 +1024,18 @@ describe('EXACT IMAGINARY PART OUTSIDE THE FLOAT64 RANGE', () => {
     }
   });
 
-  // `ExactNumericValue.sum` treats an inexact Gaussian integer as exact, and
-  // decides this with `isGaussianInteger()`, the rule `_liftComplex` uses.
+  // `ExactNumericValue.sum` treats an inexact complex value as inexact, also
+  // when its parts are integers (it was read as an exact Gaussian integer).
   // A real part too small for a double (`10^{-800}`, projection 0) does not
   // make the value a Gaussian integer.
-  test('the exact sum treats only a Gaussian integer as exact', () => {
+  test('the exact sum treats an inexact Gaussian integer as inexact', () => {
     const half = ce._numericValue({ rational: [1, 2] });
     const [gauss] = ExactNumericValue.sum(
       [half, ce._numericValue({ re: 0, im: 3 })],
       (x) => ce._numericValue(x)
     ).filter((x) => !x.isZero);
-    expect(gauss.isExact).toBe(true);
-    expect(gauss.toString()).toBe('(1/2 + 3i)');
+    expect(gauss.isExact).toBe(false);
+    expect(gauss.toString()).toBe('(0.5 + 3i)');
 
     const tinyRe = ce._numericValue({ re: ce.bignum('1e-800'), im: 3 });
     expect(isGaussianInteger(tinyRe)).toBe(false);

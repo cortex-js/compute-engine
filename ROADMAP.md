@@ -531,20 +531,6 @@ answers a pure imaginary argument with `i·erfi(y)` (real kernel), and
 `erfc(iy)` as `1 − i·erfi(y)`. The other special functions of a complex
 argument have not been surveyed for the same residue at an exact argument.
 
-### An imaginary literal divided by a number stays a `Divide` inside a canonical product (OPEN, small — found 2026-10-02 by the review of the exact-angle speed fix)
-
-`\tanh(\frac{i}{3}\cdot\frac{3}{2}\pi)` canonicalizes to
-`Tanh(Multiply(3/2, Pi, Divide(Complex(0, 1), 3)))`: the factor `i/3` is not
-folded to the literal `Complex(0, 1/3)`. `getImaginaryFactor`
-(`boxed-expression/utils.ts`) then does not see the imaginary factor, the
-exact reduction of the multiple of π is skipped, and `.N()` gives `NaN` for
-`tanh(iπ/2)` and `coth(iπ/2)` written this way (at every precision, in
-radians and degrees), where `\tanh(\frac{i\pi}{2})` gives `~oo`. Fix: fold
-`Divide(<exact imaginary literal>, <rational>)` when the product is made
-canonical, or let `getImaginaryFactor` read a `Divide`/`Negate` operand of a
-`Multiply`. Measure the snapshot changes of the first option before choosing
-it.
-
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
 `reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and

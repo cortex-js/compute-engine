@@ -263,6 +263,35 @@ describe('.N() of an exact multiple of π: units, poles, large multiples', () =>
       expect(b.re).toBeCloseTo(-Math.sqrt(3) / 2, 15);
       expect(b.im).toBe(0.5);
     });
+
+  // An imaginary literal divided by a number (`\frac{i}{3}`) is folded to an
+  // exact imaginary literal when it is made canonical, so the multiple of π
+  // in a product such as `\frac{i}{3}\cdot\frac{3}{2}\pi` is seen and reduced
+  // exactly. Before the fold, the factor stayed a `Divide` and `.N()` gave
+  // `NaN` for the poles below.
+  for (const unit of ['rad', 'deg'] as const)
+    for (const precision of ['machine', 21, 50] as const)
+      test(`${unit}, precision ${precision}: an imaginary literal over a number`, () => {
+        const ce = engineAt(precision);
+        ce.angularUnit = unit;
+        const v = (latex: string) => ce.parse(latex).N();
+        expect(v('\\tanh(\\frac{i}{3}\\cdot\\frac{3}{2}\\pi)').json).toEqual(
+          'ComplexInfinity'
+        );
+        // coth(iπ/2) = cos(π/2)/(i·sin(π/2)) = 0
+        const coth = v('\\coth(\\frac{i}{3}\\cdot\\frac{3}{2}\\pi)');
+        expect([coth.re, coth.im]).toEqual([0, 0]);
+        const sinh = v('\\sinh(\\frac{i}{3}\\cdot 3\\pi)');
+        expect([sinh.re, sinh.im]).toEqual([0, 0]);
+        const exp = v('e^{\\frac{i}{3}\\cdot 3\\pi}');
+        expect([exp.re, exp.im]).toEqual([-1, 0]);
+      });
+
+  test('the imaginary multiple of π is folded in the product', () => {
+    expect(
+      engineAt('machine').parse('\\frac{i}{3}\\cdot\\frac{3}{2}\\pi').json
+    ).toEqual(['Multiply', ['Complex', 0, ['Rational', 1, 2]], 'Pi']);
+  });
 });
 
 describe('compiled: the sign of a zero part, e^{x + iπ}, and sin(πL)', () => {

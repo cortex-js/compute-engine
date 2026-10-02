@@ -29,12 +29,10 @@ import {
   NumericValue,
   NumericValueFactory,
 } from './types.js';
-import { isGaussianInteger } from './gaussian-integer.js';
 import { MathJsonExpression } from '../../math-json/types.js';
 import { numberToExpression } from '../numerics/expression.js';
 import { numberToString } from '../numerics/strings.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
-import { isSubtype } from '../../common/type/subtype.js';
 
 // Shared frozen zero imaginary component: real values (the overwhelmingly
 // common case) all point to this singleton, so no per-instance allocation is
@@ -421,24 +419,6 @@ export class ExactNumericValue extends NumericValue {
     return this.factory({ re: this.bignumRe, im: this.bignumIm });
   }
 
-  /** Lift a Gaussian-integer value from the inexact lane (e.g. the machine
-   * complex `i` constant, `3i`) to an exact value, so mixed exact/Gaussian
-   * arithmetic stays exact (`√2·i`, `1/2 + i`). Returns `null` when the
-   * components are not exactly-representable integers.
-   *
-   * The test is `isGaussianInteger()`: the double projections `re` and `im`
-   * alone are not enough, because a part too small for a double
-   * (`10^{-800}`) projects to the integer `0`, and lifting it would make an
-   * exact zero of a non-zero part. */
-  private _liftComplex(other: NumericValue): ExactNumericValue | null {
-    if (isGaussianInteger(other))
-      return this.clone({
-        rational: [other.re, 1],
-        imRational: [other.im, 1],
-      });
-    return null;
-  }
-
   private normalize(): void {
     const w = this as WritableExact;
     console.assert(
@@ -631,11 +611,9 @@ export class ExactNumericValue extends NumericValue {
       return this.factory(this.bignumRe);
     }
     // Every complex value goes to the float lane, a Gaussian integer
-    // (`1 + i`) too: under `.N()` a complex value is always inexact. The
-    // decision stops there: when a float complex value with integer parts
-    // meets an exact value in `add`, `mul` or `div`, `_liftComplex` lifts
-    // it back to an exact value, as an integer machine number is kept exact
-    // in those operations for a real value.
+    // (`1 + i`) too: under `.N()` a complex value is always inexact. A float
+    // complex value stays inexact when it meets an exact value in `add`,
+    // `mul` or `div`, also when its parts are integers.
     return this._toFloat();
   }
 
@@ -734,15 +712,9 @@ export class ExactNumericValue extends NumericValue {
     if (other.isZero && other.isExact) return this;
     if (this.isZero) return other;
 
-    if (!(other instanceof ExactNumericValue)) {
-      // A Gaussian integer from the inexact lane is exactly representable:
-      // lift it so the sum stays exact (`1/2 + i` → the exact `1/2 + i`)
-      if (other.isComplex) {
-        const lifted = this._liftComplex(other);
-        if (lifted !== null) return this.add(lifted);
-      }
-      return other.add(this);
-    }
+    // An inexact operand makes the sum inexact, also a float complex value
+    // whose parts are integers (`1/2 + 1.0i` is a float)
+    if (!(other instanceof ExactNumericValue)) return other.add(this);
 
     if (!this.isComplex && !other.isComplex) {
       // Can we keep a rational result?
@@ -826,15 +798,11 @@ export class ExactNumericValue extends NumericValue {
       return this._toFloat().mul(other);
     }
     if (other instanceof BigDecimal) return this.factory(other).mul(this);
-    // A Gaussian integer from the inexact lane (e.g. the `i` constant) is
-    // exactly representable: lift it so the product stays exact (`√2·i`,
-    // `3·i`). Other complex machine/big values know how to multiply by
+    // An inexact complex value makes the product inexact, also when its
+    // parts are integers (`3·1.0i` is a float). It knows how to multiply by
     // `this`; an exact complex `other` is handled by the exact section below.
-    if (other.isComplex && !(other instanceof ExactNumericValue)) {
-      const lifted = this._liftComplex(other);
-      if (lifted === null) return other.mul(this);
-      other = lifted;
-    }
+    if (other.isComplex && !(other instanceof ExactNumericValue))
+      return other.mul(this);
 
     if (other.isZero) {
       if (this.isPositiveInfinity || this.isNegativeInfinity || this.isNaN)
@@ -936,31 +904,25 @@ export class ExactNumericValue extends NumericValue {
     let exactOther: ExactNumericValue;
     if (other instanceof ExactNumericValue) exactOther = other;
     else {
-      // Lift a Gaussian integer from the inexact lane (e.g. `x/i`) so the
-      // quotient stays exact
-      const lifted = other.isComplex ? this._liftComplex(other) : null;
-      if (lifted === null) {
-        const approx = this._toFloat();
-        // In the machine lane (a factory value with no big-decimal part),
-        // a real value whose double underflows to 0, overflows to ±∞ or is
-        // subnormal loses its value or its digits before the quotient.
-        // Divide the big-decimal values first: `(1/10^400) / 1e-300` is then
-        // `1e-100`, not `0 / 1e-300`.
-        if (
-          !this.isComplex &&
-          !other.isComplex &&
-          approx.bignumRe === undefined &&
-          isOutsideNormalDoubleRange(approx.re) &&
-          Number.isFinite(other.re)
-        ) {
-          const divisor = other.re;
-          return this.factory(
-            withDoubleDigits(() => this.bignumRe.div(divisor))
-          );
-        }
-        return approx.div(other);
+      // An inexact divisor makes the quotient inexact, also a float complex
+      // value whose parts are integers (`3/1.0i` is a float)
+      const approx = this._toFloat();
+      // In the machine lane (a factory value with no big-decimal part),
+      // a real value whose double underflows to 0, overflows to ±∞ or is
+      // subnormal loses its value or its digits before the quotient.
+      // Divide the big-decimal values first: `(1/10^400) / 1e-300` is then
+      // `1e-100`, not `0 / 1e-300`.
+      if (
+        !this.isComplex &&
+        !other.isComplex &&
+        approx.bignumRe === undefined &&
+        isOutsideNormalDoubleRange(approx.re) &&
+        Number.isFinite(other.re)
+      ) {
+        const divisor = other.re;
+        return this.factory(withDoubleDigits(() => this.bignumRe.div(divisor)));
       }
-      exactOther = lifted;
+      return approx.div(other);
     }
 
     if (this.isComplex || exactOther.isComplex) {
@@ -1639,20 +1601,10 @@ export class ExactNumericValue extends NumericValue {
   ): NumericValue[] {
     if (values.length === 1) return values;
 
-    // A Gaussian integer (notably the imaginary unit `i = 0 + 1i`) is exact even
-    // though it is represented as a (non-`ExactNumericValue`) complex value.
-    // Treat it as exact here so it does not force the structured sum below into
-    // the inexact path — otherwise an exact real summed with it would floatify
-    // (`1/2 + i` → `0.5 + i`). The structured path tracks the imaginary part
-    // (`imSum`) and the exact real part separately, preserving both.
-    // The integrality of the parts is read with `isGaussianInteger()`, not
-    // from the doubles: an imaginary part too small for a double has the
-    // projection `0`, which is an integer.
-    const isExactForSum = (x: NumericValue): boolean =>
-      x.isExact || (x.isComplex && isGaussianInteger(x));
-
-    // If we have some genuinely inexact values, just do a simple sum
-    if (values.some((x) => !isExactForSum(x))) {
+    // If we have some inexact values, just do a simple sum. A float complex
+    // value is inexact also when its parts are integers (`1/2 + 1.0i` is a
+    // float); the exact imaginary unit `i` is an `ExactNumericValue`.
+    if (values.some((x) => !x.isExact)) {
       if (values.length === 2) return [values[0].add(values[1])];
       let sum = factory(0);
       for (const value of values) sum = sum.add(value);
@@ -1701,21 +1653,6 @@ export class ExactNumericValue extends NumericValue {
             imRationalSum = add(imRationalSum, value.imRational);
           else addToBuckets(imRadicals, value.imRational, value.imRadical);
         }
-      } else {
-        // A non-`ExactNumericValue` value reaching the exact path is a real
-        // integer or a Gaussian integer: fold both integer components exactly.
-        console.assert(
-          isSubtype(value.type, 'integer') || isGaussianInteger(value)
-        );
-        if (value.isComplex) imRationalSum = add(imRationalSum, [value.im, 1]);
-        // Use bignumRe to avoid precision loss for large integers. A
-        // MachineNumericValue has no bignumRe: its integral `re` converts
-        // to BigInt exactly.
-        const intValue =
-          value.bignumRe !== undefined
-            ? BigInt(value.bignumRe.toFixed(0))
-            : BigInt(value.re);
-        rationalSum = add(rationalSum, [intValue, BigInt(1)]);
       }
     }
 
