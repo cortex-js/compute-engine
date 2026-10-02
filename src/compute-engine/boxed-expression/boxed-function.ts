@@ -262,6 +262,7 @@ import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
+import { numericCanonicalHandlerName } from './numeric-canonical-registry.js';
 import {
   CancellationError,
   checkDeadline,
@@ -5526,6 +5527,12 @@ export class BoxedFunction
           // operands — `tail` has already been evaluated. See
           // `EvaluateHandlerOptions.expression`.
           expression: this,
+          // The digits requested by an enclosing `N(x, p)`, else the
+          // precision of the engine. Only for a numeric approximation: an
+          // exact evaluation has no precision.
+          precision: numericApproximation
+            ? (this.engine._requestedPrecision ?? this.engine.precision)
+            : undefined,
           // Set by the enclosing `evaluate()`; the fallback covers a caller
           // that reaches this step without going through it.
           effects: this.engine._evaluationEffects ?? this.engine.effects,
@@ -6390,6 +6397,7 @@ export class BoxedFunction
         const opts: Partial<EvaluateOptions> & {
           engine: ComputeEngine;
           expression: Expression;
+          precision: number | undefined;
           effects: EffectHandlers;
         } = {
           numericApproximation,
@@ -6402,6 +6410,10 @@ export class BoxedFunction
           // See the matching comment (and `EvaluateHandlerOptions.expression`)
           // on the sync path.
           expression: this,
+          // See the matching comment on the sync path.
+          precision: numericApproximation
+            ? (engine._requestedPrecision ?? engine.precision)
+            : undefined,
           effects,
         };
         // AWAIT INSIDE THE `try`: an `evaluateAsync` handler returns at its
@@ -9614,7 +9626,18 @@ function genericRuntimeConformance(
 ): Expression | undefined {
   if (!(def instanceof _BoxedOperatorDefinition)) return undefined;
   if (def.lazy === true || def.inferredSignature) return undefined;
-  if (def.canonical !== undefined) return undefined;
+  // `Sqrt`, `Ln` and `Log` are checked here although their library
+  // definitions have a `canonical` handler (`numericCanonicalHandler`,
+  // `canonical-numeric.ts`). They got that handler on 2026-10-01 only so
+  // that a copy of the definition keeps the canonical form; before, they had
+  // no handler and this check applied to them. The other arithmetic
+  // operators with that handler had a custom handler before, and stay
+  // skipped.
+  if (def.canonical !== undefined) {
+    const numeric = numericCanonicalHandlerName(def.canonical);
+    if (numeric !== 'Sqrt' && numeric !== 'Ln' && numeric !== 'Log')
+      return undefined;
+  }
   const isUserFn: boolean = isUserFunctionDef(def);
   if (isUserFn) {
     // A function literal under a signature its author DECLARED on the name

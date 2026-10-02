@@ -17,6 +17,7 @@ import type { DeadlineFrame } from '../common/interruptible.js';
 import type { MapAutoCompileStats } from './map-auto-compile-stats.js';
 export type { MapAutoCompileStats } from './map-auto-compile-stats.js';
 import type {
+  LatexDictionaryEntry,
   ParseLatexOptions,
   SerializeLatexOptions,
   SymbolResolution,
@@ -63,6 +64,7 @@ import type {
   InterpretResult,
   BoxedValueDefinition,
   BoxedOperatorDefinition,
+  LibraryDefinition,
 } from './types-definitions.js';
 import type {
   AssumeResult,
@@ -120,6 +122,12 @@ export interface ILatexSyntax {
    *  library search (`ce.searchDefinitions()`). Optional: MathJSON-only
    *  builds and minimal injected syntaxes may not implement it. */
   getNamedTriggers?(): ReadonlyArray<{ name: string; triggers: string[] }>;
+
+  /** Add LaTeX dictionary entries. The next parse or serialization uses
+   *  them. Optional: `LatexSyntax` implements it, a minimal injected syntax
+   *  may not. If the same instance is used by several engines, the entries
+   *  apply to all of them. See `LatexSyntax.addEntries()`. */
+  addEntries?(entries: ReadonlyArray<Partial<LatexDictionaryEntry>>): void;
 }
 
 export type OperatorInfo = {
@@ -394,6 +402,59 @@ export type ProtocolImplementationInput = {
   setters?: Record<string, ProtocolHostHandler>;
 };
 
+/**
+ * The options of `ce.declare(id, def, options)`.
+ *
+ * - `scope`: the scope the declaration is installed in. The default is the
+ *   current lexical scope.
+ * - `extend`: when `true`, `def` is a PATCH applied to the operator definition
+ *   currently visible for `id`, not a new definition. See
+ *   {@link OperatorDefinitionPatch}.
+ *
+ * @category Definitions
+ */
+export type DeclareOptions = {
+  scope?: Scope;
+  extend?: boolean;
+};
+
+/**
+ * The patch `ce.declare(id, patch, { extend: true })` applies to the operator
+ * definition currently visible for `id`.
+ *
+ * The engine builds a NEW definition from the fields of the visible one and
+ * the fields of the patch, and installs it in the target scope. A field the
+ * patch does not name keeps its value. A field the patch names replaces the
+ * old value: when two extensions give the same handler (two `evaluate`
+ * handlers, for example), the later one wins. The visible definition is not
+ * changed, so an expression boxed before the extension keeps using it.
+ *
+ * - `signature` replaces the signature.
+ * - `addSignature` adds an overload: the new signature is the intersection
+ *   `old & addSignature`. A call that matches both arms resolves to the old
+ *   arm first.
+ *
+ * In both cases the new signature must be a subtype of the old one, so that
+ * every call that was valid stays valid. For example `(value, value*) -> set`
+ * can replace `(set<any>, value*) -> set`, but `(any*) -> any` cannot replace
+ * `(value+) -> value`. This does not apply when the old signature was only
+ * inferred (`inferredSignature` is `true`: an operator declared without a
+ * signature, or a function whose signature is inferred from its body),
+ * since such a signature is not a contract.
+ *
+ * Extending a standard-library operator without replacing its `evaluate`,
+ * `canonical`, `compile` or `derivative` handler (for example, to add a
+ * description or a wider signature) keeps it a library operator: `D`,
+ * compilation and the numeric evaluation of the library still apply to it.
+ * An extension that replaces one of these handlers is treated as a user
+ * definition with the same name, as a plain `ce.declare()` is.
+ *
+ * @category Definitions
+ */
+export type OperatorDefinitionPatch = OperatorDefinition & {
+  addSignature?: Type | TypeString;
+};
+
 /** A handle on a saved engine state, from {@link IComputeEngine.checkpoint}.
  * Deliberately opaque: `id` is for logging and `live` is the only state a
  * client can act on. Declared here rather than in `checkpoint.ts` because it
@@ -411,7 +472,15 @@ export interface EngineCheckpoint {
 
 export interface IComputeEngine {
   /** The LatexSyntax instance used for LaTeX parsing/serialization.
-   *  `undefined` when no LatexSyntax was provided to the constructor.
+   *  `undefined` when no LatexSyntax was provided to the constructor and
+   *  the entry point has no LaTeX support (the core-only bundle).
+   *
+   *  To add a notation to a running engine, call
+   *  `ce.latexSyntax.addEntries([...])`: later parses and serializations use
+   *  the new entries. An engine created without the `latexSyntax` option
+   *  has its own instance, so the change applies to that engine only. An
+   *  instance given to several engines with the `latexSyntax` option is
+   *  shared: the change applies to all of them.
    */
   readonly latexSyntax: ILatexSyntax | undefined;
 
@@ -615,6 +684,18 @@ export interface IComputeEngine {
    * synchronous evaluations inherit it.
    * @internal */
   _evaluationEffects: EffectHandlers | undefined;
+
+  /** The number of significant digits requested by the `N(x, p)` call that
+   * is running now, or `undefined` when none is running. `N(x, p)` sets it
+   * to `p` for the duration of the evaluation of `x` and restores the
+   * previous value after, so a nested `N(y, q)` applies to `y` only. An
+   * `evaluate` handler receives it as `options.precision` when
+   * `numericApproximation` is `true`; when it is `undefined`, the handler
+   * receives `ce.precision` instead. It is an engine slot, not an evaluate
+   * option, so that it also reaches the evaluations that a handler starts
+   * without passing its own options along.
+   * @internal */
+  _requestedPrecision: number | undefined;
 
   /**
    * Incremented on every mutable-object field store — the one engine write
@@ -996,9 +1077,28 @@ export interface IComputeEngine {
    * into the SYSTEM scope (bootstrap runs between `pushScope('system')` and
    * `pushScope('global')`), so scope identity alone cannot tell an
    * engine-authored definition from a caller-authored one; this set records the
-   * provenance. Populated once, at bootstrap.
+   * provenance. Populated once, at bootstrap: `loadLibrary()` installs into
+   * the GLOBAL scope, where comparing with the system-scope binding already
+   * tells a caller definition from a built-in one, and does not add to it.
    * @internal */
   readonly _customLibraryOperators: Set<string>;
+
+  /** For each name a library defined — standard or caller, at construction
+   * or with `loadLibrary()` — the library name and the binding it
+   * installed. `libraryOf()` answers the library name only while the name
+   * still resolves to that binding. Journaled for checkpoints.
+   * @internal */
+  readonly _libraryProvenance: Map<
+    string,
+    { library: string; binding: BoxedDefinition }
+  >;
+
+  /** The libraries loaded on this engine, by name, in load order: at
+   * construction, then by `loadLibrary()`. A `requires` entry of a library
+   * given to `loadLibrary()` must name one of them. Journaled for
+   * checkpoints.
+   * @internal */
+  readonly _loadedLibraries: Map<string, LibraryDefinition>;
 
   /** The `any` invalidation axis (read-only; advanced only through
    * `_noteStateEvent`). @internal */
@@ -1954,12 +2054,20 @@ export interface IComputeEngine {
   declare(
     id: MathJsonSymbol,
     type: Type | TypeString,
-    scope?: Scope
+    scope?: Scope | (DeclareOptions & { extend?: false })
+  ): IComputeEngine;
+  // Extend mode: `patch` is applied to the visible operator definition (see
+  // `OperatorDefinitionPatch`). Listed before the plain definition overload so
+  // that a call with `{ extend: true }` accepts the `addSignature` field.
+  declare(
+    id: MathJsonSymbol,
+    patch: OperatorDefinitionPatch,
+    options: DeclareOptions & { extend: true }
   ): IComputeEngine;
   declare(
     id: MathJsonSymbol,
     def: SymbolDefinitionInput,
-    scope?: Scope
+    scope?: Scope | (DeclareOptions & { extend?: false })
   ): IComputeEngine;
   declare(
     arg1:
@@ -1967,9 +2075,24 @@ export interface IComputeEngine {
       | {
           [id: MathJsonSymbol]: Type | TypeString | SymbolDefinitionInput;
         },
-    arg2?: Type | TypeString | SymbolDefinitionInput,
-    arg3?: Scope
+    arg2?: Type | TypeString | SymbolDefinitionInput | OperatorDefinitionPatch,
+    arg3?: Scope | DeclareOptions
   ): IComputeEngine;
+
+  /**
+   * Load a library on an engine that is already constructed. Its
+   * definitions are declared in the global scope, as with `ce.declare()`,
+   * and its name is recorded (see `libraryOf()`). Each library in its
+   * `requires` list must already be loaded.
+   */
+  loadLibrary(library: LibraryDefinition): IComputeEngine;
+
+  /**
+   * The name of the library whose definition `name` resolves to in the
+   * current scope (`'trigonometry'` for `Sin`), or `undefined` for a name
+   * that no library defines or that a declaration shadows.
+   */
+  libraryOf(name: MathJsonSymbol): string | undefined;
 
   assume(predicate: Expression | string): AssumeResult;
 

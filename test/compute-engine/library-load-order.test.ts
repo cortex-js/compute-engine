@@ -192,3 +192,79 @@ describe('the derivative of a user function that shadows a library name', () => 
     ).toBe('cos(t)');
   });
 });
+
+// `Function` is in `core`, and a function literal is canonicalized with a
+// `Block` body. `Block` is in `core` too, so a library list with `core` but
+// without `control-structures` can build and apply function literals.
+describe('a library list without control-structures', () => {
+  for (const libraries of [['core', 'arithmetic'], ['core']]) {
+    test(`${libraries.join(', ')}: function literals work`, () => {
+      const errors: unknown[][] = [];
+      const spy = jest
+        .spyOn(console, 'error')
+        .mockImplementation((...args: unknown[]) => {
+          errors.push(args);
+        });
+      const asserts: unknown[][] = [];
+      const assertSpy = jest
+        .spyOn(console, 'assert')
+        .mockImplementation((cond?: unknown, ...args: unknown[]) => {
+          if (!cond) asserts.push(args);
+        });
+      try {
+        const ce = new ComputeEngine({
+          libraries: [...libraries, SQ_LIBRARY],
+        });
+        expect(ce.lookupDefinition('Block')).toBeDefined();
+        const apply = ce
+          .box(['Apply', ['Function', ['Multiply', 'x', 2], 'x'], 3])
+          .evaluate();
+        const sq = ce.box(['Sq', 3]).evaluate();
+        if (libraries.includes('arithmetic')) {
+          expect(apply.toString()).toBe('6');
+          expect(sq.toString()).toBe('9');
+        } else {
+          // No `Multiply` definition: the product stays symbolic, but the
+          // function literal is applied.
+          expect(apply.toString()).toBe('2 * 3');
+          expect(sq.toString()).toBe('3 * 3');
+        }
+        expect(
+          ce
+            .box(['Block', ['Assign', 'y', 3], 'y'])
+            .evaluate()
+            .toString()
+        ).toBe('3');
+      } finally {
+        spy.mockRestore();
+        assertSpy.mockRestore();
+      }
+      expect(errors).toEqual([]);
+      expect(asserts).toEqual([]);
+    });
+  }
+});
+
+describe('getStandardLibrary with a subset of categories', () => {
+  test('adds the libraries the requested ones require, in load order', () => {
+    expect(
+      ComputeEngine.getStandardLibrary('physics').map((l) => l.name)
+    ).toEqual(['core', 'arithmetic', 'units', 'physics']);
+    expect(
+      ComputeEngine.getStandardLibrary(['core']).map((l) => l.name)
+    ).toEqual(['core']);
+  });
+
+  test('the result can build an engine', () => {
+    const ce = new ComputeEngine({
+      libraries: [...ComputeEngine.getStandardLibrary('physics')],
+    });
+    expect(ce.parse('2+3').evaluate().toString()).toBe('5');
+  });
+
+  test('an unknown category still throws', () => {
+    expect(() => ComputeEngine.getStandardLibrary('nope' as any)).toThrow(
+      'Unknown library category "nope"'
+    );
+  });
+});

@@ -1,4 +1,7 @@
-import { CancellationError, checkDeadline } from '../../common/interruptible.js';
+import {
+  CancellationError,
+  checkDeadline,
+} from '../../common/interruptible.js';
 import { replace } from './rules.js';
 import { isPatternRule } from './rule-index.js';
 import { sameSyntactic } from './compare.js';

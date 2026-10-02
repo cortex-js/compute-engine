@@ -56,6 +56,7 @@ import type {
   Expression,
   OperandStructure,
   SymbolDefinitions,
+  OperatorDefinition,
   EvaluateOptions,
   IComputeEngine as ComputeEngine,
   Scope,
@@ -202,52 +203,60 @@ function orderedCarrierPrefix(
   return elems;
 }
 
+/**
+ * The definition of `Block`. It belongs to the `core` library (`CORE_LIBRARY`,
+ * `core.ts` lists it), not to `control-structures`: `Function` is in `core`
+ * and canonicalizing a function literal needs `Block`, so an engine built
+ * with `core` but without `control-structures` must still have it. The
+ * handlers stay in this file because they share their statement-position
+ * helpers with `Loop` and the other control structures.
+ */
+export const BLOCK_DEFINITION: OperatorDefinition = {
+  description:
+    'Evaluate a sequence of expressions in a local scope, **sequentially**. ' +
+    'Each operand is evaluated in order; later operands observe side effects ' +
+    "(`Assign`, `Declare`) of earlier operands. The block's value is the " +
+    'value of the last expression. Short-circuiting heads (`Return`, ' +
+    '`Break`, `Continue`) terminate the sequence early.\n\n' +
+    'IMPORTANT — consumers translating *simultaneous* action tuples (e.g. ' +
+    'Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must ' +
+    'rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp ' +
+    'first, then assign the temps to the LHS symbols. See ' +
+    '`doc/84-reference-control-structures.md` for the canonical recipe.',
+  lazy: true,
+  scoped: true,
+  signature: '(unknown*) -> unknown',
+  // A SEQUENCER that RETURNS its last value: a statement is evaluated, a
+  // bare function value is not auto-applied, so no position ever applies a
+  // function-valued operand. Statement APPLICATIONS are untouched — their
+  // effects reach the block through the `effectsOf` recursion into the
+  // operand's own effects, not through the latent term this suppresses, so
+  // `Block(Assign(x, 1), Random())` is still `{random, scope}`.
+  //
+  // The only term that changes is the latent half of a build-and-return
+  // block, where the two channels DISAGREED: `Block(() ↦ Random())`
+  // reported `{random}` at runtime while `(() ↦ Block(() ↦ Random()))`
+  // already typed a PURE outer arrow — the inference treats `Block` as
+  // non-projecting through its `acceptsCallable` gate. Annotating aligns
+  // the runtime channel with the inference, matches the store/select/return
+  // precedent (`List`, `If`, `Which`, `Assign`, `Declare`), and releases a
+  // seed frame that a surviving build-and-return block owes no draws to.
+  invokes: false,
+  type: (args, context) => {
+    if (args.length === 0)
+      return BoxedType.forResult('nothing', context.engine._typeResolver);
+    return BoxedType.forResult(
+      args[args.length - 1].type,
+      context.engine._typeResolver
+    );
+  },
+  canonical: canonicalBlock,
+  evaluate: evaluateBlock,
+  evaluateAsync: evaluateBlockAsync,
+};
+
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
-    Block: {
-      description:
-        'Evaluate a sequence of expressions in a local scope, **sequentially**. ' +
-        'Each operand is evaluated in order; later operands observe side effects ' +
-        "(`Assign`, `Declare`) of earlier operands. The block's value is the " +
-        'value of the last expression. Short-circuiting heads (`Return`, ' +
-        '`Break`, `Continue`) terminate the sequence early.\n\n' +
-        'IMPORTANT — consumers translating *simultaneous* action tuples (e.g. ' +
-        'Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must ' +
-        'rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp ' +
-        'first, then assign the temps to the LHS symbols. See ' +
-        '`doc/84-reference-control-structures.md` for the canonical recipe.',
-      lazy: true,
-      scoped: true,
-      signature: '(unknown*) -> unknown',
-      // A SEQUENCER that RETURNS its last value: a statement is evaluated, a
-      // bare function value is not auto-applied, so no position ever applies a
-      // function-valued operand. Statement APPLICATIONS are untouched — their
-      // effects reach the block through the `effectsOf` recursion into the
-      // operand's own effects, not through the latent term this suppresses, so
-      // `Block(Assign(x, 1), Random())` is still `{random, scope}`.
-      //
-      // The only term that changes is the latent half of a build-and-return
-      // block, where the two channels DISAGREED: `Block(() ↦ Random())`
-      // reported `{random}` at runtime while `(() ↦ Block(() ↦ Random()))`
-      // already typed a PURE outer arrow — the inference treats `Block` as
-      // non-projecting through its `acceptsCallable` gate. Annotating aligns
-      // the runtime channel with the inference, matches the store/select/return
-      // precedent (`List`, `If`, `Which`, `Assign`, `Declare`), and releases a
-      // seed frame that a surviving build-and-return block owes no draws to.
-      invokes: false,
-      type: (args, context) => {
-        if (args.length === 0)
-          return BoxedType.forResult('nothing', context.engine._typeResolver);
-        return BoxedType.forResult(
-          args[args.length - 1].type,
-          context.engine._typeResolver
-        );
-      },
-      canonical: canonicalBlock,
-      evaluate: evaluateBlock,
-      evaluateAsync: evaluateBlockAsync,
-    },
-
     // A condition expression tests for one or more conditions of an expression.
     // Two forms:
     //   ['Condition', value, "positive"]  — tests value against named condition(s)

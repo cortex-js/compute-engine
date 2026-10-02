@@ -189,6 +189,11 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Arccot'),
   },
   {
+    // Variant, symbol: `\operatorname{arccot}`, the DLMF spelling
+    symbolTrigger: 'arccot',
+    parse: parseTrig('Arccot'),
+  },
+  {
     name: 'Arcoth',
     standaloneSymbol: true,
     symbolTrigger: 'arcoth',

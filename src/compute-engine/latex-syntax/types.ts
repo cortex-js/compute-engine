@@ -920,11 +920,12 @@ export type ParseLatexOptions = NumberFormat & {
    * flagging charitable parse decisions — undeclared symbols, application-like
    * juxtaposition read as multiply, discarded `%` comments, and trailing noise
    * dropped by recovery. In non-strict mode, also: letter runs read as a
-   * product (`letter-run-split`), an implicit product read as the whole
-   * denominator of a `/` (`implicit-product-in-denominator`), digits
-   * separated by white space read as one number (`spaced-digit-groups`), and a
+   * product (`ambiguous-letter-run`), an implicit product read as the whole
+   * denominator of a `/` (`ambiguous-denominator`), digits
+   * separated by white space read as one number (`ambiguous-digit-groups`), a
    * symbol directly followed by `.digits` read as a product
-   * (`letter-before-decimal`).
+   * (`ambiguous-letter-decimal`), and a prefix `±` or two signs in a row
+   * (`ambiguous-sign`).
    *
    * This flag only takes effect through
    * {@link IComputeEngine.parse | ComputeEngine.parse}, which
@@ -938,6 +939,33 @@ export type ParseLatexOptions = NumberFormat & {
    * **Default:** `false`
    */
   diagnostics?: boolean;
+
+  /**
+   * What the lenient grammar (`strict: false`) does with a reading that has
+   * a second common reading, that is, with each diagnostic whose code starts
+   * with `ambiguous-` (see {@link ParseDiagnostic}):
+   *
+   * - `"report"`: keep the reading. The diagnostic is reported when
+   *   `diagnostics` is `true`.
+   * - `"error"`: put an `Error` node in place of the smallest expression that
+   *   holds the source span of the diagnostic. The error code is the
+   *   diagnostic code, and the error holds the source text of the span:
+   *   `["Error", "'ambiguous-sign'", ["LatexString", "'--'"]]`. This works
+   *   without `diagnostics: true`, and for every code that starts with
+   *   `ambiguous-`.
+   *
+   * The parser records the source span of the expressions it builds. When
+   * no recorded expression holds the span of a diagnostic, for example
+   * because a later step rebuilt that part of the result, the `Error` node
+   * replaces the whole result. When two diagnostics select nested
+   * expressions, the `Error` node of the outer expression is kept.
+   *
+   * In strict mode (`strict: true`) this option has no effect: the strict
+   * grammar reports no `ambiguous-*` diagnostic.
+   *
+   * **Default:** `"report"`
+   */
+  onAmbiguity?: 'report' | 'error';
 
   /**
    * Internal sink invoked once per collected diagnostic when `diagnostics` is
@@ -1040,12 +1068,24 @@ export interface Parser {
   ): MathJsonExpression | null;
 
   /** @internal In non-strict mode, with diagnostics on, report a
-   * `letter-run-split` when the unbraced script that starts at token
+   * `ambiguous-letter-run` when the unbraced script that starts at token
    * `scriptStart` and was just read took only the first letter of a run of
    * letters (`(x)_ab` is `(x)_a·b`). Called by the postfix `_` entry. */
   _emitScriptLetterRunSplit?(
     scriptStart: number,
     script: MathJsonExpression
+  ): void;
+
+  /** @internal In non-strict mode, with diagnostics on, record a diagnostic
+   * whose code starts with `ambiguous-` for the tokens
+   * `[startToken, endToken)`: the text has a second common reading. A
+   * diagnostic with the same code and span as a recorded one is not recorded
+   * again. Does nothing in strict mode. */
+  _emitAmbiguity?(
+    code: string,
+    startToken: number,
+    endToken: number,
+    detail?: Record<string, unknown>
   ): void;
 
   /**
@@ -1517,6 +1557,18 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    *   of the head and the tail that will be materialized, respectively.
    */
   materialization: boolean | number | [number, number];
+
+  /**
+   * LaTeX used to render the constant `ExponentialE`, the counterpart of
+   * `imaginaryUnit`. Use `e` or `\mathrm{e}` to match the glyph used for
+   * the imaginary unit.
+   *
+   * Serialization only: `\exponentialE`, `\mathrm{e}` and `\operatorname{e}`
+   * are always read as the constant.
+   *
+   * @default `\exponentialE`
+   */
+  exponentialE?: LatexString;
 
   /**
    * LaTeX string used to render an invisible multiply, e.g. in '2x'.

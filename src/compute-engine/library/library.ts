@@ -291,7 +291,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
  * first library that requires it. A caller library listed after
  * the standard libraries, which no standard library requires, thus loads after
  * them, even when it has no `requires` list: its definitions can use operators
- * such as `Block` (from `control-structures`) without declaring them.
+ * such as `Loop` (from `control-structures`) without declaring them.
  *
  * Throws on a duplicate name, a cycle or a missing dependency.
  */
@@ -351,13 +351,20 @@ export function getStandardLibrary(
 
   if (typeof categories === 'string') categories = [categories];
 
-  const filtered = categories.map((cat) => {
-    const lib = STANDARD_LIBRARIES.find((l) => l.name === cat);
-    if (!lib) throw new Error(`Unknown library category "${cat}"`);
-    return lib;
-  });
+  // Each requested library comes with the libraries it requires, directly or
+  // indirectly: every standard library except `core` requires another one,
+  // and a list without them cannot be sorted or loaded.
+  const selected = new Set<LibraryDefinition>();
+  const add = (name: string): void => {
+    const lib = STANDARD_LIBRARIES.find((l) => l.name === name);
+    if (!lib) throw new Error(`Unknown library category "${name}"`);
+    if (selected.has(lib)) return;
+    selected.add(lib);
+    for (const req of lib.requires ?? []) add(req);
+  };
+  for (const cat of categories) add(cat);
 
-  return Object.freeze(sortLibraries(filtered));
+  return Object.freeze(sortLibraries([...selected]));
 }
 
 function validateDefinitionName(name: string): string {

@@ -507,6 +507,47 @@ export function isValueShielded(def: BoxedValueDefinition): boolean {
 }
 
 /**
+ * The definitions that take their declared type only, without the facts the
+ * assumptions prove about them (`BoxedValueDefinition.type`). A compilation
+ * sets this for a `vars`-mapped input (`withVarsValuesHidden` in
+ * `compilation/vars-inputs.ts`): the compiled code reads the input, so the
+ * symbol must read as the input of its declared type. Without this,
+ * `assume(a = 4)` would type `a` as an integer and a compiled `⌊a⌋` would
+ * drop the floor.
+ *
+ * This is separate from the value shield above. `assume()` also shields
+ * names whose value is put in force by an assumption, and there the facts
+ * must still apply: after `assume(a = 4)`, `assume(a > 0)` must see the type
+ * the facts give `a`. Module state for the same reason as the shield: the
+ * window is one synchronous call, and the definition's own type read cannot
+ * import the compiler.
+ */
+let _declaredTypeOnlyDefinitions: ReadonlySet<BoxedValueDefinition> | undefined;
+
+/** Run `fn` with every definition in `defs` typed by its declared type only
+ * ({@link isDeclaredTypeOnly}). Re-entrant: an inner window restores the
+ * outer one, and the two sets are unioned. */
+export function withDeclaredTypeOnly<T>(
+  defs: ReadonlySet<BoxedValueDefinition>,
+  fn: () => T
+): T {
+  if (defs.size === 0) return fn();
+  const saved = _declaredTypeOnlyDefinitions;
+  _declaredTypeOnlyDefinitions =
+    saved === undefined ? defs : new Set([...saved, ...defs]);
+  try {
+    return fn();
+  } finally {
+    _declaredTypeOnlyDefinitions = saved;
+  }
+}
+
+/** True while this definition must take its declared type only. */
+export function isDeclaredTypeOnly(def: BoxedValueDefinition): boolean {
+  return _declaredTypeOnlyDefinitions?.has(def) === true;
+}
+
+/**
  * Whether the fact keyed by a list of assertions holds.
  *
  * One key can carry several assertions — an inner scope inherits the

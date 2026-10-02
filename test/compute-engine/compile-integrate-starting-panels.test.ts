@@ -125,13 +125,15 @@ describe('COMPILE Integrate — starting panels sized by tree-visible depth', ()
   // The `vars` mapping keeps these on the quadrature emitter: without it the
   // integrand is elementary and the antiderivative-first path folds the whole
   // integral to a closed form, and there is no quadrature left to size. The
+  // mapping is `(_.k)`, not the plain read `_.k`: a valueless symbol mapped to
+  // a plain read gets the closed form too, since it stays a live read in it. The
   // closed forms are exact: ∫₀¹e^x dx = e − 1, so the d-fold integral of
   // k·e^{x₁+…+x_d} over the unit cube is k(e − 1)^d.
   const E = Math.E;
 
   test('a tree-visible double keeps its value and costs an order less', () => {
     const r = compileReal('\\int_0^1\\int_0^1 k e^{x+y}\\,dy\\,dx', {
-      vars: { k: '_.k' },
+      vars: { k: '(_.k)' },
     });
     expect(r.code.match(/_SYS\.integrate\(/g)?.length).toBe(2);
     // The panel count is part of the emitted call — pin it, so a regression in
@@ -156,7 +158,7 @@ describe('COMPILE Integrate — starting panels sized by tree-visible depth', ()
   test('a tree-visible triple keeps its value and costs two orders less', () => {
     const r = compileReal(
       '\\int_0^1\\int_0^1\\int_0^1 k e^{x+y+z}\\,dz\\,dy\\,dx',
-      { vars: { k: '_.k' } }
+      { vars: { k: '(_.k)' } }
     );
     expect(r.code.match(/_SYS\.integrate\(/g)?.length).toBe(3);
     expect(r.code).toContain(', 0, 1, 3)');
@@ -178,9 +180,10 @@ describe('COMPILE Integrate — starting panels sized by tree-visible depth', ()
     // One level has nothing to multiply against, so it stays at the quadrature
     // default — and the emitted call carries no panel argument at all, which is
     // what keeps single-integral codegen unchanged.
-    const r = compileReal('\\int_0^k \\sin(t^2)\\,dt', { vars: { k: '_.k' } });
+    const r = compileReal('\\int_0^k \\sin(t^2)\\,dt', { vars: { k: '(_.k)' } });
     expect(r.code).toContain('_SYS.integrate(');
-    expect(r.code).toContain(', 0, _.k)');
+    // (`sin(t²)` has a Fresnel closed form, so the mapping is `(_.k)` here too.)
+    expect(r.code).toContain(', 0, (_.k))');
 
     // ∫₀¹ sin(t²) dt = 0.310268301723381 (Fresnel S, verified against the
     // interpreter's own evaluation of the same integral).
@@ -193,7 +196,7 @@ describe('COMPILE Integrate — starting panels sized by tree-visible depth', ()
     // walk must count it. Value: ∫₀¹(x + ∫₀¹k e^{y} dy) dx = 1/2 + k(e − 1).
     const r = compileReal(
       '\\int_0^1 \\left(x + \\int_0^1 k e^{y}\\,dy\\right)\\,dx',
-      { vars: { k: '_.k' } }
+      { vars: { k: '(_.k)' } }
     );
     expect(r.code.match(/_SYS\.integrate\(/g)?.length).toBe(2);
     expect(r.code).toContain(', 0, 1, 4)');

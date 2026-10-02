@@ -1,4 +1,5 @@
 import { engine as ce, latex } from '../../utils';
+import type { MathJsonExpression } from '../../../src/math-json/types';
 
 describe('LATEX SERIALIZING', () => {
   test('Numbers', () => {
@@ -116,6 +117,66 @@ describe('LATEX SERIALIZING', () => {
     expect(
       ce.box(['Subtract', 'x', ['Complex', 1, 2]], { form: 'raw' }).latex
     ).toBe('x-(1+2\\imaginaryI)');
+  });
+
+  // In a product, a pure imaginary factor is wrapped only when the text it
+  // writes needs it: the bare unit is a single token, `2\imaginaryI` is a
+  // product, and a leading sign is wrapped as a negative number is. Each
+  // output reads back as the same value.
+  test('Pure imaginary factors in a product', () => {
+    const cases: [MathJsonExpression, string][] = [
+      [['Multiply', 'ImaginaryUnit', 'x'], '\\imaginaryI x'],
+      [['Exp', ['Multiply', 'ImaginaryUnit', 'Pi']], '\\exp(\\imaginaryI\\pi)'],
+      [['Multiply', ['Complex', 0, 2], 'x'], '2\\imaginaryI x'],
+      [
+        ['Multiply', ['Complex', 0, ['Sqrt', 2]], 'x'],
+        '\\sqrt{2}\\imaginaryI x',
+      ],
+      [['Multiply', 'ImaginaryUnit', ['Add', 'x', 1]], '\\imaginaryI(x+1)'],
+      [['Sin', ['Multiply', 'ImaginaryUnit', 'x']], '\\sin(\\imaginaryI x)'],
+      // A leading sign keeps its parentheses
+      [['Multiply', ['Complex', 0, -2], 'x'], '(-2\\imaginaryI)x'],
+      // A complex number with a real part keeps its parentheses
+      [['Multiply', ['Complex', 1, 2], 'x'], '(1+2\\imaginaryI)x'],
+    ];
+    for (const [json, expected] of cases) {
+      const expr = ce.box(json);
+      expect(expr.latex).toBe(expected);
+      expect(ce.parse(expected).isSame(expr)).toBe(true);
+    }
+    // The same rule applies in a tighter context
+    expect(ce.box(['Factorial', ['Complex', 0, 1]]).latex).toBe(
+      '\\imaginaryI!'
+    );
+    expect(ce.box(['Factorial', ['Complex', 0, 2]]).latex).toBe(
+      '(2\\imaginaryI)!'
+    );
+  });
+
+  // The wrapping decision must use the zero test of the `Complex` serializer,
+  // which reads a number string from its digits: `1e-800` rounds to the
+  // double 0, but it is not zero and it is written. The real part decides
+  // when the imaginary part is 0, and a float unit `1.0\imaginaryI` is a
+  // product, not the bare unit.
+  test('Complex factors: zero tests and power bases', () => {
+    const raw = (json: MathJsonExpression) =>
+      ce.box(json, { form: 'raw' }).latex;
+    expect(raw(['Multiply', ['Complex', 2, { num: '1e-800' }], 'x'])).toBe(
+      '(2+1.0\\cdot10^{-800}\\imaginaryI)x'
+    );
+    expect(raw(['Multiply', ['Complex', { num: '2.5e-800' }, 2], 'x'])).toBe(
+      '(2.5\\cdot10^{-800}+2\\imaginaryI)x'
+    );
+    expect(raw(['Power', ['Complex', 0, 1], 'x'])).toBe('\\imaginaryI^{x}');
+    expect(raw(['Power', ['Complex', 0, 2], 'x'])).toBe('(2\\imaginaryI)^{x}');
+    expect(raw(['Power', ['Complex', 0, { num: '1.0' }], 'x'])).toBe(
+      '(1.0\\imaginaryI)^{x}'
+    );
+    expect(raw(['Power', ['Complex', ['Rational', 1, 2], 0], 'x'])).toBe(
+      '(\\frac{1}{2})^{x}'
+    );
+    expect(raw(['Power', ['Complex', -3, 0], 'x'])).toBe('(-3)^{x}');
+    expect(raw(['Power', ['Complex', 1.5, 0], 'x'])).toBe('1.5^{x}');
   });
 
   test.each([

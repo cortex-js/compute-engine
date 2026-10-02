@@ -28,7 +28,7 @@ export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
  *   segmented into a letter run (`divisors(60)` → `"divisors"`). When the
  *   symbol was read as a unit, `detail` additionally carries
  *   `lexedAs: "unit"`.
- * - `"letter-run-split"` — non-strict mode only: a run of two or more
+ * - `"ambiguous-letter-run"` — non-strict mode only: a run of two or more
  *   letters that is not a known word was read as a product of its parts
  *   (`eps` → `e·p·s`, `sinx` → `s·i·n·x`, `xpi` → `x·π`). `detail: { run,
  *   parts }` with `run` the letters as written and `parts` the MathJSON
@@ -46,23 +46,115 @@ export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
  * - `"recovered"` — trailing tokens skipped/coerced by non-strict error
  *   recovery that do not otherwise surface as an `Error` node. `detail` may
  *   include the skipped fragment as `{ skipped }`.
- * - `"implicit-product-in-denominator"` — non-strict mode only: the
+ * - `"ambiguous-denominator"` — non-strict mode only: the
  *   denominator of a `/` is an implicit product, which binds tighter than
  *   `/`. `1/2x` is read as `1/(2x)`, not `(1/2)x`. The span covers the
  *   denominator. A differential denominator (`dy/dx`) is not reported.
- * - `"spaced-digit-groups"` — non-strict mode only: white space between
+ * - `"ambiguous-digit-groups"` — non-strict mode only: white space between
  *   digits was read as part of one number (`2 3` → 23, `1 000` → 1000).
  *   `detail: { digits }`. Visual space commands (`1\,000`) and the `{,}`
  *   separator are not reported.
- * - `"letter-before-decimal"` — non-strict mode only: a symbol is directly
+ * - `"ambiguous-letter-decimal"` — non-strict mode only: a symbol is directly
  *   followed by `.digits` (`x.5`), read as the product `x \cdot 0.5`.
  *   `detail: { name }`. The span starts at the `.`.
+ * - `"ambiguous-sign"` — non-strict mode only: a prefix `±` (also spelled
+ *   `\pm`, `\plusmn` or `+-`) with no left operand, read as a measurement
+ *   with a nominal value of 0 where a person often means two values
+ *   (`x = ±1` is read as `Measurement(0, 1)`, and `y = +-\sqrt{x}` as
+ *   `Measurement(0, √x)`), a prefix `∓` (also spelled `\mp` or `-+`) with
+ *   no left operand, read as `MinusPlus(0, …)` (`x = ∓1` and `-+x` are
+ *   read as `MinusPlus(0, 1)` and `MinusPlus(0, x)`), or two signs in a row
+ *   (`--x`, `x - -y`, `a + -b`, and `a -+ b`, which is read as
+ *   `MinusPlus(a, b)`).
+ *   `detail: { signs }`, the signs as written with no white space. The span
+ *   covers the signs. `a +- b` with no white space is read as
+ *   `Measurement(a, b)` and is not reported.
+ * - Non-strict mode only, codes for a reading that has a second common
+ *   reading (the reading does not change):
+ *   - `"ambiguous-exponent-end"` — where an unbraced exponent ends:
+ *     `e^2pi` (`e^2·π`), `e^i pi`, `e^x/2`, `x^1/2`. `detail: { exponent }`.
+ *     The span is from the base to the end of the operand after the
+ *     exponent: `e^2pi`.
+ *   - `"ambiguous-implicit-subscript"` — a letter followed by digits is a
+ *     subscript (`x2` → `x_2`), and a digit subscript ends before a letter
+ *     (`x_1y` → `x_1·y`). `detail: { base?, subscript }`.
+ *   - `"ambiguous-name-digits"` — letters and digits that are not a library
+ *     function, before a parenthesis: `atan3(y)` → `arctan(3y)`.
+ *     `detail: { name }`.
+ *   - `"ambiguous-function-argument"` — a bare function name with an
+ *     argument of more than one factor and no parentheses (`sin x y` →
+ *     `sin(xy)`), or `log` and a number after white space (`log 2 x` →
+ *     `log_2(x)`). `detail: { function }`.
+ *   - `"ambiguous-function-without-parentheses"` — a symbol declared as a
+ *     function followed by an operand: `f x` → `f·x`. `detail: { name }`.
+ *   - `"ambiguous-name-then-number"` — a name, white space, a number:
+ *     `x 2` → `x·2`. `detail: { name }`.
+ *   - `"ambiguous-delta"` — `Δ` or `Delta` followed by a letter: `Δx` →
+ *     `Δ·x`.
+ *   - `"ambiguous-constant-name"` — a library constant alone on the left of
+ *     `=` (`e = 1.6e-19`, `pi = 3.14`), or followed by a parenthesized group
+ *     on the left of `=` (`pi(x) = x` → `π·x = x`, where a person can mean
+ *     the definition of a function `pi`). `detail: { name }`. Only an `=`
+ *     at the top level of the line is reported: the index of
+ *     `\sum_{i=1}^n` is not.
+ *   - `"ambiguous-log-base"` — `log` with two arguments in parentheses:
+ *     `log(x, 2)` is `Log(x, 2)`, the base second, and other tools put the
+ *     base first. Also the name `lg`, which is the base-10 logarithm and,
+ *     in computer science, the base-2 logarithm. `detail: { name }`.
+ *   - `"ambiguous-engine-operator"` — a one-letter library operator written
+ *     as a plain letter before a parenthesis, read as a call of the
+ *     operator: `N(x)` (numeric evaluation), `D(x)` (derivative). A person
+ *     usually means a function of their own. `\operatorname{N}(x)` is not
+ *     reported. `detail: { name }`.
+ *   - `"ambiguous-lookalike-letter"` — a Greek letter that looks like a
+ *     Latin letter (`Α`, `Ρ`, `ο`). `detail: { letter }`.
+ *   - `"ambiguous-unknown-character"` — a character that is not math, read
+ *     as a string: `y = ж`. `detail: { text }`.
+ *   - `"ambiguous-radical"` — the extent of `√` without braces or
+ *     parentheses: `√2π` → `√2·π`, `√x²` → `(√x)²`, `3√8` → `3·√8`. The
+ *     span ends after the operand that follows the radicand.
+ *   - `"ambiguous-absolute-value"` — bars that pair two ways: `|x|y|z|`.
+ *   - `"ambiguous-equation-number"` — a parenthesized number or letter at
+ *     the end of the line, after white space, read as a factor
+ *     (`y = x^2 (2)`, `x = 4 (m)`). The span is the group.
+ *   - `"ambiguous-group-product"` — a parenthesized name followed by a
+ *     parenthesized group with a comma, read as a product (`(x)(1,2)`).
+ *   - `"ambiguous-factorial"` — `!=` directly after an operand, read as
+ *     `≠` (`5!=120`). The span is the `!=`.
+ *   - `"ambiguous-arrow"` — `<-`, read as `< -` (`x <- 2`).
+ *   - `"ambiguous-equal-chain"` — more than one `=` in a chain
+ *     (`x = x = x`). The span is from the first to the last `=`.
+ *   - `"ambiguous-element"` — `in`, `\in` or `∈` whose left operand is an
+ *     equation (`y = x in [0,1]`). The span is the operator.
+ *   - `"ambiguous-interval"` — after `in`, `\in`, `∈` or `\notin`, a
+ *     bracket pair `[a, b]` or `(a, b)`, or a range `[a..b]`, followed by
+ *     an operator, so the pair is not read as an interval:
+ *     `M in [0,1]^2` → `Element(M, Power(List(0, 1), 2))`. The span is the
+ *     bracket pair and the operator after it, with the operand of a `^` or
+ *     a `/` (`[0,1]^2`). `M in [0,1]` is not reported.
+ *   - `"ambiguous-range"` — a range with two `..` (`1..10..2`).
+ *   - `"ambiguous-percent"` — a `%` after a number (`y = 50%`), which
+ *     starts a comment. The span is the number and the `%`, in
+ *     original-input coordinates.
+ *   - `"ambiguous-comma"` — a comma outside every bracket (`1,5`).
+ *   - `"ambiguous-list-label"` — a list label read as math: `1. y = x`,
+ *     `x = 1. 5`, `(1) y = x`, `a) y = x`, or a line that is only `1.`,
+ *     `(1)`, `(i)` or `[1]`. A letter label is one of `a` to `h`, and only
+ *     when more follows it: a line that is only `(x)` is not reported.
+ *   - `"ambiguous-number-notation"` — `1_000` or `0x10`.
+ *     `detail: { notation }`, `"digit-grouping"` or `"hexadecimal"`.
+ *   - `"ambiguous-date"` — digit groups joined by `-` or `/` that can be a
+ *     date, a phone number or a range (`2026-10-15`, `9/30/2026`,
+ *     `555-1234`, `7-11`). `3/4`, `2-1` and two groups in parentheses
+ *     (`x = (1-10)`) are not reported.
+ *
+ *   Their spans use the normalized-LaTeX convention below, except
+ *   `ambiguous-percent`.
  *
  * ## Span convention (`start`/`end`)
  *
- * Spans for `undeclared-symbol`, `juxtaposition-as-multiply`,
- * `letter-run-split`, `implicit-product-in-denominator`,
- * `spaced-digit-groups` and `letter-before-decimal` are offsets into CE's
+ * Spans for `undeclared-symbol`, `juxtaposition-as-multiply` and every
+ * `ambiguous-*` code except `ambiguous-percent` are offsets into CE's
  * **normalized** LaTeX (the
  * re-serialized token stream), which matches the original input only when
  * the input round-trips unchanged.
