@@ -9,6 +9,8 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
 
 const ce = new ComputeEngine();
 
@@ -317,6 +319,323 @@ describe('BarnesG(z)', () => {
     const g = value(['Multiply', ['Gamma', z], ['BarnesG', z]]);
     expectClose(g1, [g.re, g.im], 1e-12);
   });
+});
+
+describe('BarnesG at a complex z where G is not a double', () => {
+  // mpmath.barnesg(mpc(re, im)) at 40 digits. |G| is below 1e-308 or above
+  // 1e308, so exp(ln G) in doubles underflowed to 0 or overflowed; the value
+  // is boxed from ln G with a big-decimal modulus.
+  // The last column is the tolerance: the value keeps 12 digits at
+  // 0.5 + 30i, 11 at 60 + 10i and 10 at 0.5 + 300i (the size of ln G limits
+  // the digits a double ln G gives), so it is off by the rounding to them.
+  const cases: [number, number, string, string, number][] = [
+    [
+      0.5,
+      30,
+      '1.4850192495074601647301534796e-362',
+      '2.52832839715190303669643502983e-362',
+      1e-11,
+    ],
+    [
+      1,
+      40,
+      '9.53734929937039202020594549553e-762',
+      '-1.75276703928727967400820730856e-761',
+      1e-11,
+    ],
+    [
+      -3.5,
+      36,
+      '1.07762365722462009816709450667e-463',
+      '8.44790313732267234958573074383e-463',
+      1e-11,
+    ],
+    [
+      30,
+      0.5,
+      '-1.55976735404335879590232997265e+352',
+      '-3.57952350318069342512740097284e+351',
+      1e-11,
+    ],
+    [
+      60,
+      10,
+      '1.16313082923549317293551718185e+1883',
+      '-2.10110905278928676262001922649e+1881',
+      1e-10,
+    ],
+    [
+      0.5,
+      300,
+      '-3.19301622777783256370524666005e-82054',
+      '-2.08176829617599889110268297049e-82054',
+      1e-9,
+    ],
+  ];
+
+  // The relative error of each part, against the modulus of the reference.
+  const relativeErrors = (v: Expression, re: string, im: string) => {
+    const wantRe = new BigDecimal(re);
+    const wantIm = new BigDecimal(im);
+    const modulus = wantRe.mul(wantRe).add(wantIm.mul(wantIm)).sqrt();
+    return [
+      v.bignumRe!.sub(wantRe).abs().div(modulus).toNumber(),
+      v.bignumIm!.sub(wantIm).abs().div(modulus).toNumber(),
+    ];
+  };
+
+  for (const digits of [21, 30]) {
+    test.each(cases)(
+      `BarnesG(%p + %pi) at precision ${digits}`,
+      (re, im, wantRe, wantIm, tolerance) => {
+        const engine = new ComputeEngine();
+        engine.precision = digits;
+        const v = engine.box(['BarnesG', cx(re, im)]).N();
+        expect(v.isExact).toBe(false);
+        expect(v.bignumRe!.isZero() || v.bignumIm!.isZero()).toBe(false);
+        for (const e of relativeErrors(v, wantRe, wantIm))
+          expect(e).toBeLessThan(tolerance);
+      }
+    );
+  }
+
+  test('only the digits of the double ln G are kept', () => {
+    const engine = new ComputeEngine();
+    expect(
+      engine.parse('\\operatorname{BarnesG}(0.5+30i)').N().toString()
+    ).toBe('(1.48501924951e-362 + 2.52832839715e-362i)');
+  });
+
+  // Γ shares the route, from ln Γ: mpmath.gamma(mpc(re, im)) at 40 digits.
+  // `Factorial(z)` is Γ(z + 1). The double kernel gave 0 for the first two
+  // and `~oo`, which reads as a pole, for the others.
+  const gammaCases: [string, number, number, string, string, number][] = [
+    [
+      'Gamma',
+      0.5,
+      1000,
+      '1.57066061457641173483029610551e-684',
+      '1.6251473018203136842063038684e-682',
+      1e-10,
+    ],
+    [
+      'Gamma',
+      -200.5,
+      0.5,
+      '9.89278019221151949555281168196e-377',
+      '-5.27591870915292749281773404407e-377',
+      1e-11,
+    ],
+    [
+      'Gamma',
+      200.5,
+      0.5,
+      '-4.9079258626343367844561471102e+373',
+      '2.6331872181699454993025330951e+373',
+      1e-11,
+    ],
+    [
+      'Factorial',
+      300,
+      2,
+      '1.22674475486466102643391562544e+614',
+      '-2.78179033693280020814050811286e+614',
+      1e-11,
+    ],
+    [
+      'Factorial',
+      -300.5,
+      1,
+      '1.28609375285617192321839099662e-614',
+      '-8.41506546785366682694213200956e-615',
+      1e-11,
+    ],
+  ];
+  for (const digits of [21, 30]) {
+    test.each(gammaCases)(
+      `%s(%p + %pi) at precision ${digits}`,
+      (head, re, im, wantRe, wantIm, tolerance) => {
+        const engine = new ComputeEngine();
+        engine.precision = digits;
+        const v = engine.box([head, cx(re, im)]).N();
+        expect(v.isExact).toBe(false);
+        expect(v.bignumRe!.isZero() || v.bignumIm!.isZero()).toBe(false);
+        for (const e of relativeErrors(v, wantRe, wantIm))
+          expect(e).toBeLessThan(tolerance);
+      }
+    );
+  }
+
+  // A part much smaller than the modulus has fewer correct digits than the
+  // modulus: each part is checked against its OWN mpmath value
+  // (mpmath.gamma(mpc(re, im)) at 40 digits). A part with d significant
+  // digits is good to 10^(1−d) of itself; a part below the error of the
+  // modulus is dropped (printed as 0).
+  const smallPartCases: [number, number, string, string][] = [
+    [
+      -200,
+      1e-12,
+      '6.72131161378250851497151486335e-375',
+      '-1.26797695348096244725626373763e-363',
+    ],
+    [
+      -200.5,
+      1e-9,
+      '-2.81146892278232750603892500342e-376',
+      '-1.49100798365800391667758311968e-384',
+    ],
+    [
+      -300.5,
+      1e-6,
+      '-5.91893997697040637819897081808e-616',
+      '-3.37800458214343657492472376704e-621',
+    ],
+    [
+      0.5,
+      1000,
+      '1.57066061457641173483029610551e-684',
+      '1.6251473018203136842063038684e-682',
+    ],
+  ];
+  test.each(smallPartCases)(
+    'Gamma(%p + %pi): each part keeps only its correct digits',
+    (re, im, wantRe, wantIm) => {
+      const engine = new ComputeEngine();
+      const v = engine.box(['Gamma', cx(re, im)]).N();
+      const want = [new BigDecimal(wantRe), new BigDecimal(wantIm)];
+      const modulus = want[0].mul(want[0]).add(want[1].mul(want[1])).sqrt();
+      const got = [v.bignumRe!, v.bignumIm!];
+      for (let k = 0; k < 2; k++) {
+        if (got[k].isZero()) {
+          expect(want[k].abs().div(modulus).toNumber()).toBeLessThan(1e-10);
+          continue;
+        }
+        const digits = got[k].significand.toString().replace('-', '').length;
+        const error = got[k].sub(want[k]).abs().div(want[k].abs()).toNumber();
+        expect(error).toBeLessThan(10 ** (1 - digits));
+      }
+    }
+  );
+
+  test('a real Γ and the poles of Γ do not take this route', () => {
+    const engine = new ComputeEngine();
+    // mpmath.gamma(200.5) at 30 digits: the bignum kernel, all 21 digits.
+    expect(engine.box(['Gamma', 200.5]).N().toString()).toBe(
+      '5.57316894480137913364e+373'
+    );
+    expect(engine.box(['Gamma', -3]).N().toString()).toBe('~oo');
+    expect(engine.box(['Gamma', 0]).N().toString()).toBe('~oo');
+    expect(engine.box(['Factorial', -3]).N().toString()).toBe('~oo');
+  });
+
+  // mpmath.gamma(x + 1) at 32 digits. The double kernel gave `+oo` for
+  // 200.5!, `0` for (-200.5)! and a 17-digit double for 2.5!.
+  test.each([
+    [200.5, 21, '1.1174203734326765163e+376'],
+    [-200.5, 21, '5.63699519017856675668e-374'],
+    [2.5, 21, '3.32335097044784255118'],
+    [-2.5, 30, '2.36327180120735470306422331112'],
+    [2.5, 30, '3.32335097044784255118406403126'],
+  ])(
+    'Factorial(%p) at precision %p is Γ(x + 1) at that precision',
+    (x, digits, want) => {
+      const engine = new ComputeEngine();
+      engine.precision = digits;
+      expect(engine.box(['Factorial', x]).N().toString()).toBe(want);
+    }
+  );
+
+  test('an exact non-integer factorial stays symbolic under evaluate(), as Gamma does', () => {
+    const engine = new ComputeEngine();
+    for (const x of [
+      ['Rational', 5, 2],
+      ['Rational', -1, 2],
+      ['Rational', 1, 3],
+      ['Complex', 1, 1],
+    ]) {
+      expect(engine.box(['Factorial', x]).evaluate().operator).toBe(
+        'Factorial'
+      );
+    }
+    // Gamma of the same arguments has no closed form here either.
+    expect(engine.box(['Gamma', ['Rational', 7, 2]]).evaluate().operator).toBe(
+      'Gamma'
+    );
+    // .N() and a float operand give the float; integers stay exact.
+    expect(
+      engine
+        .box(['Factorial', ['Rational', -1, 2]])
+        .N()
+        .toString()
+    ).toBe('1.7724538509055160273');
+    expect(engine.box(['Factorial', 2.5]).evaluate().isExact).toBe(false);
+    expect(engine.box(['Factorial', 5]).evaluate().toString()).toBe('120');
+  });
+
+  // mpmath.factorial(n) at 32 digits. Past the exact digit cap the double
+  // overflowed to +oo; above machine precision the value is a big decimal.
+  test.each([
+    [1e6, '8.26393168833124006238e+5565708'],
+    [1e7, '1.20242340051590345614e+65657059'],
+  ])('Factorial(%p).N() past the exact cap', (n, want) => {
+    const engine = new ComputeEngine();
+    expect(engine.box(['Factorial', n]).N().toString()).toBe(want);
+    expect(engine.box(['Factorial', n]).evaluate().operator).toBe('Factorial');
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    expect(machine.box(['Factorial', n]).N().toString()).toBe('+oo');
+  });
+
+  // mpmath.fac2(n) at 32 digits, for an odd and an even n past the cap.
+  test.each([
+    [1000001, '8.12014473058435753146378456013e+2782858'],
+    [1000000, '1.01770845550781491955086629766e+2782856'],
+  ])('Factorial2(%p).N() past the exact cap at precision 30', (n, want) => {
+    const engine = new ComputeEngine();
+    engine.precision = 30;
+    expect(engine.box(['Factorial2', n]).N().toString()).toBe(want);
+  });
+
+  // Past the exponent range of a big decimal (about ±9·10¹⁵ in the decimal
+  // exponent) the big-decimal Γ saturates to 0 or infinity. Γ has no zeros,
+  // so an underflow to 0 gives no value: the expression stays unevaluated.
+  // An overflow is `+oo`, as a double overflow is ("too large" is true).
+  test.each([
+    ['Gamma', -1e15 - 0.5],
+    ['Factorial', -1e15 - 0.5],
+  ])(
+    '%s(%p).N() underflows past the big-decimal range: unevaluated',
+    (head, x) => {
+      const engine = new ComputeEngine();
+      expect(engine.box([head, x]).N().operator).toBe(head);
+    }
+  );
+  test.each([
+    ['Gamma', 1e15 + 0.5],
+    ['Factorial', 1e15],
+  ])('%s(%p).N() overflows past the big-decimal range: +oo', (head, x) => {
+    const engine = new ComputeEngine();
+    expect(engine.box([head, x]).N().toString()).toBe('+oo');
+  });
+  test('a complex value past the big-decimal range stays unevaluated', () => {
+    const engine = new ComputeEngine();
+    expect(engine.box(['Gamma', ['Complex', 1e15, 1]]).N().operator).toBe(
+      'Gamma'
+    );
+  });
+
+  test('Γ at a large argument and a high precision stops at the time limit', () => {
+    // The Bernoulli table for precision 3000 takes about 30 s to build.
+    const engine = new ComputeEngine();
+    engine.precision = 3000;
+    const started = Date.now();
+    expect(() =>
+      engine.withTimeLimit({ ms: 200, label: 'test:gamma' }, () =>
+        engine.box(['Factorial', 1e7]).N()
+      )
+    ).toThrow(/Timeout|exceeded|time/i);
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 30_000);
 });
 
 describe('LogBarnesG(z)', () => {

@@ -33,6 +33,7 @@ import {
   boxBignumApprox,
   bigRealOperand,
   boxComplexResult,
+  boxExpOfComplexLog,
   infiniteGammaFamilyValue,
 } from './arithmetic.js';
 // Every `type` handler in this file is on the `'types'` (operand-descriptor)
@@ -339,6 +340,15 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (isNumber(z) && !z.isComplex && bignumPreferred(engine)) {
           const big = bigBarnesG(engine, bigRealOperand(engine, z));
           return big === undefined ? undefined : boxBignumApprox(engine, big);
+        }
+        if (isNumber(z) && z.isComplex) {
+          // A value outside the double range is formed from ln G.
+          const big = boxExpOfComplexLog(
+            engine,
+            logBarnesGComplex(new Complex(z.re, z.im))
+          );
+          if (big === null) return undefined;
+          if (big !== undefined) return big;
         }
         return applyN(
           [z],

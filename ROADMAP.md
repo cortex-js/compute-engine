@@ -543,21 +543,6 @@ doubles (the one-operand form), and for γₙ(a) either move the tail point with
 n so that the cancellation stays below 10⁴, or sum the series in double-double
 arithmetic (two doubles per value), which gives back the 16 digits.
 
-### A complex `BarnesG` value below the double range prints as an exact-looking `0` (OPEN, decision — found 2026-10-01 by the review of PR #404)
-
-`BarnesG(0.5 + 30i).N()` is `0`, while the value is about
-`1.5·10⁻³⁶² + 2.5·10⁻³⁶²i` (mpmath). A complex argument is computed in
-doubles (`barnesGComplex`, `numerics/barnes-g.ts`), as for `Gamma` and `Zeta`
-at a complex point, and `exp(ln G)` underflows to 0. The `0` then reads as an
-exact zero of G, which G does not have off the non-positive integers. The
-options: (a) leave the head unevaluated when the double result underflows
-(the same as an overflow today), so no value is shown that is not one;
-(b) box the result from its logarithm, `exp(ln G)` with `ln G` as a bignum,
-which keeps the value (`ln G` is about `−833 + 1.0i` here and is accurate in
-doubles); or (c) keep `0` and document it. Recommendation: (b), since
-`logBarnesGComplex` already gives `ln G` and the engine's bignum numbers
-reach 10⁻³⁶²; (a) is the smaller change.
-
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
 `reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and

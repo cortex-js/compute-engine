@@ -891,6 +891,7 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
   let shiftProduct = BigDecimal.ONE;
   let w = z;
   for (let i = 0; i < m; i++) {
+    if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     shiftProduct = shiftProduct._mulToPrecision(w, p);
     w = w.add(BigDecimal.ONE);
   }
@@ -920,6 +921,9 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
   const tol = new BigDecimal(10).pow(-(p + guard));
   const nTerms = Math.min(maxTerms, bernoulliRationals.length);
   for (let k = 0; k < nTerms; k++) {
+    // Each term divides by a Bernoulli rational of thousands of digits at a
+    // high precision, so the time limit is checked at every term.
+    checkDeadline(ce._deadlineFrame);
     const twoK = 2 * (k + 1);
     const [bNum, bDen] = bernoulliRationals[k];
     const denom = BigInt(twoK) * BigInt(twoK - 1);
@@ -1103,7 +1107,10 @@ export function computeBernoulliEven(
   ];
 
   for (let m = 2; m <= 2 * n; m++) {
-    if ((m & 0xff) === 0) checkDeadline(deadline);
+    // Each step sums m products of rationals that grow with m (about 15 ms
+    // a step near m = 3700, for `ce.precision = 3000`), so the time limit is
+    // checked at every step: once every 256 steps let it run seconds late.
+    checkDeadline(deadline);
     // Odd m > 1: B_m = 0
     if (m % 2 === 1) {
       all.push([0n, 1n]);

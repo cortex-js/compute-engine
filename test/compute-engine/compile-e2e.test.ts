@@ -277,7 +277,10 @@ describe('E2E: Real-world Expressions', () => {
     it('compiled (1/2-1)! is √π', () => {
       const expr = ce.parse('(\\frac{1}{2}-1)!');
       expect(expr.N().re).toBeCloseTo(Math.sqrt(Math.PI), 12);
-      expect(compile(expr)?.run?.({})).toBe(1.7724538509055159);
+      // The constant is folded from `.N()`, which computes Γ(1/2) at the
+      // working precision: the double nearest √π, one unit in the last place
+      // above `Math.sqrt(Math.PI)`.
+      expect(compile(expr)?.run?.({})).toBe(1.772453850905516);
     });
 
     it('compiled non-integer factorials match .N()', () => {

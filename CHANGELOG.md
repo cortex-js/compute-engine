@@ -27,6 +27,51 @@
   - `arctan(iy)` for `y > 1`, `arccot(iy)` for `−1 < y < 0`, and `artanh`
     and `arcoth` on their cuts on the real axis do not change.
 
+- **The factorial of a real non-integer follows `ce.precision`.** `x!` for a
+  real non-integer `x` is Γ(x + 1). It was computed in doubles at every
+  precision, so `Factorial(2.5).N()` was `3.3233509704478448`, a double,
+  `Factorial(200.5).N()` overflowed to `+oo` and `Factorial(-200.5).N()`
+  underflowed to `0`. It is now computed as `Gamma` computes it, to
+  `ce.precision` digits: `Factorial(2.5).N()` is `3.32335097044784255118`,
+  `Factorial(200.5).N()` is `1.1174203734326765163e+376` and
+  `Factorial(-200.5).N()` is `5.63699519017856675668e-374` at the default
+  precision of 21 digits. At `precision: "machine"` the result is the double,
+  as before. A compiled `(1/2 - 1)!`, whose constant is folded from `.N()`, is
+  now `1.772453850905516`, the double nearest √π, not `1.7724538509055159`.
+
+- **The factorial of an exact non-integer stays symbolic under `evaluate()`.**
+  `Factorial(5/2).evaluate()`, `Factorial(-1/2).evaluate()` and
+  `Factorial(1 + i).evaluate()` gave a float, against the rule that
+  `evaluate()` keeps an exact argument exact. They now stay `(5/2)!`,
+  `(-1/2)!` and `(1 + i)!`, as `Gamma(7/2)`, `Gamma(1/2)` and `Gamma(2 + i)`
+  do; `.N()` and a float operand (`2.5!`) give the float. Integer factorials
+  are unchanged.
+
+- **A factorial too large for the exact product is a big decimal under
+  `.N()`.** Past the exact digit cap (10⁶ digits), `Factorial(n).N()` and
+  `Factorial2(n).N()` overflowed to `+oo`. Above machine precision they are
+  now computed from Γ to `ce.precision` digits: `Factorial(10^6).N()` is
+  `8.26393168833124006238e+5565708`, `Factorial(10^7).N()` is
+  `1.20242340051590345614e+65657059` and `Factorial2(10^15).N()` is
+  `6.83517080822812242208e+7282852759048381`. Under `evaluate()` they stay
+  symbolic, as before. At `precision: "machine"` they are `+oo`, since a
+  double cannot hold them. A value whose decimal exponent is past
+  ±2⁵³ ≈ ±9·10¹⁵, the largest exponent a big decimal holds exactly, has no
+  big-decimal value either (the big-decimal `exp` saturates to infinity or
+  0 there). A real value that overflows past that range is `+oo`, as
+  before and as a double overflow is (`Factorial(10^15).N()`,
+  `Gamma(10^15 + 0.5).N()`). A real value that underflows past it now stays
+  unevaluated, since a `0` reads as an exact zero and Γ has no zeros:
+  `Gamma(-10^15 - 0.5).N()` and `Factorial(-10^15 - 0.5).N()` (decimal
+  exponent about −1.5·10¹⁶) were `0`. A complex `Gamma`, `Factorial` or
+  `BarnesG` value past that range, in either direction, stays unevaluated:
+  a complex value that is too large has a direction that no infinity of the
+  engine holds.
+  The big-decimal Γ at a high precision now stops at the time limit
+  (`ce.withTimeLimit`): the Bernoulli table it builds (about 30 s at
+  `ce.precision = 3000`) checks the deadline at every step instead of every
+  256 steps, and the Stirling series checks it at every term.
+
 ### New Features
 
 - **Wolfram Language aliases `EulerPhi`, `PartitionsP` and `Det`.** They are
@@ -49,6 +94,40 @@
   `sin(x)!` are unchanged. A factorial used as the base of a power prints
   as `(n!)^2`: `n!^2` did not parse back, since `!^` is read as one
   operator.
+
+- **A complex `BarnesG` value outside the double range is no longer `0` or
+  left unevaluated.** `BarnesG(0.5 + 30i).N()` was `0`, which reads as an
+  exact zero of G (G has none off the non-positive integers), and
+  `BarnesG(30 + 0.5i).N()` stayed unevaluated: a complex argument is computed
+  in doubles, and exp(ln G) underflowed or overflowed. When it leaves the
+  range of a double, G is now formed from ln G as
+  exp(Re ln G)·(cos Im ln G + i sin Im ln G) with a big-decimal modulus:
+  `BarnesG(0.5 + 30i).N()` is `1.48501924951e-362 + 2.52832839715e-362i`
+  (mpmath: `1.48501924950746e-362 + 2.52832839715190e-362i`) and
+  `BarnesG(60 + 10i).N()` is `1.1631308292e+1883 - 2.10110905e+1881i`. The
+  value keeps only the digits that ln G in doubles gives: its error is about
+  2⁻⁵² times |ln G| relative to the modulus, so 12 digits at 0.5 + 30i and
+  10 at 0.5 + 300i, and a part smaller than the modulus keeps fewer (each
+  part is rounded at the last correct digit of the modulus),
+  at any `ce.precision`, as for the other complex results of the special
+  functions. At `precision: "machine"` the engine has no number that holds
+  such a value, and the result is unchanged (`0` on underflow, unevaluated on
+  overflow), as for `e^{-1000+i}`, which is `0` there.
+
+- **A complex `Gamma` or `Factorial` value outside the double range is no
+  longer `0` or `~oo`.** `Gamma(0.5 + 1000i).N()` and
+  `Gamma(-200.5 + 0.5i).N()` were `0`, and `Gamma(200.5 + 0.5i).N()` was
+  `~oo`, which reads as a pole, while Γ has no zeros and its only poles are
+  the non-positive integers. As for `BarnesG` above, the value is now formed
+  from ln Γ with a big-decimal modulus, keeping the digits that ln Γ in
+  doubles gives: `Gamma(200.5 + 0.5i).N()` is
+  `-4.90792586263e+373 + 2.63318721817e+373i` (mpmath:
+  `-4.907925862634e+373 + 2.633187218170e+373i`) and
+  `Gamma(0.5 + 1000i).N()` is `1.57066061e-684 + 1.6251473018e-682i`. A
+  complex `Factorial` takes the same route: `Factorial(300 + 2i).N()` is
+  `1.22674475486e+614 - 2.78179033693e+614i`. At `precision: "machine"` the
+  result is unchanged (`0` on underflow, `~oo` on overflow), as for
+  `e^{-1000+i}`.
 
 ## 0.146.0 _2026-10-02_
 

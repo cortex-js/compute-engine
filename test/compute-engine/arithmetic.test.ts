@@ -3143,9 +3143,15 @@ describe('Factorial2 digit cap (review pins)', () => {
     expect(ce.box(['Factorial2', -3]).evaluate().isNaN).toBe(true);
     expect(ce.box(['Factorial2', -1]).evaluate().isNaN).toBe(true);
   });
-  test('above the cap the numeric route overflows to +oo', () => {
-    expect(ce.box(['Factorial2', 1e15]).N().isSame(ce.PositiveInfinity)).toBe(
-      true
+  test('above the cap the numeric route is a big decimal, +oo at machine precision', () => {
+    // mpmath.fac2(10**15) = 6.835170808228122422077323e+7282852759048381
+    expect(ce.box(['Factorial2', 1e15]).N().toString()).toBe(
+      '6.83517080822812242208e+7282852759048381'
     );
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    expect(
+      machine.box(['Factorial2', 1e15]).N().isSame(machine.PositiveInfinity)
+    ).toBe(true);
   });
 });
