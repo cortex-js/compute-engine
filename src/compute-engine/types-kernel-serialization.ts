@@ -47,12 +47,12 @@ export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
  *   recovery that do not otherwise surface as an `Error` node. `detail` may
  *   include the skipped fragment as `{ skipped }`.
  * - `"ambiguous-denominator"` — non-strict mode only: the
- *   denominator of a `/` is an implicit product, which binds tighter than
- *   `/`. `1/2x` is read as `1/(2x)`, not `(1/2)x`. The span covers the
+ *   denominator of a `/` or `÷` is an implicit product, which binds tighter
+ *   than `/`. `1/2x` is read as `1/(2x)`, not `(1/2)x`. The span covers the
  *   denominator. A differential denominator (`dy/dx`) is not reported.
  * - `"ambiguous-digit-groups"` — non-strict mode only: white space between
- *   digits was read as part of one number (`2 3` → 23, `1 000` → 1000).
- *   `detail: { digits }`. Visual space commands (`1\,000`) and the `{,}`
+ *   digits was read as part of one number (`2 3` → 23, `1 000` → 1000,
+ *   `3 .5` → 3.5). `detail: { digits }`. Visual space commands (`1\,000`) and the `{,}`
  *   separator are not reported.
  * - `"ambiguous-letter-decimal"` — non-strict mode only: a symbol is directly
  *   followed by `.digits` (`x.5`), read as the product `x \cdot 0.5`.
@@ -84,7 +84,8 @@ export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
  *   - `"ambiguous-function-argument"` — a bare function name with an
  *     argument of more than one factor and no parentheses (`sin x y` →
  *     `sin(xy)`), or `log` and a number after white space (`log 2 x` →
- *     `log_2(x)`). `detail: { function }`.
+ *     `log_2(x)`), or an argument with no parentheses that starts with `+`
+ *     (`ln+1` → `ln(1)`). `detail: { function }`.
  *   - `"ambiguous-function-without-parentheses"` — a symbol declared as a
  *     function followed by an operand: `f x` → `f·x`. `detail: { name }`.
  *   - `"ambiguous-name-then-number"` — a name, white space, a number:
@@ -132,7 +133,10 @@ export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
  *     `M in [0,1]^2` → `Element(M, Power(List(0, 1), 2))`. The span is the
  *     bracket pair and the operator after it, with the operand of a `^` or
  *     a `/` (`[0,1]^2`). `M in [0,1]` is not reported.
- *   - `"ambiguous-range"` — a range with two `..` (`1..10..2`).
+ *   - `"ambiguous-range"` — a range with two `..` (`1..10..2`), a range
+ *     with one `..` next to an operation (`1..5/2`), or `...` directly
+ *     followed by a digit after a decimal number (`.5...5`, which can be
+ *     `.5..` and `.5`).
  *   - `"ambiguous-percent"` — a `%` after a number (`y = 50%`), which
  *     starts a comment. The span is the number and the `%`, in
  *     original-input coordinates.

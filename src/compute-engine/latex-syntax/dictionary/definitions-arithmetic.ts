@@ -41,7 +41,12 @@ import {
 } from './definitions-sets.js';
 import { endsWithSuperscript, joinLatex, supsub } from '../tokenizer.js';
 import { OPENING_PARENTHESIS } from '../delimiter-tables.js';
-import { isOperandStartToken, operandEnd } from '../lenient-ambiguity.js';
+import {
+  getSymbolToUnicode,
+  isLetterToken,
+  isOperandStartToken,
+  operandEnd,
+} from '../lenient-ambiguity.js';
 
 import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
@@ -247,10 +252,13 @@ function parseRootGlyph(parser: Parser): MathJsonExpression | null {
  * - an unbraced radicand directly followed by `^`: `√x²` is `(√x)²`, and a
  *   person can mean `√(x²)`;
  * - a digit directly before the glyph: `3√8` is `3·√8`, and a person can
- *   mean the cube root of 8.
+ *   mean the cube root of 8. Also a Latin letter: `t√y` is `t·√y`, and a
+ *   person can mean the root of index `t`;
+ * - a radicand that is one letter, then white space and an operand: `√a b`
+ *   is `√a·b`, and a person can mean `√(ab)`.
  *
  * The span starts at the glyph and ends after the operand that has the
- * second reading (`√2π`, `√x²`, `√xy`). The reading does not change.
+ * second reading (`√2π`, `√x²`, `√xy`, `√a b`). The reading does not change.
  */
 function emitRadicalAmbiguity(parser: Parser, glyph: number): void {
   if (!parser._emitAmbiguity) return;
@@ -261,18 +269,51 @@ function emitRadicalAmbiguity(parser: Parser, glyph: number): void {
   // removes a diagnostic of a branch it abandons only when the span starts
   // inside that branch, and the branch that reads the root starts at the
   // glyph.
-  if (/^[0-9]$/.test(token(glyph - 1)))
+  // A Latin letter directly before the glyph (`t√y`, `n√x`) is reported as
+  // a digit is: a person can mean the root of index `t`. A Greek letter or a
+  // constant (`π√2`) is not an index. The letter must be an operand of one
+  // letter: it is not reported when the token before it is a letter (the
+  // end of a word or a function name, `sin√x`, `ln√x`) or a `√` (the letter
+  // is the previous radicand, `√x√y`).
+  const before = token(glyph - 1);
+  const isLetter = (t: string) => /^[a-zA-Z]$/.test(t);
+  const beforeLetter = token(glyph - 2);
+  if (
+    /^[0-9]$/.test(before) ||
+    (isLetter(before) && !isLetter(beforeLetter) && beforeLetter !== '√')
+  )
     parser._emitAmbiguity('ambiguous-radical', glyph, parser.index);
   // A braced radicand (`√{2π}`) has a clear end
   const radicand = token(glyph + 1);
   if (radicand === '{' || radicand === '(' || radicand === '\\left') return;
   const next = token(parser.index);
-  if (next === '^' || isOperandStartToken(next))
+  if (next === '^' || isOperandStartToken(next)) {
     parser._emitAmbiguity(
       'ambiguous-radical',
       glyph,
       operandEnd(at, parser.index)
     );
+    return;
+  }
+  // A radicand that is one letter, then white space and an operand: `√a b`
+  // is `√a·b`, and a person can mean `√(ab)`. A number radicand is not
+  // reported (`√2 x` is `√2·x`), as a number exponent is not (`x^2 y`). A
+  // word of two or more letters after the white space is not reported
+  // either: a function name (`√x sin x`), a differential (`√x dx`) or the
+  // word `in`.
+  if (next !== ' ' || parser.index !== glyph + 2) return;
+  if (!isLetterToken(radicand) && !isLetterToken(letterOf(radicand))) return;
+  let j = parser.index;
+  while (token(j) === ' ') j += 1;
+  const operand = token(j);
+  if (!isOperandStartToken(operand)) return;
+  if (/^[a-zA-Z]$/.test(operand) && /^[a-zA-Z]$/.test(token(j + 1))) return;
+  parser._emitAmbiguity('ambiguous-radical', glyph, operandEnd(at, j));
+}
+
+/** The letter of a LaTeX command for a letter (`\alpha` is `α`), or `''`. */
+function letterOf(command: string): string {
+  return getSymbolToUnicode().get(command) ?? '';
 }
 
 function negateNumberLiteral(
@@ -2439,10 +2480,26 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: DIVISION_PRECEDENCE,
     parse: (parser, lhs, until) => {
       if (parser.options.strict !== false) return null;
+      parser.skipSpace();
+      const denomStart = parser.index;
       const rhs = parser.parseExpression({
         ...until,
         minPrec: DIVISION_PRECEDENCE + 1,
       });
+      // `13÷2x` is read as `13/(2x)`, as `13/2x` is, and a person can mean
+      // `(13/2)·x`. It is reported with the same rule as the `/` spelling
+      // (see `parseSlashDivide()`).
+      if (
+        rhs !== null &&
+        operator(rhs) === 'InvisibleOperator' &&
+        !isDifferentialSymbol(operand(rhs, 1)) &&
+        !isSymbolApplication(rhs)
+      )
+        parser._emitAmbiguity?.(
+          'ambiguous-denominator',
+          denomStart,
+          parser.index
+        );
       return ['Divide', lhs, missingIfEmpty(rhs)];
     },
   },

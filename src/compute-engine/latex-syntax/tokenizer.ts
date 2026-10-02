@@ -260,6 +260,7 @@ class Tokenizer {
     } else if (next === '^') {
       if (this.peek() === '^') {
         // It might be a ^^ command (inline hex character)
+        const caret = this.pos;
         this.get();
         // There can be zero to six carets with the same number of hex digits
         const hex = this.match(
@@ -270,6 +271,9 @@ class Tokenizer {
             parseInt(hex.slice(hex.lastIndexOf('^') + 1), 16)
           );
         }
+        // Not a hex character: keep the second `^` as a token of its own,
+        // so `x^^2` is a double superscript (an error), not `x^2`.
+        this.pos = caret;
       }
       return next;
     } else if (next === '#') {

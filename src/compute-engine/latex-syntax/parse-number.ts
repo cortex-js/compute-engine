@@ -103,10 +103,14 @@ function parseDecimalDigits(
   return result.join('');
 }
 
-/** True if the tokens from `start` to the current index are only white
- * space (no visual space command such as `\,` and no `{}`). */
-function isPlainWhiteSpace(parser: Parser, start: number): boolean {
-  return parser.latex(start, parser.index).trim() === '';
+/** True if the tokens from `start` to `end` (by default the current index)
+ * are only white space (no visual space command such as `\,` and no `{}`). */
+function isPlainWhiteSpace(
+  parser: Parser,
+  start: number,
+  end = parser.index
+): boolean {
+  return parser.latex(start, end).trim() === '';
 }
 
 /**
@@ -381,6 +385,7 @@ export function parseNumber(
     else parser.match('+');
     parser.skipVisualSpace();
   }
+  const digitsStart = parser.index;
 
   let wholePart = '';
   let fractionalPart = '';
@@ -411,6 +416,26 @@ export function parseNumber(
   ) {
     fractionalPart = parseDecimalDigits(parser, fmt, 'fraction');
     hasFractionalPart = true;
+    // In non-strict mode, white space between the whole part and the decimal
+    // separator joins them: `3 .5` is read as 3.5, and a person can mean
+    // `3·0.5` or the two numbers 3 and .5. It is reported as digits joined
+    // by white space, as `3 5` is. When the whole part has digits joined
+    // by white space (`3 4 .5`), `parseDecimalDigits()` has already reported
+    // them, and the input is reported only once.
+    if (
+      !startsWithdecimalSeparator &&
+      !/[0-9]\s+[0-9]/.test(parser.latex(digitsStart, fractionalIndex)) &&
+      fractionalPart &&
+      parser.options.strict === false &&
+      fractionalIndex > digitsStart &&
+      isPlainWhiteSpace(parser, fractionalIndex - 1, fractionalIndex)
+    )
+      parser._emitAmbiguity?.(
+        'ambiguous-digit-groups',
+        digitsStart,
+        parser.index,
+        { digits: `${wholePart}.${fractionalPart}` }
+      );
   }
 
   let hasRepeatingPart = false;

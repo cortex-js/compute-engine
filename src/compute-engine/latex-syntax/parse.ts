@@ -3070,12 +3070,65 @@ export class _Parser implements Parser {
         this._emitAmbiguity('ambiguous-unknown-character', start, this.index, {
           text: id,
         });
+      this.emitSubscriptEndAmbiguity(id, start);
       return id;
     }
 
     // This was a symbol, but not a valid symbol. Backtrack
     this.index = start;
     return null;
+  }
+
+  /**
+   * In non-strict mode, record an `ambiguous-implicit-subscript` diagnostic
+   * when the symbol `id`, read from the tokens between `start` and the
+   * index, ends with an unbraced subscript that is a run of letters, and
+   * the end of that subscript has a second common reading:
+   *
+   * - a digit directly after the run: `M_max0.5` is `M_max·0.5`, and a
+   *   person can mean a subscript that holds the number;
+   * - the run ends with a function name and has more letters before it:
+   *   `A_maxsin t` is `A_maxsin·t`, and a person can mean `A_max·sin(t)`.
+   *
+   * The span starts at the `_`. A braced subscript (`A_{maxsin}`) has a
+   * clear end and is not reported.
+   */
+  private emitSubscriptEndAmbiguity(id: string, start: number): void {
+    if (this.diagnostics === null || this.options.strict !== false) return;
+    const t = this._tokens;
+    const end = this.index;
+    const isLetter = (i: number) =>
+      t[i] !== undefined && /^[a-zA-Z]$/.test(t[i]);
+    let runStart = end;
+    while (runStart > start && isLetter(runStart - 1)) runStart--;
+    const underscore = runStart - 1;
+    if (runStart === end || underscore <= start || t[underscore] !== '_')
+      return;
+    const run = t.slice(runStart, end).join('');
+    const base = id.slice(0, id.length - run.length - 1);
+    if (/^[0-9]$/.test(t[end] ?? '')) {
+      let numberEnd = end;
+      while (/^[0-9]$/.test(t[numberEnd] ?? '')) numberEnd++;
+      if (t[numberEnd] === '.' && /^[0-9]$/.test(t[numberEnd + 1] ?? '')) {
+        numberEnd++;
+        while (/^[0-9]$/.test(t[numberEnd] ?? '')) numberEnd++;
+      }
+      this._emitAmbiguity('ambiguous-implicit-subscript', underscore, numberEnd, {
+        base,
+        subscript: run,
+      });
+      return;
+    }
+    for (let k = 1; k < run.length - 1; k++) {
+      const fn = run.slice(k);
+      if (BARE_FUNCTION_MAP[fn] === undefined) continue;
+      this._emitAmbiguity('ambiguous-implicit-subscript', underscore, end, {
+        base,
+        subscript: run,
+        function: fn,
+      });
+      return;
+    }
   }
 
   /**
@@ -3177,6 +3230,20 @@ export class _Parser implements Parser {
 
     const nameEnd = this.index;
     this.skipSpace();
+
+    // A prime after the name (`sin'(x)`, `sin\prime(x)`) makes the function
+    // the operand of a derivative, not a call. The name is left to the other
+    // parselets, which read it as a symbol, and the prime is then read as a
+    // postfix `Derivative`. Without this check, `\prime` was read as the
+    // first token of the argument and gave an `unexpected-command` error.
+    if (
+      this.peek === "'" ||
+      this.peek === '\\prime' ||
+      this.peek === '\\doubleprime'
+    ) {
+      this.index = start;
+      return null;
+    }
 
     // Check for optional subscript: log_2(x) or log_{10}(x)
     let subscript: MathJsonExpression | null = null;
@@ -3320,8 +3387,19 @@ export class _Parser implements Parser {
       let argEnd = this.index;
       while (argEnd > argStart && this._tokens[argEnd - 1] === '<space>')
         argEnd--;
+      // An argument without parentheses that starts with `+`: `ln+1` is read
+      // as `ln(+1)`, and the `+` is dropped. A person can mean a sum with a
+      // missing argument of `ln`, or the letters `l·n` plus 1. A `-` is not
+      // reported: `sin -x` is `sin(-x)` by convention.
+      let signAt = argStart;
+      while (this._tokens[signAt] === '<space>') signAt++;
+      const plusSign = this._tokens[signAt] === '+' && signAt < argEnd;
+      if (plusSign)
+        this._emitAmbiguity('ambiguous-function-argument', start, argEnd, {
+          function: name,
+        });
       let depth = 0;
-      for (let k = argStart; k < argEnd; k++) {
+      for (let k = plusSign ? argEnd : argStart; k < argEnd; k++) {
         const tok = this._tokens[k];
         if (tok === '(' || tok === '[' || tok === '<{>' || tok === '\\left')
           depth += 1;
@@ -3339,6 +3417,28 @@ export class _Parser implements Parser {
           break;
         }
       }
+      // A power of `e` after the first factor of the argument: `sin2e^a` is
+      // read as `sin(2e^a)`, and a person can mean `sin(2)·e^a`. The power
+      // of `e` is the exponential function, a second function next to the
+      // first one.
+      const factors =
+        args.length === 1 &&
+        (operator(args[0]) === 'InvisibleOperator' ||
+          operator(args[0]) === 'Multiply')
+          ? operands(args[0])
+          : [];
+      if (
+        factors
+          .slice(1)
+          .some(
+            (f) =>
+              operator(f) === 'Power' &&
+              (operand(f, 1) === 'e' || operand(f, 1) === 'ExponentialE')
+          )
+      )
+        this._emitAmbiguity('ambiguous-function-argument', start, argEnd, {
+          function: name,
+        });
     }
 
     // Special case: cbrt(x) -> ['Root', x, 3]
@@ -3472,6 +3572,13 @@ export class _Parser implements Parser {
     // constants (`oo`→`PositiveInfinity`, `pi`→`Pi`, …) are declared → no-op.
     this.emitSymbolReference(symbolName, start, this.index);
 
+    // `ii` is read as the imaginary unit, and a person can mean the product
+    // `i·i`.
+    if (name === 'ii')
+      this._emitAmbiguity('ambiguous-constant-name', start, this.index, {
+        name: symbolName,
+      });
+
     return this.parseBareApplicationCandidate(symbolName, start) ?? symbolName;
   }
 
@@ -3549,6 +3656,14 @@ export class _Parser implements Parser {
     // returned as a single unknown symbol (`sin*x` → `sin·x`).
     if (BARE_FUNCTION_MAP[name] !== undefined) {
       this.emitSymbolReference(name, start, this.index);
+      // A function name with no argument (`y = min`, `sin*x`) is a symbol,
+      // and a person can mean a call with an argument that is missing. A
+      // name followed by a prime (`sin'(x)`) is the derivative of the
+      // function, so the argument is not missing: it is not reported.
+      if (this.peek !== "'" && this.peek !== '\\prime')
+        this._emitAmbiguity('ambiguous-function-argument', start, this.index, {
+          function: name,
+        });
       return name;
     }
 
@@ -3752,13 +3867,14 @@ export class _Parser implements Parser {
    *
    * - an operand directly after the exponent: `e^2pi` is `e^2·π`, and a
    *   person can mean `e^{2π}`. When the exponent is one letter and a letter
-   *   follows (`e^xy`), the `ambiguous-letter-run` diagnostic of
-   *   `_emitScriptLetterRunSplit()` reports it instead;
+   *   follows (`x^xy`), the `ambiguous-letter-run` diagnostic of
+   *   `_emitScriptLetterRunSplit()` reports the run too;
    * - an operand after white space, when the exponent is a name, is signed,
    *   or the base is `e`: `e^i pi`, `e^-x y`, `e^2 pi i`. A number exponent
    *   on another base is not reported: `x^2 y` is `x^2·y`. A bare function
-   *   name (`e^x sin x`), the word `in` and a differential (`e^x dx`) after
-   *   the white space are not reported;
+   *   name after an exponent that is not signed (`e^x sin x`), the word `in`
+   *   and a differential (`e^x dx`) after the white space are not reported.
+   *   A function name after a signed exponent is reported (`e^-x sin x`);
    * - a `/` directly after an exponent that is a name, is signed or is the
    *   number 1: `e^x/2`, `x^1/2`. A `/` after another number is not
    *   reported: `x^3/2` is `x^3/2` by convention, `^` binds tighter than
@@ -3809,8 +3925,8 @@ export class _Parser implements Parser {
     // An operand directly after the exponent
     const next = t[end];
     if (isOperandStartToken(next)) {
-      // `e^xy`: reported as a letter run (see above)
-      if (end === first + 1 && isLetter(first) && isLetter(end)) return;
+      // `e^xy` is also reported as a letter run (see above). The span of
+      // this diagnostic ends after the whole run.
       report(end);
       return;
     }
@@ -3830,7 +3946,10 @@ export class _Parser implements Parser {
     if (!isOperandStartToken(t[j])) return;
     let word = '';
     for (let k = j; isLetter(k); k++) word += t[k];
-    if (BARE_FUNCTION_MAP[word] !== undefined) return;
+    // A function name after a signed exponent is reported: in `e^-x sin x`
+    // the sign shows that the exponent is an expression typed without
+    // braces, and a person can mean `e^{-x sin x}`.
+    if (BARE_FUNCTION_MAP[word] !== undefined && !signed) return;
     if (word === 'in') return;
     if (word.length === 2 && word[0] === 'd') return;
     report(j);
@@ -3970,7 +4089,7 @@ export class _Parser implements Parser {
       : [];
     const subscripts: MathJsonExpression[] = [];
     let subIndex = index;
-    while (this.peek === '_' || this.peek === '^') {
+    while (this.peek === '_' || this.peek === '^' || this.atDoubleStar()) {
       if (this.match('_')) {
         subIndex = this.index;
         if (this.match('_') || this.match('^'))
@@ -4010,26 +4129,22 @@ export class _Parser implements Parser {
 
           subscripts.push(sub);
         }
-      } else if (this.match('^')) {
+      } else if (this.match('^') || this.matchDoubleStar()) {
+        // In non-strict mode, `**` is read as `^` (see `atDoubleStar()`).
+        const doubleStar = this._tokens[this.index - 1] === '*';
+        // In non-strict mode, white space after `^` does not change the
+        // reading: `x ^ pi` is `x^pi`, and `e^ -x` is `e^-x`.
+        if (this.options.strict === false) this.skipSpace();
         subIndex = this.index;
         if (this.match('_') || this.match('^'))
           superscripts.push(this.error('syntax-error', subIndex));
         else {
-          let sup = this.parseGroup();
-          // In non-strict mode, an unbraced exponent is one whole operand
-          // (`x^12`, `x^2.5`, `x^pi`, `e^sin(x)`, `e^-x`), not the single
-          // token parseToken() would read.
-          if (sup === null && this.options.strict === false)
-            sup = this.parseLenientExponent();
-          sup ??= this.parseToken();
-          // In non-strict mode, also accept parenthesized expressions
-          // Note: After match('^'), peek has changed but TypeScript doesn't know
-          if (
-            sup === null &&
-            this.options.strict === false &&
-            (this.peek as string) === '('
-          )
-            sup = this.parseEnclosure();
+          // A chain of `**` is read from the right, as in programming
+          // languages: `2**3**2` is `2^(3^2)`. A `^` after a `**` exponent
+          // is a second superscript, an error, as `x^y^z` is.
+          const sup = doubleStar
+            ? this.parseDoubleStarExponent()
+            : this.parseUnbracedSuperscript();
           if (sup === null) return this.error('missing', index);
           this._emitScriptLetterRunSplit(subIndex, sup);
           // A second superscript is an error (see below): not reported
@@ -4119,6 +4234,100 @@ export class _Parser implements Parser {
   }
 
   /**
+   * In non-strict mode, whether the next tokens are `**`, the exponent
+   * operator of programming languages, read as `^` by `parseSupsub()`. So
+   * `**` binds as `^` does: `-e**x` is `-(e^x)`, and `x**2y` is `x^2·y`.
+   */
+  private atDoubleStar(): boolean {
+    return (
+      this.options.strict === false &&
+      this.peek === '*' &&
+      this._tokens[this.index + 1] === '*'
+    );
+  }
+
+  /** Match the two tokens of `**` in non-strict mode (see `atDoubleStar()`). */
+  private matchDoubleStar(): boolean {
+    if (!this.atDoubleStar()) return false;
+    this.index += 2;
+    return true;
+  }
+
+  /**
+   * Read the superscript after `^` (or `**`): a braced group, or in
+   * non-strict mode one unbraced operand (`x^12`, `x^2.5`, `x^pi`,
+   * `e^sin(x)`, `e^-x`), or a single token, or in non-strict mode a
+   * parenthesized expression. `spaceAfterSign` is passed to
+   * `parseLenientExponent()`. Return `null` if there is no superscript.
+   */
+  private parseUnbracedSuperscript(
+    spaceAfterSign = false
+  ): MathJsonExpression | null {
+    let sup = this.parseGroup();
+    // In non-strict mode, an unbraced exponent is one whole operand, not the
+    // single token parseToken() would read.
+    if (sup === null && this.options.strict === false)
+      sup = this.parseLenientExponent(spaceAfterSign);
+    sup ??= this.parseToken();
+    // In non-strict mode, also accept parenthesized expressions
+    if (sup === null && this.options.strict === false && this.peek === '(')
+      sup = this.parseEnclosure();
+    return sup;
+  }
+
+  /**
+   * In non-strict mode, after the exponent `exponent` of a `**`, read the
+   * `**` operators that follow, from the right: `2**3**2` is `2^(3^2)`.
+   * Return `exponent` when no `**` follows, and `null` when a `**` has no
+   * exponent.
+   */
+  private parseDoubleStarTower(
+    exponent: MathJsonExpression
+  ): MathJsonExpression | null {
+    const start = this.index;
+    this.skipSpace();
+    if (!this.matchDoubleStar()) {
+      this.index = start;
+      return exponent;
+    }
+    this.skipSpace();
+    const next = this.parseDoubleStarExponent();
+    if (next === null) return null;
+    return this.applySuperscript(exponent, next);
+  }
+
+  /**
+   * In non-strict mode, read the exponent after a `**` and the `**`
+   * operators that follow it (see `parseDoubleStarTower()`). A sign before
+   * the exponent applies to the whole rest of the chain, as in Python:
+   * `2**-3**2` is `2^(-(3^2))`, not `2^((-3)^2)`. Return `null` when there
+   * is no exponent.
+   */
+  private parseDoubleStarExponent(): MathJsonExpression | null {
+    let sign = this.peek === '-' || this.peek === '+' ? this.peek : null;
+    const sup = this.parseUnbracedSuperscript(true);
+    if (sup === null) return null;
+    // Get the operand after the sign. A `-` before a run of digits gives a
+    // negative number (`-3`), before any other operand a `Negate`. If the
+    // sign was not read as the sign of the operand, the exponent is used
+    // as it is.
+    let operand: MathJsonExpression = sup;
+    if (sign === '-') {
+      if (typeof sup === 'number' && (sup < 0 || Object.is(sup, -0)))
+        operand = -sup;
+      else if (Array.isArray(sup) && sup[0] === 'Negate' && sup.length === 2)
+        operand = sup[1] as MathJsonExpression;
+      else sign = null;
+    }
+    const tower = this.parseDoubleStarTower(operand);
+    if (tower === null) return null;
+    // No `**` follows: keep the exponent as it was read (`2**-3` is
+    // `2^(-3)`, with the number `-3`).
+    if (tower === operand) return sup;
+    return sign === '-' ? ['Negate', tower] : tower;
+  }
+
+  /**
    * Read `base` with the superscript `sup` using the dictionary entries
    * triggered by `^` (the last step of `parseSupsub()`).
    */
@@ -4150,18 +4359,23 @@ export class _Parser implements Parser {
    * - After a sign, a parenthesized group (`e^-(x)`), a braced group
    *   (`e^-{x}`) and any single token `parseToken()` reads (`e^-x`,
    *   `e^-\pi`) are also an operand. Without a sign the caller reads those.
-   *   White space after the sign is not skipped: `\R^+ x` keeps its reading.
+   *   White space after the sign is skipped only when `spaceAfterSign` is
+   *   true (see `_parseLenientSignedExponent()` and `**`): `\R^+ x` keeps
+   *   its reading.
    *   A `_`, a `^`, a visual-spacing command or a closing delimiter after
    *   the sign is not an operand either (see `atSignedExponentOperand()`).
    *
    * Return `null`, with the index unchanged, if there is no such exponent.
    */
-  private parseLenientExponent(): MathJsonExpression | null {
+  private parseLenientExponent(
+    spaceAfterSign = false
+  ): MathJsonExpression | null {
     const start = this.index;
     const sign = this.peek === '-' || this.peek === '+' ? this.peek : null;
     if (sign === null) return this.parseLenientExponentOperand()?.[0] ?? null;
 
     this.index++;
+    if (spaceAfterSign) this.skipSpace();
     let operand = this.parseLenientExponentOperand();
     if (operand === null && this.atSignedExponentOperand()) {
       const expr =
@@ -4285,6 +4499,12 @@ export class _Parser implements Parser {
    * `Superminus(e)·x`. The index is after the sign. Return `null`, with the
    * index unchanged, when no operand follows the sign directly (`\Z^+`,
    * `x \to 0^+`), so the postfix entry keeps its reading.
+   *
+   * When the sign is `-` and the base is a plain letter (`e`, `x`, `θ`),
+   * white space after the sign is skipped: `e^- x` is `e^-x`, not
+   * `Superminus(e)·x`. A `+` keeps the postfix reading (`A^+ x` is the
+   * pseudo-inverse of `A` times `x`), and so does a base that is a command
+   * (`\R^- x`), a digit (`0^- x`) or a group.
    */
   _parseLenientSignedExponent(
     lhs: MathJsonExpression,
@@ -4295,8 +4515,11 @@ export class _Parser implements Parser {
     if (this._tokens[start - 1] !== sign || this._tokens[start - 2] !== '^')
       return null;
     const baseStart = this._scriptBaseStart;
+    let b = start - 3;
+    while (this._tokens[b] === '<space>') b--;
+    const letterBase = sign === '-' && /^\p{L}$/u.test(this._tokens[b] ?? '');
     this.index = start - 1;
-    const superscript = this.parseLenientExponent();
+    const superscript = this.parseLenientExponent(letterBase);
     if (superscript === null) {
       this.index = start;
       return null;
@@ -5370,10 +5593,14 @@ export class _Parser implements Parser {
    *   person can mean `f(x)`;
    * - `ambiguous-name-then-number`: the symbol is not a function, white
    *   space separates it from `rhs`, and `rhs` starts with a digit. `x 2` is
-   *   `x·2`, and a person can mean `x_2`. The symbol must be a whole word;
+   *   `x·2`, and a person can mean `x_2`. When the symbol is the last letter
+   *   of a run read one letter at a time (`xy 0.5`), the span is the whole
+   *   run. Also the glyph `∞` directly followed by a digit (`∞2`);
    * - `ambiguous-delta`: the symbol is `Δ` (also `\Delta` or the word
    *   `Delta`) followed by a letter. `Δx` and `Delta x` are `Δ·x`, and a
    *   person can mean the one symbol "change in x".
+   *
+   * A sign before the factor is ignored: `-Δα` is reported as `Δα` is.
    */
   private emitJuxtapositionAmbiguity(
     lhs: MathJsonExpression,
@@ -5381,11 +5608,15 @@ export class _Parser implements Parser {
     rhsStartToken: number
   ): void {
     if (this.diagnostics === null || this.options.strict !== false) return;
-    const factor =
+    let factor =
       operator(lhs) === 'InvisibleOperator' &&
       !this._applicationPolicy?.has(lhs)
         ? operands(lhs).at(-1)!
         : lhs;
+    // A sign before the name does not change the reading of what follows
+    // it: `-Δα` is `(-Δ)·α`, as `Δα` is `Δ·α`.
+    if (operator(factor) === 'Negate' && nops(factor) === 1)
+      factor = operand(factor, 1)!;
     const name = symbol(factor);
     if (name === null) return;
     const t = this._tokens;
@@ -5413,15 +5644,48 @@ export class _Parser implements Parser {
       return;
     }
 
-    // The last letter of a run read one letter at a time (`7 mod 3`) is not
-    // a name: the run is reported as a letter run.
+    // The last letter of a run read one letter at a time (`xy 0.5` is
+    // `x·y·0.5`) is reported with the whole run: the span starts at the
+    // first letter, and `detail.name` is the run. A run that is a function
+    // name of the lenient grammar (`7 mod 3`) is a word, not a name: the
+    // run is reported as a letter run only.
     // A symbol that is not spelled with letters (`…`) is not a name either.
     if (
       spaced &&
       /^[0-9]$/.test(t[rhsStartToken] ?? '') &&
-      !/^[a-zA-Z]$/.test(t[factorStart - 1] ?? '') &&
       isOperandStartToken(t[factorStart]) &&
       !/^[0-9]$/.test(t[factorStart])
+    ) {
+      let runStart = factorStart;
+      if (name.length === 1)
+        while (runStart > 0 && /^[a-zA-Z]$/.test(t[runStart - 1])) runStart--;
+      const run = this.latex(runStart, factorEnd);
+      if (
+        runStart < factorStart &&
+        (BARE_FUNCTION_MAP[run] !== undefined ||
+          PARENTHESIZED_BARE_FUNCTION_MAP[run] !== undefined)
+      )
+        return;
+      this._emitAmbiguity(
+        'ambiguous-name-then-number',
+        runStart,
+        this.index,
+        { name: runStart < factorStart ? run : name }
+      );
+      return;
+    }
+
+    // The glyph `∞` directly followed by a digit: `∞2` is `∞·2`, and a
+    // person can mean an index, as `π2` is read `π_2`. A letter is not
+    // reported here: a letter directly followed by a digit is read as a
+    // subscript (`x2`, `π2`) and reported as `ambiguous-implicit-subscript`.
+    // The command `\infty` is LaTeX, where `\infty2` is a product.
+    if (
+      !spaced &&
+      name === 'PositiveInfinity' &&
+      factorStart === factorEnd - 1 &&
+      t[factorStart] === '∞' &&
+      /^[0-9]$/.test(t[rhsStartToken] ?? '')
     ) {
       this._emitAmbiguity(
         'ambiguous-name-then-number',

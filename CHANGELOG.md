@@ -27,6 +27,27 @@
   - `arctan(iy)` for `y > 1`, `arccot(iy)` for `−1 < y < 0`, and `artanh`
     and `arcoth` on their cuts on the real axis do not change.
 
+- **The lenient grammar reads `**` as `^`.** `**` was an infix operator that
+  bound looser than a prefix minus and than a `^` in its exponent. It now has
+  the same reading as `^` (`ce.parse(text, { strict: false })`):
+  - `-e**θ` is `-(e^θ)`, was `(-e)^θ`; `-x**2` is `-(x²)`, was `(-x)²`.
+  - `1**x^M`, `a**b^c` and `x^2**3` are an `unexpected-superscript` error,
+    as `1^x^M` is. Before, they were `1^(x^M)`, `a^(b^c)` and `(x²)³`.
+  - `x**y!` is `(x^y)!`, as `x^y!` is, was `x^(y!)`.
+  - `x**2y` is `x²·y` and reports `ambiguous-exponent-end`, as `x^2y` does.
+  - A chain of `**` alone is read from the right, as in programming
+    languages, and does not change: `2**3**2` is `2^(3^2)`.
+- **White space after `^` does not change the reading of the lenient
+  grammar.** `x ^ pi` is `x^π`, was `x^p·i`; `x^ -y` is `x^(-y)`, was an
+  error. White space after the `-` of an exponent on a letter is also
+  skipped: `e^- x` is `e^(-x)`, was `Superminus(e)·x`. `A^+ x` (the
+  pseudo-inverse of `A` times `x`) and `\R^- x` do not change, and the strict
+  grammar does not change.
+- **`x^^2` and `x^²` are a double-superscript error**, in both grammars. The
+  tokenizer dropped the second `^` of a `^^` that was not followed by two
+  hexadecimal digits, so these inputs were read as `x²`. A TeX `^^` character
+  code such as `^^41` is still read.
+
 - **The factorial of a real non-integer follows `ce.precision`.** `x!` for a
   real non-integer `x` is Γ(x + 1). It was computed in doubles at every
   precision, so `Factorial(2.5).N()` was `3.3233509704478448`, a double,
@@ -74,6 +95,17 @@
 
 ### New Features
 
+- **More reading choices of the lenient grammar report an `ambiguous-*`
+  code** (the reading does not change):
+  - `ambiguous-denominator` for `÷`: `13÷2x` is `13/(2x)`, as `13/2x` is.
+  - `ambiguous-digit-groups` for white space before a decimal separator:
+    `3 .5` is read as 3.5.
+  - `ambiguous-range` for `...` directly followed by a digit after a
+    decimal number: `.5...5` is the range from 0.5 to 5, and can be `.5..`
+    and `.5`. `1...5` is not reported.
+  - `ambiguous-function-argument` for an argument with no parentheses that
+    starts with `+`: `ln+1` is `ln(1)`. `sin -x` is not reported.
+
 - **Wolfram Language aliases `EulerPhi`, `PartitionsP` and `Det`.** They are
   aliases for `Totient`, `NPartition` and `Determinant`: the canonical form
   uses the CE name (`["EulerPhi", 12]` becomes `["Totient", 12]`, which
@@ -84,7 +116,40 @@
   because Mathematica's `Tr` of a vector or of a rank-3 tensor has a different
   meaning than `Trace`. See `docs/MATHEMATICA-NAMES.md`.
 
+- **More `ambiguous-*` parse diagnostics in the lenient grammar.** These
+  inputs were read with no diagnostic, although a person can mean a second
+  reading. The reading does not change, and the strict grammar reports none
+  of these codes. One code is new and eight codes report more inputs:
+  - `ambiguous-missing-base` (new): a `_` with no base is read as the symbol
+    `_` (`-_1`).
+  - `ambiguous-name-then-number`: a run of letters, white space, then a
+    number (`xy 0.5`, was reported only as a letter run), and `∞` directly
+    followed by a digit (`∞2`).
+  - `ambiguous-implicit-subscript`: an unbraced subscript of letters
+    directly followed by a digit (`M_max0.5`, `x_a2`), or that ends with a
+    function name (`A_maxsin t`).
+  - `ambiguous-delta`: `Δ` after a sign (`-Δα`, `-Δx`).
+  - `ambiguous-exponent-end`: a one-letter exponent directly followed by a
+    letter (`x^xy`, `e^xy`; these also report `ambiguous-letter-run`, as
+    before), and a function name after a signed exponent and white space
+    (`e^-x sin x`).
+  - `ambiguous-factorial`: a `!` directly after an exponent or a radicand
+    (`M³!`, `2^-k!`, `√i!`), and a superscript directly after a `!`
+    (`n!²`).
+  - `ambiguous-radical`: a Latin letter directly before `√` (`t√y`), and a
+    one-letter radicand followed by white space and an operand (`√a b`).
+  - `ambiguous-function-argument`: a power of `e` after the first factor of
+    an argument without parentheses (`sin2e^a`), and a function name with no
+    argument (`y = min`, `sin*x`).
+  - `ambiguous-constant-name`: `ii`, read as the imaginary unit.
+
+  See `docs/plans/2026-10-01-lenient-ambiguity-codes.md`, section 5.
+
 ### Issues Resolved
+
+- **`sin\prime(x)` in the lenient grammar is the derivative of `sin`**, as
+  `sin'(x)` and `\sin\prime(x)` are. The `\prime` was read as the start of
+  the argument of `sin`, and gave an `unexpected-command` error.
 
 - **`toString()` wraps the operand of a factorial when needed.** The
   factorial of `5/2` printed as `5/2!`, which reads as 5/(2!), and the
