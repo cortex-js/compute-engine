@@ -2,40 +2,6 @@
 
 ### Behavior Changes
 
-- **A constant `NIntegrate` inside a compiled expression is folded to its
-  value.** `compile(y + NIntegrate(x ↦ x, 0, 1))` gave `success: false`, since
-  `NIntegrate` has no compiled form and the compiler declined to evaluate it
-  ahead of time; it now compiles to `_.y + 0.5`. The compiler evaluates a
-  constant `NIntegrate` like a one-dimensional `Integrate`, within the same cost
-  limit, so a nested integral (a user function whose body is another
-  `NIntegrate`) still declines.
-- **`NIntegrate` uses quadrature first.** `NIntegrate(f, a, b)` now uses the
-  same methods, in the same order, as `Integrate(f, x, a, b).N()`: on a
-  semi-infinite interval the oscillatory quadrature, then adaptive
-  Gauss–Kronrod quadrature (for a compiled integrand and, with a smaller panel
-  budget, for an interpreted one). It used to go straight to Monte Carlo
-  sampling. `NIntegrate(x ↦ x², 0, 1)` was `0.333422` and is now
-  `0.3333333333333333`. A divergent integral is now `+∞`, `−∞` or `NaN`
-  (`NIntegrate(x ↦ 1/x, 0, 1)` is `+∞`, and a proven pole strictly inside the
-  bounds gives `+∞`, `−∞` or `NaN`), as for `Integrate(…).N()`; before, both
-  gave a sampled finite number.
-  Monte Carlo is still the fallback when the quadrature does not converge, so
-  `NIntegrate` still reads the `WithRandomSeed` frame. A seeded `NIntegrate`
-  gives different digits than before when the quadrature succeeds, because no
-  sample is drawn. The result is still a plain number (real or complex), not a
-  `Measurement`.
-
-- **`PrimitiveRoot` ignores the sign of `n`.** The unit group mod `−n` is the
-  unit group mod `n`, so `PrimitiveRoot(-7)` is now `3`; it stayed unevaluated
-  before. This agrees with the new `PrimitiveRootList`, which also gives `[0]`
-  for `n = 1`, as `PrimitiveRoot(1)` is `0`. `PrimitiveRoot(0)` stays
-  unevaluated and `PrimitiveRootList(0)` is `[]`.
-
-- **`MultiplicativeOrder` ignores the sign of `n`,** as `PrimitiveRoot` does,
-  because the unit group mod `−n` is the unit group mod `n`:
-  `MultiplicativeOrder(3, -7)` is `6`; it stayed unevaluated before. This
-  applies to the form with a list of residues too. `n = 0` still stays
-  unevaluated.
 - **A definite integral with only one bound stays unevaluated.** A limit that
   has an upper bound and no lower bound, or a lower bound and no upper bound
   (`\int^2 y^2\,dy`, `\int_0 y^2\,dy`, `Limits(y, Nothing, 2)`, the flat
@@ -117,6 +83,40 @@
   or a number in the integrand is a float (`∫₋₁¹ 1.5/t dt`). `.N()` and
   `NIntegrate` give `NaN`, as before. A pole with one sign is still `+∞` or
   `−∞`, and a divergence whose sign is not established still stays
+  unevaluated.
+- **A constant `NIntegrate` inside a compiled expression is folded to its
+  value.** `compile(y + NIntegrate(x ↦ x, 0, 1))` gave `success: false`, since
+  `NIntegrate` has no compiled form and the compiler declined to evaluate it
+  ahead of time; it now compiles to `_.y + 0.5`. The compiler evaluates a
+  constant `NIntegrate` like a one-dimensional `Integrate`, within the same cost
+  limit, so a nested integral (a user function whose body is another
+  `NIntegrate`) still declines.
+- **`NIntegrate` uses quadrature first.** `NIntegrate(f, a, b)` now uses the
+  same methods, in the same order, as `Integrate(f, x, a, b).N()`: on a
+  semi-infinite interval the oscillatory quadrature, then adaptive
+  Gauss–Kronrod quadrature (for a compiled integrand and, with a smaller panel
+  budget, for an interpreted one). It used to go straight to Monte Carlo
+  sampling. `NIntegrate(x ↦ x², 0, 1)` was `0.333422` and is now
+  `0.3333333333333333`. A divergent integral is now `+∞`, `−∞` or `NaN`
+  (`NIntegrate(x ↦ 1/x, 0, 1)` is `+∞`, and a proven pole strictly inside the
+  bounds gives `+∞`, `−∞` or `NaN`), as for `Integrate(…).N()`; before, both
+  gave a sampled finite number.
+  Monte Carlo is still the fallback when the quadrature does not converge, so
+  `NIntegrate` still reads the `WithRandomSeed` frame. A seeded `NIntegrate`
+  gives different digits than before when the quadrature succeeds, because no
+  sample is drawn. The result is still a plain number (real or complex), not a
+  `Measurement`.
+
+- **`PrimitiveRoot` ignores the sign of `n`.** The unit group mod `−n` is the
+  unit group mod `n`, so `PrimitiveRoot(-7)` is now `3`; it stayed unevaluated
+  before. This agrees with the new `PrimitiveRootList`, which also gives `[0]`
+  for `n = 1`, as `PrimitiveRoot(1)` is `0`. `PrimitiveRoot(0)` stays
+  unevaluated and `PrimitiveRootList(0)` is `[]`.
+
+- **`MultiplicativeOrder` ignores the sign of `n`,** as `PrimitiveRoot` does,
+  because the unit group mod `−n` is the unit group mod `n`:
+  `MultiplicativeOrder(3, -7)` is `6`; it stayed unevaluated before. This
+  applies to the form with a list of residues too. `n = 0` still stays
   unevaluated.
 
 ### New Features
@@ -261,16 +261,6 @@
 
 ### Issues Resolved
 
-- **`GammaLn` at machine precision is accurate next to 0, 1 and 2.**
-  `GammaLn(1e-10)` had 8 correct digits (`23.02585084714237`, against
-  `23.025850929882735`), and `GammaLn(1 + 10⁻¹⁰)` had about 10: the double
-  kernel formed z − 1 + i, which loses the low digits of a small z, and its
-  absolute error of about 10⁻¹⁶ is a large relative error next to the zeros of
-  ln Γ at 1 and 2. For 0 < z ≤ 7/2 the kernel now uses the Taylor series of
-  ln Γ(1 + e) about 1 with ζ(k) − 1 as its coefficients, and is within a few
-  units in the last place of mpmath there. The new `LogGamma` uses the same
-  kernel for a positive real argument.
-
 - **The GLSL and WGSL inverse trigonometric functions of a complex argument
   are accurate.** The shader helpers of `Arcsin`, `Arccos`, `Arctan`,
   `Arsinh`, `Arcosh` and `Artanh` (also used by `Arccsc`, `Arcsec`, `Arsech`
@@ -315,6 +305,59 @@
   gives a Python `complex` for these twelve functions, also when the value is
   real: `Artanh`, `Arsinh` and `Arcosh` returned a `float` before
   (`Arcsin`, `Arccos` and `Arctan` already returned a `complex`).
+
+- **A definite integral over a zero of `eᵗ − a`, `sin t − a` or
+  `(t − a)^(−n)` stays unevaluated.** `∫₀¹ eᵗ/(eᵗ − a) dt` gave
+  `ln|e − a| − ln|1 − a|`, wrong for `1 ≤ a ≤ e`, where the integrand has a
+  pole. `∫₀¹ cos t/(sin t − a) dt` gave `ln|sin 1 − a| − ln|−a|`, wrong for
+  `0 ≤ a ≤ sin 1`, `∫₀¹ cos t/(sin t − a)² dt` gave a finite value where the
+  integral is `+∞`, and `∫₀¹ (t − a)^(−n) dt` gave a closed form for every
+  `n`. These integrals now stay unevaluated, unless the declared type of `a`
+  or an assumption puts the zero outside the interval: with
+  `ce.assume(a > 3)`, `∫₀¹ eᵗ/(eᵗ − a) dt` is `ln(a − e) − ln(a − 1)`. The
+  zero of a divisor `g(t) − c`, where `g` is monotone on the interval, is
+  located by comparing `c` with `g` at the bounds. Any other divisor with a
+  free symbol whose zeros cannot be located keeps the integral unevaluated.
+- **A definite integral with a free symbol in a bound and a pole at a number
+  stays unevaluated.** `∫ₐ¹ dt/t` gave `−ln|a|`, `∫₋₁ᵇ dt/t` gave `ln|b|` and
+  `∫₀ᵇ dt/(t + 1)` gave `ln|b + 1|`: each is wrong when the pole is between
+  the bounds (`a < 0`, `b > 0`, `b < −1`). `∫₀ᵃ dt/t` gave `+∞`, wrong for
+  `a < 0`. They now stay unevaluated unless an assumption puts the pole
+  outside the interval: with `ce.assume(a > 0)`, `∫ₐ¹ dt/t` is `−ln(a)`. A
+  removable or integrable singularity is not a pole: `∫₀ˣ sin(t)/t dt` is
+  still `Si(x)` and `∫₀ᵇ dt/√t` is still `2√b`. A pole of `tan`, `cot`,
+  `sec` or `csc` (or a zero of a `sin` or `cos` divisor) with a free symbol
+  in a bound keeps the integral unevaluated: `∫₀ˣ tan t dt` was
+  `ln|sec x|`, wrong for `x ≥ π/2`.
+- **`∫ ln(ax + b) dx` is correct.** `∫ ln(x + 1) dx` gave
+  `(x + 1)·ln(x) − x + 1`, and `∫₀¹ ln(x + 1) dx` gave `+∞`. They are now
+  `(x + 1)·ln(x + 1) − x` and `2ln(2) − 1`. `∫ ln(2x + 3) dx` is
+  `(2x + 3)·ln(2x + 3)/2 − x`.
+- **`.N()` of an integral over a pole agrees with `evaluate()` when the
+  integrand has a constant such as `π`.** `.N()` of `\int_{-1}^1
+  \frac{\pi}{t}\,dt` gave a random Monte Carlo estimate (`0.0 ± 3.4`); it
+  now gives `NaN` (`evaluate()` gives `Indeterminate`). `.N()` of
+  `\int_{-1}^1 \frac{\pi}{t^2}\,dt` gave `2.1e154 ± 8.8e143`; it now gives
+  `+∞`, as `evaluate()` does.
+- **`∫₋₁¹ dt/(eᵃ·t)` is `Indeterminate`**, since `eᵃ` is never zero and the
+  integrand changes sign across the pole at `0`. It was `0`.
+- **The flat spelling of several integration variables or indexes reads a
+  repeated name as a bound.** `["Integrate", ["Multiply", "x", "y"], "x", 0,
+  "y", "y", 0, 1]` read as `Limits(x, Nothing, 0)`, `Limits(y, Nothing,
+  Nothing)`, `Limits(y, 0, 1)`, with `y` an index twice. A name that would
+  be an index twice is now the upper bound of the index before it:
+  `Limits(x, 0, y), Limits(y, 0, 1)`. The same applies to `Sum` and
+  `Product`: `["Sum", "k", "k", 1, "n", "n", 1, 10]`, which had three
+  `missing` error operands, is `Sum(k, Limits(k, 1, n), Limits(n, 1, 10))`.
+- **`GammaLn` at machine precision is accurate next to 0, 1 and 2.**
+  `GammaLn(1e-10)` had 8 correct digits (`23.02585084714237`, against
+  `23.025850929882735`), and `GammaLn(1 + 10⁻¹⁰)` had about 10: the double
+  kernel formed z − 1 + i, which loses the low digits of a small z, and its
+  absolute error of about 10⁻¹⁶ is a large relative error next to the zeros of
+  ln Γ at 1 and 2. For 0 < z ≤ 7/2 the kernel now uses the Taylor series of
+  ln Γ(1 + e) about 1 with ζ(k) − 1 as its coefficients, and is within a few
+  units in the last place of mpmath there. The new `LogGamma` uses the same
+  kernel for a positive real argument.
 
 - **Inverse trigonometric functions are accurate at large and small
   arguments.** `\arcsin(-1000000)` gave `-1.5707963267948966 +
@@ -380,12 +423,53 @@
   heads now stay unevaluated when a list operand is not known to be finite or
   has more than 1,000,000 elements.
 
+- **An iterated integral with a slowly integrable singularity has the right
+  value and error.** `Integrate(y^(−0.999), Limits(y, 0, 1), Limits(x, 0,
+  2)).N()` gave `0 ± 1.3e+289`; it is now `2000.000000002 ± 0.000000024`
+  (exact: 2000). With `y^(−1/2)` it gave `0 ± 9.4e+136`; it is now
+  `4.000000000000 ± 0.000000000015` (exact: 4). The error of the inner
+  levels was averaged over the nodes of the outer level and multiplied by
+  its range, but the nodes are packed next to the singularity, where the
+  inner values and their errors are largest. When the inner values keep one
+  sign, the error added is now their relative error times the magnitude of
+  the result.
+
+- **`∫₋₁¹ dt/(a·t)` with a free `a` is `Indeterminate`.** It was `0`. The pole
+  at `t = 0` could not be confirmed by sampling while `a` is free. The
+  integrand is now split into a constant factor and a part with only the
+  integration variable (`(1/a)·(1/t)`), and the pole of that part is
+  confirmed. For every `a ≠ 0` the integrand changes sign across the pole,
+  and for `a = 0` it is undefined everywhere, so the integral has no value.
+  `∫₋₁¹ dt/(a·t²)` was `−2/a`; it now stays unevaluated, and is `+∞` when
+  `a > 0` is assumed and `−∞` when `a < 0`. `∫₋₁¹ a/t dt` was `0`; it now
+  stays unevaluated (it is `0` for `a = 0`). `∫₁² dt/(a·t)` is still
+  `ln(2)/a`. An integrand with a pole at a number and a free symbol that is
+  not a constant factor (`1/(t·(t² + a² + 1))` over `[−1, 1]`) also stays
+  unevaluated.
+
+- **`.N()` of an iterated integral with a moving pole and an infinite bound
+  is `+∞`.** `Integrate((y − x)⁻², Limits(y, 0, +∞), Limits(x, 3, 4)).N()`
+  gave `5140000000000000 ± 440000000000000`; it is now `+∞`: for every `x`
+  in `(3, 4)` the inner integral has a pole at `y = x`. The scan for such
+  poles now places its points on an infinite range with the transform of
+  the quadrature, and cuts an infinite range to a finite one for the pole
+  check.
+
 - **`Stirling`, `StirlingS1` and `Eulerian` outside their triangle are `0`.**
   `Stirling(3, 5)`, `StirlingS1(3, 5)` and `Eulerian(3, 5)` stayed
   unevaluated (and their compiled form gave `NaN`); they are now `0`, as
   `Binomial(3, 5)` already was. `Eulerian(0, 0)` is now `1`. A negative or
   symbolic operand still leaves the expression unevaluated.
 
+- **`Log` and `Ln` check their operand count in strict mode.** `Log` and
+  `Ln` take one or two operands (the second is the base; `Ln(3, 4)` is
+  `Log(3, 4)`). With `ce.strict = true`, `Log(8, 2, 3)` was valid and
+  evaluated to `3`, and `Ln(3, 4, 5)` became `Log(3, 4, 5)`. Now the extra
+  operand is an error, as for `Sqrt(4, 5)`: `Log(8, 2, 3)` is
+  `Log(8, 2, Error("unexpected-argument", "3"))`, and `Ln(3, 4, 5)` is
+  `Ln(3, 4, Error("unexpected-argument", "5"))`. This applies to `ce.box()`,
+  `ce.function()` and `ce.parse()` (`\log(8, 2, 3)`). In non-strict mode
+  the extra operand is kept, as before.
 - **A redeclared `If`, `Sum`, `Block`, … compiles as the user definition.**
   With `ce.declare('If', { ...ce.lookupDefinition('If').operator, evaluate:
   () => ce.number(100) })`, `If(x > 0, sin(x), cos(x))` gives `100` in the
@@ -576,87 +660,6 @@
 - `Derivative()` with no operand logged "error canonicalizing `Derivative`" and
   stayed `Derivative()`; it is now `Derivative(Error("missing"))`, the
   standard form of a missing required operand.
-- **A definite integral over a zero of `eᵗ − a`, `sin t − a` or
-  `(t − a)^(−n)` stays unevaluated.** `∫₀¹ eᵗ/(eᵗ − a) dt` gave
-  `ln|e − a| − ln|1 − a|`, wrong for `1 ≤ a ≤ e`, where the integrand has a
-  pole. `∫₀¹ cos t/(sin t − a) dt` gave `ln|sin 1 − a| − ln|−a|`, wrong for
-  `0 ≤ a ≤ sin 1`, `∫₀¹ cos t/(sin t − a)² dt` gave a finite value where the
-  integral is `+∞`, and `∫₀¹ (t − a)^(−n) dt` gave a closed form for every
-  `n`. These integrals now stay unevaluated, unless the declared type of `a`
-  or an assumption puts the zero outside the interval: with
-  `ce.assume(a > 3)`, `∫₀¹ eᵗ/(eᵗ − a) dt` is `ln(a − e) − ln(a − 1)`. The
-  zero of a divisor `g(t) − c`, where `g` is monotone on the interval, is
-  located by comparing `c` with `g` at the bounds. Any other divisor with a
-  free symbol whose zeros cannot be located keeps the integral unevaluated.
-- **A definite integral with a free symbol in a bound and a pole at a number
-  stays unevaluated.** `∫ₐ¹ dt/t` gave `−ln|a|`, `∫₋₁ᵇ dt/t` gave `ln|b|` and
-  `∫₀ᵇ dt/(t + 1)` gave `ln|b + 1|`: each is wrong when the pole is between
-  the bounds (`a < 0`, `b > 0`, `b < −1`). `∫₀ᵃ dt/t` gave `+∞`, wrong for
-  `a < 0`. They now stay unevaluated unless an assumption puts the pole
-  outside the interval: with `ce.assume(a > 0)`, `∫ₐ¹ dt/t` is `−ln(a)`. A
-  removable or integrable singularity is not a pole: `∫₀ˣ sin(t)/t dt` is
-  still `Si(x)` and `∫₀ᵇ dt/√t` is still `2√b`. A pole of `tan`, `cot`,
-  `sec` or `csc` (or a zero of a `sin` or `cos` divisor) with a free symbol
-  in a bound keeps the integral unevaluated: `∫₀ˣ tan t dt` was
-  `ln|sec x|`, wrong for `x ≥ π/2`.
-- **`∫ ln(ax + b) dx` is correct.** `∫ ln(x + 1) dx` gave
-  `(x + 1)·ln(x) − x + 1`, and `∫₀¹ ln(x + 1) dx` gave `+∞`. They are now
-  `(x + 1)·ln(x + 1) − x` and `2ln(2) − 1`. `∫ ln(2x + 3) dx` is
-  `(2x + 3)·ln(2x + 3)/2 − x`.
-- **`.N()` of an integral over a pole agrees with `evaluate()` when the
-  integrand has a constant such as `π`.** `.N()` of `\int_{-1}^1
-  \frac{\pi}{t}\,dt` gave a random Monte Carlo estimate (`0.0 ± 3.4`); it
-  now gives `NaN` (`evaluate()` gives `Indeterminate`). `.N()` of
-  `\int_{-1}^1 \frac{\pi}{t^2}\,dt` gave `2.1e154 ± 8.8e143`; it now gives
-  `+∞`, as `evaluate()` does.
-- **`∫₋₁¹ dt/(eᵃ·t)` is `Indeterminate`**, since `eᵃ` is never zero and the
-  integrand changes sign across the pole at `0`. It was `0`.
-- **The flat spelling of several integration variables or indexes reads a
-  repeated name as a bound.** `["Integrate", ["Multiply", "x", "y"], "x", 0,
-  "y", "y", 0, 1]` read as `Limits(x, Nothing, 0)`, `Limits(y, Nothing,
-  Nothing)`, `Limits(y, 0, 1)`, with `y` an index twice. A name that would
-  be an index twice is now the upper bound of the index before it:
-  `Limits(x, 0, y), Limits(y, 0, 1)`. The same applies to `Sum` and
-  `Product`: `["Sum", "k", "k", 1, "n", "n", 1, 10]`, which had three
-  `missing` error operands, is `Sum(k, Limits(k, 1, n), Limits(n, 1, 10))`.
-- **An iterated integral with a slowly integrable singularity has the right
-  value and error.** `Integrate(y^(−0.999), Limits(y, 0, 1), Limits(x, 0,
-  2)).N()` gave `0 ± 1.3e+289`; it is now `2000.000000002 ± 0.000000024`
-  (exact: 2000). With `y^(−1/2)` it gave `0 ± 9.4e+136`; it is now
-  `4.000000000000 ± 0.000000000015` (exact: 4). The error of the inner
-  levels was averaged over the nodes of the outer level and multiplied by
-  its range, but the nodes are packed next to the singularity, where the
-  inner values and their errors are largest. When the inner values keep one
-  sign, the error added is now their relative error times the magnitude of
-  the result.
-- **`∫₋₁¹ dt/(a·t)` with a free `a` is `Indeterminate`.** It was `0`. The pole
-  at `t = 0` could not be confirmed by sampling while `a` is free. The
-  integrand is now split into a constant factor and a part with only the
-  integration variable (`(1/a)·(1/t)`), and the pole of that part is
-  confirmed. For every `a ≠ 0` the integrand changes sign across the pole,
-  and for `a = 0` it is undefined everywhere, so the integral has no value.
-  `∫₋₁¹ dt/(a·t²)` was `−2/a`; it now stays unevaluated, and is `+∞` when
-  `a > 0` is assumed and `−∞` when `a < 0`. `∫₋₁¹ a/t dt` was `0`; it now
-  stays unevaluated (it is `0` for `a = 0`). `∫₁² dt/(a·t)` is still
-  `ln(2)/a`. An integrand with a pole at a number and a free symbol that is
-  not a constant factor (`1/(t·(t² + a² + 1))` over `[−1, 1]`) also stays
-  unevaluated.
-- **`.N()` of an iterated integral with a moving pole and an infinite bound
-  is `+∞`.** `Integrate((y − x)⁻², Limits(y, 0, +∞), Limits(x, 3, 4)).N()`
-  gave `5140000000000000 ± 440000000000000`; it is now `+∞`: for every `x`
-  in `(3, 4)` the inner integral has a pole at `y = x`. The scan for such
-  poles now places its points on an infinite range with the transform of
-  the quadrature, and cuts an infinite range to a finite one for the pole
-  check.
-- **`Log` and `Ln` check their operand count in strict mode.** `Log` and
-  `Ln` take one or two operands (the second is the base; `Ln(3, 4)` is
-  `Log(3, 4)`). With `ce.strict = true`, `Log(8, 2, 3)` was valid and
-  evaluated to `3`, and `Ln(3, 4, 5)` became `Log(3, 4, 5)`. Now the extra
-  operand is an error, as for `Sqrt(4, 5)`: `Log(8, 2, 3)` is
-  `Log(8, 2, Error("unexpected-argument", "3"))`, and `Ln(3, 4, 5)` is
-  `Ln(3, 4, Error("unexpected-argument", "5"))`. This applies to `ce.box()`,
-  `ce.function()` and `ce.parse()` (`\log(8, 2, 3)`). In non-strict mode
-  the extra operand is kept, as before.
 - **The flat MathJSON form of a definite integral reads its bounds for any
   bound expression.** `["Integrate", ["Power", "y", 2], "y", 0, "Pi"]` read
   `Pi` as a second integration variable and evaluated to `-1/3 * pi`; it is
