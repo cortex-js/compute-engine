@@ -199,9 +199,9 @@ describe('VALUES ON THE IMAGINARY AXIS', () => {
   test.each(rows)(
     'f(%p·i): the constant part is exact',
     (y, erfiY, erfY, shiY, siY, chiY, ciY) => {
-      // The real kernels of the four integrals are a few ulps off past
-      // |y| = 2: Shi and Chi are built on Ei, Si and Ci on a continued
-      // fraction (3 ulps at 2.5 and 3).
+      // The real kernels of the four integrals are within 1 ulp at these
+      // points (`trigonometric-integral-kernels.test.ts` has their measured
+      // accuracy over the whole range).
       const close = (actual: number, expected: number, max = 2) =>
         expect(ulps(actual, expected)).toBeLessThanOrEqual(max);
       const s = Math.sign(y);
@@ -220,17 +220,17 @@ describe('VALUES ON THE IMAGINARY AXIS', () => {
       // Si(iy) = i·Shi(y), Shi(iy) = i·Si(y)
       v = N(['SinIntegral', iy(y)]);
       expect(v.re).toBe(0);
-      close(v.im, shiY, 4);
+      close(v.im, shiY, 1);
       v = N(['SinhIntegral', iy(y)]);
       expect(v.re).toBe(0);
-      close(v.im, siY, 4);
+      close(v.im, siY, 1);
 
       // Ci(iy) = Chi(|y|) + sign(y)·iπ/2, Chi(iy) = Ci(|y|) + sign(y)·iπ/2
       v = N(['CosIntegral', iy(y)]);
-      close(v.re, chiY, 4);
+      close(v.re, chiY, 1);
       expect(v.im).toBe((s * Math.PI) / 2);
       v = N(['CoshIntegral', iy(y)]);
-      close(v.re, ciY, 4);
+      close(v.re, ciY, 1);
       expect(v.im).toBe((s * Math.PI) / 2);
     }
   );
@@ -322,6 +322,17 @@ describe('VALUES ON THE IMAGINARY AXIS ABOVE MACHINE PRECISION', () => {
 
   test('erf(10¹⁰·i) is past the big-decimal range: unevaluated', () => {
     expect(N(['Erf', iy(['Power', 10, 10])]).operator).toBe('Erf');
+  });
+
+  test('a huge exact imaginary argument finishes', () => {
+    // An exact sum aligned to the last digit of `10^(10⁹)·i` or of
+    // `10^(10⁹) + 1` has a billion digits.
+    const huge = ['Power', 10, 1000000000];
+    expect(N(['Multiply', huge, 'ImaginaryUnit']).toString()).toBe(
+      '1e+1000000000i'
+    );
+    expect(N(['Add', huge, 1]).toString()).toBe('1e+1000000000');
+    expect(N(['Erf', iy(huge)]).operator).toBe('Erf');
   });
 
   test('erfi of a large argument uses the asymptotic series', () => {

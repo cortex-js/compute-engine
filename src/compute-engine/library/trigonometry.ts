@@ -95,6 +95,12 @@ import {
   sinhIntegralComplex,
   coshIntegralComplex,
 } from '../numerics/numeric-complex.js';
+import {
+  fresnelCComplex,
+  fresnelSComplex,
+  sincComplex,
+  sincImaginaryAxis,
+} from '../numerics/sinc-fresnel-complex.js';
 
 /**
  * Whether a `Hypot` leg has an infinite magnitude, which makes the hypotenuse
@@ -208,6 +214,22 @@ function boundedEntireRealType(
   const scalar = x.facts.collection === true ? undefined : x;
   if (scalar?.facts.finite === true || isSubtype(t, 'complex')) return 'number';
   return 'number';
+}
+
+/**
+ * The value that `apply()` gives with a complex kernel, or `undefined` when
+ * that value is `NaN` or has a part that is not finite. The complex kernels
+ * of `Sinc`, `FresnelS` and `FresnelC` give such a part only when the value
+ * is past the range of doubles. That value is finite, and its direction is
+ * one that no infinity of the engine holds, so the expression stays
+ * unevaluated (the rule of `applyOnImaginaryAxis()`).
+ */
+function complexKernelValue(
+  value: Expression | undefined
+): Expression | undefined {
+  if (value === undefined || value.isNaN === true || value.isFinite === false)
+    return undefined;
+  return value;
 }
 
 /** The carrier of `Arctan`, for the error its evaluate handler gives `~oo`. */
@@ -1136,9 +1158,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // `evaluate()` (policy D2 — no exactness to preserve), and
     // `numericApproximation` (`.N()`) always numericizes.
     // `shouldNumericize()` dispatches to the machine kernel or, when the
-    // engine precision exceeds machine precision, the bignum kernel. Complex
-    // arguments stay symbolic (no complex kernel — previously the real part
-    // was used silently, which was incorrect).
+    // engine precision exceeds machine precision, the bignum kernel. A
+    // complex argument uses a complex kernel, which computes in doubles at
+    // every precision; on the imaginary axis, an identity with a real kernel
+    // gives the part that is a constant exactly. A complex value past the
+    // range of doubles stays unevaluated (`complexKernelValue()`).
     //
 
     /** sinc(x) = sin(x)/x with sinc(0) = 1 (unnormalized cardinal sine) */
@@ -1185,15 +1209,30 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
             return numericApproximation ? exact.N() : exact;
           }
         }
-        if (!isNumber(x) || x.isComplex) return undefined;
-        // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return floatIfFloatOperand([x], ce.One);
-        if (x.isInfinity) return ce.Zero;
+        if (!isNumber(x)) return undefined;
+        if (!x.isComplex) {
+          // Exact special values, regardless of numericApproximation
+          if (x.isSame(0)) return floatIfFloatOperand([x], ce.One);
+          if (x.isInfinity) return ce.Zero;
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
-        return apply(
+        // On the imaginary axis sinc(iy) = sinh(y)/y, a real value: the
+        // imaginary part is exactly 0. The value is positive, so a value past
+        // the range of doubles (`sinc(800i)`) is +∞.
+        const onAxis = applyOnImaginaryAxis(
           x,
-          (x) => sinc(x),
-          (x) => bigSinc(x)
+          (y) => [sincImaginaryAxis(y), 0],
+          (y) => [y.sinh().div(y), 0]
+        );
+        if (onAxis === null) return ce.PositiveInfinity;
+        if (onAxis !== undefined) return onAxis;
+        return complexKernelValue(
+          apply(
+            x,
+            (x) => sinc(x),
+            (x) => bigSinc(x),
+            sincComplex
+          )
         );
       },
     },
@@ -1216,15 +1255,28 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.isComplex) return undefined;
-        // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
-        if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
+        if (!isNumber(x)) return undefined;
+        if (!x.isComplex) {
+          // Exact special values, regardless of numericApproximation
+          if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
+          if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
-        return apply(
+        // On the imaginary axis S(iy) = −i·S(y): the real part is exactly 0,
+        // and the real kernels compute the other part.
+        const onAxis = applyOnImaginaryAxis(
           x,
-          (x) => fresnelS(x),
-          (x) => bigFresnelS(x)
+          (y) => [0, -fresnelS(y)],
+          (y) => [0, bigFresnelS(y).neg()]
+        );
+        if (onAxis !== undefined) return onAxis ?? undefined;
+        return complexKernelValue(
+          apply(
+            x,
+            (x) => fresnelS(x),
+            (x) => bigFresnelS(x),
+            fresnelSComplex
+          )
         );
       },
     },
@@ -1247,15 +1299,28 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.isComplex) return undefined;
-        // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
-        if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
+        if (!isNumber(x)) return undefined;
+        if (!x.isComplex) {
+          // Exact special values, regardless of numericApproximation
+          if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
+          if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
-        return apply(
+        // On the imaginary axis C(iy) = i·C(y): the real part is exactly 0,
+        // and the real kernels compute the other part.
+        const onAxis = applyOnImaginaryAxis(
           x,
-          (x) => fresnelC(x),
-          (x) => bigFresnelC(x)
+          (y) => [0, fresnelC(y)],
+          (y) => [0, bigFresnelC(y)]
+        );
+        if (onAxis !== undefined) return onAxis ?? undefined;
+        return complexKernelValue(
+          apply(
+            x,
+            (x) => fresnelC(x),
+            (x) => bigFresnelC(x),
+            fresnelCComplex
+          )
         );
       },
     },

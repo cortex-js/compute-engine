@@ -23,6 +23,54 @@
     `Erf(10^{10}i)` at every precision. A real overflow is still `+∞`
     (`Erfi(27)`).
 
+- **Bessel and Airy functions of a complex argument.** `BesselJ`,
+  `BesselY`, `BesselI`, `BesselK` (integer order) and `AiryAi`, `AiryBi`,
+  `AiryAiPrime`, `AiryBiPrime` compute a value at a complex argument under
+  `.N()`, and under `evaluate()` when the argument is a float. They stayed
+  symbolic: `BesselJ(3, 0.7i).N()` was `BesselJ(3, 0.7i)`, it is now
+  `-0.007367373607628006i`. `BesselY` and `BesselK` also have a value on the
+  negative real axis, their branch cut: the limit from above, as for
+  `Ln(-2)` (`BesselY(0, -2).N()` is `0.5103756726497453 + 0.4477815582824712i`).
+  On the imaginary axis `J_n(iy) = iⁿ·I_n(y)` and `I_n(iy) = iⁿ·J_n(y)`, so
+  one part is exactly `0`. Measured against mpmath at more than 2,000 points:
+  a relative error of at most `7·10⁻¹⁴` for J, I and K, `4·10⁻¹⁴` for Y away
+  from its zeros, `5·10⁻¹⁴` for the Airy functions up to `|z| = 40` and
+  `3·10⁻¹³` at `|z| = 120` (the conditioning of the function there). A
+  non-integer order stays symbolic. The result type of `BesselY` and
+  `BesselK` of a real argument that is not positive is now `number`, not
+  `real`. Compiled code computes these functions for a real argument only:
+  a complex operand is refused (compiled `BesselI(0, z)` gave `1` at
+  `z = 1 + i`).
+- **`LambertW` on every branch, and `Sinc`, `FresnelS`, `FresnelC` of a
+  complex argument.** `.N()` (and `evaluate()` of a float argument)
+  computes `W_k(z)` for every integer branch `k` and every complex `z`, with
+  the branch cuts of mpmath's `lambertw` (on a cut, the limit from above, as
+  for `Ln`). A real argument outside the real domain of a branch has its
+  complex value: `LambertW(-1).N()` is `-0.31813 + 1.33724i` and
+  `LambertW(0.5, -1).N()` is `-2.25916 - 4.22096i` (they stayed symbolic).
+  `W_k(0) = -∞` for `k ≠ 0`. `Sinc(1+2i).N()` is `1.41700 - 0.87439i`. On
+  the imaginary axis `Sinc(iy) = sinh(y)/y`, `FresnelS(iy) = -i·FresnelS(y)`
+  and `FresnelC(iy) = i·FresnelC(y)`, with the constant part exact. Against
+  mpmath, the largest relative error is `6.6·10⁻¹⁶` for `LambertW` (31,000
+  points, branches −3 to 3) and `4.3·10⁻¹⁶` for `Sinc`; for the Fresnel
+  integrals it is `4·10⁻¹⁶` for `|z| < 1` and `5·10⁻¹⁴` for `|z| < 10`, and
+  further out it follows the condition number `π|z|²`.
+- **`LambertW(-1/e)` and `LambertW(-1/e, -1)` are exactly `-1`**, under
+  `evaluate()` as well as `.N()`, at every precision. `evaluate()` left them
+  unevaluated. At machine precision `.N()` gives `-1`, not the complex value
+  of the double just below `-1/e`.
+- **The type of `LambertW(x)` for a real `x` is `real` only when the branch
+  and the range of `x` prove it** (`W₀` on `[−1/e, ∞]`, `W₋₁` on
+  `[−1/e, 0)`). Otherwise it is `number`: `LambertW(-1)` was typed `real`.
+- **`solve` keeps a root from a `LambertW` template only when it is real.**
+  The templates that solve `x·eˣ = b` and the related shapes give the real
+  roots: `W₀` when its argument is in `[−1/e, ∞)`, and `W₋₁` for the second
+  real root when its argument is in `[−1/e, 0)`. Outside these intervals
+  `W₀` and `W₋₁` now have complex values, which are two of infinitely many
+  complex roots: `solve` returns the real roots of these equations, as it
+  does for `sin(x) = 2`. So `x·eˣ = 3` still solves to `W(3)` only, and
+  `x·eˣ = -1` has no root.
+
 ### Improvements
 
 - **More accurate `erf`, `erfc` and `erfi` in doubles.** The machine kernels
@@ -45,7 +93,56 @@
   was `9.99982e-11`, it is now `1e-10`. The real kernels of `Shi` and `Chi`
   use their Maclaurin series for `|x| ≤ 2`.
 
+- **More accurate `SinIntegral`, `CosIntegral`, `SinhIntegral`,
+  `CoshIntegral` and `ExpIntegralEi` in doubles, mostly as fast or faster.**
+  Measured against mpmath on more than 30,000 points from 0.12 to 10³⁰⁰, the
+  largest error is now 0.74 unit in the last place for `SinIntegral` (21
+  before), 1.5 for `CosIntegral` away from its zeros (73 before), and for
+  `SinhIntegral`, `CoshIntegral` and `ExpIntegralEi` 1 for `2 ≤ x < 50` and 2
+  above (11 before); `CoshIntegral` below 2 is within 1.6 away from its zero
+  (4 before). `CosIntegral` gave wrong values past 10¹⁵, and
+  `SinhIntegral`, `CoshIntegral` and `ExpIntegralEi` gave `+∞` from 716; they
+  are finite up to their overflow (717.05 and 716.36). `SinIntegral` and
+  `CosIntegral` are up to 3 times faster for `2 ≤ x ≤ 16`; `CoshIntegral`
+  below 2 is about 2 times slower. Compiled JavaScript uses the same kernels.
+- **`.N()` of a sum or product with a very large exponent gap finishes.**
+  `(10^{10^9} + 1).N()`, `(10^{10^9}·i).N()` and `Erf(10^{10^9}·i).N()` did
+  not finish at a precision of 50 digits, or failed with "Maximum BigInt size
+  exceeded": the exact sum aligned the operands to a billion-digit
+  significand. Now they take a few milliseconds. In the arithmetic of
+  approximate values above machine precision, an operand that is more than
+  10,000 digits (or 4 times the precision) below the other is replaced by a
+  value of the same sign just under that limit, which rounds the same way at
+  every precision up to that limit. Exact arithmetic is not changed.
+
 ### Issues Resolved
+
+- **`BesselY` and `BesselJ` of a real argument are accurate.** `BesselY`
+  computed `Y₀` and `Y₁` from a series that loses about `x/2.3` digits, then
+  recurred: `BesselY(12, 40).N()` was `-1.83` instead of `-0.0236`, and
+  `BesselY(30, 200).N()` was `-5.5·10⁷⁶` instead of `-0.0224`. `BesselJ`
+  started its backward recurrence too low for a large argument:
+  `BesselJ(12, 95)` had a relative error of `10⁻⁸`, and `BesselJ(80, 80)` was
+  `1.98` instead of `0.104`. `Y₀` and `Y₁`
+  now come from Steed's continued fractions for `2 < x ≤ 30`, and the
+  recurrence of `J` starts high enough. Against mpmath at orders 0 to 80 and
+  `x` up to 240, both are within `1·10⁻¹⁴` of the size of the function. The
+  asymptotic expansions also reduce the phase `x − (2n+1)π/4` exactly
+  (`BesselY(0, 1000)` had an error of `3·10⁻¹⁴`). Compiled JavaScript uses
+  the same kernels.
+- **`FresnelS` and `FresnelC` of a real argument between 1.6 and 4.5 are
+  accurate to `7·10⁻¹⁶`.** One coefficient of the auxiliary function was
+  wrong: the relative error was up to `4.5·10⁻¹²` (`FresnelS(2.5)` was
+  `0.61918175581901`, it is `0.6191817558195929`). The GLSL and WGSL
+  lowerings had the same coefficient (with no visible effect in 32-bit
+  floats); it is corrected there too.
+- **`LambertW` next to `-1/e` is accurate.** The real kernels returned
+  exactly `-1` for an argument within `10⁻¹⁵` of `-1/e`, also above machine
+  precision: at 50 digits, `LambertW(-1/e + 10^{-20})` had an error of
+  `2·10⁻¹⁰`. They now use the series about the branch point, with `1/e`
+  held to more than double precision, and above machine precision Halley's
+  iteration with extra digits.
+
 
 - **In Epsil, `f(x) := body` defines `f` as `f(x) = body` does** (#400,
   contributed by [enumeratio](https://github.com/enumeratio)). As a statement,

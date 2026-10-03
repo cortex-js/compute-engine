@@ -1224,6 +1224,45 @@ describe('add()', () => {
   });
 });
 
+describe('add() and sub() with a large exponent gap', () => {
+  test('a zero operand returns the other operand', () => {
+    const big = new BigDecimal('1e100000000');
+    expect(rep(big.add(BigDecimal.ZERO))).toEqual(rep(big));
+    expect(rep(BigDecimal.ZERO.add(big))).toEqual(rep(big));
+    expect(rep(big.sub(BigDecimal.ZERO))).toEqual(rep(big));
+    expect(rep(BigDecimal.ZERO.sub(big))).toEqual(rep(big.neg()));
+  });
+
+  test('add() and sub() are exact at any gap', () => {
+    const a = new BigDecimal('1e20000');
+    expect(a.add(1).sub(a).toString()).toBe('1');
+    const x = new BigDecimal('-1' + '0'.repeat(20000) + '.5');
+    expect(x.floor().add(a).toString()).toBe('-1');
+    expect(x.ceil().add(a).toString()).toBe('0');
+  });
+
+  test('addBounded() past the gap limit rounds as the exact sum', () => {
+    // Exact sums would have 10⁹ digits: more than a bigint can hold.
+    const a = new BigDecimal('1e1000000000');
+    expect(rep(a.addBounded(1).toPrecision(50))).toEqual(rep(a));
+    expect(rep(a.subBounded(1).toPrecision(50))).toEqual(rep(a));
+    expect(rep(new BigDecimal(1).subBounded(a).toPrecision(50))).toEqual(
+      rep(a.neg())
+    );
+    // 10²⁰⁰⁰⁰ − 10⁻⁵ is strictly between 10²⁰⁰⁰⁰ − 10¹⁰⁰⁰¹ and 10²⁰⁰⁰⁰.
+    const top = new BigDecimal('1e20000');
+    const b = top.subBounded(new BigDecimal('1e-5'));
+    expect(b.lt(top)).toBe(true);
+    expect(b.gt(top.sub(new BigDecimal('1e10001')))).toBe(true);
+    expect(rep(b.toPrecision(50))).toEqual(rep(top));
+  });
+
+  test('addBounded() within the gap limit is exact', () => {
+    const a = new BigDecimal('1e5000');
+    expect(a.addBounded(1).subBounded(a).toString()).toBe('1');
+  });
+});
+
 // ================================================================
 // sub()
 // ================================================================

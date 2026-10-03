@@ -1080,10 +1080,22 @@ describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
 
   it('LambertW linear-exp-branch drops the NaN candidate for single-real-root shapes (W1: x·eˣ − 1 → one root)', () => {
     const r = solved('x e^x - 1 = 0');
-    // Only the principal root; the W₋₁ companion argument (−1) is outside its
-    // domain → NaN → validateRoots drops it (no spurious root).
+    // Only the principal root: the argument of the W₋₁ companion (−1) is
+    // outside its real domain, so that root is complex and the template does
+    // not fire.
     expect(r.length).toBe(1);
     expect(r[0]).toBeCloseTo(0.5671432904097838, 9);
+  });
+
+  it('LambertW templates give no complex root (x·eˣ = b with b < −1/e)', () => {
+    // W₀(b) and W₋₁(b) are complex for b < −1/e: two of the infinitely many
+    // complex roots, and `solve` returns the real ones (none here).
+    expect(solved('x e^x = -1')).toEqual([]);
+    expect(solved('x e^x = -0.5')).toEqual([]);
+    // Between −1/e and 0 both real roots are given.
+    const r = solved('x e^x = -0.2');
+    expect(r.some((v) => Math.abs(v - -0.2591711018190737) < 1e-9)).toBe(true);
+    expect(r.some((v) => Math.abs(v - -2.542641357773527) < 1e-9)).toBe(true);
   });
 
   it('LambertW exp-bare-branch: 0.8ˣ + x = 0 → second real root −W₋₁(ln 0.8)/ln 0.8', () => {

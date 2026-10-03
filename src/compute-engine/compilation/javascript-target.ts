@@ -3356,7 +3356,13 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'Sinc',
   'FresnelC',
   'FresnelS',
+  // The four Bessel heads have complex values in the interpreter (a complex
+  // argument, and a negative real one for `BesselY`/`BesselK`), but the
+  // function-codegen lowerings below call the real kernels.
   'BesselJ',
+  'BesselY',
+  'BesselI',
+  'BesselK',
   'Zeta',
   'HurwitzZeta',
   // `PolyGamma` has a complex kernel in the interpreter (`polygammaComplex`,

@@ -5,10 +5,20 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { bigStieltjesGamma, STIELTJES_MAX_ORDER } from './stieltjes.js';
 import { erf, erfc } from './error-functions.js';
+import { lambertWNearBranchPoint } from './lambert-w-complex.js';
 
 // The machine kernels of the error functions live in their own module; they
 // are re-exported here, where the other special-function kernels are.
 export { erf, erfc, erfi, dawson } from './error-functions.js';
+// Likewise for the kernels of Ei, Si, Ci, Shi and Chi.
+import { expIntegralEi } from './exponential-integrals.js';
+export {
+  expIntegralEi,
+  sinIntegral,
+  cosIntegral,
+  sinhIntegral,
+  coshIntegral,
+} from './exponential-integrals.js';
 import {
   type DD,
   ddAdd,
@@ -2902,6 +2912,73 @@ function bigLambertWHalley(w: BigNum, x: BigNum, tol: BigNum): BigNum {
 }
 
 /**
+ * Bignum W₀ (`sign` = 1) or W₋₁ (`sign` = −1) at an x next to the branch
+ * point, 0 ≤ x + 1/e < 0.05. Returns `undefined` for an x outside that
+ * interval.
+ *
+ * With p = ±√(2(e·x + 1)), W = −1 + p − p²/3 + 11p³/72 − 43p⁴/540 +
+ * 769p⁵/17280 − 221p⁶/8505 + … (Corless et al., "On the Lambert W function",
+ * 1996, eq. 4.22; the coefficients were checked against mpmath). When p⁷ is
+ * below the working precision, these seven terms are the value. Otherwise
+ * they are the start of Halley's iteration, which runs with about
+ * log₁₀(1/|p|) extra digits: its step divides by e^w·(w + 1), and w + 1 is
+ * about p.
+ *
+ * When x + 1/e is within a few units of 10^−precision of 0, x is −1/e
+ * rounded to the working precision, and W = −1.
+ */
+function bigLambertWNearBranchPoint(
+  x: BigNum,
+  sign: 1 | -1
+): BigNum | undefined {
+  const invE = BigDecimal.ONE.div(BigDecimal.ONE.exp());
+  const d0 = x.add(invE);
+  // x is −1/e to the working precision when x + 1/e is below the rounding
+  // error of x and of 1/e (a few units of 10^−precision): x is then −1/e
+  // rounded, and W = −1. A larger negative x + 1/e is outside the real
+  // domain: the caller uses the complex kernel.
+  if (d0.abs().lt(new BigDecimal(10).pow(1 - BigDecimal.precision)))
+    return BigDecimal.NEGATIVE_ONE;
+  if (d0.isNegative() || d0.gte(0.05)) return undefined;
+  const prec = BigDecimal.precision;
+  return withGuardDigits(10, () => {
+    const e = BigDecimal.ONE.exp();
+    const d = x.add(BigDecimal.ONE.div(e));
+    let p = d.mul(e).mul(2).sqrt();
+    if (sign < 0) p = p.neg();
+    // |p| is between 10^(magnitude − 1) and 10^magnitude.
+    const magnitude = p.exponent + p._digitCount();
+    const coefficients: [number, number][] = [
+      [-1, 1],
+      [1, 1],
+      [-1, 3],
+      [11, 72],
+      [-43, 540],
+      [769, 17280],
+      [-221, 8505],
+    ];
+    let w: BigNum = BigDecimal.ZERO;
+    let power: BigNum = BigDecimal.ONE;
+    for (const [num, den] of coefficients) {
+      w = w.add(power.mul(num).div(den));
+      power = power.mul(p);
+    }
+    if (-7 * (magnitude - 1) > prec + 15) return w;
+    const extra = Math.max(0, -magnitude) + 10;
+    BigDecimal.precision += extra;
+    try {
+      return bigLambertWHalley(
+        w,
+        x,
+        new BigDecimal(10).pow(-BigDecimal.precision)
+      );
+    } finally {
+      BigDecimal.precision -= extra;
+    }
+  });
+}
+
+/**
  * Bignum Lambert W function W_k(x) satisfying W(x)·e^{W(x)} = x.
  *
  * `branch` selects the real branch (0 = principal W₀, defined for x ≥ −1/e;
@@ -2921,14 +2998,12 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum, branch = 0): BigNum {
   // stop early (or, when the working precision was higher, left a garbage tail
   // beyond the true precision). (NU-P1-10)
   const tol = new BigDecimal(10).pow(-BigDecimal.precision);
-  const branchTol = new BigDecimal(10).pow(-15); // machine precision tolerance
 
   if (branch === 0) {
     if (x.isZero()) return new BigDecimal(0);
 
-    // Branch point: W(-1/e) = -1. Use a tolerance that accounts for
-    // machine-precision inputs.
-    if (x.sub(negInvE).abs().lt(branchTol)) return BigDecimal.NEGATIVE_ONE;
+    const near = bigLambertWNearBranchPoint(x, 1);
+    if (near !== undefined) return near;
 
     // W₀ is defined for x >= -1/e
     if (x.lt(negInvE)) return BigDecimal.NAN;
@@ -2953,8 +3028,8 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum, branch = 0): BigNum {
   }
 
   if (branch === -1) {
-    // Branch point: W₋₁(-1/e) = -1
-    if (x.sub(negInvE).abs().lt(branchTol)) return BigDecimal.NEGATIVE_ONE;
+    const near = bigLambertWNearBranchPoint(x, -1);
+    if (near !== undefined) return near;
 
     // W₋₁ is real only on -1/e <= x < 0
     if (x.lt(negInvE) || x.gte(0)) return BigDecimal.NAN;
@@ -3420,11 +3495,13 @@ export function lambertW(x: number, branch = 0): number {
   if (branch === 0) {
     if (x === 0) return 0;
 
+    // Next to the branch point −1/e, Halley's step loses digits: the series
+    // about −1/e gives the value directly.
+    const near = lambertWNearBranchPoint(x, 1);
+    if (near !== undefined) return near;
+
     // W₀ is defined for x >= -1/e
     if (x < -e1) return NaN;
-
-    // Branch point: W(-1/e) = -1
-    if (Math.abs(x + e1) < 1e-15) return -1;
 
     // Initial guess
     let w: number;
@@ -3446,11 +3523,11 @@ export function lambertW(x: number, branch = 0): number {
   }
 
   if (branch === -1) {
+    const near = lambertWNearBranchPoint(x, -1);
+    if (near !== undefined) return near;
+
     // W₋₁ is real only on -1/e <= x < 0
     if (x < -e1 || x >= 0) return NaN;
-
-    // Branch point: W₋₁(-1/e) = -1
-    if (Math.abs(x + e1) < 1e-15) return -1;
 
     // Initial guess. Near the branch point use the series around -1/e (the
     // mirror of the W₀ series: MINUS p); near 0⁻ use the log asymptotic
@@ -3473,8 +3550,12 @@ export function lambertW(x: number, branch = 0): number {
 /**
  * Bessel function of the first kind J_n(x) for integer order n.
  *
- * Uses power series for small |x|, asymptotic expansion for large |x|,
- * and Miller's backward recurrence for intermediate values.
+ * Uses the power series for |x| ≤ 2, the Hankel asymptotic expansion for
+ * |x| > 25 + n²/2, and Miller's backward recurrence between.
+ *
+ * Measured against mpmath at orders 0 to 80 and x up to 240: the error is
+ * at most 5·10⁻¹⁵ of max(|J_n(x)|, √(2/(πx))), and the relative error is at
+ * most 5·10⁻¹⁵ where J_n(x) is small because n > x.
  *
  * Reference: Abramowitz & Stegun, Ch. 9; NIST DLMF 10.2, 10.17
  */
@@ -3494,8 +3575,9 @@ export function besselJ(n: number, x: number): number {
   // For large x, use asymptotic expansion
   if (x > 25 + (n * n) / 2) return besselJAsymptotic(n, x);
 
-  // For small x relative to order, use power series
-  if (x < 5 + n) return besselJSeries(n, x);
+  // The series alternates: for a larger x its terms grow before they
+  // decrease, and their sum loses digits.
+  if (x <= 2) return besselJSeries(n, x);
 
   // Intermediate: Miller's backward recurrence
   return besselJMiller(n, x);
@@ -3544,44 +3626,84 @@ function hankelPQ(n: number, x: number): [number, number] {
   return [P, Q];
 }
 
-/** J_n(x) ~ sqrt(2/(πx)) [P cos(χ) - Q sin(χ)] where χ = x - nπ/2 - π/4 */
-function besselJAsymptotic(n: number, x: number): number {
-  const chi = x - (n / 2 + 0.25) * Math.PI;
-  const [P, Q] = hankelPQ(n, x);
-  return Math.sqrt(2 / (Math.PI * x)) * (P * Math.cos(chi) - Q * Math.sin(chi));
+/**
+ * [cos χ, sin χ] for χ = x − (2n+1)·π/4, the phase of the Hankel expansions.
+ *
+ * χ is not computed: x − (2n+1)π/4 rounds to the unit in the last place of
+ * x, and an error of 6·10⁻¹⁴ at x = 1000 shows in the result. Instead
+ * cos(x − φ) and sin(x − φ) are expanded, with cos φ and sin φ equal to
+ * ±√2/2 (φ is an odd multiple of π/4), and `Math.cos`/`Math.sin` reduce x
+ * itself exactly.
+ */
+function hankelPhase(n: number, x: number): [number, number] {
+  const h = Math.SQRT1_2;
+  // (2n + 1)·π/4 modulo 2π: k = (2n + 1) mod 8 is 1, 3, 5 or 7.
+  const k = (((2 * n + 1) % 8) + 8) % 8;
+  const cosPhi = k === 1 || k === 7 ? h : -h;
+  const sinPhi = k === 1 || k === 3 ? h : -h;
+  const c = Math.cos(x);
+  const s = Math.sin(x);
+  return [c * cosPhi + s * sinPhi, s * cosPhi - c * sinPhi];
 }
 
-/** Miller's backward recurrence for J_n(x).
- *  Start from a large index M, recur downward using J_{k-1} = (2k/x)J_k - J_{k+1},
- *  then normalize using J_0 + 2J_2 + 2J_4 + ... = 1.
+/** J_n(x) ~ sqrt(2/(πx)) [P cos(χ) - Q sin(χ)] where χ = x - nπ/2 - π/4 */
+function besselJAsymptotic(n: number, x: number): number {
+  const [cosChi, sinChi] = hankelPhase(n, x);
+  const [P, Q] = hankelPQ(n, x);
+  return Math.sqrt(2 / (Math.PI * x)) * (P * cosChi - Q * sinChi);
+}
+
+/**
+ * Miller's backward recurrence for J_n(x), x > 0: start from J_{M+1} = 0 and
+ * J_M = 1 at an index M where J_M(x) is negligible, recur downward with
+ * J_{k−1} = (2k/x)·J_k − J_{k+1}, then normalize with
+ * J_0 + 2·(J_2 + J_4 + …) = 1 (DLMF 10.12.4).
+ *
+ * J_k(x) decreases quickly once k is past x, so M = max(n, x) +
+ * √(160·max(n, x)) + 10 gives full double precision (the start of Numerical
+ * Recipes `bessj`, there for n > x only, extended here to x > n). The values
+ * grow while k decreases past x: they are scaled down when they pass
+ * 10²⁵⁰, so they cannot overflow.
  */
 function besselJMiller(n: number, x: number): number {
-  const M = Math.max(n + 20, Math.ceil(x) + 30);
-  let jp1 = 0; // J_{M+1}
-  let jk = 1; // J_M (arbitrary nonzero start)
-  const vals = new Array(M + 1);
-  vals[M] = jk;
-
+  const top = Math.max(n, x);
+  let M = Math.ceil(top + Math.sqrt(160 * top)) + 10;
+  if (M % 2 === 1) M += 1;
+  let jp1 = 0; // J_{k+1}
+  let jk = 1; // J_k (arbitrary nonzero start at k = M)
+  let sum = 0; // 2·(J_2 + J_4 + …), unnormalized
+  let result = 0;
   for (let k = M; k >= 1; k--) {
     const jm1 = ((2 * k) / x) * jk - jp1;
     jp1 = jk;
     jk = jm1;
-    vals[k - 1] = jk;
+    if (Math.abs(jk) > 1e250) {
+      jk *= 1e-250;
+      jp1 *= 1e-250;
+      sum *= 1e-250;
+      result *= 1e-250;
+    }
+    // jk is now J_{k−1}
+    if (k - 1 === n) result = jk;
+    if (k - 1 > 0 && (k - 1) % 2 === 0) sum += 2 * jk;
   }
-
-  // Normalize: J_0 + 2(J_2 + J_4 + ...) = 1
-  let norm = vals[0];
-  for (let k = 2; k <= M; k += 2) norm += 2 * vals[k];
-  const scale = 1 / norm;
-
-  return vals[n] * scale;
+  // jk is J_0
+  return result / (sum + jk);
 }
 
 /**
  * Bessel function of the second kind Y_n(x) for integer order n.
  *
- * Y_0 and Y_1 computed directly via series/integrals, higher orders via
- * forward recurrence: Y_{n+1}(x) = (2n/x)Y_n(x) - Y_{n-1}(x).
+ * Y_0 and Y_1 come from the Neumann series for x ≤ 2, from Steed's method
+ * for 2 < x ≤ 30 (`besselY0Y1Steed()`), and from the Hankel asymptotic
+ * expansion for x > 30. Higher orders use the forward recurrence
+ * Y_{k+1}(x) = (2k/x)·Y_k(x) − Y_{k−1}(x), which is stable because Y_k grows
+ * with k. For x > 25 + n²/2 the asymptotic expansion of Y_n is used directly.
+ * The Neumann series alone loses about x/2.3 digits to cancellation, so it is
+ * not used past 2.
+ *
+ * Measured against mpmath at orders 0 to 30 and x up to 200: the error is at
+ * most 1·10⁻¹⁴ of max(|Y_n(x)|, √(2/(πx))).
  *
  * Reference: NIST DLMF 10.8, 10.17
  */
@@ -3595,15 +3717,20 @@ export function besselY(n: number, x: number): number {
     return n % 2 === 0 ? besselY(n, x) : -besselY(n, x);
   }
 
-  // For large x, use asymptotic expansion.
-  // The series for Y_n suffers from catastrophic cancellation at large x,
-  // so we switch to asymptotic earlier than for J_n.
-  if (x > 12 + (n * n) / 4) return besselYAsymptotic(n, x);
+  if (x > 25 + (n * n) / 2) return besselYAsymptotic(n, x);
 
-  // Compute Y_0 and Y_1 via series, then recur forward
-  const y0 = besselY0(x);
+  let y0: number;
+  let y1: number;
+  if (x <= 2) {
+    y0 = besselY0(x);
+    y1 = besselY1(x);
+  } else if (x <= 30) {
+    [y0, y1] = besselY0Y1Steed(x);
+  } else {
+    y0 = besselYAsymptotic(0, x);
+    y1 = besselYAsymptotic(1, x);
+  }
   if (n === 0) return y0;
-  const y1 = besselY1(x);
   if (n === 1) return y1;
 
   let ym1 = y0;
@@ -3614,6 +3741,91 @@ export function besselY(n: number, x: number): number {
     yk = yp1;
   }
   return yk;
+}
+
+/**
+ * [Y_0(x), Y_1(x)] for x ≥ 2, by Steed's method (Numerical Recipes `bessjy`
+ * at order 0; DLMF 10.10.1 for the continued fraction of J_ν′/J_ν):
+ * - CF1 gives f = J_0′(x)/J_0(x) (modified Lentz);
+ * - CF2 gives p + iq = (H_0⁽¹⁾)′(x)/H_0⁽¹⁾(x) (Steed's algorithm, in complex
+ *   arithmetic written out in real and imaginary parts);
+ * - the Wronskian J_0·Y_0′ − J_0′·Y_0 = 2/(πx) then gives J_0, Y_0 and
+ *   Y_0′ = −Y_1.
+ * CF1 takes about x steps, CF2 a number of steps that decreases with x.
+ * The error grows slowly with x: at most 5·10⁻¹⁴ of max(|Y|, √(2/(πx))) at
+ * x = 50, which is why `besselY` uses it up to 30 only.
+ */
+function besselY0Y1Steed(x: number): [number, number] {
+  const EPS = 1e-16;
+  const FPMIN = 1e-300;
+  const xi = 1 / x;
+  const xi2 = 2 * xi;
+  const w = xi2 / Math.PI;
+
+  // CF1: f = J_0′/J_0. `isign` tracks the sign of J_0.
+  let isign = 1;
+  let h = FPMIN;
+  let b = 0;
+  let d = 0;
+  let c = h;
+  for (let i = 1; i <= 10_000; i++) {
+    b += xi2;
+    d = b - d;
+    if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = b - 1 / c;
+    if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    const del = c * d;
+    h *= del;
+    if (d < 0) isign = -isign;
+    if (Math.abs(del - 1) < EPS) break;
+  }
+  const f = h;
+
+  // CF2: p + iq
+  let a = 0.25;
+  let p = -0.5 * xi;
+  let q = 1;
+  const br = 2 * x;
+  let bi = 2;
+  let fact = (a * xi) / (p * p + q * q);
+  let cr = br + q * fact;
+  let ci = bi + p * fact;
+  let den = br * br + bi * bi;
+  let dr = br / den;
+  let di = -bi / den;
+  let dlr = cr * dr - ci * di;
+  let dli = cr * di + ci * dr;
+  let temp = p * dlr - q * dli;
+  q = p * dli + q * dlr;
+  p = temp;
+  for (let i = 2; i <= 10_000; i++) {
+    a += 2 * (i - 1);
+    bi += 2;
+    dr = a * dr + br;
+    di = a * di + bi;
+    if (Math.abs(dr) + Math.abs(di) < FPMIN) dr = FPMIN;
+    fact = a / (cr * cr + ci * ci);
+    cr = br + cr * fact;
+    ci = bi - ci * fact;
+    if (Math.abs(cr) + Math.abs(ci) < FPMIN) cr = FPMIN;
+    den = dr * dr + di * di;
+    dr /= den;
+    di /= -den;
+    dlr = cr * dr - ci * di;
+    dli = cr * di + ci * dr;
+    temp = p * dlr - q * dli;
+    q = p * dli + q * dlr;
+    p = temp;
+    if (Math.abs(dlr - 1) + Math.abs(dli) < EPS) break;
+  }
+
+  const gam = (p - f) / q;
+  const j0Magnitude = Math.sqrt(w / ((p - f) * gam + q));
+  const j0 = isign < 0 ? -j0Magnitude : j0Magnitude;
+  const y0 = j0 * gam;
+  const y0Prime = y0 * (p + q / gam);
+  return [y0, -y0Prime];
 }
 
 /** Y_0(x) via Neumann series:
@@ -3676,9 +3888,9 @@ function besselY1(x: number): number {
 
 /** Y_n(x) ~ sqrt(2/(πx)) [P sin(χ) + Q cos(χ)] where χ = x - nπ/2 - π/4 */
 function besselYAsymptotic(n: number, x: number): number {
-  const chi = x - (n / 2 + 0.25) * Math.PI;
+  const [cosChi, sinChi] = hankelPhase(n, x);
   const [P, Q] = hankelPQ(n, x);
-  return Math.sqrt(2 / (Math.PI * x)) * (P * Math.sin(chi) + Q * Math.cos(chi));
+  return Math.sqrt(2 / (Math.PI * x)) * (P * sinChi + Q * cosChi);
 }
 
 /**
@@ -4336,7 +4548,7 @@ const GD = [
   1.0, 1.47495759925128324529, 3.37748989120019970451e-1,
   2.53603741420338795122e-2, 8.14679107184306179049e-4,
   1.27545075667729118702e-5, 1.04314589657571990585e-7,
-  4.60680728515232032307e-10, 1.10273215066240270757e-12,
+  4.60680728146520428211e-10, 1.10273215066240270757e-12,
   1.38796531259578871258e-15, 8.39158816283118707363e-19,
   1.86958710162783236342e-22,
 ];
@@ -4648,263 +4860,6 @@ function bigErfiAsymptotic(x: BigNum, tolDigits: number): BigNum {
 }
 
 const EULER_GAMMA = 0.5772156649015328606; // Euler–Mascheroni constant γ
-
-/**
- * Sine and cosine integrals computed together:
- *   Si(x) = ∫₀ˣ sin t / t dt          (odd, Si(±∞) = ±π/2)
- *   Ci(x) = γ + ln x + ∫₀ˣ (cos t − 1)/t dt   (Ci(0⁺) = −∞, Ci(∞) = 0)
- *
- * Method (Numerical Recipes §6.8 `cisi`): the Maclaurin series for |x| ≤ 2
- * (negligible cancellation), and Lentz's modified continued fraction for the
- * complex exponential integral E₁(ix) for |x| > 2 — evaluated here with
- * explicit real/imaginary parts so no Complex type is needed. Full double
- * precision across the whole range.
- *
- * Ci(x) for x < 0 is complex; this returns its real part, Ci(|x|).
- */
-function cisi(x: number): { si: number; ci: number } {
-  const EPS = 1e-16;
-  const TMIN = 2.0;
-  const BIG = 1e30;
-  const t = Math.abs(x);
-
-  if (t === 0) return { si: 0, ci: -Infinity };
-  if (!Number.isFinite(t))
-    return { si: x > 0 ? Math.PI / 2 : -Math.PI / 2, ci: 0 };
-
-  let si: number;
-  let ci: number;
-
-  if (t > TMIN) {
-    // Continued fraction for ∫_t^∞ e^{iu}/u du via Lentz's algorithm.
-    // b = 1 + i·t; c = BIG; d = h = 1/b.
-    let br = 1;
-    const bi = t; // imaginary part of b is constant
-    let cr = BIG;
-    let cim = 0;
-    let denom = br * br + bi * bi;
-    let dr = br / denom;
-    let di = -bi / denom;
-    let hr = dr;
-    let hi = di;
-    for (let i = 1; i < 100; i++) {
-      const a = -i * i;
-      br += 2; // b += 2
-      // d = 1/(a·d + b)
-      let tr = a * dr + br;
-      let ti = a * di + bi;
-      denom = tr * tr + ti * ti;
-      dr = tr / denom;
-      di = -ti / denom;
-      // c = b + a/c
-      denom = cr * cr + cim * cim;
-      cr = br + (a * cr) / denom;
-      cim = bi - (a * cim) / denom;
-      // del = c·d
-      const delr = cr * dr - cim * di;
-      const deli = cr * di + cim * dr;
-      // h = h·del
-      tr = hr * delr - hi * deli;
-      ti = hr * deli + hi * delr;
-      hr = tr;
-      hi = ti;
-      if (Math.abs(delr - 1) + Math.abs(deli) <= EPS) break;
-    }
-    // h = (cos t − i·sin t)·h ; then ci = −Re(h), si = π/2 + Im(h)
-    const ct = Math.cos(t);
-    const st = Math.sin(t);
-    const reH = ct * hr + st * hi;
-    const imH = ct * hi - st * hr;
-    ci = -reH;
-    si = Math.PI / 2 + imH;
-  } else {
-    // Maclaurin series, accumulating the odd-power (Si) and even-power (Ci)
-    // partial sums in lockstep.
-    let sum = 0;
-    let sums = 0;
-    let sumc = 0;
-    let sign = 1;
-    let fact = 1;
-    let odd = true;
-    for (let k = 1; k <= 100; k++) {
-      fact *= t / k;
-      const term = fact / k;
-      sum += sign * term;
-      const err = term / Math.abs(sum);
-      if (odd) {
-        sign = -sign;
-        sums = sum;
-        sum = sumc;
-      } else {
-        sumc = sum;
-        sum = sums;
-      }
-      if (err < EPS) break;
-      odd = !odd;
-    }
-    si = sums;
-    ci = sumc + Math.log(t) + EULER_GAMMA;
-  }
-
-  if (x < 0) si = -si; // Si is odd
-  return { si, ci };
-}
-
-/** Sine integral Si(x) = ∫₀ˣ sin t / t dt. */
-export function sinIntegral(x: number): number {
-  if (Number.isNaN(x)) return NaN;
-  return cisi(x).si;
-}
-
-/** Cosine integral Ci(x) = γ + ln x + ∫₀ˣ (cos t − 1)/t dt (real part). */
-export function cosIntegral(x: number): number {
-  if (Number.isNaN(x)) return NaN;
-  return cisi(x).ci;
-}
-
-/**
- * Hyperbolic sine integral Shi(x) = ∫₀ˣ sinh(t)/t dt. Odd and entire, so it is
- * real for every real x.
- *
- * For |x| ≤ 2, the Maclaurin series Σ_{n≥0} x^{2n+1}/((2n+1)·(2n+1)!)
- * (DLMF 6.6.6), whose terms are all of the sign of x. Past 2, built on Ei:
- * Shi(x) = (Ei(x) − Ei(−x))/2. Near 0 that difference cancels: Ei(x) and
- * Ei(−x) are both close to γ + ln|x| (the difference gives `Shi(10⁻¹⁰)` with
- * a relative error of 10⁻⁵).
- */
-export function sinhIntegral(x: number): number {
-  if (Number.isNaN(x)) return NaN;
-  if (x === 0) return x;
-  if (Math.abs(x) <= 2) {
-    const x2 = x * x;
-    // power = x^{2n+1}/(2n+1)!
-    let power = x;
-    let sum = x;
-    for (let n = 1; n < 30; n++) {
-      power *= x2 / (2 * n * (2 * n + 1));
-      const term = power / (2 * n + 1);
-      sum += term;
-      if (Math.abs(term) <= 1e-17 * Math.abs(sum)) break;
-    }
-    return sum;
-  }
-  return (expIntegralEi(x) - expIntegralEi(-x)) / 2;
-}
-
-/**
- * Hyperbolic cosine integral Chi(x) = γ + ln|x| + ∫₀ˣ (cosh t − 1)/t dt.
- * For real x < 0 the function is complex (Chi(−|x|) = Chi(|x|) + iπ); like the
- * cosine-integral kernel, this returns the real part Chi(|x|).
- *
- * For |x| ≤ 2, the Maclaurin series γ + ln|x| + Σ_{n≥1} x^{2n}/(2n·(2n)!)
- * (DLMF 6.6.7); past 2, built on Ei: Chi(|x|) = (Ei(|x|) + Ei(−|x|))/2,
- * which is a few units in the last place less accurate below 2 (2 at x = 1).
- * Next to the zero of Chi at x = 0.5238 both lose relative accuracy (the
- * sum cancels γ + ln x); the absolute error stays about 10⁻¹⁶.
- */
-export function coshIntegral(x: number): number {
-  if (Number.isNaN(x)) return NaN;
-  const a = Math.abs(x);
-  if (a <= 2) {
-    if (a === 0) return -Infinity;
-    const x2 = a * a;
-    // power = x^{2n}/(2n)!
-    let power = 1;
-    let sum = 0;
-    for (let n = 1; n < 30; n++) {
-      power *= x2 / ((2 * n - 1) * (2 * n));
-      const term = power / (2 * n);
-      sum += term;
-      if (term <= 1e-17 * sum) break;
-    }
-    return EULER_GAMMA + Math.log(a) + sum;
-  }
-  return (expIntegralEi(a) + expIntegralEi(-a)) / 2;
-}
-
-/**
- * E₁(x) = ∫ₓ^∞ e^{−t}/t dt for x > 0 (Numerical Recipes §6.3 `expint`,
- * specialised to n = 1): the power series for x ≤ 1, Lentz's continued
- * fraction for x > 1. Used to extend Ei to negative arguments via
- * Ei(−x) = −E₁(x).
- */
-function expInt1(x: number): number {
-  const EPS = 1e-16;
-  const MAXIT = 200;
-  if (x <= 0) return NaN;
-  if (x <= 1) {
-    // E₁(x) = −γ − ln x − Σ_{n≥1} (−x)ⁿ/(n·n!)
-    let sum = -Math.log(x) - EULER_GAMMA;
-    let fact = 1;
-    for (let n = 1; n <= MAXIT; n++) {
-      fact *= -x / n;
-      const del = -fact / n;
-      sum += del;
-      if (Math.abs(del) < Math.abs(sum) * EPS) break;
-    }
-    return sum;
-  }
-  // Lentz continued fraction: E₁(x) = e^{−x}·(1/(x+1−) 1²/(x+3−) 2²/(x+5−) …)
-  const BIG = 1e30;
-  let b = x + 1;
-  let c = BIG;
-  let d = 1 / b;
-  let h = d;
-  for (let i = 1; i <= MAXIT; i++) {
-    const a = -i * i;
-    b += 2;
-    d = 1 / (a * d + b);
-    c = b + a / c;
-    const del = c * d;
-    h *= del;
-    if (Math.abs(del - 1) <= EPS) break;
-  }
-  return h * Math.exp(-x);
-}
-
-/**
- * Exponential integral Ei(x) = PV ∫_{−∞}^x e^t/t dt, for real x ≠ 0.
- *   Ei(0) = −∞, Ei(+∞) = +∞, Ei(−∞) = 0.
- * For x > 0: power series Ei(x) = γ + ln x + Σ_{n≥1} xⁿ/(n·n!) for moderate x,
- * the asymptotic series e^x/x·(1 + 1/x + 2!/x² + …) for large x (Numerical
- * Recipes §6.3 `ei`). For x < 0: Ei(x) = −E₁(−x).
- */
-export function expIntegralEi(x: number): number {
-  if (Number.isNaN(x)) return NaN;
-  if (x === 0) return -Infinity;
-  if (!Number.isFinite(x)) return x > 0 ? Infinity : 0;
-  if (x < 0) return -expInt1(-x);
-
-  const EPS = 1e-16;
-  const MAXIT = 200;
-  const SWITCH = -Math.log(EPS); // ≈ 36.8 — series below, asymptotic above
-  if (x <= SWITCH) {
-    // Power series (all terms positive for x > 0 — no cancellation).
-    let sum = 0;
-    let fact = 1;
-    for (let k = 1; k <= MAXIT; k++) {
-      fact *= x / k;
-      const term = fact / k;
-      sum += term;
-      if (term < EPS * sum) break;
-    }
-    return sum + Math.log(x) + EULER_GAMMA;
-  }
-  // Asymptotic series (divergent — stop once terms start growing).
-  let sum = 0;
-  let term = 1;
-  for (let k = 1; k <= MAXIT; k++) {
-    const prev = term;
-    term *= k / x;
-    if (term < EPS) break;
-    if (term < prev) sum += term;
-    else {
-      sum -= prev; // last reliable term, then halt
-      break;
-    }
-  }
-  return (Math.exp(x) * (1 + sum)) / x;
-}
 
 /**
  * Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t, for x > 0, x ≠ 1.

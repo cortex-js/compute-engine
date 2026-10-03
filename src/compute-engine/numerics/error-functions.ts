@@ -41,13 +41,15 @@ const TWO_INV_SQRT_PI_LO = 1.533545961316588e-17;
 // Error-free transformations.
 //
 // A function that computes a double-double value returns its high part and
-// writes its low part to `lowPart`. A module variable is used instead of an
-// object or an array so that no call allocates.
+// writes its low part to `lowPart[0]`. A typed array is used instead of a
+// returned object, which is allocated, and instead of a module variable: a
+// double written to a module variable is boxed on each write, which is
+// slower.
 //
 
 /** 2^27 + 1: the factor that splits a double into two 26-bit halves. */
 const SPLIT = 134217729;
-let lowPart = 0;
+const lowPart = new Float64Array(1);
 
 /**
  * Value of the polynomial c[0]·yⁿ + c[1]·yⁿ⁻¹ + … + c[n] at `y`, with
@@ -55,7 +57,7 @@ let lowPart = 0;
  * part of the decimal coefficient that the double `c[i]` does not hold.
  * Returns the high part; the low part (the sum of the rounding errors and of
  * the low parts of the coefficients, carried through the scheme) is in
- * `lowPart`.
+ * `lowPart[0]`.
  */
 function compensatedHorner(
   c: readonly number[],
@@ -81,13 +83,13 @@ function compensatedHorner(
     s = r;
     e = e * y + (pErr + rErr + cLo[i]);
   }
-  lowPart = e;
+  lowPart[0] = e;
   return s;
 }
 
 /**
  * (nHi + nLo)/(dHi + dLo) as a double-double: the high part is returned and
- * the low part is in `lowPart`.
+ * the low part is in `lowPart[0]`.
  */
 function ddDivide(nHi: number, nLo: number, dHi: number, dLo: number): number {
   const q = nHi / dHi;
@@ -102,13 +104,13 @@ function ddDivide(nHi: number, nLo: number, dHi: number, dLo: number): number {
   const pErr = qHi * dHiHi - p + qHi * dHiLo + qLo * dHiHi + qLo * dHiLo;
   const c = (nHi - p - pErr + nLo - q * dLo) / dHi;
   const hi = q + c;
-  lowPart = c - (hi - q);
+  lowPart[0] = c - (hi - q);
   return hi;
 }
 
 /**
  * (aHi + aLo)·(bHi + bLo) as a double-double: the high part is returned and
- * the low part is in `lowPart`.
+ * the low part is in `lowPart[0]`.
  */
 function ddMultiply(
   aHi: number,
@@ -125,7 +127,7 @@ function ddMultiply(
   const b2 = bHi - b1;
   const e = a1 * b1 - p + a1 * b2 + a2 * b1 + a2 * b2 + (aHi * bLo + aLo * bHi);
   const hi = p + e;
-  lowPart = e - (hi - p);
+  lowPart[0] = e - (hi - p);
   return hi;
 }
 
@@ -247,9 +249,9 @@ function erfSmall(x: number): number {
   if (y <= 1.11e-16) return x * TWO_INV_SQRT_PI;
   const s = y * y;
   const n = compensatedHorner(ERF_SMALL_NUM, ERF_SMALL_NUM_LO, s);
-  const nLo = lowPart;
+  const nLo = lowPart[0];
   const d = compensatedHorner(ERF_SMALL_DEN, ERF_SMALL_DEN_LO, s);
-  return x * ddDivide(n, nLo, d, lowPart);
+  return x * ddDivide(n, nLo, d, lowPart[0]);
 }
 
 /**
@@ -267,10 +269,10 @@ function erfcPositive(y: number, accurate: boolean): number {
       return expSquareTimes(-1, y, r, 0);
     }
     const n = compensatedHorner(ERFC_MID_NUM, ERFC_MID_NUM_LO, y);
-    const nLo = lowPart;
+    const nLo = lowPart[0];
     const d = compensatedHorner(ERFC_MID_DEN, ERFC_MID_DEN_LO, y);
-    const r = ddDivide(n, nLo, d, lowPart);
-    return expSquareTimes(-1, y, r, lowPart);
+    const r = ddDivide(n, nLo, d, lowPart[0]);
+    return expSquareTimes(-1, y, r, lowPart[0]);
   }
   // erfc(y) is below half the smallest subnormal double, and rounds to 0,
   // past y = 27.23. Past 27.3, e^{-y²} alone is 0 even after the scaling
@@ -283,7 +285,7 @@ function erfcPositive(y: number, accurate: boolean): number {
   const nHi = INV_SQRT_PI - r;
   const nLo = INV_SQRT_PI - nHi - r + INV_SQRT_PI_LO;
   const q = ddDivide(nHi, nLo, y, 0);
-  return expSquareTimes(-1, y, q, lowPart);
+  return expSquareTimes(-1, y, q, lowPart[0]);
 }
 
 /**
@@ -402,20 +404,20 @@ function dawsonFraction(p: readonly number[], q: readonly number[], y: number) {
 
 /**
  * The Dawson integral D(x) for x ≥ 0 as a double-double: the high part is
- * returned and the low part is in `lowPart`.
+ * returned and the low part is in `lowPart[0]`.
  */
 function dawsonPositive(x: number): number {
   if (x < 1.05e-8) {
-    lowPart = 0;
+    lowPart[0] = 0;
     return x;
   }
   const y = x * x;
   if (y < 6.25) {
     const n = compensatedHorner(DAW_SMALL_NUM, DAW_SMALL_NUM_LO, y);
-    const nLo = lowPart;
+    const nLo = lowPart[0];
     const d = compensatedHorner(DAW_SMALL_DEN, DAW_SMALL_DEN_LO, y);
-    const r = ddDivide(n, nLo, d, lowPart);
-    return ddMultiply(x, 0, r, lowPart);
+    const r = ddDivide(n, nLo, d, lowPart[0]);
+    return ddMultiply(x, 0, r, lowPart[0]);
   }
   if (y >= 25) {
     // D(x) = 1/(2x) for x > 9.49·10⁷, to the last bit, and the fraction
@@ -423,7 +425,7 @@ function dawsonPositive(x: number): number {
     // `ddDivide()` splits its divisor with a product that overflows past
     // 1.3·10³⁰⁰.
     if (x > 9.49e7) {
-      lowPart = 0;
+      lowPart[0] = 0;
       return 0.5 / x;
     }
     const f = DAW_P4[9] + dawsonFraction(DAW_P4, DAW_Q4, y);
@@ -434,10 +436,10 @@ function dawsonPositive(x: number): number {
       ? [DAW_P2, DAW_Q2, DAW_P2_CONSTANT_LO]
       : [DAW_P3, DAW_Q3, DAW_P3_CONSTANT_LO];
   const h = ddDivide(p[9], constantLo, x, 0);
-  const hLo = lowPart;
+  const hLo = lowPart[0];
   const correction = dawsonFraction(p, q, y) / x;
   const hi = h + correction;
-  lowPart = correction - (hi - h) + hLo;
+  lowPart[0] = correction - (hi - h) + hLo;
   return hi;
 }
 
@@ -467,8 +469,8 @@ export function erfi(x: number): number {
   if (y > 27) r = Infinity;
   else {
     const d = dawsonPositive(y);
-    const p = ddMultiply(TWO_INV_SQRT_PI, TWO_INV_SQRT_PI_LO, d, lowPart);
-    r = expSquareTimes(1, y, p, lowPart);
+    const p = ddMultiply(TWO_INV_SQRT_PI, TWO_INV_SQRT_PI_LO, d, lowPart[0]);
+    r = expSquareTimes(1, y, p, lowPart[0]);
   }
   return x < 0 ? -r : r;
 }

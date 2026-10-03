@@ -518,50 +518,6 @@ negative and the exponent may be a float — this breaks the pinned emissions
 and `tycho-item-286-unrolled-literal-call-fold.test.ts` and every shader
 `x^y` of an undeclared base. Kept as is (2026-10-02): `pow`.
 
-### The real kernels of `Si`, `Ci`, `Shi` and `Chi` are a few units in the last place off past `|x| = 2` (OPEN, small — found 2026-10-02 by the work on the error functions on the imaginary axis)
-
-Measured 2026-10-02 against mpmath at 40 digits, on 400 points in
-[0.12, 49.5]: the real `Shi` and `Chi` kernels (`sinhIntegral()`,
-`coshIntegral()` in `numerics/special-functions.ts`) are built on the `Ei`
-kernel past `|x| = 2` and are up to 4 units in the last place off in [2, 10]
-and 14 in [10, 50] (5 at 27). The real `Si` kernel (`cisi()`, a continued
-fraction past 2) is up to 10 units off in [2, 10]. Below 2 the four kernels
-are within 2 units (`Shi` and `Chi` use their Maclaurin series there). These
-kernels also give the values of the four functions on the imaginary axis
-(`Si(iy) = i·Shi(y)`, `Ci(iy) = Chi(|y|) ± iπ/2`, …), so the same errors show
-there. A fix computes each function past 2 without the sum or difference of
-two larger values: an asymptotic expansion with auxiliary functions f and g
-for a large argument (DLMF 6.12), or rational approximations.
-
-`Ci` and `Chi` lose relative accuracy next to their zeros (`Chi` at 0.5238,
-`Ci` at 0.6165, 3.3842, …), where γ + ln x and the sum cancel; the absolute
-error stays about 10⁻¹⁶. That is the normal behaviour of a kernel at a zero
-of its function, not part of this entry.
-
-### `.N()` of an exact large integer times `i` takes a time that grows with the number of digits (OPEN, small — found 2026-10-02 by the review of the error functions on the imaginary axis)
-
-Measured 2026-10-02 at a precision of 50 digits: `Power(10, 10⁹).N()` takes
-3 ms (the result is `1e+1000000000`), but
-`Multiply(Power(10, 100000), ImaginaryUnit).N()` takes 2.1 s, and with
-`10⁷` or `10⁹` as the exponent it does not finish in 20 s. The canonical
-product is fast (2 ms): the time is in `.N()` of the exact imaginary value
-(not traced further). So `Erf(10^{10^9}·i).N()` does not finish, while
-`Erfi(10^{10^9}).N()` answers `+oo` at once. The time grows with the number
-of digits of the integer, where the real power does not: a fix rounds the
-exact imaginary part to the working precision as the real part is rounded.
-
-### `Sinc`, `FresnelS`/`FresnelC`, `BesselJ/Y/I/K`, `AiryAi/Bi` and `LambertW` stay symbolic for a complex argument (OPEN, small — found 2026-10-02 by the work on the error functions on the imaginary axis)
-
-These functions have no complex kernel: `.N()` of a complex argument leaves
-them unevaluated. When they get one, an argument exactly on the imaginary
-axis should use the identity that gives the constant part exactly, as
-`Erf`, `Erfc`, `Erfi`, `SinIntegral`, `SinhIntegral`, `CosIntegral` and
-`CoshIntegral` do through `applyOnImaginaryAxis()`
-(`boxed-expression/apply.ts`): for example `Sinc(iy) = sinh(y)/y`,
-`FresnelS(iy) = −i·FresnelS(y)`, `FresnelC(iy) = i·FresnelC(y)`,
-`BesselJ(n, iy) = iⁿ·BesselI(n, y)`. The identities were checked against
-mpmath at 30 digits on 2026-10-02.
-
 ### A float matrix gives exact results when a value is an integer (OPEN, decision — found 2026-10-02 by the change that makes a complex number from the host with integer parts exact)
 
 A matrix whose entries are numbers is packed into cells of doubles
