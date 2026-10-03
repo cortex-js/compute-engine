@@ -2099,11 +2099,16 @@ export function adjoinType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * by `m` (`ℤ_n` = `ℤ/nℤ`).
  *
  * An element is a residue class, which no element of the base represents
- * (7 and 2 are one element of ℤ/5ℤ, so `set<integer>` would be wrong), and
- * the engine has no value for a residue class. The element type is therefore
- * `unknown`, as for an `Adjoin` adjunct the engine cannot type.
+ * (7 and 2 are one element of ℤ/5ℤ, so `set<integer>` would be wrong). The
+ * classes of the library `Integers` are `ResidueClass` values, typed `value`:
+ * `QuotientRing(Integers, n)` is a `set<value>`. For any other base the
+ * engine has no value for an element, and the element type is `unknown`, as
+ * for an `Adjoin` adjunct the engine cannot type.
  */
-export function quotientRingType(_ops: ReadonlyArray<OperandDescriptor>): Type {
+export function quotientRingType(ops: ReadonlyArray<OperandDescriptor>): Type {
+  const base = ops[0]?.structureOf?.();
+  if (base?.kind === 'symbol' && base.name === 'Integers' && base.system)
+    return { kind: 'set', elements: 'value' };
   return { kind: 'set', elements: 'unknown' };
 }
 

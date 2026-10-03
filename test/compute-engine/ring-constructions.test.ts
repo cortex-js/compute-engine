@@ -289,8 +289,8 @@ describe('Types', () => {
     expect(ce.parse('\\mathbb{Z}[x]').type.toString()).toBe('set<unknown>');
   });
 
-  test('QuotientRing claims no element type (its elements are classes)', () => {
-    expect(ce.parse('\\mathbb{Z}_n').type.toString()).toBe('set<unknown>');
+  test('QuotientRing elements are classes: value over ℤ, unknown over other bases', () => {
+    expect(ce.parse('\\mathbb{Z}_n').type.toString()).toBe('set<value>');
     expect(ce.parse('\\mathbb{Q}_p').type.toString()).toBe('set<unknown>');
   });
 });
@@ -331,7 +331,7 @@ describe('Route parity: raw MathJSON reaches the same dispatch', () => {
       structural: true,
     });
     expect(e.json).toEqual(['Subscript', 'Integers', 'n']);
-    expect(e.type.toString()).toBe('set<unknown>');
+    expect(e.type.toString()).toBe('set<value>');
     expect(e.type.toString()).toBe(
       ce.box(['QuotientRing', 'Integers', 'n']).type.toString()
     );

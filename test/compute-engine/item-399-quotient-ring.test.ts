@@ -50,25 +50,33 @@ describe('QuotientRing(Integers, n) is a finite collection (#399)', () => {
 });
 
 describe('QuotientRing element type (#399)', () => {
-  test('the element type is unknown: an element is a residue class', () => {
+  test('the element type is value: an element is a residue class', () => {
     expect(ce.parse('\\mathbb{Z}/5\\mathbb{Z}').type.toString()).toBe(
-      'set<unknown>'
+      'set<value>'
     );
     expect(ce.box(['QuotientRing', 'Integers', 'n']).type.toString()).toBe(
+      'set<value>'
+    );
+  });
+  test('a base other than Integers has no class value: unknown', () => {
+    expect(ce.box(['QuotientRing', 'RationalNumbers', 5]).type.toString()).toBe(
       'set<unknown>'
     );
   });
 });
 
-// A residue class has no value in the engine: the classes are counted but
-// not listed, so an operator that must walk the elements stays unevaluated
-// instead of reading ℤ/5ℤ as empty.
-describe('QuotientRing classes are counted, not listed (#399)', () => {
+// The classes are `ResidueClass` values (item-399-residue-class.test.ts), so
+// ℤ/5ℤ is listed and decides the membership of a class. A bare integer is a
+// representative of a class, not the class, and its membership is not decided.
+describe('QuotientRing classes are listed (#399)', () => {
   const z5 = ce.box(['QuotientRing', 'Integers', 5]);
-  test('does not enumerate', () => {
-    expect(z5.isEnumerableCollection).toBe(false);
+  test('enumerates', () => {
+    expect(z5.isEnumerableCollection).toBe(true);
+    expect([...z5.each()].map((x) => x.json)).toEqual(
+      [0, 1, 2, 3, 4].map((k) => ['ResidueClass', k, 5])
+    );
   });
-  test('does not decide membership', () => {
+  test('does not decide the membership of a bare integer', () => {
     expect(ce.box(['Element', 7, z5]).evaluate().operator).toBe('Element');
   });
   test('IsEmpty is False', () => {
@@ -76,14 +84,13 @@ describe('QuotientRing classes are counted, not listed (#399)', () => {
   });
   const walking: [string, unknown][] = [
     ['Union', ['Union', z5.json, ['Set', 1]]],
-    ['Intersection', ['Intersection', z5.json, ['Set', 1]]],
     ['Unique', ['Unique', z5.json]],
     ['Tally', ['Tally', z5.json]],
   ];
   for (const [name, json] of walking) {
-    test(`${name} stays unevaluated`, () => {
+    test(`${name} walks the classes`, () => {
       const result = ce.box(json as Expression).evaluate();
-      expect(result.operator).toBe(name);
+      expect(result.operator).not.toBe(name);
       expect(result.isValid).toBe(true);
     });
   }

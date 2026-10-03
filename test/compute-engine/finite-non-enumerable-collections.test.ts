@@ -1,10 +1,8 @@
 /**
  * A finite collection can know its size and still have no computable
  * elements. `Linspace(a, 1, 3)` with a symbolic `a` has `count` 3, but its
- * elements are not numbers yet; `QuotientRing(Integers, 5)` (ℤ/5ℤ) has 5
- * elements, which are residue classes the engine does not list. For both,
- * `isFiniteCollection` is `true`, `isEnumerableCollection` is `false`, and
- * `each()` yields nothing.
+ * elements are not numbers yet. `isFiniteCollection` is `true`,
+ * `isEnumerableCollection` is `false`, and `each()` yields nothing.
  *
  * An operator that checked only `isFiniteCollection` and then walked the
  * elements read such a collection as EMPTY and gave a wrong answer with no
@@ -18,14 +16,14 @@ import type { Expression } from '../../src/compute-engine';
 type Json = Parameters<ComputeEngine['box']>[0];
 
 const LINSPACE: Json = ['Linspace', 'a', 1, 3];
-const Z5: Json = ['QuotientRing', 'Integers', 5];
+// The same elements as a set, the operand type that the set operators take.
+const LSET: Json = ['SetFrom', LINSPACE];
+// Five elements, none computable: a count that differs from a three-element list.
+const LINSPACE5: Json = ['Linspace', 'a', 1, 5];
 
-const COLLECTIONS: [string, Json][] = [
-  ['Linspace(a, 1, 3)', LINSPACE],
-  ['QuotientRing(Integers, 5)', Z5],
-];
+const COLLECTIONS: [string, Json][] = [['Linspace(a, 1, 3)', LINSPACE]];
 
-describe('the two collections have a count and no computable elements', () => {
+describe('a collection with a count and no computable elements', () => {
   const ce = new ComputeEngine();
   for (const [name, json] of COLLECTIONS) {
     test(name, () => {
@@ -50,10 +48,7 @@ describe('operators that walk the elements stay unevaluated', () => {
       ['SetFrom', ['SetFrom', xs]],
       ['SubsetEqual', ['SubsetEqual', xs, ['Set', 1]]],
     ];
-    // `Sort` reads its source by position, so a set operand (ℤ/5ℤ) is a type
-    // error, as `Sort(Set(3, 1))` is. `SetMinus` takes a set first.
-    if (xs === LINSPACE) cases.push(['Sort', ['Sort', xs]]);
-    else cases.push(['SetMinus', ['SetMinus', xs, ['Set', 1]]]);
+    cases.push(['Sort', ['Sort', xs]]);
     for (const [op, json] of cases) {
       test(`${op} over ${name}`, () => {
         const result = ce.box(json).evaluate();
@@ -74,7 +69,6 @@ describe('operators that walk the elements stay unevaluated', () => {
   });
 
   test('membership is not decided', () => {
-    expect(ce.box(['Element', 7, Z5]).evaluate().operator).toBe('Element');
     // 1 is the last element of `Linspace(a, 1, 3)`: the intersection with a
     // concrete list is not empty, and it is not decided.
     expect(
@@ -91,7 +85,7 @@ describe('operators that walk the elements stay unevaluated', () => {
     ).toBe('IdenticallyEqual');
     expect(ce.box(LINSPACE).isEqual(ce.box(list))).toBeUndefined();
     // Known counts that differ still decide the comparison.
-    expect(ce.box(['Equal', Z5, list]).evaluate().json).toBe('False');
+    expect(ce.box(['Equal', LINSPACE5, list]).evaluate().json).toBe('False');
     // The same expression on both sides is still equal.
     expect(ce.box(['Equal', LINSPACE, LINSPACE]).evaluate().json).toBe('True');
   });
@@ -115,9 +109,6 @@ describe('operators that decide membership or splice elements', () => {
 
   // An undecided membership in a removed operand is not an absence.
   test('SetMinus with a removed operand that has no computable elements', () => {
-    expect(evaluate(['SetMinus', ['Set', 1], Z5])).toBe(
-      'SetMinus(Set(1), QuotientRing("Integers", 5))'
-    );
     expect(evaluate(['SetMinus', ['Set', 1], LINSPACE])).toBe(
       'SetMinus(Set(1), Linspace(a, 1, 3))'
     );
@@ -127,28 +118,18 @@ describe('operators that decide membership or splice elements', () => {
   // its `count` handler read an undecided membership as "not removed".
   test('a held SetMinus has no count and is not walked', () => {
     expect(
-      ce.box(['Count', ['SetMinus', ['Set', 1], Z5]]).evaluate().operator
+      ce.box(['Count', ['SetMinus', ['Set', 1], LINSPACE]]).evaluate().operator
     ).toBe('Count');
     expect(
-      ce.box(['Union', ['SetMinus', ['Set', 1], Z5], ['Set', 2]]).evaluate()
-        .operator
+      ce
+        .box(['Union', ['SetMinus', ['Set', 1], LINSPACE], ['Set', 2]])
+        .evaluate().operator
     ).toBe('Union');
   });
 
-  test('a held set operation over ℤ/5ℤ has no count', () => {
-    for (const op of ['Union', 'Intersection', 'SymmetricDifference']) {
-      const result = ce.box(['Count', [op, ['Set', 1], Z5]]).evaluate();
-      expect(result.operator).toBe('Count');
-    }
-    expect(
-      ce.box(['Union', ['Intersection', ['Set', 1], Z5], ['Set', 2]]).evaluate()
-        .operator
-    ).toBe('Union');
-  });
-
-  test('SymmetricDifference with ℤ/5ℤ stays unevaluated', () => {
-    expect(evaluate(['SymmetricDifference', ['Set', 1], Z5])).toBe(
-      'SymmetricDifference(Set(1), QuotientRing("Integers", 5))'
+  test('SymmetricDifference with such a collection stays unevaluated', () => {
+    expect(evaluate(['SymmetricDifference', ['Set', 1], LSET])).toBe(
+      'SymmetricDifference(Set(1), SetFrom(Linspace(a, 1, 3)))'
     );
   });
 
@@ -175,12 +156,9 @@ describe('operators that decide membership or splice elements', () => {
   });
 
   test('When over a carrier with no computable elements', () => {
-    expect(evaluate(['When', Z5, ['List', 'True', 'False']])).toBe(
-      ce.box(['When', Z5, ['List', 'True', 'False']]).toString()
+    expect(evaluate(['When', LINSPACE, ['List', 'True', 'False']])).toBe(
+      ce.box(['When', LINSPACE, ['List', 'True', 'False']]).toString()
     );
-    expect(
-      ce.box(['When', Z5, ['List', 'True', 'False']]).evaluate().operator
-    ).toBe('When');
     expect(
       ce.box(['When', LINSPACE, ['List', 'True', 'False']]).evaluate().operator
     ).toBe('When');
@@ -199,10 +177,10 @@ describe('operators that decide membership or splice elements', () => {
     expect(ce.box(['Intersection', ['List'], LINSPACE]).evaluate().json).toBe(
       'EmptySet'
     );
-    expect(ce.box(['Intersection', 'EmptySet', Z5]).evaluate().json).toBe(
+    expect(ce.box(['Intersection', 'EmptySet', LINSPACE]).evaluate().json).toBe(
       'EmptySet'
     );
-    expect(ce.box(['Intersection', ['Set'], Z5]).evaluate().json).toBe(
+    expect(ce.box(['Intersection', ['Set'], LINSPACE]).evaluate().json).toBe(
       'EmptySet'
     );
   });
