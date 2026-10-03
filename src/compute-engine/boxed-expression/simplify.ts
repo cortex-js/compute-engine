@@ -8,6 +8,7 @@ import { sameSyntactic } from './compare.js';
 import { holdMap } from './hold.js';
 import { expToTrig } from './exp-to-trig.js';
 import { expand } from './expand.js';
+import { isResidueClass } from './residue-class.js';
 import {
   rebindEscaping,
   hasAssignedVariable,
@@ -113,7 +114,7 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
     !hasAssignedVariable(expr)
   ) {
     const evaluated = expr.evaluate();
-    if (isNumber(evaluated)) return evaluated;
+    if (isNumber(evaluated) || isResidueClass(evaluated)) return evaluated;
   }
 
   // Constant logarithms are folded to their exact value even when they are
@@ -921,7 +922,7 @@ function simplifyOperands(
         continue;
       }
       const evaluated = x.evaluate();
-      if (isNumber(evaluated)) {
+      if (isNumber(evaluated) || isResidueClass(evaluated)) {
         simplifiedOps.push(evaluated);
         continue;
       }
@@ -1006,6 +1007,22 @@ function simplifyExpression(
         : { value: alt, because: 'simplified operands' };
     steps = [...steps, aggregate];
     expr = alt;
+  }
+
+  // Arithmetic on residue classes folds to a class, as for numbers:
+  // `ResidueClass(5, 7) + ResidueClass(4, 7)` is `ResidueClass(2, 7)`. A
+  // class has no number literal, so the numeric fold of the operands does
+  // not reach it.
+  if (
+    isFunction(expr) &&
+    BASIC_ARITHMETIC.includes(expr.operator) &&
+    expr.ops.some(isResidueClass) &&
+    expr.unknowns.length === 0 &&
+    !hasAssignedVariable(expr)
+  ) {
+    const folded = expr.evaluate();
+    if (isResidueClass(folded))
+      return [...steps, { value: folded, because: 'residue class arithmetic' }];
   }
 
   // A `NaN` or `Indeterminate` operand at a position whose NaN policy is

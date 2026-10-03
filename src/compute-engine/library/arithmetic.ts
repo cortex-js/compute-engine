@@ -342,6 +342,15 @@ import {
   quantityPower,
 } from './quantity-arithmetic.js';
 import {
+  isResidueClass,
+  isResidueClassOperand,
+  residueAdd,
+  residueDivide,
+  residueMultiply,
+  residueNegate,
+  residuePower,
+} from '../boxed-expression/residue-class.js';
+import {
   foldMeasurementOperands,
   isMeasurement,
   measurementAdd,
@@ -4082,7 +4091,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
-          signedInfinitySum(ops, addTypeOnTypes(ops.map(withoutFunctionArm))),
+          ops.some(isResidueClassOperand)
+            ? 'value'
+            : signedInfinitySum(
+                ops,
+                addTypeOnTypes(ops.map(withoutFunctionArm))
+              ),
           context.engine._typeResolver
         ),
 
@@ -4174,6 +4188,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (hasAbsentScalarOperand(evaluated))
             return absentScalarMarker(engine!, expression);
         }
+        // A class is exact: under `.N()` its integer operands are read
+        // exactly too, not as the floats `evaluated` holds.
+        if (evaluated.some(isResidueClass))
+          return residueAdd(
+            engine!,
+            numericApproximation ? ops.map((x) => x.evaluate()) : evaluated
+          );
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityAdd(engine!, evaluated);
           if (
@@ -4405,6 +4426,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (ops, context) => {
         const [num, den] = ops;
+        // A class divided by a class or an integer is a class.
+        if (ops.some(isResidueClassOperand))
+          return BoxedType.forResult('value', context.engine._typeResolver);
         if (operandLiteralValueOnTypes(den) === 1)
           return BoxedType.forResult(num.type, context.engine._typeResolver);
         // A numeric tuple (point/vector) divided by a scalar keeps the tuple
@@ -4664,6 +4688,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (listTuple !== undefined) return listTuple;
         const evalNum = num;
         const evalDen = den;
+        if (isResidueClass(evalNum) || isResidueClass(evalDen))
+          return residueDivide(engine!, evalNum, evalDen);
         if (
           evalNum.operator === 'Quantity' ||
           evalDen.operator === 'Quantity'
@@ -6708,6 +6734,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops, { engine, derive }) => {
         if (ops.length === 0)
           return BoxedType.forResult('integer', engine._typeResolver); // = 1
+        if (ops.some(isResidueClassOperand))
+          return BoxedType.forResult('value', engine._typeResolver);
         if (ops.length === 1)
           return BoxedType.forResult(ops[0].type, engine._typeResolver);
         // A factor that is NaN or a number (`nan | real`, the type of an
@@ -7348,6 +7376,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (hasAbsentScalarOperand(evaluated))
             return absentScalarMarker(engine!, expression);
         }
+        if (evaluated.some(isResidueClass))
+          return residueMultiply(
+            engine!,
+            numericApproximation ? ops.map((x) => x.evaluate()) : evaluated
+          );
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityMultiply(engine!, evaluated);
           if (
@@ -7497,6 +7530,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const listTuple = listCoordinateTupleOperandError(engine!, [x]);
         if (listTuple !== undefined) return listTuple;
         const evalX = x;
+        if (isResidueClass(evalX)) return residueNegate(engine, evalX);
         if (isQuantity(evalX)) {
           if (isMeasurement(evalX.op1)) {
             const negM = measurementNegate(engine, evalX.op1);
@@ -7657,6 +7691,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context,
           ((): BoxedType | undefined => {
             const [base, exp] = ops;
+            if (base !== undefined && isResidueClassOperand(base))
+              return BoxedType.forResult('value', context.engine._typeResolver);
             // A proven-NaN operand: decline, so the framework's proven-NaN arm
             // answers the sharp `nan` from the propagate policy (the
             // `Sqrt`/`Erf` precedent).
@@ -8031,6 +8067,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         )
           return engine!.typeError(POWER_EXPONENT_CARRIER_TYPE, n.type, n);
         const evalBase = x;
+        if (isResidueClass(evalBase)) return residuePower(engine!, evalBase, n);
         if (evalBase.operator === 'Quantity') {
           const r = quantityPower(engine!, evalBase, n);
           if (

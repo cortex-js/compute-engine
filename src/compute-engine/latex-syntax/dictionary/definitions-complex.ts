@@ -1,6 +1,23 @@
-import { LatexDictionary, Parser } from '../types.js';
+import { LatexDictionary, Parser, Serializer } from '../types.js';
 import { MathJsonExpression } from '../../../math-json/types.js';
+import { isNumberObject, operand } from '../../../math-json/utils.js';
 import { singleArgSerializer } from './definitions-other.js';
+
+/**
+ * The digits of a non-negative integer literal (`7`, `{num: '123456…'}`), or
+ * `null` for anything else: a symbol, a sum, a negation, a decimal.
+ */
+function integerLiteralDigits(expr: MathJsonExpression | null): string | null {
+  if (typeof expr === 'number')
+    return Number.isSafeInteger(expr) && expr >= 0 ? String(expr) : null;
+  if (isNumberObject(expr)) {
+    const digits = String(expr.num);
+    return /^\d+$/.test(digits) ? digits : null;
+  }
+  return null;
+}
+
+const isPositive = (digits: string): boolean => /[1-9]/.test(digits);
 
 export const DEFINITIONS_COMPLEX: LatexDictionary = [
   {
@@ -56,9 +73,38 @@ export const DEFINITIONS_COMPLEX: LatexDictionary = [
     latexTrigger: ['\\overline'],
     parse: (parser: Parser): MathJsonExpression => {
       const arg = parser.parseGroup();
-      return arg === null ? ['Conjugate'] : ['Conjugate', arg];
+      if (arg === null) return ['Conjugate'];
+
+      // `\overline{k}_{n}` with integer literals `k` and `n ≥ 1` is the
+      // residue class of `k` mod `n`. Anything else keeps the conjugate:
+      // `\overline{7}` and `\overline{z}_1` are not classes, and the
+      // subscript is left for the subscript parselet.
+      if (integerLiteralDigits(arg) !== null) {
+        const start = parser.index;
+        if (parser.match('_')) {
+          const modulus = parser.parseGroup() ?? parser.parseToken();
+          const digits = integerLiteralDigits(modulus);
+          if (digits !== null && isPositive(digits))
+            return ['ResidueClass', arg, modulus!];
+        }
+        parser.index = start;
+      }
+      return ['Conjugate', arg];
     },
     serialize: singleArgSerializer('\\overline'),
+  },
+  // `ResidueClass(k, n)` is written `\overline{k}_{n}` when both operands are
+  // integer literals, the only form that reads back as a class; otherwise it
+  // is written as a function call.
+  {
+    name: 'ResidueClass',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const k = integerLiteralDigits(operand(expr, 1));
+      const n = integerLiteralDigits(operand(expr, 2));
+      if (k === null || n === null || !isPositive(n))
+        return serializer.serializeFunction(expr);
+      return `\\overline{${k}}_{${n}}`;
+    },
   },
   // Function-style alias: `\operatorname{conj}(z)`, the spelling Desmos writes
   // for the complex conjugate. Without it `conj` lexed as an undeclared symbol:

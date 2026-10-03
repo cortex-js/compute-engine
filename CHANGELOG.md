@@ -71,6 +71,33 @@
   does for `sin(x) = 2`. So `x·eˣ = 3` still solves to `W(3)` only, and
   `x·eˣ = -1` has no root.
 
+### New Features
+
+- **`ResidueClass(k, n)` is an element of ℤ/nℤ**, and `QuotientRing(Integers, n)`
+  lists them (#399, contributed by [enumeratio](https://github.com/enumeratio)).
+  The canonical form reduces `k` into `0…n−1`, so `ResidueClass(7, 5)` is
+  `ResidueClass(2, 5)` and `ResidueClass(-1, 7)` is `ResidueClass(6, 7)`, and
+  `ResidueClass(7, 5) == ResidueClass(2, 5)` is `True`. Sums, differences,
+  products and integer powers of classes are classes:
+  `ResidueClass(5, 7) + ResidueClass(4, 7)` is `ResidueClass(2, 7)` and
+  `ResidueClass(3, 7)^6` is `ResidueClass(1, 7)`. An integer next to a class is
+  read in its ring: `ResidueClass(5, 7) + 3` is `ResidueClass(1, 7)`, and
+  `ResidueClass(1/3, 7)` is `ResidueClass(5, 7)`. An inverse, a division and a
+  negative power need `gcd(k, n) = 1`: `1/ResidueClass(3, 7)` is
+  `ResidueClass(5, 7)`, and `1/ResidueClass(2, 4)` stays unevaluated. Classes of
+  two moduli meet in ℤ/gcd(m, n): `ResidueClass(2, 4) + ResidueClass(1, 6)` is
+  `ResidueClass(1, 2)`. The class has type `value`, and the element type of
+  `QuotientRing(Integers, n)` is `value`, not `unknown`. ℤ/5ℤ lists
+  `ResidueClass(0, 5)` … `ResidueClass(4, 5)` (`ListFrom`, `Union`, `Tally`…
+  walk them), and `Element(ResidueClass(7, 5), ℤ/5ℤ)` is `True`; the
+  membership of a bare integer, `Element(7, ℤ/5ℤ)`, is still not decided. In
+  LaTeX the class is `\overline{k}_{n}` for integer literals `k` and `n ≥ 1`:
+  `\overline{7}_{5}` was `Subscript(Conjugate(7), 5)` and is now
+  `ResidueClass(2, 5)`, while `\overline{7}`, `\overline{z}_1` and the
+  repeating decimal `0.\overline{3}` are unchanged. `Mod` stays the remainder,
+  classes are not ordered, a modulus past 2^53 is exact, and compiled code does
+  not lower a class (it falls back, as for any operator without a lowering).
+
 ### Improvements
 
 - **More accurate `erf`, `erfc` and `erfi` in doubles.** The machine kernels
@@ -125,14 +152,14 @@
   same element of ℤ/5ℤ. For a positive integer literal `n`, the collection
   now has the count `n`, is finite and is not empty, and `Count` evaluates:
   `Count(\mathbb{Z}/5\mathbb{Z})` is `5`. A symbolic, zero or negative
-  modulus, or a base other than `Integers`, stays inert. The type is
-  `set<unknown>`, as for an `Adjoin` adjunct that the engine cannot type. The
-  engine has no value for a residue class, so the classes are not listed and
-  membership is not decided.
+  modulus, or a base other than `Integers`, stays inert. Its elements are
+  `ResidueClass` values (see New Features), so the type is `set<value>` for
+  the base `Integers`, and `set<unknown>`, as for an `Adjoin` adjunct that the
+  engine cannot type, for another base.
 
 - **A finite collection whose elements cannot be computed no longer reads as
   empty.** `Linspace(a, 1, 3)` with a symbolic `a` has the count 3 but no
-  elements that can be computed, and so does ℤ/5ℤ. Many operators checked
+  elements that can be computed. Many operators checked
   only that a collection was finite and then walked its elements, so they
   read it as empty and gave a wrong answer with no diagnostic:
   `Union(Linspace(a, 1, 3), {1})` was `Set(1)`, `Unique(…)` was `[]`,
