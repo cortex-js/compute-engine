@@ -77,6 +77,7 @@ import {
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
+import { definiteIntegralByResidues } from '../symbolic/contour-definite-integrate.js';
 import {
   getPolynomialCoefficients,
   polynomialDegree,
@@ -3405,25 +3406,79 @@ volumes
     },
 
     CircularIntegrate: {
-      description: 'Contour (closed-path) integral. Inert: never evaluated.',
+      description:
+        'Closed-path integral. Evaluates supported explicit contours by the residue theorem.',
       keywords: ['contour integral', 'closed integral', 'line integral'],
       broadcastable: false,
 
       lazy: true,
       signature: '(function, limits+) -> number',
 
-      // `CircularIntegrate` carries no contour-integration machinery: the
-      // integrand is left as the bare application it was parsed as (not wrapped
-      // in a `Function` literal the way `Integrate` does), so it round-trips to
-      // the same LaTeX. The canonical handler exists to (a) rewrite the limits
-      // that `parseIntegral` builds as `Tuple`s into `Limits` expressions, so a
-      // limits-consuming caller sees the same shape as `Integrate` (the `Tuple`
-      // uses the symbol `Nothing` as a *positional* placeholder for an absent
-      // index/bound), and (b) give the operator a `number` type.
+      // Preserve the legacy notation and round trip when no explicit contour
+      // is supplied. A single lower limit can instead name a contour.
       canonical: (ops, { engine: ce }) => {
         if (!ops[0]) return null;
         const limits = canonicalLimitsSequence(ops.slice(1), { engine: ce });
         return ce._fn('CircularIntegrate', [ops[0].canonical, ...limits]);
+      },
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        if (ops.length !== 2 || !isFunction(ops[1], 'Limits')) return undefined;
+        const [variable, contour, upper] = ops[1].ops;
+        if (
+          !isSymbol(variable) ||
+          !contour ||
+          (upper && sym(upper) !== 'Nothing')
+        )
+          return undefined;
+        const r = ce.contourIntegrate(ops[0], variable.symbol, contour);
+        if (r.status === 'pole-on-contour') return ce.Indeterminate;
+        return numericApproximation ? r.value?.N() : r.value;
+      },
+    },
+
+    CircleContour: {
+      description:
+        'Closed circle: center, positive radius, optional orientation (+1 or -1).',
+      signature:
+        '(center:complex, radius:real, orientation:integer?) -> expression',
+    },
+    RealLineContour: {
+      description:
+        'The real axis from minus infinity to infinity. Pass True to explicitly request a Cauchy principal value.',
+      signature: '(principalValue:boolean?) -> expression',
+    },
+    PolygonContour: {
+      description:
+        'Simple closed polygon: a list of complex vertices in traversal order, with optional orientation override (+1 or -1).',
+      signature: '(vertices:list<complex>, orientation:integer?) -> expression',
+    },
+    RectangleContour: {
+      description:
+        'Closed rectangle: lower-left and upper-right complex corners, optional orientation (+1 or -1).',
+      signature:
+        '(lowerLeft:complex, upperRight:complex, orientation:integer?) -> expression',
+    },
+    ContourIntegrate: {
+      description:
+        'Symbolic integral over an explicit closed contour, using the residue theorem.',
+      keywords: ['residue theorem', 'contour integral'],
+      broadcastable: false,
+      lazy: true,
+      scoped: operandSites(1),
+      signature: '(expression, variable:symbol, contour:expression) -> number',
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length !== 3 || !isSymbol(ops[1])) return null;
+        return ce._fn(
+          'ContourIntegrate',
+          ops.map((op) => op.canonical)
+        );
+      },
+      evaluate: ([f, x, contour], { engine: ce, numericApproximation }) => {
+        const variable = sym(x);
+        if (!variable) return undefined;
+        const r = ce.contourIntegrate(f, variable, contour);
+        if (r.status === 'pole-on-contour') return ce.Indeterminate;
+        return numericApproximation ? r.value?.N() : r.value;
       },
     },
 
@@ -3640,6 +3695,39 @@ volumes
           const [lo, hi] = [l.op2, l.op3];
           if (sym(lo) === 'Nothing' || sym(hi) === 'Nothing') continue;
           if (lo.isSame(hi)) return ce.Zero;
+        }
+
+        // Use the exact residue result on both evaluation routes after the
+        // real-line driver has verified the closing arc and all poles.
+        if (ops.length === 2 && isFunction(ops[1], 'Limits')) {
+          const [x, lo, hi] = ops[1].ops;
+          const variable = sym(x);
+          if (
+            variable &&
+            lo?.isInfinity === true &&
+            hi?.isInfinity === true &&
+            ((lo.sgn === 'negative' && hi.sgn === 'positive') ||
+              (lo.sgn === 'positive' && hi.sgn === 'negative'))
+          ) {
+            const r = ce.contourIntegrate(liftIntegrand(ops[0]), variable, {
+              kind: 'real-line',
+            });
+            if (r.status === 'pole-on-contour')
+              return numericApproximation ? ce.NaN : ce.Indeterminate;
+            if (r.value) {
+              const value = lo.sgn === 'negative' ? r.value : r.value.neg();
+              return numericApproximation ? value.N() : value;
+            }
+          }
+          if (variable && lo && hi) {
+            const value = definiteIntegralByResidues(
+              liftIntegrand(ops[0]),
+              variable,
+              lo,
+              hi
+            );
+            if (value) return numericApproximation ? value.N() : value;
+          }
         }
 
         if (numericApproximation) {

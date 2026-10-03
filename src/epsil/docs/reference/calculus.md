@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Calculus
 
-The 19 definitions of the calculus library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 24 definitions of the calculus library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -27,11 +27,23 @@ MathJSON `BigO` · `(value) -> number`
 
 Landau big-O remainder term. Inert; any numeric approximation (.N()) of an expression containing it is NaN.
 
+### circleContour
+
+MathJSON `CircleContour` · `(center: complex, radius: real, orientation: integer?) -> expression`
+
+Closed circle: center, positive radius, optional orientation (+1 or -1).
+
 ### circularIntegrate
 
 MathJSON `CircularIntegrate` · `(function, limits+) -> number`
 
-Contour (closed-path) integral. Inert: never evaluated.
+Closed-path integral. Evaluates supported explicit contours by the residue theorem.
+
+### contourIntegrate
+
+MathJSON `ContourIntegrate` · `(expression, variable: symbol, contour: expression) -> number`
+
+Symbolic integral over an explicit closed contour, using the residue theorem.
 
 ### D
 
@@ -129,11 +141,29 @@ MathJSON `Normal` · `(value) -> value`
 
 Strip Big-O remainder terms from a series, yielding the truncated polynomial. Example: Normal(Series(\sin x, x)) → x - x^3/6 + x^5/120
 
+### polygonContour
+
+MathJSON `PolygonContour` · `(vertices: list<complex>, orientation: integer?) -> expression`
+
+Simple closed polygon: a list of complex vertices in traversal order, with optional orientation override (+1 or -1).
+
 ### rSolve
 
 MathJSON `RSolve` · `(expression, symbol, symbol) -> expression`
 
 Symbolic recurrence equation solver.
+
+### realLineContour
+
+MathJSON `RealLineContour` · `(principalValue: boolean?) -> expression`
+
+The real axis from minus infinity to infinity. Pass True to explicitly request a Cauchy principal value.
+
+### rectangleContour
+
+MathJSON `RectangleContour` · `(lowerLeft: complex, upperRight: complex, orientation: integer?) -> expression`
+
+Closed rectangle: lower-left and upper-right complex corners, optional orientation (+1 or -1).
 
 ### residue
 

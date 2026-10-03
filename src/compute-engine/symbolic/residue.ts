@@ -28,6 +28,12 @@ import { laurentData, freshSymbol } from './series.js';
 import { differentiate } from './derivative.js';
 import { sym } from '../boxed-expression/type-guards.js';
 import { getFunctionProperties } from '../function-properties/index.js';
+import { checkDeadline } from '../../common/interruptible.js';
+import {
+  exponentialArgument,
+  nonzeroResidueConstant,
+  polynomialExponentialSingularity,
+} from './essential-residue.js';
 
 // The base `Expression` type only exposes operands after a type guard; the
 // boxed objects always have an `ops` getter (see limit.ts for the same idiom).
@@ -73,7 +79,15 @@ export function residue(
   }
   if (point.isFinite === false) return undefined;
 
-  // The Laurent kernel runs FIRST (item 7c): the residue is, by definition,
+  const essential = polynomialExponentialSingularity(body, varName);
+  if (essential) {
+    const distance = point.sub(essential.point).simplify();
+    if (distance.isSame(0)) return essential.residue;
+    // The recognized family is analytic at every other finite point.
+    return nonzeroResidueConstant(distance) ? ce.Zero : undefined;
+  }
+
+  // For meromorphic inputs, use the Laurent kernel first: the residue is
   // the coefficient of `(x − a)⁻¹` in the exact Laurent expansion, and the
   // kernel models the special-function poles (Gamma/Digamma/Zeta) and their
   // meromorphic combinations — including the shapes the paths below cannot
@@ -93,6 +107,33 @@ export function residue(
     const c = lau.coeff(-1).evaluate();
     if (c.isValid && c.isNaN !== true) return c;
   }
+
+  // A real-direction limit cannot establish a removable complex singularity:
+  // exp(-1/z²), for example, decays on the real axis but is essential at 0.
+  // Unsupported exponential principal parts must not reach pole-order probing.
+  let scanBudget = 512;
+  const polarExponential = (e: Expression): boolean => {
+    checkDeadline(ce._deadlineFrame);
+    if (--scanBudget < 0) return true;
+    const arg = exponentialArgument(e);
+    if (arg) {
+      const local = laurentData(arg, varName, point, ce, 4);
+      if (local && local.v < 0) return true;
+      // At a symbolic centre the Laurent kernel may itself decline. A zero
+      // divisor there still prevents us from assuming an analytic argument.
+      if (
+        !local &&
+        arg.denominator.has(varName) &&
+        arg.denominator
+          .subs({ [varName]: point })
+          .simplify()
+          .isSame(0)
+      )
+        return true;
+    }
+    return oo(e).some(polarExponential);
+  };
+  if (polarExponential(body)) return undefined;
 
   // Authoritative closed-form residues for recognized special functions. This
   // runs before the generic limit method, which can't see a special
