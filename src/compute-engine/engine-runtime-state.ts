@@ -1,12 +1,13 @@
 import {
   CancellationError,
+  DEFAULT_ITERATION_LIMIT,
   frameExpired,
   type DeadlineFrame,
 } from '../common/interruptible.js';
 import type { RandomSeedFrame } from './numerics/random.js';
 
 export class EngineRuntimeState {
-  private _iterationLimit = 1024;
+  private _iterationLimit = DEFAULT_ITERATION_LIMIT;
   private _recursionLimit = 256;
   private _recursionDepth = 0;
   private _maxCollectionSize = 10_000;

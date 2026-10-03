@@ -170,7 +170,7 @@ import { SIMPLIFY_RULES } from './symbolic/simplify-rules.js';
 
 import {
   deriveSubstream,
-  frameDraw,
+  nextFrameDraw,
   type RandomSeedFrame,
   type RandomSubstream,
 } from './numerics/random.js';
@@ -2151,11 +2151,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   _random(): number {
     const frame = this._runtimeState.randomFrame;
-    if (frame !== undefined) {
-      const n = frame.next >>> 0;
-      frame.next = (frame.next + 1) >>> 0;
-      return frameDraw(frame.seedLo, frame.seedHi, n);
-    }
+    if (frame !== undefined) return nextFrameDraw(frame);
     return this._liveRandom();
   }
 

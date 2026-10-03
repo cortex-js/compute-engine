@@ -14,7 +14,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { BaseCompiler } from './base-compiler.js';
 import { asRational } from '../boxed-expression/numerics.js';
-import { realPowerBranchTerms } from '../boxed-expression/arithmetic-power.js';
+import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
 import {
   factorial,
   tanWithPole,
@@ -181,43 +181,11 @@ export function negativeBaseRealPow(
   exp: Expression | null | undefined,
   expValue: number
 ): number | undefined {
-  if (!(base < 0) || !Number.isFinite(base)) return undefined;
-  if (!Number.isFinite(expValue) || Number.isInteger(expValue))
-    return undefined;
-
-  // The branch is decided by the exponent's EXACT rational when it has one,
-  // and only otherwise by the (ulp-tolerant) float reconstruction — sharing
-  // `realPowerBranchTerms` with the interpreter so the two can never disagree.
-  const exact = exp ? asRational(exp) : undefined;
-  const isExactRational = exact !== undefined;
-  const terms = realPowerBranchTerms(exact, expValue);
-  if (terms === undefined) return undefined;
-  const [p, q] = terms;
-  if (q % 2 === 0) return undefined;
-
-  // The magnitude is |base|^(p/q), evaluated the way the INTERPRETER evaluates
-  // this node — the two paths round differently and the fold must match
-  // whichever one the uncompiled expression takes:
-  //
-  // - An exact rational of SMALL terms goes through the interpreter's exact
-  //   arithmetic, which lands on clean values. Mirror it by taking the q-th
-  //   ROOT first and then the p-th power: `Math.pow(8, 1/3)` is exactly `2`, so
-  //   `(−8)^(2/3)` folds to exactly `4`, where a direct `Math.pow(8, 2/3)`
-  //   leaves `3.9999999999999996`.
-  // - Everything else — a float exponent, or an exact rational with terms too
-  //   large for the root-then-power split to stay accurate — goes through the
-  //   interpreter's float path. Match it with the DIRECT power: for a
-  //   continued-fraction reconstruction like `√2 ≈ 54608393/38613965` the split
-  //   compounds rounding over a huge `p` and drifts ~1e-9 off the interpreter,
-  //   while the direct form agrees to the last ulp.
-  const useSplit = isExactRational && Math.abs(p) <= 64 && q <= 64;
-  let magnitude = useSplit
-    ? Math.pow(Math.pow(-base, 1 / q), p)
-    : Math.pow(-base, expValue);
-  // A large `p` can overflow the split form where the direct one does not.
-  if (!Number.isFinite(magnitude)) magnitude = Math.pow(-base, expValue);
-  if (!Number.isFinite(magnitude)) return undefined;
-  return p % 2 === 0 ? magnitude : -magnitude;
+  return negativeBaseRealPowFromRational(
+    base,
+    exp ? asRational(exp) : undefined,
+    expValue
+  );
 }
 
 /**

@@ -2492,6 +2492,15 @@ export type CompilationResult<
   code: string;
 
   /**
+   * The version of the helper set the JavaScript `code` calls (`_SYS`). Run
+   * stored code with `createJavaScriptRuntime()` from
+   * `@cortex-js/compute-engine/runtime`, and compare this with the runtime's
+   * `runtimeVersion`: a mismatch means the code was compiled by another
+   * release. Set by the JavaScript target only.
+   */
+  runtimeVersion?: string;
+
+  /**
    * Identifiers the generated `code` references that the caller must supply at
    * run time (JS vars-object keys / GLSL uniforms) for the result to be
    * self-contained.
@@ -2614,6 +2623,26 @@ export type CompilationResult<
    * library (helper functions, etc.) that the compiled expression references.
    */
   preamble?: string;
+
+  /**
+   * JavaScript only. The definitions of `preamble` that read nothing per call
+   * (a constant list, a memo), which `run()` evaluates once. A runtime that
+   * loads the stored code does the same: evaluating them on every call
+   * rebuilds each constant on every sample.
+   */
+  preambleOnce?: string;
+
+  /**
+   * JavaScript only. The rest of `preamble`, evaluated on every call; set with
+   * `preambleOnce`.
+   */
+  preamblePerCall?: string;
+
+  /**
+   * JavaScript lambdas only, with `preambleOnce`. `code` without the
+   * once-only definitions: the function the runtime calls.
+   */
+  callCode?: string;
 
   /**
    * How `run` should be called (present only for executable targets).
