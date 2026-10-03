@@ -5327,13 +5327,16 @@ export const RUNTIME_VERSION = '{{SDK_VERSION}}';
  * counter (`{ seedLo, seedHi, next }`, what the engine holds), or the seed
  * itself and the index of the next draw (default 0). */
 export type RuntimeFrameInput =
-  RandomSeedFrame | { seed: number | string; next?: number };
+  | RandomSeedFrame
+  | { seed: number | string; next?: number };
 
 export type JavaScriptRuntimeOptions = {
   /** The source of draws outside any `WithRandomSeed` frame, and of the
    * integrals' Monte-Carlo samples (which are live inside a frame too).
    * Default `Math.random`. `null` denies draws: a draw then throws, as it does
-   * in an engine whose host denies the `entropy` capability. */
+   * in an engine whose host denies the `entropy` capability. The error is a
+   * `CapabilityDeniedError`, a different class in each bundle, so test it by
+   * `e.name === 'CapabilityDeniedError'`, not with `instanceof`. */
   random?: (() => number) | null;
   /** The frame active when the code is called: set it when the code is called
    * from inside an interpreted `WithRandomSeed`. */
@@ -5349,30 +5352,46 @@ export type JavaScriptRuntimeOptions = {
 /** The code of a compilation result, or the same fields stored. */
 export type StoredJavaScript = {
   code: string;
+  /** All the definitions `code` reads. Run on every call, unless
+   * `preambleOnce` or `preamblePerCall` is present. */
   preamble?: string;
+  /** The definitions that read nothing per call: evaluated once, when the
+   * code is loaded. */
+  preambleOnce?: string;
+  /** The definitions evaluated on every call. */
+  preamblePerCall?: string;
+  /** For a lambda with `preambleOnce`: `code` without those definitions. */
+  callCode?: string;
   calling?: 'expression' | 'lambda';
+  /** Required by `load()`. */
   runtimeVersion?: string;
 };
 
 /**
- * The `_SYS` bundle of a runtime that holds no engine, with the state the
- * engine-bound helpers read. Pass it as `_SYS` to code from
- * `JavaScriptTarget.compile()`, or have `load()` do it.
+ * The runtime for compiled JavaScript, with no engine behind it: load stored
+ * code with `load()`. The helpers the code calls are not part of this type and
+ * may change in any release.
  */
-export type JavaScriptRuntime = SysHelpers & {
+export interface JavaScriptRuntime {
   readonly runtimeVersion: string;
   /** The active frame. Its `next` is the draw counter: read it after a call
    * to hand the advanced counter back to the host that owns the frame. */
-  frame: RandomSeedFrame | undefined;
+  get frame(): RandomSeedFrame | undefined;
+  set frame(f: RuntimeFrameInput | undefined);
+  /** The cap on lazy-stream walks: `Infinity` when set to 0 or less. */
   iterationLimit: number;
   deadline: number | undefined;
   /** The function the stored code denotes: `(vars?) => value` for code
    * compiled from an expression, `(...args) => value` for a lambda. Throws if
-   * `runtimeVersion` differs. The run-time input checks of
-   * `CompilationResult.run` (a complex value bound to a real symbol) are not
-   * applied. */
+   * `runtimeVersion` is missing or differs. The definitions that read no
+   * per-call value are evaluated once, here, as `run()` does. The run-time
+   * input checks of `CompilationResult.run` (a complex value bound to a real
+   * symbol) are not applied. */
   load(stored: StoredJavaScript): (...args: unknown[]) => unknown;
-};
+}
+
+/** A runtime together with its helper table, for the engine's own tests. */
+export type SysRuntime = JavaScriptRuntime & SysHelpers;
 
 function toFrame(
   input: RuntimeFrameInput | undefined
@@ -5393,6 +5412,13 @@ function toFrame(
 export function createJavaScriptRuntime(
   options: JavaScriptRuntimeOptions = {}
 ): JavaScriptRuntime {
+  return createSysRuntime(options);
+}
+
+/** `createJavaScriptRuntime()` with the helper table in the type. */
+export function createSysRuntime(
+  options: JavaScriptRuntimeOptions = {}
+): SysRuntime {
   const random =
     options.random === null
       ? (): number => {
@@ -5402,6 +5428,7 @@ export function createJavaScriptRuntime(
   let frame = toFrame(options.frame);
   let iterationLimit = options.iterationLimit ?? DEFAULT_ITERATION_LIMIT;
   let deadline = options.deadline;
+  const limit = (): number => (iterationLimit <= 0 ? Infinity : iterationLimit);
 
   const sys = makeSysHelpers({
     random,
@@ -5409,9 +5436,9 @@ export function createJavaScriptRuntime(
     setFrame: (f) => {
       frame = f;
     },
-    iterationLimit: () => (iterationLimit <= 0 ? Infinity : iterationLimit),
+    iterationLimit: limit,
     deadline: () => deadline,
-  }) as JavaScriptRuntime;
+  }) as SysRuntime;
 
   Object.defineProperties(sys, {
     runtimeVersion: { value: RUNTIME_VERSION, enumerable: true },
@@ -5423,7 +5450,7 @@ export function createJavaScriptRuntime(
       enumerable: true,
     },
     iterationLimit: {
-      get: () => iterationLimit,
+      get: limit,
       set: (n: number) => {
         iterationLimit = n;
       },
@@ -5438,27 +5465,63 @@ export function createJavaScriptRuntime(
     },
     load: {
       value: (stored: StoredJavaScript): ((...args: unknown[]) => unknown) => {
-        if (
-          stored.runtimeVersion !== undefined &&
-          stored.runtimeVersion !== RUNTIME_VERSION
-        )
+        if (stored.runtimeVersion === undefined)
+          throw new Error(
+            'The stored code has no runtimeVersion: it cannot be matched to this runtime'
+          );
+        if (stored.runtimeVersion !== RUNTIME_VERSION)
           throw new Error(
             `The code was compiled for runtime ${stored.runtimeVersion}, this is runtime ${RUNTIME_VERSION}`
           );
+        const once = stored.preambleOnce ?? '';
         if (stored.calling === 'lambda') {
-          const fn = new Function('_SYS', `return (${stored.code});`)(sys) as (
-            ...args: unknown[]
-          ) => unknown;
+          const fn = twoStageRunner(
+            sys,
+            once,
+            [],
+            `return (${stored.callCode ?? stored.code});`
+          )() as (...args: unknown[]) => unknown;
           return (...args) => normalizeRunResult(fn(...args));
         }
-        const fn = new Function(
-          '_SYS',
-          '_',
-          `${stored.preamble ?? ''}\nreturn ${stored.code};`
-        ) as (sys: unknown, vars: unknown) => unknown;
-        return (vars = {}) => normalizeRunResult(fn(sys, vars));
+        const split =
+          stored.preambleOnce !== undefined ||
+          stored.preamblePerCall !== undefined;
+        const perCall = split ? stored.preamblePerCall : stored.preamble;
+        const fn = twoStageRunner(
+          sys,
+          once,
+          ['_'],
+          `${perCall ?? ''}\nreturn ${stored.code};`
+        );
+        return (vars = {}) => normalizeRunResult(fn(vars));
       },
     },
   });
   return sys;
+}
+
+/**
+ * The two-stage form of a compiled runner. `hoisted` is evaluated ONCE, when
+ * the runner is built, in a scope that sees `_SYS` and nothing per call; the
+ * inner function it returns runs on every call with the per-call preamble
+ * and the body. A folded symbol value that reads no per-call binding is the
+ * same on every call (`splitPreambleDefs`), and a plot that sampled `S[k]`
+ * once per pixel rebuilt the whole 22 500-element `S` on each sample before
+ * the split. Any error the hoisted stage raises is raised here, at
+ * construction, instead of on the first call. The caller's own `preamble`
+ * option is never part of `hoisted`: it is arbitrary source that may read
+ * the vars object under another spelling, draw randomness, or hold per-call
+ * state, so it keeps running on every call.
+ */
+export function twoStageRunner(
+  sys: SysHelpers,
+  hoisted: string,
+  params: string[],
+  perCallCode: string
+): (...args: unknown[]) => unknown {
+  const stage = new Function(
+    '_SYS',
+    `${hoisted}return function (${params.join(', ')}) { ${perCallCode} };`
+  ) as (sys: SysHelpers) => (...args: unknown[]) => unknown;
+  return stage(sys);
 }

@@ -111,15 +111,22 @@ asks for a compile option; none exists today.
 The code of a JavaScript compilation result reads only `_SYS` and `_`.
 `@cortex-js/compute-engine/runtime` exports `createJavaScriptRuntime(options)`,
 the `_SYS` that `run()` uses, with no engine behind it, so code compiled in one
-place (a worker, a build) runs in another with only the numerics it calls. The
+place (a worker, a build) runs in another with only the numerics it calls. Its
+type exposes `load`, `frame`, `iterationLimit`, `deadline` and `runtimeVersion`;
+the helper table is internal and may change in any release. `load()` evaluates
+the definitions that read nothing per call (`preambleOnce`) once, as `run()`
+does, and the rest (`preamblePerCall`) on every call. The
 engine-bound helpers take their state as options: `random` (draws outside a
 `WithRandomSeed` frame and the integrals' Monte-Carlo samples; `null` denies),
 `frame` (the enclosing frame, read back from `runtime.frame.next`),
-`iterationLimit` and `deadline`. Tolerance and angular unit are fixed into the
+`iterationLimit` (`Infinity` when 0 or less) and `deadline`. A denied draw
+throws a `CapabilityDeniedError`, a different class in each bundle: test
+`e.name`, not `instanceof`. Tolerance and angular unit are fixed into the
 code at compile time, and compiled code always uses machine floats.
 
 The result and the runtime both carry `runtimeVersion`; a mismatch means the
-code was compiled by another release, and `runtime.load()` refuses it.
+code was compiled by another release, and `runtime.load()` refuses it, as it
+refuses code with no `runtimeVersion`.
 
 Functions passed in the `functions` or `imports` compile options are copied into
 the code as source (`toString()`): a closure loses its enclosing scope, and a

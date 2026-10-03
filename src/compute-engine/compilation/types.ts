@@ -2625,6 +2625,26 @@ export type CompilationResult<
   preamble?: string;
 
   /**
+   * JavaScript only. The definitions of `preamble` that read nothing per call
+   * (a constant list, a memo), which `run()` evaluates once. A runtime that
+   * loads the stored code does the same: evaluating them on every call
+   * rebuilds each constant on every sample.
+   */
+  preambleOnce?: string;
+
+  /**
+   * JavaScript only. The rest of `preamble`, evaluated on every call; set with
+   * `preambleOnce`.
+   */
+  preamblePerCall?: string;
+
+  /**
+   * JavaScript lambdas only, with `preambleOnce`. `code` without the
+   * once-only definitions: the function the runtime calls.
+   */
+  callCode?: string;
+
+  /**
    * How `run` should be called (present only for executable targets).
    * - `'expression'` — call with a vars object: `run({ x: 0.5 })`
    * - `'lambda'` — call with positional args: `run(0.5, 1.0)`

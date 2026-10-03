@@ -2,6 +2,7 @@ import { derivativeClosedForm } from './derivative-closed-form.js';
 import {
   makeSysHelpers,
   normalizeRunResult,
+  twoStageRunner,
   isComplexObject,
   isUnsignedPole,
   isNumericTypedArray,
@@ -8907,32 +8908,6 @@ function splitPreambleDefs(
 }
 
 /**
- * The two-stage form of a compiled runner. `hoisted` is evaluated ONCE, when
- * the runner is built, in a scope that sees `_SYS` and nothing per call; the
- * inner function it returns runs on every call with the per-call preamble
- * and the body. A folded symbol value that reads no per-call binding is the
- * same on every call (`splitPreambleDefs`), and a plot that sampled `S[k]`
- * once per pixel rebuilt the whole 22 500-element `S` on each sample before
- * the split. Any error the hoisted stage raises is raised here, at
- * construction, instead of on the first call. The caller's own `preamble`
- * option is never part of `hoisted`: it is arbitrary source that may read
- * the vars object under another spelling, draw randomness, or hold per-call
- * state, so it keeps running on every call.
- */
-function twoStageRunner(
-  sys: SysHelpers,
-  hoisted: string,
-  params: string[],
-  perCallCode: string
-): (...args: unknown[]) => unknown {
-  const stage = new Function(
-    '_SYS',
-    `${hoisted}return function (${params.join(', ')}) { ${perCallCode} };`
-  ) as (sys: SysHelpers) => (...args: unknown[]) => unknown;
-  return stage(sys);
-}
-
-/**
  * What the engine-bound helpers of `_SYS` read from `ce` each time they run:
  * the same helpers as a standalone runtime (`createJavaScriptRuntime`), over
  * the engine's own random frame, entropy handler, iteration limit and
@@ -9828,6 +9803,16 @@ function compileToTarget(
         : userDefs
           ? `(${params.join(', ')}) => { ${userDefs}return ${body}; }`
           : `(${params.join(', ')}) => ${body}`,
+      // A runtime evaluates the once-only definitions when it loads the code
+      // and runs `callCode`, the same split as `run()`.
+      ...(split.hoisted
+        ? {
+            preambleOnce: split.hoisted,
+            callCode: statementBody
+              ? `(${params.join(', ')}) => { ${split.perCall}${statementBody} }`
+              : `(${params.join(', ')}) => { ${split.perCall}return ${body}; }`,
+          }
+        : {}),
       calling: 'lambda' as const,
       run: fn as unknown as CompiledRunner<
         CompiledValue,
@@ -9912,6 +9897,10 @@ function compileToTarget(
     // The helper preamble plus the emitted definitions (`_fn_*` user
     // functions, `_val_*` bound symbol values), which `code` reads by name.
     ...(preamble ? { preamble } : {}),
+    // The same definitions split as `run()` runs them: a runtime evaluates
+    // `preambleOnce` when it loads the code, `preamblePerCall` on every call.
+    ...(split.hoisted ? { preambleOnce: split.hoisted } : {}),
+    ...(split.hoisted && perCall ? { preamblePerCall: perCall } : {}),
     calling: 'expression' as const,
     run: fn as unknown as CompiledRunner<CompiledValue, number | ComplexResult>,
   };

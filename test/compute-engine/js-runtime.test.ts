@@ -3,6 +3,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
 import { createJavaScriptRuntime, runtimeVersion } from '../../src/runtime';
+import { createSysRuntime } from '../../src/compute-engine/compilation/javascript-runtime';
 
 /**
  * The runtime for compiled JavaScript with no engine behind it
@@ -102,14 +103,20 @@ describe('random outside a frame', () => {
   });
 
   test('a null source denies draws, and a draw throws', () => {
-    const rt = createJavaScriptRuntime({ random: null });
+    const rt = createSysRuntime({ random: null });
     expect(() => rt.load(random)()).toThrow(/entropy/);
     expect(() => rt.integrateMC((x) => x, 0, 1)).toThrow(/entropy/);
+    // The class differs in each bundle: the error is identified by its name.
+    try {
+      rt.load(random)();
+    } catch (e: any) {
+      expect(e.name).toBe('CapabilityDeniedError');
+    }
   });
 
   test('Monte-Carlo integrals sample from it, inside a frame too', () => {
     let draws = 0;
-    const rt = createJavaScriptRuntime({
+    const rt = createSysRuntime({
       random: () => {
         draws++;
         return 0.5;
@@ -129,7 +136,7 @@ describe('limits are options of the runtime', () => {
   };
 
   test('the iteration limit caps the lazy-stream walks', () => {
-    const rt = createJavaScriptRuntime({ iterationLimit: 50 });
+    const rt = createSysRuntime({ iterationLimit: 50 });
     expect(() =>
       rt.takeIter(
         rt.filterIter(endless(), () => false),
@@ -140,6 +147,7 @@ describe('limits are options of the runtime', () => {
       'Iteration limit of 50'
     );
     rt.iterationLimit = 0; // no cap
+    expect(rt.iterationLimit).toBe(Infinity);
     expect(
       rt.takeWhileIter(endless(), (x) => (x as number) < 5000)
     ).toHaveLength(5000);
@@ -149,9 +157,29 @@ describe('limits are options of the runtime', () => {
     expect(createJavaScriptRuntime().iterationLimit).toBe(ce.iterationLimit);
   });
 
+  test('a limit of 0 or less reads back as no cap, as `ce.iterationLimit` does', () => {
+    for (const n of [0, -5]) {
+      expect(createJavaScriptRuntime({ iterationLimit: n }).iterationLimit).toBe(
+        Infinity
+      );
+    }
+    const saved = ce.iterationLimit;
+    ce.iterationLimit = 0;
+    expect(ce.iterationLimit).toBe(Infinity);
+    ce.iterationLimit = saved;
+  });
+
+  test('the frame accepts a seed and a counter, and reads back the folded frame', () => {
+    const rt = createJavaScriptRuntime();
+    rt.frame = { seed: 7, next: 3 };
+    expect(rt.frame!.next).toBe(3);
+    rt.frame = undefined;
+    expect(rt.frame).toBeUndefined();
+  });
+
   test('a deadline stops the shuffle and choice loops; unset, there is none', () => {
     const xs = Array.from({ length: 5000 }, (_, i) => i);
-    const rt = createJavaScriptRuntime();
+    const rt = createSysRuntime();
     expect(rt.shuffle(xs)).toHaveLength(5000);
     rt.deadline = Date.now() - 1;
     expect(() => rt.shuffle(xs)).toThrow(/Timeout/);
@@ -179,7 +207,82 @@ describe('runtimeVersion', () => {
   });
 });
 
+describe('the published type', () => {
+  test('has no helper table', () => {
+    const rt = createJavaScriptRuntime();
+    // The helpers are reachable at run time (the code calls them) but are not
+    // part of the type; the type's members are the five below.
+    const members: (keyof typeof rt)[] = [
+      'load',
+      'frame',
+      'iterationLimit',
+      'deadline',
+      'runtimeVersion',
+    ];
+    for (const m of members) expect(m in rt).toBe(true);
+    // @ts-expect-error `cabs` is a helper, not a member of the runtime type
+    void rt.cabs;
+  });
+});
+
 describe('stored code', () => {
+  test('load() rejects code without a runtimeVersion', () => {
+    expect(() => createJavaScriptRuntime().load({ code: '1' })).toThrow(
+      /no runtimeVersion/
+    );
+  });
+
+  test('constant definitions are built once, not on every call', () => {
+    const L = ce.box(['Range', 1, 1000]).evaluate();
+    ce.declare('Lconst', { type: 'list<integer>', value: L });
+    const result = compile(ce.box(['At', 'Lconst', ['Floor', 'x']]), {
+      fallback: false,
+    })!;
+    expect(result.preambleOnce).toMatch(/_SYS\.range\(1, 1000, 1\)/);
+
+    // Count the constructions of the list through the helper that builds it.
+    const constructions = (stored: any, calls: number): number => {
+      const rt = createSysRuntime();
+      let built = 0;
+      const range = rt.range;
+      rt.range = (...args: Parameters<typeof range>) => {
+        built++;
+        return range(...args);
+      };
+      const f = rt.load(stored);
+      for (let i = 1; i <= calls; i++) expect(f({ x: i })).toBe(i);
+      return built;
+    };
+    expect(constructions(result, 50)).toBe(1);
+    // Stored without the split (an older result), the preamble runs per call.
+    const { preambleOnce, preamblePerCall, ...legacy } = result as any;
+    expect(constructions(legacy, 50)).toBe(50);
+    // The engine's own runner does the same once-only construction.
+    expect(result.run!({ x: 3 })).toBe(3);
+  });
+
+  test('a lambda builds its constant definitions once too', () => {
+    ce.declare('Mconst', {
+      type: 'list<integer>',
+      value: ce.box(['Range', 1, 1000]).evaluate(),
+    });
+    const result = compile(
+      ce.box(['Function', ['At', 'Mconst', ['Floor', 'k']], 'k']),
+      { fallback: false }
+    )!;
+    expect(result.preambleOnce).toBeDefined();
+    const rt = createSysRuntime();
+    let built = 0;
+    const range = rt.range;
+    rt.range = (...args: Parameters<typeof range>) => {
+      built++;
+      return range(...args);
+    };
+    const f = rt.load(result);
+    for (let i = 1; i <= 20; i++) expect(f(i)).toBe(i);
+    expect(built).toBe(1);
+  });
+
   test('an expression with free symbols', () => {
     const result = compiled(['Add', ['Sin', 'x'], ['Multiply', 2, 'y']]);
     const f = createJavaScriptRuntime().load(result);
@@ -224,17 +327,23 @@ describe('the entry point has no engine in it', () => {
     code = out.outputFiles[0].text;
   }, 60_000);
 
-  test('no engine module is bundled', () => {
+  test('only the runtime and its numerics are bundled', () => {
+    // An allow-list: a module added to the bundle's graph fails here until it
+    // is judged engine-free and listed.
+    const allowed = [
+      /^src\/runtime\.ts$/,
+      /^src\/common\/interruptible\.ts$/,
+      /^src\/compute-engine\/effects-registry\.ts$/,
+      /^src\/compute-engine\/numerics\/[\w-]+\.ts$/,
+      /^src\/big-decimal\/[\w-]+\.ts$/,
+      /^src\/compute-engine\/compilation\/(javascript-runtime|jet-helpers)\.ts$/,
+      /node_modules\/(complex-esm|@arnog\/colors)\//,
+    ];
     const inputs = Object.keys(metafile.inputs);
     expect(inputs).toContain(
       'src/compute-engine/compilation/javascript-runtime.ts'
     );
-    const engine = inputs.filter((f) =>
-      /compute-engine\/(index|boxed-expression|library|symbolic|rubi|latex-syntax|global-types|types-engine)|^src\/(latex-syntax|math-json)\b|compilation\/(base-compiler|javascript-target|compile-expression|jet-derivative)/.test(
-        f
-      )
-    );
-    expect(engine).toEqual([]);
+    expect(inputs.filter((f) => !allowed.some((re) => re.test(f)))).toEqual([]);
   });
 
   test('the bundle runs without the engine', () => {

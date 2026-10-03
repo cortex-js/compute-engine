@@ -48,6 +48,9 @@ const result = compile(
 if (!result?.success) fail('the seeded program did not compile');
 if (result.runtimeVersion !== runtimeVersion)
   fail(`runtimeVersion ${result.runtimeVersion} !== ${runtimeVersion}`);
+// Both sides could carry the same unreplaced placeholder.
+if (!/^\d+\.\d+\.\d+/.test(runtimeVersion))
+  fail(`the build did not replace the version: ${runtimeVersion}`);
 
 const viaRun = JSON.stringify(result.run());
 const viaRuntime = JSON.stringify(createJavaScriptRuntime().load(result)());
