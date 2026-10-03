@@ -47,6 +47,7 @@ import {
   isTupleShapedType,
   isValuelessCollectionTyped,
   unionMayHoldACollection,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 
 /** The element descriptors of a tuple or list literal, or the child
@@ -2977,14 +2978,14 @@ export function* reduceBigOp<T>(
     // and hand back the list unchanged.
     if (options?.numericApproximation && options.foldValue !== undefined) {
       const numeric = body.evaluate({ numericApproximation: true });
-      if (numeric.isCollection && numeric.isFiniteCollection === true) {
+      if (numeric.isCollection && isWalkableFiniteCollection(numeric)) {
         const folded = options.foldValue(numeric);
         if (folded !== undefined) return folded;
       }
     }
     const value = body.evaluate();
     if (value.isCollection) {
-      if (value.isFiniteCollection !== true) return NON_ENUMERABLE_DOMAIN;
+      if (!isWalkableFiniteCollection(value)) return NON_ENUMERABLE_DOMAIN;
       const folded = options?.foldValue?.(value);
       if (folded !== undefined) return folded;
       return yield* reduceCollectionOrDecline(value, fn, initial);

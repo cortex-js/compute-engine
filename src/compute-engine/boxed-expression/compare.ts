@@ -592,6 +592,15 @@ function eqImpl(
       if (ca === undefined || cb === undefined) return undefined;
       if (ca !== cb) return false;
       if (!Number.isFinite(ca)) return undefined;
+      // A collection can know its count and still have no computable
+      // elements (`Linspace(a, 1, 3)` with a symbolic `a`). The walks below
+      // would then see no elements and answer `true`: the comparison is
+      // undecided instead.
+      if (
+        a.isEnumerableCollection === false ||
+        b.isEnumerableCollection === false
+      )
+        return undefined;
       if (a.isIndexedCollection && b.isIndexedCollection) {
         const itB = b.each();
         for (const xa of a.each()) {

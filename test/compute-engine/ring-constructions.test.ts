@@ -289,13 +289,9 @@ describe('Types', () => {
     expect(ce.parse('\\mathbb{Z}[x]').type.toString()).toBe('set<unknown>');
   });
 
-  test('QuotientRing keeps the base element type', () => {
-    expect(ce.parse('\\mathbb{Z}_n').type.toString()).toBe(
-      'set<integer>'
-    );
-    expect(ce.parse('\\mathbb{Q}_p').type.toString()).toBe(
-      'set<rational>'
-    );
+  test('QuotientRing claims no element type (its elements are classes)', () => {
+    expect(ce.parse('\\mathbb{Z}_n').type.toString()).toBe('set<unknown>');
+    expect(ce.parse('\\mathbb{Q}_p').type.toString()).toBe('set<unknown>');
   });
 });
 
@@ -335,7 +331,7 @@ describe('Route parity: raw MathJSON reaches the same dispatch', () => {
       structural: true,
     });
     expect(e.json).toEqual(['Subscript', 'Integers', 'n']);
-    expect(e.type.toString()).toBe('set<integer>');
+    expect(e.type.toString()).toBe('set<unknown>');
     expect(e.type.toString()).toBe(
       ce.box(['QuotientRing', 'Integers', 'n']).type.toString()
     );
@@ -444,7 +440,7 @@ describe('Inert (v1)', () => {
       ['Adjoin', 'Integers', ['Sqrt', 2]],
       'p',
     ]);
-    expect(e.type.toString()).toBe('set<real>');
+    expect(e.type.toString()).toBe('set<unknown>');
   });
 });
 

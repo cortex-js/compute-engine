@@ -39,6 +39,7 @@ import { kleeneEvery } from '../../common/kleene.js';
 import {
   enumerableFromAllSources,
   enumerableFromSource,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import { innerRun, resolveTextSource } from './collections.js';
 
@@ -1150,7 +1151,7 @@ function* permutationsIterator(
       return;
     }
   }
-  if (!xs.isFiniteCollection) return;
+  if (!isWalkableFiniteCollection(xs)) return;
   const all = [...xs.each()] as Expression[];
   const k = kExpr ? toIntegerOperand(kExpr) : all.length;
   if (k === null || k < 0 || k > all.length) return;
@@ -1199,7 +1200,7 @@ function* combinationsIterator(
     yield innerRun(ce, xs, []);
     return;
   }
-  if (!xs.isFiniteCollection) return;
+  if (!isWalkableFiniteCollection(xs)) return;
   const all = [...xs.each()] as Expression[];
   const k = k0;
   if (k > all.length) return;

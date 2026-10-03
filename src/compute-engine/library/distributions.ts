@@ -34,6 +34,7 @@ import {
   binomialQuantile,
   poissonQuantile,
 } from '../numerics/distributions.js';
+import { isWalkableFiniteCollection } from '../collection-utils.js';
 import type {
   Expression,
   SymbolDefinitions,
@@ -867,7 +868,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         // Empirical quantile of a data collection (distinguished from a
         // distribution by the first argument's shape).
         if (!isDistributionExpression(dist)) {
-          if (!dist.isFiniteCollection) return undefined;
+          if (!isWalkableFiniteCollection(dist)) return undefined;
           const r = empiricalQuantile(ce, dist, p, pv);
           if (!r) return undefined;
           return numericApproximation ? r.N() : r.evaluate();

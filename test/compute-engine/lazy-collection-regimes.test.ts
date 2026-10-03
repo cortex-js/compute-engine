@@ -157,6 +157,7 @@ describe('lazy collection regimes', () => {
       'Intersection',
       'Interval',
       'PowerSet',
+      'QuotientRing',
       'SetMinus',
       'SymmetricDifference',
       'Union',
@@ -165,7 +166,7 @@ describe('lazy collection regimes', () => {
 
   test('every collection operator lands in exactly one regime', () => {
     const regimes = collectionRegimes();
-    expect(regimes.size).toBe(48);
+    expect(regimes.size).toBe(49);
     for (const [name, regime] of regimes)
       expect([name, regime]).toEqual([
         name,

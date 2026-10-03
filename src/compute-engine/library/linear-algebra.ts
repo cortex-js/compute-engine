@@ -34,6 +34,7 @@ import {
   isPointListValue,
   isTuple,
   isTextAtom,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import {
   Expression,
@@ -2006,7 +2007,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (isString(op1)) return ce.expr(['List', op1]);
           if (!isFiniteIndexedCollection(op1) && !isTensorValue(op1))
             return undefined;
-          return ce.function('List', flattenToDepth(op1, depth));
+          const items = flattenToDepth(op1, depth);
+          if (items === undefined) return undefined;
+          return ce.function('List', items);
         }
 
         // Handle scalar - return single-element list
@@ -2031,8 +2034,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // is a no-op on a ragged/non-uniform nested list (e.g.
         // `Flatten([[1, x], [2]])`). Uniform tensors keep the `tensor.flatten()`
         // fast path above.
-        if (isFiniteIndexedCollection(op1))
-          return ce.function('List', flattenToDepth(op1, Infinity));
+        if (isFiniteIndexedCollection(op1)) {
+          const items = flattenToDepth(op1, Infinity);
+          if (items === undefined) return undefined;
+          return ce.function('List', items);
+        }
 
         return undefined;
       },
@@ -4198,7 +4204,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (isPointListValue(x)) {
           // A symbolic (valueless) or unbounded operand stays symbolic: the
           // point-list type alone is not a value to broadcast over.
-          const count = x.isFiniteCollection === true ? x.count : undefined;
+          const count = isWalkableFiniteCollection(x) ? x.count : undefined;
           if (count === undefined || count > MAX_POINT_LIST_NORM)
             return undefined;
           const norms: Expression[] = [];
@@ -7043,17 +7049,37 @@ function buildNestedList(
  * Return the elements of the collection `xs` flattened up to `depth` nesting
  * levels (Wolfram `Flatten[list, n]`). At `depth` 0 the elements are returned
  * as-is; each level splices the contents of collection-valued elements.
+ *
+ * Return `undefined` when an element to splice is a finite indexed
+ * collection whose elements cannot be computed (`Linspace(a, 1, 3)` with a
+ * symbolic `a`). Such an element cannot be spliced, and keeping it as a leaf
+ * gives a list with the wrong elements and the wrong count, so the caller
+ * must leave the `Flatten` unevaluated.
  */
-function flattenToDepth(xs: Expression, depth: number): Expression[] {
+function flattenToDepth(
+  xs: Expression,
+  depth: number
+): Expression[] | undefined {
   const result: Expression[] = [];
   for (const e of xs.each()) {
     // A STRING is a LEAF, never descended into, at any depth: a string is an
     // indexed collection of its characters, but `Flatten(["ab", "cd"])` is
     // `["ab", "cd"]`, not `["a", "b", "c", "d"]` — the choice users expect
     // (`docs/STRING_ROADMAP.md`, design constraint 6).
-    if (depth >= 1 && isFiniteIndexedCollection(e) && !isString(e))
-      result.push(...flattenToDepth(e, depth - 1));
-    else result.push(e);
+    if (depth >= 1 && isFiniteIndexedCollection(e) && !isString(e)) {
+      const items = flattenToDepth(e, depth - 1);
+      if (items === undefined) return undefined;
+      result.push(...items);
+    } else if (
+      depth >= 1 &&
+      e.isFiniteCollection === true &&
+      e.isIndexedCollection &&
+      !isString(e)
+    ) {
+      // A finite indexed collection that `isFiniteIndexedCollection()`
+      // rejects: its elements cannot be computed.
+      return undefined;
+    } else result.push(e);
   }
   return result;
 }

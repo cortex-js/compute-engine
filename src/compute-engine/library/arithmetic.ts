@@ -415,6 +415,7 @@ import {
   isShapedNumericType,
   resolveShapedTypeAlias,
   unionHasGenuineScalarBranch,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
@@ -11127,7 +11128,7 @@ function pointOperand(x: Expression): readonly Expression[] | undefined {
   // Any finite indexed collection of numbers — a `List` literal, a `Range`,
   // a lazy `Map` — is the flat spelling. The count bound keeps a large domain
   // from materializing here (an oversized operand stays symbolic).
-  if (x.isFiniteCollection !== true || x.isIndexedCollection !== true)
+  if (!isWalkableFiniteCollection(x) || x.isIndexedCollection !== true)
     return undefined;
   const count = x.count;
   if (count === undefined || count === 0 || count > MAX_DISTANCE_BROADCAST)
@@ -11169,7 +11170,7 @@ function isCoordinate(x: Expression): boolean {
 function pointListOperand(
   xs: Expression
 ): readonly (readonly Expression[] | Expression)[] | undefined {
-  if (xs.isFiniteCollection !== true || xs.isIndexedCollection !== true)
+  if (!isWalkableFiniteCollection(xs) || xs.isIndexedCollection !== true)
     return undefined;
   const count = xs.count;
   if (count === undefined || count > MAX_DISTANCE_BROADCAST) return undefined;

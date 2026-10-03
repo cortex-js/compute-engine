@@ -239,6 +239,7 @@ import {
   isBroadcastableCollection,
   lazyBroadcastMapIfNeeded,
   zipBroadcast,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import { numericDerivativeOfApply } from './calculus.js';
 import {
@@ -1462,7 +1463,7 @@ function trimCharacterSet(
   if (chars === undefined) return null;
   if (isString(chars) || isCharacter(chars))
     return new Set(splitGraphemeClusters(chars.string));
-  if (!chars.isCollection || chars.isFiniteCollection !== true)
+  if (!chars.isCollection || !isWalkableFiniteCollection(chars))
     return undefined;
   const set = new Set<string>();
   for (const c of chars.each()) {
@@ -1699,6 +1700,11 @@ function analyzeRandomDomain(
 
   if (domain.isFiniteCollection === false)
     return randomDomainError(ce, 'a finite collection', domain);
+
+  // A collection whose elements cannot be computed (`Linspace(a, 1, 3)` with
+  // a symbolic `a`) can know its count, but it has no element to choose: a
+  // positional read or a walk of it gives nothing. It stays symbolic.
+  if (domain.isEnumerableCollection === false) return { kind: 'symbolic' };
 
   if (domain.isIndexedCollection) {
     const n = domain.count;
@@ -1972,7 +1978,7 @@ function randomListType(
  */
 function assignedValue(ce: ComputeEngine, value: Expression): Expression {
   if (!value.isValid || !value.isLazyCollection) return value;
-  if (value.isFiniteCollection !== true) return value;
+  if (!isWalkableFiniteCollection(value)) return value;
   // The kind of the stored value: a list for an indexed collection, read
   // from the VALUE (the type of a `Filter` over a local whose type was
   // inferred `collection<any>` does not say `list`), and a set for a value
@@ -6862,6 +6868,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // EvaluateAt(F, a, b) = F(b) - F(a); it is how a definite integral applies
       // its limits. See ../latex-syntax/dictionary/README.md (integral subsystem).
       evaluate: ([f, lower, upper], { engine: ce }) => {
+        // The operator is `lazy`, so its arguments are not validated against
+        // the signature: `EvaluateAt(f)` with no point arrives here, and
+        // applying `f` to a missing argument threw a TypeError. It stays
+        // unevaluated.
+        if (lower === undefined) return undefined;
         // Defense in depth (see CORRECTNESS_FINDINGS P0-1): never beta-reduce
         // a function whose body still contains an inert `Integrate` (an
         // unresolved antiderivative). Substituting a bound for the parameter
@@ -8107,7 +8118,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           !isCharacter(ops[0]) &&
           ops[0].isCollection
         ) {
-          if (ops[0].isFiniteCollection !== true) return undefined;
+          if (!isWalkableFiniteCollection(ops[0])) return undefined;
           return engine.string(
             [...ops[0].each()]
               .map((x) =>
@@ -8184,7 +8195,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // A lazy collection (e.g. a `Map` result) is materialized via
         // `.each()`; a non-finite one stays symbolic. A string subject is a
         // collection of its own characters, so it needs no special case.
-        if (!xs.isCollection || xs.isFiniteCollection !== true)
+        if (!xs.isCollection || !isWalkableFiniteCollection(xs))
           return undefined;
         const parts: string[] = [];
         for (const op of xs.each()) {

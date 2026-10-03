@@ -117,6 +117,39 @@
 
 ### Issues Resolved
 
+- **`QuotientRing(Integers, n)` is a finite collection of `n` residue
+  classes, not a set of integers** (#399, contributed by
+  [enumeratio](https://github.com/enumeratio)). `\mathbb{Z}/5\mathbb{Z}` and
+  `\mathbb{Z}_5` had no count (`count` was `undefined`, and `Count(…)` stayed
+  unevaluated), and their type was `set<integer>`, although 7 and 2 are the
+  same element of ℤ/5ℤ. For a positive integer literal `n`, the collection
+  now has the count `n`, is finite and is not empty, and `Count` evaluates:
+  `Count(\mathbb{Z}/5\mathbb{Z})` is `5`. A symbolic, zero or negative
+  modulus, or a base other than `Integers`, stays inert. The type is
+  `set<unknown>`, as for an `Adjoin` adjunct that the engine cannot type. The
+  engine has no value for a residue class, so the classes are not listed and
+  membership is not decided.
+
+- **A finite collection whose elements cannot be computed no longer reads as
+  empty.** `Linspace(a, 1, 3)` with a symbolic `a` has the count 3 but no
+  elements that can be computed, and so does ℤ/5ℤ. Many operators checked
+  only that a collection was finite and then walked its elements, so they
+  read it as empty and gave a wrong answer with no diagnostic:
+  `Union(Linspace(a, 1, 3), {1})` was `Set(1)`, `Unique(…)` was `[]`,
+  `Tally(…)` was `([], [])`, `Intersection(…, {1})` was `EmptySet`,
+  `SetMinus(Set(1), …)` was `Set(1)`, `First(…)` was `NaN`,
+  `Flatten([[1], Linspace(a, 1, 3)])` was `[1]`,
+  `Equal(Linspace(a, 1, 3), [1, 2, 3])` was `True`, and `Sort(…)` gave an
+  `internal-error`. These operators now stay unevaluated, and `Equal`,
+  `IdenticallyEqual` and `.isEqual()` are undecided. An empty collection
+  still gives a definite answer: `Union(Linspace(a, 1, 0), Set(1))` is
+  `Set(1)`. An element-wise function of such a collection gives the lazy
+  form that it already gives for `Range(1, n)`: `Sin(Linspace(a, 1, 3))` is
+  `Map((_) => sin(_), Linspace(a, 1, 3))`.
+
+- **`EvaluateAt` with one operand no longer throws.** `EvaluateAt(x^2)`
+  threw a `TypeError`. It now stays unevaluated.
+
 - **`BesselY` and `BesselJ` of a real argument are accurate.** `BesselY`
   computed `Y₀` and `Y₁` from a series that loses about `x/2.3` digits, then
   recurred: `BesselY(12, 40).N()` was `-1.83` instead of `-0.0236`, and

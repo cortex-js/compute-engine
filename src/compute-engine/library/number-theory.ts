@@ -11,6 +11,7 @@ import { rationalize } from '../numerics/rationals.js';
 import {
   canEnumerateOperand,
   groundEnumerationOperand,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import {
   gcd,
@@ -178,7 +179,7 @@ const MAX_ENUMERATED_ELEMENTS = 1_000_000;
 function finiteElements(
   op: Expression | undefined
 ): Expression[] | undefined {
-  if (op === undefined || op.isFiniteCollection !== true) return undefined;
+  if (op === undefined || !isWalkableFiniteCollection(op)) return undefined;
   const elements: Expression[] = [];
   for (const x of op.each()) {
     if (elements.length >= MAX_ENUMERATED_ELEMENTS) return undefined;
